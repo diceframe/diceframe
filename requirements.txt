@@ -1,0 +1,4 @@
+# DiceFrame 后端运行时依赖（Python 3.10+）
+# 安装：pip install -r requirements.txt
+aiohttp>=3.9,<4
+Pillow>=10,<13

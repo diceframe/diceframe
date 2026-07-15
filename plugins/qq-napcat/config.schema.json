@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "required": ["enabled", "host", "port"],
+  "properties": {
+    "enabled": {"type":"boolean","title":"启用适配器","description":"关闭后插件保持空闲，不建立 NapCat 连接。","default":false,"ui":{"control":"switch","order":10}},
+    "host": {"type":"string","title":"主机地址","description":"NapCat“网络设置 → 网络配置 → WebSocket 服务器”的主机地址。","default":"127.0.0.1","ui":{"control":"text","group":"NapCat 连接","env":"NAPCAT_HOST","order":20}},
+    "port": {"type":"integer","title":"端口","description":"NapCat“WebSocket 服务器”的监听端口。","default":3001,"ui":{"control":"number","group":"NapCat 连接","env":"NAPCAT_PORT","order":30}},
+    "token": {"type":"string","title":"访问令牌","description":"与 NapCat 配置的访问令牌一致。","ui":{"control":"secret","sensitive":true,"group":"NapCat 连接","env":"NAPCAT_TOKEN","order":40}},
+    "heartbeat_sec": {"type":"number","title":"心跳间隔（秒）","description":"必须大于 0。","default":30,"exclusiveMinimum":0,"ui":{"control":"number","group":"NapCat 连接","env":"NAPCAT_HEARTBEAT_SEC","order":50}},
+    "reconnect_delay_sec": {"type":"number","title":"重连等待（秒）","description":"连接断开后的等待时间。","default":5,"exclusiveMinimum":0,"ui":{"control":"number","group":"NapCat 连接","env":"NAPCAT_RECONNECT_DELAY_SEC","order":60}},
+    "action_timeout_sec": {"type":"number","title":"动作超时（秒）","description":"发送与查询动作的超时时间。","default":15,"exclusiveMinimum":0,"ui":{"control":"number","group":"NapCat 连接","env":"NAPCAT_ACTION_TIMEOUT_SEC","order":70}},
+    "reply_delay_min_sec": {"type":"number","title":"回复随机延迟下限（秒）","description":"发送 QQ 回复前等待的最短时间，0 表示不等待。","default":0.8,"minimum":0,"ui":{"control":"number","group":"回复节流","env":"NAPCAT_REPLY_DELAY_MIN_SEC","order":80}},
+    "reply_delay_max_sec": {"type":"number","title":"回复随机延迟上限（秒）","description":"发送 QQ 回复前等待的最长时间。","default":2.4,"minimum":0,"ui":{"control":"number","group":"回复节流","env":"NAPCAT_REPLY_DELAY_MAX_SEC","order":90}},
+    "command_dedup_window_sec": {"type":"number","title":"重复命令忽略窗口（秒）","description":"同群/同人/同文本在窗口内只处理一次，防止 NapCat 重复事件刷屏。","default":6,"exclusiveMinimum":0,"ui":{"control":"number","group":"回复节流","env":"NAPCAT_COMMAND_DEDUP_WINDOW_SEC","order":100}},
+    "card_cache_max_age_hours": {"type":"number","title":"卡片缓存保留时长（小时）","description":"群聊图片卡片会缓存到 data/bot/cards；超过该时间的 card_*.png 会在发送新卡片时自动清理。0 表示不按时间清理。","default":24,"minimum":0,"ui":{"control":"number","group":"卡片缓存","env":"NAPCAT_CARD_CACHE_MAX_AGE_HOURS","order":110}},
+    "card_cache_max_files": {"type":"integer","title":"卡片缓存最多保留张数","description":"超过该数量时优先删除较旧的 card_*.png。0 表示不按数量清理。","default":200,"minimum":0,"ui":{"control":"number","group":"卡片缓存","env":"NAPCAT_CARD_CACHE_MAX_FILES","order":120}},
+    "card_cache_cleanup_interval_sec": {"type":"number","title":"卡片缓存定时清理间隔（秒）","description":"群聊插件后台定时扫描临时卡片目录。默认 3600 秒；0 表示关闭定时清理，但发送新卡片时仍会顺手清理。","default":3600,"minimum":0,"ui":{"control":"number","group":"卡片缓存","env":"NAPCAT_CARD_CACHE_CLEANUP_INTERVAL_SEC","order":130}},
+    "link_reminder_enabled": {"type":"boolean","title":"提醒网页入口","description":"开启后，@bot 帮助 / 状态 会附带网页入口；群聊中优先私聊发送，私聊失败时退回群聊。关闭后不提醒这些入口。","default":true,"ui":{"control":"switch","group":"群聊体验","env":"NAPCAT_LINK_REMINDER_ENABLED","order":140}},
+    "ai_character_creation_enabled": {"type":"boolean","title":"AI 辅助车卡","description":"开启后，玩家在群聊明确发送 @bot AI车卡 时，Bot 才会尝试私聊引导自然语言车卡；普通 @bot 新建角色 / 车卡 只在群里发清单和网页入口。玩家确认后在群里公示草稿，不会自动写入存档。","default":true,"ui":{"control":"switch","group":"群聊体验","env":"NAPCAT_AI_CHARACTER_CREATION_ENABLED","order":150}},
+    "connection_id": {"type":"string","title":"连接标识","description":"多连接时的路由作用域。","default":"","ui":{"control":"text","group":"NapCat 连接","env":"NAPCAT_CONNECTION_ID","order":160}},
+    "chat_filter_enabled": {"type":"boolean","title":"启用聊天名单过滤","default":false,"ui":{"control":"switch","group":"聊天过滤","env":"NAPCAT_CHAT_FILTER_ENABLED","order":170}},
+    "show_dropped_logs": {"type":"boolean","title":"显示聊天名单丢弃日志","default":false,"ui":{"control":"switch","group":"聊天过滤","env":"NAPCAT_SHOW_DROPPED_LOGS","order":180}},
+    "group_list_mode": {"type":"string","title":"群聊名单模式","enum":["whitelist","blacklist"],"default":"whitelist","ui":{"control":"select","group":"聊天过滤","env":"NAPCAT_GROUP_LIST_MODE","order":190}},
+    "group_list": {"type":"array","items":{"type":"string"},"title":"群聊名单","description":"群号自动字符串化并去重。","default":[],"ui":{"control":"string-list","group":"聊天过滤","env":"NAPCAT_GROUP_LIST","order":200}},
+    "private_list_mode": {"type":"string","title":"私聊名单模式","enum":["whitelist","blacklist"],"default":"whitelist","ui":{"control":"select","group":"聊天过滤","env":"NAPCAT_PRIVATE_LIST_MODE","order":210}},
+    "private_list": {"type":"array","items":{"type":"string"},"title":"私聊名单","default":[],"ui":{"control":"string-list","group":"聊天过滤","env":"NAPCAT_PRIVATE_LIST","order":220}},
+    "blocked_users": {"type":"array","items":{"type":"string"},"title":"全局屏蔽用户","default":[],"ui":{"control":"string-list","group":"聊天过滤","env":"NAPCAT_BLOCKED_USERS","order":230}},
+    "block_official_bots": {"type":"boolean","title":"屏蔽 QQ 官方机器人","default":true,"ui":{"control":"switch","group":"聊天过滤","env":"NAPCAT_BLOCK_OFFICIAL_BOTS","order":240}},
+    "advance_allowed_users": {"type":"array","items":{"type":"string"},"title":"可推进的账号 ID","description":"除绑定本局的 GM 外，允许这些账号在群聊里发送 @bot 推进 / @bot 下一轮。NapCat 下通常填写 QQ 号；每行一个，留空则仅 GM 可推进。","default":[],"ui":{"control":"string-list","group":"GM 权限","env":"NAPCAT_ADVANCE_ALLOWED_USERS","order":250}},
+    "bot_token": {"type":"string","title":"Bot 服务令牌","description":"留空时由宿主自动生成；填写时至少 12 位。","minLength":12,"ui":{"control":"secret","sensitive":true,"generate":true,"env":"TRPG_BOT_TOKEN","order":260}}
+  }
+}

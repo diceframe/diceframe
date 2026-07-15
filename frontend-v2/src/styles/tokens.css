@@ -1,0 +1,20 @@
+/* 设计 tokens：CSS 变量单源，供非 Naive 组件使用；与 styles/theme.ts 同色值 */
+:root{
+  --font-title:"Palatino Linotype","Book Antiqua","Noto Serif SC","Songti SC",serif;
+  --font-body:"Trebuchet MS","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono:Consolas,"Cascadia Mono","Courier New",monospace;
+  --page:#120f0c;--page-glow:#2a1d13;--panel:#251b13;--panel-2:#312317;--panel-soft:#3b2b1d;
+  --line:#725936;--line-soft:rgba(210,167,91,.28);
+  --gold:#d8ad52;--gold-2:#f2cf83;
+  --red:#9f3d35;--red-2:#c95b4c;
+  --green:#4f8f58;--green-2:#6dac70;
+  --text:#f1e3c3;--muted:#ad9d81;--ink:#17110d;
+  --shadow:0 12px 30px rgba(0,0,0,.28);
+}
+body.light{
+  --page:#e7d2a4;--page-glow:#f3dfb1;--panel:#fff2d0;--panel-2:#ecd3a5;--panel-soft:#ead0a0;
+  --line:#9c743b;--line-soft:rgba(122,82,30,.28);
+  --gold:#9c743b;--gold-2:#6f451e;
+  --text:#25190f;--muted:#715c3c;--ink:#fff7df;
+  --shadow:0 10px 26px rgba(97,62,22,.2);
+}

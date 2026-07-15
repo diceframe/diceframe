@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "version": "1.0.0",
+  "name": "DiceFrame",
+  "description": "AI 结构化跑团引擎 —— LLM叙事 + 状态机 + 骰子系统 + 剧情追踪。骰子决定命运，引擎驱动世界。",
+  "id": "maibot.diceframe",
+  "capabilities": ["send.text", "config.get"],
+  "dependencies": ["aiohttp"],
+  "author": {"name": "MaiBot Team"},
+  "license": "AGPL-3.0-only",
+  "host_application": {"min_version": "1.0.0"},
+  "sdk": {"min_version": "2.6.0"},
+  "i18n": {"default_locale": "zh-CN"}
+}

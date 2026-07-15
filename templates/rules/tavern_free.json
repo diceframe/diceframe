@@ -1,0 +1,62 @@
+{
+  "rule_version": "1.1",
+  "rule_id": "tavern_free",
+  "rule_name": "酒馆自由模式",
+  "rule_name_en": "Tavern Free RP",
+  "description": "无骼子、无属性、纯叙事角色扮演模式，像酒馆跑团一样自由对话",
+  "attributes": [],
+  "special_stats": [],
+  "attribute_points": 0,
+  "attr_hint": "酒馆模式不需要属性点分配，直接写角色设定即可。",
+  "dice_system": "none",
+  "combat_model": "narrative",
+  "hp_formula": "100",
+  "valid_qualities": [],
+  "max_skills": 5,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "narrative",
+  "skill_hint": "写 1-5 个你擅长的事，纯描述用途，不做数值检定。",
+  "currency": "金币",
+  "item_categories": {
+    "equipment": [],
+    "consumable": [],
+    "misc": []
+  },
+  "classes": [
+    {
+      "name": "冒险者",
+      "description": "自由的冒险者",
+      "starter_equipment": []
+    },
+    {
+      "name": "商人",
+      "description": "旅行商人",
+      "starter_equipment": []
+    },
+    {
+      "name": "吟游诗人",
+      "description": "吟游诗人",
+      "starter_equipment": []
+    },
+    {
+      "name": "佣兵",
+      "description": "雇佣兵",
+      "starter_equipment": []
+    },
+    {
+      "name": "学者",
+      "description": "游学学者",
+      "starter_equipment": []
+    }
+  ],
+  "skill_pools": {},
+  "mechanics": "narrative_only",
+  "ruleset_level": "narrative",
+  "dc_table": {},
+  "difficulty_dc_modifiers": {
+    "轻松": 0,
+    "标准": 0,
+    "硬核": 0
+  }
+}

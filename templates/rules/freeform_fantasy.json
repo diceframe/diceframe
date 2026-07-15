@@ -1,0 +1,52 @@
+{
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "freeform_fantasy",
+  "rule_name": "经典奇幻自由规则",
+  "rule_name_en": "Classic Fantasy Freeform",
+  "description": "以D&D为蓝本的剑与魔法轻量自由规则",
+  "attributes": [
+    {"key": "str", "name": "力量",  "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷",  "min": 3, "max": 18},
+    {"key": "con", "name": "体质",  "min": 3, "max": 18},
+    {"key": "int", "name": "智力",  "min": 3, "max": 18},
+    {"key": "wis", "name": "感知",  "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力",  "min": 3, "max": 18}
+  ],
+  "special_stats": [],
+  "attribute_points": 60,
+  "attr_hint": "属性使用 3-18 数值，10 约等于普通人平均水平，14 以上代表明显擅长；总点数越集中，角色短板越明显。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 3,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "技能用于告诉 GM 角色擅长什么。可写“技能名(20-80)”或只写技能名；数值越高，叙事和检定中越可靠。",
+  "currency": "金币",
+  "item_categories": {
+    "equipment": ["剑","弓","法杖","匕首","弯刀","巨剑","长矛","钉头锤","战锤","盾","皮甲","链甲","板甲","袍","靴子","手套","头盔","披风","护腕","项链","戒指","铠甲","护甲","胸甲","腿甲","臂甲","护肩"],
+    "consumable": ["药水","卷轴","药剂","干粮","绷带","解毒剂","炸弹","符咒","火把","箭矢","弩箭"],
+    "misc": ["钥匙","地图","信","令牌","石头","宝石","水晶","书","笔记","徽章","背包","绳索","灯笼"]
+  },
+  "classes": [
+    {"name": "战士", "description": "前线近战专家", "starter_equipment": ["铁剑", "皮甲"]},
+    {"name": "法师", "description": "奥术施法者", "starter_equipment": ["法杖", "法术书"]},
+    {"name": "游侠", "description": "远程和追踪专家", "starter_equipment": ["长弓", "箭矢×20"]},
+    {"name": "盗贼", "description": "潜行和开锁高手", "starter_equipment": ["匕首", "撬锁工具"]}
+  ],
+  "skill_pools": {
+    "战士": ["重击", "防御姿态", "冲锋"],
+    "法师": ["火球术", "魔法护盾", "法术辨识"],
+    "游侠": ["精准射击", "追踪", "自然感知"],
+    "盗贼": ["潜行", "开锁", "偷袭"]
+  },
+  "gm_prompt_appendix": "你是经典奇幻世界的GM。世界充满魔法、怪物和冒险。玩家可以自由探索地城、与NPC互动、解决谜题。战斗使用d20判定系统。",
+  "difficulty_instructions": {
+    "轻松": "战斗简单，资源充足，NPC友好",
+    "标准": "有挑战但公平，资源有限，需要策略",
+    "硬核": "资源紧缺，敌人凶猛，角色可永久死亡"
+  }
+}

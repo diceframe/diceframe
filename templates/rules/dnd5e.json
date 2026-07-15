@@ -1,0 +1,77 @@
+{
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "dnd5e",
+  "rule_name": "D&D 5e 轻量规则",
+  "rule_name_en": "D&D 5e SRD-inspired Lite",
+  "description": "基于龙与地下城第五版SRD风格的轻量辅助规则：12职业、熟练加值、d20检定与简化战斗；适合叙事跑团，不承诺完整RAW复刻。",
+  "mechanics": "dnd5e_core",
+  "ruleset_level": "assisted",
+  "dc_table": {
+    "easy": 10,
+    "normal": 15,
+    "hard": 20,
+    "extreme": 25
+  },
+  "attributes": [
+    {"key": "str", "name": "力量",  "min": 3, "max": 20},
+    {"key": "dex", "name": "敏捷",  "min": 3, "max": 20},
+    {"key": "con", "name": "体质",  "min": 3, "max": 20},
+    {"key": "int", "name": "智力",  "min": 3, "max": 20},
+    {"key": "wis", "name": "感知",  "min": 3, "max": 20},
+    {"key": "cha", "name": "魅力",  "min": 3, "max": 20}
+  ],
+  "special_stats": [],
+  "attribute_points": 72,
+  "attr_hint": "D&D 属性使用 3-20 数值，10 约等于普通人平均水平；偶数提升通常会带来更好的 d20 修正。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "proficiency_formula": "max(2, 2 + (level - 1) // 4)",
+  "hp_formula": "max(class_hp_die + con_mod, 1)",
+  "valid_qualities": ["common", "uncommon", "rare", "very_rare", "legendary"],
+  "max_skills": 4,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "proficiency",
+  "skill_hint": "D&D 技能更接近“熟练项/职业能力”。可以写擅长的技能或职业能力名，数值可省略；熟练加值主要由等级决定。检定小抄：优势=2d20取高，劣势=2d20取低；同时出现会抵消。",
+  "currency": "金币",
+  "item_categories": {
+    "equipment": ["剑","弓","法杖","匕首","弯刀","巨剑","长矛","钉头锤","战锤","盾","皮甲","链甲","板甲","袍","靴子","手套","头盔","披风","护腕","项链","戒指","铠甲","鳞甲","胸甲","短剑","长剑","细剑","短弓","长弓","弩","圣徽","法器","乐器","短棍","飞镖","槲寄生","盗贼工具"],
+    "consumable": ["药水","卷轴","药剂","干粮","绷带","解毒剂","火把","箭矢","弩箭","法术卷轴","治疗药水","圣水"],
+    "misc": ["钥匙","地图","信","宝石","水晶","书","背包","绳索","灯笼","睡袋","铲子","口粮","水袋"]
+  },
+  "classes": [
+    {"name": "野蛮人", "description": "狂怒的近战战士，愤怒是他们的武器", "starter_equipment": ["巨斧", "皮甲"], "hp_die": 12},
+    {"name": "吟游诗人", "description": "用音乐和言辞编织魔法的艺术家", "starter_equipment": ["细剑", "鲁特琴"], "hp_die": 8},
+    {"name": "牧师", "description": "侍奉神明的神圣施法者，治疗与驱邪", "starter_equipment": ["钉头锤", "盾牌", "圣徽"], "hp_die": 8},
+    {"name": "德鲁伊", "description": "自然之力的守护者，可变身野兽", "starter_equipment": ["木盾", "槲寄生"], "hp_die": 8},
+    {"name": "战士", "description": "精通所有武器和护甲的战术大师", "starter_equipment": ["长剑", "盾牌", "链甲"], "hp_die": 10},
+    {"name": "武僧", "description": "以身体为武器的修行者，精通徒手格斗", "starter_equipment": ["短棍", "飞镖x10"], "hp_die": 8},
+    {"name": "圣骑士", "description": "背负神圣誓言的重甲骑士，惩恶扬善", "starter_equipment": ["长剑", "盾牌", "圣徽"], "hp_die": 10},
+    {"name": "游侠", "description": "荒野中的猎人和追踪者，精通远程和双武器", "starter_equipment": ["长弓", "箭矢x20", "皮甲"], "hp_die": 10},
+    {"name": "游荡者", "description": "暗影中的潜行者，开锁和偷袭的专家", "starter_equipment": ["短剑", "短弓", "盗贼工具"], "hp_die": 8},
+    {"name": "术士", "description": "血脉中流淌着魔法力量的先天施法者", "starter_equipment": {"name": "法器", "description": "奥术法器"}, "hp_die": 6},
+    {"name": "邪术师", "description": "与异界存在签订契约获得黑暗力量", "starter_equipment": ["皮甲", "法器"], "hp_die": 8},
+    {"name": "法师", "description": "通过长年学习掌握奥术的学院派施法者", "starter_equipment": ["法杖", "法术书"], "hp_die": 6}
+  ],
+  "skill_pools": {
+    "野蛮人": ["狂怒", "鲁莽攻击", "危险感知", "蛮力"],
+    "吟游诗人": ["吟游激励", "迷惑曲", "逸闻知识", "反制咒法"],
+    "牧师": ["治疗伤口", "驱散不死", "神圣惩击", "虔信护盾"],
+    "德鲁伊": ["荒野变形", "纠缠术", "自然感知", "树肤术"],
+    "战士": ["动作如潮", "回气", "重击强化", "战术大师"],
+    "武僧": ["疾风连击", "拨挡飞弹", "震慑拳", "轻身步"],
+    "圣骑士": ["至圣斩", "圣疗", "虔诚护盾", "制裁"],
+    "游侠": ["宿敌标记", "猎人印记", "自然行者", "多重射击"],
+    "游荡者": ["偷袭", "灵巧闪避", "开锁精通", "潜行大师"],
+    "术士": ["魔法飞弹", "护盾术", "灼热射线", "超魔法"],
+    "邪术师": ["魔能爆", "邪魔契约", "黑暗视觉", "魅惑"],
+    "法师": ["火球术", "魔法飞弹", "护盾术", "法术反制"]
+  },
+  "gm_prompt_appendix": "你使用龙与地下城第5版规则。角色有熟练加值（proficiency_bonus = 2 + (等级-1)//4），检定格式：(力量检定: d20+属性修正+熟练加值 vs DC)。优势/劣势按 D&D 5e 处理：优势掷 2 个 d20 取高，劣势掷 2 个 d20 取低；优势和劣势同时存在时互相抵消，不叠加。战斗中：攻击检定决定命中（d20+力量/敏捷修正+熟练加值 vs AC=10+敏捷修正+护甲），命中后掷伤害骰+属性修正。每轮所有玩家可移动30尺+1个动作或1个附赠动作。施法者消耗法术位（1级角色1环2个）。短休回复部分HP（掷生命骰+体质修正），长休全回复+回复法术位。",
+  "difficulty_instructions": {
+    "轻松": "怪物CR低于队伍1级，DC-2，战利品丰富",
+    "标准": "怪物CR等于队伍等级，DC如常，战利品合理",
+    "硬核": "怪物CR高于队伍1-2级，DC+2，资源稀缺"
+  }
+}

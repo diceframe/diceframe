@@ -1,0 +1,56 @@
+{
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "freeform_wuxia",
+  "rule_name": "武侠仙侠自由规则",
+  "rule_name_en": "Wuxia/Xianxia Freeform",
+  "description": "架空武侠仙侠世界的轻量自由规则",
+  "attributes": [
+    {"key": "str", "name": "力量",  "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷",  "min": 3, "max": 18},
+    {"key": "con", "name": "体质",  "min": 3, "max": 18},
+    {"key": "int", "name": "智力",  "min": 3, "max": 18},
+    {"key": "wis", "name": "感知",  "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力",  "min": 3, "max": 18}
+  ],
+  "special_stats": [
+    {"key": "qi", "name": "内力", "max": 100,
+     "description": "使用内功和轻功消耗内力，调息休息可恢复"}
+  ],
+  "attribute_points": 60,
+  "attr_hint": "属性使用 3-18 数值，10 约等于普通人平均水平；内功、身法、悟性等表现会随对应属性增强。",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 4,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "技能可写武学招式、轻功、医毒或江湖手段。可写“技能名(20-80)”；数值越高，代表修为越深。",
+  "currency": "灵石",
+  "item_categories": {
+    "equipment": ["剑","刀","飞剑","拂尘","道袍","护符","玉佩","长棍","铁扇","飞镖","暗器","软甲","轻甲","甲胄"],
+    "pills": ["丹","药","散","丸","液","露","浆","膏","粉","汤"],
+    "consumable": ["符咒","灵石","卷轴","金疮药","真气丹","解毒散","清心丸"],
+    "misc": ["令牌","玉简","信物","地图","秘籍","刀谱","剑谱","残卷","卜卦","罗盘","葫芦","酒壶"]
+  },
+  "classes": [
+    {"name": "剑客", "description": "以剑入道的武者", "starter_equipment": ["铁剑", "轻甲"]},
+    {"name": "道士", "description": "修习道法符箓之士", "starter_equipment": ["桃木剑", "符纸×5"]},
+    {"name": "刺客", "description": "暗影中的暗器高手", "starter_equipment": ["淬毒匕首", "飞镖×10"]},
+    {"name": "游侠", "description": "浪迹天涯的行侠仗义者", "starter_equipment": ["长棍", "金疮药×3"]}
+  ],
+  "skill_pools": {
+    "剑客": ["御剑术", "剑气纵横", "剑盾", "破招"],
+    "道士": ["驱邪", "符咒", "炼丹", "望气"],
+    "刺客": ["暗器", "轻功", "毒术", "易容"],
+    "游侠": ["棍法", "追踪", "疗伤", "交涉"]
+  },
+  "gm_prompt_appendix": "你是架空武侠仙侠世界的GM。江湖恩怨、宗门争斗、修仙问道、降妖除魔——这是一个充满侠义与奇遇的世界。玩家可以在江湖中自由行走，拜入宗门、挑战高手、探寻秘境。注意内力的消耗与恢复，轻功可以跨越地形障碍。",
+  "difficulty_instructions": {
+    "轻松": "敌人较弱，宗门友好，机缘充足",
+    "标准": "江湖险恶但公平，需要修炼和策略",
+    "硬核": "强敌环伺，走火入魔风险高，重伤难愈"
+  }
+}

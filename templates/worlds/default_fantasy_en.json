@@ -1,0 +1,66 @@
+{
+  "world_id": "default_fantasy_en",
+  "world_name": "Classic Fantasy Adventure",
+  "description": "A beginner-friendly sword-and-sorcery fantasy setup.",
+  "language": "en",
+  "world_setting": "The realm of Asterion stretches across old roads, border towns, elf-haunted woods, dwarf holds, and city-states where practical magic is studied like a difficult craft. Adventurers' guilds connect remote settlements with work, rumors, maps, and emergency help. In recent weeks, old ruins have begun to stir, animals have grown restless, and travelers whisper that something beneath the northern forest has woken up.",
+  "starter_scene": "You are gathered in the taproom of the Golden Lion Inn. Firelight glows across dark beams and rain taps against the shutters. Old Tom, the innkeeper, polishes a mug behind the bar while two hunters argue in low voices near the hearth. On the guild board hangs a fresh notice: investigate the strange activity in Blackpine Forest. Reward: 50 gold.",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_fantasy",
+  "starter_lorebook": [
+    {
+      "id": "npc_old_tom",
+      "name": "Old Tom",
+      "type": "npc",
+      "keywords": ["Old Tom", "innkeeper", "Golden Lion Inn"],
+      "content": "The owner of the Golden Lion Inn. He is in his fifties, cheerful, watchful, and careful about the trouble he lets through his door. After thirty years behind the bar, he knows merchants, hunters, guards, and guild agents by name. He is friendly to adventurers and can share local rumors.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_golden_lion_inn",
+      "name": "Golden Lion Inn",
+      "type": "location",
+      "keywords": ["Golden Lion Inn", "inn", "tavern", "guild board"],
+      "content": "The largest inn in Stonebridge, with a common room on the first floor and eight modest rooms upstairs. The adventurers' guild board is mounted beside the hearth. Its best-known dishes are roast boar, onion stew, and honey ale.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_stonebridge",
+      "name": "Stonebridge",
+      "type": "location",
+      "keywords": ["Stonebridge", "town", "adventurers' guild"],
+      "content": "A market town of roughly two thousand people on the northern road. It is named for an ancient stone bridge crossing the mill river. Important places include the Golden Lion Inn, the guild office, a smithy, a shrine, and several supply shops.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_blackpine_forest",
+      "name": "Blackpine Forest",
+      "type": "location",
+      "keywords": ["Blackpine Forest", "forest", "northern woods"],
+      "content": "A vast conifer forest north of Stonebridge. The air beneath the branches is dim and cold even at noon. Hunters report violent animals, strange lights, and paths that seem to shift after sundown. An abandoned tower is rumored to stand somewhere in the deeper woods.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_adventurers_guild",
+      "name": "Adventurers' Guild",
+      "type": "faction",
+      "keywords": ["Adventurers' Guild", "guild", "quest board", "jobs"],
+      "content": "A loose network that posts jobs, pays rewards, brokers information, and keeps basic records on adventuring parties. The Stonebridge office is run by Hank Ironhand, a retired delver who distrusts clean boots and vague reports.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "event_forest_disturbance",
+      "name": "Forest Disturbance",
+      "type": "event",
+      "keywords": ["forest disturbance", "missing hunters", "strange lights"],
+      "content": "During the last month, animals from Blackpine Forest have become unusually aggressive. Two hunters vanished three weeks ago, and a merchant wagon was attacked near the tree line last week. Witnesses claim they saw pale blue light deeper in the forest.",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}

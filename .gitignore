@@ -1,0 +1,43 @@
+# data/ 全部为运行时数据与 secrets（config/access_token/secrets/*.db/saves/plugins/sessions/bot/debug/tmp_cards 等），不入库
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 前端 build 产物
+static-v2/assets/
+
+# 运行日志
+*.log
+
+# 本地回归测试（首版公开仓库暂不上传）
+tests/
+frontend-v2/tests/
+frontend-v2/e2e/
+
+# 调试临时文件
+_play_js.txt
+
+# 临时审计数据
+.tmp_audit_data/
+
+# Claude Code 本地设置
+.claude/
+.claude/settings.local.json
+.claude/skills/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example

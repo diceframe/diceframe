@@ -1,0 +1,32 @@
+{
+  "name": "diceframe-frontend-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:mobile": "playwright test --project=mobile"
+  },
+  "dependencies": {
+    "@vicons/ionicons5": "0.13.0",
+    "@vitejs/plugin-vue": "6.0.7",
+    "naive-ui": "2.44.1",
+    "pinia": "3.0.4",
+    "vite": "8.1.4",
+    "vue": "3.5.39",
+    "vue-router": "5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.1",
+    "@vue/test-utils": "2.4.11",
+    "jsdom": "29.1.1",
+    "typescript": "5.7.3",
+    "vitest": "4.1.10",
+    "vue-tsc": "2.2.0"
+  }
+}

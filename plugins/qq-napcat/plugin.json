@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "qq-napcat",
+  "name": "QQ / NapCat",
+  "version": "1.0.0",
+  "description": "通过 NapCat WebSocket 服务器将群聊连接到 DiceFrame。",
+  "entrypoint": ["{python}", "-m", "src.bots.qq.main"],
+  "config_schema": "config.schema.json",
+  "capabilities": ["channel.group", "channel.private", "game.action"],
+  "docs": "README_CN.md"
+}

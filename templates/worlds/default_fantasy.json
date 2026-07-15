@@ -1,0 +1,83 @@
+{
+  "world_id": "default_fantasy",
+  "world_name": "经典奇幻冒险",
+  "description": "剑与魔法的经典奇幻世界，适合新手入门",
+  "world_setting": "这是一个辽阔的中世纪奇幻世界，名为「艾泽兰」。大陆上分布着人类王国、精灵森林、矮人山脉和兽人荒原。魔法在这个世界是真实存在的，由散布于各地的魔法学院研究和传承。冒险者公会在各个城镇设有据点，发布任务、提供补给。近来，远古的邪恶力量正在苏醒，各地的怪物活动越来越频繁。",
+  "starter_scene": "你们在「金狮酒馆」的大厅里，壁炉的火光映照着木质墙壁。酒馆老板老汤姆正在擦拭吧台，几个猎人坐在角落里低声交谈。公告板上钉着一张泛黄的羊皮纸——冒险者公会发布的任务：调查北边森林最近出现的异常动静，赏金50金币。",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_fantasy",
+  "starter_lorebook": [
+    {
+      "id": "npc_innkeeper",
+      "name": "老汤姆",
+      "type": "npc",
+      "keywords": ["酒馆老板", "老汤姆", "金狮酒馆", "老板"],
+      "content": "金狮酒馆的老板，50多岁，秃顶微胖，总是笑呵呵的。在镇上经营酒馆30年，认识三教九流的人，消息灵通但从不主动惹事。对冒险者态度友好，愿意提供一些本地情报。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_golden_lion_inn",
+      "name": "金狮酒馆",
+      "type": "location",
+      "keywords": ["金狮酒馆", "酒馆", "镇中心", "旅馆"],
+      "content": "冒险者小镇「石桥镇」中心最大的酒馆和旅馆。一楼是吧台和散座大厅，二楼有8间客房（每晚5银币）。公告板上张贴着各种任务和悬赏。酒馆的招牌菜是烤野猪肉和蜂蜜麦酒。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_stonebridge",
+      "name": "石桥镇",
+      "type": "location",
+      "keywords": ["石桥镇", "小镇", "城镇", "冒险者公会"],
+      "content": "位于艾泽兰王国北境的中型城镇，人口约2000。镇子因一座古老的石桥得名。主要建筑：金狮酒馆、冒险者公会、铁匠铺、杂货店、神殿。镇北是通往黑松林的官道，镇南通往王都。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_blackpine_forest",
+      "name": "黑松林",
+      "type": "location",
+      "keywords": ["黑松林", "森林", "北边森林", "北部森林"],
+      "content": "石桥镇北面的一片广袤针叶林。林中光线昏暗，常年雾气弥漫。传闻森林深处有一座废弃的古塔，曾是某位法师的居所。近期林中的动物变得异常凶猛，有猎人在林中失踪。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_adventurer_guild",
+      "name": "冒险者公会",
+      "type": "faction",
+      "keywords": ["冒险者公会", "公会", "任务板", "任务"],
+      "content": "遍布大陆的冒险者组织。在石桥镇的分会由一名退役冒险者「铁锤」汉克管理。公会提供任务发布、物资补给、情报交换等服务。冒险者等级从铜牌到秘银共6级。新手默认铜牌。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_blacksmith",
+      "name": "铁匠杜兰",
+      "type": "npc",
+      "keywords": ["铁匠", "杜兰", "铁匠铺", "装备", "武器"],
+      "content": "石桥镇唯一的铁匠，矮人血统，脾气火爆但手艺精湛。可以维修和购买武器防具。偶尔会有自己打造的精品装备出售（价格不菲）。对矿石品质很挑剔。",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "event_forest_disturbance",
+      "name": "森林异动",
+      "type": "event",
+      "keywords": ["森林异动", "失踪", "怪物", "异常"],
+      "content": "最近一个月，黑松林中的动物变得异常凶暴。三周前有两名猎人在林中失踪，上周有一队商人的马车在森林边缘遭到不明生物袭击。冒险者公会悬赏调查此事，赏金50金币。有目击者称看到林中深处有奇怪的光亮。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_ancient_tower",
+      "name": "废弃古塔",
+      "type": "location",
+      "keywords": ["古塔", "法师塔", "废墟", "塔"],
+      "content": "位于黑松林深处的一座古老石塔。据说是200年前一位名叫梅里恩的法师的居所。塔高三层，外墙爬满藤蔓，底层入口被魔法封印。传说塔顶仍保存着梅里恩的魔法笔记和法器。封印的解除方法无人知晓。",
+      "tier": "background",
+      "unreliable": false
+    }
+  ]
+}
