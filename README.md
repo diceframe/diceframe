@@ -55,6 +55,8 @@ http://localhost:18000
 
 Docker 会把运行数据挂载到当前目录的 `data/`。详细说明见 [docs/DOCKER_DEPLOY_CN.md](docs/DOCKER_DEPLOY_CN.md)。
 
+NAS 用户可以在 Docker 管理界面搜索 `diceframe` 拉取镜像，或在 [Docker Hub](https://hub.docker.com/r/falconku/diceframe) 查找。
+
 ### 从源码运行
 
 源码运行适合开发、调试或自己改代码。需要：
