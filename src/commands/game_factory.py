@@ -10,6 +10,7 @@ from typing import Any
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.world_template import load_world_template
+from src.lorebook.bootstrap import ensure_world_from_template
 
 logger = logging.getLogger("trpg")
 
@@ -80,18 +81,4 @@ class GameFactory:
 
     async def init_world_from_template(self, world_id: str, template: dict) -> None:
         """从模板初始化世界书条目。"""
-        if not self.lorebook_store:
-            return
-        world = self.lorebook_store.get_world(world_id)
-        if not world:
-            self.lorebook_store.create_world(
-                world_id,
-                template.get("world_name", world_id),
-                description=template.get("description", ""),
-            )
-        for entry in template.get("starter_lorebook", []):
-            entry["world_id"] = world_id
-            existing = self.lorebook_store.get_entry(entry["id"])
-            if existing and existing.get("world_id") == world_id:
-                continue  # 同世界已存在，跳过
-            self.lorebook_store.add_entry(entry)
+        ensure_world_from_template(self.lorebook_store, world_id, template)

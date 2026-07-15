@@ -33,6 +33,7 @@ class ProviderConfig:
     base_url: str
     api_key: str
     model_name: str
+    api_format: str = "openai"
     fallback: bool = False
 
 
@@ -159,6 +160,26 @@ class LLMClient:
         max_tokens: int,
         json_mode: bool = False,
     ) -> LLMResponse:
+        api_format = (provider.api_format or "openai").strip().lower()
+        if api_format == "anthropic":
+            return await self._call_anthropic(
+                provider, system_prompt, user_message,
+                temperature, max_tokens, json_mode,
+            )
+        return await self._call_openai_compatible(
+            provider, system_prompt, user_message,
+            temperature, max_tokens, json_mode,
+        )
+
+    async def _call_openai_compatible(
+        self,
+        provider: ProviderConfig,
+        system_prompt: str,
+        user_message: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool = False,
+    ) -> LLMResponse:
         url = provider.base_url.rstrip("/")
         if not url.endswith("/chat/completions"):
             url += "/chat/completions"
@@ -198,6 +219,57 @@ class LLMClient:
         if not content.strip():
             content = data["choices"][0]["message"].get("reasoning_content", "") or ""
         total_tokens = data.get("usage", {}).get("total_tokens", 0)
+        return self._to_response(content, total_tokens, provider.provider_name)
+
+    async def _call_anthropic(
+        self,
+        provider: ProviderConfig,
+        system_prompt: str,
+        user_message: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        url = _anthropic_messages_url(provider.base_url)
+        system = system_prompt
+        if json_mode:
+            system = f"{system_prompt}\n\nReturn only valid JSON. Do not wrap it in Markdown."
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": provider.api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        body = {
+            "model": provider.model_name,
+            "system": system,
+            "messages": [
+                {"role": "user", "content": user_message},
+            ],
+            "max_tokens": max_tokens,
+        }
+
+        session = await self._get_session()
+        request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
+        async with session.post(url, json=body, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                                **request_kwargs) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise aiohttp.ClientResponseError(
+                    resp.request_info, resp.history,
+                    status=resp.status, message=error_text[:300],
+                    headers=resp.headers,
+                )
+            data = await resp.json()
+
+        content = _anthropic_text_content(data)
+        usage = data.get("usage", {})
+        total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+        return self._to_response(content, total_tokens, provider.provider_name)
+
+    @staticmethod
+    def _to_response(content: str, total_tokens: int, provider_used: str) -> LLMResponse:
 
         # 解析输出
         from .parser import parse_llm_response
@@ -212,5 +284,22 @@ class LLMClient:
             plot_update=result.plot_update,
             total_tokens=total_tokens,
             is_narration_only=result.is_narration_only,
-            provider_used=provider.provider_name,
+            provider_used=provider_used,
         )
+
+
+def _anthropic_messages_url(base_url: str) -> str:
+    url = (base_url or "https://api.anthropic.com").strip().rstrip("/")
+    if url.endswith("/v1/messages"):
+        return url
+    if url.endswith("/v1"):
+        return f"{url}/messages"
+    return f"{url}/v1/messages"
+
+
+def _anthropic_text_content(data: dict) -> str:
+    parts: list[str] = []
+    for block in data.get("content", []):
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "\n".join(part for part in parts if part).strip()

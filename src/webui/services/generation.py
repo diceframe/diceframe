@@ -19,8 +19,17 @@ logger = logging.getLogger("trpg")
 
 
 async def test_connection(api: "WebAPI", base_url: str, api_key: str,
-                          model: str, proxy_url: str = "") -> dict[str, Any]:
+                          model: str, proxy_url: str = "",
+                          api_format: str = "openai") -> dict[str, Any]:
     """测试 LLM API 连接是否正常。"""
+    import aiohttp
+    if (api_format or "openai").strip().lower() == "anthropic":
+        return await _test_anthropic_connection(api, base_url, api_key, model, proxy_url)
+    return await _test_openai_connection(api, base_url, api_key, model, proxy_url)
+
+
+async def _test_openai_connection(api: "WebAPI", base_url: str, api_key: str,
+                                  model: str, proxy_url: str = "") -> dict[str, Any]:
     import aiohttp
     url = base_url.rstrip("/")
     if not url.endswith("/chat/completions"):
@@ -49,6 +58,56 @@ async def test_connection(api: "WebAPI", base_url: str, api_key: str,
             **request_kwargs,
         ) as resp:
             return await _parse_connection_test_response(resp, start)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "elapsed": round(time.time() - start, 2)}
+
+
+async def _test_anthropic_connection(api: "WebAPI", base_url: str, api_key: str,
+                                     model: str, proxy_url: str = "") -> dict[str, Any]:
+    import aiohttp
+    from src.llm.client import _anthropic_messages_url, _anthropic_text_content
+
+    url = _anthropic_messages_url(base_url)
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": "回复：OK"}],
+        "max_tokens": 10,
+    }
+
+    start = time.time()
+    try:
+        if not api._llm_client:
+            return {"ok": False, "error": "LLM 客户端未初始化", "elapsed": 0}
+        session = await api._llm_client._get_session()
+        active_proxy = proxy_url or api._llm_client.proxy_url
+        request_kwargs = {"proxy": active_proxy} if active_proxy else {}
+        async with session.post(
+            url, json=body, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+            **request_kwargs,
+        ) as resp:
+            elapsed = round(time.time() - start, 2)
+            if resp.status == 200:
+                data = await resp.json()
+                usage = data.get("usage", {})
+                tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+                return {
+                    "ok": True,
+                    "elapsed": elapsed,
+                    "response": _anthropic_text_content(data).strip(),
+                    "tokens": tokens,
+                }
+            error_text = await resp.text()
+            return {
+                "ok": False,
+                "error": f"HTTP {resp.status}: {error_text[:200]}",
+                "elapsed": elapsed,
+            }
     except Exception as e:
         return {"ok": False, "error": str(e), "elapsed": round(time.time() - start, 2)}
 

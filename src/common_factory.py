@@ -9,6 +9,7 @@ from pathlib import Path
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
 from src.llm.client import LLMClient, ProviderConfig
+from src.lorebook.bootstrap import seed_builtin_worlds
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
 from src.memory.delta import MemoryStore
@@ -55,6 +56,7 @@ def create_trpg_subsystems(
 
     lorebook_store = LorebookStore(data_dir / "lorebook.db")
     lorebook_store.open()
+    seed_builtin_worlds(lorebook_store, worlds_dir)
     lorebook_matcher = KeywordMatcher()
 
     memory_store = MemoryStore(data_dir / "memory.db")

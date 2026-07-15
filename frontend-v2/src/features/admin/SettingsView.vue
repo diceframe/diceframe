@@ -68,6 +68,9 @@ const updateTagLabel = computed(() => {
 function hasSecret(key: SecretKey, field?: SecretField) {
   return Boolean(store.secrets[key]?.trim() || field?.configured)
 }
+function apiFormatLabel(value?: unknown) {
+  return value === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容'
+}
 
 const systemStatusItems = computed<SystemStatusItem[]>(() => {
   const c = store.config
@@ -84,7 +87,7 @@ const systemStatusItems = computed<SystemStatusItem[]>(() => {
     {
       label: '主模型',
       value: mainReady ? '配置完整' : '待补全',
-      detail: `${c.model || '未设置模型'} · ${c.base_url || '未设置接口'} · ${hasSecret('api_key', c.api_key) ? 'Key 已配置' : 'Key 缺失'}`,
+      detail: `${apiFormatLabel(c.api_format)} · ${c.model || '未设置模型'} · ${c.base_url || '未设置接口'} · ${hasSecret('api_key', c.api_key) ? 'Key 已配置' : 'Key 缺失'}`,
       tone: mainReady ? 'success' : 'warning',
     },
     {
@@ -120,8 +123,9 @@ watch(section, () => {
   sc?.scrollTo({ top: 0 })
 })
 
-function setStr(key: keyof AppConfig, v: string | number) { (store.config as Record<string, unknown>)[key] = String(v) }
-function setSecret(key: SecretKey, v: string | number) { store.secrets[key] = String(v) }
+function setStr(key: keyof AppConfig, v: string | number) { (store.config as Record<string, unknown>)[key] = String(v).trim() }
+function setSecret(key: SecretKey, v: string | number) { store.secrets[key] = String(v).trim() }
+function eventValue(event: Event) { return (event.target as HTMLSelectElement | null)?.value || '' }
 function setNum(key: keyof AppConfig, v: string | number | null) {
   if (v === null || v === '') { (store.config as Record<string, unknown>)[key] = 0; return }
   ;(store.config as Record<string, unknown>)[key] = Number(v) || 0
@@ -236,8 +240,19 @@ function openUpdateUrl() {
           <div v-show="section === 'api'" class="settings-pane">
             <h3>主模型接口</h3>
             <div class="form-row">
+              <label>接口格式</label>
+              <select :value="store.config.api_format ?? 'openai'" @change="setStr('api_format', eventValue($event))">
+                <option value="openai">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </div>
+            <div class="form-row">
               <label>Base URL</label>
-              <NInput :value="store.config.base_url ?? ''" placeholder="https://api.openai.com/v1" @update:value="setStr('base_url', $event)" />
+              <NInput
+                :value="store.config.base_url ?? ''"
+                :placeholder="store.config.api_format === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'"
+                @update:value="setStr('base_url', $event)"
+              />
             </div>
             <div class="form-row">
               <label>API Key</label>
@@ -251,10 +266,14 @@ function openUpdateUrl() {
             </div>
             <div class="form-row">
               <label>模型</label>
-              <NInput :value="store.config.model ?? ''" placeholder="gpt-4o-mini" @update:value="setStr('model', $event)" />
+              <NInput
+                :value="store.config.model ?? ''"
+                :placeholder="store.config.api_format === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini'"
+                @update:value="setStr('model', $event)"
+              />
             </div>
             <div class="actions-row">
-              <NButton type="primary" @click="save(['base_url', 'model'], ['api_key'])">保存</NButton>
+              <NButton type="primary" @click="save(['api_format', 'base_url', 'model'], ['api_key'])">保存</NButton>
               <NButton :loading="testing && testKind === 'model'" @click="runTest('model')">测试连接</NButton>
             </div>
             <TestResultCard v-if="testKind === 'model' && testResult" :result="testResult" kind="model" />
@@ -262,15 +281,17 @@ function openUpdateUrl() {
             <NCollapse :default-expanded-names="[]">
               <NCollapseItem title="备用模型回退" name="fallback">
                 <div class="form-row"><label>备用 1</label><div class="switch-inline"><NSwitch :value="!!store.config.fallback1_enabled" @update:value="setBool('fallback1_enabled', $event)" /><span>启用</span></div></div>
+                <div class="form-row"><label>接口格式</label><select :value="store.config.fallback1_api_format ?? 'openai'" @change="setStr('fallback1_api_format', eventValue($event))"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select></div>
                 <div class="form-row"><label>Base URL</label><NInput :value="store.config.fallback1_base_url ?? ''" @update:value="setStr('fallback1_base_url', $event)" /></div>
                 <div class="form-row"><label>API Key</label><NInput :value="store.secrets.fallback1_api_key ?? ''" type="password" show-password-on="click" @update:value="setSecret('fallback1_api_key', $event)" /></div>
                 <div class="form-row"><label>模型</label><NInput :value="store.config.fallback1_model ?? ''" @update:value="setStr('fallback1_model', $event)" /></div>
                 <div class="form-row"><label>备用 2</label><div class="switch-inline"><NSwitch :value="!!store.config.fallback2_enabled" @update:value="setBool('fallback2_enabled', $event)" /><span>启用</span></div></div>
+                <div class="form-row"><label>接口格式</label><select :value="store.config.fallback2_api_format ?? 'openai'" @change="setStr('fallback2_api_format', eventValue($event))"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select></div>
                 <div class="form-row"><label>Base URL</label><NInput :value="store.config.fallback2_base_url ?? ''" @update:value="setStr('fallback2_base_url', $event)" /></div>
                 <div class="form-row"><label>API Key</label><NInput :value="store.secrets.fallback2_api_key ?? ''" type="password" show-password-on="click" @update:value="setSecret('fallback2_api_key', $event)" /></div>
                 <div class="form-row"><label>模型</label><NInput :value="store.config.fallback2_model ?? ''" @update:value="setStr('fallback2_model', $event)" /></div>
                 <div class="actions-row">
-                  <NButton type="primary" @click="save(['fallback1_enabled', 'fallback1_base_url', 'fallback1_model', 'fallback2_enabled', 'fallback2_base_url', 'fallback2_model'], ['fallback1_api_key', 'fallback2_api_key'])">保存备用模型</NButton>
+                  <NButton type="primary" @click="save(['fallback1_enabled', 'fallback1_api_format', 'fallback1_base_url', 'fallback1_model', 'fallback2_enabled', 'fallback2_api_format', 'fallback2_base_url', 'fallback2_model'], ['fallback1_api_key', 'fallback2_api_key'])">保存备用模型</NButton>
                 </div>
               </NCollapseItem>
             </NCollapse>
@@ -387,6 +408,7 @@ function openUpdateUrl() {
               <h4>免责声明</h4>
               <p class="muted">本工具由 AI 生成叙事内容，可能包含不恰当或冒犯性文本，请自行甄别；内容仅供娱乐，不代表开发者立场。请遵守当地法律法规与所用模型的条款。</p>
               <h4>联系</h4>
+              <p>项目地址：<a href="https://github.com/EOEOY/diceframe" target="_blank" rel="noopener">EOEOY/diceframe</a></p>
               <p>反馈邮箱：<a href="mailto:yurloe0@gmail.com">yurloe0@gmail.com</a></p>
             </section>
             <section class="update-card" aria-label="版本更新">
@@ -413,9 +435,9 @@ function openUpdateUrl() {
                 <NButton :disabled="!updateInfo?.release_url && !updateInfo?.releases_url && !updateInfo?.source_url" @click="openUpdateUrl">打开发布页</NButton>
               </div>
             </section>
-            <section class="sponsor-card" aria-label="支持作者">
+            <section class="sponsor-card" aria-label="支持项目">
               <div>
-                <h4>支持作者</h4>
+                <h4>支持项目</h4>
                 <p>如果 DiceFrame 对你有帮助，欢迎支持项目继续维护。</p>
               </div>
               <img src="/sponsor-wechat-qr.png" alt="微信赞助二维码" loading="lazy">

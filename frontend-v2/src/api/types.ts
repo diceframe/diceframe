@@ -533,9 +533,9 @@ export interface PluginInfo { id:string; name:string; version?:string; descripti
 
 export interface SecretField { configured:boolean; masked:string }
 export interface AppConfig {
-  base_url?:string; model?:string; api_key?:SecretField
-  fallback1_enabled?:boolean; fallback1_base_url?:string; fallback1_api_key?:SecretField; fallback1_model?:string
-  fallback2_enabled?:boolean; fallback2_base_url?:string; fallback2_api_key?:SecretField; fallback2_model?:string
+  base_url?:string; model?:string; api_format?:string; api_key?:SecretField
+  fallback1_enabled?:boolean; fallback1_base_url?:string; fallback1_api_key?:SecretField; fallback1_model?:string; fallback1_api_format?:string
+  fallback2_enabled?:boolean; fallback2_base_url?:string; fallback2_api_key?:SecretField; fallback2_model?:string; fallback2_api_format?:string
   embedding_enabled?:boolean; embedding_base_url?:string; embedding_api_key?:SecretField; embedding_model?:string; embedding_max_input?:number
   narrative_max_tokens?:number; character_gen_max_tokens?:number; summary_max_tokens?:number; brief_max_tokens?:number; analysis_max_tokens?:number; text_gen_max_tokens?:number
   proxy_enabled?:boolean; proxy_url?:string; proxy_source?:string; proxy_supported?:boolean

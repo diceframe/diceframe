@@ -62,6 +62,8 @@ BASE_URL = (os.getenv("TRPG_LLM_BASE_URL")
             or saved.get("base_url", "https://api.deepseek.com/v1"))
 MODEL = (os.getenv("TRPG_LLM_MODEL")
          or saved.get("model", "deepseek-chat"))
+API_FORMAT = (os.getenv("TRPG_LLM_API_FORMAT")
+              or saved.get("api_format", "openai"))
 PORT = int(os.getenv("TRPG_WEB_PORT") or saved.get("web_port", 18000))
 HOST = os.getenv("TRPG_WEB_HOST") or saved.get("web_host", "0.0.0.0")
 EMB_ENABLED = saved.get("embedding_enabled", False)
@@ -121,16 +123,18 @@ if saved.get("embedding_api_key") and not secrets.get("embedding_api_key"):
     _migrated = True
 
 STATE = {
-    "api_key": API_KEY, "base_url": BASE_URL, "model": MODEL, "web_port": PORT,
+    "api_key": API_KEY, "base_url": BASE_URL, "model": MODEL, "api_format": API_FORMAT, "web_port": PORT,
     "embedding_enabled": EMB_ENABLED, "embedding_base_url": EMB_BASE_URL,
     "embedding_model": EMB_MODEL, "embedding_api_key": EMB_API_KEY,
     "fallback1_enabled": saved.get("fallback1_enabled", False),
     "fallback1_base_url": saved.get("fallback1_base_url", ""),
     "fallback1_model": saved.get("fallback1_model", ""),
+    "fallback1_api_format": saved.get("fallback1_api_format", "openai"),
     "fallback1_api_key": FALLBACK1_API_KEY,
     "fallback2_enabled": saved.get("fallback2_enabled", False),
     "fallback2_base_url": saved.get("fallback2_base_url", ""),
     "fallback2_model": saved.get("fallback2_model", ""),
+    "fallback2_api_format": saved.get("fallback2_api_format", "openai"),
     "fallback2_api_key": FALLBACK2_API_KEY,
     "narrative_max_tokens": NARRATIVE_MAX_TOKENS,
     "character_gen_max_tokens": CHARACTER_GEN_MAX_TOKENS,
@@ -208,6 +212,24 @@ def _public_config() -> dict:
     return public
 
 
+_SECRET_CONFIG_KEYS = {"api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token"}
+_STRING_CONFIG_KEYS = {
+    "base_url", "model", "embedding_base_url", "embedding_model",
+    "fallback1_base_url", "fallback1_model", "fallback2_base_url", "fallback2_model",
+    "public_base_url", "napcat_host", "napcat_connection_id",
+}
+_API_FORMAT_KEYS = {"api_format", "fallback1_api_format", "fallback2_api_format"}
+
+
+def _clean_text_value(value) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _normalize_api_format(value) -> str:
+    value = _clean_text_value(value).lower()
+    return "anthropic" if value == "anthropic" else "openai"
+
+
 def save_config():
     non_sensitive = {k: v for k, v in STATE.items()
                      if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")}
@@ -224,7 +246,8 @@ if _migrated:
 
 def _build_subsystems() -> TRPGSubsystems:
     providers = [ProviderConfig(provider_name="default", base_url=STATE["base_url"],
-                                api_key=STATE["api_key"], model_name=STATE["model"])]
+                                api_key=STATE["api_key"], model_name=STATE["model"],
+                                api_format=_normalize_api_format(STATE.get("api_format")))]
     for idx in (1, 2):
         if STATE.get(f"fallback{idx}_enabled") and STATE.get(f"fallback{idx}_base_url") and STATE.get(f"fallback{idx}_model"):
             providers.append(ProviderConfig(
@@ -232,6 +255,7 @@ def _build_subsystems() -> TRPGSubsystems:
                 base_url=STATE.get(f"fallback{idx}_base_url", ""),
                 api_key=STATE.get(f"fallback{idx}_api_key") or STATE.get("api_key", ""),
                 model_name=STATE.get(f"fallback{idx}_model", ""),
+                api_format=_normalize_api_format(STATE.get(f"fallback{idx}_api_format")),
                 fallback=True,
             ))
     emb_base = STATE.get("embedding_base_url", "")
@@ -536,10 +560,10 @@ async def api_config_post(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     body = await request.json()
-    for k in ("api_key", "base_url", "model", "web_port", "embedding_enabled",
+    for k in ("api_key", "base_url", "model", "api_format", "web_port", "embedding_enabled",
               "embedding_base_url", "embedding_model", "embedding_api_key", "embedding_max_input",
-              "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_key",
-              "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_key",
+              "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_format", "fallback1_api_key",
+              "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_format", "fallback2_api_key",
               "narrative_max_tokens", "character_gen_max_tokens",
               "summary_max_tokens", "brief_max_tokens",
               "analysis_max_tokens", "text_gen_max_tokens",
@@ -551,6 +575,18 @@ async def api_config_post(request: web.Request) -> web.Response:
               "napcat_group_list_mode", "napcat_group_list", "napcat_private_list_mode",
               "napcat_private_list", "napcat_blocked_users", "napcat_block_official_bots"):
         if k in body:
+            if k in _SECRET_CONFIG_KEYS:
+                value = _clean_text_value(body[k])
+                if not value:
+                    continue
+                STATE[k] = value
+                continue
+            if k in _API_FORMAT_KEYS:
+                STATE[k] = _normalize_api_format(body[k])
+                continue
+            if k in _STRING_CONFIG_KEYS:
+                STATE[k] = _clean_text_value(body[k])
+                continue
             if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token") and not body[k]:
                 continue
             if k.endswith("_max_tokens"):
@@ -664,7 +700,7 @@ def _is_safe_external_url(url: str) -> bool:
 
 async def api_test_connection(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = body.get("base_url", STATE.get("base_url", ""))
+    base_url = _clean_text_value(body.get("base_url")) or STATE.get("base_url", "")
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "base_url 非法或不允许"}, status=400)
     proxy_url = _proxy_from_test_body(body)
@@ -672,9 +708,10 @@ async def api_test_connection(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://"}, status=400)
     result = await _get_api(request).test_connection(
         base_url=base_url,
-        api_key=body.get("api_key") or STATE.get("api_key", ""),
-        model=body.get("model", STATE.get("model", "")),
+        api_key=_clean_text_value(body.get("api_key")) or STATE.get("api_key", ""),
+        model=_clean_text_value(body.get("model")) or STATE.get("model", ""),
         proxy_url=proxy_url,
+        api_format=_normalize_api_format(body.get("api_format") or STATE.get("api_format")),
     )
     return web.json_response(result)
 
@@ -691,9 +728,9 @@ def _proxy_from_test_body(body: dict) -> str:
 
 async def api_test_embedding(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = body.get("base_url", "")
-    api_key = body.get("api_key") or STATE.get("embedding_api_key") or STATE.get("api_key", "")
-    model = body.get("model", "nomic-embed-text")
+    base_url = _clean_text_value(body.get("base_url"))
+    api_key = _clean_text_value(body.get("api_key")) or STATE.get("embedding_api_key") or STATE.get("api_key", "")
+    model = _clean_text_value(body.get("model")) or "nomic-embed-text"
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "Base URL 非法或不允许"})
     from src.memory.embedding import EmbeddingClient
