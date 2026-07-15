@@ -30,22 +30,44 @@ DiceFrame 是一个可以自己部署的 AI 跑团桌。
 
 ## 快速开始
 
-### 环境要求
+### Windows 便携版
+
+普通 Windows 用户建议直接下载便携版：
+
+[前往 Releases 下载](https://github.com/EOEOY/diceframe/releases)
+
+下载 `DiceFrame-v0.1.1-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+
+### Docker 运行
+
+已安装 Docker 的用户可以直接拉取镜像：
+
+```bash
+docker pull ghcr.io/eoeoy/diceframe:latest
+docker run -d --name diceframe -p 18000:18000 -v ./data:/app/data ghcr.io/eoeoy/diceframe:latest
+```
+
+打开：
+
+```text
+http://localhost:18000
+```
+
+Docker 会把运行数据挂载到当前目录的 `data/`。详细说明见 [docs/DOCKER_DEPLOY_CN.md](docs/DOCKER_DEPLOY_CN.md)。
+
+### 从源码运行
+
+源码运行适合开发、调试或自己改代码。需要：
 
 - Python 3.10 或更高版本
-- Node.js 20 或更高版本，用于构建前端
+- Node.js 20 或更高版本
 - 一个兼容 OpenAI Chat Completions API 的模型服务
 
 可以使用 DeepSeek、硅基流动、OpenAI、Ollama 等服务。只要它提供 OpenAI 兼容接口，就可以在设置页里配置。
 
-### 从源码运行
-
-第一次从 GitHub 克隆后，需要先构建前端。Docker 会自动做这一步；本地直接跑需要手动执行。
+第一次从 GitHub 克隆后，需要先构建前端：
 
 ```bash
-# 克隆仓库后进入项目目录
-cd trpg
-
 cd frontend-v2
 npm ci
 npm run build
@@ -70,37 +92,7 @@ TRPG_LLM_MODEL=deepseek-chat
 python web_server.py
 ```
 
-Windows 下也可以用下面任一方式启动 WebUI。
-
-命令行启动，需要先按上面的步骤构建前端：
-
-```powershell
-python web_server.py
-```
-
-双击启动：
-
-```text
-web_ui.bat
-```
-
-`web_ui.bat` 会先检查运行依赖；如果缺少 `static-v2/` 前端构建产物，会自动进入 `frontend-v2/` 执行 `npm ci` 和 `npm run build`，然后启动 `web_server.py`。首次使用仍然需要在浏览器设置页填写 API Key。
-
-### Docker 运行
-
-```bash
-cp .env.example .env
-# 编辑 .env，按需填写模型配置
-docker compose up -d --build
-```
-
-打开：
-
-```text
-http://localhost:18000
-```
-
-Docker 会把运行数据挂载到项目根目录的 `data/`。详细说明见 [docs/DOCKER_DEPLOY_CN.md](docs/DOCKER_DEPLOY_CN.md)。
+Windows 下也可以双击 `web_ui.bat` 启动；它会检查依赖，并在缺少前端构建产物时自动构建。
 
 新手玩法、多人流程、群聊命令和状态变动说明见 [docs/USER_GUIDE_CN.md](docs/USER_GUIDE_CN.md)。
 
