@@ -90,7 +90,7 @@ http://localhost:18000
 ```bash
 TRPG_LLM_API_KEY=your_key
 TRPG_LLM_BASE_URL=https://api.deepseek.com/v1
-TRPG_LLM_MODEL=deepseek-chat
+TRPG_LLM_MODEL=deepseek-v4-pro
 python web_server.py
 ```
 

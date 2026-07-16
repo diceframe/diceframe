@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, apiBlob, errorMessage } from '../../api/client'
-import type { BatchDeleteGamesResponse, GameMutationResponse, GamesResponse, GameSummary } from '../../api/types'
-import { useToast } from '../../composables/useToast'
-import { useConfirm } from '../../composables/useConfirm'
-import { useLocale } from '../../composables/useLocale'
-import { clearCurrentGame, rememberCurrentGame } from '../../stores/gameContext'
+import { api, apiBlob, errorMessage } from '@/api/client'
+import type { BatchDeleteGamesResponse, GameMutationResponse, GamesResponse, GameSummary } from '@/api/types'
+import { useToast } from '@/composables/useToast'
+import { useConfirm } from '@/composables/useConfirm'
+import { useLocale } from '@/composables/useLocale'
+import { clearCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 
 const router = useRouter()
 const toast = useToast()
@@ -15,6 +15,7 @@ const { t } = useLocale()
 
 const games = ref<GameSummary[]>([])
 const error = ref('')
+function setError(e: unknown) { error.value = errorMessage(e) }
 const busy = ref(false)
 const selected = ref<string[]>([])
 
@@ -28,7 +29,7 @@ async function load() {
   try {
     const r = await api<GamesResponse>('/games')
     games.value = r.games || []
-  } catch (e: unknown) { error.value = errorMessage(e) }
+  } catch (e: unknown) { setError(e) }
 }
 
 function play(key: string) {
@@ -48,7 +49,7 @@ async function remove(key: string) {
     toast.success(t('deleted'))
     clearCurrentGame(key)
     await load()
-  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+  } catch (e: unknown) { setError(e) } finally { busy.value = false }
 }
 
 async function exportGame(key: string) {
@@ -66,7 +67,7 @@ async function exportGame(key: string) {
     a.click()
     URL.revokeObjectURL(url)
     toast.success(t('exported'))
-  } catch (e: unknown) { error.value = errorMessage(e) }
+  } catch (e: unknown) { setError(e) }
 }
 
 async function exportAll() {
@@ -88,7 +89,7 @@ async function resetGame(key: string) {
     if (!r.ok) throw new Error(r.error || t('resetFailed'))
     toast.success(`${t('resetDone')} ${r.seed_code || ''}`)
     await load()
-  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+  } catch (e: unknown) { setError(e) } finally { busy.value = false }
 }
 
 async function restartGame(key: string) {
@@ -100,7 +101,7 @@ async function restartGame(key: string) {
     if (!r.ok) throw new Error(r.error || t('restartFailed'))
     toast.success(`${t('restartDone')} ${r.seed_code || ''}`)
     await load()
-  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+  } catch (e: unknown) { setError(e) } finally { busy.value = false }
 }
 
 async function batchRemove() {
@@ -116,7 +117,7 @@ async function batchRemove() {
     for (const key of selected.value) clearCurrentGame(key)
     selected.value = []
     await load()
-  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+  } catch (e: unknown) { setError(e) } finally { busy.value = false }
 }
 
 function selectAll() { selected.value = games.value.map(g => g.game_key) }

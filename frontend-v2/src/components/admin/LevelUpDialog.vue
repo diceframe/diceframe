@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { CharacterSheet, Player, RuleMeta } from '../../api/types'
-import Modal from '../ui/Modal.vue'
-import { attrDisplayName, type RuleAttr } from '../../utils/ruleSchema'
+import type { CharacterSheet, Player, RuleMeta } from '@/api/types'
+import Modal from '@/components/ui/Modal.vue'
+import { attrDisplayName, type RuleAttr } from '@/utils/ruleSchema'
 
 const props = defineProps<{
   ruleAttrs: RuleAttr[]

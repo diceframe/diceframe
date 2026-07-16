@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CharacterSkill, SkillSpec } from '../../api/types'
+import type { CharacterSkill, SkillSpec } from '@/api/types'
 
 const props = defineProps<{ modelValue: CharacterSkill[]; pool?: Array<string | SkillSpec> }>()
 const emit = defineEmits<{ 'update:modelValue': [v: CharacterSkill[]] }>()

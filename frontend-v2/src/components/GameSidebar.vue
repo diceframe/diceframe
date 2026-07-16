@@ -2,8 +2,8 @@
 import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
 import { ChevronBack, ChevronForward } from '@vicons/ionicons5'
-import type { GameDetail, MapData, Player, PrivateMessage, RuleMeta } from '../api/types'
-import { gameStateLabel } from '../utils/play'
+import type { GameDetail, MapData, Player, PrivateMessage, RuleMeta } from '@/api/types'
+import { gameStateLabel } from '@/utils/play'
 import CharacterPanel from './CharacterPanel.vue'
 import MapGraph from './play/MapGraph.vue'
 

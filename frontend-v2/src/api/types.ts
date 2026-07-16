@@ -528,23 +528,89 @@ export type RuleEditorState =
   | { mode: 'new'; source_rule_id: string; id: string; name: string }
   | { mode: 'copy'; source_rule_id: string; id: string; name: string }
   | { mode: 'edit'; id: string; name: string }
-export interface PluginField { type:string; title?:string; description?:string; default?:unknown; enum?:string[]; minimum?:number; maximum?:number; exclusiveMinimum?:number; exclusiveMaximum?:number; minLength?:number; maxLength?:number; ui?:{control?:string;group?:string;sensitive?:boolean;order?:number;generate?:boolean;env?:string} }
-export interface PluginInfo { id:string; name:string; version?:string; description?:string; enabled:boolean; running:boolean; status:string; schema?:{properties?:Record<string,PluginField>}; config?:Record<string,unknown>; error?:string }
-
-export interface SecretField { configured:boolean; masked:string }
-export interface AppConfig {
-  base_url?:string; model?:string; api_format?:string; api_key?:SecretField
-  fallback1_enabled?:boolean; fallback1_base_url?:string; fallback1_api_key?:SecretField; fallback1_model?:string; fallback1_api_format?:string
-  fallback2_enabled?:boolean; fallback2_base_url?:string; fallback2_api_key?:SecretField; fallback2_model?:string; fallback2_api_format?:string
-  embedding_enabled?:boolean; embedding_base_url?:string; embedding_api_key?:SecretField; embedding_model?:string; embedding_max_input?:number
-  narrative_max_tokens?:number; character_gen_max_tokens?:number; summary_max_tokens?:number; brief_max_tokens?:number; analysis_max_tokens?:number; text_gen_max_tokens?:number
-  proxy_enabled?:boolean; proxy_url?:string; proxy_source?:string; proxy_supported?:boolean
-  public_base_url?:string
-  access_password?:SecretField
-  [key:string]:unknown
+export interface PluginField {
+  type: string
+  title?: string
+  description?: string
+  default?: unknown
+  enum?: string[]
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  exclusiveMaximum?: number
+  minLength?: number
+  maxLength?: number
+  ui?: { control?: string; group?: string; sensitive?: boolean; order?: number; generate?: boolean; env?: string }
 }
-export interface TestResult { ok:boolean; error?:string; response?:string; elapsed?:number; tokens?:number; dimension?:number; status?:number }
-export interface UpdateAsset { name:string; download_url:string; size?:number }
+
+export interface PluginInfo {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  enabled: boolean
+  running: boolean
+  status: string
+  schema?: { properties?: Record<string, PluginField> }
+  config?: Record<string, unknown>
+  error?: string
+}
+
+export interface SecretField {
+  configured: boolean
+  masked: string
+}
+
+export interface AppConfig {
+  base_url?: string
+  model?: string
+  api_format?: string
+  api_key?: SecretField
+  fallback1_enabled?: boolean
+  fallback1_base_url?: string
+  fallback1_api_key?: SecretField
+  fallback1_model?: string
+  fallback1_api_format?: string
+  fallback2_enabled?: boolean
+  fallback2_base_url?: string
+  fallback2_api_key?: SecretField
+  fallback2_model?: string
+  fallback2_api_format?: string
+  embedding_enabled?: boolean
+  embedding_base_url?: string
+  embedding_api_key?: SecretField
+  embedding_model?: string
+  embedding_max_input?: number
+  narrative_max_tokens?: number
+  character_gen_max_tokens?: number
+  summary_max_tokens?: number
+  brief_max_tokens?: number
+  analysis_max_tokens?: number
+  text_gen_max_tokens?: number
+  proxy_enabled?: boolean
+  proxy_url?: string
+  proxy_source?: string
+  proxy_supported?: boolean
+  public_base_url?: string
+  access_password?: SecretField
+  [key: string]: unknown
+}
+
+export interface TestResult {
+  ok: boolean
+  error?: string
+  response?: string
+  elapsed?: number
+  tokens?: number
+  dimension?: number
+  status?: number
+}
+
+export interface UpdateAsset {
+  name: string
+  download_url: string
+  size?: number
+}
 export interface UpdateRelease {
   version:string
   tag_name?:string

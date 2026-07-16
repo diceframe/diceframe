@@ -14,6 +14,15 @@ export const useSettingsStore = defineStore('settings', () => {
   const loading = ref(false)
   const error = ref('')
 
+  // AppConfig 有 [key:string]:unknown 索引签名，但 Partial<AppConfig> + 动态键 TS 仍要求断言。
+  // 集中在这两个 helper 里做，避免散落的 (config as Record<string, unknown>)[key]。
+  function getConfigField<T = unknown>(key: keyof AppConfig): T {
+    return (config.value as Record<string, unknown>)[key] as T
+  }
+  function setConfigField(key: keyof AppConfig, value: unknown): void {
+    ;(config.value as Record<string, unknown>)[key] = value
+  }
+
   async function load() {
     loading.value = true
     error.value = ''
@@ -37,7 +46,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function saveSection(keys: string[], secretKeys: SecretKey[] = []) {
     const payload: Record<string, unknown> = {}
-    for (const k of keys) if (k in config.value) payload[k] = (config.value as Record<string, unknown>)[k]
+    for (const k of keys) if (k in config.value) payload[k] = getConfigField(k as keyof AppConfig)
     Object.assign(payload, collectSecrets(secretKeys))
     await api('/config', { method: 'POST', body: JSON.stringify(payload) })
     for (const k of secretKeys) secrets.value[k] = ''
@@ -68,12 +77,12 @@ export const useSettingsStore = defineStore('settings', () => {
       // 后端 api_test_embedding 读 body.base_url/model/api_key（与 legacy 约定一致）；
       // config 里 embedding 字段名是 embedding_base_url/embedding_model，需映射，
       // 且 config.api_key 是 SecretField 对象（{configured,masked}）不能直接传，只传 secrets 里的明文 key。
-      body.base_url = String((config.value as Record<string, unknown>).embedding_base_url ?? '').trim()
-      body.model = String((config.value as Record<string, unknown>).embedding_model ?? '').trim()
+      body.base_url = String(getConfigField('embedding_base_url') ?? '').trim()
+      body.model = String(getConfigField('embedding_model') ?? '').trim()
       body.api_key = secrets.value.embedding_api_key?.trim() || secrets.value.api_key?.trim()
     }
     return api<TestResult>(path, { method: 'POST', body: JSON.stringify(body) })
   }
 
-  return { config, secrets, loading, error, load, saveSection, saveAccessPassword, clearProxy, test }
+  return { config, secrets, loading, error, load, saveSection, saveAccessPassword, clearProxy, test, setConfigField }
 })

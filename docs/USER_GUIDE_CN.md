@@ -13,7 +13,7 @@ http://localhost:18000
 第一次进入设置页，先填模型配置：
 
 - API 地址：兼容 OpenAI Chat Completions 的接口地址。
-- 模型名：例如 `deepseek-chat`。
+- 模型名：例如 `deepseek-v4-pro`。
 - API Key：模型服务商提供的密钥。
 
 保存后可以用设置页里的测试连接确认模型能正常回复。

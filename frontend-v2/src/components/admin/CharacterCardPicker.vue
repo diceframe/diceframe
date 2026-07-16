@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CharacterCard } from '../../api/types'
+import type { CharacterCard } from '@/api/types'
 
 defineProps<{ cards: CharacterCard[] }>()
 const emit = defineEmits<{ pick: [card: CharacterCard]; close: [] }>()

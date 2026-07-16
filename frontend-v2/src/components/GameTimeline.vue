@@ -2,11 +2,11 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
-import type { LogEntry, PublicAction, Player } from '../api/types'
-import type { DiceTag } from '../utils/play'
-import { parseAction, playerColor } from '../utils/play'
-import { api } from '../api/client'
-import { parseGMText, type LoreKeywords } from '../utils/renderer'
+import type { LogEntry, PublicAction, Player } from '@/api/types'
+import type { DiceTag } from '@/utils/play'
+import { parseAction, playerColor } from '@/utils/play'
+import { api } from '@/api/client'
+import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 
 const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; processing?: boolean; isGm?: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()

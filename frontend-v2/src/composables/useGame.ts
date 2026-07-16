@@ -1,9 +1,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, gameEventSource, hasAccessToken } from '../api/client'
-import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage } from '../api/types'
-import type { LoreKeywords } from '../utils/renderer'
-import { gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '../stores/gameContext'
+import { api, gameEventSource, hasAccessToken } from '@/api/client'
+import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage } from '@/api/types'
+import type { LoreKeywords } from '@/utils/renderer'
+import { gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 
 const KEY_MAP:Record<string,keyof LoreKeywords>={npc:'npc',location:'location',item:'item',faction:'faction',event:'event',puzzle:'puzzle',other:'other',lore:'other'}
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || '加载失败') }

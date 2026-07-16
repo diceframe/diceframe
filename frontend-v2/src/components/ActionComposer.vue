@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
-import { api } from '../api/client'
-import type { ActionSubmitResponse, GameDetail } from '../api/types'
-import { useLocale } from '../composables/useLocale'
-import { DEFAULT_QUICK_ACTIONS } from '../utils/play'
+import { api } from '@/api/client'
+import type { ActionSubmitResponse, GameDetail } from '@/api/types'
+import { useLocale } from '@/composables/useLocale'
+import { DEFAULT_QUICK_ACTIONS } from '@/utils/play'
 import DiceButton from './play/DiceButton.vue'
 
 const props = defineProps<{ gameKey: string; userId: string; detail: GameDetail; disabled?: boolean }>()

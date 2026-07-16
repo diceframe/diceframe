@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { api, errorMessage } from '../../api/client'
-import type { CharacterSheet, CharacterSkill, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '../../api/types'
-import { useToast } from '../../composables/useToast'
+import { api, errorMessage } from '@/api/client'
+import type { CharacterSheet, CharacterSkill, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
+import { useToast } from '@/composables/useToast'
 import SkillEditor from './SkillEditor.vue'
 import {
   identitySchema, identityLabel, attrDisplayName, currencyLabel,
   isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost,
   type IdentityField, type RuleAttr,
-} from '../../utils/ruleSchema'
+} from '@/utils/ruleSchema'
 
 interface CharacterSubmit extends CharacterSheet { character_name: string }
 

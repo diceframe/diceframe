@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, errorMessage } from '../../api/client'
-import type { GameDetail, GameLogResponse, HealthResponse, LogEntry, LorebookResponse, LoreEntry, PrivateLogResponse, PrivateMessage } from '../../api/types'
-import { readCurrentGame } from '../../stores/gameContext'
-import { parseGMText, type LoreKeywords } from '../../utils/renderer'
+import { api, errorMessage } from '@/api/client'
+import type { GameDetail, GameLogResponse, HealthResponse, LogEntry, LorebookResponse, LoreEntry, PrivateLogResponse, PrivateMessage } from '@/api/types'
+import { readCurrentGame } from '@/stores/gameContext'
+import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 
 interface LogViewData extends GameLogResponse { _lore?: LoreKeywords }
 interface LogAction { uid: string; text: string }

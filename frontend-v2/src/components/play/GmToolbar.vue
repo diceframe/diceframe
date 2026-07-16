@@ -7,7 +7,7 @@ import {
   KeyOutline, PlaySkipForwardOutline, DownloadOutline, RefreshOutline,
   TrashOutline, SendOutline,
 } from '@vicons/ionicons5'
-import type { GameDetail, Player } from '../../api/types'
+import type { GameDetail, Player } from '@/api/types'
 
 defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean }>()
 const emit = defineEmits<{

@@ -14,8 +14,8 @@ import type { SecretKey } from '@/stores/useSettingsStore'
 import type { AppConfig, SecretField, TestResult } from '@/api/types'
 import AppPage from '@/components/common/AppPage.vue'
 import TestResultCard from '@/components/admin/TestResultCard.vue'
-import ApiHelpButton from '@/components/common/ApiHelpButton.vue'
-import PluginSettings from '../plugins/PluginSettings.vue'
+import HelpButton from '@/components/common/HelpButton.vue'
+import PluginSettings from '@/features/plugins/PluginSettings.vue'
 
 type SectionId = 'api' | 'memory' | 'network' | 'sharing' | 'plugins' | 'access' | 'advanced' | 'about'
 type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info'
@@ -43,7 +43,7 @@ const testResult = ref<TestResult | null>(null)
 const testKind = ref<'model' | 'embedding' | 'proxy' | ''>('')
 
 const password = ref('')
-const password2 = ref('')
+const passwordConfirm = ref('')
 const locationOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin
 
 const proxySourceLabel = computed(() => {
@@ -124,14 +124,23 @@ watch(section, () => {
   sc?.scrollTo({ top: 0 })
 })
 
-function setStr(key: keyof AppConfig, v: string | number) { (store.config as Record<string, unknown>)[key] = String(v).trim() }
+function setStr(key: keyof AppConfig, v: string | number) { store.setConfigField(key, String(v).trim()) }
 function setSecret(key: SecretKey, v: string | number) { store.secrets[key] = String(v).trim() }
 function eventValue(event: Event) { return (event.target as HTMLSelectElement | null)?.value || '' }
 function setNum(key: keyof AppConfig, v: string | number | null) {
-  if (v === null || v === '') { (store.config as Record<string, unknown>)[key] = 0; return }
-  ;(store.config as Record<string, unknown>)[key] = Number(v) || 0
+  if (v === null || v === '') { store.setConfigField(key, 0); return }
+  store.setConfigField(key, Number(v) || 0)
 }
-function setBool(key: keyof AppConfig, v: string | number | boolean) { (store.config as Record<string, unknown>)[key] = Boolean(v) }
+function setBool(key: keyof AppConfig, v: string | number | boolean) { store.setConfigField(key, Boolean(v)) }
+
+const tokenFields: { key: keyof AppConfig; label: string }[] = [
+  { key: 'narrative_max_tokens', label: '叙事 Token' },
+  { key: 'character_gen_max_tokens', label: '角色生成 Token' },
+  { key: 'summary_max_tokens', label: '摘要 Token' },
+  { key: 'brief_max_tokens', label: '简报 Token' },
+  { key: 'analysis_max_tokens', label: '分析 Token' },
+  { key: 'text_gen_max_tokens', label: '文本生成 Token' },
+]
 
 async function save(keys: string[], secretKeys: SecretKey[] = []) {
   try {
@@ -157,11 +166,11 @@ async function runTest(kind: 'model' | 'embedding' | 'proxy') {
 
 async function savePassword() {
   if (password.value.length < 6) { toast.error('访问密码至少 6 位'); return }
-  if (password.value !== password2.value) { toast.error('两次输入不一致'); return }
+  if (password.value !== passwordConfirm.value) { toast.error('两次输入不一致'); return }
   try {
     await store.saveAccessPassword(password.value)
     toast.success('访问密码已更新')
-    password.value = password2.value = ''
+    password.value = passwordConfirm.value = ''
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   }
@@ -239,7 +248,21 @@ function openUpdateUrl() {
         <NSpin :show="store.loading">
           <!-- 模型接口 -->
           <div v-show="section === 'api'" class="settings-pane">
-            <div class="api-head-row"><h3>主模型接口</h3><ApiHelpButton /></div>
+            <div class="api-head-row"><h3>主模型接口</h3><HelpButton title="如何获取 DeepSeek API Key">
+              <h4>1. 注册 DeepSeek 账号</h4>
+              <p>打开 <a href="https://platform.deepseek.com/" target="_blank" rel="noopener">DeepSeek 开放平台</a>，注册并登录。</p>
+              <h4>2. 创建 API Key</h4>
+              <p>进入左侧「API Keys」页面，点击「创建 API Key」，给个名字后复制生成的 Key（形如 <code>sk-xxxxxxxx</code>）。</p>
+              <h4>3. 填写到 DiceFrame</h4>
+              <p>回到本页的「主模型接口」，按以下内容填写：</p>
+              <ul>
+                <li><strong>接口格式</strong>：OpenAI 兼容</li>
+                <li><strong>Base URL</strong>：<code>https://api.deepseek.com/v1</code></li>
+                <li><strong>API Key</strong>：粘贴刚才复制的 Key</li>
+                <li><strong>模型</strong>：<code>deepseek-v4-pro</code></li>
+              </ul>
+              <p>填好后点「保存」，再点「测试连接」确认能通。</p>
+            </HelpButton></div>
             <div class="form-row">
               <label>接口格式</label>
               <select :value="store.config.api_format ?? 'openai'" @change="setStr('api_format', eventValue($event))">
@@ -300,7 +323,22 @@ function openUpdateUrl() {
 
           <!-- 向量记忆 -->
           <div v-show="section === 'memory'" class="settings-pane">
-            <h3>向量记忆</h3>
+            <div class="api-head-row"><h3>向量记忆</h3><HelpButton title="向量模型是什么？怎么选？">
+              <h4>向量模型是干嘛的</h4>
+              <p>把文本转成一组数字（向量）。DiceFrame 用它做"向量记忆"--把剧情、世界书、角色卡等内容存成向量，AI 回复时检索相关片段，长剧情不容易忘。不启用也能跑，但长团建议开。</p>
+              <h4>选什么模型</h4>
+              <p>常用 <code>bge-m3</code>（中文友好、支持长文本）。其他如 <code>text-embedding-3-small</code>、<code>gte-large</code>、<code>nomic-embed-text</code> 也行，只要是 OpenAI 兼容的 embedding 接口都能接。</p>
+              <h4>怎么配置（以 bge-m3 为例）</h4>
+              <ul>
+                <li><strong>向量接口</strong>：填提供 embedding 的服务地址，例如 <code>https://api.siliconflow.cn/v1</code></li>
+                <li><strong>API Key</strong>：对应平台的 key</li>
+                <li><strong>模型</strong>：<code>BAAI/bge-m3</code>（部分平台写成 <code>bge-m3</code>）</li>
+                <li><strong>最大输入</strong>：填 0 自动推断，或按模型填（bge-m3 支持 8192）</li>
+              </ul>
+              <p>服务可以用硅基流动、OpenAI、本地部署的模型服务等任意 OpenAI 兼容 embedding 接口。</p>
+              <h4>测试</h4>
+              <p>填好点「测试向量连接」，通了再保存。</p>
+            </HelpButton></div>
             <div class="form-row"><label>向量记忆</label><div class="switch-inline"><NSwitch :value="!!store.config.embedding_enabled" @update:value="setBool('embedding_enabled', $event)" /><span>启用</span></div></div>
             <div class="form-row"><label>向量接口</label><NInput :value="store.config.embedding_base_url ?? ''" @update:value="setStr('embedding_base_url', $event)" /></div>
             <div class="form-row">
@@ -371,7 +409,7 @@ function openUpdateUrl() {
             <h3>访问密码</h3>
             <p class="muted">设置后所有页面访问需登录；留空表示不启用。修改密码后会自动更新本地登录凭证。</p>
             <div class="form-row"><label>新密码</label><NInput v-model:value="password" type="password" show-password-on="click" placeholder="至少 6 位" /></div>
-            <div class="form-row"><label>再次输入</label><NInput v-model:value="password2" type="password" show-password-on="click" /></div>
+            <div class="form-row"><label>再次输入</label><NInput v-model:value="passwordConfirm" type="password" show-password-on="click" /></div>
             <div class="actions-row">
               <NButton type="primary" @click="savePassword">保存密码</NButton>
             </div>
@@ -381,12 +419,10 @@ function openUpdateUrl() {
           <!-- 高级参数 -->
           <div v-show="section === 'advanced'" class="settings-pane">
             <h3>生成参数</h3>
-            <div class="form-row"><label>叙事 Token</label><NInputNumber :value="store.config.narrative_max_tokens ?? 0" @update:value="setNum('narrative_max_tokens', $event)" style="width:100%" /></div>
-            <div class="form-row"><label>角色生成 Token</label><NInputNumber :value="store.config.character_gen_max_tokens ?? 0" @update:value="setNum('character_gen_max_tokens', $event)" style="width:100%" /></div>
-            <div class="form-row"><label>摘要 Token</label><NInputNumber :value="store.config.summary_max_tokens ?? 0" @update:value="setNum('summary_max_tokens', $event)" style="width:100%" /></div>
-            <div class="form-row"><label>简报 Token</label><NInputNumber :value="store.config.brief_max_tokens ?? 0" @update:value="setNum('brief_max_tokens', $event)" style="width:100%" /></div>
-            <div class="form-row"><label>分析 Token</label><NInputNumber :value="store.config.analysis_max_tokens ?? 0" @update:value="setNum('analysis_max_tokens', $event)" style="width:100%" /></div>
-            <div class="form-row"><label>文本生成 Token</label><NInputNumber :value="store.config.text_gen_max_tokens ?? 0" @update:value="setNum('text_gen_max_tokens', $event)" style="width:100%" /></div>
+            <div v-for="item in tokenFields" :key="item.key" class="form-row">
+              <label>{{ item.label }}</label>
+              <NInputNumber :value="Number(store.config[item.key] ?? 0)" @update:value="setNum(item.key, $event)" style="width:100%" />
+            </div>
             <div class="actions-row">
               <NButton type="primary" @click="save(['narrative_max_tokens', 'character_gen_max_tokens', 'summary_max_tokens', 'brief_max_tokens', 'analysis_max_tokens', 'text_gen_max_tokens'])">保存</NButton>
             </div>

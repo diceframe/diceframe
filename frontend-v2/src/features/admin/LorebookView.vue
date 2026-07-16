@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { api, errorMessage } from '../../api/client'
-import type { GameSummary, GamesResponse, LorebookResponse, LoreEntry, LoreGenerateResponse, WorldCreateResponse, WorldListResponse, WorldSummary } from '../../api/types'
-import { readCurrentGame } from '../../stores/gameContext'
-import { useToast } from '../../composables/useToast'
-import { useConfirm } from '../../composables/useConfirm'
-import Modal from '../../components/ui/Modal.vue'
+import { api, errorMessage } from '@/api/client'
+import type { GameSummary, GamesResponse, LorebookResponse, LoreEntry, LoreGenerateResponse, WorldCreateResponse, WorldListResponse, WorldSummary } from '@/api/types'
+import { readCurrentGame } from '@/stores/gameContext'
+import { useToast } from '@/composables/useToast'
+import { useConfirm } from '@/composables/useConfirm'
+import Modal from '@/components/ui/Modal.vue'
 
 interface LoreEdit extends LoreEntry {
   tier?: string

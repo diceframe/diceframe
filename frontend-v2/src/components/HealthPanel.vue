@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { GameDetail, HealthEvent, HealthResponse } from '../api/types'
-import { gameStateLabel } from '../utils/play'
+import type { GameDetail, HealthEvent, HealthResponse } from '@/api/types'
+import { gameStateLabel } from '@/utils/play'
 
 const props = defineProps<{ health?: HealthResponse | null; detail?: GameDetail | null; isGm: boolean }>()
 const emit = defineEmits<{ resolve: [id: string, action: string] }>()

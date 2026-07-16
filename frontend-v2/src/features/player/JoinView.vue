@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, errorMessage } from '../../api/client'
-import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterSkill, GameDetail, PlayerCreateResponse, RuleAttribute, RuleMeta } from '../../api/types'
-import { rememberCurrentGame } from '../../stores/gameContext'
-import { attrDisplayName, suggestedAttributes, skillPointCost } from '../../utils/ruleSchema'
+import { api, errorMessage } from '@/api/client'
+import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterSkill, GameDetail, PlayerCreateResponse, RuleAttribute, RuleMeta } from '@/api/types'
+import { rememberCurrentGame } from '@/stores/gameContext'
+import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ruleSchema'
 
 interface JoinSkill { name: string; value: string | number }
 interface JoinForm {

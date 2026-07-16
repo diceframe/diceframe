@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, errorMessage } from '../../api/client'
-import type { MemoriesResponse, MemoryEntry } from '../../api/types'
-import { readCurrentGame } from '../../stores/gameContext'
-import { useConfirm } from '../../composables/useConfirm'
-import { useToast } from '../../composables/useToast'
-import Modal from '../../components/ui/Modal.vue'
+import { api, errorMessage } from '@/api/client'
+import type { MemoriesResponse, MemoryEntry } from '@/api/types'
+import { readCurrentGame } from '@/stores/gameContext'
+import { useConfirm } from '@/composables/useConfirm'
+import { useToast } from '@/composables/useToast'
+import Modal from '@/components/ui/Modal.vue'
 
 const { confirm } = useConfirm()
 const toast = useToast()

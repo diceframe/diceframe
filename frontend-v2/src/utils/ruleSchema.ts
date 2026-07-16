@@ -1,4 +1,4 @@
-import type { CharacterSheet, IdentityFieldSpec, ResourceSpec, RuleAttribute, RuleMeta } from '../api/types'
+import type { CharacterSheet, IdentityFieldSpec, ResourceSpec, RuleAttribute, RuleMeta } from '@/api/types'
 
 const ATTR_NAME_EN: Record<string, string> = { str: 'STR', con: 'CON', dex: 'DEX', int: 'INT', edu: 'EDU', app: 'APP', pow: 'POW', siz: 'SIZ', wis: 'WIS', cha: 'CHA' }
 const ATTR_NAME_ZH: Record<string, string> = { str: '力量', con: '体质', dex: '敏捷', int: '智力', edu: '教育', app: '外貌', pow: '意志', siz: '体型', wis: '感知', cha: '魅力' }

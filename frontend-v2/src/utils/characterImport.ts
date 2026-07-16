@@ -1,5 +1,5 @@
-import { api } from '../api/client'
-import type { CharacterCard, CharacterImportResponse } from '../api/types'
+import { api } from '@/api/client'
+import type { CharacterCard, CharacterImportResponse } from '@/api/types'
 
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

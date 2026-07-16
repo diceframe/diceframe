@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CharacterSheet, Player, RuleAttribute, RuleMeta } from '../api/types'
-import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel } from '../utils/ruleSchema'
-import { buildSpecialStats, primaryResourceList } from '../utils/play'
+import type { CharacterSheet, Player, RuleAttribute, RuleMeta } from '@/api/types'
+import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel } from '@/utils/ruleSchema'
+import { buildSpecialStats, primaryResourceList } from '@/utils/play'
 
 const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null }>()
 function label(item: unknown) { if (typeof item === 'string') return item; if (item && typeof item === 'object' && 'name' in item) return String((item as { name?: unknown }).name || JSON.stringify(item)); return JSON.stringify(item) }

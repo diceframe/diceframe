@@ -2,9 +2,9 @@
 import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
 import { LinkOutline, CreateOutline, CloseCircleOutline } from '@vicons/ionicons5'
-import type { GameDetail, Player } from '../../api/types'
-import { useLocale } from '../../composables/useLocale'
-import { playerColor } from '../../utils/play'
+import type { GameDetail, Player } from '@/api/types'
+import { useLocale } from '@/composables/useLocale'
+import { playerColor } from '@/utils/play'
 
 const props = defineProps<{ players: Player[]; detail: GameDetail; isGm: boolean; currentUserId?: string }>()
 const emit = defineEmits<{

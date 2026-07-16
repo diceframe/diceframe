@@ -1,27 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { api } from '../../api/client'
-import type { CharacterCard, CharacterCardsResponse, CharacterItem, CharacterListResponse, CharacterSheet, CharacterSkill, JsonObject, RuleDetailResponse, RuleMeta, SkillSpec } from '../../api/types'
-import { readCurrentGame } from '../../stores/gameContext'
-import { importTavernCard } from '../../utils/characterImport'
-import { useToast } from '../../composables/useToast'
-import { useConfirm } from '../../composables/useConfirm'
-import Modal from '../../components/ui/Modal.vue'
-import CharacterWizard from '../../components/admin/CharacterWizard.vue'
-import SkillEditor from '../../components/admin/SkillEditor.vue'
-import LevelUpDialog from '../../components/admin/LevelUpDialog.vue'
+import { api } from '@/api/client'
+import type { CharacterCard, CharacterCardsResponse, CharacterItem, CharacterListResponse, CharacterSheet, CharacterSkill, JsonObject, RuleDetailResponse, RuleMeta, SkillSpec } from '@/api/types'
+import { readCurrentGame } from '@/stores/gameContext'
+import { importTavernCard } from '@/utils/characterImport'
+import { useToast } from '@/composables/useToast'
+import { useConfirm } from '@/composables/useConfirm'
+import Modal from '@/components/ui/Modal.vue'
+import CharacterWizard from '@/components/admin/CharacterWizard.vue'
+import SkillEditor from '@/components/admin/SkillEditor.vue'
+import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
 import {
   identitySchema, identityLabel, getIdentityValue, setIdentityUpdate,
   currencyLabel, getCurrencyAmount, getResourceValue,
   isAutoHpRule, calcAutoHp, attrDisplayName,
   type IdentityField, type RuleAttr,
-} from '../../utils/ruleSchema'
+} from '@/utils/ruleSchema'
 
 interface CharacterData extends CharacterListResponse { cards: CharacterCard[] }
 interface ResourceEdit { current: number; max: number }
 interface CharacterEditForm {
-  player: import('../../api/types').Player
+  player: import('@/api/types').Player
   user_id: string
   character_name: string
   level: number
@@ -36,7 +36,7 @@ interface CharacterEditForm {
   fields: IdentityField[]
   identityValues: Record<string, string>
 }
-interface LevelUpState { player: import('../../api/types').Player; levelUpPoints: number }
+interface LevelUpState { player: import('@/api/types').Player; levelUpPoints: number }
 interface CardEditForm {
   card_id: string
   character_name: string
@@ -114,7 +114,7 @@ function parseLines<T extends CharacterItem>(text: string, fn: (p: string[]) => 
   return t.split('\n').map(l => fn(l.split('|').map(x => x.trim())))
 }
 function cardId(card: CharacterCard): string { return String(card.card_id || card.id || '') }
-function levelUpPoints(player: import('../../api/types').Player): number { return Number(player.character_sheet?.level_up_points || 0) }
+function levelUpPoints(player: import('@/api/types').Player): number { return Number(player.character_sheet?.level_up_points || 0) }
 function npcKey(card: CharacterCard): string { return String(card.id || card.card_id || card.name || card.character_name || Math.random()) }
 
 watch(ruleId, async (id) => {
@@ -167,7 +167,7 @@ async function onImportTavern(e: Event) {
   } catch (err: unknown) { toast.error(errorMessage(err)) } finally { busy.value = false; input.value = '' }
 }
 
-function openEdit(p: import('../../api/types').Player) {
+function openEdit(p: import('@/api/types').Player) {
   const cs = p.character_sheet || {}
   const fields = identitySchema(ruleMeta.value).filter((f: IdentityField) => f.key !== 'background')
   const attrs: Record<string, number> = { ...(cs.attributes || {}) }
@@ -234,7 +234,7 @@ async function saveCharacter() {
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
-async function deleteCharacter(p: import('../../api/types').Player) {
+async function deleteCharacter(p: import('@/api/types').Player) {
   const ok = await confirm({ title: '移除角色', content: `确定移除 ${p.character_name} 吗？该角色会从当前存档中删除。`, positiveText: '移除角色', type: 'warning' })
   if (!ok) return
   try {
@@ -244,7 +244,7 @@ async function deleteCharacter(p: import('../../api/types').Player) {
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
-async function saveToCard(p: import('../../api/types').Player) {
+async function saveToCard(p: import('@/api/types').Player) {
   const cs = p.character_sheet || {}
   try {
     await api('/character-cards', { method: 'POST', body: JSON.stringify({ character_name: p.character_name, ...cs }) })
@@ -253,7 +253,7 @@ async function saveToCard(p: import('../../api/types').Player) {
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
-function openLevelUp(p: import('../../api/types').Player) {
+function openLevelUp(p: import('@/api/types').Player) {
   editLevelUp.value = { player: p, levelUpPoints: Number(p.character_sheet?.level_up_points || 0) }
 }
 async function saveLevelUp(attrs: Record<string, number>) {

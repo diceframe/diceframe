@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { MapData, MapLocation } from '../../api/types'
+import type { MapData, MapLocation } from '@/api/types'
 
 const props = defineProps<{ map?: MapData | null; currentScene?: string }>()
 const emit = defineEmits<{ 'lore-click': [name: string] }>()

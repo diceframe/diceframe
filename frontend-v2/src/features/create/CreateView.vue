@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, errorMessage } from '../../api/client'
-import type { CharacterCard, CharacterCardsResponse, CharacterSheet, GameMutationResponse, GeneratedRuleResponse, GeneratedWorldResponse, RuleDetailResponse, RuleSummary, RuleTemplate, RulesResponse, WorldListResponse, WorldSummary, WorldTemplateSummary, WorldTemplatesResponse } from '../../api/types'
-import { useToast } from '../../composables/useToast'
-import { useLocale, type Locale } from '../../composables/useLocale'
-import CharacterWizard from '../../components/admin/CharacterWizard.vue'
-import CharacterCardPicker from '../../components/admin/CharacterCardPicker.vue'
-import { importTavernCard } from '../../utils/characterImport'
-import { rememberCurrentGame } from '../../stores/gameContext'
+import { api, errorMessage } from '@/api/client'
+import type { CharacterCard, CharacterCardsResponse, CharacterSheet, GameMutationResponse, GeneratedRuleResponse, GeneratedWorldResponse, RuleDetailResponse, RuleSummary, RuleTemplate, RulesResponse, WorldListResponse, WorldSummary, WorldTemplateSummary, WorldTemplatesResponse } from '@/api/types'
+import { useToast } from '@/composables/useToast'
+import { useLocale, type Locale } from '@/composables/useLocale'
+import CharacterWizard from '@/components/admin/CharacterWizard.vue'
+import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
+import { importTavernCard } from '@/utils/characterImport'
+import { rememberCurrentGame } from '@/stores/gameContext'
 
 interface CreateCharacter extends CharacterSheet { character_name: string }
 type CreateMode = 'template' | 'custom' | 'ai'

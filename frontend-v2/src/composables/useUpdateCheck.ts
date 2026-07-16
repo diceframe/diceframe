@@ -27,7 +27,6 @@ export function useUpdateCheck() {
   return {
     updateInfo,
     updateChecking,
-    updateChecked,
     updateAvailable,
     checkForUpdates,
   }

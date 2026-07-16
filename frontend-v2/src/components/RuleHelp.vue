@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RuleMeta } from '../api/types'
+import type { RuleMeta } from '@/api/types'
 
 const props = defineProps<{ meta?: RuleMeta | null }>()
 defineEmits<{ close: [] }>()

@@ -1,4 +1,4 @@
-import type { CharacterSheet, RuleMeta, SpecialStatSpec } from '../api/types'
+import type { CharacterSheet, RuleMeta, SpecialStatSpec } from '@/api/types'
 import { getResourceValue, resourceLabel } from './ruleSchema'
 
 export interface DiceTag { system: string; value: string }

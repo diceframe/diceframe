@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../../api/client'
-import type { RuleAttributeEdit, RuleDetailResponse, RuleEditorState, RuleForm, RulesResponse, RuleSummary, RuleTemplate } from '../../api/types'
-import { useToast } from '../../composables/useToast'
-import { useConfirm } from '../../composables/useConfirm'
-import Modal from '../../components/ui/Modal.vue'
+import { api } from '@/api/client'
+import type { RuleAttributeEdit, RuleDetailResponse, RuleEditorState, RuleForm, RulesResponse, RuleSummary, RuleTemplate } from '@/api/types'
+import { useToast } from '@/composables/useToast'
+import { useConfirm } from '@/composables/useConfirm'
+import Modal from '@/components/ui/Modal.vue'
 
 const toast = useToast()
 const { confirm } = useConfirm()
