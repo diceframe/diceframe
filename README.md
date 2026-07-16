@@ -40,23 +40,23 @@ QQ 群：1060613588
 
 普通 Windows 用户建议直接下载便携版：
 
-[前往 Releases 下载](https://github.com/EOEOY/diceframe/releases)
+[前往 Releases 下载](https://github.com/diceframe/diceframe/releases)
 
-下载 `DiceFrame-v0.1.3-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+下载 `DiceFrame-v1.0-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
 
 ### Docker 运行
 
 已安装 Docker 的用户可以直接拉取镜像：
 
 ```bash
-docker pull ghcr.io/eoeoy/diceframe:latest
-docker run -d --name diceframe -p 18000:18000 -v ./data:/app/data ghcr.io/eoeoy/diceframe:latest
+docker pull ghcr.io/diceframe/diceframe:latest
+docker run -d --name diceframe -p 9876:9876 -v ./data:/app/data ghcr.io/diceframe/diceframe:latest
 ```
 
 打开：
 
 ```text
-http://localhost:18000
+http://localhost:9876
 ```
 
 Docker 会把运行数据挂载到当前目录的 `data/`。详细说明见 [docs/DOCKER_DEPLOY_CN.md](docs/DOCKER_DEPLOY_CN.md)。

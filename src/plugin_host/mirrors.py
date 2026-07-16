@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 
-DEFAULT_MARKETPLACE_OWNER = "EOEOY"
+DEFAULT_MARKETPLACE_OWNER = "diceframe"
 DEFAULT_MARKETPLACE_REPO = "diceframe-plugins"
 DEFAULT_MARKETPLACE_BRANCH = "main"
 DEFAULT_MARKETPLACE_FILE = "plugin_details.json"

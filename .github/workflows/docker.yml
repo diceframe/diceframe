@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image version, for example 0.1.4"
+        description: "Image version, for example 1.0"
         required: true
-        default: "0.1.4"
+        default: "1.0"
   push:
     tags:
       - "v*"

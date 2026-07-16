@@ -445,8 +445,8 @@ function openUpdateUrl() {
               <h4>免责声明</h4>
               <p class="muted">本工具由 AI 生成叙事内容，可能包含不恰当或冒犯性文本，请自行甄别；内容仅供娱乐，不代表开发者立场。请遵守当地法律法规与所用模型的条款。</p>
               <h4>联系</h4>
-              <p>项目地址：<a href="https://github.com/EOEOY/diceframe" target="_blank" rel="noopener">EOEOY/diceframe</a></p>
-              <p>问题反馈：<a href="https://github.com/EOEOY/diceframe/issues" target="_blank" rel="noopener">提交 Issue</a></p>
+              <p>项目地址：<a href="https://github.com/diceframe/diceframe" target="_blank" rel="noopener">diceframe/diceframe</a></p>
+              <p>问题反馈：<a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">提交 Issue</a></p>
               <p>QQ 群：1060613588</p>
             </section>
             <section class="update-card" aria-label="版本更新">

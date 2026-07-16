@@ -414,7 +414,7 @@ maps/
 
 ## 8. 商店收录
 
-官方社区索引仓库为 `https://github.com/EOEOY/diceframe-plugins`。WebUI “插件 -> 插件商店”默认读取该仓库 `main` 分支的 `plugin_details.json`，并通过镜像源自动重试。
+官方社区索引仓库为 `https://github.com/diceframe/diceframe-plugins`。WebUI “插件 -> 插件商店”默认读取该仓库 `main` 分支的 `plugin_details.json`，并通过镜像源自动重试。
 
 最小商店条目：
 
