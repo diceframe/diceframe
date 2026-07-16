@@ -9,10 +9,10 @@ import os
 import subprocess
 from typing import Any
 
+from src.bots.bridge_core.client import DiceFrameClient
+from src.bots.bridge_core.store import JsonBridgeStore
 from src.bots.qq.adapter import QQTRPGAdapter
-from src.bots.qq.api_client import TRPGBotAPI
 from src.bots.qq.config import QQBotConfig
-from src.bots.qq.store import QQSessionStore
 from src.bots.qq.transport import NapCatTransport
 
 
@@ -33,9 +33,9 @@ async def run() -> None:
 
 
 async def _run_with_config(config: QQBotConfig) -> None:
-    store = QQSessionStore(config.data_path)
+    store = JsonBridgeStore(config.data_path)
     await store.load()
-    api = TRPGBotAPI(config.trpg_api_base, config.bot_token)
+    api = DiceFrameClient(config.trpg_api_base, config.bot_token)
     adapter: QQTRPGAdapter
 
     async def on_payload(payload: dict) -> None:

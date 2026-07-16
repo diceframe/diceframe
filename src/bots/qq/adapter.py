@@ -7,10 +7,8 @@ import re
 import asyncio
 from typing import Any, Protocol
 
-from src.bots.qq.api_client import TRPGBotAPI
-from src.bots.qq.card_renderer import render_card_png
-from src.bots.qq.character_flow import QQCharacterFlowMixin
-from src.bots.qq.command_matchers import (
+from src.bots.bridge_core.client import DiceFrameClient
+from src.bots.bridge_core.commands import (
     advance_force,
     away_target_query,
     is_advance,
@@ -28,11 +26,7 @@ from src.bots.qq.command_matchers import (
     payment_decision,
     payment_index,
 )
-from src.bots.qq.config import QQBotConfig
-from src.bots.qq.delivery import QQDeliveryMixin
-from src.bots.qq.game_commands import QQGameCommandsMixin
-from src.bots.qq.message_utils import invite_target_user_ids, mentions_self, message_text
-from src.bots.qq.presenters import (
+from src.bots.bridge_core.presenters import (
     background_lines,
     bind_success_text,
     bound_help_text,
@@ -60,8 +54,17 @@ from src.bots.qq.presenters import (
     unbound_group_text,
     unclaimed_player_text,
 )
-from src.bots.qq.store import QQSessionStore
+from src.bots.bridge_core.store import JsonBridgeStore
+from src.bots.qq.card_renderer import render_card_png
+from src.bots.qq.character_flow import QQCharacterFlowMixin
+from src.bots.qq.config import QQBotConfig
+from src.bots.qq.delivery import QQDeliveryMixin
+from src.bots.qq.game_commands import QQGameCommandsMixin
+from src.bots.qq.message_utils import invite_target_user_ids, mentions_self, message_text
 from src.bots.qq.web_sync import QQWebSyncMixin
+
+TRPGBotAPI = DiceFrameClient
+QQSessionStore = JsonBridgeStore
 
 
 class GroupSender(Protocol):
