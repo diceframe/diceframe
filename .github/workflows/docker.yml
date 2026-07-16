@@ -33,11 +33,11 @@ jobs:
           else
             version="${{ inputs.version }}"
           fi
-          image="ghcr.io/${owner}/diceframe"
+          ghcr_image="ghcr.io/${owner}/diceframe"
+          dockerhub_image="docker.io/falconku/diceframe"
           {
-            echo "image=${image}"
             echo "version=${version}"
-            echo "tags=${image}:${version},${image}:latest"
+            echo "tags=${ghcr_image}:${version},${ghcr_image}:latest,${dockerhub_image}:${version},${dockerhub_image}:latest"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
@@ -49,6 +49,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
