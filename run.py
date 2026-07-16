@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """TRPG 独立运行器 —— 不依赖 MaiBot，命令行直接跑团测试。"""
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from src.commands.game_handler import GameHandler
 
 API_KEY = os.getenv("TRPG_LLM_API_KEY", os.getenv("TRPG_API_KEY", ""))
 BASE_URL = os.getenv("TRPG_LLM_BASE_URL", os.getenv("TRPG_BASE_URL", "https://api.deepseek.com/v1"))
-MODEL = os.getenv("TRPG_LLM_MODEL", os.getenv("TRPG_MODEL", "deepseek-chat"))
+MODEL = os.getenv("TRPG_LLM_MODEL", os.getenv("TRPG_MODEL", "deepseek-v4-pro"))
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))
 
 # 颜色输出

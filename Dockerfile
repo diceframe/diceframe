@@ -9,18 +9,17 @@ COPY frontend-v2/ ./
 RUN npm run build
 
 
-FROM python:3.11-slim-bookworm AS runtime
+FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TRPG_WEB_HOST=0.0.0.0 \
-    TRPG_WEB_PORT=18000 \
+    TRPG_WEB_PORT=9876 \
     TRPG_DATA_DIR=/app/data
 
 WORKDIR /app
 
-RUN sed -i 's|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g; s|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=5 update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +31,7 @@ COPY --from=frontend-build /build/static-v2 ./static-v2
 
 RUN mkdir -p /app/data
 
-EXPOSE 18000
+EXPOSE 9876
 VOLUME ["/app/data"]
 
 CMD ["python", "web_server.py"]

@@ -20,7 +20,7 @@ docker compose up --build
 启动后打开：
 
 ```text
-http://localhost:18000
+http://localhost:9876
 ```
 
 如果要换宿主机端口，改 `.env`：
@@ -29,7 +29,7 @@ http://localhost:18000
 DICEFRAME_HTTP_PORT=8080
 ```
 
-然后访问 `http://localhost:8080`。容器内部端口仍是 `18000`，这样 WebUI、插件托管和内部 API 地址保持稳定。
+然后访问 `http://localhost:8080`。容器内部端口仍是 `9876`，这样 WebUI、插件托管和内部 API 地址保持稳定。
 
 ## 常用命令
 

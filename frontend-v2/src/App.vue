@@ -62,6 +62,16 @@ const fullscreen = computed(
 function onLocaleChange(event: Event) {
   setLocale((event.target as HTMLSelectElement).value as Locale)
 }
+
+// PC 鼠标滚轮在窄窗口下横向滚动菜单（移动端靠触摸滑动，无需此逻辑）
+function onTopMenuWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement
+  if (!el) return
+  // 没有溢出时放行，不影响页面正常竖向滚动
+  if (el.scrollWidth <= el.clientWidth) return
+  el.scrollLeft += e.deltaY || e.deltaX
+  e.preventDefault()
+}
 </script>
 <template>
   <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides">
@@ -80,9 +90,9 @@ function onLocaleChange(event: Event) {
               <NLayoutHeader bordered class="top-nav">
                 <div class="top-brand">
                   <BrandLogo :size="30" :subtitle="t('appSubtitle')" />
-                </div>
-                <div class="top-menu">
-                  <NMenu mode="horizontal" :options="menuOptions" :value="activeKey" />
+               </div>
+                <div class="top-menu" @wheel="onTopMenuWheel">
+                 <NMenu mode="horizontal" :options="menuOptions" :value="activeKey" />
                 </div>
                 <div class="top-right">
                   <ThemeToggle />

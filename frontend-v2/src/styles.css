@@ -457,3 +457,11 @@ body.light .top-nav{background:linear-gradient(180deg,#f5dfae,#d7b778);border-bo
 body.light .perception-item{background:rgba(255,247,223,.78);border-color:rgba(156,116,59,.26);border-left-color:#9c743b;color:#2d2115;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
 body.light .perception-item.fresh{animation:perceptionFreshLight 1.6s ease-out}
 @keyframes perceptionFreshLight{0%{border-color:#9c743b;border-left-color:#5b3517;background:#fff0bd;box-shadow:0 0 0 1px rgba(156,116,59,.22),0 8px 18px rgba(80,48,16,.14)}100%{border-color:rgba(156,116,59,.26);border-left-color:#9c743b;background:rgba(255,247,223,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}}
+
+/* Startup update-available dialog */
+.update-dialog-body{max-width:560px}
+.update-dialog-body .muted{color:var(--muted);font-size:13px;margin:0 0 10px}
+.update-dialog-notes{max-height:240px;overflow:auto;margin:0;padding:10px 12px;border:1px solid var(--line-soft);border-radius:8px;background:rgba(28,25,21,.6);color:var(--text);font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+body.light .update-dialog-notes{background:rgba(255,247,223,.7);border-color:rgba(156,116,59,.26)}
+
+.api-head-row{display:flex;align-items:baseline;gap:8px}.api-head-row h3{margin:0}a,a:visited{color:var(--gold-2)}

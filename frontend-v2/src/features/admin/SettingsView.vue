@@ -14,6 +14,7 @@ import type { SecretKey } from '@/stores/useSettingsStore'
 import type { AppConfig, SecretField, TestResult } from '@/api/types'
 import AppPage from '@/components/common/AppPage.vue'
 import TestResultCard from '@/components/admin/TestResultCard.vue'
+import ApiHelpButton from '@/components/common/ApiHelpButton.vue'
 import PluginSettings from '../plugins/PluginSettings.vue'
 
 type SectionId = 'api' | 'memory' | 'network' | 'sharing' | 'plugins' | 'access' | 'advanced' | 'about'
@@ -238,7 +239,7 @@ function openUpdateUrl() {
         <NSpin :show="store.loading">
           <!-- 模型接口 -->
           <div v-show="section === 'api'" class="settings-pane">
-            <h3>主模型接口</h3>
+            <div class="api-head-row"><h3>主模型接口</h3><ApiHelpButton /></div>
             <div class="form-row">
               <label>接口格式</label>
               <select :value="store.config.api_format ?? 'openai'" @change="setStr('api_format', eventValue($event))">
@@ -409,7 +410,8 @@ function openUpdateUrl() {
               <p class="muted">本工具由 AI 生成叙事内容，可能包含不恰当或冒犯性文本，请自行甄别；内容仅供娱乐，不代表开发者立场。请遵守当地法律法规与所用模型的条款。</p>
               <h4>联系</h4>
               <p>项目地址：<a href="https://github.com/EOEOY/diceframe" target="_blank" rel="noopener">EOEOY/diceframe</a></p>
-              <p>反馈邮箱：<a href="mailto:yurloe0@gmail.com">yurloe0@gmail.com</a></p>
+              <p>问题反馈：<a href="https://github.com/EOEOY/diceframe/issues" target="_blank" rel="noopener">提交 Issue</a></p>
+              <p>QQ 群：1060613588</p>
             </section>
             <section class="update-card" aria-label="版本更新">
               <div class="update-card-head">

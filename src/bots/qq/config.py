@@ -73,7 +73,7 @@ class QQBotConfig:
             blocked_users=_env_list("NAPCAT_BLOCKED_USERS"),
             block_official_bots=_env_bool("NAPCAT_BLOCK_OFFICIAL_BOTS", True),
             advance_allowed_users=_env_list("NAPCAT_ADVANCE_ALLOWED_USERS"),
-            trpg_api_base=os.getenv("TRPG_API_BASE", "http://127.0.0.1:18000").rstrip("/"),
+            trpg_api_base=os.getenv("TRPG_API_BASE", "http://127.0.0.1:9876").rstrip("/"),
             bot_token=os.getenv("TRPG_BOT_TOKEN", ""),
             data_path=Path(os.getenv("TRPG_BOT_DATA", str(root / "data" / "bot" / "qq_sessions.json"))),
             parent_pid=int(os.getenv("TRPG_PARENT_PID", "0") or "0"),

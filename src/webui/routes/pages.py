@@ -11,7 +11,14 @@ from aiohttp import web
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(
         request.app["static_v2_dir"] / "index.html",
-        headers={"Content-Type": "text/html; charset=utf-8"},
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            # index.html 引用带 hash 的 JS/CSS chunk；升级后旧 chunk 会被删除。
+            # 不加 no-cache 时浏览器对 index.html 做启发式缓存，复用旧版会引用已删除的
+            # chunk 导致 404 白屏(只有背景、需 F5 才恢复)。no-cache 让浏览器每次
+            # 重新验证(配合已有的 ETag/Last-Modified 协商)，确保拿到最新 chunk 引用。
+            "Cache-Control": "no-cache",
+        },
     )
 
 
