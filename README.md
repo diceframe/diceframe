@@ -36,7 +36,7 @@ DiceFrame 是一个可以自己部署的 AI 跑团桌。
 
 [前往 Releases 下载](https://github.com/EOEOY/diceframe/releases)
 
-下载 `DiceFrame-v0.1.2-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+下载 `DiceFrame-v0.1.3-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
 
 ### Docker 运行
 
