@@ -5,6 +5,7 @@ import type { RuleAttributeEdit, RuleDetailResponse, RuleEditorState, RuleForm, 
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
+import { localizedField } from '@/utils/ruleSchema'
 import Modal from '@/components/ui/Modal.vue'
 
 const toast = useToast()
@@ -202,14 +203,14 @@ async function deleteRule(rule: RuleSummary) {
     <div class="card-grid">
       <article v-for="r in data?.rules || []" :key="r.rule_id" class="rule-card">
         <div>
-          <h2>{{ r.rule_name || r.rule_id }}<small v-if="r.custom" class="badge badge-active">{{ t('custom') }}</small><small v-else class="badge">{{ t('builtin') }}</small></h2>
+          <h2>{{ localizedField<string>(r, 'rule_name') || r.rule_id }}<small v-if="r.custom" class="badge badge-active">{{ t('custom') }}</small><small v-else class="badge">{{ t('builtin') }}</small></h2>
           <div class="rule-meta-row">
             <span><strong>{{ t('dice') }}</strong>{{ r.dice_system || '-' }}</span>
             <span><strong>{{ t('combat') }}</strong>{{ r.combat_model || '-' }}</span>
             <span><strong>{{ t('attributes') }}</strong>{{ r.attr_count ?? '-' }} {{ t('itemsUnit') }}</span>
             <span v-if="r.file"><strong>{{ t('file') }}</strong>{{ r.file }}</span>
           </div>
-          <p>{{ r.description || '' }}</p>
+          <p>{{ localizedField<string>(r, 'description') || '' }}</p>
         </div>
         <div class="actions">
           <button @click="openRule(r)">{{ r.custom ? t('editRule') : t('copyAndEdit') }}</button>
