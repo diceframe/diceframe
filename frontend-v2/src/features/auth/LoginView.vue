@@ -59,7 +59,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.locale-switch { position: fixed; top: 14px; right: 14px; z-index: 10; }
+.locale-switch { position: fixed; top: 14px; right: 52px; z-index: 10; }
 .locale-switch select {
   padding: 4px 10px; border-radius: 6px;
   border: 1px solid rgba(128,128,128,0.4);
