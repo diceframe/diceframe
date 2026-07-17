@@ -45,6 +45,7 @@ dist/
 AGENTS.md
 CLAUDE.md
 docs/ARCHITECTURE_CN.md
+docs/I18N_PLAN_CN.md
 
 # Local environment / secrets
 .env

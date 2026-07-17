@@ -1,6 +1,6 @@
-# Bot Bridge 共享核心计划
+# Bot Bridge 共享核心
 
-本文记录 DiceFrame 聊天平台接入的拆分边界，避免 NapCat/QQ 或后续 Discord/Telegram 适配器重复实现同一套跑团业务。
+DiceFrame 聊天平台接入的共享核心层，供 NapCat/QQ 及后续 Discord/Telegram 适配器复用同一套跑团业务。
 
 ## 目标边界
 
