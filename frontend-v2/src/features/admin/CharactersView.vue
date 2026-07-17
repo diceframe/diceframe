@@ -12,6 +12,7 @@ import Modal from '@/components/ui/Modal.vue'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import SkillEditor from '@/components/admin/SkillEditor.vue'
 import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
+import ItemEditor from '@/components/admin/ItemEditor.vue'
 import {
   identitySchema, identityLabel, getIdentityValue, setIdentityUpdate,
   currencyLabel, getCurrencyAmount, getResourceValue,
@@ -31,8 +32,8 @@ interface CharacterEditForm {
   attributes: Record<string, number>
   skills: CharacterSkill[]
   background: string
-  equipText: string
-  invText: string
+  equipment: CharacterItem[]
+  inventory: CharacterItem[]
   keyText: string
   fields: IdentityField[]
   identityValues: Record<string, string>
@@ -191,8 +192,8 @@ function openEdit(p: import('@/api/types').Player) {
     attributes: attrs,
     skills: toSkillList(cs.skills),
     background: String(cs.background || ''),
-    equipText: itemLines(cs.equipment, ['name', 'type', 'damage', 'slot', 'quality'], { type: 'weapon', damage: 0, slot: 'main_hand', quality: 'common' }),
-    invText: itemLines(cs.inventory, ['name', 'qty', 'effect'], { qty: 1, effect: '' }),
+    equipment: (cs.equipment || []).map(it => ({ ...it })),
+    inventory: (cs.inventory || []).map(it => ({ ...it })),
     keyText: itemLines(cs.key_items, ['name', 'category', 'note'], { category: 'key_item', note: '' }),
     fields,
     identityValues: Object.fromEntries(fields.map((f: IdentityField) => [f.key, getIdentityValue(cs, f)])),
@@ -233,8 +234,8 @@ async function saveCharacter() {
     e.fields.forEach((f: IdentityField) => setIdentityUpdate(updates, f, e.identityValues[f.key]))
     updates.identity = updates.identity || {}
     updates.identity.background = e.background
-    updates.equipment = parseLines(e.equipText, p => p.length >= 5 ? { name: p[0], type: p[1], damage: parseInt(p[2]) || 0, slot: p[3], quality: p[4] } : { name: p[0] || '', type: 'weapon', damage: 0, slot: 'main_hand', quality: 'common' })
-    updates.inventory = parseLines(e.invText, p => p.length >= 3 ? { name: p[0], qty: parseInt(p[1]) || 1, effect: p[2] } : { name: p[0] || '', qty: 1, effect: '' })
+    updates.equipment = e.equipment.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0, slot: it.slot || 'main_hand', quality: it.quality || 'common' }))
+    updates.inventory = e.inventory.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), qty: Number(it.qty) || 1, effect: it.effect || '' }))
     updates.key_items = parseLines(e.keyText, p => p.length >= 3 ? { name: p[0], category: p[1] || 'key_item', note: p[2] } : p.length >= 2 ? { name: p[0], category: p[1] || 'key_item' } : { name: p[0] || '', category: 'key_item' })
     await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(e.user_id)}`, { method: 'PUT', body: JSON.stringify(updates) })
     edit.value = null
@@ -417,8 +418,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
       <label>{{ t('skills') }}</label>
       <SkillEditor v-model="edit.skills" :pool="skillPool" />
       <label>{{ t('backgroundStory') }}<textarea rows="3" v-model="edit.background"></textarea></label>
-      <label>{{ t('equipmentLineHelp') }}<textarea rows="3" v-model="edit.equipText"></textarea></label>
-      <label>{{ t('inventoryLineHelp') }}<textarea rows="3" v-model="edit.invText"></textarea></label>
+      <ItemEditor v-model:equipment="edit.equipment" v-model:inventory="edit.inventory" />
       <label>{{ t('keyItemsLineHelp') }}<textarea rows="3" v-model="edit.keyText"></textarea></label>
       <template #actions>
         <button @click="edit = null">{{ t('cancel') }}</button>

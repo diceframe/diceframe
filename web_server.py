@@ -289,7 +289,7 @@ def _build_subsystems() -> TRPGSubsystems:
         embedding_max_input=int(STATE.get("embedding_max_input", 0)),
         proxy_url=effective_proxy_url(bool(STATE.get("proxy_enabled")), STATE.get("proxy_url", "")),
         narrative_max_tokens=int(STATE.get("narrative_max_tokens", 1024)),
-        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 2048)),
+        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
         summary_max_tokens=int(STATE.get("summary_max_tokens", 400)),
         brief_max_tokens=int(STATE.get("brief_max_tokens", 300)),
         analysis_max_tokens=int(STATE.get("analysis_max_tokens", 512)),
@@ -302,7 +302,7 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None) -> WebAPI:
         memory=subsystems.memory_store, rules_dir=RULES_DIR,
         handler=subsystems.handler, llm_client=subsystems.llm_client,
         worlds_dir=WORLDS_DIR,
-        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 2048)),
+        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
         text_gen_max_tokens=int(STATE.get("text_gen_max_tokens", 400)),
         plugin_host=plugin_host,
     )

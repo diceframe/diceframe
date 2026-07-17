@@ -121,11 +121,12 @@ class GameLifecycle:
         if start_data.get("quick_actions"):
             instance.quick_actions = start_data["quick_actions"]
         scene = (start_data.get("state_update") or {}).get("scene_change", "")
-        instance.scene = scene or "游戏开始"
+        start_label = "Game Start" if is_english(getattr(instance, "language", "")) else "游戏开始"
+        instance.scene = scene or start_label
         instance.total_tokens += response.total_tokens
         instance.log.append({
             "round": 0,
-            "actions": [{"user_id": "system", "text": "游戏开始"}],
+            "actions": [{"user_id": "system", "text": start_label}],
             "gm_response": narration,
             "tags_summary": summarize_tags(start_data),
             "timestamp": datetime.now(timezone.utc).isoformat(),

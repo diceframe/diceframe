@@ -381,6 +381,45 @@ def roll_attributes(
         f"(keys={keys}, total={target}, min_total={min_total}, max_total={max_total})"
     )
 
+def find_item_category(item_categories: dict, name: str) -> str:
+    for category, names in (item_categories or {}).items():
+        if name in names:
+            return category
+    return "misc"
+
+
+def build_starter_items(rule, class_name: str) -> tuple[list[dict], list[dict]]:
+    """从规则职业的 starter_equipment 构造初始装备/背包。
+
+    字符串道具名查 item_categories + WEAPON_DAMAGE 判武器；对象 {name, slot} 指定部位。
+    """
+    if not rule or not getattr(rule, "classes", None):
+        return [], []
+    cls = next((c for c in rule.classes if c.get("name") == class_name), rule.classes[0])
+    starter = cls.get("starter_equipment", [])
+    if not starter:
+        return [], []
+    from src.engine.constants import WEAPON_DAMAGE
+    equip: list[dict] = []
+    inv: list[dict] = []
+    for st_item in starter:
+        if isinstance(st_item, dict):
+            iname = st_item.get("name", "")
+            islot = st_item.get("slot", "")
+            if islot:
+                equip.append({"name": iname, "type": "weapon", "damage": WEAPON_DAMAGE.get(iname, 0), "slot": islot, "quality": "common"})
+            else:
+                inv.append({"name": iname, "qty": 1, "effect": ""})
+        else:
+            iname = str(st_item)
+            cat = find_item_category(rule.item_categories, iname)
+            if cat == "equipment" and iname in WEAPON_DAMAGE and not equip:
+                equip.append({"name": iname, "type": "weapon", "damage": WEAPON_DAMAGE[iname], "slot": "main_hand", "quality": "common"})
+            else:
+                inv.append({"name": iname, "qty": 1, "effect": ""})
+    return equip, inv
+
+
 def make_default_character(
     name: str,
     rule_id: str = "freeform_fantasy",
@@ -400,7 +439,8 @@ def make_default_character(
     hi = 16
     hp = 35
     default_class_name = "冒险者"
-    default_weapon = {"name": "铁剑", "type": "weapon", "damage": 6, "slot": "main_hand", "quality": "common"}
+    default_equipment: list[dict] = [{"name": "铁剑", "type": "weapon", "damage": 6, "slot": "main_hand", "quality": "common"}]
+    default_inventory: list[dict] = [{"name": "医疗包", "qty": 2, "effect": "回复20HP"}]
     default_skills = ["基础攻击"]
     gold = 30
 
@@ -429,12 +469,11 @@ def make_default_character(
                     {"name": sn, "value": skill_base_values.get(sn, 20)}
                     for sn in default_skills_raw
                 ]
-                starter_equip = first_class.get("starter_equipment", [])
-                if starter_equip:
-                    from src.engine.constants import WEAPON_DAMAGE
-                    equip_name = starter_equip[0]
-                    dmg = WEAPON_DAMAGE.get(equip_name, 6)
-                    default_weapon = {"name": equip_name, "type": "weapon", "damage": dmg, "slot": "main_hand", "quality": "common"}
+                se, si = build_starter_items(rule, default_class_name)
+                if se:
+                    default_equipment = se
+                if si:
+                    default_inventory = si
     except Exception:
         logger.exception("读取默认角色规则失败: %s", rule_path)
 
@@ -447,15 +486,14 @@ def make_default_character(
         logger.exception("计算默认角色 HP 失败: %s", rule_path)
 
     if rule_id == "freeform_coc":
-        default_weapon = {"name": "手电筒", "type": "weapon", "damage": 1, "slot": "off_hand", "quality": "common"}
         gold = 0
 
     cs = {
         "race": "人类", "class": default_class_name, "level": 1, "xp": 0,
         "attributes": attrs,
         "hp": hp, "max_hp": hp,
-        "equipment": [default_weapon],
-        "inventory": [{"name": "医疗包", "qty": 2, "effect": "回复20HP"}],
+        "equipment": default_equipment,
+        "inventory": default_inventory,
         "key_items": [],
         "skills": default_skills, "background": "", "deceased": False,
         "gold": gold,

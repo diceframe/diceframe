@@ -8,6 +8,5 @@
   "entrypoint": ["{python}", "-m", "src.bots.qq.main"],
   "config_schema": "config.schema.json",
   "capabilities": ["channel.group", "channel.private", "game.action"],
-  "permissions": ["process.spawn", "network.client", "diceframe.http", "plugin.config", "plugin.secrets", "plugin.data"],
   "docs": "README_CN.md"
 }

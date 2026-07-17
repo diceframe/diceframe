@@ -541,7 +541,7 @@ class PluginHost:
     def _find_install_root(temp_dir: Path) -> Path:
         if (temp_dir / "plugin.json").exists():
             return temp_dir
-        candidates = [path.parent for path in temp_dir.glob("*/plugin.json")]
+        candidates = [path.parent for path in temp_dir.glob("**/plugin.json")]
         if not candidates:
             raise ValueError("插件包缺少 plugin.json")
         if len(candidates) > 1:

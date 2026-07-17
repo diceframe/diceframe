@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.engine.character_utils import (
     apply_currency_delta,
+    build_starter_items,
     calc_hp_from_rule,
     initial_special_stat_value,
     make_default_character,
@@ -443,14 +444,15 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
     default_class = rule.classes[0]["name"] if (rule and rule.classes) else "冒险者"
     if len(str(character.get("background", ""))) > MAX_BIO_CHARS:
         return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
+    starter_equip, starter_inv = build_starter_items(rule, character.get("class") or default_class)
     cs = {
         "race": character.get("race", "人类"),
         "class": character.get("class") or default_class,
         "level": 1, "xp": 0,
         "attributes": attrs,
         "hp": hp, "max_hp": max_hp,
-        "equipment": character.get("equipment", default_weapons),
-        "inventory": character.get("inventory", []),
+        "equipment": character.get("equipment") or starter_equip or default_weapons,
+        "inventory": character.get("inventory") or starter_inv,
         "key_items": character.get("key_items", []),
         "skills": _normalize_skills(character.get("skills", []), rule),
         "background": character.get("background", ""),

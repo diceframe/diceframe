@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api, errorMessage } from '@/api/client'
-import type { CharacterSheet, CharacterSkill, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
+import type { CharacterSheet, CharacterSkill, CharacterItem, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/composables/useLocale'
 import SkillEditor from './SkillEditor.vue'
+import ItemEditor from './ItemEditor.vue'
 import {
   identitySchema, identityLabel, attrDisplayName, currencyLabel,
   isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, localizedField,
@@ -29,7 +30,7 @@ const emit = defineEmits<{ submit: [character: CharacterSubmit]; cancel: [] }>()
 
 const toast = useToast()
 const { locale, t } = useLocale()
-const step = ref<1 | 2 | 3>(1)
+const step = ref<1 | 2 | 3 | 4>(1)
 
 const characterName = ref('')
 const identityValues = ref<Record<string, string>>({})
@@ -56,6 +57,8 @@ const diceHint = computed(() =>
 const skills = ref<CharacterSkill[]>([])
 const background = ref('')
 const gold = ref(0)
+const equipment = ref<CharacterItem[]>([])
+const inventory = ref<CharacterItem[]>([])
 const pool = computed(() => props.skillPool || [])
 const skillHint = computed(() => localizedField<string>(props.ruleMeta, 'skill_hint') || '')
 const maxSkills = computed(() => Number(props.ruleMeta?.max_skills || 0))
@@ -94,6 +97,8 @@ function resetFields() {
   skills.value = []
   background.value = ''
   gold.value = 0
+  equipment.value = []
+  inventory.value = []
   step.value = 1
   attrs.value = suggestedAttributes(props.ruleAttrs, props.attrTotal)
 }
@@ -138,6 +143,8 @@ function applyCharacter(c: CharacterSheet) {
     for (const [k, v] of Object.entries(c.attributes)) attrs.value[k] = Number(v) || 0
   }
   if (Array.isArray(c.skills) && c.skills.length) skills.value = c.skills.map(skillToDraft)
+  if (Array.isArray(c.equipment)) equipment.value = c.equipment.map(it => ({ ...it }))
+  if (Array.isArray(c.inventory)) inventory.value = c.inventory.map(it => ({ ...it }))
   if (c.background) background.value = c.background
   if (c.currency?.amount !== undefined) gold.value = Number(c.currency.amount) || 0
   else if (c.gold !== undefined) gold.value = Number(c.gold) || 0
@@ -147,8 +154,8 @@ function canNext() {
   if (step.value === 1) return characterName.value.trim().length > 0
   return true
 }
-function next() { if (canNext() && step.value < 3) step.value = (step.value + 1) as 1 | 2 | 3 }
-function prev() { if (step.value > 1) step.value = (step.value - 1) as 1 | 2 | 3 }
+function next() { if (canNext() && step.value < 4) step.value = (step.value + 1) as 1 | 2 | 3 | 4 }
+function prev() { if (step.value > 1) step.value = (step.value - 1) as 1 | 2 | 3 | 4 }
 
 function finish() {
   const fields = identitySchema(props.ruleMeta)
@@ -162,6 +169,8 @@ function finish() {
     identity,
     attributes: { ...attrs.value },
     skills: skills.value.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
+    equipment: equipment.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0, slot: it.slot || 'main_hand', quality: it.quality || 'common' })),
+    inventory: inventory.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), qty: Number(it.qty) || 1, effect: it.effect || '' })),
     background: background.value,
     gold: gold.value,
     currency: { amount: gold.value },
@@ -175,8 +184,8 @@ function finish() {
   <div class="wizard">
     <section class="wizard-inner">
       <div class="wizard-steps">
-      <span v-for="n in 3" :key="n" :class="['wizard-step', { active: step === n, done: step > n }]">
-        {{ n === 1 ? t('identityStep') : n === 2 ? t('attributes') : t('skillsBackgroundStep') }}
+      <span v-for="n in 4" :key="n" :class="['wizard-step', { active: step === n, done: step > n }]">
+        {{ n === 1 ? t('identityStep') : n === 2 ? t('attributes') : n === 3 ? t('skillsBackgroundStep') : t('equipment') }}
       </span>
     </div>
 
@@ -212,7 +221,7 @@ function finish() {
       <p v-if="autoHp && autoHpValue" class="form-hint">{{ t('ruleSuggestedHp') }}: <strong>{{ autoHpValue }}</strong></p>
     </div>
 
-    <div v-else class="wizard-pane">
+    <div v-else-if="step === 3" class="wizard-pane">
       <label>{{ t('skills') }}</label>
       <p v-if="skillHint" class="form-hint">{{ skillHint }}</p>
       <p class="form-hint" :class="{ warn: skillOverLimit }">
@@ -225,10 +234,15 @@ function finish() {
       <label>{{ currencyLabel(ruleMeta) }}<input type="number" v-model.number="gold" min="0"></label>
     </div>
 
+    <div v-else-if="step === 4" class="wizard-pane">
+      <p class="form-hint">{{ t('itemsStepHint') }}</p>
+      <ItemEditor v-model:equipment="equipment" v-model:inventory="inventory" />
+    </div>
+
     <div class="wizard-actions">
       <button @click="emit('cancel')">{{ t('cancel') }}</button>
       <button v-if="step > 1" @click="prev">{{ t('previous') }}</button>
-      <button v-if="step < 3" class="primary" :disabled="!canNext()" @click="next">{{ t('next') }}</button>
+      <button v-if="step < 4" class="primary" :disabled="!canNext()" @click="next">{{ t('next') }}</button>
       <button v-else class="primary" @click="finish">{{ t('finish') }}</button>
     </div>
   </section>

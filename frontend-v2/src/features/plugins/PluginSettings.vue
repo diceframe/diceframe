@@ -396,6 +396,19 @@ async function testMirror(mirror?: PluginMirror) {
 function openUrl(url?: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
+function isNewerVersion(latest?: string, current?: string): boolean {
+  const a = String(latest || '').trim()
+  const b = String(current || '').trim()
+  if (!a || !b) return false
+  const pa = a.replace(/^v/i, '').split('.').map(Number)
+  const pb = b.replace(/^v/i, '').split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0
+    if (x > y) return true
+    if (x < y) return false
+  }
+  return false
+}
 function pluginTypeLabel(type?: string): string {
   const labels: Record<string, MessageKey> = {
     'channel-adapter': 'pluginTypeChannelAdapter',
@@ -607,6 +620,7 @@ onMounted(async () => {
             <div class="tag-row">
               <NTag v-if="item.plugin_type" size="small">{{ pluginTypeLabel(item.plugin_type) }}</NTag>
               <NTag v-if="item.installed" type="success" size="small">{{ t('installedVersion', { version: item.installed_version || '' }) }}</NTag>
+              <NTag v-if="item.installed && isNewerVersion(item.version, item.installed_version)" type="warning" size="small">{{ t('newVersionAvailable', { version: item.version || '' }) }}</NTag>
               <NTag v-for="tag in item.tags || []" :key="tag" size="small">{{ tag }}</NTag>
             </div>
             <p v-if="item.permissions?.length" class="muted market-permissions">

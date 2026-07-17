@@ -43,6 +43,17 @@ function toggleRail() { railCollapsed.value = !railCollapsed.value; localStorage
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('operationFailed')) }
 function joinNames(names: string[]) { return names.filter(Boolean).join(t('listSeparator')) }
 
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text)
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } finally { document.body.removeChild(ta) }
+}
+
 const actorId = computed(() => game.userId.value || game.player.value?.user_id || game.detail.value?.gm_uid || '')
 const serverJudging = computed(() => game.detail.value?.state === 'active_judgment')
 const showGmThinking = computed(() => gmThinking.value || serverJudging.value)
@@ -133,14 +144,15 @@ async function ensureSettingsLoaded() {
 
 async function invite() {
   await ensureSettingsLoaded()
-  navigator.clipboard.writeText(buildJoinLink(game.currentGame.value, settings.config.public_base_url))
+  await copyToClipboard(buildJoinLink(game.currentGame.value, settings.config.public_base_url))
   toast.success(t('inviteCopied'))
 }
 
 async function copyBotBind() {
   try {
-    const r = await api<BotBindTokenResponse>(`/games/${encodeURIComponent(game.currentGame.value)}/bot-bind-token`, { method: 'POST', body: JSON.stringify({ rotate: true }) })
-    await navigator.clipboard.writeText(`${BOT_BIND_COMMAND} ${game.currentGame.value} ${r.bind_token}`)
+    const r = await api<BotBindTokenResponse & { ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.currentGame.value)}/bot-bind-token`, { method: 'POST', body: JSON.stringify({ rotate: true }) })
+    if (r?.ok === false || !r?.bind_token) throw new Error(r?.error || t('botBindFailed'))
+    await copyToClipboard(`${BOT_BIND_COMMAND} ${game.currentGame.value} ${r.bind_token}`)
     toast.success(t('botBindCopied'))
   } catch (e: unknown) { toast.error(errorMessage(e)) }
 }
@@ -221,7 +233,7 @@ async function setAway(uid: string, away: boolean) {
 
 async function copyLink(uid: string) {
   await ensureSettingsLoaded()
-  navigator.clipboard.writeText(buildJoinLink(game.currentGame.value, settings.config.public_base_url, uid))
+  await copyToClipboard(buildJoinLink(game.currentGame.value, settings.config.public_base_url, uid))
   toast.success(t('controlLinkCopied'))
 }
 

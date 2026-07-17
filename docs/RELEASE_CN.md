@@ -57,8 +57,7 @@ dist/DiceFrame-v版本-windows-portable.zip
 - 日志
 - 测试目录
 - `node_modules`
-- 本地 Codex/Claude 配置
-- 本地生成的 `ai_*`、`*_copy_*` 世界模板
+- 本地 IDE 与辅助工具配置目录
 
 如果只是本地试包，当前工作区有未提交改动时可以运行：
 
