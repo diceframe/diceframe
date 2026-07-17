@@ -10,7 +10,22 @@ import re
 
 from src.engine.dice import check_coc, check_d20_advantage, check_d100
 from src.engine.game_instance import GameInstance
+from src.engine.language import is_english
 from src.rules.rule_system import RuleSystem
+
+
+def _verdict_text(verdict: str, english: bool) -> str:
+    if not english:
+        return verdict
+    mapping = {
+        "大成功": "Critical Success",
+        "极难成功": "Extreme Success",
+        "困难成功": "Hard Success",
+        "成功": "Success",
+        "失败": "Failure",
+        "大失败": "Critical Failure",
+    }
+    return mapping.get(verdict, verdict)
 
 
 class DiceResolver:
@@ -71,6 +86,15 @@ class DiceResolver:
             "is_critical": "大成功" in verdict,
             "is_fumble": "大失败" in verdict,
         }
+        english = is_english(instance.language)
+        if english:
+            return (
+                f"\n[System Check - Must Follow]\n"
+                f"Check: d100={result.natural} vs {label}\n"
+                f"Result: {_verdict_text(verdict, True)}\n"
+                f"Requirement: GM narration must strictly reflect this roll. Critical success (<=5) gives an extra narrative benefit; "
+                f"critical failure (>=96) creates a serious consequence; success/failure is judged by GM against DC.\n"
+            )
         return (
             f"\n【系统检定·必须遵循】\n"
             f"检定: d100={result.natural} vs {label}\n"
@@ -156,6 +180,17 @@ class DiceResolver:
             "is_critical": "大成功" in verdict,
             "is_fumble": "大失败" in verdict,
         }
+        english = is_english(instance.language)
+        if english:
+            return (
+                f"\n[System Check - Must Follow]\n"
+                f"Mechanic: {rule.mechanics} / {rule.ruleset_level}\n"
+                f"Check: {roll_label} + attribute {attr_label} modifier {attr_mod:+d}"
+                f"{(' + ' + bonus_label) if bonus_label else ''} = {result.total} vs DC {dc}\n"
+                f"Result: {_verdict_text(verdict, True)}\n"
+                f"Requirement: GM narration must strictly reflect this check. Critical success means an extra benefit; "
+                f"critical failure means a serious consequence; ordinary success/failure follows the total vs DC.\n"
+            )
         return (
             f"\n【系统检定·必须遵循】\n"
             f"机制: {rule.mechanics} / {rule.ruleset_level}\n"
@@ -206,6 +241,23 @@ class DiceResolver:
             if 0 < gap <= luck:
                 luck_hint = f"\n幸运提示: 可消耗 {gap} 点幸运把本次失败补成普通成功。"
 
+        english = is_english(instance.language)
+        if english:
+            luck_hint_en = ""
+            if verdict == "失败" and result.natural > threshold:
+                gap = result.natural - threshold
+                if 0 < gap <= luck:
+                    luck_hint_en = f"\nLuck hint: spending {gap} Luck can turn this failure into a regular success."
+            return (
+                f"\n[System Check - Must Follow]\n"
+                f"Mechanic: coc7e_core / {getattr(instance, 'difficulty', '标准')}\n"
+                f"Check: d100={result.natural} vs {label}\n"
+                f"Success thresholds: regular <= {threshold}, hard <= {hard}, extreme <= {extreme}, "
+                f"critical success = 1, fumble = 96-100 when skill is below 50.\n"
+                f"Result: {_verdict_text(verdict, True)}{luck_hint_en}\n"
+                f"Requirement: GM narration must strictly reflect the CoC success level. Failure must not be narrated as success; "
+                f"a fumble must create a clear worsening.\n"
+            )
         return (
             f"\n【系统检定·必须遵循】\n"
             f"机制: coc7e_core / {getattr(instance, 'difficulty', '标准')}\n"

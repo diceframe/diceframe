@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import type { CharacterCard } from '@/api/types'
+import { useLocale } from '@/composables/useLocale'
 
 defineProps<{ cards: CharacterCard[] }>()
 const emit = defineEmits<{ pick: [card: CharacterCard]; close: [] }>()
+const { t } = useLocale()
 </script>
 
 <template>
   <div class="modal" @click.self="emit('close')">
     <section class="dialog">
       <header>
-        <h2>选择角色卡</h2>
+        <h2>{{ t('chooseCharacterCard') }}</h2>
         <button @click="emit('close')">×</button>
       </header>
-      <p>从共享卡库选择，将作为新角色加入列表。</p>
+      <p>{{ t('chooseCharacterCardHelp') }}</p>
       <button
         v-for="c in cards"
         :key="c.card_id || c.character_name"
@@ -22,7 +24,7 @@ const emit = defineEmits<{ pick: [card: CharacterCard]; close: [] }>()
         <strong>{{ c.character_name }}</strong>
         <span>{{ c.race }} · {{ c.class }}</span>
       </button>
-      <p v-if="!cards.length" class="muted">卡库为空。</p>
+      <p v-if="!cards.length" class="muted">{{ t('characterLibraryEmpty') }}</p>
     </section>
   </div>
 </template>

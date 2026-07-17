@@ -8,7 +8,7 @@
 
 DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通过插件安装和分发这些能力：
 
-- 聊天桥接：QQ/NapCat、MaiBot、Discord、Telegram 等。
+- 聊天桥接：QQ/NapCat、Discord、Telegram 等。
 - 内容包：规则、世界模板、角色模板、NPC、道具、法术、职业。
 - 主题：CSS 变量、色板、背景、图标和界面风格包。
 - 地图包：地点模板、图标、场景素材、战斗网格素材。
@@ -284,11 +284,18 @@ content/
 约定：
 
 - `content/rules/*.json` 必须是 DiceFrame 规则模板，建议显式填写 `rule_id` 和 `rule_name`。
-- `content/worlds/*.json` 必须是 DiceFrame 世界模板，建议显式填写 `world_id`、`world_name` 和 `default_rule`。
+- `content/worlds/*.json` 必须是 DiceFrame 世界模板，建议显式填写 `world_id`、`world_name`、`default_rule` 和 `language`。
 - 内置规则/世界模板优先于插件资源；插件不要使用与内置资源相同的 ID。
 - 角色模板可从插件设置页导入角色卡库；NPC、道具、法术、职业可导入指定世界书。
 - 内容包不会自动写入用户角色卡库、世界书或运行中游戏，必须由用户主动导入。
 - 内容包不得写运行时数据。
+
+内容语言约定：
+
+- 世界模板、世界书和内容目录用 `language` 标识内容语言，常用值为 `zh-CN` 和 `en`。创建游戏时同语言内容会优先显示，其他语言内容仍可选择。
+- 世界模板正文按内容语言书写：`world_name`、`description`、`world_setting`、`starter_scene`、`starter_lorebook[].content` 不会被宿主自动翻译。
+- 规则模板按语言拆分文件：`<rule_id>.json`（中文版，纯中文）+ `<rule_id>_en.json`（英文版，纯英文全文）。`rule_id` 保持不变（是引用键，`world.default_rule` 指向它，不随语言变，区别于世界模板的 `world_id`）。`RuleSystem.path_for(rules_dir, rule_id, language)` 按游戏语言选文件（`_en.json` 不存在则回退中文版）。规则列表与详情会配对合并各语言文件，前端按界面语言显示对应字段。自定义规则可不拆，保持单文件并在字段后加 `_en` 后缀（如 `attr_hint_en`）做英文显示。新增语言：在 `engine/language.py` 的 `_LANG_FIELD_SUFFIXES` 登记后缀，加 `<rule_id>_<suffix>.json`，加载/展示自动生效。
+- 规则字段、枚举、协议标签和内部难度键保持稳定，例如 `rule_id`、`dice_system`、`combat_model`、`mechanics`、`difficulty_instructions` 的键、GM 标签 `HP/GOLD/QUICK_ACTIONS` 等不随内容语言改名。
 
 ### 7.3 主题插件
 

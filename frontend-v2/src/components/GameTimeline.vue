@@ -7,13 +7,15 @@ import type { DiceTag } from '@/utils/play'
 import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
+import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; processing?: boolean; isGm?: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
+const { t } = useLocale()
 
 const box = ref<HTMLElement | null>(null), hasNew = ref(false), awayFromBottom = ref(false)
 const swipeError = ref("")
-function name(uid: string, fallback?: string) { return fallback || props.players.find(p => p.user_id === uid)?.character_name || uid || '冒险者' }
+function name(uid: string, fallback?: string) { return fallback || props.players.find(p => p.user_id === uid)?.character_name || uid || t('characters') }
 
 interface Act { uid: string; text: string; dice: DiceTag | null }
 function record(value: unknown): Record<string, unknown> {
@@ -39,7 +41,7 @@ const rounds = computed(() => props.log.map((entry, index) => {
   return { entry, round: Number(entry.round || index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
 }))
 
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || '分支操作失败') }
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('branchOperationFailed')) }
 async function swipeTo(round: number, idx: number) {
   if (!props.gameKey) return
   try {
@@ -98,14 +100,14 @@ watch(() => [props.log.length, JSON.stringify(props.live), props.processing], as
   <div class="timeline-wrap">
     <div ref="box" class="timeline" data-testid="timeline" @scroll.passive="onScroll">
       <template v-for="item in rounds" :key="item.round">
-        <div class="round-divider" v-if="item.round">第 {{ item.round }} 轮</div>
+        <div class="round-divider" v-if="item.round">{{ t('roundDivider', { round: item.round }) }}</div>
         <div v-for="a in actions(item.entry)" :key="a.uid + a.text" class="message player" :style="{ borderLeftColor: playerColor(a.uid) }">
           <strong :style="{ color: playerColor(a.uid) }">{{ name(a.uid) }}</strong>
           <p>{{ a.text }}</p>
           <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
         </div>
         <div v-if="item.gm" class="message gm">
-          <strong>GM · 第 {{ item.round }} 轮</strong>
+          <strong>{{ t('gmRound', { round: item.round }) }}</strong>
           <p v-for="(p, i) in item.gm.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
           <div v-if="item.gm.states.length" class="state-card-list">
             <div v-for="(s, i) in item.gm.states" :key="'s' + i" class="state-card" :class="s.cls">
@@ -127,28 +129,28 @@ watch(() => [props.log.length, JSON.stringify(props.live), props.processing], as
             <span>{{ item.swipeCur + 1 }}/{{ item.swipeCount }}</span>
             <button @click="swipeTo(item.round, item.swipeCur + 1)" :disabled="item.swipeCur >= item.swipeCount - 1">→</button>
             </div>
-            <button v-if="item.swipeCount < 5" class="ghost" @click="reroll(item.round)">重新生成</button>
+            <button v-if="item.swipeCount < 5" class="ghost" @click="reroll(item.round)">{{ t('regenerate') }}</button>
           </div>
           <p v-if="swipeError && isGm" class="muted">{{ swipeError }}</p>
         </div>
       </template>
       <div v-for="a in live" :key="a.user_id" class="message player live" :style="{ borderLeftColor: playerColor(a.user_id) }">
-        <strong :style="{ color: playerColor(a.user_id) }">{{ name(a.user_id, a.character_name) }} · 已公开 · {{ a.revision_count || 1 }}/3</strong>
+        <strong :style="{ color: playerColor(a.user_id) }">{{ name(a.user_id, a.character_name) }} · {{ t('published') }} · {{ a.revision_count || 1 }}/3</strong>
         <p>{{ liveAct(a).text }}</p>
         <span v-if="liveAct(a).dice" class="dice-tag">🎲 {{ liveAct(a).dice?.system }}={{ liveAct(a).dice?.value }}</span>
       </div>
       <div v-if="processing" class="message gm thinking-message" aria-live="polite">
-        <strong>正在读取本轮行动，生成下一段剧情。<span class="thinking-dots"><i></i><i></i><i></i></span></strong>
+        <strong>{{ t('thinkingMessage') }}<span class="thinking-dots"><i></i><i></i><i></i></span></strong>
       </div>
-      <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>冒险尚未开幕</strong><span>写下第一项行动，GM 会从这里开始推进。</span></div>
+      <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
     </div>
     <button
       v-if="awayFromBottom || hasNew"
       class="new-message"
       :class="{ unread: hasNew }"
       type="button"
-      aria-label="回到底部查看最新消息"
+      :aria-label="t('scrollLatest')"
       @click="latest"
-    >{{ hasNew ? '有新消息' : '回到底部' }} ↓</button>
+    >{{ hasNew ? t('newMessages') : t('backToBottom') }} ↓</button>
   </div>
 </template>

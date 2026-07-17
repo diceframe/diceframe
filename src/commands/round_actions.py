@@ -8,6 +8,7 @@ from typing import Any
 from src.engine.constants import ACTION_KEYWORDS
 from src.engine.dice import roll as dice_roll
 from src.engine.game_instance import GameInstance
+from src.engine.language import is_english
 
 logger = logging.getLogger("trpg")
 
@@ -31,10 +32,12 @@ def format_action_line(instance: GameInstance, action: dict) -> str:
     selected_attr = action.get('selected_attribute', '')
     selected_skill = action.get('selected_skill', '')
     if selected_attr or selected_skill:
-        parts.append(f"检定:{selected_attr or '?'}" + (f"/{selected_skill}" if selected_skill else ""))
+        label = "Check" if is_english(instance.language) else "检定"
+        parts.append(f"{label}:{selected_attr or '?'}" + (f"/{selected_skill}" if selected_skill else ""))
     target = action.get('target_text', '')
     if target:
-        parts.append(f"目标:{target}")
+        label = "Target" if is_english(instance.language) else "目标"
+        parts.append(f"{label}:{target}")
     tag = f" [{' '.join(parts)}]" if parts else ""
     return f"【{name}】{text}{tag}"
 
@@ -86,7 +89,9 @@ def build_dice_constraint_block(
     """按行动文本和规则生成系统骰子约束块；不需要检定时返回空字符串。"""
     if dice_system == "none":
         return ""
-    already_rolled = "【系统检定·必须遵循】" in actions_text
+    english = is_english(instance.language)
+    check_heading = "[System Check - Must Follow]" if english else "【系统检定·必须遵循】"
+    already_rolled = check_heading in actions_text or "【系统检定·必须遵循】" in actions_text
     need_check = not already_rolled and any(keyword in actions_text for keyword in ACTION_KEYWORDS)
     if not need_check:
         return ""
@@ -98,13 +103,20 @@ def build_dice_constraint_block(
 
     d20_result = dice_roll("d20")
     if d20_result.natural == 20:
-        verdict = "大成功 (d20=20)"
+        verdict = "Critical Success (d20=20)" if english else "大成功 (d20=20)"
     elif d20_result.natural == 1:
-        verdict = "大失败 (d20=1)"
+        verdict = "Critical Failure (d20=1)" if english else "大失败 (d20=1)"
     else:
-        verdict = f"掷出 d20={d20_result.natural}"
+        verdict = f"Rolled d20={d20_result.natural}" if english else f"掷出 d20={d20_result.natural}"
+    if english:
+        return (
+            f"\n{check_heading}\n"
+            f"Check result: {verdict}\n"
+            f"Requirement: GM narration must strictly reflect this roll. Critical success means an extra narrative benefit; "
+            f"critical failure means a serious consequence; ordinary rolls are judged by GM against DC.\n"
+        )
     return (
-        f"\n【系统检定·必须遵循】\n"
+        f"\n{check_heading}\n"
         f"检定结果: {verdict}\n"
         f"要求: GM叙事必须严格体现此掷骰结果。大成功=额外的叙事奖励，大失败=严重后果，"
         f"普通值由GM根据DC判定成败\n"

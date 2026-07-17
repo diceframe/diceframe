@@ -7,6 +7,7 @@ import logging
 import os
 
 from src.engine.game_instance import GameInstance
+from src.engine.language import is_english
 
 logger = logging.getLogger("trpg")
 
@@ -77,7 +78,7 @@ def _is_key_round(entry: dict) -> bool:
         return True
     return False
 
-def _format_history(log: list[dict], max_chars: int) -> str:
+def _format_history(log: list[dict], max_chars: int, english: bool = False) -> str:
     MIN_KEEP = 5
     if not log:
         return ""
@@ -96,12 +97,14 @@ def _format_history(log: list[dict], max_chars: int) -> str:
     def _entry_full(entry: dict) -> str:
         actions_text = "; ".join(a.get("text", "") for a in entry.get("actions", []))
         gm_text = entry.get("gm_response", "")
-        return f"[Round {entry.get('round','?')}]\n玩家: {actions_text}\nGM: {gm_text}"
+        player_label = "Players" if english else "玩家"
+        return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}"
 
     def _entry_slim(entry: dict) -> str:
         actions_text = "; ".join(a.get("text", "") for a in entry.get("actions", []))
         gm_text = entry.get("gm_response", "")
-        return f"[Round {entry.get('round','?')}] 玩家: {actions_text} | GM: {gm_text[:80]}"
+        player_label = "Players" if english else "玩家"
+        return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}"
 
     for entry in keep_full:
         line = _entry_full(entry)
@@ -152,6 +155,7 @@ async def build_context(
         完整的上下文字符串
     """
     max_total = _detect_max_chars(provider_name)
+    english = is_english(getattr(instance, "language", "zh-CN"))
 
     # 按比例分配预算
     budget_system = int(max_total * _BUDGET_SYSTEM_PROMPT)
@@ -175,7 +179,7 @@ async def build_context(
             pdata.get("character_sheet", {}).pop("inventory", None)
         state_json = json.dumps(state, ensure_ascii=False)
     state_json = _truncate(state_json, budget_state)
-    parts.append(f"【游戏状态】\n{state_json}")
+    parts.append(("## Game State" if english else "【游戏状态】") + f"\n{state_json}")
 
     # 2. Lorebook 条目（核心 NPC/场景优先）
     lorebook_text = ""
@@ -184,7 +188,7 @@ async def build_context(
         visible = entry.get("visible_to", [])
         vis_hint = ""
         if visible:
-            vis_hint = f" [仅{','.join(visible)}可见]"
+            vis_hint = f" [visible only to {','.join(visible)}]" if english else f" [仅{','.join(visible)}可见]"
         entry_text = f"[{entry.get('type', 'other')}]{vis_hint} {entry.get('name', '')}: {entry.get('content', '')}"
         if len(lorebook_text) + len(entry_text) > budget_lorebook:
             trimmed.append(entry.get("name", entry.get("id", "?")))
@@ -194,7 +198,7 @@ async def build_context(
         logger.info("Lorebook 预算裁剪: 丢弃 %d 条 (%s), budget=%d",
                      len(trimmed), ", ".join(trimmed[:5]), budget_lorebook)
     if lorebook_text:
-        parts.append(f"【世界观知识】\n{lorebook_text.strip()}")
+        parts.append(("## World Knowledge" if english else "【世界观知识】") + f"\n{lorebook_text.strip()}")
 
     # 3. 摘要 + 关键事实
     summary = instance.summary.get("narrative", "")
@@ -211,12 +215,13 @@ async def build_context(
             facts_text = _truncate("\n".join(facts_lines), budget_summary)
             summary_section_parts.append(facts_text)
     if summary_section_parts:
-        parts.append("【近期经历】\n" + "\n".join(summary_section_parts))
+        parts.append(("## Recent Events" if english else "【近期经历】") + "\n" + "\n".join(summary_section_parts))
 
     # D1: 已确认事项（防 GM 重复讨论）
     if instance.confirmed_items:
-        confirmed_text = "、".join(instance.confirmed_items[-20:])
-        parts.append(f"【已确认事项】（玩家再问相同内容时直接推进，不要重复解释）\n{confirmed_text}")
+        confirmed_text = ("; ".join(instance.confirmed_items[-20:]) if english else "、".join(instance.confirmed_items[-20:]))
+        heading = "## Confirmed Items\nIf players ask about the same thing again, move forward instead of re-explaining." if english else "【已确认事项】（玩家再问相同内容时直接推进，不要重复解释）"
+        parts.append(f"{heading}\n{confirmed_text}")
 
     # 4. 长期记忆召回（召回源：玩家消息 + 最近 3 轮 GM 回复，提高命中率）
     if memory_store:
@@ -242,12 +247,12 @@ async def build_context(
     remaining = max(0, max_total - used_chars - len(player_message) - 200)
     history_budget = min(budget_history_base + max(0, remaining - budget_history_base), max_total // 2)
     history_budget = max(history_budget, budget_history_base)
-    history = _format_history(instance.log, history_budget)
+    history = _format_history(instance.log, history_budget, english)
     if history:
-        parts.append(f"【对话历史】\n{history}")
+        parts.append(("## Conversation History" if english else "【对话历史】") + f"\n{history}")
 
     # 6. 玩家刚说的话
-    parts.append(f"【玩家发言】\n{player_message}")
+    parts.append(("## Player Message" if english else "【玩家发言】") + f"\n{player_message}")
 
     context = "\n\n---\n\n".join(parts)
 

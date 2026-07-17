@@ -2,7 +2,7 @@
 withDefaults(defineProps<{ size?: number; withText?: boolean; subtitle?: string }>(), {
   size: 34,
   withText: true,
-  subtitle: '结构化 AI 跑团',
+  subtitle: '',
 })
 </script>
 

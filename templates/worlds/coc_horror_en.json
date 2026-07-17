@@ -1,0 +1,84 @@
+{
+  "world_id": "coc_horror_en",
+  "world_name": "Cthulhu Horror: Shadows Over Arkham",
+  "description": "Investigative horror set on the 1920s American East Coast.",
+  "language": "en",
+  "world_setting": "It is 1928 in Massachusetts, USA. Arkham is an old college town, home to Miskatonic University. Behind its quiet facade, the town conceals dark secrets known to few. Old tales persist of witches, deep-sea monsters, and entities beyond naming. The restricted shelves of the university library hold volumes no prudent reader should open. In recent months, several inexplicable events have unsettled the town: fishermen gone missing, a strange green glow upon the sea, and what townsfolk now call 'whispers from the deep.'",
+  "starter_scene": "Each of you has received a letter from a distant cousin. The sender is Howard, a professor of archaeology at Miskatonic University. The letters are nearly identical: 'Come to Arkham. Tell no one the details. Bring weapons.' -- the last line trails off, as if written in haste. Today is September 15, 1928, and you meet at the railway station in Arkham.",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_coc",
+  "starter_lorebook": [
+    {
+      "id": "npc_professor_howard",
+      "name": "Professor Howard",
+      "type": "npc",
+      "keywords": ["Howard", "professor", "cousin", "sender", "archaeology professor"],
+      "content": "A professor of archaeology at Miskatonic University, 45 years old. Your distant cousin. Six months ago he led an expedition to the island of Pohnpei in the South Pacific; since returning he has grown withdrawn and taciturn. For the past month he has been entirely out of reach: his office is locked, and colleagues say he is on sick leave. His neighbors, however, report that a light sometimes glows behind his curtains at night, always drawn tight.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_arkham",
+      "name": "Arkham",
+      "type": "location",
+      "keywords": ["Arkham", "town", "college town", "Massachusetts"],
+      "content": "An old college town on the eastern coast of Massachusetts. Miskatonic University is its heart, and its library holds the largest collection of occult works in the United States. The town's architecture is largely colonial, with narrow winding streets. Locals treat outsiders with wary courtesy. The seaward side has a fishing port, but lately the fishermen have been reluctant to put out to sea.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_miskatonic_university",
+      "name": "Miskatonic University",
+      "type": "location",
+      "keywords": ["Miskatonic University", "university", "library", "restricted books"],
+      "content": "Founded in 1690, an ancient university. The library's restricted shelves hold forbidden volumes including fragments of a Latin translation of the Necronomicon and the Unaussprechlichen Kulten. Access requires a pass signed by a professor. Professor Howard's office is on the third floor of the Archaeology building, room 307.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_howard_residence",
+      "name": "Howard's Residence",
+      "type": "location",
+      "keywords": ["Howard's home", "residence", "house", "windows"],
+      "content": "A two-story wooden house on the east side of Arkham, 13 Elm Street. The yard is overgrown, and the mailbox is crammed with uncollected letters. Neighbors say a light comes on in the upstairs study at night, but by day the curtains stay drawn and knocking brings no answer. A locked tool shed stands at the back.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_sheriff_mcrae",
+      "name": "Sheriff McRae",
+      "type": "npc",
+      "keywords": ["sheriff", "McRae", "police", "constable"],
+      "content": "Sheriff of Arkham, in his forties, a big man. He is uneasy about the strange events in town but will not admit it openly. He appears to cooperate with investigations, but plainly keeps something back. Pressed with too many questions, he grows irritable.",
+      "tier": "background",
+      "unreliable": true
+    },
+    {
+      "id": "event_missing_fishermen",
+      "name": "Missing Fishermen",
+      "type": "event",
+      "keywords": ["missing", "fishermen", "deep sea"],
+      "content": "Over the past three months, three fishing boats have failed to return to Arkham port, leaving seven fishermen missing. The one fisherman who came back is out of his wits, mumbling day and night about a 'green light' and a 'city under the sea.' The local paper is evasive on the matter, but townsfolk whisper among themselves.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_arkham_fishing_port",
+      "name": "Arkham Fishing Port",
+      "type": "location",
+      "keywords": ["fishing port", "harbor", "dock", "seaside"],
+      "content": "The fishing port on the east side of Arkham. The air hangs thick with the smell of fish and saltwater. Several fishing boats are tied at the dock, and one of them bears strange scratch marks along its hull, nothing like ordinary wear. The harbor lighthouse lights itself at night, but its keeper now reports seeing a 'green phosphorescence' out on the water.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "item_forbidden_manuscript",
+      "name": "Forbidden Manuscript",
+      "type": "item",
+      "keywords": ["manuscript", "notebook", "Howard's notes", "runes"],
+      "content": "Archaeological notes Professor Howard brought back from the South Pacific. The cover is black leather, cold to the touch in a way that seems unnatural. The pages are filled with runes and symbols no one can read. Turning them, one sometimes has the sense that the pages move on their own. Consulting them against the library's holdings will trace the signs to some ancient language.",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}

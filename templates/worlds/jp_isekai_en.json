@@ -1,0 +1,75 @@
+{
+  "world_id": "jp_isekai_en",
+  "world_name": "Japanese Isekai: Sword and Sorcery Adventurers' Guild",
+  "description": "A classic Japanese-style isekai of sword and sorcery, built around the adventurers' guild system.",
+  "language": "en",
+  "world_setting": "The isekai world of Eldran, a continent of human kingdoms, elf-haunted woods, dwarf holds, and monster-haunted wilds. Adventurers' guilds operate outposts in every town, where completing quests earns bounty and reputation. Adventurer ranks run through seven tiers, from the lowest Copper to the highest Mithril. A hundred years ago the Hero defeated the Demon Lord's army, and its remnants scattered across the land. The continent now lives in peace, but lingering monsters and labyrinths remain a steady source of coin for adventurers. Magic is divided into three schools: Elemental, Healing, and Summoning, taught at academies across the land.",
+  "starter_scene": "You stand in the registration hall of the Adventurers' Guild. Behind the wooden counter, a silver-haired receptionist hands you a registration form with a practiced smile. The walls are plastered with quests, from 'Clear Slimes from the Sewers' to 'Slay the Wyvern of the Northern Dragon Valley'. The hall is crowded with adventurers of every sort: a warrior resting a greatsword on his shoulder, a mage cradling a staff, an elven ranger cleaning her bowstring. Some debate the latest labyrinth expedition; others boast of newly won legendary weapons.",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_fantasy",
+  "starter_lorebook": [
+    {
+      "id": "npc_receptionist_lily",
+      "name": "Guild Receptionist Lily",
+      "type": "npc",
+      "keywords": ["Lily", "receptionist", "guild receptionist"],
+      "content": "The newcomers' receptionist at Adventurers' Guild headquarters, a silver-haired, blue-eyed girl who never loses her professional smile. Though she looks fragile, rumor says she was once an A-rank adventurer. She registers new adventurers and assigns quests. She takes her work seriously and occasionally lets slip insider details about certain quests.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_guild_hq",
+      "name": "Adventurers' Guild Headquarters",
+      "type": "location",
+      "keywords": ["guild", "Adventurers' Guild", "hall", "headquarters"],
+      "content": "A four-story stone building at the heart of the royal capital. The first floor houses the quest hall and registration counter; the second floor, a dining hall and lounge; the third floor, an exclusive area for high-ranking adventurers; the fourth floor, the guild's administrative offices. Portraits of past S-rank adventurers line the hall. The quest board refreshes itself by magic once an hour.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_royal_capital",
+      "name": "Royal Capital: Holy Sword City",
+      "type": "location",
+      "keywords": ["royal capital", "Holy Sword City", "capital", "castle"],
+      "content": "Capital of the human kingdom of Eldran, with a population of roughly half a million. The city is laid out radially around the royal palace. Main districts: the commercial quarter (equipment shops, potion vendors, magical item stores), the residential quarter, the temple quarter (with the Healing Temple and the adventurers' rest hall), and the noble quarter. The city walls are patrolled year-round by the Royal Knight Order.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_slime_sewer",
+      "name": "Royal Capital Sewers",
+      "type": "location",
+      "keywords": ["sewers", "underground", "slimes", "labyrinth"],
+      "content": "A vast network of waterways beneath the royal capital. In recent years, an abnormal rise in mana concentration has drawn monsters into the sewers: chiefly blue slimes and giant rats. It is a good training ground for novice adventurers. Rumor holds that the sewers' deepest reaches connect to the ruins of an ancient labyrinth.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_demon_lord_remnants",
+      "name": "Demon Lord's Army Remnants",
+      "type": "faction",
+      "keywords": ["Demon Lord", "Demon Lord's Army", "remnants", "monsters"],
+      "content": "Remnants of the Demon Lord's army, defeated by the Hero a century ago. They are now scattered across the wilds and labyrinths, each faction acting on its own. The strongest of them, the Four Heavenly Kings' remnants, still operate in their respective territories but can no longer mount large-scale offensives. Over the past six months, monster activity has clearly risen across the land. Some adventurers suspect someone is secretly reuniting the remnants.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_old_warrior_grey",
+      "name": "Retired Adventurer Old Grey",
+      "type": "npc",
+      "keywords": ["Old Grey", "retired adventurer", "tavern", "veteran"],
+      "content": "A regular at the tavern on the second floor of the guild hall, a retired B-rank adventurer in his sixties. In his youth he rode with the Hero's party against the Demon Lord's army; now he spends his days drinking and telling stories. He looks like an ordinary old man, but from time to time he offers pinpoint combat advice. Rumor has it he still keeps a few pieces of legendary gear he has never sold.",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "event_monster_activity",
+      "name": "Abnormal Monster Activity",
+      "type": "event",
+      "keywords": ["monsters", "abnormal", "activity", "labyrinth"],
+      "content": "Over the past three months, monster sightings around the royal capital have risen by roughly thirty percent. Poisonous variants have appeared in sewers that previously held only slimes, and giant wolves native to deep mountains have been seen in the northern woods. The guild has rated this investigation B-rank, with a bounty of 500 gold. Some scholars suspect a loosening seal on an ancient ruin may be to blame.",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}

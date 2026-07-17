@@ -13,6 +13,15 @@ import { rememberCurrentGame } from '@/stores/gameContext'
 interface CreateCharacter extends CharacterSheet { character_name: string }
 type CreateMode = 'template' | 'custom' | 'ai'
 type Step = 1 | 2 | 3
+const DIFFICULTY_EASY = '\u8f7b\u677e'
+const DIFFICULTY_NORMAL = '\u6807\u51c6'
+const DIFFICULTY_HARDCORE = '\u786c\u6838'
+const DEFAULT_ADVENTURER_ZH = '\u5192\u9669\u8005'
+const DEFAULT_NEW_ADVENTURE_ZH = '\u65b0\u5192\u9669'
+const DEFAULT_MY_ADVENTURE_ZH = '\u6211\u7684\u5192\u9669'
+const DEFAULT_AI_WORLD_ZH = 'AI \u751f\u6210\u7684\u4e16\u754c'
+const BLANK_LOREBOOK_SUFFIX_ZH = '\uff08\u7a7a\u767d\u4e16\u754c\u4e66\uff09'
+const COPIED_LOREBOOK_SUFFIX_ZH = '\uff08\u590d\u5236\u4e16\u754c\u4e66\uff09'
 
 const router = useRouter()
 const toast = useToast()
@@ -23,7 +32,7 @@ const rules = ref<RuleSummary[]>([])
 const loreWorlds = ref<WorldSummary[]>([])
 const mode = ref<CreateMode>('template')
 const world = ref(''), rule = ref(''), name = ref(''), description = ref('')
-const difficulty = ref('标准'), solo = ref(true), roomPassword = ref('')
+const difficulty = ref(DIFFICULTY_NORMAL), solo = ref(true), roomPassword = ref('')
 const gameLanguage = ref<Locale>(locale.value)
 const customName = ref(''), customDesc = ref('')
 const aiPrompt = ref(''), aiRule = ref('')
@@ -48,10 +57,13 @@ const attrTotal = computed(() => ruleDetail.value?.attribute_points || 60)
 
 function worldIdOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_id || w.id || '') }
 function worldNameOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_name || w.name || w.id || '') }
-function ruleNameOf(r: RuleSummary): string { return r.rule_name || r.rule_id }
+function worldLanguageLabel(w: WorldTemplateSummary | WorldSummary): string { return w.language === 'en' ? t('english') : t('chinese') }
+function worldOptionLabel(w: WorldTemplateSummary | WorldSummary): string { return `${worldNameOf(w)} · ${worldLanguageLabel(w)}` }
+function ruleNameOf(r: RuleSummary): string { return gameLanguage.value === 'en' ? String(r.rule_name_en || r.rule_name || r.rule_id) : (r.rule_name || r.rule_id) }
 function cloneCharacter<T extends CharacterSheet>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
+function gameDefault(zh: string, en: string): string { return gameLanguage.value === 'en' ? en : zh }
 function ensureCharacter(value: CharacterSheet): CreateCharacter {
-  return { ...value, character_name: String(value.character_name || (gameLanguage.value === 'en' ? 'Adventurer' : '冒险者')) }
+  return { ...value, character_name: String(value.character_name || gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer')) }
 }
 
 watch(activeRule, async (id) => {
@@ -82,7 +94,7 @@ onMounted(async () => {
   world.value = worldIdOf(availableWorlds.value[0] || worlds.value[0] || {})
   rule.value = rules.value[0]?.rule_id || ''
   aiRule.value = rule.value
-  characters.value = [{ character_name: gameLanguage.value === 'en' ? 'Adventurer' : '冒险者', background: '', identity: {}, attributes: {}, skills: [] }]
+  characters.value = [{ character_name: gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer'), background: '', identity: {}, attributes: {}, skills: [] }]
 })
 
 function openWizard(idx: number | null) {
@@ -151,7 +163,7 @@ async function prepareAiRule() {
   toast.info(t('generatingRule'))
   const r = await api<GeneratedRuleResponse>('/generate-rule', {
     method: 'POST',
-    body: JSON.stringify({ prompt: aiPrompt.value, source_rule_id: aiRule.value }),
+    body: JSON.stringify({ prompt: aiPrompt.value, source_rule_id: aiRule.value, language: gameLanguage.value }),
   })
   if (!r.ok && r.error) throw new Error(r.error)
   if (!r.rule_id) throw new Error(t('missingRuleId'))
@@ -185,10 +197,10 @@ async function create() {
     let worldId = ''
     if (mode.value === 'template') {
       worldId = world.value; payload.world_id = worldId
-      payload.game_name = name.value || worldNameOf(worlds.value.find(w => worldIdOf(w) === world.value) || {}) || (gameLanguage.value === 'en' ? 'New Adventure' : '新冒险')
+      payload.game_name = name.value || worldNameOf(worlds.value.find(w => worldIdOf(w) === world.value) || {}) || gameDefault(DEFAULT_NEW_ADVENTURE_ZH, 'New Adventure')
     } else if (mode.value === 'custom') {
       worldId = 'custom_' + Date.now(); payload.world_id = worldId
-      payload.world_name = customName.value.trim() || (gameLanguage.value === 'en' ? 'My Adventure' : '我的冒险'); payload.custom_world = true; payload.description = customDesc.value
+      payload.world_name = customName.value.trim() || gameDefault(DEFAULT_MY_ADVENTURE_ZH, 'My Adventure'); payload.custom_world = true; payload.description = customDesc.value
     } else if (mode.value === 'ai') {
       if (!aiPrompt.value.trim()) throw new Error(t('enterWorldPrompt'))
       if (aiAutoRule.value && !aiGeneratedRule.value?.rule_id) await prepareAiRule()
@@ -196,16 +208,16 @@ async function create() {
       payload.rule_id = selectedRule
       const gw = await api<GeneratedWorldResponse>('/generate-world', { method: 'POST', body: JSON.stringify({ prompt: aiPrompt.value, rule_id: selectedRule, language: gameLanguage.value }) })
       if (!gw.ok && gw.error) throw new Error(gw.error)
-      worldId = gw.world_id; payload.world_id = worldId; payload.game_name = gw.world_name || (gameLanguage.value === 'en' ? 'AI Generated World' : 'AI 生成的世界')
+      worldId = gw.world_id; payload.world_id = worldId; payload.game_name = gw.world_name || gameDefault(DEFAULT_AI_WORLD_ZH, 'AI Generated World')
     }
     if (loreChoice.value === '__builtin__') payload.create_lorebook = false
     else if (loreChoice.value === '__blank__') {
       payload.source_world_id = worldId; payload.world_id = worldId + '_blank_' + Date.now()
-      payload.game_name = String(payload.game_name || '') + (gameLanguage.value === 'en' ? ' (Blank Lorebook)' : '（空白世界书）'); payload.create_lorebook = true; payload.blank_lorebook = true
+      payload.game_name = String(payload.game_name || '') + gameDefault(BLANK_LOREBOOK_SUFFIX_ZH, ' (Blank Lorebook)'); payload.create_lorebook = true; payload.blank_lorebook = true
     } else if (loreChoice.value.startsWith('copy:')) {
       const src = loreChoice.value.slice(5)
       payload.source_world_id = worldId; payload.world_id = worldId + '_copy_' + Date.now()
-      payload.game_name = String(payload.game_name || '') + (gameLanguage.value === 'en' ? ' (Copied Lorebook)' : '（复制世界书）'); payload.create_lorebook = true; payload.lorebook_world_id = src
+      payload.game_name = String(payload.game_name || '') + gameDefault(COPIED_LOREBOOK_SUFFIX_ZH, ' (Copied Lorebook)'); payload.create_lorebook = true; payload.lorebook_world_id = src
     }
     const r = await api<GameMutationResponse>('/games/create', { method: 'POST', body: JSON.stringify(payload) })
     if (!r.ok && r.error) throw new Error(r.error)
@@ -248,7 +260,7 @@ async function create() {
         </div>
         <template v-if="mode === 'template'">
           <label>{{ t('worldTemplate') }}
-            <select v-model="world"><option v-for="w in availableWorlds" :key="w.world_id" :value="w.world_id">{{ w.world_name || w.world_id }}</option></select>
+            <select v-model="world"><option v-for="w in availableWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldOptionLabel(w) }}</option></select>
           </label>
           <label>{{ t('adventureName') }}<input v-model="name" :placeholder="t('useWorldName')"></label>
         </template>
@@ -258,22 +270,22 @@ async function create() {
         </template>
         <template v-else-if="mode === 'ai'">
           <label>{{ t('aiWorldDescription') }}<textarea v-model="aiPrompt" rows="5" :placeholder="t('aiWorldPlaceholder')"></textarea></label>
-          <label>{{ t('baseRule') }}<select v-model="aiRule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ r.rule_name || r.rule_id }}</option></select></label>
+          <label>{{ t('baseRule') }}<select v-model="aiRule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ ruleNameOf(r) }}</option></select></label>
           <label class="check-row"><input type="checkbox" v-model="aiAutoRule"> {{ t('aiRuleDraft') }}</label>
           <p v-if="aiGeneratedRule?.rule_id" class="notice">{{ t('generatedRule') }}{{ aiGeneratedRule.rule_name || aiGeneratedRule.rule_id }}{{ t('generatedRuleHint') }}</p>
         </template>
-        <label v-if="mode !== 'ai'">{{ t('rule') }}<select v-model="rule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ r.rule_name || r.rule_id }}</option></select></label>
+        <label v-if="mode !== 'ai'">{{ t('rule') }}<select v-model="rule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ ruleNameOf(r) }}</option></select></label>
         <label>{{ t('extraBackground') }}<textarea v-model="description" rows="3" :placeholder="t('extraBackgroundPlaceholder')"></textarea></label>
         <label>{{ t('lorebookSource') }}
           <select v-model="loreChoice">
             <option value="__builtin__">{{ t('builtinLorebook') }}</option>
             <option value="__blank__">{{ t('blankLorebook') }}</option>
-            <option v-for="w in loreWorlds" :key="w.id" :value="'copy:' + w.id">{{ t('copyFrom') }}{{ w.name }}</option>
+            <option v-for="w in loreWorlds" :key="w.id" :value="'copy:' + w.id">{{ t('copyFrom') }}{{ worldNameOf(w) }} · {{ worldLanguageLabel(w) }}</option>
           </select>
         </label>
         <div class="two-cols">
           <label>{{ t('gameMode') }}<select v-model.number="solo"><option :value="true">{{ t('solo') }}</option><option :value="false">{{ t('multiplayer') }}</option></select></label>
-          <label>{{ t('difficulty') }}<select v-model="difficulty"><option value="轻松">{{ t('easy') }}</option><option value="标准">{{ t('normal') }}</option><option value="硬核">{{ t('hardcore') }}</option></select></label>
+          <label>{{ t('difficulty') }}<select v-model="difficulty"><option :value="DIFFICULTY_EASY">{{ t('easy') }}</option><option :value="DIFFICULTY_NORMAL">{{ t('normal') }}</option><option :value="DIFFICULTY_HARDCORE">{{ t('hardcore') }}</option></select></label>
         </div>
         <label>{{ t('roomPassword') }}<input v-model="roomPassword" :placeholder="t('roomPasswordPlaceholder')"></label>
       </template>
@@ -308,8 +320,8 @@ async function create() {
       <p v-if="seed">{{ t('restoreBySeed') }}</p>
       <template v-else>
         <p><strong>{{ t('world') }}：</strong>{{ mode === 'template' ? (worlds.find(w => w.world_id === world)?.world_name || world) : mode === 'custom' ? customName : t('byAi') }}</p>
-        <p><strong>{{ t('rule') }}：</strong>{{ rules.find(r => r.rule_id === activeRule)?.rule_name || activeRule }}</p>
-        <p><strong>{{ t('difficulty') }}：</strong>{{ difficulty === '轻松' ? t('easy') : difficulty === '硬核' ? t('hardcore') : t('normal') }} · {{ solo ? t('solo') : t('multiplayer') }} · {{ gameLanguage === 'en' ? t('english') : t('chinese') }}</p>
+        <p><strong>{{ t('rule') }}：</strong>{{ ruleNameOf(rules.find(r => r.rule_id === activeRule) || { rule_id: activeRule }) }}</p>
+        <p><strong>{{ t('difficulty') }}:</strong>{{ difficulty === DIFFICULTY_EASY ? t('easy') : difficulty === DIFFICULTY_HARDCORE ? t('hardcore') : t('normal') }} · {{ solo ? t('solo') : t('multiplayer') }} · {{ gameLanguage === 'en' ? t('english') : t('chinese') }}</p>
       </template>
       <p><strong>{{ t('charactersCount') }}（{{ characters.length }}）：</strong></p>
       <ul>
@@ -332,6 +344,7 @@ async function create() {
       :attr-total="attrTotal"
       :skill-pool="skillPool"
       :rule-id="activeRule"
+      :language="gameLanguage"
       :initial="editIdx !== null ? characters[editIdx] : undefined"
       @submit="onWizardSubmit"
       @cancel="showWizard = false"

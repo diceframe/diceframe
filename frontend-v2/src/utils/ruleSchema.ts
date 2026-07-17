@@ -1,8 +1,24 @@
 import type { CharacterSheet, IdentityFieldSpec, ResourceSpec, RuleAttribute, RuleMeta } from '@/api/types'
+import { i18n } from '@/i18n'
 
 const ATTR_NAME_EN: Record<string, string> = { str: 'STR', con: 'CON', dex: 'DEX', int: 'INT', edu: 'EDU', app: 'APP', pow: 'POW', siz: 'SIZ', wis: 'WIS', cha: 'CHA' }
 const ATTR_NAME_ZH: Record<string, string> = { str: '力量', con: '体质', dex: '敏捷', int: '智力', edu: '教育', app: '外貌', pow: '意志', siz: '体型', wis: '感知', cha: '魅力' }
-const LABELS: Record<string, string> = { name: '角色名', origin: '种族', archetype: '职业', background: '背景故事', level: '等级', xp: '经验', hp: '生命', max_hp: '最大生命', currency: '金币', attributes: '属性', skills: '技能', equipment: '装备', inventory: '背包', key_items: '关键物品' }
+const LABELS: Record<string, { zh: string; en: string }> = {
+  name: { zh: '角色名', en: 'Character Name' },
+  origin: { zh: '种族', en: 'Origin' },
+  archetype: { zh: '职业', en: 'Archetype' },
+  background: { zh: '背景故事', en: 'Background' },
+  level: { zh: '等级', en: 'Level' },
+  xp: { zh: '经验', en: 'XP' },
+  hp: { zh: '生命', en: 'HP' },
+  max_hp: { zh: '最大生命', en: 'Max HP' },
+  currency: { zh: '金币', en: 'Gold' },
+  attributes: { zh: '属性', en: 'Attributes' },
+  skills: { zh: '技能', en: 'Skills' },
+  equipment: { zh: '装备', en: 'Equipment' },
+  inventory: { zh: '背包', en: 'Inventory' },
+  key_items: { zh: '关键物品', en: 'Key Items' },
+}
 
 export type IdentityField = IdentityFieldSpec
 export type RuleAttr = RuleAttribute
@@ -15,18 +31,47 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-export function localizedLabel(value: LabelValue, fallback = ''): string {
-  if (value && typeof value === 'object') return value.zh || value.en || fallback
-  return value || fallback
+function isEnglish(): boolean {
+  return i18n.global.locale.value === 'en'
 }
 
-export function tr(key: string): string { return LABELS[key] || key }
+const LOCALE_FIELD_SUFFIX: Record<string, string> = { en: 'en' }
+
+export function localeFieldSuffix(): string {
+  const locale = i18n.global.locale.value
+  if (typeof locale === 'string' && locale.startsWith('zh')) return ''
+  const main = typeof locale === 'string' ? locale.split('-')[0] : ''
+  return LOCALE_FIELD_SUFFIX[main] || ''
+}
+
+export function localizedField<T = unknown>(obj: Record<string, unknown> | null | undefined, key: string): T | undefined {
+  const suffix = localeFieldSuffix()
+  if (suffix) {
+    const v = obj?.[`${key}_${suffix}`]
+    if (v !== undefined && v !== null) return v as T
+  }
+  return obj?.[key] as T | undefined
+}
+
+export function localizedLabel(value: LabelValue, fallback: LabelValue = ''): string {
+  const localeFirst = isEnglish() ? 'en' : 'zh'
+  const localeSecond = isEnglish() ? 'zh' : 'en'
+  if (value && typeof value === 'object') {
+    return value[localeFirst] || value[localeSecond] || localizedLabel(undefined, fallback)
+  }
+  if (value) return value
+  if (fallback && typeof fallback === 'object') return fallback[localeFirst] || fallback[localeSecond] || ''
+  return fallback || ''
+}
+
+export function tr(key: string): string { return localizedLabel(undefined, LABELS[key] || key) }
 
 export function attrDisplayName(attr: RuleAttr): string {
   const key = attr.key || ''
   if (attr.display_name) return attr.display_name
-  const name = attr.name || ATTR_NAME_ZH[key] || key
+  const name = isEnglish() ? (attr.name_en || ATTR_NAME_EN[key] || attr.name || key) : (attr.name || ATTR_NAME_ZH[key] || key)
   const nameEn = attr.name_en || ATTR_NAME_EN[key] || (key ? key.toUpperCase() : '')
+  if (isEnglish()) return name
   return nameEn ? `${name} (${nameEn})` : name
 }
 
@@ -67,9 +112,9 @@ export function skillPointCost(skill: { name?: string; value?: string | number }
 
 export function identitySchema(ruleMeta?: RuleMeta | null): IdentityField[] {
   return ruleMeta?.identity_schema?.length ? ruleMeta.identity_schema : [
-    { key: 'origin', label: '种族', legacy_field: 'race' },
-    { key: 'archetype', label: '职业', legacy_field: 'class' },
-    { key: 'background', label: '背景故事', legacy_field: 'background' },
+    { key: 'origin', label: LABELS.origin, legacy_field: 'race' },
+    { key: 'archetype', label: LABELS.archetype, legacy_field: 'class' },
+    { key: 'background', label: LABELS.background, legacy_field: 'background' },
   ]
 }
 
@@ -93,7 +138,7 @@ export function setIdentityUpdate(updates: SheetUpdate, field: IdentityField, va
 }
 
 export function currencyLabel(ruleMeta?: RuleMeta | null): string {
-  return localizedLabel(ruleMeta?.ui_schema?.currency_label, ruleMeta?.currency || '金币')
+  return localizedLabel(ruleMeta?.ui_schema?.currency_label, ruleMeta?.currency || LABELS.currency)
 }
 
 export function getCurrencyAmount(cs?: CharacterSheet): number {
@@ -128,5 +173,5 @@ export function calcAutoHp(attrs: Record<string, number | string | undefined>, r
 }
 
 export function resourceLabel(spec: ResourceSpec): string {
-  return localizedLabel(spec.label, spec.key === 'hp' ? '生命' : spec.key)
+  return localizedLabel(spec.label, spec.key === 'hp' ? LABELS.hp : spec.key)
 }

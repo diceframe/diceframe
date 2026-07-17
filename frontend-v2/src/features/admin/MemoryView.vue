@@ -5,10 +5,12 @@ import type { MemoriesResponse, MemoryEntry } from '@/api/types'
 import { readCurrentGame } from '@/stores/gameContext'
 import { useConfirm } from '@/composables/useConfirm'
 import { useToast } from '@/composables/useToast'
+import { useLocale } from '@/composables/useLocale'
 import Modal from '@/components/ui/Modal.vue'
 
 const { confirm } = useConfirm()
 const toast = useToast()
+const { t } = useLocale()
 
 const game = ref(readCurrentGame())
 const data = ref<MemoriesResponse>({ memories: [] })
@@ -62,7 +64,7 @@ function goPage(n: number) {
 
 function cloneMemory(item: MemoryEntry): MemoryEntry { return JSON.parse(JSON.stringify(item)) as MemoryEntry }
 function openMemory(item: MemoryEntry) { memoryEdit.value = cloneMemory(item) }
-function memoryTitle(item: MemoryEntry) { return item.entity || item.title || item.type || '记忆' }
+function memoryTitle(item: MemoryEntry) { return item.entity || item.title || item.type || t('memoryFallback') }
 function memoryBody(item: MemoryEntry) { return item.value || item.content || item.text || item.summary || '' }
 
 async function saveMemory() {
@@ -72,19 +74,19 @@ async function saveMemory() {
     await api<unknown>(`/games/${encodeURIComponent(game.value)}/memories/${encodeURIComponent(memoryEdit.value.id)}`, { method: 'PUT', body: JSON.stringify(memoryEdit.value) })
     memoryEdit.value = null
     await load()
-    toast.success('记忆已修正')
+    toast.success(t('memoryCorrected'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
 async function deleteMemory(item: MemoryEntry) {
   if (!game.value || !item.id) return
-  const ok = await confirm({ title: '遗忘记忆', content: '确定遗忘这条长期记忆吗？', positiveText: '遗忘记忆', negativeText: '取消', type: 'warning' })
+  const ok = await confirm({ title: t('forgetMemoryTitle'), content: t('forgetMemoryContent'), positiveText: t('forgetMemoryAction'), negativeText: t('cancel'), type: 'warning' })
   if (!ok) return
   busy.value = true
   try {
     await api<unknown>(`/games/${encodeURIComponent(game.value)}/memories/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
     await load()
-    toast.success('已遗忘')
+    toast.success(t('forgotten'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 </script>
@@ -93,20 +95,20 @@ async function deleteMemory(item: MemoryEntry) {
   <section class="view archive-page memory-page">
     <header class="archive-hero">
       <div>
-        <span class="section-kicker">长期记忆</span>
-        <h1>记忆档案</h1>
-        <p v-if="game">当前存档：{{ game }}</p>
-        <p v-else class="muted">未选择存档，请在游玩页进入一局游戏。</p>
+        <span class="section-kicker">{{ t('longTermMemory') }}</span>
+        <h1>{{ t('memoryArchive') }}</h1>
+        <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
+        <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
       </div>
       <div class="memory-search">
-        <input v-model="keyword" placeholder="按实体名搜索" @keyup.enter="search" :disabled="!game" />
-        <button @click="search" :disabled="!game || busy">搜索</button>
-        <button v-if="searchKeyword" class="ghost" @click="clearSearch" :disabled="busy">清除</button>
-        <button @click="load" :disabled="busy">刷新</button>
+        <input v-model="keyword" :placeholder="t('searchByEntity')" @keyup.enter="search" :disabled="!game" />
+        <button @click="search" :disabled="!game || busy">{{ t('search') }}</button>
+        <button v-if="searchKeyword" class="ghost" @click="clearSearch" :disabled="busy">{{ t('clear') }}</button>
+        <button @click="load" :disabled="busy">{{ t('refresh') }}</button>
       </div>
     </header>
 
-    <p class="memory-meta" v-if="game">共 {{ total }} 条记忆，显示第 {{ rangeStart }}-{{ rangeEnd }} 条<span v-if="searchKeyword"> · 关键词「{{ searchKeyword }}」</span></p>
+    <p class="memory-meta" v-if="game">{{ t('memoryMeta', { total, start: rangeStart, end: rangeEnd }) }}<span v-if="searchKeyword"> · {{ t('keywords') }} "{{ searchKeyword }}"</span></p>
     <p v-if="error" class="error-banner">{{ error }}</p>
 
     <div v-if="memories.length" class="memory-list">
@@ -115,36 +117,36 @@ async function deleteMemory(item: MemoryEntry) {
           <div class="memory-row-head">
             <strong>{{ memoryTitle(m) }}</strong>
             <span v-if="m.relation" class="muted small">{{ m.relation }}</span>
-            <span v-if="m.confidence !== undefined && m.confidence !== null" class="badge" :class="{ low: Number(m.confidence) < 0.5 }">置信 {{ Number(m.confidence).toFixed(2) }}</span>
+            <span v-if="m.confidence !== undefined && m.confidence !== null" class="badge" :class="{ low: Number(m.confidence) < 0.5 }">{{ t('confidence') }} {{ Number(m.confidence).toFixed(2) }}</span>
           </div>
           <p class="memory-row-body">{{ memoryBody(m) }}</p>
         </div>
         <div class="memory-row-actions">
-          <button @click="openMemory(m)">修正</button>
-          <button class="danger" :disabled="busy" @click="deleteMemory(m)">遗忘</button>
+          <button @click="openMemory(m)">{{ t('correct') }}</button>
+          <button class="danger" :disabled="busy" @click="deleteMemory(m)">{{ t('forget') }}</button>
         </div>
       </article>
     </div>
 
     <section v-else-if="game && !busy" class="empty-panel">
-      <h2>暂无长期记忆</h2>
-      <p class="muted">剧情推进后，角色关系、地点线索和重要事实会在这里沉淀。</p>
+      <h2>{{ t('noLongTermMemory') }}</h2>
+      <p class="muted">{{ t('noLongTermMemoryHint') }}</p>
     </section>
 
     <nav v-if="totalPages > 1" class="memory-pager">
-      <button :disabled="page <= 1 || busy" @click="goPage(page - 1)">上一页</button>
-      <span>第 {{ page }} / {{ totalPages }} 页</span>
-      <button :disabled="page >= totalPages || busy" @click="goPage(page + 1)">下一页</button>
+      <button :disabled="page <= 1 || busy" @click="goPage(page - 1)">{{ t('previousPage') }}</button>
+      <span>{{ t('pageOf', { page, total: totalPages }) }}</span>
+      <button :disabled="page >= totalPages || busy" @click="goPage(page + 1)">{{ t('nextPage') }}</button>
     </nav>
 
-    <Modal v-if="memoryEdit" title="修正记忆" @close="memoryEdit = null">
-      <label>实体<input v-model="memoryEdit.entity"></label>
-      <label>关系<input v-model="memoryEdit.relation"></label>
-      <label>内容<textarea rows="6" v-model="memoryEdit.value"></textarea></label>
-      <label>置信度<input type="number" min="0" max="1" step="0.05" v-model="memoryEdit.confidence"></label>
+    <Modal v-if="memoryEdit" :title="t('correctMemory')" @close="memoryEdit = null">
+      <label>{{ t('entity') }}<input v-model="memoryEdit.entity"></label>
+      <label>{{ t('relation') }}<input v-model="memoryEdit.relation"></label>
+      <label>{{ t('content') }}<textarea rows="6" v-model="memoryEdit.value"></textarea></label>
+      <label>{{ t('confidenceScore') }}<input type="number" min="0" max="1" step="0.05" v-model="memoryEdit.confidence"></label>
       <template #actions>
-        <button @click="memoryEdit = null">取消</button>
-        <button class="primary" :disabled="busy" @click="saveMemory">保存</button>
+        <button @click="memoryEdit = null">{{ t('cancel') }}</button>
+        <button class="primary" :disabled="busy" @click="saveMemory">{{ t('saveAction') }}</button>
       </template>
     </Modal>
   </section>

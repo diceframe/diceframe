@@ -4,9 +4,8 @@ import type { UpdateCheckResponse } from '@/api/types'
 
 const updateInfo = ref<UpdateCheckResponse | null>(null)
 const updateChecking = ref(false)
-// 标记本次进程是否已成功拉取过一次结果；只有成功才置位，
-// 否则首次请求失败(如启动时尚未登录的 401)会让 updateInfo 永远停在 null，
-// 后续非 force 的自动检查都直接返回 null、不再重试，导致更新提醒永久失效。
+// Mark successful fetches only. If the initial request fails, for example a pre-login 401,
+// later non-force automatic checks should still retry instead of freezing updateInfo at null.
 const updateChecked = ref(false)
 const updateAvailable = computed(() => Boolean(updateInfo.value?.ok && updateInfo.value.update_available))
 

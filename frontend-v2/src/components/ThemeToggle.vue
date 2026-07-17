@@ -2,14 +2,16 @@
 import { NButton, NIcon } from 'naive-ui'
 import { SunnyOutline, MoonOutline } from '@vicons/ionicons5'
 import { useTheme } from '@/composables/useTheme'
+import { useLocale } from '@/composables/useLocale'
 const { current, toggle } = useTheme()
+const { t } = useLocale()
 </script>
 <template>
   <NButton
     circle
     quaternary
     class="theme-toggle"
-    :title="current === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+    :title="current === 'dark' ? t('switchToLightTheme') : t('switchToDarkTheme')"
     @click="toggle"
   >
     <template #icon>

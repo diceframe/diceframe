@@ -3,7 +3,6 @@
   "rule_version": "1.1",
   "rule_id": "dnd5e",
   "rule_name": "D&D 5e 轻量规则",
-  "rule_name_en": "D&D 5e SRD-inspired Lite",
   "description": "基于龙与地下城第五版SRD风格的轻量辅助规则：12职业、熟练加值、d20检定与简化战斗；适合叙事跑团，不承诺完整RAW复刻。",
   "mechanics": "dnd5e_core",
   "ruleset_level": "assisted",
@@ -14,12 +13,12 @@
     "extreme": 25
   },
   "attributes": [
-    {"key": "str", "name": "力量",  "min": 3, "max": 20},
-    {"key": "dex", "name": "敏捷",  "min": 3, "max": 20},
-    {"key": "con", "name": "体质",  "min": 3, "max": 20},
-    {"key": "int", "name": "智力",  "min": 3, "max": 20},
-    {"key": "wis", "name": "感知",  "min": 3, "max": 20},
-    {"key": "cha", "name": "魅力",  "min": 3, "max": 20}
+    {"key": "str", "name": "力量", "min": 3, "max": 20},
+    {"key": "dex", "name": "敏捷", "min": 3, "max": 20},
+    {"key": "con", "name": "体质", "min": 3, "max": 20},
+    {"key": "int", "name": "智力", "min": 3, "max": 20},
+    {"key": "wis", "name": "感知", "min": 3, "max": 20},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 20}
   ],
   "special_stats": [],
   "attribute_points": 72,

@@ -4,12 +4,14 @@ import { api, errorMessage } from '@/api/client'
 import type { GameDetail, GameLogResponse, HealthResponse, LogEntry, LorebookResponse, LoreEntry, PrivateLogResponse, PrivateMessage } from '@/api/types'
 import { readCurrentGame } from '@/stores/gameContext'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
+import { useLocale } from '@/composables/useLocale'
 
 interface LogViewData extends GameLogResponse { _lore?: LoreKeywords }
 interface LogAction { uid: string; text: string }
 interface HealthWithStatus extends HealthResponse { status?: Record<string, unknown> }
 
 const game = ref(readCurrentGame())
+const { t } = useLocale()
 const data = ref<LogViewData>({ log: [] })
 const gameDetail = ref<GameDetail | null>(null)
 const healthData = ref<HealthWithStatus | null>(null)
@@ -127,17 +129,17 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
   <section class="view archive-page logs-page">
     <header class="view-title archive-hero">
       <div>
-        <h1>游戏日志</h1>
-        <p v-if="game">当前存档：{{ game }}</p>
-        <p v-else class="muted">未选择存档，请在游玩页进入一局游戏。</p>
+        <h1>{{ t('gameLogs') }}</h1>
+        <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
+        <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
       </div>
-      <button @click="load">刷新</button>
+      <button @click="load">{{ t('refresh') }}</button>
     </header>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
     <div v-if="hasSystem" class="lore-system">
-      <h3>系统记录</h3>
+      <h3>{{ t('systemRecords') }}</h3>
       <div v-if="statusChips.length" class="status-tags">
         <span v-for="c in statusChips" :key="c.key" class="status-chip"><strong>{{ c.key }}</strong> {{ c.val }}</span>
       </div>
@@ -147,7 +149,7 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
         </div>
       </div>
       <div v-if="recentPrivate.length">
-        <p class="muted" style="margin: 8px 0 4px">GM 悄悄话</p>
+        <p class="muted" style="margin: 8px 0 4px">{{ t('gmWhispers') }}</p>
         <div v-for="(m, i) in recentPrivate" :key="i" class="quiet">
           [R{{ m.round }}] {{ m.character_name || m.user_id }}：{{ m.text }}
         </div>
@@ -155,23 +157,23 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
     </div>
 
     <div class="mode-tabs">
-      <button type="button" :class="{ active: tab === 'log' }" @click="tab = 'log'">对话日志</button>
-      <button type="button" :class="{ active: tab === 'proclog' }" @click="tab = 'proclog'">处理日志</button>
+      <button type="button" :class="{ active: tab === 'log' }" @click="tab = 'log'">{{ t('dialogueLog') }}</button>
+      <button type="button" :class="{ active: tab === 'proclog' }" @click="tab = 'proclog'">{{ t('processingLog') }}</button>
     </div>
     <div class="log-toolbar">
-      <span>默认只加载当前页，避免长团日志一次性撑爆页面。</span>
-      <label>每页
+      <span>{{ t('logPageLoadHint') }}</span>
+      <label>{{ t('perPage') }}
         <select :value="pageSize" @change="setPageSize(($event.target as HTMLSelectElement).value)">
-          <option :value="10">10 轮</option>
-          <option :value="20">20 轮</option>
-          <option :value="50">50 轮</option>
+          <option :value="10">{{ t('roundsCount', { count: 10 }) }}</option>
+          <option :value="20">{{ t('roundsCount', { count: 20 }) }}</option>
+          <option :value="50">{{ t('roundsCount', { count: 50 }) }}</option>
         </select>
       </label>
     </div>
 
     <div v-if="tab === 'log'" class="log-reader">
       <article v-for="item in logs" :key="item.round">
-        <h2>第 {{ item.round }} 轮<span v-if="item.swipes" class="muted"> · {{ item.swipes }} 分支</span></h2>
+        <h2>{{ t('roundLabel', { round: item.round }) }}<span v-if="item.swipes" class="muted"> · {{ t('branchesCount', { count: item.swipes }) }}</span></h2>
         <div class="log-entry-body" :class="{ collapsed: isLongLog(item) && !isExpanded(item.round) }">
           <div v-for="a in item.actions" :key="a.uid + a.text" class="log-action">
             <strong class="log-actor">{{ a.uid }}</strong> {{ a.text }}
@@ -190,10 +192,10 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
           </template>
         </div>
         <button v-if="isLongLog(item)" class="log-expand" @click="toggleExpanded(item.round)">
-          {{ isExpanded(item.round) ? '收起本轮' : '展开本轮完整内容' }}
+          {{ isExpanded(item.round) ? t('collapseRound') : t('expandRoundFull') }}
         </button>
       </article>
-      <p v-if="!logs.length" class="muted">暂无日志。</p>
+      <p v-if="!logs.length" class="muted">{{ t('noLogs') }}</p>
     </div>
 
     <div v-else class="console-log">
@@ -204,15 +206,15 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
           <br><span class="ok">[OK]</span> {{ item.tags.count || (item.tags.tags || []).length }} tags
           <span v-for="(t, j) in item.tags.tags || []" :key="j"><br>  <span class="tag-badge">{{ t }}</span></span>
         </template>
-        <template v-else><br><span class="warn">[WARN]</span> no state tags emitted</template>
+      <template v-else><br><span class="warn">[WARN]</span> no state tags emitted</template>
       </div>
-      <p v-if="!proclog.length" class="muted">暂无日志。</p>
+      <p v-if="!proclog.length" class="muted">{{ t('noLogs') }}</p>
     </div>
 
     <nav v-if="totalPages > 1" class="memory-pager">
-      <button :disabled="page <= 1" @click="goPage(page - 1)">上一页</button>
-      <span>第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 轮</span>
-      <button :disabled="page >= totalPages" @click="goPage(page + 1)">下一页</button>
+      <button :disabled="page <= 1" @click="goPage(page - 1)">{{ t('previousPage') }}</button>
+      <span>{{ t('pageOf', { page, total: totalPages }) }} · {{ t('totalRoundsCount', { count: total }) }}</span>
+      <button :disabled="page >= totalPages" @click="goPage(page + 1)">{{ t('nextPage') }}</button>
     </nav>
   </section>
 </template>

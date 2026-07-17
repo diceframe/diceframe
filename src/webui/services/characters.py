@@ -297,7 +297,7 @@ async def update_character(api: "WebAPI", game_key: str, user_id: str, updates: 
             base_hp = (
                 rule.calculate_hp(new_attrs, cs.get("class", ""))
                 if rule
-                else calc_hp_from_rule(new_attrs, rules_dir=api._rules_dir)
+                else calc_hp_from_rule(new_attrs, rules_dir=api._rules_dir, language=getattr(inst, "language", ""))
             )
             lv_bonus = max(0, (cs.get("level", 1) - 1) * 5)
             new_hp = base_hp + lv_bonus
@@ -423,7 +423,7 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
         name = character.get("name") or character.get("character_name") or "冒险者"
         try:
             templates_base = api._rules_dir.parent if api._rules_dir else None
-            character = make_default_character(name, rule_id or "freeform_fantasy", templates_base)
+            character = make_default_character(name, rule_id or "freeform_fantasy", templates_base, language=getattr(inst, "language", ""))
             character["character_name"] = name
         except Exception:
             logger.exception("生成默认角色卡失败: %s", name)
@@ -437,7 +437,7 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
         hp = (
             rule.calculate_hp(attrs, character.get("class", ""))
             if rule
-            else calc_hp_from_rule(attrs, rule_id, api._rules_dir, character.get("class", ""))
+            else calc_hp_from_rule(attrs, rule_id, api._rules_dir, character.get("class", ""), language=getattr(inst, "language", ""))
         )
         max_hp = hp
     default_class = rule.classes[0]["name"] if (rule and rule.classes) else "冒险者"

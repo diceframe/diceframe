@@ -1,3 +1,5 @@
+import { i18n } from '@/i18n'
+
 function escapeHtml(s:unknown):string{
   return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
 }
@@ -7,7 +9,8 @@ function escapeRegExp(s:string):string{
 }
 
 const LIST_RE=/^([\-•*]|\d+[.、]|[一二三四五六七八九十]+[、.])\s*/
-const CUE_RE=/^(?:随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人|门|房间)/
+const CUE_RE=/^(?:随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人|门|房间|then|next|meanwhile|suddenly|now|check|result|clue|quest|status|reward|cost|gain|lose|spend|life|gold|xp|enemy|door|room)/i
+const SPLIT_CUE='随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人|then|next|meanwhile|suddenly|now|check|result|clue|quest|status|reward|cost|gain|lose|spend|life|gold|xp|enemy'
 
 function splitParagraphs(text:string):string[]{
   const source=String(text||'').replace(/\r\n/g,'\n').trim()
@@ -15,7 +18,7 @@ function splitParagraphs(text:string):string[]{
   const blocks=source.split(/\n\s*\n/).map(s=>s.trim()).filter(Boolean)
   const out:string[]=[]
   for(const block of blocks){
-    const normalized=block.replace(/([。！？；])\s*(?=(?:随后|接着|与此同时|同时|忽然|突然|此时|检定|判定|结果|线索|任务|状态|奖励|代价|获得|失去|消耗|HP|生命|金币|经验|NPC|敌人))/g,'$1\n')
+    const normalized=block.replace(new RegExp('([。！？；]|[.!?;])\\s*(?=(?:'+SPLIT_CUE+'))','gi'),'$1\n')
     const lines=normalized.split(/\n+/).map(s=>s.trim()).filter(Boolean)
     const shouldSplit=lines.length>1&&(lines.some(line=>LIST_RE.test(line)||CUE_RE.test(line))||lines.length>=3||lines.every(line=>line.length<=90))
     if(shouldSplit)out.push(...lines)
@@ -26,11 +29,11 @@ function splitParagraphs(text:string):string[]{
 
 export interface StateCard{title:string;body:string;cls:'good'|'warn'}
 function stateClass(title:string,body:string):'good'|'warn'{
-  return /失败|警惕|受伤|扣除|失去|消耗|危险|倒地|中毒|拒绝|伤害|惩罚|代价|[－-]\s*\d+/.test(title+body)?'warn':'good'
+  return /失败|警惕|受伤|扣除|失去|消耗|危险|倒地|中毒|拒绝|伤害|惩罚|代价|fail|failure|alert|injured|damage|lose|lost|spend|spent|consume|danger|poison|reject|penalty|cost|[－-]\s*\d+/i.test(title+body)?'warn':'good'
 }
-const STATE_KEYWORDS='系统检定|任务更新|状态变化|状态变动|状态更新|玩家状态|资源变化|资源变动|资源更新|关系变化|关系变动|属性变化|属性变动|属性更新|线索更新|记忆更新|检定结果|战斗结算|奖励|代价|buff|debuff'
+const STATE_KEYWORDS='系统检定|任务更新|状态变化|状态变动|状态更新|玩家状态|资源变化|资源变动|资源更新|关系变化|关系变动|属性变化|属性变动|属性更新|线索更新|记忆更新|检定结果|战斗结算|奖励|代价|system check|quest update|status change|status update|player status|resource change|resource update|relationship change|attribute change|attribute update|clue update|memory update|check result|combat resolution|reward|cost|buff|debuff'
 const STATE_TITLE_RE=new RegExp('^(?:'+STATE_KEYWORDS+')$','i')
-const STATE_CUE_RE=/变化|变动|更新|结算|检定|奖励|代价/
+const STATE_CUE_RE=/变化|变动|更新|结算|检定|奖励|代价|change|update|resolution|check|reward|cost/i
 function isStateTitle(title:string):boolean{return STATE_TITLE_RE.test(title)||STATE_CUE_RE.test(title)}
 export function extractStateLines(text:string):{narration:string;states:StateCard[]}{
   const states:StateCard[]=[];const narration:string[]=[]
@@ -53,6 +56,7 @@ export function extractStateLines(text:string):{narration:string;states:StateCar
 }
 
 export interface Badge{cls:string;text:string}
+function uiText(zh:string,en:string):string{return i18n.global.locale.value==='en'?en:zh}
 export function formatTagLine(tagBlock:string):Badge[]{
   const badges:Badge[]=[]
   String(tagBlock||'').split('\n').forEach(raw=>{
@@ -60,8 +64,8 @@ export function formatTagLine(tagBlock:string):Badge[]{
     const p=line.split(':');if(p.length<2)return
     const tag=p[0].toUpperCase();const uid=p[1]||'';const val=p.slice(2).join(':');const count=parseInt(val)
     if(tag==='HP'&&!isNaN(count))badges.push({cls:count<0?'hp-dn':'hp-up',text:'HP '+(count<0?String(count):'+'+count)})
-    else if(tag==='GOLD'&&!isNaN(count))badges.push({cls:'gold',text:'金币 '+(count<0?String(count):'+'+count)})
-    else if(tag==='PAY'&&!isNaN(count))badges.push({cls:'pay',text:'金币 '+(-Math.abs(count))})
+    else if(tag==='GOLD'&&!isNaN(count))badges.push({cls:'gold',text:uiText('金币','Gold')+' '+(count<0?String(count):'+'+count)})
+    else if(tag==='PAY'&&!isNaN(count))badges.push({cls:'pay',text:uiText('金币','Gold')+' '+(-Math.abs(count))})
     else if(tag==='LOOT'&&val)badges.push({cls:'loot',text:val})
     else if(tag==='KEY_ITEM'&&val)badges.push({cls:'loot',text:'🔑 '+val})
     else if(tag==='WEAPON'&&val)badges.push({cls:'loot',text:'⚔ '+val})
@@ -69,7 +73,7 @@ export function formatTagLine(tagBlock:string):Badge[]{
     else if(tag==='NPC'&&val)badges.push({cls:'npc',text:'NPC '+(val||uid)})
     else if(tag==='SCENE'&&val)badges.push({cls:'scene',text:val})
     else if(tag==='QUEST'&&val)badges.push({cls:'quest',text:val})
-    else if(tag==='DECISION')badges.push({cls:'decision',text:val||'关键决策'})
+    else if(tag==='DECISION')badges.push({cls:'decision',text:val||uiText('关键决策','Key Decision')})
     else if(tag==='XP'&&val)badges.push({cls:'gold',text:'XP +'+val})
     else if(tag==='ROLL'&&val)badges.push({cls:'roll',text:val})
   })
@@ -93,10 +97,10 @@ export function highlightKeywords(text:string,lore?:LoreKeywords):string{
   let m:RegExpExecArray|null
   const marker=raw.match(LIST_RE);if(marker)matches.push({start:0,end:marker[0].length,type:'marker',text:marker[0]})
   addRegexMatches(raw,matches,'quote',/「([^」]+)」/g)
-  addRegexMatches(raw,matches,'quote',/["“]([一-鿿]{2,20})["”]/g)
-  addRegexMatches(raw,matches,'roll',/(?:D\d+|d\d+|\b\d+d\d+\b|掷骰|骰子|检定|判定|大成功|大失败|成功|失败|优势|劣势|DC\s*\d+|难度\s*\d+)/gi)
-  addRegexMatches(raw,matches,'change',/(?:HP|生命|理智|魔力|资源|金币|金钱|经验|XP)\s*(?:[+-]\s*)?\d+|(?:获得|失去|消耗|扣除|回复|恢复|受伤|治疗)/g)
-  addRegexMatches(raw,matches,'key',/(?:线索|任务|目标|关键|秘密|弱点|危险|警惕|陷阱|战斗|谜题|选择|决定|后果|代价|奖励|状态|公开行动|私密感知)/g)
+  addRegexMatches(raw,matches,'quote',/["“]([^"”]{2,40})["”]/g)
+  addRegexMatches(raw,matches,'roll',/(?:D\d+|d\d+|\b\d+d\d+\b|掷骰|骰子|检定|判定|大成功|大失败|成功|失败|优势|劣势|DC\s*\d+|难度\s*\d+|roll|dice|check|critical success|critical failure|success|failure|advantage|disadvantage|difficulty\s*\d+)/gi)
+  addRegexMatches(raw,matches,'change',/(?:HP|生命|理智|魔力|资源|金币|金钱|经验|XP|sanity|mana|resource|gold|money|experience)\s*(?:[+-]\s*)?\d+|(?:获得|失去|消耗|扣除|回复|恢复|受伤|治疗|gain|lose|lost|spend|spent|consume|deduct|recover|heal|injured|damage)/gi)
+  addRegexMatches(raw,matches,'key',/(?:线索|任务|目标|关键|秘密|弱点|危险|警惕|陷阱|战斗|谜题|选择|决定|后果|代价|奖励|状态|公开行动|私密感知|clue|quest|objective|key|secret|weakness|danger|alert|trap|combat|puzzle|choice|decision|consequence|cost|reward|status|public action|private perception)/gi)
   Object.keys(kw).forEach(t=>{
     const cls=TYPE_MAP[t]||'place'
     ;(kw[t as keyof LoreKeywords]||[]).forEach(name=>{

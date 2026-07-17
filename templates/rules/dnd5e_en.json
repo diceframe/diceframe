@@ -1,0 +1,77 @@
+{
+  "language": "en",
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "dnd5e",
+  "rule_name": "D&D 5e SRD-inspired Lite",
+  "description": "A lightweight assisted rule inspired by D&D 5e SRD: 12 classes, proficiency bonus, d20 checks, and simplified combat; suited for narrative play, not a full RAW recreation.",
+  "mechanics": "dnd5e_core",
+  "ruleset_level": "assisted",
+  "dc_table": {
+    "easy": 10,
+    "normal": 15,
+    "hard": 20,
+    "extreme": 25
+  },
+  "attributes": [
+    {"key": "str", "name": "Strength", "min": 3, "max": 20},
+    {"key": "dex", "name": "Dexterity", "min": 3, "max": 20},
+    {"key": "con", "name": "Constitution", "min": 3, "max": 20},
+    {"key": "int", "name": "Intelligence", "min": 3, "max": 20},
+    {"key": "wis", "name": "Wisdom", "min": 3, "max": 20},
+    {"key": "cha", "name": "Charisma", "min": 3, "max": 20}
+  ],
+  "special_stats": [],
+  "attribute_points": 72,
+  "attr_hint": "D&D attributes use 3-20 values; 10 is roughly average for a commoner, and even numbers usually yield better d20 modifiers.",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "proficiency_formula": "max(2, 2 + (level - 1) // 4)",
+  "hp_formula": "max(class_hp_die + con_mod, 1)",
+  "valid_qualities": ["common", "uncommon", "rare", "very_rare", "legendary"],
+  "max_skills": 4,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "proficiency",
+  "skill_hint": "D&D skills are closer to \"proficiencies\" or class abilities. You may write favored skills or class ability names, values optional; proficiency bonus is mostly determined by level. Roll cheat sheet: advantage = roll 2d20 take higher, disadvantage = take lower; if both apply, they cancel out.",
+  "currency": "Gold Pieces",
+  "item_categories": {
+    "equipment": ["Sword","Bow","Staff","Dagger","Scimitar","Greatsword","Spear","Mace","Warhammer","Shield","Leather Armor","Chain Mail","Plate Armor","Robe","Boots","Gloves","Helmet","Cloak","Bracers","Amulet","Ring","Banded Mail","Scale Mail","Breastplate","Shortsword","Longsword","Rapier","Shortbow","Longbow","Crossbow","Holy Symbol","Arcane Focus","Instrument","Quarterstaff","Dart","Mistletoe","Thieves' Tools"],
+    "consumable": ["Potion","Scroll","Elixir","Dry Rations","Bandages","Antitoxin","Torch","Arrows","Bolts","Spell Scroll","Healing Potion","Holy Water"],
+    "misc": ["Key","Map","Letter","Gem","Crystal","Book","Backpack","Rope","Lantern","Bedroll","Shovel","Trail Rations","Waterskin"]
+  },
+  "classes": [
+    {"name": "Barbarian", "description": "A furious melee warrior whose rage is their weapon", "starter_equipment": ["Greataxe", "Leather Armor"], "hp_die": 12},
+    {"name": "Bard", "description": "An artist who weaves magic through music and words", "starter_equipment": ["Rapier", "Lute"], "hp_die": 8},
+    {"name": "Cleric", "description": "A divine caster serving the gods, healing the wounded and turning undead", "starter_equipment": ["Mace", "Shield", "Holy Symbol"], "hp_die": 8},
+    {"name": "Druid", "description": "Guardian of nature's power, able to shapeshift into beasts", "starter_equipment": ["Wooden Shield", "Mistletoe"], "hp_die": 8},
+    {"name": "Fighter", "description": "A tactical master proficient with all weapons and armor", "starter_equipment": ["Longsword", "Shield", "Chain Mail"], "hp_die": 10},
+    {"name": "Monk", "description": "An ascetic whose body is a weapon, master of unarmed combat", "starter_equipment": ["Quarterstaff", "Dart x10"], "hp_die": 8},
+    {"name": "Paladin", "description": "A heavy-armored knight bound by sacred oaths, punishing evil and protecting the innocent", "starter_equipment": ["Longsword", "Shield", "Holy Symbol"], "hp_die": 10},
+    {"name": "Ranger", "description": "A wilderness hunter and tracker, skilled with ranged weapons and two-weapon combat", "starter_equipment": ["Longbow", "Arrows x20", "Leather Armor"], "hp_die": 10},
+    {"name": "Rogue", "description": "A skulker in shadows, expert at lockpicking and sneak attacks", "starter_equipment": ["Shortsword", "Shortbow", "Thieves' Tools"], "hp_die": 8},
+    {"name": "Sorcerer", "description": "An innate caster with magic flowing through their bloodline", "starter_equipment": {"name": "Arcane Focus", "description": "An arcane focus"}, "hp_die": 6},
+    {"name": "Warlock", "description": "Gains dark power through a pact with an otherworldly patron", "starter_equipment": ["Leather Armor", "Arcane Focus"], "hp_die": 8},
+    {"name": "Wizard", "description": "An academic caster who masters arcana through years of study", "starter_equipment": ["Staff", "Spellbook"], "hp_die": 6}
+  ],
+  "skill_pools": {
+    "Barbarian": ["Rage", "Reckless Attack", "Danger Sense", "Brutal Critical"],
+    "Bard": ["Bardic Inspiration", "Hypnotic Pattern", "Jack of All Trades", "Counterspell"],
+    "Cleric": ["Healing Word", "Turn Undead", "Guiding Bolt", "Shield of Faith"],
+    "Druid": ["Wild Shape", "Entangle", "Nature Sense", "Barkskin"],
+    "Fighter": ["Action Surge", "Second Wind", "Improved Critical", "Battle Master"],
+    "Monk": ["Flurry of Blows", "Deflect Missiles", "Stunning Strike", "Step of the Wind"],
+    "Paladin": ["Divine Smite", "Lay on Hands", "Aura of Protection", "Divine Sense"],
+    "Ranger": ["Favored Enemy", "Hunter's Mark", "Natural Explorer", "Multiattack"],
+    "Rogue": ["Sneak Attack", "Uncanny Dodge", "Thieves' Tools", "Stealth Expertise"],
+    "Sorcerer": ["Magic Missile", "Shield", "Scorching Ray", "Metamagic"],
+    "Warlock": ["Eldritch Blast", "Pact Boon", "Devil's Sight", "Charm Person"],
+    "Wizard": ["Fireball", "Magic Missile", "Shield", "Counterspell"]
+  },
+  "gm_prompt_appendix": "You run Dungeons & Dragons 5th edition rules. Characters have a proficiency bonus (proficiency_bonus = 2 + (level-1)//4); check format: (Strength check: d20 + ability modifier + proficiency bonus vs DC). Advantage/disadvantage follow D&D 5e: advantage rolls 2d20 take the higher, disadvantage rolls 2d20 take the lower; when both apply they cancel and do not stack. In combat: an attack roll determines a hit (d20 + Strength/Dexterity modifier + proficiency bonus vs AC = 10 + Dexterity modifier + armor); on a hit, roll damage dice + ability modifier. Each round every player may move 30 feet and take 1 action or 1 bonus action. Casters expend spell slots (a 1st-level character has two 1st-level slots). A short rest restores some HP (roll a Hit Die + Constitution modifier); a long rest fully restores HP and recovers spell slots.",
+  "difficulty_instructions": {
+    "轻松": "Monster CR 1 below party level, DC -2, plentiful loot",
+    "标准": "Monster CR equals party level, DC as normal, reasonable loot",
+    "硬核": "Monster CR 1-2 above party level, DC +2, scarce resources"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "world_id": "tavern_generic_en",
+  "world_name": "Crossroads Inn",
+  "description": "The Crossroads Inn where the realm's trade roads meet—a waystation for travelers, adventurers, caravans, and mysterious strangers. No rule restrictions, pure freeform roleplay.",
+  "language": "en",
+  "world_setting": "The Crossroads Inn sits at the junction of three trade roads, serving as the default waystation for travelers seeking rest, adventurers seeking companions, information brokers, and neutral meetings. The innkeeper is a well-traveled former adventurer, and the walls are covered with mementos left by travelers from every land. There are no combat rules, no dice checks—only dialogue, negotiation, and story between characters. You can play anyone: a wandering swordsman, a fallen noble, a mysterious planeswalker, an information broker, or just an ordinary person who wants a hot drink.",
+  "starter_scene": "Night has fallen, and the hearth fire is blazing in the Crossroads Inn. The innkeeper is wiping the counter; a few travelers are scattered at different tables. The wind chime by the door rings as you push it open. The innkeeper looks up, gives you a slight nod, and lets you pick your own seat.",
+  "suggested_difficulty": "轻松",
+  "default_rule": "tavern_free",
+  "starter_lorebook": [
+    {
+      "id": "loc_crossroads_inn",
+      "name": "Crossroads Inn",
+      "type": "location",
+      "content": "A two-story timber-and-stone building. The first floor holds the common room and bar; the second floor has guest rooms. The back yard contains a stable and a storehouse. The innkeeper is named Old Mo, a retired adventurer.",
+      "tier": "core"
+    },
+    {
+      "id": "npc_old_mo",
+      "name": "Old Mo",
+      "type": "npc",
+      "content": "The innkeeper, in his fifties, with an old wound on his left arm. He never asks guests where they come from, but he remembers every regular's preferences. Occasionally he lets slip a useful piece of information to those he takes a liking to.",
+      "tier": "core"
+    }
+  ],
+  "item_categories": {
+    "equipment": [],
+    "consumable": [
+      "Ale",
+      "Hot Soup",
+      "Bread",
+      "Wine",
+      "Tea"
+    ],
+    "misc": [
+      "Letter",
+      "Map",
+      "Key",
+      "Badge",
+      "Notebook"
+    ]
+  }
+}

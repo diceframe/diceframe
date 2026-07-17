@@ -81,6 +81,13 @@ Runtime data is stored in `data/`.
 6. Submit actions in natural language.
 7. If DiceFrame asks for a roll, roll first; the GM narration resumes after the result is recorded.
 
+## Languages And Content
+
+- App language controls menus, buttons, settings, and UI messages.
+- Game Language controls GM narration, opening scenes, summaries, quick actions, and AI-generated content.
+- World templates, lorebooks, and content packs declare their content language with `language`. Create prioritizes matching templates while still allowing other-language content.
+- Rule JSON stays as one mechanics file. Add localized display fields such as `rule_name_en`, `name_en`, and `skill_pools_en` when English-facing names or generation hints are needed.
+
 More player-facing help is in [docs/USER_GUIDE_EN.md](docs/USER_GUIDE_EN.md).
 
 ## Data And Privacy

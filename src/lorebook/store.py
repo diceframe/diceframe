@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS worlds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
+    language TEXT DEFAULT 'zh-CN',
     author TEXT DEFAULT '',
     version TEXT DEFAULT '1.0',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -69,6 +70,7 @@ _MIGRATE_PROBABILITY = "ALTER TABLE lorebook_entries ADD COLUMN probability INTE
 _MIGRATE_GROUP = 'ALTER TABLE lorebook_entries ADD COLUMN "group" TEXT DEFAULT \'\';'
 _MIGRATE_GROUP_WEIGHT = "ALTER TABLE lorebook_entries ADD COLUMN group_weight INTEGER DEFAULT 1;"
 _MIGRATE_CONNECTED = "ALTER TABLE lorebook_entries ADD COLUMN connected_to TEXT DEFAULT '[]';"
+_MIGRATE_WORLD_LANGUAGE = "ALTER TABLE worlds ADD COLUMN language TEXT DEFAULT 'zh-CN';"
 
 
 class LorebookStore:
@@ -91,7 +93,7 @@ class LorebookStore:
         for mig in (_MIGRATE_CONSTANT, _MIGRATE_MATCH_MODE, _MIGRATE_STICKY,
                      _MIGRATE_COOLDOWN, _MIGRATE_DELAY, _MIGRATE_ORDER,
                      _MIGRATE_PROBABILITY, _MIGRATE_GROUP, _MIGRATE_GROUP_WEIGHT,
-                      _MIGRATE_CONNECTED):
+                      _MIGRATE_CONNECTED, _MIGRATE_WORLD_LANGUAGE):
             try:
                 self._conn.execute(mig)
                 self._conn.commit()
@@ -115,10 +117,10 @@ class LorebookStore:
 
     def create_world(self, world_id: str, name: str, **kwargs) -> None:
         self._execute(
-            "INSERT OR REPLACE INTO worlds(id, name, description, author, version) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO worlds(id, name, description, language, author, version) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (world_id, name, kwargs.get("description", ""),
-             kwargs.get("author", ""), kwargs.get("version", "1.0")),
+             kwargs.get("language", "zh-CN"), kwargs.get("author", ""), kwargs.get("version", "1.0")),
         )
         self._conn.commit()
 

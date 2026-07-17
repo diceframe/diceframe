@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import Callable
 
 from src.engine.game_instance import GameInstance
-from src.engine.language import gm_language_instruction
+from src.engine.language import DEFAULT_LANGUAGE, gm_language_instruction, is_english
 from src.llm.context_builder import build_context
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 
 logger = logging.getLogger("trpg")
-_GM_PROMPT_CACHE: str | None = None
+_GM_PROMPT_CACHE: dict[str, str] | None = {}
 
 
 @dataclass
@@ -45,18 +45,30 @@ class PromptComposer:
         self.rules_dir = rules_dir
         self.memory_store = memory_store
 
-    def load_gm_prompt(self, rule_appendix: str = "") -> str:
+    def load_gm_prompt(self, rule_appendix: str = "", language: str = DEFAULT_LANGUAGE) -> str:
         """读取基础 GM prompt，并按需附加当前规则说明。"""
         global _GM_PROMPT_CACHE
         if _GM_PROMPT_CACHE is None:
-            zh = self.prompts_dir / "gm_system_zh.md"
-            if zh.exists():
-                _GM_PROMPT_CACHE = zh.read_text(encoding="utf-8")
+            _GM_PROMPT_CACHE = {}
+        cache_key = "en" if is_english(language) else "zh-CN"
+        if cache_key not in _GM_PROMPT_CACHE:
+            filename = "gm_system_en.md" if cache_key == "en" else "gm_system_zh.md"
+            path = self.prompts_dir / filename
+            if path.exists():
+                _GM_PROMPT_CACHE[cache_key] = path.read_text(encoding="utf-8")
+            elif cache_key == "en":
+                zh = self.prompts_dir / "gm_system_zh.md"
+                _GM_PROMPT_CACHE[cache_key] = (
+                    zh.read_text(encoding="utf-8")
+                    if zh.exists()
+                    else "You are the GM for a TRPG text adventure. Narrate in natural English. The GM prompt file is missing."
+                )
             else:
-                _GM_PROMPT_CACHE = "你是 TRPG 游戏的主持人（GM）。请用流畅中文进行叙述。（GM prompt 文件缺失）"
-        prompt = _GM_PROMPT_CACHE
+                _GM_PROMPT_CACHE[cache_key] = "你是 TRPG 游戏的主持人（GM）。请用流畅中文进行叙述。（GM prompt 文件缺失）"
+        prompt = _GM_PROMPT_CACHE[cache_key]
         if rule_appendix:
-            prompt += f"\n\n## 当前规则\n{rule_appendix}"
+            heading = "## Current Rules" if cache_key == "en" else "## 当前规则"
+            prompt += f"\n\n{heading}\n{rule_appendix}"
         return prompt
 
     def load_rule_context(
@@ -75,10 +87,11 @@ class PromptComposer:
                 rule = RuleSystem.load_for_world(world_data, self.rules_dir)
                 if rule:
                     ctx.rule = rule
-                    ctx.rule_appendix = rule.get_gm_prompt_appendix()
+                    language = getattr(instance, "language", DEFAULT_LANGUAGE)
+                    ctx.rule_appendix = rule.get_gm_prompt_appendix(language)
                     ctx.combat_model = rule.combat_model
                     ctx.dice_system = rule.dice_system
-                    difficulty_text = rule.get_difficulty_instructions(instance.difficulty)
+                    difficulty_text = rule.get_difficulty_instructions(instance.difficulty, language)
                     if difficulty_text:
                         ctx.rule_appendix = ctx.rule_appendix + "\n\n" + difficulty_text
         except Exception:
@@ -101,10 +114,11 @@ class PromptComposer:
                 rule = RuleSystem.load_for_world(world_data, self.rules_dir)
                 if rule:
                     ctx.rule = rule
-                    ctx.rule_appendix = rule.get_gm_prompt_appendix()
+                    language = getattr(instance, "language", DEFAULT_LANGUAGE)
+                    ctx.rule_appendix = rule.get_gm_prompt_appendix(language)
                     ctx.combat_model = rule.combat_model
                     ctx.dice_system = rule.dice_system
-                    difficulty_text = rule.get_difficulty_instructions(instance.difficulty)
+                    difficulty_text = rule.get_difficulty_instructions(instance.difficulty, language)
                     if difficulty_text:
                         ctx.rule_appendix += "\n\n" + difficulty_text
         except Exception:
@@ -113,7 +127,8 @@ class PromptComposer:
 
     def compose_gm_prompt(self, instance: GameInstance, rule_appendix: str = "") -> str:
         """构造系统 prompt：基础 prompt + 规则附录 + 剧情追踪。"""
-        gm_prompt = self.load_gm_prompt(rule_appendix)
+        language = getattr(instance, "language", DEFAULT_LANGUAGE)
+        gm_prompt = self.load_gm_prompt(rule_appendix, language)
         plot_text = instance.plot_tracker.format_for_context() if instance.plot_tracker else ""
         if plot_text:
             gm_prompt = gm_prompt + "\n\n" + plot_text

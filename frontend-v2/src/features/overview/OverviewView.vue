@@ -161,7 +161,7 @@ onMounted(load)
       </div>
     </header>
 
-    <section class="overview-stats" aria-label="存档统计">
+    <section class="overview-stats" :aria-label="t('archiveStats')">
       <article><strong>{{ games.length }}</strong><span>{{ t('totalSaves') }}</span></article>
       <article><strong>{{ activeGames }}</strong><span>{{ t('activeGames') }}</span></article>
       <article><strong>{{ playerCount }}</strong><span>{{ t('playerSlots') }}</span></article>

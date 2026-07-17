@@ -3,8 +3,10 @@ import { computed } from 'vue'
 import type { CharacterSheet, Player, RuleAttribute, RuleMeta } from '@/api/types'
 import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel } from '@/utils/ruleSchema'
 import { buildSpecialStats, primaryResourceList } from '@/utils/play'
+import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null }>()
+const { t } = useLocale()
 function label(item: unknown) { if (typeof item === 'string') return item; if (item && typeof item === 'object' && 'name' in item) return String((item as { name?: unknown }).name || JSON.stringify(item)); return JSON.stringify(item) }
 
 const cs = computed<CharacterSheet>(() => props.player?.character_sheet || {})
@@ -28,11 +30,11 @@ function pct(cur: number, max: number) { return Math.max(0, Math.min(100, cur / 
 <template>
   <section class="panel character" v-if="player">
     <header>
-      <h2>角色状态</h2>
+      <h2>{{ t('characterStatus') }}</h2>
     </header>
     <div class="character-title">
       <h3>{{ player.character_name }}</h3>
-      <span v-if="cs.deceased" class="tag tag-deceased">不可操作</span>
+      <span v-if="cs.deceased" class="tag tag-deceased">{{ t('unavailable') }}</span>
       <span v-if="cs.status" class="tag tag-warn">{{ cs.status }}</span>
       <span class="gold">{{ currencyName }} {{ gold }}</span>
     </div>
@@ -52,15 +54,15 @@ function pct(cur: number, max: number) { return Math.max(0, Math.min(100, cur / 
     <div class="chips">
       <span v-for="a in attrs" :key="a.key">{{ a.name }} {{ a.value }}</span>
     </div>
-    <details><summary>技能</summary>
+    <details><summary>{{ t('skills') }}</summary>
       <div class="chips">
         <span v-for="s in cs.skills || []" :key="label(s)">{{ label(s) }}<template v-if="typeof s === 'object'"> {{ s.value }}</template></span>
       </div>
     </details>
-    <details><summary>装备与背包</summary>
-      <p><strong>装备：</strong>{{ (cs.equipment || []).map(label).join('、') || '无' }}</p>
-      <p><strong>背包：</strong>{{ (cs.inventory || []).map(label).join('、') || '无' }}</p>
-      <p><strong>关键物品：</strong>{{ (cs.key_items || []).map(label).join('、') || '无' }}</p>
+    <details><summary>{{ t('equipmentAndInventory') }}</summary>
+      <p><strong>{{ t('equipment') }}：</strong>{{ (cs.equipment || []).map(label).join(t('listSeparator')) || t('none') }}</p>
+      <p><strong>{{ t('inventory') }}：</strong>{{ (cs.inventory || []).map(label).join(t('listSeparator')) || t('none') }}</p>
+      <p><strong>{{ t('keyItems') }}：</strong>{{ (cs.key_items || []).map(label).join(t('listSeparator')) || t('none') }}</p>
     </details>
   </section>
 </template>

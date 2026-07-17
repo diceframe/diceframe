@@ -3,15 +3,14 @@
   "rule_version": "1.1",
   "rule_id": "freeform_wuxia",
   "rule_name": "武侠仙侠自由规则",
-  "rule_name_en": "Wuxia/Xianxia Freeform",
   "description": "架空武侠仙侠世界的轻量自由规则",
   "attributes": [
-    {"key": "str", "name": "力量",  "min": 3, "max": 18},
-    {"key": "dex", "name": "敏捷",  "min": 3, "max": 18},
-    {"key": "con", "name": "体质",  "min": 3, "max": 18},
-    {"key": "int", "name": "智力",  "min": 3, "max": 18},
-    {"key": "wis", "name": "感知",  "min": 3, "max": 18},
-    {"key": "cha", "name": "魅力",  "min": 3, "max": 18}
+    {"key": "str", "name": "力量", "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷", "min": 3, "max": 18},
+    {"key": "con", "name": "体质", "min": 3, "max": 18},
+    {"key": "int", "name": "智力", "min": 3, "max": 18},
+    {"key": "wis", "name": "感知", "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 18}
   ],
   "special_stats": [
     {"key": "qi", "name": "内力", "max": 100,
@@ -47,7 +46,7 @@
     "刺客": ["暗器", "轻功", "毒术", "易容"],
     "游侠": ["棍法", "追踪", "疗伤", "交涉"]
   },
-  "gm_prompt_appendix": "你是架空武侠仙侠世界的GM。江湖恩怨、宗门争斗、修仙问道、降妖除魔——这是一个充满侠义与奇遇的世界。玩家可以在江湖中自由行走，拜入宗门、挑战高手、探寻秘境。注意内力的消耗与恢复，轻功可以跨越地形障碍。",
+  "gm_prompt_appendix": "你是架空武侠仙侠世界的GM。江湖恩怨、宗门争斗、修仙问道、降妖除魔--这是一个充满侠义与奇遇的世界。玩家可以在江湖中自由行走，拜入宗门、挑战高手、探寻秘境。注意内力的消耗与恢复，轻功可以跨越地形障碍。",
   "difficulty_instructions": {
     "轻松": "敌人较弱，宗门友好，机缘充足",
     "标准": "江湖险恶但公平，需要修炼和策略",

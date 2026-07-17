@@ -1,0 +1,56 @@
+{
+  "language": "en",
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "freeform_wuxia",
+  "rule_name": "Wuxia/Xianxia Freeform",
+  "description": "A lightweight freeform rule for an alternate wuxia/xianxia world.",
+  "attributes": [
+    {"key": "str", "name": "Strength", "min": 3, "max": 18},
+    {"key": "dex", "name": "Dexterity", "min": 3, "max": 18},
+    {"key": "con", "name": "Constitution", "min": 3, "max": 18},
+    {"key": "int", "name": "Intelligence", "min": 3, "max": 18},
+    {"key": "wis", "name": "Wisdom", "min": 3, "max": 18},
+    {"key": "cha", "name": "Charisma", "min": 3, "max": 18}
+  ],
+  "special_stats": [
+    {"key": "qi", "name": "Qi", "max": 100,
+     "description": "Using internal arts and lightness arts consumes Qi; meditation and rest restore it."}
+  ],
+  "attribute_points": 60,
+  "attr_hint": "Attributes use 3-18 values; 10 is roughly average. Internal arts, agility, and insight scale with the corresponding attributes.",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 4,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "Skills may be martial techniques, lightness arts, medicine/poison, or jianghu methods. Write as \"Skill Name (20-80)\"; higher values mean deeper mastery.",
+  "currency": "Spirit Stone",
+  "item_categories": {
+    "equipment": ["Sword", "Saber", "Flying Sword", "Whisk", "Daoist Robe", "Talisman", "Jade Pendant", "Staff", "Iron Fan", "Dart", "Hidden Weapon", "Soft Armor", "Light Armor", "Armor"],
+    "pills": ["Pill", "Medicine", "Powder", "Pellet", "Elixir", "Dew", "Syrup", "Paste", "Dust", "Decoction"],
+    "consumable": ["Talisman", "Spirit Stone", "Scroll", "Wound Medicine", "Qi Pill", "Antidote Powder", "Clarity Pill"],
+    "misc": ["Token", "Jade Slip", "Token", "Map", "Manual", "Saber Manual", "Sword Manual", "Fragment", "Divination", "Compass", "Gourd", "Wine Flask"]
+  },
+  "classes": [
+    {"name": "Swordsman", "description": "A warrior who follows the Way of the Sword", "starter_equipment": ["Iron Sword", "Light Armor"]},
+    {"name": "Daoist", "description": "A practitioner of Daoist arts and talismans", "starter_equipment": ["Peachwood Sword", "Talisman Paper×5"]},
+    {"name": "Assassin", "description": "A hidden-weapons master in the shadows", "starter_equipment": ["Poisoned Dagger", "Dart×10"]},
+    {"name": "Wanderer", "description": "A wandering champion of justice", "starter_equipment": ["Staff", "Wound Medicine×3"]}
+  ],
+  "skill_pools": {
+    "Swordsman": ["Sword Control", "Sword Aura", "Sword Shield", "Parry Break"],
+    "Daoist": ["Exorcism", "Talismans", "Alchemy", "Qi Sight"],
+    "Assassin": ["Hidden Weapons", "Lightness Arts", "Poisons", "Disguise"],
+    "Wanderer": ["Staff Arts", "Tracking", "Healing", "Persuasion"]
+  },
+  "gm_prompt_appendix": "You are the GM of an alternate wuxia/xianxia world. Jianghu feuds, sect conflicts, cultivation and immortality-seeking, demon slaying-a world full of chivalry and serendipity. Players can roam the jianghu freely, join a sect, challenge masters, and explore secret realms. Mind the consumption and recovery of Qi; lightness arts can cross terrain obstacles.",
+  "difficulty_instructions": {
+    "轻松": "Weaker foes, friendly sects, ample opportunities",
+    "标准": "The jianghu is dangerous but fair; training and strategy needed",
+    "硬核": "Powerful foes surround you, high risk of cultivation deviation, wounds heal slowly"
+  }
+}

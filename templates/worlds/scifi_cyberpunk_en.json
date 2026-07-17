@@ -1,0 +1,84 @@
+{
+  "world_id": "scifi_cyberpunk_en",
+  "world_name": "Cyberpunk: Neon Tokyo",
+  "description": "Near-future 2049: high tech, low life, a corporate-ruled metropolis.",
+  "language": "en",
+  "world_setting": "The year is 2049. Neo-Tokyo. Rebuilt as a corporate city-state after the mid-century Catastrophe, the city is ruled by the Mitsubishi-Kamiya Group (MKG), which controls most of its infrastructure--transit, power, communications, and even the police. The wealth gap is absolute: the elite live above the smog in Cloudspire, a kilometer-tall arcology with filtered air and manufactured sunlight, while the poor scramble through neon-slum alleys below. Cyberware modification is ubiquitous, but grade-A augmentations are reserved for corporate budgets. Netrunners glide through the darknet, hunted by corporate AI.",
+  "starter_scene": "An anonymous encrypted message reaches you, signed only 'Ghost'. Ghost claims to have found a sealed project buried inside MKG's core database--codename 'Eden'. The meet is set for 23:00 tonight at the Red Eye, an old bar in the Shibuya Underground Market. Payment: 5,000 new yen per head. You are pushing through Shibuya's neon-crowded streets now, the air thick with grilled squid and industrial exhaust.",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_cyberpunk",
+  "starter_lorebook": [
+    {
+      "id": "loc_shibuya_market",
+      "name": "Shibuya Underground Market",
+      "type": "location",
+      "keywords": ["Shibuya", "underground market", "black market", "Shibuya district"],
+      "content": "Three illegal levels buried beneath Shibuya's shopping district. Up top, the malls gleam; down here, the real business runs--black clinics selling second-hand cyberware, stalls hawking smuggled components, and brokers who deal in information that never appears on a feed. The entrance is hidden behind a ramen shop's kitchen. On level B2 sits an old bar called the Red Eye, where hackers and mercs go to talk business.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_red_eye_bar",
+      "name": "Red Eye Bar",
+      "type": "location",
+      "keywords": ["Red Eye", "bar", "meet point", "tavern"],
+      "content": "A bar on level B2 of the Shibuya Underground. The owner is a former merc with a prosthetic eye who never asks questions. The walls are lined with decommissioned weapons and cyberware parts, more trophy than decor. House rules: no fighting, no eavesdropping, no dealing--take your business elsewhere. A coin-operated encrypted comm terminal sits in the corner.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_mkg",
+      "name": "Mitsubishi-Kamiya Group",
+      "type": "faction",
+      "keywords": ["Mitsubishi-Kamiya", "MKG", "corporation", "corp", "company"],
+      "content": "De facto ruler of Neo-Tokyo. MKG controls 47% of the city's infrastructure and 34% of its security forces. The group operates through three main divisions: Kamiya Tech (cyberware and military hardware), Mitsubishi Data (networks and information), and Neo-Tokyo Security (private armed police). Its CEO, Ryuichi Kamiya, is a near-mythic figure who almost never appears in public. The internal black project 'Eden' is sealed tight--only a handful of people know it exists.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_ghost",
+      "name": "Ghost",
+      "type": "npc",
+      "keywords": ["Ghost", "informant", "anonymous", "hacker"],
+      "content": "A hacker who never shows their face. Reputation on the darknet is spotless--Ghost has never burned a client. Ghost claims to have been a senior security engineer at MKG three years ago, until a routine data audit surfaced the 'Eden' project. They were fired, then hunted. Ghost's true identity is unknown--could be a cyber-laborer radicalized by corporate abuse, or a pawn sacrificed in an internal power struggle.",
+      "tier": "core",
+      "unreliable": true
+    },
+    {
+      "id": "event_eden_project",
+      "name": "Eden Project",
+      "type": "event",
+      "keywords": ["Eden", "secret project", "sealed", "database"],
+      "content": "A black project inside MKG, codenamed 'Eden'. Sealed by the highest executive tier inside an isolated database. Ghost claims to have seen only fragments--something about a new generation of cyberware, possibly tied to AI consciousness upload. If the tech leaks, it could reshape the entire augmentation industry.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_cloudspire",
+      "name": "Cloudspire",
+      "type": "location",
+      "keywords": ["Cloudspire", "upper city", "rich district", "corporate headquarters"],
+      "content": "A 1,003-meter megastructure at the heart of Neo-Tokyo. The lower 700 floors house MKG headquarters and corporate retail; the upper 300 floors are a sealed residential arcology for the ultra-rich. Air inside is scrubbed by a central purification system, cut off from the smog below. The sky garden at the summit is accessible only with a platinum pass. Security is military-grade.",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "npc_dr_akai",
+      "name": "Dr. Akai",
+      "type": "npc",
+      "keywords": ["ripperdoc", "Akai", "black clinic", "doctor"],
+      "content": "The most reputed ripperdoc in the Shibuya Underground, running an unmarked clinic. Former cyberware R&D engineer at a major corp, fired for unlicensed experiments. Akai's work is as clean as a hospital's, at a third of the price--but the provenance of his implants is questionable. Some are likely harvested from the dead.",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "loc_mkg_datacenter",
+      "name": "MKG Datacenter",
+      "type": "location",
+      "keywords": ["datacenter", "servers", "core database", "firewall"],
+      "content": "A massive datacenter occupying floors 50 through 55 of Cloudspire. Stores all of MKG's core data. Security is run by an isolated AI called the 'Gatekeeper', physically air-gapped from external networks. To pull data, you have to jack into an internal terminal. Rumor says floor 53 contains a sealed 'darkroom' where the highest-classified data is stored.",
+      "tier": "background",
+      "unreliable": false
+    }
+  ]
+}

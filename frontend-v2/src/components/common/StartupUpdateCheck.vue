@@ -5,10 +5,12 @@ import type { DialogOptions } from 'naive-ui'
 import { errorMessage } from '@/api/client'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { getDialog } from '@/composables/useNaiveBridge'
+import { useLocale } from '@/composables/useLocale'
 
 const route = useRoute()
 const { checkForUpdates } = useUpdateCheck()
-// 本次进程内只弹一次（跨版本仍会弹：见下方 version 去重）
+const { t } = useLocale()
+// Show at most once per process; cross-version dedupe is handled below.
 let notified = false
 
 function shouldSkipCurrentRoute(): boolean {
@@ -21,7 +23,7 @@ function openReleaseUrl(url: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
 
-// 同一版本只弹一次：避免每次启动/刷新都打扰用户；出现更新的版本时再弹。
+// Show once per version so refreshes do not keep interrupting the user.
 function alreadyNotified(version: string): boolean {
   try {
     return Boolean(version) && localStorage.getItem('trpg_update_notified_version') === version
@@ -34,22 +36,22 @@ function markNotified(version: string) {
   try {
     if (version) localStorage.setItem('trpg_update_notified_version', version)
   } catch {
-    /* localStorage 不可用时退化为本次会话内不重复弹 */
+    /* Fall back to process-level dedupe when localStorage is unavailable. */
   }
 }
 
 function showUpdateDialog(version: string, body: string, url: string) {
   const dialog = getDialog()
   const cfg: DialogOptions = {
-    title: `发现新版本 ${version}`,
+    title: t('updateDialogTitle', { version }),
     content: () => h('div', { class: 'update-dialog-body' }, [
-      h('p', { class: 'muted' }, `DiceFrame ${version} 已发布，建议升级后再继续跑团。`),
+      h('p', { class: 'muted' }, t('updateDialogBody', { version })),
       body
         ? h('pre', { class: 'update-dialog-notes' }, body)
         : null,
     ]),
-    positiveText: '打开发布页',
-    negativeText: '稍后说',
+    positiveText: t('openReleasePage'),
+    negativeText: t('laterSay'),
     maskClosable: true,
     closeOnEsc: true,
     positiveButtonProps: { type: 'primary' },
@@ -64,7 +66,7 @@ async function checkOnce() {
   try {
     const result = await checkForUpdates()
     if (!notified && result?.ok && result.update_available && result.latest) {
-      const version = result.latest.tag_name || result.latest.version || '新版本'
+      const version = result.latest.tag_name || result.latest.version || t('newVersion')
       if (alreadyNotified(result.latest.version || '')) return
       notified = true
       markNotified(result.latest.version || '')
@@ -75,7 +77,7 @@ async function checkOnce() {
       )
     }
   } catch (e: unknown) {
-    // 自动检查失败不打扰用户，但保留日志便于排查
+    // Keep automatic check failures quiet for users, but leave a debug trail.
     console.warn('DiceFrame update check failed:', errorMessage(e))
   }
 }

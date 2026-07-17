@@ -1,3 +1,5 @@
+import { i18n } from '@/i18n'
+
 const tokenKey = 'trpg_access_token'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message) } }
@@ -37,10 +39,10 @@ function applyConfirmHeader(headers: Headers, init: RequestInit): void {
 }
 
 async function handleUnauthorized(response: Response): Promise<void> {
-  // /api/config 是公开配置（敏感字段已 mask），玩家无 access_token 也应能读取，401 不触发跳登录
+  // /api/config is public config with sensitive fields masked; player share pages can also read without access_token.
   if (response.status === 401 && !isPlayerShareLocation() && !location.hash.startsWith('#/login') && !response.url.includes('/api/config')) {
     location.href = `/#/login?redirect=${encodeURIComponent(location.pathname + location.hash)}`
-    throw new ApiError('需要登录', 401)
+    throw new ApiError(i18n.global.t('loginRequired'), 401)
   }
 }
 
@@ -71,7 +73,7 @@ export async function validateAccessToken(value: string): Promise<void> {
   const headers = new Headers()
   if (value) headers.set('Authorization', `Bearer ${value}`)
   const response = await fetch(apiUrl('/games'), { headers })
-  if (!response.ok) throw new ApiError('密码错误，请重试', response.status)
+  if (!response.ok) throw new ApiError(i18n.global.t('incorrectPassword'), response.status)
 }
 
 export function setAccessToken(value: string) { localStorage.setItem(tokenKey, value) }

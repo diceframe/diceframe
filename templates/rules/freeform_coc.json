@@ -2,19 +2,18 @@
   "rule_version": "1.2",
   "rule_id": "freeform_coc",
   "rule_name": "CoC 7e 调查恐怖轻量规则",
-  "rule_name_en": "CoC 7e Investigation Freeform",
   "description": "以 Call of Cthulhu 7版为蓝本的调查恐怖轻量规则，使用 d100 百分制属性、技能、SAN、幸运和推动检定；适合叙事调查，不承诺完整规则书复刻。",
   "mechanics": "coc7e_core",
   "ruleset_level": "assisted",
   "attributes": [
-    {"key": "str", "name": "力量", "name_en": "STR", "min": 15, "max": 90},
-    {"key": "con", "name": "体质", "name_en": "CON", "min": 15, "max": 90},
-    {"key": "siz", "name": "体型", "name_en": "SIZ", "min": 40, "max": 90},
-    {"key": "dex", "name": "敏捷", "name_en": "DEX", "min": 15, "max": 90},
-    {"key": "app", "name": "外貌", "name_en": "APP", "min": 15, "max": 90},
-    {"key": "int", "name": "智力", "name_en": "INT", "min": 40, "max": 90},
-    {"key": "pow", "name": "意志", "name_en": "POW", "min": 15, "max": 90},
-    {"key": "edu", "name": "教育", "name_en": "EDU", "min": 40, "max": 90}
+    {"key": "str", "name": "力量", "min": 15, "max": 90},
+    {"key": "con", "name": "体质", "min": 15, "max": 90},
+    {"key": "siz", "name": "体型", "min": 40, "max": 90},
+    {"key": "dex", "name": "敏捷", "min": 15, "max": 90},
+    {"key": "app", "name": "外貌", "min": 15, "max": 90},
+    {"key": "int", "name": "智力", "min": 40, "max": 90},
+    {"key": "pow", "name": "意志", "min": 15, "max": 90},
+    {"key": "edu", "name": "教育", "min": 40, "max": 90}
   ],
   "special_stats": [
     {"key": "sanity", "name": "理智值", "max": 99, "description": "通常以 POW 为初始值；接触恐怖事物会降低，归零可能永久疯狂。"},
@@ -91,7 +90,7 @@
     "记者": ["侦查", "聆听", "话术", "说服", "心理学", "图书馆使用", "摄影", "外语"],
     "古董商": ["会计", "估价", "历史", "图书馆使用", "神秘学", "说服", "外语", "侦查"]
   },
-  "gm_prompt_appendix": "你是1920年代调查恐怖故事的GM。玩家面对的是无法理解的存在，战斗往往致命；鼓励玩家搜集线索、推理真相，而非正面冲突。CoC属性与技能使用 d100 百分制：普通成功≤阈值，困难成功≤阈值/2，极难成功≤阈值/5。失败可以推动剧情但必须带来代价。每次遭遇超自然事物时，要求玩家进行理智检定（使用 SAN_CHECK:玩家ID:损失骰 标签，如 SAN_CHECK:玩家ID:1d6）。\n\n理智值变化规则：\n- 直接修改使用 SAN:玩家ID:变化量（如 SAN:玩家ID:-5）\n- 休息恢复：游戏内过夜休息可用 SAN:玩家ID:+1d6 恢复少量理智\n- 心理治疗：成功心理学或精神分析检定后可用 SAN:玩家ID:+1d3 恢复\n- 理智值归零可能永久疯狂，角色不一定可继续操作\n- 推动检定使用 PUSH:玩家ID:技能名 标签\n- 幸运消耗使用 LUCK:玩家ID:-消耗量 降低检定后果",
+  "gm_prompt_appendix": "你是1920年代调查恐怖故事的GM。玩家面对的是无法理解的存在，战斗往往致命；鼓励玩家搜集线索、推理真相，而非正面冲突。CoC属性与技能使用 d100 百分制：普通成功≤阈值，困难成功≤阈值/2，极难成功≤阈值/5。失败可以推动剧情但必须带来代价。每次遭遇超自然事物时，要求玩家进行理智检定（使用 SANCheck:玩家ID:损失骰 标签，如 SANCheck:玩家ID:1d6）。\n\n理智值变化规则：\n- 直接修改使用 SAN:玩家ID:变化量（如 SAN:玩家ID:-5）\n- 休息恢复：游戏内过夜休息可用 SAN:玩家ID:+1d6 恢复少量理智\n- 心理治疗：成功心理学或精神分析检定后可用 SAN:玩家ID:+1d3 恢复\n- 理智值归零可能永久疯狂，角色不一定可继续操作\n- 推动检定使用 PUSH:玩家ID:技能名 标签\n- 幸运消耗使用 LUCK:玩家ID:-消耗量 降低检定后果",
   "difficulty_instructions": {
     "轻松": "调查线索充足，战斗可避免，理智损失减半。",
     "标准": "线索需要拼凑，战斗有风险，理智损失正常。",

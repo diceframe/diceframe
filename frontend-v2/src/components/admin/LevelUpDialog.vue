@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { CharacterSheet, Player, RuleMeta } from '@/api/types'
 import Modal from '@/components/ui/Modal.vue'
 import { attrDisplayName, type RuleAttr } from '@/utils/ruleSchema'
+import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{
   ruleAttrs: RuleAttr[]
@@ -11,6 +12,7 @@ const props = defineProps<{
   levelUpPoints: number
 }>()
 const emit = defineEmits<{ submit: [attributes: Record<string, number>]; cancel: [] }>()
+const { t } = useLocale()
 
 const emptySheet: CharacterSheet = { character_name: '' }
 const sheet = props.character.character_sheet || emptySheet
@@ -38,9 +40,9 @@ function minus(a: RuleAttr) {
 </script>
 
 <template>
-  <Modal title="分配升级属性点" @close="emit('cancel')">
-    <p class="muted">{{ character?.character_name || '冒险者' }} 获得了 {{ levelUpPoints }} 点升级属性</p>
-    <p class="attr-points" :class="{ over: overLimit }">剩余: {{ remaining }} 点<span v-if="overLimit" class="warn">已超限</span></p>
+  <Modal :title="t('allocateLevelUpPoints')" @close="emit('cancel')">
+    <p class="muted">{{ t('levelUpPointsGained', { name: character?.character_name || t('adventurer'), points: levelUpPoints }) }}</p>
+    <p class="attr-points" :class="{ over: overLimit }">{{ t('pointsRemaining', { points: remaining }) }}<span v-if="overLimit" class="warn">{{ t('overLimit') }}</span></p>
     <div class="attr-sliders">
       <div v-for="a in ruleAttrs" :key="a.key" class="attr-row level-row">
         <span class="attr-name">{{ attrDisplayName(a) }}</span>
@@ -50,10 +52,10 @@ function minus(a: RuleAttr) {
         <span class="attr-range">[{{ a.min }}-{{ a.max }}]</span>
       </div>
     </div>
-    <p class="form-hint">未分配的点数会保留到下次。允许有剩余，但不能超限。</p>
+    <p class="form-hint">{{ t('levelUpPointsHint') }}</p>
     <template #actions>
-      <button @click="emit('cancel')">取消</button>
-      <button class="primary" :disabled="overLimit" @click="emit('submit', { ...local })">确认分配</button>
+      <button @click="emit('cancel')">{{ t('cancel') }}</button>
+      <button class="primary" :disabled="overLimit" @click="emit('submit', { ...local })">{{ t('confirmAllocation') }}</button>
     </template>
   </Modal>
 </template>

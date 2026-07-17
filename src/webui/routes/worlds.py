@@ -16,6 +16,7 @@ async def api_world_create(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).create_world(
         body.get("name", ""),
         body.get("description", ""),
+        body.get("language", ""),
     ))
 
 
@@ -48,7 +49,11 @@ async def api_lorebook_generate(request: web.Request) -> web.Response:
     prompt = str(body.get("prompt", "")).strip()
     if len(prompt) > MAX_LOREBOOK_CHARS:
         return web.json_response({"error": f"生成描述过长（上限 {MAX_LOREBOOK_CHARS} 字）"}, status=400)
-    result = await _get_api(request).generate_lorebook_entries(request.match_info["world_id"], prompt)
+    result = await _get_api(request).generate_lorebook_entries(
+        request.match_info["world_id"],
+        prompt,
+        str(body.get("language", "") or ""),
+    )
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 

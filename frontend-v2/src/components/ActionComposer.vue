@@ -3,7 +3,7 @@ import { computed, onUnmounted, ref } from 'vue'
 import { api } from '@/api/client'
 import type { ActionSubmitResponse, GameDetail } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
-import { DEFAULT_QUICK_ACTIONS } from '@/utils/play'
+import { SYSTEM_DICE_MARKER_PREFIX } from '@/utils/play'
 import DiceButton from './play/DiceButton.vue'
 
 const props = defineProps<{ gameKey: string; userId: string; detail: GameDetail; disabled?: boolean }>()
@@ -20,13 +20,14 @@ let diceTimer: ReturnType<typeof setTimeout> | null = null
 const own = computed(() => props.detail.multiplayer?.submitted_actions?.find(a => a.user_id === props.userId))
 const pendingRollText = computed(() => pending.value || (!editingInstead.value && own.value?.dice_pending ? stripRollMarker(own.value.text) : ''))
 const hint = computed(() => props.detail.solo_mode ? t('soloHint') : own.value ? t('submittedHint', { count: own.value.revision_count || 1 }) : t('defaultHint'))
-const quickActions = computed(() => (props.detail.quick_actions?.length ? props.detail.quick_actions : DEFAULT_QUICK_ACTIONS) as string[])
+const defaultQuickActions = computed(() => [t('quickObserve'), t('quickExplore'), t('quickTalk'), t('quickPrepareCombat')])
+const quickActions = computed(() => (props.detail.quick_actions?.length ? props.detail.quick_actions : defaultQuickActions.value) as string[])
 const locked = computed(() => props.disabled || busy.value || dicePhase.value !== 'idle')
 const diceNotice = computed(() => notice.value || t('diceNeeded'))
 
 function clearDiceTimer() { if (diceTimer) { clearTimeout(diceTimer); diceTimer = null } }
 function stripRollMarker(value: string) {
-  return String(value || '').split('\n').filter(line => !line.startsWith('(系统掷骰:')).join('\n').trim()
+  return String(value || '').split('\n').filter(line => !line.startsWith(SYSTEM_DICE_MARKER_PREFIX)).join('\n').trim()
 }
 
 async function submit(confirm = false) {

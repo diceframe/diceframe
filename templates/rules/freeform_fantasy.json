@@ -3,15 +3,14 @@
   "rule_version": "1.1",
   "rule_id": "freeform_fantasy",
   "rule_name": "经典奇幻自由规则",
-  "rule_name_en": "Classic Fantasy Freeform",
   "description": "以D&D为蓝本的剑与魔法轻量自由规则",
   "attributes": [
-    {"key": "str", "name": "力量",  "min": 3, "max": 18},
-    {"key": "dex", "name": "敏捷",  "min": 3, "max": 18},
-    {"key": "con", "name": "体质",  "min": 3, "max": 18},
-    {"key": "int", "name": "智力",  "min": 3, "max": 18},
-    {"key": "wis", "name": "感知",  "min": 3, "max": 18},
-    {"key": "cha", "name": "魅力",  "min": 3, "max": 18}
+    {"key": "str", "name": "力量", "min": 3, "max": 18},
+    {"key": "dex", "name": "敏捷", "min": 3, "max": 18},
+    {"key": "con", "name": "体质", "min": 3, "max": 18},
+    {"key": "int", "name": "智力", "min": 3, "max": 18},
+    {"key": "wis", "name": "感知", "min": 3, "max": 18},
+    {"key": "cha", "name": "魅力", "min": 3, "max": 18}
   ],
   "special_stats": [],
   "attribute_points": 60,

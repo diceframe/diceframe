@@ -428,7 +428,7 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
     # item_categories 全部回退到 freeform_fantasy 默认值，LLM 失去世界约束。
     if custom_world or create_lorebook:
         if api._lore and not api._lore.get_world(world_id):
-            api._lore.create_world(world_id, resolved_world_name, description=description or "")
+            api._lore.create_world(world_id, resolved_world_name, description=description or "", language=resolved_language)
             logger.info("已创建自定义世界书: %s", world_id)
         if api._worlds_dir:
             template_path = api._worlds_dir / f"{world_id}.json"
@@ -488,7 +488,13 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
         if src_entries:
             dest_world = api._lore.get_world(world_id)
             if not dest_world:
-                api._lore.create_world(world_id, resolved_world_name, description=f"来自 {lorebook_world_id}")
+                src_world = api._lore.get_world(lorebook_world_id) or {}
+                api._lore.create_world(
+                    world_id,
+                    resolved_world_name,
+                    description=f"来自 {lorebook_world_id}",
+                    language=src_world.get("language", resolved_language),
+                )
             for entry in src_entries:
                 new_entry = dict(entry)
                 new_entry["id"] = f"{world_id}_{entry['id']}"

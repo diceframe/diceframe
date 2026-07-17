@@ -7,6 +7,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.generation import creator
 
 if TYPE_CHECKING:
@@ -27,14 +28,16 @@ def list_worlds(api: "WebAPI") -> dict[str, Any]:
     return {"worlds": worlds, "total": len(worlds)}
 
 
-def create_world(api: "WebAPI", name: str, description: str = "") -> dict[str, Any]:
+def create_world(api: "WebAPI", name: str, description: str = "",
+                 language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     name = (name or "").strip()
     if not name:
         return {"ok": False, "error": "世界书名称不能为空"}
     base = "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip("_") or "world"
     world_id = f"custom_book_{base}_{int(time.time())}"
-    api._lore.create_world(world_id, name, description=description or "")
-    return {"ok": True, "world_id": world_id, "name": name}
+    language = normalize_language(language)
+    api._lore.create_world(world_id, name, description=description or "", language=language)
+    return {"ok": True, "world_id": world_id, "name": name, "language": language}
 
 
 def list_entries(api: "WebAPI", world_id: str, entry_type: str | None = None) -> dict[str, Any]:
@@ -105,7 +108,8 @@ def _normalize_generated_entry(raw: dict, world_id: str, existing_ids: set[str],
     }
 
 
-async def generate_lorebook_entries(api: "WebAPI", world_id: str, prompt: str) -> dict[str, Any]:
+async def generate_lorebook_entries(api: "WebAPI", world_id: str, prompt: str,
+                                    language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "error": "请输入要生成的世界书设定"}
@@ -114,6 +118,7 @@ async def generate_lorebook_entries(api: "WebAPI", world_id: str, prompt: str) -
     world = api._lore.get_world(world_id)
     if not world:
         return {"ok": False, "error": "世界书不存在"}
+    language = normalize_language(language or world.get("language", DEFAULT_LANGUAGE))
 
     existing_entries = api._lore.list_entries(world_id)
     raw_entries = await creator.generate_lorebook_entries(
@@ -122,6 +127,7 @@ async def generate_lorebook_entries(api: "WebAPI", world_id: str, prompt: str) -
         world_name=world.get("name", ""),
         existing_names=[e.get("name", "") for e in existing_entries],
         max_tokens=api.character_gen_max_tokens,
+        language=language,
     )
     if not raw_entries:
         return {"ok": False, "error": "AI 返回内容解析失败，请换一种描述重试"}

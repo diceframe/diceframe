@@ -8,6 +8,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from src.rules.rule_system import RuleSystem
+from src.engine.language import field_suffixes
 
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
@@ -36,6 +37,27 @@ def _enrich_attributes(attributes: list[dict]) -> list[dict]:
         item["display_name"] = f"{name} ({name_en})" if name_en else name
         enriched.append(item)
     return enriched
+
+
+_LOCALIZED_TOP_KEYS = ("rule_name", "description", "attr_hint", "skill_hint",
+                       "gm_prompt_appendix", "difficulty_instructions", "skill_pools",
+                       "item_categories", "currency", "skill_base_values")
+
+
+def _merge_localized_fields(template: dict, loc: dict, suffix: str) -> None:
+    """把 loc（语言版全文）的字段合并进 template 作为 _<suffix> 后缀字段。"""
+    for k in _LOCALIZED_TOP_KEYS:
+        if k in loc:
+            template[f"{k}_{suffix}"] = loc[k]
+    for key in ("attributes", "classes", "special_stats"):
+        zh_list = template.get(key, [])
+        loc_list = loc.get(key, [])
+        for i, zh_item in enumerate(zh_list):
+            if i < len(loc_list):
+                loc_item = loc_list[i]
+                for field in ("name", "description"):
+                    if field in loc_item:
+                        zh_item[f"{field}_{suffix}"] = loc_item[field]
 
 
 def list_rules(api: "WebAPI") -> dict[str, Any]:
@@ -111,6 +133,14 @@ def get_rule_template(api: "WebAPI", rule_id: str) -> dict[str, Any]:
     template.setdefault("identity_schema", rule.identity_schema)
     template.setdefault("progression_schema", rule.progression_schema)
     template.setdefault("ui_schema", rule.ui_schema)
+    for s in sorted(field_suffixes()):
+        loc_path = rule_path.parent / f"{rule_path.stem}_{s}.json"
+        if loc_path.exists():
+            try:
+                loc = json.loads(loc_path.read_text(encoding="utf-8"))
+                _merge_localized_fields(template, loc, s)
+            except Exception:
+                logger.warning("规则语言模板合并失败: %s", loc_path)
     template["attributes"] = _enrich_attributes(template.get("attributes", []))
     if _plugin_rule_path(api, rule_id):
         template["plugin_id"] = _plugin_rule_plugin_id(api, rule_id)
@@ -203,7 +233,9 @@ def _plugin_rule_items(api: "WebAPI") -> list[dict[str, Any]]:
             result.append({
                 "rule_id": rule.rule_id,
                 "rule_name": rule.rule_name,
+                "rule_name_en": rule.template.get("rule_name_en", ""),
                 "description": rule.template.get("description", ""),
+                "description_en": rule.template.get("description_en", ""),
                 "dice_system": rule.dice_system,
                 "combat_model": rule.combat_model,
                 "attr_count": len(rule.attributes),

@@ -20,6 +20,7 @@ def ensure_world_from_template(lorebook_store: Any, world_id: str, template: dic
             world_id,
             template.get("world_name", world_id),
             description=template.get("description", ""),
+            language=template.get("language", "zh-CN"),
         )
 
     inserted = 0

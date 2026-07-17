@@ -1,0 +1,48 @@
+{
+  "language": "en",
+  "rule_version": "1.1",
+  "rule_id": "base_d20",
+  "rule_name": "d20 基础规则",
+  "abstract": true,
+  "description": "d20 规则模板基类，供具体规则继承",
+  "mechanics": "freeform_d20_core",
+  "ruleset_level": "assisted",
+  "dc_table": {
+    "easy": 10,
+    "normal": 15,
+    "hard": 20,
+    "extreme": 25
+  },
+  "difficulty_dc_modifiers": {
+    "轻松": -2,
+    "标准": 0,
+    "硬核": 2
+  },
+  "attributes": [
+    {"key": "str", "name": "Strength", "min": 3, "max": 18},
+    {"key": "dex", "name": "Dexterity", "min": 3, "max": 18},
+    {"key": "con", "name": "Constitution", "min": 3, "max": 18},
+    {"key": "int", "name": "Intelligence", "min": 3, "max": 18},
+    {"key": "wis", "name": "Wisdom", "min": 3, "max": 18},
+    {"key": "cha", "name": "Charisma", "min": 3, "max": 18}
+  ],
+  "special_stats": [],
+  "attribute_points": 60,
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "growth_system": "xp_level",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 3,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_point_spend_mode": "total_value",
+  "skill_value_to_bonus": {
+    "20": 1,
+    "40": 2,
+    "60": 3,
+    "80": 4
+  },
+  "skill_mode": "narrative",
+  "currency": "金币"
+}

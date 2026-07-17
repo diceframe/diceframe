@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import {
   NConfigProvider, NMessageProvider, NDialogProvider, NLoadingBarProvider,
   NLayout, NLayoutHeader, NLayoutContent, NMenu, NIcon,
+  zhCN, enUS, dateZhCN, dateEnUS,
   type MenuOption,
 } from 'naive-ui'
 import {
@@ -23,6 +24,8 @@ const route = useRoute()
 const { naiveTheme, overrides, loadPluginThemes } = useTheme()
 const { locale, setLocale, t } = useLocale()
 const { updateAvailable } = useUpdateCheck()
+const naiveLocale = computed(() => locale.value === 'en' ? enUS : zhCN)
+const naiveDateLocale = computed(() => locale.value === 'en' ? dateEnUS : dateZhCN)
 
 const items = [
   { id: 'overview', labelKey: 'navOverview', icon: HomeOutline },
@@ -47,7 +50,7 @@ const menuOptions = computed<MenuOption[]>(() => items.map((n) => ({
   label: () => h(RouterLink, { to: menuTo(n.id) }, {
     default: () => h('span', { class: 'nav-label' }, [
       t(n.labelKey),
-      n.id === 'settings' && updateAvailable.value ? h('span', { class: 'nav-update-dot', 'aria-label': '有新版本' }) : null,
+      n.id === 'settings' && updateAvailable.value ? h('span', { class: 'nav-update-dot', 'aria-label': t('updateAvailable') }) : null,
     ]),
   }),
 })))
@@ -63,11 +66,11 @@ function onLocaleChange(event: Event) {
   setLocale((event.target as HTMLSelectElement).value as Locale)
 }
 
-// PC 鼠标滚轮在窄窗口下横向滚动菜单（移动端靠触摸滑动，无需此逻辑）
+// Let desktop mouse wheels scroll the top nav horizontally in narrow windows.
 function onTopMenuWheel(e: WheelEvent) {
   const el = e.currentTarget as HTMLElement
   if (!el) return
-  // 没有溢出时放行，不影响页面正常竖向滚动
+  // Let the page keep normal vertical scrolling when there is no horizontal overflow.
   if (el.scrollWidth <= el.clientWidth) return
   el.scrollLeft += e.deltaY || e.deltaX
   e.preventDefault()
@@ -78,7 +81,7 @@ onMounted(() => {
 })
 </script>
 <template>
-  <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides">
+  <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
     <NLoadingBarProvider>
       <NMessageProvider>
         <NDialogProvider>

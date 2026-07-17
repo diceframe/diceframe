@@ -1,6 +1,7 @@
 import { h } from 'vue'
 import type { DialogOptions } from 'naive-ui'
 import { getDialog } from './useNaiveBridge'
+import { useLocale } from './useLocale'
 
 export interface ConfirmOptions {
   title?: string
@@ -12,15 +13,16 @@ export interface ConfirmOptions {
 
 export function useConfirm() {
   const api = getDialog()
+  const { t } = useLocale()
   function confirm(opts: ConfirmOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const danger = opts.type === 'error'
-      const title = opts.title?.trim() || (danger ? '危险操作确认' : '确认操作')
+      const title = opts.title?.trim() || (danger ? t('confirmDangerTitle') : t('confirmTitle'))
       const cfg: DialogOptions = {
         title: () => h('div', { class: ['confirm-title', danger ? 'danger' : ''] }, title),
-        content: () => h('div', { class: 'confirm-content' }, opts.content || '请确认是否继续。'),
-        positiveText: opts.positiveText ?? (danger ? '确认删除' : '确定'),
-        negativeText: opts.negativeText ?? '取消',
+        content: () => h('div', { class: 'confirm-content' }, opts.content || t('confirmContent')),
+        positiveText: opts.positiveText ?? (danger ? t('confirmDelete') : t('ok')),
+        negativeText: opts.negativeText ?? t('cancel'),
         maskClosable: false,
         closeOnEsc: true,
         positiveButtonProps: danger ? { type: 'error' } : { type: 'primary' },

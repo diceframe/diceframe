@@ -7,6 +7,7 @@ import { readCurrentGame } from '@/stores/gameContext'
 import { importTavernCard } from '@/utils/characterImport'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
+import { useLocale } from '@/composables/useLocale'
 import Modal from '@/components/ui/Modal.vue'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import SkillEditor from '@/components/admin/SkillEditor.vue'
@@ -74,6 +75,7 @@ interface UpdateCharacterPayload extends JsonObject {
 
 const toast = useToast()
 const { confirm } = useConfirm()
+const { t } = useLocale()
 
 const game = ref(readCurrentGame())
 const data = ref<CharacterData | null>(null)
@@ -101,7 +103,7 @@ const editRuleAttrs = computed<RuleAttr[]>(() => {
   return Object.keys(attrs).map(key => ({ key, name: key, min: 0, max: Math.max(100, Number(attrs[key]) || 100) }))
 })
 
-function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err || '操作失败') }
+function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err || t('operationFailed')) }
 function toSkillList(input: CharacterSheet['skills']): CharacterSkill[] {
   return (input || []).map(s => typeof s === 'string' ? { name: s, value: 20 } : { name: s.name || '', value: s.value || 20 })
 }
@@ -116,6 +118,13 @@ function parseLines<T extends CharacterItem>(text: string, fn: (p: string[]) => 
 function cardId(card: CharacterCard): string { return String(card.card_id || card.id || '') }
 function levelUpPoints(player: import('@/api/types').Player): number { return Number(player.character_sheet?.level_up_points || 0) }
 function npcKey(card: CharacterCard): string { return String(card.id || card.card_id || card.name || card.character_name || Math.random()) }
+function npcSummary(card: CharacterCard): string {
+  return [
+    card.relation ? `${t('relationshipPrefix')} ${card.relation}` : '',
+    card.status ? `${t('statusPrefix')} ${card.status}` : '',
+    card.first_seen_round ? `${t('firstSeenRound')} ${card.first_seen_round}` : '',
+  ].filter(Boolean).join(' · ')
+}
 
 watch(ruleId, async (id) => {
   if (!id) { ruleDetail.value = null; return }
@@ -162,7 +171,7 @@ async function onImportTavern(e: Event) {
   busy.value = true
   try {
     const card = await importTavernCard(file)
-    toast.success(`已导入「${card.character_name || file.name}」`)
+    toast.success(t('importedCharacter', { name: card.character_name || file.name }))
     await load()
   } catch (err: unknown) { toast.error(errorMessage(err)) } finally { busy.value = false; input.value = '' }
 }
@@ -230,17 +239,17 @@ async function saveCharacter() {
     await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(e.user_id)}`, { method: 'PUT', body: JSON.stringify(updates) })
     edit.value = null
     await load()
-    toast.success('角色已保存')
+    toast.success(t('characterSaved'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
 async function deleteCharacter(p: import('@/api/types').Player) {
-  const ok = await confirm({ title: '移除角色', content: `确定移除 ${p.character_name} 吗？该角色会从当前存档中删除。`, positiveText: '移除角色', type: 'warning' })
+  const ok = await confirm({ title: t('removeCharacterTitle'), content: t('removeCharacterContent', { name: p.character_name }), positiveText: t('removeCharacterAction'), type: 'warning' })
   if (!ok) return
   try {
     await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(p.user_id)}`, { method: 'DELETE' })
     await load()
-    toast.success('已移除')
+    toast.success(t('removed'))
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
@@ -249,7 +258,7 @@ async function saveToCard(p: import('@/api/types').Player) {
   try {
     await api('/character-cards', { method: 'POST', body: JSON.stringify({ character_name: p.character_name, ...cs }) })
     await load()
-    toast.success('已存入共享卡库')
+    toast.success(t('savedToSharedLibrary'))
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
@@ -264,7 +273,7 @@ async function saveLevelUp(attrs: Record<string, number>) {
     await api(`/games/${encodeURIComponent(game.value)}/character/${encodeURIComponent(p.user_id)}`, { method: 'PUT', body: JSON.stringify({ attributes: attrs }) })
     editLevelUp.value = null
     await load()
-    toast.success('属性点已分配')
+    toast.success(t('attributePointsAllocated'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
@@ -285,28 +294,28 @@ async function saveCardEdit() {
   busy.value = true
   try {
     const patch: CharacterCardPatch = {
-      character_name: e.character_name.trim() || '未命名',
-      race: e.race.trim() || '人类',
-      class: e.class.trim() || '冒险者',
+      character_name: e.character_name.trim() || t('unnamed'),
+      race: e.race.trim() || t('human'),
+      class: e.class.trim() || t('adventurer'),
       skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
       background: e.background.trim(),
       gold: parseInt(String(e.gold)) || 0,
     }
     const r = await api<{ ok?: boolean; error?: string }>(`/character-cards/${encodeURIComponent(e.card_id)}`, { method: 'PUT', body: JSON.stringify(patch) })
-    if (!r.ok) throw new Error(r.error || '保存失败')
+    if (!r.ok) throw new Error(r.error || t('saveFailed'))
     editCard.value = null
     await load()
-    toast.success('角色卡已更新')
+    toast.success(t('characterCardUpdated'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
 async function deleteCard(c: CharacterCard) {
-  const ok = await confirm({ title: '删除角色卡', content: `确定删除「${c.character_name}」吗？此操作不可撤销。`, positiveText: '删除角色卡', type: 'error' })
+  const ok = await confirm({ title: t('deleteCharacterCardTitle'), content: t('deleteCharacterCardContent', { name: c.character_name || t('unnamed') }), positiveText: t('deleteCharacterCardAction'), type: 'error' })
   if (!ok) return
   try {
     await api(`/character-cards/${encodeURIComponent(cardId(c))}`, { method: 'DELETE' })
     await load()
-    toast.success('已删除')
+    toast.success(t('deleted'))
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
@@ -316,7 +325,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
     await api('/character-cards', { method: 'POST', body: JSON.stringify(c) })
     showWizard.value = false
     await load()
-    toast.success('已新建角色卡')
+    toast.success(t('characterCardCreated'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 </script>
@@ -325,79 +334,79 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
   <section class="view archive-page characters-page">
     <header class="view-title archive-hero">
       <div>
-        <h1>角色管理</h1>
-        <p v-if="game">当前存档：{{ game }}</p>
-        <p v-else class="muted">未选择存档，请在游玩页进入一局游戏。</p>
+        <h1>{{ t('characterManagement') }}</h1>
+        <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
+        <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
       </div>
       <div class="actions">
-        <button class="primary" :disabled="!ruleId" @click="showWizard = true">+ 新建角色卡</button>
-        <button @click="load">刷新</button>
+        <button class="primary" :disabled="!ruleId" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
+        <button @click="load">{{ t('refresh') }}</button>
       </div>
     </header>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
-    <h2 class="field-group">本局角色</h2>
+    <h2 class="field-group">{{ t('currentGameCharacters') }}</h2>
     <div class="card-grid">
       <article v-for="p in data?.players || []" :key="p.user_id" class="char-card">
         <div>
           <h2>{{ p.character_name }}</h2>
           <p class="muted">
             {{ p.user_id }} · HP {{ p.character_sheet?.hp }}/{{ p.character_sheet?.max_hp }}
-            <span v-if="levelUpPoints(p) > 0" class="warn"> · 待分配 {{ levelUpPoints(p) }} 点</span>
+            <span v-if="levelUpPoints(p) > 0" class="warn"> · {{ t('pointsToAllocate', { points: levelUpPoints(p) }) }}</span>
           </p>
         </div>
         <div class="actions">
-          <button @click="openEdit(p)">编辑</button>
-          <button v-if="levelUpPoints(p) > 0" class="primary" @click="openLevelUp(p)">分配属性点 ({{ levelUpPoints(p) }})</button>
-          <button @click="saveToCard(p)">存入共享卡库</button>
-          <button class="danger" @click="deleteCharacter(p)">移除</button>
+          <button @click="openEdit(p)">{{ t('edit') }}</button>
+          <button v-if="levelUpPoints(p) > 0" class="primary" @click="openLevelUp(p)">{{ t('allocateAttributePointsWithCount', { points: levelUpPoints(p) }) }}</button>
+          <button @click="saveToCard(p)">{{ t('saveToSharedLibrary') }}</button>
+          <button class="danger" @click="deleteCharacter(p)">{{ t('remove') }}</button>
         </div>
       </article>
-      <p v-if="!data?.players?.length" class="muted">暂无角色。</p>
+      <p v-if="!data?.players?.length" class="muted">{{ t('noCharacters') }}</p>
     </div>
 
-    <h2 class="field-group" v-if="data?.npcs?.length">本局 NPC</h2>
+    <h2 class="field-group" v-if="data?.npcs?.length">{{ t('currentGameNpcs') }}</h2>
     <div class="card-grid" v-if="data?.npcs?.length">
       <article v-for="n in data.npcs" :key="npcKey(n)" class="char-card">
         <div>
-          <h2>{{ n.character_name || n.name || '未命名' }}<small v-if="n.tier === 'core'" class="muted"> · 核心</small></h2>
-          <p class="muted">{{ [n.relation ? '关系 ' + n.relation : '', n.status ? '状态 ' + n.status : '', n.first_seen_round ? '首次 Round ' + n.first_seen_round : ''].filter(Boolean).join(' · ') }}</p>
+          <h2>{{ n.character_name || n.name || t('unnamed') }}<small v-if="n.tier === 'core'" class="muted"> · {{ t('core') }}</small></h2>
+          <p class="muted">{{ npcSummary(n) }}</p>
           <p v-if="n.note || n.description" class="muted">{{ String(n.note || n.description).slice(0, 120) }}</p>
         </div>
       </article>
     </div>
 
-    <h2 class="field-group" style="display:flex;align-items:center;justify-content:space-between"><span>共享角色卡库</span><button class="primary" :disabled="busy" @click="tavernInput?.click()">导入酒馆卡</button></h2>
+    <h2 class="field-group" style="display:flex;align-items:center;justify-content:space-between"><span>{{ t('sharedCharacterLibrary') }}</span><button class="primary" :disabled="busy" @click="tavernInput?.click()">{{ t('importTavernCard') }}</button></h2>
     <input ref="tavernInput" type="file" accept=".json,application/json" @change="onImportTavern" hidden>
     <div class="card-grid">
       <article v-for="c in data?.cards || []" :key="c.card_id || c.id" class="char-card">
         <div>
           <h2>{{ c.character_name }}</h2>
-          <p class="muted">{{ c.race }} · {{ c.class }}<span v-if="c.source"> · 来源 {{ c.source }}</span></p>
+          <p class="muted">{{ c.race }} · {{ c.class }}<span v-if="c.source"> · {{ t('source') }} {{ c.source }}</span></p>
           <p v-if="c.background" class="muted">{{ String(c.background).slice(0, 80) }}</p>
         </div>
         <div class="actions">
-          <button @click="openCardEdit(c)">编辑卡片</button>
-          <button class="danger" @click="deleteCard(c)">删除</button>
+          <button @click="openCardEdit(c)">{{ t('editCard') }}</button>
+          <button class="danger" @click="deleteCard(c)">{{ t('delete') }}</button>
         </div>
       </article>
-      <p v-if="!data?.cards?.length" class="muted">暂无共享卡。</p>
+      <p v-if="!data?.cards?.length" class="muted">{{ t('noSharedCards') }}</p>
     </div>
 
-    <Modal v-if="edit" title="编辑角色" @close="edit = null">
-      <label>角色名<input v-model="edit.character_name"></label>
+    <Modal v-if="edit" :title="t('editCharacter')" @close="edit = null">
+      <label>{{ t('characterName') }}<input v-model="edit.character_name"></label>
       <label v-for="f in edit.fields" :key="f.key">{{ identityLabel(f) }}<input v-model="edit.identityValues[f.key]"></label>
-      <label>等级<input type="number" v-model.number="edit.level"></label>
-      <label>HP / 最大 HP
+      <label>{{ t('level') }}<input type="number" v-model.number="edit.level"></label>
+      <label>HP / {{ t('maxHp') }}
         <div class="row">
           <input type="number" v-model.number="edit.hp.current" placeholder="HP">
-          <input type="number" v-model.number="edit.hp.max" placeholder="最大 HP">
+          <input type="number" v-model.number="edit.hp.max" :placeholder="t('maxHp')">
         </div>
       </label>
-      <p v-if="autoHp" class="form-hint">规则建议 HP：<strong>{{ autoHpValue }}</strong>。你仍然可以手填。</p>
+      <p v-if="autoHp" class="form-hint">{{ t('ruleSuggestedHp') }}: <strong>{{ autoHpValue }}</strong>{{ t('manualHpStillAllowed') }}</p>
       <label>{{ currencyLabel(ruleMeta) }}<input type="number" v-model.number="edit.gold"></label>
-      <label>属性 <span class="attr-points">剩余 {{ attrPoints }} 点</span></label>
+      <label>{{ t('attributes') }} <span class="attr-points">{{ t('pointsRemaining', { points: attrPoints }) }}</span></label>
       <div class="attr-sliders">
         <div v-for="a in editRuleAttrs" :key="a.key" class="attr-row">
           <span class="attr-name">{{ attrDisplayName(a) }}</span>
@@ -405,15 +414,15 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
           <input type="number" class="attr-val" :min="a.min" v-model.number="edit.attributes[a.key]">
         </div>
       </div>
-      <label>技能</label>
+      <label>{{ t('skills') }}</label>
       <SkillEditor v-model="edit.skills" :pool="skillPool" />
-      <label>背景故事<textarea rows="3" v-model="edit.background"></textarea></label>
-      <label>装备（每行: 名称|类型|伤害|部位|品质，不含|则视为名称）<textarea rows="3" v-model="edit.equipText"></textarea></label>
-      <label>背包（每行: 名称|数量|效果）<textarea rows="3" v-model="edit.invText"></textarea></label>
-      <label>关键物品（每行: 名称|分类|备注）<textarea rows="3" v-model="edit.keyText"></textarea></label>
+      <label>{{ t('backgroundStory') }}<textarea rows="3" v-model="edit.background"></textarea></label>
+      <label>{{ t('equipmentLineHelp') }}<textarea rows="3" v-model="edit.equipText"></textarea></label>
+      <label>{{ t('inventoryLineHelp') }}<textarea rows="3" v-model="edit.invText"></textarea></label>
+      <label>{{ t('keyItemsLineHelp') }}<textarea rows="3" v-model="edit.keyText"></textarea></label>
       <template #actions>
-        <button @click="edit = null">取消</button>
-        <button class="primary" :disabled="busy" @click="saveCharacter">保存</button>
+        <button @click="edit = null">{{ t('cancel') }}</button>
+        <button class="primary" :disabled="busy" @click="saveCharacter">{{ t('saveAction') }}</button>
       </template>
     </Modal>
 
@@ -427,17 +436,17 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
       @cancel="editLevelUp = null"
     />
 
-    <Modal v-if="editCard" title="编辑角色卡" @close="editCard = null">
-      <label>角色名<input v-model="editCard.character_name"></label>
-      <label>族群/身份<input v-model="editCard.race"></label>
-      <label>职业/定位<input v-model="editCard.class"></label>
-      <label>技能</label>
+    <Modal v-if="editCard" :title="t('editCharacterCard')" @close="editCard = null">
+      <label>{{ t('characterName') }}<input v-model="editCard.character_name"></label>
+      <label>{{ t('originIdentity') }}<input v-model="editCard.race"></label>
+      <label>{{ t('classRole') }}<input v-model="editCard.class"></label>
+      <label>{{ t('skills') }}</label>
       <SkillEditor v-model="editCard.skills" :pool="skillPool" />
-      <label>背景<textarea rows="4" v-model="editCard.background"></textarea></label>
-      <label>初始金钱<input type="number" v-model.number="editCard.gold"></label>
+      <label>{{ t('background') }}<textarea rows="4" v-model="editCard.background"></textarea></label>
+      <label>{{ t('initialMoney') }}<input type="number" v-model.number="editCard.gold"></label>
       <template #actions>
-        <button @click="editCard = null">取消</button>
-        <button class="primary" :disabled="busy" @click="saveCardEdit">保存</button>
+        <button @click="editCard = null">{{ t('cancel') }}</button>
+        <button class="primary" :disabled="busy" @click="saveCardEdit">{{ t('saveAction') }}</button>
       </template>
     </Modal>
 

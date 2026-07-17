@@ -11,6 +11,8 @@ import {
 import { api, errorMessage } from '@/api/client'
 import { useTheme } from '@/composables/useTheme'
 import { useToast } from '@/composables/useToast'
+import { useLocale } from '@/composables/useLocale'
+import type { MessageKey } from '@/i18n'
 import type {
   PluginContentImportResponse, PluginContentResource, PluginContentResponse,
   PluginField, PluginInfo, PluginMarketplaceItem, PluginMarketplaceResponse,
@@ -19,6 +21,7 @@ import type {
 import NapcatGuide from '@/components/plugins/NapcatGuide.vue'
 
 const toast = useToast()
+const { t } = useLocale()
 const { pluginThemes, pluginThemeId, loadPluginThemes, applyPluginTheme, clearPluginTheme } = useTheme()
 const plugins = ref<PluginInfo[]>([])
 const contentResources = ref<Record<string, PluginContentResource[]>>({})
@@ -49,13 +52,14 @@ const themeOptions = computed(() => pluginThemes.value.map(theme => ({
   label: `${theme.name}${theme.plugin_name ? ` · ${theme.plugin_name}` : ''}`,
   value: theme.id,
 })))
-const contentGroups = computed(() => [
-  { key: 'character_template', label: '角色模板' },
-  { key: 'npc', label: 'NPC' },
-  { key: 'item', label: '道具' },
-  { key: 'spell', label: '法术' },
-  { key: 'class', label: '职业' },
-].map(group => ({ ...group, items: contentResources.value[group.key] || [] })))
+const contentGroupDefs = [
+  { key: 'character_template', labelKey: 'contentGroupCharacterTemplate' },
+  { key: 'npc', labelKey: 'contentGroupNpc' },
+  { key: 'item', labelKey: 'contentGroupItem' },
+  { key: 'spell', labelKey: 'contentGroupSpell' },
+  { key: 'class', labelKey: 'contentGroupClass' },
+] satisfies { key: string; labelKey: MessageKey }[]
+const contentGroups = computed(() => contentGroupDefs.map(group => ({ ...group, items: contentResources.value[group.key] || [] })))
 const worldOptions = computed(() => (worlds.value || []).map(world => {
   const id = String(world.id || world.world_id || '')
   return {
@@ -90,7 +94,7 @@ async function loadMarketplace() {
   marketLoading.value = true
   try {
     const r = await api<PluginMarketplaceResponse>('/plugins/marketplace')
-    if (!r.ok) throw new Error(r.error || '插件商店读取失败')
+    if (!r.ok) throw new Error(r.error || t('pluginMarketplaceLoadFailed'))
     marketplace.value = r.plugins || []
     marketplaceSource.value = r.source || null
   } catch (e: unknown) {
@@ -116,7 +120,7 @@ async function loadContentResources() {
   contentLoading.value = true
   try {
     const r = await api<PluginContentResponse>('/plugins/content')
-    if (!r.ok) throw new Error(r.error || '内容包读取失败')
+    if (!r.ok) throw new Error(r.error || t('pluginContentLoadFailed'))
     contentResources.value = r.resources || {}
   } catch (e: unknown) {
     toast.error(errorMessage(e))
@@ -166,7 +170,7 @@ function listValue(p: PluginInfo, key: string, field: PluginField): string[] {
 }
 function secretPlaceholder(p: PluginInfo, key: string, field: PluginField): string {
   const v = p.config?.[key] as { configured?: boolean; masked?: string } | undefined
-  return field.ui?.sensitive && v?.configured ? `已配置 ${v.masked}，留空不修改` : ''
+  return field.ui?.sensitive && v?.configured ? t('secretConfiguredPlaceholder', { masked: v.masked || '' }) : ''
 }
 function showGroup(fields: [string, PluginField][], index: number): boolean {
   const group = fields[index][1].ui?.group
@@ -180,14 +184,14 @@ function validate(p: PluginInfo): string {
     const v = value(p, key, field)
     if (field.type === 'number' || field.type === 'integer') {
       const n = Number(v)
-      if (field.exclusiveMinimum !== undefined && n <= field.exclusiveMinimum) return `${field.title || key} 必须大于 ${field.exclusiveMinimum}`
-      if (field.minimum !== undefined && n < field.minimum) return `${field.title || key} 不能小于 ${field.minimum}`
-      if (field.maximum !== undefined && n > field.maximum) return `${field.title || key} 不能大于 ${field.maximum}`
+      if (field.exclusiveMinimum !== undefined && n <= field.exclusiveMinimum) return t('validationGreaterThan', { field: field.title || key, value: field.exclusiveMinimum })
+      if (field.minimum !== undefined && n < field.minimum) return t('validationAtLeast', { field: field.title || key, value: field.minimum })
+      if (field.maximum !== undefined && n > field.maximum) return t('validationAtMost', { field: field.title || key, value: field.maximum })
     }
     if (field.type === 'string') {
       const s = String(v || '')
-      if (field.minLength !== undefined && s.length > 0 && s.length < field.minLength) return `${field.title || key} 至少 ${field.minLength} 位`
-      if (field.maxLength !== undefined && s.length > field.maxLength) return `${field.title || key} 最多 ${field.maxLength} 位`
+      if (field.minLength !== undefined && s.length > 0 && s.length < field.minLength) return t('validationMinLength', { field: field.title || key, value: field.minLength })
+      if (field.maxLength !== undefined && s.length > field.maxLength) return t('validationMaxLength', { field: field.title || key, value: field.maxLength })
     }
   }
   return ''
@@ -207,7 +211,7 @@ async function save(p: PluginInfo) {
       }
     }
     await api(`/plugins/${encodeURIComponent(p.id)}/config`, { method: 'PUT', body: JSON.stringify(payload) })
-    toast.success(`${p.name} 已保存`)
+    toast.success(t('pluginNamedSaved', { name: p.name }))
     await load()
   } catch (e: unknown) {
     toast.error(errorMessage(e))
@@ -219,7 +223,7 @@ async function restart(p: PluginInfo) {
   busy.value = p.id
   try {
     await api(`/plugins/${encodeURIComponent(p.id)}/restart`, { method: 'POST' })
-    toast.success(`${p.name} 已请求重启`)
+    toast.success(t('pluginNamedRestartRequested', { name: p.name }))
     await load()
   } catch (e: unknown) {
     toast.error(errorMessage(e))
@@ -228,13 +232,13 @@ async function restart(p: PluginInfo) {
   }
 }
 async function clearCardCache(p: PluginInfo) {
-  if (!window.confirm('确定清理 QQ 卡片缓存吗？只会删除 data/bot/cards 里的临时 card_*.png。')) return
+  if (!window.confirm(t('confirmClearCardCache'))) return
   busy.value = `${p.id}:card-cache`
   try {
     const r = await api<{ deleted?: number; bytes_deleted?: number }>(`/plugins/${encodeURIComponent(p.id)}/card-cache/clear`, { method: 'POST' })
     const deleted = r.deleted || 0
     const mb = ((r.bytes_deleted || 0) / 1024 / 1024).toFixed(2)
-    toast.success(`已清理 ${deleted} 张卡片，释放 ${mb} MB`)
+    toast.success(t('cardCacheCleared', { count: deleted, mb }))
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   } finally {
@@ -245,7 +249,7 @@ async function toggleRunning(p: PluginInfo, on: boolean) {
   busy.value = p.id
   try {
     await api(`/plugins/${encodeURIComponent(p.id)}/${on ? 'start' : 'stop'}`, { method: 'POST' })
-    toast.success(`${p.name} 已${on ? '启动' : '停止'}`)
+    toast.success(t(on ? 'pluginNamedStarted' : 'pluginNamedStopped', { name: p.name }))
     await load()
   } catch (e: unknown) {
     toast.error(errorMessage(e))
@@ -259,7 +263,7 @@ function onPluginFile(event: Event) {
 }
 async function installPlugin() {
   if (!installFile.value) {
-    toast.error('请选择插件 zip 包')
+    toast.error(t('selectPluginZip'))
     return
   }
   busy.value = 'install'
@@ -268,7 +272,7 @@ async function installPlugin() {
     body.append('file', installFile.value)
     body.append('overwrite', overwriteInstall.value ? 'true' : 'false')
     await api('/plugins/install', { method: 'POST', body })
-    toast.success('插件已安装')
+    toast.success(t('pluginZipInstalled'))
     installFile.value = null
     overwriteInstall.value = false
     await load()
@@ -288,7 +292,7 @@ async function installMarketPlugin(item: PluginMarketplaceItem) {
       method: 'POST',
       body: JSON.stringify({ plugin_id: item.id, overwrite: item.installed }),
     })
-    toast.success(`${item.name} 已${item.installed ? '更新' : '安装'}`)
+    toast.success(t(item.installed ? 'pluginNamedUpdated' : 'pluginNamedInstalled', { name: item.name }))
     await load()
     await loadMarketplace()
     await loadPluginThemes()
@@ -303,7 +307,7 @@ async function updateInstalledPlugin(p: PluginInfo) {
   busy.value = `${p.id}:update`
   try {
     await api(`/plugins/${encodeURIComponent(p.id)}/update`, { method: 'POST' })
-    toast.success(`${p.name} 已更新`)
+    toast.success(t('pluginNamedUpdated', { name: p.name }))
     await load()
     await loadMarketplace()
     await loadPluginThemes()
@@ -315,12 +319,12 @@ async function updateInstalledPlugin(p: PluginInfo) {
   }
 }
 async function uninstallPlugin(p: PluginInfo) {
-  const message = `确定卸载 ${p.name} 吗？默认会保留插件配置和运行数据。`
+  const message = t('confirmUninstallPlugin', { name: p.name })
   if (!window.confirm(message)) return
   busy.value = `${p.id}:uninstall`
   try {
     await api(`/plugins/${encodeURIComponent(p.id)}`, { method: 'DELETE', body: JSON.stringify({ delete_data: false }) })
-    toast.success(`${p.name} 已卸载`)
+    toast.success(t('pluginNamedUninstalled', { name: p.name }))
     await load()
     await loadMarketplace()
     await loadPluginThemes()
@@ -335,7 +339,7 @@ async function addMirror() {
   busy.value = 'mirror:add'
   try {
     await api('/plugins/mirrors', { method: 'POST', body: JSON.stringify(newMirror) })
-    toast.success('镜像源已添加')
+    toast.success(t('mirrorAdded'))
     Object.assign(newMirror, { id: '', name: '', raw_prefix: '', clone_prefix: '', enabled: true, priority: mirrors.value.length + 1 })
     await loadMirrors()
   } catch (e: unknown) {
@@ -356,11 +360,11 @@ async function saveMirror(mirror: PluginMirror, patch: Partial<PluginMirror>) {
   }
 }
 async function deleteMirror(mirror: PluginMirror) {
-  if (!window.confirm(`确定删除镜像源 ${mirror.name} 吗？`)) return
+  if (!window.confirm(t('confirmDeleteMirror', { name: mirror.name }))) return
   busy.value = `mirror:${mirror.id}`
   try {
     await api(`/plugins/mirrors/${encodeURIComponent(mirror.id)}`, { method: 'DELETE' })
-    toast.success('镜像源已删除')
+    toast.success(t('mirrorDeleted'))
     await loadMirrors()
   } catch (e: unknown) {
     toast.error(errorMessage(e))
@@ -379,10 +383,10 @@ async function testMirror(mirror?: PluginMirror) {
     for (const result of r.results || []) {
       const id = result.mirror_id || 'all'
       mirrorTests.value[id] = result.ok
-        ? `可用，${result.elapsed_ms || 0} ms`
-        : `失败：${result.error || result.status || '未知错误'}`
+        ? t('mirrorAvailable', { ms: result.elapsed_ms || 0 })
+        : t('mirrorFailed', { reason: result.error || result.status || t('unknownError') })
     }
-    toast[r.ok ? 'success' : 'error'](r.ok ? '镜像测试完成' : (r.error || '所有镜像测试失败'))
+    toast[r.ok ? 'success' : 'error'](r.ok ? t('mirrorTestDone') : (r.error || t('allMirrorTestsFailed')))
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   } finally {
@@ -393,16 +397,16 @@ function openUrl(url?: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
 function pluginTypeLabel(type?: string): string {
-  const labels: Record<string, string> = {
-    'channel-adapter': '聊天桥接',
-    'content-pack': '内容包',
-    'theme': '主题',
-    'map-pack': '地图包',
-    'import-export': '导入导出',
-    'provider': '服务提供器',
-    'tool': '工具',
+  const labels: Record<string, MessageKey> = {
+    'channel-adapter': 'pluginTypeChannelAdapter',
+    'content-pack': 'pluginTypeContentPack',
+    'theme': 'pluginTypeTheme',
+    'map-pack': 'pluginTypeMapPack',
+    'import-export': 'pluginTypeImportExport',
+    'provider': 'pluginTypeProvider',
+    'tool': 'pluginTypeTool',
   }
-  return labels[type || ''] || type || '未分类'
+  return labels[type || ''] ? t(labels[type || '']) : type || t('uncategorized')
 }
 function permissionDescription(p: PluginInfo, permission: string): string {
   return p.permission_details?.find(item => item.id === permission)?.description || permission
@@ -416,14 +420,14 @@ function selectPluginTheme(value: string | null) {
   applyPluginTheme(value)
 }
 function contentTitle(item: PluginContentResource): string {
-  return String(item.character_name || item.name || item.id || '未命名')
+  return String(item.character_name || item.name || item.id || t('unnamed'))
 }
 function contentSubtitle(item: PluginContentResource): string {
   return [item.plugin_name || item.plugin_id || '', item.description || ''].filter(Boolean).join(' · ')
 }
 async function importContent(kind: string, item: PluginContentResource) {
   if (kind !== 'character_template' && !contentTargetWorldId.value) {
-    toast.error('请选择要导入到的世界书')
+    toast.error(t('selectLorebookTarget'))
     return
   }
   const key = `${kind}:${item.plugin_id}:${item.id || item.name || item.character_name}`
@@ -438,8 +442,8 @@ async function importContent(kind: string, item: PluginContentResource) {
         target_world_id: kind === 'character_template' ? '' : contentTargetWorldId.value,
       }),
     })
-    if (!r.ok) throw new Error(r.error || '导入失败')
-    toast.success(kind === 'character_template' ? '已导入角色卡库' : '已导入世界书')
+    if (!r.ok) throw new Error(r.error || t('importFailed'))
+    toast.success(kind === 'character_template' ? t('importedCharacterLibrary') : t('importedLorebook'))
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   } finally {
@@ -455,24 +459,24 @@ onMounted(async () => {
 
 <template>
   <NTabs type="line" animated>
-    <NTabPane name="installed" tab="已安装">
+    <NTabPane name="installed" :tab="t('pluginsInstalledTab')">
       <NSpin :show="loading">
         <section class="plugin-install">
           <div>
-            <h3>安装插件</h3>
-            <p class="muted">选择符合 DiceFrame 插件标准的 zip 包。</p>
+            <h3>{{ t('installPluginTitle') }}</h3>
+            <p class="muted">{{ t('installPluginHelp') }}</p>
           </div>
           <div class="install-controls">
-            <input type="file" accept=".zip,application/zip" aria-label="插件 zip 包" @change="onPluginFile">
-            <NCheckbox v-model:checked="overwriteInstall">覆盖同 ID 插件</NCheckbox>
+            <input type="file" accept=".zip,application/zip" :aria-label="t('pluginZipAria')" @change="onPluginFile">
+            <NCheckbox v-model:checked="overwriteInstall">{{ t('overwriteSameIdPlugin') }}</NCheckbox>
             <NButton type="primary" :disabled="!installFile" :loading="busy === 'install'" @click="installPlugin">
               <template #icon><NIcon :component="CloudDownloadOutline" /></template>
-              安装
+              {{ t('install') }}
             </NButton>
           </div>
         </section>
 
-        <p v-if="!plugins.length" class="muted">暂无可用插件。</p>
+        <p v-if="!plugins.length" class="muted">{{ t('noPluginsAvailable') }}</p>
 
         <NCollapse v-model:expanded-names="expandedPluginNames">
           <NCollapseItem v-for="p in plugins" :key="p.id" :name="p.id" class="plugin-collapsible">
@@ -491,9 +495,9 @@ onMounted(async () => {
             </template>
 
             <NTabs type="line" animated class="plugin-tabs">
-              <NTabPane name="config" tab="配置">
+              <NTabPane name="config" :tab="t('config')">
                 <section v-if="p.permissions?.length" class="permission-panel">
-                  <h4>权限</h4>
+                  <h4>{{ t('permissions') }}</h4>
                   <div class="permission-list">
                     <NTag v-for="permission in p.permissions" :key="permission" size="small">
                       {{ permission }}
@@ -523,7 +527,7 @@ onMounted(async () => {
                           :rows="4"
                           :input-props="{ 'aria-label': entry[1].title || entry[0] }"
                           :value="listValue(p, entry[0], entry[1]).join('\n')"
-                          placeholder="每行一个，或用逗号分隔（自动去重）"
+                          :placeholder="t('arrayInputPlaceholder')"
                           @update:value="set(p, entry[0], parseList($event))"
                         />
                         <NInput
@@ -550,44 +554,44 @@ onMounted(async () => {
                   </template>
                 </div>
               </NTabPane>
-              <NTabPane v-if="p.id === 'qq-napcat'" name="guide" tab="说明文档">
+              <NTabPane v-if="p.id === 'qq-napcat'" name="guide" :tab="t('guideDocs')">
                 <NapcatGuide />
               </NTabPane>
             </NTabs>
 
             <div class="actions-row">
-              <NButton type="primary" :loading="busy === p.id" @click="save(p)">保存配置</NButton>
+              <NButton type="primary" :loading="busy === p.id" @click="save(p)">{{ t('saveConfig') }}</NButton>
               <NButton v-if="p.has_entrypoint" :loading="busy === p.id" @click="restart(p)">
                 <template #icon><NIcon :component="RefreshOutline" /></template>
-                重启插件
+                {{ t('restartPlugin') }}
               </NButton>
               <NButton secondary :loading="busy === `${p.id}:update`" @click="updateInstalledPlugin(p)">
                 <template #icon><NIcon :component="CloudDownloadOutline" /></template>
-                从商店更新
+                {{ t('updateFromStore') }}
               </NButton>
-              <NButton v-if="p.id === 'qq-napcat'" secondary :loading="busy === `${p.id}:card-cache`" @click="clearCardCache(p)">清理卡片缓存</NButton>
+              <NButton v-if="p.id === 'qq-napcat'" secondary :loading="busy === `${p.id}:card-cache`" @click="clearCardCache(p)">{{ t('clearCardCache') }}</NButton>
               <NButton tertiary type="error" :loading="busy === `${p.id}:uninstall`" @click="uninstallPlugin(p)">
                 <template #icon><NIcon :component="TrashOutline" /></template>
-                卸载插件
+                {{ t('uninstallPlugin') }}
               </NButton>
             </div>
-            <p v-if="p.has_entrypoint" class="muted hint">修改令牌 / 连接参数后，需重启插件才会生效。</p>
-            <p v-else class="muted hint">声明型插件不启动后台进程；保存配置后立即记录到插件数据目录。</p>
+            <p v-if="p.has_entrypoint" class="muted hint">{{ t('pluginRestartHint') }}</p>
+            <p v-else class="muted hint">{{ t('declarativePluginHint') }}</p>
           </NCollapseItem>
         </NCollapse>
       </NSpin>
     </NTabPane>
 
-    <NTabPane name="marketplace" tab="插件商店">
+    <NTabPane name="marketplace" :tab="t('pluginMarketplaceTab')">
       <section class="toolbar-row">
-        <NInput v-model:value="marketKeyword" placeholder="搜索插件名称、ID、标签或仓库" clearable />
+        <NInput v-model:value="marketKeyword" :placeholder="t('pluginSearchPlaceholder')" clearable />
         <NButton :loading="marketLoading" @click="loadMarketplace">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('refresh') }}
         </NButton>
       </section>
       <p v-if="marketplaceSource?.mirror_name" class="muted source-line">
-        来源：{{ marketplaceSource.mirror_name }}，{{ marketplaceSource.elapsed_ms || 0 }} ms
+        {{ t('source') }}: {{ marketplaceSource.mirror_name }}, {{ marketplaceSource.elapsed_ms || 0 }} ms
       </p>
       <NSpin :show="marketLoading">
         <div class="market-grid">
@@ -596,77 +600,77 @@ onMounted(async () => {
               <NIcon :component="ExtensionPuzzleOutline" />
               <div>
                 <h3>{{ item.name }}</h3>
-                <p class="muted">{{ item.id }} · {{ item.version || '未知版本' }}</p>
+                <p class="muted">{{ item.id }} · {{ item.version || t('unknownVersion') }}</p>
               </div>
             </div>
-            <p class="market-desc">{{ item.description || '暂无介绍' }}</p>
+            <p class="market-desc">{{ item.description || t('noDescription') }}</p>
             <div class="tag-row">
               <NTag v-if="item.plugin_type" size="small">{{ pluginTypeLabel(item.plugin_type) }}</NTag>
-              <NTag v-if="item.installed" type="success" size="small">已安装 {{ item.installed_version }}</NTag>
+              <NTag v-if="item.installed" type="success" size="small">{{ t('installedVersion', { version: item.installed_version || '' }) }}</NTag>
               <NTag v-for="tag in item.tags || []" :key="tag" size="small">{{ tag }}</NTag>
             </div>
             <p v-if="item.permissions?.length" class="muted market-permissions">
-              权限：{{ item.permissions.slice(0, 4).join('、') }}{{ item.permissions.length > 4 ? ' 等' : '' }}
+              {{ t('permissions') }}: {{ item.permissions.slice(0, 4).join(t('listSeparator')) }}{{ item.permissions.length > 4 ? t('andMore') : '' }}
             </p>
             <div class="market-actions">
               <NButton type="primary" :loading="busy === `market:${item.id}`" @click="installMarketPlugin(item)">
                 <template #icon><NIcon :component="CloudDownloadOutline" /></template>
-                {{ item.installed ? '更新' : '安装' }}
+                {{ item.installed ? t('update') : t('install') }}
               </NButton>
               <NButton secondary :disabled="!item.repository_url && !item.homepage" @click="openUrl(item.repository_url || item.homepage)">
-                打开仓库
+                {{ t('openRepository') }}
               </NButton>
             </div>
           </article>
         </div>
-        <p v-if="!filteredMarketplace.length" class="muted">插件商店暂无匹配项目。</p>
+        <p v-if="!filteredMarketplace.length" class="muted">{{ t('marketplaceNoMatches') }}</p>
       </NSpin>
     </NTabPane>
 
-    <NTabPane name="themes" tab="主题">
+    <NTabPane name="themes" :tab="t('themes')">
       <section class="theme-plugin-panel">
         <div>
-          <h3>插件主题</h3>
-          <p class="muted">主题插件会覆盖 DiceFrame 的 CSS 变量；选择只保存在当前浏览器。</p>
+          <h3>{{ t('pluginThemes') }}</h3>
+          <p class="muted">{{ t('pluginThemesHelp') }}</p>
         </div>
         <div class="theme-plugin-controls">
           <NSelect
             :value="pluginThemeId || null"
             :options="themeOptions"
-            placeholder="选择已启用的主题插件"
+            :placeholder="t('selectEnabledThemePlugin')"
             clearable
             @update:value="selectPluginTheme"
           />
-          <NButton :disabled="!pluginThemeId" @click="clearPluginTheme">清除</NButton>
-          <NButton @click="loadPluginThemes">刷新</NButton>
+          <NButton :disabled="!pluginThemeId" @click="clearPluginTheme">{{ t('clear') }}</NButton>
+          <NButton @click="loadPluginThemes">{{ t('refresh') }}</NButton>
         </div>
         <p v-if="selectedThemeDescription()" class="muted">{{ selectedThemeDescription() }}</p>
-        <p v-if="!pluginThemes.length" class="muted">暂无已启用的主题插件。</p>
+        <p v-if="!pluginThemes.length" class="muted">{{ t('noEnabledThemePlugins') }}</p>
       </section>
     </NTabPane>
 
-    <NTabPane name="content" tab="内容包">
+    <NTabPane name="content" :tab="t('contentPacks')">
       <section class="toolbar-row">
         <NSelect
           v-model:value="contentTargetWorldId"
           :options="worldOptions"
-          placeholder="选择世界书"
+          :placeholder="t('selectLorebook')"
           class="content-world-select"
         />
         <NButton :loading="contentLoading" @click="loadContentResources">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('refresh') }}
         </NButton>
       </section>
       <NSpin :show="contentLoading">
         <div class="content-catalog">
           <section v-for="group in contentGroups" :key="group.key" class="content-group">
-            <h3>{{ group.label }} <span class="muted">{{ group.items.length }}</span></h3>
+            <h3>{{ t(group.labelKey) }} <span class="muted">{{ group.items.length }}</span></h3>
             <div v-if="group.items.length" class="content-list">
               <article v-for="item in group.items" :key="`${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`" class="content-item">
                 <div class="content-item-main">
                   <strong>{{ contentTitle(item) }}</strong>
-                  <p class="muted">{{ contentSubtitle(item) || '暂无说明' }}</p>
+                  <p class="muted">{{ contentSubtitle(item) || t('noDescription') }}</p>
                 </div>
                 <NButton
                   size="small"
@@ -675,37 +679,37 @@ onMounted(async () => {
                   :loading="busy === `${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`"
                   @click="importContent(group.key, item)"
                 >
-                  {{ group.key === 'character_template' ? '导入角色卡' : '导入世界书' }}
+                  {{ group.key === 'character_template' ? t('importCharacterCard') : t('importLorebook') }}
                 </NButton>
               </article>
             </div>
-            <p v-else class="muted">暂无。</p>
+            <p v-else class="muted">{{ t('none') }}</p>
           </section>
         </div>
       </NSpin>
     </NTabPane>
 
-    <NTabPane name="mirrors" tab="镜像源">
+    <NTabPane name="mirrors" :tab="t('mirrorSources')">
       <section class="toolbar-row">
         <NButton :loading="mirrorLoading" @click="loadMirrors">
           <template #icon><NIcon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('refresh') }}
         </NButton>
         <NButton :loading="busy === 'mirror-test:all'" @click="testMirror()">
-          测试全部
+          {{ t('testAll') }}
         </NButton>
       </section>
 
       <div class="mirror-form">
-        <NInput v-model:value="newMirror.id" placeholder="ID，例如 my-mirror" />
-        <NInput v-model:value="newMirror.name" placeholder="名称" />
-        <NInput v-model:value="newMirror.raw_prefix" class="mirror-url-input" placeholder="Raw 前缀" />
-        <NInput v-model:value="newMirror.clone_prefix" class="mirror-url-input" placeholder="GitHub/下载前缀" />
-        <NInputNumber v-model:value="newMirror.priority" :min="1" placeholder="优先级" />
+        <NInput v-model:value="newMirror.id" :placeholder="t('mirrorIdPlaceholder')" />
+        <NInput v-model:value="newMirror.name" :placeholder="t('name')" />
+        <NInput v-model:value="newMirror.raw_prefix" class="mirror-url-input" :placeholder="t('rawPrefix')" />
+        <NInput v-model:value="newMirror.clone_prefix" class="mirror-url-input" :placeholder="t('clonePrefix')" />
+        <NInputNumber v-model:value="newMirror.priority" :min="1" :placeholder="t('priority')" />
         <NSwitch v-model:value="newMirror.enabled" />
         <NButton type="primary" :loading="busy === 'mirror:add'" @click="addMirror">
           <template #icon><NIcon :component="AddOutline" /></template>
-          添加
+          {{ t('add') }}
         </NButton>
       </div>
 
@@ -717,19 +721,19 @@ onMounted(async () => {
                 <NSwitch :value="mirror.enabled" @update:value="saveMirror(mirror, { enabled: $event })" />
                 <strong>{{ mirror.name }}</strong>
                 <NTag size="small">{{ mirror.id }}</NTag>
-                <NTag size="small">优先级 {{ mirror.priority }}</NTag>
+                <NTag size="small">{{ t('priority') }} {{ mirror.priority }}</NTag>
               </div>
               <p class="muted">Raw：{{ mirror.raw_prefix }}</p>
               <div class="mirror-edit-grid">
-                <NInput v-model:value="mirror.name" placeholder="名称" />
-                <NInput v-model:value="mirror.raw_prefix" class="mirror-url-input" placeholder="Raw 前缀" />
-                <NInput v-model:value="mirror.clone_prefix" class="mirror-url-input" placeholder="下载前缀" />
+                <NInput v-model:value="mirror.name" :placeholder="t('name')" />
+                <NInput v-model:value="mirror.raw_prefix" class="mirror-url-input" :placeholder="t('rawPrefix')" />
+                <NInput v-model:value="mirror.clone_prefix" class="mirror-url-input" :placeholder="t('downloadPrefix')" />
                 <NInputNumber v-model:value="mirror.priority" :min="1" />
               </div>
               <p v-if="mirrorTests[mirror.id]" class="mirror-test">{{ mirrorTests[mirror.id] }}</p>
             </div>
             <div class="mirror-actions">
-              <NButton size="small" :loading="busy === `mirror-test:${mirror.id}`" @click="testMirror(mirror)">测试</NButton>
+              <NButton size="small" :loading="busy === `mirror-test:${mirror.id}`" @click="testMirror(mirror)">{{ t('test') }}</NButton>
               <NButton size="small" @click="saveMirror(mirror, { priority: Math.max(1, mirror.priority - 1) })">
                 <template #icon><NIcon :component="ChevronUp" /></template>
               </NButton>
@@ -738,7 +742,7 @@ onMounted(async () => {
               </NButton>
               <NButton size="small" @click="saveMirror(mirror, mirror)">
                 <template #icon><NIcon :component="CreateOutline" /></template>
-                保存
+                {{ t('saveAction') }}
               </NButton>
               <NButton size="small" type="error" tertiary @click="deleteMirror(mirror)">
                 <template #icon><NIcon :component="TrashOutline" /></template>

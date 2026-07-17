@@ -1,25 +1,31 @@
 import type { CharacterSheet, RuleMeta, SpecialStatSpec } from '@/api/types'
+import { i18n } from '@/i18n'
 import { getResourceValue, resourceLabel } from './ruleSchema'
 
 export interface DiceTag { system: string; value: string }
 
+export const SYSTEM_DICE_MARKER_PREFIX = '(\u7cfb\u7edf\u63b7\u9ab0:'
+const SYSTEM_DICE_RE = new RegExp(`\\n\\${SYSTEM_DICE_MARKER_PREFIX}\\s*([^=\\s]+)=([^\\)]+)\\)\\s*$`)
+
 export function parseAction(text: string): { text: string; dice: DiceTag | null } {
   const raw = String(text || '')
-  const m = raw.match(/\n\(系统掷骰:\s*([^=\s]+)=([^\)]+)\)\s*$/)
+  const m = raw.match(SYSTEM_DICE_RE)
   if (!m) return { text: raw, dice: null }
   return { text: raw.slice(0, m.index).trim(), dice: { system: m[1].toUpperCase(), value: m[2].trim() } }
 }
 
-const STATE_LABELS: Record<string, string> = {
-  active_action: '行动阶段',
-  active_judgment: 'GM 判定中',
-  paused: '暂停',
-  waiting: '等待玩家',
-  created: '已创建',
-  ended: '已结束',
+const STATE_LABELS: Record<string, { zh: string; en: string }> = {
+  active_action: { zh: '行动阶段', en: 'Action Phase' },
+  active_judgment: { zh: 'GM 判定中', en: 'GM Resolving' },
+  paused: { zh: '暂停', en: 'Paused' },
+  waiting: { zh: '等待玩家', en: 'Waiting for Players' },
+  created: { zh: '已创建', en: 'Created' },
+  ended: { zh: '已结束', en: 'Ended' },
 }
 export function gameStateLabel(state?: string): string {
-  return (state && STATE_LABELS[state]) || state || '未知'
+  const label = state ? STATE_LABELS[state] : undefined
+  if (label) return i18n.global.locale.value === 'en' ? label.en : label.zh
+  return state || (i18n.global.locale.value === 'en' ? 'Unknown' : '未知')
 }
 
 export function playerColor(userId: string): string {
@@ -27,8 +33,6 @@ export function playerColor(userId: string): string {
   String(userId || 'player').split('').forEach(ch => { hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0 })
   return `hsl(${Math.abs(hash) % 360} 68% 66%)`
 }
-
-export const DEFAULT_QUICK_ACTIONS = ['观察周围', '四处探索', '与人交谈', '准备战斗']
 
 const SPECIAL_STAT_COLORS: Record<string, string> = {
   sanity: 'stat-sanity',
@@ -38,7 +42,7 @@ const SPECIAL_STAT_COLORS: Record<string, string> = {
   cyberware_load: 'stat-cyber',
   humanity: 'stat-humanity',
   heat: 'stat-heat',
-  义体: 'stat-cyber',
+  '\u4e49\u4f53': 'stat-cyber',
 }
 export function specialStatColor(key: string): string {
   return SPECIAL_STAT_COLORS[key] || ''

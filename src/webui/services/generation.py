@@ -157,7 +157,8 @@ def _slug(value: str) -> str:
     return raw or "custom"
 
 
-async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "") -> dict[str, Any]:
+async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "",
+                        language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """按母版规则生成并保存一套 AI 自定义规则。"""
     if not api._llm_client:
         return {"ok": False, "error": "LLM 客户端未初始化，请先配置 API Key"}
@@ -165,10 +166,11 @@ async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "") ->
     if not prompt:
         return {"ok": False, "error": "请输入规则题材描述"}
     source_rule_id = (source_rule_id or "freeform_fantasy").strip()
-    source_path = RuleSystem.path_for(api._rules_dir, source_rule_id)
+    source_path = RuleSystem.path_for(api._rules_dir, source_rule_id, language)
     if not source_path.exists():
         return {"ok": False, "error": f"母版规则不存在: {source_rule_id}"}
     try:
+        language = normalize_language(language)
         source_rule = json.loads(source_path.read_text(encoding="utf-8"))
         rule_id = f"ai_rule_{_slug(prompt)}_{int(time.time())}"
         data = await creator.generate_rule(
@@ -178,6 +180,7 @@ async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "") ->
             source_rule_id=source_rule_id,
             rule_id=rule_id,
             max_tokens=max(api.character_gen_max_tokens, 4096),
+            language=language,
         )
         if not data:
             return {"ok": False, "error": "AI 返回规则 JSON 解析失败，请重试"}
@@ -204,19 +207,23 @@ async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "") ->
         return {"ok": False, "error": str(e)}
 
 
-async def generate_character(api: "WebAPI", prompt: str, game_key: str = "", rule_id: str = "") -> dict[str, Any]:
+async def generate_character(api: "WebAPI", prompt: str, game_key: str = "", rule_id: str = "",
+                             language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """使用 AI 根据用户描述生成角色卡。"""
     if not api._llm_client:
         return {"ok": False, "error": "LLM 客户端未初始化，请先配置 API Key"}
     try:
-        rule = api._load_rule_by_id(rule_id)
+        resolved_language = normalize_language(language)
+        rule = api._load_rule_by_id(rule_id, resolved_language)
         if game_key:
             inst = api._reg.get(api._parse_key(game_key))
             if inst:
+                resolved_language = normalize_language(language or getattr(inst, "language", DEFAULT_LANGUAGE))
                 rule = rule or api._load_rule_for_game(inst)
         data = await creator.generate_character(
             api._llm_client, prompt, game_key, api._reg, rule=rule,
             max_tokens=api.character_gen_max_tokens,
+            language=resolved_language,
         )
         if not data:
             return {"ok": False, "error": "AI 返回内容解析失败，请重试"}
@@ -226,11 +233,17 @@ async def generate_character(api: "WebAPI", prompt: str, game_key: str = "", rul
         return {"ok": False, "error": str(e)}
 
 
-async def generate_text(api: "WebAPI", prompt: str, system_hint: str = "") -> dict[str, Any]:
+async def generate_text(api: "WebAPI", prompt: str, system_hint: str = "",
+                        language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """轻量文字生成：直接发 prompt 给 LLM，返回原始文本，不解析 JSON。"""
     if not api._llm_client:
         return {"ok": False, "error": "LLM 客户端未初始化"}
-    system = system_hint or "你是一个TRPG角色设定助手。根据用户描述，生成简短实用的回答。不要输出JSON，直接输出文字。"
+    language = normalize_language(language)
+    system = system_hint or (
+        "You are a TRPG character and setting assistant. Answer briefly and practically in natural English. Do not output JSON."
+        if language == "en"
+        else "你是一个TRPG角色设定助手。根据用户描述，生成简短实用的回答。不要输出JSON，直接输出文字。"
+    )
     try:
         response = await api._llm_client.call(
             system_prompt=system,

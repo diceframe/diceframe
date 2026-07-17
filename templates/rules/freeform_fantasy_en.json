@@ -1,0 +1,52 @@
+{
+  "language": "en",
+  "extends": "base_d20",
+  "rule_version": "1.1",
+  "rule_id": "freeform_fantasy",
+  "rule_name": "Classic Fantasy Freeform",
+  "description": "A lightweight freeform sword-and-sorcery rule based on D&D.",
+  "attributes": [
+    {"key": "str", "name": "Strength", "min": 3, "max": 18},
+    {"key": "dex", "name": "Dexterity", "min": 3, "max": 18},
+    {"key": "con", "name": "Constitution", "min": 3, "max": 18},
+    {"key": "int", "name": "Intelligence", "min": 3, "max": 18},
+    {"key": "wis", "name": "Wisdom", "min": 3, "max": 18},
+    {"key": "cha", "name": "Charisma", "min": 3, "max": 18}
+  ],
+  "special_stats": [],
+  "attribute_points": 60,
+  "attr_hint": "Attributes use 3-18 values; 10 is roughly average, 14+ means clear aptitude. Concentrating points leaves clear weaknesses.",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare", "legendary"],
+  "max_skills": 3,
+  "skill_point_total": 200,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "Skills tell the GM what the character excels at. Write as \"Skill Name (20-80)\" or just the name; higher values mean more reliability in narrative and checks.",
+  "currency": "Gold",
+  "item_categories": {
+    "equipment": ["Sword", "Bow", "Staff", "Dagger", "Scimitar", "Greatsword", "Spear", "Mace", "Warhammer", "Shield", "Leather Armor", "Chain Mail", "Plate Armor", "Robe", "Boots", "Gloves", "Helmet", "Cloak", "Bracers", "Necklace", "Ring", "Armor", "Body Armor", "Chestplate", "Greaves", "Armguards", "Pauldrons"],
+    "consumable": ["Potion", "Scroll", "Elixir", "Rations", "Bandage", "Antidote", "Bomb", "Talisman", "Torch", "Arrows", "Crossbow Bolts"],
+    "misc": ["Key", "Map", "Letter", "Token", "Stone", "Gem", "Crystal", "Book", "Notebook", "Badge", "Backpack", "Rope", "Lantern"]
+  },
+  "classes": [
+    {"name": "Warrior", "description": "Frontline melee specialist", "starter_equipment": ["Iron Sword", "Leather Armor"]},
+    {"name": "Mage", "description": "Arcane spellcaster", "starter_equipment": ["Staff", "Spellbook"]},
+    {"name": "Ranger", "description": "Ranged and tracking specialist", "starter_equipment": ["Longbow", "Arrows x20"]},
+    {"name": "Rogue", "description": "Stealth and lockpicking expert", "starter_equipment": ["Dagger", "Lockpicks"]}
+  ],
+  "skill_pools": {
+    "Warrior": ["Heavy Strike", "Defensive Stance", "Charge"],
+    "Mage": ["Fireball", "Magic Shield", "Arcana"],
+    "Ranger": ["Precise Shot", "Tracking", "Nature Sense"],
+    "Rogue": ["Stealth", "Lockpicking", "Sneak Attack"]
+  },
+  "gm_prompt_appendix": "You are the GM of a classic fantasy world. The world is full of magic, monsters, and adventure. Players can freely explore dungeons, interact with NPCs, and solve puzzles. Combat uses the d20 resolution system.",
+  "difficulty_instructions": {
+    "轻松": "Easy fights, ample resources, friendly NPCs",
+    "标准": "Challenging but fair, limited resources, strategy needed",
+    "硬核": "Scarce resources, fierce enemies, permanent death possible"
+  }
+}

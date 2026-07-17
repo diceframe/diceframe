@@ -1,0 +1,83 @@
+{
+  "language": "en",
+  "extends": "base_d20",
+  "rule_version": "1.2",
+  "rule_id": "freeform_cyberpunk",
+  "rule_name": "Cyberpunk d20 Freeform",
+  "description": "A near-future high-tech low-life cyberpunk d20 lightweight rule; emphasizes cyberware, hacking, corporate oppression, gang conflict, heat tracking, and street survival; does not correspond to Cyberpunk 2020/RED official rules.",
+  "attributes": [
+    {"key": "str", "name": "Strength", "min": 3, "max": 18},
+    {"key": "dex", "name": "Dexterity", "min": 3, "max": 18},
+    {"key": "con", "name": "Constitution", "min": 3, "max": 18},
+    {"key": "int", "name": "Intelligence", "min": 3, "max": 18},
+    {"key": "wis", "name": "Wisdom", "min": 3, "max": 18},
+    {"key": "cha", "name": "Charisma", "min": 3, "max": 18}
+  ],
+  "special_stats": [
+    {
+      "key": "humanity",
+      "name": "Humanity",
+      "max": 100,
+      "initial": 100,
+      "description": "How much the character retains of self, emotion, and social bonds. Trauma, betrayal, extreme cyberization, or corporate brainwashing lower humanity."
+    },
+    {
+      "key": "cyberware_load",
+      "name": "Cyberware Load",
+      "max": 10,
+      "initial": 0,
+      "description": "The burden implanted cyberware places on the body and nervous system. The closer to the limit, the more rejection, maintenance cost, humanity loss, or hacking risk."
+    },
+    {
+      "key": "heat",
+      "name": "Heat",
+      "max": 10,
+      "initial": 0,
+      "description": "How much corporate security, police, gangs, or bounty hunters are watching the character. Higher heat means more frequent checks, tracking, and retaliation."
+    }
+  ],
+  "attribute_points": 60,
+  "attr_hint": "Attributes use 3-18 values; 10 is roughly average. This rule keeps the d20 six-attribute skeleton: Strength leans toward melee and carry capacity, Dexterity toward firearms/stealth/driving, Constitution toward damage soak and cyberware tolerance, Intelligence toward hacking/tech/investigation, Wisdom toward scouting/reading situations, Charisma toward streetwise/deals/intimidation.",
+  "dice_system": "d20",
+  "combat_model": "hp_based",
+  "hp_formula": "5 + con * 3",
+  "valid_qualities": ["common", "uncommon", "rare"],
+  "max_skills": 4,
+  "skill_point_total": 220,
+  "max_skill_value": 80,
+  "skill_mode": "narrative",
+  "skill_hint": "Skills represent street expertise, professional training, or black-market experience. At creation pick 3-4 core skills with values 20-80; 40 is reliable entry-level, 60 is professional, 80 is a signature talent. Hacking, cyberware, corporate etiquette, and street relationships should carry costs in the story.",
+  "currency": "Credits",
+  "item_categories": {
+    "equipment": ["Pistol", "SMG", "Assault Rifle", "Shotgun", "Sniper Rifle", "Knife", "Stun Bat", "Body Armor", "Tactical Helmet", "Neural Whip", "Smart Scope", "Suppressor"],
+    "cyberware": ["Cybereye", "Prosthetic", "Subdermal Armor", "Neural Interface", "Reflex Booster", "Muscle Fiber Weave", "Datajack", "Subdermal Comms", "Pain Editor", "Scanner Implant"],
+    "consumable": ["Medkit", "Ammo", "Battery", "Stimulant", "Painkiller", "Neural Stabilizer", "Disposable Crack Chip", "Repair Kit", "Smoke Grenade", "Frag Grenade"],
+    "misc": ["Key", "Data Chip", "Hacking Terminal", "Drive", "Forged ID", "Comm", "Drone", "Corp Pass", "Black Money Account", "Informant Contact"]
+  },
+  "classes": [
+    {"name": "Street Merc", "description": "Frontline operator who makes a living with guns, cyberware, and guts.", "starter_equipment": ["Assault Rifle", "Body Armor"]},
+    {"name": "Hacker", "description": "A netghost who intrudes on systems, bypasses ICE, steals data, and sows electronic chaos.", "starter_equipment": ["Portable Terminal", "Disposable Crack Chip"]},
+    {"name": "Tech", "description": "Expert at repairing cyberware, modding weapons, operating drones, and dismantling security systems.", "starter_equipment": ["Toolbox", "Drone"]},
+    {"name": "Fixer", "description": "Broker who connects corps, gangs, and the black market, negotiating prices and selling intel.", "starter_equipment": ["Encrypted Comm", "Informant Contact"]},
+    {"name": "Corp", "description": "Insider renegade or agent who knows corporate process, contract traps, and office warfare.", "starter_equipment": ["Corp Pass", "Encrypted Terminal"]},
+    {"name": "Nomad Driver", "description": "Driver, smuggler, and route expert surviving in the wasteland outside the city and the logistics underworld.", "starter_equipment": ["Modded Vehicle Key", "Repair Kit"]},
+    {"name": "Media", "description": "Tracks truth, agitates public opinion, and exposes dirt; may also be devoured by the truth.", "starter_equipment": ["Recording Gear", "Forged ID"]},
+    {"name": "Street Doc", "description": "Underground doctor in back-alley clinics stitching gunshots, implanting cyberware, and handling illegal pharma.", "starter_equipment": ["Medkit", "Neural Stabilizer"]}
+  ],
+  "skill_pools": {
+    "Street Merc": ["Firearms", "Melee", "Tactical Cover", "Intimidate", "Athletics", "Cyberware Combat"],
+    "Hacker": ["Intrusion", "Electronic Warfare", "Data Mining", "Trace Evasion", "Security Systems", "Identity Spoofing"],
+    "Tech": ["Repair", "Cyberware Maintenance", "Weapon Modding", "Drone Control", "Demolitions", "Driving"],
+    "Fixer": ["Streetwise", "Intel Gathering", "Deal-Making", "Infiltration", "Gang Contacts", "Black Market"],
+    "Corp": ["Corporate Etiquette", "Contract Loophole", "Resource Allocation", "Psychological Pressure", "Security Protocol", "Insider Info"],
+    "Nomad Driver": ["Driving", "Vehicle Repair", "Route Planning", "Smuggling", "Wilderness Survival", "Vehicular Pursuit"],
+    "Media": ["Investigation", "Interview", "Recording", "Public Agitation", "Source Cultivation", "Expose"],
+    "Street Doc": ["First Aid", "Surgery", "Cyberware Install", "Pharma Compounding", "Mental Stabilization", "Black Clinic Contacts"]
+  },
+  "gm_prompt_appendix": "You are the GM of a near-future cyberpunk world. Megacorporations rule infrastructure, media, healthcare, security, and law; gangs control the districts and the black market fills every gap; players survive between neon, acid rain, slums, and steel skyscrapers.\n\nThis is a d20 lightweight rule, not Cyberpunk 2020/RED. Put the cyberpunk flavor into narrative structure and cost:\n- Each job must involve at least one of: corp, gang, police, black market, media, or fixers; never let a commission look clean and harmless.\n- Information matters more than firepower. Encourage reconnaissance, negotiation, hacking, infiltration, identity spoofing, framing scapegoats, and timely retreat.\n- Hackers are not master keys. Intrusion faces ICE, firewalls, tracing, alarms, honeypots, air gaps, or counter-hackers; failure raises heat or exposes identity.\n- Cyberware is powerful but costly. New cyberware may add cyberware load, maintenance fees, hacker backdoors, rejection, humanity loss, corp warranty locks, or debt.\n- Combat should be dangerous, brief, and expensive. Heavy fire draws security, drones, media, or gang retaliation; gunshots always have consequences.\n- Heat represents how much attention is on the party. Open killing, failed hacks, left evidence, offending a corp, or betraying a gang should raise heat; lying low, framing others, clearing evidence, or deals can lower it.\n- Humanity represents how much self the character retains. Cruel choices, betraying friends, over-cyberization, trauma, and corporate brainwashing lower humanity; relationships, rest, treatment, and holding the line can restore a little.\n\nResource tags: when needed, use STATE or narrative tags to describe changes to cyberware load, humanity, and heat; do not over-tally, but major costs must land on the character sheet or as story consequences.",
+  "difficulty_instructions": {
+    "轻松": "Lax security, bribable NPCs, slow heat gain; suited for small street jobs and newcomer sessions.",
+    "标准": "Tight corporate security, planning and trade-offs needed; failed hacks, shootouts, and betrayal visibly raise heat.",
+    "硬核": "Corporate manhunts everywhere, proactive ICE counterattacks, pricey cyberware upkeep; every violent act or failure can bring long-term debt, humanity loss, or a manhunt."
+  }
+}

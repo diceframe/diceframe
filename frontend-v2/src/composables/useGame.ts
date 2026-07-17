@@ -7,7 +7,7 @@ import type { LoreKeywords } from '@/utils/renderer'
 import { gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 
 const KEY_MAP:Record<string,keyof LoreKeywords>={npc:'npc',location:'location',item:'item',faction:'faction',event:'event',puzzle:'puzzle',other:'other',lore:'other'}
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || '加载失败') }
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || 'Load failed') }
 function buildLore(entries:LorebookResponse['entries'] = []):LoreKeywords{
   const lore:LoreKeywords={}
   for(const e of entries){

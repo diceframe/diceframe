@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MapData, MapLocation } from '@/api/types'
+import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ map?: MapData | null; currentScene?: string }>()
 const emit = defineEmits<{ 'lore-click': [name: string] }>()
+const { t } = useLocale()
 
 interface MapNode { id: string; name: string; x: number; y: number; current: boolean }
 
@@ -51,7 +53,7 @@ const edges = computed(() => {
 
 <template>
   <section class="map-graph panel">
-    <h2>场景地图</h2>
+    <h2>{{ t('mapTitle') }}</h2>
     <svg v-if="nodes.length" viewBox="0 0 100 100" class="map-svg" preserveAspectRatio="xMidYMid meet">
       <line v-for="(e, i) in edges" :key="'e' + i" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="map-edge" />
       <g
@@ -66,7 +68,7 @@ const edges = computed(() => {
         <text v-if="n.current" y="-5.5" text-anchor="middle" class="map-star">★</text>
       </g>
     </svg>
-    <p v-else class="muted">暂无地图数据。</p>
-    <p v-if="assetCount" class="muted">已加载 {{ assetCount }} 个地图包素材。</p>
+    <p v-else class="muted">{{ t('noMapData') }}</p>
+    <p v-if="assetCount" class="muted">{{ t('mapAssetsLoaded', { count: assetCount }) }}</p>
   </section>
 </template>

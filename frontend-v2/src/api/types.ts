@@ -384,7 +384,9 @@ export interface RuleMeta {
   rule_name?: string
   dice_system?: string
   attr_hint?: string
+  attr_hint_en?: string
   skill_hint?: string
+  skill_hint_en?: string
   hp_formula?: string
   mechanics?: string
   currency?: string
@@ -451,6 +453,7 @@ export interface WorldSummary {
   world_name?: string
   description?: string
   entry_count?: number
+  language?: string
   [key: string]: unknown
 }
 

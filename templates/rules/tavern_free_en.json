@@ -1,0 +1,62 @@
+{
+  "language": "en",
+  "rule_version": "1.1",
+  "rule_id": "tavern_free",
+  "rule_name": "Tavern Free RP",
+  "description": "A no-dice, no-attribute, pure-narrative roleplay mode-free conversation like a tavern session.",
+  "attributes": [],
+  "special_stats": [],
+  "attribute_points": 0,
+  "attr_hint": "Tavern mode needs no attribute allocation; just write the character concept.",
+  "dice_system": "none",
+  "combat_model": "narrative",
+  "hp_formula": "100",
+  "valid_qualities": [],
+  "max_skills": 5,
+  "skill_point_total": 0,
+  "max_skill_value": 0,
+  "skill_mode": "narrative",
+  "skill_hint": "Write 1-5 things you're good at; descriptive only, no numeric checks.",
+  "currency": "Gold",
+  "item_categories": {
+    "equipment": [],
+    "consumable": [],
+    "misc": []
+  },
+  "classes": [
+    {
+      "name": "Adventurer",
+      "description": "Free adventurer",
+      "starter_equipment": []
+    },
+    {
+      "name": "Merchant",
+      "description": "Traveling merchant",
+      "starter_equipment": []
+    },
+    {
+      "name": "Bard",
+      "description": "Bard",
+      "starter_equipment": []
+    },
+    {
+      "name": "Mercenary",
+      "description": "Hired fighter",
+      "starter_equipment": []
+    },
+    {
+      "name": "Scholar",
+      "description": "Traveling scholar",
+      "starter_equipment": []
+    }
+  ],
+  "skill_pools": {},
+  "mechanics": "narrative_only",
+  "ruleset_level": "narrative",
+  "dc_table": {},
+  "difficulty_dc_modifiers": {
+    "轻松": 0,
+    "标准": 0,
+    "硬核": 0
+  }
+}

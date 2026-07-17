@@ -9,6 +9,8 @@ import operator
 from collections.abc import Callable
 from pathlib import Path
 
+from src.engine.language import DEFAULT_LANGUAGE, field_suffixes, lang_suffix, localized_field
+
 logger = logging.getLogger("trpg")
 
 # 安全的数学表达式求值 —— 仅允许数字和基本算术运算
@@ -120,9 +122,15 @@ class RuleSystem:
         return cls(template)
 
     @staticmethod
-    def path_for(rules_dir: str | Path, rule_id: str) -> Path:
-        """构造规则文件路径，统一所有调用点。"""
-        return Path(rules_dir) / f"{rule_id}.json"
+    def path_for(rules_dir: str | Path, rule_id: str, language: str = "") -> Path:
+        """构造规则文件路径。language 非空时优先 <rule_id>_<suffix>.json（不存在回退原版）。"""
+        base = Path(rules_dir) / f"{rule_id}.json"
+        suffix = lang_suffix(language) if language else ""
+        if suffix:
+            localized = Path(rules_dir) / f"{rule_id}_{suffix}.json"
+            if localized.exists():
+                return localized
+        return base
 
     # ---- 属性 ----
 
@@ -351,11 +359,11 @@ class RuleSystem:
 
     # ---- GM Prompt ----
 
-    def get_gm_prompt_appendix(self) -> str:
-        return self.template.get("gm_prompt_appendix", "")
+    def get_gm_prompt_appendix(self, language: str = DEFAULT_LANGUAGE) -> str:
+        return str(localized_field(self.template, "gm_prompt_appendix", language) or "")
 
-    def get_difficulty_instructions(self, difficulty: str) -> str:
-        di = self.template.get("difficulty_instructions", {})
+    def get_difficulty_instructions(self, difficulty: str, language: str = DEFAULT_LANGUAGE) -> str:
+        di = localized_field(self.template, "difficulty_instructions", language)
         if isinstance(di, dict):
             return di.get(difficulty, "")
         return ""
@@ -445,7 +453,8 @@ class RuleSystem:
             if path.exists():
                 return cls.load(path)
         rule_id = world_data.get("default_rule", "freeform_fantasy")
-        rule_path = rules_dir / f"{rule_id}.json"
+        language = world_data.get("language", DEFAULT_LANGUAGE)
+        rule_path = cls.path_for(rules_dir, rule_id, language)
         if rule_path.exists():
             return cls.load(rule_path)
         return None
@@ -468,16 +477,32 @@ def list_available_rules(rules_dir: str | Path) -> list[dict]:
     rules_dir = Path(rules_dir)
     if not rules_dir.is_dir():
         return []
+    suffixes = sorted(field_suffixes())
+    skip_suffixes = {f"_{s}.json" for s in suffixes}
     result = []
     for f in rules_dir.glob("*.json"):
+        if any(f.name.endswith(s) for s in skip_suffixes):
+            continue
         try:
             template = _resolve_rule_template(f)
             if template.get("abstract", False):
                 continue
+            rule_id = template.get("rule_id", f.stem)
+            for s in suffixes:
+                loc_path = rules_dir / f"{rule_id}_{s}.json"
+                if loc_path.exists():
+                    try:
+                        loc = _resolve_rule_template(loc_path)
+                        template[f"rule_name_{s}"] = loc.get("rule_name", "")
+                        template[f"description_{s}"] = loc.get("description", "")
+                    except Exception:
+                        logger.warning("规则语言模板读取失败: %s", loc_path)
             result.append({
-                "rule_id": template.get("rule_id", f.stem),
+                "rule_id": rule_id,
                 "rule_name": template.get("rule_name", f.stem),
+                "rule_name_en": template.get("rule_name_en", ""),
                 "description": template.get("description", ""),
+                "description_en": template.get("description_en", ""),
                 "dice_system": template.get("dice_system", "d20"),
                 "combat_model": template.get("combat_model", "hp_based"),
                 "attr_count": len(template.get("attributes", [])),

@@ -9,11 +9,11 @@ export function registerNaiveApis(message: MessageApi, dialog: DialogApi) {
 }
 
 export function getMessage(): MessageApi {
-  if (!messageApi) throw new Error('Naive MessageProvider 未初始化：请在 App.vue 根挂载 NaiveBridge')
+  if (!messageApi) throw new Error('Naive MessageProvider is not initialized. Mount NaiveBridge under the App.vue root.')
   return messageApi
 }
 
 export function getDialog(): DialogApi {
-  if (!dialogApi) throw new Error('Naive DialogProvider 未初始化：请在 App.vue 根挂载 NaiveBridge')
+  if (!dialogApi) throw new Error('Naive DialogProvider is not initialized. Mount NaiveBridge under the App.vue root.')
   return dialogApi
 }

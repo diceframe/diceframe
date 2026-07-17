@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from src.engine.game_instance import GameInstance
+from src.engine.language import is_english
 
 
 def item_counts(items: list[dict]) -> dict[str, int]:
@@ -43,32 +44,40 @@ def signed_delta(value: int) -> str:
     return f"+{value}" if value > 0 else str(value)
 
 
-def format_counter_diff(before: dict[str, int], after: dict[str, int]) -> list[str]:
+def format_counter_diff(before: dict[str, int], after: dict[str, int], english: bool = False) -> list[str]:
     changes: list[str] = []
     names = sorted(set(before) | set(after))
     for name in names:
         delta = after.get(name, 0) - before.get(name, 0)
         if delta > 0:
-            changes.append(f"获得 {name} x{delta}")
+            changes.append(f"Gained {name} x{delta}" if english else f"获得 {name} x{delta}")
         elif delta < 0:
-            changes.append(f"失去 {name} x{abs(delta)}")
+            changes.append(f"Lost {name} x{abs(delta)}" if english else f"失去 {name} x{abs(delta)}")
     return changes
 
 
-def quest_status_label(status: str) -> str:
-    labels = {
+def quest_status_label(status: str, english: bool = False) -> str:
+    labels_en = {
+        "active": "Active",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "hidden": "Hidden",
+    }
+    labels = labels_en if english else {
         "active": "进行中",
         "completed": "已完成",
         "failed": "失败",
         "cancelled": "已取消",
         "hidden": "隐藏",
     }
-    return labels.get(status, status or "更新")
+    return labels.get(status, status or ("Updated" if english else "更新"))
 
 
 def build_state_change_messages(instance: GameInstance, before: dict[str, dict], data: dict) -> list[str]:
     """生成玩家可见的状态变动摘要，避免 HP/物品/任务变化只藏在处理日志里。"""
     messages: list[str] = []
+    english = is_english(instance.language)
     state_update = data.get("state_update", {})
     players_update = state_update.get("players", {})
     loot_players = {item.get("player", "") for item in state_update.get("loot", [])}
@@ -76,10 +85,10 @@ def build_state_change_messages(instance: GameInstance, before: dict[str, dict],
 
     numeric_fields = (
         ("hp", "HP"),
-        ("gold", "金币"),
-        ("mana", "法力"),
-        ("sanity", "理智"),
-        ("luck", "幸运"),
+        ("gold", "Gold" if english else "金币"),
+        ("mana", "Mana" if english else "法力"),
+        ("sanity", "Sanity" if english else "理智"),
+        ("luck", "Luck" if english else "幸运"),
     )
     for uid in touched_uids:
         old = before.get(uid, {})
@@ -94,27 +103,27 @@ def build_state_change_messages(instance: GameInstance, before: dict[str, dict],
             new_value = cs.get(key)
             if isinstance(old_value, (int, float)) and isinstance(new_value, (int, float)) and int(old_value) != int(new_value):
                 delta = int(new_value) - int(old_value)
-                parts.append(f"{label} {int(old_value)} → {int(new_value)}（{signed_delta(delta)}）")
+                parts.append(f"{label} {int(old_value)} -> {int(new_value)} ({signed_delta(delta)})" if english else f"{label} {int(old_value)} → {int(new_value)}（{signed_delta(delta)}）")
 
         if old.get("status") != cs.get("status") and cs.get("status"):
-            parts.append(f"状态 → {cs.get('status')}")
+            parts.append(f"Status -> {cs.get('status')}" if english else f"状态 → {cs.get('status')}")
         if not old.get("deceased") and cs.get("deceased"):
-            parts.append("生死状态 → 死亡")
+            parts.append("Life state -> Dead" if english else "生死状态 → 死亡")
         elif old.get("deceased") and not cs.get("deceased"):
-            parts.append("生死状态 → 复活")
+            parts.append("Life state -> Revived" if english else "生死状态 → 复活")
 
-        parts.extend(format_counter_diff(old.get("inventory", {}), item_counts(cs.get("inventory", []))))
-        parts.extend(format_counter_diff(old.get("key_items", {}), item_counts(cs.get("key_items", []))))
-        parts.extend(format_counter_diff(old.get("equipment", {}), item_counts(cs.get("equipment", []))))
+        parts.extend(format_counter_diff(old.get("inventory", {}), item_counts(cs.get("inventory", [])), english))
+        parts.extend(format_counter_diff(old.get("key_items", {}), item_counts(cs.get("key_items", [])), english))
+        parts.extend(format_counter_diff(old.get("equipment", {}), item_counts(cs.get("equipment", [])), english))
 
         if parts:
-            messages.append(f"【状态变动】{name}：" + "；".join(parts))
+            messages.append((f"[Status Change] {name}: " + "; ".join(parts)) if english else f"【状态变动】{name}：" + "；".join(parts))
 
     plot_update = data.get("plot_update", {})
     for quest in plot_update.get("quests", []):
         title = str(quest.get("title", "")).strip()
         status = str(quest.get("status", "")).strip()
         if title:
-            messages.append(f"【任务更新】{title}：{quest_status_label(status)}")
+            messages.append(f"[Quest Update] {title}: {quest_status_label(status, True)}" if english else f"【任务更新】{title}：{quest_status_label(status)}")
 
     return messages

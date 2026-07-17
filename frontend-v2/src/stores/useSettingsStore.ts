@@ -14,8 +14,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const loading = ref(false)
   const error = ref('')
 
-  // AppConfig 有 [key:string]:unknown 索引签名，但 Partial<AppConfig> + 动态键 TS 仍要求断言。
-  // 集中在这两个 helper 里做，避免散落的 (config as Record<string, unknown>)[key]。
+  // AppConfig has a [key:string]:unknown index signature, but Partial<AppConfig>
+  // still needs assertions for dynamic keys. Keep them centralized here.
   function getConfigField<T = unknown>(key: keyof AppConfig): T {
     return (config.value as Record<string, unknown>)[key] as T
   }
@@ -74,9 +74,8 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     Object.assign(body, collectSecrets(['api_key', 'embedding_api_key', 'fallback1_api_key', 'fallback2_api_key', 'proxy_url']))
     if (kind === 'embedding') {
-      // 后端 api_test_embedding 读 body.base_url/model/api_key（与 legacy 约定一致）；
-      // config 里 embedding 字段名是 embedding_base_url/embedding_model，需映射，
-      // 且 config.api_key 是 SecretField 对象（{configured,masked}）不能直接传，只传 secrets 里的明文 key。
+      // The backend embedding test reads body.base_url/model/api_key for legacy compatibility.
+      // Map the embedding_* config fields and pass only plaintext secrets, not SecretField objects.
       body.base_url = String(getConfigField('embedding_base_url') ?? '').trim()
       body.model = String(getConfigField('embedding_model') ?? '').trim()
       body.api_key = secrets.value.embedding_api_key?.trim() || secrets.value.api_key?.trim()

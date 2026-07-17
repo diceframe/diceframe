@@ -2,8 +2,10 @@
 import { ref } from 'vue'
 import { NButton, NIcon, NModal } from 'naive-ui'
 import { HelpCircleOutline } from '@vicons/ionicons5'
+import { useLocale } from '@/composables/useLocale'
 
 defineProps<{ title: string; buttonLabel?: string }>()
+const { t } = useLocale()
 const show = ref(false)
 </script>
 
@@ -12,7 +14,7 @@ const show = ref(false)
     <template #icon>
       <NIcon :component="HelpCircleOutline" />
     </template>
-    {{ buttonLabel ?? '帮助' }}
+    {{ buttonLabel ?? t('help') }}
   </NButton>
   <NModal v-model:show="show" preset="card" :title="title" style="max-width:520px" :bordered="false">
     <div class="help-tutorial">

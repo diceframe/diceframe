@@ -1,0 +1,75 @@
+{
+  "world_id": "zhongshi_fantasy_en",
+  "world_name": "Chinese Fantasy: Great Void Continent",
+  "description": "An alternate wuxia and xianxia world where dynasties and sects coexist.",
+  "language": "en",
+  "world_setting": "The Great Void Continent stretches across the Nine Provinces, ruled jointly by dynasties and sects. In the east, the Great Xia Dynasty governs by Confucian law; in the west, the Kunlun Sword Sect reigns through swordsmanship; in the south, the Miao Frontier is rife with shamanic gu sorcery; in the north, nomadic tribes roam the snowfields. Cultivators advance through nine realms: Foundation Building, Illumination, Integration, Stirring Heart, Golden Core, Nascent Soul, Out-of-Body, Spirit Split, and Tribulation Crossing. Martial sects stand in great number, and the righteous and wicked paths have been entangled in a thousand-year feud.",
+  "starter_scene": "You arrive at Bluestone Town on the frontier of the Great Xia Dynasty. Built against the mountainside, the town is split by a clear stream. Today is the monthly market day, and the streets bustle with people. A crowd has gathered by the notice board at the town entrance, arguing over something—word has it that strange lights have been appearing at night on Deadwood Cliff just outside town, and a herbalist claims to have seen traces of a monster.",
+  "suggested_difficulty": "标准",
+  "default_rule": "freeform_wuxia",
+  "starter_lorebook": [
+    {
+      "id": "loc_bluestone_town",
+      "name": "Bluestone Town",
+      "type": "location",
+      "keywords": ["Bluestone Town", "town", "frontier", "market"],
+      "content": "A small town on the western frontier of the Great Xia Dynasty, named for the Bluestone Cliff just outside. Its population of about 1,500 lives by farming and hunting. The town has a teahouse, an apothecary, a smithy, and a small inn called the Clear Breeze Lodge. On every fifth day a market is held, drawing mountain folk from all around to trade. Though small, the town sits on the main road to the Kunlun Mountains, and many wandering figures of the martial world pass through.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_shopkeeper_liu",
+      "name": "Shopkeeper Liu",
+      "type": "npc",
+      "keywords": ["Shopkeeper Liu", "teahouse owner", "Clear Breeze Teahouse", "shopkeeper"],
+      "content": "Owner of the Clear Breeze Teahouse. He is in his forties, thin-faced but with bright, spirited eyes. Word is he retired here from the capital years ago, though his true background remains unknown. The teahouse is the town's hub of news and gossip; Shopkeeper Liu is well-informed and knows the martial world inside out, though he never volunteers anything about himself.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "loc_deadwood_cliff",
+      "name": "Deadwood Cliff",
+      "type": "location",
+      "keywords": ["Deadwood Cliff", "cliff", "monster", "strange light"],
+      "content": "A steep cliff three li west of Bluestone Town. A millennia-old withered pine stands atop it, giving the cliff its name. At its foot lie several natural stone caves, said to be the ruins of an ancient cultivator's dwelling. For the past month, eerie green light has been appearing atop the cliff at night, and a herbalist claims to have seen a monster moving inside the caves.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "faction_kunlun_sword_sect",
+      "name": "Kunlun Sword Sect",
+      "type": "faction",
+      "keywords": ["Kunlun Sword Sect", "Sword Sect", "Kunlun", "swordsmanship"],
+      "content": "The foremost swordsmanship sect in the west, seated among the Kunlun Mountains. It is renowned across the land for the 'Thirteen Swords of Kunlun.' Its current sect master, Dugu Han, known as the 'Sword Saint,' is said to be one of the few Spirit Split realm masters left in the world. Disciples of the Sword Sect act with righteousness and take slaying demons and evil as their duty. The sect opens its gates to take in new disciples once every three years, and youths across the realm consider it an honor to be accepted.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_old_wang_herbalist",
+      "name": "Old Wang the Herbalist",
+      "type": "npc",
+      "keywords": ["herbalist", "Old Wang", "Uncle Wang", "witness"],
+      "content": "An elderly herbalist of Bluestone Town, in his sixties, who has gathered herbs around Deadwood Cliff for over thirty years. Three days ago, while picking herbs beneath the cliff, he caught sight of a 'human-shaped shadow' flitting through the caves and fled back to town in the dead of night. Old Wang stutters and speaks haltingly, but he is an honest man who does not lie.",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "loc_deadwood_cliff_caves",
+      "name": "Ancient Caves of Deadwood Cliff",
+      "type": "location",
+      "keywords": ["stone caves", "cave dwelling", "ancient cultivator", "ruins"],
+      "content": "A group of natural stone caves beneath Deadwood Cliff, said to be the dwelling of a Nascent Soul realm cultivator from a thousand years ago. Inside are the broken remnants of formation arrays and stone walls carved with runes. Rumor has it that deep within lies a hidden chamber holding that cultivator's relics, but it is guarded by formations and can only be entered by solving its mechanisms.",
+      "tier": "background",
+      "unreliable": false
+    },
+    {
+      "id": "event_deadwood_cliff_strange_light",
+      "name": "Strange Light at Deadwood Cliff",
+      "type": "event",
+      "keywords": ["strange light", "green light", "monster sighting", "uncanny events"],
+      "content": "For the past month, eerie green light has appeared atop Deadwood Cliff every night, lasting about the time it takes to burn a stick of incense. The townsfolk are in a panic, and some have already moved away. The mayor of Bluestone Town has offered a hundred taels of silver to anyone who can uncover the truth. An old hunter says the green light looks like the glow of a 'demon core'—a monster is cultivating beneath the cliff.",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}

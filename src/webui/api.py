@@ -142,13 +142,14 @@ class WebAPI:
         world_data = self._load_world_template(inst.world_id)
         if not world_data:
             return None
-        return self._load_rule_by_id(str(world_data.get("default_rule") or "freeform_fantasy"))
+        language = getattr(inst, "language", "") or world_data.get("language", "")
+        return self._load_rule_by_id(str(world_data.get("default_rule") or "freeform_fantasy"), language)
 
-    def _load_rule_by_id(self, rule_id: str) -> RuleSystem | None:
+    def _load_rule_by_id(self, rule_id: str, language: str = "") -> RuleSystem | None:
         rule_id = (rule_id or "").strip()
         if not rule_id or not rules.is_valid_rule_id(rule_id):
             return None
-        rule_path = RuleSystem.path_for(self._rules_dir, rule_id)
+        rule_path = RuleSystem.path_for(self._rules_dir, rule_id, language)
         if not rule_path.exists() and self._plugins:
             plugin_path = self._plugins.contribution_path("rule", rule_id)
             if plugin_path:
@@ -242,8 +243,8 @@ class WebAPI:
     def list_worlds(self) -> dict[str, Any]:
         return worlds.list_worlds(self)
 
-    def create_world(self, name: str, description: str = "") -> dict[str, Any]:
-        return worlds.create_world(self, name, description)
+    def create_world(self, name: str, description: str = "", language: str = "") -> dict[str, Any]:
+        return worlds.create_world(self, name, description, language)
 
     def list_entries(self, world_id: str, entry_type: str | None = None) -> dict[str, Any]:
         return worlds.list_entries(self, world_id, entry_type)
@@ -257,8 +258,8 @@ class WebAPI:
     def save_entry(self, entry: dict) -> dict[str, Any]:
         return worlds.save_entry(self, entry)
 
-    async def generate_lorebook_entries(self, world_id: str, prompt: str) -> dict[str, Any]:
-        return await worlds.generate_lorebook_entries(self, world_id, prompt)
+    async def generate_lorebook_entries(self, world_id: str, prompt: str, language: str = "") -> dict[str, Any]:
+        return await worlds.generate_lorebook_entries(self, world_id, prompt, language)
 
     def update_entry(self, entry_id: str, updates: dict) -> dict[str, Any]:
         return worlds.update_entry(self, entry_id, updates)
@@ -372,14 +373,14 @@ class WebAPI:
     async def generate_world(self, prompt: str, rule_id: str = "", language: str = "") -> dict[str, Any]:
         return await generation.generate_world(self, prompt, rule_id, language)
 
-    async def generate_rule(self, prompt: str, source_rule_id: str = "") -> dict[str, Any]:
-        return await generation.generate_rule(self, prompt, source_rule_id)
+    async def generate_rule(self, prompt: str, source_rule_id: str = "", language: str = "") -> dict[str, Any]:
+        return await generation.generate_rule(self, prompt, source_rule_id, language)
 
-    async def generate_character(self, prompt: str, game_key: str = "", rule_id: str = "") -> dict[str, Any]:
-        return await generation.generate_character(self, prompt, game_key, rule_id)
+    async def generate_character(self, prompt: str, game_key: str = "", rule_id: str = "", language: str = "") -> dict[str, Any]:
+        return await generation.generate_character(self, prompt, game_key, rule_id, language)
 
-    async def generate_text(self, prompt: str, system_hint: str = "") -> dict[str, Any]:
-        return await generation.generate_text(self, prompt, system_hint)
+    async def generate_text(self, prompt: str, system_hint: str = "", language: str = "") -> dict[str, Any]:
+        return await generation.generate_text(self, prompt, system_hint, language)
 
     # ---- 内存 ----
 

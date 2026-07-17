@@ -1,4 +1,5 @@
 import { api } from '@/api/client'
+import { i18n } from '@/i18n'
 import type { CharacterCard, CharacterImportResponse } from '@/api/types'
 
 export function fileToBase64(file: File): Promise<string> {
@@ -9,7 +10,7 @@ export function fileToBase64(file: File): Promise<string> {
       const comma = result.indexOf(',')
       resolve(comma >= 0 ? result.slice(comma + 1) : result)
     }
-    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.onerror = () => reject(new Error(i18n.global.t('fileReadFailed')))
     reader.readAsDataURL(file)
   })
 }
@@ -20,6 +21,6 @@ export async function importTavernCard(file: File): Promise<CharacterCard> {
     method: 'POST',
     body: JSON.stringify({ file_name: file.name, file_data: fileData }),
   })
-  if (!r.ok || !r.card) throw new Error(r.error || '导入失败')
+  if (!r.ok || !r.card) throw new Error(r.error || i18n.global.t('importFailed'))
   return r.card
 }

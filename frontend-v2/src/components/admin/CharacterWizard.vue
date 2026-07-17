@@ -3,10 +3,11 @@ import { computed, ref, watch } from 'vue'
 import { api, errorMessage } from '@/api/client'
 import type { CharacterSheet, CharacterSkill, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
 import { useToast } from '@/composables/useToast'
+import { useLocale } from '@/composables/useLocale'
 import SkillEditor from './SkillEditor.vue'
 import {
   identitySchema, identityLabel, attrDisplayName, currencyLabel,
-  isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost,
+  isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, localizedField,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
 
@@ -21,11 +22,13 @@ const props = defineProps<{
   skillPool?: Array<string | SkillSpec>
   ruleId?: string
   gameKey?: string
+  language?: string
   initial?: CharacterSheet
 }>()
 const emit = defineEmits<{ submit: [character: CharacterSubmit]; cancel: [] }>()
 
 const toast = useToast()
+const { locale, t } = useLocale()
 const step = ref<1 | 2 | 3>(1)
 
 const characterName = ref('')
@@ -43,10 +46,10 @@ const attrSum = computed(() =>
 )
 const attrPoints = computed(() => Math.max(props.attrTotal, attrSum.value) - attrSum.value)
 const overLimit = computed(() => attrSum.value > props.attrTotal)
-const attrHint = computed(() => props.ruleMeta?.attr_hint || '')
+const attrHint = computed(() => localizedField<string>(props.ruleMeta, 'attr_hint') || '')
 const diceHint = computed(() =>
   props.ruleMeta?.mechanics === 'dnd5e_core'
-    ? 'DND 小抄：优势=2d20取高，劣势=2d20取低；同时有优势和劣势时抵消。'
+    ? t('dndDiceHint')
     : ''
 )
 
@@ -54,7 +57,7 @@ const skills = ref<CharacterSkill[]>([])
 const background = ref('')
 const gold = ref(0)
 const pool = computed(() => props.skillPool || [])
-const skillHint = computed(() => props.ruleMeta?.skill_hint || '')
+const skillHint = computed(() => localizedField<string>(props.ruleMeta, 'skill_hint') || '')
 const maxSkills = computed(() => Number(props.ruleMeta?.max_skills || 0))
 const skillPointTotal = computed(() => Number(props.ruleMeta?.skill_point_total || 0))
 const maxSkillValue = computed(() => Number(props.ruleMeta?.max_skill_value || 0))
@@ -105,16 +108,17 @@ function resetAttrs() {
 }
 
 async function generateByAI() {
-  if (!aiPrompt.value.trim()) { toast.error('请输入角色描述'); return }
+  if (!aiPrompt.value.trim()) { toast.error(t('enterCharacterPrompt')); return }
   generating.value = true
   try {
     const body: Record<string, unknown> = { prompt: aiPrompt.value }
     if (props.gameKey) body.game_key = props.gameKey
     else if (props.ruleId) body.rule_id = props.ruleId
+    body.language = props.language || locale.value
     const r = await api<GeneratedCharacterResponse>('/generate-character', { method: 'POST', body: JSON.stringify(body) })
-    if (!r.ok || !r.character) throw new Error(r.error || '生成失败')
+    if (!r.ok || !r.character) throw new Error(r.error || t('generationFailed'))
     applyCharacter(r.character)
-    toast.success('AI 已生成角色，可在各步继续调整')
+    toast.success(t('aiGeneratedCharacterToast'))
   } catch (e: unknown) { toast.error(errorMessage(e)) } finally { generating.value = false }
 }
 
@@ -172,18 +176,18 @@ function finish() {
     <section class="wizard-inner">
       <div class="wizard-steps">
       <span v-for="n in 3" :key="n" :class="['wizard-step', { active: step === n, done: step > n }]">
-        {{ n === 1 ? '身份' : n === 2 ? '属性' : '技能与背景' }}
+        {{ n === 1 ? t('identityStep') : n === 2 ? t('attributes') : t('skillsBackgroundStep') }}
       </span>
     </div>
 
     <div v-if="step === 1" class="wizard-pane">
-      <label>角色名<input v-model="characterName" placeholder="为角色命名"></label>
+      <label>{{ t('characterName') }}<input v-model="characterName" :placeholder="t('nameCharacterPlaceholder')"></label>
       <label v-for="f in identityFields" :key="f.key">{{ identityLabel(f) }}<input v-model="identityValues[f.key]"></label>
 
       <details class="ai-block">
-        <summary>AI 生成角色</summary>
-        <textarea v-model="aiPrompt" rows="3" placeholder="用自然语言描述角色：身份、性格、经历，AI 自动填充全部字段"></textarea>
-        <button class="primary" :disabled="generating" @click="generateByAI">{{ generating ? '生成中…' : 'AI 生成' }}</button>
+        <summary>{{ t('aiGenerateCharacter') }}</summary>
+        <textarea v-model="aiPrompt" rows="3" :placeholder="t('aiCharacterPromptPlaceholder')"></textarea>
+        <button class="primary" :disabled="generating" @click="generateByAI">{{ generating ? t('generatingEllipsis') : t('aiGenerate') }}</button>
       </details>
     </div>
 
@@ -191,12 +195,12 @@ function finish() {
       <p v-if="attrHint" class="form-hint">{{ attrHint }}</p>
       <p v-if="diceHint" class="form-hint">{{ diceHint }}</p>
       <p class="attr-points" :class="{ over: overLimit }">
-        总和 {{ attrSum }} / {{ attrTotal }} · 剩余 {{ attrPoints }} 点
-        <span v-if="overLimit" class="warn">已超限</span>
+        {{ t('attrTotalRemaining', { sum: attrSum, total: attrTotal, remaining: attrPoints }) }}
+        <span v-if="overLimit" class="warn">{{ t('overLimit') }}</span>
       </p>
       <div class="attr-actions">
-        <button @click="fillSuggested">填建议值</button>
-        <button @click="resetAttrs">重置</button>
+        <button @click="fillSuggested">{{ t('fillSuggestedValues') }}</button>
+        <button @click="resetAttrs">{{ t('reset') }}</button>
       </div>
       <div class="attr-sliders">
         <div v-for="a in ruleAttrs" :key="a.key" class="attr-row">
@@ -205,27 +209,27 @@ function finish() {
           <input type="number" class="attr-val" :min="a.min" v-model.number="attrs[a.key]">
         </div>
       </div>
-      <p v-if="autoHp && autoHpValue" class="form-hint">规则建议 HP：<strong>{{ autoHpValue }}</strong></p>
+      <p v-if="autoHp && autoHpValue" class="form-hint">{{ t('ruleSuggestedHp') }}: <strong>{{ autoHpValue }}</strong></p>
     </div>
 
     <div v-else class="wizard-pane">
-      <label>技能</label>
+      <label>{{ t('skills') }}</label>
       <p v-if="skillHint" class="form-hint">{{ skillHint }}</p>
       <p class="form-hint" :class="{ warn: skillOverLimit }">
-        <span v-if="maxSkills">技能 {{ skills.filter(s => s.name?.trim()).length }} / {{ maxSkills }}</span>
-        <span v-if="skillPointTotal"> · 技能点 {{ skillSpent }} / {{ skillPointTotal }}</span>
-        <span v-if="maxSkillValue"> · 单技能上限 {{ maxSkillValue }}</span>
+        <span v-if="maxSkills">{{ t('skillCount', { count: skills.filter(s => s.name?.trim()).length, max: maxSkills }) }}</span>
+        <span v-if="skillPointTotal"> · {{ t('skillPointsSpent', { spent: skillSpent, total: skillPointTotal }) }}</span>
+        <span v-if="maxSkillValue"> · {{ t('maxSingleSkill', { max: maxSkillValue }) }}</span>
       </p>
       <SkillEditor v-model="skills" :pool="pool" />
-      <label>背景故事<textarea v-model="background" rows="4" placeholder="角色经历、动机、人际关系"></textarea></label>
+      <label>{{ t('backgroundStory') }}<textarea v-model="background" rows="4" :placeholder="t('backgroundPlaceholder')"></textarea></label>
       <label>{{ currencyLabel(ruleMeta) }}<input type="number" v-model.number="gold" min="0"></label>
     </div>
 
     <div class="wizard-actions">
-      <button @click="emit('cancel')">取消</button>
-      <button v-if="step > 1" @click="prev">上一步</button>
-      <button v-if="step < 3" class="primary" :disabled="!canNext()" @click="next">下一步</button>
-      <button v-else class="primary" @click="finish">完成</button>
+      <button @click="emit('cancel')">{{ t('cancel') }}</button>
+      <button v-if="step > 1" @click="prev">{{ t('previous') }}</button>
+      <button v-if="step < 3" class="primary" :disabled="!canNext()" @click="next">{{ t('next') }}</button>
+      <button v-else class="primary" @click="finish">{{ t('finish') }}</button>
     </div>
   </section>
   </div>

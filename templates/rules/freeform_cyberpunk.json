@@ -3,7 +3,6 @@
   "rule_version": "1.2",
   "rule_id": "freeform_cyberpunk",
   "rule_name": "赛博朋克 d20 自由规则",
-  "rule_name_en": "Cyberpunk d20 Freeform",
   "description": "近未来高科技低生活的赛博朋克风格 d20 轻量规则；强调义体、黑客、企业压迫、帮派纠葛、热度追踪与街头生存，不对应 Cyberpunk 2020/RED 官方规则。",
   "attributes": [
     {"key": "str", "name": "力量", "min": 3, "max": 18},

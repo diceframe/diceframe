@@ -385,6 +385,7 @@ def make_default_character(
     name: str,
     rule_id: str = "freeform_fantasy",
     templates_base: Path | None = None,
+    language: str = "",
 ) -> dict:
     """生成默认角色卡，自动从规则模板读取属性/HP 配置。
 
@@ -408,7 +409,7 @@ def make_default_character(
         if templates_base
         else Path(__file__).parent.parent.parent / "templates" / "rules"
     )
-    rule_path = RuleSystem.path_for(rules_dir, rule_id)
+    rule_path = RuleSystem.path_for(rules_dir, rule_id, language)
     rule: RuleSystem | None = None
 
     skill_base_values: dict[str, int] = {}
@@ -475,12 +476,13 @@ def make_default_character(
 
 
 def calc_hp_from_rule(attrs: dict[str, int], rule_id: str = "freeform_fantasy",
-                       rules_dir: Path | None = None, class_name: str = "") -> int:
+                       rules_dir: Path | None = None, class_name: str = "",
+                       language: str = "") -> int:
     """根据规则计算 HP。class_name 用于 dnd5e 等需 class_hp_die 的公式。"""
     if rules_dir is None:
         rules_dir = Path(__file__).parent.parent.parent / "templates" / "rules"
     try:
-        rule_path = RuleSystem.path_for(rules_dir, rule_id)
+        rule_path = RuleSystem.path_for(rules_dir, rule_id, language)
         if rule_path.exists():
             rule = RuleSystem.load(rule_path)
             return rule.calculate_hp(attrs, class_name)
@@ -490,12 +492,13 @@ def calc_hp_from_rule(attrs: dict[str, int], rule_id: str = "freeform_fantasy",
 
 
 def get_rule_attr_config(rule_id: str = "freeform_fantasy",
-                          rules_dir: Path | None = None) -> tuple[list[str], int, int, int]:
+                          rules_dir: Path | None = None,
+                          language: str = "") -> tuple[list[str], int, int, int]:
     """读取规则属性配置，返回 (keys, total_points, min_val, max_val)。"""
     if rules_dir is None:
         rules_dir = Path(__file__).parent.parent.parent / "templates" / "rules"
     try:
-        rule_path = RuleSystem.path_for(rules_dir, rule_id)
+        rule_path = RuleSystem.path_for(rules_dir, rule_id, language)
         if rule_path.exists():
             rule = RuleSystem.load(rule_path)
             keys = rule.attribute_keys

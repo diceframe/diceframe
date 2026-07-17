@@ -25,6 +25,7 @@ async def api_generate_rule(request: web.Request) -> web.Response:
     result = await _get_api(request).generate_rule(
         prompt=body.get("prompt", ""),
         source_rule_id=body.get("source_rule_id", ""),
+        language=body.get("language", ""),
     )
     return web.json_response(result)
 
@@ -35,6 +36,7 @@ async def api_generate_character(request: web.Request) -> web.Response:
         prompt=body.get("prompt", ""),
         game_key=body.get("game_key", ""),
         rule_id=body.get("rule_id", ""),
+        language=body.get("language", ""),
     )
     return web.json_response(result)
 
@@ -44,6 +46,7 @@ async def api_generate_text(request: web.Request) -> web.Response:
     result = await _get_api(request).generate_text(
         prompt=body.get("prompt", ""),
         system_hint=body.get("system_hint", ""),
+        language=body.get("language", ""),
     )
     return web.json_response(result)
 
