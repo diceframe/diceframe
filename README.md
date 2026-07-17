@@ -1,10 +1,10 @@
 # DiceFrame
 
-English docs: [README_EN.md](README_EN.md), [docs/USER_GUIDE_EN.md](docs/USER_GUIDE_EN.md).
+[English](README_EN.md) | 中文
 
 ![DiceFrame WebUI preview](docs/assets/diceframe-readme-hero.png)
 
-DiceFrame 是一个可以自己部署的 AI 跑团桌。
+DiceFrame 是一个可以自己部署的 AI 跑团桌面，支持 DND/COC/自定义规则，多人 WebUI。
 
 它把 Web 桌面、角色卡、世界书、骰子、状态变动、剧情日志和群聊 Bot 接到同一个游戏状态里。玩家用自然语言说“我想做什么”，系统负责把这句话交给 GM 模型、处理骰子与状态变化，并把结果同步给网页或群聊里的其他玩家。
 

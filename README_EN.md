@@ -1,8 +1,10 @@
 # DiceFrame
 
+English | [中文](README.md)
+
 ![DiceFrame Web UI preview](docs/assets/diceframe-readme-hero.png)
 
-DiceFrame is a self-hosted AI tabletop RPG table.
+DiceFrame is a self-hostable AI tabletop RPG platform supporting DND/COC/custom rules, with multiplayer WebUI.
 
 It brings the Web UI, character sheets, lorebooks, dice checks, state changes, campaign logs, and optional chat-bot play into one shared game state. Players describe what they want to do in natural language; DiceFrame passes those actions to a GM model, handles dice and state tags, then syncs the result back to the browser.
 
