@@ -36,7 +36,7 @@ The app language in Settings controls Web UI text. Game Language on Create is sa
 
 World templates, lorebooks, and content packs have their own content language. Create prioritizes matching templates and shows the content language for other templates or lorebooks. If you choose a Chinese lorebook while using the English UI, its Chinese content remains Chinese; choosing English content in the Chinese UI works the same way.
 
-Rules stay as one mechanics JSON file. Add localized display fields such as `rule_name_en`, `name_en`, and `skill_pools_en` for English-facing names and generation hints. Missing localized fields fall back to the rule's original text.
+Rules are split by language: `<rule_id>.json` (Chinese) + `<rule_id>_en.json` (English). The game loads the version matching its language, falling back to Chinese if the English file is missing.
 
 ## Turns And Actions
 
