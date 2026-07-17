@@ -358,7 +358,7 @@ watch(() => game.detail.value?.solo_mode, (solo, prev) => {
     </header>
 
     <div v-if="game.error.value" class="error-banner">{{ game.error.value }}</div>
-    <div v-else-if="game.loading.value || !game.detail.value" class="play-loading">
+    <div v-else-if="!game.detail.value" class="play-loading">
       <span class="spinner"></span>
       <h2>{{ t('enteringTable') }}</h2>
       <p>{{ t('syncingTable') }}</p>
