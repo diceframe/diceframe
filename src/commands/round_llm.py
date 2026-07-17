@@ -62,9 +62,14 @@ async def _compress_long_narration(
             f"总字数控制在 {target} 字以内，最多 2 段；不要新增设定，不要改变结果。\n\n"
             f"原正文：\n{narration}"
         )
+    compress_system = (
+        "You are a narration compressor. Output only the compressed narration text, no preamble, no ---, no state tags, no meta commentary about the task."
+        if is_english(getattr(response, "language", ""))
+        else "你是叙事压缩器，只输出压缩后的正文，不要前言、不要 ---、不要状态标签、不要对任务的元说明。"
+    )
     try:
         compressed = await llm_client.call(
-            system_prompt=gm_prompt,
+            system_prompt=compress_system,
             user_message=prompt,
             temperature=0.2,
             max_tokens=min(max_tokens, 512),
