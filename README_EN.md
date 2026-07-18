@@ -1,4 +1,8 @@
-# DiceFrame
+<p align="center">
+  <img src="docs/assets/diceframe-logo.svg" width="144" height="144" alt="DiceFrame Logo">
+</p>
+
+<h1 align="center">DiceFrame</h1>
 
 English | [中文](README.md)
 

@@ -15,6 +15,9 @@ const { t } = useLocale()
 
 const box = ref<HTMLElement | null>(null), hasNew = ref(false), awayFromBottom = ref(false)
 const swipeError = ref("")
+const INITIAL_VISIBLE_ROUNDS = 20
+const ROUND_BATCH_SIZE = 20
+const visibleRoundCount = ref(INITIAL_VISIBLE_ROUNDS)
 function name(uid: string, fallback?: string) { return fallback || props.players.find(p => p.user_id === uid)?.character_name || uid || t('characters') }
 
 interface Act { uid: string; text: string; dice: DiceTag | null }
@@ -35,11 +38,22 @@ function actions(entry: LogEntry): Act[] {
 }
 function liveAct(a: PublicAction): Act { return toAct(a) }
 
-const rounds = computed(() => props.log.map((entry, index) => {
+const visibleLog = computed(() => props.log.slice(-visibleRoundCount.value))
+const hiddenRoundCount = computed(() => Math.max(0, props.log.length - visibleLog.value.length))
+const rounds = computed(() => visibleLog.value.map((entry, index) => {
   const sw = entry.swipes || []
   const cur = Number(entry.current_swipe) || 0
-  return { entry, round: Number(entry.round || index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
+  return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
 }))
+
+async function showEarlier() {
+  const el = box.value
+  const previousHeight = el?.scrollHeight || 0
+  const previousTop = el?.scrollTop || 0
+  visibleRoundCount.value = Math.min(props.log.length, visibleRoundCount.value + ROUND_BATCH_SIZE)
+  await nextTick()
+  if (el) el.scrollTop = previousTop + el.scrollHeight - previousHeight
+}
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('branchOperationFailed')) }
 async function swipeTo(round: number, idx: number) {
@@ -94,11 +108,21 @@ watch(() => [props.log.length, JSON.stringify(props.live), props.processing], as
     updateScrollState()
   }
 })
+watch(() => props.gameKey, () => {
+  visibleRoundCount.value = INITIAL_VISIBLE_ROUNDS
+  initialized.value = false
+  hasNew.value = false
+  awayFromBottom.value = false
+})
 </script>
 
 <template>
   <div class="timeline-wrap">
     <div ref="box" class="timeline" data-testid="timeline" @scroll.passive="onScroll">
+      <div v-if="hiddenRoundCount" class="timeline-history-gate">
+        <button type="button" class="ghost" @click="showEarlier">{{ t('showEarlierRounds', { count: Math.min(ROUND_BATCH_SIZE, hiddenRoundCount) }) }}</button>
+        <span>{{ t('earlierRoundsHidden', { count: hiddenRoundCount }) }}</span>
+      </div>
       <template v-for="item in rounds" :key="item.round">
         <div class="round-divider" v-if="item.round">{{ t('roundDivider', { round: item.round }) }}</div>
         <div v-for="a in actions(item.entry)" :key="a.uid + a.text" class="message player" :style="{ borderLeftColor: playerColor(a.uid) }">

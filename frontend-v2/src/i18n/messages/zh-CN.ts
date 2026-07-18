@@ -293,6 +293,8 @@ export const zhCN = {
   scrollLatest: '回到底部查看最新消息',
   newMessages: '有新消息',
   backToBottom: '回到底部',
+  showEarlierRounds: '再看前 {count} 轮',
+  earlierRoundsHidden: '已收起更早的 {count} 轮，完整记录仍保留',
   flow: '流程',
   advance: '推进',
   rollback: '撤回',

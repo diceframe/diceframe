@@ -11,4 +11,18 @@ describe('GameTimeline',()=>{
     expect(wrapper.text()).toContain('艾琳 · 已公开 · 2/3')
     expect(wrapper.text()).toContain('我检查门锁')
   })
+
+  it('renders a bounded recent window and reveals older rounds in batches',async()=>{
+    i18n.global.locale.value = 'zh-CN'
+    const log=Array.from({length:50},(_,index)=>({round:index+1,gm_response:`第${index+1}轮叙事`}))
+    const wrapper=mount(GameTimeline,{global:{plugins:[i18n]},props:{round:50,players:[],log,live:[]}})
+
+    expect(wrapper.text()).not.toContain('第30轮叙事')
+    expect(wrapper.text()).toContain('第31轮叙事')
+    expect(wrapper.text()).toContain('已收起更早的 30 轮')
+
+    await wrapper.get('.timeline-history-gate button').trigger('click')
+    expect(wrapper.text()).toContain('第11轮叙事')
+    expect(wrapper.text()).toContain('已收起更早的 10 轮')
+  })
 })

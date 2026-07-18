@@ -464,3 +464,50 @@ body.light .perception-item.fresh{animation:perceptionFreshLight 1.6s ease-out}
 body.light .update-dialog-notes{background:rgba(255,247,223,.7);border-color:rgba(156,116,59,.26)}
 
 .api-head-row{display:flex;align-items:center;gap:8px}.api-head-row h3{margin:0}a,a:visited{color:var(--gold-2)}
+
+/* Keep long play sessions cheap to render while older rounds remain available on demand. */
+.timeline-history-gate{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;margin:0 auto 14px;color:var(--muted);font-size:12px}.timeline-history-gate button{min-height:30px;padding:0 11px}
+
+/* A single compact row leaves substantially more play space on phones. */
+@media(max-width:800px){.top-nav{height:44px;padding:4px 6px;gap:4px;flex-wrap:nowrap;align-items:center}.top-brand{order:1;flex:0 0 auto;min-width:0}.top-brand .brand-text{display:none}.top-brand .brand-mark{width:28px;height:28px}.top-menu{order:2;flex:1 1 auto;width:auto;overflow-x:auto;padding:0}.top-menu .n-menu{min-width:max-content}.top-nav .n-menu-item-content{height:34px!important;padding:0 7px!important;font-size:12px}.top-nav .n-menu-item-content__icon{margin-right:4px!important}.top-right{order:3;margin-left:0;gap:2px}.top-right .theme-toggle{min-width:32px;min-height:32px}.locale-select{margin:0}.locale-select span,.app-version{display:none}.locale-select select{min-width:76px;max-width:76px;height:32px;padding:4px 20px 4px 6px;font-size:11px}}
+
+/* Keep the action composer in the first viewport. The story timeline, not the whole page, scrolls. */
+@media(min-width:981px){
+  .play-page{height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .workspace .play-page{height:calc(100dvh - 56px)}
+  .play-layout,.workspace .play-layout{flex:1 1 auto;height:auto}
+  .play-main .timeline-wrap{min-height:0}
+}
+.scene-strip p{display:none}
+@media(max-width:800px){
+  .play-page{height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .workspace .play-page{height:calc(100dvh - 44px)}
+  .play-hud{flex:0 0 auto;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title tools";align-items:center;min-height:52px;padding:5px 7px;gap:6px}
+  .play-hud .play-hud-main{align-items:center;min-width:0}
+  .play-eyebrow,.play-hud-stats{display:none}
+  .play-titleblock h1{font-size:17px;line-height:1.25}
+  .play-hud .play-titleblock p{margin-top:1px;font-size:11px}
+  .play-toolbar{min-width:0;max-width:48vw;justify-content:flex-end;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .play-toolbar::-webkit-scrollbar{display:none}
+  .play-toolbar button{flex:0 0 auto;min-height:30px;padding:0 7px;font-size:12px}
+  .play-layout,.play-layout.no-console,.play-layout.collapsed,.play-layout.collapsed.no-console{flex:1 1 auto;min-height:0;height:auto;overflow-y:auto}
+  .play-main{height:calc(100dvh - 52px);min-height:0;padding:6px;gap:5px;overflow:hidden}
+  .workspace .play-main{height:calc(100dvh - 96px)}
+  .scene-strip{display:flex;align-items:center;padding:5px 7px;gap:7px;min-height:34px}
+  .scene-title{flex:1 1 auto;min-width:0}
+  .scene-label,.scene-strip p{display:none}
+  .scene-strip h2{font-size:14px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .scene-chips{flex:0 1 auto;max-width:58%;justify-content:flex-end;flex-wrap:nowrap;overflow:hidden}
+  .scene-chips span{flex:0 1 auto;min-width:0;max-width:112px;padding:2px 6px;font-size:11px}
+  .scene-chips span:nth-child(n+3){display:none}
+  .timeline-wrap{flex:1 1 0;min-height:0}
+  .composer{flex:0 0 auto;padding:6px}
+  .composer-row{grid-template-columns:minmax(0,1fr) 72px;gap:6px}
+  .composer-row button{width:auto;padding:0 6px}
+}
+@media(max-width:480px){
+  .composer-head{display:flex;align-items:center;margin-bottom:4px}
+  .composer-head span{display:none}
+  .quick-actions{margin-bottom:4px}
+  .composer-row textarea{min-height:58px}
+}

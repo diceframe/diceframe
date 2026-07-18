@@ -293,6 +293,8 @@ export const en = {
   scrollLatest: 'Scroll to latest messages',
   newMessages: 'New messages',
   backToBottom: 'Back to bottom',
+  showEarlierRounds: 'Show {count} earlier rounds',
+  earlierRoundsHidden: '{count} earlier rounds are collapsed; the records are still kept',
   flow: 'Flow',
   advance: 'Advance',
   rollback: 'Rollback',
