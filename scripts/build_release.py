@@ -63,9 +63,14 @@ FRONTEND_DIRS = [
 ]
 
 DOC_FILES = [
+    "docs/BOT_BRIDGE_CORE_CN.md",
+    "docs/BOT_BRIDGE_CORE_EN.md",
     "docs/DOCKER_DEPLOY_CN.md",
+    "docs/DOCKER_DEPLOY_EN.md",
     "docs/PLUGIN_DEVELOPMENT_CN.md",
-    "docs/RELEASE_CN.md",
+    "docs/PLUGIN_DEVELOPMENT_EN.md",
+    "docs/PLUGIN_REGISTRY_CN.md",
+    "docs/PLUGIN_REGISTRY_EN.md",
     "docs/USER_GUIDE_CN.md",
     "docs/USER_GUIDE_EN.md",
 ]

@@ -39,8 +39,9 @@ dist/
 .codex/
 AGENTS.md
 CLAUDE.md
-docs/ARCHITECTURE_CN.md
-docs/I18N_PLAN_CN.md
+docs/ARCHITECTURE_*.md
+docs/RELEASE_*.md
+docs/I18N_PLAN_*.md
 
 # Local environment / secrets
 .env

@@ -428,7 +428,7 @@ maps/
 
 ## 8. 商店收录
 
-官方社区索引仓库为 `https://github.com/diceframe/diceframe-plugins`。作者通过 Issue 模板提交插件 ID 和公开仓库地址；机器人读取最新正式 GitHub Release，自动检查后由维护者回复 `/approve`。不再使用 PR、作者上传 ZIP、`package_url` 或 SHA-256。
+官方社区索引仓库为 `https://github.com/diceframe/diceframe-plugins`。作者通过 Issue 模板提交插件 ID 和公开仓库地址；机器人读取最新正式 GitHub Release，自动检查后在投稿 Issue 中给出收录结果。不再使用 PR、作者上传 ZIP、`package_url` 或 SHA-256。
 
 DiceFrame 安装时重新解析最新 Release，并下载它所指向的完整 Git commit 源码快照，而不是会变化的 `main` 分支。声明型插件在权限不扩大时自动更新；带入口的进程型插件只提示更新；权限或运行方式变化会暂停更新并要求重新审核。
 

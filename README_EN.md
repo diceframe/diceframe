@@ -105,12 +105,10 @@ The plugin store indexes author-owned repositories. Installation resolves the la
 | Topic | English | 中文 |
 |-------|---------|------|
 | User guide | [USER_GUIDE_EN](docs/USER_GUIDE_EN.md) | [USER_GUIDE_CN](docs/USER_GUIDE_CN.md) |
-| Architecture | [ARCHITECTURE_EN](docs/ARCHITECTURE_EN.md) | [ARCHITECTURE_CN](docs/ARCHITECTURE_CN.md) |
 | Docker deployment | [DOCKER_DEPLOY_EN](docs/DOCKER_DEPLOY_EN.md) | [DOCKER_DEPLOY_CN](docs/DOCKER_DEPLOY_CN.md) |
 | Plugin development | [PLUGIN_DEVELOPMENT_EN](docs/PLUGIN_DEVELOPMENT_EN.md) | [PLUGIN_DEVELOPMENT_CN](docs/PLUGIN_DEVELOPMENT_CN.md) |
 | Plugin index and review | [PLUGIN_REGISTRY_EN](docs/PLUGIN_REGISTRY_EN.md) | [PLUGIN_REGISTRY_CN](docs/PLUGIN_REGISTRY_CN.md) |
 | Bot Bridge core | [BOT_BRIDGE_CORE_EN](docs/BOT_BRIDGE_CORE_EN.md) | [BOT_BRIDGE_CORE_CN](docs/BOT_BRIDGE_CORE_CN.md) |
-| Release and packaging | [RELEASE_EN](docs/RELEASE_EN.md) | [RELEASE_CN](docs/RELEASE_CN.md) |
 
 ## Data And Privacy
 

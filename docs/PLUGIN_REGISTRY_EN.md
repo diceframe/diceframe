@@ -13,9 +13,9 @@ Authors do not fork the registry, upload a ZIP, or calculate SHA-256.
 3. Publish a non-draft, non-prerelease GitHub Release.
 4. Open the registry's “Add plugin” Issue form with the plugin ID and repository URL.
 5. Fix automated errors and reply `/recheck` when necessary.
-6. After validation, wait for a maintainer to reply `/approve` or `/reject reason`.
+6. After validation, wait for the listing result in the submission Issue.
 
-Validation is bound to the complete Git commit referenced by the Release. If the latest Release changes after validation, approval is refused until validation runs again.
+Validation is bound to the complete Git commit referenced by the Release. If the latest Release changes before listing, the new version must pass validation again.
 
 ## Automated validation
 
