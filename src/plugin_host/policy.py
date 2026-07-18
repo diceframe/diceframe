@@ -15,6 +15,7 @@ PERMISSION_DETAILS = {
     "content.import": "由用户主动导入内容到角色卡库或世界书",
     "theme.tokens": "注册主题 CSS 变量",
     "map.assets": "注册地图地点和素材资源",
+    "tool.execute": "注册并执行结构化工具调用",
 }
 
 DECLARATIVE_PLUGIN_TYPES = {"content-pack", "theme", "map-pack"}
@@ -52,6 +53,8 @@ def effective_plugin_permissions(manifest: dict[str, Any], schema: dict[str, Any
         inferred.add("theme.tokens")
     elif plugin_type == "map-pack":
         inferred.add("map.assets")
+    elif plugin_type == "tool":
+        inferred.add("tool.execute")
     return sorted(inferred)
 
 

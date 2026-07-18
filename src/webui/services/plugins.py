@@ -113,6 +113,31 @@ def list_plugin_themes(api: "WebAPI") -> dict[str, Any]:
     return {"ok": True, "themes": themes, "total": len(themes)}
 
 
+def list_plugin_tools(api: "WebAPI") -> dict[str, Any]:
+    if not api._plugins:
+        return {"ok": False, "error": "插件宿主未启用", "tools": []}
+    tools = api._plugins.list_tools()
+    return {"ok": True, "tools": tools, "total": len(tools)}
+
+
+async def invoke_plugin_tool(
+    api: "WebAPI",
+    plugin_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not api._plugins:
+        return {"ok": False, "error": "插件宿主未启用"}
+    result = await api._plugins.call_tool(
+        (plugin_id or "").strip(),
+        (tool_name or "").strip(),
+        arguments,
+        context=context,
+    )
+    return {"ok": True, "plugin_id": plugin_id, "tool_name": tool_name, "result": result}
+
+
 def list_plugin_content(api: "WebAPI", kind: str = "", world_id: str = "", rule_id: str = "") -> dict[str, Any]:
     if not api._plugins:
         return {"ok": False, "error": "插件宿主未启用", "resources": {}}

@@ -2,7 +2,7 @@
 
 [中文](PLUGIN_DEVELOPMENT_CN.md) | English
 
-This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, content packs, filtered theme variables, and the location/asset subset of map packs. Import/export, Provider, and tool plugins are reserved types without a business runtime.
+This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, content packs, filtered theme variables, structured tools, and the location/asset subset of map packs. Import/export and Provider plugins remain reserved types without a business runtime.
 
 **Only capabilities marked Supported or Partial below have an active integration. Reserved types may be recognized in a development directory, but they do not participate in their intended workflows and cannot be installed from the store. Plugin documentation must describe actual behavior without implying unavailable features.**
 
@@ -20,9 +20,9 @@ DiceFrame's plugin model covers channel adapters, content packs, themes, maps, i
 | Map pack | `map-pack` | Partial: locations and icon/scene/grid assets; no live tabletop or editor |
 | Import/export | `import-export` | Reserved: no unified task API; store installation disabled |
 | Provider | `provider` | Reserved: no Provider runtime; store installation disabled |
-| Tool | `tool` | Reserved: no callable tool runtime; store installation disabled |
+| Tool | `tool` | Supported: process handshake, registration, structured invocation, timeout, and manual testing UI |
 
-`content-pack`, `theme`, and `map-pack` are declarative and may omit a background process. `channel-adapter` requires an `entrypoint`.
+`content-pack`, `theme`, and `map-pack` are declarative and may omit a background process. `channel-adapter` and `tool` require an `entrypoint`.
 
 ## 3. Plugin Boundaries
 
@@ -50,6 +50,7 @@ For local or private sharing, package the directory as a `.dfplugin` file. A `.d
 |---------|------|------|--------------|
 | Starter Content | `plugins/examples/starter-content` | `content-pack` | Rules, worlds, characters, NPCs, items, spells, and classes |
 | Paper Theme | `plugins/examples/paper-theme` | `theme` | Safe CSS-variable themes |
+| Echo Tool | `plugins/examples/echo-tool` | `tool` | Process handshake, registration, JSON arguments, and structured results |
 
 Recommended workflow:
 
@@ -88,7 +89,7 @@ The output is placed in `dist/plugins/`. The packager applies host validation an
 - `schema_version` is currently `1`.
 - `id` matches `^[a-z0-9]+(?:-[a-z0-9]+)*$` and matches the installed directory.
 - `plugin_type` is required; missing or unknown values fail validation.
-- `entrypoint` is an argument array. `"{python}"` resolves to the active interpreter. Declarative plugins may omit it.
+- `entrypoint` is an argument array. `"{python}"` resolves to the active interpreter; `"{plugin_dir}"` and `"{data_dir}"` resolve to the plugin source and private runtime-data directories. Declarative plugins may omit it.
 - `config_schema` defaults to `config.schema.json` and stays inside the plugin.
 - `contributes` declares resource paths or globs that register while enabled.
 - `capabilities` describes factual business capabilities.
@@ -109,6 +110,7 @@ Known types are `channel-adapter`, `content-pack`, `theme`, `map-pack`, `import-
 | `content.import` | Copy selected content into user storage |
 | `theme.tokens` | Register theme variables |
 | `map.assets` | Register map locations and static assets |
+| `tool.execute` | Register and execute structured tool calls |
 
 ## 6.1 Security Boundaries
 
@@ -201,7 +203,7 @@ Map packs register `locations`, `icons`, `scenes`, and `grids`. Enabled location
 - Maps have no editor, tabletop rules, layers, or real-time collaboration.
 - `import-export` has no unified task API.
 - `provider` has no registration or selection runtime.
-- `tool` has no execution, progress, cancellation, or result API.
+- `tool` supports short calls but not long-task progress, cancellation, result-file downloads, or automatic AI tool selection.
 
 ### 7.6 Import/Export Plugins
 
@@ -213,7 +215,28 @@ Reserved for LLM, embeddings, TTS, and image generation. Future Providers must k
 
 ### 7.8 Tool Plugins
 
-Reserved for validation, backup, conversion, and generation utilities. Future tools must declare inputs, outputs, side effects, file boundaries, and long-task cancellation or recovery.
+Tool plugins implement short validation, lookup, conversion, and generation operations over a host-managed JSON-RPC stdio protocol. They complete a version handshake and register at least one tool. Authors should use `src.plugin_sdk.ToolRuntime`; copy `plugins/examples/echo-tool` as a starting point.
+
+```python
+from src.plugin_sdk import ToolRuntime
+
+runtime = ToolRuntime()
+
+@runtime.tool(
+    name="echo",
+    title="Echo",
+    description="Return text.",
+    input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+)
+def echo(arguments, context):
+    return {"content": [{"type": "text", "text": str(arguments.get("text") or "")}]}
+
+runtime.run()
+```
+
+The host validates names, input schemas, protocol versions, and object results. Calls time out after 30 seconds and each request or response is limited to 256 KB. Standard output is reserved for protocol messages; diagnostics belong on standard error. Running tools can be inspected and manually invoked under **Settings → Plugins → Tools**. HTTP consumers use `GET /api/plugins/tools` and confirmed `POST /api/plugins/tools/{plugin_id}/{tool_name}`.
+
+Tools must document inputs, outputs, and side effects. File writes stay inside the provided data directory or a user-selected location. The current runtime is for work that finishes within 30 seconds; long tasks must wait for a future task/progress protocol.
 
 ## 8. Store Listing
 

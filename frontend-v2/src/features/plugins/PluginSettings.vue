@@ -17,6 +17,7 @@ import type {
   PluginContentImportResponse, PluginContentResource, PluginContentResponse,
   PluginField, PluginInfo, PluginMarketplaceItem, PluginMarketplaceResponse,
   PluginMirror, PluginMirrorsResponse, PluginMirrorTestResponse, WorldListResponse,
+  PluginToolDescriptor, PluginToolInvokeResponse, PluginToolsResponse,
 } from '@/api/types'
 import NapcatGuide from '@/components/plugins/NapcatGuide.vue'
 
@@ -27,6 +28,9 @@ const plugins = ref<PluginInfo[]>([])
 const contentResources = ref<Record<string, PluginContentResource[]>>({})
 const marketplace = ref<PluginMarketplaceItem[]>([])
 const mirrors = ref<PluginMirror[]>([])
+const tools = ref<PluginToolDescriptor[]>([])
+const toolInputs = ref<Record<string, string>>({})
+const toolResults = ref<Record<string, string>>({})
 const mirrorTests = ref<Record<string, string>>({})
 const worlds = ref<WorldListResponse['worlds']>([])
 const marketplaceSource = ref<PluginMarketplaceResponse['source'] | null>(null)
@@ -39,6 +43,7 @@ const installFile = ref<File | null>(null)
 const overwriteInstall = ref(false)
 const marketKeyword = ref('')
 const contentLoading = ref(false)
+const toolsLoading = ref(false)
 const contentTargetWorldId = ref('')
 const newMirror = reactive<PluginMirror>({
   id: '',
@@ -87,11 +92,68 @@ async function load() {
     const r = await api<{ plugins: PluginInfo[] }>('/plugins')
     plugins.value = r.plugins || []
     if (!expandedPluginNames.value.length) expandedPluginNames.value = plugins.value.map(p => p.id)
-    await loadPluginThemes()
+    await Promise.all([loadPluginThemes(), loadTools()])
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   } finally {
     loading.value = false
+  }
+}
+
+function toolKey(tool: PluginToolDescriptor): string {
+  return `${tool.plugin_id}:${tool.name}`
+}
+
+async function loadTools() {
+  toolsLoading.value = true
+  try {
+    const r = await api<PluginToolsResponse>('/plugins/tools')
+    if (!r.ok) throw new Error(r.error || t('pluginToolsLoadFailed'))
+    tools.value = r.tools || []
+    for (const tool of tools.value) {
+      const key = toolKey(tool)
+      if (toolInputs.value[key] === undefined) toolInputs.value[key] = '{}'
+    }
+  } catch (e: unknown) {
+    tools.value = []
+    toast.error(errorMessage(e))
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+function setToolInput(tool: PluginToolDescriptor, value: string) {
+  toolInputs.value[toolKey(tool)] = value
+}
+
+async function invokeTool(tool: PluginToolDescriptor) {
+  const key = toolKey(tool)
+  if (!window.confirm(t('confirmPluginToolInvoke', { name: tool.title || tool.name, plugin: tool.plugin_name }))) return
+  let argumentsValue: unknown
+  try {
+    argumentsValue = JSON.parse(toolInputs.value[key] || '{}')
+  } catch {
+    toast.error(t('pluginToolArgumentsInvalid'))
+    return
+  }
+  if (!argumentsValue || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+    toast.error(t('pluginToolArgumentsInvalid'))
+    return
+  }
+  busy.value = `tool:${key}`
+  try {
+    const r = await api<PluginToolInvokeResponse>(
+      `/plugins/tools/${encodeURIComponent(tool.plugin_id)}/${encodeURIComponent(tool.name)}`,
+      { method: 'POST', body: JSON.stringify({ arguments: argumentsValue, context: {} }) },
+    )
+    if (!r.ok) throw new Error(r.error || t('pluginToolInvokeFailed'))
+    toolResults.value[key] = JSON.stringify(r.result || {}, null, 2)
+    toast.success(t('pluginToolInvokeSucceeded', { name: tool.title || tool.name }))
+  } catch (e: unknown) {
+    toolResults.value[key] = errorMessage(e)
+    toast.error(errorMessage(e))
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -705,6 +767,52 @@ onMounted(async () => {
       </section>
     </NTabPane>
 
+    <NTabPane name="tools" :tab="t('pluginToolsTab')">
+      <section class="toolbar-row">
+        <div>
+          <h3>{{ t('pluginToolsTitle') }}</h3>
+          <p class="muted">{{ t('pluginToolsHelp') }}</p>
+        </div>
+        <NButton :loading="toolsLoading" @click="loadTools">
+          <template #icon><NIcon :component="RefreshOutline" /></template>
+          {{ t('refresh') }}
+        </NButton>
+      </section>
+      <NSpin :show="toolsLoading">
+        <div v-if="tools.length" class="tool-grid">
+          <article v-for="tool in tools" :key="toolKey(tool)" class="tool-card">
+            <div class="tool-heading">
+              <div>
+                <h3>{{ tool.title || tool.name }}</h3>
+                <p class="muted">{{ tool.plugin_name }} · {{ tool.name }}</p>
+              </div>
+              <NTag size="small">{{ tool.plugin_id }}</NTag>
+            </div>
+            <p>{{ tool.description || t('noDescription') }}</p>
+            <details>
+              <summary>{{ t('pluginToolInputSchema') }}</summary>
+              <pre>{{ JSON.stringify(tool.input_schema, null, 2) }}</pre>
+            </details>
+            <label class="input-label">
+              <span class="field-title">{{ t('pluginToolArguments') }}</span>
+              <NInput
+                type="textarea"
+                :rows="5"
+                :value="toolInputs[toolKey(tool)] || '{}'"
+                :placeholder="t('pluginToolArgumentsPlaceholder')"
+                @update:value="setToolInput(tool, $event)"
+              />
+            </label>
+            <NButton type="primary" :loading="busy === `tool:${toolKey(tool)}`" @click="invokeTool(tool)">
+              {{ t('pluginToolInvoke') }}
+            </NButton>
+            <pre v-if="toolResults[toolKey(tool)]" class="tool-result">{{ toolResults[toolKey(tool)] }}</pre>
+          </article>
+        </div>
+        <p v-else class="muted">{{ t('noRunningPluginTools') }}</p>
+      </NSpin>
+    </NTabPane>
+
     <NTabPane name="content" :tab="t('contentPacks')">
       <section class="toolbar-row">
         <NSelect
@@ -862,6 +970,57 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.tool-card {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+}
+
+.tool-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tool-heading h3,
+.tool-heading p,
+.tool-card > p {
+  margin: 0;
+}
+
+.tool-card details summary {
+  cursor: pointer;
+  color: var(--gold-2);
+}
+
+.tool-card pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-result {
+  border-color: var(--gold) !important;
 }
 
 .content-world-select {

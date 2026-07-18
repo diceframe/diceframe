@@ -31,12 +31,22 @@ from .package_limits import (
 )
 from .policy import PERMISSION_DETAILS, effective_plugin_permissions
 from .registry import ContributionRegistry, validate_contributes
+from .runtime_protocol import (
+    DEFAULT_RPC_TIMEOUT,
+    MAX_RPC_MESSAGE_BYTES,
+    PLUGIN_PROTOCOL_VERSION,
+    JsonRpcStdioClient,
+    PluginProtocolError,
+    validate_tool_arguments,
+)
 from .support import PLUGIN_TYPE_SUPPORT, plugin_type_support
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
 _PLUGIN_TYPES = set(PLUGIN_TYPE_SUPPORT)
 _STATIC_PLUGIN_TYPES = {"content-pack", "theme", "map-pack"}
+_RPC_PLUGIN_TYPES = {"tool"}
 _ALLOWED_PERMISSIONS = PERMISSION_DETAILS
 
 _SAFE_PARENT_ENV = {
@@ -62,6 +72,8 @@ class PluginRuntime:
     secrets: dict[str, str] = field(default_factory=dict)
     process: asyncio.subprocess.Process | None = None
     monitor_task: asyncio.Task | None = None
+    rpc_client: JsonRpcStdioClient | None = None
+    tools: list[dict[str, Any]] = field(default_factory=list)
     status: str = "disabled"
     error: str = ""
 
@@ -131,12 +143,60 @@ class PluginHost:
             "capabilities": runtime.manifest.get("capabilities", []),
             "permissions": self._plugin_permissions(runtime),
             "permission_details": self._plugin_permission_details(runtime),
+            "tools": [dict(tool) for tool in runtime.tools],
             "contributions": [item.to_dict() for item in self.contributions.list() if item.plugin_id == plugin_id],
             "docs": runtime.manifest.get("docs", ""),
         }
 
     def list_contributions(self, kind: str = "") -> list[dict[str, Any]]:
         return [item.to_dict() for item in self.contributions.list(kind)]
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        tools: list[dict[str, Any]] = []
+        for plugin_id, runtime in self.plugins.items():
+            if self._plugin_type(runtime.manifest) != "tool" or runtime.status != "running":
+                continue
+            for descriptor in runtime.tools:
+                tools.append({
+                    **descriptor,
+                    "plugin_id": plugin_id,
+                    "plugin_name": str(runtime.manifest.get("name") or plugin_id),
+                })
+        return tools
+
+    async def call_tool(
+        self,
+        plugin_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        runtime = self._require(plugin_id)
+        if self._plugin_type(runtime.manifest) != "tool":
+            raise ValueError("该插件不是 tool 类型")
+        if runtime.status != "running" or not runtime.rpc_client:
+            raise ValueError("工具插件尚未运行或初始化失败")
+        if not isinstance(arguments, dict):
+            raise ValueError("工具 arguments 必须是对象")
+        if context is not None and not isinstance(context, dict):
+            raise ValueError("工具 context 必须是对象")
+        descriptor = next((item for item in runtime.tools if item.get("name") == tool_name), None)
+        if not descriptor:
+            raise KeyError(f"工具不存在：{tool_name}")
+        validate_tool_arguments(descriptor["input_schema"], arguments)
+        try:
+            result = await runtime.rpc_client.request(
+                "tool.call",
+                {"name": tool_name, "arguments": arguments, "context": context or {}},
+                timeout=DEFAULT_RPC_TIMEOUT,
+            )
+            if not isinstance(result, dict):
+                raise PluginProtocolError("工具必须返回 JSON 对象")
+        except PluginProtocolError as exc:
+            await self._fail_rpc_runtime(runtime, str(exc))
+            raise
+        return result
 
     def contribution_path(self, kind: str, key: str) -> Path | None:
         item = self.contributions.find(kind, key)
@@ -447,17 +507,48 @@ class PluginHost:
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             runtime.status, runtime.error = "failed", "entrypoint 必须是非空字符串数组"
             return
-        executable = sys.executable if command[0] == "{python}" else command[0]
-        args = command[1:] if command[0] == "{python}" else command[1:]
+        expanded = self._expand_entrypoint(plugin_id, runtime, command)
+        executable = sys.executable if expanded[0] == "{python}" else expanded[0]
+        args = expanded[1:]
         kwargs: dict[str, Any] = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        uses_rpc = self._plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES
+        if uses_rpc:
+            kwargs.update({
+                "stdin": asyncio.subprocess.PIPE,
+                "stdout": asyncio.subprocess.PIPE,
+                "limit": MAX_RPC_MESSAGE_BYTES,
+            })
         try:
             runtime.process = await asyncio.create_subprocess_exec(executable, *args, cwd=str(runtime.directory.parent.parent), env=env, **kwargs)
+            if uses_rpc:
+                runtime.rpc_client = JsonRpcStdioClient(runtime.process)
+                initialized = await runtime.rpc_client.request(
+                    "initialize",
+                    {
+                        "protocol_version": PLUGIN_PROTOCOL_VERSION,
+                        "plugin_id": plugin_id,
+                        "plugin_type": self._plugin_type(runtime.manifest),
+                    },
+                    timeout=5,
+                )
+                runtime.tools = self._validate_tool_descriptors(initialized)
             runtime.status = "running"
             self.logger.info("插件 %s 已启动，PID=%s", plugin_id, runtime.process.pid)
             runtime.monitor_task = asyncio.create_task(self._monitor_process(plugin_id, runtime.process))
         except Exception as exc:
+            process = runtime.process
+            if process and process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            runtime.process = None
+            runtime.rpc_client = None
+            runtime.tools = []
             runtime.status, runtime.error = "failed", str(exc)
             self.logger.exception("插件 %s 启动失败", plugin_id)
 
@@ -477,7 +568,10 @@ class PluginHost:
             "DICEFRAME_PLUGIN_DIR": str(runtime.directory.resolve()),
             "DICEFRAME_PLUGIN_DATA_DIR": str(plugin_data_dir),
             "TRPG_PARENT_PID": str(os.getpid()),
+            "DICEFRAME_PLUGIN_PROTOCOL": str(PLUGIN_PROTOCOL_VERSION),
         })
+        if self._plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES:
+            env["PYTHONPATH"] = str(runtime.directory.parent.parent.resolve())
         for key, field_schema in runtime.schema.get("properties", {}).items():
             env_name = str((field_schema.get("ui") or {}).get("env") or "")
             if not env_name:
@@ -513,9 +607,30 @@ class PluginHost:
                 process.kill()
                 await process.wait()
         runtime.process = None
+        runtime.rpc_client = None
+        runtime.tools = []
         runtime.status = self._status_for_enabled(runtime)
         if runtime.status != "active":
             self.contributions.clear_plugin(plugin_id)
+
+    async def _fail_rpc_runtime(self, runtime: PluginRuntime, error: str) -> None:
+        monitor = runtime.monitor_task
+        runtime.monitor_task = None
+        if monitor and not monitor.done():
+            monitor.cancel()
+        process = runtime.process
+        if process and process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        runtime.process = None
+        runtime.rpc_client = None
+        runtime.tools = []
+        runtime.status = "failed"
+        runtime.error = error
 
     async def restart(self, plugin_id: str) -> None:
         await self.stop(plugin_id)
@@ -547,6 +662,8 @@ class PluginHost:
         runtime.status = "failed"
         runtime.error = f"插件进程已退出，code={code}"
         runtime.process = None
+        runtime.rpc_client = None
+        runtime.tools = []
         self.logger.warning("插件 %s 意外退出，3 秒后尝试自动重启，code=%s", plugin_id, code)
         await asyncio.sleep(3)
         if self.plugins.get(plugin_id) is runtime and runtime.config.get("enabled") and runtime.status == "failed":
@@ -634,9 +751,61 @@ class PluginHost:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self._validate_schema(schema)
         self._validate_manifest_permissions(manifest)
+        self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)
         validate_contributes(manifest, plugin_dir)
         return plugin_id, PluginRuntime(manifest, schema, plugin_dir)
+
+    def _expand_entrypoint(self, plugin_id: str, runtime: PluginRuntime, command: list[str]) -> list[str]:
+        data_dir = (self.data_dir / plugin_id / "runtime").resolve()
+        replacements = {
+            "{plugin_dir}": str(runtime.directory.resolve()),
+            "{data_dir}": str(data_dir),
+        }
+        expanded: list[str] = []
+        for item in command:
+            value = item
+            for marker, replacement in replacements.items():
+                value = value.replace(marker, replacement)
+            expanded.append(value)
+        return expanded
+
+    @staticmethod
+    def _validate_tool_descriptors(initialized: Any) -> list[dict[str, Any]]:
+        if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:
+            raise PluginProtocolError("工具插件协议版本不匹配")
+        raw_tools = initialized.get("tools")
+        if not isinstance(raw_tools, list) or not raw_tools:
+            raise PluginProtocolError("工具插件必须注册至少一个工具")
+        if len(raw_tools) > 64:
+            raise PluginProtocolError("单个插件最多注册 64 个工具")
+        tools: list[dict[str, Any]] = []
+        names: set[str] = set()
+        for raw in raw_tools:
+            if not isinstance(raw, dict):
+                raise PluginProtocolError("工具描述必须是对象")
+            name = str(raw.get("name") or "").strip()
+            if not _TOOL_NAME_RE.fullmatch(name):
+                raise PluginProtocolError(f"工具名称非法：{name}")
+            if name in names:
+                raise PluginProtocolError(f"工具名称重复：{name}")
+            names.add(name)
+            title = str(raw.get("title") or name).strip()[:120]
+            description = str(raw.get("description") or "").strip()[:1000]
+            input_schema = raw.get("input_schema")
+            if not isinstance(input_schema, dict) or input_schema.get("type") != "object":
+                raise PluginProtocolError(f"工具 {name} 的 input_schema 必须是 object")
+            try:
+                json.dumps(input_schema, ensure_ascii=False)
+            except (TypeError, ValueError) as exc:
+                raise PluginProtocolError(f"工具 {name} 的 input_schema 不是有效 JSON") from exc
+            tools.append({
+                "name": name,
+                "title": title,
+                "description": description,
+                "input_schema": input_schema,
+            })
+        return tools
 
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:
@@ -752,6 +921,13 @@ class PluginHost:
         unknown = sorted({item.strip() for item in permissions} - set(_ALLOWED_PERMISSIONS))
         if unknown:
             raise ValueError(f"未知插件权限：{', '.join(unknown)}")
+
+    @staticmethod
+    def _validate_runtime_permissions(manifest: dict[str, Any], schema: dict[str, Any]) -> None:
+        plugin_type = str(manifest.get("plugin_type") or "").strip()
+        permissions = set(effective_plugin_permissions(manifest, schema))
+        if plugin_type == "tool" and "tool.execute" not in permissions:
+            raise ValueError("tool 插件必须声明 tool.execute 权限")
 
     def _plugin_permissions(self, runtime: PluginRuntime) -> list[str]:
         return effective_plugin_permissions(runtime.manifest, runtime.schema)

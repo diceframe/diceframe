@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "echo-tool",
+  "name": "Echo Tool",
+  "version": "0.1.0",
+  "description": "A minimal callable tool plugin for testing the DiceFrame process runtime.",
+  "plugin_type": "tool",
+  "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+  "config_schema": "config.schema.json",
+  "capabilities": ["tool.echo"],
+  "permissions": ["process.spawn", "plugin.config", "plugin.data", "tool.execute"],
+  "docs": "README_CN.md"
+}

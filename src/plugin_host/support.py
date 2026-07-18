@@ -30,8 +30,8 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, str]] = {
         "summary": "仅保留清单类型，尚未接入模型 Provider 运行时",
     },
     "tool": {
-        "level": "reserved",
-        "summary": "仅保留清单类型，尚未接入可调用工具运行时",
+        "level": "supported",
+        "summary": "可通过受限 JSON-RPC 协议注册并执行结构化工具",
     },
 }
 

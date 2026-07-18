@@ -2,6 +2,7 @@
 from __future__ import annotations
 from aiohttp import web
 from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
+from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.webui.routes._common import _get_api, _require_confirmed_request
 
 async def api_plugins(request: web.Request) -> web.Response:
@@ -78,6 +79,39 @@ async def api_plugin_contributions(request: web.Request) -> web.Response:
 
 async def api_plugin_themes(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).list_plugin_themes())
+
+async def api_plugin_tools(request: web.Request) -> web.Response:
+    return web.json_response(_get_api(request).list_plugin_tools())
+
+async def api_plugin_tool_invoke(request: web.Request) -> web.Response:
+    denied=_require_confirmed_request(request)
+    if denied is not None: return denied
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+    arguments = body.get("arguments", {})
+    context = body.get("context", {})
+    if not isinstance(arguments, dict) or not isinstance(context, dict):
+        return web.json_response({"ok":False,"error":"arguments 和 context 必须是对象"},status=400)
+    try:
+        result = await _get_api(request).invoke_plugin_tool(
+            request.match_info["plugin_id"],
+            request.match_info["tool_name"],
+            arguments,
+            context,
+        )
+    except KeyError as exc:
+        return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ValueError as exc:
+        return web.json_response({"ok":False,"error":str(exc)},status=400)
+    except PluginInvocationError as exc:
+        return web.json_response({"ok":False,"error":str(exc)},status=422)
+    except PluginProtocolError as exc:
+        return web.json_response({"ok":False,"error":str(exc)},status=502)
+    return web.json_response(result)
 
 async def api_plugin_content(request: web.Request) -> web.Response:
     result = _get_api(request).list_plugin_content(
@@ -214,6 +248,8 @@ def register_plugins(app: web.Application) -> None:
     app.router.add_get("/api/plugins/marketplace",api_plugin_marketplace)
     app.router.add_get("/api/plugins/contributions",api_plugin_contributions)
     app.router.add_get("/api/plugins/themes",api_plugin_themes)
+    app.router.add_get("/api/plugins/tools",api_plugin_tools)
+    app.router.add_post("/api/plugins/tools/{plugin_id}/{tool_name}",api_plugin_tool_invoke)
     app.router.add_get("/api/plugins/content",api_plugin_content)
     app.router.add_post("/api/plugins/content/import",api_plugin_content_import)
     app.router.add_get("/api/plugins/assets/{plugin_id}/{path:.*}",api_plugin_asset)

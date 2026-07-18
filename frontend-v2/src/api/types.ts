@@ -578,8 +578,33 @@ export interface PluginInfo {
   capabilities?: string[]
   permissions?: string[]
   permission_details?: Array<{ id: string; description?: string }>
+  tools?: PluginToolDescriptor[]
   contributions?: PluginContribution[]
   docs?: string
+}
+
+export interface PluginToolDescriptor {
+  plugin_id: string
+  plugin_name: string
+  name: string
+  title?: string
+  description?: string
+  input_schema: JsonObject
+}
+
+export interface PluginToolsResponse {
+  ok: boolean
+  error?: string
+  tools: PluginToolDescriptor[]
+  total?: number
+}
+
+export interface PluginToolInvokeResponse {
+  ok: boolean
+  error?: string
+  plugin_id?: string
+  tool_name?: string
+  result?: JsonObject
 }
 
 export interface PluginContribution {

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import textwrap
 import zipfile
 
 import pytest
 
 from src.plugin_host import PluginHost
+from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.rules.rule_system import RuleSystem
 from src.webui.services import maps as map_service
 from src.webui.services import plugins as plugin_service
@@ -271,7 +273,108 @@ def test_public_plugin_detail_reports_real_support_level(tmp_path):
     host.discover()
 
     assert host.public_detail("map-assets")["support"]["level"] == "partial"
-    assert host.public_detail("future-tool")["support"]["level"] == "reserved"
+    assert host.public_detail("future-tool")["support"]["level"] == "supported"
+
+
+@pytest.mark.asyncio
+async def test_tool_plugin_registers_and_executes_over_stdio_rpc(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "echo-tool",
+        plugin_type="tool",
+        manifest_extra={
+            "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+            "permissions": ["process.spawn", "plugin.config", "plugin.data", "tool.execute"],
+        },
+    )
+    (plugins / "echo-tool" / "main.py").write_text(textwrap.dedent('''
+        import json
+        import sys
+        for line in sys.stdin:
+            request = json.loads(line)
+            method = request["method"]
+            if method == "initialize":
+                result = {
+                    "protocol_version": 1,
+                    "tools": [{
+                        "name": "echo",
+                        "title": "Echo",
+                        "description": "Return the supplied text.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"text": {"type": "string"}},
+                            "required": ["text"],
+                            "additionalProperties": False,
+                        },
+                    }],
+                }
+            elif method == "tool.call":
+                if request["params"]["arguments"]["text"] == "fail":
+                    response = {"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32000, "message": "expected failure"}}
+                    print(json.dumps(response), flush=True)
+                    continue
+                result = {"content": [{"type": "text", "text": request["params"]["arguments"]["text"]}]}
+            response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+            print(json.dumps(response), flush=True)
+    '''), encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    detail = await host.update_config("echo-tool", {"enabled": True})
+    tools = host.list_tools()
+    result = await host.call_tool("echo-tool", "echo", {"text": "hello"})
+
+    assert detail["status"] == "running"
+    assert detail["tools"][0]["name"] == "echo"
+    assert tools[0]["plugin_id"] == "echo-tool"
+    assert result["content"][0]["text"] == "hello"
+    with pytest.raises(PluginProtocolError, match="缺少必填字段"):
+        await host.call_tool("echo-tool", "echo", {})
+    with pytest.raises(PluginInvocationError, match="expected failure"):
+        await host.call_tool("echo-tool", "echo", {"text": "fail"})
+    assert host.public_detail("echo-tool")["status"] == "running"
+    await host.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_tool_plugin_with_invalid_handshake_fails_closed(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "bad-tool",
+        plugin_type="tool",
+        manifest_extra={"entrypoint": ["{python}", "{plugin_dir}/main.py"]},
+    )
+    (plugins / "bad-tool" / "main.py").write_text(
+        "import sys\nfor line in sys.stdin:\n print('not-json', flush=True)\n",
+        encoding="utf-8",
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    detail = await host.update_config("bad-tool", {"enabled": True})
+
+    assert detail["status"] == "failed"
+    assert "stdout 只能输出协议消息" in detail["error"]
+    assert detail["running"] is False
+    assert host.list_tools() == []
+
+
+def test_tool_plugin_requires_execute_permission_when_permissions_are_explicit(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "under-declared-tool",
+        plugin_type="tool",
+        manifest_extra={"permissions": ["process.spawn", "plugin.data"]},
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+
+    detail = host.discover()[0]
+
+    assert detail["status"] == "failed"
+    assert "tool.execute" in detail["error"]
 
 
 def test_process_environment_does_not_inherit_unrelated_host_secrets(tmp_path, monkeypatch):

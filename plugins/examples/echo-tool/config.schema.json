@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "启用插件",
+      "default": false,
+      "ui": {"control": "switch", "group": "运行", "order": 1}
+    },
+    "prefix": {
+      "type": "string",
+      "title": "输出前缀",
+      "description": "添加在回显文本前，演示普通配置如何注入插件进程。",
+      "default": "Echo: ",
+      "maxLength": 40,
+      "ui": {"control": "text", "group": "输出", "order": 10, "env": "ECHO_TOOL_PREFIX"}
+    }
+  }
+}

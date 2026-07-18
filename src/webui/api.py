@@ -108,6 +108,18 @@ class WebAPI:
     def list_plugin_themes(self) -> dict[str, Any]:
         return plugins.list_plugin_themes(self)
 
+    def list_plugin_tools(self) -> dict[str, Any]:
+        return plugins.list_plugin_tools(self)
+
+    async def invoke_plugin_tool(
+        self,
+        plugin_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await plugins.invoke_plugin_tool(self, plugin_id, tool_name, arguments, context)
+
     def list_plugin_content(self, kind: str = "", world_id: str = "", rule_id: str = "") -> dict[str, Any]:
         return plugins.list_plugin_content(self, kind, world_id, rule_id)
 
