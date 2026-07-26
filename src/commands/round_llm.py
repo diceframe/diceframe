@@ -17,6 +17,8 @@ logger = logging.getLogger("trpg")
 _NARRATION_SOFT_LIMIT_CHARS = 260
 _NARRATION_COMPRESS_TRIGGER_CHARS = 450
 _NARRATION_COMBAT_TARGET_CHARS = 400
+_NARRATION_COMPRESS_MIN_TOKENS = 1024
+_NARRATION_COMPRESS_MAX_TOKENS = 2048
 
 
 def _narration_len(text: str) -> int:
@@ -68,11 +70,15 @@ async def _compress_long_narration(
         else "你是叙事压缩器，只输出压缩后的正文，不要前言、不要 ---、不要状态标签、不要对任务的元说明。"
     )
     try:
+        compression_max_tokens = max(
+            _NARRATION_COMPRESS_MIN_TOKENS,
+            min(max_tokens, _NARRATION_COMPRESS_MAX_TOKENS),
+        )
         compressed = await llm_client.call(
             system_prompt=compress_system,
             user_message=prompt,
             temperature=0.2,
-            max_tokens=min(max_tokens, 512),
+            max_tokens=compression_max_tokens,
         )
     except Exception:
         logger.warning("超长叙事二次压缩失败，保留原文", exc_info=True)

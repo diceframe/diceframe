@@ -155,12 +155,14 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
     last_private_count = cursor[1]
     last_action_signature = ""
     last_player_count = len(inst.players)
+    last_public_signature = _play_public_signature(inst, user_id)
     try:
         while True:
             current = subsystems.registry.get(api._parse_key(game_key))
             if not current:
                 break
             inst = current
+            public_event_sent = False
             if inst.round_number > last_round:
                 last_round = inst.round_number
                 log_last = inst.log[-1] if inst.log else {}
@@ -168,6 +170,12 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
                 # 状态
                 cs = inst.get_character_sheet(user_id)
                 await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'state','hp':cs.get('hp'),'max_hp':cs.get('max_hp'),'gold':cs.get('gold'),'deceased':cs.get('deceased')})
+                public_event_sent = True
+            elif inst.round_number < last_round:
+                # 回滚后回合号会倒退；同步游标，避免后续重新推进到旧回合号时漏报。
+                last_round = inst.round_number
+                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'rollback'})
+                public_event_sent = True
             action_signature = json.dumps(
                 [
                     (a.get("user_id", ""), a.get("text", ""), a.get("timestamp", ""))
@@ -178,9 +186,18 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
             if action_signature != last_action_signature:
                 last_action_signature = action_signature
                 await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'public_actions'})
+                public_event_sent = True
             if len(inst.players) != last_player_count:
                 last_player_count = len(inst.players)
                 await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'players'})
+                public_event_sent = True
+            public_signature = _play_public_signature(inst, user_id)
+            if public_signature != last_public_signature:
+                last_public_signature = public_signature
+                if not public_event_sent:
+                    # 同回合回滚、角色状态恢复等操作不会改变既有 SSE 游标，
+                    # 仍需显式唤醒玩家端重新拉取完整公开状态。
+                    await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'refresh'})
             priv = inst.private_log.get(user_id, [])
             if len(priv) > last_private_count:
                 for p in priv[last_private_count:]:
@@ -193,6 +210,25 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
     finally:
         pool.remove(game_key, user_id, resp)
     return resp
+
+
+def _play_public_signature(inst, user_id: str) -> str:
+    """返回会影响玩家游戏页的公开状态签名。"""
+    payload = {
+        "round_number": inst.round_number,
+        "state": inst.state.value,
+        "last_activity": inst.last_activity,
+        "log_count": len(inst.log),
+        "scene": inst.scene,
+        "quick_actions": getattr(inst, "quick_actions", []),
+        "pending_payments": [
+            payment for payment in getattr(inst, "pending_payments", [])
+            if payment.get("status") == "pending"
+        ],
+        "multiplayer": inst.multiplayer_status(),
+        "character_sheet": inst.get_character_sheet(user_id),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
 
 
 def _event_cursor(round_number: int, private_count: int, action_signature: str) -> str:

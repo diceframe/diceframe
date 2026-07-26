@@ -15,6 +15,20 @@ from src.webui.access_password import hash_access_password
 from src.webui.sse_ticket import SseTicketStore
 
 
+def test_generation_defaults_migration_raises_only_the_old_narrative_default():
+    old_default = {"narrative_max_tokens": 1024}
+    custom = {"narrative_max_tokens": 1536}
+
+    assert web_server._migrate_generation_defaults(old_default) is True
+    assert old_default["narrative_max_tokens"] == 2048
+    assert old_default["generation_defaults_version"] == 2
+    assert web_server._migrate_generation_defaults(old_default) is False
+
+    assert web_server._migrate_generation_defaults(custom) is True
+    assert custom["narrative_max_tokens"] == 1536
+    assert custom["generation_defaults_version"] == 2
+
+
 def test_invalid_config_is_quarantined_instead_of_silently_discarded(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{坏掉的 JSON", encoding="utf-8")

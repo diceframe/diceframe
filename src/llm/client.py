@@ -215,9 +215,13 @@ class LLMClient:
                 )
             data = await resp.json()
 
-        content = data["choices"][0]["message"]["content"] or ""
+        choice = data["choices"][0]
+        content = choice["message"].get("content") or ""
         if not content.strip():
-            content = data["choices"][0]["message"].get("reasoning_content", "") or ""
+            finish_reason = str(choice.get("finish_reason") or "unknown")
+            raise ValueError(
+                f"模型未返回最终正文 (finish_reason={finish_reason})"
+            )
         total_tokens = data.get("usage", {}).get("total_tokens", 0)
         return self._to_response(content, total_tokens, provider.provider_name)
 

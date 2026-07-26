@@ -370,7 +370,7 @@ export const en = {
   passwordUnset: 'No password',
   currentCredential: 'Current credential {masked}',
   localAccessNoPassword: 'Local access does not require a login password',
-  narrativeTokens: 'Narrative Tokens',
+  narrativeTokens: 'Narrative Tokens (incl. compression)',
   characterGenTokens: 'Character Generation Tokens',
   summaryTokens: 'Summary Tokens',
   briefTokens: 'Brief Tokens',

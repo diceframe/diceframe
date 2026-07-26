@@ -42,6 +42,9 @@ from src.webui.routes.system import register_system
 logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 
+DEFAULT_NARRATIVE_MAX_TOKENS = 2048
+GENERATION_DEFAULTS_VERSION = 2
+
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -82,8 +85,28 @@ def _load_json_object(path: Path, label: str) -> dict:
         return {}
 
 
+def _migrate_generation_defaults(config: dict) -> bool:
+    """一次性提升旧版默认生成额度，同时保留用户的自定义数值。"""
+    try:
+        version = int(config.get("generation_defaults_version", 0) or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version >= GENERATION_DEFAULTS_VERSION:
+        return False
+
+    try:
+        narrative_tokens = int(config.get("narrative_max_tokens", 1024) or 1024)
+    except (TypeError, ValueError):
+        narrative_tokens = 1024
+    if narrative_tokens == 1024:
+        config["narrative_max_tokens"] = DEFAULT_NARRATIVE_MAX_TOKENS
+    config["generation_defaults_version"] = GENERATION_DEFAULTS_VERSION
+    return True
+
+
 saved = _load_json_object(CONFIG_FILE, "主配置")
 secrets = _load_json_object(SECRETS_FILE, "敏感配置")
+_generation_defaults_migrated = _migrate_generation_defaults(saved)
 
 # env > secrets.json > config.json（用于迁移）
 API_KEY = (os.getenv("TRPG_LLM_API_KEY")
@@ -125,7 +148,7 @@ NAPCAT_REPLY_DELAY_MAX_SEC = float(os.getenv("NAPCAT_REPLY_DELAY_MAX_SEC") or sa
 NAPCAT_COMMAND_DEDUP_WINDOW_SEC = float(os.getenv("NAPCAT_COMMAND_DEDUP_WINDOW_SEC") or saved.get("napcat_command_dedup_window_sec", 6))
 NAPCAT_CONNECTION_ID = os.getenv("NAPCAT_CONNECTION_ID") or str(saved.get("napcat_connection_id", ""))
 NARRATIVE_MAX_TOKENS = int(os.getenv("TRPG_NARRATIVE_MAX_TOKENS")
-                           or saved.get("narrative_max_tokens", 1024))
+                           or saved.get("narrative_max_tokens", DEFAULT_NARRATIVE_MAX_TOKENS))
 CHARACTER_GEN_MAX_TOKENS = int(os.getenv("TRPG_CHARACTER_GEN_MAX_TOKENS")
                                or saved.get("character_gen_max_tokens", 2048))
 SUMMARY_MAX_TOKENS = int(os.getenv("TRPG_SUMMARY_MAX_TOKENS")
@@ -144,16 +167,16 @@ PROXY_URL = (os.getenv("TRPG_PROXY_URL")
              or _ENV_PROXY_URL)
 
 # 自动迁移：config.json 中的 api_key 迁移到 secrets.json
+_migrated = _generation_defaults_migrated
 if saved.get("api_key") and not secrets.get("api_key"):
     secrets["api_key"] = saved.pop("api_key")
     _migrated = True
-else:
-    _migrated = False
 if saved.get("embedding_api_key") and not secrets.get("embedding_api_key"):
     secrets["embedding_api_key"] = saved.pop("embedding_api_key")
     _migrated = True
 
 STATE = {
+    "generation_defaults_version": GENERATION_DEFAULTS_VERSION,
     "api_key": API_KEY, "base_url": BASE_URL, "model": MODEL, "api_format": API_FORMAT, "web_port": PORT,
     "embedding_enabled": EMB_ENABLED, "embedding_base_url": EMB_BASE_URL,
     "embedding_model": EMB_MODEL, "embedding_api_key": EMB_API_KEY,
@@ -346,7 +369,7 @@ def _build_subsystems() -> TRPGSubsystems:
         embedding_model=STATE.get("embedding_model", "nomic-embed-text"),
         embedding_max_input=int(STATE.get("embedding_max_input", 0)),
         proxy_url=effective_proxy_url(bool(STATE.get("proxy_enabled")), STATE.get("proxy_url", "")),
-        narrative_max_tokens=int(STATE.get("narrative_max_tokens", 1024)),
+        narrative_max_tokens=int(STATE.get("narrative_max_tokens", DEFAULT_NARRATIVE_MAX_TOKENS)),
         character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
         summary_max_tokens=int(STATE.get("summary_max_tokens", 400)),
         brief_max_tokens=int(STATE.get("brief_max_tokens", 300)),

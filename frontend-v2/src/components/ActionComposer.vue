@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { ActionSubmitResponse, GameDetail } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
@@ -29,6 +29,29 @@ function clearDiceTimer() { if (diceTimer) { clearTimeout(diceTimer); diceTimer 
 function stripRollMarker(value: string) {
   return String(value || '').split('\n').filter(line => !line.startsWith(SYSTEM_DICE_MARKER_PREFIX)).join('\n').trim()
 }
+function resetSubmissionState() {
+  clearDiceTimer()
+  pending.value = ''
+  notice.value = ''
+  editingInstead.value = false
+  dicePhase.value = 'idle'
+  diceValue.value = undefined
+  diceCrit.value = false
+  diceFumble.value = false
+}
+
+const ownSignature = computed(() => own.value
+  ? JSON.stringify([own.value.text, own.value.revision_count, own.value.dice_pending, own.value.dice_roll_source])
+  : '')
+
+watch(
+  [() => props.detail.round_number, ownSignature],
+  ([roundNumber, signature], [previousRoundNumber, previousSignature]) => {
+    if (roundNumber !== previousRoundNumber || (previousSignature && !signature)) {
+      resetSubmissionState()
+    }
+  },
+)
 
 async function submit(confirm = false) {
   const action = (confirm ? pendingRollText.value : text.value).trim()

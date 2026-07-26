@@ -36,6 +36,26 @@ class _FakeSession:
         return _FakeResponse()
 
 
+class _EmptyOpenAIResponse(_FakeResponse):
+    async def json(self):
+        return {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "reasoning_content": "首先，任务是压缩给定的 TRPG GM 正文，只输出压缩后的正文。",
+                },
+                "finish_reason": "length",
+            }],
+            "usage": {"total_tokens": 512},
+        }
+
+
+class _EmptyOpenAISession(_FakeSession):
+    def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        return _EmptyOpenAIResponse()
+
+
 @pytest.mark.asyncio
 async def test_anthropic_provider_uses_messages_api(monkeypatch):
     session = _FakeSession()
@@ -70,3 +90,29 @@ async def test_anthropic_provider_uses_messages_api(monkeypatch):
     assert "temperature" not in call["json"]
     assert "system prompt" in call["json"]["system"]
     assert "Return only valid JSON" in call["json"]["system"]
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_never_exposes_reasoning_as_final_content(monkeypatch):
+    session = _EmptyOpenAISession()
+    provider = ProviderConfig(
+        provider_name="reasoning-model",
+        base_url="https://api.example.com",
+        api_key="test-key",
+        model_name="reasoning-test",
+    )
+    client = LLMClient(providers=[provider], default=provider.provider_name)
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    with pytest.raises(ValueError, match=r"finish_reason=length"):
+        await client._call_openai_compatible(
+            provider,
+            "compress the narration",
+            "original narration",
+            temperature=0.2,
+            max_tokens=512,
+        )

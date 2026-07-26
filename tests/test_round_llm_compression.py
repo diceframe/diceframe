@@ -56,6 +56,7 @@ async def test_long_narration_is_compressed_without_reparsing_tags():
     )
 
     assert len(llm.calls) == 2
+    assert llm.calls[1]["kwargs"]["max_tokens"] == 1024
     assert "白马寺藏经阁" in response.narration
     assert len(response.narration) < 260
     assert data["state_update"]["loot"][0]["item"] == "摄魂银针"
