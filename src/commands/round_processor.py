@@ -26,6 +26,7 @@ from src.commands.round_llm import (
 from src.commands.round_actions import (
     build_dice_constraint_block,
     collect_actions_text,
+    collect_gm_directives_text,
     ensure_round_managers,
     initialize_puzzles_from_lorebook,
 )
@@ -94,6 +95,8 @@ class RoundProcessor:
 
         ensure_round_managers(instance)
         actions_text = collect_actions_text(instance)
+        instance.last_check = None
+        instance.last_checks.clear()
 
         if instance.world_id:
             self._ensure_matcher_for_world(instance.world_id)
@@ -125,6 +128,9 @@ class RoundProcessor:
         puzzle_text = self._puzzles.process_puzzles(instance, actions_text)
         if puzzle_text:
             actions_text = puzzle_text + "\n\n" + actions_text
+        gm_directives_text, consumed_directive_ids = collect_gm_directives_text(instance)
+        if gm_directives_text:
+            actions_text += gm_directives_text
 
         gm_prompt = self._prompt.compose_gm_prompt(instance, rule_appendix)
         provider_name = self.llm_client.default if self.llm_client else ""
@@ -163,6 +169,12 @@ class RoundProcessor:
         store_private_messages(instance, response)
         state_msgs = append_state_change_messages(instance, response, public_state_before, data)
 
+        if consumed_directive_ids:
+            consumed = set(consumed_directive_ids)
+            instance.gm_directives = [
+                entry for entry in instance.gm_directives
+                if str(entry.get("id") or "") not in consumed
+            ]
         await instance.finish_judgment(response.narration, pre_state_snapshot=round_pre_snapshot, state_changes=state_msgs)
         if instance.log:
             instance.log[-1]["tags_summary"] = summarize_tags(data)

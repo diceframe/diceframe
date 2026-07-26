@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/api/client'
-import type { ActionSubmitResponse, GameDetail } from '@/api/types'
+import type { ActionSubmitResponse, CheckRequest, GameDetail } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import { SYSTEM_DICE_MARKER_PREFIX } from '@/utils/play'
 import DiceButton from './play/DiceButton.vue'
@@ -14,7 +14,9 @@ const text = ref(''), busy = ref(false), pending = ref(''), notice = ref('')
 const editingInstead = ref(false)
 const dicePhase = ref<'idle' | 'rolling' | 'result'>('idle')
 const diceValue = ref<number | undefined>(undefined)
+const diceSystem = ref('d20')
 const diceCrit = ref(false), diceFumble = ref(false)
+const pendingCheck = ref<CheckRequest | null>(null)
 let diceTimer: ReturnType<typeof setTimeout> | null = null
 
 const own = computed(() => props.detail.multiplayer?.submitted_actions?.find(a => a.user_id === props.userId))
@@ -23,7 +25,8 @@ const hint = computed(() => props.detail.solo_mode ? t('soloHint') : own.value ?
 const defaultQuickActions = computed(() => [t('quickObserve'), t('quickExplore'), t('quickTalk'), t('quickPrepareCombat')])
 const quickActions = computed(() => (props.detail.quick_actions?.length ? props.detail.quick_actions : defaultQuickActions.value) as string[])
 const locked = computed(() => props.disabled || busy.value || dicePhase.value !== 'idle')
-const diceNotice = computed(() => notice.value || t('diceNeeded'))
+const activeCheck = computed(() => pendingCheck.value || own.value?.check_request || null)
+const diceNotice = computed(() => notice.value || activeCheck.value?.label || t('diceNeeded'))
 
 function clearDiceTimer() { if (diceTimer) { clearTimeout(diceTimer); diceTimer = null } }
 function stripRollMarker(value: string) {
@@ -36,12 +39,14 @@ function resetSubmissionState() {
   editingInstead.value = false
   dicePhase.value = 'idle'
   diceValue.value = undefined
+  diceSystem.value = 'd20'
   diceCrit.value = false
   diceFumble.value = false
+  pendingCheck.value = null
 }
 
 const ownSignature = computed(() => own.value
-  ? JSON.stringify([own.value.text, own.value.revision_count, own.value.dice_pending, own.value.dice_roll_source])
+  ? JSON.stringify([own.value.text, own.value.revision_count, own.value.dice_pending, own.value.dice_roll_source, own.value.check_request])
   : '')
 
 watch(
@@ -60,9 +65,18 @@ async function submit(confirm = false) {
   if (confirm) { dicePhase.value = 'rolling'; diceValue.value = undefined; diceCrit.value = false; diceFumble.value = false }
   try {
     const r = await api<ActionSubmitResponse>(`/games/${encodeURIComponent(props.gameKey)}/action`, { method: 'POST', body: JSON.stringify({ text: action, confirm, server_roll: confirm }) })
-    if (r.phase === 'dice') { pending.value = action; editingInstead.value = false; notice.value = r.message || t('diceNeeded'); dicePhase.value = 'idle'; emit('refresh'); return }
+    if (r.phase === 'dice') {
+      pending.value = action
+      pendingCheck.value = r.check_request || null
+      diceSystem.value = r.check_request?.dice_system || 'd20'
+      editingInstead.value = false
+      notice.value = r.message || t('diceNeeded')
+      dicePhase.value = 'idle'
+      emit('refresh')
+      return
+    }
     if (confirm && r.roll?.ok) {
-      dicePhase.value = 'result'; diceValue.value = r.roll.value; diceCrit.value = !!r.roll.critical; diceFumble.value = !!r.roll.fumble
+      dicePhase.value = 'result'; diceValue.value = r.roll.value; diceSystem.value = r.roll.dice_system || activeCheck.value?.dice_system || 'd20'; diceCrit.value = !!r.roll.critical; diceFumble.value = !!r.roll.fumble
       text.value = ''; pending.value = ''; editingInstead.value = false
       clearDiceTimer()
       diceTimer = setTimeout(() => { dicePhase.value = 'idle'; notice.value = t('actionRecorded'); emit('refresh') }, 1800)
@@ -82,13 +96,13 @@ onUnmounted(clearDiceTimer)
         <strong>{{ t('composerTitle') }}</strong>
         <span>{{ hint }}</span>
       </div>
-      <DiceButton :phase="dicePhase" :value="diceValue" :crit="diceCrit" :fumble="diceFumble" />
+      <DiceButton :phase="dicePhase" :value="diceValue" :dice="diceSystem" :crit="diceCrit" :fumble="diceFumble" />
     </div>
     <div class="quick-actions" :aria-label="t('quickActions')">
       <button v-for="action in quickActions" :key="action" :disabled="locked" @click="text = action">{{ action }}</button>
     </div>
     <div v-if="pendingRollText" class="dice-prompt">
-      <span>{{ diceNotice }}</span>
+      <span><strong>{{ activeCheck?.label || diceNotice }}</strong> · {{ activeCheck?.dice_system || diceSystem }}</span>
       <button class="primary" @click="submit(true)" :disabled="locked">{{ t('rollDice') }}</button>
       <button @click="pending = ''; notice = ''; editingInstead = true">{{ t('changeAction') }}</button>
     </div>

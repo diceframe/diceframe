@@ -2,10 +2,10 @@
 import { computed } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 
-const props = defineProps<{ phase: 'idle' | 'rolling' | 'result'; value?: number; crit?: boolean; fumble?: boolean }>()
+const props = defineProps<{ phase: 'idle' | 'rolling' | 'result'; value?: number; dice?: string; crit?: boolean; fumble?: boolean }>()
 const { t } = useLocale()
-const isCrit = computed(() => props.phase === 'result' && (props.crit || props.value === 20))
-const isFumble = computed(() => props.phase === 'result' && (props.fumble || props.value === 1))
+const isCrit = computed(() => props.phase === 'result' && (props.crit || (props.dice === 'd20' && props.value === 20)))
+const isFumble = computed(() => props.phase === 'result' && (props.fumble || (props.dice === 'd20' && props.value === 1)))
 </script>
 
 <template>
@@ -14,7 +14,7 @@ const isFumble = computed(() => props.phase === 'result' && (props.fumble || pro
       <span class="dice-spinner" /> 🎲 {{ t('diceRolling') }}
     </template>
     <template v-else>
-      🎲 <strong class="dice-value">d20 = {{ value }}</strong>
+      🎲 <strong class="dice-value">{{ dice || 'd20' }} = {{ value }}</strong>
       <span v-if="isCrit" class="dice-crit">⚡ {{ t('criticalSuccess') }}</span>
       <span v-if="isFumble" class="dice-fumble">💥 {{ t('criticalFailure') }}</span>
     </template>

@@ -75,4 +75,34 @@ describe('ActionComposer rollback refresh', () => {
     expect(wrapper.find('.notice').exists()).toBe(false)
     expect(wrapper.find('textarea').exists()).toBe(true)
   })
+
+  it('shows the structured rule check and keeps the d100 dice type', async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        phase: 'dice',
+        message: '需要潜行检定',
+        check_request: { dice_system: 'd100', label: '潜行检定', skill: '潜行' },
+      })
+      .mockResolvedValueOnce({
+        phase: 'done',
+        roll: { ok: true, dice_system: 'd100', value: 54, critical: false, fumble: false },
+      })
+    const wrapper = mount(ActionComposer, {
+      global: { plugins: [i18n] },
+      props: {
+        gameKey: 'web|room|bot',
+        userId: 'player-1',
+        detail: detail(false),
+      },
+    })
+
+    await wrapper.get('textarea').setValue('悄悄上楼')
+    await wrapper.get('.composer-row button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.dice-prompt').text()).toContain('潜行检定 · d100')
+
+    await wrapper.get('.dice-prompt .primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.dice-result').text()).toContain('d100 = 54')
+  })
 })

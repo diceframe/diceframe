@@ -484,7 +484,8 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             result = await self._action_with_group_thinking(group_id, game_key, actor, text)
             if result.get("phase") == "dice":
                 self.pending_dice[pending_key] = text
-                await self._send_group_text(group_id, f"@{platform_user_id} 这次行动需要掷骰。回复 @我 掷骰，或重新描述行动。")
+                check_message = str(result.get("message") or "这次行动需要掷骰")
+                await self._send_group_text(group_id, f"@{platform_user_id} {check_message}。回复 @我 掷骰，或重新描述行动。")
                 return
             await self._send_action_result(group_id, game_key, actor, result)
         finally:

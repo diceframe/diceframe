@@ -10,7 +10,6 @@ from urllib.parse import quote
 
 from aiohttp import web
 
-from src.engine.constants import ACTION_KEYWORDS
 from src.engine.game_instance import GameState
 from src.webui.api import can_modify_character
 from src.webui.routes._common import (
@@ -290,8 +289,13 @@ async def api_log(request: web.Request) -> web.Response:
         per_page = max(1, min(200, int(request.query.get("per_page", "50"))))
     except (TypeError, ValueError):
         return web.json_response({"ok": False, "error": "分页参数必须是整数"}, status=400)
-    return web.json_response(_get_api(request).get_log(
-        request.match_info["game_key"], page, per_page))
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    inst = request.app["subsystems"].registry.get(api._parse_key(game_key))
+    include_internal = bool(inst and request.get("user_id", "") == inst.gm_uid)
+    if include_internal:
+        return web.json_response(api.get_log(game_key, page, per_page, True))
+    return web.json_response(api.get_log(game_key, page, per_page))
 
 
 async def api_create_game(request: web.Request) -> web.Response:
@@ -365,17 +369,16 @@ async def api_action(request: web.Request) -> web.Response:
             else:
                 await inst.resume()
 
-        # 酒馆模式（无骼子规则）跳过骼子检定提示
-        _rule = api._load_rule_for_game(inst)
-        _dice_system = _rule.dice_system if _rule else "d20"
-        existing_has_roll = bool(
-            existing_action and "(系统掷骰:" in str(existing_action.get("text", ""))
+        check_request = api.check_request_for_action(
+            gk,
+            user_id,
+            text,
+            selected_attribute,
+            selected_skill,
+            target_text,
         )
-        need_check = (
-            _dice_system != "none"
-            and not existing_has_roll
-            and any(kw in text for kw in ACTION_KEYWORDS)
-        )
+        need_check = bool(check_request)
+        _dice_system = str((check_request or {}).get("dice_system") or "")
 
         roll_payload = None
         if confirm and existing_pending_roll:
@@ -393,10 +396,12 @@ async def api_action(request: web.Request) -> web.Response:
                 source=source,
                 dice_pending=True,
                 dice_system=_dice_system,
+                check_request=check_request,
             )
             return web.json_response({
                 "phase": "dice",
-                "message": "需要掷骰判定",
+                "message": f"需要{check_request.get('label') or '掷骰判定'}",
+                "check_request": check_request,
                 "advanced": False,
                 "multiplayer": inst.multiplayer_status(),
             })
@@ -410,7 +415,15 @@ async def api_action(request: web.Request) -> web.Response:
             action_text = text
             if confirm and d20 is not None:
                 action_text = f"{text}\n(系统掷骰: {_dice_system}={d20})"
-            await inst.add_action(user_id, action_text, selected_attribute, selected_skill, target_text, source=source)
+            await inst.add_action(
+                user_id,
+                action_text,
+                selected_attribute,
+                selected_skill,
+                target_text,
+                source=source,
+                check_request=check_request,
+            )
         handler = request.app["subsystems"].handler
         if await inst.try_advance():
             narration, _ = await handler.process_round(inst)
@@ -424,6 +437,7 @@ async def api_action(request: web.Request) -> web.Response:
                     if p.get("status") == "pending"
                 ],
                 "check_result": getattr(inst, "last_check", None),
+                "check_results": getattr(inst, "last_checks", []),
                 "recap": getattr(inst, "last_state_update", None),
             }
             if roll_payload:
@@ -469,6 +483,8 @@ async def api_advance(request: web.Request) -> web.Response:
         return web.json_response({
             "narration": narration,
             "quick_actions": getattr(inst, "quick_actions", []),
+            "check_result": getattr(inst, "last_check", None),
+            "check_results": getattr(inst, "last_checks", []),
             "pending_payments": [
                 p for p in getattr(inst, "pending_payments", [])
                 if p.get("status") == "pending"
@@ -510,6 +526,8 @@ async def api_advance(request: web.Request) -> web.Response:
             "ok": True,
             "narration": narration,
             "quick_actions": getattr(inst, "quick_actions", []),
+            "check_result": getattr(inst, "last_check", None),
+            "check_results": getattr(inst, "last_checks", []),
             "pending_payments": [
                 p for p in getattr(inst, "pending_payments", [])
                 if p.get("status") == "pending"

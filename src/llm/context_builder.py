@@ -95,13 +95,19 @@ def _format_history(log: list[dict], max_chars: int, english: bool = False) -> s
     used = 0
 
     def _entry_full(entry: dict) -> str:
-        actions_text = "; ".join(a.get("text", "") for a in entry.get("actions", []))
+        actions_text = "; ".join(
+            a.get("text", "") for a in entry.get("actions", [])
+            if a.get("user_id") != "system"
+        )
         gm_text = entry.get("gm_response", "")
         player_label = "Players" if english else "玩家"
         return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}"
 
     def _entry_slim(entry: dict) -> str:
-        actions_text = "; ".join(a.get("text", "") for a in entry.get("actions", []))
+        actions_text = "; ".join(
+            a.get("text", "") for a in entry.get("actions", [])
+            if a.get("user_id") != "system"
+        )
         gm_text = entry.get("gm_response", "")
         player_label = "Players" if english else "玩家"
         return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}"

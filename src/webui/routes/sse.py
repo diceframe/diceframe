@@ -101,7 +101,28 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
             else:
                 await inst.resume()
 
-        await inst.add_action(user_id, text, selected_attribute, selected_skill, target_text)
+        check_request = api.check_request_for_action(
+            gk, user_id, text, selected_attribute, selected_skill, target_text
+        )
+        await inst.add_action(
+            user_id,
+            text,
+            selected_attribute,
+            selected_skill,
+            target_text,
+            dice_pending=bool(check_request),
+            dice_system=str((check_request or {}).get("dice_system") or ""),
+            check_request=check_request,
+        )
+        if check_request:
+            data = json.dumps({
+                "phase": "dice",
+                "message": f"需要{check_request.get('label') or '掷骰判定'}",
+                "check_request": check_request,
+            }, ensure_ascii=False)
+            await response.write(f"data: {data}\n\n".encode())
+            await response.write(b"event: done\ndata: complete\n\n")
+            return response
         handler = request.app["subsystems"].handler
         if await inst.try_advance():
             narration, _ = await handler.process_round(inst)
@@ -111,9 +132,9 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
                     continue
                 data = json.dumps({"narration": part.strip(), "index": i, "total": len(parts)}, ensure_ascii=False)
                 await response.write(f"data: {data}\n\n".encode())
-            check_result = getattr(inst, "last_check", None)
-            if check_result:
-                await response.write(f"data: {json.dumps({'check_result': check_result}, ensure_ascii=False)}\n\n".encode())
+            check_results = getattr(inst, "last_checks", [])
+            if check_results:
+                await response.write(f"data: {json.dumps({'check_result': check_results[-1], 'check_results': check_results}, ensure_ascii=False)}\n\n".encode())
             recap = getattr(inst, "last_state_update", None)
             if recap:
                 await response.write(f"data: {json.dumps({'recap': recap}, ensure_ascii=False)}\n\n".encode())

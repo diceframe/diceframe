@@ -25,4 +25,38 @@ describe('GameTimeline',()=>{
     expect(wrapper.text()).toContain('第11轮叙事')
     expect(wrapper.text()).toContain('已收起更早的 10 轮')
   })
+
+  it('renders structured check results and hides internal system actions',()=>{
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper=mount(GameTimeline,{global:{plugins:[i18n]},props:{
+      round:2,
+      players:[{user_id:'p1',character_name:'艾琳'}],
+      log:[{
+        round:1,
+        actions:[
+          {user_id:'system',text:'【GM指令】隐藏这条内容'},
+          {user_id:'p1',text:'悄悄上楼'},
+        ],
+        gm_response:'木板发出脆响。',
+        check_results:[{
+          check_id:'check-1',
+          label:'潜行检定',
+          actor_uid:'p1',
+          actor_name:'艾琳',
+          dice:'d100',
+          roll:54,
+          threshold:20,
+          hard_threshold:10,
+          extreme_threshold:4,
+          verdict:'失败',
+        }],
+      }],
+      live:[],
+    }})
+
+    expect(wrapper.text()).toContain('潜行检定 · 艾琳')
+    expect(wrapper.text()).toContain('d100=54 / 20')
+    expect(wrapper.text()).toContain('失败')
+    expect(wrapper.text()).not.toContain('GM指令')
+  })
 })

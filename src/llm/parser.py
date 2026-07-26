@@ -55,6 +55,20 @@ _INTERNAL_ANALYSIS_PREFIXES = (
     "我应该做什么",
 )
 
+_INTERNAL_CHECK_HEADING_RE = re.compile(
+    r"^(?:【系统[^】]*检定[^】]*必须遵循】|\[System Check\s*[-–—]\s*Must Follow\])$",
+    re.IGNORECASE,
+)
+_INTERNAL_CHECK_LINE_RE = re.compile(
+    r"^(?:角色|机制|检定|成功等级阈值|结果|要求|幸运(?:提示|选项)|"
+    r"actor|mechanic|check|success thresholds?|result|requirement|luck (?:hint|option))\s*[：:]",
+    re.IGNORECASE,
+)
+_INTERNAL_GM_DIRECTIVE_RE = re.compile(
+    r"^(?:【GM(?:私密)?指令】|\[Private GM Directives?\])",
+    re.IGNORECASE,
+)
+
 
 def sanitize_narration(text: str) -> str:
     """Remove leaked prompt/context blocks from player-facing narration."""
@@ -63,8 +77,30 @@ def sanitize_narration(text: str) -> str:
     lines = str(text).splitlines()
     kept: list[str] = []
     skipping = False
+    skipping_check = False
+    skipping_directive = False
     for line in lines:
         stripped = line.strip()
+        normalized_heading = stripped.replace("**", "").strip("*_ ")
+        if _INTERNAL_CHECK_HEADING_RE.match(normalized_heading):
+            skipping_check = True
+            continue
+        if _INTERNAL_GM_DIRECTIVE_RE.match(normalized_heading):
+            skipping_directive = True
+            continue
+        if skipping_directive:
+            if not normalized_heading:
+                skipping_directive = False
+                continue
+            if normalized_heading.startswith(("-", "以下内容只用于", "Apply these directives")):
+                continue
+            skipping_directive = False
+        if normalized_heading.startswith("要求：下一次判定必须优先遵循这条 GM 指令"):
+            continue
+        if skipping_check:
+            if not normalized_heading or _INTERNAL_CHECK_LINE_RE.match(normalized_heading):
+                continue
+            skipping_check = False
         if any(stripped.startswith(heading) for heading in _INTERNAL_CONTEXT_HEADINGS):
             skipping = True
             continue

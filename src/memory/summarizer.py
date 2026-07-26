@@ -100,7 +100,10 @@ def build_summary_input(instance: GameInstance, last_n_rounds: int = 10) -> str:
     recent = instance.log[-last_n_rounds:]
     lines = []
     for entry in recent:
-        actions = "; ".join(a.get("text", "") for a in entry.get("actions", []))
+        actions = "; ".join(
+            a.get("text", "") for a in entry.get("actions", [])
+            if a.get("user_id") != "system"
+        )
         gm = entry.get("gm_response", "")
         lines.append(f"Round {entry.get('round','?')}\n玩家: {actions}\nGM: {gm}")
     return "\n\n".join(lines)

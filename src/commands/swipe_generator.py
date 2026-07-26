@@ -6,9 +6,11 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance, restore_players
+from src.llm.parser import sanitize_narration
 
 logger = logging.getLogger("trpg")
 
@@ -62,7 +64,13 @@ class SwipeGenerator:
             restore_players(instance, snapshot)
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)
 
-        actions_text = "; ".join(a.get("text", "") for a in target_entry.get("actions", []))
+        actions_text = "; ".join(
+            a.get("text", "") for a in target_entry.get("actions", [])
+            if a.get("user_id") in instance.players
+        )
+        actions_text += format_check_results_constraint(
+            instance, list(target_entry.get("check_results") or [])
+        )
         if instance.world_id:
             self.ensure_matcher_for_world(instance.world_id)
         lorebook_matches = self.matcher.match_with_recursive(
@@ -95,6 +103,7 @@ class SwipeGenerator:
         narration = response.content
         if "---" in response.content:
             narration = response.content.split("---", 1)[0].strip()
+        narration = sanitize_narration(narration)
         data = parse_tag_state(response.content, combat_model_s)
 
         if data.get("state_update"):

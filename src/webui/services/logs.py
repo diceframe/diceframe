@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
 
 
-def get_log(api: "WebAPI", game_key: str, page: int = 1, per_page: int = 50) -> dict[str, Any]:
+def get_log(
+    api: "WebAPI",
+    game_key: str,
+    page: int = 1,
+    per_page: int = 50,
+    include_internal: bool = False,
+) -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
         return {"log": [], "total": 0, "page": page}
@@ -16,8 +23,23 @@ def get_log(api: "WebAPI", game_key: str, page: int = 1, per_page: int = 50) -> 
     total = len(log)
     start = (page - 1) * per_page
     end = start + per_page
+    page_items = log[-end:-start] if start else log[-end:]
+    if not include_internal:
+        page_items = copy.deepcopy(page_items)
+        for entry in page_items:
+            actions = entry.get("actions")
+            if not isinstance(actions, list):
+                continue
+            entry["actions"] = [
+                action for action in actions
+                if not (
+                    isinstance(action, dict)
+                    and action.get("user_id") == "system"
+                    and str(action.get("text") or "").lstrip().startswith(("【GM指令】", "[GM Directive]"))
+                )
+            ]
     return {
-        "log": log[-end:-start] if start else log[-end:],
+        "log": page_items,
         "total": total,
         "page": page,
         "total_pages": max(1, (total + per_page - 1) // per_page),

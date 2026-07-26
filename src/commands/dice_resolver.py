@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from src.engine.dice import check_coc, check_d20_advantage, check_d100
+from src.engine.dice import DiceResult, check_coc, check_d20_advantage, check_d100, coc_success_level
 from src.engine.game_instance import GameInstance
 from src.engine.language import is_english
 from src.rules.rule_system import RuleSystem
@@ -30,6 +30,196 @@ def _verdict_text(verdict: str, english: bool) -> str:
 
 class DiceResolver:
     """回合检定：按规则掷骰，返回 GM 硬约束文本，并写入 instance.last_check。"""
+
+    def resolve_action_check(
+        self,
+        instance: GameInstance,
+        action: dict,
+        rule: RuleSystem | None,
+    ) -> str:
+        """使用行动中已确认的原始骰值结算检定，保证玩家只掷一次。"""
+        request = action.get("check_request") if isinstance(action.get("check_request"), dict) else {}
+        uid = str(action.get("user_id") or request.get("actor_uid") or "")
+        if uid not in instance.players:
+            return ""
+        text = str(action.get("text") or "")
+        dice_system = str(request.get("dice_system") or (rule.dice_system if rule else "d20")).lower()
+        roll_value = int(action.get("dice_value") or 0)
+        rolls = [int(value) for value in (action.get("dice_rolls") or ([roll_value] if roll_value else []))]
+        if not roll_value:
+            if rule:
+                return self.roll_rule_check(instance, text, rule)
+            return self.roll_d100_check(instance, text) if dice_system == "d100" else ""
+
+        cs = instance.get_character_sheet(uid)
+        attrs = cs.get("attributes", {})
+        skills = cs.get("skills", [])
+        requested_skill = str(request.get("skill") or action.get("selected_skill") or "")
+        matched_skill = next(
+            (
+                skill for skill in skills
+                if (skill.get("name", "") if isinstance(skill, dict) else str(skill)) == requested_skill
+            ),
+            None,
+        )
+        if isinstance(matched_skill, str):
+            matched_skill = {"name": matched_skill, "value": 20}
+        if not matched_skill:
+            matched_skill = self._match_skill(skills, text)
+
+        if dice_system == "d100":
+            return self._resolve_coc_value(instance, uid, attrs, matched_skill, roll_value, request)
+
+        attr_key = str(request.get("attribute") or action.get("selected_attribute") or "")
+        if not attr_key:
+            attr_key = self._guess_attribute_key(text, rule) if rule else "dex"
+        attr_value = int(attrs.get(attr_key, 10) or 10)
+        attr_mod = rule.attribute_modifier(attr_value) if rule else (attr_value - 10) // 2
+        skill_name = matched_skill.get("name", "") if isinstance(matched_skill, dict) else str(matched_skill or "")
+        skill_value = int(matched_skill.get("value", 0) or 0) if isinstance(matched_skill, dict) else 0
+        level = int(cs.get("level", 1) or 1)
+        skill_bonus = 0
+        bonus_label = ""
+        if rule and rule.skill_mode == "proficiency" and matched_skill:
+            skill_bonus = rule.proficiency_bonus(level)
+            bonus_label = f"熟练加值 +{skill_bonus}"
+        elif rule and matched_skill:
+            skill_bonus = rule.skill_bonus(skill_value)
+            bonus_label = f"技能「{skill_name}」{skill_value} → 加值 +{skill_bonus}"
+
+        dc = rule.dc_for_difficulty(instance.difficulty, "normal") if rule else 10
+        modifier = attr_mod + skill_bonus
+        total = roll_value + modifier
+        if roll_value == 20:
+            verdict = "大成功"
+        elif roll_value == 1:
+            verdict = "大失败"
+        else:
+            verdict = "成功" if total >= dc else "失败"
+        mode = str(request.get("advantage_mode") or "")
+        note = str(request.get("advantage_note") or "")
+        result = DiceResult(
+            formula="d20",
+            rolls=rolls or [roll_value],
+            modifier=modifier,
+            total=total,
+            natural=roll_value,
+            is_critical=verdict == "大成功",
+            is_fumble=verdict == "大失败",
+        )
+        attr_label = self._attribute_label(rule, attr_key) if rule else attr_key
+        roll_label = self._d20_roll_label(result, mode)
+        if note:
+            roll_label = f"{roll_label}（{note}）"
+        check = {
+            "check_id": str(request.get("check_id") or ""),
+            "label": str(request.get("label") or f"{skill_name or attr_label}检定"),
+            "actor_uid": uid,
+            "actor_name": instance.players.get(uid, {}).get("character_name", ""),
+            "dice": "d20",
+            "attribute": attr_label,
+            "skill": skill_name,
+            "roll": roll_value,
+            "rolls": result.rolls,
+            "advantage_mode": mode,
+            "advantage_note": note or None,
+            "modifier": modifier,
+            "modifier_breakdown": bonus_label or None,
+            "total": total,
+            "dc": dc,
+            "difficulty": instance.difficulty,
+            "verdict": verdict,
+            "is_critical": verdict == "大成功",
+            "is_fumble": verdict == "大失败",
+        }
+        self._record_check(instance, check)
+        english = is_english(instance.language)
+        if english:
+            return (
+                "\n[System Check - Must Follow]\n"
+                f"Check: {roll_label} + {attr_label} {modifier:+d} = {total} vs DC {dc}\n"
+                f"Result: {_verdict_text(verdict, True)}\n"
+                "Requirement: narrate this server-resolved result without changing the roll or outcome.\n"
+            )
+        return (
+            "\n【系统检定·必须遵循】\n"
+            f"检定: {roll_label} + 属性「{attr_label}」总修正 {modifier:+d} = {total} vs DC {dc}\n"
+            f"结果: {verdict}\n"
+            "要求: 这是服务端已结算结果，只按结果叙事，不得重掷或改判。\n"
+        )
+
+    def _resolve_coc_value(
+        self,
+        instance: GameInstance,
+        uid: str,
+        attrs: dict,
+        matched_skill: dict | None,
+        roll_value: int,
+        request: dict,
+    ) -> str:
+        cs = instance.get_character_sheet(uid)
+        if matched_skill:
+            threshold = int(matched_skill.get("value", 20) or 20)
+            skill_name = str(matched_skill.get("name") or "")
+            label = f"技能「{skill_name}」{threshold}%"
+            attribute_label = None
+        else:
+            attr_key = str(request.get("attribute") or "int")
+            raw_value = int(attrs.get(attr_key, 10) or 10)
+            threshold = raw_value if raw_value > 20 else raw_value * 5
+            skill_name = ""
+            attribute_label = attr_key
+            label = f"属性「{attr_key}」={threshold}%"
+        threshold = max(1, min(99, threshold))
+        verdict = coc_success_level(roll_value, threshold)
+        luck = int(cs.get("luck", 0) or 0)
+        luck_cost = roll_value - threshold if verdict == "失败" else 0
+        check = {
+            "check_id": str(request.get("check_id") or ""),
+            "label": str(request.get("label") or f"{skill_name or attribute_label}检定"),
+            "actor_uid": uid,
+            "actor_name": instance.players.get(uid, {}).get("character_name", ""),
+            "dice": "d100",
+            "attribute": attribute_label,
+            "skill": skill_name,
+            "roll": roll_value,
+            "rolls": [roll_value],
+            "threshold": threshold,
+            "hard_threshold": threshold // 2,
+            "extreme_threshold": threshold // 5,
+            "verdict": verdict,
+            "luck_spend_available": 0 < luck_cost <= luck,
+            "luck_cost": luck_cost if 0 < luck_cost <= luck else None,
+            "is_critical": verdict == "大成功",
+            "is_fumble": verdict == "大失败",
+        }
+        self._record_check(instance, check)
+        english = is_english(instance.language)
+        luck_hint = ""
+        if check["luck_spend_available"]:
+            luck_hint = (
+                f"\nLuck option: spend {luck_cost} Luck for a regular success."
+                if english else f"\n幸运选项: 可消耗 {luck_cost} 点幸运变为普通成功。"
+            )
+        if english:
+            return (
+                "\n[System Check - Must Follow]\n"
+                f"Check: d100={roll_value} vs {label}\n"
+                f"Result: {_verdict_text(verdict, True)}{luck_hint}\n"
+                "Requirement: narrate this server-resolved result without changing the roll or outcome.\n"
+            )
+        return (
+            "\n【系统检定·必须遵循】\n"
+            f"检定: d100={roll_value} vs {label}\n"
+            f"成功等级阈值: 普通≤{threshold}，困难≤{threshold // 2}，极难≤{threshold // 5}\n"
+            f"结果: {verdict}{luck_hint}\n"
+            "要求: 这是服务端已结算结果，只按结果叙事，不得重掷或改判。\n"
+        )
+
+    @staticmethod
+    def _record_check(instance: GameInstance, check: dict) -> None:
+        instance.last_check = check
+        instance.last_checks.append(check)
 
     def roll_d100_check(self, instance: GameInstance, actions_text: str) -> str:
         """通用 d100 检定：优先匹配技能值，否则用最高相关属性×5 作为阈值。"""

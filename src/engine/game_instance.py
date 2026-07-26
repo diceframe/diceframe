@@ -170,6 +170,10 @@ class GameInstance:
 
     # 判定卡片：最近一次检定的结构化结果（前端渲染用）
     last_check: dict | None = None
+    last_checks: list[dict] = field(default_factory=list)
+
+    # GM 私密指令：只注入 GM 上下文，不作为玩家/系统行动公开记录
+    gm_directives: list[dict] = field(default_factory=list)
 
     # 状态变化 recap：最近一回合的 state_update（前端渲染用）
     last_state_update: dict | None = None
@@ -306,8 +310,10 @@ class GameInstance:
                     "dice_pending": bool(a.get("dice_pending")),
                     "dice_system": str(a.get("dice_system", "") or ""),
                     "dice_roll_source": str(a.get("dice_roll_source", "") or ""),
+                    **({"check_request": a.get("check_request")} if a.get("check_request") else {}),
                 }
                 for a in self.action_queue
+                if a.get("user_id") in self.players
             ],
             "pending_action_count": len(self.pending_actions),
             "gm_uid": self.gm_uid,
@@ -341,6 +347,7 @@ class GameInstance:
                          selected_attribute: str = "", selected_skill: str = "",
                          target_text: str = "", source: str = "",
                          dice_pending: bool = False, dice_system: str = "",
+                         check_request: dict | None = None,
                          count_revision: bool = True) -> bool:
         """玩家声明行动。判决阶段中的发言缓存到下一轮。
 
@@ -364,6 +371,8 @@ class GameInstance:
             if dice_pending:
                 action_entry["dice_pending"] = True
                 action_entry["dice_system"] = dice_system or "d20"
+            if check_request:
+                action_entry["check_request"] = dict(check_request)
             if not self.can_accept_actions():
                 self.pending_actions.append(action_entry)
                 return False
@@ -389,6 +398,9 @@ class GameInstance:
                         action_entry["dice_pending"] = False
                         action_entry["dice_system"] = existing.get("dice_system", "")
                         action_entry["dice_roll_source"] = existing.get("dice_roll_source", "")
+                        action_entry["dice_value"] = existing.get("dice_value")
+                        action_entry["dice_rolls"] = list(existing.get("dice_rolls") or [])
+                        action_entry["check_request"] = existing.get("check_request")
                     old_revision = int(existing.get("revision_count", 1) or 1)
                     action_entry["revision_count"] = old_revision + 1 if count_revision else old_revision
                     self.action_queue[existing_index] = action_entry
@@ -415,7 +427,15 @@ class GameInstance:
             and (user_id is None or action.get("user_id") == user_id)
         ]
 
-    async def apply_action_roll(self, user_id: str, dice_system: str, value: int, *, source: str = "player") -> bool:
+    async def apply_action_roll(
+        self,
+        user_id: str,
+        dice_system: str,
+        value: int,
+        *,
+        rolls: list[int] | None = None,
+        source: str = "player",
+    ) -> bool:
         """Attach a resolved roll to a pending action without counting as an edit."""
         async with self._lock:
             action = next(
@@ -437,6 +457,7 @@ class GameInstance:
             action["dice_system"] = system
             action["dice_roll_source"] = source
             action["dice_value"] = int(value)
+            action["dice_rolls"] = [int(item) for item in (rolls or [value])]
             self.ready_players.add(user_id)
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return True
@@ -506,6 +527,7 @@ class GameInstance:
                 "actions": list(self.action_queue),
                 "gm_response": gm_response,
                 "state_changes": list(state_changes or []),
+                "check_results": [dict(item) for item in self.last_checks],
                 "swipes": [],
                 "current_swipe": 0,
                 "pre_state_snapshot": pre_state_snapshot if pre_state_snapshot is not None else _snapshot_players(self),
@@ -604,7 +626,9 @@ class GameInstance:
             self.confirmed_items.clear()
             self.private_log.clear()
             self.last_check = None
+            self.last_checks.clear()
             self.last_state_update = None
+            self.gm_directives.clear()
             self.state = GameState.CREATED
             self.world_id = saved_world_id
             self.world_name = saved_world_name
@@ -676,7 +700,9 @@ class GameInstance:
             "health_events": self.health_events[-100:],
             "health_status": self.health_status,
             "last_check": self.last_check,
+            "last_checks": self.last_checks,
             "last_state_update": self.last_state_update,
+            "gm_directives": self.gm_directives,
             "confirmed_items": self.confirmed_items,
             "private_log": self.private_log,
         }
@@ -813,7 +839,9 @@ class GameInstance:
             health_events=data.get("health_events", []),
             health_status=data.get("health_status", {}),
             last_check=data.get("last_check"),
+            last_checks=data.get("last_checks", []),
             last_state_update=data.get("last_state_update"),
+            gm_directives=data.get("gm_directives", []),
         )
         inst.ready_players = set(data.get("ready_players", []))
         inst.away_players = set(data.get("away_players", []))

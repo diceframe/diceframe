@@ -46,6 +46,43 @@ export interface Player {
   [key: string]: unknown
 }
 
+export interface CheckRequest {
+  check_id?: string
+  required?: boolean
+  actor_uid?: string
+  actor_name?: string
+  dice_system: 'd20' | 'd100' | string
+  label?: string
+  intent?: string
+  skill?: string
+  attribute?: string
+  advantage_mode?: string
+  advantage_note?: string | null
+}
+
+export interface CheckResult {
+  check_id?: string
+  label?: string
+  actor_uid?: string
+  actor_name?: string
+  dice?: string
+  attribute?: string | null
+  skill?: string
+  roll?: number
+  rolls?: number[]
+  modifier?: number
+  total?: number
+  dc?: number
+  threshold?: number
+  hard_threshold?: number
+  extreme_threshold?: number
+  verdict?: string
+  luck_spend_available?: boolean
+  luck_cost?: number | null
+  is_critical?: boolean
+  is_fumble?: boolean
+}
+
 export interface PublicAction {
   user_id: string
   character_name?: string
@@ -55,6 +92,7 @@ export interface PublicAction {
   dice_pending?: boolean
   dice_system?: string
   dice_roll_source?: string
+  check_request?: CheckRequest
 }
 
 export interface Multiplayer {
@@ -110,6 +148,7 @@ export interface LogEntry {
   swipes?: unknown[]
   current_swipe?: number
   tags_summary?: LogTagsSummary
+  check_results?: CheckResult[]
   [key: string]: unknown
 }
 
@@ -422,9 +461,14 @@ export interface ActionSubmitResponse {
   phase?: 'dice' | string
   message?: string
   narration?: string
+  check_request?: CheckRequest
+  check_result?: CheckResult
+  check_results?: CheckResult[]
   roll?: {
     ok?: boolean
+    dice_system?: string
     value?: number
+    rolls?: number[]
     critical?: boolean
     fumble?: boolean
   }

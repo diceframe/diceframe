@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
-import type { LogEntry, PublicAction, Player } from '@/api/types'
+import type { CheckResult, LogEntry, PublicAction, Player } from '@/api/types'
 import type { DiceTag } from '@/utils/play'
 import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
@@ -32,9 +32,20 @@ function toAct(input: unknown): Act {
 }
 function actions(entry: LogEntry): Act[] {
   const raw = entry.player_actions || entry.actions || []
-  if (Array.isArray(raw)) return raw.map(toAct)
-  if (raw && typeof raw === 'object') return Object.entries(raw).map(([uid, text]) => { const p = parseAction(String(text)); return { uid, text: p.text, dice: p.dice } })
+  if (Array.isArray(raw)) return raw.map(toAct).filter(action => action.uid !== 'system')
+  if (raw && typeof raw === 'object') return Object.entries(raw).map(([uid, text]) => { const p = parseAction(String(text)); return { uid, text: p.text, dice: p.dice } }).filter(action => action.uid !== 'system')
   return []
+}
+function checks(entry: LogEntry): CheckResult[] {
+  return Array.isArray(entry.check_results) ? entry.check_results : []
+}
+function checkMath(check: CheckResult): string {
+  if (typeof check.threshold === 'number') return `${check.dice || 'd100'}=${check.roll} / ${check.threshold}`
+  const modifier = Number(check.modifier || 0)
+  const modifierText = modifier ? ` ${modifier > 0 ? '+' : '-'} ${Math.abs(modifier)}` : ''
+  const total = typeof check.total === 'number' ? ` = ${check.total}` : ''
+  const dc = typeof check.dc === 'number' ? ` / DC ${check.dc}` : ''
+  return `${check.dice || 'd20'}=${check.roll}${modifierText}${total}${dc}`
 }
 function liveAct(a: PublicAction): Act { return toAct(a) }
 
@@ -129,6 +140,15 @@ watch(() => props.gameKey, () => {
           <strong :style="{ color: playerColor(a.uid) }">{{ name(a.uid) }}</strong>
           <p>{{ a.text }}</p>
           <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
+        </div>
+        <div v-for="check in checks(item.entry)" :key="check.check_id || `${check.actor_uid}-${check.roll}`" class="message check-result-card" :class="{ success: String(check.verdict).includes('成功'), failure: String(check.verdict).includes('失败') }">
+          <strong><NIcon :component="InformationCircleOutline" size="15" /> {{ check.label || '检定' }} · {{ check.actor_name }}</strong>
+          <p>{{ checkMath(check) }} → <b>{{ check.verdict }}</b></p>
+          <details v-if="typeof check.hard_threshold === 'number'">
+            <summary>成功等级</summary>
+            <span>普通 ≤ {{ check.threshold }} · 困难 ≤ {{ check.hard_threshold }} · 极难 ≤ {{ check.extreme_threshold }}</span>
+          </details>
+          <span v-if="check.luck_spend_available && check.luck_cost" class="dice-tag">可消耗 {{ check.luck_cost }} 点幸运</span>
         </div>
         <div v-if="item.gm" class="message gm">
           <strong>{{ t('gmRound', { round: item.round }) }}</strong>

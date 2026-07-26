@@ -199,6 +199,19 @@ class WebAPI:
     async def set_player_access(self, game_key: str, open_access: bool) -> dict[str, Any]:
         return await games.set_player_access(self, game_key, open_access)
 
+    def check_request_for_action(
+        self,
+        game_key: str,
+        user_id: str,
+        text: str,
+        selected_attribute: str = "",
+        selected_skill: str = "",
+        target_text: str = "",
+    ) -> dict[str, Any] | None:
+        return games.check_request_for_action(
+            self, game_key, user_id, text, selected_attribute, selected_skill, target_text
+        )
+
     def roll_for_game(self, game_key: str) -> dict[str, Any]:
         return games.roll_for_game(self, game_key)
 
@@ -311,8 +324,14 @@ class WebAPI:
 
     # ---- 剧情日志 ----
 
-    def get_log(self, game_key: str, page: int = 1, per_page: int = 50) -> dict[str, Any]:
-        return logs.get_log(self, game_key, page, per_page)
+    def get_log(
+        self,
+        game_key: str,
+        page: int = 1,
+        per_page: int = 50,
+        include_internal: bool = False,
+    ) -> dict[str, Any]:
+        return logs.get_log(self, game_key, page, per_page, include_internal)
 
     def get_statistics(self, game_key: str) -> dict[str, Any]:
         return logs.get_statistics(self, game_key)

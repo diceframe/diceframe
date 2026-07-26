@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from src.engine.character_utils import apply_resource_delta, get_resource
+from src.engine.checks import build_check_request, roll_check_request
 from src.engine.game_instance import GameState
 from src.engine.game_instance import restore_players
 from src.engine.dice import roll
@@ -21,6 +25,29 @@ if TYPE_CHECKING:
     from src.webui.api import WebAPI
 
 logger = logging.getLogger("trpg")
+
+_GM_RESOURCE_ALIASES = {
+    "生命值": "hp",
+    "生命": "hp",
+    "血量": "hp",
+    "hp": "hp",
+    "金币": "currency",
+    "金钱": "currency",
+    "货币": "currency",
+    "gold": "currency",
+    "幸运值": "luck",
+    "幸运": "luck",
+    "luck": "luck",
+    "理智值": "sanity",
+    "理智": "sanity",
+    "san": "sanity",
+    "法力值": "mana",
+    "法力": "mana",
+    "mana": "mana",
+    "内力": "qi",
+    "人性": "humanity",
+    "热度": "heat",
+}
 
 
 def list_games(api: "WebAPI") -> dict[str, Any]:
@@ -168,6 +195,29 @@ async def set_player_access(api: "WebAPI", game_key: str, open_access: bool) -> 
     return {"ok": True, "player_access_open": inst.player_access_open}
 
 
+def check_request_for_action(
+    api: "WebAPI",
+    game_key: str,
+    user_id: str,
+    text: str,
+    selected_attribute: str = "",
+    selected_skill: str = "",
+    target_text: str = "",
+) -> dict[str, Any] | None:
+    """使用当前规则为单个玩家行动生成统一 CheckRequest。"""
+    inst = api._reg.get(api._parse_key(game_key))
+    if not inst or user_id not in inst.players:
+        return None
+    action = {
+        "user_id": user_id,
+        "text": text,
+        "selected_attribute": selected_attribute,
+        "selected_skill": selected_skill,
+        "target_text": target_text,
+    }
+    return build_check_request(inst, action, api._load_rule_for_game(inst))
+
+
 def roll_for_game(api: "WebAPI", game_key: str) -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
@@ -202,26 +252,24 @@ async def resolve_pending_dice_for_game(
     resolved: list[dict[str, Any]] = []
     for action in pending:
         uid = str(action.get("user_id") or "")
-        dice_system = str(action.get("dice_system") or "").lower()
-        if not dice_system:
+        request = action.get("check_request")
+        if not isinstance(request, dict):
             rule = api._load_rule_for_game(inst)
-            dice_system = str(rule.dice_system if rule else "d20").lower()
-        if dice_system == "none":
+            request = build_check_request(inst, action, rule)
+        if not request:
             continue
-        formula = "d100" if dice_system == "d100" else "d20"
-        result = roll(formula)
-        applied = await inst.apply_action_roll(uid, formula, result.natural, source=source)
+        action["check_request"] = request
+        payload = roll_check_request(request)
+        applied = await inst.apply_action_roll(
+            uid,
+            payload["dice_system"],
+            payload["value"],
+            rolls=payload["rolls"],
+            source=source,
+        )
         if not applied:
             continue
-        payload = {
-            "ok": True,
-            "user_id": uid,
-            "dice_system": formula,
-            "value": result.natural,
-            "critical": result.is_critical,
-            "fumble": result.is_fumble,
-            "source": source,
-        }
+        payload.update({"user_id": uid, "source": source})
         resolved.append(payload)
     return {"ok": True, "resolved": resolved, "roll": resolved[0] if resolved else None}
 
@@ -332,6 +380,82 @@ async def rollback_round(api: "WebAPI", game_key: str) -> dict[str, Any]:
     return {"ok": True, "message": f"已撤回到第 {inst.round_number} 轮开始前的玩家状态"}
 
 
+def _resolve_gm_command_target(inst, raw_target: str) -> tuple[str, str] | tuple[None, str]:
+    target = re.sub(r"\s+", "", raw_target).strip("的")
+    generic_targets = {
+        "用户", "玩家", "冒险者", "角色", "当前玩家", "当前角色",
+        "user", "player", "adventurer", "currentplayer", "currentcharacter",
+    }
+    if target in generic_targets:
+        if len(inst.players) == 1:
+            uid = next(iter(inst.players))
+            return uid, ""
+        return None, "当前有多名玩家，请在 GM 指令中写明角色名"
+    for uid, player in inst.players.items():
+        name = str(player.get("character_name") or "")
+        if target in {str(uid), re.sub(r"\s+", "", name)}:
+            return str(uid), ""
+    return None, f"找不到角色：{raw_target}"
+
+
+def _parse_gm_resource_change(inst, command: str, rule: RuleSystem | None) -> dict[str, Any] | None:
+    compact = re.sub(r"\s+", "", command).lower()
+    aliases = sorted(_GM_RESOURCE_ALIASES, key=len, reverse=True)
+    resource_group = "|".join(re.escape(alias) for alias in aliases)
+    patterns: tuple[tuple[re.Pattern[str], int], ...] = (
+        (re.compile(rf"^给(?P<target>.+?)(?:加|增加|恢复|补充|给予)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), 1),
+        (re.compile(rf"^(?P<target>.+?)(?:的)?(?P<resource>{resource_group})(?P<delta>[+-]\d+)点?$"), 1),
+        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), -1),
+        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<amount>\d+)点?(?P<resource>{resource_group})$"), -1),
+        (re.compile(rf"^(?:give|add)(?P<amount>\d+)(?P<resource>{resource_group})(?:to)?(?P<target>.+)$"), 1),
+        (re.compile(rf"^(?:remove|subtract)(?P<amount>\d+)(?P<resource>{resource_group})(?:from)?(?P<target>.+)$"), -1),
+    )
+    match = None
+    sign = 1
+    for pattern, candidate_sign in patterns:
+        match = pattern.fullmatch(compact)
+        if match:
+            sign = candidate_sign
+            break
+    if not match:
+        return None
+
+    uid, error = _resolve_gm_command_target(inst, match.group("target"))
+    if error:
+        return {"error": error}
+    resource_alias = match.group("resource")
+    resource_key = _GM_RESOURCE_ALIASES[resource_alias]
+    raw_delta = match.groupdict().get("delta")
+    delta = int(raw_delta) if raw_delta else sign * int(match.group("amount"))
+    if delta == 0:
+        return {"error": "修正值不能为 0"}
+
+    character_sheet = inst.get_character_sheet(uid)
+    allowed_resources = {"currency", *(
+        str(spec.get("key") or "") for spec in (rule.resource_schema if rule else [])
+    )}
+    if resource_key not in allowed_resources and get_resource(character_sheet, resource_key) is None:
+        return {"error": f"当前规则没有资源：{resource_alias}"}
+    before_resource = get_resource(character_sheet, resource_key)
+    before = (
+        int(character_sheet.get("gold", 0) or 0)
+        if resource_key == "currency"
+        else int((before_resource or {}).get("current", character_sheet.get(resource_key, 0)) or 0)
+    )
+    after = apply_resource_delta(character_sheet, resource_key, delta, rule)
+    actual_delta = after - before
+    return {
+        "uid": uid,
+        "character_name": inst.players.get(uid, {}).get("character_name") or uid,
+        "resource": resource_key,
+        "resource_label": resource_alias,
+        "requested_delta": delta,
+        "actual_delta": actual_delta,
+        "before": before,
+        "after": after,
+    }
+
+
 async def gm_command(api: "WebAPI", game_key: str, command: str, mode: str = "note") -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
@@ -342,31 +466,58 @@ async def gm_command(api: "WebAPI", game_key: str, command: str, mode: str = "no
     if not command:
         return {"ok": False, "error": "请输入 GM 指令"}
 
-    entry = {
-        "user_id": "system",
-        "text": f"【GM指令】{command}\n要求：下一次判定必须优先遵循这条 GM 指令；如果它修正了金币、道具、剧情方向或死亡风险，请按修正后的设定继续。",
-        "timestamp": time.time(),
-        "selected_attribute": "",
-        "selected_skill": "",
-        "target_text": "",
-    }
-    if inst.state == GameState.ACTIVE_ACTION:
-        inst.action_queue.append(entry)
-    else:
-        inst.pending_actions.append(entry)
+    rule = api._load_rule_for_game(inst)
+    resource_change = _parse_gm_resource_change(inst, command, rule)
+    if resource_change:
+        if resource_change.get("error"):
+            return {"ok": False, "error": resource_change["error"]}
+        record_health_event(
+            inst,
+            component="gm_control",
+            code="GM_RESOURCE_CHANGE",
+            severity="info",
+            title="GM 数值修正",
+            message=(
+                f"{resource_change['character_name']} · {resource_change['resource_label']} "
+                f"{resource_change['before']} → {resource_change['after']}"
+            ),
+            impact="数值已由服务端直接写入角色卡，不依赖模型输出。",
+            fallback="direct_state_update",
+            repair_hint="如修正有误，可提交相反数值恢复。",
+        )
+        await api._reg.save(inst)
+        return {
+            "ok": True,
+            "message": (
+                f"{resource_change['character_name']}的{resource_change['resource_label']}："
+                f"{resource_change['before']} → {resource_change['after']}"
+            ),
+            "kind": "resource_update",
+            "resource_update": resource_change,
+        }
+
+    target_round = int(inst.round_number or 0)
+    if inst.state != GameState.ACTIVE_ACTION:
+        target_round += 1
+    inst.gm_directives.append({
+        "id": uuid.uuid4().hex,
+        "text": command,
+        "created_at": time.time(),
+        "target_round": target_round,
+    })
     record_health_event(
         inst,
         component="gm_control",
         code="GM_COMMAND",
         severity="info",
-        title="GM 修正指令",
+        title="GM 私密叙事指令",
         message=command,
-        impact="下一次判定会把这条 GM 指令作为系统行动纳入上下文。",
-        fallback="queued_action",
+        impact="下一轮会私密注入 GM 上下文；不参与行动检定，也不出现在玩家日志中。",
+        fallback="private_directive",
         repair_hint="如果指令写错，可撤回上一轮或追加新的 GM 修正指令覆盖。",
     )
     await api._reg.save(inst)
-    return {"ok": True, "message": "GM 指令已加入下一次判定"}
+    return {"ok": True, "kind": "directive", "message": "GM 私密指令已加入下一轮"}
 
 
 async def gm_private_message(api: "WebAPI", game_key: str, user_id: str, text: str) -> dict[str, Any]:
