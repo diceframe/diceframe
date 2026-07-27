@@ -17,15 +17,15 @@ from src.webui.sse_ticket import SseTicketStore
 
 def test_generation_defaults_migration_raises_only_the_old_narrative_default():
     old_default = {"narrative_max_tokens": 1024}
-    custom = {"narrative_max_tokens": 1536}
+    custom = {"narrative_max_tokens": 1280}
 
     assert web_server._migrate_generation_defaults(old_default) is True
-    assert old_default["narrative_max_tokens"] == 2048
+    assert old_default["narrative_max_tokens"] == web_server.DEFAULT_NARRATIVE_MAX_TOKENS
     assert old_default["generation_defaults_version"] == 2
     assert web_server._migrate_generation_defaults(old_default) is False
 
     assert web_server._migrate_generation_defaults(custom) is True
-    assert custom["narrative_max_tokens"] == 1536
+    assert custom["narrative_max_tokens"] == 1280
     assert custom["generation_defaults_version"] == 2
 
 

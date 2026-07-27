@@ -20,7 +20,7 @@ class CompressionLLM:
         if "请压缩以下 TRPG GM 正文" in user_message:
             content = "李玄清压低声音，指出银针与祭品名录都指向白马寺藏经阁。夜风骤停，绢帛上新名字正在浮现，若不立刻潜入查明阵法根源，下一具无面尸很快就会出现。"
         else:
-            long_text = "李玄清展开绢帛。" * 80
+            long_text = "李玄清展开绢帛。" * 100
             content = (
                 f"{long_text}\n---\n"
                 "KEY_ITEM:u1:摄魂银针\n"

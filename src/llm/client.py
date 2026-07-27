@@ -28,7 +28,7 @@ _RETRY_BACKOFF: dict[int, float] = {
 _RETRYABLE_STATUSES = frozenset(_RETRY_BACKOFF) | {408}  # 408 Timeout 也可重试
 
 
-class _OutputTruncatedError(ValueError):
+class OutputTruncatedError(ValueError):
     """模型输出被 max_tokens 截断且未返回正文（finish_reason=length / stop_reason=max_tokens）。
 
     继承 ValueError 以保持"空正文即报错"的原有语义；call() 据此在重试时
@@ -132,7 +132,7 @@ class LLMClient:
                         provider, system_prompt, user_message,
                         temperature, current_max_tokens, json_mode,
                     )
-                except _OutputTruncatedError as exc:
+                except OutputTruncatedError as exc:
                     last_error = exc
                     logger.warning(
                         "LLM 输出被 max_tokens 截断 (attempt=%d, provider=%s, max_tokens=%d): %s",
@@ -169,7 +169,7 @@ class LLMClient:
                     )
                     continue
             if attempt_num < MAX_RETRIES:
-                if isinstance(last_error, _OutputTruncatedError):
+                if isinstance(last_error, OutputTruncatedError):
                     bumped = min(
                         current_max_tokens * LENGTH_RETRY_FACTOR,
                         max_tokens * LENGTH_RETRY_MAX_MULT,
@@ -185,6 +185,80 @@ class LLMClient:
                     await asyncio.sleep(last_backoff)
 
         raise RuntimeError(f"所有模型供应商均调用失败: {last_error}") from last_error
+
+    async def call_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        force_provider: str | None = None,
+        json_mode: bool = False,
+        on_delta=None,
+    ) -> LLMResponse:
+        """流式调用 LLM，逐段文本通过 on_delta 回调推送，返回与 call() 相同的 LLMResponse。
+
+        on_delta 为可选的 async callable，签名为 ``async def on_delta(text: str) -> None``；
+        每收到一段正文就调用一次，供上层做实时打字机展示。返回值与 call() 一致，
+        内部累积完整正文后走同一个 _to_response 解析，保证流式/非流式结果同构。
+
+        供应商在开始流式前失败（连接/HTTP 错误/超时）时按 fallback 顺序与退避重试，
+        行为与 call() 一致；流式过程中途失败则抛出，由调用方决定是否重试。空正文且
+        finish_reason=length 时抛 OutputTruncatedError，不在内部放大预算，由调用方
+        提高 max_tokens 后重新调用（与 call() 的截断处理对齐）。
+        """
+        primary = self.providers[force_provider or self.default]
+        ordered = [primary] + [
+            p for p in self.providers.values()
+            if p.fallback and p.provider_name != primary.provider_name
+        ]
+
+        last_error = None
+        last_backoff = BASE_DELAY
+        for attempt_num in range(1, MAX_RETRIES + 1):
+            for provider in ordered:
+                try:
+                    content, total_tokens, _finish_reason = await self._stream_one(
+                        provider, system_prompt, user_message,
+                        temperature, max_tokens, json_mode, on_delta,
+                    )
+                    return self._to_response(content, total_tokens, provider.provider_name)
+                except OutputTruncatedError:
+                    raise
+                except aiohttp.ClientResponseError as exc:
+                    last_error = exc
+                    status = exc.status
+                    if status in _RETRYABLE_STATUSES:
+                        last_backoff = _RETRY_BACKOFF.get(status, BASE_DELAY) * attempt_num
+                        logger.warning(
+                            "LLM 流式 HTTP %d (attempt=%d, provider=%s): %s, %0.1fs后重试",
+                            status, attempt_num, provider.provider_name, exc, last_backoff,
+                        )
+                    else:
+                        logger.warning(
+                            "LLM 流式 HTTP %d (attempt=%d, provider=%s): %s (不可重试，跳过该供应商)",
+                            status, attempt_num, provider.provider_name, exc,
+                        )
+                        continue
+                except asyncio.TimeoutError as exc:
+                    last_error = exc
+                    last_backoff = BASE_DELAY * attempt_num * 0.5
+                    logger.warning(
+                        "LLM 流式超时 (attempt=%d, provider=%s): %0.1fs后重试",
+                        attempt_num, provider.provider_name, last_backoff,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "LLM 流式调用失败 (attempt=%d, provider=%s): %s",
+                        attempt_num, provider.provider_name, exc,
+                    )
+                    continue
+            if attempt_num < MAX_RETRIES:
+                await asyncio.sleep(last_backoff)
+
+        raise RuntimeError(f"所有模型供应商均流式调用失败: {last_error}") from last_error
 
     async def _call_one(
         self,
@@ -255,7 +329,7 @@ class LLMClient:
         if not content.strip():
             finish_reason = str(choice.get("finish_reason") or "unknown")
             if finish_reason == "length":
-                raise _OutputTruncatedError(finish_reason)
+                raise OutputTruncatedError(finish_reason)
             raise ValueError(
                 f"模型未返回最终正文 (finish_reason={finish_reason})"
             )
@@ -306,10 +380,199 @@ class LLMClient:
 
         content = _anthropic_text_content(data)
         if not content.strip() and data.get("stop_reason") == "max_tokens":
-            raise _OutputTruncatedError("max_tokens")
+            raise OutputTruncatedError("max_tokens")
         usage = data.get("usage", {})
         total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
         return self._to_response(content, total_tokens, provider.provider_name)
+
+    async def _stream_one(
+        self,
+        provider: ProviderConfig,
+        system_prompt: str,
+        user_message: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool,
+        on_delta=None,
+    ) -> tuple[str, int, str]:
+        api_format = (provider.api_format or "openai").strip().lower()
+        if api_format == "anthropic":
+            return await self._stream_anthropic(
+                provider, system_prompt, user_message,
+                temperature, max_tokens, json_mode, on_delta,
+            )
+        return await self._stream_openai_compatible(
+            provider, system_prompt, user_message,
+            temperature, max_tokens, json_mode, on_delta,
+        )
+
+    async def _stream_openai_compatible(
+        self,
+        provider: ProviderConfig,
+        system_prompt: str,
+        user_message: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool = False,
+        on_delta=None,
+    ) -> tuple[str, int, str]:
+        url = provider.base_url.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url += "/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {provider.api_key}",
+        }
+        body = {
+            "model": provider.model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        # JSON 模式：DeepSeek/OpenAI 兼容的 structured output
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+
+        session = await self._get_session()
+        request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
+        content_parts: list[str] = []
+        finish_reason = "stop"
+        total_tokens = 0
+        async with session.post(url, json=body, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                                **request_kwargs) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise aiohttp.ClientResponseError(
+                    resp.request_info, resp.history,
+                    status=resp.status, message=error_text[:300],
+                    headers=resp.headers,
+                )
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if not payload:
+                    continue
+                if payload == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                if choices:
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+                    text = delta.get("content") or ""
+                    if text:
+                        content_parts.append(text)
+                        if on_delta:
+                            await on_delta(text)
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                usage = chunk.get("usage")
+                if isinstance(usage, dict):
+                    total_tokens = int(usage.get("total_tokens", 0) or 0)
+
+        content = "".join(content_parts)
+        if not content.strip():
+            if finish_reason == "length":
+                raise OutputTruncatedError(finish_reason)
+            raise ValueError(f"模型未返回最终正文 (finish_reason={finish_reason})")
+        return content, total_tokens, finish_reason
+
+    async def _stream_anthropic(
+        self,
+        provider: ProviderConfig,
+        system_prompt: str,
+        user_message: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool = False,
+        on_delta=None,
+    ) -> tuple[str, int, str]:
+        url = _anthropic_messages_url(provider.base_url)
+        system = system_prompt
+        if json_mode:
+            system = f"{system_prompt}\n\nReturn only valid JSON. Do not wrap it in Markdown."
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": provider.api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        body = {
+            "model": provider.model_name,
+            "system": system,
+            "messages": [
+                {"role": "user", "content": user_message},
+            ],
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        session = await self._get_session()
+        request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
+        content_parts: list[str] = []
+        stop_reason = "end_turn"
+        input_tokens = 0
+        output_tokens = 0
+        async with session.post(url, json=body, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                                **request_kwargs) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise aiohttp.ClientResponseError(
+                    resp.request_info, resp.history,
+                    status=resp.status, message=error_text[:300],
+                    headers=resp.headers,
+                )
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if not payload:
+                    continue
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                etype = chunk.get("type")
+                if etype == "message_start":
+                    message = chunk.get("message") or {}
+                    usage = message.get("usage") or {}
+                    input_tokens = int(usage.get("input_tokens", 0) or 0)
+                elif etype == "content_block_delta":
+                    delta = chunk.get("delta") or {}
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text") or ""
+                        if text:
+                            content_parts.append(text)
+                            if on_delta:
+                                await on_delta(text)
+                elif etype == "message_delta":
+                    delta = chunk.get("delta") or {}
+                    if delta.get("stop_reason"):
+                        stop_reason = delta["stop_reason"]
+                    usage = chunk.get("usage") or {}
+                    output_tokens = int(usage.get("output_tokens", 0) or 0)
+
+        content = "".join(content_parts)
+        if not content.strip():
+            if stop_reason == "max_tokens":
+                raise OutputTruncatedError("max_tokens")
+            raise ValueError(f"模型未返回最终正文 (stop_reason={stop_reason})")
+        total_tokens = input_tokens + output_tokens
+        return content, total_tokens, stop_reason
 
     @staticmethod
     def _to_response(content: str, total_tokens: int, provider_used: str) -> LLMResponse:

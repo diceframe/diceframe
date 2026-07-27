@@ -9,7 +9,7 @@ import { api } from '@/api/client'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
 
-const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; processing?: boolean; isGm?: boolean }>()
+const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; processing?: boolean; isGm?: boolean; liveNarration?: string }>()
 const emit = defineEmits<{ refresh: [] }>()
 const { t } = useLocale()
 
@@ -106,7 +106,7 @@ function latest() {
   awayFromBottom.value = false
 }
 function onScroll() { updateScrollState() }
-watch(() => [props.log.length, JSON.stringify(props.live), props.processing], async () => {
+watch(() => [props.log.length, JSON.stringify(props.live), props.processing, props.liveNarration], async () => {
   const wasNearBottom = isNearBottom()
   await nextTick()
   if (!initialized.value) {
@@ -184,7 +184,8 @@ watch(() => props.gameKey, () => {
         <span v-if="liveAct(a).dice" class="dice-tag">🎲 {{ liveAct(a).dice?.system }}={{ liveAct(a).dice?.value }}</span>
       </div>
       <div v-if="processing" class="message gm thinking-message" aria-live="polite">
-        <strong>{{ t('thinkingMessage') }}<span class="thinking-dots"><i></i><i></i><i></i></span></strong>
+        <strong>{{ t('thinkingMessage') }}<span v-if="!liveNarration" class="thinking-dots"><i></i><i></i><i></i></span></strong>
+        <p v-if="liveNarration" class="chat-gm live-narration">{{ liveNarration }}</p>
       </div>
       <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
     </div>

@@ -332,6 +332,9 @@ watch(() => game.detail.value?.solo_mode, (solo, prev) => {
     railCollapsed.value = stored !== null ? stored === '1' : false
   }
 }, { immediate: true })
+watch(showGmThinking, (thinking) => {
+  if (!thinking && game.liveNarration.value) game.liveNarration.value = ''
+})
 </script>
 
 <template>
@@ -413,6 +416,7 @@ watch(() => game.detail.value?.solo_mode, (solo, prev) => {
           :game-key="game.currentGame.value"
           :processing="showGmThinking"
           :is-gm="game.isGm.value"
+          :live-narration="game.liveNarration.value"
           @refresh="game.refresh"
         />
 

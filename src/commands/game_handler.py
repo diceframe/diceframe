@@ -47,7 +47,7 @@ class GameHandler:
         prompts_dir: Path | None = None,
         rules_dir: Path | None = None,
         worlds_dir: Path | None = None,
-        narrative_max_tokens: int = 2048,
+        narrative_max_tokens: int = 1536,
         summary_max_tokens: int = 400,
         brief_max_tokens: int = 300,
         analysis_max_tokens: int = 512,
@@ -180,17 +180,17 @@ class GameHandler:
 
     # ---- 处理单轮 ----
 
-    async def process_round(self, instance: GameInstance) -> tuple[str, dict | None]:
+    async def process_round(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """处理完整的一轮判定：context 拼接 → LLM 调用 → 解析 → 更新状态 → 播报。
 
         Returns: (narration: str, info_asymmetry: dict | None)
             info_asymmetry 格式: {"user_qq_xxx": "仅该玩家可见的消息", ...}
         """
-        return await self._round_processor.process_round(instance)
+        return await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
 
-    async def _process_round_impl(self, instance: GameInstance) -> tuple[str, dict | None]:
+    async def _process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """兼容旧内部调用；实际逻辑已拆到 RoundProcessor。"""
-        return await self._round_processor.process_round_impl(instance)
+        return await self._round_processor.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
 
     def _skill_growth_checks(self, instance: GameInstance, growth_skills: list[dict]) -> None:
         """兼容旧内部调用；实际逻辑已拆到 ProgressionResolver。"""

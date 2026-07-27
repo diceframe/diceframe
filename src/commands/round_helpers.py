@@ -12,12 +12,12 @@ def should_multi_step(instance: GameInstance, actions_text: str) -> bool:
     """判断是否需要多步推理（仅 WebUI 模式）。"""
     if instance.entry_point != "web":
         return False
-    decision_keywords = ("是否", "选择", "赌上", "决定", "要么", "还是")
+    decision_keywords = ("是否", "选择", "赌上", "决定", "要么")
     if instance.puzzle_manager and instance.puzzle_manager.get_active_puzzles():
         return True
     if any(kw in actions_text for kw in COMBAT_INTENT_KEYWORDS):
         return True
-    if len(instance.npcs) >= 3:
+    if len(instance.npcs) >= 4:
         return True
     if any(kw in actions_text for kw in decision_keywords):
         return True

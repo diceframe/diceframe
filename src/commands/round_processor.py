@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -77,8 +78,10 @@ class RoundProcessor:
         self.narrative_max_tokens = narrative_max_tokens
         self.summary_max_tokens = summary_max_tokens
         self.analysis_max_tokens = analysis_max_tokens
+        # 后台摘要任务引用持有，避免被 GC 中断
+        self._pending_summary_tasks: set = set()
 
-    async def process_round(self, instance: GameInstance) -> tuple[str, dict | None]:
+    async def process_round(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         instance = self.registry.get(instance.game_key)
         if not instance or instance.state != GameState.ACTIVE_JUDGMENT:
             return "", None
@@ -86,9 +89,30 @@ class RoundProcessor:
             logger.warning("process_round 已在处理中，跳过并发调用: %s", instance.game_key)
             return "", None
         async with instance._process_lock:
-            return await self.process_round_impl(instance)
+            return await self.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
 
-    async def process_round_impl(self, instance: GameInstance) -> tuple[str, dict | None]:
+    async def _summarize_background(self, instance: GameInstance, gm_prompt: Any, round_number: int) -> None:
+        """后台执行摘要压缩，不阻塞回合返回。
+
+        叙事已在 finish_judgment 推送，用户无需等待摘要。asyncio 单线程下
+        instance.summary 的赋值在 await 间原子，下轮读到旧/新摘要均合法；
+        关机 save_all_active 会落盘。round_number 在调度时快照，避免日志读到被推进的值。
+        """
+        try:
+            await summarize(instance, self.llm_client, gm_prompt, self.summary_max_tokens)
+        except Exception:
+            logger.exception("摘要压缩失败，已跳过 (round=%d)", round_number)
+
+    def _maybe_schedule_summary(self, instance: GameInstance, gm_prompt: Any) -> asyncio.Task | None:
+        """若到摘要周期（每 10 回合），调度后台摘要任务并返回；否则返回 None。"""
+        if not needs_summary(instance):
+            return None
+        task = asyncio.create_task(self._summarize_background(instance, gm_prompt, instance.round_number))
+        self._pending_summary_tasks.add(task)
+        task.add_done_callback(self._pending_summary_tasks.discard)
+        return task
+
+    async def process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """实际的判定处理逻辑。"""
         instance.pending_combat_results.clear()
         instance.update_lorebook_timed_state()
@@ -142,7 +166,8 @@ class RoundProcessor:
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
-            dice_block, self.narrative_max_tokens, actions_text)
+            dice_block, self.narrative_max_tokens, actions_text,
+            on_delta=on_delta, on_reset=on_reset)
         apply_parsed_data_to_response(instance, response, data)
 
         public_state_before = snapshot_public_player_state(instance)
@@ -182,11 +207,8 @@ class RoundProcessor:
 
         self._state_applier.tick_madness(instance)
 
-        if needs_summary(instance):
-            try:
-                await summarize(instance, self.llm_client, gm_prompt, self.summary_max_tokens)
-            except Exception:
-                logger.exception("摘要压缩失败，已跳过 (round=%d)", instance.round_number)
+        # 摘要压缩较慢（LLM 调用，每 10 回合），延后到后台：叙事已推送，用户无需等待。
+        self._maybe_schedule_summary(instance, gm_prompt)
 
         try:
             await self.registry.save(instance)

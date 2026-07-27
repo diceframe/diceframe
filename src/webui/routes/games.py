@@ -425,8 +425,15 @@ async def api_action(request: web.Request) -> web.Response:
                 check_request=check_request,
             )
         handler = request.app["subsystems"].handler
+        pool = request.app.get("connection_pool")
+        on_delta = on_reset = None
+        if pool is not None:
+            async def on_delta(text: str) -> None:
+                await pool.broadcast(gk, {"type": "narration_delta", "text": text})
+            async def on_reset() -> None:
+                await pool.broadcast(gk, {"type": "narration_reset"})
         if await inst.try_advance():
-            narration, _ = await handler.process_round(inst)
+            narration, _ = await handler.process_round(inst, on_delta=on_delta, on_reset=on_reset)
             response_payload = {
                 "narration": narration,
                 "advanced": True,

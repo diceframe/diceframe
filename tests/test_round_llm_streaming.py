@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from src.commands.round_llm import _NarrationDeltaFilter, call_llm_with_tag_retry
+from src.engine.game_instance import GameInstance
+from src.llm.client import LLMResponse
+
+
+def _make_response(content: str, provider: str = "stream-test") -> LLMResponse:
+    return LLMResponse(
+        content=content,
+        narration=content.split("---", 1)[0].strip(),
+        state_update=None,
+        memory_delta=None,
+        info_asymmetry=None,
+        plot_update=None,
+        total_tokens=10,
+        is_narration_only=False,
+        provider_used=provider,
+    )
+
+
+class StreamingLLM:
+    """按顺序返回预设内容的流式 fake；on_delta 收到原始 delta（--- 过滤由上层负责）。"""
+
+    default = "stream-test"
+
+    def __init__(self, contents: list[str]) -> None:
+        self._contents = list(contents)
+        self._i = 0
+        self.stream_calls = 0
+
+    async def call_stream(self, system_prompt: str = "", user_message: str = "", *,
+                          temperature: float = 0.7, max_tokens: int = 1024,
+                          on_delta=None, **kwargs) -> LLMResponse:
+        self.stream_calls += 1
+        content = self._contents[min(self._i, len(self._contents) - 1)]
+        self._i += 1
+        if on_delta:
+            # 拆成两段发，验证 --- 跨 chunk 也能被过滤
+            mid = len(content) // 2
+            await on_delta(content[:mid])
+            await on_delta(content[mid:])
+        return _make_response(content)
+
+
+@pytest.mark.asyncio
+async def test_narration_delta_filter_stops_at_separator():
+    received: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        received.append(text)
+
+    filt = _NarrationDeltaFilter(on_delta)
+    await filt.feed("叙事开头")
+    await filt.feed("，继续")
+    await filt.feed("。---\nKEY_ITEM:u1:银针")
+    await filt.flush()
+
+    streamed = "".join(received)
+    assert streamed == "叙事开头，继续。"
+    assert "KEY_ITEM" not in streamed
+    assert "---" not in streamed
+
+
+@pytest.mark.asyncio
+async def test_narration_delta_filter_handles_split_separator():
+    received: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        received.append(text)
+
+    filt = _NarrationDeltaFilter(on_delta)
+    await filt.feed("叙事")
+    await filt.feed("--")
+    await filt.feed("-\nKEY_ITEM:u1:银针")
+    await filt.flush()
+
+    assert "".join(received) == "叙事"
+
+
+@pytest.mark.asyncio
+async def test_narration_delta_filter_flushes_when_no_separator():
+    received: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        received.append(text)
+
+    filt = _NarrationDeltaFilter(on_delta)
+    await filt.feed("纯叙事文本")
+    await filt.flush()
+
+    assert "".join(received) == "纯叙事文本"
+
+
+@pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_streams_narration_only():
+    content = "古墓深处传来低语。\n---\nKEY_ITEM:u1:青铜钥匙"
+    llm = StreamingLLM([content])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    resets: list[int] = []
+
+    async def on_reset() -> None:
+        resets.append(1)
+
+    response, _data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    streamed = "".join(deltas)
+    assert "古墓深处传来低语。" in streamed
+    assert "KEY_ITEM" not in streamed
+    assert "---" not in streamed
+    assert resets == []
+    assert llm.stream_calls == 1
+    assert "青铜钥匙" in response.content
+
+
+@pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_resets_on_dice_contradiction():
+    bad = "你没能打开门。"   # 大成功 + 失败词 -> 矛盾
+    good = "你成功打开了门。"
+    llm = StreamingLLM([bad, good])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    resets: list[int] = []
+
+    async def on_reset() -> None:
+        resets.append(1)
+
+    response, _data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    assert llm.stream_calls == 2
+    assert len(resets) == 1  # 第二次尝试前应清空前端流式缓冲
+    assert "成功" in response.narration
+
+
+@pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_caps_at_one_retry():
+    # 骰子持续矛盾时，最多 2 次尝试（1 次重试），不会无限重试
+    bad = "你没能打开门。"  # 大成功 + 失败词 -> 持续矛盾
+    llm = StreamingLLM([bad])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+
+    async def on_delta(_text: str) -> None:
+        pass
+
+    resets: list[int] = []
+
+    async def on_reset() -> None:
+        resets.append(1)
+
+    response, _data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    assert llm.stream_calls == 2  # range(2): 初始 + 1 次重试
+    assert len(resets) == 1
+    # 重试用尽后接受最后输出（仍是矛盾叙事，但不再重试）
+    assert "没能" in response.narration

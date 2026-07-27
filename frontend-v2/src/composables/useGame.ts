@@ -26,7 +26,7 @@ export function useGame(){
   const routeUser = () => queryString(route.query.user)
   const currentGame = ref(routeGame() || readCurrentGame())
   const userId = ref(routeUser())
-  const detail = ref<GameDetail|null>(null), players = ref<Player[]>([]), log = ref<LogEntry[]>([])
+  const detail = ref<GameDetail|null>(null), players = ref<Player[]>([]), log = ref<LogEntry[]>([]), liveNarration = ref('')
   const privateMessages = ref<PrivateMessage[]>([]), map = ref<MapData>({locations:[]}), lore = ref<LoreKeywords>({}), loreEntries = ref<LoreEntry[]>([]), loading=ref(false), error=ref('')
   let source:EventSource|null=null
   let pollTimer:number|undefined
@@ -111,7 +111,7 @@ export function useGame(){
 
   async function connect(){
     const version=++connectVersion
-    source?.close(); source=null; clearRefreshTimer()
+    source?.close(); source=null; clearRefreshTimer(); liveNarration.value=''
     if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=undefined}
     if(pollTimer){clearInterval(pollTimer);pollTimer=undefined}
     const gameKey=currentGame.value
@@ -120,7 +120,15 @@ export function useGame(){
       const next=await gameEventSource(gameKey)
       if(version!==connectVersion || gameKey!==currentGame.value){next.close();return}
       source=next
-      source.onmessage=()=>{ if(pollTimer){clearInterval(pollTimer);pollTimer=undefined} scheduleSilentRefresh() }
+      source.onmessage=(ev:MessageEvent)=>{
+        if(pollTimer){clearInterval(pollTimer);pollTimer=undefined}
+        let payload:{type?:string;text?:string}|null=null
+        try{payload=JSON.parse(ev.data)}catch{payload=null}
+        const type=payload?.type||''
+        if(type==='narration_delta'){liveNarration.value+=String(payload?.text||'');return}
+        if(type==='narration_reset'){liveNarration.value='';return}
+        scheduleSilentRefresh()
+      }
       source.onerror=()=>{
         source?.close(); source=null
         if(!pollTimer)pollTimer=window.setInterval(() => void refresh(true),30000)
@@ -145,6 +153,7 @@ export function useGame(){
     }
   })
   watch(() => route.query.user, () => { userId.value = routeUser() })
+  watch(() => log.value.length, (next, prev) => { if ((prev ?? 0) < next) liveNarration.value = '' })
   onBeforeUnmount(()=>{connectVersion++;source?.close();clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
-  return {currentGame,userId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame}
+  return {currentGame,userId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration}
 }

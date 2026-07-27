@@ -42,7 +42,7 @@ from src.webui.routes.system import register_system
 logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 
-DEFAULT_NARRATIVE_MAX_TOKENS = 2048
+DEFAULT_NARRATIVE_MAX_TOKENS = 1536
 GENERATION_DEFAULTS_VERSION = 2
 
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))

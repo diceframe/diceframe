@@ -11,11 +11,12 @@ from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
 from src.engine.language import is_english
+from src.llm.client import LENGTH_RETRY_FACTOR, LENGTH_RETRY_MAX_MULT, OutputTruncatedError
 from src.llm.parser import sanitize_narration
 
 logger = logging.getLogger("trpg")
 _NARRATION_SOFT_LIMIT_CHARS = 260
-_NARRATION_COMPRESS_TRIGGER_CHARS = 450
+_NARRATION_COMPRESS_TRIGGER_CHARS = 700
 _NARRATION_COMBAT_TARGET_CHARS = 400
 _NARRATION_COMPRESS_MIN_TOKENS = 1024
 _NARRATION_COMPRESS_MAX_TOKENS = 2048
@@ -29,6 +30,55 @@ def _replace_narration_in_content(content: str, narration: str) -> str:
     if "---" not in content:
         return narration
     return f"{narration.strip()}\n---{content.split('---', 1)[1]}"
+
+
+class _NarrationDeltaFilter:
+    """流式转发叙事正文，遇到 '---' 分隔符后停止转发。
+
+    LLM 叙事输出形如 ``<叙事>\n---\n<结构化标签>``，--- 之后的标签是给解析器用的，
+    不能推给前端。本类逐段接收 call_stream 的 delta，只把分隔符之前的部分经 on_delta
+    推出；为避免 '---' 被拆到多个 chunk 中间，最多暂存 len(SEPARATOR)-1 个字符，
+    flush() 时把剩余暂存一次性发出（纯叙事、无分隔符的场景）。
+    """
+
+    SEPARATOR = "---"
+
+    def __init__(self, on_delta):
+        self._on_delta = on_delta
+        self._buf = ""
+        self._sent = 0
+        self._sealed = False
+
+    async def feed(self, text: str) -> None:
+        if self._sealed or not text:
+            return
+        self._buf += text
+        idx = self._buf.find(self.SEPARATOR)
+        if idx != -1:
+            head = self._buf[self._sent:idx]
+            self._sent = idx
+            self._sealed = True
+            if head:
+                await self._on_delta(head)
+            return
+        # 暂存末尾最多 len(SEPARATOR)-1 个字符，防止分隔符跨 chunk 被提前发出
+        hold = min(len(self.SEPARATOR) - 1, len(self._buf) - self._sent)
+        if hold > 0:
+            forward = self._buf[self._sent:len(self._buf) - hold]
+            self._sent = len(self._buf) - hold
+        else:
+            forward = self._buf[self._sent:]
+            self._sent = len(self._buf)
+        if forward:
+            await self._on_delta(forward)
+
+    async def flush(self) -> None:
+        if self._sealed:
+            return
+        remaining = self._buf[self._sent:]
+        self._sent = len(self._buf)
+        if remaining:
+            await self._on_delta(remaining)
 
 
 async def _compress_long_narration(
@@ -116,7 +166,7 @@ async def append_multistep_analysis(
         analysis_text = analyze_res.content
         logger.info("多步推理: 分析完成 (round=%d, len=%d)",
                     instance.round_number, len(analysis_text))
-        return context + "\n\n【局势分析（内部参考）】\n" + analysis_text[:600]
+        return context + "\n\n【局势分析（内部参考）】\n" + analysis_text[:400]
     except Exception:
         logger.exception("多步推理分析失败，降级为单次调用 (round=%d)", instance.round_number)
         return context
@@ -131,23 +181,67 @@ async def call_llm_with_tag_retry(
     dice_block: str,
     narrative_max_tokens: int,
     actions_text: str = "",
+    *,
+    on_delta=None,
+    on_reset=None,
 ) -> tuple[Any, dict]:
-    """调用 LLM，解析标签；若叙事违反骰子约束则最多重试 3 次。"""
+    """调用 LLM，解析标签；若叙事违反骰子约束则最多重试 1 次。
+
+    传入 on_delta 时走流式调用（call_stream），逐段叙事经 _NarrationDeltaFilter 过滤掉
+    --- 之后的结构化标签后推给前端；骰子矛盾或截断重试前调 on_reset 让前端清空已显示
+    的流式文本。未传 on_delta 时退化为原有非流式 call()，bot 等场景不受影响。
+    """
     response = None
     data: dict = {}
-    for retry in range(3):
+    stream = on_delta is not None
+    current_max_tokens = narrative_max_tokens
+    for retry in range(2):
         retry_context = context
         if retry > 0:
             if is_english(getattr(instance, "language", "")):
                 retry_context = context + "\n\nPrevious response contradicted the required dice/check result. Rewrite the narration and strictly follow the check outcome."
             else:
                 retry_context = context + "\n\n⚠️ 上一轮回复与【系统检定·必须遵循】矛盾，请严格遵循检定结果重新叙述。"
-        response = await llm_client.call(
-            system_prompt=gm_prompt,
-            user_message=retry_context,
-            temperature=0.7,
-            max_tokens=narrative_max_tokens,
-        )
+            if on_reset:
+                await on_reset()
+        if stream:
+            filt = _NarrationDeltaFilter(on_delta)
+            try:
+                response = await llm_client.call_stream(
+                    system_prompt=gm_prompt,
+                    user_message=retry_context,
+                    temperature=0.7,
+                    max_tokens=current_max_tokens,
+                    on_delta=filt.feed,
+                )
+                await filt.flush()
+            except OutputTruncatedError:
+                bumped = min(
+                    current_max_tokens * LENGTH_RETRY_FACTOR,
+                    narrative_max_tokens * LENGTH_RETRY_MAX_MULT,
+                )
+                if bumped > current_max_tokens:
+                    logger.info(
+                        "流式输出被截断，提高 max_tokens 重试: %d -> %d (round=%d)",
+                        current_max_tokens, bumped, instance.round_number,
+                    )
+                    current_max_tokens = bumped
+                    continue
+                logger.warning("流式输出截断且已达放大上限，降级为非流式调用 (round=%d)", instance.round_number)
+                stream = False
+                response = await llm_client.call(
+                    system_prompt=gm_prompt,
+                    user_message=retry_context,
+                    temperature=0.7,
+                    max_tokens=current_max_tokens,
+                )
+        else:
+            response = await llm_client.call(
+                system_prompt=gm_prompt,
+                user_message=retry_context,
+                temperature=0.7,
+                max_tokens=narrative_max_tokens,
+            )
         response.language = getattr(instance, "language", "zh-CN")
 
         if "---" in response.content:
@@ -179,9 +273,9 @@ async def call_llm_with_tag_retry(
         narration = response.narration or response.content
         if not dice_block or validate_dice_constraint(dice_block, narration):
             break
-        logger.warning("骰子约束矛盾，重试 (%d/2, round=%d)", retry + 1, instance.round_number)
+        logger.warning("骰子约束矛盾，重试 (%d/1, round=%d)", retry + 1, instance.round_number)
     else:
-        logger.error("骰子约束连续3次矛盾，接受最后输出 (round=%d)", instance.round_number)
+        logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", instance.round_number)
 
     await _compress_long_narration(
         llm_client, gm_prompt, response, actions_text, combat_model, narrative_max_tokens
