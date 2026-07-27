@@ -1,8 +1,23 @@
-# DiceFrame v1.5.0
+# DiceFrame v1.6.0
 
 ## 中文
 
-### v1.5.0
+### v1.6.0
+
+本版本带来应用内自动更新与叙事流式输出，让版本升级与回合反馈都更顺畅。
+
+#### 新功能
+
+- **应用内版本更新**：设置页"版本更新"面板可检测新版本，下载 Windows 安装包并自动校验完整性，便于本地升级。Docker 部署会提示不支持自更新，请重建镜像升级。
+- **叙事流式输出**：GM 叙述现在逐字流式显示，无需等待整段生成完毕，回合反馈更即时（WebUI）。
+- **叙事生成提速**：优化长叙事的延迟摘要与默认额度配置，生成更流畅。
+
+#### 修复
+
+- LLM 叙事输出被截断时，自动提高输出额度并重试，减少空回复。
+- 修复分享链接玩家无法接收流式叙事的问题。
+
+### v1.5.0（上一版，紧邻发布）
 
 本版本引入统一的检定（check）系统与 GM 指令流：掷骰与判定由系统权威生成，GM 专注叙事，玩家侧不再看到内部机制块。
 
@@ -20,24 +35,24 @@
 - 新增 `SAN`、`LUCK` 资源标签，供 GM 在状态块中调整理智与幸运。
 - 前端行动编辑器、时间线与检定结果展示适配新检定流。
 
-### v1.4.2（上一版，紧邻发布）
-
-本版本修复了推理模型输出截断时可能暴露思考过程、回滚后玩家页面未及时刷新等问题，并提高了默认叙事输出额度。
-
-#### 修复
-
-- 当兼容 OpenAI 的推理模型没有返回最终正文时，不再把 `reasoning_content` 当作叙事结果，避免内部推理过程出现在游戏正文中。
-- 修复回滚到上一回合或同回合撤销行动后，玩家端仍停留在旧的提交、掷骰或角色状态的问题。
-- 修复 NapCat 使用指南中的 `@bot` 指令显示不完整的问题。
-
-#### 调整
-
-- 默认叙事最大 Token 从 1024 提升至 2048；仅迁移仍使用旧默认值的配置，保留已有自定义值。
-- 长叙事二次压缩的输出额度提高至 1024–2048 Token；设置页对应统计明确为“叙事 Token（含二次压缩）”。
-
 ## English
 
-### v1.5.0
+### v1.6.0
+
+This release adds in-app updates and streaming narration, making upgrades and round feedback smoother.
+
+#### New Features
+
+- **In-app version update**: The "Version Update" panel in Settings can detect new releases, download the Windows package, and verify its integrity automatically for easier local upgrades. Docker deployments report self-update as unsupported; rebuild the image to upgrade.
+- **Streaming narration**: GM narration now streams token by token instead of appearing all at once, making round feedback more immediate (WebUI).
+- **Faster narration generation**: Optimized deferred summary and default token budgets for smoother long-form narration.
+
+#### Fixes
+
+- When LLM narration output is truncated, the token budget is automatically raised and retried, reducing empty replies.
+- Fixed share-link players not receiving streamed narration.
+
+### v1.5.0 (previous release, published shortly before)
 
 This release introduces a unified check system and GM command flow: dice and outcomes are now produced authoritatively by the system, letting the GM focus on narration while players no longer see internal mechanic blocks.
 
@@ -54,18 +69,3 @@ This release introduces a unified check system and GM command flow: dice and out
 - GM narration behavior updated: narrate only from the system check block in context; never fabricate dice values or check blocks.
 - Added `SAN` and `LUCK` resource tags for the GM to adjust sanity and luck in state blocks.
 - The frontend action composer, timeline, and check result display adapt to the new check flow.
-
-### v1.4.2 (previous release, published shortly before)
-
-This release fixes cases where truncated reasoning-model responses could expose internal reasoning, improves player refresh after rollbacks, and raises the default narration budget.
-
-#### Fixes
-
-- When an OpenAI-compatible reasoning model returns no final content, DiceFrame no longer uses `reasoning_content` as narration. This prevents internal reasoning from appearing in the game text.
-- Fixed player pages retaining stale submission, dice, or character state after rolling back to an earlier round or undoing actions in the same round.
-- Fixed incomplete rendering of literal `@bot` commands in the NapCat guide.
-
-#### Changes
-
-- Raised the default narrative token limit from 1024 to 2048. Only configurations still using the old default are migrated; custom values are preserved.
-- Raised the long-narration compression budget to 1024–2048 tokens and clarified the usage label as “Narrative Tokens (incl. compression)”.
