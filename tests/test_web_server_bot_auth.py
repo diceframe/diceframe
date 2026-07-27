@@ -232,3 +232,19 @@ async def test_sse_query_no_longer_accepts_owner_password(monkeypatch):
     async with TestClient(TestServer(app)) as client:
         response = await client.get("/api/games/web%7Croom%7Cbot/sse", params={"token": "owner-secret"})
         assert response.status == 401
+
+
+@pytest.mark.asyncio
+async def test_share_link_player_can_post_sse_ticket(monkeypatch):
+    """share-link 玩家通过 ?user=&share=1 调 POST /sse-ticket 不应被 owner 门 401。
+
+    回归：_share_player_user_id 的 POST 白名单漏了 sse-ticket，玩家拿不到 ticket、
+    EventSource 反复重连，narration_delta 全丢、最终经轮询一次性返回（无流式）。
+    """
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    app.router.add_post("/api/games/{game_key}/sse-ticket", _identity)
+    async with TestClient(TestServer(app)) as client:
+        r = await client.post("/api/games/web%7Croom%7Cbot/sse-ticket?user=player-1&share=1")
+        assert r.status == 200
+        assert (await r.json())["user_id"] == "player-1"

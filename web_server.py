@@ -650,7 +650,7 @@ def _share_player_user_id(request: web.Request) -> str:
         tail = parts[3]
         if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context"}:
             return uid or request.get("user_id", "")
-        if request.method == "POST" and tail in {"players", "action"}:
+        if request.method == "POST" and tail in {"players", "action", "sse-ticket"}:
             return uid or request.get("user_id", "")
         if request.method == "PUT" and tail == "character":
             return uid or request.get("user_id", "")
