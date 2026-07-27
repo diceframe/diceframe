@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import ipaddress
 import json
 import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import aiohttp
@@ -243,6 +244,49 @@ class MirrorManager:
                 return last
         return FetchResult(ok=False, error=f"所有镜像源均失败：{last.error}", attempts=len(mirrors) * self.max_attempts)
 
+    async def download_to_file(
+        self,
+        url: str,
+        target_path: Path,
+        *,
+        mirror_id: str = "",
+        max_bytes: int | None = None,
+        on_progress: Callable[[int, int], Any] | None = None,
+    ) -> FetchResult:
+        """流式下载大文件到 target_path（经多镜像降级），支持进度回调。
+
+        与 fetch_github_url 不同，本方法逐 chunk 写盘而非全部读入内存，
+        适合 release zip 等大文件。on_progress(downloaded, total) 在每个 chunk
+        后调用（total 为 0 表示未知长度），可为同步或异步回调。
+        """
+        normalized_url = validate_public_http_url(url)
+        mirrors = [self._require(mirror_id)] if mirror_id else self.enabled()
+        if not mirrors:
+            return await self._download_to_file(
+                normalized_url,
+                {"id": "direct", "name": "直接访问"},
+                1,
+                1,
+                target_path,
+                max_bytes=max_bytes,
+                on_progress=on_progress,
+            )
+        last = FetchResult(ok=False, error="未尝试")
+        for index, mirror in enumerate(mirrors, 1):
+            mirrored_url = self.mirror_github_url(normalized_url, mirror)
+            last = await self._download_to_file(
+                mirrored_url,
+                mirror,
+                index,
+                len(mirrors),
+                target_path,
+                max_bytes=max_bytes,
+                on_progress=on_progress,
+            )
+            if last.ok:
+                return last
+        return FetchResult(ok=False, error=f"所有镜像源均失败：{last.error}", attempts=len(mirrors) * self.max_attempts)
+
     def raw_url(self, owner: str, repo: str, branch: str, file_path: str, mirror: dict[str, Any]) -> str:
         raw_prefix = validate_public_http_url(str(mirror.get("raw_prefix", ""))).rstrip("/")
         clean_path = "/".join(part.strip("/") for part in (owner, repo, branch, file_path) if part)
@@ -363,6 +407,80 @@ class MirrorManager:
         return FetchResult(
             ok=False,
             error=last_error or "请求失败",
+            url=url,
+            mirror_id=str(mirror.get("id", "")),
+            mirror_name=str(mirror.get("name", "")),
+            mirror_index=mirror_index,
+            total_mirrors=total_mirrors,
+            attempts=attempts,
+            elapsed_ms=int((time.perf_counter() - started) * 1000),
+            status=last_status,
+        )
+
+    async def _download_to_file(
+        self,
+        url: str,
+        mirror: dict[str, Any],
+        mirror_index: int,
+        total_mirrors: int,
+        target_path: Path,
+        *,
+        max_bytes: int | None = None,
+        on_progress: Callable[[int, int], Any] | None = None,
+    ) -> FetchResult:
+        """底层流式下载：逐 chunk 写入 target_path.download，成功后原子 replace。"""
+        started = time.perf_counter()
+        attempts = self.max_attempts
+        last_error = ""
+        last_status = 0
+        timeout = aiohttp.ClientTimeout(total=self.timeout_sec)
+        headers = {"User-Agent": "DiceFrame updater"}
+        tmp_path = target_path.with_suffix(target_path.suffix + ".download")
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in range(1, attempts + 1):
+            try:
+                async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                    async with session.get(url) as response:
+                        last_status = response.status
+                        if response.status >= 400:
+                            text = await response.text()
+                            last_error = f"HTTP {response.status}: {text[:160]}"
+                            continue
+                        total = int(response.content_length or 0)
+                        if max_bytes and total and total > max_bytes:
+                            last_error = f"下载内容超过限制：{max_bytes} bytes"
+                            continue
+                        tmp_path.unlink(missing_ok=True)
+                        downloaded = 0
+                        with open(tmp_path, "wb") as fh:
+                            async for chunk in response.content.iter_chunked(64 * 1024):
+                                fh.write(chunk)
+                                downloaded += len(chunk)
+                                if max_bytes and downloaded > max_bytes:
+                                    raise ValueError(f"下载内容超过限制：{max_bytes} bytes")
+                                if on_progress:
+                                    progress_result = on_progress(downloaded, total)
+                                    if inspect.isawaitable(progress_result):
+                                        await progress_result
+                        tmp_path.replace(target_path)
+                        return FetchResult(
+                            ok=True,
+                            data=str(target_path),
+                            url=url,
+                            mirror_id=str(mirror.get("id", "")),
+                            mirror_name=str(mirror.get("name", "")),
+                            mirror_index=mirror_index,
+                            total_mirrors=total_mirrors,
+                            attempts=attempt,
+                            elapsed_ms=int((time.perf_counter() - started) * 1000),
+                            status=response.status,
+                        )
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                last_error = str(exc)
+        tmp_path.unlink(missing_ok=True)
+        return FetchResult(
+            ok=False,
+            error=last_error or "下载失败",
             url=url,
             mirror_id=str(mirror.get("id", "")),
             mirror_name=str(mirror.get("name", "")),

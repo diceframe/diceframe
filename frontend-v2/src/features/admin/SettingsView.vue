@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, type Component } from 'vue'
-import { NButton, NInput, NInputNumber, NSwitch, NTag, NIcon, NCollapse, NCollapseItem, NSpin } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NSwitch, NTag, NIcon, NCollapse, NCollapseItem, NSpin, NProgress } from 'naive-ui'
 import {
   ServerOutline, CubeOutline, CloudDownloadOutline, ExtensionPuzzleOutline,
   LockClosedOutline, OptionsOutline, InformationCircleOutline, ShareSocialOutline,
@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
+import { useUpdater } from '@/composables/useUpdater'
 import { useLocale } from '@/composables/useLocale'
 import { errorMessage } from '@/api/client'
 import type { MessageKey } from '@/i18n'
@@ -30,6 +31,7 @@ const store = useSettingsStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 const { updateInfo, updateChecking, checkForUpdates } = useUpdateCheck()
+const { updateStatus, isDownloading, downloadPercent, startDownload, refreshStatus } = useUpdater()
 const { t } = useLocale()
 
 const section = ref<SectionId>('api')
@@ -128,7 +130,7 @@ const systemStatusItems = computed<SystemStatusItem[]>(() => {
   ]
 })
 
-onMounted(() => store.load())
+onMounted(() => { void store.load(); void refreshStatus() })
 watch(section, () => {
   const sc = document.querySelector('.n-layout-scroll-container') as HTMLElement | null
   sc?.scrollTo({ top: 0 })
@@ -263,6 +265,19 @@ async function checkUpdate() {
 function openUpdateUrl() {
   const url = updateInfo.value?.release_url || updateInfo.value?.releases_url || updateInfo.value?.source_url
   if (url) window.open(url, '_blank', 'noopener')
+}
+
+async function downloadUpdatePackage(kind: 'source' | 'portable') {
+  try {
+    const result = await startDownload(kind)
+    if (!result.ok) {
+      toast.error(result.error || t('updateDownloadFailed'))
+    } else {
+      toast.success(t('updateDownloadStarted'))
+    }
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+  }
 }
 </script>
 
@@ -548,6 +563,31 @@ function openUpdateUrl() {
               <div v-if="updateInfo?.latest?.body" class="update-notes">
                 <strong>{{ t('releaseNotes') }}</strong>
                 <pre>{{ updateInfo.latest.body }}</pre>
+              </div>
+              <div v-if="updateInfo?.update_available && updateStatus" class="update-download">
+                <div v-if="!updateStatus.self_update.supported" class="muted">
+                  {{ updateStatus.self_update.hint || t('updateSelfUpdateUnsupported') }}
+                </div>
+                <template v-else>
+                  <div v-if="updateStatus.state === 'staged'" class="update-staged">
+                    <NTag type="success" size="small" round>{{ t('updateStaged') }}</NTag>
+                    <span class="muted">{{ t('updateStagedHint') }}</span>
+                  </div>
+                  <div v-else-if="updateStatus.state === 'failed'" class="error-text">
+                    {{ t('updateDownloadFailed') }}: {{ updateStatus.error }}
+                  </div>
+                  <div v-else-if="isDownloading" class="update-progress">
+                    <div class="update-progress-head">
+                      <span>{{ t('updateDownloading') }}</span>
+                      <span class="muted">{{ updateStatus.mirror_used || '-' }}</span>
+                    </div>
+                    <NProgress :percentage="downloadPercent" />
+                  </div>
+                  <div v-if="!isDownloading && updateStatus.state !== 'staged'" class="actions-row">
+                    <NButton @click="downloadUpdatePackage('source')">{{ t('downloadUpdateSource') }}</NButton>
+                    <NButton @click="downloadUpdatePackage('portable')">{{ t('downloadUpdatePortable') }}</NButton>
+                  </div>
+                </template>
               </div>
               <div class="actions-row">
                 <NButton :loading="updateChecking" @click="checkUpdate">{{ t('checkUpdate') }}</NButton>

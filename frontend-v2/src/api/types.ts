@@ -884,3 +884,30 @@ export interface UpdateCheckResponse {
   source_url?:string
   install_hint?:Record<string,string>
 }
+export interface UpdateSelfUpdateInfo {
+  supported:boolean
+  reason:string
+  hint:string
+}
+export interface UpdateStatusResponse {
+  state:'idle' | 'downloading' | 'verifying' | 'staged' | 'failed'
+  version?:string
+  asset?:string
+  downloaded_bytes?:number
+  total_bytes?:number
+  mirror_used?:string
+  error?:string
+  path?:string
+  sha256?:string
+  downloaded_at?:number
+  current_version:string
+  self_update:UpdateSelfUpdateInfo
+}
+export interface UpdateDownloadResponse {
+  ok:boolean
+  error?:string
+  state?:string
+  version?:string
+  asset?:string
+  no_release?:boolean
+}

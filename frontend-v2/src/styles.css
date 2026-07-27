@@ -308,6 +308,13 @@ details:not([open])>:not(summary){display:none}
 .update-notes{margin-top:12px;padding:10px;border:1px solid var(--line-soft);border-radius:8px;background:rgba(18,15,12,.22)}
 .update-notes strong{display:block;margin-bottom:7px;color:var(--gold-2);font-size:13px}
 .update-notes pre{max-height:220px;margin:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);font:13px/1.65 var(--font-sans)}
+.update-download{margin-top:12px;padding:10px;border:1px solid var(--line-soft);border-radius:8px;background:rgba(18,15,12,.14)}
+.update-download .actions-row{margin-top:10px}
+.update-staged{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.update-progress{margin-top:6px}
+.update-progress-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-bottom:6px}
+.update-progress .n-progress{margin-top:2px}
+.error-text{color:#ff9286;font-size:13px;margin-top:6px}
 .sponsor-card{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px;border:1px solid var(--line-soft);border-radius:8px;background:rgba(216,173,82,.08)}
 .sponsor-card h4{margin:0 0 6px}
 .sponsor-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.7}
