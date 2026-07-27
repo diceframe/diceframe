@@ -13,6 +13,8 @@ logger = logging.getLogger("trpg")
 
 MAX_RETRIES = 3          # 总共尝试次数（含首次）
 BASE_DELAY = 2.0         # 基础重试间隔（秒）
+LENGTH_RETRY_FACTOR = 2    # finish_reason=length 时重试放大 max_tokens 的倍数
+LENGTH_RETRY_MAX_MULT = 4  # 最大放大到原始 max_tokens 的多少倍
 
 
 # 按 HTTP 状态码的退避策略
@@ -24,6 +26,18 @@ _RETRY_BACKOFF: dict[int, float] = {
 }
 
 _RETRYABLE_STATUSES = frozenset(_RETRY_BACKOFF) | {408}  # 408 Timeout 也可重试
+
+
+class _OutputTruncatedError(ValueError):
+    """模型输出被 max_tokens 截断且未返回正文（finish_reason=length / stop_reason=max_tokens）。
+
+    继承 ValueError 以保持"空正文即报错"的原有语义；call() 据此在重试时
+    自动提高 max_tokens，而不是用相同预算对推理模型原地重试。
+    """
+
+    def __init__(self, finish_reason: str = "length"):
+        self.finish_reason = finish_reason
+        super().__init__(f"模型未返回最终正文 (finish_reason={finish_reason})")
 
 
 @dataclass
@@ -110,13 +124,21 @@ class LLMClient:
 
         last_error = None
         last_backoff = BASE_DELAY
+        current_max_tokens = max_tokens
         for attempt_num in range(1, MAX_RETRIES + 1):
             for provider in ordered:
                 try:
                     return await self._call_one(
                         provider, system_prompt, user_message,
-                        temperature, max_tokens, json_mode,
+                        temperature, current_max_tokens, json_mode,
                     )
+                except _OutputTruncatedError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "LLM 输出被 max_tokens 截断 (attempt=%d, provider=%s, max_tokens=%d): %s",
+                        attempt_num, provider.provider_name, current_max_tokens, exc,
+                    )
+                    continue
                 except aiohttp.ClientResponseError as exc:
                     last_error = exc
                     status = exc.status
@@ -147,7 +169,20 @@ class LLMClient:
                     )
                     continue
             if attempt_num < MAX_RETRIES:
-                await asyncio.sleep(last_backoff)
+                if isinstance(last_error, _OutputTruncatedError):
+                    bumped = min(
+                        current_max_tokens * LENGTH_RETRY_FACTOR,
+                        max_tokens * LENGTH_RETRY_MAX_MULT,
+                    )
+                    if bumped > current_max_tokens:
+                        logger.info(
+                            "输出截断，下次重试提高 max_tokens: %d -> %d",
+                            current_max_tokens, bumped,
+                        )
+                        current_max_tokens = bumped
+                    await asyncio.sleep(BASE_DELAY * 0.5)
+                else:
+                    await asyncio.sleep(last_backoff)
 
         raise RuntimeError(f"所有模型供应商均调用失败: {last_error}") from last_error
 
@@ -219,6 +254,8 @@ class LLMClient:
         content = choice["message"].get("content") or ""
         if not content.strip():
             finish_reason = str(choice.get("finish_reason") or "unknown")
+            if finish_reason == "length":
+                raise _OutputTruncatedError(finish_reason)
             raise ValueError(
                 f"模型未返回最终正文 (finish_reason={finish_reason})"
             )
@@ -268,6 +305,8 @@ class LLMClient:
             data = await resp.json()
 
         content = _anthropic_text_content(data)
+        if not content.strip() and data.get("stop_reason") == "max_tokens":
+            raise _OutputTruncatedError("max_tokens")
         usage = data.get("usage", {})
         total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
         return self._to_response(content, total_tokens, provider.provider_name)

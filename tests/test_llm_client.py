@@ -116,3 +116,29 @@ async def test_openai_provider_never_exposes_reasoning_as_final_content(monkeypa
             temperature=0.2,
             max_tokens=512,
         )
+
+
+@pytest.mark.asyncio
+async def test_length_truncation_retries_with_larger_max_tokens(monkeypatch):
+    """finish_reason=length 时，call() 应逐步放大 max_tokens 重试，而非用相同预算原地重试。"""
+    session = _EmptyOpenAISession()
+    provider = ProviderConfig(
+        provider_name="reasoning-model",
+        base_url="https://api.example.com",
+        api_key="test-key",
+        model_name="reasoning-test",
+    )
+    client = LLMClient(providers=[provider], default=provider.provider_name)
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    monkeypatch.setattr("src.llm.client.BASE_DELAY", 0.0)
+
+    with pytest.raises(RuntimeError):
+        await client.call("system", "user", max_tokens=512)
+
+    # 3 次尝试的 max_tokens 应为 512 -> 1024 -> 2048（2x 步进，4x 上限）
+    sent_budgets = [call["json"]["max_tokens"] for call in session.calls]
+    assert sent_budgets == [512, 1024, 2048]
