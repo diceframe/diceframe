@@ -289,6 +289,17 @@ class UpdaterService:
         if self.is_busy():
             return {"ok": False, "error": "已有更新任务在进行中"}
 
+        support = is_self_update_supported(self._root)
+        if not support.get("supported"):
+            return {
+                "ok": False,
+                "error": support.get("hint") or "当前环境不支持自动更新",
+            }
+        mode = str(support.get("mode", ""))
+        if kind != mode:
+            expected = "便携版" if mode == "portable" else "完整源码"
+            return {"ok": False, "error": f"当前安装方式需要下载{expected}更新包"}
+
         check = await api.check_updates()
         if not check.get("ok"):
             return {"ok": False, "error": check.get("error", "版本检查失败")}

@@ -480,6 +480,7 @@ export const en = {
   disclaimer: 'Disclaimer',
   disclaimerText: 'This tool generates narrative content with AI and may produce inappropriate or offensive text. Review content yourself. It is for entertainment only and does not represent the developer\'s views. Follow local laws and the terms of the model providers you use.',
   contact: 'Contact',
+  officialWebsite: 'Official Website',
   projectAddress: 'Project',
   issueFeedback: 'Feedback',
   submitIssue: 'Submit Issue',

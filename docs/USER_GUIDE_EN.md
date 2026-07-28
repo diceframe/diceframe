@@ -2,7 +2,7 @@
 
 [中文](USER_GUIDE_CN.md) | English
 
-This guide is for GMs and players. It explains starting a game, taking actions, rolling dice, using chat adapters, and updating the application without covering the code architecture.
+Whether you are a GM preparing a new adventure or a player joining the table, this is the place to start. The sections below cover everyday tasks—from creating a game, taking actions, and rolling dice to using chat bots and updating DiceFrame. For code and development details, see the relevant technical guides.
 
 ## First Launch
 

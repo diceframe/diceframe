@@ -6,6 +6,15 @@
 
 <p align="center">English | <a href="README.md">中文</a></p>
 
+<p align="center"><a href="https://diceframe.com">Official Website</a></p>
+
+<p align="center">
+  <a href="https://github.com/diceframe/diceframe/stargazers"><img src="https://img.shields.io/github/stars/diceframe/diceframe?style=flat-square&logo=github&label=Stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/diceframe/diceframe/forks"><img src="https://img.shields.io/github/forks/diceframe/diceframe?style=flat-square&logo=github&label=Forks" alt="GitHub Forks"></a>
+  <a href="https://github.com/diceframe/diceframe/issues"><img src="https://img.shields.io/github/issues/diceframe/diceframe?style=flat-square&logo=github&label=Issues" alt="GitHub Issues"></a>
+  <a href="https://github.com/diceframe/diceframe/pulls"><img src="https://img.shields.io/github/issues-pr/diceframe/diceframe?style=flat-square&logo=github&label=Pull%20Requests" alt="GitHub Pull Requests"></a>
+</p>
+
 ![DiceFrame Web UI preview](docs/assets/diceframe-readme-hero.png)
 
 DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **DND/COC/custom rules**, with **multiplayer WebUI**.

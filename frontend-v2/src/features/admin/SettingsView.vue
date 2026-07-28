@@ -24,6 +24,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 
 type SectionId = 'api' | 'memory' | 'network' | 'sharing' | 'botapi' | 'plugins' | 'access' | 'advanced' | 'about'
 type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info'
+type UpdatePackageKind = 'source' | 'portable'
 type SystemStatusItem = { label: string; value: string; detail: string; tone: StatusTone }
 type SettingsSection = { id: SectionId; labelKey: MessageKey; icon: Component }
 
@@ -66,6 +67,10 @@ const proxySourceLabel = computed(() => {
   return t('proxySourceUnset')
 })
 const proxyFormatLabel = computed(() => (store.config.proxy_supported ? t('proxyFormatSupported') : t('proxyFormatUnsupported')))
+const requiredUpdateKind = computed<UpdatePackageKind | null>(() => {
+  const mode = updateStatus.value?.self_update.mode
+  return mode === 'source' || mode === 'portable' ? mode : null
+})
 const updateTagType = computed<StatusTone>(() => {
   if (!updateInfo.value) return 'default'
   if (!updateInfo.value.ok) return 'error'
@@ -267,7 +272,7 @@ function openUpdateUrl() {
   if (url) window.open(url, '_blank', 'noopener')
 }
 
-async function downloadUpdatePackage(kind: 'source' | 'portable') {
+async function downloadUpdatePackage(kind: UpdatePackageKind) {
   try {
     const result = await startDownload(kind)
     if (!result.ok) {
@@ -292,7 +297,9 @@ async function applyDownloadedUpdate() {
 }
 
 function redownloadUpdatePackage() {
-  void downloadUpdatePackage(updateStatus.value?.kind || (updateStatus.value?.self_update.mode === 'portable' ? 'portable' : 'source'))
+  if (requiredUpdateKind.value) {
+    void downloadUpdatePackage(requiredUpdateKind.value)
+  }
 }
 </script>
 
@@ -556,6 +563,7 @@ function redownloadUpdatePackage() {
               <h4>{{ t('disclaimer') }}</h4>
               <p class="muted">{{ t('disclaimerText') }}</p>
               <h4>{{ t('contact') }}</h4>
+              <p>{{ t('officialWebsite') }}: <a href="https://diceframe.com" target="_blank" rel="noopener">diceframe.com</a></p>
               <p>{{ t('projectAddress') }}: <a href="https://github.com/diceframe/diceframe" target="_blank" rel="noopener">diceframe/diceframe</a></p>
               <p>{{ t('issueFeedback') }}: <a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">{{ t('submitIssue') }}</a></p>
               <p>{{ t('qqGroup') }}: 1060613588</p>
@@ -590,8 +598,8 @@ function redownloadUpdatePackage() {
                     <NTag type="success" size="small" round>{{ t('updateStaged') }}</NTag>
                     <span class="muted">{{ t('updateStagedHint') }}</span>
                     <div class="actions-row">
-                      <NButton type="primary" @click="applyDownloadedUpdate">{{ t('applyUpdate') }}</NButton>
-                      <NButton @click="redownloadUpdatePackage">{{ t('redownloadUpdate') }}</NButton>
+                      <NButton v-if="updateStatus.kind === requiredUpdateKind" type="primary" @click="applyDownloadedUpdate">{{ t('applyUpdate') }}</NButton>
+                      <NButton v-if="requiredUpdateKind" @click="redownloadUpdatePackage">{{ t('redownloadUpdate') }}</NButton>
                     </div>
                   </div>
                   <div v-else-if="updateStatus.state === 'failed'" class="error-text">
@@ -618,8 +626,9 @@ function redownloadUpdatePackage() {
                     <NProgress :percentage="downloadPercent" />
                   </div>
                   <div v-if="!isUpdateBusy && !['staged', 'done'].includes(updateStatus.state)" class="actions-row">
-                    <NButton @click="downloadUpdatePackage('source')">{{ t('downloadUpdateSource') }}</NButton>
-                    <NButton @click="downloadUpdatePackage('portable')">{{ t('downloadUpdatePortable') }}</NButton>
+                    <NButton v-if="requiredUpdateKind" @click="downloadUpdatePackage(requiredUpdateKind)">
+                      {{ requiredUpdateKind === 'portable' ? t('downloadUpdatePortable') : t('downloadUpdateSource') }}
+                    </NButton>
                   </div>
                 </template>
               </div>

@@ -118,10 +118,21 @@ def test_self_update_unsupported_when_readonly(tmp_path, monkeypatch):
 
 
 def test_self_update_supported_when_writable(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
     monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
     monkeypatch.setattr(updater.os, "access", lambda *a, **k: True)
     result = updater.is_self_update_supported(tmp_path)
     assert result["supported"] is True
+    assert result["mode"] == "source"
+
+
+def test_self_update_supported_in_portable_launcher(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+    monkeypatch.setenv("TRPG_INSTALL_ROOT", str(tmp_path))
+    monkeypatch.setattr(updater.os, "access", lambda *a, **k: True)
+    result = updater.is_self_update_supported(tmp_path)
+    assert result["supported"] is True
+    assert result["mode"] == "portable"
 
 
 def test_self_update_unsupported_in_git_worktree(tmp_path, monkeypatch):
@@ -263,6 +274,32 @@ async def test_download_update_unknown_kind_rejected(tmp_path):
     svc = _make_service(tmp_path, SimpleNamespace())
     result = await svc.download_update(SimpleNamespace(), "foo")
     assert result["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_download_update_rejects_portable_package_for_source_install(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+    svc = _make_service(tmp_path, SimpleNamespace())
+    result = await svc.download_update(SimpleNamespace(), "portable")
+    assert result["ok"] is False
+    assert "完整源码" in result["error"]
+    assert svc._task is None
+
+
+@pytest.mark.asyncio
+async def test_download_update_rejects_source_package_for_portable_install(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+    monkeypatch.setenv("TRPG_INSTALL_ROOT", str(tmp_path))
+    svc = _make_service(tmp_path, SimpleNamespace())
+    result = await svc.download_update(SimpleNamespace(), "source")
+    assert result["ok"] is False
+    assert "便携版" in result["error"]
+    assert svc._task is None
 
 
 @pytest.mark.asyncio

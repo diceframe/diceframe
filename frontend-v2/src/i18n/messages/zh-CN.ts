@@ -480,6 +480,7 @@ export const zhCN = {
   disclaimer: '免责声明',
   disclaimerText: '本工具由 AI 生成叙事内容，可能包含不恰当或冒犯性文本，请自行甄别；内容仅供娱乐，不代表开发者立场。请遵守当地法律法规与所用模型的条款。',
   contact: '联系',
+  officialWebsite: '官方网站',
   projectAddress: '项目地址',
   issueFeedback: '问题反馈',
   submitIssue: '提交 Issue',
