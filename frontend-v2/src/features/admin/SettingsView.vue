@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Component } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
+import { useRoute } from 'vue-router'
 import { NButton, NInput, NInputNumber, NSwitch, NTag, NIcon, NCollapse, NCollapseItem, NSpin, NProgress } from 'naive-ui'
 import {
   ServerOutline, CubeOutline, CloudDownloadOutline, ExtensionPuzzleOutline,
@@ -29,6 +30,7 @@ type SystemStatusItem = { label: string; value: string; detail: string; tone: St
 type SettingsSection = { id: SectionId; labelKey: MessageKey; icon: Component }
 
 const store = useSettingsStore()
+const route = useRoute()
 const toast = useToast()
 const { confirm } = useConfirm()
 const { updateInfo, updateChecking, checkForUpdates } = useUpdateCheck()
@@ -47,6 +49,23 @@ const sections: SettingsSection[] = [
   { id: 'advanced', labelKey: 'settingsSectionAdvanced', icon: OptionsOutline },
   { id: 'about', labelKey: 'settingsSectionAbout', icon: InformationCircleOutline },
 ]
+
+function queryValue(value: unknown): string {
+  return String(Array.isArray(value) ? (value[0] || '') : (value || ''))
+}
+
+function syncRouteTarget() {
+  const requestedSection = queryValue(route.query.section)
+  if (sections.some(item => item.id === requestedSection)) {
+    section.value = requestedSection as SectionId
+  }
+  if (queryValue(route.query.focus) === 'update') {
+    section.value = 'about'
+    void nextTick(() => {
+      document.getElementById('settings-update')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+}
 
 const testing = ref(false)
 const testResult = ref<TestResult | null>(null)
@@ -135,7 +154,12 @@ const systemStatusItems = computed<SystemStatusItem[]>(() => {
   ]
 })
 
-onMounted(() => { void store.load(); void refreshStatus() })
+onMounted(() => {
+  void store.load()
+  void refreshStatus()
+  syncRouteTarget()
+})
+watch(() => [route.query.section, route.query.focus], syncRouteTarget)
 watch(section, () => {
   const sc = document.querySelector('.n-layout-scroll-container') as HTMLElement | null
   sc?.scrollTo({ top: 0 })
@@ -568,7 +592,7 @@ function redownloadUpdatePackage() {
               <p>{{ t('issueFeedback') }}: <a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">{{ t('submitIssue') }}</a></p>
               <p>{{ t('qqGroup') }}: 1060613588</p>
             </section>
-            <section class="update-card" :aria-label="t('versionUpdate')">
+            <section id="settings-update" class="update-card" :aria-label="t('versionUpdate')">
               <div class="update-card-head">
                 <div>
                   <h4>{{ t('versionUpdate') }}</h4>

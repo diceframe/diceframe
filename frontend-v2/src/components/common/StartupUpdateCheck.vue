@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { h, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { DialogOptions } from 'naive-ui'
 import { errorMessage } from '@/api/client'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
@@ -8,6 +8,7 @@ import { getDialog } from '@/composables/useNaiveBridge'
 import { useLocale } from '@/composables/useLocale'
 
 const route = useRoute()
+const router = useRouter()
 const { checkForUpdates } = useUpdateCheck()
 const { t } = useLocale()
 // Show at most once per process; cross-version dedupe is handled below.
@@ -17,10 +18,6 @@ function shouldSkipCurrentRoute(): boolean {
   if (route.name === 'login' || route.name === 'join') return true
   if (route.name === 'play' && (route.query.user || route.query.share)) return true
   return false
-}
-
-function openReleaseUrl(url: string) {
-  if (url) window.open(url, '_blank', 'noopener')
 }
 
 // Show once per version so refreshes do not keep interrupting the user.
@@ -40,7 +37,7 @@ function markNotified(version: string) {
   }
 }
 
-function showUpdateDialog(version: string, body: string, url: string) {
+function showUpdateDialog(version: string, body: string) {
   const dialog = getDialog()
   const cfg: DialogOptions = {
     title: t('updateDialogTitle', { version }),
@@ -50,13 +47,16 @@ function showUpdateDialog(version: string, body: string, url: string) {
         ? h('pre', { class: 'update-dialog-notes' }, body)
         : null,
     ]),
-    positiveText: t('openReleasePage'),
+    positiveText: t('goToUpdateSettings'),
     negativeText: t('laterSay'),
     maskClosable: true,
     closeOnEsc: true,
     positiveButtonProps: { type: 'primary' },
     negativeButtonProps: { secondary: true },
-    onPositiveClick: () => openReleaseUrl(url),
+    onPositiveClick: () => router.push({
+      name: 'settings',
+      query: { section: 'about', focus: 'update' },
+    }),
   }
   dialog.info(cfg)
 }
@@ -73,7 +73,6 @@ async function checkOnce() {
       showUpdateDialog(
         version,
         String(result.latest.body || ''),
-        result.latest.html_url || result.release_url || result.releases_url || result.source_url || '',
       )
     }
   } catch (e: unknown) {

@@ -660,6 +660,7 @@ export const en = {
   switchToDarkTheme: 'Switch to dark theme',
   updateDialogTitle: 'New version found {version}',
   updateDialogBody: 'DiceFrame {version} has been released. Upgrading before continuing is recommended.',
+  goToUpdateSettings: 'Update in Settings',
   laterSay: 'Later',
   newVersion: 'New version',
   chooseCharacterCard: 'Choose Character Card',

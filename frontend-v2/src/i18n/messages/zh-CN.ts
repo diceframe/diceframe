@@ -660,6 +660,7 @@ export const zhCN = {
   switchToDarkTheme: '切换到深色主题',
   updateDialogTitle: '发现新版本 {version}',
   updateDialogBody: 'DiceFrame {version} 已发布，建议升级后再继续跑团。',
+  goToUpdateSettings: '前往设置更新',
   laterSay: '稍后说',
   newVersion: '新版本',
   chooseCharacterCard: '选择角色卡',
