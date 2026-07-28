@@ -2,12 +2,6 @@
 
 ## 中文
 
-### 下载指南
-
-- **普通 Windows 用户**：下载 `DiceFrame-v1.6.2-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.6.2-windows.zip`。
-- `.sha256` 是更新校验文件，普通用户不需要手动下载。
-
 这个版本补齐了应用更新流程，也带来了更流畅的叙事显示、购买确认和模型配置引导。
 
 ### 新功能
@@ -27,13 +21,13 @@
 - 调整中英文用户手册的开头说明。
 - 调整 README 首页链接布局。
 
+### 下载指南
+
+- **普通 Windows 用户**：下载 `DiceFrame-v1.6.2-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.6.2-windows.zip`。
+- `.sha256` 是更新校验文件，普通用户不需要手动下载。
+
 ## English
-
-### Download Guide
-
-- **Most Windows users**: Download `DiceFrame-v1.6.2-windows-portable.zip`.
-- **Source package users**: Download `DiceFrame-v1.6.2-windows.zip`.
-- `.sha256` files are used for update verification and do not need to be downloaded manually.
 
 This release completes the application update flow and adds smoother narration, purchase confirmation, and model setup guidance.
 
@@ -53,3 +47,9 @@ This release completes the application update flow and adds smoother narration, 
 - Fixed internal model state tags occasionally appearing in player-facing narration.
 - Refined the introduction in both user guides.
 - Adjusted the link layout at the top of the README.
+
+### Download Guide
+
+- **Most Windows users**: Download `DiceFrame-v1.6.2-windows-portable.zip`.
+- **Source package users**: Download `DiceFrame-v1.6.2-windows.zip`.
+- `.sha256` files are used for update verification and do not need to be downloaded manually.
