@@ -103,6 +103,16 @@ class FetchResult:
         }
 
 
+def _streaming_download_timeout(timeout_sec: int) -> aiohttp.ClientTimeout:
+    """Allow slow active downloads without imposing the request timeout as a total deadline."""
+    return aiohttp.ClientTimeout(
+        total=None,
+        connect=timeout_sec,
+        sock_connect=timeout_sec,
+        sock_read=max(timeout_sec, 60),
+    )
+
+
 class MirrorManager:
     def __init__(self, config_path: Path, *, timeout_sec: int = 20, max_attempts: int = 2) -> None:
         self.config_path = config_path
@@ -433,7 +443,7 @@ class MirrorManager:
         attempts = self.max_attempts
         last_error = ""
         last_status = 0
-        timeout = aiohttp.ClientTimeout(total=self.timeout_sec)
+        timeout = _streaming_download_timeout(self.timeout_sec)
         headers = {"User-Agent": "DiceFrame updater"}
         tmp_path = target_path.with_suffix(target_path.suffix + ".download")
         tmp_path.parent.mkdir(parents=True, exist_ok=True)

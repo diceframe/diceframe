@@ -2,7 +2,7 @@
 
 [中文](DOCKER_DEPLOY_CN.md) | English
 
-Docker adds a deployment option without changing direct desktop use. Windows, macOS, and Linux can still run:
+Docker is optional. If you prefer running DiceFrame directly on your computer, Windows, macOS, and Linux can still start it with:
 
 ```bash
 pip install -r requirements.txt

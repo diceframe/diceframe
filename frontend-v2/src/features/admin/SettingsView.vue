@@ -34,7 +34,7 @@ const route = useRoute()
 const toast = useToast()
 const { confirm } = useConfirm()
 const { updateInfo, updateChecking, checkForUpdates } = useUpdateCheck()
-const { updateStatus, isDownloading, isUpdateBusy, downloadPercent, startDownload, applyUpdate, refreshStatus } = useUpdater()
+const { updateStatus, reloadCountdown, isDownloading, isUpdateBusy, downloadPercent, startDownload, applyUpdate, refreshStatus } = useUpdater()
 const { t } = useLocale()
 
 const section = ref<SectionId>('api')
@@ -572,26 +572,6 @@ function redownloadUpdatePackage() {
           </div>
 
           <div v-show="section === 'about'" class="settings-pane about">
-            <section class="about-card">
-              <h3>{{ t('aboutDiceFrame') }}</h3>
-              <p>{{ t('aboutIntro1') }}</p>
-              <p>{{ t('aboutIntro2') }}</p>
-              <h4>{{ t('whatCanDo') }}</h4>
-              <ul>
-                <li>{{ t('aboutFeature1') }}</li>
-                <li>{{ t('aboutFeature2') }}</li>
-                <li>{{ t('aboutFeature3') }}</li>
-                <li>{{ t('aboutFeature4') }}</li>
-                <li>{{ t('aboutFeature5') }}</li>
-              </ul>
-              <h4>{{ t('disclaimer') }}</h4>
-              <p class="muted">{{ t('disclaimerText') }}</p>
-              <h4>{{ t('contact') }}</h4>
-              <p>{{ t('officialWebsite') }}: <a href="https://diceframe.com" target="_blank" rel="noopener">diceframe.com</a></p>
-              <p>{{ t('projectAddress') }}: <a href="https://github.com/diceframe/diceframe" target="_blank" rel="noopener">diceframe/diceframe</a></p>
-              <p>{{ t('issueFeedback') }}: <a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">{{ t('submitIssue') }}</a></p>
-              <p>{{ t('qqGroup') }}: 1060613588</p>
-            </section>
             <section id="settings-update" class="update-card" :aria-label="t('versionUpdate')">
               <div class="update-card-head">
                 <div>
@@ -637,7 +617,8 @@ function redownloadUpdatePackage() {
                   </div>
                   <div v-else-if="updateStatus.state === 'done'" class="update-staged">
                     <NTag type="success" size="small" round>{{ t('updateApplied') }}</NTag>
-                    <span v-if="updateStatus.restart_needed" class="muted">{{ t('updateRestartNeeded') }}</span>
+                    <span v-if="reloadCountdown !== null" class="muted">{{ t('updateReloadCountdown', { seconds: reloadCountdown }) }}</span>
+                    <span v-else-if="updateStatus.restart_needed" class="muted">{{ t('updateRestartNeeded') }}</span>
                   </div>
                   <div v-else-if="updateStatus.state === 'rolled-back'" class="error-text">
                     {{ t('updateRolledBack') }}: {{ updateStatus.error }}
@@ -660,6 +641,26 @@ function redownloadUpdatePackage() {
                 <NButton :loading="updateChecking" @click="checkUpdate">{{ t('checkUpdate') }}</NButton>
                 <NButton :disabled="!updateInfo?.release_url && !updateInfo?.releases_url && !updateInfo?.source_url" @click="openUpdateUrl">{{ t('openReleasePage') }}</NButton>
               </div>
+            </section>
+            <section class="about-card">
+              <h3>{{ t('aboutDiceFrame') }}</h3>
+              <p>{{ t('aboutIntro1') }}</p>
+              <p>{{ t('aboutIntro2') }}</p>
+              <h4>{{ t('whatCanDo') }}</h4>
+              <ul>
+                <li>{{ t('aboutFeature1') }}</li>
+                <li>{{ t('aboutFeature2') }}</li>
+                <li>{{ t('aboutFeature3') }}</li>
+                <li>{{ t('aboutFeature4') }}</li>
+                <li>{{ t('aboutFeature5') }}</li>
+              </ul>
+              <h4>{{ t('disclaimer') }}</h4>
+              <p class="muted">{{ t('disclaimerText') }}</p>
+              <h4>{{ t('contact') }}</h4>
+              <p>{{ t('officialWebsite') }}: <a href="https://diceframe.com" target="_blank" rel="noopener">diceframe.com</a></p>
+              <p>{{ t('projectAddress') }}: <a href="https://github.com/diceframe/diceframe" target="_blank" rel="noopener">diceframe/diceframe</a></p>
+              <p>{{ t('issueFeedback') }}: <a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">{{ t('submitIssue') }}</a></p>
+              <p>{{ t('qqGroup') }}: 1060613588</p>
             </section>
             <section class="sponsor-card" :aria-label="t('supportProject')">
               <div>

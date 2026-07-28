@@ -2,7 +2,7 @@
 
 中文 | [English](BOT_BRIDGE_CORE_EN.md)
 
-DiceFrame 聊天平台接入的共享核心层。新平台适配器（NapCat/QQ、Discord、Telegram 等）复用这一层，只实现平台自身的消息收发与展示，不重写跑团业务。
+Bot Bridge 用来把 DiceFrame 接到聊天平台。NapCat/QQ、Discord、Telegram 等适配器只处理各平台的消息收发和展示，跑团逻辑统一交给 DiceFrame。
 
 代码位于 `src/bots/bridge_core/`。
 

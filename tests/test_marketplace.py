@@ -3,7 +3,11 @@ import json
 import pytest
 
 from src.plugin_host.marketplace import PluginMarketplace, _normalize_market_item
-from src.plugin_host.mirrors import FetchResult, MirrorManager
+from src.plugin_host.mirrors import (
+    FetchResult,
+    MirrorManager,
+    _streaming_download_timeout,
+)
 
 
 class FakeMirrors:
@@ -126,3 +130,63 @@ def test_official_github_source_is_attempted_before_proxies(tmp_path):
     manager = MirrorManager(tmp_path / "mirrors.json")
 
     assert manager.enabled()[0]["id"] == "github"
+
+
+def test_streaming_download_timeout_has_no_total_deadline():
+    timeout = _streaming_download_timeout(20)
+
+    assert timeout.total is None
+    assert timeout.connect == 20
+    assert timeout.sock_connect == 20
+    assert timeout.sock_read == 60
+
+
+@pytest.mark.asyncio
+async def test_streaming_download_uses_the_download_timeout(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeContent:
+        async def iter_chunked(self, _size):
+            yield b"payload"
+
+    class FakeResponse:
+        status = 200
+        content_length = 7
+        content = FakeContent()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class FakeSession:
+        def __init__(self, *, timeout, headers):
+            captured["timeout"] = timeout
+            captured["headers"] = headers
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, _url):
+            return FakeResponse()
+
+    monkeypatch.setattr("src.plugin_host.mirrors.aiohttp.ClientSession", FakeSession)
+    manager = MirrorManager(tmp_path / "mirrors.json", timeout_sec=20, max_attempts=1)
+    target = tmp_path / "update.zip"
+
+    result = await manager._download_to_file(
+        "https://github.com/example/update.zip",
+        {"id": "github", "name": "GitHub"},
+        1,
+        1,
+        target,
+    )
+
+    assert result.ok is True
+    assert target.read_bytes() == b"payload"
+    assert captured["timeout"].total is None
+    assert captured["timeout"].sock_read == 60

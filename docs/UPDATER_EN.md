@@ -2,7 +2,7 @@
 
 [中文](UPDATER_CN.md) | English
 
-This document covers updates to the DiceFrame application. Plugin Store updates use a separate mechanism.
+This page explains how to update DiceFrame itself. Plugins are updated separately through the Plugin Store.
 
 ## Installation Modes
 

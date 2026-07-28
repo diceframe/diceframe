@@ -2,7 +2,7 @@
 
 [中文](BOT_BRIDGE_CORE_CN.md) | English
 
-DiceFrame provides a platform-neutral core for chat integrations. Adapters for NapCat/QQ, Discord, Telegram, and other platforms reuse this layer and implement only platform transport and presentation instead of duplicating tabletop business logic.
+Bot Bridge connects DiceFrame to chat platforms. Adapters for NapCat/QQ, Discord, Telegram, and others handle each platform's messages and presentation while DiceFrame keeps the tabletop logic in one place.
 
 The code lives in `src/bots/bridge_core/`.
 

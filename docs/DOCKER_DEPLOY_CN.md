@@ -2,7 +2,7 @@
 
 中文 | [English](DOCKER_DEPLOY_EN.md)
 
-这套 Docker 支持只新增部署入口，不改变 PC 直接运行方式。Windows/macOS/Linux 仍可继续用：
+想用 Docker 可以直接照下面部署；习惯在电脑上运行的用户不用改用法。Windows、macOS 和 Linux 仍然可以这样启动：
 
 ```bash
 pip install -r requirements.txt
