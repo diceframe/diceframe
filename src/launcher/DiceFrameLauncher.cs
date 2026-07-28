@@ -195,6 +195,7 @@ internal static class DiceFrameLauncher
                     + "}\n"
             );
             PromoteLauncher(installRoot, launcherPath);
+            PruneOldVersions(installRoot, candidateDir, previousDir);
             WriteUpdateState(updaterDir, "done", version, "");
             TryDelete(restartSignal);
             Console.WriteLine("Update to " + version + " succeeded.");
@@ -688,6 +689,60 @@ internal static class DiceFrameLauncher
         catch
         {
             return false;
+        }
+    }
+
+    private static void PruneOldVersions(
+        string installRoot,
+        string currentDir,
+        string previousDir
+    )
+    {
+        string versionsDir = Path.Combine(installRoot, "versions");
+        try
+        {
+            if (!Directory.Exists(versionsDir))
+            {
+                return;
+            }
+
+            string current = Path.GetFullPath(currentDir);
+            string previous = Path.GetFullPath(previousDir);
+            foreach (string directory in Directory.GetDirectories(versionsDir))
+            {
+                string candidate = Path.GetFullPath(directory);
+                bool keepCurrent = string.Equals(
+                    candidate,
+                    current,
+                    StringComparison.OrdinalIgnoreCase
+                );
+                bool keepPrevious = IsUnder(previous, versionsDir)
+                    && string.Equals(
+                        candidate,
+                        previous,
+                        StringComparison.OrdinalIgnoreCase
+                    );
+                if (!keepCurrent && !keepPrevious && IsUnder(candidate, versionsDir))
+                {
+                    try
+                    {
+                        Directory.Delete(candidate, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            "Could not remove old version "
+                                + candidate
+                                + ": "
+                                + ex.Message
+                        );
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Could not prune old versions: " + ex.Message);
         }
     }
 

@@ -38,7 +38,8 @@ After an update is applied, the launcher:
 2. calls the public health endpoint and checks the target version;
 3. observes the process for another 60 seconds;
 4. commits the active-version pointer after success;
-5. stops the candidate and restarts the old version if startup, health checking, or probation fails.
+5. keeps only the current and previous rollback-ready versions;
+6. stops the candidate and restarts the old version if startup, health checking, or probation fails.
 
 The launcher shipped with v1.6.0 does not yet have supervisor support. The first move from v1.6.0 to a release containing the new launcher therefore requires one manual upgrade. Later portable releases can switch and roll back automatically.
 
@@ -55,7 +56,7 @@ The updater preserves:
 - `.claude/`
 - `dist/`
 
-Settings asks for a manual restart after a successful replacement. Git checkouts do not use this workflow.
+Settings asks for a manual restart after a successful replacement. The downloaded package is removed and only the latest source backup is kept. Git checkouts do not use this workflow.
 
 ## Docker and NAS
 
@@ -76,7 +77,7 @@ docker compose up -d --build
 
 ## Download and Safety Checks
 
-- Packages are downloaded under `data/_updater/`.
+- Packages are downloaded under `data/_updater/` and removed after a successful apply.
 - SHA-256 is verified when a Release provides a `.sha256` sidecar.
 - ZIP extraction rejects absolute paths, drive paths, `..` traversal, symbolic links, abnormal member counts, and abnormal expanded size.
 - A portable candidate must contain the Web service, bundled Python runtime, and launcher.

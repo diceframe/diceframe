@@ -434,6 +434,7 @@ class UpdaterService:
                 result = await asyncio.to_thread(
                     self._prepare_portable_update, archive, version
                 )
+                self._remove_completed_archive(archive)
                 self._state.update(
                     state="restarting",
                     candidate_dir=result["candidate_dir"],
@@ -447,6 +448,8 @@ class UpdaterService:
                 backup = await asyncio.to_thread(
                     self._apply_source_update, archive, version
                 )
+                self._remove_completed_archive(archive)
+                self._prune_source_backups(backup)
                 self._state.update(
                     state="done",
                     backup_dir=str(backup),
@@ -468,6 +471,34 @@ class UpdaterService:
             self._state.update(state="failed", error=str(exc), restart_needed=False)
             self._save_state()
             logger.exception("应用更新失败")
+
+    def _remove_completed_archive(self, archive: Path) -> None:
+        try:
+            archive = archive.resolve()
+            if _path_within(archive, self._dir) and archive.is_file():
+                archive.unlink()
+        except OSError:
+            logger.warning("更新成功，但未能删除下载包：%s", archive, exc_info=True)
+
+    def _prune_source_backups(self, keep: Path) -> None:
+        try:
+            keep = keep.resolve()
+            updater_dir = self._dir.resolve()
+            for backup in updater_dir.glob("backup-*"):
+                try:
+                    resolved = backup.resolve()
+                    if (
+                        resolved != keep
+                        and _path_within(resolved, updater_dir)
+                        and backup.is_dir()
+                    ):
+                        shutil.rmtree(backup)
+                except OSError:
+                    logger.warning(
+                        "未能删除旧的源码更新备份：%s", backup, exc_info=True
+                    )
+        except OSError:
+            logger.warning("未能清理旧的源码更新备份", exc_info=True)
 
     def _prepare_portable_update(
         self, archive: Path, version: str

@@ -426,6 +426,7 @@ async def test_portable_apply_stages_side_by_side_and_restart_signal(
     )
     assert signal["expected_version"] == "1.7.0"
     assert Path(signal["candidate_dir"]) == candidate
+    assert not archive.exists()
 
 
 def _write_source_archive(path: Path, version: str = "1.7.0") -> None:
@@ -451,6 +452,9 @@ async def test_source_apply_creates_backup_and_requires_restart(
     (root / "static-v2" / "index.html").write_text("old", encoding="utf-8")
     archive = updater_dir / "source.zip"
     _write_source_archive(archive)
+    old_backup = updater_dir / "backup-20000101-000000"
+    old_backup.mkdir()
+    (old_backup / "stale.txt").write_text("stale", encoding="utf-8")
     monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
     monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
 
@@ -472,6 +476,9 @@ async def test_source_apply_creates_backup_and_requires_restart(
     assert (root / "web_server.py").read_text(encoding="utf-8") == "# new server"
     backup = Path(status["backup_dir"])
     assert (backup / "web_server.py").read_text(encoding="utf-8") == "# old server"
+    assert not archive.exists()
+    assert not old_backup.exists()
+    assert sorted(updater_dir.glob("backup-*")) == [backup]
 
 
 def test_source_apply_restores_backup_when_install_fails(
