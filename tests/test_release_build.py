@@ -24,3 +24,15 @@ def test_copy_tree_excludes_legacy_user_templates(monkeypatch, tmp_path):
 
     assert (target / "base.json").exists()
     assert not (target / "custom_rule_home.json").exists()
+
+
+def test_prepare_package_tree_excludes_docs(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    (root / "docs").mkdir(parents=True)
+    (root / "docs" / "USER_GUIDE_CN.md").write_text("guide", encoding="utf-8")
+    package = tmp_path / "package"
+    monkeypatch.setattr(build_release, "ROOT", root)
+
+    build_release.prepare_package_tree(package)
+
+    assert not (package / "docs").exists()

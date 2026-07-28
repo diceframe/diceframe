@@ -39,7 +39,6 @@ ROOT_FILES = [
 ]
 
 ROOT_DIRS = [
-    "docs/assets",
     "plugins",
     "prompts",
     "scripts",
@@ -60,21 +59,6 @@ FRONTEND_FILES = [
 FRONTEND_DIRS = [
     "public",
     "src",
-]
-
-DOC_FILES = [
-    "docs/BOT_BRIDGE_CORE_CN.md",
-    "docs/BOT_BRIDGE_CORE_EN.md",
-    "docs/DOCKER_DEPLOY_CN.md",
-    "docs/DOCKER_DEPLOY_EN.md",
-    "docs/PLUGIN_DEVELOPMENT_CN.md",
-    "docs/PLUGIN_DEVELOPMENT_EN.md",
-    "docs/PLUGIN_REGISTRY_CN.md",
-    "docs/PLUGIN_REGISTRY_EN.md",
-    "docs/USER_GUIDE_CN.md",
-    "docs/USER_GUIDE_EN.md",
-    "docs/UPDATER_CN.md",
-    "docs/UPDATER_EN.md",
 ]
 
 EXCLUDED_DIR_NAMES = {
@@ -186,7 +170,7 @@ def prepare_package_tree(package_dir: Path) -> None:
         shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True)
 
-    for rel in ROOT_FILES + DOC_FILES:
+    for rel in ROOT_FILES:
         copy_file(ROOT / rel, package_dir / rel)
     for rel in ROOT_DIRS:
         copy_tree(ROOT / rel, package_dir / rel)
