@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -373,6 +374,51 @@ async def test_create_game_rejects_empty_player_list(web_api):
 
 
 @pytest.mark.asyncio
+async def test_unconfigured_model_is_rejected_before_creating_save_data(web_api):
+    api, _lorebook, registry, fake_llm, _worlds_dir = web_api
+    fake_llm.providers = {
+        "fake": SimpleNamespace(
+            provider_name="fake",
+            base_url="",
+            api_key="",
+            model_name="",
+        ),
+    }
+
+    result = await api.create_game(
+        "template_world",
+        "模板世界",
+        players=[{"character_name": "艾琳", "attributes": {"str": 12}}],
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "llm_not_configured"
+    assert result["missing"] == ["base_url", "model", "api_key"]
+    assert registry.list_all() == []
+    assert fake_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ai_generation_reports_unconfigured_model_without_calling_it(web_api):
+    api, _lorebook, _registry, fake_llm, _worlds_dir = web_api
+    fake_llm.providers = {
+        "fake": SimpleNamespace(
+            provider_name="fake",
+            base_url="https://example.invalid/v1",
+            api_key="",
+            model_name="test-model",
+        ),
+    }
+
+    result = await api.generate_rule("测试规则", "freeform_fantasy")
+
+    assert result["ok"] is False
+    assert result["error_code"] == "llm_not_configured"
+    assert result["missing"] == ["api_key"]
+    assert fake_llm.calls == []
+
+
+@pytest.mark.asyncio
 async def test_pay_tag_deducts_gold_immediately(web_api):
     api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
     result = await api.create_game(
@@ -427,7 +473,14 @@ async def test_negative_gold_change_clamps_at_zero(web_api):
     assert inst.pending_payments == []
 
 
-async def _make_game_with_pending(web_api, *, gold=30, amount=12, payment_id="pay_test1"):
+async def _make_game_with_pending(
+    web_api,
+    *,
+    gold=30,
+    amount=12,
+    payment_id="pay_test1",
+    rewards=None,
+):
     api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
     result = await api.create_game(
         "template_world",
@@ -447,6 +500,8 @@ async def _make_game_with_pending(web_api, *, gold=30, amount=12, payment_id="pa
     inst.gm_uid = uid
     inst.pending_payments.append({
         "id": payment_id, "uid": uid, "amount": amount,
+        "recipient_uid": uid,
+        "rewards": list(rewards or []),
         "reason": "GM 建议支付", "status": "pending", "round": 1,
     })
     return api, gk, inst, uid
@@ -491,12 +546,60 @@ async def test_resolve_payment_permission_non_owner_blocked(web_api):
 
 @pytest.mark.asyncio
 async def test_resolve_payment_insufficient_gold(web_api):
-    api, gk, inst, uid = await _make_game_with_pending(web_api, gold=5, amount=12)
+    api, gk, inst, uid = await _make_game_with_pending(
+        web_api,
+        gold=5,
+        amount=12,
+        rewards=[{"name": "解毒草", "category": ""}],
+    )
     res = await api.resolve_payment(gk, "pay_test1", True, uid)
     assert res["ok"] is False
     assert "金币不足" in res["error"]
     assert inst.players[uid]["character_sheet"]["gold"] == 5
+    assert not any(
+        item.get("name") == "解毒草"
+        for item in inst.players[uid]["character_sheet"].get("inventory", [])
+    )
     assert next(p for p in inst.pending_payments if p["id"] == "pay_test1")["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_multiplayer_payment_grants_items_to_recipient(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    result = await api.create_game(
+        "template_world",
+        "多人交易",
+        players=[
+            {"character_name": "付款者", "attributes": {"str": 12}, "gold": 30},
+            {"character_name": "接收者", "attributes": {"str": 12}, "gold": 5},
+        ],
+    )
+    gk = result["game_key"]
+    inst = registry.get(api._parse_key(gk))
+    payer_uid, recipient_uid = list(inst.players)
+    inst.gm_uid = payer_uid
+    inst.players[payer_uid]["character_sheet"]["gold"] = 30
+    inst.pending_payments.append({
+        "id": "pay_multi",
+        "uid": payer_uid,
+        "amount": 15,
+        "recipient_uid": recipient_uid,
+        "rewards": [
+            {"name": "解毒草", "category": ""},
+            {"name": "止血苔", "category": ""},
+        ],
+        "reason": "替队友购买药草",
+        "status": "pending",
+        "round": 1,
+    })
+
+    resolved = await api.resolve_payment(
+        gk, "pay_multi", True, payer_uid
+    )
+    assert resolved["ok"] is True
+    assert inst.players[payer_uid]["character_sheet"]["gold"] == 15
+    recipient_inventory = inst.players[recipient_uid]["character_sheet"]["inventory"]
+    assert {item["name"] for item in recipient_inventory} >= {"解毒草", "止血苔"}
 
 
 @pytest.mark.asyncio
@@ -511,16 +614,28 @@ async def test_apply_state_update_creates_pending_payment(web_api):
     assert inst.pending_payments == []
 
     api._handler._apply_state_update(inst, {
-        "pending_payments": [{"uid": uid, "amount": 7, "reason": "购买药水"}],
+        "pending_payments": [{
+            "uid": uid,
+            "amount": 7,
+            "recipient_uid": uid,
+            "items": ["药水"],
+            "reason": "购买药水",
+        }],
     })
     assert len(inst.pending_payments) == 1
     pay = inst.pending_payments[0]
     assert pay["uid"] == uid
     assert pay["amount"] == 7
+    assert pay["recipient_uid"] == uid
+    assert pay["rewards"][0]["name"] == "药水"
     assert pay["status"] == "pending"
     assert pay["id"].startswith("pay_")
     # PAY 不直接扣金币
     assert inst.players[uid]["character_sheet"]["gold"] == 30
+    assert not any(
+        item.get("name") == "药水"
+        for item in inst.players[uid]["character_sheet"].get("inventory", [])
+    )
 
 
 def test_character_card_library_does_not_include_active_game_players(web_api):

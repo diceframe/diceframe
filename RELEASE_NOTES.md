@@ -1,4 +1,22 @@
-# DiceFrame v1.6.0
+# DiceFrame Release Notes
+
+## Unreleased
+
+### 中文
+
+- Windows 便携版新增旁路安装、健康检查、观察期和失败自动回滚；源码发布包使用可恢复的事务式替换。
+- Docker、NAS 和 Git 开发目录只显示适合各自环境的更新提示，不在运行环境中直接覆盖程序。
+- 创建冒险时新增模型 API 配置引导，后端会在写入世界、角色和存档前检查配置。
+- 购买物品改为由付款玩家确认；余额足够并确认后才扣款和发放物品。
+- 修复部分模型输出把内部状态标签显示在叙事正文中的问题。
+
+### English
+
+- Added side-by-side portable updates with health checking, probation, and automatic rollback. Extracted source releases use recoverable transactional replacement.
+- Docker, NAS, and Git development installations now receive environment-specific update guidance without in-place replacement.
+- Added model-API guidance on Create and a backend preflight before writing world, character, or save data.
+- Item purchases now require confirmation from the paying player; funds and items move only after confirmation and a sufficient-balance check.
+- Fixed internal model state tags appearing in player-facing narration.
 
 ## 中文
 

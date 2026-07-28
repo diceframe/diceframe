@@ -583,6 +583,9 @@ async def auth_middleware(request: web.Request, handler):
     # /api/config 返回公开配置（敏感字段已 mask），玩家无 access_token 也可读取
     if request.method == "GET" and request.path == "/api/config":
         return await handler(request)
+    # 启动器在更新切换期间没有用户令牌，只读取版本和进程号。
+    if request.method == "GET" and request.path == "/api/system/update/health":
+        return await handler(request)
     # 仅保护 API 端点；HTML 页面和静态资源放行，由前端遇 401 跳 /login 处理登录
     if token and request.path.startswith("/api/"):
         if not owner_authenticated:

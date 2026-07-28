@@ -134,8 +134,8 @@ async def _parse_connection_test_response(resp, start: float) -> dict[str, Any]:
 async def generate_world(api: "WebAPI", prompt: str, rule_id: str = "",
                          language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """使用 AI 根据用户描述生成完整世界模板。"""
-    if not api._llm_client:
-        return {"ok": False, "error": "LLM 客户端未初始化，请先配置 API Key"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     try:
         return await _gen_world(api, prompt, rule_id, normalize_language(language))
     except Exception as e:
@@ -160,8 +160,8 @@ def _slug(value: str) -> str:
 async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "",
                         language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """按母版规则生成并保存一套 AI 自定义规则。"""
-    if not api._llm_client:
-        return {"ok": False, "error": "LLM 客户端未初始化，请先配置 API Key"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     prompt = (prompt or "").strip()
     if not prompt:
         return {"ok": False, "error": "请输入规则题材描述"}
@@ -210,8 +210,8 @@ async def generate_rule(api: "WebAPI", prompt: str, source_rule_id: str = "",
 async def generate_character(api: "WebAPI", prompt: str, game_key: str = "", rule_id: str = "",
                              language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """使用 AI 根据用户描述生成角色卡。"""
-    if not api._llm_client:
-        return {"ok": False, "error": "LLM 客户端未初始化，请先配置 API Key"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     try:
         resolved_language = normalize_language(language)
         rule = api._load_rule_by_id(rule_id, resolved_language)
@@ -236,8 +236,8 @@ async def generate_character(api: "WebAPI", prompt: str, game_key: str = "", rul
 async def generate_text(api: "WebAPI", prompt: str, system_hint: str = "",
                         language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     """轻量文字生成：直接发 prompt 给 LLM，返回原始文本，不解析 JSON。"""
-    if not api._llm_client:
-        return {"ok": False, "error": "LLM 客户端未初始化"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     language = normalize_language(language)
     system = system_hint or (
         "You are a TRPG character and setting assistant. Answer briefly and practically in natural English. Do not output JSON."

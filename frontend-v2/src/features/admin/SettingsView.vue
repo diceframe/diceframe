@@ -31,7 +31,7 @@ const store = useSettingsStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 const { updateInfo, updateChecking, checkForUpdates } = useUpdateCheck()
-const { updateStatus, isDownloading, downloadPercent, startDownload, refreshStatus } = useUpdater()
+const { updateStatus, isDownloading, isUpdateBusy, downloadPercent, startDownload, applyUpdate, refreshStatus } = useUpdater()
 const { t } = useLocale()
 
 const section = ref<SectionId>('api')
@@ -278,6 +278,21 @@ async function downloadUpdatePackage(kind: 'source' | 'portable') {
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   }
+}
+
+async function applyDownloadedUpdate() {
+  try {
+    const result = await applyUpdate()
+    if (!result.ok) {
+      toast.error(result.error || t('updateApplyFailed'))
+    }
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+  }
+}
+
+function redownloadUpdatePackage() {
+  void downloadUpdatePackage(updateStatus.value?.kind || (updateStatus.value?.self_update.mode === 'portable' ? 'portable' : 'source'))
 }
 </script>
 
@@ -566,15 +581,34 @@ async function downloadUpdatePackage(kind: 'source' | 'portable') {
               </div>
               <div v-if="updateInfo?.update_available && updateStatus" class="update-download">
                 <div v-if="!updateStatus.self_update.supported" class="muted">
-                  {{ updateStatus.self_update.hint || t('updateSelfUpdateUnsupported') }}
+                  {{ updateStatus.self_update.reason === 'docker'
+                    ? t('updateDockerHint')
+                    : (updateStatus.self_update.hint || t('updateSelfUpdateUnsupported')) }}
                 </div>
                 <template v-else>
                   <div v-if="updateStatus.state === 'staged'" class="update-staged">
                     <NTag type="success" size="small" round>{{ t('updateStaged') }}</NTag>
                     <span class="muted">{{ t('updateStagedHint') }}</span>
+                    <div class="actions-row">
+                      <NButton type="primary" @click="applyDownloadedUpdate">{{ t('applyUpdate') }}</NButton>
+                      <NButton @click="redownloadUpdatePackage">{{ t('redownloadUpdate') }}</NButton>
+                    </div>
                   </div>
                   <div v-else-if="updateStatus.state === 'failed'" class="error-text">
-                    {{ t('updateDownloadFailed') }}: {{ updateStatus.error }}
+                    {{ updateStatus.path ? t('updateApplyFailed') : t('updateDownloadFailed') }}: {{ updateStatus.error }}
+                  </div>
+                  <div v-else-if="updateStatus.state === 'applying'" class="muted">
+                    {{ t('updateApplying') }}
+                  </div>
+                  <div v-else-if="updateStatus.state === 'restarting'" class="muted">
+                    {{ t('updateRestarting') }}
+                  </div>
+                  <div v-else-if="updateStatus.state === 'done'" class="update-staged">
+                    <NTag type="success" size="small" round>{{ t('updateApplied') }}</NTag>
+                    <span v-if="updateStatus.restart_needed" class="muted">{{ t('updateRestartNeeded') }}</span>
+                  </div>
+                  <div v-else-if="updateStatus.state === 'rolled-back'" class="error-text">
+                    {{ t('updateRolledBack') }}: {{ updateStatus.error }}
                   </div>
                   <div v-else-if="isDownloading" class="update-progress">
                     <div class="update-progress-head">
@@ -583,7 +617,7 @@ async function downloadUpdatePackage(kind: 'source' | 'portable') {
                     </div>
                     <NProgress :percentage="downloadPercent" />
                   </div>
-                  <div v-if="!isDownloading && updateStatus.state !== 'staged'" class="actions-row">
+                  <div v-if="!isUpdateBusy && !['staged', 'done'].includes(updateStatus.state)" class="actions-row">
                     <NButton @click="downloadUpdatePackage('source')">{{ t('downloadUpdateSource') }}</NButton>
                     <NButton @click="downloadUpdatePackage('portable')">{{ t('downloadUpdatePortable') }}</NButton>
                   </div>

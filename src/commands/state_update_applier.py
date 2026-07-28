@@ -17,10 +17,8 @@ from src.commands.madness_tracker import MadnessTracker
 from src.commands.npc_state_applier import NpcStateApplier
 from src.commands.player_state_applier import PlayerStateApplier
 from src.commands.state_items import (
-    append_inventory_item,
-    append_key_item,
-    append_unique_equipment,
     classify_item,
+    grant_classified_item,
 )
 
 
@@ -62,18 +60,7 @@ class StateUpdateApplier:
             cs = instance.get_character_sheet(uid)
             # 遍历所有品类关键字匹配
             category = loot.get("category") or classify_item(item_name, rule_cats)
-            if category == "equipment":
-                append_unique_equipment(cs, item_name)
-            elif category in ("key_item", "quest", "clue", "credential", "artifact"):
-                append_key_item(cs, item_name, category=category)
-            elif category == "cyberware":
-                cw = cs.setdefault("cyberware", [])
-                if not any(item.get("name") == item_name for item in cw):
-                    cw.append({"name": item_name, "effect": ""})
-            elif category in ("pills",):
-                append_inventory_item(cs, item_name, category="丹药")
-            else:
-                append_inventory_item(cs, item_name)
+            grant_classified_item(cs, item_name, category)
 
         # 待确认支付（PAY tag 不直接扣金币，转入 pending 等玩家确认）
         for pay in update.get("pending_payments", []):
@@ -81,11 +68,27 @@ class StateUpdateApplier:
             amount = int(pay.get("amount", 0) or 0)
             if not uid or amount <= 0 or uid not in instance.players:
                 continue
+            recipient_uid = str(pay.get("recipient_uid") or uid)
+            if recipient_uid not in instance.players:
+                continue
+            rewards = []
+            for item_name in pay.get("items", [])[:8]:
+                item_name = str(item_name).strip()[:120]
+                if item_name:
+                    rewards.append({
+                        "name": item_name,
+                        "category": classify_item(item_name, rule_cats),
+                    })
             instance.pending_payments.append({
                 "id": f"pay_{instance.round_number}_{uid}_{uuid4().hex[:8]}",
                 "uid": uid,
                 "amount": amount,
-                "reason": pay.get("reason", "GM 建议支付"),
+                "recipient_uid": recipient_uid,
+                "rewards": rewards,
+                "reason": pay.get("reason") or (
+                    f"购买 {'、'.join(item['name'] for item in rewards)}"
+                    if rewards else "GM 建议支付"
+                ),
                 "status": "pending",
                 "round": instance.round_number,
             })

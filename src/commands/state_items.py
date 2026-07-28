@@ -81,3 +81,23 @@ def append_key_item(
     if note:
         new_item["note"] = note
     key_items.append(new_item)
+
+
+def grant_classified_item(
+    character_sheet: dict,
+    item_name: str,
+    category: str = "",
+) -> None:
+    """Grant one already-classified item to a character sheet."""
+    if category == "equipment":
+        append_unique_equipment(character_sheet, item_name)
+    elif category in ("key_item", "quest", "clue", "credential", "artifact"):
+        append_key_item(character_sheet, item_name, category=category)
+    elif category == "cyberware":
+        cyberware = character_sheet.setdefault("cyberware", [])
+        if not any(item.get("name") == item_name for item in cyberware):
+            cyberware.append({"name": item_name, "effect": ""})
+    elif category == "pills":
+        append_inventory_item(character_sheet, item_name, category="丹药")
+    else:
+        append_inventory_item(character_sheet, item_name)

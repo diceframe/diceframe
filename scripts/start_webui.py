@@ -46,7 +46,7 @@ def ensure_frontend() -> int:
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         print(
-            "未找到 npm。请先安装 Node.js 20 或更高版本，然后重新运行 web_ui.bat。",
+            "未找到 npm。请先安装 Node.js 20.19+ 或 22.12+，然后重新运行 web_ui.bat。",
             file=sys.stderr,
             flush=True,
         )

@@ -140,8 +140,24 @@ export function highlightKeywords(text:string,lore?:LoreKeywords):string{
 }
 
 export interface GMBlock{paragraphs:string[];states:StateCard[];tags:Badge[]}
+const PROTOCOL_HEADING_RE=/^[\s#>*_`【[]*(?:状态[\s*_`]*(?:变更|变化|更新)|state[\s*_`-]*changes?)[\s#>*_`】\]:：-]*$/i
+const PROTOCOL_TAG_RE=/^(?:HP|GOLD|PAY|SCENE|NPC|LOOT|KEY_ITEM|DECISION|QUEST|USE|WEAPON|EQUIP|PRIVATE|XP|SAN|SAN_CHECK|LUCK|SKILL_GROWTH|PUSH|PUZZLE|MANA|SPELL|QUICK_ACTIONS|COMBAT|REVIVE|CONFIRMED|MEMORY|NONE)\s*(?::|$)/i
+function normalizeProtocolSuffix(text:string):string{
+  const source=String(text||'')
+  if(source.includes('---'))return source
+  const lines=source.replace(/\r\n/g,'\n').split('\n')
+  const headingIndex=lines.findIndex((line,index)=>PROTOCOL_HEADING_RE.test(line.trim())&&lines.slice(index+1).some(next=>PROTOCOL_TAG_RE.test(next.trim())))
+  if(headingIndex>=0)return [...lines.slice(0,headingIndex),'---',...lines.slice(headingIndex+1)].join('\n')
+  for(let index=0;index<lines.length;index++){
+    const suffix=lines.slice(index).filter(line=>line.trim())
+    if(suffix.length>=2&&suffix.every(line=>PROTOCOL_TAG_RE.test(line.trim()))){
+      return [...lines.slice(0,index),'---',...lines.slice(index)].join('\n')
+    }
+  }
+  return source
+}
 export function parseGMText(text:string,lore?:LoreKeywords):GMBlock{
-  const extracted=extractStateLines(text)
+  const extracted=extractStateLines(normalizeProtocolSuffix(text))
   let narration=extracted.narration;let tagBlock=''
   const dash=narration.indexOf('---')
   if(dash>=0){tagBlock=narration.substring(dash+3).trim();narration=narration.substring(0,dash)}

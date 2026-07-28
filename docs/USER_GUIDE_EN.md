@@ -2,7 +2,7 @@
 
 [中文](USER_GUIDE_CN.md) | English
 
-This guide is for GMs and players. It explains starting a game, taking actions, rolling dice, and using chat adapters without covering the code architecture.
+This guide is for GMs and players. It explains starting a game, taking actions, rolling dice, using chat adapters, and updating the application without covering the code architecture.
 
 ## First Launch
 
@@ -19,6 +19,8 @@ On the first visit, open Settings and enter:
 - API key from that service.
 
 Save the settings and use Test connection to verify that the model can respond.
+
+If you open Create before finishing the model settings, a notice at the top links directly to Settings. You can still fill in the world and characters first; complete the setup before generating content or starting the adventure.
 
 ## Start a Game
 
@@ -81,6 +83,12 @@ After GM narration, the State changes panel shows what was actually committed to
 - Character-private perceptions.
 
 If prose and recorded state conflict, the recorded state is authoritative.
+
+### Confirming a Purchase
+
+When the story offers something that costs money, DiceFrame asks the paying player to confirm first. No money is deducted and no item is added before confirmation.
+
+In multiplayer, the player who is paying confirms the purchase. The purchase completes only when that character has enough money; rejecting it or having insufficient funds leaves both the balance and inventory unchanged.
 
 ## Chat Bot
 
@@ -163,11 +171,26 @@ Some clues belong to one character, such as hidden doors, hallucinations, dreams
 
 The Bot attempts a direct message. If that fails, it asks the player to check temporary-session or friend settings.
 
+## Updating DiceFrame
+
+Check for a new version under Settings → Version Update. The apply method depends on the installation:
+
+- Windows portable builds can download and apply an update in the WebUI. A failed candidate returns to the old version.
+- Extracted source releases can apply an update and then ask for a manual restart.
+- Git development checkouts should use `git pull`.
+- Docker uses `docker compose pull && docker compose up -d`. NAS users can also pull and recreate the image from the device's container manager.
+
+The first move from v1.6.0 to a release with the new launcher requires one manual upgrade following that release's notes. See [Application Updates](UPDATER_EN.md) for details.
+
 ## Troubleshooting
 
 ### The AI does not respond
 
 Check model settings and Test connection. Common causes are an incorrect API key, model name, incompatible base URL, or network failure.
+
+### Update check returns HTTP 403
+
+The anonymous request quota used for version checking is temporarily exhausted. Only update notifications are affected; games, saves, and model calls continue to work. Retry later or open the project's Releases page directly.
 
 ### A player cannot act
 

@@ -13,10 +13,13 @@ Docker 里固定把运行数据放在 `/app/data`，compose 会映射到项目�
 
 ## 快速启动
 
+使用发布镜像：
+
 ```bash
 cp .env.example .env
 # 编辑 .env，填 TRPG_LLM_API_KEY；如需自定义模型，再填 base_url/model
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
 
 启动后打开：
@@ -36,12 +39,20 @@ DICEFRAME_HTTP_PORT=8080
 ## 常用命令
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose logs -f
 docker compose down
-docker compose pull
+```
+
+如果你在本地修改了源码，需要重新构建自己的镜像：
+
+```bash
+docker compose up -d --build
 docker compose build --no-cache
 ```
+
+设置页只负责提示 Docker/NAS 有新版本，不会在容器内部替换程序文件。NAS 用户可以直接在设备自带的容器管理界面检查并拉取新镜像。
 
 ## 数据与密钥
 
@@ -57,7 +68,7 @@ Docker 版主服务仍然使用内置插件宿主。启用 QQ 插件时，Bot �
 
 推荐流程：
 
-1. 先启动 WebUI：`docker compose up -d --build`
+1. 先启动 WebUI：`docker compose up -d`
 2. 在 WebUI 插件页启用 `QQ / NapCat`
 3. 如果 NapCat 不在容器内，填写宿主机或 NAS 上可从容器访问的 `NAPCAT_HOST` / `NAPCAT_PORT`
 

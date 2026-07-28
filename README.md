@@ -36,6 +36,7 @@ QQ 群：1060613588
 - 记忆与摘要：长团会压缩历史，也可以启用 embedding 做语义召回。
 - AI 生成：世界、规则、角色、世界书条目都可以由模型辅助生成。
 - QQ / [NapCat](https://github.com/NapNeko/NapCat) 插件：群聊绑定网页对局，支持行动、状态、前情、地图、感知、支付、掷骰。
+- 应用更新：便携版支持旁路安装、健康检查和失败回滚；源码、Git、Docker 按安装方式给出安全更新流程。
 - Docker：提供 Linux/Docker 部署入口，运行数据挂载到 `data/`。
 
 ## 快速开始
@@ -46,7 +47,9 @@ QQ 群：1060613588
 
 [前往 Releases 下载](https://github.com/diceframe/diceframe/releases)
 
-下载 `DiceFrame-v1.0-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+下载最新的 `DiceFrame-vX.Y.Z-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+
+Windows 便携版可以在设置页检查并应用更新。
 
 ### Docker 运行
 
@@ -67,12 +70,19 @@ Docker 会把运行数据挂载到当前目录的 `data/`。详细说明见 [doc
 
 NAS 用户可以在 Docker 管理界面搜索 `diceframe` 拉取镜像，或在 [Docker Hub](https://hub.docker.com/r/falconku/diceframe) 查找。
 
+后续更新 Compose 部署：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 ### 从源码运行
 
 源码运行适合开发、调试或自己改代码。需要：
 
 - Python 3.10 或更高版本
-- Node.js 20 或更高版本
+- Node.js 20.19+，或 22.12+
 - 一个兼容 OpenAI Chat Completions API 的模型服务
 
 可以使用 DeepSeek、硅基流动、OpenAI、Ollama 等服务。只要它提供 OpenAI 兼容接口，就可以在设置页里配置。
@@ -169,6 +179,7 @@ Bot 不直接读写存档，只通过 Web 服务的 HTTP API 工作。插件商�
 |------|------|---------|
 | 用户手册 | [USER_GUIDE_CN](docs/USER_GUIDE_CN.md) | [USER_GUIDE_EN](docs/USER_GUIDE_EN.md) |
 | Docker 部署 | [DOCKER_DEPLOY_CN](docs/DOCKER_DEPLOY_CN.md) | [DOCKER_DEPLOY_EN](docs/DOCKER_DEPLOY_EN.md) |
+| 应用更新 | [UPDATER_CN](docs/UPDATER_CN.md) | [UPDATER_EN](docs/UPDATER_EN.md) |
 | 插件开发 | [PLUGIN_DEVELOPMENT_CN](docs/PLUGIN_DEVELOPMENT_CN.md) | [PLUGIN_DEVELOPMENT_EN](docs/PLUGIN_DEVELOPMENT_EN.md) |
 | 插件索引与审核 | [PLUGIN_REGISTRY_CN](docs/PLUGIN_REGISTRY_CN.md) | [PLUGIN_REGISTRY_EN](docs/PLUGIN_REGISTRY_EN.md) |
 | Bot Bridge 核心 | [BOT_BRIDGE_CORE_CN](docs/BOT_BRIDGE_CORE_CN.md) | [BOT_BRIDGE_CORE_EN](docs/BOT_BRIDGE_CORE_EN.md) |
@@ -216,7 +227,7 @@ data/
 ├── plugins/qq-napcat/     # 插件 manifest 和配置 schema
 ├── prompts/               # GM 系统提示词
 ├── templates/             # 内置规则和世界模板
-└── docs/                  # 用户手册、部署、插件、架构文档
+└── docs/                  # 用户手册、部署、更新与插件文档
 ```
 
 ## License

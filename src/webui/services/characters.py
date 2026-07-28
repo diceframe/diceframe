@@ -15,6 +15,7 @@ from src.engine.character_utils import (
     normalize_character_sheet,
 )
 from src.engine.health import record_health_event
+from src.commands.state_items import grant_classified_item
 
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
@@ -343,13 +344,55 @@ async def resolve_payment(api: "WebAPI", game_key: str, payment_id: str, accepte
     if accepted:
         if uid not in inst.players:
             return {"ok": False, "error": "支付角色不存在"}
+        recipient_uid = str(payment.get("recipient_uid") or uid)
+        if recipient_uid not in inst.players:
+            return {"ok": False, "error": "物品接收角色不存在"}
         cs = inst.get_character_sheet(uid)
         current_gold = int(cs.get("gold", 0) or 0)
         if current_gold < amount:
             return {"ok": False, "error": f"金币不足：需要 {amount}，当前 {current_gold}"}
         apply_currency_delta(cs, -amount)
         inst.set_character_sheet(uid, cs)
+        rewards = list(payment.get("rewards") or [])
+        if rewards:
+            recipient_cs = (
+                cs
+                if recipient_uid == uid
+                else inst.get_character_sheet(recipient_uid)
+            )
+            for reward in rewards:
+                item_name = str(reward.get("name") or "").strip()
+                if item_name:
+                    grant_classified_item(
+                        recipient_cs,
+                        item_name,
+                        str(reward.get("category") or ""),
+                    )
+            inst.set_character_sheet(recipient_uid, recipient_cs)
         payment["status"] = "accepted"
+        payer_name = inst.players.get(uid, {}).get("character_name", uid)
+        recipient_name = inst.players.get(recipient_uid, {}).get(
+            "character_name", recipient_uid
+        )
+        reward_names = "、".join(
+            str(reward.get("name") or "")
+            for reward in rewards
+            if reward.get("name")
+        )
+        record_health_event(
+            inst,
+            component="economy",
+            code="payment_accepted",
+            severity="info",
+            title="玩家确认支付",
+            message=(
+                f"{payer_name} 支付 {amount} 金币"
+                + (
+                    f"，{recipient_name} 获得 {reward_names}"
+                    if reward_names else ""
+                )
+            ),
+        )
     else:
         payment["status"] = "rejected"
         name = inst.players.get(uid, {}).get("character_name", uid)

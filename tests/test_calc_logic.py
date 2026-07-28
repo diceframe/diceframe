@@ -50,6 +50,18 @@ def test_pay_creates_pending():
     assert "gold_change" not in _pu(result)
 
 
+def test_pay_purchase_carries_recipient_and_items():
+    result = _parse([
+        ("PAY", f"{UID}:15:teammate:解毒草|止血苔"),
+    ])
+    payment = _pending(result)[0]
+    assert payment["uid"] == UID
+    assert payment["amount"] == 15
+    assert payment["recipient_uid"] == "teammate"
+    assert payment["items"] == ["解毒草", "止血苔"]
+    assert "解毒草" in payment["reason"]
+
+
 def test_pay_negative_amount_uses_abs():
     """PAY:-5 也按 5 金币挂起（amount 取绝对值）。"""
     pending = _pending(_parse([("PAY", f"{UID}:-5")]))
@@ -92,6 +104,11 @@ def test_pay_over_loss_ignored():
     result = _parse([("PAY", f"{UID}:99999")])
     assert _pending(result) == []
     assert "gold_change" not in _pu(result)
+
+
+def test_payment_limit_is_independent_from_combat_model():
+    pending = _pending(_parse([("PAY", f"{UID}:500")], "lethal_narrative"))
+    assert pending[0]["amount"] == 500
 
 
 # ===== HP：累加（已有 add=True，回归保护）=====
@@ -146,6 +163,22 @@ def test_parse_tag_state_purchase_accumulates():
     result = parse_tag_state(text, "hp_based")
     assert _pu(result)["gold_change"] == 20
     assert len(_pending(result)) == 1
+
+
+def test_parse_tag_state_repairs_nonstandard_state_heading():
+    text = (
+        "玛尔塔把药草推到柜台上。\n\n"
+        "【**状态**变更】\n"
+        f"PAY:{UID}:15\n"
+        f"LOOT:{UID}:解毒草\n"
+        "SCENE:南街草药铺\n"
+        "QUICK_ACTIONS:确认购买|询问药效"
+    )
+    result = parse_tag_state(text, "hp_based")
+    assert _pending(result)[0]["amount"] == 15
+    assert result["state_update"]["loot"][0]["item"] == "解毒草"
+    assert result["state_update"]["scene_change"] == "南街草药铺"
+    assert result["quick_actions"] == ["确认购买", "询问药效"]
 
 
 def test_parse_tag_state_requires_separator_for_executable_tags():

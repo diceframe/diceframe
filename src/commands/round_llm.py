@@ -12,7 +12,11 @@ from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
 from src.engine.language import is_english
 from src.llm.client import LENGTH_RETRY_FACTOR, LENGTH_RETRY_MAX_MULT, OutputTruncatedError
-from src.llm.parser import sanitize_narration
+from src.llm.parser import (
+    find_protocol_suffix_start,
+    normalize_tag_protocol,
+    sanitize_narration,
+)
 
 logger = logging.getLogger("trpg")
 _NARRATION_SOFT_LIMIT_CHARS = 260
@@ -42,6 +46,7 @@ class _NarrationDeltaFilter:
     """
 
     SEPARATOR = "---"
+    PROTOCOL_HOLD_CHARS = 128
 
     def __init__(self, on_delta):
         self._on_delta = on_delta
@@ -53,7 +58,14 @@ class _NarrationDeltaFilter:
         if self._sealed or not text:
             return
         self._buf += text
-        idx = self._buf.find(self.SEPARATOR)
+        separator_idx = self._buf.find(self.SEPARATOR)
+        protocol_idx = find_protocol_suffix_start(self._buf)
+        candidates = [
+            index
+            for index in (separator_idx, protocol_idx)
+            if index is not None and index >= 0
+        ]
+        idx = min(candidates) if candidates else -1
         if idx != -1:
             head = self._buf[self._sent:idx]
             self._sent = idx
@@ -62,7 +74,7 @@ class _NarrationDeltaFilter:
                 await self._on_delta(head)
             return
         # 暂存末尾最多 len(SEPARATOR)-1 个字符，防止分隔符跨 chunk 被提前发出
-        hold = min(len(self.SEPARATOR) - 1, len(self._buf) - self._sent)
+        hold = min(self.PROTOCOL_HOLD_CHARS, len(self._buf) - self._sent)
         if hold > 0:
             forward = self._buf[self._sent:len(self._buf) - hold]
             self._sent = len(self._buf) - hold
@@ -75,10 +87,14 @@ class _NarrationDeltaFilter:
     async def flush(self) -> None:
         if self._sealed:
             return
-        remaining = self._buf[self._sent:]
+        boundary = find_protocol_suffix_start(self._buf)
+        end = boundary if boundary is not None else len(self._buf)
+        remaining = self._buf[self._sent:end]
         self._sent = len(self._buf)
         if remaining:
-            await self._on_delta(remaining)
+            cleaned = sanitize_narration(remaining)
+            if cleaned:
+                await self._on_delta(cleaned)
 
 
 async def _compress_long_narration(
@@ -243,6 +259,7 @@ async def call_llm_with_tag_retry(
                 max_tokens=narrative_max_tokens,
             )
         response.language = getattr(instance, "language", "zh-CN")
+        response.content = normalize_tag_protocol(response.content)
 
         if "---" in response.content:
             narration_part = response.content.split("---", 1)[0].strip()

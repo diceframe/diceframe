@@ -556,6 +556,8 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
                       language: str = DEFAULT_LANGUAGE) -> dict[str, Any]:
     if not api._handler or not api._reg:
         return {"ok": False, "error": "系统未就绪"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     if not _is_safe_world_id(world_id):
         return {"ok": False, "error": "非法 world_id"}
     if source_world_id and not _is_safe_world_id(source_world_id):
@@ -759,6 +761,8 @@ async def create_from_seed(api: "WebAPI", seed_code: str, solo: bool = False,
                            language: str = "") -> dict[str, Any]:
     if not api._handler or not api._reg:
         return {"ok": False, "error": "系统未就绪"}
+    if config_error := api._llm_configuration_error(language):
+        return config_error
     target_inst = None
     for inst in api._reg.list_all():
         if inst.seed_code == seed_code:

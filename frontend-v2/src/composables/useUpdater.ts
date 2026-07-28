@@ -1,13 +1,15 @@
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
-import type { UpdateStatusResponse, UpdateDownloadResponse } from '@/api/types'
+import type { UpdateStatusResponse, UpdateDownloadResponse, UpdateApplyResponse } from '@/api/types'
 
 // 单例：更新下载状态跨组件共享（设置页打开/关闭不丢失进行中的下载）。
 const updateStatus = ref<UpdateStatusResponse | null>(null)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
-const ACTIVE_STATES = new Set<UpdateStatusResponse['state']>(['downloading', 'verifying'])
-const isDownloading = computed(() => ACTIVE_STATES.has(updateStatus.value?.state || 'idle'))
+const ACTIVE_STATES = new Set<UpdateStatusResponse['state']>(['downloading', 'verifying', 'applying', 'restarting'])
+const DOWNLOAD_STATES = new Set<UpdateStatusResponse['state']>(['downloading', 'verifying'])
+const isDownloading = computed(() => DOWNLOAD_STATES.has(updateStatus.value?.state || 'idle'))
+const isUpdateBusy = computed(() => ACTIVE_STATES.has(updateStatus.value?.state || 'idle'))
 const downloadPercent = computed(() => {
   const s = updateStatus.value
   if (!s || !s.total_bytes) return 0
@@ -38,6 +40,14 @@ async function startDownload(kind: 'source' | 'portable'): Promise<UpdateDownloa
   return result
 }
 
+async function applyUpdate(): Promise<UpdateApplyResponse> {
+  const result = await api<UpdateApplyResponse>('/system/update/apply', { method: 'POST' })
+  if (result.ok) {
+    await refreshStatus()
+  }
+  return result
+}
+
 export function useUpdater() {
-  return { updateStatus, isDownloading, downloadPercent, refreshStatus, startDownload }
+  return { updateStatus, isDownloading, isUpdateBusy, downloadPercent, refreshStatus, startDownload, applyUpdate }
 }

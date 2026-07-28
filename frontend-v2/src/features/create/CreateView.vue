@@ -9,6 +9,7 @@ import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import { importTavernCard } from '@/utils/characterImport'
 import { rememberCurrentGame } from '@/stores/gameContext'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 
 interface CreateCharacter extends CharacterSheet { character_name: string }
 type CreateMode = 'template' | 'custom' | 'ai'
@@ -26,6 +27,7 @@ const COPIED_LOREBOOK_SUFFIX_ZH = '\uff08\u590d\u5236\u4e16\u754c\u4e66\uff09'
 const router = useRouter()
 const toast = useToast()
 const { locale, t } = useLocale()
+const settings = useSettingsStore()
 
 const worlds = ref<WorldTemplateSummary[]>([])
 const rules = ref<RuleSummary[]>([])
@@ -39,6 +41,7 @@ const aiPrompt = ref(''), aiRule = ref('')
 const aiAutoRule = ref(false), aiGeneratedRule = ref<GeneratedRuleResponse | null>(null)
 const loreChoice = ref('__builtin__')
 const seed = ref(''), busy = ref(false), error = ref('')
+const settingsChecked = ref(false)
 
 const ruleDetail = ref<RuleTemplate | null>(null)
 const characters = ref<CreateCharacter[]>([])
@@ -54,6 +57,12 @@ const availableWorlds = computed(() => languageMatchedWorlds.value.length ? lang
 const ruleAttrs = computed(() => ruleDetail.value?.attributes || [])
 const skillPool = computed(() => ruleDetail.value?.skill_pool || ruleDetail.value?.skills || [])
 const attrTotal = computed(() => ruleDetail.value?.attribute_points || 60)
+const apiReady = computed(() => Boolean(
+  String(settings.config.base_url || '').trim()
+  && String(settings.config.model || '').trim()
+  && settings.config.api_key?.configured,
+))
+const showApiSetupHint = computed(() => settingsChecked.value && !settings.error && !apiReady.value)
 
 function worldIdOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_id || w.id || '') }
 function worldNameOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_name || w.name || w.id || '') }
@@ -81,11 +90,13 @@ watch([gameLanguage, worlds], () => {
 })
 
 onMounted(async () => {
+  const settingsPromise = settings.load().finally(() => { settingsChecked.value = true })
   const [w, r, lw, cs] = await Promise.all([
     api<WorldTemplatesResponse>('/world-templates'),
     api<RulesResponse>('/rules'),
     api<WorldListResponse>('/worlds'),
     api<CharacterCardsResponse>('/character-cards'),
+    settingsPromise,
   ])
   worlds.value = w.templates || []
   rules.value = r.rules || []
@@ -157,8 +168,13 @@ function canNext() {
   if (step.value === 2) return characters.value.length >= 1 && characters.value.every(c => c.character_name?.trim())
   return true
 }
+function requireApiConfiguration() {
+  if (!showApiSetupHint.value) return
+  throw new Error(t('apiSetupRequired'))
+}
 async function prepareAiRule() {
   if (mode.value !== 'ai' || !aiAutoRule.value || aiGeneratedRule.value?.rule_id) return
+  requireApiConfiguration()
   if (!aiPrompt.value.trim()) throw new Error(t('enterWorldPrompt'))
   toast.info(t('generatingRule'))
   const r = await api<GeneratedRuleResponse>('/generate-rule', {
@@ -185,6 +201,7 @@ function prevStep() { if (step.value > 1) step.value = (step.value - 1) as Step 
 async function create() {
   busy.value = true; error.value = ''
   try {
+    requireApiConfiguration()
     const players = characters.value.map(cloneCharacter)
     if (seed.value.trim()) {
       const r = await api<GameMutationResponse>('/games/create-from-seed', { method: 'POST', body: JSON.stringify({ seed_code: seed.value.trim(), solo: solo.value, players, language: gameLanguage.value }) })
@@ -236,6 +253,14 @@ async function create() {
         <p>{{ t('createSubtitle') }}</p>
       </div>
     </header>
+
+    <div v-if="showApiSetupHint" class="notice create-api-hint">
+      <div>
+        <strong>{{ t('apiSetupRequiredTitle') }}</strong>
+        <p>{{ t('apiSetupRequiredHint') }}</p>
+      </div>
+      <button type="button" class="primary" @click="router.push({ name: 'settings' })">{{ t('goToApiSettings') }}</button>
+    </div>
 
     <div class="wizard-steps">
       <span v-for="n in 3" :key="n" :class="['wizard-step', { active: step === n, done: step > n }]">

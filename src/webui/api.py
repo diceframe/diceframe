@@ -52,6 +52,61 @@ class WebAPI:
         if self._plugins and self._handler and hasattr(self._handler, "set_plugin_host"):
             self._handler.set_plugin_host(self._plugins)
 
+    # ---- 跨域共享辅助 ----
+
+    def _llm_configuration_status(self) -> dict[str, Any]:
+        """检查当前主模型配置；兼容不暴露 providers 的测试或第三方客户端。"""
+        client = self._llm_client
+        if client is None:
+            return {"ready": False, "missing": ["client"], "provider": ""}
+
+        providers = getattr(client, "providers", None)
+        if not isinstance(providers, dict):
+            return {
+                "ready": True,
+                "missing": [],
+                "provider": str(getattr(client, "default", "") or ""),
+            }
+
+        default = str(getattr(client, "default", "") or "")
+        provider = providers.get(default)
+        if provider is None and providers:
+            provider = next(iter(providers.values()))
+        if provider is None:
+            return {"ready": False, "missing": ["provider"], "provider": default}
+
+        missing: list[str] = []
+        if not str(getattr(provider, "base_url", "") or "").strip():
+            missing.append("base_url")
+        if not str(getattr(provider, "model_name", "") or "").strip():
+            missing.append("model")
+        if not str(getattr(provider, "api_key", "") or "").strip():
+            missing.append("api_key")
+        return {
+            "ready": not missing,
+            "missing": missing,
+            "provider": str(getattr(provider, "provider_name", default) or default),
+        }
+
+    def _llm_configuration_error(self, language: str = "zh-CN") -> dict[str, Any] | None:
+        """为所有依赖主模型的 WebUI 域生成一致的未配置错误。"""
+        status = self._llm_configuration_status()
+        if status["ready"]:
+            return None
+        english = str(language or "").lower().startswith("en")
+        message = (
+            "The model API is not configured. Open Settings and fill in the API key, "
+            "base URL, and model before continuing."
+            if english
+            else "尚未配置模型 API，请先前往设置页填写 API Key、Base URL 和模型。"
+        )
+        return {
+            "ok": False,
+            "error_code": "llm_not_configured",
+            "error": message,
+            "missing": status["missing"],
+        }
+
     # ---- 规则辅助 ----
 
     def list_plugins(self) -> dict[str, Any]:

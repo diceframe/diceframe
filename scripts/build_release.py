@@ -73,6 +73,8 @@ DOC_FILES = [
     "docs/PLUGIN_REGISTRY_EN.md",
     "docs/USER_GUIDE_CN.md",
     "docs/USER_GUIDE_EN.md",
+    "docs/UPDATER_CN.md",
+    "docs/UPDATER_EN.md",
 ]
 
 EXCLUDED_DIR_NAMES = {
@@ -201,7 +203,7 @@ def build_frontend(package_dir: Path) -> None:
     frontend_dir = package_dir / "frontend-v2"
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
-        raise RuntimeError("npm not found. Install Node.js 20+ before building a release.")
+        raise RuntimeError("npm not found. Install Node.js 20.19+ or 22.12+ before building a release.")
     run([npm, "ci"], frontend_dir)
     run([npm, "run", "build"], frontend_dir)
     shutil.rmtree(frontend_dir / "node_modules", ignore_errors=True)

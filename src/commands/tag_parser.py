@@ -9,6 +9,7 @@ parse_tag_state 按标签类型分派到 tag_handlers 中的 typed handler：
 
 from __future__ import annotations
 
+from src.llm.parser import normalize_tag_protocol
 from src.commands.tag_handlers import (
     ACTION_TAGS,
     KNOWN_TAGS,
@@ -62,6 +63,7 @@ def parse_tag_state(text: str, combat_model: str = "hp_based") -> dict:
     """从 LLM 输出的标签格式中提取结构化状态。
     根据规则体系（combat_model）动态调整数值上限。
     """
+    text = normalize_tag_protocol(text)
     limits = LIMITS_BY_COMBAT_MODEL.get(combat_model, LIMITS_BY_COMBAT_MODEL["hp_based"])
     result = _new_result()
     if not text:

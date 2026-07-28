@@ -113,6 +113,8 @@ export interface PendingPayment {
   payment_id?: string
   uid?: string
   amount?: number
+  recipient_uid?: string
+  rewards?: Array<{ name:string; category?:string }>
   round?: number
   item?: string
   description?: string
@@ -886,12 +888,14 @@ export interface UpdateCheckResponse {
 }
 export interface UpdateSelfUpdateInfo {
   supported:boolean
+  mode?:'portable' | 'source' | 'development' | 'docker'
   reason:string
   hint:string
 }
 export interface UpdateStatusResponse {
-  state:'idle' | 'downloading' | 'verifying' | 'staged' | 'failed'
+  state:'idle' | 'downloading' | 'verifying' | 'staged' | 'applying' | 'restarting' | 'done' | 'rolled-back' | 'failed'
   version?:string
+  kind?:'source' | 'portable'
   asset?:string
   downloaded_bytes?:number
   total_bytes?:number
@@ -900,6 +904,9 @@ export interface UpdateStatusResponse {
   path?:string
   sha256?:string
   downloaded_at?:number
+  restart_needed?:boolean
+  candidate_dir?:string
+  backup_dir?:string
   current_version:string
   self_update:UpdateSelfUpdateInfo
 }
@@ -910,4 +917,10 @@ export interface UpdateDownloadResponse {
   version?:string
   asset?:string
   no_release?:boolean
+}
+export interface UpdateApplyResponse {
+  ok:boolean
+  error?:string
+  state?:string
+  version?:string
 }

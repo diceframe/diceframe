@@ -97,6 +97,25 @@ async def test_narration_delta_filter_flushes_when_no_separator():
 
 
 @pytest.mark.asyncio
+async def test_narration_delta_filter_hides_nonstandard_state_heading():
+    received: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        received.append(text)
+
+    filt = _NarrationDeltaFilter(on_delta)
+    await filt.feed("玛尔塔把药草推到柜台上。\n【**状态**")
+    await filt.feed("变更】\nPAY:u1:15\nLOOT:u1:解毒草")
+    await filt.flush()
+
+    streamed = "".join(received)
+    assert streamed.strip() == "玛尔塔把药草推到柜台上。"
+    assert "PAY:" not in streamed
+    assert "LOOT:" not in streamed
+    assert "状态" not in streamed
+
+
+@pytest.mark.asyncio
 async def test_call_llm_with_tag_retry_streams_narration_only():
     content = "古墓深处传来低语。\n---\nKEY_ITEM:u1:青铜钥匙"
     llm = StreamingLLM([content])

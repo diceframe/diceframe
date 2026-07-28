@@ -13,10 +13,13 @@ The container stores runtime data in `/app/data`; Compose maps it to `./data` in
 
 ## Quick Start
 
+Using the published image:
+
 ```bash
 cp .env.example .env
 # Edit .env and set TRPG_LLM_API_KEY. Override base URL/model only when needed.
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
 
 Open `http://localhost:9876`. To change the host port:
@@ -30,12 +33,20 @@ Then open `http://localhost:8080`. The internal port remains `9876`, keeping Web
 ## Common Commands
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose logs -f
 docker compose down
-docker compose pull
+```
+
+To rebuild an image after changing the local source:
+
+```bash
+docker compose up -d --build
 docker compose build --no-cache
 ```
+
+Settings only notifies Docker/NAS installations about a new version; it does not replace files inside the container. NAS users can check and pull the new image in the device's container manager.
 
 ## Data and Secrets
 
@@ -49,7 +60,7 @@ docker compose build --no-cache
 
 The Docker deployment uses the same built-in plugin host. When enabled, QQ/NapCat runs as a child process inside the main service container.
 
-1. Start the WebUI with `docker compose up -d --build`.
+1. Start the WebUI with `docker compose up -d`.
 2. Enable QQ / NapCat on the WebUI plugin page.
 3. If NapCat runs outside the container, use a host or NAS address reachable from the container for `NAPCAT_HOST` and `NAPCAT_PORT`.
 

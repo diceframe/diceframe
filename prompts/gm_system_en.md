@@ -26,6 +26,9 @@ After the narration, put `---` on its own line. Then write one state update per 
 HP:player_id:delta             (damage is negative, healing is positive)
 GOLD:player_id:amount          (positive currency gain only)
 PAY:player_id:amount           (positive payment amount; the system stores it as negative)
+PAY:payer_id:amount:recipient_id:item1|item2
+                               (for purchases; deduct and grant items only after the payer confirms and has enough currency)
+                               (do not repeat purchased items as LOOT/KEY_ITEM/WEAPON/EQUIP; narrate an offer awaiting confirmation, not a completed purchase)
 SCENE:new scene name           (when the scene changes)
 NPC:name:relationship          (register named NPCs on first appearance)
 LOOT:player_id:item name       (ordinary inventory items)

@@ -21,6 +21,7 @@ LIMITS_BY_COMBAT_MODEL = {
     "narrative": {"hp_max": 30, "hp_heal": 15, "gold_max": 300, "gold_loss": 80, "weapon": 15},
     "hp_based": {"hp_max": 50, "hp_heal": 20, "gold_max": 500, "gold_loss": 100, "weapon": 15},
 }
+MAX_PAYMENT_AMOUNT = 10_000
 
 PLAYER_TAGS = frozenset({
     "HP", "PAY", "GOLD", "USE", "EQUIP", "WEAPON", "XP", "SAN", "SAN_CHECK",
@@ -107,13 +108,32 @@ def parse_player_tag(tag: str, value: str, result: dict, limits: dict) -> None:
         split = _split_tag_value(value)
         if split:
             uid, change = split
-            v = _parse_int(change, tag=tag, uid=uid)
+            purchase_parts = change.split(":", 2)
+            v = _parse_int(purchase_parts[0], tag=tag, uid=uid)
             if v is not None:
                 amount = abs(v)
-                if 0 < amount <= limits["gold_loss"]:
-                    result.setdefault("state_update", {}).setdefault("pending_payments", []).append(
-                        {"uid": uid, "amount": amount, "reason": "GM 建议支付"}
-                    )
+                if 0 < amount <= MAX_PAYMENT_AMOUNT:
+                    payment = {
+                        "uid": uid,
+                        "amount": amount,
+                        "reason": "GM 建议支付",
+                    }
+                    if len(purchase_parts) == 3:
+                        recipient_uid = purchase_parts[1].strip()
+                        items = [
+                            item.strip()[:120]
+                            for item in purchase_parts[2].split("|")
+                            if item.strip()
+                        ][:8]
+                        if recipient_uid and items:
+                            payment.update(
+                                recipient_uid=recipient_uid,
+                                items=items,
+                                reason=f"购买 {'、'.join(items)}",
+                            )
+                    result.setdefault("state_update", {}).setdefault(
+                        "pending_payments", []
+                    ).append(payment)
                 else:
                     logger.warning("PAY 金额异常，已忽略: %s = %d", uid, amount)
     elif tag == "GOLD":

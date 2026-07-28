@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from src.plugin_host.mirrors import FetchResult
-from src.webui.services import system, updater
+from src.webui.services import updater
 
 ZIP_NAME = "DiceFrame-v1.6.0-windows.zip"
 PORTABLE_NAME = "DiceFrame-v1.6.0-windows-portable.zip"
@@ -122,6 +124,24 @@ def test_self_update_supported_when_writable(tmp_path, monkeypatch):
     assert result["supported"] is True
 
 
+def test_self_update_unsupported_in_git_worktree(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+    (tmp_path / ".git").mkdir()
+    result = updater.is_self_update_supported(tmp_path)
+    assert result["supported"] is False
+    assert result["reason"] == "development"
+
+
+def test_safe_extract_rejects_path_traversal(tmp_path):
+    archive = tmp_path / "bad.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("DiceFrame/../../outside.txt", "bad")
+    with pytest.raises(ValueError, match="不安全路径"):
+        updater.safe_extract_archive(archive, tmp_path / "extract")
+    assert not (tmp_path / "outside.txt").exists()
+
+
 # ---------- UpdaterService 状态机 ----------
 
 def _make_service(tmp_path, mirrors=None) -> updater.UpdaterService:
@@ -130,8 +150,15 @@ def _make_service(tmp_path, mirrors=None) -> updater.UpdaterService:
     return updater.UpdaterService(tmp_path, tmp_path, mirrors)
 
 
+def _api_with_update_result(result: dict) -> SimpleNamespace:
+    async def check_updates():
+        return result
+
+    return SimpleNamespace(check_updates=check_updates)
+
+
 @pytest.mark.asyncio
-async def test_download_update_success_flow(tmp_path, monkeypatch):
+async def test_download_update_success_flow(tmp_path):
     content = b"fake zip content"
     digest = hashlib.sha256(content).hexdigest()
     mirrors = SimpleNamespace()
@@ -150,13 +177,11 @@ async def test_download_update_success_flow(tmp_path, monkeypatch):
 
     latest = {"version": "1.6.0", "assets": [_asset(ZIP_NAME), _asset(ZIP_NAME + ".sha256")]}
 
-    async def fake_check(api, include_prerelease=False):
-        return {"ok": True, "latest": latest}
-
-    monkeypatch.setattr(system, "check_updates", fake_check)
-
     svc = _make_service(tmp_path, mirrors)
-    result = await svc.download_update(SimpleNamespace(), "source")
+    result = await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     assert result["ok"] is True
     assert result["state"] == "downloading"
     await svc._task
@@ -172,7 +197,7 @@ async def test_download_update_success_flow(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_download_update_progress_updates_bytes(tmp_path, monkeypatch):
+async def test_download_update_progress_updates_bytes(tmp_path):
     content = b"x" * 1024
     mirrors = SimpleNamespace()
 
@@ -190,17 +215,15 @@ async def test_download_update_progress_updates_bytes(tmp_path, monkeypatch):
     mirrors.fetch_github_url = fake_fetch
     mirrors.download_to_file = fake_download
     latest = {"version": "1.6.0", "assets": [_asset(ZIP_NAME), _asset(ZIP_NAME + ".sha256")]}
-    monkeypatch.setattr(system, "check_updates", lambda api, include_prerelease=False: _async_ok(latest))
 
     svc = _make_service(tmp_path, mirrors)
-    await svc.download_update(SimpleNamespace(), "source")
+    await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     await svc._task
     # 最终进度应等于文件大小
     assert svc.get_status()["downloaded_bytes"] == 1024
-
-
-async def _async_ok(latest):
-    return {"ok": True, "latest": latest}
 
 
 @pytest.mark.asyncio
@@ -213,22 +236,24 @@ async def test_download_update_busy_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_download_update_no_release(tmp_path, monkeypatch):
-    async def fake_check(api, include_prerelease=False):
-        return {"ok": True, "no_release": True, "latest": None}
-    monkeypatch.setattr(system, "check_updates", fake_check)
+async def test_download_update_no_release(tmp_path):
     svc = _make_service(tmp_path, SimpleNamespace())
-    result = await svc.download_update(SimpleNamespace(), "source")
+    result = await svc.download_update(
+        _api_with_update_result({"ok": True, "no_release": True, "latest": None}),
+        "source",
+    )
     assert result["ok"] is False
     assert result.get("no_release") is True
 
 
 @pytest.mark.asyncio
-async def test_download_update_no_matching_asset(tmp_path, monkeypatch):
+async def test_download_update_no_matching_asset(tmp_path):
     latest = {"version": "1.6.0", "assets": [_asset("other.zip")]}
-    monkeypatch.setattr(system, "check_updates", lambda api, include_prerelease=False: _async_ok(latest))
     svc = _make_service(tmp_path, SimpleNamespace())
-    result = await svc.download_update(SimpleNamespace(), "source")
+    result = await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     assert result["ok"] is False
     assert "未找到" in result["error"]
 
@@ -241,16 +266,18 @@ async def test_download_update_unknown_kind_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_download_update_sha_mismatch_marks_failed(tmp_path, monkeypatch):
+async def test_download_update_sha_mismatch_marks_failed(tmp_path):
     content = b"real content"
     mirrors = SimpleNamespace()
     mirrors.fetch_github_url = lambda url, *, binary=False, max_bytes=None: _async_fetch("0" * 64)
     mirrors.download_to_file = lambda url, target, *, max_bytes=None, on_progress=None: _async_download(target, content)
     latest = {"version": "1.6.0", "assets": [_asset(ZIP_NAME), _asset(ZIP_NAME + ".sha256")]}
-    monkeypatch.setattr(system, "check_updates", lambda api, include_prerelease=False: _async_ok(latest))
 
     svc = _make_service(tmp_path, mirrors)
-    await svc.download_update(SimpleNamespace(), "source")
+    await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     await svc._task
     status = svc.get_status()
     assert status["state"] == "failed"
@@ -258,7 +285,7 @@ async def test_download_update_sha_mismatch_marks_failed(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_download_update_download_failure_marks_failed(tmp_path, monkeypatch):
+async def test_download_update_download_failure_marks_failed(tmp_path):
     mirrors = SimpleNamespace()
 
     async def fake_fetch(url, *, binary=False, max_bytes=None):
@@ -270,10 +297,12 @@ async def test_download_update_download_failure_marks_failed(tmp_path, monkeypat
     mirrors.fetch_github_url = fake_fetch
     mirrors.download_to_file = fake_download
     latest = {"version": "1.6.0", "assets": [_asset(ZIP_NAME), _asset(ZIP_NAME + ".sha256")]}
-    monkeypatch.setattr(system, "check_updates", lambda api, include_prerelease=False: _async_ok(latest))
 
     svc = _make_service(tmp_path, mirrors)
-    await svc.download_update(SimpleNamespace(), "source")
+    await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     await svc._task
     status = svc.get_status()
     assert status["state"] == "failed"
@@ -281,7 +310,7 @@ async def test_download_update_download_failure_marks_failed(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_download_update_sha_sidecar_missing_skips_verify(tmp_path, monkeypatch):
+async def test_download_update_sha_sidecar_missing_skips_verify(tmp_path):
     content = b"no sidecar"
     mirrors = SimpleNamespace()
 
@@ -293,10 +322,12 @@ async def test_download_update_sha_sidecar_missing_skips_verify(tmp_path, monkey
     mirrors.download_to_file = fake_download
     # 无 .sha256 asset
     latest = {"version": "1.6.0", "assets": [_asset(ZIP_NAME)]}
-    monkeypatch.setattr(system, "check_updates", lambda api, include_prerelease=False: _async_ok(latest))
 
     svc = _make_service(tmp_path, mirrors)
-    await svc.download_update(SimpleNamespace(), "source")
+    await svc.download_update(
+        _api_with_update_result({"ok": True, "latest": latest}),
+        "source",
+    )
     await svc._task
     status = svc.get_status()
     assert status["state"] == "staged"
@@ -310,6 +341,183 @@ def test_restart_marks_active_state_failed(tmp_path):
     svc = _make_service(tmp_path, SimpleNamespace())
     assert svc.get_status()["state"] == "failed"
     assert "中断" in svc.get_status()["error"]
+
+
+def _write_portable_archive(path: Path, version: str = "1.7.0") -> None:
+    top = f"DiceFrame-v{version}-windows-portable"
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr(f"{top}/app/web_server.py", "# candidate")
+        package.writestr(f"{top}/python/python.exe", b"python")
+        package.writestr(f"{top}/DiceFrame.exe", b"launcher")
+
+
+@pytest.mark.asyncio
+async def test_portable_apply_stages_side_by_side_and_restart_signal(
+    tmp_path, monkeypatch
+):
+    install_root = tmp_path / "DiceFrame"
+    data_dir = install_root / "data"
+    app_dir = install_root / "app"
+    app_dir.mkdir(parents=True)
+    updater_dir = data_dir / "_updater"
+    updater_dir.mkdir(parents=True)
+    archive = updater_dir / "portable.zip"
+    _write_portable_archive(archive)
+    monkeypatch.setenv("TRPG_INSTALL_ROOT", str(install_root))
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+
+    svc = updater.UpdaterService(data_dir, app_dir, SimpleNamespace())
+    svc._state = {
+        "state": "staged",
+        "version": "1.7.0",
+        "kind": "portable",
+        "path": str(archive),
+    }
+    svc._save_state()
+
+    result = await svc.apply_update()
+    assert result["ok"] is True
+    await svc._task
+
+    status = svc.get_status()
+    assert status["state"] == "restarting"
+    candidate = install_root / "versions" / "v1.7.0"
+    assert (candidate / "app" / "web_server.py").is_file()
+    assert (candidate / "python" / "python.exe").is_file()
+    signal = json.loads(
+        (updater_dir / "restart_signal.json").read_text(encoding="utf-8")
+    )
+    assert signal["expected_version"] == "1.7.0"
+    assert Path(signal["candidate_dir"]) == candidate
+
+
+def _write_source_archive(path: Path, version: str = "1.7.0") -> None:
+    top = f"DiceFrame-v{version}-windows"
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr(f"{top}/web_server.py", "# new server")
+        package.writestr(f"{top}/src/version.py", '__version__ = "1.7.0"')
+        package.writestr(f"{top}/static-v2/index.html", "<html>new</html>")
+
+
+@pytest.mark.asyncio
+async def test_source_apply_creates_backup_and_requires_restart(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "source-install"
+    data_dir = root / "data"
+    updater_dir = data_dir / "_updater"
+    updater_dir.mkdir(parents=True)
+    (root / "web_server.py").write_text("# old server", encoding="utf-8")
+    (root / "src").mkdir()
+    (root / "src" / "version.py").write_text("old", encoding="utf-8")
+    (root / "static-v2").mkdir()
+    (root / "static-v2" / "index.html").write_text("old", encoding="utf-8")
+    archive = updater_dir / "source.zip"
+    _write_source_archive(archive)
+    monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
+    monkeypatch.delenv("TRPG_DATA_DIR", raising=False)
+
+    svc = updater.UpdaterService(data_dir, root, SimpleNamespace())
+    svc._state = {
+        "state": "staged",
+        "version": "1.7.0",
+        "kind": "source",
+        "path": str(archive),
+    }
+    svc._save_state()
+    result = await svc.apply_update()
+    assert result["ok"] is True
+    await svc._task
+
+    status = svc.get_status()
+    assert status["state"] == "done"
+    assert status["restart_needed"] is True
+    assert (root / "web_server.py").read_text(encoding="utf-8") == "# new server"
+    backup = Path(status["backup_dir"])
+    assert (backup / "web_server.py").read_text(encoding="utf-8") == "# old server"
+
+
+def test_source_apply_restores_backup_when_install_fails(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "source-install"
+    data_dir = root / "data"
+    updater_dir = data_dir / "_updater"
+    updater_dir.mkdir(parents=True)
+    (root / "web_server.py").write_text("# old server", encoding="utf-8")
+    (root / "src").mkdir()
+    (root / "src" / "version.py").write_text("old", encoding="utf-8")
+    (root / "static-v2").mkdir()
+    (root / "static-v2" / "index.html").write_text("old", encoding="utf-8")
+    archive = updater_dir / "source.zip"
+    _write_source_archive(archive)
+    monkeypatch.delenv("TRPG_INSTALL_ROOT", raising=False)
+
+    svc = updater.UpdaterService(data_dir, root, SimpleNamespace())
+    original_move = updater.shutil.move
+    failed_once = False
+
+    def failing_move(source, target):
+        nonlocal failed_once
+        source_path = Path(source)
+        if (
+            not failed_once
+            and source_path.name == "src"
+            and "extract-v1.7.0" in source_path.parts
+        ):
+            failed_once = True
+            raise OSError("simulated install failure")
+        return original_move(source, target)
+
+    monkeypatch.setattr(updater.shutil, "move", failing_move)
+    with pytest.raises(updater.UpdateRolledBackError, match="已恢复旧版本"):
+        svc._apply_source_update(archive, "1.7.0")
+
+    assert (root / "web_server.py").read_text(encoding="utf-8") == "# old server"
+    assert (root / "src" / "version.py").read_text(encoding="utf-8") == "old"
+    assert (root / "static-v2" / "index.html").read_text(encoding="utf-8") == "old"
+
+
+def test_restart_state_is_preserved_while_signal_exists(tmp_path):
+    updater_dir = tmp_path / "_updater"
+    updater_dir.mkdir()
+    (updater_dir / "state.json").write_text(
+        '{"state": "restarting", "version": "1.7.0"}',
+        encoding="utf-8",
+    )
+    (updater_dir / "restart_signal.json").write_text("{}", encoding="utf-8")
+    svc = _make_service(tmp_path, SimpleNamespace())
+    assert svc.get_status()["state"] == "restarting"
+
+
+def test_restart_state_observes_launcher_completion(tmp_path):
+    updater_dir = tmp_path / "_updater"
+    updater_dir.mkdir()
+    state_file = updater_dir / "state.json"
+    state_file.write_text(
+        '{"state": "restarting", "version": "1.7.0"}',
+        encoding="utf-8",
+    )
+    (updater_dir / "restart_signal.json").write_text("{}", encoding="utf-8")
+    svc = _make_service(tmp_path, SimpleNamespace())
+
+    state_file.write_text(
+        '{"state": "done", "version": "1.7.0", "restart_needed": false}',
+        encoding="utf-8",
+    )
+    assert svc.get_status()["state"] == "done"
+
+
+def test_restart_state_fails_when_signal_is_missing(tmp_path):
+    updater_dir = tmp_path / "_updater"
+    updater_dir.mkdir()
+    (updater_dir / "state.json").write_text(
+        '{"state": "restarting", "version": "1.7.0"}',
+        encoding="utf-8",
+    )
+    svc = _make_service(tmp_path, SimpleNamespace())
+    assert svc.get_status()["state"] == "failed"
+    assert "握手" in svc.get_status()["error"]
 
 
 # ---------- mock helpers ----------

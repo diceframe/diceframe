@@ -69,11 +69,67 @@ _INTERNAL_GM_DIRECTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_STATE_TAG_NAMES = (
+    "HP|GOLD|PAY|SCENE|NPC|LOOT|KEY_ITEM|DECISION|QUEST|USE|WEAPON|EQUIP|"
+    "PRIVATE|XP|SAN|SAN_CHECK|LUCK|SKILL_GROWTH|PUSH|PUZZLE|MANA|SPELL|"
+    "QUICK_ACTIONS|COMBAT|REVIVE|CONFIRMED|MEMORY|NONE"
+)
+_STATE_HEADING_LINE_RE = re.compile(
+    r"(?im)^[ \t#>*_`【\[]*"
+    r"(?:状态[\s*_`]*(?:变更|变化|更新)|state[\s*_`-]*changes?)"
+    r"[\s#>*_`】\]:：-]*$"
+)
+_STATE_TAG_LINE_RE = re.compile(
+    rf"(?im)^[ \t]*(?:{_STATE_TAG_NAMES})\s*(?::|$)"
+)
+
+
+def find_protocol_suffix_start(text: str) -> int | None:
+    """Locate a leaked state-tag suffix when the model omitted ``---``."""
+    source = str(text or "")
+    heading = _STATE_HEADING_LINE_RE.search(source)
+    if heading and _STATE_TAG_LINE_RE.search(source, heading.end()):
+        return heading.start()
+
+    # Some models omit both separator and heading. Only accept a trailing
+    # block containing at least two protocol lines to avoid false positives.
+    matches = list(_STATE_TAG_LINE_RE.finditer(source))
+    for match in matches:
+        suffix_lines = [
+            line.strip()
+            for line in source[match.start():].splitlines()
+            if line.strip()
+        ]
+        if (
+            len(suffix_lines) >= 2
+            and all(_STATE_TAG_LINE_RE.match(line) for line in suffix_lines)
+        ):
+            return match.start()
+    return None
+
+
+def normalize_tag_protocol(text: str) -> str:
+    """Repair common model variants of the narration/tag separator."""
+    source = str(text or "")
+    if "---" in source:
+        return source
+    boundary = find_protocol_suffix_start(source)
+    if boundary is None:
+        return source
+    suffix = source[boundary:]
+    heading = _STATE_HEADING_LINE_RE.match(suffix)
+    if heading:
+        suffix = suffix[heading.end():]
+    return source[:boundary].rstrip() + "\n---\n" + suffix.lstrip()
+
 
 def sanitize_narration(text: str) -> str:
     """Remove leaked prompt/context blocks from player-facing narration."""
     if not text:
         return ""
+    boundary = find_protocol_suffix_start(text)
+    if boundary is not None:
+        text = str(text)[:boundary]
     lines = str(text).splitlines()
     kept: list[str] = []
     skipping = False

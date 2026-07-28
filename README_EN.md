@@ -20,14 +20,23 @@ It brings the Web UI, character sheets, lorebooks, dice checks, state changes, c
 - Lorebook entries for NPCs, locations, items, events, puzzles, and factions.
 - Long-session summaries, with optional embedding-based memory recall.
 - AI-assisted world, rule, character, and lorebook generation.
+- Application updates with side-by-side portable installs, health checks, rollback, and install-specific guidance.
 - Docker support for Linux deployment, with runtime data mounted under `data/`.
 
 ## Quick Start
 
+### Windows Portable
+
+Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases), extract it, and run `DiceFrame.exe`. Enter the model base URL, model name, and API key in Settings.
+
+Windows portable builds can check for and apply updates from Settings.
+
+### From Source
+
 Requirements:
 
 - Python 3.10+
-- Node.js 20+
+- Node.js 20.19+ or 22.12+
 - An OpenAI-compatible Chat Completions API endpoint
 
 From source:
@@ -66,7 +75,8 @@ On Windows, `web_ui.bat` can start the Web UI. It checks Python runtime dependen
 ```bash
 cp .env.example .env
 # edit .env as needed
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Open:
@@ -78,6 +88,13 @@ http://localhost:9876
 Runtime data is stored in `data/`.
 
 See [docs/DOCKER_DEPLOY_EN.md](docs/DOCKER_DEPLOY_EN.md) for ports, volumes, secrets, and NapCat networking.
+
+To update a Compose deployment:
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ## First Game
 
@@ -110,6 +127,7 @@ The plugin store indexes author-owned repositories. Installation resolves the la
 |-------|---------|------|
 | User guide | [USER_GUIDE_EN](docs/USER_GUIDE_EN.md) | [USER_GUIDE_CN](docs/USER_GUIDE_CN.md) |
 | Docker deployment | [DOCKER_DEPLOY_EN](docs/DOCKER_DEPLOY_EN.md) | [DOCKER_DEPLOY_CN](docs/DOCKER_DEPLOY_CN.md) |
+| Application updates | [UPDATER_EN](docs/UPDATER_EN.md) | [UPDATER_CN](docs/UPDATER_CN.md) |
 | Plugin development | [PLUGIN_DEVELOPMENT_EN](docs/PLUGIN_DEVELOPMENT_EN.md) | [PLUGIN_DEVELOPMENT_CN](docs/PLUGIN_DEVELOPMENT_CN.md) |
 | Plugin index and review | [PLUGIN_REGISTRY_EN](docs/PLUGIN_REGISTRY_EN.md) | [PLUGIN_REGISTRY_CN](docs/PLUGIN_REGISTRY_CN.md) |
 | Bot Bridge core | [BOT_BRIDGE_CORE_EN](docs/BOT_BRIDGE_CORE_EN.md) | [BOT_BRIDGE_CORE_CN](docs/BOT_BRIDGE_CORE_CN.md) |

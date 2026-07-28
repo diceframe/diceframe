@@ -513,6 +513,9 @@ watch(showGmThinking, (thinking) => {
 
     <Modal v-if="pendingPay" :title="t('gmPaymentTitle')" @close="pendingPay = null">
       <p>{{ t('gmPaymentContent', { amount: pendingPay.amount ?? 0, reason: pendingPay.reason ? t('gmPaymentReason', { reason: pendingPay.reason }) : '' }) }}</p>
+      <p v-if="pendingPay.rewards?.length">
+        {{ t('gmPaymentRewards', { items: pendingPay.rewards.map(item => item.name).join('、') }) }}
+      </p>
       <p class="muted">{{ t('gmPaymentHelp') }}</p>
       <template #actions>
         <button @click="pendingPay = null">{{ t('later') }}</button>
