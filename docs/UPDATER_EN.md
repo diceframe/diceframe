@@ -4,70 +4,43 @@
 
 This page explains how to update DiceFrame itself. Plugins are updated separately through the Plugin Store.
 
-## Installation Modes
+## Installation Methods
 
-| Installation | Settings behavior | Apply behavior |
-|---|---|---|
-| Windows portable | Download and apply | Automatic restart and health check; automatic rollback on failure |
-| Extracted source release | Download and apply | Transactional file replacement; manual restart after success |
-| Git development checkout | Check and notify only | Update with `git pull`; the working tree is never overwritten |
-| Docker / NAS | Check and notify only | Pull a new image and recreate the container |
+| Installation | How to update |
+|---|---|
+| Windows portable | Check, download, and apply updates from Settings |
+| Extracted source release | Apply the update from Settings, then restart manually |
+| Git checkout | Run `git pull` after receiving a new-version notification |
+| Docker / NAS | Pull the latest image after receiving a new-version notification |
 
-The application updater does not replace `data/`. Backing up the complete `data/` directory before an upgrade is still recommended.
+Updating the application does not delete saves or settings. Backing up the complete `data/` folder before an upgrade is still recommended.
 
 ## Windows Portable
 
-Portable updates install the candidate beside the running version:
+Open **Settings → Version Update**, then follow the prompts to download and apply the update. DiceFrame restarts automatically and refreshes the page when the update finishes.
 
-```text
-DiceFrame/
-  DiceFrame.exe
-  app/
-  python/
-  versions/
-    vX.Y.Z/
-      app/
-      python/
-  data/
-    _updater/
-```
+If the new version cannot start correctly, DiceFrame automatically returns to the previous version. Downloaded packages and older unused versions are removed after a successful update.
 
-After an update is applied, the launcher:
+If Settings shows a new version but no Apply button, manually download the latest portable package from GitHub Releases once. Later updates can then be applied from Settings.
 
-1. starts the candidate version;
-2. calls the public health endpoint and checks the target version;
-3. observes the process for another 60 seconds;
-4. commits the active-version pointer after success;
-5. keeps only the current and previous rollback-ready versions;
-6. stops the candidate and restarts the old version if startup, health checking, or probation fails.
+## Source Release
 
-The launcher shipped with v1.6.0 does not yet have supervisor support. The first move from v1.6.0 to a release containing the new launcher therefore requires one manual upgrade. Later portable releases can switch and roll back automatically.
+A source package downloaded and extracted from GitHub Releases can be updated from Settings. Restart DiceFrame manually when prompted.
 
-## Extracted Source Releases
+DiceFrame backs up the previous application files and attempts to restore them if the update fails. Only the latest backup is kept after a successful update, and saves and settings are not overwritten.
 
-An extracted release without `.git/` can apply an update from Settings. DiceFrame backs up program files before moving in replacements and attempts to restore the complete backup if any step fails.
-
-The updater preserves:
-
-- `data/`
-- `logs/`
-- `.git/`
-- `.codex/`
-- `.claude/`
-- `dist/`
-
-Settings asks for a manual restart after a successful replacement. The downloaded package is removed and only the latest source backup is kept. Git checkouts do not use this workflow.
+If you use a Git checkout, continue updating it with `git pull`.
 
 ## Docker and NAS
 
-DiceFrame does not replace files inside a running container. For a Compose deployment:
+For a Docker Compose deployment, run:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-NAS users can instead use the device's container manager to check for a newer image, pull it, and recreate the container. Make sure `data/` is mounted from the host.
+NAS users can use the device's container manager to check for updates, pull the latest image, and recreate the container. Make sure `data/` is mounted from the host.
 
 For an image built from a local source checkout, pull the new source and run:
 
@@ -75,40 +48,12 @@ For an image built from a local source checkout, pull the new source and run:
 docker compose up -d --build
 ```
 
-## Download and Safety Checks
-
-- Packages are downloaded under `data/_updater/` and removed after a successful apply.
-- SHA-256 is verified when a Release provides a `.sha256` sidecar.
-- ZIP extraction rejects absolute paths, drive paths, `..` traversal, symbolic links, abnormal member counts, and abnormal expanded size.
-- A portable candidate must contain the Web service, bundled Python runtime, and launcher.
-- The health endpoint exposes only `ok`, version, and process ID.
-
 ## Troubleshooting
 
 ### Update check returns HTTP 403
 
-The anonymous request quota for both mirrors and the GitHub API may be temporarily exhausted. This affects only update notifications; games, saves, and model calls continue to work. Retry later or check the project's Releases page directly.
+The temporary anonymous request quota for the mirrors and GitHub may be exhausted. This affects only version checks, not games, saves, or model calls. Retry later or check GitHub Releases directly.
 
-### Applying an update fails
+### An update fails
 
-Keep `data/_updater/state.json` and the relevant logs for diagnosis. Do not delete `data/`. “Rolled back” means the portable launcher has restarted the old version. A source update reports whether its backup was restored.
-
-### Release acceptance
-
-In addition to automated tests, every release that changes the updater should be exercised with real portable packages:
-
-1. one successful upgrade;
-2. one candidate that fails to start or exits early;
-3. confirmation that the failed candidate returns to the old version.
-
-## HTTP API
-
-Application updates use:
-
-- `GET /api/system/update-check`
-- `GET /api/system/update/status`
-- `POST /api/system/update/download?kind=source|portable`
-- `POST /api/system/update/apply`
-- `GET /api/system/update/health`
-
-States are `idle`, `downloading`, `verifying`, `staged`, `applying`, `restarting`, `done`, `rolled-back`, and `failed`.
+Do not delete `data/`. Portable installations attempt to return to the previous version automatically, while source installations attempt to restore the previous application files. If DiceFrame still cannot start, download the appropriate package again from GitHub Releases and keep the logs for diagnosis.
