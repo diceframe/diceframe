@@ -31,6 +31,7 @@ async def verify_bind_game(api: "WebAPI", game_key: str, bind_token: str) -> dic
         "game_key": game_key,
         "gm_uid": inst.gm_uid,
         "world_name": inst.world_name,
+        "language": str(getattr(inst, "language", "") or "zh-CN"),
         "player_access_open": bool(getattr(inst, "player_access_open", True)),
         "players": [
             {

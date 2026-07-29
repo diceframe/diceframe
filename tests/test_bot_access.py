@@ -45,6 +45,7 @@ async def test_bind_token_is_persisted_but_not_exposed_in_multiplayer_status():
 @pytest.mark.asyncio
 async def test_bind_verification_and_actor_authorization():
     inst = GameInstance(game_key=("web", "room", "bot"), gm_uid="gm")
+    inst.language = "en"
     inst.players = {"gm": {"character_name": "GM"}, "player-1": {"character_name": "玩家"}}
     api = FakeAPI(inst)
     token = (await bot_access.get_bind_token(api, "web|room|bot"))["bind_token"]
@@ -52,6 +53,7 @@ async def test_bind_verification_and_actor_authorization():
     assert (await bot_access.verify_bind_game(api, "web|room|bot", "wrong"))["ok"] is False
     bound = await bot_access.verify_bind_game(api, "web|room|bot", token)
     assert bound["gm_uid"] == "gm"
+    assert bound["language"] == "en"
     assert inst.bot_bind_token == ""
     assert api._reg.saved == 2
     assert (await bot_access.verify_bind_game(api, "web|room|bot", token))["ok"] is False

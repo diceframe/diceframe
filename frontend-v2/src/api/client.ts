@@ -38,6 +38,15 @@ function applyConfirmHeader(headers: Headers, init: RequestInit): void {
   if (init.method && init.method !== 'GET') headers.set('X-TRPG-Confirm', 'true')
 }
 
+function rateLimitMessage(data: unknown): string {
+  const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const seconds = Number(payload.retry_after)
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return i18n.global.t('tooManyRequestsRetry', { seconds: Math.ceil(seconds) })
+  }
+  return i18n.global.t('tooManyRequests')
+}
+
 async function handleUnauthorized(response: Response): Promise<void> {
   // /api/config is public config with sensitive fields masked; player share pages can also read without access_token.
   if (response.status === 401 && !isPlayerShareLocation() && !location.hash.startsWith('#/login') && !response.url.includes('/api/config')) {
@@ -53,6 +62,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   const response = await fetch(apiUrl(path), { ...init, headers })
   const data = await response.json().catch(() => ({}))
   await handleUnauthorized(response)
+  if (response.status === 429) throw new ApiError(rateLimitMessage(data), 429)
   if (!response.ok) throw new ApiError(data.error || `HTTP ${response.status}`, response.status)
   return data
 }
@@ -62,6 +72,10 @@ export async function apiBlob(path: string, init: RequestInit = {}): Promise<Res
   applyConfirmHeader(headers, init)
   const response = await fetch(apiUrl(path), { ...init, headers })
   await handleUnauthorized(response)
+  if (response.status === 429) {
+    const data = await response.json().catch(() => ({}))
+    throw new ApiError(rateLimitMessage(data), 429)
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new ApiError(data.error || `HTTP ${response.status}`, response.status)
@@ -72,7 +86,11 @@ export async function apiBlob(path: string, init: RequestInit = {}): Promise<Res
 export async function validateAccessToken(value: string): Promise<void> {
   const headers = new Headers()
   if (value) headers.set('Authorization', `Bearer ${value}`)
-  const response = await fetch(apiUrl('/games'), { headers })
+  const response = await fetch(apiUrl('/login'), { method: 'POST', headers })
+  if (response.status === 429) {
+    const data = await response.json().catch(() => ({}))
+    throw new ApiError(rateLimitMessage(data), 429)
+  }
   if (!response.ok) throw new ApiError(i18n.global.t('incorrectPassword'), response.status)
 }
 

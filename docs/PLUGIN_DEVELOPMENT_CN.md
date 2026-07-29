@@ -2,7 +2,7 @@
 
 中文 | [English](PLUGIN_DEVELOPMENT_EN.md)
 
-本指南定义 DiceFrame 插件的通用包结构、manifest 标准、配置规则和各类插件的扩展边界。当前真正可用的是聊天桥接、内容包、安全主题变量、结构化工具，以及地图包中的地点/素材注册。导入导出和 Provider 目前只有类型占位，没有对应业务运行时。
+本指南定义 DiceFrame 插件的通用包结构、manifest 标准、配置规则和各类插件的扩展边界。当前真正可用的是聊天桥接、Bot Bridge 命令/Hook/渲染扩展、内容包、安全主题变量、结构化工具，以及地图包中的地点/素材注册。导入导出和 Provider 目前只有类型占位，没有对应业务运行时。
 
 **重要：只有“当前支持状态”标为“已支持”或“部分支持”的能力，照本文开发后才会真实生效。标为“预留”的类型在开发目录中只能被识别和展示，不会接入对应业务流程，插件商店也不允许安装。插件 README 必须如实说明当前作用。**
 
@@ -11,6 +11,7 @@
 DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通过插件安装和分发这些能力：
 
 - 聊天桥接：QQ/NapCat、Discord、Telegram 等。
+- Bot Bridge 扩展：新增命令、修改回复、替换文字/图片/卡片展示。
 - 内容包：规则、世界模板、角色模板、NPC、道具、法术、职业。
 - 主题：CSS 变量、色板、背景、图标和界面风格包。
 - 地图包：地点模板、图标、场景素材、战斗网格素材。
@@ -23,6 +24,7 @@ DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通�
 | 类型 | plugin_type | 当前状态 |
 |------|-------------|----------|
 | 聊天桥接 | `channel-adapter` | 已支持进程托管、配置、启停、HTTP API 调用 |
+| Bot Bridge 扩展 | `bot-extension` | 已支持命令拦截、消息/结果 Hook、文字/图片/卡片渲染和失败回退 |
 | 内容包 | `content-pack` | 已支持规则、世界模板和内容目录注册，支持把内容导入用户角色卡库/世界书 |
 | 主题 | `theme` | 已支持选择和加载经过过滤的 CSS 变量主题 |
 | 地图包 | `map-pack` | 部分支持：可安装、配置、展示；地点会并入地图接口，图标/场景/网格素材会作为资产清单返回 |
@@ -30,7 +32,7 @@ DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通�
 | Provider | `provider` | 预留：尚无 Provider 注册运行时，商店不允许安装 |
 | 工具 | `tool` | 已支持进程握手、工具注册、结构化调用、超时和设置页手动测试 |
 
-`content-pack`、`theme`、`map-pack` 是声明型插件，可以没有后台进程。`channel-adapter` 和 `tool` 需要 `entrypoint`，由宿主作为独立进程托管。预留类型即使可以在开发目录中被识别，也不代表已经具有对应业务能力。
+`content-pack`、`theme`、`map-pack` 是声明型插件，可以没有后台进程。`channel-adapter`、`bot-extension` 和 `tool` 需要 `entrypoint`，由宿主作为独立进程托管。预留类型即使可以在开发目录中被识别，也不代表已经具有对应业务能力。
 
 ## 3. 插件边界
 
@@ -77,13 +79,14 @@ README_CN.md
 
 ## 4.1 从示例开始
 
-仓库内置三个可复制的示例插件：
+仓库内置四个可复制的示例插件：
 
 | 示例 | 路径 | 类型 | 用途 |
 |------|------|------|------|
 | Starter Content | `plugins/examples/starter-content` | `content-pack` | 规则、世界模板、角色模板、NPC、道具、法术、职业 |
 | Paper Theme | `plugins/examples/paper-theme` | `theme` | 安全 CSS 变量主题 |
 | Echo Tool | `plugins/examples/echo-tool` | `tool` | 进程握手、工具注册、JSON 参数与结构化结果 |
+| Bridge Customizer | `plugins/examples/bridge-customizer` | `bot-extension` | 自定义命令、结果 Hook、QQ 图片渲染 |
 
 开发新插件的推荐流程：
 
@@ -138,6 +141,7 @@ python scripts\package_plugin.py plugins\my-content-pack --overwrite
 
 ```text
 channel-adapter
+bot-extension
 content-pack
 theme
 map-pack
@@ -161,6 +165,7 @@ tool
 | `theme.tokens` | 注册主题 CSS 变量 |
 | `map.assets` | 注册地图地点和素材资源 |
 | `tool.execute` | 注册并执行结构化工具调用 |
+| `bot.extend` | 扩展 Bot Bridge 命令、消息处理和展示 |
 
 ## 6.1 安全边界
 
@@ -247,6 +252,40 @@ src/bots/<platform>/
 - 平台断线重连、限速、消息格式转换由插件负责。
 - 骰点、状态变化、剧情推进由 DiceFrame 服务端完成。
 - HTTP 字段保持向后兼容；新增平台不得要求 Web 前端改用平台专属字段。
+
+### 7.1.1 Bot Bridge 扩展插件
+
+`bot-extension` 用来扩展聊天处理本身，而不是连接新的平台。它可以新增命令、修改进入 Bridge 的消息、修改业务结果，并替换文字、图片或结构化卡片展示。QQ / NapCat 直接调用扩展协议；MaiBot 等外部桥接在 `/api/bot/ping` 检测到 `bridge_extensions.protocol_version` 后，通过 `POST /api/bot/bridge/extensions` 使用同一套扩展。旧版 DiceFrame 没有该能力时，外部桥接继续使用原有逻辑。
+
+作者推荐使用 `src.plugin_sdk.BridgeExtensionRuntime`，可复制 `plugins/examples/bridge-customizer` 开始开发。一个插件可以注册多个扩展，每个扩展声明以下阶段：
+
+- `before_message`：在内置命令处理前运行；可修改 `payload.text`，也可返回 `handled: true` 和 `outputs` 直接处理命令。
+- `after_result`：在内置逻辑产生展示结果后运行；适合增加提示、过滤内容或修改结构化字段。
+- `render`：选择最终展示；返回 `handled: true` 时替换内置文字或卡片渲染。
+
+扩展按 `priority` 从高到低执行。`before_message` / `after_result` 可依次传递修改后的 `payload`；`render` 使用第一个返回 `handled: true` 的结果。调用异常会被记录并跳过，协议错误或超时会停止该插件，Bot Bridge 随后使用内置逻辑。
+
+输出支持：
+
+```json
+{"type": "text", "text": "自定义回复"}
+{"type": "card", "title": "角色状态", "subtitle": "", "lines": ["HP 8/10"], "fallback_text": "HP 8/10"}
+{"type": "image", "path": "status.png", "caption": "", "alt": "角色状态", "fallback_text": "HP 8/10"}
+```
+
+图片必须由插件写入 `DICEFRAME_PLUGIN_DATA_DIR`，只接受 PNG、JPEG、WebP 或 GIF，单个文件最大 10 MB。宿主验证路径后提供带 Bot 鉴权的读取地址；NapCat 会下载到自己的卡片缓存再发送，MaiBot 会转换为 base64 后调用图片发送能力。图片发送失败时使用 `fallback_text`。
+
+清单至少包含：
+
+```json
+{
+  "plugin_type": "bot-extension",
+  "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+  "permissions": ["process.spawn", "plugin.config", "plugin.data", "bot.extend"]
+}
+```
+
+标准输出只用于 JSON-RPC，不得打印日志。单条 RPC 请求或响应仍受 256 KB 限制，因此图片必须返回文件路径，不能放入 base64。插件只能改变聊天命令与展示，骰点、余额、支付和存档状态仍由 DiceFrame 游戏核心决定。
 
 ### 7.2 内容包插件
 

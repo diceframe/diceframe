@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "bridge-customizer",
+  "name": "Bot Bridge 扩展示例",
+  "version": "0.1.0",
+  "description": "演示自定义聊天命令、回复后处理和 QQ 图片渲染。",
+  "plugin_type": "bot-extension",
+  "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+  "config_schema": "config.schema.json",
+  "capabilities": ["bridge.command", "bridge.transform", "bridge.render.image"],
+  "permissions": ["process.spawn", "plugin.config", "plugin.data", "bot.extend"],
+  "docs": "README_CN.md"
+}

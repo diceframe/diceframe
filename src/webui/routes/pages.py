@@ -8,6 +8,20 @@ from pathlib import Path
 from aiohttp import web
 
 
+NOINDEX_HEADER_VALUE = "noindex, nofollow, noarchive"
+
+
+async def add_response_security_headers(
+    request: web.Request,
+    response: web.StreamResponse,
+) -> None:
+    response.headers["X-Robots-Tag"] = NOINDEX_HEADER_VALUE
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(
         request.app["static_v2_dir"] / "index.html",
@@ -28,6 +42,17 @@ async def player_page(request: web.Request) -> web.FileResponse:
 
 async def login_page(request: web.Request) -> web.FileResponse:
     return await index(request)
+
+
+async def robots_txt(request: web.Request) -> web.Response:
+    return web.Response(
+        # Keep pages crawlable so search engines can observe the noindex
+        # response header and remove URLs that were indexed previously.
+        text="User-agent: *\nDisallow:\n",
+        content_type="text/plain",
+        charset="utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 async def v2_static_file(request: web.Request) -> web.FileResponse:
@@ -52,6 +77,7 @@ def _guess_content_type(path: Path) -> str:
 
 
 def register_pages(app: web.Application) -> None:
+    app.router.add_get("/robots.txt", robots_txt)
     app.router.add_get("/", index)
     app.router.add_get("/player", player_page)
     app.router.add_get("/player.html", player_page)

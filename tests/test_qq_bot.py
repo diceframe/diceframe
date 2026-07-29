@@ -132,6 +132,59 @@ class FakeAPI:
         return f"https://table.example/#/join?game={game_key}&share=1{suffix}"
 
 
+class EnglishFakeAPI(FakeAPI):
+    async def bind_game(self, game_key, bind_token):
+        result = await super().bind_game(game_key, bind_token)
+        result.update({
+            "world_name": "The Long Night",
+            "language": "en",
+            "players": [
+                {"user_id": "gm-1", "character_name": "Game Master"},
+                {"user_id": "player-1", "character_name": "Erin"},
+            ],
+        })
+        return result
+
+
+class ExtensionFakeAPI(FakeAPI):
+    def __init__(self):
+        super().__init__()
+        self.extension_calls = []
+
+    async def apply_bridge_extensions(self, stage, payload):
+        self.extension_calls.append((stage, dict(payload)))
+        if stage == "before_message" and payload.get("text") == "插件命令":
+            return {
+                "ok": True,
+                "handled": True,
+                "payload": payload,
+                "outputs": [{"type": "text", "text": "插件已处理"}],
+            }
+        if stage == "after_result" and payload.get("text") == "原始文字":
+            changed = dict(payload)
+            changed["text"] = "插件修改后的文字"
+            return {"ok": True, "handled": False, "payload": changed, "outputs": []}
+        if stage == "render" and payload.get("kind") == "card":
+            return {
+                "ok": True,
+                "handled": True,
+                "payload": payload,
+                "outputs": [{
+                    "type": "card",
+                    "title": "插件卡片",
+                    "subtitle": "",
+                    "lines": ["自定义展示"],
+                    "fallback_text": "插件卡片：自定义展示",
+                }],
+            }
+        return {"ok": True, "handled": False, "payload": payload, "outputs": []}
+
+
+class BrokenExtensionFakeAPI(FakeAPI):
+    async def apply_bridge_extensions(self, _stage, _payload):
+        raise RuntimeError("broken extension service")
+
+
 class FakeSender:
     def __init__(self):
         self.messages = []
@@ -254,6 +307,54 @@ async def test_bind_action_and_server_roll_flow(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_bot_extension_can_handle_qq_command_before_builtin_logic(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    api = ExtensionFakeAPI()
+    sender = FakeSender()
+    adapter = QQTRPGAdapter(api, store, sender)
+
+    await adapter.handle_payload(group_message("plugin-1", "42", "插件命令"))
+
+    assert sender.messages[-1] == ("100", "插件已处理")
+    assert api.actions == []
+    assert api.extension_calls[0][0] == "before_message"
+
+
+@pytest.mark.asyncio
+async def test_bot_extension_can_modify_text_and_replace_card_renderer(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    api = ExtensionFakeAPI()
+    sender = FakeImageSender()
+    adapter = QQTRPGAdapter(api, store, sender)
+    adapter._render_card_png = lambda *_args, **_kwargs: tmp_path / "plugin-card.png"
+
+    await adapter._send_group_text("100", "原始文字")
+    await adapter._send_group_card(
+        "100",
+        title="内置卡片",
+        lines=["内置展示"],
+        fallback="内置卡片：内置展示",
+    )
+
+    assert sender.messages[0] == ("100", "插件修改后的文字")
+    assert "IMAGE:" in sender.messages[1][1]
+    assert any(stage == "render" and payload.get("kind") == "card" for stage, payload in api.extension_calls)
+
+
+@pytest.mark.asyncio
+async def test_bot_extension_failure_falls_back_to_builtin_qq_behavior(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    sender = FakeSender()
+    adapter = QQTRPGAdapter(BrokenExtensionFakeAPI(), store, sender)
+
+    await adapter._send_group_text("100", "内置回复")
+    await adapter.handle_payload(group_message("broken-1", "42", "帮助"))
+
+    assert sender.messages[0] == ("100", "内置回复")
+    assert "尚未绑定" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
 async def test_bind_success_message_explains_next_steps(tmp_path):
     store = QQSessionStore(tmp_path / "sessions.json")
     sender = FakeSender()
@@ -266,6 +367,58 @@ async def test_bind_success_message_explains_next_steps(tmp_path):
     assert "@我 加入 角色名" in text
     assert "可认领" in text
     assert "@我 帮助" in text
+
+
+@pytest.mark.asyncio
+async def test_english_game_binding_drives_qq_commands_and_presenters(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    sender = FakeSender()
+    api = EnglishFakeAPI()
+    api.character_players = [
+        {"user_id": "gm-1", "character_name": "Game Master"},
+        {
+            "user_id": "player-1",
+            "character_name": "Erin",
+            "character_sheet": {
+                "hp": 8,
+                "max_hp": 10,
+                "gold": 3,
+                "attributes": {"dex": 14},
+                "level_up_points": 1,
+            },
+        },
+    ]
+    adapter = QQTRPGAdapter(api, store, sender)
+
+    await adapter.handle_payload(group_message("en-1", "42", "bind web|game|bot bind-ok"))
+    assert store.group("100")["language"] == "en"
+    assert "How to get started" in sender.messages[-1][1]
+
+    await adapter.handle_payload(group_message("en-2", "43", "help"))
+    assert "DiceFrame chat quick start" in sender.messages[-1][1]
+
+    await adapter.handle_payload(group_message("en-3", "43", "join Erin"))
+    assert store.player("100", "43")["user_id"] == "player-1"
+    assert "Character claimed: Erin" in sender.messages[-1][1]
+
+    await adapter.handle_payload(group_message("en-4", "43", "attributes"))
+    assert "Points available: 1" in sender.messages[-1][1]
+
+    await adapter.handle_payload(group_message("en-5", "43", "add dex 1"))
+    assert api.character_updates[-1][2] == {"attributes": {"dex": 15}}
+    assert "0 remaining" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_english_web_action_sync_uses_english_fallback_name_and_punctuation(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    sender = FakeSender()
+    adapter = QQTRPGAdapter(FakeAPI(), store, sender)
+    await store.bind_group("100", "web|game|bot", "42", "gm-1", language="en")
+
+    await adapter._send_web_action_to_group("100", {"text": "I inspect the gate", "source": "web"})
+
+    assert sender.messages[-1][1] == "Adventurer: I inspect the gate"
 
 
 @pytest.mark.asyncio

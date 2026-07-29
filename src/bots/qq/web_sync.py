@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.bots.bridge_core.language import bridge_is_english
+
 
 class QQWebSyncMixin:
     async def _poll_web_notifications(self) -> None:
@@ -58,11 +60,13 @@ class QQWebSyncMixin:
         """网页玩家行动实时转发：纯文本「角色名：行动」，像群友发言。"""
         if str(action.get("source") or "") == "group":
             return
-        name = str(action.get("character_name") or "冒险者")
+        language = self._group_language(self.store.group(group_id))
+        english = bridge_is_english(language)
+        name = str(action.get("character_name") or ("Adventurer" if english else "冒险者"))
         text = str(action.get("text") or "").strip()
         if not text:
             return
-        await self._send_group_text(group_id, f"{name}：{text}")
+        await self._send_group_text(group_id, f"{name}: {text}" if english else f"{name}：{text}")
 
     async def _send_web_round_to_group(self, group_id: str, round_entry: dict, round_number: int, seen: set[str], *, quick_actions: list[str] | None = None) -> None:
         """轮次推进时：补发未被实时转发的行动 + 合并卡。"""

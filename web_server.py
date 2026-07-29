@@ -21,9 +21,12 @@ from src.webui.access_password import (
     consume_reset_password,
     hash_access_password,
     is_hashed_access_password,
+    is_valid_access_password,
     mask_access_password,
+    normalize_access_password,
     verify_access_password,
 )
+from src.webui.abuse_guard import ABUSE_GUARD_KEY, AbuseGuard, abuse_guard_middleware
 from src.webui.api import WebAPI
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.character_cards import register_character_cards
@@ -33,8 +36,9 @@ from src.webui.routes.generation import register_generation
 from src.webui.routes.games import register_games
 from src.webui.routes.sse import register_sse
 from src.webui.routes.memory import register_memory
-from src.webui.routes.auth import register_auth
-from src.webui.routes.pages import register_pages
+from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY, register_auth
+from src.webui.routes.pages import add_response_security_headers, register_pages
+from src.webui.login_audit import LOGIN_AUDIT_KEY, LoginAuditStore
 from src.webui.routes.bot import register_bot
 from src.webui.routes.plugins import register_plugins
 from src.webui.routes.system import register_system
@@ -131,9 +135,13 @@ EMB_API_KEY = (os.getenv("TRPG_EMBEDDING_API_KEY")
                or saved.get("embedding_api_key", ""))
 FALLBACK1_API_KEY = secrets.get("fallback1_api_key") or saved.get("fallback1_api_key", "")
 FALLBACK2_API_KEY = secrets.get("fallback2_api_key") or saved.get("fallback2_api_key", "")
-ACCESS_TOKEN = (os.getenv("TRPG_ACCESS_TOKEN")
-                or secrets.get("access_token")
-                or saved.get("access_token", ""))
+ACCESS_TOKEN = next((
+    password for password in (
+        normalize_access_password(os.getenv("TRPG_ACCESS_TOKEN")),
+        normalize_access_password(secrets.get("access_token")),
+        normalize_access_password(saved.get("access_token")),
+    ) if password
+), "")
 BOT_TOKEN = (os.getenv("TRPG_BOT_TOKEN")
              or secrets.get("bot_token")
              or saved.get("bot_token", ""))
@@ -340,6 +348,28 @@ def _write_access_token_file(password: str) -> None:
 def _delete_access_token_file() -> None:
     ACCESS_TOKEN_FILE.unlink(missing_ok=True)
 
+
+def _read_access_token_file() -> str:
+    try:
+        return normalize_access_password(ACCESS_TOKEN_FILE.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _generate_initial_access_password() -> None:
+    import secrets as _secrets
+    generated_password = _secrets.token_urlsafe(18)
+    STATE["access_token"] = hash_access_password(generated_password)
+    save_config()
+    _write_access_token_file(generated_password)
+    print("\n" + "=" * 60, flush=True)
+    print("  Initial access password: " + generated_password, flush=True)
+    print("  Frontend will prompt for this on open.", flush=True)
+    print("  It is also saved once to data/access_token.txt.", flush=True)
+    print("  If forgotten later: create data/reset_access_password.txt and restart.", flush=True)
+    print("=" * 60 + "\n", flush=True)
+
+
 if _migrated:
     save_config()
     logger.warning("已自动迁移 API Key 到 secrets.json，config.json 中密钥已移除")
@@ -421,30 +451,38 @@ async def _embed_pending_memories(app: web.Application):
 
 async def on_startup(app: web.Application) -> None:
     reset_password = consume_reset_password(DATA_DIR)
+    configured_env_password = normalize_access_password(os.getenv("TRPG_ACCESS_TOKEN"))
+    stored_password = normalize_access_password(STATE.get("access_token"))
+    STATE["access_token"] = stored_password
     if reset_password:
         STATE["access_token"] = hash_access_password(reset_password)
         save_config()
         _delete_access_token_file()
         logger.warning("访问密码已通过 data/reset_access_password.txt 重置，重置文件已删除。")
-    elif not STATE.get("access_token"):
-        import secrets as _secrets
-        generated_password = _secrets.token_urlsafe(18)
-        STATE["access_token"] = hash_access_password(generated_password)
+    elif not is_valid_access_password(stored_password):
+        if stored_password:
+            logger.warning("保存的访问密码凭证无效，将重新生成首次启动密码。")
+        _generate_initial_access_password()
+    elif not is_hashed_access_password(stored_password) and not configured_env_password:
+        STATE["access_token"] = hash_access_password(stored_password)
         save_config()
-        _write_access_token_file(generated_password)
-        print("\n" + "=" * 60, flush=True)
-        print("  Initial access password: " + generated_password, flush=True)
-        print("  Frontend will prompt for this on open.", flush=True)
-        print("  It is also saved once to data/access_token.txt.", flush=True)
-        print("  If forgotten later: create data/reset_access_password.txt and restart.", flush=True)
-        print("=" * 60 + "\n", flush=True)
-    elif not is_hashed_access_password(STATE.get("access_token", "")) and not os.getenv("TRPG_ACCESS_TOKEN"):
-        STATE["access_token"] = hash_access_password(STATE["access_token"])
-        save_config()
-        _delete_access_token_file()
-        logger.info("已将旧版明文访问密码迁移为哈希保存。")
+        password_file_value = _read_access_token_file()
+        if password_file_value and not hmac.compare_digest(password_file_value, stored_password):
+            _delete_access_token_file()
+            logger.warning("data/access_token.txt 与现有密码不一致，已删除过期文件。")
+        logger.info("已将旧版明文访问密码迁移为安全凭证。")
+    elif configured_env_password:
+        logger.info("使用环境变量 TRPG_ACCESS_TOKEN 配置的访问密码。")
     else:
-        logger.info("使用配置的固定访问密码（来自 env 或 secrets.json）")
+        password_file_value = _read_access_token_file()
+        if password_file_value and not verify_access_password(password_file_value, stored_password):
+            _delete_access_token_file()
+            password_file_value = ""
+            logger.warning("data/access_token.txt 与现有密码不一致，已删除过期文件。")
+        if password_file_value:
+            logger.info("已加载访问密码；首次启动密码仍可在 data/access_token.txt 查看。")
+        else:
+            logger.info("已加载访问密码安全凭证；忘记密码请使用 data/reset_access_password.txt 重置。")
     _ensure_bot_token()
     subsystems = _build_subsystems()
     app["subsystems"] = subsystems
@@ -550,11 +588,13 @@ async def auth_middleware(request: web.Request, handler):
         request["sse_ticket_authenticated"] = True
         return await handler(request)
 
-    token = STATE.get("access_token", "")
+    token = normalize_access_password(STATE.get("access_token"))
+    access_password_configured = is_valid_access_password(token)
     auth = request.headers.get("Authorization", "")
     bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
-    owner_authenticated = bool(token and verify_access_password(bearer, token))
+    owner_authenticated = bool(access_password_configured and verify_access_password(bearer, token))
     request["owner_authenticated"] = owner_authenticated
+    request[ACCESS_PASSWORD_CONFIGURED_KEY] = access_password_configured
     share_uid = _share_player_user_id(request)
 
     # 房间密码门：设了 room_password 的游戏，玩家端点需带有效 room_token。
@@ -586,8 +626,11 @@ async def auth_middleware(request: web.Request, handler):
     # 启动器在更新切换期间没有用户令牌，只读取版本和进程号。
     if request.method == "GET" and request.path == "/api/system/update/health":
         return await handler(request)
+    # 登录验证本身必须允许未认证请求进入；handler 只返回验证结果并记审计。
+    if request.method == "POST" and request.path == "/api/login":
+        return await handler(request)
     # 仅保护 API 端点；HTML 页面和静态资源放行，由前端遇 401 跳 /login 处理登录
-    if token and request.path.startswith("/api/"):
+    if access_password_configured and request.path.startswith("/api/"):
         if not owner_authenticated:
             if share_uid:
                 if _player_access_is_closed(request):
@@ -684,6 +727,7 @@ async def api_config_post(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     body = await request.json()
+    access_password_changed = bool(_clean_text_value(body.get("access_token")))
     for k in ("api_key", "base_url", "model", "api_format", "web_port", "embedding_enabled",
               "embedding_base_url", "embedding_model", "embedding_api_key", "embedding_max_input",
               "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_format", "fallback1_api_key",
@@ -756,7 +800,7 @@ async def api_config_post(request: web.Request) -> web.Response:
     if float(STATE.get("napcat_reply_delay_max_sec", 0)) < float(STATE.get("napcat_reply_delay_min_sec", 0)):
         return web.json_response({"ok": False, "error": "NapCat 回复延迟上限不能小于下限"}, status=400)
     save_config()
-    if "access_token" in body:
+    if access_password_changed:
         _delete_access_token_file()
 
     bot_fields = {key for key in STATE if key.startswith("napcat_")} | {"qq_bot_enabled"}
@@ -781,7 +825,7 @@ async def api_config_post(request: web.Request) -> web.Response:
 
     # 修改访问密码不涉及模型运行时，避免无意义地重建并丢失当前内存中的活跃对局。
     if set(body).issubset({"access_token"} | bot_fields):
-        return web.json_response({"ok": True, "access_password_changed": True})
+        return web.json_response({"ok": True, "access_password_changed": access_password_changed})
 
     # 关闭旧 subsystems 的 HTTP session，防止泄漏
     old_subs = request.app.get("subsystems")
@@ -964,8 +1008,12 @@ from src.webui.session import SessionManager, session_middleware
 from src.webui.sse_ticket import SseTicketStore
 
 app.middlewares.append(session_middleware)
+app.middlewares.append(abuse_guard_middleware)
 app.middlewares.append(auth_middleware)
+app.on_response_prepare.append(add_response_security_headers)
 app["session_manager"] = SessionManager(DATA_DIR)
+app[ABUSE_GUARD_KEY] = AbuseGuard()
+app[LOGIN_AUDIT_KEY] = LoginAuditStore(DATA_DIR)
 app["connection_pool"] = ConnectionPool()
 app["sse_tickets"] = SseTicketStore()
 app["static_v2_dir"] = STATIC_V2_DIR

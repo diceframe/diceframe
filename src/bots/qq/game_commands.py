@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.bots.bridge_core.language import bridge_is_english, bridge_text
+
 
 class QQGameCommandsMixin:
     async def _send_status(self, group_id: str, platform_user_id: str, game_key: str, actor: str) -> None:
+        language = self._group_language(self.store.group(group_id))
+        english = bridge_is_english(language)
         data = await self.api.characters(game_key, actor)
         player = next((item for item in data.get("players", []) if item.get("user_id") == actor), None)
         if not player:
-            await self._send_group_text(group_id, "未找到当前角色。")
+            await self._send_group_text(group_id, bridge_text(language, "未找到当前角色。", "Current character not found."))
             return
         sheet = player.get("character_sheet", {})
         items = [item.get("name", "") if isinstance(item, dict) else str(item) for item in sheet.get("inventory", [])]
@@ -65,48 +69,63 @@ class QQGameCommandsMixin:
                     if not title:
                         continue
                     progress = str(q.get("progress") or "").strip()
-                    quest_lines.append(f"[进行] {title}" + (f"（{progress}）" if progress else ""))
+                    quest_lines.append(
+                        (f"[Active] {title}" + (f" ({progress})" if progress else ""))
+                        if english else
+                        (f"[进行] {title}" + (f"（{progress}）" if progress else ""))
+                    )
                 for q in completed:
                     title = str(q.get("title") or "").strip()
                     if title:
-                        quest_lines.append(f"[完成] {title}")
+                        quest_lines.append(f"[Done] {title}" if english else f"[完成] {title}")
         except Exception:
             self.logger.warning("状态卡拉取任务列表失败", exc_info=True)
         lines: list[str] = [
-            f"HP {sheet.get('hp', 0)}/{sheet.get('max_hp', 0)}  金币 {sheet.get('gold', 0)}",
+            (
+                f"HP {sheet.get('hp', 0)}/{sheet.get('max_hp', 0)}  Gold {sheet.get('gold', 0)}"
+                if english else
+                f"HP {sheet.get('hp', 0)}/{sheet.get('max_hp', 0)}  金币 {sheet.get('gold', 0)}"
+            ),
         ]
         lines.extend(resource_lines[:4])
         if attr_lines:
             lines.append("")
-            lines.append("-- 属性 --")
+            lines.append("-- Attributes --" if english else "-- 属性 --")
             lines.extend(attr_lines)
         if skill_lines:
             lines.append("")
-            lines.append("-- 技能 --")
+            lines.append("-- Skills --" if english else "-- 技能 --")
             lines.extend(skill_lines[:12])
         if quest_lines:
             lines.append("")
-            lines.append("-- 任务 --")
+            lines.append("-- Quests --" if english else "-- 任务 --")
             lines.extend(quest_lines[:12])
         lines.append("")
-        lines.append(f"背包：{'、'.join(items[:8]) or '无'}")
-        lines.append(f"关键物品：{'、'.join(key_items[:6]) or '无'}")
+        separator = ", " if english else "、"
+        lines.append(f"Inventory: {separator.join(items[:8]) or 'None'}" if english else f"背包：{separator.join(items[:8]) or '无'}")
+        lines.append(f"Key items: {separator.join(key_items[:6]) or 'None'}" if english else f"关键物品：{separator.join(key_items[:6]) or '无'}")
         await self._send_group_card(
             group_id,
             title=str(player.get("character_name") or actor),
-            subtitle="角色状态",
+            subtitle="Character status" if english else "角色状态",
             lines=lines,
             fallback=(
                 f"{player.get('character_name') or actor}  HP {sheet.get('hp', 0)}/{sheet.get('max_hp', 0)}  "
-                f"金币 {sheet.get('gold', 0)}  背包：{'、'.join(items) or '无'}"
+                + (
+                    f"Gold {sheet.get('gold', 0)}  Inventory: {', '.join(items) or 'None'}"
+                    if english else
+                    f"金币 {sheet.get('gold', 0)}  背包：{'、'.join(items) or '无'}"
+                )
             ),
         )
 
     async def _send_attributes_card(self, group_id: str, game_key: str, actor: str) -> None:
+        language = self._group_language(self.store.group(group_id))
+        english = bridge_is_english(language)
         data = await self.api.characters(game_key, actor)
         player = next((item for item in data.get("players", []) if item.get("user_id") == actor), None)
         if not player:
-            await self._send_group_text(group_id, "未找到当前角色。")
+            await self._send_group_text(group_id, bridge_text(language, "未找到当前角色。", "Current character not found."))
             return
         sheet = player.get("character_sheet", {})
         attrs = sheet.get("attributes", {}) if isinstance(sheet.get("attributes"), dict) else {}
@@ -128,24 +147,26 @@ class QQGameCommandsMixin:
                 continue
             lines.append(f"{key} {value}")
         lines.append("")
-        lines.append(f"可分配点数：{pool}")
+        lines.append(f"Points available: {pool}" if english else f"可分配点数：{pool}")
         if pool > 0:
-            lines.append("发送：@我 加 属性名 数值")
+            lines.append("Send: @me add Attribute Amount" if english else "发送：@我 加 属性名 数值")
         else:
-            lines.append("暂无可分配点数（升级获得）")
+            lines.append("No points available (gain them by leveling up)" if english else "暂无可分配点数（升级获得）")
         await self._send_group_card(
             group_id,
             title=str(player.get("character_name") or actor),
-            subtitle="属性 · 加点",
+            subtitle="Attributes · Spend points" if english else "属性 · 加点",
             lines=lines,
             fallback=("  ".join(ln for ln in lines if ln) or f"{player.get('character_name') or actor} 属性"),
         )
 
     async def _allocate_attribute(self, group_id: str, game_key: str, actor: str, attr_name: str, delta: int) -> None:
+        language = self._group_language(self.store.group(group_id))
+        english = bridge_is_english(language)
         data = await self.api.characters(game_key, actor)
         player = next((item for item in data.get("players", []) if item.get("user_id") == actor), None)
         if not player:
-            await self._send_group_text(group_id, "未找到当前角色。")
+            await self._send_group_text(group_id, bridge_text(language, "未找到当前角色。", "Current character not found."))
             return
         sheet = player.get("character_sheet", {})
         attrs = sheet.get("attributes", {}) if isinstance(sheet.get("attributes"), dict) else {}
@@ -167,86 +188,92 @@ class QQGameCommandsMixin:
             target_key = attr_name
             target_name = attr_name
         if not target_key:
-            await self._send_group_text(group_id, f"未找到属性“{attr_name}”，发送 @我 加点 查看可加属性。")
+            await self._send_group_text(group_id, f'Attribute “{attr_name}” not found. Send @me attributes to view choices.' if english else f"未找到属性“{attr_name}”，发送 @我 加点 查看可加属性。")
             return
         if delta <= 0:
-            await self._send_group_text(group_id, "加点数值必须大于 0。")
+            await self._send_group_text(group_id, "The amount must be greater than 0." if english else "加点数值必须大于 0。")
             return
         if delta > pool:
-            await self._send_group_text(group_id, f"点数不足：剩余 {pool} 点，尝试加 {delta} 点。")
+            await self._send_group_text(group_id, f"Not enough points: {pool} remaining, requested {delta}." if english else f"点数不足：剩余 {pool} 点，尝试加 {delta} 点。")
             return
         old_val = int(attrs.get(target_key, 0) or 0)
         new_val = old_val + delta
         result = await self.api.update_character(game_key, actor, {"attributes": {target_key: new_val}})
         if not result.get("ok"):
-            await self._send_group_text(group_id, f"加点失败：{result.get('error') or '未知错误'}")
+            await self._send_group_text(group_id, f"Could not spend points: {result.get('error') or 'Unknown error'}" if english else f"加点失败：{result.get('error') or '未知错误'}")
             return
         remaining = pool - delta
         await self._send_group_card(
             group_id,
             title=str(player.get("character_name") or actor),
-            subtitle="加点成功",
+            subtitle="Points applied" if english else "加点成功",
             lines=[
                 f"{target_name} {old_val} -> {new_val}",
-                f"剩余可分配：{remaining}",
+                f"Remaining: {remaining}" if english else f"剩余可分配：{remaining}",
             ],
-            fallback=f"{target_name} {old_val}->{new_val}，剩余 {remaining} 点",
+            fallback=(f"{target_name} {old_val}->{new_val}, {remaining} remaining" if english else f"{target_name} {old_val}->{new_val}，剩余 {remaining} 点"),
         )
 
     async def _send_recap_group(self, group_id: str, group: dict[str, Any]) -> None:
+        language = self._group_language(group)
         game_key = str(group.get("game_key") or "")
         gm_uid = str(group.get("gm_uid") or "")
         if not game_key or not gm_uid:
-            await self._send_group_text(group_id, "当前群还没有可读取的前情。")
+            await self._send_group_text(group_id, bridge_text(language, "当前群还没有可读取的前情。", "This chat has no recap available yet."))
             return
         detail = await self.api.game_detail(game_key, gm_uid)
-        await self._send_group_text(group_id, self._recap_text(detail))
+        await self._send_group_text(group_id, self._recap_text(detail, language))
 
     async def _send_recap_private(self, platform_user_id: str, game_key: str, actor: str) -> None:
+        language = self._private_language(platform_user_id)
         detail = await self.api.game_detail(game_key, actor)
-        await self._send_private_text(platform_user_id, self._recap_text(detail))
+        await self._send_private_text(platform_user_id, self._recap_text(detail, language))
 
     async def _send_map_group(self, group_id: str, group: dict[str, Any]) -> None:
+        language = self._group_language(group)
+        english = bridge_is_english(language)
         game_key = str(group.get("game_key") or "")
         gm_uid = str(group.get("gm_uid") or "")
         if not game_key:
-            await self._send_group_text(group_id, "当前群还没有绑定游戏，暂时没有地图。")
+            await self._send_group_text(group_id, bridge_text(language, "当前群还没有绑定游戏，暂时没有地图。", "This chat is not bound to a game, so no map is available."))
             return
         data = await self.api.map(game_key, gm_uid)
-        lines = self._map_lines(data)
+        lines = self._map_lines(data, language)
         await self._send_group_card(
             group_id,
-            title="场景地图",
-            subtitle=str(data.get("current_scene") or "地点概览"),
+            title="Scene map" if english else "场景地图",
+            subtitle=str(data.get("current_scene") or ("Location overview" if english else "地点概览")),
             lines=lines,
-            fallback=self._map_text(lines),
+            fallback=self._map_text(lines, language),
         )
 
     async def _set_away_group(self, group_id: str, platform_user_id: str, group: dict[str, Any],
                               text: str, *, away: bool, actor_uid: str = "") -> None:
+        language = self._group_language(group)
+        english = bridge_is_english(language)
         game_key = str(group.get("game_key") or "")
         if not game_key:
-            await self._send_group_text(group_id, "当前群聊还没有绑定游戏。")
+            await self._send_group_text(group_id, bridge_text(language, "当前群聊还没有绑定游戏。", "This chat is not bound to a game."))
             return
         player = self.store.player(group_id, platform_user_id)
         actor_uid = actor_uid or str((player or {}).get("user_id") or "")
         target_uid, target_name = await self._away_target(group_id, group, text, actor_uid)
         if not target_uid:
-            await self._send_group_text(group_id, "没有找到要切换状态的角色。自己暂离可发 @我 暂离；GM 可发 @我 暂离 角色名。")
+            await self._send_group_text(group_id, "Could not find that character. Use @me away for yourself; the GM can use @me away Character Name." if english else "没有找到要切换状态的角色。自己暂离可发 @我 暂离；GM 可发 @我 暂离 角色名。")
             return
         if target_uid != actor_uid and not self._can_advance(platform_user_id, group):
-            await self._send_group_text(group_id, f"@{platform_user_id} 只能切换自己的暂离状态；GM 或授权账号可指定角色。")
+            await self._send_group_text(group_id, f"@{platform_user_id} you can only change your own away status; the GM or an authorized user can name another character." if english else f"@{platform_user_id} 只能切换自己的暂离状态；GM 或授权账号可指定角色。")
             return
         api_actor = actor_uid if target_uid == actor_uid else str(group.get("gm_uid") or actor_uid)
         result = await self.api.set_player_away(game_key, api_actor, target_uid, away=away)
         if not result.get("ok"):
-            await self._send_group_text(group_id, str(result.get("error") or "暂离状态切换失败。"))
+            await self._send_group_text(group_id, str(result.get("error") or ("Could not change away status." if english else "暂离状态切换失败。")))
             return
         name = str(result.get("character_name") or target_name or target_uid)
         if away:
-            await self._send_group_text(group_id, f"{name} 已暂离：暂时不阻塞回合，剧情中默认跟随队伍，不主动做重大决定。")
+            await self._send_group_text(group_id, f"{name} is away: they will not block the round and will follow the party without making major decisions." if english else f"{name} 已暂离：暂时不阻塞回合，剧情中默认跟随队伍，不主动做重大决定。")
         else:
-            await self._send_group_text(group_id, f"{name} 已回来：之后会重新参与待行动列表。")
+            await self._send_group_text(group_id, f"{name} is back and will participate in upcoming rounds." if english else f"{name} 已回来：之后会重新参与待行动列表。")
 
     async def _away_target(self, group_id: str, group: dict[str, Any], text: str, actor_uid: str) -> tuple[str, str]:
         query = self._away_target_query(text)
@@ -264,15 +291,17 @@ class QQGameCommandsMixin:
         return "", ""
 
     async def _advance_group(self, group_id: str, platform_user_id: str, group: dict[str, Any], text: str) -> None:
+        language = self._group_language(group)
+        english = bridge_is_english(language)
         if not self._can_advance(platform_user_id, group):
-            await self._send_group_text(group_id, f"@{platform_user_id} 只有本局 GM 或设置里授权的账号可以推进。")
+            await self._send_group_text(group_id, f"@{platform_user_id} only the GM or an authorized user can advance the game." if english else f"@{platform_user_id} 只有本局 GM 或设置里授权的账号可以推进。")
             return
         game_key = str(group.get("game_key") or "")
         gm_uid = str(group.get("gm_uid") or "")
         if not game_key or not gm_uid:
-            await self._send_group_text(group_id, "当前群聊还没有绑定可推进的游戏。")
+            await self._send_group_text(group_id, bridge_text(language, "当前群聊还没有绑定可推进的游戏。", "This chat has no bound game to advance."))
             return
-        await self._send_group_text(group_id, "收到推进指令，GM 正在思考中，生成下一段剧情…")
+        await self._send_group_text(group_id, bridge_text(language, "收到推进指令，GM 正在思考中，生成下一段剧情…", "Advance received. The GM is preparing the next part of the story…"))
         result = await self.api.advance(game_key, gm_uid, force=self._advance_force(text))
         gm_response = str(result.get("narration") or "")
         state_changes: list = []
@@ -313,84 +342,111 @@ class QQGameCommandsMixin:
         return user in {str(item).strip() for item in configured if str(item).strip()}
 
     async def _send_private_log_group(self, group_id: str, platform_user_id: str, game_key: str, actor: str) -> None:
+        language = self._group_language(self.store.group(group_id))
         try:
             sent = await self._send_private_log_private(platform_user_id, game_key, actor, announce=False)
         except Exception:
             self.logger.warning("QQ 私聊角色感知失败", exc_info=True)
             sent = False
-        await self._send_group_text(group_id, "已私聊你最近的角色感知。" if sent else "暂时无法私聊你，请检查是否允许接收临时会话。")
+        await self._send_group_text(
+            group_id,
+            (
+                "I sent your latest private character information by direct message."
+                if sent else
+                "I could not send a direct message. Please check your privacy settings."
+            ) if bridge_is_english(language) else (
+                "已私聊你最近的角色感知。" if sent else "暂时无法私聊你，请检查是否允许接收临时会话。"
+            ),
+        )
 
     async def _send_private_log_private(self, platform_user_id: str, game_key: str, actor: str,
                                         announce: bool = True) -> bool:
+        language = self._private_language(platform_user_id)
+        english = bridge_is_english(language)
         data = await self.api.private_log(game_key, actor)
         messages = data.get("messages") if isinstance(data.get("messages"), list) else []
         recent = messages[-6:]
         if recent:
             lines = [
-                f"R{item.get('round', '?')}：{str(item.get('text') or '').strip()}"
+                (f"R{item.get('round', '?')}: " if english else f"R{item.get('round', '?')}：") + str(item.get("text") or "").strip()
                 for item in recent
                 if str(item.get("text") or "").strip()
             ]
         else:
-            lines = ["暂无专属于你的角色感知。"]
+            lines = ["No private character information yet." if english else "暂无专属于你的角色感知。"]
         await self._send_private_card(
             platform_user_id,
-            title="角色感知",
-            subtitle="仅你可见",
+            title="Private character information" if english else "角色感知",
+            subtitle="Visible only to you" if english else "仅你可见",
             lines=lines,
-            fallback="角色感知：\n" + "\n".join("　　" + line for line in lines),
+            fallback=("Private character information:\n" + "\n".join("  " + line for line in lines)) if english else ("角色感知：\n" + "\n".join("　　" + line for line in lines)),
         )
         return True
 
     async def _send_payment_list_group(self, group_id: str, platform_user_id: str, game_key: str, actor: str) -> None:
+        language = self._group_language(self.store.group(group_id))
         try:
             sent = await self._send_payment_list_private(platform_user_id, game_key, actor, announce=False)
         except Exception:
             self.logger.warning("QQ 私聊支付列表失败", exc_info=True)
             sent = False
-        await self._send_group_text(group_id, "已私聊你待处理的支付请求。" if sent else "暂时无法私聊你，请检查是否允许接收临时会话。")
+        await self._send_group_text(
+            group_id,
+            (
+                "I sent your pending payments by direct message."
+                if sent else
+                "I could not send a direct message. Please check your privacy settings."
+            ) if bridge_is_english(language) else (
+                "已私聊你待处理的支付请求。" if sent else "暂时无法私聊你，请检查是否允许接收临时会话。"
+            ),
+        )
 
     async def _send_payment_list_private(self, platform_user_id: str, game_key: str, actor: str,
                                          announce: bool = True) -> bool:
+        language = self._private_language(platform_user_id)
+        english = bridge_is_english(language)
         payments = await self._pending_payments(game_key, actor)
         if not payments:
-            await self._send_private_text(platform_user_id, "当前没有待你确认的支付请求。")
+            await self._send_private_text(platform_user_id, "You have no pending payment requests." if english else "当前没有待你确认的支付请求。")
             return True
-        lines = [self._payment_line(item, idx) for idx, item in enumerate(payments, 1)]
-        lines.append("确认：确认支付 或 确认支付 2")
-        lines.append("拒绝：拒绝支付 或 拒绝支付 2")
+        lines = [self._payment_line(item, idx, language) for idx, item in enumerate(payments, 1)]
+        lines.append("Confirm: confirm pay or confirm pay 2" if english else "确认：确认支付 或 确认支付 2")
+        lines.append("Reject: reject pay or reject pay 2" if english else "拒绝：拒绝支付 或 拒绝支付 2")
         await self._send_private_card(
             platform_user_id,
-            title="待确认支付",
-            subtitle="仅处理你的角色",
+            title="Pending payments" if english else "待确认支付",
+            subtitle="Only your character" if english else "仅处理你的角色",
             lines=lines,
-            fallback="待确认支付：\n" + "\n".join("　　" + line for line in lines),
+            fallback=("Pending payments:\n" + "\n".join("  " + line for line in lines)) if english else ("待确认支付：\n" + "\n".join("　　" + line for line in lines)),
         )
         return True
 
     async def _resolve_payment_group(self, group_id: str, platform_user_id: str, game_key: str,
                                      actor: str, accepted: bool, text: str) -> None:
-        message = await self._resolve_payment(game_key, actor, accepted, text)
+        language = self._group_language(self.store.group(group_id))
+        message = await self._resolve_payment(game_key, actor, accepted, text, language)
         await self._send_group_text(group_id, f"@{platform_user_id} {message}")
 
     async def _resolve_payment_private(self, platform_user_id: str, game_key: str,
                                        actor: str, accepted: bool, text: str) -> None:
-        message = await self._resolve_payment(game_key, actor, accepted, text)
+        language = self._private_language(platform_user_id)
+        message = await self._resolve_payment(game_key, actor, accepted, text, language)
         await self._send_private_text(platform_user_id, message)
 
-    async def _resolve_payment(self, game_key: str, actor: str, accepted: bool, text: str) -> str:
+    async def _resolve_payment(self, game_key: str, actor: str, accepted: bool, text: str, language: str = "zh-CN") -> str:
+        english = bridge_is_english(language)
         payments = await self._pending_payments(game_key, actor)
         if not payments:
-            return "当前没有待你确认的支付请求。"
+            return "You have no pending payment requests." if english else "当前没有待你确认的支付请求。"
         index = self._payment_index(text)
         if index < 1 or index > len(payments):
-            return f"没有第 {index} 笔待支付；发送“支付”查看列表。"
+            return f"There is no pending payment #{index}; send “pay” to view the list." if english else f"没有第 {index} 笔待支付；发送“支付”查看列表。"
         payment = payments[index - 1]
         result = await self.api.resolve_payment(game_key, actor, str(payment.get("id") or ""), accepted)
         if result.get("ok") is False:
-            return str(result.get("error") or "支付处理失败")
+            return str(result.get("error") or ("Payment failed" if english else "支付处理失败"))
         amount = int(payment.get("amount", 0) or 0)
-        return f"已{'确认' if accepted else '拒绝'}支付 {amount} 金币。"
+        return f"Payment of {amount} gold {'confirmed' if accepted else 'rejected'}." if english else f"已{'确认' if accepted else '拒绝'}支付 {amount} 金币。"
 
     async def _pending_payments(self, game_key: str, actor: str) -> list[dict[str, Any]]:
         detail = await self.api.game_detail(game_key, actor)

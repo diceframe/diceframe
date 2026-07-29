@@ -68,7 +68,7 @@ async function submit() {
         <p class="hint muted">{{ t('firstPasswordHintBefore') }} <code>data/access_token.txt</code>{{ t('firstPasswordHintAfter') }}</p>
         <details class="forgot-password">
           <summary>{{ t('forgotPassword') }}</summary>
-          <p>{{ t('resetPasswordHintBefore') }} <code>reset_access_password.txt</code>{{ t('resetPasswordHintAfter') }}</p>
+          <p>{{ t('resetPasswordHintBefore') }} <code>data/reset_access_password.txt</code>{{ t('resetPasswordHintAfter') }}</p>
         </details>
       </section>
     </template>

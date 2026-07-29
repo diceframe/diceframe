@@ -15,7 +15,7 @@ from src.lorebook.store import LorebookStore
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 from src.engine.world_template import load_world_template
-from src.webui.services import bot_access, character_cards, characters, generation, games, logs, maps, memory, tavern, worlds, rules, plugins, system
+from src.webui.services import bot_access, bot_extensions, character_cards, characters, generation, games, logs, maps, memory, tavern, worlds, rules, plugins, system
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 logger = logging.getLogger("trpg")
@@ -244,6 +244,15 @@ class WebAPI:
 
     def bot_actor_allowed(self, game_key: str, user_id: str) -> bool:
         return bot_access.actor_allowed(self, game_key, user_id)
+
+    def bot_extension_capabilities(self) -> dict[str, Any]:
+        return bot_extensions.capabilities(self)
+
+    async def apply_bot_extensions(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await bot_extensions.apply(self, stage, payload)
+
+    def bot_extension_asset_path(self, plugin_id: str, relative_path: str) -> Path:
+        return bot_extensions.asset_path(self, plugin_id, relative_path)
 
     def multiplayer_status(self, game_key: str) -> dict[str, Any]:
         return games.multiplayer_status(self, game_key)

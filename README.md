@@ -161,6 +161,8 @@ Windows 下也可以双击 `web_ui.bat` 启动；它会检查依赖，并在缺�
 
 DiceFrame Bot API Token 由宿主自动生成并注入，内置 QQ / NapCat 无需填写。外部 MaiBot Bridge 等适配器可在“设置 → Bot API”复制服务地址和 Token。
 
+Bot 会跟随绑定对局的语言显示帮助和主要操作提示；中文与英文对局都可直接使用对应语言的命令。
+
 群聊里常用命令：
 
 - `@bot 帮助`：查看当前群可用指令。
@@ -180,7 +182,7 @@ DiceFrame Bot API Token 由宿主自动生成并注入，内置 QQ / NapCat 无�
 - `@bot 暂离` / `@bot 回来`：临时下线不阻塞回合。
 - `@bot <自然语言行动>`：提交角色行动。
 
-Bot 不直接读写存档，只通过 Web 服务的 HTTP API 工作。插件商店从作者自己的 GitHub 仓库解析正式 Release；安全的声明式更新可自动安装，进程型或扩权更新需要确认。本地和私下分享使用 `.dfplugin`。插件开发说明见 [docs/PLUGIN_DEVELOPMENT_CN.md](docs/PLUGIN_DEVELOPMENT_CN.md)，投稿和审核边界见 [docs/PLUGIN_REGISTRY_CN.md](docs/PLUGIN_REGISTRY_CN.md)。示例插件在 `plugins/examples/`，包括内容包、主题和可调用工具；可用 `python scripts\package_plugin.py plugins\examples\echo-tool --overwrite` 打包测试。
+Bot 不直接读写存档，只通过 Web 服务的 HTTP API 工作。插件商店从作者自己的 GitHub 仓库解析正式 Release；安全的声明式更新可自动安装，进程型或扩权更新需要确认。本地和私下分享使用 `.dfplugin`。插件开发说明见 [docs/PLUGIN_DEVELOPMENT_CN.md](docs/PLUGIN_DEVELOPMENT_CN.md)，投稿和审核边界见 [docs/PLUGIN_REGISTRY_CN.md](docs/PLUGIN_REGISTRY_CN.md)。示例插件在 `plugins/examples/`，包括内容包、主题、可调用工具和 Bot Bridge 命令/展示扩展；可用 `python scripts\package_plugin.py plugins\examples\bridge-customizer --overwrite` 打包测试。
 
 ## 文档
 

@@ -26,6 +26,7 @@ from src.bots.bridge_core.commands import (
     payment_decision,
     payment_index,
 )
+from src.bots.bridge_core.language import bridge_is_english, bridge_language, bridge_text, infer_command_language
 from src.bots.bridge_core.presenters import (
     background_lines,
     bind_success_text,
@@ -166,6 +167,23 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         if not await self._message_allowed(group_id, platform_user_id, message_type == "private"):
             return
         text = self._text(segments).strip()
+        extension = await self._apply_message_extensions(
+            message_type=message_type,
+            stream_id=platform_user_id if message_type == "private" else group_id,
+            platform_user_id=platform_user_id,
+            text=text,
+            mentioned_bot=message_type == "group",
+        )
+        if extension.get("handled"):
+            outputs = extension.get("outputs") if isinstance(extension.get("outputs"), list) else []
+            if message_type == "private":
+                await self._deliver_private_extension_outputs(platform_user_id, outputs)
+            else:
+                await self._deliver_group_extension_outputs(group_id, outputs)
+            return
+        extension_payload = extension.get("payload")
+        if isinstance(extension_payload, dict):
+            text = str(extension_payload.get("text") or text).strip()
         if not await self._remember_command_signature(message_type, group_id, platform_user_id, text):
             self.logger.info("QQ 重复命令已忽略: type=%s group=%s user=%s text=%s",
                              message_type, group_id, platform_user_id, text[:40])
@@ -179,7 +197,13 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 except Exception as exc:
                     self.logger.exception("QQ 私聊指令处理失败")
                     if getattr(self.sender, "send_private_text", None):
-                        await self._send_private_text(platform_user_id, f"服务暂时不可用：{exc}")
+                        language = self._private_language(platform_user_id)
+                        if not self.store.bindings_for_platform(platform_user_id):
+                            language = infer_command_language(text)
+                        await self._send_private_text(
+                            platform_user_id,
+                            bridge_text(language, "服务暂时不可用：{error}", "The service is temporarily unavailable: {error}", error=exc),
+                        )
             return
         if not group_id or not platform_user_id:
             return
@@ -187,7 +211,44 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             await self._handle_command(group_id, platform_user_id, text, segments)
         except Exception as exc:
             self.logger.exception("QQ 指令处理失败")
-            await self._send_group_text(group_id, f"服务暂时不可用：{exc}")
+            language = self._group_language(self.store.group(group_id)) if self.store.group(group_id) else infer_command_language(text)
+            await self._send_group_text(
+                group_id,
+                bridge_text(language, "服务暂时不可用：{error}", "The service is temporarily unavailable: {error}", error=exc),
+            )
+
+    async def _apply_message_extensions(
+        self,
+        *,
+        message_type: str,
+        stream_id: str,
+        platform_user_id: str,
+        text: str,
+        mentioned_bot: bool,
+    ) -> dict[str, Any]:
+        apply_extensions = getattr(self.api, "apply_bridge_extensions", None)
+        payload: dict[str, Any] = {
+            "platform": "qq",
+            "kind": "command",
+            "scope": message_type,
+            "stream_id": stream_id,
+            "user_id": platform_user_id,
+            "text": text,
+            "mentioned_bot": mentioned_bot,
+        }
+        if not callable(apply_extensions):
+            return {"handled": False, "payload": payload, "outputs": []}
+        group = self.store.group(stream_id) if message_type == "group" else None
+        if group:
+            payload["game_key"] = str(group.get("game_key") or "")
+            player = self.store.player(stream_id, platform_user_id)
+            payload["actor"] = str((player or {}).get("user_id") or "")
+            payload["language"] = self._group_language(group)
+        try:
+            return await apply_extensions("before_message", payload)
+        except Exception:
+            self.logger.warning("Bot Bridge 消息扩展调用失败，继续使用内置逻辑", exc_info=True)
+            return {"handled": False, "payload": payload, "outputs": []}
 
     async def _message_allowed(self, group_id: str, user_id: str, private: bool = False) -> bool:
         config = self.config
@@ -226,12 +287,15 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 return
         bindings = self.store.bindings_for_platform(platform_user_id)
         if not bindings:
-            await self._send_private_text(platform_user_id, "尚未在任何已绑定群中认领角色。")
+            language = infer_command_language(text)
+            await self._send_private_text(platform_user_id, bridge_text(language, "尚未在任何已绑定群中认领角色。", "You have not claimed a character in any bound chat."))
             return
         if len(bindings) > 1:
-            await self._send_private_text(platform_user_id, "你在多个群中拥有角色，请在对应群内 @Bot 操作。")
+            language = infer_command_language(text)
+            await self._send_private_text(platform_user_id, bridge_text(language, "你在多个群中拥有角色，请在对应群内 @Bot 操作。", "You have characters in multiple chats. Please use @Bot in the relevant chat."))
             return
         group_id, player = bindings[0]
+        language = self._group_language(self.store.group(group_id))
         game_key, actor = player["game_key"], player["user_id"]
         pending_key = QQSessionStore.player_key(group_id, platform_user_id)
         payment_decision = self._payment_decision(text)
@@ -247,39 +311,64 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         if self._is_recap(text):
             await self._send_recap_private(platform_user_id, game_key, actor)
             return
-        if text in {"状态", "我的状态"}:
+        if text.lower() in {"状态", "我的状态", "status", "my status"}:
             data = await self.api.characters(game_key, actor)
             found = next((item for item in data.get("players", []) if item.get("user_id") == actor), None)
             if not found:
-                await self._send_private_text(platform_user_id, "未找到当前角色。")
+                await self._send_private_text(platform_user_id, bridge_text(language, "未找到当前角色。", "Current character not found."))
                 return
             sheet = found.get("character_sheet", {})
             await self._send_private_card(
                 platform_user_id,
                 title=str(found.get("character_name") or actor),
-                subtitle="角色状态",
+                subtitle="Character status" if bridge_is_english(language) else "角色状态",
                 lines=[
-                    f"HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  金币 {sheet.get('gold',0)}",
+                    (
+                        f"HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  Gold {sheet.get('gold',0)}"
+                        if bridge_is_english(language) else
+                        f"HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  金币 {sheet.get('gold',0)}"
+                    ),
                 ],
-                fallback=f"{found.get('character_name') or actor}  HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  金币 {sheet.get('gold',0)}",
+                fallback=(
+                    f"{found.get('character_name') or actor}  HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  Gold {sheet.get('gold',0)}"
+                    if bridge_is_english(language) else
+                    f"{found.get('character_name') or actor}  HP {sheet.get('hp',0)}/{sheet.get('max_hp',0)}  金币 {sheet.get('gold',0)}"
+                ),
             )
             return
-        if text in {"掷骰", "骰子", "roll"}:
+        if text.lower() in {"掷骰", "骰子", "roll"}:
             pending = self.pending_dice.get(pending_key)
             if not pending:
-                await self._send_private_text(platform_user_id, "当前没有等待确认的骰子。")
+                await self._send_private_text(platform_user_id, bridge_text(language, "当前没有等待确认的骰子。", "There is no roll waiting for confirmation."))
                 return
             result = await self._action_with_private_thinking(platform_user_id, game_key, actor, pending, confirm=True)
             self.pending_dice.pop(pending_key, None)
             await self._send_private_card(
                 platform_user_id,
-                title="行动结果",
+                title="Action result" if bridge_is_english(language) else "行动结果",
                 subtitle=str(result.get("phase") or "done"),
-                lines=self._format_action_result(result).splitlines(),
-                fallback=self._format_action_result(result),
+                lines=self._format_action_result(result, language).splitlines(),
+                fallback=self._format_action_result(result, language),
             )
             return
         if not text or text in {"帮助", "help", "?", "？"}:
+            if bridge_is_english(language):
+                await self._send_private_card(
+                    platform_user_id,
+                    title="DiceFrame private-message help",
+                    subtitle="Utility commands only; actions are not submitted here",
+                    lines=[
+                        "Private messages do not enter the campaign",
+                        "status — view your character",
+                        "recap — view the public recap",
+                        "roll — confirm a pending check",
+                        "sense — view private character information",
+                        "pay — handle pending payments",
+                        "Create characters in the group with @me create character / @me AI character",
+                    ],
+                    fallback="Private commands: status, recap, roll, sense, and pay. Submit campaign actions in the group.",
+                )
+                return
             await self._send_private_card(
                 platform_user_id,
                 title="DiceFrame 私聊帮助",
@@ -289,11 +378,28 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             )
             return
         if self._is_private_character_creation_request(text):
+            if bridge_is_english(language):
+                await self._send_private_text(
+                    platform_user_id,
+                    "Do not start character creation in an ordinary private message.\n"
+                    "Return to the group and send: @me create character.\n"
+                    "For an AI draft, send @me AI character in the group; I will then guide you privately.",
+                )
+                return
             await self._send_private_text(
                 platform_user_id,
                 "车卡不要在普通私聊里直接说，避免误进剧情。\n"
                 "请回群聊发送：@我 车卡 / @我 新建角色。\n"
                 "如果想用 AI 辅助车卡，请在群聊发送：@我 AI车卡；之后我会私聊引导你。",
+            )
+            return
+        if bridge_is_english(language):
+            await self._send_private_text(
+                platform_user_id,
+                "Private messages are for utility commands and are not submitted as campaign actions.\n"
+                "Available: status / recap / sense / pay / roll.\n"
+                "Create characters in the group with @me create character or @me AI character.\n"
+                "Submit actions in the group with @Bot, or use the web play page.",
             )
             return
         await self._send_private_text(
@@ -311,17 +417,35 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         text: str,
         segments: list[dict[str, Any]] | None = None,
     ) -> None:
-        bind_match = re.match(r"^绑定\s+(\S+)\s+(\S+)\s*$", text)
+        bind_match = re.match(r"^(?:绑定|bind)\s+(\S+)\s+(\S+)\s*$", text, re.IGNORECASE)
         if bind_match:
             result = await self.api.bind_game(bind_match.group(1), bind_match.group(2))
+            language = bridge_language(result.get("language"))
             await self.store.bind_group(
                 group_id,
                 result["game_key"],
                 platform_user_id,
                 result["gm_uid"],
                 result.get("players", []),
+                language,
             )
             link = await self._join_link(result["game_key"])
+            if bridge_is_english(language):
+                await self._send_group_card(
+                    group_id,
+                    title="DiceFrame connected",
+                    subtitle=str(result.get("world_name") or result["game_key"]),
+                    lines=[
+                        "GM identity confirmed.",
+                        "Next: players send “@me join Character Name”.",
+                        f"Available: {self._roster_names({'roster': result.get('players', [])}, language)}",
+                        "Start playing: @me I inspect the area.",
+                        "Common: @me status / recap / map / roll / help",
+                    ],
+                    fallback=self._bind_success_text(result, language=language),
+                    link_text=self._link_text("Web page", link, language),
+                )
+                return
             await self._send_group_card(
                 group_id,
                 title="DiceFrame 已绑定",
@@ -340,8 +464,10 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
 
         group = self.store.group(group_id)
         if not group:
-            await self._send_group_text(group_id, self._unbound_group_text())
+            language = infer_command_language(text)
+            await self._send_group_text(group_id, self._unbound_group_text(language=language))
             return
+        language = self._group_language(group)
         player = self.store.player(group_id, platform_user_id)
         if self._is_ai_character_create(text):
             await self._send_character_creation_guide(
@@ -368,6 +494,27 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             await self._set_away_group(group_id, platform_user_id, group, text, away=self._is_away(text))
             return
         if self._is_help(text):
+            if bridge_is_english(language):
+                await self._send_group_card(
+                    group_id,
+                    title="DiceFrame chat quick start",
+                    subtitle="Start in 3 steps",
+                    lines=[
+                        "1. Claim: @me join Character Name",
+                        f"Available: {self._roster_names(group, language)}",
+                        "Need one? @me create character; AI draft: @me AI character",
+                        "Invite: @me invite",
+                        "Catch up: @me recap",
+                        "Map: @me map",
+                        "2. Act: @me I inspect the area",
+                        "3. When prompted: @me roll",
+                        "GM: @me advance",
+                        "Step away: @me away; return: @me back",
+                        "Status: @me status",
+                    ],
+                    fallback=self._bound_help_text(group, language=language),
+                )
+                return
             await self._send_group_card(
                 group_id,
                 title="DiceFrame 群聊新手指南",
@@ -388,44 +535,22 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 fallback=self._bound_help_text(group),
             )
             return
-        if text.startswith("加入"):
-            await self._join_character(group_id, platform_user_id, text[2:].strip(), group)
+        join_match = re.match(r"^(?:加入\s*|join\s+)(.+)$", text, re.IGNORECASE)
+        if join_match:
+            await self._join_character(group_id, platform_user_id, join_match.group(1).strip(), group)
             return
         if not player:
-            await self._send_group_text(group_id, self._unclaimed_player_text(group))
+            await self._send_group_text(group_id, self._unclaimed_player_text(group, language=language))
             return
         actor = player["user_id"]
         game_key = group["game_key"]
         pending_key = QQSessionStore.player_key(group_id, platform_user_id)
         payment_decision = self._payment_decision(text)
 
-        if self._is_help(text):
-            await self._send_group_card(
-                group_id,
-                title="DiceFrame 群聊帮助",
-                subtitle="群内轻量跑团入口",
-                lines=[
-                    "@我 加入 <角色名>",
-                    "@我 新建角色 / 车卡",
-                    "@我 邀请",
-                    "@我 <自然语言行动>",
-                    "@我 掷骰",
-                    "@我 状态",
-                    "@我 前情",
-                    "@我 地图",
-                    "@我 感知（私聊发送）",
-                    "@我 支付 / 确认支付 / 拒绝支付",
-                    "@我 推进 / 下一轮（GM 或授权账号）",
-                    "@我 暂离 / 回来",
-                    "每轮最多修改行动 3 次，AI 只读取最后一版。",
-                ],
-                fallback="@我 加入 <角色名>\n@我 新建角色 / 车卡\n@我 邀请\n@我 <自然语言行动>\n@我 掷骰\n@我 状态\n@我 前情\n@我 地图\n@我 感知\n@我 支付 / 确认支付 / 拒绝支付\n@我 推进 / 下一轮（GM 或授权账号）\n@我 暂离 / 回来\n每轮最多修改行动 3 次，AI 只读取最后一版。",
-            )
-            return
-        if text in {"加点", "属性"}:
+        if text.lower() in {"加点", "属性", "attributes", "stats"}:
             await self._send_attributes_card(group_id, game_key, actor)
             return
-        allocate_match = re.match(r"^加\s+(\S+)\s+(\d+)\s*$", text)
+        allocate_match = re.match(r"^(?:加\s*|add\s+)(\S+)\s+(\d+)\s*$", text, re.IGNORECASE)
         if allocate_match:
             await self._allocate_attribute(group_id, game_key, actor, allocate_match.group(1), int(allocate_match.group(2)))
             return
@@ -447,10 +572,10 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         if self._is_away(text) or self._is_return(text):
             await self._set_away_group(group_id, platform_user_id, group, text, away=self._is_away(text), actor_uid=actor)
             return
-        if text in {"状态", "我的状态"}:
+        if text.lower() in {"状态", "我的状态", "status", "my status"}:
             await self._send_status(group_id, platform_user_id, game_key, actor)
             return
-        if text in {"掷骰", "骰子", "roll"}:
+        if text.lower() in {"掷骰", "骰子", "roll"}:
             pending_text = self.pending_dice.get(pending_key)
             if not pending_text:
                 detail = await self.api.game_detail(game_key, actor)
@@ -465,7 +590,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 if own_action:
                     pending_text = str(own_action.get("text") or "")
             if not pending_text:
-                await self._send_group_text(group_id, "当前没有等待确认的骰子。")
+                await self._send_group_text(group_id, bridge_text(language, "当前没有等待确认的骰子。", "There is no roll waiting for confirmation."))
                 return
             self._group_action_inflight[game_key] = True
             try:
@@ -476,7 +601,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 self._group_action_inflight[game_key] = False
             return
         if not text:
-            await self._send_group_text(group_id, "请在 @我 后描述行动，或发送“帮助”。")
+            await self._send_group_text(group_id, bridge_text(language, "请在 @我 后描述行动，或发送“帮助”。", "Describe an action after mentioning me, or send “help”."))
             return
 
         self._group_action_inflight[game_key] = True
@@ -484,8 +609,9 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             result = await self._action_with_group_thinking(group_id, game_key, actor, text)
             if result.get("phase") == "dice":
                 self.pending_dice[pending_key] = text
-                check_message = str(result.get("message") or "这次行动需要掷骰")
-                await self._send_group_text(group_id, f"@{platform_user_id} {check_message}。回复 @我 掷骰，或重新描述行动。")
+                check_message = str(result.get("message") or ("This action requires a roll" if bridge_is_english(language) else "这次行动需要掷骰"))
+                suffix = " Reply with @me roll, or describe a different action." if bridge_is_english(language) else "。回复 @我 掷骰，或重新描述行动。"
+                await self._send_group_text(group_id, f"@{platform_user_id} {check_message}{suffix}")
                 return
             await self._send_action_result(group_id, game_key, actor, result)
         finally:
@@ -525,25 +651,36 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         return waiting_ids == {actor}
 
     async def _send_group_thinking(self, group_id: str) -> None:
-        await self._send_group_text(group_id, "GM 正在思考中，生成下一段剧情…")
+        language = self._group_language(self.store.group(group_id))
+        await self._send_group_text(group_id, bridge_text(
+            language,
+            "GM 正在思考中，生成下一段剧情…",
+            "The GM is thinking and preparing the next part of the story…",
+        ))
 
     async def _send_private_thinking(self, platform_user_id: str) -> None:
-        await self._send_private_text(platform_user_id, "GM 正在思考中，生成下一段剧情…")
+        language = self._private_language(platform_user_id)
+        await self._send_private_text(platform_user_id, bridge_text(
+            language,
+            "GM 正在思考中，生成下一段剧情…",
+            "The GM is thinking and preparing the next part of the story…",
+        ))
 
     async def _join_character(self, group_id: str, platform_user_id: str, name: str,
                               group: dict[str, Any]) -> None:
+        language = self._group_language(group)
         if not name:
-            await self._send_group_text(group_id, "请发送：@我 加入 <角色名>")
+            await self._send_group_text(group_id, bridge_text(language, "请发送：@我 加入 <角色名>", "Please send: @me join <Character Name>"))
             return
         group = await self._refresh_group_roster(group_id, group)
         matches = self._match_roster_character(group.get("roster", []), name)
         if len(matches) != 1:
-            await self._send_group_text(group_id, "没有找到唯一匹配的角色，请输入完整角色名。")
+            await self._send_group_text(group_id, bridge_text(language, "没有找到唯一匹配的角色，请输入完整角色名。", "Could not find one unique character. Please enter the full character name."))
             return
         if not await self.store.bind_player(group_id, platform_user_id, str(matches[0]["user_id"])):
-            await self._send_group_text(group_id, "该角色已被其他群成员认领。")
+            await self._send_group_text(group_id, bridge_text(language, "该角色已被其他群成员认领。", "That character has already been claimed by another member."))
             return
-        await self._send_group_text(group_id, f"已认领角色：{matches[0].get('character_name') or name}")
+        await self._send_group_text(group_id, bridge_text(language, "已认领角色：{name}", "Character claimed: {name}", name=matches[0].get("character_name") or name))
 
     async def _refresh_group_roster(self, group_id: str, group: dict[str, Any]) -> dict[str, Any]:
         game_key = str(group.get("game_key") or "")
@@ -577,6 +714,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
 
     async def _send_action_result(self, group_id: str, game_key: str, actor: str,
                                   result: dict[str, Any]) -> None:
+        language = self._group_language(self.store.group(group_id))
         roll = result.get("roll") or {}
         advanced = bool(result.get("advanced"))
         narration = str(result.get("narration") or "").strip()
@@ -621,7 +759,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             return
 
         # 未推进：行动结果简短卡（roll + 等待提示 + pending）
-        text = self._format_action_result(result)
+        text = self._format_action_result(result, language)
         lines: list = []
         if roll and roll.get("value") is not None:
             lines.append(f"🎲 {str(roll.get('dice_system', '')).upper()} = {roll.get('value')}")
@@ -629,17 +767,17 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             lines.extend(narration.splitlines()[:8])
         if pending:
             lines.append("")
-            lines.append("-- 待确认支付 --")
+            lines.append("-- Pending payments --" if bridge_is_english(language) else "-- 待确认支付 --")
             for p in pending:
                 if not isinstance(p, dict):
                     continue
                 amount = int(p.get("amount", 0) or 0)
-                reason = str(p.get("reason") or "GM 建议支付").strip()
-                lines.append(f"{reason}：{amount} 金币")
-            lines.append("发 @我 支付 查看并确认/拒绝")
+                reason = str(p.get("reason") or ("GM-requested payment" if bridge_is_english(language) else "GM 建议支付")).strip()
+                lines.append(f"{reason}: {amount} gold" if bridge_is_english(language) else f"{reason}：{amount} 金币")
+            lines.append("Send @me pay to review and confirm/reject." if bridge_is_english(language) else "发 @我 支付 查看并确认/拒绝")
         await self._send_group_card(
             group_id,
-            title="行动结果",
+            title="Action result" if bridge_is_english(language) else "行动结果",
             subtitle=str(result.get("phase") or "done"),
             lines=lines or [text],
             fallback=text,
@@ -657,6 +795,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         quick_actions: list[str] | None = None,
     ) -> None:
         """推进后合并卡：GM 叙事正文 + 状态变动 + 可选行动（一张图，不分发多张）。"""
+        language = self._group_language(self.store.group(group_id))
         lines: list[str] = []
         if roll and roll.get("value") is not None:
             ds = str(roll.get("dice_system") or "").upper()
@@ -682,14 +821,14 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         if pending_payments:
             if lines:
                 lines.append("")
-            lines.append("-- 待确认支付 --")
+            lines.append("-- Pending payments --" if bridge_is_english(language) else "-- 待确认支付 --")
             for p in pending_payments:
                 if not isinstance(p, dict):
                     continue
                 amount = int(p.get("amount", 0) or 0)
-                reason = str(p.get("reason") or "GM 建议支付").strip()
-                lines.append(f"{reason}：{amount} 金币")
-            lines.append("发 @我 支付 查看并确认/拒绝")
+                reason = str(p.get("reason") or ("GM-requested payment" if bridge_is_english(language) else "GM 建议支付")).strip()
+                lines.append(f"{reason}: {amount} gold" if bridge_is_english(language) else f"{reason}：{amount} 金币")
+            lines.append("Send @me pay to review and confirm/reject." if bridge_is_english(language) else "发 @我 支付 查看并确认/拒绝")
         # 可选行动两列（最下面，footer 前）：一行两个选项
         hint_pairs: list[tuple[str, str]] = []
         if isinstance(quick_actions, list) and quick_actions:
@@ -700,12 +839,12 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 hint_pairs.append((left, right))
         if not lines and not hint_pairs:
             return
-        subtitle = f"第 {round_number} 轮" if round_number else ""
+        subtitle = (f"Round {round_number}" if bridge_is_english(language) else f"第 {round_number} 轮") if round_number else ""
         fallback_lines = [ln if isinstance(ln, str) else ln[0] for ln in lines if ln]
         fallback_lines.extend(f"{l}　{r}".strip() for l, r in hint_pairs if (l or r))
         await self._send_group_card(
             group_id,
-            title="GM 叙事",
+            title="GM narration" if bridge_is_english(language) else "GM 叙事",
             subtitle=subtitle,
             lines=lines,
             fallback="\n".join(fallback_lines),
@@ -728,14 +867,24 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
     def _ai_character_creation_enabled(self) -> bool:
         return bool(getattr(self.config, "ai_character_creation_enabled", True))
 
-    def _link_text(self, label: str, link: str) -> str:
+    def _link_text(self, label: str, link: str, language: str = "zh-CN") -> str:
         if not self._link_reminders_enabled() or not link:
             return ""
-        return f"{label}：{link}"
+        return f"{label}: {link}" if bridge_is_english(language) else f"{label}：{link}"
 
-    def _link_suffix(self, label: str, link: str) -> str:
-        text = self._link_text(label, link)
+    def _link_suffix(self, label: str, link: str, language: str = "zh-CN") -> str:
+        text = self._link_text(label, link, language)
         return f"\n{text}" if text else ""
+
+    @staticmethod
+    def _group_language(group: dict[str, Any] | None) -> str:
+        return bridge_language((group or {}).get("language"))
+
+    def _private_language(self, platform_user_id: str) -> str:
+        bindings = self.store.bindings_for_platform(platform_user_id)
+        if len(bindings) == 1:
+            return self._group_language(self.store.group(bindings[0][0]))
+        return "zh-CN"
 
     async def _remember_command_signature(self, message_type: str, group_id: str,
                                           platform_user_id: str, text: str) -> bool:

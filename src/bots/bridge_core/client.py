@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
@@ -29,6 +31,35 @@ class DiceFrameClient:
 
     async def ping(self) -> dict[str, Any]:
         return await self._request("GET", "/api/bot/ping")
+
+    async def apply_bridge_extensions(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/api/bot/bridge/extensions",
+            json={"stage": stage, "payload": payload},
+        )
+
+    async def download_bridge_asset(self, asset_url: str, target_dir: Path) -> Path:
+        asset_url = str(asset_url or "").strip()
+        if not asset_url.startswith("/api/bot/plugin-assets/"):
+            raise DiceFrameHTTPError("Bot Bridge 图片地址无效")
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=self.timeout_sec)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(asset_url.split("?", 1)[0]).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            raise DiceFrameHTTPError("Bot Bridge 图片格式不受支持")
+        target = target_dir / f"plugin-{secrets.token_hex(8)}{suffix}"
+        headers = {"X-Bot-Token": self.bot_token}
+        async with self._session.get(self.base_url + asset_url, headers=headers) as response:
+            if response.status >= 400:
+                raise DiceFrameHTTPError(f"Bot Bridge 图片下载失败：HTTP {response.status}")
+            data = await response.read()
+        if not data or len(data) > 10 * 1024 * 1024:
+            raise DiceFrameHTTPError("Bot Bridge 图片为空或超过 10 MB")
+        target.write_bytes(data)
+        return target
 
     async def detail(self, game_key: str, actor: str = "") -> dict[str, Any]:
         return await self._request("GET", f"/api/games/{quote(game_key, safe='')}", actor=actor)

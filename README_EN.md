@@ -128,7 +128,9 @@ More player-facing help is in [docs/USER_GUIDE_EN.md](docs/USER_GUIDE_EN.md).
 
 The built-in QQ/NapCat plugin receives its DiceFrame Bot API Token automatically; users configure only the NapCat connection. External bridges such as MaiBot copy the service URL and token from Settings → Bot API.
 
-The plugin store indexes author-owned repositories. Installation resolves the latest stable GitHub Release to an exact commit; safe declarative updates may run automatically, while process or permission-expanding updates require confirmation. Local/private sharing uses `.dfplugin`. Supported capabilities are channel adapters, content packs, themes, and the location/asset subset of map packs. Import/export, Provider, and tool types remain reserved and cannot be installed from the store.
+The Bot follows the bound game's language for help and primary operation messages, with native Chinese and English commands available.
+
+The plugin store indexes author-owned repositories. Installation resolves the latest stable GitHub Release to an exact commit; safe declarative updates may run automatically, while process or permission-expanding updates require confirmation. Local/private sharing uses `.dfplugin`. Supported capabilities include channel adapters, Bot Bridge command/hook/render extensions, content packs, themes, structured tools, and the location/asset subset of map packs. Import/export and Provider types remain reserved and cannot be installed from the store.
 
 ## Documentation
 

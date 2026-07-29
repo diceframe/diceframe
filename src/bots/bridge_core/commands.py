@@ -10,7 +10,11 @@ def is_help(text: str) -> bool:
 
 
 def is_character_create(text: str) -> bool:
-    return text.strip().lower() in {"新建角色", "创建角色", "车卡", "建卡", "角色创建", "我要建卡"}
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    return normalized in {
+        "新建角色", "创建角色", "车卡", "建卡", "角色创建", "我要建卡",
+        "new character", "create character", "character creation", "character",
+    }
 
 
 def is_ai_character_create(text: str) -> bool:
@@ -18,6 +22,7 @@ def is_ai_character_create(text: str) -> bool:
     return normalized in {
         "ai车卡", "ai建卡", "ai新建角色", "ai创建角色",
         "私聊车卡", "私聊建卡", "智能车卡", "辅助车卡",
+        "aicharacter", "aicharactergeneration", "generatecharacter",
     }
 
 
@@ -37,11 +42,15 @@ def is_private_character_creation_request(text: str) -> bool:
     return any(word in compact for word in {
         "车卡", "建卡", "新建角色", "创建角色", "角色创建",
         "ai车卡", "ai建卡", "角色草稿", "生成角色",
+        "newcharacter", "createcharacter", "charactergeneration", "characterdraft",
     })
 
 
 def is_private_log(text: str) -> bool:
-    return text.strip().lower() in {"感知", "我的感知", "私密感知", "悄悄话", "私密信息", "私聊记录"}
+    return text.strip().lower() in {
+        "感知", "我的感知", "私密感知", "悄悄话", "私密信息", "私聊记录",
+        "sense", "perception", "private log", "private info",
+    }
 
 
 def is_recap(text: str) -> bool:
@@ -53,13 +62,23 @@ def is_map(text: str) -> bool:
 
 
 def is_away(text: str) -> bool:
-    normalized = re.sub(r"\s+", "", text.strip().lower())
-    return any(word in normalized for word in {"暂离", "离开", "下线", "挂机", "afk", "away"})
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    compact = normalized.replace(" ", "")
+    return (
+        any(word in compact for word in {"暂离", "下线", "挂机"})
+        or normalized in {"离开", "afk", "away"}
+        or normalized.startswith(("away ", "afk "))
+    )
 
 
 def is_return(text: str) -> bool:
-    normalized = re.sub(r"\s+", "", text.strip().lower())
-    return any(word in normalized for word in {"回来", "归队", "上线", "return", "back"})
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    compact = normalized.replace(" ", "")
+    return (
+        any(word in compact for word in {"回来", "归队", "上线"})
+        or normalized in {"return", "back"}
+        or normalized.startswith(("return ", "back "))
+    )
 
 
 def away_target_query(text: str) -> str:
@@ -67,6 +86,7 @@ def away_target_query(text: str) -> str:
     raw = re.sub(r"^(让|标记)?\s*", "", raw)
     raw = re.sub(r"^(暂离|离开|下线|挂机|回来|归队|上线)\s*", "", raw)
     raw = re.sub(r"\s*(暂离|离开|下线|挂机|回来|归队|上线)$", "", raw)
+    raw = re.sub(r"^(away|afk|return|back)\s+", "", raw, flags=re.IGNORECASE)
     return raw.strip()
 
 
@@ -84,14 +104,23 @@ def advance_force(text: str) -> bool:
 
 
 def is_payment_list(text: str) -> bool:
-    return text.strip().lower() in {"支付", "付款", "待支付", "待付款", "支付列表", "付款列表"}
+    return text.strip().lower() in {
+        "支付", "付款", "待支付", "待付款", "支付列表", "付款列表",
+        "pay", "payment", "payments", "pending payments",
+    }
 
 
 def payment_decision(text: str) -> bool | None:
     normalized = re.sub(r"\s+", "", text.strip().lower())
-    if normalized in {"确认支付", "同意支付", "支付确认", "确认付款", "同意付款", "付款确认"} or normalized.startswith(("确认支付", "同意支付", "确认付款", "同意付款")):
+    if normalized in {
+        "确认支付", "同意支付", "支付确认", "确认付款", "同意付款", "付款确认",
+        "confirmpay", "confirmpayment", "acceptpay", "acceptpayment",
+    } or normalized.startswith(("确认支付", "同意支付", "确认付款", "同意付款", "confirmpay", "acceptpay")):
         return True
-    if normalized in {"拒绝支付", "取消支付", "支付拒绝", "拒绝付款", "取消付款", "付款拒绝"} or normalized.startswith(("拒绝支付", "取消支付", "拒绝付款", "取消付款")):
+    if normalized in {
+        "拒绝支付", "取消支付", "支付拒绝", "拒绝付款", "取消付款", "付款拒绝",
+        "rejectpay", "rejectpayment", "declinepay", "declinepayment",
+    } or normalized.startswith(("拒绝支付", "取消支付", "拒绝付款", "取消付款", "rejectpay", "declinepay")):
         return False
     return None
 

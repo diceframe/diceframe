@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import textwrap
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -359,6 +360,148 @@ async def test_tool_plugin_with_invalid_handshake_fails_closed(tmp_path):
     assert "stdout 只能输出协议消息" in detail["error"]
     assert detail["running"] is False
     assert host.list_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_bot_extension_runs_hooks_and_exposes_validated_images(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "pretty-bridge",
+        plugin_type="bot-extension",
+        manifest_extra={
+            "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+            "permissions": ["process.spawn", "plugin.config", "plugin.data", "bot.extend"],
+        },
+    )
+    (plugins / "pretty-bridge" / "main.py").write_text(textwrap.dedent('''
+        import os
+        from pathlib import Path
+        from src.plugin_sdk import BridgeExtensionRuntime
+
+        runtime = BridgeExtensionRuntime()
+        data_dir = Path(os.environ["DICEFRAME_PLUGIN_DATA_DIR"])
+
+        @runtime.extension(
+            name="demo",
+            title="Demo",
+            description="Test command and renderer.",
+            stages=["before_message", "render"],
+            priority=50,
+            platforms=["qq"],
+        )
+        def demo(stage, payload):
+            if stage == "before_message":
+                if payload.get("text") == "/broken":
+                    raise RuntimeError("expected extension failure")
+                return {
+                    "handled": payload.get("text") == "/plugin",
+                    "outputs": [{"type": "text", "text": "plugin handled"}],
+                }
+            image = data_dir / "demo.png"
+            image.write_bytes(b"not-a-real-png-but-safe-test-data")
+            return {
+                "handled": True,
+                "outputs": [{
+                    "type": "image",
+                    "path": "demo.png",
+                    "fallback_text": payload.get("text", ""),
+                }],
+            }
+
+        runtime.run()
+    '''), encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    try:
+        detail = await host.update_config("pretty-bridge", {"enabled": True})
+        command = await host.apply_bridge_extensions(
+            "before_message",
+            {"platform": "qq", "kind": "command", "text": "/plugin"},
+        )
+        failed_command = await host.apply_bridge_extensions(
+            "before_message",
+            {"platform": "qq", "kind": "command", "text": "/broken"},
+        )
+        rendered = await host.apply_bridge_extensions(
+            "render",
+            {"platform": "qq", "kind": "status", "text": "fallback"},
+        )
+
+        assert detail["status"] == "running"
+        assert detail["bridge_extensions"][0]["name"] == "demo"
+        assert command["handled"] is True
+        assert command["outputs"] == [{"type": "text", "text": "plugin handled"}]
+        assert failed_command["handled"] is False
+        assert host.public_detail("pretty-bridge")["status"] == "running"
+        assert rendered["handled"] is True
+        assert rendered["outputs"][0]["asset_url"].endswith("/pretty-bridge/demo.png")
+        assert host.bridge_asset_path("pretty-bridge", "demo.png").is_file()
+        with pytest.raises(ValueError, match="路径越界"):
+            host.bridge_asset_path("pretty-bridge", "../outside.png")
+    finally:
+        await host.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_repository_bot_extension_example_runs_end_to_end(tmp_path):
+    plugins = Path(__file__).resolve().parents[1] / "plugins" / "examples"
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    try:
+        detail = await host.update_config(
+            "bridge-customizer",
+            {
+                "enabled": True,
+                "reply_footer": "— test footer",
+                "image_cards": True,
+            },
+        )
+        command = await host.apply_bridge_extensions(
+            "before_message",
+            {"platform": "maibot", "kind": "command", "text": "plugin test"},
+        )
+        changed = await host.apply_bridge_extensions(
+            "after_result",
+            {"platform": "maibot", "kind": "text", "text": "original"},
+        )
+        rendered = await host.apply_bridge_extensions(
+            "render",
+            {
+                "platform": "qq",
+                "kind": "card",
+                "title": "Status",
+                "fallback_text": "Status",
+            },
+        )
+
+        assert detail["status"] == "running"
+        assert command["handled"] is True
+        assert command["outputs"][0]["type"] == "card"
+        assert changed["payload"]["text"] == "original\n— test footer"
+        assert rendered["handled"] is True
+        assert rendered["outputs"][0]["type"] == "image"
+        assert host.bridge_asset_path("bridge-customizer", "example-card.png").is_file()
+    finally:
+        await host.cleanup()
+
+
+def test_bot_extension_requires_extend_permission_when_explicit(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "under-declared-bridge",
+        plugin_type="bot-extension",
+        manifest_extra={"permissions": ["process.spawn", "plugin.data"]},
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+
+    detail = host.discover()[0]
+
+    assert detail["status"] == "failed"
+    assert "bot.extend" in detail["error"]
 
 
 def test_tool_plugin_requires_execute_permission_when_permissions_are_explicit(tmp_path):

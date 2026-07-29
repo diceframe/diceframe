@@ -11,6 +11,10 @@
 
 内置插件不需要填写 DiceFrame Bot API Token。该凭证由 DiceFrame 自动生成并注入；插件页只需要配置 NapCat 自身的 WebSocket 地址、端口和 access_token。
 
+安装并启用 `bot-extension` 插件后，QQ 消息会自动经过相同的命令、回复和渲染扩展；扩展失败时仍使用本页所述的内置命令和卡片。
+
+Bot 会跟随绑定对局的语言显示帮助、状态、前情、地图、支付和错误信息。中文对局使用下面的中文命令；英文对局可直接使用 `help`、`join`、`status`、`recap`、`map`、`roll`、`pay`、`advance`、`away`、`back`、`create character` 等英文命令。
+
 常用命令：
 
 - `@Bot 帮助`：查看当前群可用指令。

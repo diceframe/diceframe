@@ -15,7 +15,8 @@ class TriggerConfig:
         "地图", "map", "状态", "status", "感知", "sense", "log", "支付", "pay",
         "确认支付", "拒绝支付", "rejectpay", "掷骰", "roll", "推进", "下一轮",
         "advance", "next", "暂离", "away", "回来", "return", "back", "行动", "做",
-        "连接测试", "ping",
+        "连接测试", "ping", "character", "create", "payment", "payments", "sense",
+        "perception", "confirm", "reject",
     }))
 
 

@@ -13,10 +13,10 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { useUpdater } from '@/composables/useUpdater'
 import { useLocale } from '@/composables/useLocale'
-import { errorMessage } from '@/api/client'
+import { api, errorMessage } from '@/api/client'
 import type { MessageKey } from '@/i18n'
 import type { SecretKey } from '@/stores/useSettingsStore'
-import type { AppConfig, SecretField, TestResult } from '@/api/types'
+import type { AppConfig, LoginAuditEntry, LoginAuditResponse, SecretField, TestResult } from '@/api/types'
 import AppPage from '@/components/common/AppPage.vue'
 import TestResultCard from '@/components/admin/TestResultCard.vue'
 import HelpButton from '@/components/common/HelpButton.vue'
@@ -73,6 +73,9 @@ const testKind = ref<'model' | 'embedding' | 'proxy' | ''>('')
 
 const password = ref('')
 const passwordConfirm = ref('')
+const loginHistory = ref<LoginAuditEntry[]>([])
+const loginHistoryLoading = ref(false)
+const loginHistoryError = ref('')
 const botToken = ref('')
 const botTokenBusy = ref(false)
 const locationOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin
@@ -164,6 +167,9 @@ watch(section, () => {
   const sc = document.querySelector('.n-layout-scroll-container') as HTMLElement | null
   sc?.scrollTo({ top: 0 })
 })
+watch(section, value => {
+  if (value === 'access') void loadLoginHistory()
+})
 
 function setStr(key: keyof AppConfig, v: string | number) { store.setConfigField(key, String(v).trim()) }
 function setSecret(key: SecretKey, v: string | number) { store.secrets[key] = String(v).trim() }
@@ -215,6 +221,24 @@ async function savePassword() {
   } catch (e: unknown) {
     toast.error(errorMessage(e))
   }
+}
+
+async function loadLoginHistory() {
+  loginHistoryLoading.value = true
+  loginHistoryError.value = ''
+  try {
+    const result = await api<LoginAuditResponse>('/login-history')
+    loginHistory.value = result.entries
+  } catch (e: unknown) {
+    loginHistoryError.value = errorMessage(e)
+  } finally {
+    loginHistoryLoading.value = false
+  }
+}
+
+function formatLoginTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 async function clearProxy() {
@@ -558,6 +582,27 @@ function redownloadUpdatePackage() {
               <NButton type="primary" @click="savePassword">{{ t('savePassword') }}</NButton>
             </div>
             <p v-if="store.config.access_password?.configured" class="muted">{{ t('currentPasswordSet', { masked: store.config.access_password.masked }) }}</p>
+            <div class="login-history-head">
+              <div>
+                <h4>{{ t('recentLogins') }}</h4>
+                <p class="muted">{{ t('loginHistoryHint') }}</p>
+              </div>
+              <NButton size="small" :loading="loginHistoryLoading" @click="loadLoginHistory">
+                <template #icon><NIcon :component="RefreshOutline" /></template>
+                {{ t('refresh') }}
+              </NButton>
+            </div>
+            <p v-if="loginHistoryError" class="error-text">{{ loginHistoryError }}</p>
+            <div v-else-if="loginHistory.length" class="login-history-list">
+              <div v-for="(entry, index) in loginHistory" :key="`${entry.at}-${entry.ip}-${index}`" class="login-history-row">
+                <span>{{ formatLoginTime(entry.at) }}</span>
+                <code>{{ entry.ip }}</code>
+                <NTag :type="entry.success ? 'success' : 'error'" size="small" round>
+                  {{ entry.success ? t('loginSucceeded') : t('loginFailed') }}
+                </NTag>
+              </div>
+            </div>
+            <p v-else-if="!loginHistoryLoading" class="muted">{{ t('noLoginHistory') }}</p>
           </div>
 
           <div v-show="section === 'advanced'" class="settings-pane">

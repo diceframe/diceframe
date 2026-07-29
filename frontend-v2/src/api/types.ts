@@ -857,6 +857,17 @@ export interface TestResult {
   status?: number
 }
 
+export interface LoginAuditEntry {
+  at: string
+  ip: string
+  success: boolean
+}
+
+export interface LoginAuditResponse {
+  entries: LoginAuditEntry[]
+  max_entries: number
+}
+
 export interface UpdateAsset {
   name: string
   download_url: string

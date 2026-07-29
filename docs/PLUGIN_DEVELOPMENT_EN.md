@@ -2,7 +2,7 @@
 
 [中文](PLUGIN_DEVELOPMENT_CN.md) | English
 
-This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, content packs, filtered theme variables, structured tools, and the location/asset subset of map packs. Import/export and Provider plugins remain reserved types without a business runtime.
+This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, Bot Bridge command/hook/render extensions, content packs, filtered theme variables, structured tools, and the location/asset subset of map packs. Import/export and Provider plugins remain reserved types without a business runtime.
 
 **Only capabilities marked Supported or Partial below have an active integration. Reserved types may be recognized in a development directory, but they do not participate in their intended workflows and cannot be installed from the store. Plugin documentation must describe actual behavior without implying unavailable features.**
 
@@ -15,6 +15,7 @@ DiceFrame's plugin model covers channel adapters, content packs, themes, maps, i
 | Type | `plugin_type` | Current status |
 |------|---------------|----------------|
 | Channel adapter | `channel-adapter` | Supported: managed process, settings, start/stop, and DiceFrame HTTP API access |
+| Bot Bridge extension | `bot-extension` | Supported: command interception, message/result hooks, text/image/card rendering, and failure fallback |
 | Content pack | `content-pack` | Supported: rules, worlds, content catalogs, and user-triggered imports |
 | Theme | `theme` | Supported: filtered CSS custom properties |
 | Map pack | `map-pack` | Partial: locations and icon/scene/grid assets; no live tabletop or editor |
@@ -22,7 +23,7 @@ DiceFrame's plugin model covers channel adapters, content packs, themes, maps, i
 | Provider | `provider` | Reserved: no Provider runtime; store installation disabled |
 | Tool | `tool` | Supported: process handshake, registration, structured invocation, timeout, and manual testing UI |
 
-`content-pack`, `theme`, and `map-pack` are declarative and may omit a background process. `channel-adapter` and `tool` require an `entrypoint`.
+`content-pack`, `theme`, and `map-pack` are declarative and may omit a background process. `channel-adapter`, `bot-extension`, and `tool` require an `entrypoint`.
 
 ## 3. Plugin Boundaries
 
@@ -51,6 +52,7 @@ For local or private sharing, package the directory as a `.dfplugin` file. A `.d
 | Starter Content | `plugins/examples/starter-content` | `content-pack` | Rules, worlds, characters, NPCs, items, spells, and classes |
 | Paper Theme | `plugins/examples/paper-theme` | `theme` | Safe CSS-variable themes |
 | Echo Tool | `plugins/examples/echo-tool` | `tool` | Process handshake, registration, JSON arguments, and structured results |
+| Bridge Customizer | `plugins/examples/bridge-customizer` | `bot-extension` | Custom commands, result hooks, and QQ image rendering |
 
 Recommended workflow:
 
@@ -96,7 +98,7 @@ The output is placed in `dist/plugins/`. The packager applies host validation an
 - `permissions` requests known host capabilities and is shown in settings.
 - `docs` points to documentation inside the package.
 
-Known types are `channel-adapter`, `content-pack`, `theme`, `map-pack`, `import-export`, `provider`, and `tool`.
+Known types are `channel-adapter`, `bot-extension`, `content-pack`, `theme`, `map-pack`, `import-export`, `provider`, and `tool`.
 
 | Permission | Meaning |
 |------------|---------|
@@ -111,6 +113,7 @@ Known types are `channel-adapter`, `content-pack`, `theme`, `map-pack`, `import-
 | `theme.tokens` | Register theme variables |
 | `map.assets` | Register map locations and static assets |
 | `tool.execute` | Register and execute structured tool calls |
+| `bot.extend` | Extend Bot Bridge commands, processing, and presentation |
 
 ## 6.1 Security Boundaries
 
@@ -161,6 +164,40 @@ src/bots/<platform>/
 ```
 
 Adapters use HTTP rather than importing WebUI code, store platform mappings in plugin data, deduplicate persistent message IDs, handle reconnect/rate-limit/formatting behavior, and leave dice, state changes, and narrative progression to DiceFrame.
+
+### 7.1.1 Bot Bridge Extensions
+
+`bot-extension` extends chat processing rather than connecting a new platform. It can add commands, change messages entering the Bridge, transform business results, and replace text, image, or structured-card presentation. QQ/NapCat calls the extension protocol directly. External bridges such as MaiBot detect `bridge_extensions.protocol_version` through `/api/bot/ping`, then use `POST /api/bot/bridge/extensions`; they retain their existing behavior with older DiceFrame versions.
+
+Use `src.plugin_sdk.BridgeExtensionRuntime` and start from `plugins/examples/bridge-customizer`. An extension declares one or more stages:
+
+- `before_message` runs before built-in command handling; it may modify `payload.text` or return `handled: true` with `outputs`.
+- `after_result` transforms text or structured fields after built-in business handling.
+- `render` selects final presentation; the first extension returning `handled: true` replaces the built-in renderer.
+
+Extensions run by descending `priority`. Invocation errors are logged and skipped; protocol errors or timeouts stop that plugin and the Bridge falls back to built-in behavior.
+
+Outputs use one of these forms:
+
+```json
+{"type": "text", "text": "Custom reply"}
+{"type": "card", "title": "Status", "subtitle": "", "lines": ["HP 8/10"], "fallback_text": "HP 8/10"}
+{"type": "image", "path": "status.png", "caption": "", "alt": "Status", "fallback_text": "HP 8/10"}
+```
+
+Images must be written under `DICEFRAME_PLUGIN_DATA_DIR`. PNG, JPEG, WebP, and GIF are accepted up to 10 MB. DiceFrame validates the path and exposes an authenticated asset route; NapCat downloads it into its card cache and MaiBot converts it to base64 for its image-send capability. Delivery failures use `fallback_text`.
+
+The manifest must include at least:
+
+```json
+{
+  "plugin_type": "bot-extension",
+  "entrypoint": ["{python}", "{plugin_dir}/main.py"],
+  "permissions": ["process.spawn", "plugin.config", "plugin.data", "bot.extend"]
+}
+```
+
+Standard output is reserved for JSON-RPC. The 256 KB request/response limit still applies, so image bytes must not be returned as base64. Extensions can change chat commands and presentation, but dice, balances, payments, and saved game state remain authoritative in DiceFrame's game core.
 
 ### 7.2 Content Packs
 

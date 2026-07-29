@@ -16,6 +16,7 @@ PERMISSION_DETAILS = {
     "theme.tokens": "注册主题 CSS 变量",
     "map.assets": "注册地图地点和素材资源",
     "tool.execute": "注册并执行结构化工具调用",
+    "bot.extend": "扩展 Bot Bridge 命令、消息处理和展示",
 }
 
 DECLARATIVE_PLUGIN_TYPES = {"content-pack", "theme", "map-pack"}
@@ -55,6 +56,8 @@ def effective_plugin_permissions(manifest: dict[str, Any], schema: dict[str, Any
         inferred.add("map.assets")
     elif plugin_type == "tool":
         inferred.add("tool.execute")
+    elif plugin_type == "bot-extension":
+        inferred.add("bot.extend")
     return sorted(inferred)
 
 

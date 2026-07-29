@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "required": ["enabled"],
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "启用插件",
+      "default": false,
+      "ui": {"control": "switch", "order": 10}
+    },
+    "reply_footer": {
+      "type": "string",
+      "title": "文字回复后缀",
+      "default": "",
+      "ui": {"control": "text", "env": "BRIDGE_REPLY_FOOTER", "order": 20}
+    },
+    "image_cards": {
+      "type": "boolean",
+      "title": "用示例图片替换 QQ 卡片",
+      "default": false,
+      "ui": {"control": "switch", "env": "BRIDGE_IMAGE_CARDS", "order": 30}
+    }
+  }
+}

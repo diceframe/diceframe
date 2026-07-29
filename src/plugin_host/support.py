@@ -33,6 +33,10 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, str]] = {
         "level": "supported",
         "summary": "可通过受限 JSON-RPC 协议注册并执行结构化工具",
     },
+    "bot-extension": {
+        "level": "supported",
+        "summary": "可扩展 Bot Bridge 命令、消息处理和文本/图片/卡片渲染",
+    },
 }
 
 

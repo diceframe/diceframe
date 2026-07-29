@@ -102,6 +102,8 @@ DiceFrame can connect a Web game to QQ group chat through the built-in QQ/NapCat
 
 The built-in plugin receives its DiceFrame Bot API Token automatically. For an external bridge such as MaiBot, copy the DiceFrame URL and token from Settings → Bot API into that bridge. Regenerating the token invalidates the old value.
 
+The Bot follows the current game's language for help, status, recap, map, payment, character-creation, and error messages. The examples below use the English commands; Chinese games retain the corresponding Chinese commands.
+
 ## Using the Plugin Store
 
 Open Settings → Plugins → Plugin Store. The store is an index: authors retain their source repositories while DiceFrame pins the latest stable Release to an exact commit during installation.
@@ -113,43 +115,44 @@ Open Settings → Plugins → Plugin Store. The store is an index: authors retai
 - After installation, review permissions, enter the plugin's own settings, and enable it. QQ/NapCat still needs no manually entered DiceFrame Bot Token.
 - Declarative plugins may update automatically when their runtime type and effective permissions do not expand. Process plugins only notify and require confirmation; permission or runtime expansion also requires confirmation.
 - Privately shared plugins should use a `.dfplugin` file produced by the packaging script. Select it under Local Install. After manually copying a plugin directory, use Rescan Local Plugins.
+- Chat presentation extensions may add commands or replace status, map, and other replies with custom text, images, or cards. If an extension fails, DiceFrame keeps using its built-in presentation; the extension cannot rewrite authoritative character state, rolls, or payment results.
 
 ## Common Chat Commands
 
 The examples below use `@bot` for mentioning the Bot:
 
 ```text
-@bot 帮助
-@bot 加入 CharacterName
-@bot 新建角色
-@bot 车卡
-@bot AI车卡
-@bot 邀请
-@bot 前情
-@bot 地图
-@bot 状态
-@bot 感知
-@bot 支付
-@bot 掷骰
+@bot help
+@bot join CharacterName
+@bot create character
+@bot AI character
+@bot invite
+@bot recap
+@bot map
+@bot status
+@bot sense
+@bot pay
+@bot confirm pay
+@bot reject pay
+@bot roll
 @bot I inspect the runes on the wall
-@bot 推进
-@bot 下一轮
-@bot 暂离
-@bot 回来
+@bot advance
+@bot away
+@bot back
 ```
 
-- `加入 CharacterName`: bind the platform account to a Web character.
-- `新建角色` / `车卡`: get character-creation instructions or an entry link.
-- `AI车卡`: generate a character draft for confirmation.
-- `邀请`: send the player join link.
-- `前情`: show the public recap and recent turns.
-- `地图`: show the current and known locations.
-- `状态`: show the claimed character summary.
-- `感知`: request character-private information, normally by direct message.
-- `支付`: view and accept or reject pending payments.
-- `掷骰`: confirm a pending check.
-- `推进` / `下一轮`: let the GM or an authorized account advance.
-- `暂离` / `回来`: leave temporarily or resume participation.
+- `join CharacterName`: bind the platform account to a Web character.
+- `create character`: get character-creation instructions or an entry link.
+- `AI character`: generate a character draft for confirmation.
+- `invite`: send the player join link.
+- `recap`: show the public recap and recent turns.
+- `map`: show the current and known locations.
+- `status`: show the claimed character summary.
+- `sense`: request character-private information, normally by direct message.
+- `pay`: view pending payments; use `confirm pay` or `reject pay` to decide.
+- `roll`: confirm a pending check.
+- `advance`: let the GM or an authorized account advance.
+- `away` / `back`: leave temporarily or resume participation.
 
 ## Chat Actions
 
@@ -159,14 +162,14 @@ Players may mention the Bot and send a natural-language action:
 @bot I circle behind the guard and look for the key on his belt
 ```
 
-If a check is required, the Bot asks for `@bot 掷骰`. Otherwise DiceFrame progresses and sends the GM narration and recorded state changes back to the group.
+If a check is required, the Bot asks for `@bot roll`. Otherwise DiceFrame progresses and sends the GM narration and recorded state changes back to the group.
 
 ## Private Information
 
 Some clues belong to one character, such as hidden doors, hallucinations, dreams, private thoughts, or unique perceptions. In group chat, send:
 
 ```text
-@bot 感知
+@bot sense
 ```
 
 The Bot attempts a direct message. If that fails, it asks the player to check temporary-session or friend settings.

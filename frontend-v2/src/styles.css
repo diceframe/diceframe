@@ -474,6 +474,8 @@ body.light .perception-item.fresh{animation:perceptionFreshLight 1.6s ease-out}
 body.light .update-dialog-notes{background:rgba(255,247,223,.7);border-color:rgba(156,116,59,.26)}
 
 .api-head-row{display:flex;align-items:center;gap:8px}.api-head-row h3{margin:0}a,a:visited{color:var(--gold-2)}
+.login-history-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:22px}.login-history-head h4,.login-history-head p{margin:0}.login-history-list{display:grid;gap:6px;max-height:320px;margin-top:10px;overflow:auto}.login-history-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(110px,1fr) auto;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line-soft);border-radius:6px;background:rgba(255,255,255,.025);font-size:13px}.login-history-row code{overflow-wrap:anywhere}
+@media(max-width:640px){.login-history-row{grid-template-columns:1fr auto}.login-history-row code{grid-column:1/-1;grid-row:2}}
 
 /* Keep long play sessions cheap to render while older rounds remain available on demand. */
 .timeline-history-gate{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;margin:0 auto 14px;color:var(--muted);font-size:12px}.timeline-history-gate button{min-height:30px;padding:0 11px}

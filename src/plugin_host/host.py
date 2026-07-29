@@ -36,6 +36,7 @@ from .runtime_protocol import (
     MAX_RPC_MESSAGE_BYTES,
     PLUGIN_PROTOCOL_VERSION,
     JsonRpcStdioClient,
+    PluginInvocationError,
     PluginProtocolError,
     validate_tool_arguments,
 )
@@ -43,10 +44,14 @@ from .support import PLUGIN_TYPE_SUPPORT, plugin_type_support
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_BRIDGE_EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_BRIDGE_EXTENSION_STAGES = {"before_message", "after_result", "render"}
+_BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
 _PLUGIN_TYPES = set(PLUGIN_TYPE_SUPPORT)
 _STATIC_PLUGIN_TYPES = {"content-pack", "theme", "map-pack"}
-_RPC_PLUGIN_TYPES = {"tool"}
+_RPC_PLUGIN_TYPES = {"tool", "bot-extension"}
 _ALLOWED_PERMISSIONS = PERMISSION_DETAILS
 
 _SAFE_PARENT_ENV = {
@@ -74,6 +79,7 @@ class PluginRuntime:
     monitor_task: asyncio.Task | None = None
     rpc_client: JsonRpcStdioClient | None = None
     tools: list[dict[str, Any]] = field(default_factory=list)
+    bridge_extensions: list[dict[str, Any]] = field(default_factory=list)
     status: str = "disabled"
     error: str = ""
 
@@ -144,6 +150,7 @@ class PluginHost:
             "permissions": self._plugin_permissions(runtime),
             "permission_details": self._plugin_permission_details(runtime),
             "tools": [dict(tool) for tool in runtime.tools],
+            "bridge_extensions": [dict(extension) for extension in runtime.bridge_extensions],
             "contributions": [item.to_dict() for item in self.contributions.list() if item.plugin_id == plugin_id],
             "docs": runtime.manifest.get("docs", ""),
         }
@@ -197,6 +204,110 @@ class PluginHost:
             await self._fail_rpc_runtime(runtime, str(exc))
             raise
         return result
+
+    def list_bridge_extensions(self) -> list[dict[str, Any]]:
+        extensions: list[dict[str, Any]] = []
+        for plugin_id, runtime in self.plugins.items():
+            if self._plugin_type(runtime.manifest) != "bot-extension" or runtime.status != "running":
+                continue
+            for descriptor in runtime.bridge_extensions:
+                extensions.append({
+                    **descriptor,
+                    "plugin_id": plugin_id,
+                    "plugin_name": str(runtime.manifest.get("name") or plugin_id),
+                })
+        return sorted(
+            extensions,
+            key=lambda item: (-int(item.get("priority", 0)), str(item.get("plugin_id")), str(item.get("name"))),
+        )
+
+    async def apply_bridge_extensions(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
+        stage = str(stage or "").strip()
+        if stage not in _BRIDGE_EXTENSION_STAGES:
+            raise ValueError(f"不支持的 Bot Bridge 扩展阶段：{stage}")
+        if not isinstance(payload, dict):
+            raise ValueError("Bot Bridge 扩展 payload 必须是对象")
+        current = dict(payload)
+        outputs: list[dict[str, Any]] = []
+        applied: list[dict[str, str]] = []
+        handled = False
+        platform = str(current.get("platform") or "").strip().lower()
+        kind = str(current.get("kind") or "").strip().lower()
+
+        for descriptor in self.list_bridge_extensions():
+            if stage not in descriptor.get("stages", []):
+                continue
+            platforms = descriptor.get("platforms", [])
+            kinds = descriptor.get("kinds", [])
+            if platforms and platform not in platforms:
+                continue
+            if kinds and kind not in kinds:
+                continue
+            plugin_id = str(descriptor["plugin_id"])
+            runtime = self._require(plugin_id)
+            if not runtime.rpc_client:
+                continue
+            try:
+                result = await runtime.rpc_client.request(
+                    "bridge.apply",
+                    {
+                        "name": descriptor["name"],
+                        "stage": stage,
+                        "payload": current,
+                    },
+                    timeout=min(30.0, max(1.0, float(descriptor.get("timeout_sec", 5)))),
+                )
+                if not isinstance(result, dict):
+                    raise PluginProtocolError("Bot Bridge 扩展必须返回 JSON 对象")
+                next_payload = result.get("payload")
+                if next_payload is not None:
+                    if not isinstance(next_payload, dict):
+                        raise PluginProtocolError("Bot Bridge 扩展返回的 payload 必须是对象")
+                    current = next_payload
+                normalized_outputs = self._normalize_bridge_outputs(runtime, result.get("outputs"))
+                applied.append({"plugin_id": plugin_id, "name": str(descriptor["name"])})
+                if bool(result.get("handled")):
+                    handled = True
+                    outputs = normalized_outputs
+                    break
+                if stage != "render" and normalized_outputs:
+                    outputs.extend(normalized_outputs)
+            except PluginInvocationError as exc:
+                self.logger.warning(
+                    "Bot Bridge 扩展调用失败，已跳过: plugin=%s extension=%s stage=%s error=%s",
+                    plugin_id,
+                    descriptor["name"],
+                    stage,
+                    exc,
+                )
+            except PluginProtocolError as exc:
+                self.logger.error(
+                    "Bot Bridge 扩展协议错误，已停止插件: plugin=%s extension=%s error=%s",
+                    plugin_id,
+                    descriptor["name"],
+                    exc,
+                )
+                await self._fail_rpc_runtime(runtime, str(exc))
+
+        return {
+            "handled": handled,
+            "payload": current,
+            "outputs": outputs[:16],
+            "applied": applied,
+        }
+
+    def bridge_asset_path(self, plugin_id: str, relative_path: str) -> Path:
+        runtime = self._require(plugin_id)
+        if self._plugin_type(runtime.manifest) != "bot-extension" or runtime.status != "running":
+            raise KeyError("Bot Bridge 扩展未运行")
+        root = (self.data_dir / plugin_id / "runtime").resolve()
+        target = (root / str(relative_path or "")).resolve()
+        self._ensure_inside(root, target)
+        if not target.is_file() or target.suffix.lower() not in _BRIDGE_IMAGE_SUFFIXES:
+            raise KeyError("Bot Bridge 图片不存在或格式不受支持")
+        if target.stat().st_size > _MAX_BRIDGE_IMAGE_BYTES:
+            raise ValueError("Bot Bridge 图片不能超过 10 MB")
+        return target
 
     def contribution_path(self, kind: str, key: str) -> Path | None:
         item = self.contributions.find(kind, key)
@@ -533,7 +644,10 @@ class PluginHost:
                     },
                     timeout=5,
                 )
-                runtime.tools = self._validate_tool_descriptors(initialized)
+                if self._plugin_type(runtime.manifest) == "tool":
+                    runtime.tools = self._validate_tool_descriptors(initialized)
+                else:
+                    runtime.bridge_extensions = self._validate_bridge_extension_descriptors(initialized)
             runtime.status = "running"
             self.logger.info("插件 %s 已启动，PID=%s", plugin_id, runtime.process.pid)
             runtime.monitor_task = asyncio.create_task(self._monitor_process(plugin_id, runtime.process))
@@ -549,6 +663,7 @@ class PluginHost:
             runtime.process = None
             runtime.rpc_client = None
             runtime.tools = []
+            runtime.bridge_extensions = []
             runtime.status, runtime.error = "failed", str(exc)
             self.logger.exception("插件 %s 启动失败", plugin_id)
 
@@ -569,9 +684,15 @@ class PluginHost:
             "DICEFRAME_PLUGIN_DATA_DIR": str(plugin_data_dir),
             "TRPG_PARENT_PID": str(os.getpid()),
             "DICEFRAME_PLUGIN_PROTOCOL": str(PLUGIN_PROTOCOL_VERSION),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
         })
         if self._plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES:
-            env["PYTHONPATH"] = str(runtime.directory.parent.parent.resolve())
+            host_root = Path(__file__).resolve().parents[2]
+            env["PYTHONPATH"] = os.pathsep.join((
+                str(host_root),
+                str(runtime.directory.parent.parent.resolve()),
+            ))
         for key, field_schema in runtime.schema.get("properties", {}).items():
             env_name = str((field_schema.get("ui") or {}).get("env") or "")
             if not env_name:
@@ -609,6 +730,7 @@ class PluginHost:
         runtime.process = None
         runtime.rpc_client = None
         runtime.tools = []
+        runtime.bridge_extensions = []
         runtime.status = self._status_for_enabled(runtime)
         if runtime.status != "active":
             self.contributions.clear_plugin(plugin_id)
@@ -629,6 +751,7 @@ class PluginHost:
         runtime.process = None
         runtime.rpc_client = None
         runtime.tools = []
+        runtime.bridge_extensions = []
         runtime.status = "failed"
         runtime.error = error
 
@@ -664,6 +787,7 @@ class PluginHost:
         runtime.process = None
         runtime.rpc_client = None
         runtime.tools = []
+        runtime.bridge_extensions = []
         self.logger.warning("插件 %s 意外退出，3 秒后尝试自动重启，code=%s", plugin_id, code)
         await asyncio.sleep(3)
         if self.plugins.get(plugin_id) is runtime and runtime.config.get("enabled") and runtime.status == "failed":
@@ -807,6 +931,119 @@ class PluginHost:
             })
         return tools
 
+    @staticmethod
+    def _validate_bridge_extension_descriptors(initialized: Any) -> list[dict[str, Any]]:
+        if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:
+            raise PluginProtocolError("Bot Bridge 插件协议版本不匹配")
+        raw_extensions = initialized.get("bridge_extensions")
+        if not isinstance(raw_extensions, list) or not raw_extensions:
+            raise PluginProtocolError("bot-extension 插件必须注册至少一个扩展")
+        if len(raw_extensions) > 32:
+            raise PluginProtocolError("单个插件最多注册 32 个 Bot Bridge 扩展")
+        descriptors: list[dict[str, Any]] = []
+        names: set[str] = set()
+        for raw in raw_extensions:
+            if not isinstance(raw, dict):
+                raise PluginProtocolError("Bot Bridge 扩展描述必须是对象")
+            name = str(raw.get("name") or "").strip()
+            if not _BRIDGE_EXTENSION_NAME_RE.fullmatch(name):
+                raise PluginProtocolError(f"Bot Bridge 扩展名称非法：{name}")
+            if name in names:
+                raise PluginProtocolError(f"Bot Bridge 扩展名称重复：{name}")
+            names.add(name)
+            stages = raw.get("stages")
+            if not isinstance(stages, list) or not stages:
+                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 必须声明 stages")
+            normalized_stages = list(dict.fromkeys(str(item).strip() for item in stages if str(item).strip()))
+            unknown = sorted(set(normalized_stages) - _BRIDGE_EXTENSION_STAGES)
+            if unknown:
+                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 使用未知阶段：{', '.join(unknown)}")
+            try:
+                priority = int(raw.get("priority", 0))
+                timeout_sec = float(raw.get("timeout_sec", 5))
+            except (TypeError, ValueError) as exc:
+                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的优先级或超时无效") from exc
+            if not -1000 <= priority <= 1000:
+                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的 priority 必须在 -1000 到 1000 之间")
+            if not 1 <= timeout_sec <= 30:
+                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的 timeout_sec 必须在 1 到 30 秒之间")
+            platforms = PluginHost._descriptor_string_list(raw.get("platforms"), 32, "platforms", name)
+            kinds = PluginHost._descriptor_string_list(raw.get("kinds"), 64, "kinds", name)
+            descriptors.append({
+                "name": name,
+                "title": str(raw.get("title") or name).strip()[:120],
+                "description": str(raw.get("description") or "").strip()[:1000],
+                "stages": normalized_stages,
+                "priority": priority,
+                "timeout_sec": timeout_sec,
+                "platforms": platforms,
+                "kinds": kinds,
+            })
+        return descriptors
+
+    @staticmethod
+    def _descriptor_string_list(raw: Any, limit: int, field_name: str, extension_name: str) -> list[str]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise PluginProtocolError(f"Bot Bridge 扩展 {extension_name} 的 {field_name} 必须是字符串数组")
+        values = list(dict.fromkeys(str(item).strip().lower() for item in raw if str(item).strip()))
+        if len(values) > limit or any(len(item) > 64 for item in values):
+            raise PluginProtocolError(f"Bot Bridge 扩展 {extension_name} 的 {field_name} 超出限制")
+        return values
+
+    def _normalize_bridge_outputs(self, runtime: PluginRuntime, raw_outputs: Any) -> list[dict[str, Any]]:
+        if raw_outputs is None:
+            return []
+        if not isinstance(raw_outputs, list):
+            raise PluginProtocolError("Bot Bridge 扩展 outputs 必须是数组")
+        if len(raw_outputs) > 16:
+            raise PluginProtocolError("Bot Bridge 扩展单次最多返回 16 条消息")
+        plugin_id = str(runtime.manifest.get("id") or "")
+        outputs: list[dict[str, Any]] = []
+        for raw in raw_outputs:
+            if not isinstance(raw, dict):
+                raise PluginProtocolError("Bot Bridge 输出必须是对象")
+            output_type = str(raw.get("type") or "").strip().lower()
+            fallback_text = str(raw.get("fallback_text") or "").strip()[:20_000]
+            if output_type == "text":
+                text = str(raw.get("text") or "")
+                if not text or len(text) > 20_000:
+                    raise PluginProtocolError("Bot Bridge 文本输出为空或超过 20000 字")
+                outputs.append({"type": "text", "text": text})
+                continue
+            if output_type == "card":
+                lines = raw.get("lines")
+                if not isinstance(lines, list) or len(lines) > 100:
+                    raise PluginProtocolError("Bot Bridge 卡片 lines 必须是不超过 100 项的数组")
+                outputs.append({
+                    "type": "card",
+                    "title": str(raw.get("title") or "").strip()[:200],
+                    "subtitle": str(raw.get("subtitle") or "").strip()[:500],
+                    "lines": [str(line)[:1000] for line in lines],
+                    "fallback_text": fallback_text,
+                })
+                continue
+            if output_type == "image":
+                relative_path = str(raw.get("path") or "").strip().replace("\\", "/")
+                try:
+                    target = self.bridge_asset_path(plugin_id, relative_path)
+                except (KeyError, ValueError) as exc:
+                    raise PluginProtocolError(str(exc)) from exc
+                if target.stat().st_size <= 0:
+                    raise PluginProtocolError("Bot Bridge 图片文件为空")
+                encoded_path = quote(relative_path, safe="/")
+                outputs.append({
+                    "type": "image",
+                    "asset_url": f"/api/bot/plugin-assets/{quote(plugin_id, safe='')}/{encoded_path}",
+                    "caption": str(raw.get("caption") or "").strip()[:2000],
+                    "alt": str(raw.get("alt") or "").strip()[:500],
+                    "fallback_text": fallback_text,
+                })
+                continue
+            raise PluginProtocolError(f"不支持的 Bot Bridge 输出类型：{output_type}")
+        return outputs
+
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:
             raise ValueError("插件包为空")
@@ -928,6 +1165,8 @@ class PluginHost:
         permissions = set(effective_plugin_permissions(manifest, schema))
         if plugin_type == "tool" and "tool.execute" not in permissions:
             raise ValueError("tool 插件必须声明 tool.execute 权限")
+        if plugin_type == "bot-extension" and "bot.extend" not in permissions:
+            raise ValueError("bot-extension 插件必须声明 bot.extend 权限")
 
     def _plugin_permissions(self, runtime: PluginRuntime) -> list[str]:
         return effective_plugin_permissions(runtime.manifest, runtime.schema)

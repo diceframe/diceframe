@@ -13,6 +13,7 @@ class BridgeInput:
     text: str
     mentioned_bot: bool = False
     platform: str = ""
+    language: str = ""
     raw_message: Any = None
 
 
@@ -21,4 +22,5 @@ class BridgeResult:
     handled: bool
     intercept: bool = False
     replies: list[str] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
