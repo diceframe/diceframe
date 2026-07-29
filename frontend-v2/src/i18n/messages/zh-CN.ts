@@ -897,7 +897,6 @@ export const zhCN = {
   gmWhispers: 'GM 悄悄话',
   dialogueLog: '对话日志',
   processingLog: '处理日志',
-  logPageLoadHint: '默认只加载当前页，避免长团日志一次性撑爆页面。',
   perPage: '每页',
   roundsCount: '{count} 轮',
   branchesCount: '{count} 分支',

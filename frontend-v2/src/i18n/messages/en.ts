@@ -896,7 +896,6 @@ export const en = {
   gmWhispers: 'GM Whispers',
   dialogueLog: 'Dialogue Log',
   processingLog: 'Processing Log',
-  logPageLoadHint: 'Only the current page is loaded by default so long campaigns do not overwhelm the page.',
   perPage: 'Per page',
   roundsCount: '{count} rounds',
   branchesCount: '{count} branches',

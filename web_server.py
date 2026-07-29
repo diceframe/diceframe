@@ -48,8 +48,8 @@ from src.webui.services import updater as updater_svc
 logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 
-DEFAULT_NARRATIVE_MAX_TOKENS = 1536
-GENERATION_DEFAULTS_VERSION = 2
+DEFAULT_NARRATIVE_MAX_TOKENS = 2048
+GENERATION_DEFAULTS_VERSION = 3
 
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def _migrate_generation_defaults(config: dict) -> bool:
         narrative_tokens = int(config.get("narrative_max_tokens", 1024) or 1024)
     except (TypeError, ValueError):
         narrative_tokens = 1024
-    if narrative_tokens == 1024:
+    if narrative_tokens in {1024, 1536}:
         config["narrative_max_tokens"] = DEFAULT_NARRATIVE_MAX_TOKENS
     config["generation_defaults_version"] = GENERATION_DEFAULTS_VERSION
     return True

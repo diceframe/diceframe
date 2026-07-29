@@ -11,7 +11,7 @@ from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
 from src.engine.language import is_english
-from src.llm.client import LENGTH_RETRY_FACTOR, LENGTH_RETRY_MAX_MULT, OutputTruncatedError
+from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
     normalize_tag_protocol,
@@ -188,6 +188,48 @@ async def append_multistep_analysis(
         return context
 
 
+async def _call_stream_with_length_retry(
+    llm_client: Any,
+    instance: GameInstance,
+    gm_prompt: str,
+    context: str,
+    narrative_max_tokens: int,
+    on_delta,
+    on_reset,
+):
+    """流式调用被截断时，按 1×、2×、4× 的预算独立重试。"""
+    budgets = length_retry_budgets(narrative_max_tokens)
+    for budget_index, current_max_tokens in enumerate(budgets):
+        filt = _NarrationDeltaFilter(on_delta)
+        try:
+            response = await llm_client.call_stream(
+                system_prompt=gm_prompt,
+                user_message=context,
+                temperature=0.7,
+                max_tokens=current_max_tokens,
+                on_delta=filt.feed,
+            )
+            await filt.flush()
+            return response
+        except OutputTruncatedError:
+            if budget_index + 1 >= len(budgets):
+                logger.warning(
+                    "流式输出截断且已达放大上限 (max_tokens=%d, round=%d)",
+                    current_max_tokens,
+                    instance.round_number,
+                )
+                raise
+            bumped = budgets[budget_index + 1]
+            logger.info(
+                "流式输出被截断，提高 max_tokens 重试: %d -> %d (round=%d)",
+                current_max_tokens,
+                bumped,
+                instance.round_number,
+            )
+            if on_reset:
+                await on_reset()
+
+
 async def call_llm_with_tag_retry(
     llm_client: Any,
     instance: GameInstance,
@@ -205,15 +247,14 @@ async def call_llm_with_tag_retry(
 
     传入 on_delta 时走流式调用（call_stream），逐段叙事经 _NarrationDeltaFilter 过滤掉
     --- 之后的结构化标签后推给前端；骰子矛盾或截断重试前调 on_reset 让前端清空已显示
-    的流式文本。未传 on_delta 时退化为原有非流式 call()，bot 等场景不受影响。
+    的流式文本。流式与非流式截断均按 1×、2×、4× 预算重试，且不占用骰子矛盾重试次数。
     """
     response = None
     data: dict = {}
     stream = on_delta is not None
-    current_max_tokens = narrative_max_tokens
-    for retry in range(2):
+    for dice_retry in range(2):
         retry_context = context
-        if retry > 0:
+        if dice_retry > 0:
             if is_english(getattr(instance, "language", "")):
                 retry_context = context + "\n\nPrevious response contradicted the required dice/check result. Rewrite the narration and strictly follow the check outcome."
             else:
@@ -221,36 +262,15 @@ async def call_llm_with_tag_retry(
             if on_reset:
                 await on_reset()
         if stream:
-            filt = _NarrationDeltaFilter(on_delta)
-            try:
-                response = await llm_client.call_stream(
-                    system_prompt=gm_prompt,
-                    user_message=retry_context,
-                    temperature=0.7,
-                    max_tokens=current_max_tokens,
-                    on_delta=filt.feed,
-                )
-                await filt.flush()
-            except OutputTruncatedError:
-                bumped = min(
-                    current_max_tokens * LENGTH_RETRY_FACTOR,
-                    narrative_max_tokens * LENGTH_RETRY_MAX_MULT,
-                )
-                if bumped > current_max_tokens:
-                    logger.info(
-                        "流式输出被截断，提高 max_tokens 重试: %d -> %d (round=%d)",
-                        current_max_tokens, bumped, instance.round_number,
-                    )
-                    current_max_tokens = bumped
-                    continue
-                logger.warning("流式输出截断且已达放大上限，降级为非流式调用 (round=%d)", instance.round_number)
-                stream = False
-                response = await llm_client.call(
-                    system_prompt=gm_prompt,
-                    user_message=retry_context,
-                    temperature=0.7,
-                    max_tokens=current_max_tokens,
-                )
+            response = await _call_stream_with_length_retry(
+                llm_client,
+                instance,
+                gm_prompt,
+                retry_context,
+                narrative_max_tokens,
+                on_delta,
+                on_reset,
+            )
         else:
             response = await llm_client.call(
                 system_prompt=gm_prompt,
@@ -290,7 +310,11 @@ async def call_llm_with_tag_retry(
         narration = response.narration or response.content
         if not dice_block or validate_dice_constraint(dice_block, narration):
             break
-        logger.warning("骰子约束矛盾，重试 (%d/1, round=%d)", retry + 1, instance.round_number)
+        logger.warning(
+            "骰子约束矛盾，重试 (%d/1, round=%d)",
+            dice_retry + 1,
+            instance.round_number,
+        )
     else:
         logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", instance.round_number)
 

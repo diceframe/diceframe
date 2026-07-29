@@ -168,7 +168,6 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
       <button type="button" :class="{ active: tab === 'proclog' }" @click="tab = 'proclog'">{{ t('processingLog') }}</button>
     </div>
     <div class="log-toolbar">
-      <span>{{ t('logPageLoadHint') }}</span>
       <label>{{ t('perPage') }}
         <select :value="pageSize" @change="setPageSize(($event.target as HTMLSelectElement).value)">
           <option :value="10">{{ t('roundsCount', { count: 10 }) }}</option>

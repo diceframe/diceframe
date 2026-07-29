@@ -5,7 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.llm.client import LLMClient, ProviderConfig, OutputTruncatedError
+from src.llm.client import (
+    LLMClient,
+    OutputTruncatedError,
+    ProviderConfig,
+    length_retry_budgets,
+)
+
+
+def test_length_retry_budgets_are_shared_one_two_four_times():
+    assert length_retry_budgets(2048) == (2048, 4096, 8192)
 
 
 class _FakeResponse:
@@ -53,10 +62,27 @@ class _EmptyOpenAIResponse(_FakeResponse):
         }
 
 
+class _PartialOpenAIResponse(_FakeResponse):
+    async def json(self):
+        return {
+            "choices": [{
+                "message": {"content": "已经生成但没有结束的部分正文"},
+                "finish_reason": "length",
+            }],
+            "usage": {"total_tokens": 512},
+        }
+
+
 class _EmptyOpenAISession(_FakeSession):
     def post(self, url, **kwargs):
         self.calls.append({"url": url, **kwargs})
         return _EmptyOpenAIResponse()
+
+
+class _PartialOpenAISession(_FakeSession):
+    def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        return _PartialOpenAIResponse()
 
 
 @pytest.mark.asyncio
@@ -117,6 +143,32 @@ async def test_openai_provider_never_exposes_reasoning_as_final_content(monkeypa
             "compress the narration",
             "original narration",
             temperature=0.2,
+            max_tokens=512,
+        )
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_rejects_partial_content_when_finish_reason_is_length(monkeypatch):
+    session = _PartialOpenAISession()
+    provider = ProviderConfig(
+        provider_name="partial-model",
+        base_url="https://api.example.com",
+        api_key="test-key",
+        model_name="partial-test",
+    )
+    client = LLMClient(providers=[provider], default=provider.provider_name)
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    with pytest.raises(OutputTruncatedError, match=r"finish_reason=length"):
+        await client._call_openai_compatible(
+            provider,
+            "system",
+            "user",
+            temperature=0.7,
             max_tokens=512,
         )
 
@@ -314,6 +366,40 @@ async def test_call_stream_openai_length_truncation_raises(monkeypatch):
 
     with pytest.raises(OutputTruncatedError):
         await client.call_stream("system", "hello", max_tokens=512)
+
+
+@pytest.mark.asyncio
+async def test_call_stream_openai_partial_length_truncation_raises(monkeypatch):
+    session = _FakeStreamSession(
+        _openai_sse_lines([("部分正文", ""), ("", "length")])
+    )
+    provider = ProviderConfig(
+        provider_name="reasoning-model",
+        base_url="https://api.example.com",
+        api_key="k",
+        model_name="m",
+    )
+    client = LLMClient(providers=[provider], default="reasoning-model")
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    with pytest.raises(OutputTruncatedError):
+        await client.call_stream(
+            "system",
+            "hello",
+            max_tokens=512,
+            on_delta=on_delta,
+        )
+
+    assert deltas == ["部分正文"]
 
 
 @pytest.mark.asyncio

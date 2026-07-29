@@ -6,7 +6,7 @@ import pytest
 
 from src.commands.round_llm import _NarrationDeltaFilter, call_llm_with_tag_retry
 from src.engine.game_instance import GameInstance
-from src.llm.client import LLMResponse
+from src.llm.client import LLMResponse, OutputTruncatedError
 
 
 def _make_response(content: str, provider: str = "stream-test") -> LLMResponse:
@@ -45,6 +45,31 @@ class StreamingLLM:
             await on_delta(content[:mid])
             await on_delta(content[mid:])
         return _make_response(content)
+
+
+class LengthRetryStreamingLLM:
+    """None 表示本次流式输出因 token 上限截断，其余值表示成功响应。"""
+
+    default = "stream-test"
+
+    def __init__(self, outcomes: list[str | None]) -> None:
+        self._outcomes = list(outcomes)
+        self._i = 0
+        self.max_tokens: list[int] = []
+
+    async def call_stream(self, system_prompt: str = "", user_message: str = "", *,
+                          temperature: float = 0.7, max_tokens: int = 1024,
+                          on_delta=None, **kwargs) -> LLMResponse:
+        self.max_tokens.append(max_tokens)
+        outcome = self._outcomes[min(self._i, len(self._outcomes) - 1)]
+        self._i += 1
+        if outcome is None:
+            if on_delta:
+                await on_delta("尚未完成的叙事。" * 20)
+            raise OutputTruncatedError("max_tokens")
+        if on_delta:
+            await on_delta(outcome)
+        return _make_response(outcome)
 
 
 @pytest.mark.asyncio
@@ -143,6 +168,77 @@ async def test_call_llm_with_tag_retry_streams_narration_only():
     assert resets == []
     assert llm.stream_calls == 1
     assert "青铜钥匙" in response.content
+
+
+@pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_stream_length_budgets_reach_four_times():
+    llm = LengthRetryStreamingLLM([None, None, "最终叙事。"])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+    deltas: list[str] = []
+    resets: list[int] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    async def on_reset() -> None:
+        resets.append(1)
+        deltas.clear()
+
+    response, _data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    assert llm.max_tokens == [1024, 2048, 4096]
+    assert len(resets) == 2
+    assert "".join(deltas) == "最终叙事。"
+    assert response.narration == "最终叙事。"
+
+
+@pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_stream_length_stops_after_four_times():
+    llm = LengthRetryStreamingLLM([None])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+    resets: list[int] = []
+
+    async def on_delta(_text: str) -> None:
+        pass
+
+    async def on_reset() -> None:
+        resets.append(1)
+
+    with pytest.raises(OutputTruncatedError):
+        await call_llm_with_tag_retry(
+            llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+            on_delta=on_delta, on_reset=on_reset,
+        )
+
+    assert llm.max_tokens == [1024, 2048, 4096]
+    assert len(resets) == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_length_retry_does_not_consume_dice_rewrite():
+    bad = "你没能打开门。"
+    good = "你成功打开了门。"
+    llm = LengthRetryStreamingLLM([None, bad, good])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+    resets: list[int] = []
+
+    async def on_delta(_text: str) -> None:
+        pass
+
+    async def on_reset() -> None:
+        resets.append(1)
+
+    response, _data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    assert llm.max_tokens == [1024, 2048, 1024]
+    assert len(resets) == 2
+    assert response.narration == good
 
 
 @pytest.mark.asyncio

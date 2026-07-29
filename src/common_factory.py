@@ -42,7 +42,7 @@ def create_trpg_subsystems(
     embedding_max_input: int = 0,
     proxy_url: str = "",
     auto_recover: bool = False,
-    narrative_max_tokens: int = 1536,
+    narrative_max_tokens: int = 2048,
     character_gen_max_tokens: int = 2048,
     summary_max_tokens: int = 400,
     brief_max_tokens: int = 300,

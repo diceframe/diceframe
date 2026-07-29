@@ -17,6 +17,21 @@ LENGTH_RETRY_FACTOR = 2    # finish_reason=length 时重试放大 max_tokens 的
 LENGTH_RETRY_MAX_MULT = 4  # 最大放大到原始 max_tokens 的多少倍
 
 
+def length_retry_budgets(base_max_tokens: int) -> tuple[int, ...]:
+    """返回输出截断时共用的 token 预算序列。"""
+    if base_max_tokens <= 0:
+        raise ValueError("base_max_tokens 必须大于 0")
+
+    budgets = [base_max_tokens]
+    limit = base_max_tokens * LENGTH_RETRY_MAX_MULT
+    while len(budgets) < MAX_RETRIES:
+        bumped = min(budgets[-1] * LENGTH_RETRY_FACTOR, limit)
+        if bumped <= budgets[-1]:
+            break
+        budgets.append(bumped)
+    return tuple(budgets)
+
+
 # 按 HTTP 状态码的退避策略
 _RETRY_BACKOFF: dict[int, float] = {
     429: 5.0,     # Rate Limit → 较长等待
@@ -29,10 +44,10 @@ _RETRYABLE_STATUSES = frozenset(_RETRY_BACKOFF) | {408}  # 408 Timeout 也可重
 
 
 class OutputTruncatedError(ValueError):
-    """模型输出被 max_tokens 截断且未返回正文（finish_reason=length / stop_reason=max_tokens）。
+    """模型输出被 max_tokens 截断（finish_reason=length / stop_reason=max_tokens）。
 
-    继承 ValueError 以保持"空正文即报错"的原有语义；call() 据此在重试时
-    自动提高 max_tokens，而不是用相同预算对推理模型原地重试。
+    即使已经返回部分正文也不能当作完整结果；call() 据此在重试时自动提高
+    max_tokens，而不是保存缺少结尾或结构化状态的半截回复。
     """
 
     def __init__(self, finish_reason: str = "length"):
@@ -124,7 +139,8 @@ class LLMClient:
 
         last_error = None
         last_backoff = BASE_DELAY
-        current_max_tokens = max_tokens
+        retry_budgets = length_retry_budgets(max_tokens)
+        current_max_tokens = retry_budgets[0]
         for attempt_num in range(1, MAX_RETRIES + 1):
             for provider in ordered:
                 try:
@@ -170,10 +186,9 @@ class LLMClient:
                     continue
             if attempt_num < MAX_RETRIES:
                 if isinstance(last_error, OutputTruncatedError):
-                    bumped = min(
-                        current_max_tokens * LENGTH_RETRY_FACTOR,
-                        max_tokens * LENGTH_RETRY_MAX_MULT,
-                    )
+                    bumped = retry_budgets[
+                        min(attempt_num, len(retry_budgets) - 1)
+                    ]
                     if bumped > current_max_tokens:
                         logger.info(
                             "输出截断，下次重试提高 max_tokens: %d -> %d",
@@ -204,9 +219,9 @@ class LLMClient:
         内部累积完整正文后走同一个 _to_response 解析，保证流式/非流式结果同构。
 
         供应商在开始流式前失败（连接/HTTP 错误/超时）时按 fallback 顺序与退避重试，
-        行为与 call() 一致；流式过程中途失败则抛出，由调用方决定是否重试。空正文且
-        finish_reason=length 时抛 OutputTruncatedError，不在内部放大预算，由调用方
-        提高 max_tokens 后重新调用（与 call() 的截断处理对齐）。
+        行为与 call() 一致；流式过程中途失败则抛出，由调用方决定是否重试。
+        finish_reason=length 时即使已有部分正文也抛 OutputTruncatedError，不在内部
+        放大预算，由调用方提高 max_tokens 后重新调用（与 call() 的截断处理对齐）。
         """
         primary = self.providers[force_provider or self.default]
         ordered = [primary] + [
@@ -326,10 +341,10 @@ class LLMClient:
 
         choice = data["choices"][0]
         content = choice["message"].get("content") or ""
+        finish_reason = str(choice.get("finish_reason") or "unknown")
+        if finish_reason == "length":
+            raise OutputTruncatedError(finish_reason)
         if not content.strip():
-            finish_reason = str(choice.get("finish_reason") or "unknown")
-            if finish_reason == "length":
-                raise OutputTruncatedError(finish_reason)
             raise ValueError(
                 f"模型未返回最终正文 (finish_reason={finish_reason})"
             )
@@ -379,8 +394,12 @@ class LLMClient:
             data = await resp.json()
 
         content = _anthropic_text_content(data)
-        if not content.strip() and data.get("stop_reason") == "max_tokens":
+        if data.get("stop_reason") == "max_tokens":
             raise OutputTruncatedError("max_tokens")
+        if not content.strip():
+            raise ValueError(
+                f"模型未返回最终正文 (stop_reason={data.get('stop_reason') or 'unknown'})"
+            )
         usage = data.get("usage", {})
         total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
         return self._to_response(content, total_tokens, provider.provider_name)
@@ -483,9 +502,9 @@ class LLMClient:
                     total_tokens = int(usage.get("total_tokens", 0) or 0)
 
         content = "".join(content_parts)
+        if finish_reason == "length":
+            raise OutputTruncatedError(finish_reason)
         if not content.strip():
-            if finish_reason == "length":
-                raise OutputTruncatedError(finish_reason)
             raise ValueError(f"模型未返回最终正文 (finish_reason={finish_reason})")
         return content, total_tokens, finish_reason
 
@@ -567,9 +586,9 @@ class LLMClient:
                     output_tokens = int(usage.get("output_tokens", 0) or 0)
 
         content = "".join(content_parts)
+        if stop_reason == "max_tokens":
+            raise OutputTruncatedError("max_tokens")
         if not content.strip():
-            if stop_reason == "max_tokens":
-                raise OutputTruncatedError("max_tokens")
             raise ValueError(f"模型未返回最终正文 (stop_reason={stop_reason})")
         total_tokens = input_tokens + output_tokens
         return content, total_tokens, stop_reason
