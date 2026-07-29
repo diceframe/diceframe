@@ -63,6 +63,47 @@ GM 创建游戏后，可以复制邀请链接发给其他玩家。
 
 GM 可以在游戏页查看玩家状态。有人临时不在时，可以标记“暂离”；暂离玩家不会阻塞回合，剧情里默认跟随队伍，不主动做重大决定。回来后再恢复即可。
 
+## 外网联机
+
+如果玩家和 GM 不在同一个局域网，邀请链接还需要配合内网穿透、虚拟局域网或路由器端口映射工具使用。DiceFrame 不与下面提到的第三方服务存在合作关系，请根据价格、网络环境和隐私政策自行选择。
+
+第三方工具需要连接到 DiceFrame 的本地网页地址：
+
+```text
+Windows 便携版或源码运行：http://127.0.0.1:18000
+默认 Docker 部署：http://127.0.0.1:9876
+```
+
+如果你修改过 Web 端口，请填写实际能在本机浏览器中打开的地址。隧道程序和 DiceFrame 不在同一台设备或同一个 Docker 容器时，`127.0.0.1` 通常要改为 DiceFrame 所在设备的局域网地址、容器名或 Docker 网关地址。
+
+### SakuraFrp
+
+SakuraFrp 提供 Windows、macOS、Linux、OpenWrt 和 Docker 客户端，并有免费使用方案。具体安装、节点限制、域名和 HTTPS 配置以 [SakuraFrp Web 应用穿透指南](https://doc.natfrp.com/app/http.html) 为准。
+
+用 TCP 隧道连接 Windows 上的 DiceFrame 时，关键配置是：
+
+```text
+隧道类型：TCP
+本地 IP：127.0.0.1
+本地端口：18000
+```
+
+SakuraFrp 官方要求通过 TCP 隧道转发 HTTP 网页时选择非内地节点。分享前请确认最终地址能从手机流量或其他网络打开，并优先使用其 HTTPS、自动 HTTPS 或免费子域名能力。
+
+### Cloudflare Tunnel
+
+Cloudflare Tunnel 可在免费套餐中使用，通过主动建立的隧道把域名指向本地服务，不要求公网 IP，也不需要在路由器上开放入站端口。它更适合已经有域名、希望长期保留固定 HTTPS 地址的 GM。创建正式隧道后，把 Public Hostname 的服务地址指向 `http://127.0.0.1:18000`；Docker 默认部署则指向实际可访问的 `9876` 端口。具体步骤见 [Cloudflare Tunnel 官方文档](https://developers.cloudflare.com/tunnel/)。
+
+不要把无需账号、会生成随机 `trycloudflare.com` 地址的 Quick Tunnel 当作 DiceFrame 的正式联机方案。Cloudflare 官方说明 Quick Tunnel 不支持 Server-Sent Events，而 DiceFrame 用它实时同步剧情和游戏状态。
+
+### 对外分享前
+
+- 先在“设置 → 访问密码”设置一个不容易猜到的密码。
+- 优先分享 HTTPS 地址，避免通过明文 HTTP 传输访问密码和游戏内容。
+- 只映射 DiceFrame 的网页端口，不要同时暴露 NAS 管理页、数据库或 `data/` 目录。
+- 游戏结束后可以关闭隧道；第三方服务的账号、实名、流量和费用由该服务商负责。
+- DiceFrame 有基础访问限流，但不能替代专业的抗 DDoS 服务。
+
 ## 掷骰流程
 
 有些行动会直接叙事，有些行动需要检定。

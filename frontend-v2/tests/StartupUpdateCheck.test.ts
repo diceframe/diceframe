@@ -8,6 +8,7 @@ import StartupUpdateCheck from '../src/components/common/StartupUpdateCheck.vue'
 const mocks = vi.hoisted(() => ({
   checkForUpdates: vi.fn(),
   info: vi.fn(),
+  destroy: vi.fn(),
 }))
 
 vi.mock('../src/composables/useUpdateCheck', () => ({
@@ -32,6 +33,8 @@ describe('StartupUpdateCheck', () => {
     localStorage.clear()
     mocks.checkForUpdates.mockReset()
     mocks.info.mockReset()
+    mocks.destroy.mockReset()
+    mocks.info.mockReturnValue({ destroy: mocks.destroy })
     i18n.global.locale.value = 'zh-CN'
   })
 
@@ -74,5 +77,39 @@ describe('StartupUpdateCheck', () => {
       section: 'about',
       focus: 'update',
     })
+  })
+
+  it('closes an existing update dialog after entering the login page', async () => {
+    mocks.checkForUpdates.mockResolvedValue({
+      ok: true,
+      update_available: true,
+      latest: {
+        version: '9.9.9',
+        tag_name: 'v9.9.9',
+        body: '更新说明',
+      },
+    })
+    const emptyView = defineComponent({ template: '<div />' })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/overview', name: 'overview', component: emptyView },
+        { path: '/login', name: 'login', component: emptyView },
+      ],
+    })
+    await router.push({ name: 'overview' })
+    await router.isReady()
+
+    mount(StartupUpdateCheck, {
+      global: { plugins: [i18n, router] },
+    })
+    await flushPromises()
+
+    expect(mocks.info).toHaveBeenCalledOnce()
+    await router.push({ name: 'login' })
+    await flushPromises()
+
+    expect(mocks.destroy).toHaveBeenCalledOnce()
+    expect(mocks.checkForUpdates).toHaveBeenCalledOnce()
   })
 })

@@ -9,6 +9,7 @@ export function isNotFoundError(error: unknown): boolean {
 }
 
 function isPlayerShareLocation(): boolean {
+  if (location.hash.startsWith('#/join')) return true
   const q = new URLSearchParams(location.hash.split('?')[1] || '')
   return q.has('user') || q.get('share') === '1' || q.get('share') === 'true' || q.get('share') === 'yes'
 }
@@ -100,6 +101,20 @@ export async function validateAccessToken(value: string): Promise<void> {
 
 export function setAccessToken(value: string) { localStorage.setItem(tokenKey, value) }
 export function hasAccessToken(): boolean { return !!localStorage.getItem(tokenKey) }
+
+export type OwnerAccessStatus = 'allowed' | 'login-required' | 'unavailable'
+
+export async function checkOwnerAccess(): Promise<OwnerAccessStatus> {
+  try {
+    // Do not use apiUrl(): a player share query must never grant access to owner pages.
+    const response = await fetch('/api/me', { headers: authHeaders(undefined, false) })
+    if (response.status === 401) return 'login-required'
+    return response.ok ? 'allowed' : 'unavailable'
+  } catch {
+    // A temporary network failure should not trap local users on the login page.
+    return 'unavailable'
+  }
+}
 
 export async function gameEventSource(gameKey: string): Promise<EventSource> {
   const result = await api<{ ticket: string }>(`/games/${encodeURIComponent(gameKey)}/sse-ticket`, { method: 'POST' })

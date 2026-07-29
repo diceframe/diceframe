@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { h, onMounted, watch } from 'vue'
+import { h, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { DialogOptions } from 'naive-ui'
+import type { DialogOptions, DialogReactive } from 'naive-ui'
 import { errorMessage } from '@/api/client'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { getDialog } from '@/composables/useNaiveBridge'
@@ -13,6 +13,7 @@ const { checkForUpdates } = useUpdateCheck()
 const { t } = useLocale()
 // Show at most once per process; cross-version dedupe is handled below.
 let notified = false
+let activeDialog: DialogReactive | null = null
 
 function shouldSkipCurrentRoute(): boolean {
   if (route.name === 'login' || route.name === 'join') return true
@@ -58,11 +59,15 @@ function showUpdateDialog(version: string, body: string) {
       query: { section: 'about', focus: 'update' },
     }),
   }
-  dialog.info(cfg)
+  activeDialog = dialog.info(cfg)
 }
 
 async function checkOnce() {
-  if (shouldSkipCurrentRoute()) return
+  if (shouldSkipCurrentRoute()) {
+    activeDialog?.destroy()
+    activeDialog = null
+    return
+  }
   try {
     const result = await checkForUpdates()
     if (!notified && result?.ok && result.update_available && result.latest) {
@@ -83,6 +88,7 @@ async function checkOnce() {
 
 onMounted(checkOnce)
 watch(() => [route.name, route.query.user, route.query.share], checkOnce)
+onBeforeUnmount(() => activeDialog?.destroy())
 </script>
 
 <template></template>
