@@ -4,6 +4,10 @@ const tokenKey = 'trpg_access_token'
 
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message) } }
 
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
 function isPlayerShareLocation(): boolean {
   const q = new URLSearchParams(location.hash.split('?')[1] || '')
   return q.has('user') || q.get('share') === '1' || q.get('share') === 'true' || q.get('share') === 'yes'

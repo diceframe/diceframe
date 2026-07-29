@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { ChevronBack, ChevronForward } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
-import { api, apiBlob } from '@/api/client'
+import { api, apiBlob, isNotFoundError } from '@/api/client'
 import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CommandResponse, HealthResponse, JsonObject, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { useGame } from '@/composables/useGame'
 import { useToast } from '@/composables/useToast'
@@ -295,10 +295,11 @@ async function loadPlayContext() {
     try {
       await api(`/games/${encodeURIComponent(game.currentGame.value)}/claim-gm`, { method: 'POST', body: '{}' })
     } catch (e: unknown) {
-      game.error.value = errorMessage(e)
+      if (!isNotFoundError(e)) game.error.value = errorMessage(e)
     }
   }
   await game.refresh()
+  if (!game.currentGame.value) return
   game.connect()
   try {
     const healthRequest: Promise<HealthResponse> = game.isGm.value ? api<HealthResponse>(`/games/${encodeURIComponent(game.currentGame.value)}/health?include_resolved=true`) : Promise.resolve({ events: [] })

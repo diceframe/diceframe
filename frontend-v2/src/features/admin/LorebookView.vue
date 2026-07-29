@@ -231,7 +231,6 @@ async function importLore(e: Event) {
   <section class="view archive-page lorebook-page">
     <header class="view-title archive-hero">
       <div>
-        <span class="section-kicker">{{ t('navLorebook') }}</span>
         <h1>{{ t('navLorebook') }}</h1>
         <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
         <p v-else class="muted">{{ t('standaloneLorebookHint') }}</p>

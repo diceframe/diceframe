@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, errorMessage } from '@/api/client'
+import { api, errorMessage, isNotFoundError } from '@/api/client'
 import type { GameDetail, GameLogResponse, HealthResponse, LogEntry, LorebookResponse, LoreEntry, PrivateLogResponse, PrivateMessage } from '@/api/types'
-import { readCurrentGame } from '@/stores/gameContext'
+import { clearCurrentGame, readCurrentGame } from '@/stores/gameContext'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
 
@@ -37,7 +37,7 @@ function buildLore(entries: LoreEntry[] = []): LoreKeywords {
 }
 
 async function load() {
-  error.value = ''; data.value = { log: [] }; gameDetail.value = null; healthData.value = null; privateMsgs.value = []
+  error.value = ''; data.value = { log: [] }; gameDetail.value = null; healthData.value = null; privateMsgs.value = []; total.value = 0
   if (!game.value) return
   try {
     const logParams = new URLSearchParams({ page: String(page.value), per_page: String(pageSize.value) })
@@ -59,7 +59,14 @@ async function load() {
       } catch { lore = undefined }
     }
     data.value = { ...log, _lore: lore }
-  } catch (e: unknown) { error.value = errorMessage(e) }
+  } catch (e: unknown) {
+    if (isNotFoundError(e)) {
+      clearCurrentGame(game.value)
+      game.value = ''
+      return
+    }
+    error.value = errorMessage(e)
+  }
 }
 onMounted(load)
 
@@ -131,7 +138,7 @@ const hasSystem = computed(() => statusChips.value.length || recentHealth.value.
       <div>
         <h1>{{ t('gameLogs') }}</h1>
         <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
-        <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
+        <p v-else class="muted">{{ t('noAdventureLogsHint') }}</p>
       </div>
       <button @click="load">{{ t('refresh') }}</button>
     </header>

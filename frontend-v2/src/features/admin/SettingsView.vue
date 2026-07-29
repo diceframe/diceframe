@@ -76,6 +76,13 @@ const passwordConfirm = ref('')
 const loginHistory = ref<LoginAuditEntry[]>([])
 const loginHistoryLoading = ref(false)
 const loginHistoryError = ref('')
+const loginHistoryPage = ref(1)
+const loginHistoryPageSize = 10
+const loginHistoryTotalPages = computed(() => Math.max(1, Math.ceil(loginHistory.value.length / loginHistoryPageSize)))
+const pagedLoginHistory = computed(() => {
+  const start = (loginHistoryPage.value - 1) * loginHistoryPageSize
+  return loginHistory.value.slice(start, start + loginHistoryPageSize)
+})
 const botToken = ref('')
 const botTokenBusy = ref(false)
 const locationOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin
@@ -243,7 +250,8 @@ async function loadLoginHistory() {
   loginHistoryError.value = ''
   try {
     const result = await api<LoginAuditResponse>('/login-history')
-    loginHistory.value = result.entries
+    loginHistory.value = result.entries || []
+    loginHistoryPage.value = Math.min(loginHistoryPage.value, loginHistoryTotalPages.value)
   } catch (e: unknown) {
     loginHistoryError.value = errorMessage(e)
   } finally {
@@ -254,6 +262,11 @@ async function loadLoginHistory() {
 function formatLoginTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function goLoginHistoryPage(page: number) {
+  if (page < 1 || page > loginHistoryTotalPages.value) return
+  loginHistoryPage.value = page
 }
 
 async function clearProxy() {
@@ -608,15 +621,26 @@ function redownloadUpdatePackage() {
               </NButton>
             </div>
             <p v-if="loginHistoryError" class="error-text">{{ loginHistoryError }}</p>
-            <div v-else-if="loginHistory.length" class="login-history-list">
-              <div v-for="(entry, index) in loginHistory" :key="`${entry.at}-${entry.ip}-${index}`" class="login-history-row">
-                <span>{{ formatLoginTime(entry.at) }}</span>
-                <code>{{ entry.ip }}</code>
-                <NTag :type="entry.success ? 'success' : 'error'" size="small" round>
-                  {{ entry.success ? t('loginSucceeded') : t('loginFailed') }}
-                </NTag>
+            <template v-else-if="loginHistory.length">
+              <div class="login-history-list">
+                <div v-for="(entry, index) in pagedLoginHistory" :key="`${entry.at}-${entry.ip}-${index}`" class="login-history-row">
+                  <span>{{ formatLoginTime(entry.at) }}</span>
+                  <code>{{ entry.ip }}</code>
+                  <NTag :type="entry.success ? 'success' : 'error'" size="small" round>
+                    {{ entry.success ? t('loginSucceeded') : t('loginFailed') }}
+                  </NTag>
+                </div>
               </div>
-            </div>
+              <nav v-if="loginHistoryTotalPages > 1" class="memory-pager login-history-pager">
+                <NButton size="small" :disabled="loginHistoryPage <= 1" @click="goLoginHistoryPage(loginHistoryPage - 1)">
+                  {{ t('previousPage') }}
+                </NButton>
+                <span>{{ t('pageOf', { page: loginHistoryPage, total: loginHistoryTotalPages }) }}</span>
+                <NButton size="small" :disabled="loginHistoryPage >= loginHistoryTotalPages" @click="goLoginHistoryPage(loginHistoryPage + 1)">
+                  {{ t('nextPage') }}
+                </NButton>
+              </nav>
+            </template>
             <p v-else-if="!loginHistoryLoading" class="muted">{{ t('noLoginHistory') }}</p>
           </div>
 

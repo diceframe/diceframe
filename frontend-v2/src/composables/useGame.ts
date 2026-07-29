@@ -1,10 +1,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, gameEventSource, hasAccessToken } from '@/api/client'
+import { api, gameEventSource, hasAccessToken, isNotFoundError } from '@/api/client'
 import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage } from '@/api/types'
 import type { LoreKeywords } from '@/utils/renderer'
-import { gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
+import { clearCurrentGame, gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 
 const KEY_MAP:Record<string,keyof LoreKeywords>={npc:'npc',location:'location',item:'item',faction:'faction',event:'event',puzzle:'puzzle',other:'other',lore:'other'}
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || 'Load failed') }
@@ -69,6 +69,32 @@ export function useGame(){
     }, AUTO_REFRESH_DELAY)
   }
 
+  function clearMissingGame(gameKey: string) {
+    if (currentGame.value !== gameKey) return
+    clearCurrentGame(gameKey)
+    currentGame.value = ''
+    detail.value = null
+    players.value = []
+    log.value = []
+    privateMessages.value = []
+    map.value = { locations: [] }
+    lore.value = {}
+    loreEntries.value = []
+    liveNarration.value = ''
+    error.value = ''
+    source?.close()
+    source = null
+    clearRefreshTimer()
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = undefined
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+    }
+  }
+
   async function refresh(silent=false){
     const gameKey = currentGame.value
     if(!gameKey)return
@@ -105,6 +131,10 @@ export function useGame(){
       }
       error.value=''
     }catch(e:unknown){
+      if (isNotFoundError(e)) {
+        clearMissingGame(gameKey)
+        return
+      }
       if(!silent || !detail.value) error.value=errorMessage(e)
     }finally{if(!silent)loading.value=false}
   }

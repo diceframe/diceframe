@@ -95,7 +95,6 @@ async function deleteMemory(item: MemoryEntry) {
   <section class="view archive-page memory-page">
     <header class="archive-hero">
       <div>
-        <span class="section-kicker">{{ t('longTermMemory') }}</span>
         <h1>{{ t('memoryArchive') }}</h1>
         <p v-if="game">{{ t('currentSave') }}: {{ game }}</p>
         <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>

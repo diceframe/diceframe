@@ -698,6 +698,7 @@ export const zhCN = {
   characterManagement: '角色管理',
   currentSave: '当前存档',
   noSaveSelectedHint: '未选择存档，请在游玩页进入一局游戏。',
+  noAdventureLogsHint: '还没有冒险记录。创建或进入一个冒险后，这里会显示日志。',
   newCharacterCard: '新建角色卡',
   currentGameCharacters: '本局角色',
   pointsToAllocate: '待分配 {points} 点',

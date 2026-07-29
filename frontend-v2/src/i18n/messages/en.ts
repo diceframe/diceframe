@@ -698,6 +698,7 @@ export const en = {
   characterManagement: 'Character Management',
   currentSave: 'Current Save',
   noSaveSelectedHint: 'No save selected. Enter a game from the Play page first.',
+  noAdventureLogsHint: 'No adventure records yet. Logs will appear here after you create or enter an adventure.',
   newCharacterCard: 'New Character Card',
   currentGameCharacters: 'Current Game Characters',
   pointsToAllocate: '{points} points to allocate',
