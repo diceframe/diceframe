@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
@@ -106,6 +107,41 @@ def game_detail(api: "WebAPI", game_key: str) -> dict[str, Any] | None:
         "multiplayer": inst.multiplayer_status(),
         "plot_tracker": inst.plot_tracker.to_dict() if inst.plot_tracker else None,
         "recap": _public_recap(inst),
+    }
+
+
+def _saved_world_id(api: "WebAPI", game_key: tuple[str, ...]) -> str:
+    save_path = api._reg._save_path(game_key)
+    for path in (save_path, save_path.with_name("state.backup.json")):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("读取待删除存档的世界 ID 失败: %s", path, exc_info=True)
+            continue
+        return str(data.get("world_id") or "")
+    return ""
+
+
+def delete_game(api: "WebAPI", game_key: str) -> dict[str, Any]:
+    """Delete one save and release its game-scoped template when no save uses it."""
+    parsed_key = api._parse_key(game_key)
+    instance = api._reg.get(parsed_key)
+    save_dir = api._reg._save_path(parsed_key).parent
+    if not instance and not save_dir.exists():
+        return {"ok": False, "error": "存档目录不存在"}
+    world_id = str(getattr(instance, "world_id", "") or "") or _saved_world_id(api, parsed_key)
+    try:
+        shutil.rmtree(save_dir)
+    except Exception as exc:
+        logger.warning("删除存档目录失败: %s", save_dir, exc_info=True)
+        return {"ok": False, "error": f"删除存档目录失败: {exc}"}
+    api._reg.remove(parsed_key)
+    removed_templates = api.cleanup_orphan_game_templates(world_id) if world_id else 0
+    return {
+        "ok": True,
+        "world_template_removed": bool(removed_templates),
     }
 
 
@@ -617,6 +653,9 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
                     "default_rule": resolved_rule,
                     "starter_lorebook": [],
                 }
+                if create_lorebook and not custom_world:
+                    min_template["_diceframe_managed"] = "game"
+                    min_template["_diceframe_owner_game"] = _GAME_KEY_SEP.join(game_key)
                 if cats:
                     min_template["item_categories"] = cats
                 api._worlds_dir.mkdir(parents=True, exist_ok=True)

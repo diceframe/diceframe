@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import json
 import secrets
-import shutil
 from urllib.parse import quote
 
 from aiohttp import web
@@ -34,19 +33,6 @@ def _read_saved_gm_uid(registry, gk: tuple) -> str:
         except Exception:
             logger.warning("读取存档 GM 身份失败: %s", path, exc_info=True)
     return ""
-
-
-def _remove_save_dir(registry, gk: tuple) -> tuple[bool, str]:
-    save_dir = registry._save_path(gk).parent
-    if not save_dir.exists():
-        return False, "存档目录不存在"
-    try:
-        shutil.rmtree(save_dir)
-    except Exception as exc:
-        logger.warning("删除存档目录失败: %s", save_dir, exc_info=True)
-        return False, f"删除存档目录失败: {exc}"
-    registry.remove(gk)
-    return True, ""
 
 
 def _can_delete_save(request: web.Request, session_uid: str, gm_uid: str) -> bool:
@@ -785,11 +771,11 @@ async def api_batch_delete_games(request: web.Request) -> web.Response:
         if not _can_delete_save(request, session_uid, gm_uid):
             failed.append({"key": raw, "error": "非 GM 不可删除"})
             continue
-        ok, error = _remove_save_dir(registry, gk)
-        if ok:
+        result = api.delete_game(raw)
+        if result.get("ok"):
             deleted.append(raw)
         else:
-            failed.append({"key": raw, "error": error})
+            failed.append({"key": raw, "error": str(result.get("error") or "删除失败")})
     return web.json_response({"ok": True, "deleted": deleted, "failed": failed})
 
 
@@ -812,11 +798,12 @@ async def api_delete_game(request: web.Request) -> web.Response:
         return web.json_response({"error": "存档缺少 GM 身份，拒绝删除"}, status=403)
     if not _can_delete_save(request, session_uid, gm_uid):
         return web.json_response({"error": "仅 GM 可删除游戏"}, status=403)
-    ok, error = _remove_save_dir(registry, gk)
-    if not ok:
+    result = api.delete_game(request.match_info["game_key"])
+    if not result.get("ok"):
+        error = str(result.get("error") or "删除失败")
         status = 404 if error == "存档目录不存在" else 500
         return web.json_response({"error": error}, status=status)
-    return web.json_response({"ok": True})
+    return web.json_response(result)
 
 
 def register_games(app: web.Application) -> None:

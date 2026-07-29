@@ -508,10 +508,13 @@ async def on_startup(app: web.Application) -> None:
     app["plugin_host"] = plugin_host
     app["api"] = _make_api(subsystems, plugin_host)
     app["updater"] = updater_svc.UpdaterService(DATA_DIR, ROOT, plugin_host.mirrors if plugin_host else None)
-    await plugin_host.start_enabled()
     recovered = await subsystems.registry.recover_all()
     if recovered:
         logger.info("恢复了 %d 个存档", len(recovered))
+    removed_templates = app["api"].cleanup_orphan_game_templates()
+    if removed_templates:
+        logger.info("已清理 %d 个孤立的对局临时世界模板", removed_templates)
+    await plugin_host.start_enabled()
     app["_embedding_backfill_task"] = asyncio.create_task(_embed_pending_memories(app))
     app["_save_task"] = asyncio.create_task(_periodic_save(app))
 
@@ -568,10 +571,18 @@ async def auth_middleware(request: web.Request, handler):
             if request.path in _BOT_PUBLIC_ENDPOINTS:
                 return await handler(request)
             return web.json_response({"ok": False, "error": "Bot 代表玩家无效"}, status=403)
+        detail = api.game_detail(game_key) if api else None
+        if not detail:
+            return web.json_response(
+                {"ok": False, "error": "游戏不存在", "code": "GAME_NOT_FOUND"},
+                status=404,
+            )
         actor = str(request.headers.get("X-Bot-Actor") or "").strip()
         if not actor or not api or not api.bot_actor_allowed(game_key, actor):
-            return web.json_response({"ok": False, "error": "Bot 代表玩家无效"}, status=403)
-        detail = api.game_detail(game_key) or {}
+            return web.json_response(
+                {"ok": False, "error": "Bot 代表玩家无效", "code": "BOT_ACTOR_INVALID"},
+                status=403,
+            )
         if detail.get("player_access_open") is False and actor != detail.get("gm_uid"):
             return web.json_response({"ok": False, "error": "本局玩家入口已关闭"}, status=403)
         request["user_id"] = actor

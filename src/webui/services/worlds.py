@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,13 @@ logger = logging.getLogger("trpg")
 _LOREBOOK_ENTRY_TYPES = {"npc", "location", "item", "event", "puzzle", "faction", "other"}
 _LOREBOOK_TIERS = {"core", "background", "archived"}
 _MAX_GENERATED_LOREBOOK_CONTENT = 2000
+_LEGACY_GAME_TEMPLATE_ID = re.compile(r"^.+_(?:copy|blank)_\d+$")
+_LEGACY_GAME_TEMPLATE_SUFFIXES = (
+    "（复制世界书）",
+    "（空白世界书）",
+    " (Copied Lorebook)",
+    " (Blank Lorebook)",
+)
 
 
 def list_worlds(api: "WebAPI") -> dict[str, Any]:
@@ -202,6 +210,48 @@ def list_world_templates(api: "WebAPI") -> dict[str, Any]:
             templates.append(item)
             seen.add(str(item.get("world_id") or ""))
     return {"templates": templates, "total": len(templates)}
+
+
+def _is_game_scoped_template(data: dict[str, Any], world_id: str) -> bool:
+    if data.get("_diceframe_managed") == "game":
+        return True
+    world_name = str(data.get("world_name") or "")
+    return bool(
+        data.get("custom") is True
+        and _LEGACY_GAME_TEMPLATE_ID.fullmatch(world_id)
+        and world_name.endswith(_LEGACY_GAME_TEMPLATE_SUFFIXES)
+    )
+
+
+def cleanup_orphan_game_templates(api: "WebAPI", world_id: str = "") -> int:
+    """Remove generated copy/blank templates after their last game is gone."""
+    worlds_dir = api._worlds_dir
+    if not worlds_dir or not worlds_dir.is_dir():
+        return 0
+    referenced = {
+        str(getattr(instance, "world_id", "") or "")
+        for instance in api._reg.list_all()
+    }
+    removed = 0
+    candidates = sorted(worlds_dir.glob("*.json"))
+    if world_id:
+        candidates = [path for path in candidates if path.stem == world_id]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            template_world_id = str(data.get("world_id") or path.stem)
+            if world_id and template_world_id != world_id:
+                continue
+            if template_world_id in referenced or not _is_game_scoped_template(data, template_world_id):
+                continue
+            path.unlink()
+            removed += 1
+            logger.info("已清理孤立的对局临时世界模板: %s", path.name)
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("清理对局临时世界模板失败: %s", path, exc_info=True)
+    return removed
 
 
 def _world_template_summary(data: dict[str, Any], fallback_id: str) -> dict[str, Any]:

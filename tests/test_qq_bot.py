@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.bots.bridge_core.errors import DiceFrameHTTPError
 from src.bots.qq.adapter import QQTRPGAdapter
 from src.bots.qq.card_renderer import BRAND_FOOTER
 from src.bots.qq.main import _watch_parent_process
@@ -1221,6 +1222,48 @@ async def test_web_sync_forwards_new_round_actions_and_narration(tmp_path):
     assert len(sender.messages) == 2
     assert sender.messages[0] == ("100", "艾琳：我攻击守卫")
     assert "剑光一闪" in sender.messages[1][1]
+
+
+@pytest.mark.asyncio
+async def test_web_sync_unbinds_deleted_game_after_repeated_not_found(tmp_path):
+    class MissingGameAPI(FakeAPI):
+        async def game_detail(self, game_key, actor):
+            raise DiceFrameHTTPError(
+                "游戏不存在",
+                status=404,
+                code="GAME_NOT_FOUND",
+            )
+
+    store = QQSessionStore(tmp_path / "sessions.json")
+    await store.bind_group("100", "web|deleted|bot", "42", "gm-1")
+    adapter = QQTRPGAdapter(MissingGameAPI(), store, FakeSender(), qq_config())
+
+    await adapter._poll_web_notifications()
+    await adapter._poll_web_notifications()
+    assert store.group("100") is not None
+
+    await adapter._poll_web_notifications()
+
+    assert store.group("100") is None
+    persisted = json.loads((tmp_path / "sessions.json").read_text(encoding="utf-8"))
+    assert persisted["groups"] == {}
+    assert persisted["players"] == {}
+
+
+@pytest.mark.asyncio
+async def test_web_sync_keeps_binding_for_unrelated_forbidden_error(tmp_path):
+    class ClosedGameAPI(FakeAPI):
+        async def game_detail(self, game_key, actor):
+            raise DiceFrameHTTPError("本局玩家入口已关闭", status=403)
+
+    store = QQSessionStore(tmp_path / "sessions.json")
+    await store.bind_group("100", "web|closed|bot", "42", "gm-1")
+    adapter = QQTRPGAdapter(ClosedGameAPI(), store, FakeSender(), qq_config())
+
+    for _ in range(4):
+        await adapter._poll_web_notifications()
+
+    assert store.group("100") is not None
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from src.bots.bridge_core.errors import DiceFrameHTTPError
 from src.bots.bridge_core.language import bridge_is_english
+
+_STALE_BINDING_FAILURE_LIMIT = 3
 
 
 class QQWebSyncMixin:
@@ -15,9 +18,37 @@ class QQWebSyncMixin:
                 continue
             try:
                 detail = await self.api.game_detail(game_key, gm_uid)
+            except DiceFrameHTTPError as exc:
+                stale_binding = (
+                    exc.code in {"GAME_NOT_FOUND", "BOT_ACTOR_INVALID"}
+                    or exc.status == 404
+                    or (exc.status == 403 and str(exc) == "Bot 代表玩家无效")
+                )
+                if stale_binding:
+                    failures = self._web_sync_failures.get(group_id, 0) + 1
+                    self._web_sync_failures[group_id] = failures
+                    if failures >= _STALE_BINDING_FAILURE_LIMIT:
+                        await self.store.unbind_group(group_id)
+                        self._web_sync_failures.pop(group_id, None)
+                        self._web_sync_last_round.pop(game_key, None)
+                        self._web_sync_seen_actions.pop(game_key, None)
+                        self.logger.warning(
+                            "Web 同步绑定已失效并自动解除: group=%s game=%s code=%s status=%s",
+                            group_id, game_key, exc.code or "-", exc.status or "-",
+                        )
+                        continue
+                    self.logger.warning(
+                        "Web 同步绑定校验失败（%d/%d）: group=%s game=%s code=%s status=%s",
+                        failures, _STALE_BINDING_FAILURE_LIMIT,
+                        group_id, game_key, exc.code or "-", exc.status or "-",
+                    )
+                    continue
+                self.logger.warning("Web 同步轮询 game_detail 失败: %s", game_key, exc_info=True)
+                continue
             except Exception:
                 self.logger.warning("Web 同步轮询 game_detail 失败: %s", game_key, exc_info=True)
                 continue
+            self._web_sync_failures.pop(group_id, None)
             if not isinstance(detail, dict):
                 continue
             recap = detail.get("recap") or {}

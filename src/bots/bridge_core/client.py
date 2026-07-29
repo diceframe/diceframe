@@ -170,12 +170,22 @@ class DiceFrameClient:
                 data = await response.json(content_type=None)
             except Exception as exc:
                 text = await response.text()
-                raise DiceFrameHTTPError(f"DiceFrame 返回了非 JSON 响应：HTTP {response.status} {text[:120]}") from exc
+                raise DiceFrameHTTPError(
+                    f"DiceFrame 返回了非 JSON 响应：HTTP {response.status} {text[:120]}",
+                    status=response.status,
+                ) from exc
             if response.status >= 400:
                 error = data.get("error") or data.get("message") or f"HTTP {response.status}"
-                raise DiceFrameHTTPError(str(error))
+                raise DiceFrameHTTPError(
+                    str(error),
+                    status=response.status,
+                    code=str(data.get("code") or ""),
+                )
             if isinstance(data, dict) and data.get("ok") is False:
-                raise DiceFrameHTTPError(str(data.get("error") or data.get("narration") or "DiceFrame 请求失败"))
+                raise DiceFrameHTTPError(
+                    str(data.get("error") or data.get("narration") or "DiceFrame 请求失败"),
+                    code=str(data.get("code") or ""),
+                )
             return data if isinstance(data, dict) else {"data": data}
 
 

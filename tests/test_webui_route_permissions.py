@@ -37,6 +37,16 @@ class FakeAPI:
         self.calls.append(("switch", game_key, world_id))
         return {"ok": True, "world_id": world_id}
 
+    def delete_game(self, game_key: str) -> dict:
+        key = self._parse_key(game_key)
+        save_dir = self.registry._save_path(key).parent
+        if not save_dir.exists():
+            return {"ok": False, "error": "存档目录不存在"}
+        import shutil
+        shutil.rmtree(save_dir)
+        self.registry.remove(key)
+        return {"ok": True}
+
     def get_log(self, game_key: str, page: int, per_page: int) -> dict:
         self.calls.append(("log", game_key, page, per_page))
         return {"log": [], "total": 0, "page": page, "total_pages": 1}

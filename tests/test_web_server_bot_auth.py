@@ -72,12 +72,13 @@ async def _identity(request: web.Request) -> web.Response:
 class FakeAPI:
     def __init__(self) -> None:
         self._players = {"actor-1"}
+        self.exists = True
 
     def bot_actor_allowed(self, game_key: str, user_id: str) -> bool:
         return user_id in self._players
 
     def game_detail(self, game_key: str) -> dict:
-        return {"player_access_open": True, "gm_uid": "actor-1"}
+        return {"player_access_open": True, "gm_uid": "actor-1"} if self.exists else None
 
 
 class FakePluginHost:
@@ -171,6 +172,21 @@ async def test_bot_game_action_with_valid_actor_allowed(bot_enabled):
             json={},
         )
         assert r.status == 200
+
+
+@pytest.mark.asyncio
+async def test_bot_deleted_game_returns_machine_readable_not_found(bot_enabled):
+    api = FakeAPI()
+    api.exists = False
+    app = _make_app(api)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post(
+            "/api/games/web%7Cx%7Cy/action",
+            headers={"X-Bot-Token": "tok", "X-Bot-Actor": "actor-1"},
+            json={},
+        )
+        assert response.status == 404
+        assert (await response.json())["code"] == "GAME_NOT_FOUND"
 
 
 @pytest.mark.asyncio

@@ -1053,7 +1053,14 @@ async def test_blank_lorebook_from_template_keeps_starter_lorebook_empty(web_api
     assert result["ok"] is True
     template_data = json.loads((worlds_dir / "template_world_blank_case.json").read_text(encoding="utf-8"))
     assert template_data["starter_lorebook"] == []
+    assert template_data["_diceframe_managed"] == "game"
+    assert template_data["_diceframe_owner_game"] == result["game_key"]
     assert lorebook.list_entries("template_world_blank_case") == []
+
+    deleted = api.delete_game(result["game_key"])
+
+    assert deleted == {"ok": True, "world_template_removed": True}
+    assert not (worlds_dir / "template_world_blank_case.json").exists()
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1091,43 @@ async def test_copy_lorebook_copies_selected_source_entries(web_api):
     entries = lorebook.list_entries("template_world_copy_case")
     assert [entry["name"] for entry in entries] == ["抄录者"]
     assert entries[0]["world_id"] == "template_world_copy_case"
+
+
+def test_cleanup_orphan_legacy_copy_template_preserves_referenced_copy(web_api):
+    api, _lorebook, registry, _fake_llm, worlds_dir = web_api
+    world_id = "template_world_copy_1785176322339"
+    path = worlds_dir / f"{world_id}.json"
+    path.write_text(json.dumps({
+        "world_id": world_id,
+        "world_name": "贝克兰德（复制世界书）",
+        "custom": True,
+    }, ensure_ascii=False), encoding="utf-8")
+    instance = SimpleNamespace(
+        game_key=("web", "copy-user", "web_bot"),
+        world_id=world_id,
+    )
+    registry.register(instance)
+
+    assert api.cleanup_orphan_game_templates() == 0
+    assert path.exists()
+
+    registry.remove(instance.game_key)
+    assert api.cleanup_orphan_game_templates() == 1
+    assert not path.exists()
+
+
+def test_cleanup_does_not_remove_user_template_that_only_looks_like_copy(web_api):
+    api, _lorebook, _registry, _fake_llm, worlds_dir = web_api
+    world_id = "my_world_copy_1785176322339"
+    path = worlds_dir / f"{world_id}.json"
+    path.write_text(json.dumps({
+        "world_id": world_id,
+        "world_name": "我主动保存的世界",
+        "custom": True,
+    }, ensure_ascii=False), encoding="utf-8")
+
+    assert api.cleanup_orphan_game_templates() == 0
+    assert path.exists()
 
 
 @pytest.mark.asyncio

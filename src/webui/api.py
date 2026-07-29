@@ -236,6 +236,9 @@ class WebAPI:
     def game_detail(self, game_key: str) -> dict[str, Any] | None:
         return games.game_detail(self, game_key)
 
+    def delete_game(self, game_key: str) -> dict[str, Any]:
+        return games.delete_game(self, game_key)
+
     async def get_bot_bind_token(self, game_key: str, rotate: bool = False) -> dict[str, Any]:
         return await bot_access.get_bind_token(self, game_key, rotate)
 
@@ -421,6 +424,9 @@ class WebAPI:
 
     def list_world_templates(self) -> dict[str, Any]:
         return worlds.list_world_templates(self)
+
+    def cleanup_orphan_game_templates(self, world_id: str = "") -> int:
+        return worlds.cleanup_orphan_game_templates(self, world_id)
 
     # ---- 创建游戏 ----
 

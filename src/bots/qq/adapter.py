@@ -142,6 +142,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         self.character_wizards: dict[str, dict[str, Any]] = {}
         self._web_sync_last_round: dict[str, int] = {}
         self._web_sync_seen_actions: dict[str, set[str]] = {}
+        self._web_sync_failures: dict[str, int] = {}
         self._group_action_inflight: dict[str, bool] = {}
 
     async def handle_payload(self, payload: dict[str, Any]) -> None:
