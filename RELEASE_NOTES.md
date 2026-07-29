@@ -1,4 +1,4 @@
-# DiceFrame v1.7.2
+# DiceFrame v1.7.3
 
 ## 中文
 
@@ -23,8 +23,8 @@
 
 ### 下载指南
 
-- **普通 Windows 用户**：下载 `DiceFrame-v1.7.2-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.7.2-windows.zip`。
+- **普通 Windows 用户**：下载 `DiceFrame-v1.7.3-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.7.3-windows.zip`。
 - `.sha256` 是更新校验文件，普通用户不需要手动下载。
 
 ## English
@@ -50,6 +50,6 @@ This release makes DiceFrame safer to share through port forwarding and complete
 
 ### Download Guide
 
-- **Most Windows users**: Download `DiceFrame-v1.7.2-windows-portable.zip`.
-- **Source package users**: Download `DiceFrame-v1.7.2-windows.zip`.
+- **Most Windows users**: Download `DiceFrame-v1.7.3-windows-portable.zip`.
+- **Source package users**: Download `DiceFrame-v1.7.3-windows.zip`.
 - `.sha256` files are used for update verification and do not need to be downloaded manually.
