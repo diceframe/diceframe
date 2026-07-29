@@ -11,7 +11,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
-import { useUpdater } from '@/composables/useUpdater'
+import { updateStateForVersion, useUpdater } from '@/composables/useUpdater'
 import { useLocale } from '@/composables/useLocale'
 import { api, errorMessage } from '@/api/client'
 import type { MessageKey } from '@/i18n'
@@ -34,7 +34,7 @@ const route = useRoute()
 const toast = useToast()
 const { confirm } = useConfirm()
 const { updateInfo, updateChecking, checkForUpdates } = useUpdateCheck()
-const { updateStatus, reloadCountdown, isDownloading, isUpdateBusy, downloadPercent, startDownload, applyUpdate, refreshStatus } = useUpdater()
+const { updateStatus, reloadCountdown, downloadPercent, startDownload, applyUpdate, refreshStatus } = useUpdater()
 const { t } = useLocale()
 
 const section = ref<SectionId>('api')
@@ -93,6 +93,21 @@ const requiredUpdateKind = computed<UpdatePackageKind | null>(() => {
   const mode = updateStatus.value?.self_update.mode
   return mode === 'source' || mode === 'portable' ? mode : null
 })
+const latestUpdateVersion = computed(() => (
+  updateInfo.value?.latest?.version || updateInfo.value?.latest?.tag_name || ''
+))
+const displayedUpdateState = computed(() => updateStateForVersion(
+  updateStatus.value,
+  latestUpdateVersion.value,
+))
+const isDisplayedUpdateDownloading = computed(() => (
+  displayedUpdateState.value === 'downloading' || displayedUpdateState.value === 'verifying'
+))
+const isDisplayedUpdateBusy = computed(() => (
+  isDisplayedUpdateDownloading.value
+  || displayedUpdateState.value === 'applying'
+  || displayedUpdateState.value === 'restarting'
+))
 const updateTagType = computed<StatusTone>(() => {
   if (!updateInfo.value) return 'default'
   if (!updateInfo.value.ok) return 'error'
@@ -643,7 +658,7 @@ function redownloadUpdatePackage() {
                     : (updateStatus.self_update.hint || t('updateSelfUpdateUnsupported')) }}
                 </div>
                 <template v-else>
-                  <div v-if="updateStatus.state === 'staged'" class="update-staged">
+                  <div v-if="displayedUpdateState === 'staged'" class="update-staged">
                     <NTag type="success" size="small" round>{{ t('updateStaged') }}</NTag>
                     <span class="muted">{{ t('updateStagedHint') }}</span>
                     <div class="actions-row">
@@ -651,31 +666,31 @@ function redownloadUpdatePackage() {
                       <NButton v-if="requiredUpdateKind" @click="redownloadUpdatePackage">{{ t('redownloadUpdate') }}</NButton>
                     </div>
                   </div>
-                  <div v-else-if="updateStatus.state === 'failed'" class="error-text">
+                  <div v-else-if="displayedUpdateState === 'failed'" class="error-text">
                     {{ updateStatus.path ? t('updateApplyFailed') : t('updateDownloadFailed') }}: {{ updateStatus.error }}
                   </div>
-                  <div v-else-if="updateStatus.state === 'applying'" class="muted">
+                  <div v-else-if="displayedUpdateState === 'applying'" class="muted">
                     {{ t('updateApplying') }}
                   </div>
-                  <div v-else-if="updateStatus.state === 'restarting'" class="muted">
+                  <div v-else-if="displayedUpdateState === 'restarting'" class="muted">
                     {{ t('updateRestarting') }}
                   </div>
-                  <div v-else-if="updateStatus.state === 'done'" class="update-staged">
+                  <div v-else-if="displayedUpdateState === 'done'" class="update-staged">
                     <NTag type="success" size="small" round>{{ t('updateApplied') }}</NTag>
                     <span v-if="reloadCountdown !== null" class="muted">{{ t('updateReloadCountdown', { seconds: reloadCountdown }) }}</span>
                     <span v-else-if="updateStatus.restart_needed" class="muted">{{ t('updateRestartNeeded') }}</span>
                   </div>
-                  <div v-else-if="updateStatus.state === 'rolled-back'" class="error-text">
+                  <div v-else-if="displayedUpdateState === 'rolled-back'" class="error-text">
                     {{ t('updateRolledBack') }}: {{ updateStatus.error }}
                   </div>
-                  <div v-else-if="isDownloading" class="update-progress">
+                  <div v-else-if="isDisplayedUpdateDownloading" class="update-progress">
                     <div class="update-progress-head">
                       <span>{{ t('updateDownloading') }}</span>
                       <span class="muted">{{ updateStatus.mirror_used || '-' }}</span>
                     </div>
                     <NProgress :percentage="downloadPercent" />
                   </div>
-                  <div v-if="!isUpdateBusy && !['staged', 'done'].includes(updateStatus.state)" class="actions-row">
+                  <div v-if="!isDisplayedUpdateBusy && !['staged', 'done'].includes(displayedUpdateState)" class="actions-row">
                     <NButton v-if="requiredUpdateKind" @click="downloadUpdatePackage(requiredUpdateKind)">
                       {{ requiredUpdateKind === 'portable' ? t('downloadUpdatePortable') : t('downloadUpdateSource') }}
                     </NButton>

@@ -14,6 +14,17 @@ const DOWNLOAD_STATES = new Set<UpdateStatusResponse['state']>(['downloading', '
 const RELOAD_DELAY_SECONDS = 5
 const isDownloading = computed(() => DOWNLOAD_STATES.has(updateStatus.value?.state || 'idle'))
 const isUpdateBusy = computed(() => ACTIVE_STATES.has(updateStatus.value?.state || 'idle'))
+
+export function updateStateForVersion(
+  status: Pick<UpdateStatusResponse, 'state' | 'version'> | null,
+  targetVersion?: string,
+): UpdateStatusResponse['state'] {
+  const normalize = (value?: string) => String(value || '').trim().replace(/^v/i, '')
+  const statusVersion = normalize(status?.version)
+  const target = normalize(targetVersion)
+  return statusVersion && target && statusVersion === target ? status?.state || 'idle' : 'idle'
+}
+
 const downloadPercent = computed(() => {
   const s = updateStatus.value
   if (!s || !s.total_bytes) return 0
