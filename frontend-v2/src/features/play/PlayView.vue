@@ -345,7 +345,6 @@ watch(showGmThinking, (thinking) => {
         <div class="play-titleblock">
           <span class="play-eyebrow">{{ roleLabel }} · {{ tableMode }}</span>
           <h1>{{ game.detail.value?.world_name || 'DiceFrame' }}</h1>
-          <p>{{ sceneTitle }} · {{ t('roundLabel', { round: game.detail.value?.round_number || 0 }) }}</p>
         </div>
       </div>
       <div class="play-hud-stats" :aria-label="t('gameStatus')">

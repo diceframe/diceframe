@@ -362,7 +362,7 @@ function redownloadUpdatePackage() {
       <article v-for="item in systemStatusItems" :key="item.label" class="system-status-card">
         <div class="system-status-head">
           <span>{{ item.label }}</span>
-          <NTag :type="item.tone" size="small" round>{{ item.value }}</NTag>
+          <NTag :type="item.tone" :class="['system-status-tag', `tone-${item.tone}`]" size="small" round>{{ item.value }}</NTag>
         </div>
         <p>{{ item.detail }}</p>
       </article>

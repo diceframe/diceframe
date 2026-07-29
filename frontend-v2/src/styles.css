@@ -522,3 +522,117 @@ body.light .update-dialog-notes{background:rgba(255,247,223,.7);border-color:rgb
   .quick-actions{margin-bottom:4px}
   .composer-row textarea{min-height:58px}
 }
+
+/* Light theme contrast: replace dark-theme neon accents with readable ink colors. */
+body.light button:disabled{opacity:.68}
+body.light .round-divider{color:#6f5230}
+body.light .message.player strong{color:#315b3b!important}
+body.light .mode-tabs button{opacity:.9}
+
+body.light .acted.done,
+body.light .badge-active,
+body.light .plugin-status.running,
+body.light .tag-badge.hp-up{
+  color:#236b36;
+  background:rgba(64,133,75,.14);
+  border-color:rgba(35,107,54,.38);
+}
+body.light .dice-crit{color:#236b36}
+
+body.light .acted.wait,
+body.light .tag-badge.gold{
+  color:#765b00;
+  background:rgba(181,143,30,.14);
+  border-color:rgba(118,91,0,.34);
+}
+
+body.light .tag-deceased,
+body.light .tag-badge.hp-dn{
+  color:#8b2e2a;
+  background:rgba(159,61,53,.12);
+  border-color:rgba(139,46,42,.34);
+}
+body.light .dice-fumble,
+body.light .error-text,
+body.light .error-banner,
+body.light .rule-warn-card,
+body.light .confirm-title.danger{color:#8b2e2a}
+
+body.light .tag-warn,
+body.light .tag-badge.pay,
+body.light .tag-badge.quest{
+  color:#85440e;
+  background:rgba(197,103,26,.13);
+  border-color:rgba(133,68,14,.34);
+}
+body.light .tag-gm,
+body.light .tag-badge.npc{
+  color:#1f5681;
+  background:rgba(55,113,158,.12);
+  border-color:rgba(31,86,129,.34);
+}
+body.light .tag-badge.scene{
+  color:#65408c;
+  background:rgba(112,75,148,.12);
+  border-color:rgba(101,64,140,.34);
+}
+body.light .tag-badge.loot{
+  color:#14665c;
+  background:rgba(35,133,121,.12);
+  border-color:rgba(20,102,92,.34);
+}
+body.light .tag-badge.decision{
+  color:#8a315b;
+  background:rgba(168,66,113,.11);
+  border-color:rgba(138,49,91,.32);
+}
+
+body.light .kw-npc{color:#7a2635;background:#f2d5d8;box-shadow:inset 0 -1px 0 #c77982}
+body.light .kw-place{color:#684817;background:#f3dfad;box-shadow:inset 0 -1px 0 #b88a49}
+body.light .kw-item{color:#285f36;background:#dbe9d5;box-shadow:inset 0 -1px 0 #78a57f}
+body.light .kw-faction{color:#51407f;background:#e2dcf0;box-shadow:inset 0 -1px 0 #8d7bb5}
+body.light .kw-event{color:#7a3e16;background:#f4d8bc;box-shadow:inset 0 -1px 0 #c4824d}
+body.light .kw-puzzle{color:#175d69;background:#d4e9e9;box-shadow:inset 0 -1px 0 #6ba7ad}
+body.light .kw-other{color:#514536;background:#e7dcc7;box-shadow:inset 0 -1px 0 #a39176}
+body.light .kw-quote{color:#684817;background:#f5e6ba;box-shadow:inset 0 -1px 0 #b99753}
+
+body.light .system-status-tag.tone-success{
+  --n-color:#e8f3df!important;
+  --n-text-color:#28663a!important;
+  --n-border:1px solid rgba(40,102,58,.38)!important;
+}
+
+/* Keep the desktop play HUD compact without clipping its title or status rows. */
+@media(min-width:801px){
+  .play-hud{
+    flex:0 0 auto;
+    min-height:58px;
+    padding:5px 10px;
+    gap:8px;
+    row-gap:4px;
+  }
+  .play-hud .play-hud-main{gap:9px}
+  .play-titleblock{
+    flex:1 1 auto;
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    align-items:baseline;
+  }
+  .play-eyebrow{
+    grid-column:1/-1;
+    margin-bottom:0;
+    font-size:11px;
+    line-height:1.2;
+  }
+  .play-titleblock h1{
+    font-size:20px;
+    line-height:1.2;
+  }
+  .hud-stat{padding:4px 7px}
+  .hud-stat strong{font-size:12px;line-height:1.2}
+  .hud-stat small{margin-top:1px;font-size:10px;line-height:1.2}
+  .play-toolbar button{min-height:30px;padding:0 8px}
+}
+@media(min-width:981px){
+  .play-layout{height:calc(100dvh - 58px)}
+}

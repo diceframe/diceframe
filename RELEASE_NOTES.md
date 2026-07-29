@@ -1,63 +1,55 @@
-# DiceFrame v1.6.3
+# DiceFrame v1.7.0
 
 ## 中文
 
-这个版本补齐了应用更新流程，也带来了更流畅的叙事显示、购买确认和模型配置引导。
+这个版本让 DiceFrame 更适合通过端口映射邀请朋友游玩，并补齐了群聊 Bot 的中英文体验和插件扩展能力。
 
 ### 新功能
 
-- **应用更新**：可以直接在设置页检查、下载并应用新版本。
-- **叙事逐字显示**：GM 叙述会逐步显示，不用再等整段内容生成完。
-- **模型配置引导**：创建冒险时如果还没有配置模型 API，页面会给出提示，并能直接前往设置页。
-- **购买确认**：购买物品前会先交给付款玩家确认；余额足够并确认后，才会扣款和发放物品，多人游戏同样适用。
+- **公网访问保护**：加入轻量请求限流和更清楚的操作频繁提示，降低大量连续请求对游戏的影响。
+- **最近登录记录**：设置页可以查看最近的登录时间、来源 IP 和结果，记录会自动限制数量。
+- **中英文群聊 Bot**：Bot 会跟随对局语言显示帮助、状态、前情、地图、支付和错误提示，英文对局可以直接使用英文命令。
+- **群聊展示扩展**：插件可以增加 Bot 命令，或把状态、地图等回复替换为自定义文字、图片和卡片；扩展失败时会自动使用内置展示。
 
 ### 优化与修复
 
-- 更新提示现在可直接前往设置页的版本更新区域。
-- 设置页只会提供适合当前安装方式的更新包，避免便携版和源码版混用。
-- 修复网络较慢时更新包反复从头下载的问题。
-- 便携版更新完成后会自动刷新页面。
-- 更新成功后会清理下载包，并限制保留的旧版本与源码备份数量。
-- 调整设置页版本更新区域的位置。
-- 优化长篇叙事的生成和显示体验。
-- 修复部分情况下玩家看不到 GM 叙述的问题。
-- 修复模型内部状态标签偶尔出现在叙事正文中的问题。
-- 调整中英文用户手册的开头说明。
-- 调整 README 首页链接布局。
+- 减少私下部署的 DiceFrame 页面被搜索引擎收录。
+- 补充常用安全响应头，并改进登录与接口访问保护。
+- 修复未设置固定密码时，部分情况下页面却显示已经设置密码的问题。
+- “忘记密码”说明现在会明确指出重置文件应放在 `data` 目录。
+- 改善日间主题的文字、状态标签和高亮内容对比度。
+- 调整游玩页顶部栏高度和排版，避免内容上下溢出，并移除与场景卡片重复的信息。
+- 更新 Bot Bridge、QQ / NapCat 和插件开发文档。
 
 ### 下载指南
 
-- **普通 Windows 用户**：下载 `DiceFrame-v1.6.3-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.6.3-windows.zip`。
+- **普通 Windows 用户**：下载 `DiceFrame-v1.7.0-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.7.0-windows.zip`。
 - `.sha256` 是更新校验文件，普通用户不需要手动下载。
 
 ## English
 
-This release completes the application update flow and adds smoother narration, purchase confirmation, and model setup guidance.
+This release makes DiceFrame safer to share through port forwarding and completes the bilingual chat Bot experience and extension support.
 
 ### New Features
 
-- **Application updates**: Check, download, and apply new versions directly from Settings.
-- **Streaming narration**: GM narration appears progressively instead of waiting for the complete response.
-- **Model setup guidance**: When no model API is configured, the adventure creation page shows a prompt with a direct link to Settings.
-- **Purchase confirmation**: The paying player confirms a purchase before funds are deducted and items are granted, including in multiplayer games.
+- **Public access protection**: Lightweight request throttling and clearer rate-limit messages reduce the impact of repeated requests on active games.
+- **Recent login history**: Settings now shows recent login times, source IPs, and results while automatically limiting retained entries.
+- **Bilingual chat Bot**: Help, status, recap, map, payment, and error messages follow the game language, with native English commands for English games.
+- **Chat presentation extensions**: Plugins can add Bot commands or replace status, map, and other replies with custom text, images, or cards. DiceFrame falls back to its built-in presentation if an extension fails.
 
 ### Improvements and Fixes
 
-- Update notifications can now take users directly to the version update area in Settings.
-- Settings now offers only the update package that matches the current installation, preventing portable and source packages from being mixed.
-- Fixed update packages repeatedly restarting from the beginning on slower networks.
-- Portable installations now refresh the page automatically after an update completes.
-- Successful updates now remove downloaded packages and limit retained old versions and source backups.
-- Moved the version update area within Settings.
-- Improved the generation and display of long-form narration.
-- Fixed cases where players could not see GM narration.
-- Fixed internal model state tags occasionally appearing in player-facing narration.
-- Refined the introduction in both user guides.
-- Adjusted the link layout at the top of the README.
+- Reduced search-engine indexing of privately hosted DiceFrame pages.
+- Added common security response headers and improved login and API access protection.
+- Fixed cases where DiceFrame reported that a fixed password was configured when none had been set.
+- Password recovery guidance now clearly identifies the `data` directory.
+- Improved text, status tag, and highlighted-content contrast in the light theme.
+- Refined the play-page header to prevent vertical clipping and removed information duplicated by the scene card.
+- Updated Bot Bridge, QQ / NapCat, and plugin development documentation.
 
 ### Download Guide
 
-- **Most Windows users**: Download `DiceFrame-v1.6.3-windows-portable.zip`.
-- **Source package users**: Download `DiceFrame-v1.6.3-windows.zip`.
+- **Most Windows users**: Download `DiceFrame-v1.7.0-windows-portable.zip`.
+- **Source package users**: Download `DiceFrame-v1.7.0-windows.zip`.
 - `.sha256` files are used for update verification and do not need to be downloaded manually.
