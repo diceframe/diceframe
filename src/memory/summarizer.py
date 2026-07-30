@@ -115,7 +115,7 @@ def needs_summary(instance: GameInstance, interval: int = 10) -> bool:
 
 
 async def summarize(instance: GameInstance, llm_client, system_prompt: str,
-                    max_tokens: int = 400) -> None:
+                    max_tokens: int = 1024) -> None:
     """调用 LLM 生成摘要并更新 GameInstance。
 
     由每轮 LLM 调用后检查触发，不需要独立调度。

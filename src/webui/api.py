@@ -37,7 +37,7 @@ class WebAPI:
                  memory: MemoryStore, rules_dir: Path,
                  handler=None, llm_client=None, worlds_dir: Path | None = None,
                  character_gen_max_tokens: int = 2048,
-                 text_gen_max_tokens: int = 400, plugin_host=None):
+                 text_gen_max_tokens: int = 1024, plugin_host=None):
         self._reg = registry
         self._lore = lorebook
         self._mem = memory

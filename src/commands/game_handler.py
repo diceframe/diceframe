@@ -48,9 +48,9 @@ class GameHandler:
         rules_dir: Path | None = None,
         worlds_dir: Path | None = None,
         narrative_max_tokens: int = 2048,
-        summary_max_tokens: int = 400,
-        brief_max_tokens: int = 300,
-        analysis_max_tokens: int = 512,
+        summary_max_tokens: int = 1024,
+        brief_max_tokens: int = 1024,
+        analysis_max_tokens: int = 1024,
     ):
         self.registry = registry
         self._combat = CombatResolver()

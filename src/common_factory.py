@@ -44,9 +44,9 @@ def create_trpg_subsystems(
     auto_recover: bool = False,
     narrative_max_tokens: int = 2048,
     character_gen_max_tokens: int = 2048,
-    summary_max_tokens: int = 400,
-    brief_max_tokens: int = 300,
-    analysis_max_tokens: int = 512,
+    summary_max_tokens: int = 1024,
+    brief_max_tokens: int = 1024,
+    analysis_max_tokens: int = 1024,
 ) -> TRPGSubsystems:
     save_dir = data_dir / "saves"
 

@@ -49,7 +49,7 @@ logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 
 DEFAULT_NARRATIVE_MAX_TOKENS = 2048
-GENERATION_DEFAULTS_VERSION = 3
+GENERATION_DEFAULTS_VERSION = 5
 
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,6 +91,19 @@ def _load_json_object(path: Path, label: str) -> dict:
         return {}
 
 
+# 各 token 字段的迁移规则：(字段名, 旧默认值集合, 新默认值)。
+# 仅在配置值等于某个已知旧默认时提升，保留用户自定义值。
+# 默认值历史上单调递增，缺失字段按最小旧默认补全后同样提升。
+# character_gen_max_tokens 一直是 2048，无旧默认需提升，不在表中。
+_TOKEN_FIELD_MIGRATIONS: tuple[tuple[str, frozenset[int], int], ...] = (
+    ("narrative_max_tokens", frozenset({1024, 1536}), DEFAULT_NARRATIVE_MAX_TOKENS),
+    ("analysis_max_tokens", frozenset({512}), 1024),
+    ("summary_max_tokens", frozenset({400}), 1024),
+    ("brief_max_tokens", frozenset({300}), 1024),
+    ("text_gen_max_tokens", frozenset({400}), 1024),
+)
+
+
 def _migrate_generation_defaults(config: dict) -> bool:
     """一次性提升旧版默认生成额度，同时保留用户的自定义数值。"""
     try:
@@ -100,12 +113,15 @@ def _migrate_generation_defaults(config: dict) -> bool:
     if version >= GENERATION_DEFAULTS_VERSION:
         return False
 
-    try:
-        narrative_tokens = int(config.get("narrative_max_tokens", 1024) or 1024)
-    except (TypeError, ValueError):
-        narrative_tokens = 1024
-    if narrative_tokens in {1024, 1536}:
-        config["narrative_max_tokens"] = DEFAULT_NARRATIVE_MAX_TOKENS
+    for field, old_defaults, new_default in _TOKEN_FIELD_MIGRATIONS:
+        missing = min(old_defaults)
+        try:
+            current = int(config.get(field, missing) or missing)
+        except (TypeError, ValueError):
+            current = missing
+        if current in old_defaults:
+            config[field] = new_default
+
     config["generation_defaults_version"] = GENERATION_DEFAULTS_VERSION
     return True
 
@@ -162,13 +178,13 @@ NARRATIVE_MAX_TOKENS = int(os.getenv("TRPG_NARRATIVE_MAX_TOKENS")
 CHARACTER_GEN_MAX_TOKENS = int(os.getenv("TRPG_CHARACTER_GEN_MAX_TOKENS")
                                or saved.get("character_gen_max_tokens", 2048))
 SUMMARY_MAX_TOKENS = int(os.getenv("TRPG_SUMMARY_MAX_TOKENS")
-                         or saved.get("summary_max_tokens", 400))
+                         or saved.get("summary_max_tokens", 1024))
 BRIEF_MAX_TOKENS = int(os.getenv("TRPG_BRIEF_MAX_TOKENS")
-                       or saved.get("brief_max_tokens", 300))
+                       or saved.get("brief_max_tokens", 1024))
 ANALYSIS_MAX_TOKENS = int(os.getenv("TRPG_ANALYSIS_MAX_TOKENS")
-                          or saved.get("analysis_max_tokens", 512))
+                          or saved.get("analysis_max_tokens", 1024))
 TEXT_GEN_MAX_TOKENS = int(os.getenv("TRPG_TEXT_GEN_MAX_TOKENS")
-                          or saved.get("text_gen_max_tokens", 400))
+                          or saved.get("text_gen_max_tokens", 1024))
 _ENV_PROXY_URL = env_proxy_url()
 _CONFIG_PROXY_URL = secrets.get("proxy_url") or saved.get("proxy_url", "")
 PROXY_ENABLED = bool(saved.get("proxy_enabled", bool(_ENV_PROXY_URL)))
@@ -403,9 +419,9 @@ def _build_subsystems() -> TRPGSubsystems:
         proxy_url=effective_proxy_url(bool(STATE.get("proxy_enabled")), STATE.get("proxy_url", "")),
         narrative_max_tokens=int(STATE.get("narrative_max_tokens", DEFAULT_NARRATIVE_MAX_TOKENS)),
         character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
-        summary_max_tokens=int(STATE.get("summary_max_tokens", 400)),
-        brief_max_tokens=int(STATE.get("brief_max_tokens", 300)),
-        analysis_max_tokens=int(STATE.get("analysis_max_tokens", 512)),
+        summary_max_tokens=int(STATE.get("summary_max_tokens", 1024)),
+        brief_max_tokens=int(STATE.get("brief_max_tokens", 1024)),
+        analysis_max_tokens=int(STATE.get("analysis_max_tokens", 1024)),
     )
 
 
@@ -416,7 +432,7 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None) -> WebAPI:
         handler=subsystems.handler, llm_client=subsystems.llm_client,
         worlds_dir=WORLDS_DIR,
         character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
-        text_gen_max_tokens=int(STATE.get("text_gen_max_tokens", 400)),
+        text_gen_max_tokens=int(STATE.get("text_gen_max_tokens", 1024)),
         plugin_host=plugin_host,
     )
 
