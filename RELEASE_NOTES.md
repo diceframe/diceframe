@@ -1,8 +1,8 @@
-# DiceFrame v1.8.0
+# DiceFrame v1.8.1
 
 ## 中文
 
-这个版本扩展了角色与跨端游玩体验：角色可以在开团前独立创建和管理，Web 与 Bot 可共同处理幸运改判，并加入完整的角色头像系统。同时加强了模型协议隔离、插件管理和便携版更新回滚。
+这个版本扩展了角色与跨端游玩体验，并修复 v1.8.0 首次引入头像资源后导致的安装包异常膨胀。角色可以在开团前独立创建和管理，Web 与 Bot 可共同处理幸运改判，并加入完整的角色头像系统。
 
 ### 新功能
 
@@ -13,6 +13,7 @@
 
 ### 优化与修复
 
+- 将内置头像图集改为适配界面分辨率的高质量 WebP，并让便携包只保留运行所需的编译产物；发布流程会阻止 PNG 图集回流、头像重复打包和体积异常增长。
 - 加强模型输出协议隔离：异常的状态标签、检定标签和修复文本不会再混入公开叙事；必要时自动进行一次格式修复重试。
 - Token 自动升档成功后会在 GM 页面显示低干扰提示，便于发现默认预算不足；截断重试会记录实际使用档位。
 - 世界模板、世界书和角色卡按内容语言筛选，减少中英文内容混杂。
@@ -23,13 +24,13 @@
 
 ### 下载指南
 
-- **普通 Windows 用户**：下载 `DiceFrame-v1.8.0-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.8.0-windows.zip`。
+- **普通 Windows 用户**：下载 `DiceFrame-v1.8.1-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.8.1-windows.zip`。
 - `.sha256` 是更新校验文件，普通用户不需要手动下载。
 
 ## English
 
-This release expands character and cross-client play. Characters can now be created and managed before a game starts, Web and bot clients share the same Luck-spend workflow, and DiceFrame gains a complete portrait system. It also strengthens model-protocol isolation, plugin management, and portable-update rollback.
+This release expands character and cross-client play and fixes the package-size regression introduced when v1.8.0 first added portrait assets. Characters can now be created and managed before a game starts, Web and bot clients share the same Luck-spend workflow, and DiceFrame gains a complete portrait system.
 
 ### New Features
 
@@ -40,6 +41,7 @@ This release expands character and cross-client play. Characters can now be crea
 
 ### Improvements and Fixes
 
+- Converted built-in portrait atlases to high-quality, UI-sized WebP assets and removed frontend source copies from portable packages. Release validation now blocks legacy PNG atlases, duplicate portable assets, and future portrait-size regressions.
 - Strengthened model-output protocol isolation so malformed state tags, check tags, and repair text no longer leak into public narration; one strict format-repair retry is used when needed.
 - Added a subtle GM notice when automatic token-budget escalation succeeds, and retained the actual successful retry budget for diagnostics.
 - Filtered world templates, lorebooks, and character cards by content language to reduce mixed Chinese and English content.
@@ -50,6 +52,6 @@ This release expands character and cross-client play. Characters can now be crea
 
 ### Download Guide
 
-- **Most Windows users**: Download `DiceFrame-v1.8.0-windows-portable.zip`.
-- **Source package users**: Download `DiceFrame-v1.8.0-windows.zip`.
+- **Most Windows users**: Download `DiceFrame-v1.8.1-windows-portable.zip`.
+- **Source package users**: Download `DiceFrame-v1.8.1-windows.zip`.
 - `.sha256` files are used for update verification and do not need to be downloaded manually.

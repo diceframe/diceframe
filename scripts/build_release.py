@@ -24,6 +24,8 @@ from src.template_catalog import is_user_template_file
 
 DIST_DIR = ROOT / "dist"
 BUILD_ROOT = DIST_DIR / "_release_build"
+EXPECTED_BUILTIN_AVATAR_ATLASES = 12
+MAX_BUILTIN_AVATAR_COMPRESSED_BYTES = 4 * 1024 * 1024
 
 ROOT_FILES = [
     ".env.example",
@@ -219,6 +221,7 @@ def available_zip_name(path: Path) -> Path:
 def validate_zip(output_zip: Path) -> None:
     with zipfile.ZipFile(output_zip) as zf:
         names = zf.namelist()
+        infos = zf.infolist()
     bad = [name for name in names if any(pattern.search(name.replace("\\", "/")) for pattern in FORBIDDEN_ZIP_PATTERNS)]
     if bad:
         preview = "\n".join(bad[:20])
@@ -227,6 +230,29 @@ def validate_zip(output_zip: Path) -> None:
         raise RuntimeError("Release zip is missing static-v2/index.html")
     if not any("/static-v2/assets/" in name and name.endswith(".js") for name in names):
         raise RuntimeError("Release zip is missing built frontend assets")
+    validate_avatar_payload(infos, require_source=True)
+
+
+def validate_avatar_payload(infos: list[zipfile.ZipInfo], *, require_source: bool) -> None:
+    normalized = [(info, info.filename.replace("\\", "/")) for info in infos]
+    built = [info for info, name in normalized if "/static-v2/avatars/" in name and name.endswith(".webp")]
+    source = [info for info, name in normalized if "/frontend-v2/public/avatars/" in name and name.endswith(".webp")]
+    legacy_png = [name for _, name in normalized if "/avatars/" in name and name.lower().endswith(".png")]
+    if legacy_png:
+        raise RuntimeError("Release zip contains legacy PNG portrait atlases")
+    if len(built) != EXPECTED_BUILTIN_AVATAR_ATLASES:
+        raise RuntimeError(
+            f"Release zip must contain {EXPECTED_BUILTIN_AVATAR_ATLASES} built WebP portrait atlases, got {len(built)}"
+        )
+    if require_source and len(source) != EXPECTED_BUILTIN_AVATAR_ATLASES:
+        raise RuntimeError(
+            f"Source release must contain {EXPECTED_BUILTIN_AVATAR_ATLASES} source WebP portrait atlases, got {len(source)}"
+        )
+    compressed_size = sum(info.compress_size for info in built + source)
+    if compressed_size > MAX_BUILTIN_AVATAR_COMPRESSED_BYTES:
+        raise RuntimeError(
+            f"Built-in portrait payload is too large: {compressed_size} bytes; optimize assets before publishing"
+        )
 
 
 def parse_args() -> argparse.Namespace:

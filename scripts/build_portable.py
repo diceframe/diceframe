@@ -214,6 +214,7 @@ def build_windows_launcher(package_dir: Path) -> None:
 def validate_zip(output_zip: Path) -> None:
     with zipfile.ZipFile(output_zip) as zf:
         names = zf.namelist()
+        infos = zf.infolist()
     bad = [name for name in names if any(pattern.search(name.replace("\\", "/")) for pattern in FORBIDDEN_PATTERNS)]
     if bad:
         raise RuntimeError("Portable zip contains forbidden paths:\n" + "\n".join(bad[:20]))
@@ -232,6 +233,9 @@ def validate_zip(output_zip: Path) -> None:
         raise RuntimeError("Portable zip should not contain batch launchers")
     if not any("/app/static-v2/assets/" in name and name.endswith(".js") for name in names):
         raise RuntimeError("Portable zip is missing built frontend assets")
+    if any("/app/frontend-v2/" in name for name in names):
+        raise RuntimeError("Portable zip should not contain frontend source files")
+    build_release.validate_avatar_payload(infos, require_source=False)
     if not any("/python/Lib/site-packages/aiohttp/" in name for name in names):
         raise RuntimeError("Portable zip is missing aiohttp")
     if not any("/python/Lib/site-packages/PIL/" in name for name in names):
@@ -284,6 +288,7 @@ def main() -> int:
     build_release.prepare_package_tree(app_dir)
     (app_dir / "web_ui.bat").unlink(missing_ok=True)
     build_release.build_frontend(app_dir)
+    remove_generated_tree(app_dir / "frontend-v2")
     install_python_runtime(
         runtime_dir,
         args.python_version,

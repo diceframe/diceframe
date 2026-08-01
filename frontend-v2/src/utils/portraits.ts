@@ -44,7 +44,7 @@ export function builtinPortraits(ruleId?: string): BuiltinPortrait[] {
       id: `${rule}:${index}`,
       ruleId: rule,
       index,
-      image: `${import.meta.env.BASE_URL}avatars/${rule}${atlasSuffix}.png`,
+      image: `${import.meta.env.BASE_URL}avatars/${rule}${atlasSuffix}.webp`,
       position: ATLAS_POSITIONS[index % PORTRAITS_PER_ATLAS],
     }
   })

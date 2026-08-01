@@ -7,8 +7,8 @@ describe('character portraits', () => {
       const options = builtinPortraits(ruleId)
       expect(options).toHaveLength(8)
       expect(options.map(option => option.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7].map(index => `${ruleId}:${index}`))
-      expect(options.slice(0, 4).every(option => option.image.endsWith(`/avatars/${ruleId}.png`))).toBe(true)
-      expect(options.slice(4).every(option => option.image.endsWith(`/avatars/${ruleId}_2.png`))).toBe(true)
+      expect(options.slice(0, 4).every(option => option.image.endsWith(`/avatars/${ruleId}.webp`))).toBe(true)
+      expect(options.slice(4).every(option => option.image.endsWith(`/avatars/${ruleId}_2.webp`))).toBe(true)
     }
   })
 
@@ -22,7 +22,7 @@ describe('character portraits', () => {
   it('resolves portraits from the added atlas without changing their public ids', () => {
     const portrait = resolveBuiltinPortrait({ kind: 'builtin', id: 'freeform_wuxia:6' })
     expect(portrait.index).toBe(6)
-    expect(portrait.image).toMatch(/\/avatars\/freeform_wuxia_2\.png$/)
+    expect(portrait.image).toMatch(/\/avatars\/freeform_wuxia_2\.webp$/)
     expect(portrait.position).toBe('0% 100%')
   })
 
