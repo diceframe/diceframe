@@ -15,7 +15,7 @@ from src.lorebook.store import LorebookStore
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 from src.engine.world_template import load_world_template
-from src.webui.services import bot_access, bot_extensions, character_cards, characters, generation, games, logs, maps, memory, tavern, worlds, rules, plugins, system
+from src.webui.services import avatars, bot_access, bot_extensions, character_cards, characters, generation, games, logs, maps, memory, tavern, turns, worlds, rules, plugins, system
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 logger = logging.getLogger("trpg")
@@ -46,6 +46,7 @@ class WebAPI:
         self._llm_client = llm_client
         self._worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
         self._character_cards_path = self._reg.save_dir.parent / "character_cards.json"
+        self._avatars_dir = self._reg.save_dir.parent / "avatars"
         self.character_gen_max_tokens = character_gen_max_tokens
         self.text_gen_max_tokens = text_gen_max_tokens
         self._plugins = plugin_host
@@ -285,6 +286,30 @@ class WebAPI:
     async def resolve_pending_dice_for_game(self, game_key: str, user_id: str = "", source: str = "system") -> dict[str, Any]:
         return await games.resolve_pending_dice_for_game(self, game_key, user_id, source)
 
+    async def resolve_luck_decision(self, game_key: str, check_id: str, actor_uid: str, spend: bool) -> dict[str, Any]:
+        return await games.resolve_luck_decision(self, game_key, check_id, actor_uid, spend)
+
+    async def decline_pending_luck(self, game_key: str) -> dict[str, Any]:
+        return await games.decline_pending_luck(self, game_key)
+
+    async def submit_action(self, game_key: str, actor_uid: str, text: str, **kwargs) -> turns.TurnResult:
+        return await turns.submit_action(self, game_key, actor_uid, text, **kwargs)
+
+    async def resolve_luck_and_continue(
+        self,
+        game_key: str,
+        check_id: str,
+        actor_uid: str,
+        spend: bool,
+        **kwargs,
+    ) -> turns.TurnResult:
+        return await turns.resolve_luck_and_continue(
+            self, game_key, check_id, actor_uid, spend, **kwargs
+        )
+
+    async def advance_turn(self, game_key: str, actor_uid: str, **kwargs) -> turns.TurnResult:
+        return await turns.advance_round(self, game_key, actor_uid, **kwargs)
+
     def private_log(self, game_key: str) -> dict[str, Any]:
         return games.private_log(self, game_key)
 
@@ -373,6 +398,9 @@ class WebAPI:
     def list_characters(self, game_key: str) -> dict[str, Any]:
         return characters.list_characters(self, game_key)
 
+    def character_schema(self, rule_id: str, language: str = "") -> dict[str, Any]:
+        return characters.character_schema(self, rule_id, language)
+
     def get_character(self, game_key: str, user_id: str) -> dict[str, Any] | None:
         return characters.get_character(self, game_key, user_id)
 
@@ -388,6 +416,12 @@ class WebAPI:
     async def create_player(self, game_key: str, character: dict,
                            force_uid: str = "", assign_new_id: bool = False) -> dict[str, Any]:
         return await characters.create_player(self, game_key, character, force_uid, assign_new_id)
+
+    def save_avatar_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        return avatars.save_avatar_upload(self, file_data, file_name)
+
+    def avatar_file(self, asset_id: str) -> Path | None:
+        return avatars.avatar_file(self, asset_id)
 
     # ---- 剧情日志 ----
 

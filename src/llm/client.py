@@ -78,6 +78,8 @@ class LLMResponse:
     total_tokens: int           # 实际消耗的 token 数
     is_narration_only: bool     # JSON 解析失败，仅叙事
     provider_used: str          # 实际使用的供应商名称
+    token_budget_initial: int = 0  # 本次调用最初配置的最大输出 token
+    token_budget_used: int = 0     # 成功响应实际使用的最大输出 token 档位
 
 
 class LLMClient:
@@ -144,10 +146,13 @@ class LLMClient:
         for attempt_num in range(1, MAX_RETRIES + 1):
             for provider in ordered:
                 try:
-                    return await self._call_one(
+                    response = await self._call_one(
                         provider, system_prompt, user_message,
                         temperature, current_max_tokens, json_mode,
                     )
+                    response.token_budget_initial = max_tokens
+                    response.token_budget_used = current_max_tokens
+                    return response
                 except OutputTruncatedError as exc:
                     last_error = exc
                     logger.warning(
@@ -238,7 +243,10 @@ class LLMClient:
                         provider, system_prompt, user_message,
                         temperature, max_tokens, json_mode, on_delta,
                     )
-                    return self._to_response(content, total_tokens, provider.provider_name)
+                    response = self._to_response(content, total_tokens, provider.provider_name)
+                    response.token_budget_initial = max_tokens
+                    response.token_budget_used = max_tokens
+                    return response
                 except OutputTruncatedError:
                     raise
                 except aiohttp.ClientResponseError as exc:

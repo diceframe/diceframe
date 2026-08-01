@@ -28,8 +28,17 @@ from src.webui.access_password import (
 )
 from src.webui.abuse_guard import ABUSE_GUARD_KEY, AbuseGuard, abuse_guard_middleware
 from src.webui.api import WebAPI
+from src.webui.config_update import (
+    API_RUNTIME_CONFIG_KEYS,
+    MODEL_RUNTIME_CONFIG_KEYS,
+    bot_plugin_changes,
+    clean_text_value,
+    normalize_api_format,
+    prepare_config_update,
+)
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.character_cards import register_character_cards
+from src.webui.routes.avatars import register_avatars
 from src.webui.routes.rules import register_rules
 from src.webui.routes.worlds import register_worlds
 from src.webui.routes.generation import register_generation
@@ -300,24 +309,6 @@ def _public_config() -> dict:
     return public
 
 
-_SECRET_CONFIG_KEYS = {"api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token"}
-_STRING_CONFIG_KEYS = {
-    "base_url", "model", "embedding_base_url", "embedding_model",
-    "fallback1_base_url", "fallback1_model", "fallback2_base_url", "fallback2_model",
-    "public_base_url", "napcat_host", "napcat_connection_id",
-}
-_API_FORMAT_KEYS = {"api_format", "fallback1_api_format", "fallback2_api_format"}
-
-
-def _clean_text_value(value) -> str:
-    return value.strip() if isinstance(value, str) else ""
-
-
-def _normalize_api_format(value) -> str:
-    value = _clean_text_value(value).lower()
-    return "anthropic" if value == "anthropic" else "openai"
-
-
 def save_config():
     non_sensitive = {k: v for k, v in STATE.items()
                      if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")}
@@ -391,48 +382,54 @@ if _migrated:
     logger.warning("已自动迁移 API Key 到 secrets.json，config.json 中密钥已移除")
 
 
-def _build_subsystems() -> TRPGSubsystems:
-    providers = [ProviderConfig(provider_name="default", base_url=STATE["base_url"],
-                                api_key=STATE["api_key"], model_name=STATE["model"],
-                                api_format=_normalize_api_format(STATE.get("api_format")))]
+def _build_subsystems(
+    reuse: TRPGSubsystems | None = None,
+    config: dict | None = None,
+) -> TRPGSubsystems:
+    runtime_config = STATE if config is None else config
+    providers = [ProviderConfig(provider_name="default", base_url=runtime_config["base_url"],
+                                api_key=runtime_config["api_key"], model_name=runtime_config["model"],
+                                api_format=normalize_api_format(runtime_config.get("api_format")))]
     for idx in (1, 2):
-        if STATE.get(f"fallback{idx}_enabled") and STATE.get(f"fallback{idx}_base_url") and STATE.get(f"fallback{idx}_model"):
+        if runtime_config.get(f"fallback{idx}_enabled") and runtime_config.get(f"fallback{idx}_base_url") and runtime_config.get(f"fallback{idx}_model"):
             providers.append(ProviderConfig(
                 provider_name=f"fallback{idx}",
-                base_url=STATE.get(f"fallback{idx}_base_url", ""),
-                api_key=STATE.get(f"fallback{idx}_api_key") or STATE.get("api_key", ""),
-                model_name=STATE.get(f"fallback{idx}_model", ""),
-                api_format=_normalize_api_format(STATE.get(f"fallback{idx}_api_format")),
+                base_url=runtime_config.get(f"fallback{idx}_base_url", ""),
+                api_key=runtime_config.get(f"fallback{idx}_api_key") or runtime_config.get("api_key", ""),
+                model_name=runtime_config.get(f"fallback{idx}_model", ""),
+                api_format=normalize_api_format(runtime_config.get(f"fallback{idx}_api_format")),
                 fallback=True,
             ))
-    emb_base = STATE.get("embedding_base_url", "")
-    emb_enabled = STATE.get("embedding_enabled", False) and bool(emb_base)
+    emb_base = runtime_config.get("embedding_base_url", "")
+    emb_enabled = runtime_config.get("embedding_enabled", False) and bool(emb_base)
     return create_trpg_subsystems(
         data_dir=DATA_DIR, prompts_dir=PROMPTS_DIR,
         rules_dir=RULES_DIR, worlds_dir=WORLDS_DIR,
         providers=providers, default_provider="default",
         embedding_enabled=emb_enabled,
         embedding_base_url=emb_base,
-        embedding_api_key=STATE.get("embedding_api_key") or STATE.get("api_key", ""),
-        embedding_model=STATE.get("embedding_model", "nomic-embed-text"),
-        embedding_max_input=int(STATE.get("embedding_max_input", 0)),
-        proxy_url=effective_proxy_url(bool(STATE.get("proxy_enabled")), STATE.get("proxy_url", "")),
-        narrative_max_tokens=int(STATE.get("narrative_max_tokens", DEFAULT_NARRATIVE_MAX_TOKENS)),
-        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
-        summary_max_tokens=int(STATE.get("summary_max_tokens", 1024)),
-        brief_max_tokens=int(STATE.get("brief_max_tokens", 1024)),
-        analysis_max_tokens=int(STATE.get("analysis_max_tokens", 1024)),
+        embedding_api_key=runtime_config.get("embedding_api_key") or runtime_config.get("api_key", ""),
+        embedding_model=runtime_config.get("embedding_model", "nomic-embed-text"),
+        embedding_max_input=int(runtime_config.get("embedding_max_input", 0)),
+        proxy_url=effective_proxy_url(bool(runtime_config.get("proxy_enabled")), runtime_config.get("proxy_url", "")),
+        narrative_max_tokens=int(runtime_config.get("narrative_max_tokens", DEFAULT_NARRATIVE_MAX_TOKENS)),
+        character_gen_max_tokens=int(runtime_config.get("character_gen_max_tokens", 4096)),
+        summary_max_tokens=int(runtime_config.get("summary_max_tokens", 1024)),
+        brief_max_tokens=int(runtime_config.get("brief_max_tokens", 1024)),
+        analysis_max_tokens=int(runtime_config.get("analysis_max_tokens", 1024)),
+        reuse=reuse,
     )
 
 
-def _make_api(subsystems: TRPGSubsystems, plugin_host=None) -> WebAPI:
+def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None = None) -> WebAPI:
+    runtime_config = STATE if config is None else config
     return WebAPI(
         registry=subsystems.registry, lorebook=subsystems.lorebook_store,
         memory=subsystems.memory_store, rules_dir=RULES_DIR,
         handler=subsystems.handler, llm_client=subsystems.llm_client,
         worlds_dir=WORLDS_DIR,
-        character_gen_max_tokens=int(STATE.get("character_gen_max_tokens", 4096)),
-        text_gen_max_tokens=int(STATE.get("text_gen_max_tokens", 1024)),
+        character_gen_max_tokens=int(runtime_config.get("character_gen_max_tokens", 4096)),
+        text_gen_max_tokens=int(runtime_config.get("text_gen_max_tokens", 1024)),
         plugin_host=plugin_host,
     )
 
@@ -721,9 +718,9 @@ def _share_player_user_id(request: web.Request) -> str:
         return uid or request.get("user_id", "")
     if len(parts) >= 4:
         tail = parts[3]
-        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context"}:
+        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context", "avatars"}:
             return uid or request.get("user_id", "")
-        if request.method == "POST" and tail in {"players", "action", "sse-ticket"}:
+        if request.method == "POST" and tail in {"players", "action", "sse-ticket", "avatars"}:
             return uid or request.get("user_id", "")
         if request.method == "PUT" and tail == "character":
             return uid or request.get("user_id", "")
@@ -754,126 +751,118 @@ async def api_config_post(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     body = await request.json()
-    access_password_changed = bool(_clean_text_value(body.get("access_token")))
-    for k in ("api_key", "base_url", "model", "api_format", "web_port", "embedding_enabled",
-              "embedding_base_url", "embedding_model", "embedding_api_key", "embedding_max_input",
-              "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_format", "fallback1_api_key",
-              "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_format", "fallback2_api_key",
-              "narrative_max_tokens", "character_gen_max_tokens",
-              "summary_max_tokens", "brief_max_tokens",
-              "analysis_max_tokens", "text_gen_max_tokens",
-              "proxy_enabled", "proxy_url", "public_base_url", "access_token",
-              "qq_bot_enabled", "napcat_host", "napcat_port", "napcat_token",
-              "napcat_heartbeat_sec", "napcat_reconnect_delay_sec", "napcat_action_timeout_sec",
-              "napcat_reply_delay_min_sec", "napcat_reply_delay_max_sec", "napcat_command_dedup_window_sec",
-              "napcat_connection_id", "napcat_chat_filter_enabled", "napcat_show_dropped_logs",
-              "napcat_group_list_mode", "napcat_group_list", "napcat_private_list_mode",
-              "napcat_private_list", "napcat_blocked_users", "napcat_block_official_bots"):
-        if k in body:
-            if k in _SECRET_CONFIG_KEYS:
-                value = _clean_text_value(body[k])
-                if not value:
-                    continue
-                STATE[k] = hash_access_password(value) if k == "access_token" else value
-                continue
-            if k in _API_FORMAT_KEYS:
-                STATE[k] = _normalize_api_format(body[k])
-                continue
-            if k in _STRING_CONFIG_KEYS:
-                STATE[k] = _clean_text_value(body[k])
-                continue
-            if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token") and not body[k]:
-                continue
-            if k.endswith("_max_tokens"):
-                STATE[k] = max(1, int(body[k]))
-            elif k == "proxy_url":
-                proxy_url = str(body[k] or "").strip()
-                if proxy_url and not is_supported_proxy_url(proxy_url):
-                    return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://"}, status=400)
-                STATE[k] = proxy_url
-            elif k == "proxy_enabled":
-                STATE[k] = bool(body[k])
-            elif k == "qq_bot_enabled":
-                STATE[k] = bool(body[k])
-            elif k in {"napcat_chat_filter_enabled", "napcat_show_dropped_logs", "napcat_block_official_bots"}:
-                STATE[k] = bool(body[k])
-            elif k in {"napcat_heartbeat_sec", "napcat_reconnect_delay_sec", "napcat_action_timeout_sec", "napcat_command_dedup_window_sec"}:
-                value = float(body[k])
-                if value <= 0:
-                    return web.json_response({"ok": False, "error": "NapCat 时间参数必须大于 0"}, status=400)
-                STATE[k] = value
-            elif k in {"napcat_reply_delay_min_sec", "napcat_reply_delay_max_sec"}:
-                value = float(body[k])
-                if value < 0:
-                    return web.json_response({"ok": False, "error": "NapCat 回复延迟不能小于 0"}, status=400)
-                STATE[k] = value
-            elif k in {"napcat_group_list_mode", "napcat_private_list_mode"}:
-                STATE[k] = "blacklist" if body[k] == "blacklist" else "whitelist"
-            elif k in {"napcat_group_list", "napcat_private_list", "napcat_blocked_users"}:
-                values = body[k] if isinstance(body[k], list) else []
-                STATE[k] = list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
-            elif k == "napcat_port":
-                port = int(body[k])
-                if not 1 <= port <= 65535:
-                    return web.json_response({"ok": False, "error": "NapCat 端口无效"}, status=400)
-                STATE[k] = port
-            else:
-                STATE[k] = body[k]
-    active_proxy = effective_proxy_url(bool(STATE.get("proxy_enabled")), STATE.get("proxy_url", ""))
-    if STATE.get("proxy_enabled") and not active_proxy:
-        return web.json_response({"ok": False, "error": "已启用代理，但代理地址为空"}, status=400)
-    if active_proxy and not is_supported_proxy_url(active_proxy):
-        return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://"}, status=400)
-    if float(STATE.get("napcat_reply_delay_max_sec", 0)) < float(STATE.get("napcat_reply_delay_min_sec", 0)):
-        return web.json_response({"ok": False, "error": "NapCat 回复延迟上限不能小于下限"}, status=400)
-    save_config()
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "error": "配置请求必须是 JSON 对象"}, status=400)
+    reload_lock = request.app.get("_config_reload_lock")
+    if reload_lock is None:
+        reload_lock = asyncio.Lock()
+        request.app["_config_reload_lock"] = reload_lock
+    async with reload_lock:
+        return await _apply_config_update(request, body)
+
+
+async def _apply_config_update(request: web.Request, body: dict) -> web.Response:
+    prepared = prepare_config_update(STATE, body)
+    if prepared.error:
+        return web.json_response({"ok": False, "error": prepared.error}, status=400)
+    access_password_changed = prepared.access_password_changed
+    changed_keys = prepared.changed_keys
+    model_runtime_changed = bool(changed_keys & MODEL_RUNTIME_CONFIG_KEYS)
+    api_runtime_changed = bool(changed_keys & API_RUNTIME_CONFIG_KEYS)
+    old_subs = request.app.get("subsystems")
+    plugin_host = request.app.get("plugin_host")
+    old_embedding = (
+        old_subs.memory_store.embedding_client
+        if old_subs is not None and old_subs.memory_store is not None
+        else None
+    )
+    subsystems = old_subs
+    new_api = request.app.get("api")
+    try:
+        # 先用候选配置完整构建，成功后才提交 STATE 和磁盘配置。
+        if model_runtime_changed:
+            subsystems = _build_subsystems(reuse=old_subs, config=prepared.state)
+            new_api = _make_api(subsystems, plugin_host, config=prepared.state)
+        elif api_runtime_changed and old_subs is not None:
+            new_api = _make_api(old_subs, plugin_host, config=prepared.state)
+    except Exception as exc:
+        if old_subs is not None and old_subs.memory_store is not None:
+            old_subs.memory_store.embedding_client = old_embedding
+        if subsystems is not None and subsystems is not old_subs:
+            if subsystems.llm_client:
+                await subsystems.llm_client.close()
+            new_embedding = getattr(subsystems.memory_store, "embedding_client", None)
+            if new_embedding is not None and new_embedding is not old_embedding:
+                await new_embedding.close()
+        logger.exception("配置更新后的运行时重建失败")
+        return web.json_response(
+            {"ok": False, "error": f"运行时重载失败，配置未保存：{exc}"},
+            status=500,
+        )
+
+    previous_state = dict(STATE)
+    STATE.clear()
+    STATE.update(prepared.state)
+    try:
+        # save_config 保留既有无参约定；同步写盘失败时立即恢复内存状态。
+        save_config()
+    except Exception as exc:
+        STATE.clear()
+        STATE.update(previous_state)
+        if old_subs is not None and old_subs.memory_store is not None:
+            old_subs.memory_store.embedding_client = old_embedding
+        if subsystems is not None and subsystems is not old_subs:
+            if subsystems.llm_client:
+                await subsystems.llm_client.close()
+            candidate_embedding = getattr(subsystems.memory_store, "embedding_client", None)
+            if candidate_embedding is not None and candidate_embedding is not old_embedding:
+                await candidate_embedding.close()
+        logger.exception("保存候选配置失败")
+        return web.json_response({"ok": False, "error": f"配置保存失败：{exc}"}, status=500)
+
     if access_password_changed:
         _delete_access_token_file()
 
-    bot_fields = {key for key in STATE if key.startswith("napcat_")} | {"qq_bot_enabled"}
-    if set(body) & bot_fields:
-        plugin_host = request.app.get("plugin_host")
-        if plugin_host and "qq-napcat" in plugin_host.plugins:
-            legacy_to_plugin = {
-                "qq_bot_enabled":"enabled", "napcat_host":"host", "napcat_port":"port", "napcat_token":"token",
-                "napcat_heartbeat_sec":"heartbeat_sec", "napcat_reconnect_delay_sec":"reconnect_delay_sec",
-                "napcat_action_timeout_sec":"action_timeout_sec",
-                "napcat_reply_delay_min_sec":"reply_delay_min_sec",
-                "napcat_reply_delay_max_sec":"reply_delay_max_sec",
-                "napcat_command_dedup_window_sec":"command_dedup_window_sec",
-                "napcat_connection_id":"connection_id",
-                "napcat_chat_filter_enabled":"chat_filter_enabled", "napcat_show_dropped_logs":"show_dropped_logs",
-                "napcat_group_list_mode":"group_list_mode", "napcat_group_list":"group_list",
-                "napcat_private_list_mode":"private_list_mode", "napcat_private_list":"private_list",
-                "napcat_blocked_users":"blocked_users", "napcat_block_official_bots":"block_official_bots",
-            }
-            changes = {legacy_to_plugin[key]: value for key, value in body.items() if key in legacy_to_plugin}
-            await plugin_host.update_config("qq-napcat", changes)
+    plugin_warning = ""
+    plugin_changes = bot_plugin_changes(body, STATE)
+    if plugin_changes and plugin_host and "qq-napcat" in plugin_host.plugins:
+        try:
+            await plugin_host.update_config("qq-napcat", plugin_changes)
+        except Exception as exc:
+            plugin_warning = f"NapCat 插件配置同步失败：{exc}"
+            logger.exception("NapCat 插件配置同步失败")
 
-    # 修改访问密码不涉及模型运行时，避免无意义地重建并丢失当前内存中的活跃对局。
-    if set(body).issubset({"access_token"} | bot_fields):
-        return web.json_response({"ok": True, "access_password_changed": access_password_changed})
+    if model_runtime_changed and subsystems is not None:
+        request.app["subsystems"] = subsystems
+        request.app["api"] = new_api
+    elif api_runtime_changed and new_api is not None:
+        request.app["api"] = new_api
 
-    # 关闭旧 subsystems 的 HTTP session，防止泄漏
-    old_subs = request.app.get("subsystems")
-    if old_subs:
-        if old_subs.llm_client:
-            await old_subs.llm_client.close()
-        if old_subs.memory_store and old_subs.memory_store.embedding_client:
-            await old_subs.memory_store.embedding_client.close()
-    subsystems = _build_subsystems()
-    request.app["subsystems"] = subsystems
-    request.app["api"] = _make_api(subsystems, request.app.get("plugin_host"))
+    if model_runtime_changed and old_subs is not None and subsystems is not None:
+        if old_subs.llm_client and old_subs.llm_client is not subsystems.llm_client:
+            try:
+                await old_subs.llm_client.close()
+            except Exception:
+                logger.warning("关闭旧模型客户端失败", exc_info=True)
+        new_embedding = getattr(subsystems.memory_store, "embedding_client", None)
+        if old_embedding is not None and old_embedding is not new_embedding:
+            try:
+                await old_embedding.close()
+            except Exception:
+                logger.warning("关闭旧 Embedding 客户端失败", exc_info=True)
     # 配置更新后，如果 embedding 已启用，立即补齐存量记忆的向量
     emb_now = STATE.get("embedding_enabled", False) and bool(STATE.get("embedding_base_url", ""))
-    if emb_now:
+    if model_runtime_changed and emb_now and subsystems is not None:
         try:
             count = await subsystems.memory_store.embed_all_pending()
             if count:
                 logger.info("[Embedding] 配置更新后补齐 %d 条向量记忆", count)
         except Exception:
             logger.warning("配置更新后 embedding 补齐失败", exc_info=True)
-    return web.json_response({"ok": True})
+    payload = {"ok": True, "access_password_changed": access_password_changed}
+    if plugin_warning:
+        payload["warning"] = plugin_warning
+    return web.json_response(payload)
 
 
 async def api_bot_token_post(request: web.Request) -> web.Response:
@@ -927,7 +916,7 @@ def _is_safe_external_url(url: str) -> bool:
 
 async def api_test_connection(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = _clean_text_value(body.get("base_url")) or STATE.get("base_url", "")
+    base_url = clean_text_value(body.get("base_url")) or STATE.get("base_url", "")
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "base_url 非法或不允许"}, status=400)
     proxy_url = _proxy_from_test_body(body)
@@ -935,10 +924,10 @@ async def api_test_connection(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://"}, status=400)
     result = await _get_api(request).test_connection(
         base_url=base_url,
-        api_key=_clean_text_value(body.get("api_key")) or STATE.get("api_key", ""),
-        model=_clean_text_value(body.get("model")) or STATE.get("model", ""),
+        api_key=clean_text_value(body.get("api_key")) or STATE.get("api_key", ""),
+        model=clean_text_value(body.get("model")) or STATE.get("model", ""),
         proxy_url=proxy_url,
-        api_format=_normalize_api_format(body.get("api_format") or STATE.get("api_format")),
+        api_format=normalize_api_format(body.get("api_format") or STATE.get("api_format")),
     )
     return web.json_response(result)
 
@@ -955,9 +944,9 @@ def _proxy_from_test_body(body: dict) -> str:
 
 async def api_test_embedding(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = _clean_text_value(body.get("base_url"))
-    api_key = _clean_text_value(body.get("api_key")) or STATE.get("embedding_api_key") or STATE.get("api_key", "")
-    model = _clean_text_value(body.get("model")) or "nomic-embed-text"
+    base_url = clean_text_value(body.get("base_url"))
+    api_key = clean_text_value(body.get("api_key")) or STATE.get("embedding_api_key") or STATE.get("api_key", "")
+    model = clean_text_value(body.get("model")) or "nomic-embed-text"
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "Base URL 非法或不允许"})
     from src.memory.embedding import EmbeddingClient
@@ -1038,6 +1027,7 @@ app.middlewares.append(session_middleware)
 app.middlewares.append(abuse_guard_middleware)
 app.middlewares.append(auth_middleware)
 app.on_response_prepare.append(add_response_security_headers)
+app["_config_reload_lock"] = asyncio.Lock()
 app["session_manager"] = SessionManager(DATA_DIR)
 app[ABUSE_GUARD_KEY] = AbuseGuard()
 app[LOGIN_AUDIT_KEY] = LoginAuditStore(DATA_DIR)
@@ -1063,6 +1053,8 @@ def register_routes(application: web.Application) -> None:
     register_rules(application)
     # character cards
     register_character_cards(application)
+    # character portraits
+    register_avatars(application)
     # config / test
     application.router.add_get("/api/config", api_config_get)
     application.router.add_post("/api/config", api_config_post)

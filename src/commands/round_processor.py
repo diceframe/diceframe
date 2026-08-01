@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -29,6 +30,7 @@ from src.commands.round_actions import (
     collect_actions_text,
     collect_gm_directives_text,
     ensure_round_managers,
+    format_check_results_constraint,
     initialize_puzzles_from_lorebook,
 )
 from src.commands.state_recap import snapshot_public_player_state
@@ -81,9 +83,37 @@ class RoundProcessor:
         # 后台摘要任务引用持有，避免被 GC 中断
         self._pending_summary_tasks: set = set()
 
+    def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
+        """在生成叙事前结算骰值，并标记需要玩家决定的幸运选项。"""
+        if instance.round_checks_prepared:
+            return list(instance.last_checks)
+        if instance.state != GameState.ACTIVE_JUDGMENT:
+            return []
+        actions_text = collect_actions_text(instance)
+        rule_ctx = self._prompt.load_rule_context(instance, self._load_world_template)
+        instance.reset_round_checks()
+        build_dice_constraint_block(
+            instance,
+            actions_text,
+            rule_ctx.rule,
+            rule_ctx.dice_system,
+            self._dice,
+        )
+        for check in instance.last_checks:
+            if not check.get("check_id"):
+                check["check_id"] = uuid.uuid4().hex
+            if check.get("luck_spend_available"):
+                check["luck_decision"] = "pending"
+        instance.complete_round_check_preparation()
+        return list(instance.last_checks)
+
     async def process_round(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         instance = self.registry.get(instance.game_key)
         if not instance or instance.state != GameState.ACTIVE_JUDGMENT:
+            return "", None
+        self.prepare_round_checks(instance)
+        if instance.pending_luck_checks():
+            logger.info("等待幸运选择，暂不生成叙事: %s", instance.game_key)
             return "", None
         if instance._process_lock.locked():
             logger.warning("process_round 已在处理中，跳过并发调用: %s", instance.game_key)
@@ -114,13 +144,11 @@ class RoundProcessor:
 
     async def process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """实际的判定处理逻辑。"""
-        instance.pending_combat_results.clear()
-        instance.update_lorebook_timed_state()
+        # 只保留最近一轮的短期展示状态，避免旧提示或战斗结果常驻。
+        instance.begin_round_processing()
 
         ensure_round_managers(instance)
         actions_text = collect_actions_text(instance)
-        instance.last_check = None
-        instance.last_checks.clear()
 
         if instance.world_id:
             self._ensure_matcher_for_world(instance.world_id)
@@ -136,8 +164,12 @@ class RoundProcessor:
         world_data = rule_ctx.world_data
         rule = rule_ctx.rule
 
-        dice_block = ""
-        dice_block = build_dice_constraint_block(instance, actions_text, rule, dice_system, self._dice)
+        if instance.round_checks_prepared:
+            dice_block = format_check_results_constraint(instance, list(instance.last_checks))
+        else:
+            instance.reset_round_checks()
+            dice_block = build_dice_constraint_block(instance, actions_text, rule, dice_system, self._dice)
+            instance.complete_round_check_preparation()
         if dice_block:
             actions_text += dice_block
 
@@ -168,6 +200,9 @@ class RoundProcessor:
             self.llm_client, instance, gm_prompt, context, combat_model,
             dice_block, self.narrative_max_tokens, actions_text,
             on_delta=on_delta, on_reset=on_reset)
+        initial_budget = int(getattr(response, "token_budget_initial", 0) or 0)
+        used_budget = int(getattr(response, "token_budget_used", 0) or 0)
+        instance.set_token_budget_bump(initial_budget, used_budget)
         apply_parsed_data_to_response(instance, response, data)
 
         public_state_before = snapshot_public_player_state(instance)
@@ -175,7 +210,7 @@ class RoundProcessor:
 
         if response.state_update:
             self._state_applier.apply_state_update(instance, response.state_update)
-        instance.last_state_update = response.state_update or None
+        instance.set_state_update_recap(response.state_update)
 
         apply_confirmed_items(instance, data)
         apply_puzzle_updates(instance, data)
@@ -194,16 +229,10 @@ class RoundProcessor:
         store_private_messages(instance, response)
         state_msgs = append_state_change_messages(instance, response, public_state_before, data)
 
-        if consumed_directive_ids:
-            consumed = set(consumed_directive_ids)
-            instance.gm_directives = [
-                entry for entry in instance.gm_directives
-                if str(entry.get("id") or "") not in consumed
-            ]
+        instance.consume_gm_directives(set(consumed_directive_ids))
         await instance.finish_judgment(response.narration, pre_state_snapshot=round_pre_snapshot, state_changes=state_msgs)
-        if instance.log:
-            instance.log[-1]["tags_summary"] = summarize_tags(data)
-        instance.total_tokens += response.total_tokens
+        instance.set_latest_log_tags_summary(summarize_tags(data))
+        instance.record_llm_usage(response.total_tokens, calls=0)
 
         self._state_applier.tick_madness(instance)
 
@@ -212,10 +241,9 @@ class RoundProcessor:
 
         try:
             await self.registry.save(instance)
-            instance._save_fail_count = 0
+            instance.record_save_success()
         except Exception:
-            count = getattr(instance, "_save_fail_count", 0) + 1
-            instance._save_fail_count = count
+            count = instance.record_save_failure()
             logger.exception("存档失败(连续%d次) (round=%d)", count, instance.round_number)
 
         return response.narration, response.info_asymmetry

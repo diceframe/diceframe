@@ -90,5 +90,3 @@ onMounted(checkOnce)
 watch(() => [route.name, route.query.user, route.query.share], checkOnce)
 onBeforeUnmount(() => activeDialog?.destroy())
 </script>
-
-<template></template>

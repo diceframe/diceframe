@@ -43,6 +43,7 @@ PRIVATE:玩家ID:私聊消息  （仅指定玩家可见的信息。例：PRIVATE
 XP:玩家ID:额外经验值      （额外经验奖励。例：XP:web_user:50。日常探索不要频繁给）
 MANA:玩家ID:变化量        （法力消耗或回复。例：MANA:web_user:-5）
 SAN:玩家ID:变化量         （理智值增减。例：SAN:web_user:-3）
+SAN_CHECK:玩家ID:损失骰   （进行一次系统理智检定并按结果扣除理智。例：SAN_CHECK:web_user:1d6）
 LUCK:玩家ID:变化量        （幸运值增减。例：LUCK:web_user:5）
 SPELL:玩家ID:法术名       （玩家施法。例：SPELL:web_user:火球术）
 PUZZLE:谜题ID:状态        （谜题状态变更。例：PUZZLE:puzzle_001:solved）
@@ -51,6 +52,7 @@ CONFIRMED:已完成事项       （标记本轮已确认/已完成的关键事�
 MEMORY:记忆内容           （**必填**：每轮至少写1条长期记忆，记录本轮发现的关键事实/设定/人物关系/秘密。这些记忆会在后续轮次自动召回，帮助你保持剧情连贯。例：MEMORY:老铁匠的锤子被诅咒、MEMORY:公主真名是艾琳、MEMORY:梅林瞳孔发紫与晶石共鸣、MEMORY:召唤阵是三百年前的封印）
 
 info_asymmetry 的私聊消息用 PRIVATE 标签。
+标签必须保持以上大写名称和纯文本格式，只能放在 `---` 后；不得给标签加粗、加代码标记、改写名称或把标签与正文写在同一行。
 
 ## 禁止
 - 替玩家发言或做决定

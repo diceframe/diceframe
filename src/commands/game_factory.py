@@ -56,13 +56,15 @@ class GameFactory:
     ) -> GameInstance:
         instance = self.registry.get_or_create(game_key)
         async with instance._lock:
-            instance.world_id = world_id
-            instance.world_name = world_name
-            instance.group_name = group_name
-            instance.state = GameState.WAITING
-            instance.seed_code = seed_code or generate_seed_code()
-            instance.difficulty = difficulty
-            instance.language = normalize_language(language)
+            instance.configure_game(
+                world_id=world_id,
+                world_name=world_name,
+                group_name=group_name,
+                state=GameState.WAITING,
+                seed_code=seed_code or generate_seed_code(),
+                difficulty=difficulty,
+                language=normalize_language(language),
+            )
 
         world_data = self.load_world_template(world_id)
         if world_data:

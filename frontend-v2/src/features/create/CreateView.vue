@@ -7,9 +7,12 @@ import { useToast } from '@/composables/useToast'
 import { useLocale, type Locale } from '@/composables/useLocale'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
+import PortraitImage from '@/components/PortraitImage.vue'
 import { importTavernCard } from '@/utils/characterImport'
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLanguage'
+import { characterCardNeedsConversion } from '@/utils/characterCards'
 
 interface CreateCharacter extends CharacterSheet { character_name: string }
 type CreateMode = 'template' | 'custom' | 'ai'
@@ -52,8 +55,9 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 const step = ref<Step>(1)
 const activeRule = computed(() => mode.value === 'ai' ? (aiGeneratedRule.value?.rule_id || aiRule.value) : rule.value)
-const languageMatchedWorlds = computed(() => worlds.value.filter(w => gameLanguage.value === 'en' ? w.language === 'en' : w.language !== 'en'))
+const languageMatchedWorlds = computed(() => filterByContentLanguage(worlds.value, gameLanguage.value))
 const availableWorlds = computed(() => languageMatchedWorlds.value.length ? languageMatchedWorlds.value : worlds.value)
+const availableLoreWorlds = computed(() => filterByContentLanguage(loreWorlds.value, gameLanguage.value))
 const ruleAttrs = computed(() => ruleDetail.value?.attributes || [])
 const skillPool = computed(() => ruleDetail.value?.skill_pool || ruleDetail.value?.skills || [])
 const attrTotal = computed(() => ruleDetail.value?.attribute_points || 60)
@@ -66,7 +70,7 @@ const showApiSetupHint = computed(() => settingsChecked.value && !settings.error
 
 function worldIdOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_id || w.id || '') }
 function worldNameOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_name || w.name || w.id || '') }
-function worldLanguageLabel(w: WorldTemplateSummary | WorldSummary): string { return w.language === 'en' ? t('english') : t('chinese') }
+function worldLanguageLabel(w: WorldTemplateSummary | WorldSummary): string { return contentLanguageOf(w) === 'en' ? t('english') : t('chinese') }
 function worldOptionLabel(w: WorldTemplateSummary | WorldSummary): string { return `${worldNameOf(w)} · ${worldLanguageLabel(w)}` }
 function ruleNameOf(r: RuleSummary): string { return gameLanguage.value === 'en' ? String(r.rule_name_en || r.rule_name || r.rule_id) : (r.rule_name || r.rule_id) }
 function cloneCharacter<T extends CharacterSheet>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
@@ -87,6 +91,11 @@ watch(locale, (next) => { gameLanguage.value = next })
 watch([gameLanguage, worlds], () => {
   if (world.value && availableWorlds.value.some(w => worldIdOf(w) === world.value)) return
   world.value = worldIdOf(availableWorlds.value[0] || worlds.value[0] || {})
+})
+watch([gameLanguage, loreWorlds], () => {
+  if (!loreChoice.value.startsWith('copy:')) return
+  const selected = loreChoice.value.slice('copy:'.length)
+  if (!availableLoreWorlds.value.some(w => worldIdOf(w) === selected)) loreChoice.value = '__builtin__'
 })
 
 onMounted(async () => {
@@ -120,19 +129,30 @@ function onWizardSubmit(c: CharacterSheet) {
   editIdx.value = null
 }
 function onPickerPick(c: CharacterCard) {
-  characters.value.push(ensureCharacter({
+  const character = ensureCharacter({
     character_name: c.character_name,
     background: c.background || '',
     identity: c.identity || {},
     attributes: c.attributes || {},
     skills: c.skills || [],
+    equipment: c.equipment || [],
+    inventory: c.inventory || [],
+    key_items: c.key_items || [],
     gold: c.gold || 0,
     currency: c.currency,
     race: c.race,
     class: c.class,
-  }))
+    portrait: c.portrait,
+  })
+  characters.value.push(character)
   showPicker.value = false
-  toast.success(t('addedFromLibrary'))
+  if (characterCardNeedsConversion(c, activeRule.value)) {
+    editIdx.value = characters.value.length - 1
+    showWizard.value = true
+    toast.info(t('cardRuleConversionReview'))
+  } else {
+    toast.success(t('addedFromLibrary'))
+  }
 }
 async function onStImport(e: Event) {
   const input = e.target as HTMLInputElement
@@ -147,6 +167,7 @@ async function onStImport(e: Event) {
       identity: card.identity || {},
       attributes: card.attributes || {},
       skills: card.skills || [],
+      portrait: card.portrait,
     }))
     toast.success(t('importedCharacter', { name: card.character_name }))
   } catch (err: unknown) { toast.error(errorMessage(err)) }
@@ -305,7 +326,7 @@ async function create() {
           <select v-model="loreChoice">
             <option value="__builtin__">{{ t('builtinLorebook') }}</option>
             <option value="__blank__">{{ t('blankLorebook') }}</option>
-            <option v-for="w in loreWorlds" :key="w.id" :value="'copy:' + w.id">{{ t('copyFrom') }}{{ worldNameOf(w) }} · {{ worldLanguageLabel(w) }}</option>
+            <option v-for="w in availableLoreWorlds" :key="worldIdOf(w)" :value="'copy:' + worldIdOf(w)">{{ t('copyFrom') }}{{ worldNameOf(w) }} · {{ worldLanguageLabel(w) }}</option>
           </select>
         </label>
         <div class="two-cols">
@@ -319,12 +340,15 @@ async function create() {
     <div v-else-if="step === 2" class="form create-step-card">
       <div class="char-list">
         <article v-for="(c, i) in characters" :key="i" class="char-row">
-          <div>
+          <div class="character-card-summary">
+            <PortraitImage :portrait="c.portrait" :rule-id="activeRule" :seed="c.character_name || String(i)" :name="c.character_name" :size="52" />
+            <div>
             <h3>{{ c.character_name || t('unnamed') }}</h3>
             <p class="muted">
               {{ c.identity?.origin || c.race || '' }} {{ c.identity?.archetype || c.class || '' }}
               · {{ c.skills?.length || 0 }} {{ t('skills') }}
             </p>
+            </div>
           </div>
           <div class="actions">
             <button @click="openWizard(i)">{{ t('edit') }}</button>
@@ -377,6 +401,7 @@ async function create() {
     <CharacterCardPicker
       v-if="showPicker"
       :cards="cards"
+      :target-rule-id="activeRule"
       @pick="onPickerPick"
       @close="showPicker = false"
     />

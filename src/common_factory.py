@@ -47,25 +47,32 @@ def create_trpg_subsystems(
     summary_max_tokens: int = 1024,
     brief_max_tokens: int = 1024,
     analysis_max_tokens: int = 1024,
+    reuse: TRPGSubsystems | None = None,
 ) -> TRPGSubsystems:
     save_dir = data_dir / "saves"
 
-    registry = GameRegistry(save_dir)
+    registry = reuse.registry if reuse is not None else GameRegistry(save_dir)
 
     llm_client = LLMClient(providers=providers, default=default_provider, proxy_url=proxy_url)
 
-    lorebook_store = LorebookStore(data_dir / "lorebook.db")
-    lorebook_store.open()
-    seed_builtin_worlds(lorebook_store, worlds_dir)
-    lorebook_matcher = KeywordMatcher()
+    if reuse is not None:
+        lorebook_store = reuse.lorebook_store
+        lorebook_matcher = reuse.lorebook_matcher
+        memory_store = reuse.memory_store
+    else:
+        lorebook_store = LorebookStore(data_dir / "lorebook.db")
+        lorebook_store.open()
+        seed_builtin_worlds(lorebook_store, worlds_dir)
+        lorebook_matcher = KeywordMatcher()
 
-    memory_store = MemoryStore(data_dir / "memory.db")
-    memory_store.open()
+        memory_store = MemoryStore(data_dir / "memory.db")
+        memory_store.open()
 
+    embedding_client = None
     if embedding_enabled and embedding_base_url:
         from src.memory.embedding import EmbeddingClient
         emb_key = embedding_api_key or providers[0].api_key if providers else ""
-        memory_store.embedding_client = EmbeddingClient(
+        embedding_client = EmbeddingClient(
             embedding_base_url, emb_key, embedding_model or "nomic-embed-text",
             max_input_override=embedding_max_input,
             proxy_url=proxy_url,
@@ -85,6 +92,9 @@ def create_trpg_subsystems(
         brief_max_tokens=brief_max_tokens,
         analysis_max_tokens=analysis_max_tokens,
     )
+    # 仅在新运行时已经完整构建后切换 embedding 客户端，避免构建失败时
+    # 破坏仍在服务请求的旧运行时。GameRegistry 与数据库连接始终复用。
+    memory_store.embedding_client = embedding_client
 
     return TRPGSubsystems(
         registry=registry,

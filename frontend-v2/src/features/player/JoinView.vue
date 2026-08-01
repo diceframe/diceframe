@@ -2,10 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, errorMessage } from '@/api/client'
-import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterSkill, GameDetail, PlayerCreateResponse, RuleAttribute, RuleMeta } from '@/api/types'
+import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSkill, GameDetail, PlayerCreateResponse, RuleAttribute, RuleMeta } from '@/api/types'
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ruleSchema'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { useConfirm } from '@/composables/useConfirm'
+import { characterCardNeedsConversion, characterCardRuleName } from '@/utils/characterCards'
+import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 
 interface JoinSkill { name: string; value: string | number }
 interface JoinForm {
@@ -17,11 +20,13 @@ interface JoinForm {
   attributes: Record<string, number>
   skills: JoinSkill[]
   identity?: Record<string, unknown>
+  portrait?: CharacterPortrait
   [key: string]: unknown
 }
 
 const route = useRoute(), router = useRouter()
 const { locale, setLocale, t } = useLocale()
+const { confirm } = useConfirm()
 const gameKey = computed(() => String(route.query.game || ''))
 const linkUser = computed(() => route.query.user ? String(route.query.user) : '')
 const detail = ref<Partial<GameDetail>>({})
@@ -34,6 +39,7 @@ const error = ref(''), busy = ref(false)
 const sheetReady = ref(false)
 const needRoomPassword = ref(false), roomPasswordInput = ref('')
 const resumeUser = ref('')
+const backgroundLimit = 8000
 
 const fallbackAttrs = computed<RuleAttribute[]>(() => [
   { key: 'str', name: t('attrStrength'), min: 1, max: 100 },
@@ -138,11 +144,32 @@ async function verifyRoomPassword() {
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
-function applyCard(event: Event) {
-  const i = Number((event.target as HTMLSelectElement).value)
+async function applyCard(event: Event) {
+  const select = event.target as HTMLSelectElement
+  if (select.value === '') return
+  const i = Number(select.value)
   const card = cards.value[i]
   if (!card) return
-  form.value = { ...form.value, ...JSON.parse(JSON.stringify(card)), skills: (card.skills || []).map(skillToForm) }
+  const mismatch = characterCardNeedsConversion(card, ruleMeta.value.rule_id)
+  if (mismatch) {
+    const ok = await confirm({
+      title: t('cardRuleMismatchTitle'),
+      content: t('cardRuleMismatchContent', {
+        source: characterCardRuleName(card, t('unboundRule')),
+        target: String(ruleMeta.value.rule_name || ruleMeta.value.rule_id || ''),
+      }),
+      positiveText: t('continueAndReview'),
+      negativeText: t('cancel'),
+      type: 'warning',
+    })
+    if (!ok) { select.value = ''; return }
+  }
+  const copied = JSON.parse(JSON.stringify(card)) as CharacterCard
+  const targetSuggested = suggestedAttributes(attrs.value, attrLimit.value)
+  const targetAttributes = mismatch
+    ? Object.fromEntries(attrs.value.map(attr => [attr.key, Number(card.attributes?.[attr.key] ?? targetSuggested[attr.key]) || 0]))
+    : (card.attributes || {})
+  form.value = { ...form.value, ...copied, attributes: targetAttributes, skills: (card.skills || []).map(skillToForm) }
   if (!form.value.skills.length) form.value.skills = [{ name: '', value: '' }]
 }
 
@@ -240,6 +267,7 @@ async function create() {
           <label>{{ t('classRole') }}<input v-model="form.class"></label>
           <label>HP<input type="number" v-model="form.hp" :placeholder="t('leaveBlankAuto')"></label>
         </div>
+        <PortraitPicker v-model="form.portrait" :rule-id="String(ruleMeta.rule_id || '')" :seed="form.character_name" :name="form.character_name" />
       </section>
 
       <section class="sheet-section">
@@ -275,7 +303,10 @@ async function create() {
         </div>
       </section>
 
-      <label class="sheet-field">{{ t('characterBackground') }}<textarea rows="5" v-model="form.background"></textarea></label>
+      <label class="sheet-field">
+        <span class="field-label-row"><span>{{ t('characterBackground') }}</span><small>{{ form.background.length }} / {{ backgroundLimit }}</small></span>
+        <textarea class="character-background-input" rows="8" :maxlength="backgroundLimit" v-model="form.background" :placeholder="t('characterBackgroundLongHint')"></textarea>
+      </label>
       <p v-if="error" class="error-banner">{{ error }}</p>
       <button class="primary submit" :disabled="busy || !form.character_name.trim()" @click="create">{{ busy ? t('creating') : t('createCharacterAndEnter') }}</button>
     </section>

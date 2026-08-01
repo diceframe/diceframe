@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from src.engine.character_utils import reset_character_for_restart
-from src.engine.game_instance import GameInstance, GameState
+from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.health import health_payload, mark_health_event, record_health_event
 from src.commands.progression_resolver import ProgressionResolver
 
@@ -361,3 +361,38 @@ def test_level_up_syncs_legacy_hp_and_resource_hp(tmp_path):
     assert cs["max_hp"] == 51
     assert cs["resources"]["hp"]["current"] == 51
     assert cs["resources"]["hp"]["max"] == 51
+
+
+@pytest.mark.asyncio
+async def test_recovery_keeps_pending_luck_decision_actionable(tmp_path):
+    registry = GameRegistry(tmp_path / "saves")
+    inst = GameInstance(("web", "luck", "bot"), state=GameState.ACTIVE_JUDGMENT)
+    inst.round_checks_prepared = True
+    inst.last_checks = [{
+        "check_id": "check-1",
+        "actor_uid": "p1",
+        "luck_decision": "pending",
+    }]
+    registry.register(inst)
+    await registry.save(inst)
+
+    restored_registry = GameRegistry(tmp_path / "saves")
+    restored = await restored_registry.recover_all()
+
+    assert restored[0].state == GameState.ACTIVE_JUDGMENT
+    assert restored[0].pending_luck_checks()[0]["check_id"] == "check-1"
+
+
+@pytest.mark.asyncio
+async def test_finished_round_keeps_an_independent_start_snapshot_for_rollback():
+    inst = GameInstance(("web", "luck_snapshot", "bot"), state=GameState.ACTIVE_JUDGMENT)
+    inst.players["p1"] = {
+        "character_name": "调查员",
+        "character_sheet": {"luck": 28},
+    }
+    inst.round_start_snapshot = {"p1": {"luck": 30}}
+
+    await inst.finish_judgment("本轮结束")
+
+    assert inst.round_start_snapshot == {}
+    assert inst.log[-1]["round_start_snapshot"]["p1"]["luck"] == 30

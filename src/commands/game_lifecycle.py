@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.tag_parser import (
     parse_tag_state,
@@ -16,7 +17,7 @@ from src.commands.tag_summary import summarize_tags
 from src.engine.character_utils import reset_character_for_restart
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.language import DEFAULT_LANGUAGE, is_english, normalize_language
-from src.llm.parser import sanitize_narration
+from src.llm.parser import normalize_tag_protocol, sanitize_narration
 
 logger = logging.getLogger("trpg")
 
@@ -103,6 +104,16 @@ class GameLifecycle:
             temperature=0.8,
             max_tokens=self.narrative_max_tokens,
         )
+        response = await repair_malformed_protocol_response(
+            self.llm_client,
+            response,
+            system_prompt=gm_prompt,
+            user_message=welcome_context,
+            language=instance.language,
+            temperature=0.8,
+            max_tokens=self.narrative_max_tokens,
+        )
+        response.content = normalize_tag_protocol(response.content)
 
         narration = extract_narration_from_response(response)
         if "---" in response.content:
@@ -119,37 +130,35 @@ class GameLifecycle:
             except Exception:
                 logger.exception("开场剧情更新异常，已跳过")
         if start_data.get("quick_actions"):
-            instance.quick_actions = start_data["quick_actions"]
+            instance.set_quick_actions(start_data["quick_actions"])
         scene = (start_data.get("state_update") or {}).get("scene_change", "")
         start_label = "Game Start" if is_english(getattr(instance, "language", "")) else "游戏开始"
-        instance.scene = scene or start_label
-        instance.total_tokens += response.total_tokens
-        instance.log.append({
+        instance.set_scene(scene or start_label)
+        instance.record_llm_usage(response.total_tokens)
+        instance.append_log_entry({
             "round": 0,
             "actions": [{"user_id": "system", "text": start_label}],
             "gm_response": narration,
             "tags_summary": summarize_tags(start_data),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        instance.total_llm_calls += 1
         await self.registry.save(instance)
         return narration
 
     async def resume_game(self, instance: GameInstance) -> str:
         """从 PAUSED 状态恢复游戏，生成「上回说到」续接叙事。"""
         if instance.state != GameState.PAUSED:
-            instance.state = GameState.ACTIVE_ACTION
+            await instance.activate()
             return ""
 
         recent_log = instance.log[-5:] if instance.log else []
         if not recent_log:
-            instance.state = GameState.ACTIVE_ACTION
             await instance.start_round()
             return ""
 
         gm_prompt = self.prompt.compose_gm_prompt(instance)
         history_text = "\n".join(
-            f"Round {e.get('round','?')}: {e.get('gm_response','')[:100]}"
+            f"Round {e.get('round','?')}: {sanitize_narration(e.get('gm_response',''))[:100]}"
             for e in recent_log
         )
 
@@ -180,7 +189,7 @@ class GameLifecycle:
                 temperature=0.6,
                 max_tokens=self.brief_max_tokens,
             )
-            resume_narration = response.narration
+            resume_narration = sanitize_narration(response.narration or response.content)
         except Exception:
             logger.exception("续接叙事生成失败")
             resume_narration = (
@@ -189,7 +198,6 @@ class GameLifecycle:
                 else f"GM 已重新上线。当前场景：{instance.scene}。输入 /go 继续冒险。"
             )
 
-        instance.state = GameState.ACTIVE_ACTION
         await instance.start_round()
         await self.registry.save(instance)
         return resume_narration
@@ -206,7 +214,7 @@ class GameLifecycle:
             group_name=group_name, seed_code=seed, language=language,
         )
         await self.start_game(instance)
-        instance.total_llm_calls += 1
+        instance.record_llm_usage(calls=1)
         await self.registry.save(instance)
         return instance
 
@@ -230,13 +238,13 @@ class GameLifecycle:
             instance.game_key, world_id=world_id, world_name=world_name,
             group_name=group_name, seed_code=seed, language=language,
         )
-        instance.solo_mode = solo
-        instance.players = saved_players
+        instance.configure_session(solo_mode=solo)
+        instance.replace_players(saved_players)
 
         if not instance.players:
             raise ValueError("重开世界需要至少 1 名角色")
 
         await self.start_game(instance)
-        instance.total_llm_calls += 1
+        instance.record_llm_usage(calls=1)
         await self.registry.save(instance)
         return instance

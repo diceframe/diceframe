@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, Any
 
+from src.llm.parser import sanitize_narration
+
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
 
@@ -23,9 +25,16 @@ def get_log(
     total = len(log)
     start = (page - 1) * per_page
     end = start + per_page
-    page_items = log[-end:-start] if start else log[-end:]
+    page_items = copy.deepcopy(log[-end:-start] if start else log[-end:])
+    for entry in page_items:
+        entry["gm_response"] = sanitize_narration(entry.get("gm_response", ""))
+        swipes = entry.get("swipes")
+        if isinstance(swipes, list):
+            entry["swipes"] = [
+                sanitize_narration(item) if isinstance(item, str) else item
+                for item in swipes
+            ]
     if not include_internal:
-        page_items = copy.deepcopy(page_items)
         for entry in page_items:
             actions = entry.get("actions")
             if not isinstance(actions, list):

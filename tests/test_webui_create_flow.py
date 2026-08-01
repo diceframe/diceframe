@@ -664,6 +664,104 @@ def test_character_card_library_does_not_include_active_game_players(web_api):
     assert names == ["仓库角色"]
 
 
+def test_character_schema_is_available_without_active_game(web_api):
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+
+    result = api.character_schema("freeform_fantasy", "zh-CN")
+
+    assert result["ok"] is True
+    assert result["rule_meta"]["rule_id"] == "freeform_fantasy"
+    assert len(result["rule_attrs"]) == 1
+    assert result["rule_attrs"][0] == {
+        "key": "str",
+        "name": "力量",
+        "name_en": "STR",
+        "display_name": "力量 (STR)",
+        "min": 3,
+        "max": 18,
+    }
+    assert result["rule_attrs_total"] == 60
+    assert result["skill_pool"] == ["侦查", "射击"]
+
+
+def test_character_card_preserves_rule_blueprint_without_runtime_state(web_api):
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+
+    saved = api.save_character_card({
+        "character_name": "规则蓝图角色",
+        "rule_id": "freeform_fantasy",
+        "rule_name": "自由幻想",
+        "rule_version": "1.2.3",
+        "mechanics": "d20_core",
+        "language": "zh-CN",
+        "identity": {"pronouns": "她"},
+        "attributes": {"str": 12},
+        "skills": [{"name": "侦查", "value": 40}],
+        "inventory": [{"name": "火把", "quantity": 2}],
+        "key_items": [{"name": "旧钥匙"}],
+        "currency": {"name": "金币", "amount": 18},
+        "portrait": {"kind": "builtin", "id": "freeform_fantasy:2"},
+        "hp": 1,
+        "max_hp": 30,
+        "xp": 999,
+        "deceased": True,
+        "status": ["中毒"],
+    })
+
+    assert saved["ok"] is True
+    card = saved["card"]
+    assert card["schema_version"] == 2
+    assert card["rule_id"] == "freeform_fantasy"
+    assert card["rule_version"] == "1.2.3"
+    assert card["identity"] == {"pronouns": "她"}
+    assert card["inventory"] == [{"name": "火把", "quantity": 2}]
+    assert card["key_items"] == [{"name": "旧钥匙"}]
+    assert card["currency"] == {"name": "金币", "amount": 18}
+    assert card["portrait"] == {"kind": "builtin", "id": "freeform_fantasy:2"}
+    assert not ({"hp", "max_hp", "xp", "deceased", "status"} & card.keys())
+
+
+def test_character_cards_with_same_identity_can_bind_to_different_rules(web_api):
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    shared = {
+        "character_name": "跨规则角色",
+        "race": "人类",
+        "class": "调查员",
+        "background": "同一个角色概念",
+    }
+
+    api.save_character_card({**shared, "rule_id": "freeform_fantasy"})
+    api.save_character_card({**shared, "rule_id": "freeform_coc"})
+
+    result = api.list_character_cards()
+    assert result["total"] == 2
+    assert {card["rule_id"] for card in result["cards"]} == {
+        "freeform_fantasy", "freeform_coc",
+    }
+
+
+def test_legacy_character_card_remains_readable_as_unbound(web_api):
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    legacy_card = {
+        "id": "legacy_card",
+        "character_name": "旧版角色",
+        "race": "人类",
+        "class": "冒险者",
+        "attributes": {"str": 10},
+    }
+    api._character_cards_path.parent.mkdir(parents=True, exist_ok=True)
+    api._character_cards_path.write_text(
+        json.dumps([legacy_card], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = api.list_character_cards()
+
+    assert result["total"] == 1
+    assert result["cards"][0] == legacy_card
+    assert "rule_id" not in result["cards"][0]
+
+
 def test_save_custom_rule_copies_existing_rule_template(web_api):
     api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
 
@@ -910,6 +1008,7 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
         "race": "精灵",
         "class": "游侠",
         "attributes": {"str": 12},
+        "portrait": {"kind": "builtin", "id": "freeform_fantasy:3"},
     })
 
     inst = registry.get(api._parse_key(created["game_key"]))
@@ -917,6 +1016,9 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
     assert inst.players[uid]["character_name"] == "新名字"
     assert inst.players[uid]["character_sheet"]["race"] == "精灵"
     assert inst.players[uid]["character_sheet"]["class"] == "游侠"
+    assert inst.players[uid]["character_sheet"]["portrait"] == {
+        "kind": "builtin", "id": "freeform_fantasy:3",
+    }
 
 
 @pytest.mark.asyncio
@@ -986,13 +1088,17 @@ async def test_update_character_rejects_overlong_bio(web_api):
         gm_uid="web_session_gm",
     )
     uid = created["players"][0]["user_id"]
+    accepted = await api.update_character(created["game_key"], uid, {
+        "background": "字" * 4000,
+    })
+    assert accepted["ok"] is True
     result = await api.update_character(created["game_key"], uid, {
-        "background": "字" * 2001,
+        "background": "字" * 8001,
     })
     assert result["ok"] is False
     assert "背景过长" in result["error"]
     inst = registry.get(api._parse_key(created["game_key"]))
-    assert inst.players[uid]["character_sheet"].get("background", "") != "字" * 2001
+    assert inst.players[uid]["character_sheet"].get("background", "") == "字" * 4000
 
 
 @pytest.mark.asyncio
@@ -1011,11 +1117,13 @@ async def test_game_detail_exposes_multiplayer_status(web_api):
     inst = registry.get(api._parse_key(created["game_key"]))
     first_uid = created["players"][0]["user_id"]
     await inst.add_action(first_uid, "我观察门口")
+    inst.last_token_budget_bump = {"kind": "narrative", "from": 2048, "to": 4096}
 
     detail = api.game_detail(created["game_key"])
     status = api.multiplayer_status(created["game_key"])
 
     assert detail["solo_mode"] is False
+    assert detail["token_budget_bump"] == {"kind": "narrative", "from": 2048, "to": 4096}
     assert detail["multiplayer"]["ready_count"] == 1
     assert status["ok"] is True
     assert status["waiting_players"][0]["character_name"] == "洛恩"
@@ -1288,14 +1396,24 @@ async def test_rollback_round_pops_last_log_entry_and_reports_empty(web_api):
     )
     gk = result["game_key"]
     inst = registry.get(api._parse_key(gk))
+    uid = next(iter(inst.players))
+    sheet = inst.get_character_sheet(uid)
+    sheet["luck"] = 28
+    sheet["resources"] = {"luck": {"current": 28, "max": 99}}
     inst.round_number = 3
-    inst.log.append({"round": 3, "pre_state_snapshot": {}})
+    inst.log.append({
+        "round": 3,
+        "round_start_snapshot": {uid: {"luck": 30, "resources": {"luck": {"current": 30, "max": 99}}}},
+        "pre_state_snapshot": {uid: {"luck": 28, "resources": {"luck": {"current": 28, "max": 99}}}},
+    })
 
     rolled = await api.rollback_round(gk)
 
     assert rolled["ok"] is True
     assert len(inst.log) == 1  # 我加的 round3 已 pop，create_game 的开场 log 仍在
     assert inst.round_number == 3
+    assert inst.get_character_sheet(uid)["luck"] == 30
+    assert inst.get_character_sheet(uid)["resources"]["luck"]["current"] == 30
 
     second = await api.rollback_round(gk)  # 撤回开场
     assert second["ok"] is True

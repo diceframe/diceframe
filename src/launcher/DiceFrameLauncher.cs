@@ -36,6 +36,12 @@ internal static class DiceFrameLauncher
         string port = ResolvePort(Path.Combine(dataDir, "config.json"));
         string url = "http://127.0.0.1:" + port;
         string activeDir = ResolveActiveDirectory(installRoot, currentPointer);
+        MigrateLegacyPortablePayload(
+            installRoot,
+            currentPointer,
+            restartSignal,
+            activeDir
+        );
 
         Console.WriteLine("========================================");
         Console.WriteLine("  DiceFrame Portable");
@@ -186,12 +192,19 @@ internal static class DiceFrameLauncher
         if (string.IsNullOrEmpty(failure))
         {
             string relativeDir = RelativeVersionDirectory(installRoot, candidateDir);
+            string versionsDir = Path.Combine(installRoot, "versions");
+            string previousRelativeDir = IsUnder(previousDir, versionsDir)
+                ? RelativeVersionDirectory(installRoot, previousDir)
+                : "";
             AtomicWriteText(
                 currentPointer,
                 "{\n"
                     + "  \"schema\": 1,\n"
                     + "  \"version\": \"" + JsonEscape(version) + "\",\n"
-                    + "  \"relative_dir\": \"" + JsonEscape(relativeDir) + "\"\n"
+                    + "  \"relative_dir\": \"" + JsonEscape(relativeDir) + "\",\n"
+                    + "  \"previous_relative_dir\": \""
+                    + JsonEscape(previousRelativeDir)
+                    + "\"\n"
                     + "}\n"
             );
             PromoteLauncher(installRoot, launcherPath);
@@ -271,21 +284,52 @@ internal static class DiceFrameLauncher
     {
         try
         {
-            if (!File.Exists(currentPointer))
+            if (File.Exists(currentPointer))
             {
-                return installRoot;
+                string json = File.ReadAllText(currentPointer, Encoding.UTF8);
+                string current = ResolveVersionDirectory(
+                    installRoot,
+                    JsonString(json, "relative_dir")
+                );
+                if (!string.IsNullOrEmpty(current))
+                {
+                    return current;
+                }
+
+                string previous = ResolveVersionDirectory(
+                    installRoot,
+                    JsonString(json, "previous_relative_dir")
+                );
+                if (!string.IsNullOrEmpty(previous))
+                {
+                    Console.WriteLine(
+                        "Current version is unavailable; using the previous version."
+                    );
+                    return previous;
+                }
             }
-            string json = File.ReadAllText(currentPointer, Encoding.UTF8);
-            string relativeDir = JsonString(json, "relative_dir");
+        }
+        catch
+        {
+        }
+        return installRoot;
+    }
+
+    private static string ResolveVersionDirectory(
+        string installRoot,
+        string relativeDir
+    )
+    {
+        try
+        {
             if (string.IsNullOrEmpty(relativeDir) || Path.IsPathRooted(relativeDir))
             {
-                return installRoot;
+                return null;
             }
             string candidate = Path.GetFullPath(Path.Combine(installRoot, relativeDir));
             if (
                 IsUnder(candidate, Path.Combine(installRoot, "versions"))
-                && File.Exists(Path.Combine(candidate, "python", "python.exe"))
-                && File.Exists(Path.Combine(candidate, "app", "web_server.py"))
+                && HasPortablePayload(candidate)
             )
             {
                 return candidate;
@@ -294,7 +338,159 @@ internal static class DiceFrameLauncher
         catch
         {
         }
-        return installRoot;
+        return null;
+    }
+
+    private static bool HasPortablePayload(string directory)
+    {
+        return File.Exists(Path.Combine(directory, "python", "python.exe"))
+            && File.Exists(Path.Combine(directory, "app", "web_server.py"));
+    }
+
+    private static void MigrateLegacyPortablePayload(
+        string installRoot,
+        string currentPointer,
+        string restartSignal,
+        string activeDir
+    )
+    {
+        try
+        {
+            if (
+                !HasPortablePayload(installRoot)
+                || !File.Exists(currentPointer)
+                || File.Exists(restartSignal)
+            )
+            {
+                return;
+            }
+
+            string pointerJson = File.ReadAllText(currentPointer, Encoding.UTF8);
+            string currentRelative = JsonString(pointerJson, "relative_dir");
+            string current = ResolveVersionDirectory(installRoot, currentRelative);
+            if (
+                string.IsNullOrEmpty(current)
+                || !string.Equals(
+                    Path.GetFullPath(activeDir),
+                    Path.GetFullPath(current),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                return;
+            }
+
+            string previousRelative = JsonString(
+                pointerJson,
+                "previous_relative_dir"
+            );
+            string previous = ResolveVersionDirectory(
+                installRoot,
+                previousRelative
+            );
+            if (!string.IsNullOrEmpty(previous))
+            {
+                if (string.Equals(
+                    previous,
+                    current,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                {
+                    return;
+                }
+                DeleteLegacyPayload(Path.Combine(installRoot, "app"));
+                DeleteLegacyPayload(Path.Combine(installRoot, "python"));
+                return;
+            }
+            if (!string.IsNullOrEmpty(previousRelative))
+            {
+                return;
+            }
+
+            string updaterState = Path.Combine(
+                Path.GetDirectoryName(currentPointer),
+                "state.json"
+            );
+            if (!File.Exists(updaterState))
+            {
+                return;
+            }
+            string stateJson = File.ReadAllText(updaterState, Encoding.UTF8);
+            string version = JsonString(pointerJson, "version");
+            if (
+                !string.Equals(
+                    JsonString(stateJson, "state"),
+                    "done",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || string.IsNullOrEmpty(version)
+                || !string.Equals(
+                    JsonString(stateJson, "version"),
+                    version,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                return;
+            }
+
+            string versionsDir = Path.Combine(installRoot, "versions");
+            string inferredPrevious = null;
+            foreach (string directory in Directory.GetDirectories(versionsDir))
+            {
+                string candidate = Path.GetFullPath(directory);
+                if (
+                    string.Equals(
+                        candidate,
+                        current,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || !HasPortablePayload(candidate)
+                )
+                {
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(inferredPrevious))
+                {
+                    return;
+                }
+                inferredPrevious = candidate;
+            }
+            if (string.IsNullOrEmpty(inferredPrevious))
+            {
+                return;
+            }
+
+            AtomicWriteText(
+                currentPointer,
+                "{\n"
+                    + "  \"schema\": 1,\n"
+                    + "  \"version\": \"" + JsonEscape(version) + "\",\n"
+                    + "  \"relative_dir\": \""
+                    + JsonEscape(currentRelative)
+                    + "\",\n"
+                    + "  \"previous_relative_dir\": \""
+                    + JsonEscape(
+                        RelativeVersionDirectory(
+                            installRoot,
+                            inferredPrevious
+                        )
+                    )
+                    + "\"\n"
+                    + "}\n"
+            );
+            DeleteLegacyPayload(Path.Combine(installRoot, "app"));
+            DeleteLegacyPayload(Path.Combine(installRoot, "python"));
+            Console.WriteLine(
+                "Migrated the legacy portable layout to two version slots."
+            );
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                "Could not migrate the legacy portable layout: " + ex.Message
+            );
+        }
     }
 
     private static string ValidateCandidate(
@@ -739,10 +935,46 @@ internal static class DiceFrameLauncher
                     }
                 }
             }
+
+            bool hasVersionRollbackPair = IsUnder(current, versionsDir)
+                && IsUnder(previous, versionsDir)
+                && !string.Equals(
+                    current,
+                    previous,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && HasPortablePayload(current)
+                && HasPortablePayload(previous);
+            if (hasVersionRollbackPair)
+            {
+                DeleteLegacyPayload(Path.Combine(installRoot, "app"));
+                DeleteLegacyPayload(Path.Combine(installRoot, "python"));
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine("Could not prune old versions: " + ex.Message);
+        }
+    }
+
+    private static void DeleteLegacyPayload(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+                Console.WriteLine("Removed legacy portable payload " + directory);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                "Could not remove legacy portable payload "
+                    + directory
+                    + ": "
+                    + ex.Message
+            );
         }
     }
 

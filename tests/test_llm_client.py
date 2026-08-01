@@ -85,6 +85,25 @@ class _PartialOpenAISession(_FakeSession):
         return _PartialOpenAIResponse()
 
 
+class _CompleteOpenAIResponse(_FakeResponse):
+    async def json(self):
+        return {
+            "choices": [{
+                "message": {"content": "完整正文。"},
+                "finish_reason": "stop",
+            }],
+            "usage": {"total_tokens": 640},
+        }
+
+
+class _LengthThenCompleteSession(_FakeSession):
+    def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        if len(self.calls) == 1:
+            return _PartialOpenAIResponse()
+        return _CompleteOpenAIResponse()
+
+
 @pytest.mark.asyncio
 async def test_anthropic_provider_uses_messages_api(monkeypatch):
     session = _FakeSession()
@@ -197,6 +216,30 @@ async def test_length_truncation_retries_with_larger_max_tokens(monkeypatch):
     # 3 次尝试的 max_tokens 应为 512 -> 1024 -> 2048（2x 步进，4x 上限）
     sent_budgets = [call["json"]["max_tokens"] for call in session.calls]
     assert sent_budgets == [512, 1024, 2048]
+
+
+@pytest.mark.asyncio
+async def test_length_retry_reports_initial_and_successful_token_budgets(monkeypatch):
+    session = _LengthThenCompleteSession()
+    provider = ProviderConfig(
+        provider_name="reasoning-model",
+        base_url="https://api.example.com",
+        api_key="test-key",
+        model_name="reasoning-test",
+    )
+    client = LLMClient(providers=[provider], default=provider.provider_name)
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    monkeypatch.setattr("src.llm.client.BASE_DELAY", 0.0)
+
+    response = await client.call("system", "user", max_tokens=512)
+
+    assert response.narration == "完整正文。"
+    assert response.token_budget_initial == 512
+    assert response.token_budget_used == 1024
 
 
 class _FakeStreamContent:

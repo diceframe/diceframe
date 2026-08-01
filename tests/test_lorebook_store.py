@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from src.lorebook.bootstrap import ensure_world_from_template
 from src.lorebook.store import LorebookStore
 
 
@@ -38,6 +39,31 @@ class TestCreateAndGetWorld:
             store.create_world("w2", "世界2")
             worlds = store.list_worlds()
             assert len(worlds) == 2
+        finally:
+            store.close()
+            path.unlink(missing_ok=True)
+
+    def test_builtin_template_repairs_legacy_world_language_without_losing_entries(self):
+        store, path = _temp_store()
+        try:
+            store.create_world("world_en", "Legacy World", language="zh-CN")
+            store.add_entry({
+                "id": "entry_1",
+                "world_id": "world_en",
+                "name": "Existing entry",
+                "keywords": [],
+                "content": "Keep me",
+            })
+
+            inserted = ensure_world_from_template(store, "world_en", {
+                "world_name": "English World",
+                "language": "en",
+                "starter_lorebook": [],
+            })
+
+            assert inserted == 0
+            assert store.get_world("world_en")["language"] == "en"
+            assert store.get_entry("entry_1")["content"] == "Keep me"
         finally:
             store.close()
             path.unlink(missing_ok=True)

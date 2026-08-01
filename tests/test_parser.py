@@ -1,6 +1,13 @@
 ﻿"""LLM 输出解析器测试。"""
 
-from src.llm.parser import ParsedResult, make_retry_message, parse_llm_response, sanitize_narration
+from src.llm.parser import (
+    ParsedResult,
+    has_malformed_protocol_leak,
+    make_retry_message,
+    normalize_tag_protocol,
+    parse_llm_response,
+    sanitize_narration,
+)
 
 
 class TestParseLLMResponse:
@@ -49,6 +56,44 @@ class TestParseLLMResponse:
         assert "店小二压低声音" in cleaned
         assert "局势分析" not in cleaned
         assert "玩家发言" not in cleaned
+
+    def test_sanitize_narration_removes_markdown_protocol_but_keeps_story(self):
+        raw = (
+            "**SANCheck:web_79cf963c:1d6** | "
+            "目睹封印板石崩解时荧绿眼睛的直视，进行理智检定。\n\n"
+            "若成功则损失1点理智，若失败则损失1d6点理智。\n\n"
+            "**第三封印板状态**:板石开裂2/3，石板下闸门已崩脱三层。"
+        )
+
+        cleaned = sanitize_narration(raw)
+
+        assert has_malformed_protocol_leak(raw) is True
+        assert "SANCheck" not in cleaned
+        assert "web_79cf963c" not in cleaned
+        assert "目睹封印板" in cleaned
+        assert "若成功则损失1点理智" in cleaned
+        assert "第三封印板状态" in cleaned
+
+    def test_normalize_tag_protocol_accepts_legacy_alias_and_markdown(self):
+        raw = (
+            "你感到理智动摇。\n---\n"
+            "**SANCheck:web_legacy:1d6**\n"
+            "- **MEMORY:封印板:状态:开裂**"
+        )
+
+        normalized = normalize_tag_protocol(raw)
+
+        assert normalized == (
+            "你感到理智动摇。\n---\n"
+            "SAN_CHECK:web_legacy:1d6\n"
+            "MEMORY:封印板:状态:开裂"
+        )
+
+    def test_sanitize_unknown_historical_state_tag_without_executing_it(self):
+        raw = "STATE:heat:+1\n警报等级已经提高。"
+
+        assert sanitize_narration(raw) == "警报等级已经提高。"
+        assert has_malformed_protocol_leak(raw) is True
 
 
 class TestMakeRetryMessage:

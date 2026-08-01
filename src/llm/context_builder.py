@@ -8,6 +8,7 @@ import os
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import is_english
+from src.llm.parser import sanitize_narration
 
 logger = logging.getLogger("trpg")
 
@@ -65,7 +66,7 @@ def _truncate(text: str, max_chars: int) -> str:
 _GM_COMPACT_KEYS = ("npc", "location", "scene", "item", "gold", "hp", "combat")
 
 def _is_key_round(entry: dict) -> bool:
-    gm = (entry.get("gm_response", "") or "").lower()
+    gm = sanitize_narration(entry.get("gm_response", "")).lower()
     tags = entry.get("tags_summary", {}).get("tags", [])
     tag_str = " ".join(tags).lower()
     keywords = ("战斗", "攻击", "受伤", "倒地", "购买", "花费", "金币", "交易",
@@ -99,7 +100,7 @@ def _format_history(log: list[dict], max_chars: int, english: bool = False) -> s
             a.get("text", "") for a in entry.get("actions", [])
             if a.get("user_id") != "system"
         )
-        gm_text = entry.get("gm_response", "")
+        gm_text = sanitize_narration(entry.get("gm_response", ""))
         player_label = "Players" if english else "玩家"
         return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}"
 
@@ -108,7 +109,7 @@ def _format_history(log: list[dict], max_chars: int, english: bool = False) -> s
             a.get("text", "") for a in entry.get("actions", [])
             if a.get("user_id") != "system"
         )
-        gm_text = entry.get("gm_response", "")
+        gm_text = sanitize_narration(entry.get("gm_response", ""))
         player_label = "Players" if english else "玩家"
         return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}"
 
@@ -146,6 +147,7 @@ async def build_context(
     platform: str = "",
     provider_name: str = "",
     lorebook_budget: int = 0,
+    history_override: list[dict] | None = None,
 ) -> str:
     """将游戏状态拼接为完整的 LLM 上下文。
 
@@ -162,6 +164,7 @@ async def build_context(
     """
     max_total = _detect_max_chars(provider_name)
     english = is_english(getattr(instance, "language", "zh-CN"))
+    history_entries = instance.log if history_override is None else history_override
 
     # 按比例分配预算
     budget_system = int(max_total * _BUDGET_SYSTEM_PROMPT)
@@ -207,7 +210,7 @@ async def build_context(
         parts.append(("## World Knowledge" if english else "【世界观知识】") + f"\n{lorebook_text.strip()}")
 
     # 3. 摘要 + 关键事实
-    summary = instance.summary.get("narrative", "")
+    summary = sanitize_narration(instance.summary.get("narrative", ""))
     summary_section_parts: list[str] = []
     if summary:
         summary_section_parts.append(_truncate(summary, budget_summary))
@@ -234,9 +237,9 @@ async def build_context(
         try:
             from src.memory.recall import recall_and_format
             recall_source = player_message
-            recent_log = instance.log[-3:] if instance.log else []
+            recent_log = history_entries[-3:] if history_entries else []
             for entry in recent_log:
-                gm_resp = entry.get("gm_response", "")
+                gm_resp = sanitize_narration(entry.get("gm_response", ""))
                 if gm_resp:
                     recall_source += "\n" + gm_resp
             memory_text = await recall_and_format(
@@ -246,14 +249,14 @@ async def build_context(
                 memory_text = _truncate(memory_text, budget_memory)
                 parts.append(memory_text)
         except Exception:
-            pass
+            logger.warning("长期记忆召回失败，已降级为无记忆上下文", exc_info=True)
 
     # 5. 计算剩余预算 → 对话历史
     used_chars = reserved_system_chars + sum(len(p) for p in parts)
     remaining = max(0, max_total - used_chars - len(player_message) - 200)
     history_budget = min(budget_history_base + max(0, remaining - budget_history_base), max_total // 2)
     history_budget = max(history_budget, budget_history_base)
-    history = _format_history(instance.log, history_budget, english)
+    history = _format_history(history_entries, history_budget, english)
     if history:
         parts.append(("## Conversation History" if english else "【对话历史】") + f"\n{history}")
 

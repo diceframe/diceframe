@@ -143,6 +143,7 @@ class PromptComposer:
         actions_text: str,
         provider_name: str = "",
         world_data: dict | None = None,
+        history_override: list[dict] | None = None,
     ) -> str:
         """调用 context_builder 生成本轮 user context。"""
         return await build_context(
@@ -153,4 +154,5 @@ class PromptComposer:
             memory_store=self.memory_store,
             provider_name=provider_name,
             lorebook_budget=world_data.get("lorebook_token_budget", 0) if world_data else 0,
+            history_override=history_override,
         )

@@ -23,6 +23,9 @@ test('gm and player render the same game through shared play components', async 
 
   await expect(gmPage.getByTestId('timeline')).toBeVisible()
   await expect(playerPage.getByTestId('timeline')).toBeVisible()
+  await expect(gmPage.locator('.portrait-edit-button')).toBeVisible()
+  await gmPage.locator('.portrait-edit-button').click()
+  await expect(gmPage.locator('.portrait-picker')).toBeVisible()
   const gmComposerBottom = await gmPage.locator('.composer').evaluate(element => element.getBoundingClientRect().bottom)
   const playerComposerBottom = await playerPage.locator('.composer').evaluate(element => element.getBoundingClientRect().bottom)
   expect(gmComposerBottom).toBeLessThanOrEqual(768)
@@ -36,10 +39,29 @@ test('gm and player render the same game through shared play components', async 
 test('generic invite opens free character creation without gm password', async ({ page, request }) => {
   const games = await (await request.get('/api/games', { headers: { Authorization: `Bearer ${token()}` } })).json()
   const game = games.games.find((item: any) => item.solo_mode === false) || games.games[0]
+  const unexpectedUnauthorized: string[] = []
+  page.on('response', response => {
+    if (response.status() === 401 && /\/api\/(?:system\/update-check|plugins\/themes)/.test(response.url())) {
+      unexpectedUnauthorized.push(response.url())
+    }
+  })
   await page.goto(`/#/join?game=${encodeURIComponent(game.game_key)}&share=1`)
   await expect(page.getByRole('heading', { name: '创建你的角色' })).toBeVisible()
   await expect(page.getByText('数字框可直接输入任意数值')).toBeVisible()
   await expect(page.getByRole('button', { name: '创建角色并进入' })).toBeVisible()
+  const layout = await page.evaluate(() => {
+    const background = document.querySelector<HTMLElement>('.join-page')!
+    const form = document.querySelector<HTMLElement>('.join-form')!
+    return {
+      backgroundBottom: background.getBoundingClientRect().bottom,
+      backgroundHeight: background.getBoundingClientRect().height,
+      formBottom: form.getBoundingClientRect().bottom,
+      viewportHeight: window.innerHeight,
+    }
+  })
+  expect(layout.backgroundBottom).toBeGreaterThanOrEqual(layout.formBottom)
+  expect(layout.backgroundHeight).toBeGreaterThan(layout.viewportHeight)
+  expect(unexpectedUnauthorized).toEqual([])
 })
 
 test('plugin settings are generated from manifest schema', async ({ page }) => {

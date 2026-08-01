@@ -9,8 +9,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
+from src.engine.contracts import (
+    ActionRecord,
+    CheckResult,
+    PendingPayment,
+    PlayerData,
+    RoundLogEntry,
+    TokenBudgetBump,
+)
 from src.engine.dice import parse_player_roll, roll as dice_roll, check_d20
+from src.engine.character_utils import apply_resource_delta, get_resource
 from src.engine.health import record_health_event
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 
@@ -121,13 +131,13 @@ class GameInstance:
     state: GameState = GameState.CREATED
 
     # 玩家与 NPC
-    players: dict = field(default_factory=dict)       # user_id -> {...}
-    npcs: dict = field(default_factory=dict)
+    players: dict[str, PlayerData] = field(default_factory=dict)       # user_id -> {...}
+    npcs: dict[str, dict] = field(default_factory=dict)
 
     # 回合
     round_number: int = 0
-    action_queue: list = field(default_factory=list)
-    pending_actions: list = field(default_factory=list)
+    action_queue: list[ActionRecord] = field(default_factory=list)
+    pending_actions: list[ActionRecord] = field(default_factory=list)
     ready_players: set = field(default_factory=set)
     away_players: set = field(default_factory=set)
 
@@ -152,7 +162,7 @@ class GameInstance:
     game_time: str = ""
 
     # 日志与摘要
-    log: list = field(default_factory=list)
+    log: list[RoundLogEntry] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     key_facts: list = field(default_factory=list)
 
@@ -169,14 +179,21 @@ class GameInstance:
     plot_tracker: object | None = None     # PlotTracker 实例
 
     # 判定卡片：最近一次检定的结构化结果（前端渲染用）
-    last_check: dict | None = None
-    last_checks: list[dict] = field(default_factory=list)
+    last_check: CheckResult | None = None
+    last_checks: list[CheckResult] = field(default_factory=list)
+    # 当前判定阶段是否已生成结构化检定；幸运选择必须发生在 LLM 叙事之前。
+    round_checks_prepared: bool = False
+    # 进入判定阶段前的玩家状态；整轮撤回时用于退还本轮消耗的幸运。
+    round_start_snapshot: dict = field(default_factory=dict)
 
     # GM 私密指令：只注入 GM 上下文，不作为玩家/系统行动公开记录
     gm_directives: list[dict] = field(default_factory=list)
 
     # 状态变化 recap：最近一回合的 state_update（前端渲染用）
     last_state_update: dict | None = None
+
+    # 最近一回合因输出截断触发的 token 预算升档（给 GM 的低打扰提示）
+    last_token_budget_bump: TokenBudgetBump | None = None
 
     # 单人模式
     solo_mode: bool = False  # True=单人模式, 行动后自动推进
@@ -203,7 +220,7 @@ class GameInstance:
     quick_actions: list[str] = field(default_factory=list)
 
     # 等待玩家确认的支付请求
-    pending_payments: list[dict] = field(default_factory=list)
+    pending_payments: list[PendingPayment] = field(default_factory=list)
 
     # 系统健康 / 降级事件
     health_events: list[dict] = field(default_factory=list)
@@ -213,6 +230,8 @@ class GameInstance:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     # 内部：process_round/generate_swipe 互斥锁，防并发处理同一实例
     _process_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    _save_fail_count: int = field(default=0, repr=False)
+    _tag_fail_streak: int = field(default=0, repr=False)
     # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
     confirmed_items: list = field(default_factory=list)
 
@@ -242,6 +261,257 @@ class GameInstance:
         self.players[uid]["character_sheet"] = character_sheet
         return True
 
+    def get_player(self, uid: str) -> PlayerData | None:
+        return self.players.get(uid)
+
+    def put_player(self, uid: str, player: PlayerData) -> None:
+        """Insert or replace one complete player record."""
+        self.players[uid] = player
+
+    def set_player_name(self, uid: str, character_name: str) -> bool:
+        if uid not in self.players:
+            return False
+        self.players[uid]["character_name"] = character_name
+        return True
+
+    # ---------- 统一状态写入 --------------------------------
+
+    def configure_game(
+        self,
+        *,
+        world_id: str | None,
+        world_name: str,
+        group_name: str,
+        seed_code: str,
+        difficulty: str,
+        language: str,
+        state: GameState = GameState.WAITING,
+    ) -> None:
+        """配置新局身份信息；调用方在并发路径中应持有 ``_lock``。"""
+        self.world_id = world_id
+        self.world_name = world_name
+        self.group_name = group_name
+        self.seed_code = seed_code
+        self.difficulty = difficulty
+        self.language = normalize_language(language)
+        self.state = state
+
+    def configure_session(
+        self,
+        *,
+        solo_mode: bool | None = None,
+        entry_point: str | None = None,
+        room_password: str | None = None,
+        gm_uid: str | None = None,
+    ) -> None:
+        """集中更新入口与房间身份配置，保留旧存档字段。"""
+        if solo_mode is not None:
+            self.solo_mode = bool(solo_mode)
+        if entry_point is not None:
+            self.entry_point = entry_point
+        if room_password is not None:
+            self.room_password = room_password
+        if gm_uid is not None:
+            self.gm_uid = gm_uid
+
+    def replace_players(self, players: dict[str, PlayerData]) -> None:
+        self.players = players
+
+    def set_player_access(self, open_access: bool) -> None:
+        self.player_access_open = bool(open_access)
+
+    def set_bot_bind_token(self, token: str) -> None:
+        self.bot_bind_token = token
+
+    def set_room_password(self, password: str) -> None:
+        self.room_password = password
+        self.room_token = ""
+
+    def set_room_token(self, token: str) -> None:
+        self.room_token = token
+
+    def set_scene(self, scene: str) -> None:
+        self.scene = scene
+
+    def set_world(self, world_id: str, world_name: str) -> None:
+        self.world_id = world_id
+        self.world_name = world_name
+
+    def set_difficulty(self, difficulty: str) -> None:
+        self.difficulty = difficulty
+
+    def set_solo_mode(self, solo_mode: bool) -> None:
+        self.solo_mode = bool(solo_mode)
+        if self.solo_mode and self.action_queue and self.state == GameState.ACTIVE_ACTION:
+            self.ready_players.update(self.alive_players)
+
+    def append_log_entry(self, entry: RoundLogEntry) -> None:
+        self.log.append(entry)
+
+    def set_latest_log_tags_summary(self, summary: dict) -> bool:
+        if not self.log:
+            return False
+        self.log[-1]["tags_summary"] = summary
+        return True
+
+    def set_summary_narrative(self, narrative: str) -> None:
+        self.summary["narrative"] = narrative
+
+    def set_quick_actions(self, actions: list[str]) -> None:
+        self.quick_actions = [str(action) for action in actions if str(action).strip()]
+
+    def set_key_facts(self, facts: list) -> None:
+        self.key_facts = list(facts)
+
+    def add_confirmed_items(self, items: list[str], *, limit: int = 50) -> None:
+        existing = set(self.confirmed_items)
+        for item in items:
+            if item not in existing:
+                self.confirmed_items.append(item)
+                existing.add(item)
+        if len(self.confirmed_items) > limit:
+            del self.confirmed_items[:-limit]
+
+    def append_private_message(self, uid: str, message: dict) -> None:
+        self.private_log.setdefault(uid, []).append(message)
+
+    def add_gm_directive(self, directive: dict) -> None:
+        self.gm_directives.append(directive)
+
+    def clear_private_messages(self, uid: str) -> None:
+        self.private_log.pop(uid, None)
+
+    def queue_payment(self, payment: PendingPayment) -> None:
+        self.pending_payments.append(payment)
+
+    def remove_payments_for_player(self, uid: str) -> None:
+        self.pending_payments = [
+            payment
+            for payment in self.pending_payments
+            if payment.get("uid") != uid and payment.get("recipient_uid") != uid
+        ]
+
+    def prune_resolved_payments(self) -> None:
+        self.pending_payments = [
+            payment
+            for payment in self.pending_payments
+            if payment.get("status") == "pending"
+        ]
+
+    def mark_payment_resolved(
+        self,
+        payment_id: str,
+        status: Literal["accepted", "declined", "rejected"],
+        *,
+        resolved_at: float,
+    ) -> PendingPayment | None:
+        for payment in self.pending_payments:
+            if payment.get("id") == payment_id:
+                payment["status"] = status
+                payment["resolved_at"] = resolved_at
+                return payment
+        return None
+
+    def record_check(self, check: CheckResult) -> None:
+        """记录结构化检定，并保持 last_check 与 last_checks 一致。"""
+        self.last_checks.append(check)
+        self.last_check = check
+
+    def reset_round_checks(self, *, prepared: bool = False) -> None:
+        self.last_check = None
+        self.last_checks.clear()
+        self.round_checks_prepared = prepared
+
+    def complete_round_check_preparation(self) -> None:
+        if self.last_checks:
+            self.last_check = self.last_checks[-1]
+        self.round_checks_prepared = True
+
+    def begin_round_processing(self) -> None:
+        """清理仅属于上一轮展示的短期状态。"""
+        self.last_token_budget_bump = None
+        self.pending_combat_results.clear()
+        self.update_lorebook_timed_state()
+
+    def set_token_budget_bump(self, initial: int, used: int, *, kind: str = "narrative") -> None:
+        self.last_token_budget_bump = (
+            {"kind": kind, "from": initial, "to": used}
+            if used > initial > 0
+            else None
+        )
+
+    def set_state_update_recap(self, state_update: dict | None) -> None:
+        self.last_state_update = state_update or None
+
+    def consume_gm_directives(self, directive_ids: set[str]) -> None:
+        if not directive_ids:
+            return
+        self.gm_directives = [
+            directive
+            for directive in self.gm_directives
+            if str(directive.get("id") or "") not in directive_ids
+        ]
+
+    def record_llm_usage(self, tokens: int = 0, *, calls: int = 1) -> None:
+        self.total_tokens += max(0, int(tokens or 0))
+        self.total_llm_calls += max(0, int(calls or 0))
+
+    def record_combat_result(self, result: dict) -> None:
+        self.pending_combat_results.append(result)
+
+    def begin_combat(self, initiative_order: list[str]) -> None:
+        self.initiative_order = list(initiative_order)
+        self.initiative_current = 0
+        self.combat_state = "active"
+        self.combat_active = True
+
+    def end_combat(self) -> None:
+        self.combat_state = "none"
+        self.combat_active = False
+        self.initiative_order.clear()
+        self.initiative_current = 0
+
+    def record_save_success(self) -> None:
+        self._save_fail_count = 0
+
+    def record_save_failure(self) -> int:
+        self._save_fail_count += 1
+        return self._save_fail_count
+
+    def set_tag_failure_streak(self, streak: int) -> None:
+        self._tag_fail_streak = max(0, int(streak))
+
+    def ensure_round_managers(self) -> None:
+        """惰性初始化回合管理器，避免调用方直接替换运行时组件。"""
+        if self.plot_tracker is None:
+            from src.engine.plot_tracker import PlotTracker
+
+            self.plot_tracker = PlotTracker()
+        if self.puzzle_manager is None:
+            from src.engine.puzzle import PuzzleManager
+
+            self.puzzle_manager = PuzzleManager()
+
+    async def rollback_last_round(self) -> int | None:
+        """恢复到上一轮开始前；返回恢复后的轮次，没有日志时返回 None。"""
+        async with self._lock:
+            if not self.log:
+                return None
+            last = self.log.pop()
+            snapshot = last.get("round_start_snapshot") or last.get("pre_state_snapshot", {})
+            if isinstance(snapshot, dict) and snapshot:
+                restore_players(self, snapshot)
+            self.round_number = max(1, int(last.get("round", self.round_number) or 1))
+            self.action_queue.clear()
+            self.pending_actions.clear()
+            self.ready_players.clear()
+            self.pending_payments.clear()
+            self.reset_round_checks()
+            self.round_start_snapshot.clear()
+            self.state = GameState.ACTIVE_ACTION
+            self.last_activity = datetime.now(timezone.utc).isoformat()
+            return self.round_number
+
     def iter_player_sheets(self):
         """遍历玩家及其角色卡，yield (uid, player_data, character_sheet)。"""
         for uid, player in self.players.items():
@@ -257,6 +527,106 @@ class GameInstance:
 
     def can_accept_actions(self) -> bool:
         return self.state == GameState.ACTIVE_ACTION
+
+    def pending_luck_checks(self, user_id: str = "") -> list[dict]:
+        """返回当前等待玩家决定是否消耗幸运的检定。"""
+        return [
+            dict(check)
+            for check in self.last_checks
+            if check.get("luck_decision") == "pending"
+            and (not user_id or str(check.get("actor_uid") or "") == user_id)
+        ]
+
+    async def resolve_luck_decision(
+        self,
+        check_id: str,
+        actor_uid: str,
+        spend: bool,
+        *,
+        rule=None,
+        allow_gm: bool = False,
+    ) -> dict:
+        """原子处理一次幸运选择，重复请求不会重复扣除资源。"""
+        async with self._lock:
+            target = next(
+                (check for check in self.last_checks if str(check.get("check_id") or "") == check_id),
+                None,
+            )
+            if not target:
+                return {"ok": False, "code": "CHECK_NOT_FOUND", "error": "检定不存在或已过期"}
+            owner_uid = str(target.get("actor_uid") or "")
+            if actor_uid != owner_uid and not (allow_gm and actor_uid == self.gm_uid):
+                return {"ok": False, "code": "LUCK_FORBIDDEN", "error": "只能处理自己的幸运选择"}
+
+            desired = "spent" if spend else "declined"
+            current_decision = str(target.get("luck_decision") or "")
+            if current_decision and current_decision != "pending":
+                if current_decision == desired:
+                    return {
+                        "ok": True,
+                        "already_resolved": True,
+                        "check_result": dict(target),
+                    }
+                return {"ok": False, "code": "LUCK_ALREADY_RESOLVED", "error": "该检定的幸运选择已经处理"}
+            if self.state != GameState.ACTIVE_JUDGMENT or not self.round_checks_prepared:
+                return {"ok": False, "code": "LUCK_NOT_PENDING", "error": "当前没有等待处理的幸运选择"}
+            if current_decision != "pending":
+                return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不能消耗幸运"}
+
+            if spend:
+                if str(target.get("dice") or "").lower() != "d100" or str(target.get("verdict") or "") != "失败":
+                    return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不能消耗幸运"}
+                roll_value = int(target.get("roll", 0) or 0)
+                threshold = int(target.get("threshold", 0) or 0)
+                cost = roll_value - threshold
+                if cost <= 0:
+                    return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不需要消耗幸运"}
+                character_sheet = self.get_character_sheet(owner_uid)
+                resource = get_resource(character_sheet, "luck")
+                current_luck = int((resource or {}).get("current", character_sheet.get("luck", 0)) or 0)
+                if current_luck < cost:
+                    return {
+                        "ok": False,
+                        "code": "LUCK_INSUFFICIENT",
+                        "error": f"幸运不足：需要 {cost} 点，当前只有 {current_luck} 点",
+                    }
+                remaining = apply_resource_delta(character_sheet, "luck", -cost, rule)
+                target["original_verdict"] = target.get("verdict")
+                target["verdict"] = "成功"
+                target["luck_spent"] = cost
+                target["luck_remaining"] = remaining
+
+            target["luck_decision"] = desired
+            target["luck_spend_available"] = False
+            target["luck_resolved_at"] = datetime.now(timezone.utc).isoformat()
+            if self.last_check and str(self.last_check.get("check_id") or "") == check_id:
+                self.last_check = dict(target)
+            self.last_activity = datetime.now(timezone.utc).isoformat()
+            return {"ok": True, "check_result": dict(target)}
+
+    async def decline_pending_luck(self) -> list[dict]:
+        """GM 强制推进时将所有未选择的幸运检定按失败继续。"""
+        async with self._lock:
+            declined: list[dict] = []
+            now = datetime.now(timezone.utc).isoformat()
+            for check in self.last_checks:
+                if check.get("luck_decision") != "pending":
+                    continue
+                check["luck_decision"] = "declined"
+                check["luck_spend_available"] = False
+                check["luck_resolved_at"] = now
+                declined.append(dict(check))
+            if declined:
+                if self.last_check:
+                    last_id = str(self.last_check.get("check_id") or "")
+                    replacement = next(
+                        (check for check in self.last_checks if str(check.get("check_id") or "") == last_id),
+                        None,
+                    )
+                    if replacement:
+                        self.last_check = dict(replacement)
+                self.last_activity = now
+            return declined
 
     def all_alive_ready(self) -> bool:
         """多人模式下，所有未暂离的存活角色都提交行动后才自动推进。"""
@@ -335,6 +705,8 @@ class GameInstance:
         async with self._lock:
             self.round_number += 1
             self.state = GameState.ACTIVE_ACTION
+            self.round_checks_prepared = False
+            self.round_start_snapshot.clear()
             self.action_queue.clear()
             self.ready_players.clear()
             if self.pending_actions:
@@ -509,6 +881,8 @@ class GameInstance:
         for uid in self.alive_players:
             self.ready_players.add(uid)
         self.state = GameState.ACTIVE_JUDGMENT
+        self.round_checks_prepared = False
+        self.round_start_snapshot = _snapshot_players(self)
         logger.info("进入判定阶段 - game_key=%s, actions=%d",
                      self.game_key, len(self.action_queue))
         return True
@@ -528,6 +902,10 @@ class GameInstance:
                 "gm_response": gm_response,
                 "state_changes": list(state_changes or []),
                 "check_results": [dict(item) for item in self.last_checks],
+                "round_start_snapshot": (
+                    copy.deepcopy(self.round_start_snapshot)
+                    if self.round_start_snapshot else _snapshot_players(self)
+                ),
                 "swipes": [],
                 "current_swipe": 0,
                 "pre_state_snapshot": pre_state_snapshot if pre_state_snapshot is not None else _snapshot_players(self),
@@ -627,7 +1005,10 @@ class GameInstance:
             self.private_log.clear()
             self.last_check = None
             self.last_checks.clear()
+            self.round_checks_prepared = False
+            self.round_start_snapshot.clear()
             self.last_state_update = None
+            self.last_token_budget_bump = None
             self.gm_directives.clear()
             self.state = GameState.CREATED
             self.world_id = saved_world_id
@@ -701,7 +1082,10 @@ class GameInstance:
             "health_status": self.health_status,
             "last_check": self.last_check,
             "last_checks": self.last_checks,
+            "round_checks_prepared": self.round_checks_prepared,
+            "round_start_snapshot": self.round_start_snapshot,
             "last_state_update": self.last_state_update,
+            "last_token_budget_bump": self.last_token_budget_bump,
             "gm_directives": self.gm_directives,
             "confirmed_items": self.confirmed_items,
             "private_log": self.private_log,
@@ -839,8 +1223,11 @@ class GameInstance:
             health_events=data.get("health_events", []),
             health_status=data.get("health_status", {}),
             last_check=data.get("last_check"),
-            last_checks=data.get("last_checks", []),
+            last_checks=data.get("last_checks") or [],
+            round_checks_prepared=bool(data.get("round_checks_prepared", False)),
+            round_start_snapshot=data.get("round_start_snapshot") or {},
             last_state_update=data.get("last_state_update"),
+            last_token_budget_bump=data.get("last_token_budget_bump"),
             gm_directives=data.get("gm_directives", []),
         )
         inst.ready_players = set(data.get("ready_players", []))
@@ -983,7 +1370,7 @@ class GameRegistry:
         return instance
 
     async def recover_all(self) -> list[GameInstance]:
-        """启动时扫描 saves/ 恢复所有未完成对局，设为 PAUSED。"""
+        """启动时恢复未完成对局；待幸运选择保持可处理，其余对局暂停。"""
         recovered: list[GameInstance] = []
         if not self.save_dir.exists():
             return recovered
@@ -1004,7 +1391,12 @@ class GameRegistry:
                 game_key = tuple(parts[:3])
                 instance = await self.load(game_key)
                 if instance and instance.state != GameState.ENDED:
-                    instance.state = GameState.PAUSED
+                    if not (
+                        instance.state == GameState.ACTIVE_JUDGMENT
+                        and instance.round_checks_prepared
+                        and instance.pending_luck_checks()
+                    ):
+                        instance.state = GameState.PAUSED
                     recovered.append(instance)
             except Exception:
                 logger.exception("恢复存档失败: %s", entry.name)

@@ -14,7 +14,7 @@ async def get_bind_token(api: "WebAPI", game_key: str, rotate: bool = False) -> 
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
     if rotate or not getattr(inst, "bot_bind_token", ""):
-        inst.bot_bind_token = secrets.token_urlsafe(18)
+        inst.set_bot_bind_token(secrets.token_urlsafe(18))
         await api._reg.save(inst)
     return {"ok": True, "bind_token": inst.bot_bind_token}
 
@@ -41,7 +41,7 @@ async def verify_bind_game(api: "WebAPI", game_key: str, bind_token: str) -> dic
             for user_id, player in inst.players.items()
         ],
     }
-    inst.bot_bind_token = ""
+    inst.set_bot_bind_token("")
     await api._reg.save(inst)
     return result
 

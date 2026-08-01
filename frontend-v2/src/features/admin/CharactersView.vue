@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
-import type { CharacterCard, CharacterCardsResponse, CharacterItem, CharacterListResponse, CharacterSheet, CharacterSkill, JsonObject, RuleDetailResponse, RuleMeta, SkillSpec } from '@/api/types'
+import type { CharacterCard, CharacterCardsResponse, CharacterItem, CharacterListResponse, CharacterPortrait, CharacterSchemaResponse, CharacterSheet, CharacterSkill, JsonObject, RuleMeta, RulesResponse, RuleSummary, SkillSpec } from '@/api/types'
 import { readCurrentGame } from '@/stores/gameContext'
 import { importTavernCard } from '@/utils/characterImport'
 import { useToast } from '@/composables/useToast'
@@ -13,6 +13,8 @@ import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import SkillEditor from '@/components/admin/SkillEditor.vue'
 import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
 import ItemEditor from '@/components/admin/ItemEditor.vue'
+import PortraitImage from '@/components/PortraitImage.vue'
+import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import {
   identitySchema, identityLabel, getIdentityValue, setIdentityUpdate,
   currencyLabel, getCurrencyAmount, getResourceValue,
@@ -37,6 +39,7 @@ interface CharacterEditForm {
   keyText: string
   fields: IdentityField[]
   identityValues: Record<string, string>
+  portrait?: CharacterPortrait
 }
 interface LevelUpState { player: import('@/api/types').Player; levelUpPoints: number }
 interface CardEditForm {
@@ -47,6 +50,8 @@ interface CardEditForm {
   skills: CharacterSkill[]
   background: string
   gold: number
+  portrait?: CharacterPortrait
+  rule_id?: string
 }
 interface CharacterCardPatch extends JsonObject {
   character_name: string
@@ -55,6 +60,7 @@ interface CharacterCardPatch extends JsonObject {
   skills: CharacterSkill[]
   background: string
   gold: number
+  portrait?: CharacterPortrait
 }
 interface UpdateCharacterPayload extends JsonObject {
   character_name: string
@@ -72,11 +78,12 @@ interface UpdateCharacterPayload extends JsonObject {
   equipment?: CharacterItem[]
   inventory?: CharacterItem[]
   key_items?: CharacterItem[]
+  portrait?: CharacterPortrait
 }
 
 const toast = useToast()
 const { confirm } = useConfirm()
-const { t } = useLocale()
+const { locale, t } = useLocale()
 
 const game = ref(readCurrentGame())
 const data = ref<CharacterData | null>(null)
@@ -87,11 +94,13 @@ const editLevelUp = ref<LevelUpState | null>(null)
 const editCard = ref<CardEditForm | null>(null)
 const showWizard = ref(false)
 
+const rules = ref<RuleSummary[]>([])
 const ruleMeta = ref<RuleMeta>({})
 const ruleAttrs = ref<RuleAttr[]>([])
 const ruleAttrsTotal = ref(60)
 const ruleId = ref('')
 const ruleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec> } | null>(null)
+const ruleSchemaLoading = ref(false)
 
 const skillPool = computed<Array<string | SkillSpec>>(() => {
   const detail = ruleDetail.value || {}
@@ -117,6 +126,26 @@ function parseLines<T extends CharacterItem>(text: string, fn: (p: string[]) => 
   return t.split('\n').map(l => fn(l.split('|').map(x => x.trim())))
 }
 function cardId(card: CharacterCard): string { return String(card.card_id || card.id || '') }
+function ruleNameOf(rule: RuleSummary): string {
+  return String(locale.value).startsWith('en')
+    ? String(rule.rule_name_en || rule.rule_name || rule.rule_id)
+    : String(rule.rule_name || rule.rule_id)
+}
+function cardRuleLabel(card: CharacterCard): string {
+  if (!card.rule_id) return t('unboundRule')
+  const rule = rules.value.find(candidate => candidate.rule_id === card.rule_id)
+  return rule ? ruleNameOf(rule) : String(card.rule_name || card.rule_id)
+}
+function currentRuleBinding(): Pick<CharacterCard, 'rule_id' | 'rule_name' | 'rule_version' | 'mechanics' | 'language'> {
+  const rule = rules.value.find(candidate => candidate.rule_id === ruleId.value)
+  return {
+    rule_id: ruleId.value,
+    rule_name: String(ruleMeta.value.rule_name || rule?.rule_name || ruleId.value),
+    rule_version: String(ruleMeta.value.rule_version || ''),
+    mechanics: String(ruleMeta.value.mechanics || ''),
+    language: String(locale.value),
+  }
+}
 function levelUpPoints(player: import('@/api/types').Player): number { return Number(player.character_sheet?.level_up_points || 0) }
 function npcKey(card: CharacterCard): string { return String(card.id || card.card_id || card.name || card.character_name || Math.random()) }
 function npcSummary(card: CharacterCard): string {
@@ -127,30 +156,51 @@ function npcSummary(card: CharacterCard): string {
   ].filter(Boolean).join(' · ')
 }
 
-watch(ruleId, async (id) => {
+watch([ruleId, locale], async ([id]) => {
   if (!id) { ruleDetail.value = null; return }
+  ruleSchemaLoading.value = true
   try {
-    const rd = await api<RuleDetailResponse>(`/rules/${id}`)
-    ruleDetail.value = rd.rule || null
-  } catch { ruleDetail.value = null }
+    const schema = await api<CharacterSchemaResponse>(
+      `/rules/${encodeURIComponent(String(id))}/character-schema?language=${encodeURIComponent(String(locale.value))}`,
+    )
+    if (!schema.ok) throw new Error(schema.error || t('ruleLoadFailed'))
+    if (!game.value) {
+      ruleMeta.value = schema.rule_meta || {}
+      ruleAttrs.value = schema.rule_attrs || []
+      ruleAttrsTotal.value = Number(schema.rule_attrs_total || 60)
+    }
+    ruleDetail.value = { skill_pool: schema.skill_pool || [] }
+  } catch (e: unknown) {
+    ruleDetail.value = null
+    error.value = errorMessage(e)
+  } finally { ruleSchemaLoading.value = false }
 })
 
 async function load() {
   error.value = ''; data.value = null
   try {
     if (game.value) {
-      const [chars, cards] = await Promise.all([
+      const [chars, cards, availableRules] = await Promise.all([
         api<CharacterListResponse>(`/games/${encodeURIComponent(game.value)}/characters`),
         api<CharacterCardsResponse>('/character-cards'),
+        api<RulesResponse>('/rules'),
       ])
+      rules.value = availableRules.rules || []
       data.value = { ...chars, cards: cards.cards || [] }
       ruleMeta.value = chars.rule_meta || {}
       ruleAttrs.value = chars.rule_attrs || []
       ruleAttrsTotal.value = chars.rule_attrs_total || 60
       ruleId.value = String(ruleMeta.value.rule_id || '')
     } else {
-      const cards = await api<CharacterCardsResponse>('/character-cards')
+      const [cards, availableRules] = await Promise.all([
+        api<CharacterCardsResponse>('/character-cards'),
+        api<RulesResponse>('/rules'),
+      ])
+      rules.value = availableRules.rules || []
       data.value = { players: [], cards: cards.cards || [] }
+      if (!ruleId.value || !rules.value.some(rule => rule.rule_id === ruleId.value)) {
+        ruleId.value = rules.value[0]?.rule_id || ''
+      }
     }
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
@@ -197,6 +247,7 @@ function openEdit(p: import('@/api/types').Player) {
     keyText: itemLines(cs.key_items, ['name', 'category', 'note'], { category: 'key_item', note: '' }),
     fields,
     identityValues: Object.fromEntries(fields.map((f: IdentityField) => [f.key, getIdentityValue(cs, f)])),
+    portrait: cs.portrait ? { ...cs.portrait } : undefined,
   }
 }
 
@@ -230,6 +281,7 @@ async function saveCharacter() {
       hp: hpCurrent,
       max_hp: hpMax,
       resources: { hp: { current: hpCurrent, max: hpMax, min: 0 } },
+      portrait: e.portrait ? { ...e.portrait } : undefined,
     }
     e.fields.forEach((f: IdentityField) => setIdentityUpdate(updates, f, e.identityValues[f.key]))
     updates.identity = updates.identity || {}
@@ -257,7 +309,7 @@ async function deleteCharacter(p: import('@/api/types').Player) {
 async function saveToCard(p: import('@/api/types').Player) {
   const cs = p.character_sheet || {}
   try {
-    await api('/character-cards', { method: 'POST', body: JSON.stringify({ character_name: p.character_name, ...cs }) })
+    await api('/character-cards', { method: 'POST', body: JSON.stringify({ character_name: p.character_name, ...cs, ...currentRuleBinding() }) })
     await load()
     toast.success(t('savedToSharedLibrary'))
   } catch (e: unknown) { error.value = errorMessage(e) }
@@ -287,6 +339,8 @@ function openCardEdit(c: CharacterCard) {
     skills: toSkillList(c.skills),
     background: c.background || '',
     gold: Number(c.gold ?? 30),
+    portrait: c.portrait ? { ...c.portrait } : undefined,
+    rule_id: c.rule_id,
   }
 }
 async function saveCardEdit() {
@@ -301,6 +355,7 @@ async function saveCardEdit() {
       skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
       background: e.background.trim(),
       gold: parseInt(String(e.gold)) || 0,
+      portrait: e.portrait ? { ...e.portrait } : undefined,
     }
     const r = await api<{ ok?: boolean; error?: string }>(`/character-cards/${encodeURIComponent(e.card_id)}`, { method: 'PUT', body: JSON.stringify(patch) })
     if (!r.ok) throw new Error(r.error || t('saveFailed'))
@@ -323,7 +378,7 @@ async function deleteCard(c: CharacterCard) {
 async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
   busy.value = true
   try {
-    await api('/character-cards', { method: 'POST', body: JSON.stringify(c) })
+    await api('/character-cards', { method: 'POST', body: JSON.stringify({ ...c, ...currentRuleBinding() }) })
     showWizard.value = false
     await load()
     toast.success(t('characterCardCreated'))
@@ -340,22 +395,31 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
         <p v-else class="muted">{{ t('noSaveSelectedHint') }}</p>
       </div>
       <div class="actions">
-        <button class="primary" :disabled="!ruleId" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
+        <label v-if="!game" class="standalone-rule-select">
+          <span>{{ t('characterCardRule') }}</span>
+          <select v-model="ruleId" :disabled="ruleSchemaLoading">
+            <option v-for="rule in rules" :key="rule.rule_id" :value="rule.rule_id">{{ ruleNameOf(rule) }}</option>
+          </select>
+        </label>
+        <button class="primary" :disabled="!ruleId || ruleSchemaLoading" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
         <button @click="load">{{ t('refresh') }}</button>
       </div>
     </header>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
 
-    <h2 class="field-group">{{ t('currentGameCharacters') }}</h2>
-    <div class="card-grid">
+    <h2 v-if="game" class="field-group">{{ t('currentGameCharacters') }}</h2>
+    <div v-if="game" class="card-grid">
       <article v-for="p in data?.players || []" :key="p.user_id" class="char-card">
-        <div>
+        <div class="character-card-summary">
+          <PortraitImage :portrait="p.character_sheet?.portrait" :rule-id="ruleId" :seed="p.user_id" :name="p.character_name" :size="56" />
+          <div>
           <h2>{{ p.character_name }}</h2>
           <p class="muted">
             {{ p.user_id }} · HP {{ p.character_sheet?.hp }}/{{ p.character_sheet?.max_hp }}
             <span v-if="levelUpPoints(p) > 0" class="warn"> · {{ t('pointsToAllocate', { points: levelUpPoints(p) }) }}</span>
           </p>
+          </div>
         </div>
         <div class="actions">
           <button @click="openEdit(p)">{{ t('edit') }}</button>
@@ -370,10 +434,13 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
     <h2 class="field-group" v-if="data?.npcs?.length">{{ t('currentGameNpcs') }}</h2>
     <div class="card-grid" v-if="data?.npcs?.length">
       <article v-for="n in data.npcs" :key="npcKey(n)" class="char-card">
-        <div>
+        <div class="character-card-summary">
+          <PortraitImage :portrait="n.portrait" :rule-id="ruleId" :seed="String(n.id || n.character_name || n.name || '')" :name="String(n.character_name || n.name || '')" :size="56" />
+          <div>
           <h2>{{ n.character_name || n.name || t('unnamed') }}<small v-if="n.tier === 'core'" class="muted"> · {{ t('core') }}</small></h2>
           <p class="muted">{{ npcSummary(n) }}</p>
           <p v-if="n.note || n.description" class="muted">{{ String(n.note || n.description).slice(0, 120) }}</p>
+          </div>
         </div>
       </article>
     </div>
@@ -382,10 +449,16 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
     <input ref="tavernInput" type="file" accept=".json,application/json" @change="onImportTavern" hidden>
     <div class="card-grid">
       <article v-for="c in data?.cards || []" :key="c.card_id || c.id" class="char-card">
-        <div>
+        <div class="character-card-summary">
+          <PortraitImage :portrait="c.portrait" :rule-id="c.rule_id" :seed="cardId(c) || c.character_name" :name="c.character_name" :size="56" />
+          <div>
           <h2>{{ c.character_name }}</h2>
-          <p class="muted">{{ c.race }} · {{ c.class }}<span v-if="c.source"> · {{ t('source') }} {{ c.source }}</span></p>
+          <p class="muted">
+            <span class="badge">{{ cardRuleLabel(c) }}</span>
+            {{ c.race }} · {{ c.class }}<span v-if="c.source"> · {{ t('source') }} {{ c.source }}</span>
+          </p>
           <p v-if="c.background" class="muted">{{ String(c.background).slice(0, 80) }}</p>
+          </div>
         </div>
         <div class="actions">
           <button @click="openCardEdit(c)">{{ t('editCard') }}</button>
@@ -397,6 +470,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
 
     <Modal v-if="edit" :title="t('editCharacter')" @close="edit = null">
       <label>{{ t('characterName') }}<input v-model="edit.character_name"></label>
+      <PortraitPicker v-model="edit.portrait" :rule-id="ruleId" :seed="edit.user_id" :name="edit.character_name" />
       <label v-for="f in edit.fields" :key="f.key">{{ identityLabel(f) }}<input v-model="edit.identityValues[f.key]"></label>
       <label>{{ t('level') }}<input type="number" v-model.number="edit.level"></label>
       <label>HP / {{ t('maxHp') }}
@@ -438,6 +512,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
 
     <Modal v-if="editCard" :title="t('editCharacterCard')" @close="editCard = null">
       <label>{{ t('characterName') }}<input v-model="editCard.character_name"></label>
+      <PortraitPicker v-model="editCard.portrait" :rule-id="editCard.rule_id || ruleId" :seed="editCard.card_id" :name="editCard.character_name" />
       <label>{{ t('originIdentity') }}<input v-model="editCard.race"></label>
       <label>{{ t('classRole') }}<input v-model="editCard.class"></label>
       <label>{{ t('skills') }}</label>
@@ -457,6 +532,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
       :attr-total="ruleAttrsTotal"
       :skill-pool="skillPool"
       :rule-id="ruleId"
+      :language="String(locale)"
       @submit="onWizardSubmit"
       @cancel="showWizard = false"
     />

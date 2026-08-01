@@ -21,6 +21,8 @@ Open **Settings → Version Update**, then follow the prompts to download and ap
 
 If the new version cannot start correctly, DiceFrame automatically returns to the previous version. Downloaded packages and older unused versions are removed after a successful update.
 
+Portable installations keep at most two application payloads. The root-level `app/` and `python/` directories from the original archive count as the first payload and remain as the rollback copy after the first update. After the second and later successful updates, only the current and previous payloads under `versions/` are kept, and the legacy root-level `app/` and `python/` directories are removed. `data/`, `logs/`, and the root launcher are not version payloads and are never removed by this cleanup. If the current payload is unavailable, the launcher uses the version pointer to try the previous payload.
+
 If Settings shows a new version but no Apply button, manually download the latest portable package from GitHub Releases once. Later updates can then be applied from Settings.
 
 ## Source Release

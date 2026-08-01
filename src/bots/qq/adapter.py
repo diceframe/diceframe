@@ -23,6 +23,8 @@ from src.bots.bridge_core.commands import (
     is_private_log,
     is_recap,
     is_return,
+    luck_decision,
+    luck_index,
     payment_decision,
     payment_index,
 )
@@ -37,6 +39,7 @@ from src.bots.bridge_core.presenters import (
     character_draft_text,
     character_public_lines,
     format_action_result,
+    luck_prompt_lines,
     format_character_attrs,
     format_character_items,
     format_character_skills,
@@ -96,6 +99,8 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
     _is_payment_list = staticmethod(is_payment_list)
     _payment_decision = staticmethod(payment_decision)
     _payment_index = staticmethod(payment_index)
+    _luck_decision = staticmethod(luck_decision)
+    _luck_index = staticmethod(luck_index)
 
     _format_action_result = staticmethod(format_action_result)
     _recap_text = staticmethod(recap_text)
@@ -142,6 +147,7 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         self.character_wizards: dict[str, dict[str, Any]] = {}
         self._web_sync_last_round: dict[str, int] = {}
         self._web_sync_seen_actions: dict[str, set[str]] = {}
+        self._web_sync_seen_luck: dict[str, set[str]] = {}
         self._web_sync_failures: dict[str, int] = {}
         self._group_action_inflight: dict[str, bool] = {}
 
@@ -351,6 +357,10 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
                 lines=self._format_action_result(result, language).splitlines(),
                 fallback=self._format_action_result(result, language),
             )
+            return
+        luck = self._luck_decision(text)
+        if luck is not None:
+            await self._resolve_luck_private(platform_user_id, game_key, actor, text, spend=luck)
             return
         if not text or text in {"帮助", "help", "?", "？"}:
             if bridge_is_english(language):
@@ -576,6 +586,10 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         if text.lower() in {"状态", "我的状态", "status", "my status"}:
             await self._send_status(group_id, platform_user_id, game_key, actor)
             return
+        luck = self._luck_decision(text)
+        if luck is not None:
+            await self._resolve_luck_group(group_id, game_key, actor, text, spend=luck)
+            return
         if text.lower() in {"掷骰", "骰子", "roll"}:
             pending_text = self.pending_dice.get(pending_key)
             if not pending_text:
@@ -620,17 +634,23 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
 
     async def _action_with_group_thinking(self, group_id: str, game_key: str, actor: str,
                                           text: str, *, confirm: bool = False) -> dict[str, Any]:
-        show_thinking = await self._will_trigger_gm_thinking(game_key, actor)
+        show_thinking = not confirm and await self._will_trigger_gm_thinking(game_key, actor)
         task = asyncio.create_task(self.api.action(game_key, actor, text, confirm=confirm, source="group"))
-        if show_thinking:
+        if confirm:
+            language = self._group_language(self.store.group(group_id))
+            await self._send_group_text(group_id, bridge_text(language, "正在结算检定；若可使用幸运，会先等待你的选择。", "Resolving the check. If Luck can be spent, you will be asked before the story continues."))
+        elif show_thinking:
             await self._send_group_thinking(group_id)
         return await task
 
     async def _action_with_private_thinking(self, platform_user_id: str, game_key: str, actor: str,
                                             text: str, *, confirm: bool = False) -> dict[str, Any]:
-        show_thinking = await self._will_trigger_gm_thinking(game_key, actor)
+        show_thinking = not confirm and await self._will_trigger_gm_thinking(game_key, actor)
         task = asyncio.create_task(self.api.action(game_key, actor, text, confirm=confirm, source="group"))
-        if show_thinking:
+        if confirm:
+            language = self._private_language(platform_user_id)
+            await self._send_private_text(platform_user_id, bridge_text(language, "正在结算检定；若可使用幸运，会先等待你的选择。", "Resolving the check. If Luck can be spent, you will be asked before the story continues."))
+        elif show_thinking:
             await self._send_private_thinking(platform_user_id)
         return await task
 
@@ -713,6 +733,112 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
         fresh["roster"] = roster
         return fresh
 
+    async def _pending_luck_for_actor(self, game_key: str, actor: str) -> tuple[list[dict], list[dict]]:
+        detail = await self.api.game_detail(game_key, actor)
+        all_pending = [
+            check for check in (detail.get("pending_luck_decisions") or [])
+            if isinstance(check, dict)
+        ]
+        own_pending = [
+            check for check in all_pending
+            if str(check.get("actor_uid") or "") == actor
+        ]
+        return own_pending, all_pending
+
+    async def _resolve_luck_group(
+        self,
+        group_id: str,
+        game_key: str,
+        actor: str,
+        text: str,
+        *,
+        spend: bool,
+    ) -> None:
+        language = self._group_language(self.store.group(group_id))
+        own_pending, all_pending = await self._pending_luck_for_actor(game_key, actor)
+        if not own_pending:
+            await self._send_group_text(group_id, bridge_text(language, "当前没有等待你处理的幸运选择。", "There is no Luck decision waiting for you."))
+            return
+        index = self._luck_index(text)
+        if index > len(own_pending):
+            await self._send_group_text(group_id, bridge_text(language, "没有第 {index} 个幸运选择。", "There is no Luck decision #{index}.", index=index))
+            return
+        check = own_pending[index - 1]
+        self._group_action_inflight[game_key] = True
+        try:
+            if len(all_pending) == 1:
+                await self._send_group_thinking(group_id)
+            result = await self.api.resolve_luck(
+                game_key,
+                actor,
+                str(check.get("check_id") or ""),
+                spend=spend,
+            )
+            if result.get("advanced"):
+                await self._send_action_result(group_id, game_key, actor, result)
+                return
+            cost = int(check.get("luck_cost", 0) or 0)
+            message = (
+                f"Spent {cost} Luck; the check is now a regular success."
+                if spend else "Luck was not spent; the failure is kept."
+            ) if bridge_is_english(language) else (
+                f"已消耗 {cost} 点幸运，本次检定改为普通成功。"
+                if spend else "未使用幸运，本次检定保留失败。"
+            )
+            if result.get("pending_luck_decisions"):
+                message += " Waiting for other Luck decisions." if bridge_is_english(language) else " 仍在等待其他角色选择幸运。"
+            await self._send_group_text(group_id, message)
+        finally:
+            self._group_action_inflight[game_key] = False
+
+    async def _resolve_luck_private(
+        self,
+        platform_user_id: str,
+        game_key: str,
+        actor: str,
+        text: str,
+        *,
+        spend: bool,
+    ) -> None:
+        language = self._private_language(platform_user_id)
+        own_pending, all_pending = await self._pending_luck_for_actor(game_key, actor)
+        if not own_pending:
+            await self._send_private_text(platform_user_id, bridge_text(language, "当前没有等待你处理的幸运选择。", "There is no Luck decision waiting for you."))
+            return
+        index = self._luck_index(text)
+        if index > len(own_pending):
+            await self._send_private_text(platform_user_id, bridge_text(language, "没有第 {index} 个幸运选择。", "There is no Luck decision #{index}.", index=index))
+            return
+        check = own_pending[index - 1]
+        if len(all_pending) == 1:
+            await self._send_private_thinking(platform_user_id)
+        result = await self.api.resolve_luck(
+            game_key,
+            actor,
+            str(check.get("check_id") or ""),
+            spend=spend,
+        )
+        cost = int(check.get("luck_cost", 0) or 0)
+        lines = [(
+            f"Spent {cost} Luck; the check is now a regular success."
+            if spend else "Luck was not spent; the failure is kept."
+        ) if bridge_is_english(language) else (
+            f"已消耗 {cost} 点幸运，本次检定改为普通成功。"
+            if spend else "未使用幸运，本次检定保留失败。"
+        )]
+        narration = str(result.get("narration") or "").strip()
+        if narration:
+            lines.extend(narration.splitlines())
+        elif result.get("pending_luck_decisions"):
+            lines.append("Waiting for other Luck decisions." if bridge_is_english(language) else "仍在等待其他角色选择幸运。")
+        await self._send_private_card(
+            platform_user_id,
+            title="Luck decision" if bridge_is_english(language) else "幸运选择",
+            subtitle="Resolved" if bridge_is_english(language) else "已处理",
+            lines=lines,
+            fallback="\n".join(lines),
+        )
+
     async def _send_action_result(self, group_id: str, game_key: str, actor: str,
                                   result: dict[str, Any]) -> None:
         language = self._group_language(self.store.group(group_id))
@@ -766,6 +892,11 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             lines.append(f"🎲 {str(roll.get('dice_system', '')).upper()} = {roll.get('value')}")
         if narration:
             lines.extend(narration.splitlines()[:8])
+        pending_luck = result.get("pending_luck_decisions") if isinstance(result.get("pending_luck_decisions"), list) else []
+        if pending_luck:
+            lines.extend(luck_prompt_lines(pending_luck, language, command_prefix="@我"))
+            seen_luck = self._web_sync_seen_luck.setdefault(game_key, set())
+            seen_luck.update(str(check.get("check_id") or "") for check in pending_luck if isinstance(check, dict))
         if pending:
             lines.append("")
             lines.append("-- Pending payments --" if bridge_is_english(language) else "-- 待确认支付 --")

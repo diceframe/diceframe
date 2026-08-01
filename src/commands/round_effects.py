@@ -19,13 +19,7 @@ def apply_confirmed_items(instance: GameInstance, data: dict) -> None:
     confirmed = data.get("confirmed", [])
     if not confirmed:
         return
-    existing = set(instance.confirmed_items)
-    for item in confirmed:
-        if item not in existing:
-            instance.confirmed_items.append(item)
-            existing.add(item)
-    if len(instance.confirmed_items) > 50:
-        del instance.confirmed_items[:len(instance.confirmed_items) - 50]
+    instance.add_confirmed_items(confirmed)
 
 
 def apply_puzzle_updates(instance: GameInstance, data: dict) -> None:
@@ -48,10 +42,7 @@ def apply_puzzle_updates(instance: GameInstance, data: dict) -> None:
 def apply_combat_command(instance: GameInstance, data: dict) -> None:
     combat_cmd = data.get("combat_command", "")
     if combat_cmd == "end" and instance.combat_state == "active":
-        instance.combat_state = "none"
-        instance.combat_active = False
-        instance.initiative_order.clear()
-        instance.initiative_current = 0
+        instance.end_combat()
         logger.info("战斗结束 (round=%d)", instance.round_number)
 
 
@@ -100,7 +91,7 @@ def update_quick_actions(instance: GameInstance, data: dict) -> None:
         first_uid = next(iter(instance.alive_players), "")
         class_name = instance.get_character_sheet(first_uid).get("class", "")
         quick_actions = default_quick_actions_by_class(class_name)
-    instance.quick_actions = quick_actions
+    instance.set_quick_actions(quick_actions)
 
 async def apply_memory_delta(instance: GameInstance, response: Any, memory_store: Any) -> None:
     if response.memory_delta and memory_store:
@@ -138,7 +129,7 @@ def apply_plot_update(instance: GameInstance, response: Any) -> None:
 def store_private_messages(instance: GameInstance, response: Any) -> None:
     info_asym = response.info_asymmetry or {}
     for uid, msg in info_asym.items():
-        instance.private_log.setdefault(uid, []).append({
+        instance.append_private_message(uid, {
             "round": instance.round_number,
             "text": msg,
         })

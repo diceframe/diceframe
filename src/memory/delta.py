@@ -279,8 +279,8 @@ class MemoryStore:
                 sim = cosine_similarity(query_embedding, emb)
                 if sim > 0.3:  # 相似度阈值
                     scored.append((sim, entry))
-            except Exception:
-                pass
+            except (TypeError, ValueError, json.JSONDecodeError):
+                logger.debug("忽略无效记忆向量: entry_id=%s", entry.get("id"), exc_info=True)
 
         scored.sort(key=lambda x: -x[0])
         return [e for _, e in scored[:limit]]

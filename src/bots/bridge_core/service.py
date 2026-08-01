@@ -22,6 +22,8 @@ from src.bots.bridge_core.commands import (
     is_private_log,
     is_recap,
     is_return,
+    luck_decision,
+    luck_index,
     payment_decision,
     payment_index,
 )
@@ -208,6 +210,11 @@ class DiceFrameBridgeService:
             "payment": "支付",
             "payments": "支付",
             "perception": "感知",
+            "luck": "幸运",
+            "spendluck": "幸运",
+            "noluck": "不用幸运",
+            "declineluck": "不用幸运",
+            "keepfailure": "不用幸运",
         }
         verb = aliases.get(verb.lower(), verb)
 
@@ -238,6 +245,9 @@ class DiceFrameBridgeService:
             return await self._private_log(message)
         if verb == "掷骰":
             return await self._action(message, "", confirm=True)
+        luck = luck_decision(text)
+        if verb in {"幸运", "不用幸运"} or luck is not None:
+            return await self._luck(message, text, spend=(verb == "幸运") if luck is None else luck)
         if verb == "推进" or is_advance(text):
             return await self._advance(message, text)
         if verb == "暂离" or is_away(text):
@@ -377,6 +387,43 @@ class DiceFrameBridgeService:
             return bridge_text(language, "只有绑定本局的 GM 或配置中的授权用户可以推进。", "Only the bound GM or an authorized user can advance the game.")
         result = await self.client.advance(game_key, gm_uid, force=advance_force(text))
         return self._format_advance_response(result, language)
+
+    async def _luck(self, message: BridgeInput, text: str, *, spend: bool) -> str:
+        group, game_key, actor = self._require_actor(message)
+        language = self._group_language(group)
+        detail = await self.client.detail(game_key, actor)
+        pending = [
+            check for check in (detail.get("pending_luck_decisions") or [])
+            if isinstance(check, dict) and str(check.get("actor_uid") or "") == actor
+        ]
+        if not pending:
+            return bridge_text(language, "当前没有等待你处理的幸运选择。", "There is no Luck decision waiting for you.")
+        index = luck_index(text)
+        if index > len(pending):
+            return bridge_text(language, "没有第 {index} 个幸运选择。", "There is no Luck decision #{index}.", index=index)
+        check = pending[index - 1]
+        result = await self.client.resolve_luck(
+            game_key,
+            actor,
+            str(check.get("check_id") or ""),
+            spend=spend,
+        )
+        cost = int(check.get("luck_cost", 0) or 0)
+        prefix = (
+            f"Spent {cost} Luck; the check is now a regular success."
+            if spend else "Luck was not spent; the failure is kept."
+        ) if bridge_is_english(language) else (
+            f"已消耗 {cost} 点幸运，本次检定改为普通成功。"
+            if spend else "未使用幸运，本次检定保留失败。"
+        )
+        narration = str(result.get("narration") or "").strip()
+        if narration:
+            return prefix + "\n" + narration
+        remaining = result.get("pending_luck_decisions") if isinstance(result.get("pending_luck_decisions"), list) else []
+        if remaining:
+            suffix = " Waiting for other Luck decisions." if bridge_is_english(language) else " 仍在等待其他角色选择幸运。"
+            return prefix + suffix
+        return prefix
 
     async def _away(self, message: BridgeInput, text: str, *, away: bool) -> str:
         group, game_key, actor = self._require_actor(message)

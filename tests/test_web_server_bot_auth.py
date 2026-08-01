@@ -316,3 +316,22 @@ async def test_share_link_player_can_post_sse_ticket(monkeypatch):
         r = await client.post("/api/games/web%7Croom%7Cbot/sse-ticket?user=player-1&share=1")
         assert r.status == 200
         assert (await r.json())["user_id"] == "player-1"
+
+
+@pytest.mark.asyncio
+async def test_share_link_player_can_upload_and_read_game_avatar(monkeypatch):
+    """玩家头像走游戏作用域端点，不应被 owner 密码门拦截。"""
+    monkeypatch.setitem(web_server.STATE, "access_token", hash_access_password("owner-secret"))
+    app = _make_sse_auth_app()
+    app.router.add_post("/api/games/{game_key}/avatars", _identity)
+    app.router.add_get("/api/games/{game_key}/avatars/{asset_id}", _identity)
+    async with TestClient(TestServer(app)) as client:
+        uploaded = await client.post("/api/games/web%7Croom%7Cbot/avatars?user=player-1&share=1")
+        loaded = await client.get("/api/games/web%7Croom%7Cbot/avatars/abc?user=player-1&share=1")
+        uploaded_body = await uploaded.json()
+        loaded_body = await loaded.json()
+
+    assert uploaded.status == 200
+    assert loaded.status == 200
+    assert uploaded_body["user_id"] == "player-1"
+    assert loaded_body["user_id"] == "player-1"

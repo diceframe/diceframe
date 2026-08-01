@@ -18,8 +18,14 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
+from .content import PluginContentCatalog
+from .descriptors import (
+    BRIDGE_EXTENSION_STAGES,
+    normalize_bridge_outputs,
+    validate_bridge_extension_descriptors,
+    validate_tool_descriptors,
+)
 from .marketplace import PluginMarketplace
 from .mirrors import MirrorManager
 from .package_limits import (
@@ -43,9 +49,6 @@ from .runtime_protocol import (
 from .support import PLUGIN_TYPE_SUPPORT, plugin_type_support
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_BRIDGE_EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_BRIDGE_EXTENSION_STAGES = {"before_message", "after_result", "render"}
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
@@ -94,6 +97,7 @@ class PluginHost:
         self.mirrors = MirrorManager(self.data_dir / "_marketplace" / "mirrors.json")
         self.marketplace = PluginMarketplace(self.mirrors)
         self.contributions = ContributionRegistry()
+        self.content = PluginContentCatalog(self.contributions, self.plugins_dir, self.logger)
         self._api_tokens: dict[str, str] = {}
 
     def discover(self) -> list[dict[str, Any]]:
@@ -223,7 +227,7 @@ class PluginHost:
 
     async def apply_bridge_extensions(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
         stage = str(stage or "").strip()
-        if stage not in _BRIDGE_EXTENSION_STAGES:
+        if stage not in BRIDGE_EXTENSION_STAGES:
             raise ValueError(f"不支持的 Bot Bridge 扩展阶段：{stage}")
         if not isinstance(payload, dict):
             raise ValueError("Bot Bridge 扩展 payload 必须是对象")
@@ -264,7 +268,11 @@ class PluginHost:
                     if not isinstance(next_payload, dict):
                         raise PluginProtocolError("Bot Bridge 扩展返回的 payload 必须是对象")
                     current = next_payload
-                normalized_outputs = self._normalize_bridge_outputs(runtime, result.get("outputs"))
+                normalized_outputs = normalize_bridge_outputs(
+                    runtime,
+                    result.get("outputs"),
+                    self.bridge_asset_path,
+                )
                 applied.append({"plugin_id": plugin_id, "name": str(descriptor["name"])})
                 if bool(result.get("handled")):
                     handled = True
@@ -310,51 +318,16 @@ class PluginHost:
         return target
 
     def contribution_path(self, kind: str, key: str) -> Path | None:
-        item = self.contributions.find(kind, key)
-        return item.path if item else None
+        return self.content.contribution_path(kind, key)
 
     def load_world_template(self, world_id: str) -> dict[str, Any] | None:
-        path = self.contribution_path("world_template", world_id)
-        if not path or not path.exists():
-            return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return None
-        rule_id = str(data.get("default_rule") or "")
-        rule_path = self.contribution_path("rule", rule_id) if rule_id else None
-        if rule_path:
-            data = dict(data)
-            data["_diceframe_rule_path"] = str(rule_path)
-        return data
+        return self.content.load_world_template(world_id)
 
     def list_themes(self) -> list[dict[str, Any]]:
-        themes = []
-        for item in self.contributions.list("theme"):
-            try:
-                data = json.loads(item.path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict):
-                    continue
-                theme_id = str(data.get("id") or item.key).strip()
-                themes.append({
-                    "id": theme_id,
-                    "name": str(data.get("name") or item.title or theme_id),
-                    "description": str(data.get("description") or item.description or ""),
-                    "plugin_id": item.plugin_id,
-                    "plugin_name": item.plugin_name,
-                    "tokens": self._sanitize_theme_tokens(data),
-                })
-            except Exception:
-                self.logger.warning("插件主题读取失败: %s", item.path, exc_info=True)
-        return themes
+        return self.content.list_themes()
 
     def list_map_assets(self, world_id: str = "") -> dict[str, list[dict[str, Any]]]:
-        locations = [item for item in self._map_json_items("map_location", world_id)]
-        return {
-            "locations": locations,
-            "icons": [self._asset_item(item) for item in self.contributions.list("map_icon")],
-            "scenes": [self._asset_item(item) for item in self.contributions.list("map_scene")],
-            "grids": [self._asset_item(item) for item in self.contributions.list("map_grid")],
-        }
+        return self.content.list_map_assets(world_id)
 
     def list_content_resources(
         self,
@@ -363,55 +336,13 @@ class PluginHost:
         world_id: str = "",
         rule_id: str = "",
     ) -> dict[str, list[dict[str, Any]]]:
-        allowed = {
-            "character_template",
-            "npc",
-            "item",
-            "spell",
-            "class",
-        }
-        kinds = [kind] if kind in allowed else sorted(allowed)
-        return {
-            name: self._content_json_items(name, world_id=world_id, rule_id=rule_id)
-            for name in kinds
-        }
+        return self.content.list_content_resources(kind, world_id=world_id, rule_id=rule_id)
 
     def get_content_resource(self, kind: str, key: str, *, plugin_id: str = "") -> dict[str, Any] | None:
-        allowed = {
-            "character_template",
-            "npc",
-            "item",
-            "spell",
-            "class",
-        }
-        kind = (kind or "").strip()
-        key = (key or "").strip()
-        plugin_id = (plugin_id or "").strip()
-        if kind not in allowed or not key:
-            return None
-        item = self.contributions.find(kind, key)
-        if not item or (plugin_id and item.plugin_id != plugin_id):
-            return None
-        resources = self._content_json_items(kind)
-        return next(
-            (
-                resource for resource in resources
-                if str(resource.get("id") or "") == key
-                and (not plugin_id or str(resource.get("plugin_id") or "") == plugin_id)
-            ),
-            None,
-        )
+        return self.content.get_content_resource(kind, key, plugin_id=plugin_id)
 
     def public_asset_path(self, plugin_id: str, relative_path: str) -> Path:
-        normalized = relative_path.replace("\\", "/").strip("/")
-        target = (self.plugins_dir / plugin_id / normalized).resolve()
-        self._ensure_inside(self.plugins_dir / plugin_id, target)
-        if not target.exists() or not target.is_file() or target.is_symlink():
-            raise KeyError("插件资源不存在")
-        for item in self.contributions.list():
-            if item.plugin_id == plugin_id and item.path == target:
-                return target
-        raise KeyError("插件资源未声明为可访问贡献")
+        return self.content.public_asset_path(plugin_id, relative_path)
 
     async def install_from_zip(self, payload: bytes, *, overwrite: bool = False, allow_any_root: bool = False) -> dict[str, Any]:
         if not payload:
@@ -645,9 +576,9 @@ class PluginHost:
                     timeout=5,
                 )
                 if self._plugin_type(runtime.manifest) == "tool":
-                    runtime.tools = self._validate_tool_descriptors(initialized)
+                    runtime.tools = validate_tool_descriptors(initialized)
                 else:
-                    runtime.bridge_extensions = self._validate_bridge_extension_descriptors(initialized)
+                    runtime.bridge_extensions = validate_bridge_extension_descriptors(initialized)
             runtime.status = "running"
             self.logger.info("插件 %s 已启动，PID=%s", plugin_id, runtime.process.pid)
             runtime.monitor_task = asyncio.create_task(self._monitor_process(plugin_id, runtime.process))
@@ -894,156 +825,6 @@ class PluginHost:
             expanded.append(value)
         return expanded
 
-    @staticmethod
-    def _validate_tool_descriptors(initialized: Any) -> list[dict[str, Any]]:
-        if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:
-            raise PluginProtocolError("工具插件协议版本不匹配")
-        raw_tools = initialized.get("tools")
-        if not isinstance(raw_tools, list) or not raw_tools:
-            raise PluginProtocolError("工具插件必须注册至少一个工具")
-        if len(raw_tools) > 64:
-            raise PluginProtocolError("单个插件最多注册 64 个工具")
-        tools: list[dict[str, Any]] = []
-        names: set[str] = set()
-        for raw in raw_tools:
-            if not isinstance(raw, dict):
-                raise PluginProtocolError("工具描述必须是对象")
-            name = str(raw.get("name") or "").strip()
-            if not _TOOL_NAME_RE.fullmatch(name):
-                raise PluginProtocolError(f"工具名称非法：{name}")
-            if name in names:
-                raise PluginProtocolError(f"工具名称重复：{name}")
-            names.add(name)
-            title = str(raw.get("title") or name).strip()[:120]
-            description = str(raw.get("description") or "").strip()[:1000]
-            input_schema = raw.get("input_schema")
-            if not isinstance(input_schema, dict) or input_schema.get("type") != "object":
-                raise PluginProtocolError(f"工具 {name} 的 input_schema 必须是 object")
-            try:
-                json.dumps(input_schema, ensure_ascii=False)
-            except (TypeError, ValueError) as exc:
-                raise PluginProtocolError(f"工具 {name} 的 input_schema 不是有效 JSON") from exc
-            tools.append({
-                "name": name,
-                "title": title,
-                "description": description,
-                "input_schema": input_schema,
-            })
-        return tools
-
-    @staticmethod
-    def _validate_bridge_extension_descriptors(initialized: Any) -> list[dict[str, Any]]:
-        if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:
-            raise PluginProtocolError("Bot Bridge 插件协议版本不匹配")
-        raw_extensions = initialized.get("bridge_extensions")
-        if not isinstance(raw_extensions, list) or not raw_extensions:
-            raise PluginProtocolError("bot-extension 插件必须注册至少一个扩展")
-        if len(raw_extensions) > 32:
-            raise PluginProtocolError("单个插件最多注册 32 个 Bot Bridge 扩展")
-        descriptors: list[dict[str, Any]] = []
-        names: set[str] = set()
-        for raw in raw_extensions:
-            if not isinstance(raw, dict):
-                raise PluginProtocolError("Bot Bridge 扩展描述必须是对象")
-            name = str(raw.get("name") or "").strip()
-            if not _BRIDGE_EXTENSION_NAME_RE.fullmatch(name):
-                raise PluginProtocolError(f"Bot Bridge 扩展名称非法：{name}")
-            if name in names:
-                raise PluginProtocolError(f"Bot Bridge 扩展名称重复：{name}")
-            names.add(name)
-            stages = raw.get("stages")
-            if not isinstance(stages, list) or not stages:
-                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 必须声明 stages")
-            normalized_stages = list(dict.fromkeys(str(item).strip() for item in stages if str(item).strip()))
-            unknown = sorted(set(normalized_stages) - _BRIDGE_EXTENSION_STAGES)
-            if unknown:
-                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 使用未知阶段：{', '.join(unknown)}")
-            try:
-                priority = int(raw.get("priority", 0))
-                timeout_sec = float(raw.get("timeout_sec", 5))
-            except (TypeError, ValueError) as exc:
-                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的优先级或超时无效") from exc
-            if not -1000 <= priority <= 1000:
-                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的 priority 必须在 -1000 到 1000 之间")
-            if not 1 <= timeout_sec <= 30:
-                raise PluginProtocolError(f"Bot Bridge 扩展 {name} 的 timeout_sec 必须在 1 到 30 秒之间")
-            platforms = PluginHost._descriptor_string_list(raw.get("platforms"), 32, "platforms", name)
-            kinds = PluginHost._descriptor_string_list(raw.get("kinds"), 64, "kinds", name)
-            descriptors.append({
-                "name": name,
-                "title": str(raw.get("title") or name).strip()[:120],
-                "description": str(raw.get("description") or "").strip()[:1000],
-                "stages": normalized_stages,
-                "priority": priority,
-                "timeout_sec": timeout_sec,
-                "platforms": platforms,
-                "kinds": kinds,
-            })
-        return descriptors
-
-    @staticmethod
-    def _descriptor_string_list(raw: Any, limit: int, field_name: str, extension_name: str) -> list[str]:
-        if raw is None:
-            return []
-        if not isinstance(raw, list):
-            raise PluginProtocolError(f"Bot Bridge 扩展 {extension_name} 的 {field_name} 必须是字符串数组")
-        values = list(dict.fromkeys(str(item).strip().lower() for item in raw if str(item).strip()))
-        if len(values) > limit or any(len(item) > 64 for item in values):
-            raise PluginProtocolError(f"Bot Bridge 扩展 {extension_name} 的 {field_name} 超出限制")
-        return values
-
-    def _normalize_bridge_outputs(self, runtime: PluginRuntime, raw_outputs: Any) -> list[dict[str, Any]]:
-        if raw_outputs is None:
-            return []
-        if not isinstance(raw_outputs, list):
-            raise PluginProtocolError("Bot Bridge 扩展 outputs 必须是数组")
-        if len(raw_outputs) > 16:
-            raise PluginProtocolError("Bot Bridge 扩展单次最多返回 16 条消息")
-        plugin_id = str(runtime.manifest.get("id") or "")
-        outputs: list[dict[str, Any]] = []
-        for raw in raw_outputs:
-            if not isinstance(raw, dict):
-                raise PluginProtocolError("Bot Bridge 输出必须是对象")
-            output_type = str(raw.get("type") or "").strip().lower()
-            fallback_text = str(raw.get("fallback_text") or "").strip()[:20_000]
-            if output_type == "text":
-                text = str(raw.get("text") or "")
-                if not text or len(text) > 20_000:
-                    raise PluginProtocolError("Bot Bridge 文本输出为空或超过 20000 字")
-                outputs.append({"type": "text", "text": text})
-                continue
-            if output_type == "card":
-                lines = raw.get("lines")
-                if not isinstance(lines, list) or len(lines) > 100:
-                    raise PluginProtocolError("Bot Bridge 卡片 lines 必须是不超过 100 项的数组")
-                outputs.append({
-                    "type": "card",
-                    "title": str(raw.get("title") or "").strip()[:200],
-                    "subtitle": str(raw.get("subtitle") or "").strip()[:500],
-                    "lines": [str(line)[:1000] for line in lines],
-                    "fallback_text": fallback_text,
-                })
-                continue
-            if output_type == "image":
-                relative_path = str(raw.get("path") or "").strip().replace("\\", "/")
-                try:
-                    target = self.bridge_asset_path(plugin_id, relative_path)
-                except (KeyError, ValueError) as exc:
-                    raise PluginProtocolError(str(exc)) from exc
-                if target.stat().st_size <= 0:
-                    raise PluginProtocolError("Bot Bridge 图片文件为空")
-                encoded_path = quote(relative_path, safe="/")
-                outputs.append({
-                    "type": "image",
-                    "asset_url": f"/api/bot/plugin-assets/{quote(plugin_id, safe='')}/{encoded_path}",
-                    "caption": str(raw.get("caption") or "").strip()[:2000],
-                    "alt": str(raw.get("alt") or "").strip()[:500],
-                    "fallback_text": fallback_text,
-                })
-                continue
-            raise PluginProtocolError(f"不支持的 Bot Bridge 输出类型：{output_type}")
-        return outputs
-
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:
             raise ValueError("插件包为空")
@@ -1210,106 +991,3 @@ class PluginHost:
     def _register_contributions(self, plugin_id: str, runtime: PluginRuntime) -> None:
         self.contributions.clear_plugin(plugin_id)
         self.contributions.register_static_plugin(runtime.manifest, runtime.directory)
-
-    @staticmethod
-    def _sanitize_theme_tokens(data: dict[str, Any]) -> dict[str, dict[str, str]]:
-        raw = data.get("tokens") if isinstance(data.get("tokens"), dict) else data.get("variables")
-        if not isinstance(raw, dict):
-            raw = {}
-        if any(key.startswith("--") for key in raw):
-            raw = {"base": raw}
-        result = {"base": {}, "dark": {}, "light": {}}
-        for mode in result:
-            values = raw.get(mode)
-            if not isinstance(values, dict):
-                continue
-            for key, value in values.items():
-                name = str(key).strip()
-                text = str(value).strip()
-                lowered = text.lower()
-                if not name.startswith("--"):
-                    continue
-                if len(text) > 160 or any(ch in text for ch in "{};") or "url(" in lowered or "expression(" in lowered:
-                    continue
-                result[mode][name] = text
-        return result
-
-    def _map_json_items(self, kind: str, world_id: str) -> list[dict[str, Any]]:
-        result = []
-        for item in self.contributions.list(kind):
-            try:
-                data = json.loads(item.path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict) or not self._matches_world(data, world_id):
-                    continue
-                data = dict(data)
-                data.setdefault("id", item.key)
-                data.setdefault("name", item.title or item.key)
-                data["plugin_id"] = item.plugin_id
-                data["plugin_name"] = item.plugin_name
-                data["source"] = "plugin"
-                result.append(data)
-            except Exception:
-                self.logger.warning("插件地图资源读取失败: %s", item.path, exc_info=True)
-        return result
-
-    def _content_json_items(self, kind: str, *, world_id: str = "", rule_id: str = "") -> list[dict[str, Any]]:
-        result = []
-        for item in self.contributions.list(kind):
-            try:
-                data = json.loads(item.path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict):
-                    continue
-                if not self._matches_world(data, world_id) or not self._matches_rule(data, rule_id):
-                    continue
-                data = dict(data)
-                data.setdefault("id", item.key)
-                if kind == "character_template":
-                    data.setdefault("character_name", item.title or item.key)
-                else:
-                    data.setdefault("name", item.title or item.key)
-                data["plugin_id"] = item.plugin_id
-                data["plugin_name"] = item.plugin_name
-                data["source"] = "plugin"
-                data["readonly"] = True
-                result.append(data)
-            except Exception:
-                self.logger.warning("插件内容资源读取失败: %s", item.path, exc_info=True)
-        return result
-
-    @staticmethod
-    def _matches_world(data: dict[str, Any], world_id: str) -> bool:
-        target = str(world_id or "")
-        if not target:
-            return True
-        declared = data.get("world_id")
-        worlds = data.get("worlds")
-        if declared:
-            return str(declared) == target
-        if isinstance(worlds, list) and worlds:
-            return target in {str(item) for item in worlds}
-        return True
-
-    @staticmethod
-    def _matches_rule(data: dict[str, Any], rule_id: str) -> bool:
-        target = str(rule_id or "")
-        if not target:
-            return True
-        declared = data.get("rule_id")
-        rules = data.get("rules")
-        if declared:
-            return str(declared) == target
-        if isinstance(rules, list) and rules:
-            return target in {str(item) for item in rules}
-        return True
-
-    def _asset_item(self, item) -> dict[str, Any]:
-        rel = item.relative_path
-        return {
-            "id": item.key,
-            "name": item.title or item.key,
-            "description": item.description,
-            "plugin_id": item.plugin_id,
-            "plugin_name": item.plugin_name,
-            "path": rel,
-            "url": f"/api/plugins/assets/{quote(item.plugin_id)}/{quote(rel, safe='/')}",
-        }

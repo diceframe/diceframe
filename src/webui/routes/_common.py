@@ -8,11 +8,12 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.api import WebAPI
-
-MAX_LOREBOOK_CHARS = 5000  # 世界书单条 content 上限
-MAX_ACTION_CHARS = 1000  # 玩家单次行动文本上限（防 token 暴涨/DoS）
-MAX_ACTIONS_PER_TURN = 3  # 单玩家单回合行动条数上限（防灌数量拖垮上下文）
-MAX_SEED_CHARS = 2000  # 世界/游戏描述上限
+from src.webui.services._common import (
+    MAX_ACTION_CHARS,
+    MAX_ACTIONS_PER_TURN,
+    MAX_LOREBOOK_CHARS,
+    MAX_SEED_CHARS,
+)
 
 
 def _get_api(request: web.Request) -> WebAPI:

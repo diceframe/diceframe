@@ -34,8 +34,9 @@ export function useGame(){
   let reconnectTimer:number|undefined
   let connectVersion=0
   const signatures:Record<string,string> = { detail:'', players:'', log:'', privateMessages:'', map:'', loreEntries:'', lore:'' }
-  const player = computed(()=>players.value.find(p=>p.user_id===userId.value) || players.value[0])
   const isGm = computed(()=>!!detail.value && (!userId.value || (detail.value.gm_uid===userId.value && hasAccessToken())))
+  const actorId = computed(() => userId.value || (isGm.value ? detail.value?.gm_uid || '' : ''))
+  const player = computed(()=>players.value.find(p=>p.user_id===actorId.value) || players.value[0])
 
   function rememberGame(key: string) {
     currentGame.value = key
@@ -185,5 +186,5 @@ export function useGame(){
   watch(() => route.query.user, () => { userId.value = routeUser() })
   watch(() => log.value.length, (next, prev) => { if ((prev ?? 0) < next) liveNarration.value = '' })
   onBeforeUnmount(()=>{connectVersion++;source?.close();clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
-  return {currentGame,userId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration}
+  return {currentGame,userId,actorId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration}
 }

@@ -48,6 +48,7 @@ class ProgressionResolver:
                         msg = (f"技能成长: {instance.players[uid].get('character_name', uid)} "
                                f"「{skill_name}」{current_val}% → {skill['value']}%")
                         logger.info(msg)
+                        instance.set_character_sheet(uid, cs)
                     break
 
     @staticmethod
@@ -92,8 +93,7 @@ class ProgressionResolver:
                 logger.exception("升级 HP 计算失败，回退 +10: uid=%s", uid)
                 new_hp = cs.get("max_hp", 0) + 10
                 set_hp(cs, new_hp, new_hp)
-            atk["character_sheet"] = cs
-            instance.players[uid] = atk
+            instance.set_character_sheet(uid, cs)
             msgs.append(
                 f"🎉 {atk['character_name']} 升到 Lv.{level}！"
                 f"HP {old_hp}→{cs['max_hp']}，获得2点自由属性"

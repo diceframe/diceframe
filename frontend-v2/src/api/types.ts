@@ -8,6 +8,12 @@ export interface CharacterSkill { name: string; value?: number }
 
 export interface CharacterItem { name?: string; type?: string; damage?: number; slot?: string; quality?: string; qty?: number; effect?: string; category?: string; note?: string; [key: string]: unknown }
 
+export interface CharacterPortrait {
+  kind: 'builtin' | 'upload'
+  id?: string
+  asset_id?: string
+}
+
 export interface CharacterSheet {
   character_name?: string
   race?: string
@@ -27,6 +33,7 @@ export interface CharacterSheet {
   equipment?: CharacterItem[]
   inventory?: CharacterItem[]
   key_items?: CharacterItem[]
+  portrait?: CharacterPortrait
   [key: string]: unknown
 }
 
@@ -34,6 +41,12 @@ export interface CharacterCard extends CharacterSheet {
   id?: string
   card_id?: string
   source?: string
+  schema_version?: number
+  rule_id?: string
+  rule_name?: string
+  rule_version?: string
+  mechanics?: string
+  language?: string
   character_name: string
   race?: string
   class?: string
@@ -79,6 +92,11 @@ export interface CheckResult {
   verdict?: string
   luck_spend_available?: boolean
   luck_cost?: number | null
+  luck_decision?: 'pending' | 'spent' | 'declined' | string
+  luck_spent?: number
+  luck_remaining?: number
+  original_verdict?: string
+  luck_resolved_at?: string
   is_critical?: boolean
   is_fumble?: boolean
 }
@@ -138,8 +156,16 @@ export interface GameDetail {
   multiplayer?: Multiplayer
   quick_actions?: string[]
   pending_payments?: PendingPayment[]
+  pending_luck_decisions?: CheckResult[]
   total_tokens?: number
+  token_budget_bump?: TokenBudgetBump | null
   [key: string]: unknown
+}
+
+export interface TokenBudgetBump {
+  kind: 'narrative' | string
+  from: number
+  to: number
 }
 
 export interface LogEntry {
@@ -423,6 +449,7 @@ export interface PlayerContextResponse {
 export interface RuleMeta {
   rule_id?: string
   rule_name?: string
+  rule_version?: string
   dice_system?: string
   attr_hint?: string
   attr_hint_en?: string
@@ -466,6 +493,8 @@ export interface ActionSubmitResponse {
   check_request?: CheckRequest
   check_result?: CheckResult
   check_results?: CheckResult[]
+  pending_luck_decisions?: CheckResult[]
+  advanced?: boolean
   roll?: {
     ok?: boolean
     dice_system?: string
@@ -475,6 +504,13 @@ export interface ActionSubmitResponse {
     fumble?: boolean
   }
   [key: string]: unknown
+}
+
+export interface LuckDecisionResponse extends ActionSubmitResponse {
+  ok?: boolean
+  error?: string
+  ready_to_resolve?: boolean
+  already_resolved?: boolean
 }
 export interface BotBindTokenResponse {
   bind_token: string
@@ -530,6 +566,7 @@ export interface RuleAttributeEdit {
 export interface RuleSummary {
   rule_id: string
   rule_name?: string
+  rule_name_en?: string
   description?: string
   dice_system?: string
   combat_model?: string
@@ -542,6 +579,17 @@ export interface RuleSummary {
 export interface RulesResponse {
   rules?: RuleSummary[]
   total?: number
+}
+
+export interface CharacterSchemaResponse {
+  ok?: boolean
+  error?: string
+  rule_attrs?: RuleAttribute[]
+  rule_attrs_total?: number
+  rule_classes?: string[]
+  rule_special_stats?: SpecialStatSpec[]
+  rule_meta?: RuleMeta
+  skill_pool?: Array<string | SkillSpec>
 }
 
 export interface RuleTemplate extends JsonObject {

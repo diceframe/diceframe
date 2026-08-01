@@ -10,6 +10,7 @@ import logging
 from aiohttp import web
 
 from src.engine.game_instance import GameState
+from src.llm.parser import sanitize_narration
 from src.webui.connection_pool import ConnectionPool
 from src.webui.routes._common import MAX_ACTION_CHARS, _get_api
 
@@ -53,7 +54,7 @@ async def sse_stream(request: web.Request) -> web.StreamResponse:
             if current.round_number > seen_rounds:
                 seen_rounds = current.round_number
                 last_log = current.log[-1] if current.log else {}
-                gm_text = last_log.get("gm_response", "")
+                gm_text = sanitize_narration(last_log.get("gm_response", ""))
                 if gm_text:
                     data = json.dumps({"narration": gm_text, "round": seen_rounds}, ensure_ascii=False)
                     await response.write(f"data: {data}\n\n".encode())
@@ -187,7 +188,17 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
             if inst.round_number > last_round:
                 last_round = inst.round_number
                 log_last = inst.log[-1] if inst.log else {}
-                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'narration','round':last_round,'text':log_last.get('gm_response','')})
+                await _write_play_event(
+                    resp,
+                    last_round,
+                    last_private_count,
+                    last_action_signature,
+                    {
+                        "type": "narration",
+                        "round": last_round,
+                        "text": sanitize_narration(log_last.get("gm_response", "")),
+                    },
+                )
                 # 状态
                 cs = inst.get_character_sheet(user_id)
                 await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'state','hp':cs.get('hp'),'max_hp':cs.get('max_hp'),'gold':cs.get('gold'),'deceased':cs.get('deceased')})

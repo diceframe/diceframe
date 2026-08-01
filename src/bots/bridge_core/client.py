@@ -99,6 +99,21 @@ class DiceFrameClient:
             json={"force": bool(force)},
         )
 
+    async def resolve_luck(
+        self,
+        game_key: str,
+        actor: str,
+        check_id: str,
+        *,
+        spend: bool,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/api/games/{quote(game_key, safe='')}/checks/{quote(check_id, safe='')}/luck",
+            actor=actor,
+            json={"spend": bool(spend)},
+        )
+
     async def update_character(self, game_key: str, actor: str, updates: dict[str, Any]) -> dict[str, Any]:
         return await self._request(
             "PUT",

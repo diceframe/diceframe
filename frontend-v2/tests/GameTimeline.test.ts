@@ -59,4 +59,22 @@ describe('GameTimeline',()=>{
     expect(wrapper.text()).toContain('失败')
     expect(wrapper.text()).not.toContain('GM指令')
   })
+
+  it('offers the check owner a direct Luck decision before narration',async()=>{
+    i18n.global.locale.value = 'zh-CN'
+    const check = {
+      check_id:'luck-1', actor_uid:'p1', actor_name:'艾琳', label:'考古学检定',
+      dice:'d100', roll:52, threshold:50, verdict:'失败', luck_cost:2,
+      luck_spend_available:true, luck_decision:'pending',
+    }
+    const wrapper=mount(GameTimeline,{global:{plugins:[i18n]},props:{
+      round:2,players:[{user_id:'p1',character_name:'艾琳'}],log:[],live:[],
+      pendingChecks:[check],currentUserId:'p1',
+    }})
+
+    expect(wrapper.text()).toContain('消耗 2 点幸运 → 普通成功')
+    expect(wrapper.text()).toContain('保留失败')
+    await wrapper.get('.dice-tag-button').trigger('click')
+    expect(wrapper.emitted('luck')?.[0]).toEqual([check,true])
+  })
 })

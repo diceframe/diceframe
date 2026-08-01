@@ -141,6 +141,25 @@ async def test_narration_delta_filter_hides_nonstandard_state_heading():
 
 
 @pytest.mark.asyncio
+async def test_narration_delta_filter_hides_single_markdown_protocol_line():
+    received: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        received.append(text)
+
+    filt = _NarrationDeltaFilter(on_delta)
+    await filt.feed("**SANCheck:web_79cf963c:")
+    await filt.feed("1d6** | 目睹荧绿眼睛，进行理智检定。\n\n后续叙事。")
+    await filt.flush()
+
+    streamed = "".join(received)
+    assert "SANCheck" not in streamed
+    assert "web_79cf963c" not in streamed
+    assert "目睹荧绿眼睛" in streamed
+    assert "后续叙事" in streamed
+
+
+@pytest.mark.asyncio
 async def test_call_llm_with_tag_retry_streams_narration_only():
     content = "古墓深处传来低语。\n---\nKEY_ITEM:u1:青铜钥匙"
     llm = StreamingLLM([content])
@@ -171,6 +190,35 @@ async def test_call_llm_with_tag_retry_streams_narration_only():
 
 
 @pytest.mark.asyncio
+async def test_call_llm_with_tag_retry_repairs_malformed_protocol_once():
+    malformed = "**SANCheck:web_legacy:1d6** | 你看见了不可名状之物。"
+    repaired = "你看见了不可名状之物。\n---\nSAN_CHECK:web_legacy:1d6"
+    llm = StreamingLLM([malformed, repaired])
+    instance = GameInstance(game_key=("web", "stream", "bot"))
+    deltas: list[str] = []
+    resets: list[int] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    async def on_reset() -> None:
+        resets.append(1)
+        deltas.clear()
+
+    response, data = await call_llm_with_tag_retry(
+        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        on_delta=on_delta, on_reset=on_reset,
+    )
+
+    assert llm.stream_calls == 2
+    assert resets == [1]
+    assert "SANCheck" not in "".join(deltas)
+    assert "web_legacy" not in "".join(deltas)
+    assert response.narration == "你看见了不可名状之物。"
+    assert data["state_update"]["players"]["web_legacy"]["san_check_loss"] == "1d6"
+
+
+@pytest.mark.asyncio
 async def test_call_llm_with_tag_retry_stream_length_budgets_reach_four_times():
     llm = LengthRetryStreamingLLM([None, None, "最终叙事。"])
     instance = GameInstance(game_key=("web", "stream", "bot"))
@@ -193,6 +241,8 @@ async def test_call_llm_with_tag_retry_stream_length_budgets_reach_four_times():
     assert len(resets) == 2
     assert "".join(deltas) == "最终叙事。"
     assert response.narration == "最终叙事。"
+    assert response.token_budget_initial == 1024
+    assert response.token_budget_used == 4096
 
 
 @pytest.mark.asyncio
@@ -239,6 +289,8 @@ async def test_stream_length_retry_does_not_consume_dice_rewrite():
     assert llm.max_tokens == [1024, 2048, 1024]
     assert len(resets) == 2
     assert response.narration == good
+    assert response.token_budget_initial == 1024
+    assert response.token_budget_used == 2048
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,7 @@ Common commands:
 - `@Bot pay`: send pending payment confirmations by direct message.
 - `@Bot confirm pay` / `@Bot reject pay`: accept or reject a pending payment.
 - `@Bot roll`: confirm an action that is waiting for dice.
+- `@Bot luck` / `@Bot no luck`: spend Luck for a regular success or keep the failure; append a number when several decisions are pending.
 - `@Bot advance`: let the GM or an authorized account force the round forward.
 - `@Bot away` / `@Bot back`: stop or resume blocking the round. A GM may target a named character.
 - `@Bot <natural-language action>`: submit an action. If it starts GM generation, the Bot first reports that the GM is thinking.

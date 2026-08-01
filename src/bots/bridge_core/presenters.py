@@ -22,7 +22,42 @@ def format_action_result(result: dict[str, Any], language: str = "zh-CN") -> str
     narration = str(result.get("narration") or "").strip()
     if narration:
         lines.append(narration)
+    pending_luck = result.get("pending_luck_decisions") if isinstance(result.get("pending_luck_decisions"), list) else []
+    if pending_luck:
+        lines.extend(luck_prompt_lines(pending_luck, language))
     return "\n".join(lines) or ("Action recorded." if bridge_is_english(language) else "行动已记录。")
+
+
+def luck_prompt_lines(
+    checks: list[dict[str, Any]],
+    language: str = "zh-CN",
+    *,
+    command_prefix: str = "@me",
+) -> list[str]:
+    """格式化跨 Bridge 共用的幸运选择提示。"""
+    english = bridge_is_english(language)
+    lines = ["Luck decision required:" if english else "需要决定是否使用幸运："]
+    multiple = len(checks) > 1
+    for index, check in enumerate(checks, 1):
+        prefix = f"{index}. " if multiple else ""
+        actor = str(check.get("actor_name") or check.get("actor_uid") or ("Character" if english else "角色"))
+        label = str(check.get("label") or ("Check" if english else "检定"))
+        roll = check.get("roll")
+        threshold = check.get("threshold")
+        cost = int(check.get("luck_cost", 0) or 0)
+        if english:
+            lines.append(f"{prefix}{actor} · {label}: d100={roll}/{threshold}, spend {cost} Luck for a regular success.")
+        else:
+            lines.append(f"{prefix}{actor} · {label}：d100={roll}/{threshold}，可消耗 {cost} 点幸运变为普通成功。")
+    if english:
+        lines.append(f"Use: {command_prefix} luck; keep failure: {command_prefix} no luck")
+        if multiple:
+            lines.append("Your character is matched automatically; add a number only if that character has multiple decisions.")
+    else:
+        lines.append(f"使用：{command_prefix} 幸运；保留失败：{command_prefix} 不用幸运")
+        if multiple:
+            lines.append("系统会自动匹配你的角色；只有同一角色有多个选择时才需要追加序号。")
+    return lines
 
 
 def recap_text(detail: dict[str, Any], language: str = "zh-CN") -> str:
@@ -325,6 +360,7 @@ def bound_help_text(
             f"map: {command_example('map', command_prefix=command_prefix)}\n"
             f"2. Describe an action: {command_example('I inspect the area', command_prefix=command_prefix)}\n"
             f"3. When prompted: {command_example('roll', command_prefix=command_prefix)}\n"
+            f"   If offered: {command_example('luck', command_prefix=command_prefix)} or {command_example('no luck', command_prefix=command_prefix)}\n"
             f"4. Character status: {command_example('status', command_prefix=command_prefix)}\n"
             f"5. Step away: {command_example('away', command_prefix=command_prefix)}; "
             f"return: {command_example('back', command_prefix=command_prefix)}\n"
@@ -341,6 +377,7 @@ def bound_help_text(
         f"   看地图：{command_example('地图', command_prefix=command_prefix)}\n"
         f"2. 描述行动：{command_example('我观察四周', command_prefix=command_prefix)} / {command_example('我攻击守卫', command_prefix=command_prefix)}\n"
         f"3. 如果提示需要检定：{command_example('掷骰', command_prefix=command_prefix)}\n"
+        f"   如果可以消耗幸运：{command_example('幸运', command_prefix=command_prefix)} / {command_example('不用幸运', command_prefix=command_prefix)}\n"
         f"4. 查看自己状态：{command_example('状态', command_prefix=command_prefix)}\n"
         f"5. 临时离开：{command_example('暂离', command_prefix=command_prefix)}；回来：{command_example('回来', command_prefix=command_prefix)}\n"
         f"6. GM 推进：{command_example('推进', command_prefix=command_prefix)} / {command_example('下一轮', command_prefix=command_prefix)}\n"

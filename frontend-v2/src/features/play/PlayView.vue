@@ -4,7 +4,7 @@ import { NIcon } from 'naive-ui'
 import { ChevronBack, ChevronForward } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, isNotFoundError } from '@/api/client'
-import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CommandResponse, HealthResponse, JsonObject, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
+import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CheckResult, CommandResponse, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { useGame } from '@/composables/useGame'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
@@ -12,6 +12,8 @@ import { useLocale, type Locale } from '@/composables/useLocale'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { buildJoinLink } from '@/utils/shareLink'
 import { copyToClipboard } from '@/utils/clipboard'
+import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLanguage'
+import { characterCardNeedsConversion, characterCardRuleName } from '@/utils/characterCards'
 import GameTimeline from '@/components/GameTimeline.vue'
 import ActionComposer from '@/components/ActionComposer.vue'
 import GameSidebar from '@/components/GameSidebar.vue'
@@ -20,6 +22,7 @@ import HealthPanel from '@/components/HealthPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import GmToolbar from '@/components/play/GmToolbar.vue'
 import MultiplayerPanel from '@/components/play/MultiplayerPanel.vue'
+import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 
 defineOptions({ name: 'PlayView' })
 
@@ -38,6 +41,10 @@ const help = ref(false), ruleMeta = ref<RuleMeta>({}), preview = ref(false), del
 const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false), showRoomPassword = ref(false), roomPasswordInput = ref('')
 const sidebarCollapsed = ref(localStorage.getItem('play_sidebar_collapsed') === '1')
 const gmThinking = ref(false)
+const luckBusyId = ref('')
+const showPortraitEditor = ref(false)
+const portraitDraft = ref<CharacterPortrait | undefined>()
+const portraitBusy = ref(false)
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem('play_sidebar_collapsed', sidebarCollapsed.value ? '1' : '0') }
 const railCollapsed = ref(false)
 function toggleRail() { railCollapsed.value = !railCollapsed.value; localStorage.setItem('play_rail_collapsed', railCollapsed.value ? '1' : '0') }
@@ -45,12 +52,19 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function joinNames(names: string[]) { return names.filter(Boolean).join(t('listSeparator')) }
 function onLocaleChange(event: Event) { setLocale((event.target as HTMLSelectElement).value as Locale) }
 
-const actorId = computed(() => game.userId.value || game.player.value?.user_id || game.detail.value?.gm_uid || '')
-const serverJudging = computed(() => game.detail.value?.state === 'active_judgment')
+const actorId = computed(() => game.actorId.value || game.player.value?.user_id || '')
+const canEditOwnPortrait = computed(() => Boolean(
+  actorId.value
+  && game.player.value?.user_id === actorId.value
+  && (!preview.value || delegate.value),
+))
+const pendingLuckDecisions = computed(() => game.detail.value?.pending_luck_decisions || [])
+const serverJudging = computed(() => game.detail.value?.state === 'active_judgment' && !pendingLuckDecisions.value.length)
 const showGmThinking = computed(() => gmThinking.value || serverJudging.value)
 const sceneTitle = computed(() => game.detail.value?.scene || t('unknownScene'))
 const stateLabel = computed(() => {
   if (showGmThinking.value) return t('gmThinking')
+  if (pendingLuckDecisions.value.length) return t('luckDecisionState')
   const state = game.detail.value?.state || 'unknown'
   const labels: Record<string, string> = {
     setup: t('preparing'),
@@ -76,8 +90,20 @@ const progressLabel = computed(() => {
   return t('actedProgress', { ready, total })
 })
 const gameCode = computed(() => game.currentGame.value ? game.currentGame.value.slice(0, 8) : '')
+const tokenBudgetHint = computed(() => {
+  if (!game.isGm.value) return ''
+  const bump = game.detail.value?.token_budget_bump
+  if (!bump || bump.to <= bump.from) return ''
+  return t('tokenBudgetBumped', { from: bump.from, to: bump.to })
+})
 const tableNotice = computed(() => {
   if (showGmThinking.value) return t('gmProcessingNotice')
+  if (pendingLuckDecisions.value.length) {
+    const own = pendingLuckDecisions.value.some(check => check.actor_uid === actorId.value)
+    if (own || game.isGm.value) return t('luckDecisionOwnNotice')
+    const names = joinNames(pendingLuckDecisions.value.map(check => String(check.actor_name || check.actor_uid || '')))
+    return t('luckDecisionWaitingNotice', { names })
+  }
   const detail = game.detail.value
   if (!detail) return ''
   if (detail.state === 'paused') return game.isGm.value ? t('pausedNoticeGm') : t('pausedNoticePlayer')
@@ -95,6 +121,60 @@ const tableNotice = computed(() => {
   if (!detail.solo_mode && submitted) return t('submittedNotice')
   return ''
 })
+
+function openPortraitEditor() {
+  if (!canEditOwnPortrait.value || !game.player.value) return
+  const current = game.player.value.character_sheet?.portrait
+  portraitDraft.value = current ? { ...current } : undefined
+  showPortraitEditor.value = true
+}
+
+async function savePortrait() {
+  if (!canEditOwnPortrait.value || !game.currentGame.value || !actorId.value) return
+  portraitBusy.value = true
+  try {
+    await api(`/games/${encodeURIComponent(game.currentGame.value)}/character/${encodeURIComponent(actorId.value)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ portrait: portraitDraft.value ? { ...portraitDraft.value } : {} }),
+    })
+    await game.refresh(true)
+    showPortraitEditor.value = false
+    toast.success(t('avatarSaved'))
+  } catch (error: unknown) {
+    toast.error(errorMessage(error))
+  } finally { portraitBusy.value = false }
+}
+
+async function onLuckDecision(check: CheckResult, spend: boolean) {
+  const checkId = String(check.check_id || '')
+  if (!checkId || luckBusyId.value) return
+  const accepted = await confirm({
+    title: spend ? t('luckSpendConfirmTitle') : t('luckDeclineConfirmTitle'),
+    content: spend
+      ? t('luckSpendConfirm', { cost: check.luck_cost || 0 })
+      : t('luckDeclineConfirm'),
+    positiveText: spend ? t('spendLuckForSuccess', { cost: check.luck_cost || 0 }) : t('keepFailure'),
+    type: spend ? 'warning' : 'info',
+  })
+  if (!accepted) return
+  luckBusyId.value = checkId
+  const resolvingRound = pendingLuckDecisions.value.length === 1
+  if (resolvingRound) gmThinking.value = true
+  try {
+    const result = await api<LuckDecisionResponse>(`/games/${encodeURIComponent(game.currentGame.value)}/checks/${encodeURIComponent(checkId)}/luck`, {
+      method: 'POST',
+      body: JSON.stringify({ spend }),
+    })
+    if (result.ok === false || result.error) throw new Error(result.error || t('operationFailed'))
+    toast.success(t('luckDecisionSaved'))
+    await game.refresh()
+  } catch (error: unknown) {
+    toast.error(errorMessage(error))
+  } finally {
+    luckBusyId.value = ''
+    if (resolvingRound) gmThinking.value = false
+  }
+}
 async function command(path: string, body: JsonObject = {}) {
   const thinkingCommand = path === 'advance'
   if (thinkingCommand) gmThinking.value = true
@@ -151,15 +231,18 @@ async function copyBotBind() {
 async function openWorldSwitch() {
   try {
     const [templateData, worldData] = await Promise.all([api<WorldTemplatesResponse>('/world-templates'), api<WorldListResponse>('/worlds')])
+    const gameLanguage = contentLanguageOf({ language: game.detail.value?.language || locale.value })
+    const templates = filterByContentLanguage(templateData.templates || [], gameLanguage)
+    const loreWorlds = filterByContentLanguage(worldData.worlds || [], gameLanguage)
     const seen = new Set<string>()
     const candidates: WorldCandidate[] = []
-    for (const template of templateData.templates || []) {
+    for (const template of templates) {
       const id = template.world_id || template.id
       if (!id) continue
       seen.add(id)
       candidates.push({ id, name: template.world_name || template.name || id, description: template.description || '', source: t('templateSource'), default_rule: template.default_rule || '', entry_count: undefined })
     }
-    for (const w of worldData.worlds || []) {
+    for (const w of loreWorlds) {
       const id = w.id || w.world_id
       if (!id || seen.has(id)) continue
       candidates.push({ id, name: w.name || w.world_name || id, description: w.description || '', source: t('lorebookSourceShort'), default_rule: '', entry_count: w.entry_count || 0 })
@@ -193,6 +276,10 @@ async function openCards() {
 }
 
 async function selectCard(card: CharacterCard) {
+  if (characterCardNeedsConversion(card, ruleMeta.value.rule_id)) {
+    toast.error(t('cardRuleMismatchManage'))
+    return
+  }
   try {
     await api(`/games/${encodeURIComponent(game.currentGame.value)}/character/${encodeURIComponent(actorId.value)}`, { method: 'PUT', body: JSON.stringify(card) })
     showCards.value = false
@@ -389,9 +476,24 @@ watch(showGmThinking, (thinking) => {
         :map="game.map.value"
         :rule-meta="ruleMeta"
         :collapsed="sidebarCollapsed"
+        :portrait-editable="canEditOwnPortrait"
         @lore-click="onLoreClick"
         @toggle-sidebar="toggleSidebar"
+        @portrait-click="openPortraitEditor"
       />
+
+      <Modal v-if="showPortraitEditor && game.player.value" :title="t('changeAvatar')" @close="showPortraitEditor = false">
+        <PortraitPicker
+          v-model="portraitDraft"
+          :rule-id="String(ruleMeta?.rule_id || '')"
+          :seed="actorId"
+          :name="game.player.value.character_name"
+        />
+        <template #actions>
+          <button :disabled="portraitBusy" @click="showPortraitEditor = false">{{ t('cancel') }}</button>
+          <button class="primary" :disabled="portraitBusy" @click="savePortrait">{{ portraitBusy ? t('savingAvatar') : t('saveAction') }}</button>
+        </template>
+      </Modal>
 
       <section class="play-main">
         <section class="scene-strip">
@@ -414,15 +516,21 @@ watch(showGmThinking, (thinking) => {
           :round="game.detail.value.round_number || 0"
           :lore="game.lore.value"
           :game-key="game.currentGame.value"
+          :rule-id="String(ruleMeta?.rule_id || '')"
           :processing="showGmThinking"
           :is-gm="game.isGm.value"
           :live-narration="game.liveNarration.value"
+          :pending-checks="pendingLuckDecisions"
+          :current-user-id="actorId"
+          :luck-busy-id="luckBusyId"
           @refresh="game.refresh"
+          @luck="onLuckDecision"
         />
 
         <div v-if="tableNotice" class="table-notice notice">{{ tableNotice }}</div>
+        <p v-if="tokenBudgetHint" class="token-budget-hint" aria-live="polite">{{ tokenBudgetHint }}</p>
 
-        <ActionComposer :game-key="game.currentGame.value" :user-id="actorId" :detail="game.detail.value" :disabled="preview && !delegate" @processing="gmThinking = $event" @refresh="game.refresh" />
+        <ActionComposer :game-key="game.currentGame.value" :user-id="actorId" :detail="game.detail.value" :disabled="(preview && !delegate) || !!pendingLuckDecisions.length" @processing="gmThinking = $event" @refresh="game.refresh" />
       </section>
 
       <aside v-if="game.isGm.value || game.detail.value.solo_mode === false" class="play-control-rail" :class="{ collapsed: railCollapsed }">
@@ -472,7 +580,7 @@ watch(showGmThinking, (thinking) => {
         <header><h2>{{ t('sharedCharacterLibrary') }}</h2><button @click="showCards = false">×</button></header>
         <p>{{ t('replaceCharacterHint') }}</p>
         <button v-for="c in cards" :key="c.character_name" class="card-choice" @click="selectCard(c)">
-          <strong>{{ c.character_name }}</strong><span>{{ c.race }} · {{ c.class }}</span>
+          <strong>{{ c.character_name }}</strong><span>{{ characterCardRuleName(c, t('unboundRule')) }} · {{ c.race }} · {{ c.class }}</span>
         </button>
         <p v-if="!cards.length" class="muted">{{ t('emptyCharacterLibrary') }}</p>
       </section>

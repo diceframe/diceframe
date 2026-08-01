@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from src.commands.round_helpers import should_multi_step, validate_dice_constraint
+from src.commands.protocol_repair import append_protocol_repair_instruction
 from src.commands.tag_json import safe_parse_json
 from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance
@@ -14,9 +15,11 @@ from src.engine.language import is_english
 from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
+    has_malformed_protocol_leak,
     normalize_tag_protocol,
     sanitize_narration,
 )
+from src.llm.protocol import leaked_protocol_line_start, strip_protocol_markup_from_public_line
 
 logger = logging.getLogger("trpg")
 _NARRATION_SOFT_LIMIT_CHARS = 260
@@ -73,6 +76,29 @@ class _NarrationDeltaFilter:
             if head:
                 await self._on_delta(head)
             return
+
+        # A single malformed tag line cannot be treated as an executable suffix
+        # safely, but it must still never reach the player. Hold that line until
+        # complete, remove the protocol token, and preserve explicit prose after it.
+        while True:
+            pending = self._buf[self._sent:]
+            leaked_at = leaked_protocol_line_start(pending)
+            if leaked_at is None:
+                break
+            absolute = self._sent + leaked_at
+            if absolute > self._sent:
+                head = self._buf[self._sent:absolute]
+                self._sent = absolute
+                if head:
+                    await self._on_delta(head)
+            newline = self._buf.find("\n", self._sent)
+            if newline < 0:
+                return
+            leaked_line = self._buf[self._sent:newline]
+            public_remainder = strip_protocol_markup_from_public_line(leaked_line)
+            self._sent = newline + 1
+            if public_remainder:
+                await self._on_delta(public_remainder + "\n")
         # 暂存末尾最多 len(SEPARATOR)-1 个字符，防止分隔符跨 chunk 被提前发出
         hold = min(self.PROTOCOL_HOLD_CHARS, len(self._buf) - self._sent)
         if hold > 0:
@@ -210,6 +236,8 @@ async def _call_stream_with_length_retry(
                 on_delta=filt.feed,
             )
             await filt.flush()
+            response.token_budget_initial = narrative_max_tokens
+            response.token_budget_used = current_max_tokens
             return response
         except OutputTruncatedError:
             if budget_index + 1 >= len(budgets):
@@ -252,15 +280,22 @@ async def call_llm_with_tag_retry(
     response = None
     data: dict = {}
     stream = on_delta is not None
-    for dice_retry in range(2):
+    max_budget_used = narrative_max_tokens
+    dice_retry = 0
+    retry_kind = ""
+    protocol_retry_used = False
+    while True:
         retry_context = context
-        if dice_retry > 0:
+        if retry_kind == "protocol":
+            retry_context = append_protocol_repair_instruction(
+                context,
+                getattr(instance, "language", "zh-CN"),
+            )
+        elif retry_kind == "dice":
             if is_english(getattr(instance, "language", "")):
                 retry_context = context + "\n\nPrevious response contradicted the required dice/check result. Rewrite the narration and strictly follow the check outcome."
             else:
                 retry_context = context + "\n\n⚠️ 上一轮回复与【系统检定·必须遵循】矛盾，请严格遵循检定结果重新叙述。"
-            if on_reset:
-                await on_reset()
         if stream:
             response = await _call_stream_with_length_retry(
                 llm_client,
@@ -278,7 +313,19 @@ async def call_llm_with_tag_retry(
                 temperature=0.7,
                 max_tokens=narrative_max_tokens,
             )
+        max_budget_used = max(
+            max_budget_used,
+            int(getattr(response, "token_budget_used", 0) or 0),
+        )
         response.language = getattr(instance, "language", "zh-CN")
+        malformed_protocol = has_malformed_protocol_leak(response.content)
+        if malformed_protocol and not protocol_retry_used:
+            protocol_retry_used = True
+            retry_kind = "protocol"
+            logger.warning("检测到模型协议标签泄漏，按严格格式重试一次 (round=%d)", instance.round_number)
+            if on_reset:
+                await on_reset()
+            continue
         response.content = normalize_tag_protocol(response.content)
 
         if "---" in response.content:
@@ -310,17 +357,24 @@ async def call_llm_with_tag_retry(
         narration = response.narration or response.content
         if not dice_block or validate_dice_constraint(dice_block, narration):
             break
+        if dice_retry >= 1:
+            logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", instance.round_number)
+            break
+        dice_retry += 1
+        retry_kind = "dice"
         logger.warning(
             "骰子约束矛盾，重试 (%d/1, round=%d)",
-            dice_retry + 1,
+            dice_retry,
             instance.round_number,
         )
-    else:
-        logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", instance.round_number)
+        if on_reset:
+            await on_reset()
 
     await _compress_long_narration(
         llm_client, gm_prompt, response, actions_text, combat_model, narrative_max_tokens
     )
+    response.token_budget_initial = narrative_max_tokens
+    response.token_budget_used = max_budget_used
     return response, data
 
 
@@ -347,8 +401,8 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
 
     if not response.state_update:
         response.is_narration_only = True
-        streak = getattr(instance, "_tag_fail_streak", 0) + 1
-        instance._tag_fail_streak = streak
+        streak = instance._tag_fail_streak + 1
+        instance.set_tag_failure_streak(streak)
         if streak >= 3:
             logger.error("标签连续%d轮解析失败！建议：检查模型是否支持当前prompt格式，或更换模型", streak)
             record_health_event(
@@ -380,4 +434,4 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
         response.info_asymmetry = {}
         response.plot_update = {"quests": [], "relations": [], "decisions": []}
     else:
-        instance._tag_fail_streak = 0
+        instance.set_tag_failure_streak(0)

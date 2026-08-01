@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.bots.bridge_core.errors import DiceFrameHTTPError
 from src.bots.bridge_core.language import bridge_is_english
+from src.bots.bridge_core.presenters import luck_prompt_lines
 
 _STALE_BINDING_FAILURE_LIMIT = 3
 
@@ -32,6 +33,7 @@ class QQWebSyncMixin:
                         self._web_sync_failures.pop(group_id, None)
                         self._web_sync_last_round.pop(game_key, None)
                         self._web_sync_seen_actions.pop(game_key, None)
+                        self._web_sync_seen_luck.pop(game_key, None)
                         self.logger.warning(
                             "Web 同步绑定已失效并自动解除: group=%s game=%s code=%s status=%s",
                             group_id, game_key, exc.code or "-", exc.status or "-",
@@ -67,6 +69,31 @@ class QQWebSyncMixin:
                 except Exception:
                     self.logger.warning("Web 同步实时转发行动失败: group=%s sig=%s", group_id, sig, exc_info=True)
 
+            pending_luck = detail.get("pending_luck_decisions") if isinstance(detail.get("pending_luck_decisions"), list) else []
+            seen_luck = self._web_sync_seen_luck.setdefault(game_key, set())
+            current_luck_ids = {
+                str(check.get("check_id") or "")
+                for check in pending_luck
+                if isinstance(check, dict) and str(check.get("check_id") or "")
+            }
+            seen_luck.intersection_update(current_luck_ids)
+            if not self._group_action_inflight.get(game_key):
+                for check in pending_luck:
+                    if not isinstance(check, dict):
+                        continue
+                    check_id = str(check.get("check_id") or "")
+                    if not check_id or check_id in seen_luck:
+                        continue
+                    seen_luck.add(check_id)
+                    language = self._group_language(group)
+                    try:
+                        await self._send_group_text(
+                            group_id,
+                            "\n".join(luck_prompt_lines([check], language, command_prefix="@我")),
+                        )
+                    except Exception:
+                        self.logger.warning("Web 同步幸运选择提示失败: group=%s check=%s", group_id, check_id, exc_info=True)
+
             current_round = int(detail.get("round_number") or 0)
             last = self._web_sync_last_round.get(game_key)
             if last is None:
@@ -86,6 +113,7 @@ class QQWebSyncMixin:
             except Exception:
                 self.logger.warning("Web 同步转发到群失败: group=%s round=%s", group_id, current_round, exc_info=True)
             seen.clear()
+            self._web_sync_seen_luck.pop(game_key, None)
 
     async def _send_web_action_to_group(self, group_id: str, action: dict) -> None:
         """网页玩家行动实时转发：纯文本「角色名：行动」，像群友发言。"""

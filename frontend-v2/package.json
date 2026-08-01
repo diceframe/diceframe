@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "typecheck": "vue-tsc -b",
+    "lint": "eslint src tests --max-warnings 0",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:mobile": "playwright test --project=mobile"
@@ -25,8 +26,11 @@
     "@playwright/test": "1.61.1",
     "@types/node": "26.1.1",
     "@vue/test-utils": "2.4.11",
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.10.0",
     "jsdom": "29.1.1",
     "typescript": "5.7.3",
+    "typescript-eslint": "^8.65.0",
     "vitest": "4.1.10",
     "vue-tsc": "2.2.0"
   }

@@ -10,6 +10,7 @@ parse_tag_state 按标签类型分派到 tag_handlers 中的 typed handler：
 from __future__ import annotations
 
 from src.llm.parser import normalize_tag_protocol
+from src.llm.protocol import normalize_protocol_line
 from src.commands.tag_handlers import (
     ACTION_TAGS,
     KNOWN_TAGS,
@@ -49,7 +50,7 @@ def _extract_tag_lines(text: str, result: dict) -> list[str]:
 
 def _split_tag_line(line: str) -> tuple[str | None, str | None]:
     """解析单行 'TAG: value'；无效或未知标签返回 (None, None)。"""
-    line = line.strip()
+    line = normalize_protocol_line(line) or line.strip()
     if not line or ":" not in line:
         return None, None
     tag, _, value = line.partition(":")

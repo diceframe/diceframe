@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Any
 from src.engine.character_utils import apply_resource_delta, get_resource
 from src.engine.checks import build_check_request, roll_check_request
 from src.engine.game_instance import GameState
-from src.engine.game_instance import restore_players
 from src.engine.dice import roll
 from src.engine.health import health_payload, mark_health_event, record_health_event
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
+from src.llm.parser import sanitize_narration
 from src.rules.rule_system import RuleSystem
 
 from src.webui.services._common import _GAME_KEY_SEP, _is_safe_world_id
@@ -101,12 +101,14 @@ def game_detail(api: "WebAPI", game_key: str) -> dict[str, Any] | None:
             p for p in getattr(inst, "pending_payments", [])
             if p.get("status") == "pending"
         ],
+        "pending_luck_decisions": inst.pending_luck_checks(),
         "difficulty": inst.difficulty,
         "solo_mode": inst.solo_mode,
         "max_players": inst.max_players,
         "multiplayer": inst.multiplayer_status(),
         "plot_tracker": inst.plot_tracker.to_dict() if inst.plot_tracker else None,
         "recap": _public_recap(inst),
+        "token_budget_bump": getattr(inst, "last_token_budget_bump", None),
     }
 
 
@@ -147,7 +149,7 @@ def delete_game(api: "WebAPI", game_key: str) -> dict[str, Any]:
 
 def _clean_public_narration(text: str) -> str:
     """只取公开叙事段，去掉 --- 后面的结构化标签，不截断长度。"""
-    return str(text or "").split("\n---", 1)[0].strip()
+    return sanitize_narration(str(text or ""))
 
 
 def _public_recap(inst) -> dict[str, Any]:
@@ -187,7 +189,9 @@ def _public_recap(inst) -> dict[str, Any]:
         })
     pending_actions = [view for a in (inst.action_queue or []) if (view := _action_view(a))]
     return {
-        "narrative": str((getattr(inst, "summary", {}) or {}).get("narrative") or "").strip(),
+        "narrative": _clean_public_narration(
+            (getattr(inst, "summary", {}) or {}).get("narrative") or ""
+        ),
         "key_facts": list(getattr(inst, "key_facts", []) or [])[-8:],
         "recent_rounds": recent_rounds,
         "pending_actions": pending_actions,
@@ -226,7 +230,7 @@ async def set_player_access(api: "WebAPI", game_key: str, open_access: bool) -> 
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
-    inst.player_access_open = bool(open_access)
+    inst.set_player_access(open_access)
     await api._reg.save(inst)
     return {"ok": True, "player_access_open": inst.player_access_open}
 
@@ -310,6 +314,49 @@ async def resolve_pending_dice_for_game(
     return {"ok": True, "resolved": resolved, "roll": resolved[0] if resolved else None}
 
 
+async def resolve_luck_decision(
+    api: "WebAPI",
+    game_key: str,
+    check_id: str,
+    actor_uid: str,
+    spend: bool,
+) -> dict[str, Any]:
+    """处理叙事生成前的幸运选择，并持久化防止跨端重复扣除。"""
+    inst = api._reg.get(api._parse_key(game_key))
+    if not inst:
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+    result = await inst.resolve_luck_decision(
+        check_id,
+        actor_uid,
+        spend,
+        rule=api._load_rule_for_game(inst),
+        allow_gm=True,
+    )
+    if not result.get("ok"):
+        return result
+    await api._reg.save(inst)
+    pending = inst.pending_luck_checks()
+    round_already_resolved = inst.state != GameState.ACTIVE_JUDGMENT
+    return {
+        **result,
+        "phase": "done" if round_already_resolved else ("luck" if pending else "ready"),
+        "pending_luck_decisions": pending,
+        "ready_to_resolve": not pending and not round_already_resolved,
+        "round_already_resolved": round_already_resolved,
+    }
+
+
+async def decline_pending_luck(api: "WebAPI", game_key: str) -> dict[str, Any]:
+    """GM 强制推进时按失败继续所有尚未决定的幸运检定。"""
+    inst = api._reg.get(api._parse_key(game_key))
+    if not inst:
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+    declined = await inst.decline_pending_luck()
+    if declined:
+        await api._reg.save(inst)
+    return {"ok": True, "declined_luck_decisions": declined}
+
+
 def private_log(api: "WebAPI", game_key: str) -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
@@ -359,10 +406,7 @@ async def set_solo_mode(api: "WebAPI", game_key: str, solo: bool) -> dict[str, A
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
-    inst.solo_mode = bool(solo)
-    if inst.solo_mode and inst.action_queue and inst.state == GameState.ACTIVE_ACTION:
-        for uid in inst.alive_players:
-            inst.ready_players.add(uid)
+    inst.set_solo_mode(solo)
     await api._reg.save(inst)
     return {"ok": True, "solo_mode": inst.solo_mode, "multiplayer": inst.multiplayer_status()}
 
@@ -388,32 +432,22 @@ async def rollback_round(api: "WebAPI", game_key: str) -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
-    if not inst.log:
+    round_number = await inst.rollback_last_round()
+    if round_number is None:
         return {"ok": False, "error": "没有可撤回的上一轮"}
-    last = inst.log.pop()
-    snapshot = last.get("pre_state_snapshot", {})
-    if isinstance(snapshot, dict) and snapshot:
-        restore_players(inst, snapshot)
-    inst.round_number = max(1, int(last.get("round", inst.round_number) or 1))
-    inst.action_queue.clear()
-    inst.pending_actions.clear()
-    inst.ready_players.clear()
-    inst.pending_payments.clear()
-    inst.state = GameState.ACTIVE_ACTION
-    inst.last_activity = datetime.now(timezone.utc).isoformat()
     record_health_event(
         inst,
         component="gm_control",
         code="GM_ROLLBACK",
         severity="info",
         title="GM 回退",
-        message=f"已撤回到第 {inst.round_number} 轮开始前的玩家状态。",
+        message=f"已撤回到第 {round_number} 轮开始前的玩家状态。",
         impact="上一轮叙事日志已移除，玩家公开状态已恢复到快照。",
         fallback="rollback_snapshot",
         repair_hint="如果仍不满意，可继续用 GM 指令修正下一次判定。",
     )
     await api._reg.save(inst)
-    return {"ok": True, "message": f"已撤回到第 {inst.round_number} 轮开始前的玩家状态"}
+    return {"ok": True, "message": f"已撤回到第 {round_number} 轮开始前的玩家状态"}
 
 
 def _resolve_gm_command_target(inst, raw_target: str) -> tuple[str, str] | tuple[None, str]:
@@ -535,7 +569,7 @@ async def gm_command(api: "WebAPI", game_key: str, command: str, mode: str = "no
     target_round = int(inst.round_number or 0)
     if inst.state != GameState.ACTIVE_ACTION:
         target_round += 1
-    inst.gm_directives.append({
+    inst.add_gm_directive({
         "id": uuid.uuid4().hex,
         "text": command,
         "created_at": time.time(),
@@ -566,7 +600,7 @@ async def gm_private_message(api: "WebAPI", game_key: str, user_id: str, text: s
         return {"ok": False, "error": "目标玩家不存在"}
     if not text:
         return {"ok": False, "error": "请输入悄悄话内容"}
-    inst.private_log.setdefault(user_id, []).append({
+    inst.append_private_message(user_id, {
         "round": inst.round_number,
         "text": text,
         "source": "gm",
@@ -670,10 +704,12 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
         rule_id=rule_id or "freeform_fantasy",
         language=resolved_language,
     )
-    instance.solo_mode = solo
-    instance.difficulty = difficulty
-    instance.entry_point = "web"
-    instance.room_password = room_password or ""
+    instance.set_difficulty(difficulty)
+    instance.configure_session(
+        solo_mode=solo,
+        entry_point="web",
+        room_password=room_password or "",
+    )
 
     # 如果指定了外部世界书来源，复制条目
     if lorebook_world_id and lorebook_world_id != world_id and api._lore:
@@ -715,7 +751,7 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
     world_name = instance.world_name
 
     # GM 严格绑定成功创建的第一个角色；没有角色就没有 GM。
-    instance.gm_uid = created_players[0]["user_id"] if created_players else ""
+    instance.configure_session(gm_uid=created_players[0]["user_id"] if created_players else "")
     await api._reg.save(instance)
 
     return {
@@ -741,7 +777,9 @@ async def reset_game(api: "WebAPI", game_key: str) -> dict[str, Any]:
     inst = await api._handler.reset_game(inst)
     return {
         "ok": True,
-        "narration": inst.log[-1].get("gm_response", "") if inst.log else "",
+        "narration": _clean_public_narration(
+            inst.log[-1].get("gm_response", "") if inst.log else ""
+        ),
         "seed_code": inst.seed_code,
     }
 
@@ -758,7 +796,9 @@ async def restart_game(api: "WebAPI", game_key: str) -> dict[str, Any]:
     inst = await api._handler.restart_game(inst)
     return {
         "ok": True,
-        "narration": inst.log[-1].get("gm_response", "") if inst.log else "",
+        "narration": _clean_public_narration(
+            inst.log[-1].get("gm_response", "") if inst.log else ""
+        ),
         "seed_code": inst.seed_code,
     }
 
@@ -785,8 +825,7 @@ async def switch_world(api: "WebAPI", game_key: str, world_id: str) -> dict[str,
             world_name = world.get("name", world_id)
         else:
             return {"ok": False, "error": f"世界 {world_id} 不存在"}
-    inst.world_id = world_id
-    inst.world_name = world_name
+    inst.set_world(world_id, world_name)
     if api._handler:
         api._handler._last_matcher_world_id = None
         api._rebuild_lorebook_index(world_id)
@@ -824,7 +863,7 @@ async def create_from_seed(api: "WebAPI", seed_code: str, solo: bool = False,
         difficulty=target_inst.difficulty,
         language=resolved_language,
     )
-    instance.solo_mode = solo
+    instance.configure_session(solo_mode=solo)
     created_players: list[dict[str, Any]] = []
     for idx, character in enumerate(players or []):
         if idx == 0 and gm_uid:
@@ -839,7 +878,7 @@ async def create_from_seed(api: "WebAPI", seed_code: str, solo: bool = False,
     world_name = instance.world_name
 
     # 与 create_game 一致：首个成功创建的角色拥有 GM 身份。
-    instance.gm_uid = created_players[0]["user_id"] if created_players else ""
+    instance.configure_session(gm_uid=created_players[0]["user_id"] if created_players else "")
     await api._reg.save(instance)
 
     return {

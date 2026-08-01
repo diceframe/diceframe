@@ -103,6 +103,27 @@ def advance_force(text: str) -> bool:
     return normalized not in {"尝试推进", "普通推进", "advance"}
 
 
+def luck_decision(text: str) -> bool | None:
+    """识别是否使用幸运；True=使用，False=保留失败。"""
+    normalized = re.sub(r"\s+", "", str(text or "").strip().lower())
+    if normalized in {
+        "幸运", "用幸运", "使用幸运", "消耗幸运", "花幸运",
+        "luck", "useluck", "spendluck",
+    } or normalized.startswith(("用幸运", "使用幸运", "消耗幸运", "花幸运", "useluck", "spendluck")):
+        return True
+    if normalized in {
+        "不用幸运", "不使用幸运", "保留失败", "接受失败", "放弃幸运",
+        "noluck", "declineluck", "keepfailure", "acceptfailure",
+    } or normalized.startswith(("不用幸运", "不使用幸运", "保留失败", "接受失败", "放弃幸运", "declineluck", "keepfailure")):
+        return False
+    return None
+
+
+def luck_index(text: str) -> int:
+    match = re.search(r"(\d+)", str(text or ""))
+    return max(1, int(match.group(1))) if match else 1
+
+
 def is_payment_list(text: str) -> bool:
     return text.strip().lower() in {
         "支付", "付款", "待支付", "待付款", "支付列表", "付款列表",

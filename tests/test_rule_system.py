@@ -1,10 +1,32 @@
 """规则系统安全表达式求值测试。"""
 
+import json
+import re
+from pathlib import Path
+
 import pytest
 from src.commands.dice_resolver import DiceResolver
 from src.engine.character_utils import initial_special_stat_value, make_default_character
 from src.engine.game_instance import GameInstance
+from src.llm.protocol import KNOWN_PROTOCOL_TAGS
 from src.rules.rule_system import RuleSystem, _safe_eval, list_available_rules
+
+
+def test_builtin_rule_appendices_only_reference_supported_protocol_tags():
+    unknown: dict[str, list[str]] = {}
+    legacy_aliases: list[str] = []
+    for path in Path("templates/rules").glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        appendix = str(data.get("gm_prompt_appendix") or "")
+        tag_names = set(re.findall(r"\b([A-Z][A-Z_]{1,31})\s*[:：]", appendix))
+        unsupported = sorted(tag_names - KNOWN_PROTOCOL_TAGS)
+        if unsupported:
+            unknown[path.name] = unsupported
+        if "SANCheck:" in appendix:
+            legacy_aliases.append(path.name)
+
+    assert unknown == {}
+    assert legacy_aliases == []
 
 
 class TestSafeEval:

@@ -197,6 +197,7 @@ _RULE_SYSTEM_PROMPT = """你是TRPG规则设计师。请基于给定“母版规
 - 属性 key 必须是英文/数字/下划线，HP 公式只能使用属性 key、+ - * / //、min/max/abs/int。
 - 属性数量建议 5-8 个；必须能支撑建卡。
 - gm_prompt_appendix 要具体，能约束AI不串题材。
+- gm_prompt_appendix 不得发明或要求使用新的大写协议标签；状态标签由 DiceFrame 的系统提示统一提供。
 - 所有中文文本自然、短而实用。"""
 
 _RULE_SYSTEM_PROMPT_EN = """You are a TRPG rules designer. Based on the provided master rule JSON and the user's genre description, generate a lightweight custom rule JSON that can be used directly by DiceFrame.
@@ -236,6 +237,7 @@ Requirements:
 - HP formula may only use attribute keys and + - * / // min max abs int.
 - Use 5-8 attributes when possible and make character creation practical.
 - gm_prompt_appendix must be concrete enough to keep AI on genre.
+- gm_prompt_appendix must not invent or require new uppercase protocol tags; DiceFrame supplies state-tag instructions separately.
 - Player-facing display text should be natural, concise English. Keep required JSON keys and enum values unchanged."""
 
 
@@ -706,10 +708,10 @@ async def generate_character(llm_client, prompt: str, game_key: str = "",
         inst = registry.get(game_key if isinstance(game_key, tuple) else _parse_key(game_key))
         if inst:
             uid = "ai_gen_" + str(int(time.time()))
-            inst.players[uid] = {
+            inst.put_player(uid, {
                 "character_name": data["character_name"],
                 "character_sheet": data,
-            }
+            })
 
     return data
 

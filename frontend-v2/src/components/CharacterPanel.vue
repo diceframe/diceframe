@@ -4,8 +4,10 @@ import type { CharacterSheet, Player, RuleAttribute, RuleMeta } from '@/api/type
 import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel } from '@/utils/ruleSchema'
 import { buildSpecialStats, primaryResourceList } from '@/utils/play'
 import { useLocale } from '@/composables/useLocale'
+import PortraitImage from '@/components/PortraitImage.vue'
 
-const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null }>()
+const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null; portraitEditable?: boolean }>()
+const emit = defineEmits<{ 'portrait-click': [] }>()
 const { t } = useLocale()
 function label(item: unknown) { if (typeof item === 'string') return item; if (item && typeof item === 'object' && 'name' in item) return String((item as { name?: unknown }).name || JSON.stringify(item)); return JSON.stringify(item) }
 
@@ -32,11 +34,18 @@ function pct(cur: number, max: number) { return Math.max(0, Math.min(100, cur / 
     <header>
       <h2>{{ t('characterStatus') }}</h2>
     </header>
-    <div class="character-title">
-      <h3>{{ player.character_name }}</h3>
-      <span v-if="cs.deceased" class="tag tag-deceased">{{ t('unavailable') }}</span>
-      <span v-if="cs.status" class="tag tag-warn">{{ cs.status }}</span>
-      <span class="gold">{{ currencyName }} {{ gold }}</span>
+    <div class="character-profile">
+      <button v-if="portraitEditable" type="button" class="portrait-edit-button" :title="t('clickToChangeAvatar')" @click="emit('portrait-click')">
+        <PortraitImage :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
+        <span>{{ t('changeAvatar') }}</span>
+      </button>
+      <PortraitImage v-else :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
+      <div class="character-title">
+        <h3>{{ player.character_name }}</h3>
+        <span v-if="cs.deceased" class="tag tag-deceased">{{ t('unavailable') }}</span>
+        <span v-if="cs.status" class="tag tag-warn">{{ cs.status }}</span>
+        <span class="gold">{{ currencyName }} {{ gold }}</span>
+      </div>
     </div>
     <div class="hp"><span>HP</span><strong>{{ hp.current }} / {{ hp.max }}</strong></div>
     <div class="hpbar"><i :style="{ width: hpPct + '%' }" /></div>

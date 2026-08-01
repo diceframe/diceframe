@@ -27,9 +27,9 @@ DiceFrame 是一个可以自己部署的 **ai跑团引擎**，支持 **DND/COC/�
 
 ## 交流与反馈
 
-QQ 群：1060613588
+项目由社区维护。问题反馈和改进建议请优先通过 [GitHub Issues](https://github.com/diceframe/diceframe/issues) 提交，代码贡献欢迎发起 PR。
 
-项目由社区维护，欢迎通过 Issue、PR 或群聊提交反馈与改进建议。
+QQ 交流群：1060613588
 
 ## 功能概览
 

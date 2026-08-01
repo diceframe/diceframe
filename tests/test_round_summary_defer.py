@@ -28,7 +28,7 @@ def _make_processor(content: str = '{"narrative":"摘要内容","key_facts":[]}'
 
 
 def _make_instance(round_number: int) -> SimpleNamespace:
-    return SimpleNamespace(
+    instance = SimpleNamespace(
         game_key=("web", "test"),
         round_number=round_number,
         language="zh",
@@ -36,6 +36,9 @@ def _make_instance(round_number: int) -> SimpleNamespace:
         summary={},
         key_facts=[],
     )
+    instance.set_summary_narrative = lambda narrative: instance.summary.__setitem__("narrative", narrative)
+    instance.set_key_facts = lambda facts: setattr(instance, "key_facts", list(facts))
+    return instance
 
 
 @pytest.mark.asyncio

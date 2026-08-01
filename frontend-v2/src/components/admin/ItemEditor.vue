@@ -4,7 +4,7 @@ import { useLocale } from '@/composables/useLocale'
 import type { CharacterItem } from '@/api/types'
 import HelpButton from '@/components/common/HelpButton.vue'
 
-const props = defineProps<{
+defineProps<{
   equipment: CharacterItem[]
   inventory: CharacterItem[]
 }>()

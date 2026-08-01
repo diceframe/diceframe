@@ -218,8 +218,7 @@ class DiceResolver:
 
     @staticmethod
     def _record_check(instance: GameInstance, check: dict) -> None:
-        instance.last_check = check
-        instance.last_checks.append(check)
+        instance.record_check(check)
 
     def roll_d100_check(self, instance: GameInstance, actions_text: str) -> str:
         """通用 d100 检定：优先匹配技能值，否则用最高相关属性×5 作为阈值。"""
@@ -264,7 +263,7 @@ class DiceResolver:
             label = f"属性阈值 {threshold}"
 
         result, verdict = check_d100(threshold)
-        instance.last_check = {
+        check = {
             "actor_uid": uid,
             "actor_name": instance.players.get(uid, {}).get("character_name", ""),
             "dice": "d100",
@@ -276,6 +275,7 @@ class DiceResolver:
             "is_critical": "大成功" in verdict,
             "is_fumble": "大失败" in verdict,
         }
+        instance.record_check(check)
         english = is_english(instance.language)
         if english:
             return (
@@ -351,7 +351,7 @@ class DiceResolver:
         roll_label = self._d20_roll_label(result, advantage_mode)
         if advantage_note:
             roll_label = f"{roll_label}（{advantage_note}）"
-        instance.last_check = {
+        check = {
             "actor_uid": uid,
             "actor_name": instance.players.get(uid, {}).get("character_name", ""),
             "dice": "d20",
@@ -370,6 +370,7 @@ class DiceResolver:
             "is_critical": "大成功" in verdict,
             "is_fumble": "大失败" in verdict,
         }
+        instance.record_check(check)
         english = is_english(instance.language)
         if english:
             return (
@@ -409,7 +410,7 @@ class DiceResolver:
             label = f"属性「智力」×5 = {threshold}%"
 
         result, verdict = check_coc(threshold)
-        instance.last_check = {
+        check = {
             "actor_uid": uid,
             "actor_name": instance.players.get(uid, {}).get("character_name", ""),
             "dice": "d100",
@@ -421,6 +422,7 @@ class DiceResolver:
             "is_critical": "大成功" in verdict,
             "is_fumble": "大失败" in verdict,
         }
+        instance.record_check(check)
 
         hard = threshold // 2
         extreme = threshold // 5

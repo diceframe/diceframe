@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable
 
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+
+logger = logging.getLogger("trpg")
 
 # 兜底分类表：覆盖常见武器/防具/消耗品/杂项，
 # 避免「步兵长剑」「硬牛皮甲」这种装备被堆到道具栏（issue #9）
@@ -59,7 +62,6 @@ class ItemCategoryResolver:
                         rule_cats = rule.item_categories
         except Exception:
             logger.warning("物品分类表加载失败，回退内置表: world_id=%s", instance.world_id, exc_info=True)
-            pass
 
         if not rule_cats:
             rule_cats = _DEFAULT_ITEM_CATEGORIES

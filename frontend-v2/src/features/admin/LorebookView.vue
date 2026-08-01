@@ -5,8 +5,9 @@ import type { GameSummary, GamesResponse, LorebookResponse, LoreEntry, LoreGener
 import { readCurrentGame } from '@/stores/gameContext'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
-import { useLocale } from '@/composables/useLocale'
+import { useLocale, type Locale } from '@/composables/useLocale'
 import type { MessageKey } from '@/i18n'
+import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLanguage'
 import Modal from '@/components/ui/Modal.vue'
 
 interface LoreEdit extends LoreEntry {
@@ -34,6 +35,7 @@ const { locale, t } = useLocale()
 
 const game = ref(readCurrentGame())
 const worlds = ref<WorldSummary[]>([])
+const worldLanguage = ref<Locale>(locale.value)
 const currentWorldId = ref('')
 const data = ref<LorebookResponse>({ entries: [] })
 const error = ref('')
@@ -44,6 +46,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const showNewWorld = ref(false)
 const newWorld = ref({ name: '', description: '', language: locale.value })
 const entries = computed(() => data.value.entries || [])
+const languageWorlds = computed(() => filterByContentLanguage(worlds.value, worldLanguage.value))
 const currentWorld = computed(() => worlds.value.find(w => worldIdOf(w) === currentWorldId.value))
 const activeLoreType = ref('all')
 const loreTypeOrder = ['npc', 'location', 'faction', 'item', 'event', 'puzzle', 'other'] as const
@@ -51,6 +54,11 @@ const loreTypeOrder = ['npc', 'location', 'faction', 'item', 'event', 'puzzle', 
 function worldIdOf(w: WorldSummary | undefined): string { return String(w?.id || w?.world_id || '') }
 function worldNameOf(w: WorldSummary | undefined): string { return String(w?.name || w?.world_name || w?.id || '') }
 function cloneLore(entry: LoreEntry): LoreEdit { return JSON.parse(JSON.stringify(entry)) as LoreEdit }
+
+function toggleNewWorld() {
+  showNewWorld.value = !showNewWorld.value
+  if (showNewWorld.value) newWorld.value.language = worldLanguage.value
+}
 
 async function loadWorlds() {
   error.value = ''
@@ -60,13 +68,27 @@ async function loadWorlds() {
     if (game.value) {
       const games = await api<GamesResponse>('/games')
       const cur = (games.games || []).find((g: GameSummary) => g.game_key === game.value)
-      if (cur?.world_id) currentWorldId.value = cur.world_id
+      if (cur?.world_id) {
+        currentWorldId.value = cur.world_id
+        const activeWorld = worlds.value.find(w => worldIdOf(w) === cur.world_id)
+        worldLanguage.value = activeWorld
+          ? contentLanguageOf(activeWorld)
+          : contentLanguageOf({ language: cur.language })
+      }
     }
-    if (!currentWorldId.value && worlds.value.length) currentWorldId.value = worldIdOf(worlds.value[0])
+    if (!languageWorlds.value.some(w => worldIdOf(w) === currentWorldId.value)) {
+      currentWorldId.value = worldIdOf(languageWorlds.value[0])
+    }
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
 watch(currentWorldId, () => { if (currentWorldId.value) loadLore() })
+watch(worldLanguage, () => {
+  if (languageWorlds.value.some(w => worldIdOf(w) === currentWorldId.value)) return
+  currentWorldId.value = worldIdOf(languageWorlds.value[0])
+  if (!currentWorldId.value) data.value = { entries: [] }
+})
+watch(locale, next => { if (!game.value) worldLanguage.value = next })
 
 async function loadLore() {
   if (!currentWorldId.value) { data.value = { entries: [] }; return }
@@ -170,12 +192,14 @@ async function createWorld() {
   if (!newWorld.value.name.trim()) { toast.error(t('enterWorldName')); return }
   busy.value = true
   try {
+    const createdLanguage = contentLanguageOf({ language: newWorld.value.language })
     const r = await api<WorldCreateResponse>('/worlds', { method: 'POST', body: JSON.stringify({ name: newWorld.value.name, description: newWorld.value.description, language: newWorld.value.language }) })
     if (!r.ok) throw new Error(r.error || t('createFailed'))
     toast.success(t('worldCreated'))
     newWorld.value = { name: '', description: '', language: locale.value }
     showNewWorld.value = false
     await loadWorlds()
+    worldLanguage.value = createdLanguage
     if (r.world_id || r.id) currentWorldId.value = String(r.world_id || r.id)
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
@@ -190,7 +214,7 @@ async function deleteWorld() {
     toast.success(t('worldDeleted'))
     currentWorldId.value = ''
     await loadWorlds()
-    if (worlds.value.length) currentWorldId.value = worldIdOf(worlds.value[0])
+    if (languageWorlds.value.length) currentWorldId.value = worldIdOf(languageWorlds.value[0])
     else data.value = { entries: [] }
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
@@ -241,11 +265,18 @@ async function importLore(e: Event) {
     <p v-if="error" class="error-banner">{{ error }}</p>
 
     <div class="lore-world-bar">
+      <label class="lore-language-filter">
+        <span>{{ t('contentLanguage') }}</span>
+        <select v-model="worldLanguage">
+          <option value="zh-CN">{{ t('chinese') }}</option>
+          <option value="en">{{ t('english') }}</option>
+        </select>
+      </label>
       <select v-model="currentWorldId">
         <option value="" disabled>{{ t('chooseWorldEllipsis') }}</option>
-        <option v-for="w in worlds" :key="w.id" :value="w.id">{{ w.name }} ({{ t('entriesCount', { count: w.entry_count || 0 }) }})</option>
+        <option v-for="w in languageWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldNameOf(w) }} ({{ t('entriesCount', { count: w.entry_count || 0 }) }})</option>
       </select>
-      <button class="primary" @click="showNewWorld = !showNewWorld">+ {{ t('newWorld') }}</button>
+      <button class="primary" @click="toggleNewWorld">+ {{ t('newWorld') }}</button>
       <button v-if="currentWorldId" class="danger" @click="deleteWorld" :disabled="busy">{{ t('deleteWorldAction') }}</button>
     </div>
 
@@ -272,7 +303,7 @@ async function importLore(e: Event) {
     </div>
 
     <p class="memory-meta" v-if="currentWorldId">
-      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
+      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ worldLanguage === 'en' ? t('english') : t('chinese') }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
     </p>
 
     <div v-if="entries.length" class="lore-type-tabs">

@@ -42,6 +42,7 @@ PRIVATE:player_id:message      (message visible only to that player)
 XP:player_id:amount            (extra XP reward)
 MANA:player_id:delta           (mana loss or recovery)
 SAN:player_id:delta            (sanity loss or recovery)
+SAN_CHECK:player_id:loss die   (run a system Sanity check and deduct Sanity from the result)
 LUCK:player_id:delta           (Luck loss or recovery)
 SPELL:player_id:spell name     (spell cast)
 PUZZLE:puzzle_id:status        (puzzle status change)
@@ -49,7 +50,7 @@ QUICK_ACTIONS:option1|option2|option3|option4
 CONFIRMED:completed item       (mark a resolved topic so it is not repeated)
 MEMORY:long-term memory        (required; write at least one key fact, secret, relationship, or setting detail every round)
 
-Keep tag names uppercase and exactly as listed. Keep player IDs exact. Do not translate tag names, JSON keys, dice notation, or the `---` separator.
+Keep tag names uppercase and exactly as listed. Keep player IDs exact. Tags must be plain text after `---`; never bold, quote, rename, or place a tag on the same line as narration. Do not translate tag names, JSON keys, dice notation, or the `---` separator.
 
 ## Do Not
 - Do not speak or decide for player characters.

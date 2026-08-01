@@ -1,7 +1,6 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 
 const FONT_BODY = '"Trebuchet MS","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif'
-const FONT_TITLE = '"Palatino Linotype","Book Antiqua","Noto Serif SC","Songti SC",serif'
 
 export const darkThemeOverrides: GlobalThemeOverrides = {
   common: {

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("trpg")
 
-MAX_BIO_CHARS = 2000  # 角色背景上限（防超长文本污染上下文）
+MAX_BIO_CHARS = 8000  # 兼容详细人物小传，同时保留上限避免无限污染上下文。
 
 _ATTR_NAME_EN = {
     "str": "STR",
@@ -81,6 +81,117 @@ def _format_rule_attr(attr: dict) -> dict:
     }
 
 
+def _fallback_rule_attrs() -> list[dict[str, Any]]:
+    return [
+        _format_rule_attr({"key": key, "name": name, "min": 3, "max": 18})
+        for key, name in [
+            ("str", "力量"), ("dex", "敏捷"), ("con", "体质"),
+            ("int", "智力"), ("wis", "感知"), ("cha", "魅力"),
+        ]
+    ]
+
+
+def _fallback_rule_meta() -> dict[str, Any]:
+    return {
+        "dice_system": "d20",
+        "rule_id": "",
+        "mechanics": "freeform_d20_core",
+        "hp_formula": "",
+        "auto_hp": False,
+        "attr_hint": "",
+        "skill_mode": "narrative",
+        "skill_hint": "",
+        "max_skills": 3,
+        "skill_point_total": 0,
+        "max_skill_value": 0,
+        "skill_point_spend_mode": "total_value",
+        "skill_pools": {},
+        "skill_base_values": {},
+        "currency": "金币",
+        "conflict_model": {"type": "hp_based"},
+        "currency_system": {"base_unit": "unit", "units": [{"id": "unit", "name": "金币", "rate": 1}]},
+        "resource_schema": [{"key": "hp", "label": "生命", "min": 0}],
+        "identity_schema": [
+            {"key": "origin", "label": "种族", "type": "text", "legacy_field": "race"},
+            {"key": "archetype", "label": "职业", "type": "text", "legacy_field": "class"},
+            {"key": "background", "label": "背景", "type": "text", "legacy_field": "background"},
+        ],
+        "progression_schema": {"type": "xp_level"},
+        "ui_schema": {
+            "primary_resources": ["hp"],
+            "secondary_resources": [],
+            "identity_labels": {"origin": "种族", "archetype": "职业", "background": "背景"},
+            "show_level": True,
+            "show_xp": True,
+            "currency_label": "金币",
+            "equipment_label": "装备",
+        },
+    }
+
+
+def _character_schema_for_rule(rule) -> dict[str, Any]:
+    """Build the one character-creation contract used with and without a game."""
+    if not rule:
+        return {
+            "rule_attrs": _fallback_rule_attrs(),
+            "rule_attrs_total": 60,
+            "rule_classes": ["战士", "法师", "游侠", "盗贼", "牧师", "冒险者"],
+            "rule_special_stats": [],
+            "rule_meta": _fallback_rule_meta(),
+            "skill_pool": [],
+        }
+    meta = {
+        "dice_system": rule.dice_system,
+        "rule_id": rule.rule_id,
+        "rule_name": rule.rule_name,
+        "rule_version": str(rule.template.get("rule_version") or ""),
+        "mechanics": rule.mechanics,
+        "hp_formula": rule.hp_formula,
+        "auto_hp": rule.mechanics == "coc7e_core",
+        "attr_hint": rule.attr_hint,
+        "skill_mode": rule.skill_mode,
+        "skill_hint": rule.skill_hint,
+        "max_skills": rule.max_skills,
+        "skill_point_total": rule.skill_point_total,
+        "max_skill_value": rule.max_skill_value,
+        "skill_point_spend_mode": rule.skill_point_spend_mode,
+        "skill_pools": rule.skill_pools,
+        "skill_base_values": rule.skill_base_values,
+        "currency": rule.currency,
+        "conflict_model": rule.conflict_model,
+        "currency_system": rule.currency_system,
+        "resource_schema": rule.resource_schema,
+        "identity_schema": rule.identity_schema,
+        "progression_schema": rule.progression_schema,
+        "ui_schema": rule.ui_schema,
+    }
+    skill_pool = list(rule.template.get("skill_pool") or rule.template.get("skills") or [])
+    if not skill_pool:
+        # Standalone creation has no class selection context yet. Offer the
+        # union of class pools so the same rule schema remains useful before a
+        # game (and before the user has settled on an archetype).
+        for class_pool in rule.skill_pools.values():
+            for skill in class_pool:
+                if skill not in skill_pool:
+                    skill_pool.append(skill)
+    return {
+        "rule_attrs": [_format_rule_attr(attr) for attr in rule.attributes],
+        "rule_attrs_total": rule.attribute_points,
+        "rule_classes": rule.get_class_names(),
+        "rule_special_stats": rule.special_stats,
+        "rule_meta": meta,
+        "skill_pool": skill_pool,
+    }
+
+
+def character_schema(api: "WebAPI", rule_id: str, language: str = "") -> dict[str, Any]:
+    """Return rule-driven creation fields without requiring a GameInstance."""
+    rule = api._load_rule_by_id(rule_id, language)
+    if not rule:
+        return {"ok": False, "error": f"规则不存在: {rule_id}"}
+    return {"ok": True, **_character_schema_for_rule(rule)}
+
+
 def format_attribute_map(attributes: dict, rule_attrs: list[dict]) -> str:
     """按规则属性顺序格式化属性，中文界面同时显示中文名与英文 key。"""
     attr_by_key = {a["key"]: a for a in rule_attrs}
@@ -137,7 +248,7 @@ def _get_rule_classes_for_game(api: "WebAPI", inst) -> list[str]:
     try:
         rule = api._load_rule_for_game(inst)
         if rule:
-            return rule.get_class_names()
+            return _character_schema_for_rule(rule)["rule_classes"]
     except Exception:
         logger.exception("读取规则职业失败: world_id=%s", inst.world_id)
     return ["战士", "法师", "游侠", "盗贼", "牧师", "冒险者"]
@@ -147,20 +258,17 @@ def _get_rule_attrs_for_game(api: "WebAPI", inst) -> list[dict]:
     try:
         rule = api._load_rule_for_game(inst)
         if rule:
-            return [_format_rule_attr(a) for a in rule.attributes]
+            return _character_schema_for_rule(rule)["rule_attrs"]
     except Exception:
         logger.exception("读取规则属性失败: world_id=%s", inst.world_id)
-    return [
-        _format_rule_attr({"key": k, "name": n, "min": 3, "max": 18})
-        for k, n in [("str","力量"),("dex","敏捷"),("con","体质"),("int","智力"),("wis","感知"),("cha","魅力")]
-    ]
+    return _fallback_rule_attrs()
 
 
 def _get_rule_attrs_total(api: "WebAPI", inst) -> int:
     try:
         rule = api._load_rule_for_game(inst)
         if rule:
-            return rule.attribute_points
+            return _character_schema_for_rule(rule)["rule_attrs_total"]
     except Exception:
         logger.exception("读取规则属性点失败: world_id=%s", inst.world_id)
     return 60
@@ -170,7 +278,7 @@ def _get_rule_special_stats(api: "WebAPI", inst) -> list[dict]:
     try:
         rule = api._load_rule_for_game(inst)
         if rule:
-            return rule.special_stats
+            return _character_schema_for_rule(rule)["rule_special_stats"]
     except Exception:
         logger.exception("读取特殊属性失败: world_id=%s", inst.world_id)
     return []
@@ -180,74 +288,21 @@ def _get_rule_meta_for_game(api: "WebAPI", inst) -> dict[str, Any]:
     try:
         rule = api._load_rule_for_game(inst)
         if rule:
-            return {
-                "dice_system": rule.dice_system,
-                "rule_id": rule.rule_id,
-                "mechanics": rule.mechanics,
-                "hp_formula": rule.hp_formula,
-                "auto_hp": rule.mechanics == "coc7e_core",
-                "attr_hint": rule.attr_hint,
-                "skill_mode": rule.skill_mode,
-                "skill_hint": rule.skill_hint,
-                "max_skills": rule.max_skills,
-                "skill_point_total": rule.skill_point_total,
-                "max_skill_value": rule.max_skill_value,
-                "skill_point_spend_mode": rule.skill_point_spend_mode,
-                "skill_pools": rule.skill_pools,
-                "skill_base_values": rule.skill_base_values,
-                "currency": rule.currency,
-                "conflict_model": rule.conflict_model,
-                "currency_system": rule.currency_system,
-                "resource_schema": rule.resource_schema,
-                "identity_schema": rule.identity_schema,
-                "progression_schema": rule.progression_schema,
-                "ui_schema": rule.ui_schema,
-            }
+            return _character_schema_for_rule(rule)["rule_meta"]
     except Exception:
         logger.exception("读取规则建卡提示失败: world_id=%s", inst.world_id)
-    return {
-        "dice_system": "d20",
-        "rule_id": "",
-        "mechanics": "freeform_d20_core",
-        "hp_formula": "",
-        "auto_hp": False,
-        "attr_hint": "",
-        "skill_mode": "narrative",
-        "skill_hint": "",
-        "max_skills": 3,
-        "skill_point_total": 0,
-        "max_skill_value": 0,
-        "skill_point_spend_mode": "total_value",
-        "skill_pools": {},
-        "skill_base_values": {},
-        "currency": "金币",
-        "conflict_model": {"type": "hp_based"},
-        "currency_system": {"base_unit": "unit", "units": [{"id": "unit", "name": "金币", "rate": 1}]},
-        "resource_schema": [{"key": "hp", "label": "生命", "min": 0}],
-        "identity_schema": [
-            {"key": "origin", "label": "种族", "type": "text", "legacy_field": "race"},
-            {"key": "archetype", "label": "职业", "type": "text", "legacy_field": "class"},
-            {"key": "background", "label": "背景", "type": "text", "legacy_field": "background"},
-        ],
-        "progression_schema": {"type": "xp_level"},
-        "ui_schema": {
-            "primary_resources": ["hp"],
-            "secondary_resources": [],
-            "identity_labels": {"origin": "种族", "archetype": "职业", "background": "背景"},
-            "show_level": True,
-            "show_xp": True,
-            "currency_label": "金币",
-            "equipment_label": "装备",
-        },
-    }
+    return _fallback_rule_meta()
 
 
 def get_character(api: "WebAPI", game_key: str, user_id: str) -> dict[str, Any] | None:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst or user_id not in inst.players:
         return None
-    normalize_character_sheet(inst.players[user_id].setdefault("character_sheet", {}), api._load_rule_for_game(inst))
-    return {"user_id": user_id, **inst.players[user_id]}
+    player = inst.get_player(user_id) or {}
+    character_sheet = player.get("character_sheet", {})
+    normalize_character_sheet(character_sheet, api._load_rule_for_game(inst))
+    inst.set_character_sheet(user_id, character_sheet)
+    return {"user_id": user_id, **(inst.get_player(user_id) or {})}
 
 
 async def update_character(api: "WebAPI", game_key: str, user_id: str, updates: dict) -> dict[str, Any]:
@@ -256,7 +311,7 @@ async def update_character(api: "WebAPI", game_key: str, user_id: str, updates: 
         return {"ok": False, "error": "角色不存在"}
     character_name = str(updates.pop("character_name", "")).strip()
     if character_name:
-        inst.players[user_id]["character_name"] = character_name
+        inst.set_player_name(user_id, character_name)
     cs = inst.get_character_sheet(user_id)
     if "background" in updates and len(str(updates.get("background", ""))) > MAX_BIO_CHARS:
         return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
@@ -287,8 +342,8 @@ async def update_character(api: "WebAPI", game_key: str, user_id: str, updates: 
             if total > stored:
                 cs["attr_points_max"] = total
                 logger.info("attr_points_max 修正: %d -> %d (uid=%s)", stored, total, user_id)
-    except Exception:
-        pass
+    except (TypeError, ValueError):
+        logger.warning("attr_points_max 自动修正失败: uid=%s", user_id, exc_info=True)
     # 规范化技能格式
     if "skills" in updates:
         cs["skills"] = _normalize_skills(updates.get("skills", []), rule)
@@ -369,7 +424,7 @@ async def resolve_payment(api: "WebAPI", game_key: str, payment_id: str, accepte
                         str(reward.get("category") or ""),
                     )
             inst.set_character_sheet(recipient_uid, recipient_cs)
-        payment["status"] = "accepted"
+        payment = inst.mark_payment_resolved(payment_id, "accepted", resolved_at=time.time()) or payment
         payer_name = inst.players.get(uid, {}).get("character_name", uid)
         recipient_name = inst.players.get(recipient_uid, {}).get(
             "character_name", recipient_uid
@@ -394,7 +449,7 @@ async def resolve_payment(api: "WebAPI", game_key: str, payment_id: str, accepte
             ),
         )
     else:
-        payment["status"] = "rejected"
+        payment = inst.mark_payment_resolved(payment_id, "rejected", resolved_at=time.time()) or payment
         name = inst.players.get(uid, {}).get("character_name", uid)
         record_health_event(
             inst,
@@ -404,11 +459,7 @@ async def resolve_payment(api: "WebAPI", game_key: str, payment_id: str, accepte
             title="玩家拒绝支付",
             message=f"{name} 拒绝支付 {amount} 金币（第 {payment.get('round', inst.round_number)} 轮建议）",
         )
-    payment["resolved_at"] = time.time()
-    inst.pending_payments = [
-        p for p in getattr(inst, "pending_payments", [])
-        if p.get("status") == "pending"
-    ]
+    inst.prune_resolved_payments()
     await api._reg.save(inst)
     return {"ok": True, "accepted": bool(accepted), "payment": payment}
 
@@ -423,11 +474,8 @@ async def delete_character(api: "WebAPI", game_key: str, user_id: str) -> dict[s
     removed = await inst.remove_player(user_id)
     if not removed:
         return {"ok": False, "error": "角色不存在"}
-    inst.pending_payments = [
-        p for p in getattr(inst, "pending_payments", [])
-        if p.get("uid") != user_id
-    ]
-    inst.private_log.pop(user_id, None)
+    inst.remove_payments_for_player(user_id)
+    inst.clear_private_messages(user_id)
     await api._reg.save(inst)
     logger.info("角色已删除: %s (%s)", name, game_key)
     return {"ok": True}
@@ -491,6 +539,7 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
     cs = {
         "race": character.get("race", "人类"),
         "class": character.get("class") or default_class,
+        "identity": character.get("identity", {}),
         "level": 1, "xp": 0,
         "attributes": attrs,
         "hp": hp, "max_hp": max_hp,
@@ -501,6 +550,8 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
         "background": character.get("background", ""),
         "deceased": False,
         "gold": character.get("gold", 30),
+        "currency": character.get("currency", {}),
+        "portrait": character.get("portrait", {}),
         "attr_points_max": total_points,
     }
     # 初始化 special_stats（理智值/幸运值/内力等）
@@ -514,10 +565,18 @@ async def create_player(api: "WebAPI", game_key: str, character: dict,
     except Exception as exc:
         logger.exception("初始化特殊属性失败: %s", exc)
     normalize_character_sheet(cs, rule)
-    inst.players[uid] = {
+    player = {
         "character_name": character.get("character_name") or character.get("name") or "冒险者",
         "character_sheet": cs,
     }
-    api.save_character_card(inst.players[uid])
+    inst.put_player(uid, player)
+    api.save_character_card({
+        **player,
+        "rule_id": rule_id,
+        "rule_name": rule.rule_name if rule else rule_id,
+        "rule_version": str(rule.template.get("rule_version") or "") if rule else "",
+        "mechanics": rule.mechanics if rule else "",
+        "language": getattr(inst, "language", ""),
+    })
     await api._reg.save(inst)
-    return {"ok": True, "user_id": uid, "character_name": inst.players[uid]["character_name"]}
+    return {"ok": True, "user_id": uid, "character_name": player["character_name"]}

@@ -28,6 +28,7 @@ def infer_command_language(text: object, fallback: str = DEFAULT_LANGUAGE) -> st
         "help", "bind", "unbind", "join", "invite", "status", "recap", "summary",
         "map", "roll", "advance", "next", "pay", "confirm", "reject", "rejectpay",
         "sense", "log", "away", "return", "back", "ping", "character", "create",
+        "luck", "spend", "no", "keep",
     }:
         return "en"
     return bridge_language(fallback)

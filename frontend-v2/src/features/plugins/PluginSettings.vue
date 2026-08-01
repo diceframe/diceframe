@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NButton, NCheckbox, NCollapse, NCollapseItem, NIcon, NInput, NInputNumber,
   NSelect, NSpin, NSwitch, NTabPane, NTabs, NTag,
@@ -8,493 +8,54 @@ import {
   AddOutline, ChevronDown, ChevronUp, CloudDownloadOutline, CreateOutline,
   ExtensionPuzzleOutline, RefreshOutline, TrashOutline,
 } from '@vicons/ionicons5'
-import { api, errorMessage } from '@/api/client'
 import { useTheme } from '@/composables/useTheme'
-import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/composables/useLocale'
 import type { MessageKey } from '@/i18n'
-import type {
-  PluginContentImportResponse, PluginContentResource, PluginContentResponse,
-  PluginField, PluginInfo, PluginMarketplaceItem, PluginMarketplaceResponse,
-  PluginMirror, PluginMirrorsResponse, PluginMirrorTestResponse, WorldListResponse,
-  PluginToolDescriptor, PluginToolInvokeResponse, PluginToolsResponse,
-} from '@/api/types'
+import type { PluginInfo } from '@/api/types'
 import NapcatGuide from '@/components/plugins/NapcatGuide.vue'
+import { usePluginContent } from './usePluginContent'
+import { useInstalledPlugins } from './useInstalledPlugins'
+import { usePluginMarketplace } from './usePluginMarketplace'
+import { usePluginTools } from './usePluginTools'
 
-const toast = useToast()
 const { t } = useLocale()
 const { pluginThemes, pluginThemeId, loadPluginThemes, applyPluginTheme, clearPluginTheme } = useTheme()
-const plugins = ref<PluginInfo[]>([])
-const contentResources = ref<Record<string, PluginContentResource[]>>({})
-const marketplace = ref<PluginMarketplaceItem[]>([])
-const mirrors = ref<PluginMirror[]>([])
-const tools = ref<PluginToolDescriptor[]>([])
-const toolInputs = ref<Record<string, string>>({})
-const toolResults = ref<Record<string, string>>({})
-const mirrorTests = ref<Record<string, string>>({})
-const worlds = ref<WorldListResponse['worlds']>([])
-const marketplaceSource = ref<PluginMarketplaceResponse['source'] | null>(null)
-const expandedPluginNames = ref<string[]>([])
-const loading = ref(false)
-const marketLoading = ref(false)
-const mirrorLoading = ref(false)
 const busy = ref('')
-const installFile = ref<File | null>(null)
-const overwriteInstall = ref(false)
-const marketKeyword = ref('')
-const contentLoading = ref(false)
-const toolsLoading = ref(false)
-const contentTargetWorldId = ref('')
-const newMirror = reactive<PluginMirror>({
-  id: '',
-  name: '',
-  raw_prefix: '',
-  clone_prefix: '',
-  enabled: true,
-  priority: 1,
-})
+const {
+  tools, toolInputs, toolResults, toolsLoading,
+  toolKey, loadTools, setToolInput, invokeTool,
+} = usePluginTools(busy)
+const {
+  contentGroups, contentLoading, contentTargetWorldId, worldOptions,
+  loadContentResources, loadWorlds, contentTitle, contentSubtitle, importContent,
+} = usePluginContent(busy)
+
+async function refreshPluginSurfaces() {
+  await load()
+  await Promise.all([loadMarketplace(), loadPluginThemes(), loadContentResources()])
+}
+
+const {
+  mirrors, mirrorTests, marketplaceSource, marketKeyword,
+  marketLoading, mirrorLoading, newMirror, filteredMarketplace,
+  canUpdateFromStore, loadMarketplace, loadMirrors, installMarketPlugin,
+  updateInstalledPlugin, uninstallPlugin, addMirror, saveMirror,
+  deleteMirror, testMirror, openUrl, isNewerVersion,
+} = usePluginMarketplace(busy, refreshPluginSurfaces)
+const {
+  plugins, expandedPluginNames, loading, installFile, overwriteInstall,
+  load, ordered, value, textValue, selectValue, numberValue, set,
+  listValue, secretPlaceholder, showGroup, parseList, save, restart,
+  clearCardCache, toggleRunning, onPluginFile, installPlugin, rescanLocalPlugins,
+} = useInstalledPlugins(
+  busy,
+  () => Promise.all([loadPluginThemes(), loadTools()]),
+  refreshPluginSurfaces,
+)
 const themeOptions = computed(() => pluginThemes.value.map(theme => ({
   label: `${theme.name}${theme.plugin_name ? ` · ${theme.plugin_name}` : ''}`,
   value: theme.id,
 })))
-const contentGroupDefs = [
-  { key: 'character_template', labelKey: 'contentGroupCharacterTemplate' },
-  { key: 'npc', labelKey: 'contentGroupNpc' },
-  { key: 'item', labelKey: 'contentGroupItem' },
-  { key: 'spell', labelKey: 'contentGroupSpell' },
-  { key: 'class', labelKey: 'contentGroupClass' },
-] satisfies { key: string; labelKey: MessageKey }[]
-const contentGroups = computed(() => contentGroupDefs.map(group => ({ ...group, items: contentResources.value[group.key] || [] })))
-const worldOptions = computed(() => (worlds.value || []).map(world => {
-  const id = String(world.id || world.world_id || '')
-  return {
-    label: String(world.name || world.world_name || id),
-    value: id,
-  }
-}).filter(item => item.value))
-
-const filteredMarketplace = computed(() => {
-  const keyword = marketKeyword.value.trim().toLowerCase()
-  if (!keyword) return marketplace.value
-  return marketplace.value.filter(item => [
-    item.id, item.name, item.description, item.repository_url, ...(item.tags || []),
-  ].some(value => String(value || '').toLowerCase().includes(keyword)))
-})
-
-function canUpdateFromStore(pluginId: string) {
-  const item = marketplace.value.find(candidate => candidate.id === pluginId)
-  return Boolean(item && item.distribution !== 'bundled' && item.installable !== false)
-}
-
-async function load() {
-  loading.value = true
-  try {
-    const r = await api<{ plugins: PluginInfo[] }>('/plugins')
-    plugins.value = r.plugins || []
-    if (!expandedPluginNames.value.length) expandedPluginNames.value = plugins.value.map(p => p.id)
-    await Promise.all([loadPluginThemes(), loadTools()])
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    loading.value = false
-  }
-}
-
-function toolKey(tool: PluginToolDescriptor): string {
-  return `${tool.plugin_id}:${tool.name}`
-}
-
-async function loadTools() {
-  toolsLoading.value = true
-  try {
-    const r = await api<PluginToolsResponse>('/plugins/tools')
-    if (!r.ok) throw new Error(r.error || t('pluginToolsLoadFailed'))
-    tools.value = r.tools || []
-    for (const tool of tools.value) {
-      const key = toolKey(tool)
-      if (toolInputs.value[key] === undefined) toolInputs.value[key] = '{}'
-    }
-  } catch (e: unknown) {
-    tools.value = []
-    toast.error(errorMessage(e))
-  } finally {
-    toolsLoading.value = false
-  }
-}
-
-function setToolInput(tool: PluginToolDescriptor, value: string) {
-  toolInputs.value[toolKey(tool)] = value
-}
-
-async function invokeTool(tool: PluginToolDescriptor) {
-  const key = toolKey(tool)
-  if (!window.confirm(t('confirmPluginToolInvoke', { name: tool.title || tool.name, plugin: tool.plugin_name }))) return
-  let argumentsValue: unknown
-  try {
-    argumentsValue = JSON.parse(toolInputs.value[key] || '{}')
-  } catch {
-    toast.error(t('pluginToolArgumentsInvalid'))
-    return
-  }
-  if (!argumentsValue || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
-    toast.error(t('pluginToolArgumentsInvalid'))
-    return
-  }
-  busy.value = `tool:${key}`
-  try {
-    const r = await api<PluginToolInvokeResponse>(
-      `/plugins/tools/${encodeURIComponent(tool.plugin_id)}/${encodeURIComponent(tool.name)}`,
-      { method: 'POST', body: JSON.stringify({ arguments: argumentsValue, context: {} }) },
-    )
-    if (!r.ok) throw new Error(r.error || t('pluginToolInvokeFailed'))
-    toolResults.value[key] = JSON.stringify(r.result || {}, null, 2)
-    toast.success(t('pluginToolInvokeSucceeded', { name: tool.title || tool.name }))
-  } catch (e: unknown) {
-    toolResults.value[key] = errorMessage(e)
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-
-async function loadMarketplace() {
-  marketLoading.value = true
-  try {
-    const r = await api<PluginMarketplaceResponse>('/plugins/marketplace')
-    if (!r.ok) throw new Error(r.error || t('pluginMarketplaceLoadFailed'))
-    marketplace.value = r.plugins || []
-    marketplaceSource.value = r.source || null
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    marketLoading.value = false
-  }
-}
-
-async function loadMirrors() {
-  mirrorLoading.value = true
-  try {
-    const r = await api<PluginMirrorsResponse>('/plugins/mirrors')
-    mirrors.value = r.mirrors || []
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    mirrorLoading.value = false
-  }
-}
-
-async function loadContentResources() {
-  contentLoading.value = true
-  try {
-    const r = await api<PluginContentResponse>('/plugins/content')
-    if (!r.ok) throw new Error(r.error || t('pluginContentLoadFailed'))
-    contentResources.value = r.resources || {}
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    contentLoading.value = false
-  }
-}
-
-async function loadWorlds() {
-  try {
-    const r = await api<WorldListResponse>('/worlds')
-    worlds.value = r.worlds || []
-    if (!contentTargetWorldId.value && worldOptions.value.length) {
-      contentTargetWorldId.value = String(worldOptions.value[0].value)
-    }
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  }
-}
-
-function ordered(p: PluginInfo): [string, PluginField][] {
-  return Object.entries(p.schema?.properties || {}).sort((a, b) => (a[1].ui?.order || 0) - (b[1].ui?.order || 0))
-}
-function value(p: PluginInfo, key: string, field: PluginField): unknown {
-  const v = p.config?.[key]
-  return typeof v === 'object' && field.ui?.sensitive ? '' : v ?? field.default ?? ''
-}
-function textValue(p: PluginInfo, key: string, field: PluginField): string {
-  const v = value(p, key, field)
-  return typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v)
-}
-function selectValue(p: PluginInfo, key: string, field: PluginField): string | number | null {
-  const v = value(p, key, field)
-  return typeof v === 'string' || typeof v === 'number' ? v : null
-}
-function numberValue(p: PluginInfo, key: string, field: PluginField): number | null {
-  const v = value(p, key, field)
-  return typeof v === 'number' ? v : v === '' || v === null || v === undefined ? null : Number(v)
-}
-function set(p: PluginInfo, key: string, v: unknown) {
-  if (!p.config) p.config = {}
-  p.config[key] = v
-}
-function listValue(p: PluginInfo, key: string, field: PluginField): string[] {
-  const v = value(p, key, field)
-  return Array.isArray(v) ? v : []
-}
-function secretPlaceholder(p: PluginInfo, key: string, field: PluginField): string {
-  const v = p.config?.[key] as { configured?: boolean; masked?: string } | undefined
-  return field.ui?.sensitive && v?.configured ? t('secretConfiguredPlaceholder', { masked: v.masked || '' }) : ''
-}
-function showGroup(fields: [string, PluginField][], index: number): boolean {
-  const group = fields[index][1].ui?.group
-  return !!group && (index === 0 || fields[index - 1][1].ui?.group !== group)
-}
-function parseList(input: string): string[] {
-  return Array.from(new Set(input.split(/[\n,]+/).map(x => x.trim()).filter(Boolean)))
-}
-function validate(p: PluginInfo): string {
-  for (const [key, field] of ordered(p)) {
-    const v = value(p, key, field)
-    if (field.type === 'number' || field.type === 'integer') {
-      const n = Number(v)
-      if (field.exclusiveMinimum !== undefined && n <= field.exclusiveMinimum) return t('validationGreaterThan', { field: field.title || key, value: field.exclusiveMinimum })
-      if (field.minimum !== undefined && n < field.minimum) return t('validationAtLeast', { field: field.title || key, value: field.minimum })
-      if (field.maximum !== undefined && n > field.maximum) return t('validationAtMost', { field: field.title || key, value: field.maximum })
-    }
-    if (field.type === 'string') {
-      const s = String(v || '')
-      if (field.minLength !== undefined && s.length > 0 && s.length < field.minLength) return t('validationMinLength', { field: field.title || key, value: field.minLength })
-      if (field.maxLength !== undefined && s.length > field.maxLength) return t('validationMaxLength', { field: field.title || key, value: field.maxLength })
-    }
-  }
-  return ''
-}
-async function save(p: PluginInfo) {
-  const err = validate(p)
-  if (err) { toast.error(err); return }
-  busy.value = p.id
-  try {
-    const payload: Record<string, unknown> = {}
-    for (const [key, field] of ordered(p)) {
-      const current = p.config?.[key]
-      if (field.ui?.sensitive) {
-        if (typeof current === 'string' && current.trim()) payload[key] = current
-      } else if (current !== undefined) {
-        payload[key] = current
-      }
-    }
-    await api(`/plugins/${encodeURIComponent(p.id)}/config`, { method: 'PUT', body: JSON.stringify(payload) })
-    toast.success(t('pluginNamedSaved', { name: p.name }))
-    await load()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function restart(p: PluginInfo) {
-  busy.value = p.id
-  try {
-    await api(`/plugins/${encodeURIComponent(p.id)}/restart`, { method: 'POST' })
-    toast.success(t('pluginNamedRestartRequested', { name: p.name }))
-    await load()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function clearCardCache(p: PluginInfo) {
-  if (!window.confirm(t('confirmClearCardCache'))) return
-  busy.value = `${p.id}:card-cache`
-  try {
-    const r = await api<{ deleted?: number; bytes_deleted?: number }>(`/plugins/${encodeURIComponent(p.id)}/card-cache/clear`, { method: 'POST' })
-    const deleted = r.deleted || 0
-    const mb = ((r.bytes_deleted || 0) / 1024 / 1024).toFixed(2)
-    toast.success(t('cardCacheCleared', { count: deleted, mb }))
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function toggleRunning(p: PluginInfo, on: boolean) {
-  busy.value = p.id
-  try {
-    await api(`/plugins/${encodeURIComponent(p.id)}/${on ? 'start' : 'stop'}`, { method: 'POST' })
-    toast.success(t(on ? 'pluginNamedStarted' : 'pluginNamedStopped', { name: p.name }))
-    await load()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-function onPluginFile(event: Event) {
-  const input = event.target as HTMLInputElement
-  installFile.value = input.files?.[0] || null
-}
-async function installPlugin() {
-  if (!installFile.value) {
-    toast.error(t('selectPluginZip'))
-    return
-  }
-  busy.value = 'install'
-  try {
-    const body = new FormData()
-    body.append('file', installFile.value)
-    body.append('overwrite', overwriteInstall.value ? 'true' : 'false')
-    await api('/plugins/install', { method: 'POST', body })
-    toast.success(t('pluginZipInstalled'))
-    installFile.value = null
-    overwriteInstall.value = false
-    await load()
-    await loadMarketplace()
-    await loadPluginThemes()
-    await loadContentResources()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-
-async function rescanLocalPlugins() {
-  busy.value = 'rescan'
-  try {
-    await api('/plugins/rescan', { method: 'POST' })
-    toast.success(t('pluginsRescanned'))
-    await load()
-    await loadMarketplace()
-    await loadPluginThemes()
-    await loadContentResources()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function installMarketPlugin(item: PluginMarketplaceItem) {
-  if (item.risk_level === 'unrestricted-process' && !window.confirm(t('confirmProcessPluginInstall', { name: item.name }))) return
-  busy.value = `market:${item.id}`
-  try {
-    await api('/plugins/marketplace/install', {
-      method: 'POST',
-      body: JSON.stringify({ plugin_id: item.id, overwrite: item.installed }),
-    })
-    toast.success(t(item.installed ? 'pluginNamedUpdated' : 'pluginNamedInstalled', { name: item.name }))
-    await load()
-    await loadMarketplace()
-    await loadPluginThemes()
-    await loadContentResources()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function updateInstalledPlugin(p: PluginInfo) {
-  const marketItem = marketplace.value.find(item => item.id === p.id)
-  if (marketItem?.risk_level === 'unrestricted-process' && !window.confirm(t('confirmProcessPluginUpdate', { name: p.name }))) return
-  busy.value = `${p.id}:update`
-  try {
-    await api(`/plugins/${encodeURIComponent(p.id)}/update`, { method: 'POST' })
-    toast.success(t('pluginNamedUpdated', { name: p.name }))
-    await load()
-    await loadMarketplace()
-    await loadPluginThemes()
-    await loadContentResources()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function uninstallPlugin(p: PluginInfo) {
-  const message = t('confirmUninstallPlugin', { name: p.name })
-  if (!window.confirm(message)) return
-  busy.value = `${p.id}:uninstall`
-  try {
-    await api(`/plugins/${encodeURIComponent(p.id)}`, { method: 'DELETE', body: JSON.stringify({ delete_data: false }) })
-    toast.success(t('pluginNamedUninstalled', { name: p.name }))
-    await load()
-    await loadMarketplace()
-    await loadPluginThemes()
-    await loadContentResources()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function addMirror() {
-  busy.value = 'mirror:add'
-  try {
-    await api('/plugins/mirrors', { method: 'POST', body: JSON.stringify(newMirror) })
-    toast.success(t('mirrorAdded'))
-    Object.assign(newMirror, { id: '', name: '', raw_prefix: '', clone_prefix: '', enabled: true, priority: mirrors.value.length + 1 })
-    await loadMirrors()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function saveMirror(mirror: PluginMirror, patch: Partial<PluginMirror>) {
-  busy.value = `mirror:${mirror.id}`
-  try {
-    await api(`/plugins/mirrors/${encodeURIComponent(mirror.id)}`, { method: 'PUT', body: JSON.stringify(patch) })
-    await loadMirrors()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function deleteMirror(mirror: PluginMirror) {
-  if (!window.confirm(t('confirmDeleteMirror', { name: mirror.name }))) return
-  busy.value = `mirror:${mirror.id}`
-  try {
-    await api(`/plugins/mirrors/${encodeURIComponent(mirror.id)}`, { method: 'DELETE' })
-    toast.success(t('mirrorDeleted'))
-    await loadMirrors()
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-async function testMirror(mirror?: PluginMirror) {
-  const key = mirror?.id || 'all'
-  busy.value = `mirror-test:${key}`
-  try {
-    const r = await api<PluginMirrorTestResponse>('/plugins/mirrors/test', {
-      method: 'POST',
-      body: JSON.stringify({ mirror_id: mirror?.id || '' }),
-    })
-    for (const result of r.results || []) {
-      const id = result.mirror_id || 'all'
-      mirrorTests.value[id] = result.ok
-        ? t('mirrorAvailable', { ms: result.elapsed_ms || 0 })
-        : t('mirrorFailed', { reason: result.error || result.status || t('unknownError') })
-    }
-    toast[r.ok ? 'success' : 'error'](r.ok ? t('mirrorTestDone') : (r.error || t('allMirrorTestsFailed')))
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-function openUrl(url?: string) {
-  if (url) window.open(url, '_blank', 'noopener')
-}
-function isNewerVersion(latest?: string, current?: string): boolean {
-  const a = String(latest || '').trim()
-  const b = String(current || '').trim()
-  if (!a || !b) return false
-  const pa = a.replace(/^v/i, '').split('.').map(Number)
-  const pb = b.replace(/^v/i, '').split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0, y = pb[i] || 0
-    if (x > y) return true
-    if (x < y) return false
-  }
-  return false
-}
 function pluginTypeLabel(type?: string): string {
   const labels: Record<string, MessageKey> = {
     'channel-adapter': 'pluginTypeChannelAdapter',
@@ -518,38 +79,6 @@ function selectedThemeDescription(): string {
 function selectPluginTheme(value: string | null) {
   applyPluginTheme(value)
 }
-function contentTitle(item: PluginContentResource): string {
-  return String(item.character_name || item.name || item.id || t('unnamed'))
-}
-function contentSubtitle(item: PluginContentResource): string {
-  return [item.plugin_name || item.plugin_id || '', item.description || ''].filter(Boolean).join(' · ')
-}
-async function importContent(kind: string, item: PluginContentResource) {
-  if (kind !== 'character_template' && !contentTargetWorldId.value) {
-    toast.error(t('selectLorebookTarget'))
-    return
-  }
-  const key = `${kind}:${item.plugin_id}:${item.id || item.name || item.character_name}`
-  busy.value = key
-  try {
-    const r = await api<PluginContentImportResponse>('/plugins/content/import', {
-      method: 'POST',
-      body: JSON.stringify({
-        kind,
-        id: item.id,
-        plugin_id: item.plugin_id,
-        target_world_id: kind === 'character_template' ? '' : contentTargetWorldId.value,
-      }),
-    })
-    if (!r.ok) throw new Error(r.error || t('importFailed'))
-    toast.success(kind === 'character_template' ? t('importedCharacterLibrary') : t('importedLorebook'))
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    busy.value = ''
-  }
-}
-
 onMounted(async () => {
   await load()
   await Promise.all([loadMarketplace(), loadMirrors(), loadContentResources(), loadWorlds()])

@@ -9,17 +9,30 @@ from urllib.parse import quote
 
 from aiohttp import web
 
-from src.engine.game_instance import GameState
 from src.webui.api import can_modify_character
 from src.webui.routes._common import (
     MAX_ACTION_CHARS,
-    MAX_ACTIONS_PER_TURN,
     MAX_SEED_CHARS,
     _get_api,
     _require_confirmed_request,
 )
 
 logger = logging.getLogger("trpg")
+
+
+def _narration_callbacks(request: web.Request, game_key: str):
+    """把 Web SSE 广播适配为回合 service 使用的可选回调。"""
+    pool = request.app.get("connection_pool")
+    if pool is None:
+        return None, None
+
+    async def on_delta(text: str) -> None:
+        await pool.broadcast(game_key, {"type": "narration_delta", "text": text})
+
+    async def on_reset() -> None:
+        await pool.broadcast(game_key, {"type": "narration_reset"})
+
+    return on_delta, on_reset
 
 
 def _read_saved_gm_uid(registry, gk: tuple) -> str:
@@ -169,8 +182,7 @@ async def api_set_room_password(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "GM only"}, status=403)
     body = await request.json()
     password = str(body.get("password", "") or "")
-    inst.room_password = password
-    inst.room_token = ""  # 密码变更后旧 room_token 失效，玩家需重新验证
+    inst.set_room_password(password)
     await api._reg.save(inst)
     return web.json_response({"ok": True, "has_room_password": bool(password)})
 
@@ -320,141 +332,51 @@ async def api_action(request: web.Request) -> web.Response:
     text = body.get("text", "")
     if len(text) > MAX_ACTION_CHARS:
         return web.json_response({"error": f"行动文本过长（上限 {MAX_ACTION_CHARS} 字）"}, status=400)
-    confirm = body.get("confirm", False)
-    d20 = body.get("d20")
-    selected_attribute = str(body.get("selected_attribute", "") or "")
-    selected_skill = str(body.get("selected_skill", "") or "")
-    target_text = str(body.get("target_text", "") or "")
-    source = str(body.get("source", "") or "")
-    user_id = request.get("user_id", "")
-    inst = request.app["subsystems"].registry.get(api._parse_key(gk))
-    if not inst:
-        return web.json_response({"error": "游戏不存在，请刷新页面重新开始"}, status=404)
     if request.get("player_preview", False) and not request.get("player_delegate", False):
         return web.json_response({"error": "当前是房主预览模式，请先开启允许代操作"}, status=403)
-    if user_id not in inst.players:
-        return web.json_response({"error": "未加入本局，请先通过邀请链接加入"}, status=403)
-    if inst.is_dead(user_id):
-        return web.json_response({"error": "角色已死亡，无法提交行动"}, status=403)
-    if inst.state == GameState.ACTIVE_JUDGMENT:
-        return web.json_response({"error": "本轮正在推进剧情，请等待下一轮开始", "phase": "processing"}, status=409)
-    existing_action = next(
-        (action for action in inst.action_queue if action.get("user_id") == user_id),
-        None,
-    )
-    existing_pending_roll = bool(existing_action and existing_action.get("dice_pending"))
-    if inst.solo_mode:
-        if sum(1 for action in inst.action_queue if action.get("user_id") == user_id) >= MAX_ACTIONS_PER_TURN:
-            return web.json_response({"error": f"本回合已达行动上限（{MAX_ACTIONS_PER_TURN} 条）"}, status=400)
-    elif existing_action and int(existing_action.get("revision_count", 1) or 1) >= 3 and not (confirm and existing_pending_roll):
-        return web.json_response({"error": "本轮行动已修改 3 次，请等待其他玩家或 GM 推进"}, status=400)
+    on_delta, on_reset = _narration_callbacks(request, gk)
     try:
-        if inst.state == GameState.PAUSED:
-            if inst.round_number <= 0:
-                await inst.start_round()
-            else:
-                await inst.resume()
-
-        check_request = api.check_request_for_action(
+        result = await api.submit_action(
             gk,
-            user_id,
+            request.get("user_id", ""),
             text,
-            selected_attribute,
-            selected_skill,
-            target_text,
+            confirm=bool(body.get("confirm", False)),
+            d20=body.get("d20"),
+            server_roll=bool(body.get("server_roll")),
+            selected_attribute=str(body.get("selected_attribute", "") or ""),
+            selected_skill=str(body.get("selected_skill", "") or ""),
+            target_text=str(body.get("target_text", "") or ""),
+            source=str(body.get("source", "") or ""),
+            on_delta=on_delta,
+            on_reset=on_reset,
         )
-        need_check = bool(check_request)
-        _dice_system = str((check_request or {}).get("dice_system") or "")
-
-        roll_payload = None
-        if confirm and existing_pending_roll:
-            resolved = await api.resolve_pending_dice_for_game(gk, user_id, "player")
-            if not resolved.get("ok"):
-                return web.json_response(resolved, status=400)
-            roll_payload = resolved.get("roll")
-        elif need_check and not confirm:
-            await inst.add_action(
-                user_id,
-                text,
-                selected_attribute,
-                selected_skill,
-                target_text,
-                source=source,
-                dice_pending=True,
-                dice_system=_dice_system,
-                check_request=check_request,
-            )
-            return web.json_response({
-                "phase": "dice",
-                "message": f"需要{check_request.get('label') or '掷骰判定'}",
-                "check_request": check_request,
-                "advanced": False,
-                "multiplayer": inst.multiplayer_status(),
-            })
-        elif confirm and d20 is None and body.get("server_roll"):
-            roll_payload = api.roll_for_game(gk)
-            if not roll_payload.get("ok"):
-                return web.json_response(roll_payload, status=400)
-            d20 = roll_payload["value"]
-
-        if not (confirm and existing_pending_roll):
-            action_text = text
-            if confirm and d20 is not None:
-                action_text = f"{text}\n(系统掷骰: {_dice_system}={d20})"
-            await inst.add_action(
-                user_id,
-                action_text,
-                selected_attribute,
-                selected_skill,
-                target_text,
-                source=source,
-                check_request=check_request,
-            )
-        handler = request.app["subsystems"].handler
-        pool = request.app.get("connection_pool")
-        on_delta = on_reset = None
-        if pool is not None:
-            async def on_delta(text: str) -> None:
-                await pool.broadcast(gk, {"type": "narration_delta", "text": text})
-            async def on_reset() -> None:
-                await pool.broadcast(gk, {"type": "narration_reset"})
-        if await inst.try_advance():
-            narration, _ = await handler.process_round(inst, on_delta=on_delta, on_reset=on_reset)
-            response_payload = {
-                "narration": narration,
-                "advanced": True,
-                "phase": "done",
-                "quick_actions": getattr(inst, "quick_actions", []),
-                "pending_payments": [
-                    p for p in getattr(inst, "pending_payments", [])
-                    if p.get("status") == "pending"
-                ],
-                "check_result": getattr(inst, "last_check", None),
-                "check_results": getattr(inst, "last_checks", []),
-                "recap": getattr(inst, "last_state_update", None),
-            }
-            if roll_payload:
-                response_payload["roll"] = roll_payload
-            return web.json_response(response_payload)
-        multiplayer = inst.multiplayer_status()
-        waiting_names = [
-            p.get("character_name") or p.get("user_id")
-            for p in multiplayer.get("waiting_players", [])
-        ]
-        waiting_text = "、".join(str(name) for name in waiting_names if name)
-        message = f"行动已公开，等待 {waiting_text} 行动" if waiting_text else "行动已公开，等待系统推进"
-        response_payload = {
-            "narration": message,
-            "advanced": False,
-            "phase": "done",
-            "multiplayer": multiplayer,
-        }
-        if roll_payload:
-            response_payload["roll"] = roll_payload
-        return web.json_response(response_payload)
-    except Exception as exc:
+        return web.json_response(result["payload"], status=result["status"])
+    except Exception:
         logger.exception("action 处理异常")
         return web.json_response({"narration": "处理请求时出错，请查看服务器日志", "advanced": False, "phase": "error"})
+
+
+async def api_luck_decision(request: web.Request) -> web.Response:
+    """叙事生成前处理一次幸运选择；Web 与 Bot 共用该接口。"""
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    actor_uid = request.get("user_id", "")
+    if request.get("player_preview", False) and not request.get("player_delegate", False):
+        return web.json_response({"ok": False, "error": "当前是房主预览模式，请先开启允许代操作"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    on_delta, on_reset = _narration_callbacks(request, gk)
+    result = await api.resolve_luck_and_continue(
+        gk,
+        request.match_info["check_id"],
+        actor_uid,
+        bool(body.get("spend")),
+        on_delta=on_delta,
+        on_reset=on_reset,
+    )
+    return web.json_response(result["payload"], status=result["status"])
 
 
 async def api_advance(request: web.Request) -> web.Response:
@@ -464,79 +386,17 @@ async def api_advance(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         body = {}
-    force = bool(body.get("force"))
-    inst = request.app["subsystems"].registry.get(api._parse_key(gk))
-    if not inst:
-        return web.json_response({"error": "not found"}, status=404)
-    if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "仅 GM 可推进"}, status=403)
-    if inst.state == GameState.ACTIVE_JUDGMENT and inst.action_queue:
-        logger.warning("检测到卡死状态，自动恢复 process_round - game_key=%s", gk)
-        narration, _ = await request.app["subsystems"].handler.process_round(inst)
-        return web.json_response({
-            "narration": narration,
-            "quick_actions": getattr(inst, "quick_actions", []),
-            "check_result": getattr(inst, "last_check", None),
-            "check_results": getattr(inst, "last_checks", []),
-            "pending_payments": [
-                p for p in getattr(inst, "pending_payments", [])
-                if p.get("status") == "pending"
-            ],
-        })
-    if not inst.can_accept_actions():
-        return web.json_response({"ok": False, "narration": "当前不能推进"})
+    on_delta, on_reset = _narration_callbacks(request, gk)
+    result = await api.advance_turn(
+        gk,
+        request.get("user_id", ""),
+        force=bool(body.get("force")),
+        on_delta=on_delta,
+        on_reset=on_reset,
+    )
+    return web.json_response(result["payload"], status=result["status"])
 
-    auto_rolls: list[dict] = []
-    if inst.has_pending_dice():
-        if not force:
-            return web.json_response({
-                "ok": False,
-                "narration": "仍有玩家行动等待掷骰",
-                "multiplayer": inst.multiplayer_status(),
-            })
-        resolved = await api.resolve_pending_dice_for_game(gk, source="system")
-        if not resolved.get("ok"):
-            return web.json_response(resolved, status=400)
-        auto_rolls = list(resolved.get("resolved") or [])
 
-    forced_waiting: list[str] = []
-    if force and not inst.should_advance():
-        multiplayer = inst.multiplayer_status()
-        waiting = multiplayer.get("waiting_players", [])
-        if not inst.action_queue:
-            return web.json_response({"ok": False, "narration": "还没有任何玩家行动，无法推进"})
-        for player in waiting:
-            uid = str(player.get("user_id", "") or "")
-            name = str(player.get("character_name", "") or uid)
-            if uid:
-                await inst.add_action(uid, "本轮暂不行动，保持警戒。")
-                forced_waiting.append(name)
-
-    advanced = await inst.advance_round() if force else await inst.try_advance()
-    if advanced:
-        narration, _ = await request.app["subsystems"].handler.process_round(inst)
-        payload = {
-            "ok": True,
-            "narration": narration,
-            "quick_actions": getattr(inst, "quick_actions", []),
-            "check_result": getattr(inst, "last_check", None),
-            "check_results": getattr(inst, "last_checks", []),
-            "pending_payments": [
-                p for p in getattr(inst, "pending_payments", [])
-                if p.get("status") == "pending"
-            ],
-        }
-        if forced_waiting:
-            payload["forced_waiting"] = forced_waiting
-        if auto_rolls:
-            payload["auto_rolls"] = auto_rolls
-        return web.json_response(payload)
-
-    multiplayer = inst.multiplayer_status()
-    waiting_names = [p.get("character_name") or p.get("user_id") for p in multiplayer.get("waiting_players", [])]
-    waiting_text = "、".join(str(name) for name in waiting_names if name)
-    message = f"推进失败：仍在等待 {waiting_text} 行动" if waiting_text else "推进失败：当前状态不能推进"
-    return web.json_response({"ok": False, "narration": message, "multiplayer": multiplayer})
 async def api_payment_resolve(request: web.Request) -> web.Response:
     api = _get_api(request)
     gk = request.match_info["game_key"]
@@ -652,7 +512,7 @@ async def api_verify_room_password(request: web.Request) -> web.Response:
     if not secrets.compare_digest(inst.room_password, password):
         return web.json_response({"ok": False, "error": "房间密码错误"}, status=403)
     if not inst.room_token:
-        inst.room_token = secrets.token_urlsafe(24)
+        inst.set_room_token(secrets.token_urlsafe(24))
         await api._reg.save(inst)
     return web.json_response({"ok": True, "room_token": inst.room_token})
 
@@ -821,6 +681,7 @@ def register_games(app: web.Application) -> None:
     app.router.add_post("/api/games/create-from-seed", api_create_from_seed)
     app.router.add_post("/api/games/batch-delete", api_batch_delete_games)
     app.router.add_post("/api/games/{game_key}/action", api_action)
+    app.router.add_post("/api/games/{game_key}/checks/{check_id}/luck", api_luck_decision)
     app.router.add_post("/api/games/{game_key}/advance", api_advance)
     app.router.add_post("/api/games/{game_key}/gm-command", api_gm_command)
     app.router.add_post("/api/games/{game_key}/rollback", api_rollback)

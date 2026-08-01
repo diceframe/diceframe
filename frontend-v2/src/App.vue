@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted } from 'vue'
+import { computed, h, onMounted, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import {
   NConfigProvider, NMessageProvider, NDialogProvider, NLoadingBarProvider,
@@ -19,6 +19,7 @@ import BrandLogo from '@/components/BrandLogo.vue'
 import NaiveBridge from '@/components/common/NaiveBridge.vue'
 import StartupUpdateCheck from '@/components/common/StartupUpdateCheck.vue'
 import { readCurrentGame } from '@/stores/gameContext'
+import { isPublicRoute } from '@/router'
 
 const route = useRoute()
 const { naiveTheme, overrides, loadPluginThemes } = useTheme()
@@ -58,9 +59,8 @@ const menuOptions = computed<MenuOption[]>(() => items.map((n) => ({
 const activeKey = computed(() => (route.name as string) ?? '')
 const currentGameBadge = computed(() => String(route.query.game || readCurrentGame() || '').slice(0, 8))
 const currentGameText = computed(() => currentGameBadge.value ? `${t('currentTable')} ${currentGameBadge.value}` : t('lobby'))
-const fullscreen = computed(
-  () => route.name === 'login' || route.name === 'join' || (route.name === 'play' && !!(route.query.user || route.query.share)),
-)
+const publicRoute = computed(() => isPublicRoute(route))
+const fullscreen = publicRoute
 
 function onLocaleChange(event: Event) {
   setLocale((event.target as HTMLSelectElement).value as Locale)
@@ -76,17 +76,33 @@ function onTopMenuWheel(e: WheelEvent) {
   e.preventDefault()
 }
 
-onMounted(() => {
-  loadPluginThemes().catch(() => undefined)
-})
+let pluginThemesLoaded = false
+async function loadOwnerPluginThemes() {
+  if (publicRoute.value || pluginThemesLoaded) return
+  try {
+    await loadPluginThemes()
+    pluginThemesLoaded = true
+  } catch {
+    pluginThemesLoaded = false
+  }
+}
+
+onMounted(() => { void loadOwnerPluginThemes() })
+watch(publicRoute, (isPublic) => { if (!isPublic) void loadOwnerPluginThemes() })
 </script>
 <template>
-  <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
+  <NConfigProvider
+    :class="{ 'content-height-provider': route.name === 'join' }"
+    :theme="naiveTheme"
+    :theme-overrides="overrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
+  >
     <NLoadingBarProvider>
       <NMessageProvider>
         <NDialogProvider>
           <NaiveBridge>
-            <StartupUpdateCheck />
+            <StartupUpdateCheck v-if="!publicRoute" />
             <RouterView v-if="fullscreen" v-slot="{ Component }">
               <ThemeToggle class="theme-toggle-floating" />
               <KeepAlive :include="['PlayView']">

@@ -8,9 +8,10 @@ import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
 import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
+import PortraitImage from '@/components/PortraitImage.vue'
 
-const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; processing?: boolean; isGm?: boolean; liveNarration?: string }>()
-const emit = defineEmits<{ refresh: [] }>()
+const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string }>()
+const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean] }>()
 const { t } = useLocale()
 
 const box = ref<HTMLElement | null>(null), hasNew = ref(false), awayFromBottom = ref(false)
@@ -19,6 +20,7 @@ const INITIAL_VISIBLE_ROUNDS = 20
 const ROUND_BATCH_SIZE = 20
 const visibleRoundCount = ref(INITIAL_VISIBLE_ROUNDS)
 function name(uid: string, fallback?: string) { return fallback || props.players.find(p => p.user_id === uid)?.character_name || uid || t('characters') }
+function portrait(uid: string) { return props.players.find(p => p.user_id === uid)?.character_sheet?.portrait }
 
 interface Act { uid: string; text: string; dice: DiceTag | null }
 function record(value: unknown): Record<string, unknown> {
@@ -48,6 +50,9 @@ function checkMath(check: CheckResult): string {
   return `${check.dice || 'd20'}=${check.roll}${modifierText}${total}${dc}`
 }
 function liveAct(a: PublicAction): Act { return toAct(a) }
+function canDecideLuck(check: CheckResult): boolean {
+  return !!props.isGm || (!!props.currentUserId && check.actor_uid === props.currentUserId)
+}
 
 const visibleLog = computed(() => props.log.slice(-visibleRoundCount.value))
 const hiddenRoundCount = computed(() => Math.max(0, props.log.length - visibleLog.value.length))
@@ -136,10 +141,13 @@ watch(() => props.gameKey, () => {
       </div>
       <template v-for="item in rounds" :key="item.round">
         <div class="round-divider" v-if="item.round">{{ t('roundDivider', { round: item.round }) }}</div>
-        <div v-for="a in actions(item.entry)" :key="a.uid + a.text" class="message player" :style="{ borderLeftColor: playerColor(a.uid) }">
-          <strong :style="{ color: playerColor(a.uid) }">{{ name(a.uid) }}</strong>
-          <p>{{ a.text }}</p>
-          <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
+        <div v-for="a in actions(item.entry)" :key="a.uid + a.text" class="message player message-with-avatar" :style="{ borderLeftColor: playerColor(a.uid) }">
+          <PortraitImage :portrait="portrait(a.uid)" :rule-id="ruleId" :seed="a.uid" :name="name(a.uid)" :size="42" />
+          <div class="message-copy">
+            <strong :style="{ color: playerColor(a.uid) }">{{ name(a.uid) }}</strong>
+            <p>{{ a.text }}</p>
+            <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
+          </div>
         </div>
         <div v-for="check in checks(item.entry)" :key="check.check_id || `${check.actor_uid}-${check.roll}`" class="message check-result-card" :class="{ success: String(check.verdict).includes('成功'), failure: String(check.verdict).includes('失败') }">
           <strong><NIcon :component="InformationCircleOutline" size="15" /> {{ check.label || '检定' }} · {{ check.actor_name }}</strong>
@@ -148,9 +156,13 @@ watch(() => props.gameKey, () => {
             <summary>成功等级</summary>
             <span>普通 ≤ {{ check.threshold }} · 困难 ≤ {{ check.hard_threshold }} · 极难 ≤ {{ check.extreme_threshold }}</span>
           </details>
-          <span v-if="check.luck_spend_available && check.luck_cost" class="dice-tag">可消耗 {{ check.luck_cost }} 点幸运</span>
+          <span v-if="check.luck_decision === 'spent' && check.luck_spent" class="dice-tag">{{ t('luckSpent', { cost: check.luck_spent }) }}</span>
+          <span v-else-if="check.luck_decision === 'declined'" class="dice-tag">{{ t('luckDeclined') }}</span>
+          <span v-else-if="check.luck_spend_available && check.luck_cost" class="dice-tag">{{ t('spendLuckForSuccess', { cost: check.luck_cost }) }}</span>
         </div>
-        <div v-if="item.gm" class="message gm">
+        <div v-if="item.gm" class="message gm message-with-avatar">
+          <span class="narrator-avatar" aria-hidden="true">GM</span>
+          <div class="message-copy">
           <strong>{{ t('gmRound', { round: item.round }) }}</strong>
           <p v-for="(p, i) in item.gm.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
           <div v-if="item.gm.states.length" class="state-card-list">
@@ -176,16 +188,36 @@ watch(() => props.gameKey, () => {
             <button v-if="item.swipeCount < 5" class="ghost" @click="reroll(item.round)">{{ t('regenerate') }}</button>
           </div>
           <p v-if="swipeError && isGm" class="muted">{{ swipeError }}</p>
+          </div>
         </div>
       </template>
-      <div v-for="a in live" :key="a.user_id" class="message player live" :style="{ borderLeftColor: playerColor(a.user_id) }">
-        <strong :style="{ color: playerColor(a.user_id) }">{{ name(a.user_id, a.character_name) }} · {{ t('published') }} · {{ a.revision_count || 1 }}/3</strong>
-        <p>{{ liveAct(a).text }}</p>
-        <span v-if="liveAct(a).dice" class="dice-tag">🎲 {{ liveAct(a).dice?.system }}={{ liveAct(a).dice?.value }}</span>
+      <div v-for="a in live" :key="a.user_id" class="message player live message-with-avatar" :style="{ borderLeftColor: playerColor(a.user_id) }">
+        <PortraitImage :portrait="portrait(a.user_id)" :rule-id="ruleId" :seed="a.user_id" :name="name(a.user_id, a.character_name)" :size="42" />
+        <div class="message-copy">
+          <strong :style="{ color: playerColor(a.user_id) }">{{ name(a.user_id, a.character_name) }} · {{ t('published') }} · {{ a.revision_count || 1 }}/3</strong>
+          <p>{{ liveAct(a).text }}</p>
+          <span v-if="liveAct(a).dice" class="dice-tag">🎲 {{ liveAct(a).dice?.system }}={{ liveAct(a).dice?.value }}</span>
+        </div>
       </div>
-      <div v-if="processing" class="message gm thinking-message" aria-live="polite">
-        <strong>{{ t('thinkingMessage') }}<span v-if="!liveNarration" class="thinking-dots"><i></i><i></i><i></i></span></strong>
-        <p v-if="liveNarration" class="chat-gm live-narration">{{ liveNarration }}</p>
+      <div v-for="check in pendingChecks || []" :key="`pending-${check.check_id}`" class="message check-result-card failure pending-luck-card">
+        <strong><NIcon :component="InformationCircleOutline" size="15" /> {{ check.label || '检定' }} · {{ check.actor_name }}</strong>
+        <p>{{ checkMath(check) }} → <b>{{ check.verdict }}</b></p>
+        <details v-if="typeof check.hard_threshold === 'number'">
+          <summary>成功等级</summary>
+          <span>普通 ≤ {{ check.threshold }} · 困难 ≤ {{ check.hard_threshold }} · 极难 ≤ {{ check.extreme_threshold }}</span>
+        </details>
+        <div v-if="canDecideLuck(check)" class="luck-decision-actions">
+          <button class="dice-tag dice-tag-button" type="button" :disabled="!!luckBusyId" @click="emit('luck', check, true)">{{ t('spendLuckForSuccess', { cost: check.luck_cost || 0 }) }}</button>
+          <button class="ghost luck-decline-button" type="button" :disabled="!!luckBusyId" @click="emit('luck', check, false)">{{ t('keepFailure') }}</button>
+        </div>
+        <span v-else class="dice-tag">{{ t('waitLuckDecision', { name: check.actor_name || check.actor_uid || '' }) }}</span>
+      </div>
+      <div v-if="processing" class="message gm thinking-message message-with-avatar" aria-live="polite">
+        <span class="narrator-avatar" aria-hidden="true">GM</span>
+        <div class="message-copy">
+          <strong>{{ t('thinkingMessage') }}<span v-if="!liveNarration" class="thinking-dots"><i></i><i></i><i></i></span></strong>
+          <p v-if="liveNarration" class="chat-gm live-narration">{{ liveNarration }}</p>
+        </div>
       </div>
       <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
     </div>

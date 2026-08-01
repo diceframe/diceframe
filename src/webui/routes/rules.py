@@ -23,6 +23,14 @@ async def api_rule_detail(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).get_rule_template(request.match_info["rule_id"]))
 
 
+async def api_rule_character_schema(request: web.Request) -> web.Response:
+    result = _get_api(request).character_schema(
+        request.match_info["rule_id"],
+        request.query.get("language", ""),
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
 async def api_rule_update(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
@@ -41,6 +49,7 @@ async def api_rule_delete(request: web.Request) -> web.Response:
 def register_rules(app: web.Application) -> None:
     app.router.add_get("/api/rules", api_rules)
     app.router.add_post("/api/rules", api_rule_create)
+    app.router.add_get("/api/rules/{rule_id}/character-schema", api_rule_character_schema)
     app.router.add_get("/api/rules/{rule_id}", api_rule_detail)
     app.router.add_route("PUT", "/api/rules/{rule_id}", api_rule_update)
     app.router.add_route("DELETE", "/api/rules/{rule_id}", api_rule_delete)

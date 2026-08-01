@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api, errorMessage } from '@/api/client'
-import type { CharacterSheet, CharacterSkill, CharacterItem, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
+import type { CharacterSheet, CharacterSkill, CharacterItem, CharacterPortrait, GeneratedCharacterResponse, RuleMeta, SkillSpec } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 import { useLocale } from '@/composables/useLocale'
 import SkillEditor from './SkillEditor.vue'
 import ItemEditor from './ItemEditor.vue'
+import PortraitPicker from './PortraitPicker.vue'
 import {
   identitySchema, identityLabel, attrDisplayName, currencyLabel,
   isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, localizedField,
@@ -33,6 +34,7 @@ const { locale, t } = useLocale()
 const step = ref<1 | 2 | 3 | 4>(1)
 
 const characterName = ref('')
+const portrait = ref<CharacterPortrait | undefined>()
 const identityValues = ref<Record<string, string>>({})
 const identityFields = computed<IdentityField[]>(() =>
   identitySchema(props.ruleMeta).filter(f => f.key !== 'background')
@@ -93,6 +95,7 @@ watch(
 
 function resetFields() {
   characterName.value = ''
+  portrait.value = undefined
   identityValues.value = {}
   skills.value = []
   background.value = ''
@@ -134,13 +137,17 @@ function skillToDraft(skill: string | CharacterSkill): CharacterSkill {
 function applyCharacter(c: CharacterSheet) {
   const record = c as Record<string, unknown>
   if (c.character_name) characterName.value = c.character_name
+  portrait.value = c.portrait ? { ...c.portrait } : undefined
   const fields = identitySchema(props.ruleMeta)
   for (const f of fields) {
     const v = c.identity?.[f.key] ?? (f.legacy_field ? record[f.legacy_field] : '') ?? ''
     if (v) identityValues.value[f.key] = String(v)
   }
   if (c.attributes) {
-    for (const [k, v] of Object.entries(c.attributes)) attrs.value[k] = Number(v) || 0
+    const targetKeys = new Set(props.ruleAttrs.map(attr => attr.key))
+    for (const [k, v] of Object.entries(c.attributes)) {
+      if (!targetKeys.size || targetKeys.has(k)) attrs.value[k] = Number(v) || 0
+    }
   }
   if (Array.isArray(c.skills) && c.skills.length) skills.value = c.skills.map(skillToDraft)
   if (Array.isArray(c.equipment)) equipment.value = c.equipment.map(it => ({ ...it }))
@@ -166,6 +173,7 @@ function finish() {
 
   const character: CharacterSubmit = {
     character_name: characterName.value.trim(),
+    portrait: portrait.value ? { ...portrait.value } : undefined,
     identity,
     attributes: { ...attrs.value },
     skills: skills.value.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
@@ -191,6 +199,7 @@ function finish() {
 
     <div v-if="step === 1" class="wizard-pane">
       <label>{{ t('characterName') }}<input v-model="characterName" :placeholder="t('nameCharacterPlaceholder')"></label>
+      <PortraitPicker v-model="portrait" :rule-id="ruleId" :seed="characterName" :name="characterName" />
       <label v-for="f in identityFields" :key="f.key">{{ identityLabel(f) }}<input v-model="identityValues[f.key]"></label>
 
       <details class="ai-block">

@@ -614,8 +614,8 @@ def _parse_tavern_png(raw_data: bytes) -> dict | None:
                     return _extract_tavern_fields(data)
             elif chunk_type == "IEND":
                 break
-    except Exception:
-        pass
+    except (IndexError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        logger.debug("酒馆 PNG 角色元数据解析失败", exc_info=True)
     return None
 
 

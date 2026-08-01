@@ -188,6 +188,10 @@ class GameHandler:
         """
         return await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
 
+    def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
+        """结算本轮结构化检定；若可消耗幸运，叙事会等待玩家选择。"""
+        return self._round_processor.prepare_round_checks(instance)
+
     async def _process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """兼容旧内部调用；实际逻辑已拆到 RoundProcessor。"""
         return await self._round_processor.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)

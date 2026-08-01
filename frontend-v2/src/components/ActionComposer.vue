@@ -78,8 +78,16 @@ async function submit(confirm = false) {
     if (confirm && r.roll?.ok) {
       dicePhase.value = 'result'; diceValue.value = r.roll.value; diceSystem.value = r.roll.dice_system || activeCheck.value?.dice_system || 'd20'; diceCrit.value = !!r.roll.critical; diceFumble.value = !!r.roll.fumble
       text.value = ''; pending.value = ''; editingInstead.value = false
+      if (r.phase === 'luck') {
+        notice.value = t('luckDecisionRequired')
+        emit('refresh')
+      }
       clearDiceTimer()
-      diceTimer = setTimeout(() => { dicePhase.value = 'idle'; notice.value = t('actionRecorded'); emit('refresh') }, 1800)
+      diceTimer = setTimeout(() => {
+        dicePhase.value = 'idle'
+        if (r.phase !== 'luck') notice.value = t('actionRecorded')
+        emit('refresh')
+      }, 1800)
       return
     }
     text.value = ''; pending.value = ''; editingInstead.value = false; notice.value = t('actionRecorded'); emit('refresh')

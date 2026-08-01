@@ -17,6 +17,7 @@ class TriggerConfig:
         "advance", "next", "暂离", "away", "回来", "return", "back", "行动", "做",
         "连接测试", "ping", "character", "create", "payment", "payments", "sense",
         "perception", "confirm", "reject",
+        "幸运", "用幸运", "不用幸运", "保留失败", "luck", "spendluck", "noluck",
     }))
 
 

@@ -20,6 +20,7 @@ class FakeAPI:
         self.away_updates = []
         self.character_generations = []
         self.payment_resolutions = []
+        self.luck_resolutions = []
         self.consume_bind_token = consume_bind_token
         self._bind_token_valid = True
         self.character_players = None
@@ -109,6 +110,12 @@ class FakeAPI:
     async def resolve_payment(self, game_key, actor, payment_id, accepted):
         self.payment_resolutions.append((game_key, actor, payment_id, accepted))
         return {"ok": True, "accepted": accepted, "payment": {"id": payment_id}}
+
+    async def resolve_luck(self, game_key, actor, check_id, *, spend):
+        self.luck_resolutions.append((game_key, actor, check_id, spend))
+        if self.detail_payload:
+            self.detail_payload["pending_luck_decisions"] = []
+        return {"ok": True, "advanced": False, "pending_luck_decisions": []}
 
     async def advance(self, game_key, actor, *, force=True):
         self.advances.append((game_key, actor, force))
@@ -305,6 +312,26 @@ async def test_bind_action_and_server_roll_flow(tmp_path):
         ("web|game|bot", "gm-1", "我攻击守卫", True),
     ]
     assert "D20 = 16" in sender.messages[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_group_luck_command_resolves_own_pending_check(tmp_path):
+    store = QQSessionStore(tmp_path / "sessions.json")
+    api = FakeAPI()
+    api.detail_payload = {"pending_luck_decisions": [{
+        "check_id": "check-1",
+        "actor_uid": "gm-1",
+        "actor_name": "主持人",
+        "luck_cost": 2,
+    }]}
+    sender = FakeSender()
+    adapter = QQTRPGAdapter(api, store, sender, qq_config())
+
+    await adapter.handle_payload(group_message("luck-bind", "42", "绑定 web|game|bot bind-ok"))
+    await adapter.handle_payload(group_message("luck-use", "42", "幸运"))
+
+    assert api.luck_resolutions == [("web|game|bot", "gm-1", "check-1", True)]
+    assert "已消耗 2 点幸运" in sender.messages[-1][1]
 
 
 @pytest.mark.asyncio

@@ -104,7 +104,7 @@ class CombatResolver:
                 )
 
             results.append((char_name, weapon_name, result))
-            instance.pending_combat_results.append({
+            instance.record_combat_result({
                 "attacker": char_name,
                 "target": target_name,
                 "weapon": weapon_name,
@@ -159,10 +159,7 @@ class CombatResolver:
             combatants.append((eid, init.total))
 
         combatants.sort(key=lambda x: -x[1])
-        instance.initiative_order = [c[0] for c in combatants]
-        instance.initiative_current = 0
-        instance.combat_state = "active"
-        instance.combat_active = True
+        instance.begin_combat([combatant[0] for combatant in combatants])
 
         order_text = " → ".join(
             f"{instance.players[uid].get('character_name', uid)}({score})"

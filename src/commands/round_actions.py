@@ -15,13 +15,7 @@ logger = logging.getLogger("trpg")
 
 def ensure_round_managers(instance: GameInstance) -> None:
     """确保回合处理需要的运行期管理器已存在。"""
-    if not hasattr(instance, "plot_tracker") or instance.plot_tracker is None:
-        from src.engine.plot_tracker import PlotTracker
-        instance.plot_tracker = PlotTracker()
-
-    if not hasattr(instance, "puzzle_manager") or instance.puzzle_manager is None:
-        from src.engine.puzzle import PuzzleManager
-        instance.puzzle_manager = PuzzleManager()
+    instance.ensure_round_managers()
 
 
 def format_action_line(instance: GameInstance, action: dict) -> str:

@@ -189,6 +189,21 @@ def test_parse_tag_state_requires_separator_for_executable_tags():
     assert result.get("_missing_tag_separator") is True
 
 
+def test_parse_tag_state_accepts_legacy_sancheck_alias_after_separator():
+    text = f"尤洛直视了不可名状之物。\n---\n**SANCheck:{UID}:1d6**"
+
+    result = parse_tag_state(text, "hp_based")
+
+    assert _pu(result)["san_check_loss"] == "1d6"
+
+
+def test_unknown_historical_state_tag_is_never_executable():
+    result = parse_tag_state("热度提高。\n---\nSTATE:heat:+1", "hp_based")
+
+    assert result["state_update"]["players"] == {}
+    assert result["state_update"]["scene_change"] == ""
+
+
 # ===== swipe 回滚：SAN/LUCK/MANA/currency 必须随回滚恢复（#21）=====
 def test_swipe_rollback_restores_resources():
     """swipe 回滚应恢复 SAN/LUCK/MANA/currency/法术，不能只回 HP/gold。"""

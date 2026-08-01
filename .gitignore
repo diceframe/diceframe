@@ -18,6 +18,7 @@ Thumbs.db
 # 前端 build 产物
 static-v2/assets/
 static-v2/index.html
+static-v2/avatars/
 
 # 运行日志
 *.log
@@ -31,6 +32,7 @@ dist/
 # 临时审计数据
 .tmp_audit_data/
 .codex_tmp/
+.coverage
 
 # Claude Code 本地设置
 .claude/

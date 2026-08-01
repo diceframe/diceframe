@@ -130,6 +130,14 @@ class LorebookStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def update_world_language(self, world_id: str, language: str) -> None:
+        """Correct world language metadata without replacing the world or its entries."""
+        self._execute(
+            "UPDATE worlds SET language = ?, updated_at = datetime('now') WHERE id = ?",
+            (language, world_id),
+        )
+        self._conn.commit()
+
     def list_worlds(self) -> list[dict]:
         rows = self._execute("SELECT * FROM worlds ORDER BY updated_at DESC").fetchall()
         return [dict(r) for r in rows]

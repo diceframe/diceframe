@@ -7,6 +7,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from src.llm.protocol import (
+    contains_protocol_markup,
+    normalize_protocol_line,
+    parse_protocol_line,
+    strip_protocol_markup_from_public_line,
+)
+
 logger = logging.getLogger("trpg")
 
 
@@ -69,18 +76,10 @@ _INTERNAL_GM_DIRECTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_STATE_TAG_NAMES = (
-    "HP|GOLD|PAY|SCENE|NPC|LOOT|KEY_ITEM|DECISION|QUEST|USE|WEAPON|EQUIP|"
-    "PRIVATE|XP|SAN|SAN_CHECK|LUCK|SKILL_GROWTH|PUSH|PUZZLE|MANA|SPELL|"
-    "QUICK_ACTIONS|COMBAT|REVIVE|CONFIRMED|MEMORY|NONE"
-)
 _STATE_HEADING_LINE_RE = re.compile(
     r"(?im)^[ \t#>*_`【\[]*"
     r"(?:状态[\s*_`]*(?:变更|变化|更新)|state[\s*_`-]*changes?)"
     r"[\s#>*_`】\]:：-]*$"
-)
-_STATE_TAG_LINE_RE = re.compile(
-    rf"(?im)^[ \t]*(?:{_STATE_TAG_NAMES})\s*(?::|$)"
 )
 
 
@@ -88,31 +87,48 @@ def find_protocol_suffix_start(text: str) -> int | None:
     """Locate a leaked state-tag suffix when the model omitted ``---``."""
     source = str(text or "")
     heading = _STATE_HEADING_LINE_RE.search(source)
-    if heading and _STATE_TAG_LINE_RE.search(source, heading.end()):
-        return heading.start()
+    if heading:
+        for line in source[heading.end():].splitlines():
+            if not line.strip():
+                continue
+            if parse_protocol_line(line):
+                return heading.start()
+            break
 
     # Some models omit both separator and heading. Only accept a trailing
     # block containing at least two protocol lines to avoid false positives.
-    matches = list(_STATE_TAG_LINE_RE.finditer(source))
-    for match in matches:
-        suffix_lines = [
-            line.strip()
-            for line in source[match.start():].splitlines()
-            if line.strip()
-        ]
-        if (
-            len(suffix_lines) >= 2
-            and all(_STATE_TAG_LINE_RE.match(line) for line in suffix_lines)
-        ):
-            return match.start()
+    offset = 0
+    lines_with_offsets: list[tuple[int, str]] = []
+    for raw_line in source.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        if line.strip():
+            lines_with_offsets.append((offset, line))
+        offset += len(raw_line)
+    for index, (line_offset, line) in enumerate(lines_with_offsets):
+        if not parse_protocol_line(line):
+            continue
+        suffix_lines = [item[1] for item in lines_with_offsets[index:]]
+        if len(suffix_lines) >= 2 and all(parse_protocol_line(item) for item in suffix_lines):
+            return line_offset
     return None
+
+
+def _normalize_protocol_block(text: str) -> str:
+    lines: list[str] = []
+    for line in str(text or "").splitlines():
+        if _STATE_HEADING_LINE_RE.match(line):
+            continue
+        normalized = normalize_protocol_line(line)
+        lines.append(normalized if normalized is not None else line)
+    return "\n".join(lines)
 
 
 def normalize_tag_protocol(text: str) -> str:
     """Repair common model variants of the narration/tag separator."""
     source = str(text or "")
     if "---" in source:
-        return source
+        narration, tag_block = source.split("---", 1)
+        return narration + "---" + _normalize_protocol_block(tag_block)
     boundary = find_protocol_suffix_start(source)
     if boundary is None:
         return source
@@ -120,13 +136,23 @@ def normalize_tag_protocol(text: str) -> str:
     heading = _STATE_HEADING_LINE_RE.match(suffix)
     if heading:
         suffix = suffix[heading.end():]
-    return source[:boundary].rstrip() + "\n---\n" + suffix.lstrip()
+    return source[:boundary].rstrip() + "\n---\n" + _normalize_protocol_block(suffix.lstrip())
+
+
+def has_malformed_protocol_leak(text: str) -> bool:
+    """Whether a response exposes tag-shaped protocol text without a safe separator."""
+    source = str(text or "")
+    normalized = normalize_tag_protocol(source)
+    return "---" not in normalized and contains_protocol_markup(source)
 
 
 def sanitize_narration(text: str) -> str:
     """Remove leaked prompt/context blocks from player-facing narration."""
     if not text:
         return ""
+    text = normalize_tag_protocol(text)
+    if "---" in text:
+        text = text.split("---", 1)[0]
     boundary = find_protocol_suffix_start(text)
     if boundary is not None:
         text = str(text)[:boundary]
@@ -137,6 +163,18 @@ def sanitize_narration(text: str) -> str:
     skipping_directive = False
     for line in lines:
         stripped = line.strip()
+        protocol_line = parse_protocol_line(stripped, include_non_executable=True)
+        if protocol_line:
+            public_remainder = strip_protocol_markup_from_public_line(stripped)
+            if public_remainder:
+                kept.append(public_remainder)
+            continue
+        scrubbed_line = strip_protocol_markup_from_public_line(line)
+        if scrubbed_line != line:
+            line = scrubbed_line
+            stripped = line.strip()
+            if not stripped:
+                continue
         normalized_heading = stripped.replace("**", "").strip("*_ ")
         if _INTERNAL_CHECK_HEADING_RE.match(normalized_heading):
             skipping_check = True

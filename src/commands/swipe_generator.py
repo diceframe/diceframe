@@ -6,11 +6,12 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance, restore_players
-from src.llm.parser import sanitize_narration
+from src.llm.parser import normalize_tag_protocol, sanitize_narration
 
 logger = logging.getLogger("trpg")
 
@@ -82,16 +83,17 @@ class SwipeGenerator:
 
         gm_prompt = self.prompt.compose_gm_prompt(instance, rule_ctx.rule_appendix)
 
-        # 构建上下文（仅使用目标轮之前的日志）
-        saved_log = list(instance.log)
-        instance.log = instance.log[:target_idx]
-        try:
-            provider_name = self.llm_client.default if self.llm_client else ""
-            context = await self.prompt.build_user_context(
-                instance, gm_prompt, lorebook_matches, actions_text,
-                provider_name=provider_name, world_data=world_data)
-        finally:
-            instance.log = saved_log
+        # 构建上下文（仅使用目标轮之前的日志），不临时改写共享 instance.log。
+        provider_name = self.llm_client.default if self.llm_client else ""
+        context = await self.prompt.build_user_context(
+            instance,
+            gm_prompt,
+            lorebook_matches,
+            actions_text,
+            provider_name=provider_name,
+            world_data=world_data,
+            history_override=instance.log[:target_idx],
+        )
 
         response = await self.llm_client.call(
             system_prompt=gm_prompt,
@@ -99,6 +101,16 @@ class SwipeGenerator:
             temperature=0.9,
             max_tokens=self.narrative_max_tokens,
         )
+        response = await repair_malformed_protocol_response(
+            self.llm_client,
+            response,
+            system_prompt=gm_prompt,
+            user_message=context,
+            language=instance.language,
+            temperature=0.9,
+            max_tokens=self.narrative_max_tokens,
+        )
+        response.content = normalize_tag_protocol(response.content)
 
         narration = response.content
         if "---" in response.content:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 import tempfile
@@ -38,25 +39,26 @@ def _write_cards(api: "WebAPI", cards: list[dict[str, Any]]) -> None:
     tmp_path.replace(path)
 
 
-def _card_signature(card: dict[str, Any]) -> tuple[str, str, str, str]:
+def _card_signature(card: dict[str, Any]) -> tuple[str, str, str, str, str]:
     """同一张仓库卡的稳定指纹，用于避免 AI 生成后微调产生重复卡。"""
     return (
         str(card.get("character_name") or "").strip().lower(),
         str(card.get("race") or "").strip().lower(),
         str(card.get("class") or "").strip().lower(),
         str(card.get("background") or "").strip().lower(),
+        str(card.get("rule_id") or "").strip().lower(),
     )
 
 
 def _dedupe_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    order: list[tuple[str, str, str, str]] = []
+    seen: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str, str, str, str]] = []
     for card in cards:
         if not isinstance(card, dict):
             continue
         sig = _card_signature(card)
         if not sig[0]:
-            sig = (str(card.get("id") or f"anon_{len(order)}"), "", "", "")
+            sig = (str(card.get("id") or f"anon_{len(order)}"), "", "", "", "")
         if sig not in seen:
             order.append(sig)
         seen[sig] = card
@@ -66,19 +68,36 @@ def _dedupe_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _to_character_card(character: dict, source: str = "") -> dict[str, Any]:
     cs = character.get("character_sheet", {}) if isinstance(character.get("character_sheet"), dict) else character
     name = character.get("character_name") or cs.get("character_name") or "冒险者"
-    attrs = cs.get("attributes", {}) if isinstance(cs.get("attributes", {}), dict) else {}
-    return {
+    card: dict[str, Any] = {
         "id": character.get("card_id") or character.get("id") or cs.get("card_id") or cs.get("id") or f"card_{int(time.time_ns())}",
+        "schema_version": 2,
         "character_name": name,
         "race": cs.get("race", character.get("race", "人类")),
         "class": cs.get("class", character.get("class", "冒险者")),
-        "attributes": attrs,
-        "skills": cs.get("skills", character.get("skills", [])),
-        "background": cs.get("background", character.get("background", "")),
-        "equipment": cs.get("equipment", character.get("equipment", [])),
-        "gold": cs.get("gold", character.get("gold", 30)),
         "source": source,
     }
+    # A library card is a reusable blueprint, not a snapshot of one running
+    # game. Runtime-only HP, XP, death and temporary status are recomputed when
+    # the card joins a game under its target rule.
+    for key, default in (
+        ("identity", {}),
+        ("attributes", {}),
+        ("skills", []),
+        ("background", ""),
+        ("equipment", []),
+        ("inventory", []),
+        ("key_items", []),
+        ("gold", 30),
+        ("currency", {}),
+        ("portrait", {}),
+    ):
+        value = cs.get(key, character.get(key, default))
+        card[key] = copy.deepcopy(value)
+    for key in ("rule_id", "rule_name", "rule_version", "mechanics", "language"):
+        value = character.get(key, cs.get(key, ""))
+        if value not in (None, ""):
+            card[key] = str(value)
+    return card
 
 
 def list_character_cards(api: "WebAPI") -> dict[str, Any]:
@@ -114,12 +133,16 @@ def update_character_card(api: "WebAPI", card_id: str, patch: dict[str, Any]) ->
         if old.get("id") != card_id:
             continue
         updated = {**old}
-        for key in ("character_name", "race", "class", "background", "gold", "source"):
+        for key in (
+            "character_name", "race", "class", "background", "gold", "source",
+            "rule_id", "rule_name", "rule_version", "mechanics", "language",
+        ):
             if key in patch:
                 updated[key] = patch[key]
-        for key in ("attributes", "skills", "equipment", "inventory", "key_items"):
+        for key in ("identity", "attributes", "skills", "equipment", "inventory", "key_items", "currency", "portrait"):
             if key in patch and isinstance(patch[key], (dict, list)):
                 updated[key] = patch[key]
+        updated["schema_version"] = 2
         updated["id"] = card_id
         cards[idx] = updated
         _write_cards(api, cards)
@@ -148,6 +171,7 @@ def _tavern_to_character_card(tavern: dict, file_name: str = "") -> dict[str, An
         source += f"（含 {len(tavern['character_book'])} 条角色世界书）"
     return {
         "id": f"st_{int(time.time_ns())}",
+        "schema_version": 2,
         "character_name": tavern.get("name") or "未命名",
         "race": "人类",
         "class": "冒险者",
@@ -157,6 +181,7 @@ def _tavern_to_character_card(tavern: dict, file_name: str = "") -> dict[str, An
         "equipment": [],
         "gold": 30,
         "source": source,
+        "rule_id": "",
         "raw_sillytavern": tavern,
     }
 

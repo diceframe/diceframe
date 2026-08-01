@@ -9,6 +9,7 @@ import logging
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import is_english
+from src.llm.parser import sanitize_narration
 
 logger = logging.getLogger("trpg")
 
@@ -104,7 +105,7 @@ def build_summary_input(instance: GameInstance, last_n_rounds: int = 10) -> str:
             a.get("text", "") for a in entry.get("actions", [])
             if a.get("user_id") != "system"
         )
-        gm = entry.get("gm_response", "")
+        gm = sanitize_narration(entry.get("gm_response", ""))
         lines.append(f"Round {entry.get('round','?')}\n玩家: {actions}\nGM: {gm}")
     return "\n\n".join(lines)
 
@@ -122,7 +123,10 @@ async def summarize(instance: GameInstance, llm_client, system_prompt: str,
     滚动累积：有旧摘要时融合生成，无旧摘要时全新生成。
     """
     log_text = build_summary_input(instance)
-    prev_narrative = instance.summary.get("narrative", "") if instance.summary else ""
+    prev_narrative = (
+        sanitize_narration(instance.summary.get("narrative", ""))
+        if instance.summary else ""
+    )
     if prev_narrative:
         template = _SUMMARY_PROMPT_ROLLING_EN if is_english(instance.language) else _SUMMARY_PROMPT_ROLLING
         prompt = template.format(
@@ -143,16 +147,23 @@ async def summarize(instance: GameInstance, llm_client, system_prompt: str,
         from src.generation.creator import parse_json
         data = parse_json(response.content)
         if data:
-            instance.summary["narrative"] = data.get("narrative", response.narration)
-            instance.key_facts = data.get("key_facts", [])
+            instance.set_summary_narrative(sanitize_narration(
+                data.get("narrative", response.narration)
+            ))
+            instance.set_key_facts(data.get("key_facts", []))
         else:
-            instance.summary["narrative"] = response.narration or response.content
-            instance.key_facts = []
+            instance.set_summary_narrative(sanitize_narration(
+                response.narration or response.content
+            ))
+            instance.set_key_facts([])
         logger.info("摘要生成完成: round=%d", instance.round_number)
     except Exception:
         logger.exception("摘要生成失败")
         # 降级：保留旧摘要，不覆盖（旧摘要可能仍然有效）
         # 仅在没有任何旧摘要时才用 GM 回复兜底
         if not (instance.summary and instance.summary.get("narrative")):
-            recent_gm = [e.get("gm_response", "") for e in instance.log[-3:]]
-            instance.summary["narrative"] = " ... ".join(recent_gm)[:300]
+            recent_gm = [
+                sanitize_narration(e.get("gm_response", ""))
+                for e in instance.log[-3:]
+            ]
+            instance.set_summary_narrative(" ... ".join(recent_gm)[:300])

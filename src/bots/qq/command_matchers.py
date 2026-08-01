@@ -17,6 +17,8 @@ from src.bots.bridge_core.commands import (
     is_private_log,
     is_recap,
     is_return,
+    luck_decision,
+    luck_index,
     payment_decision,
     payment_index,
 )

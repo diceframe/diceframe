@@ -47,7 +47,7 @@ class StateUpdateApplier:
         # 场景变换
         scene_change = update.get("scene_change")
         if scene_change:
-            instance.scene = scene_change
+            instance.set_scene(scene_change)
 
         # 战利品 - 按规则 JSON 的 item_categories 智能分类；规则未定义时用内置回退
         rule_cats = self._item_cats.load_categories(instance)
@@ -79,7 +79,7 @@ class StateUpdateApplier:
                         "name": item_name,
                         "category": classify_item(item_name, rule_cats),
                     })
-            instance.pending_payments.append({
+            instance.queue_payment({
                 "id": f"pay_{instance.round_number}_{uid}_{uuid4().hex[:8]}",
                 "uid": uid,
                 "amount": amount,

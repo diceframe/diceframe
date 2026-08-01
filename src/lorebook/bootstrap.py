@@ -15,13 +15,19 @@ def ensure_world_from_template(lorebook_store: Any, world_id: str, template: dic
     """Ensure one template world and its starter entries exist in the lorebook DB."""
     if not lorebook_store or not world_id or not template:
         return 0
-    if not lorebook_store.get_world(world_id):
+    template_language = template.get("language", "zh-CN")
+    existing_world = lorebook_store.get_world(world_id)
+    if not existing_world:
         lorebook_store.create_world(
             world_id,
             template.get("world_name", world_id),
             description=template.get("description", ""),
-            language=template.get("language", "zh-CN"),
+            language=template_language,
         )
+    elif existing_world.get("language") != template_language:
+        # Early databases acquired the zh-CN migration default even for English
+        # bundled templates. Update metadata in place; never replace user entries.
+        lorebook_store.update_world_language(world_id, template_language)
 
     inserted = 0
     for raw_entry in template.get("starter_lorebook", []):

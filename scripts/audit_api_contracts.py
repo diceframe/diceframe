@@ -25,9 +25,15 @@ DATA_ENDPOINTS = {
     "/api/world-templates",
     "/api/lorebook/{world_id}",
     "/api/rules",
+    "/api/rules/{rule_id}/character-schema",
     "/api/character-cards",
     "/api/config",
+    "/api/login-history",
+    "/api/me",
+    "/api/system/update/status",
     "/api/games/{game_key}/map",
+    "/api/avatars/{asset_id}",
+    "/api/games/{game_key}/avatars/{asset_id}",
 }
 
 STREAM_ENDPOINTS = {
@@ -72,6 +78,7 @@ def parse_routes(source: str) -> list[tuple[str, str, str]]:
 def main() -> int:
     handler_bodies: dict[str, str] = {}
     routes: list[tuple[str, str, str]] = []
+    review_routes: list[tuple[str, str, str]] = []
     for path in SOURCES:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -95,7 +102,11 @@ def main() -> int:
             marker = "delegated"
         elif path.startswith("/api/") and not (has_ok or has_error or has_status):
             marker = "review"
+            review_routes.append((method, path, handler))
         print(f"  - [{marker}] {method:6} {path} -> {handler}")
+    if review_routes:
+        print(f"API route contract audit failed: {len(review_routes)} unclassified route(s)")
+        return 1
     return 0
 
 
