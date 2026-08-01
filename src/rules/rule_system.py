@@ -9,7 +9,13 @@ import operator
 from collections.abc import Callable
 from pathlib import Path
 
-from src.engine.language import DEFAULT_LANGUAGE, field_suffixes, lang_suffix, localized_field
+from src.engine.language import (
+    DEFAULT_LANGUAGE,
+    field_suffixes,
+    lang_suffix,
+    localized_field,
+    normalize_language,
+)
 
 logger = logging.getLogger("trpg")
 
@@ -131,6 +137,123 @@ class RuleSystem:
             if localized.exists():
                 return localized
         return base
+
+    # ---- 检定意图（intents）----
+
+    @property
+    def intents(self) -> dict:
+        """检定意图表：{intent_id: {aliases, skill_candidates, default_attribute, priority}}。
+
+        从规则模板读取（可经 extends 继承），缺失时返回空 dict。
+        """
+        return self.template.get("intents") or {}
+
+    def intent_aliases(self, intent: str, language: str = "") -> tuple[str, ...]:
+        """某意图在指定语言下的触发词。按模板里登记的别名顺序返回。
+
+        优先取该语言的别名键（如 zh-CN / en）；缺失时回退到任意已有的语言键，
+        保证中英混写也能命中。找不到返回空元组。
+        """
+        block = self.intents.get(intent) or {}
+        aliases = block.get("aliases") or {}
+        lang = normalize_language(language)
+        if lang in aliases:
+            return tuple(aliases[lang])
+        # 回退：任意语言的别名都可用，避免纯中文规则在英文局完全失效。
+        for value in aliases.values():
+            if value:
+                return tuple(value)
+        return ()
+
+    def intent_skill_candidates(self, intent: str, language: str = "") -> tuple[str, ...]:
+        """某意图的技能候选词，用于按角色卡技能名做子串匹配。"""
+        block = self.intents.get(intent) or {}
+        candidates = block.get("skill_candidates") or {}
+        lang = normalize_language(language)
+        if lang in candidates:
+            return tuple(candidates[lang])
+        for value in candidates.values():
+            if value:
+                return tuple(value)
+        return ()
+
+    def intent_default_attribute(self, intent: str) -> str:
+        """某意图的默认属性键；无默认时返回空串。"""
+        return str((self.intents.get(intent) or {}).get("default_attribute") or "")
+
+    def intent_applies_to(self, intent: str, dice_system: str) -> bool:
+        """某意图是否适用于当前骰制（d20 / d100）。"""
+        block = self.intents.get(intent) or {}
+        allowed = block.get("applies_to_dice_systems")
+        if allowed is None:
+            allowed = (self.intents.get("defaults") or {}).get("applies_to_dice_systems")
+        if not allowed:
+            return True
+        return str(dice_system).lower() in allowed
+
+    def intent_match_mode(self, intent: str, language: str) -> str:
+        """语言对应的匹配方式：'word'（整词边界，英文）或 'substring'（中文）。"""
+        defaults = self.intents.get("defaults") or {}
+        if normalize_language(language) == "en":
+            return defaults.get("en_match", "word")
+        return defaults.get("zh_match", "substring")
+
+    def prefer_longest_match(self) -> bool:
+        return bool((self.intents.get("defaults") or {}).get("prefer_longest", True))
+
+    def generic_intent_id(self) -> str:
+        """通用检定意图 id；词表里没有则回退 'generic'。"""
+        return "generic" if "generic" in self.intents else "generic"
+
+    def find_intent(self, text: str, language: str = "", dice_system: str = "") -> str:
+        """扫描词表，返回命中的第一个意图 id（按 priority 升序，即先匹配者胜）。
+
+        返回空串表示没有命中任何意图。
+        """
+        source = str(text or "")
+        lang = normalize_language(language)
+        if lang != "en":
+            # 中文按去掉空白后的子串匹配（与 checks.py _normalized 一致）。
+            haystack = source.replace(" ", "").lower()
+            is_word_match = False
+        else:
+            haystack = source
+            is_word_match = True
+        entries = [
+            (intent, self.intents.get(intent) or {})
+            for intent in self.intents
+            if intent != "defaults"
+        ]
+        if not entries:
+            return ""
+        entries.sort(
+            key=lambda item: int(item[1].get("priority", 99)),
+        )
+        prefer_longest = self.prefer_longest_match()
+        best_intent = ""
+        best_len = 0
+        for intent, block in entries:
+            if not block.get("aliases"):
+                continue
+            if dice_system and not self.intent_applies_to(intent, dice_system):
+                continue
+            mode = self.intent_match_mode(intent, language)
+            matched_len = 0
+            for alias in self.intent_aliases(intent, language):
+                if not alias:
+                    continue
+                if is_word_match:
+                    import re
+
+                    if re.search(rf"\b{re.escape(alias)}\b", haystack):
+                        matched_len = max(matched_len, len(alias))
+                elif alias in haystack:
+                    matched_len = max(matched_len, len(alias))
+            if matched_len > 0:
+                if not prefer_longest or matched_len > best_len:
+                    best_len = matched_len
+                    best_intent = intent
+        return best_intent
 
     # ---- 属性 ----
 

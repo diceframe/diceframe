@@ -1,0 +1,312 @@
+{
+  "rule_id": "intents_base",
+  "rule_name": "检定意图词表基础数据",
+  "abstract": true,
+  "intents": {
+    "defaults": {
+      "applies_to_dice_systems": ["d20", "d100"],
+      "zh_match": "substring",
+      "en_match": "word",
+      "case_sensitive": false,
+      "prefer_longest": true
+    },
+    "stealth": {
+      "aliases": {
+        "zh-CN": [
+          "潜行", "潜入", "隐匿", "隐藏", "躲藏", "潜伏", "悄悄", "偷偷", "偷偷摸摸",
+          "鬼鬼祟祟", "蹑手蹑脚", "悄无声息", "无声", "无声无息", "绕后", "摸进",
+          "摸上去", "溜进", "溜走", "偷溜", "闪进", "潜踪", "隐没", "隐身", "藏匿",
+          "隐蔽", "暗中", "屏息", "猫着腰", "潜步", "摸到背后", "潜近", "迂回",
+          "避人耳目", "藏身", "躲进", "尾随", "尾行", "跟梢", "趁人不注意",
+          "神不知鬼不觉", "神出鬼没", "无声潜入", "溜号", "偷溜出去"
+        ],
+        "en": [
+          "sneak", "sneak in", "sneak up", "stealth", "stealthy", "hide", "hiding",
+          "hide out", "conceal", "concealed", "conceal myself", "creep", "creep up",
+          "creep along", "slip", "slip in", "slip out", "slip past", "slip away",
+          "skulk", "lurk", "slink", "pad", "move silently", "move quietly", "be quiet",
+          "tiptoe", "tiptoe in", "noiseless", "undetected", "unnoticed", "unobserved",
+          "stay hidden", "keep hidden", "keep low", "duck behind", "duck into",
+          "stay out of sight", "keep out of sight", "fade into", "ghost past",
+          "ghost through", "shadow", "tail", "stalk", "infiltrate", "infiltrated",
+          "covert", "covertly", "ninja", "vanish", "disappear into", "blend in",
+          "melt into", "sneak around", "sneak behind", "behind their back", "quietly",
+          "keep to the shadows", "stick to the shadows", "hug the wall", "low profile",
+          "keep a low profile", "lie low", "stay low", "under cover",
+          "cover of darkness", "out of sight", "avoid notice", "avoid detection",
+          "escape notice"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["潜行", "隐匿", "潜伏", "躲藏"],
+        "en": ["stealth", "sleight of hand", "dexterity"]
+      },
+      "default_attribute": "dex",
+      "priority": 10
+    },
+    "investigate": {
+      "aliases": {
+        "zh-CN": [
+          "调查", "调查现场", "探查", "检查房间", "搜查", "搜寻", "翻找", "翻箱倒柜",
+          "寻找", "找线索", "寻线索", "查证", "核实", "验证", "核对", "排查",
+          "排查线索", "勘验", "勘测", "验尸", "尸检", "检查尸体", "检查痕迹",
+          "寻找痕迹", "辨认", "识别", "鉴定", "追踪", "追查", "跟踪", "顺藤摸瓜",
+          "追线索", "破案", "查案", "查资料", "查书", "翻阅", "翻查", "查阅", "检索",
+          "研究", "分析", "剖析", "推理", "推断", "推敲", "搜身", "摸尸", "搜刮",
+          "阅读", "看文件", "看资料", "看线索", "比对", "对照", "审阅", "观察细节",
+          "找细节", "发现线索", "推理一下", "想想", "思索", "琢磨", "思考", "动脑",
+          "动脑筋", "推理分析", "分析线索", "研究线索", "追根究底", "查明", "查清",
+          "弄清楚", "搞明白", "检查", "搜索", "探查"
+        ],
+        "en": [
+          "investigate", "investigation", "examine", "examination", "inspect",
+          "inspection", "scrutinize", "study", "analyze", "analyse", "analysis",
+          "research", "search", "searching", "search for clues", "look for clues",
+          "find clues", "hunt", "hunt for", "hunt for clues", "dig", "dig into",
+          "dig deeper", "probe", "look into", "check out", "check", "figure out",
+          "work out", "deduce", "deduction", "reason", "reasoning", "reason it out",
+          "solve", "crack", "decipher", "decode", "interpret", "read", "reading",
+          "go through", "go over", "rifle through", "sift through", "comb through",
+          "pore over", "search the body", "search the scene", "examine the scene",
+          "forensics", "forensic", "autopsy", "trace", "track", "track down",
+          "follow the trail", "follow up", "trail", "chase leads", "gather evidence",
+          "collect evidence", "evidence", "clues", "fingerprints", "verify", "confirm",
+          "double-check", "fact-check", "cross-reference", "archives", "records",
+          "files", "rummage", "magnify", "magnifying glass", "piece it together",
+          "connect the dots", "draw a conclusion", "test a theory",
+          "investigate the room", "search the room", "check the room",
+          "examine the room", "case the place", "follow the money",
+          "follow the paper trail", "audit", "do the math"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["侦查", "调查", "搜索", "图书馆使用", "追踪", "开锁"],
+        "en": ["investigation", "perception", "library use", "research", "search"]
+      },
+      "default_attribute": "int",
+      "priority": 20
+    },
+    "perception": {
+      "aliases": {
+        "zh-CN": [
+          "观察", "看看", "看一看", "张望", "瞅", "瞅瞅", "环视", "环顾", "环顾四周",
+          "扫视", "打量", "瞄", "瞄一眼", "看", "看着", "窥视", "偷窥", "眺望", "远眺",
+          "瞭望", "巡视", "观望", "端详", "凝视", "凝望", "注视", "盯着", "盯", "瞥",
+          "瞥一眼", "偷瞄", "望", "远望", "察觉", "发觉", "发现", "留意", "留心",
+          "留神", "注意", "注意到", "听", "听见", "听到", "聆听", "倾听", "偷听",
+          "窃听", "感觉", "感到", "闻到", "嗅到", "嗅", "察觉异常", "觉得不对",
+          "觉得不对劲", "有预感", "第六感", "直觉", "感应", "感知", "警觉", "警戒",
+          "警惕", "提防", "小心", "四下张望", "东张西望", "打量四周", "看看四周",
+          "看看周围", "四周看看", "查看", "察看", "查看周围", "观察四周", "扫视全场",
+          "目光扫过", "视线扫过", "抬眼", "抬头看", "望向", "盯着看", "认真看",
+          "仔细看", "仔细观察", "侦查", "侦察", "侦查四周", "侦察四周"
+        ],
+        "en": [
+          "perceive", "perception", "observe", "observing", "observation", "look",
+          "look at", "look around", "look about", "look over", "look closely",
+          "have a look", "take a look", "take a good look", "get a look at", "glance",
+          "glance around", "glance over", "glance at", "scan", "scanning", "survey",
+          "watch", "watching", "watch for", "keep watch", "look out", "keep an eye",
+          "keep an eye out", "look out for", "see", "seeing", "spot", "notice",
+          "catch sight of", "glimpse", "peek", "peek at", "peek around", "peer",
+          "peer at", "peer into", "squint", "scrutinize", "take in", "take it all in",
+          "absorb", "listen", "listen for", "listen closely", "listen carefully",
+          "hear", "hearing", "overhear", "eavesdrop", "strain to hear", "make out",
+          "detect", "detection", "discern", "sense", "feel", "smell", "sniff",
+          "sniff the air", "taste", "register", "note", "eyeball", "gander",
+          "looksee", "reconnoiter", "recon", "scout", "alert", "vigilant",
+          "on guard", "be on the lookout", "watchful", "attentive", "pay attention",
+          "pick up on", "gut feeling", "hunch", "sixth sense", "intuition",
+          "sweep the room", "sweep the area", "scan the room", "listen for footsteps"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["侦查", "聆听", "察觉", "感知", "观察"],
+        "en": ["perception", "investigation", "spot hidden", "listen"]
+      },
+      "default_attribute": "wis",
+      "priority": 30
+    },
+    "social": {
+      "aliases": {
+        "zh-CN": [
+          "说服", "劝服", "劝说", "劝导", "游说", "交涉", "谈判", "协商", "商议",
+          "商讨", "讨价还价", "砍价", "讲价", "杀价", "议价", "欺骗", "骗", "哄骗",
+          "蒙骗", "欺诈", "忽悠", "画饼", "画大饼", "威吓", "恐吓", "威胁", "恫吓",
+          "吓唬", "威胁恐吓", "套话", "套取", "套近乎", "打听", "探听", "询问", "问",
+          "提问", "质询", "质问", "盘问", "审问", "审讯", "逼问", "套问", "表演",
+          "演戏", "装", "伪装", "假装", "扮", "乔装", "化装", "撒谎", "说谎", "吹牛",
+          "吹嘘", "自夸", "炫耀", "迷惑", "魅惑", "诱惑", "引诱", "勾引", "撩",
+          "调情", "讨好", "巴结", "奉承", "拍马屁", "阿谀", "谄媚", "请托", "恳求",
+          "哀求", "祈求", "请求", "提议", "结盟", "拉拢", "招揽", "招募", "演讲",
+          "演说", "号召", "鼓动", "煽动", "激将", "安抚", "劝慰", "安慰", "调停",
+          "调解", "斡旋", "打圆场", "说情", "求情", "贿赂", "行贿", "收买", "买通",
+          "讹诈", "敲诈", "勒索", "社交", "寒暄", "搭讪", "攀谈", "闲聊", "聊天",
+          "八卦", "传话", "放话", "吹捧", "恭维", "赞美"
+        ],
+        "en": [
+          "persuade", "persuasion", "convince", "talk into", "talk out of",
+          "talk around", "talk down", "coax", "cajole", "sweet-talk", "sweet talk",
+          "charm", "beguile", "captivate", "win over", "sway", "influence",
+          "negotiate", "negotiation", "negotiations", "bargain", "barter", "haggle",
+          "deal", "make a deal", "cut a deal", "broker", "mediate", "mediation",
+          "deception", "deceive", "deceiving", "lie", "lying", "bluff", "con", "scam",
+          "swindle", "hustle", "manipulate", "manipulation", "gaslight", "fool",
+          "mislead", "misdirect", "intimidate", "intimidation", "threaten", "threat",
+          "menace", "bully", "browbeat", "coerce", "coercion", "strong-arm", "press",
+          "pressure", "order", "command", "demand", "bluster", "interrogate",
+          "question", "quiz", "grill", "probe", "pry", "fish", "fish for",
+          "pump for info", "extract info", "perform", "performance", "act", "acting",
+          "put on", "feign", "pretend", "bluff your way", "fast-talk", "fast talk",
+          "flatter", "flattery", "butter up", "schmooze", "suck up", "kiss up",
+          "grovel", "beg", "plead", "implore", "entreat", "beseech", "appeal",
+          "petition", "request", "ask", "propose", "proposition", "pitch",
+          "sales pitch", "recruit", "recruiting", "rally", "inspire", "exhort",
+          "incite", "taunt", "mock", "insult", "banter", "tease", "joke", "seduce",
+          "flirt", "hit on", "socialize", "mingle", "chat", "small talk", "gossip",
+          "spin", "spin a story", "argue", "debate", "reason with", "talk sense into",
+          "comfort", "console", "reassure", "calm down", "de-escalate",
+          "smooth things over", "make peace", "apologize", "trade favors",
+          "call in a favor", "win their trust", "bribe", "bribery", "buy off",
+          "pay off", "blackmail", "extort", "shake down", "grift", "network",
+          "backroom deal"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["说服", "话术", "魅惑", "威吓", "欺骗", "表演", "心理学"],
+        "en": ["persuasion", "intimidation", "deception", "performance", "insight", "charm"]
+      },
+      "default_attribute": "cha",
+      "priority": 40
+    },
+    "athletics": {
+      "aliases": {
+        "zh-CN": [
+          "攀爬", "攀", "攀登", "攀岩", "爬", "爬上去", "爬上", "爬下", "爬墙", "翻越",
+          "翻过", "跳过", "跳跃", "跳", "蹦", "跃", "跃过", "跳远", "跳高", "跳水",
+          "游泳", "游", "泅渡", "潜水", "冲刺", "全力奔跑", "奔跑", "跑", "疾跑",
+          "狂奔", "追赶", "追逐", "追", "逃", "逃跑", "逃离", "逃脱", "挣脱",
+          "挣脱束缚", "甩开追兵", "推开", "推", "拉开", "拉", "撬开", "撬", "撬动",
+          "撞开", "撞", "冲撞", "撞门", "踹门", "踢开", "搬起", "搬", "举起", "举",
+          "抬", "抬起", "扛", "扛起", "抱", "抱起", "托举", "拎起", "拖", "拖动",
+          "拽", "拉拽", "拽开", "掰开", "拧开", "扭开", "压住", "顶住", "挡住",
+          "撑住", "稳住", "站稳", "保持平衡", "平衡", "走钢丝", "悬垂", "抓住",
+          "抓稳", "攀住", "挂住", "扒住", "徒手", "较劲", "角力", "摔跤", "扳手腕",
+          "拔河", "比力气", "举重", "硬拉", "翻墙", "越墙", "跳上", "跳下", "跳过去",
+          "跨过去", "越过", "渡河", "蹚水"
+        ],
+        "en": [
+          "climb", "climbing", "scale", "scaling", "clamber", "scramble", "shin",
+          "shin up", "ascend", "crawl", "rappel", "abseil", "jump", "jumping", "leap",
+          "bound", "vault", "hurdle", "hop", "skip", "dive", "dive into", "swim",
+          "swimming", "swim across", "wade", "wade across", "ford", "cross the river",
+          "sprint", "run", "running", "run for", "dash", "bolt", "race", "flee",
+          "fleeing", "escape", "escaping", "getaway", "make a run for it",
+          "break free", "struggle free", "wrench", "wrench free", "pull", "push",
+          "shove", "heave", "shove open", "shove aside", "force open", "force the door",
+          "break open", "bust open", "batter down", "break down", "kick in", "ram",
+          "lift", "lifting", "raise", "hoist", "haul", "heft", "carry", "lug", "drag",
+          "tow", "yank", "tug", "pry", "pry open", "lever", "prise", "wrestle",
+          "grapple", "strain", "muscle", "brute force", "overpower", "strong-arm",
+          "bench press", "deadlift", "hold the door", "brace", "brace yourself",
+          "keep balance", "balance on", "tightrope", "cross the gap", "jump the gap",
+          "hang", "hang from", "hold on", "grab hold", "grab", "cling", "cling to",
+          "pull yourself up", "haul yourself up", "squeeze through", "squeeze past",
+          "wiggle through", "shimmy", "hand over hand", "pull-up", "chin-up", "grip",
+          "handhold", "foothold", "leverage", "swing across", "zipline", "acrobatics",
+          "parkour", "free run", "leap of faith"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["攀爬", "游泳", "跳跃", "运动", "体能"],
+        "en": ["athletics", "acrobatics"]
+      },
+      "default_attribute": "str",
+      "priority": 50
+    },
+    "combat": {
+      "aliases": {
+        "zh-CN": [
+          "攻击", "攻击他", "进攻", "出击", "开打", "打", "动手", "出手", "挥剑",
+          "挥砍", "劈", "砍", "斩", "斩击", "削", "刺", "戳", "捅", "扎", "突刺",
+          "冲锋", "突击", "突袭", "偷袭", "伏击", "射击", "开枪", "开枪射击", "开火",
+          "狙击", "扫射", "连射", "点射", "射", "射箭", "拉弓", "搭箭", "开弓", "扔",
+          "投掷", "掷", "丢", "抛", "投石", "飞刀", "格挡", "抵挡", "招架", "挡开",
+          "拨开", "闪避", "躲避", "躲开", "避开", "闪开", "闪身", "侧身", "翻滚",
+          "后撤", "后跳", "施法", "施放法术", "放法术", "释放法术", "咏唱", "吟唱",
+          "念咒", "施咒", "凝聚法力", "引导法术", "近战", "肉搏", "拳打", "揍", "捶",
+          "抓", "咬", "扑", "扑咬", "撞", "顶", "抱摔", "擒拿", "制伏", "压制",
+          "缴械", "夺武器", "防御", "防守", "抵御", "格斗", "搏斗", "缠斗", "混战",
+          "激战", "挥拳", "出拳", "拳击", "掌击", "肘击", "膝撞", "踢", "踢腿",
+          "飞踢", "鞭腿", "拔刀", "出刀", "斩向", "砍向", "刺向", "袭向", "扑向",
+          "冲向", "杀", "击杀", "砍杀", "格杀", "歼灭", "扫荡", "突围", "决斗",
+          "单挑", "挑战", "开战", "战斗", "交战", "瞄准", "瞄准射击", "扣动扳机",
+          "上膛", "装填", "躲子弹", "火力掩护", "掩护", "断后", "殿后", "召唤",
+          "魔法攻击", "法术攻击"
+        ],
+        "en": [
+          "attack", "attacking", "strike", "strike at", "hit", "punch", "swing",
+          "swing at", "slash", "slice", "cut", "cleave", "chop", "stab", "thrust",
+          "lunge", "jab", "poke", "pierce", "impale", "shoot", "shooting", "fire",
+          "open fire", "gun down", "snipe", "spray", "unload", "let off",
+          "pull the trigger", "aim", "aim at", "take aim", "target", "engage",
+          "charge", "rush", "rush at", "lunge at", "dive at", "pounce", "tackle",
+          "grapple", "wrestle", "kick", "roundhouse", "knee", "elbow", "headbutt",
+          "bite", "claw", "swipe", "maul", "smash", "bash", "clobber", "bludgeon",
+          "club", "batter", "swing the sword", "blade", "draw the blade", "unsheathe",
+          "duel", "parry", "block", "defend", "defend against", "dodge", "duck",
+          "weave", "sidestep", "roll away", "evade", "take cover", "duck behind",
+          "counter", "counterattack", "riposte", "flurry", "combo", "rapid strikes",
+          "cast", "casting", "cast a spell", "spell", "magic", "arcane",
+          "incantation", "chant", "invoke", "summon", "conjure", "weave magic",
+          "unleash", "blast", "fireball", "bolt", "ray", "necromancy", "enchant",
+          "buff", "heal", "cure", "smite", "holy", "divine", "elemental", "flame",
+          "lightning", "frost", "poison", "venom", "breath weapon", "shapeshift",
+          "transform", "rage", "frenzy", "berserk", "power attack", "reckless",
+          "sneak attack", "ambush", "flank", "surround", "corner", "pin down",
+          "suppress", "overwatch", "hold the line", "hold them off", "fight back",
+          "fight off", "fend off", "keep at bay", "retreat", "withdraw", "disengage",
+          "fall back", "pull back", "breach", "storm", "siege", "raid", "kill",
+          "killing", "slay", "slaughter", "butcher", "vanquish", "defeat", "subdue",
+          "disarm", "trip", "throw", "throw a weapon", "hurl", "lob", "chuck",
+          "fling", "grenade", "molotov", "bomb", "explosive", "detonate", "blow up",
+          "demolish", "melee", "close combat", "hand-to-hand", "fistfight", "brawl",
+          "fight", "fighting", "combat", "battle", "skirmish", "clash", "shootout",
+          "gunfight", "firefight", "exchange fire", "trade blows", "throw down",
+          "scrap", "rumble", "duke it out", "go toe-to-toe", "sucker punch",
+          "cheap shot", "get the drop", "take them down", "finish them", "execute",
+          "decapitate", "maim", "wound", "injure", "crush", "stomp", "trample",
+          "mow down", "carve through", "cut down", "lay waste", "join the fray",
+          "enter combat", "engage the enemy", "tangle with", "go after",
+          "strike back", "hit back", "fight your way", "cut your way", "shoot your way"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": ["射击", "手枪", "步枪", "格斗", "斗殴", "剑术", "法术", "闪避"],
+        "en": ["attack", "shooting", "firearms", "melee", "combat", "spellcasting", "dodge"]
+      },
+      "default_attribute": "dex",
+      "priority": 60
+    },
+    "generic": {
+      "aliases": {
+        "zh-CN": [
+          "检定", "判定", "掷骰", "投骰", "丢骰", "骰子", "测试", "试试", "试一下",
+          "让我试试", "试试看", "考验", "试试手气", "表现", "一展身手", "亮一手"
+        ],
+        "en": [
+          "roll", "check", "make a check", "do a check", "dice roll", "roll a check",
+          "test", "save", "saving throw", "ability check", "skill check", "attempt",
+          "give it a shot", "give it a go", "take a shot", "try your luck",
+          "test your luck", "show your skill", "show what you've got"
+        ]
+      },
+      "skill_candidates": {
+        "zh-CN": [],
+        "en": []
+      },
+      "default_attribute": null,
+      "priority": 99
+    }
+  }
+}

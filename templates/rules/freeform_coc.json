@@ -1,4 +1,5 @@
 {
+  "extends": "intents_base",
   "rule_version": "1.2",
   "rule_id": "freeform_coc",
   "rule_name": "CoC 7e 调查恐怖轻量规则",

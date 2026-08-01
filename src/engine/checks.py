@@ -127,13 +127,20 @@ def build_check_request(
     candidates: tuple[str, ...] = ()
     attribute = selected_attribute
 
-    for intent_name, aliases, skill_candidates, attr_key in _INTENT_SPECS:
-        if any(_normalized(alias) in text for alias in aliases):
-            intent = intent_name
-            candidates = skill_candidates
-            if not attribute:
-                attribute = attr_key
-            break
+    # 意图识别：优先规则词表（数据驱动），规则未带词表时回退到内置 _INTENT_SPECS。
+    intent = rule.find_intent(action.get("text"), instance.language, dice_system) if rule else ""
+    if intent:
+        candidates = rule.intent_skill_candidates(intent, instance.language) if rule else ()
+        if not attribute:
+            attribute = rule.intent_default_attribute(intent) if rule else ""
+    else:
+        for intent_name, aliases, skill_candidates, attr_key in _INTENT_SPECS:
+            if any(_normalized(alias) in text for alias in aliases):
+                intent = intent_name
+                candidates = skill_candidates
+                if not attribute:
+                    attribute = attr_key
+                break
 
     direct_skill = _find_skill(character_sheet, text, ())
     skill = selected_skill or direct_skill
@@ -141,7 +148,16 @@ def build_check_request(
         skill = _find_skill(character_sheet, text, candidates)
 
     explicit_check = bool(selected_skill or selected_attribute)
-    generic_check = any(word in text for word in _GENERIC_CHECK_WORDS)
+    # 通用检定词：优先用规则词表的 generic 意图（整词边界，避免 'roll' 命中
+    # 'scroll'）；规则没词表时回退内置 _GENERIC_CHECK_WORDS（子串）。
+    generic_check = False
+    if not explicit_check:
+        if rule and "generic" in rule.intents:
+            generic_check = rule.find_intent(
+                action.get("text"), instance.language, dice_system
+            ) == "generic"
+        else:
+            generic_check = any(word in text for word in _GENERIC_CHECK_WORDS)
     if not (explicit_check or intent or direct_skill or generic_check):
         return None
 

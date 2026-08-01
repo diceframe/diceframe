@@ -485,19 +485,20 @@ class DiceResolver:
 
     @staticmethod
     def _guess_attribute_key(actions_text: str, rule: RuleSystem) -> str:
-        hints = [
-            ("dex", ("敏捷", "潜行", "躲", "闪", "射击", "弓", "跳", "攀", "快")),
-            ("str", ("力量", "攻击", "砍", "劈", "推", "撬", "举", "格斗")),
-            ("con", ("体质", "忍耐", "抗", "承受", "耐力")),
-            ("int", ("智力", "调查", "破解", "分析", "知识", "研究", "黑入", "维修")),
-            ("wis", ("感知", "观察", "侦查", "聆听", "察觉", "追踪")),
-            ("cha", ("魅力", "说服", "欺骗", "威胁", "交涉", "表演")),
-        ]
-        keys = set(rule.attribute_keys)
-        for key, words in hints:
-            if key in keys and any(word in actions_text for word in words):
-                return key
-        return "dex" if "dex" in keys else (rule.attribute_keys[0] if rule.attribute_keys else "dex")
+        """从规则词表推断属性：命中意图取该意图的默认属性，过滤到规则合法属性键。
+
+        与 src/engine/checks.py 共享同一份 intents 词表，避免两条路径对同一
+        文本给出不同属性（旧实现是单独硬编码的提示词表）。
+        """
+        if rule:
+            intent = rule.find_intent(actions_text, "")
+            if intent:
+                attr = rule.intent_default_attribute(intent)
+                if attr in rule.attribute_keys:
+                    return attr
+        if rule and "dex" in rule.attribute_keys:
+            return "dex"
+        return rule.attribute_keys[0] if rule and rule.attribute_keys else "dex"
 
     @staticmethod
     def _dnd5e_advantage_mode(actions_text: str, action: dict, rule: RuleSystem) -> tuple[str, str]:
