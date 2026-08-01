@@ -1,8 +1,8 @@
-# DiceFrame v1.8.1
+# DiceFrame v1.8.2
 
 ## 中文
 
-这个版本扩展了角色与跨端游玩体验，并修复 v1.8.0 首次引入头像资源后导致的安装包异常膨胀。角色可以在开团前独立创建和管理，Web 与 Bot 可共同处理幸运改判，并加入完整的角色头像系统。
+这个版本在完整角色与跨端游玩体验的基础上，修复窄桌面窗口下的游玩页布局，并完善 NPC 头像管理；同时沿用 v1.8.1 的全部功能与修复记录。
 
 ### 新功能
 
@@ -13,6 +13,8 @@
 
 ### 优化与修复
 
+- 修复 801–980px 宽度下 GM 控制栏收起后留下大块空白、展开后页面过长的问题；控制栏改为右侧浮层抽屉，并支持独立滚动。
+- 完善 NPC 头像管理：未明确设置头像的 NPC 默认显示空头像，不再自动套用规则头像；GM 可在角色管理中点击头像，从当前规则的 8 张内置头像中选择或上传自定义图片，选择结果随存档持久化。
 - 将内置头像图集改为适配界面分辨率的高质量 WebP，并让便携包只保留运行所需的编译产物；发布流程会阻止 PNG 图集回流、头像重复打包和体积异常增长。
 - 加强模型输出协议隔离：异常的状态标签、检定标签和修复文本不会再混入公开叙事；必要时自动进行一次格式修复重试。
 - Token 自动升档成功后会在 GM 页面显示低干扰提示，便于发现默认预算不足；截断重试会记录实际使用档位。
@@ -24,13 +26,13 @@
 
 ### 下载指南
 
-- **普通 Windows 用户**：下载 `DiceFrame-v1.8.1-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.8.1-windows.zip`。
+- **普通 Windows 用户**：下载 `DiceFrame-v1.8.2-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.8.2-windows.zip`。
 - `.sha256` 是更新校验文件，普通用户不需要手动下载。
 
 ## English
 
-This release expands character and cross-client play and fixes the package-size regression introduced when v1.8.0 first added portrait assets. Characters can now be created and managed before a game starts, Web and bot clients share the same Luck-spend workflow, and DiceFrame gains a complete portrait system.
+This release builds on the complete character and cross-client play experience, fixes the play layout at narrow desktop widths, and completes NPC portrait management. It retains the full feature and fix history from v1.8.1 below.
 
 ### New Features
 
@@ -41,6 +43,8 @@ This release expands character and cross-client play and fixes the package-size 
 
 ### Improvements and Fixes
 
+- Fixed the GM control rail at 801–980px widths so collapsing it no longer leaves a large empty area and expanding it no longer stretches the page. It is now a right-side overlay drawer with independent scrolling.
+- Completed NPC portrait management. NPCs without an explicitly selected portrait now show an empty placeholder instead of receiving an automatic ruleset portrait; GMs can click the portrait in character management to choose from all eight portraits for the current ruleset or upload a custom image, with the choice persisted in the save.
 - Converted built-in portrait atlases to high-quality, UI-sized WebP assets and removed frontend source copies from portable packages. Release validation now blocks legacy PNG atlases, duplicate portable assets, and future portrait-size regressions.
 - Strengthened model-output protocol isolation so malformed state tags, check tags, and repair text no longer leak into public narration; one strict format-repair retry is used when needed.
 - Added a subtle GM notice when automatic token-budget escalation succeeds, and retained the actual successful retry budget for diagnostics.
@@ -52,6 +56,6 @@ This release expands character and cross-client play and fixes the package-size 
 
 ### Download Guide
 
-- **Most Windows users**: Download `DiceFrame-v1.8.1-windows-portable.zip`.
-- **Source package users**: Download `DiceFrame-v1.8.1-windows.zip`.
+- **Most Windows users**: Download `DiceFrame-v1.8.2-windows-portable.zip`.
+- **Source package users**: Download `DiceFrame-v1.8.2-windows.zip`.
 - `.sha256` files are used for update verification and do not need to be downloaded manually.
