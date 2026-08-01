@@ -42,6 +42,7 @@ interface CharacterEditForm {
   portrait?: CharacterPortrait
 }
 interface LevelUpState { player: import('@/api/types').Player; levelUpPoints: number }
+interface NpcPortraitEdit { npcId: string; name: string; portrait?: CharacterPortrait }
 interface CardEditForm {
   card_id: string
   character_name: string
@@ -92,6 +93,7 @@ const busy = ref(false)
 const edit = ref<CharacterEditForm | null>(null)
 const editLevelUp = ref<LevelUpState | null>(null)
 const editCard = ref<CardEditForm | null>(null)
+const editNpcPortrait = ref<NpcPortraitEdit | null>(null)
 const showWizard = ref(false)
 
 const rules = ref<RuleSummary[]>([])
@@ -147,7 +149,7 @@ function currentRuleBinding(): Pick<CharacterCard, 'rule_id' | 'rule_name' | 'ru
   }
 }
 function levelUpPoints(player: import('@/api/types').Player): number { return Number(player.character_sheet?.level_up_points || 0) }
-function npcKey(card: CharacterCard): string { return String(card.id || card.card_id || card.name || card.character_name || Math.random()) }
+function npcKey(card: CharacterCard): string { return String(card.npc_id || card.id || card.card_id || card.name || card.character_name || Math.random()) }
 function npcSummary(card: CharacterCard): string {
   return [
     card.relation ? `${t('relationshipPrefix')} ${card.relation}` : '',
@@ -375,6 +377,30 @@ async function deleteCard(c: CharacterCard) {
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
+function openNpcPortrait(npc: CharacterCard) {
+  editNpcPortrait.value = {
+    npcId: npcKey(npc),
+    name: String(npc.character_name || npc.name || t('unnamed')),
+    portrait: npc.portrait ? { ...npc.portrait } : undefined,
+  }
+}
+
+async function saveNpcPortrait() {
+  const npc = editNpcPortrait.value
+  if (!npc || !game.value) return
+  busy.value = true
+  try {
+    const result = await api<{ ok?: boolean; error?: string }>(
+      `/games/${encodeURIComponent(game.value)}/npc/${encodeURIComponent(npc.npcId)}/portrait`,
+      { method: 'PUT', body: JSON.stringify({ portrait: npc.portrait ?? null }) },
+    )
+    if (!result.ok) throw new Error(result.error || t('saveFailed'))
+    editNpcPortrait.value = null
+    await load()
+    toast.success(t('characterSaved'))
+  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+}
+
 async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
   busy.value = true
   try {
@@ -435,7 +461,11 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
     <div class="card-grid" v-if="data?.npcs?.length">
       <article v-for="n in data.npcs" :key="npcKey(n)" class="char-card">
         <div class="character-card-summary">
-          <PortraitImage :portrait="n.portrait" :rule-id="ruleId" :seed="String(n.id || n.character_name || n.name || '')" :name="String(n.character_name || n.name || '')" :size="56" />
+          <button type="button" class="portrait-edit-button" :title="t('clickToChangeAvatar')" @click="openNpcPortrait(n)">
+            <PortraitImage v-if="n.portrait" :portrait="n.portrait" :rule-id="ruleId" :seed="npcKey(n)" :name="String(n.character_name || n.name || '')" :size="56" />
+            <span v-else class="portrait-image npc-portrait-empty" aria-hidden="true">＋</span>
+            <span>{{ t('clickToChangeAvatar') }}</span>
+          </button>
           <div>
           <h2>{{ n.character_name || n.name || t('unnamed') }}<small v-if="n.tier === 'core'" class="muted"> · {{ t('core') }}</small></h2>
           <p class="muted">{{ npcSummary(n) }}</p>
@@ -522,6 +552,14 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
       <template #actions>
         <button @click="editCard = null">{{ t('cancel') }}</button>
         <button class="primary" :disabled="busy" @click="saveCardEdit">{{ t('saveAction') }}</button>
+      </template>
+    </Modal>
+
+    <Modal v-if="editNpcPortrait" :title="`${editNpcPortrait.name} · ${t('characterAvatar')}`" @close="editNpcPortrait = null">
+      <PortraitPicker v-model="editNpcPortrait.portrait" :rule-id="ruleId" :seed="editNpcPortrait.npcId" :name="editNpcPortrait.name" />
+      <template #actions>
+        <button @click="editNpcPortrait = null">{{ t('cancel') }}</button>
+        <button class="primary" :disabled="busy" @click="saveNpcPortrait">{{ t('saveAction') }}</button>
       </template>
     </Modal>
 

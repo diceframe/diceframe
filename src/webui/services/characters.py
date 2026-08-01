@@ -378,6 +378,62 @@ async def update_character(api: "WebAPI", game_key: str, user_id: str, updates: 
     return {"ok": True}
 
 
+def _validated_portrait(api: "WebAPI", portrait: Any) -> dict[str, str] | None:
+    if portrait is None:
+        return None
+    if not isinstance(portrait, dict):
+        raise ValueError("头像数据无效")
+    kind = str(portrait.get("kind") or "")
+    if kind == "builtin":
+        portrait_id = str(portrait.get("id") or "")
+        if not portrait_id or len(portrait_id) > 100:
+            raise ValueError("内置头像编号无效")
+        return {"kind": "builtin", "id": portrait_id}
+    if kind == "upload":
+        asset_id = str(portrait.get("asset_id") or "")
+        if not asset_id or api.avatar_file(asset_id) is None:
+            raise ValueError("上传头像不存在")
+        return {"kind": "upload", "asset_id": asset_id}
+    raise ValueError("头像类型无效")
+
+
+async def update_npc_portrait(api: "WebAPI", game_key: str, npc_id: str, portrait: Any) -> dict[str, Any]:
+    inst = api._reg.get(api._parse_key(game_key))
+    if not inst:
+        return {"ok": False, "error": "游戏不存在"}
+    npc_key = str(npc_id or "").strip()
+    if not npc_key:
+        return {"ok": False, "error": "NPC 不存在"}
+    npc = inst.npcs.get(npc_key)
+    if npc is None:
+        for key, candidate in inst.npcs.items():
+            if str(candidate.get("id") or candidate.get("npc_id") or "") == npc_key:
+                npc_key, npc = key, candidate
+                break
+    if npc is None and api._lore and inst.world_id:
+        entry = api._lore.get_entry(npc_key)
+        if entry and entry.get("world_id") == inst.world_id and entry.get("type") == "npc":
+            name = str(entry.get("name") or npc_key)
+            npc = {
+                "name": name,
+                "character_name": name,
+                "tier": entry.get("tier", ""),
+            }
+            inst.npcs[npc_key] = npc
+    if npc is None:
+        return {"ok": False, "error": "NPC 不存在"}
+    try:
+        normalized = _validated_portrait(api, portrait)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if normalized is None:
+        npc.pop("portrait", None)
+    else:
+        npc["portrait"] = normalized
+    await api._reg.save(inst)
+    return {"ok": True, "portrait": npc.get("portrait")}
+
+
 async def resolve_payment(api: "WebAPI", game_key: str, payment_id: str, accepted: bool, session_uid: str = "") -> dict[str, Any]:
     inst = api._reg.get(api._parse_key(game_key))
     if not inst:

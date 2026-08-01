@@ -478,6 +478,19 @@ async def api_char_delete(request: web.Request) -> web.Response:
     return web.json_response(await api.delete_character(gk, uid))
 
 
+async def api_npc_portrait_update(request: web.Request) -> web.Response:
+    gk = request.match_info["game_key"]
+    npc_id = request.match_info["npc_id"]
+    api = _get_api(request)
+    inst = request.app["subsystems"].registry.get(api._parse_key(gk))
+    if not inst:
+        return web.json_response({"error": "游戏不存在"}, status=404)
+    if request.get("user_id", "") != inst.gm_uid:
+        return web.json_response({"error": "仅 GM 可修改 NPC 头像"}, status=403)
+    body = await request.json()
+    return web.json_response(await api.update_npc_portrait(gk, npc_id, body.get("portrait")))
+
+
 async def api_player_create(request: web.Request) -> web.Response:
     gk = request.match_info["game_key"]
     body = await request.json()
@@ -694,6 +707,7 @@ def register_games(app: web.Application) -> None:
     app.router.add_get("/api/games/{game_key}/export", api_export_game)
     app.router.add_route("PUT", "/api/games/{game_key}/character/{user_id}", api_char_update)
     app.router.add_route("DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete)
+    app.router.add_route("PUT", "/api/games/{game_key}/npc/{npc_id}/portrait", api_npc_portrait_update)
     app.router.add_post("/api/games/{game_key}/players", api_player_create)
     app.router.add_post("/api/games/{game_key}/verify-room-password", api_verify_room_password)
     app.router.add_post("/api/games/{game_key}/room-password", api_set_room_password)

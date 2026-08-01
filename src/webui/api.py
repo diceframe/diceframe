@@ -407,6 +407,9 @@ class WebAPI:
     async def update_character(self, game_key: str, user_id: str, updates: dict) -> dict[str, Any]:
         return await characters.update_character(self, game_key, user_id, updates)
 
+    async def update_npc_portrait(self, game_key: str, npc_id: str, portrait: Any) -> dict[str, Any]:
+        return await characters.update_npc_portrait(self, game_key, npc_id, portrait)
+
     async def resolve_payment(self, game_key: str, payment_id: str, accepted: bool, session_uid: str = "") -> dict[str, Any]:
         return await characters.resolve_payment(self, game_key, payment_id, accepted, session_uid)
 

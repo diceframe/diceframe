@@ -1022,6 +1022,37 @@ async def test_character_wizard_update_changes_display_name_and_sheet(web_api):
 
 
 @pytest.mark.asyncio
+async def test_npc_portrait_is_explicit_and_persisted(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    created = await api.create_game(
+        "template_world",
+        "NPC 头像测试",
+        players=[{"character_name": "主持人", "attributes": {"str": 10}}],
+        gm_uid="web_session_gm",
+    )
+    inst = registry.get(api._parse_key(created["game_key"]))
+    inst.npcs["npc-guide"] = {"name": "向导", "character_name": "向导"}
+
+    before = api.list_characters(created["game_key"])["npcs"][0]
+    assert "portrait" not in before
+
+    updated = await api.update_npc_portrait(
+        created["game_key"],
+        "npc-guide",
+        {"kind": "builtin", "id": "freeform_fantasy:5"},
+    )
+    assert updated == {
+        "ok": True,
+        "portrait": {"kind": "builtin", "id": "freeform_fantasy:5"},
+    }
+    assert inst.npcs["npc-guide"]["portrait"] == updated["portrait"]
+
+    reset = await api.update_npc_portrait(created["game_key"], "npc-guide", None)
+    assert reset == {"ok": True, "portrait": None}
+    assert "portrait" not in inst.npcs["npc-guide"]
+
+
+@pytest.mark.asyncio
 async def test_create_player_allows_overpointed_sheet(web_api):
     api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
     created = await api.create_game(
