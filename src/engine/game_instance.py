@@ -748,38 +748,38 @@ class GameInstance:
             if not self.can_accept_actions():
                 self.pending_actions.append(action_entry)
                 return False
-            if not self.solo_mode:
-                existing_index = next(
-                    (index for index, action in enumerate(self.action_queue)
-                     if action.get("user_id") == user_id),
-                    None,
+            # 切换行动时替换同玩家的旧条目（solo 与多人一致）：
+            # 避免 solo 模式反复追加堆积多条行动、触发 3 条上限，
+            # 也让未掷骰的旧检定随替换作废，不再卡住掷骰。
+            existing_index = next(
+                (index for index, action in enumerate(self.action_queue)
+                 if action.get("user_id") == user_id),
+                None,
+            )
+            if existing_index is not None:
+                existing = self.action_queue[existing_index]
+                old_roll = next(
+                    (line for line in str(existing.get("text", "")).splitlines()
+                     if line.startswith("(系统掷骰:") and line.endswith(")")),
+                    "",
                 )
-                if existing_index is not None:
-                    existing = self.action_queue[existing_index]
-                    old_roll = next(
-                        (line for line in str(existing.get("text", "")).splitlines()
-                         if line.startswith("(系统掷骰:") and line.endswith(")")),
-                        "",
-                    )
-                    if old_roll:
-                        clean_text = "\n".join(
-                            line for line in str(action_text).splitlines()
-                            if not (line.startswith("(系统掷骰:") and line.endswith(")"))
-                        ).rstrip()
-                        action_entry["text"] = f"{clean_text}\n{old_roll}"
-                        action_entry["dice_pending"] = False
-                        action_entry["dice_system"] = existing.get("dice_system", "")
-                        action_entry["dice_roll_source"] = existing.get("dice_roll_source", "")
-                        action_entry["dice_value"] = existing.get("dice_value")
-                        action_entry["dice_rolls"] = list(existing.get("dice_rolls") or [])
-                        action_entry["check_request"] = existing.get("check_request")
-                    old_revision = int(existing.get("revision_count", 1) or 1)
-                    action_entry["revision_count"] = old_revision + 1 if count_revision else old_revision
-                    self.action_queue[existing_index] = action_entry
-                else:
-                    action_entry["revision_count"] = 1
-                    self.action_queue.append(action_entry)
+                if old_roll:
+                    clean_text = "\n".join(
+                        line for line in str(action_text).splitlines()
+                        if not (line.startswith("(系统掷骰:") and line.endswith(")"))
+                    ).rstrip()
+                    action_entry["text"] = f"{clean_text}\n{old_roll}"
+                    action_entry["dice_pending"] = False
+                    action_entry["dice_system"] = existing.get("dice_system", "")
+                    action_entry["dice_roll_source"] = existing.get("dice_roll_source", "")
+                    action_entry["dice_value"] = existing.get("dice_value")
+                    action_entry["dice_rolls"] = list(existing.get("dice_rolls") or [])
+                    action_entry["check_request"] = existing.get("check_request")
+                old_revision = int(existing.get("revision_count", 1) or 1)
+                action_entry["revision_count"] = old_revision + 1 if count_revision else old_revision
+                self.action_queue[existing_index] = action_entry
             else:
+                action_entry["revision_count"] = 1
                 self.action_queue.append(action_entry)
             self.ready_players.add(user_id)
             self.last_activity = datetime.now(timezone.utc).isoformat()

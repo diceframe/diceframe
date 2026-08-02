@@ -26,7 +26,7 @@ const {
   toolKey, loadTools, setToolInput, invokeTool,
 } = usePluginTools(busy)
 const {
-  contentGroups, contentLoading, contentTargetWorldId, worldOptions,
+  contentGroups, contentByPlugin, contentGroupCount, contentLoading, contentTargetWorldId, worldOptions,
   loadContentResources, loadWorlds, contentTitle, contentSubtitle, importContent,
 } = usePluginContent(busy)
 
@@ -46,7 +46,7 @@ const {
   plugins, expandedPluginNames, loading, installFile, overwriteInstall,
   load, ordered, value, textValue, selectValue, numberValue, set,
   listValue, secretPlaceholder, showGroup, parseList, save, restart,
-  clearCardCache, toggleRunning, onPluginFile, installPlugin, rescanLocalPlugins,
+  clearCardCache, toggleRunning, toggleEnabled, onPluginFile, installPlugin, rescanLocalPlugins,
 } = useInstalledPlugins(
   busy,
   () => Promise.all([loadPluginThemes(), loadTools()]),
@@ -123,6 +123,13 @@ onMounted(async () => {
                 <NTag size="small">{{ pluginTypeLabel(p.plugin_type) }}</NTag>
                 <NTag :type="p.running ? 'success' : 'default'" size="small">{{ p.status }}</NTag>
                 <NSwitch v-if="p.has_entrypoint" :value="p.running" :disabled="busy === p.id" @update:value="toggleRunning(p, $event)" />
+                <NSwitch
+                  v-else-if="p.plugin_type === 'content-pack' || p.plugin_type === 'theme'"
+                  :value="p.config?.enabled !== false"
+                  :disabled="busy === p.id"
+                  :aria-label="t('pluginEnabled')"
+                  @update:value="toggleEnabled(p, $event)"
+                />
               </div>
             </template>
 
@@ -350,35 +357,54 @@ onMounted(async () => {
           :placeholder="t('selectLorebook')"
           class="content-world-select"
         />
+        <span class="muted">{{ t('contentTotalCount', { count: contentGroupCount }) }}</span>
         <NButton :loading="contentLoading" @click="loadContentResources">
           <template #icon><NIcon :component="RefreshOutline" /></template>
           {{ t('refresh') }}
         </NButton>
       </section>
       <NSpin :show="contentLoading">
-        <div class="content-catalog">
-          <section v-for="group in contentGroups" :key="group.key" class="content-group">
-            <h3>{{ t(group.labelKey) }} <span class="muted">{{ group.items.length }}</span></h3>
-            <div v-if="group.items.length" class="content-list">
-              <article v-for="item in group.items" :key="`${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`" class="content-item">
-                <div class="content-item-main">
-                  <strong>{{ contentTitle(item) }}</strong>
-                  <p class="muted">{{ contentSubtitle(item) || t('noDescription') }}</p>
+        <p v-if="!contentByPlugin.length" class="muted">{{ t('noPluginsAvailable') }}</p>
+        <NCollapse v-else class="content-collapse">
+          <NCollapseItem v-for="plugin in contentByPlugin" :key="plugin.plugin_id" :name="plugin.plugin_id">
+            <template #header>
+              <div class="content-plugin-head">
+                <h3>{{ plugin.plugin_name }}</h3>
+                <span class="muted">{{ plugin.plugin_id }}</span>
+              </div>
+            </template>
+            <template #header-extra>
+              <NTag size="small">{{ plugin.groups.reduce((sum, g) => sum + g.items.length, 0) }}</NTag>
+            </template>
+            <div class="content-plugin-body">
+              <section v-for="group in plugin.groups" :key="group.key" class="content-group">
+                <h4>{{ t(group.labelKey) }} <span class="muted">{{ group.items.length }}</span></h4>
+                <div v-if="group.items.length" class="content-list">
+                  <article
+                    v-for="item in group.items"
+                    :key="`${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`"
+                    class="content-item"
+                  >
+                    <div class="content-item-main">
+                      <strong>{{ contentTitle(item) }}</strong>
+                      <p class="muted">{{ contentSubtitle(item) || t('noDescription') }}</p>
+                    </div>
+                    <NButton
+                      size="small"
+                      secondary
+                      :disabled="group.key !== 'character_template' && !contentTargetWorldId"
+                      :loading="busy === `${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`"
+                      @click="importContent(group.key, item)"
+                    >
+                      {{ group.key === 'character_template' ? t('importCharacterCard') : t('importLorebook') }}
+                    </NButton>
+                  </article>
                 </div>
-                <NButton
-                  size="small"
-                  secondary
-                  :disabled="group.key !== 'character_template' && !contentTargetWorldId"
-                  :loading="busy === `${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`"
-                  @click="importContent(group.key, item)"
-                >
-                  {{ group.key === 'character_template' ? t('importCharacterCard') : t('importLorebook') }}
-                </NButton>
-              </article>
+                <p v-else class="muted">{{ t('none') }}</p>
+              </section>
             </div>
-            <p v-else class="muted">{{ t('none') }}</p>
-          </section>
-        </div>
+          </NCollapseItem>
+        </NCollapse>
       </NSpin>
     </NTabPane>
 
@@ -495,10 +521,78 @@ onMounted(async () => {
   align-items: center;
 }
 
-.content-catalog {
+.content-collapse {
+  margin-top: 4px;
+}
+
+.content-plugin-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.content-plugin-head h3 {
+  margin: 0;
+  color: var(--gold-2);
+  font-size: 15px;
+}
+
+.content-plugin-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+  padding-top: 4px;
+}
+
+.content-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.content-group h3 {
+  margin: 0 0 10px;
+  color: var(--gold-2);
+  font-size: 15px;
+}
+
+.content-group h4 {
+  margin: 0 0 8px;
+  color: var(--gold-2);
+  font-size: 14px;
+}
+
+.content-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.content-item {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .03);
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.content-item strong,
+.content-item p {
+  overflow-wrap: anywhere;
+}
+
+.content-item-main {
+  min-width: 0;
+}
+
+.content-item p {
+  margin: 4px 0 0;
+  line-height: 1.45;
 }
 
 .tool-grid {
@@ -554,49 +648,6 @@ onMounted(async () => {
 
 .content-world-select {
   width: min(360px, 100%);
-}
-
-.content-group {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--panel-soft);
-}
-
-.content-group h3 {
-  margin: 0 0 10px;
-  color: var(--gold-2);
-  font-size: 15px;
-}
-
-.content-list {
-  display: grid;
-  gap: 8px;
-}
-
-.content-item {
-  min-width: 0;
-  padding: 9px;
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, .03);
-  display: grid;
-  gap: 8px;
-}
-
-.content-item strong,
-.content-item p {
-  overflow-wrap: anywhere;
-}
-
-.content-item-main {
-  min-width: 0;
-}
-
-.content-item p {
-  margin: 4px 0 0;
-  line-height: 1.45;
 }
 
 .plugin-install h3 {

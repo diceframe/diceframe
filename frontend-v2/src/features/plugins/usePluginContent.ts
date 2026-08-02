@@ -26,6 +26,35 @@ export function usePluginContent(busy: Ref<string>) {
     ...group,
     items: contentResources.value[group.key] || [],
   })))
+
+  // 按插件分组的资源：每个插件一个折叠项，内部再按类型分
+  const contentByPlugin = computed(() => {
+    const plugins = new Map<string, {
+      plugin_id: string
+      plugin_name: string
+      groups: { key: string; labelKey: MessageKey; items: PluginContentResource[] }[]
+    }>()
+    for (const group of CONTENT_GROUPS) {
+      for (const item of contentResources.value[group.key] || []) {
+        const pid = String(item.plugin_id || 'unknown')
+        if (!plugins.has(pid)) {
+          plugins.set(pid, {
+            plugin_id: pid,
+            plugin_name: String(item.plugin_name || pid),
+            groups: CONTENT_GROUPS.map(g => ({ key: g.key, labelKey: g.labelKey, items: [] as PluginContentResource[] })),
+          })
+        }
+        const entry = plugins.get(pid)!
+        const target = entry.groups.find(g => g.key === group.key)!
+        target.items.push(item)
+      }
+    }
+    return [...plugins.values()].sort((a, b) => a.plugin_name.localeCompare(b.plugin_name))
+  })
+
+  const contentGroupCount = computed(() =>
+    Object.values(contentResources.value).reduce((sum, arr) => sum + (arr?.length || 0), 0),
+  )
   const worldOptions = computed(() => (worlds.value || []).map(world => {
     const id = String(world.id || world.world_id || '')
     return {
@@ -90,6 +119,8 @@ export function usePluginContent(busy: Ref<string>) {
 
   return {
     contentGroups,
+    contentByPlugin,
+    contentGroupCount,
     contentLoading,
     contentTargetWorldId,
     worldOptions,

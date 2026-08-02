@@ -23,9 +23,7 @@ export function useInstalledPlugins(
     try {
       const response = await pluginApi.list()
       plugins.value = response.plugins || []
-      if (!expandedPluginNames.value.length) {
-        expandedPluginNames.value = plugins.value.map(plugin => plugin.id)
-      }
+      // 默认收起全部插件，避免插件多时页面过长；用户展开的保持展开。
       await afterLoad()
     } catch (error: unknown) {
       toast.error(errorMessage(error))
@@ -161,6 +159,13 @@ export function useInstalledPlugins(
     }
   }
 
+  // 静态插件（内容包/主题）没有进程开关，用 config 的 enabled 作为列表开关，勾选即保存生效。
+  async function toggleEnabled(plugin: PluginInfo, enabled: boolean) {
+    if (!plugin.config) plugin.config = {}
+    plugin.config.enabled = enabled
+    await save(plugin)
+  }
+
   function onPluginFile(event: Event) {
     installFile.value = (event.target as HTMLInputElement).files?.[0] || null
   }
@@ -221,6 +226,7 @@ export function useInstalledPlugins(
     restart,
     clearCardCache,
     toggleRunning,
+    toggleEnabled,
     onPluginFile,
     installPlugin,
     rescanLocalPlugins,

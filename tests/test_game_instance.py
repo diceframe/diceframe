@@ -82,13 +82,32 @@ class TestGameInstance:
         assert inst.action_queue[0]["text"] == "我攻击守卫\n(系统掷骰: d20=16)"
         assert inst.should_advance() is True
 
-    async def test_solo_actions_remain_separate(self):
+    async def test_solo_action_replaces_previous(self):
+        # 切换行动应替换旧行动，而不是追加堆积（避免触发 3 条上限、旧检定残留）
         inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=True)
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "第一步")
         await inst.add_action("user1", "第二步")
 
-        assert [action["text"] for action in inst.action_queue] == ["第一步", "第二步"]
+        assert [action["text"] for action in inst.action_queue] == ["第二步"]
+
+    async def test_solo_action_replaces_old_pending_dice(self):
+        # 回归：solo 反复切换待掷骰行动，应只保留最新一条，且旧检定作废
+        inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=True)
+        inst.state = GameState.ACTIVE_ACTION
+        inst.players["user1"] = {"character_name": "冒险者"}
+        for i in range(5):
+            await inst.add_action(
+                "user1",
+                f"检查杂物间第{i + 1}次",
+                dice_pending=True,
+                dice_system="d100",
+                check_request={"label": f"侦查检定{i}", "dice_system": "d100"},
+            )
+        assert len(inst.action_queue) == 1
+        assert inst.action_queue[0]["text"] == "检查杂物间第5次"
+        assert inst.action_queue[0]["dice_pending"] is True
+        assert not inst.has_pending_dice("user2")  # 无其他玩家待掷骰
 
     async def test_action_blocked_in_judgment(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
