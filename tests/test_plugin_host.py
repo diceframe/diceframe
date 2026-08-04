@@ -642,6 +642,158 @@ def test_autoimport_plugin_content_without_world_only_imports_cards():
     assert len(saved_entries) == 0  # 无世界，npc 跳过
 
 
+def test_rename_dir_with_retry_retries_transient_permission_error(tmp_path, monkeypatch):
+    """Windows 下目录被短暂锁定时自动重试，最终成功。"""
+    import asyncio
+
+    import src.plugin_host.host as host_module
+
+    calls = {"n": 0}
+
+    def fake_rename(self, target):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError(5, "Access is denied")
+        return None
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+    src_dir = tmp_path / "src"
+    dst_dir = tmp_path / "dst"
+    src_dir.mkdir()
+    dst_dir.mkdir()
+
+    async def run():
+        await host_module._rename_dir_with_retry(src_dir, dst_dir)
+
+    asyncio.run(run())
+    assert calls["n"] == 3
+
+
+def test_rename_dir_with_retry_gives_up_after_attempts(tmp_path, monkeypatch):
+    """超过重试次数后继续抛错。"""
+    import asyncio
+
+    import src.plugin_host.host as host_module
+
+    calls = {"n": 0}
+
+    def fake_rename(self, target):
+        calls["n"] += 1
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+    src_dir = tmp_path / "src"
+    dst_dir = tmp_path / "dst"
+    src_dir.mkdir()
+    dst_dir.mkdir()
+
+    async def run():
+        await host_module._rename_dir_with_retry(src_dir, dst_dir, attempts=3, delay=0)
+
+    with pytest.raises(PermissionError):
+        asyncio.run(run())
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_install_marketplace_plugin_triggers_autoimport_when_enabled():
+    """已启用内容包从商店安装/更新后自动同步世界书并灌入内容。"""
+    from src.webui.services.plugins import install_marketplace_plugin
+
+    saved_cards: list = []
+    saved_entries: list = []
+
+    class _Contrib:
+        def __init__(self, key):
+            self.plugin_id = "pack"
+            self.key = key
+
+    class _ContribRegistry:
+        def list(self, kind):
+            return [_Contrib("w1")]
+
+    class _Plugins:
+        contributions = _ContribRegistry()
+
+        def __init__(self):
+            self.synced = False
+
+        async def install_from_marketplace(self, plugin_id, overwrite=False):
+            return {"id": plugin_id, "name": "pack"}
+
+        def public_detail(self, plugin_id):
+            return {"id": plugin_id, "enabled": True, "status": "active"}
+
+        def sync_lorebooks(self, lore):
+            self.synced = True
+            return 0
+
+        def list_content_resources(self):
+            return {
+                "character_template": [{"plugin_id": "pack", "id": "hero", "character_name": "Hero", "plugin_name": "pack"}],
+                "npc": [{"plugin_id": "pack", "id": "himmel", "name": "Himmel", "description": "hero"}],
+                "spell": [], "item": [], "class": [],
+            }
+
+    class _Lore:
+        def get_world(self, wid):
+            return wid == "w1"
+
+        def get_entry(self, eid):
+            return None
+
+        def update_entry(self, eid, entry):
+            saved_entries.append(entry)
+
+    class _Api:
+        _plugins = _Plugins()
+        _lore = _Lore()
+
+        def save_character_card(self, card):
+            saved_cards.append(card)
+            return {"ok": True}
+
+        def save_entry(self, entry):
+            saved_entries.append(entry)
+            return {"ok": True}
+
+    api = _Api()
+    result = await install_marketplace_plugin(api, "pack")
+
+    assert result["ok"] is True
+    assert api._plugins.synced is True
+    assert len(saved_cards) == 1
+    assert saved_cards[0]["character_name"] == "Hero"
+    assert len(saved_entries) == 1
+    assert saved_entries[0]["source_plugin"] == "pack"
+
+
+@pytest.mark.asyncio
+async def test_install_marketplace_plugin_skips_autoimport_when_disabled():
+    """未启用插件安装后不触发自动导入。"""
+    from src.webui.services.plugins import install_marketplace_plugin
+
+    class _Plugins:
+        async def install_from_marketplace(self, plugin_id, overwrite=False):
+            return {"id": plugin_id, "name": "pack"}
+
+        def public_detail(self, plugin_id):
+            return {"id": plugin_id, "enabled": False, "status": "disabled"}
+
+        def sync_lorebooks(self, lore):
+            raise AssertionError("should not sync")
+
+        def list_content_resources(self):
+            raise AssertionError("should not list")
+
+    class _Api:
+        _plugins = _Plugins()
+        _lore = None
+
+    result = await install_marketplace_plugin(_Api(), "pack")
+    assert result["ok"] is True
+
+
 def test_invalid_manifest_isolated_from_other_plugins(tmp_path):
     plugins = tmp_path / "plugins"
     write_plugin(plugins, "good")

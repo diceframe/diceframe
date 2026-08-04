@@ -1,4 +1,4 @@
-# DiceFrame v1.9.0
+# DiceFrame v1.9.1
 
 ## 中文
 
@@ -24,8 +24,8 @@
 
 ### 下载指南
 
-- **普通 Windows 用户**：下载 `DiceFrame-v1.9.0-windows-portable.zip`。
-- **源码运行用户**：下载 `DiceFrame-v1.9.0-windows.zip`。
+- **普通 Windows 用户**：下载 `DiceFrame-v1.9.1-windows-portable.zip`。
+- **源码运行用户**：下载 `DiceFrame-v1.9.1-windows.zip`。
 - `.sha256` 是更新校验文件，普通用户不需要手动下载。
 
 ## English
@@ -52,6 +52,6 @@ This release brings save import/export and a plugin-store overhaul: games can be
 
 ### Download Guide
 
-- **Regular Windows users**: download `DiceFrame-v1.9.0-windows-portable.zip`.
-- **Source-run users**: download `DiceFrame-v1.9.0-windows.zip`.
+- **Regular Windows users**: download `DiceFrame-v1.9.1-windows-portable.zip`.
+- **Source-run users**: download `DiceFrame-v1.9.1-windows.zip`.
 - `.sha256` files are update checksums; regular users do not need to download them manually.

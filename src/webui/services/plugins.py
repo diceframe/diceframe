@@ -126,6 +126,23 @@ def _autoimport_plugin_content(api: "WebAPI", plugin_id: str) -> None:
                 logger.warning("自动灌注插件 %s 内容失败（%s）", plugin_id, kind, exc_info=True)
 
 
+def _maybe_autoimport_after_install(api: "WebAPI", plugin_id: str) -> None:
+    """安装/更新内容包后自动同步世界书并灌入内容，避免已启用插件更新后内容缺失。"""
+    if not api._plugins:
+        return
+    try:
+        detail = api._plugins.public_detail(plugin_id)
+    except Exception:
+        return
+    if not detail.get("enabled") or detail.get("status") != "active":
+        return
+    try:
+        sync_plugin_lorebooks(api)
+        _autoimport_plugin_content(api, plugin_id)
+    except Exception:
+        logger.warning("安装后自动灌入插件内容失败，已跳过: %s", plugin_id, exc_info=True)
+
+
 async def update_plugin_config(api: "WebAPI", plugin_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     if not api._plugins: return {"ok": False, "error": "插件宿主未启用"}
     result = await api._plugins.update_config(plugin_id, changes)
@@ -148,7 +165,9 @@ async def control_plugin(api: "WebAPI", plugin_id: str, action: str) -> dict[str
 async def install_plugin(api: "WebAPI", payload: bytes, overwrite: bool = False) -> dict[str, Any]:
     if not api._plugins:
         return {"ok": False, "error": "插件宿主未启用"}
-    return {"ok": True, **await api._plugins.install_from_zip(payload, overwrite=overwrite)}
+    detail = await api._plugins.install_from_zip(payload, overwrite=overwrite)
+    _maybe_autoimport_after_install(api, detail.get("id", ""))
+    return {"ok": True, **detail}
 
 async def list_plugin_marketplace(api: "WebAPI") -> dict[str, Any]:
     if not api._plugins:
@@ -158,7 +177,9 @@ async def list_plugin_marketplace(api: "WebAPI") -> dict[str, Any]:
 async def install_marketplace_plugin(api: "WebAPI", plugin_id: str, overwrite: bool = False) -> dict[str, Any]:
     if not api._plugins:
         return {"ok": False, "error": "插件宿主未启用"}
-    return {"ok": True, **await api._plugins.install_from_marketplace(plugin_id, overwrite=overwrite)}
+    result = await api._plugins.install_from_marketplace(plugin_id, overwrite=overwrite)
+    _maybe_autoimport_after_install(api, plugin_id)
+    return {"ok": True, **result}
 
 async def update_marketplace_plugin(api: "WebAPI", plugin_id: str) -> dict[str, Any]:
     if not api._plugins:

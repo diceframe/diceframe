@@ -91,6 +91,18 @@ class PluginRuntime:
     error: str = ""
 
 
+async def _rename_dir_with_retry(src: Path, dst: Path, *, attempts: int = 3, delay: float = 0.3) -> None:
+    """重命名目录；Windows 下杀毒软件实时扫描可能短暂锁定目录，失败时小间隔重试。"""
+    for attempt in range(1, attempts + 1):
+        try:
+            src.rename(dst)
+            return
+        except OSError:
+            if attempt >= attempts:
+                raise
+            await asyncio.sleep(delay)
+
+
 class PluginHost:
     def __init__(self, plugins_dir: Path, data_dir: Path, *, base_env: dict[str, str] | None = None) -> None:
         self.plugins_dir = plugins_dir
@@ -447,15 +459,15 @@ class PluginHost:
                 if target_dir.exists():
                     if plugin_id in self.plugins:
                         await self.stop(plugin_id)
-                    target_dir.rename(backup_dir)
-                staging_dir.rename(target_dir)
+                    await _rename_dir_with_retry(target_dir, backup_dir)
+                await _rename_dir_with_retry(staging_dir, target_dir)
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
             except Exception:
                 if target_dir.exists() and not (target_dir / "plugin.json").exists():
                     shutil.rmtree(target_dir, ignore_errors=True)
                 if backup_dir.exists() and not target_dir.exists():
-                    backup_dir.rename(target_dir)
+                    await _rename_dir_with_retry(backup_dir, target_dir)
                 if staging_dir.exists():
                     shutil.rmtree(staging_dir, ignore_errors=True)
                 raise
