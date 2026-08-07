@@ -840,7 +840,6 @@ function redownloadUpdatePackage() {
               <p>{{ t('officialWebsite') }}: <a href="https://diceframe.com" target="_blank" rel="noopener">diceframe.com</a></p>
               <p>{{ t('projectAddress') }}: <a href="https://github.com/diceframe/diceframe" target="_blank" rel="noopener">diceframe/diceframe</a></p>
               <p>{{ t('issueFeedback') }}: <a href="https://github.com/diceframe/diceframe/issues" target="_blank" rel="noopener">{{ t('submitIssue') }}</a></p>
-              <p>{{ t('qqGroup') }}: 1060613588</p>
             </section>
             <section class="sponsor-card" :aria-label="t('supportProject')">
               <div>
