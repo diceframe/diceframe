@@ -199,8 +199,10 @@ def _sha256_file(path: Path) -> str:
 def download_cloudflared(package_dir: Path) -> None:
     """下载 cloudflared 二进制打进包内，让外网接入插件离线可用。
 
-    按构建平台选择资产：portable/source 包在 Windows 构建 -> windows-amd64；
-    仅 linux-amd64 留给未来 Linux/Docker 构建。失败不阻断打包（插件会运行时下载）。
+    当前 release.yml 仅 Windows 平台构建（ubuntu 跑 windows-zip、windows 跑
+    portable），均不内置——source/portable 包里外网接入插件运行时自行下载。
+    函数保留，供未来 Linux/Docker 构建复用（按构建平台选资产：
+    windows-amd64 / linux-amd64）。失败不阻断打包（插件会运行时下载）。
     """
     target_dir = package_dir / "cloudflared"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -229,7 +231,13 @@ def download_cloudflared(package_dir: Path) -> None:
         print(f"Warning: cloudflared download failed, plugin will fetch at runtime: {exc}")
 
 
-def prepare_package_tree(package_dir: Path, *, include_cloudflared: bool = True) -> None:
+def prepare_package_tree(package_dir: Path, *, include_cloudflared: bool = False) -> None:
+    """组装发布包目录树。
+
+    include_cloudflared 默认 False：source 与 portable 包都不内置 cloudflared
+    二进制，外网接入插件运行时自行下载（插件 v0.2.0 起带 sha256 校验）。
+    参数保留，供未来 Linux/Docker 构建复用（内置 linux-amd64）。
+    """
     if package_dir.exists():
         shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True)
