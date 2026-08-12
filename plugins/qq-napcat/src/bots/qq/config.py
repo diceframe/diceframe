@@ -26,7 +26,6 @@ class QQBotConfig:
     link_reminder_enabled: bool
     ai_character_creation_enabled: bool
     connection_id: str
-    chat_filter_enabled: bool
     show_dropped_logs: bool
     group_list_mode: str
     group_list: tuple[str, ...]
@@ -39,6 +38,8 @@ class QQBotConfig:
     bot_token: str
     data_path: Path
     parent_pid: int
+    generation_file: Path
+    host_generation: str
 
     @property
     def ws_url(self) -> str:
@@ -47,6 +48,7 @@ class QQBotConfig:
     @classmethod
     def from_env(cls) -> "QQBotConfig":
         root = Path(__file__).resolve().parents[3]
+        plugin_data_dir = Path(os.getenv("DICEFRAME_PLUGIN_DATA_DIR", str(root / "data" / "bot")))
         return cls(
             napcat_host=os.getenv("NAPCAT_HOST", "127.0.0.1"),
             napcat_port=int(os.getenv("NAPCAT_PORT", "3001")),
@@ -64,7 +66,6 @@ class QQBotConfig:
             link_reminder_enabled=_env_bool("NAPCAT_LINK_REMINDER_ENABLED", True),
             ai_character_creation_enabled=_env_bool("NAPCAT_AI_CHARACTER_CREATION_ENABLED", True),
             connection_id=os.getenv("NAPCAT_CONNECTION_ID", "").strip(),
-            chat_filter_enabled=_env_bool("NAPCAT_CHAT_FILTER_ENABLED", False),
             show_dropped_logs=_env_bool("NAPCAT_SHOW_DROPPED_LOGS", False),
             group_list_mode=_list_mode(os.getenv("NAPCAT_GROUP_LIST_MODE", "whitelist")),
             group_list=_env_list("NAPCAT_GROUP_LIST"),
@@ -80,6 +81,8 @@ class QQBotConfig:
                 str(Path(os.getenv("DICEFRAME_PLUGIN_DATA_DIR", str(root / "data" / "bot"))) / "sessions.json"),
             )),
             parent_pid=int(os.getenv("TRPG_PARENT_PID", "0") or "0"),
+            generation_file=plugin_data_dir / ".host-generation",
+            host_generation=_read_generation_file(plugin_data_dir / ".host-generation"),
         )
 
     def validate(self) -> None:
@@ -125,3 +128,14 @@ def _env_list(name: str) -> tuple[str, ...]:
 
 def _list_mode(value: str) -> str:
     return "blacklist" if str(value).lower() == "blacklist" else "whitelist"
+
+
+def _read_generation_file(path: Path) -> str:
+    """读取宿主世代文件；缺失/不可读返回空串。
+
+    空串表示旧主程序不写世代文件，插件回退到纯 PID 父进程监控（兼容行为）。
+    """
+    try:
+        return path.read_text(encoding="ascii").strip()
+    except Exception:
+        return ""

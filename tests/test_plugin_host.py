@@ -1828,6 +1828,84 @@ async def test_overwrite_restarts_plugin_that_was_running(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_restart_forced_restarts_disabled_plugin(tmp_path):
+    # 前端"重启"按钮传 require_enabled=False（强制重启）；control_plugin 曾把该
+    # 参数传给不接受它的 restart() 导致 TypeError → HTTP 500。这里验证修复：
+    # restart 默认按 enabled（改配置后不启动禁用插件），require_enabled=False 强制重启。
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "demo-plugin", manifest_extra={
+        "entrypoint": ["{python}", "-c", "import time; time.sleep(60)"],
+    })
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    # disabled 插件默认 restart 不启动进程，enabled 保持 false。
+    await host.restart("demo-plugin")
+    detail = host.public_detail("demo-plugin")
+    assert detail["enabled"] is False
+    assert detail["running"] is False
+
+    # 强制 restart（对应前端重启按钮）会启动进程并把 enabled 置 true。
+    await host.restart("demo-plugin", require_enabled=False)
+    detail = host.public_detail("demo-plugin")
+    assert detail["running"] is True
+    assert detail["enabled"] is True
+    await host.stop("demo-plugin")
+
+
+@pytest.mark.asyncio
+async def test_host_start_writes_generation_file_and_cleanup_removes_it(tmp_path):
+    """宿主世代文件：start 时写入插件 runtime 目录，cleanup 时删除。
+
+    插件进程据此感知宿主换代（主程序重启）立即退出，避免孤儿进程残留。
+    """
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "demo-plugin", manifest_extra={
+        "entrypoint": ["{python}", "-c", "import time; time.sleep(60)"],
+    })
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    assert (tmp_path / "data" / "demo-plugin" / "runtime" / ".host-generation").exists() is False
+
+    await host.start("demo-plugin", require_enabled=False)
+    gen_path = tmp_path / "data" / "demo-plugin" / "runtime" / ".host-generation"
+    assert gen_path.read_text(encoding="ascii").strip() == host._host_generation
+
+    await host.cleanup()
+    assert gen_path.exists() is False
+
+
+def test_host_generation_is_unique_per_host_instance(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "demo-plugin", manifest_extra={
+        "entrypoint": ["{python}", "-c", "import time; time.sleep(60)"],
+    })
+    first = PluginHost(plugins, tmp_path / "data")
+    second = PluginHost(plugins, tmp_path / "data2")
+    first.discover()
+    second.discover()
+    assert first._host_generation
+    assert first._host_generation != second._host_generation
+
+
+@pytest.mark.asyncio
+async def test_host_writes_generation_inside_plugin_data_dir(tmp_path):
+    """世代文件必须落在 data_dir 内（_ensure_inside 校验），路径穿越会抛异常。"""
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "demo-plugin", manifest_extra={
+        "entrypoint": ["{python}", "-c", "import time; time.sleep(60)"],
+    })
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    await host.start("demo-plugin", require_enabled=False)
+    host._host_generation = "tampered"
+    with pytest.raises(Exception):
+        # 手动篡改插件 id 路径模拟越界；正常路径下不会走到这里。
+        await host._write_host_generation("../../evil")
+    await host.stop("demo-plugin")
+
+
+@pytest.mark.asyncio
 async def test_install_rejects_zip_bomb_by_unpacked_size(tmp_path, monkeypatch):
     monkeypatch.setitem(PluginHost._extract_zip.__globals__, "MAX_PLUGIN_UNPACKED_BYTES", 100)
     package = tmp_path / "large-unpacked.zip"

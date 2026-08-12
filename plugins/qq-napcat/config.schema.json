@@ -18,7 +18,6 @@
     "link_reminder_enabled": {"type":"boolean","title":"提醒网页入口","description":"开启后，@bot 帮助 / 状态 会附带网页入口；群聊中优先私聊发送，私聊失败时退回群聊。关闭后不提醒这些入口。","default":true,"ui":{"control":"switch","group":"群聊体验","env":"NAPCAT_LINK_REMINDER_ENABLED","order":140}},
     "ai_character_creation_enabled": {"type":"boolean","title":"AI 辅助车卡","description":"开启后，玩家在群聊明确发送 @bot AI车卡 时，Bot 才会尝试私聊引导自然语言车卡；普通 @bot 新建角色 / 车卡 只在群里发清单和网页入口。玩家确认后在群里公示草稿，不会自动写入存档。","default":true,"ui":{"control":"switch","group":"群聊体验","env":"NAPCAT_AI_CHARACTER_CREATION_ENABLED","order":150}},
     "connection_id": {"type":"string","title":"连接标识","description":"多连接时的路由作用域。","default":"","ui":{"control":"text","group":"NapCat 连接","env":"NAPCAT_CONNECTION_ID","order":160}},
-    "chat_filter_enabled": {"type":"boolean","title":"启用聊天名单过滤","default":false,"ui":{"control":"switch","group":"聊天过滤","env":"NAPCAT_CHAT_FILTER_ENABLED","order":170}},
     "show_dropped_logs": {"type":"boolean","title":"显示聊天名单丢弃日志","default":false,"ui":{"control":"switch","group":"聊天过滤","env":"NAPCAT_SHOW_DROPPED_LOGS","order":180}},
     "group_list_mode": {"type":"string","title":"群聊名单模式","enum":["whitelist","blacklist"],"default":"whitelist","ui":{"control":"select","group":"聊天过滤","env":"NAPCAT_GROUP_LIST_MODE","order":190}},
     "group_list": {"type":"array","items":{"type":"string"},"title":"群聊名单","description":"群号自动字符串化并去重。","default":[],"ui":{"control":"string-list","group":"聊天过滤","env":"NAPCAT_GROUP_LIST","order":200}},

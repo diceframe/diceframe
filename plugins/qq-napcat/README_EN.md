@@ -2,7 +2,7 @@
 
 [中文](README_CN.md) | English
 
-This is the QQ/NapCat chat adapter plugin for DiceFrame, connecting group chats to DiceFrame through a NapCat WebSocket server. Published independently and installable from the plugin store; its runtime code (`src/bots/qq/`) ships with this repository and depends on DiceFrame's Bot Bridge core (`bridge_core`). Starting with this version, card rendering reuses the main program's `bridge_core` renderer, so it requires a DiceFrame main program that includes that renderer (v1.9.6 or later).
+This is the QQ/NapCat chat adapter plugin for DiceFrame, connecting group chats to DiceFrame through a NapCat WebSocket server. Published independently and installable from the plugin store; its runtime code (`src/bots/qq/`) ships with this repository and depends on DiceFrame's Bot Bridge core (`bridge_core`). Starting with this version, card rendering reuses the main program's `bridge_core` renderer, so it requires a DiceFrame main program that includes that renderer (v2.0.0 or later).
 
 1. In NapCat, open Network Settings → Network Configuration → WebSocket Server, enable it, and note the port and access token.
 2. Enter those connection values on the DiceFrame plugin settings page and enable the plugin.
@@ -44,6 +44,16 @@ AI-assisted character creation is enabled by default but starts only after the e
 Away characters remain with the party but do not count toward pending actions. AI context marks them as following the group without initiating major decisions. `@Bot back` restores normal participation.
 
 Only the bound GM may force progression by default. Add assistant GMs or trusted player account IDs under the plugin's authorized progression accounts, one ID per line. NapCat normally uses QQ numbers.
+
+Chat-scope filtering:
+
+- The group list and private-chat list restrict where the Bot replies. Each list has a whitelist / blacklist mode, and **filling in the list takes effect immediately** — no extra toggle:
+  - Whitelist: reply only in listed groups / private chats.
+  - Blacklist: do not reply in listed groups / private chats; allow everything else.
+  - An empty list means no restriction: an empty whitelist allows everyone, an empty blacklist blocks nothing.
+- Blocked users are silenced in both group and private chats.
+- Official QQ bots are blocked by default.
+- Enter one group / QQ number per line; group numbers are normalized to strings automatically.
 
 Image-card cache:
 

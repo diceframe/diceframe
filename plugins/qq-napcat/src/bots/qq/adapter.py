@@ -269,11 +269,13 @@ class QQTRPGAdapter(QQDeliveryMixin, QQWebSyncMixin, QQCharacterFlowMixin, QQGam
             if checker and await checker(group_id, user_id):
                 self.logger.warning("QQ 官方机器人消息已丢弃")
                 return False
-        if not config.chat_filter_enabled:
-            return True
         configured = config.private_list if private else config.group_list
         mode = config.private_list_mode if private else config.group_list_mode
         target = user_id if private else group_id
+        # 名单为空时不设限（白名单空 = 全部放行，黑名单空 = 无可屏蔽项）。
+        # 填了名单即生效，不再要求额外打开开关。
+        if not configured:
+            return True
         allowed = target in configured
         if mode == "blacklist":
             allowed = not allowed

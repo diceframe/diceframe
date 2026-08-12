@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import io
 import json
@@ -134,6 +135,10 @@ class PluginHost:
         self._api_tokens: dict[str, str] = {}
         self._install_locks: dict[str, asyncio.Lock] = {}
         self._auto_update_task: asyncio.Task[Any] | None = None
+        # 宿主世代标识：每个主进程实例一个随机值。spawn 插件前写入插件 runtime 目录，
+        # 插件进程启动时捕获并轮询；主进程被重启（含 os.execv 保 PID 重启）后重新生成，
+        # 旧插件进程读到世代变化/缺失即退出，避免孤儿进程残留导致开关状态与真实进程不一致。
+        self._host_generation = secrets.token_hex(8)
 
     def discover(self) -> list[dict[str, Any]]:
         self.plugins.clear()
@@ -714,6 +719,7 @@ class PluginHost:
             return
         runtime.status, runtime.error = "starting", ""
         env = self._build_process_env(plugin_id, runtime)
+        self._write_host_generation(plugin_id)
         command = runtime.manifest.get("entrypoint")
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             runtime.status, runtime.error = "failed", "entrypoint 必须是非空字符串数组"
@@ -815,6 +821,24 @@ class PluginHost:
             env[env_name] = json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value).lower() if isinstance(value, bool) else str(value or "")
         return env
 
+    def _host_generation_path(self, plugin_id: str) -> Path:
+        return (self.data_dir / plugin_id / "runtime" / ".host-generation").resolve()
+
+    def _write_host_generation(self, plugin_id: str) -> None:
+        """把本宿主进程的世代标识原子写入插件 runtime 目录。
+
+        插件进程启动时捕获该值并周期性轮询；值变化或文件缺失 = 宿主已换代
+        （主程序被重启，可能是 PID 复用或 os.execv 保 PID 重启），插件应立即
+        退出并释放单实例锁，避免旧进程残留导致 UI 开关与真实进程不一致、
+        新实例被锁拒绝。
+        """
+        path = self._host_generation_path(plugin_id)
+        self._ensure_inside(self.data_dir, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".host-generation.{os.getpid()}.tmp")
+        tmp.write_text(self._host_generation + "\n", encoding="ascii")
+        os.replace(tmp, path)
+
     def authenticate_api_token(self, token: str) -> dict[str, Any] | None:
         candidate = str(token or "").strip()
         if not candidate:
@@ -881,9 +905,9 @@ class PluginHost:
         runtime.status = "failed"
         runtime.error = error
 
-    async def restart(self, plugin_id: str) -> None:
+    async def restart(self, plugin_id: str, *, require_enabled: bool = True) -> None:
         await self.stop(plugin_id, keep_enabled=True)
-        await self.start(plugin_id)
+        await self.start(plugin_id, require_enabled=require_enabled)
 
     async def cleanup(self) -> None:
         if self._auto_update_task and not self._auto_update_task.done():
@@ -891,6 +915,10 @@ class PluginHost:
         # 宿主关闭不改变插件 enabled 状态，重启后按用户意图恢复。
         for plugin_id in list(self.plugins):
             await self.stop(plugin_id, keep_enabled=True)
+        # 删除世代文件：若某插件 stop 失败残留，也能感知宿主换代立即退出并释放锁。
+        for plugin_id in list(self.plugins):
+            with contextlib.suppress(OSError):
+                self._host_generation_path(plugin_id).unlink()
 
     async def rescan(self) -> list[dict[str, Any]]:
         await self.cleanup()
