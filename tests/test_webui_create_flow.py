@@ -1517,3 +1517,90 @@ async def test_create_game_room_password_tristate(web_api):
     r4 = await api.create_game("template_world", "弱密码", players=list(players), solo=False, room_password="ab")
     assert r4.get("ok") is False
     assert "至少 4 位" in r4.get("error", "")
+
+
+def test_delete_world_removes_user_template(web_api):
+    api, lorebook, _registry, _fake_llm, worlds_dir = web_api
+    _write_world(worlds_dir, "ai_user_world", starter_lorebook=[{
+        "id": "ai_user_world_npc1", "name": "测试NPC", "type": "npc",
+        "keywords": ["测试"], "content": "内容", "tier": "core",
+    }])
+    lorebook.create_world("ai_user_world", "测试世界")
+    lorebook.add_entry({
+        "id": "ai_user_world_npc1", "world_id": "ai_user_world",
+        "name": "测试NPC", "type": "npc", "keywords": ["测试"],
+        "content": "内容", "tier": "core",
+    })
+    assert (worlds_dir / "ai_user_world.json").exists()
+
+    api.delete_world("ai_user_world")
+
+    assert not (worlds_dir / "ai_user_world.json").exists()
+
+
+def test_delete_world_keeps_builtin_template(web_api):
+    api, lorebook, _registry, _fake_llm, worlds_dir = web_api
+    _write_world(worlds_dir, "coc_horror", starter_lorebook=[{
+        "id": "coc_horror_npc1", "name": "NPC", "type": "npc",
+        "keywords": ["k"], "content": "c", "tier": "core",
+    }])
+    lorebook.create_world("coc_horror", "克苏鲁")
+    lorebook.add_entry({
+        "id": "coc_horror_npc1", "world_id": "coc_horror",
+        "name": "NPC", "type": "npc", "keywords": ["k"],
+        "content": "c", "tier": "core",
+    })
+
+    api.delete_world("coc_horror")
+
+    assert (worlds_dir / "coc_horror.json").exists()
+
+
+def test_save_entry_syncs_user_template_lorebook(web_api):
+    api, lorebook, _registry, _fake_llm, worlds_dir = web_api
+    _write_world(worlds_dir, "ai_sync_world", starter_lorebook=[{
+        "id": "ai_sync_world_old", "name": "旧条目", "type": "npc",
+        "keywords": ["旧"], "content": "旧内容", "tier": "core",
+    }])
+    lorebook.create_world("ai_sync_world", "同步世界")
+    lorebook.add_entry({
+        "id": "ai_sync_world_old", "world_id": "ai_sync_world",
+        "name": "旧条目", "type": "npc", "keywords": ["旧"],
+        "content": "旧内容", "tier": "core",
+    })
+
+    api.save_entry({
+        "id": "ai_sync_world_new", "world_id": "ai_sync_world",
+        "name": "新条目", "type": "location", "keywords": ["新"],
+        "content": "新内容", "tier": "background",
+    })
+
+    data = json.loads((worlds_dir / "ai_sync_world.json").read_text(encoding="utf-8"))
+    ids = [e["id"] for e in data["starter_lorebook"]]
+    assert "ai_sync_world_new" in ids
+    assert "ai_sync_world_old" in ids
+    for e in data["starter_lorebook"]:
+        assert "world_id" not in e
+
+
+def test_save_entry_skips_builtin_template(web_api):
+    api, lorebook, _registry, _fake_llm, worlds_dir = web_api
+    _write_world(worlds_dir, "coc_sync", starter_lorebook=[{
+        "id": "coc_sync_old", "name": "旧", "type": "npc",
+        "keywords": ["k"], "content": "c", "tier": "core",
+    }])
+    lorebook.create_world("coc_sync", "克苏鲁同步")
+    lorebook.add_entry({
+        "id": "coc_sync_old", "world_id": "coc_sync",
+        "name": "旧", "type": "npc", "keywords": ["k"],
+        "content": "c", "tier": "core",
+    })
+    original = (worlds_dir / "coc_sync.json").read_text(encoding="utf-8")
+
+    api.save_entry({
+        "id": "coc_sync_new", "world_id": "coc_sync",
+        "name": "新", "type": "location", "keywords": ["n"],
+        "content": "new", "tier": "background",
+    })
+
+    assert (worlds_dir / "coc_sync.json").read_text(encoding="utf-8") == original

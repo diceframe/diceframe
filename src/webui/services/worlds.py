@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.generation import creator
+from src.template_catalog import is_user_template_file
 
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
@@ -65,6 +66,7 @@ def get_entry(api: "WebAPI", entry_id: str) -> dict[str, Any] | None:
 def save_entry(api: "WebAPI", entry: dict) -> dict[str, Any]:
     api._lore.add_entry(entry)
     rebuild_lorebook_index(api, entry.get("world_id", ""))
+    _sync_user_template_lorebook(api, entry.get("world_id", ""))
     return {"ok": True, "entry_id": entry["id"]}
 
 
@@ -159,7 +161,9 @@ def update_entry(api: "WebAPI", entry_id: str, updates: dict) -> dict[str, Any]:
     # 获取条目所属世界以重建索引
     entry = api._lore.get_entry(entry_id)
     if entry:
-        rebuild_lorebook_index(api, entry.get("world_id", ""))
+        world_id = entry.get("world_id", "")
+        rebuild_lorebook_index(api, world_id)
+        _sync_user_template_lorebook(api, world_id)
     return {"ok": True}
 
 
@@ -169,13 +173,71 @@ def delete_entry(api: "WebAPI", entry_id: str) -> dict[str, Any]:
     api._lore.delete_entry(entry_id)
     if world_id:
         rebuild_lorebook_index(api, world_id)
+        _sync_user_template_lorebook(api, world_id)
     return {"ok": True}
 
 
 def delete_world(api: "WebAPI", world_id: str) -> dict[str, Any]:
     """删除世界及其所有条目。"""
     api._lore.delete_world_cascade(world_id)
+    _delete_user_template_file(api, world_id)
     return {"ok": True}
+
+
+def _delete_user_template_file(api: "WebAPI", world_id: str) -> None:
+    """删除世界书时联动删除对应的用户模板文件（ai_/custom_），内置/插件模板不动。"""
+    worlds_dir = api._worlds_dir
+    if not worlds_dir:
+        return
+    path = worlds_dir / f"{world_id}.json"
+    if not path.is_file() or not is_user_template_file(path, "worlds"):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        logger.warning("删除用户模板文件失败: %s", path, exc_info=True)
+
+
+def _entry_to_template_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """条目 -> 模板 starter_lorebook 条目：保留业务字段，去掉内部追踪字段。
+
+    与 plugins._entry_to_lorebook_entry 保持一致，实现世界书 <-> 模板无损往返。
+    """
+    skip = {"world_id", "source_plugin", "created_at", "updated_at"}
+    keywords = entry.get("keywords")
+    if not isinstance(keywords, list):
+        keywords = [keywords] if keywords else []
+    result = {k: v for k, v in entry.items() if k not in skip}
+    result["keywords"] = [str(k).strip() for k in keywords if str(k).strip()]
+    return result
+
+
+def _sync_user_template_lorebook(api: "WebAPI", world_id: str) -> None:
+    """条目 CRUD 后把世界书当前条目回写到用户模板的 starter_lorebook。
+
+    仅对用户模板（ai_/custom_）生效；内置模板只读（启动覆盖）不回写；
+    手动建世界书（custom_book_*，无模板文件）不创建模板，保持现状。
+    只同步 starter_lorebook，不动 world_name/default_rule/scene_image 等元信息。
+    """
+    if not world_id:
+        return
+    worlds_dir = api._worlds_dir
+    if not worlds_dir:
+        return
+    path = worlds_dir / f"{world_id}.json"
+    if not path.is_file() or not is_user_template_file(path, "worlds"):
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        entries = api._lore.list_entries(world_id)
+        data["starter_lorebook"] = [
+            _entry_to_template_entry(e) for e in entries if isinstance(e, dict)
+        ]
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, ValueError):
+        logger.warning("回写用户模板 starter_lorebook 失败: %s", path, exc_info=True)
 
 
 def rebuild_lorebook_index(api: "WebAPI", world_id: str) -> None:
