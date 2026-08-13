@@ -76,6 +76,7 @@ def list_games(api: "WebAPI") -> dict[str, Any]:
             "world_name": inst.world_name,
             "rule_id": _instance_rule_id(api, inst),
             "scene_image": dict(getattr(inst, "scene_image", {}) or {}),
+            "map_background": dict(getattr(inst, "map_background", {}) or {}),
             "group_name": inst.group_name,
             "state": inst.state.value,
             "round_number": inst.round_number,
@@ -105,6 +106,7 @@ def game_detail(api: "WebAPI", game_key: str) -> dict[str, Any] | None:
         "world_id": inst.world_id or "",
         "rule_id": _instance_rule_id(api, inst),
         "scene_image": dict(getattr(inst, "scene_image", {}) or {}),
+        "map_background": dict(getattr(inst, "map_background", {}) or {}),
         "world_name": inst.world_name, "group_name": inst.group_name,
         "state": inst.state.value, "round_number": inst.round_number,
         "player_count": len(inst.players), "scene": inst.scene,
@@ -475,6 +477,19 @@ async def rollback_round(api: "WebAPI", game_key: str) -> dict[str, Any]:
     return {"ok": True, "message": f"已撤回到第 {round_number} 轮开始前的玩家状态"}
 
 
+async def generate_story_recap(api: "WebAPI", game_key: str) -> dict[str, Any]:
+    """Generate and persist a public recap without adding a synthetic round."""
+    inst = api._reg.get(api._parse_key(game_key))
+    if not inst:
+        return {"ok": False, "error": "游戏不存在"}
+    if not api._handler:
+        return {"ok": False, "error": "系统未就绪"}
+    result = await api._handler.generate_story_recap(inst)
+    if result.get("ok"):
+        await api._reg.save(inst)
+    return result
+
+
 def _resolve_gm_command_target(
     inst,
     raw_target: str,
@@ -753,7 +768,8 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
                       gm_uid: str = "",
                       room_password: str | None = None,
                       language: str = DEFAULT_LANGUAGE,
-                      scene_image: dict[str, Any] | None = None) -> dict[str, Any]:
+                      scene_image: dict[str, Any] | None = None,
+                      map_background: dict[str, Any] | None = None) -> dict[str, Any]:
     if not api._handler or not api._reg:
         return {"ok": False, "error": "系统未就绪"}
     if config_error := api._llm_configuration_error(language):
@@ -768,6 +784,7 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
     try:
         default_scene_image = api.resolve_default_scene_image(source_world_id or world_id, rule_id)
         selected_scene_image = api.materialize_scene_image(scene_image if scene_image else default_scene_image)
+        selected_map_background = api.validate_map_background_selection(map_background)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -844,6 +861,7 @@ async def create_game(api: "WebAPI", world_id: str, game_name: str = "",
     )
     instance.set_difficulty(difficulty)
     instance.set_scene_image(selected_scene_image)
+    instance.set_map_background(selected_map_background)
     # 房间密码三态：字段缺失(None) 且 多人局 → 生成随机密码回显（安全默认，
     # 防止 GM 以为设了密码实际开放）；显式空串 "" → 明确开放；非空 → 加密并校验长度。
     generated_password: str | None = None
@@ -1030,6 +1048,7 @@ async def create_from_seed(api: "WebAPI", seed_code: str, solo: bool = False,
     )
     instance.configure_session(solo_mode=solo)
     instance.set_scene_image(selected_scene_image)
+    instance.set_map_background(dict(getattr(target_inst, "map_background", {}) or {}))
     created_players: list[dict[str, Any]] = []
     for idx, character in enumerate(players or []):
         if idx == 0 and gm_uid:

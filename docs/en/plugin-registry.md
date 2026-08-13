@@ -46,7 +46,7 @@ The star count shown in the store is taken from the plugin's GitHub repository s
 
 | Level | Meaning | Updates |
 |---|---|---|
-| `declarative` | Content, theme, or map plugin without a process entrypoint | Checked and prompted when the user opens the plugin store; installing or updating requires user confirmation, while permissions and runtime remain unchanged |
+| `declarative` | Content pack (optionally including maps), optional voice preset, or theme plugin without a process entrypoint | Checked and prompted when the user opens the plugin store; installing or updating requires user confirmation, while permissions and runtime remain unchanged |
 | `unrestricted-process` | Launches Python, Node, an executable, or another process | Notification only; installation requires user confirmation |
 | `bundled` | Maintained by the DiceFrame organization and shipped with the application | Updated with DiceFrame |
 | `approval-required` | A release expanded permissions or changed runtime behavior | Installation and updates pause for another review |

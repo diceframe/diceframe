@@ -388,6 +388,9 @@ class PluginHost:
     def list_map_assets(self, world_id: str = "") -> dict[str, list[dict[str, Any]]]:
         return self.content.list_map_assets(world_id)
 
+    def list_voice_profiles(self) -> list[dict[str, Any]]:
+        return self.content.list_voice_profiles()
+
     def list_content_resources(
         self,
         kind: str = "",

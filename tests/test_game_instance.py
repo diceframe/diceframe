@@ -543,6 +543,38 @@ class TestGameRegistry:
         restored = await registry.load(tuple(result["game_key"]))
         assert restored.scene_image == {"kind": "upload", "asset_id": "local-scene"}
 
+    @pytest.mark.asyncio
+    async def test_import_save_zip_materializes_portable_map_background(self, tmp_path):
+        import io
+        import json
+        import zipfile
+
+        state = {
+            "game_key": ["web", "portable-map", "bot"],
+            "state": "waiting",
+            "world_id": "default_fantasy",
+            "map_background": {"kind": "save_asset", "path": "map-background.asset"},
+        }
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("state.json", json.dumps(state))
+            zf.writestr("map-background.asset", b"portable-map")
+
+        result = await GameRegistry(tmp_path / "saves").import_save_zip(
+            buffer.getvalue(),
+            map_background_importer=lambda raw: (
+                {"ok": True, "map_background": {"kind": "upload", "asset_id": "local-map"}}
+                if raw == b"portable-map"
+                else {"ok": False, "error": "bad payload"}
+            ),
+        )
+
+        assert result["ok"] is True
+        restored = GameRegistry(tmp_path / "saves")
+        instance = await restored.load(tuple(result["game_key"]))
+        assert instance is not None
+        assert instance.map_background == {"kind": "upload", "asset_id": "local-map"}
+
     async def test_import_save_zip_rejects_missing_state(self, tmp_path):
         """存档包缺 state.json 报错。"""
         import io

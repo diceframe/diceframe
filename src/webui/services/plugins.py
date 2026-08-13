@@ -436,6 +436,9 @@ def export_content_pack(
     include_scene_images: bool = True,
     world_scene_image: dict[str, Any] | None = None,
     rule_scene_image: dict[str, Any] | None = None,
+    include_map: bool = True,
+    map_background: dict[str, Any] | None = None,
+    map_icons: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """把应用内的世界/角色卡/规则导出成一个内容包 .dfplugin。
 
@@ -457,6 +460,7 @@ def export_content_pack(
 
     files: dict[str, str | bytes] = {}
     has_world = has_rule = has_cards = False
+    map_package = None
     world_default_rule = rule_id if rule_id else ""
 
     if rule_id:
@@ -487,6 +491,21 @@ def export_content_pack(
             return {"ok": False, "error": "世界不存在"}
         entries = api._lore.list_entries(world_id)
         template = _world_to_template(world, entries, world_default_rule)
+        if include_map:
+            try:
+                map_package = api.package_content_map(
+                    plugin_id,
+                    name,
+                    world,
+                    entries,
+                    files,
+                    background_selection=map_background,
+                    icon_uploads=map_icons,
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            if map_package and map_package.default_map:
+                template["default_map"] = map_package.default_map
         reference = world_scene_image if isinstance(world_scene_image, dict) else world.get("scene_image")
         if include_scene_images and reference:
             packaged = api.package_scene_image(reference, files)
@@ -521,11 +540,22 @@ def export_content_pack(
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)
     manifest = build_content_pack_manifest(
-        plugin_id, name, version, description, has_world, has_rule, has_cards, has_portraits, has_scene_images
+        plugin_id, name, version, description, has_world, has_rule, has_cards, has_portraits, has_scene_images,
+        bool(map_package and map_package.has_definitions),
+        bool(map_package and map_package.has_locations),
+        bool(map_package and map_package.has_icons),
+        bool(map_package and map_package.has_backgrounds),
     )
     files["plugin.json"] = json.dumps(manifest, ensure_ascii=False, indent=2)
     files["config.schema.json"] = json.dumps(_default_config_schema(name), ensure_ascii=False, indent=2)
-    files["README.md"] = _default_readme(name, description, has_world, has_rule, has_cards)
+    files["README.md"] = _default_readme(
+        name,
+        description,
+        has_world,
+        has_rule,
+        has_cards,
+        bool(map_package and map_package.has_map),
+    )
 
     payload = api._plugins.package_files(plugin_id, files, flat=flat)
     filename = f"{plugin_id}-{version}-src.zip" if flat else f"{plugin_id}-{version}.dfplugin"
@@ -536,6 +566,8 @@ def build_content_pack_manifest(
     plugin_id: str, name: str, version: str, description: str,
     has_world: bool, has_rule: bool, has_cards: bool, has_portraits: bool = False,
     has_scene_images: bool = False,
+    has_map_definitions: bool = False, has_map_locations: bool = False,
+    has_map_icons: bool = False, has_map_backgrounds: bool = False,
 ) -> dict[str, Any]:
     contributes: dict[str, list[str]] = {}
     if has_world:
@@ -548,6 +580,14 @@ def build_content_pack_manifest(
         contributes["portraits"] = ["assets/portraits/*"]
     if has_scene_images:
         contributes["scene_images"] = ["assets/scenes/*"]
+    if has_map_definitions:
+        contributes["map_definitions"] = ["maps/definitions/*.json"]
+    if has_map_locations:
+        contributes["map_locations"] = ["maps/locations/*.json"]
+    if has_map_icons:
+        contributes["map_icons"] = ["maps/icons/*.webp"]
+    if has_map_backgrounds:
+        contributes["map_backgrounds"] = ["maps/backgrounds/*.webp"]
     capabilities: list[str] = []
     if has_world:
         capabilities.append("content.world")
@@ -557,6 +597,8 @@ def build_content_pack_manifest(
         capabilities.append("content.character-template")
     if has_scene_images:
         capabilities.append("content.scene-image")
+    if any((has_map_definitions, has_map_locations, has_map_icons, has_map_backgrounds)):
+        capabilities.append("content.map")
     return {
         "schema_version": 1,
         "id": plugin_id,
@@ -587,7 +629,14 @@ def _default_config_schema(name: str) -> dict[str, Any]:
     }
 
 
-def _default_readme(name: str, description: str, has_world: bool, has_rule: bool, has_cards: bool) -> str:
+def _default_readme(
+    name: str,
+    description: str,
+    has_world: bool,
+    has_rule: bool,
+    has_cards: bool,
+    has_map: bool = False,
+) -> str:
     lines = [f"# {name}", ""]
     if description:
         lines += [description, ""]
@@ -598,6 +647,8 @@ def _default_readme(name: str, description: str, has_world: bool, has_rule: bool
         lines.append("- 规则")
     if has_cards:
         lines.append("- 角色模板（可在插件内容目录导入角色卡库）")
+    if has_map:
+        lines.append("- 场景地图（地点、地图定义及所选图标/底图）")
     lines += ["", "## 用法", "1. 设置页 -> 插件 -> 导入本 .dfplugin", "2. 打开本内容包的开关", "3. 创建游戏时选择本世界与规则", ""]
     return "\n".join(lines)
 

@@ -2,7 +2,7 @@
 
 中文 | [English](../en/plugin-development.md)
 
-本指南定义 DiceFrame 插件的通用包结构、manifest 标准、配置规则和各类插件的扩展边界。当前真正可用的是聊天桥接、Bot Bridge 命令/Hook/渲染扩展、内容包、安全主题变量、结构化工具，以及地图包中的地点/素材注册。导入导出和 Provider 目前只有类型占位，没有对应业务运行时。
+本指南定义 DiceFrame 插件的通用包结构、manifest 标准、配置规则和各类插件的扩展边界。当前真正可用的是聊天桥接、Bot Bridge 命令/Hook/渲染扩展、内容包（包括只读地图定义、地点、图标和底图）、可选音色预设、安全主题变量与结构化工具。导入导出和通用 Provider 插件目前只有类型占位；TTS 已由核心提供浏览器、OpenAI 兼容和 GPT-SoVITS 适配器。
 
 **重要：只有“当前支持状态”标为“已支持”或“部分支持”的能力，照本文开发后才会真实生效。标为“预留”的类型在开发目录中只能被识别和展示，不会接入对应业务流程，插件商店也不允许安装。插件 README 必须如实说明当前作用。**
 
@@ -12,9 +12,8 @@ DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通�
 
 - 聊天桥接：QQ/NapCat、Discord、Telegram 等。
 - Bot Bridge 扩展：新增命令、修改回复、替换文字/图片/卡片展示。
-- 内容包：规则、世界模板、角色模板、NPC、道具、法术、职业。
+- 内容包：规则、世界模板、角色模板、NPC、道具、法术、职业，以及可选的地图定义和素材。
 - 主题：基于 v2 语义 token 的色板、字体、圆角和阴影风格包。
-- 地图包：地点模板、图标、场景素材、战斗网格素材。
 - 导入导出：SillyTavern/酒馆角色卡、世界书、Lorebook 等格式转换。
 - Provider：LLM、Embedding、TTS、图片生成等外部服务接入。
 - 工具：批量校验、备份、转换、生成器等辅助功能。
@@ -25,14 +24,14 @@ DiceFrame 插件不只面向机器人接入。长期目标是让社区可以通�
 |------|-------------|----------|
 | 聊天桥接 | `channel-adapter` | 已支持进程托管、配置、启停、HTTP API 调用 |
 | Bot Bridge 扩展 | `bot-extension` | 已支持命令拦截、消息/结果 Hook、文字/图片/卡片渲染和失败回退 |
-| 内容包 | `content-pack` | 已支持规则、世界模板和内容目录注册，支持把内容导入用户角色卡库/世界书 |
+| 内容包 | `content-pack` | 已支持规则、世界模板、内容目录和只读地图贡献，支持把部分内容导入用户角色卡库/世界书 |
 | 主题 | `theme` | 已支持选择和加载 v2 语义 token 主题 |
-| 地图包 | `map-pack` | 预留：地图地点/图标/场景/网格素材后续接入地图编辑器；商店不允许安装 |
+| 音色预设 | `voice-pack` | 可选：OpenAI 兼容 voice ID，以及 GPT-SoVITS 参考 WAV/提示文本 |
 | 导入导出 | `import-export` | 预留：尚无统一导入导出任务 API，商店不允许安装 |
 | Provider | `provider` | 预留：尚无 Provider 注册运行时，商店不允许安装 |
 | 工具 | `tool` | 已支持进程握手、工具注册、结构化调用、超时和设置页手动测试 |
 
-`content-pack`、`theme`、`map-pack` 是声明型插件，可以没有后台进程。`channel-adapter`、`bot-extension` 和 `tool` 需要 `entrypoint`，由宿主作为独立进程托管。预留类型即使可以在开发目录中被识别，也不代表已经具有对应业务能力。
+`content-pack`、`theme` 和 `voice-pack` 是声明型插件，可以没有后台进程。`channel-adapter`、`bot-extension` 和 `tool` 需要 `entrypoint`，由宿主作为独立进程托管。
 
 ## 3. 插件边界
 
@@ -144,7 +143,7 @@ channel-adapter
 bot-extension
 content-pack
 theme
-map-pack
+voice-pack
 import-export
 provider
 tool
@@ -163,6 +162,7 @@ tool
 | `content.read` | 注册和读取内容包资源 |
 | `content.import` | 由用户主动导入内容到角色卡库或世界书 |
 | `theme.tokens` | 注册主题 CSS 变量 |
+| `voice.assets` | 注册语音音色描述、试听和参考音频 |
 | `map.assets` | 注册地图地点和素材资源 |
 | `tool.execute` | 注册并执行结构化工具调用 |
 | `bot.extend` | 扩展 Bot Bridge 命令、消息处理和展示 |
@@ -340,7 +340,7 @@ content/
   spells/
 ```
 
-当前宿主已支持 `rules`、`world_templates`、`character_templates`、`npcs`、`items`、`spells`、`classes` 贡献注册。启用内容包后，插件规则会出现在规则列表中，插件世界模板会出现在创建游戏的世界模板列表中；角色模板、NPC、道具、法术和职业会出现在插件设置页的“内容包”目录中，也可通过 `/api/plugins/content` 查询。目录中的插件内容保持只读，卸载或停用插件后不再出现在列表里；用户主动导入时会复制一份到自己的角色卡库或世界书，之后不再依赖原插件文件。
+当前宿主已支持 `rules`、`world_templates`、`character_templates`、`npcs`、`items`、`spells`、`classes`、`map_definitions`、`map_locations`、`map_icons`、`map_backgrounds` 贡献注册。启用内容包后，插件规则会出现在规则列表中，插件世界模板会出现在创建游戏的世界模板列表中；角色模板、NPC、道具、法术和职业会出现在插件设置页的“内容包”目录中，也可通过 `/api/plugins/content` 查询；地图贡献由游玩页地图直接消费。目录中的插件内容保持只读，卸载或停用插件后不再出现在列表里；用户主动导入普通内容时会复制一份到自己的角色卡库或世界书，之后不再依赖原插件文件。
 
 冒险头图资产通过 `scene_images` 注册，与 `portraits` 一样属于内容包的声明型图片贡献。
 
@@ -364,7 +364,11 @@ content/
     "spells": ["content/spells/*.json"],
     "classes": ["content/classes/*.json"],
     "portraits": ["assets/portraits/*"],
-    "scene_images": ["assets/scenes/*"]
+    "scene_images": ["assets/scenes/*"],
+    "map_definitions": ["maps/definitions/*.json"],
+    "map_locations": ["maps/locations/*.json"],
+    "map_icons": ["maps/icons/*"],
+    "map_backgrounds": ["maps/backgrounds/*"]
   },
   "docs": "README_CN.md"
 }
@@ -517,25 +521,39 @@ theme/
 - 当前不允许主题提供背景图。如果未来开放，只会通过宿主校验的插件资源引用实现，不会允许任意 `url()` CSS 注入。
 - 主题应同时验证亮色/暗色的文本对比度、焦点态和禁用态。
 
-### 7.4 地图包插件
+### 7.4 内容包中的地图贡献
 
-适用于地点模板、地图图标、场景素材和战斗网格素材。地图包通常是声明型插件，也可以后续扩展为带生成进程的插件。
+`content-pack` 可以同时提供世界、角色等常规内容和地图，也可以只填写地图字段，作为纯地图内容包发布。启用后，游玩页会按世界自动选择合适的地图；除 GM 的背景来源选择外，不会把地图布局状态写入存档。
 
 建议目录：
 
 ```text
 maps/
+  definitions/
   locations/
   icons/
   scenes/
-  grids/
 ```
 
-当前宿主可以通过 `contributes.locations`、`contributes.icons`、`contributes.scenes`、`contributes.grids` 注册地图包资源。启用地图包后：
+声明贡献：
 
-- `locations` 中的 JSON 地点会并入 `/api/games/{game_key}/map` 的 `locations`。
-- `icons`、`scenes`、`grids` 会出现在 `/api/games/{game_key}/map` 的 `assets` 中，并带有受限访问 URL。
+```json
+{
+  "contributes": {
+    "map_definitions": ["maps/definitions/*.json"],
+    "map_locations": ["maps/locations/*.json"],
+    "map_icons": ["maps/icons/*"],
+    "map_backgrounds": ["maps/scenes/*"]
+  }
+}
+```
+
+启用内容包后：
+
+- `map_locations` 中的 JSON 地点会并入 `/api/games/{game_key}/map` 的 `locations`。
+- `map_icons` 和 `map_backgrounds` 会经内容、格式与尺寸校验，然后获得受限访问 URL。
 - 地点 JSON 可使用 `world_id` 或 `worlds` 限定适用世界；未限定时对所有世界可用。
+- 地图定义使用插件 ID 作命名空间，不同内容包可以重用相同的地图素材 ID。
 
 地点示例：
 
@@ -550,18 +568,87 @@ maps/
 }
 ```
 
-地图包当前不会提供实时战棋、拖拽编辑、碰撞体或网格规则；这些属于后续地图系统能力。
+地图定义示例：
 
-## 7.5 仍未达成的插件能力
+```json
+{
+  "schema_version": 1,
+  "id": "city-noir-overview",
+  "name": "雾都概览",
+  "worlds": ["city-noir"],
+  "mode": "graph",
+  "background": "city-noir",
+  "nodes": [
+    { "location_ref": "old-town", "x": -18, "y": 8, "icon": "old-town" },
+    { "location_ref": "station", "x": 16, "y": 12, "icon": "station" }
+  ],
+  "default_view": { "x": 0, "y": 0, "zoom": 1.2 }
+}
+```
+
+约定：
+
+- `schema_version` 必须为 `1`，`mode` 当前只支持 `graph`。
+- `background` 引用同一内容包 `map_backgrounds` 中的文件 ID；`icon` 引用同一内容包 `map_icons` 中的图标 ID。
+- `location_ref` 可指向内容包地图地点 ID，也可匹配当前世界 Lorebook 地点的 ID 或名称。
+- `x/y` 均位于 `-50..50`，两者必须同时提供；未提供的地点仍使用稳定的自动布局。
+- 世界模板可用 `default_map: "plugin:<plugin-id>:map:<map-id>"` 明确选择地图。否则宿主按 `worlds`、`default` 和排序自动匹配；无匹配时回退为 Lorebook 地点关系图。
+
+### 7.5 音色预设插件
+
+`voice-pack` 是无进程的声明型插件，通过现有插件商店安装。用户界面称其为“音色预设”，它不是使用本地 TTS 的必要条件。用户可以直接填写 OpenAI 兼容服务已有的 `voice_id`，或在“设置 → 我的音色”保存个人 GPT-SoVITS 参考 WAV/文本。预设只提供可选的一键配置、说明和小型试听/参考音频，不重复打包 GPT-SoVITS、Kokoro 等基础模型，也不负责安装 Python/CUDA 环境。
+
+```json
+{
+  "schema_version": 1,
+  "id": "example-narrator-voice",
+  "name": "示例旁白音色",
+  "version": "1.0.0",
+  "plugin_type": "voice-pack",
+  "config_schema": "config.schema.json",
+  "contributes": {
+    "voices": ["voices/*.json"],
+    "voice_assets": ["voices/*.wav", "voices/*.mp3"]
+  }
+}
+```
+
+`config.schema.json` 至少提供与其他声明型插件相同的 `enabled` 布尔开关；音色预设不需要 `entrypoint`。
+
+GPT-SoVITS 音色描述示例：
+
+```json
+{
+  "schema_version": 1,
+  "id": "example-narrator-zh",
+  "name": "示例中文旁白",
+  "engine": "gpt-sovits",
+  "language": "zh-CN",
+  "reference_audio": "voices/example-narrator.wav",
+  "preview_audio": "voices/example-narrator.mp3",
+  "prompt_text": "篝火已经点亮，新的冒险即将开始。",
+  "prompt_language": "zh-CN",
+  "license": "CC-BY-4.0",
+  "consent": true
+}
+```
+
+OpenAI 兼容服务的音色预设不需要参考音频，改为声明 `"engine": "openai-compatible"` 和服务实际接受的 `"voice_id"`。所有音色必须声明 `license` 和 `consent: true`；这表示作者确认有权分发音色描述、试听及参考音频。GPT-SoVITS 的 `reference_audio` 必须是 WAV，所有音频路径都必须同时出现在 `contributes.voice_assets` 中。
+
+基础模型与训练权重不得塞进音色预设；当前插件包仍受 20 MB 上限保护。个人 GPT-SoVITS 音色支持两种参考来源：上传到 DiceFrame 的 WAV 适合同机、共享文件系统服务；“TTS 服务端可见路径”适合容器或远程主机。也可以使用 OpenAI 兼容 HTTP 接口，把原生模型和音色完全交给 AllTalk 等上游服务管理。
+
+从开源音色选择、授权记录、本地打包到插件商店投稿的完整步骤，见 [音色预设发布指南](voice-pack-publishing.md)。仓库内的 `plugins/examples/kokoro-zh-voice-presets` 是一个不携带权重和音频的轻量示例。
+
+## 7.6 仍未达成的插件能力
 
 - 内容包资源已经支持导入用户角色卡库/世界书，但还没有直接进入运行中游戏流程的自动消费机制。
 - 主题插件还不能注入 Vue 组件、布局或任意 CSS 文件。
-- 地图包还没有地图编辑器、战棋网格规则、图层管理和实时协同。
+- 内容包地图还没有编辑器、图层管理和实时协同；游玩页地图保持只读。
 - `import-export` 还没有统一导入导出任务 API。
 - `provider` 还没有统一 Provider 注册和选择 UI。
 - `tool` 已支持短任务调用，但还没有长任务进度、取消和结果文件下载接口，也尚未自动接入 AI 工具选择。
 
-### 7.6 导入导出插件
+### 7.7 导入导出插件
 
 适用于 SillyTavern/酒馆角色卡、世界书、Lorebook 等格式转换。当前仅保留类型定义，尚未提供可调用运行时，商店不允许安装此类型。
 
@@ -571,7 +658,7 @@ maps/
 - 导入前必须校验 JSON/PNG 元数据，不得直接覆盖用户现有数据。
 - 出错时返回可读错误，不泄露本地路径和完整私密内容。
 
-### 7.7 Provider 插件
+### 7.8 Provider 插件
 
 适用于 LLM、Embedding、TTS、图片生成等外部服务。当前仅保留类型定义，统一 Provider 注册接口后续实现，商店不允许安装此类型。
 
@@ -581,7 +668,7 @@ maps/
 - 网络请求必须有超时和错误处理。
 - 不得记录完整 prompt、响应或令牌。
 
-### 7.8 工具插件
+### 7.9 工具插件
 
 适用于校验、查询、转换和生成器等短任务。工具插件使用宿主管理的 JSON-RPC 标准输入/输出协议，启动后必须完成版本握手并注册至少一个工具。作者推荐使用 `src.plugin_sdk.ToolRuntime`，可复制 `plugins/examples/echo-tool` 开始开发。
 

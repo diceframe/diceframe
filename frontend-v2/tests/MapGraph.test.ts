@@ -62,6 +62,67 @@ describe('MapGraph', () => {
     await node.trigger('click')
     expect(wrapper.emitted('lore-click')).toBeTruthy()
     expect(wrapper.emitted('lore-click')![0]).toEqual(['黑森林'])
+    expect(wrapper.emitted('location-select')![0][0]).toMatchObject({ id: 'b', name: '黑森林' })
+  })
+
+  it('渲染内容包地图底图、地点图标和选中状态', () => {
+    const wrapper = mountMap({
+      ...baseMap,
+      current_location_id: 'a',
+      active_map: {
+        id: 'plugin:demo:map:world',
+        name: '演示世界地图',
+        mode: 'graph',
+        background: { id: 'world', url: '/map/world.webp' },
+      },
+      locations: [
+        { id: 'a', name: '冒险者公会', connected_to: ['b'], icon_url: '/map/guild.webp' },
+        { id: 'b', name: '黑森林', connected_to: ['a'] },
+      ],
+    })
+    expect(wrapper.get('.map-background-image').attributes('src')).toBe('/map/world.webp')
+    expect(wrapper.get('.map-node-icon').attributes('href')).toBe('/map/guild.webp')
+    expect(wrapper.text()).toContain('演示世界地图')
+  })
+
+  it('keeps the background fixed while allowing the node layer to pan and zoom freely', async () => {
+    const wrapper = mountMap({
+      ...baseMap,
+      active_map: {
+        id: 'builtin:test-map',
+        name: 'Bounded map',
+        mode: 'graph',
+        background: { id: 'world', url: '/map/world.webp' },
+      },
+    })
+    const svg = wrapper.get('.map-svg')
+    const element = svg.element as SVGSVGElement
+    element.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 600, bottom: 300,
+      width: 600, height: 300, toJSON: () => ({}),
+    } as DOMRect)
+
+    element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 300, clientY: 150, bubbles: true }))
+    element.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 900, clientY: 900, bubbles: true }))
+    element.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }))
+    await nextTick()
+
+    const [x, y, width, height] = svg.attributes('viewBox')!.split(' ').map(Number)
+    expect(x + width / 2).toBeLessThan(0)
+    expect(y + height / 2).toBeLessThan(0)
+    expect(svg.attributes('preserveAspectRatio')).toBe('xMidYMid meet')
+    expect(wrapper.get('.map-background-image').element.closest('svg')).toBeNull()
+
+    element.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: 10_000,
+      clientX: 300,
+      clientY: 150,
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+    const zoomedOutWidth = Number(svg.attributes('viewBox')!.split(' ')[2])
+    expect(zoomedOutWidth).toBe(400)
   })
 
   it('初始视图以当前场景★为中心（viewBox 中心对准世界原点）', () => {

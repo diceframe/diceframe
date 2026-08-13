@@ -13,7 +13,7 @@ interface Decision { title?: string; summary?: string; description?: string; rou
 interface PlotTracker { quests?: Record<string, Quest>; relations?: Record<string, Relation>; decisions?: Array<Decision | string> }
 
 const props = defineProps<{ detail: GameDetail; player?: Player; privateMessages: PrivateMessage[]; map?: MapData | null; ruleMeta?: RuleMeta | null; collapsed?: boolean; portraitEditable?: boolean }>()
-const emit = defineEmits<{ 'lore-click': [name: string]; 'toggle-sidebar': []; 'portrait-click': [] }>()
+const emit = defineEmits<{ 'lore-click': [name: string]; 'open-map': []; 'toggle-sidebar': []; 'portrait-click': [] }>()
 const { t } = useLocale()
 
 const pt = computed<PlotTracker>(() => (props.detail.plot_tracker && typeof props.detail.plot_tracker === 'object' ? props.detail.plot_tracker as PlotTracker : {}))
@@ -107,7 +107,10 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
 
     <details class="panel sidebar-disclosure sidebar-map">
       <summary><strong>{{ t('mapTitle') }}</strong></summary>
-      <div class="sidebar-disclosure-body"><MapGraph :map="map" :current-scene="detail.scene" @lore-click="emit('lore-click', $event)" /></div>
+      <div class="sidebar-disclosure-body">
+        <button class="sidebar-map-open" @click="emit('open-map')">{{ t('mapOpenLarge') }}</button>
+        <MapGraph :map="map" :current-scene="detail.scene" :show-header="false" @lore-click="emit('lore-click', $event)" />
+      </div>
     </details>
   </aside>
 </template>

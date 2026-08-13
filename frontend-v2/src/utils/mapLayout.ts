@@ -44,11 +44,12 @@ export function forceLayout(locations: MapLocation[], options: MapLayoutOptions 
       current: false,
     }
   })
-  // 找当前场景节点：没有 anchorId 或没匹配到时取名字最长的节点当视觉锚点
+  // 找当前场景节点；若没有匹配，只选择一个内部布局锚点，不把它误标为当前地点。
   let anchorIndex = -1
   if (anchorId) {
     anchorIndex = nodes.findIndex(node => node.id === anchorId || node.name === anchorId)
   }
+  const hasCurrentAnchor = anchorIndex >= 0
   if (anchorIndex < 0) {
     anchorIndex = nodes.reduce((best, node, i) => (node.name.length > nodes[best].name.length ? i : best), 0)
   }
@@ -123,6 +124,15 @@ export function forceLayout(locations: MapLocation[], options: MapLayoutOptions 
     node.x = (node.x - anchorX) * scale
     node.y = (node.y - anchorY) * scale
   }
-  nodeArr[anchorIndex].current = true
+  // 声明式地图可为部分或全部地点提供稳定坐标；未声明的地点仍沿用确定性力导向结果。
+  locations.forEach((location, index) => {
+    const x = Number(location.x)
+    const y = Number(location.y)
+    if (Number.isFinite(x) && Number.isFinite(y) && x >= -50 && x <= 50 && y >= -50 && y <= 50) {
+      nodeArr[index].x = x
+      nodeArr[index].y = y
+    }
+  })
+  if (hasCurrentAnchor) nodeArr[anchorIndex].current = true
   return nodeArr
 }

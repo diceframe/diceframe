@@ -9,6 +9,7 @@ import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import PortraitImage from '@/components/PortraitImage.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
+import MapBackgroundPicker from '@/components/common/MapBackgroundPicker.vue'
 import { importTavernCard } from '@/utils/characterImport'
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { useSettingsStore } from '@/stores/useSettingsStore'
@@ -16,6 +17,7 @@ import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLangu
 import { characterCardNeedsConversion } from '@/utils/characterCards'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { resolveSceneImageUrl, revokeSceneImageUrl, sceneImageStyle, uploadSceneImage } from '@/api/sceneImages'
+import { mapBackgroundSelection, uploadMapBackground } from '@/api/mapBackgrounds'
 
 interface CreateCharacter extends CharacterSheet { character_name: string }
 type CreateMode = 'template' | 'custom' | 'ai'
@@ -49,6 +51,8 @@ const loreChoice = ref('__builtin__')
 const seed = ref(''), busy = ref(false), error = ref('')
 const settingsChecked = ref(false)
 const sceneImageFile = ref<File | null>(null)
+const mapBackgroundChoice = ref('auto')
+const mapBackgroundFile = ref<File | null>(null)
 const defaultSceneImageUrl = ref(ruleSceneUrl())
 const customSceneImageUrl = ref('')
 
@@ -299,7 +303,10 @@ async function create() {
       rememberCurrentGame(r.game_key, r.world_name || '')
       router.push({ name: 'play', query: { game: r.game_key } }); return
     }
-    const payload: Record<string, unknown> = { solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, description: description.value, room_password: openRoom.value ? '' : (roomPassword.value.trim() || null), players, language: gameLanguage.value, scene_image: selectedSceneImage }
+    const selectedMapBackground = mapBackgroundFile.value
+      ? await uploadMapBackground(mapBackgroundFile.value)
+      : mapBackgroundSelection(mapBackgroundChoice.value)
+    const payload: Record<string, unknown> = { solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, description: description.value, room_password: openRoom.value ? '' : (roomPassword.value.trim() || null), players, language: gameLanguage.value, scene_image: selectedSceneImage, map_background: selectedMapBackground }
     let worldId = ''
     if (mode.value === 'template') {
       worldId = world.value; payload.world_id = worldId
@@ -403,6 +410,10 @@ async function create() {
               <label class="wide"><span>{{ t('roomPassword') }}</span><input v-model="roomPassword" :placeholder="t('roomPasswordPlaceholder')"></label>
               <label class="wide checkbox"><input type="checkbox" v-model="openRoom"><span>{{ t('roomOpen') }}</span></label>
               <AdventureSceneImagePicker v-model="sceneImageFile" class="wide" :default-url="defaultSceneImageUrl" />
+              <details class="wide create-advanced-settings">
+                <summary>{{ t('mapBackgroundAdvanced') }}</summary>
+                <MapBackgroundPicker v-model="mapBackgroundChoice" v-model:file="mapBackgroundFile" />
+              </details>
             </div>
           </template>
         </section>

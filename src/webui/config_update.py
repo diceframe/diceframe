@@ -14,12 +14,13 @@ from src.webui.access_password import hash_access_password
 
 SECRET_CONFIG_KEYS = frozenset({
     "api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key",
-    "access_token", "bot_token", "napcat_token",
+    "access_token", "bot_token", "napcat_token", "tts_api_key",
 })
 STRING_CONFIG_KEYS = frozenset({
     "base_url", "model", "embedding_base_url", "embedding_model",
     "fallback1_base_url", "fallback1_model", "fallback2_base_url", "fallback2_model",
     "public_base_url", "napcat_host", "napcat_connection_id",
+    "tts_base_url", "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
 })
 API_FORMAT_KEYS = frozenset({"api_format", "fallback1_api_format", "fallback2_api_format"})
 CONFIG_KEYS = (
@@ -35,6 +36,8 @@ CONFIG_KEYS = (
     "napcat_chat_filter_enabled", "napcat_show_dropped_logs", "napcat_group_list_mode", "napcat_group_list",
     "napcat_private_list_mode", "napcat_private_list", "napcat_blocked_users", "napcat_block_official_bots",
     "update_channel",
+    "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
+    "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "api_key", "base_url", "model", "api_format",
@@ -44,7 +47,11 @@ MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
     "proxy_enabled", "proxy_url",
 })
-API_RUNTIME_CONFIG_KEYS = frozenset({"character_gen_max_tokens", "text_gen_max_tokens"})
+API_RUNTIME_CONFIG_KEYS = frozenset({
+    "character_gen_max_tokens", "text_gen_max_tokens",
+    "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
+    "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
+})
 BOT_CONFIG_MAP = {
     "qq_bot_enabled": "enabled",
     "napcat_host": "host",
@@ -134,6 +141,26 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 candidate[key] = list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
             elif key == "update_channel":
                 candidate[key] = "preview" if str(raw).strip() == "preview" else "stable"
+            elif key == "tts_provider":
+                provider = str(raw or "").strip()
+                if provider not in {"browser", "openai-compatible", "gpt-sovits"}:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "TTS Provider 无效")
+                candidate[key] = provider
+            elif key == "tts_audio_format":
+                audio_format = str(raw or "").strip().lower()
+                if audio_format not in {"mp3", "opus", "aac", "flac", "wav", "pcm"}:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "TTS 音频格式无效")
+                candidate[key] = audio_format
+            elif key == "tts_timeout_seconds":
+                timeout = float(raw)
+                if not 5 <= timeout <= 300:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "TTS 超时必须在 5–300 秒之间")
+                candidate[key] = timeout
+            elif key == "tts_cache_mb":
+                cache_mb = int(raw)
+                if not 16 <= cache_mb <= 2048:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "TTS 缓存必须在 16–2048 MB 之间")
+                candidate[key] = cache_mb
             elif key == "napcat_port":
                 port = int(raw)
                 if not 1 <= port <= 65535:

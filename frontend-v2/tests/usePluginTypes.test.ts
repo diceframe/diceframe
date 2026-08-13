@@ -29,10 +29,11 @@ describe('usePluginTypes', () => {
     mocks.listTypes.mockResolvedValue({
       ok: true,
       types: [
-        { id: 'tool', level: 'supported', filterable: true, filter_order: 3 },
+        { id: 'tool', level: 'supported', filterable: true, filter_order: 4 },
         { id: 'content-pack', level: 'supported', filterable: true, filter_order: 1 },
         { id: 'bot-extension', level: 'supported', filterable: false, filter_order: 0 },
         { id: 'theme', level: 'supported', filterable: true, filter_order: 2 },
+        { id: 'voice-pack', level: 'supported', filterable: true, filter_order: 3 },
       ],
     })
     const { pluginTypeFilters, loadTypes } = usePluginTypes()
@@ -40,6 +41,7 @@ describe('usePluginTypes', () => {
     expect(pluginTypeFilters.value).toEqual([
       { value: 'content-pack', labelKey: 'pluginTypeContentPack' },
       { value: 'theme', labelKey: 'pluginTypeTheme' },
+      { value: 'voice-pack', labelKey: 'pluginTypeVoicePack' },
       { value: 'tool', labelKey: 'pluginTypeTool' },
     ])
   })
@@ -48,6 +50,7 @@ describe('usePluginTypes', () => {
     const { pluginTypeLabel } = usePluginTypes()
     expect(pluginTypeLabel('content-pack')).toBe('内容包')
     expect(pluginTypeLabel('theme')).toBe('主题')
+    expect(pluginTypeLabel('voice-pack')).toBe('音色预设')
     expect(pluginTypeLabel('bot-extension')).toBe('Bot Bridge 扩展')
     // 未知类型：i18n 无对应键，回退原始 id
     expect(pluginTypeLabel('unknown-type')).toBe('unknown-type')

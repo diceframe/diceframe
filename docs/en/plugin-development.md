@@ -2,7 +2,7 @@
 
 [中文](../zh/plugin-development.md) | English
 
-This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, Bot Bridge command/hook/render extensions, content packs, filtered theme variables, structured tools, and the location/asset subset of map packs. Import/export and Provider plugins remain reserved types without a business runtime.
+This guide defines DiceFrame plugin packages, manifests, settings, permissions, and extension boundaries. The capabilities available today are channel adapters, Bot Bridge command/hook/render extensions, content packs, optional voice presets, filtered theme variables, structured tools, and read-only map definitions, locations, icons, and backgrounds. Import/export and generic Provider plugins remain reserved; core TTS already includes browser, OpenAI-compatible, and GPT-SoVITS adapters.
 
 **Only capabilities marked Supported or Partial below have an active integration. Reserved types may be recognized in a development directory, but they do not participate in their intended workflows and cannot be installed from the store. Plugin documentation must describe actual behavior without implying unavailable features.**
 
@@ -16,14 +16,14 @@ DiceFrame's plugin model covers channel adapters, content packs, themes, maps, i
 |------|---------------|----------------|
 | Channel adapter | `channel-adapter` | Supported: managed process, settings, start/stop, and DiceFrame HTTP API access |
 | Bot Bridge extension | `bot-extension` | Supported: command interception, message/result hooks, text/image/card rendering, and failure fallback |
-| Content pack | `content-pack` | Supported: rules, worlds, content catalogs, and user-triggered imports |
+| Content pack | `content-pack` | Supported: rules, worlds, content catalogs, read-only map contributions, and user-triggered imports |
 | Theme | `theme` | Supported: v2 semantic theme tokens |
-| Map pack | `map-pack` | Reserved: map assets planned for a future map editor; store installation disabled |
+| Voice preset | `voice-pack` | Optional OpenAI-compatible voice IDs and GPT-SoVITS reference WAV/transcript bundles |
 | Import/export | `import-export` | Reserved: no unified task API; store installation disabled |
 | Provider | `provider` | Reserved: no Provider runtime; store installation disabled |
 | Tool | `tool` | Supported: process handshake, registration, structured invocation, timeout, and manual testing UI |
 
-`content-pack`, `theme`, and `map-pack` are declarative and may omit a background process. `channel-adapter`, `bot-extension`, and `tool` require an `entrypoint`.
+`content-pack`, `theme`, and `voice-pack` are declarative and may omit a background process. `channel-adapter`, `bot-extension`, and `tool` require an `entrypoint`.
 
 ## 3. Plugin Boundaries
 
@@ -98,7 +98,7 @@ The output is placed in `dist/plugins/`. The packager applies host validation an
 - `permissions` requests known host capabilities and is shown in settings.
 - `docs` points to documentation inside the package (e.g. `README_CN.md`). It is rendered in the plugin settings "Guide" tab using lightweight Markdown (headings, lists, bold, inline code). Write it in the language of your users and explain what the plugin does, how to enable it, and how to use it. The tab is hidden when this field is absent.
 
-Known types are `channel-adapter`, `bot-extension`, `content-pack`, `theme`, `map-pack`, `import-export`, `provider`, and `tool`.
+Known types are `channel-adapter`, `bot-extension`, `content-pack`, `theme`, `voice-pack`, `import-export`, `provider`, and `tool`.
 
 | Permission | Meaning |
 |------------|---------|
@@ -111,6 +111,7 @@ Known types are `channel-adapter`, `bot-extension`, `content-pack`, `theme`, `ma
 | `content.read` | Register and read content resources |
 | `content.import` | Copy selected content into user storage |
 | `theme.tokens` | Register theme variables |
+| `voice.assets` | Register voice descriptors, previews, and reference audio |
 | `map.assets` | Register map locations and static assets |
 | `tool.execute` | Register and execute structured tool calls |
 | `bot.extend` | Extend Bot Bridge commands, processing, and presentation |
@@ -379,28 +380,59 @@ Themes register JSON through `contributes.theme` or `contributes.themes`. Only t
 - Theme background images are not supported. A future implementation must use host-controlled plugin asset references and will not expose arbitrary CSS `url()` injection.
 - Theme authors should verify text contrast, focus states, and disabled states in both light and dark modes.
 
-### 7.4 Map Packs
+### 7.4 Map Contributions in Content Packs
 
-Map packs register `locations`, `icons`, `scenes`, and `grids`. Enabled locations enter `/api/games/{game_key}/map`; assets receive restricted URLs. Locations may use `world_id` or `worlds` filters. The runtime does not provide live tabletop play, editing, collision, layers, collaboration, or grid rules.
+Content packs may bundle maps with worlds and other content, or declare only map fields to act as standalone map content. The supported contribution keys are `map_definitions`, `map_locations`, `map_icons`, and `map_backgrounds`. Enabled locations enter `/api/games/{game_key}/map`; validated image assets receive restricted URLs. Locations and map definitions may use `world_id` or `worlds` filters.
 
-## 7.5 Capabilities Not Yet Implemented
+A `map_definitions` JSON file uses `schema_version: 1` and `mode: "graph"`. It may declare a same-package `map_backgrounds` asset ID, a `default_view`, and `nodes` with `location_ref`, optional `x/y` coordinates in `-50..50`, and same-package map icon or background IDs. A world template can select one explicitly with `default_map: "plugin:<plugin-id>:map:<map-id>"`; otherwise the host automatically matches the current world and falls back to the Lorebook location graph.
+
+Map resource IDs are namespaced by content pack. The map is read-only; only the GM's selected background source is persisted.
+
+### 7.5 Voice Presets
+
+`voice-pack` is a declarative, process-free plugin shown as a “Voice Preset” in the store. It is never required for local TTS: users can enter an upstream OpenAI-compatible `voice_id` directly or save a personal GPT-SoVITS reference WAV/transcript under Settings → My voices. A preset only adds optional one-click metadata and small preview/reference recordings; it does not duplicate GPT-SoVITS, Kokoro, or other base models and never installs Python/CUDA environments.
+
+```json
+{
+  "schema_version": 1,
+  "id": "example-narrator-voice",
+  "name": "Example Narrator Voice",
+  "version": "1.0.0",
+  "plugin_type": "voice-pack",
+  "config_schema": "config.schema.json",
+  "contributes": {
+    "voices": ["voices/*.json"],
+    "voice_assets": ["voices/*.wav", "voices/*.mp3"]
+  }
+}
+```
+
+`config.schema.json` must at least expose the usual `enabled` boolean for a declarative plugin. A voice preset has no `entrypoint`.
+
+A GPT-SoVITS voice descriptor uses contract version 1 and declares `id`, `name`, `engine: "gpt-sovits"`, `language`, a WAV `reference_audio`, its exact `prompt_text`/`prompt_language`, `license`, and `consent: true`. An optional `preview_audio` may use another declared audio asset. An OpenAI-compatible preset instead declares `engine: "openai-compatible"` and the upstream `voice_id`.
+
+Every audio path must also match `contributes.voice_assets`. The required license and consent declaration confirms that the author may distribute the descriptor, preview, and reference recording. Base models and trained weights do not belong in a voice preset; the normal 20 MB plugin package limit remains in force. Personal GPT-SoVITS profiles accept either a WAV uploaded to DiceFrame for same-host/shared-filesystem setups or a path visible to the TTS server for containers and remote hosts. An OpenAI-compatible service such as a multi-engine frontend can instead keep native models and voices entirely upstream.
+
+For the complete workflow from open-source voice selection and licensing records through local packaging and store submission, see [Publishing voice presets](voice-pack-publishing.md). `plugins/examples/kokoro-zh-voice-presets` is a lightweight example that ships no weights or audio.
+
+## 7.6 Capabilities Not Yet Implemented
 
 - Content imports do not automatically enter a running game.
 - Themes cannot inject components, layouts, scripts, or arbitrary CSS.
-- Maps have no editor, tabletop rules, layers, or real-time collaboration.
+- Maps have no editor, layers, or real-time collaboration.
 - `import-export` has no unified task API.
 - `provider` has no registration or selection runtime.
 - `tool` supports short calls but not long-task progress, cancellation, result-file downloads, or automatic AI tool selection.
 
-### 7.6 Import/Export Plugins
+### 7.7 Import/Export Plugins
 
 Reserved for character-card, world-book, and lorebook transformations. A future runtime must declare formats and versions, validate without overwriting user data, and avoid exposing private paths or content.
 
-### 7.7 Provider Plugins
+### 7.8 Provider Plugins
 
 Reserved for LLM, embeddings, TTS, and image generation. Future Providers must keep API keys in secrets, use timeouts, handle network errors, and avoid logging prompts, responses, or tokens.
 
-### 7.8 Tool Plugins
+### 7.9 Tool Plugins
 
 Tool plugins implement short validation, lookup, conversion, and generation operations over a host-managed JSON-RPC stdio protocol. They complete a version handshake and register at least one tool. Authors should use `src.plugin_sdk.ToolRuntime`; copy `plugins/examples/echo-tool` as a starting point.
 

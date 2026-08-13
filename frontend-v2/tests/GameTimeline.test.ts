@@ -80,4 +80,29 @@ describe('GameTimeline',()=>{
     expect(wrapper.emitted('luck')?.[0]).toEqual([check,true])
     vi.useRealTimers()
   })
+
+  it('renders a public story recap as plain text after its round',()=>{
+    i18n.global.locale.value = 'en'
+    const wrapper=mount(GameTimeline,{global:{plugins:[i18n]},props:{
+      round:4,
+      players:[],
+      log:[{
+        round:4,
+        gm_response:'The door closes behind the party.',
+        story_recaps:[{
+          id:'recap-1',
+          text:'The party reached the archive. <b>This stays plain text.</b>',
+          from_round:1,
+          to_round:4,
+        }],
+      }],
+      live:[],
+    }})
+
+    const card=wrapper.get('[data-testid="story-recap-card"]')
+    expect(card.text()).toContain('Story Recap')
+    expect(card.text()).toContain('Rounds 1–4')
+    expect(card.text()).toContain('<b>This stays plain text.</b>')
+    expect(card.find('b').exists()).toBe(false)
+  })
 })

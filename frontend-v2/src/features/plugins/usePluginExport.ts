@@ -5,6 +5,8 @@ import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
 import type { CharacterCard, RuleSummary, WorldListResponse } from '@/api/types'
 import { uploadSceneImage } from '@/api/sceneImages'
+import { uploadMapBackground } from '@/api/mapBackgrounds'
+import { fileToBase64 } from '@/utils/characterImport'
 
 export function usePluginExport(busy: Ref<string>) {
   const toast = useToast()
@@ -22,8 +24,11 @@ export function usePluginExport(busy: Ref<string>) {
   const selectedCardIds = ref<string[]>([])
   const includePortraits = ref(true)
   const includeSceneImages = ref(true)
+  const includeMap = ref(true)
   const worldSceneImageFile = ref<File | null>(null)
   const ruleSceneImageFile = ref<File | null>(null)
+  const mapBackgroundFile = ref<File | null>(null)
+  const mapIconFiles = ref<File[]>([])
 
   const worldOptions = computed(() => (worlds.value || []).map(world => {
     const id = String(world?.id || world?.world_id || '')
@@ -71,12 +76,23 @@ export function usePluginExport(busy: Ref<string>) {
     }
     busy.value = 'export-pack'
     try {
-      const [worldSceneImage, ruleSceneImage] = includeSceneImages.value
-        ? await Promise.all([
-          selectedWorldId.value && worldSceneImageFile.value ? uploadSceneImage(worldSceneImageFile.value) : undefined,
-          selectedRuleId.value && ruleSceneImageFile.value ? uploadSceneImage(ruleSceneImageFile.value) : undefined,
-        ])
-        : [undefined, undefined]
+      if (mapIconFiles.value.length > 128) throw new Error(t('exportMapIconLimit'))
+      const shouldExportMap = includeMap.value && Boolean(selectedWorldId.value)
+      const [worldSceneImage, ruleSceneImage, mapBackground, mapIcons] = await Promise.all([
+        includeSceneImages.value && selectedWorldId.value && worldSceneImageFile.value
+          ? uploadSceneImage(worldSceneImageFile.value) : undefined,
+        includeSceneImages.value && selectedRuleId.value && ruleSceneImageFile.value
+          ? uploadSceneImage(ruleSceneImageFile.value) : undefined,
+        shouldExportMap && mapBackgroundFile.value
+          ? uploadMapBackground(mapBackgroundFile.value) : undefined,
+        shouldExportMap
+          ? Promise.all(mapIconFiles.value.map(async file => ({
+            id: file.name.replace(/\.[^.]+$/, ''),
+            file_name: file.name,
+            file_data: await fileToBase64(file),
+          })))
+          : [],
+      ])
       const response = await pluginApi.exportContent({
         plugin_id: packId.value.trim(),
         name: packName.value.trim(),
@@ -90,6 +106,9 @@ export function usePluginExport(busy: Ref<string>) {
         include_scene_images: includeSceneImages.value,
         world_scene_image: worldSceneImage,
         rule_scene_image: ruleSceneImage,
+        include_map: shouldExportMap,
+        map_background: mapBackground,
+        map_icons: mapIcons,
       })
       const blob = await response.blob()
       const disposition = response.headers.get('Content-Disposition') || ''
@@ -115,6 +134,7 @@ export function usePluginExport(busy: Ref<string>) {
     selectedWorldId, selectedRuleId, selectedCardIds,
     includePortraits,
     includeSceneImages, worldSceneImageFile, ruleSceneImageFile,
+    includeMap, mapBackgroundFile, mapIconFiles,
     worldOptions, ruleOptions, cardOptions,
     loadAuthorData, exportPack,
   }

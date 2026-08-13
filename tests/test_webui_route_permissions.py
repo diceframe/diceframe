@@ -33,6 +33,10 @@ class FakeAPI:
         self.calls.append(("restart", game_key))
         return {"ok": True}
 
+    async def generate_story_recap(self, game_key: str) -> dict:
+        self.calls.append(("story-recap", game_key))
+        return {"ok": True, "recap": {"text": "summary"}}
+
     async def switch_world(self, game_key: str, world_id: str) -> dict:
         self.calls.append(("switch", game_key, world_id))
         return {"ok": True, "world_id": world_id}
@@ -283,6 +287,31 @@ async def test_swipe_route_allows_gm_switch(tmp_path):
     assert response.status == 200
     assert response_json(response)["ok"] is True
     assert inst.switched_swipe == (3, 2)
+
+
+@pytest.mark.asyncio
+async def test_story_recap_route_rejects_non_gm(tmp_path):
+    registry = FakeRegistry(tmp_path)
+    registry.items[("web", "room", "bot")] = SimpleNamespace(gm_uid="gm")
+    req, api = make_request(registry, user_id="player")
+
+    response = await games.api_story_recap(req)
+
+    assert response.status == 403
+    assert api.calls == []
+
+
+@pytest.mark.asyncio
+async def test_story_recap_route_allows_gm(tmp_path):
+    registry = FakeRegistry(tmp_path)
+    registry.items[("web", "room", "bot")] = SimpleNamespace(gm_uid="gm")
+    req, api = make_request(registry)
+
+    response = await games.api_story_recap(req)
+
+    assert response.status == 200
+    assert response_json(response)["recap"]["text"] == "summary"
+    assert api.calls == [("story-recap", "web|room|bot")]
 
 
 @pytest.mark.asyncio

@@ -81,7 +81,7 @@ async def resolve_luck_decision(
         target["luck_resolved_at"] = datetime.now(timezone.utc).isoformat()
         _cancel_luck_timer(instance, str(target.get("check_id") or ""))
         if instance.last_check and str(instance.last_check.get("check_id") or "") == check_id:
-            instance.last_check = dict(target)
+            instance.sync_last_check(target)
         instance.last_activity = datetime.now(timezone.utc).isoformat()
         return {"ok": True, "check_result": dict(target)}
 
@@ -107,7 +107,7 @@ async def decline_pending_luck(instance: GameInstance) -> list[dict]:
                     None,
                 )
                 if replacement:
-                    instance.last_check = dict(replacement)
+                    instance.sync_last_check(replacement)
             instance.last_activity = now
         return declined
 
@@ -132,7 +132,7 @@ async def system_decline_luck(instance: GameInstance, check_id: str) -> dict:
         target["luck_timeout"] = True
         target["luck_resolved_at"] = datetime.now(timezone.utc).isoformat()
         if instance.last_check and str(instance.last_check.get("check_id") or "") == check_id:
-            instance.last_check = dict(target)
+            instance.sync_last_check(target)
         instance.last_activity = target["luck_resolved_at"]
         declined_all = not any(
             c.get("luck_decision") == "pending"

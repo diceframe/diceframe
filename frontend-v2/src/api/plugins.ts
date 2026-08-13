@@ -13,6 +13,7 @@ import type {
   PluginMirrorTestResponse,
   PluginToolInvokeResponse,
   PluginToolsResponse,
+  MapBackgroundSelection,
   SceneImageRef,
   WorldListResponse,
 } from '@/api/types'
@@ -96,6 +97,9 @@ export const pluginApi = {
       include_scene_images?: boolean
       world_scene_image?: SceneImageRef
       rule_scene_image?: SceneImageRef
+      include_map?: boolean
+      map_background?: MapBackgroundSelection
+      map_icons?: Array<{ id: string; file_name: string; file_data: string }>
   }) => apiBlob('/plugins/export', { method: 'POST', body: JSON.stringify(payload) }),
   updateConfig: (pluginId: string, payload: Record<string, unknown>) =>
     api(pluginPath(pluginId, '/config'), { method: 'PUT', body: JSON.stringify(payload) }),

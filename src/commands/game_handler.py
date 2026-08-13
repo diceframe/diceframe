@@ -28,6 +28,7 @@ from src.commands.state_recap import (
     build_state_change_messages as _build_state_change_messages,
     snapshot_public_player_state as _snapshot_public_player_state,
 )
+from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
 
@@ -107,6 +108,7 @@ class GameHandler:
             narrative_max_tokens,
             brief_max_tokens,
         )
+        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens)
         self.narrative_max_tokens = narrative_max_tokens
         self.summary_max_tokens = summary_max_tokens
         self.brief_max_tokens = brief_max_tokens
@@ -173,6 +175,10 @@ class GameHandler:
     async def resume_game(self, instance: GameInstance) -> str:
         """兼容旧入口；实际逻辑已拆到 GameLifecycle。"""
         return await self._lifecycle.resume_game(instance)
+
+    async def generate_story_recap(self, instance: GameInstance) -> dict:
+        """Generate a public recap card from completed round logs."""
+        return await self._story_recap.generate(instance)
 
     # ---- 重置游戏 ----
 

@@ -84,4 +84,19 @@ describe('forceLayout', () => {
     // 16 个孤立点若全在环上则 x 至多几个不同值；网格应有较多不同 x
     expect(xs.size).toBeGreaterThan(4)
   })
+
+  it('地图定义提供的显式坐标覆盖自动布局', () => {
+    const nodes = forceLayout([
+      { ...loc('a', ['b']), x: -24, y: 18 },
+      { ...loc('b', ['a']), x: 27, y: -11 },
+      loc('c'),
+    ], { anchorId: 'a' })
+    expect(nodes.find(node => node.id === 'a')).toMatchObject({ x: -24, y: 18, current: true })
+    expect(nodes.find(node => node.id === 'b')).toMatchObject({ x: 27, y: -11 })
+  })
+
+  it('当前场景没有匹配地点时不会误标当前节点', () => {
+    const nodes = forceLayout([loc('a'), loc('b')], { anchorId: 'missing' })
+    expect(nodes.every(node => !node.current)).toBe(true)
+  })
 })

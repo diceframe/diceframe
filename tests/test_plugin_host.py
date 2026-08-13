@@ -4,15 +4,19 @@ import io
 import json
 import textwrap
 import zipfile
+import base64
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from src.plugin_host import PluginHost
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.rules.rule_system import RuleSystem
+from src.webui.services import content_pack_maps as content_pack_map_service
 from src.webui.services import maps as map_service
 from src.webui.services import plugins as plugin_service
 from src.webui.services import rules as rule_service
@@ -41,6 +45,17 @@ def write_plugin(root, plugin_id="example", *, plugin_type="channel-adapter", en
             "token": {"type": "string", "ui": {"control": "secret", "sensitive": True}},
         },
     }), encoding="utf-8")
+
+
+def write_png(path: Path, *, size: tuple[int, int] = (32, 32)) -> None:
+    Image.new("RGBA", size, (74, 116, 142, 255)).save(path, format="PNG")
+
+
+class ContentMapApiFacade:
+    """Minimal WebAPI map-packaging facade used by service unit tests."""
+
+    def package_content_map(self, *args, **kwargs):
+        return content_pack_map_service.package_content_map(self, *args, **kwargs)
 
 
 def test_discovery_and_schema_config_need_no_host_code_change(tmp_path):
@@ -507,7 +522,7 @@ async def test_export_content_pack_round_trips_through_install(tmp_path):
             "source": "插件内容包：old-pack", "plugin_content_id": "hero",
             "source_plugin": "old-pack", "portrait": {"kind": "builtin", "id": "warrior"}}
 
-    class _Api:
+    class _Api(ContentMapApiFacade):
         def __init__(self):
             self._plugins = host
             self._lore = _Lore()
@@ -565,6 +580,95 @@ async def test_export_content_pack_round_trips_through_install(tmp_path):
     assert cards[0].get("character_name") == "Hero"
 
 
+@pytest.mark.asyncio
+async def test_export_content_pack_bundles_world_map_background_locations_and_icons(tmp_path):
+    from src.webui.services.plugins import export_content_pack
+
+    plugins_dir = tmp_path / "plugins"
+    host = PluginHost(plugins_dir, tmp_path / "data")
+    background = tmp_path / "background.webp"
+    Image.new("RGB", (640, 360), (38, 54, 72)).save(background, format="WEBP")
+    icon_buffer = io.BytesIO()
+    Image.new("RGBA", (64, 64), (74, 116, 142, 200)).save(icon_buffer, format="PNG")
+
+    class _Lore:
+        world = {"id": "w1", "name": "旧城区", "description": "", "language": "zh-CN"}
+        entries = [{
+            "id": "old-town",
+            "world_id": "w1",
+            "name": "Old Town",
+            "type": "location",
+            "keywords": ["old town"],
+            "content": "Rainy streets.",
+            "tier": "core",
+            "connected_to": [],
+        }]
+
+        def get_world(self, world_id):
+            return self.world if world_id == "w1" else None
+
+        def list_entries(self, world_id):
+            return list(self.entries) if world_id == "w1" else []
+
+    class _Api(ContentMapApiFacade):
+        def __init__(self):
+            self._plugins = host
+            self._lore = _Lore()
+            self._rules_dir = tmp_path
+
+        def list_character_cards(self):
+            return {"cards": []}
+
+        @staticmethod
+        def resolve_map_background_file(selection):
+            return background if selection == {"kind": "upload", "asset_id": "test"} else None
+
+    result = export_content_pack(
+        _Api(),
+        "map-content",
+        "地图内容包",
+        "1.0.0",
+        "map export",
+        world_id="w1",
+        include_map=True,
+        map_background={"kind": "upload", "asset_id": "test"},
+        map_icons=[{
+            "id": "Old Town",
+            "file_name": "Old Town.png",
+            "file_data": base64.b64encode(icon_buffer.getvalue()).decode("ascii"),
+        }],
+    )
+
+    assert result["ok"] is True
+    archive = zipfile.ZipFile(io.BytesIO(result["payload"]))
+    names = set(archive.namelist())
+    assert "map-content/maps/definitions/w1-map.json" in names
+    assert "map-content/maps/locations/old-town.json" in names
+    assert "map-content/maps/icons/old_town.webp" in names
+    assert "map-content/maps/backgrounds/w1-map.webp" in names
+
+    manifest = json.loads(archive.read("map-content/plugin.json"))
+    assert manifest["contributes"] | {
+        "map_definitions": ["maps/definitions/*.json"],
+        "map_locations": ["maps/locations/*.json"],
+        "map_icons": ["maps/icons/*.webp"],
+        "map_backgrounds": ["maps/backgrounds/*.webp"],
+    } == manifest["contributes"]
+    assert "content.map" in manifest["capabilities"]
+
+    world = json.loads(archive.read("map-content/content/worlds/w1.json"))
+    assert world["default_map"] == "plugin:map-content:map:w1-map"
+    location = json.loads(archive.read("map-content/maps/locations/old-town.json"))
+    assert location["icon"] == "old_town"
+
+    await host.install_from_zip(result["payload"], overwrite=True)
+    await host.update_config("map-content", {"enabled": True})
+    assets = host.list_map_assets("w1")
+    assert assets["maps"][0]["background"] == "w1-map"
+    assert assets["locations"][0]["id"] == "old-town"
+    assert assets["icons"][0]["id"] == "old_town"
+
+
 def test_export_content_pack_flat_has_plugin_json_at_root(tmp_path):
     """flat=True 导出仓库源码：plugin.json 在根目录，无 <id>/ 前缀，解压即可推到 GitHub。"""
     import zipfile
@@ -580,7 +684,7 @@ def test_export_content_pack_flat_has_plugin_json_at_root(tmp_path):
         def list_entries(self, wid): return [] if wid != "w1" else [
             {"id": "e1", "world_id": "w1", "name": "P", "type": "location", "content": "c", "tier": "core"}]
 
-    class _Api:
+    class _Api(ContentMapApiFacade):
         def __init__(self): self._plugins = host; self._lore = _Lore(); self._rules_dir = tmp_path
         def list_character_cards(self): return {"cards": []}
 
@@ -693,12 +797,110 @@ def test_list_plugin_types_drives_frontend_filters():
     from src.plugin_host.support import list_plugin_types
     types = list_plugin_types()
     filterable = [t["id"] for t in types if t["filterable"]]
-    assert filterable == ["content-pack", "theme", "tool", "channel-adapter"]
+    assert filterable == ["content-pack", "theme", "voice-pack", "tool", "channel-adapter"]
     assert len(types) == 8
     assert {t["id"] for t in types} == {
-        "channel-adapter", "content-pack", "theme", "map-pack",
-        "import-export", "provider", "tool", "bot-extension",
+        "channel-adapter", "content-pack", "theme",
+        "import-export", "provider", "tool", "bot-extension", "voice-pack",
     }
+
+
+@pytest.mark.asyncio
+async def test_voice_pack_registers_authorized_reference_audio(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "narrator-voice",
+        plugin_type="voice-pack",
+        entrypoint=False,
+        manifest_extra={
+            "contributes": {
+                "voices": ["voices/*.json"],
+                "voice_assets": ["voices/*.wav"],
+            },
+        },
+    )
+    voice_dir = plugins / "narrator-voice" / "voices"
+    voice_dir.mkdir(parents=True)
+    (voice_dir / "narrator.wav").write_bytes(b"RIFF-test-wave")
+    (voice_dir / "narrator.json").write_text(json.dumps({
+        "schema_version": 1,
+        "id": "narrator",
+        "name": "Narrator",
+        "engine": "gpt-sovits",
+        "language": "zh-CN",
+        "reference_audio": "voices/narrator.wav",
+        "prompt_text": "欢迎来到冒险。",
+        "prompt_language": "zh-CN",
+        "license": "CC-BY-4.0",
+        "consent": True,
+    }), encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    await host.update_config("narrator-voice", {"enabled": True})
+    profiles = host.list_voice_profiles()
+
+    assert profiles[0]["id"] == "plugin:narrator-voice:voice:narrator"
+    assert profiles[0]["engine"] == "gpt-sovits"
+    assert Path(profiles[0]["_reference_audio_path"]).name == "narrator.wav"
+    assert profiles[0]["preview_url"].endswith("/voices/narrator.wav")
+
+
+def test_voice_pack_rejects_missing_consent(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "unsafe-voice",
+        plugin_type="voice-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"voices": ["voices/*.json"]}},
+    )
+    voice_dir = plugins / "unsafe-voice" / "voices"
+    voice_dir.mkdir(parents=True)
+    (voice_dir / "unsafe.json").write_text(json.dumps({
+        "schema_version": 1,
+        "id": "unsafe",
+        "name": "Unsafe",
+        "engine": "openai-compatible",
+        "voice_id": "unsafe",
+        "license": "unknown",
+    }), encoding="utf-8")
+
+    detail = PluginHost(plugins, tmp_path / "data").discover()[0]
+
+    assert detail["status"] == "failed"
+    assert "consent=true" in detail["error"]
+
+
+def test_content_pack_map_contributions_infer_map_asset_permission(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "map-content",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"map_icons": ["maps/icons/*.png"]}},
+    )
+    icon_dir = plugins / "map-content" / "maps" / "icons"
+    icon_dir.mkdir(parents=True)
+    write_png(icon_dir / "town.png")
+
+    detail = PluginHost(plugins, tmp_path / "data").discover()[0]
+
+    assert detail["status"] == "disabled"
+    assert "content.read" in detail["permissions"]
+    assert "map.assets" in detail["permissions"]
+
+
+def test_removed_map_pack_type_is_rejected(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "legacy-map", plugin_type="map-pack", entrypoint=False)
+
+    detail = PluginHost(plugins, tmp_path / "data").discover()[0]
+
+    assert detail["status"] == "failed"
+    assert "不支持的 plugin_type" in detail["error"]
 
 
 def test_autoimport_plugin_content_idempotent():
@@ -1067,9 +1269,9 @@ async def test_theme_and_map_pack_contributions_are_queryable(tmp_path):
     write_plugin(
         plugins,
         "map-assets",
-        plugin_type="map-pack",
+        plugin_type="content-pack",
         entrypoint=False,
-        manifest_extra={"contributes": {"locations": ["maps/locations/*.json"]}},
+        manifest_extra={"contributes": {"map_locations": ["maps/locations/*.json"]}},
     )
     location_dir = plugins / "map-assets" / "maps" / "locations"
     location_dir.mkdir(parents=True)
@@ -1098,16 +1300,16 @@ async def test_theme_and_map_pack_contributions_are_queryable(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_map_pack_locations_and_assets_are_consumed_by_map_service(tmp_path):
+async def test_content_pack_maps_are_consumed_by_map_service(tmp_path):
     plugins = tmp_path / "plugins"
     write_plugin(
         plugins,
         "map-assets",
-        plugin_type="map-pack",
+        plugin_type="content-pack",
         entrypoint=False,
         manifest_extra={"contributes": {
-            "locations": ["maps/locations/*.json"],
-            "icons": ["maps/icons/*.png"],
+            "map_locations": ["maps/locations/*.json"],
+            "map_icons": ["maps/icons/*.png"],
         }},
     )
     location_dir = plugins / "map-assets" / "maps" / "locations"
@@ -1121,7 +1323,7 @@ async def test_map_pack_locations_and_assets_are_consumed_by_map_service(tmp_pat
         "connected_to": [],
         "content": "A plugin location.",
     }), encoding="utf-8")
-    (icon_dir / "town.png").write_bytes(b"fake-png")
+    write_png(icon_dir / "town.png")
     host = PluginHost(plugins, tmp_path / "data")
     host.discover()
     await host.update_config("map-assets", {"enabled": True})
@@ -1155,6 +1357,246 @@ async def test_map_pack_locations_and_assets_are_consumed_by_map_service(tmp_pat
         host.public_asset_path("map-assets", "plugin.json")
 
 
+def test_fantasy_world_uses_builtin_map_background_without_plugin(tmp_path):
+    class Registry:
+        @staticmethod
+        def get(_key):
+            return SimpleNamespace(world_id="default_fantasy", scene="")
+
+    class Lore:
+        @staticmethod
+        def list_entries(_world_id, _entry_type):
+            return []
+
+    class Api:
+        _plugins = None
+        _reg = Registry()
+        _lore = Lore()
+
+        @staticmethod
+        def _parse_key(game_key):
+            return ("web", game_key, "web_bot")
+
+    result = map_service.get_map_locations(Api, "demo")
+
+    assert result["active_map"]["id"] == "builtin:map:fantasy-region-v1"
+    assert result["active_map"]["background"]["url"] == "/v2-assets/ui/maps/fantasy-region-v1.webp"
+    assert result["capabilities"]["has_background"] is True
+    assert result["capabilities"]["has_plugin_assets"] is False
+
+
+@pytest.mark.parametrize(("rule_id", "asset_id"), [
+    ("freeform_coc", "occult-town-v1"),
+    ("freeform_cyberpunk", "cyber-city-v1"),
+])
+def test_copied_world_uses_builtin_background_recommended_by_rule(rule_id, asset_id):
+    class Registry:
+        @staticmethod
+        def get(_key):
+            return SimpleNamespace(world_id="custom_copy_123", rule_id=rule_id, scene="")
+
+    class Lore:
+        @staticmethod
+        def list_entries(_world_id, _entry_type):
+            return []
+
+    class Api:
+        _plugins = None
+        _reg = Registry()
+        _lore = Lore()
+
+        @staticmethod
+        def _parse_key(game_key):
+            return ("web", game_key, "web_bot")
+
+    result = map_service.get_map_locations(Api, "demo")
+
+    assert result["active_map"]["id"] == f"builtin:map:{asset_id}"
+    assert result["active_map"]["background"]["url"] == f"/v2-assets/ui/maps/{asset_id}.webp"
+
+
+def test_old_save_without_rule_uses_world_template_rule_for_builtin_background():
+    class Registry:
+        @staticmethod
+        def get(_key):
+            return SimpleNamespace(world_id="legacy_copy_123", rule_id="", scene="")
+
+    class Lore:
+        @staticmethod
+        def list_entries(_world_id, _entry_type):
+            return []
+
+    class Api:
+        _plugins = None
+        _reg = Registry()
+        _lore = Lore()
+
+        @staticmethod
+        def _parse_key(game_key):
+            return ("web", game_key, "web_bot")
+
+        @staticmethod
+        def _load_world_template(_world_id):
+            return {"default_rule": "freeform_coc"}
+
+    result = map_service.get_map_locations(Api, "demo")
+
+    assert result["active_map"]["id"] == "builtin:map:occult-town-v1"
+
+
+@pytest.mark.asyncio
+async def test_content_pack_map_definition_applies_background_icons_and_stable_coordinates(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "map-assets",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {
+            "map_definitions": ["maps/maps/*.json"],
+            "map_locations": ["maps/locations/*.json"],
+            "map_icons": ["maps/icons/*.png"],
+            "map_backgrounds": ["maps/scenes/*.png"],
+        }},
+    )
+    plugin_dir = plugins / "map-assets" / "maps"
+    (plugin_dir / "maps").mkdir(parents=True)
+    (plugin_dir / "locations").mkdir(parents=True)
+    (plugin_dir / "icons").mkdir(parents=True)
+    (plugin_dir / "scenes").mkdir(parents=True)
+    (plugin_dir / "maps" / "arkham.json").write_text(json.dumps({
+        "schema_version": 1,
+        "id": "arkham",
+        "name": "Arkham",
+        "worlds": ["coc_horror"],
+        "mode": "graph",
+        "background": "arkham",
+        "nodes": [{"location_ref": "station", "x": -18, "y": 12, "icon": "station"}],
+        "default_view": {"x": 0, "y": 0, "zoom": 1.4},
+    }), encoding="utf-8")
+    (plugin_dir / "locations" / "station.json").write_text(json.dumps({
+        "id": "station", "name": "Station", "worlds": ["coc_horror"],
+    }), encoding="utf-8")
+    write_png(plugin_dir / "icons" / "station.png")
+    write_png(plugin_dir / "scenes" / "arkham.png", size=(640, 360))
+
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    await host.update_config("map-assets", {"enabled": True})
+
+    class Registry:
+        @staticmethod
+        def get(_key):
+            return SimpleNamespace(world_id="coc_horror", scene="Station")
+
+    class Lore:
+        @staticmethod
+        def list_entries(_world_id, _entry_type):
+            return []
+
+    class Api:
+        _plugins = host
+        _reg = Registry()
+        _lore = Lore()
+
+        @staticmethod
+        def _parse_key(game_key):
+            return ("web", game_key, "web_bot")
+
+        @staticmethod
+        def _load_world_template(_world_id):
+            return {"world_id": "coc_horror", "default_map": "plugin:map-assets:map:arkham"}
+
+    result = map_service.get_map_locations(Api, "demo")
+
+    assert result["current_location_id"] == "station"
+    assert result["active_map"]["id"] == "plugin:map-assets:map:arkham"
+    assert result["active_map"]["background"]["url"].endswith("maps/scenes/arkham.png")
+    assert result["locations"][0]["x"] == -18
+    assert result["locations"][0]["y"] == 12
+    assert result["locations"][0]["icon_url"].endswith("maps/icons/station.png")
+    assert result["capabilities"] == {
+        "can_expand": True,
+        "can_edit": False,
+        "has_background": True,
+        "has_plugin_assets": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_map_asset_ids_are_namespaced_by_plugin(tmp_path):
+    plugins = tmp_path / "plugins"
+    for plugin_id in ("map-east", "map-west"):
+        write_plugin(
+            plugins,
+            plugin_id,
+            plugin_type="content-pack",
+            entrypoint=False,
+            manifest_extra={"contributes": {"map_icons": ["icons/*.png"]}},
+        )
+        icon_dir = plugins / plugin_id / "icons"
+        icon_dir.mkdir()
+        write_png(icon_dir / "station.png")
+
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    await host.update_config("map-east", {"enabled": True})
+    await host.update_config("map-west", {"enabled": True})
+
+    icons = host.list_map_assets()["icons"]
+    assert len(icons) == 2
+    assert {item["ref"] for item in icons} == {
+        "plugin:map-east:icon:station",
+        "plugin:map-west:icon:station",
+    }
+
+
+def test_content_pack_rejects_invalid_declared_map_image(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "broken-map",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"map_icons": ["icons/*.png"]}},
+    )
+    icon_dir = plugins / "broken-map" / "icons"
+    icon_dir.mkdir()
+    (icon_dir / "bad.png").write_bytes(b"not-an-image")
+
+    found = PluginHost(plugins, tmp_path / "data").discover()
+
+    assert found[0]["status"] == "failed"
+    assert "无法读取地图图标" in found[0]["error"]
+
+
+def test_content_pack_rejects_missing_map_asset_reference(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "broken-reference-map",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"map_definitions": ["maps/*.json"]}},
+    )
+    maps_dir = plugins / "broken-reference-map" / "maps"
+    maps_dir.mkdir()
+    (maps_dir / "overview.json").write_text(json.dumps({
+        "schema_version": 1,
+        "id": "overview",
+        "mode": "graph",
+        "background": "missing-scene",
+        "nodes": [],
+    }), encoding="utf-8")
+
+    host = PluginHost(plugins, tmp_path / "data")
+    found = host.discover()
+
+    assert found[0]["status"] == "failed"
+    assert "background=missing-scene" in found[0]["error"]
+    assert host.list_contributions("map_definition") == []
+
+
 def test_unknown_plugin_type_is_rejected_but_isolated(tmp_path):
     plugins = tmp_path / "plugins"
     write_plugin(plugins, "good")
@@ -1183,12 +1625,12 @@ def test_missing_plugin_type_is_rejected(tmp_path):
 
 def test_public_plugin_detail_reports_real_support_level(tmp_path):
     plugins = tmp_path / "plugins"
-    write_plugin(plugins, "map-assets", plugin_type="map-pack", entrypoint=False)
+    write_plugin(plugins, "map-assets", plugin_type="content-pack", entrypoint=False)
     write_plugin(plugins, "future-tool", plugin_type="tool", entrypoint=True)
     host = PluginHost(plugins, tmp_path / "data")
     host.discover()
 
-    assert host.public_detail("map-assets")["support"]["level"] == "reserved"
+    assert host.public_detail("map-assets")["support"]["level"] == "supported"
     assert host.public_detail("future-tool")["support"]["level"] == "supported"
 
 

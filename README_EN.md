@@ -24,6 +24,7 @@ It brings the Web UI, character sheets, lorebooks, dice checks, state changes, c
 - Lorebook entries for NPCs, locations, items, events, puzzles, and factions.
 - Long-session summaries, with optional embedding-based memory recall.
 - AI-assisted world, rule, character, and lorebook generation.
+- Text-to-speech with a zero-setup system fallback, online or local OpenAI-compatible endpoints, and GPT-SoVITS. Existing service voice IDs and personal reference WAVs work directly; store voice presets are optional.
 - Application updates with side-by-side portable installs, health checks, rollback, and install-specific guidance.
 - Docker support for Linux deployment, with runtime data mounted under `data/`.
 

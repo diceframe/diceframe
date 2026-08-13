@@ -8,6 +8,7 @@ from src.webui.abuse_guard import (
     ABUSE_GUARD_KEY,
     AbuseGuard,
     SlidingWindowLimiter,
+    _is_ai_request,
     abuse_guard_middleware,
 )
 
@@ -106,3 +107,21 @@ def test_limiter_evicts_old_identities_instead_of_growing_forever():
         assert limiter.check("write", f"ip-{index}", 10, 60).allowed
 
     assert limiter.bucket_count == 3
+
+
+def test_story_recap_is_counted_as_an_ai_request():
+    request = type("Request", (), {
+        "path": "/api/games/room/story-recap",
+        "method": "POST",
+    })()
+
+    assert _is_ai_request(request) is True
+
+
+def test_server_speech_is_counted_as_an_ai_request():
+    request = type("Request", (), {
+        "path": "/api/games/room/speech",
+        "method": "POST",
+    })()
+
+    assert _is_ai_request(request) is True

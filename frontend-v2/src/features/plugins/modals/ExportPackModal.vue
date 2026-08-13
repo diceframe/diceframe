@@ -15,6 +15,9 @@ defineProps<{
   selectedCardIds: string[]
   includePortraits: boolean
   includeSceneImages: boolean
+  includeMap: boolean
+  mapBackgroundFile: File | null
+  mapIconFiles: File[]
   authorWorldOptions: SelectOption[]
   authorRuleOptions: SelectOption[]
   authorCardOptions: SelectOption[]
@@ -28,7 +31,9 @@ defineProps<{
   setSelectedCardIds: (v: (string | number)[] | null) => void
   setIncludePortraits: (v: boolean) => void
   setIncludeSceneImages: (v: boolean) => void
+  setIncludeMap: (v: boolean) => void
   setExportSceneImage: (kind: 'world' | 'rule', event: Event) => void
+  setExportMapAsset: (kind: 'background' | 'icons', event: Event) => void
   exportPack: (repoSource: boolean) => Promise<void> | void
 }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
@@ -107,6 +112,47 @@ const { t } = useLocale()
             <label class="input-label export-card-select">
               <span class="field-title">{{ t('selectCards') }}</span>
               <NSelect :value="selectedCardIds" :options="authorCardOptions" multiple clearable @update:value="setSelectedCardIds" />
+            </label>
+          </div>
+        </section>
+
+        <section class="export-pack-section export-map-section">
+          <h3>{{ t('exportPackMapContent') }}</h3>
+          <label class="export-resource-option" :class="{ disabled: !selectedWorldId }" :title="t('includeContentPackMapHint')">
+            <NCheckbox
+              :checked="includeMap"
+              :disabled="!selectedWorldId"
+              @update:checked="setIncludeMap"
+            >
+              {{ t('includeContentPackMap') }}
+            </NCheckbox>
+            <small class="muted">{{ t('includeContentPackMapHint') }}</small>
+          </label>
+          <div class="export-map-assets">
+            <label class="compact-file-field" :class="{ disabled: !selectedWorldId || !includeMap }">
+              <span>{{ t('contentPackMapBackground') }}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                :disabled="!selectedWorldId || !includeMap"
+                @change="setExportMapAsset('background', $event)"
+              >
+              <small class="muted">
+                {{ mapBackgroundFile ? mapBackgroundFile.name : t('contentPackMapBackgroundHint') }}
+              </small>
+            </label>
+            <label class="compact-file-field" :class="{ disabled: !selectedWorldId || !includeMap }">
+              <span>{{ t('contentPackMapIcons') }}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                :disabled="!selectedWorldId || !includeMap"
+                @change="setExportMapAsset('icons', $event)"
+              >
+              <small class="muted">
+                {{ mapIconFiles.length ? t('contentPackMapIconsSelected', { count: mapIconFiles.length }) : t('contentPackMapIconsHint') }}
+              </small>
             </label>
           </div>
         </section>
@@ -274,6 +320,21 @@ const { t } = useLocale()
   gap: 10px;
 }
 
+.export-map-section {
+  display: grid;
+  gap: 9px;
+}
+
+.export-map-section h3 {
+  margin-bottom: 0;
+}
+
+.export-map-assets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .export-resource-option {
   display: grid;
   align-content: center;
@@ -309,6 +370,7 @@ const { t } = useLocale()
   }
 
   .export-content-grid,
+  .export-map-assets,
   .export-resource-options,
   .export-pack-footer {
     grid-template-columns: 1fr;

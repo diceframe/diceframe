@@ -5,7 +5,7 @@ import type { AppConfig, BotTokenResponse, TestResult } from '@/api/types'
 
 export type SecretKey =
   | 'api_key' | 'embedding_api_key' | 'fallback1_api_key' | 'fallback2_api_key'
-  | 'bot_token' | 'napcat_token' | 'proxy_url'
+  | 'bot_token' | 'napcat_token' | 'proxy_url' | 'tts_api_key'
 export type SecretInput = Partial<Record<SecretKey, string>>
 
 export const useSettingsStore = defineStore('settings', () => {

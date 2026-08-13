@@ -1,4 +1,102 @@
 /* Final settings polish: compact controls, explicit bundled assets, and a structured about page. */
+.reference-settings-page .tts-settings-group,
+.reference-settings-page .tts-profile-manager {
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-1) 74%, transparent);
+}
+
+.reference-settings-page .tts-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--df-border-soft);
+}
+
+.reference-settings-page .tts-group-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.reference-settings-page .tts-group-heading strong {
+  font-size: 13px;
+}
+
+.reference-settings-page .tts-group-heading small,
+.reference-settings-page .tts-profile-card small {
+  color: var(--df-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.reference-settings-page .tts-settings-group > .tts-profile-manager {
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--df-border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+.reference-settings-page .tts-profile-list {
+  display: grid;
+  gap: 7px;
+}
+
+.reference-settings-page .tts-profile-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-control-bg);
+}
+
+.reference-settings-page .tts-profile-card > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.reference-settings-page .tts-profile-actions,
+.reference-settings-page .tts-profile-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.reference-settings-page .tts-profile-form {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--df-border-soft);
+}
+
+.reference-settings-page .tts-profile-form input[type="file"] {
+  min-width: 0;
+  color: var(--df-text-secondary);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .reference-settings-page .tts-profile-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reference-settings-page .tts-profile-actions {
+    justify-content: flex-start;
+  }
+}
+
 .reference-settings-page .settings-pane.about {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -176,6 +274,7 @@
 
 .about-card .sponsor-cta {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   width: 100%;
   padding: 12px 14px;
@@ -186,6 +285,7 @@
   cursor: pointer;
   font: inherit;
   text-align: left;
+  justify-content: stretch;
   justify-items: start;
   align-items: start;
 }
@@ -194,12 +294,21 @@
   background: color-mix(in srgb, var(--df-accent-strong) 16%, var(--df-surface-1));
 }
 
-.about-card .sponsor-cta strong {
+.about-card .sponsor-cta > strong,
+.about-card .sponsor-cta > small {
+  display: block;
+  justify-self: stretch;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.about-card .sponsor-cta > strong {
   color: var(--df-accent-strong);
   font-size: 13px;
 }
 
-.about-card .sponsor-cta small {
+.about-card .sponsor-cta > small {
   color: var(--df-text-muted);
   font-size: 11px;
   line-height: 1.5;

@@ -77,7 +77,7 @@ def _append_chatlog(registry: GameRegistry, instance: GameInstance) -> None:
     if instance.last_saved_log_count > len(instance.log):
         # log 缩短（rollback 弹出了末尾条目）：截断 chatlog 到当前长度，丢弃死条目
         _truncate_chatlog(chatlog, len(instance.log))
-        instance.last_saved_log_count = len(instance.log)
+        instance.mark_log_persisted()
     if instance.last_saved_log_count >= len(instance.log):
         return
     new_entries = instance.log[instance.last_saved_log_count:]
@@ -89,7 +89,7 @@ def _append_chatlog(registry: GameRegistry, instance: GameInstance) -> None:
     # 追加写入（O(1)，不重写历史）
     with open(chatlog, "a", encoding="utf-8") as fh:
         fh.write(lines)
-    instance.last_saved_log_count = len(instance.log)
+    instance.mark_log_persisted()
 
 
 def _truncate_chatlog(chatlog: Path, keep: int) -> None:
@@ -204,8 +204,7 @@ def _restore_chatlog(registry: GameRegistry, instance: GameInstance, sp: Path) -
             history = (history[:prefix] if prefix > 0 else []) + core_log
     elif core_log:
         history = core_log
-    instance.log = history
-    instance.last_saved_log_count = len(history)
+    instance.restore_log_history(history)
 
 
 async def recover_all(registry: GameRegistry) -> list[GameInstance]:
@@ -256,6 +255,7 @@ async def import_save_zip(
     platform: str = "web",
     account_id: str = "web_bot",
     scene_image_importer: Callable[[bytes], dict[str, Any]] | None = None,
+    map_background_importer: Callable[[bytes], dict[str, Any]] | None = None,
 ) -> dict:
     """导入导出的存档 zip（state.json + 可选历史/头图），作为新对局恢复。
 
@@ -282,6 +282,7 @@ async def import_save_zip(
                 "state.json": game_instance.MAX_SAVE_STATE_BYTES,
                 "chatlog.jsonl": game_instance.MAX_SAVE_CHATLOG_BYTES,
                 "scene-image.asset": 8 * 1024 * 1024,
+                "map-background.asset": 8 * 1024 * 1024,
             }
             unpacked_size = 0
             for info in infos:
@@ -301,11 +302,12 @@ async def import_save_zip(
             if not isinstance(state_json, dict) or "game_key" not in state_json:
                 return {"ok": False, "error": "state.json 缺少 game_key"}
             # 仅接受顶层已知文件，防止解压路径穿越/任意写入
-            allowed = {"state.json", "chatlog.jsonl", "scene-image.asset"}
+            allowed = {"state.json", "chatlog.jsonl", "scene-image.asset", "map-background.asset"}
             if any(name for name in names if name not in allowed or "/" in name or "\\" in name or ".." in name):
                 return {"ok": False, "error": "存档包包含非法文件"}
             chatlog_data = zf.read("chatlog.jsonl") if "chatlog.jsonl" in names else b""
             scene_image_data = zf.read("scene-image.asset") if "scene-image.asset" in names else b""
+            map_background_data = zf.read("map-background.asset") if "map-background.asset" in names else b""
     except zipfile.BadZipFile:
         return {"ok": False, "error": "存档包不是有效的 zip"}
     except Exception as exc:
@@ -322,6 +324,17 @@ async def import_save_zip(
         if not imported.get("ok") or not imported.get("scene_image"):
             return {"ok": False, "error": str(imported.get("error") or "冒险头图导入失败")}
         state_json["scene_image"] = imported["scene_image"]
+
+    map_reference = state_json.get("map_background")
+    if isinstance(map_reference, dict) and map_reference.get("kind") == "save_asset":
+        if map_reference.get("path") != "map-background.asset" or not map_background_data:
+            return {"ok": False, "error": "存档包缺少地图背景资产"}
+        if map_background_importer is None:
+            return {"ok": False, "error": "当前环境不支持导入地图背景资产"}
+        imported = map_background_importer(map_background_data)
+        if not imported.get("ok") or not imported.get("map_background"):
+            return {"ok": False, "error": str(imported.get("error") or "地图背景导入失败")}
+        state_json["map_background"] = imported["map_background"]
 
     # 生成唯一新 game_key：import_<毫秒时间戳>
     new_key = (platform, f"import_{int(time.time() * 1000)}", account_id)

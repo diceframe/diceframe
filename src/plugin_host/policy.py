@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .support import STATIC_PLUGIN_TYPES, plugin_type_descriptor
+from .support import MAP_CONTRIBUTION_FIELDS, STATIC_PLUGIN_TYPES, plugin_type_descriptor
 
 PERMISSION_DETAILS = {
     "process.spawn": "启动独立插件进程",
@@ -17,6 +17,7 @@ PERMISSION_DETAILS = {
     "content.import": "由用户主动导入内容到角色卡库或世界书",
     "theme.tokens": "注册主题 CSS 变量",
     "map.assets": "注册地图地点和素材资源",
+    "voice.assets": "注册可选音色预设、试听和参考音频",
     "tool.execute": "注册并执行结构化工具调用",
     "bot.extend": "扩展 Bot Bridge 命令、消息处理和展示",
     "tunnel.publish": "向核心上报外网公开访问地址",
@@ -48,6 +49,13 @@ def effective_plugin_permissions(manifest: dict[str, Any], schema: dict[str, Any
     if has_entrypoint(manifest):
         inferred.update({"process.spawn", "plugin.data"})
     inferred.update(plugin_type_descriptor(plugin_type).get("inferred_permissions") or [])
+    contributes = manifest.get("contributes")
+    if (
+        plugin_type == "content-pack"
+        and isinstance(contributes, dict)
+        and MAP_CONTRIBUTION_FIELDS.intersection(contributes)
+    ):
+        inferred.add("map.assets")
     return sorted(inferred)
 
 

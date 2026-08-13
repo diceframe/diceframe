@@ -87,11 +87,23 @@ test('phone play side panels open as drawers without entering document flow', as
 
   await page.getByRole('button', { name: '状态' }).click()
   await expect(sidebar).toBeVisible()
+  const sidebarBounds = await sidebar.evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    return { top: bounds.top, bottom: bounds.bottom, viewportHeight: window.innerHeight }
+  })
+  expect(Math.abs(sidebarBounds.top)).toBeLessThanOrEqual(1)
+  expect(Math.abs(sidebarBounds.viewportHeight - sidebarBounds.bottom)).toBeLessThanOrEqual(1)
   await sidebar.getByRole('button', { name: '收起侧栏' }).click()
   await expect(sidebar).toBeHidden()
 
   await page.getByRole('button', { name: '控台' }).click()
   await expect(controls).toBeVisible()
+  const controlBounds = await controls.evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    return { top: bounds.top, bottom: bounds.bottom, viewportHeight: window.innerHeight }
+  })
+  expect(Math.abs(controlBounds.top)).toBeLessThanOrEqual(1)
+  expect(Math.abs(controlBounds.viewportHeight - controlBounds.bottom)).toBeLessThanOrEqual(1)
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBe(0)
   await controls.locator('.rail-toggle').click()
@@ -181,6 +193,72 @@ test('phone play has no spacer bands around the game workspace', async ({ page }
   expect(Math.abs(geometry.hudGap)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.pageBottomGap)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.mainBottomGap)).toBeLessThanOrEqual(1)
+})
+
+test('phone play opens the scene map as a full-screen workspace', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
+  await expect(page.locator('.composer')).toBeVisible()
+
+  await page.getByRole('button', { name: '地图', exact: true }).click()
+  const workspace = page.locator('.map-workspace-shell')
+  await expect(workspace).toBeVisible()
+  await expect(workspace.getByPlaceholder('搜索地点或关键词')).toBeVisible()
+  const background = workspace.locator('.map-background-image')
+  await expect(background).toHaveAttribute('src', /fantasy-region-v1\.webp$/)
+  const mapSvg = workspace.locator('.map-svg')
+  const mapBounds = await mapSvg.boundingBox()
+  if (!mapBounds) throw new Error('map viewport has no bounds')
+  const backgroundBefore = await background.boundingBox()
+  const viewBoxBefore = await mapSvg.getAttribute('viewBox')
+  await page.mouse.move(mapBounds.x + mapBounds.width / 2, mapBounds.y + mapBounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(mapBounds.x + mapBounds.width + 240, mapBounds.y + mapBounds.height + 240, { steps: 4 })
+  await page.mouse.up()
+  const viewBoxAfterDrag = await mapSvg.getAttribute('viewBox')
+  expect(viewBoxAfterDrag).not.toBe(viewBoxBefore)
+  await page.mouse.move(mapBounds.x + mapBounds.width / 2, mapBounds.y + mapBounds.height / 2)
+  await page.mouse.wheel(0, -600)
+  await expect.poll(() => mapSvg.getAttribute('viewBox')).not.toBe(viewBoxAfterDrag)
+  expect(await background.boundingBox()).toEqual(backgroundBefore)
+  const coverage = await background.evaluate(element => {
+    const image = element.getBoundingClientRect()
+    const viewport = element.closest('.map-viewport')!.getBoundingClientRect()
+    return {
+      left: image.left - viewport.left,
+      top: image.top - viewport.top,
+      right: image.right - viewport.right,
+      bottom: image.bottom - viewport.bottom,
+    }
+  })
+  expect(coverage.left).toBeLessThanOrEqual(1)
+  expect(coverage.top).toBeLessThanOrEqual(1)
+  expect(coverage.right).toBeGreaterThanOrEqual(-1)
+  expect(coverage.bottom).toBeGreaterThanOrEqual(-1)
+  const bounds = await workspace.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    return { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: innerWidth, height: innerHeight }
+  })
+  expect(Math.abs(bounds.top)).toBeLessThanOrEqual(1)
+  expect(Math.abs(bounds.left)).toBeLessThanOrEqual(1)
+  expect(Math.abs(bounds.width - bounds.right)).toBeLessThanOrEqual(1)
+  expect(Math.abs(bounds.height - bounds.bottom)).toBeLessThanOrEqual(1)
+  const titleIcon = await workspace.locator('.map-workspace-title-icon').evaluate(element => {
+    const box = element.getBoundingClientRect()
+    const svg = element.querySelector('svg')!.getBoundingClientRect()
+    return {
+      box: { left: box.left, top: box.top, right: box.right, bottom: box.bottom },
+      svg: { left: svg.left, top: svg.top, right: svg.right, bottom: svg.bottom },
+    }
+  })
+  expect(titleIcon.svg.left).toBeGreaterThanOrEqual(titleIcon.box.left)
+  expect(titleIcon.svg.top).toBeGreaterThanOrEqual(titleIcon.box.top)
+  expect(titleIcon.svg.right).toBeLessThanOrEqual(titleIcon.box.right)
+  expect(titleIcon.svg.bottom).toBeLessThanOrEqual(titleIcon.box.bottom)
+  await workspace.getByRole('button', { name: '关闭' }).click()
+  await expect(workspace).toBeHidden()
 })
 
 test('phone character actions can scroll clear of bottom navigation', async ({ page }) => {

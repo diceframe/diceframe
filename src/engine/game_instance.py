@@ -17,6 +17,7 @@ from src.engine.contracts import (
     PendingPayment,
     PlayerData,
     RoundLogEntry,
+    StoryRecap,
     TokenBudgetBump,
 )
 from src.engine.dice import parse_player_roll, roll as dice_roll, check_d20
@@ -133,6 +134,7 @@ class GameInstance:
     world_id: str | None = None
     rule_id: str = "freeform_fantasy"
     scene_image: dict[str, str] = field(default_factory=dict)
+    map_background: dict[str, str] = field(default_factory=dict)
     world_name: str = ""
     group_name: str = ""
     state: GameState = GameState.CREATED
@@ -344,6 +346,10 @@ class GameInstance:
         """Set the portable adventure scene-image reference."""
         self.scene_image = dict(reference or {})
 
+    def set_map_background(self, selection: dict[str, str]) -> None:
+        """Set this save's validated map-background selection."""
+        self.map_background = dict(selection or {})
+
     def replace_players(self, players: dict[str, PlayerData]) -> None:
         self.players = players
 
@@ -380,6 +386,27 @@ class GameInstance:
 
     def append_log_entry(self, entry: RoundLogEntry) -> None:
         self.log.append(entry)
+
+    async def append_story_recap(
+        self,
+        recap: StoryRecap,
+        *,
+        target_entry: RoundLogEntry,
+        tokens: int = 0,
+    ) -> bool:
+        """Attach a public recap to one real round without creating a fake round."""
+        async with self._lock:
+            target = next((entry for entry in self.log if entry is target_entry), None)
+            if target is None:
+                return False
+            recaps = target.get("story_recaps")
+            if not isinstance(recaps, list):
+                recaps = []
+                target["story_recaps"] = recaps
+            recaps.append(recap)
+            self.record_llm_usage(tokens)
+            self.last_activity = datetime.now(timezone.utc).isoformat()
+            return True
 
     def set_latest_log_tags_summary(self, summary: dict) -> bool:
         if not self.log:
@@ -450,10 +477,23 @@ class GameInstance:
         self.last_checks.append(check)
         self.last_check = check
 
+    def sync_last_check(self, check: CheckResult) -> None:
+        """刷新最近检定快照，同时隔离可变的轮次检定记录。"""
+        self.last_check = dict(check)
+
     def reset_round_checks(self, *, prepared: bool = False) -> None:
         self.last_check = None
         self.last_checks.clear()
         self.round_checks_prepared = prepared
+
+    def mark_log_persisted(self) -> None:
+        """记录当前日志已经完整写入增量聊天日志。"""
+        self.last_saved_log_count = len(self.log)
+
+    def restore_log_history(self, history: list[RoundLogEntry]) -> None:
+        """原子替换恢复后的完整日志，并同步持久化游标。"""
+        self.log = history
+        self.mark_log_persisted()
 
     def complete_round_check_preparation(self) -> None:
         if self.last_checks:
@@ -1006,6 +1046,7 @@ class GameInstance:
             "world_id": self.world_id,
             "rule_id": self.rule_id,
             "scene_image": self.scene_image,
+            "map_background": self.map_background,
             "world_name": self.world_name,
             "group_name": self.group_name,
             "state": self.state.value,
@@ -1159,6 +1200,7 @@ class GameInstance:
             # the world template on first read and persists the migrated value.
             rule_id=data.get("rule_id", ""),
             scene_image=data.get("scene_image", {}),
+            map_background=data.get("map_background", {}),
             world_name=data.get("world_name", ""),
             group_name=data.get("group_name", ""),
             state=GameState(data["state"]),
@@ -1298,6 +1340,7 @@ class GameRegistry:
         platform: str = "web",
         account_id: str = "web_bot",
         scene_image_importer: Callable[[bytes], dict[str, Any]] | None = None,
+        map_background_importer: Callable[[bytes], dict[str, Any]] | None = None,
     ) -> dict:
         """导入导出的存档 zip（逻辑见 persistence）。"""
         return await persistence.import_save_zip(
@@ -1306,6 +1349,7 @@ class GameRegistry:
             platform=platform,
             account_id=account_id,
             scene_image_importer=scene_image_importer,
+            map_background_importer=map_background_importer,
         )
 
     async def save_all_active(self) -> None:

@@ -5,6 +5,7 @@ import { api, gameEventSource, hasAccessToken, isNotFoundError } from '@/api/cli
 import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage } from '@/api/types'
 import type { LoreKeywords } from '@/utils/renderer'
 import { clearCurrentGame, gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
+import { resolveMapBackgroundAsset, revokeMapBackgroundAsset } from '@/api/mapBackgrounds'
 
 const KEY_MAP:Record<string,keyof LoreKeywords>={npc:'npc',location:'location',item:'item',faction:'faction',event:'event',puzzle:'puzzle',other:'other',lore:'other'}
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || 'Load failed') }
@@ -78,7 +79,9 @@ export function useGame(){
     players.value = []
     log.value = []
     privateMessages.value = []
+    revokeMapBackgroundAsset(map.value)
     map.value = { locations: [] }
+    signatures.map = ''
     lore.value = {}
     loreEntries.value = []
     liveNarration.value = ''
@@ -113,7 +116,18 @@ export function useGame(){
       setIfChanged('players', players, c.players||[])
       setIfChanged('log', log, l.log||[])
       setIfChanged('privateMessages', privateMessages, p.messages||p.private_log||[])
-      setIfChanged('map', map, m||{locations:[]})
+      const nextMap = m || { locations: [] }
+      const nextMapSignature = signature(nextMap)
+      if (signatures.map !== nextMapSignature) {
+        const resolvedMap = await resolveMapBackgroundAsset(nextMap)
+        if (currentGame.value !== gameKey) {
+          revokeMapBackgroundAsset(resolvedMap)
+          return
+        }
+        revokeMapBackgroundAsset(map.value)
+        signatures.map = nextMapSignature
+        map.value = resolvedMap
+      }
       if(d.world_id && isGm.value){
         try{
           const lb=await api<LorebookResponse>(`/lorebook/${encodeURIComponent(d.world_id)}`)
@@ -185,6 +199,6 @@ export function useGame(){
   })
   watch(() => route.query.user, () => { userId.value = routeUser() })
   watch(() => log.value.length, (next, prev) => { if ((prev ?? 0) < next) liveNarration.value = '' })
-  onBeforeUnmount(()=>{connectVersion++;source?.close();clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
+  onBeforeUnmount(()=>{connectVersion++;source?.close();revokeMapBackgroundAsset(map.value);clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
   return {currentGame,userId,actorId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration}
 }

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 # 运行方式
-PROCESS_MODE_STATIC = "static"                # 无进程：内容包/主题/地图包
+PROCESS_MODE_STATIC = "static"                # 无进程：内容包/主题
 PROCESS_MODE_RPC_TOOL = "rpc-tool"            # JSON-RPC stdio 进程：工具
 PROCESS_MODE_RPC_BRIDGE = "rpc-bridge"         # JSON-RPC stdio 进程：Bot Bridge 扩展
 PROCESS_MODE_PLAIN_SUBPROCESS = "plain-subprocess"  # 普通进程（非 RPC）：渠道适配器
@@ -36,14 +36,22 @@ _CONTENT_CONTRIBUTIONS = {
     "classes": "class",
     "portraits": "portrait_asset",
     "scene_images": "scene_image_asset",
+    "map_definitions": "map_definition",
+    "map_locations": "map_location",
+    "map_icons": "map_icon",
+    "map_backgrounds": "map_scene",
 }
 _THEME_CONTRIBUTIONS = {"theme": "theme", "themes": "theme"}
-_MAP_CONTRIBUTIONS = {
-    "locations": "map_location",
-    "icons": "map_icon",
-    "scenes": "map_scene",
-    "grids": "map_grid",
+_VOICE_CONTRIBUTIONS = {
+    "voices": "voice_profile",
+    "voice_assets": "voice_asset",
 }
+MAP_CONTRIBUTION_FIELDS = frozenset({
+    "map_definitions",
+    "map_locations",
+    "map_icons",
+    "map_backgrounds",
+})
 
 PLUGIN_TYPE_SUPPORT: dict[str, dict[str, Any]] = {
     "channel-adapter": {
@@ -54,11 +62,11 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, Any]] = {
         "required_permission": None,
         "contributes": None,
         "filterable": True,
-        "filter_order": 4,
+        "filter_order": 5,
     },
     "content-pack": {
         "level": "supported",
-        "summary": "可注册规则、世界、角色、NPC、道具、法术和职业内容",
+        "summary": "可注册规则、世界、角色、NPC、道具、法术、职业和地图内容",
         "process_mode": PROCESS_MODE_STATIC,
         "inferred_permissions": ["content.read", "content.import"],
         "required_permission": None,
@@ -77,15 +85,15 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, Any]] = {
         "filterable": True,
         "filter_order": 2,
     },
-    "map-pack": {
-        "level": "reserved",
-        "summary": "预留类型：地图地点/图标/场景/网格素材后续接入地图编辑器；暂不在商店提供",
+    "voice-pack": {
+        "level": "supported",
+        "summary": "可选的 TTS 音色预设、试听与小型参考音频；也可直接使用个人音色",
         "process_mode": PROCESS_MODE_STATIC,
-        "inferred_permissions": ["map.assets"],
+        "inferred_permissions": ["voice.assets"],
         "required_permission": None,
-        "contributes": _MAP_CONTRIBUTIONS,
-        "filterable": False,
-        "filter_order": 0,
+        "contributes": _VOICE_CONTRIBUTIONS,
+        "filterable": True,
+        "filter_order": 3,
     },
     "import-export": {
         "level": "reserved",
@@ -115,7 +123,7 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, Any]] = {
         "required_permission": "tool.execute",
         "contributes": None,
         "filterable": True,
-        "filter_order": 3,
+        "filter_order": 4,
     },
     "bot-extension": {
         "level": "supported",

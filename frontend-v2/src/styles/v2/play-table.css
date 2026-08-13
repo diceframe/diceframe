@@ -106,6 +106,39 @@
   color: var(--df-accent-strong);
 }
 
+.message.story-recap {
+  border-color: color-mix(in srgb, var(--df-interactive) 38%, var(--df-border-soft));
+  background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--df-interactive) 13%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--df-accent) 6%, var(--df-surface-2)), var(--df-surface-1));
+}
+
+.message.story-recap strong {
+  color: var(--df-interactive-strong);
+}
+
+.message.story-recap strong small {
+  margin-left: auto;
+  color: var(--df-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.recap-avatar {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--df-interactive) 48%, transparent);
+  border-radius: 10px;
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 14%, var(--df-surface-2));
+}
+
+.story-recap-text {
+  white-space: pre-wrap;
+}
+
 .narrator-avatar {
   border-color: color-mix(in srgb, var(--df-accent) 48%, transparent);
   color: var(--df-on-accent);

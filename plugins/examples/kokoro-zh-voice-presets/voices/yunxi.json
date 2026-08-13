@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "yunxi",
+  "name": "Kokoro 云希（男声）",
+  "engine": "openai-compatible",
+  "voice_id": "zm_yunxi",
+  "language": "zh-CN",
+  "description": "Kokoro-82M 的基础中文男声 Voice ID。",
+  "license": "Apache-2.0",
+  "consent": true
+}

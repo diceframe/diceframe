@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "xiaoxiao",
+  "name": "Kokoro 小小（女声）",
+  "engine": "openai-compatible",
+  "voice_id": "zf_xiaoxiao",
+  "language": "zh-CN",
+  "description": "Kokoro-82M 的基础中文女声 Voice ID。",
+  "license": "Apache-2.0",
+  "consent": true
+}

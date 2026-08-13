@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
-import { ChevronBack, ChevronForward, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
+import { ChevronBack, ChevronForward, MapOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, isNotFoundError } from '@/api/client'
 import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CheckResult, CommandResponse, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
@@ -22,8 +22,10 @@ import HealthPanel from '@/components/HealthPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import GmToolbar from '@/components/play/GmToolbar.vue'
 import MultiplayerPanel from '@/components/play/MultiplayerPanel.vue'
+import MapWorkspace from '@/components/play/MapWorkspace.vue'
 import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
+import MapBackgroundSettingsModal from '@/components/play/MapBackgroundSettingsModal.vue'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { fileToBase64, resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 
@@ -44,7 +46,9 @@ const help = ref(false), ruleMeta = ref<RuleMeta>({}), preview = ref(false), del
 const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false), showRoomPassword = ref(false), roomPasswordInput = ref(''), luckTimeoutInput = ref('')
 const sidebarCollapsed = ref(localStorage.getItem('play_sidebar_collapsed') === '1')
 const mobilePanel = ref<'sidebar' | 'controls' | ''>('')
+const showMap = ref(false)
 const gmThinking = ref(false)
+const storyRecapBusy = ref(false)
 const luckBusyId = ref('')
 const showPortraitEditor = ref(false)
 const portraitDraft = ref<CharacterPortrait | null>()
@@ -54,6 +58,7 @@ const showSceneImageEditor = ref(false)
 const sceneImageDraft = ref<File | null>(null)
 const sceneImageDefaultUrl = ref(ruleSceneUrl())
 const sceneImageBusy = ref(false)
+const showMapBackgroundEditor = ref(false)
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem('play_sidebar_collapsed', sidebarCollapsed.value ? '1' : '0') }
 const railCollapsed = ref(false)
 function toggleRail() { railCollapsed.value = !railCollapsed.value; localStorage.setItem('play_rail_collapsed', railCollapsed.value ? '1' : '0') }
@@ -73,6 +78,10 @@ function openMobilePanel(panel: 'sidebar' | 'controls') {
 function toggleMobilePanel(panel: 'sidebar' | 'controls') {
   if (mobilePanel.value === panel) { mobilePanel.value = ''; return }
   openMobilePanel(panel)
+}
+function openMap() {
+  mobilePanel.value = ''
+  showMap.value = true
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('operationFailed')) }
 function joinNames(names: string[]) { return names.filter(Boolean).join(t('listSeparator')) }
@@ -229,6 +238,14 @@ async function saveSceneImage() {
   }
 }
 
+function openMapBackgroundEditor() {
+  showMapBackgroundEditor.value = true
+}
+
+async function onMapBackgroundSaved() {
+  await game.refresh(true)
+}
+
 async function onLuckDecision(check: CheckResult, spend: boolean) {
   const checkId = String(check.check_id || '')
   if (!checkId || luckBusyId.value) return
@@ -271,6 +288,24 @@ async function command(path: string, body: JsonObject = {}) {
     else toast.success(t('operationDone'))
     await game.refresh()
   } catch (e: unknown) { toast.error(errorMessage(e)) } finally { if (thinkingCommand) gmThinking.value = false }
+}
+
+async function generateStoryRecap() {
+  if (storyRecapBusy.value || !game.currentGame.value) return
+  storyRecapBusy.value = true
+  try {
+    const result = await api<{ ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.currentGame.value)}/story-recap`, {
+      method: 'POST',
+      body: '{}',
+    })
+    if (result.ok === false || result.error) throw new Error(result.error || t('operationFailed'))
+    toast.success(t('storyRecapGenerated'))
+    await game.refresh()
+  } catch (error: unknown) {
+    toast.error(errorMessage(error))
+  } finally {
+    storyRecapBusy.value = false
+  }
 }
 
 function onCommand(text: string) { command('gm-command', { command: text }) }
@@ -564,6 +599,7 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <button class="play-secondary-action" @click="openCards">{{ t('characters') }}</button>
+        <button class="play-secondary-action play-map-action" @click="openMap">{{ t('mapTitle') }}</button>
         <button class="play-secondary-action" @click="help = true">{{ t('rule') }}</button>
         <button class="play-secondary-action play-refresh" @click="game.refresh()">{{ t('refresh') }}</button>
       </div>
@@ -591,6 +627,7 @@ onBeforeUnmount(() => {
         :collapsed="sidebarCollapsed"
         :portrait-editable="canEditOwnPortrait"
         @lore-click="onLoreClick"
+        @open-map="openMap"
         @toggle-sidebar="toggleSidebarPanel"
         @portrait-click="openPortraitEditor"
       />
@@ -616,6 +653,14 @@ onBeforeUnmount(() => {
           <button class="primary" :disabled="sceneImageBusy" @click="saveSceneImage">{{ sceneImageBusy ? t('saving') : t('saveAction') }}</button>
         </template>
       </Modal>
+
+      <MapBackgroundSettingsModal
+        :open="showMapBackgroundEditor"
+        :game-key="game.currentGame.value"
+        :map="game.map.value"
+        @close="showMapBackgroundEditor = false"
+        @saved="onMapBackgroundSaved"
+      />
 
       <section class="play-main">
         <section class="scene-strip">
@@ -669,8 +714,10 @@ onBeforeUnmount(() => {
           :detail="game.detail.value"
           :players="game.players.value"
           :is-gm="game.isGm.value"
+          :recap-busy="storyRecapBusy"
           @advance="command('advance', { force: true })"
           @rollback="command('rollback')"
+          @recap="generateStoryRecap"
           @invite="invite"
           @bot-bind="copyBotBind"
           @mode="onMode"
@@ -684,6 +731,7 @@ onBeforeUnmount(() => {
           @world-switch="openWorldSwitch"
           @room-password="onRoomPassword"
           @scene-image="openSceneImageEditor"
+          @map-background="openMapBackgroundEditor"
         />
 
         <MultiplayerPanel
@@ -707,6 +755,12 @@ onBeforeUnmount(() => {
         @click="mobilePanel = ''"
       />
     </div>
+    <MapWorkspace
+      v-if="showMap"
+      :map="game.map.value"
+      :current-scene="game.detail.value?.scene"
+      @close="showMap = false"
+    />
     <button
       class="mobile-drawer-trigger mobile-drawer-trigger-left"
       :class="{ hidden: mobilePanel === 'sidebar' }"
@@ -714,6 +768,13 @@ onBeforeUnmount(() => {
       :title="t('mobileStatusLabel')"
       @click="toggleMobilePanel('sidebar')"
     ><NIcon :component="StatsChartOutline" /></button>
+    <button
+      v-if="!showMap"
+      class="mobile-drawer-trigger mobile-drawer-trigger-left mobile-drawer-trigger-map"
+      :aria-label="t('mobileMapLabel')"
+      :title="t('mobileMapLabel')"
+      @click="openMap"
+    ><NIcon :component="MapOutline" /></button>
     <button
       v-if="game.isGm.value || game.detail.value?.solo_mode === false"
       class="mobile-drawer-trigger mobile-drawer-trigger-right"

@@ -303,6 +303,16 @@ async def api_rollback(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 
+async def api_story_recap(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    _, err = _gm_only_inst(request, gk)
+    if err:
+        return err
+    result = await api.generate_story_recap(gk)
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
 def _gm_only_inst(request: web.Request, gk: str):
     api = _get_api(request)
     inst = request.app["subsystems"].registry.get(api._parse_key(gk))
@@ -414,6 +424,7 @@ async def api_create_game(request: web.Request) -> web.Response:
         room_password=body.get("room_password"),
         language=str(body.get("language", "") or ""),
         scene_image=body.get("scene_image"),
+        map_background=body.get("map_background"),
     )
     return web.json_response(result)
 
@@ -533,6 +544,11 @@ async def api_export_game(request: web.Request) -> web.Response:
             if image_path is not None and isinstance(reference, dict) and reference.get("kind") != "builtin":
                 zf.writestr("scene-image.asset", image_path.read_bytes())
                 state_data["scene_image"] = {"kind": "save_asset", "path": "scene-image.asset"}
+            map_reference = state_data.get("map_background")
+            map_image_path = api.resolve_map_background_file(map_reference)
+            if map_image_path is not None:
+                zf.writestr("map-background.asset", map_image_path.read_bytes())
+                state_data["map_background"] = {"kind": "save_asset", "path": "map-background.asset"}
             zf.writestr("state.json", json.dumps(state_data, ensure_ascii=False, indent=2))
             chatlog = save_path.with_name("chatlog.jsonl")
             if chatlog.exists():
@@ -576,6 +592,7 @@ async def api_import_game(request: web.Request) -> web.Response:
         result = await request.app["subsystems"].registry.import_save_zip(
             payload,
             scene_image_importer=lambda raw: api.save_scene_image_upload(base64.b64encode(raw).decode("ascii")),
+            map_background_importer=lambda raw: api.save_map_background_upload(base64.b64encode(raw).decode("ascii")),
         )
     except _SavePackageTooLarge:
         return web.json_response({"ok": False, "error": "存档包不能超过 50 MB"}, status=413)
@@ -704,12 +721,6 @@ async def api_switch_world(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     result = await _get_api(request).switch_world(gk, body.get("world_id", ""))
-    return web.json_response(result)
-
-
-async def api_map_locations(request: web.Request) -> web.Response:
-    gk = request.match_info["game_key"]
-    result = _get_api(request).get_map_locations(gk)
     return web.json_response(result)
 
 
@@ -847,6 +858,7 @@ def register_games(app: web.Application) -> None:
     app.router.add_post("/api/games/{game_key}/advance", api_advance)
     app.router.add_post("/api/games/{game_key}/gm-command", api_gm_command)
     app.router.add_post("/api/games/{game_key}/rollback", api_rollback)
+    app.router.add_post("/api/games/{game_key}/story-recap", api_story_recap)
     app.router.add_get("/api/games/{game_key}/private-log", api_private_log)
     app.router.add_post("/api/games/{game_key}/private-message", api_gm_private_message)
     app.router.add_post("/api/games/{game_key}/payments/{payment_id}", api_payment_resolve)
@@ -863,6 +875,5 @@ def register_games(app: web.Application) -> None:
     app.router.add_post("/api/games/{game_key}/reset", api_reset_game)
     app.router.add_post("/api/games/{game_key}/restart", api_restart_game)
     app.router.add_post("/api/games/{game_key}/switch-world", api_switch_world)
-    app.router.add_get("/api/games/{game_key}/map", api_map_locations)
     app.router.add_post(r"/api/games/{game_key}/swipe/{round:\d+}", api_swipe)
     app.router.add_put(r"/api/games/{game_key}/swipe/{round:\d+}", api_swipe)

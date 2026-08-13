@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "启用 Kokoro 中文音色预设",
+      "description": "启用后，四个 Voice ID 会出现在 DiceFrame 的音色选择列表中。",
+      "default": false,
+      "ui": {"control": "switch", "order": 10}
+    }
+  }
+}

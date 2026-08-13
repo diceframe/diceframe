@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "kokoro-zh-voice-presets",
+  "name": "Kokoro 中文音色预设",
+  "version": "1.0.0",
+  "description": "为本地 Kokoro-FastAPI 提供四个中文 Voice ID；不包含模型权重或音频。",
+  "plugin_type": "voice-pack",
+  "repository_url": "https://github.com/diceframe/kokoro-zh-voice-presets",
+  "config_schema": "config.schema.json",
+  "capabilities": ["voice.preset"],
+  "permissions": ["plugin.config", "voice.assets"],
+  "contributes": {
+    "voices": ["voices/*.json"]
+  },
+  "docs": "README_CN.md",
+  "license": "Apache-2.0",
+  "author": "DiceFrame"
+}

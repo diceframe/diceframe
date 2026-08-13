@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
-import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
-import type { CheckResult, LogEntry, PublicAction, Player } from '@/api/types'
+import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline, ReaderOutline } from '@vicons/ionicons5'
+import type { CheckResult, LogEntry, PublicAction, Player, StoryRecap } from '@/api/types'
 import type { DiceTag } from '@/utils/play'
 import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
@@ -10,7 +10,7 @@ import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
 import CheckRevealCard from '@/components/play/CheckRevealCard.vue'
-import { speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
+import { initializeTts, speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
 
 const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string }>()
 const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean] }>()
@@ -42,6 +42,20 @@ function actions(entry: LogEntry): Act[] {
 function checks(entry: LogEntry): CheckResult[] {
   return Array.isArray(entry.check_results) ? entry.check_results : []
 }
+function recaps(entry: LogEntry): StoryRecap[] {
+  return Array.isArray(entry.story_recaps)
+    ? entry.story_recaps.filter(recap => recap && typeof recap.text === 'string' && recap.text.trim())
+    : []
+}
+function recapRange(recap: StoryRecap): string {
+  const from = Number(recap.from_round || 0)
+  const to = Number(recap.to_round || from)
+  if (from === 0 && to === 0) return t('storyRecapOpening')
+  if (from === 0) return t('storyRecapOpeningRange', { to })
+  return from === to
+    ? t('storyRecapSingleRound', { round: to })
+    : t('storyRecapRange', { from, to })
+}
 function liveAct(a: PublicAction): Act { return toAct(a) }
 function canDecideLuck(check: CheckResult): boolean {
   return !!props.isGm || (!!props.currentUserId && check.actor_uid === props.currentUserId)
@@ -56,6 +70,7 @@ const rounds = computed(() => visibleLog.value.map((entry, index) => {
   const cur = Number(entry.current_swipe) || 0
   return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
 }))
+const recapSignature = computed(() => props.log.flatMap(entry => recaps(entry).map(recap => recap.id || recap.text)).join('|'))
 
 async function showEarlier() {
   const el = box.value
@@ -106,7 +121,7 @@ function latest() {
   awayFromBottom.value = false
 }
 function onScroll() { updateScrollState() }
-watch(() => [props.log.length, JSON.stringify(props.live), props.processing, props.liveNarration], async () => {
+watch(() => [props.log.length, JSON.stringify(props.live), props.processing, props.liveNarration, recapSignature.value], async () => {
   const wasNearBottom = isNearBottom()
   await nextTick()
   if (!initialized.value) {
@@ -124,7 +139,8 @@ watch(() => props.gameKey, () => {
   initialized.value = false
   hasNew.value = false
   awayFromBottom.value = false
-})
+  void initializeTts()
+}, { immediate: true })
 
 // --- 本地朗读（文字转语音） ---
 const { t, isEnglish } = useLocale()
@@ -135,7 +151,8 @@ function autoSpeakEnabled(): boolean {
 }
 // 新 GM 叙事到达时若开启自动朗读，则朗读该段。仅在有新内容且用户开启时触发。
 const lastAutoSpoken = ref('')
-watch(() => rounds.value, (latest) => {
+watch(() => rounds.value, async (latest) => {
+  await initializeTts()
   if (!autoSpeakEnabled() || !ttsSupported()) return
   const newest = latest[latest.length - 1]
   if (!newest?.gm) return
@@ -143,7 +160,7 @@ watch(() => rounds.value, (latest) => {
   const sig = newest.round + ':' + text
   if (sig === lastAutoSpoken.value) return
   lastAutoSpoken.value = sig
-  ttsToggle(text, `gm:${newest.round}`, { lang: ttsVoiceLang.value })
+  ttsToggle(text, `gm:${newest.round}`, { lang: ttsVoiceLang.value, gameKey: props.gameKey, role: 'gm' })
 }, { deep: true })
 
 </script>
@@ -166,7 +183,7 @@ watch(() => rounds.value, (latest) => {
               class="tts-button"
               :class="{ active: speakingKey === 'act:' + a.uid + a.text }"
               :title="speakingKey === 'act:' + a.uid + a.text ? t('ttsStop') : t('ttsSpeak')"
-              @click="ttsToggle(a.text, 'act:' + a.uid + a.text, { lang: ttsVoiceLang })"
+              @click="ttsToggle(a.text, 'act:' + a.uid + a.text, { lang: ttsVoiceLang, gameKey, role: 'player' })"
             >{{ speakingKey === 'act:' + a.uid + a.text ? '⏸' : '🔊' }}</button></strong>
             <p>{{ a.text }}</p>
             <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
@@ -182,7 +199,7 @@ watch(() => rounds.value, (latest) => {
             class="tts-button"
             :class="{ active: speakingKey === 'gm:' + item.round }"
             :title="speakingKey === 'gm:' + item.round ? t('ttsStop') : t('ttsSpeakGm')"
-            @click="ttsToggle(item.gm.paragraphs.join(' '), 'gm:' + item.round, { lang: ttsVoiceLang })"
+            @click="ttsToggle(item.gm.paragraphs.join(' '), 'gm:' + item.round, { lang: ttsVoiceLang, gameKey, role: 'gm' })"
           >{{ speakingKey === 'gm:' + item.round ? '⏸' : '🔊' }}</button></strong>
           <p v-for="(p, i) in item.gm.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
           <div v-if="item.gm.states.length" class="state-card-list">
@@ -208,6 +225,13 @@ watch(() => rounds.value, (latest) => {
             <button v-if="item.swipeCount < 5" class="ghost" @click="reroll(item.round)">{{ t('regenerate') }}</button>
           </div>
           <p v-if="swipeError && isGm" class="muted">{{ swipeError }}</p>
+          </div>
+        </div>
+        <div v-for="recap in recaps(item.entry)" :key="recap.id || recap.text" class="message story-recap message-with-avatar" data-testid="story-recap-card">
+          <span class="recap-avatar" aria-hidden="true"><NIcon :component="ReaderOutline" size="19" /></span>
+          <div class="message-copy">
+            <strong>{{ t('storyRecapTitle') }} <small>{{ recapRange(recap) }}</small></strong>
+            <p class="story-recap-text">{{ recap.text }}</p>
           </div>
         </div>
       </template>

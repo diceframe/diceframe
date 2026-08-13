@@ -268,6 +268,12 @@
     linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
 }
 
+.play-main .message.story-recap {
+  width: min(980px, 100%);
+  border: 1px solid color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
+  border-left: 3px solid var(--df-interactive);
+}
+
 .play-main .message-copy > strong {
   display: flex;
   align-items: center;

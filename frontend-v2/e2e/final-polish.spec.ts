@@ -108,9 +108,9 @@ test('appearance and advanced settings obey the compact layout contract', async 
     elements.map(element => element.getBoundingClientRect()).map(rect => ({ top: rect.top, left: rect.left, width: rect.width })),
   )
   expect(advancedBoxes).toHaveLength(3)
-  expect(Math.abs(advancedBoxes[0].top - advancedBoxes[1].top)).toBeLessThanOrEqual(1)
-  expect(advancedBoxes[1].left).toBeGreaterThan(advancedBoxes[0].left + advancedBoxes[0].width)
-  expect(advancedBoxes[2].top).toBeGreaterThan(advancedBoxes[0].top)
+  expect(advancedBoxes[1].top).toBeGreaterThan(advancedBoxes[0].top)
+  expect(Math.abs(advancedBoxes[1].top - advancedBoxes[2].top)).toBeLessThanOrEqual(1)
+  expect(advancedBoxes[2].left).toBeGreaterThan(advancedBoxes[1].left + advancedBoxes[1].width)
 
   await page.goto('/#/settings?section=about')
   await expect(page.locator('.about-card')).toBeVisible()
@@ -179,7 +179,7 @@ test('avatar picker keeps distinct realistic and anime packs for every ruleset',
   expect(currentImages.slice(0, 4).every(image => image.includes('/realistic-'))).toBe(true)
   expect(currentImages.slice(4).every(image => image.includes('/anime-'))).toBe(true)
 
-  await page.locator('.portrait-all').click()
+  await page.getByRole('button', { name: '从所有头像中选择', exact: true }).click()
   await expect(page.locator('.portrait-all-group')).toHaveCount(6)
   await expect(page.locator('.portrait-all-group .portrait-option')).toHaveCount(48)
   const ruleDirectories = await page.locator('.portrait-all-group .portrait-builtin').evaluateAll(elements => [
@@ -242,6 +242,29 @@ test('about, header and content-pack controls use the final layout contract', as
   expect(Math.abs(aboutGeometry.sponsorTop - aboutGeometry.starTop)).toBeLessThanOrEqual(2)
   expect(aboutGeometry.sponsorLeft).toBeGreaterThan(aboutGeometry.starRight)
   expect(aboutGeometry.aboutBottom).toBeGreaterThan(aboutGeometry.sponsorBottom)
+  const sponsorCopy = await page.locator('.about-card .sponsor-cta').evaluate(element => {
+    const button = element.getBoundingClientRect()
+    const title = element.querySelector<HTMLElement>('strong')!
+    const detail = element.querySelector<HTMLElement>('small')!
+    const titleRect = title.getBoundingClientRect()
+    const detailRect = detail.getBoundingClientRect()
+    const buttonStyle = getComputedStyle(element)
+    return {
+      titleOffset: titleRect.left - button.left,
+      detailOffset: detailRect.left - button.left,
+      expectedOffset: parseFloat(buttonStyle.paddingLeft) + parseFloat(buttonStyle.borderLeftWidth),
+      titleAlign: getComputedStyle(title).textAlign,
+      detailAlign: getComputedStyle(detail).textAlign,
+      titleJustify: getComputedStyle(title).justifySelf,
+      contentJustify: buttonStyle.justifyContent,
+    }
+  })
+  expect(Math.abs(sponsorCopy.titleOffset - sponsorCopy.detailOffset)).toBeLessThanOrEqual(1)
+  expect(Math.abs(sponsorCopy.titleOffset - sponsorCopy.expectedOffset)).toBeLessThanOrEqual(1)
+  expect(sponsorCopy.titleAlign).toBe('left')
+  expect(sponsorCopy.detailAlign).toBe('left')
+  expect(sponsorCopy.titleJustify).toBe('stretch')
+  expect(sponsorCopy.contentJustify).toBe('stretch')
 
   await expect(page.locator('.operator-avatar')).toHaveCount(0)
 

@@ -34,12 +34,19 @@ DATA_ENDPOINTS = {
     "/api/games/{game_key}/map",
     "/api/avatars/{asset_id}",
     "/api/games/{game_key}/avatars/{asset_id}",
+    "/api/tts/profiles",
+    "/api/tts/profiles/{profile_id}",
 }
 
 STREAM_ENDPOINTS = {
     "/api/games/{game_key}/stream",
     "/api/games/{game_key}/stream-action",
     "/api/games/{game_key}/sse",
+}
+
+BINARY_ENDPOINTS = {
+    "/api/tts/test",
+    "/api/games/{game_key}/speech",
 }
 
 
@@ -98,6 +105,8 @@ def main() -> int:
             marker = "data"
         elif path in STREAM_ENDPOINTS:
             marker = "stream"
+        elif path in BINARY_ENDPOINTS:
+            marker = "binary"
         elif "_get_api(request)." in body or "api.resolve_payment(" in body:
             marker = "delegated"
         elif path.startswith("/api/") and not (has_ok or has_error or has_status):

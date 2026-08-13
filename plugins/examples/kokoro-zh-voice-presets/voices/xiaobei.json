@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "xiaobei",
+  "name": "Kokoro 小北（女声）",
+  "engine": "openai-compatible",
+  "voice_id": "zf_xiaobei",
+  "language": "zh-CN",
+  "description": "Kokoro-82M 的基础中文女声 Voice ID。",
+  "license": "Apache-2.0",
+  "consent": true
+}

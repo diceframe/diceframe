@@ -183,6 +183,9 @@ async def api_plugin_export(request: web.Request) -> web.Response:
               bool(body.get("include_scene_images", True)),
               body.get("world_scene_image"),
               body.get("rule_scene_image"),
+              bool(body.get("include_map", True)),
+              body.get("map_background"),
+              body.get("map_icons") or [],
           )
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)

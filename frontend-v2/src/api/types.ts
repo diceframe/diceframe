@@ -24,6 +24,23 @@ export interface SceneImageRef {
   path?: string
 }
 
+export interface MapBackgroundSelection {
+  kind: 'auto' | 'none' | 'builtin' | 'upload' | 'plugin'
+  id?: string
+  asset_id?: string
+  map_id?: string
+}
+
+export interface MapBackgroundOption {
+  id: string
+  kind: MapBackgroundSelection['kind']
+  name: string
+  description?: string
+  plugin_name?: string
+  url?: string
+  selection?: MapBackgroundSelection
+}
+
 export interface CharacterSheet {
   character_name?: string
   race?: string
@@ -178,6 +195,7 @@ export interface GameDetail {
   world_id?: string
   rule_id?: string
   scene_image?: SceneImageRef
+  map_background?: MapBackgroundSelection
   gm_uid?: string
   scene?: string
   round_number?: number
@@ -202,6 +220,14 @@ export interface TokenBudgetBump {
   to: number
 }
 
+export interface StoryRecap {
+  id?: string
+  text: string
+  from_round?: number
+  to_round?: number
+  created_at?: string
+}
+
 export interface LogEntry {
   round?: number
   gm_response?: string
@@ -211,6 +237,7 @@ export interface LogEntry {
   current_swipe?: number
   tags_summary?: LogTagsSummary
   check_results?: CheckResult[]
+  story_recaps?: StoryRecap[]
   [key: string]: unknown
 }
 
@@ -226,11 +253,21 @@ export interface MapLocation {
   id?: string
   name: string
   connected_to?: string[]
+  content?: string
+  keywords?: string[]
+  source?: 'lorebook' | 'plugin' | string
+  plugin_id?: string
+  plugin_name?: string
+  x?: number
+  y?: number
+  icon_url?: string
+  image_url?: string
   [key: string]: unknown
 }
 
 export interface MapAsset {
   id: string
+  ref?: string
   name?: string
   description?: string
   plugin_id?: string
@@ -239,12 +276,36 @@ export interface MapAsset {
   url?: string
 }
 
+export interface MapDefinition {
+  id: string
+  source_id?: string
+  name: string
+  description?: string
+  mode: 'graph' | string
+  plugin_id?: string
+  plugin_name?: string
+  background?: MapAsset | null
+  default_view?: { x?: number; y?: number; zoom?: number }
+}
+
 export interface MapData {
+  schema_version?: number
+  map_mode?: 'graph' | string
   locations: MapLocation[]
+  current_scene?: string
+  current_location_id?: string
+  active_map?: MapDefinition | null
+  background_selection?: MapBackgroundSelection
+  background_options?: MapBackgroundOption[]
   assets?: {
     icons?: MapAsset[]
     scenes?: MapAsset[]
-    grids?: MapAsset[]
+  }
+  capabilities?: {
+    can_expand?: boolean
+    can_edit?: boolean
+    has_background?: boolean
+    has_plugin_assets?: boolean
   }
   [key: string]: unknown
 }
@@ -275,6 +336,7 @@ export interface GameSummary {
   world_id?: string
   rule_id?: string
   scene_image?: SceneImageRef
+  map_background?: MapBackgroundSelection
   scene?: string
   state?: string
   language?: string
@@ -1034,7 +1096,84 @@ export interface AppConfig {
   bot_token?: SecretField
   bot_token_source?: 'env' | 'generated'
   update_channel?: 'stable' | 'preview'
+  tts_provider?: 'browser' | 'openai-compatible' | 'gpt-sovits'
+  tts_base_url?: string
+  tts_api_key?: SecretField
+  tts_model?: string
+  tts_audio_format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
+  tts_default_voice?: string
+  tts_gm_voice?: string
+  tts_player_voice?: string
+  tts_timeout_seconds?: number
+  tts_cache_mb?: number
   [key: string]: unknown
+}
+
+export interface TtsVoiceProfile {
+  id: string
+  name: string
+  engine: 'openai-compatible' | 'gpt-sovits' | string
+  voice_id?: string
+  language?: string
+  description?: string
+  plugin_id?: string
+  plugin_name?: string
+  preview_url?: string
+  license?: string
+  source?: 'personal' | 'plugin' | 'provider' | string
+}
+
+export interface TtsPersonalVoiceProfile {
+  id: string
+  name: string
+  engine: 'openai-compatible' | 'gpt-sovits'
+  voice_id?: string
+  language?: string
+  description?: string
+  prompt_text?: string
+  prompt_language?: string
+  server_reference_path?: string
+  has_reference_audio?: boolean
+  source: 'personal'
+}
+
+export interface TtsPersonalVoiceProfileInput {
+  name: string
+  engine: 'openai-compatible' | 'gpt-sovits'
+  voice_id?: string
+  language?: string
+  description?: string
+  prompt_text?: string
+  prompt_language?: string
+  server_reference_path?: string
+  file_data?: string
+  file_name?: string
+}
+
+export interface TtsPersonalVoiceProfilesResponse {
+  ok: boolean
+  profiles: TtsPersonalVoiceProfile[]
+  total: number
+}
+
+export interface TtsVoiceCatalog {
+  ok: boolean
+  provider: 'browser' | 'openai-compatible' | 'gpt-sovits'
+  backend_enabled: boolean
+  model?: string
+  audio_format?: string
+  default_voice?: string
+  gm_voice?: string
+  player_voice?: string
+  max_text_chars?: number
+  voices: TtsVoiceProfile[]
+}
+
+export interface TtsSpeechRequest {
+  text: string
+  voice?: string
+  language?: string
+  speed?: number
 }
 
 export interface TestResult {

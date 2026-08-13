@@ -128,6 +128,42 @@ async def test_api_token_limit_reload_rebuilds_api_without_replacing_subsystems(
 
 
 @pytest.mark.asyncio
+async def test_tts_config_reload_rebuilds_only_api_facade(monkeypatch):
+    runtime = _runtime()
+    old_api = object()
+    new_api = object()
+    app = {"subsystems": runtime, "api": old_api, "plugin_host": None}
+    monkeypatch.setattr(web_server, "save_config", lambda: None)
+    monkeypatch.setattr(
+        web_server,
+        "_build_subsystems",
+        lambda **kwargs: pytest.fail("TTS 配置不应重建游戏子系统"),
+    )
+
+    def make_api(subsystems, plugin_host=None, config=None):
+        assert subsystems is runtime
+        assert config["tts_provider"] == "openai-compatible"
+        assert config["tts_base_url"] == "http://127.0.0.1:8880/v1"
+        return new_api
+
+    monkeypatch.setattr(web_server, "_make_api", make_api)
+    monkeypatch.setitem(web_server.STATE, "tts_provider", "browser")
+    monkeypatch.setitem(web_server.STATE, "tts_base_url", "")
+    monkeypatch.setitem(web_server.STATE, "proxy_enabled", False)
+    monkeypatch.setitem(web_server.STATE, "proxy_url", "")
+
+    response = await web_server.api_config_post(_ConfigRequest({
+        "tts_provider": "openai-compatible",
+        "tts_base_url": "http://127.0.0.1:8880/v1",
+    }, app))
+
+    assert response.status == 200
+    assert app["subsystems"] is runtime
+    assert app["api"] is new_api
+    assert runtime.llm_client.closed == 0
+
+
+@pytest.mark.asyncio
 async def test_failed_runtime_reload_keeps_old_runtime_available(monkeypatch):
     old_runtime = _runtime()
     old_api = object()

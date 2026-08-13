@@ -5,7 +5,7 @@ import { NTabPane, NTabs } from 'naive-ui'
 import DOMPurify from 'dompurify'
 import {
   ChatbubblesOutline, ColorPaletteOutline, ConstructOutline, CubeOutline,
-  ExtensionPuzzleOutline, MapOutline,
+  ExtensionPuzzleOutline, MicOutline,
 } from '@vicons/ionicons5'
 import { useTheme, type SkinName } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
@@ -47,9 +47,9 @@ function switchMarketScope(scope: 'plugins' | 'content') {
 const pluginTypeIcons: Record<string, Component> = {
   'content-pack': CubeOutline,
   'theme': ColorPaletteOutline,
+  'voice-pack': MicOutline,
   'tool': ConstructOutline,
   'channel-adapter': ChatbubblesOutline,
-  'map-pack': MapOutline,
 }
 function pluginTypeIcon(type?: string): Component {
   return (type && pluginTypeIcons[type]) || ExtensionPuzzleOutline
@@ -72,6 +72,7 @@ const {
   packId, packName, packVersion, packDescription,
   selectedWorldId, selectedRuleId, selectedCardIds,
   includePortraits, includeSceneImages, worldSceneImageFile, ruleSceneImageFile,
+  includeMap, mapBackgroundFile, mapIconFiles,
   worldOptions: authorWorldOptions, ruleOptions: authorRuleOptions, cardOptions: authorCardOptions,
   loadAuthorData, exportPack,
 } = usePluginExport(busy)
@@ -79,6 +80,11 @@ function setExportSceneImage(kind: 'world' | 'rule', event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0] || null
   if (kind === 'world') worldSceneImageFile.value = file
   else ruleSceneImageFile.value = file
+}
+function setExportMapAsset(kind: 'background' | 'icons', event: Event) {
+  const files = Array.from((event.target as HTMLInputElement).files || [])
+  if (kind === 'background') mapBackgroundFile.value = files[0] || null
+  else mapIconFiles.value = files
 }
 const showExportModal = ref(false)
 let authorLoaded = false
@@ -387,6 +393,9 @@ onMounted(async () => {
     :selected-card-ids="selectedCardIds"
     :include-portraits="includePortraits"
     :include-scene-images="includeSceneImages"
+    :include-map="includeMap"
+    :map-background-file="mapBackgroundFile"
+    :map-icon-files="mapIconFiles"
     :author-world-options="authorWorldOptions"
     :author-rule-options="authorRuleOptions"
     :author-card-options="authorCardOptions"
@@ -400,7 +409,9 @@ onMounted(async () => {
     :set-selected-card-ids="(v: (string | number)[] | null) => selectedCardIds = (v || []) as string[]"
     :set-include-portraits="(v: boolean) => includePortraits = v"
     :set-include-scene-images="(v: boolean) => includeSceneImages = v"
+    :set-include-map="(v: boolean) => includeMap = v"
     :set-export-scene-image="setExportSceneImage"
+    :set-export-map-asset="setExportMapAsset"
     :export-pack="exportPack"
   />
 </template>

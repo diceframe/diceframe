@@ -99,7 +99,7 @@ const { t } = useLocale()
             <NTag :type="p.running ? 'success' : 'default'" size="small">{{ p.status }}</NTag>
             <NSwitch v-if="p.has_entrypoint" :value="p.running" :disabled="busy === p.id" @update:value="toggleRunning(p, $event)" />
             <NSwitch
-              v-else-if="p.plugin_type === 'content-pack' || p.plugin_type === 'theme'"
+              v-else-if="p.plugin_type === 'content-pack' || p.plugin_type === 'theme' || p.plugin_type === 'voice-pack'"
               :value="p.config?.enabled !== false"
               :disabled="busy === p.id"
               :aria-label="t('pluginEnabled')"

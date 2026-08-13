@@ -169,9 +169,9 @@ body.light .thinking-message {
     padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
-  .app-shell .game-sidebar,
-  .app-shell .play-control-rail,
-  .app-shell .play-drawer-backdrop {
+  .app-shell:not(.app-shell-play) .game-sidebar,
+  .app-shell:not(.app-shell-play) .play-control-rail,
+  .app-shell:not(.app-shell-play) .play-drawer-backdrop {
     bottom: calc(58px + env(safe-area-inset-bottom));
   }
 

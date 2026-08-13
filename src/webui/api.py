@@ -15,7 +15,7 @@ from src.lorebook.store import LorebookStore
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 from src.engine.world_template import load_world_template
-from src.webui.services import avatars, bot_access, bot_extensions, character_cards, characters, content, generation, games, logs, maps, memory, tavern, turns, worlds, rules, plugins, scene_images, system, tunnel, announcements, assistant, hub, legal
+from src.webui.services import avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, generation, games, logs, map_backgrounds, maps, memory, tavern, turns, worlds, rules, plugins, scene_images, speech, system, tunnel, announcements, assistant, hub, legal
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 logger = logging.getLogger("trpg")
@@ -107,7 +107,8 @@ class WebAPI:
                  memory: MemoryStore, rules_dir: Path,
                  handler=None, llm_client=None, worlds_dir: Path | None = None,
                  character_gen_max_tokens: int = 2048,
-                 text_gen_max_tokens: int = 1024, plugin_host=None, hub_client=None):
+                 text_gen_max_tokens: int = 1024, plugin_host=None, hub_client=None,
+                 speech_service=None):
         self._reg = registry
         self._lore = lorebook
         self._mem = memory
@@ -118,10 +119,12 @@ class WebAPI:
         self._character_cards_path = self._reg.save_dir.parent / "character_cards.json"
         self._avatars_dir = self._reg.save_dir.parent / "avatars"
         self._scene_images_dir = self._reg.save_dir.parent / "scene-images"
+        self._map_backgrounds_dir = self._reg.save_dir.parent / "map-backgrounds"
         self.character_gen_max_tokens = character_gen_max_tokens
         self.text_gen_max_tokens = text_gen_max_tokens
         self._plugins = plugin_host
         self._hub = hub_client
+        self._speech = speech_service
         if self._plugins and self._handler and hasattr(self._handler, "set_plugin_host"):
             self._handler.set_plugin_host(self._plugins)
 
@@ -225,6 +228,51 @@ class WebAPI:
 
     def list_plugin_types(self) -> dict[str, Any]:
         return plugins.list_plugin_types(self)
+
+    def list_speech_voices(self) -> dict[str, Any]:
+        return speech.list_voices(self)
+
+    def list_personal_speech_profiles(self) -> dict[str, Any]:
+        return speech.list_personal_profiles(self)
+
+    def save_personal_speech_profile(
+        self,
+        profile_id: str,
+        values: dict[str, Any],
+        *,
+        file_data: str = "",
+        file_name: str = "",
+    ) -> dict[str, Any]:
+        return speech.save_personal_profile(
+            self,
+            profile_id,
+            values,
+            file_data=file_data,
+            file_name=file_name,
+        )
+
+    def delete_personal_speech_profile(self, profile_id: str) -> dict[str, Any]:
+        return speech.delete_personal_profile(self, profile_id)
+
+    async def synthesize_speech(
+        self,
+        game_key: str,
+        user_id: str,
+        text: str,
+        voice: str = "",
+        language: str = "zh-CN",
+        speed: float = 1.0,
+    ):
+        return await speech.synthesize(self, game_key, user_id, text, voice, language, speed)
+
+    async def test_speech(
+        self,
+        text: str,
+        voice: str = "",
+        language: str = "zh-CN",
+        speed: float = 1.0,
+    ):
+        return await speech.test_synthesis(self, text, voice, language, speed)
 
     async def rescan_plugins(self) -> dict[str, Any]:
         return await plugins.rescan_plugins(self)
@@ -345,10 +393,37 @@ class WebAPI:
         include_scene_images: bool = True,
         world_scene_image: dict[str, Any] | None = None,
         rule_scene_image: dict[str, Any] | None = None,
+        include_map: bool = True,
+        map_background: dict[str, Any] | None = None,
+        map_icons: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return plugins.export_content_pack(
             self, plugin_id, name, version, description, world_id, card_ids, rule_id, flat,
-            include_portraits, include_scene_images, world_scene_image, rule_scene_image
+            include_portraits, include_scene_images, world_scene_image, rule_scene_image,
+            include_map, map_background, map_icons,
+        )
+
+    def package_content_map(
+        self,
+        plugin_id: str,
+        pack_name: str,
+        world: dict[str, Any],
+        entries: list[dict[str, Any]],
+        files: dict[str, str | bytes],
+        *,
+        background_selection: dict[str, Any] | None = None,
+        icon_uploads: list[dict[str, Any]] | None = None,
+    ):
+        """Package map contributions through the WebAPI cross-domain facade."""
+        return content_pack_maps.package_content_map(
+            self,
+            plugin_id,
+            pack_name,
+            world,
+            entries,
+            files,
+            background_selection=background_selection,
+            icon_uploads=icon_uploads,
         )
 
     def plugin_asset_path(self, plugin_id: str, relative_path: str) -> Path:
@@ -503,6 +578,9 @@ class WebAPI:
     async def rollback_round(self, game_key: str) -> dict[str, Any]:
         return await games.rollback_round(self, game_key)
 
+    async def generate_story_recap(self, game_key: str) -> dict[str, Any]:
+        return await games.generate_story_recap(self, game_key)
+
     async def gm_private_message(self, game_key: str, user_id: str, text: str) -> dict[str, Any]:
         return await games.gm_private_message(self, game_key, user_id, text)
 
@@ -632,6 +710,18 @@ class WebAPI:
     ) -> dict[str, str] | None:
         return scene_images.package_scene_image(self, reference, files)
 
+    def save_map_background_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        return map_backgrounds.save_map_background_upload(self, file_data, file_name)
+
+    def map_background_file(self, asset_id: str) -> Path | None:
+        return map_backgrounds.map_background_file(self, asset_id)
+
+    def validate_map_background_selection(self, selection: Any) -> dict[str, str]:
+        return map_backgrounds.validate_map_background_selection(self, selection)
+
+    def resolve_map_background_file(self, selection: Any) -> Path | None:
+        return map_backgrounds.resolve_map_background_file(self, selection)
+
     # ---- 剧情日志 ----
 
     def get_log(
@@ -693,12 +783,13 @@ class WebAPI:
                            gm_uid: str = "",
                            room_password: str = "",
                            language: str = "",
-                           scene_image: dict[str, Any] | None = None) -> dict[str, Any]:
+                           scene_image: dict[str, Any] | None = None,
+                           map_background: dict[str, Any] | None = None) -> dict[str, Any]:
         return await games.create_game(self, world_id, game_name, group_name, rule_id,
                                        solo, lorebook_world_id, difficulty, description,
                                        create_lorebook, blank_lorebook, source_world_id,
                                        players, custom_world, gm_uid, room_password,
-                                       language, scene_image)
+                                       language, scene_image, map_background)
 
     # ---- 重开引用码 ----
 
@@ -726,6 +817,13 @@ class WebAPI:
         use_default: bool = False,
     ) -> dict[str, Any]:
         return await games.update_scene_image(self, game_key, reference, use_default=use_default)
+
+    async def update_map_background(
+        self,
+        game_key: str,
+        selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await maps.update_map_background(self, game_key, selection)
 
     # ---- AI 生成 ----
 
@@ -766,6 +864,9 @@ class WebAPI:
 
     def get_map_locations(self, game_key: str) -> dict[str, Any]:
         return maps.get_map_locations(self, game_key)
+
+    def map_background_asset(self, game_key: str, asset_id: str) -> Path | None:
+        return maps.map_background_asset(self, game_key, asset_id)
 
     @staticmethod
     def _parse_key(game_key: str) -> tuple:

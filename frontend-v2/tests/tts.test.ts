@@ -26,6 +26,19 @@ vi.stubGlobal('speechSynthesis', {
   addEventListener: mocks.addEventListener,
 })
 vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance)
+class MockAudio {
+  onended: ((event: Event) => unknown) | null = null
+  onerror: ((event: Event) => unknown) | null = null
+  constructor(_src: string) {}
+  play() {
+    queueMicrotask(() => this.onended?.(new Event('ended')))
+    return Promise.resolve()
+  }
+  pause() {}
+}
+vi.stubGlobal('Audio', MockAudio)
+Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:tts-test') })
+Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
 
 // jsdom 下 localStorage 可能因 opaque origin 抛 SecurityError，stub 一个内存实现。
 const memStore = new Map<string, string>()
@@ -36,18 +49,21 @@ vi.stubGlobal('localStorage', {
   clear: () => { memStore.clear() },
 })
 
-import { setTtsRate, speakingKey, stripHtml, ttsRate, ttsSpeak, ttsStop, ttsSupported, ttsToggle } from '../src/utils/tts'
+import { speechApi } from '../src/api/speech'
+import { chunkSpeechText, setTtsRate, speakingKey, stripHtml, ttsRate, ttsRuntimeConfig, ttsSpeak, ttsStop, ttsSupported, ttsToggle } from '../src/utils/tts'
 
 describe('tts utils', () => {
   beforeEach(() => {
     mocks.cancel.mockReset()
     mocks.speak.mockReset()
     speakingKey.value = ''
+    ttsRuntimeConfig.value = { provider: 'browser', defaultVoice: 'alloy', gmVoice: '', playerVoice: '' }
     try { localStorage.removeItem('trpg_tts_rate') } catch { /* ignore */ }
   })
 
   afterEach(() => {
     ttsStop()
+    vi.restoreAllMocks()
   })
 
   it('reports support when speechSynthesis exists', () => {
@@ -58,6 +74,12 @@ describe('tts utils', () => {
     expect(stripHtml('<span class="kw-quote">古堡</span>的大门')).toBe('古堡的大门')
     expect(stripHtml('他说 &quot;来吧&quot; &amp; 出发')).toBe('他说 "来吧" & 出发')
     expect(stripHtml('无标签纯文本')).toBe('无标签纯文本')
+  })
+
+  it('chunks long server narration on sentence boundaries', () => {
+    const chunks = chunkSpeechText(`${'甲'.repeat(700)}。${'乙'.repeat(700)}。`, 1000)
+    expect(chunks).toHaveLength(2)
+    expect(chunks.every(chunk => chunk.length <= 1000)).toBe(true)
   })
 
   it('reads stripped plain text, not HTML markup', () => {
@@ -120,5 +142,33 @@ describe('tts utils', () => {
     ttsStop()
     expect(mocks.cancel).toHaveBeenCalled()
     expect(speakingKey.value).toBe('')
+  })
+
+  it('uses the shared server engine and role voice when configured', async () => {
+    ttsRuntimeConfig.value = {
+      provider: 'openai-compatible',
+      defaultVoice: 'alloy',
+      gmVoice: 'nova',
+      playerVoice: 'echo',
+    }
+    const synthesize = vi.spyOn(speechApi, 'synthesize').mockResolvedValue(new Blob(['audio'], { type: 'audio/mpeg' }))
+
+    ttsSpeak('远处传来钟声。', 'gm:remote', { gameKey: 'web|room|bot', role: 'gm', lang: 'zh-CN' })
+
+    await vi.waitFor(() => expect(synthesize).toHaveBeenCalledOnce())
+    expect(synthesize.mock.calls[0][1]).toMatchObject({ voice: 'nova', language: 'zh-CN' })
+    await vi.waitFor(() => expect(speakingKey.value).toBe(''))
+  })
+
+  it('rejects non-WAV personal references before uploading', async () => {
+    await expect(speechApi.saveProfile(
+      {
+        name: 'Narrator',
+        engine: 'gpt-sovits',
+        prompt_text: 'Reference text',
+      },
+      '',
+      new File(['not-a-wave'], 'voice.mp3', { type: 'audio/mpeg' }),
+    )).rejects.toThrow('tts-reference-invalid')
   })
 })

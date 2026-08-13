@@ -89,6 +89,19 @@ def test_reserved_plugin_type_is_visible_but_not_installable():
     assert item["installable"] is False
 
 
+def test_content_pack_with_map_contributions_is_installable():
+    item = _market_item(manifest={
+        "id": "demo-map",
+        "name": "Demo Map",
+        "version": "1.0.0",
+        "plugin_type": "content-pack",
+        "contributes": {"map_definitions": ["maps/*.json"]},
+    })
+
+    assert item["support"]["level"] == "supported"
+    assert item["installable"] is True
+
+
 @pytest.mark.asyncio
 async def test_marketplace_downloads_latest_release_at_resolved_commit():
     payload = b"repository snapshot"

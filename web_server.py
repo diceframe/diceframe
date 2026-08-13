@@ -19,6 +19,7 @@ from src.network_proxy import effective_proxy_url, env_proxy_url, is_supported_p
 from src.plugin_host import PluginHost
 from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.template_catalog import sync_template_catalog
+from src.tts import SpeechService
 from src.webui.access_password import (
     consume_reset_password,
     hash_access_password,
@@ -42,6 +43,7 @@ from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.avatars import register_avatars
 from src.webui.routes.scene_images import register_scene_images
+from src.webui.routes.maps import register_maps
 from src.webui.routes.rules import register_rules
 from src.webui.routes.worlds import register_worlds
 from src.webui.routes.generation import register_generation
@@ -60,6 +62,7 @@ from src.webui.routes.assistant import register_assistant
 from src.webui.routes.tunnel import register_tunnel
 from src.webui.routes.system import register_system
 from src.webui.routes.updater import register_updater
+from src.webui.routes.speech import register_speech
 from src.webui.services import updater as updater_svc
 from src.webui.services import legal as legal_svc
 
@@ -169,6 +172,7 @@ EMB_API_KEY = (os.getenv("TRPG_EMBEDDING_API_KEY")
                or "")
 FALLBACK1_API_KEY = secrets.get("fallback1_api_key") or ""
 FALLBACK2_API_KEY = secrets.get("fallback2_api_key") or ""
+TTS_API_KEY = os.getenv("TRPG_TTS_API_KEY") or secrets.get("tts_api_key") or ""
 ACCESS_TOKEN = next((
     password for password in (
         normalize_access_password(os.getenv("TRPG_ACCESS_TOKEN")),
@@ -227,6 +231,16 @@ STATE = {
     "fallback2_model": saved.get("fallback2_model", ""),
     "fallback2_api_format": saved.get("fallback2_api_format", "openai"),
     "fallback2_api_key": FALLBACK2_API_KEY,
+    "tts_provider": str(os.getenv("TRPG_TTS_PROVIDER") or saved.get("tts_provider", "browser")),
+    "tts_base_url": str(os.getenv("TRPG_TTS_BASE_URL") or saved.get("tts_base_url", "")),
+    "tts_api_key": TTS_API_KEY,
+    "tts_model": str(os.getenv("TRPG_TTS_MODEL") or saved.get("tts_model", "tts-1")),
+    "tts_audio_format": str(os.getenv("TRPG_TTS_AUDIO_FORMAT") or saved.get("tts_audio_format", "mp3")),
+    "tts_default_voice": str(os.getenv("TRPG_TTS_VOICE") or saved.get("tts_default_voice", "alloy")),
+    "tts_gm_voice": str(saved.get("tts_gm_voice", "")),
+    "tts_player_voice": str(saved.get("tts_player_voice", "")),
+    "tts_timeout_seconds": float(saved.get("tts_timeout_seconds", 60)),
+    "tts_cache_mb": int(saved.get("tts_cache_mb", 256)),
     "narrative_max_tokens": NARRATIVE_MAX_TOKENS,
     "character_gen_max_tokens": CHARACTER_GEN_MAX_TOKENS,
     "summary_max_tokens": SUMMARY_MAX_TOKENS,
@@ -293,11 +307,12 @@ def _mask_secret(value: str) -> dict:
 
 def _public_config() -> dict:
     public = {k: v for k, v in STATE.items()
-              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")}
+              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")}
     public["api_key"] = _mask_secret(STATE.get("api_key", ""))
     public["embedding_api_key"] = _mask_secret(STATE.get("embedding_api_key", ""))
     public["fallback1_api_key"] = _mask_secret(STATE.get("fallback1_api_key", ""))
     public["fallback2_api_key"] = _mask_secret(STATE.get("fallback2_api_key", ""))
+    public["tts_api_key"] = _mask_secret(STATE.get("tts_api_key", ""))
     public["access_password"] = mask_access_password(STATE.get("access_token", ""))
     public["bot_token"] = _mask_secret(STATE.get("bot_token", ""))
     public["bot_token_source"] = "env" if os.getenv("TRPG_BOT_TOKEN") else "generated"
@@ -318,10 +333,10 @@ def _public_config() -> dict:
 
 def save_config():
     non_sensitive = {k: v for k, v in STATE.items()
-                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")}
+                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")}
     _atomic_write_json(CONFIG_FILE, non_sensitive)
     sensitive = {k: v for k, v in STATE.items()
-                 if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
+                 if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
                  and not (k == "access_token" and os.getenv("TRPG_ACCESS_TOKEN"))}
     if any(v for v in sensitive.values()) or SECRETS_FILE.exists():
         _atomic_write_json(SECRETS_FILE, sensitive)
@@ -430,6 +445,14 @@ def _build_subsystems(
 
 def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None = None, hub_client=None) -> WebAPI:
     runtime_config = STATE if config is None else config
+    speech_service = SpeechService(
+        runtime_config,
+        DATA_DIR / "tts-cache",
+        proxy_url=effective_proxy_url(
+            bool(runtime_config.get("proxy_enabled")),
+            runtime_config.get("proxy_url", ""),
+        ),
+    )
     api = WebAPI(
         registry=subsystems.registry, lorebook=subsystems.lorebook_store,
         memory=subsystems.memory_store, rules_dir=RULES_DIR,
@@ -439,6 +462,7 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None 
         text_gen_max_tokens=int(runtime_config.get("text_gen_max_tokens", 1024)),
         plugin_host=plugin_host,
         hub_client=hub_client,
+        speech_service=speech_service,
     )
     # 配置状态引用就地更新，始终指向最新值（更新频道等运行时配置）
     api._config_state = STATE
@@ -769,7 +793,7 @@ def _share_player_user_id(request: web.Request) -> str:
         return uid or request.get("user_id", "")
     if len(parts) >= 4:
         tail = parts[3]
-        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context", "avatars", "scene-image"}:
+        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context", "avatars", "scene-image", "map-background-asset"}:
             return uid or request.get("user_id", "")
         if request.method == "POST" and tail in {"players", "action", "sse-ticket", "avatars", "scene-image"}:
             return uid or request.get("user_id", "")
@@ -1108,6 +1132,7 @@ def register_routes(application: web.Application) -> None:
     register_tunnel(application)
     register_system(application)
     register_updater(application)
+    register_speech(application)
     # worlds / lorebook
     register_worlds(application)
     # rules
@@ -1118,6 +1143,7 @@ def register_routes(application: web.Application) -> None:
     register_avatars(application)
     # adventure scene images
     register_scene_images(application)
+    register_maps(application)
     # config / test
     application.router.add_get("/api/config", api_config_get)
     application.router.add_post("/api/config", api_config_post)

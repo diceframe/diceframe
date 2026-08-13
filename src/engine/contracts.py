@@ -102,6 +102,14 @@ class PendingPayment(TypedDict, total=False):
     resolved_at: float
 
 
+class StoryRecap(TypedDict, total=False):
+    id: str
+    text: str
+    from_round: int
+    to_round: int
+    created_at: str
+
+
 class RoundLogEntry(TypedDict, total=False):
     round: int
     actions: list[ActionRecord]
@@ -114,6 +122,7 @@ class RoundLogEntry(TypedDict, total=False):
     current_swipe: int
     timestamp: str
     tags_summary: NotRequired[dict[str, Any]]
+    story_recaps: NotRequired[list[StoryRecap]]
 
 
 TokenBudgetBump = TypedDict(

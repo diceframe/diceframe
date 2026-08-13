@@ -357,6 +357,7 @@
   .app-shell-play .play-control-rail.collapsed {
     top: 0;
     bottom: 0;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 
   .app-shell-play .play-drawer-backdrop {
@@ -601,10 +602,10 @@
     visibility: hidden;
   }
 
-  .app-shell .game-sidebar,
-  .app-shell .play-control-rail,
-  .app-shell .game-sidebar.collapsed,
-  .app-shell .play-control-rail.collapsed {
+  .app-shell:not(.app-shell-play) .game-sidebar,
+  .app-shell:not(.app-shell-play) .play-control-rail,
+  .app-shell:not(.app-shell-play) .game-sidebar.collapsed,
+  .app-shell:not(.app-shell-play) .play-control-rail.collapsed {
     bottom: calc(64px + env(safe-area-inset-bottom));
   }
 
@@ -656,7 +657,7 @@
     backdrop-filter: blur(3px);
   }
 
-  .app-shell .play-drawer-backdrop {
+  .app-shell:not(.app-shell-play) .play-drawer-backdrop {
     bottom: calc(64px + env(safe-area-inset-bottom));
   }
 

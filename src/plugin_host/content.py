@@ -172,11 +172,54 @@ class PluginContentCatalog:
 
     def list_map_assets(self, world_id: str = "") -> dict[str, list[dict[str, Any]]]:
         return {
+            "maps": self._map_json_items("map_definition", world_id),
             "locations": self._map_json_items("map_location", world_id),
             "icons": [self._asset_item(item) for item in self.registry.list("map_icon")],
             "scenes": [self._asset_item(item) for item in self.registry.list("map_scene")],
-            "grids": [self._asset_item(item) for item in self.registry.list("map_grid")],
         }
+
+    def list_voice_profiles(self) -> list[dict[str, Any]]:
+        profiles: list[dict[str, Any]] = []
+        assets = {
+            (item.plugin_id, item.relative_path): item
+            for item in self.registry.list("voice_asset")
+        }
+        for item in self.registry.list("voice_profile"):
+            try:
+                data = json.loads(item.path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or data.get("schema_version") != 1:
+                    continue
+                local_id = str(data.get("id") or item.key)
+                profile = {
+                    "id": f"plugin:{item.plugin_id}:voice:{local_id}",
+                    "local_id": local_id,
+                    "name": str(data.get("name") or item.title or item.key),
+                    "engine": str(data.get("engine") or ""),
+                    "voice_id": str(data.get("voice_id") or ""),
+                    "language": str(data.get("language") or ""),
+                    "description": str(data.get("description") or item.description or ""),
+                    "prompt_text": str(data.get("prompt_text") or ""),
+                    "prompt_language": str(data.get("prompt_language") or data.get("language") or ""),
+                    "license": str(data.get("license") or ""),
+                    "plugin_id": item.plugin_id,
+                    "plugin_name": item.plugin_name,
+                    "source": "plugin",
+                }
+                reference = str(data.get("reference_audio") or "").replace("\\", "/").strip("/")
+                preview = str(data.get("preview_audio") or reference).replace("\\", "/").strip("/")
+                reference_item = assets.get((item.plugin_id, reference)) if reference else None
+                preview_item = assets.get((item.plugin_id, preview)) if preview else None
+                if reference_item:
+                    profile["_reference_audio_path"] = str(reference_item.path)
+                if preview_item:
+                    profile["preview_url"] = (
+                        f"/api/plugins/assets/{quote(item.plugin_id)}/"
+                        f"{quote(preview_item.relative_path, safe='/')}"
+                    )
+                profiles.append(profile)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                self.logger.warning("插件语音资源读取失败: %s", item.path, exc_info=True)
+        return profiles
 
     def list_content_resources(
         self,
@@ -372,8 +415,13 @@ class PluginContentCatalog:
     @staticmethod
     def _asset_item(item) -> dict[str, Any]:
         relative_path = item.relative_path
+        asset_kind = {
+            "map_icon": "icon",
+            "map_scene": "scene",
+        }.get(item.kind, item.kind)
         return {
             "id": item.key,
+            "ref": f"plugin:{item.plugin_id}:{asset_kind}:{item.key}",
             "name": item.title or item.key,
             "description": item.description,
             "plugin_id": item.plugin_id,

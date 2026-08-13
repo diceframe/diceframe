@@ -5,15 +5,17 @@ import {
   PlayForwardOutline, ArrowUndoOutline, ShareOutline, BugOutline,
   PersonOutline, BookOutline, PeopleOutline, LockOpenOutline, LockClosedOutline,
   KeyOutline, PlaySkipForwardOutline, DownloadOutline, RefreshOutline,
-  TrashOutline, SendOutline, ImageOutline,
+  TrashOutline, SendOutline, ImageOutline, MapOutline,
+  ReaderOutline,
 } from '@vicons/ionicons5'
 import type { GameDetail, Player } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 
-defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean }>()
+defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean; recapBusy?: boolean }>()
 const emit = defineEmits<{
   advance: []
   rollback: []
+  recap: []
   invite: []
   'bot-bind': []
   mode: []
@@ -27,6 +29,7 @@ const emit = defineEmits<{
   'world-switch': []
   'room-password': []
   'scene-image': []
+  'map-background': []
 }>()
 
 const cmdText = ref('')
@@ -48,6 +51,7 @@ function sendPerc() { if (percTarget.value && percText.value.trim()) { emit('per
       <h4>{{ t('flow') }}</h4>
       <button @click="emit('advance')"><NIcon :component="PlayForwardOutline" size="14" /> {{ t('advance') }}</button>
       <button @click="emit('rollback')"><NIcon :component="ArrowUndoOutline" size="14" /> {{ t('rollback') }}</button>
+      <button :disabled="recapBusy" @click="emit('recap')"><NIcon :component="ReaderOutline" size="14" /> {{ recapBusy ? t('storyRecapGenerating') : t('storyRecapGenerate') }}</button>
     </div>
     <div class="gm-group gm-grow gm-command-group">
       <h4>{{ t('commandGroup') }}</h4>
@@ -73,6 +77,7 @@ function sendPerc() { if (percTarget.value && percText.value.trim()) { emit('per
       <div class="gm-console-section-actions">
         <button @click="emit('export')"><NIcon :component="DownloadOutline" size="14" /> {{ t('export') }}</button>
         <button @click="emit('scene-image')"><NIcon :component="ImageOutline" size="14" /> {{ t('sceneImageManage') }}</button>
+        <button @click="emit('map-background')"><NIcon :component="MapOutline" size="14" /> {{ t('mapBackgroundManage') }}</button>
         <button @click="emit('restart')"><NIcon :component="RefreshOutline" size="14" /> {{ t('restart') }}</button>
         <button class="danger" @click="emit('reset')"><NIcon :component="TrashOutline" size="14" /> {{ t('reset') }}</button>
       </div>
