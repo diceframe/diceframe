@@ -35,10 +35,10 @@ describe('map backgrounds', () => {
   })
 
   it('loads protected game assets with the application token', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      new Blob(['map'], { type: 'image/webp' }),
-      { status: 200 },
-    ))
+    const fetchMock = vi.fn().mockResolvedValue(new Response('map', {
+      status: 200,
+      headers: { 'Content-Type': 'image/webp' },
+    }))
     const createObjectURL = vi.fn().mockReturnValue('blob:map-background')
     const revokeObjectURL = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
