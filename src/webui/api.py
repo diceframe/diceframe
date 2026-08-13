@@ -601,6 +601,12 @@ class WebAPI:
     def avatar_file(self, asset_id: str) -> Path | None:
         return avatars.avatar_file(self, asset_id)
 
+    def list_user_avatars(self) -> dict[str, Any]:
+        return avatars.list_user_avatars(self)
+
+    def delete_avatar(self, asset_id: str) -> dict[str, Any]:
+        return avatars.delete_avatar(self, asset_id)
+
     def save_scene_image_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
         return scene_images.save_scene_image_upload(self, file_data, file_name)
 

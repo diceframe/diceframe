@@ -70,3 +70,31 @@ def avatar_file(api: "WebAPI", asset_id: str) -> Path | None:
         return None
     path = api._avatars_dir / f"{asset_id}.webp"
     return path if path.is_file() else None
+
+
+def list_user_avatars(api: "WebAPI") -> dict[str, Any]:
+    """列出所有用户上传的头像（按 asset_id 排序）。"""
+    avatars_dir = api._avatars_dir
+    if not avatars_dir or not avatars_dir.is_dir():
+        return {"avatars": [], "total": 0}
+    items: list[dict[str, Any]] = []
+    for path in sorted(avatars_dir.glob("*.webp")):
+        asset_id = path.stem
+        if not ASSET_ID_RE.fullmatch(asset_id):
+            continue
+        items.append({"asset_id": asset_id, "size_kb": round(path.stat().st_size / 1024, 1)})
+    return {"avatars": items, "total": len(items)}
+
+
+def delete_avatar(api: "WebAPI", asset_id: str) -> dict[str, Any]:
+    """删除用户上传的头像文件。不检查引用，删后引用处显示占位。"""
+    if not ASSET_ID_RE.fullmatch(asset_id):
+        return {"ok": False, "error": "无效的头像 ID"}
+    path = api._avatars_dir / f"{asset_id}.webp"
+    if not path.is_file():
+        return {"ok": False, "error": "头像不存在"}
+    try:
+        path.unlink()
+    except OSError:
+        return {"ok": False, "error": "删除头像失败"}
+    return {"ok": True}

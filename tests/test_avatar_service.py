@@ -6,12 +6,13 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from src.webui.services.avatars import avatar_file, save_avatar_upload
+from src.webui.services.avatars import avatar_file, delete_avatar, list_user_avatars, save_avatar_upload
 
 
-def _encoded_image(size: tuple[int, int] = (80, 120), fmt: str = "PNG") -> str:
+def _encoded_image(size: tuple[int, int] = (80, 120), fmt: str = "PNG",
+                   color: tuple[int, int, int] = (71, 93, 118)) -> str:
     output = io.BytesIO()
-    Image.new("RGB", size, (71, 93, 118)).save(output, format=fmt)
+    Image.new("RGB", size, color).save(output, format=fmt)
     return base64.b64encode(output.getvalue()).decode("ascii")
 
 
@@ -42,3 +43,22 @@ def test_avatar_upload_rejects_invalid_or_tiny_images(tmp_path):
     assert invalid == {"ok": False, "error": "无法读取该头像图片"}
     assert tiny == {"ok": False, "error": "头像尺寸不能小于 32×32"}
     assert avatar_file(api, "../escape") is None
+
+
+def test_list_and_delete_user_avatars(tmp_path):
+    api = SimpleNamespace(_avatars_dir=tmp_path / "avatars")
+    first = save_avatar_upload(api, _encoded_image())["portrait"]["asset_id"]
+    second = save_avatar_upload(api, _encoded_image((90, 90), color=(120, 40, 40)))["portrait"]["asset_id"]
+    assert first != second
+
+    listed = list_user_avatars(api)
+    assert listed["total"] == 2
+    assert {a["asset_id"] for a in listed["avatars"]} == {first, second}
+    assert all("size_kb" in a for a in listed["avatars"])
+
+    assert delete_avatar(api, first) == {"ok": True}
+    assert avatar_file(api, first) is None
+    assert list_user_avatars(api)["total"] == 1
+
+    assert delete_avatar(api, first) == {"ok": False, "error": "头像不存在"}
+    assert delete_avatar(api, "../escape") == {"ok": False, "error": "无效的头像 ID"}

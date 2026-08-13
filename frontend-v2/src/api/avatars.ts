@@ -38,3 +38,26 @@ export async function uploadedAvatarUrl(assetId: string): Promise<string> {
   uploadedUrls.set(assetId, url)
   return url
 }
+
+export interface UserAvatar {
+  asset_id: string
+  size_kb: number
+}
+
+interface UserAvatarsResponse {
+  avatars: UserAvatar[]
+  total: number
+}
+
+export async function listUserAvatars(): Promise<UserAvatarsResponse> {
+  return api<UserAvatarsResponse>('/avatars')
+}
+
+export async function deleteUserAvatar(assetId: string): Promise<void> {
+  const result = await api<{ ok?: boolean; error?: string }>(
+    `/avatars/${encodeURIComponent(assetId)}`,
+    { method: 'DELETE' },
+  )
+  if (!result.ok) throw new Error(result.error || 'Delete avatar failed')
+  uploadedUrls.delete(assetId)
+}

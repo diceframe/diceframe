@@ -23,6 +23,15 @@ async def api_avatar_file(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+async def api_avatar_list(request: web.Request) -> web.Response:
+    return web.json_response(_get_api(request).list_user_avatars())
+
+
+async def api_avatar_delete(request: web.Request) -> web.Response:
+    result = _get_api(request).delete_avatar(request.match_info["asset_id"])
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
 async def api_game_avatar_upload(request: web.Request) -> web.Response:
     api = _get_api(request)
     if not api.game_detail(request.match_info["game_key"]):
@@ -46,7 +55,9 @@ async def api_game_avatar_file(request: web.Request) -> web.StreamResponse:
 
 
 def register_avatars(app: web.Application) -> None:
+    app.router.add_get("/api/avatars", api_avatar_list)
     app.router.add_post("/api/avatars", api_avatar_upload)
     app.router.add_get("/api/avatars/{asset_id}", api_avatar_file)
+    app.router.add_delete("/api/avatars/{asset_id}", api_avatar_delete)
     app.router.add_post("/api/games/{game_key}/avatars", api_game_avatar_upload)
     app.router.add_get("/api/games/{game_key}/avatars/{asset_id}", api_game_avatar_file)

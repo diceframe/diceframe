@@ -308,6 +308,34 @@ async function exportSelected() {
   await exportCards([...selectedCardIds.value])
 }
 
+async function deleteSelectedCards() {
+  const ids = [...selectedCardIds.value]
+  if (!ids.length) return
+  const ok = await confirm({
+    title: t('deleteSelectedCards'),
+    content: t('deleteSelectedCardsConfirm', { count: ids.length }),
+    positiveText: t('delete'),
+    type: 'error',
+  })
+  if (!ok) return
+  busy.value = true
+  try {
+    const results = await Promise.allSettled(
+      ids.map(id => api<{ ok?: boolean }>(`/character-cards/${encodeURIComponent(id)}`, { method: 'DELETE' })),
+    )
+    const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !(r.value as { ok?: boolean })?.ok)).length
+    const success = ids.length - failed
+    const next = new Set(selectedCardIds.value)
+    ids.forEach(id => next.delete(id))
+    selectedCardIds.value = next
+    if (success > 0) {
+      await load()
+      toast.success(t('deleteSelectedCardsResult', { count: success }))
+    }
+    if (failed > 0) toast.error(t('deleteSelectedCardsFailed', { count: failed }))
+  } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+}
+
 onMounted(async () => {
   await load()
   const uid = route.query.edit_user ? String(route.query.edit_user) : ''
@@ -626,7 +654,7 @@ async function onWizardSubmit(c: CharacterSheet & { character_name: string }) {
         <input v-model="characterSearch" :placeholder="t('characterLibrarySearch')">
         <select v-model="characterSort"><option value="name">{{ t('characterSortName') }}</option><option value="rule">{{ t('characterSortRule') }}</option></select>
         <div class="character-view-switch"><button :class="{ active: libraryView === 'grid' }" @click="libraryView = 'grid'">▦</button><button :class="{ active: libraryView === 'list' }" @click="libraryView = 'list'">☷</button></div>
-        <div class="actions character-import-actions"><button class="danger" :disabled="busy || !selectedCardIds.size" @click="exportSelected">{{ t('exportSelected') }}</button><button class="success" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button></div>
+        <div class="actions character-import-actions"><button class="danger" :disabled="busy || !selectedCardIds.size" @click="exportSelected">{{ t('exportSelected') }}</button><button class="danger" :disabled="busy || !selectedCardIds.size" @click="deleteSelectedCards">{{ t('deleteSelectedCards') }}</button><button class="success" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button></div>
       </div>
     <div class="card-grid character-library-grid" :class="`view-${libraryView}`">
       <article v-for="c in filteredCards" :key="c.card_id || c.id" class="char-card library-character-card">

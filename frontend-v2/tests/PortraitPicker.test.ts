@@ -5,10 +5,16 @@ import { i18n } from '../src/i18n'
 
 vi.mock('../src/api/avatars', () => ({
   uploadAvatar: vi.fn(),
+  listUserAvatars: vi.fn().mockResolvedValue({ avatars: [], total: 0 }),
+  deleteUserAvatar: vi.fn(),
 }))
 
 vi.mock('../src/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+}))
+
+vi.mock('../src/composables/useConfirm', () => ({
+  useConfirm: () => ({ confirm: vi.fn().mockResolvedValue(true) }),
 }))
 
 describe('PortraitPicker', () => {

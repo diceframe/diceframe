@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { CharacterPortrait } from '@/api/types'
-import { uploadAvatar } from '@/api/avatars'
+import { uploadAvatar, listUserAvatars, deleteUserAvatar, type UserAvatar } from '@/api/avatars'
 import { builtinPortraits, builtinRule, resolveBuiltinPortrait } from '@/utils/portraits'
 import type { MessageKey } from '@/i18n'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
+import { useConfirm } from '@/composables/useConfirm'
 import PortraitImage from '@/components/PortraitImage.vue'
 import Modal from '@/components/ui/Modal.vue'
 
@@ -13,9 +14,13 @@ const props = defineProps<{ modelValue?: CharacterPortrait | null; ruleId?: stri
 const emit = defineEmits<{ 'update:modelValue': [value: CharacterPortrait | null] }>()
 const { t } = useLocale()
 const toast = useToast()
+const { confirm } = useConfirm()
 const input = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const allOpen = ref(false)
+const userOpen = ref(false)
+const userAvatars = ref<UserAvatar[]>([])
+const userLoading = ref(false)
 const choices = computed(() => builtinPortraits(props.ruleId))
 const resolvedId = computed(() => {
   // 未显式选择头像时不高亮任何选项（也不自动分配兜底）。
@@ -80,6 +85,42 @@ async function onUpload(event: Event) {
     element.value = ''
   }
 }
+
+async function openUserAvatars() {
+  userOpen.value = true
+  userLoading.value = true
+  try {
+    const result = await listUserAvatars()
+    userAvatars.value = result.avatars || []
+  } catch (error: unknown) {
+    userAvatars.value = []
+    toast.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    userLoading.value = false
+  }
+}
+
+function chooseUser(assetId: string) {
+  emit('update:modelValue', { kind: 'upload', asset_id: assetId })
+  userOpen.value = false
+}
+
+async function removeUserAvatar(assetId: string) {
+  const ok = await confirm({
+    title: t('deleteAvatarTitle'),
+    content: t('deleteAvatarConfirm'),
+    positiveText: t('deleteAvatarAction'),
+    type: 'warning',
+  })
+  if (!ok) return
+  try {
+    await deleteUserAvatar(assetId)
+    userAvatars.value = userAvatars.value.filter(a => a.asset_id !== assetId)
+    toast.success(t('avatarDeleted'))
+  } catch (error: unknown) {
+    toast.error(error instanceof Error ? error.message : String(error))
+  }
+}
 </script>
 
 <template>
@@ -104,6 +145,7 @@ async function onUpload(event: Event) {
         {{ uploading ? t('uploading') : t('uploadCustomAvatar') }}
       </button>
       <button type="button" class="portrait-all" @click="allOpen = true">{{ t('allAvatars') }}</button>
+      <button type="button" class="portrait-all" @click="openUserAvatars">{{ t('userAvatars') }}</button>
       <button type="button" class="ghost portrait-auto" @click="emit('update:modelValue', null)">{{ t('useDefaultAvatar') }}</button>
     </div>
     <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onUpload">
@@ -127,6 +169,31 @@ async function onUpload(event: Event) {
           >
             <PortraitImage :portrait="{ kind: 'builtin', id: p.id }" :rule-id="group.ruleId" :name="name" :size="52" />
           </button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal v-if="userOpen" :title="t('userAvatars')" @close="userOpen = false">
+      <p v-if="userLoading" class="muted">{{ t('userAvatarsLoading') }}</p>
+      <p v-else-if="!userAvatars.length" class="muted">{{ t('userAvatarsEmpty') }}</p>
+      <div v-else class="portrait-options user-avatar-grid">
+        <div v-for="a in userAvatars" :key="a.asset_id" class="user-avatar-item">
+          <button
+            type="button"
+            class="portrait-option"
+            :class="{ selected: modelValue?.kind === 'upload' && modelValue.asset_id === a.asset_id }"
+            :title="t('clickToChangeAvatar')"
+            @click="chooseUser(a.asset_id)"
+          >
+            <PortraitImage :portrait="{ kind: 'upload', asset_id: a.asset_id }" :size="52" />
+          </button>
+          <button
+            type="button"
+            class="user-avatar-remove"
+            :title="t('deleteAvatarAction')"
+            :aria-label="t('deleteAvatarAction')"
+            @click="removeUserAvatar(a.asset_id)"
+          >×</button>
         </div>
       </div>
     </Modal>
