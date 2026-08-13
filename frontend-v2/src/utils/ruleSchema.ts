@@ -31,10 +31,6 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-function isEnglish(): boolean {
-  return i18n.global.locale.value === 'en'
-}
-
 // zh 界面用中文；en/ja 界面均回退英文（ja 缺失文案回退英文，而非中文）。
 function localeIsZh(): boolean {
   const locale = i18n.global.locale.value
