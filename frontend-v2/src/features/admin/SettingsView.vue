@@ -1000,89 +1000,83 @@ function redownloadUpdatePackage() {
                 <NIcon :component="OptionsOutline" />
                 <div><h3>{{ t('ttsSettings') }}</h3><p>{{ t('ttsSettingsHint') }}</p></div>
               </header>
-              <div class="tts-settings-group">
-                <div class="tts-group-heading">
-                  <div><strong>{{ t('ttsEngineConnection') }}</strong><small>{{ t('ttsEngineConnectionHint') }}</small></div>
+              <div class="advanced-row tts-subheading-row">
+                <div><strong>{{ t('ttsEngineConnection') }}</strong><small>{{ t('ttsEngineConnectionHint') }}</small></div>
+              </div>
+              <div class="advanced-row">
+                <div><strong>{{ t('ttsProvider') }}</strong></div>
+                <select :value="store.config.tts_provider ?? 'browser'" @change="setStr('tts_provider', eventValue($event))">
+                  <option value="browser">{{ t('ttsProviderBrowser') }}</option>
+                  <option value="openai-compatible">{{ t('ttsProviderOpenAI') }}</option>
+                  <option value="gpt-sovits">GPT-SoVITS</option>
+                </select>
+              </div>
+              <template v-if="ttsProvider !== 'browser'">
+                <div class="advanced-row">
+                  <div><strong>Base URL</strong></div>
+                  <NInput
+                    :value="store.config.tts_base_url ?? ''"
+                    :placeholder="ttsProvider === 'gpt-sovits' ? 'http://127.0.0.1:9880' : 'https://api.openai.com/v1'"
+                    @update:value="setStr('tts_base_url', $event)"
+                  />
                 </div>
-                <div class="form-row">
-                  <label>{{ t('ttsProvider') }}</label>
-                  <select :value="store.config.tts_provider ?? 'browser'" @change="setStr('tts_provider', eventValue($event))">
-                    <option value="browser">{{ t('ttsProviderBrowser') }}</option>
-                    <option value="openai-compatible">{{ t('ttsProviderOpenAI') }}</option>
-                    <option value="gpt-sovits">GPT-SoVITS</option>
+                <div class="advanced-row">
+                  <div><strong>API Key</strong></div>
+                  <NInput
+                    :value="store.secrets.tts_api_key ?? ''"
+                    type="password"
+                    show-password-on="click"
+                    :placeholder="store.config.tts_api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.tts_api_key.masked }) : t('ttsApiKeyOptional')"
+                    @update:value="setSecret('tts_api_key', $event)"
+                  />
+                </div>
+                <div v-if="ttsProvider === 'openai-compatible'" class="advanced-row">
+                  <div><strong>{{ t('model') }}</strong></div>
+                  <NInput :value="store.config.tts_model ?? 'tts-1'" placeholder="tts-1" @update:value="setStr('tts_model', $event)" />
+                </div>
+                <div class="advanced-row">
+                  <div><strong>{{ t('ttsAudioFormat') }}</strong></div>
+                  <select :value="store.config.tts_audio_format ?? 'mp3'" @change="setStr('tts_audio_format', eventValue($event))">
+                    <option value="mp3">MP3</option><option value="wav">WAV</option><option value="opus">Opus</option><option value="flac">FLAC</option><option value="aac">AAC</option>
                   </select>
                 </div>
-                <template v-if="ttsProvider !== 'browser'">
-                  <div class="form-row">
-                    <label>Base URL</label>
-                    <NInput
-                      :value="store.config.tts_base_url ?? ''"
-                      :placeholder="ttsProvider === 'gpt-sovits' ? 'http://127.0.0.1:9880' : 'https://api.openai.com/v1'"
-                      @update:value="setStr('tts_base_url', $event)"
-                    />
-                  </div>
-                  <div class="form-row">
-                    <label>API Key</label>
-                    <NInput
-                      :value="store.secrets.tts_api_key ?? ''"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="store.config.tts_api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.tts_api_key.masked }) : t('ttsApiKeyOptional')"
-                      @update:value="setSecret('tts_api_key', $event)"
-                    />
-                  </div>
-                  <div v-if="ttsProvider === 'openai-compatible'" class="form-row">
-                    <label>{{ t('model') }}</label>
-                    <NInput :value="store.config.tts_model ?? 'tts-1'" placeholder="tts-1" @update:value="setStr('tts_model', $event)" />
-                  </div>
-                  <div class="form-row">
-                    <label>{{ t('ttsAudioFormat') }}</label>
-                    <select :value="store.config.tts_audio_format ?? 'mp3'" @change="setStr('tts_audio_format', eventValue($event))">
-                      <option value="mp3">MP3</option><option value="wav">WAV</option><option value="opus">Opus</option><option value="flac">FLAC</option><option value="aac">AAC</option>
-                    </select>
-                  </div>
-                  <div class="form-row">
-                    <label>{{ t('ttsCacheSize') }}</label>
-                    <NInputNumber :value="Number(store.config.tts_cache_mb ?? 256)" :min="16" :max="2048" :step="64" @update:value="setNum('tts_cache_mb', $event)" />
-                  </div>
-                  <TtsVoiceProfiles :provider="ttsProvider" @changed="loadTtsVoices" />
-                </template>
-              </div>
-
-              <div class="tts-settings-group">
-                <div class="tts-group-heading">
-                  <div><strong>{{ t('ttsRoleMapping') }}</strong><small>{{ t('ttsRoleMappingHint') }}</small></div>
+                <div class="advanced-row">
+                  <div><strong>{{ t('ttsCacheSize') }}</strong></div>
+                  <NInputNumber :value="Number(store.config.tts_cache_mb ?? 256)" :min="16" :max="2048" :step="64" @update:value="setNum('tts_cache_mb', $event)" />
                 </div>
-                <template v-if="ttsProvider !== 'browser'">
-                <div class="form-row">
-                  <label>{{ t('ttsDefaultVoice') }}</label>
+                <TtsVoiceProfiles :provider="ttsProvider" @changed="loadTtsVoices" />
+              </template>
+
+              <div class="advanced-row tts-subheading-row">
+                <div><strong>{{ t('ttsRoleMapping') }}</strong><small>{{ t('ttsRoleMappingHint') }}</small></div>
+              </div>
+              <template v-if="ttsProvider !== 'browser'">
+                <div class="advanced-row">
+                  <div><strong>{{ t('ttsDefaultVoice') }}</strong></div>
                   <input :value="store.config.tts_default_voice ?? ''" list="diceframe-tts-voices" @input="setStr('tts_default_voice', eventValue($event))" />
                 </div>
                 <datalist id="diceframe-tts-voices">
                   <option v-for="voice in ttsVoiceOptions" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
                 </datalist>
-                <div class="form-row">
-                  <label>{{ t('ttsGmVoice') }}</label>
+                <div class="advanced-row">
+                  <div><strong>{{ t('ttsGmVoice') }}</strong></div>
                   <input :value="store.config.tts_gm_voice ?? ''" list="diceframe-tts-voices" :placeholder="t('ttsFollowDefault')" @input="setStr('tts_gm_voice', eventValue($event))" />
                 </div>
-                <div class="form-row">
-                  <label>{{ t('ttsPlayerVoice') }}</label>
+                <div class="advanced-row">
+                  <div><strong>{{ t('ttsPlayerVoice') }}</strong></div>
                   <input :value="store.config.tts_player_voice ?? ''" list="diceframe-tts-voices" :placeholder="t('ttsFollowDefault')" @input="setStr('tts_player_voice', eventValue($event))" />
                 </div>
-                  <p v-if="ttsProvider === 'gpt-sovits' && !ttsVoiceOptions.length" class="muted">{{ t('ttsGptVoiceHint') }}</p>
-                </template>
-                <p v-else class="muted">{{ t('ttsBrowserVoiceMappingHint') }}</p>
-              </div>
+                <p v-if="ttsProvider === 'gpt-sovits' && !ttsVoiceOptions.length" class="muted tts-inline-hint">{{ t('ttsGptVoiceHint') }}</p>
+              </template>
+              <p v-else class="muted tts-inline-hint">{{ t('ttsBrowserVoiceMappingHint') }}</p>
 
-              <div class="tts-settings-group">
-                <div class="advanced-row">
-                  <div><strong>{{ t('ttsAutoSpeak') }}</strong><small>{{ t('ttsAutoSpeakHint') }}</small></div>
-                  <div class="switch-inline"><NSwitch :value="autoSpeak" @update:value="setAutoSpeak" /><span>{{ t('enabled') }}</span></div>
-                </div>
-                <div class="advanced-row">
-                  <div><strong>{{ t('ttsRate') }}</strong><small>{{ t('ttsRateHint') }}</small></div>
-                  <NInputNumber class="advanced-number" :value="ttsRateValue" :min="0.5" :max="5" :step="0.1" @update:value="setTtsRateValue" />
-                </div>
+              <div class="advanced-row">
+                <div><strong>{{ t('ttsAutoSpeak') }}</strong><small>{{ t('ttsAutoSpeakHint') }}</small></div>
+                <div class="switch-inline"><NSwitch :value="autoSpeak" @update:value="setAutoSpeak" /><span>{{ t('enabled') }}</span></div>
+              </div>
+              <div class="advanced-row">
+                <div><strong>{{ t('ttsRate') }}</strong><small>{{ t('ttsRateHint') }}</small></div>
+                <NInputNumber class="advanced-number" :value="ttsRateValue" :min="0.5" :max="5" :step="0.1" @update:value="setTtsRateValue" />
               </div>
               <footer class="advanced-save-row">
                 <NButton type="primary" @click="saveTts()">{{ t('saveAction') }}</NButton>
