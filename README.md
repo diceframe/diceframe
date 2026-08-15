@@ -8,9 +8,9 @@
 
 <p align="center"><a href="https://github.com/diceframe/diceframe/stargazers"><img src="https://img.shields.io/github/stars/diceframe/diceframe?style=flat-square&logo=github&label=Stars" alt="GitHub Stars"></a> <a href="https://github.com/diceframe/diceframe/releases"><img src="https://img.shields.io/github/v/release/diceframe/diceframe?style=flat-square&logo=github&label=Release" alt="GitHub Release"></a> <a href="https://github.com/diceframe/diceframe/blob/main/LICENSE"><img src="https://img.shields.io/github/license/diceframe/diceframe?style=flat-square&logo=github&label=License" alt="License"></a></p>
 
-<p align="center"><a href="https://diceframe.com">官方网站</a></p>
-
 ![DiceFrame WebUI preview](docs/assets/diceframe-readme-hero.jpg)
+
+<p align="center"><a href="https://diceframe.com">官方网站</a></p>
 
 DiceFrame 是一个可以自己部署的 **ai跑团引擎**，支持 **DND/COC/自定义规则**，**多人 WebUI**。
 
