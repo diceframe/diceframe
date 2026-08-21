@@ -29,7 +29,7 @@ test('two clients establish a direct data channel through Hub signaling', async 
   await expect(host.locator('.peer-message-form')).toHaveCount(0)
   await expect(guest.locator('.peer-message-form')).toHaveCount(0)
 
-  await guest.getByRole('button', { name: '进入直连冒险' }).click()
+  await guest.getByRole('button', { name: '进入冒险' }).click()
   await expect(guest.getByRole('heading', { name: '创建你的角色' })).toBeVisible()
   await guest.getByLabel('角色名').fill('Peer E2E Player')
   await guest.getByRole('button', { name: '创建角色并进入' }).click()

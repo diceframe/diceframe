@@ -1571,7 +1571,7 @@ export const ja = {
   peerConnectionStatus: '接続状態',
   peerConnectedPeers: 'メンバーのリンク',
   peerDisconnect: 'この端末の直接接続を切断',
-  peerEnterGame: '直接接続の冒険に入る',
+  peerEnterGame: '冒険に入る',
   peerBoundary: 'ゲームチャネルは、ホワイトリストに明示されたプレイヤー情報の読み取り、キャラクター作成、行動、幸運と支払いの判定、離席状態、本人のキャラクターカード操作のみを受け付けます。任意の HTTP インターフェースのプロキシは行いません。モデル呼び出しは引き続きホストの端末でのみ実行されます。',
   peerConnectionCheckTitle: 'チャネル状態',
   peerConnectionCheckHint: '接続後、双方がチャネルを自動で維持し、正常に動くかを確認します。',

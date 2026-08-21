@@ -1571,7 +1571,7 @@ export const en = {
   peerConnectionStatus: 'Connection status',
   peerConnectedPeers: 'Member links',
   peerDisconnect: 'Disconnect this client',
-  peerEnterGame: 'Enter direct-connect game',
+  peerEnterGame: 'Enter the adventure',
   peerBoundary: 'The game channel accepts only allowlisted player reads, character creation, actions, luck and payment decisions, away status, and edits to the player\'s own character. It never proxies arbitrary HTTP endpoints. Model calls still run only on the host.',
   peerConnectionCheckTitle: 'Channel status',
   peerConnectionCheckHint: 'Once connected, both sides automatically keep the channel alive and check that it works.',

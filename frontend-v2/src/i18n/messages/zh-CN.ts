@@ -1571,7 +1571,7 @@ export const zhCN = {
   peerConnectionStatus: '连接状态',
   peerConnectedPeers: '成员链路',
   peerDisconnect: '断开本机直连',
-  peerEnterGame: '进入直连冒险',
+  peerEnterGame: '进入冒险',
   peerBoundary: '游戏通道只接受明确列入白名单的玩家读取、建卡、行动、幸运、支付、离开状态和本人角色卡操作；不会代理任意 HTTP 接口。模型调用仍只在房主本机执行。',
   peerConnectionCheckTitle: '通道状态',
   peerConnectionCheckHint: '连上后双方会自动保持通道，并检查它是否工作正常。',
