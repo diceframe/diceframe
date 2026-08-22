@@ -1,5 +1,14 @@
-"""图像生成能力域：provider 插件门面与场景图资产接入。"""
+from .assets import ImageAssetError, ImageAssetStore
+from .contracts import IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult, game_image_owner_id
+from .service import ImageGenerationError, ImageGenerationService
 
-from .service import IMAGEGEN_CAPABILITY, ImageGenError, SceneImageGenerator
-
-__all__ = ["IMAGEGEN_CAPABILITY", "ImageGenError", "SceneImageGenerator"]
+__all__ = [
+    "IMAGE_PURPOSES",
+    "ImageAssetError",
+    "ImageAssetStore",
+    "ImageGenerationError",
+    "ImageGenerationRequest",
+    "ImageGenerationResult",
+    "ImageGenerationService",
+    "game_image_owner_id",
+]

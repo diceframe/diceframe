@@ -2,7 +2,7 @@
 
 服务商元数据（名称/Base URL/api 格式）是普通配置，API Key 以
 `ai_provider_key_<id>` 的扁平 secret 形式存储，随现有 secrets.json 管线落盘。
-各能力（LLM 主/备、embedding、TTS、ASR）通过 `*_provider_ref` 引用服务商；
+各能力（LLM 主/备、embedding、TTS、ASR、生图）通过 `*_provider_ref` 引用服务商；
 引用为空时回退既有的内联配置键，保证旧配置零改动。
 """
 
@@ -17,7 +17,7 @@ _PROVIDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # 引用键 → 能力侧的运行时重建分组（与 config_update 的两个 frozenset 对应）
 PROVIDER_REF_KEYS = frozenset({
     "llm_provider_ref", "fallback1_provider_ref", "fallback2_provider_ref",
-    "embedding_provider_ref", "tts_provider_ref", "asr_provider_ref",
+    "embedding_provider_ref", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
 })
 
 

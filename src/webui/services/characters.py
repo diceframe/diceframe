@@ -404,6 +404,11 @@ def _validated_portrait(api: "WebAPI", portrait: Any) -> dict[str, str] | None:
         if not asset_id or api.avatar_file(asset_id) is None:
             raise ValueError("上传头像不存在")
         return {"kind": "upload", "asset_id": asset_id}
+    if kind == "generated":
+        asset_id = str(portrait.get("asset_id") or "")
+        if not asset_id or api.generated_image_file(asset_id) is None:
+            raise ValueError("生成头像不存在")
+        return {"kind": "generated", "asset_id": asset_id}
     raise ValueError("头像类型无效")
 
 

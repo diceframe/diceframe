@@ -1,8 +1,8 @@
 """Small synchronous SDK for DiceFrame ``provider`` process plugins.
 
-Provider 插件以 capability 为单位对外提供能力（如 ``image-generation``）。
+Provider 插件以 capability 为单位对外提供能力（如 ``text-transform``）。
 宿主通过 ``provider.request``（capability + 方法别名）调用；插件进程内同步
-处理请求，一次一张图等慢操作无需并发。
+处理请求，适合封装独立的外部服务能力。
 """
 
 from __future__ import annotations

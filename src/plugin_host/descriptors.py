@@ -105,8 +105,8 @@ def validate_bridge_extension_descriptors(initialized: Any) -> list[dict[str, An
 def validate_provider_capabilities(initialized: Any) -> list[dict[str, Any]]:
     """校验 provider 插件 initialize 返回的 capabilities 声明。
 
-    每个 capability 形如 {"kind": "image-generation", "version": 1,
-    "methods": {"generate": "provider.image.generate"}}；kind 即能力命名空间，
+    每个 capability 形如 {"kind": "text-transform", "version": 1,
+    "methods": {"generate": "provider.text-transform.generate"}}；kind 即能力命名空间，
     methods 的键是宿主侧别名（如 generate），值是插件侧 RPC 方法名。
     """
     if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:

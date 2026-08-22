@@ -40,6 +40,7 @@ export function mapBackgroundChoice(selection?: MapBackgroundSelection | null): 
   if (selection.kind === 'builtin') return `builtin:${selection.id || ''}`
   if (selection.kind === 'plugin') return `plugin-map:${selection.map_id || ''}`
   if (selection.kind === 'upload') return `upload:${selection.asset_id || ''}`
+  if (selection.kind === 'generated') return `generated:${selection.asset_id || ''}`
   return 'auto'
 }
 
@@ -48,6 +49,7 @@ export function mapBackgroundSelection(choice: string): MapBackgroundSelection {
   if (choice.startsWith('builtin:')) return { kind: 'builtin', id: choice.slice('builtin:'.length) }
   if (choice.startsWith('plugin-map:')) return { kind: 'plugin', map_id: choice.slice('plugin-map:'.length) }
   if (choice.startsWith('upload:')) return { kind: 'upload', asset_id: choice.slice('upload:'.length) }
+  if (choice.startsWith('generated:')) return { kind: 'generated', asset_id: choice.slice('generated:'.length) }
   return { kind: 'auto' }
 }
 

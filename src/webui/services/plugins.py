@@ -793,6 +793,12 @@ def _materialize_content_portrait(api: "WebAPI", resource: dict[str, Any]) -> di
             return result
         result.pop("portrait", None)
         return result
+    if kind == "generated":
+        asset_id = str(portrait.get("asset_id") or "")
+        if asset_id and api.generated_image_file(asset_id):
+            return result
+        result.pop("portrait", None)
+        return result
     if kind != "plugin":
         result.pop("portrait", None)
         return result
@@ -838,6 +844,8 @@ def _package_portrait(
     source: Path | None = None
     if kind == "upload":
         source = api.avatar_file(str(portrait.get("asset_id") or ""))
+    elif kind == "generated":
+        source = api.generated_image_file(str(portrait.get("asset_id") or ""))
     elif kind == "plugin":
         plugin_id = str(portrait.get("plugin_id") or "")
         if plugin_id:
@@ -885,7 +893,7 @@ def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -
         "source_plugin": plugin_id,
     }
     portrait = resource.get("portrait")
-    if isinstance(portrait, dict) and portrait.get("kind") in {"builtin", "upload"}:
+    if isinstance(portrait, dict) and portrait.get("kind") in {"builtin", "upload", "generated"}:
         entry["portrait"] = dict(portrait)
     return entry
 

@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import type { SceneGalleryItem } from '@/api/types'
 import { errorMessage } from '@/api/client'
-import { fetchSceneGallery, setMapBackgroundFromScene } from '@/api/sceneImages'
+import { fetchGeneratedImages, useGeneratedImageAsMapBackground } from '@/api/generatedImages'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
@@ -38,7 +38,7 @@ async function reload() {
   if (!props.gameKey) return
   loading.value = true
   try {
-    items.value = await fetchSceneGallery(props.gameKey)
+    items.value = await fetchGeneratedImages(props.gameKey, 'scene')
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
   } finally {
@@ -50,7 +50,7 @@ async function applyAsBackground(item: SceneGalleryItem) {
   if (!props.gameKey || applyingId.value) return
   applyingId.value = item.asset_id
   try {
-    await setMapBackgroundFromScene(props.gameKey, item.asset_id)
+    await useGeneratedImageAsMapBackground(props.gameKey, item.asset_id)
     toast.success(t('mapBackgroundSet'))
     emit('backgroundSaved')
   } catch (cause: unknown) {
@@ -67,9 +67,9 @@ async function applyAsBackground(item: SceneGalleryItem) {
     <p v-else-if="error" class="scene-gallery-hint scene-gallery-error">{{ error }}</p>
     <p v-else-if="!items.length" class="scene-gallery-hint">{{ t('sceneGalleryEmpty') }}</p>
     <div v-else class="scene-gallery-grid" data-testid="scene-gallery">
-      <div v-for="item in items" :key="item.asset_id" class="scene-gallery-item">
-        <div class="scene-gallery-round">{{ t('roundDivider', { round: item.round }) }}</div>
-        <SceneImageBlock :asset-id="item.asset_id" :alt="item.prompt || ''" />
+      <div v-for="item in items" :key="item.generation_id" class="scene-gallery-item">
+        <div v-if="item.round" class="scene-gallery-round">{{ t('roundDivider', { round: item.round }) }}</div>
+        <SceneImageBlock :asset-id="item.asset_id" :game-key="gameKey" :alt="item.prompt || ''" />
         <p v-if="item.prompt" class="scene-gallery-prompt">{{ item.prompt }}</p>
         <button
           v-if="isGm"

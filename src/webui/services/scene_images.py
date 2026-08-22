@@ -92,6 +92,11 @@ def validate_scene_image_ref(api: "WebAPI", reference: Any) -> dict[str, str]:
         if not scene_image_file(api, asset_id):
             raise ValueError("上传的冒险头图不存在")
         return {"kind": "upload", "asset_id": asset_id}
+    if kind == "generated":
+        asset_id = str(reference.get("asset_id") or "").strip()
+        if not api.generated_image_file(asset_id):
+            raise ValueError("生成的冒险头图不存在")
+        return {"kind": "generated", "asset_id": asset_id}
     if kind == "plugin":
         plugin_id = str(reference.get("plugin_id") or "").strip()
         relative_path = str(reference.get("path") or "").replace("\\", "/").strip("/")
@@ -151,6 +156,8 @@ def resolve_scene_image_file(api: "WebAPI", reference: Any) -> Path | None:
         return builtin_scene_image_file(normalized["id"])
     if normalized["kind"] == "upload":
         return scene_image_file(api, normalized["asset_id"])
+    if normalized["kind"] == "generated":
+        return api.generated_image_file(normalized["asset_id"])
     return api.plugin_asset_path(normalized["plugin_id"], normalized["path"])
 
 

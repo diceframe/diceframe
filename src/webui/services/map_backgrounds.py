@@ -43,6 +43,11 @@ def validate_map_background_selection(api: "WebAPI", selection: Any) -> dict[str
         if map_background_file(api, asset_id) is None:
             raise ValueError("上传的地图背景不存在")
         return {"kind": "upload", "asset_id": asset_id}
+    if kind == "generated":
+        asset_id = str(selection.get("asset_id") or "").strip()
+        if api.generated_image_file(asset_id) is None:
+            raise ValueError("生成的地图背景不存在")
+        return {"kind": "generated", "asset_id": asset_id}
     if kind == "plugin":
         map_id = str(selection.get("map_id") or "").strip()
         if not map_id or len(map_id) > 256 or not map_id.startswith("plugin:"):
@@ -92,9 +97,11 @@ def resolve_map_background_file(api: "WebAPI", selection: Any) -> Path | None:
         normalized = validate_map_background_selection(api, selection)
     except ValueError:
         return None
-    if normalized["kind"] != "upload":
-        return None
-    return map_background_file(api, normalized["asset_id"])
+    if normalized["kind"] == "upload":
+        return map_background_file(api, normalized["asset_id"])
+    if normalized["kind"] == "generated":
+        return api.generated_image_file(normalized["asset_id"])
+    return None
 
 
 def _normalized_map_background(raw: bytes) -> bytes:

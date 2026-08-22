@@ -327,6 +327,7 @@ const modelRoutingSaving = ref(false)
 
 const providerLibrarySupported = computed(() => Object.prototype.hasOwnProperty.call(store.config, 'ai_providers'))
 const savedProviderIds = computed(() => new Set((store.config.ai_providers || []).map(p => p.id)))
+const openAiProviders = computed(() => (store.config.ai_providers || []).filter(p => p.api_format === 'openai'))
 const filteredProviderDrafts = computed(() => {
   const query = providerSearch.value.trim().toLowerCase()
   if (!query) return providerDrafts.value
@@ -609,6 +610,9 @@ const MODEL_ROUTING_CONFIG_KEYS = [
   'embedding_provider_ref', 'embedding_model',
   'tts_provider', 'tts_provider_ref', 'tts_model',
   'asr_provider', 'asr_provider_ref', 'asr_model',
+  'imagegen_enabled', 'imagegen_auto_scene', 'imagegen_provider_ref', 'imagegen_model',
+  'imagegen_square_size', 'imagegen_landscape_size', 'imagegen_quality',
+  'imagegen_style_prefix', 'imagegen_timeout_seconds',
 ]
 
 async function saveModelRouting() {
@@ -1457,6 +1461,18 @@ function redownloadUpdatePackage() {
                 <header><NIcon :component="CubeOutline" /><div><h4>{{ t('modelRoleEmbedding') }}</h4><p>{{ t('modelRoleEmbeddingHint') }}</p></div></header>
                 <label><span>{{ t('providerName') }}</span><select :value="store.config.embedding_provider_ref || ''" @change="setModelRoleProvider('embedding_provider_ref', 'embedding_model', eventValue($event), 'embedding')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in store.config.ai_providers || []" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
                 <label><span>{{ t('model') }}</span><select :value="store.config.embedding_model || ''" :disabled="!store.config.embedding_provider_ref" @change="setStr('embedding_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.embedding_provider_ref || ''), 'embedding')" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+              </article>
+
+              <article class="model-role-card">
+                <header><NIcon :component="ImageOutline" /><div><h4>{{ t('modelRoleImagegen') }}</h4><p>{{ t('modelRoleImagegenHint') }}</p></div></header>
+                <label class="model-role-enabled"><span>{{ t('enabled') }}</span><NSwitch :value="!!store.config.imagegen_enabled" @update:value="setBool('imagegen_enabled', $event)" /></label>
+                <label class="model-role-enabled"><span>{{ t('imagegenAutoScene') }}</span><NSwitch :value="!!store.config.imagegen_auto_scene" :disabled="!store.config.imagegen_enabled" @update:value="setBool('imagegen_auto_scene', $event)" /></label>
+                <label><span>{{ t('providerName') }}</span><select :value="store.config.imagegen_provider_ref || ''" :disabled="!store.config.imagegen_enabled" @change="setModelRoleProvider('imagegen_provider_ref', 'imagegen_model', eventValue($event), 'image')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in openAiProviders" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
+                <label><span>{{ t('model') }}</span><select :value="store.config.imagegen_model || ''" :disabled="!store.config.imagegen_enabled || !store.config.imagegen_provider_ref" @change="setStr('imagegen_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.imagegen_provider_ref || ''), 'image')" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+                <label><span>{{ t('imagegenStylePrefix') }}</span><NInput :value="String(store.config.imagegen_style_prefix || '')" :disabled="!store.config.imagegen_enabled" @update:value="setStr('imagegen_style_prefix', $event)" /></label>
+                <label><span>{{ t('imagegenSquareSize') }}</span><NInput :value="String(store.config.imagegen_square_size || '1024x1024')" :disabled="!store.config.imagegen_enabled" @update:value="setStr('imagegen_square_size', $event)" /></label>
+                <label><span>{{ t('imagegenLandscapeSize') }}</span><NInput :value="String(store.config.imagegen_landscape_size || '1792x1024')" :disabled="!store.config.imagegen_enabled" @update:value="setStr('imagegen_landscape_size', $event)" /></label>
+                <label><span>{{ t('imagegenTimeout') }}</span><NInputNumber :value="Number(store.config.imagegen_timeout_seconds || 120)" :min="5" :max="300" :disabled="!store.config.imagegen_enabled" @update:value="setNum('imagegen_timeout_seconds', $event)" /></label>
               </article>
 
               <article class="model-role-card">

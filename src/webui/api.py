@@ -715,6 +715,11 @@ class WebAPI:
     def delete_avatar(self, asset_id: str) -> dict[str, Any]:
         return avatars.delete_avatar(self, asset_id)
 
+    def generated_image_file(self, asset_id: str) -> Path | None:
+        if self._imagegen is None:
+            return None
+        return self._imagegen.assets.file(asset_id)
+
     def save_scene_image_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
         return scene_images.save_scene_image_upload(self, file_data, file_name)
 

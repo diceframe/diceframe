@@ -105,4 +105,25 @@ describe('GameTimeline',()=>{
     expect(card.text()).toContain('<b>This stays plain text.</b>')
     expect(card.find('b').exists()).toBe(false)
   })
+
+  it('renders generated scene images through the game-scoped component',()=>{
+    const wrapper=mount(GameTimeline,{global:{plugins:[i18n],stubs:{SceneImageBlock:{
+      props:['assetId','gameKey'],
+      template:'<div data-testid="generated-scene" :data-asset-id="assetId" :data-game-key="gameKey" />',
+    }}},props:{
+      gameKey:'web|room|bot',round:2,players:[],live:[],log:[{
+        round:1,
+        gm_response:'The harbor emerges from the fog.',
+        scene_image:{
+          status:'ready',
+          prompt:'misty harbor',
+          reference:{kind:'generated',asset_id:'asset-1'},
+        },
+      }],
+    }})
+
+    const image=wrapper.get('[data-testid="generated-scene"]')
+    expect(image.attributes('data-asset-id')).toBe('asset-1')
+    expect(image.attributes('data-game-key')).toBe('web|room|bot')
+  })
 })

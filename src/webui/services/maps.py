@@ -54,7 +54,10 @@ def get_map_locations(api: "WebAPI", game_key: str) -> dict[str, Any]:
         game_key,
         automatic_map,
         selection,
-        lambda asset_id: api.map_background_file(asset_id) is not None,
+        lambda asset_id: (
+            api.map_background_file(asset_id) is not None
+            or api.generated_image_file(asset_id) is not None
+        ),
     )
     return {
         "schema_version": 1,
@@ -117,8 +120,10 @@ def map_background_asset(api: "WebAPI", game_key: str, asset_id: str) -> Path | 
         )
     except ValueError:
         return None
-    if selection.get("kind") != "upload" or selection.get("asset_id") != asset_id:
+    if selection.get("kind") not in {"upload", "generated"} or selection.get("asset_id") != asset_id:
         return None
+    if selection.get("kind") == "generated":
+        return api.generated_image_file(asset_id)
     return api.map_background_file(asset_id)
 
 

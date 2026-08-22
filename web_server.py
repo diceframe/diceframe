@@ -27,7 +27,7 @@ from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.template_catalog import sync_template_catalog
 from src.tts import SpeechService
 from src.asr import AsrService
-from src.imagegen import SceneImageGenerator
+from src.imagegen import ImageGenerationService
 from src.webui.access_password import (
     consume_reset_password,
     hash_access_password,
@@ -73,7 +73,7 @@ from src.webui.routes.system import register_system
 from src.webui.routes.updater import register_updater
 from src.webui.routes.speech import register_speech
 from src.webui.routes.asr import register_asr
-from src.webui.routes.imagegen import register_imagegen
+from src.webui.routes.generated_images import register_generated_images
 from src.webui.services import updater as updater_svc
 from src.webui.services import legal as legal_svc
 
@@ -185,6 +185,7 @@ FALLBACK1_API_KEY = secrets.get("fallback1_api_key") or ""
 FALLBACK2_API_KEY = secrets.get("fallback2_api_key") or ""
 TTS_API_KEY = os.getenv("TRPG_TTS_API_KEY") or secrets.get("tts_api_key") or ""
 ASR_API_KEY = os.getenv("TRPG_ASR_API_KEY") or secrets.get("asr_api_key") or ""
+IMAGEGEN_API_KEY = os.getenv("TRPG_IMAGEGEN_API_KEY") or secrets.get("imagegen_api_key") or ""
 ACCESS_TOKEN = next((
     password for password in (
         normalize_access_password(os.getenv("TRPG_ACCESS_TOKEN")),
@@ -240,6 +241,7 @@ STATE = {
     "embedding_provider_ref": str(saved.get("embedding_provider_ref", "")),
     "tts_provider_ref": str(saved.get("tts_provider_ref", "")),
     "asr_provider_ref": str(saved.get("asr_provider_ref", "")),
+    "imagegen_provider_ref": str(saved.get("imagegen_provider_ref", "")),
     **{key: str(value or "") for key, value in secrets.items() if is_provider_secret_key(key)},
     "embedding_enabled": EMB_ENABLED, "embedding_base_url": EMB_BASE_URL,
     "embedding_model": EMB_MODEL, "embedding_api_key": EMB_API_KEY,
@@ -268,6 +270,17 @@ STATE = {
     "asr_api_key": ASR_API_KEY,
     "asr_model": str(os.getenv("TRPG_ASR_MODEL") or saved.get("asr_model", "whisper-1")),
     "asr_timeout_seconds": float(saved.get("asr_timeout_seconds", 60)),
+    "imagegen_enabled": bool(saved.get("imagegen_enabled", False)),
+    "imagegen_auto_scene": bool(saved.get("imagegen_auto_scene", True)),
+    "imagegen_provider": "openai-compatible",
+    "imagegen_base_url": str(os.getenv("TRPG_IMAGEGEN_BASE_URL") or saved.get("imagegen_base_url", "")),
+    "imagegen_api_key": IMAGEGEN_API_KEY,
+    "imagegen_model": str(os.getenv("TRPG_IMAGEGEN_MODEL") or saved.get("imagegen_model", "")),
+    "imagegen_square_size": str(saved.get("imagegen_square_size", "1024x1024")),
+    "imagegen_landscape_size": str(saved.get("imagegen_landscape_size", "1792x1024")),
+    "imagegen_quality": str(saved.get("imagegen_quality", "")),
+    "imagegen_style_prefix": str(saved.get("imagegen_style_prefix", "")),
+    "imagegen_timeout_seconds": float(saved.get("imagegen_timeout_seconds", 120)),
     "narrative_max_tokens": NARRATIVE_MAX_TOKENS,
     "character_gen_max_tokens": CHARACTER_GEN_MAX_TOKENS,
     "summary_max_tokens": SUMMARY_MAX_TOKENS,
@@ -334,7 +347,7 @@ def _mask_secret(value: str) -> dict:
 
 def _public_config() -> dict:
     public = {k: v for k, v in STATE.items()
-              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
+              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "imagegen_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
               and not is_provider_secret_key(k)}
     public["ai_providers"] = [
         {**entry, "api_key": _mask_secret(STATE.get(provider_secret_key(entry["id"]), ""))}
@@ -346,6 +359,7 @@ def _public_config() -> dict:
     public["fallback2_api_key"] = _mask_secret(STATE.get("fallback2_api_key", ""))
     public["tts_api_key"] = _mask_secret(STATE.get("tts_api_key", ""))
     public["asr_api_key"] = _mask_secret(STATE.get("asr_api_key", ""))
+    public["imagegen_api_key"] = _mask_secret(STATE.get("imagegen_api_key", ""))
     public["access_password"] = mask_access_password(STATE.get("access_token", ""))
     public["bot_token"] = _mask_secret(STATE.get("bot_token", ""))
     public["bot_token_source"] = "env" if os.getenv("TRPG_BOT_TOKEN") else "generated"
@@ -366,11 +380,11 @@ def _public_config() -> dict:
 
 def save_config():
     non_sensitive = {k: v for k, v in STATE.items()
-                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")
+                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "imagegen_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")
                      and not is_provider_secret_key(k)}
     _atomic_write_json(CONFIG_FILE, non_sensitive)
     sensitive = {k: v for k, v in STATE.items()
-                 if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
+                 if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "imagegen_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
                  or is_provider_secret_key(k)}
     sensitive = {k: v for k, v in sensitive.items()
                  if not (k == "access_token" and os.getenv("TRPG_ACCESS_TOKEN"))}
@@ -508,8 +522,8 @@ def _build_subsystems(
     )
 
 
-def _config_with_resolved_speech_refs(config: dict) -> dict:
-    """把 TTS/ASR 的服务商引用解析进 tts_*/asr_* 键，Speech/Asr 服务保持零感知。"""
+def _config_with_resolved_api_refs(config: dict) -> dict:
+    """Resolve shared provider references into capability-specific runtime keys."""
     resolved = dict(config)
     tts_provider = resolve_provider(config, config.get("tts_provider_ref", ""))
     if tts_provider:
@@ -519,14 +533,18 @@ def _config_with_resolved_speech_refs(config: dict) -> dict:
     if asr_provider:
         resolved["asr_base_url"] = asr_provider["base_url"]
         resolved["asr_api_key"] = asr_provider["api_key"]
+    imagegen_provider = resolve_provider(config, config.get("imagegen_provider_ref", ""))
+    if imagegen_provider and imagegen_provider.get("api_format") == "openai":
+        resolved["imagegen_base_url"] = imagegen_provider["base_url"]
+        resolved["imagegen_api_key"] = imagegen_provider["api_key"]
     return resolved
 
 
 def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None = None, hub_client=None) -> WebAPI:
     runtime_config = STATE if config is None else config
-    speech_config = _config_with_resolved_speech_refs(runtime_config)
+    api_config = _config_with_resolved_api_refs(runtime_config)
     speech_service = SpeechService(
-        speech_config,
+        api_config,
         DATA_DIR / "tts-cache",
         proxy_url=effective_proxy_url(
             bool(runtime_config.get("proxy_enabled")),
@@ -534,16 +552,20 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None 
         ),
     )
     asr_service = AsrService(
-        speech_config,
+        api_config,
         proxy_url=effective_proxy_url(
             bool(runtime_config.get("proxy_enabled")),
             runtime_config.get("proxy_url", ""),
         ),
     )
-    # 场景图资产目录与 WebAPI._scene_images_dir 同源（save_dir.parent / "scene-images"）
-    imagegen_service = SceneImageGenerator(plugin_host, DATA_DIR / "scene-images")
-    if plugin_host is not None and getattr(subsystems, "handler", None) is not None:
-        subsystems.handler.set_scene_image_generator(imagegen_service)
+    imagegen_service = ImageGenerationService(
+        api_config,
+        DATA_DIR / "generated-images",
+        proxy_url=effective_proxy_url(
+            bool(runtime_config.get("proxy_enabled")),
+            runtime_config.get("proxy_url", ""),
+        ),
+    )
     api = WebAPI(
         registry=subsystems.registry, lorebook=subsystems.lorebook_store,
         memory=subsystems.memory_store, rules_dir=RULES_DIR,
@@ -563,6 +585,12 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None 
     # 持久化回调：service 层更新 public_base_url 后走标准写盘路径（见 services/tunnel.py）
     api._save_config = save_config
     return api
+
+
+def _activate_api_runtime(subsystems: TRPGSubsystems, api: WebAPI) -> None:
+    handler = getattr(subsystems, "handler", None)
+    if handler is not None and hasattr(handler, "set_image_generation_service"):
+        handler.set_image_generation_service(getattr(api, "_imagegen", None))
 
 
 async def _periodic_save(app: web.Application):
@@ -686,6 +714,7 @@ async def on_startup(app: web.Application) -> None:
         })
     app["plugin_host"] = plugin_host
     app["api"] = _make_api(subsystems, plugin_host, hub_client=hub_client)
+    _activate_api_runtime(subsystems, app["api"])
     app["updater"] = updater_svc.UpdaterService(DATA_DIR, ROOT, plugin_host.mirrors if plugin_host else None)
     recovered = await subsystems.registry.recover_all()
     if recovered:
@@ -895,9 +924,9 @@ def _share_player_user_id(request: web.Request) -> str:
         return uid or request.get("user_id", "")
     if len(parts) >= 4:
         tail = parts[3]
-        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context", "avatars", "scene-image", "map-background-asset"}:
+        if request.method == "GET" and tail in {"characters", "character-cards", "log", "private-log", "multiplayer", "sse", "map", "player-context", "avatars", "scene-image", "map-background-asset", "generated-images"}:
             return uid or request.get("user_id", "")
-        if request.method == "POST" and tail in {"players", "action", "sse-ticket", "avatars", "scene-image"}:
+        if request.method == "POST" and tail in {"players", "action", "sse-ticket", "avatars", "scene-image", "generated-images"}:
             return uid or request.get("user_id", "")
         if (
             request.method == "POST"
@@ -1025,9 +1054,11 @@ async def _apply_config_update(request: web.Request, body: dict) -> web.Response
             logger.exception("AI 服务商插件重启失败")
 
     if model_runtime_changed and subsystems is not None:
+        _activate_api_runtime(subsystems, new_api)
         request.app["subsystems"] = subsystems
         request.app["api"] = new_api
     elif api_runtime_changed and new_api is not None:
+        _activate_api_runtime(old_subs, new_api)
         request.app["api"] = new_api
 
     if model_runtime_changed and old_subs is not None and subsystems is not None:
@@ -1294,7 +1325,7 @@ def register_routes(application: web.Application) -> None:
     register_updater(application)
     register_speech(application)
     register_asr(application)
-    register_imagegen(application)
+    register_generated_images(application)
     # worlds / lorebook
     register_worlds(application)
     # rules

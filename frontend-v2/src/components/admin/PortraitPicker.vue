@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { CharacterPortrait } from '@/api/types'
 import { uploadAvatar, listUserAvatars, deleteUserAvatar, type UserAvatar } from '@/api/avatars'
+import { generateImage } from '@/api/generatedImages'
 import { builtinPortraits, builtinRule, resolveBuiltinPortrait } from '@/utils/portraits'
 import type { MessageKey } from '@/i18n'
 import { useLocale } from '@/composables/useLocale'
@@ -21,6 +22,8 @@ const allOpen = ref(false)
 const userOpen = ref(false)
 const userAvatars = ref<UserAvatar[]>([])
 const userLoading = ref(false)
+const generationPrompt = ref('')
+const generating = ref(false)
 const choices = computed(() => builtinPortraits(props.ruleId))
 const resolvedId = computed(() => {
   // 未显式选择头像时不高亮任何选项（也不自动分配兜底）。
@@ -121,6 +124,35 @@ async function removeUserAvatar(assetId: string) {
     toast.error(error instanceof Error ? error.message : String(error))
   }
 }
+
+function currentGameKey(): string {
+  return new URLSearchParams(location.hash.split('?')[1] || '').get('game') || ''
+}
+
+async function generatePortrait() {
+  if (generating.value) return
+  const subject = generationPrompt.value.trim() || [props.name, props.ruleId].filter(Boolean).join(', ')
+  if (!subject) {
+    toast.error(t('imagePromptRequired'))
+    return
+  }
+  generating.value = true
+  try {
+    const result = await generateImage({
+      purpose: 'avatar',
+      prompt: subject,
+      gameKey: currentGameKey() || undefined,
+      aspectRatio: '1:1',
+      context: { character_name: props.name || '', rule_id: props.ruleId || '' },
+    })
+    emit('update:modelValue', { kind: 'generated', asset_id: result.asset_id })
+    toast.success(t('avatarGenerated'))
+  } catch (error: unknown) {
+    toast.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    generating.value = false
+  }
+}
 </script>
 
 <template>
@@ -128,6 +160,10 @@ async function removeUserAvatar(assetId: string) {
     <div class="portrait-picker-head">
       <div><strong>{{ t('characterAvatar') }}</strong><small>{{ t('avatarHelp') }}</small></div>
       <PortraitImage :portrait="modelValue" :rule-id="ruleId" :seed="seed" :name="name" :size="64" />
+    </div>
+    <div class="image-generation-row">
+      <input v-model="generationPrompt" :placeholder="t('avatarGenerationPrompt')" @keydown.enter.prevent="generatePortrait">
+      <button type="button" class="primary" :disabled="generating" @click="generatePortrait">{{ generating ? t('generatingEllipsis') : t('generateAvatar') }}</button>
     </div>
     <div class="portrait-options">
       <button

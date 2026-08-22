@@ -31,20 +31,21 @@ def apply_background_selection(
             fallback=preset,
             fallback_name=str(preset["name"]),
         )
-    if kind == "upload":
+    if kind in {"upload", "generated"}:
         asset_id = selection.get("asset_id", "")
         if not upload_exists(asset_id):
             return automatic_map
+        generated = kind == "generated"
         background = {
             "id": asset_id,
-            "ref": f"upload:map-background:{asset_id}",
-            "name": "自定义地图背景",
+            "ref": f"{kind}:map-background:{asset_id}",
+            "name": "生成地图背景" if generated else "自定义地图背景",
             "url": f"/api/games/{game_key}/map-background-asset/{asset_id}",
         }
         return _map_with_background(
             automatic_map,
             background,
-            fallback_name="自定义地图背景",
+            fallback_name="生成地图背景" if generated else "自定义地图背景",
         )
     return automatic_map
 
@@ -78,11 +79,12 @@ def background_options(
             "url": public["background"].get("url", ""),
             "selection": {"kind": "plugin", "map_id": public["id"]},
         })
-    if selection["kind"] == "upload":
+    if selection["kind"] in {"upload", "generated"}:
+        kind = selection["kind"]
         options.append({
-            "id": f"upload:{selection.get('asset_id', '')}",
-            "kind": "upload",
-            "name": "当前上传背景",
+            "id": f"{kind}:{selection.get('asset_id', '')}",
+            "kind": kind,
+            "name": "当前生成背景" if kind == "generated" else "当前上传背景",
             "selection": dict(selection),
         })
     return options

@@ -162,6 +162,30 @@ def test_config_update_degrades_speech_engines_when_provider_deleted():
     assert prepared.state["asr_provider"] == "disabled"
 
 
+def test_config_update_disables_imagegen_when_provider_deleted():
+    current = _state(
+        ai_providers=[_provider()],
+        imagegen_enabled=True,
+        imagegen_provider_ref="sf",
+        imagegen_base_url="",
+        imagegen_model="image-model",
+    )
+
+    prepared = prepare_config_update(current, {"ai_providers": []})
+
+    assert prepared.error == ""
+    assert prepared.state["imagegen_provider_ref"] == ""
+    assert prepared.state["imagegen_enabled"] is False
+
+
+def test_config_update_rejects_anthropic_imagegen_provider():
+    current = _state(ai_providers=[_provider(api_format="anthropic")])
+
+    prepared = prepare_config_update(current, {"imagegen_provider_ref": "sf"})
+
+    assert prepared.error == "图像生成仅支持 OpenAI 兼容服务商"
+
+
 def test_config_update_keeps_speech_engine_when_inline_base_url_remains():
     current = _state(
         ai_providers=[_provider()],
@@ -262,7 +286,7 @@ def test_build_subsystems_fallback_ref_does_not_leak_inline_key(monkeypatch):
     assert fallback.api_key == ""  # 服务商 key 未配置时不回退别家内联 key
 
 
-def test_make_api_resolves_tts_and_asr_refs(monkeypatch):
+def test_make_api_resolves_tts_asr_and_imagegen_refs(monkeypatch):
     captured = {}
 
     class FakeSpeechService:
@@ -273,17 +297,24 @@ def test_make_api_resolves_tts_and_asr_refs(monkeypatch):
         def __init__(self, config, proxy_url=""):
             captured["asr"] = config
 
+    class FakeImageGenerationService:
+        def __init__(self, config, assets_dir, proxy_url=""):
+            captured["imagegen"] = config
+
     class FakeWebAPI:
         def __init__(self, **kwargs):
             pass
 
     monkeypatch.setattr(web_server, "SpeechService", FakeSpeechService)
     monkeypatch.setattr(web_server, "AsrService", FakeAsrService)
+    monkeypatch.setattr(web_server, "ImageGenerationService", FakeImageGenerationService)
     monkeypatch.setattr(web_server, "WebAPI", FakeWebAPI)
     config = _state(
         proxy_enabled=False, proxy_url="",
         tts_provider="openai-compatible", tts_base_url="", tts_api_key="", tts_provider_ref="sf",
         asr_provider="openai-compatible", asr_base_url="", asr_api_key="", asr_provider_ref="sf",
+        imagegen_enabled=True, imagegen_provider="openai-compatible",
+        imagegen_base_url="", imagegen_api_key="", imagegen_provider_ref="sf", imagegen_model="image-model",
         ai_providers=[_provider()],
         **{provider_secret_key("sf"): "sk-sf"},
     )
@@ -297,6 +328,8 @@ def test_make_api_resolves_tts_and_asr_refs(monkeypatch):
     assert captured["speech"]["tts_api_key"] == "sk-sf"
     assert captured["asr"]["asr_base_url"] == "https://api.siliconflow.cn/v1"
     assert captured["asr"]["asr_api_key"] == "sk-sf"
+    assert captured["imagegen"]["imagegen_base_url"] == "https://api.siliconflow.cn/v1"
+    assert captured["imagegen"]["imagegen_api_key"] == "sk-sf"
 
 
 def test_public_config_masks_provider_secrets(monkeypatch):
@@ -368,3 +401,56 @@ async def test_provider_secret_change_rebuilds_model_and_api_runtimes(monkeypatc
     assert response.status == 200
     assert built_configs and built_configs[0][provider_secret_key("sf")] == "sk-rotated"
     assert app["subsystems"] is new_runtime
+
+
+@pytest.mark.asyncio
+async def test_imagegen_runtime_is_not_activated_when_config_save_fails(monkeypatch):
+    activated = []
+
+    class Handler:
+        def set_image_generation_service(self, service):
+            activated.append(service)
+
+    runtime = _runtime()
+    runtime.handler = Handler()
+    old_api = SimpleNamespace(_imagegen="old-imagegen")
+    candidate_api = SimpleNamespace(_imagegen="candidate-imagegen")
+    app = {"subsystems": runtime, "api": old_api, "plugin_host": None}
+
+    monkeypatch.setattr(web_server, "_make_api", lambda *args, **kwargs: candidate_api)
+    monkeypatch.setattr(web_server, "save_config", lambda: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setitem(web_server.STATE, "imagegen_auto_scene", True)
+
+    response = await web_server.api_config_post(
+        _ConfigRequest({"imagegen_auto_scene": False}, app),
+    )
+
+    assert response.status == 500
+    assert activated == []
+    assert app["api"] is old_api
+
+
+@pytest.mark.asyncio
+async def test_imagegen_runtime_activates_after_config_save(monkeypatch):
+    activated = []
+
+    class Handler:
+        def set_image_generation_service(self, service):
+            activated.append(service)
+
+    runtime = _runtime()
+    runtime.handler = Handler()
+    candidate_api = SimpleNamespace(_imagegen="candidate-imagegen")
+    app = {"subsystems": runtime, "api": SimpleNamespace(_imagegen="old-imagegen"), "plugin_host": None}
+
+    monkeypatch.setattr(web_server, "_make_api", lambda *args, **kwargs: candidate_api)
+    monkeypatch.setattr(web_server, "save_config", lambda: None)
+    monkeypatch.setitem(web_server.STATE, "imagegen_auto_scene", True)
+
+    response = await web_server.api_config_post(
+        _ConfigRequest({"imagegen_auto_scene": False}, app),
+    )
+
+    assert response.status == 200
+    assert activated == ["candidate-imagegen"]
+    assert app["api"] is candidate_api

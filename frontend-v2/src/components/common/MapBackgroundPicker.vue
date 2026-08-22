@@ -27,6 +27,8 @@ const input = ref<HTMLInputElement | null>(null)
 
 const pluginOptions = computed(() => props.options.filter(option => option.kind === 'plugin' && option.selection?.map_id))
 const uploadOptions = computed(() => props.options.filter(option => option.kind === 'upload' && option.selection?.asset_id))
+const generatedOptions = computed(() => props.options.filter(option => option.kind === 'generated' && option.selection?.asset_id))
+const currentGeneratedChoice = computed(() => props.modelValue.startsWith('generated:') ? props.modelValue : '')
 
 function onSelection(event: Event) {
   const value = (event.target as HTMLSelectElement).value
@@ -65,6 +67,12 @@ function onFile(event: Event) {
           :key="option.id"
           :value="`upload:${option.selection?.asset_id}`"
         >{{ t('mapBackgroundCurrentUpload') }}</option>
+        <option
+          v-for="option in generatedOptions"
+          :key="option.id"
+          :value="`generated:${option.selection?.asset_id}`"
+        >{{ t('mapBackgroundCurrentGenerated') }}</option>
+        <option v-if="currentGeneratedChoice && !generatedOptions.length" :value="currentGeneratedChoice">{{ t('mapBackgroundCurrentGenerated') }}</option>
         <option v-if="file" value="file">{{ t('mapBackgroundNewUpload', { name: file.name }) }}</option>
         <optgroup v-if="pluginOptions.length" :label="t('mapBackgroundPlugins')">
           <option

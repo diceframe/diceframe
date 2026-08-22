@@ -23,7 +23,7 @@ from src.webui.access_password import hash_access_password
 
 SECRET_CONFIG_KEYS = frozenset({
     "api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key",
-    "access_token", "bot_token", "napcat_token", "tts_api_key", "asr_api_key",
+    "access_token", "bot_token", "napcat_token", "tts_api_key", "asr_api_key", "imagegen_api_key",
 })
 STRING_CONFIG_KEYS = frozenset({
     "base_url", "model", "embedding_base_url", "embedding_model",
@@ -31,6 +31,8 @@ STRING_CONFIG_KEYS = frozenset({
     "public_base_url", "napcat_host", "napcat_connection_id",
     "tts_base_url", "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
     "asr_base_url", "asr_model",
+    "imagegen_base_url", "imagegen_model", "imagegen_square_size",
+    "imagegen_landscape_size", "imagegen_quality", "imagegen_style_prefix",
     *PROVIDER_REF_KEYS,
 })
 API_FORMAT_KEYS = frozenset({"api_format", "fallback1_api_format", "fallback2_api_format"})
@@ -50,6 +52,9 @@ CONFIG_KEYS = (
     "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
     "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
+    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider", "imagegen_base_url",
+    "imagegen_api_key", "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
+    "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds",
     "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
@@ -67,7 +72,10 @@ API_RUNTIME_CONFIG_KEYS = frozenset({
     "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
     "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
-    "ai_providers", "tts_provider_ref", "asr_provider_ref",
+    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider", "imagegen_base_url",
+    "imagegen_api_key", "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
+    "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds",
+    "ai_providers", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
 })
 
 
@@ -92,6 +100,12 @@ def _degrade_speech_engines_lost_provider(candidate: dict[str, Any], refs_before
             and candidate.get("asr_provider") == "openai-compatible"
             and not str(candidate.get("asr_base_url") or "").strip()):
         candidate["asr_provider"] = "disabled"
+
+    imagegen_ref_cleared = bool(refs_before.get("imagegen_provider_ref")) and not str(
+        candidate.get("imagegen_provider_ref") or ""
+    ).strip()
+    if imagegen_ref_cleared and not str(candidate.get("imagegen_base_url") or "").strip():
+        candidate["imagegen_enabled"] = False
 BOT_CONFIG_MAP = {
     "qq_bot_enabled": "enabled",
     "napcat_host": "host",
@@ -170,6 +184,7 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
             elif key in {
                 "proxy_enabled", "qq_bot_enabled", "napcat_chat_filter_enabled",
                 "napcat_show_dropped_logs", "napcat_block_official_bots",
+                "imagegen_enabled", "imagegen_auto_scene",
             }:
                 candidate[key] = bool(raw)
             elif key in {
@@ -222,6 +237,16 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 if not 5 <= timeout <= 300:
                     return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "ASR 超时必须在 5–300 秒之间")
                 candidate[key] = timeout
+            elif key == "imagegen_provider":
+                provider = str(raw or "").strip()
+                if provider != "openai-compatible":
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "图像生成 Provider 无效")
+                candidate[key] = provider
+            elif key == "imagegen_timeout_seconds":
+                timeout = float(raw)
+                if not 5 <= timeout <= 300:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "图像生成超时必须在 5–300 秒之间")
+                candidate[key] = timeout
             elif key == "napcat_port":
                 port = int(raw)
                 if not 1 <= port <= 65535:
@@ -237,6 +262,20 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
     strip_orphan_provider_secrets(candidate)
     strip_dangling_provider_refs(candidate)
     _degrade_speech_engines_lost_provider(candidate, refs_before)
+
+    imagegen_ref = str(candidate.get("imagegen_provider_ref") or "").strip()
+    if imagegen_ref:
+        imagegen_provider = next(
+            (entry for entry in candidate.get("ai_providers") or [] if entry.get("id") == imagegen_ref),
+            None,
+        )
+        if imagegen_provider and imagegen_provider.get("api_format") != "openai":
+            return PreparedConfigUpdate(
+                candidate,
+                changed_keys,
+                access_password_changed,
+                "图像生成仅支持 OpenAI 兼容服务商",
+            )
 
     active_proxy = effective_proxy_url(bool(candidate.get("proxy_enabled")), candidate.get("proxy_url", ""))
     if candidate.get("proxy_enabled") and not active_proxy:

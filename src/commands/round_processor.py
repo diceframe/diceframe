@@ -42,7 +42,11 @@ from src.commands.tag_summary import summarize_tags
 from src.engine.constants import COMBAT_ATTACK_KEYWORDS, COMBAT_INTENT_KEYWORDS
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
-from src.imagegen import ImageGenError
+from src.imagegen import (
+    ImageGenerationError,
+    ImageGenerationRequest,
+    game_image_owner_id,
+)
 from src.memory.summarizer import needs_summary, summarize
 
 logger = logging.getLogger("trpg")
@@ -132,14 +136,12 @@ class RoundProcessor:
         self.analysis_max_tokens = analysis_max_tokens
         # 后台摘要任务引用持有，避免被 GC 中断
         self._pending_summary_tasks: set = set()
-        # 场景图生成门面（provider 插件），未注入时 SCENE_IMAGE 标签零开销忽略
-        self._scene_image_generator = None
+        self._image_generation = None
         # 每局同一时间只允许一个生图任务：连续快速推进时跳过新请求
         self._scene_image_tasks: dict[str, asyncio.Task] = {}
 
-    def set_scene_image_generator(self, generator) -> None:
-        """注入场景图生成门面；传 None 可关闭自动生图。"""
-        self._scene_image_generator = generator
+    def set_image_generation_service(self, service) -> None:
+        self._image_generation = service
 
     def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
         """离线兼容路径：模型工具不可用时按旧规则意图结算检定。"""
@@ -289,9 +291,9 @@ class RoundProcessor:
         return task
 
     def _maybe_schedule_scene_image(self, instance: GameInstance, data: dict) -> asyncio.Task | None:
-        """按 GM 的 SCENE_IMAGE 标签调度后台生图；插件缺失 / 节流命中时返回 None。"""
-        generator = self._scene_image_generator
-        if generator is None or not generator.available():
+        """按 GM 的 SCENE_IMAGE 标签调度后台生图；能力关闭或节流命中时返回 None。"""
+        service = self._image_generation
+        if service is None or not service.available or not service.auto_scene:
             return None
         prompt = str(data.get("scene_image_prompt") or "").strip()
         if not prompt:
@@ -313,9 +315,9 @@ class RoundProcessor:
         force: bool = False,
     ) -> asyncio.Task | None:
         """为指定回合调度一次场景图生成（叙事已推送，生图在后台进行）。"""
-        generator = self._scene_image_generator
+        service = self._image_generation
         prompt = str(prompt or "").strip()
-        if generator is None or not generator.available() or not prompt:
+        if service is None or not service.available or not service.auto_scene or not prompt:
             return None
         if not force and prompt == _last_scene_image_prompt(instance):
             return None
@@ -341,18 +343,27 @@ class RoundProcessor:
             )
             if entry is None:
                 return  # 该回合已被回滚删除，放弃本次生图
-            result = await self._scene_image_generator.generate(prompt)
-            current.set_scene_image(result["reference"])
+            result = await self._image_generation.generate(ImageGenerationRequest(
+                prompt=prompt,
+                purpose="scene",
+                owner_type="game",
+                owner_id=game_image_owner_id(game_key),
+                aspect_ratio="16:9",
+                context={"round": round_number},
+            ))
+            reference = {"kind": "generated", "asset_id": result.asset_id}
+            current.set_scene_image(reference)
             entry["scene_image"] = {
-                "reference": result["reference"],
+                "reference": reference,
+                "generation_id": result.generation_id,
                 "prompt": prompt,
-                "revised_prompt": str(result.get("revised_prompt") or ""),
+                "revised_prompt": result.revised_prompt,
                 "status": "ready",
                 "swipe_index": int(entry.get("current_swipe") or 0),
             }
             await self.registry.save(current)
-            logger.info("场景图已生成 (round=%d, asset=%s)", round_number, result["asset_id"])
-        except ImageGenError as exc:
+            logger.info("场景图已生成 (round=%d, asset=%s)", round_number, result.asset_id)
+        except ImageGenerationError as exc:
             logger.warning("场景图生成失败 (round=%d): %s", round_number, exc)
         except Exception:
             logger.exception("场景图后台任务异常 (round=%d)", round_number)

@@ -1,103 +1,135 @@
-"""场景图生成门面：把 provider 插件的生图结果接入既有场景图资产管线。
-
-只做三件事：找到声明 image-generation capability 的运行中插件、调用其
-generate 方法、读取插件数据目录中的图像并归一化为场景头图资产（内容寻址
-WebP）。不存在 provider 插件时零开销降级。
-"""
+"""Provider-neutral system image-generation service."""
 
 from __future__ import annotations
 
-import base64
-import binascii
-import logging
-import types
+import asyncio
+import ipaddress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-logger = logging.getLogger("trpg")
-
-IMAGEGEN_CAPABILITY = "image-generation"
-# 宿主侧等待上限：略高于插件默认 120s，给归一化与传输留余量。
-DEFAULT_IMAGEGEN_TIMEOUT = 150.0
-
-
-def _scene_image_assets():
-    # 延迟导入：scene_images 属于 webui 服务层，其包初始化会连带拉起
-    # commands（round_processor 又引用本模块），顶层导入会成环。
-    from src.webui.services import scene_images
-
-    return scene_images
+from .assets import ImageAssetError, ImageAssetStore
+from .contracts import IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult
+from .providers import ImageProvider, ImageProviderError, OpenAICompatibleImageProvider
 
 
-class ImageGenError(RuntimeError):
-    """生图失败（插件缺失、调用出错或图像无效）。"""
+PURPOSE_PROMPT_SUFFIXES = {
+    "scene": "Wide cinematic environment scene, no text, no interface elements.",
+    "avatar": "Single character portrait, centered composition, clear face, no text, no frame.",
+    "item": "Single isolated item illustration, centered composition, no text, no interface elements.",
+    "map": "Detailed location map background, readable terrain and landmarks, no labels, no interface elements.",
+    "freeform": "No text or interface elements unless explicitly requested.",
+}
 
 
-class SceneImageGenerator:
-    """包装 PluginHost 的生图调用；assets_dir 与场景头图存储同源。"""
+class ImageGenerationError(RuntimeError):
+    pass
 
-    def __init__(self, plugin_host: Any, assets_dir: Path) -> None:
-        self._host = plugin_host
-        self._assets_dir = Path(assets_dir)
 
+class ImageGenerationService:
+    def __init__(self, config: dict[str, Any], assets_dir: Path, *, proxy_url: str = "") -> None:
+        self.enabled = bool(config.get("imagegen_enabled", False))
+        self.provider_id = str(config.get("imagegen_provider") or "openai-compatible").strip()
+        self.base_url = str(config.get("imagegen_base_url") or "").strip()
+        self.api_key = str(config.get("imagegen_api_key") or "").strip()
+        self.model = str(config.get("imagegen_model") or "").strip()
+        self.square_size = str(config.get("imagegen_square_size") or "1024x1024").strip()
+        self.landscape_size = str(config.get("imagegen_landscape_size") or "1792x1024").strip()
+        self.quality = str(config.get("imagegen_quality") or "").strip()
+        self.style_prefix = str(config.get("imagegen_style_prefix") or "").strip()
+        self.timeout_seconds = float(config.get("imagegen_timeout_seconds") or 120)
+        self.auto_scene = bool(config.get("imagegen_auto_scene", True))
+        self.proxy_url = "" if _is_local_endpoint(self.base_url) else str(proxy_url or "").strip()
+        self.assets = ImageAssetStore(assets_dir)
+        self._semaphore = asyncio.Semaphore(2)
+        self._validate_config()
+
+    @property
     def available(self) -> bool:
-        return self._find_plugin() is not None
+        return self.enabled and bool(self.base_url and self.model)
 
-    def plugin_id(self) -> str | None:
-        return self._find_plugin()
-
-    async def generate(self, prompt: str, *, timeout: float = DEFAULT_IMAGEGEN_TIMEOUT) -> dict[str, Any]:
-        prompt = str(prompt or "").strip()
-        if not prompt:
-            raise ImageGenError("画面描述为空")
-        plugin_id = self._find_plugin()
-        if not plugin_id:
-            raise ImageGenError("没有正在运行的图像生成插件")
-        try:
-            result = await self._host.call_provider(
-                plugin_id, IMAGEGEN_CAPABILITY, "generate",
-                {"prompt": prompt}, timeout=timeout,
-            )
-        except Exception as exc:
-            raise ImageGenError(f"图像生成插件调用失败：{exc}") from exc
-        if not result.get("ok"):
-            raise ImageGenError(str(result.get("error") or "图像生成失败"))
-        raw = self._read_result_image(plugin_id, result)
-        if not raw:
-            raise ImageGenError("图像生成插件返回了空图像")
-        scene_images = _scene_image_assets()
-        try:
-            payload = scene_images._normalized_scene_image(raw)
-        except ValueError as exc:
-            raise ImageGenError(str(exc)) from exc
-        reference = scene_images._store_payload(
-            types.SimpleNamespace(_scene_images_dir=self._assets_dir), payload,
-        )
+    def public_config(self) -> dict[str, Any]:
         return {
-            "reference": reference,
-            "asset_id": reference["asset_id"],
-            "prompt": prompt,
-            "revised_prompt": str(result.get("revised_prompt") or ""),
+            "enabled": self.enabled,
+            "available": self.available,
+            "provider": self.provider_id,
+            "model": self.model,
+            "auto_scene": self.auto_scene,
         }
 
-    def _read_result_image(self, plugin_id: str, result: dict[str, Any]) -> bytes:
-        relative_path = str(result.get("image_path") or "").strip()
-        if relative_path:
-            try:
-                source = self._host.provider_asset_path(plugin_id, relative_path)
-                return source.read_bytes()
-            except (KeyError, ValueError, OSError) as exc:
-                raise ImageGenError(f"图像生成插件返回了无效的图片文件：{exc}") from exc
+    async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
+        if not self.available:
+            raise ImageGenerationError("系统图像生成尚未配置或启用")
+        purpose = str(request.purpose or "").strip().lower()
+        if purpose not in IMAGE_PURPOSES:
+            raise ImageGenerationError("不支持的图片用途")
+        prompt = str(request.prompt or "").strip()
+        if not prompt:
+            raise ImageGenerationError("画面描述为空")
+        if len(prompt) > 8000:
+            raise ImageGenerationError("画面描述不能超过 8000 个字符")
+        composed_prompt = self._compose_prompt(prompt, purpose, request.style)
+        size = self._size_for(request, purpose)
         try:
-            return base64.b64decode(str(result.get("image_base64") or ""), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise ImageGenError("图像生成插件返回了无效的图像数据") from exc
+            async with self._semaphore:
+                generated = await self._provider().generate(
+                    composed_prompt,
+                    size=size,
+                    quality=self.quality,
+                )
+            return self.assets.store(
+                generated.body,
+                purpose=purpose,
+                prompt=prompt,
+                revised_prompt=generated.revised_prompt,
+                provider=self.provider_id,
+                model=self.model,
+                owner_type=request.owner_type,
+                owner_id=request.owner_id,
+                context=request.context,
+            )
+        except (ImageProviderError, ImageAssetError) as exc:
+            raise ImageGenerationError(str(exc)) from exc
 
-    def _find_plugin(self) -> str | None:
-        if self._host is None:
-            return None
-        try:
-            return self._host.find_provider(IMAGEGEN_CAPABILITY)
-        except Exception:
-            logger.debug("查找图像生成插件失败", exc_info=True)
-            return None
+    def _provider(self) -> ImageProvider:
+        kwargs = {
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "model": self.model,
+            "timeout_seconds": self.timeout_seconds,
+            "proxy_url": self.proxy_url,
+        }
+        if self.provider_id == "openai-compatible":
+            return OpenAICompatibleImageProvider(**kwargs)
+        raise ImageGenerationError(f"不支持的图像生成 provider：{self.provider_id}")
+
+    def _compose_prompt(self, prompt: str, purpose: str, request_style: str) -> str:
+        parts = [self.style_prefix, str(request_style or "").strip(), prompt, PURPOSE_PROMPT_SUFFIXES[purpose]]
+        return "\n\n".join(part for part in parts if part)[:12000]
+
+    def _size_for(self, request: ImageGenerationRequest, purpose: str) -> str:
+        ratio = str(request.aspect_ratio or "").strip()
+        if ratio in {"1:1", "square"} or purpose in {"avatar", "item"}:
+            return self.square_size
+        return self.landscape_size
+
+    def _validate_config(self) -> None:
+        if self.provider_id != "openai-compatible":
+            raise ValueError(f"不支持的图像生成 provider：{self.provider_id}")
+        if not self.enabled:
+            return
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+            raise ValueError("图像生成 Base URL 必须是无内嵌凭据的 http(s) 地址")
+        if not self.model:
+            raise ValueError("启用图像生成时必须选择模型")
+
+
+def _is_local_endpoint(value: str) -> bool:
+    hostname = (urlparse(value).hostname or "").strip().lower()
+    if hostname in {"localhost", "host.docker.internal"} or hostname.endswith(".local"):
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_private
+    except ValueError:
+        return False

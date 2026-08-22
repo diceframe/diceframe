@@ -7,6 +7,7 @@ import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
 import Modal from '@/components/ui/Modal.vue'
 import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
+import GeneratedImageThumbnail from '@/components/common/GeneratedImageThumbnail.vue'
 
 const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null; portraitEditable?: boolean }>()
 const emit = defineEmits<{ 'portrait-click': []; 'allocate-level-up': [attrs: Record<string, number>] }>()
@@ -44,6 +45,10 @@ function itemName(it: CharacterItem): string {
 function itemQty(it: CharacterItem): number | undefined {
   const q = it.qty
   return typeof q === 'number' && q > 1 ? q : undefined
+}
+function itemAssetId(it: CharacterItem): string {
+  const image = it.image
+  return image && typeof image === 'object' && 'asset_id' in image ? String(image.asset_id || '') : ''
 }
 function typeLabel(type?: string): string {
   if (type === 'weapon') return t('itemTypeWeapon')
@@ -176,21 +181,21 @@ function submitLevelUp(attrs: Record<string, number>) {
         <div v-if="equipment.length" class="item-group">
           <span class="item-label item-label-equipment">{{ t('equipment') }}</span>
           <div class="item-chips">
-            <span v-for="(it, i) in equipment.slice(0, PREVIEW_LIMIT)" :key="'e'+i" class="item-chip">{{ itemName(it) }}</span>
+            <span v-for="(it, i) in equipment.slice(0, PREVIEW_LIMIT)" :key="'e'+i" class="item-chip"><GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="22" />{{ itemName(it) }}</span>
             <span v-if="restCount(equipment.length)" class="item-more-count">{{ t('moreItems', { count: restCount(equipment.length) }) }}</span>
           </div>
         </div>
         <div v-if="inventory.length" class="item-group">
           <span class="item-label item-label-inventory">{{ t('inventory') }}</span>
           <div class="item-chips">
-            <span v-for="(it, i) in inventory.slice(0, PREVIEW_LIMIT)" :key="'i'+i" class="item-chip">{{ itemName(it) }}<template v-if="itemQty(it)"> ×{{ itemQty(it) }}</template></span>
+            <span v-for="(it, i) in inventory.slice(0, PREVIEW_LIMIT)" :key="'i'+i" class="item-chip"><GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="22" />{{ itemName(it) }}<template v-if="itemQty(it)"> ×{{ itemQty(it) }}</template></span>
             <span v-if="restCount(inventory.length)" class="item-more-count">{{ t('moreItems', { count: restCount(inventory.length) }) }}</span>
           </div>
         </div>
         <div v-if="keyItems.length" class="item-group">
           <span class="item-label item-label-keyitems">{{ t('keyItems') }}</span>
           <div class="item-chips">
-            <span v-for="(it, i) in keyItems.slice(0, PREVIEW_LIMIT)" :key="'k'+i" class="item-chip">{{ itemName(it) }}</span>
+            <span v-for="(it, i) in keyItems.slice(0, PREVIEW_LIMIT)" :key="'k'+i" class="item-chip"><GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="22" />{{ itemName(it) }}</span>
             <span v-if="restCount(keyItems.length)" class="item-more-count">{{ t('moreItems', { count: restCount(keyItems.length) }) }}</span>
           </div>
         </div>
@@ -205,6 +210,7 @@ function submitLevelUp(attrs: Record<string, number>) {
           <h3 class="item-detail-h item-label-equipment">{{ t('equipment') }}</h3>
           <ul class="item-detail-list">
             <li v-for="(it, i) in equipment" :key="'e'+i" class="item-detail-row">
+              <GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="48" />
               <span class="item-detail-name">{{ itemName(it) }}</span>
               <span v-if="equipmentDetail(it)" class="item-detail-meta">{{ equipmentDetail(it) }}</span>
             </li>
@@ -214,6 +220,7 @@ function submitLevelUp(attrs: Record<string, number>) {
           <h3 class="item-detail-h item-label-inventory">{{ t('inventory') }}</h3>
           <ul class="item-detail-list">
             <li v-for="(it, i) in inventory" :key="'i'+i" class="item-detail-row">
+              <GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="48" />
               <span class="item-detail-name">{{ itemName(it) }}<template v-if="itemQty(it)"> ×{{ itemQty(it) }}</template></span>
               <span v-if="inventoryDetail(it)" class="item-detail-meta">{{ inventoryDetail(it) }}</span>
             </li>
@@ -223,6 +230,7 @@ function submitLevelUp(attrs: Record<string, number>) {
           <h3 class="item-detail-h item-label-keyitems">{{ t('keyItems') }}</h3>
           <ul class="item-detail-list">
             <li v-for="(it, i) in keyItems" :key="'k'+i" class="item-detail-row">
+              <GeneratedImageThumbnail v-if="itemAssetId(it)" :asset-id="itemAssetId(it)" :alt="itemName(it)" :size="48" />
               <span class="item-detail-name">{{ itemName(it) }}</span>
               <span v-if="keyItemDetail(it)" class="item-detail-meta">{{ keyItemDetail(it) }}</span>
             </li>

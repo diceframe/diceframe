@@ -1,5 +1,5 @@
 import { api, apiBlob } from '@/api/client'
-import type { MapBackgroundSelection, SceneImageRef, SceneGalleryItem } from '@/api/types'
+import type { SceneImageRef } from '@/api/types'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 
 export const MAX_SCENE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -47,6 +47,8 @@ export async function resolveSceneImageUrl(reference: SceneImageRef | undefined,
   let path = ''
   if (reference.kind === 'upload' && reference.asset_id) {
     path = `/scene-images/${encodeURIComponent(reference.asset_id)}`
+  } else if (reference.kind === 'generated' && reference.asset_id) {
+    path = `/generated-images/${encodeURIComponent(reference.asset_id)}`
   } else if (reference.kind === 'plugin' && reference.plugin_id && reference.path) {
     path = `/plugins/assets/${encodeURIComponent(reference.plugin_id)}/${encodeAssetPath(reference.path)}`
   }
@@ -70,45 +72,4 @@ export function sceneImageStyle(url: string): Record<string, string> {
 
 export function revokeSceneImageUrl(url: string): void {
   if (url.startsWith('blob:')) URL.revokeObjectURL(url)
-}
-
-// --- 自动生成场景图（imagegen provider 插件） ---
-
-interface SceneGalleryResponse {
-  images?: SceneGalleryItem[]
-}
-
-export async function fetchSceneGallery(gameKey: string): Promise<SceneGalleryItem[]> {
-  const result = await api<SceneGalleryResponse>(
-    `/games/${encodeURIComponent(gameKey)}/images`,
-  )
-  return result.images || []
-}
-
-interface MapBackgroundFromSceneResponse {
-  ok?: boolean
-  error?: string
-  map_background?: MapBackgroundSelection
-}
-
-export async function setMapBackgroundFromScene(gameKey: string, assetId: string): Promise<void> {
-  const result = await api<MapBackgroundFromSceneResponse>(
-    `/games/${encodeURIComponent(gameKey)}/map-background-from-scene`,
-    { method: 'POST', body: JSON.stringify({ asset_id: assetId }) },
-  )
-  if (!result.ok) throw new Error(result.error || 'map-background-update-failed')
-}
-
-export interface ImagegenTestResponse {
-  ok?: boolean
-  error?: string
-  asset_id?: string
-  revised_prompt?: string
-}
-
-export async function testImageGeneration(prompt: string): Promise<ImagegenTestResponse> {
-  return api<ImagegenTestResponse>('/imagegen/test', {
-    method: 'POST',
-    body: JSON.stringify({ prompt }),
-  })
 }

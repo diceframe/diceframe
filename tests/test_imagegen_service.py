@@ -1,15 +1,27 @@
-"""场景图生成门面：provider 调用、资产归一化落盘与错误转译。"""
+"""Built-in image-generation service, provider, and asset persistence."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
-from pathlib import Path
+import json
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from PIL import Image
 
-from src.imagegen import ImageGenError, SceneImageGenerator
+from src.imagegen import (
+    ImageGenerationError,
+    ImageGenerationRequest,
+    ImageGenerationService,
+)
+from src.imagegen.providers import (
+    ImageProviderError,
+    OpenAICompatibleImageProvider,
+    ProviderImage,
+)
 
 
 def _png_bytes(size: tuple[int, int] = (400, 225), color=(90, 120, 160)) -> bytes:
@@ -18,106 +30,249 @@ def _png_bytes(size: tuple[int, int] = (400, 225), color=(90, 120, 160)) -> byte
     return buffer.getvalue()
 
 
-class _FakeHost:
-    def __init__(
-        self,
-        provider_dir: Path,
-        *,
-        payload: bytes | None = None,
-        error: str = "",
-        plugin: str = "stub",
-        legacy_base64: bool = False,
-    ):
-        self.plugin = plugin
+def _config(**overrides):
+    config = {
+        "imagegen_enabled": True,
+        "imagegen_provider": "openai-compatible",
+        "imagegen_base_url": "https://images.example/v1",
+        "imagegen_api_key": "secret",
+        "imagegen_model": "image-model",
+        "imagegen_square_size": "1024x1024",
+        "imagegen_landscape_size": "1792x1024",
+        "imagegen_quality": "high",
+        "imagegen_style_prefix": "Painterly tabletop RPG art.",
+        "imagegen_timeout_seconds": 30,
+        "imagegen_auto_scene": True,
+    }
+    config.update(overrides)
+    return config
+
+
+class _FakeProvider:
+    def __init__(self, *, body: bytes | None = None, error: str = "") -> None:
+        self.body = body or _png_bytes()
+        self.error = error
         self.calls = []
-        self._provider_dir = provider_dir
-        self._payload = payload
-        self._error = error
-        self._legacy_base64 = legacy_base64
 
-    def find_provider(self, capability):
-        return self.plugin if self._payload is not None or self._error else None
+    async def generate(self, prompt: str, *, size: str, quality: str = "") -> ProviderImage:
+        self.calls.append((prompt, size, quality))
+        if self.error:
+            raise ImageProviderError(self.error)
+        return ProviderImage(self.body, "image/png", "provider revised prompt")
 
-    async def call_provider(self, plugin_id, capability, alias, arguments, *, timeout=0):
-        self.calls.append((plugin_id, capability, alias, arguments, timeout))
-        if self._error:
-            return {"ok": False, "error": self._error}
-        if not self._legacy_base64:
-            self._provider_dir.mkdir(parents=True, exist_ok=True)
-            (self._provider_dir / "generated.png").write_bytes(self._payload)
-            return {"ok": True, "image_path": "generated.png", "mime_type": "image/png"}
+
+def _service(tmp_path, provider: _FakeProvider, **config_overrides) -> ImageGenerationService:
+    service = ImageGenerationService(_config(**config_overrides), tmp_path)
+    service._provider = lambda: provider
+    return service
+
+
+def test_service_availability_and_config_validation(tmp_path):
+    disabled = ImageGenerationService(
+        _config(imagegen_enabled=False, imagegen_base_url="", imagegen_model=""),
+        tmp_path,
+    )
+    assert disabled.available is False
+    assert disabled.public_config() == {
+        "enabled": False,
+        "available": False,
+        "provider": "openai-compatible",
+        "model": "",
+        "auto_scene": True,
+    }
+    with pytest.raises(ImageGenerationError, match="尚未配置或启用"):
+        asyncio.run(disabled.generate(ImageGenerationRequest(prompt="harbor")))
+    with pytest.raises(ValueError, match="Base URL"):
+        ImageGenerationService(_config(imagegen_base_url="file:///tmp/images"), tmp_path)
+    with pytest.raises(ValueError, match="必须选择模型"):
+        ImageGenerationService(_config(imagegen_model=""), tmp_path)
+
+
+def test_service_bypasses_proxy_for_local_endpoints(tmp_path):
+    local = ImageGenerationService(
+        _config(imagegen_base_url="http://127.0.0.1:8080/v1"),
+        tmp_path,
+        proxy_url="http://proxy.example:7890",
+    )
+    remote = ImageGenerationService(
+        _config(imagegen_base_url="https://images.example/v1"),
+        tmp_path,
+        proxy_url="http://proxy.example:7890",
+    )
+
+    assert local.proxy_url == ""
+    assert remote.proxy_url == "http://proxy.example:7890"
+
+
+@pytest.mark.parametrize(
+    ("purpose", "aspect_ratio", "requested_size", "stored_size"),
+    [
+        ("scene", "16:9", "1792x1024", (1600, 900)),
+        ("avatar", "", "1024x1024", (512, 512)),
+        ("item", "", "1024x1024", (768, 768)),
+        ("map", "16:9", "1792x1024", (400, 225)),
+        ("freeform", "1:1", "1024x1024", (400, 225)),
+    ],
+)
+def test_generate_supports_all_purposes_and_normalizes_assets(
+    tmp_path,
+    purpose,
+    aspect_ratio,
+    requested_size,
+    stored_size,
+):
+    provider = _FakeProvider()
+    service = _service(tmp_path, provider)
+    result = asyncio.run(service.generate(ImageGenerationRequest(
+        prompt="misty harbor at dusk",
+        purpose=purpose,
+        owner_type="game",
+        owner_id="web:room:bot",
+        aspect_ratio=aspect_ratio,
+        style="muted blue palette",
+        context={"round": 3},
+    )))
+
+    assert result.purpose == purpose
+    assert result.revised_prompt == "provider revised prompt"
+    assert provider.calls[0][1:] == (requested_size, "high")
+    assert provider.calls[0][0].startswith("Painterly tabletop RPG art.\n\nmuted blue palette")
+    assert "misty harbor at dusk" in provider.calls[0][0]
+    with Image.open(service.assets.file(result.asset_id)) as stored:
+        assert stored.format == "WEBP"
+        assert stored.size == stored_size
+
+    records = service.assets.list_records(
+        owner_type="game",
+        owner_id="web:room:bot",
+        purpose=purpose,
+    )
+    assert len(records) == 1
+    assert records[0]["generation_id"] == result.generation_id
+    assert records[0]["context"] == {"round": 3}
+
+
+def test_content_addressing_reuses_asset_but_keeps_generation_history(tmp_path):
+    provider = _FakeProvider()
+    service = _service(tmp_path, provider)
+    request = ImageGenerationRequest(prompt="harbor", purpose="scene")
+
+    first = asyncio.run(service.generate(request))
+    second = asyncio.run(service.generate(request))
+
+    assert first.asset_id == second.asset_id
+    assert first.generation_id != second.generation_id
+    assert len(service.assets.list_records()) == 2
+
+
+def test_service_translates_provider_asset_and_request_errors(tmp_path):
+    failing = _service(tmp_path / "failing", _FakeProvider(error="upstream down"))
+    with pytest.raises(ImageGenerationError, match="upstream down"):
+        asyncio.run(failing.generate(ImageGenerationRequest(prompt="harbor")))
+
+    garbage = _service(tmp_path / "garbage", _FakeProvider(body=b"not-an-image"))
+    with pytest.raises(ImageGenerationError, match="无法读取"):
+        asyncio.run(garbage.generate(ImageGenerationRequest(prompt="harbor")))
+
+    service = _service(tmp_path / "request", _FakeProvider())
+    with pytest.raises(ImageGenerationError, match="画面描述为空"):
+        asyncio.run(service.generate(ImageGenerationRequest(prompt="   ")))
+    with pytest.raises(ImageGenerationError, match="不支持"):
+        asyncio.run(service.generate(ImageGenerationRequest(prompt="x", purpose="cover")))
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_reads_base64_and_retries_400_compatibility(monkeypatch):
+    provider = OpenAICompatibleImageProvider(
+        base_url="https://images.example/v1",
+        api_key="secret",
+        model="image-model",
+        timeout_seconds=30,
+    )
+    calls = []
+
+    async def fake_post(payload, headers):
+        calls.append((payload, headers))
+        if len(calls) == 1:
+            raise ImageProviderError("图像生成服务返回 HTTP 400: unsupported response_format")
         return {
-            "ok": True,
-            "image_base64": base64.b64encode(self._payload).decode("ascii"),
-            "mime_type": "image/png",
+            "data": [{
+                "b64_json": base64.b64encode(_png_bytes()).decode("ascii"),
+                "revised_prompt": "revised",
+            }],
         }
 
-    def provider_asset_path(self, plugin_id, relative_path):
-        return self._provider_dir / relative_path
+    monkeypatch.setattr(provider, "_post_json", fake_post)
+    result = await provider.generate("harbor", size="1024x1024", quality="high")
+
+    assert result.body.startswith(b"\x89PNG")
+    assert result.content_type == "image/png"
+    assert result.revised_prompt == "revised"
+    assert calls[0][0]["response_format"] == "b64_json"
+    assert "response_format" not in calls[1][0]
+    assert calls[0][1]["Authorization"] == "Bearer secret"
 
 
-def test_generator_without_plugin_degrades(tmp_path):
-    generator = SceneImageGenerator(None, tmp_path)
-    assert generator.available() is False
-    with pytest.raises(ImageGenError, match="没有正在运行"):
-        import asyncio
-        asyncio.run(generator.generate("harbor"))
-
-
-def test_generate_stores_normalized_webp_asset(tmp_path):
-    host = _FakeHost(tmp_path / "provider", payload=_png_bytes())
-    generator = SceneImageGenerator(host, tmp_path)
-
-    import asyncio
-    result = asyncio.run(generator.generate("misty harbor at dusk"))
-
-    reference = result["reference"]
-    assert reference["kind"] == "upload"
-    asset_path = tmp_path / f"{reference['asset_id']}.webp"
-    assert asset_path.is_file()
-    with Image.open(asset_path) as stored:
-        assert stored.format == "WEBP"
-        assert stored.size == (1600, 900)
-    assert host.calls[0][1] == "image-generation"
-    assert host.calls[0][2] == "generate"
-    assert host.calls[0][3] == {"prompt": "misty harbor at dusk"}
-    # 内容寻址：同图再生成复用同一资产
-    again = asyncio.run(generator.generate("misty harbor at dusk"))
-    assert again["asset_id"] == reference["asset_id"]
-
-
-def test_generate_translates_plugin_and_image_errors(tmp_path):
-    import asyncio
-
-    failing = SceneImageGenerator(_FakeHost(tmp_path / "failing", error="upstream down"), tmp_path)
-    with pytest.raises(ImageGenError, match="upstream down"):
-        asyncio.run(failing.generate("harbor"))
-
-    tiny = SceneImageGenerator(
-        _FakeHost(tmp_path / "tiny", payload=_png_bytes(size=(120, 90))), tmp_path,
+@pytest.mark.asyncio
+async def test_openai_provider_accepts_url_results(monkeypatch):
+    provider = OpenAICompatibleImageProvider(
+        base_url="https://images.example/v1",
+        api_key="secret",
+        model="image-model",
+        timeout_seconds=30,
     )
-    with pytest.raises(ImageGenError, match="尺寸"):
-        asyncio.run(tiny.generate("harbor"))
+    downloaded = []
 
-    garbage = SceneImageGenerator(
-        _FakeHost(tmp_path / "garbage", payload=b"not-an-image"), tmp_path,
-    )
-    with pytest.raises(ImageGenError):
-        asyncio.run(garbage.generate("harbor"))
+    async def fake_post(payload, headers):
+        return {"data": [{"url": "https://cdn.example/result.png"}]}
 
-    empty = SceneImageGenerator(_FakeHost(tmp_path / "empty", payload=_png_bytes()), tmp_path)
-    with pytest.raises(ImageGenError, match="画面描述为空"):
-        asyncio.run(empty.generate("   "))
+    async def fake_download(url, headers):
+        downloaded.append((url, headers))
+        return _png_bytes(), "image/png"
+
+    monkeypatch.setattr(provider, "_post_json", fake_post)
+    monkeypatch.setattr(provider, "_download_image", fake_download)
+
+    result = await provider.generate("harbor", size="1024x1024")
+    assert result.content_type == "image/png"
+    assert downloaded[0][0] == "https://cdn.example/result.png"
 
 
-def test_generate_accepts_legacy_base64_result(tmp_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_url_download_forwards_credentials_only_to_same_origin():
+    seen_headers = []
 
-    host = _FakeHost(
-        tmp_path / "legacy",
-        payload=_png_bytes(),
-        legacy_base64=True,
-    )
-    result = asyncio.run(SceneImageGenerator(host, tmp_path).generate("harbor"))
+    async def image_handler(request):
+        seen_headers.append(request.headers.get("Authorization", ""))
+        return web.Response(body=_png_bytes(), content_type="image/png")
 
-    assert (tmp_path / f"{result['asset_id']}.webp").is_file()
+    app = web.Application()
+    app.router.add_get("/asset.png", image_handler)
+    async with TestServer(app) as server:
+        provider = OpenAICompatibleImageProvider(
+            base_url=str(server.make_url("/v1")),
+            api_key="secret",
+            model="image-model",
+            timeout_seconds=30,
+        )
+        body, content_type = await provider._download_image(
+            str(server.make_url("/asset.png")),
+            {"Authorization": "Bearer secret", "Content-Type": "application/json"},
+        )
+        assert body.startswith(b"\x89PNG")
+        assert content_type == "image/png"
+        assert seen_headers == ["Bearer secret"]
+
+        provider.base_url = "https://images.example/v1"
+        await provider._download_image(
+            str(server.make_url("/asset.png")),
+            {"Authorization": "Bearer secret", "Content-Type": "application/json"},
+        )
+        assert seen_headers[-1] == ""
+
+
+def test_generation_records_are_valid_json(tmp_path):
+    service = _service(tmp_path, _FakeProvider())
+    result = asyncio.run(service.generate(ImageGenerationRequest(prompt="harbor")))
+    record_path = service.assets.records_dir / f"{result.generation_id}.json"
+    assert json.loads(record_path.read_text(encoding="utf-8"))["asset_id"] == result.asset_id

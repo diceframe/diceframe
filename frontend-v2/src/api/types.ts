@@ -8,8 +8,23 @@ export interface CharacterSkill { name: string; value?: number }
 
 export interface CharacterItem { name?: string; type?: string; damage?: number; slot?: string; quality?: string; qty?: number; effect?: string; category?: string; note?: string; [key: string]: unknown }
 
+export type GeneratedImagePurpose = 'scene' | 'avatar' | 'item' | 'map' | 'freeform'
+
+export interface GeneratedImageRecord {
+  generation_id: string
+  asset_id: string
+  purpose: GeneratedImagePurpose
+  prompt?: string
+  revised_prompt?: string
+  provider?: string
+  model?: string
+  created_at?: string
+  context?: Record<string, unknown>
+  round?: number
+}
+
 export interface CharacterPortrait {
-  kind: 'builtin' | 'upload' | 'plugin'
+  kind: 'builtin' | 'upload' | 'plugin' | 'generated'
   id?: string
   asset_id?: string
   plugin_id?: string
@@ -17,7 +32,7 @@ export interface CharacterPortrait {
 }
 
 export interface SceneImageRef {
-  kind: 'builtin' | 'upload' | 'plugin' | 'asset'
+  kind: 'builtin' | 'upload' | 'plugin' | 'asset' | 'generated'
   id?: string
   asset_id?: string
   plugin_id?: string
@@ -25,7 +40,7 @@ export interface SceneImageRef {
 }
 
 export interface MapBackgroundSelection {
-  kind: 'auto' | 'none' | 'builtin' | 'upload' | 'plugin'
+  kind: 'auto' | 'none' | 'builtin' | 'upload' | 'plugin' | 'generated'
   id?: string
   asset_id?: string
   map_id?: string
@@ -236,13 +251,7 @@ export interface RoundSceneImage {
   swipe_index?: number
 }
 
-export interface SceneGalleryItem {
-  round: number
-  asset_id: string
-  prompt?: string
-  revised_prompt?: string
-  status?: string
-}
+export type SceneGalleryItem = GeneratedImageRecord
 
 export interface LogEntry {
   round?: number
@@ -1115,6 +1124,7 @@ export interface AppConfig {
   embedding_provider_ref?: string
   tts_provider_ref?: string
   asr_provider_ref?: string
+  imagegen_provider_ref?: string
   fallback1_enabled?: boolean
   fallback1_base_url?: string
   fallback1_api_key?: SecretField
@@ -1160,6 +1170,17 @@ export interface AppConfig {
   asr_api_key?: SecretField
   asr_model?: string
   asr_timeout_seconds?: number
+  imagegen_enabled?: boolean
+  imagegen_auto_scene?: boolean
+  imagegen_provider?: 'openai-compatible'
+  imagegen_base_url?: string
+  imagegen_api_key?: SecretField
+  imagegen_model?: string
+  imagegen_square_size?: string
+  imagegen_landscape_size?: string
+  imagegen_quality?: string
+  imagegen_style_prefix?: string
+  imagegen_timeout_seconds?: number
   [key: string]: unknown
 }
 

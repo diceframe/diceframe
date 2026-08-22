@@ -4,7 +4,6 @@ import { CloudDownloadOutline, RefreshOutline, TrashOutline } from '@vicons/ioni
 import { useLocale } from '@/composables/useLocale'
 import type { AiProvider, PluginField, PluginInfo } from '@/api/types'
 import NapcatGuide from '@/components/plugins/NapcatGuide.vue'
-import ProviderImagegenTest from '../ProviderImagegenTest.vue'
 
 const props = defineProps<{
   loading: boolean
@@ -255,10 +254,7 @@ function groupedFields(plugin: PluginInfo): PluginFieldSection[] {
           <NTabPane v-if="p.id === 'qq-napcat'" name="guide" :tab="t('guideDocs')">
             <NapcatGuide />
           </NTabPane>
-          <NTabPane v-if="p.plugin_type === 'provider'" name="provider-test" :tab="t('imagegenTestTitle')">
-            <ProviderImagegenTest :running="p.running" />
-          </NTabPane>
-          <NTabPane v-else-if="p.docs" name="docs" :tab="t('guideDocs')">
+          <NTabPane v-if="p.docs" name="docs" :tab="t('guideDocs')">
             <div class="plugin-docs">
               <p v-if="pluginDocsLoading[p.id]" class="muted">{{ t('pluginLoading') }}</p>
               <div v-else-if="pluginDocs[p.id]" class="plugin-docs-content safe-markdown" v-html="renderDocsMarkdown(pluginDocs[p.id].content)" />

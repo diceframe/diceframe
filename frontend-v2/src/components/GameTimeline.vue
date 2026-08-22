@@ -47,7 +47,7 @@ function sceneImageAsset(entry: LogEntry): string {
   const record = entry.scene_image
   if (!record || record.status !== 'ready') return ''
   const reference = record.reference
-  return reference?.kind === 'upload' ? String(reference.asset_id || '') : ''
+  return reference?.kind === 'generated' ? String(reference.asset_id || '') : ''
 }
 function recaps(entry: LogEntry): StoryRecap[] {
   return Array.isArray(entry.story_recaps)
@@ -212,6 +212,7 @@ watch(() => rounds.value, async (latest) => {
           <SceneImageBlock
             v-if="sceneImageAsset(item.entry)"
             :asset-id="sceneImageAsset(item.entry)"
+            :game-key="gameKey"
             :alt="item.entry.scene_image?.prompt || ''"
           />
           <div v-if="item.gm.states.length" class="state-card-list">
