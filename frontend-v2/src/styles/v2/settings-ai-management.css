@@ -329,7 +329,7 @@
 .provider-model-row {
   position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto 32px;
+  grid-template-columns: 34px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 9px;
   min-height: 53px;
@@ -342,21 +342,6 @@
 
 .provider-model-row:hover {
   background: color-mix(in srgb, var(--df-interactive) 6%, transparent);
-}
-
-.provider-model-row.active {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--df-success) 11%, transparent), color-mix(in srgb, var(--df-interactive) 5%, transparent));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--df-success) 72%, var(--df-interactive));
-}
-
-.provider-model-select {
-  position: absolute;
-  z-index: 3;
-  inset: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  cursor: pointer;
 }
 
 .provider-model-orbit {
@@ -504,8 +489,509 @@
 .provider-model-add input:focus-visible,
 .provider-library-footer button:focus-visible,
 .provider-list-item:focus-visible,
-.provider-model-select:focus-visible,
 .provider-model-remove:focus-visible {
+  outline: 2px solid var(--df-interactive);
+  outline-offset: 2px;
+}
+
+
+.provider-backend-warning {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 11px;
+  margin: 18px 24px 0;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--df-warning) 46%, var(--df-border-soft));
+  border-radius: 11px;
+  color: var(--df-warning-strong);
+  background: color-mix(in srgb, var(--df-warning) 8%, var(--df-surface-2));
+}
+
+.provider-backend-warning > .n-icon {
+  margin-top: 1px;
+  font-size: 19px;
+}
+
+.provider-backend-warning strong,
+.provider-backend-warning p {
+  margin: 0;
+}
+
+.provider-backend-warning p {
+  margin-top: 3px;
+  color: var(--df-text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.provider-backend-warning.compact {
+  margin: 18px clamp(18px, 2.5vw, 28px) 0;
+}
+
+.provider-model-toolbar {
+  align-items: end;
+}
+
+.provider-model-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-model-group {
+  overflow: hidden;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--df-surface-2) 58%, transparent);
+}
+
+.provider-model-group > header,
+.provider-catalog-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 72%, transparent);
+  color: var(--df-text-secondary);
+  background: color-mix(in srgb, var(--df-surface-3) 54%, transparent);
+}
+
+.provider-model-group > header strong,
+.provider-catalog-group > header strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-model-group > header span,
+.provider-catalog-group > header span {
+  display: inline-grid;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--df-text-muted);
+  background: color-mix(in srgb, var(--df-control-bg) 86%, transparent);
+  font: 9px/1 var(--df-font-mono);
+}
+
+.provider-model-group .provider-model-list {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.provider-catalog-modal.n-card {
+  width: min(900px, calc(100vw - 32px));
+  max-height: min(820px, calc(100dvh - 32px));
+  border-color: color-mix(in srgb, var(--df-interactive) 24%, var(--df-border-soft));
+  background:
+    radial-gradient(circle at 84% -12%, color-mix(in srgb, var(--df-interactive) 10%, transparent), transparent 30%),
+    var(--df-surface-1);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .46);
+}
+
+.provider-catalog-modal .n-card__content {
+  display: grid;
+  min-height: 0;
+  padding-top: 4px;
+}
+
+.provider-catalog-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.provider-catalog-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 0 11px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 9px;
+  color: var(--df-text-muted);
+  background: var(--df-control-bg);
+}
+
+.provider-catalog-search:focus-within {
+  border-color: var(--df-interactive);
+  box-shadow: 0 0 0 2px var(--df-focus);
+}
+
+.provider-catalog-search input,
+.provider-catalog-custom input {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--df-text);
+  background: transparent;
+}
+
+.provider-catalog-filters {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--df-surface-2) 68%, transparent);
+}
+
+.provider-catalog-filters button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--df-text-muted);
+  background: transparent;
+  font-size: 10px;
+}
+
+.provider-catalog-filters button span {
+  color: color-mix(in srgb, currentColor 76%, transparent);
+  font: 9px/1 var(--df-font-mono);
+}
+
+.provider-catalog-filters button:hover,
+.provider-catalog-filters button.active {
+  border-color: color-mix(in srgb, var(--df-interactive) 34%, transparent);
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 10%, transparent);
+}
+
+.provider-catalog-body {
+  min-height: 220px;
+  max-height: min(54dvh, 560px);
+  margin-top: 10px;
+  padding-right: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.provider-catalog-group {
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--df-surface-2) 48%, transparent);
+}
+
+.provider-catalog-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 50px;
+  padding: 6px 10px;
+  border: 0;
+  color: var(--df-text-secondary);
+  background: transparent;
+  text-align: left;
+}
+
+.provider-catalog-row + .provider-catalog-row {
+  border-top: 1px solid color-mix(in srgb, var(--df-border-soft) 58%, transparent);
+}
+
+.provider-catalog-row:hover {
+  color: var(--df-text);
+  background: color-mix(in srgb, var(--df-interactive) 7%, transparent);
+}
+
+.provider-catalog-row.selected {
+  color: color-mix(in srgb, var(--df-success-strong) 78%, var(--df-text));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--df-success) 16%, transparent), color-mix(in srgb, var(--df-success) 5%, transparent));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--df-success) 74%, var(--df-interactive));
+}
+
+.provider-catalog-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.provider-catalog-copy strong {
+  overflow: hidden;
+  font: 11px/1.4 var(--df-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-catalog-copy small {
+  color: var(--df-text-muted);
+  font-size: 9px;
+}
+
+.provider-catalog-toggle {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--df-border-soft) 82%, transparent);
+  border-radius: 8px;
+  color: var(--df-text-secondary);
+  background: color-mix(in srgb, var(--df-control-bg) 86%, transparent);
+  font: 15px/1 var(--df-font-mono);
+}
+
+.provider-catalog-row.selected .provider-catalog-toggle {
+  border-color: color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft));
+  color: var(--df-success-strong);
+  background: color-mix(in srgb, var(--df-success) 12%, transparent);
+}
+
+.provider-catalog-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--df-border-soft);
+}
+
+.provider-catalog-custom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 9px;
+  background: var(--df-control-bg);
+}
+
+.provider-catalog-custom input {
+  padding: 0 11px;
+}
+
+.provider-catalog-custom button {
+  min-width: 92px;
+  border: 0;
+  border-left: 1px solid var(--df-border-soft);
+  color: var(--df-interactive-strong);
+  background: color-mix(in srgb, var(--df-interactive) 8%, transparent);
+}
+
+.model-routing-pane {
+  padding: 0;
+  overflow: hidden;
+}
+
+.model-routing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 110px;
+  padding: 20px clamp(20px, 3vw, 32px);
+  border-bottom: 1px solid var(--df-border-soft);
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--df-interactive) 8%, transparent), transparent 42%),
+    color-mix(in srgb, var(--df-surface-1) 92%, transparent);
+}
+
+.model-routing-header h3,
+.model-routing-header p,
+.model-role-card h4,
+.model-role-card p,
+.model-routing-empty strong,
+.model-routing-empty p,
+.model-binding-summary strong,
+.model-binding-summary small {
+  margin: 0;
+}
+
+.model-routing-header h3 {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.model-routing-header p {
+  max-width: 720px;
+  margin-top: 6px;
+  color: var(--df-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.model-routing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 22px clamp(20px, 3vw, 32px) 30px;
+}
+
+.model-role-card {
+  --role-accent: var(--df-interactive);
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  min-width: 0;
+  padding: 17px;
+  overflow: hidden;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 13px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--role-accent) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--df-surface-2) 78%, transparent);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--role-accent) 62%, transparent);
+}
+
+.model-role-card:nth-child(2) { --role-accent: var(--df-success); }
+.model-role-card:nth-child(3) { --role-accent: var(--df-warning); }
+.model-role-card:nth-child(4) { --role-accent: #5a9bd8; }
+
+.model-role-card > header {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 48px;
+}
+
+.model-role-card > header > .n-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--role-accent) 42%, var(--df-border-soft));
+  border-radius: 11px;
+  color: color-mix(in srgb, var(--role-accent) 76%, var(--df-text));
+  background: color-mix(in srgb, var(--role-accent) 10%, transparent);
+  font-size: 18px;
+}
+
+.model-role-card h4 {
+  color: var(--df-text);
+  font-size: 14px;
+}
+
+.model-role-card p {
+  margin-top: 3px;
+  color: var(--df-text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.model-role-card > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-role-card > label > span {
+  color: var(--df-text-secondary);
+  font-size: 10px;
+}
+
+.model-role-card select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 34px 0 11px;
+  overflow: hidden;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 9px;
+  color: var(--df-text);
+  background-color: var(--df-control-bg);
+  text-overflow: ellipsis;
+}
+
+.model-role-card select:disabled {
+  color: var(--df-text-muted);
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.model-routing-empty {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 22px clamp(20px, 3vw, 32px) 28px;
+  padding: 18px;
+  border: 1px dashed var(--df-border-soft);
+  border-radius: 13px;
+  color: var(--df-text-secondary);
+  background: color-mix(in srgb, var(--df-surface-2) 62%, transparent);
+}
+
+.model-routing-empty > .n-icon {
+  font-size: 28px;
+  color: var(--df-interactive-strong);
+}
+
+.model-routing-empty p {
+  margin-top: 4px;
+  color: var(--df-text-muted);
+  font-size: 10px;
+}
+
+.model-binding-summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--df-interactive) 24%, var(--df-border-soft));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--df-interactive) 6%, var(--df-surface-2));
+}
+
+.model-binding-summary > .n-icon {
+  font-size: 21px;
+  color: var(--df-interactive-strong);
+}
+
+.model-binding-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.model-binding-summary strong,
+.model-binding-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-binding-summary strong {
+  color: var(--df-text-secondary);
+  font-size: 11px;
+}
+
+.model-binding-summary small {
+  color: var(--df-text-muted);
+  font: 10px/1.4 var(--df-font-mono);
+}
+
+.advanced-binding-summary {
+  margin: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.provider-catalog-row:focus-visible,
+.provider-catalog-filters button:focus-visible,
+.provider-catalog-custom button:focus-visible,
+.model-role-card select:focus-visible {
   outline: 2px solid var(--df-interactive);
   outline-offset: 2px;
 }
@@ -550,7 +1036,8 @@
   }
 
   .provider-field-grid,
-  .provider-test-section {
+  .provider-test-section,
+  .model-routing-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -585,11 +1072,33 @@
     grid-template-columns: 30px minmax(0, 1fr) 30px;
   }
 
-  .provider-model-row .n-tag {
-    grid-column: 2 / -1;
-    grid-row: 2;
-    justify-self: start;
+  .model-routing-header,
+  .model-routing-empty {
+    align-items: stretch;
   }
+
+  .model-routing-header {
+    flex-direction: column;
+  }
+
+  .model-routing-empty,
+  .provider-catalog-tools,
+  .provider-catalog-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-catalog-body {
+    max-height: 48dvh;
+  }
+
+  .model-binding-summary {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .model-binding-summary .n-button {
+    grid-column: 1 / -1;
+  }
+
 
   .provider-test-actions,
   .provider-empty-actions {
@@ -611,7 +1120,9 @@
 @media (prefers-reduced-motion: no-preference) {
   .provider-list-item,
   .provider-model-row,
-  .provider-model-remove {
+  .provider-model-remove,
+  .provider-catalog-row,
+  .model-role-card {
     transition: border-color .16s ease, color .16s ease, background-color .16s ease, transform .16s ease;
   }
 

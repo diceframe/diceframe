@@ -73,16 +73,12 @@ export const useSettingsStore = defineStore('settings', () => {
     await load()
   }
 
-  async function saveProviders(providers: AiProviderInput[], mainSelection?: { providerId: string; model: string }) {
+  async function saveProviders(providers: AiProviderInput[]) {
     const payload: Record<string, unknown> = {
       ai_providers: providers.map((p) => ({
         id: p.id, name: p.name, base_url: p.base_url, api_format: p.api_format,
         models: p.models || [],
       })),
-    }
-    if (mainSelection) {
-      payload.llm_provider_ref = mainSelection.providerId
-      payload.model = mainSelection.model
     }
     for (const p of providers) {
       const v = secrets.value[providerSecretKey(p.id)]?.trim()

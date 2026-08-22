@@ -8,7 +8,7 @@ vi.mock('../src/api/client', () => {
   return { api: vi.fn(), apiBlob: vi.fn(), errorMessage: (e: unknown) => String(e), ApiError }
 })
 
-import { api } from '../src/api/client'
+import { ApiError, api } from '../src/api/client'
 import { providerSecretKey, useSettingsStore } from '../src/stores/useSettingsStore'
 
 const mockedApi = vi.mocked(api)
@@ -44,6 +44,30 @@ describe('AI provider library settings store', () => {
     expect(payload[providerSecretKey('empty')]).toBeUndefined()
     // 保存后清空已提交的 secret 输入
     expect(store.secrets[providerSecretKey('sf')]).toBe('')
+  })
+
+  it('rejects a legacy backend response without clearing provider secrets', async () => {
+    const store = useSettingsStore()
+    store.secrets[providerSecretKey('sf')] = 'sk-still-needed'
+    mockedApi.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({})
+
+    const saving = store.saveProviders([
+      {
+        id: 'sf',
+        name: 'SiliconFlow',
+        base_url: 'https://api.siliconflow.cn/v1',
+        api_format: 'openai',
+        models: ['deepseek-ai/DeepSeek-V3'],
+      },
+    ])
+
+    const error = await saving.catch(cause => cause)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toEqual(expect.objectContaining({
+      status: 409,
+      code: 'provider_library_unsupported',
+    }))
+    expect(store.secrets[providerSecretKey('sf')]).toBe('sk-still-needed')
   })
 
   it('sends provider_id for the model/embedding test when a provider is referenced', async () => {
