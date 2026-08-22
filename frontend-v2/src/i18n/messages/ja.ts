@@ -588,6 +588,7 @@ export const ja = {
   modelRoutingMode: '方式',
   modelRoleMain: 'メインモデル',
   modelRoleMainHint: 'ナレーション、判定、一般コンテンツを生成します。',
+  modelRoleFallbackHint: 'メインモデルが失敗した場合に使用します。予備 1、予備 2 の順に試行します。',
   modelRoleEmbedding: '埋め込みモデル',
   modelRoleEmbeddingHint: 'セマンティック記憶検索用のベクトルを生成します。',
   modelRoleTts: '音声合成',

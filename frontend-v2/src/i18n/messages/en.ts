@@ -588,6 +588,7 @@ export const en = {
   modelRoutingMode: 'Mode',
   modelRoleMain: 'Main model',
   modelRoleMainHint: 'Generates narration, decisions, and general content.',
+  modelRoleFallbackHint: 'Used when the main model fails; fallback 1 is tried before fallback 2.',
   modelRoleEmbedding: 'Embedding model',
   modelRoleEmbeddingHint: 'Creates vectors for semantic memory retrieval.',
   modelRoleTts: 'Text to speech',

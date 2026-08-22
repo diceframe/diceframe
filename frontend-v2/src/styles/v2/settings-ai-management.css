@@ -899,6 +899,12 @@
   font-size: 10px;
 }
 
+.model-role-card > .model-role-enabled {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .model-role-card select {
   width: 100%;
   min-height: 38px;

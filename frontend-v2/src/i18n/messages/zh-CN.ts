@@ -588,6 +588,7 @@ export const zhCN = {
   modelRoutingMode: '模式',
   modelRoleMain: '主模型',
   modelRoleMainHint: '处理游戏叙事、角色行动与主要对话。',
+  modelRoleFallbackHint: '主模型请求失败时按顺序接管，备用 1 先于备用 2。',
   modelRoleEmbedding: '向量模型',
   modelRoleEmbeddingHint: '为向量记忆生成嵌入，用于长剧情检索。',
   modelRoleTts: 'TTS 模型',
