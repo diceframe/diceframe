@@ -44,6 +44,7 @@ from src.webui.config_update import (
     MODEL_RUNTIME_CONFIG_KEYS,
     bot_plugin_changes,
     clean_text_value,
+    connection_test_timeout,
     normalize_api_format,
     prepare_config_update,
     provider_runtime_changed,
@@ -281,6 +282,7 @@ STATE = {
     "imagegen_quality": str(saved.get("imagegen_quality", "")),
     "imagegen_style_prefix": str(saved.get("imagegen_style_prefix", "")),
     "imagegen_timeout_seconds": float(saved.get("imagegen_timeout_seconds", 120)),
+    "test_timeout_seconds": float(saved.get("test_timeout_seconds", 30)),
     "narrative_max_tokens": NARRATIVE_MAX_TOKENS,
     "character_gen_max_tokens": CHARACTER_GEN_MAX_TOKENS,
     "summary_max_tokens": SUMMARY_MAX_TOKENS,
@@ -1221,6 +1223,7 @@ async def api_test_embedding(request: web.Request) -> web.Response:
     client = EmbeddingClient(
         base_url, api_key, model,
         proxy_url=proxy_url,
+        timeout_seconds=connection_test_timeout(STATE),
     )
     start = time.time()
     try:
@@ -1249,7 +1252,7 @@ async def api_test_proxy(request: web.Request) -> web.Response:
     import time
     start = time.time()
     try:
-        timeout = aiohttp.ClientTimeout(total=12)
+        timeout = aiohttp.ClientTimeout(total=connection_test_timeout(STATE))
         async with aiohttp.ClientSession() as session:
             request_kwargs = {"proxy": proxy} if proxy else {}
             async with session.get(url, timeout=timeout, **request_kwargs) as resp:

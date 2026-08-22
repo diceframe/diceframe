@@ -1181,6 +1181,7 @@ export interface AppConfig {
   imagegen_quality?: string
   imagegen_style_prefix?: string
   imagegen_timeout_seconds?: number
+  test_timeout_seconds?: number
   [key: string]: unknown
 }
 

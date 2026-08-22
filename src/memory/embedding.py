@@ -40,11 +40,13 @@ class EmbeddingClient:
         model: str = "nomic-embed-text",
         max_input_override: int = 0,
         proxy_url: str = "",
+        timeout_seconds: float = 30,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.proxy_url = proxy_url.strip()
+        self.timeout_seconds = max(5.0, min(float(timeout_seconds), 300.0))
         self.max_input_chars = max_input_override if max_input_override > 0 else self._detect_max_input(model)
         self._session: aiohttp.ClientSession | None = None
 
@@ -104,7 +106,7 @@ class EmbeddingClient:
             request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
             async with session.post(
                 url, json=body, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds),
                 **request_kwargs,
             ) as resp:
                 if resp.status != 200:
@@ -134,7 +136,7 @@ class EmbeddingClient:
             request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
             async with session.post(
                 url, json=body, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=aiohttp.ClientTimeout(total=max(60.0, self.timeout_seconds)),
                 **request_kwargs,
             ) as resp:
                 if resp.status != 200:

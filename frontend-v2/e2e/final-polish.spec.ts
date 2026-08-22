@@ -102,14 +102,28 @@ test('appearance and advanced settings obey the compact layout contract', async 
   await expect(advancedSections.first()).toBeVisible()
   // 契约不锁 section 数量：新增块只需自觉选择“整行”或“成对”布局；只锁布局不变量。
   await expect(page.locator('.advanced-settings-pane').getByRole('heading', { name: 'DiceFrame Hub 与隐私' })).toBeVisible()
-  const advancedBoxes = await advancedSections.evaluateAll(elements =>
-    elements.map(element => element.getBoundingClientRect()).map(rect => ({ top: rect.top, left: rect.left, width: rect.width, height: rect.height })),
-  )
+  const advancedBoxes = await advancedSections.evaluateAll(elements => elements.map(element => {
+    const rect = element.getBoundingClientRect()
+    return {
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+      wide: element.classList.contains('advanced-section-wide'),
+    }
+  }))
   expect(advancedBoxes.length).toBeGreaterThanOrEqual(3)
   // 契约只做烟雾级检查：所有块在面板内、块间不重叠；
   // 具体排布（谁和谁并排、谁跨行、列宽比例）交给视觉评审，不在 e2e 里编码布局。
   const paneBox = await page.locator('.advanced-settings-pane').boundingBox()
   expect(paneBox).not.toBeNull()
+  const panePadding = await page.locator('.advanced-settings-pane').evaluate(element => {
+    const style = getComputedStyle(element)
+    return {
+      left: Number.parseFloat(style.paddingLeft),
+      right: Number.parseFloat(style.paddingRight),
+    }
+  })
   for (const box of advancedBoxes) {
     expect(box.left).toBeGreaterThanOrEqual(paneBox!.x - 1)
     expect(box.left + box.width).toBeLessThanOrEqual(paneBox!.x + paneBox!.width + 1)
@@ -123,10 +137,56 @@ test('appearance and advanced settings obey the compact layout contract', async 
       expect(Math.min(overlapX, overlapY)).toBeLessThanOrEqual(2)
     }
   }
+  const wideBoxes = advancedBoxes.filter(box => box.wide)
+  for (const box of wideBoxes) {
+    expect(Math.abs(box.left - paneBox!.x - panePadding.left)).toBeLessThanOrEqual(2)
+    expect(Math.abs(box.width - paneBox!.width + panePadding.left + panePadding.right)).toBeLessThanOrEqual(2)
+  }
+  const pairedBoxes = advancedBoxes.filter(box => !box.wide)
+  expect(pairedBoxes.length).toBeGreaterThanOrEqual(2)
+  expect(Math.abs(pairedBoxes[0].top - pairedBoxes[1].top)).toBeLessThanOrEqual(2)
+  expect(Math.abs(pairedBoxes[0].width - pairedBoxes[1].width)).toBeLessThanOrEqual(2)
+  expect(Math.abs(pairedBoxes[0].height - pairedBoxes[1].height)).toBeLessThanOrEqual(2)
 
   await page.goto('/#/settings?section=about')
   await expect(page.locator('.about-card')).toBeVisible()
   await expect(page.getByText('1060613588')).toHaveCount(0)
+})
+
+test('model settings expose DeepSeek help and configurable test timeout', async ({ page }, testInfo) => {
+  await authenticate(page)
+
+  await page.goto('/#/settings?section=api')
+  const providerHeader = page.locator('.ai-manager-header')
+  await providerHeader.getByRole('button', { name: '帮助' }).click()
+  await expect(page.getByRole('dialog').getByText('https://api.deepseek.com')).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('deepseek-v4-pro')).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('deepseek-v4-flash')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await page.goto('/#/settings?section=models')
+  const routingHeader = page.locator('.model-routing-header')
+  await routingHeader.getByRole('button', { name: '帮助' }).click()
+  await expect(page.getByRole('dialog').getByRole('heading', { name: '如何配置模型', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog').getByText(/deepseek-v4-pro/)).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await page.goto('/#/settings?section=advanced')
+  const timeoutSection = page.locator('.test-timeout-section')
+  await expect(timeoutSection.getByRole('heading', { name: '连接测试超时' })).toBeVisible()
+  await expect(timeoutSection.locator('input')).toHaveValue('30')
+  await expect(timeoutSection).toContainText('不改变正常游戏生成')
+
+  if (testInfo.project.name === 'mobile') {
+    const boxes = await page.locator('.advanced-settings-pane > .advanced-section').evaluateAll(elements =>
+      elements.map(element => element.getBoundingClientRect()).map(rect => ({ left: rect.left, width: rect.width })),
+    )
+    expect(boxes.length).toBeGreaterThanOrEqual(5)
+    const lefts = boxes.map(box => box.left)
+    const widths = boxes.map(box => box.width)
+    expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(2)
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(2)
+  }
 })
 
 test('plugin marketplace cards align titles and stretch evenly per row', async ({ page }, testInfo) => {
@@ -235,33 +295,43 @@ test('avatar picker keeps distinct realistic and anime packs for every ruleset',
   expect(ruleDirectories).toHaveLength(await groups.count())
 })
 
-test('settings status cards share the same content baselines', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop', 'desktop visual contract')
+test('settings status stays in one readable horizontal row', async ({ page }, testInfo) => {
   await authenticate(page)
   await page.goto('/#/settings')
 
+  const grid = page.locator('.system-status-grid')
   const cards = page.locator('.system-status-card')
   await expect(cards.first()).toBeVisible()
+  const layout = await grid.evaluate(element => ({
+    display: getComputedStyle(element).display,
+    flexWrap: getComputedStyle(element).flexWrap,
+    overflowX: getComputedStyle(element).overflowX,
+  }))
   const geometry = await cards.evaluateAll(elements => elements.map(element => {
     const card = element.getBoundingClientRect()
     const icon = element.querySelector<HTMLElement>('.system-status-icon')!.getBoundingClientRect()
     const head = element.querySelector<HTMLElement>('.system-status-head')!.getBoundingClientRect()
-    const detail = element.querySelector<HTMLElement>('p')!.getBoundingClientRect()
-    return { cardTop: card.top, cardHeight: card.height, iconTop: icon.top, headTop: head.top, detailTop: detail.top }
+    const detail = element.querySelector<HTMLElement>('p')!
+    return {
+      cardTop: Math.round(card.top),
+      cardHeight: card.height,
+      iconTop: icon.top,
+      headTop: head.top,
+      detailTop: detail.getBoundingClientRect().top,
+      detailWhiteSpace: getComputedStyle(detail).whiteSpace,
+      detailLineHeight: Number.parseFloat(getComputedStyle(detail).lineHeight),
+    }
   }))
 
   expect(geometry.length).toBeGreaterThan(0)
-  const rows = new Map<number, typeof geometry>()
-  for (const item of geometry) {
-    const rowTop = Math.round(item.cardTop)
-    rows.set(rowTop, [...(rows.get(rowTop) ?? []), item])
-  }
-  for (const row of rows.values()) {
-    if (row.length < 2) continue
-    for (const key of ['cardHeight', 'iconTop', 'headTop', 'detailTop'] as const) {
-      const values = row.map(item => item[key])
-      expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(2)
-    }
+  expect(layout).toEqual({ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' })
+  expect(new Set(geometry.map(item => item.cardTop)).size).toBe(1)
+  expect(geometry.every(item => item.cardHeight >= 100)).toBe(true)
+  expect(geometry.every(item => item.detailWhiteSpace !== 'nowrap')).toBe(true)
+  expect(geometry.every(item => item.detailLineHeight > 0 && item.cardHeight >= item.detailLineHeight * 3)).toBe(true)
+  for (const key of ['cardHeight', 'iconTop', 'headTop', 'detailTop'] as const) {
+    const values = geometry.map(item => item[key])
+    expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(2)
   }
 })
 

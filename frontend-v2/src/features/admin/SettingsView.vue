@@ -1163,6 +1163,22 @@ function redownloadUpdatePackage() {
                 <h3>{{ t('aiProviders') }}</h3>
                 <p>{{ t('aiProvidersHint') }}</p>
               </div>
+              <HelpButton :title="t('deepseekHelpTitle')">
+                <h4>{{ t('deepseekHelpStep1Title') }}</h4>
+                <p>{{ t('deepseekHelpStep1TextBefore') }} <a href="https://platform.deepseek.com/" target="_blank" rel="noopener">{{ t('deepseekPlatform') }}</a>{{ t('deepseekHelpStep1TextAfter') }}</p>
+                <h4>{{ t('deepseekHelpStep2Title') }}</h4>
+                <p>{{ t('deepseekHelpStep2Text') }} <code>sk-xxxxxxxx</code>{{ t('deepseekHelpStep2Suffix') }}</p>
+                <h4>{{ t('deepseekHelpStep3Title') }}</h4>
+                <p>{{ t('deepseekHelpStep3Text') }}</p>
+                <ul>
+                  <li><strong>{{ t('providerName') }}</strong>: DeepSeek</li>
+                  <li><strong>{{ t('apiFormat') }}</strong>: {{ t('apiFormatOpenAI') }}</li>
+                  <li><strong>Base URL</strong>: <code>https://api.deepseek.com</code></li>
+                  <li><strong>API Key</strong>: {{ t('deepseekHelpApiKey') }}</li>
+                  <li><strong>{{ t('providerModels') }}</strong>: <code>deepseek-v4-pro</code>, <code>deepseek-v4-flash</code></li>
+                </ul>
+                <p>{{ t('deepseekHelpFinish') }}</p>
+              </HelpButton>
             </header>
 
             <div v-if="!providerLibrarySupported" class="provider-backend-warning">
@@ -1421,9 +1437,21 @@ function redownloadUpdatePackage() {
                 <h3>{{ t('modelRoutingTitle') }}</h3>
                 <p>{{ t('modelRoutingHint') }}</p>
               </div>
-              <NButton type="primary" :loading="modelRoutingSaving" :disabled="!providerLibrarySupported" @click="saveModelRouting">
-                {{ t('modelRoutingSave') }}
-              </NButton>
+              <div class="model-routing-actions">
+                <HelpButton :title="t('modelRoutingHelpTitle')">
+                  <h4>{{ t('modelRoutingHelpMainTitle') }}</h4>
+                  <p>{{ t('modelRoutingHelpMainText') }}</p>
+                  <h4>{{ t('modelRoutingHelpFallbackTitle') }}</h4>
+                  <p>{{ t('modelRoutingHelpFallbackText') }}</p>
+                  <h4>{{ t('modelRoutingHelpOptionalTitle') }}</h4>
+                  <p>{{ t('modelRoutingHelpOptionalText') }}</p>
+                  <h4>{{ t('modelRoutingHelpExampleTitle') }}</h4>
+                  <p>{{ t('modelRoutingHelpExampleText') }}</p>
+                </HelpButton>
+                <NButton type="primary" :loading="modelRoutingSaving" :disabled="!providerLibrarySupported" @click="saveModelRouting">
+                  {{ t('modelRoutingSave') }}
+                </NButton>
+              </div>
             </header>
 
             <div v-if="!providerLibrarySupported" class="provider-backend-warning compact">
@@ -1715,7 +1743,20 @@ function redownloadUpdatePackage() {
           </div>
 
           <div v-show="section === 'advanced'" class="settings-pane advanced-settings-pane">
-            <section class="advanced-section tts-section">
+            <section class="advanced-section advanced-section-wide test-timeout-section">
+              <header class="advanced-section-head">
+                <NIcon :component="ServerOutline" />
+                <div><h3>{{ t('testTimeoutTitle') }}</h3><p>{{ t('testTimeoutHint') }}</p></div>
+              </header>
+              <div class="advanced-row">
+                <div><strong>{{ t('testTimeoutSeconds') }}</strong><small>{{ t('testTimeoutScope') }}</small></div>
+                <NInputNumber class="advanced-number" :value="Number(store.config.test_timeout_seconds ?? 30)" :min="5" :max="300" :step="5" @update:value="setNum('test_timeout_seconds', $event)" />
+              </div>
+              <footer class="advanced-save-row">
+                <NButton type="primary" @click="save(['test_timeout_seconds'])">{{ t('saveAction') }}</NButton>
+              </footer>
+            </section>
+            <section class="advanced-section advanced-section-wide tts-section">
               <header class="advanced-section-head">
                 <NIcon :component="OptionsOutline" />
                 <div><h3>{{ t('ttsSettings') }}</h3><p>{{ t('ttsSettingsHint') }}</p></div>
@@ -1815,7 +1856,7 @@ function redownloadUpdatePackage() {
                 </NButton>
               </div>
             </section>
-            <section class="advanced-section generation-section">
+            <section class="advanced-section advanced-section-wide generation-section">
               <header class="advanced-section-head">
                 <NIcon :component="OptionsOutline" />
                 <div><h3>{{ t('generationParams') }}</h3><p>{{ t('generationParamsHint') }}</p></div>

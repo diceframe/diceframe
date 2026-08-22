@@ -6,6 +6,10 @@
 }
 
 .ai-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
   min-height: 104px;
   padding: 18px 24px;
   border-bottom: 1px solid var(--df-border-soft);
@@ -828,6 +832,13 @@
   line-height: 1.55;
 }
 
+.model-routing-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .model-routing-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1087,6 +1098,19 @@
     flex-direction: column;
   }
 
+  .ai-manager-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .model-routing-actions {
+    width: 100%;
+  }
+
+  .model-routing-actions > * {
+    flex: 1 1 0;
+  }
+
   .model-routing-empty,
   .provider-catalog-tools,
   .provider-catalog-footer {
@@ -1134,5 +1158,33 @@
 
   .provider-list-item:hover .provider-avatar {
     transform: translateY(-1px);
+  }
+}
+
+.reference-settings-page .system-status-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 5px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.reference-settings-page .system-status-card {
+  flex: 1 0 218px;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 800px) {
+  .reference-settings-page .system-status-grid {
+    display: flex;
+    grid-auto-columns: unset;
+    grid-auto-flow: unset;
+    grid-template-columns: none;
+  }
+
+  .reference-settings-page .system-status-card {
+    flex-basis: 230px;
   }
 }

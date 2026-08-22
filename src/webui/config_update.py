@@ -54,7 +54,7 @@ CONFIG_KEYS = (
     "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
     "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider", "imagegen_base_url",
     "imagegen_api_key", "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
-    "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds",
+    "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds", "test_timeout_seconds",
     "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
@@ -77,6 +77,14 @@ API_RUNTIME_CONFIG_KEYS = frozenset({
     "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds",
     "ai_providers", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
 })
+
+
+def connection_test_timeout(config: dict[str, Any]) -> float:
+    try:
+        value = float(config.get("test_timeout_seconds", 30))
+    except (TypeError, ValueError):
+        value = 30
+    return max(5.0, min(value, 300.0))
 
 
 def provider_runtime_changed(changed_keys: frozenset[str]) -> bool:
@@ -246,6 +254,11 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 timeout = float(raw)
                 if not 5 <= timeout <= 300:
                     return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "图像生成超时必须在 5–300 秒之间")
+                candidate[key] = timeout
+            elif key == "test_timeout_seconds":
+                timeout = float(raw)
+                if not 5 <= timeout <= 300:
+                    return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "连接测试超时必须在 5–300 秒之间")
                 candidate[key] = timeout
             elif key == "napcat_port":
                 port = int(raw)

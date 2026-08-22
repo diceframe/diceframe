@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.generation import creator
 from src.rules.rule_system import RuleSystem
+from src.webui.config_update import connection_test_timeout
 
 if TYPE_CHECKING:
     from src.webui.api import WebAPI
@@ -77,7 +78,7 @@ async def list_models(api: "WebAPI", base_url: str, api_key: str,
         async with session.get(
             url,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
+            timeout=aiohttp.ClientTimeout(total=connection_test_timeout(api._config_state)),
             **request_kwargs,
         ) as response:
             if response.status != 200:
@@ -131,7 +132,7 @@ async def _test_openai_connection(api: "WebAPI", base_url: str, api_key: str,
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
         async with session.post(
             url, json=body, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
+            timeout=aiohttp.ClientTimeout(total=connection_test_timeout(api._config_state)),
             **request_kwargs,
         ) as resp:
             return await _parse_connection_test_response(resp, start)
@@ -165,7 +166,7 @@ async def _test_anthropic_connection(api: "WebAPI", base_url: str, api_key: str,
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
         async with session.post(
             url, json=body, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
+            timeout=aiohttp.ClientTimeout(total=connection_test_timeout(api._config_state)),
             **request_kwargs,
         ) as resp:
             elapsed = round(time.time() - start, 2)

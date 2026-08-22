@@ -171,9 +171,10 @@
 
 .advanced-settings-pane {
   display: grid;
-  grid-template-columns: minmax(310px, .72fr) minmax(520px, 1.28fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: row dense;
   align-content: start;
-  align-items: start;
+  align-items: stretch;
   gap: 15px;
   padding: 14px !important;
   overflow: visible;
@@ -181,27 +182,10 @@
   background: transparent !important;
 }
 
-.advanced-settings-pane > .tts-section {
+/* 高级设置布局契约：普通区块自动成对，复杂区块加此类占整行。
+   不按 DOM 序号指定行列，后续新增区块不会挤乱已有布局。 */
+.advanced-settings-pane > .advanced-section-wide {
   grid-column: 1 / -1;
-}
-
-/* 双列错位布局：左列 Hub 隐私 + 语音识别上下堆叠，
-   右列生成参数跨两行并拉伸到底，与左列底边对齐。 */
-.advanced-settings-pane > .hub-section {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.advanced-settings-pane > .asr-section {
-  grid-column: 1;
-  grid-row: 3;
-  align-self: start;
-}
-
-.advanced-settings-pane > .generation-section {
-  grid-column: 2;
-  grid-row: 2 / span 2;
-  align-self: stretch;
 }
 
 .advanced-section + .advanced-section {
@@ -209,6 +193,8 @@
 }
 
 .advanced-section {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--df-accent) 26%, var(--df-border-soft));
   border-radius: var(--df-radius-md);
@@ -299,6 +285,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: auto;
   padding: 15px 23px;
   border-top: 1px solid color-mix(in srgb, var(--df-border-soft) 70%, transparent);
   background: color-mix(in srgb, var(--df-surface-2) 54%, transparent);
