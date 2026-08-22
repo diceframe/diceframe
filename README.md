@@ -53,7 +53,7 @@ QQ 交流群：1060613588
 
 [前往 Releases 下载最新版](https://github.com/diceframe/diceframe/releases/latest)
 
-下载最新的 `DiceFrame-vX.Y.Z-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，在浏览器设置页填写 API 地址、模型名和 API Key。
+下载最新的 `DiceFrame-vX.Y.Z-windows-portable.zip`，解压后运行 `DiceFrame.exe`。首次打开后，先在“设置 → AI 服务商”添加服务商名称、API 格式、Base URL、API Key 和可用模型，再到“模型配置”为主模型、备用模型、Embedding、TTS、ASR 和生图选择实际使用的服务商与模型。
 
 Windows 便携版可以在设置页检查并应用更新。
 
@@ -75,6 +75,13 @@ http://localhost:9876
 Docker 会把运行数据挂载到当前目录的 `data/`。详细说明见 [DiceFrame 部署说明](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/deploy.md)。
 
 NAS 用户可以在 Docker 管理界面搜索 `diceframe` 拉取镜像，或在 [Docker Hub](https://hub.docker.com/r/falconku/diceframe) 查找。
+
+`latest` 只跟随正式版。预览版也会发布 Docker 镜像，但不会覆盖 `latest`；需要体验时请从 GitHub Releases 复制完整预览版本号并显式拉取，例如：
+
+```bash
+docker pull ghcr.io/diceframe/diceframe:2.3.0-beta.1
+# Docker Hub：docker pull falconku/diceframe:2.3.0-beta.1
+```
 
 后续更新 Compose 部署：
 
@@ -111,7 +118,7 @@ python web_server.py
 http://localhost:18000
 ```
 
-第一次进入设置页，填入模型 API 地址、模型名和 API key。也可以通过环境变量提供：
+第一次进入设置页，先在“AI 服务商”添加连接信息与模型目录，再到“模型配置”分配主模型、备用模型和各项 AI 能力。旧版已经保存的内联 API 地址、模型名和 API Key 仍可继续使用；环境变量方式也保持兼容：
 
 ```bash
 TRPG_LLM_API_KEY=your_key
@@ -127,7 +134,7 @@ Windows 下也可以双击 `web_ui.bat` 启动；它会检查依赖，并在缺�
 ## 第一局怎么玩
 
 1. 打开 WebUI。
-2. 去“设置”配置 API 地址、模型名和 API Key。
+2. 去“设置 → AI 服务商”添加连接与模型目录，再到“模型配置”选择主模型。
 3. 进入“创建”，选择游戏语言。
 4. 选择模板世界、AI 生成世界，或自己填写世界设定。
 5. 选择规则和难度。

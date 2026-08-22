@@ -32,7 +32,7 @@ It brings the Web UI, character sheets, lorebooks, dice checks, state changes, c
 
 ### Windows Portable
 
-Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. Enter the model base URL, model name, and API key in Settings.
+Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. In Settings, first add an AI provider with its name, API format, Base URL, API key, and model catalog. Then use Model routing to assign the main model, fallbacks, embedding, TTS, ASR, and image generation roles.
 
 Windows portable builds can check for and apply updates from Settings.
 
@@ -64,7 +64,7 @@ Open:
 http://localhost:18000
 ```
 
-On first launch, go to Settings and enter your model base URL, model name, and API key. You can also provide them with environment variables:
+On first launch, add the endpoint and model catalog under AI Providers, then assign the main model, fallbacks, and optional AI roles under Model routing. Existing inline Base URL, model, and API key settings from older versions remain supported. Environment variables remain available as well:
 
 ```bash
 TRPG_LLM_API_KEY=your_key
@@ -92,6 +92,13 @@ http://localhost:9876
 
 Runtime data is stored in `data/`.
 
+The `latest` image always tracks stable releases. Preview images are published under their explicit version tags and never replace `latest`. To try one, copy the full preview version from GitHub Releases, for example:
+
+```bash
+docker pull ghcr.io/diceframe/diceframe:2.3.0-beta.1
+# Docker Hub: docker pull falconku/diceframe:2.3.0-beta.1
+```
+
 See the [Docker deployment guide](https://github.com/diceframe/diceframe-content/blob/main/docs/en/deploy.md) for ports, volumes, secrets, and NapCat networking.
 
 To update a Compose deployment:
@@ -105,11 +112,12 @@ docker compose up -d
 
 1. Open the Web UI.
 2. Switch the app language to English if needed.
-3. Go to Create.
-4. Choose Game Language: English.
-5. Pick the English fantasy template, create or import characters, then enter Play.
-6. Submit actions in natural language.
-7. If an action triggers a check, the system adjudicates and rolls once automatically; the GM narration then resumes.
+3. Add an AI provider and assign the main model in Settings.
+4. Go to Create.
+5. Choose Game Language: English.
+6. Pick the English fantasy template, create or import characters, then enter Play.
+7. Submit actions in natural language.
+8. If an action triggers a check, the system adjudicates and rolls once automatically; the GM narration then resumes.
 
 More player-facing help is in the [DiceFrame user guide](https://github.com/diceframe/diceframe-content/blob/main/docs/en/guide.md).
 

@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image version, for example 1.0"
+        description: "Explicit image tag, for example 2.3.0 or 2.3.0-beta.1"
         required: true
-        default: "1.0"
   push:
     tags:
       - "v*"
@@ -17,7 +16,6 @@ permissions:
 
 jobs:
   ghcr:
-    if: github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
 
     steps:
@@ -31,14 +29,28 @@ jobs:
           owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
+            update_latest="true"
           else
             version="${{ inputs.version }}"
+            update_latest="false"
+          fi
+          version="${version#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid image version: ${version}" >&2
+            exit 1
+          fi
+          if [[ "${version}" == *-* ]]; then
+            update_latest="false"
           fi
           ghcr_image="ghcr.io/${owner}/diceframe"
           dockerhub_image="docker.io/falconku/diceframe"
+          tags="${ghcr_image}:${version},${dockerhub_image}:${version}"
+          if [[ "${update_latest}" == "true" ]]; then
+            tags="${tags},${ghcr_image}:latest,${dockerhub_image}:latest"
+          fi
           {
             echo "version=${version}"
-            echo "tags=${ghcr_image}:${version},${ghcr_image}:latest,${dockerhub_image}:${version},${dockerhub_image}:latest"
+            echo "tags=${tags}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
