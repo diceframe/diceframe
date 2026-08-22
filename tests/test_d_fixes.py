@@ -5,32 +5,46 @@ from src.engine.combat import resolve_attack
 from src.engine.game_instance import GameInstance, GameRegistry
 
 
-def test_difficulty_no_compound(monkeypatch):
+def _attack_check(verdict: str, roll: int) -> dict:
+    return {
+        "check_id": f"attack-{roll}",
+        "actor_uid": "fighter",
+        "kind": "attack",
+        "dice": "d20",
+        "roll": roll,
+        "total": roll,
+        "verdict": verdict,
+        "is_critical": verdict == "大成功",
+        "is_fumble": verdict == "大失败",
+    }
+
+
+def test_difficulty_no_compound():
     """E3: 硬核难度多次受击不会让 HP 滚雪球增加（B2 修复）。"""
-    monkeypatch.setattr("random.randint", lambda a, b: 10)
     target = {"character_name": "哥布林", "hp": 100, "max_hp": 100, "armor": 0}
     for _ in range(3):
         resolve_attack("战士", target, {"name": "剑", "damage": 5},
-                       attr_value=14, combat_model="hp_based", difficulty="硬核")
+                       attr_value=14, combat_model="hp_based", difficulty="硬核",
+                       check_result=_attack_check("成功", 10))
     assert target["hp"] < 100  # 受击后 HP 应单调递减，不滚雪球
 
 
-def test_lethal_narrative_can_miss(monkeypatch):
-    """D9: lethal_narrative 高 d100（>50）未命中，dmg=0。"""
-    monkeypatch.setattr("random.randint", lambda a, b: 90)
+def test_lethal_narrative_can_miss():
+    """lethal_narrative 直接消费失败 CheckResult，dmg=0。"""
     target = {"character_name": "教徒", "hp": 20, "max_hp": 20, "armor": 0}
     result = resolve_attack("调查员", target, {"name": "手枪", "damage": 8},
-                            attr_value=14, combat_model="lethal_narrative")
+                            attr_value=14, combat_model="lethal_narrative",
+                            check_result=_attack_check("失败", 90))
     assert result.damage == 0
     assert result.target_hp_after == 20
 
 
-def test_lethal_narrative_hit(monkeypatch):
-    """D9: lethal_narrative 低 d100（<=50）命中，有伤害。"""
-    monkeypatch.setattr("random.randint", lambda a, b: 10)
+def test_lethal_narrative_hit():
+    """lethal_narrative 直接消费成功 CheckResult，有伤害。"""
     target = {"character_name": "教徒", "hp": 20, "max_hp": 20, "armor": 0}
     result = resolve_attack("调查员", target, {"name": "手枪", "damage": 8},
-                            attr_value=14, combat_model="lethal_narrative")
+                            attr_value=14, combat_model="lethal_narrative",
+                            check_result=_attack_check("普通成功", 10))
     assert result.damage > 0
     assert result.target_hp_after < 20
 

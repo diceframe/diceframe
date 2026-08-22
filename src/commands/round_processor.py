@@ -39,7 +39,7 @@ from src.commands.round_actions import (
 from src.commands.state_recap import snapshot_public_player_state
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.commands.tag_summary import summarize_tags
-from src.engine.constants import COMBAT_ATTACK_KEYWORDS, COMBAT_INTENT_KEYWORDS
+from src.engine.constants import COMBAT_INTENT_KEYWORDS
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.imagegen import (
@@ -397,7 +397,8 @@ class RoundProcessor:
             actions_text += dice_block
 
         explicit_attack = any(
-            any(keyword in str(action.get("text") or "") for keyword in COMBAT_ATTACK_KEYWORDS)
+            isinstance(action.get("check_request"), dict)
+            and str(action["check_request"].get("kind") or "") == "attack"
             for action in instance.action_queue
             if action.get("user_id") in instance.players
         )

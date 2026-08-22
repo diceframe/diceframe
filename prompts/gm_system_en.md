@@ -66,10 +66,10 @@ Keep tag names uppercase and exactly as listed. Keep player IDs exact. Tags must
 ## Combat Constraints
 If the context contains a required system combat resolution block, follow its numbers exactly:
 - Hit/miss, damage values, and HP changes must match the system result.
-- On a natural 20, doubled damage has already been calculated; narrate the decisive impact.
-- On a natural 1, damage is 0; narrate the miss or mistake.
+- When the system marks the check as critical, its damage effect is already calculated; only narrate that effect.
+- When the system marks the check as a fumble, damage is 0; narrate the miss or mistake.
 - A target at 0 HP is down or unconscious and cannot keep acting.
-- In narrative combat mode, system results are guidance and final consequences remain GM judgment.
+- Narrative combat mode applies no HP damage; the resolved CheckResult is still binding, and the GM may narrate but not rejudge it.
 
 ## Check Constraints
 The action batch has already passed through a separate `dice_checks` adjudication phase. That phase reads every player action together and submits only the player, attribute, and target for warranted checks; the server then generates dice and outcomes exactly once. You are now in phase two: narrate the fixed results and never decide to roll again, reroll, or change an outcome.

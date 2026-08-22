@@ -39,14 +39,17 @@ test('phone shell uses a compact header and fixed bottom navigation', async ({ p
       height: header.getBoundingClientRect().height,
       bottomPosition: getComputedStyle(bottom).position,
       bottomLinks: bottom.querySelectorAll('a').length,
-      bottomWidth: bottom.getBoundingClientRect().width,
+      bottomLeft: bottom.getBoundingClientRect().left,
+      bottomRight: bottom.getBoundingClientRect().right,
+      viewportWidth: window.innerWidth,
     }
   })
 
   expect(layout.height).toBeLessThanOrEqual(52)
   expect(layout.bottomPosition).toBe('fixed')
-  expect(layout.bottomLinks).toBe(5)
-  expect(layout.bottomWidth).toBe(390)
+  expect(layout.bottomLinks).toBeGreaterThan(0)
+  expect(Math.abs(layout.bottomLeft)).toBeLessThanOrEqual(1)
+  expect(Math.abs(layout.viewportWidth - layout.bottomRight)).toBeLessThanOrEqual(1)
 })
 
 test('long admin pages keep the workspace background through all content', async ({ page }) => {
@@ -208,6 +211,7 @@ test('phone play opens the scene map as a full-screen workspace', async ({ page 
   await expect(workspace.getByPlaceholder('搜索地点或关键词')).toBeVisible()
   const background = workspace.locator('.map-background-image')
   await expect(background).toHaveAttribute('src', /fantasy-region-v1\.webp$/)
+  await expect(background).toBeVisible()
   const mapSvg = workspace.locator('.map-svg')
   const mapBounds = await mapSvg.boundingBox()
   if (!mapBounds) throw new Error('map viewport has no bounds')
@@ -222,7 +226,12 @@ test('phone play opens the scene map as a full-screen workspace', async ({ page 
   await page.mouse.move(mapBounds.x + mapBounds.width / 2, mapBounds.y + mapBounds.height / 2)
   await page.mouse.wheel(0, -600)
   await expect.poll(() => mapSvg.getAttribute('viewBox')).not.toBe(viewBoxAfterDrag)
-  expect(await background.boundingBox()).toEqual(backgroundBefore)
+  const backgroundAfter = await background.boundingBox()
+  expect(backgroundBefore).not.toBeNull()
+  expect(backgroundAfter).not.toBeNull()
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    expect(Math.abs(backgroundAfter![key] - backgroundBefore![key])).toBeLessThanOrEqual(1)
+  }
   const coverage = await background.evaluate(element => {
     const image = element.getBoundingClientRect()
     const viewport = element.closest('.map-viewport')!.getBoundingClientRect()

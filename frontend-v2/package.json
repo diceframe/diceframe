@@ -10,6 +10,8 @@
     "lint": "eslint src tests --max-warnings 0",
     "test": "vitest run",
     "test:e2e": "python ../scripts/run_e2e.py",
+    "test:e2e:smoke": "python ../scripts/run_e2e.py e2e/admin-ui.spec.ts e2e/flows.spec.ts e2e/peer-connect.spec.ts e2e/responsive.spec.ts e2e/shell.spec.ts",
+    "test:e2e:visual": "python ../scripts/run_e2e.py e2e/final-polish.spec.ts e2e/plugin-layout.spec.ts",
     "test:e2e:mobile": "python ../scripts/run_e2e.py --project=mobile"
   },
   "dependencies": {

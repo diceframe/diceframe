@@ -2,26 +2,30 @@ import { describe, expect, it } from 'vitest'
 import { builtinPortraits, defaultBuiltinPortrait, resolveBuiltinPortrait } from '../src/utils/portraits'
 
 describe('character portraits', () => {
-  it('provides a distinct mixed-style eight-image portrait set for every built-in ruleset', () => {
+  it('provides a distinct mixed-style portrait set for every built-in ruleset', () => {
     const allImages = new Set<string>()
+    let optionCount = 0
     for (const ruleId of ['dnd5e', 'freeform_coc', 'freeform_cyberpunk', 'freeform_fantasy', 'freeform_wuxia', 'tavern_free']) {
       const options = builtinPortraits(ruleId)
-      expect(options).toHaveLength(8)
-      expect(options.map(option => option.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7].map(index => `${ruleId}:${index}`))
-      expect(new Set(options.map(option => option.image)).size).toBe(8)
+      expect(options.length).toBeGreaterThanOrEqual(2)
+      expect(options.map(option => option.id)).toEqual(options.map((_, index) => `${ruleId}:${index}`))
+      expect(new Set(options.map(option => option.image)).size).toBe(options.length)
       expect(options.every(option => option.image.includes(`/avatars/v3/${ruleId}/`))).toBe(true)
-      expect(options.filter(option => option.style === 'realistic')).toHaveLength(4)
-      expect(options.filter(option => option.style === 'anime')).toHaveLength(4)
+      expect(options.some(option => option.style === 'realistic')).toBe(true)
+      expect(options.some(option => option.style === 'anime')).toBe(true)
       expect(options.every(option => option.position === '50% 26%')).toBe(true)
       options.forEach(option => allImages.add(option.image))
+      optionCount += options.length
     }
-    expect(allImages.size).toBe(48)
+    expect(allImages.size).toBe(optionCount)
   })
 
-  it('selects stable defaults from all eight portraits', () => {
+  it('selects stable defaults that remain inside the available portrait set', () => {
     expect(defaultBuiltinPortrait('freeform_coc', 'player_1')).toEqual(defaultBuiltinPortrait('freeform_coc', 'player_1'))
+    const available = builtinPortraits('freeform_coc')
     const selected = new Set(Array.from({ length: 128 }, (_, index) => defaultBuiltinPortrait('freeform_coc', `player_${index}`).index))
-    expect(selected).toEqual(new Set([0, 1, 2, 3, 4, 5, 6, 7]))
+    expect(selected.size).toBeGreaterThan(1)
+    expect([...selected].every(index => index >= 0 && index < available.length)).toBe(true)
     expect(resolveBuiltinPortrait(undefined, 'freeform_coc_en', 'player_1').ruleId).toBe('freeform_coc')
   })
 

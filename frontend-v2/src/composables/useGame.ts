@@ -7,6 +7,7 @@ import type { LoreKeywords } from '@/utils/renderer'
 import { clearCurrentGame, gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 import { resolveMapBackgroundAsset, revokeMapBackgroundAsset } from '@/api/mapBackgrounds'
 import { activePeerGameClient } from '@/peer/game/bridge'
+import { gameSseEffect, updatedGameSseCursor, type GameSsePayload } from '@/composables/gameSse'
 
 const KEY_MAP:Record<string,keyof LoreKeywords>={npc:'npc',location:'location',item:'item',faction:'faction',event:'event',puzzle:'puzzle',other:'other',lore:'other'}
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || 'Load failed') }
@@ -36,6 +37,7 @@ export function useGame(){
   let refreshTimer:number|undefined
   let reconnectTimer:number|undefined
   let connectVersion=0
+  let eventCursor=''
   const signatures:Record<string,string> = { detail:'', players:'', log:'', privateMessages:'', map:'', loreEntries:'', lore:'' }
   // GM 判定与后端 is_game_gm 同口径：已登录 owner（管理员账号多人共用都算）或该局主 GM 会话。
   const isGm = computed(()=>!!detail.value && (hasAccessToken() || (!!userId.value && detail.value.gm_uid===userId.value)))
@@ -43,6 +45,7 @@ export function useGame(){
   const player = computed(()=>players.value.find(p=>p.user_id===actorId.value) || players.value[0])
 
   function rememberGame(key: string) {
+    if (currentGame.value !== key) eventCursor = ''
     currentGame.value = key
     rememberCurrentGame(key, detail.value?.world_name || '')
   }
@@ -177,16 +180,22 @@ export function useGame(){
       return
     }
     try{
-      const next=await gameEventSource(gameKey)
+      const next=await gameEventSource(gameKey, eventCursor)
       if(version!==connectVersion || gameKey!==currentGame.value){next.close();return}
       source=next
+      source.onopen=()=>{
+        if(source!==next)return
+        if(pollTimer){clearInterval(pollTimer);pollTimer=undefined}
+      }
       source.onmessage=(ev:MessageEvent)=>{
         if(pollTimer){clearInterval(pollTimer);pollTimer=undefined}
-        let payload:{type?:string;text?:string}|null=null
+        eventCursor=updatedGameSseCursor(eventCursor, ev.lastEventId)
+        let payload:GameSsePayload|null=null
         try{payload=JSON.parse(ev.data)}catch{payload=null}
-        const type=payload?.type||''
-        if(type==='narration_delta'){liveNarration.value+=String(payload?.text||'');return}
-        if(type==='narration_reset'){liveNarration.value='';return}
+        const effect=gameSseEffect(payload)
+        if(effect==='baseline')return
+        if(effect==='narration-delta'){liveNarration.value+=String(payload?.text||'');return}
+        if(effect==='narration-reset'){liveNarration.value='';return}
         scheduleSilentRefresh()
       }
       source.onerror=()=>{
@@ -200,19 +209,26 @@ export function useGame(){
       if(!reconnectTimer)reconnectTimer=window.setTimeout(()=>{reconnectTimer=undefined;void connect()},5000)
     }
   }
-  function selectGame(key:string){rememberGame(key);refresh();connect()}
+  async function selectGame(key:string){rememberGame(key);await refresh();await connect()}
   if(currentGame.value) rememberCurrentGame(currentGame.value, detail.value?.world_name || '')
-  watch(() => route.query.game, (value) => {
+  watch(() => route.query.game, async (value) => {
     const next = queryString(value)
     if(next && next !== currentGame.value){
       rememberGame(next)
-      refresh()
-      connect()
+      await refresh()
+      await connect()
     } else if(!currentGame.value && readCurrentGame()) {
       rememberGame(readCurrentGame())
     }
   })
-  watch(() => route.query.user, () => { userId.value = routeUser() })
+  watch(() => route.query.user, async () => {
+    const nextUser = routeUser()
+    if (nextUser === userId.value) return
+    userId.value = nextUser
+    eventCursor = ''
+    await refresh(true)
+    await connect()
+  })
   watch(() => log.value.length, (next, prev) => { if ((prev ?? 0) < next) liveNarration.value = '' })
   onBeforeUnmount(()=>{connectVersion++;source?.close();unsubscribePeerEvents?.();revokeMapBackgroundAsset(map.value);clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
   return {currentGame,userId,actorId,detail,players,player,log,privateMessages,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration}

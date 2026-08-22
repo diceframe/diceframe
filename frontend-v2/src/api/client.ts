@@ -162,10 +162,11 @@ export async function checkOwnerAccess(): Promise<OwnerAccessStatus> {
   }
 }
 
-export async function gameEventSource(gameKey: string): Promise<EventSource> {
+export async function gameEventSource(gameKey: string, cursor = ''): Promise<EventSource> {
   const result = await api<{ ticket: string }>(`/games/${encodeURIComponent(gameKey)}/sse-ticket`, { method: 'POST' })
   const q = new URLSearchParams(shareQuery())
   q.set('ticket', result.ticket)
+  if (cursor) q.set('cursor', cursor)
   return new EventSource(`/api/games/${encodeURIComponent(gameKey)}/sse?${q}`)
 }
 

@@ -75,16 +75,6 @@ async function submit() {
       <div class="composer-title-row">
         <strong>{{ t('composerTitle') }}</strong>
         <span v-if="hint" class="composer-hint">{{ hint }}</span>
-        <button
-          v-if="micAvailable"
-          type="button"
-          class="dictation-toggle"
-          :class="{ active: recording }"
-          :title="recording ? t('asrStop') : t('asrVoice')"
-          :aria-pressed="recording"
-          :disabled="transcribing || (locked && !recording)"
-          @click="toggleVoice()"
-        >{{ recording ? '⏹' : '🎤' }}</button>
       </div>
     </div>
     <div class="quick-actions" :aria-label="t('quickActions')">
@@ -93,8 +83,19 @@ async function submit() {
     <div v-if="dictationError" class="dictation-status error">{{ dictationError }}</div>
     <div v-else-if="recording" class="dictation-status">{{ t('asrRecording', { seconds: elapsedSeconds }) }}</div>
     <div v-else-if="transcribing" class="dictation-status">{{ t('asrTranscribing') }}</div>
-    <div class="composer-row">
+    <div class="composer-row" :class="{ 'has-dictation': micAvailable }">
       <textarea v-model="text" :disabled="locked" :placeholder="t('actionPlaceholder')" @keydown.ctrl.enter.prevent="submit()" />
+      <button
+        v-if="micAvailable"
+        type="button"
+        class="dictation-toggle"
+        :class="{ active: recording }"
+        :title="recording ? t('asrStop') : t('asrVoice')"
+        :aria-label="recording ? t('asrStop') : t('asrVoice')"
+        :aria-pressed="recording"
+        :disabled="transcribing || (locked && !recording)"
+        @click="toggleVoice()"
+      >{{ recording ? '⏹' : '🎤' }}</button>
       <button class="primary" @click="submit()" :disabled="locked || !text.trim()">{{ busy ? t('processing') : t('action') }}</button>
     </div>
     <div v-if="notice" class="notice">{{ notice }}</div>
@@ -102,16 +103,18 @@ async function submit() {
 </template>
 
 <style scoped>
+.composer-row.has-dictation {
+  grid-template-columns: minmax(0, 1fr) 44px 92px;
+}
+
 .dictation-toggle {
-  flex: 0 0 auto;
-  min-width: 32px;
-  padding: 2px 9px;
+  min-width: 44px;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--df-interactive) 38%, var(--df-border-soft));
-  border-radius: 999px;
+  border-radius: var(--df-radius-md);
   color: var(--df-text-secondary);
   background: color-mix(in srgb, var(--df-interactive) 10%, var(--df-control-bg));
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 16px;
 }
 
 .dictation-toggle.active {
@@ -140,5 +143,15 @@ async function submit() {
   border-color: color-mix(in srgb, var(--df-danger) 38%, var(--df-border-soft));
   color: var(--df-danger-strong);
   background: color-mix(in srgb, var(--df-danger) 8%, transparent);
+}
+
+@media (max-width: 800px) {
+  .composer-row.has-dictation {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .composer-row textarea {
+    grid-column: 1 / -1;
+  }
 }
 </style>

@@ -28,6 +28,7 @@ DATA_ENDPOINTS = {
     "/api/rules/{rule_id}/character-schema",
     "/api/character-cards",
     "/api/config",
+    "/api/image-generation",
     "/api/login-history",
     "/api/me",
     "/api/system/update/status",

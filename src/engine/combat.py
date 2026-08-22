@@ -1,50 +1,105 @@
-﻿"""战斗结算 —— 三种战斗模型：hp_based / lethal_narrative / narrative。"""
+"""战斗伤害结算。
+
+命中与成败由统一检定引擎生成的 ``CheckResult`` 唯一决定；
+本模块不产生 d20/d100 命中骰，也不重新判定成败。处理顺序固定为：
+``CheckResult -> 伤害计算 -> 全部修正 -> HP 修改``。
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from typing import Any
 
-from .character_utils import set_hp
-from .dice import DiceResult, check_d100, check_d20, roll
+from .character_utils import armor_value, set_hp
+from .dice_rng import DiceResult
 
 logger = logging.getLogger("trpg")
+
+_SUCCESS_VERDICTS = {
+    "成功",
+    "普通成功",
+    "困难成功",
+    "极难成功",
+    "大成功",
+    "success",
+    "regular success",
+    "hard success",
+    "extreme success",
+    "critical success",
+}
 
 
 @dataclass
 class AttackResult:
-    """攻击结算结果。"""
+    """已结算的单次攻击结果。
+
+    前八个字段保持旧结构；新字段用于多人对应和幂等复用。
+    ``dice`` 仅保留为旧 Python 调用兼容字段，新路径不写入它。
+    """
+
     attacker: str
     target: str
     damage: int
-    actual_damage: int    # 扣除护甲后
+    actual_damage: int
     target_hp_before: int
     target_hp_after: int
     description: str
     dice: DiceResult | None = None
+    attacker_uid: str = ""
+    target_ref: str = ""
+    check_id: str = ""
+    weapon: str = "徒手"
+    verdict: str = ""
+    is_critical: bool = False
+    is_fumble: bool = False
+
+    def to_record(self) -> dict[str, Any]:
+        """转换为可序列化战斗缓存，不序列化旧 ``DiceResult``。"""
+        record = asdict(self)
+        record.pop("dice", None)
+        return record
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "AttackResult":
+        """从存档/重试缓存恢复；额外字段保持向前兼容。"""
+        fields = cls.__dataclass_fields__
+        values = {key: value for key, value in record.items() if key in fields and key != "dice"}
+        return cls(**values)
+
+
+def _check_succeeded(check_result: Mapping[str, Any]) -> bool:
+    if bool(check_result.get("is_fumble")):
+        return False
+    return str(check_result.get("verdict") or "").strip().casefold() in _SUCCESS_VERDICTS
 
 
 def calc_hp_based_damage(
     weapon_damage: int,
     attr_modifier: int = 0,
     target_armor: int = 0,
-    dice_result: DiceResult | None = None,
+    check_result: Mapping[str, Any] | None = None,
 ) -> int:
-    """标准 HP 战斗伤害计算。
+    """计算 HP 模型的命中伤害，不修改角色状态。
 
-    伤害 = 武器基础 + 属性修正 +/- d20 浮动 - 目标护甲
-    普通命中/大成功最小伤害 = 1；大失败 = 0（不应用最小伤害下限）
+    骰面浮动和暴击都只读取已有 ``CheckResult``。该函数本身不负责
+    判定是否命中；外层 ``calculate_attack_damage`` 先执行成败门禁。
     """
-    base = weapon_damage + attr_modifier
-    if dice_result:
-        if dice_result.is_critical:
-            base *= 2
-        elif dice_result.is_fumble:
+    base = int(weapon_damage) + int(attr_modifier)
+    if check_result:
+        if bool(check_result.get("is_fumble")):
             return 0
-        else:
-            dice_offset = dice_result.total - 10  # d20 与平均值 10.5 的偏差
-            base += dice_offset // 3
-    return max(1, base - target_armor)
+        if bool(check_result.get("is_critical")):
+            base *= 2
+        elif str(check_result.get("dice") or check_result.get("dice_system") or "").lower() == "d20":
+            resolved_total = int(
+                check_result.get("total")
+                or check_result.get("roll")
+                or 10
+            )
+            base += (resolved_total - 10) // 3
+    return max(1, base - int(target_armor))
 
 
 def calc_lethal_damage(
@@ -52,9 +107,48 @@ def calc_lethal_damage(
     attr_modifier: int = 0,
     target_armor: int = 0,
 ) -> int:
-    """致命叙事战斗 —— 伤害更高，每次命中都可能致命。"""
-    dmg = weapon_damage + attr_modifier * 2 - target_armor // 2
-    return max(1, dmg)
+    """计算致命叙事模型的命中伤害，不修改角色状态。"""
+    damage = int(weapon_damage) + int(attr_modifier) * 2 - int(target_armor) // 2
+    return max(1, damage)
+
+
+def calculate_attack_damage(
+    check_result: Mapping[str, Any],
+    *,
+    weapon_damage: int,
+    attr_modifier: int = 0,
+    target_armor: int = 0,
+    combat_model: str = "hp_based",
+    same_faction: bool = False,
+) -> int:
+    """消费权威检定并应用全部伤害修正；不修改 HP。"""
+    if combat_model == "narrative" or not _check_succeeded(check_result):
+        return 0
+    if combat_model == "lethal_narrative":
+        damage = calc_lethal_damage(weapon_damage, attr_modifier, target_armor)
+        if bool(check_result.get("is_critical")):
+            damage *= 2
+    else:
+        damage = calc_hp_based_damage(
+            weapon_damage,
+            attr_modifier,
+            target_armor,
+            check_result,
+        )
+    if same_faction and damage > 0:
+        damage //= 2
+    return max(0, damage)
+
+
+def apply_damage(target: dict[str, Any], damage: int) -> tuple[int, int]:
+    """在最终伤害已确定后才修改 HP，返回 ``(before, after)``。"""
+    before = int(target.get("hp", 0) or 0)
+    applied = max(0, int(damage))
+    if applied <= 0:
+        return before, before
+    after = max(0, before - applied)
+    set_hp(target, after, target.get("max_hp", before))
+    return before, after
 
 
 def resolve_attack(
@@ -64,81 +158,88 @@ def resolve_attack(
     attr_value: int = 10,
     combat_model: str = "hp_based",
     difficulty: str = "standard",
+    *,
+    check_result: Mapping[str, Any] | None = None,
+    same_faction: bool = False,
+    attacker_uid: str = "",
+    target_ref: str = "",
+    target_name: str = "",
 ) -> AttackResult:
-    """解析一次攻击。
+    """基于已有 ``CheckResult`` 结算一次攻击。
 
-    Args:
-        attacker_name: 攻击者名称
-        target: 目标玩家/NPC 字典（含 hp, armor, character_name 等）
-        weapon: 武器字典（含 damage, name 等），None 表示徒手
-        attr_value: 攻击方的相关属性值
-        combat_model: hp_based / lethal_narrative / narrative
-        difficulty: easy / standard / hardcore
-
-    Returns:
-        AttackResult
+    ``check_result`` 缺失时采用 fail-closed：不掷骰、不扣 HP，从而保留
+    旧函数调用形式的同时不再提供隐式二次命中入口。
     """
-    weapon_damage = weapon.get("damage", 1) if weapon else 1
-    weapon_name = weapon.get("name", "徒手") if weapon else "徒手"
-    target_name = target.get("character_name", target.get("name", "目标"))
-    target_armor = target.get("armor") or target.get("_armor", 0)
-    target_hp = target.get("hp", 0)
-    attr_mod = (attr_value - 10) // 2  # D&D 式属性修正
+    del difficulty  # 难度已在 CheckResult 的 DC/阈值中结算。
+    weapon_damage = int(weapon.get("damage", 1) or 1) if weapon else 1
+    weapon_name = str(weapon.get("name", "徒手") or "徒手") if weapon else "徒手"
+    resolved_target_name = target_name or str(
+        target.get("character_name") or target.get("name") or "目标"
+    )
+    target_armor = armor_value(target)
+    before = int(target.get("hp", 0) or 0)
+    attr_modifier = (int(attr_value) - 10) // 2
 
-    # 难度修正：仅调整大成功/大失败阈值。HP 缩放已移除（原代码每次受击都乘
-    # 难度系数导致硬核越打血越多/轻松一碰就碎）。敌人 max_hp 的难度缩放应由
-    # 敌人初始化系统处理，见 D10。
-    if difficulty == "轻松":
-        crit_threshold = 19
-        fumble_threshold = 1
-    elif difficulty == "硬核":
-        crit_threshold = 20
-        fumble_threshold = 2
-    else:
-        crit_threshold = 20
-        fumble_threshold = 1
-
-    dice_res: DiceResult | None = None
-    verdict: str = ""
-
-    if combat_model == "narrative":
-        dice_res, verdict = check_d20(attr_mod, dc=10, crit_on=crit_threshold, fumble_on=fumble_threshold)
+    if not check_result:
         return AttackResult(
-            attacker=attacker_name, target=target_name,
-            damage=0, actual_damage=0,
-            target_hp_before=target_hp, target_hp_after=target_hp,
-            description=f"{attacker_name} 对 {target_name} 发起攻击（叙事模式，{verdict}，GM 裁定结果）",
-            dice=dice_res,
+            attacker=attacker_name,
+            target=resolved_target_name,
+            damage=0,
+            actual_damage=0,
+            target_hp_before=before,
+            target_hp_after=before,
+            description=(
+                f"{attacker_name} 尝试使用 {weapon_name} 攻击 {resolved_target_name}"
+                "（缺少服务端攻击检定，未结算伤害）"
+            ),
+            attacker_uid=attacker_uid,
+            target_ref=target_ref,
+            weapon=weapon_name,
         )
 
-    if combat_model == "lethal_narrative":
-        # D9: d100 命中检定（CoC 风格），未命中 dmg=0
-        dice_res, verdict = check_d100(50)
-        if verdict in ("失败", "大失败"):
-            dmg = 0
-        else:
-            dmg = calc_lethal_damage(weapon_damage, attr_mod, target_armor)
+    verdict = str(check_result.get("verdict") or "")
+    calculated_damage = calculate_attack_damage(
+        check_result,
+        weapon_damage=weapon_damage,
+        attr_modifier=attr_modifier,
+        target_armor=target_armor,
+        combat_model=combat_model,
+        same_faction=same_faction,
+    )
+    hp_before, hp_after = apply_damage(target, calculated_damage)
+    damage = hp_before - hp_after
+    check_id = str(check_result.get("check_id") or "")
+    is_critical = bool(check_result.get("is_critical"))
+    is_fumble = bool(check_result.get("is_fumble"))
+
+    if combat_model == "narrative":
+        description = (
+            f"{attacker_name} 对 {resolved_target_name} 发起攻击"
+            f"（叙事模式，{verdict}，GM 只可按该检定结果叙事）"
+        )
     else:
-        dice_res, verdict = check_d20(attr_mod, dc=12, crit_on=crit_threshold, fumble_on=fumble_threshold)
-        dmg = calc_hp_based_damage(weapon_damage, attr_mod, target_armor, dice_res)
-
-    new_hp = max(0, target_hp - dmg)
-    set_hp(target, new_hp, target.get("max_hp", target_hp))
-
-    desc_parts = [f"{attacker_name} 使用 {weapon_name} 攻击 {target_name}"]
-    if combat_model == "hp_based":
-        desc_parts.append(f"（{verdict}，伤害 {dmg}）")
-    else:
-        desc_parts.append(f"（伤害 {dmg}）")
-    desc_parts.append(f"{target_name} HP: {target_hp} → {new_hp}")
-
-    if new_hp <= 0:
-        desc_parts.append(f"💀 {target_name} 倒地昏迷！")
+        friendly_note = "，友军伤害减半" if same_faction and damage > 0 else ""
+        description = (
+            f"{attacker_name} 使用 {weapon_name} 攻击 {resolved_target_name}"
+            f"（{verdict}，伤害 {damage}{friendly_note}）"
+            f"{resolved_target_name} HP: {hp_before} → {hp_after}"
+        )
+        if hp_after <= 0 and hp_before > 0:
+            description += f"💀 {resolved_target_name} 倒地昏迷！"
 
     return AttackResult(
-        attacker=attacker_name, target=target_name,
-        damage=dmg, actual_damage=dmg,
-        target_hp_before=target_hp, target_hp_after=new_hp,
-        description="".join(desc_parts),
-        dice=dice_res,
+        attacker=attacker_name,
+        target=resolved_target_name,
+        damage=damage,
+        actual_damage=damage,
+        target_hp_before=hp_before,
+        target_hp_after=hp_after,
+        description=description,
+        attacker_uid=attacker_uid,
+        target_ref=target_ref,
+        check_id=check_id,
+        weapon=weapon_name,
+        verdict=verdict,
+        is_critical=is_critical,
+        is_fumble=is_fumble,
     )

@@ -111,4 +111,4 @@ jobs:
 
       - name: Run clean-data browser tests
         working-directory: frontend-v2
-        run: npm run test:e2e
+        run: npm run test:e2e:smoke

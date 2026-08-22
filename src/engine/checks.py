@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.engine.constants import COMBAT_ATTACK_KEYWORDS
+from src.engine.character_utils import armor_value
 from src.engine.dice import (
     check_d100_bonus,
     coc_success_level,
@@ -22,6 +24,91 @@ from src.engine.language import localized_text
 from src.rules.rule_system import RuleSystem
 
 logger = logging.getLogger("trpg")
+
+_CHINESE_COMBAT_WORD = re.compile(r"攻击|袭击|战斗|交战|开枪|开火|射击|动手|击杀|杀死")
+_CHINESE_NEGATED_COMBAT = re.compile(
+    r"(?:没有敌人时|无敌人时)?"
+    r"(?:不要|不会|不再|不愿|不想|不打算|不准备|避免|拒绝|停止|禁止|不|别|勿)"
+    r"(?:再|去|进行|参与|主动|随意|轻易|贸然|立刻|马上|不必要的|"
+    r"与(?:任何|未知|当前)?目标)*"
+    r"(?:攻击|袭击|战斗|交战|开枪|开火|射击|动手|击杀|杀死)"
+)
+_ENGLISH_COMBAT_WORD = re.compile(
+    r"\b(?:attack(?:ing)?|fight(?:ing)?|shoot(?:ing)?|engag(?:e|ing)|open fire)\b",
+    flags=re.IGNORECASE,
+)
+_ENGLISH_NEGATED_COMBAT = re.compile(
+    r"\b(?:do\s+not|don't|will\s+not|won't|avoid|without|refuse\s+to|stop)\s+"
+    r"(?:unnecessary\s+|randomly\s+|actively\s+)?"
+    r"(?:attack(?:ing)?|fight(?:ing)?|shoot(?:ing)?|engag(?:e|ing)|open\s+fire)\b",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_ATTACK_WORD = re.compile(
+    r"\b(?:attack|shoot|strike|slash|stab|kick|fire at)\b",
+    flags=re.IGNORECASE,
+)
+_GENERIC_ENEMY_WORDS = ("敌人", "敌方", "怪物", "对手", "enemy", "foe", "target")
+
+
+def is_non_combat_declaration(text: object) -> bool:
+    """识别“声明不战斗”，但保留同句中转而发动的真实攻击。"""
+    original = str(text or "").casefold()
+    compact = re.sub(r"\s+", "", original)
+    compact, chinese_count = _CHINESE_NEGATED_COMBAT.subn("", compact)
+    english, english_count = _ENGLISH_NEGATED_COMBAT.subn("", original)
+    if not (chinese_count or english_count):
+        return False
+    return not _CHINESE_COMBAT_WORD.search(compact) and not _ENGLISH_COMBAT_WORD.search(english)
+
+
+def is_explicit_attack_action(text: object) -> bool:
+    """只识别会进入伤害结算的明确攻击，不把格挡/闪避当攻击。"""
+    raw = str(text or "")
+    if is_non_combat_declaration(raw):
+        return False
+    return any(keyword in raw for keyword in COMBAT_ATTACK_KEYWORDS) or bool(
+        _EXPLICIT_ATTACK_WORD.search(raw)
+    )
+
+
+def find_action_opponent(instance: GameInstance, actor_uid: str, text: object) -> str:
+    """把行动中明确点名的目标转成稳定引用。
+
+    玩家沿用 uid，NPC 使用 ``npc:<id>``，战斗敌人使用
+    ``enemy:<index>``。同名目标不猜；只有活跃战斗中的泛称“敌人”才
+    会稳定落到第一个存活敌人。
+    """
+    normalized = _normalized(text)
+    matches: list[tuple[int, str]] = []
+
+    def add(name: object, reference: str) -> None:
+        candidate = _normalized(name)
+        if candidate and candidate in normalized:
+            matches.append((len(candidate), reference))
+
+    for uid, player in instance.players.items():
+        if uid != actor_uid:
+            add(player.get("character_name"), uid)
+    for npc_id, npc in instance.npcs.items():
+        reference = f"npc:{npc_id}"
+        add(npc_id, reference)
+        add(npc.get("name"), reference)
+        add(npc.get("character_name"), reference)
+    for index, enemy in enumerate(instance.combat_enemies):
+        reference = f"enemy:{index}"
+        add(enemy.get("name"), reference)
+        add(enemy.get("character_name"), reference)
+
+    if matches:
+        longest = max(length for length, _ in matches)
+        references = {reference for length, reference in matches if length == longest}
+        return next(iter(references)) if len(references) == 1 else ""
+
+    if instance.combat_state != "none" and any(word in normalized for word in _GENERIC_ENEMY_WORDS):
+        for index, enemy in enumerate(instance.combat_enemies):
+            if int(enemy.get("hp", 1) or 0) > 0:
+                return f"enemy:{index}"
+    return ""
 
 
 def _load_fallback_intents() -> dict:
@@ -191,6 +278,8 @@ def build_check_request(
     if not attribute:
         attribute = "dex" if not rule or "dex" in rule.attribute_keys else (rule.attribute_keys[0] if rule.attribute_keys else "")
 
+    kind = "attack" if intent == "combat" and is_explicit_attack_action(action.get("text")) else "check"
+    opponent = find_action_opponent(instance, uid, action.get("text")) if kind == "attack" else ""
     subject = skill or _attribute_name(rule, attribute)
     label = localized_text(instance.language, {
         "en": f"{subject} Check",
@@ -211,6 +300,8 @@ def build_check_request(
         "attribute": attribute,
         "advantage_mode": advantage_mode,
         "advantage_note": advantage_note or None,
+        "kind": kind,
+        "opponent": opponent,
     }
 
 
@@ -219,6 +310,35 @@ def _effective_advantage_mode(request: dict[str, Any], rule: RuleSystem | None) 
     if rule is not None and mode and not rule.supports_advantage_mode(mode):
         return ""
     return mode if mode in {"advantage", "disadvantage"} else ""
+
+
+def _d20_thresholds_for_request(
+    request: dict[str, Any],
+    rule: RuleSystem | None,
+) -> tuple[int | None, int | None]:
+    """读取检定类型对应的 d20 大成功/大失败阈值。
+
+    普通检定沿用规则的 ``critical``；攻击可以用
+    ``attack_critical`` 单独声明，避免为了 D&D 攻击暴击而把普通
+    属性检定也改成自然 20/1 自动成败。
+    """
+    critical_on, fumble_on = d20_critical_thresholds(rule)
+    if str(request.get("kind") or "") != "attack" or rule is None:
+        return critical_on, fumble_on
+    attack_critical = rule.check_mechanic.get("attack_critical")
+    if not isinstance(attack_critical, dict):
+        return critical_on, fumble_on
+
+    def threshold(key: str) -> int | None:
+        value = attack_critical.get(key)
+        if value is None:
+            return None
+        try:
+            return max(1, min(20, int(value)))
+        except (TypeError, ValueError):
+            return None
+
+    return threshold("success"), threshold("failure")
 
 
 def roll_check_request(request: dict[str, Any], rule: RuleSystem | None = None) -> dict[str, Any]:
@@ -249,7 +369,7 @@ def roll_check_request(request: dict[str, Any], rule: RuleSystem | None = None) 
     else:
         raise ValueError(f"不支持的检定骰制: {dice_system}")
     if dice_system == "d20":
-        crit_on, fumble_on = d20_critical_thresholds(rule)
+        crit_on, fumble_on = _d20_thresholds_for_request(request, rule)
         critical = crit_on is not None and crit_on <= value <= 20
         fumble = fumble_on is not None and 1 <= value <= fumble_on
     else:
@@ -322,6 +442,52 @@ def _bounded_modifier(value: object) -> int:
     return max(-20, min(20, parsed))
 
 
+def _opponent_details(instance: GameInstance, opponent_ref: str) -> tuple[str, dict[str, Any]]:
+    """解析目标引用，返回名称和可信状态；不执行任何掷骰。"""
+    if not opponent_ref:
+        return "", {}
+    if opponent_ref.startswith("npc:"):
+        npc_id = opponent_ref.split(":", 1)[1]
+        npc = instance.npcs.get(npc_id, {})
+        name = str(npc.get("name") or npc.get("character_name") or npc_id)
+        return name, npc
+    if opponent_ref.startswith("enemy:"):
+        try:
+            index = int(opponent_ref.split(":", 1)[1])
+            if index < 0:
+                return "", {}
+            enemy = instance.combat_enemies[index]
+        except (ValueError, IndexError):
+            return "", {}
+        name = str(enemy.get("name") or enemy.get("character_name") or f"敌人{index + 1}")
+        sheet = enemy.get("character_sheet") if isinstance(enemy.get("character_sheet"), dict) else enemy
+        return name, sheet
+    if opponent_ref in instance.players:
+        name = str(instance.players[opponent_ref].get("character_name") or opponent_ref)
+        sheet = instance.get_character_sheet(opponent_ref)
+        return name, sheet
+    return "", {}
+
+
+def _attack_target_dc(rule: RuleSystem | None, target: dict[str, Any]) -> int | None:
+    """Derive an attack target from server-owned state when the rule declares it."""
+    if rule is None:
+        return None
+    target_rule = rule.check_mechanic.get("attack_target")
+    if not isinstance(target_rule, dict) or target_rule.get("type") != "armor_class":
+        return None
+    attributes = target.get("attributes") if isinstance(target.get("attributes"), dict) else {}
+    attribute = str(target_rule.get("attribute") or "dex")
+    attribute_value = int(attributes.get(attribute, 10) or 10)
+    base = int(target_rule.get("base", 10) or 10)
+    total = base + rule.attribute_modifier(attribute_value)
+    if target_rule.get("include_armor", True):
+        total += armor_value(target)
+    minimum = int(target_rule.get("min", 1) or 1)
+    maximum = int(target_rule.get("max", 40) or 40)
+    return max(minimum, min(maximum, total))
+
+
 def resolve_check_request(
     instance: GameInstance,
     action: dict[str, Any],
@@ -371,6 +537,13 @@ def resolve_check_request(
     matched_skill = _resolve_skill(character_sheet, requested_skill, text)
     skill_name = str(matched_skill.get("name") or "") if matched_skill else ""
     actor_name = str(instance.players.get(uid, {}).get("character_name") or uid)
+    opponent_ref = str(request.get("opponent") or "")
+    opponent_name, opponent_state = _opponent_details(instance, opponent_ref)
+    opponent_attributes = (
+        opponent_state.get("attributes")
+        if isinstance(opponent_state.get("attributes"), dict)
+        else {}
+    )
     common = {
         "check_id": str(request.get("check_id") or ""),
         "label": str(request.get("label") or ""),
@@ -383,7 +556,8 @@ def resolve_check_request(
         "advantage_mode": advantage_mode,
         "advantage_note": str(request.get("advantage_note") or "") or None,
         "kind": str(request.get("kind") or "check"),
-        "opponent": str(request.get("opponent") or ""),
+        "opponent": opponent_ref,
+        "opponent_name": opponent_name,
         "assist": list(request.get("assist") or []),
         "planner_source": str(request.get("planner_source") or "legacy"),
     }
@@ -440,35 +614,32 @@ def resolve_check_request(
         raw_dc = rule.dc_for_difficulty(instance.difficulty, "normal") if rule else 10
     dc = max(1, min(d20_dc_cap(rule), raw_dc))
 
-    opponent_ref = str(request.get("opponent") or "")
-    opponent_name = ""
+    trusted_attack_dc = (
+        _attack_target_dc(rule, opponent_state)
+        if common["kind"] == "attack" and opponent_name
+        else None
+    )
+    if trusted_attack_dc is not None:
+        dc = trusted_attack_dc
+
     opponent_roll = request.get("opponent_roll")
     opponent_modifier = _bounded_modifier(request.get("opponent_modifier"))
     opponent_total = request.get("opponent_total")
-    if opponent_ref:
-        opponent_attributes: dict[str, Any] = {}
-        if opponent_ref.startswith("npc:"):
-            npc_id = opponent_ref.split(":", 1)[1]
-            npc = instance.npcs.get(npc_id, {})
-            opponent_name = str(npc.get("name") or npc.get("character_name") or npc_id)
-            opponent_attributes = npc.get("attributes") if isinstance(npc.get("attributes"), dict) else {}
-        elif opponent_ref in instance.players:
-            opponent_name = str(instance.players[opponent_ref].get("character_name") or opponent_ref)
-            sheet = instance.get_character_sheet(opponent_ref)
-            opponent_attributes = sheet.get("attributes") if isinstance(sheet.get("attributes"), dict) else {}
-        if opponent_name:
-            if opponent_roll is None or opponent_total is None:
-                opponent_value = int(opponent_attributes.get(attribute_key, 10) or 10)
-                opponent_modifier = rule.attribute_modifier(opponent_value) if rule else (opponent_value - 10) // 2
-                opponent_roll = roll("d20").natural
-                opponent_total = int(opponent_roll) + opponent_modifier
-                # 缓存对抗结果，保证同一请求重试时不会偷偷重掷对手骰。
-                request["opponent_roll"] = opponent_roll
-                request["opponent_modifier"] = opponent_modifier
-                request["opponent_total"] = opponent_total
-            dc = max(1, min(d20_dc_cap(rule), int(opponent_total)))
+    # attack 中 opponent 只是受击目标引用，命中成败已由当前
+    # CheckResult 确定，不得在这里额外掷一枚“对手骰”改写 DC。
+    if opponent_name and common["kind"] != "attack":
+        if opponent_roll is None or opponent_total is None:
+            opponent_value = int(opponent_attributes.get(attribute_key, 10) or 10)
+            opponent_modifier = rule.attribute_modifier(opponent_value) if rule else (opponent_value - 10) // 2
+            opponent_roll = roll("d20").natural
+            opponent_total = int(opponent_roll) + opponent_modifier
+            # 缓存对抗结果，保证同一请求重试时不会偷偷重掷对手骰。
+            request["opponent_roll"] = opponent_roll
+            request["opponent_modifier"] = opponent_modifier
+            request["opponent_total"] = opponent_total
+        dc = max(1, min(d20_dc_cap(rule), int(opponent_total)))
 
-    critical_on, fumble_on = d20_critical_thresholds(rule)
+    critical_on, fumble_on = _d20_thresholds_for_request(request, rule)
     verdict = d20_verdict(
         roll_value,
         total,
@@ -488,6 +659,7 @@ def resolve_check_request(
         "total": total,
         "dc": dc,
         "difficulty": instance.difficulty,
+        "target_source": "server_armor_class" if trusted_attack_dc is not None else "request_dc",
         "opponent_name": opponent_name,
         "opponent_roll": opponent_roll,
         "opponent_modifier": opponent_modifier if opponent_name else None,

@@ -248,6 +248,7 @@ describe('ActionComposer voice input', () => {
     })
 
     expect(wrapper.find('.dictation-toggle').exists()).toBe(false)
+    expect(wrapper.get('.composer-row').classes()).not.toContain('has-dictation')
   })
 
   it('toggles recording from the mic button once the engine is ready', async () => {
@@ -257,6 +258,9 @@ describe('ActionComposer voice input', () => {
       props: { gameKey: 'web|room|bot', userId: 'player-1', detail: detail() },
     })
     await vi.waitFor(() => expect(wrapper.find('.dictation-toggle').exists()).toBe(true))
+    expect(wrapper.find('.composer-head .dictation-toggle').exists()).toBe(false)
+    expect(wrapper.find('.composer-row .dictation-toggle').exists()).toBe(true)
+    expect(wrapper.get('.composer-row').classes()).toContain('has-dictation')
 
     await wrapper.get('.dictation-toggle').trigger('click')
     await vi.waitFor(() => expect(wrapper.get('.dictation-toggle').classes()).toContain('active'))

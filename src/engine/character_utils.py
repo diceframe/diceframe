@@ -137,6 +137,38 @@ def set_hp(character_sheet: dict, hp: int | float, max_hp: int | float | None = 
     return current
 
 
+def armor_value(character_sheet: dict) -> int:
+    """Return trusted armor from explicit state or equipped items.
+
+    Runtime NPC/enemy records commonly expose ``armor`` directly, while player
+    sheets usually derive it from equipment.  Keep both attack DC and damage
+    reduction on this single interpretation instead of duplicating the rule.
+    """
+    for key in ("armor", "_armor"):
+        if key not in character_sheet or character_sheet.get(key) is None:
+            continue
+        try:
+            return max(0, int(character_sheet[key]))
+        except (TypeError, ValueError):
+            break
+
+    total = 0
+    equipment = character_sheet.get("equipment")
+    if not isinstance(equipment, list):
+        return 0
+    for item in equipment:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("armor")
+        if raw is None and item.get("type") in {"armor", "clothing"}:
+            raw = 1
+        try:
+            total += int(raw or 0)
+        except (TypeError, ValueError):
+            continue
+    return max(0, total)
+
+
 def bounded_hp_delta(character_sheet: dict, hp_change: int | float) -> int:
     """按角色 max_hp 限制单次 HP 变更：伤害≤max_hp，治疗≤max_hp//2。"""
     raw_max_hp = character_sheet.get("max_hp", 100)

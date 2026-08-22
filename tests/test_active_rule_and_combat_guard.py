@@ -26,7 +26,7 @@ def test_prompt_uses_save_rule_instead_of_world_default() -> None:
         world_id="default_fantasy",
         rule_id="dnd5e",
     )
-    composer = PromptComposer(ROOT / "data" / "prompts", ROOT / "data" / "templates" / "rules")
+    composer = PromptComposer(ROOT / "prompts", ROOT / "templates" / "rules")
 
     context = composer.load_rule_context(
         instance,
@@ -79,13 +79,34 @@ def test_magic_research_does_not_attack_first_player() -> None:
     assert instance.pending_combat_results == []
 
 
-def test_only_named_attacker_hits_named_target(monkeypatch) -> None:
-    monkeypatch.setattr("random.randint", lambda _a, _b: 20)
+def test_only_named_attacker_hits_named_target() -> None:
     instance = _combat_instance()
     instance.action_queue = [
         {"user_id": "a", "text": "我观察星墨的法术。"},
-        {"user_id": "b", "text": "我用法杖攻击冒险者。"},
+        {
+            "user_id": "b",
+            "text": "我用法杖攻击冒险者。",
+            "check_request": {
+                "check_id": "b-attacks-a",
+                "actor_uid": "b",
+                "kind": "attack",
+                "opponent": "a",
+            },
+        },
     ]
+    instance.last_checks = [{
+        "check_id": "b-attacks-a",
+        "actor_uid": "b",
+        "actor_name": "星墨",
+        "kind": "attack",
+        "opponent": "a",
+        "dice": "d20",
+        "roll": 20,
+        "total": 21,
+        "verdict": "成功",
+        "is_critical": False,
+        "is_fumble": False,
+    }]
 
     text = CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
@@ -113,8 +134,8 @@ def test_dnd_level_up_uses_active_rule_and_class_hit_die() -> None:
         },
     }
     resolver = ProgressionResolver(
-        ROOT / "data" / "templates" / "rules",
-        ROOT / "data" / "templates" / "worlds",
+        ROOT / "templates" / "rules",
+        ROOT / "templates" / "worlds",
     )
 
     resolver.try_level_up(instance, "a")
@@ -133,7 +154,7 @@ def test_dnd_help_gives_target_advantage_and_helper_no_own_roll() -> None:
         {"user_id": "b", "text": "我专心协助冒险者观察危险，为他提供掩护。"},
     ]
     rule = PromptComposer(
-        ROOT / "data" / "prompts", ROOT / "data" / "templates" / "rules"
+        ROOT / "prompts", ROOT / "templates" / "rules"
     ).load_rule_context(
         instance,
         lambda _world_id: {"world_id": "default_fantasy", "default_rule": "freeform_fantasy"},
@@ -162,7 +183,7 @@ def test_coc_bonus_die_in_round_pipeline_shares_units(monkeypatch) -> None:
         },
     }
     action = {"user_id": "a", "text": "我用侦查搜索，并获得一个奖励骰。"}
-    rule = RuleSystem.load(ROOT / "data" / "templates" / "rules" / "freeform_coc.json")
+    rule = RuleSystem.load(ROOT / "templates" / "rules" / "freeform_coc.json")
     request = build_check_request(instance, action, rule)
     assert request is not None
     assert request["advantage_mode"] == "advantage"
@@ -182,7 +203,7 @@ def test_coc_bonus_die_in_round_pipeline_shares_units(monkeypatch) -> None:
 
 
 def test_explicit_coc_penalty_die_overrides_percent_modifier() -> None:
-    rule = RuleSystem.load(ROOT / "data" / "templates" / "rules" / "freeform_coc.json")
+    rule = RuleSystem.load(ROOT / "templates" / "rules" / "freeform_coc.json")
     action = {"user_id": "a", "text": "在黑暗中用侦查搜索，承受一个惩罚骰。"}
     request = {
         "actor_uid": "a",
@@ -203,7 +224,7 @@ def test_avoiding_combat_does_not_force_a_safety_net_roll() -> None:
     instance.action_queue = [
         {"user_id": "a", "text": "我清点装备并提醒大家避免不必要的战斗。"},
     ]
-    rule = RuleSystem.load(ROOT / "data" / "templates" / "rules" / "dnd5e.json")
+    rule = RuleSystem.load(ROOT / "templates" / "rules" / "dnd5e.json")
 
     assert _merge_safety_net_checks(instance, rule, []) == []
 
@@ -217,7 +238,7 @@ def test_cyberpunk_weapon_check_without_attack_does_not_force_combat_roll() -> N
         "text": "我清点弹匣并确认保险，没有敌人时不随意开枪。",
     }]
     rule = RuleSystem.load(
-        ROOT / "data" / "templates" / "rules" / "freeform_cyberpunk.json"
+        ROOT / "templates" / "rules" / "freeform_cyberpunk.json"
     )
 
     assert _merge_safety_net_checks(instance, rule, []) == []

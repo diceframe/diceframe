@@ -8,7 +8,16 @@
   "mechanics": "dnd5e_core",
   "ruleset_level": "assisted",
   "check_mechanic": {
-    "critical": {"success": null, "failure": null}
+    "critical": {"success": null, "failure": null},
+    "attack_critical": {"success": 20, "failure": 1},
+    "attack_target": {
+      "type": "armor_class",
+      "base": 10,
+      "attribute": "dex",
+      "include_armor": true,
+      "min": 1,
+      "max": 40
+    }
   },
   "dc_table": {
     "easy": 10,

@@ -9,7 +9,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.engine.checks import build_check_request, detect_advantage_mode
+from src.engine.checks import (
+    build_check_request,
+    detect_advantage_mode,
+    find_action_opponent,
+    is_explicit_attack_action,
+    is_non_combat_declaration,
+)
 from src.engine.dice import d20_dc_cap
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
@@ -26,39 +32,7 @@ _CONCEALED_OR_HAZARDOUS_WORDS = (
     "hidden", "secret", "hazard", "danger", "trap", "poison", "attack",
 )
 _SKILL_USE_PREFIXES = ("使用", "运用", "尝试", "进行", "施展", "用", "use", "attempt")
-_CHINESE_COMBAT_WORD = re.compile(r"攻击|袭击|战斗|交战|开枪|开火|射击|动手|击杀|杀死")
-_CHINESE_NEGATED_COMBAT = re.compile(
-    r"(?:没有敌人时|无敌人时)?"
-    r"(?:不要|不会|不再|不愿|不想|不打算|不准备|避免|拒绝|停止|禁止|不|别|勿)"
-    r"(?:再|去|进行|参与|主动|随意|轻易|贸然|立刻|马上|不必要的|"
-    r"与(?:任何|未知|当前)?目标)*"
-    r"(?:攻击|袭击|战斗|交战|开枪|开火|射击|动手|击杀|杀死)"
-)
-_ENGLISH_COMBAT_WORD = re.compile(
-    r"\b(?:attack(?:ing)?|fight(?:ing)?|shoot(?:ing)?|engag(?:e|ing)|open fire)\b",
-    flags=re.IGNORECASE,
-)
-_ENGLISH_NEGATED_COMBAT = re.compile(
-    r"\b(?:do\s+not|don't|will\s+not|won't|avoid|without|refuse\s+to|stop)\s+"
-    r"(?:unnecessary\s+|randomly\s+|actively\s+)?"
-    r"(?:attack(?:ing)?|fight(?:ing)?|shoot(?:ing)?|engag(?:e|ing)|open\s+fire)\b",
-    flags=re.IGNORECASE,
-)
-
-
-def _is_non_combat_declaration(text: object) -> bool:
-    """识别“声明不战斗”，但保留同一句中转而发动的真实攻击。
-
-    先删除明确被否定的战斗短语；若剩余文本仍有攻击词（例如“不射击，改用刀
-    攻击”），就仍视为战斗。这样无需不断添加整句白名单。
-    """
-    original = str(text or "").casefold()
-    compact = re.sub(r"\s+", "", original)
-    compact, chinese_count = _CHINESE_NEGATED_COMBAT.subn("", compact)
-    english, english_count = _ENGLISH_NEGATED_COMBAT.subn("", original)
-    if not (chinese_count or english_count):
-        return False
-    return not _CHINESE_COMBAT_WORD.search(compact) and not _ENGLISH_COMBAT_WORD.search(english)
+_is_non_combat_declaration = is_non_combat_declaration
 
 
 def _prompt_text(language: str) -> str:
@@ -164,6 +138,13 @@ def _match_opponent(instance: GameInstance, value: object) -> str:
         }
         if query in names:
             return f"npc:{npc_id}"
+    for index, enemy in enumerate(instance.combat_enemies):
+        names = {
+            str(enemy.get("name") or "").strip().casefold(),
+            str(enemy.get("character_name") or "").strip().casefold(),
+        }
+        if query in names:
+            return f"enemy:{index}"
     # 模型常把“考古学系主任”简称为“系主任”。仅在唯一匹配时接受双向包含，
     # 避免同场景有多个主任/守卫时猜错目标。
     if len(query) >= 2:
@@ -348,6 +329,8 @@ def normalize_check_specs(
             kind = "check"
         opponent_raw = str(raw.get("opponent") or "").strip()
         opponent = _match_opponent(instance, opponent_raw) if opponent_raw else ""
+        if kind == "attack" and not opponent_raw:
+            opponent = find_action_opponent(instance, uid, action.get("text"))
         if opponent_raw and not opponent:
             errors.append(f"checks[{index}] opponent 不存在")
             continue
@@ -431,6 +414,11 @@ def _merge_safety_net_checks(
             if skill_cue:
                 break
         intent = str(request.get("intent") or "")
+        if intent == "combat" and is_explicit_attack_action(action.get("text")):
+            request["kind"] = "attack"
+            request["opponent"] = str(request.get("opponent") or "") or find_action_opponent(
+                instance, uid, action.get("text")
+            )
         concealed_or_hazardous = (
             intent in {"investigate", "perception"}
             and any(word in text for word in _CONCEALED_OR_HAZARDOUS_WORDS)

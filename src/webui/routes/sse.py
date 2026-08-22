@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 
 from aiohttp import web
 
@@ -15,6 +16,11 @@ from src.webui.connection_pool import ConnectionPool
 from src.webui.routes._common import MAX_ACTION_CHARS, _get_api
 
 logger = logging.getLogger("trpg")
+
+_EVENT_CURSOR_RE = re.compile(
+    r"^r(?P<round>\d{1,10})\.p(?P<private>\d{1,10})\.a(?P<action>0|[0-9a-f]{10})"
+    r"(?:\.s(?P<public>0|[0-9a-f]{10}))?$"
+)
 
 
 async def api_sse_ticket(request: web.Request) -> web.Response:
@@ -158,18 +164,44 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
     await resp.prepare(request)
     pool.add(game_key, user_id, resp)
 
-    cursor = _parse_event_cursor(request.headers.get("Last-Event-ID", ""))
-    last_round = cursor[0]
-    last_private_count = cursor[1]
-    last_action_signature = ""
+    raw_cursor = (
+        request.headers.get("Last-Event-ID", "")
+        or request.query.get("cursor", "")
+    )
+    cursor = _parse_event_cursor(raw_cursor)
+    action_signature = _play_action_signature(inst)
+    public_signature = _play_public_signature(inst, user_id)
+    fresh_connection = cursor is None
+    if fresh_connection:
+        # 页面已先通过 HTTP 获取完整快照。首次 SSE 连接只建立当前基线，
+        # 不把既有回合、行动和私聊误报成新事件，再触发一整组重复 GET。
+        last_round = inst.round_number
+        last_private_count = len(inst.private_log.get(user_id, []))
+        last_action_digest = _signature_digest(action_signature)
+        last_public_digest = _signature_digest(public_signature)
+    else:
+        assert cursor is not None
+        last_round, last_private_count, last_action_digest, last_public_digest = cursor
     last_player_count = len(inst.players)
-    last_public_signature = _play_public_signature(inst, user_id)
     try:
+        if fresh_connection:
+            await _write_play_event(
+                resp,
+                last_round,
+                last_private_count,
+                action_signature,
+                public_signature,
+                {"type": "baseline"},
+            )
         while True:
             current = subsystems.registry.get(api._parse_key(game_key))
             if not current:
                 break
             inst = current
+            action_signature = _play_action_signature(inst)
+            action_digest = _signature_digest(action_signature)
+            public_signature = _play_public_signature(inst, user_id)
+            public_digest = _signature_digest(public_signature)
             public_event_sent = False
             if inst.round_number > last_round:
                 last_round = inst.round_number
@@ -178,7 +210,8 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
                     resp,
                     last_round,
                     last_private_count,
-                    last_action_signature,
+                    action_signature,
+                    public_signature,
                     {
                         "type": "narration",
                         "round": last_round,
@@ -187,40 +220,36 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
                 )
                 # 状态
                 cs = inst.get_character_sheet(user_id)
-                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'state','hp':cs.get('hp'),'max_hp':cs.get('max_hp'),'gold':cs.get('gold'),'deceased':cs.get('deceased')})
+                await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'state','hp':cs.get('hp'),'max_hp':cs.get('max_hp'),'gold':cs.get('gold'),'deceased':cs.get('deceased')})
                 public_event_sent = True
             elif inst.round_number < last_round:
                 # 回滚后回合号会倒退；同步游标，避免后续重新推进到旧回合号时漏报。
                 last_round = inst.round_number
-                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'rollback'})
+                await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'rollback'})
                 public_event_sent = True
-            action_signature = json.dumps(
-                [
-                    (a.get("user_id", ""), a.get("text", ""), a.get("timestamp", ""))
-                    for a in inst.action_queue
-                ],
-                ensure_ascii=False,
-            )
-            if action_signature != last_action_signature:
-                last_action_signature = action_signature
-                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'public_actions'})
+            if action_digest != last_action_digest:
+                last_action_digest = action_digest
+                await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'public_actions'})
                 public_event_sent = True
             if len(inst.players) != last_player_count:
                 last_player_count = len(inst.players)
-                await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'players'})
+                await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'players'})
                 public_event_sent = True
-            public_signature = _play_public_signature(inst, user_id)
-            if public_signature != last_public_signature:
-                last_public_signature = public_signature
+            if public_digest != last_public_digest:
+                last_public_digest = public_digest
                 if not public_event_sent:
                     # 同回合回滚、角色状态恢复等操作不会改变既有 SSE 游标，
                     # 仍需显式唤醒玩家端重新拉取完整公开状态。
-                    await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'refresh'})
+                    await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'refresh'})
             priv = inst.private_log.get(user_id, [])
+            if len(priv) < last_private_count:
+                # 清空私聊等回退操作也要更新游标；客户端通过完整刷新移除旧消息。
+                last_private_count = len(priv)
+                await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'private_reset'})
             if len(priv) > last_private_count:
                 for p in priv[last_private_count:]:
                     last_private_count += 1
-                    await _write_play_event(resp, last_round, last_private_count, last_action_signature, {'type':'private','text':p.get('text','')})
+                    await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'private','text':p.get('text','')})
                 last_private_count = len(priv)
             await asyncio.sleep(0.5)
     except ConnectionResetError:
@@ -256,22 +285,48 @@ def _play_public_signature(inst, user_id: str) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _event_cursor(round_number: int, private_count: int, action_signature: str) -> str:
-    digest = hashlib.sha1(action_signature.encode("utf-8")).hexdigest()[:10] if action_signature else "0"
-    return f"r{round_number}.p{private_count}.a{digest}"
+def _play_action_signature(inst) -> str:
+    """返回当前公开行动队列的稳定签名原文。"""
+    return json.dumps(
+        [
+            (action.get("user_id", ""), action.get("text", ""), action.get("timestamp", ""))
+            for action in inst.action_queue
+        ],
+        ensure_ascii=False,
+    )
 
 
-def _parse_event_cursor(value: str) -> tuple[int, int]:
-    try:
-        parts = str(value).split(".")
-        return max(0, int(parts[0][1:])), max(0, int(parts[1][1:]))
-    except (IndexError, ValueError):
-        return 0, 0
+def _signature_digest(signature: str) -> str:
+    return hashlib.sha1(signature.encode("utf-8")).hexdigest()[:10] if signature else "0"
+
+
+def _event_cursor(
+    round_number: int,
+    private_count: int,
+    action_signature: str,
+    public_signature: str = "",
+) -> str:
+    action_digest = _signature_digest(action_signature)
+    public_digest = _signature_digest(public_signature)
+    return f"r{round_number}.p{private_count}.a{action_digest}.s{public_digest}"
+
+
+def _parse_event_cursor(value: str) -> tuple[int, int, str, str] | None:
+    match = _EVENT_CURSOR_RE.fullmatch(str(value or ""))
+    if not match:
+        return None
+    return (
+        int(match.group("round")),
+        int(match.group("private")),
+        match.group("action"),
+        match.group("public") or "0",
+    )
 
 
 async def _write_play_event(resp: web.StreamResponse, round_number: int, private_count: int,
-                            action_signature: str, payload: dict) -> None:
-    event_id = _event_cursor(round_number, private_count, action_signature)
+                            action_signature: str, public_signature: str,
+                            payload: dict) -> None:
+    event_id = _event_cursor(round_number, private_count, action_signature, public_signature)
     data = json.dumps(payload, ensure_ascii=False)
     await resp.write(f"id: {event_id}\ndata: {data}\n\n".encode())
 

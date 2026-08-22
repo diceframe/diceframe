@@ -27,6 +27,7 @@ class ActionRecord(TypedDict, total=False):
     dice_value: int
     dice_rolls: list[int]
     check_request: dict[str, Any]
+    combat_outcome: dict[str, Any]
     revision_count: int
 
 

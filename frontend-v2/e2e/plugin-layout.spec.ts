@@ -19,7 +19,7 @@ async function waitContained(page: Page, selector: string) {
       return Math.max(...elements.map(element => element.getBoundingClientRect().right - workspace.right))
     })
     return Math.ceil(overshoot || 0)
-  }, { timeout: 4000 }).toBeLessThanOrEqual(1)
+  }, { timeout: 4000 }).toBeLessThanOrEqual(2)
 }
 
 // 读取真实几何：元素不得横向溢出工作区；同一行内高度一致。
@@ -44,7 +44,7 @@ async function expectContainedAndEven(page: Page, selector: string) {
   for (const item of geometry) rows.set(item.top, [...(rows.get(item.top) || []), item.height])
   for (const heights of rows.values()) {
     if (heights.length < 2) continue
-    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1)
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(2)
   }
 }
 

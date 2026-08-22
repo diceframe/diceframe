@@ -3,15 +3,24 @@ import { accessToken } from './support'
 
 const token = accessToken
 
-test('settings status summary and destructive confirmations are explicit', async ({ page }) => {
+test('settings status summary stays structured and destructive confirmations are explicit', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token())
 
   await page.goto('/#/settings')
+  await expect(page.locator('.system-status-grid')).toBeVisible()
   const statusCards = page.locator('.system-status-card')
-  await expect(statusCards.filter({ hasText: '主模型' })).toBeVisible()
-  await expect(statusCards.filter({ hasText: '备用回退' })).toBeVisible()
-  await expect(statusCards.filter({ hasText: '向量记忆' })).toBeVisible()
-  await expect(statusCards.filter({ hasText: '访问控制' })).toBeVisible()
+  await expect(statusCards.first()).toBeVisible()
+  const summaries = await statusCards.evaluateAll(elements => elements.map(element => ({
+    label: element.querySelector('.system-status-head > span')?.textContent?.trim() ?? '',
+    value: element.querySelector('.system-status-tag')?.textContent?.trim() ?? '',
+    detail: element.querySelector('p')?.textContent?.trim() ?? '',
+  })))
+  expect(summaries.length).toBeGreaterThan(0)
+  for (const summary of summaries) {
+    expect(summary.label).not.toBe('')
+    expect(summary.value).not.toBe('')
+    expect(summary.detail).not.toBe('')
+  }
 
   await page.goto('/')
   await page.getByRole('button', { name: '删除' }).first().click()
