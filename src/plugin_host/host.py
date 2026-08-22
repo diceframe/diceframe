@@ -61,6 +61,8 @@ from .support import (
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
+_PROVIDER_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+_MAX_PROVIDER_IMAGE_BYTES = 20 * 1024 * 1024
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
 _RESTART_BASE_DELAY = 3.0
 _RESTART_MAX_DELAY = 300.0
@@ -437,6 +439,19 @@ class PluginHost:
             raise KeyError("Bot Bridge 图片不存在或格式不受支持")
         if target.stat().st_size > _MAX_BRIDGE_IMAGE_BYTES:
             raise ValueError("Bot Bridge 图片不能超过 10 MB")
+        return target
+
+    def provider_asset_path(self, plugin_id: str, relative_path: str) -> Path:
+        runtime = self._require(plugin_id)
+        if self._plugin_type(runtime.manifest) != "provider" or runtime.status != "running":
+            raise KeyError("Provider 插件未运行")
+        root = (self.data_dir / plugin_id / "runtime").resolve()
+        target = (root / str(relative_path or "")).resolve()
+        self._ensure_inside(root, target)
+        if not target.is_file() or target.suffix.lower() not in _PROVIDER_IMAGE_SUFFIXES:
+            raise KeyError("Provider 图片不存在或格式不受支持")
+        if target.stat().st_size > _MAX_PROVIDER_IMAGE_BYTES:
+            raise ValueError("Provider 图片不能超过 20 MB")
         return target
 
     def contribution_path(self, kind: str, key: str) -> Path | None:

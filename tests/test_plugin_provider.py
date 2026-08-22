@@ -110,6 +110,9 @@ async def test_provider_plugin_registers_and_executes_over_stdio_rpc(tmp_path, m
         "properties": {"enabled": {"type": "boolean", "default": False, "ui": {"control": "switch"}}},
     }), encoding="utf-8")
     (folder / "main.py").write_text(textwrap.dedent('''
+        import os
+        from pathlib import Path
+
         from src.plugin_sdk import ProviderRuntime
 
         runtime = ProviderRuntime()
@@ -119,7 +122,9 @@ async def test_provider_plugin_registers_and_executes_over_stdio_rpc(tmp_path, m
             prompt = str(arguments.get("prompt") or "")
             if prompt == "fail":
                 return {"ok": False, "error": "upstream down"}
-            return {"ok": True, "image_base64": prompt.upper()}
+            target = Path(os.environ["DICEFRAME_PLUGIN_DATA_DIR"]) / "generated.png"
+            target.write_bytes(prompt.upper().encode("utf-8"))
+            return {"ok": True, "image_path": "generated.png"}
 
         if __name__ == "__main__":
             runtime.run()
@@ -135,7 +140,10 @@ async def test_provider_plugin_registers_and_executes_over_stdio_rpc(tmp_path, m
     result = await host.call_provider(
         "stub-provider", "image-generation", "generate", {"prompt": "harbor"}, timeout=10,
     )
-    assert result == {"ok": True, "image_base64": "HARBOR"}
+    assert result == {"ok": True, "image_path": "generated.png"}
+    assert host.provider_asset_path("stub-provider", result["image_path"]).read_text() == "HARBOR"
+    with pytest.raises(ValueError, match="路径越界"):
+        host.provider_asset_path("stub-provider", "../outside.png")
     # 插件侧业务失败以 ok:false 的正常返回送达（不抛 RPC 错误），由门面层转译
     failed = await host.call_provider(
         "stub-provider", "image-generation", "generate", {"prompt": "fail"}, timeout=10,

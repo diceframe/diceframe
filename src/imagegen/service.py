@@ -1,8 +1,8 @@
 """场景图生成门面：把 provider 插件的生图结果接入既有场景图资产管线。
 
 只做三件事：找到声明 image-generation capability 的运行中插件、调用其
-generate 方法、把返回的图像归一化为场景头图资产（内容寻址 WebP）。不存在
-provider 插件时零开销降级。
+generate 方法、读取插件数据目录中的图像并归一化为场景头图资产（内容寻址
+WebP）。不存在 provider 插件时零开销降级。
 """
 
 from __future__ import annotations
@@ -62,10 +62,7 @@ class SceneImageGenerator:
             raise ImageGenError(f"图像生成插件调用失败：{exc}") from exc
         if not result.get("ok"):
             raise ImageGenError(str(result.get("error") or "图像生成失败"))
-        try:
-            raw = base64.b64decode(str(result.get("image_base64") or ""), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise ImageGenError("图像生成插件返回了无效的图像数据") from exc
+        raw = self._read_result_image(plugin_id, result)
         if not raw:
             raise ImageGenError("图像生成插件返回了空图像")
         scene_images = _scene_image_assets()
@@ -82,6 +79,19 @@ class SceneImageGenerator:
             "prompt": prompt,
             "revised_prompt": str(result.get("revised_prompt") or ""),
         }
+
+    def _read_result_image(self, plugin_id: str, result: dict[str, Any]) -> bytes:
+        relative_path = str(result.get("image_path") or "").strip()
+        if relative_path:
+            try:
+                source = self._host.provider_asset_path(plugin_id, relative_path)
+                return source.read_bytes()
+            except (KeyError, ValueError, OSError) as exc:
+                raise ImageGenError(f"图像生成插件返回了无效的图片文件：{exc}") from exc
+        try:
+            return base64.b64decode(str(result.get("image_base64") or ""), validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ImageGenError("图像生成插件返回了无效的图像数据") from exc
 
     def _find_plugin(self) -> str | None:
         if self._host is None:

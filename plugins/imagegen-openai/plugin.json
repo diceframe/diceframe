@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "imagegen-openai",
   "name": "图像生成（OpenAI 兼容）",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenAI 兼容的图像生成 Provider：GM 在重大场景切换时自动生成场景图（叙事流、场景卡、画廊展示）。",
   "plugin_type": "provider",
   "entrypoint": ["{python}", "{plugin_dir}/main.py"],

@@ -19,11 +19,21 @@ def _png_bytes(size: tuple[int, int] = (400, 225), color=(90, 120, 160)) -> byte
 
 
 class _FakeHost:
-    def __init__(self, *, payload: bytes | None = None, error: str = "", plugin: str = "stub"):
+    def __init__(
+        self,
+        provider_dir: Path,
+        *,
+        payload: bytes | None = None,
+        error: str = "",
+        plugin: str = "stub",
+        legacy_base64: bool = False,
+    ):
         self.plugin = plugin
         self.calls = []
+        self._provider_dir = provider_dir
         self._payload = payload
         self._error = error
+        self._legacy_base64 = legacy_base64
 
     def find_provider(self, capability):
         return self.plugin if self._payload is not None or self._error else None
@@ -32,11 +42,18 @@ class _FakeHost:
         self.calls.append((plugin_id, capability, alias, arguments, timeout))
         if self._error:
             return {"ok": False, "error": self._error}
+        if not self._legacy_base64:
+            self._provider_dir.mkdir(parents=True, exist_ok=True)
+            (self._provider_dir / "generated.png").write_bytes(self._payload)
+            return {"ok": True, "image_path": "generated.png", "mime_type": "image/png"}
         return {
             "ok": True,
             "image_base64": base64.b64encode(self._payload).decode("ascii"),
             "mime_type": "image/png",
         }
+
+    def provider_asset_path(self, plugin_id, relative_path):
+        return self._provider_dir / relative_path
 
 
 def test_generator_without_plugin_degrades(tmp_path):
@@ -48,7 +65,7 @@ def test_generator_without_plugin_degrades(tmp_path):
 
 
 def test_generate_stores_normalized_webp_asset(tmp_path):
-    host = _FakeHost(payload=_png_bytes())
+    host = _FakeHost(tmp_path / "provider", payload=_png_bytes())
     generator = SceneImageGenerator(host, tmp_path)
 
     import asyncio
@@ -72,18 +89,35 @@ def test_generate_stores_normalized_webp_asset(tmp_path):
 def test_generate_translates_plugin_and_image_errors(tmp_path):
     import asyncio
 
-    failing = SceneImageGenerator(_FakeHost(error="upstream down"), tmp_path)
+    failing = SceneImageGenerator(_FakeHost(tmp_path / "failing", error="upstream down"), tmp_path)
     with pytest.raises(ImageGenError, match="upstream down"):
         asyncio.run(failing.generate("harbor"))
 
-    tiny = SceneImageGenerator(_FakeHost(payload=_png_bytes(size=(120, 90))), tmp_path)
+    tiny = SceneImageGenerator(
+        _FakeHost(tmp_path / "tiny", payload=_png_bytes(size=(120, 90))), tmp_path,
+    )
     with pytest.raises(ImageGenError, match="尺寸"):
         asyncio.run(tiny.generate("harbor"))
 
-    garbage = SceneImageGenerator(_FakeHost(payload=b"not-an-image"), tmp_path)
+    garbage = SceneImageGenerator(
+        _FakeHost(tmp_path / "garbage", payload=b"not-an-image"), tmp_path,
+    )
     with pytest.raises(ImageGenError):
         asyncio.run(garbage.generate("harbor"))
 
-    empty = SceneImageGenerator(_FakeHost(payload=_png_bytes()), tmp_path)
+    empty = SceneImageGenerator(_FakeHost(tmp_path / "empty", payload=_png_bytes()), tmp_path)
     with pytest.raises(ImageGenError, match="画面描述为空"):
         asyncio.run(empty.generate("   "))
+
+
+def test_generate_accepts_legacy_base64_result(tmp_path):
+    import asyncio
+
+    host = _FakeHost(
+        tmp_path / "legacy",
+        payload=_png_bytes(),
+        legacy_base64=True,
+    )
+    result = asyncio.run(SceneImageGenerator(host, tmp_path).generate("harbor"))
+
+    assert (tmp_path / f"{result['asset_id']}.webp").is_file()
