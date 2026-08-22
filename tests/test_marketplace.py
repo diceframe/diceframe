@@ -82,11 +82,23 @@ def test_reserved_plugin_type_is_visible_but_not_installable():
         "id": "demo-pack",
         "name": "Demo",
         "version": "1.0.0",
-        "plugin_type": "provider",
+        "plugin_type": "import-export",
     })
 
     assert item["support"]["level"] == "reserved"
     assert item["installable"] is False
+
+
+def test_provider_plugin_type_is_installable():
+    item = _market_item(manifest={
+        "id": "demo-provider",
+        "name": "Demo Provider",
+        "version": "1.0.0",
+        "plugin_type": "provider",
+    })
+
+    assert item["support"]["level"] == "supported"
+    assert item["installable"] is True
 
 
 def test_content_pack_with_map_contributions_is_installable():

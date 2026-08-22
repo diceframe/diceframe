@@ -12,6 +12,7 @@ PERMISSION_DETAILS = {
     "diceframe.http": "调用 DiceFrame HTTP API",
     "plugin.config": "读取插件普通配置",
     "plugin.secrets": "读取插件敏感配置",
+    "ai.providers": "读取模型设置中的 AI 服务商连接信息",
     "plugin.data": "读写插件专属数据目录",
     "content.read": "注册和读取内容包资源",
     "content.import": "由用户主动导入内容到角色卡库或世界书",

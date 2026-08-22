@@ -25,6 +25,7 @@ import Modal from '@/components/ui/Modal.vue'
 import GmToolbar from '@/components/play/GmToolbar.vue'
 import MultiplayerPanel from '@/components/play/MultiplayerPanel.vue'
 import MapWorkspace from '@/components/play/MapWorkspace.vue'
+import SceneGalleryModal from '@/components/play/SceneGalleryModal.vue'
 import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
 import MapBackgroundSettingsModal from '@/components/play/MapBackgroundSettingsModal.vue'
@@ -49,6 +50,7 @@ const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false),
 const sidebarCollapsed = ref(localStorage.getItem('play_sidebar_collapsed') === '1')
 const mobilePanel = ref<'sidebar' | 'controls' | ''>('')
 const showMap = ref(false)
+const showSceneGallery = ref(false)
 const gmThinking = ref(false)
 const storyRecapBusy = ref(false)
 const luckBusyId = ref('')
@@ -84,6 +86,9 @@ function toggleMobilePanel(panel: 'sidebar' | 'controls') {
 function openMap() {
   mobilePanel.value = ''
   showMap.value = true
+}
+function refreshMapAfterBackground() {
+  void game.refresh(true)
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('operationFailed')) }
 function joinNames(names: string[]) { return names.filter(Boolean).join(t('listSeparator')) }
@@ -630,6 +635,7 @@ onBeforeUnmount(() => {
         </label>
         <button class="play-secondary-action" @click="openCards">{{ t('characters') }}</button>
         <button class="play-secondary-action play-map-action" @click="openMap">{{ t('mapTitle') }}</button>
+        <button class="play-secondary-action" @click="showSceneGallery = true">{{ t('sceneGallery') }}</button>
         <button class="play-secondary-action" @click="help = true">{{ t('rule') }}</button>
         <button class="play-secondary-action play-refresh" @click="game.refresh()">{{ t('refresh') }}</button>
       </div>
@@ -791,6 +797,14 @@ onBeforeUnmount(() => {
       :map="game.map.value"
       :current-scene="game.detail.value?.scene"
       @close="showMap = false"
+    />
+    <SceneGalleryModal
+      v-if="showSceneGallery"
+      open
+      :game-key="game.currentGame.value || ''"
+      :is-gm="game.isGm.value"
+      @close="showSceneGallery = false"
+      @background-saved="refreshMapAfterBackground"
     />
     <button
       class="mobile-drawer-trigger mobile-drawer-trigger-left"

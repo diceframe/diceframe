@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NInput, NInputNumber, NSwitch, NTag, NIcon, NCollapse, NCollapseItem, NSpin, NProgress, NModal } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NSwitch, NTag, NIcon, NSpin, NProgress, NModal } from 'naive-ui'
 import {
   ServerOutline, CubeOutline, CloudDownloadOutline,
   LockClosedOutline, OptionsOutline, InformationCircleOutline, ShareSocialOutline,
   KeyOutline, CopyOutline, EyeOutline, RefreshOutline, ColorPaletteOutline,
-  ImageOutline, PowerOutline, MicOutline,
+  ImageOutline, PowerOutline, MicOutline, SearchOutline, AddOutline,
+  TrashOutline, CheckmarkCircleOutline, AlertCircleOutline, SparklesOutline,
+  VolumeHighOutline,
 } from '@vicons/ionicons5'
-import { useSettingsStore } from '@/stores/useSettingsStore'
+import { useSettingsStore, providerSecretKey } from '@/stores/useSettingsStore'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
@@ -21,7 +23,7 @@ import { speechApi } from '@/api/speech'
 import { pluginApi } from '@/api/plugins'
 import type { MessageKey } from '@/i18n'
 import type { SecretKey } from '@/stores/useSettingsStore'
-import type { AppConfig, HubPreferences, LoginAuditEntry, LoginAuditResponse, SecretField, TestResult, TtsVoiceCatalog } from '@/api/types'
+import type { AppConfig, HubPreferences, LoginAuditEntry, LoginAuditResponse, TestResult, TtsVoiceCatalog } from '@/api/types'
 import TestResultCard from '@/components/admin/TestResultCard.vue'
 import TtsVoiceProfiles from '@/components/admin/TtsVoiceProfiles.vue'
 import HelpButton from '@/components/common/HelpButton.vue'
@@ -30,9 +32,12 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { useTheme } from '@/composables/useTheme'
 import { useBackgroundImages, type BackgroundSlot } from '@/composables/useBackgroundImages'
 
-type SectionId = 'api' | 'memory' | 'network' | 'sharing' | 'botapi' | 'appearance' | 'access' | 'advanced' | 'about'
+type SectionId = 'api' | 'models' | 'memory' | 'network' | 'sharing' | 'botapi' | 'appearance' | 'access' | 'advanced' | 'about'
 type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info'
 type UpdatePackageKind = 'source' | 'portable'
+type ModelCapability = 'chat' | 'image' | 'embedding' | 'tts' | 'asr'
+type ModelCatalogFilter = 'all' | ModelCapability
+type ProviderModelGroup = { name: string; models: string[] }
 type SystemStatusItem = { label: string; value: string; detail: string; tone: StatusTone; icon: Component }
 type SettingsSection = { id: SectionId; labelKey: MessageKey; icon: Component }
 
@@ -171,6 +176,7 @@ async function toggleUpdateChannel(enabled: boolean) {
 const section = ref<SectionId>('api')
 const sections: SettingsSection[] = [
   { id: 'api', labelKey: 'settingsSectionApi', icon: ServerOutline },
+  { id: 'models', labelKey: 'settingsSectionModels', icon: SparklesOutline },
   { id: 'memory', labelKey: 'settingsSectionMemory', icon: CubeOutline },
   { id: 'network', labelKey: 'settingsSectionNetwork', icon: CloudDownloadOutline },
   { id: 'sharing', labelKey: 'settingsSectionSharing', icon: ShareSocialOutline },
@@ -230,6 +236,7 @@ const EDGE_TTS_DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
 
 function setTtsProvider(value: string) {
   setStr('tts_provider', value)
+  if (value === 'browser' || value === 'edge-tts') setStr('tts_provider_ref', '')
   const currentVoice = String(store.config.tts_default_voice || '')
   if (value === 'edge-tts' && !currentVoice.endsWith('Neural')) {
     setStr('tts_default_voice', EDGE_TTS_DEFAULT_VOICE)
@@ -239,8 +246,7 @@ function setTtsProvider(value: string) {
 }
 
 const TTS_CONFIG_KEYS = [
-  'tts_provider', 'tts_base_url', 'tts_model', 'tts_audio_format',
-  'tts_default_voice', 'tts_gm_voice', 'tts_player_voice',
+  'tts_audio_format', 'tts_default_voice', 'tts_gm_voice', 'tts_player_voice',
   'tts_timeout_seconds', 'tts_cache_mb',
 ]
 
@@ -286,7 +292,337 @@ const asrTestRecording = ref(false)
 const asrTestText = ref('')
 let asrTestSession: RecordingSession | null = null
 
-const ASR_CONFIG_KEYS = ['asr_provider', 'asr_base_url', 'asr_model', 'asr_timeout_seconds']
+const ASR_CONFIG_KEYS = ['asr_timeout_seconds']
+
+function setAsrProvider(value: string) {
+  setStr('asr_provider', value)
+  if (value === 'disabled') setStr('asr_provider_ref', '')
+}
+
+// AI 服务商凭据库：草稿在本地编辑，保存时整体提交；secret 走 store.secrets 动态键。
+interface ProviderDraft {
+  id: string
+  name: string
+  base_url: string
+  api_format: string
+  models: string[]
+  configuredMasked: string
+}
+const providerDrafts = ref<ProviderDraft[]>([])
+const providerTestModels = ref<Record<string, string>>({})
+const providerSearch = ref('')
+const activeProviderId = ref('')
+const providerSaving = ref(false)
+const providerTestingId = ref('')
+const providerFetchingModelsId = ref('')
+const providerTestedId = ref('')
+const providerTestResult = ref<TestResult | null>(null)
+const providerCatalogOpen = ref(false)
+const providerCatalogProviderId = ref('')
+const providerCatalogModels = ref<Record<string, string[]>>({})
+const providerCatalogSearch = ref('')
+const providerCatalogFilter = ref<ModelCatalogFilter>('all')
+const providerCatalogCustomModel = ref('')
+const modelRoutingSaving = ref(false)
+
+const providerLibrarySupported = computed(() => Object.prototype.hasOwnProperty.call(store.config, 'ai_providers'))
+const savedProviderIds = computed(() => new Set((store.config.ai_providers || []).map(p => p.id)))
+const filteredProviderDrafts = computed(() => {
+  const query = providerSearch.value.trim().toLowerCase()
+  if (!query) return providerDrafts.value
+  return providerDrafts.value.filter(provider => (
+    `${provider.name} ${provider.base_url} ${provider.models.join(' ')}`.toLowerCase().includes(query)
+  ))
+})
+const activeProvider = computed(() => (
+  providerDrafts.value.find(provider => provider.id === activeProviderId.value) || null
+))
+const activeCatalogProvider = computed(() => (
+  providerDrafts.value.find(provider => provider.id === providerCatalogProviderId.value) || null
+))
+const activeProviderModelGroups = computed(() => groupProviderModels(activeProvider.value?.models || []))
+const providerCatalogSourceModels = computed(() => (
+  providerCatalogModels.value[providerCatalogProviderId.value] || []
+))
+const providerCatalogFilteredModels = computed(() => {
+  const query = providerCatalogSearch.value.trim().toLowerCase()
+  return providerCatalogSourceModels.value.filter(model => {
+    const matchesQuery = !query || model.toLowerCase().includes(query)
+    const matchesCapability = providerCatalogFilter.value === 'all'
+      || modelCapability(model) === providerCatalogFilter.value
+    return matchesQuery && matchesCapability
+  })
+})
+const providerCatalogGroups = computed(() => groupProviderModels(providerCatalogFilteredModels.value))
+const providerCatalogFilters = computed(() => {
+  const models = providerCatalogSourceModels.value
+  const filters: { id: ModelCatalogFilter; label: string; count: number }[] = [
+    { id: 'all', label: t('modelPickerAll'), count: models.length },
+    { id: 'chat', label: t('modelCapabilityChat'), count: models.filter(model => modelCapability(model) === 'chat').length },
+    { id: 'image', label: t('modelCapabilityImage'), count: models.filter(model => modelCapability(model) === 'image').length },
+    { id: 'embedding', label: t('modelCapabilityEmbedding'), count: models.filter(model => modelCapability(model) === 'embedding').length },
+    { id: 'tts', label: t('modelCapabilityTts'), count: models.filter(model => modelCapability(model) === 'tts').length },
+    { id: 'asr', label: t('modelCapabilityAsr'), count: models.filter(model => modelCapability(model) === 'asr').length },
+  ]
+  return filters
+})
+
+function syncProviderDrafts(list: AppConfig['ai_providers']) {
+  providerDrafts.value = (list || []).map(p => ({
+    id: p.id,
+    name: p.name,
+    base_url: p.base_url,
+    api_format: String(p.api_format || 'openai'),
+    models: [...new Set((p.models || []).map(model => String(model).trim()).filter(Boolean))],
+    configuredMasked: p.api_key?.configured ? p.api_key.masked : '',
+  }))
+  if (!providerDrafts.value.some(provider => provider.id === activeProviderId.value)) {
+    activeProviderId.value = providerDrafts.value[0]?.id || ''
+  }
+}
+watch(() => store.config.ai_providers, syncProviderDrafts, { immediate: true })
+
+function addProviderDraft() {
+  if (!providerLibrarySupported.value) {
+    toast.error(t('providerBackendOutdated'))
+    return
+  }
+  const provider = {
+    id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    name: '', base_url: '', api_format: 'openai', models: [], configuredMasked: '',
+  }
+  providerDrafts.value.push(provider)
+  activeProviderId.value = provider.id
+}
+function removeProviderDraft(index: number) {
+  const [removed] = providerDrafts.value.splice(index, 1)
+  if (removed?.id === activeProviderId.value) {
+    activeProviderId.value = providerDrafts.value[Math.min(index, providerDrafts.value.length - 1)]?.id || ''
+  }
+}
+function setProviderSecret(id: string, v: string | number) {
+  store.secrets[providerSecretKey(id)] = String(v).trim()
+}
+
+async function saveProvidersList() {
+  if (!providerLibrarySupported.value) {
+    toast.error(t('providerBackendOutdated'))
+    return
+  }
+  providerSaving.value = true
+  try {
+    await store.saveProviders(
+      providerDrafts.value.map(d => ({
+        id: d.id, name: d.name, base_url: d.base_url, api_format: d.api_format, models: d.models,
+      })),
+      {
+        providerId: String(store.config.llm_provider_ref || ''),
+        model: String(store.config.model || ''),
+      },
+    )
+    toast.success(t('settingsSaved'))
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+  } finally {
+    providerSaving.value = false
+  }
+}
+
+async function testProviderDraft(draft: ProviderDraft, testModel: string) {
+  providerTestingId.value = draft.id
+  providerTestResult.value = null
+  try {
+    providerTestResult.value = await store.testProvider({
+      // 已保存的服务商可让服务端取凭据；新草稿只带明文输入。
+      providerId: savedProviderIds.value.has(draft.id) ? draft.id : undefined,
+      baseUrl: draft.base_url,
+      apiKey: store.secrets[providerSecretKey(draft.id)]?.trim() || '',
+      apiFormat: draft.api_format,
+      model: testModel.trim() || String(store.config.model || 'gpt-4o-mini'),
+    })
+    providerTestedId.value = draft.id
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+  } finally {
+    providerTestingId.value = ''
+  }
+}
+
+async function fetchProviderModels(draft: ProviderDraft) {
+  providerFetchingModelsId.value = draft.id
+  try {
+    const result = await store.fetchProviderModels({
+      providerId: savedProviderIds.value.has(draft.id) ? draft.id : undefined,
+      baseUrl: draft.base_url,
+      apiKey: store.secrets[providerSecretKey(draft.id)]?.trim() || '',
+      apiFormat: draft.api_format,
+    })
+    if (!result.ok) throw new Error(result.error || t('operationFailed'))
+    providerCatalogModels.value[draft.id] = [...new Set([
+      ...draft.models,
+      ...result.models.map(model => String(model).trim()).filter(Boolean),
+    ])]
+    toast.success(t('providerModelsFetched', { count: providerCatalogModels.value[draft.id].length }))
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+  } finally {
+    providerFetchingModelsId.value = ''
+  }
+}
+
+async function openProviderCatalog(draft: ProviderDraft) {
+  providerCatalogProviderId.value = draft.id
+  providerCatalogSearch.value = ''
+  providerCatalogFilter.value = 'all'
+  providerCatalogCustomModel.value = ''
+  providerCatalogOpen.value = true
+  if (!providerCatalogModels.value[draft.id]) {
+    providerCatalogModels.value[draft.id] = [...draft.models]
+    await fetchProviderModels(draft)
+  }
+}
+
+function addProviderModel(draft: ProviderDraft, value: string) {
+  const model = String(value || '').trim()
+  if (!model) return
+  if (!draft.models.includes(model)) draft.models.push(model)
+}
+
+function addCustomProviderModel() {
+  if (!activeCatalogProvider.value) return
+  addProviderModel(activeCatalogProvider.value, providerCatalogCustomModel.value)
+  const id = activeCatalogProvider.value.id
+  providerCatalogModels.value[id] = [...new Set([...(providerCatalogModels.value[id] || []), providerCatalogCustomModel.value.trim()].filter(Boolean))]
+  providerCatalogCustomModel.value = ''
+}
+
+function toggleCatalogModel(model: string) {
+  if (!activeCatalogProvider.value) return
+  if (activeCatalogProvider.value.models.includes(model)) removeProviderModel(activeCatalogProvider.value, model)
+  else addProviderModel(activeCatalogProvider.value, model)
+}
+
+function addAllCatalogModels() {
+  if (!activeCatalogProvider.value) return
+  activeCatalogProvider.value.models = [...new Set([
+    ...activeCatalogProvider.value.models,
+    ...providerCatalogFilteredModels.value,
+  ])]
+}
+
+function isCatalogModelSelected(model: string): boolean {
+  return Boolean(activeCatalogProvider.value?.models.includes(model))
+}
+
+function removeProviderModel(draft: ProviderDraft, model: string) {
+  draft.models = draft.models.filter(item => item !== model)
+}
+
+function providerHasKey(draft: ProviderDraft): boolean {
+  return Boolean(draft.configuredMasked || store.secrets[providerSecretKey(draft.id)]?.trim())
+}
+
+function providerDraftReady(draft: ProviderDraft): boolean {
+  return Boolean(draft.base_url.trim() && providerHasKey(draft))
+}
+
+function setActiveProviderTestModel(value: string | number) {
+  if (!activeProvider.value) return
+  providerTestModels.value[activeProvider.value.id] = String(value)
+}
+
+function providerMark(draft: ProviderDraft): string {
+  return (draft.name || draft.id).trim().slice(0, 1).toUpperCase()
+}
+
+function providerStyle(providerId: string) {
+  let hash = 0
+  for (const character of providerId) hash = ((hash << 5) - hash) + character.charCodeAt(0)
+  return { '--provider-hue': String(Math.abs(hash) % 360) }
+}
+
+function modelCapability(model: string): ModelCapability {
+  const value = model.toLowerCase()
+  if (/(image|dall-e|flux|stable[-_. ]?diffusion|(^|[-_.])sd3|kolors|qwen[-_. ]?image|ideogram|imagen)/.test(value)) {
+    return 'image'
+  }
+  if (/(embed|embedding|bge|e5-|text2vec|rerank)/.test(value)) return 'embedding'
+  if (/(whisper|sensevoice|paraformer|funasr|speech[-_. ]?to[-_. ]?text|transcri|(^|[-_.])asr)/.test(value)) return 'asr'
+  if (/(tts|cosyvoice|fish[-_. ]?speech|gpt[-_. ]?sovits|chattts|voice)/.test(value)) return 'tts'
+  return 'chat'
+}
+
+function modelCapabilityLabels(model: string): string[] {
+  const capability = modelCapability(model)
+  if (capability === 'image') return [t('modelCapabilityImage')]
+  if (capability === 'embedding') return [t('modelCapabilityEmbedding')]
+  if (capability === 'tts') return [t('modelCapabilityTts')]
+  if (capability === 'asr') return [t('modelCapabilityAsr')]
+
+  const labels = [t('modelCapabilityChat')]
+  const value = model.toLowerCase()
+  if (/(reason|thinking|deepseek-r|(^|[-_.])r1|(^|[-_.])o[134])/.test(value)) {
+    labels.push(t('modelCapabilityReasoning'))
+  }
+  return labels
+}
+
+function groupProviderModels(models: string[]): ProviderModelGroup[] {
+  const groups = new Map<string, string[]>()
+  for (const model of models) {
+    const slash = model.indexOf('/')
+    const name = slash > 0 ? model.slice(0, slash) : t('providerOtherModels')
+    const items = groups.get(name) || []
+    items.push(model)
+    groups.set(name, items)
+  }
+  return [...groups.entries()].map(([name, items]) => ({ name, models: items }))
+}
+
+function providerById(id: string) {
+  return (store.config.ai_providers || []).find(p => p.id === id)
+}
+
+function savedProviderModels(providerId: string): string[] {
+  return providerById(providerId)?.models || []
+}
+
+function modelBindingSummary(providerId: unknown, model: unknown): string {
+  const provider = providerById(String(providerId || ''))
+  if (!provider) return t('modelRoutingUnassigned')
+  return `${provider.name || provider.id} · ${String(model || t('modelUnset'))}`
+}
+
+function setModelRoleProvider(refKey: keyof AppConfig, modelKey: keyof AppConfig, providerId: string) {
+  setStr(refKey, providerId)
+  const models = savedProviderModels(providerId)
+  const current = String((store.config as Record<string, unknown>)[modelKey] || '')
+  if (!models.includes(current)) setStr(modelKey, models[0] || '')
+}
+
+const MODEL_ROUTING_CONFIG_KEYS = [
+  'llm_provider_ref', 'model',
+  'embedding_provider_ref', 'embedding_model',
+  'tts_provider', 'tts_provider_ref', 'tts_model',
+  'asr_provider', 'asr_provider_ref', 'asr_model',
+]
+
+async function saveModelRouting() {
+  if (!providerLibrarySupported.value) {
+    toast.error(t('providerBackendOutdated'))
+    return
+  }
+  modelRoutingSaving.value = true
+  try {
+    await store.saveSection(MODEL_ROUTING_CONFIG_KEYS)
+    await Promise.all([initializeTts(true), initializeAsr(true), loadTtsVoices()])
+    toast.success(t('modelRoutingSaved'))
+  } catch (error: unknown) {
+    toast.error(errorMessage(error))
+  } finally {
+    modelRoutingSaving.value = false
+  }
+}
 
 async function saveAsr(showToast = true): Promise<boolean> {
   try {
@@ -401,43 +737,52 @@ const updateTagLabel = computed(() => {
   if (updateInfo.value.no_release) return t('updateNoRelease')
   return updateInfo.value.update_available ? t('updateFound') : t('updateLatest')
 })
-function hasSecret(key: SecretKey, field?: SecretField) {
-  return Boolean(store.secrets[key]?.trim() || field?.configured)
+function providerReady(ref: unknown): boolean {
+  const id = String(ref || '').trim()
+  if (!id) return false
+  const p = providerById(id)
+  return Boolean(p && p.base_url && p.api_key?.configured)
 }
-function apiFormatLabel(value?: unknown) {
-  return value === 'anthropic' ? 'Anthropic' : t('apiFormatOpenAI')
-}
-
 const systemStatusItems = computed<SystemStatusItem[]>(() => {
   const c = store.config
-  const mainReady = Boolean(c.base_url && c.model && hasSecret('api_key', c.api_key))
-  const fallbackSlots = [
-    { name: t('fallbackSlot1'), enabled: !!c.fallback1_enabled, model: c.fallback1_model, ready: Boolean(c.fallback1_base_url && c.fallback1_model && hasSecret('fallback1_api_key', c.fallback1_api_key)) },
-    { name: t('fallbackSlot2'), enabled: !!c.fallback2_enabled, model: c.fallback2_model, ready: Boolean(c.fallback2_base_url && c.fallback2_model && hasSecret('fallback2_api_key', c.fallback2_api_key)) },
-  ]
-  const enabledFallbacks = fallbackSlots.filter(item => item.enabled)
-  const readyFallbacks = enabledFallbacks.filter(item => item.ready)
-  const embeddingReady = Boolean(c.embedding_enabled && c.embedding_base_url && c.embedding_model && hasSecret('embedding_api_key', c.embedding_api_key))
+  const mainProvider = providerById(String(c.llm_provider_ref || '').trim())
+  const embeddingProvider = providerById(String(c.embedding_provider_ref || '').trim())
+  const ttsProviderConfig = providerById(String(c.tts_provider_ref || '').trim())
+  const asrProviderConfig = providerById(String(c.asr_provider_ref || '').trim())
+  const mainReady = Boolean(c.model && providerReady(c.llm_provider_ref))
+  const embeddingReady = Boolean(c.embedding_enabled && c.embedding_model && providerReady(c.embedding_provider_ref))
+  const ttsMode = String(c.tts_provider || 'browser')
+  const asrMode = String(c.asr_provider || 'disabled')
+  const ttsBuiltIn = ttsMode === 'browser' || ttsMode === 'edge-tts'
+  const ttsReady = Boolean(ttsBuiltIn || (c.tts_model && providerReady(c.tts_provider_ref)))
+  const asrReady = Boolean(asrMode === 'disabled' || (c.asr_model && providerReady(c.asr_provider_ref)))
   const proxyEnabled = !!c.proxy_enabled
+  const mainDetail = mainProvider ? `${mainProvider.name || mainProvider.id} · ${c.model || t('modelUnset')}` : t('modelRoutingUnassigned')
+  const ttsDetail = ttsBuiltIn
+    ? (ttsMode === 'edge-tts' ? t('ttsProviderEdge') : t('ttsProviderBrowser'))
+    : (ttsProviderConfig ? `${ttsProviderConfig.name || ttsProviderConfig.id} · ${c.tts_model || t('modelUnset')}` : t('modelRoutingUnassigned'))
+  const asrDetail = asrMode === 'disabled'
+    ? t('asrProviderDisabled')
+    : (asrProviderConfig ? `${asrProviderConfig.name || asrProviderConfig.id} · ${c.asr_model || t('modelUnset')}` : t('modelRoutingUnassigned'))
   return [
     {
       label: t('statusMainModel'),
       value: mainReady ? t('statusComplete') : t('statusNeedsSetup'),
-      detail: `${apiFormatLabel(c.api_format)} · ${c.model || t('modelUnset')} · ${c.base_url || t('endpointUnset')} · ${hasSecret('api_key', c.api_key) ? t('keyConfigured') : t('keyMissing')}`,
+      detail: mainDetail,
       tone: mainReady ? 'success' : 'warning',
       icon: ServerOutline,
     },
     {
-      label: t('statusFallback'),
-      value: enabledFallbacks.length ? t('routesAvailable', { ready: readyFallbacks.length, total: enabledFallbacks.length }) : t('disabled'),
-      detail: enabledFallbacks.length ? enabledFallbacks.map(item => `${item.name}: ${item.model || t('modelUnset')}`).join(' · ') : t('fallbackDetailHint'),
-      tone: !enabledFallbacks.length ? 'default' : readyFallbacks.length === enabledFallbacks.length ? 'success' : 'warning',
-      icon: CubeOutline,
+      label: t('statusSpeechModels'),
+      value: ttsReady && asrReady ? t('statusComplete') : t('statusNeedsSetup'),
+      detail: `TTS: ${ttsDetail} · ASR: ${asrDetail}`,
+      tone: ttsReady && asrReady ? 'success' : 'warning',
+      icon: VolumeHighOutline,
     },
     {
       label: t('statusVectorMemory'),
       value: c.embedding_enabled ? (embeddingReady ? t('enabled') : t('statusIncomplete')) : t('disabled'),
-      detail: `${c.embedding_model || t('modelUnset')} · ${c.embedding_base_url || t('endpointUnset')} · ${t('inputLimit')} ${c.embedding_max_input || t('auto')}`,
+      detail: `${embeddingProvider?.name || t('modelRoutingUnassigned')} · ${c.embedding_model || t('modelUnset')} · ${t('inputLimit')} ${c.embedding_max_input || t('auto')}`,
       tone: c.embedding_enabled ? (embeddingReady ? 'success' : 'warning') : 'default',
       icon: CubeOutline,
     },
@@ -776,78 +1121,317 @@ function redownloadUpdatePackage() {
 
       <div class="settings-content">
         <NSpin :show="store.loading">
-          <div v-show="section === 'api'" class="settings-pane">
-            <div class="api-head-row"><h3>{{ t('mainModelApi') }}</h3><HelpButton :title="t('deepseekHelpTitle')">
-              <h4>{{ t('deepseekHelpStep1Title') }}</h4>
-              <p>{{ t('deepseekHelpStep1TextBefore') }} <a href="https://platform.deepseek.com/" target="_blank" rel="noopener">{{ t('deepseekPlatform') }}</a>{{ t('deepseekHelpStep1TextAfter') }}</p>
-              <h4>{{ t('deepseekHelpStep2Title') }}</h4>
-              <p>{{ t('deepseekHelpStep2Text') }} <code>sk-xxxxxxxx</code>{{ t('deepseekHelpStep2Suffix') }}</p>
-              <h4>{{ t('deepseekHelpStep3Title') }}</h4>
-              <p>{{ t('deepseekHelpStep3Text') }}</p>
-              <ul>
-                <li><strong>{{ t('apiFormat') }}</strong>: {{ t('apiFormatOpenAI') }}</li>
-                <li><strong>Base URL</strong>: <code>https://api.deepseek.com/v1</code></li>
-                <li><strong>API Key</strong>: {{ t('deepseekHelpApiKey') }}</li>
-                <li><strong>{{ t('model') }}</strong>: <code>deepseek-v4-flash</code></li>
-              </ul>
-              <p>{{ t('deepseekHelpFinish') }}</p>
-            </HelpButton></div>
-            <div class="form-row">
-              <label>{{ t('apiFormat') }}</label>
-              <select :value="store.config.api_format ?? 'openai'" @change="setStr('api_format', eventValue($event))">
-                <option value="openai">{{ t('apiFormatOpenAI') }}</option>
-                <option value="anthropic">Anthropic</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label>Base URL</label>
-              <NInput
-                :value="store.config.base_url ?? ''"
-                :placeholder="store.config.api_format === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'"
-                @update:value="setStr('base_url', $event)"
-              />
-            </div>
-            <div class="form-row">
-              <label>API Key</label>
-              <NInput
-                :value="store.secrets.api_key ?? ''"
-                type="password"
-                show-password-on="click"
-                :placeholder="store.config.api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.api_key.masked }) : ''"
-                @update:value="setSecret('api_key', $event)"
-              />
-            </div>
-            <div class="form-row">
-              <label>{{ t('model') }}</label>
-              <NInput
-                :value="store.config.model ?? ''"
-                :placeholder="store.config.api_format === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini'"
-                @update:value="setStr('model', $event)"
-              />
-            </div>
-            <div class="actions-row">
-              <NButton type="primary" @click="save(['api_format', 'base_url', 'model'], ['api_key'])">{{ t('saveAction') }}</NButton>
-              <NButton :loading="testing && testKind === 'model'" @click="runTest('model')">{{ t('testConnection') }}</NButton>
-            </div>
-            <TestResultCard v-if="testKind === 'model' && testResult" :result="testResult" kind="model" />
+          <div v-show="section === 'api'" class="settings-pane ai-management-pane">
+            <header class="ai-manager-header">
+              <div>
+                <span class="section-kicker">MODEL CONTROL</span>
+                <h3>{{ t('aiProviders') }}</h3>
+                <p>{{ t('aiProvidersHint') }}</p>
+              </div>
+            </header>
 
-            <NCollapse :default-expanded-names="[]">
-              <NCollapseItem :title="t('fallbackModelCollapse')" name="fallback">
-                <div class="form-row"><label>{{ t('fallbackSlot1') }}</label><div class="switch-inline"><NSwitch :value="!!store.config.fallback1_enabled" @update:value="setBool('fallback1_enabled', $event)" /><span>{{ t('enabled') }}</span></div></div>
-                <div class="form-row"><label>{{ t('apiFormat') }}</label><select :value="store.config.fallback1_api_format ?? 'openai'" @change="setStr('fallback1_api_format', eventValue($event))"><option value="openai">{{ t('apiFormatOpenAI') }}</option><option value="anthropic">Anthropic</option></select></div>
-                <div class="form-row"><label>Base URL</label><NInput :value="store.config.fallback1_base_url ?? ''" @update:value="setStr('fallback1_base_url', $event)" /></div>
-                <div class="form-row"><label>API Key</label><NInput :value="store.secrets.fallback1_api_key ?? ''" type="password" show-password-on="click" @update:value="setSecret('fallback1_api_key', $event)" /></div>
-                <div class="form-row"><label>{{ t('model') }}</label><NInput :value="store.config.fallback1_model ?? ''" @update:value="setStr('fallback1_model', $event)" /></div>
-                <div class="form-row"><label>{{ t('fallbackSlot2') }}</label><div class="switch-inline"><NSwitch :value="!!store.config.fallback2_enabled" @update:value="setBool('fallback2_enabled', $event)" /><span>{{ t('enabled') }}</span></div></div>
-                <div class="form-row"><label>{{ t('apiFormat') }}</label><select :value="store.config.fallback2_api_format ?? 'openai'" @change="setStr('fallback2_api_format', eventValue($event))"><option value="openai">{{ t('apiFormatOpenAI') }}</option><option value="anthropic">Anthropic</option></select></div>
-                <div class="form-row"><label>Base URL</label><NInput :value="store.config.fallback2_base_url ?? ''" @update:value="setStr('fallback2_base_url', $event)" /></div>
-                <div class="form-row"><label>API Key</label><NInput :value="store.secrets.fallback2_api_key ?? ''" type="password" show-password-on="click" @update:value="setSecret('fallback2_api_key', $event)" /></div>
-                <div class="form-row"><label>{{ t('model') }}</label><NInput :value="store.config.fallback2_model ?? ''" @update:value="setStr('fallback2_model', $event)" /></div>
-                <div class="actions-row">
-                  <NButton type="primary" @click="save(['fallback1_enabled', 'fallback1_api_format', 'fallback1_base_url', 'fallback1_model', 'fallback2_enabled', 'fallback2_api_format', 'fallback2_base_url', 'fallback2_model'], ['fallback1_api_key', 'fallback2_api_key'])">{{ t('saveFallbackModels') }}</NButton>
+            <div v-if="!providerLibrarySupported" class="provider-backend-warning">
+              <NIcon :component="AlertCircleOutline" />
+              <div>
+                <strong>{{ t('providerBackendOutdatedTitle') }}</strong>
+                <p>{{ t('providerBackendOutdated') }}</p>
+              </div>
+            </div>
+
+            <div class="ai-provider-workspace">
+              <aside class="provider-library">
+                <div class="provider-search-box">
+                  <NIcon :component="SearchOutline" />
+                  <input v-model="providerSearch" :placeholder="t('providerSearch')">
                 </div>
-              </NCollapseItem>
-            </NCollapse>
+                <div class="provider-list">
+                  <button
+                    v-for="p in filteredProviderDrafts"
+                    :key="p.id"
+                    type="button"
+                    :class="['provider-list-item', { active: activeProviderId === p.id }]"
+                    @click="activeProviderId = p.id"
+                  >
+                    <span class="provider-avatar" :style="providerStyle(p.id)">{{ providerMark(p) }}</span>
+                    <span class="provider-list-copy">
+                      <strong>{{ p.name || p.base_url || t('providerNamePlaceholder') }}</strong>
+                      <small>{{ t('providerCatalogCount', { count: p.models.length }) }}</small>
+                    </span>
+                    <i :class="{ ready: providerDraftReady(p) }" />
+                  </button>
+                  <p v-if="providerDrafts.length && !filteredProviderDrafts.length" class="provider-list-empty">
+                    {{ t('providerSearchEmpty') }}
+                  </p>
+                </div>
+                <footer class="provider-library-footer">
+                  <button type="button" :disabled="!providerLibrarySupported" @click="addProviderDraft">
+                    <NIcon :component="AddOutline" />
+                    {{ t('providerAdd') }}
+                  </button>
+                </footer>
+              </aside>
+
+              <section v-if="activeProvider" class="provider-editor">
+                <header class="provider-editor-head">
+                  <div class="provider-editor-identity">
+                    <span class="provider-avatar provider-avatar-large" :style="providerStyle(activeProvider.id)">
+                      {{ providerMark(activeProvider) }}
+                    </span>
+                    <div>
+                      <h4>{{ activeProvider.name || activeProvider.id }}</h4>
+                      <span>{{ activeProvider.base_url || activeProvider.id }}</span>
+                    </div>
+                  </div>
+                  <NTag :type="providerDraftReady(activeProvider) ? 'success' : 'warning'" round>
+                    <NIcon :component="providerDraftReady(activeProvider) ? CheckmarkCircleOutline : AlertCircleOutline" />
+                    {{ providerDraftReady(activeProvider) ? t('providerReady') : t('providerIncomplete') }}
+                  </NTag>
+                </header>
+
+                <section class="provider-editor-section provider-credentials-section">
+                  <div class="provider-section-title">
+                    <div>
+                      <h5>{{ t('providerCredentials') }}</h5>
+                      <p>{{ t('providerCredentialsHint') }}</p>
+                    </div>
+                  </div>
+                  <div class="provider-field-grid">
+                    <label class="provider-field">
+                      <span>{{ t('providerName') }}</span>
+                      <NInput
+                        :value="activeProvider.name"
+                        :placeholder="t('providerNamePlaceholder')"
+                        @update:value="activeProvider.name = String($event)"
+                      />
+                    </label>
+                    <label class="provider-field">
+                      <span>{{ t('apiFormat') }}</span>
+                      <select :value="activeProvider.api_format" @change="activeProvider.api_format = eventValue($event)">
+                        <option value="openai">{{ t('apiFormatOpenAI') }}</option>
+                        <option value="anthropic">Anthropic</option>
+                      </select>
+                    </label>
+                    <label class="provider-field provider-field-wide">
+                      <span>API Key</span>
+                      <NInput
+                        :value="store.secrets[providerSecretKey(activeProvider.id)] ?? ''"
+                        type="password"
+                        show-password-on="click"
+                        :placeholder="activeProvider.configuredMasked ? t('secretConfiguredPlaceholder', { masked: activeProvider.configuredMasked }) : ''"
+                        @update:value="setProviderSecret(activeProvider.id, $event)"
+                      />
+                    </label>
+                    <label class="provider-field provider-field-wide">
+                      <span>Base URL</span>
+                      <NInput
+                        :value="activeProvider.base_url"
+                        placeholder="https://api.example.com/v1"
+                        @update:value="activeProvider.base_url = String($event).trim()"
+                      />
+                    </label>
+                  </div>
+                </section>
+
+                <section class="provider-editor-section provider-models-section">
+                  <div class="provider-section-title provider-model-toolbar">
+                    <div>
+                      <h5>{{ t('providerModels') }}</h5>
+                      <p>{{ t('providerModelsHint') }}</p>
+                    </div>
+                    <NButton
+                      size="small"
+                      :loading="providerFetchingModelsId === activeProvider.id"
+                      @click="openProviderCatalog(activeProvider)"
+                    >
+                      <template #icon><NIcon :component="CloudDownloadOutline" /></template>
+                      {{ t('providerSelectModels') }}
+                    </NButton>
+                  </div>
+
+                  <div v-if="activeProviderModelGroups.length" class="provider-model-groups">
+                    <section v-for="group in activeProviderModelGroups" :key="group.name" class="provider-model-group">
+                      <header>
+                        <strong>{{ group.name }}</strong>
+                        <span>{{ group.models.length }}</span>
+                      </header>
+                      <div class="provider-model-list">
+                        <article v-for="modelName in group.models" :key="modelName" class="provider-model-row">
+                          <span class="provider-model-orbit"><i /><i /></span>
+                          <div class="provider-model-copy">
+                            <strong>{{ modelName }}</strong>
+                            <small>{{ modelCapabilityLabels(modelName).join(' · ') }}</small>
+                          </div>
+                          <button
+                            type="button"
+                            class="provider-model-remove"
+                            :title="t('providerRemove')"
+                            @click="removeProviderModel(activeProvider, modelName)"
+                          >
+                            <NIcon :component="TrashOutline" />
+                          </button>
+                        </article>
+                      </div>
+                    </section>
+                  </div>
+                  <p v-else class="provider-model-empty">{{ t('providerNoModels') }}</p>
+                </section>
+
+                <section class="provider-editor-section provider-test-section">
+                  <label class="provider-field provider-field-wide">
+                    <span>{{ t('providerTestModel') }}</span>
+                    <NInput
+                      :value="providerTestModels[activeProvider.id] ?? ''"
+                      :placeholder="activeProvider.models[0] || String(store.config.model || 'gpt-4o-mini')"
+                      @update:value="setActiveProviderTestModel"
+                    />
+                  </label>
+                  <div class="provider-test-actions">
+                    <NButton
+                      :loading="providerTestingId === activeProvider.id"
+                      @click="testProviderDraft(activeProvider, providerTestModels[activeProvider.id] || activeProvider.models[0] || '')"
+                    >{{ t('testConnection') }}</NButton>
+                    <NButton type="primary" :loading="providerSaving" :disabled="!providerLibrarySupported" @click="saveProvidersList">{{ t('providerSave') }}</NButton>
+                    <NButton
+                      quaternary
+                      type="error"
+                      @click="removeProviderDraft(providerDrafts.findIndex(provider => provider.id === activeProvider?.id))"
+                    >{{ t('providerRemove') }}</NButton>
+                  </div>
+                  <TestResultCard
+                    v-if="providerTestedId === activeProvider.id && providerTestResult"
+                    :result="providerTestResult"
+                    kind="model"
+                  />
+                </section>
+              </section>
+
+              <section v-else class="provider-editor provider-editor-empty">
+                <span class="provider-empty-sigil"><NIcon :component="ServerOutline" /></span>
+                <h4>{{ t('providerEmptyTitle') }}</h4>
+                <p>{{ t('providerEmptyHint') }}</p>
+                <div class="provider-empty-actions">
+                  <NButton type="primary" :disabled="!providerLibrarySupported" @click="addProviderDraft">{{ t('providerAdd') }}</NButton>
+                </div>
+              </section>
+            </div>
+
+          </div>
+
+          <NModal
+            v-model:show="providerCatalogOpen"
+            preset="card"
+            class="provider-catalog-modal"
+            :title="t('providerCatalogTitle', { name: activeCatalogProvider?.name || activeCatalogProvider?.id || '' })"
+          >
+            <div class="provider-catalog-tools">
+              <label class="provider-catalog-search">
+                <NIcon :component="SearchOutline" />
+                <input v-model="providerCatalogSearch" :placeholder="t('modelPickerSearch')">
+              </label>
+              <NButton
+                :loading="providerFetchingModelsId === activeCatalogProvider?.id"
+                :disabled="!activeCatalogProvider"
+                @click="activeCatalogProvider && fetchProviderModels(activeCatalogProvider)"
+              >
+                <template #icon><NIcon :component="RefreshOutline" /></template>
+                {{ t('providerRefreshCatalog') }}
+              </NButton>
+            </div>
+            <div class="provider-catalog-filters">
+              <button
+                v-for="filter in providerCatalogFilters"
+                :key="filter.id"
+                type="button"
+                :class="{ active: providerCatalogFilter === filter.id }"
+                @click="providerCatalogFilter = filter.id"
+              >
+                {{ filter.label }} <span>{{ filter.count }}</span>
+              </button>
+            </div>
+            <div class="provider-catalog-body">
+              <section v-for="group in providerCatalogGroups" :key="group.name" class="provider-catalog-group">
+                <header><strong>{{ group.name }}</strong><span>{{ group.models.length }}</span></header>
+                <button
+                  v-for="modelName in group.models"
+                  :key="modelName"
+                  type="button"
+                  :class="['provider-catalog-row', { selected: isCatalogModelSelected(modelName) }]"
+                  @click="toggleCatalogModel(modelName)"
+                >
+                  <span class="provider-model-orbit"><i /><i /></span>
+                  <span class="provider-catalog-copy">
+                    <strong>{{ modelName }}</strong>
+                    <small>{{ modelCapabilityLabels(modelName).join(' · ') }}</small>
+                  </span>
+                  <span class="provider-catalog-toggle">{{ isCatalogModelSelected(modelName) ? '−' : '+' }}</span>
+                </button>
+              </section>
+              <p v-if="!providerCatalogGroups.length" class="provider-model-empty">{{ t('modelPickerEmpty') }}</p>
+            </div>
+            <footer class="provider-catalog-footer">
+              <div class="provider-catalog-custom">
+                <input v-model="providerCatalogCustomModel" :placeholder="t('providerModelPlaceholder')" @keydown.enter.prevent="addCustomProviderModel">
+                <button type="button" @click="addCustomProviderModel">{{ t('providerAddModel') }}</button>
+              </div>
+              <NButton :disabled="!providerCatalogFilteredModels.length" @click="addAllCatalogModels">
+                {{ t('providerAddAllModels') }}
+              </NButton>
+            </footer>
+          </NModal>
+
+          <div v-show="section === 'models'" class="settings-pane model-routing-pane">
+            <header class="model-routing-header">
+              <div>
+                <span class="section-kicker">MODEL ROUTING</span>
+                <h3>{{ t('modelRoutingTitle') }}</h3>
+                <p>{{ t('modelRoutingHint') }}</p>
+              </div>
+              <NButton type="primary" :loading="modelRoutingSaving" :disabled="!providerLibrarySupported" @click="saveModelRouting">
+                {{ t('modelRoutingSave') }}
+              </NButton>
+            </header>
+
+            <div v-if="!providerLibrarySupported" class="provider-backend-warning compact">
+              <NIcon :component="AlertCircleOutline" />
+              <div><strong>{{ t('providerBackendOutdatedTitle') }}</strong><p>{{ t('providerBackendOutdated') }}</p></div>
+            </div>
+            <div v-else-if="!(store.config.ai_providers || []).length" class="model-routing-empty">
+              <NIcon :component="ServerOutline" />
+              <div><strong>{{ t('modelRoutingNoProviders') }}</strong><p>{{ t('modelRoutingNoProvidersHint') }}</p></div>
+              <NButton @click="section = 'api'">{{ t('providerAdd') }}</NButton>
+            </div>
+
+            <div class="model-routing-grid">
+              <article class="model-role-card">
+                <header><NIcon :component="SparklesOutline" /><div><h4>{{ t('modelRoleMain') }}</h4><p>{{ t('modelRoleMainHint') }}</p></div></header>
+                <label><span>{{ t('providerName') }}</span><select :value="store.config.llm_provider_ref || ''" @change="setModelRoleProvider('llm_provider_ref', 'model', eventValue($event))"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in store.config.ai_providers || []" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
+                <label><span>{{ t('model') }}</span><select :value="store.config.model || ''" :disabled="!store.config.llm_provider_ref" @change="setStr('model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.llm_provider_ref || ''))" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+              </article>
+
+              <article class="model-role-card">
+                <header><NIcon :component="CubeOutline" /><div><h4>{{ t('modelRoleEmbedding') }}</h4><p>{{ t('modelRoleEmbeddingHint') }}</p></div></header>
+                <label><span>{{ t('providerName') }}</span><select :value="store.config.embedding_provider_ref || ''" @change="setModelRoleProvider('embedding_provider_ref', 'embedding_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in store.config.ai_providers || []" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
+                <label><span>{{ t('model') }}</span><select :value="store.config.embedding_model || ''" :disabled="!store.config.embedding_provider_ref" @change="setStr('embedding_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.embedding_provider_ref || ''))" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+              </article>
+
+              <article class="model-role-card">
+                <header><NIcon :component="VolumeHighOutline" /><div><h4>{{ t('modelRoleTts') }}</h4><p>{{ t('modelRoleTtsHint') }}</p></div></header>
+                <label><span>{{ t('modelRoutingMode') }}</span><select :value="store.config.tts_provider || 'browser'" @change="setTtsProvider(eventValue($event))"><option value="browser">{{ t('ttsProviderBrowser') }}</option><option value="edge-tts">{{ t('ttsProviderEdge') }}</option><option value="openai-compatible">{{ t('ttsProviderOpenAI') }}</option><option value="gpt-sovits">GPT-SoVITS</option></select></label>
+                <template v-if="ttsProvider === 'openai-compatible' || ttsProvider === 'gpt-sovits'">
+                  <label><span>{{ t('providerName') }}</span><select :value="store.config.tts_provider_ref || ''" @change="setModelRoleProvider('tts_provider_ref', 'tts_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in store.config.ai_providers || []" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
+                  <label><span>{{ t('model') }}</span><select :value="store.config.tts_model || ''" :disabled="!store.config.tts_provider_ref" @change="setStr('tts_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.tts_provider_ref || ''))" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+                </template>
+              </article>
+
+              <article class="model-role-card">
+                <header><NIcon :component="MicOutline" /><div><h4>{{ t('modelRoleAsr') }}</h4><p>{{ t('modelRoleAsrHint') }}</p></div></header>
+                <label><span>{{ t('modelRoutingMode') }}</span><select :value="store.config.asr_provider || 'disabled'" @change="setAsrProvider(eventValue($event))"><option value="disabled">{{ t('asrProviderDisabled') }}</option><option value="openai-compatible">{{ t('asrProviderOpenAI') }}</option></select></label>
+                <template v-if="asrProvider === 'openai-compatible'">
+                  <label><span>{{ t('providerName') }}</span><select :value="store.config.asr_provider_ref || ''" @change="setModelRoleProvider('asr_provider_ref', 'asr_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="p in store.config.ai_providers || []" :key="p.id" :value="p.id">{{ p.name || p.id }}</option></select></label>
+                  <label><span>{{ t('model') }}</span><select :value="store.config.asr_model || ''" :disabled="!store.config.asr_provider_ref" @change="setStr('asr_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="modelName in savedProviderModels(String(store.config.asr_provider_ref || ''))" :key="modelName" :value="modelName">{{ modelName }}</option></select></label>
+                </template>
+              </article>
+            </div>
           </div>
 
           <div v-show="section === 'memory'" class="settings-pane">
@@ -857,33 +1441,20 @@ function redownloadUpdatePackage() {
               <h4>{{ t('embeddingHelpChooseTitle') }}</h4>
               <p>{{ t('embeddingHelpChooseBefore') }} <code>bge-m3</code>{{ t('embeddingHelpChooseAfter') }} <code>text-embedding-3-small</code>, <code>gte-large</code>, <code>nomic-embed-text</code>{{ t('embeddingHelpChooseSuffix') }}</p>
               <h4>{{ t('embeddingHelpConfigTitle') }}</h4>
-              <ul>
-                <li><strong>{{ t('embeddingEndpoint') }}</strong>: {{ t('embeddingHelpEndpoint') }} <code>https://api.siliconflow.cn/v1</code></li>
-                <li><strong>API Key</strong>: {{ t('embeddingHelpKey') }}</li>
-                <li><strong>{{ t('model') }}</strong>: <code>BAAI/bge-m3</code> {{ t('embeddingHelpModelSuffix') }} <code>bge-m3</code>{{ t('embeddingHelpParenEnd') }}</li>
-                <li><strong>{{ t('maxInput') }}</strong>: {{ t('embeddingHelpMaxInput') }}</li>
-              </ul>
-              <p>{{ t('embeddingHelpProviders') }}</p>
+              <p>{{ t('embeddingHelpCentralized') }}</p>
               <h4>{{ t('test') }}</h4>
               <p>{{ t('embeddingHelpTest') }}</p>
             </HelpButton></div>
             <div class="form-row"><label>{{ t('vectorMemory') }}</label><div class="switch-inline"><NSwitch :value="!!store.config.embedding_enabled" @update:value="setBool('embedding_enabled', $event)" /><span>{{ t('enabled') }}</span></div></div>
-            <div class="form-row"><label>{{ t('embeddingEndpoint') }}</label><NInput :value="store.config.embedding_base_url ?? ''" @update:value="setStr('embedding_base_url', $event)" /></div>
-            <div class="form-row">
-              <label>API Key</label>
-              <NInput
-                :value="store.secrets.embedding_api_key ?? ''"
-                type="password"
-                show-password-on="click"
-                :placeholder="store.config.embedding_api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.embedding_api_key.masked }) : ''"
-                @update:value="setSecret('embedding_api_key', $event)"
-              />
+            <div class="model-binding-summary">
+              <NIcon :component="CubeOutline" />
+              <div><strong>{{ t('modelRoleEmbedding') }}</strong><small>{{ modelBindingSummary(store.config.embedding_provider_ref, store.config.embedding_model) }}</small></div>
+              <NButton size="small" @click="section = 'models'">{{ t('modelRoutingOpen') }}</NButton>
             </div>
-            <div class="form-row"><label>{{ t('model') }}</label><NInput :value="store.config.embedding_model ?? ''" @update:value="setStr('embedding_model', $event)" /></div>
             <div class="form-row"><label>{{ t('maxInput') }}</label><NInputNumber :value="store.config.embedding_max_input ?? 0" @update:value="setNum('embedding_max_input', $event)" style="width:100%" /></div>
             <p class="form-hint">{{ t('maxInputHint') }}</p>
             <div class="actions-row">
-              <NButton type="primary" @click="save(['embedding_enabled', 'embedding_base_url', 'embedding_model', 'embedding_max_input'], ['embedding_api_key'])">{{ t('saveAction') }}</NButton>
+              <NButton type="primary" @click="save(['embedding_enabled', 'embedding_max_input'])">{{ t('saveAction') }}</NButton>
               <NButton :loading="testing && testKind === 'embedding'" @click="runTest('embedding')">{{ t('testEmbeddingConnection') }}</NButton>
             </div>
             <TestResultCard v-if="testKind === 'embedding' && testResult" :result="testResult" kind="embedding" />
@@ -1088,41 +1659,15 @@ function redownloadUpdatePackage() {
                 <NIcon :component="OptionsOutline" />
                 <div><h3>{{ t('ttsSettings') }}</h3><p>{{ t('ttsSettingsHint') }}</p></div>
               </header>
-              <div class="advanced-row tts-subheading-row">
-                <div><strong>{{ t('ttsEngineConnection') }}</strong><small>{{ t('ttsEngineConnectionHint') }}</small></div>
-              </div>
-              <div class="advanced-row">
-                <div><strong>{{ t('ttsProvider') }}</strong></div>
-                <select :value="store.config.tts_provider ?? 'browser'" @change="setTtsProvider(eventValue($event))">
-                  <option value="browser">{{ t('ttsProviderBrowser') }}</option>
-                  <option value="openai-compatible">{{ t('ttsProviderOpenAI') }}</option>
-                  <option value="gpt-sovits">GPT-SoVITS</option>
-                  <option value="edge-tts">{{ t('ttsProviderEdge') }}</option>
-                </select>
+              <div class="model-binding-summary advanced-binding-summary">
+                <NIcon :component="VolumeHighOutline" />
+                <div>
+                  <strong>{{ t('modelRoleTts') }}</strong>
+                  <small>{{ ttsProvider === 'browser' ? t('ttsProviderBrowser') : ttsProvider === 'edge-tts' ? t('ttsProviderEdge') : modelBindingSummary(store.config.tts_provider_ref, store.config.tts_model) }}</small>
+                </div>
+                <NButton size="small" @click="section = 'models'">{{ t('modelRoutingOpen') }}</NButton>
               </div>
               <template v-if="ttsProvider !== 'browser'">
-                <div v-if="ttsProvider === 'openai-compatible' || ttsProvider === 'gpt-sovits'" class="advanced-row">
-                  <div><strong>Base URL</strong></div>
-                  <NInput
-                    :value="store.config.tts_base_url ?? ''"
-                    :placeholder="ttsProvider === 'gpt-sovits' ? 'http://127.0.0.1:9880' : 'https://api.openai.com/v1'"
-                    @update:value="setStr('tts_base_url', $event)"
-                  />
-                </div>
-                <div v-if="ttsProvider === 'openai-compatible' || ttsProvider === 'gpt-sovits'" class="advanced-row">
-                  <div><strong>API Key</strong></div>
-                  <NInput
-                    :value="store.secrets.tts_api_key ?? ''"
-                    type="password"
-                    show-password-on="click"
-                    :placeholder="store.config.tts_api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.tts_api_key.masked }) : t('ttsApiKeyOptional')"
-                    @update:value="setSecret('tts_api_key', $event)"
-                  />
-                </div>
-                <div v-if="ttsProvider === 'openai-compatible'" class="advanced-row">
-                  <div><strong>{{ t('model') }}</strong></div>
-                  <NInput :value="store.config.tts_model ?? 'tts-1'" placeholder="tts-1" @update:value="setStr('tts_model', $event)" />
-                </div>
                 <div v-if="ttsProvider !== 'edge-tts'" class="advanced-row">
                   <div><strong>{{ t('ttsAudioFormat') }}</strong></div>
                   <select :value="store.config.tts_audio_format ?? 'mp3'" @change="setStr('tts_audio_format', eventValue($event))">
@@ -1230,36 +1775,12 @@ function redownloadUpdatePackage() {
                 <NIcon :component="MicOutline" />
                 <div><h3>{{ t('asrSettings') }}</h3><p>{{ t('asrSettingsHint') }}</p></div>
               </header>
-              <div class="advanced-row">
-                <div><strong>{{ t('asrProvider') }}</strong></div>
-                <select :value="store.config.asr_provider ?? 'disabled'" @change="setStr('asr_provider', eventValue($event))">
-                  <option value="disabled">{{ t('asrProviderDisabled') }}</option>
-                  <option value="openai-compatible">{{ t('asrProviderOpenAI') }}</option>
-                </select>
+              <div class="model-binding-summary advanced-binding-summary">
+                <NIcon :component="MicOutline" />
+                <div><strong>{{ t('modelRoleAsr') }}</strong><small>{{ asrProvider === 'disabled' ? t('asrProviderDisabled') : modelBindingSummary(store.config.asr_provider_ref, store.config.asr_model) }}</small></div>
+                <NButton size="small" @click="section = 'models'">{{ t('modelRoutingOpen') }}</NButton>
               </div>
               <template v-if="asrProvider === 'openai-compatible'">
-                <div class="advanced-row">
-                  <div><strong>Base URL</strong></div>
-                  <NInput
-                    :value="store.config.asr_base_url ?? ''"
-                    placeholder="https://api.openai.com/v1"
-                    @update:value="setStr('asr_base_url', $event)"
-                  />
-                </div>
-                <div class="advanced-row">
-                  <div><strong>API Key</strong></div>
-                  <NInput
-                    :value="store.secrets.asr_api_key ?? ''"
-                    type="password"
-                    show-password-on="click"
-                    :placeholder="store.config.asr_api_key?.configured ? t('secretConfiguredPlaceholder', { masked: store.config.asr_api_key.masked }) : t('ttsApiKeyOptional')"
-                    @update:value="setSecret('asr_api_key', $event)"
-                  />
-                </div>
-                <div class="advanced-row">
-                  <div><strong>{{ t('model') }}</strong></div>
-                  <NInput :value="store.config.asr_model ?? 'whisper-1'" placeholder="whisper-1" @update:value="setStr('asr_model', $event)" />
-                </div>
                 <div class="advanced-row">
                   <div><strong>{{ t('asrTimeout') }}</strong></div>
                   <NInputNumber :value="Number(store.config.asr_timeout_seconds ?? 60)" :min="5" :max="300" :step="5" @update:value="setNum('asr_timeout_seconds', $event)" />

@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "启用插件",
+      "description": "停用后 GM 不再自动生成场景图。",
+      "default": false,
+      "ui": {"control": "switch", "order": 1}
+    },
+    "provider_ref": {
+      "type": "string",
+      "title": "AI 服务商",
+      "description": "引用“设置 → 模型接口”中已保存的 OpenAI 兼容服务商；地址与 API Key 由模型设置统一提供。",
+      "default": "",
+      "maxLength": 64,
+      "ui": {
+        "control": "select",
+        "group": "接入",
+        "order": 10,
+        "env": "DF_IMAGEGEN_PROVIDER_REF",
+        "options_source": "ai_providers",
+        "api_format": "openai",
+        "provider_base_url_env": "DF_IMAGEGEN_BASE_URL",
+        "provider_api_key_env": "DF_IMAGEGEN_API_KEY",
+        "provider_api_format_env": "DF_IMAGEGEN_API_FORMAT"
+      }
+    },
+    "model": {
+      "type": "string",
+      "title": "模型",
+      "description": "从所选服务商在“模型接口”中保存的模型目录选择，不在插件内单独填写或获取。",
+      "default": "",
+      "maxLength": 120,
+      "ui": {
+        "control": "select",
+        "group": "接入",
+        "order": 12,
+        "env": "DF_IMAGEGEN_MODEL",
+        "options_source": "provider_models",
+        "provider_ref_field": "provider_ref"
+      }
+    },
+    "size": {
+      "type": "string",
+      "title": "图片尺寸",
+      "description": "如 1792x1024（横幅）、1024x1024、1024x1792；以生图服务实际支持为准。",
+      "default": "1792x1024",
+      "maxLength": 20,
+      "ui": {"control": "text", "group": "生成", "order": 20, "env": "DF_IMAGEGEN_SIZE"}
+    },
+    "style_prefix": {
+      "type": "string",
+      "title": "风格前缀",
+      "description": "拼接在每条画面描述前的统一风格，如 “fantasy oil painting, dramatic lighting”。留空则完全按 GM 描述生成。",
+      "default": "",
+      "maxLength": 300,
+      "ui": {"control": "text", "group": "生成", "order": 21, "env": "DF_IMAGEGEN_STYLE_PREFIX"}
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "title": "超时（秒）",
+      "description": "单次生图的最长等待时间。",
+      "default": 120,
+      "minimum": 5,
+      "maximum": 300,
+      "ui": {"control": "number", "group": "生成", "order": 22, "env": "DF_IMAGEGEN_TIMEOUT"}
+    }
+  }
+}

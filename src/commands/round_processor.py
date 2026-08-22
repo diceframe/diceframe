@@ -42,6 +42,7 @@ from src.commands.tag_summary import summarize_tags
 from src.engine.constants import COMBAT_ATTACK_KEYWORDS, COMBAT_INTENT_KEYWORDS
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
+from src.imagegen import ImageGenError
 from src.memory.summarizer import needs_summary, summarize
 
 logger = logging.getLogger("trpg")
@@ -50,6 +51,15 @@ logger = logging.getLogger("trpg")
 def overreach_guard_enabled() -> bool:
     """顺带裁判开关：默认关，TRPG_OVERREACH_GUARD=1 启用。"""
     return os.environ.get("TRPG_OVERREACH_GUARD", "") == "1"
+
+
+def _last_scene_image_prompt(instance: GameInstance) -> str:
+    """最近一张场景图的画面描述；用于无场景切换时的重复生成节流。"""
+    for entry in reversed(instance.log):
+        record = entry.get("scene_image")
+        if isinstance(record, dict) and record.get("status") == "ready":
+            return str(record.get("prompt") or "")
+    return ""
 
 
 def format_overreach_block(instance: GameInstance) -> str:
@@ -122,6 +132,14 @@ class RoundProcessor:
         self.analysis_max_tokens = analysis_max_tokens
         # 后台摘要任务引用持有，避免被 GC 中断
         self._pending_summary_tasks: set = set()
+        # 场景图生成门面（provider 插件），未注入时 SCENE_IMAGE 标签零开销忽略
+        self._scene_image_generator = None
+        # 每局同一时间只允许一个生图任务：连续快速推进时跳过新请求
+        self._scene_image_tasks: dict[str, asyncio.Task] = {}
+
+    def set_scene_image_generator(self, generator) -> None:
+        """注入场景图生成门面；传 None 可关闭自动生图。"""
+        self._scene_image_generator = generator
 
     def prepare_round_checks(self, instance: GameInstance) -> list[dict]:
         """离线兼容路径：模型工具不可用时按旧规则意图结算检定。"""
@@ -270,6 +288,75 @@ class RoundProcessor:
         task.add_done_callback(self._pending_summary_tasks.discard)
         return task
 
+    def _maybe_schedule_scene_image(self, instance: GameInstance, data: dict) -> asyncio.Task | None:
+        """按 GM 的 SCENE_IMAGE 标签调度后台生图；插件缺失 / 节流命中时返回 None。"""
+        generator = self._scene_image_generator
+        if generator is None or not generator.available():
+            return None
+        prompt = str(data.get("scene_image_prompt") or "").strip()
+        if not prompt:
+            return None
+        completed_round = int(instance.round_number) - 1
+        if completed_round < 1:
+            return None
+        scene_change = str((data.get("state_update") or {}).get("scene_change") or "").strip()
+        # 场景切换时即使描述与上一张相同也重新生成（场景确实变了）；
+        # 否则与上一张相同的描述视为模型复读，跳过。
+        return self.schedule_scene_image(instance, prompt, completed_round, force=bool(scene_change))
+
+    def schedule_scene_image(
+        self,
+        instance: GameInstance,
+        prompt: str,
+        completed_round: int,
+        *,
+        force: bool = False,
+    ) -> asyncio.Task | None:
+        """为指定回合调度一次场景图生成（叙事已推送，生图在后台进行）。"""
+        generator = self._scene_image_generator
+        prompt = str(prompt or "").strip()
+        if generator is None or not generator.available() or not prompt:
+            return None
+        if not force and prompt == _last_scene_image_prompt(instance):
+            return None
+        game_key = instance.game_key
+        existing = self._scene_image_tasks.get(game_key)
+        if existing is not None and not existing.done():
+            return None
+        task = asyncio.create_task(
+            self._generate_scene_image_background(game_key, completed_round, prompt)
+        )
+        self._scene_image_tasks[game_key] = task
+        task.add_done_callback(lambda _task: self._scene_image_tasks.pop(game_key, None))
+        return task
+
+    async def _generate_scene_image_background(self, game_key: str, round_number: int, prompt: str) -> None:
+        try:
+            current = self.registry.get(game_key)
+            if current is None:
+                return
+            entry = next(
+                (item for item in current.log if item.get("round") == round_number),
+                None,
+            )
+            if entry is None:
+                return  # 该回合已被回滚删除，放弃本次生图
+            result = await self._scene_image_generator.generate(prompt)
+            current.set_scene_image(result["reference"])
+            entry["scene_image"] = {
+                "reference": result["reference"],
+                "prompt": prompt,
+                "revised_prompt": str(result.get("revised_prompt") or ""),
+                "status": "ready",
+                "swipe_index": int(entry.get("current_swipe") or 0),
+            }
+            await self.registry.save(current)
+            logger.info("场景图已生成 (round=%d, asset=%s)", round_number, result["asset_id"])
+        except ImageGenError as exc:
+            logger.warning("场景图生成失败 (round=%d): %s", round_number, exc)
+        except Exception:
+            logger.exception("场景图后台任务异常 (round=%d)", round_number)
+
     async def process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """实际的判定处理逻辑。"""
         if not instance.round_checks_prepared:
@@ -385,6 +472,8 @@ class RoundProcessor:
 
         # 摘要压缩较慢（LLM 调用，每 10 回合），延后到后台：叙事已推送，用户无需等待。
         self._maybe_schedule_summary(instance, gm_prompt)
+        # 场景图生成慢（生图 API 10-60s），同样延后到后台，完成后再推给前端。
+        self._maybe_schedule_scene_image(instance, data)
 
         try:
             await self.registry.save(instance)

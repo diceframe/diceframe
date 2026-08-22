@@ -2,12 +2,14 @@
 import { NButton, NCheckbox, NCollapse, NCollapseItem, NIcon, NInput, NInputNumber, NSelect, NSwitch, NSpin, NTabPane, NTabs, NTag } from 'naive-ui'
 import { CloudDownloadOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
 import { useLocale } from '@/composables/useLocale'
-import type { PluginField, PluginInfo } from '@/api/types'
+import type { AiProvider, PluginField, PluginInfo } from '@/api/types'
 import NapcatGuide from '@/components/plugins/NapcatGuide.vue'
+import ProviderImagegenTest from '../ProviderImagegenTest.vue'
 
-defineProps<{
+const props = defineProps<{
   loading: boolean
   plugins: PluginInfo[]
+  aiProviders: AiProvider[]
   filteredPlugins: PluginInfo[]
   expandedPluginNames: string[]
   typeFilter: string
@@ -31,7 +33,6 @@ defineProps<{
   set: (plugin: PluginInfo, key: string, next: unknown) => void
   listValue: (plugin: PluginInfo, key: string, field: PluginField) => string[]
   secretPlaceholder: (plugin: PluginInfo, key: string, field: PluginField) => string
-  showGroup: (fields: [string, PluginField][], index: number) => boolean
   parseList: (input: string) => string[]
   save: (plugin: PluginInfo) => Promise<unknown> | unknown
   restart: (plugin: PluginInfo) => Promise<void> | void
@@ -50,6 +51,70 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useLocale()
+
+function compatibleProviders(field: PluginField): AiProvider[] {
+  const apiFormat = String(field.ui?.api_format || '').trim().toLowerCase()
+  return props.aiProviders.filter(provider => !apiFormat || provider.api_format === apiFormat)
+}
+
+function providerOptions(field: PluginField) {
+  return compatibleProviders(field).map(provider => ({
+    label: `${provider.name || provider.id} · ${provider.base_url}`,
+    value: provider.id,
+  }))
+}
+
+function providerForModel(plugin: PluginInfo, field: PluginField): AiProvider | undefined {
+  const refField = field.ui?.provider_ref_field || 'provider_ref'
+  const providerRef = String(plugin.config?.[refField] || '')
+  return props.aiProviders.find(provider => provider.id === providerRef)
+}
+
+function providerModelOptions(plugin: PluginInfo, field: PluginField) {
+  return (providerForModel(plugin, field)?.models || []).map(model => ({ label: model, value: model }))
+}
+
+function providerModelValue(plugin: PluginInfo, key: string, field: PluginField): string | number | null {
+  const current = props.selectValue(plugin, key, field)
+  return providerModelOptions(plugin, field).some(option => option.value === current) ? current : null
+}
+
+function updateProvider(plugin: PluginInfo, key: string, next: string | number | null) {
+  props.set(plugin, key, next || '')
+  for (const [modelKey, field] of props.ordered(plugin)) {
+    if (field.ui?.options_source !== 'provider_models') continue
+    if ((field.ui.provider_ref_field || 'provider_ref') !== key) continue
+    const provider = props.aiProviders.find(item => item.id === next)
+    const currentModel = String(plugin.config?.[modelKey] || '')
+    if (!provider?.models?.includes(currentModel)) props.set(plugin, modelKey, '')
+  }
+}
+
+type PluginFieldEntry = [string, PluginField]
+
+interface PluginFieldSection {
+  key: string
+  name: string
+  fields: PluginFieldEntry[]
+}
+
+function groupedFields(plugin: PluginInfo): PluginFieldSection[] {
+  const sections: PluginFieldSection[] = []
+  for (const entry of props.ordered(plugin)) {
+    const name = String(entry[1].ui?.group || '').trim()
+    const current = sections.at(-1)
+    if (current?.name === name) {
+      current.fields.push(entry)
+      continue
+    }
+    sections.push({
+      key: `${name || 'default'}:${entry[0]}`,
+      name,
+      fields: [entry],
+    })
+  }
+  return sections
+}
 </script>
 
 <template>
@@ -119,57 +184,79 @@ const { t } = useLocale()
               </div>
               <p class="muted">{{ p.permissions.map(permission => permissionDescription(p, permission)).join('；') }}</p>
             </section>
-            <div class="plugin-form-grid">
-              <template v-for="(entry, i) in ordered(p)" :key="entry[0]">
-                <h4 v-if="showGroup(ordered(p), i)" class="field-group">{{ entry[1].ui?.group }}</h4>
-                <div class="field" :class="{ 'field-wide': entry[1].type === 'array' }">
-                  <label v-if="entry[1].type === 'boolean'" class="switch-label">
-                    <NSwitch :value="!!value(p, entry[0], entry[1])" :aria-label="entry[1].title || entry[0]" @update:value="set(p, entry[0], $event)" />
-                    <span>{{ entry[1].title || entry[0] }}</span>
-                  </label>
-                  <label v-else class="input-label">
-                    <span class="field-title">{{ entry[1].title || entry[0] }}</span>
-                    <NSelect
-                      v-if="entry[1].enum"
-                      :value="selectValue(p, entry[0], entry[1])"
-                      :options="(entry[1].enum || []).map(x => ({ label: x, value: x }))"
-                      @update:value="set(p, entry[0], $event)"
-                    />
-                    <NInput
-                      v-else-if="entry[1].type === 'array'"
-                      type="textarea"
-                      :rows="4"
-                      :input-props="{ 'aria-label': entry[1].title || entry[0] }"
-                      :value="listValue(p, entry[0], entry[1]).join('\n')"
-                      :placeholder="t('arrayInputPlaceholder')"
-                      @update:value="set(p, entry[0], parseList($event))"
-                    />
-                    <NInput
-                      v-else-if="entry[1].ui?.sensitive"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="secretPlaceholder(p, entry[0], entry[1])"
-                      :value="textValue(p, entry[0], entry[1])"
-                      @update:value="set(p, entry[0], $event)"
-                    />
-                    <NInputNumber
-                      v-else-if="entry[1].type === 'number' || entry[1].type === 'integer'"
-                      :value="numberValue(p, entry[0], entry[1])"
-                      @update:value="set(p, entry[0], $event)"
-                    />
-                    <NInput
-                      v-else
-                      :value="textValue(p, entry[0], entry[1])"
-                      @update:value="set(p, entry[0], $event)"
-                    />
-                  </label>
-                  <small v-if="entry[1].description" class="muted">{{ entry[1].description }}</small>
+            <div class="plugin-form-sections">
+              <section v-for="section in groupedFields(p)" :key="section.key" class="plugin-form-section">
+                <h4 v-if="section.name" class="field-group">{{ section.name }}</h4>
+                <div class="plugin-form-grid">
+                  <div v-for="entry in section.fields" :key="entry[0]" class="field" :class="{ 'field-wide': entry[1].type === 'array' }">
+                    <label v-if="entry[1].type === 'boolean'" class="switch-label">
+                      <NSwitch :value="!!value(p, entry[0], entry[1])" :aria-label="entry[1].title || entry[0]" @update:value="set(p, entry[0], $event)" />
+                      <span>{{ entry[1].title || entry[0] }}</span>
+                    </label>
+                    <label v-else class="input-label">
+                      <span class="field-title">{{ entry[1].title || entry[0] }}</span>
+                      <NSelect
+                        v-if="entry[1].ui?.options_source === 'ai_providers'"
+                        filterable
+                        :value="selectValue(p, entry[0], entry[1])"
+                        :options="providerOptions(entry[1])"
+                        :placeholder="providerOptions(entry[1]).length ? t('pluginAiProviderSelect') : t('pluginAiProviderEmpty')"
+                        @update:value="updateProvider(p, entry[0], $event)"
+                      />
+                      <NSelect
+                        v-else-if="entry[1].ui?.options_source === 'provider_models'"
+                        filterable
+                        :value="providerModelValue(p, entry[0], entry[1])"
+                        :options="providerModelOptions(p, entry[1])"
+                        :disabled="!providerModelOptions(p, entry[1]).length"
+                        :placeholder="providerForModel(p, entry[1]) ? t('pluginProviderModelsEmpty') : t('pluginAiProviderSelectFirst')"
+                        @update:value="set(p, entry[0], $event)"
+                      />
+                      <NSelect
+                        v-else-if="entry[1].enum"
+                        :value="selectValue(p, entry[0], entry[1])"
+                        :options="(entry[1].enum || []).map(x => ({ label: x, value: x }))"
+                        @update:value="set(p, entry[0], $event)"
+                      />
+                      <NInput
+                        v-else-if="entry[1].type === 'array'"
+                        type="textarea"
+                        :rows="4"
+                        :input-props="{ 'aria-label': entry[1].title || entry[0] }"
+                        :value="listValue(p, entry[0], entry[1]).join('\n')"
+                        :placeholder="t('arrayInputPlaceholder')"
+                        @update:value="set(p, entry[0], parseList($event))"
+                      />
+                      <NInput
+                        v-else-if="entry[1].ui?.sensitive"
+                        type="password"
+                        show-password-on="click"
+                        :placeholder="secretPlaceholder(p, entry[0], entry[1])"
+                        :value="textValue(p, entry[0], entry[1])"
+                        @update:value="set(p, entry[0], $event)"
+                      />
+                      <NInputNumber
+                        v-else-if="entry[1].type === 'number' || entry[1].type === 'integer'"
+                        :value="numberValue(p, entry[0], entry[1])"
+                        @update:value="set(p, entry[0], $event)"
+                      />
+                      <NInput
+                        v-else
+                        :value="textValue(p, entry[0], entry[1])"
+                        @update:value="set(p, entry[0], $event)"
+                      />
+                    </label>
+                    <small v-if="entry[1].description" class="muted">{{ entry[1].description }}</small>
+                  </div>
                 </div>
-              </template>
+              </section>
             </div>
           </NTabPane>
           <NTabPane v-if="p.id === 'qq-napcat'" name="guide" :tab="t('guideDocs')">
             <NapcatGuide />
+          </NTabPane>
+          <NTabPane v-if="p.plugin_type === 'provider'" name="provider-test" :tab="t('imagegenTestTitle')">
+            <ProviderImagegenTest :running="p.running" />
           </NTabPane>
           <NTabPane v-else-if="p.docs" name="docs" :tab="t('guideDocs')">
             <div class="plugin-docs">
@@ -244,11 +331,29 @@ const { t } = useLocale()
   gap: 7px;
 }
 
+.plugin-form-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.plugin-form-section {
+  min-width: 0;
+}
+
+.plugin-form-section .field-group {
+  margin: 0 0 14px;
+}
+
 .plugin-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 14px 18px;
   align-items: start;
+}
+
+.plugin-form-grid .field {
+  min-width: 0;
+  margin: 0;
 }
 
 .field-wide {

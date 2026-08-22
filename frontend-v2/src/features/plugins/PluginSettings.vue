@@ -12,6 +12,7 @@ import { useLocale } from '@/composables/useLocale'
 import { renderSafeMarkdown } from '@/utils/markdown'
 import type { PluginInfo } from '@/api/types'
 import { pluginApi } from '@/api/plugins'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 import { usePluginContent } from './usePluginContent'
 import { useInstalledPlugins } from './useInstalledPlugins'
 import { usePluginMarketplace } from './usePluginMarketplace'
@@ -29,6 +30,7 @@ import HubDetailModal from './modals/HubDetailModal.vue'
 import ExportPackModal from './modals/ExportPackModal.vue'
 
 const { t } = useLocale()
+const settingsStore = useSettingsStore()
 const {
   skin, builtinSkins, applySkin,
   pluginThemes, pluginThemeId, loadPluginThemes, applyPluginTheme, clearPluginTheme,
@@ -122,7 +124,7 @@ const safeHubReadmeHtml = computed(() => DOMPurify.sanitize(hubReadmeHtml.value)
 const {
   plugins, filteredPlugins, expandedPluginNames, loading, installFile, overwriteInstall,
   load, ordered, value, textValue, selectValue, numberValue, set,
-  listValue, secretPlaceholder, showGroup, parseList, save, restart,
+  listValue, secretPlaceholder, parseList, save, restart,
   clearCardCache, toggleRunning, toggleEnabled, onPluginFile, installPlugin, rescanLocalPlugins,
 } = useInstalledPlugins(
   busy,
@@ -187,7 +189,7 @@ async function loadPluginDocs(pluginId: string) {
 onMounted(async () => {
   await load()
   await Promise.all([
-    loadMarketplace(), loadMirrors(), loadContentResources(), loadWorlds(), loadTypes(),
+    loadMarketplace(), loadMirrors(), loadContentResources(), loadWorlds(), loadTypes(), settingsStore.load(),
   ])
 })
 </script>
@@ -206,6 +208,7 @@ onMounted(async () => {
       <InstalledTab
         :loading="loading"
         :plugins="plugins"
+        :ai-providers="settingsStore.config.ai_providers || []"
         :filtered-plugins="filteredPlugins"
         :expanded-plugin-names="expandedPluginNames"
         :type-filter="typeFilter"
@@ -229,7 +232,6 @@ onMounted(async () => {
         :set="set"
         :list-value="listValue"
         :secret-placeholder="secretPlaceholder"
-        :show-group="showGroup"
         :parse-list="parseList"
         :save="save"
         :restart="restart"

@@ -14,6 +14,9 @@ from .runtime_protocol import PLUGIN_PROTOCOL_VERSION, PluginProtocolError
 BRIDGE_EXTENSION_STAGES = frozenset({"before_message", "after_result", "render"})
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _BRIDGE_EXTENSION_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_PROVIDER_CAPABILITY_KIND_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+_PROVIDER_METHOD_NAME_RE = re.compile(r"^provider\.[a-z][a-z0-9_.-]{0,63}$")
+PROVIDER_METHOD_ALIASES = frozenset({"generate"})
 
 
 def validate_tool_descriptors(initialized: Any) -> list[dict[str, Any]]:
@@ -97,6 +100,59 @@ def validate_bridge_extension_descriptors(initialized: Any) -> list[dict[str, An
             "kinds": _descriptor_string_list(raw.get("kinds"), 64, "kinds", name),
         })
     return descriptors
+
+
+def validate_provider_capabilities(initialized: Any) -> list[dict[str, Any]]:
+    """校验 provider 插件 initialize 返回的 capabilities 声明。
+
+    每个 capability 形如 {"kind": "image-generation", "version": 1,
+    "methods": {"generate": "provider.image.generate"}}；kind 即能力命名空间，
+    methods 的键是宿主侧别名（如 generate），值是插件侧 RPC 方法名。
+    """
+    if not isinstance(initialized, dict) or int(initialized.get("protocol_version") or 0) != PLUGIN_PROTOCOL_VERSION:
+        raise PluginProtocolError("Provider 插件协议版本不匹配")
+    raw_capabilities = initialized.get("capabilities")
+    if not isinstance(raw_capabilities, list) or not raw_capabilities:
+        raise PluginProtocolError("provider 插件必须声明至少一个 capability")
+    if len(raw_capabilities) > 8:
+        raise PluginProtocolError("单个 provider 插件最多声明 8 个 capability")
+    capabilities: list[dict[str, Any]] = []
+    kinds: set[str] = set()
+    for raw in raw_capabilities:
+        if not isinstance(raw, dict):
+            raise PluginProtocolError("capability 描述必须是对象")
+        kind = str(raw.get("kind") or "").strip()
+        if not _PROVIDER_CAPABILITY_KIND_RE.fullmatch(kind):
+            raise PluginProtocolError(f"capability kind 非法：{kind}")
+        if kind in kinds:
+            raise PluginProtocolError(f"capability kind 重复：{kind}")
+        kinds.add(kind)
+        try:
+            version = int(raw.get("version", 1))
+        except (TypeError, ValueError) as exc:
+            raise PluginProtocolError(f"capability {kind} 的 version 无效") from exc
+        if not 1 <= version <= 99:
+            raise PluginProtocolError(f"capability {kind} 的 version 必须在 1 到 99 之间")
+        raw_methods = raw.get("methods")
+        if not isinstance(raw_methods, dict) or not raw_methods:
+            raise PluginProtocolError(f"capability {kind} 必须声明 methods")
+        methods: dict[str, str] = {}
+        for alias, method_name in raw_methods.items():
+            alias = str(alias).strip()
+            if alias not in PROVIDER_METHOD_ALIASES:
+                raise PluginProtocolError(f"capability {kind} 使用未知方法别名：{alias}")
+            method_name = str(method_name or "").strip()
+            if not _PROVIDER_METHOD_NAME_RE.fullmatch(method_name):
+                raise PluginProtocolError(f"capability {kind} 的方法名非法：{method_name}")
+            methods[alias] = method_name
+        capabilities.append({
+            "kind": kind,
+            "version": version,
+            "methods": methods,
+            "title": str(raw.get("title") or kind).strip()[:120],
+            "description": str(raw.get("description") or "").strip()[:1000],
+        })
+    return capabilities
 
 
 def _descriptor_string_list(raw: Any, limit: int, field_name: str, extension_name: str) -> list[str]:

@@ -160,6 +160,13 @@ class GameHandler:
     def set_plugin_host(self, plugin_host) -> None:
         self._plugin_host = plugin_host
 
+    def set_scene_image_generator(self, generator) -> None:
+        """注入场景图生成门面；同时给 swipe 重生成接上生图调度。"""
+        if hasattr(self._round_processor, "set_scene_image_generator"):
+            self._round_processor.set_scene_image_generator(generator)
+        if hasattr(self._swipe_generator, "set_scene_image_hook"):
+            self._swipe_generator.set_scene_image_hook(self._round_processor.schedule_scene_image)
+
     async def _init_world_from_template(self, world_id: str, template: dict) -> None:
         """兼容旧内部调用；实际逻辑已拆到 GameFactory。"""
         await self._factory.init_world_from_template(world_id, template)

@@ -228,6 +228,22 @@ export interface StoryRecap {
   created_at?: string
 }
 
+export interface RoundSceneImage {
+  reference?: SceneImageRef
+  prompt?: string
+  revised_prompt?: string
+  status?: 'ready' | 'failed' | string
+  swipe_index?: number
+}
+
+export interface SceneGalleryItem {
+  round: number
+  asset_id: string
+  prompt?: string
+  revised_prompt?: string
+  status?: string
+}
+
 export interface LogEntry {
   round?: number
   gm_response?: string
@@ -238,6 +254,7 @@ export interface LogEntry {
   tags_summary?: LogTagsSummary
   check_results?: CheckResult[]
   story_recaps?: StoryRecap[]
+  scene_image?: RoundSceneImage
   [key: string]: unknown
 }
 
@@ -770,7 +787,20 @@ export interface PluginField {
   exclusiveMaximum?: number
   minLength?: number
   maxLength?: number
-  ui?: { control?: string; group?: string; sensitive?: boolean; order?: number; generate?: boolean; env?: string }
+  ui?: {
+    control?: string
+    group?: string
+    sensitive?: boolean
+    order?: number
+    generate?: boolean
+    env?: string
+    options_source?: string
+    api_format?: string
+    provider_ref_field?: string
+    provider_base_url_env?: string
+    provider_api_key_env?: string
+    provider_api_format_env?: string
+  }
 }
 
 export interface PluginInfo {
@@ -1057,6 +1087,15 @@ export interface SecretField {
   masked: string
 }
 
+export interface AiProvider {
+  id: string
+  name: string
+  base_url: string
+  api_format: 'openai' | 'anthropic' | string
+  models?: string[]
+  api_key?: SecretField
+}
+
 export interface BotTokenResponse {
   ok: boolean
   token: string
@@ -1069,6 +1108,13 @@ export interface AppConfig {
   model?: string
   api_format?: string
   api_key?: SecretField
+  ai_providers?: AiProvider[]
+  llm_provider_ref?: string
+  fallback1_provider_ref?: string
+  fallback2_provider_ref?: string
+  embedding_provider_ref?: string
+  tts_provider_ref?: string
+  asr_provider_ref?: string
   fallback1_enabled?: boolean
   fallback1_base_url?: string
   fallback1_api_key?: SecretField

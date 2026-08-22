@@ -13,6 +13,12 @@ from aiohttp import web
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.common_factory import TRPGSubsystems, create_trpg_subsystems
+from src.ai_providers import (
+    is_provider_secret_key,
+    normalize_ai_providers,
+    provider_secret_key,
+    resolve_provider,
+)
 from src.llm.client import ProviderConfig
 from src.hub_client import HubClient
 from src.network_proxy import effective_proxy_url, env_proxy_url, is_supported_proxy_url, mask_proxy_url
@@ -21,6 +27,7 @@ from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.template_catalog import sync_template_catalog
 from src.tts import SpeechService
 from src.asr import AsrService
+from src.imagegen import SceneImageGenerator
 from src.webui.access_password import (
     consume_reset_password,
     hash_access_password,
@@ -39,6 +46,7 @@ from src.webui.config_update import (
     clean_text_value,
     normalize_api_format,
     prepare_config_update,
+    provider_runtime_changed,
 )
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.character_cards import register_character_cards
@@ -65,6 +73,7 @@ from src.webui.routes.system import register_system
 from src.webui.routes.updater import register_updater
 from src.webui.routes.speech import register_speech
 from src.webui.routes.asr import register_asr
+from src.webui.routes.imagegen import register_imagegen
 from src.webui.services import updater as updater_svc
 from src.webui.services import legal as legal_svc
 
@@ -219,9 +228,19 @@ PROXY_URL = (os.getenv("TRPG_PROXY_URL")
 
 _migrated = _generation_defaults_migrated
 
+_AI_PROVIDERS_DEFAULT = normalize_ai_providers(saved.get("ai_providers"))
+
 STATE = {
     "generation_defaults_version": GENERATION_DEFAULTS_VERSION,
     "api_key": API_KEY, "base_url": BASE_URL, "model": MODEL, "api_format": API_FORMAT, "web_port": PORT,
+    "ai_providers": _AI_PROVIDERS_DEFAULT,
+    "llm_provider_ref": str(saved.get("llm_provider_ref", "")),
+    "fallback1_provider_ref": str(saved.get("fallback1_provider_ref", "")),
+    "fallback2_provider_ref": str(saved.get("fallback2_provider_ref", "")),
+    "embedding_provider_ref": str(saved.get("embedding_provider_ref", "")),
+    "tts_provider_ref": str(saved.get("tts_provider_ref", "")),
+    "asr_provider_ref": str(saved.get("asr_provider_ref", "")),
+    **{key: str(value or "") for key, value in secrets.items() if is_provider_secret_key(key)},
     "embedding_enabled": EMB_ENABLED, "embedding_base_url": EMB_BASE_URL,
     "embedding_model": EMB_MODEL, "embedding_api_key": EMB_API_KEY,
     "fallback1_enabled": saved.get("fallback1_enabled", False),
@@ -315,7 +334,12 @@ def _mask_secret(value: str) -> dict:
 
 def _public_config() -> dict:
     public = {k: v for k, v in STATE.items()
-              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")}
+              if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
+              and not is_provider_secret_key(k)}
+    public["ai_providers"] = [
+        {**entry, "api_key": _mask_secret(STATE.get(provider_secret_key(entry["id"]), ""))}
+        for entry in STATE.get("ai_providers", [])
+    ]
     public["api_key"] = _mask_secret(STATE.get("api_key", ""))
     public["embedding_api_key"] = _mask_secret(STATE.get("embedding_api_key", ""))
     public["fallback1_api_key"] = _mask_secret(STATE.get("fallback1_api_key", ""))
@@ -342,11 +366,14 @@ def _public_config() -> dict:
 
 def save_config():
     non_sensitive = {k: v for k, v in STATE.items()
-                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")}
+                     if k not in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url", "qq_bot_running")
+                     and not is_provider_secret_key(k)}
     _atomic_write_json(CONFIG_FILE, non_sensitive)
     sensitive = {k: v for k, v in STATE.items()
                  if k in ("api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key", "tts_api_key", "asr_api_key", "access_token", "bot_token", "napcat_token", "proxy_url")
-                 and not (k == "access_token" and os.getenv("TRPG_ACCESS_TOKEN"))}
+                 or is_provider_secret_key(k)}
+    sensitive = {k: v for k, v in sensitive.items()
+                 if not (k == "access_token" and os.getenv("TRPG_ACCESS_TOKEN"))}
     if any(v for v in sensitive.values()) or SECRETS_FILE.exists():
         _atomic_write_json(SECRETS_FILE, sensitive)
 
@@ -418,20 +445,49 @@ def _build_subsystems(
     config: dict | None = None,
 ) -> TRPGSubsystems:
     runtime_config = STATE if config is None else config
-    providers = [ProviderConfig(provider_name="default", base_url=runtime_config["base_url"],
-                                api_key=runtime_config["api_key"], model_name=runtime_config["model"],
-                                api_format=normalize_api_format(runtime_config.get("api_format")))]
+    # 引用服务商时凭据以服务商为准（即使 key 为空也不回退内联，避免把 key 发给别家服务）；
+    # 未引用则维持原内联配置与回退语义。
+    main_provider = resolve_provider(runtime_config, runtime_config.get("llm_provider_ref", ""))
+    if main_provider:
+        main_base_url, main_api_key, main_api_format = (
+            main_provider["base_url"], main_provider["api_key"], main_provider["api_format"])
+    else:
+        main_base_url = runtime_config["base_url"]
+        main_api_key = runtime_config["api_key"]
+        main_api_format = normalize_api_format(runtime_config.get("api_format"))
+    providers = [ProviderConfig(provider_name="default", base_url=main_base_url,
+                                api_key=main_api_key, model_name=runtime_config["model"],
+                                api_format=main_api_format)]
     for idx in (1, 2):
-        if runtime_config.get(f"fallback{idx}_enabled") and runtime_config.get(f"fallback{idx}_base_url") and runtime_config.get(f"fallback{idx}_model"):
-            providers.append(ProviderConfig(
-                provider_name=f"fallback{idx}",
-                base_url=runtime_config.get(f"fallback{idx}_base_url", ""),
-                api_key=runtime_config.get(f"fallback{idx}_api_key") or runtime_config.get("api_key", ""),
-                model_name=runtime_config.get(f"fallback{idx}_model", ""),
-                api_format=normalize_api_format(runtime_config.get(f"fallback{idx}_api_format")),
-                fallback=True,
-            ))
-    emb_base = runtime_config.get("embedding_base_url", "")
+        if not runtime_config.get(f"fallback{idx}_enabled"):
+            continue
+        fallback_provider = resolve_provider(runtime_config, runtime_config.get(f"fallback{idx}_provider_ref", ""))
+        fallback_base_url = (fallback_provider["base_url"] if fallback_provider
+                             else runtime_config.get(f"fallback{idx}_base_url", ""))
+        fallback_model = runtime_config.get(f"fallback{idx}_model", "")
+        if not (fallback_base_url and fallback_model):
+            continue
+        if fallback_provider:
+            fallback_api_key = fallback_provider["api_key"]
+            fallback_api_format = fallback_provider["api_format"]
+        else:
+            fallback_api_key = runtime_config.get(f"fallback{idx}_api_key") or main_api_key
+            fallback_api_format = normalize_api_format(runtime_config.get(f"fallback{idx}_api_format"))
+        providers.append(ProviderConfig(
+            provider_name=f"fallback{idx}",
+            base_url=fallback_base_url,
+            api_key=fallback_api_key,
+            model_name=fallback_model,
+            api_format=fallback_api_format,
+            fallback=True,
+        ))
+    embedding_provider = resolve_provider(runtime_config, runtime_config.get("embedding_provider_ref", ""))
+    if embedding_provider:
+        emb_base = embedding_provider["base_url"]
+        emb_api_key = embedding_provider["api_key"]
+    else:
+        emb_base = runtime_config.get("embedding_base_url", "")
+        emb_api_key = runtime_config.get("embedding_api_key") or main_api_key
     emb_enabled = runtime_config.get("embedding_enabled", False) and bool(emb_base)
     return create_trpg_subsystems(
         data_dir=DATA_DIR, prompts_dir=PROMPTS_DIR,
@@ -439,7 +495,7 @@ def _build_subsystems(
         providers=providers, default_provider="default",
         embedding_enabled=emb_enabled,
         embedding_base_url=emb_base,
-        embedding_api_key=runtime_config.get("embedding_api_key") or runtime_config.get("api_key", ""),
+        embedding_api_key=emb_api_key,
         embedding_model=runtime_config.get("embedding_model", "nomic-embed-text"),
         embedding_max_input=int(runtime_config.get("embedding_max_input", 0)),
         proxy_url=effective_proxy_url(bool(runtime_config.get("proxy_enabled")), runtime_config.get("proxy_url", "")),
@@ -452,10 +508,25 @@ def _build_subsystems(
     )
 
 
+def _config_with_resolved_speech_refs(config: dict) -> dict:
+    """把 TTS/ASR 的服务商引用解析进 tts_*/asr_* 键，Speech/Asr 服务保持零感知。"""
+    resolved = dict(config)
+    tts_provider = resolve_provider(config, config.get("tts_provider_ref", ""))
+    if tts_provider:
+        resolved["tts_base_url"] = tts_provider["base_url"]
+        resolved["tts_api_key"] = tts_provider["api_key"]
+    asr_provider = resolve_provider(config, config.get("asr_provider_ref", ""))
+    if asr_provider:
+        resolved["asr_base_url"] = asr_provider["base_url"]
+        resolved["asr_api_key"] = asr_provider["api_key"]
+    return resolved
+
+
 def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None = None, hub_client=None) -> WebAPI:
     runtime_config = STATE if config is None else config
+    speech_config = _config_with_resolved_speech_refs(runtime_config)
     speech_service = SpeechService(
-        runtime_config,
+        speech_config,
         DATA_DIR / "tts-cache",
         proxy_url=effective_proxy_url(
             bool(runtime_config.get("proxy_enabled")),
@@ -463,12 +534,16 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None 
         ),
     )
     asr_service = AsrService(
-        runtime_config,
+        speech_config,
         proxy_url=effective_proxy_url(
             bool(runtime_config.get("proxy_enabled")),
             runtime_config.get("proxy_url", ""),
         ),
     )
+    # 场景图资产目录与 WebAPI._scene_images_dir 同源（save_dir.parent / "scene-images"）
+    imagegen_service = SceneImageGenerator(plugin_host, DATA_DIR / "scene-images")
+    if plugin_host is not None and getattr(subsystems, "handler", None) is not None:
+        subsystems.handler.set_scene_image_generator(imagegen_service)
     api = WebAPI(
         registry=subsystems.registry, lorebook=subsystems.lorebook_store,
         memory=subsystems.memory_store, rules_dir=RULES_DIR,
@@ -480,6 +555,7 @@ def _make_api(subsystems: TRPGSubsystems, plugin_host=None, config: dict | None 
         hub_client=hub_client,
         speech_service=speech_service,
         asr_service=asr_service,
+        imagegen_service=imagegen_service,
     )
     # 配置状态引用就地更新，始终指向最新值（更新频道等运行时配置）
     api._config_state = STATE
@@ -572,9 +648,15 @@ async def on_startup(app: web.Application) -> None:
         if api is not None:
             api.release_tunnel_url(plugin_id)
 
-    plugin_host = PluginHost(DATA_DIR / "plugin-packages", DATA_DIR / "plugins", builtin_dir=ROOT / "plugins", base_env={
-        "TRPG_API_BASE": f"http://127.0.0.1:{PORT}",
-    }, on_plugin_stopped=_on_plugin_stopped, hub_client=hub_client)
+    plugin_host = PluginHost(
+        DATA_DIR / "plugin-packages",
+        DATA_DIR / "plugins",
+        builtin_dir=ROOT / "plugins",
+        base_env={"TRPG_API_BASE": f"http://127.0.0.1:{PORT}"},
+        on_plugin_stopped=_on_plugin_stopped,
+        hub_client=hub_client,
+        ai_provider_resolver=lambda provider_id: resolve_provider(STATE, provider_id),
+    )
     # 启动时补迁：旧布局便携版根 app/plugins/ 里可能还有用户插件（更新器迁移由旧版本
     # 执行，覆盖不到本次升级），新版本首次启动时由自己补搬一次到 data/plugin-packages/。
     install_root = os.getenv("TRPG_INSTALL_ROOT", "").strip()
@@ -869,8 +951,8 @@ async def _apply_config_update(request: web.Request, body: dict) -> web.Response
         return web.json_response({"ok": False, "error": prepared.error}, status=400)
     access_password_changed = prepared.access_password_changed
     changed_keys = prepared.changed_keys
-    model_runtime_changed = bool(changed_keys & MODEL_RUNTIME_CONFIG_KEYS)
-    api_runtime_changed = bool(changed_keys & API_RUNTIME_CONFIG_KEYS)
+    model_runtime_changed = bool(changed_keys & MODEL_RUNTIME_CONFIG_KEYS) or provider_runtime_changed(changed_keys)
+    api_runtime_changed = bool(changed_keys & API_RUNTIME_CONFIG_KEYS) or provider_runtime_changed(changed_keys)
     old_subs = request.app.get("subsystems")
     plugin_host = request.app.get("plugin_host")
     old_embedding = (
@@ -934,6 +1016,14 @@ async def _apply_config_update(request: web.Request, body: dict) -> web.Response
             plugin_warning = f"NapCat 插件配置同步失败：{exc}"
             logger.exception("NapCat 插件配置同步失败")
 
+    if plugin_host and ("ai_providers" in changed_keys or provider_runtime_changed(changed_keys)):
+        try:
+            await plugin_host.restart_ai_provider_consumers()
+        except Exception as exc:
+            provider_warning = f"AI 服务商插件重启失败：{exc}"
+            plugin_warning = f"{plugin_warning}；{provider_warning}" if plugin_warning else provider_warning
+            logger.exception("AI 服务商插件重启失败")
+
     if model_runtime_changed and subsystems is not None:
         request.app["subsystems"] = subsystems
         request.app["api"] = new_api
@@ -953,7 +1043,8 @@ async def _apply_config_update(request: web.Request, body: dict) -> web.Response
             except Exception:
                 logger.warning("关闭旧 Embedding 客户端失败", exc_info=True)
     # 配置更新后，如果 embedding 已启用，立即补齐存量记忆的向量
-    emb_now = STATE.get("embedding_enabled", False) and bool(STATE.get("embedding_base_url", ""))
+    emb_now = STATE.get("embedding_enabled", False) and bool(
+        STATE.get("embedding_base_url", "") or resolve_provider(STATE, STATE.get("embedding_provider_ref", "")))
     if model_runtime_changed and emb_now and subsystems is not None:
         try:
             count = await subsystems.memory_store.embed_all_pending()
@@ -1018,7 +1109,17 @@ def _is_safe_external_url(url: str) -> bool:
 
 async def api_test_connection(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = clean_text_value(body.get("base_url")) or STATE.get("base_url", "")
+    # provider_id 指定服务商时，凭据默认取自服务商库（明文 key 只存在于服务端）；
+    # body 里的显式明文输入仍然优先，供未保存前直接测试。
+    provider = resolve_provider(STATE, str(body.get("provider_id") or ""))
+    if provider:
+        base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
+        api_key = clean_text_value(body.get("api_key")) or provider["api_key"]
+        api_format = normalize_api_format(body.get("api_format") or provider["api_format"])
+    else:
+        base_url = clean_text_value(body.get("base_url")) or STATE.get("base_url", "")
+        api_key = clean_text_value(body.get("api_key")) or STATE.get("api_key", "")
+        api_format = normalize_api_format(body.get("api_format") or STATE.get("api_format"))
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "base_url 非法或不允许"}, status=400)
     proxy_url = _proxy_from_test_body(body)
@@ -1026,10 +1127,35 @@ async def api_test_connection(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://"}, status=400)
     result = await _get_api(request).test_connection(
         base_url=base_url,
-        api_key=clean_text_value(body.get("api_key")) or STATE.get("api_key", ""),
+        api_key=api_key,
         model=clean_text_value(body.get("model")) or STATE.get("model", ""),
         proxy_url=proxy_url,
-        api_format=normalize_api_format(body.get("api_format") or STATE.get("api_format")),
+        api_format=api_format,
+    )
+    return web.json_response(result)
+
+
+async def api_config_provider_models_post(request: web.Request) -> web.Response:
+    body = await request.json()
+    provider = resolve_provider(STATE, str(body.get("provider_id") or ""))
+    if provider:
+        base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
+        api_key = clean_text_value(body.get("api_key")) or provider["api_key"]
+        api_format = normalize_api_format(body.get("api_format") or provider["api_format"])
+    else:
+        base_url = clean_text_value(body.get("base_url"))
+        api_key = clean_text_value(body.get("api_key"))
+        api_format = normalize_api_format(body.get("api_format"))
+    if not _is_safe_external_url(base_url):
+        return web.json_response({"ok": False, "error": "base_url 非法或不允许", "models": []}, status=400)
+    proxy_url = _proxy_from_test_body(body)
+    if proxy_url and not is_supported_proxy_url(proxy_url):
+        return web.json_response({"ok": False, "error": "代理地址仅支持 http:// 或 https://", "models": []}, status=400)
+    result = await _get_api(request).list_models(
+        base_url=base_url,
+        api_key=api_key,
+        proxy_url=proxy_url,
+        api_format=api_format,
     )
     return web.json_response(result)
 
@@ -1046,8 +1172,13 @@ def _proxy_from_test_body(body: dict) -> str:
 
 async def api_test_embedding(request: web.Request) -> web.Response:
     body = await request.json()
-    base_url = clean_text_value(body.get("base_url"))
-    api_key = clean_text_value(body.get("api_key")) or STATE.get("embedding_api_key") or STATE.get("api_key", "")
+    provider = resolve_provider(STATE, str(body.get("provider_id") or ""))
+    if provider:
+        base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
+        api_key = clean_text_value(body.get("api_key")) or provider["api_key"]
+    else:
+        base_url = clean_text_value(body.get("base_url"))
+        api_key = clean_text_value(body.get("api_key")) or STATE.get("embedding_api_key") or STATE.get("api_key", "")
     model = clean_text_value(body.get("model")) or "nomic-embed-text"
     if not _is_safe_external_url(base_url):
         return web.json_response({"ok": False, "error": "Base URL 非法或不允许"})
@@ -1163,6 +1294,7 @@ def register_routes(application: web.Application) -> None:
     register_updater(application)
     register_speech(application)
     register_asr(application)
+    register_imagegen(application)
     # worlds / lorebook
     register_worlds(application)
     # rules
@@ -1178,6 +1310,7 @@ def register_routes(application: web.Application) -> None:
     application.router.add_get("/api/config", api_config_get)
     application.router.add_post("/api/config", api_config_post)
     application.router.add_post("/api/config/bot-token", api_bot_token_post)
+    application.router.add_post("/api/config/providers/models", api_config_provider_models_post)
     application.router.add_post("/api/test-connection", api_test_connection)
     application.router.add_post("/api/test-embedding", api_test_embedding)
     application.router.add_post("/api/test-proxy", api_test_proxy)

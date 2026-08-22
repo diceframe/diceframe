@@ -82,9 +82,6 @@ export function useInstalledPlugins(
       : ''
   }
 
-  const showGroup = (fields: [string, PluginField][], index: number) =>
-    Boolean(fields[index][1].ui?.group && (index === 0 || fields[index - 1][1].ui?.group !== fields[index][1].ui?.group))
-
   const parseList = (input: string) =>
     Array.from(new Set(input.split(/[\n,]+/).map(item => item.trim()).filter(Boolean)))
 
@@ -236,7 +233,6 @@ export function useInstalledPlugins(
     set,
     listValue,
     secretPlaceholder,
-    showGroup,
     parseList,
     save,
     restart,

@@ -36,6 +36,11 @@ class SwipeGenerator:
         self.load_world_template = load_world_template
         self.ensure_matcher_for_world = ensure_matcher_for_world
         self.narrative_max_tokens = narrative_max_tokens
+        # 生图调度回调（GameHandler 注入）：swipe 叙事带新 SCENE_IMAGE 时重新生成该回合图片
+        self._scene_image_hook = None
+
+    def set_scene_image_hook(self, hook) -> None:
+        self._scene_image_hook = hook
 
     async def generate(self, instance: GameInstance, round_num: int) -> str | None:
         """为指定轮生成一个新 swipe（最多 5 个）。"""
@@ -129,6 +134,14 @@ class SwipeGenerator:
                 logger.exception("Swipe 剧情更新异常，已跳过 (round=%d)", round_num)
 
         await instance.finish_judgment_with_swipe(narration, round_num)
+        if self._scene_image_hook:
+            swipe_prompt = str(data.get("scene_image_prompt") or "").strip()
+            if swipe_prompt:
+                try:
+                    # swipe 是用户主动重掷叙事，新画面描述直接强制重新生成
+                    self._scene_image_hook(instance, swipe_prompt, round_num, force=True)
+                except Exception:
+                    logger.exception("Swipe 场景图调度失败 (round=%d)", round_num)
         logger.info("Swipe 生成: round=%d swipe=%d/%d", round_num,
                     len(swipes) + 1, len(swipes) + 1)
         return narration

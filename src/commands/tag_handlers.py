@@ -19,7 +19,7 @@ PLAYER_TAGS = frozenset({
     "LUCK", "SKILL_GROWTH", "PUSH", "MANA", "REVIVE", "STAT",
 })
 WORLD_TAGS = frozenset({
-    "CONFIRMED", "MEMORY", "SCENE", "NPC", "DECISION", "QUEST", "PRIVATE",
+    "CONFIRMED", "MEMORY", "SCENE", "SCENE_IMAGE", "NPC", "DECISION", "QUEST", "PRIVATE",
 })
 LOOT_TAGS = frozenset({"LOOT", "KEY_ITEM"})
 ACTION_TAGS = frozenset({"PUZZLE", "SPELL", "QUICK_ACTIONS", "COMBAT"})

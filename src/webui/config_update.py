@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.network_proxy import effective_proxy_url, is_supported_proxy_url
+from src.ai_providers import (
+    PROVIDER_REF_KEYS,
+    is_provider_secret_key,
+    normalize_ai_providers,
+    strip_dangling_provider_refs,
+    strip_orphan_provider_secrets,
+)
 from src.asr.contracts import SUPPORTED_ASR_PROVIDER_IDS
 from src.tts.contracts import SUPPORTED_PROVIDER_IDS
 from src.webui.access_password import hash_access_password
@@ -24,6 +31,7 @@ STRING_CONFIG_KEYS = frozenset({
     "public_base_url", "napcat_host", "napcat_connection_id",
     "tts_base_url", "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
     "asr_base_url", "asr_model",
+    *PROVIDER_REF_KEYS,
 })
 API_FORMAT_KEYS = frozenset({"api_format", "fallback1_api_format", "fallback2_api_format"})
 CONFIG_KEYS = (
@@ -42,6 +50,7 @@ CONFIG_KEYS = (
     "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
     "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
+    "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "api_key", "base_url", "model", "api_format",
@@ -50,13 +59,39 @@ MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_format", "fallback2_api_key",
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
     "proxy_enabled", "proxy_url",
+    "ai_providers", "llm_provider_ref", "fallback1_provider_ref", "fallback2_provider_ref",
+    "embedding_provider_ref",
 })
 API_RUNTIME_CONFIG_KEYS = frozenset({
     "character_gen_max_tokens", "text_gen_max_tokens",
     "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
     "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
+    "ai_providers", "tts_provider_ref", "asr_provider_ref",
 })
+
+
+def provider_runtime_changed(changed_keys: frozenset[str]) -> bool:
+    """服务商库或其 secret 有变动：影响所有引用它的能力，两组运行时都要重建。"""
+    return any(is_provider_secret_key(key) for key in changed_keys)
+
+
+def _degrade_speech_engines_lost_provider(candidate: dict[str, Any], refs_before: dict[str, str]) -> None:
+    """服务商被删除导致 TTS/ASR 引用悬空且无内联地址时，回退到零配置引擎。
+
+    否则 Speech/Asr 服务构造校验会失败，把"删除服务商"整个操作卡死。
+    仅在引用因删除被清空的场景触发；手动开启引擎但不填地址仍走原有报错。
+    """
+    tts_ref_cleared = bool(refs_before.get("tts_provider_ref")) and not str(candidate.get("tts_provider_ref") or "").strip()
+    if (tts_ref_cleared
+            and candidate.get("tts_provider") == "openai-compatible"
+            and not str(candidate.get("tts_base_url") or "").strip()):
+        candidate["tts_provider"] = "browser"
+    asr_ref_cleared = bool(refs_before.get("asr_provider_ref")) and not str(candidate.get("asr_provider_ref") or "").strip()
+    if (asr_ref_cleared
+            and candidate.get("asr_provider") == "openai-compatible"
+            and not str(candidate.get("asr_base_url") or "").strip()):
+        candidate["asr_provider"] = "disabled"
 BOT_CONFIG_MAP = {
     "qq_bot_enabled": "enabled",
     "napcat_host": "host",
@@ -98,8 +133,17 @@ def normalize_api_format(value: Any) -> str:
 
 def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> PreparedConfigUpdate:
     candidate = dict(current)
-    changed_keys = frozenset(set(body).intersection(CONFIG_KEYS))
+    changed_keys = frozenset(set(body).intersection(CONFIG_KEYS)
+                             | {key for key in body
+                                if is_provider_secret_key(key) and clean_text_value(body[key])})
     access_password_changed = bool(clean_text_value(body.get("access_token")))
+    # 服务商 secret 是动态键（ai_provider_key_<id>），不在 CONFIG_KEYS 白名单内，
+    # 与固定 secret 同语义：非空才写入，空值保留旧值。
+    for key in body:
+        if is_provider_secret_key(key):
+            value = clean_text_value(body[key])
+            if value:
+                candidate[key] = value
     try:
         for key in CONFIG_KEYS:
             if key not in body:
@@ -112,6 +156,8 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 continue
             if key in API_FORMAT_KEYS:
                 candidate[key] = normalize_api_format(raw)
+            elif key == "ai_providers":
+                candidate[key] = normalize_ai_providers(raw)
             elif key in STRING_CONFIG_KEYS:
                 candidate[key] = clean_text_value(raw)
             elif key.endswith("_max_tokens"):
@@ -185,6 +231,12 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 candidate[key] = raw
     except (TypeError, ValueError):
         return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "配置字段格式无效")
+
+    # 服务商删除后同步清理孤儿 secret 与悬空引用，保持 STATE 自洽。
+    refs_before = {key: str(candidate.get(key) or "").strip() for key in PROVIDER_REF_KEYS}
+    strip_orphan_provider_secrets(candidate)
+    strip_dangling_provider_refs(candidate)
+    _degrade_speech_engines_lost_provider(candidate, refs_before)
 
     active_proxy = effective_proxy_url(bool(candidate.get("proxy_enabled")), candidate.get("proxy_url", ""))
     if candidate.get("proxy_enabled") and not active_proxy:

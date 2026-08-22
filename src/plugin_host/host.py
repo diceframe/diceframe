@@ -26,6 +26,7 @@ from .descriptors import (
     BRIDGE_EXTENSION_STAGES,
     normalize_bridge_outputs,
     validate_bridge_extension_descriptors,
+    validate_provider_capabilities,
     validate_tool_descriptors,
 )
 from .marketplace import PluginMarketplace
@@ -100,6 +101,7 @@ class PluginRuntime:
     rpc_client: JsonRpcStdioClient | None = None
     tools: list[dict[str, Any]] = field(default_factory=list)
     bridge_extensions: list[dict[str, Any]] = field(default_factory=list)
+    provider_capabilities: list[dict[str, Any]] = field(default_factory=list)
     status: str = "disabled"
     error: str = ""
     started_at: float = 0.0
@@ -120,7 +122,17 @@ async def _rename_dir_with_retry(src: Path, dst: Path, *, attempts: int = 3, del
 
 
 class PluginHost:
-    def __init__(self, plugins_dir: Path, data_dir: Path, *, builtin_dir: Path | None = None, base_env: dict[str, str] | None = None, on_plugin_stopped=None, hub_client=None) -> None:
+    def __init__(
+        self,
+        plugins_dir: Path,
+        data_dir: Path,
+        *,
+        builtin_dir: Path | None = None,
+        base_env: dict[str, str] | None = None,
+        on_plugin_stopped=None,
+        hub_client=None,
+        ai_provider_resolver=None,
+    ) -> None:
         self.builtin_dir = builtin_dir
         self.plugins_dir = plugins_dir
         self.data_dir = data_dir
@@ -131,6 +143,7 @@ class PluginHost:
         self.logger = logging.getLogger("trpg.plugins")
         self.mirrors = MirrorManager(self.data_dir / "_marketplace" / "mirrors.json")
         self.hub_client = hub_client
+        self._ai_provider_resolver = ai_provider_resolver
         self.marketplace = PluginMarketplace(self.mirrors, hub_client=hub_client)
         self.contributions = ContributionRegistry()
         self.content = PluginContentCatalog(self.contributions, self.logger)
@@ -262,6 +275,57 @@ class PluginHost:
             )
             if not isinstance(result, dict):
                 raise PluginProtocolError("工具必须返回 JSON 对象")
+        except PluginProtocolError as exc:
+            await self._fail_rpc_runtime(runtime, str(exc))
+            raise
+        return result
+
+    def find_provider(self, capability: str) -> str | None:
+        """返回当前运行中、声明了指定 capability 的 provider 插件 id。"""
+        capability = str(capability or "").strip()
+        if not capability:
+            return None
+        for plugin_id, runtime in self.plugins.items():
+            if self._plugin_type(runtime.manifest) != "provider" or runtime.status != "running":
+                continue
+            if any(item.get("kind") == capability for item in runtime.provider_capabilities):
+                return plugin_id
+        return None
+
+    async def call_provider(
+        self,
+        plugin_id: str,
+        capability: str,
+        method_alias: str,
+        arguments: dict[str, Any],
+        *,
+        timeout: float = 120.0,
+    ) -> dict[str, Any]:
+        """按 capability 别名调用 provider 插件；默认超时长于普通 RPC（生图等慢操作）。"""
+        runtime = self._require(plugin_id)
+        if self._plugin_type(runtime.manifest) != "provider":
+            raise ValueError("该插件不是 provider 类型")
+        if runtime.status != "running" or not runtime.rpc_client:
+            raise ValueError("Provider 插件尚未运行或初始化失败")
+        descriptor = next(
+            (item for item in runtime.provider_capabilities if item.get("kind") == capability),
+            None,
+        )
+        if not descriptor:
+            raise KeyError(f"插件 {plugin_id} 未声明 capability：{capability}")
+        method_name = str(descriptor.get("methods", {}).get(method_alias) or "")
+        if not method_name:
+            raise KeyError(f"capability {capability} 不支持方法别名：{method_alias}")
+        if not isinstance(arguments, dict):
+            raise ValueError("Provider 调用 arguments 必须是对象")
+        try:
+            result = await runtime.rpc_client.request(
+                "provider.request",
+                {"capability": capability, "method": method_alias, "arguments": arguments},
+                timeout=max(float(timeout), DEFAULT_RPC_TIMEOUT),
+            )
+            if not isinstance(result, dict):
+                raise PluginProtocolError("Provider 必须返回 JSON 对象")
         except PluginProtocolError as exc:
             await self._fail_rpc_runtime(runtime, str(exc))
             raise
@@ -755,8 +819,11 @@ class PluginHost:
                     },
                     timeout=5,
                 )
-                if self._plugin_type(runtime.manifest) == "tool":
+                plugin_type = self._plugin_type(runtime.manifest)
+                if plugin_type == "tool":
                     runtime.tools = validate_tool_descriptors(initialized)
+                elif plugin_type == "provider":
+                    runtime.provider_capabilities = validate_provider_capabilities(initialized)
                 else:
                     runtime.bridge_extensions = validate_bridge_extension_descriptors(initialized)
             runtime.started_at = time.monotonic()
@@ -780,6 +847,7 @@ class PluginHost:
             runtime.rpc_client = None
             runtime.tools = []
             runtime.bridge_extensions = []
+            runtime.provider_capabilities = []
             runtime.status, runtime.error = "failed", str(exc)
             self.logger.exception("插件 %s 启动失败", plugin_id)
 
@@ -824,7 +892,54 @@ class PluginHost:
                 continue
             value = runtime.secrets.get(key, "") if self._sensitive(field_schema) else runtime.config.get(key, field_schema.get("default"))
             env[env_name] = json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value).lower() if isinstance(value, bool) else str(value or "")
+        self._inject_ai_provider_env(runtime, env, permissions)
         return env
+
+    def _inject_ai_provider_env(
+        self,
+        runtime: PluginRuntime,
+        env: dict[str, str],
+        permissions: set[str],
+    ) -> None:
+        if "ai.providers" not in permissions or self._ai_provider_resolver is None:
+            return
+        for key, field_schema in runtime.schema.get("properties", {}).items():
+            ui = field_schema.get("ui") or {}
+            if ui.get("options_source") != "ai_providers":
+                continue
+            provider_ref = str(runtime.config.get(key) or "").strip()
+            if not provider_ref:
+                continue
+            try:
+                provider = self._ai_provider_resolver(provider_ref)
+            except Exception:
+                self.logger.exception("解析插件 AI 服务商失败: %s", provider_ref)
+                continue
+            if not isinstance(provider, dict):
+                continue
+            required_format = str(ui.get("api_format") or "").strip().lower()
+            provider_format = str(provider.get("api_format") or "openai").strip().lower()
+            if required_format and provider_format != required_format:
+                continue
+            for ui_key, provider_key in (
+                ("provider_base_url_env", "base_url"),
+                ("provider_api_key_env", "api_key"),
+                ("provider_api_format_env", "api_format"),
+            ):
+                env_name = str(ui.get(ui_key) or "").strip()
+                if env_name:
+                    env[env_name] = str(provider.get(provider_key) or "")
+
+    async def restart_ai_provider_consumers(self) -> None:
+        for plugin_id, runtime in self.plugins.items():
+            permissions = set(self._plugin_permissions(runtime))
+            uses_ai_provider = any(
+                (field_schema.get("ui") or {}).get("options_source") == "ai_providers"
+                for field_schema in runtime.schema.get("properties", {}).values()
+            )
+            process_running = bool(runtime.process and runtime.process.returncode is None)
+            if "ai.providers" in permissions and uses_ai_provider and process_running:
+                await self.restart(plugin_id, require_enabled=False)
 
     def _host_generation_path(self, plugin_id: str) -> Path:
         return (self.data_dir / plugin_id / "runtime" / ".host-generation").resolve()
@@ -879,6 +994,7 @@ class PluginHost:
         runtime.rpc_client = None
         runtime.tools = []
         runtime.bridge_extensions = []
+        runtime.provider_capabilities = []
         runtime.status = self._status_for_enabled(runtime)
         if runtime.status != "active":
             self.contributions.clear_plugin(plugin_id)
@@ -907,6 +1023,7 @@ class PluginHost:
         runtime.rpc_client = None
         runtime.tools = []
         runtime.bridge_extensions = []
+        runtime.provider_capabilities = []
         runtime.status = "failed"
         runtime.error = error
 
@@ -952,6 +1069,7 @@ class PluginHost:
         runtime.rpc_client = None
         runtime.tools = []
         runtime.bridge_extensions = []
+        runtime.provider_capabilities = []
         if alive_sec >= _RESTART_STABLE_SECONDS:
             runtime.restart_delay_sec = _RESTART_BASE_DELAY
         delay = runtime.restart_delay_sec

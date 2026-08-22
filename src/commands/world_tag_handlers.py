@@ -33,6 +33,8 @@ def parse_world_tag(tag: str, value: str, result: dict) -> None:
             logger.warning("MEMORY tag empty, skipped")
     elif tag == "SCENE":
         result["state_update"]["scene_change"] = value[:200]
+    elif tag == "SCENE_IMAGE":
+        result["scene_image_prompt"] = value[:300]
     elif tag == "NPC":
         parts = value.split(":", 1)
         if len(parts) == 2:

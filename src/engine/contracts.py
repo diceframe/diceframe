@@ -123,6 +123,7 @@ class RoundLogEntry(TypedDict, total=False):
     timestamp: str
     tags_summary: NotRequired[dict[str, Any]]
     story_recaps: NotRequired[list[StoryRecap]]
+    scene_image: NotRequired[dict[str, Any]]
 
 
 TokenBudgetBump = TypedDict(

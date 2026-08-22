@@ -31,6 +31,7 @@ PAY:payer_id:amount:recipient_id:item1|item2
                                (for purchases; deduct and grant items only after the payer confirms and has enough currency)
                                (do not repeat purchased items as LOOT/KEY_ITEM/WEAPON/EQUIP; narrate an offer awaiting confirmation, not a completed purchase)
 SCENE:new scene name           (when the scene changes)
+SCENE_IMAGE:visual description (output ONCE only on a major scene change or the first appearance of a new location/level: one short English sentence describing subject, environment, mood and art style, e.g. SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style. Never output it without a major scene change, or when the scene matches the previous image)
 NPC:name:relationship          (register named NPCs on first appearance)
 LOOT:player_id:item name       (ordinary inventory items)
 KEY_ITEM:player_id:item name   (important physical clues, keys, documents, maps, quest items)

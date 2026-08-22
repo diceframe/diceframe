@@ -110,7 +110,7 @@ class WebAPI:
                  handler=None, llm_client=None, worlds_dir: Path | None = None,
                  character_gen_max_tokens: int = 2048,
                  text_gen_max_tokens: int = 1024, plugin_host=None, hub_client=None,
-                 speech_service=None, asr_service=None):
+                 speech_service=None, asr_service=None, imagegen_service=None):
         self._reg = registry
         self._lore = lorebook
         self._mem = memory
@@ -128,6 +128,7 @@ class WebAPI:
         self._hub = hub_client
         self._speech = speech_service
         self._asr = asr_service
+        self._imagegen = imagegen_service
         if self._plugins and self._handler and hasattr(self._handler, "set_plugin_host"):
             self._handler.set_plugin_host(self._plugins)
 
@@ -860,6 +861,10 @@ class WebAPI:
                               model: str, proxy_url: str = "",
                               api_format: str = "openai") -> dict[str, Any]:
         return await generation.test_connection(self, base_url, api_key, model, proxy_url, api_format)
+
+    async def list_models(self, base_url: str, api_key: str,
+                          proxy_url: str = "", api_format: str = "openai") -> dict[str, Any]:
+        return await generation.list_models(self, base_url, api_key, proxy_url, api_format)
 
     async def generate_world(self, prompt: str, rule_id: str = "", language: str = "") -> dict[str, Any]:
         return await generation.generate_world(self, prompt, rule_id, language)

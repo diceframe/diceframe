@@ -33,6 +33,7 @@ def _new_result() -> dict:
         "plot_update": {"quests": [], "relations": [], "decisions": []},
         "xp_rewards": {},  # uid -> xp_amount (LLM 可选标签)
         "growth_skills": [],  # [{uid, skill}] 用于 CoC 技能成长检定
+        "scene_image_prompt": "",  # GM 请求为本回合生成场景图（需图像生成插件）
     }
 
 

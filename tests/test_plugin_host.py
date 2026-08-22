@@ -797,7 +797,7 @@ def test_list_plugin_types_drives_frontend_filters():
     from src.plugin_host.support import list_plugin_types
     types = list_plugin_types()
     filterable = [t["id"] for t in types if t["filterable"]]
-    assert filterable == ["content-pack", "theme", "voice-pack", "tool", "channel-adapter"]
+    assert filterable == ["content-pack", "theme", "voice-pack", "tool", "channel-adapter", "provider"]
     assert len(types) == 8
     assert {t["id"] for t in types} == {
         "channel-adapter", "content-pack", "theme",
@@ -1901,6 +1901,88 @@ def test_process_environment_does_not_inherit_unrelated_host_secrets(tmp_path, m
     assert "TRPG_API_BASE" not in env
     assert env["DICEFRAME_PLUGIN_ID"] == "future-tool"
     assert env["DICEFRAME_PLUGIN_DATA_DIR"].endswith("future-tool\\runtime") or env["DICEFRAME_PLUGIN_DATA_DIR"].endswith("future-tool/runtime")
+
+
+def test_ai_provider_reference_injects_only_resolved_connection_fields(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "image-provider",
+        plugin_type="provider",
+        entrypoint=True,
+        manifest_extra={
+            "permissions": ["network.client", "plugin.config", "ai.providers", "process.spawn", "plugin.data"],
+        },
+    )
+    (plugins / "image-provider" / "config.schema.json").write_text(json.dumps({
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean", "default": False, "ui": {"control": "switch"}},
+            "provider_ref": {
+                "type": "string",
+                "default": "images",
+                "ui": {
+                    "control": "select",
+                    "options_source": "ai_providers",
+                    "api_format": "openai",
+                    "provider_base_url_env": "DF_IMAGEGEN_BASE_URL",
+                    "provider_api_key_env": "DF_IMAGEGEN_API_KEY",
+                    "provider_api_format_env": "DF_IMAGEGEN_API_FORMAT",
+                },
+            },
+        },
+    }), encoding="utf-8")
+    host = PluginHost(
+        plugins,
+        tmp_path / "data",
+        ai_provider_resolver=lambda ref: {
+            "base_url": "https://images.example/v1",
+            "api_key": "provider-secret",
+            "api_format": "openai",
+        } if ref == "images" else None,
+    )
+    host.discover()
+
+    env = host._build_process_env("image-provider", host.plugins["image-provider"])
+
+    assert env["DF_IMAGEGEN_BASE_URL"] == "https://images.example/v1"
+    assert env["DF_IMAGEGEN_API_KEY"] == "provider-secret"
+    assert env["DF_IMAGEGEN_API_FORMAT"] == "openai"
+
+
+def test_ai_provider_reference_requires_explicit_permission(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "image-provider",
+        plugin_type="provider",
+        entrypoint=True,
+        manifest_extra={"permissions": ["network.client", "plugin.config", "process.spawn", "plugin.data"]},
+    )
+    (plugins / "image-provider" / "config.schema.json").write_text(json.dumps({
+        "type": "object",
+        "properties": {
+            "provider_ref": {
+                "type": "string",
+                "default": "images",
+                "ui": {
+                    "control": "select",
+                    "options_source": "ai_providers",
+                    "provider_api_key_env": "DF_IMAGEGEN_API_KEY",
+                },
+            },
+        },
+    }), encoding="utf-8")
+    host = PluginHost(
+        plugins,
+        tmp_path / "data",
+        ai_provider_resolver=lambda _ref: {"api_key": "provider-secret", "api_format": "openai"},
+    )
+    host.discover()
+
+    env = host._build_process_env("image-provider", host.plugins["image-provider"])
+
+    assert "DF_IMAGEGEN_API_KEY" not in env
 
 
 def test_http_capability_receives_only_diceframe_connection_credentials(tmp_path):

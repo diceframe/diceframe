@@ -238,6 +238,8 @@ def _play_public_signature(inst, user_id: str) -> str:
         "last_activity": inst.last_activity,
         "log_count": len(inst.log),
         "scene": inst.scene,
+        "scene_image": inst.scene_image,
+        "log_scene_image": (inst.log[-1].get("scene_image") if inst.log else None),
         "quick_actions": getattr(inst, "quick_actions", []),
         "pending_payments": [
             payment for payment in getattr(inst, "pending_payments", [])

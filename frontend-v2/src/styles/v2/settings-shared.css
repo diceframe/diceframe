@@ -73,6 +73,32 @@
   color: var(--df-text-secondary);
 }
 
+.provider-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  color: var(--df-text);
+  background: linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.provider-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memory-row,
 .log-reader article,
 .archive-page .char-card,

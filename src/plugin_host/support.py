@@ -12,6 +12,7 @@ from typing import Any
 PROCESS_MODE_STATIC = "static"                # 无进程：内容包/主题
 PROCESS_MODE_RPC_TOOL = "rpc-tool"            # JSON-RPC stdio 进程：工具
 PROCESS_MODE_RPC_BRIDGE = "rpc-bridge"         # JSON-RPC stdio 进程：Bot Bridge 扩展
+PROCESS_MODE_RPC_PROVIDER = "rpc-provider"    # JSON-RPC stdio 进程：能力 Provider（生图等）
 PROCESS_MODE_PLAIN_SUBPROCESS = "plain-subprocess"  # 普通进程（非 RPC）：渠道适配器
 PROCESS_MODE_NONE = "none"                     # 预留类型，无运行时
 
@@ -19,6 +20,7 @@ PROCESS_MODES = (
     PROCESS_MODE_STATIC,
     PROCESS_MODE_RPC_TOOL,
     PROCESS_MODE_RPC_BRIDGE,
+    PROCESS_MODE_RPC_PROVIDER,
     PROCESS_MODE_PLAIN_SUBPROCESS,
     PROCESS_MODE_NONE,
 )
@@ -106,14 +108,14 @@ PLUGIN_TYPE_SUPPORT: dict[str, dict[str, Any]] = {
         "filter_order": 0,
     },
     "provider": {
-        "level": "reserved",
-        "summary": "仅保留清单类型，尚未接入模型 Provider 运行时",
-        "process_mode": PROCESS_MODE_NONE,
-        "inferred_permissions": [],
+        "level": "supported",
+        "summary": "以能力 Provider 进程提供外部服务（如 OpenAI 兼容图像生成），由宿主按能力调用",
+        "process_mode": PROCESS_MODE_RPC_PROVIDER,
+        "inferred_permissions": ["network.client"],
         "required_permission": None,
         "contributes": None,
-        "filterable": False,
-        "filter_order": 0,
+        "filterable": True,
+        "filter_order": 6,
     },
     "tool": {
         "level": "supported",
@@ -154,7 +156,7 @@ STATIC_PLUGIN_TYPES = frozenset(
 )
 RPC_PLUGIN_TYPES = frozenset(
     t for t, d in PLUGIN_TYPE_SUPPORT.items()
-    if d["process_mode"] in (PROCESS_MODE_RPC_TOOL, PROCESS_MODE_RPC_BRIDGE)
+    if d["process_mode"] in (PROCESS_MODE_RPC_TOOL, PROCESS_MODE_RPC_BRIDGE, PROCESS_MODE_RPC_PROVIDER)
 )
 
 

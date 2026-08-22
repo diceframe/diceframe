@@ -18,6 +18,83 @@ if TYPE_CHECKING:
 logger = logging.getLogger("trpg")
 
 
+def _model_list_url(base_url: str, api_format: str = "openai") -> str:
+    url = base_url.rstrip("/")
+    if url.endswith("/chat/completions"):
+        return f"{url[:-len('/chat/completions')]}/models"
+    if url.endswith("/messages"):
+        url = url[:-len("/messages")]
+    if url.endswith("/models"):
+        return url
+    if (api_format or "openai").strip().lower() == "anthropic" and not url.endswith("/v1"):
+        return f"{url}/v1/models"
+    return f"{url}/models"
+
+
+def _extract_model_ids(payload: Any) -> list[str]:
+    if isinstance(payload, dict):
+        raw_models = payload.get("data")
+        if not isinstance(raw_models, list):
+            raw_models = payload.get("models")
+    else:
+        raw_models = payload
+    if not isinstance(raw_models, list):
+        return []
+
+    models: list[str] = []
+    seen: set[str] = set()
+    for item in raw_models:
+        if isinstance(item, dict):
+            model = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+        else:
+            model = str(item or "").strip()
+        if not model or model in seen:
+            continue
+        seen.add(model)
+        models.append(model[:160])
+        if len(models) >= 300:
+            break
+    return sorted(models, key=str.casefold)
+
+
+async def list_models(api: "WebAPI", base_url: str, api_key: str,
+                      proxy_url: str = "", api_format: str = "openai") -> dict[str, Any]:
+    """读取 OpenAI / Anthropic 兼容接口的模型目录。"""
+    import aiohttp
+
+    url = _model_list_url(base_url, api_format)
+    anthropic = (api_format or "openai").strip().lower() == "anthropic"
+    headers = (
+        {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        if anthropic else {"Authorization": f"Bearer {api_key}"}
+    )
+    try:
+        if not api._llm_client:
+            return {"ok": False, "error": "LLM 客户端未初始化", "models": []}
+        session = await api._llm_client._get_session()
+        active_proxy = proxy_url or api._llm_client.proxy_url
+        request_kwargs = {"proxy": active_proxy} if active_proxy else {}
+        async with session.get(
+            url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+            **request_kwargs,
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                return {"ok": False, "error": f"HTTP {response.status}: {error_text[:200]}", "models": []}
+            try:
+                payload = await response.json()
+            except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                return {"ok": False, "error": "模型列表响应不是有效 JSON", "models": []}
+            models = _extract_model_ids(payload)
+            if not models:
+                return {"ok": False, "error": "接口未返回可识别的模型列表", "models": []}
+            return {"ok": True, "models": models, "count": len(models)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "models": []}
+
+
 async def test_connection(api: "WebAPI", base_url: str, api_key: str,
                           model: str, proxy_url: str = "",
                           api_format: str = "openai") -> dict[str, Any]:

@@ -10,6 +10,7 @@ import { parseGMText, type LoreKeywords } from '@/utils/renderer'
 import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
 import CheckRevealCard from '@/components/play/CheckRevealCard.vue'
+import SceneImageBlock from '@/components/play/SceneImageBlock.vue'
 import { initializeTts, speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
 
 const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string }>()
@@ -41,6 +42,12 @@ function actions(entry: LogEntry): Act[] {
 }
 function checks(entry: LogEntry): CheckResult[] {
   return Array.isArray(entry.check_results) ? entry.check_results : []
+}
+function sceneImageAsset(entry: LogEntry): string {
+  const record = entry.scene_image
+  if (!record || record.status !== 'ready') return ''
+  const reference = record.reference
+  return reference?.kind === 'upload' ? String(reference.asset_id || '') : ''
 }
 function recaps(entry: LogEntry): StoryRecap[] {
   return Array.isArray(entry.story_recaps)
@@ -202,6 +209,11 @@ watch(() => rounds.value, async (latest) => {
             @click="ttsToggle(item.gm.paragraphs.join(' '), 'gm:' + item.round, { lang: ttsVoiceLang, gameKey, role: 'gm' })"
           >{{ speakingKey === 'gm:' + item.round ? '⏸' : '🔊' }}</button></strong>
           <p v-for="(p, i) in item.gm.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
+          <SceneImageBlock
+            v-if="sceneImageAsset(item.entry)"
+            :asset-id="sceneImageAsset(item.entry)"
+            :alt="item.entry.scene_image?.prompt || ''"
+          />
           <div v-if="item.gm.states.length" class="state-card-list">
             <div v-for="(s, i) in item.gm.states" :key="'s' + i" class="state-card" :class="s.cls">
               <span class="state-card-title">
