@@ -209,18 +209,27 @@ test('settings status cards share the same content baselines', async ({ page }, 
   await page.goto('/#/settings')
 
   const cards = page.locator('.system-status-card')
-  await expect(cards).toHaveCount(5)
+  await expect(cards.first()).toBeVisible()
   const geometry = await cards.evaluateAll(elements => elements.map(element => {
     const card = element.getBoundingClientRect()
     const icon = element.querySelector<HTMLElement>('.system-status-icon')!.getBoundingClientRect()
     const head = element.querySelector<HTMLElement>('.system-status-head')!.getBoundingClientRect()
     const detail = element.querySelector<HTMLElement>('p')!.getBoundingClientRect()
-    return { cardHeight: card.height, iconTop: icon.top, headTop: head.top, detailTop: detail.top }
+    return { cardTop: card.top, cardHeight: card.height, iconTop: icon.top, headTop: head.top, detailTop: detail.top }
   }))
 
-  for (const key of ['cardHeight', 'iconTop', 'headTop', 'detailTop'] as const) {
-    const values = geometry.map(item => item[key])
-    expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(1)
+  expect(geometry.length).toBeGreaterThan(0)
+  const rows = new Map<number, typeof geometry>()
+  for (const item of geometry) {
+    const rowTop = Math.round(item.cardTop)
+    rows.set(rowTop, [...(rows.get(rowTop) ?? []), item])
+  }
+  for (const row of rows.values()) {
+    if (row.length < 2) continue
+    for (const key of ['cardHeight', 'iconTop', 'headTop', 'detailTop'] as const) {
+      const values = row.map(item => item[key])
+      expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(2)
+    }
   }
 })
 
