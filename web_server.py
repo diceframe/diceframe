@@ -13,6 +13,11 @@ from aiohttp import web
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.common_factory import TRPGSubsystems, create_trpg_subsystems
+from src.migrations.config import (
+    DEFAULT_NARRATIVE_MAX_TOKENS,
+    GENERATION_DEFAULTS_VERSION,
+    migrate_generation_defaults as _migrate_generation_defaults,
+)
 from src.ai_providers import (
     is_provider_secret_key,
     normalize_ai_providers,
@@ -81,8 +86,6 @@ from src.webui.services import legal as legal_svc
 logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
 
-DEFAULT_NARRATIVE_MAX_TOKENS = 2048
-GENERATION_DEFAULTS_VERSION = 5
 
 DATA_DIR = Path(os.getenv("TRPG_DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -128,37 +131,6 @@ def _load_json_object(path: Path, label: str) -> dict:
 # 仅在配置值等于某个已知旧默认时提升，保留用户自定义值。
 # 默认值历史上单调递增，缺失字段按最小旧默认补全后同样提升。
 # character_gen_max_tokens 一直是 2048，无旧默认需提升，不在表中。
-_TOKEN_FIELD_MIGRATIONS: tuple[tuple[str, frozenset[int], int], ...] = (
-    ("narrative_max_tokens", frozenset({1024, 1536}), DEFAULT_NARRATIVE_MAX_TOKENS),
-    ("analysis_max_tokens", frozenset({512}), 1024),
-    ("summary_max_tokens", frozenset({400}), 1024),
-    ("brief_max_tokens", frozenset({300}), 1024),
-    ("text_gen_max_tokens", frozenset({400}), 1024),
-)
-
-
-def _migrate_generation_defaults(config: dict) -> bool:
-    """一次性提升旧版默认生成额度，同时保留用户的自定义数值。"""
-    try:
-        version = int(config.get("generation_defaults_version", 0) or 0)
-    except (TypeError, ValueError):
-        version = 0
-    if version >= GENERATION_DEFAULTS_VERSION:
-        return False
-
-    for field, old_defaults, new_default in _TOKEN_FIELD_MIGRATIONS:
-        missing = min(old_defaults)
-        try:
-            current = int(config.get(field, missing) or missing)
-        except (TypeError, ValueError):
-            current = missing
-        if current in old_defaults:
-            config[field] = new_default
-
-    config["generation_defaults_version"] = GENERATION_DEFAULTS_VERSION
-    return True
-
-
 saved = _load_json_object(CONFIG_FILE, "主配置")
 secrets = _load_json_object(SECRETS_FILE, "敏感配置")
 _generation_defaults_migrated = _migrate_generation_defaults(saved)
