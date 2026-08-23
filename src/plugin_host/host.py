@@ -1154,6 +1154,16 @@ class PluginHost:
             raise ValueError("插件 ID 与目录名不一致")
         if int(manifest.get("schema_version", 0)) != 1:
             raise ValueError("不支持的 manifest schema_version")
+        for field in ("content_schema_version", "locale_schema_version"):
+            if field in manifest:
+                try:
+                    version = int(manifest[field])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{field} 必须是正整数") from exc
+                if version < 1:
+                    raise ValueError(f"{field} 必须是正整数")
+        if "default_locale" in manifest and not str(manifest["default_locale"] or "").strip():
+            raise ValueError("default_locale 不能为空")
         plugin_type = self._plugin_type(manifest)
         if plugin_type not in _PLUGIN_TYPES:
             raise ValueError(f"不支持的 plugin_type：{plugin_type}")

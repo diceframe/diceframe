@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
+
+from src.content.contracts import ResourceRef
 
 from .map_validation import (
     MAP_IMAGE_KINDS,
@@ -34,6 +37,14 @@ class PluginContribution:
     relative_path: str
     title: str = ""
     description: str = ""
+    content_schema_version: int = 1
+
+    @property
+    def ref(self) -> ResourceRef:
+        # Asset paths are legacy local keys; retain the original key while
+        # exposing a canonical identity for the V2 registry.
+        local_id = re.sub(r"[^a-zA-Z0-9_-]", "_", self.key).lower().strip("_") or "asset"
+        return ResourceRef(f"plugin:{self.plugin_id}", self.kind, local_id)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,15 +63,18 @@ class ContributionRegistry:
     def __init__(self) -> None:
         self._items: list[PluginContribution] = []
         self._by_kind_key: dict[tuple[str, str], PluginContribution] = {}
+        self._by_ref: dict[ResourceRef, PluginContribution] = {}
 
     def clear(self) -> None:
         self._items.clear()
         self._by_kind_key.clear()
+        self._by_ref.clear()
 
     def clear_plugin(self, plugin_id: str) -> None:
         kept = [item for item in self._items if item.plugin_id != plugin_id]
         self._items = []
         self._by_kind_key = {}
+        self._by_ref = {}
         for item in kept:
             self._add(item)
 
@@ -102,20 +116,24 @@ class ContributionRegistry:
         return [item for item in self._items if item.kind == kind]
 
     def find(self, kind: str, key: str, *, plugin_id: str = "") -> PluginContribution | None:
+        if plugin_id:
+            return self._by_ref.get(ResourceRef(f"plugin:{plugin_id}", kind, key))
         if kind not in _NAMESPACED_KINDS:
             return self._by_kind_key.get((kind, key))
-        if plugin_id:
-            return self._by_kind_key.get((kind, f"{plugin_id}:{key}"))
         matches = [item for item in self._items if item.kind == kind and item.key == key]
         return matches[0] if len(matches) == 1 else None
 
     def _add(self, item: PluginContribution) -> None:
+        ref = item.ref
+        if ref in self._by_ref:
+            raise ValueError(f"插件资源 ID 重复：{ref}")
+        self._by_ref[ref] = item
         lookup_key = f"{item.plugin_id}:{item.key}" if item.kind in _NAMESPACED_KINDS else item.key
         existing = self._by_kind_key.get((item.kind, lookup_key))
         if existing:
             if item.kind in _NAMESPACED_KINDS:
                 raise ValueError(f"插件内资源 ID 重复：{item.kind} {item.key}")
-            if existing.plugin_id != item.plugin_id:
+            if existing.plugin_id != item.plugin_id and item.content_schema_version < 2:
                 raise ValueError(
                     f"插件资源冲突：{item.kind} {item.key} 已由 {existing.plugin_id} 提供"
                 )
@@ -213,6 +231,7 @@ def _contribution_from_path(
         relative_path=path.relative_to(plugin_dir).as_posix(),
         title=title.strip(),
         description=description.strip(),
+        content_schema_version=int(manifest.get("content_schema_version", 1) or 1),
     )
 
 
