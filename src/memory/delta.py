@@ -9,6 +9,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.migrations.memory import migrate as migrate_memory
+
 logger = logging.getLogger("trpg")
 
 SCHEMA = """
@@ -34,12 +36,6 @@ CREATE INDEX IF NOT EXISTS idx_memory_status  ON memory_entries(game_key, status
 PRAGMA journal_mode=WAL;
 """
 
-# 表升级：为没有 embedding 列的老表添加
-_MIGRATE_EMBEDDING = """
-ALTER TABLE memory_entries ADD COLUMN embedding TEXT;
-"""
-
-
 class MemoryStore:
     """长期记忆 SQLite 存储，处理 memory_delta 的冲突消解。"""
 
@@ -57,12 +53,7 @@ class MemoryStore:
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
-        # 尝试迁移旧表（添加 embedding 列）
-        try:
-            self._conn.execute(_MIGRATE_EMBEDDING)
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass  # 列已存在
+        migrate_memory(self._conn)
         self._conn.commit()
 
     def close(self) -> None:

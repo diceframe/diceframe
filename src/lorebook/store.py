@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from src.migrations.lorebook import migrate as migrate_lorebook
+
 logger = logging.getLogger("trpg")
 
 SCHEMA = """
@@ -58,20 +60,6 @@ CREATE INDEX IF NOT EXISTS idx_lorebook_tier  ON lorebook_entries(world_id, tier
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 """
-# 表升级
-_MIGRATE_CONSTANT = "ALTER TABLE lorebook_entries ADD COLUMN is_constant INTEGER DEFAULT 0;"
-_MIGRATE_MATCH_MODE = "ALTER TABLE lorebook_entries ADD COLUMN match_mode TEXT DEFAULT 'any' CHECK(match_mode IN ('any','all','not_any','not_all'));"
-_MIGRATE_STICKY = "ALTER TABLE lorebook_entries ADD COLUMN sticky INTEGER DEFAULT 0;"
-_MIGRATE_COOLDOWN = "ALTER TABLE lorebook_entries ADD COLUMN cooldown INTEGER DEFAULT 0;"
-_MIGRATE_DELAY = "ALTER TABLE lorebook_entries ADD COLUMN delay INTEGER DEFAULT 0;"
-_MIGRATE_ORDER = 'ALTER TABLE lorebook_entries ADD COLUMN "order" INTEGER DEFAULT 100;'
-_MIGRATE_PROBABILITY = "ALTER TABLE lorebook_entries ADD COLUMN probability INTEGER DEFAULT 100;"
-_MIGRATE_GROUP = 'ALTER TABLE lorebook_entries ADD COLUMN "group" TEXT DEFAULT \'\';'
-_MIGRATE_GROUP_WEIGHT = "ALTER TABLE lorebook_entries ADD COLUMN group_weight INTEGER DEFAULT 1;"
-_MIGRATE_CONNECTED = "ALTER TABLE lorebook_entries ADD COLUMN connected_to TEXT DEFAULT '[]';"
-_MIGRATE_WORLD_LANGUAGE = "ALTER TABLE worlds ADD COLUMN language TEXT DEFAULT 'zh-CN';"
-_MIGRATE_SOURCE_PLUGIN = "ALTER TABLE lorebook_entries ADD COLUMN source_plugin TEXT DEFAULT '';"
-
 # 迁移后的 lorebook_entries 目标列（新表结构，顺序即 _drop_legacy_type_check_sql 的建表顺序）
 _LOREBOOK_NEW_COLUMNS = (
     "id", "world_id", "name", "type", "keywords", "content", "unreliable",
@@ -134,16 +122,7 @@ class LorebookStore:
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(SCHEMA)
-        # 运行表升级
-        for mig in (_MIGRATE_CONSTANT, _MIGRATE_MATCH_MODE, _MIGRATE_STICKY,
-                     _MIGRATE_COOLDOWN, _MIGRATE_DELAY, _MIGRATE_ORDER,
-                     _MIGRATE_PROBABILITY, _MIGRATE_GROUP, _MIGRATE_GROUP_WEIGHT,
-                      _MIGRATE_CONNECTED, _MIGRATE_WORLD_LANGUAGE, _MIGRATE_SOURCE_PLUGIN):
-            try:
-                self._conn.execute(mig)
-                self._conn.commit()
-            except sqlite3.OperationalError:
-                pass
+        migrate_lorebook(self._conn)
         self._drop_legacy_type_check()
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_lorebook_source ON lorebook_entries(source_plugin)")
         self._conn.commit()
