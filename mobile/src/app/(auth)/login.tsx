@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Text } from '@/components/ui/text'
 import {
   configureApiClient,
+  errorMessage,
   fetchAppConfig,
   normalizeBaseUrl,
   validateAccessToken,
@@ -79,8 +80,10 @@ export default function LoginScreen() {
       }
       settings.setBaseUrl(normalized)
       setPasswordNeeded(!!config.access_password?.configured)
-    } catch {
-      setError(strings.common.networkError)
+    } catch (e) {
+      const detail = errorMessage(e)
+      const target = normalized || '当前地址'
+      setError(detail ? `${strings.common.networkError}（${target}：${detail}）` : strings.common.networkError)
     } finally {
       setBusy(null)
     }

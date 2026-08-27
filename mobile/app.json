@@ -42,7 +42,8 @@
         }
       ],
       "expo-audio",
-      "expo-image"
+      "expo-image",
+      "./plugins/withCleartextTraffic"
     ],
     "experiments": {
       "typedRoutes": true,
