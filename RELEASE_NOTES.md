@@ -1,6 +1,6 @@
-# DiceFrame v2.5.1-beta.1
+# DiceFrame v2.5.1-beta.3
 
-> 预览版本。v2.5.1-beta.1 延续 v2.5.0 的功能，并补充 PR202 经济结算回滚、Swipe 历史重写与 origin-round 快照隔离修复。重要战役升级前，请先备份完整的 `data/` 文件夹。
+> 预览版本。v2.5.1-beta.3 延续 v2.5.0 的功能，并补充经济结算、跨回合购买确认、报价生命周期与发布包顺序修复。重要战役升级前，请先备份完整的 `data/` 文件夹。
 
 ## 中文
 
@@ -33,6 +33,7 @@
 
 - **经济结算回滚**：多笔晚结算按逆提交顺序恢复余额、金币、物品和堆叠数量；origin-round Swipe 不再把后续轮次的状态写回旧快照。
 - **奖励资格**：开场、普通回合和 Swipe 都会拦截尚未有完成证据的条件性奖励，避免任务未完成就生成奖励提案。
+- **跨回合购买确认**：报价会持久化到原始对局回合，只能由原付款人确认；确认时以已保存的价格和物品为准，并防止重复发货或误把普通拾取物识别成商品报价。
 
 ### 修复、兼容与更新可靠性
 
@@ -54,9 +55,9 @@
 
 ### 下载与校验
 
-- **普通 Windows 用户**：`DiceFrame-v2.5.1-beta.1-windows-portable.zip`
-- **源码运行用户**：`DiceFrame-v2.5.1-beta.1-windows.zip`
-- **托管 Docker 更新**：`DiceFrame-v2.5.1-beta.1-docker-update-linux-amd64.zip`
+- **普通 Windows 用户**：`DiceFrame-v2.5.1-beta.3-windows-portable.zip`
+- **源码运行用户**：`DiceFrame-v2.5.1-beta.3-windows.zip`
+- **托管 Docker 更新**：`DiceFrame-v2.5.1-beta.3-docker-update-linux-amd64.zip`
 - 下载后请使用 Release 中的 `SHA256SUMS` 统一校验；重要战役建议保留旧版程序与数据备份，便于回退。
 
 ## English
@@ -90,6 +91,7 @@
 
 - **Economy rollback**: multiple late settlements now restore balances, gold, items, and stacked quantities in reverse commit order; origin-round Swipe no longer projects later-round state into an earlier snapshot.
 - **Reward eligibility**: opening, normal-round, and Swipe pipelines reject conditional rewards without completion evidence, so unfinished tasks do not create reward proposals.
+- **Cross-turn purchase confirmation**: quotes persist with their originating run and payer; confirmation uses the stored amount and items, prevents duplicate delivery, and does not misclassify ordinary loot as a shop quote.
 
 ### Fixes, compatibility, and update reliability
 
@@ -111,7 +113,7 @@
 
 ### Downloads and verification
 
-- **Regular Windows users**: `DiceFrame-v2.5.1-beta.1-windows-portable.zip`
-- **Source-run users**: `DiceFrame-v2.5.1-beta.1-windows.zip`
-- **Managed Docker update**: `DiceFrame-v2.5.1-beta.1-docker-update-linux-amd64.zip`
+- **Regular Windows users**: `DiceFrame-v2.5.1-beta.3-windows-portable.zip`
+- **Source-run users**: `DiceFrame-v2.5.1-beta.3-windows.zip`
+- **Managed Docker update**: `DiceFrame-v2.5.1-beta.3-docker-update-linux-amd64.zip`
 - Verify downloads with the Release `SHA256SUMS`. For important campaigns, keep the prior program version and a data backup so rollback remains possible.
