@@ -87,10 +87,38 @@ def record_evidence(
     item: str = "",
     amount: int | None = None,
     note: str = "",
+    dedupe: bool = False,
 ) -> dict[str, Any] | None:
-    """Append one evidence record and return it (audit-only, bounded)."""
+    """Append one evidence record and return it (audit-only, bounded).
+
+    ``dedupe=True`` 时同一轮内 type/actor/item/amount 完全相同的记录只保留
+    一条（供可重入的规划阶段使用，避免重试路径重复留痕）。
+    """
 
     entries = evidence_collection(instance)
+    if dedupe:
+        run_id = str(getattr(instance, "run_id", ""))
+        try:
+            round_number = int(getattr(instance, "round_number", 0) or 0)
+        except (TypeError, ValueError):
+            round_number = -1
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                entry_round = int(entry.get("round", -1))
+            except (TypeError, ValueError):
+                entry_round = -1
+            if (
+                entry.get("type") == evidence_type
+                and entry.get("source") == source
+                and str(entry.get("actor_uid") or "") == str(actor_uid or "")
+                and str(entry.get("item") or "") == str(item or "")
+                and entry.get("amount") == amount
+                and str(entry.get("run_id") or "") == run_id
+                and entry_round == round_number
+            ):
+                return entry
     evidence = {
         "id": f"ev_{uuid4().hex}",
         "type": str(evidence_type or "")[:40],

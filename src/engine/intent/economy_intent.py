@@ -16,12 +16,16 @@ Intent(actor) → evidence ladder → pending proposal / clarification
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import re
 from typing import Any, Iterable
 from uuid import uuid4
 
 from src.engine.economy import MAX_ECONOMY_AMOUNT
+
+logger = logging.getLogger("trpg")
 from src.engine.intent.evidence import collect_evidence_for_intent
+from src.engine.intent.evidence import evidence_collection
 from src.engine.intent.lexicon import instance_language
 from src.engine.intent.matcher import match_open_merchant_offers
 from src.engine.intent.parser import (
@@ -206,6 +210,28 @@ def repair_missing_economy_proposals(
     intents = parse_purchase_intents(
         action_records, getattr(instance, "players", {}), language, currency_labels,
     )
+    # 迁移阶段 1：AI Action 与关键词 parser 并行运行，仅记录差异不改行为。
+    # 阶段 2 将把 AI Action 提为优先意图源（评审通过后切换）。
+    try:
+        current_round = int(getattr(instance, "round_number", -1))
+    except (TypeError, ValueError):
+        current_round = -1
+    ai_action_evidence = [
+        item for item in evidence_collection(instance)
+        if isinstance(item, dict)
+        and item.get("type") == "ai_action"
+        and str(item.get("run_id") or "") == str(getattr(instance, "run_id", ""))
+        and int(item.get("round", -1)) == current_round
+    ]
+    if ai_action_evidence:
+        keyword_actors = {intent.actor_uid for intent in intents}
+        for item in ai_action_evidence:
+            actor = str(item.get("actor_uid") or "")
+            if actor and actor not in keyword_actors:
+                logger.info(
+                    "意图差异: GM AI 识别到购买意图但关键词未命中 (actor=%s item=%s)",
+                    actor, str(item.get("item") or "")[:60],
+                )
     narrative_text = str(narration or "")
     priced_narrative = bool(
         charge_pattern(language, currency_labels).search(narrative_text)

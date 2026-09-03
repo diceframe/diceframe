@@ -19,6 +19,7 @@ from src.engine.checks import (
 from src.engine.character_utils import is_conscious
 from src.engine.dice import d20_dc_cap
 from src.engine.game_instance import GameInstance
+from src.engine.intent.evidence import record_evidence
 from src.engine.language import localized_text
 from src.llm.parser import sanitize_narration
 from src.llm.tools import DICE_CHECKS_TOOL, DICE_CHECKS_TOOL_NAME
@@ -27,6 +28,8 @@ from src.rules.rule_system import RuleSystem
 logger = logging.getLogger("trpg")
 
 _SAFETY_CHECK_INTENTS = {"combat", "athletics", "stealth"}
+# PR1 仅启用 purchase；sell/trade/give 等类型随 Event System 扩展。
+_ECONOMY_ACTION_TYPES = {"purchase"}
 _CONCEALED_OR_HAZARDOUS_WORDS = (
     "暗门", "暗室", "隐藏", "秘密", "危险", "异常", "诡异", "未知",
     "残留", "血迹", "毒", "陷阱", "追赶", "袭击",
@@ -550,6 +553,7 @@ async def plan_round_checks(
     )
     raw_checks: list[Any] = []
     overreach_notes: list[dict[str, str]] = []
+    economy_actions: list[dict[str, Any]] = []
     for call in response.tool_calls:
         if str(call.get("name") or "") != DICE_CHECKS_TOOL_NAME:
             continue
@@ -570,6 +574,51 @@ async def plan_round_checks(
                         overreach_notes.append({"player": uid, "reason": reason})
         except Exception:
             logger.warning("overreach 标注解析失败，已忽略 (round=%d)", instance.round_number, exc_info=True)
+        # economy_actions 与 checks 独立解析（overreach 同款容错）：玩家自己
+        # 说出的经济意图，任何语言。意图不是事实——只进入证据层供恢复与
+        # 确认参考，服务端负责定价、资金、确认与结算。
+        try:
+            economy_raw = arguments.get("economy_actions")
+            if isinstance(economy_raw, list):
+                for item in economy_raw[:8]:
+                    if not isinstance(item, dict):
+                        continue
+                    uid = _match_player(instance, item.get("player"))
+                    action_type = str(item.get("type") or "").strip().lower()
+                    if action_type not in _ECONOMY_ACTION_TYPES:
+                        continue
+                    target = str(item.get("target") or "").strip()[:120]
+                    if not uid or not target:
+                        continue
+                    raw_amount = item.get("amount")
+                    try:
+                        amount = int(raw_amount) if raw_amount is not None else None
+                    except (TypeError, ValueError):
+                        amount = None
+                    if amount is not None and amount <= 0:
+                        amount = None
+                    economy_actions.append({
+                        "player": uid,
+                        "type": action_type,
+                        "target": target,
+                        "amount": amount,
+                        "note": str(item.get("note") or "").strip()[:160],
+                    })
+        except Exception:
+            logger.warning("economy_actions 解析失败，已忽略 (round=%d)", instance.round_number, exc_info=True)
+    # AI Action（迁移阶段 1）：GM 模型从玩家行动识别的经济意图只进入证据层
+    # （authority=False，dedupe 防重规划重复留痕），供恢复层比对与 GM 参考。
+    for economy_action in economy_actions:
+        record_evidence(
+            instance,
+            evidence_type="ai_action",
+            source="gm_ai",
+            actor_uid=str(economy_action.get("player") or ""),
+            item=str(economy_action.get("target") or ""),
+            amount=economy_action.get("amount"),
+            note=str(economy_action.get("type") or ""),
+            dedupe=True,
+        )
     planned, errors = normalize_check_specs(instance, rule, raw_checks)
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_explicit_advantage_modes(rule, planned)
@@ -581,4 +630,5 @@ async def plan_round_checks(
         "total_tokens": response.total_tokens,
         "errors": errors,
         "overreach": overreach_notes,
+        "economy_actions": economy_actions,
     }
