@@ -351,10 +351,11 @@ def repair_missing_economy_proposals(
                 offer=offers[0],
             )
             evidence_ids = [*evidence_ids, *offer_evidence]
+            # 冲突检测同样只认有归属的证据：按句叙事绑定 / 行动自报，
+            # 全局叙事金额（可能与商品无关，如任务悬赏）不参与冲突判定。
             evidence = (
                 item_bound_amounts[0]
                 if len(item_bound_amounts) == 1
-                else narration_amounts[0] if len(narration_amounts) == 1
                 else intent.amount_candidates[0] if len(intent.amount_candidates) == 1
                 else 0
             )
@@ -372,9 +373,11 @@ def repair_missing_economy_proposals(
                 continue
             amount, amount_source = offer_amount, AMOUNT_SOURCE_MERCHANT_OFFER
         elif len(item_bound_amounts) == 1:
+            # 叙事价格必须与商品同句绑定。此处刻意没有"全局唯一叙事金额"兜底：
+            # 叙事里无关的数字（任务悬赏、NPC 薪水、其它商品报价）只要恰好唯一，
+            # 就会被错误归属为商品价格（真实案例：影狼悬赏 40 金被绑给 15 金的剑）。
+            # 价格归属比价格准确更重要——绑定失败回落行动自报金额或澄清。
             amount, amount_source = item_bound_amounts[0], AMOUNT_SOURCE_NARRATION
-        elif len(narration_amounts) == 1:
-            amount, amount_source = narration_amounts[0], AMOUNT_SOURCE_NARRATION
         elif len(intent.amount_candidates) == 1:
             amount, amount_source = (
                 intent.amount_candidates[0], AMOUNT_SOURCE_PLAYER_ACTION,
