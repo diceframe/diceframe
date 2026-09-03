@@ -162,6 +162,120 @@ class OpenAICompatibleImageProvider(ImageProvider):
         return body, content_type
 
 
+class MiniMaxImageProvider(ImageProvider):
+    provider_id = "minimax"
+
+    async def generate(self, prompt: str, *, size: str, quality: str = "") -> ProviderImage:
+        try:
+            width_text, height_text = str(size or "").strip().lower().split("x", 1)
+            width, height = int(width_text), int(height_text)
+        except (TypeError, ValueError) as exc:
+            raise ImageProviderError(
+                "MiniMax 图片尺寸必须是 512 到 2048 之间且为 8 的倍数"
+            ) from exc
+        if not all(
+            512 <= value <= 2048 and value % 8 == 0 for value in (width, height)
+        ):
+            raise ImageProviderError(
+                "MiniMax 图片尺寸必须是 512 到 2048 之间且为 8 的倍数"
+            )
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        payload = {
+            "model": self.model,
+            "prompt": prompt[:1500],
+            "n": 1,
+            "width": width,
+            "height": height,
+            "response_format": "base64",
+        }
+        response_payload = await self._post_json(payload, headers)
+        base_response = response_payload.get("base_resp")
+        if isinstance(base_response, dict):
+            status_code = base_response.get("status_code")
+            if status_code not in {None, 0, "0"}:
+                status_message = str(base_response.get("status_msg") or "未知错误")
+                raise ImageProviderError(
+                    f"MiniMax 图像生成失败（{status_code}）：{status_message}"
+                )
+        data = response_payload.get("data")
+        images = data.get("image_base64") if isinstance(data, dict) else None
+        if not isinstance(images, list) or not images:
+            raise ImageProviderError("MiniMax 图像生成响应缺少 data.image_base64")
+        try:
+            body = base64.b64decode(str(images[0]), validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ImageProviderError(
+                "MiniMax 图像生成服务返回了无效的 Base64 图片"
+            ) from exc
+        if not body:
+            raise ImageProviderError("MiniMax 图像生成服务返回了空图片")
+        if len(body) > MAX_IMAGE_BYTES:
+            raise ImageProviderError("生成图片不能超过 20 MB")
+        return ProviderImage(
+            body=body,
+            content_type=_image_content_type(body, "image/jpeg"),
+        )
+
+    async def _post_json(self, payload: dict, headers: dict[str, str]) -> dict:
+        timeout = aiohttp.ClientTimeout(
+            total=self.timeout_seconds,
+            connect=min(15.0, self.timeout_seconds),
+        )
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    _minimax_image_url(self.base_url),
+                    json=payload,
+                    headers=headers,
+                    proxy=self.proxy_url,
+                ) as response:
+                    body = await _read_limited(response, MAX_JSON_RESPONSE_BYTES)
+                    if response.status >= 400:
+                        detail = body.decode("utf-8", "replace")[:1000]
+                        raise ImageProviderError(
+                            f"MiniMax 图像生成服务返回 HTTP {response.status}: {detail or response.reason}"
+                        )
+        except ImageProviderError:
+            raise
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise ImageProviderError(
+                f"无法连接 MiniMax 图像生成服务：{exc}"
+            ) from exc
+        try:
+            result = json.loads(body.decode("utf-8", "replace") or "{}")
+        except ValueError as exc:
+            raise ImageProviderError("MiniMax 图像生成服务返回了无法解析的响应") from exc
+        if not isinstance(result, dict):
+            raise ImageProviderError("MiniMax 图像生成服务返回了非对象响应")
+        return result
+
+
+def create_image_provider(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout_seconds: float,
+    proxy_url: str = "",
+) -> ImageProvider:
+    kwargs = {
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model,
+        "timeout_seconds": timeout_seconds,
+        "proxy_url": proxy_url,
+    }
+    hostname = (urlparse(str(base_url or "").strip()).hostname or "").lower()
+    if (
+        hostname in {"api.minimax.cn", "api.minimaxi.com"}
+        and model == "image-01"
+    ):
+        return MiniMaxImageProvider(**kwargs)
+    return OpenAICompatibleImageProvider(**kwargs)
+
+
 def _openai_image_url(base_url: str) -> str:
     parsed = urlparse(str(base_url or "").strip())
     path = parsed.path.rstrip("/")
@@ -171,6 +285,18 @@ def _openai_image_url(base_url: str) -> str:
         target = path + "/images/generations"
     else:
         target = path + "/v1/images/generations"
+    return urlunparse(parsed._replace(path=target))
+
+
+def _minimax_image_url(base_url: str) -> str:
+    parsed = urlparse(str(base_url or "").strip())
+    path = parsed.path.rstrip("/")
+    if path.endswith("/image_generation"):
+        target = path
+    elif path.endswith("/v1"):
+        target = path + "/image_generation"
+    else:
+        target = path + "/v1/image_generation"
     return urlunparse(parsed._replace(path=target))
 
 

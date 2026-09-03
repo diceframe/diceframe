@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from .assets import ImageAssetError, ImageAssetStore
 from .contracts import IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult
-from .providers import ImageProvider, ImageProviderError, OpenAICompatibleImageProvider
+from .providers import ImageProvider, ImageProviderError, create_image_provider
 
 
 PURPOSE_PROMPT_SUFFIXES = {
@@ -100,7 +100,7 @@ class ImageGenerationService:
             "proxy_url": self.proxy_url,
         }
         if self.provider_id == "openai-compatible":
-            return OpenAICompatibleImageProvider(**kwargs)
+            return create_image_provider(**kwargs)
         raise ImageGenerationError(f"不支持的图像生成 provider：{self.provider_id}")
 
     def _compose_prompt(self, prompt: str, purpose: str, request_style: str) -> str:

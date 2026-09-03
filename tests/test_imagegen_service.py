@@ -19,6 +19,7 @@ from src.imagegen import (
 )
 from src.imagegen.providers import (
     ImageProviderError,
+    MiniMaxImageProvider,
     OpenAICompatibleImageProvider,
     ProviderImage,
 )
@@ -124,6 +125,75 @@ def test_service_bypasses_proxy_for_local_endpoints(tmp_path):
 
     assert local.proxy_url == ""
     assert remote.proxy_url == "http://proxy.example:7890"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api.minimax.cn/v1",
+        "https://api.minimaxi.com/v1",
+    ],
+)
+@pytest.mark.asyncio
+async def test_service_generates_with_minimax_on_official_hosts(
+    tmp_path, base_url, monkeypatch
+):
+    seen = {}
+
+    async def fake_minimax_post(self, payload, headers):
+        seen.update(payload)
+        return {
+            "data": {
+                "image_base64": [base64.b64encode(_png_bytes()).decode("ascii")]
+            },
+            "base_resp": {"status_code": 0, "status_msg": "success"},
+        }
+
+    async def unexpected_openai_post(self, payload, headers):
+        raise AssertionError("official MiniMax hosts must use the native adapter")
+
+    monkeypatch.setattr(MiniMaxImageProvider, "_post_json", fake_minimax_post)
+    monkeypatch.setattr(OpenAICompatibleImageProvider, "_post_json", unexpected_openai_post)
+    service = ImageGenerationService(
+        _config(imagegen_base_url=base_url, imagegen_model="image-01"),
+        tmp_path,
+    )
+    result = await service.generate(
+        ImageGenerationRequest(prompt="harbor", purpose="avatar")
+    )
+
+    assert service.assets.file(result.asset_id).is_file()
+    assert seen["model"] == "image-01"
+    assert seen["response_format"] == "base64"
+
+
+@pytest.mark.asyncio
+async def test_service_preserves_openai_adapter_for_other_hosts(tmp_path, monkeypatch):
+    async def fake_openai_post(self, payload, headers):
+        return {
+            "data": [
+                {
+                    "b64_json": base64.b64encode(_png_bytes()).decode("ascii"),
+                    "revised_prompt": "openai-compatible result",
+                }
+            ]
+        }
+
+    async def unexpected_minimax_post(self, payload, headers):
+        raise AssertionError("third-party hosts must keep the OpenAI adapter")
+
+    monkeypatch.setattr(OpenAICompatibleImageProvider, "_post_json", fake_openai_post)
+    monkeypatch.setattr(MiniMaxImageProvider, "_post_json", unexpected_minimax_post)
+    service = ImageGenerationService(
+        _config(
+            imagegen_base_url="https://images.example/v1",
+            imagegen_model="image-01",
+        ),
+        tmp_path,
+    )
+    result = await service.generate(ImageGenerationRequest(prompt="harbor"))
+
+    assert result.revised_prompt == "openai-compatible result"
 
 
 @pytest.mark.parametrize(
@@ -258,6 +328,123 @@ async def test_openai_provider_accepts_url_results(monkeypatch):
     result = await provider.generate("harbor", size="1024x1024")
     assert result.content_type == "image/png"
     assert downloaded[0][0] == "https://cdn.example/result.png"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("base_path", ["/v1", "/v1/image_generation"])
+async def test_minimax_provider_uses_native_request_and_base64_response(base_path):
+    seen = {}
+    jpeg = b"\xff\xd8\xff" + b"generated-image"
+
+    async def image_handler(request):
+        seen["path"] = request.path
+        seen["authorization"] = request.headers.get("Authorization")
+        seen["payload"] = await request.json()
+        return web.json_response(
+            {
+                "data": {
+                    "image_base64": [base64.b64encode(jpeg).decode("ascii")]
+                },
+                "metadata": {"failed_count": "0", "success_count": "1"},
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/v1/image_generation", image_handler)
+    async with TestServer(app) as server:
+        provider = MiniMaxImageProvider(
+            base_url=str(server.make_url(base_path)),
+            api_key="secret",
+            model="image-01",
+            timeout_seconds=30,
+        )
+        result = await provider.generate("harbor", size="1024x768", quality="high")
+
+    assert result.body == jpeg
+    assert result.content_type == "image/jpeg"
+    assert seen == {
+        "path": "/v1/image_generation",
+        "authorization": "Bearer secret",
+        "payload": {
+            "model": "image-01",
+            "prompt": "harbor",
+            "n": 1,
+            "width": 1024,
+            "height": 768,
+            "response_format": "base64",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_minimax_provider_surfaces_http_200_business_error(monkeypatch):
+    provider = MiniMaxImageProvider(
+        base_url="https://api.minimax.cn/v1",
+        api_key="secret",
+        model="image-01",
+        timeout_seconds=30,
+    )
+
+    async def fake_post(payload, headers):
+        return {
+            "data": {},
+            "base_resp": {"status_code": 1008, "status_msg": "insufficient balance"},
+        }
+
+    monkeypatch.setattr(provider, "_post_json", fake_post)
+
+    with pytest.raises(ImageProviderError, match="1008.*insufficient balance"):
+        await provider.generate("harbor", size="1024x1024")
+
+
+@pytest.mark.asyncio
+async def test_minimax_provider_limits_prompt_to_documented_length(monkeypatch):
+    provider = MiniMaxImageProvider(
+        base_url="https://api.minimax.cn/v1",
+        api_key="secret",
+        model="image-01",
+        timeout_seconds=30,
+    )
+    seen = {}
+
+    async def fake_post(payload, headers):
+        seen.update(payload)
+        return {
+            "data": {
+                "image_base64": [
+                    base64.b64encode(b"\xff\xd8\xffimage").decode("ascii")
+                ]
+            },
+            "base_resp": {"status_code": 0, "status_msg": "success"},
+        }
+
+    monkeypatch.setattr(provider, "_post_json", fake_post)
+    await provider.generate("x" * 1501, size="1024x1024")
+
+    assert seen["prompt"] == "x" * 1500
+
+
+@pytest.mark.parametrize(
+    "size",
+    ["invalid", "511x1024", "1025x1024", "2048x2056"],
+)
+@pytest.mark.asyncio
+async def test_minimax_provider_rejects_unsupported_dimensions(size, monkeypatch):
+    provider = MiniMaxImageProvider(
+        base_url="https://api.minimax.cn/v1",
+        api_key="secret",
+        model="image-01",
+        timeout_seconds=30,
+    )
+
+    async def unexpected_post(payload, headers):
+        raise AssertionError("invalid dimensions must be rejected before the request")
+
+    monkeypatch.setattr(provider, "_post_json", unexpected_post)
+
+    with pytest.raises(ImageProviderError, match="512.*2048.*8"):
+        await provider.generate("harbor", size=size)
 
 
 @pytest.mark.asyncio
