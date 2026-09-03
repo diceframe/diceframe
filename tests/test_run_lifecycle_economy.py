@@ -175,6 +175,34 @@ def test_purchase_loot_is_kept_when_proposal_exists() -> None:
 
 
 def test_explicit_purchase_with_omitted_pay_tag_becomes_pending_proposal() -> None:
+    """商品与价格同句：缺 PAY 也合成待确认提案。"""
+
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "买下硬皮甲"}]
+    data = {
+        "state_update": {
+            "players": {"gm": {"equip_gain": "硬皮甲"}},
+        },
+    }
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data, "霍根把硬皮甲递给你，硬皮甲二十五枚金币，钱货两讫。"
+    )
+    assert dropped == 0
+    assert ambiguous is False
+    proposal = data["state_update"]["economy_proposals"][0]
+    assert proposal["kind"] == "purchase"
+    assert proposal["amount"] == 25
+    assert proposal["amount_source"] == "narration"
+    assert proposal["items"] == ["硬皮甲"]
+
+
+def test_purchase_price_in_separate_sentence_clarifies() -> None:
+    """商品与价格不同句且行动无金额：价格归属不成立 → 澄清而非猜测。
+
+    真实案例：叙事"数出二十五枚金币"+"授予硬皮甲"分处两句，全局唯一金额
+    曾被错误绑给商品（25），而相邻轮次的任务悬赏（40金）也会被同样误绑。
+    """
+
     instance = _instance()
     instance.action_queue = [{"user_id": "gm", "text": "买下硬皮甲"}]
     data = {
@@ -185,12 +213,11 @@ def test_explicit_purchase_with_omitted_pay_tag_becomes_pending_proposal() -> No
     dropped, ambiguous = repair_unbacked_purchase(
         instance, data, "你从钱袋里数出二十五枚金币，放在柜台上。"
     )
-    assert dropped == 0
-    assert ambiguous is False
-    proposal = data["state_update"]["economy_proposals"][0]
-    assert proposal["kind"] == "purchase"
-    assert proposal["amount"] == 25
-    assert proposal["items"] == ["硬皮甲"]
+    assert (dropped, ambiguous) == (1, True)
+    assert not data["state_update"].get("economy_proposals")
+    clarification = instance.economy["clarifications"][0]
+    assert clarification["reason"] == "AMBIGUOUS_PRICE"
+    assert 25 in clarification["amount_candidates"]
 
 
 def test_repaired_purchase_consumes_bound_grant_for_single_delivery() -> None:
@@ -278,11 +305,11 @@ def test_purchase_guard_uses_ruleset_currency_labels() -> None:
         "柜台收取三枚灵石。",
         currency_labels=("spirit_shard", "灵石"),
     )
-    assert dropped == 0
-    assert ambiguous is False
-    proposal = data["state_update"]["economy_proposals"][0]
-    assert proposal["amount"] == 3
-    assert proposal["items"] == ["通行证"]
+    # 跨句 + 无行动金额：澄清的价格候选证明灵石被当作货币解析。
+    assert (dropped, ambiguous) == (1, True)
+    clarification = instance.economy["clarifications"][0]
+    assert clarification["amount_candidates"] == [3]
+    assert not data["state_update"].get("economy_proposals")
 
 
 def test_purchase_quote_can_be_confirmed_on_next_turn() -> None:
@@ -506,6 +533,24 @@ def test_player_action_price_synthesizes_pending_proposal() -> None:
 
 
 def test_narration_price_outranks_action_price() -> None:
+    """商家叙事价（点名商品）优先于玩家自报价。"""
+
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "掏20金币买下精钢剑"}]
+    data = {"state_update": {"loot": [{"player": "gm", "item": "矮人精钢剑"}]}}
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data, "霍根咧嘴：“矮人精钢剑三十金币。”你把钱放下了。",
+    )
+    assert (dropped, ambiguous) == (0, False)
+    proposal = data["state_update"]["economy_proposals"][0]
+    assert proposal["amount"] == 30
+    assert proposal["amount_source"] == "narration"
+
+
+def test_pronoun_price_falls_back_to_player_action() -> None:
+    """叙事用代词指代商品（"这剑三十金币"）时无法按句绑定：
+    回落玩家行动自报金额并经其确认，而不是把无关数字绑给商品。"""
+
     instance = _instance()
     instance.action_queue = [{"user_id": "gm", "text": "掏20金币买下精钢剑"}]
     data = {"state_update": {"loot": [{"player": "gm", "item": "矮人精钢剑"}]}}
@@ -514,8 +559,8 @@ def test_narration_price_outranks_action_price() -> None:
     )
     assert (dropped, ambiguous) == (0, False)
     proposal = data["state_update"]["economy_proposals"][0]
-    assert proposal["amount"] == 30
-    assert proposal["amount_source"] == "narration"
+    assert proposal["amount"] == 20
+    assert proposal["amount_source"] == "player_action"
 
 
 def test_merchant_offer_price_is_authoritative_when_it_matches() -> None:
@@ -2786,3 +2831,89 @@ def test_unknown_language_falls_back_to_union() -> None:
     assert (dropped, ambiguous) == (0, False)
     proposal = data["state_update"]["economy_proposals"][0]
     assert proposal["amount"] == 30
+
+
+def test_bounty_amount_not_attributed_to_purchase() -> None:
+    """round-5 真实案例回归：叙事里无关的任务悬赏（40金）不得绑给商品。
+
+    双人同轮各自购买（行动自带正确价格 15/20），叙事唯一金额是悬赏 40 金——
+    全局唯一叙事金额曾把 40 绑给两件商品；删除该层级后应回落行动自报金额。
+    """
+
+    instance = _instance()
+    instance.action_queue = [
+        {"user_id": "gm", "text": "确认购买精钢长剑（15金）"},
+        {"user_id": "p2", "text": "确认购买硬皮甲（20金）"},
+    ]
+    data = {"state_update": {"loot": [
+        {"player": "gm", "item": "精钢长剑"},
+        {"player": "p2", "item": "硬皮甲"},
+    ]}}
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data,
+        "艾琳将精钢长剑推到尤落面前，又将硬皮甲叠好递给小林。"
+        "矿道那单影狼的悬赏，公会现在提价到40金，视完成情况还有追加。",
+    )
+    assert (dropped, ambiguous) == (0, False)
+    proposals = data["state_update"]["economy_proposals"]
+    by_payer = {p["uid"]: p for p in proposals}
+    assert by_payer["gm"]["amount"] == 15
+    assert by_payer["gm"]["amount_source"] == "player_action"
+    assert by_payer["p2"]["amount"] == 20
+    assert by_payer["p2"]["amount_source"] == "player_action"
+
+
+def test_reward_noise_not_attributed_to_purchase() -> None:
+    """叙事里的任务奖励（500金）不得成为购买药水的价格。"""
+
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "买治疗药水（5金）"}]
+    data = {"state_update": {"loot": [{"player": "gm", "item": "治疗药水"}]}}
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data,
+        "你完成了任务，获得500金币奖励。掌柜把治疗药水递给你，药水5金。",
+    )
+    assert (dropped, ambiguous) == (0, False)
+    proposal = data["state_update"]["economy_proposals"][0]
+    assert proposal["amount"] == 5
+    assert proposal["amount_source"] == "narration"
+
+
+def test_question_actions_do_not_create_intents() -> None:
+    """询价/疑问行动不产生购买意图，也不产生澄清噪音。"""
+
+    instance = _instance()
+    instance.action_queue = [
+        {"user_id": "gm", "text": "还有其他买的吗我们一起看看"},
+    ]
+    data = {"state_update": {"loot": [{"player": "gm", "item": "通行证"}]}}
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data, "城门卫兵说通行证需要支付5金币。",
+    )
+    # 疑问行动无意图：repair 层不产出提案/澄清。
+    assert (dropped, ambiguous) == (0, False)
+    assert not data["state_update"].get("economy_proposals")
+    # round 管线后续由 discard 层接管：有价叙事 + 无提案 → 掉落 + 无主澄清。
+    dropped_by_discard = discard_unbacked_purchase_items(
+        instance, data, "城门卫兵说通行证需要支付5金币。",
+    )
+    assert dropped_by_discard == 1
+    assert data["state_update"]["loot"] == []
+    clarification = instance.economy["clarifications"][0]
+    assert clarification["reason"] == "MISSING_SELLER_PRICE_CONFIRMATION"
+    # 玩家只是询价：澄清不归属到任何 payer（无购买承诺）。
+    assert clarification["payer_uid"] == ""
+
+
+def test_intent_question_filter_keeps_real_intent() -> None:
+    """过滤只针对疑问句："我要买这个"等陈述句不受影响。"""
+
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "我要买这个"}]
+    data = {"state_update": {"loot": [{"player": "gm", "item": "硬皮甲"}]}}
+    dropped, ambiguous = repair_unbacked_purchase(
+        instance, data, "掌柜把硬皮甲递给你，硬皮甲二十枚金币。",
+    )
+    assert (dropped, ambiguous) == (0, False)
+    proposal = data["state_update"]["economy_proposals"][0]
+    assert proposal["amount"] == 20

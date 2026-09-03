@@ -175,6 +175,14 @@ def item_context_from_action(
     return re.sub(r"^[\s，,。.、：:；;'-]+|[\s，,。.、：:；;'-]+$", "", cleaned)
 
 
+_INTENT_QUESTION_RE = re.compile(
+    r"(?:[买购付][^。！？\n]{0,6}(?:吗|呢))"
+    r"|(?:多少钱|多少金币|多少灵石)"
+    r"|(?:可以买了吗|买的话)",
+    re.IGNORECASE,
+)
+
+
 def parse_purchase_intents(
     action_records: Iterable[Any],
     players: Any,
@@ -184,7 +192,8 @@ def parse_purchase_intents(
     """Parse each player's own action into one purchase intent.
 
     每个 actor 独立解析：意图只来自玩家自己的行动文本，AI 输出不参与。
-    没有购买动词的行动不产生意图。
+    疑问/询价句（"还有其他买的吗""可以买了吗""多少钱"）不产生意图——
+    询问价格不是购买承诺；"我要买这个"等陈述句不受影响。
     """
 
     from src.engine.intent.models import PurchaseIntent
@@ -198,13 +207,26 @@ def parse_purchase_intents(
         text = str(action.get("text") or "")
         if not actor_uid or actor_uid not in players:
             continue
-        if not intent_pattern.search(text):
+        verb_sentences = [
+            sentence
+            for sentence in re.split(r"[。！？.!?]+", text)
+            if intent_pattern.search(sentence)
+        ]
+        if not verb_sentences:
             continue
-        amounts = currency_amounts(language, text, extra_labels)
+        # 疑问句过滤：购买动词所在句是询价/疑问时不产生意图。
+        verb_sentences = [
+            sentence for sentence in verb_sentences
+            if not _INTENT_QUESTION_RE.search(sentence)
+        ]
+        if not verb_sentences:
+            continue
+        evidence_text = "。".join(verb_sentences)
+        amounts = currency_amounts(language, evidence_text, extra_labels)
         intents.append(PurchaseIntent(
             actor_uid=actor_uid,
             action_text=text,
-            item_context=item_context_from_action(language, text, extra_labels),
+            item_context=item_context_from_action(language, evidence_text, extra_labels),
             amount_candidates=tuple(sorted(set(amounts))),
         ))
     return intents
