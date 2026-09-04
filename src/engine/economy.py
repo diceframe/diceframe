@@ -594,10 +594,6 @@ def queue_proposal(
     rewards: list[dict[str, Any]] | None = None,
     contributors: list[dict[str, Any]] | None = None,
     visibility: str = "private",
-    order_id: str = "",
-    request_id: str = "",
-    delivery_mode: str = "immediate",
-    delivery_condition: str = "",
 ) -> dict[str, Any]:
     """Queue one idempotent proposal; no balance is changed here."""
 
@@ -608,17 +604,13 @@ def queue_proposal(
         raise ValueError("unsupported economy proposal kind")
     if approval_policy not in APPROVAL_POLICIES:
         raise ValueError("unsupported economy approval policy")
+    if kind in PAYER_ECONOMY_KINDS and approval_policy not in {"payer", "all_contributors"}:
+        raise ValueError("chargeable economy proposals require payer approval")
     payer_uid = str(payer_uid)
     if payer_uid and kind in PAYER_ECONOMY_KINDS and payer_uid not in instance.players:
         # Fail closed at the proposal layer: a payer outside the current game
         # can never be settled, so the offer must not become pending.
         raise ValueError("economy payer is not part of the current game")
-    if kind in PAYER_ECONOMY_KINDS and str(source) not in {"gm_manual", "purchase_order"}:
-        raise ValueError("chargeable economy proposals require an explicit GM order")
-    if kind == "purchase" and not str(order_id or ""):
-        raise ValueError("purchase proposals require an explicit order")
-    if str(delivery_mode or "immediate") not in {"immediate", "deferred"}:
-        raise ValueError("unsupported purchase delivery mode")
     normalized_contributors = deepcopy(list(contributors or []))
     if approval_policy == "all_contributors":
         contributor_uids = [
@@ -656,12 +648,6 @@ def queue_proposal(
         "reason": str(reason or "经济提案")[:240],
         "source": str(source),
         "source_ref": str(source_ref),
-        # Purchase-order linkage is explicit server state.  Empty values keep
-        # legacy reward/payment proposals byte-compatible.
-        "order_id": str(order_id or ""),
-        "request_id": str(request_id or ""),
-        "delivery_mode": str(delivery_mode or "immediate"),
-        "delivery_condition": str(delivery_condition or "")[:240],
         "approval_policy": str(approval_policy),
         "rewards": deepcopy(list(rewards or [])),
         "contributors": normalized_contributors,
@@ -676,6 +662,106 @@ def queue_proposal(
     if source_ref:
         economy.setdefault("idempotency_records", {})[source_ref] = proposal["id"]
     return proposal
+
+
+PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer"})
+
+
+def queue_purchase_offer(
+    instance: Any,
+    *,
+    payer_uid: str,
+    amount: int,
+    items: list[str],
+    reason: str = "",
+    source: str = "table_offer",
+    source_ref: str = "",
+) -> dict[str, Any]:
+    """Create one pending purchase charge that only the payer may confirm.
+
+    This is the sole entry point for chargeable purchase proposals. `source`
+    records provenance for audit and never alters behavior.
+    """
+    if str(source) not in PURCHASE_OFFER_SOURCES:
+        raise ValueError("unsupported purchase offer source")
+    from src.commands.state_items import normalized_reward_entries
+
+    rewards = normalized_reward_entries(items, {})
+    if not rewards:
+        raise ValueError("purchase offer requires at least one item")
+    return queue_proposal(
+        instance,
+        kind="purchase",
+        amount=amount,
+        payer_uid=payer_uid,
+        recipient_uid=payer_uid,
+        reason=reason,
+        source=source,
+        source_ref=source_ref,
+        approval_policy="payer",
+        rewards=rewards,
+    )
+
+
+def filter_unconfirmed_purchase_grants(instance: Any, data: dict[str, Any]) -> int:
+    """Strip model grants for items that are part of an unconfirmed charge.
+
+    A pending chargeable proposal owns its reward items until the payer
+    confirms.  Model-emitted grants whose names match a pending purchase
+    proposal's rewards are removed so the item cannot bypass the payment.
+    Other loot and rewards continue through the normal narrative pipeline.
+    """
+
+    state_update = data.get("state_update")
+    if not isinstance(state_update, dict):
+        return 0
+    pending_items: dict[str, set[str]] = {}
+    for proposal in instance.economy.get("proposals", []):
+        if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+            continue
+        if str(proposal.get("kind") or "") not in PAYER_ECONOMY_KINDS:
+            continue
+        uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        for reward in proposal.get("rewards") or []:
+            name = (
+                str(reward.get("name") or "").strip().casefold()
+                if isinstance(reward, dict) else str(reward).strip().casefold()
+            )
+            if uid and name:
+                pending_items.setdefault(uid, set()).add(name)
+
+    def blocked(uid: str, item: str) -> bool:
+        key = str(item or "").strip().casefold()
+        if not uid or not key:
+            return False
+        return any(
+            name and (name in key or key in name)
+            for name in pending_items.get(uid, set())
+        )
+
+    removed = 0
+    players = state_update.get("players")
+    if isinstance(players, dict):
+        for uid, update in players.items():
+            if not isinstance(update, dict):
+                continue
+            for field in ("equip_gain", "weapon_change"):
+                value = str(update.get(field) or "").strip()
+                if value and blocked(str(uid), value):
+                    update.pop(field, None)
+                    removed += 1
+    loot = state_update.get("loot")
+    if isinstance(loot, list):
+        kept = []
+        for entry in loot:
+            uid = str(entry.get("player") or "") if isinstance(entry, dict) else ""
+            item = str(entry.get("item") or "") if isinstance(entry, dict) else ""
+            if blocked(uid, item):
+                removed += 1
+                continue
+            kept.append(entry)
+        state_update["loot"] = kept
+    return removed
 
 
 def resolve_proposal(
@@ -738,13 +824,6 @@ def resolve_proposal(
             instance, proposal, status=str(proposal["status"]), actor_uid=actor_uid,
         )
         _settle_effect_group(instance, proposal)
-        # A rejected/declined order leaves the original player request
-        # actionable so the GM can correct the item or price without losing it.
-        if proposal.get("order_id"):
-            from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
-
-            sync_purchase_order_status(instance, proposal)
-            reopen_purchase_order_request(instance, proposal)
         return {
             "ok": True,
             "accepted": False,
@@ -792,11 +871,6 @@ def resolve_proposal(
                     instance, proposal, status="rejected", actor_uid=actor_uid,
                 )
                 _settle_effect_group(instance, proposal)
-                if proposal.get("order_id"):
-                    from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
-
-                    sync_purchase_order_status(instance, proposal)
-                    reopen_purchase_order_request(instance, proposal)
                 return {
                     "ok": False,
                     "code": "INSUFFICIENT_FUNDS",
@@ -840,11 +914,6 @@ def resolve_proposal(
                 instance, proposal, status="rejected", actor_uid=actor_uid,
             )
             _settle_effect_group(instance, proposal)
-            if proposal.get("order_id"):
-                from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
-
-                sync_purchase_order_status(instance, proposal)
-                reopen_purchase_order_request(instance, proposal)
             return {
                 "ok": False,
                 "code": "INSUFFICIENT_FUNDS",
@@ -881,8 +950,7 @@ def resolve_proposal(
                 "before": None,
                 "after": None,
             })
-        delivery_mode = str(proposal.get("delivery_mode") or "immediate")
-        if rewards and grant_reward and delivery_mode != "deferred":
+        if rewards and grant_reward:
             recipient = instance.get_character_sheet(recipient_uid)
             reward_snapshots.append({
                 "recipient_uid": recipient_uid,
@@ -934,22 +1002,11 @@ def resolve_proposal(
     }
     if reward_snapshots:
         transaction["reward_snapshots"] = reward_snapshots
-    if proposal.get("order_id"):
-        transaction["order_id"] = str(proposal.get("order_id") or "")
-        transaction["delivery_mode"] = str(proposal.get("delivery_mode") or "immediate")
-        transaction["delivery_status"] = (
-            "paid" if str(proposal.get("delivery_mode") or "immediate") == "deferred"
-            else "delivered"
-        )
     instance.economy.setdefault("transactions", []).append(transaction)
     _advance_revision(instance)
     outcome = _record_outcome(
         instance, proposal, status="committed", actor_uid=actor_uid,
     )
-    if proposal.get("order_id"):
-        from src.engine.purchase_orders import sync_purchase_order_status
-
-        sync_purchase_order_status(instance, proposal)
     effect_group = _settle_effect_group(instance, proposal)
     return {
         "ok": True,

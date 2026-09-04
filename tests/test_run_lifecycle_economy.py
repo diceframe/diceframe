@@ -55,8 +55,7 @@ def test_only_plain_personal_purchase_is_nonblocking() -> None:
     purchase = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid="gm",
         recipient_uid="gm",
         amount=5,
@@ -165,7 +164,7 @@ def test_proposal_status_transitions_are_whitelisted() -> None:
 def test_queue_proposal_rejects_payer_outside_game() -> None:
     instance = _instance()
     with pytest.raises(ValueError):
-        queue_proposal(instance, order_id="order_test", source="gm_manual", kind="purchase", payer_uid="ghost", amount=5)
+        queue_proposal(instance, source="gm_manual", kind="purchase", payer_uid="ghost", amount=5)
     with pytest.raises(ValueError):
         queue_proposal(instance, source="gm_manual", kind="transfer", payer_uid="ghost", amount=5)
     # 奖励类提案没有付款人；收款人资格在结算时校验。
@@ -180,8 +179,7 @@ def test_personal_purchase_with_effect_group_remains_blocking() -> None:
     purchase = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid="gm",
         recipient_uid="gm",
         amount=5,
@@ -253,8 +251,7 @@ def test_late_personal_purchase_reopens_when_settlement_round_is_rolled_back() -
     purchase = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid="gm",
         recipient_uid="gm",
         amount=5,
@@ -316,8 +313,7 @@ def test_origin_round_rollback_invalidates_purchase_paid_in_later_round() -> Non
     purchase = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid="gm",
         recipient_uid="gm",
         amount=5,
@@ -353,8 +349,7 @@ async def test_gm_rollback_restores_late_purchase_character_and_ledger_consisten
     purchase = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid="gm",
         recipient_uid="gm",
         amount=5,
@@ -423,8 +418,7 @@ async def test_real_swipe_reconciles_purchase_settled_after_target_round(
     proposal = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=5,
@@ -508,8 +502,7 @@ async def test_origin_round_swipe_does_not_project_later_settlement_before_state
     proposal = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=5,
@@ -604,11 +597,11 @@ async def test_rollback_reconciles_multiple_late_settlements_in_reverse_commit_o
     uid = "gm"
     instance.round_number = 6
     first = queue_proposal(
-        instance, kind="purchase", payer_uid=uid, recipient_uid=uid, amount=5, order_id="order_test", source="gm_manual",
+        instance, kind="purchase", payer_uid=uid, recipient_uid=uid, amount=5, source="gm_manual",
         rewards=[{"name": "药水", "category": "consumable"}],
     )
     second = queue_proposal(
-        instance, kind="purchase", payer_uid=uid, recipient_uid=uid, amount=5, order_id="order_test", source="gm_manual",
+        instance, kind="purchase", payer_uid=uid, recipient_uid=uid, amount=5, source="gm_manual",
         rewards=[{"name": "绳索", "category": "misc"}],
     )
     instance.round_number = 7
@@ -956,8 +949,7 @@ async def test_payment_decision_commits_or_discards_linked_effects(web_api) -> N
     accepted = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=5,
@@ -1052,8 +1044,7 @@ async def test_effect_failure_rolls_back_the_whole_economy_decision(
     proposal = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=5,
@@ -1124,8 +1115,7 @@ async def test_economy_scene_image_starts_only_after_authoritative_save(
     proposal = queue_proposal(
         instance,
         kind="purchase",
-        order_id="order_test",
-        source="gm_manual",
+                source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=4,
@@ -1371,8 +1361,7 @@ async def test_delivered_economy_memory_is_reversed_with_round(
         proposal = queue_proposal(
             instance,
             kind="purchase",
-            order_id="order_test",
-            source="gm_manual",
+                        source="gm_manual",
             payer_uid=uid,
             recipient_uid=uid,
             amount=3,

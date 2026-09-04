@@ -5,7 +5,7 @@ import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, Ma
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, hasAccessToken, isNotFoundError } from '@/api/client'
 import { currentBackendUrl, isStandaloneFrontend } from '@/api/connection'
-import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, RulesetDirectorProposal, RulesetGameplayView, WorldCandidate, WorldListResponse, WorldTemplatesResponse, PurchaseOrder } from '@/api/types'
+import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, RulesetDirectorProposal, RulesetGameplayView, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { queryString } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { useGame } from '@/composables/useGame'
@@ -83,16 +83,6 @@ const paymentRecipientUid = ref('')
 const paymentAmount = ref(1)
 const paymentReason = ref('')
 const paymentItems = ref('')
-const paymentRequestId = ref('')
-const paymentDeliveryMode = ref<'immediate' | 'deferred'>('immediate')
-const paymentDeliveryCondition = ref('')
-watch(paymentRequestId, (requestId) => {
-  if (!requestId) return
-  const request = (game.detail.value?.purchase_requests || []).find(item => item.id === requestId)
-  if (!request) return
-  paymentPayerUid.value = request.actor_uid
-  if (!paymentItems.value.trim() && request.item_hint) paymentItems.value = request.item_hint
-})
 const paymentBusy = ref(false)
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem('play_sidebar_collapsed', sidebarCollapsed.value ? '1' : '0') }
 const railCollapsed = ref(false)
@@ -122,17 +112,13 @@ function refreshMapAfterBackground() {
   void game.refresh(true)
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('operationFailed')) }
-function openPaymentComposer(requestId = '') {
+function openPaymentComposer() {
   const first = game.players.value[0]?.user_id || ''
   paymentPayerUid.value = first
   paymentRecipientUid.value = first
   paymentAmount.value = 1
   paymentReason.value = ''
   paymentItems.value = ''
-  const firstRequest = requestId || (game.detail.value?.purchase_requests || [])[0]?.id || ''
-  paymentRequestId.value = firstRequest
-  paymentDeliveryMode.value = 'immediate'
-  paymentDeliveryCondition.value = ''
   showPaymentComposer.value = true
 }
 async function createPaymentProposal() {
@@ -147,9 +133,6 @@ async function createPaymentProposal() {
         amount: Math.trunc(paymentAmount.value),
         reason: paymentReason.value.trim(),
         items: paymentItems.value.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean),
-        request_id: paymentRequestId.value || undefined,
-        delivery_mode: paymentDeliveryMode.value,
-        delivery_condition: paymentDeliveryCondition.value.trim(),
       }),
     })
     showPaymentComposer.value = false
@@ -694,26 +677,6 @@ const actionableEconomyProposals = computed(() => economyProposalList.value.filt
   )
 )))
 const pendingEconomyCount = computed(() => actionableEconomyProposals.value.length)
-const deferredPurchaseOrders = computed(() => (
-  (game.detail.value?.purchase_orders || []) as PurchaseOrder[]
-).filter(order => order.status === 'paid'))
-const openPurchaseRequests = computed(() => (
-  (game.detail.value?.purchase_requests || [])
-).filter(request => request.status === 'open'))
-const deliveryBusyId = ref('')
-async function deliverPurchaseOrder(order: PurchaseOrder) {
-  if (!game.currentGame.value || !order.id) return
-  deliveryBusyId.value = order.id
-  try {
-    await api(`/games/${encodeURIComponent(game.currentGame.value)}/purchase-orders/${encodeURIComponent(order.id)}/deliver`, { method: 'POST', body: '{}' })
-    await game.refresh(true)
-    toast.success('订单已交付')
-  } catch (e: unknown) {
-    toast.error(errorMessage(e))
-  } finally {
-    deliveryBusyId.value = ''
-  }
-}
 
 watch(actionableEconomyProposals, (list) => {
   const activeIds = new Set(list.map(item => String(item.id || item.payment_id || '')).filter(Boolean))
@@ -1155,29 +1118,6 @@ onBeforeUnmount(() => {
           @reject="resolvePay(false)"
           @confirm="resolvePay(true)"
         />
-        <section v-if="game.isGm.value && openPurchaseRequests.length" class="economy-purchase-requests notice" aria-live="polite">
-          <strong>有 {{ openPurchaseRequests.length }} 个购买请求待处理</strong>
-          <span>请在 GM 控制台填写实际价格和商品；系统不会从叙事中的数字自动扣款。</span>
-          <button type="button" @click="openPaymentComposer(openPurchaseRequests[0].id)">处理购买请求</button>
-        </section>
-        <section
-          v-else-if="!game.isGm.value && openPurchaseRequests.some(request => request.actor_uid === actorId)"
-          class="economy-purchase-requests notice"
-          aria-live="polite"
-        >
-          <strong>购买请求已记录</strong>
-          <span>等待 GM 确认价格和商品。确认订单后，你会看到付款确认按钮；现在不会扣款，也不会先发物品。</span>
-        </section>
-        <section v-if="game.isGm.value && deferredPurchaseOrders.length" class="economy-deferred-orders">
-          <h3>待交付订单</h3>
-          <article v-for="order in deferredPurchaseOrders" :key="order.id" class="economy-deferred-order">
-            <span>{{ economyPlayerName(order.payer_uid) }} · {{ order.items.join('、') }} · {{ order.amount }} {{ economyCurrencyName }}</span>
-            <small v-if="order.delivery_condition">{{ order.delivery_condition }}</small>
-            <button type="button" :disabled="deliveryBusyId === order.id" @click="deliverPurchaseOrder(order)">
-              {{ deliveryBusyId === order.id ? t('saving') : '交付' }}
-            </button>
-          </article>
-        </section>
 
         <div v-if="tableNotice" class="table-notice notice">{{ tableNotice }}</div>
         <p v-if="tokenBudgetHint" class="token-budget-hint" aria-live="polite">{{ tokenBudgetHint }}</p>
@@ -1348,26 +1288,6 @@ onBeforeUnmount(() => {
         <label>
           <span>{{ t('paymentItems') }}</span>
           <input v-model="paymentItems" :placeholder="t('paymentItemsPlaceholder')">
-        </label>
-        <label>
-          <span>购买请求（可选）</span>
-          <select v-model="paymentRequestId">
-            <option value="">不关联请求</option>
-            <option v-for="request in (game.detail.value?.purchase_requests || [])" :key="request.id" :value="request.id">
-              {{ economyPlayerName(request.actor_uid) }} · {{ request.item_hint || request.action_text || request.id }}
-            </option>
-          </select>
-        </label>
-        <label v-if="paymentItems">
-          <span>交付方式</span>
-          <select v-model="paymentDeliveryMode">
-            <option value="immediate">立即交付</option>
-            <option value="deferred">付款后稍后交付</option>
-          </select>
-        </label>
-        <label v-if="paymentDeliveryMode === 'deferred'">
-          <span>交付条件（可选）</span>
-          <input v-model="paymentDeliveryCondition" placeholder="例如：铁匠明天打好后交付">
         </label>
         <p class="muted">{{ t('paymentProposalHelp') }}</p>
       </div>

@@ -20,7 +20,7 @@ from src.commands.economy_effects import (
     unbacked_purchase_notice,
     unearned_reward_notice,
 )
-from src.engine.purchase_orders import filter_unordered_purchase_grants
+from src.engine.economy import filter_unconfirmed_purchase_grants
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.tag_parser import (
     parse_tag_state,
@@ -326,7 +326,7 @@ class GameLifecycle:
             narration, start_data, instance.language,
             currency_labels=currency_labels,
         )
-        dropped_purchase_items = filter_unordered_purchase_grants(instance, start_data)
+        dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, start_data)
         if dropped_purchase_items:
             narration = f"{narration}\n\n{unbacked_purchase_notice(instance.language)}".strip()
         deferred_effects = (

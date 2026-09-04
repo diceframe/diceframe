@@ -17,7 +17,7 @@ from src.compat.dnd2024_adventure_bindings import apply_unreleased_adventure_bin
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 6
+CURRENT_INSTANCE_SCHEMA_VERSION = 7
 
 
 def _legacy_run_id(payload: Mapping[str, Any]) -> str:
@@ -128,6 +128,21 @@ def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
+    """Collapse the purchase order/request pair into payer-confirmed proposals.
+
+    Open purchase requests and pending orders are preview-build scratch state;
+    they are dropped rather than guessed into proposals.  Authoritative
+    balances, items and the transaction ledger are untouched.
+    """
+    economy = payload.get("economy")
+    if isinstance(economy, dict):
+        economy.pop("purchase_requests", None)
+        economy.pop("purchase_orders", None)
+    payload["instance_schema_version"] = 7
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -150,6 +165,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 5:
         payload = _migrate_v5_to_v6(payload)
         version = 6
+    if version == 6:
+        payload = _migrate_v6_to_v7(payload)
+        version = 7
     payload["instance_schema_version"] = version
     return payload
 
@@ -189,8 +207,6 @@ def rebind_imported_game_state_payload(
             "effect_groups",
             "external_effects_outbox",
             "outcomes",
-            "purchase_requests",
-            "purchase_orders",
         ):
             for item in economy.get(collection_name, []) or []:
                 if isinstance(item, dict):

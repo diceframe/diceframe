@@ -17,7 +17,7 @@ from src.commands.economy_effects import (
     unearned_reward_notice,
     unbacked_purchase_notice,
 )
-from src.engine.purchase_orders import filter_unordered_purchase_grants
+from src.engine.economy import filter_unconfirmed_purchase_grants
 from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier, discard_unresolved_player_damage
@@ -190,7 +190,7 @@ class SwipeGenerator:
         )
         if dropped_rewards:
             narration = f"{narration}\n\n{unearned_reward_notice(instance.language)}".strip()
-        dropped_purchase_items = filter_unordered_purchase_grants(instance, data)
+        dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
         if dropped_purchase_items:
             narration = f"{narration}\n\n{unbacked_purchase_notice(instance.language)}".strip()
         deferred_effects = defer_narrative_effects(

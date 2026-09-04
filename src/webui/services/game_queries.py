@@ -124,33 +124,6 @@ def game_detail(
             }
         )
     ]
-    purchase_requests = [
-        dict(request)
-        for request in (getattr(instance, "economy", {}).get("purchase_requests", []) or [])
-        if isinstance(request, dict)
-        and request.get("status") == "open"
-        and str(request.get("run_id") or "") == str(instance.run_id)
-        and (
-            not viewer_uid
-            or viewer_uid == instance.gm_uid
-            or viewer_uid == str(request.get("actor_uid") or "")
-        )
-    ]
-    purchase_orders = [
-        dict(order)
-        for order in (getattr(instance, "economy", {}).get("purchase_orders", []) or [])
-        if isinstance(order, dict)
-        and order.get("status") in {"pending", "paid"}
-        and str(order.get("run_id") or "") == str(instance.run_id)
-        and (
-            not viewer_uid
-            or viewer_uid == instance.gm_uid
-            or viewer_uid in {
-                str(order.get("payer_uid") or ""),
-                str(order.get("recipient_uid") or ""),
-            }
-        )
-    ]
     detail = {
         "game_key": _GAME_KEY_SEP.join(instance.game_key),
         "run_id": instance.run_id,
@@ -179,8 +152,6 @@ def game_detail(
         "has_room_password": bool(getattr(instance, "room_password", "")),
         "quick_actions": getattr(instance, "quick_actions", []),
         "economy_proposals": economy_proposals,
-        "purchase_requests": purchase_requests,
-        "purchase_orders": purchase_orders,
         "pending_luck_decisions": instance.pending_luck_checks(),
         "round_check_results": (
             [dict(item) for item in instance.last_checks]

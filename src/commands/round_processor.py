@@ -59,7 +59,7 @@ from src.engine.economy import (
     has_blocking_economy_decision,
     queue_effect_group,
 )
-from src.engine.purchase_orders import filter_unordered_purchase_grants
+from src.engine.economy import filter_unconfirmed_purchase_grants
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.imagegen import (
@@ -637,7 +637,7 @@ class RoundProcessor:
         )
         # Purchase authority is explicit GM order + payer confirmation. Never
         # infer a price or create a chargeable proposal from narration text.
-        dropped_purchase_items = filter_unordered_purchase_grants(instance, data)
+        dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
         if dropped_purchase_items:
             response.narration = (
                 f"{response.narration or ''}\n\n"

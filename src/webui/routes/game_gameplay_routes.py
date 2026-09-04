@@ -378,34 +378,8 @@ async def api_payment_create(request: web.Request) -> web.Response:
         reason=str(body.get("reason") or ""),
         recipient_uid=str(body.get("recipient_uid") or ""),
         items=body.get("items") if isinstance(body.get("items"), list) else [],
-        request_id=str(body.get("request_id") or ""),
-        delivery_mode=str(body.get("delivery_mode") or "immediate"),
-        delivery_condition=str(body.get("delivery_condition") or ""),
     )
     return web.json_response(result, status=200 if result.get("ok") else 400)
-
-
-async def api_purchase_order_deliver(request: web.Request) -> web.Response:
-    """GM delivers one already-paid deferred purchase order."""
-
-    api = _get_api(request)
-    gk = request.match_info["game_key"]
-    order_id = request.match_info["order_id"]
-    _inst, denied = _gm_only_inst(request, gk)
-    if denied is not None:
-        return denied
-    result = await api.deliver_purchase_order(
-        gk, order_id, request.get("user_id", ""),
-    )
-    code = str(result.get("code") or "")
-    status = (
-        200 if result.get("ok")
-        else 404 if code in {"GAME_NOT_FOUND", "ORDER_NOT_FOUND"}
-        else 403 if code == "FORBIDDEN"
-        else 409 if code in {"ORDER_NOT_PAID", "STALE_RUN", "REWRITE_IN_PROGRESS"}
-        else 400
-    )
-    return web.json_response(result, status=status)
 
 
 async def api_swipe(request: web.Request) -> web.Response:

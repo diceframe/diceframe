@@ -29,18 +29,12 @@ from src.engine.economy import (
     pending_memory_reversals,
     queue_memory_delivery,
     queue_proposal,
+    queue_purchase_offer,
     resolve_proposal,
     cancel_proposals_for_player,
 )
 from src.engine.game_instance import GameInstance
-from src.commands.state_items import (
-    grant_classified_item,
-    normalized_reward_entries,
-)
-from src.engine.purchase_orders import (
-    create_purchase_order,
-    deliver_purchase_order,
-)
+from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime
 from src.webui.character_contracts import MAX_BIO_CHARS
 
@@ -143,7 +137,6 @@ class CharacterDependencies:
     schedule_economy_scene_image: Callable[[Any, dict[str, Any]], Any] | None = None
     apply_economy_memory: Callable[[str, str, dict[str, Any], int], Awaitable[None]] | None = None
     reverse_economy_memory: Callable[[str, str], Awaitable[bool]] | None = None
-    load_item_categories: Callable[[Any], dict[str, list[str]]] | None = None
 
 
 async def create_payment_proposal(
@@ -155,9 +148,6 @@ async def create_payment_proposal(
     reason: str = "",
     recipient_uid: str = "",
     items: list[str] | None = None,
-    request_id: str = "",
-    delivery_mode: str = "immediate",
-    delivery_condition: str = "",
 ) -> dict[str, Any]:
     """Create a GM-authored payment proposal without changing balances."""
 
@@ -186,10 +176,6 @@ async def create_payment_proposal(
     reason = str(reason or "").strip()[:240]
     if not reason:
         reason = f"购买 {'、'.join(normalized_items)}" if normalized_items else "GM 发起的支付"
-    rewards = [
-        {"name": item, "category": ""}
-        for item in normalized_items
-    ]
     async with inst.authoritative_write() as write_entered, inst._lock:
         if not write_entered:
             return {
@@ -204,25 +190,16 @@ async def create_payment_proposal(
                 "code": "STALE_RUN",
                 "error": "游戏已重开或重置，请刷新后再发起支付",
             }
-        if rewards:
+        if normalized_items:
             try:
-                categories = (
-                    dependencies.load_item_categories(inst)
-                    if dependencies.load_item_categories is not None
-                    else {}
-                )
-                order_rewards = normalized_reward_entries(normalized_items, categories)
-                order, proposal = create_purchase_order(
+                proposal = queue_purchase_offer(
                     inst,
                     payer_uid=payer_uid,
-                    recipient_uid=recipient_uid,
                     amount=amount,
                     items=normalized_items,
                     reason=reason,
-                    request_id=request_id,
-                    delivery_mode=delivery_mode,
-                    delivery_condition=delivery_condition,
-                    rewards=order_rewards,
+                    source="gm_manual",
+                    source_ref=f"gm_manual:{inst.run_id}:{uuid4().hex}",
                 )
             except ValueError as exc:
                 return {"ok": False, "code": "ORDER_INVALID", "error": str(exc)}
@@ -239,54 +216,8 @@ async def create_payment_proposal(
                 source_ref=f"gm_manual:{inst.run_id}:{uuid4().hex}",
                 approval_policy="payer",
             )
-            order = None
         await dependencies.games.save_instance(inst)
-    result = {"ok": True, "proposal": proposal}
-    if order is not None:
-        result["order"] = order
-    return result
-
-
-async def deliver_purchase_order_service(
-    dependencies: CharacterDependencies,
-    game_key: str,
-    order_id: str,
-    session_uid: str = "",
-) -> dict[str, Any]:
-    """Deliver a paid deferred purchase; GM-only authorization is enforced here."""
-
-    inst = dependencies.games.get_instance(dependencies.games.parse_game_key(game_key))
-    if inst is None:
-        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
-    actor_uid = str(session_uid or "")
-    if actor_uid != str(inst.gm_uid or ""):
-        return {"ok": False, "code": "FORBIDDEN", "error": "只有 GM 可以交付订单"}
-
-    def grant_reward(sheet: dict[str, Any], reward: dict[str, Any]) -> None:
-        item_name = str(reward.get("name") or "").strip()
-        if item_name:
-            grant_classified_item(sheet, item_name, str(reward.get("category") or ""))
-
-    async with inst.authoritative_write() as write_entered, inst._lock:
-        if not write_entered:
-            return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": "正在重写历史回合，请稍后再交付"}
-        current = dependencies.games.get_instance(inst.game_key)
-        if current is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后再交付"}
-        staged = type(inst).from_dict(deepcopy(inst.to_dict()))
-        staged.log = deepcopy(inst.log)
-        result = deliver_purchase_order(staged, order_id, grant_reward=grant_reward)
-        if not result.get("ok"):
-            return result
-        before = type(inst).from_dict(deepcopy(inst.to_dict()))
-        before.log = deepcopy(inst.log)
-        inst.replace_persisted_state_from(staged)
-        try:
-            await dependencies.games.save_instance(inst)
-        except Exception:
-            inst.replace_persisted_state_from(before)
-            raise
-        return result
+    return {"ok": True, "proposal": proposal}
 
 
 _ATTR_NAME_EN = {

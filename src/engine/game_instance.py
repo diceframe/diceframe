@@ -269,8 +269,6 @@ class GameInstance:
             self.economy.setdefault("effect_groups", [])
             self.economy.setdefault("external_effects_outbox", [])
             self.economy.setdefault("outcomes", [])
-            self.economy.setdefault("purchase_requests", [])
-            self.economy.setdefault("purchase_orders", [])
             self.economy.setdefault("decision_revision", 0)
 
     def _fresh_economy_state(self) -> dict[str, Any]:
@@ -284,8 +282,6 @@ class GameInstance:
             "effect_groups": [],
             "external_effects_outbox": [],
             "outcomes": [],
-            "purchase_requests": [],
-            "purchase_orders": [],
             "decision_revision": 0,
         }
 
@@ -871,25 +867,8 @@ class GameInstance:
             if self.pending_actions:
                 self.action_queue.extend(self.pending_actions)
                 self.pending_actions.clear()
-            self._record_purchase_requests_locked()
             self.last_activity = datetime.now(timezone.utc).isoformat()
             logger.info("Round %d 开始 - game_key=%s", self.round_number, self.game_key)
-
-    def _record_purchase_requests_locked(self) -> None:
-        """Record player purchase requests without making them chargeable."""
-
-        try:
-            from src.engine.purchase_orders import record_purchase_requests
-
-            record_purchase_requests(
-                self,
-                self.action_queue,
-                language=str(getattr(self, "language", "") or ""),
-            )
-        except Exception:
-            # A recorder failure must never reject an otherwise valid TRPG
-            # action. The raw action remains in the round log for retry.
-            logger.exception("记录购买请求失败，保留原始行动: game=%s", self.game_key)
 
     async def add_action(self, user_id: str, action_text: str,
                          selected_attribute: str = "", selected_skill: str = "",
@@ -959,7 +938,6 @@ class GameInstance:
             else:
                 action_entry["revision_count"] = 1
                 self.action_queue.append(action_entry)
-            self._record_purchase_requests_locked()
             self.ready_players.add(user_id)
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return True
