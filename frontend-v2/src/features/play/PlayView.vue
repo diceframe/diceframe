@@ -24,6 +24,7 @@ import CombatMessageComposer from '@/components/play/CombatMessageComposer.vue'
 import KpQuestionDialog from '@/components/play/KpQuestionDialog.vue'
 import TableTalkFeed from '@/components/play/TableTalkFeed.vue'
 import EconomyProposalCard from '@/components/play/EconomyProposalCard.vue'
+import GmChargeComposer from '@/features/play/economy/GmChargeComposer.vue'
 import GameSidebar from '@/components/GameSidebar.vue'
 import PlayHelpCenter from '@/components/PlayHelpCenter.vue'
 import HealthPanel from '@/components/HealthPanel.vue'
@@ -78,11 +79,8 @@ const sceneImageDefaultUrl = ref(ruleSceneUrl())
 const sceneImageBusy = ref(false)
 const showMapBackgroundEditor = ref(false)
 const showPaymentComposer = ref(false)
-const paymentPayerUid = ref('')
-const paymentRecipientUid = ref('')
-const paymentAmount = ref(1)
-const paymentReason = ref('')
-const paymentItems = ref('')
+const composerPayerUid = ref('')
+const composerRecipientUid = ref('')
 const paymentBusy = ref(false)
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; localStorage.setItem('play_sidebar_collapsed', sidebarCollapsed.value ? '1' : '0') }
 const railCollapsed = ref(false)
@@ -114,26 +112,19 @@ function refreshMapAfterBackground() {
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || t('operationFailed')) }
 function openPaymentComposer() {
   const first = game.players.value[0]?.user_id || ''
-  paymentPayerUid.value = first
-  paymentRecipientUid.value = first
-  paymentAmount.value = 1
-  paymentReason.value = ''
-  paymentItems.value = ''
+  composerPayerUid.value = first
+  composerRecipientUid.value = first
   showPaymentComposer.value = true
 }
-async function createPaymentProposal() {
-  if (!game.currentGame.value || !paymentPayerUid.value || paymentAmount.value < 1) return
+async function createPaymentProposal(payload: {
+  payer_uid: string; recipient_uid: string; amount: number; reason: string; items: string[]
+}) {
+  if (!game.currentGame.value || !payload.payer_uid || payload.amount < 1) return
   paymentBusy.value = true
   try {
     await api(`/games/${encodeURIComponent(game.currentGame.value)}/payments`, {
       method: 'POST',
-      body: JSON.stringify({
-        payer_uid: paymentPayerUid.value,
-        recipient_uid: paymentRecipientUid.value || paymentPayerUid.value,
-        amount: Math.trunc(paymentAmount.value),
-        reason: paymentReason.value.trim(),
-        items: paymentItems.value.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean),
-      }),
+      body: JSON.stringify(payload),
     })
     showPaymentComposer.value = false
     await game.refresh(true)
@@ -666,6 +657,7 @@ async function resolveHealth(id: string, action: string) {
 }
 
 const pendingPay = ref<PendingPayment | null>(null)
+const payResolving = ref(false)
 const dismissedPaymentIds = ref<Set<string>>(new Set())
 const economyCurrencyName = computed(() => currencyLabel(ruleMeta.value))
 const economyProposalList = computed(() => game.detail.value?.economy_proposals || [])
@@ -735,7 +727,8 @@ function reopenPendingEconomy() {
 
 async function resolvePay(accepted: boolean) {
   const p = pendingPay.value
-  if (!p || !p.id) return
+  if (!p || !p.id || payResolving.value) return
+  payResolving.value = true
   try {
     const result = await api<{ committed?: boolean; awaiting_uids?: string[] }>(`/games/${encodeURIComponent(game.currentGame.value)}/payments/${encodeURIComponent(p.id)}`, { method: 'POST', body: JSON.stringify({ accepted }) })
     const resolvedId = String(p.id || p.payment_id || '')
@@ -756,6 +749,8 @@ async function resolvePay(accepted: boolean) {
     // 刷新 detail：若后端已自动取消该支付（如金币不足），pending 消失后 watch 不再重弹
     pendingPay.value = null
     await game.refresh().catch(() => undefined)
+  } finally {
+    payResolving.value = false
   }
 }
 
@@ -1109,6 +1104,7 @@ onBeforeUnmount(() => {
         <EconomyProposalCard
           v-if="pendingPay"
           :proposal="pendingPay"
+          :busy="payResolving"
           :currency="economyCurrencyName"
           :player-name="economyPlayerName"
           :dismiss-label="pendingEconomyDismissLabel(pendingPay)"
@@ -1263,39 +1259,15 @@ onBeforeUnmount(() => {
         @click="mobilePanel = ''"
       />
     </div>
-    <Modal v-if="showPaymentComposer" :title="t('createPaymentProposal')" @close="showPaymentComposer = false">
-      <div class="gm-payment-form">
-        <label>
-          <span>{{ t('paymentPayer') }}</span>
-          <select v-model="paymentPayerUid">
-            <option v-for="player in game.players.value" :key="player.user_id" :value="player.user_id">{{ player.character_name || player.user_id }}</option>
-          </select>
-        </label>
-        <label>
-          <span>{{ t('paymentRecipient') }}</span>
-          <select v-model="paymentRecipientUid">
-            <option v-for="player in game.players.value" :key="player.user_id" :value="player.user_id">{{ player.character_name || player.user_id }}</option>
-          </select>
-        </label>
-        <label>
-          <span>{{ t('paymentAmount') }}</span>
-          <input v-model.number="paymentAmount" type="number" min="1" max="100000">
-        </label>
-        <label>
-          <span>{{ t('paymentReason') }}</span>
-          <input v-model="paymentReason" :placeholder="t('paymentReasonPlaceholder')" maxlength="240">
-        </label>
-        <label>
-          <span>{{ t('paymentItems') }}</span>
-          <input v-model="paymentItems" :placeholder="t('paymentItemsPlaceholder')">
-        </label>
-        <p class="muted">{{ t('paymentProposalHelp') }}</p>
-      </div>
-      <template #actions>
-        <button type="button" @click="showPaymentComposer = false">{{ t('cancel') }}</button>
-        <button type="button" class="primary" :disabled="paymentBusy || !paymentPayerUid || paymentAmount < 1" @click="createPaymentProposal">{{ paymentBusy ? t('saving') : t('createProposal') }}</button>
-      </template>
-    </Modal>
+    <GmChargeComposer
+      v-if="showPaymentComposer"
+      :players="game.players.value"
+      :payer-uid="composerPayerUid"
+      :recipient-uid="composerRecipientUid"
+      :busy="paymentBusy"
+      @close="showPaymentComposer = false"
+      @submit="createPaymentProposal"
+    />
     <MapWorkspace
       v-if="showMap"
       :map="game.map.value"
