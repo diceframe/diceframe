@@ -165,6 +165,24 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                     "stated one; never infer, estimate, or invent a price yourself."
                                 ),
                             },
+                            "quantity": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 8,
+                                "description": (
+                                    "Number of units the player explicitly wants. Default to 1 when no "
+                                    "quantity is stated; never infer a quantity from inventory or context."
+                                ),
+                            },
+                            "amount_scope": {
+                                "type": "string",
+                                "enum": ["unit", "total"],
+                                "description": (
+                                    "Whether amount is the price per unit or the total price for the requested "
+                                    "quantity. Use 'unit' for wording such as '30金币一瓶'; use 'total' for "
+                                    "wording such as '五瓶共150金币'. Default to 'total' when unclear."
+                                ),
+                            },
                             "price_source": {
                                 "type": "string",
                                 "enum": ["player_stated", "gm_narrated", "none"],

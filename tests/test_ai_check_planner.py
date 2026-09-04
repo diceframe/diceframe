@@ -390,9 +390,31 @@ async def test_plan_round_checks_normalizes_economy_offers() -> None:
     assert planned == []
     assert metadata["errors"] == []
     assert metadata["economy_offers"] == [
-        {"payer_uid": "p1", "amount": 50, "target": "长剑", "note": "矮人摊主报价"},
-        {"payer_uid": "p2", "amount": 3, "target": "口粮", "note": ""},
+        {"payer_uid": "p1", "amount": 50, "quantity": 1, "amount_scope": "total", "target": "长剑", "note": "矮人摊主报价"},
+        {"payer_uid": "p2", "amount": 3, "quantity": 1, "amount_scope": "total", "target": "口粮", "note": ""},
     ]
+
+
+@pytest.mark.asyncio
+async def test_economy_offer_multiplies_unit_price_by_explicit_quantity() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我要5瓶治疗药水"}]
+    planned, metadata = await plan_round_checks(
+        instance, make_rule(),
+        _client_returning({"checks": [], "economy_actions": [
+            {
+                "player": "p1", "type": "purchase", "target": "治疗药水",
+                "amount": 30, "quantity": 5, "amount_scope": "unit",
+                "price_source": "gm_narrated",
+            },
+        ]}),
+    )
+    assert planned == []
+    assert metadata["errors"] == []
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 150, "quantity": 5,
+        "amount_scope": "unit", "target": "治疗药水", "note": "",
+    }]
 
 
 @pytest.mark.asyncio
@@ -450,6 +472,11 @@ async def test_economy_offers_queue_payer_confirmed_proposals_idempotently() -> 
     assert first["approval_policy"] == "payer"
     assert first["source"] == "table_offer"
     assert [reward["name"] for reward in first["rewards"]] == ["长剑"]
+    bulk = queue_purchase_offer(
+        instance, payer_uid="p1", amount=150, items=["治疗药水"] * 5,
+        reason="30 金币一瓶，共五瓶", source="table_offer", source_ref="ai:bulk",
+    )
+    assert len(bulk["rewards"]) == 5
     with pytest.raises(ValueError):
         queue_purchase_offer(
             instance, payer_uid="p1", amount=50, items=["长剑"],
@@ -465,5 +492,7 @@ def test_economy_tool_schema_requires_price_provenance() -> None:
     )
     props = actions["items"]["properties"]
     assert props["price_source"]["enum"] == ["player_stated", "gm_narrated", "none"]
+    assert props["quantity"]["maximum"] == 8
+    assert props["amount_scope"]["enum"] == ["unit", "total"]
     assert actions["items"]["required"] == ["player", "type", "target"]
     assert "never invent, estimate, or infer a price" in props["price_source"]["description"]

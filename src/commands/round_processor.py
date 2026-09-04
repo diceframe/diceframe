@@ -269,16 +269,18 @@ class RoundProcessor:
             # 提前创建会让 planning_target_is_current() 误判规划过期。
             for offer in metadata.get("economy_offers") or []:
                 try:
+                    quantity = max(1, min(8, int(offer.get("quantity", 1) or 1)))
                     queue_purchase_offer(
                         instance,
                         payer_uid=str(offer["payer_uid"]),
                         amount=int(offer["amount"]),
-                        items=[str(offer["target"])],
+                        items=[str(offer["target"])] * quantity,
                         reason=str(offer.get("note") or ""),
                         source="table_offer",
                         source_ref=(
                             f"ai:{instance.run_id}:{instance.round_number}:"
-                            f"{offer['payer_uid']}:{offer['target']}"
+                            f"{offer['payer_uid']}:{offer['target']}:{quantity}:"
+                            f"{offer.get('amount_scope') or 'total'}:{offer['amount']}"
                         ),
                     )
                 except Exception:

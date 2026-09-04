@@ -189,14 +189,6 @@ class StateUpdateApplier:
                     f"round:{instance.run_id}:{instance.round_number}:reward:"
                     f"{proposal_index}:{uid}:{amount}:{reason.casefold()}"
                 )
-            else:
-                contributor_ref = "|".join(
-                    f"{item['uid']}={item['amount']}" for item in contributors
-                )
-                source_ref = (
-                    f"round:{instance.run_id}:{instance.round_number}:economy:"
-                    f"{proposal_index}:{kind}:{uid}:{amount}:{contributor_ref}:{reason.casefold()}"
-                )
             queued_proposals.append(queue_proposal(
                 instance,
                 kind=kind,

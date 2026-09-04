@@ -556,6 +556,18 @@ def normalize_economy_actions(
         if price_source == "none" or amount_raw is None:
             continue
         try:
+            quantity = int(raw.get("quantity", 1) or 1)
+        except (TypeError, ValueError):
+            errors.append(f"economy_actions[{index}] quantity 无效")
+            continue
+        if not 1 <= quantity <= 8:
+            errors.append(f"economy_actions[{index}] quantity 超出范围")
+            continue
+        amount_scope = str(raw.get("amount_scope") or "total").strip()
+        if amount_scope not in {"unit", "total"}:
+            errors.append(f"economy_actions[{index}] amount_scope={amount_scope!r} 无效")
+            continue
+        try:
             amount = int(amount_raw)
         except (TypeError, ValueError):
             errors.append(f"economy_actions[{index}] amount 无效")
@@ -566,9 +578,16 @@ def normalize_economy_actions(
         if price_source not in {"player_stated", "gm_narrated"}:
             errors.append(f"economy_actions[{index}] price_source={price_source!r} 无效")
             continue
+        total_amount = amount * quantity if amount_scope == "unit" else amount
+        if not 0 < total_amount <= MAX_ECONOMY_AMOUNT:
+            errors.append(f"economy_actions[{index}] total amount 超出范围")
+            continue
         offers.append({
             "payer_uid": uid,
-            "amount": amount,
+            # Downstream proposal settlement always receives the total charge.
+            "amount": total_amount,
+            "quantity": quantity,
+            "amount_scope": amount_scope,
             "target": target,
             "note": str(raw.get("note") or "").strip()[:160],
         })
