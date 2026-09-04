@@ -7,6 +7,13 @@ from types import SimpleNamespace
 import pytest
 
 from src.webui.routes import games, memory
+from src.webui.routes.game_gameplay_routes import (
+    api_gm_private_message,
+    api_payment_create,
+    api_rollback,
+    api_story_recap,
+    api_swipe,
+)
 
 
 class FakeHandler:
@@ -37,6 +44,10 @@ class FakeAPI:
     async def drain_economy_outbox(self, game_key: str) -> bool:
         self.calls.append(("drain-economy", game_key))
         return True
+
+    async def create_payment_proposal(self, game_key: str, **payload):
+        self.calls.append(("create-payment-proposal", game_key, payload))
+        return {"ok": True, "proposal": {"id": "eco_test"}}
 
     def saved_game_access(self, game_key: str) -> dict:
         key = self._parse_key(game_key)
@@ -126,13 +137,14 @@ def make_request(
     body: dict | None = None,
     method: str = "POST",
     query: dict | None = None,
+    match: dict | None = None,
 ):
     api = FakeAPI(registry)
     request_method = method
     request_query = query or {}
 
     class FakeRequest:
-        match_info = {"game_key": "web|room|bot"}
+        match_info = {"game_key": "web|room|bot", **(match or {})}
         app = {"api": api, "subsystems": SimpleNamespace(registry=registry)}
         headers = {"X-TRPG-Confirm": "true"} if confirm else {}
         method = request_method
@@ -457,3 +469,54 @@ async def test_memory_route_rejects_invalid_pagination(tmp_path):
 
     assert response.status == 400
     assert response_json(response)["error"] == "分页参数必须是整数"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler",
+    [
+        api_rollback,
+        api_story_recap,
+        api_gm_private_message,
+        api_payment_create,
+        api_swipe,
+    ],
+)
+async def test_gm_only_gameplay_routes_reject_non_gm(tmp_path, handler):
+    """创建收费/改写历史等 GM 路由对普通玩家必须 403，且不触达 service。"""
+    registry = FakeRegistry(tmp_path)
+    key = ("web", "room", "bot")
+    registry.items[key] = SimpleNamespace(gm_uid="gm")
+    req, api = make_request(
+        registry,
+        user_id="player",
+        body={"text": "hi", "amount": 5},
+        match={"round": "3"},
+    )
+
+    response = await handler(req)
+
+    assert response.status == 403
+    assert response_json(response) == {"ok": False, "error": "GM only"}
+    assert api.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gm_payment_create_reaches_service(tmp_path):
+    """GM 是唯一能到达收费创建服务的入口（安全不变量的正向侧）。"""
+    registry = FakeRegistry(tmp_path)
+    key = ("web", "room", "bot")
+    registry.items[key] = SimpleNamespace(gm_uid="gm")
+    req, api = make_request(
+        registry,
+        user_id="gm",
+        body={"payer_uid": "p1", "amount": 5, "items": ["长剑"]},
+    )
+
+    response = await api_payment_create(req)
+
+    assert response.status == 200
+    assert response_json(response)["ok"] is True
+    assert len(api.calls) == 1
+    assert api.calls[0][0] == "create-payment-proposal"
+    assert api.calls[0][2]["payer_uid"] == "p1"
