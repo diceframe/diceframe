@@ -51,9 +51,42 @@ granting the item later through the normal reward path.
 The unconfirmed-grant gate survives in proposal scope:
 `filter_unconfirmed_purchase_grants()` strips model-emitted items whose names
 match a pending chargeable proposal's rewards, so items cannot bypass a
-payment that is awaiting confirmation. Known accepted limitation: if no price
-has ever been stated (therefore no proposal exists), the model may grant an
-item unchallenged in the same round — that is the GM's narration, not a bug.
+payment that is awaiting confirmation.
+
+## Amendment (2026-09-05): same-round price pass closes the priceless grant hole
+
+The originally accepted limitation — "if no price has ever been stated, the
+model may grant an item unchallenged in the same round; that is the GM's
+narration, not a bug" — is superseded. The incident that forced the change:
+a player asked to buy five potions, the planner (running before narration)
+correctly reported `price_source=none`, and the GM then narrated the deal and
+handed the items over through a `LOOT` tag in the same round, bypassing
+payment entirely.
+
+The fix keeps every decision in this ADR intact — one entity, one state
+machine, prices only from verbatim human-stated numbers, no resurrection of
+the dropped `purchase_request` / `purchase_order` entities:
+
+- The planner's priceless purchase intents (`price_source=none` or missing
+  amount) are no longer silently dropped. They are held on the live instance
+  as in-memory round state (`round_unpriced_purchase_intents`), never
+  persisted, never carrying an amount.
+- After the narration is generated, a single cheap planner pass
+  (`price_unpriced_purchase_intents`) re-reads this round's narration and may
+  emit an offer per intent whose price a human verbatim stated in that text
+  (`price_source=gm_narrated`). Such offers flow through the same
+  `queue_purchase_offer` entry point and become ordinary payer-confirmed
+  proposals — the payment dialog now appears in the same round the deal was
+  narrated.
+- Intents that stay priceless after the pass are passed to
+  `filter_unconfirmed_purchase_grants()`, which strips same-round model
+  grants of the matching items, so a purchase can no longer be delivered
+  through narrative LOOT before any price exists. The player simply states
+  the purchase again once the price is on the table, and the normal planner
+  path prices it from `recent_narration`.
+
+No persisted schema changes: the intent list lives and dies with the round's
+prepared checks, and instance schema stays at 7.
 
 ## Compatibility
 

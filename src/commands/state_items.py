@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
+
+# GM 常把数量直接写进物品串（"回复药水x5"、"地图×2"）。识别并剥离这个后缀，
+# 让数量进入 qty 字段而不是污染物品名。只认结尾的 x/X/× + 数字，避免误伤
+# 名字里本就含 x 的条目。
+_ITEM_QTY_SUFFIX = re.compile(r"^(.+?)\s*[xX×]\s*(\d{1,2})$")
+
+_MAX_GRANT_QTY = 99
+
+
+def split_item_quantity(item_name: str) -> tuple[str, int]:
+    """Split a trailing 'xN' quantity suffix from a loot item string."""
+    name = str(item_name or "").strip()
+    match = _ITEM_QTY_SUFFIX.match(name)
+    if match:
+        base = match.group(1).strip()
+        quantity = int(match.group(2))
+        if base and 1 <= quantity <= _MAX_GRANT_QTY:
+            return base, quantity
+    return name, 1
 
 
 def normalized_reward_entries(
@@ -73,13 +93,28 @@ def append_inventory_item(
     effect: str = "",
     quality: str = "common",
     category: str = "",
+    qty: int = 1,
 ) -> None:
+    qty = max(1, int(qty or 1))
     inventory = character_sheet.setdefault("inventory", [])
+    # 同名同类的行优先精确匹配（name+effect+category），其次放宽 effect：
+    # 角色卡初始行常带 effect 文案而 loot/购买授予不带，recap 的公开视图
+    # （item_counts）本来就按名字聚合，入库不应因 effect 差异拆出碎片行。
     for item in inventory:
-        if item.get("name") == item_name and item.get("effect", "") == effect and item.get("category", "") == category:
-            item["qty"] = int(item.get("qty", 1)) + 1
+        if (
+            item.get("name") == item_name
+            and item.get("effect", "") == effect
+            and item.get("category", "") == category
+        ):
+            item["qty"] = int(item.get("qty", 1)) + qty
             return
-    new_item = {"name": item_name, "qty": 1, "effect": effect, "quality": quality}
+    for item in inventory:
+        if item.get("name") == item_name and item.get("category", "") == category:
+            if not item.get("effect") and effect:
+                item["effect"] = effect
+            item["qty"] = int(item.get("qty", 1)) + qty
+            return
+    new_item = {"name": item_name, "qty": qty, "effect": effect, "quality": quality}
     if category:
         new_item["category"] = category
     inventory.append(new_item)
@@ -90,6 +125,7 @@ def add_owned_equipment_to_inventory(
     item_name: str,
     *,
     quality: str = "common",
+    qty: int = 1,
 ) -> None:
     """Record an equipment item as owned but not currently equipped.
 
@@ -103,6 +139,7 @@ def add_owned_equipment_to_inventory(
         item_name,
         quality=quality,
         category="equipment",
+        qty=qty,
     )
 
 
@@ -130,6 +167,7 @@ def grant_classified_item(
     character_sheet: dict,
     item_name: str,
     category: str = "",
+    qty: int = 1,
 ) -> None:
     """Grant one already-classified item to a character sheet."""
     item_name = str(item_name or "").strip()
@@ -140,7 +178,7 @@ def grant_classified_item(
         # the item owned in the backpack; only an explicit WEAPON/equip action
         # may move it into an active slot.  This prevents a new loot/purchase
         # from silently replacing the weapon currently in hand.
-        add_owned_equipment_to_inventory(character_sheet, item_name)
+        add_owned_equipment_to_inventory(character_sheet, item_name, qty=qty)
     elif category in ("key_item", "quest", "clue", "credential", "artifact"):
         append_key_item(character_sheet, item_name, category=category)
     elif category == "cyberware":
@@ -148,6 +186,6 @@ def grant_classified_item(
         if not any(item.get("name") == item_name for item in cyberware):
             cyberware.append({"name": item_name, "effect": ""})
     elif category == "pills":
-        append_inventory_item(character_sheet, item_name, category="丹药")
+        append_inventory_item(character_sheet, item_name, category="丹药", qty=qty)
     else:
-        append_inventory_item(character_sheet, item_name)
+        append_inventory_item(character_sheet, item_name, qty=qty)

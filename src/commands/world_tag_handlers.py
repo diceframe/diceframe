@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from src.commands.state_items import split_item_quantity
+
 logger = logging.getLogger("trpg")
 
 _PERSON_SUFFIXES = (
@@ -61,11 +63,15 @@ def parse_loot_tag(tag: str, value: str, result: dict) -> None:
         if parts:
             uid = parts[0].strip()
             item = parts[1].strip() if len(parts) > 1 else ""
-            result["state_update"]["loot"].append({"player": uid, "item": item[:120]})
+            name, quantity = split_item_quantity(item)
+            entry: dict = {"player": uid, "item": name[:120], "qty": quantity}
+            result["state_update"]["loot"].append(entry)
     elif tag == "KEY_ITEM":
         parts = value.split(":", 1)
         if len(parts) == 2:
             uid, item = parts[0].strip(), parts[1].strip()
+            # 关键物品无数量语义，但同样要剥掉"xN"后缀，避免脏名字入库。
+            item, _qty = split_item_quantity(item)
             if _looks_like_person(item):
                 logger.warning("KEY_ITEM 疑似人物而非物品（已照常写入，请检查 GM prompt）: %s", item)
             result["state_update"]["loot"].append({

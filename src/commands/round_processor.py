@@ -37,7 +37,10 @@ from src.commands.round_effects import (
     store_private_messages,
     update_quick_actions,
 )
-from src.commands.check_planner import plan_round_checks
+from src.commands.check_planner import (
+    plan_round_checks,
+    price_unpriced_purchase_intents,
+)
 from src.engine.economy import (
     economy_changes_are_resolutions_only,
     economy_fingerprint,
@@ -287,6 +290,11 @@ class RoundProcessor:
                     logger.warning(
                         "AI 报价提案创建失败，已跳过: %s", offer, exc_info=True,
                     )
+            # 无价购买意图留在实例回合内存中：叙事后复检一次是否有口述价格，
+            # 并在结算阶段拦截同轮模型授予（从不持久化、不产生金额）。
+            instance.round_unpriced_purchase_intents = list(
+                metadata.get("unpriced_purchase_intents") or [],
+            )
             if not metadata.get("available"):
                 logger.warning("模型工具不可用，进入离线检定兼容路径: %s", instance.game_key)
                 return self.prepare_round_checks(instance)
@@ -675,8 +683,47 @@ class RoundProcessor:
         ):
             system_changes.append(unbacked_payment_notice(instance.language))
         # Purchase authority is explicit GM order + payer confirmation. Never
-        # infer a price or create a chargeable proposal from narration text.
-        dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
+        # infer a price or create a chargeable proposal from narration text;
+        # the same-round pass below may only report numbers a human verbatim
+        # stated in this narration (same provenance contract as the planner).
+        unpriced_purchase_intents = list(instance.round_unpriced_purchase_intents)
+        if unpriced_purchase_intents:
+            try:
+                late_offers, unpriced_purchase_intents = await price_unpriced_purchase_intents(
+                    instance, self.llm_client, response.narration,
+                    unpriced_purchase_intents,
+                )
+            except Exception:
+                logger.warning(
+                    "同期购买价格复检失败，无价意图保持拦截: game=%s round=%d",
+                    instance.game_key, instance.round_number, exc_info=True,
+                )
+                late_offers = []
+            for offer in late_offers:
+                try:
+                    quantity = max(1, min(8, int(offer.get("quantity", 1) or 1)))
+                    queue_purchase_offer(
+                        instance,
+                        payer_uid=str(offer["payer_uid"]),
+                        amount=int(offer["amount"]),
+                        items=[str(offer["target"])] * quantity,
+                        reason=str(offer.get("note") or ""),
+                        source="table_offer",
+                        source_ref=(
+                            f"ai:{instance.run_id}:{instance.round_number}:"
+                            f"{offer['payer_uid']}:{offer['target']}:{quantity}:"
+                            f"{offer.get('amount_scope') or 'total'}:{offer['amount']}"
+                        ),
+                    )
+                except Exception:
+                    logger.warning(
+                        "复检报价提案创建失败，已跳过: %s", offer, exc_info=True,
+                    )
+            instance.round_unpriced_purchase_intents = list(unpriced_purchase_intents)
+        dropped_purchase_items = filter_unconfirmed_purchase_grants(
+            instance, data,
+            unpriced_purchase_intents=unpriced_purchase_intents,
+        )
         if dropped_purchase_items:
             system_changes.append(unbacked_purchase_notice(instance.language))
         economy_pending = has_economy_proposal(data)

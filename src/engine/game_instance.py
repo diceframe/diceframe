@@ -181,6 +181,9 @@ class GameInstance:
     # 判定卡片：最近一次检定的结构化结果（前端渲染用）
     last_check: CheckResult | None = None
     last_checks: list[CheckResult] = field(default_factory=list)
+    # 本轮规划发现的无价购买意图（payer/target/quantity）。只在回合内存中
+    # 传递：供叙事后价格复检与同轮 LOOT 拦截使用，从不持久化、不产生金额。
+    round_unpriced_purchase_intents: list[dict] = field(default_factory=list)
     # 当前判定阶段是否已生成结构化检定；幸运选择必须发生在 LLM 叙事之前。
     round_checks_prepared: bool = False
     # 进入判定阶段前的玩家状态；整轮撤回时用于退还本轮消耗的幸运。
@@ -619,6 +622,7 @@ class GameInstance:
         self.last_check = None
         self.last_checks.clear()
         self.last_overreach.clear()
+        self.round_unpriced_purchase_intents.clear()
         self.round_checks_prepared = prepared
 
     def mark_log_persisted(self) -> None:
@@ -1237,6 +1241,9 @@ class GameInstance:
         runtime_only = {
             "last_saved_log_count",
             "pending_luck_after_recovery",
+            # 回合内的无价购买意图是 process-local 协调状态：不入持久化投影，
+            # 生成期间的合法结算回写不得清空它（否则同轮 LOOT 拦截会失效）。
+            "round_unpriced_purchase_intents",
         }
         for name, value in source.__dict__.items():
             if name.startswith("_") or name in runtime_only:

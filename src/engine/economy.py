@@ -631,12 +631,20 @@ def queue_purchase_offer(
     )
 
 
-def filter_unconfirmed_purchase_grants(instance: Any, data: dict[str, Any]) -> int:
+def filter_unconfirmed_purchase_grants(
+    instance: Any,
+    data: dict[str, Any],
+    *,
+    unpriced_purchase_intents: list[dict[str, Any]] | None = None,
+) -> int:
     """Strip model grants for items that are part of an unconfirmed charge.
 
     A pending chargeable proposal owns its reward items until the payer
     confirms.  Model-emitted grants whose names match a pending purchase
     proposal's rewards are removed so the item cannot bypass the payment.
+    Same-round unpriced purchase intents (in-memory round state only, never
+    persisted) are matched the same way: a purchase whose price nobody has
+    stated yet must not be delivered through a narrative LOOT tag either.
     Other loot and rewards continue through the normal narrative pipeline.
     """
 
@@ -657,6 +665,13 @@ def filter_unconfirmed_purchase_grants(instance: Any, data: dict[str, Any]) -> i
             )
             if uid and name:
                 pending_items.setdefault(uid, set()).add(name)
+    for intent in unpriced_purchase_intents or []:
+        if not isinstance(intent, dict):
+            continue
+        uid = str(intent.get("payer_uid") or "")
+        name = str(intent.get("target") or "").strip().casefold()
+        if uid and name:
+            pending_items.setdefault(uid, set()).add(name)
 
     def blocked(uid: str, item: str) -> bool:
         key = str(item or "").strip().casefold()

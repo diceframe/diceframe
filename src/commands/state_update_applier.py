@@ -141,7 +141,11 @@ class StateUpdateApplier:
             cs = instance.get_character_sheet(uid)
             # 遍历所有品类关键字匹配
             category = loot.get("category") or classify_item(item_name, rule_cats)
-            grant_classified_item(cs, item_name, category)
+            try:
+                quantity = max(1, min(99, int(loot.get("qty", 1) or 1)))
+            except (TypeError, ValueError):
+                quantity = 1
+            grant_classified_item(cs, item_name, category, qty=quantity)
 
         for proposal_index, proposal in enumerate(update.get("economy_proposals", [])):
             uid = str(proposal.get("uid") or "")

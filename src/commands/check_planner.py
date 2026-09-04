@@ -528,14 +528,18 @@ def _apply_explicit_advantage_modes(
 def normalize_economy_actions(
     instance: GameInstance,
     raw_actions: list[Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """校验模型经济报价并归一到付款人。
 
-    price_source=none 或缺价时安全跳过（没有人说出价格就不产生提案）；
-    amount 存在则 price_source 必须是明确的转述来源。单条无效不影响同批。
+    price_source=none 或缺价时安全跳过（没有人说出价格就不产生扣款提案），
+    但有效的意图会以 ``unpriced`` 形式返回，供叙事后复检与本轮拦截使用；
+    它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
+    price_source 必须是明确的转述来源。单条无效不影响同批。
     """
     offers: list[dict[str, Any]] = []
+    unpriced: list[dict[str, Any]] = []
     errors: list[str] = []
+    seen_unpriced: set[tuple[str, str, int]] = set()
     for index, raw in enumerate(raw_actions[:8]):
         if not isinstance(raw, dict):
             errors.append(f"economy_actions[{index}] 不是 object")
@@ -551,9 +555,29 @@ def normalize_economy_actions(
         if not target:
             errors.append(f"economy_actions[{index}] target 为空")
             continue
-        amount_raw = raw.get("amount")
         price_source = str(raw.get("price_source") or "").strip()
-        if price_source == "none" or amount_raw is None:
+        if price_source != "none" and raw.get("amount") is None:
+            # 有目标但没有金额：与 price_source=none 同样处理为无价意图。
+            price_source = "none"
+        if price_source == "none":
+            quantity = 1
+            if raw.get("quantity") is not None:
+                try:
+                    quantity = int(raw.get("quantity") or 1)
+                except (TypeError, ValueError):
+                    errors.append(f"economy_actions[{index}] quantity 无效")
+                    continue
+                if not 1 <= quantity <= 8:
+                    errors.append(f"economy_actions[{index}] quantity 超出范围")
+                    continue
+            key = (uid, target.casefold(), quantity)
+            if key not in seen_unpriced:
+                seen_unpriced.add(key)
+                unpriced.append({
+                    "payer_uid": uid,
+                    "target": target,
+                    "quantity": quantity,
+                })
             continue
         try:
             quantity = int(raw.get("quantity", 1) or 1)
@@ -563,6 +587,7 @@ def normalize_economy_actions(
         if not 1 <= quantity <= 8:
             errors.append(f"economy_actions[{index}] quantity 超出范围")
             continue
+        amount_raw = raw.get("amount")
         amount_scope = str(raw.get("amount_scope") or "total").strip()
         if amount_scope not in {"unit", "total"}:
             errors.append(f"economy_actions[{index}] amount_scope={amount_scope!r} 无效")
@@ -591,7 +616,7 @@ def normalize_economy_actions(
             "target": target,
             "note": str(raw.get("note") or "").strip()[:160],
         })
-    return offers, errors
+    return offers, unpriced, errors
 
 
 async def plan_round_checks(
@@ -652,7 +677,9 @@ async def plan_round_checks(
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_explicit_advantage_modes(rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
-    economy_offers, economy_errors = normalize_economy_actions(instance, raw_economy_actions)
+    economy_offers, economy_intents_unpriced, economy_errors = normalize_economy_actions(
+        instance, raw_economy_actions,
+    )
     return planned, {
         "available": True,
         "native_tools": response.native_tools,
@@ -663,4 +690,82 @@ async def plan_round_checks(
         # 由调用方在过时检查通过后落库；这里不直接改动经济状态，
         # 否则创建提案推进的 revision 会让本轮规划被误判为过期。
         "economy_offers": economy_offers,
+        # 无价购买意图只活在回合内存里：供叙事后复检报价与本轮 LOOT 拦截，
+        # 从不持久化、不产生金额（ADR 0002 修订）。
+        "unpriced_purchase_intents": economy_intents_unpriced,
     }
+
+
+def _price_pass_prompt_text(language: str) -> str:
+    suffix = localized_text(language, {"en": "en", "zh-CN": "zh", "ja": "ja"})
+    path = (
+        Path(__file__).resolve().parents[2] / "prompts" / f"purchase_price_pass_{suffix}.md"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+async def price_unpriced_purchase_intents(
+    instance: GameInstance,
+    llm_client: Any,
+    narration_text: str,
+    intents: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """叙事后复检：用本轮叙述文本给无价购买意图找真人报出的价格。
+
+    复用 ``dice_checks`` 工具契约；金额必须逐字来自叙述文本中的原话，
+    系统不推断价格（ADR 0002）。返回 (可入账报价, 仍无价的意图)。
+    """
+    if not intents or not llm_client or not hasattr(llm_client, "call_tools"):
+        return [], list(intents)
+    intent_rows = []
+    for intent in intents[:8]:
+        uid = str(intent.get("payer_uid") or "")
+        if uid not in instance.players:
+            continue
+        intent_rows.append({
+            "player_id": uid,
+            "character_name": instance.players[uid].get("character_name") or uid,
+            "target": str(intent.get("target") or ""),
+            "quantity": int(intent.get("quantity", 1) or 1),
+        })
+    if not intent_rows:
+        return [], list(intents)
+    payload = json.dumps({
+        "round": instance.round_number,
+        "purchase_intents": intent_rows,
+        "narration": sanitize_narration(str(narration_text or ""))[:4000],
+    }, ensure_ascii=False, separators=(",", ":"))
+    response = await llm_client.call_tools(
+        _price_pass_prompt_text(instance.language),
+        payload,
+        tools=[DICE_CHECKS_TOOL],
+        max_tokens=1024,
+        temperature=0.1,
+    )
+    raw_actions: list[Any] = []
+    for call in response.tool_calls:
+        if str(call.get("name") or "") != DICE_CHECKS_TOOL_NAME:
+            continue
+        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+        economy = arguments.get("economy_actions")
+        if isinstance(economy, list):
+            raw_actions.extend(economy)
+    offers, _unpriced, _errors = normalize_economy_actions(instance, raw_actions)
+    # 只保留与提交意图对应的报价：复检无权替模型造出新的购买对象。
+    intent_keys = {
+        (str(intent.get("payer_uid") or ""), str(intent.get("target") or "").casefold())
+        for intent in intents
+    }
+    priced_offers = [
+        offer for offer in offers
+        if (str(offer["payer_uid"]), str(offer["target"]).casefold()) in intent_keys
+    ]
+    consumed_keys = {
+        (str(offer["payer_uid"]), str(offer["target"]).casefold()) for offer in priced_offers
+    }
+    remaining = [
+        intent for intent in intents
+        if (str(intent.get("payer_uid") or ""), str(intent.get("target") or "").casefold())
+        not in consumed_keys
+    ]
+    return priced_offers, remaining
