@@ -104,9 +104,9 @@ def guard_unbacked_payment_narration(narration: str, data: dict[str, Any], langu
 
 def unbacked_purchase_notice(language: str) -> str:
     return localized_text(language, {
-        "en": "The item was not granted because no purchase order exists.",
-        "zh-CN": "由于没有购买订单，本次购买物品未发放。",
-        "ja": "購入注文がないため、購入品は付与されませんでした。",
+        "en": "The item was not granted because its payment is not confirmed yet.",
+        "zh-CN": "支付尚未确认，本次购买的物品未发放。",
+        "ja": "支払いが確認されていないため、購入品は付与されませんでした。",
     })
 
 

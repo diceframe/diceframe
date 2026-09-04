@@ -16,10 +16,9 @@ from src.engine.economy import (
     blocking_economy_proposals,
     is_auto_settleable_reward,
     pending_effect_groups,
-    pending_memory_deliveries,
-    pending_memory_reversals,
     pending_economy_proposals,
 )
+from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.engine.game_instance import GameState
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
 

@@ -23,15 +23,17 @@ from src.engine.language import localized_text
 from src.engine.health import record_health_event
 from src.engine.economy import (
     complete_effect_group,
+    queue_proposal,
+    queue_purchase_offer,
+    resolve_proposal,
+    cancel_proposals_for_player,
+)
+from src.engine.memory_outbox import (
     complete_memory_delivery,
     complete_memory_reversal,
     pending_memory_deliveries,
     pending_memory_reversals,
     queue_memory_delivery,
-    queue_proposal,
-    queue_purchase_offer,
-    resolve_proposal,
-    cancel_proposals_for_player,
 )
 from src.engine.game_instance import GameInstance
 from src.commands.state_items import grant_classified_item
