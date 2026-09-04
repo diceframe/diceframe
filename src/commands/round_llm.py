@@ -456,7 +456,7 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
                 repair_hint="建议暂停并检查模型、prompt 标签格式，或重新生成本轮。",
             )
             # P2-B：连续失败时给玩家可见提示，避免"叙事里受伤但 HP 没扣"的
-            # 状态漂移无声无息（health_event 仅 GM 可见）。追加到叙事末尾，玩家必见。
+            # 状态漂移无声无息（health_event 仅 GM 可见）。作为系统事件展示。
             _sync_notice = localized_text(
                 getattr(instance, "language", ""),
                 {
@@ -469,11 +469,11 @@ def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: d
                           "このラウンドを再生成してください。",
                 },
             )
-            narration_text = str(response.narration or "").strip()
-            if narration_text:
-                response.narration = narration_text + "\n" + _sync_notice
-            elif response.content:
-                response.content = str(response.content).rstrip() + "\n" + _sync_notice
+            system_notices = getattr(response, "system_notices", None)
+            if not isinstance(system_notices, list):
+                system_notices = []
+                response.system_notices = system_notices
+            system_notices.append(_sync_notice)
         else:
             logger.warning("标签解析失败，本轮仅保留叙事 (round=%d, streak=%d)", instance.round_number, streak)
             record_health_event(

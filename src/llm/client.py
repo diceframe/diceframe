@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -95,6 +95,7 @@ class LLMResponse:
     provider_used: str          # 实际使用的供应商名称
     token_budget_initial: int = 0  # 本次调用最初配置的最大输出 token
     token_budget_used: int = 0     # 成功响应实际使用的最大输出 token 档位
+    system_notices: list[str] = field(default_factory=list)  # 不属于 GM 正文的系统提示
 
 
 @dataclass

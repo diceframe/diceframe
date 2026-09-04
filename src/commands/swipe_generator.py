@@ -11,11 +11,12 @@ from src.commands.economy_effects import (
     currency_labels_for_rule,
     discard_unearned_reward_proposals,
     defer_narrative_effects,
-    guard_unbacked_payment_narration,
     has_economy_proposal,
     pending_decision_notice,
     unearned_reward_notice,
     unbacked_purchase_notice,
+    unbacked_payment_notice,
+    should_warn_unbacked_payment,
 )
 from src.engine.economy import filter_unconfirmed_purchase_grants
 from src.commands.protocol_repair import repair_malformed_protocol_response
@@ -181,25 +182,27 @@ class SwipeGenerator:
             narration = response.content.split("---", 1)[0].strip()
         narration = sanitize_narration(narration)
         data = parse_tag_state(response.content, combat_model_s)
-        narration = guard_unbacked_payment_narration(
+        system_changes: list[str] = []
+        if should_warn_unbacked_payment(
             narration, data, instance.language,
             currency_labels=currency_labels,
-        )
+        ):
+            system_changes.append(unbacked_payment_notice(instance.language))
         dropped_rewards = discard_unearned_reward_proposals(
             instance, data, narration,
         )
         if dropped_rewards:
-            narration = f"{narration}\n\n{unearned_reward_notice(instance.language)}".strip()
+            system_changes.append(unearned_reward_notice(instance.language))
         dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
         if dropped_purchase_items:
-            narration = f"{narration}\n\n{unbacked_purchase_notice(instance.language)}".strip()
+            system_changes.append(unbacked_purchase_notice(instance.language))
         deferred_effects = defer_narrative_effects(
             data, response,
             defer_state_update=True,
         )
         economy_pending = has_economy_proposal(data)
         if economy_pending:
-            narration = f"{narration}\n\n{pending_decision_notice(instance.language)}".strip()
+            system_changes.append(pending_decision_notice(instance.language))
 
         queued_proposals: list[dict[str, Any]] = []
         if data.get("state_update"):
@@ -217,7 +220,10 @@ class SwipeGenerator:
             except Exception:
                 logger.exception("Swipe 剧情更新异常，已跳过 (round=%d)", round_num)
 
-        await instance.finish_judgment_with_swipe(narration, round_num)
+        await instance.finish_judgment_with_swipe(
+            narration, round_num,
+            state_changes=system_changes if system_changes else None,
+        )
         scene_payload = None
         swipe_prompt = str(data.get("scene_image_prompt") or "").strip()
         if swipe_prompt:

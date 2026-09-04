@@ -606,7 +606,8 @@ async def test_opening_conditional_reward_is_not_queued(web_api, monkeypatch):
     instance = registry.get(api._parse_key(result["game_key"]))
     assert instance is not None
     assert instance.economy["proposals"] == []
-    assert "奖励待确认" in instance.log[-1]["gm_response"]
+    assert any("奖励待确认" in item for item in instance.log[-1]["state_changes"])
+    assert "奖励待确认" not in instance.log[-1]["gm_response"]
 
 
 @pytest.mark.asyncio

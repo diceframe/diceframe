@@ -62,9 +62,10 @@ def test_growth_rewards_use_runtime_advancement_capability() -> None:
     response = SimpleNamespace(narration="STORY")
     update = {"milestone_grants": ["all"]}
 
-    apply_growth_rewards(
+    messages = apply_growth_rewards(
         _instance(), update, response, None, _ProgressionMustNotRun(), runtime,
     )
 
     assert runtime.applied_updates == [update]
-    assert response.narration == "STORY\n\nADVANCEMENT APPLIED"
+    assert response.narration == "STORY"
+    assert messages == ["ADVANCEMENT APPLIED"]

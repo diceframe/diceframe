@@ -43,6 +43,16 @@ function actions(entry: LogEntry): Act[] {
 function checks(entry: LogEntry): CheckResult[] {
   return Array.isArray(entry.check_results) ? entry.check_results : []
 }
+function systemChanges(entry: LogEntry): string[] {
+  return Array.isArray(entry.state_changes)
+    ? entry.state_changes.map(change => String(change || '').trim()).filter(Boolean)
+    : []
+}
+function systemChangeClass(change: string): string {
+  if (/待确认|未扣款|未发放|失败|可能未更新|等待|pending|failed|not granted|out of date/i.test(change)) return 'pending'
+  if (/获得|完成|成功|升级|复活|gained|completed|success|revived/i.test(change)) return 'good'
+  return ''
+}
 function sceneImageAsset(entry: LogEntry): string {
   const record = entry.scene_image
   if (!record || record.status !== 'ready') return ''
@@ -238,6 +248,15 @@ watch(() => rounds.value, async (latest) => {
             <button v-if="item.swipeCount < 5" class="ghost" @click="reroll(item.round)">{{ t('regenerate') }}</button>
           </div>
           <p v-if="swipeError && isGm" class="muted">{{ swipeError }}</p>
+          </div>
+        </div>
+        <div v-if="systemChanges(item.entry).length" class="state-card-list system-change-list">
+          <div v-for="(change, i) in systemChanges(item.entry)" :key="'change' + i" class="state-card" :class="systemChangeClass(change)">
+            <span class="state-card-title">
+              <NIcon :component="InformationCircleOutline" size="14" />
+              {{ t('systemRecords') }}
+            </span>
+            <div class="state-card-body">{{ change }}</div>
           </div>
         </div>
         <div v-for="recap in recaps(item.entry)" :key="recap.id || recap.text" class="message story-recap message-with-avatar" data-testid="story-recap-card">

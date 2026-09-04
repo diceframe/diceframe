@@ -88,18 +88,36 @@ def unearned_reward_notice(language: str) -> str:
     })
 
 
-def guard_unbacked_payment_narration(narration: str, data: dict[str, Any], language: str, *, currency_labels: Any = None) -> str:
+def should_warn_unbacked_payment(
+    narration: str,
+    data: dict[str, Any],
+    language: str,
+    *,
+    currency_labels: Any = None,
+) -> bool:
+    """Return whether narration describes a payment without an authority proposal."""
+
     text = str(narration or "").strip()
     if not text or has_economy_proposal(data):
-        return text
-    if not completed_payment_pattern(language, currency_labels).search(text):
-        return text
-    notice = localized_text(language, {
+        return False
+    return bool(completed_payment_pattern(language, currency_labels).search(text))
+
+
+def unbacked_payment_notice(language: str) -> str:
+    return localized_text(language, {
         "en": "No payment was charged: the GM must issue an explicit payment order.",
         "zh-CN": "本次未扣款：需要由 GM 明确发起支付订单。",
         "ja": "支払いは実行されていません。GM が明示的な支払い注文を発行してください。",
     })
-    return f"{text}\n\n{notice}"
+
+
+def guard_unbacked_payment_narration(narration: str, data: dict[str, Any], language: str, *, currency_labels: Any = None) -> str:
+    text = str(narration or "").strip()
+    if not should_warn_unbacked_payment(
+        text, data, language, currency_labels=currency_labels,
+    ):
+        return text
+    return f"{text}\n\n{unbacked_payment_notice(language)}"
 
 
 def unbacked_purchase_notice(language: str) -> str:

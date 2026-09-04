@@ -347,7 +347,7 @@ async def test_call_llm_with_tag_retry_caps_at_one_retry():
 
 
 def test_tag_failure_streak_appends_player_notice():
-    """P2-B：连续 3 轮标签解析失败时，叙事末尾追加玩家可见提示。"""
+    """P2-B：连续 3 轮标签解析失败时，记录玩家可见系统提示。"""
     from types import SimpleNamespace
     from src.commands.round_llm import apply_parsed_data_to_response
 
@@ -365,7 +365,7 @@ def test_tag_failure_streak_appends_player_notice():
     apply_parsed_data_to_response(inst, response, {})
     assert response.is_narration_only is True
     assert inst._tag_fail_streak == 3
-    assert "系统提示" in response.narration
+    assert "系统提示" in response.system_notices[0]
     assert "调查员推开门。" in response.narration
     assert response.state_update == {}
 
@@ -397,7 +397,7 @@ def test_tag_parse_success_resets_streak():
 
 
 def test_three_round_failure_sequence_records_health_event():
-    """P3-C：连续 3 轮标签失败 → streak 累积 + health_event 记录 + 叙事末尾提示。"""
+    """P3-C：连续 3 轮标签失败 → streak 累积 + health_event 记录 + 系统事件提示。"""
     from types import SimpleNamespace
     from src.commands.round_llm import apply_parsed_data_to_response
 
@@ -411,9 +411,9 @@ def test_three_round_failure_sequence_records_health_event():
         )
         apply_parsed_data_to_response(inst, response, {})
         if round_no < 2:
-            assert "系统提示" not in response.narration  # 前两轮无提示
+            assert not getattr(response, "system_notices", [])  # 前两轮无提示
         else:
-            assert "系统提示" in response.narration       # 第三轮追加提示
+            assert "系统提示" in response.system_notices[0]  # 第三轮追加提示
 
     assert inst._tag_fail_streak == 3
     codes = [e.get("code") for e in inst.health_events]

@@ -17,6 +17,7 @@ from src.engine.economy import (
     pending_proposals,
     proposal_transition_allowed,
     queue_effect_group,
+    queue_purchase_offer,
     queue_proposal,
     reconcile_rollback_snapshot,
     reverse_round_economy,
@@ -50,15 +51,109 @@ def _instance() -> GameInstance:
     return instance
 
 
+def test_narration_staleness_allows_resolutions_only() -> None:
+    """生成叙事期间玩家确认既有提案不判过期；回滚类迁移仍判过期。"""
+    from src.engine.economy import (
+        economy_changes_are_resolutions_only,
+        economy_fingerprint,
+    )
+
+    def fp(*statuses: str) -> dict[str, str]:
+        return {f"eco_{i}": status for i, status in enumerate(statuses)}
+
+    unchanged = fp("pending", "pending", "committed")
+    assert economy_changes_are_resolutions_only(unchanged, unchanged)
+    # pending -> 任一终态：本轮已诊断的误杀场景（生成期间确认弹窗）。
+    assert economy_changes_are_resolutions_only(
+        fp("pending", "pending"), fp("committed", "declined"),
+    )
+    assert economy_changes_are_resolutions_only(
+        fp("pending",), fp("rejected",),
+    )
+    assert economy_changes_are_resolutions_only(
+        fp("pending",), fp("cancelled",),
+    )
+    # 生成期间新增提案必须判过期，即使 queue_proposal 没有 revision。
+    assert not economy_changes_are_resolutions_only(
+        fp("pending"), {"eco_0": "pending", "eco_new": "pending"},
+    )
+    # 回滚类迁移必须判过期。
+    assert not economy_changes_are_resolutions_only(
+        fp("committed"), fp("reversed"),
+    )
+    assert not economy_changes_are_resolutions_only(
+        fp("committed"), fp("superseded"),
+    )
+    assert not economy_changes_are_resolutions_only(
+        fp("committed"), fp("pending"),
+    )
+    assert not economy_changes_are_resolutions_only(
+        fp("pending"), fp("superseded"),
+    )
+    assert not economy_changes_are_resolutions_only(
+        fp("pending"), {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_payer_confirmation_during_generation_keeps_round_output(tmp_path) -> None:
+    """回归：round_processor 的两个守卫在“结算既有提案”后必须放行。
+
+    用 economy_fingerprint 直接模拟 process_round_impl 的捕获/比较时序：
+    捕获后 resolve 一笔 pending（真实案例中玩家在叙事生成 3.7s 内点确认），
+    守卫须放行；而回滚产生的 reversed 迁移须丢弃。
+    """
+    from src.commands.round_processor import (
+        economy_changes_are_resolutions_only,
+        economy_fingerprint,
+    )
+    from src.engine.economy import queue_proposal, resolve_proposal
+
+    instance = _instance()
+    instance.round_number = 5
+    proposal = queue_proposal(
+        instance,
+        kind="purchase",
+        payer_uid="gm",
+        recipient_uid="gm",
+        amount=2,
+        rewards=[{"name": "火把", "category": "misc"}],
+        source="gm_manual",
+        source_ref="gm_manual:stall-test",
+    )
+    before = economy_fingerprint(instance)
+    resolved = resolve_proposal(instance, proposal["id"], actor_uid="gm", accepted=True)
+    assert resolved["ok"] is True
+    assert economy_changes_are_resolutions_only(before, economy_fingerprint(instance))
+
+    rollback_proposal = queue_proposal(
+        instance,
+        kind="purchase",
+        payer_uid="gm",
+        recipient_uid="gm",
+        amount=3,
+        rewards=[{"name": "绳索", "category": "misc"}],
+        source="gm_manual",
+        source_ref="gm_manual:stall-test-2",
+    )
+    resolve_proposal(instance, rollback_proposal["id"], actor_uid="gm", accepted=True)
+    before_rollback = economy_fingerprint(instance)
+    reverse_round_economy(instance, instance.round_number)
+    assert not economy_changes_are_resolutions_only(
+        before_rollback, economy_fingerprint(instance),
+    )
+
+
 def test_unconfirmed_purchase_grants_are_stripped() -> None:
     """验收 #7：有待确认收费时，模型输出同名物品 grant 必须被剥离。"""
     from src.engine.economy import filter_unconfirmed_purchase_grants, queue_purchase_offer
 
     instance = _instance()
-    queue_purchase_offer(
+    proposal = queue_purchase_offer(
         instance, payer_uid="gm", amount=50, items=["长剑"],
         source="gm_manual", source_ref="gm_manual:test",
     )
+    assert proposal["visibility"] == "party"
     data = {"state_update": {
         "loot": [
             {"player": "gm", "item": "长剑"},
@@ -961,6 +1056,38 @@ async def test_private_payment_outcome_does_not_leak_into_party_log(web_api) -> 
 
 
 @pytest.mark.asyncio
+async def test_purchase_settlement_is_party_visible_even_for_legacy_private_outcome(web_api) -> None:
+    """购买结算不能落入角色感知；旧的 private 标记也要升级为公开事件。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Public Purchase Settlement",
+        players=[{"character_name": "Buyer", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    instance.append_log_entry({
+        "round": instance.round_number,
+        "actions": [],
+        "gm_response": "商人提出交易。",
+        "state_changes": [],
+    })
+
+    characters._record_economy_outcome_in_round(instance, {
+        "kind": "purchase",
+        "visibility": "private",
+        "status": "committed",
+        "effects_status": "committed",
+        "amount": 5,
+        "reason": "购买通行证",
+        "round": instance.round_number,
+        "id": "legacy-purchase-outcome",
+    })
+
+    assert any("购买通行证" in item for item in instance.log[-1]["state_changes"])
+    assert not instance.private_log
+
+
+@pytest.mark.asyncio
 
 
 async def test_payment_decision_commits_or_discards_linked_effects(web_api) -> None:
@@ -1527,7 +1654,7 @@ async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
 @pytest.mark.asyncio
 
 
-async def test_in_flight_narration_is_discarded_after_economy_decision(
+async def test_in_flight_narration_keeps_output_when_pending_proposal_resolves(
     web_api,
     monkeypatch,
 ) -> None:
@@ -1545,6 +1672,13 @@ async def test_in_flight_narration_is_discarded_after_economy_decision(
     await instance.add_action(uid, "我等待商人的答复")
     assert await instance.try_advance() is True
     instance.complete_round_check_preparation()
+    proposal = queue_purchase_offer(
+        instance,
+        payer_uid=uid,
+        amount=3,
+        items=["商人的旧报价"],
+        source="gm_manual",
+    )
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -1566,19 +1700,75 @@ async def test_in_flight_narration_is_discarded_after_economy_decision(
     monkeypatch.setattr(llm, "call", delayed_call)
     processing = asyncio.create_task(api._handler.process_round(instance))
     await entered.wait()
-    proposal = queue_proposal(
+    declined = await api.resolve_payment(
+        created["game_key"], proposal["id"], False, uid,
+    )
+    assert declined["ok"] is True
+    release.set()
+
+    narration, private = await processing
+
+    # 结算既有提案（玩家在生成期间确认/拒绝自己的弹窗）不使叙事过期。
+    assert narration == "这条叙事已经过期。"
+    assert private == {}
+    assert any(entry.get("gm_response") == "这条叙事已经过期。" for entry in instance.log)
+
+
+@pytest.mark.asyncio
+async def test_in_flight_narration_is_discarded_after_rollback(
+    web_api,
+    monkeypatch,
+) -> None:
+    """回滚类迁移（结算回滚 reopen / reverse）仍必须在生成后丢弃叙事。"""
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Rollback Race",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    instance.gm_uid = uid
+    await instance.activate()
+    await instance.start_round()
+    await instance.add_action(uid, "我等待商人的答复")
+    assert await instance.try_advance() is True
+    instance.complete_round_check_preparation()
+    settled = queue_proposal(
         instance,
         kind="payment",
         source="gm_manual",
         payer_uid=uid,
         recipient_uid=uid,
         amount=3,
-        reason="商人的旧报价",
+        reason="已结算的旧付款",
     )
-    declined = await api.resolve_payment(
-        created["game_key"], proposal["id"], False, uid,
-    )
-    assert declined["ok"] is True
+    committed = await api.resolve_payment(created["game_key"], settled["id"], True, uid)
+    assert committed["ok"] is True
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed_call(*, system_prompt, user_message, **kwargs):
+        entered.set()
+        await release.wait()
+        return LLMResponse(
+            content="这条叙事已经过期。\n---\nSCENE:错误场景",
+            narration="这条叙事已经过期。",
+            state_update=None,
+            memory_delta=None,
+            info_asymmetry=None,
+            plot_update=None,
+            total_tokens=8,
+            is_narration_only=False,
+            provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", delayed_call)
+    processing = asyncio.create_task(api._handler.process_round(instance))
+    await entered.wait()
+    # 生成期间回滚本轮：committed -> pending（结算回滚 reopen），必须判过期。
+    reverse_round_economy(instance, instance.round_number)
     release.set()
 
     narration, private = await processing
@@ -1609,6 +1799,13 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
     await instance.start_round()
     await instance.add_action(uid, "我用力量推开石门", selected_attribute="str")
     assert await instance.try_advance() is True
+    proposal = queue_purchase_offer(
+        instance,
+        payer_uid=uid,
+        amount=1,
+        items=["旧报价"],
+        source="gm_manual",
+    )
     entered = asyncio.Event()
     release = asyncio.Event()
     calls_before = instance.total_llm_calls
@@ -1631,15 +1828,6 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
     monkeypatch.setattr("src.commands.round_processor.plan_round_checks", delayed_plan)
     planning = asyncio.create_task(api._handler.prepare_round_checks_ai(instance))
     await entered.wait()
-    proposal = queue_proposal(
-        instance,
-        kind="payment",
-        source="gm_manual",
-        payer_uid=uid,
-        recipient_uid=uid,
-        amount=1,
-        reason="旧报价",
-    )
     declined = await api.resolve_payment(
         created["game_key"], proposal["id"], False, uid,
     )
@@ -1648,10 +1836,11 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
 
     checks = await planning
 
-    assert checks == []
-    assert instance.round_checks_prepared is False
-    assert "check_request" not in instance.action_queue[0]
-    assert instance.total_llm_calls == calls_before
+    # 结算既有提案不使规划过期：检定计划与经济提案（economy_offers）都保留。
+    assert len(checks) == 1
+    assert instance.round_checks_prepared is True
+    assert "check_request" in instance.action_queue[0]
+    assert instance.total_llm_calls > calls_before
 
 
 @pytest.mark.asyncio

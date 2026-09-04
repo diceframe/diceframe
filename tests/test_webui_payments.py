@@ -241,6 +241,7 @@ async def test_gm_can_create_payment_proposal_without_deduction(web_api):
     proposal = created["proposal"]
     assert proposal["approval_policy"] == "payer"
     assert proposal["kind"] == "purchase"
+    assert proposal["visibility"] == "party"
     assert proposal["rewards"][0]["name"] == "通行证"
     assert inst.get_character_sheet(uid).get("gold") == 30
     assert proposal in pending_proposals(inst)
@@ -347,5 +348,4 @@ async def test_apply_state_update_caps_loot_per_round(web_api):
     names = {item["name"] for item in inventory}
     assert {f"物品{i}" for i in range(20)} <= names
     assert not names & {f"物品{i}" for i in range(20, 25)}
-
 

@@ -414,6 +414,55 @@ def pending_effect_groups(instance: Any) -> list[dict[str, Any]]:
     ]
 
 
+ECONOMY_RESOLUTION_STATUSES = frozenset({"committed", "declined", "cancelled", "rejected"})
+
+
+def economy_fingerprint(instance: Any) -> dict[str, str]:
+    """Snapshot one (proposal id -> status) entry per proposal.
+
+    Optimistic-concurrency helpers compare two fingerprints to decide whether
+    the economy changed in a way that invalidates an in-flight LLM response.
+    """
+
+    return {
+        str(item.get("id") or ""): str(item.get("status") or "")
+        for item in getattr(instance, "economy", {}).get("proposals", [])
+        if isinstance(item, dict)
+    }
+
+
+def economy_changes_are_resolutions_only(
+    before: dict[str, str],
+    after: dict[str, str],
+) -> bool:
+    """Whether proposal changes are solely settlements of pending proposals.
+
+    Payer confirmations/declines that arrive while an LLM response is being
+    generated do not invalidate that response: balances were validated
+    authoritatively at resolution time and model-emitted charges are dropped
+    regardless.  Rollback artifacts (reversed / superseded / reopened
+    proposals) and removed entries still count as stale.
+    """
+
+    # A proposal that did not exist at the start is a concurrent write, not a
+    # resolution of an already-known decision.  It must invalidate the
+    # in-flight narrative; otherwise a newly-created charge can be silently
+    # folded into a response generated from an older economy snapshot.
+    if set(after) - set(before):
+        return False
+    for pid, before_status in before.items():
+        after_status = after.get(pid)
+        if after_status == before_status:
+            continue
+        if (
+            before_status == "pending"
+            and after_status in ECONOMY_RESOLUTION_STATUSES
+        ):
+            continue
+        return False
+    return True
+
+
 def has_pending_economy_decision(instance: Any) -> bool:
     """Whether any economy decision remains unresolved (compatibility API)."""
 
@@ -574,6 +623,11 @@ def queue_purchase_offer(
         source_ref=source_ref,
         approval_policy="payer",
         rewards=rewards,
+        # A purchase offer changes the shared fiction (the party is waiting
+        # for the item/payment decision), so its proposal and final outcome
+        # are visible to the whole party.  Private GM payments can still use
+        # queue_proposal(..., visibility="private") explicitly.
+        visibility="party",
     )
 
 

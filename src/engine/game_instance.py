@@ -1082,7 +1082,12 @@ class GameInstance:
             self.last_activity = datetime.now(timezone.utc).isoformat()
         await self.start_round()
 
-    async def finish_judgment_with_swipe(self, gm_response: str, original_round: int) -> None:
+    async def finish_judgment_with_swipe(
+        self,
+        gm_response: str,
+        original_round: int,
+        state_changes: list[str] | None = None,
+    ) -> None:
         """为已有轮次添加 swipe（不推进回合）。"""
         async with self._lock:
             for entry in self.log:
@@ -1093,6 +1098,8 @@ class GameInstance:
                     swipes.append(gm_response)
                     entry["current_swipe"] = len(swipes) - 1
                     entry["gm_response"] = gm_response
+                    if state_changes is not None:
+                        entry["state_changes"] = list(state_changes)
                     break
             self.total_llm_calls += 1
             self.last_activity = datetime.now(timezone.utc).isoformat()

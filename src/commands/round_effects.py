@@ -93,16 +93,14 @@ def apply_growth_rewards(
     runtime: Any | None = None,
     *,
     include_base: bool = True,
-) -> None:
+) -> list[str]:
     if isinstance(runtime, NarrativeAdvancementRuntime):
         messages = runtime.apply_narrative_advancement_rewards(instance, data)
-        if messages:
-            response.narration = f"{response.narration or ''}\n\n" + "\n".join(messages)
-        return
+        return list(messages or [])
     growth_system = rule.growth_system if rule else "xp_level"
     if growth_system == "skill_improvement":
         progression.skill_growth_checks(instance, data.get("growth_skills", []))
-        return
+        return []
 
     xp_rewards: dict[str, int] = data.get("xp_rewards", {})
     level_up_msgs: list[str] = []
@@ -116,11 +114,9 @@ def apply_growth_rewards(
         instance.set_character_sheet(uid, character_sheet)
         up_msgs = progression.try_level_up(instance, uid)
         level_up_msgs.extend(up_msgs)
-    if level_up_msgs:
-        for msg in level_up_msgs:
-            logger.info("%s %s", instance.game_key, msg)
-        addon = "\n\n" + "\n".join(level_up_msgs)
-        response.narration = (response.narration or "") + addon
+    for msg in level_up_msgs:
+        logger.info("%s %s", instance.game_key, msg)
+    return level_up_msgs
 
 
 def update_quick_actions(instance: GameInstance, data: dict) -> None:
@@ -182,8 +178,6 @@ def append_state_change_messages(
     state_change_msgs = build_state_change_messages(instance, public_state_before, data)
     if not state_change_msgs:
         return []
-    addon = "\n\n" + "\n".join(state_change_msgs)
-    response.narration = (response.narration or "") + addon
     for msg in state_change_msgs:
         logger.info("%s %s", instance.game_key, msg)
     return state_change_msgs

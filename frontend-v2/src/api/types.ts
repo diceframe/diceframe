@@ -309,6 +309,7 @@ export type SceneGalleryItem = GeneratedImageRecord
 export interface LogEntry {
   round?: number
   gm_response?: string
+  state_changes?: string[]
   player_actions?: unknown
   actions?: unknown
   swipes?: unknown[]

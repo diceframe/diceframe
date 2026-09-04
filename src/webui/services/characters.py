@@ -75,7 +75,11 @@ def _record_economy_outcome_in_round(
             "ja": f"決済不成立（{amount}）：{reason}。支払いも関連結果も発生していません。",
         })
     round_number = int(outcome.get("round", 0) or 0)
-    if str(outcome.get("visibility") or "private") != "party":
+    # Purchases are always a party-visible settlement event.  Keep the
+    # explicit private path for other GM payments, but also promote purchases
+    # created before the visibility default was corrected.
+    is_purchase = str(outcome.get("kind") or "") == "purchase"
+    if str(outcome.get("visibility") or "private") != "party" and not is_purchase:
         recipients = {
             str(outcome.get("payer_uid") or ""),
             str(outcome.get("recipient_uid") or ""),
@@ -217,6 +221,7 @@ async def create_payment_proposal(
                 source="gm_manual",
                 source_ref=f"gm_manual:{inst.run_id}:{uuid4().hex}",
                 approval_policy="payer",
+                visibility="party",
             )
         await dependencies.games.save_instance(inst)
     return {"ok": True, "proposal": proposal}
