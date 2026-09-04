@@ -43,10 +43,33 @@ def discard_unearned_reward_proposals(instance: Any, data: dict[str, Any], narra
     if not isinstance(proposals, list):
         return 0
     text = str(narration or "")
+    completed_titles: set[str] = set()
+    plot_update = data.get("plot_update")
+    if isinstance(plot_update, dict):
+        for quest in plot_update.get("quests", []):
+            if isinstance(quest, dict) and str(quest.get("status") or "").casefold() in {
+                "completed", "complete", "已完成", "完成", "成功",
+            }:
+                title = str(quest.get("title") or "").strip().casefold()
+                if title:
+                    completed_titles.add(title)
+    tracker = getattr(instance, "plot_tracker", None)
+    for quest in getattr(tracker, "quests", {}).values() if tracker is not None else []:
+        status = getattr(getattr(quest, "status", None), "value", getattr(quest, "status", ""))
+        if str(status).casefold() in {"completed", "complete", "已完成", "完成", "成功"}:
+            title = str(getattr(quest, "title", "") or "").strip().casefold()
+            if title:
+                completed_titles.add(title)
     kept: list[dict[str, Any]] = []
     dropped = 0
     for proposal in proposals:
         if not isinstance(proposal, dict) or proposal.get("kind") != "reward":
+            kept.append(proposal)
+            continue
+        reason = str(proposal.get("reason") or "").casefold()
+        if any(title in reason or reason in title for title in completed_titles):
+            # Explicit same-turn or previously completed quest state is
+            # accepted as the completion evidence.
             kept.append(proposal)
             continue
         if _COMPLETION_EVIDENCE_RE.search(text) and not _CONDITIONAL_REWARD_RE.search(text):
