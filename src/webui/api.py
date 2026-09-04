@@ -1549,7 +1549,8 @@ class WebAPI:
         state = self._config_state if isinstance(self._config_state, dict) else {}
         return (
             bool(state.get("economy_auto_reward_enabled", True)),
-            max(1, int(state.get("economy_auto_reward_gold_cap", 50) or 50)),
+            # 与 runtime_config 默认保持一致：放宽到 10000，配置可覆盖。
+            max(1, int(state.get("economy_auto_reward_gold_cap", 10000) or 10000)),
         )
 
     async def create_payment_proposal(

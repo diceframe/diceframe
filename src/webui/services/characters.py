@@ -46,6 +46,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("trpg")
 
 
+_TRAILING_SENTENCE_PUNCTUATION = "。．.！!？?；;，,、"
+
+
+def _settlement_reason_text(reason: str) -> str:
+    """Strip trailing sentence punctuation so the composed card never shows
+    a doubled full stop（提案 reason 由模型书写，常自带句号）。"""
+
+    return str(reason or "").rstrip().rstrip(_TRAILING_SENTENCE_PUNCTUATION).rstrip()
+
+
 def _record_economy_outcome_in_round(
     instance: Any,
     outcome: dict[str, Any],
@@ -55,7 +65,7 @@ def _record_economy_outcome_in_round(
     status = str(outcome.get("status") or "")
     effects_status = str(outcome.get("effects_status") or "none")
     amount = int(outcome.get("amount", 0) or 0)
-    reason = str(outcome.get("reason") or "经济提案")
+    reason = _settlement_reason_text(str(outcome.get("reason") or "经济提案"))
     if status == "committed" and effects_status == "pending":
         message = localized_text(instance.language, {
             "en": f"Settlement confirmed ({amount}): {reason}. Linked results are waiting for the remaining decisions.",

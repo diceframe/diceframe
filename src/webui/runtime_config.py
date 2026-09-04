@@ -313,7 +313,9 @@ class ConfigStore:
                 saved.get("economy_auto_reward_enabled", True)
             ),
             "economy_auto_reward_gold_cap": int(
-                saved.get("economy_auto_reward_gold_cap", 50)
+                # 默认放宽到 10000：普通团奖励很少超过这个量级，50 的旧默认
+                # 会让大部分奖励退回 GM 手动确认；仍可在设置中按需调低。
+                saved.get("economy_auto_reward_gold_cap", 10000)
             ),
             "model_request_timeout_seconds": float(
                 env.get("TRPG_MODEL_REQUEST_TIMEOUT_SECONDS")

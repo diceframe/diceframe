@@ -503,3 +503,48 @@ async def test_duplicate_offer_not_queued_while_first_pending(web_api) -> None:
     pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
     assert len(pending) == 1
     assert pending[0]["id"] == first_offer["id"]
+
+
+# ---------- 5. 结算文案与奖励自动结算上限 ----------
+
+
+@pytest.mark.asyncio
+async def test_settlement_card_avoids_double_full_stop(web_api) -> None:
+    """模型书写的 reason 自带句号时，结算卡不得出现「。。」。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Settlement Card Punctuation",
+        players=[{"character_name": "尤落", "attributes": {"str": 10}, "gold": 500}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    instance.append_log_entry({
+        "round": instance.round_number,
+        "actions": [],
+        "gm_response": "交易完成。",
+        "state_changes": [],
+    })
+    from src.webui.services import characters
+
+    characters._record_economy_outcome_in_round(instance, {
+        "kind": "purchase",
+        "status": "committed",
+        "effects_status": "committed",
+        "amount": 2,
+        "reason": "玩家明确要买两根火把，GM叙事中已标明火把1金币。",
+        "round": instance.round_number,
+        "id": "punct-card",
+    })
+    card = next(
+        item for item in instance.log[-1]["state_changes"] if "结算已确认" in item
+    )
+    assert "。。" not in card
+    assert "已标明火把1金币。关联结果现已生效。" in card
+
+
+def test_auto_reward_default_cap_is_relaxed(web_api) -> None:
+    """奖励自动结算默认上限放宽到 10000（未显式配置的存量局直接生效）。"""
+    api, _lorebook, _registry, _llm, _worlds = web_api
+    enabled, cap = api.economy_auto_reward_settings()
+    assert enabled is True
+    assert cap == 10000
