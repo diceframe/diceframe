@@ -1,6 +1,5 @@
 """Minimal economy predicate used by the narrative effect barrier.
 
-Purchase requests are recorded from player actions by ``purchase_orders``.
 The former narration/evidence/price-repair pipeline is intentionally gone.
 """
 

@@ -148,10 +148,11 @@ class StateUpdateApplier:
             amount = int(proposal.get("amount", 0) or 0)
             kind = str(proposal.get("kind") or "")
             # Model output is never allowed to create a chargeable purchase or
-            # payment.  Those proposals must come from the authenticated GM
-            # purchase-order service; otherwise arbitrary narration/JSON can
-            # charge the wrong player or item.  Narrative rewards remain a
-            # separate, GM-approved path.
+            # payment.  The only legitimate path for an AI-sourced purchase is
+            # check_planner -> economy_offers -> queue_purchase_offer, which
+            # normalizes the actor and de-duplicates via a stable source_ref;
+            # state_update output has neither, so it stays discarded here.
+            # Narrative rewards remain a separate, GM-approved path.
             if kind in {"payment", "purchase", "fee", "transfer"}:
                 logger.warning(
                     "忽略模型经济扣款提案: kind=%s uid=%s round=%d",

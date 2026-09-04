@@ -121,6 +121,70 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                         "required": ["player", "reason"],
                     },
                 },
+                # 经济报价（可选）：与 checks 规划完全独立的附加输出。
+                # 只转述人类在本轮文本中明确说出的价格；AI 绝不推断、估算或
+                # 发明价格。服务端生成待确认提案，付款人弹窗确认后才扣款。
+                # 解析侧独立容错，缺失/畸形不影响 checks。
+                "economy_actions": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "description": (
+                        "Optional and independent of checks. Identify purchase intents the players clearly "
+                        "stated in their own actions, in ANY language (Chinese, Japanese, English, ...). "
+                        "Price questions ('多少钱?', 'いくら?', 'how much?') or hypothetical talk are NOT "
+                        "intents. Report only prices that a human actually stated in this round's text. "
+                        "The payer always confirms in a dialog before anything is deducted; you cannot "
+                        "charge anyone directly. Leave empty when unsure."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "player": {
+                                "type": "string",
+                                "description": "Exact player id or character name from the supplied roster.",
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": ["purchase"],
+                                "description": "Economic intent type. More types may be added in later versions.",
+                            },
+                            "target": {
+                                "type": "string",
+                                "maxLength": 120,
+                                "description": (
+                                    "The item/subject in the player's own words (e.g. 精钢长剑). "
+                                    "Do not translate or normalize it."
+                                ),
+                            },
+                            "amount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": (
+                                    "The price a human stated in this round's text. Omit when nobody has "
+                                    "stated one; never infer, estimate, or invent a price yourself."
+                                ),
+                            },
+                            "price_source": {
+                                "type": "string",
+                                "enum": ["player_stated", "gm_narrated", "none"],
+                                "description": (
+                                    "Where the amount came from. 'player_stated' = the buying player said the "
+                                    "number themselves. 'gm_narrated' = the GM stated the price in narration. "
+                                    "'none' = nobody has stated a price yet. Use 'none' and OMIT amount when "
+                                    "the price is not yet established — never invent, estimate, or infer a "
+                                    "price from context, item rarity, or real-world knowledge."
+                                ),
+                            },
+                            "note": {
+                                "type": "string",
+                                "maxLength": 160,
+                                "description": "Short private note (context or uncertainty).",
+                            },
+                        },
+                        "required": ["player", "type", "target"],
+                    },
+                },
             },
             "required": ["checks"],
         },

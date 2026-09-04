@@ -50,6 +50,39 @@ def _instance() -> GameInstance:
     return instance
 
 
+def test_unconfirmed_purchase_grants_are_stripped() -> None:
+    """验收 #7：有待确认收费时，模型输出同名物品 grant 必须被剥离。"""
+    from src.engine.economy import filter_unconfirmed_purchase_grants, queue_purchase_offer
+
+    instance = _instance()
+    queue_purchase_offer(
+        instance, payer_uid="gm", amount=50, items=["长剑"],
+        source="gm_manual", source_ref="gm_manual:test",
+    )
+    data = {"state_update": {
+        "loot": [
+            {"player": "gm", "item": "长剑"},
+            {"player": "gm", "item": "无关护符"},
+            {"player": "p2", "item": "长剑"},
+        ],
+        "players": {"gm": {"equip_gain": "皮甲", "hp_change": -1}},
+    }}
+    removed = filter_unconfirmed_purchase_grants(instance, data)
+    assert removed == 1
+    assert data["state_update"]["loot"] == [
+        {"player": "gm", "item": "无关护符"},
+        {"player": "p2", "item": "长剑"},
+    ]
+    # 无 pending 提案时不剥离任何东西。
+    assert filter_unconfirmed_purchase_grants(instance, {"state_update": {
+        "loot": [{"player": "gm", "item": "另一把长剑"}],
+    }}) == 1
+    instance.economy["proposals"][0]["status"] = "committed"
+    assert filter_unconfirmed_purchase_grants(instance, {"state_update": {
+        "loot": [{"player": "gm", "item": "长剑"}],
+    }}) == 0
+
+
 def test_only_plain_personal_purchase_is_nonblocking() -> None:
     instance = _instance()
     purchase = queue_proposal(

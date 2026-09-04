@@ -16,4 +16,4 @@ class PurchaseIntent:
     actor_uid: str
     action_text: str
     item_context: str
-    source: str = "keyword"  # keyword = 规则解析；ai = GM 模型结构化输出
+    source: str = "keyword"  # keyword = 规则解析（AI 报价经 check_planner 工具调用）
