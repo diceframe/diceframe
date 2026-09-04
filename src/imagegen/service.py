@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .assets import ImageAssetError, ImageAssetStore
-from .contracts import IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult
+from .contracts import IMAGE_PROVIDER_IDS, IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult
 from .providers import ImageProvider, ImageProviderError, create_image_provider
 
 
@@ -52,7 +52,7 @@ class ImageGenerationService:
         return {
             "enabled": self.enabled,
             "available": self.available,
-            "provider": self.provider_id,
+            "provider": self._provider().provider_id,
             "model": self.model,
             "auto_scene": self.auto_scene,
         }
@@ -71,8 +71,9 @@ class ImageGenerationService:
         composed_prompt = self._compose_prompt(prompt, purpose, request.style)
         size = self._size_for(request, purpose)
         try:
+            provider = self._provider()
             async with self._semaphore:
-                generated = await self._provider().generate(
+                generated = await provider.generate(
                     composed_prompt,
                     size=size,
                     quality=self.quality,
@@ -82,7 +83,7 @@ class ImageGenerationService:
                 purpose=purpose,
                 prompt=prompt,
                 revised_prompt=generated.revised_prompt,
-                provider=self.provider_id,
+                provider=getattr(provider, "provider_id", self.provider_id),
                 model=self.model,
                 owner_type=request.owner_type,
                 owner_id=request.owner_id,
@@ -98,10 +99,12 @@ class ImageGenerationService:
             "model": self.model,
             "timeout_seconds": self.timeout_seconds,
             "proxy_url": self.proxy_url,
+            "provider_id": self.provider_id,
         }
-        if self.provider_id == "openai-compatible":
+        try:
             return create_image_provider(**kwargs)
-        raise ImageGenerationError(f"不支持的图像生成 provider：{self.provider_id}")
+        except ImageProviderError as exc:
+            raise ImageGenerationError(str(exc)) from exc
 
     def _compose_prompt(self, prompt: str, purpose: str, request_style: str) -> str:
         parts = [self.style_prefix, str(request_style or "").strip(), prompt, PURPOSE_PROMPT_SUFFIXES[purpose]]
@@ -114,8 +117,10 @@ class ImageGenerationService:
         return self.landscape_size
 
     def _validate_config(self) -> None:
-        if self.provider_id != "openai-compatible":
+        if self.provider_id not in IMAGE_PROVIDER_IDS:
             raise ValueError(f"不支持的图像生成 provider：{self.provider_id}")
+        if self.provider_id == "minimax" and self.model and self.model != "image-01":
+            raise ValueError("MiniMax 图像生成目前仅支持 image-01")
         if not self.enabled:
             return
         if self.base_url:

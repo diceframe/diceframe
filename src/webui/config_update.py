@@ -19,6 +19,7 @@ from src.ai_providers import (
     strip_orphan_provider_secrets,
 )
 from src.asr.contracts import SUPPORTED_ASR_PROVIDER_IDS
+from src.imagegen.contracts import IMAGE_PROVIDER_IDS
 from src.tts.contracts import SUPPORTED_PROVIDER_IDS
 from src.webui.access_password import hash_access_password
 from src.webui.cors import invalid_cors_origins, normalize_cors_origins
@@ -269,7 +270,7 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 candidate[key] = timeout
             elif key == "imagegen_provider":
                 provider = str(raw or "").strip()
-                if provider != "openai-compatible":
+                if provider not in IMAGE_PROVIDER_IDS:
                     return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "图像生成 Provider 无效")
                 candidate[key] = provider
             elif key == "imagegen_timeout_seconds":

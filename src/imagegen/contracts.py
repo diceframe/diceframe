@@ -7,6 +7,7 @@ from typing import Any
 
 
 IMAGE_PURPOSES = frozenset({"scene", "avatar", "item", "map", "freeform"})
+IMAGE_PROVIDER_IDS = frozenset({"openai-compatible", "minimax"})
 
 
 def game_image_owner_id(game_key: Any) -> str:

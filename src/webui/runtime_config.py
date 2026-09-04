@@ -284,7 +284,9 @@ class ConfigStore:
             "asr_timeout_seconds": float(saved.get("asr_timeout_seconds", 60)),
             "imagegen_enabled": bool(saved.get("imagegen_enabled", False)),
             "imagegen_auto_scene": bool(saved.get("imagegen_auto_scene", True)),
-            "imagegen_provider": "openai-compatible",
+            "imagegen_provider": str(
+                saved.get("imagegen_provider") or "openai-compatible"
+            ),
             "imagegen_base_url": str(
                 env.get("TRPG_IMAGEGEN_BASE_URL")
                 or saved.get("imagegen_base_url", "")

@@ -259,6 +259,7 @@ def create_image_provider(
     model: str,
     timeout_seconds: float,
     proxy_url: str = "",
+    provider_id: str = "openai-compatible",
 ) -> ImageProvider:
     kwargs = {
         "base_url": base_url,
@@ -267,12 +268,15 @@ def create_image_provider(
         "timeout_seconds": timeout_seconds,
         "proxy_url": proxy_url,
     }
+    provider_id = str(provider_id or "").strip().lower()
     hostname = (urlparse(str(base_url or "").strip()).hostname or "").lower()
-    if (
+    if provider_id == "minimax" or (
         hostname in {"api.minimax.cn", "api.minimaxi.com"}
         and model == "image-01"
     ):
         return MiniMaxImageProvider(**kwargs)
+    if provider_id != "openai-compatible":
+        raise ImageProviderError(f"不支持的图像生成 provider：{provider_id}")
     return OpenAICompatibleImageProvider(**kwargs)
 
 

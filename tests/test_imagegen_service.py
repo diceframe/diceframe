@@ -109,6 +109,11 @@ def test_service_availability_and_config_validation(tmp_path):
         )
     with pytest.raises(ValueError, match="provider"):
         ImageGenerationService(_config(imagegen_provider="unsupported"), tmp_path)
+    with pytest.raises(ValueError, match="image-01"):
+        ImageGenerationService(
+            _config(imagegen_provider="minimax", imagegen_model="image-model"),
+            tmp_path,
+        )
 
 
 def test_service_bypasses_proxy_for_local_endpoints(tmp_path):
@@ -194,6 +199,35 @@ async def test_service_preserves_openai_adapter_for_other_hosts(tmp_path, monkey
     result = await service.generate(ImageGenerationRequest(prompt="harbor"))
 
     assert result.revised_prompt == "openai-compatible result"
+
+
+@pytest.mark.asyncio
+async def test_explicit_minimax_provider_uses_native_adapter_on_custom_endpoint(
+    tmp_path, monkeypatch,
+):
+    seen = {}
+
+    async def fake_minimax_post(self, payload, headers):
+        seen.update(payload)
+        return {
+            "data": {"image_base64": [base64.b64encode(_png_bytes()).decode("ascii")]},
+            "base_resp": {"status_code": 0},
+        }
+
+    monkeypatch.setattr(MiniMaxImageProvider, "_post_json", fake_minimax_post)
+    service = ImageGenerationService(
+        _config(
+            imagegen_provider="minimax",
+            imagegen_base_url="https://minimax-gateway.example/v1",
+            imagegen_model="image-01",
+        ),
+        tmp_path,
+    )
+    result = await service.generate(ImageGenerationRequest(prompt="harbor", purpose="avatar"))
+
+    assert result.provider == "minimax"
+    assert service.public_config()["provider"] == "minimax"
+    assert seen["response_format"] == "base64"
 
 
 @pytest.mark.parametrize(
