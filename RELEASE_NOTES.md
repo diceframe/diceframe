@@ -1,6 +1,6 @@
-# DiceFrame v2.5.1
+# DiceFrame v2.5.2
 
-> 稳定版。v2.5.1 延续 v2.5.0 的功能，并统一购买提案、AI 行动识别、多人结算展示与图像生成配置。重要战役升级前，请先备份完整的 `data/` 文件夹。
+> 稳定版。v2.5.2 延续 v2.5.1 的功能，修复实测发现的购买结算链路问题：首次询价的购买现在会在 GM 报价的同一回合弹出付款确认，叙事交付无法再绕过付款，成交后也不会每回合重复弹窗；并修复物品数量后缀与结算文案、放宽奖励自动结算默认上限。重要战役升级前，请先备份完整的 `data/` 文件夹。
 
 ## 中文
 
@@ -27,25 +27,18 @@
 - **模型目录与主模型**：可以在模型目录中直接指定主模型；写入失败时会回滚，避免界面显示与实际配置不一致。
 - **更清晰的连接安全说明**：设置页补充本地 HTTPS、局域网/外网访问、证书与 Android 连接的说明，并改善相关移动端布局。
 - **运行日志与诊断**：运行日志可持久化与导出；需要排查时，内置助手可以在明确授权后阅读受限、脱敏的 DiceFrame 运行诊断上下文。
-- **Docker 托管更新首次发布**：容器可下载并校验应用更新包，经过健康检查与观察期后切换版本；失败时可回到上一应用版本，业务数据仍独立保留。
+- **Docker 托管更新**：容器可下载并校验应用更新包，经过健康检查与观察期后切换版本；失败时可回到上一应用版本，业务数据仍独立保留。
 
 ### 本版重点更新
 
-- **AI 行动层与购买提案**：GM planner 可从中文、英文、日文等自然语言行动识别购买意图，并生成付款人待确认的购买提案；AI 只负责理解，不能直接扣款或发货。
-- **付款确认安全边界**：购买统一为单一提案状态机，只有报价中的付款人确认后才会扣款和发放物品；未明确说出的价格不会被模型自行推断。
-- **系统结算信息分层**：扣款、奖励和物品发放显示为全队可见的系统结算卡，不再混入 GM 叙事；私聊和私人提问仍保持私密。
-- **经济状态可靠性**：补强回滚、并发写入和重复提交保护，并将内存投递 outbox 从经济模块中拆出，降低重复结算风险。
-- **普通奖励自动结算**：上限内（默认 50 金币，可配置）的单人金币奖励在回合完成后自动到账，不再阻塞整桌等待 GM 确认；超额奖励或关闭开关时保持原有的 GM 确认流程。
-- **重置后快速重建与身份恢复**：重置后 GM/单人游玩页提供直接创建角色入口；玩家从连接注册后返回旧游玩地址时会自动恢复本地玩家身份，避免被误判为未加入本局。
-- **意图多语言**：意图识别模式迁移到语言资源文件，日文局的「剣を買います」等购买句式现在可以正确识别。
-- **MiniMax 图像生成**：新增显式 `minimax` provider，支持 `image-01` 模型及对应的尺寸、响应和 Base64 校验。
+- **同轮购买确认闭环**：玩家首次询价购买时，若本轮 GM 叙事中出现了真人报出的价格，系统会在同一回合弹出付款人确认窗；叙事中尚未有价格时，系统会先拦截该商品的叙事交付，价格明确后才进入确认，绝不再“白拿货”。
+- **购买防重复弹窗**：GM 规划器现在能看到最近的购买历史（状态、商品、数量、金额），浏览、询问、使用已购物品不再被误判成新的购买；同一商品已有待确认报价时不会再叠加第二份确认窗，成交或拒绝后也不重复弹窗，除非玩家再次明确要求购买。
+- **奖励自动结算上限放宽**：普通奖励自动结算的默认金币上限从 50 提高到 10000，大部分叙事奖励不再退回 GM 手动确认；仍可在设置中按局调低。
 
 ### 修复、兼容与更新可靠性
 
-- **世界书批量导入**：超过 50 条的条目导入改为一次批量请求完成，不再触发写操作频控而中途失败（#213）；部分失败会按条目报告。
-- **图像生成分步配置**：可以先启用图像生成、稍后再选择服务商和模型；配置完整前服务保持不可用而不是报错，原有 URL 安全校验不变（#218）。
-- **重置后状态**：修复重置会清空玩家后缺少角色创建入口的问题；旧游玩地址的玩家身份恢复不再误判。
-- **多数量购买结算**：明确区分单价和总价，购买多瓶/多个相同物品时按数量正确扣款并发货。
+- **物品数量后缀**：LOOT 物品串结尾的 `xN` / `×N` 数量后缀会被正确解析，不再出现“回复药水x5 ×1”式的脏行；同名物品按数量正确堆叠，购买交付也并入原有物品行。
+- **结算文案**：结算卡不再出现双句号（提案原因自带句号时的拼接问题）。
 - **购买提案迁移**：旧购买请求和订单字段迁移时安全丢弃，不影响已经结算的余额、物品和交易流水。
 - **规则边界**：D&D 专属自动化继续限制在 D&D 运行时边界内，不会自动改变传统规则、CoC、赛博朋克或 generic d20 的玩法。
 
@@ -55,15 +48,15 @@
 - 首次启动会在可安全判断的前提下升级内置模板与兼容数据；已经被用户修改的世界书或内容不会被系统模板无条件覆盖，无法安全判断时会保留原样。
 - 已绑定到存档的冒险包继续保持只读、不可删除，确保重开时始终使用同一份已验证的内容。
 - “重开”和“重置”会清理该局的会话派生记忆，避免叙事串到新局；它们不会删除其它存档。
-- 奖励自动结算默认开启（上限 50 金币）；如需回到全部 GM 确认模式，可在配置中关闭 `economy_auto_reward_enabled`。
+- 奖励自动结算默认开启，上限已放宽到 10000 金币；如需恢复严格确认模式，可在配置中调低 `economy_auto_reward_gold_cap` 或关闭 `economy_auto_reward_enabled`。
 - 存档迁移到 schema 7 时会移除旧的 `purchase_requests` 和 `purchase_orders` 字段；未确认的旧购买请求不保证保留。
 - Docker 托管更新包当前支持 `linux-amd64`。
 
 ### 下载与校验
 
-- **普通 Windows 用户**：`DiceFrame-v2.5.1-windows-portable.zip`
-- **源码运行用户**：`DiceFrame-v2.5.1-windows.zip`
-- **托管 Docker 更新**：`DiceFrame-v2.5.1-docker-update-linux-amd64.zip`
+- **普通 Windows 用户**：`DiceFrame-v2.5.2-windows-portable.zip`
+- **源码运行用户**：`DiceFrame-v2.5.2-windows.zip`
+- **托管 Docker 更新**：`DiceFrame-v2.5.2-docker-update-linux-amd64.zip`
 - 下载后请使用 Release 中的 `SHA256SUMS` 统一校验；重要战役建议保留旧版程序与数据备份，便于回退。
 
 ## English
@@ -91,25 +84,18 @@
 - **Provider catalog and main model**: Choose the main model directly from the catalog. Configuration writes roll back on failure so the UI and stored configuration cannot silently diverge.
 - **Clearer connection guidance**: Settings now explain local HTTPS, LAN/public access, certificates, and Android connectivity, with improved mobile layouts for related controls.
 - **Runtime logs and diagnostics**: Runtime logs can be retained and exported. With explicit permission, the built-in assistant can inspect a bounded, redacted DiceFrame diagnostic context for troubleshooting.
-- **First managed-Docker update release**: Containers can download and verify an application update package, switch versions after health checks and a probation period, and return to the prior application version on failure while business data remains separate.
+- **Managed Docker updates**: Containers can download and verify an application update package, switch versions after health checks and a probation period, and return to the prior application version on failure while business data remains separate.
 
 ### Included in this release
 
-- **AI action layer & purchase proposals**: The GM planner recognizes purchase intent in Chinese, English, Japanese, and other natural-language actions, then creates a payer-confirmed proposal. The AI understands actions but cannot charge or deliver items directly.
-- **Payer-confirmation boundary**: Purchases use one proposal state machine. Only the quoted payer can confirm a charge; prices that were not explicitly stated are never invented by the model.
-- **System settlement cards**: Charges, rewards, and item delivery appear as party-visible system settlement cards instead of GM narration. Private messages and questions remain private.
-- **Economy reliability**: Rollback, concurrent writes, and duplicate submissions are guarded, and the memory delivery outbox is separated from the economy module.
-- **Automatic reward settlement**: Plain single-recipient gold rewards within the configured cap (default 50, configurable) settle automatically after each round instead of blocking the table for a GM click. Over-cap rewards and the off switch keep the original confirmation flow.
-- **Post-reset rebuild & identity restore**: After a reset, the GM/solo play page offers a direct character-creation entry, and players returning to an old play URL after joining restore their local identity instead of being treated as not joined.
-- **Intent multilingual support**: Intent trigger patterns moved into language resource files; Japanese phrases such as「剣を買います」are now recognized.
-- **MiniMax image generation**: Added an explicit `minimax` provider with the `image-01` model and provider-specific size, response, and Base64 validation.
+- **Same-round purchase confirmation**: When a player's first purchase request is priced by a human-stated number in that round's narration, the payer confirmation dialog now appears in the same round. While no price exists, narrative delivery of the item is intercepted — the purchase only completes through explicit payer confirmation, never free handouts.
+- **No more repeated purchase dialogs**: The GM planner now sees recent purchase history (status, items, quantity, amount). Browsing, questions, and using bought items are no longer misread as new purchases; a pending quote is never stacked with a second dialog, and settled or declined deals do not reopen unless the player explicitly buys again.
+- **Relaxed automatic reward settlement**: The default gold cap for auto-settled plain rewards rises from 50 to 10000, so most narrative rewards settle automatically; per-game configuration can lower it again.
 
 ### Fixes, compatibility, and update reliability
 
-- **Lorebook batch import**: Importing more than 50 entries now completes in a single batched request instead of tripping the write flood guard mid-import (#213); per-entry failures are reported individually.
-- **Staged image generation**: Enable image generation first and pick the provider/model later. Before the configuration is complete the service reports unavailable cleanly instead of erroring, with URL security checks unchanged (#218).
-- **Post-reset state**: Fixed the missing character-creation entry after a reset cleared the roster; player identity restoration for old play URLs no longer misfires.
-- **Multi-quantity purchase settlement**: Unit and total prices are distinguished, so buying multiple copies charges and delivers the requested quantity correctly.
+- **Item quantity suffixes**: Trailing `xN` / `×N` quantity suffixes in LOOT item strings are parsed correctly, eliminating junk rows like "回复药水x5 ×1"; same-name items stack by quantity, including purchase deliveries.
+- **Settlement card text**: Settlement cards no longer render a doubled full stop when the model-written reason already ends with one.
 - **Purchase proposal migration**: Legacy purchase request and order fields are safely removed during migration without changing already-settled balances, items, or transaction history.
 - **Ruleset boundaries**: D&D-specific automation remains inside the D&D runtime boundary and does not automatically alter traditional rules, Call of Cthulhu, cyberpunk, or generic d20 play.
 
@@ -119,13 +105,13 @@
 - On first startup, bundled templates and compatibility data are upgraded only when this is safe to determine. User-edited worldbooks and content are never unconditionally overwritten; uncertain cases are preserved unchanged.
 - Adventure packages bound to saves remain read-only and undeletable so restarts always use the same validated content.
 - Restart and reset clear session-derived memory for that game to prevent narrative carry-over; they do not delete other saves.
-- Automatic reward settlement is enabled by default (cap 50 gold); disable `economy_auto_reward_enabled` in the configuration to return to full GM confirmation.
+- Automatic reward settlement is enabled by default with the cap raised to 10000 gold; lower `economy_auto_reward_gold_cap` or disable `economy_auto_reward_enabled` in the configuration to return to strict confirmation.
 - Save migration to schema 7 removes legacy `purchase_requests` and `purchase_orders`; unconfirmed legacy purchase requests are not guaranteed to survive.
 - Managed Docker updates currently support `linux-amd64`.
 
 ### Downloads and verification
 
-- **Regular Windows users**: `DiceFrame-v2.5.1-windows-portable.zip`
-- **Source-run users**: `DiceFrame-v2.5.1-windows.zip`
-- **Managed Docker update**: `DiceFrame-v2.5.1-docker-update-linux-amd64.zip`
+- **Regular Windows users**: `DiceFrame-v2.5.2-windows-portable.zip`
+- **Source-run users**: `DiceFrame-v2.5.2-windows.zip`
+- **Managed Docker update**: `DiceFrame-v2.5.2-docker-update-linux-amd64.zip`
 - Verify downloads with the Release `SHA256SUMS`. For important campaigns, keep the prior program version and a data backup so rollback remains possible.
