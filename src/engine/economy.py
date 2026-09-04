@@ -590,6 +590,37 @@ def queue_proposal(
 PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer"})
 
 
+def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -> bool:
+    """True when a pending purchase proposal already covers this payer+item.
+
+    AI offer extraction re-reads shop narration every round, so a deal that is
+    still awaiting confirmation can be quoted again and stack a second dialog
+    on the first.  Queueing is skippable in that case; a settled or declined
+    purchase is intentionally NOT covered here — a genuine re-buy stays legal
+    (ADR 0002: a hallucinated extra costs one decline click, never a charge).
+    """
+
+    key = str(target or "").strip().casefold()
+    payer = str(payer_uid or "")
+    if not key or not payer:
+        return False
+    for proposal in instance.economy.get("proposals", []):
+        if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+            continue
+        if str(proposal.get("kind") or "") != "purchase":
+            continue
+        if str(proposal.get("payer_uid") or "") != payer:
+            continue
+        for reward in proposal.get("rewards") or []:
+            name = (
+                str(reward.get("name") or "").strip().casefold()
+                if isinstance(reward, dict) else str(reward).strip().casefold()
+            )
+            if name and (name in key or key in name):
+                return True
+    return False
+
+
 def queue_purchase_offer(
     instance: Any,
     *,

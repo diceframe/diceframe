@@ -67,7 +67,7 @@ from src.engine.economy import (
     has_blocking_economy_decision,
     queue_effect_group,
 )
-from src.engine.economy import filter_unconfirmed_purchase_grants
+from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_identical_purchase
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.imagegen import (
@@ -272,6 +272,14 @@ class RoundProcessor:
             # 提前创建会让 planning_target_is_current() 误判规划过期。
             for offer in metadata.get("economy_offers") or []:
                 try:
+                    if has_pending_identical_purchase(
+                        instance, str(offer["payer_uid"]), str(offer["target"]),
+                    ):
+                        logger.info(
+                            "同商品购买已待确认，跳过重复 AI 报价: payer=%s target=%s round=%d",
+                            offer["payer_uid"], offer["target"], instance.round_number,
+                        )
+                        continue
                     quantity = max(1, min(8, int(offer.get("quantity", 1) or 1)))
                     queue_purchase_offer(
                         instance,
@@ -701,6 +709,14 @@ class RoundProcessor:
                 late_offers = []
             for offer in late_offers:
                 try:
+                    if has_pending_identical_purchase(
+                        instance, str(offer["payer_uid"]), str(offer["target"]),
+                    ):
+                        logger.info(
+                            "同商品购买已待确认，跳过复检重复报价: payer=%s target=%s round=%d",
+                            offer["payer_uid"], offer["target"], instance.round_number,
+                        )
+                        continue
                     quantity = max(1, min(8, int(offer.get("quantity", 1) or 1)))
                     queue_purchase_offer(
                         instance,

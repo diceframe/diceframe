@@ -28,7 +28,12 @@ from src.commands.state_items import (
     split_item_quantity,
 )
 from src.commands.tag_parser import parse_tag_state
-from src.engine.economy import filter_unconfirmed_purchase_grants, queue_purchase_offer
+from src.engine.economy import (
+    filter_unconfirmed_purchase_grants,
+    has_pending_identical_purchase,
+    queue_purchase_offer,
+    resolve_proposal,
+)
 from src.engine.game_instance import GameInstance
 from src.llm.client import LLMResponse
 
@@ -250,6 +255,8 @@ class PurchaseFlowLLMStub:
 
     def __init__(self, base) -> None:
         self._base = base
+        # 在外部覆盖 base.call 之前快照原始绑定方法，避免回退路径递归。
+        self._base_call = base.call
         self.buyer_uid = ""
         self.planner_economy: list = []
         self.price_pass_economy: list = []
@@ -275,7 +282,7 @@ class PurchaseFlowLLMStub:
                 is_narration_only=False,
                 provider_used="fake",
             )
-        return await self._base.call(system_prompt, user_message, **kwargs)
+        return await self._base_call(system_prompt, user_message, **kwargs)
 
 
 def _potion_row(sheet: dict) -> dict | None:
@@ -399,3 +406,100 @@ def test_queue_purchase_offer_idempotent_for_pass_offers() -> None:
     )
     assert first["id"] == second["id"]
     assert len(instance.economy["proposals"]) == 1
+
+
+# ---------- 4. 成交后不再每回合重复弹窗 ----------
+
+
+@pytest.mark.asyncio
+async def test_planner_context_lists_recent_purchases() -> None:
+    """planner 必须能看到已成交/已拒绝的购买，才能避免把追问当新意图。"""
+    instance = _instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我在大厅坐着休息"}]
+    instance.get_character_sheet("p1").update({
+        "gold": 5000, "currency": {"amount": 5000, "base_unit": "unit", "label": "金币"},
+    })
+    proposal = queue_purchase_offer(
+        instance, payer_uid="p1", amount=50, items=["治疗药水"] * 5,
+        source="gm_manual", source_ref="gm_manual:test",
+    )
+    resolve_proposal(instance, proposal["id"], actor_uid="p1", accepted=True,
+                     grant_reward=lambda sheet, reward: None)
+    captured: dict[str, str] = {}
+
+    class _Client:
+        async def call_tools(self, system_prompt, user_message, **kwargs):
+            captured["user"] = user_message
+            return SimpleNamespace(
+                tool_calls=[], total_tokens=1, provider_used="fake", native_tools=True,
+            )
+
+    await plan_round_checks(instance, None, _Client())
+    payload = json.loads(captured["user"])
+    assert payload["recent_purchases"] == [{
+        "round": proposal["round"], "status": "committed", "payer_id": "p1",
+        "items": ["治疗药水"], "quantity": 5, "amount": 50,
+    }]
+
+
+def test_has_pending_identical_purchase_scope() -> None:
+    instance = _instance()
+    queue_purchase_offer(
+        instance, payer_uid="p1", amount=50, items=["治疗药水"] * 5,
+        source="gm_manual", source_ref="gm_manual:dup",
+    )
+    # 同付款人同商品（含包含匹配）→ 待确认重复。
+    assert has_pending_identical_purchase(instance, "p1", "治疗药水")
+    assert has_pending_identical_purchase(instance, "p1", "治疗药水x5")
+    # 其他付款人 / 已拒绝 / 已成交不算待确认重复。
+    assert not has_pending_identical_purchase(instance, "p2", "治疗药水")
+    assert not has_pending_identical_purchase(instance, "p1", "长剑")
+    instance.economy["proposals"][0]["status"] = "committed"
+    assert not has_pending_identical_purchase(instance, "p1", "治疗药水")
+
+
+@pytest.mark.asyncio
+async def test_duplicate_offer_not_queued_while_first_pending(web_api) -> None:
+    """同一商品已有待确认提案时，下一轮不再叠第二份报价。"""
+    api, _lorebook, registry, fake_llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Duplicate Offer",
+        players=[{"character_name": "尤落", "attributes": {"str": 10}, "gold": 500}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    sheet = instance.get_character_sheet(uid)
+    sheet["inventory"] = [{"name": "治疗药水", "qty": 1, "effect": "恢复10点HP"}]
+    instance.set_character_sheet(uid, sheet)
+
+    stub = PurchaseFlowLLMStub(fake_llm)
+    stub.buyer_uid = uid
+    stub.planner_economy = [{
+        "type": "purchase", "player": uid, "target": "治疗药水",
+        "quantity": 5, "amount": 10, "amount_scope": "unit",
+        "price_source": "gm_narrated",
+    }]
+    stub.price_pass_economy = []
+    stub.narration = "店主擦着柜台，等你拿主意。"
+    fake_llm.call_tools = stub.call_tools
+    fake_llm.call = stub.call
+
+    async def play_round(action: str) -> None:
+        await instance.add_action(uid, action)
+        assert await instance.try_advance() is True
+        await api._handler.process_round(instance)
+
+    await instance.activate()
+    await instance.start_round()
+    await play_round("买5瓶治疗药水")
+    pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
+    assert len(pending) == 1
+    first_offer = pending[0]
+
+    # 第二轮（process_round 结束时已自动进入下一轮）玩家只是继续话题；
+    # planner 仍输出同样的报价意图，但不得叠窗。
+    await play_round("再看看货架")
+    pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
+    assert len(pending) == 1
+    assert pending[0]["id"] == first_offer["id"]

@@ -59,6 +59,39 @@ def _skill_rows(sheet: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
+    """最近的购买提案快照，让 planner 看到“什么已经买过/报过价”。
+
+    没有这份历史时，模型只能从 recent_narration 里看到上一轮的价格，
+    容易把“还有什么”这类浏览追问误判成新的购买意图，导致成交后
+    每回合重复弹窗（实际事故：round3 重复报价 round2 已成交的药水）。
+    """
+    rows: list[dict[str, Any]] = []
+    for proposal in reversed(instance.economy.get("proposals", [])):
+        if len(rows) >= 5:
+            break
+        if not isinstance(proposal, dict) or str(proposal.get("kind") or "") != "purchase":
+            continue
+        if str(proposal.get("status") or "") not in {"pending", "committed", "declined"}:
+            continue
+        rewards = proposal.get("rewards") or []
+        items = sorted({
+            str(reward.get("name") or "").strip()
+            for reward in rewards
+            if isinstance(reward, dict) and str(reward.get("name") or "").strip()
+        })
+        rows.append({
+            "round": proposal.get("round"),
+            "status": proposal.get("status"),
+            "payer_id": proposal.get("payer_uid"),
+            "items": items,
+            "quantity": len(rewards),
+            "amount": proposal.get("amount"),
+        })
+    rows.reverse()
+    return rows
+
+
 def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     players = []
     for action in instance.action_queue:
@@ -113,6 +146,7 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         "difficulty": instance.difficulty,
         "ruleset": ruleset,
         "players": players,
+        "recent_purchases": _recent_purchases(instance),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
