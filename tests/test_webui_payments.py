@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.skip(reason="legacy pending-payment/PAY contract retired in schema 6; covered by test_purchase_orders")
+
 from src.commands.game_handler import GameHandler
 from src.commands.tag_parser import parse_tag_state
 from src.engine.economy import queue_effect_group

@@ -10,16 +10,14 @@ from typing import Any
 from src.commands.economy_effects import (
     currency_labels_for_rule,
     discard_unearned_reward_proposals,
-    discard_unbacked_purchase_items,
     defer_narrative_effects,
     guard_unbacked_payment_narration,
     has_economy_proposal,
-    has_server_purchase_guard,
     pending_decision_notice,
-    repair_unbacked_purchase,
     unearned_reward_notice,
     unbacked_purchase_notice,
 )
+from src.engine.purchase_orders import filter_unordered_purchase_grants
 from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier, discard_unresolved_player_damage
@@ -192,20 +190,12 @@ class SwipeGenerator:
         )
         if dropped_rewards:
             narration = f"{narration}\n\n{unearned_reward_notice(instance.language)}".strip()
-        dropped_purchase_items, purchase_was_ambiguous = repair_unbacked_purchase(
-            instance, data, narration,
-            actions=target_entry.get("actions", []),
-            currency_labels=currency_labels,
-        )
-        if not purchase_was_ambiguous:
-            dropped_purchase_items += discard_unbacked_purchase_items(
-                instance, data, narration, currency_labels=currency_labels,
-            )
+        dropped_purchase_items = filter_unordered_purchase_grants(instance, data)
         if dropped_purchase_items:
             narration = f"{narration}\n\n{unbacked_purchase_notice(instance.language)}".strip()
         deferred_effects = defer_narrative_effects(
             data, response,
-            defer_state_update=not has_server_purchase_guard(data),
+            defer_state_update=True,
         )
         economy_pending = has_economy_proposal(data)
         if economy_pending:

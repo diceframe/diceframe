@@ -10,7 +10,7 @@ import re
 
 from aiohttp import web
 
-from src.engine.economy import has_blocking_economy_decision
+from src.engine.economy import has_blocking_economy_decision, pending_economy_proposals
 from src.engine.game_instance import GameState
 from src.llm.parser import sanitize_narration
 from src.webui.connection_pool import ConnectionPool
@@ -277,16 +277,15 @@ def _play_public_signature(inst, user_id: str) -> str:
         "scene_image": inst.scene_image,
         "log_scene_image": (inst.log[-1].get("scene_image") if inst.log else None),
         "quick_actions": getattr(inst, "quick_actions", []),
-        "pending_payments": [
-            payment for payment in getattr(inst, "pending_payments", [])
-            if payment.get("status") == "pending"
-            and (
+        "economy_proposals": [
+            proposal for proposal in pending_economy_proposals(inst)
+            if (
                 user_id == inst.gm_uid
-                or payment.get("visibility") == "party"
-                or user_id == str(payment.get("payer_uid") or payment.get("uid") or "")
+                or proposal.get("visibility") == "party"
+                or user_id == str(proposal.get("payer_uid") or proposal.get("uid") or "")
                 or user_id in {
                     str(item.get("uid") or "")
-                    for item in (payment.get("contributors") or [])
+                    for item in (proposal.get("contributors") or [])
                     if isinstance(item, dict)
                 }
             )

@@ -12,7 +12,6 @@ from typing import Any, TypedDict
 from src.engine.contracts import (
     ActionRecord,
     CheckResult,
-    PendingPayment,
     PlayerData,
     RoundLogEntry,
     TableTalkExchange,
@@ -157,7 +156,6 @@ class GamePersistedState(TypedDict, total=False):
     pending_combat_results: list[OpaqueState]
     lorebook_timed_state: dict[str, OpaqueState]
     quick_actions: list[str]
-    pending_payments: list[PendingPayment]
     health_events: list[OpaqueState]
     health_status: OpaqueState
     last_check: CheckResult | None

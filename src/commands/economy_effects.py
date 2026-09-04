@@ -1,93 +1,32 @@
-"""Bridge narrative proposals to authoritative economic decisions.
+"""Narrative economy gates that do not create charges.
 
-The LLM may describe and propose a transaction, but state changes which depend
-on that transaction must not become authoritative until the decision commits.
-This module extracts those effects from one parsed response.  The command
-orchestrator owns applying them later; the engine economy owns their persisted
-decision group.
+Purchases are created only by the explicit GM purchase-order service. Model
+output can describe a payment, but it cannot create a payment proposal.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
 import re
-from typing import Any, Iterable
-from uuid import uuid4
+from typing import Any
 
+from src.engine.intent.economy_intent import has_economy_proposal
+from src.engine.intent.parser import completed_payment_pattern, currency_labels_for_rule
 from src.engine.language import localized_text
-from src.engine.intent.economy_intent import (
-    AMOUNT_SOURCE_MERCHANT_OFFER,
-    AMOUNT_SOURCE_NARRATION,
-    AMOUNT_SOURCE_PLAYER_ACTION,
-    bounded_economy_collection as _bounded_economy_collection,
-    has_economy_proposal,
-    record_purchase_clarification,
-    repair_missing_economy_proposals,
-    trim_open_history as _trim_open_history,
-)
-from src.engine.intent.matcher import (
-    match_open_merchant_offers,
-    normalized_item_name as _normalized_item_name,
-)
-from src.engine.intent.lexicon import instance_language as _instance_language
-from src.engine.intent.parser import (
-    charge_pattern as _charge_pattern,
-    completed_payment_pattern as _completed_payment_pattern,
-    currency_amount_pattern as _currency_amount_pattern,
-    currency_amounts as _currency_amounts,
-    currency_labels_for_rule,
-    purchase_confirm_pattern as _purchase_confirm_pattern,
-    purchase_intent_pattern as _purchase_intent_pattern,
-    purchase_offer_pattern as _purchase_offer_pattern,
-)
 
-_MAX_PURCHASE_QUOTE_HISTORY = 24
-_MAX_MERCHANT_OFFER_HISTORY = 24
-_MAX_CLARIFICATION_HISTORY = 24
-
-# Price evidence ladder for repair: the seller's persisted quote outranks the
-# current narration, which outranks the acting player's own stated amount.
-_ECONOMY_STATE_KEYS = {"pending_payments", "economy_proposals", "merchant_offers"}
 _DEFERRED_DATA_KEYS = {
-    "confirmed",
-    "growth_skills",
-    "info_asymmetry",
-    "memory_delta",
-    "milestone_grants",
-    "plot_update",
-    "quick_actions",
-    "scene_image_prompt",
+    "confirmed", "growth_skills", "info_asymmetry", "memory_delta",
+    "milestone_grants", "plot_update", "quick_actions", "scene_image_prompt",
     "xp_rewards",
 }
-
 _CONDITIONAL_REWARD_RE = re.compile(
-    r"(?:要是|如果|若是|完成[^。！？\n]{0,20}后|之后再|等你|待你|才能|才会|以后|将会|承诺|答应|promise|promises|will pay|\bif\b|\bonce\b|\bafter\b|\bwhen\b|\u3067\u304d\u305f\u3089|\u7d42\u308f\u3063\u305f\u3089)",
+    r"(?:要是|如果|若是|完成[^。！？\n]{0,20}后|之后再|等你|待你|才能|才会|以后|将会|承诺|答应|promise|promises|will pay|\bif\b|\bonce\b|\bafter\b|\bwhen\b)",
     re.IGNORECASE,
 )
 _COMPLETION_EVIDENCE_RE = re.compile(
     r"(?:完成|成功|击败|打倒|交付|归还|回收|达成|兑现|领取|earned|completed|complete|defeated|delivered|recovered|claimed|critical success|大成功)",
     re.IGNORECASE,
 )
-def repair_unbacked_purchase(
-    instance: Any,
-    data: dict[str, Any],
-    narration: str,
-    *,
-    actions: Iterable[dict[str, Any]] | None = None,
-    currency_labels: Iterable[str] | None = None,
-) -> tuple[int, bool]:
-    """Bind explicit purchase intents to economy proposals before state apply.
-
-    实现已下沉到 intent 层（src.engine.intent.economy_intent）：本函数只保留
-    原调用入口。每个 actor 独立证据链，详见
-    ``repair_missing_economy_proposals``。
-    """
-
-    return repair_missing_economy_proposals(
-        instance, data, narration,
-        actions=actions, currency_labels=currency_labels,
-    )
 
 
 def _meaningful(value: Any) -> bool:
@@ -98,586 +37,84 @@ def _meaningful(value: Any) -> bool:
     return value not in {None, "", False, 0}
 
 
-def has_server_purchase_guard(data: dict[str, Any]) -> bool:
-    """Whether this response contains a server-repaired purchase proposal."""
-
+def discard_unearned_reward_proposals(instance: Any, data: dict[str, Any], narration: str) -> int:
     state_update = data.get("state_update")
     proposals = state_update.get("economy_proposals") if isinstance(state_update, dict) else None
-    return isinstance(proposals, list) and any(
-        isinstance(proposal, dict) and proposal.get("source") == "server_purchase_guard"
-        for proposal in proposals
-    )
-
-def record_merchant_offer(
-    instance: Any,
-    *,
-    item_display: str,
-    amount: int,
-    seller_id: str = "",
-    currency_id: str = "",
-) -> dict[str, Any] | None:
-    """Persist one world-side merchant offer from a typed payload.
-
-    Offers are world facts, not decisions: they never bind a payer and can
-    never settle, charge, or deliver anything.  The amount is the seller's
-    statement and stays authoritative — a player-stated price may conflict
-    with it, but never overwrite it.
-    """
-
-    name = str(item_display or "").strip()[:120]
-    try:
-        price = int(amount)
-    except (TypeError, ValueError):
-        return None
-    if not name or not 0 < price <= 100_000:
-        return None
-    offers = _bounded_economy_collection(instance, "merchant_offers")
-    for offer in offers:
-        if (
-            isinstance(offer, dict)
-            and offer.get("status") == "open"
-            and str(offer.get("item_display") or "") == name
-            and (
-                not offer.get("run_id")
-                or str(offer.get("run_id")) == str(getattr(instance, "run_id", ""))
-            )
-        ):
-            # A persisted seller quote stands until it is resolved or rolled
-            # back; a re-narrated identical quote never moves its price.
-            return offer
-    offer = {
-        "id": f"offer_{uuid4().hex}",
-        "run_id": str(getattr(instance, "run_id", "")),
-        "origin_round": int(getattr(instance, "round_number", 0) or 0),
-        "item_display": name,
-        "amount": price,
-        "currency_id": str(currency_id or "")[:40],
-        "seller_id": str(seller_id or "")[:120],
-        "status": "open",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    offers.append(offer)
-    _trim_open_history(offers, max_history=_MAX_MERCHANT_OFFER_HISTORY)
-    return offer
-
-
-def _purchase_quotes(instance: Any) -> list[dict[str, Any]]:
-    economy = getattr(instance, "economy", None)
-    if not isinstance(economy, dict):
-        return []
-    quotes = economy.setdefault("purchase_quotes", [])
-    if not isinstance(quotes, list):
-        economy["purchase_quotes"] = []
-    return economy["purchase_quotes"]
-
-
-def _open_purchase_quote(quotes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Return the single actionable offer; history entries are not open."""
-
-    open_quotes = [
-        quote for quote in quotes
-        if isinstance(quote, dict) and quote.get("status", "open") == "open"
-    ]
-    return open_quotes[0] if len(open_quotes) == 1 else None
-
-
-def _trim_purchase_quote_history(quotes: list[dict[str, Any]]) -> None:
-    open_entries = [
-        quote for quote in quotes
-        if isinstance(quote, dict) and quote.get("status", "open") == "open"
-    ]
-    resolved = [
-        quote for quote in quotes
-        if not (isinstance(quote, dict) and quote.get("status", "open") == "open")
-    ]
-    budget = max(0, _MAX_PURCHASE_QUOTE_HISTORY - len(open_entries))
-    quotes[:] = (resolved[-budget:] if budget else []) + open_entries
-
-
-def close_purchase_quote(
-    instance: Any,
-    quote_id: str,
-    *,
-    status: str,
-    resolution_code: str,
-) -> dict[str, Any] | None:
-    """Retire one persisted offer by id, keeping the audit entry in place."""
-
-    quote = next(
-        (
-            quote for quote in _purchase_quotes(instance)
-            if isinstance(quote, dict) and str(quote.get("id") or "") == str(quote_id)
-        ),
-        None,
-    )
-    if quote is None:
-        return None
-    if quote.get("status", "open") != "open":
-        return None
-    quote["status"] = status
-    quote["resolution_code"] = resolution_code
-    quote["resolved_at"] = datetime.now(timezone.utc).isoformat()
-    return quote
-
-
-def link_purchase_quote_proposal(instance: Any, quote_id: str, proposal_id: str) -> None:
-    """Record the derived proposal id on the audit copy of a converted offer."""
-
-    if not quote_id or not proposal_id:
-        return
-    for quote in _purchase_quotes(instance):
-        if isinstance(quote, dict) and str(quote.get("id") or "") == str(quote_id):
-            quote["proposal_id"] = str(proposal_id)
-            return
-
-
-def settle_purchase_quote(
-    instance: Any,
-    data: dict[str, Any],
-    *,
-    currency_labels: Iterable[str] | None = None,
-) -> bool:
-    """Turn an open quote into a typed proposal when a player confirms it."""
-
-    confirming_uids = {
-        str(action.get("user_id") or "")
-        for action in getattr(instance, "action_queue", [])
-        if isinstance(action, dict)
-        and _purchase_confirm_pattern(_instance_language(instance)).search(
-            str(action.get("text") or "")
-        )
-        and str(action.get("user_id") or "")
-    }
-    if len(confirming_uids) != 1:
-        return False
-    quotes = _purchase_quotes(instance)
-    quote = _open_purchase_quote(quotes)
-    if quote is None:
-        return False
-    payer_uid = str(quote.get("payer_uid") or "")
-    if (
-        not payer_uid
-        or payer_uid not in getattr(instance, "players", {})
-        or confirming_uids != {payer_uid}
-        or str(quote.get("run_id") or "") != str(getattr(instance, "run_id", ""))
-    ):
-        return False
-    items = [str(item).strip() for item in quote.get("items", []) if str(item).strip()]
-    amount = int(quote.get("amount", 0) or 0)
-    if amount <= 0 or not items:
-        return False
-    state_update = data.setdefault("state_update", {})
-    # The persisted quote is the only source of truth for purchased goods.
-    # Remove any model-repeated copy from ordinary LOOT/EQUIP before the
-    # proposal is queued, so confirmation cannot reintroduce double delivery.
-    loot = state_update.get("loot")
-    if isinstance(loot, list):
-        state_update["loot"] = [
-            entry for entry in loot
-            if not (
-                isinstance(entry, dict)
-                and str(entry.get("player") or "") == payer_uid
-                and str(entry.get("item") or "").strip() in items
-            )
-        ]
-    players_update = state_update.get("players")
-    if isinstance(players_update, dict):
-        player_update = players_update.get(payer_uid)
-        if isinstance(player_update, dict):
-            for key in ("equip_gain", "weapon_change"):
-                if str(player_update.get(key) or "").strip() in items:
-                    player_update.pop(key, None)
-    proposals = state_update.setdefault("economy_proposals", [])
-    def conflicts_with_quote(proposal: Any) -> bool:
-        if not isinstance(proposal, dict) or proposal.get("kind") != "purchase":
-            return False
-        rewards = proposal.get("rewards")
-        if isinstance(rewards, list) and any(
-            isinstance(item, dict)
-            and str(item.get("name") or item.get("item") or "").strip() in items
-            for item in rewards
-        ):
-            return True
-        proposal_items = proposal.get("items")
-        return isinstance(proposal_items, list) and any(
-            str(item).strip() in items for item in proposal_items
-        )
-
-    state_update["economy_proposals"] = [
-        proposal for proposal in proposals
-        if not conflicts_with_quote(proposal)
-    ]
-    state_update["economy_proposals"].append({
-        "kind": "purchase", "uid": payer_uid, "amount": amount,
-        "recipient_uid": str(quote.get("recipient_uid") or payer_uid),
-        "items": items, "reason": str(quote.get("reason") or "购买商品"),
-        "approval_policy": "payer", "source": "server_purchase_quote",
-        # Keep the offer's origin round authoritative after conversion so a
-        # rollback of that round can reverse the later settlement.
-        "quote_id": str(quote.get("id") or ""),
-    })
-    # Retire the offer, keeping the audit entry; the queued proposal above is
-    # now the only path to settlement.
-    quote["status"] = "confirmed"
-    quote["resolved_at"] = datetime.now(timezone.utc).isoformat()
-    _trim_purchase_quote_history(quotes)
-    return True
-
-
-def record_purchase_quote(
-    instance: Any,
-    data: dict[str, Any],
-    narration: str,
-    *,
-    currency_labels: Iterable[str] | None = None,
-) -> bool:
-    """Persist one uncommitted shop quote for a later confirmation turn."""
-
-    if has_economy_proposal(data):
-        return False
-    state_update = data.get("state_update")
-    if not isinstance(state_update, dict):
-        return False
-    grants: list[tuple[str, str]] = []
-    for item in state_update.get("loot", []) if isinstance(state_update.get("loot"), list) else []:
-        if isinstance(item, dict) and str(item.get("player") or "").strip() and str(item.get("item") or "").strip():
-            grants.append((str(item["player"]), str(item["item"]).strip()))
-    players_update = state_update.get("players")
-    if isinstance(players_update, dict):
-        for uid, update in players_update.items():
-            if isinstance(update, dict):
-                for key in ("equip_gain", "weapon_change"):
-                    if str(update.get(key) or "").strip():
-                        grants.append((str(uid), str(update[key]).strip()))
-    action_text = "\n".join(
-        str(action.get("text") or "")
-        for action in getattr(instance, "action_queue", [])
-        if isinstance(action, dict)
-    )
-    language = _instance_language(instance)
-    amounts = _currency_amounts(language, narration, currency_labels)
-    offer_pattern = _purchase_offer_pattern(language)
-    sentences = re.split(r"[。！？.!?\n]+", str(narration or ""))
-    bound_grants = [
-        grant for grant in grants
-        if any(
-            grant[1].casefold() in sentence.casefold()
-            and offer_pattern.search(sentence)
-            and _currency_amount_pattern(language, currency_labels).search(sentence)
-            for sentence in sentences
-        )
-        or (
-            grant[1].casefold() in action_text.casefold()
-            and len(amounts) == 1
-            and bool(offer_pattern.search(narration))
-        )
-    ]
-    grant_uids = {uid for uid, _item in bound_grants}
-    if (
-        len(bound_grants) == 0
-        or len(grant_uids) != 1
-        or len(amounts) != 1
-        or not (
-            (
-                offer_pattern.search(narration)
-                and _currency_amount_pattern(language, currency_labels).search(narration)
-            )
-            or _purchase_intent_pattern(language).search(action_text)
-        )
-    ):
-        return False
-    quotes = _purchase_quotes(instance)
-    if any(
-        isinstance(quote, dict) and quote.get("status", "open") == "open"
-        for quote in quotes
-    ):
-        # A persisted offer is authoritative until it is confirmed or
-        # invalidated by rollback; never replace its amount/items with a
-        # later model narration.
-        return False
-    payer_uid = bound_grants[0][0]
-    if payer_uid not in getattr(instance, "players", {}):
-        # An offer for a payer outside the current game can never settle.
-        return False
-    quotes.append({
-        "id": f"quote_{uuid4().hex}",
-        "run_id": str(getattr(instance, "run_id", "")),
-        "round": int(getattr(instance, "round_number", 0) or 0),
-        "payer_uid": payer_uid, "recipient_uid": payer_uid,
-        "amount": amounts[0], "items": [item for _uid, item in bound_grants],
-        "reason": "购买商品", "status": "open",
-    })
-    _trim_purchase_quote_history(quotes)
-    # A quote is only an offer.  Keep its items out of the immediate state
-    # update; confirmation will re-create the typed proposal and its deferred
-    # effect group.
-    bound_pairs = set(bound_grants)
-    if isinstance(state_update.get("loot"), list):
-        state_update["loot"] = [
-            entry for entry in state_update["loot"]
-            if not (
-                isinstance(entry, dict)
-                and (str(entry.get("player") or ""), str(entry.get("item") or "").strip()) in bound_pairs
-            )
-        ]
-    if isinstance(players_update, dict):
-        for uid, update in players_update.items():
-            if not isinstance(update, dict):
-                continue
-            for key in ("equip_gain", "weapon_change"):
-                if (str(uid), str(update.get(key) or "").strip()) in bound_pairs:
-                    update.pop(key, None)
-    return True
-
-
-def discard_unearned_reward_proposals(
-    instance: Any,
-    data: dict[str, Any],
-    narration: str,
-) -> int:
-    """Drop rewards that are still conditional promises, before queueing them.
-
-    ``GOLD`` is intentionally still a proposal, but a proposal must represent
-    an earned event. A common model failure is to emit GOLD while an NPC is
-    merely promising payment after a task is completed. Such a reward is kept
-    in the prose but cannot enter the authoritative economy until a later turn
-    records completion. Explicit same-turn or previously completed quest state
-    is accepted as the completion evidence.
-    """
-
-    state_update = data.get("state_update")
-    if not isinstance(state_update, dict):
+    if not isinstance(proposals, list):
         return 0
-    proposals = state_update.get("economy_proposals")
-    if not isinstance(proposals, list) or not proposals:
-        return 0
-    rewards = [item for item in proposals if isinstance(item, dict) and item.get("kind") == "reward"]
-    narration_text = str(narration or "")
-    if not rewards:
-        return 0
-
-    completed_titles: set[str] = set()
-    plot_update = data.get("plot_update")
-    if isinstance(plot_update, dict):
-        for quest in plot_update.get("quests", []):
-            if isinstance(quest, dict) and str(quest.get("status") or "").casefold() in {"completed", "complete", "已完成", "完成", "成功"}:
-                title = str(quest.get("title") or "").strip().casefold()
-                if title:
-                    completed_titles.add(title)
-    tracker = getattr(instance, "plot_tracker", None)
-    for quest in getattr(tracker, "quests", {}).values() if tracker is not None else []:
-        status = getattr(getattr(quest, "status", None), "value", getattr(quest, "status", ""))
-        if str(status).casefold() in {"completed", "complete", "已完成", "完成", "成功"}:
-            title = str(getattr(quest, "title", "") or "").strip().casefold()
-            if title:
-                completed_titles.add(title)
-
+    text = str(narration or "")
     kept: list[dict[str, Any]] = []
     dropped = 0
     for proposal in proposals:
-        if proposal not in rewards:
+        if not isinstance(proposal, dict) or proposal.get("kind") != "reward":
             kept.append(proposal)
             continue
-        reason = str(proposal.get("reason") or "").casefold()
-        if any(title in reason or reason in title for title in completed_titles):
+        if _COMPLETION_EVIDENCE_RE.search(text) and not _CONDITIONAL_REWARD_RE.search(text):
             kept.append(proposal)
-            continue
-        # A reward needs affirmative completion evidence in the same turn. A
-        # conditional/promise phrase takes precedence, even if the model also
-        # mentions a future payment elsewhere in the paragraph.
-        if (
-            _COMPLETION_EVIDENCE_RE.search(narration_text)
-            and not _CONDITIONAL_REWARD_RE.search(narration_text)
-        ):
-            kept.append(proposal)
-            continue
-        dropped += 1
+        else:
+            dropped += 1
     state_update["economy_proposals"] = kept
     return dropped
 
 
 def unearned_reward_notice(language: str) -> str:
     return localized_text(language, {
-        "en": "Reward pending: the story described a conditional promise, so no reward proposal was created until the task is confirmed complete.",
-        "zh-CN": "奖励待确认：当前剧情只是条件性承诺，任务确认完成前不会生成奖励提案。",
-        "ja": "報酬保留中：物語が条件付きの約束を示しているため、任務の完了が確認されるまで報酬提案は作成されません。",
+        "en": "Reward pending: the task must be confirmed complete before it is awarded.",
+        "zh-CN": "奖励待确认：任务确认完成前不会发放奖励。",
+        "ja": "報酬保留中：任務の完了が確認されるまで報酬は付与されません。",
     })
 
 
-def guard_unbacked_payment_narration(
-    narration: str,
-    data: dict[str, Any],
-    language: str,
-    *,
-    currency_labels: Iterable[str] | None = None,
-) -> str:
-    """Prevent prose from claiming a completed payment without authority.
-
-    Currency changes are authoritative only through PAY/TEAM_PAY/economy
-    proposals.  Models occasionally narrate handing over coins while omitting
-    the protocol tag; leave the balance untouched and make that fact explicit
-    instead of presenting a false completed transaction to the player.
-    """
-
+def guard_unbacked_payment_narration(narration: str, data: dict[str, Any], language: str, *, currency_labels: Any = None) -> str:
     text = str(narration or "").strip()
-    completed_payment_re = _completed_payment_pattern(language, currency_labels)
-    if not text or has_economy_proposal(data) or not completed_payment_re.search(text):
+    if not text or has_economy_proposal(data):
         return text
-    notice = {
-        "en": "Authority notice: no payment proposal was created, so no gold was deducted. Ask the GM to issue a payment proposal if this fee should be charged.",
-        "zh-CN": "权威账本提示：本次没有生成支付提案，因此未扣除金币。若确实需要收费，请由 GM 重新发起支付提案。",
-        "ja": "権威台帳の通知：支払い提案が作成されなかったため、ゴールドは差し引かれていません。請求が必要なら GM に支払い提案を出してもらってください。",
-    }.get(str(language or "").lower(), "权威账本提示：本次没有生成支付提案，因此未扣除金币。若确实需要收费，请由 GM 重新发起支付提案。")
+    if not completed_payment_pattern(language, currency_labels).search(text):
+        return text
+    notice = localized_text(language, {
+        "en": "No payment was charged: the GM must issue an explicit payment order.",
+        "zh-CN": "本次未扣款：需要由 GM 明确发起支付订单。",
+        "ja": "支払いは実行されていません。GM が明示的な支払い注文を発行してください。",
+    })
     return f"{text}\n\n{notice}"
-
-
-def discard_unbacked_purchase_items(
-    instance: Any,
-    data: dict[str, Any],
-    narration: str,
-    *,
-    currency_labels: Iterable[str] | None = None,
-) -> int:
-    """Fail closed when prose describes a priced purchase without a proposal.
-
-    A model can emit ``LOOT`` while narrating a shop price but omit ``PAY`` /
-    ``ECONOMY``.  Granting that loot would make the item authoritative even
-    though no payment decision exists.  Drop the transaction-dependent loot;
-    the GM can issue a proposal explicitly on a later turn.
-    """
-
-    narration_text = str(narration or "")
-    language = _instance_language(instance)
-    charge_re = _charge_pattern(language, currency_labels)
-    completed_payment_re = _completed_payment_pattern(language, currency_labels)
-    if has_economy_proposal(data) or not (charge_re.search(narration_text) or completed_payment_re.search(narration_text)):
-        return 0
-    state_update = data.get("state_update")
-    if not isinstance(state_update, dict):
-        return 0
-    dropped = 0
-    dropped_items: list[str] = []
-    loot = state_update.get("loot")
-    if isinstance(loot, list) and loot:
-        dropped += len(loot)
-        dropped_items.extend(
-            str(entry.get("item") or "").strip()
-            for entry in loot
-            if isinstance(entry, dict) and str(entry.get("item") or "").strip()
-        )
-        state_update["loot"] = []
-    players_update = state_update.get("players")
-    if isinstance(players_update, dict):
-        for player_update in players_update.values():
-            if not isinstance(player_update, dict):
-                continue
-            for key in ("equip_gain", "weapon_change"):
-                if key in player_update:
-                    dropped += 1
-                    name = str(player_update.get(key) or "").strip()
-                    if name:
-                        dropped_items.append(name)
-                    player_update.pop(key, None)
-    if dropped:
-        record_purchase_clarification(
-            instance,
-            reason="MISSING_SELLER_PRICE_CONFIRMATION",
-            item_candidates=dropped_items,
-            amount_candidates=_currency_amounts(language, narration_text, currency_labels),
-        )
-    return dropped
 
 
 def unbacked_purchase_notice(language: str) -> str:
     return localized_text(language, {
-        "en": "Purchase items were not granted because no payment proposal was created.",
-        "zh-CN": "由于没有生成支付提案，本次购买物品未发放。",
-        "ja": "支払い提案が作成されなかったため、購入品は付与されませんでした。",
+        "en": "The item was not granted because no purchase order exists.",
+        "zh-CN": "由于没有购买订单，本次购买物品未发放。",
+        "ja": "購入注文がないため、購入品は付与されませんでした。",
     })
 
 
-def defer_narrative_effects(
-    data: dict[str, Any],
-    response: Any,
-    *,
-    defer_state_update: bool = True,
-) -> dict[str, Any]:
-    """Remove decision-dependent effects from the immediate round response."""
-
+def defer_narrative_effects(data: dict[str, Any], response: Any, *, defer_state_update: bool = True) -> dict[str, Any]:
     if not has_economy_proposal(data):
         return {}
     state_update = dict(data.get("state_update") or {})
-    if not defer_state_update and has_server_purchase_guard(data):
-        # A repaired purchase only proves that the purchased item is
-        # settlement-dependent.  Keep the explicitly remaining item grants on
-        # the normal pipeline, but fail closed for every other state field.
-        immediate_state = {
-            key: deepcopy(value)
-            for key, value in state_update.items()
-            if key in _ECONOMY_STATE_KEYS or key == "loot"
-        }
-        deferred_state = {
-            key: deepcopy(value)
-            for key, value in state_update.items()
-            if key not in _ECONOMY_STATE_KEYS and key != "loot" and _meaningful(value)
-        }
-        players = state_update.get("players")
-        if isinstance(players, dict):
-            immediate_players: dict[str, dict[str, Any]] = {}
-            deferred_players: dict[str, dict[str, Any]] = {}
-            for uid, raw_update in players.items():
-                if not isinstance(raw_update, dict):
-                    if _meaningful(raw_update):
-                        deferred_players[str(uid)] = deepcopy(raw_update)
-                    continue
-                immediate_update = {
-                    key: deepcopy(value)
-                    for key, value in raw_update.items()
-                    if key in {"equip_gain", "weapon_change"} and _meaningful(value)
-                }
-                deferred_update = {
-                    key: deepcopy(value)
-                    for key, value in raw_update.items()
-                    if key not in {"equip_gain", "weapon_change"} and _meaningful(value)
-                }
-                if immediate_update:
-                    immediate_players[str(uid)] = immediate_update
-                if deferred_update:
-                    deferred_players[str(uid)] = deferred_update
-            if immediate_players:
-                immediate_state["players"] = immediate_players
-            else:
-                immediate_state.pop("players", None)
-            if deferred_players:
-                deferred_state["players"] = deferred_players
-            else:
-                deferred_state.pop("players", None)
-    else:
-        immediate_state = {
-            key: deepcopy(value)
-            for key, value in state_update.items()
-            if not defer_state_update or key in _ECONOMY_STATE_KEYS
-        }
-        deferred_state = {
-            key: deepcopy(value)
-            for key, value in state_update.items()
-            if defer_state_update and key not in _ECONOMY_STATE_KEYS and _meaningful(value)
-        }
+    immediate = {
+        key: deepcopy(value)
+        for key, value in state_update.items()
+        if not defer_state_update or key in {"economy_proposals"}
+    }
+    deferred_state = {
+        key: deepcopy(value)
+        for key, value in state_update.items()
+        if defer_state_update and key not in immediate and _meaningful(value)
+    }
     deferred: dict[str, Any] = {}
     if deferred_state:
         deferred["state_update"] = deferred_state
-    data["state_update"] = immediate_state
-    response.state_update = immediate_state
-
+    data["state_update"] = immediate
+    response.state_update = immediate
     for key in _DEFERRED_DATA_KEYS:
         value = data.get(key)
         if _meaningful(value):
             deferred[key] = deepcopy(value)
-        if key in {"memory_delta"}:
+        if key == "memory_delta":
             data[key] = {"add": [], "update": [], "forget": []}
         elif key == "plot_update":
             data[key] = {"quests": [], "relations": [], "decisions": []}
-        elif key in {"info_asymmetry"}:
+        elif key == "info_asymmetry":
             data[key] = {}
         elif key in {"confirmed", "growth_skills", "milestone_grants", "quick_actions"}:
             data[key] = []
@@ -685,7 +122,6 @@ def defer_narrative_effects(
             data[key] = {}
         else:
             data[key] = ""
-
     response.memory_delta = data.get("memory_delta", {})
     response.info_asymmetry = data.get("info_asymmetry", {})
     response.plot_update = data.get("plot_update", {})
@@ -694,10 +130,7 @@ def defer_narrative_effects(
 
 def pending_decision_notice(language: str) -> str:
     return localized_text(language, {
-        "en": (
-            "Settlement pending: any narrated goods, services, scene changes, or quest progress "
-            "that depend on this transaction have not taken effect yet."
-        ),
-        "zh-CN": "结算待确认：本次交易关联的物品、服务、场景或任务推进尚未生效。",
-        "ja": "決済確認待ち：この取引に関連するアイテム・サービス・場面・クエスト進行はまだ発効していません。",
+        "en": "Settlement pending: dependent results are not effective yet.",
+        "zh-CN": "结算待确认：关联结果尚未生效。",
+        "ja": "決済確認待ち：関連結果はまだ発効していません。",
     })

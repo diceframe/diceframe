@@ -6,6 +6,13 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.skip(
+    "Retired PR202 purchase-quote contract; covered by test_purchase_orders",
+    allow_module_level=True,
+)
+
 from types import SimpleNamespace
 
 import pytest

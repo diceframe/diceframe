@@ -11,13 +11,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Literal
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from uuid import uuid4
 
 from src.engine.contracts import (
     ActionRecord,
     CheckResult,
-    PendingPayment,
     PlayerData,
     RoundLogEntry,
     StoryRecap,
@@ -110,7 +109,7 @@ class GameInstance:
     """
 
     game_key: tuple[str, str, str]      # (platform, target_id, account_id)
-    instance_schema_version: int = 4
+    instance_schema_version: int = 6
     run_id: str = field(default_factory=lambda: f"run_{uuid4().hex}")
     memory_namespace: str = ""
     economy: dict[str, Any] = field(default_factory=dict)
@@ -229,9 +228,6 @@ class GameInstance:
     # WebUI 快捷行动建议
     quick_actions: list[str] = field(default_factory=list)
 
-    # 等待玩家确认的支付请求
-    pending_payments: list[PendingPayment] = field(default_factory=list)
-
     # 系统健康 / 降级事件
     health_events: list[dict] = field(default_factory=list)
     health_status: dict = field(default_factory=dict)
@@ -273,10 +269,8 @@ class GameInstance:
             self.economy.setdefault("effect_groups", [])
             self.economy.setdefault("external_effects_outbox", [])
             self.economy.setdefault("outcomes", [])
-            self.economy.setdefault("purchase_quotes", [])
-            self.economy.setdefault("merchant_offers", [])
-            self.economy.setdefault("clarifications", [])
-            self.economy.setdefault("evidence", [])
+            self.economy.setdefault("purchase_requests", [])
+            self.economy.setdefault("purchase_orders", [])
             self.economy.setdefault("decision_revision", 0)
 
     def _fresh_economy_state(self) -> dict[str, Any]:
@@ -290,10 +284,8 @@ class GameInstance:
             "effect_groups": [],
             "external_effects_outbox": [],
             "outcomes": [],
-            "purchase_quotes": [],
-            "merchant_offers": [],
-            "clarifications": [],
-            "evidence": [],
+            "purchase_requests": [],
+            "purchase_orders": [],
             "decision_revision": 0,
         }
 
@@ -618,49 +610,6 @@ class GameInstance:
     def clear_private_messages(self, uid: str) -> None:
         self.private_log.pop(uid, None)
 
-    def queue_payment(self, payment: PendingPayment) -> None:
-        self.pending_payments.append(payment)
-
-    def remove_payments_for_player(self, uid: str) -> None:
-        from src.engine.economy import cancel_proposals_for_player
-
-        affected_ids = cancel_proposals_for_player(self, uid)
-        self.pending_payments = [
-            payment
-            for payment in self.pending_payments
-            if (
-                payment.get("uid") != uid
-                and payment.get("recipient_uid") != uid
-                and str(payment.get("id") or "") not in affected_ids
-                and uid not in {
-                    str(item.get("uid") or "")
-                    for item in (payment.get("contributors") or [])
-                    if isinstance(item, dict)
-                }
-            )
-        ]
-
-    def prune_resolved_payments(self) -> None:
-        self.pending_payments = [
-            payment
-            for payment in self.pending_payments
-            if payment.get("status") == "pending"
-        ]
-
-    def mark_payment_resolved(
-        self,
-        payment_id: str,
-        status: Literal["accepted", "declined", "rejected"],
-        *,
-        resolved_at: float,
-    ) -> PendingPayment | None:
-        for payment in self.pending_payments:
-            if payment.get("id") == payment_id:
-                payment["status"] = status
-                payment["resolved_at"] = resolved_at
-                return payment
-        return None
-
     def record_check(self, check: CheckResult) -> None:
         """记录结构化检定，并保持 last_check 与 last_checks 一致。"""
         self.last_checks.append(check)
@@ -922,8 +871,25 @@ class GameInstance:
             if self.pending_actions:
                 self.action_queue.extend(self.pending_actions)
                 self.pending_actions.clear()
+            self._record_purchase_requests_locked()
             self.last_activity = datetime.now(timezone.utc).isoformat()
             logger.info("Round %d 开始 - game_key=%s", self.round_number, self.game_key)
+
+    def _record_purchase_requests_locked(self) -> None:
+        """Record player purchase requests without making them chargeable."""
+
+        try:
+            from src.engine.purchase_orders import record_purchase_requests
+
+            record_purchase_requests(
+                self,
+                self.action_queue,
+                language=str(getattr(self, "language", "") or ""),
+            )
+        except Exception:
+            # A recorder failure must never reject an otherwise valid TRPG
+            # action. The raw action remains in the round log for retry.
+            logger.exception("记录购买请求失败，保留原始行动: game=%s", self.game_key)
 
     async def add_action(self, user_id: str, action_text: str,
                          selected_attribute: str = "", selected_skill: str = "",
@@ -993,6 +959,7 @@ class GameInstance:
             else:
                 action_entry["revision_count"] = 1
                 self.action_queue.append(action_entry)
+            self._record_purchase_requests_locked()
             self.ready_players.add(user_id)
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return True
@@ -1226,7 +1193,6 @@ class GameInstance:
             self.health_events.clear()
             self.health_status.clear()
             self.quick_actions.clear()
-            self.pending_payments.clear()
             self.confirmed_items.clear()
             self.private_log.clear()
             self.table_talk.clear()

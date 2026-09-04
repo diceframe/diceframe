@@ -8,6 +8,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.skip(reason="legacy PAY/TEAM_PAY tag contract retired in schema 6")
+
 from src.commands.tag_handlers import LIMITS_BY_COMBAT_MODEL, parse_player_tag
 from src.commands.tag_parser import _new_result, parse_tag_state
 

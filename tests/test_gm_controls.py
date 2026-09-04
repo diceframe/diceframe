@@ -200,7 +200,6 @@ async def test_delete_character_cleans_player_runtime_state(tmp_path):
     inst.ready_players.add("p1")
     inst.action_queue.append({"user_id": "p1", "text": "act"})
     inst.pending_actions.append({"user_id": "p1", "text": "next"})
-    inst.pending_payments.append({"id": "pay1", "uid": "p1", "status": "pending"})
     inst.private_log["p1"] = [{"text": "secret"}]
     registry.register(inst)
 
@@ -214,7 +213,6 @@ async def test_delete_character_cleans_player_runtime_state(tmp_path):
     assert "p1" not in inst.ready_players
     assert not inst.action_queue
     assert not inst.pending_actions
-    assert not inst.pending_payments
     assert "p1" not in inst.private_log
 
 

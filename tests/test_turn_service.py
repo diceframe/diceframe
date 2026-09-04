@@ -25,7 +25,6 @@ class FakeInstance:
         self.state = GameState.ACTIVE_ACTION
         self.round_number = 1
         self.action_queue: list[dict] = []
-        self.pending_payments: list[dict] = []
         self.run_id = "run-test"
         self.economy = {
             "proposals": [],
@@ -198,7 +197,6 @@ async def test_pending_economy_blocks_next_round_before_recording_action() -> No
         "visibility": "private",
     }
     instance.economy["proposals"].append(proposal)
-    instance.pending_payments.append(proposal)
 
     blocked = await submit_action(api.dependencies, "game", "gm", "继续赶路")
 
@@ -208,7 +206,6 @@ async def test_pending_economy_blocks_next_round_before_recording_action() -> No
     assert instance.added == []
 
     proposal["status"] = "declined"
-    instance.pending_payments.clear()
     continued = await submit_action(api.dependencies, "game", "gm", "继续赶路")
     assert continued["status"] == 200
     assert instance.added
@@ -231,7 +228,6 @@ async def test_personal_purchase_can_remain_pending_without_blocking_other_playe
         "visibility": "private",
     }
     instance.economy["proposals"].append(purchase)
-    instance.pending_payments.append(purchase)
 
     result = await submit_action(api.dependencies, "game", "p2", "调查房门")
 

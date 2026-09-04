@@ -308,14 +308,6 @@ class WebAccessControl:
                 return uid or request.get("user_id", "")
             if (
                 request.method == "POST"
-                and tail == "purchase-quotes"
-                and len(parts) == 6
-                and parts[5] in {"confirm", "cancel"}
-                and bool(parts[4])
-            ):
-                return uid or request.get("user_id", "")
-            if (
-                request.method == "POST"
                 and tail == "checks"
                 and len(parts) >= 6
                 and parts[5] == "luck"

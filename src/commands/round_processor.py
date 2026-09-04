@@ -15,16 +15,11 @@ from typing import Any
 
 from src.commands.economy_effects import (
     discard_unearned_reward_proposals,
-    discard_unbacked_purchase_items,
     defer_narrative_effects,
     guard_unbacked_payment_narration,
     has_economy_proposal,
-    has_server_purchase_guard,
     pending_decision_notice,
-    repair_unbacked_purchase,
     currency_labels_for_rule,
-    record_purchase_quote,
-    settle_purchase_quote,
     unbacked_purchase_notice,
     unearned_reward_notice,
 )
@@ -59,12 +54,12 @@ from src.commands.round_actions import (
 from src.commands.state_recap import snapshot_public_player_state
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.commands.tag_summary import summarize_tags
-from src.engine.constants import COMBAT_INTENT_KEYWORDS
 from src.engine.economy import (
     economy_revision,
     has_blocking_economy_decision,
     queue_effect_group,
 )
+from src.engine.purchase_orders import filter_unordered_purchase_grants
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.imagegen import (
@@ -640,35 +635,18 @@ class RoundProcessor:
             response.narration, data, instance.language,
             currency_labels=currency_labels,
         )
-        settled_quote = settle_purchase_quote(instance, data, currency_labels=currency_labels)
-        if not settled_quote:
-            record_purchase_quote(
-                instance, data, response.narration, currency_labels=currency_labels,
-            )
-            dropped_purchase_items, purchase_was_ambiguous = repair_unbacked_purchase(
-                instance, data, response.narration,
-                actions=instance.action_queue,
-                currency_labels=currency_labels,
-            )
-        else:
-            dropped_purchase_items, purchase_was_ambiguous = 0, False
-        if not settled_quote and not purchase_was_ambiguous:
-            dropped_purchase_items += discard_unbacked_purchase_items(
-                instance, data, response.narration, currency_labels=currency_labels,
-            )
+        # Purchase authority is explicit GM order + payer confirmation. Never
+        # infer a price or create a chargeable proposal from narration text.
+        dropped_purchase_items = filter_unordered_purchase_grants(instance, data)
         if dropped_purchase_items:
             response.narration = (
                 f"{response.narration or ''}\n\n"
                 f"{unbacked_purchase_notice(instance.language)}"
             ).strip()
-        # A server-side purchase repair may have synthesized a typed proposal
-        # from an explicit action plus an unambiguous rule currency amount.
-        # Recompute after the repair so it receives the same pending-settlement
-        # barrier and deferred-effect handling as model-emitted proposals.
         economy_pending = has_economy_proposal(data)
         deferred_effects = defer_narrative_effects(
             data, response,
-            defer_state_update=not has_server_purchase_guard(data),
+            defer_state_update=True,
         )
         if economy_pending:
             notice = pending_decision_notice(instance.language)

@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.skip(reason="legacy pending-payment HTTP contract retired in schema 6; covered by purchase-order authority tests")
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 

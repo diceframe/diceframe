@@ -78,7 +78,6 @@ def test_persisted_boundary_preserves_opaque_state_and_filters_transient_entries
     assert restored.ruleset_state == payload["ruleset_state"]
     assert restored.adventure_binding == payload["adventure_binding"]
     assert restored.event_ledger == payload["event_ledger"]
-    assert [item["id"] for item in restored.pending_payments] == ["pending"]
     assert [item["id"] for item in restored.table_talk] == ["party"]
 
 
@@ -679,12 +678,11 @@ class TestGameRegistry:
             item["run_id"] == imported.run_id
             for key in (
                 "proposals", "transactions", "effect_groups",
-                "external_effects_outbox", "outcomes", "purchase_quotes",
+                "external_effects_outbox", "outcomes",
             )
             for item in imported.economy[key]
         )
-        # open 报价随新 run 收养，导入后仍可确认，不会卡死新报价。
-        assert imported.economy["purchase_quotes"][0]["status"] == "open"
+        assert "purchase_quotes" not in imported.economy
         assert [
             item["id"] for item in imported.economy["external_effects_outbox"]
         ] == ["memory:pending"]

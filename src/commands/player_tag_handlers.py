@@ -9,7 +9,6 @@ from collections.abc import Callable
 from src.engine.dice import roll as dice_roll
 
 logger = logging.getLogger("trpg")
-MAX_PAYMENT_AMOUNT = 10_000
 PlayerTagHandler = Callable[[str, dict, dict], None]
 
 
@@ -41,62 +40,6 @@ def _hp(value: str, result: dict, _limits: dict) -> None:
         parsed = _parse_int(change, tag="HP", uid=uid)
         if parsed is not None:
             _set_int_change(result, uid, "hp_change", parsed)
-
-
-def _pay(value: str, result: dict, _limits: dict) -> None:
-    if not (split := _split(value)):
-        return
-    uid, change = split
-    purchase_parts = change.split(":", 2)
-    parsed = _parse_int(purchase_parts[0], tag="PAY", uid=uid)
-    if parsed is None:
-        return
-    amount = abs(parsed)
-    if not 0 < amount <= MAX_PAYMENT_AMOUNT:
-        logger.warning("PAY 金额异常，已忽略: %s = %d", uid, amount)
-        return
-    payment: dict = {"uid": uid, "amount": amount, "reason": "GM 建议支付"}
-    if len(purchase_parts) == 3:
-        recipient_uid = purchase_parts[1].strip()
-        items = [item.strip()[:120] for item in purchase_parts[2].split("|") if item.strip()][:8]
-        if recipient_uid and items:
-            payment.update(
-                recipient_uid=recipient_uid,
-                items=items,
-                reason=f"购买 {'、'.join(items)}",
-            )
-    result.setdefault("state_update", {}).setdefault("pending_payments", []).append(payment)
-
-
-def _team_pay(value: str, result: dict, _limits: dict) -> None:
-    contributor_text, separator, reason = value.partition(":")
-    if not separator or not reason.strip():
-        logger.warning("TEAM_PAY 缺少明确用途，已忽略: %s", value)
-        return
-    contributors = []
-    total = 0
-    seen: set[str] = set()
-    for raw_contributor in contributor_text.split("|"):
-        uid, equals, raw_amount = raw_contributor.strip().partition("=")
-        parsed = _parse_int(raw_amount.strip(), tag="TEAM_PAY", uid=uid) if equals else None
-        if not uid or uid in seen or parsed is None or not 0 < parsed <= MAX_PAYMENT_AMOUNT:
-            logger.warning("TEAM_PAY 分摊格式异常，已忽略: %s", value)
-            return
-        seen.add(uid)
-        total += parsed
-        contributors.append({"uid": uid, "amount": parsed})
-    if len(contributors) < 2 or total > MAX_PAYMENT_AMOUNT:
-        logger.warning("TEAM_PAY 参与者或总额异常，已忽略: %s", value)
-        return
-    result.setdefault("state_update", {}).setdefault("economy_proposals", []).append({
-        "kind": "fee",
-        "amount": total,
-        "reason": reason.strip()[:240],
-        "approval_policy": "all_contributors",
-        "contributors": contributors,
-        "visibility": "party",
-        "source": "team_pay_tag",
-    })
 
 
 def _gold(value: str, result: dict, limits: dict) -> None:
@@ -254,8 +197,6 @@ def _stat(value: str, result: dict, _limits: dict) -> None:
 
 PLAYER_TAG_HANDLERS: dict[str, PlayerTagHandler] = {
     "HP": _hp,
-    "PAY": _pay,
-    "TEAM_PAY": _team_pay,
     "GOLD": _gold,
     "USE": _use,
     "EQUIP": _equip,

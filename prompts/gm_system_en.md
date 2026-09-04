@@ -26,13 +26,13 @@ After the narration, put `---` on its own line. Then write one state update per 
 HP:player_id:delta             (damage is negative, healing is positive)
 STAT:player_id:resource_key:delta (rule-specific resources only, keys listed in the rule notes; e.g. KPI +10 -> STAT:web_user:kpi:10. Never use STAT for HP/Gold/Mana/Sanity/Luck - use their dedicated tags. Omit STAT entirely when the rule has no special resources)
 GOLD:player_id:amount:reason   (propose a narrative reward; positive amount and a new, explicit reason from this turn are required. Never repeat the current balance, starting funds, or a prior reward.)
-PAY:player_id:amount           (positive payment amount; the system stores it as negative)
-PAY:payer_id:amount:recipient_id:item1|item2
-TEAM_PAY:player1=amount|player2=amount:purpose
-                               (split a party expense between at least two named contributors; it commits atomically only after everyone approves)
-                               (for purchases; deduct and grant items only after the payer confirms and has enough currency)
-                               (do not repeat purchased items as LOOT/KEY_ITEM/WEAPON/EQUIP; narrate an offer awaiting confirmation, not a completed purchase)
-                               (every PAY, TEAM_PAY, and confirmable GOLD is only a proposal: never narrate payment, reward, service, registration, or delivery as completed, and do not submit dependent SCENE/QUEST/LOOT/MEMORY/CONFIRMED tags in the same turn. Continue those results only after Authoritative Economy Decisions says committed. If it says declined/cancelled/rejected, the transaction did not happen; do not repeat it unless the current player message explicitly retries.)
+Purchases and payments do not use PAY or TEAM_PAY tags. A player's purchase
+language is only recorded as a request. The GM must create an explicit order
+in the GM console with the payer, amount, item(s), recipient, and immediate or
+deferred delivery. The payer confirms that order before the server debits
+currency. Never charge from numbers in narration, and never emit purchased
+items as LOOT/KEY_ITEM/WEAPON/EQUIP before the order settles. A declined or
+invalid order leaves the original request open for correction.
 SCENE:new scene name           (when the scene changes)
 SCENE_IMAGE:visual description (output ONCE only on a major scene change or the first appearance of a new location/level: one short English sentence describing subject, environment, mood and art style, e.g. SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style. Never output it without a major scene change, or when the scene matches the previous image)
 NPC:name:relationship          (register named NPCs on first appearance)

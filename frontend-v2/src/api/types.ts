@@ -269,8 +269,9 @@ export interface GameDetail {
   has_room_password?: boolean
   multiplayer?: Multiplayer
   quick_actions?: string[]
-  pending_payments?: PendingPayment[]
   economy_proposals?: PendingPayment[]
+  purchase_requests?: PurchaseRequest[]
+  purchase_orders?: PurchaseOrder[]
   run_id?: string
   pending_luck_decisions?: CheckResult[]
   round_check_results?: CheckResult[]
@@ -280,6 +281,31 @@ export interface GameDetail {
     content_version?: string
     state_schema_version?: number
   }
+  [key: string]: unknown
+}
+
+export interface PurchaseRequest {
+  id: string
+  actor_uid: string
+  item_hint?: string
+  action_text?: string
+  round?: number
+  status?: string
+  [key: string]: unknown
+}
+
+export interface PurchaseOrder {
+  id: string
+  request_id?: string
+  proposal_id?: string
+  payer_uid: string
+  recipient_uid: string
+  amount: number
+  items: string[]
+  reason?: string
+  delivery_mode?: 'immediate' | 'deferred' | string
+  delivery_condition?: string
+  status?: string
   [key: string]: unknown
 }
 

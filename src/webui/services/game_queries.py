@@ -124,68 +124,31 @@ def game_detail(
             }
         )
     ]
-    open_purchase_quotes = [
-        {
-            "id": str(quote.get("id") or ""),
-            "payer_uid": str(quote.get("payer_uid") or ""),
-            "recipient_uid": str(
-                quote.get("recipient_uid") or quote.get("payer_uid") or ""
-            ),
-            "amount": int(quote.get("amount", 0) or 0),
-            "items": [str(item) for item in (quote.get("items") or []) if str(item)],
-            "reason": str(quote.get("reason") or ""),
-            "round": int(quote.get("round", 0) or 0),
-            "status": "open",
-        }
-        for quote in (getattr(instance, "economy", {}).get("purchase_quotes", []) or [])
-        if isinstance(quote, dict)
-        and quote.get("status", "open") == "open"
-        and str(quote.get("run_id") or "") == str(instance.run_id)
+    purchase_requests = [
+        dict(request)
+        for request in (getattr(instance, "economy", {}).get("purchase_requests", []) or [])
+        if isinstance(request, dict)
+        and request.get("status") == "open"
+        and str(request.get("run_id") or "") == str(instance.run_id)
         and (
             not viewer_uid
             or viewer_uid == instance.gm_uid
-            or viewer_uid == str(quote.get("payer_uid") or "")
+            or viewer_uid == str(request.get("actor_uid") or "")
         )
     ]
-    open_merchant_offers = [
-        {
-            "id": str(offer.get("id") or ""),
-            "item_display": str(offer.get("item_display") or ""),
-            "amount": int(offer.get("amount", 0) or 0),
-            "currency_id": str(offer.get("currency_id") or ""),
-            "origin_round": int(offer.get("origin_round", 0) or 0),
-            "status": "open",
-        }
-        for offer in (getattr(instance, "economy", {}).get("merchant_offers", []) or [])
-        if isinstance(offer, dict)
-        and offer.get("status") == "open"
-        and str(offer.get("run_id") or "") == str(instance.run_id)
-    ]
-    open_clarifications = [
-        {
-            "id": str(entry.get("id") or ""),
-            "payer_uid": str(entry.get("payer_uid") or ""),
-            "item_candidates": [
-                str(item) for item in (entry.get("item_candidates") or []) if str(item)
-            ],
-            "amount_candidates": [
-                int(value) for value in (entry.get("amount_candidates") or [])
-            ],
-            "reason": str(entry.get("reason") or ""),
-            "origin_round": int(entry.get("origin_round", 0) or 0),
-            "status": "open",
-        }
-        for entry in (getattr(instance, "economy", {}).get("clarifications", []) or [])
-        if isinstance(entry, dict)
-        and entry.get("status") == "open"
-        and str(entry.get("run_id") or "") == str(instance.run_id)
+    purchase_orders = [
+        dict(order)
+        for order in (getattr(instance, "economy", {}).get("purchase_orders", []) or [])
+        if isinstance(order, dict)
+        and order.get("status") in {"pending", "paid"}
+        and str(order.get("run_id") or "") == str(instance.run_id)
         and (
             not viewer_uid
             or viewer_uid == instance.gm_uid
-            or (
-                entry.get("payer_uid")
-                and viewer_uid == str(entry.get("payer_uid") or "")
-            )
+            or viewer_uid in {
+                str(order.get("payer_uid") or ""),
+                str(order.get("recipient_uid") or ""),
+            }
         )
     ]
     detail = {
@@ -215,26 +178,9 @@ def game_detail(
         ),
         "has_room_password": bool(getattr(instance, "room_password", "")),
         "quick_actions": getattr(instance, "quick_actions", []),
-        "pending_payments": [
-            payment
-            for payment in getattr(instance, "pending_payments", [])
-            if payment.get("status") == "pending"
-            and (
-                not viewer_uid
-                or viewer_uid == instance.gm_uid
-                or payment.get("visibility") == "party"
-                or viewer_uid == str(payment.get("payer_uid") or payment.get("uid") or "")
-                or viewer_uid in {
-                    str(item.get("uid") or "")
-                    for item in (payment.get("contributors") or [])
-                    if isinstance(item, dict)
-                }
-            )
-        ],
         "economy_proposals": economy_proposals,
-        "purchase_quotes": open_purchase_quotes,
-        "merchant_offers": open_merchant_offers,
-        "clarifications": open_clarifications,
+        "purchase_requests": purchase_requests,
+        "purchase_orders": purchase_orders,
         "pending_luck_decisions": instance.pending_luck_checks(),
         "round_check_results": (
             [dict(item) for item in instance.last_checks]

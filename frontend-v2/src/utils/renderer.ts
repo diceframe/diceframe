@@ -68,7 +68,6 @@ export function formatTagLine(tagBlock:string):Badge[]{
     const tag=p[0].toUpperCase();const uid=p[1]||'';const val=p.slice(2).join(':');const count=parseInt(val)
     if(tag==='HP'&&!isNaN(count))badges.push({cls:count<0?'hp-dn':'hp-up',text:'HP '+(count<0?String(count):'+'+count)})
     else if(tag==='GOLD'&&!isNaN(count))badges.push({cls:'gold',text:uiText('金币','Gold')+' '+(count<0?String(count):'+'+count)})
-    else if(tag==='PAY'&&!isNaN(count))badges.push({cls:'pay',text:uiText('金币','Gold')+' '+(-Math.abs(count))})
     else if(tag==='LOOT'&&val)badges.push({cls:'loot',text:val})
     else if(tag==='KEY_ITEM'&&val)badges.push({cls:'loot',text:'🔑 '+val})
     else if(tag==='WEAPON'&&val)badges.push({cls:'loot',text:'⚔ '+val})
@@ -144,7 +143,7 @@ export function highlightKeywords(text:string,lore?:LoreKeywords):string{
 
 export interface GMBlock{paragraphs:string[];states:StateCard[];tags:Badge[]}
 const PROTOCOL_HEADING_RE=/^[\s#>*_`【[]*(?:状态[\s*_`]*(?:变更|变化|更新)|state[\s*_`-]*changes?)[\s#>*_`】\]:：-]*$/i
-const PROTOCOL_TAG_RE=/^(?:HP|GOLD|PAY|SCENE|NPC|LOOT|KEY_ITEM|DECISION|QUEST|USE|WEAPON|EQUIP|PRIVATE|XP|MILESTONE|SAN|SAN_CHECK|LUCK|SKILL_GROWTH|PUSH|PUZZLE|MANA|SPELL|QUICK_ACTIONS|COMBAT|REVIVE|CONFIRMED|MEMORY|NONE)\s*(?::|$)/i
+const PROTOCOL_TAG_RE=/^(?:HP|GOLD|SCENE|NPC|LOOT|KEY_ITEM|DECISION|QUEST|USE|WEAPON|EQUIP|PRIVATE|XP|MILESTONE|SAN|SAN_CHECK|LUCK|SKILL_GROWTH|PUSH|PUZZLE|MANA|SPELL|QUICK_ACTIONS|COMBAT|REVIVE|CONFIRMED|MEMORY|NONE)\s*(?::|$)/i
 function normalizeProtocolSuffix(text:string):string{
   const source=String(text||'')
   if(source.includes('---'))return source

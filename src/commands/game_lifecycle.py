@@ -13,7 +13,6 @@ from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.economy_effects import (
     currency_labels_for_rule,
     discard_unearned_reward_proposals,
-    discard_unbacked_purchase_items,
     defer_narrative_effects,
     guard_unbacked_payment_narration,
     has_economy_proposal,
@@ -21,6 +20,7 @@ from src.commands.economy_effects import (
     unbacked_purchase_notice,
     unearned_reward_notice,
 )
+from src.engine.purchase_orders import filter_unordered_purchase_grants
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.tag_parser import (
     parse_tag_state,
@@ -30,7 +30,7 @@ from src.commands.tag_summary import summarize_tags
 from src.engine.character_utils import reset_character_for_restart
 from src.engine.economy import queue_effect_group
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
-from src.engine.language import DEFAULT_LANGUAGE, localized_text, normalize_language
+from src.engine.language import localized_text, normalize_language
 from src.engine.narrative_perspective import narrative_perspective_instruction
 from src.llm.parser import normalize_tag_protocol, sanitize_narration
 from src.rulesets.contracts import RunLifecycleRuntime
@@ -326,9 +326,7 @@ class GameLifecycle:
             narration, start_data, instance.language,
             currency_labels=currency_labels,
         )
-        dropped_purchase_items = discard_unbacked_purchase_items(
-            instance, start_data, narration, currency_labels=currency_labels,
-        )
+        dropped_purchase_items = filter_unordered_purchase_grants(instance, start_data)
         if dropped_purchase_items:
             narration = f"{narration}\n\n{unbacked_purchase_notice(instance.language)}".strip()
         deferred_effects = (

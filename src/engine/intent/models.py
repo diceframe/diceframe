@@ -9,12 +9,11 @@ from dataclasses import dataclass
 class PurchaseIntent:
     """One actor's stated purchase intent, parsed from their own action text.
 
-    ``item_context`` 是去掉金额与购买动词后的商品指代片段（供澄清展示与
-    宽松绑定），``amount_candidates`` 是该 actor 行动里出现的全部金额——
-    多于一个时视为无法唯一确认。意图只是证据，不是交易事实。
+    ``item_context`` 是去掉金额与购买动词后的商品指代片段，仅用于展示。
+    意图只是请求记录，不是交易事实，也不携带可收费金额。
     """
 
     actor_uid: str
     action_text: str
     item_context: str
-    amount_candidates: tuple[int, ...]
+    source: str = "keyword"  # keyword = 规则解析；ai = GM 模型结构化输出

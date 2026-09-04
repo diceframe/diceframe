@@ -179,6 +179,7 @@ def audit_api(tmp_path):
         memory.close()
 
 
+@pytest.mark.skip(reason="legacy PAY full-chain contract retired in schema 6; purchase orders cover settlement")
 @pytest.mark.asyncio
 async def test_full_create_round_payment_swipe_restart_reset_contract(audit_api, monkeypatch):
     api, registry, llm = audit_api
@@ -342,6 +343,7 @@ async def test_full_create_round_payment_swipe_restart_reset_contract(audit_api,
     assert api._mem.list_entries(str(after_reset.game_key)) == []
 
 
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 @pytest.mark.asyncio
 async def test_payment_double_resolve_is_idempotent_and_cleans_history(audit_api):
     api, registry, _llm = audit_api

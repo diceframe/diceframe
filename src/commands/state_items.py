@@ -85,6 +85,27 @@ def append_inventory_item(
     inventory.append(new_item)
 
 
+def add_owned_equipment_to_inventory(
+    character_sheet: dict,
+    item_name: str,
+    *,
+    quality: str = "common",
+) -> None:
+    """Record an equipment item as owned but not currently equipped.
+
+    Loot and purchases must not silently replace the character's active
+    weapon.  Keeping the category on the inventory row lets an explicit
+    equip action move it to the equipment list later.
+    """
+
+    append_inventory_item(
+        character_sheet,
+        item_name,
+        quality=quality,
+        category="equipment",
+    )
+
+
 def append_key_item(
     character_sheet: dict,
     item_name: str,
@@ -115,7 +136,11 @@ def grant_classified_item(
     if not item_name:
         return
     if category == "equipment":
-        append_unique_equipment(character_sheet, item_name)
+        # Obtaining equipment is not the same action as equipping it.  Keep
+        # the item owned in the backpack; only an explicit WEAPON/equip action
+        # may move it into an active slot.  This prevents a new loot/purchase
+        # from silently replacing the weapon currently in hand.
+        add_owned_equipment_to_inventory(character_sheet, item_name)
     elif category in ("key_item", "quest", "clue", "credential", "artifact"):
         append_key_item(character_sheet, item_name, category=category)
     elif category == "cyberware":

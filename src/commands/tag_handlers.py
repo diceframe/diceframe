@@ -15,7 +15,7 @@ LIMITS_BY_COMBAT_MODEL = {
 }
 
 PLAYER_TAGS = frozenset({
-    "HP", "PAY", "TEAM_PAY", "GOLD", "USE", "EQUIP", "WEAPON", "XP", "MILESTONE", "SAN", "SAN_CHECK",
+    "HP", "GOLD", "USE", "EQUIP", "WEAPON", "XP", "MILESTONE", "SAN", "SAN_CHECK",
     "LUCK", "SKILL_GROWTH", "PUSH", "MANA", "REVIVE", "STAT",
 })
 WORLD_TAGS = frozenset({

@@ -18,6 +18,7 @@ from src.engine.economy import (
     pending_effect_groups,
     pending_memory_deliveries,
     pending_memory_reversals,
+    pending_economy_proposals,
 )
 from src.engine.game_instance import GameState
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
@@ -65,20 +66,18 @@ def _result(payload: dict[str, Any], status: int = 200) -> TurnResult:
     return {"payload": payload, "status": status}
 
 
-def _pending_payments(instance: "GameInstance", viewer_uid: str = "") -> list[dict[str, Any]]:
+def _visible_economy_proposals(instance: "GameInstance", viewer_uid: str = "") -> list[dict[str, Any]]:
     return [
-        payment
-        for payment in instance.pending_payments
-        if isinstance(payment, dict)
-        and payment.get("status") == "pending"
-        and (
+        proposal
+        for proposal in pending_economy_proposals(instance)
+        if (
             not viewer_uid
             or viewer_uid == instance.gm_uid
-            or payment.get("visibility") == "party"
-            or viewer_uid == str(payment.get("payer_uid") or payment.get("uid") or "")
+            or proposal.get("visibility") == "party"
+            or viewer_uid == str(proposal.get("payer_uid") or proposal.get("uid") or "")
             or viewer_uid in {
                 str(item.get("uid") or "")
-                for item in (payment.get("contributors") or [])
+                for item in (proposal.get("contributors") or [])
                 if isinstance(item, dict)
             }
         )
@@ -115,12 +114,11 @@ def economy_decision_pending_payload(
         "error": "请先处理待确认的经济提案，再继续本局叙事",
         "pending_count": (
             len(unresolved)
-            or len(_pending_payments(instance))
             or len(pending_effect_groups(instance))
             or len(pending_memory_deliveries(instance))
             or len(pending_memory_reversals(instance))
         ),
-        "pending_payments": visible,
+        "economy_proposals": visible,
     }
 
 
@@ -156,7 +154,7 @@ def _round_payload(
     payload: dict[str, Any] = {
         "narration": narration,
         "quick_actions": list(instance.quick_actions),
-        "pending_payments": _pending_payments(instance, viewer_uid),
+        "economy_proposals": _visible_economy_proposals(instance, viewer_uid),
         "check_result": instance.last_check,
         "check_results": list(instance.last_checks),
     }
@@ -400,6 +398,14 @@ async def submit_action(
                 "error_code": "REWRITE_IN_PROGRESS",
                 "error": "GM 正在重写历史回合，请等待完成后再提交行动",
             }, 409)
+        # Purchase requests are recorded together with the action. Persisting
+        # here keeps a request recoverable even when another player has not yet
+        # submitted an action and no narrative round has started.
+        if action_added:
+            try:
+                await dependencies.save_instance(instance)
+            except Exception:
+                logger.exception("保存行动/购买请求失败: game=%s", game_key)
 
     if await instance.try_advance():
         await _prepare_checks(dependencies, instance)

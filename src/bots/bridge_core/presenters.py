@@ -16,7 +16,7 @@ def command_example(command: str = "", *, command_prefix: str = "@我") -> str:
 
 def format_action_result(result: dict[str, Any], language: str = "zh-CN") -> str:
     if str(result.get("error_code") or "") == "ECONOMY_DECISION_PENDING":
-        if result.get("pending_payments"):
+        if result.get("economy_proposals"):
             return localized_text(language, {
                 "en": "An economy proposal is waiting for your decision. Send “pay” to review it.",
                 "zh-CN": "当前有经济提案待确认，请发送“支付”查看。",

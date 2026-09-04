@@ -1567,6 +1567,9 @@ class WebAPI:
         reason: str = "",
         recipient_uid: str = "",
         items: list[str] | None = None,
+        request_id: str = "",
+        delivery_mode: str = "immediate",
+        delivery_condition: str = "",
     ) -> dict[str, Any]:
         return await characters.create_payment_proposal(
             self._character_dependencies,
@@ -1576,22 +1579,16 @@ class WebAPI:
             reason=reason,
             recipient_uid=recipient_uid,
             items=items,
+            request_id=request_id,
+            delivery_mode=delivery_mode,
+            delivery_condition=delivery_condition,
         )
 
-    async def confirm_purchase_quote(self, game_key: str, quote_id: str, session_uid: str = "") -> dict[str, Any]:
-        return await characters.confirm_purchase_quote(
-            self._character_dependencies,
-            game_key,
-            quote_id,
-            session_uid,
-        )
-
-    async def cancel_purchase_quote(self, game_key: str, quote_id: str, session_uid: str = "") -> dict[str, Any]:
-        return await characters.cancel_purchase_quote(
-            self._character_dependencies,
-            game_key,
-            quote_id,
-            session_uid,
+    async def deliver_purchase_order(
+        self, game_key: str, order_id: str, session_uid: str = "",
+    ) -> dict[str, Any]:
+        return await characters.deliver_purchase_order_service(
+            self._character_dependencies, game_key, order_id, session_uid,
         )
 
     async def _drain_economy_outbox(self, instance: Any) -> bool:

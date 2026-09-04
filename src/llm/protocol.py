@@ -17,6 +17,7 @@ PROTOCOL_SENTINELS = frozenset({"NONE"})
 # 曾在规则模板或模型输出中出现、但核心从未支持执行的伪标签。
 # 只用于玩家可见文本的泄漏识别，绝不进入状态执行路径。
 NON_EXECUTABLE_PROTOCOL_NAMES = frozenset({"STATE"})
+RETIRED_PROTOCOL_TAGS = frozenset({"PAY", "TEAM_PAY"})
 
 
 def _name_key(value: str) -> str:
@@ -86,6 +87,8 @@ def parse_protocol_line(
         if not include_non_executable or _name_key(raw_tag) not in _NON_EXECUTABLE_KEYS:
             return None
         tag = raw_tag.upper()
+    if tag in RETIRED_PROTOCOL_TAGS:
+        executable = False
 
     body = match.group("body").strip()
     trailing = ""
@@ -104,6 +107,8 @@ def normalize_protocol_line(line: str) -> str | None:
     """Return a canonical executable protocol line, or None for ordinary text."""
     parsed = parse_protocol_line(line)
     if not parsed:
+        return None
+    if not parsed.executable:
         return None
     if parsed.tag == "NONE":
         return "NONE"

@@ -93,18 +93,6 @@ class CheckResult(TypedDict, total=False):
     is_fumble: bool
 
 
-class PendingPayment(TypedDict, total=False):
-    id: str
-    uid: str
-    amount: int
-    recipient_uid: str
-    rewards: list[dict[str, Any]]
-    reason: str
-    status: Literal["pending", "accepted", "declined", "rejected"]
-    round: int
-    resolved_at: float
-
-
 class StoryRecap(TypedDict, total=False):
     id: str
     text: str

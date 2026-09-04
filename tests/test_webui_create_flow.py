@@ -605,7 +605,6 @@ async def test_opening_conditional_reward_is_not_queued(web_api, monkeypatch):
     assert result["ok"] is True
     instance = registry.get(api._parse_key(result["game_key"]))
     assert instance is not None
-    assert instance.pending_payments == []
     assert instance.economy["proposals"] == []
     assert "奖励待确认" in instance.log[-1]["gm_response"]
 
@@ -722,7 +721,6 @@ async def test_raw_gold_change_cannot_bypass_economy_authority(web_api):
     })
 
     assert inst.players[uid]["character_sheet"]["gold"] == 30
-    assert inst.pending_payments == []
 
 
 @pytest.mark.asyncio
@@ -748,7 +746,6 @@ async def test_oversized_raw_gold_change_cannot_zero_balance(web_api):
     })
 
     assert inst.players[uid]["character_sheet"]["gold"] == 20
-    assert inst.pending_payments == []
 
 
 async def _make_game_with_pending(
@@ -786,6 +783,7 @@ async def _make_game_with_pending(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 async def test_resolve_payment_accepted_deducts_gold(web_api):
     api, gk, inst, uid = await _make_game_with_pending(web_api, gold=30, amount=12)
     res = await api.resolve_payment(gk, "pay_test1", True, uid)
@@ -797,6 +795,7 @@ async def test_resolve_payment_accepted_deducts_gold(web_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 async def test_resolve_payment_rejected_adds_health_event(web_api):
     api, gk, inst, uid = await _make_game_with_pending(web_api, gold=30, amount=12)
     res = await api.resolve_payment(gk, "pay_test1", False, uid)
@@ -811,6 +810,7 @@ async def test_resolve_payment_rejected_adds_health_event(web_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 async def test_resolve_payment_permission_non_owner_blocked(web_api):
     api, gk, inst, uid = await _make_game_with_pending(web_api, gold=30, amount=12)
     # 非当事玩家、非 GM 不能处理
@@ -823,6 +823,7 @@ async def test_resolve_payment_permission_non_owner_blocked(web_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 async def test_resolve_payment_insufficient_gold(web_api):
     api, gk, inst, uid = await _make_game_with_pending(
         web_api,
@@ -846,6 +847,7 @@ async def test_resolve_payment_insufficient_gold(web_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy top-level pending-payment contract retired in schema 6")
 async def test_multiplayer_payment_grants_items_to_recipient(web_api):
     api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
     result = await api.create_game(
@@ -885,6 +887,7 @@ async def test_multiplayer_payment_grants_items_to_recipient(web_api):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="legacy PAY tag contract retired in schema 6")
 async def test_apply_state_update_creates_pending_payment(web_api):
     api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
     result = await api.create_game(

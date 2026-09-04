@@ -13,10 +13,6 @@ from typing import Any, Callable
 
 from src.compat.callbacks import load_world_template as load_world_template_compat
 from src.engine.game_instance import GameInstance
-from src.commands.economy_effects import (
-    link_purchase_quote_proposal,
-    record_merchant_offer,
-)
 from src.commands.item_category_resolver import ItemCategoryResolver
 from src.commands.madness_tracker import MadnessTracker
 from src.commands.npc_state_applier import NpcStateApplier
@@ -147,62 +143,22 @@ class StateUpdateApplier:
             category = loot.get("category") or classify_item(item_name, rule_cats)
             grant_classified_item(cs, item_name, category)
 
-        # 待确认支付（PAY tag 不直接扣金币，转入 pending 等玩家确认）
-        for proposal_index, pay in enumerate(update.get("pending_payments", [])):
-            uid = pay.get("uid", "")
-            amount = int(pay.get("amount", 0) or 0)
-            if not uid or amount <= 0 or uid not in instance.players:
-                continue
-            recipient_uid = str(pay.get("recipient_uid") or uid)
-            if recipient_uid not in instance.players:
-                continue
-            rewards = []
-            for item_name in pay.get("items", [])[:8]:
-                item_name = str(item_name).strip()[:120]
-                if item_name:
-                    rewards.append({
-                        "name": item_name,
-                        "category": classify_item(item_name, rule_cats),
-                    })
-            queued_proposals.append(queue_proposal(
-                instance,
-                kind="purchase" if rewards else "payment",
-                payer_uid=uid,
-                recipient_uid=recipient_uid,
-                amount=amount,
-                rewards=rewards,
-                reason=pay.get("reason") or (
-                    f"购买 {'、'.join(item['name'] for item in rewards)}"
-                    if rewards else "GM 建议支付"
-                ),
-                source="pay_tag",
-                source_ref=f"round:{instance.run_id}:{instance.round_number}:pay:{proposal_index}:{uid}:{amount}:{recipient_uid}:{'|'.join(item['name'] for item in rewards)}",
-                approval_policy="payer",
-            ))
-
         for proposal_index, proposal in enumerate(update.get("economy_proposals", [])):
             uid = str(proposal.get("uid") or "")
             amount = int(proposal.get("amount", 0) or 0)
             kind = str(proposal.get("kind") or "")
-            contributors = [
-                {"uid": str(item.get("uid") or ""), "amount": int(item.get("amount", 0) or 0)}
-                for item in (proposal.get("contributors") or [])
-                if isinstance(item, dict)
-            ]
-            is_team_fee = (
-                kind == "fee"
-                and str(proposal.get("approval_policy") or "") == "all_contributors"
-                and len(contributors) >= 2
-                and all(
-                    item["uid"] in instance.players and item["amount"] > 0
-                    for item in contributors
+            # Model output is never allowed to create a chargeable purchase or
+            # payment.  Those proposals must come from the authenticated GM
+            # purchase-order service; otherwise arbitrary narration/JSON can
+            # charge the wrong player or item.  Narrative rewards remain a
+            # separate, GM-approved path.
+            if kind in {"payment", "purchase", "fee", "transfer"}:
+                logger.warning(
+                    "忽略模型经济扣款提案: kind=%s uid=%s round=%d",
+                    kind, uid, instance.round_number,
                 )
-                and sum(item["amount"] for item in contributors) == amount
-            )
-            if not is_team_fee and (
-                uid not in instance.players
-                or kind not in {"payment", "purchase", "reward"}
-            ):
+                continue
+            if uid not in instance.players or kind != "reward":
                 continue
             reason = str(proposal.get("reason") or "经济提案")[:240]
             source = str(proposal.get("source") or "narrative")
@@ -243,63 +199,17 @@ class StateUpdateApplier:
             queued_proposals.append(queue_proposal(
                 instance,
                 kind=kind,
-                payer_uid=uid if kind in {"payment", "purchase"} else "",
+                payer_uid="",
                 recipient_uid=str(proposal.get("recipient_uid") or uid),
                 amount=amount,
                 rewards=rewards,
                 reason=reason,
                 source=source,
                 source_ref=source_ref,
-                approval_policy=(
-                    "all_contributors" if is_team_fee
-                    else "gm" if kind == "reward"
-                    else "payer"
-                ),
-                contributors=contributors if is_team_fee else None,
-                visibility="party" if is_team_fee else "private",
-                quote_id=str(proposal.get("quote_id") or ""),
-                # AI payloads never set the price source; only the server
-                # guard records which evidence produced the amount.
-                amount_source=(
-                    str(proposal.get("amount_source") or "")
-                    if source == "server_purchase_guard"
-                    else ""
-                ),
-                evidence_ids=(
-                    [
-                        str(item)
-                        for item in (proposal.get("evidence_ids") or [])
-                        if str(item)
-                    ]
-                    if source == "server_purchase_guard"
-                    else []
-                ),
+                approval_policy="gm",
+                visibility="private",
             ))
-            quote_id = str(proposal.get("quote_id") or "")
-            if quote_id:
-                link_purchase_quote_proposal(
-                    instance, quote_id, str(queued_proposals[-1].get("id") or ""),
-                )
-        self._apply_merchant_offers(instance, update)
         return queued_proposals
-
-    def _apply_merchant_offers(self, instance: GameInstance, update: dict) -> None:
-        """Persist typed world-side merchant offers; they never bind a payer."""
-
-        for offer_payload in update.get("merchant_offers", []) or []:
-            if not isinstance(offer_payload, dict):
-                continue
-            record_merchant_offer(
-                instance,
-                item_display=str(
-                    offer_payload.get("item_display")
-                    or offer_payload.get("item")
-                    or ""
-                ),
-                amount=offer_payload.get("amount", 0),
-                seller_id=str(offer_payload.get("seller_id") or ""),
-                currency_id=str(offer_payload.get("currency_id") or ""),
-            )
 
     def apply_madness(self, instance: GameInstance, uid: str, cs: dict, loss: int) -> None:
         """兼容旧内部调用；实际逻辑已拆到 MadnessTracker。"""

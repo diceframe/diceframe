@@ -21,7 +21,11 @@ from src.engine.character_utils import (
 from src.engine.game_instance import GameInstance
 from src.commands.madness_tracker import MadnessTracker
 from src.commands.resource_triggers import check_resource_triggers
-from src.commands.state_items import append_unique_equipment
+from src.commands.state_items import (
+    add_owned_equipment_to_inventory,
+    append_inventory_item,
+    equipment_entry,
+)
 
 logger = logging.getLogger("trpg")
 
@@ -90,20 +94,50 @@ class PlayerStateApplier:
             # 切换武器
             weapon_name = pud.get("weapon_change")
             if weapon_name:
-                dmg = pud.get("weapon_damage", 3)
-                eq = cs.get("equipment", [])
-                replaced = False
-                for e in eq:
-                    if e.get("slot") == "main_hand":
-                        e["name"] = weapon_name
-                        e["damage"] = dmg
-                        replaced = True
-                        break
-                if not replaced:
-                    eq.append({"name": weapon_name, "type": "weapon", "damage": dmg, "slot": "main_hand", "quality": "common"})
+                requested = str(weapon_name).strip()
+                inventory = cs.setdefault("inventory", [])
+                owned_index = next(
+                    (
+                        index for index, item in enumerate(inventory)
+                        if isinstance(item, dict)
+                        and str(item.get("name") or "").strip().casefold()
+                        == requested.casefold()
+                        and int(item.get("qty", 1) or 1) > 0
+                    ),
+                    None,
+                )
+                if owned_index is None:
+                    logger.warning(
+                        "忽略未拥有武器的装备切换: uid=%s weapon=%s round=%d",
+                        uid, requested, instance.round_number,
+                    )
+                else:
+                    owned = inventory[owned_index]
+                    owned["qty"] = int(owned.get("qty", 1) or 1) - 1
+                    if owned["qty"] <= 0:
+                        inventory.pop(owned_index)
+                    eq = cs.setdefault("equipment", [])
+                    previous = next(
+                        (item for item in eq if isinstance(item, dict) and item.get("slot") == "main_hand"),
+                        None,
+                    )
+                    if previous is not None:
+                        append_inventory_item(
+                            cs,
+                            str(previous.get("name") or "").strip(),
+                            quality=str(previous.get("quality") or "common"),
+                            category="equipment",
+                        )
+                    eq[:] = [item for item in eq if item is not previous]
+                    equipped = equipment_entry(requested)
+                    equipped["slot"] = "main_hand"
+                    eq.append(equipped)
             equip_gain = pud.get("equip_gain")
             if equip_gain:
-                append_unique_equipment(cs, equip_gain)
+                # EQUIP is an acquisition marker in the narrative protocol,
+                # not an instruction to replace the active loadout.  Explicit
+                # WEAPON/equip actions are the only path that changes slots.
+                add_owned_equipment_to_inventory(cs, str(equip_gain))
             # 法力变化
             mana_change = pud.get("mana_change")
             if isinstance(mana_change, (int, float)):

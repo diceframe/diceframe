@@ -74,11 +74,6 @@ class GameStateCodec:
             "pending_combat_results": instance.pending_combat_results,
             "lorebook_timed_state": instance.lorebook_timed_state,
             "quick_actions": instance.quick_actions,
-            "pending_payments": [
-                payment
-                for payment in instance.pending_payments
-                if isinstance(payment, dict) and payment.get("status") == "pending"
-            ],
             "health_events": instance.health_events[-100:],
             "health_status": instance.health_status,
             "last_check": instance.last_check,
@@ -120,7 +115,7 @@ class GameStateCodec:
         )
         instance = instance_type(
             game_key=tuple(data["game_key"]),
-            instance_schema_version=int(data.get("instance_schema_version", 4) or 4),
+            instance_schema_version=int(data.get("instance_schema_version", 6) or 6),
             run_id=str(data.get("run_id") or ""),
             memory_namespace=str(data.get("memory_namespace") or ""),
             economy=data.get("economy") or {},
@@ -172,11 +167,6 @@ class GameStateCodec:
             pending_combat_results=data.get("pending_combat_results", []),
             lorebook_timed_state=data.get("lorebook_timed_state", {}),
             quick_actions=data.get("quick_actions", []),
-            pending_payments=[
-                payment
-                for payment in data.get("pending_payments", [])
-                if isinstance(payment, dict) and payment.get("status") == "pending"
-            ],
             health_events=data.get("health_events", []),
             health_status=data.get("health_status", {}),
             last_check=data.get("last_check"),

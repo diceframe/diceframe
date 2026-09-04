@@ -23,7 +23,6 @@ MAX_EXTERNAL_EFFECT_DELIVERIES = 50
 # (or reopened by a settlement-only rollback).  Everything else is terminal and
 # must never be re-resolved.
 PAYER_ECONOMY_KINDS = {"payment", "purchase", "fee", "transfer"}
-VALID_AMOUNT_SOURCES = {"", "narration", "player_action", "merchant_offer"}
 PROPOSAL_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"committed", "declined", "cancelled", "rejected", "superseded"}),
     "committed": frozenset({"reversed", "pending"}),
@@ -54,6 +53,12 @@ def _advance_revision(instance: Any) -> int:
     revision = economy_revision(instance) + 1
     instance.economy["decision_revision"] = revision
     return revision
+
+
+def advance_economy_revision(instance: Any) -> int:
+    """Advance the authoritative economy decision revision."""
+
+    return _advance_revision(instance)
 
 
 def _record_outcome(
@@ -93,6 +98,18 @@ def _record_outcome(
     if len(outcomes) > MAX_ECONOMY_OUTCOMES:
         del outcomes[:-MAX_ECONOMY_OUTCOMES]
     return outcome
+
+
+def record_economy_outcome(
+    instance: Any,
+    proposal: dict[str, Any],
+    *,
+    status: str,
+    actor_uid: str,
+) -> dict[str, Any]:
+    """Record one bounded, authoritative economy outcome."""
+
+    return _record_outcome(instance, proposal, status=status, actor_uid=actor_uid)
 
 
 def queue_effect_group(
@@ -382,10 +399,6 @@ def cancel_proposals_for_player(
             actor_uid="system",
         )
         _settle_effect_group(instance, proposal)
-    instance.pending_payments = [
-        item for item in instance.pending_payments
-        if str(item.get("id") or "") not in affected_ids
-    ]
     return affected_ids
 
 
@@ -403,23 +416,9 @@ def pending_proposals(instance: Any) -> list[dict[str, Any]]:
 
 
 def pending_economy_proposals(instance: Any) -> list[dict[str, Any]]:
-    """Return every pending proposal, including legacy payment projections.
+    """Return canonical pending proposals for the current run."""
 
-    Legacy saves may still carry entries only in ``pending_payments``.  They
-    intentionally remain visible to the policy layer and are treated as
-    blocking when their semantics cannot be proven safe.
-    """
-
-    proposals = pending_proposals(instance)
-    known_ids = {str(item.get("id") or "") for item in proposals}
-    for item in (getattr(instance, "pending_payments", []) or []):
-        if not isinstance(item, dict) or item.get("status") != "pending":
-            continue
-        proposal_id = str(item.get("id") or "")
-        if proposal_id and proposal_id not in known_ids:
-            proposals.append(item)
-            known_ids.add(proposal_id)
-    return proposals
+    return pending_proposals(instance)
 
 
 def is_nonblocking_personal_purchase(
@@ -595,9 +594,10 @@ def queue_proposal(
     rewards: list[dict[str, Any]] | None = None,
     contributors: list[dict[str, Any]] | None = None,
     visibility: str = "private",
-    quote_id: str = "",
-    amount_source: str = "",
-    evidence_ids: list[str] | None = None,
+    order_id: str = "",
+    request_id: str = "",
+    delivery_mode: str = "immediate",
+    delivery_condition: str = "",
 ) -> dict[str, Any]:
     """Queue one idempotent proposal; no balance is changed here."""
 
@@ -613,10 +613,12 @@ def queue_proposal(
         # Fail closed at the proposal layer: a payer outside the current game
         # can never be settled, so the offer must not become pending.
         raise ValueError("economy payer is not part of the current game")
-    if str(amount_source) not in VALID_AMOUNT_SOURCES:
-        # The audit field records which evidence produced the amount; an
-        # unknown value would make that provenance untrustworthy.
-        raise ValueError("unsupported economy amount source")
+    if kind in PAYER_ECONOMY_KINDS and str(source) not in {"gm_manual", "purchase_order"}:
+        raise ValueError("chargeable economy proposals require an explicit GM order")
+    if kind == "purchase" and not str(order_id or ""):
+        raise ValueError("purchase proposals require an explicit order")
+    if str(delivery_mode or "immediate") not in {"immediate", "deferred"}:
+        raise ValueError("unsupported purchase delivery mode")
     normalized_contributors = deepcopy(list(contributors or []))
     if approval_policy == "all_contributors":
         contributor_uids = [
@@ -654,15 +656,12 @@ def queue_proposal(
         "reason": str(reason or "经济提案")[:240],
         "source": str(source),
         "source_ref": str(source_ref),
-        # Origin linkage for offers converted from a persisted purchase quote;
-        # empty for proposals that did not come from a quote.
-        "quote_id": str(quote_id),
-        # Audit of which evidence produced the amount (server guard paths
-        # only): narration / player_action / merchant_offer.
-        "amount_source": str(amount_source)[:40],
-        # Evidence layer links (ev_*): audit trail of what was observed;
-        # evidence itself never mutates state.
-        "evidence_ids": [str(item) for item in (evidence_ids or [])][:20],
+        # Purchase-order linkage is explicit server state.  Empty values keep
+        # legacy reward/payment proposals byte-compatible.
+        "order_id": str(order_id or ""),
+        "request_id": str(request_id or ""),
+        "delivery_mode": str(delivery_mode or "immediate"),
+        "delivery_condition": str(delivery_condition or "")[:240],
         "approval_policy": str(approval_policy),
         "rewards": deepcopy(list(rewards or [])),
         "contributors": normalized_contributors,
@@ -676,35 +675,6 @@ def queue_proposal(
     economy["next_sequence"] = sequence + 1
     if source_ref:
         economy.setdefault("idempotency_records", {})[source_ref] = proposal["id"]
-    if kind in {"payment", "purchase", "fee"}:
-        instance.pending_payments.append(proposal)
-    return proposal
-
-
-def import_legacy_payment(instance: Any, payment: dict[str, Any]) -> dict[str, Any]:
-    """Adopt a legacy pending payment at the compatibility boundary."""
-
-    existing = next(
-        (item for item in instance.economy.get("proposals", []) if item.get("id") == payment.get("id")),
-        None,
-    )
-    if existing is not None:
-        return existing
-    proposal = {
-        **deepcopy(payment),
-        "id": str(payment.get("id") or f"eco_{uuid4().hex}"),
-        "run_id": instance.run_id,
-        "sequence": int(instance.economy.get("next_sequence", 1) or 1),
-        "kind": "payment",
-        "payer_uid": str(payment.get("uid") or ""),
-        "approval_policy": "payer_or_gm_legacy",
-        "source": "legacy",
-        "source_ref": "",
-        "visibility": "private",
-        "status": "pending",
-    }
-    instance.economy.setdefault("proposals", []).append(proposal)
-    instance.economy["next_sequence"] = proposal["sequence"] + 1
     return proposal
 
 
@@ -722,13 +692,6 @@ def resolve_proposal(
         (item for item in instance.economy.get("proposals", []) if item.get("id") == proposal_id),
         None,
     )
-    if proposal is None:
-        legacy = next(
-            (item for item in instance.pending_payments if item.get("id") == proposal_id),
-            None,
-        )
-        if legacy is not None:
-            proposal = import_legacy_payment(instance, legacy)
     if proposal is None:
         return {"ok": False, "code": "PROPOSAL_NOT_FOUND", "error": "经济提案不存在"}
     if proposal.get("run_id") != instance.run_id:
@@ -766,14 +729,22 @@ def resolve_proposal(
             "cancelled" if is_gm and actor_uid != payer_uid else "declined",
         )
         proposal["resolved_at"] = now
-        instance.pending_payments = [
-            item for item in instance.pending_payments if item.get("id") != proposal_id
-        ]
+        proposal["resolution_code"] = (
+            "CANCELLED_BY_GM" if is_gm and actor_uid != payer_uid
+            else "DECLINED_BY_PAYER"
+        )
         _advance_revision(instance)
         outcome = _record_outcome(
             instance, proposal, status=str(proposal["status"]), actor_uid=actor_uid,
         )
         _settle_effect_group(instance, proposal)
+        # A rejected/declined order leaves the original player request
+        # actionable so the GM can correct the item or price without losing it.
+        if proposal.get("order_id"):
+            from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
+
+            sync_purchase_order_status(instance, proposal)
+            reopen_purchase_order_request(instance, proposal)
         return {
             "ok": True,
             "accepted": False,
@@ -815,15 +786,17 @@ def resolve_proposal(
             if balances[uid] < contribution_amount:
                 set_proposal_status(proposal, "rejected")
                 proposal["resolved_at"] = now
-                instance.pending_payments = [
-                    item for item in instance.pending_payments
-                    if item.get("id") != proposal_id
-                ]
+                proposal["resolution_code"] = "INSUFFICIENT_FUNDS"
                 _advance_revision(instance)
                 outcome = _record_outcome(
                     instance, proposal, status="rejected", actor_uid=actor_uid,
                 )
                 _settle_effect_group(instance, proposal)
+                if proposal.get("order_id"):
+                    from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
+
+                    sync_purchase_order_status(instance, proposal)
+                    reopen_purchase_order_request(instance, proposal)
                 return {
                     "ok": False,
                     "code": "INSUFFICIENT_FUNDS",
@@ -861,14 +834,17 @@ def resolve_proposal(
         if current < amount:
             set_proposal_status(proposal, "rejected")
             proposal["resolved_at"] = now
-            instance.pending_payments = [
-                item for item in instance.pending_payments if item.get("id") != proposal_id
-            ]
+            proposal["resolution_code"] = "INSUFFICIENT_FUNDS"
             _advance_revision(instance)
             outcome = _record_outcome(
                 instance, proposal, status="rejected", actor_uid=actor_uid,
             )
             _settle_effect_group(instance, proposal)
+            if proposal.get("order_id"):
+                from src.engine.purchase_orders import reopen_purchase_order_request, sync_purchase_order_status
+
+                sync_purchase_order_status(instance, proposal)
+                reopen_purchase_order_request(instance, proposal)
             return {
                 "ok": False,
                 "code": "INSUFFICIENT_FUNDS",
@@ -905,7 +881,8 @@ def resolve_proposal(
                 "before": None,
                 "after": None,
             })
-        if rewards and grant_reward:
+        delivery_mode = str(proposal.get("delivery_mode") or "immediate")
+        if rewards and grant_reward and delivery_mode != "deferred":
             recipient = instance.get_character_sheet(recipient_uid)
             reward_snapshots.append({
                 "recipient_uid": recipient_uid,
@@ -957,14 +934,22 @@ def resolve_proposal(
     }
     if reward_snapshots:
         transaction["reward_snapshots"] = reward_snapshots
+    if proposal.get("order_id"):
+        transaction["order_id"] = str(proposal.get("order_id") or "")
+        transaction["delivery_mode"] = str(proposal.get("delivery_mode") or "immediate")
+        transaction["delivery_status"] = (
+            "paid" if str(proposal.get("delivery_mode") or "immediate") == "deferred"
+            else "delivered"
+        )
     instance.economy.setdefault("transactions", []).append(transaction)
-    instance.pending_payments = [
-        item for item in instance.pending_payments if item.get("id") != proposal_id
-    ]
     _advance_revision(instance)
     outcome = _record_outcome(
         instance, proposal, status="committed", actor_uid=actor_uid,
     )
+    if proposal.get("order_id"):
+        from src.engine.purchase_orders import sync_purchase_order_status
+
+        sync_purchase_order_status(instance, proposal)
     effect_group = _settle_effect_group(instance, proposal)
     return {
         "ok": True,
@@ -987,66 +972,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
     """
 
     rollback_round = int(round_number)
-    purchase_quotes = instance.economy.get("purchase_quotes", [])
-    quote_origin_proposal_ids: set[str] = set()
-    erased_quote_ids: set[str] = set()
-    if isinstance(purchase_quotes, list):
-        quote_resolved_at = datetime.now(timezone.utc).isoformat()
-        for quote in purchase_quotes:
-            if not isinstance(quote, dict):
-                continue
-            try:
-                quote_round = int(quote.get("round", -1))
-            except (TypeError, ValueError):
-                quote_round = -1
-            if not (
-                quote_round == rollback_round
-                and (
-                    not quote.get("run_id")
-                    or str(quote.get("run_id")) == str(instance.run_id)
-                )
-            ):
-                continue
-            status = str(quote.get("status") or "open")
-            if status not in {"open", "confirmed"}:
-                continue
-            # Retire the offer for audit instead of deleting it.  Only open
-            # quotes are actionable, and a confirmed offer's purchase chain
-            # dies with its erased origin round.
-            quote["status"] = "cancelled" if status == "open" else "superseded"
-            quote["resolved_at"] = quote_resolved_at
-            quote["resolution_code"] = "ORIGIN_ROLLED_BACK"
-            quote_id = str(quote.get("id") or "")
-            if quote_id:
-                erased_quote_ids.add(quote_id)
-            proposal_id = str(quote.get("proposal_id") or "")
-            if proposal_id:
-                quote_origin_proposal_ids.add(proposal_id)
-
-    # Merchant offers and clarifications are world-side purchase context, not
-    # decisions.  Erasing their origin round retires them the same way so a
-    # rollback never leaves ghost quotes or ghost intents actionable.
-    for collection_name in ("merchant_offers", "clarifications"):
-        entries = instance.economy.get(collection_name, [])
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict) or entry.get("status") != "open":
-                continue
-            try:
-                origin_round = int(entry.get("origin_round", -1))
-            except (TypeError, ValueError):
-                origin_round = -1
-            if origin_round != rollback_round:
-                continue
-            if (
-                entry.get("run_id")
-                and str(entry.get("run_id")) != str(instance.run_id)
-            ):
-                continue
-            entry["status"] = "superseded"
-            entry["resolved_at"] = datetime.now(timezone.utc).isoformat()
-            entry["resolution_code"] = "ORIGIN_ROLLED_BACK"
     proposals = [
         item for item in instance.economy.get("proposals", [])
         if isinstance(item, dict)
@@ -1056,15 +981,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         for proposal in proposals
         if int(proposal.get("round", -1) or -1) == rollback_round
     }
-    # A proposal converted from a purchase quote inherits the quote's origin
-    # round as its authoritative narrative origin, even when the conversion
-    # and settlement happened in a later round.
-    quote_origin_proposal_ids |= {
-        str(proposal.get("id") or "")
-        for proposal in proposals
-        if str(proposal.get("quote_id") or "") in erased_quote_ids
-    }
-    origin_ids |= quote_origin_proposal_ids
     transactions = [
         item for item in instance.economy.get("transactions", [])
         if isinstance(item, dict)
@@ -1108,21 +1024,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             transaction["status"] = "reversed"
             transaction["reversed_at"] = now
 
-    # A quote's origin round stays authoritative after confirmation: rolling
-    # back that round must also undo a later-round settlement's balance and
-    # delivered goods, not only flip the ledger status.  Same-round
-    # settlements are restored by the caller's snapshot reconciliation.
-    quote_origin_transactions = [
-        transaction for transaction in transactions
-        if (
-            transaction.get("status") == "reversed"
-            and str(transaction.get("proposal_id") or "") in quote_origin_proposal_ids
-            and int(transaction.get("round", -1) or -1) != rollback_round
-        )
-    ]
-    for transaction in reversed(quote_origin_transactions):
-        _undo_live_transaction_delta(instance, transaction)
-
     # A settlement-only rollback keeps an earlier valid offer actionable. Do
     # not resurrect proposals whose origin round is itself being erased.
     for proposal in proposals:
@@ -1133,29 +1034,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             set_proposal_status(proposal, "pending")
             proposal.pop("resolved_at", None)
             proposal.pop("resolution_code", None)
-            if str(proposal.get("kind") or "payment") in {"payment", "purchase", "fee"}:
-                if not any(
-                    isinstance(item, dict) and str(item.get("id") or "") == proposal_id
-                    for item in instance.pending_payments
-                ):
-                    instance.pending_payments.append(proposal)
-
-    # Remove compatibility projections for erased origins, but retain reopened
-    # settlement-only proposals.  This also avoids duplicate pending entries.
-    pending: list[dict[str, Any]] = []
-    seen_pending: set[str] = set()
-    for item in instance.pending_payments:
-        if not isinstance(item, dict):
-            continue
-        item_id = str(item.get("id") or "")
-        if item_id in origin_ids or item.get("status") != "pending":
-            continue
-        if item_id and item_id in seen_pending:
-            continue
-        if item_id:
-            seen_pending.add(item_id)
-        pending.append(item)
-    instance.pending_payments = pending
     for group in instance.economy.get("effect_groups", []):
         if int(group.get("round", -1) or -1) == int(round_number):
             group["status"] = "superseded"

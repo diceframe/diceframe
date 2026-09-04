@@ -515,7 +515,7 @@ class DiceFrameBridgeService:
     async def _payment(self, message: BridgeInput, text: str, accepted: bool | None) -> str:
         group, game_key, actor = self._require_actor(message)
         language = self._group_language(group)
-        payments = await self._pending_payments(game_key, actor)
+        payments = await self._pending_economy_proposals(game_key, actor)
         if accepted is None:
             if not payments:
                 return bridge_text(language, "当前没有待处理的经济提案。", "There are no pending economy proposals.")
@@ -612,20 +612,10 @@ class DiceFrameBridgeService:
         group["roster"] = roster
         return roster
 
-    async def _pending_payments(self, game_key: str, actor: str) -> list[dict[str, Any]]:
+    async def _pending_economy_proposals(self, game_key: str, actor: str) -> list[dict[str, Any]]:
         detail = await self.client.detail(game_key, actor)
         canonical = detail.get("economy_proposals")
-        legacy = detail.get("pending_payments")
-        # Prefer the canonical projection when available, while retaining the
-        # legacy list for old backends (and partially upgraded responses).
-        if isinstance(canonical, list) and canonical:
-            payments = canonical
-        elif isinstance(legacy, list):
-            payments = legacy
-        elif isinstance(canonical, list):
-            payments = canonical
-        else:
-            payments = []
+        payments = canonical if isinstance(canonical, list) else []
         gm_uid = str(detail.get("gm_uid") or "")
         return [
             item for item in payments
@@ -700,7 +690,7 @@ class DiceFrameBridgeService:
     def _format_advance_response(self, result: dict[str, Any], language: str) -> str:
         lines: list[str] = []
         if str(result.get("error_code") or "") == "ECONOMY_DECISION_PENDING":
-            if result.get("pending_payments"):
+            if result.get("economy_proposals"):
                 return localized_text(language, {
                     "en": "An economy proposal is waiting for your decision. Send “pay” to review it.",
                     "zh-CN": "当前有经济提案待确认，请发送“支付”查看。",
@@ -729,7 +719,7 @@ class DiceFrameBridgeService:
                 "zh-CN": "已自动处理待掷骰：",
                 "ja": "未処理のロールを自動処理しました：",
             }) + roll_text)
-        pending = result.get("pending_payments") if isinstance(result.get("pending_payments"), list) else []
+        pending = result.get("economy_proposals") if isinstance(result.get("economy_proposals"), list) else []
         if pending:
             lines.append(localized_text(language, {
                 "en": f"Pending payments are available; send {self._cmd('pay')} to review them.",

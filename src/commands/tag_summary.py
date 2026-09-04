@@ -19,8 +19,6 @@ def summarize_tags(data: dict) -> dict:
             tags.append(f"EQUIP:{uid}:{player_update['equip_gain']}")
         if player_update.get("use_item"):
             tags.append(f"USE:{uid}:{player_update['use_item']}")
-    for pay in state_update.get("pending_payments", []):
-        tags.append(f"PAY:{pay.get('uid', '')}:{pay.get('amount', 0)}")
     for proposal in state_update.get("economy_proposals", []):
         tags.append(
             f"ECONOMY:{proposal.get('kind', '')}:{proposal.get('uid', '')}:{proposal.get('amount', 0)}"
