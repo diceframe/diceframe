@@ -80,6 +80,7 @@ function awardXp(userId: string) {
       <button @click="emit('rollback')"><NIcon :component="ArrowUndoOutline" size="14" /> {{ t('rollback') }}</button>
       <button @click="emit('payment')"><NIcon :component="CashOutline" size="14" /> {{ t('createPaymentProposal') }}</button>
       <button :disabled="recapBusy" @click="emit('recap')"><NIcon :component="ReaderOutline" size="14" /> {{ recapBusy ? t('storyRecapGenerating') : t('storyRecapGenerate') }}</button>
+      <button @click="emit('room-password')"><NIcon :component="KeyOutline" size="14" /> {{ t('gameSettings') }}</button>
     </div>
     <div class="gm-group gm-grow gm-command-group">
       <h4>{{ t('commandGroup') }}</h4>
@@ -107,7 +108,6 @@ function awardXp(userId: string) {
           <small>{{ t('narrativeChangeHint') }}</small>
         </label>
         <button @click="emit('access')"><NIcon :component="detail.player_access_open === false ? LockOpenOutline : LockClosedOutline" size="14" /> {{ detail.player_access_open === false ? t('openAccess') : t('closeAccess') }}</button>
-        <button @click="emit('room-password')"><NIcon :component="KeyOutline" size="14" /> {{ t('gameSettings') }}</button>
       </div>
     </details>
     <details v-if="detail.ruleset_runtime?.id === 'core:dnd2024' && detail.advancement" class="perc gm-perc gm-console-section gm-advancement-section">
