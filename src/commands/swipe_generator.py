@@ -123,6 +123,16 @@ class SwipeGenerator:
 
         snapshot = target_entry.get("pre_state_snapshot", {})
         if snapshot:
+            # ADR 0003 branch cut: rounds after the rewritten target belong to
+            # the discarded branch. Their log entries are dropped together
+            # with their economy (reverse_round_economy withdraws every
+            # settlement at or after the target round), and the replay
+            # continues from the target round itself.
+            instance.log = [
+                entry for entry in instance.log
+                if int(entry.get("round", 0) or 0) <= round_num
+            ]
+            instance.round_number = round_num
             reverse_round_economy(instance, round_num)
             restore_players(instance, reconcile_rollback_snapshot(instance, snapshot, round_num))
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)

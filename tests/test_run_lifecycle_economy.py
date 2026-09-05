@@ -23,7 +23,6 @@ from src.engine.economy import (
     reverse_round_economy,
     resolve_proposal,
     set_proposal_status,
-    _remove_reward_delta,
 )
 from src.commands.economy_effects import (
     discard_unearned_reward_proposals,
@@ -536,6 +535,54 @@ def test_late_personal_purchase_reopens_when_settlement_round_is_rolled_back() -
     assert sum(tx["status"] == "committed" for tx in instance.economy["transactions"]) == 1
 
 
+def test_whole_round_rollback_withdraws_later_round_settlements() -> None:
+    """ADR 0003：回滚到第 N 轮会撤销第 N 轮及之后的一切结算。"""
+    instance = _instance()
+    early_offer = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="p2",
+        amount=5,
+        reason="早于回滚点的报价",
+    )
+    # 回滚点（第 5 轮）开始前的玩家状态快照；8/9 轮的结算不会进入它。
+    instance.round_number = 5
+    era_snapshot = _snapshot_players(instance)
+    instance.round_number = 8
+    settled_late = resolve_proposal(
+        instance, early_offer["id"], actor_uid="p2", accepted=True,
+    )
+    assert settled_late["ok"] is True
+    late_origin = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="p2",
+        amount=7,
+        reason="回滚点之后创建并结算的购买",
+    )
+    assert resolve_proposal(
+        instance, late_origin["id"], actor_uid="p2", accepted=True,
+    )["ok"] is True
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, era_snapshot)
+
+    transactions = {
+        item["id"]: item for item in instance.economy["transactions"]
+    }
+    assert all(item["status"] == "reversed" for item in transactions.values())
+    # 早于回滚点创建的报价：结算被撤、提案重新待付款人决定。
+    assert early_offer["status"] == "pending"
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 20
+    # 回滚点之后创建的提案：随它的叙事时代一起作废。
+    assert late_origin["status"] == "reversed"
+    assert pending_proposals(instance) == [early_offer]
+
+
 def test_origin_round_rollback_invalidates_purchase_paid_in_later_round() -> None:
     instance = _instance()
     instance.round_number = 5
@@ -705,6 +752,86 @@ async def test_real_swipe_reconciles_purchase_settled_after_target_round(
     assert recovered.get_character_sheet(uid)["currency"]["amount"] == before[uid]["currency"]["amount"]
     assert recovered.get_character_sheet(uid)["key_items"] == before[uid]["key_items"]
     assert pending_proposals(recovered)[0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_swipe_branch_cuts_later_rounds_and_withdraws_their_economy(
+    web_api, monkeypatch,
+) -> None:
+    """ADR 0003：中间轮 swipe 截断后续日志分支，并撤销其全部结算。"""
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Swipe branch cut",
+        gm_uid="gm",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    instance.gm_uid = uid
+
+    # 提案创建于第 0 轮（早于回滚目标轮）；第 1 轮开始前的快照
+    # 之后才发生 round 2 的结算。
+    instance.round_number = 0
+    offer_round2 = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid=uid,
+        recipient_uid=uid,
+        amount=4,
+        reason="第二轮的购买",
+    )
+    instance.round_number = 1
+    round1_snapshot = _snapshot_players(instance)
+    instance.round_number = 2
+    settled = await api.resolve_payment(
+        created["game_key"], offer_round2["id"], True, uid,
+    )
+    assert settled["ok"] is True
+    assert instance.get_character_sheet(uid)["currency"]["amount"] == 16
+    instance.log.append({
+        "round": 1, "actions": [], "gm_response": "旧分支一",
+        "pre_state_snapshot": round1_snapshot,
+        "swipes": ["旧分支一"], "current_swipe": 0,
+    })
+    instance.log.append({
+        "round": 2, "actions": [], "gm_response": "第二轮",
+        "pre_state_snapshot": {},
+    })
+
+    async def replacement_swipe(*, system_prompt, user_message, **kwargs):
+        del system_prompt, user_message, kwargs
+        return LLMResponse(
+            content="重写的第一轮。\n---\nNONE",
+            narration="重写的第一轮。",
+            state_update=None,
+            memory_delta=None,
+            info_asymmetry=None,
+            plot_update=None,
+            total_tokens=6,
+            is_narration_only=True,
+            provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", replacement_swipe)
+    swipe_text = await api._handler.generate_swipe(instance, 1)
+
+    assert swipe_text == "重写的第一轮。"
+    # 分支截断：round 2 的日志与其经济一起被撤，早于目标轮的条目保留，游戏从第 1 轮重放。
+    assert [entry.get("round") for entry in instance.log] == [0, 1]
+    assert instance.round_number == 1
+    assert instance.economy["transactions"]
+    assert all(tx["status"] == "reversed" for tx in instance.economy["transactions"])
+    # 该购买提案创建于回滚目标轮之前：结算被撤后恢复为待付款人决定。
+    live_offer = next(
+        item for item in instance.economy["proposals"]
+        if item["id"] == offer_round2["id"]
+    )
+    assert live_offer["status"] == "pending"
+    assert pending_proposals(instance) == [live_offer]
+    assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
+
 
 
 @pytest.mark.asyncio
@@ -937,15 +1064,6 @@ async def test_rollback_reconciles_multiple_late_settlements_in_reverse_commit_o
     assert recovered.get_character_sheet(uid)["currency"]["amount"] == 20
     assert [item["name"] for item in recovered.get_character_sheet(uid)["inventory"]] == ["药水", "绳索"]
     assert sum(tx["status"] == "committed" for tx in recovered.economy["transactions"]) == 2
-
-
-def test_stacked_reward_delta_preserves_original_quantity() -> None:
-    before = [{"name": "Potion", "qty": 2}]
-    after_first = [{"name": "Potion", "qty": 3}]
-    after_second = [{"name": "Potion", "qty": 5}]
-    current = _remove_reward_delta(after_second, after_first, after_second)
-    current = _remove_reward_delta(current, before, after_first)
-    assert current == before
 
 
 def test_removing_party_member_cancels_their_unresolved_proposal() -> None:

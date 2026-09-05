@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
-from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import uuid4
@@ -939,13 +937,16 @@ def resolve_proposal(
 
 
 def reverse_round_economy(instance: Any, round_number: int) -> None:
-    """Reverse economy effects associated with either round axis.
+    """Withdraw every economic effect at or after ``round_number``.
 
-    ``proposal.round`` is the narrative/origin round, while
-    ``transaction.round`` is the actual settlement round.  A late personal
-    purchase can therefore need settlement-only rollback (reopen the offer)
-    without erasing its origin, while origin rollback must invalidate all
-    later settlements of that offer.
+    Whole-round rollback (ADR 0003): the erased era covers the rolled-back
+    round and every settlement made after it.  Proposals whose narrative
+    origin lies inside the era are invalidated; committed settlements inside
+    the era are reversed by their exact ledger deltas; an offer whose origin
+    survives but whose settlement does not is reopened as pending so the
+    payer can decide again.  Item effects are never recovered by selective
+    diffs -- the callers restore whole player snapshots, and
+    ``reconcile_rollback_snapshot`` projects absolute before-images.
     """
 
     rollback_round = int(round_number)
@@ -956,7 +957,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
     origin_ids = {
         str(proposal.get("id") or "")
         for proposal in proposals
-        if int(proposal.get("round", -1) or -1) == rollback_round
+        if int(proposal.get("round", -1) or -1) >= rollback_round
     }
     transactions = [
         item for item in instance.economy.get("transactions", [])
@@ -966,7 +967,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         transaction for transaction in transactions
         if transaction.get("status") == "committed"
         and (
-            int(transaction.get("round", -1) or -1) == rollback_round
+            int(transaction.get("round", -1) or -1) >= rollback_round
             or str(transaction.get("proposal_id") or "") in origin_ids
         )
     ]
@@ -978,8 +979,8 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
     now = datetime.now(timezone.utc).isoformat()
 
     # Invalidate proposals whose narrative origin was erased, then reverse
-    # every committed settlement linked to those proposals (even if it was
-    # paid in a later round).
+    # every committed settlement inside the era (even if its offer
+    # originated before it).
     for proposal in proposals:
         proposal_id = str(proposal.get("id") or "")
         if proposal_id not in origin_ids:
@@ -1001,7 +1002,7 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             transaction["status"] = "reversed"
             transaction["reversed_at"] = now
 
-    # A settlement-only rollback keeps an earlier valid offer actionable. Do
+    # A settlement-era rollback keeps an earlier valid offer actionable. Do
     # not resurrect proposals whose origin round is itself being erased.
     for proposal in proposals:
         proposal_id = str(proposal.get("id") or "")
@@ -1012,11 +1013,11 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             proposal.pop("resolved_at", None)
             proposal.pop("resolution_code", None)
     for group in instance.economy.get("effect_groups", []):
-        if int(group.get("round", -1) or -1) == int(round_number):
+        if int(group.get("round", -1) or -1) >= rollback_round:
             group["status"] = "superseded"
             group.pop("effects", None)
     for delivery in instance.economy.get("external_effects_outbox", []):
-        if int(delivery.get("round", -1) or -1) != int(round_number):
+        if int(delivery.get("round", -1) or -1) < rollback_round:
             continue
         if delivery.get("status") == "pending":
             delivery["status"] = "superseded"
@@ -1030,43 +1031,14 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             isinstance(item, dict)
             and (
                 str(item.get("proposal_id") or "") in origin_ids
+                or int(item.get("resolved_round", item.get("round", -1)) or -1) >= rollback_round
                 or (
                     str(item.get("proposal_id") or "") in settlement_ids
-                    and (
-                        int(item.get("resolved_round", item.get("round", -1)) or -1) == rollback_round
-                        or str(item.get("status") or "") == "committed"
-                    )
+                    and str(item.get("status") or "") == "committed"
                 )
             )
         )
     ]
-
-
-def _undo_transaction_rewards(
-    transaction: dict[str, Any],
-    *,
-    get_sheet: Callable[[str], Any],
-    set_sheet: Callable[[str, dict[str, Any]], None],
-) -> None:
-    """Remove only the reward entries one committed settlement introduced."""
-
-    for reward_snapshot in transaction.get("reward_snapshots", []):
-        if not isinstance(reward_snapshot, dict):
-            continue
-        uid = str(reward_snapshot.get("recipient_uid") or "")
-        target = get_sheet(uid)
-        before = reward_snapshot.get("before")
-        after = reward_snapshot.get("after")
-        if not isinstance(target, dict) or not isinstance(before, dict) or not isinstance(after, dict):
-            continue
-        for key in ("inventory", "equipment", "key_items"):
-            if key not in before or key not in after:
-                continue
-            current = target.get(key)
-            if not isinstance(current, list):
-                continue
-            target[key] = _remove_reward_delta(current, before[key], after[key])
-            set_sheet(uid, target)
 
 
 def _undo_transaction_before_images(
@@ -1075,12 +1047,13 @@ def _undo_transaction_before_images(
     get_sheet: Callable[[str], Any],
     set_sheet: Callable[[str, dict[str, Any]], None],
 ) -> None:
-    """Restore one settlement's absolute before-images.
+    """Restore one settlement's absolute pre-settlement state.
 
-    Valid for snapshot reconciliation, which rebuilds historical state by
-    undoing settlements in strict reverse commit order.  Not valid for
-    selective single-transaction reversal, where writing the before-image
-    would erase later unrelated activity.
+    Whole-round rollback replays the era's settlements in strict reverse
+    commit order, so writing each transaction's absolute ``before`` balances
+    and inventory rows reconstructs the era's original state exactly.  No
+    selective later activity needs to survive inside an erased era, which is
+    why no inventory diffing is needed here (ADR 0003).
     """
 
     for entry in transaction.get("entries", []):
@@ -1098,42 +1071,18 @@ def _undo_transaction_before_images(
             target["currency"] = {**target["currency"], "amount": before}
         target["gold"] = before
         set_sheet(uid, target)
-    _undo_transaction_rewards(transaction, get_sheet=get_sheet, set_sheet=set_sheet)
-
-
-def _undo_live_transaction_delta(instance: Any, transaction: dict[str, Any]) -> None:
-    """Selectively reverse one committed settlement against the live state.
-
-    Quote-origin rollback removes one earlier transaction while preserving
-    later unrelated ones, so every character currency entry applies its
-    inverse delta (``-delta``) to the current balance instead of writing the
-    absolute before-image.  System/world balancing entries have no character
-    sheet and remain audit-only.
-    """
-
-    for entry in transaction.get("entries", []):
-        if not isinstance(entry, dict):
+    for reward_snapshot in transaction.get("reward_snapshots", []):
+        if not isinstance(reward_snapshot, dict):
             continue
-        account = str(entry.get("account") or "")
-        if not account.startswith("character:"):
+        uid = str(reward_snapshot.get("recipient_uid") or "")
+        before = reward_snapshot.get("before")
+        target = get_sheet(uid)
+        if not isinstance(target, dict) or not isinstance(before, dict):
             continue
-        try:
-            delta = int(entry.get("delta", 0) or 0)
-        except (TypeError, ValueError):
-            continue
-        if delta == 0:
-            continue
-        uid = account.removeprefix("character:")
-        sheet = instance.get_character_sheet(uid)
-        if not isinstance(sheet, dict) or not sheet:
-            continue
-        apply_currency_delta(sheet, -delta)
-        instance.set_character_sheet(uid, sheet)
-    _undo_transaction_rewards(
-        transaction,
-        get_sheet=instance.get_character_sheet,
-        set_sheet=instance.set_character_sheet,
-    )
+        for key in ("inventory", "equipment", "key_items"):
+            if key in before:
+                target[key] = deepcopy(before[key])
+        set_sheet(uid, target)
 
 
 def reconcile_rollback_snapshot(
@@ -1147,7 +1096,8 @@ def reconcile_rollback_snapshot(
     that case the snapshot contains the already-paid state, while rollback has
     reopened the proposal and reversed its ledger transaction. Use the
     transaction's authoritative ``before`` values (and the captured reward
-    snapshot) to project the pre-settlement character state before restoring it.
+    snapshot) to project the pre-settlement character state before restoring
+    it.
     """
 
     if not isinstance(snapshot, dict):
@@ -1155,9 +1105,10 @@ def reconcile_rollback_snapshot(
     rollback_round = int(round_number)
     # Snapshot reconciliation has a narrower responsibility than economy
     # invalidation: only settlements embedded in this snapshot's own round
-    # may rewrite its character state.  A later settlement tied to an erased
-    # origin is already reversed by ``reverse_round_economy``; projecting its
-    # ``before`` value here would leak later-round state into the old snapshot.
+    # may rewrite its character state.  Later settlements tied to an erased
+    # origin are already reversed by ``reverse_round_economy``; their effects
+    # never entered this snapshot, so projecting them here would leak
+    # later-round state into the old snapshot.
     transactions = [
         item for item in instance.economy.get("transactions", [])
         if isinstance(item, dict)
@@ -1167,10 +1118,10 @@ def reconcile_rollback_snapshot(
     if not transactions:
         return snapshot
     reconciled = deepcopy(snapshot)
-    # Undo settlements in reverse commit order.  Each transaction's ``before``
-    # value is the state immediately before that settlement; applying an
-    # earlier transaction after a later one reconstructs the round's original
-    # balance and correctly removes stacked rewards.
+    # Undo settlements in reverse commit order.  Each transaction's absolute
+    # before-image (balances and inventory rows) is the state immediately
+    # before that settlement; applying an earlier transaction after a later
+    # one reconstructs the round's original state exactly.
     for transaction in reversed(transactions):
         _undo_transaction_before_images(
             transaction,
@@ -1180,51 +1131,3 @@ def reconcile_rollback_snapshot(
             set_sheet=lambda uid, sheet: reconciled.__setitem__(uid, sheet),
         )
     return reconciled
-
-
-def _item_key(item: Any, *, include_qty: bool = True) -> str:
-    value = dict(item) if isinstance(item, dict) else item
-    if isinstance(value, dict) and not include_qty:
-        value = {key: val for key, val in value.items() if key != "qty"}
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-
-
-def _remove_reward_delta(current: list[Any], before: Any, after: Any) -> list[Any]:
-    """Remove only entries added by a purchase reward, preserving later changes."""
-    if not isinstance(before, list) or not isinstance(after, list):
-        return deepcopy(current)
-    result = deepcopy(current)
-    before_counts = Counter(_item_key(item, include_qty=False) for item in before)
-    after_counts = Counter(_item_key(item, include_qty=False) for item in after)
-    additions = {
-        key: max(0, after_counts[key] - before_counts[key])
-        for key in after_counts
-        if after_counts[key] > before_counts[key]
-    }
-    if not additions:
-        # Inventory grants can merge into an existing stack instead of adding a row.
-        before_qty = Counter()
-        after_qty = Counter()
-        for item in before:
-            before_qty[_item_key(item, include_qty=False)] += int(item.get("qty", 1) or 0) if isinstance(item, dict) else 1
-        for item in after:
-            after_qty[_item_key(item, include_qty=False)] += int(item.get("qty", 1) or 0) if isinstance(item, dict) else 1
-        additions = {
-            key: max(0, after_qty[key] - before_qty[key])
-            for key in after_qty
-            if after_qty[key] > before_qty[key]
-        }
-    for index in range(len(result) - 1, -1, -1):
-        key = _item_key(result[index], include_qty=False)
-        remaining = additions.get(key, 0)
-        if remaining <= 0:
-            continue
-        item = result[index]
-        qty = int(item.get("qty", 1) or 0) if isinstance(item, dict) else 1
-        if qty <= remaining:
-            result.pop(index)
-            additions[key] = remaining - qty
-        elif isinstance(item, dict):
-            item["qty"] = qty - remaining
-            additions[key] = 0
-    return result
