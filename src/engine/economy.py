@@ -48,25 +48,6 @@ def set_proposal_status(proposal: dict[str, Any], next_status: str) -> None:
     proposal["status"] = next_status
 
 
-def economy_revision(instance: Any) -> int:
-    economy = getattr(instance, "economy", {})
-    if not isinstance(economy, dict):
-        return 0
-    return int(economy.get("decision_revision", 0) or 0)
-
-
-def _advance_revision(instance: Any) -> int:
-    revision = economy_revision(instance) + 1
-    instance.economy["decision_revision"] = revision
-    return revision
-
-
-def advance_economy_revision(instance: Any) -> int:
-    """Advance the authoritative economy decision revision."""
-
-    return _advance_revision(instance)
-
-
 def _record_outcome(
     instance: Any,
     proposal: dict[str, Any],
@@ -267,7 +248,6 @@ def cancel_proposals_for_player(
         proposal["resolution_code"] = resolution_code
         proposal_id = str(proposal.get("id") or "")
         affected_ids.add(proposal_id)
-        _advance_revision(instance)
         _record_outcome(
             instance,
             proposal,
@@ -841,7 +821,6 @@ def resolve_proposal(
             "CANCELLED_BY_GM" if is_gm and actor_uid != payer_uid
             else "DECLINED_BY_PAYER"
         )
-        _advance_revision(instance)
         outcome = _record_outcome(
             instance, proposal, status=str(proposal["status"]), actor_uid=actor_uid,
         )
@@ -871,7 +850,6 @@ def resolve_proposal(
             set_proposal_status(proposal, "rejected")
             proposal["resolved_at"] = now
             proposal["resolution_code"] = "INSUFFICIENT_FUNDS"
-            _advance_revision(instance)
             outcome = _record_outcome(
                 instance, proposal, status="rejected", actor_uid=actor_uid,
             )
@@ -946,7 +924,6 @@ def resolve_proposal(
     if reward_snapshots:
         transaction["reward_snapshots"] = reward_snapshots
     instance.economy.setdefault("transactions", []).append(transaction)
-    _advance_revision(instance)
     outcome = _record_outcome(
         instance, proposal, status="committed", actor_uid=actor_uid,
     )
@@ -1063,7 +1040,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             )
         )
     ]
-    _advance_revision(instance)
 
 
 def _undo_transaction_rewards(

@@ -2055,7 +2055,6 @@ async def test_restart_rotates_run_and_memory_but_preserves_character_assets(web
     assert restarted.economy["transactions"] == []
     assert restarted.economy["effect_groups"] == []
     assert restarted.economy["outcomes"] == []
-    assert restarted.economy["decision_revision"] == 0
     recovered = await GameRegistry(registry.save_dir).load(restarted.game_key)
     assert recovered is not None
     assert recovered.run_id == restarted.run_id
@@ -2089,7 +2088,6 @@ async def test_restart_rotates_run_and_memory_but_preserves_character_assets(web
     assert reset_instance.economy["transactions"] == []
     assert reset_instance.economy["effect_groups"] == []
     assert reset_instance.economy["outcomes"] == []
-    assert reset_instance.economy["decision_revision"] == 0
 
 
 async def _hold_historical_rewrite(instance, entered, release) -> None:
