@@ -27,6 +27,7 @@ from src.engine.economy import (
 from src.commands.economy_effects import (
     guard_unbacked_payment_narration,
     defer_narrative_effects,
+    pending_decision_notice,
 )
 from src.commands.state_items import append_key_item
 from src.commands.state_update_applier import StateUpdateApplier
@@ -784,6 +785,74 @@ async def test_swipe_branch_cuts_later_rounds_and_withdraws_their_economy(
     assert live_offer["status"] == "pending"
     assert pending_proposals(instance) == [live_offer]
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
+
+
+@pytest.mark.asyncio
+async def test_settling_removes_stale_pending_notice(web_api) -> None:
+    """结算落定后，回合里过期的「结算待确认」提示必须被清掉。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Stale notice",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    instance.gm_uid = uid
+    proposal = queue_purchase_offer(
+        instance, payer_uid=uid, amount=5, items=["磨刀石"],
+        source="gm_manual", source_ref="gm_manual:stale",
+    )
+    queue_effect_group(
+        instance, [proposal], {"state_update": {"scene_change": "铁匠铺"}},
+    )
+    instance.log.append({
+        "round": instance.round_number, "actions": [], "gm_response": "交易",
+        "state_changes": [pending_decision_notice("zh-CN")],
+    })
+
+    result = await api.resolve_payment(created["game_key"], proposal["id"], True, uid)
+
+    assert result["ok"] is True
+    entry = next(
+        item for item in instance.log
+        if int(item.get("round", -1) or -1) == int(instance.round_number)
+    )
+    assert pending_decision_notice("zh-CN") not in entry["state_changes"]
+    assert any("结算已确认" in item for item in entry["state_changes"])
+
+
+@pytest.mark.asyncio
+async def test_solo_private_settlement_is_promoted_to_round_log(web_api) -> None:
+    """单人局没有信息不对称：私密结算消息进公开时间线，且不留过期提示。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Solo settle",
+        solo=True,
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    proposal = queue_proposal(
+        instance, kind="payment", source="gm_manual",
+        payer_uid=uid, recipient_uid=uid, amount=5,
+        reason="卖掉旧短剑",
+    )
+    instance.log.append({
+        "round": instance.round_number, "actions": [], "gm_response": "交易",
+        "state_changes": [pending_decision_notice("zh-CN")],
+    })
+
+    result = await api.resolve_payment(created["game_key"], proposal["id"], True, uid)
+
+    assert result["ok"] is True
+    entry = next(
+        item for item in instance.log
+        if int(item.get("round", -1) or -1) == int(instance.round_number)
+    )
+    assert any("结算已确认" in item for item in entry["state_changes"])
+    assert pending_decision_notice("zh-CN") not in entry["state_changes"]
 
 
 

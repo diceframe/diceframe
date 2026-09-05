@@ -36,6 +36,7 @@ from src.engine.memory_outbox import (
     queue_memory_delivery,
 )
 from src.engine.game_instance import GameInstance
+from src.commands.economy_effects import pending_decision_notice
 from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime
 from src.webui.character_contracts import MAX_BIO_CHARS
@@ -87,9 +88,15 @@ def _record_economy_outcome_in_round(
     round_number = int(outcome.get("round", 0) or 0)
     # Purchases are always a party-visible settlement event.  Keep the
     # explicit private path for other GM payments, but also promote purchases
-    # created before the visibility default was corrected.
+    # created before the visibility default was corrected.  Solo tables have
+    # no information asymmetry: the only player is the GM, so settlement
+    # messages belong on the shared timeline.
     is_purchase = str(outcome.get("kind") or "") == "purchase"
-    if str(outcome.get("visibility") or "private") != "party" and not is_purchase:
+    if (
+        str(outcome.get("visibility") or "private") != "party"
+        and not is_purchase
+        and not bool(getattr(instance, "solo_mode", False))
+    ):
         recipients = {
             str(outcome.get("payer_uid") or ""),
             str(outcome.get("recipient_uid") or ""),
@@ -118,6 +125,27 @@ def _record_economy_outcome_in_round(
     changes = entry.setdefault("state_changes", [])
     if message not in changes:
         changes.append(message)
+
+
+def _remove_stale_pending_notice(instance: Any) -> None:
+    """Drop the round's "settlement pending" notice once nothing is pending.
+
+    The notice is only accurate while the response's proposals and effect
+    groups are unresolved; once everything is settled, declined, or
+    discarded, it must not keep telling the table that dependent results are
+    still pending (real incident: a sale settled but the round kept showing
+    the pending banner as its only status line).
+    """
+
+    from src.engine.economy import has_pending_economy_decision
+
+    if has_pending_economy_decision(instance):
+        return
+    notice = pending_decision_notice(str(getattr(instance, "language", "") or ""))
+    for entry in instance.log:
+        changes = entry.get("state_changes")
+        if isinstance(changes, list) and notice in changes:
+            changes.remove(notice)
 
 
 @dataclass(frozen=True)
@@ -929,6 +957,7 @@ async def resolve_payment(
                 ),
             )
         if result.get("ok") or result.get("code") == "INSUFFICIENT_FUNDS":
+            _remove_stale_pending_notice(staged)
             before_commit = type(inst).from_dict(deepcopy(inst.to_dict()))
             before_commit.log = deepcopy(inst.log)
             inst.replace_persisted_state_from(staged)
@@ -1022,6 +1051,9 @@ async def _deliver_memory_outbox_locked(
             complete_memory_delivery(instance, str(delivery.get("id") or ""))
             changed = True
     if changed:
+        # Memory delivery was the last outstanding piece of the settlement;
+        # the round's stale "settlement pending" notice can finally go.
+        _remove_stale_pending_notice(instance)
         await dependencies.games.save_instance(instance)
     return not (
         pending_memory_deliveries(instance)
