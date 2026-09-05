@@ -241,16 +241,22 @@ def test_reward_is_eligible_when_same_turn_marks_quest_completed() -> None:
     assert len(data["state_update"]["economy_proposals"]) == 1
     assert not has_blocking_economy_decision(instance)
 
-    team = queue_proposal(
+    # 挂起效果组的个人购买仍是屏障（防止未确认购买先读到后续叙事状态）。
+    purchase = queue_proposal(
         instance,
-        kind="fee",
+        kind="purchase",
         source="gm_manual",
+        payer_uid="gm",
+        recipient_uid="gm",
         amount=10,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 5}],
     )
-    assert not is_nonblocking_personal_purchase(instance, team)
-    assert team in blocking_economy_proposals(instance)
+    queue_effect_group(
+        instance,
+        [purchase],
+        {"state_update": {"scene_change": "付费区域"}},
+    )
+    assert not is_nonblocking_personal_purchase(instance, purchase)
+    assert purchase in blocking_economy_proposals(instance)
     assert has_blocking_economy_decision(instance)
 
 
@@ -293,8 +299,6 @@ def test_queue_proposal_rejects_payer_outside_game() -> None:
     instance = _instance()
     with pytest.raises(ValueError):
         queue_proposal(instance, source="gm_manual", kind="purchase", payer_uid="ghost", amount=5)
-    with pytest.raises(ValueError):
-        queue_proposal(instance, source="gm_manual", kind="transfer", payer_uid="ghost", amount=5)
     # 奖励类提案没有付款人；收款人资格在结算时校验。
     reward = queue_proposal(
         instance, kind="reward", recipient_uid="p2", amount=5, approval_policy="gm",
@@ -364,8 +368,8 @@ def test_narrative_reward_requires_gm_and_commits_once() -> None:
     assert duplicate["code"] == "ALREADY_RESOLVED"
 
 
-def test_auto_settleable_reward_excludes_item_and_team_rewards() -> None:
-    """自动结算只放行“单角色纯货币小额奖励”；带物品/平摊一律留给 GM。"""
+def test_auto_settleable_reward_excludes_item_rewards() -> None:
+    """自动结算只放行“单角色纯货币小额奖励”；带物品的一律留给 GM。"""
     from src.engine.economy import is_auto_settleable_reward
 
     instance = _instance()
@@ -388,16 +392,6 @@ def test_auto_settleable_reward_excludes_item_and_team_rewards() -> None:
         source="narrative",
         source_ref="round:1:reward:p2:12:items",
     )
-    team = queue_proposal(
-        instance,
-        kind="reward",
-        recipient_uid="p2",
-        amount=24,
-        contributors=[{"uid": "gm", "amount": 12}, {"uid": "p2", "amount": 12}],
-        approval_policy="gm",
-        source="narrative",
-        source_ref="round:1:reward:p2:24",
-    )
     over_cap = queue_proposal(
         instance,
         kind="reward",
@@ -409,7 +403,6 @@ def test_auto_settleable_reward_excludes_item_and_team_rewards() -> None:
     )
     assert is_auto_settleable_reward(instance, plain, gold_cap=500) is True
     assert is_auto_settleable_reward(instance, with_items, gold_cap=500) is False
-    assert is_auto_settleable_reward(instance, team, gold_cap=500) is False
     assert is_auto_settleable_reward(instance, over_cap, gold_cap=500) is False
 
 
@@ -801,27 +794,90 @@ async def test_origin_round_swipe_does_not_project_later_settlement_before_state
     )
 
 
-def test_transfer_moves_currency_between_players_with_balanced_ledger() -> None:
+def test_retired_economy_kinds_and_policies_are_rejected() -> None:
+    """transfer/fee/all_contributors 已随 schema 8 退役：创建路径一律拒绝。"""
     instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="transfer",
-        source="gm_manual",
-        payer_uid="gm",
-        recipient_uid="p2",
-        amount=7,
-        approval_policy="payer",
-        source_ref="player-transfer:1",
-    )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="transfer",
+            source="gm_manual",
+            payer_uid="gm",
+            recipient_uid="p2",
+            amount=7,
+        )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="fee",
+            source="gm_manual",
+            payer_uid="gm",
+            amount=7,
+        )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="payment",
+            source="gm_manual",
+            payer_uid="gm",
+            amount=7,
+            approval_policy="all_contributors",
+        )
+    assert instance.economy["proposals"] == []
 
-    result = resolve_proposal(
-        instance, proposal["id"], actor_uid="gm", accepted=True,
-    )
 
-    assert result["ok"] is True
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 23
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 27
-    assert sum(entry["delta"] for entry in result["transaction"]["entries"]) == 0
+def test_migrate_v7_to_v8_supersedes_retired_proposals() -> None:
+    """史前残留的 pending 分摊/转账提案被退役；无关提案与流水不受影响。"""
+    from src.migrations.instance import _migrate_v7_to_v8
+
+    payload = {
+        "instance_schema_version": 7,
+        "economy": {
+            "proposals": [
+                {
+                    "id": "eco-team",
+                    "status": "pending",
+                    "kind": "fee",
+                    "approval_policy": "all_contributors",
+                },
+                {"id": "eco-transfer", "status": "pending", "kind": "transfer"},
+                {"id": "eco-purchase", "status": "pending", "kind": "purchase"},
+                {"id": "eco-old-fee", "status": "committed", "kind": "fee"},
+            ],
+            "effect_groups": [
+                {
+                    "id": "effect-team",
+                    "status": "pending",
+                    "proposal_ids": ["eco-team", "eco-transfer"],
+                    "effects": {"state_update": {"scene_change": "x"}},
+                },
+                {
+                    "id": "effect-mixed",
+                    "status": "pending",
+                    "proposal_ids": ["eco-team", "eco-purchase"],
+                    "effects": {"state_update": {"scene_change": "y"}},
+                },
+            ],
+            "transactions": [{"id": "tx-1", "status": "committed", "kind": "fee"}],
+        },
+    }
+
+    migrated = _migrate_v7_to_v8(payload)
+
+    assert migrated["instance_schema_version"] == 8
+    proposals = {item["id"]: item for item in migrated["economy"]["proposals"]}
+    assert proposals["eco-team"]["status"] == "superseded"
+    assert proposals["eco-team"]["resolution_code"] == "RETIRED_LEGACY_PROPOSAL"
+    assert proposals["eco-transfer"]["status"] == "superseded"
+    # 无关的 pending purchase 与已成交 fee 历史保持原样。
+    assert proposals["eco-purchase"]["status"] == "pending"
+    assert proposals["eco-old-fee"]["status"] == "committed"
+    assert migrated["economy"]["transactions"] == [{"id": "tx-1", "status": "committed", "kind": "fee"}]
+    # 含退役成员的 pending 效果组不可能再达成 all-committed：一并丢弃。
+    groups = {item["id"]: item for item in migrated["economy"]["effect_groups"]}
+    assert groups["effect-team"]["status"] == "discarded"
+    assert "effects" not in groups["effect-team"]
+    assert groups["effect-mixed"]["status"] == "discarded"
 
 
 @pytest.mark.asyncio
@@ -892,77 +948,15 @@ def test_stacked_reward_delta_preserves_original_quantity() -> None:
     assert current == before
 
 
-def test_team_split_is_all_or_nothing() -> None:
+def test_removing_party_member_cancels_their_unresolved_proposal() -> None:
     instance = _instance()
     proposal = queue_proposal(
         instance,
-        kind="fee",
+        kind="payment",
         source="gm_manual",
-        amount=15,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 10}],
-        source_ref="gate:city:fee",
-    )
-
-    first = resolve_proposal(instance, proposal["id"], actor_uid="gm", accepted=True)
-    assert first["committed"] is False
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
-    second = resolve_proposal(instance, proposal["id"], actor_uid="p2", accepted=True)
-
-    assert second["ok"] is True
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 25
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 10
-
-
-def test_team_split_insufficient_funds_rejects_without_partial_debit() -> None:
-    instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
-        amount=45,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 40}],
-        source_ref="gate:city:expensive-fee",
-    )
-
-    assert resolve_proposal(
-        instance, proposal["id"], actor_uid="gm", accepted=True,
-    )["committed"] is False
-    rejected = resolve_proposal(
-        instance, proposal["id"], actor_uid="p2", accepted=True,
-    )
-
-    assert rejected["code"] == "INSUFFICIENT_FUNDS"
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 20
-    assert proposal["status"] == "rejected"
-    assert proposal not in pending_proposals(instance)
-
-
-def test_team_split_rejects_incomplete_or_duplicate_contributor_plan() -> None:
-    instance = _instance()
-
-    with pytest.raises(ValueError):
-        queue_proposal(
-            instance,
-            kind="fee",
-            source="gm_manual",
-            amount=10,
-            approval_policy="all_contributors",
-            contributors=[{"uid": "gm", "amount": 4}, {"uid": "gm", "amount": 4}],
-        )
-
-
-def test_removing_party_member_cancels_their_unresolved_group_proposal() -> None:
-    instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="gm",
         amount=10,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 5}],
     )
     effect_group = queue_effect_group(
         instance,
@@ -1059,64 +1053,6 @@ def test_multiple_proposals_form_one_all_or_nothing_effect_barrier() -> None:
 
 
 @pytest.mark.asyncio
-
-
-async def test_team_split_is_visible_to_each_contributor_and_waits_for_all(web_api) -> None:
-    api, _lorebook, registry, _llm, _worlds = web_api
-    created = await api.create_game(
-        "template_world",
-        "Party Economy",
-        players=[
-            {"character_name": "One", "attributes": {"str": 10}, "gold": 20},
-            {"character_name": "Two", "attributes": {"str": 10}, "gold": 20},
-        ],
-    )
-    instance = registry.get(api._parse_key(created["game_key"]))
-    first_uid, second_uid = list(instance.players)
-    instance.gm_uid = first_uid
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
-        amount=10,
-        approval_policy="all_contributors",
-        contributors=[
-            {"uid": first_uid, "amount": 4},
-            {"uid": second_uid, "amount": 6},
-        ],
-    )
-    effect_group = queue_effect_group(
-        instance,
-        [proposal],
-        {"state_update": {"scene_change": "队伍包下的房间"}},
-    )
-
-    second_view = api.game_detail(created["game_key"], second_uid)
-    assert [item["id"] for item in second_view["economy_proposals"]] == [proposal["id"]]
-
-    first = await api.resolve_payment(
-        created["game_key"], proposal["id"], True, first_uid,
-    )
-    assert first["committed"] is False
-    assert instance.get_character_sheet(first_uid)["currency"]["amount"] == 20
-    assert instance.scene != "队伍包下的房间"
-    assert effect_group is not None and effect_group["status"] == "pending"
-    assert any(event.get("code") == "economy_approved" for event in instance.health_events)
-
-    second = await api.resolve_payment(
-        created["game_key"], proposal["id"], True, second_uid,
-    )
-    assert second["ok"] is True
-    assert instance.get_character_sheet(first_uid)["currency"]["amount"] == 16
-    assert instance.get_character_sheet(second_uid)["currency"]["amount"] == 14
-    assert instance.scene == "队伍包下的房间"
-    committed_group = next(
-        item for item in instance.economy["effect_groups"]
-        if item["id"] == effect_group["id"]
-    )
-    assert committed_group["status"] == "committed"
-    assert "effects" not in committed_group
-    assert instance.economy["outcomes"][-1]["effects_status"] == "committed"
 
 
 @pytest.mark.asyncio
@@ -1704,7 +1640,7 @@ async def test_delivered_economy_memory_is_reversed_with_round(
 @pytest.mark.asyncio
 
 
-async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
+async def test_private_reward_and_payment_stay_out_of_public_gm_context(
     web_api,
 ) -> None:
     api, _lorebook, registry, _llm, _worlds = web_api
@@ -1728,9 +1664,9 @@ async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
         reason="秘密线人奖励-不可公开",
         visibility="private",
     )
-    transfer = queue_proposal(
+    payment = queue_proposal(
         instance,
-        kind="transfer",
+        kind="payment",
         source="gm_manual",
         payer_uid=gm_uid,
         recipient_uid=agent_uid,
@@ -1743,7 +1679,7 @@ async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
         created["game_key"], reward["id"], True, gm_uid,
     ))["ok"] is True
     assert (await api.resolve_payment(
-        created["game_key"], transfer["id"], True, gm_uid,
+        created["game_key"], payment["id"], True, gm_uid,
     ))["ok"] is True
     context = await build_context(instance, "SYSTEM", [], "继续")
 

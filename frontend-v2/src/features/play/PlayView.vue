@@ -703,10 +703,6 @@ function economyPlayerName(uid?: string): string {
   return game.players.value.find(player => player.user_id === uid)?.character_name || uid
 }
 
-function isTeamPayment(proposal: PendingPayment | null): boolean {
-  return proposal?.approval_policy === 'all_contributors'
-}
-
 function postponePendingPay() {
   const id = String(pendingPay.value?.id || pendingPay.value?.payment_id || '')
   if (id) dismissedPaymentIds.value = new Set([...dismissedPaymentIds.value, id])
@@ -721,7 +717,7 @@ function pendingEconomyHelp(proposal: PendingPayment): string {
   if (isNonBlockingPersonalPurchase(proposal)) return t('economyPersonalPurchaseHelp')
   return proposal.kind === 'reward'
     ? t('economyRewardHelp')
-    : isTeamPayment(proposal) ? t('economyTeamPaymentHelp') : t('gmPaymentHelp')
+    : t('gmPaymentHelp')
 }
 
 function reopenPendingEconomy() {

@@ -558,12 +558,6 @@ class DiceFrameBridgeService:
             }))
         amount = int(payment.get("amount", 0) or 0)
         is_reward = str(payment.get("kind") or "") == "reward"
-        if accepted and result.get("committed") is False:
-            return localized_text(language, {
-                "en": "Your approval was recorded; waiting for the other contributors.",
-                "zh-CN": "已记录你的确认，等待其他参与者。",
-                "ja": "承認を記録しました。ほかの参加者を待っています。",
-            })
         return localized_text(language, {
             "en": f"{'Reward' if is_reward else 'Payment'} of {amount} gold {'confirmed' if accepted else 'rejected'}.",
             "zh-CN": f"已{'确认' if accepted else '拒绝'}{'奖励' if is_reward else '支付'} {amount} 金币。",
@@ -625,11 +619,6 @@ class DiceFrameBridgeService:
                 actor == gm_uid
                 or str(item.get("payer_uid") or item.get("uid") or "") == actor
                 or str(item.get("recipient_uid") or "") == actor
-                or actor in {
-                    str(contributor.get("uid") or "")
-                    for contributor in (item.get("contributors") or [])
-                    if isinstance(contributor, dict)
-                }
             )
         ]
 

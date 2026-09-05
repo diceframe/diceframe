@@ -17,8 +17,10 @@ from src.engine.memory_outbox import (
 )
 
 MAX_ECONOMY_AMOUNT = 100_000
-ECONOMY_KINDS = {"payment", "purchase", "fee", "transfer", "reward"}
-APPROVAL_POLICIES = {"payer", "gm", "system", "all_contributors"}
+# transfer/fee/all_contributors 已随 schema 8 退役：PAY/TEAM_PAY 标签契约
+# 在 schema 6 停用后，它们没有任何存活创建路径（见 migrations.instance）。
+ECONOMY_KINDS = {"payment", "purchase", "reward"}
+APPROVAL_POLICIES = {"payer", "gm", "system"}
 MAX_ECONOMY_OUTCOMES = 50
 MAX_EFFECT_GROUPS = 50
 
@@ -26,7 +28,7 @@ MAX_EFFECT_GROUPS = 50
 # proposal starts at "pending"; "committed" may only be reversed by a rollback
 # (or reopened by a settlement-only rollback).  Everything else is terminal and
 # must never be re-resolved.
-PAYER_ECONOMY_KINDS = {"payment", "purchase", "fee", "transfer"}
+PAYER_ECONOMY_KINDS = {"payment", "purchase"}
 PROPOSAL_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"committed", "declined", "cancelled", "rejected", "superseded"}),
     "committed": frozenset({"reversed", "pending"}),
@@ -590,7 +592,6 @@ def queue_proposal(
     source_ref: str = "",
     approval_policy: str = "payer",
     rewards: list[dict[str, Any]] | None = None,
-    contributors: list[dict[str, Any]] | None = None,
     visibility: str = "private",
 ) -> dict[str, Any]:
     """Queue one idempotent proposal; no balance is changed here."""
@@ -602,33 +603,13 @@ def queue_proposal(
         raise ValueError("unsupported economy proposal kind")
     if approval_policy not in APPROVAL_POLICIES:
         raise ValueError("unsupported economy approval policy")
-    if kind in PAYER_ECONOMY_KINDS and approval_policy not in {"payer", "all_contributors"}:
+    if kind in PAYER_ECONOMY_KINDS and approval_policy != "payer":
         raise ValueError("chargeable economy proposals require payer approval")
     payer_uid = str(payer_uid)
     if payer_uid and kind in PAYER_ECONOMY_KINDS and payer_uid not in instance.players:
         # Fail closed at the proposal layer: a payer outside the current game
         # can never be settled, so the offer must not become pending.
         raise ValueError("economy payer is not part of the current game")
-    normalized_contributors = deepcopy(list(contributors or []))
-    if approval_policy == "all_contributors":
-        contributor_uids = [
-            str(item.get("uid") or "")
-            for item in normalized_contributors
-            if isinstance(item, dict)
-        ]
-        contributor_amounts = [
-            int(item.get("amount", 0) or 0)
-            for item in normalized_contributors
-            if isinstance(item, dict)
-        ]
-        if (
-            not contributor_uids
-            or any(not uid for uid in contributor_uids)
-            or len(set(contributor_uids)) != len(contributor_uids)
-            or any(value <= 0 for value in contributor_amounts)
-            or sum(contributor_amounts) != amount
-        ):
-            raise ValueError("contributors must uniquely cover the proposal amount")
     existing = _existing_by_source(instance, source_ref)
     if existing is not None:
         return existing
@@ -648,7 +629,6 @@ def queue_proposal(
         "source_ref": str(source_ref),
         "approval_policy": str(approval_policy),
         "rewards": deepcopy(list(rewards or [])),
-        "contributors": normalized_contributors,
         "approvals": {},
         "visibility": visibility if visibility in {"private", "party"} else "private",
         "status": "pending",
@@ -839,14 +819,7 @@ def resolve_proposal(
     recipient_uid = str(proposal.get("recipient_uid") or payer_uid)
     policy = str(proposal.get("approval_policy") or "payer")
     is_gm = actor_uid == instance.gm_uid
-    contributors = [
-        item for item in (proposal.get("contributors") or [])
-        if isinstance(item, dict) and str(item.get("uid") or "")
-    ]
-    contributor_uids = {str(item.get("uid") or "") for item in contributors}
-    if policy == "all_contributors":
-        allowed = actor_uid in contributor_uids or (not accepted and is_gm)
-    elif policy == "gm":
+    if policy == "gm":
         allowed = is_gm
     elif policy == "system":
         allowed = actor_uid == "system"
@@ -880,76 +853,16 @@ def resolve_proposal(
             "outcome": deepcopy(outcome),
         }
 
-    if policy == "all_contributors":
-        approvals = proposal.setdefault("approvals", {})
-        approvals[actor_uid] = True
-        missing = sorted(contributor_uids.difference(
-            uid for uid, approved in approvals.items() if approved
-        ))
-        if missing:
-            _advance_revision(instance)
-            return {
-                "ok": True,
-                "accepted": True,
-                "committed": False,
-                "awaiting_uids": missing,
-                "proposal": deepcopy(proposal),
-            }
-
     amount = int(proposal.get("amount", 0) or 0)
     if not 0 < amount <= MAX_ECONOMY_AMOUNT:
         return {"ok": False, "code": "INVALID_AMOUNT", "error": "经济金额无效"}
     entries: list[dict[str, Any]] = []
     reward_snapshots: list[dict[str, Any]] = []
-    if policy == "all_contributors":
-        balances: dict[str, int] = {}
-        for contribution in contributors:
-            uid = str(contribution.get("uid") or "")
-            contribution_amount = int(contribution.get("amount", 0) or 0)
-            if uid not in instance.players or contribution_amount <= 0:
-                return {"ok": False, "code": "CONTRIBUTOR_INVALID", "error": "平摊参与者无效"}
-            sheet = instance.get_character_sheet(uid)
-            currency = sheet.get("currency") if isinstance(sheet.get("currency"), dict) else {}
-            balances[uid] = int(currency.get("amount", sheet.get("gold", 0)) or 0)
-            if balances[uid] < contribution_amount:
-                set_proposal_status(proposal, "rejected")
-                proposal["resolved_at"] = now
-                proposal["resolution_code"] = "INSUFFICIENT_FUNDS"
-                _advance_revision(instance)
-                outcome = _record_outcome(
-                    instance, proposal, status="rejected", actor_uid=actor_uid,
-                )
-                _settle_effect_group(instance, proposal)
-                return {
-                    "ok": False,
-                    "code": "INSUFFICIENT_FUNDS",
-                    "error": f"{uid} 余额不足",
-                    "proposal": deepcopy(proposal),
-                    "outcome": deepcopy(outcome),
-                }
-        for contribution in contributors:
-            uid = str(contribution.get("uid") or "")
-            contribution_amount = int(contribution.get("amount", 0) or 0)
-            sheet = instance.get_character_sheet(uid)
-            after = apply_currency_delta(sheet, -contribution_amount)
-            instance.set_character_sheet(uid, sheet)
-            entries.append({
-                "account": f"character:{uid}",
-                "delta": -contribution_amount,
-                "before": balances[uid],
-                "after": after,
-            })
-        entries.append({
-            "account": "system:world",
-            "delta": amount,
-            "before": None,
-            "after": None,
-        })
-    elif kind in {"payment", "purchase", "fee", "transfer"}:
+    if kind in {"payment", "purchase"}:
         if payer_uid not in instance.players:
             return {"ok": False, "code": "PAYER_NOT_FOUND", "error": "付款角色不存在"}
         rewards = list(proposal.get("rewards") or [])
-        if (rewards or kind == "transfer") and recipient_uid not in instance.players:
+        if rewards and recipient_uid not in instance.players:
             return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": "物品接收角色不存在"}
         payer = instance.get_character_sheet(payer_uid)
         currency = payer.get("currency") if isinstance(payer.get("currency"), dict) else {}
@@ -974,31 +887,12 @@ def resolve_proposal(
         after = apply_currency_delta(payer, -amount)
         instance.set_character_sheet(payer_uid, payer)
         entries.append({"account": f"character:{payer_uid}", "delta": -amount, "before": before, "after": after})
-        if kind == "transfer":
-            recipient = instance.get_character_sheet(recipient_uid)
-            recipient_currency = (
-                recipient.get("currency")
-                if isinstance(recipient.get("currency"), dict)
-                else {}
-            )
-            recipient_before = int(
-                recipient_currency.get("amount", recipient.get("gold", 0)) or 0
-            )
-            recipient_after = apply_currency_delta(recipient, amount)
-            instance.set_character_sheet(recipient_uid, recipient)
-            entries.append({
-                "account": f"character:{recipient_uid}",
-                "delta": amount,
-                "before": recipient_before,
-                "after": recipient_after,
-            })
-        else:
-            entries.append({
-                "account": "system:world",
-                "delta": amount,
-                "before": None,
-                "after": None,
-            })
+        entries.append({
+            "account": "system:world",
+            "delta": amount,
+            "before": None,
+            "after": None,
+        })
         if rewards and grant_reward:
             recipient = instance.get_character_sheet(recipient_uid)
             reward_snapshots.append({

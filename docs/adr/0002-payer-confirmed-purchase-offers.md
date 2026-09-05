@@ -123,6 +123,13 @@ balances, items and the transaction ledger are unaffected. Schema 6 already
 dropped `purchase_quotes`, `merchant_offers`, `clarifications`, `evidence`,
 and top-level `pending_payments`.
 
+Schema 8 additionally retires the `transfer` / `fee` kinds and the
+`all_contributors` approval policy. The PAY/TEAM_PAY tag contract behind
+them was already retired with schema 6, so no live path can create them;
+pending leftovers from pre-retirement saves never charged anyone and are
+superseded (with dependent pending effect groups discarded). Committed
+ledger history is preserved untouched.
+
 ## Consequences
 
 The GM narrates; the payer confirms; nothing else can charge. The proposal

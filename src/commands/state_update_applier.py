@@ -157,7 +157,7 @@ class StateUpdateApplier:
             # normalizes the actor and de-duplicates via a stable source_ref;
             # state_update output has neither, so it stays discarded here.
             # Narrative rewards remain a separate, GM-approved path.
-            if kind in {"payment", "purchase", "fee", "transfer"}:
+            if kind in {"payment", "purchase"}:
                 logger.warning(
                     "忽略模型经济扣款提案: kind=%s uid=%s round=%d",
                     kind, uid, instance.round_number,

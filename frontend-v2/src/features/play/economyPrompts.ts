@@ -9,7 +9,6 @@ export function isNonBlockingPersonalPurchase(proposal: PendingPayment): boolean
     && proposal.approval_policy === 'payer'
     && Boolean(payer)
     && recipient === payer
-    && !(proposal.contributors?.length)
     && Boolean(proposal.rewards?.length)
     && !proposal.effect_group_id
 }
@@ -20,14 +19,10 @@ export function isEconomyProposalActionable(
   gmUid: string,
 ): boolean {
   if (proposal.status !== 'pending') return false
-  if (proposal.approval_policy === 'all_contributors' && proposal.approvals?.[actorId]) {
-    return false
-  }
   return Boolean(
     proposal.payer_uid === actorId
     || proposal.uid === actorId
-    || (proposal.approval_policy === 'gm' && gmUid === actorId)
-    || proposal.contributors?.some(item => item.uid === actorId),
+    || (proposal.approval_policy === 'gm' && gmUid === actorId),
   )
 }
 

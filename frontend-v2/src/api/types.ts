@@ -239,11 +239,9 @@ export interface PendingPayment {
   description?: string
   reason?: string
   status?: string
-  kind?: 'payment' | 'purchase' | 'fee' | 'reward' | 'transfer' | string
+  kind?: 'payment' | 'purchase' | 'reward' | string
   payer_uid?: string
   approval_policy?: string
-  contributors?: Array<{ uid: string; amount: number }>
-  approvals?: Record<string, boolean>
   sequence?: number
   run_id?: string
   [key: string]: unknown

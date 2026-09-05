@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CashOutline, CheckmarkCircleOutline, PeopleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5'
+import { CashOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import type { PendingPayment } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
@@ -17,13 +17,10 @@ const props = defineProps<{
 const emit = defineEmits<{ confirm: []; reject: []; dismiss: [] }>()
 const { t } = useLocale()
 
-const team = computed(() => props.proposal.approval_policy === 'all_contributors')
 const reward = computed(() => props.proposal.kind === 'reward')
-const tone = computed(() => reward.value ? 'reward' : team.value ? 'team' : 'payment')
-const title = computed(() => reward.value
-  ? t('economyRewardTitle')
-  : team.value ? t('economyTeamPaymentTitle') : t('gmPaymentTitle'))
-const icon = computed(() => reward.value ? CheckmarkCircleOutline : team.value ? PeopleOutline : CashOutline)
+const tone = computed(() => reward.value ? 'reward' : 'payment')
+const title = computed(() => reward.value ? t('economyRewardTitle') : t('gmPaymentTitle'))
+const icon = computed(() => reward.value ? CheckmarkCircleOutline : CashOutline)
 const description = computed(() => {
   const p = props.proposal
   if (reward.value) {
@@ -35,11 +32,6 @@ const description = computed(() => {
     }
     return t(props.solo ? 'economySoloRewardContent' : 'economyRewardContent', values)
   }
-  if (team.value) return t('economyTeamPaymentContent', {
-    amount: p.amount ?? 0,
-    currency: props.currency,
-    reason: p.reason || '',
-  })
   return t('gmPaymentContent', {
     target: props.playerName(p.payer_uid || p.uid),
     amount: p.amount ?? 0,
@@ -64,15 +56,6 @@ const helpText = computed(() => reward.value && props.solo ? t('economySoloRewar
     </header>
 
     <p class="economy-proposal-description">{{ description }}</p>
-    <ul v-if="team && proposal.contributors?.length" class="economy-contributor-list">
-      <li v-for="contributor in proposal.contributors" :key="contributor.uid">
-        <span>{{ playerName(contributor.uid) }}</span>
-        <strong>{{ contributor.amount }} {{ currency }}</strong>
-        <small :class="{ approved: proposal.approvals?.[contributor.uid] }">
-          {{ proposal.approvals?.[contributor.uid] ? t('economyApproved') : t('economyAwaitingApproval') }}
-        </small>
-      </li>
-    </ul>
     <p v-if="proposal.rewards?.length" class="economy-proposal-rewards">
       {{ t('gmPaymentRewards', { items: proposal.rewards.map(item => item.name).join('、') }) }}
     </p>

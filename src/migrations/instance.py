@@ -17,7 +17,7 @@ from src.compat.dnd2024_adventure_bindings import apply_unreleased_adventure_bin
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 7
+CURRENT_INSTANCE_SCHEMA_VERSION = 8
 
 
 def _legacy_run_id(payload: Mapping[str, Any]) -> str:
@@ -143,6 +143,46 @@ def _migrate_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
+    """Retire the unused transfer/fee/all_contributors proposal surface.
+
+    The PAY/TEAM_PAY tag contract was retired with schema 6, so these kinds
+    and the shared-cost approval policy have no live creation path. Pending
+    leftovers from pre-retirement saves never charged anyone; they are
+    superseded rather than guessed into a kept kind. A pending effect group
+    containing a superseded member can never reach all-committed, so it is
+    discarded -- its other members keep blocking through their own pending
+    proposals. Committed ledger history is preserved untouched.
+    """
+    economy = payload.get("economy")
+    if isinstance(economy, dict):
+        retired_kinds = {"transfer", "fee"}
+        superseded_ids: set[str] = set()
+        for proposal in economy.get("proposals", []) or []:
+            if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+                continue
+            if (
+                str(proposal.get("kind") or "") in retired_kinds
+                or str(proposal.get("approval_policy") or "") == "all_contributors"
+            ):
+                proposal["status"] = "superseded"
+                proposal["resolution_code"] = "RETIRED_LEGACY_PROPOSAL"
+                proposal_id = str(proposal.get("id") or "")
+                if proposal_id:
+                    superseded_ids.add(proposal_id)
+        if superseded_ids:
+            for group in economy.get("effect_groups", []) or []:
+                if not isinstance(group, dict) or group.get("status") != "pending":
+                    continue
+                if superseded_ids.intersection(
+                    str(item) for item in group.get("proposal_ids", []) or []
+                ):
+                    group["status"] = "discarded"
+                    group.pop("effects", None)
+    payload["instance_schema_version"] = 8
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -168,6 +208,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 6:
         payload = _migrate_v6_to_v7(payload)
         version = 7
+    if version == 7:
+        payload = _migrate_v7_to_v8(payload)
+        version = 8
     payload["instance_schema_version"] = version
     return payload
 
