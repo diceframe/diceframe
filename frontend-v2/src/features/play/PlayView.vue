@@ -61,6 +61,7 @@ const { locale, setLocale, t } = useLocale()
 const help = ref(false), ruleMeta = ref<RuleMeta>({}), preview = ref(false), delegate = ref(false), cards = ref<CharacterCard[]>([]), showCards = ref(false), health = ref<HealthResponse>({ events: [] })
 const showKpQuestion = ref(false)
 const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false), showRoomPassword = ref(false), roomPasswordInput = ref(''), luckTimeoutInput = ref('')
+const rewardPolicyMode = ref(''), rewardPolicyCap = ref('')
 const sidebarCollapsed = ref(localStorage.getItem('play_sidebar_collapsed') === '1')
 const mobilePanel = ref<'sidebar' | 'controls' | ''>('')
 const showMap = ref(false)
@@ -489,6 +490,9 @@ function onAccess() { command('player-access', { open: game.detail.value?.player
 function onRoomPassword() {
   roomPasswordInput.value = ''
   luckTimeoutInput.value = ''
+  const policy = game.detail.value?.economy_reward_policy || {}
+  rewardPolicyMode.value = policy.mode || ''
+  rewardPolicyCap.value = policy.auto_reward_cap ? String(policy.auto_reward_cap) : ''
   showRoomPassword.value = true
 }
 async function setRoomPassword() {
@@ -502,6 +506,13 @@ async function setRoomPassword() {
       if (ltR.error || ltR.ok === false) throw new Error(ltR.error || t('settingFailed'))
       toast.success(t('luckTimeoutSaved', { seconds: lt }))
     }
+    // 奖励策略总是提交：mode 为空表示清除本局覆盖、回退规则/服务器默认。
+    const capRaw = String(rewardPolicyCap.value || '').trim()
+    const rewardBody: Record<string, unknown> = { mode: rewardPolicyMode.value }
+    if (capRaw !== '') rewardBody.auto_reward_cap = Number(capRaw)
+    const rpR = await api<{ ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.currentGame.value)}/settings/reward-policy`, { method: 'POST', body: JSON.stringify(rewardBody) })
+    if (rpR.error || rpR.ok === false) throw new Error(rpR.error || t('settingFailed'))
+    if (rewardPolicyMode.value !== '') toast.success(t('rewardPolicySaved'))
     showRoomPassword.value = false
     toast.success(roomPasswordInput.value ? t('roomPasswordUpdated') : t('roomPasswordCleared'))
     await game.refresh()
@@ -692,10 +703,6 @@ function economyPlayerName(uid?: string): string {
   return game.players.value.find(player => player.user_id === uid)?.character_name || uid
 }
 
-function isTeamPayment(proposal: PendingPayment | null): boolean {
-  return proposal?.approval_policy === 'all_contributors'
-}
-
 function postponePendingPay() {
   const id = String(pendingPay.value?.id || pendingPay.value?.payment_id || '')
   if (id) dismissedPaymentIds.value = new Set([...dismissedPaymentIds.value, id])
@@ -710,7 +717,7 @@ function pendingEconomyHelp(proposal: PendingPayment): string {
   if (isNonBlockingPersonalPurchase(proposal)) return t('economyPersonalPurchaseHelp')
   return proposal.kind === 'reward'
     ? t('economyRewardHelp')
-    : isTeamPayment(proposal) ? t('economyTeamPaymentHelp') : t('gmPaymentHelp')
+    : t('gmPaymentHelp')
 }
 
 function reopenPendingEconomy() {
@@ -1349,10 +1356,18 @@ onBeforeUnmount(() => {
 
     <div v-if="showRoomPassword" class="modal" @click.self="showRoomPassword = false">
       <section class="dialog">
-        <header><h2>{{ game.detail.value?.has_room_password ? t('editRoomPassword') : t('setRoomPassword') }}</h2><button @click="showRoomPassword = false">×</button></header>
+        <header><h2>{{ t('gameSettings') }}</h2><button @click="showRoomPassword = false">×</button></header>
         <p>{{ t('roomPasswordHelp') }}</p>
         <label>{{ t('newPassword') }}<input type="password" v-model="roomPasswordInput" :placeholder="t('emptyCancelsPassword')" @keyup.enter="setRoomPassword"></label>
         <label>{{ t('luckTimeoutSeconds') }}<input type="number" v-model="luckTimeoutInput" :placeholder="t('luckTimeoutPlaceholder')" min="0" max="3600"></label>
+        <label>{{ t('rewardPolicyMode') }}
+          <select v-model="rewardPolicyMode">
+            <option value="">{{ t('rewardPolicyFollowDefault') }}</option>
+            <option value="auto_small_cash">{{ t('rewardPolicyAutoSmallCash') }}</option>
+            <option value="gm_confirm">{{ t('rewardPolicyGmConfirm') }}</option>
+          </select>
+        </label>
+        <label v-if="rewardPolicyMode === 'auto_small_cash'">{{ t('rewardPolicyCap') }}<input type="number" v-model="rewardPolicyCap" :placeholder="t('rewardPolicyCapPlaceholder')" min="1"></label>
         <div class="actions">
           <button @click="showRoomPassword = false">{{ t('cancel') }}</button>
           <button class="primary" @click="setRoomPassword">{{ t('saveAction') }}</button>

@@ -62,12 +62,12 @@ class EnglishBridgeClient:
             "economy_proposals": [{
                 "id": "eco-party",
                 "sequence": 7,
-                "kind": "fee",
+                "kind": "purchase",
                 "amount": 3,
                 "reason": "Bridge toll",
                 "status": "pending",
-                "approval_policy": "all_contributors",
-                "contributors": [{"uid": "player-1", "amount": 3}],
+                "payer_uid": "player-1",
+                "approval_policy": "payer",
             }],
         }
 
@@ -113,7 +113,7 @@ async def test_english_binding_persists_language_and_drives_shared_replies(tmp_p
     confirmed = await service.handle(BridgeInput(
         "discord-channel", "player-platform", "/df confirm pay 7",
     ))
-    assert "waiting for the other contributors" in confirmed.replies[0]
+    assert "Payment of 3 gold confirmed." in confirmed.replies[0]
     assert client.resolved_proposals == [("game-1", "player-1", "eco-party", True)]
 
     reloaded = JsonBridgeStore(tmp_path / "bridge.json")

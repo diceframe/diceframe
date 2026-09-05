@@ -12,14 +12,12 @@ from typing import Any
 from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.economy_effects import (
     currency_labels_for_rule,
-    discard_unearned_reward_proposals,
     defer_narrative_effects,
     has_economy_proposal,
     pending_decision_notice,
     should_warn_unbacked_payment,
     unbacked_purchase_notice,
     unbacked_payment_notice,
-    unearned_reward_notice,
 )
 from src.engine.economy import filter_unconfirmed_purchase_grants
 from src.commands.state_update_applier import StateUpdateApplier
@@ -117,6 +115,7 @@ class GameLifecycle:
             gm_uid=source.gm_uid,
             luck_timeout_seconds=source.luck_timeout_seconds,
             narrative_perspective=source.narrative_perspective,
+            economy_reward_policy=dict(source.economy_reward_policy or {}),
         )
         candidate.max_players = source.max_players
         candidate.player_access_open = source.player_access_open
@@ -312,17 +311,7 @@ class GameLifecycle:
                 },
             )
             start_data = {}
-        # Opening narration goes through the same reward qualification gate as
-        # normal rounds.  The model may describe an NPC promising payment for
-        # a task that has not happened yet; such a GOLD tag must not become a
-        # pending GM approval (or an eventual balance change) merely because
-        # it appeared in the first response.
         system_changes: list[str] = []
-        dropped_rewards = discard_unearned_reward_proposals(
-            instance, start_data, narration,
-        )
-        if dropped_rewards:
-            system_changes.append(unearned_reward_notice(instance.language))
         economy_pending = bool(response is not None and has_economy_proposal(start_data))
         if should_warn_unbacked_payment(
             narration, start_data, instance.language,

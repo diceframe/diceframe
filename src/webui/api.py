@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
+from src.engine.economy import resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.lorebook.store import LorebookStore
@@ -1541,15 +1542,44 @@ class WebAPI:
 
         return await self.resolve_payment(game_key, payment_id, True, session_uid)
 
-    def economy_auto_reward_settings(self) -> tuple[bool, int]:
-        """Live economy auto-reward switch and gold cap from runtime config."""
+    def economy_auto_reward_settings(self, instance: Any = None) -> tuple[bool, int]:
+        """按局解析奖励自动结算 (enabled, gold_cap)。
+
+        优先级：本局 GM 覆盖（instance.economy_reward_policy）→ 规则模板
+        economy_defaults（D&D 金币与 COC 美元的量级不同）→ 服务器全局配置
+        兜底。规则模板读取失败时按无默认值处理，不影响本局覆盖与全局兜底。
+        """
 
         state = self._config_state if isinstance(self._config_state, dict) else {}
-        return (
-            bool(state.get("economy_auto_reward_enabled", True)),
-            # 与 runtime_config 默认保持一致：放宽到 10000，配置可覆盖。
-            max(1, int(state.get("economy_auto_reward_gold_cap", 10000) or 10000)),
+        global_enabled = bool(state.get("economy_auto_reward_enabled", True))
+        global_cap = max(1, int(state.get("economy_auto_reward_gold_cap", 500) or 500))
+        if instance is None:
+            return (global_enabled, global_cap)
+        rule_template: Any = None
+        try:
+            rule = self._load_rule_for_game(instance)
+            rule_template = getattr(rule, "template", None)
+        except Exception:
+            logger.warning("读取规则模板奖励默认值失败，回退全局配置", exc_info=True)
+        return resolve_auto_reward_policy(
+            game_policy=getattr(instance, "economy_reward_policy", None),
+            rule_template=rule_template,
+            global_enabled=global_enabled,
+            global_cap=global_cap,
         )
+
+    async def set_economy_reward_policy(
+        self, game_key: str, policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "error": "not found"}
+        try:
+            instance.configure_session(economy_reward_policy=policy)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        await self.save_game_instance(instance)
+        return {"ok": True, "economy_reward_policy": instance.economy_reward_policy}
 
     async def create_payment_proposal(
         self,

@@ -57,12 +57,6 @@
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-success) 12%, var(--df-surface-2)), var(--df-surface-1));
 }
 
-.economy-proposal-card.economy-proposal-team {
-  border-color: color-mix(in srgb, #a78bfa 60%, var(--df-border-soft));
-  border-left-color: #a78bfa;
-  background: linear-gradient(145deg, color-mix(in srgb, #8b5cf6 12%, var(--df-surface-2)), var(--df-surface-1));
-}
-
 .economy-proposal-header,
 .economy-proposal-heading,
 .economy-proposal-status,
@@ -87,7 +81,6 @@
   background: color-mix(in srgb, var(--df-warning) 16%, var(--df-surface-2));
 }
 .economy-proposal-reward .economy-proposal-icon { color: var(--df-success); background: color-mix(in srgb, var(--df-success) 16%, var(--df-surface-2)); }
-.economy-proposal-team .economy-proposal-icon { color: #c4b5fd; background: color-mix(in srgb, #8b5cf6 18%, var(--df-surface-2)); }
 .economy-proposal-status { gap: 4px; color: var(--df-text-muted); font-size: 11px; }
 .economy-proposal-close { border: 0; padding: 4px 6px; color: var(--df-text-muted); background: transparent; cursor: pointer; }
 .economy-proposal-close:hover { color: var(--df-text); }
@@ -97,31 +90,10 @@
 .economy-proposal-actions button { min-height: 32px; }
 .economy-proposal-safe-hint { display: none; }
 .economy-proposal-rewards { margin: 0; color: var(--df-success); font-size: 13px; }
-.economy-contributor-list small.approved { color: var(--df-success); }
-
 @media (max-width: 640px) {
   .economy-proposal-card { padding: 12px; }
   .economy-proposal-actions { justify-content: stretch; }
   .economy-proposal-actions button { flex: 1 1 auto; }
-}
-
-.economy-contributor-list {
-  display: grid;
-  gap: 7px;
-  margin: 12px 0;
-  padding: 0;
-  list-style: none;
-}
-
-.economy-contributor-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--df-border-soft);
-  border-radius: var(--df-radius-sm);
-  background: var(--df-surface-2);
 }
 
 .economy-contributor-list small {

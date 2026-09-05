@@ -9,11 +9,9 @@ from typing import Any
 
 from src.commands.economy_effects import (
     currency_labels_for_rule,
-    discard_unearned_reward_proposals,
     defer_narrative_effects,
     has_economy_proposal,
     pending_decision_notice,
-    unearned_reward_notice,
     unbacked_purchase_notice,
     unbacked_payment_notice,
     should_warn_unbacked_payment,
@@ -123,6 +121,16 @@ class SwipeGenerator:
 
         snapshot = target_entry.get("pre_state_snapshot", {})
         if snapshot:
+            # ADR 0003 branch cut: rounds after the rewritten target belong to
+            # the discarded branch. Their log entries are dropped together
+            # with their economy (reverse_round_economy withdraws every
+            # settlement at or after the target round), and the replay
+            # continues from the target round itself.
+            instance.log = [
+                entry for entry in instance.log
+                if int(entry.get("round", 0) or 0) <= round_num
+            ]
+            instance.round_number = round_num
             reverse_round_economy(instance, round_num)
             restore_players(instance, reconcile_rollback_snapshot(instance, snapshot, round_num))
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)
@@ -188,11 +196,6 @@ class SwipeGenerator:
             currency_labels=currency_labels,
         ):
             system_changes.append(unbacked_payment_notice(instance.language))
-        dropped_rewards = discard_unearned_reward_proposals(
-            instance, data, narration,
-        )
-        if dropped_rewards:
-            system_changes.append(unearned_reward_notice(instance.language))
         dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
         if dropped_purchase_items:
             system_changes.append(unbacked_purchase_notice(instance.language))

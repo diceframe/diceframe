@@ -566,7 +566,7 @@ def normalize_economy_actions(
     """校验模型经济报价并归一到付款人。
 
     price_source=none 或缺价时安全跳过（没有人说出价格就不产生扣款提案），
-    但有效的意图会以 ``unpriced`` 形式返回，供叙事后复检与本轮拦截使用；
+    但有效的意图会以 ``unpriced`` 形式返回，供本轮 LOOT 拦截使用；
     它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
     price_source 必须是明确的转述来源。单条无效不影响同批。
     """
@@ -724,82 +724,7 @@ async def plan_round_checks(
         # 由调用方在过时检查通过后落库；这里不直接改动经济状态，
         # 否则创建提案推进的 revision 会让本轮规划被误判为过期。
         "economy_offers": economy_offers,
-        # 无价购买意图只活在回合内存里：供叙事后复检报价与本轮 LOOT 拦截，
-        # 从不持久化、不产生金额（ADR 0002 修订）。
+        # 无价购买意图只活在回合内存里：供结算阶段拦截同轮模型授予
+        # （从不持久化、不产生金额；价格复检已按 ADR 0002 修订移除）。
         "unpriced_purchase_intents": economy_intents_unpriced,
     }
-
-
-def _price_pass_prompt_text(language: str) -> str:
-    suffix = localized_text(language, {"en": "en", "zh-CN": "zh", "ja": "ja"})
-    path = (
-        Path(__file__).resolve().parents[2] / "prompts" / f"purchase_price_pass_{suffix}.md"
-    )
-    return path.read_text(encoding="utf-8")
-
-
-async def price_unpriced_purchase_intents(
-    instance: GameInstance,
-    llm_client: Any,
-    narration_text: str,
-    intents: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """叙事后复检：用本轮叙述文本给无价购买意图找真人报出的价格。
-
-    复用 ``dice_checks`` 工具契约；金额必须逐字来自叙述文本中的原话，
-    系统不推断价格（ADR 0002）。返回 (可入账报价, 仍无价的意图)。
-    """
-    if not intents or not llm_client or not hasattr(llm_client, "call_tools"):
-        return [], list(intents)
-    intent_rows = []
-    for intent in intents[:8]:
-        uid = str(intent.get("payer_uid") or "")
-        if uid not in instance.players:
-            continue
-        intent_rows.append({
-            "player_id": uid,
-            "character_name": instance.players[uid].get("character_name") or uid,
-            "target": str(intent.get("target") or ""),
-            "quantity": int(intent.get("quantity", 1) or 1),
-        })
-    if not intent_rows:
-        return [], list(intents)
-    payload = json.dumps({
-        "round": instance.round_number,
-        "purchase_intents": intent_rows,
-        "narration": sanitize_narration(str(narration_text or ""))[:4000],
-    }, ensure_ascii=False, separators=(",", ":"))
-    response = await llm_client.call_tools(
-        _price_pass_prompt_text(instance.language),
-        payload,
-        tools=[DICE_CHECKS_TOOL],
-        max_tokens=1024,
-        temperature=0.1,
-    )
-    raw_actions: list[Any] = []
-    for call in response.tool_calls:
-        if str(call.get("name") or "") != DICE_CHECKS_TOOL_NAME:
-            continue
-        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
-        economy = arguments.get("economy_actions")
-        if isinstance(economy, list):
-            raw_actions.extend(economy)
-    offers, _unpriced, _errors = normalize_economy_actions(instance, raw_actions)
-    # 只保留与提交意图对应的报价：复检无权替模型造出新的购买对象。
-    intent_keys = {
-        (str(intent.get("payer_uid") or ""), str(intent.get("target") or "").casefold())
-        for intent in intents
-    }
-    priced_offers = [
-        offer for offer in offers
-        if (str(offer["payer_uid"]), str(offer["target"]).casefold()) in intent_keys
-    ]
-    consumed_keys = {
-        (str(offer["payer_uid"]), str(offer["target"]).casefold()) for offer in priced_offers
-    }
-    remaining = [
-        intent for intent in intents
-        if (str(intent.get("payer_uid") or ""), str(intent.get("target") or "").casefold())
-        not in consumed_keys
-    ]
-    return priced_offers, remaining

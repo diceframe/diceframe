@@ -32,6 +32,7 @@ from src.webui.routes.game_control_routes import (
     api_set_solo_mode,
     api_set_narrative_perspective,
     api_set_luck_timeout,
+    api_set_reward_policy,
     api_set_player_away,
     api_set_player_access,
     api_set_room_password,
@@ -119,6 +120,9 @@ def register_games(app: web.Application) -> None:
     )
     app.router.add_post(
         "/api/games/{game_key}/settings/luck-timeout", api_set_luck_timeout
+    )
+    app.router.add_post(
+        "/api/games/{game_key}/settings/reward-policy", api_set_reward_policy
     )
     app.router.add_post(
         "/api/games/{game_key}/players/{user_id}/away", api_set_player_away

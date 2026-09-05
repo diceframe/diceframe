@@ -182,7 +182,7 @@ class GameInstance:
     last_check: CheckResult | None = None
     last_checks: list[CheckResult] = field(default_factory=list)
     # 本轮规划发现的无价购买意图（payer/target/quantity）。只在回合内存中
-    # 传递：供叙事后价格复检与同轮 LOOT 拦截使用，从不持久化、不产生金额。
+    # 传递：供结算阶段的同轮 LOOT 拦截使用，从不持久化、不产生金额。
     round_unpriced_purchase_intents: list[dict] = field(default_factory=list)
     # 当前判定阶段是否已生成结构化检定；幸运选择必须发生在 LLM 叙事之前。
     round_checks_prepared: bool = False
@@ -247,6 +247,10 @@ class GameInstance:
     _save_fail_count: int = field(default=0, repr=False)
     # 幸运超时（秒）：每条 pending 幸运检定独立倒计时，到点按失败继续；0=禁用（异步局可设 0）
     luck_timeout_seconds: int = 60
+    # 奖励自动结算策略（表级偏好，重开保留）：{"mode": "auto_small_cash"|"gm_confirm",
+    # "auto_reward_cap": int}。{} 表示未设置，结算时回退规则模板 economy_defaults
+    # 与服务器全局配置；归属见 economy.resolve_auto_reward_policy。
+    economy_reward_policy: dict = field(default_factory=dict)
     # 内部：每条 pending 幸运检定的超时定时器（check_id -> asyncio.Task），不序列化
     _luck_timers: dict = field(default_factory=dict, repr=False)
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
@@ -272,7 +276,6 @@ class GameInstance:
             self.economy.setdefault("effect_groups", [])
             self.economy.setdefault("external_effects_outbox", [])
             self.economy.setdefault("outcomes", [])
-            self.economy.setdefault("decision_revision", 0)
 
     def _fresh_economy_state(self) -> dict[str, Any]:
         return {
@@ -285,7 +288,6 @@ class GameInstance:
             "effect_groups": [],
             "external_effects_outbox": [],
             "outcomes": [],
-            "decision_revision": 0,
         }
 
     @asynccontextmanager
@@ -420,10 +422,12 @@ class GameInstance:
         gm_uid: str | None = None,
         luck_timeout_seconds: int | None = None,
         narrative_perspective: str | None = None,
+        economy_reward_policy: dict | None = None,
     ) -> None:
         """集中更新入口与房间身份配置，保留旧存档字段。
 
         luck_timeout_seconds：每玩家幸运超时秒数（0=禁用，异步局建议 0）。
+        economy_reward_policy：本局奖励自动结算策略；非法载荷整体拒绝。
         """
         if solo_mode is not None:
             self.solo_mode = bool(solo_mode)
@@ -439,6 +443,19 @@ class GameInstance:
             self.luck_timeout_seconds = int(luck_timeout_seconds)
         if narrative_perspective is not None:
             self.set_narrative_perspective(narrative_perspective)
+        if economy_reward_policy is not None:
+            from src.engine.economy import normalize_reward_policy
+
+            if not isinstance(economy_reward_policy, dict):
+                raise ValueError("奖励策略无效")
+            if not str(economy_reward_policy.get("mode") or "").strip():
+                # 显式清空：回退规则模板默认与服务器全局配置。
+                self.economy_reward_policy = {}
+            else:
+                normalized = normalize_reward_policy(economy_reward_policy)
+                if not normalized:
+                    raise ValueError("奖励策略无效（mode 或 auto_reward_cap 不合法）")
+                self.economy_reward_policy = normalized
 
     def bind_ruleset_runtime(self, binding: dict[str, Any]) -> bool:
         """Bind versioned ruleset state once; reject mixed-runtime characters."""

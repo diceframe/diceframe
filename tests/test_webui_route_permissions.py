@@ -89,6 +89,10 @@ class FakeAPI:
         self.calls.append(("narrative-perspective", game_key, perspective))
         return {"ok": True, "narrative_perspective": perspective}
 
+    async def set_economy_reward_policy(self, game_key: str, policy: dict) -> dict:
+        self.calls.append(("reward-policy", game_key, policy))
+        return {"ok": True, "economy_reward_policy": policy}
+
     def delete_game(self, game_key: str) -> dict:
         key = self._parse_key(game_key)
         save_dir = self.registry._save_path(key).parent
@@ -310,6 +314,31 @@ async def test_only_gm_can_change_narrative_perspective(tmp_path):
         registry, user_id="player", body={"perspective": "immersive"},
     )
     player_response = await games.api_set_narrative_perspective(player_request)
+
+    assert player_response.status == 403
+    assert player_api.calls == []
+
+
+@pytest.mark.asyncio
+async def test_only_gm_can_change_reward_policy(tmp_path):
+    registry = FakeRegistry(tmp_path)
+    registry.items[("web", "room", "bot")] = SimpleNamespace(gm_uid="gm")
+    gm_request, gm_api = make_request(
+        registry, user_id="gm",
+        body={"mode": "auto_small_cash", "auto_reward_cap": 120},
+    )
+
+    gm_response = await games.api_set_reward_policy(gm_request)
+
+    assert gm_response.status == 200
+    assert gm_api.calls == [
+        ("reward-policy", "web|room|bot", {"mode": "auto_small_cash", "auto_reward_cap": 120}),
+    ]
+
+    player_request, player_api = make_request(
+        registry, user_id="player", body={"mode": "gm_confirm"},
+    )
+    player_response = await games.api_set_reward_policy(player_request)
 
     assert player_response.status == 403
     assert player_api.calls == []

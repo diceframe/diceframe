@@ -7,7 +7,6 @@ output can describe a payment, but it cannot create a payment proposal.
 from __future__ import annotations
 
 from copy import deepcopy
-import re
 from typing import Any
 
 from src.engine.intent.economy_intent import has_economy_proposal
@@ -19,73 +18,12 @@ _DEFERRED_DATA_KEYS = {
     "milestone_grants", "plot_update", "quick_actions", "scene_image_prompt",
     "xp_rewards",
 }
-_CONDITIONAL_REWARD_RE = re.compile(
-    r"(?:要是|如果|若是|完成[^。！？\n]{0,20}后|之后再|等你|待你|才能|才会|以后|将会|承诺|答应|promise|promises|will pay|\bif\b|\bonce\b|\bafter\b|\bwhen\b)",
-    re.IGNORECASE,
-)
-_COMPLETION_EVIDENCE_RE = re.compile(
-    r"(?:完成|成功|击败|打倒|交付|归还|回收|达成|兑现|领取|earned|completed|complete|defeated|delivered|recovered|claimed|critical success|大成功)",
-    re.IGNORECASE,
-)
-
-
 def _meaningful(value: Any) -> bool:
     if isinstance(value, dict):
         return any(_meaningful(item) for item in value.values())
     if isinstance(value, (list, tuple, set)):
         return any(_meaningful(item) for item in value)
     return value not in {None, "", False, 0}
-
-
-def discard_unearned_reward_proposals(instance: Any, data: dict[str, Any], narration: str) -> int:
-    state_update = data.get("state_update")
-    proposals = state_update.get("economy_proposals") if isinstance(state_update, dict) else None
-    if not isinstance(proposals, list):
-        return 0
-    text = str(narration or "")
-    completed_titles: set[str] = set()
-    plot_update = data.get("plot_update")
-    if isinstance(plot_update, dict):
-        for quest in plot_update.get("quests", []):
-            if isinstance(quest, dict) and str(quest.get("status") or "").casefold() in {
-                "completed", "complete", "已完成", "完成", "成功",
-            }:
-                title = str(quest.get("title") or "").strip().casefold()
-                if title:
-                    completed_titles.add(title)
-    tracker = getattr(instance, "plot_tracker", None)
-    for quest in getattr(tracker, "quests", {}).values() if tracker is not None else []:
-        status = getattr(getattr(quest, "status", None), "value", getattr(quest, "status", ""))
-        if str(status).casefold() in {"completed", "complete", "已完成", "完成", "成功"}:
-            title = str(getattr(quest, "title", "") or "").strip().casefold()
-            if title:
-                completed_titles.add(title)
-    kept: list[dict[str, Any]] = []
-    dropped = 0
-    for proposal in proposals:
-        if not isinstance(proposal, dict) or proposal.get("kind") != "reward":
-            kept.append(proposal)
-            continue
-        reason = str(proposal.get("reason") or "").casefold()
-        if any(title in reason or reason in title for title in completed_titles):
-            # Explicit same-turn or previously completed quest state is
-            # accepted as the completion evidence.
-            kept.append(proposal)
-            continue
-        if _COMPLETION_EVIDENCE_RE.search(text) and not _CONDITIONAL_REWARD_RE.search(text):
-            kept.append(proposal)
-        else:
-            dropped += 1
-    state_update["economy_proposals"] = kept
-    return dropped
-
-
-def unearned_reward_notice(language: str) -> str:
-    return localized_text(language, {
-        "en": "Reward pending: the task must be confirmed complete before it is awarded.",
-        "zh-CN": "奖励待确认：任务确认完成前不会发放奖励。",
-        "ja": "報酬保留中：任務の完了が確認されるまで報酬は付与されません。",
-    })
 
 
 def should_warn_unbacked_payment(

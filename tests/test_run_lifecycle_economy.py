@@ -23,12 +23,11 @@ from src.engine.economy import (
     reverse_round_economy,
     resolve_proposal,
     set_proposal_status,
-    _remove_reward_delta,
 )
 from src.commands.economy_effects import (
-    discard_unearned_reward_proposals,
     guard_unbacked_payment_narration,
     defer_narrative_effects,
+    pending_decision_notice,
 )
 from src.commands.state_items import append_key_item
 from src.commands.state_update_applier import StateUpdateApplier
@@ -193,65 +192,25 @@ def test_only_plain_personal_purchase_is_nonblocking() -> None:
     assert blocking_economy_proposals(instance) == []
 
 
-def test_conditional_narrative_reward_is_not_queued_before_task_completion() -> None:
+def test_conditional_narrative_reward_is_queued_for_policy(tmp_path) -> None:
+    """奖励不做“任务完成证据”启发式拦截：照常入提案，由奖励策略/GM 决定。
+
+    旧层会用“叙述里出现如果/以后等词且没有完成证据”丢掉奖励，导致玩家
+    应得的报酬无声消失（真实事故：第 5 轮奖励未入账且提示误导）。现在
+    叙事奖励一律进入 GM 审批提案；小额纯货币是否自动到账由奖励策略决定。
+    """
+    applier = StateUpdateApplier(tmp_path, None, load_world_template=lambda *_: {})
     instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "完成药剂师委托的报酬",
-            }],
-        },
-    }
-    dropped = discard_unearned_reward_proposals(
-        instance, data, "你要是能帮我清干净，15 金币一个子儿不少。",
-    )
-    assert dropped == 1
-    assert data["state_update"]["economy_proposals"] == []
+    data = {"state_update": {"economy_proposals": [{
+        "kind": "reward", "uid": "p2", "amount": 15,
+        "reason": "完成药剂师委托后应付的报酬",
+    }]}}
+    queued = applier.apply_state_update(instance, data["state_update"])
 
-
-def test_reward_without_completion_evidence_is_not_queued() -> None:
-    instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "任务报酬",
-            }],
-        },
-    }
-    assert discard_unearned_reward_proposals(instance, data, "药剂师向你说明报酬安排。") == 1
-    assert data["state_update"]["economy_proposals"] == []
-
-
-def test_reward_is_eligible_when_same_turn_marks_quest_completed() -> None:
-    instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "完成药剂师委托的报酬",
-            }],
-        },
-        "plot_update": {"quests": [{"title": "药剂师委托", "status": "completed"}]},
-    }
-    assert discard_unearned_reward_proposals(
-        instance, data, "如果你完成了委托，药剂师会支付报酬；但本轮已确认任务完成。",
-    ) == 0
-    assert len(data["state_update"]["economy_proposals"]) == 1
-    assert not has_blocking_economy_decision(instance)
-
-    team = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
-        amount=10,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 5}],
-    )
-    assert not is_nonblocking_personal_purchase(instance, team)
-    assert team in blocking_economy_proposals(instance)
-    assert has_blocking_economy_decision(instance)
+    assert len(queued) == 1
+    assert queued[0]["status"] == "pending"
+    assert queued[0]["approval_policy"] == "gm"
+    assert pending_proposals(instance) == queued
 
 
 def test_narrated_payment_without_protocol_is_explicitly_not_charged() -> None:
@@ -293,8 +252,6 @@ def test_queue_proposal_rejects_payer_outside_game() -> None:
     instance = _instance()
     with pytest.raises(ValueError):
         queue_proposal(instance, source="gm_manual", kind="purchase", payer_uid="ghost", amount=5)
-    with pytest.raises(ValueError):
-        queue_proposal(instance, source="gm_manual", kind="transfer", payer_uid="ghost", amount=5)
     # 奖励类提案没有付款人；收款人资格在结算时校验。
     reward = queue_proposal(
         instance, kind="reward", recipient_uid="p2", amount=5, approval_policy="gm",
@@ -362,6 +319,103 @@ def test_narrative_reward_requires_gm_and_commits_once() -> None:
         entry["delta"] for entry in accepted["transaction"]["entries"]
     ) == 0
     assert duplicate["code"] == "ALREADY_RESOLVED"
+
+
+def test_auto_settleable_reward_excludes_item_rewards() -> None:
+    """自动结算只放行“单角色纯货币小额奖励”；带物品的一律留给 GM。"""
+    from src.engine.economy import is_auto_settleable_reward
+
+    instance = _instance()
+    plain = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:12",
+    )
+    with_items = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        rewards=[{"name": "治疗药水", "category": "consumable"}],
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:12:items",
+    )
+    over_cap = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=5000,
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:5000",
+    )
+    assert is_auto_settleable_reward(instance, plain, gold_cap=500) is True
+    assert is_auto_settleable_reward(instance, with_items, gold_cap=500) is False
+    assert is_auto_settleable_reward(instance, over_cap, gold_cap=500) is False
+
+
+def test_resolve_auto_reward_policy_precedence() -> None:
+    """本局覆盖 > 规则模板 economy_defaults > 服务器全局配置。"""
+    from src.engine.economy import resolve_auto_reward_policy
+
+    # 无任何配置：全局兜底。
+    assert resolve_auto_reward_policy() == (True, 500)
+    # 全局关闭 → gm_confirm。
+    assert resolve_auto_reward_policy(global_enabled=False) == (False, 500)
+    # 规则模板默认（D&D 金币与 COC 美元量级不同，由模板给默认）。
+    assert resolve_auto_reward_policy(
+        rule_template={"economy_defaults": {"reward_policy": "auto_small_cash", "auto_reward_cap": 50}},
+        global_enabled=False,
+        global_cap=500,
+    ) == (True, 50)
+    # 本局覆盖优先于模板与全局；mode 与 cap 沿链独立解析。
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "gm_confirm"},
+        rule_template={"economy_defaults": {"reward_policy": "auto_small_cash", "auto_reward_cap": 50}},
+    ) == (False, 50)
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 300},
+        rule_template={"economy_defaults": {"auto_reward_cap": 50}},
+        global_cap=500,
+    ) == (True, 300)
+    # 非法载荷不猜测：mode 非法回退默认链，cap 越界回退全局。
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "nonsense"}, global_cap=200,
+    ) == (True, 200)
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 999999},
+        global_cap=200,
+    ) == (True, 200)
+
+
+def test_configure_session_reward_policy_normalization() -> None:
+    """本局奖励策略可设置、可清空、非法整体拒绝。"""
+    instance = _instance()
+    instance.configure_session(
+        economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": 120},
+    )
+    assert instance.economy_reward_policy == {
+        "mode": "auto_small_cash", "auto_reward_cap": 120,
+    }
+    # 空模式=显式清空，回退规则/全局默认。
+    instance.configure_session(economy_reward_policy={"mode": ""})
+    assert instance.economy_reward_policy == {}
+    # 重开拷贝语义：空 dict 幂等。
+    instance.configure_session(economy_reward_policy=dict(instance.economy_reward_policy or {}))
+    assert instance.economy_reward_policy == {}
+    instance.configure_session(economy_reward_policy={"mode": "gm_confirm"})
+    assert instance.economy_reward_policy == {"mode": "gm_confirm"}
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": -1})
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy={"mode": "nonsense"})
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy="auto_small_cash")
 
 
 def _grant_inventory_reward(sheet: dict, reward: dict) -> None:
@@ -433,6 +487,54 @@ def test_late_personal_purchase_reopens_when_settlement_round_is_rolled_back() -
     assert instance.get_character_sheet("gm")["currency"]["amount"] == 25
     assert len(instance.economy["transactions"]) == 2
     assert sum(tx["status"] == "committed" for tx in instance.economy["transactions"]) == 1
+
+
+def test_whole_round_rollback_withdraws_later_round_settlements() -> None:
+    """ADR 0003：回滚到第 N 轮会撤销第 N 轮及之后的一切结算。"""
+    instance = _instance()
+    early_offer = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="p2",
+        amount=5,
+        reason="早于回滚点的报价",
+    )
+    # 回滚点（第 5 轮）开始前的玩家状态快照；8/9 轮的结算不会进入它。
+    instance.round_number = 5
+    era_snapshot = _snapshot_players(instance)
+    instance.round_number = 8
+    settled_late = resolve_proposal(
+        instance, early_offer["id"], actor_uid="p2", accepted=True,
+    )
+    assert settled_late["ok"] is True
+    late_origin = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="p2",
+        amount=7,
+        reason="回滚点之后创建并结算的购买",
+    )
+    assert resolve_proposal(
+        instance, late_origin["id"], actor_uid="p2", accepted=True,
+    )["ok"] is True
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, era_snapshot)
+
+    transactions = {
+        item["id"]: item for item in instance.economy["transactions"]
+    }
+    assert all(item["status"] == "reversed" for item in transactions.values())
+    # 早于回滚点创建的报价：结算被撤、提案重新待付款人决定。
+    assert early_offer["status"] == "pending"
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 20
+    # 回滚点之后创建的提案：随它的叙事时代一起作废。
+    assert late_origin["status"] == "reversed"
+    assert pending_proposals(instance) == [early_offer]
 
 
 def test_origin_round_rollback_invalidates_purchase_paid_in_later_round() -> None:
@@ -607,6 +709,154 @@ async def test_real_swipe_reconciles_purchase_settled_after_target_round(
 
 
 @pytest.mark.asyncio
+async def test_swipe_branch_cuts_later_rounds_and_withdraws_their_economy(
+    web_api, monkeypatch,
+) -> None:
+    """ADR 0003：中间轮 swipe 截断后续日志分支，并撤销其全部结算。"""
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Swipe branch cut",
+        gm_uid="gm",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    instance.gm_uid = uid
+
+    # 提案创建于第 0 轮（早于回滚目标轮）；第 1 轮开始前的快照
+    # 之后才发生 round 2 的结算。
+    instance.round_number = 0
+    offer_round2 = queue_proposal(
+        instance,
+        kind="purchase",
+        source="gm_manual",
+        payer_uid=uid,
+        recipient_uid=uid,
+        amount=4,
+        reason="第二轮的购买",
+    )
+    instance.round_number = 1
+    round1_snapshot = _snapshot_players(instance)
+    instance.round_number = 2
+    settled = await api.resolve_payment(
+        created["game_key"], offer_round2["id"], True, uid,
+    )
+    assert settled["ok"] is True
+    assert instance.get_character_sheet(uid)["currency"]["amount"] == 16
+    instance.log.append({
+        "round": 1, "actions": [], "gm_response": "旧分支一",
+        "pre_state_snapshot": round1_snapshot,
+        "swipes": ["旧分支一"], "current_swipe": 0,
+    })
+    instance.log.append({
+        "round": 2, "actions": [], "gm_response": "第二轮",
+        "pre_state_snapshot": {},
+    })
+
+    async def replacement_swipe(*, system_prompt, user_message, **kwargs):
+        del system_prompt, user_message, kwargs
+        return LLMResponse(
+            content="重写的第一轮。\n---\nNONE",
+            narration="重写的第一轮。",
+            state_update=None,
+            memory_delta=None,
+            info_asymmetry=None,
+            plot_update=None,
+            total_tokens=6,
+            is_narration_only=True,
+            provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", replacement_swipe)
+    swipe_text = await api._handler.generate_swipe(instance, 1)
+
+    assert swipe_text == "重写的第一轮。"
+    # 分支截断：round 2 的日志与其经济一起被撤，早于目标轮的条目保留，游戏从第 1 轮重放。
+    assert [entry.get("round") for entry in instance.log] == [0, 1]
+    assert instance.round_number == 1
+    assert instance.economy["transactions"]
+    assert all(tx["status"] == "reversed" for tx in instance.economy["transactions"])
+    # 该购买提案创建于回滚目标轮之前：结算被撤后恢复为待付款人决定。
+    live_offer = next(
+        item for item in instance.economy["proposals"]
+        if item["id"] == offer_round2["id"]
+    )
+    assert live_offer["status"] == "pending"
+    assert pending_proposals(instance) == [live_offer]
+    assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
+
+
+@pytest.mark.asyncio
+async def test_settling_removes_stale_pending_notice(web_api) -> None:
+    """结算落定后，回合里过期的「结算待确认」提示必须被清掉。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Stale notice",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    instance.gm_uid = uid
+    proposal = queue_purchase_offer(
+        instance, payer_uid=uid, amount=5, items=["磨刀石"],
+        source="gm_manual", source_ref="gm_manual:stale",
+    )
+    queue_effect_group(
+        instance, [proposal], {"state_update": {"scene_change": "铁匠铺"}},
+    )
+    instance.log.append({
+        "round": instance.round_number, "actions": [], "gm_response": "交易",
+        "state_changes": [pending_decision_notice("zh-CN")],
+    })
+
+    result = await api.resolve_payment(created["game_key"], proposal["id"], True, uid)
+
+    assert result["ok"] is True
+    entry = next(
+        item for item in instance.log
+        if int(item.get("round", -1) or -1) == int(instance.round_number)
+    )
+    assert pending_decision_notice("zh-CN") not in entry["state_changes"]
+    assert any("结算已确认" in item for item in entry["state_changes"])
+
+
+@pytest.mark.asyncio
+async def test_solo_private_settlement_is_promoted_to_round_log(web_api) -> None:
+    """单人局没有信息不对称：私密结算消息进公开时间线，且不留过期提示。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Solo settle",
+        solo=True,
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    proposal = queue_proposal(
+        instance, kind="payment", source="gm_manual",
+        payer_uid=uid, recipient_uid=uid, amount=5,
+        reason="卖掉旧短剑",
+    )
+    instance.log.append({
+        "round": instance.round_number, "actions": [], "gm_response": "交易",
+        "state_changes": [pending_decision_notice("zh-CN")],
+    })
+
+    result = await api.resolve_payment(created["game_key"], proposal["id"], True, uid)
+
+    assert result["ok"] is True
+    entry = next(
+        item for item in instance.log
+        if int(item.get("round", -1) or -1) == int(instance.round_number)
+    )
+    assert any("结算已确认" in item for item in entry["state_changes"])
+    assert pending_decision_notice("zh-CN") not in entry["state_changes"]
+
+
+
+@pytest.mark.asyncio
 
 
 async def test_origin_round_swipe_does_not_project_later_settlement_before_state(
@@ -693,27 +943,90 @@ async def test_origin_round_swipe_does_not_project_later_settlement_before_state
     )
 
 
-def test_transfer_moves_currency_between_players_with_balanced_ledger() -> None:
+def test_retired_economy_kinds_and_policies_are_rejected() -> None:
+    """transfer/fee/all_contributors 已随 schema 8 退役：创建路径一律拒绝。"""
     instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="transfer",
-        source="gm_manual",
-        payer_uid="gm",
-        recipient_uid="p2",
-        amount=7,
-        approval_policy="payer",
-        source_ref="player-transfer:1",
-    )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="transfer",
+            source="gm_manual",
+            payer_uid="gm",
+            recipient_uid="p2",
+            amount=7,
+        )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="fee",
+            source="gm_manual",
+            payer_uid="gm",
+            amount=7,
+        )
+    with pytest.raises(ValueError):
+        queue_proposal(
+            instance,
+            kind="payment",
+            source="gm_manual",
+            payer_uid="gm",
+            amount=7,
+            approval_policy="all_contributors",
+        )
+    assert instance.economy["proposals"] == []
 
-    result = resolve_proposal(
-        instance, proposal["id"], actor_uid="gm", accepted=True,
-    )
 
-    assert result["ok"] is True
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 23
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 27
-    assert sum(entry["delta"] for entry in result["transaction"]["entries"]) == 0
+def test_migrate_v7_to_v8_supersedes_retired_proposals() -> None:
+    """史前残留的 pending 分摊/转账提案被退役；无关提案与流水不受影响。"""
+    from src.migrations.instance import _migrate_v7_to_v8
+
+    payload = {
+        "instance_schema_version": 7,
+        "economy": {
+            "proposals": [
+                {
+                    "id": "eco-team",
+                    "status": "pending",
+                    "kind": "fee",
+                    "approval_policy": "all_contributors",
+                },
+                {"id": "eco-transfer", "status": "pending", "kind": "transfer"},
+                {"id": "eco-purchase", "status": "pending", "kind": "purchase"},
+                {"id": "eco-old-fee", "status": "committed", "kind": "fee"},
+            ],
+            "effect_groups": [
+                {
+                    "id": "effect-team",
+                    "status": "pending",
+                    "proposal_ids": ["eco-team", "eco-transfer"],
+                    "effects": {"state_update": {"scene_change": "x"}},
+                },
+                {
+                    "id": "effect-mixed",
+                    "status": "pending",
+                    "proposal_ids": ["eco-team", "eco-purchase"],
+                    "effects": {"state_update": {"scene_change": "y"}},
+                },
+            ],
+            "transactions": [{"id": "tx-1", "status": "committed", "kind": "fee"}],
+        },
+    }
+
+    migrated = _migrate_v7_to_v8(payload)
+
+    assert migrated["instance_schema_version"] == 8
+    proposals = {item["id"]: item for item in migrated["economy"]["proposals"]}
+    assert proposals["eco-team"]["status"] == "superseded"
+    assert proposals["eco-team"]["resolution_code"] == "RETIRED_LEGACY_PROPOSAL"
+    assert proposals["eco-transfer"]["status"] == "superseded"
+    # 无关的 pending purchase 与已成交 fee 历史保持原样。
+    assert proposals["eco-purchase"]["status"] == "pending"
+    assert proposals["eco-old-fee"]["status"] == "committed"
+    assert migrated["economy"]["transactions"] == [{"id": "tx-1", "status": "committed", "kind": "fee"}]
+    # 含退役成员的 pending 效果组不可能再达成 all-committed：一并丢弃。
+    groups = {item["id"]: item for item in migrated["economy"]["effect_groups"]}
+    assert groups["effect-team"]["status"] == "discarded"
+    assert "effects" not in groups["effect-team"]
+    assert groups["effect-mixed"]["status"] == "discarded"
 
 
 @pytest.mark.asyncio
@@ -775,86 +1088,15 @@ async def test_rollback_reconciles_multiple_late_settlements_in_reverse_commit_o
     assert sum(tx["status"] == "committed" for tx in recovered.economy["transactions"]) == 2
 
 
-def test_stacked_reward_delta_preserves_original_quantity() -> None:
-    before = [{"name": "Potion", "qty": 2}]
-    after_first = [{"name": "Potion", "qty": 3}]
-    after_second = [{"name": "Potion", "qty": 5}]
-    current = _remove_reward_delta(after_second, after_first, after_second)
-    current = _remove_reward_delta(current, before, after_first)
-    assert current == before
-
-
-def test_team_split_is_all_or_nothing() -> None:
+def test_removing_party_member_cancels_their_unresolved_proposal() -> None:
     instance = _instance()
     proposal = queue_proposal(
         instance,
-        kind="fee",
+        kind="payment",
         source="gm_manual",
-        amount=15,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 10}],
-        source_ref="gate:city:fee",
-    )
-
-    first = resolve_proposal(instance, proposal["id"], actor_uid="gm", accepted=True)
-    assert first["committed"] is False
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
-    second = resolve_proposal(instance, proposal["id"], actor_uid="p2", accepted=True)
-
-    assert second["ok"] is True
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 25
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 10
-
-
-def test_team_split_insufficient_funds_rejects_without_partial_debit() -> None:
-    instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
-        amount=45,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 40}],
-        source_ref="gate:city:expensive-fee",
-    )
-
-    assert resolve_proposal(
-        instance, proposal["id"], actor_uid="gm", accepted=True,
-    )["committed"] is False
-    rejected = resolve_proposal(
-        instance, proposal["id"], actor_uid="p2", accepted=True,
-    )
-
-    assert rejected["code"] == "INSUFFICIENT_FUNDS"
-    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
-    assert instance.get_character_sheet("p2")["currency"]["amount"] == 20
-    assert proposal["status"] == "rejected"
-    assert proposal not in pending_proposals(instance)
-
-
-def test_team_split_rejects_incomplete_or_duplicate_contributor_plan() -> None:
-    instance = _instance()
-
-    with pytest.raises(ValueError):
-        queue_proposal(
-            instance,
-            kind="fee",
-            source="gm_manual",
-            amount=10,
-            approval_policy="all_contributors",
-            contributors=[{"uid": "gm", "amount": 4}, {"uid": "gm", "amount": 4}],
-        )
-
-
-def test_removing_party_member_cancels_their_unresolved_group_proposal() -> None:
-    instance = _instance()
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
+        payer_uid="p2",
+        recipient_uid="gm",
         amount=10,
-        approval_policy="all_contributors",
-        contributors=[{"uid": "gm", "amount": 5}, {"uid": "p2", "amount": 5}],
     )
     effect_group = queue_effect_group(
         instance,
@@ -951,64 +1193,6 @@ def test_multiple_proposals_form_one_all_or_nothing_effect_barrier() -> None:
 
 
 @pytest.mark.asyncio
-
-
-async def test_team_split_is_visible_to_each_contributor_and_waits_for_all(web_api) -> None:
-    api, _lorebook, registry, _llm, _worlds = web_api
-    created = await api.create_game(
-        "template_world",
-        "Party Economy",
-        players=[
-            {"character_name": "One", "attributes": {"str": 10}, "gold": 20},
-            {"character_name": "Two", "attributes": {"str": 10}, "gold": 20},
-        ],
-    )
-    instance = registry.get(api._parse_key(created["game_key"]))
-    first_uid, second_uid = list(instance.players)
-    instance.gm_uid = first_uid
-    proposal = queue_proposal(
-        instance,
-        kind="fee",
-        source="gm_manual",
-        amount=10,
-        approval_policy="all_contributors",
-        contributors=[
-            {"uid": first_uid, "amount": 4},
-            {"uid": second_uid, "amount": 6},
-        ],
-    )
-    effect_group = queue_effect_group(
-        instance,
-        [proposal],
-        {"state_update": {"scene_change": "队伍包下的房间"}},
-    )
-
-    second_view = api.game_detail(created["game_key"], second_uid)
-    assert [item["id"] for item in second_view["economy_proposals"]] == [proposal["id"]]
-
-    first = await api.resolve_payment(
-        created["game_key"], proposal["id"], True, first_uid,
-    )
-    assert first["committed"] is False
-    assert instance.get_character_sheet(first_uid)["currency"]["amount"] == 20
-    assert instance.scene != "队伍包下的房间"
-    assert effect_group is not None and effect_group["status"] == "pending"
-    assert any(event.get("code") == "economy_approved" for event in instance.health_events)
-
-    second = await api.resolve_payment(
-        created["game_key"], proposal["id"], True, second_uid,
-    )
-    assert second["ok"] is True
-    assert instance.get_character_sheet(first_uid)["currency"]["amount"] == 16
-    assert instance.get_character_sheet(second_uid)["currency"]["amount"] == 14
-    assert instance.scene == "队伍包下的房间"
-    committed_group = next(
-        item for item in instance.economy["effect_groups"]
-        if item["id"] == effect_group["id"]
-    )
-    assert committed_group["status"] == "committed"
-    assert "effects" not in committed_group
-    assert instance.economy["outcomes"][-1]["effects_status"] == "committed"
 
 
 @pytest.mark.asyncio
@@ -1596,7 +1780,7 @@ async def test_delivered_economy_memory_is_reversed_with_round(
 @pytest.mark.asyncio
 
 
-async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
+async def test_private_reward_and_payment_stay_out_of_public_gm_context(
     web_api,
 ) -> None:
     api, _lorebook, registry, _llm, _worlds = web_api
@@ -1620,9 +1804,9 @@ async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
         reason="秘密线人奖励-不可公开",
         visibility="private",
     )
-    transfer = queue_proposal(
+    payment = queue_proposal(
         instance,
-        kind="transfer",
+        kind="payment",
         source="gm_manual",
         payer_uid=gm_uid,
         recipient_uid=agent_uid,
@@ -1635,7 +1819,7 @@ async def test_private_reward_and_transfer_stay_out_of_public_gm_context(
         created["game_key"], reward["id"], True, gm_uid,
     ))["ok"] is True
     assert (await api.resolve_payment(
-        created["game_key"], transfer["id"], True, gm_uid,
+        created["game_key"], payment["id"], True, gm_uid,
     ))["ok"] is True
     context = await build_context(instance, "SYSTEM", [], "继续")
 
@@ -2011,7 +2195,6 @@ async def test_restart_rotates_run_and_memory_but_preserves_character_assets(web
     assert restarted.economy["transactions"] == []
     assert restarted.economy["effect_groups"] == []
     assert restarted.economy["outcomes"] == []
-    assert restarted.economy["decision_revision"] == 0
     recovered = await GameRegistry(registry.save_dir).load(restarted.game_key)
     assert recovered is not None
     assert recovered.run_id == restarted.run_id
@@ -2045,7 +2228,6 @@ async def test_restart_rotates_run_and_memory_but_preserves_character_assets(web
     assert reset_instance.economy["transactions"] == []
     assert reset_instance.economy["effect_groups"] == []
     assert reset_instance.economy["outcomes"] == []
-    assert reset_instance.economy["decision_revision"] == 0
 
 
 async def _hold_historical_rewrite(instance, entered, release) -> None:

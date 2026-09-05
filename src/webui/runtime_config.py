@@ -248,9 +248,10 @@ class ConfigStore:
                 saved.get("economy_auto_reward_enabled", True)
             ),
             "economy_auto_reward_gold_cap": int(
-                # 默认放宽到 10000：普通团奖励很少超过这个量级，50 的旧默认
-                # 会让大部分奖励退回 GM 手动确认；仍可在设置中按需调低。
-                saved.get("economy_auto_reward_gold_cap", 10000)
+                # 全局兜底默认 500：这是“新游戏未配置策略时”的服务器默认值。
+                # 各规则（D&D 金币 / COC 美元）量级不同，正常应在规则模板
+                # economy_defaults 或本局设置中按局覆盖。
+                saved.get("economy_auto_reward_gold_cap", 500)
             ),
             "model_request_timeout_seconds": float(
                 env.get("TRPG_MODEL_REQUEST_TIMEOUT_SECONDS")
