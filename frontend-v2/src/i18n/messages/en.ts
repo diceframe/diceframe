@@ -469,6 +469,7 @@ export const en = {
   luckTimeoutSeconds: 'Luck timeout (seconds, blank = unchanged)',
   luckTimeoutPlaceholder: '0 = disabled (async games); live games default 60',
   luckTimeoutSaved: 'Luck timeout set to {seconds}s',
+  gameSettings: 'Game settings',
   rewardPolicyMode: 'Narrative reward granting',
   rewardPolicyFollowDefault: 'Follow rule / server default',
   rewardPolicyAutoSmallCash: 'Auto-grant small cash rewards',

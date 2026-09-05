@@ -469,6 +469,7 @@ export const ja = {
   luckTimeoutSeconds: '幸運タイムアウト（秒、空欄なら変更なし）',
   luckTimeoutPlaceholder: '0=無効（非同期卓推奨）、リアルタイム卓の既定は 60',
   luckTimeoutSaved: '幸運タイムアウトを {seconds} 秒に設定しました',
+  gameSettings: 'ゲーム設定',
   rewardPolicyMode: '報酬の付与',
   rewardPolicyFollowDefault: 'ルール／サーバーの既定に従う',
   rewardPolicyAutoSmallCash: '少額の現金報酬を自動付与',

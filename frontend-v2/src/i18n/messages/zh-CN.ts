@@ -469,6 +469,7 @@ export const zhCN = {
   luckTimeoutSeconds: '幸运超时（秒，留空不改）',
   luckTimeoutPlaceholder: '0=禁用（异步局建议），实时局默认60',
   luckTimeoutSaved: '幸运超时已设为 {seconds} 秒',
+  gameSettings: '对局设置',
   rewardPolicyMode: '剧情奖励发放',
   rewardPolicyFollowDefault: '跟随规则/服务器默认',
   rewardPolicyAutoSmallCash: '自动发放小额现金奖励',

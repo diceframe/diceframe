@@ -107,7 +107,7 @@ function awardXp(userId: string) {
           <small>{{ t('narrativeChangeHint') }}</small>
         </label>
         <button @click="emit('access')"><NIcon :component="detail.player_access_open === false ? LockOpenOutline : LockClosedOutline" size="14" /> {{ detail.player_access_open === false ? t('openAccess') : t('closeAccess') }}</button>
-        <button @click="emit('room-password')"><NIcon :component="KeyOutline" size="14" /> {{ detail.has_room_password ? t('changeRoomPassword') : t('setRoomPassword') }}</button>
+        <button @click="emit('room-password')"><NIcon :component="KeyOutline" size="14" /> {{ t('gameSettings') }}</button>
       </div>
     </details>
     <details v-if="detail.ruleset_runtime?.id === 'core:dnd2024' && detail.advancement" class="perc gm-perc gm-console-section gm-advancement-section">
