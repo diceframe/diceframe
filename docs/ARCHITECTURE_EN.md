@@ -13,6 +13,8 @@ This document describes the current implementation, not a roadmap. The dependenc
 - `src/webui/access_control.py`: owner, Bot, SSE ticket, player-share, and room-password access control;
 - `src/webui/config_controller.py`: transactional runtime reload and provider connection tests.
 
+AI application configuration uses only `ai_providers` and capability `*_provider_ref` fields, with credentials stored separately as `ai_provider_key_<id>`. Legacy capability endpoints, keys, API formats and AI capability environment inputs are not resolved; updates containing removed fields are explicitly rejected, without migration or provider creation. Missing/unknown references cannot activate residual settings. Browser, edge-tts and disabled ASR need no reference, and local providers may use empty keys. Internal `*_base_url` / `*_api_key` fields produced by composition remain valid service runtime contracts.
+
 Template synchronization and migrated-default persistence happen only during real application startup, not when importing the individual owner modules. A runtime configuration reload fully constructs the candidate runtime before persistence and swaps active state only after persistence succeeds; construction or persistence failure keeps the previous runtime active.
 
 A WebUI service does not import another service directly. Cross-domain business calls use callables or protocols injected by the composition root. Pure contracts and projections shared by multiple domains but performing no business orchestration live at the `src/webui/` root boundary, including lifecycle transaction context, ruleset draft-shape validation, read-only rest projection, and character-card identity/deduplication. Type-checking-only imports are not runtime dependencies.

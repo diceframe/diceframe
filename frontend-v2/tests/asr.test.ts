@@ -92,6 +92,11 @@ function detail(): GameDetail {
   }
 }
 
+const configuredAsr = {
+  asr_provider: 'openai-compatible', asr_provider_ref: 'local',
+  ai_providers: [{ id: 'local', name: 'Local', base_url: 'http://localhost:8000/v1', api_format: 'openai' }],
+}
+
 async function configureAsr(config: Record<string, unknown>): Promise<void> {
   mockedApi.mockReset()
   mockedApi.mockResolvedValue(config as never)
@@ -156,24 +161,26 @@ describe('voiceInputSupported', () => {
     expect(voiceInputSupported()).toBe(false)
   })
 
-  it('shows up once a cloud engine is configured with mic access', async () => {
+  it('does not enable a legacy inline ASR configuration', async () => {
     await configureAsr({ asr_provider: 'openai-compatible', asr_base_url: 'https://api.example.com/v1' })
-    expect(voiceInputSupported()).toBe(true)
+    expect(voiceInputSupported()).toBe(false)
   })
 
   it('recognizes ASR configured through the shared provider routing', async () => {
-    await configureAsr({ asr_provider: 'openai-compatible', asr_provider_ref: 'siliconflow' })
+    await configureAsr(configuredAsr)
     expect(voiceInputSupported()).toBe(true)
+    await configureAsr({ ...configuredAsr, asr_provider_ref: 'missing' })
+    expect(voiceInputSupported()).toBe(false)
   })
 
   it('stays hidden on insecure origins', async () => {
-    await configureAsr({ asr_provider: 'openai-compatible', asr_base_url: 'https://api.example.com/v1' })
+    await configureAsr(configuredAsr)
     Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
     expect(voiceInputSupported()).toBe(false)
   })
 
   it('stays hidden in P2P peer games where the upload cannot be relayed', async () => {
-    await configureAsr({ asr_provider: 'openai-compatible', asr_base_url: 'https://api.example.com/v1' })
+    await configureAsr(configuredAsr)
     mockedPeerClient.mockReturnValue({} as never)
     expect(voiceInputSupported()).toBe(false)
   })
@@ -257,7 +264,7 @@ describe('ActionComposer voice input', () => {
   })
 
   it('toggles recording from the mic button once the engine is ready', async () => {
-    await configureAsr({ asr_provider: 'openai-compatible', asr_base_url: 'https://api.example.com/v1' })
+    await configureAsr(configuredAsr)
     const wrapper = mount(ActionComposer, {
       global: { plugins: [i18n] },
       props: { gameKey: 'web|room|bot', userId: 'player-1', detail: detail() },

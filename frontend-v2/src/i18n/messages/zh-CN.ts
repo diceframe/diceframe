@@ -299,7 +299,7 @@ export const zhCN = {
   addedFromLibrary: '已从卡库添加角色',
   apiSetupRequiredTitle: '创建冒险前需要配置模型 API',
   apiSetupRequiredHint: '你可以先填写世界和角色；生成内容或正式创建冒险前，请先完成模型设置。',
-  apiSetupRequired: '尚未配置模型 API，请先前往设置页填写 API Key、Base URL 和模型。',
+  apiSetupRequired: '尚未配置主模型，请先在设置页添加 AI 服务商并选择主模型。',
   goToApiSettings: '前往 API 设置',
   overviewKicker: 'ADVENTURE ARCHIVE',
   recentAdventures: '最近 / 进行中的冒险',

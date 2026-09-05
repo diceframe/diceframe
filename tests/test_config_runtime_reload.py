@@ -191,18 +191,21 @@ async def test_tts_config_reload_rebuilds_only_api_facade(monkeypatch):
     def make_api(subsystems, plugin_host=None, config=None):
         assert subsystems is runtime
         assert config["tts_provider"] == "openai-compatible"
-        assert config["tts_base_url"] == "http://127.0.0.1:8880/v1"
+        assert config["tts_provider_ref"] == "local"
+        assert "tts_base_url" not in config
         return new_api
 
     monkeypatch.setattr(web_server, "_make_api", make_api)
     monkeypatch.setitem(web_server.STATE, "tts_provider", "browser")
-    monkeypatch.setitem(web_server.STATE, "tts_base_url", "")
+    monkeypatch.setitem(web_server.STATE, "ai_providers", [{
+        "id": "local", "name": "Local", "base_url": "http://127.0.0.1:8880/v1", "api_format": "openai",
+    }])
     monkeypatch.setitem(web_server.STATE, "proxy_enabled", False)
     monkeypatch.setitem(web_server.STATE, "proxy_url", "")
 
     response = await web_server.api_config_post(_ConfigRequest({
         "tts_provider": "openai-compatible",
-        "tts_base_url": "http://127.0.0.1:8880/v1",
+        "tts_provider_ref": "local",
     }, app))
 
     assert response.status == 200

@@ -3,7 +3,7 @@
 服务商元数据（名称/Base URL/api 格式）是普通配置，API Key 以
 `ai_provider_key_<id>` 的扁平 secret 形式存储，随现有 secrets.json 管线落盘。
 各能力（LLM 主/备、embedding、TTS、ASR、生图）通过 `*_provider_ref` 引用服务商；
-引用为空时回退既有的内联配置键，保证旧配置零改动。
+旧能力级直填配置与环境入口不受支持；引用缺失时能力保持未配置。
 """
 
 from __future__ import annotations
@@ -19,6 +19,16 @@ _MODEL_CAPABILITIES = frozenset({"chat", "image", "embedding", "tts", "asr"})
 PROVIDER_REF_KEYS = frozenset({
     "llm_provider_ref", "fallback1_provider_ref", "fallback2_provider_ref",
     "embedding_provider_ref", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
+})
+
+# 已移除的公开配置入口。只用于明确拒绝请求和过滤残留，不参与运行时解析。
+UNSUPPORTED_AI_CONFIG_KEYS = frozenset({
+    "base_url", "api_key", "api_format",
+    "fallback1_base_url", "fallback1_api_key", "fallback1_api_format",
+    "fallback2_base_url", "fallback2_api_key", "fallback2_api_format",
+    "embedding_base_url", "embedding_api_key",
+    "tts_base_url", "tts_api_key", "asr_base_url", "asr_api_key",
+    "imagegen_base_url", "imagegen_api_key",
 })
 
 # 路由键 -> 该路由要求的模型能力。只对明确的手动覆盖做协调，
@@ -116,6 +126,12 @@ def resolve_provider(config: dict[str, Any], ref: str) -> dict[str, str] | None:
     return None
 
 
+def is_llm_config_ready(config: dict[str, Any]) -> bool:
+    """主模型需要有效引用、地址和模型；本地服务商可以不提供 API Key。"""
+    provider = resolve_provider(config, config.get("llm_provider_ref", ""))
+    return bool(provider and provider["base_url"] and str(config.get("model") or "").strip())
+
+
 def provider_secret_keys_for(providers: list[dict[str, Any]]) -> set[str]:
     return {provider_secret_key(entry["id"]) for entry in providers}
 
@@ -129,7 +145,7 @@ def strip_orphan_provider_secrets(candidate: dict[str, Any]) -> None:
 
 
 def strip_dangling_provider_refs(candidate: dict[str, Any]) -> None:
-    """把指向已删除服务商的引用键清空，运行时回退内联配置。"""
+    """把指向已删除服务商的引用键清空，使对应能力保持未配置。"""
     known = {str(entry.get("id") or "") for entry in candidate.get("ai_providers") or []}
     for key in PROVIDER_REF_KEYS:
         ref = str(candidate.get(key) or "").strip()

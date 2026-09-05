@@ -70,14 +70,11 @@ Open:
 http://localhost:18000
 ```
 
-On first launch, add the endpoint and model catalog under **Management → Settings → Model API → AI Providers**, then assign the main model, fallbacks, and optional AI roles under **Model routing**. Existing inline Base URL, model, and API key settings from older versions remain supported. Environment variables remain available as well:
+On first launch, add the endpoint and model catalog under **Management → Settings → Model API → AI Providers**, then assign the main model, fallbacks, and optional AI roles under **Model routing**.
 
-```bash
-TRPG_LLM_API_KEY=your_key
-TRPG_LLM_BASE_URL=https://api.openai.com/v1
-TRPG_LLM_MODEL=gpt-4.1-mini
-python web_server.py
-```
+**Breaking AI configuration contract:** connections use only `ai_providers` and capability `*_provider_ref` fields; keys are stored as `ai_provider_key_<id>` in secret storage. Legacy inline endpoints, keys, API formats and `TRPG_LLM_*`, `TRPG_EMBEDDING_*`, `TRPG_TTS_*`, `TRPG_ASR_*`, `TRPG_IMAGEGEN_*` environment inputs are no longer activated. No automatic migration or provider creation occurs. Updates containing old fields return HTTP 400 `unsupported AI config fields`; add providers and assign roles manually in Settings.
+
+Main/fallback models, embedding, images and OpenAI-compatible/GPT-SoVITS speech require their corresponding provider references. Missing or unknown references leave remote capabilities unconfigured and never revive old credentials. Browser voices, edge-tts and disabled ASR need no reference; local providers may use an empty API key. Provider connection tests accept temporary credentials without falling back to old capability settings.
 
 On Windows, `web_ui.bat` can start the Web UI. It checks Python runtime dependencies and, if `static-v2/` is missing, runs `npm ci` and `npm run build` inside `frontend-v2/` before starting `web_server.py`.
 

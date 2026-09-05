@@ -244,8 +244,7 @@ class ConfigController:
                         exc_info=True,
                     )
         embedding_now = state.get("embedding_enabled", False) and bool(
-            state.get("embedding_base_url", "")
-            or resolve_provider(state, state.get("embedding_provider_ref", ""))
+            resolve_provider(state, state.get("embedding_provider_ref", ""))
         )
         if model_runtime_changed and embedding_now and subsystems is not None:
             try:
@@ -350,15 +349,9 @@ class ConfigController:
                 body.get("api_format") or provider["api_format"]
             )
         else:
-            base_url = clean_text_value(body.get("base_url")) or state.get(
-                "base_url", ""
-            )
-            api_key = clean_text_value(body.get("api_key")) or state.get(
-                "api_key", ""
-            )
-            api_format = normalize_api_format(
-                body.get("api_format") or state.get("api_format")
-            )
+            base_url = clean_text_value(body.get("base_url"))
+            api_key = clean_text_value(body.get("api_key"))
+            api_format = normalize_api_format(body.get("api_format"))
         if not self.is_safe_external_url(base_url):
             return web.json_response(
                 {"ok": False, "error": "base_url 非法或不允许"},
@@ -442,11 +435,7 @@ class ConfigController:
             api_key = clean_text_value(body.get("api_key")) or provider["api_key"]
         else:
             base_url = clean_text_value(body.get("base_url"))
-            api_key = (
-                clean_text_value(body.get("api_key"))
-                or state.get("embedding_api_key")
-                or state.get("api_key", "")
-            )
+            api_key = clean_text_value(body.get("api_key"))
         model = clean_text_value(body.get("model")) or "nomic-embed-text"
         if not self.is_safe_external_url(base_url):
             return web.json_response(
@@ -505,7 +494,8 @@ class ConfigController:
                 {"ok": False, "error": "代理地址仅支持 http:// 或 https://"},
                 status=400,
             )
-        url = str(state.get("base_url") or "").strip().rstrip("/")
+        provider = resolve_provider(state, state.get("llm_provider_ref", ""))
+        url = str(provider["base_url"] if provider else "").strip().rstrip("/")
         if not self.is_safe_external_url(url):
             return web.json_response(
                 {"ok": False, "error": "请先配置有效的模型服务地址"},

@@ -101,7 +101,7 @@ function setAsrProvider(value: string) {
       <NButton @click="emit('open-providers')">{{ t('providerAdd') }}</NButton>
     </div>
 
-    <div v-if="supported && providers.length" class="model-routing-grid" :class="{ 'is-saving': saving }">
+    <div v-if="supported" class="model-routing-grid" :class="{ 'is-saving': saving }">
       <article class="model-role-card model-role-card-main">
         <header><NIcon :component="SparklesOutline" /><div><h4>{{ t('modelRoleMain') }}</h4><p>{{ t('modelRoleMainHint') }}</p></div></header>
         <label><span>{{ t('providerName') }}</span><select :value="store.config.llm_provider_ref || ''" @change="setRoleProvider('llm_provider_ref', 'model', eventValue($event), 'chat')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>

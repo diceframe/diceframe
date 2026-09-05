@@ -125,14 +125,11 @@ python web_server.py
 http://localhost:18000
 ```
 
-第一次进入“管理 → 设置”，先在“模型接口”的“AI 服务商”中添加连接信息与模型目录，再到“模型配置”分配主模型、备用模型和各项 AI 能力；向量记忆不再使用独立选项卡，开关、输入上限和测试与向量模型配置放在一起。旧版已经保存的内联 API 地址、模型名和 API Key 仍可继续使用；环境变量方式也保持兼容：
+第一次进入“管理 → 设置”，先在“模型接口”的“AI 服务商”中添加连接信息与模型目录，再到“模型配置”分配主模型、备用模型和各项 AI 能力；向量记忆的开关、输入上限和测试与向量模型配置放在一起。
 
-```bash
-TRPG_LLM_API_KEY=your_key
-TRPG_LLM_BASE_URL=https://api.deepseek.com/v1
-TRPG_LLM_MODEL=deepseek-v4-pro
-python web_server.py
-```
+**AI 配置契约变更：**应用仅支持 `ai_providers` 与各能力的 `*_provider_ref`，API Key 使用 `ai_provider_key_<id>` 保存到敏感配置。旧能力级直填地址、密钥、API 格式及 `TRPG_LLM_*`、`TRPG_EMBEDDING_*`、`TRPG_TTS_*`、`TRPG_ASR_*`、`TRPG_IMAGEGEN_*` 环境入口不再启用，也不会自动迁移或创建服务商；旧配置更新请求返回 HTTP 400 `unsupported AI config fields`。请在设置页手动添加服务商并分配用途。
+
+主备模型、向量、生图及 OpenAI-compatible/GPT-SoVITS 语音只使用对应服务商引用；缺失或未知引用不会恢复旧地址和密钥，相关远程能力保持未配置。浏览器语音、edge-tts 和已禁用 ASR 无需服务商引用，本地服务商允许空 API Key。服务商连接测试可使用临时地址与密钥，但不会回退到旧能力级配置。
 
 Windows 下也可以双击 `web_ui.bat` 启动；它会检查依赖，并在缺少前端构建产物时自动构建。
 

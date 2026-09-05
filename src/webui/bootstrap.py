@@ -73,13 +73,10 @@ class WebUIBootstrap:
 
     async def embed_pending_memories(self, app: web.Application) -> None:
         state = self.dependencies.state
-        if not (
-            state.get("embedding_enabled", False)
-            and state.get("embedding_base_url", "")
-        ):
+        if not state.get("embedding_enabled", False):
             return
         subsystems: TRPGSubsystems | None = app.get("subsystems")
-        if not subsystems or not subsystems.memory_store:
+        if not subsystems or not subsystems.memory_store or not subsystems.memory_store.embedding_client:
             return
         try:
             for instance in subsystems.registry.list_all():

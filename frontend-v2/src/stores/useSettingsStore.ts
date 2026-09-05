@@ -3,9 +3,7 @@ import { ref } from 'vue'
 import { ApiError, api, errorMessage, setAccessToken } from '@/api/client'
 import type { AppConfig, BotTokenResponse, TestResult } from '@/api/types'
 
-export type SecretKey =
-  | 'api_key' | 'embedding_api_key' | 'fallback1_api_key' | 'fallback2_api_key'
-  | 'bot_token' | 'napcat_token' | 'proxy_url' | 'tts_api_key' | 'asr_api_key' | 'imagegen_api_key'
+export type SecretKey = 'bot_token' | 'napcat_token' | 'proxy_url'
 // 已知 secret 之外还允许动态的服务商 key（ai_provider_key_<id>）
 export type SecretInput = Partial<Record<SecretKey, string>> & { [key: string]: string | undefined }
 
@@ -135,31 +133,14 @@ export const useSettingsStore = defineStore('settings', () => {
   async function test(kind: 'model' | 'embedding' | 'proxy'): Promise<TestResult> {
     const path = kind === 'proxy' ? '/test-proxy' : kind === 'embedding' ? '/test-embedding' : '/test-connection'
     const body: Record<string, unknown> = {
-      ...(config.value as Record<string, unknown>),
+      proxy_enabled: config.value.proxy_enabled,
+      ...collectSecrets(['proxy_url']),
     }
-    for (const key of ['api_key', 'embedding_api_key', 'fallback1_api_key', 'fallback2_api_key']) {
-      delete body[key]
-    }
-    Object.assign(body, collectSecrets(['api_key', 'embedding_api_key', 'fallback1_api_key', 'fallback2_api_key', 'proxy_url']))
-    if (kind === 'embedding') {
-      const providerRef = String(getConfigField('embedding_provider_ref') ?? '').trim()
-      if (providerRef) {
-        // 引用服务商时凭据由服务端从凭据库取（前端只有掩码）。
-        body.provider_id = providerRef
-        body.base_url = String(getConfigField('embedding_base_url') ?? '').trim()
-        body.model = String(getConfigField('embedding_model') ?? '').trim()
-        body.api_key = secrets.value.embedding_api_key?.trim() || ''
-      } else {
-        // The backend embedding test reads body.base_url/model/api_key for legacy compatibility.
-        // Map the embedding_* config fields and pass only plaintext secrets, not SecretField objects.
-        body.base_url = String(getConfigField('embedding_base_url') ?? '').trim()
-        body.model = String(getConfigField('embedding_model') ?? '').trim()
-        body.api_key = secrets.value.embedding_api_key?.trim() || secrets.value.api_key?.trim()
-      }
-    }
-    if (kind === 'model') {
-      const providerRef = String(getConfigField('llm_provider_ref') ?? '').trim()
-      if (providerRef) body.provider_id = providerRef
+    if (kind !== 'proxy') {
+      body.provider_id = String(kind === 'embedding'
+        ? config.value.embedding_provider_ref || '' : config.value.llm_provider_ref || '').trim()
+      body.model = String(kind === 'embedding'
+        ? config.value.embedding_model || '' : config.value.model || '').trim()
     }
     return api<TestResult>(path, { method: 'POST', body: JSON.stringify(body) })
   }

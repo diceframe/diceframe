@@ -81,7 +81,7 @@ def create_trpg_subsystems(
     embedding_client = None
     if embedding_enabled and embedding_base_url:
         from src.memory.embedding import EmbeddingClient
-        emb_key = embedding_api_key or providers[0].api_key if providers else ""
+        emb_key = embedding_api_key
         embedding_client = EmbeddingClient(
             embedding_base_url, emb_key, embedding_model or "nomic-embed-text",
             max_input_override=embedding_max_input,

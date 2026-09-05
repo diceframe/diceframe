@@ -14,7 +14,7 @@ def _store(tmp_path, environ=None):
     return ConfigStore(paths, environment), paths
 
 
-def test_environment_overrides_secrets_and_config(tmp_path):
+def test_legacy_ai_environment_and_files_are_ignored_but_web_env_has_priority(tmp_path):
     store, paths = _store(
         tmp_path,
         {
@@ -43,8 +43,10 @@ def test_environment_overrides_secrets_and_config(tmp_path):
 
     runtime = store.load()
 
-    assert runtime.state["api_key"] == "env-key"
-    assert runtime.state["base_url"] == "https://env.example/v1"
+    assert "api_key" not in runtime.state
+    assert "base_url" not in runtime.state
+    assert runtime.state["ai_providers"] == []
+    assert json.loads(paths.secrets_file.read_text(encoding="utf-8"))["api_key"] == "secret-key"
     assert runtime.port == 19001
     assert runtime.state["web_port"] == 19001
     assert runtime.cors_origins == frozenset({"https://ui.example"})
@@ -72,7 +74,7 @@ def test_save_splits_public_and_provider_secrets(tmp_path):
     assert "api_key" not in public
     assert secret_key not in public
     assert "qq_bot_running" not in public
-    assert secrets["api_key"] == "sk-main"
+    assert "api_key" not in secrets
     assert secrets[secret_key] == "sk-provider"
 
 
@@ -110,11 +112,14 @@ def test_public_view_masks_secrets_and_reports_sources(tmp_path):
         },
     )
     runtime = store.load()
-    runtime.state["api_key"] = "sk-12345678"
+    runtime.state["ai_providers"] = [{"id": "local", "name": "Local", "base_url": "http://localhost:8000/v1"}]
+    runtime.state[provider_secret_key("local")] = "sk-12345678"
+    runtime.state["api_key"] = "unsupported-secret"
 
     public = store.public_view(runtime)
 
-    assert public["api_key"] == {"configured": True, "masked": "***5678"}
+    assert "api_key" not in public
+    assert public["ai_providers"][0]["api_key"] == {"configured": True, "masked": "***5678"}
     assert public["bot_token_source"] == "env"
     assert public["proxy_source"] == "env"
     assert "password" not in public["proxy_url"]

@@ -73,7 +73,7 @@ export const MODEL_ROUTING_CONFIG_KEYS = [
   'fallback1_enabled', 'fallback1_provider_ref', 'fallback1_model',
   'fallback2_enabled', 'fallback2_provider_ref', 'fallback2_model',
   'embedding_enabled', 'embedding_provider_ref', 'embedding_model', 'embedding_max_input',
-  'tts_provider', 'tts_provider_ref', 'tts_model',
+  'tts_provider', 'tts_provider_ref', 'tts_model', 'tts_default_voice',
   'asr_provider', 'asr_provider_ref', 'asr_model',
   'imagegen_enabled', 'imagegen_auto_scene', 'imagegen_provider_ref', 'imagegen_model',
   'imagegen_square_size', 'imagegen_landscape_size', 'imagegen_quality',
@@ -337,7 +337,7 @@ export function useProviderModelSettings(options: UseProviderModelSettingsOption
   }
 
   function providerDraftReady(draft: ProviderDraft): boolean {
-    return Boolean(draft.base_url.trim() && providerHasKey(draft))
+    return Boolean(draft.base_url.trim())
   }
 
   function setActiveProviderTestModel(value: string | number) {

@@ -299,7 +299,7 @@ export const ja = {
   addedFromLibrary: 'カードライブラリからキャラクターを追加しました',
   apiSetupRequiredTitle: '冒険を作成する前にモデル API の設定が必要です',
   apiSetupRequiredHint: '先に世界とキャラクターを入力できます。コンテンツを生成したり冒険を作成したりする前に、モデル設定を完了してください。',
-  apiSetupRequired: 'モデル API が未設定です。設定ページで API Key・Base URL・モデルを入力してください。',
+  apiSetupRequired: 'メインモデルが未設定です。設定ページで AI プロバイダーを追加し、メインモデルを選択してください。',
   goToApiSettings: 'API 設定へ',
   overviewKicker: 'ADVENTURE ARCHIVE',
   recentAdventures: '最近 / 進行中の冒険',
