@@ -1805,10 +1805,7 @@ export interface BotTokenResponse {
 }
 
 export interface AppConfig {
-  base_url?: string
   model?: string
-  api_format?: string
-  api_key?: SecretField
   ai_providers?: AiProvider[]
   llm_provider_ref?: string
   fallback1_provider_ref?: string
@@ -1818,18 +1815,10 @@ export interface AppConfig {
   asr_provider_ref?: string
   imagegen_provider_ref?: string
   fallback1_enabled?: boolean
-  fallback1_base_url?: string
-  fallback1_api_key?: SecretField
   fallback1_model?: string
-  fallback1_api_format?: string
   fallback2_enabled?: boolean
-  fallback2_base_url?: string
-  fallback2_api_key?: SecretField
   fallback2_model?: string
-  fallback2_api_format?: string
   embedding_enabled?: boolean
-  embedding_base_url?: string
-  embedding_api_key?: SecretField
   embedding_model?: string
   embedding_max_input?: number
   narrative_max_tokens?: number
@@ -1850,8 +1839,6 @@ export interface AppConfig {
   bot_token_source?: 'env' | 'generated'
   update_channel?: 'stable' | 'preview'
   tts_provider?: 'browser' | 'openai-compatible' | 'gpt-sovits' | 'edge-tts'
-  tts_base_url?: string
-  tts_api_key?: SecretField
   tts_model?: string
   tts_audio_format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
   tts_default_voice?: string
@@ -1860,15 +1847,11 @@ export interface AppConfig {
   tts_timeout_seconds?: number
   tts_cache_mb?: number
   asr_provider?: 'disabled' | 'openai-compatible'
-  asr_base_url?: string
-  asr_api_key?: SecretField
   asr_model?: string
   asr_timeout_seconds?: number
   imagegen_enabled?: boolean
   imagegen_auto_scene?: boolean
   imagegen_provider?: 'openai-compatible'
-  imagegen_base_url?: string
-  imagegen_api_key?: SecretField
   imagegen_model?: string
   imagegen_square_size?: string
   imagegen_landscape_size?: string

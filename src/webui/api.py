@@ -703,8 +703,6 @@ class WebAPI:
             missing.append("base_url")
         if not str(getattr(provider, "model_name", "") or "").strip():
             missing.append("model")
-        if not str(getattr(provider, "api_key", "") or "").strip():
-            missing.append("api_key")
         return {
             "ready": not missing,
             "missing": missing,
@@ -718,10 +716,10 @@ class WebAPI:
             return None
         english = str(language or "").lower().startswith("en")
         message = (
-            "The model API is not configured. Open Settings and fill in the API key, "
-            "base URL, and model before continuing."
+            "The main model is not configured. Add an AI provider in Settings "
+            "and assign a main model before continuing."
             if english
-            else "尚未配置模型 API，请先前往设置页填写 API Key、Base URL 和模型。"
+            else "尚未配置主模型，请先在设置页添加 AI 服务商并选择主模型。"
         )
         return {
             "ok": False,

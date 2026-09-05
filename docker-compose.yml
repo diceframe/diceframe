@@ -17,12 +17,6 @@ services:
       # The image already defaults to Asia/Shanghai; set TZ in .env to change it.
       TZ: "${TZ:-Asia/Shanghai}"
 
-      TRPG_LLM_API_KEY: "${TRPG_LLM_API_KEY:-}"
-      TRPG_LLM_BASE_URL: "${TRPG_LLM_BASE_URL:-}"
-      TRPG_LLM_MODEL: "${TRPG_LLM_MODEL:-}"
-      TRPG_API_KEY: "${TRPG_API_KEY:-}"
-      TRPG_BASE_URL: "${TRPG_BASE_URL:-}"
-      TRPG_MODEL: "${TRPG_MODEL:-}"
       TRPG_ACCESS_TOKEN: "${TRPG_ACCESS_TOKEN:-}"
       TRPG_WEB_CORS_ORIGINS: "${TRPG_WEB_CORS_ORIGINS:-}"
       TRPG_PROXY_URL: "${TRPG_PROXY_URL:-}"

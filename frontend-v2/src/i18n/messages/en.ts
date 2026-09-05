@@ -299,7 +299,7 @@ export const en = {
   addedFromLibrary: 'Character added from library',
   apiSetupRequiredTitle: 'Configure the model API before creating an adventure',
   apiSetupRequiredHint: 'You can fill in the world and characters first. Complete the model settings before generating content or creating the adventure.',
-  apiSetupRequired: 'The model API is not configured. Open Settings and fill in the API key, base URL, and model.',
+  apiSetupRequired: 'The main model is not configured. Add an AI provider in Settings and assign a main model.',
   goToApiSettings: 'Open API Settings',
   overviewKicker: 'ADVENTURE ARCHIVE',
   recentAdventures: 'Recent / Active Adventures',

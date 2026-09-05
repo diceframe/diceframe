@@ -12,6 +12,7 @@ from typing import Any
 from src.network_proxy import effective_proxy_url, is_supported_proxy_url
 from src.ai_providers import (
     PROVIDER_REF_KEYS,
+    UNSUPPORTED_AI_CONFIG_KEYS,
     is_provider_secret_key,
     normalize_ai_providers,
     reconcile_model_capability_routes,
@@ -25,25 +26,23 @@ from src.webui.access_password import hash_access_password
 from src.webui.cors import invalid_cors_origins, normalize_cors_origins
 
 SECRET_CONFIG_KEYS = frozenset({
-    "api_key", "embedding_api_key", "fallback1_api_key", "fallback2_api_key",
-    "access_token", "bot_token", "napcat_token", "tts_api_key", "asr_api_key", "imagegen_api_key",
+    "access_token", "bot_token", "napcat_token",
 })
 STRING_CONFIG_KEYS = frozenset({
-    "base_url", "model", "embedding_base_url", "embedding_model", "web_cors_origins",
-    "fallback1_base_url", "fallback1_model", "fallback2_base_url", "fallback2_model",
+    "model", "embedding_model", "web_cors_origins",
+    "fallback1_model", "fallback2_model",
     "public_base_url", "napcat_host", "napcat_connection_id",
-    "tts_base_url", "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
-    "asr_base_url", "asr_model",
-    "imagegen_base_url", "imagegen_model", "imagegen_square_size",
+    "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
+    "asr_model",
+    "imagegen_model", "imagegen_square_size",
     "imagegen_landscape_size", "imagegen_quality", "imagegen_style_prefix",
     *PROVIDER_REF_KEYS,
 })
-API_FORMAT_KEYS = frozenset({"api_format", "fallback1_api_format", "fallback2_api_format"})
 CONFIG_KEYS = (
-    "api_key", "base_url", "model", "api_format", "web_port", "web_cors_origins", "embedding_enabled",
-    "embedding_base_url", "embedding_model", "embedding_api_key", "embedding_max_input",
-    "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_format", "fallback1_api_key",
-    "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_format", "fallback2_api_key",
+    "model", "web_port", "web_cors_origins", "embedding_enabled",
+    "embedding_model", "embedding_max_input",
+    "fallback1_enabled", "fallback1_model",
+    "fallback2_enabled", "fallback2_model",
     "narrative_max_tokens", "character_gen_max_tokens", "summary_max_tokens", "brief_max_tokens",
     "analysis_max_tokens", "text_gen_max_tokens", "proxy_enabled", "proxy_url", "public_base_url", "access_token",
     "qq_bot_enabled", "napcat_host", "napcat_port", "napcat_token", "napcat_heartbeat_sec",
@@ -52,21 +51,21 @@ CONFIG_KEYS = (
     "napcat_chat_filter_enabled", "napcat_show_dropped_logs", "napcat_group_list_mode", "napcat_group_list",
     "napcat_private_list_mode", "napcat_private_list", "napcat_blocked_users", "napcat_block_official_bots",
     "update_channel",
-    "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
+    "tts_provider", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
-    "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
-    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider", "imagegen_base_url",
-    "imagegen_api_key", "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
+    "asr_provider", "asr_model", "asr_timeout_seconds",
+    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider",
+    "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
     "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds", "test_timeout_seconds",
     "economy_auto_reward_enabled", "economy_auto_reward_gold_cap",
     "model_request_timeout_seconds",
     "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
-    "api_key", "base_url", "model", "api_format",
-    "embedding_enabled", "embedding_base_url", "embedding_model", "embedding_api_key", "embedding_max_input",
-    "fallback1_enabled", "fallback1_base_url", "fallback1_model", "fallback1_api_format", "fallback1_api_key",
-    "fallback2_enabled", "fallback2_base_url", "fallback2_model", "fallback2_api_format", "fallback2_api_key",
+    "model",
+    "embedding_enabled", "embedding_model", "embedding_max_input",
+    "fallback1_enabled", "fallback1_model",
+    "fallback2_enabled", "fallback2_model",
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
     "model_request_timeout_seconds",
     "proxy_enabled", "proxy_url",
@@ -75,11 +74,11 @@ MODEL_RUNTIME_CONFIG_KEYS = frozenset({
 })
 API_RUNTIME_CONFIG_KEYS = frozenset({
     "character_gen_max_tokens", "text_gen_max_tokens",
-    "tts_provider", "tts_base_url", "tts_api_key", "tts_model", "tts_audio_format",
+    "tts_provider", "tts_model", "tts_audio_format",
     "tts_default_voice", "tts_gm_voice", "tts_player_voice", "tts_timeout_seconds", "tts_cache_mb",
-    "asr_provider", "asr_base_url", "asr_api_key", "asr_model", "asr_timeout_seconds",
-    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider", "imagegen_base_url",
-    "imagegen_api_key", "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
+    "asr_provider", "asr_model", "asr_timeout_seconds",
+    "imagegen_enabled", "imagegen_auto_scene", "imagegen_provider",
+    "imagegen_model", "imagegen_square_size", "imagegen_landscape_size",
     "imagegen_quality", "imagegen_style_prefix", "imagegen_timeout_seconds",
     "ai_providers", "tts_provider_ref", "asr_provider_ref", "imagegen_provider_ref",
 })
@@ -99,27 +98,25 @@ def provider_runtime_changed(changed_keys: frozenset[str]) -> bool:
 
 
 def _degrade_speech_engines_lost_provider(candidate: dict[str, Any], refs_before: dict[str, str]) -> None:
-    """服务商被删除导致 TTS/ASR 引用悬空且无内联地址时，回退到零配置引擎。
-
-    否则 Speech/Asr 服务构造校验会失败，把"删除服务商"整个操作卡死。
-    仅在引用因删除被清空的场景触发；手动开启引擎但不填地址仍走原有报错。
-    """
+    """解除服务商绑定时停用依赖它的能力，不允许残留直填配置恢复连接。"""
     tts_ref_cleared = bool(refs_before.get("tts_provider_ref")) and not str(candidate.get("tts_provider_ref") or "").strip()
     if (tts_ref_cleared
-            and candidate.get("tts_provider") == "openai-compatible"
-            and not str(candidate.get("tts_base_url") or "").strip()):
+            and candidate.get("tts_provider") in {"openai-compatible", "gpt-sovits"}):
         candidate["tts_provider"] = "browser"
     asr_ref_cleared = bool(refs_before.get("asr_provider_ref")) and not str(candidate.get("asr_provider_ref") or "").strip()
     if (asr_ref_cleared
-            and candidate.get("asr_provider") == "openai-compatible"
-            and not str(candidate.get("asr_base_url") or "").strip()):
+            and candidate.get("asr_provider") == "openai-compatible"):
         candidate["asr_provider"] = "disabled"
 
     imagegen_ref_cleared = bool(refs_before.get("imagegen_provider_ref")) and not str(
         candidate.get("imagegen_provider_ref") or ""
     ).strip()
-    if imagegen_ref_cleared and not str(candidate.get("imagegen_base_url") or "").strip():
+    if imagegen_ref_cleared:
         candidate["imagegen_enabled"] = False
+    for capability in ("fallback1", "fallback2", "embedding"):
+        ref_key = f"{capability}_provider_ref"
+        if refs_before.get(ref_key) and not candidate.get(ref_key):
+            candidate[f"{capability}_enabled"] = False
 BOT_CONFIG_MAP = {
     "qq_bot_enabled": "enabled",
     "napcat_host": "host",
@@ -161,7 +158,14 @@ def normalize_api_format(value: Any) -> str:
 
 
 def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> PreparedConfigUpdate:
-    candidate = dict(current)
+    unsupported = sorted(set(body) & UNSUPPORTED_AI_CONFIG_KEYS)
+    if unsupported:
+        return PreparedConfigUpdate(
+            dict(current), frozenset(), False,
+            "unsupported AI config fields: " + ", ".join(unsupported)
+            + "; use ai_providers and *_provider_ref",
+        )
+    candidate = {key: value for key, value in current.items() if key not in UNSUPPORTED_AI_CONFIG_KEYS}
     changed_keys = frozenset(set(body).intersection(CONFIG_KEYS)
                              | {key for key in body
                                 if is_provider_secret_key(key) and clean_text_value(body[key])})
@@ -183,9 +187,7 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 if value:
                     candidate[key] = hash_access_password(value) if key == "access_token" else value
                 continue
-            if key in API_FORMAT_KEYS:
-                candidate[key] = normalize_api_format(raw)
-            elif key == "web_cors_origins":
+            if key == "web_cors_origins":
                 invalid = invalid_cors_origins(raw)
                 if invalid:
                     return PreparedConfigUpdate(
@@ -302,8 +304,8 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
     refs_before = {key: str(candidate.get(key) or "").strip() for key in PROVIDER_REF_KEYS}
     strip_orphan_provider_secrets(candidate)
     strip_dangling_provider_refs(candidate)
-    _degrade_speech_engines_lost_provider(candidate, refs_before)
     cleared_model_routes = reconcile_model_capability_routes(candidate)
+    _degrade_speech_engines_lost_provider(candidate, refs_before)
 
     imagegen_ref = str(candidate.get("imagegen_provider_ref") or "").strip()
     if imagegen_ref:

@@ -24,7 +24,9 @@ export async function initializeAsr(force = false): Promise<void> {
     asrRuntimeConfig.value = {
       provider,
       ready: provider === 'openai-compatible' && Boolean(
-        String(config.asr_provider_ref || '').trim() || String(config.asr_base_url || '').trim(),
+        config.asr_provider_ref && config.ai_providers?.some(
+          item => item.id === config.asr_provider_ref && String(item.base_url || '').trim(),
+        ),
       ),
     }
   }).catch(() => {

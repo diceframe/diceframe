@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src.ai_providers import (
+    UNSUPPORTED_AI_CONFIG_KEYS,
     is_provider_secret_key,
     normalize_ai_providers,
     provider_secret_key,
@@ -40,13 +41,6 @@ from src.webui.services import legal as legal_svc
 
 _SECRET_KEYS = frozenset(
     {
-        "api_key",
-        "embedding_api_key",
-        "fallback1_api_key",
-        "fallback2_api_key",
-        "tts_api_key",
-        "asr_api_key",
-        "imagegen_api_key",
         "access_token",
         "bot_token",
         "napcat_token",
@@ -164,14 +158,7 @@ class ConfigStore:
         generation_defaults_migrated = migrate_generation_defaults(saved)
         env = self.environ
 
-        api_key = env.get("TRPG_LLM_API_KEY") or secret_values.get("api_key") or ""
-        base_url = env.get("TRPG_LLM_BASE_URL") or saved.get(
-            "base_url", "https://api.deepseek.com/v1"
-        )
-        model = env.get("TRPG_LLM_MODEL") or saved.get("model", "deepseek-v4-flash")
-        api_format = env.get("TRPG_LLM_API_FORMAT") or saved.get(
-            "api_format", "openai"
-        )
+        model = saved.get("model", "")
         port = int(env.get("TRPG_WEB_PORT") or saved.get("web_port", 18000))
         host = str(env.get("TRPG_WEB_HOST") or saved.get("web_host", "0.0.0.0"))
         transport_config = parse_web_transport(saved.get("web_transport"), env)
@@ -183,15 +170,7 @@ class ConfigStore:
         cors_env_value = str(env.get("TRPG_WEB_CORS_ORIGINS") or "").strip()
         cors_config_value = cors_env_value or str(saved.get("web_cors_origins") or "")
         embedding_enabled = saved.get("embedding_enabled", False)
-        embedding_base_url = saved.get("embedding_base_url", "")
-        embedding_model = env.get("TRPG_EMBEDDING_MODEL") or saved.get(
-            "embedding_model", "nomic-embed-text"
-        )
-        embedding_api_key = (
-            env.get("TRPG_EMBEDDING_API_KEY")
-            or secret_values.get("embedding_api_key")
-            or ""
-        )
+        embedding_model = saved.get("embedding_model", "nomic-embed-text")
         access_token = next(
             (
                 password
@@ -213,10 +192,7 @@ class ConfigStore:
 
         state: dict[str, Any] = {
             "generation_defaults_version": GENERATION_DEFAULTS_VERSION,
-            "api_key": api_key,
-            "base_url": base_url,
             "model": model,
-            "api_format": api_format,
             "web_port": port,
             "web_cors_origins": normalize_cors_origins(cors_config_value),
             "ai_providers": normalize_ai_providers(saved.get("ai_providers")),
@@ -233,70 +209,29 @@ class ConfigStore:
                 if is_provider_secret_key(key)
             },
             "embedding_enabled": embedding_enabled,
-            "embedding_base_url": embedding_base_url,
             "embedding_model": embedding_model,
-            "embedding_api_key": embedding_api_key,
+            "embedding_max_input": int(saved.get("embedding_max_input", 0)),
             "fallback1_enabled": saved.get("fallback1_enabled", False),
-            "fallback1_base_url": saved.get("fallback1_base_url", ""),
             "fallback1_model": saved.get("fallback1_model", ""),
-            "fallback1_api_format": saved.get("fallback1_api_format", "openai"),
-            "fallback1_api_key": secret_values.get("fallback1_api_key") or "",
             "fallback2_enabled": saved.get("fallback2_enabled", False),
-            "fallback2_base_url": saved.get("fallback2_base_url", ""),
             "fallback2_model": saved.get("fallback2_model", ""),
-            "fallback2_api_format": saved.get("fallback2_api_format", "openai"),
-            "fallback2_api_key": secret_values.get("fallback2_api_key") or "",
-            "tts_provider": str(
-                env.get("TRPG_TTS_PROVIDER") or saved.get("tts_provider", "browser")
-            ),
-            "tts_base_url": str(
-                env.get("TRPG_TTS_BASE_URL") or saved.get("tts_base_url", "")
-            ),
-            "tts_api_key": env.get("TRPG_TTS_API_KEY")
-            or secret_values.get("tts_api_key")
-            or "",
-            "tts_model": str(
-                env.get("TRPG_TTS_MODEL") or saved.get("tts_model", "tts-1")
-            ),
-            "tts_audio_format": str(
-                env.get("TRPG_TTS_AUDIO_FORMAT")
-                or saved.get("tts_audio_format", "mp3")
-            ),
-            "tts_default_voice": str(
-                env.get("TRPG_TTS_VOICE") or saved.get("tts_default_voice", "alloy")
-            ),
+            "tts_provider": str(saved.get("tts_provider", "browser")),
+            "tts_model": str(saved.get("tts_model", "tts-1")),
+            "tts_audio_format": str(saved.get("tts_audio_format", "mp3")),
+            "tts_default_voice": str(saved.get("tts_default_voice", "alloy")),
             "tts_gm_voice": str(saved.get("tts_gm_voice", "")),
             "tts_player_voice": str(saved.get("tts_player_voice", "")),
             "tts_timeout_seconds": float(saved.get("tts_timeout_seconds", 60)),
             "tts_cache_mb": int(saved.get("tts_cache_mb", 256)),
-            "asr_provider": str(
-                env.get("TRPG_ASR_PROVIDER") or saved.get("asr_provider", "disabled")
-            ),
-            "asr_base_url": str(
-                env.get("TRPG_ASR_BASE_URL") or saved.get("asr_base_url", "")
-            ),
-            "asr_api_key": env.get("TRPG_ASR_API_KEY")
-            or secret_values.get("asr_api_key")
-            or "",
-            "asr_model": str(
-                env.get("TRPG_ASR_MODEL") or saved.get("asr_model", "whisper-1")
-            ),
+            "asr_provider": str(saved.get("asr_provider", "disabled")),
+            "asr_model": str(saved.get("asr_model", "whisper-1")),
             "asr_timeout_seconds": float(saved.get("asr_timeout_seconds", 60)),
             "imagegen_enabled": bool(saved.get("imagegen_enabled", False)),
             "imagegen_auto_scene": bool(saved.get("imagegen_auto_scene", True)),
             "imagegen_provider": str(
                 saved.get("imagegen_provider") or "openai-compatible"
             ),
-            "imagegen_base_url": str(
-                env.get("TRPG_IMAGEGEN_BASE_URL")
-                or saved.get("imagegen_base_url", "")
-            ),
-            "imagegen_api_key": env.get("TRPG_IMAGEGEN_API_KEY")
-            or secret_values.get("imagegen_api_key")
-            or "",
-            "imagegen_model": str(
-                env.get("TRPG_IMAGEGEN_MODEL") or saved.get("imagegen_model", "")
-            ),
+            "imagegen_model": str(saved.get("imagegen_model", "")),
             "imagegen_square_size": str(
                 saved.get("imagegen_square_size", "1024x1024")
             ),
@@ -444,6 +379,7 @@ class ConfigStore:
             for key, value in state.items()
             if key not in _SECRET_KEYS
             and key != "web_transport"
+            and key not in UNSUPPORTED_AI_CONFIG_KEYS
             and not is_provider_secret_key(key)
         }
         public["ai_providers"] = [
@@ -456,13 +392,6 @@ class ConfigStore:
             for entry in state.get("ai_providers", [])
         ]
         for key in (
-            "api_key",
-            "embedding_api_key",
-            "fallback1_api_key",
-            "fallback2_api_key",
-            "tts_api_key",
-            "asr_api_key",
-            "imagegen_api_key",
             "bot_token",
             "napcat_token",
         ):
@@ -497,13 +426,15 @@ class ConfigStore:
             for key, value in state.items()
             if key not in _SECRET_KEYS
             and key != "qq_bot_running"
+            and key not in UNSUPPORTED_AI_CONFIG_KEYS
             and not is_provider_secret_key(key)
         }
         self.atomic_write_json(self.paths.config_file, non_sensitive)
         sensitive = {
             key: value
             for key, value in state.items()
-            if key in _SECRET_KEYS or is_provider_secret_key(key)
+            if (key in _SECRET_KEYS or is_provider_secret_key(key))
+            and key not in UNSUPPORTED_AI_CONFIG_KEYS
         }
         if self.environ.get("TRPG_ACCESS_TOKEN"):
             sensitive.pop("access_token", None)

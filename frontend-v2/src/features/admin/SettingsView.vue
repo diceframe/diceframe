@@ -580,7 +580,7 @@ function providerReady(ref: unknown): boolean {
   const id = String(ref || '').trim()
   if (!id) return false
   const p = providerById(id)
-  return Boolean(p && p.base_url && p.api_key?.configured)
+  return Boolean(p && p.base_url)
 }
 const systemStatusItems = computed<SystemStatusItem[]>(() => {
   const c = store.config

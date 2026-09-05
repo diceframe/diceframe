@@ -6,6 +6,7 @@ import pytest
 
 import web_server
 from src.ai_providers import (
+    UNSUPPORTED_AI_CONFIG_KEYS,
     is_provider_secret_key,
     normalize_ai_providers,
     provider_secret_key,
@@ -256,18 +257,19 @@ def test_config_update_rejects_anthropic_imagegen_provider():
     assert prepared.error == "图像生成仅支持 OpenAI 兼容服务商"
 
 
-def test_config_update_keeps_speech_engine_when_inline_base_url_remains():
+@pytest.mark.parametrize("engine", ["openai-compatible", "gpt-sovits"])
+def test_config_update_disables_speech_even_when_inline_base_url_remains(engine):
     current = _state(
         ai_providers=[_provider()],
-        tts_provider="openai-compatible", tts_provider_ref="sf",
+        tts_provider=engine, tts_provider_ref="sf",
         tts_base_url="https://inline.example/v1", tts_model="tts-1",
     )
 
     prepared = prepare_config_update(current, {"ai_providers": []})
 
     assert prepared.error == ""
-    assert prepared.state["tts_provider"] == "openai-compatible"
-    assert prepared.state["tts_base_url"] == "https://inline.example/v1"
+    assert prepared.state["tts_provider"] == "browser"
+    assert "tts_base_url" not in prepared.state
 
 
 def test_config_update_invalid_provider_secret_key_ignored():
@@ -276,6 +278,68 @@ def test_config_update_invalid_provider_secret_key_ignored():
     assert prepared.error == ""
     assert provider_runtime_changed(prepared.changed_keys) is False
     assert "ai_provider_key_bad id" not in prepared.state
+
+
+@pytest.mark.parametrize("key", sorted(UNSUPPORTED_AI_CONFIG_KEYS))
+def test_old_update_payload_is_explicitly_unsupported_and_atomic(key):
+    current = _state(model="kept")
+    prepared = prepare_config_update(current, {key: "obsolete", "model": "changed"})
+    assert "unsupported" in prepared.error
+    assert key in prepared.error
+    assert prepared.state == current
+    assert not prepared.changed_keys
+
+
+@pytest.mark.parametrize("ref", ["", "missing"])
+@pytest.mark.parametrize("engine", ["openai-compatible", "gpt-sovits"])
+def test_unconfigured_api_capabilities_cannot_revive_inline_credentials(ref, engine):
+    from src.webui.composition import RuntimeComposition
+
+    config = _state(tts_provider=engine, asr_provider="openai-compatible", imagegen_enabled=True)
+    for capability in ("tts", "asr", "imagegen"):
+        config[f"{capability}_provider_ref"] = ref
+        config[f"{capability}_base_url"] = "https://obsolete.example/v1"
+        config[f"{capability}_api_key"] = "obsolete-secret"
+    resolved = RuntimeComposition.config_with_resolved_api_refs(config)
+    assert resolved["tts_provider"] == "browser"
+    assert resolved["asr_provider"] == "disabled"
+    assert resolved["imagegen_enabled"] is False
+    for capability in ("tts", "asr", "imagegen"):
+        assert resolved[f"{capability}_base_url"] == ""
+        assert resolved[f"{capability}_api_key"] == ""
+
+
+@pytest.mark.parametrize("engine", ["browser", "edge-tts"])
+def test_zero_configuration_engines_need_no_provider(engine):
+    from src.webui.composition import RuntimeComposition
+
+    config = _state(tts_provider=engine, asr_provider="disabled")
+    prepared = prepare_config_update(config, {"tts_provider": engine})
+    assert not prepared.error
+    resolved = RuntimeComposition.config_with_resolved_api_refs(prepared.state)
+    assert resolved["tts_provider"] == engine
+    assert resolved["asr_provider"] == "disabled"
+
+
+def test_local_gpt_sovits_provider_works_without_key():
+    from src.webui.composition import RuntimeComposition
+
+    config = _state(ai_providers=[_provider(base_url="http://localhost:9880")],
+                    tts_provider="gpt-sovits", tts_provider_ref="sf", tts_api_key="old-secret")
+    resolved = RuntimeComposition.config_with_resolved_api_refs(config)
+    assert resolved["tts_provider"] == "gpt-sovits"
+    assert resolved["tts_base_url"] == "http://localhost:9880"
+    assert resolved["tts_api_key"] == ""
+
+
+@pytest.mark.asyncio
+async def test_http_old_update_is_rejected_before_persistence_or_runtime_build(monkeypatch):
+    monkeypatch.setattr(web_server, "save_config", lambda: pytest.fail("unsupported update must not persist"))
+    monkeypatch.setattr(web_server, "_build_subsystems", lambda **kwargs: pytest.fail("unsupported update must not build"))
+    response = await web_server.api_config_post(_ConfigRequest({"api_key": "old-key"}, {}))
+    assert response.status == 400
+    assert "unsupported AI config fields" in response.text
+    assert "old-key" not in response.text
 
 
 # ---------- 运行时解析 ----------
@@ -311,7 +375,8 @@ def test_build_subsystems_resolves_llm_and_embedding_refs(monkeypatch):
     assert captured["model_request_timeout_seconds"] == 245
 
 
-def test_build_subsystems_keeps_inline_fallback_when_ref_empty(monkeypatch):
+@pytest.mark.parametrize("ref", ["", "missing"])
+def test_build_subsystems_never_uses_inline_credentials(monkeypatch, ref):
     captured = {}
 
     def fake_create(**kwargs):
@@ -322,15 +387,20 @@ def test_build_subsystems_keeps_inline_fallback_when_ref_empty(monkeypatch):
     config = _state(
         base_url="https://inline.example/v1", api_key="sk-inline", model="m1", api_format="openai",
         fallback1_enabled=True, fallback1_base_url="https://fb.example/v1", fallback1_model="fb-model",
-        fallback1_api_key="",  # 回退主 key 的既有语义
-        embedding_enabled=False,
+        fallback1_api_key="sk-fallback",
+        llm_provider_ref=ref, fallback1_provider_ref=ref, embedding_provider_ref=ref,
+        embedding_enabled=True, embedding_base_url="https://old-embedding.example", embedding_api_key="sk-old",
         proxy_enabled=False, proxy_url="",
     )
 
     web_server._build_subsystems(config=config)
 
-    fallback = captured["providers"][1]
-    assert fallback.api_key == "sk-inline"
+    assert len(captured["providers"]) == 1
+    assert captured["providers"][0].base_url == ""
+    assert captured["providers"][0].api_key == ""
+    assert captured["embedding_enabled"] is False
+    assert captured["embedding_base_url"] == ""
+    assert captured["embedding_api_key"] == ""
 
 
 def test_build_subsystems_fallback_ref_does_not_leak_inline_key(monkeypatch):

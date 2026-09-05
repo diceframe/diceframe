@@ -13,6 +13,8 @@
 - `src/webui/access_control.py`：owner、Bot、SSE ticket、玩家分享与房间密码访问边界；
 - `src/webui/config_controller.py`：配置热重载事务和服务商连接测试。
 
+AI 应用配置仅使用 `ai_providers` 与各能力的 `*_provider_ref`；凭据以 `ai_provider_key_<id>` 单独保存。旧能力级直填地址/密钥/API 格式及 AI 能力环境入口不再参与解析，更新请求包含旧字段时明确拒绝，不自动迁移或创建服务商。缺失/未知引用不会激活残留配置；browser、edge-tts 与 disabled ASR 无需引用，本地服务商允许空 key。composition 解析后传给服务的内部 `*_base_url` / `*_api_key` 仍是有效运行时契约。
+
 模板同步和配置默认值迁移写盘只在真实 application startup 发生，不在导入独立 owner 模块时发生。配置热重载必须先完整构造候选 runtime，写盘成功后才替换活动状态；构造或写盘失败均保留旧 runtime。
 
 WebUI service 不直接导入另一个 service。跨域业务调用使用 composition root 注入的 callable/protocol；多域共同使用但不执行业务编排的纯契约和投影位于 `src/webui/` 根边界，例如生命周期事务上下文、规则草稿 shape 校验、休息只读投影及角色卡 identity/deduplication。类型检查专用导入不构成运行时依赖。

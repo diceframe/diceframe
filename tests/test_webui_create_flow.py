@@ -671,13 +671,13 @@ async def test_unconfigured_model_is_rejected_before_creating_save_data(web_api)
 
     assert result["ok"] is False
     assert result["error_code"] == "llm_not_configured"
-    assert result["missing"] == ["base_url", "model", "api_key"]
+    assert result["missing"] == ["base_url", "model"]
     assert registry.list_all() == []
     assert fake_llm.calls == []
 
 
 @pytest.mark.asyncio
-async def test_ai_generation_reports_unconfigured_model_without_calling_it(web_api):
+async def test_local_model_without_api_key_is_ready(web_api):
     api, _lorebook, _registry, fake_llm, _worlds_dir = web_api
     fake_llm.providers = {
         "fake": SimpleNamespace(
@@ -688,12 +688,10 @@ async def test_ai_generation_reports_unconfigured_model_without_calling_it(web_a
         ),
     }
 
-    result = await api.generate_rule("测试规则", "freeform_fantasy")
+    readiness = api._llm_configuration_status()
 
-    assert result["ok"] is False
-    assert result["error_code"] == "llm_not_configured"
-    assert result["missing"] == ["api_key"]
-    assert fake_llm.calls == []
+    assert readiness["ready"] is True
+    assert readiness["missing"] == []
 
 
 @pytest.mark.asyncio

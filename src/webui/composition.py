@@ -21,7 +21,6 @@ from src.migrations.config import DEFAULT_NARRATIVE_MAX_TOKENS
 from src.network_proxy import effective_proxy_url
 from src.tts import SpeechService
 from src.webui.api import WebAPI
-from src.webui.config_update import normalize_api_format
 
 
 @dataclass(frozen=True)
@@ -77,9 +76,9 @@ class RuntimeComposition:
             main_api_key = main_provider["api_key"]
             main_api_format = main_provider["api_format"]
         else:
-            main_base_url = runtime_config["base_url"]
-            main_api_key = runtime_config["api_key"]
-            main_api_format = normalize_api_format(runtime_config.get("api_format"))
+            main_base_url = ""
+            main_api_key = ""
+            main_api_format = "openai"
         providers = [
             ProviderConfig(
                 provider_name="default",
@@ -96,24 +95,14 @@ class RuntimeComposition:
                 runtime_config,
                 runtime_config.get(f"fallback{index}_provider_ref", ""),
             )
-            fallback_base_url = (
-                fallback_provider["base_url"]
-                if fallback_provider
-                else runtime_config.get(f"fallback{index}_base_url", "")
-            )
+            if not fallback_provider:
+                continue
+            fallback_base_url = fallback_provider["base_url"]
             fallback_model = runtime_config.get(f"fallback{index}_model", "")
             if not (fallback_base_url and fallback_model):
                 continue
-            if fallback_provider:
-                fallback_api_key = fallback_provider["api_key"]
-                fallback_api_format = fallback_provider["api_format"]
-            else:
-                fallback_api_key = (
-                    runtime_config.get(f"fallback{index}_api_key") or main_api_key
-                )
-                fallback_api_format = normalize_api_format(
-                    runtime_config.get(f"fallback{index}_api_format")
-                )
+            fallback_api_key = fallback_provider["api_key"]
+            fallback_api_format = fallback_provider["api_format"]
             providers.append(
                 ProviderConfig(
                     provider_name=f"fallback{index}",
@@ -133,10 +122,8 @@ class RuntimeComposition:
             embedding_base_url = embedding_provider["base_url"]
             embedding_api_key = embedding_provider["api_key"]
         else:
-            embedding_base_url = runtime_config.get("embedding_base_url", "")
-            embedding_api_key = (
-                runtime_config.get("embedding_api_key") or main_api_key
-            )
+            embedding_base_url = ""
+            embedding_api_key = ""
         embedding_enabled = bool(
             runtime_config.get("embedding_enabled", False) and embedding_base_url
         )
@@ -182,21 +169,22 @@ class RuntimeComposition:
     def config_with_resolved_api_refs(config: dict) -> dict:
         """Resolve shared providers into capability-specific runtime keys."""
         resolved = dict(config)
-        tts_provider = resolve_provider(config, config.get("tts_provider_ref", ""))
-        if tts_provider:
-            resolved["tts_base_url"] = tts_provider["base_url"]
-            resolved["tts_api_key"] = tts_provider["api_key"]
-        asr_provider = resolve_provider(config, config.get("asr_provider_ref", ""))
-        if asr_provider:
-            resolved["asr_base_url"] = asr_provider["base_url"]
-            resolved["asr_api_key"] = asr_provider["api_key"]
-        imagegen_provider = resolve_provider(
-            config,
-            config.get("imagegen_provider_ref", ""),
-        )
-        if imagegen_provider and imagegen_provider.get("api_format") == "openai":
-            resolved["imagegen_base_url"] = imagegen_provider["base_url"]
-            resolved["imagegen_api_key"] = imagegen_provider["api_key"]
+        # Always overwrite these internal fields: residual public settings are never credentials.
+        for capability in ("tts", "asr", "imagegen"):
+            provider = resolve_provider(config, config.get(f"{capability}_provider_ref", ""))
+            if capability == "imagegen" and provider and provider["api_format"] != "openai":
+                provider = None
+            resolved[f"{capability}_base_url"] = provider["base_url"] if provider else ""
+            resolved[f"{capability}_api_key"] = provider["api_key"] if provider else ""
+            if provider and provider["base_url"]:
+                continue
+            # Unconfigured installations must still start so the owner can configure them.
+            if capability == "tts" and config.get("tts_provider") in {"openai-compatible", "gpt-sovits"}:
+                resolved["tts_provider"] = "browser"
+            elif capability == "asr":
+                resolved["asr_provider"] = "disabled"
+            elif capability == "imagegen":
+                resolved["imagegen_enabled"] = False
         return resolved
 
     def make_api(

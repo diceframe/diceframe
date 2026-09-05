@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 echo ========================================
 echo   TRPG WebUI - port from data/config.json web_port, see console
-echo   首次使用请在浏览器设置页填写 API Key
+echo   首次使用请在浏览器设置页添加 AI 服务商并选择主模型
 echo ========================================
 echo.
 

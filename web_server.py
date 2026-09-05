@@ -14,6 +14,7 @@ from src.runtime_logging import RETENTION_DAYS, configure_runtime_logging
 
 load_project_env(Path(__file__).resolve().with_name(".env"))
 
+from src.ai_providers import is_llm_config_ready
 from src.common_factory import TRPGSubsystems, create_trpg_subsystems
 from src.migrations.config import (
     DEFAULT_NARRATIVE_MAX_TOKENS,
@@ -75,7 +76,6 @@ TRANSPORT = RUNTIME_CONFIG.transport
 WEB_CORS_ENV_VALUE = RUNTIME_CONFIG.cors_env_value
 WEB_CORS_CONFIG_VALUE = RUNTIME_CONFIG.cors_config_value
 WEB_CORS_ORIGINS = RUNTIME_CONFIG.cors_origins
-API_KEY = str(STATE.get("api_key", ""))
 
 PROMPTS_DIR = RUNTIME_PATHS.prompts_dir
 BUILTIN_RULES_DIR = RUNTIME_PATHS.builtin_rules_dir
@@ -269,8 +269,8 @@ if __name__ == "__main__":
     if TRANSPORT.degraded_error:
         logger.critical("%s", TRANSPORT.degraded_error)
     print(f"DiceFrame WebUI: {TRANSPORT.endpoint.url('127.0.0.1')}  (host={HOST})")
-    if not API_KEY:
-        print("请在 WebUI 设置页填写 API Key")
+    if not is_llm_config_ready(STATE):
+        print("请在 WebUI 的 AI 服务商与模型配置中设置主模型。")
     runtime_loop = asyncio.new_event_loop()
     install_runtime_exception_handler(runtime_loop)
     web.run_app(

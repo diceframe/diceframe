@@ -149,14 +149,16 @@ def test_service_validates_enabled_base_url():
 def test_config_update_accepts_asr_keys():
     prepared = prepare_config_update(_config(), {
         "asr_provider": "openai-compatible",
-        "asr_base_url": "https://api.example.com",
+        "ai_providers": [{"id": "local", "base_url": "https://api.example.com"}],
+        "asr_provider_ref": "local",
         "asr_model": "whisper-1",
         "asr_timeout_seconds": 90,
     })
 
     assert prepared.error == ""
     assert prepared.state["asr_provider"] == "openai-compatible"
-    assert prepared.state["asr_base_url"] == "https://api.example.com"
+    assert prepared.state["asr_provider_ref"] == "local"
+    assert "asr_base_url" not in prepared.state
     assert prepared.state["asr_timeout_seconds"] == 90
 
 
@@ -172,8 +174,9 @@ def test_config_update_rejects_out_of_range_asr_timeout():
     assert prepared.error == "ASR 超时必须在 5–300 秒之间"
 
 
-def test_config_update_keeps_existing_asr_secret_when_blank():
+def test_config_update_rejects_old_asr_secret_even_when_blank():
     prepared = prepare_config_update(_config(asr_api_key="sk-old"), {"asr_api_key": ""})
 
-    assert prepared.error == ""
-    assert prepared.state["asr_api_key"] == "sk-old"
+    assert "unsupported" in prepared.error
+    assert "asr_api_key" in prepared.error
+    assert not prepared.changed_keys
