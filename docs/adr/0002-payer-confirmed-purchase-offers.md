@@ -88,6 +88,32 @@ the dropped `purchase_request` / `purchase_order` entities:
 No persisted schema changes: the intent list lives and dies with the round's
 prepared checks, and instance schema stays at 7.
 
+## Amendment (2026-09-05b): the same-round price pass is retired
+
+The same-day amendment above added a second planner pass
+(`price_unpriced_purchase_intents`) that re-read the narration after the LLM
+call and created offers for intents whose price a human had narrated. It did
+close the same-round dialog gap, but it duplicated the planner's pricing
+responsibility in a second LLM call on every purchase round and added a
+compensation stage to an already deep pipeline. It is superseded:
+
+- The planner keeps single-pass pricing only: offers come from
+  `economy_actions` with `price_source=player_stated` / `gm_narrated`,
+  priced from the current context (including `recent_narration`).
+- Unpriced intents (`price_source=none`) remain in-memory round state and
+  still feed `filter_unconfirmed_purchase_grants()`, so a purchase whose
+  price nobody has stated can never be delivered through narrative LOOT.
+  What is retired is only the same-round offer creation.
+- A price the GM narrates in round N becomes quotable by the planner in
+  round N+1 through `recent_narration`. The GM who wants the dialog
+  immediately prices the offer through the manual purchase composer
+  (`source="gm_manual"`), which was already the uniform confirmation path.
+- The price-pass prompts and `price_unpriced_purchase_intents` are removed.
+
+The fail-safe direction is unchanged: no stated price means no charge and no
+free item delivery — the cost of retiring the pass is at most a one-round
+delay of the payment dialog.
+
 ## Compatibility
 
 This is an intentional breaking change for the single-user preview build.

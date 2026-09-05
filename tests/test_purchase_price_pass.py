@@ -1,10 +1,12 @@
-"""购买意图同轮闭环与 loot 数量回归（消融实验转正）。
+"""购买意图单次识别与 loot 数量回归。
 
 覆盖三层契约：
 1. loot 物品串的 "xN" 数量后缀解析与同名堆叠（x5 x1 脏数据不再产生）；
-2. 无价购买意图只在回合内存中存在：叙事后复检报价 + 同轮 LOOT 拦截，
-   不复活 ADR 0002 已删除的 purchase_request 持久化实体；
-3. 端到端：玩家说"买五瓶回复药水"时，同轮出现支付窗口、白拿货被拦、
+2. 无价购买意图只在回合内存中存在：同轮 LOOT 拦截，不复活 ADR 0002
+   已删除的 purchase_request 持久化实体；叙事后价格复检已按 ADR 0002
+   修订（2026-09-05b）移除，GM 口述的价格由下一轮 planner 从
+   recent_narration 报价，或由 GM 手动发起购买；
+3. 端到端：玩家说"买五瓶回复药水"时，白拿货被拦、口述价格下一轮弹窗、
    付款后数量正确并入原有物品行。
 """
 
@@ -19,7 +21,6 @@ import pytest
 from src.commands.check_planner import (
     normalize_economy_actions,
     plan_round_checks,
-    price_unpriced_purchase_intents,
 )
 from src.commands.state_items import (
     append_inventory_item,
@@ -162,50 +163,6 @@ def _tool_response(economy_actions: list) -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
-async def test_price_pass_prices_intent_from_narration_only() -> None:
-    instance = _instance()
-    intents = [{"payer_uid": "p1", "target": "回复药水", "quantity": 5}]
-
-    class _Client:
-        async def call_tools(self, system_prompt, user_message, **kwargs):
-            assert "购买价格复检" in system_prompt
-            return _tool_response([
-                # 复检只允许逐字转述叙述文本中的价格。
-                {"type": "purchase", "player": "p1", "target": "回复药水",
-                 "quantity": 5, "amount": 10, "amount_scope": "unit",
-                 "price_source": "gm_narrated"},
-                # 意图之外的编造记录必须被丢弃。
-                {"type": "purchase", "player": "p1", "target": "马车",
-                 "amount": 20, "price_source": "gm_narrated"},
-            ])
-
-    offers, remaining = await price_unpriced_purchase_intents(
-        instance, _Client(), "商贩报价。", intents,
-    )
-    assert offers == [{
-        "payer_uid": "p1", "amount": 50, "quantity": 5,
-        "amount_scope": "unit", "target": "回复药水", "note": "",
-    }]
-    assert remaining == []
-
-
-@pytest.mark.asyncio
-async def test_price_pass_without_price_keeps_intent_for_interception() -> None:
-    instance = _instance()
-    intents = [{"payer_uid": "p1", "target": "回复药水", "quantity": 5}]
-
-    class _Client:
-        async def call_tools(self, system_prompt, user_message, **kwargs):
-            return _tool_response([])
-
-    offers, remaining = await price_unpriced_purchase_intents(
-        instance, _Client(), "商贩吆喝，但没提价格。", intents,
-    )
-    assert offers == []
-    assert remaining == intents
-
-
 def test_filter_strips_unpriced_intent_items_only_with_kwarg() -> None:
     instance = _instance()
     data = {"state_update": {"loot": [
@@ -259,12 +216,9 @@ class PurchaseFlowLLMStub:
         self._base_call = base.call
         self.buyer_uid = ""
         self.planner_economy: list = []
-        self.price_pass_economy: list = []
         self.narration = ""
 
     async def call_tools(self, system_prompt, user_message, **kwargs):
-        if "购买价格复检" in system_prompt:
-            return _tool_response(self.price_pass_economy)
         if "回合检定规划器" in system_prompt:
             return _tool_response(self.planner_economy)
         return _tool_response([])
@@ -292,8 +246,8 @@ def _potion_row(sheet: dict) -> dict | None:
 
 
 @pytest.mark.asyncio
-async def test_same_round_purchase_shows_window_and_blocks_free_loot(web_api) -> None:
-    """事故复现：无价意图 → 叙事报价 → 同轮弹出支付窗口，LOOT 白拿被拦。"""
+async def test_narrated_price_dialog_next_round_and_blocks_free_loot(web_api) -> None:
+    """事故复现（修订后契约）：同轮白拿被拦、不弹窗；GM 口述价格后下一轮弹窗。"""
     api, _lorebook, registry, fake_llm, _worlds = web_api
     created = await api.create_game(
         "template_world",
@@ -312,12 +266,7 @@ async def test_same_round_purchase_shows_window_and_blocks_free_loot(web_api) ->
         "type": "purchase", "player": uid, "target": "回复药水",
         "quantity": 5, "price_source": "none",
     }]
-    stub.price_pass_economy = [{
-        "type": "purchase", "player": uid, "target": "回复药水",
-        "quantity": 5, "amount": 10, "amount_scope": "unit",
-        "price_source": "gm_narrated",
-    }]
-    stub.narration = "商贩麻利地将五瓶淡红色药水用麻布包好，递到你面前。"
+    stub.narration = "商贩麻利地将五瓶淡红色药水用麻布包好：十金币一瓶，递到你面前。"
     fake_llm.call_tools = stub.call_tools
     fake_llm.call = stub.call
 
@@ -328,18 +277,31 @@ async def test_same_round_purchase_shows_window_and_blocks_free_loot(web_api) ->
     narration, _private = await api._handler.process_round(instance)
     assert "五瓶" in narration
 
-    # 同轮弹出支付窗口：50 金（10 金/瓶 ×5）。
+    # 同轮不弹窗（价格复检已移除），但 GM 的 LOOT 白拿被拦：无脏行、分文未扣。
+    assert instance.economy["proposals"] == []
+    sheet = instance.get_character_sheet(uid)
+    assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
+    assert sheet["gold"] == 5000
+    # 意图保持本轮内存状态；下一轮 planner 从 recent_narration 报价。
+    assert instance.round_unpriced_purchase_intents == [
+        {"payer_uid": uid, "target": "回复药水", "quantity": 5},
+    ]
+
+    stub.planner_economy = [{
+        "type": "purchase", "player": uid, "target": "回复药水",
+        "quantity": 5, "amount": 10, "amount_scope": "unit",
+        "price_source": "gm_narrated",
+    }]
+    await instance.add_action(uid, "那就来五瓶")
+    assert await instance.try_advance() is True
+    await api._handler.process_round(instance)
+
+    # 下一轮弹出支付窗口：50 金（10 金/瓶 ×5）。
     pending = [p for p in instance.economy["proposals"] if p["status"] == "pending"]
     assert len(pending) == 1
     assert pending[0]["kind"] == "purchase"
     assert pending[0]["amount"] == 50
     assert pending[0]["payer_uid"] == uid
-    # GM 的 LOOT 白拿被拦：无脏行、无多出来的数量、分文未扣。
-    sheet = instance.get_character_sheet(uid)
-    assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
-    assert sheet["gold"] == 5000
-    # 意图已被报价消费。
-    assert instance.round_unpriced_purchase_intents == []
 
     settled = await api.resolve_payment(created["game_key"], pending[0]["id"], True, uid)
     assert settled["ok"] is True
@@ -370,7 +332,6 @@ async def test_unpriced_purchase_never_delivers_free_items(web_api) -> None:
         "type": "purchase", "player": uid, "target": "回复药水",
         "quantity": 5, "price_source": "none",
     }]
-    stub.price_pass_economy = []
     stub.narration = "商贩嘿嘿一笑，说好货不愁卖。"
     fake_llm.call_tools = stub.call_tools
     fake_llm.call = stub.call
@@ -385,15 +346,15 @@ async def test_unpriced_purchase_never_delivers_free_items(web_api) -> None:
     sheet = instance.get_character_sheet(uid)
     assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
     assert sheet["gold"] == 5000
-    # 意图保持待复检状态（仅本轮内存），玩家下轮确认时 planner 可从
+    # 意图保持待拦截状态（仅本轮内存）：玩家下一轮再确认时 planner 可从
     # recent_narration 拾取口述价格并正常弹窗。
     assert instance.round_unpriced_purchase_intents == [
         {"payer_uid": uid, "target": "回复药水", "quantity": 5},
     ]
 
 
-def test_queue_purchase_offer_idempotent_for_pass_offers() -> None:
-    """复检报价与规划报价共用同一幂等入口，重放不产生重复提案。"""
+def test_queue_purchase_offer_idempotent_for_planner_offers() -> None:
+    """规划报价与 GM 手动报价共用同一幂等入口，重放不产生重复提案。"""
     instance = _instance()
     source_ref = "ai:run:3:p1:回复药水:5:unit:50"
     first = queue_purchase_offer(
@@ -480,7 +441,6 @@ async def test_duplicate_offer_not_queued_while_first_pending(web_api) -> None:
         "quantity": 5, "amount": 10, "amount_scope": "unit",
         "price_source": "gm_narrated",
     }]
-    stub.price_pass_economy = []
     stub.narration = "店主擦着柜台，等你拿主意。"
     fake_llm.call_tools = stub.call_tools
     fake_llm.call = stub.call
