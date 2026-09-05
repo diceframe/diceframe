@@ -9,11 +9,9 @@ from typing import Any
 
 from src.commands.economy_effects import (
     currency_labels_for_rule,
-    discard_unearned_reward_proposals,
     defer_narrative_effects,
     has_economy_proposal,
     pending_decision_notice,
-    unearned_reward_notice,
     unbacked_purchase_notice,
     unbacked_payment_notice,
     should_warn_unbacked_payment,
@@ -198,11 +196,6 @@ class SwipeGenerator:
             currency_labels=currency_labels,
         ):
             system_changes.append(unbacked_payment_notice(instance.language))
-        dropped_rewards = discard_unearned_reward_proposals(
-            instance, data, narration,
-        )
-        if dropped_rewards:
-            system_changes.append(unearned_reward_notice(instance.language))
         dropped_purchase_items = filter_unconfirmed_purchase_grants(instance, data)
         if dropped_purchase_items:
             system_changes.append(unbacked_purchase_notice(instance.language))

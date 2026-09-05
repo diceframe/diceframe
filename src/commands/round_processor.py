@@ -14,14 +14,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.commands.economy_effects import (
-    discard_unearned_reward_proposals,
     defer_narrative_effects,
     has_economy_proposal,
     pending_decision_notice,
     currency_labels_for_rule,
     unbacked_purchase_notice,
     unbacked_payment_notice,
-    unearned_reward_notice,
     should_warn_unbacked_payment,
 )
 from src.commands.round_effects import (
@@ -675,13 +673,6 @@ class RoundProcessor:
         system_changes: list[str] = list(
             getattr(response, "system_notices", []) or [],
         )
-        dropped_rewards = discard_unearned_reward_proposals(instance, data, response.narration)
-        if dropped_rewards:
-            # The response object was populated before the economy gate; keep
-            # the authoritative state-update view in sync with the filtered
-            # proposal list so it cannot be queued through the old reference.
-            response.state_update = data.get("state_update") or {}
-            system_changes.append(unearned_reward_notice(instance.language))
         if should_warn_unbacked_payment(
             response.narration, data, instance.language,
             currency_labels=currency_labels,

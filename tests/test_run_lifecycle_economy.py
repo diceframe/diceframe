@@ -25,7 +25,6 @@ from src.engine.economy import (
     set_proposal_status,
 )
 from src.commands.economy_effects import (
-    discard_unearned_reward_proposals,
     guard_unbacked_payment_narration,
     defer_narrative_effects,
 )
@@ -192,71 +191,25 @@ def test_only_plain_personal_purchase_is_nonblocking() -> None:
     assert blocking_economy_proposals(instance) == []
 
 
-def test_conditional_narrative_reward_is_not_queued_before_task_completion() -> None:
+def test_conditional_narrative_reward_is_queued_for_policy(tmp_path) -> None:
+    """奖励不做“任务完成证据”启发式拦截：照常入提案，由奖励策略/GM 决定。
+
+    旧层会用“叙述里出现如果/以后等词且没有完成证据”丢掉奖励，导致玩家
+    应得的报酬无声消失（真实事故：第 5 轮奖励未入账且提示误导）。现在
+    叙事奖励一律进入 GM 审批提案；小额纯货币是否自动到账由奖励策略决定。
+    """
+    applier = StateUpdateApplier(tmp_path, None, load_world_template=lambda *_: {})
     instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "完成药剂师委托的报酬",
-            }],
-        },
-    }
-    dropped = discard_unearned_reward_proposals(
-        instance, data, "你要是能帮我清干净，15 金币一个子儿不少。",
-    )
-    assert dropped == 1
-    assert data["state_update"]["economy_proposals"] == []
+    data = {"state_update": {"economy_proposals": [{
+        "kind": "reward", "uid": "p2", "amount": 15,
+        "reason": "完成药剂师委托后应付的报酬",
+    }]}}
+    queued = applier.apply_state_update(instance, data["state_update"])
 
-
-def test_reward_without_completion_evidence_is_not_queued() -> None:
-    instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "任务报酬",
-            }],
-        },
-    }
-    assert discard_unearned_reward_proposals(instance, data, "药剂师向你说明报酬安排。") == 1
-    assert data["state_update"]["economy_proposals"] == []
-
-
-def test_reward_is_eligible_when_same_turn_marks_quest_completed() -> None:
-    instance = _instance()
-    data = {
-        "state_update": {
-            "economy_proposals": [{
-                "kind": "reward", "uid": "gm", "amount": 15,
-                "reason": "完成药剂师委托的报酬",
-            }],
-        },
-        "plot_update": {"quests": [{"title": "药剂师委托", "status": "completed"}]},
-    }
-    assert discard_unearned_reward_proposals(
-        instance, data, "如果你完成了委托，药剂师会支付报酬；但本轮已确认任务完成。",
-    ) == 0
-    assert len(data["state_update"]["economy_proposals"]) == 1
-    assert not has_blocking_economy_decision(instance)
-
-    # 挂起效果组的个人购买仍是屏障（防止未确认购买先读到后续叙事状态）。
-    purchase = queue_proposal(
-        instance,
-        kind="purchase",
-        source="gm_manual",
-        payer_uid="gm",
-        recipient_uid="gm",
-        amount=10,
-    )
-    queue_effect_group(
-        instance,
-        [purchase],
-        {"state_update": {"scene_change": "付费区域"}},
-    )
-    assert not is_nonblocking_personal_purchase(instance, purchase)
-    assert purchase in blocking_economy_proposals(instance)
-    assert has_blocking_economy_decision(instance)
+    assert len(queued) == 1
+    assert queued[0]["status"] == "pending"
+    assert queued[0]["approval_policy"] == "gm"
+    assert pending_proposals(instance) == queued
 
 
 def test_narrated_payment_without_protocol_is_explicitly_not_charged() -> None:

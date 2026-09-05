@@ -573,8 +573,11 @@ async def test_create_game_uses_created_character_before_opening(web_api):
 
 
 @pytest.mark.asyncio
-async def test_opening_conditional_reward_is_not_queued(web_api, monkeypatch):
-    """Opening narration must not turn a future promise into a reward proposal."""
+async def test_opening_conditional_reward_queues_gm_proposal(web_api, monkeypatch):
+    """开场条件奖励不再被证据启发式丢弃：照常进入 GM 审批提案。
+
+    是否发放由奖励策略/GM 决定；开场路径不走自动结算，提案保持 pending。
+    """
     api, _lorebook, registry, fake_llm, _worlds_dir = web_api
 
     async def opening_with_conditional_reward(*, system_prompt, user_message, **kwargs):
@@ -605,9 +608,14 @@ async def test_opening_conditional_reward_is_not_queued(web_api, monkeypatch):
     assert result["ok"] is True
     instance = registry.get(api._parse_key(result["game_key"]))
     assert instance is not None
-    assert instance.economy["proposals"] == []
-    assert any("奖励待确认" in item for item in instance.log[-1]["state_changes"])
-    assert "奖励待确认" not in instance.log[-1]["gm_response"]
+    pending = [
+        item for item in instance.economy["proposals"]
+        if item["status"] == "pending"
+    ]
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "reward"
+    assert pending[0]["amount"] == 15
+    assert pending[0]["approval_policy"] == "gm"
 
 
 @pytest.mark.asyncio
