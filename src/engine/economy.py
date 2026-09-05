@@ -337,6 +337,77 @@ def is_nonblocking_personal_purchase(
     return True
 
 
+REWARD_POLICY_MODES = frozenset({"auto_small_cash", "gm_confirm"})
+
+
+def normalize_reward_policy(policy: Any) -> dict[str, Any]:
+    """Normalize a per-game reward policy payload; invalid input means unset.
+
+    ``{"mode": "auto_small_cash" | "gm_confirm", "auto_reward_cap": int|None}``.
+    An unrecognized payload returns ``{}`` (fall through to rule/global
+    defaults) instead of guessing, so a bad settings request can never
+    silently widen auto-settlement.
+    """
+
+    if not isinstance(policy, dict):
+        return {}
+    mode = str(policy.get("mode") or "")
+    if mode not in REWARD_POLICY_MODES:
+        return {}
+    normalized: dict[str, Any] = {"mode": mode}
+    cap = policy.get("auto_reward_cap")
+    if cap is not None:
+        try:
+            cap_value = int(cap)
+        except (TypeError, ValueError):
+            return {}
+        if not 1 <= cap_value <= MAX_ECONOMY_AMOUNT:
+            return {}
+        normalized["auto_reward_cap"] = cap_value
+    return normalized
+
+
+def resolve_auto_reward_policy(
+    *,
+    game_policy: Any = None,
+    rule_template: Any = None,
+    global_enabled: bool = True,
+    global_cap: int = 500,
+) -> tuple[bool, int]:
+    """Resolve the effective (auto_enabled, gold_cap) for one game.
+
+    Precedence: explicit per-game override -> rule template
+    ``economy_defaults`` -> server global config.  The global value is the
+    server fallback for games that never configured a policy; rule templates
+    give each ruleset (D&D gold vs COC dollars) its own default scale.
+    """
+
+    defaults = (
+        rule_template.get("economy_defaults")
+        if isinstance(rule_template, dict) and isinstance(
+            rule_template.get("economy_defaults"), dict,
+        )
+        else {}
+    )
+    game = normalize_reward_policy(game_policy)
+    if game:
+        mode = str(game["mode"])
+    elif str(defaults.get("reward_policy") or "") in REWARD_POLICY_MODES:
+        mode = str(defaults["reward_policy"])
+    else:
+        mode = "auto_small_cash" if global_enabled else "gm_confirm"
+    enabled = mode == "auto_small_cash"
+    if game.get("auto_reward_cap") is not None:
+        cap = int(game["auto_reward_cap"])
+    else:
+        template_cap = defaults.get("auto_reward_cap")
+        if isinstance(template_cap, int) and 1 <= template_cap <= MAX_ECONOMY_AMOUNT:
+            cap = template_cap
+        else:
+            cap = max(1, int(global_cap or 1))
+    return enabled, max(1, min(cap, MAX_ECONOMY_AMOUNT))
+
+
 def is_auto_settleable_reward(
     instance: Any,
     proposal: dict[str, Any],
@@ -345,10 +416,10 @@ def is_auto_settleable_reward(
 ) -> bool:
     """Whether a pending narrative reward may settle without a GM click.
 
-    Deliberately narrow: plain single-recipient gold rewards for a current
-    player within the configured cap.  Team splits, cross-run entries and
-    anything outside the cap stay blocking so the GM keeps final say over
-    unusual or high-impact grants.
+    Deliberately narrow: plain single-recipient pure-currency rewards for a
+    current player within the configured cap.  Proposals carrying item
+    rewards, team splits, cross-run entries and anything outside the cap stay
+    blocking so the GM keeps final say over unusual or high-impact grants.
     """
 
     if not isinstance(proposal, dict):
@@ -358,6 +429,10 @@ def is_auto_settleable_reward(
     if str(proposal.get("kind") or "") != "reward":
         return False
     if proposal.get("contributors"):
+        return False
+    # 物品奖励不属于“小额现金”：即使结算逻辑今天只入账金币，也不能让
+    # 带物品的奖励在 GM 看不到的情况下自动通过。
+    if proposal.get("rewards"):
         return False
     recipient_uid = str(proposal.get("recipient_uid") or "")
     if not recipient_uid or recipient_uid not in instance.players:

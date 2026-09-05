@@ -267,6 +267,7 @@ export interface GameDetail {
   rest_session?: RestSessionStatus
   player_access_open?: boolean
   has_room_password?: boolean
+  economy_reward_policy?: { mode?: string; auto_reward_cap?: number }
   multiplayer?: Multiplayer
   quick_actions?: string[]
   economy_proposals?: PendingPayment[]

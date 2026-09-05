@@ -542,9 +542,29 @@ async def test_settlement_card_avoids_double_full_stop(web_api) -> None:
     assert "已标明火把1金币。关联结果现已生效。" in card
 
 
-def test_auto_reward_default_cap_is_relaxed(web_api) -> None:
-    """奖励自动结算默认上限放宽到 10000（未显式配置的存量局直接生效）。"""
-    api, _lorebook, _registry, _llm, _worlds = web_api
+@pytest.mark.asyncio
+async def test_auto_reward_default_cap_is_server_fallback(web_api) -> None:
+    """全局默认上限 500 只是服务器兜底；本局覆盖优先于全局。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
     enabled, cap = api.economy_auto_reward_settings()
     assert enabled is True
-    assert cap == 10000
+    assert cap == 500
+
+    created = await api.create_game(
+        "template_world",
+        "Reward Policy Game",
+        players=[{"character_name": "尤落", "attributes": {"str": 10}, "gold": 100}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    # 本局覆盖优先：GM 设置 gm_confirm 后，模板/全局都不再自动发放。
+    assert (await api.set_economy_reward_policy(
+        created["game_key"], {"mode": "gm_confirm"},
+    ))["ok"] is True
+    assert api.economy_auto_reward_settings(instance) == (False, 500)
+    assert api.game_detail(created["game_key"])["economy_reward_policy"] == {
+        "mode": "gm_confirm",
+    }
+    await api.set_economy_reward_policy(
+        created["game_key"], {"mode": "auto_small_cash", "auto_reward_cap": 120},
+    )
+    assert api.economy_auto_reward_settings(instance) == (True, 120)

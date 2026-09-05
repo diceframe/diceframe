@@ -117,6 +117,7 @@ class GameLifecycle:
             gm_uid=source.gm_uid,
             luck_timeout_seconds=source.luck_timeout_seconds,
             narrative_perspective=source.narrative_perspective,
+            economy_reward_policy=dict(source.economy_reward_policy or {}),
         )
         candidate.max_players = source.max_players
         candidate.player_access_open = source.player_access_open

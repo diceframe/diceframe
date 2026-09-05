@@ -153,6 +153,29 @@ async def api_set_luck_timeout(request: web.Request) -> web.Response:
     )
 
 
+async def api_set_reward_policy(request: web.Request) -> web.Response:
+    """GM 按局设置奖励自动结算策略。
+
+    body: {"mode": "auto_small_cash"|"gm_confirm", "auto_reward_cap": int?}。
+    mode=auto_small_cash 时纯货币小额奖励自动到账；gm_confirm 时所有剧情
+    奖励等待 GM 确认。auto_reward_cap 省略时沿用规则模板/全局默认。
+    """
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    if request.get("user_id", "") != inst.gm_uid:
+        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    body = await request.json()
+    policy = {
+        "mode": str(body.get("mode") or ""),
+        "auto_reward_cap": body.get("auto_reward_cap"),
+    }
+    result = await api.set_economy_reward_policy(gk, policy)
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
 async def api_set_player_away(request: web.Request) -> web.Response:
     api = _get_api(request)
     gk = request.match_info["game_key"]

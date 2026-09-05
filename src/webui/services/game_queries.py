@@ -150,6 +150,9 @@ def game_detail(
             getattr(instance, "player_access_open", True)
         ),
         "has_room_password": bool(getattr(instance, "room_password", "")),
+        "economy_reward_policy": dict(
+            getattr(instance, "economy_reward_policy", {}) or {}
+        ),
         "quick_actions": getattr(instance, "quick_actions", []),
         "economy_proposals": economy_proposals,
         "pending_luck_decisions": instance.pending_luck_checks(),

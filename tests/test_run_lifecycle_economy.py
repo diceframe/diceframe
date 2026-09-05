@@ -364,6 +364,114 @@ def test_narrative_reward_requires_gm_and_commits_once() -> None:
     assert duplicate["code"] == "ALREADY_RESOLVED"
 
 
+def test_auto_settleable_reward_excludes_item_and_team_rewards() -> None:
+    """自动结算只放行“单角色纯货币小额奖励”；带物品/平摊一律留给 GM。"""
+    from src.engine.economy import is_auto_settleable_reward
+
+    instance = _instance()
+    plain = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:12",
+    )
+    with_items = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        rewards=[{"name": "治疗药水", "category": "consumable"}],
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:12:items",
+    )
+    team = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=24,
+        contributors=[{"uid": "gm", "amount": 12}, {"uid": "p2", "amount": 12}],
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:24",
+    )
+    over_cap = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=5000,
+        approval_policy="gm",
+        source="narrative",
+        source_ref="round:1:reward:p2:5000",
+    )
+    assert is_auto_settleable_reward(instance, plain, gold_cap=500) is True
+    assert is_auto_settleable_reward(instance, with_items, gold_cap=500) is False
+    assert is_auto_settleable_reward(instance, team, gold_cap=500) is False
+    assert is_auto_settleable_reward(instance, over_cap, gold_cap=500) is False
+
+
+def test_resolve_auto_reward_policy_precedence() -> None:
+    """本局覆盖 > 规则模板 economy_defaults > 服务器全局配置。"""
+    from src.engine.economy import resolve_auto_reward_policy
+
+    # 无任何配置：全局兜底。
+    assert resolve_auto_reward_policy() == (True, 500)
+    # 全局关闭 → gm_confirm。
+    assert resolve_auto_reward_policy(global_enabled=False) == (False, 500)
+    # 规则模板默认（D&D 金币与 COC 美元量级不同，由模板给默认）。
+    assert resolve_auto_reward_policy(
+        rule_template={"economy_defaults": {"reward_policy": "auto_small_cash", "auto_reward_cap": 50}},
+        global_enabled=False,
+        global_cap=500,
+    ) == (True, 50)
+    # 本局覆盖优先于模板与全局；mode 与 cap 沿链独立解析。
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "gm_confirm"},
+        rule_template={"economy_defaults": {"reward_policy": "auto_small_cash", "auto_reward_cap": 50}},
+    ) == (False, 50)
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 300},
+        rule_template={"economy_defaults": {"auto_reward_cap": 50}},
+        global_cap=500,
+    ) == (True, 300)
+    # 非法载荷不猜测：mode 非法回退默认链，cap 越界回退全局。
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "nonsense"}, global_cap=200,
+    ) == (True, 200)
+    assert resolve_auto_reward_policy(
+        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 999999},
+        global_cap=200,
+    ) == (True, 200)
+
+
+def test_configure_session_reward_policy_normalization() -> None:
+    """本局奖励策略可设置、可清空、非法整体拒绝。"""
+    instance = _instance()
+    instance.configure_session(
+        economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": 120},
+    )
+    assert instance.economy_reward_policy == {
+        "mode": "auto_small_cash", "auto_reward_cap": 120,
+    }
+    # 空模式=显式清空，回退规则/全局默认。
+    instance.configure_session(economy_reward_policy={"mode": ""})
+    assert instance.economy_reward_policy == {}
+    # 重开拷贝语义：空 dict 幂等。
+    instance.configure_session(economy_reward_policy=dict(instance.economy_reward_policy or {}))
+    assert instance.economy_reward_policy == {}
+    instance.configure_session(economy_reward_policy={"mode": "gm_confirm"})
+    assert instance.economy_reward_policy == {"mode": "gm_confirm"}
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": -1})
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy={"mode": "nonsense"})
+    with pytest.raises(ValueError):
+        instance.configure_session(economy_reward_policy="auto_small_cash")
+
+
 def _grant_inventory_reward(sheet: dict, reward: dict) -> None:
     inventory = sheet.setdefault("inventory", [])
     inventory.append({"name": str(reward.get("name") or ""), "qty": 1})

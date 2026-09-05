@@ -132,7 +132,7 @@ class FakeApi:
             process_round=self._handler.process_round,
             resolve_luck_decision=self.resolve_luck_decision,
             decline_pending_luck=self.decline_pending_luck,
-            economy_auto_reward_settings=lambda: self.auto_reward_settings,
+            economy_auto_reward_settings=lambda _instance: self.auto_reward_settings,
             resolve_reward=self.resolve_reward,
         )
 
