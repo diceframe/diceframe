@@ -73,7 +73,15 @@ def test_projection_hides_other_players_pools() -> None:
     assert projection["scheduler"]["ready"] == []
 
     gm_projection = svc.combat_extension_projection(instance, _rule(), viewer_uid="gm", viewer_is_gm=True)
-    assert set(gm_projection["pools"]) == {"player:p1", "player:p2", "npc:old_monk"}
+    # NPC 按需参与：未被交战过的 NPC 不占状态与面板。
+    assert set(gm_projection["pools"]) == {"player:p1", "player:p2"}
+    svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "engage", "action_id": "ability:qi_palm", "target_ids": ["npc:old_monk"]},
+        actor_uid="p1", viewer_is_gm=False,
+    )
+    engaged = svc.combat_extension_projection(instance, _rule(), viewer_uid="gm", viewer_is_gm=True)
+    assert "npc:old_monk" in engaged["pools"]
 
 
 def test_projection_is_none_without_combat_block() -> None:

@@ -128,9 +128,13 @@ def _ensure_state(
     config: CombatExtensionConfig,
 ) -> tuple[CombatState, SchedulerState | None]:
     payload = instance.combat_extension or {}
+    # 玩家始终参与（队伍规模有界）；NPC 按需参与：只有已被目标锁定过
+    # （payload 里已有池）的 NPC 才进入状态，避免百人 NPC 存档与面板爆炸。
+    prior_pools = payload.get("pools", {}) or {}
     entity_ids = sorted(
         {f"player:{uid}" for uid in instance.players}
-        | {f"npc:{npc_id}" for npc_id in instance.npcs}
+        | {f"npc:{npc_id}" for npc_id in instance.npcs
+           if f"npc:{npc_id}" in prior_pools}
     )
     pools_payload = {
         entity_id: {
@@ -282,11 +286,33 @@ def resolve_combat_action(
 
     state, _scheduler = _ensure_state(instance, config)
     if requested_actor not in state.entities:
-        return {"ok": False, "code": "ACTOR_NOT_FOUND", "error": "战斗实体不存在"}
+        # NPC 行动者按需播种（GM 驱动 NPC 的入口）。
+        if (requested_actor.startswith("npc:")
+                and requested_actor.removeprefix("npc:") in instance.npcs):
+            state = replace(state, entities={
+                **state.entities,
+                requested_actor: _seed_pools(instance, config, requested_actor),
+            })
+        else:
+            return {"ok": False, "code": "ACTOR_NOT_FOUND", "error": "战斗实体不存在"}
     for target_id in target_ids or (requested_actor,):
-        if target_id not in state.entities:
-            return {"ok": False, "code": "TARGET_NOT_FOUND",
-                    "error": f"战斗目标不存在: {target_id}"}
+        if target_id in state.entities:
+            continue
+        if target_id.startswith("npc:") and target_id.removeprefix("npc:") in instance.npcs:
+            # 按需参与：首次被锁定的 NPC 此刻才播种进战斗状态。
+            state = replace(state, entities={
+                **state.entities,
+                target_id: _seed_pools(instance, config, target_id),
+            })
+            continue
+        if target_id.startswith("player:") and target_id.removeprefix("player:") in instance.players:
+            state = replace(state, entities={
+                **state.entities,
+                target_id: _seed_pools(instance, config, target_id),
+            })
+            continue
+        return {"ok": False, "code": "TARGET_NOT_FOUND",
+                "error": f"战斗目标不存在: {target_id}"}
 
     context = _formula_context(instance, config, requested_actor,
                                target_ids[0] if target_ids else None)
