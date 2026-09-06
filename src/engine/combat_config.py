@@ -50,6 +50,14 @@ class CombatResourceDecl:
 
 
 @dataclass(frozen=True)
+class CombatItemCost:
+    """动作与库存的联动声明：执行时从行动者背包扣除指定物品。"""
+
+    item: str
+    qty: int = 1
+
+
+@dataclass(frozen=True)
 class CombatActionDecl:
     """动作目录条目：canonical action_id + 服务端公式/效果声明。"""
 
@@ -58,6 +66,7 @@ class CombatActionDecl:
     name: str
     costs: tuple[ResourceCost, ...]
     effects: tuple[EffectSpec, ...]
+    consume_item: CombatItemCost | None = None
 
 
 @dataclass(frozen=True)
@@ -201,9 +210,21 @@ def _parse_actions(
             )
         except CombatActionError as exc:
             raise CombatConfigError(f"action {action_id!r}: {exc}") from exc
+        consume_item = None
+        raw_consume = item.get("consume_item")
+        if raw_consume is not None:
+            if not isinstance(raw_consume, Mapping) or not str(raw_consume.get("item") or "").strip():
+                raise CombatConfigError(f"action {action_id!r} consume_item requires item name")
+            try:
+                qty = int(raw_consume.get("qty", 1))
+            except (TypeError, ValueError):
+                raise CombatConfigError(f"action {action_id!r} consume_item qty invalid") from None
+            if qty <= 0:
+                raise CombatConfigError(f"action {action_id!r} consume_item qty must be positive")
+            consume_item = CombatItemCost(item=str(raw_consume["item"]).strip(), qty=qty)
         decls.append(CombatActionDecl(
             action_id=action_id, kind=kind, name=name,
-            costs=tuple(costs), effects=effects,
+            costs=tuple(costs), effects=effects, consume_item=consume_item,
         ))
     return tuple(decls)
 

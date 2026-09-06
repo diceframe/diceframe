@@ -484,6 +484,32 @@ def resolve_combat_action(
     ):
         return {"ok": False, "code": "SCHEDULER_NOT_READY",
                 "error": "该实体尚未就绪（ATB 行动条未满），请等待 GM 推进时间"}
+    if decl.consume_item is not None and requested_actor.startswith("player:"):
+        uid = requested_actor.removeprefix("player:")
+        sheet = instance.get_character_sheet(uid)
+        inventory = sheet.get("inventory")
+        if not isinstance(inventory, list):
+            return {"ok": False, "code": "ITEM_MISSING",
+                    "error": f"缺少物品: {decl.consume_item.item} x{decl.consume_item.qty}"}
+        remaining = decl.consume_item.qty
+        kept: list[Any] = []
+        for row in inventory:
+            if (remaining > 0 and isinstance(row, dict)
+                    and str(row.get("name") or "") == decl.consume_item.item):
+                qty = int(row.get("qty", 1) or 1)
+                take = min(qty, remaining)
+                remaining -= take
+                if qty - take > 0:
+                    kept.append({**row, "qty": qty - take})
+                # 整行耗尽 → 直接丢弃，不留空壳行。
+                continue
+            kept.append(row)
+        if remaining > 0:
+            return {"ok": False, "code": "ITEM_MISSING",
+                    "error": f"缺少物品: {decl.consume_item.item} x{decl.consume_item.qty}"}
+        sheet["inventory"] = kept
+        instance.set_character_sheet(uid, sheet)
+
     context = _formula_context(instance, config, requested_actor,
                                target_ids[0] if target_ids else None)
     combat_action = CombatAction(

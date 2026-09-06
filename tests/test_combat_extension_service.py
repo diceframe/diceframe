@@ -30,6 +30,7 @@ def _template() -> dict:
             ],
             "actions": [
                 {"id": "item:healing_pill.use", "kind": "consumable", "name": "回春丹",
+                 "consume_item": {"item": "回春丹", "qty": 1},
                  "effects": [{"kind": "resource_change", "resource": "hp",
                               "amount": {"op": "constant", "value": 10}}]},
                 {"id": "ability:escape_step", "kind": "ability", "name": "遁术",
@@ -121,6 +122,7 @@ def test_player_action_costs_qi_and_damages_npc() -> None:
 def test_healing_pill_restores_hp_with_maximum_clamp() -> None:
     instance = _instance()
     instance.get_character_sheet("p1")["hp"] = 25
+    instance.get_character_sheet("p1")["inventory"] = [{"name": "回春丹", "qty": 1}]
     result = svc.resolve_combat_action(
         instance, _rule(),
         {"intent_id": "i-2", "action_id": "item:healing_pill.use"},
@@ -304,6 +306,10 @@ def test_ready_actor_action_consumes_turn() -> None:
     ready = list(instance.combat_extension["scheduler"]["ready"])
     actor = ready[0]
     uid = actor.removeprefix("player:") if actor.startswith("player:") else actor
+    if actor.startswith("player:"):
+        target_sheet = instance.get_character_sheet(uid)
+        target_sheet["inventory"] = [{"name": "回春丹", "qty": 3}]
+        instance.set_character_sheet(uid, target_sheet)
     result = svc.resolve_combat_action(
         instance, _rule(),
         {"intent_id": "i-c1", "action_id": "item:healing_pill.use", "actor_id": actor},
@@ -330,3 +336,32 @@ def test_rapid_action_submissions_never_double_charge() -> None:
     assert all(r["ok"] for r in results)
     assert instance.get_character_sheet("p1")["qi"] == 10
     assert instance.combat_extension["pools"]["player:p1"]["qi"]["current"] == 10
+
+
+def test_consume_item_deducts_inventory_atomically() -> None:
+    """库存联动：动作执行扣除背包物品；不足则整单拒绝。"""
+    instance = _instance()
+    sheet = instance.get_character_sheet("p1")
+    sheet["inventory"] = [
+        {"name": "回春丹", "qty": 2},
+        {"name": "长剑"},
+    ]
+    instance.set_character_sheet("p1", sheet)
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-inv", "action_id": "item:healing_pill.use"},
+        actor_uid="p1", viewer_is_gm=False,
+    )
+    assert result["ok"] is True
+    rows = instance.get_character_sheet("p1")["inventory"]
+    assert rows == [{"name": "回春丹", "qty": 1}, {"name": "长剑"}]
+
+    # 只剩 1 颗时再吃 1 颗可以，但模板动作若声明 qty=2 就必须拒绝。
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-inv2", "action_id": "item:healing_pill.use"},
+        actor_uid="p1", viewer_is_gm=False,
+    )
+    assert result["ok"] is True
+    rows = instance.get_character_sheet("p1")["inventory"]
+    assert [row for row in rows if row.get("name") == "回春丹"] == []
