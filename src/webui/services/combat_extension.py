@@ -20,7 +20,8 @@ from dataclasses import replace
 from typing import Any
 
 from src.engine.combat_contracts import CombatAction
-from src.engine.combat_config import CombatExtensionConfig, combat_extension_from_template
+from src.engine.combat_config import CombatActionDecl, CombatExtensionConfig, combat_extension_from_template
+from src.engine.language import localized_text
 from src.engine.combat_effects import CombatState, apply_combat_action
 from src.engine.combat_formulas import FormulaContext, evaluate_formula_bound
 from src.engine.combat_resources import ResourcePool
@@ -201,6 +202,57 @@ def _formula_context(
     )
 
 
+def _entity_display_name(instance: GameInstance, entity_id: str) -> str:
+    if entity_id.startswith("player:"):
+        uid = entity_id.removeprefix("player:")
+        return str((instance.players.get(uid) or {}).get("character_name") or uid)
+    if entity_id.startswith("npc:"):
+        npc_id = entity_id.removeprefix("npc:")
+        npc = instance.npcs.get(npc_id) or {}
+        return str(npc.get("character_name") or npc.get("name") or npc_id)
+    return entity_id
+
+
+def _append_public_summary(
+    instance: GameInstance,
+    config: CombatExtensionConfig,
+    actor_entity: str,
+    decl: CombatActionDecl,
+    events: list[dict[str, Any]],
+) -> None:
+    """把动作结算摘要写进当前回合的公共状态变化（多人可见）。"""
+
+    damage_by_target: dict[str, int] = {}
+    healed = 0
+    for event in events:
+        if event.get("type") == "combat.damage_applied":
+            damage_by_target[event["target_id"]] = damage_by_target.get("target", 0) or 0
+            damage_by_target[event["target_id"]] = damage_by_target.get(event["target_id"], 0) + int(event.get("applied", 0) or 0)
+        elif event.get("type") == "combat.resource_changed" and int(event.get("delta", 0) or 0) > 0:
+            healed += int(event["delta"])
+    parts = []
+    if damage_by_target:
+        parts.append("、".join(
+            f"{_entity_display_name(instance, target)} -{amount}"
+            for target, amount in sorted(damage_by_target.items())
+        ))
+    if healed:
+        parts.append(f"恢复 {healed}")
+    summary = localized_text(getattr(instance, "language", "") or "", {
+        "en": f"Combat: {_entity_display_name(instance, actor_entity)} used {decl.name}"
+              + (f" ({'; '.join(parts)})" if parts else ""),
+        "zh-CN": f"战斗扩展：{_entity_display_name(instance, actor_entity)} 使用了 {decl.name}"
+                 + (f"（{'；'.join(parts)}）" if parts else ""),
+        "ja": f"戦闘：{_entity_display_name(instance, actor_entity)} が {decl.name} を使用"
+              + (f"（{'; '.join(parts)}）" if parts else ""),
+    })
+    for entry in reversed(instance.log):
+        if int(entry.get("round", -1) or -1) == int(instance.round_number):
+            changes = entry.setdefault("state_changes", [])
+            if summary not in changes:
+                changes.append(summary)
+            break
+
 def combat_extension_projection(
     instance: GameInstance,
     rule: Any,
@@ -353,6 +405,7 @@ def resolve_combat_action(
     for entity_id, entity_pools in outcome.state.entities.items():
         _write_back_to_sheets(instance, config, entity_id, dict(entity_pools))
 
+    _append_public_summary(instance, config, requested_actor, decl, outcome.events)
     return {
         "ok": True,
         "intent_id": str(intent.get("intent_id") or ""),

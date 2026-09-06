@@ -231,3 +231,21 @@ def test_malformed_intents_fail(intent: dict) -> None:
         _instance(), _rule(), intent, actor_uid="p1", viewer_is_gm=False,
     )
     assert result["ok"] is False
+
+
+def test_action_summary_enters_public_timeline() -> None:
+    """多人可见性：动作结算摘要写进当前回合的公共状态变化。"""
+    instance = _instance()
+    instance.round_number = 4
+    instance.log.append({"round": 4, "actions": [], "gm_response": "交战",
+                         "state_changes": []})
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-t", "action_id": "ability:qi_palm", "target_ids": ["npc:old_monk"]},
+        actor_uid="p1", viewer_is_gm=False,
+    )
+    assert result["ok"] is True
+    changes = instance.log[-1]["state_changes"]
+    assert any("战斗扩展" in item and "李逍遥" in item and "内力掌" in item
+               for item in changes)
+    assert any("老僧 -10" in item for item in changes)
