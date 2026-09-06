@@ -113,6 +113,10 @@ Ruleset runtime 可导入通用 engine 原语；generic engine、generic d20、m
 
 当前完成的是第一轮 ruleset capability normalization：主要 D&D 专属语义已移出 generic 层，并建立了可继续收缩的 optional runtime capability 边界。`RulesetRuntime` 主协议仍承载角色构建、验证、intent、事件、投影和迁移等较宽的基础契约；这不是“所有规则能力都已独立 capability 化”或 runtime 协议已经最小化的声明。
 
+## 通用战斗扩展
+
+通用战斗扩展（Issue 212 / ADR 0004）提供规则无关的公式 DSL、资源池、效果引擎与调度器原语。依赖方向固定为 contracts → primitives → ruleset adapter → ruleset catalog → transport，generic engine 不含任何 per-ruleset 分支。动作、效果与消耗全部是数据（通用 kind 词表），法术/遁术/丹药等身份由规则动作目录的 canonical `action_id` 表达；伤害与消耗金额经受限 JSON-AST 公式求值——白名单节点、深度/节点/骰子/结果上限、未知引用 fail closed、可注入确定性骰源，绝不 eval。资源池与调度器由规则 runtime 显式声明 capability（`combat_action_effects` / `combat_resource_pools` / `combat_scheduler`）后启用，客户端只提交 intent 并渲染服务端投影，伤害、速度与资源结算值不可信。D&D 2024 的伤害/治疗骰式已经由 D&D 侧适配器改经通用公式 AST 求值，法术位、专注、豁免与胜利判定仍归 D&D reducer；调度器与资源池的持久化随首个消费规则集落地。
+
 ## Ruleset Bundle v1
 
 `templates/rulesets/<directory_id>/` 是第一方高级规则的离线内容快照，不是 Plugin Content V2 的替代。Bundle manifest 绑定 `bundle_id`、`runtime_id`、规则/内容版本、locale 与归属文件。Canonical entity 必须具有稳定 `kind:id`、`source_ref` 和 `automation_level`。

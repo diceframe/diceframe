@@ -117,6 +117,27 @@ At startup, bundled adventures are synchronized as complete directories into `da
 
 An adventure step may replace the current story entry but never the selected Worldbook. Narrative context always includes the actual Worldbook setting, starter scene, and matched lore. Adventure completion returns to standard free play in that same world instead of a terminal tutorial page.
 
+## Generic Combat Extension
+
+The generic combat extension (Issue 212 / ADR 0004) provides ruleset-neutral
+formula DSL, resource pool, effect engine, and turn scheduler primitives.
+The dependency direction is fixed: contracts -> primitives -> ruleset
+adapter -> ruleset catalog -> transport, with no per-ruleset branches in the
+generic engine. Actions, effects, and costs are data (generic kind
+vocabularies); spell, technique, and consumable identities live in ruleset
+action catalogs as canonical `action_id`. Damage and cost amounts are
+evaluated through a restricted JSON-AST formula DSL -- whitelisted nodes,
+depth/node/dice/result limits, fail-closed unknown references, injectable
+deterministic dice source, never `eval`. Resource pools and schedulers
+activate only when a ruleset runtime explicitly declares the capability
+(`combat_action_effects` / `combat_resource_pools` / `combat_scheduler`);
+clients submit intents and render server projections, and damage, speed, or
+resource results from clients are ignored. D&D 2024 damage and healing dice
+now evaluate through the generic formula AST via a D&D-side adapter, while
+spell slots, concentration, saves, and victory detection remain in the D&D
+reducer. Scheduler and pool persistence lands with the first consuming
+ruleset.
+
 ## D&D 2024 Authoritative Play State
 
 `core:dnd2024` combat, Session 0, and campaign records share `GameInstance.ruleset_state.version` and one EventBatch ledger. An optional adventure supplies story input through its exact binding but is not part of the Ruleset Bundle. Combat and campaign events have separate reducers; the runtime composition root dispatches explicit intent types without making the generic engine import D&D code.
