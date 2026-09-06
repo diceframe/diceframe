@@ -317,7 +317,7 @@ class ThresholdScheduler:
         if not alive:
             raise SchedulerError("no living actors to schedule")
         for actor_id in alive:
-            if _stat(actors[actor_id], "speed") <= 0:
+            if _stat(actors[actor_id], self.config.speed_stat) <= 0:
                 raise SchedulerError(
                     f"threshold scheduler requires speed > 0 for actor {actor_id!r}"
                 )

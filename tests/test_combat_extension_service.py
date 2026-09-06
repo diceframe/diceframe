@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.engine.game_instance import GameInstance
@@ -18,7 +20,8 @@ def _template() -> dict:
         "rule_id": "freeform_wuxia",
         "combat": {
             "scheduler": {"kind": "threshold", "gauge": "action_gauge",
-                          "speed": "action_speed", "threshold": 100},
+                          "speed": "action_speed", "threshold": 100,
+                      "speed_formula": {"op": "constant", "value": 50}},
             "resources": [
                 {"id": "hp", "source": "hp"},
                 {"id": "qi", "source": "special_stat", "stat": "qi", "maximum": 100},
@@ -29,7 +32,11 @@ def _template() -> dict:
                 {"id": "item:healing_pill.use", "kind": "consumable", "name": "回春丹",
                  "effects": [{"kind": "resource_change", "resource": "hp",
                               "amount": {"op": "constant", "value": 10}}]},
-                {"id": "ability:qi_palm", "kind": "ability", "name": "内力掌",
+                {"id": "ability:escape_step", "kind": "ability", "name": "遁术",
+             "costs": [{"resource": "qi", "amount": {"op": "constant", "value": 5}}],
+             "effects": [{"kind": "modify_stat", "resource": "action_speed",
+                          "amount": {"op": "constant", "value": 50}, "duration": 1}]},
+            {"id": "ability:qi_palm", "kind": "ability", "name": "内力掌",
                  "costs": [{"resource": "qi", "amount": {"op": "constant", "value": 8}}],
                  "effects": [{"kind": "damage", "amount": {
                      "op": "multiply", "args": [
@@ -65,7 +72,7 @@ def test_projection_hides_other_players_pools() -> None:
     projection = svc.combat_extension_projection(instance, _rule(), viewer_uid="p1", viewer_is_gm=False)
     assert projection is not None
     assert [action["id"] for action in projection["actions"]] == [
-        "item:healing_pill.use", "ability:qi_palm",
+        "item:healing_pill.use", "ability:escape_step", "ability:qi_palm",
     ]
     assert set(projection["pools"]) == {"player:p1"}
     assert projection["pools"]["player:p1"]["qi"] == {"current": 50, "maximum": 100}
@@ -249,3 +256,77 @@ def test_action_summary_enters_public_timeline() -> None:
     assert any("战斗扩展" in item and "李逍遥" in item and "内力掌" in item
                for item in changes)
     assert any("老僧 -10" in item for item in changes)
+
+
+def test_scheduler_advance_accumulates_and_buff_speeds_next_tick() -> None:
+    """ATB：GM 推进累积 gauge；遁术 buff 提升下一次推进速度。"""
+    instance = _instance()
+    result = svc.scheduler_advance(instance, _rule())
+    assert result["ok"] is True
+    # 按需参与：未交战过的 NPC 不在调度集合里。
+    assert result["ready"] == ["player:p1", "player:p2"]
+    assert result["gauges"]["player:p1"] == 100
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-s1", "action_id": "ability:escape_step"},
+        actor_uid="p1", viewer_is_gm=False,
+    )
+    assert result["ok"] is True
+    assert instance.combat_extension["buffs"][0]["delta"] == 50
+    result = svc.scheduler_advance(instance, _rule())
+    assert "player:p1" in result["ready"]
+    # 时长 1 的 buff 在推进后到期移除。
+    assert not any(b["entity_id"] == "player:p1"
+                   for b in instance.combat_extension["buffs"])
+
+
+def test_scheduler_gates_actions_before_ready() -> None:
+    """调度器激活后，未就绪实体不能行动（ATB 纪律）。"""
+    instance = _instance()
+    svc.scheduler_advance(instance, _rule())
+    ready = instance.combat_extension["scheduler"]["ready"]
+    other = next(entity for entity in ("player:p1", "player:p2", "npc:old_monk")
+                 if entity not in ready)
+    actor_uid = other.removeprefix("player:") or "gm"
+    viewer_is_gm = not other.startswith("player:")
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-g1", "action_id": "item:healing_pill.use",
+         "actor_id": other},
+        actor_uid=actor_uid, viewer_is_gm=viewer_is_gm,
+    )
+    assert result["code"] == "SCHEDULER_NOT_READY"
+
+
+def test_ready_actor_action_consumes_turn() -> None:
+    instance = _instance()
+    svc.scheduler_advance(instance, _rule())
+    ready = list(instance.combat_extension["scheduler"]["ready"])
+    actor = ready[0]
+    uid = actor.removeprefix("player:") if actor.startswith("player:") else actor
+    result = svc.resolve_combat_action(
+        instance, _rule(),
+        {"intent_id": "i-c1", "action_id": "item:healing_pill.use", "actor_id": actor},
+        actor_uid=uid, viewer_is_gm=True,
+    )
+    assert result["ok"] is True
+    assert actor not in instance.combat_extension["scheduler"]["ready"]
+
+
+def test_rapid_action_submissions_never_double_charge() -> None:
+    """快速连发提交（模拟并发请求）：结算在事件循环内原子执行，
+    内力扣减无重复、无丢失。真正的多请求竞态由 aiohttp 串行化 +
+    integration 并发测试覆盖。"""
+    instance = _instance()
+    results = [
+        svc.resolve_combat_action(
+            instance, _rule(),
+            {"intent_id": f"i-r{i}", "action_id": "ability:qi_palm",
+             "target_ids": ["npc:old_monk"]},
+            actor_uid="p1", viewer_is_gm=False,
+        )
+        for i in range(5)
+    ]
+    assert all(r["ok"] for r in results)
+    assert instance.get_character_sheet("p1")["qi"] == 10
+    assert instance.combat_extension["pools"]["player:p1"]["qi"]["current"] == 10

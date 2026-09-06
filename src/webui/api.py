@@ -1582,6 +1582,18 @@ class WebAPI:
         await self.save_game_instance(instance)
         return {"ok": True, "economy_reward_policy": instance.economy_reward_policy}
 
+    async def combat_extension_scheduler_advance(self, game_key: str) -> dict[str, Any]:
+        """通用战斗扩展：GM 推进 ATB 时间（gauge 累积至有人就绪）。"""
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        rule = self._load_rule_for_game(instance)
+        result = combat_extension_service.scheduler_advance(instance, rule)
+        if result.get("ok"):
+            await self.save_game_instance(instance)
+        return result
+
     async def combat_extension_action(
         self, game_key: str, intent: dict[str, Any], *,
         session_uid: str, viewer_is_gm: bool,

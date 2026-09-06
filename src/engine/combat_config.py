@@ -67,6 +67,8 @@ class CombatExtensionConfig:
     scheduler: SchedulerConfig | None
     resources: tuple[CombatResourceDecl, ...]
     actions: tuple[CombatActionDecl, ...]
+    # ATB 每个实体的基础速度公式（按实体属性求值）；缺省为常数 25。
+    speed_formula: Mapping[str, Any] | None = None
 
     @property
     def resource_ids(self) -> frozenset[str]:
@@ -230,6 +232,13 @@ def combat_extension_from_template(template: Mapping[str, Any]) -> CombatExtensi
         else None
     )
     actions = _parse_actions(raw.get("actions"), allowed_resources, allowed_damage_types)
+    speed_formula = None
+    if isinstance(scheduler_raw, Mapping):
+        candidate = scheduler_raw.get("speed_formula")
+        if candidate is not None and (not isinstance(candidate, Mapping) or not candidate.get("op")):
+            raise CombatConfigError("scheduler.speed_formula must be a formula object")
+        speed_formula = candidate
     return CombatExtensionConfig(
         scheduler=scheduler, resources=resources, actions=actions,
+        speed_formula=speed_formula,
     )

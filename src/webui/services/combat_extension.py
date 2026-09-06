@@ -163,11 +163,16 @@ def _ensure_state(
     raw_scheduler = payload.get("scheduler")
     if isinstance(raw_scheduler, dict) and raw_scheduler:
         scheduler_state = SchedulerState.from_dict(raw_scheduler)
+    buffs = tuple(
+        dict(item) for item in (payload.get("buffs") or [])
+        if isinstance(item, dict)
+    )
     return (
         CombatState(
             entities=pools,
             hp_resource=config.hp_resource,
             barriers=config.barrier_resources,
+            buffs=buffs,
         ),
         scheduler_state,
     )
@@ -252,6 +257,109 @@ def _append_public_summary(
             if summary not in changes:
                 changes.append(summary)
             break
+
+def _scheduler_combat_state(
+    instance: GameInstance,
+    config: CombatExtensionConfig,
+    buffs: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """构建调度器视角的 plain combat-state：实体存活、速度、先攻修正。
+
+    基础速度来自模板声明的 speed_formula（按实体属性求值，缺省常数 25）；
+    生效 buff（stat 与 speed_stat 一致）叠加其上。
+    """
+
+    actors: dict[str, Any] = {}
+    for entity_id, pools in _ensure_state(instance, config)[0].entities.items():
+        sheet: dict[str, Any] = {}
+        if entity_id.startswith("player:"):
+            uid = entity_id.removeprefix("player:")
+            sheet = instance.get_character_sheet(uid)
+        elif entity_id.startswith("npc:"):
+            npc = instance.npcs.get(entity_id.removeprefix("npc:")) or {}
+            sheet = {"attributes": npc.get("attributes") or {}}
+        attributes = {
+            str(key): int(value)
+            for key, value in (sheet.get("attributes") or {}).items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+        context = FormulaContext(
+            attributes=attributes, derived_stats={}, resources={},
+            equipment_stats={}, actor_id=entity_id,
+        )
+        speed = 25
+        if config.speed_formula:
+            try:
+                speed = evaluate_formula_bound(config.speed_formula, context)
+            except ValueError:
+                speed = 25
+        speed += sum(
+            int(buff.get("delta", 0) or 0)
+            for buff in buffs
+            if buff.get("entity_id") == entity_id
+            and buff.get("stat") == config.scheduler.speed_stat
+            and int(buff.get("remaining", 0) or 0) > 0
+        )
+        alive = not entity_id.startswith("player:") or not instance.is_dead(
+            entity_id.removeprefix("player:")
+        )
+        actors[entity_id] = {
+            "alive": bool(alive),
+            config.scheduler.speed_stat: max(0, speed),
+            "initiative_modifier": 0,
+        }
+    return {"actors": actors}
+
+
+def scheduler_advance(
+    instance: GameInstance,
+    rule: Any,
+) -> dict[str, Any]:
+    """GM 推进 ATB 时间：gauge 按速度累积直至有人就绪；buff 时长随推进扣减。"""
+
+    config = load_config(rule)
+    if config is None or config.scheduler is None:
+        return {"ok": False, "code": "COMBAT_EXTENSION_NOT_CONFIGURED",
+                "error": "当前规则未声明战斗扩展调度器"}
+    state, scheduler_state = _ensure_state(instance, config)
+    scheduler = scheduler_from_config(config.scheduler)
+    if scheduler_state is None:
+        initialized = scheduler.initialize(
+            _scheduler_combat_state(instance, config, state.buffs),
+        )
+        scheduler_state = initialized.state
+        events = list(initialized.events)
+    else:
+        events = []
+    combat_state = _scheduler_combat_state(instance, config, state.buffs)
+    result = scheduler.advance(scheduler_state, combat_state)
+    # buff 时长随推进扣减（仅作用于调度相关 stat 的修正）。
+    ticked: list[dict[str, Any]] = []
+    for buff in state.buffs:
+        remaining = int(buff.get("remaining", 0) or 0) - 1
+        if remaining > 0:
+            ticked.append({**buff, "remaining": remaining})
+    payload = {
+        "schema_version": _COMBAT_EXTENSION_SCHEMA,
+        "scheduler": result.state.to_dict(),
+        "buffs": [dict(buff) for buff in ticked],
+        "pools": {
+            entity_id: {
+                resource_id: {"current": pool.current, "maximum": pool.maximum,
+                              "minimum": pool.minimum}
+                for resource_id, pool in entity_pools.items()
+            }
+            for entity_id, entity_pools in state.entities.items()
+        },
+    }
+    instance.combat_extension = payload
+    events = [*events, *result.events]
+    return {
+        "ok": True,
+        "events": events,
+        "ready": list(result.ready_actor_ids),
+        "gauges": dict(result.state.gauges),
+    }
 
 def combat_extension_projection(
     instance: GameInstance,
@@ -366,6 +474,16 @@ def resolve_combat_action(
         return {"ok": False, "code": "TARGET_NOT_FOUND",
                 "error": f"战斗目标不存在: {target_id}"}
 
+    scheduler_instance = (
+        scheduler_from_config(config.scheduler)
+        if config.scheduler and _scheduler is not None
+        else None
+    )
+    if scheduler_instance is not None and requested_actor not in scheduler_instance.available_actors(
+        _scheduler, _scheduler_combat_state(instance, config, state.buffs),
+    ):
+        return {"ok": False, "code": "SCHEDULER_NOT_READY",
+                "error": "该实体尚未就绪（ATB 行动条未满），请等待 GM 推进时间"}
     context = _formula_context(instance, config, requested_actor,
                                target_ids[0] if target_ids else None)
     combat_action = CombatAction(
@@ -389,6 +507,7 @@ def resolve_combat_action(
             if _scheduler
             else (instance.combat_extension or {}).get("scheduler")
         ),
+        "buffs": [dict(buff) for buff in outcome.state.buffs],
         "pools": {
             entity_id: {
                 resource_id: {
@@ -405,6 +524,13 @@ def resolve_combat_action(
     for entity_id, entity_pools in outcome.state.entities.items():
         _write_back_to_sheets(instance, config, entity_id, dict(entity_pools))
 
+    if scheduler_instance is not None:
+        consumed = scheduler_instance.consume_turn(
+            _scheduler,
+            _scheduler_combat_state(instance, config, outcome.state.buffs),
+            requested_actor,
+        )
+        payload["scheduler"] = consumed.state.to_dict()
     _append_public_summary(instance, config, requested_actor, decl, outcome.events)
     return {
         "ok": True,

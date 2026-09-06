@@ -105,7 +105,13 @@ def validate_effect_spec(
     if resource is not None:
         if not isinstance(resource, str) or not resource.strip():
             raise CombatActionError("effect resource must be a non-empty string")
-        if allowed_resources is not None and resource not in allowed_resources:
+        # 池引用校验只适用于 resource_change；modify_stat 的 resource 是
+        # 调度 stat 名（如 action_speed），不属于资源池。
+        if (
+            effect.get("kind") == "resource_change"
+            and allowed_resources is not None
+            and resource not in allowed_resources
+        ):
             raise CombatActionError(
                 f"effect references undeclared resource: {resource!r}"
             )

@@ -434,3 +434,19 @@ async def api_combat_action(request: web.Request) -> web.Response:
         viewer_is_gm=is_game_gm(inst, session_uid, owner),
     )
     return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
+async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
+    """GM 推进 ATB 时间。"""
+
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if inst is None:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    session_uid = str(request.get("user_id", "") or "")
+    owner = bool(request.get("owner_authenticated", False))
+    if not is_game_gm(inst, session_uid, owner):
+        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    result = await api.combat_extension_scheduler_advance(gk)
+    return web.json_response(result, status=200 if result.get("ok") else 400)
