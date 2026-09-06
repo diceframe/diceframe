@@ -96,6 +96,25 @@ def list_games(dependencies: GameQueryDependencies) -> dict[str, Any]:
     return {"games": active, "total": len(active)}
 
 
+def _combat_extension_projection(
+    instance: Any, dependencies: Any, viewer_uid: str,
+) -> dict[str, Any] | None:
+    """声明了 combat 能力的规则返回动作/资源/调度器投影；其余返回 None。"""
+
+    from src.webui.services import combat_extension as combat_extension_service
+
+    try:
+        rule = dependencies.load_rule_for_game(instance)
+    except Exception:
+        return None
+    if rule is None:
+        return None
+    viewer_is_gm = bool(viewer_uid) and viewer_uid == (instance.gm_uid or "")
+    return combat_extension_service.combat_extension_projection(
+        instance, rule, viewer_uid=viewer_uid, viewer_is_gm=viewer_is_gm,
+    )
+
+
 def game_detail(
     dependencies: GameQueryDependencies,
     game_key: str,
@@ -153,6 +172,7 @@ def game_detail(
         "economy_reward_policy": dict(
             getattr(instance, "economy_reward_policy", {}) or {}
         ),
+        "combat_extension": _combat_extension_projection(instance, dependencies, viewer_uid),
         "quick_actions": getattr(instance, "quick_actions", []),
         "economy_proposals": economy_proposals,
         "pending_luck_decisions": instance.pending_luck_checks(),

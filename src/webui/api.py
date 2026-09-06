@@ -26,6 +26,7 @@ from src.rulesets.builtin import (
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, scene_images, speech, system, tunnel, announcements, assistant, hub, legal
+from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
@@ -1580,6 +1581,24 @@ class WebAPI:
             return {"ok": False, "error": str(exc)}
         await self.save_game_instance(instance)
         return {"ok": True, "economy_reward_policy": instance.economy_reward_policy}
+
+    async def combat_extension_action(
+        self, game_key: str, intent: dict[str, Any], *,
+        session_uid: str, viewer_is_gm: bool,
+    ) -> dict[str, Any]:
+        """通用战斗扩展：结算一次动作 intent（数值全部服务端求值）。"""
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        rule = self._load_rule_for_game(instance)
+        result = await combat_extension_service.resolve_combat_action(
+            instance, rule, intent,
+            actor_uid=session_uid, viewer_is_gm=viewer_is_gm,
+        )
+        if result.get("ok"):
+            await self.save_game_instance(instance)
+        return result
 
     async def create_payment_proposal(
         self,

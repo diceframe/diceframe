@@ -314,5 +314,83 @@
     "persuasion": {
       "name": "交涉"
     }
+  },
+  "combat": {
+    "scheduler": {
+      "kind": "threshold",
+      "gauge": "action_gauge",
+      "speed": "action_speed",
+      "threshold": 100,
+      "overflow": "carry",
+      "consume": "reset"
+    },
+    "resources": [
+      {
+        "id": "hp",
+        "source": "hp"
+      },
+      {
+        "id": "qi",
+        "source": "special_stat",
+        "stat": "qi",
+        "maximum": 100
+      },
+      {
+        "id": "barrier",
+        "source": "combat_state",
+        "maximum": 50,
+        "damage_priority": "before_hp"
+      }
+    ],
+    "actions": [
+      {
+        "id": "item:healing_pill.use",
+        "kind": "consumable",
+        "name": "回春丹",
+        "effects": [
+          {
+            "kind": "resource_change",
+            "resource": "hp",
+            "amount": {
+              "op": "constant",
+              "value": 10
+            }
+          }
+        ]
+      },
+      {
+        "id": "ability:qi_palm",
+        "kind": "ability",
+        "name": "内力掌",
+        "costs": [
+          {
+            "resource": "qi",
+            "amount": {
+              "op": "constant",
+              "value": 8
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "amount": {
+              "op": "multiply",
+              "args": [
+                {
+                  "op": "attribute",
+                  "id": "str"
+                },
+                {
+                  "op": "constant",
+                  "value": 2
+                }
+              ]
+            },
+            "damage_type": "bludgeoning"
+          }
+        ]
+      }
+    ]
   }
 }
