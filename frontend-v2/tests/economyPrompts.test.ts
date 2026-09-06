@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PendingPayment } from '@/api/types'
-import { isEconomyProposalActionable, isNonBlockingPersonalPurchase, nextEconomyProposal } from '@/features/play/economyPrompts'
+import { buildRewardPolicySave, isEconomyProposalActionable, isNonBlockingPersonalPurchase, nextEconomyProposal } from '@/features/play/economyPrompts'
 
 const pending = (values: Partial<PendingPayment>): PendingPayment => ({
   id: 'proposal',
@@ -32,5 +32,35 @@ describe('economy prompt authority', () => {
     expect(nextEconomyProposal([first, second], 'player', 'gm', new Set(['first']))).toBe(second)
     expect(nextEconomyProposal([first], 'player', 'gm', new Set(['first']))).toBeUndefined()
     expect(nextEconomyProposal([first], 'player', 'gm', new Set())).toBe(first)
+  })
+})
+
+describe('reward policy save gating', () => {
+  it('skips the request when the GM never touched the reward fields', () => {
+    // 修改密码/幸运超时时不得顺带提交：detail 未加载时 mode 为空会被后端
+    // 解释为清除本局覆盖。
+    expect(buildRewardPolicySave(false, 'auto_small_cash', '120')).toBeNull()
+    expect(buildRewardPolicySave(false, '', '')).toBeNull()
+  })
+
+  it('submits exactly what the GM chose once the fields were touched', () => {
+    expect(buildRewardPolicySave(true, 'auto_small_cash', '120')).toEqual({
+      mode: 'auto_small_cash',
+      auto_reward_cap: 120,
+    })
+    // 留空上限 = 沿用规则/服务器默认。
+    expect(buildRewardPolicySave(true, 'auto_small_cash', '')).toEqual({
+      mode: 'auto_small_cash',
+      auto_reward_cap: null,
+    })
+    // 显式选择“跟随默认”= 清除本局覆盖。
+    expect(buildRewardPolicySave(true, '', '')).toEqual({
+      mode: '',
+      auto_reward_cap: null,
+    })
+    expect(buildRewardPolicySave(true, 'gm_confirm', '')).toEqual({
+      mode: 'gm_confirm',
+      auto_reward_cap: null,
+    })
   })
 })
