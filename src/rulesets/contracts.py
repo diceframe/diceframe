@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from src.engine.combat_scheduler import SCHEDULER_KINDS
+
 
 CharacterBuilderMode = Literal["legacy", "guided", "professional"]
 CharacterLifecycleMode = Literal["legacy", "rules_aware"]
@@ -24,6 +26,15 @@ class RulesetCapabilities:
     tutorial_coach: bool = False
     narrative_turns: bool = False
     adventure_formats: tuple[str, ...] = ()
+    # 通用战斗扩展（Issue 212）：只有规则 runtime 显式声明才会启用；
+    # 前端据此展示动作/资源条/行动条，不自行推断。
+    combat_action_effects: bool = False
+    combat_resource_pools: bool = False
+    combat_scheduler: str = ""  # "" | round_robin | initiative | threshold
+
+    def __post_init__(self) -> None:
+        if self.combat_scheduler and self.combat_scheduler not in SCHEDULER_KINDS:
+            raise ValueError(f"unknown combat scheduler kind: {self.combat_scheduler!r}")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
