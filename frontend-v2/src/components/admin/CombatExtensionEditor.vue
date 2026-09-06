@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { type ActionDraft, type CombatDraft, type FormulaDraft } from '@/features/admin/combatExtensionDraft'
+import { type CombatDraft, type FormulaDraft } from '@/features/admin/combatExtensionDraft'
 
 const props = defineProps<{ modelValue: CombatDraft; resourceOptions: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: CombatDraft] }>()
