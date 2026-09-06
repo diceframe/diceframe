@@ -92,7 +92,7 @@ def test_unknown_references_and_ops_fail_closed() -> None:
 
 def test_invalid_dice_forms_fail_closed() -> None:
     context = _context()
-    for formula in ("0d6", "1d0", "abc", "1d6+1d4", "100d6"):
+    for formula in ("0d6", "1d0", "abc", "1d6+1d4", "1000d6"):
         with pytest.raises(FormulaError):
             evaluate_formula({"op": "dice", "formula": formula}, context)
 

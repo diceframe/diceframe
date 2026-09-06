@@ -12,7 +12,7 @@ closed，非法引用（未知属性、未知资源、非法骰式）直接拒�
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,9 +22,9 @@ from src.engine.dice_rng import roll
 MAX_FORMULA_DEPTH = 8
 MAX_FORMULA_NODES = 64
 MAX_FORMULA_DICE_NODES = 8
-# 骰式必须是最简 NdM 形式且骰数/面数均 ≥1；dice_rng 自带数量/面数/修正
-# 上限并会抛 ValueError。
-_DICE_FORMULA_RE = re.compile(r"^[1-9]\d{0,1}d[1-9]\d{0,3}$")
+# 骰式必须是最简 NdM 形式且骰数/面数均 ≥1；骰数最多三位（上层规则目录
+# 负责更严格的面数白名单）。默认骰源 dice_rng 自带上限并会抛 ValueError。
+_DICE_FORMULA_RE = re.compile(r"^[1-9]\d{0,2}d[1-9]\d{0,3}$")
 # 结果绝对值上限：与经济金额同量级，防止公式爆炸。
 MAX_FORMULA_ABSOLUTE_RESULT = 100_000
 
@@ -73,11 +73,16 @@ def evaluate_formula(
     node: Mapping[str, Any],
     context: FormulaContext,
     *,
+    dice_roller: Callable[[str], Any] | None = None,
     _depth: int = 0,
     _counter: list[int] | None = None,
     _dice_nodes: list[int] | None = None,
 ) -> int:
-    """求值一个公式 AST 节点；任何非法输入都抛 FormulaError。"""
+    """求值一个公式 AST 节点；任何非法输入都抛 FormulaError。
+
+    ``dice_roller`` 允许宿主规则注入确定性骰源（返回带 ``total`` 的对象）；
+    缺省使用服务端 dice_rng。
+    """
 
     if _counter is None:
         _counter = [0]
@@ -119,7 +124,8 @@ def evaluate_formula(
         if _dice_nodes[0] > MAX_FORMULA_DICE_NODES:
             raise FormulaError("formula has too many dice nodes")
         try:
-            return int(roll(formula).total)
+            roller = dice_roller or roll
+            return int(roller(formula).total)
         except ValueError as exc:
             raise FormulaError(f"invalid dice formula: {formula!r}") from exc
 
@@ -132,12 +138,14 @@ def evaluate_formula(
             raise FormulaError("negate takes exactly one arg")
         return -evaluate_formula(
             args[0], context,
+            dice_roller=dice_roller,
             _depth=_depth + 1, _counter=_counter, _dice_nodes=_dice_nodes,
         )
 
     values = [
         evaluate_formula(
             arg, context,
+            dice_roller=dice_roller,
             _depth=_depth + 1, _counter=_counter, _dice_nodes=_dice_nodes,
         )
         for arg in args
@@ -156,6 +164,31 @@ def evaluate_formula(
         return min(values)
     # op == "max"（白名单已保证）
     return max(values)
+
+
+def evaluate_formula_trace(
+    node: Mapping[str, Any],
+    context: FormulaContext,
+    *,
+    dice_roller: Callable[[str], Any] | None = None,
+) -> tuple[int, list[int]]:
+    """求值并返回各骰节点按求值顺序展开的骰值明细。
+
+    供宿主规则在权威事件里保留掷骰明细（例如 D&D 的 ``rolls`` 字段）；
+    结果与 :func:`evaluate_formula` 完全一致，仅额外收集骰迹。
+    """
+
+    rolls: list[int] = []
+
+    def roller(formula: str) -> Any:
+        result = (dice_roller or roll)(formula)
+        raw_rolls = getattr(result, "rolls", None)
+        if isinstance(raw_rolls, list):
+            rolls.extend(int(item) for item in raw_rolls)
+        return result
+
+    value = evaluate_formula(node, context, dice_roller=roller)
+    return value, rolls
 
 
 def evaluate_formula_bound(node: Mapping[str, Any], context: FormulaContext) -> int:

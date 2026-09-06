@@ -6,13 +6,20 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from .action_adapter import (
+    attack_damage_node,
+    double_dice_counts,
+    formula_node_from_dice_formula,
+    heal_ability_modifier_node,
+    roll_damage_node,
+    spell_formula_node,
+)
 from .primitives import (
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
-    roll as _roll,
 )
 
 
@@ -122,14 +129,21 @@ class CombatResolutionMixin:
             "total": total, "target": target_ac, "success": hit, "critical": critical,
         })
         if hit:
-            damage, rolls = _roll(damage_formula, rng, critical=critical)
-            damage = max(0, damage + modifier)
+            # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化）
+            # → 属性修正；重击翻倍仍由本层在 AST 上显式表达。
+            extra_dice = None
             if "hexed" in target["conditions"] and target["conditions"]["hexed"].get(
                 "source_actor_id"
             ) == actor_id:
-                extra, extra_rolls = _roll("1d6", rng, critical=critical)
-                damage += extra
-                rolls.extend(extra_rolls)
+                extra_dice = "1d6"
+            damage_node = attack_damage_node(
+                damage_formula=damage_formula,
+                modifier=modifier,
+                critical=critical,
+                extra_dice_formula=extra_dice,
+            )
+            damage, rolls = roll_damage_node(damage_node, rng)
+            damage = max(0, damage)
             events.append({
                 "type": "resource.changed", "resource": "hp", "target_id": target_id,
                 "delta": -damage, "amount": damage, "damage_type": damage_type,
@@ -198,11 +212,13 @@ class CombatResolutionMixin:
                     "success": succeeded, "critical": roll == 20,
                 })
                 if succeeded:
-                    formula = self._spell_formula(
+                    damage_node = spell_formula_node(
                         str(effect["damage"]), effect.get("upcast_damage"),
                         spell, slot_level, actor,
                     )
-                    damage, rolls = _roll(formula, rng, critical=roll == 20)
+                    if roll == 20:
+                        damage_node = double_dice_counts(damage_node)
+                    damage, rolls = roll_damage_node(damage_node, rng)
                     events.append({
                         "type": "resource.changed", "resource": "hp", "target_id": target_id,
                         "delta": -damage, "amount": damage,
@@ -226,11 +242,11 @@ class CombatResolutionMixin:
                     "target": actor["spell_save_dc"], "success": succeeded,
                 })
                 if effect.get("damage"):
-                    formula = self._spell_formula(
+                    damage_node = spell_formula_node(
                         str(effect["damage"]), effect.get("upcast_damage"),
                         spell, slot_level, actor,
                     )
-                    damage, rolls = _roll(formula, rng)
+                    damage, rolls = roll_damage_node(damage_node, rng)
                     if succeeded:
                         damage = damage // 2 if effect.get("half_on_success") else 0
                     if damage:
@@ -244,11 +260,11 @@ class CombatResolutionMixin:
                         if self._last_hostile_defeated(combat, target, damage):
                             defeated_targets.add(target_id)
             elif mode == "automatic_damage":
-                formula = self._spell_formula(
+                damage_node = spell_formula_node(
                     str(effect["damage"]), effect.get("upcast_damage"),
                     spell, slot_level, actor,
                 )
-                damage, rolls = _roll(formula, rng)
+                damage, rolls = roll_damage_node(damage_node, rng)
                 events.append({
                     "type": "resource.changed", "resource": "hp", "target_id": target_id,
                     "delta": -damage, "amount": damage,
@@ -260,13 +276,13 @@ class CombatResolutionMixin:
                     defeated_targets.add(target_id)
                 succeeded = True
             elif mode == "healing":
-                formula = self._spell_formula(
+                healing_node = spell_formula_node(
                     str(effect["healing"]), effect.get("upcast_healing"),
                     spell, slot_level, actor,
                 )
-                healing, rolls = _roll(formula, rng)
                 if effect.get("add_spell_ability"):
-                    healing += ability_modifier(actor["abilities"][actor["spell_ability"]])
+                    healing_node = heal_ability_modifier_node(healing_node, actor)
+                healing, rolls = roll_damage_node(healing_node, rng)
                 events.append({
                     "type": "resource.changed", "resource": "hp", "target_id": target_id,
                     "delta": max(1, healing), "amount": max(1, healing), "healing": True,

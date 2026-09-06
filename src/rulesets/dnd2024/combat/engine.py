@@ -15,14 +15,12 @@ from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch
 
 
 from .primitives import (
-    DICE_RE,
     INTENT_TYPES,
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
-    roll as _roll,
 )
 from .reducer import CombatReducerMixin
 from .resolution import CombatResolutionMixin
@@ -691,33 +689,6 @@ class Dnd2024CombatEngine(
                 and value.get("source_actor_id") == previous_actor_id
             ]:
                 target_conditions.pop(condition_id, None)
-
-    @staticmethod
-    def _spell_formula(
-        base: str, upcast: Any, spell: dict[str, Any], slot_level: int,
-        actor: dict[str, Any],
-    ) -> str:
-        match = DICE_RE.fullmatch(base)
-        if match is None:
-            raise CombatIntentError(f"unsupported spell dice formula: {base}")
-        count, sides, bonus = (int(value or 0) for value in match.groups())
-        if int(spell["level"]) == 0:
-            level = int(actor.get("build", {}).get("level", 1) or 1)
-            multiplier = 4 if level >= 17 else 3 if level >= 11 else 2 if level >= 5 else 1
-            count *= multiplier
-        elif upcast and slot_level > int(spell["level"]):
-            extra = DICE_RE.fullmatch(str(upcast))
-            if extra is None:
-                raise CombatIntentError("upcast dice formula is invalid")
-            extra_count, extra_sides, extra_bonus = (
-                int(value or 0) for value in extra.groups()
-            )
-            if extra_sides != sides:
-                raise CombatIntentError("upcast dice sides must match the base formula")
-            levels = slot_level - int(spell["level"])
-            count += extra_count * levels
-            bonus += extra_bonus * levels
-        return f"{count}d{sides}" + (f"{bonus:+d}" if bonus else "")
 
     @staticmethod
     def _last_hostile_defeated(
