@@ -241,6 +241,7 @@ def combat_extension_projection(
             "ready": list(scheduler_state.ready) if scheduler_state else [],
             "gauges": dict(scheduler_state.gauges) if scheduler_state else {},
         },
+        "entities": sorted(state.entities),
         "actions": actions,
         "pools": pools,
     }
