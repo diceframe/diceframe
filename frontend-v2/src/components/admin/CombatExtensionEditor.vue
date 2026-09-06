@@ -1,42 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-
-/** 受限公式 AST 的可视化编辑模型（v1：叶子 + 一层加减/乘组合 + JSON 兜底）。 */
-export type FormulaDraft =
-  | { type: 'dice'; formula: string }
-  | { type: 'constant'; value: number }
-  | { type: 'attribute'; id: string }
-  | { type: 'combine'; op: 'add' | 'multiply'; left: FormulaDraft; right: FormulaDraft }
-  | { type: 'json'; raw: string }
-
-export interface CostDraft { resource: string; amount: FormulaDraft }
-export interface EffectDraft {
-  kind: string
-  resource?: string
-  amount?: FormulaDraft
-  damage_type?: string
-}
-export interface ActionDraft {
-  id: string
-  kind: string
-  name: string
-  costs: CostDraft[]
-  effects: EffectDraft[]
-}
-export interface ResourceDraft {
-  id: string
-  source: 'hp' | 'special_stat' | 'combat_state'
-  stat?: string
-  maximum?: number | null
-  costable?: boolean
-  damage_priority?: string | null
-  damage_types?: string[] | null
-}
-export interface CombatDraft {
-  scheduler: { kind: string; threshold: number; overflow: string; consume: string; gauge: string; speed: string } | null
-  resources: ResourceDraft[]
-  actions: ActionDraft[]
-}
+import { type ActionDraft, type CombatDraft, type FormulaDraft } from '@/features/admin/combatExtensionDraft'
 
 const props = defineProps<{ modelValue: CombatDraft; resourceOptions: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: CombatDraft] }>()
@@ -137,6 +101,17 @@ function formulaTypeLabel(type: FormulaDraft['type']): string {
         </select>
         <small>{{ formulaTypeLabel(cost.amount.type) }}</small>
         <button class="cee-remove" @click="update(d => d.actions[aIndex].costs.splice(cIndex, 1))">×</button>
+      </div>
+      <div class="cee-sub">
+        <span>扣库存</span>
+        <input :value="action.consume_item?.item || ''" placeholder="物品名（留空不扣）"
+               @change="update(d => {
+                 const raw = ($event.target as HTMLInputElement).value.trim()
+                 if (raw) d.actions[aIndex].consume_item = { item: raw, qty: d.actions[aIndex].consume_item?.qty || 1 }
+                 else delete d.actions[aIndex].consume_item
+               })">
+        <input v-if="action.consume_item" type="number" min="1" :value="action.consume_item.qty"
+               @change="update(d => { if (d.actions[aIndex].consume_item) d.actions[aIndex].consume_item.qty = Number(($event.target as HTMLInputElement).value) || 1 })">
       </div>
       <div v-for="(effect, eIndex) in action.effects" :key="`e${eIndex}`" class="cee-sub">
         <span>效果</span>

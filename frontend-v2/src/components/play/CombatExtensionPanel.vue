@@ -15,6 +15,24 @@ const toast = useToast()
 const ext = computed(() => props.detail.combat_extension || null)
 const busy = ref(false)
 const targets = ref<Record<string, string>>({})
+const actors = ref<Record<string, string>>({})
+
+const ownEntity = computed(() => `player:${props.selfUid}`)
+const actorEntity = computed(() => actors.value[actionIdBeingRun.value] || ownEntity.value)
+const actionIdBeingRun = ref('')
+const actorEntityProxy = computed({
+  get: () => actors.value.__gm__ || ownEntity.value,
+  set: (value: string) => { actors.value.__gm__ = value },
+})
+const groupedEntities = computed(() => {
+  const players: string[] = []
+  const others: string[] = []
+  for (const entity of ext.value?.entities || []) {
+    if (entity.startsWith('player:')) players.push(entity)
+    else others.push(entity)
+  }
+  return { players, others }
+})
 
 const shownPools = computed<Record<string, Record<string, { current: number; maximum: number | null }>>>(() => {
   if (!ext.value?.pools) return {}
@@ -26,6 +44,7 @@ const shownPools = computed<Record<string, Record<string, { current: number; max
 async function runAction(actionId: string) {
   if (busy.value) return
   busy.value = true
+  actionIdBeingRun.value = actionId
   try {
     const target = String(targets.value[actionId] || '').trim()
     const body: Record<string, unknown> = {
@@ -33,6 +52,9 @@ async function runAction(actionId: string) {
       action_id: actionId,
     }
     if (target && target !== 'self') body.target_ids = [target]
+    if (props.isGm && actorEntity.value && actorEntity.value !== ownEntity.value) {
+      body.actor_id = actorEntity.value
+    }
     const result = await api<{ ok?: boolean; error?: string }>(
       `/games/${encodeURIComponent(props.gameKey)}/combat/action`,
       { method: 'POST', body: JSON.stringify(body) },
@@ -59,13 +81,25 @@ async function runAction(actionId: string) {
         <span>{{ value.current }} / {{ value.maximum ?? '∞' }}</span>
       </div>
     </div>
+    <div v-if="isGm" class="combat-ext-action">
+      <span class="cee-label">{{ t('combatExtActor') }}</span>
+      <select v-model="actorEntityProxy">
+        <option v-for="entity in ext.entities || []" :key="entity" :value="entity">{{ entity }}</option>
+      </select>
+    </div>
     <div v-for="action in ext.actions" :key="action.id" class="combat-ext-action">
       <select v-model="targets[action.id]">
         <option value="self">{{ t('combatExtSelf') }}</option>
-        <option v-for="entity in ext.entities || []" :key="entity" :value="entity">{{ entity }}</option>
+        <optgroup v-if="groupedEntities.players.length" :label="t('combatExtPlayers')">
+          <option v-for="entity in groupedEntities.players" :key="entity" :value="entity">{{ entity }}</option>
+        </optgroup>
+        <optgroup v-if="groupedEntities.others.length" :label="t('combatExtOthers')">
+          <option v-for="entity in groupedEntities.others" :key="entity" :value="entity">{{ entity }}</option>
+        </optgroup>
       </select>
       <button :disabled="busy" @click="runAction(action.id)">
         <NIcon :component="FlashOutline" size="14" /> {{ action.name }}
+        <small v-if="action.consume_item"> ({{ action.consume_item.item }} x{{ action.consume_item.qty }})</small>
       </button>
     </div>
   </section>

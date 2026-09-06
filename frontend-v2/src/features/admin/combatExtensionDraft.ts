@@ -20,6 +20,7 @@ export interface ActionDraft {
   name: string
   costs: CostDraft[]
   effects: EffectDraft[]
+  consume_item?: { item: string; qty: number }
 }
 export interface ResourceDraft {
   id: string
@@ -68,7 +69,7 @@ export function draftFromBlock(block: unknown): CombatDraft | null {
   const raw = block as {
     scheduler?: { kind?: string; threshold?: number; overflow?: string; consume?: string; gauge?: string; speed?: string } | null
     resources?: Array<{ id?: string; source?: string; stat?: string; maximum?: number; costable?: boolean; damage_priority?: string; damage_types?: string[] }>
-    actions?: Array<{ id?: string; kind?: string; name?: string; costs?: Array<{ resource?: string; amount?: unknown }>; effects?: Array<{ kind?: string; resource?: string; amount?: unknown; damage_type?: string }> }>
+    actions?: Array<{ id?: string; kind?: string; name?: string; costs?: Array<{ resource?: string; amount?: unknown }>; effects?: Array<{ kind?: string; resource?: string; amount?: unknown; damage_type?: string }>; consume_item?: { item: string; qty: number } }>
   }
   return {
     scheduler: raw.scheduler?.kind
@@ -106,6 +107,7 @@ export function draftFromBlock(block: unknown): CombatDraft | null {
           : astToFormula(effect.amount),
         damage_type: effect.damage_type,
       })),
+      consume_item: action.consume_item,
     })),
   }
 }
@@ -136,6 +138,7 @@ export function blockFromDraft(draft: CombatDraft): Record<string, unknown> {
         if (effect.damage_type) entry.damage_type = effect.damage_type
         return entry
       }),
+      ...(action.consume_item ? { consume_item: action.consume_item } : {}),
     })),
   }
 }
