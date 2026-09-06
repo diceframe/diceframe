@@ -147,6 +147,7 @@ class GamePersistedState(TypedDict, total=False):
     language: str
     luck_timeout_seconds: int
     economy_reward_policy: OpaqueState
+    combat_extension: OpaqueState
     entry_point: str
     max_players: int
     gm_uid: str

@@ -251,6 +251,11 @@ class GameInstance:
     # "auto_reward_cap": int}。{} 表示未设置，结算时回退规则模板 economy_defaults
     # 与服务器全局配置；归属见 economy.resolve_auto_reward_policy。
     economy_reward_policy: dict = field(default_factory=dict)
+    # 通用战斗扩展状态（Issue 212）：{"schema_version": 1, "scheduler": {...}|None,
+    # "pools": {entity_id: {resource_id: {...}}}}。仅当规则模板显式声明 combat
+    # 能力时由 runtime 写入；{} 表示未启用。结构与校验归属 combat_scheduler /
+    # combat_resources，存档只做不透明透传。
+    combat_extension: dict = field(default_factory=dict)
     # 内部：每条 pending 幸运检定的超时定时器（check_id -> asyncio.Task），不序列化
     _luck_timers: dict = field(default_factory=dict, repr=False)
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
