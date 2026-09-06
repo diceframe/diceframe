@@ -74,7 +74,7 @@ async function runAction(actionId: string) {
   <section v-if="ext && ext.actions?.length" class="gm-group combat-ext panel">
     <h4><NIcon :component="FlashOutline" size="14" /> {{ t('combatExtTitle') }}</h4>
     <div v-for="(pool, entityId) in shownPools" :key="entityId" class="combat-ext-pools">
-      <strong>{{ entityId }}</strong>
+      <strong>{{ ext.entity_names?.[entityId] || entityId }}</strong>
       <div v-for="(value, resource) in pool" :key="resource" class="combat-ext-pool">
         <NIcon :component="HeartOutline" size="12" />
         <span>{{ resource }}</span>
@@ -84,7 +84,7 @@ async function runAction(actionId: string) {
     <div v-if="isGm" class="combat-ext-action">
       <span class="cee-label">{{ t('combatExtActor') }}</span>
       <select v-model="actorEntityProxy">
-        <option v-for="entity in ext.entities || []" :key="entity" :value="entity">{{ entity }}</option>
+        <option v-for="entity in ext.entities || []" :key="entity" :value="entity">{{ ext.entity_names?.[entity] || entity }}</option>
       </select>
     </div>
     <div v-for="action in ext.actions" :key="action.id" class="combat-ext-action">

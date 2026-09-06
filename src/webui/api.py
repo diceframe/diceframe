@@ -1604,7 +1604,7 @@ class WebAPI:
         if instance is None:
             return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
         rule = self._load_rule_for_game(instance)
-        result = await combat_extension_service.resolve_combat_action(
+        result = combat_extension_service.resolve_combat_action(
             instance, rule, intent,
             actor_uid=session_uid, viewer_is_gm=viewer_is_gm,
         )

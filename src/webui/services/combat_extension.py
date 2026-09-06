@@ -399,13 +399,21 @@ def combat_extension_projection(
             resource_id: {"current": pool.current, "maximum": pool.maximum}
             for resource_id, pool in entity_pools.items()
         }
+    entity_names: dict[str, str] = {}
+    for uid, player in instance.players.items():
+        entity_names[f"player:{uid}"] = str(
+            player.get("character_name") or uid)
+    for npc_id, npc in instance.npcs.items():
+        entity_names[f"npc:{npc_id}"] = str(
+            npc.get("character_name") or npc.get("name") or npc_id)
     return {
         "scheduler": {
             "kind": config.scheduler.kind if config.scheduler else None,
             "ready": list(scheduler_state.ready) if scheduler_state else [],
             "gauges": dict(scheduler_state.gauges) if scheduler_state else {},
         },
-        "entities": sorted(state.entities),
+        "entities": sorted(entity_names),
+        "entity_names": entity_names,
         "actions": actions,
         "pools": pools,
     }

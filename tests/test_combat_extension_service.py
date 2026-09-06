@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+from webapi_harness import web_api  # noqa: F401
+
 from src.engine.game_instance import GameInstance
 from src.webui.services import combat_extension as svc
 
@@ -365,3 +367,36 @@ def test_consume_item_deducts_inventory_atomically() -> None:
     assert result["ok"] is True
     rows = instance.get_character_sheet("p1")["inventory"]
     assert [row for row in rows if row.get("name") == "回春丹"] == []
+
+
+def test_unengaged_npc_still_targetable_and_named() -> None:
+    """按需参与不能把未交战 NPC 从目标列表里删掉——否则永远无法开战。"""
+    instance = _instance()
+    projection = svc.combat_extension_projection(instance, _rule(), viewer_uid="p1", viewer_is_gm=False)
+    assert "npc:old_monk" in projection["entities"]
+    # 显示名映射：玩家显示角色名，NPC 显示名称。
+    assert projection["entity_names"]["player:p1"] == "李逍遥"
+    assert projection["entity_names"]["npc:old_monk"] == "老僧"
+    # 但池子仍是按需的：GM 看到的池不含未交战 NPC。
+    gm = svc.combat_extension_projection(instance, _rule(), viewer_uid="gm", viewer_is_gm=True)
+    assert "npc:old_monk" not in gm["pools"]
+
+
+@pytest.mark.asyncio
+async def test_facade_action_path_is_usable(web_api) -> None:
+    """门面层回归（真实 500 事故）：sync 服务被 await 会导致 TypeError。"""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Facade Regression",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}}],
+    )
+    result = await api.combat_extension_action(
+        created["game_key"],
+        {"intent_id": "x", "action_id": "anything"},
+        session_uid="gm",
+        viewer_is_gm=True,
+    )
+    # template_world 未声明 combat：应得到显式"未配置"，而不是 500。
+    assert result["ok"] is False
+    assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"

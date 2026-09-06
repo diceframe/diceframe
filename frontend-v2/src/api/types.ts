@@ -269,6 +269,7 @@ export interface GameDetail {
   combat_extension?: {
     scheduler?: { kind?: string; ready?: string[]; gauges?: Record<string, number> }
     entities?: string[]
+    entity_names?: Record<string, string>
     actions?: Array<{ id: string; kind: string; name: string; costs: Array<{ resource: string; amount: unknown }>; consume_item?: { item: string; qty: number } }>
     pools?: Record<string, Record<string, { current: number; maximum: number | null }>>
   }
