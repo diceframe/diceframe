@@ -847,7 +847,7 @@ class GameInstance:
             self.combat_extension if isinstance(self.combat_extension, dict) else {}
         )
         extension_state.pop("pending_summaries", None)
-        snapshot = {
+        snapshot: dict[str, Any] = {
             "schema_version": 1,
             "combat_extension": extension_state,
             "entity_fields": {},
