@@ -535,7 +535,7 @@ export const ja = {
   combatEditorFormulaDicePlaceholder: '例：1d6',
   combatEditorFormulaAttributePlaceholder: '属性 key',
   combatEditorAdvancedFormula: '高度な JSON で編集',
-  combatEditorHint: '定数・ダイス・属性の式はここで編集できます。組み合わせ式などの高度なノードは下の高度な JSON で編集してください。保存時にサーバーがルール全体を検証します。',
+  combatEditorHint: '定数・ダイス・属性の式はここで編集できます。組み合わせ式などの高度なノードは下の JSON 編集欄で編集してください。保存時にサーバーがルール全体を検証します。',
   rewardPolicyMode: '報酬の付与',
   rewardPolicyFollowDefault: 'ルール／サーバーの既定に従う',
   rewardPolicyAutoSmallCash: '少額の現金報酬を自動付与',

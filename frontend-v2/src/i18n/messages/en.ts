@@ -535,7 +535,7 @@ export const en = {
   combatEditorFormulaDicePlaceholder: 'For example, 1d6',
   combatEditorFormulaAttributePlaceholder: 'Attribute key',
   combatEditorAdvancedFormula: 'Edit in Advanced JSON',
-  combatEditorHint: 'Edit constant, dice, and attribute formulas here. Use Advanced JSON below for combined or other advanced nodes; the server validates the complete rule when saving.',
+  combatEditorHint: 'Edit constant, dice, and attribute formulas here. Use the JSON editor below for combined or other advanced nodes; the server validates the complete rule when saving.',
   rewardPolicyMode: 'Narrative reward granting',
   rewardPolicyFollowDefault: 'Follow rule / server default',
   rewardPolicyAutoSmallCash: 'Auto-grant small cash rewards',

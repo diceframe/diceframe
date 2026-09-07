@@ -535,7 +535,7 @@ export const zhCN = {
   combatEditorFormulaDicePlaceholder: '如 1d6',
   combatEditorFormulaAttributePlaceholder: '属性 key',
   combatEditorAdvancedFormula: '请在高级 JSON 中编辑',
-  combatEditorHint: '常数、骰子和属性公式可直接编辑；组合公式与其他高级节点请在下方高级 JSON 中编辑，保存时服务端会完整校验。',
+  combatEditorHint: '常数、骰子和属性公式可直接编辑；组合公式与其他高级节点请在下方 JSON 编辑区中编辑，保存时服务端会完整校验。',
   rewardPolicyMode: '剧情奖励发放',
   rewardPolicyFollowDefault: '跟随规则/服务器默认',
   rewardPolicyAutoSmallCash: '自动发放小额现金奖励',
