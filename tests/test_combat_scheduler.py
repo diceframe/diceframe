@@ -59,6 +59,20 @@ def test_from_dict_round_trip_and_rejection() -> None:
         SchedulerState.from_dict({"kind": "atb"})
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"kind": "threshold", "order": "player:x"},
+        {"kind": "threshold", "order": ["player:x"], "turn_index": True},
+        {"kind": "threshold", "order": ["player:x"], "gauges": {"player:x": True}},
+        {"kind": "threshold", "order": ["player:x"], "ready": ["npc:ghost"]},
+    ],
+)
+def test_scheduler_state_rejects_malformed_nested_values(payload: dict) -> None:
+    with pytest.raises(SchedulerError):
+        SchedulerState.from_dict(payload)
+
+
 # ---------- round robin / initiative ----------
 
 
@@ -174,6 +188,25 @@ def test_threshold_simultaneous_ready_uses_deterministic_tie_break() -> None:
     assert result.ready_actor_ids == ("a", "b")
 
 
+def test_threshold_ready_order_uses_exact_fractional_arrival_time() -> None:
+    scheduler = _threshold_scheduler(threshold=100)
+    # Both actors become ready in the second integer tick. The early actor
+    # arrives at 1.5 ticks; the late actor arrives at 100 / 51 ticks (~1.96).
+    # Their post-tick overflow points in the opposite direction, so sorting
+    # by overflow would incorrectly put ``late`` first.
+    combat = _threshold_combat({"early": 2, "late": 51})
+    state = SchedulerState(
+        kind="threshold",
+        order=("early", "late"),
+        gauges={"early": 97, "late": 0},
+        ready=(),
+    )
+
+    result = scheduler.advance(state, combat)
+
+    assert result.ready_actor_ids == ("early", "late")
+
+
 def test_threshold_speed_buff_changes_next_advance() -> None:
     scheduler = _threshold_scheduler(threshold=100)
     combat = _threshold_combat({"player:x": 25, "enemy:goblin": 50})
@@ -195,6 +228,21 @@ def test_threshold_consume_carry_policy_keeps_overflow() -> None:
     assert result.state.gauges["player:x"] == 120  # 超过阈值保留溢出
     result = scheduler.consume_turn(result.state, combat, "player:x")
     assert result.state.gauges["player:x"] == 20  # carry：120 - 100
+
+
+def test_threshold_carry_requeues_actor_when_multiple_turns_remain() -> None:
+    scheduler = _threshold_scheduler(threshold=100, consume="carry", overflow="carry")
+    combat = _threshold_combat({"player:x": 250})
+    result = scheduler.initialize(combat)
+    result = scheduler.advance(result.state, combat)
+
+    assert result.state.gauges["player:x"] == 250
+    assert result.ready_actor_ids == ("player:x",)
+
+    consumed = scheduler.consume_turn(result.state, combat, "player:x")
+
+    assert consumed.state.gauges["player:x"] == 150
+    assert consumed.ready_actor_ids == ("player:x",)
 
 
 def test_threshold_overflow_clamp_caps_gauge() -> None:

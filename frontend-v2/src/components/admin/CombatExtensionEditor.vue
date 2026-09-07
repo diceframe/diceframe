@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { type CombatDraft, type FormulaDraft } from '@/features/admin/combatExtensionDraft'
+import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ modelValue: CombatDraft; resourceOptions: string[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: CombatDraft] }>()
+const { t } = useLocale()
 
 const model = computed({
   get: () => props.modelValue,
@@ -31,80 +33,128 @@ function removeAction(index: number) {
   update(d => d.actions.splice(index, 1))
 }
 function formulaTypeLabel(type: FormulaDraft['type']): string {
-  return { dice: '骰子', constant: '常数', attribute: '属性', combine: '组合', json: 'JSON' }[type]
+  return {
+    dice: t('combatEditorFormulaDice'),
+    constant: t('combatEditorFormulaConstant'),
+    attribute: t('combatEditorFormulaAttribute'),
+    combine: t('combatEditorFormulaCombine'),
+    json: t('combatEditorFormulaJson'),
+  }[type]
+}
+function newFormula(type: string): FormulaDraft {
+  if (type === 'dice') return { type: 'dice', formula: '1d6' }
+  if (type === 'attribute') return { type: 'attribute', id: '' }
+  return { type: 'constant', value: 1 }
+}
+function setCostFormulaType(actionIndex: number, costIndex: number, type: string) {
+  update(d => { d.actions[actionIndex].costs[costIndex].amount = newFormula(type) })
+}
+function setEffectFormulaType(actionIndex: number, effectIndex: number, type: string) {
+  update(d => { d.actions[actionIndex].effects[effectIndex].amount = newFormula(type) })
+}
+function setEffectKind(actionIndex: number, effectIndex: number, kind: string) {
+  update(d => {
+    const effect = d.actions[actionIndex].effects[effectIndex]
+    effect.kind = kind
+    if (kind === 'damage') {
+      delete effect.resource
+      delete effect.duration
+    } else if (kind === 'resource_change') {
+      effect.resource ||= props.resourceOptions[0] || ''
+      delete effect.damage_type
+      delete effect.duration
+    } else if (kind === 'modify_stat') {
+      effect.resource ||= 'action_speed'
+      effect.duration ||= 1
+      delete effect.damage_type
+    }
+  })
 }
 </script>
 
 <template>
   <section class="combat-ext-editor">
-    <h4>战斗扩展（可选声明）</h4>
+    <h4>{{ t('combatEditorTitle') }}</h4>
 
     <label class="cee-row">
-      <span>调度器</span>
+      <span>{{ t('combatEditorScheduler') }}</span>
       <select :value="model.scheduler?.kind || ''" @change="update(d => {
         const kind = ($event.target as HTMLSelectElement).value
         d.scheduler = kind ? { kind, threshold: 100, overflow: 'carry', consume: 'reset', gauge: 'action_gauge', speed: 'action_speed' } : null
       })">
-        <option value="">不启用</option>
-        <option value="round_robin">固定轮转</option>
-        <option value="initiative">先攻轮转</option>
-        <option value="threshold">ATB 行动条</option>
+        <option value="">{{ t('combatEditorDisabled') }}</option>
+        <option value="round_robin">{{ t('combatEditorRoundRobin') }}</option>
+        <option value="initiative">{{ t('combatEditorInitiative') }}</option>
+        <option value="threshold">{{ t('combatEditorThreshold') }}</option>
       </select>
     </label>
-    <div v-if="model.scheduler" class="cee-row">
-      <span>阈值</span>
+    <div v-if="model.scheduler?.kind === 'threshold'" class="cee-row">
+      <span>{{ t('combatEditorThresholdValue') }}</span>
       <input type="number" :value="model.scheduler.threshold" min="1"
              @change="update(d => { if (d.scheduler) d.scheduler.threshold = Number(($event.target as HTMLInputElement).value) })">
-      <span>溢出</span>
+      <span>{{ t('combatEditorOverflow') }}</span>
       <select :value="model.scheduler.overflow" @change="update(d => { if (d.scheduler) d.scheduler.overflow = ($event.target as HTMLSelectElement).value })">
-        <option value="carry">保留溢出</option>
-        <option value="clamp">钳制在阈值</option>
+        <option value="carry">{{ t('combatEditorOverflowCarry') }}</option>
+        <option value="clamp">{{ t('combatEditorOverflowClamp') }}</option>
       </select>
-      <span>消耗</span>
+      <span>{{ t('combatEditorConsume') }}</span>
       <select :value="model.scheduler.consume" @change="update(d => { if (d.scheduler) d.scheduler.consume = ($event.target as HTMLSelectElement).value })">
-        <option value="reset">归零</option>
-        <option value="carry">扣除阈值</option>
+        <option value="reset">{{ t('combatEditorConsumeReset') }}</option>
+        <option value="carry">{{ t('combatEditorConsumeCarry') }}</option>
       </select>
     </div>
 
-    <h5>资源池</h5>
+    <h5>{{ t('combatEditorResources') }}</h5>
     <div v-for="(resource, index) in model.resources" :key="index" class="cee-resource">
-      <input v-model="resource.id" placeholder="id（如 qi）" @change="update(() => undefined)">
+      <input v-model="resource.id" :placeholder="t('combatEditorResourceIdPlaceholder')" @change="update(() => undefined)">
       <select v-model="resource.source" @change="update(() => undefined)">
-        <option value="hp">HP</option>
-        <option value="special_stat">special_stat</option>
-        <option value="combat_state">战斗状态</option>
+        <option value="hp">{{ t('combatEditorHp') }}</option>
+        <option value="special_stat">{{ t('combatEditorSpecialStat') }}</option>
+        <option value="combat_state">{{ t('combatEditorCombatState') }}</option>
       </select>
-      <input v-if="resource.source === 'special_stat'" v-model="resource.stat" placeholder="stat key" @change="update(() => undefined)">
-      <input v-if="resource.source !== 'hp'" type="number" :value="resource.maximum ?? undefined" placeholder="上限"
+      <input v-if="resource.source === 'special_stat'" v-model="resource.stat" :placeholder="t('combatEditorStatKeyPlaceholder')" @change="update(() => undefined)">
+      <input v-if="resource.source !== 'hp'" type="number" :value="resource.maximum ?? undefined" :placeholder="t('combatEditorMaximumPlaceholder')"
              @change="update(d => { d.resources[index].maximum = ($event.target as HTMLInputElement).valueAsNumber || null })">
-      <button class="cee-remove" @click="removeResource(index)">×</button>
+      <button type="button" class="cee-remove" @click="removeResource(index)">×</button>
     </div>
-    <button class="cee-add" @click="addResource">+ 资源池</button>
+    <button type="button" class="cee-add" @click="addResource">+ {{ t('combatEditorAddResource') }}</button>
 
-    <h5>动作目录</h5>
+    <h5>{{ t('combatEditorActions') }}</h5>
     <div v-for="(action, aIndex) in model.actions" :key="aIndex" class="cee-action">
       <div class="cee-row">
-        <input v-model="action.id" placeholder="id（如 ability:qi_palm）" @change="update(() => undefined)">
+        <input v-model="action.id" :placeholder="t('combatEditorActionIdPlaceholder')" @change="update(() => undefined)">
         <select v-model="action.kind" @change="update(() => undefined)">
-          <option value="attack">攻击</option>
-          <option value="ability">技能</option>
-          <option value="consumable">消耗品</option>
+          <option value="attack">{{ t('combatEditorAttack') }}</option>
+          <option value="ability">{{ t('combatEditorAbility') }}</option>
+          <option value="consumable">{{ t('combatEditorConsumable') }}</option>
         </select>
-        <input v-model="action.name" placeholder="显示名" @change="update(() => undefined)">
-        <button class="cee-remove" @click="removeAction(aIndex)">×</button>
+        <input v-model="action.name" :placeholder="t('combatEditorDisplayNamePlaceholder')" @change="update(() => undefined)">
+        <button type="button" class="cee-remove" @click="removeAction(aIndex)">×</button>
       </div>
       <div v-for="(cost, cIndex) in action.costs" :key="`c${cIndex}`" class="cee-sub">
-        <span>消耗</span>
+        <span>{{ t('combatEditorCost') }}</span>
         <select v-model="cost.resource" @change="update(() => undefined)">
           <option v-for="resource in resourceOptions" :key="resource" :value="resource">{{ resource }}</option>
         </select>
-        <small>{{ formulaTypeLabel(cost.amount.type) }}</small>
-        <button class="cee-remove" @click="update(d => d.actions[aIndex].costs.splice(cIndex, 1))">×</button>
+        <select :value="cost.amount.type" @change="setCostFormulaType(aIndex, cIndex, ($event.target as HTMLSelectElement).value)">
+          <option value="constant">{{ t('combatEditorFormulaConstant') }}</option>
+          <option value="dice">{{ t('combatEditorFormulaDice') }}</option>
+          <option value="attribute">{{ t('combatEditorFormulaAttribute') }}</option>
+          <option v-if="cost.amount.type === 'combine'" value="combine">{{ t('combatEditorFormulaCombine') }}</option>
+          <option v-if="cost.amount.type === 'json'" value="json">{{ t('combatEditorFormulaJson') }}</option>
+        </select>
+        <input v-if="cost.amount.type === 'constant'" type="number" :value="cost.amount.value" :placeholder="t('combatEditorFormulaValuePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].costs[cIndex].amount; if (value.type === 'constant') value.value = Number(($event.target as HTMLInputElement).value) })">
+        <input v-else-if="cost.amount.type === 'dice'" :value="cost.amount.formula" :placeholder="t('combatEditorFormulaDicePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].costs[cIndex].amount; if (value.type === 'dice') value.formula = ($event.target as HTMLInputElement).value.trim() })">
+        <input v-else-if="cost.amount.type === 'attribute'" :value="cost.amount.id" :placeholder="t('combatEditorFormulaAttributePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].costs[cIndex].amount; if (value.type === 'attribute') value.id = ($event.target as HTMLInputElement).value.trim() })">
+        <small v-else>{{ formulaTypeLabel(cost.amount.type) }} · {{ t('combatEditorAdvancedFormula') }}</small>
+        <button type="button" class="cee-remove" @click="update(d => d.actions[aIndex].costs.splice(cIndex, 1))">×</button>
       </div>
       <div class="cee-sub">
-        <span>扣库存</span>
-        <input :value="action.consume_item?.item || ''" placeholder="物品名（留空不扣）"
+        <span>{{ t('combatEditorInventoryCost') }}</span>
+        <input :value="action.consume_item?.item || ''" :placeholder="t('combatEditorItemPlaceholder')"
                @change="update(d => {
                  const raw = ($event.target as HTMLInputElement).value.trim()
                  if (raw) d.actions[aIndex].consume_item = { item: raw, qty: d.actions[aIndex].consume_item?.qty || 1 }
@@ -114,23 +164,39 @@ function formulaTypeLabel(type: FormulaDraft['type']): string {
                @change="update(d => { if (d.actions[aIndex].consume_item) d.actions[aIndex].consume_item.qty = Number(($event.target as HTMLInputElement).value) || 1 })">
       </div>
       <div v-for="(effect, eIndex) in action.effects" :key="`e${eIndex}`" class="cee-sub">
-        <span>效果</span>
-        <select v-model="effect.kind" @change="update(() => undefined)">
-          <option value="damage">伤害</option>
-          <option value="resource_change">资源变化</option>
+        <span>{{ t('combatEditorEffect') }}</span>
+        <select :value="effect.kind" @change="setEffectKind(aIndex, eIndex, ($event.target as HTMLSelectElement).value)">
+          <option value="damage">{{ t('combatEditorDamage') }}</option>
+          <option value="resource_change">{{ t('combatEditorResourceChange') }}</option>
+          <option value="modify_stat">{{ t('combatEditorModifyStat') }}</option>
         </select>
         <select v-if="effect.kind === 'resource_change'" v-model="effect.resource" @change="update(() => undefined)">
           <option v-for="resource in resourceOptions" :key="resource" :value="resource">{{ resource }}</option>
         </select>
-        <input v-if="effect.kind === 'damage'" v-model="effect.damage_type" placeholder="伤害类型" @change="update(() => undefined)">
-        <small>{{ formulaTypeLabel((effect.amount || { type: 'constant', value: 0 }).type) }}</small>
-        <button class="cee-remove" @click="update(d => d.actions[aIndex].effects.splice(eIndex, 1))">×</button>
+        <input v-if="effect.kind === 'modify_stat'" v-model="effect.resource" :placeholder="t('combatEditorStatKeyPlaceholder')" @change="update(() => undefined)">
+        <input v-if="effect.kind === 'modify_stat'" type="number" min="1" v-model.number="effect.duration" :placeholder="t('combatEditorDurationPlaceholder')" @change="update(() => undefined)">
+        <input v-if="effect.kind === 'damage'" v-model="effect.damage_type" :placeholder="t('combatEditorDamageTypePlaceholder')" @change="update(() => undefined)">
+        <select :value="(effect.amount || { type: 'constant' }).type" @change="setEffectFormulaType(aIndex, eIndex, ($event.target as HTMLSelectElement).value)">
+          <option value="constant">{{ t('combatEditorFormulaConstant') }}</option>
+          <option value="dice">{{ t('combatEditorFormulaDice') }}</option>
+          <option value="attribute">{{ t('combatEditorFormulaAttribute') }}</option>
+          <option v-if="effect.amount?.type === 'combine'" value="combine">{{ t('combatEditorFormulaCombine') }}</option>
+          <option v-if="effect.amount?.type === 'json'" value="json">{{ t('combatEditorFormulaJson') }}</option>
+        </select>
+        <input v-if="effect.amount?.type === 'constant'" type="number" :value="effect.amount.value" :placeholder="t('combatEditorFormulaValuePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].effects[eIndex].amount; if (value?.type === 'constant') value.value = Number(($event.target as HTMLInputElement).value) })">
+        <input v-else-if="effect.amount?.type === 'dice'" :value="effect.amount.formula" :placeholder="t('combatEditorFormulaDicePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].effects[eIndex].amount; if (value?.type === 'dice') value.formula = ($event.target as HTMLInputElement).value.trim() })">
+        <input v-else-if="effect.amount?.type === 'attribute'" :value="effect.amount.id" :placeholder="t('combatEditorFormulaAttributePlaceholder')"
+               @change="update(d => { const value = d.actions[aIndex].effects[eIndex].amount; if (value?.type === 'attribute') value.id = ($event.target as HTMLInputElement).value.trim() })">
+        <small v-else-if="effect.amount">{{ formulaTypeLabel(effect.amount.type) }} · {{ t('combatEditorAdvancedFormula') }}</small>
+        <button type="button" class="cee-remove" @click="update(d => d.actions[aIndex].effects.splice(eIndex, 1))">×</button>
       </div>
-      <button class="cee-add" @click="update(d => d.actions[aIndex].costs.push({ resource: resourceOptions[0] || '', amount: { type: 'constant', value: 1 } }))">+ 消耗</button>
-      <button class="cee-add" @click="update(d => d.actions[aIndex].effects.push({ kind: 'damage', amount: { type: 'dice', formula: '1d6' } }))">+ 效果</button>
+      <button type="button" class="cee-add" @click="update(d => d.actions[aIndex].costs.push({ resource: resourceOptions[0] || '', amount: { type: 'constant', value: 1 } }))">+ {{ t('combatEditorAddCost') }}</button>
+      <button type="button" class="cee-add" @click="update(d => d.actions[aIndex].effects.push({ kind: 'damage', amount: { type: 'dice', formula: '1d6' } }))">+ {{ t('combatEditorAddEffect') }}</button>
     </div>
-    <button class="cee-add" @click="addAction">+ 动作</button>
-    <p class="cee-hint">组合公式与高级节点暂用动作 JSON 视图编辑；保存时服务端会完整校验。</p>
+    <button type="button" class="cee-add" @click="addAction">+ {{ t('combatEditorAddAction') }}</button>
+    <p class="cee-hint">{{ t('combatEditorHint') }}</p>
   </section>
 </template>
 

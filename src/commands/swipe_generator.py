@@ -130,9 +130,20 @@ class SwipeGenerator:
                 entry for entry in instance.log
                 if int(entry.get("round", 0) or 0) <= round_num
             ]
+            current_combat_snapshot = instance.combat_extension_round_snapshots.get(
+                str(instance.round_number),
+            )
+            if isinstance(current_combat_snapshot, dict):
+                if not instance.restore_combat_extension_snapshot(current_combat_snapshot):
+                    instance.combat_extension = {}
             instance.round_number = round_num
             reverse_round_economy(instance, round_num)
             restore_players(instance, reconcile_rollback_snapshot(instance, snapshot, round_num))
+            combat_snapshot = target_entry.get("pre_combat_extension_snapshot")
+            if isinstance(combat_snapshot, dict):
+                if not instance.restore_combat_extension_snapshot(combat_snapshot):
+                    instance.combat_extension = {}
+            instance.discard_combat_extension_snapshots_from(round_num)
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)
 
         actions_text = "; ".join(

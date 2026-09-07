@@ -703,6 +703,7 @@ class RoundProcessor:
 
         public_state_before = snapshot_public_player_state(instance)
         round_pre_snapshot = _snapshot_players(instance)
+        round_pre_combat_snapshot = instance.current_combat_extension_snapshot()
 
         queued_proposals: list[dict[str, Any]] = []
         allowed_uids: set | None = None
@@ -784,7 +785,12 @@ class RoundProcessor:
             state_msgs.append(automation_note)
 
         instance.consume_gm_directives(set(consumed_directive_ids))
-        await instance.finish_judgment(response.narration, pre_state_snapshot=round_pre_snapshot, state_changes=state_msgs)
+        await instance.finish_judgment(
+            response.narration,
+            pre_state_snapshot=round_pre_snapshot,
+            state_changes=state_msgs,
+            pre_combat_extension_snapshot=round_pre_combat_snapshot,
+        )
         instance.set_latest_log_tags_summary(summarize_tags(data))
         instance.record_llm_usage(response.total_tokens, calls=0)
 

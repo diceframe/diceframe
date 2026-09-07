@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from src.engine.combat_config import (
@@ -58,6 +61,128 @@ def test_valid_declaration_parses() -> None:
     palm = config.action("ability:qi_palm")
     assert palm is not None and palm.costs[0].resource == "qi"
     assert config.action("spell:fireball") is None
+
+
+def test_freeform_wuxia_healing_pill_requires_inventory_item() -> None:
+    template = json.loads(
+        (Path(__file__).parents[1] / "templates" / "rules" / "freeform_wuxia.json")
+        .read_text(encoding="utf-8")
+    )
+
+    config = combat_extension_from_template(template)
+    action = config.action("item:healing_pill.use") if config else None
+
+    assert action is not None
+    assert action.consume_item is not None
+    assert (action.consume_item.item, action.consume_item.qty) == ("回春丹", 1)
+
+
+def test_requires_exactly_one_hp_source_pool() -> None:
+    combat = _valid_combat()
+    combat["resources"].append({"id": "wounds", "source": "hp"})
+
+    with pytest.raises(CombatConfigError, match="exactly one hp"):
+        combat_extension_from_template(_template(combat))
+
+
+@pytest.mark.parametrize("value", [0, 1, "false", None])
+def test_costable_must_be_a_boolean(value: object) -> None:
+    combat = _valid_combat()
+    combat["resources"][1]["costable"] = value
+
+    with pytest.raises(CombatConfigError, match="costable must be a boolean"):
+        combat_extension_from_template(_template(combat))
+
+
+def test_action_cannot_spend_non_costable_resource() -> None:
+    combat = _valid_combat()
+    combat["resources"][1]["costable"] = False
+
+    with pytest.raises(CombatConfigError, match="non-costable resource"):
+        combat_extension_from_template(_template(combat))
+
+
+@pytest.mark.parametrize("value", [False, 0, ""])
+def test_action_costs_must_be_a_list_when_present(value: object) -> None:
+    combat = _valid_combat()
+    combat["actions"][1]["costs"] = value
+
+    with pytest.raises(CombatConfigError, match="costs must be a list"):
+        combat_extension_from_template(_template(combat))
+
+
+@pytest.mark.parametrize("qty", [True, 1.5, "2", 0])
+def test_consume_item_quantity_requires_a_positive_integer(qty: object) -> None:
+    combat = _valid_combat()
+    combat["actions"][0]["consume_item"] = {"item": "回春丹", "qty": qty}
+
+    with pytest.raises(CombatConfigError, match="consume_item qty"):
+        combat_extension_from_template(_template(combat))
+
+
+def test_special_stat_resource_must_reference_declared_stat() -> None:
+    template = _template(_valid_combat())
+    template["special_stats"] = [{"key": "mana", "name": "Mana"}]
+
+    with pytest.raises(CombatConfigError, match="undeclared special_stat"):
+        combat_extension_from_template(template)
+
+
+def test_empty_damage_type_catalog_keeps_unrestricted_legacy_semantics() -> None:
+    combat = _valid_combat()
+    combat["damage_types"] = []
+
+    assert combat_extension_from_template(_template(combat)) is not None
+
+
+def test_present_but_empty_scheduler_is_rejected() -> None:
+    combat = _valid_combat()
+    combat["scheduler"] = {}
+
+    with pytest.raises(Exception, match="scheduler kind"):
+        combat_extension_from_template(_template(combat))
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        {"op": "eval", "value": "2 + 2"},
+        {"op": "dice", "formula": "1000d99999"},
+        {"op": "multiply", "args": [{"op": "constant", "value": 2}]},
+        {"op": "constant", "value": True},
+    ],
+)
+def test_formula_shape_is_validated_when_rule_is_loaded(formula: dict) -> None:
+    combat = _valid_combat()
+    combat["actions"][1]["costs"][0]["amount"] = formula
+
+    with pytest.raises(CombatConfigError, match="cost formula"):
+        combat_extension_from_template(_template(combat))
+
+
+def test_formula_references_must_exist_in_rule_contract() -> None:
+    template = _template(_valid_combat())
+    template["attributes"] = [{"key": "dex", "name": "Dexterity"}]
+
+    with pytest.raises(CombatConfigError, match="unknown attribute reference"):
+        combat_extension_from_template(template)
+
+
+def test_scheduler_speed_formula_must_be_deterministic() -> None:
+    combat = _valid_combat()
+    combat["scheduler"]["speed_formula"] = {"op": "dice", "formula": "1d6"}
+
+    with pytest.raises(CombatConfigError, match="dice is not allowed"):
+        combat_extension_from_template(_template(combat))
+
+
+@pytest.mark.parametrize("value", ["bludgeoning", {"bludgeoning": True}, [""]])
+def test_malformed_damage_type_catalog_fails_closed(value: object) -> None:
+    combat = _valid_combat()
+    combat["damage_types"] = value
+
+    with pytest.raises(CombatConfigError, match="damage_types must be a string list"):
+        combat_extension_from_template(_template(combat))
 
 
 def test_unknown_scheduler_kind_fails_closed() -> None:

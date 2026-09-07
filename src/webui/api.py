@@ -1588,11 +1588,21 @@ class WebAPI:
         instance = self.get_game_instance(game_key)
         if instance is None:
             return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
-        rule = self._load_rule_for_game(instance)
-        result = combat_extension_service.scheduler_advance(instance, rule)
-        if result.get("ok"):
-            await self.save_game_instance(instance)
-        return result
+        async with instance.authoritative_write() as entered:
+            if not entered:
+                return {
+                    "ok": False,
+                    "code": "REWRITE_IN_PROGRESS",
+                    "error": "GM 正在重写历史回合，请等待完成后重试",
+                }
+            if self.get_game_instance(game_key) is not instance:
+                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            async with instance._lock:
+                rule = self._load_rule_for_game(instance)
+                result = combat_extension_service.scheduler_advance(instance, rule)
+            if result.get("ok"):
+                await self.save_game_instance(instance)
+            return result
 
     async def combat_extension_action(
         self, game_key: str, intent: dict[str, Any], *,
@@ -1603,14 +1613,24 @@ class WebAPI:
         instance = self.get_game_instance(game_key)
         if instance is None:
             return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
-        rule = self._load_rule_for_game(instance)
-        result = combat_extension_service.resolve_combat_action(
-            instance, rule, intent,
-            actor_uid=session_uid, viewer_is_gm=viewer_is_gm,
-        )
-        if result.get("ok"):
-            await self.save_game_instance(instance)
-        return result
+        async with instance.authoritative_write() as entered:
+            if not entered:
+                return {
+                    "ok": False,
+                    "code": "REWRITE_IN_PROGRESS",
+                    "error": "GM 正在重写历史回合，请等待完成后重试",
+                }
+            if self.get_game_instance(game_key) is not instance:
+                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            async with instance._lock:
+                rule = self._load_rule_for_game(instance)
+                result = combat_extension_service.resolve_combat_action(
+                    instance, rule, intent,
+                    actor_uid=session_uid, viewer_is_gm=viewer_is_gm,
+                )
+            if result.get("ok"):
+                await self.save_game_instance(instance)
+            return result
 
     async def create_payment_proposal(
         self,

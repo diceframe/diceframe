@@ -52,6 +52,20 @@ async def _broadcast_ruleset_change(
     )
 
 
+async def _broadcast_combat_change(
+    request: web.Request,
+    game_key: str,
+    result: dict,
+) -> None:
+    """Wake every table client after a persisted combat-extension mutation."""
+
+    if not result.get("ok"):
+        return
+    pool = request.app.get("connection_pool")
+    if pool is not None:
+        await pool.broadcast(game_key, {"type": "combat_state_changed"})
+
+
 def _gm_only_inst(request: web.Request, gk: str):
     api = _get_api(request)
     inst = api.get_game_instance(gk)

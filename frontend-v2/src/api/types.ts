@@ -267,7 +267,7 @@ export interface GameDetail {
   has_room_password?: boolean
   economy_reward_policy?: { mode?: string; auto_reward_cap?: number }
   combat_extension?: {
-    scheduler?: { kind?: string; ready?: string[]; gauges?: Record<string, number> }
+    scheduler?: { kind?: string; ready?: string[]; gauges?: Record<string, number>; participants?: string[] }
     entities?: string[]
     entity_names?: Record<string, string>
     actions?: Array<{ id: string; kind: string; name: string; costs: Array<{ resource: string; amount: unknown }>; consume_item?: { item: string; qty: number } }>

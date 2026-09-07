@@ -347,6 +347,10 @@
         "id": "item:healing_pill.use",
         "kind": "consumable",
         "name": "回春丹",
+        "consume_item": {
+          "item": "回春丹",
+          "qty": 1
+        },
         "effects": [
           {
             "kind": "resource_change",

@@ -7,6 +7,8 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { localizedField } from '@/utils/ruleSchema'
 import Modal from '@/components/ui/Modal.vue'
+import CombatExtensionEditor from '@/components/admin/CombatExtensionEditor.vue'
+import { blockFromDraft, draftFromBlock, emptyDraft, type CombatDraft } from '@/features/admin/combatExtensionDraft'
 
 const toast = useToast()
 const { confirm } = useConfirm()
@@ -19,6 +21,7 @@ const ruleEdit = ref<RuleEditorState | null>(null)
 const ruleForm = ref<RuleForm | null>(null)
 const ruleJson = ref('')
 const advancedJson = ref(false)
+const combatDraft = ref<CombatDraft>(emptyDraft())
 
 const editorTitle = computed(() => {
   if (!ruleEdit.value) return t('ruleEditor')
@@ -26,6 +29,10 @@ const editorTitle = computed(() => {
   if (ruleEdit.value.mode === 'copy') return t('copyAndEditRule')
   return t('editCustomRule')
 })
+
+const combatResourceOptions = computed(() => (
+  combatDraft.value.resources.map(resource => resource.id).filter(Boolean)
+))
 
 function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err || t('operationFailed')) }
 
@@ -69,6 +76,32 @@ function jsonTemplate(): RuleTemplate {
   catch { throw new Error(t('ruleJsonInvalid')) }
 }
 
+function isDefaultCombatDraft(draft: CombatDraft): boolean {
+  const resource = draft.resources[0]
+  const topLevelExtras = Object.keys(draft.raw || {}).filter(
+    key => !['scheduler', 'resources', 'actions'].includes(key),
+  )
+  const resourceExtras = Object.keys(resource?.raw || {}).filter(
+    key => !['id', 'source', 'stat', 'maximum', 'costable', 'damage_priority', 'damage_types'].includes(key),
+  )
+  return !draft.scheduler
+    && draft.actions.length === 0
+    && draft.resources.length === 1
+    && resource?.id === 'hp'
+    && resource.source === 'hp'
+    && resource.stat == null
+    && resource.maximum == null
+    && resource.costable !== false
+    && !resource.damage_priority
+    && !resource.damage_types?.length
+    && topLevelExtras.length === 0
+    && resourceExtras.length === 0
+}
+
+function syncCombatDraft(template: RuleTemplate) {
+  combatDraft.value = draftFromBlock(template.combat) || emptyDraft()
+}
+
 function applyFormToJson(): RuleTemplate {
   if (!ruleForm.value) throw new Error(t('ruleFormNotInitialized'))
   const form = ruleForm.value
@@ -89,6 +122,8 @@ function applyFormToJson(): RuleTemplate {
   template.attributes = form.attributes
     .filter(a => a.key.trim())
     .map(a => ({ key: a.key.trim(), name: a.name.trim() || a.key.trim(), min: Number(a.min) || 0, max: Number(a.max) || 0 }))
+  if (isDefaultCombatDraft(combatDraft.value)) delete template.combat
+  else template.combat = blockFromDraft(combatDraft.value)
   if (ruleEdit.value?.mode === 'copy' || ruleEdit.value?.mode === 'new') {
     template.custom = true
     template.source_rule_id = ruleEdit.value.source_rule_id
@@ -98,7 +133,12 @@ function applyFormToJson(): RuleTemplate {
 }
 
 function syncFormFromJson() {
-  try { ruleForm.value = buildForm(jsonTemplate()); toast.success(t('syncedFormFromJson')) }
+  try {
+    const template = jsonTemplate()
+    ruleForm.value = buildForm(template)
+    syncCombatDraft(template)
+    toast.success(t('syncedFormFromJson'))
+  }
   catch (e: unknown) { error.value = errorMessage(e) }
 }
 
@@ -118,6 +158,7 @@ async function openRule(rule: RuleSummary) {
     }
     ruleForm.value = buildForm(template)
     ruleJson.value = JSON.stringify(template, null, 2)
+    syncCombatDraft(template)
     advancedJson.value = false
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
@@ -139,6 +180,7 @@ async function openNewRule() {
     ruleEdit.value = { mode: 'new', source_rule_id: source.rule_id, id: template.rule_id, name: template.rule_name }
     ruleForm.value = buildForm(template)
     ruleJson.value = JSON.stringify(template, null, 2)
+    syncCombatDraft(template)
     advancedJson.value = false
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
@@ -252,6 +294,10 @@ async function deleteRule(rule: RuleSummary) {
         </div>
 
         <label>{{ t('gmRulePrompt') }}<textarea rows="5" v-model="ruleForm.gm_prompt_appendix"></textarea></label>
+        <CombatExtensionEditor
+          v-model="combatDraft"
+          :resource-options="combatResourceOptions"
+        />
         <details class="rule-json-box" :open="advancedJson" @toggle="advancedJson = ($event.target as HTMLDetailsElement).open">
           <summary>{{ t('advancedJson') }}</summary>
           <div class="actions attr-actions">

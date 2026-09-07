@@ -121,7 +121,9 @@ class RoundLogEntry(TypedDict, total=False):
     state_changes: list[str]
     check_results: list[CheckResult]
     round_start_snapshot: dict[str, Any]
+    combat_extension_round_start: dict[str, Any]
     pre_state_snapshot: dict[str, Any]
+    pre_combat_extension_snapshot: dict[str, Any]
     swipes: list[str]
     current_swipe: int
     timestamp: str

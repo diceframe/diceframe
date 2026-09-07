@@ -15,6 +15,7 @@ from src.webui.services._common import is_game_gm
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import (
+    _broadcast_combat_change,
     _broadcast_ruleset_change,
     _gm_only_inst,
     _narration_callbacks,
@@ -433,7 +434,12 @@ async def api_combat_action(request: web.Request) -> web.Response:
         session_uid=session_uid,
         viewer_is_gm=is_game_gm(inst, session_uid, owner),
     )
-    return web.json_response(result, status=200 if result.get("ok") else 400)
+    await _broadcast_combat_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = 200 if result.get("ok") else 409 if code in {
+        "INTENT_ID_CONFLICT", "REWRITE_IN_PROGRESS", "STALE_RUN",
+    } else 400
+    return web.json_response(result, status=status)
 
 
 async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
@@ -449,4 +455,9 @@ async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
     if not is_game_gm(inst, session_uid, owner):
         return web.json_response({"ok": False, "error": "GM only"}, status=403)
     result = await api.combat_extension_scheduler_advance(gk)
-    return web.json_response(result, status=200 if result.get("ok") else 400)
+    await _broadcast_combat_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = 200 if result.get("ok") else 409 if code in {
+        "REWRITE_IN_PROGRESS", "STALE_RUN",
+    } else 400
+    return web.json_response(result, status=status)
