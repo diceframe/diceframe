@@ -225,6 +225,7 @@ class PromptComposer:
         history_override: list[dict] | None = None,
         directives_text: str = "",
         overreach_text: str = "",
+        authoritative_events_text: str = "",
     ) -> str:
         """调用 context_builder 生成本轮 user context。"""
         state_view = None
@@ -243,6 +244,7 @@ class PromptComposer:
             directives_text=directives_text,
             overreach_text=overreach_text,
             state_view=state_view,
+            authoritative_events_text=authoritative_events_text,
         )
 
     async def build_player_safe_context(

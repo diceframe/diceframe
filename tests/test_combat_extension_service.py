@@ -10,6 +10,7 @@ import pytest
 from webapi_harness import web_api  # noqa: F401
 
 from src.engine.game_instance import GameInstance, GameState
+from src.engine import combat_narrative
 from src.webui.services import combat_extension as svc
 
 
@@ -299,6 +300,33 @@ def test_state_survives_round_trip() -> None:
     recovered = GI.from_dict(instance.to_dict())
     assert recovered.combat_extension == instance.combat_extension
     assert recovered.get_character_sheet("p1")["qi"] == 42
+
+
+def test_resolved_action_is_queued_for_narration_until_consumed() -> None:
+    instance = _instance()
+    result = svc.resolve_combat_action(
+        instance,
+        _rule(),
+        {"intent_id": "i-narrative", "action_id": "ability:qi_palm",
+         "target_ids": ["npc:old_monk"]},
+        actor_uid="p1",
+        viewer_is_gm=False,
+    )
+
+    assert result["ok"] is True
+    pending = combat_narrative.pending_events(instance)
+    assert len(pending) == 1
+    assert pending[0]["intent_id"] == "i-narrative"
+    assert pending[0]["events"][-1]["type"] == "combat.damage_applied"
+
+    prompt_block = combat_narrative.format_pending_events(instance)
+    assert "已结算战斗事实" in prompt_block
+    assert "npc:old_monk" in prompt_block
+    assert '"after":4' in prompt_block
+
+    combat_narrative.consume_pending_events(instance, ["i-narrative"])
+    assert combat_narrative.pending_events(instance) == []
+    assert "pending_narrative_events" not in instance.combat_extension
 
 
 @pytest.mark.parametrize("intent", [

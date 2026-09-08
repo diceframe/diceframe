@@ -22,6 +22,7 @@ from typing import Any
 
 from src.engine.combat_contracts import CombatAction
 from src.engine.combat_config import CombatActionDecl, CombatExtensionConfig, combat_extension_from_template
+from src.engine.combat_narrative import enqueue_pending_event
 from src.engine.language import localized_text
 from src.engine.combat_effects import CombatState, apply_combat_action
 from src.engine.combat_formulas import FormulaContext, evaluate_formula_bound
@@ -643,6 +644,10 @@ def scheduler_advance(
         payload["intents"] = deepcopy(dict(old_payload["intents"]))
     if isinstance(old_payload.get("pending_summaries"), list):
         payload["pending_summaries"] = list(old_payload["pending_summaries"])[-50:]
+    if isinstance(old_payload.get("pending_narrative_events"), list):
+        payload["pending_narrative_events"] = deepcopy(
+            list(old_payload["pending_narrative_events"])[-50:]
+        )
     # Capture only after all scheduler calculations succeed. The snapshot is
     # still pre-mutation, while a rejected advance leaves no bookkeeping write.
     capture = getattr(instance, "capture_combat_extension_snapshot", None)
@@ -1021,6 +1026,10 @@ def resolve_combat_action(
         payload["intents"] = deepcopy(dict(old_payload["intents"]))
     if isinstance(old_payload.get("pending_summaries"), list):
         payload["pending_summaries"] = list(old_payload["pending_summaries"])[-50:]
+    if isinstance(old_payload.get("pending_narrative_events"), list):
+        payload["pending_narrative_events"] = deepcopy(
+            list(old_payload["pending_narrative_events"])[-50:]
+        )
 
     result = {
         "ok": True,
@@ -1029,6 +1038,15 @@ def resolve_combat_action(
         "action": {"id": decl.action_id, "name": decl.name},
     }
     _remember_intent(payload, intent_id, fingerprint, result)
+    enqueue_pending_event(
+        payload,
+        intent_id=intent_id,
+        actor_id=requested_actor,
+        action_id=decl.action_id,
+        action_name=decl.name,
+        target_ids=target_ids or (requested_actor,),
+        events=outcome.events,
+    )
 
     # Commit only after every fallible calculation has completed.
     capture = getattr(instance, "capture_combat_extension_snapshot", None)
