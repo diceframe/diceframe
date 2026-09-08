@@ -263,7 +263,7 @@ async function deleteRule(rule: RuleSummary) {
       <p v-if="!data?.rules?.length" class="muted">{{ t('noRules') }}</p>
     </div>
 
-    <Modal v-if="ruleEdit && ruleForm" :title="editorTitle" @close="ruleEdit = null">
+    <Modal v-if="ruleEdit && ruleForm" :title="editorTitle" dialog-class="rule-edit-dialog" @close="ruleEdit = null">
       <div class="rule-editor-form">
         <div class="grid-2">
           <label>{{ t('ruleId') }}<input v-model="ruleForm.rule_id" :disabled="ruleEdit.mode === 'edit'"></label>
