@@ -268,6 +268,15 @@ def update_custom_rule(
             return {"ok": False, "error": "max_check_dc 必须是 1..40 的整数"}
         template["max_check_dc"] = max_check_dc
 
+    if "combat" in template:
+        # 战斗扩展声明在保存时校验：坏块不能进存档，否则游戏加载即炸。
+        from src.engine.combat_config import combat_extension_from_template
+
+        try:
+            combat_extension_from_template(template)
+        except ValueError as exc:
+            return {"ok": False, "error": f"combat 声明非法: {exc}"}
+
     template["rule_id"] = rule_id
     template["custom"] = True
     template["source_rule_id"] = template.get("source_rule_id") or old_template.get("source_rule_id", "")

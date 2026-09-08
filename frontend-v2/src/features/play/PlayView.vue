@@ -30,6 +30,7 @@ import PlayHelpCenter from '@/components/PlayHelpCenter.vue'
 import HealthPanel from '@/components/HealthPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import GmToolbar from '@/components/play/GmToolbar.vue'
+import CombatExtensionPanel from '@/components/play/CombatExtensionPanel.vue'
 import MultiplayerPanel from '@/components/play/MultiplayerPanel.vue'
 import MapWorkspace from '@/components/play/MapWorkspace.vue'
 import SceneGalleryModal from '@/components/play/SceneGalleryModal.vue'
@@ -1247,6 +1248,13 @@ onBeforeUnmount(() => {
           @scene-image="openSceneImageEditor"
           @map-background="openMapBackgroundEditor"
           @payment="openPaymentComposer"
+        />
+        <CombatExtensionPanel
+          :detail="game.detail.value"
+          :game-key="game.currentGame.value"
+          :self-uid="game.actorId.value"
+          :is-gm="game.isGm.value"
+          @changed="game.refresh(true)"
         />
 
         <MultiplayerPanel

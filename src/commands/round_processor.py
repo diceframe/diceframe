@@ -63,6 +63,7 @@ from src.engine.economy import (
     queue_effect_group,
 )
 from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_identical_purchase
+from src.engine import combat_narrative
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.imagegen import (
@@ -544,6 +545,8 @@ class RoundProcessor:
         expected_economy_fingerprint = economy_fingerprint(instance)
         # 只保留最近一轮的短期展示状态，避免旧提示或战斗结果常驻。
         instance.begin_round_processing()
+        pending_combat_event_ids = combat_narrative.pending_event_ids(instance)
+        pending_combat_events_text = combat_narrative.format_pending_events(instance)
 
         ensure_round_managers(instance)
         actions_text = collect_actions_text(instance)
@@ -606,7 +609,8 @@ class RoundProcessor:
         context = await self._prompt.build_user_context(
             instance, gm_prompt, lorebook_matches, actions_text,
             provider_name=provider_name, world_data=world_data,
-            directives_text=gm_directives_text, overreach_text=overreach_text)
+            directives_text=gm_directives_text, overreach_text=overreach_text,
+            authoritative_events_text=pending_combat_events_text)
 
         context = await append_multistep_analysis(
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
@@ -703,6 +707,7 @@ class RoundProcessor:
 
         public_state_before = snapshot_public_player_state(instance)
         round_pre_snapshot = _snapshot_players(instance)
+        round_pre_combat_snapshot = instance.current_combat_extension_snapshot()
 
         queued_proposals: list[dict[str, Any]] = []
         allowed_uids: set | None = None
@@ -784,7 +789,13 @@ class RoundProcessor:
             state_msgs.append(automation_note)
 
         instance.consume_gm_directives(set(consumed_directive_ids))
-        await instance.finish_judgment(response.narration, pre_state_snapshot=round_pre_snapshot, state_changes=state_msgs)
+        await instance.finish_judgment(
+            response.narration,
+            pre_state_snapshot=round_pre_snapshot,
+            state_changes=state_msgs,
+            pre_combat_extension_snapshot=round_pre_combat_snapshot,
+        )
+        combat_narrative.consume_pending_events(instance, pending_combat_event_ids)
         instance.set_latest_log_tags_summary(summarize_tags(data))
         instance.record_llm_usage(response.total_tokens, calls=0)
 

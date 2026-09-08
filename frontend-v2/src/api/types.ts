@@ -266,6 +266,13 @@ export interface GameDetail {
   player_access_open?: boolean
   has_room_password?: boolean
   economy_reward_policy?: { mode?: string; auto_reward_cap?: number }
+  combat_extension?: {
+    scheduler?: { kind?: string; ready?: string[]; gauges?: Record<string, number>; participants?: string[] }
+    entities?: string[]
+    entity_names?: Record<string, string>
+    actions?: Array<{ id: string; kind: string; name: string; costs: Array<{ resource: string; amount: unknown }>; consume_item?: { item: string; qty: number } }>
+    pools?: Record<string, Record<string, { current: number; maximum: number | null }>>
+  }
   multiplayer?: Multiplayer
   quick_actions?: string[]
   economy_proposals?: PendingPayment[]

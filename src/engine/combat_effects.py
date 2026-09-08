@@ -56,6 +56,9 @@ class CombatState:
     entities: Mapping[str, Mapping[str, ResourcePool]]
     hp_resource: str = "hp"
     barriers: Mapping[str, frozenset[str] | None] = field(default_factory=dict)
+    # 临时状态修正（buff）：{"entity_id", "stat", "delta", "remaining"}。
+    # 时长扣减由宿主在调度推进时负责，本模块只做应用与存储。
+    buffs: tuple[dict[str, Any], ...] = ()
 
     def entity_pools(self, entity_id: str) -> Mapping[str, ResourcePool]:
         pools = self.entities.get(entity_id)
@@ -102,7 +105,13 @@ def validate_effect_spec(
     if resource is not None:
         if not isinstance(resource, str) or not resource.strip():
             raise CombatActionError("effect resource must be a non-empty string")
-        if allowed_resources is not None and resource not in allowed_resources:
+        # 池引用校验只适用于 resource_change；modify_stat 的 resource 是
+        # 调度 stat 名（如 action_speed），不属于资源池。
+        if (
+            effect.get("kind") == "resource_change"
+            and allowed_resources is not None
+            and resource not in allowed_resources
+        ):
             raise CombatActionError(
                 f"effect references undeclared resource: {resource!r}"
             )
@@ -318,6 +327,29 @@ def apply_effects(
                 current, context.target_id, spec, amount,
                 source_action_id=source_action_id, events=events,
             )
+        elif spec.kind == "modify_stat":
+            stat = spec.resource
+            if not stat:
+                raise CombatActionError("modify_stat effect requires a stat")
+            try:
+                amount = evaluate_formula_bound(spec.amount or {}, context)
+            except ValueError as exc:
+                raise CombatActionError(f"modify_stat amount rejected: {exc}") from exc
+            if amount == 0:
+                raise CombatActionError("modify_stat amount evaluated to zero")
+            duration = spec.duration
+            if not duration or duration <= 0:
+                raise CombatActionError("modify_stat requires a positive duration")
+            if context.target_id is None:
+                raise CombatActionError("modify_stat effect requires a target")
+            entry = {"entity_id": context.target_id, "stat": stat,
+                     "delta": amount, "remaining": duration}
+            current = replace(current, buffs=(*current.buffs, entry))
+            events.append({
+                "type": "combat.buff_applied", "entity_id": context.target_id,
+                "stat": stat, "delta": amount, "duration": duration,
+                "source_action": source_action_id,
+            })
         else:
             raise CombatActionError(
                 f"effect kind {spec.kind!r} is not supported in this phase"
@@ -365,7 +397,7 @@ def apply_combat_action(
             allowed_resources=allowed_resources,
             allowed_damage_types=allowed_damage_types,
         )
-        if validated.kind not in {"damage", "resource_change"}:
+        if validated.kind not in {"damage", "resource_change", "modify_stat"}:
             raise CombatActionError(
                 f"effect kind {validated.kind!r} is not supported in this phase"
             )
@@ -418,6 +450,18 @@ def apply_combat_action(
                     current, target_id, amount, spec.damage_type,
                     source_action_id=action.action_id, events=events,
                 )
+            elif spec.kind == "modify_stat":
+                duration = spec.duration or 0
+                if duration <= 0:
+                    raise CombatActionError("modify_stat requires a positive duration")
+                entry = {"entity_id": target_id, "stat": spec.resource or "",
+                         "delta": amount, "remaining": duration}
+                current = replace(current, buffs=(*current.buffs, entry))
+                events.append({
+                    "type": "combat.buff_applied", "entity_id": target_id,
+                    "stat": spec.resource, "delta": amount, "duration": duration,
+                    "source_action": action.action_id,
+                })
             else:
                 current = _apply_resource_change(
                     current, target_id, spec, amount,

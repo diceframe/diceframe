@@ -17,6 +17,7 @@ from src.commands.economy_effects import (
     should_warn_unbacked_payment,
 )
 from src.engine.economy import filter_unconfirmed_purchase_grants
+from src.engine import combat_narrative
 from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier, discard_unresolved_player_damage
@@ -130,9 +131,20 @@ class SwipeGenerator:
                 entry for entry in instance.log
                 if int(entry.get("round", 0) or 0) <= round_num
             ]
+            current_combat_snapshot = instance.combat_extension_round_snapshots.get(
+                str(instance.round_number),
+            )
+            if isinstance(current_combat_snapshot, dict):
+                if not instance.restore_combat_extension_snapshot(current_combat_snapshot):
+                    instance.combat_extension = {}
             instance.round_number = round_num
             reverse_round_economy(instance, round_num)
             restore_players(instance, reconcile_rollback_snapshot(instance, snapshot, round_num))
+            combat_snapshot = target_entry.get("pre_combat_extension_snapshot")
+            if isinstance(combat_snapshot, dict):
+                if not instance.restore_combat_extension_snapshot(combat_snapshot):
+                    instance.combat_extension = {}
+            instance.discard_combat_extension_snapshots_from(round_num)
             logger.info("Swipe: 已恢复 pre-state snapshot (round=%d)", round_num)
 
         actions_text = "; ".join(
@@ -155,6 +167,8 @@ class SwipeGenerator:
         gm_prompt = self.prompt.compose_gm_prompt(
             instance, rule_ctx.rule_appendix, world_data=rule_ctx.world_data,
         )
+        pending_combat_event_ids = combat_narrative.pending_event_ids(instance)
+        pending_combat_events_text = combat_narrative.format_pending_events(instance)
 
         # 构建上下文（仅使用目标轮之前的日志），不临时改写共享 instance.log。
         provider_name = self.llm_client.default if self.llm_client else ""
@@ -166,6 +180,7 @@ class SwipeGenerator:
             provider_name=provider_name,
             world_data=world_data,
             history_override=instance.log[:target_idx],
+            authoritative_events_text=pending_combat_events_text,
         )
 
         response = await self.llm_client.call(
@@ -226,6 +241,9 @@ class SwipeGenerator:
         await instance.finish_judgment_with_swipe(
             narration, round_num,
             state_changes=system_changes if system_changes else None,
+        )
+        combat_narrative.consume_pending_events(
+            instance, pending_combat_event_ids,
         )
         scene_payload = None
         swipe_prompt = str(data.get("scene_image_prompt") or "").strip()

@@ -251,6 +251,14 @@ class GameInstance:
     # "auto_reward_cap": int}。{} 表示未设置，结算时回退规则模板 economy_defaults
     # 与服务器全局配置；归属见 economy.resolve_auto_reward_policy。
     economy_reward_policy: dict = field(default_factory=dict)
+    # 通用战斗扩展状态（Issue 212）：{"schema_version": 1, "scheduler": {...}|None,
+    # "pools": {entity_id: {resource_id: {...}}}}。仅当规则模板显式声明 combat
+    # 能力时由 runtime 写入；{} 表示未启用。结构与校验归属 combat_scheduler /
+    # combat_resources，存档只做不透明透传。
+    combat_extension: dict = field(default_factory=dict)
+    # 通用战斗扩展按回合惰性保存的首个写入前快照。动作和调度推进都可能
+    # 独立于叙事判定发生，因此不能只依赖玩家 round_start_snapshot。
+    combat_extension_round_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     # 内部：每条 pending 幸运检定的超时定时器（check_id -> asyncio.Task），不序列化
     _luck_timers: dict = field(default_factory=dict, repr=False)
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
@@ -688,6 +696,277 @@ class GameInstance:
     def record_combat_result(self, result: dict) -> None:
         self.pending_combat_results.append(result)
 
+    def capture_combat_extension_snapshot(
+        self,
+        entity_fields: Mapping[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        """Capture state and source fields before this round's combat writes.
+
+        The extension payload alone is insufficient because HP, declared
+        special stats, and consumable inventory live on character/NPC records.
+        Later actions may engage new entities, so their fields are merged into
+        the same pre-mutation snapshot when first touched.
+        """
+
+        try:
+            key = str(int(self.round_number or 0))
+        except (TypeError, ValueError):
+            key = "0"
+        if not isinstance(self.combat_extension_round_snapshots, dict):
+            self.combat_extension_round_snapshots = {}
+        snapshot = self.combat_extension_round_snapshots.get(key)
+        if not isinstance(snapshot, dict):
+            snapshot = None
+        elif "combat_extension" not in snapshot:
+            # Older in-memory snapshots stored the raw extension payload.
+            # Wrap it before adding source-field tracking so that a legacy
+            # branch remains restorable without exposing malformed containers.
+            snapshot = {
+                "schema_version": 1,
+                "combat_extension": copy.deepcopy(snapshot),
+                "entity_fields": {},
+            }
+            self.combat_extension_round_snapshots[key] = snapshot
+        elif (
+            isinstance(snapshot.get("schema_version"), bool)
+            or snapshot.get("schema_version") != 1
+            or not isinstance(snapshot.get("combat_extension"), dict)
+        ):
+            snapshot = None
+        if snapshot is None:
+            snapshot = {
+                "schema_version": 1,
+                "combat_extension": copy.deepcopy(
+                    self.combat_extension if isinstance(self.combat_extension, dict) else {}
+                ),
+                "entity_fields": {},
+            }
+            self.combat_extension_round_snapshots[key] = snapshot
+        snapshot = self.combat_extension_round_snapshots[key]
+        if isinstance(entity_fields, Mapping) and isinstance(snapshot, dict):
+            captured = snapshot.setdefault("entity_fields", {})
+            if not isinstance(captured, dict):
+                captured = {}
+                snapshot["entity_fields"] = captured
+            for entity_id, raw_fields in entity_fields.items():
+                if (
+                    not isinstance(entity_id, str)
+                    or not entity_id
+                    or not isinstance(raw_fields, (tuple, list, set, frozenset))
+                ):
+                    continue
+                fields = tuple(dict.fromkeys(
+                    field_name
+                    for field_name in raw_fields
+                    if isinstance(field_name, str) and field_name
+                ))
+                if not fields:
+                    continue
+                source: Mapping[str, Any] | None = None
+                if entity_id.startswith("player:"):
+                    uid = entity_id.removeprefix("player:")
+                    if uid in self.players:
+                        raw_sheet = self.get_character_sheet(uid)
+                        if isinstance(raw_sheet, Mapping):
+                            source = raw_sheet
+                elif entity_id.startswith("npc:"):
+                    npc = self.npcs.get(entity_id.removeprefix("npc:"))
+                    if isinstance(npc, Mapping):
+                        source = npc
+                if source is None:
+                    continue
+                entry = captured.get(entity_id)
+                if not isinstance(entry, dict):
+                    entry = {"values": {}, "missing": []}
+                    captured[entity_id] = entry
+                values = entry.get("values")
+                if not isinstance(values, dict):
+                    values = {}
+                    entry["values"] = values
+                missing = entry.get("missing")
+                if not isinstance(missing, list):
+                    missing = []
+                    entry["missing"] = missing
+                missing[:] = [
+                    field_name
+                    for field_name in missing
+                    if isinstance(field_name, str)
+                    and field_name
+                    and field_name not in values
+                ]
+                for field_name in fields:
+                    if field_name in values or field_name in missing:
+                        continue
+                    if field_name in source:
+                        values[field_name] = copy.deepcopy(source[field_name])
+                    else:
+                        missing.append(field_name)
+        # Save size stays bounded even in very long sessions. Finished-round
+        # logs carry their own copy, so only recent/current snapshots are needed.
+        if len(self.combat_extension_round_snapshots) > 100:
+            def _sort_key(value: str) -> tuple[int, str]:
+                try:
+                    return int(value), value
+                except (TypeError, ValueError):
+                    return -1, value
+            for old_key in sorted(self.combat_extension_round_snapshots, key=_sort_key)[:-100]:
+                self.combat_extension_round_snapshots.pop(old_key, None)
+
+    def current_combat_extension_snapshot(self) -> dict[str, Any]:
+        """Return the current combat state using this round's tracked fields."""
+
+        try:
+            key = str(int(self.round_number or 0))
+        except (TypeError, ValueError):
+            key = "0"
+        if not isinstance(self.combat_extension_round_snapshots, dict):
+            self.combat_extension_round_snapshots = {}
+        tracked = self.combat_extension_round_snapshots.get(key, {})
+        raw_fields = tracked.get("entity_fields") if isinstance(tracked, dict) else {}
+        entity_fields: dict[str, tuple[str, ...]] = {}
+        if isinstance(raw_fields, dict):
+            for entity_id, entry in raw_fields.items():
+                if not isinstance(entry, dict):
+                    continue
+                values = entry.get("values")
+                absent = entry.get("missing")
+                if (
+                    not isinstance(entity_id, str)
+                    or not entity_id
+                    or not isinstance(values, dict)
+                    or not isinstance(absent, list)
+                    or any(not isinstance(name, str) or not name for name in values)
+                    or any(not isinstance(name, str) or not name for name in absent)
+                    or len(set(absent)) != len(absent)
+                    or set(values).intersection(absent)
+                ):
+                    continue
+                entity_fields[entity_id] = tuple((*values.keys(), *absent))
+
+        extension_state = copy.deepcopy(
+            self.combat_extension if isinstance(self.combat_extension, dict) else {}
+        )
+        extension_state.pop("pending_summaries", None)
+        snapshot: dict[str, Any] = {
+            "schema_version": 1,
+            "combat_extension": extension_state,
+            "entity_fields": {},
+        }
+        for entity_id, fields in entity_fields.items():
+            source: Mapping[str, Any] | None = None
+            if entity_id.startswith("player:"):
+                uid = entity_id.removeprefix("player:")
+                if uid in self.players:
+                    raw_sheet = self.get_character_sheet(uid)
+                    if isinstance(raw_sheet, Mapping):
+                        source = raw_sheet
+            elif entity_id.startswith("npc:"):
+                npc = self.npcs.get(entity_id.removeprefix("npc:"))
+                if isinstance(npc, Mapping):
+                    source = npc
+            if source is None:
+                continue
+            values = {
+                field_name: copy.deepcopy(source[field_name])
+                for field_name in fields if field_name in source
+            }
+            snapshot["entity_fields"][entity_id] = {
+                "values": values,
+                "missing": [field_name for field_name in fields if field_name not in source],
+            }
+        return snapshot
+
+    def restore_combat_extension_snapshot(self, snapshot: Any) -> bool:
+        """Restore a snapshot produced by the combat-extension snapshot API."""
+
+        if not isinstance(snapshot, dict):
+            return False
+        if "combat_extension" not in snapshot:
+            # Compatibility with the short-lived raw-payload snapshot shape.
+            try:
+                restored_extension = copy.deepcopy(snapshot)
+            except (TypeError, ValueError, RecursionError):
+                return False
+            self.combat_extension = restored_extension
+            return True
+        version = snapshot.get("schema_version")
+        if (
+            isinstance(version, bool)
+            or not isinstance(version, int)
+            or version != 1
+            or not isinstance(snapshot.get("combat_extension"), dict)
+        ):
+            return False
+        entity_fields = snapshot.get("entity_fields")
+        if entity_fields is None:
+            entity_fields = {}
+        if not isinstance(entity_fields, dict):
+            return False
+        staged: list[tuple[dict[str, Any], dict[str, Any], list[str]]] = []
+        for entity_id, entry in entity_fields.items():
+            if not isinstance(entity_id, str) or not isinstance(entry, dict):
+                return False
+            target: dict[str, Any] | None = None
+            if entity_id.startswith("player:"):
+                uid = entity_id.removeprefix("player:")
+                if uid in self.players:
+                    raw_sheet = self.get_character_sheet(uid)
+                    if isinstance(raw_sheet, dict):
+                        target = raw_sheet
+            elif entity_id.startswith("npc:"):
+                npc = self.npcs.get(entity_id.removeprefix("npc:"))
+                if isinstance(npc, dict):
+                    target = npc
+            if target is None:
+                continue
+            values = entry.get("values")
+            absent = entry.get("missing")
+            if (
+                not isinstance(values, dict)
+                or not isinstance(absent, list)
+                or any(not isinstance(field_name, str) or not field_name for field_name in values)
+                or any(not isinstance(field_name, str) or not field_name for field_name in absent)
+                or len(set(absent)) != len(absent)
+                or set(values).intersection(absent)
+            ):
+                return False
+            if target is None:
+                continue
+            try:
+                copied_values = {
+                    field_name: copy.deepcopy(value)
+                    for field_name, value in values.items()
+                }
+            except (TypeError, ValueError, RecursionError):
+                return False
+            staged.append((target, copied_values, list(absent)))
+        try:
+            restored_extension = copy.deepcopy(snapshot["combat_extension"])
+        except (TypeError, ValueError, RecursionError):
+            return False
+        self.combat_extension = restored_extension
+        for target, values, absent in staged:
+            target.update(values)
+            for field_name in absent:
+                target.pop(field_name, None)
+        return True
+
+    def discard_combat_extension_snapshots_from(self, round_number: int) -> None:
+        """Drop live snapshots belonging to a discarded history branch."""
+
+        if not isinstance(self.combat_extension_round_snapshots, dict):
+            self.combat_extension_round_snapshots = {}
+            return
+        for key in list(self.combat_extension_round_snapshots):
+            try:
+                snapshot_round = int(key)
+            except (TypeError, ValueError):
+                # Malformed keys cannot be associated with the retained branch.
+                self.combat_extension_round_snapshots.pop(key, None)
+                continue
+            if snapshot_round >= round_number:
+                self.combat_extension_round_snapshots.pop(key, None)
+
     def begin_combat(self, initiative_order: list[str]) -> None:
         self.initiative_order = list(initiative_order)
         self.initiative_current = 0
@@ -729,11 +1008,35 @@ class GameInstance:
             last = self.log.pop()
             from src.engine.economy import reconcile_rollback_snapshot, reverse_round_economy
 
-            reverse_round_economy(self, int(last.get("round", self.round_number) or self.round_number))
+            rolled_back_round = int(last.get("round", self.round_number) or self.round_number)
+            current_combat_snapshot = self.combat_extension_round_snapshots.get(
+                str(self.round_number),
+            )
+            if (
+                self.round_number >= rolled_back_round
+                and isinstance(current_combat_snapshot, dict)
+            ):
+                if not self.restore_combat_extension_snapshot(current_combat_snapshot):
+                    self.combat_extension = {}
+            reverse_round_economy(self, rolled_back_round)
+            missing = object()
+            combat_snapshot: Any = last.get("combat_extension_round_start", missing)
+            if combat_snapshot is missing:
+                combat_snapshot = self.combat_extension_round_snapshots.get(
+                    str(rolled_back_round), missing,
+                )
             snapshot = last.get("round_start_snapshot") or last.get("pre_state_snapshot", {})
             if isinstance(snapshot, dict) and snapshot:
-                restore_players(self, reconcile_rollback_snapshot(self, snapshot, int(last.get("round", self.round_number) or self.round_number)))
-            self.round_number = max(1, int(last.get("round", self.round_number) or 1))
+                restore_players(self, reconcile_rollback_snapshot(self, snapshot, rolled_back_round))
+            # Combat actions run during ACTIVE_ACTION, before the ordinary
+            # round snapshot is captured at judgment entry. Restore their
+            # earlier source-field snapshot last so HP/inventory are not
+            # overwritten by the later round_start_snapshot.
+            if combat_snapshot is not missing:
+                if not self.restore_combat_extension_snapshot(combat_snapshot):
+                    self.combat_extension = {}
+            self.discard_combat_extension_snapshots_from(rolled_back_round)
+            self.round_number = max(1, rolled_back_round)
             self.action_queue.clear()
             self.pending_actions.clear()
             self.ready_players.clear()
@@ -1075,7 +1378,13 @@ class GameInstance:
                      self.game_key, len(self.action_queue))
         return True
 
-    async def finish_judgment(self, gm_response: str, pre_state_snapshot: dict | None = None, state_changes: list[str] | None = None) -> None:
+    async def finish_judgment(
+        self,
+        gm_response: str,
+        pre_state_snapshot: dict | None = None,
+        state_changes: list[str] | None = None,
+        pre_combat_extension_snapshot: dict[str, Any] | None = None,
+    ) -> None:
         """判定完成，记录本轮并开启下一轮。
 
         pre_state_snapshot 应为 _apply_state_update 之前拍摄的快照，
@@ -1084,21 +1393,53 @@ class GameInstance:
         """
         import copy
         async with self._lock:
+            pending_combat_summaries: list[str] = []
+            raw_schema = (
+                self.combat_extension.get("schema_version")
+                if isinstance(self.combat_extension, dict)
+                else None
+            )
+            if isinstance(self.combat_extension, dict) and (
+                raw_schema is None
+                or (isinstance(raw_schema, int) and not isinstance(raw_schema, bool)
+                    and raw_schema == 1)
+            ):
+                raw_pending = self.combat_extension.pop("pending_summaries", [])
+                if isinstance(raw_pending, list):
+                    pending_combat_summaries = [
+                        str(item) for item in raw_pending if str(item).strip()
+                    ][-50:]
+            combined_state_changes = list(state_changes or [])
+            for item in pending_combat_summaries:
+                if item not in combined_state_changes:
+                    combined_state_changes.append(item)
             self.log.append({
                 "round": self.round_number,
                 "actions": list(self.action_queue),
                 "gm_response": gm_response,
-                "state_changes": list(state_changes or []),
+                "state_changes": combined_state_changes,
                 "check_results": [dict(item) for item in self.last_checks],
                 "round_start_snapshot": (
                     copy.deepcopy(self.round_start_snapshot)
                     if self.round_start_snapshot else _snapshot_players(self)
                 ),
+                "combat_extension_round_start": copy.deepcopy(
+                    self.combat_extension_round_snapshots.get(
+                        str(self.round_number),
+                        self.combat_extension if isinstance(self.combat_extension, dict) else {},
+                    )
+                ),
                 "swipes": [],
                 "current_swipe": 0,
                 "pre_state_snapshot": pre_state_snapshot if pre_state_snapshot is not None else _snapshot_players(self),
+                "pre_combat_extension_snapshot": copy.deepcopy(
+                    pre_combat_extension_snapshot
+                    if pre_combat_extension_snapshot is not None
+                    else self.current_combat_extension_snapshot()
+                ),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
+            self.combat_extension_round_snapshots.pop(str(self.round_number), None)
             self.total_llm_calls += 1
             self.last_activity = datetime.now(timezone.utc).isoformat()
         await self.start_round()
@@ -1195,6 +1536,8 @@ class GameInstance:
             self.puzzle_manager = None
             self.plot_tracker = None
             self.pending_combat_results.clear()
+            self.combat_extension = {}
+            self.combat_extension_round_snapshots.clear()
             self.lorebook_timed_state.clear()
             self.health_events.clear()
             self.health_status.clear()

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import Any, Protocol, runtime_checkable
 
 SCHEDULER_KINDS = frozenset({"round_robin", "initiative", "threshold"})
@@ -44,6 +45,8 @@ class SchedulerConfig:
     speed_stat: str = "action_speed"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.kind, str) or not self.kind.strip():
+            raise SchedulerError("scheduler kind must be a non-empty string")
         if self.kind not in SCHEDULER_KINDS:
             raise SchedulerError(f"unknown scheduler kind: {self.kind!r}")
         if self.kind == "threshold":
@@ -60,13 +63,23 @@ class SchedulerConfig:
     def from_payload(payload: Any) -> "SchedulerConfig":
         if not isinstance(payload, Mapping):
             raise SchedulerError("scheduler config must be an object")
+        kind = payload.get("kind")
+        if not isinstance(kind, str) or not kind.strip():
+            raise SchedulerError("scheduler kind must be a non-empty string")
+        gauge = payload.get("gauge", "action_gauge")
+        speed = payload.get("speed", "action_speed")
+        if (
+            not isinstance(gauge, str) or not gauge.strip()
+            or not isinstance(speed, str) or not speed.strip()
+        ):
+            raise SchedulerError("scheduler gauge and speed must be non-empty strings")
         return SchedulerConfig(
-            kind=str(payload.get("kind") or ""),
+            kind=kind.strip(),
             threshold=payload.get("threshold", 100),
             overflow=payload.get("overflow", "carry"),
             consume=payload.get("consume", "reset"),
-            gauge_resource=str(payload.get("gauge") or "action_gauge"),
-            speed_stat=str(payload.get("speed") or "action_speed"),
+            gauge_resource=gauge.strip(),
+            speed_stat=speed.strip(),
         )
 
 
@@ -95,19 +108,58 @@ class SchedulerState:
     def from_dict(payload: Mapping[str, Any]) -> "SchedulerState":
         if not isinstance(payload, Mapping):
             raise SchedulerError("scheduler state payload must be an object")
-        kind = str(payload.get("kind") or "")
+        kind = payload.get("kind")
+        if not isinstance(kind, str):
+            raise SchedulerError("scheduler state kind must be a string")
         if kind not in SCHEDULER_KINDS:
             raise SchedulerError(f"unknown scheduler kind: {kind!r}")
+        raw_order = payload.get("order", [])
+        raw_gauges = payload.get("gauges", {})
+        raw_ready = payload.get("ready", [])
+        if (
+            not isinstance(raw_order, list)
+            or not isinstance(raw_gauges, Mapping)
+            or not isinstance(raw_ready, list)
+        ):
+            raise SchedulerError("scheduler state order/gauges/ready have invalid shapes")
+        order = tuple(raw_order)
+        if (
+            not order
+            or any(not isinstance(item, str) or not item for item in order)
+            or len(set(order)) != len(order)
+        ):
+            raise SchedulerError("scheduler state order must contain unique actor ids")
+        turn_index = payload.get("turn_index", 0)
+        round_number = payload.get("round", 1)
+        if (
+            isinstance(turn_index, bool) or not isinstance(turn_index, int)
+            or turn_index < 0 or turn_index >= len(order)
+            or isinstance(round_number, bool) or not isinstance(round_number, int)
+            or round_number < 1
+        ):
+            raise SchedulerError("scheduler state turn index or round is invalid")
+        gauges: dict[str, int] = {}
+        for key, value in raw_gauges.items():
+            if (
+                not isinstance(key, str) or key not in order
+                or isinstance(value, bool) or not isinstance(value, int)
+                or value < 0
+            ):
+                raise SchedulerError("scheduler state gauges are invalid")
+            gauges[key] = value
+        ready = tuple(raw_ready)
+        if (
+            any(not isinstance(item, str) or item not in order for item in ready)
+            or len(set(ready)) != len(ready)
+        ):
+            raise SchedulerError("scheduler state ready actors are invalid")
         return SchedulerState(
             kind=kind,
-            order=tuple(str(item) for item in (payload.get("order") or [])),
-            turn_index=int(payload.get("turn_index", 0) or 0),
-            round=int(payload.get("round", 1) or 1),
-            gauges={
-                str(key): int(value)
-                for key, value in (payload.get("gauges") or {}).items()
-            },
-            ready=tuple(str(item) for item in (payload.get("ready") or [])),
+            order=order,
+            turn_index=turn_index,
+            round=round_number,
+            gauges=gauges,
+            ready=ready,
         )
 
 
@@ -185,7 +237,11 @@ class _BaseScheduler:
         self, state: SchedulerState, combat_state: Mapping[str, Any],
     ) -> tuple[str, ...]:
         actors = _actors(combat_state)
-        if not state.order or state.turn_index >= len(state.order):
+        # ``_reconcile_scheduler_state`` may use -1 transiently when the
+        # previous turn holder disappeared between writes.  Expose no actor
+        # until the next authoritative advance selects index zero; indexing
+        # with -1 here would incorrectly grant the last actor an extra turn.
+        if not state.order or state.turn_index < 0 or state.turn_index >= len(state.order):
             return ()
         actor_id = state.order[state.turn_index]
         return (actor_id,) if actor_id in _alive_ids(actors) else ()
@@ -317,7 +373,7 @@ class ThresholdScheduler:
         if not alive:
             raise SchedulerError("no living actors to schedule")
         for actor_id in alive:
-            if _stat(actors[actor_id], "speed") <= 0:
+            if _stat(actors[actor_id], self.config.speed_stat) <= 0:
                 raise SchedulerError(
                     f"threshold scheduler requires speed > 0 for actor {actor_id!r}"
                 )
@@ -382,11 +438,18 @@ class ThresholdScheduler:
             if gauges.get(actor_id, 0) >= self.config.threshold
             and actor_id not in state.ready
         ]
+        # The integer tick above only determines when the first actor becomes
+        # ready. Every actor crossing the threshold during that tick must still
+        # be ordered by its exact fractional arrival time. Sorting by post-tick
+        # overflow is incorrect because it can reverse the true arrival order.
         newly_ready.sort(key=lambda actor_id: (
-            -(gauges.get(actor_id, 0) - self.config.threshold),  # 先达到者（溢出即先到）
-            -_stat(actors[actor_id], self.config.speed_stat),    # speed 较高者
-            -_stat(actors[actor_id], "initiative_modifier"),     # 先攻修正较高者
-            actor_id,                                            # canonical 字典序
+            Fraction(
+                self.config.threshold - state.gauges.get(actor_id, 0),
+                speeds[actor_id],
+            ),
+            -_stat(actors[actor_id], self.config.speed_stat),
+            -_stat(actors[actor_id], "initiative_modifier"),
+            actor_id,
         ))
         ready = tuple([*state.ready, *newly_ready])
         next_state = replace(state, gauges=gauges, ready=ready)
@@ -411,10 +474,17 @@ class ThresholdScheduler:
             )
         gauge = state.gauges.get(actor_id, self.config.threshold)
         if self.config.consume == "carry":
-            gauges = {**state.gauges, actor_id: gauge - self.config.threshold}
+            remaining_gauge = gauge - self.config.threshold
+            gauges = {**state.gauges, actor_id: remaining_gauge}
         else:  # reset
+            remaining_gauge = 0
             gauges = {**state.gauges, actor_id: 0}
         ready = tuple(item for item in state.ready if item != actor_id)
+        # A very fast actor can retain at least one full threshold after a
+        # carry consume. Keep it queued at the back so the next action is
+        # immediately available without requiring a no-op time advance.
+        if remaining_gauge >= self.config.threshold:
+            ready = (*ready, actor_id)
         next_state = replace(state, gauges=gauges, ready=ready)
         return SchedulerResult(
             state=next_state,

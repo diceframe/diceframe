@@ -214,7 +214,7 @@ def test_effect_formula_failure_rejects_before_costs_commit() -> None:
 
 
 def test_unsupported_effect_kinds_are_rejected_explicitly() -> None:
-    for kind in ("apply_status", "remove_status", "barrier", "modify_stat",
+    for kind in ("apply_status", "remove_status", "barrier",
                  "advance_scheduler"):
         with pytest.raises(CombatActionError, match="not supported"):
             apply_combat_action(_state(), _action(effects=(
@@ -295,3 +295,39 @@ def test_validate_effect_spec_bounds() -> None:
              "damage_type": "psychic"},
             allowed_damage_types=frozenset({"fire"}),
         )
+
+
+def test_modify_stat_applies_buff_with_duration() -> None:
+    """遁术类效果：modify_stat 挂 buff，时长必填、零变化拒绝。"""
+    outcome = apply_effects(_state(), [
+        EffectSpec(kind="modify_stat", resource="action_speed",
+                   amount={"op": "constant", "value": 20}, duration=1),
+    ], _context(target_id="player:x"), source_action_id="ability:escape_step")
+    assert outcome.state.buffs == (
+        {"entity_id": "player:x", "stat": "action_speed",
+         "delta": 20, "remaining": 1},
+    )
+    assert outcome.events[-1]["type"] == "combat.buff_applied"
+
+    with pytest.raises(CombatActionError, match="positive duration"):
+        apply_effects(_state(), [
+            EffectSpec(kind="modify_stat", resource="action_speed",
+                       amount={"op": "constant", "value": 20}),
+        ], _context(target_id="player:x"))
+    with pytest.raises(CombatActionError, match="evaluated to zero"):
+        apply_effects(_state(), [
+            EffectSpec(kind="modify_stat", resource="action_speed",
+                       amount={"op": "constant", "value": 0}, duration=2),
+        ], _context(target_id="player:x"))
+
+
+def test_action_level_modify_stat_appends_buff_per_target() -> None:
+    action = CombatAction(
+        action_id="ability:escape_step", actor_id="player:x",
+        target_ids=("player:x",), kind="ability",
+        effects=(EffectSpec(kind="modify_stat", resource="action_speed",
+                            amount={"op": "constant", "value": 20}, duration=1),),
+    )
+    outcome = apply_combat_action(_state(), action, _context(target_id="player:x"))
+    assert len(outcome.state.buffs) == 1
+    assert outcome.state.buffs[0]["entity_id"] == "player:x"

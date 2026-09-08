@@ -15,6 +15,7 @@ from src.webui.services._common import is_game_gm
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import (
+    _broadcast_combat_change,
     _broadcast_ruleset_change,
     _gm_only_inst,
     _narration_callbacks,
@@ -404,3 +405,59 @@ async def api_swipe(request: web.Request) -> web.Response:
         if ok:
             await api.save_game_instance(inst)
         return web.json_response({"ok": ok})
+
+
+async def api_combat_action(request: web.Request) -> web.Response:
+    """战斗扩展动作 intent：客户端只提交 action_id 与目标，数值全部服务端求值。"""
+
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if inst is None:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    session_uid = str(request.get("user_id", "") or "")
+    owner = bool(request.get("owner_authenticated", False))
+    if not session_uid or (
+        session_uid not in inst.players
+        and not is_game_gm(inst, session_uid, owner)
+    ):
+        return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    result = await api.combat_extension_action(
+        gk,
+        body,
+        session_uid=session_uid,
+        viewer_is_gm=is_game_gm(inst, session_uid, owner),
+    )
+    await _broadcast_combat_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = 200 if result.get("ok") else 409 if code in {
+        "INTENT_ID_CONFLICT", "REWRITE_IN_PROGRESS", "STALE_RUN",
+    } else 400
+    return web.json_response(result, status=status)
+
+
+async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
+    """GM 推进 ATB 时间。"""
+
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if inst is None:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    session_uid = str(request.get("user_id", "") or "")
+    owner = bool(request.get("owner_authenticated", False))
+    if not is_game_gm(inst, session_uid, owner):
+        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    result = await api.combat_extension_scheduler_advance(gk)
+    await _broadcast_combat_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = 200 if result.get("ok") else 409 if code in {
+        "REWRITE_IN_PROGRESS", "STALE_RUN",
+    } else 400
+    return web.json_response(result, status=status)

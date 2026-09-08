@@ -102,6 +102,17 @@ class TestFormatHistory:
         assert "你击中了哥布林" in result
         assert "Round 1" in result
 
+    def test_state_changes_are_kept_for_story_continuity(self):
+        log = [{
+            "round": 3,
+            "actions": [{"text": "观察铜尺"}],
+            "gm_response": "你发现铜尺上的刻痕。",
+            "state_changes": ["战斗扩展：我测试 使用了 内力掌（老周妻 -12）"],
+        }]
+        result = _format_history(log, 1000)
+        assert "状态变动" in result
+        assert "老周妻 -12" in result
+
     def test_truncation_by_budget(self):
         log = [
             {
@@ -188,6 +199,26 @@ async def test_build_context_does_not_duplicate_system_prompt():
     assert "【游戏状态】" in context
     assert "【世界观知识】" in context
     assert "【玩家发言】" in context
+
+
+@pytest.mark.asyncio
+async def test_build_context_includes_authoritative_combat_events_after_player_block():
+    instance = DummyInstance()
+    instance.language = "zh-CN"
+    context = await build_context(
+        instance,
+        gm_prompt_filled="你是测试 GM。",
+        lorebook_entries=[],
+        player_message="我继续观察现场。",
+        provider_name="deepseek",
+        authoritative_events_text=(
+            "【已结算战斗事实·必须接续】\n"
+            "[{\"intent_id\":\"i-1\",\"events\":[{\"type\":\"combat.damage_applied\",\"applied\":12}]}]"
+        ),
+    )
+    assert "已结算战斗事实·必须接续" in context
+    assert '"intent_id":"i-1"' in context
+    assert context.index("已结算战斗事实·必须接续") > context.index("【玩家发言】")
 
 
 @pytest.mark.asyncio

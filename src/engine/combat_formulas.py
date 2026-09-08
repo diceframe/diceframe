@@ -63,6 +63,68 @@ class FormulaContext:
     check_result: Mapping[str, Any] | None = None
 
 
+def validate_formula(
+    node: Mapping[str, Any],
+    *,
+    _depth: int = 0,
+    _counter: list[int] | None = None,
+    _dice_nodes: list[int] | None = None,
+) -> None:
+    """Validate a formula AST without evaluating references or rolling dice.
+
+    Rule editors call this at save/load time so malformed nodes fail before a
+    player attempts the action.  Runtime evaluation repeats the same bounds
+    because persisted data remains an untrusted boundary.
+    """
+
+    if _counter is None:
+        _counter = [0]
+    if _dice_nodes is None:
+        _dice_nodes = [0]
+    _counter[0] += 1
+    if _counter[0] > MAX_FORMULA_NODES:
+        raise FormulaError("formula has too many nodes")
+    if _depth > MAX_FORMULA_DEPTH:
+        raise FormulaError("formula nesting is too deep")
+    if not isinstance(node, Mapping):
+        raise FormulaError("formula node must be an object")
+
+    op = node.get("op")
+    if op not in _ALLOWED_OPS:
+        raise FormulaError(f"unknown formula op: {op!r}")
+    if op == "constant":
+        _as_int(node.get("value"), what="constant value")
+        return
+    if op in {"attribute", "derived_stat", "equipment_stat", "resource"}:
+        ref = node.get("id")
+        if not isinstance(ref, str) or not ref.strip():
+            raise FormulaError(f"formula {op} reference must be a non-empty string")
+        return
+    if op == "dice":
+        formula = node.get("formula")
+        if not isinstance(formula, str) or not _DICE_FORMULA_RE.fullmatch(formula):
+            raise FormulaError(f"invalid dice formula: {formula!r}")
+        _dice_nodes[0] += 1
+        if _dice_nodes[0] > MAX_FORMULA_DICE_NODES:
+            raise FormulaError("formula has too many dice nodes")
+        return
+
+    args = node.get("args")
+    if not isinstance(args, list) or not args:
+        raise FormulaError(f"formula op {op!r} requires non-empty args")
+    if op == "negate" and len(args) != 1:
+        raise FormulaError("negate takes exactly one arg")
+    if op in {"subtract", "multiply"} and len(args) != 2:
+        raise FormulaError(f"{op} takes exactly two args")
+    for arg in args:
+        validate_formula(
+            arg,
+            _depth=_depth + 1,
+            _counter=_counter,
+            _dice_nodes=_dice_nodes,
+        )
+
+
 def _as_int(value: Any, *, what: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise FormulaError(f"formula {what} must be an integer")

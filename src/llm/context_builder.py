@@ -105,11 +105,13 @@ def _is_key_round(entry: dict) -> bool:
     gm = sanitize_narration(entry.get("gm_response", "")).lower()
     tags = entry.get("tags_summary", {}).get("tags", [])
     tag_str = " ".join(tags).lower()
+    state_changes = entry.get("state_changes", [])
+    state_text = " ".join(str(item) for item in state_changes if str(item).strip()).lower()
     keywords = ("战斗", "攻击", "受伤", "倒地", "购买", "花费", "金币", "交易",
                 "谜题", "机关", "登场", "第一次", "发现", "线索", "秘密", "真相",
                 "combat", "attack", "damage", "gold", "pay", "puzzle", "clue",
                 "hp", "扣", "得到", "获得", "解锁")
-    if any(kw in gm for kw in keywords):
+    if any(kw in gm or kw in state_text for kw in keywords):
         return True
     if any(kw in tag_str for kw in ("hp:", "gold:", "pay:", "npc:", "puzzle:", "quest:", "xp:")):
         return True
@@ -138,7 +140,14 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
         )
         gm_text = sanitize_narration(entry.get("gm_response", ""))
         player_label = localized_text(language, {"en": "Players", "zh-CN": "玩家", "ja": "プレイヤー"})
-        return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}"
+        state_changes = "; ".join(
+            str(item) for item in entry.get("state_changes", []) if str(item).strip()
+        )
+        state_label = localized_text(language, {
+            "en": "State changes", "zh-CN": "状态变动", "ja": "状態変化",
+        })
+        state_line = f"\n{state_label}: {state_changes}" if state_changes else ""
+        return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}{state_line}"
 
     def _entry_slim(entry: dict) -> str:
         actions_text = "; ".join(
@@ -147,7 +156,14 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
         )
         gm_text = sanitize_narration(entry.get("gm_response", ""))
         player_label = localized_text(language, {"en": "Players", "zh-CN": "玩家", "ja": "プレイヤー"})
-        return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}"
+        state_changes = "; ".join(
+            str(item) for item in entry.get("state_changes", []) if str(item).strip()
+        )
+        state_label = localized_text(language, {
+            "en": "State changes", "zh-CN": "状态变动", "ja": "状態変化",
+        })
+        state_suffix = f" | {state_label}: {state_changes[:120]}" if state_changes else ""
+        return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}{state_suffix}"
 
     for entry in keep_full:
         line = _entry_full(entry)
@@ -216,6 +232,7 @@ def _shrink_to_window(parts: list[str], sec_idx: dict[str, int], max_total: int)
         ("economy", False),
         ("memory", False),
         ("summary", False),
+        ("authoritative_events", False),
         ("lorebook", False),
         ("state", False),
     ):
@@ -241,6 +258,7 @@ async def build_context(
     directives_text: str = "",
     overreach_text: str = "",
     state_view: dict | None = None,
+    authoritative_events_text: str = "",
 ) -> str:
     """将游戏状态拼接为完整的 LLM 上下文。
 
@@ -496,6 +514,9 @@ async def build_context(
         parts.append(directives_text.strip())
     if overreach_text:
         parts.append(overreach_text.strip())
+    if authoritative_events_text:
+        parts.append(authoritative_events_text.strip())
+        sec_idx["authoritative_events"] = len(parts) - 1
 
     context = "\n\n---\n\n".join(parts)
 
