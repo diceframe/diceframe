@@ -66,6 +66,15 @@ async def v2_static_file(request: web.Request) -> web.FileResponse:
 
 _CHARSET_SUFFIXES = (".js", ".mjs", ".css", ".json", ".html", ".htm", ".svg", ".xml", ".txt")
 _STATIC_CONTENT_TYPES = {
+    # Windows registry MIME associations can label scripts as text/plain.
+    # Pin frontend types so browsers can load modules with strict MIME checks.
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".svg": "image/svg+xml",
     ".avif": "image/avif",
     ".webp": "image/webp",
     ".woff2": "font/woff2",

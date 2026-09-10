@@ -9,6 +9,7 @@ from src.webui.routes.pages import (
     _guess_content_type,
     add_response_security_headers,
     robots_txt,
+    register_pages,
 )
 
 
@@ -71,3 +72,36 @@ def test_frontend_html_declares_noindex():
 def test_static_image_types_do_not_depend_on_the_windows_mime_registry():
     assert _guess_content_type(Path("avatar.webp")) == "image/webp"
     assert _guess_content_type(Path("background.avif")) == "image/avif"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("index.js", "text/javascript"),
+        ("module.mjs", "text/javascript"),
+        ("INDEX.JS", "text/javascript"),
+        ("index.css", "text/css"),
+    ],
+)
+async def test_frontend_assets_load_with_incorrect_system_mime_types(
+    tmp_path, monkeypatch, filename, content_type
+):
+    monkeypatch.setattr(
+        "src.webui.routes.pages.mimetypes.guess_type",
+        lambda *args, **kwargs: ("text/plain", None),
+    )
+    asset = b"/* frontend asset */"
+    (tmp_path / filename).write_bytes(asset)
+    app = web.Application()
+    app["static_v2_dir"] = tmp_path
+    app.on_response_prepare.append(add_response_security_headers)
+    register_pages(app)
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(f"/v2-assets/{filename}")
+        assert response.status == 200
+        assert response.content_type == content_type
+        assert response.charset == "utf-8"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert await response.read() == asset
