@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import sys
+import signal
+import ssl
 
 from aiohttp import web
 
@@ -263,23 +265,56 @@ def _application_dependencies() -> ApplicationDependencies:
 
 app = create_app(_application_dependencies())
 
+async def main():
+
+    ssl_context = None
+    try:
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.load_cert_chain('./data/server.crt', './data/server.key')
+    except Exception as exc:
+        # logger.warning("HTTPS 证书加载失败，仅启动 HTTP")
+        pass
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    sites = []
+
+    http_site = web.TCPSite(runner, host=HOST, port=PORT)
+    await http_site.start()
+    sites.append(http_site)
+    print(f"DiceFrame WebUI: {TRANSPORT.endpoint.url('127.0.0.1')}  (host={HOST})")
+
+    if ssl_context is not None:
+        https_site = web.TCPSite(
+            runner, host=HOST, port=18800, ssl_context=ssl_context
+        )
+        await https_site.start()
+        sites.append(https_site)
+        print(f"DiceFrame WebUI: 'https://127.0.0.1:18800'  (host={HOST})")
+
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGINT, stop_event.set)
+    loop.add_signal_handler(signal.SIGTERM, stop_event.set)
+
+    try:
+        await stop_event.wait()
+    finally:
+        await runner.cleanup()
+
+    if app.get("runtime_control", {}).get("restart_requested", False):
+        logger.info("DiceFrame 清理完成，正在重新启动")
+        return True
+    return False
+
 if __name__ == "__main__":
     runtime_log_path = configure_runtime_logging(DATA_DIR)
     logger.info("运行日志写入 %s（保留 %s 天）", runtime_log_path, RETENTION_DAYS)
     if TRANSPORT.degraded_error:
         logger.critical("%s", TRANSPORT.degraded_error)
-    print(f"DiceFrame WebUI: {TRANSPORT.endpoint.url('127.0.0.1')}  (host={HOST})")
     if not is_llm_config_ready(STATE):
         print("请在 WebUI 的 AI 服务商与模型配置中设置主模型。")
-    runtime_loop = asyncio.new_event_loop()
-    install_runtime_exception_handler(runtime_loop)
-    web.run_app(
-        app,
-        host=HOST,
-        port=PORT,
-        ssl_context=TRANSPORT.ssl_context,
-        loop=runtime_loop,
-    )
-    if app["runtime_control"]["restart_requested"]:
-        logger.info("DiceFrame 清理完成，正在重新启动")
+
+    restart = asyncio.run(main())
+    if restart:
         os.execv(sys.executable, [sys.executable, *sys.argv])

@@ -160,7 +160,7 @@ class ConfigStore:
 
         model = saved.get("model", "")
         port = int(env.get("TRPG_WEB_PORT") or saved.get("web_port", 18000))
-        host = str(env.get("TRPG_WEB_HOST") or saved.get("web_host", "0.0.0.0"))
+        host = str(env.get("TRPG_WEB_HOST") or saved.get("web_host", "0.0.0.0")).split(',')
         transport_config = parse_web_transport(saved.get("web_transport"), env)
         transport = build_server_transport(
             transport_config,
