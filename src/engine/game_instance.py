@@ -1052,6 +1052,33 @@ class GameInstance:
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return self.round_number
 
+    async def abort_round_processing(self) -> bool:
+        """判定阶段处理失败：回退到行动阶段，保留行动队列等待重试。
+
+        与 rollback_last_round（回滚已完成回合）不同：经济、日志、round_number
+        均未落定，不做改动；仅撤销本轮判定入口到叙事生成失败之间的状态变更。
+        行动上已掷的骰值保留，保证重试时判定结果稳定；check_request 会在
+        下一轮准备阶段按行动内容确定性重建。
+        """
+        async with self._lock:
+            if self.state != GameState.ACTIVE_JUDGMENT:
+                return False
+            if self.round_start_snapshot:
+                restore_players(self, self.round_start_snapshot)
+            combat_snapshot = self.combat_extension_round_snapshots.get(
+                str(self.round_number),
+            )
+            if isinstance(combat_snapshot, dict) and not self.restore_combat_extension_snapshot(combat_snapshot):
+                self.combat_extension = {}
+            for check_id in list(self._luck_timers):
+                self._cancel_luck_timer(check_id)
+            self.reset_round_checks()
+            self.death_save_outcomes.clear()
+            self.round_start_snapshot.clear()
+            self.state = GameState.ACTIVE_ACTION
+            self.last_activity = datetime.now(timezone.utc).isoformat()
+            return True
+
     def iter_player_sheets(self):
         """遍历玩家及其角色卡，yield (uid, player_data, character_sheet)。"""
         for uid, player in self.players.items():

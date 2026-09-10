@@ -96,6 +96,46 @@ def test_narrative_perspective_round_trips_and_old_saves_default_to_auto() -> No
 
 
 @pytest.mark.asyncio
+async def test_abort_round_processing_restores_action_phase_without_touching_queue() -> None:
+    instance = GameInstance(game_key=("web", "abort-round", "bot"))
+    instance.state = GameState.ACTIVE_ACTION
+    instance.round_number = 5
+    instance.players = {
+        "p1": {"user_id": "p1", "character_name": "Avery", "character_sheet": {"hp": 10}},
+    }
+    assert await instance.add_action("p1", "攻击哥布林")
+    assert await instance.advance_round()
+    assert instance.state == GameState.ACTIVE_JUDGMENT
+
+    # 模拟判定入口到叙事失败之间的状态变更：扣血、死亡豁免、检定/幸运、骰值。
+    instance.get_character_sheet("p1")["hp"] = 7
+    instance.death_save_outcomes[str(instance.round_number)] = {"p1": "fail"}
+    instance.record_check({"check_id": "check-1", "luck_decision": "pending"})
+    instance.complete_round_check_preparation()
+    luck_timer = asyncio.create_task(asyncio.sleep(30))
+    instance._luck_timers["check-1"] = luck_timer
+    instance.action_queue[0]["dice_value"] = 15
+
+    assert await instance.abort_round_processing() is True
+
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.get_character_sheet("p1")["hp"] == 10
+    assert instance.last_checks == []
+    assert instance.last_check is None
+    assert instance.round_checks_prepared is False
+    assert instance.death_save_outcomes == {}
+    assert instance.round_start_snapshot == {}
+    assert instance._luck_timers == {}
+    await asyncio.sleep(0)  # 让取消请求在事件循环中落地
+    assert luck_timer.cancelled()
+    # 行动队列与已掷骰值保留，重试时判定结果稳定。
+    assert len(instance.action_queue) == 1
+    assert instance.action_queue[0]["dice_value"] == 15
+    # 非判定态调用是空操作。
+    assert await instance.abort_round_processing() is False
+
+
+@pytest.mark.asyncio
 async def test_reset_preserves_exact_ruleset_and_adventure_bindings() -> None:
     instance = GameInstance(
         game_key=("web", "professional-restart", "bot"),

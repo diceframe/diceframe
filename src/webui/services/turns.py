@@ -33,6 +33,10 @@ NarrationDelta = Callable[[str], Awaitable[None]]
 NarrationReset = Callable[[], Awaitable[None]]
 
 
+class RoundProcessingError(RuntimeError):
+    """判定/叙事处理失败；实例状态已回滚到行动阶段，可重新提交行动后推进。"""
+
+
 @dataclass(frozen=True)
 class TurnDependencies:
     get_instance: Callable[[tuple[str, ...]], Any | None]
@@ -208,13 +212,50 @@ async def _process_round(
 ) -> tuple[str, Any]:
     if dependencies.process_round is None:
         raise RuntimeError("round processor is not available")
-    narration, response = await dependencies.process_round(
-        instance,
-        on_delta=on_delta,
-        on_reset=on_reset,
-    )
+    try:
+        narration, response = await dependencies.process_round(
+            instance,
+            on_delta=on_delta,
+            on_reset=on_reset,
+        )
+    except Exception as exc:
+        # 判定/叙事失败不允许把对局留在 ACTIVE_JUDGMENT：那会让玩家永远看到
+        # "正在生成剧情" 且无法提交行动。回滚到行动阶段后再向调用方报错。
+        await _rollback_failed_round(dependencies, instance, game_key, on_reset=on_reset)
+        raise RoundProcessingError(_round_failure_message(exc)) from exc
     await _auto_settle_rewards(dependencies, instance, game_key)
     return narration, response
+
+
+def _round_failure_message(exc: Exception) -> str:
+    detail = (str(exc) or exc.__class__.__name__)[:200]
+    return f"剧情生成失败，本轮已退回行动阶段，可稍后重新推进：{detail}"
+
+
+def _round_failure_result(exc: RoundProcessingError) -> TurnResult:
+    return _result({
+        "ok": False,
+        "error_code": "ROUND_PROCESSING_FAILED",
+        "error": str(exc),
+        "phase": "error",
+    }, 502)
+
+
+async def _rollback_failed_round(
+    dependencies: TurnDependencies,
+    instance: "GameInstance",
+    game_key: str,
+    *,
+    on_reset: NarrationReset | None,
+) -> None:
+    """回滚失败回合并广播重置；清理自身的异常只记日志，不吞掉原始异常。"""
+    try:
+        await instance.abort_round_processing()
+        if on_reset is not None:
+            await on_reset()
+        await dependencies.save_instance(instance)
+    except Exception:
+        logger.exception("回滚失败回合状态异常: game=%s", game_key)
 
 
 async def _auto_settle_rewards(
@@ -412,9 +453,12 @@ async def submit_action(
         if instance.pending_luck_checks():
             await dependencies.save_instance(instance)
             return _result(_pending_luck_payload(instance, roll=roll_payload))
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return _round_failure_result(exc)
         payload = _round_payload(
             instance,
             narration,
@@ -476,9 +520,12 @@ async def resolve_luck_and_continue(
         instance, auto_reward_gold_cap=_auto_reward_cap(dependencies, instance),
     ):
         return _result(economy_decision_pending_payload(instance, actor_uid), 409)
-    narration, _ = await _process_round(
-        dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-    )
+    try:
+        narration, _ = await _process_round(
+            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+        )
+    except RoundProcessingError as exc:
+        return _round_failure_result(exc)
     payload = {
         **decision,
         **_round_payload(instance, narration, phase="done", viewer_uid=actor_uid),
@@ -520,9 +567,12 @@ async def advance_round(
             declined = await dependencies.decline_pending_luck(game_key)
             advanced_declined_luck = list(declined.get("declined_luck_decisions") or [])
         logger.warning("检测到卡死状态，自动恢复 process_round - game_key=%s", game_key)
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return _round_failure_result(exc)
         payload = _round_payload(instance, narration, viewer_uid=actor_uid)
         if advanced_declined_luck:
             payload["declined_luck_decisions"] = advanced_declined_luck
@@ -570,9 +620,12 @@ async def advance_round(
         if pending_luck:
             declined = await dependencies.decline_pending_luck(game_key)
             declined_luck = list(declined.get("declined_luck_decisions") or [])
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return _round_failure_result(exc)
         payload = _round_payload(instance, narration, ok=True, viewer_uid=actor_uid)
         if forced_waiting:
             payload["forced_waiting"] = forced_waiting

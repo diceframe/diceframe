@@ -120,7 +120,7 @@ class GameHandler:
             brief_max_tokens,
             self.memory_store,
         )
-        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens)
+        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens, registry=self.registry)
         self._kp_questions = KPQuestionResponder(
             self.llm_client,
             self.matcher,
