@@ -188,6 +188,12 @@ class GameInstance:
     round_checks_prepared: bool = False
     # 进入判定阶段前的玩家状态；整轮撤回时用于退还本轮消耗的幸运。
     round_start_snapshot: PlayerRollbackSnapshot = field(default_factory=dict)
+    # 进入判定阶段前的旧版战斗实体状态（npcs / combat_enemies / 战斗状态）。
+    # 旧版 hp_based 路径（CombatResolver）直接改写这些记录、且不经过
+    # combat_extension 的快照机制；判定失败回滚必须能把它们一起还原，
+    # 否则"没讲成的回合"会留下伤害。D&D2024 权威战斗另有
+    # combat_extension_round_snapshots。见 capture_round_entity_snapshot。
+    round_entity_snapshot: dict[str, Any] = field(default_factory=dict)
     # Death-save outcomes are keyed by round and player UID so narrative/API
     # retries reuse the same roll without leaking it into future rounds.
     death_save_outcomes: dict[str, dict[str, dict]] = field(default_factory=dict)
@@ -1048,6 +1054,7 @@ class GameInstance:
             # let a discarded outcome affect the replay or a later round.
             self.death_save_outcomes.clear()
             self.round_start_snapshot.clear()
+            self.round_entity_snapshot.clear()
             self.state = GameState.ACTIVE_ACTION
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return self.round_number
@@ -1057,27 +1064,105 @@ class GameInstance:
 
         与 rollback_last_round（回滚已完成回合）不同：经济、日志、round_number
         均未落定，不做改动；仅撤销本轮判定入口到叙事生成失败之间的状态变更。
-        行动上已掷的骰值保留，保证重试时判定结果稳定；check_request 会在
-        下一轮准备阶段按行动内容确定性重建。
+        行动上已掷的骰值保留（骰值只在缺失时重掷），因此重试时骰值稳定；
+        check_request 会由检定规划按行动内容重新生成，不保证与失败那次完全一致。
+
+        行动里的战斗结算缓存（combat_outcome）不是"输入"而是失败那一轮的
+        产物：血量已经被玩家快照 / 战斗扩展快照 / 实体快照恢复的实体，其缓存
+        必须丢弃，否则重试会命中 ``CombatResolver`` 的缓存重放分支——既不重掷
+        命中骰也不重新扣血——使结算记录（伤害 5）与实际 HP（恢复后的满血）互相
+        矛盾；无法核对血量的旧存档则保留缓存，避免重试重复扣血。判定见
+        ``_drop_stale_combat_caches``。
         """
         async with self._lock:
             if self.state != GameState.ACTIVE_JUDGMENT:
                 return False
+            restored = False
             if self.round_start_snapshot:
                 restore_players(self, self.round_start_snapshot)
+                restored = True
             combat_snapshot = self.combat_extension_round_snapshots.get(
                 str(self.round_number),
             )
-            if isinstance(combat_snapshot, dict) and not self.restore_combat_extension_snapshot(combat_snapshot):
-                self.combat_extension = {}
+            if isinstance(combat_snapshot, dict):
+                if not self.restore_combat_extension_snapshot(combat_snapshot):
+                    self.combat_extension = {}
+                restored = True
+            # 旧版战斗路径直接改写的实体（npcs/combat_enemies/战斗状态）。
+            entities_restored = self.restore_round_entity_snapshot()
+            restored = restored or entities_restored
+            if restored:
+                self._drop_stale_combat_caches(all_targets=entities_restored)
             for check_id in list(self._luck_timers):
                 self._cancel_luck_timer(check_id)
             self.reset_round_checks()
             self.death_save_outcomes.clear()
             self.round_start_snapshot.clear()
+            self.round_entity_snapshot.clear()
             self.state = GameState.ACTIVE_ACTION
             self.last_activity = datetime.now(timezone.utc).isoformat()
             return True
+
+    def _drop_stale_combat_caches(self, *, all_targets: bool = False) -> None:
+        """丢弃"状态已回滚、缓存却仍记录伤害"的战斗结算缓存。
+
+        实体快照与玩家快照已经把相关实体恢复到判定入口，缓存描述的却是另一个
+        状态；保留它会命中 ``CombatResolver`` 的缓存重放分支——既不重掷命中骰
+        也不重新扣血——于是结算记录（伤害 5）与实际 HP（恢复后的满血）互相矛盾。
+
+        ``all_targets=True``（实体快照已完整还原，含 npcs/combat_enemies）时一律
+        丢弃。旧存档没有实体快照（``all_targets=False``）时退化为按目标核对：
+        只有该目标"本轮结算后的最终血量"与当前血量不一致才丢弃，血量没有被回滚
+        的目标或目标已无法解析时保留缓存，避免重试重复扣血。
+        """
+        by_target: dict[str, list[tuple[dict[str, Any], Mapping[str, Any]]]] = {}
+        for action in self.action_queue:
+            outcome = action.get("combat_outcome") if isinstance(action, dict) else None
+            if isinstance(outcome, dict):
+                by_target.setdefault(str(outcome.get("target_ref") or ""), []).append(
+                    (action, outcome),
+                )
+        for target_ref, entries in by_target.items():
+            if not all_targets:
+                # resolve_combat 按 action_queue 顺序结算，故最后一条即最终态。
+                final_hp = entries[-1][1].get("target_hp_after")
+                current_hp = self._entity_hp(target_ref)
+                if current_hp is None or final_hp is None or current_hp == final_hp:
+                    # 无法核对，或血量仍是结算后的值：保留缓存，重放安全且必要。
+                    continue
+            for action, _outcome in entries:
+                action.pop("combat_outcome", None)
+
+    def _entity_hp(self, target_ref: str) -> int | None:
+        """按战斗目标引用取当前血量；未知目标返回 None。
+
+        旧版 ``CombatResolver`` 用裸 uid 表示玩家目标，战斗扩展用
+        ``player:<uid>`` / ``npc:<id>`` / ``enemy:<index>``，两种都要认。
+        """
+        raw: Any = None
+        if target_ref in self.players:
+            raw = self.get_character_sheet(target_ref).get("hp")
+        elif target_ref.startswith("player:"):
+            uid = target_ref.removeprefix("player:")
+            if uid in self.players:
+                raw = self.get_character_sheet(uid).get("hp")
+        elif target_ref.startswith("npc:"):
+            npc = self.npcs.get(target_ref.removeprefix("npc:"))
+            if isinstance(npc, Mapping):
+                raw = npc.get("hp")
+        elif target_ref.startswith("enemy:"):
+            try:
+                enemy = self.combat_enemies[int(target_ref.removeprefix("enemy:"))]
+            except (ValueError, IndexError):
+                return None
+            if isinstance(enemy, Mapping):
+                raw = enemy.get("hp")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
 
     def iter_player_sheets(self):
         """遍历玩家及其角色卡，yield (uid, player_data, character_sheet)。"""
@@ -1213,6 +1298,7 @@ class GameInstance:
             self.state = GameState.ACTIVE_ACTION
             self.round_checks_prepared = False
             self.round_start_snapshot.clear()
+            self.round_entity_snapshot.clear()
             self.action_queue.clear()
             self.ready_players.clear()
             if self.pending_actions:
@@ -1401,8 +1487,38 @@ class GameInstance:
         self.state = GameState.ACTIVE_JUDGMENT
         self.round_checks_prepared = False
         self.round_start_snapshot = _snapshot_players(self)
+        self.capture_round_entity_snapshot()
         logger.info("进入判定阶段 - game_key=%s, actions=%d",
                      self.game_key, len(self.action_queue))
+        return True
+
+    def capture_round_entity_snapshot(self) -> None:
+        """判定入口快照旧版战斗实体与战斗状态。
+
+        覆盖 `CombatResolver` / `initiate_combat` 在判定阶段会直接改写的字段；
+        与 ``round_start_snapshot``（玩家）和 ``combat_extension_round_snapshots``
+        （D&D2024 权威战斗扩展）互补，三者合起来才是"本轮改过的东西"。
+        """
+        self.round_entity_snapshot = {
+            "npcs": copy.deepcopy(self.npcs),
+            "combat_enemies": copy.deepcopy(self.combat_enemies),
+            "combat_state": str(self.combat_state or "none"),
+            "combat_active": bool(self.combat_active),
+            "initiative_order": copy.deepcopy(list(self.initiative_order or [])),
+            "initiative_current": int(self.initiative_current or 0),
+        }
+
+    def restore_round_entity_snapshot(self) -> bool:
+        """还原判定入口的旧版实体快照；没有快照时返回 False（不动状态）。"""
+        snapshot = self.round_entity_snapshot
+        if not isinstance(snapshot, dict) or not snapshot:
+            return False
+        self.npcs = copy.deepcopy(snapshot.get("npcs") or {})
+        self.combat_enemies = copy.deepcopy(snapshot.get("combat_enemies") or [])
+        self.combat_state = str(snapshot.get("combat_state") or "none")
+        self.combat_active = bool(snapshot.get("combat_active"))
+        self.initiative_order = copy.deepcopy(list(snapshot.get("initiative_order") or []))
+        self.initiative_current = int(snapshot.get("initiative_current") or 0)
         return True
 
     async def finish_judgment(
@@ -1576,6 +1692,7 @@ class GameInstance:
             self.last_checks.clear()
             self.round_checks_prepared = False
             self.round_start_snapshot.clear()
+            self.round_entity_snapshot.clear()
             self.last_state_update = None
             self.last_token_budget_bump = None
             self.gm_directives.clear()

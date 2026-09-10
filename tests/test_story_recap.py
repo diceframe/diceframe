@@ -200,3 +200,38 @@ async def test_story_recap_attaches_to_live_entry_after_new_round_completes():
     assert result["recap"]["to_round"] == 2
     assert instance.log[1]["story_recaps"][0]["text"] == "Recap number 1"
     assert "story_recaps" not in instance.log[2]
+
+
+@pytest.mark.asyncio
+async def test_story_recap_rejects_round_rewritten_during_generation():
+    """生成期间同一回合被回滚重写：旧概览不得挂到新剧情上。
+
+    回归（PR #241 审核 P2）：只校验实例身份 + round 号是不够的——回滚后重新生成
+    会得到同号但不同正文的条目，概览必须判过期而不是落卡。
+    """
+    instance = GameInstance(
+        game_key=("web", "recap-rewrite", "bot"),
+        language="en",
+        players={"p1": {"character_name": "Avery"}},
+        round_number=2,
+    )
+    instance.log = [_entry(1), _entry(2)]
+
+    class RewriteLLM(RecapLLM):
+        def __init__(self, target: GameInstance) -> None:
+            super().__init__()
+            self._target = target
+
+        async def call(self, system_prompt: str, user_message: str, **kwargs) -> LLMResponse:
+            # 回滚 + 重新生成同一回合：round 号不变，公开正文变了。
+            self._target.log[1]["gm_response"] = "rewritten narration 2"
+            return await super().call(system_prompt, user_message, **kwargs)
+
+    generator = StoryRecapGenerator(RewriteLLM(instance))
+
+    result = await generator.generate(instance)
+
+    assert result["ok"] is False
+    assert "changed" in result["error"]
+    assert "story_recaps" not in instance.log[1]
+    assert instance.log[1]["gm_response"] == "rewritten narration 2"

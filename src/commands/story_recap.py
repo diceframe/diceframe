@@ -45,6 +45,9 @@ class StoryRecapGenerator:
         if not source:
             return {"ok": False, "error": _message(instance, "上一条概览之后还没有新剧情", "There is no new story since the previous recap.", "前回のあらすじ以降に新しい物語がありません。")}
         target_round = _round_number(source[-1])
+        # 摘要依据的公开回合身份：模型调用期间若这些回合被回滚/重写/替换，
+        # 概览就不再对应当前剧情，必须拒绝落卡而不是挂到新剧情上。
+        source_identity = _source_fingerprint(source)
         try:
             response = await self.llm_client.call(
                 system_prompt=_system_prompt(snapshot),
@@ -72,14 +75,10 @@ class StoryRecapGenerator:
         async with instance._process_lock:
             if self.registry is not None and self.registry.get(instance.game_key) is not instance:
                 return {"ok": False, "error": changed_message}
-            # 快照里的条目对象与活实例不是同一对象，必须按 round 号回找活条目。
-            target = next(
-                (
-                    entry for entry in reversed(instance.log)
-                    if isinstance(entry, dict) and _round_number(entry) == target_round
-                ),
-                None,
-            )
+            # 快照里的条目对象与活实例不是同一对象：按轮次 + 公开正文回找仍
+            # 一致的活动条目。只按 round 号回找是不够的——回滚后重新生成同一
+            # 回合会得到同号但不同内容的条目，旧概览会挂到新剧情上。
+            target = _live_source_target(instance, source_identity)
             if target is None:
                 return {"ok": False, "error": changed_message}
             attached = await instance.append_story_recap(
@@ -106,6 +105,37 @@ def recap_source_entries(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
             latest_recap_index = index
     source = log[latest_recap_index + 1:] if latest_recap_index >= 0 else log[-10:]
     return [entry for entry in source if isinstance(entry, dict)]
+
+
+def _source_fingerprint(entries: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """概览所依据的公开回合身份：轮次 + 公开正文（swipe/重写都会改变正文）。"""
+    return [
+        (_round_number(entry), str(entry.get("gm_response") or ""))
+        for entry in entries
+    ]
+
+
+def _live_source_target(
+    instance: GameInstance,
+    identity: list[tuple[int, str]],
+) -> dict[str, Any] | None:
+    """回找与快照一致的活动条目；任一回合被改写/移除则返回 None。
+
+    只校验快照里的回合仍然一致，因此生成期间**新增**回合不影响结果
+    （概览仍挂到快照时的目标回合），只有源日志本身变了才判过期。
+    """
+    live: dict[tuple[int, str], dict[str, Any]] = {}
+    for entry in instance.log:
+        if isinstance(entry, dict):
+            live.setdefault(
+                (_round_number(entry), str(entry.get("gm_response") or "")), entry,
+            )
+    if not identity:
+        return None
+    for item in identity:
+        if item not in live:
+            return None
+    return live[identity[-1]]
 
 
 def _system_prompt(instance: GameInstance) -> str:

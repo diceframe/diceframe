@@ -86,6 +86,7 @@ class GameStateCodec:
             "last_overreach": instance.last_overreach,
             "round_checks_prepared": instance.round_checks_prepared,
             "round_start_snapshot": instance.round_start_snapshot,
+            "round_entity_snapshot": instance.round_entity_snapshot,
             "death_save_outcomes": instance.death_save_outcomes,
             "last_state_update": instance.last_state_update,
             "last_token_budget_bump": instance.last_token_budget_bump,
@@ -200,6 +201,12 @@ class GameStateCodec:
             last_overreach=data.get("last_overreach") or [],
             round_checks_prepared=bool(data.get("round_checks_prepared", False)),
             round_start_snapshot=data.get("round_start_snapshot") or {},
+            # 旧存档没有这个键：默认空快照，回滚时退化为按目标核对战斗缓存。
+            round_entity_snapshot=(
+                data.get("round_entity_snapshot")
+                if isinstance(data.get("round_entity_snapshot"), dict)
+                else {}
+            ),
             death_save_outcomes=death_save_outcomes,
             last_state_update=data.get("last_state_update"),
             last_token_budget_bump=data.get("last_token_budget_bump"),

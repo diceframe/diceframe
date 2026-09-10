@@ -29,6 +29,7 @@ from src.commands.economy_effects import (
     defer_narrative_effects,
     pending_decision_notice,
 )
+from src.commands.round_processor import RoundNotProcessed
 from src.commands.state_items import append_key_item
 from src.commands.state_update_applier import StateUpdateApplier
 from src.engine.game_instance import GameInstance, GameRegistry, restore_players, _snapshot_players
@@ -1955,10 +1956,11 @@ async def test_in_flight_narration_is_discarded_after_rollback(
     reverse_round_economy(instance, instance.round_number)
     release.set()
 
-    narration, private = await processing
+    # 过期叙事按"本轮未处理"上报，不再返回一个空正文的成功回合。
+    with pytest.raises(RoundNotProcessed) as rejected:
+        await processing
 
-    assert narration == ""
-    assert private is None
+    assert rejected.value.reason == "stale"
     assert instance.scene != "错误场景"
     assert not any(entry.get("gm_response") == "这条叙事已经过期。" for entry in instance.log)
 

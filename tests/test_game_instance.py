@@ -11,6 +11,22 @@ from src.engine.health import health_payload, mark_health_event, record_health_e
 from src.commands.progression_resolver import ProgressionResolver
 
 
+def test_round_entity_snapshot_round_trips_and_defaults_empty() -> None:
+    """实体快照必须能持久化往返；旧存档缺键时默认为空（自动退化为按目标核对）。"""
+    instance = GameInstance(game_key=("web", "entity-snapshot-codec", "bot"))
+    instance.npcs = {"goblin": {"hp": 12}}
+    instance.combat_state = "active"
+    instance.capture_round_entity_snapshot()
+
+    restored = GameInstance.from_dict(instance.to_dict())
+    assert restored.round_entity_snapshot["npcs"]["goblin"]["hp"] == 12
+    assert restored.round_entity_snapshot["combat_state"] == "active"
+
+    legacy = instance.to_dict()
+    legacy.pop("round_entity_snapshot", None)
+    assert GameInstance.from_dict(legacy).round_entity_snapshot == {}
+
+
 def test_versioned_ruleset_state_is_optional_and_round_trips() -> None:
     legacy = GameInstance(game_key=("web", "legacy", "bot"))
     assert "ruleset_runtime" not in legacy.to_dict()
@@ -133,6 +149,125 @@ async def test_abort_round_processing_restores_action_phase_without_touching_que
     assert instance.action_queue[0]["dice_value"] == 15
     # 非判定态调用是空操作。
     assert await instance.abort_round_processing() is False
+
+
+@pytest.mark.asyncio
+async def test_abort_restores_entities_and_drops_all_combat_caches() -> None:
+    """判定入口的实体快照让 NPC 伤害也能回滚，缓存随之整批丢弃。
+
+    回归（PR #241 审核 P1 的完整形态）：旧版 hp_based 路径直接改 npcs，判定失败
+    只回滚玩家，怪物白挨伤害；且行动里的 combat_outcome 会命中 CombatResolver 的
+    缓存重放分支——不重掷也不扣血——使结算记录与实际 HP 互相矛盾。
+    """
+    instance = GameInstance(game_key=("web", "abort-combat-cache", "bot"))
+    instance.state = GameState.ACTIVE_ACTION
+    instance.round_number = 4
+    instance.players = {
+        "p1": {
+            "user_id": "p1",
+            "character_name": "Avery",
+            "character_sheet": {"hp": 30, "max_hp": 30},
+        },
+        "p2": {
+            "user_id": "p2",
+            "character_name": "Blake",
+            "character_sheet": {"hp": 30, "max_hp": 30},
+        },
+    }
+    instance.npcs = {"goblin": {"name": "哥布林", "hp": 30, "max_hp": 30}}
+    assert await instance.add_action("p1", "攻击哥布林")
+    assert await instance.advance_round()
+    assert instance.state == GameState.ACTIVE_JUDGMENT
+    assert instance.round_entity_snapshot["npcs"]["goblin"]["hp"] == 30
+
+    # 判定期间：p2 被打到 25（旧版 CombatResolver 用裸 uid 表示玩家目标），
+    # 哥布林被打到 12。
+    instance.get_character_sheet("p2")["hp"] = 25
+    instance.npcs["goblin"]["hp"] = 12
+    instance.action_queue[0]["dice_value"] = 15
+    instance.action_queue[0]["combat_outcome"] = {
+        "attacker_uid": "p1",
+        "target_ref": "p2",
+        "target_hp_before": 30,
+        "target_hp_after": 25,
+        "actual_damage": 5,
+    }
+    instance.action_queue.append({
+        "user_id": "p1",
+        "text": "再补一刀",
+        "dice_value": 18,
+        "combat_outcome": {
+            "attacker_uid": "p1",
+            "target_ref": "npc:goblin",
+            "target_hp_before": 30,
+            "target_hp_after": 12,
+            "actual_damage": 18,
+        },
+    })
+
+    assert await instance.abort_round_processing() is True
+
+    # 玩家与怪物都回到判定入口：缓存描述的已是不存在的状态，整批丢弃。
+    assert instance.get_character_sheet("p2")["hp"] == 30
+    assert instance.npcs["goblin"]["hp"] == 30
+    assert "combat_outcome" not in instance.action_queue[0]
+    assert "combat_outcome" not in instance.action_queue[1]
+    assert instance.round_entity_snapshot == {}
+    # 骰值仍然保留，重试结果稳定。
+    assert instance.action_queue[0]["dice_value"] == 15
+    assert instance.action_queue[1]["dice_value"] == 18
+
+
+@pytest.mark.asyncio
+async def test_abort_without_entity_snapshot_keeps_unverifiable_combat_cache() -> None:
+    """旧存档没有实体快照：只能按目标核对，无法核对时保留缓存避免重复扣血。"""
+    instance = GameInstance(game_key=("web", "abort-legacy-save", "bot"))
+    instance.state = GameState.ACTIVE_ACTION
+    instance.round_number = 4
+    instance.players = {
+        "p1": {
+            "user_id": "p1",
+            "character_name": "Avery",
+            "character_sheet": {"hp": 30, "max_hp": 30},
+        },
+        "p2": {
+            "user_id": "p2",
+            "character_name": "Blake",
+            "character_sheet": {"hp": 30, "max_hp": 30},
+        },
+    }
+    instance.npcs = {"goblin": {"name": "哥布林", "hp": 12, "max_hp": 30}}
+    assert await instance.add_action("p1", "攻击哥布林")
+    assert await instance.advance_round()
+    instance.round_entity_snapshot.clear()  # 模拟改动前落盘的旧存档
+
+    instance.get_character_sheet("p2")["hp"] = 25
+    instance.action_queue[0]["combat_outcome"] = {
+        "attacker_uid": "p1",
+        "target_ref": "p2",
+        "target_hp_before": 30,
+        "target_hp_after": 25,
+        "actual_damage": 5,
+    }
+    instance.action_queue.append({
+        "user_id": "p1",
+        "text": "攻击不存在的怪物",
+        "combat_outcome": {
+            "attacker_uid": "p1",
+            "target_ref": "npc:missing",
+            "target_hp_before": 30,
+            "target_hp_after": 25,
+            "actual_damage": 5,
+        },
+    })
+
+    assert await instance.abort_round_processing() is True
+
+    # 玩家血量被快照恢复 → 记录与实际不一致 → 丢弃，重试重新结算。
+    assert instance.get_character_sheet("p2")["hp"] == 30
+    assert "combat_outcome" not in instance.action_queue[0]
+    # 目标不可解析 → 无法核对 → 保留缓存，绝不重复扣血。
+    assert instance.action_queue[1]["combat_outcome"]["target_hp_after"] == 25
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.commands.round_processor import RoundNotProcessed
 from src.engine.game_instance import GameState
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services.turns import (
@@ -413,6 +414,77 @@ async def test_luck_pending_round_does_not_rollback() -> None:
     assert result["payload"]["phase"] == "luck"
     assert instance.aborts == 0
     assert instance.state == GameState.ACTIVE_JUDGMENT
+
+
+@pytest.mark.asyncio
+async def test_busy_round_returns_409_without_rollback() -> None:
+    """本轮仍在生成中：409 ROUND_PROCESSING_BUSY，不回滚、不广播重置。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    instance.flip_state_on_advance = True
+    api = FakeApi(instance)
+    resets: list[bool] = []
+
+    async def on_reset() -> None:
+        resets.append(True)
+
+    async def busy_process_round(_instance, **_kwargs):
+        raise RoundNotProcessed("busy")
+
+    dependencies = replace(api.dependencies, process_round=busy_process_round)
+    result = await submit_action(dependencies, "game", "gm", "调查石门", on_reset=on_reset)
+
+    assert result["status"] == 409
+    assert result["payload"]["error_code"] == "ROUND_PROCESSING_BUSY"
+    assert result["payload"]["phase"] == "processing"
+    assert instance.aborts == 0
+    assert resets == []
+    assert instance.state == GameState.ACTIVE_JUDGMENT
+
+
+@pytest.mark.asyncio
+async def test_round_not_processed_reports_reason() -> None:
+    """响应过期/实例被替换：409 ROUND_NOT_PROCESSED 并带上 reason。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    instance.flip_state_on_advance = True
+    api = FakeApi(instance)
+
+    async def stale_process_round(_instance, **_kwargs):
+        raise RoundNotProcessed("stale")
+
+    dependencies = replace(api.dependencies, process_round=stale_process_round)
+    result = await submit_action(dependencies, "game", "gm", "调查石门")
+
+    assert result["status"] == 409
+    assert result["payload"]["error_code"] == "ROUND_NOT_PROCESSED"
+    assert result["payload"]["reason"] == "stale"
+    assert instance.aborts == 0
+
+
+@pytest.mark.asyncio
+async def test_failure_after_commit_does_not_broadcast_reset() -> None:
+    """提交点之后失败：不回滚、不清前端已提交的流式文本，错误码单独区分。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    # flip_state_on_advance 保持 False：abort 视作空操作（回合已提交）。
+    api = FakeApi(instance)
+    resets: list[bool] = []
+
+    async def on_reset() -> None:
+        resets.append(True)
+
+    async def failing_process_round(_instance, **_kwargs):
+        raise RuntimeError("收尾步骤失败")
+
+    dependencies = replace(api.dependencies, process_round=failing_process_round)
+    result = await submit_action(dependencies, "game", "gm", "调查石门", on_reset=on_reset)
+
+    assert result["status"] == 502
+    assert result["payload"]["error_code"] == "ROUND_POST_COMMIT_FAILED"
+    assert result["payload"]["rolled_back"] is False
+    assert instance.aborts == 1
+    assert resets == []
 
 
 def _reward_proposal(instance, *, proposal_id: str, amount: int, uid: str = "gm") -> dict:

@@ -110,41 +110,57 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
     try:
         await response.write(b"event: start\ndata: processing\n\n")
 
-        if inst.state == GameState.PAUSED:
-            if inst.round_number <= 0:
-                await inst.start_round()
-            else:
-                await inst.resume()
-
-        await inst.add_action(
+        # 与 POST /action 走同一条应用服务路径（turns.submit_action）：判定/叙事
+        # 失败会回滚到行动阶段并返回结构化错误，不会把对局留在
+        # ACTIVE_JUDGMENT（见 turns._process_round 与生产事故 2026-09-10）。
+        result = await api.submit_action(
+            gk,
             user_id,
             text,
-            selected_attribute,
-            selected_skill,
-            target_text,
+            selected_attribute=selected_attribute,
+            selected_skill=selected_skill,
+            target_text=target_text,
         )
-        handler = request.app["subsystems"].handler
-        if await inst.try_advance():
-            await handler.prepare_round_checks_ai(inst)
-            narration, _ = await handler.process_round(inst)
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+        if int(result.get("status", 200) or 200) >= 400 or payload.get("ok") is False:
+            error_data = json.dumps(
+                {
+                    "error": payload.get("error") or "处理出错，请稍后重试",
+                    "error_code": payload.get("error_code") or "",
+                },
+                ensure_ascii=False,
+            )
+            await response.write(f"event: error\ndata: {error_data}\n\n".encode())
+            return response
+
+        if not payload.get("advanced"):
+            data = json.dumps(
+                {
+                    "narration": payload.get("narration") or "(已记录，等待推进)",
+                    "waiting": True,
+                },
+                ensure_ascii=False,
+            )
+            await response.write(f"data: {data}\n\n".encode())
+        else:
+            narration = str(payload.get("narration") or "")
             parts = narration.split("\n\n") if narration else [""]
             for i, part in enumerate(parts):
                 if not part.strip():
                     continue
                 data = json.dumps({"narration": part.strip(), "index": i, "total": len(parts)}, ensure_ascii=False)
                 await response.write(f"data: {data}\n\n".encode())
-            check_results = getattr(inst, "last_checks", [])
+            check_results = payload.get("check_results") or []
             if check_results:
                 await response.write(f"data: {json.dumps({'check_result': check_results[-1], 'check_results': check_results}, ensure_ascii=False)}\n\n".encode())
-            recap = getattr(inst, "last_state_update", None)
+            recap = payload.get("recap")
             if recap:
                 await response.write(f"data: {json.dumps({'recap': recap}, ensure_ascii=False)}\n\n".encode())
-        else:
-            data = json.dumps({"narration": "(已记录，等待推进)", "waiting": True}, ensure_ascii=False)
-            await response.write(f"data: {data}\n\n".encode())
 
         await response.write(b"event: done\ndata: complete\n\n")
-    except Exception as e:
+    except Exception:
         logger.exception("SSE 流处理异常")
         error_data = json.dumps({"error": "处理出错，请查看服务器日志"}, ensure_ascii=False)
         await response.write(f"event: error\ndata: {error_data}\n\n".encode())
