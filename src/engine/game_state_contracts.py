@@ -166,6 +166,7 @@ class GamePersistedState(TypedDict, total=False):
     last_overreach: list[Any]
     round_checks_prepared: bool
     round_start_snapshot: PlayerRollbackSnapshot
+    round_entity_snapshot: OpaqueState
     death_save_outcomes: dict[str, dict[str, OpaqueState]]
     last_state_update: OpaqueState | None
     last_token_budget_bump: TokenBudgetBump | None

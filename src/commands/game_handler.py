@@ -120,7 +120,7 @@ class GameHandler:
             brief_max_tokens,
             self.memory_store,
         )
-        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens)
+        self._story_recap = StoryRecapGenerator(self.llm_client, brief_max_tokens, registry=self.registry)
         self._kp_questions = KPQuestionResponder(
             self.llm_client,
             self.matcher,
@@ -254,7 +254,12 @@ class GameHandler:
         return await self._round_processor.prepare_round_checks_ai(instance)
 
     async def _process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
-        """兼容旧内部调用；实际逻辑已拆到 RoundProcessor。"""
+        """兼容旧内部调用；实际逻辑已拆到 RoundProcessor。
+
+        NOTE: 这是原地判定实现，**不含** ``process_round`` 的并发门禁与失败回滚
+        （调用方需自行持锁）。运行时入口请一律走 ``process_round``，否则生成失败
+        会把对局留在判定阶段。
+        """
         return await self._round_processor.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
 
     def _skill_growth_checks(self, instance: GameInstance, growth_skills: list[dict]) -> None:

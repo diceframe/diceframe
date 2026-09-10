@@ -127,6 +127,35 @@ def format_overreach_block(instance: GameInstance) -> str:
     return f"{heading}\n" + "\n".join(lines)
 
 
+class RoundNotProcessed(RuntimeError):
+    """本轮判定没有被执行，也没有产生叙事。
+
+    调用方 MUST NOT 把它当成「回合已成功处理」：它覆盖实例已被替换、运行已
+    过期、状态不在判定阶段、经济/幸运等待，以及其他任务正持有
+    ``_process_lock``（``reason="busy"``）等「未处理」情形。
+
+    ``reason`` 供调用方区分文案与状态码；可能取值：
+    ``not_judging`` / ``economy_pending`` / ``luck_pending`` / ``busy`` / ``stale``。
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class RoundProcessingFailure(RuntimeError):
+    """本轮判定执行中失败；``rolled_back`` 表示实例是否已退回行动阶段。
+
+    处理边界（``RoundProcessor.process_round``）在抛出前已完成回滚、落盘与
+    重置广播，因此任何入口——Web 回合服务、幸运超时、CLI——都不会把对局留在
+    ``ACTIVE_JUDGMENT``。
+    """
+
+    def __init__(self, message: str, *, rolled_back: bool) -> None:
+        super().__init__(message)
+        self.rolled_back = rolled_back
+
+
 class RoundProcessor:
     """处理完整的一轮判定：context 拼接 → LLM 调用 → 解析 → 更新状态 → 播报。"""
 
@@ -341,22 +370,72 @@ class RoundProcessor:
         return list(instance.last_checks)
 
     async def process_round(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
+        """执行一轮判定与叙事。
+
+        Raises:
+            RoundNotProcessed: 本轮没有执行（并发占用 / 状态已变化 /
+                等待幸运或经济）；调用方必须按"未处理"上报，不得当作成功。
+            RoundProcessingFailure: 执行中失败，对局已（尝试）退回行动阶段。
+        """
         instance = self.registry.get(instance.game_key)
         if not instance or instance.state != GameState.ACTIVE_JUDGMENT:
-            return "", None
+            raise RoundNotProcessed("not_judging")
         if has_blocking_economy_decision(instance):
             logger.info("等待经济提案结算，暂不生成叙事: %s", instance.game_key)
-            return "", None
+            raise RoundNotProcessed("economy_pending")
         await self.prepare_round_checks_ai(instance)
         if instance.pending_luck_checks():
             logger.info("等待幸运选择，暂不生成叙事: %s", instance.game_key)
             self._schedule_luck_timeouts(instance)
-            return "", None
+            raise RoundNotProcessed("luck_pending")
         if instance._process_lock.locked():
-            logger.warning("process_round 已在处理中，跳过并发调用: %s", instance.game_key)
-            return "", None
-        async with instance._process_lock:
-            return await self.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
+            # 不能返回空叙事当作成功：那会让调用方以为本轮已经处理完，
+            # 而对局实际仍停在判定阶段（生产事故 2026-09-10 22:10:55）。
+            logger.warning("process_round 已在处理中，本轮不重复处理: %s", instance.game_key)
+            raise RoundNotProcessed("busy")
+        try:
+            async with instance._process_lock:
+                async with instance.track_round_processing():
+                    return await self.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
+        except asyncio.CancelledError:
+            # 被取消（GM 抢占 / 关服 / 断连）同样不能把对局留在判定阶段。
+            logger.info("回合处理被取消，回滚到行动阶段: game=%s", instance.game_key)
+            await self._recover_failed_round(instance, on_reset=on_reset)
+            if instance.consume_preempt_request():
+                # 显式抢占：转成结构化"未处理"，让被中止的请求照常返回客户端。
+                raise RoundNotProcessed("preempted") from None
+            raise
+        except RoundNotProcessed:
+            raise
+        except Exception as exc:
+            # 判定/叙事失败不允许把对局留在 ACTIVE_JUDGMENT：那会让玩家永远
+            # 看到"正在生成剧情"（生产事故 2026-09-10）。回滚到行动阶段后
+            # 再向调用方报错，恢复对本函数的所有入口一视同仁。
+            logger.exception("回合处理失败，回滚到行动阶段: game=%s", instance.game_key)
+            rolled_back = await self._recover_failed_round(instance, on_reset=on_reset)
+            raise RoundProcessingFailure(
+                str(exc) or exc.__class__.__name__, rolled_back=rolled_back,
+            ) from exc
+
+    async def _recover_failed_round(self, instance: GameInstance, *, on_reset=None) -> bool:
+        """共享恢复边界：回滚失败回合并落盘。
+
+        幸运超时、CLI 与 Web 回合服务都从 ``process_round`` 进来，恢复必须放在
+        这里而不是各调用点，否则绕过服务层的入口（如 ``_luck_timeout``）失败后
+        仍会把对局永久留在判定阶段。
+
+        返回是否真的回滚成功（回合已过提交点时 ``abort_round_processing`` 是
+        空操作）。清理自身的异常只记日志，不吞掉原始异常。
+        """
+        try:
+            rolled_back = bool(await instance.abort_round_processing())
+            if rolled_back and on_reset is not None:
+                await on_reset()
+            await self.registry.save(instance)
+            return rolled_back
+        except Exception:
+            logger.exception("回滚失败回合状态异常: game=%s", instance.game_key)
+            return False
 
     def _schedule_luck_timeouts(self, instance: GameInstance) -> None:
         """为每条 pending 幸运检定挂独立超时；到点只 decline 该条，全清则重新推进回合。
@@ -390,7 +469,20 @@ class RoundProcessor:
             await self.registry.save(instance)
             if result.get("declined_all") and instance.state == GameState.ACTIVE_JUDGMENT:
                 logger.info("幸运超时全部决定，继续生成叙事: %s", game_key)
-                await self.process_round(instance)
+                try:
+                    await self.process_round(instance)
+                except RoundNotProcessed as exc:
+                    # 并发推进或状态已变化属于正常竞争，不是超时处理失败。
+                    logger.info(
+                        "幸运超时后本轮未处理: game=%s reason=%s", game_key, exc.reason,
+                    )
+                except RoundProcessingFailure as exc:
+                    # 回滚已由 process_round 这个共享边界完成，这里只避免重复
+                    # 记录整段堆栈；对局不会留在"生成中"。
+                    logger.warning(
+                        "幸运超时后的推进失败，已回滚到行动阶段: game=%s rolled_back=%s",
+                        game_key, exc.rolled_back,
+                    )
         except Exception:
             logger.exception("幸运超时处理失败: %s check=%s", game_key, check_id)
         finally:
@@ -633,7 +725,9 @@ class RoundProcessor:
                 expected_run_id,
                 getattr(current_instance, "run_id", "missing"),
             )
-            return "", None
+            # 叙事已作废（回滚/重置/运行替换），本轮不会提交：必须让调用方
+            # 知道"没有处理"，而不是收到一个空正文的成功回合。
+            raise RoundNotProcessed("stale")
         runtime = self._ruleset_runtime(instance)
         if isinstance(runtime, NarrativeStatePolicyRuntime):
             data["state_update"] = runtime.filter_narrative_state_update(

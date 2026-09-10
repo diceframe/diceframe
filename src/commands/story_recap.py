@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -19,50 +21,74 @@ logger = logging.getLogger("trpg")
 
 
 class StoryRecapGenerator:
-    def __init__(self, llm_client: Any, max_tokens: int = 1024) -> None:
+    def __init__(self, llm_client: Any, max_tokens: int = 1024, registry: Any = None) -> None:
         self.llm_client = llm_client
         self.max_tokens = max(256, min(int(max_tokens or 1024), 1024))
+        self.registry = registry
+        # 序列化概览生成本身（同一时刻一张概览），但不占用回合的
+        # _process_lock：模型调用期间回合推进必须能正常拿锁。
+        self._generate_lock = asyncio.Lock()
 
     async def generate(self, instance: GameInstance) -> dict[str, Any]:
         """Generate one recap and attach it to the latest completed round."""
         if instance._process_lock.locked():
             return {"ok": False, "error": _message(instance, "游戏正在推进，请稍后再生成剧情概览", "The game is processing. Try the recap again shortly.", "ゲーム進行中です。少し待ってから再度お試しください。")}
-        async with instance._process_lock:
-            source = recap_source_entries(instance.log)
-            if not source:
-                return {"ok": False, "error": _message(instance, "上一条概览之后还没有新剧情", "There is no new story since the previous recap.", "前回のあらすじ以降に新しい物語がありません。")}
-            prompt = _recap_prompt(instance, source)
-            try:
-                response = await self.llm_client.call(
-                    system_prompt=_system_prompt(instance),
-                    user_message=prompt,
-                    temperature=0.25,
-                    max_tokens=self.max_tokens,
-                )
-            except Exception:
-                logger.exception("剧情概览生成失败: game=%s", instance.game_key)
-                return {"ok": False, "error": _message(instance, "剧情概览生成失败，请检查模型连接后重试", "Recap generation failed. Check the model connection and try again.", "あらすじを生成できませんでした。モデル接続を確認して再試行してください。")}
+        async with self._generate_lock:
+            return await self._generate_locked(instance)
 
-            text = sanitize_narration(
-                str(getattr(response, "narration", "") or getattr(response, "content", "") or "")
-            ).strip()
-            if not text:
-                return {"ok": False, "error": _message(instance, "模型没有返回可用的剧情概览", "The model returned no usable recap.", "モデルから使用可能なあらすじが返されませんでした。")}
-            recap = {
-                "id": f"recap-{uuid.uuid4().hex[:12]}",
-                "text": text[:4000],
-                "from_round": _round_number(source[0]),
-                "to_round": _round_number(source[-1]),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
+    async def _generate_locked(self, instance: GameInstance) -> dict[str, Any]:
+        # 与 kp_questions 相同的模式：锁内只取一致的快照，模型调用在锁外，
+        # 仅最终落卡一步短暂重持锁并做注册表身份栅栏。
+        async with instance._process_lock:
+            snapshot = instance.__class__.from_dict(copy.deepcopy(instance.to_dict()))
+        source = recap_source_entries(snapshot.log)
+        if not source:
+            return {"ok": False, "error": _message(instance, "上一条概览之后还没有新剧情", "There is no new story since the previous recap.", "前回のあらすじ以降に新しい物語がありません。")}
+        target_round = _round_number(source[-1])
+        # 摘要依据的公开回合身份：模型调用期间若这些回合被回滚/重写/替换，
+        # 概览就不再对应当前剧情，必须拒绝落卡而不是挂到新剧情上。
+        source_identity = _source_fingerprint(source)
+        try:
+            response = await self.llm_client.call(
+                system_prompt=_system_prompt(snapshot),
+                user_message=_recap_prompt(snapshot, source),
+                temperature=0.25,
+                max_tokens=self.max_tokens,
+            )
+        except Exception:
+            logger.exception("剧情概览生成失败: game=%s", instance.game_key)
+            return {"ok": False, "error": _message(instance, "剧情概览生成失败，请检查模型连接后重试", "Recap generation failed. Check the model connection and try again.", "あらすじを生成できませんでした。モデル接続を確認して再試行してください。")}
+
+        text = sanitize_narration(
+            str(getattr(response, "narration", "") or getattr(response, "content", "") or "")
+        ).strip()
+        if not text:
+            return {"ok": False, "error": _message(instance, "模型没有返回可用的剧情概览", "The model returned no usable recap.", "モデルから使用可能なあらすじが返されませんでした。")}
+        recap = {
+            "id": f"recap-{uuid.uuid4().hex[:12]}",
+            "text": text[:4000],
+            "from_round": _round_number(source[0]),
+            "to_round": target_round,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        changed_message = _message(instance, "剧情在生成期间发生了变化，请重试", "The story changed while the recap was being generated. Please try again.", "生成中に物語が変更されました。もう一度お試しください。")
+        async with instance._process_lock:
+            if self.registry is not None and self.registry.get(instance.game_key) is not instance:
+                return {"ok": False, "error": changed_message}
+            # 快照里的条目对象与活实例不是同一对象：按轮次 + 公开正文回找仍
+            # 一致的活动条目。只按 round 号回找是不够的——回滚后重新生成同一
+            # 回合会得到同号但不同内容的条目，旧概览会挂到新剧情上。
+            target = _live_source_target(instance, source_identity)
+            if target is None:
+                return {"ok": False, "error": changed_message}
             attached = await instance.append_story_recap(
                 recap,
-                target_entry=source[-1],
+                target_entry=target,
                 tokens=int(getattr(response, "total_tokens", 0) or 0),
             )
-            if not attached:
-                return {"ok": False, "error": _message(instance, "剧情在生成期间发生了变化，请重试", "The story changed while the recap was being generated. Please try again.", "生成中に物語が変更されました。もう一度お試しください。")}
-            return {"ok": True, "recap": recap}
+        if not attached:
+            return {"ok": False, "error": changed_message}
+        return {"ok": True, "recap": recap}
 
 
 def recap_source_entries(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -79,6 +105,37 @@ def recap_source_entries(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
             latest_recap_index = index
     source = log[latest_recap_index + 1:] if latest_recap_index >= 0 else log[-10:]
     return [entry for entry in source if isinstance(entry, dict)]
+
+
+def _source_fingerprint(entries: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """概览所依据的公开回合身份：轮次 + 公开正文（swipe/重写都会改变正文）。"""
+    return [
+        (_round_number(entry), str(entry.get("gm_response") or ""))
+        for entry in entries
+    ]
+
+
+def _live_source_target(
+    instance: GameInstance,
+    identity: list[tuple[int, str]],
+) -> dict[str, Any] | None:
+    """回找与快照一致的活动条目；任一回合被改写/移除则返回 None。
+
+    只校验快照里的回合仍然一致，因此生成期间**新增**回合不影响结果
+    （概览仍挂到快照时的目标回合），只有源日志本身变了才判过期。
+    """
+    live: dict[tuple[int, str], dict[str, Any]] = {}
+    for entry in instance.log:
+        if isinstance(entry, dict):
+            live.setdefault(
+                (_round_number(entry), str(entry.get("gm_response") or "")), entry,
+            )
+    if not identity:
+        return None
+    for item in identity:
+        if item not in live:
+            return None
+    return live[identity[-1]]
 
 
 def _system_prompt(instance: GameInstance) -> str:

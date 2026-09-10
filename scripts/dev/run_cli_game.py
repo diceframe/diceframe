@@ -19,6 +19,7 @@ from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
 from src.memory.delta import MemoryStore
 from src.commands.game_handler import GameHandler
+from src.commands.round_processor import RoundNotProcessed
 from src.ai_providers import resolve_provider
 from src.network_proxy import effective_proxy_url
 from src.webui.runtime_config import ConfigStore, RuntimePaths
@@ -141,8 +142,12 @@ async def main() -> None:
         elif user_input in ("/go", "/下一轮", "/推进"):
             if instance.can_accept_actions():
                 if await instance.try_advance():
-                    narration, _ = await handler.process_round(instance)
-                    print_gm("\n" + narration + "\n")
+                    try:
+                        narration, _ = await handler.process_round(instance)
+                    except RoundNotProcessed as exc:
+                        print_warn(f"本轮未处理（{exc.reason}）：等待幸运/经济决定，或已有推进在进行中")
+                    else:
+                        print_gm("\n" + narration + "\n")
             else:
                 print_warn("当前不能推进（可能已在判定中）")
 
@@ -177,8 +182,12 @@ async def main() -> None:
                 }
             ok = await instance.add_action(uid, user_input)
             if ok and await instance.try_advance():
-                narration, _ = await handler.process_round(instance)
-                print_gm("\n" + narration + "\n")
+                try:
+                    narration, _ = await handler.process_round(instance)
+                except RoundNotProcessed as exc:
+                    print_warn(f"本轮未处理（{exc.reason}）：等待幸运/经济决定，或已有推进在进行中")
+                else:
+                    print_gm("\n" + narration + "\n")
             elif ok:
                 print_info("（行动已记录，等待更多玩家行动或输入 /go 推进）")
 

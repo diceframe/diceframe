@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
+from src.commands.round_processor import RoundNotProcessed, RoundProcessingFailure
 from src.engine.economy import (
     has_blocking_economy_decision,
     blocking_economy_proposals,
@@ -18,6 +19,7 @@ from src.engine.economy import (
     pending_effect_groups,
     pending_economy_proposals,
 )
+from src.engine.language import localized_text
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.engine.game_instance import GameState
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
@@ -31,6 +33,26 @@ logger = logging.getLogger("trpg")
 
 NarrationDelta = Callable[[str], Awaitable[None]]
 NarrationReset = Callable[[], Awaitable[None]]
+
+
+class RoundProcessingError(RuntimeError):
+    """本轮没有按预期完成；``result`` 可直接返回给 route。
+
+    两种情形都走这里，避免调用点重复分支：
+
+    - 判定/叙事抛错：``rolled_back`` 表示实例是否已退回行动阶段；
+    - 本轮根本没有执行（并发占用、状态已变化、等待幸运或经济）：
+      ``error_code`` 为 ``ROUND_PROCESSING_BUSY`` 或 ``ROUND_NOT_PROCESSED``。
+
+    任意一种都必须让调用方收到非 2xx，绝不返回"空正文的成功回合"：
+    那会让对局停在判定阶段而客户端以为已经处理完（生产事故 2026-09-10）。
+    """
+
+    def __init__(self, result: TurnResult, *, rolled_back: bool = False) -> None:
+        payload = result.get("payload") if isinstance(result, dict) else None
+        super().__init__(str((payload or {}).get("error") or "round processing failed"))
+        self.result = result
+        self.rolled_back = rolled_back
 
 
 @dataclass(frozen=True)
@@ -208,13 +230,139 @@ async def _process_round(
 ) -> tuple[str, Any]:
     if dependencies.process_round is None:
         raise RuntimeError("round processor is not available")
-    narration, response = await dependencies.process_round(
-        instance,
-        on_delta=on_delta,
-        on_reset=on_reset,
-    )
+    try:
+        narration, response = await dependencies.process_round(
+            instance,
+            on_delta=on_delta,
+            on_reset=on_reset,
+        )
+    except RoundNotProcessed as exc:
+        # 本轮没有被执行（并发占用 / 状态已变化 / 等待幸运或经济）：
+        # 返回结构化非 2xx，而不是伪造一个空正文的成功回合。
+        raise RoundProcessingError(
+            _not_processed_result(instance, exc.reason),
+        ) from exc
+    except RoundProcessingFailure as exc:
+        # 回滚、落盘与重置广播已由处理边界（RoundProcessor.process_round）完成，
+        # 覆盖了幸运超时/CLI 等不经过本服务的入口，这里只做结果翻译。
+        raise RoundProcessingError(
+            _round_failure_result(instance, rolled_back=exc.rolled_back),
+            rolled_back=exc.rolled_back,
+        ) from exc
+    except Exception as exc:
+        # 兜底：process_round 依赖本身抛错（例如非 RoundProcessor 的实现）。
+        logger.exception("回合处理失败: game=%s，尝试回滚到行动阶段", game_key)
+        rolled_back = await _rollback_failed_round(
+            dependencies, instance, game_key, on_reset=on_reset,
+        )
+        raise RoundProcessingError(
+            _round_failure_result(instance, rolled_back=rolled_back),
+            rolled_back=rolled_back,
+        ) from exc
     await _auto_settle_rewards(dependencies, instance, game_key)
     return narration, response
+
+
+def _round_message(instance: "GameInstance", texts: dict[str, str]) -> str:
+    return localized_text(getattr(instance, "language", ""), texts, fallback=texts["zh-CN"])
+
+
+def _round_failure_result(instance: "GameInstance", *, rolled_back: bool) -> TurnResult:
+    """叙事/判定失败：区分"已回滚可重试"和"提交点之后失败"。
+
+    两种情况的客户端动作不同——前者可以改行动重试，后者必须刷新查看结果，
+    所以不能共用同一句文案和同一个 error_code。
+    """
+    if rolled_back:
+        message = _round_message(instance, {
+            "zh-CN": "剧情生成失败，本轮已退回行动阶段，可修改行动后重试",
+            "en": "Narration generation failed. This round was rolled back to the action phase; "
+                  "revise your actions and try again.",
+            "ja": "物語の生成に失敗しました。このターンは行動フェーズに戻りました。"
+                  "行動を修正して再試行してください。",
+        })
+        error_code = "ROUND_PROCESSING_FAILED"
+    else:
+        message = _round_message(instance, {
+            "zh-CN": "本轮已推进完成，但收尾步骤失败，请刷新查看",
+            "en": "The round advanced, but a follow-up step failed. Refresh to see the result.",
+            "ja": "このターンは進行しましたが、後処理に失敗しました。再読み込みして確認してください。",
+        })
+        error_code = "ROUND_POST_COMMIT_FAILED"
+    return _result({
+        "ok": False,
+        "error_code": error_code,
+        "error": message,
+        "phase": "error",
+        "rolled_back": rolled_back,
+    }, 502)
+
+
+def _not_processed_result(instance: "GameInstance", reason: str) -> TurnResult:
+    """本轮未执行：区分"有人在生成中""已被 GM 抢占"和"状态已变化"。"""
+    if reason == "busy":
+        return _result({
+            "ok": False,
+            "error_code": "ROUND_PROCESSING_BUSY",
+            "error": _round_message(instance, {
+                "zh-CN": "本轮仍在生成剧情，请稍候再试；若长时间无响应请稍后再点强制推进",
+                "en": "This round is still being generated. Wait a moment and try again.",
+                "ja": "このターンはまだ生成中です。少し待ってから再試行してください。",
+            }),
+            "phase": "processing",
+            "reason": reason,
+        }, 409)
+    if reason == "preempted":
+        return _result({
+            "ok": False,
+            "error_code": "ROUND_NOT_PROCESSED",
+            "error": _round_message(instance, {
+                "zh-CN": "本轮生成已被 GM 中止并退回行动阶段，请确认行动后重新提交",
+                "en": "The GM aborted this round's generation; it is back in the action phase. "
+                      "Review your action and submit again.",
+                "ja": "GM がこのターンの生成を中止し、行動フェーズに戻しました。"
+                      "行動を確認して再提出してください。",
+            }),
+            "phase": "error",
+            "reason": reason,
+        }, 409)
+    return _result({
+        "ok": False,
+        "error_code": "ROUND_NOT_PROCESSED",
+        "error": _round_message(instance, {
+            "zh-CN": "本轮状态已变化（可能已推进、已撤回或仍在等待决定），请刷新后重试",
+            "en": "This round already changed state (advanced, rolled back, or still waiting on a "
+                  "decision). Refresh and try again.",
+            "ja": "このターンの状態が変化しました（進行済み・撤回済み・または決定待ち）。"
+                  "再読み込みして再試行してください。",
+        }),
+        "phase": "error",
+        "reason": reason,
+    }, 409)
+
+
+async def _rollback_failed_round(
+    dependencies: TurnDependencies,
+    instance: "GameInstance",
+    game_key: str,
+    *,
+    on_reset: NarrationReset | None,
+) -> bool:
+    """回滚失败回合并广播重置；清理自身的异常只记日志，不吞掉原始异常。
+
+    返回是否真的回滚成功。回合在提交点之后失败时 ``abort_round_processing``
+    是空操作，此时 MUST NOT 广播 ``narration_reset``——那会清掉已经提交入库的
+    叙事文本。调用方据返回值选择错误码与文案。
+    """
+    rolled_back = False
+    try:
+        rolled_back = bool(await instance.abort_round_processing())
+        if rolled_back and on_reset is not None:
+            await on_reset()
+        await dependencies.save_instance(instance)
+    except Exception:
+        logger.exception("回滚失败回合状态异常: game=%s", game_key)
+    return rolled_back
 
 
 async def _auto_settle_rewards(
@@ -412,9 +560,12 @@ async def submit_action(
         if instance.pending_luck_checks():
             await dependencies.save_instance(instance)
             return _result(_pending_luck_payload(instance, roll=roll_payload))
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return exc.result
         payload = _round_payload(
             instance,
             narration,
@@ -476,9 +627,12 @@ async def resolve_luck_and_continue(
         instance, auto_reward_gold_cap=_auto_reward_cap(dependencies, instance),
     ):
         return _result(economy_decision_pending_payload(instance, actor_uid), 409)
-    narration, _ = await _process_round(
-        dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-    )
+    try:
+        narration, _ = await _process_round(
+            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+        )
+    except RoundProcessingError as exc:
+        return exc.result
     payload = {
         **decision,
         **_round_payload(instance, narration, phase="done", viewer_uid=actor_uid),
@@ -495,8 +649,14 @@ async def advance_round(
     force: bool = False,
     on_delta: NarrationDelta | None = None,
     on_reset: NarrationReset | None = None,
+    _allow_preempt: bool = True,
 ) -> TurnResult:
-    """GM 推进回合，统一处理卡死恢复、待掷骰和待幸运选择。"""
+    """GM 推进回合，统一处理卡死恢复、待掷骰和待幸运选择。
+
+    ``force=True`` 且本轮**正在**生成时，GM 的中止意图优先：先抢占在飞处理
+    （取消 + 回滚 + 落盘），再按正常流程重新处理本回合。只允许抢占一次，
+    避免与另一个推进入口互相抢占成环。
+    """
     instance = dependencies.get_instance(
         dependencies.parse_game_key(game_key)
     )
@@ -504,6 +664,14 @@ async def advance_round(
         return _result({"error": "not found"}, 404)
     if actor_uid != instance.gm_uid:
         return _result({"ok": False, "error": "仅 GM 可推进"}, 403)
+    if force and _allow_preempt and instance.round_processing_in_flight():
+        if await instance.cancel_round_processing():
+            logger.warning("GM 强制推进：已中止在飞生成 - game_key=%s", game_key)
+            return await advance_round(
+                dependencies, game_key, actor_uid,
+                force=True, on_delta=on_delta, on_reset=on_reset,
+                _allow_preempt=False,
+            )
     await _retry_external_economy_effects(dependencies, instance)
     if has_blocking_economy_decision(
         instance, auto_reward_gold_cap=_auto_reward_cap(dependencies, instance),
@@ -520,9 +688,12 @@ async def advance_round(
             declined = await dependencies.decline_pending_luck(game_key)
             advanced_declined_luck = list(declined.get("declined_luck_decisions") or [])
         logger.warning("检测到卡死状态，自动恢复 process_round - game_key=%s", game_key)
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return exc.result
         payload = _round_payload(instance, narration, viewer_uid=actor_uid)
         if advanced_declined_luck:
             payload["declined_luck_decisions"] = advanced_declined_luck
@@ -570,9 +741,12 @@ async def advance_round(
         if pending_luck:
             declined = await dependencies.decline_pending_luck(game_key)
             declined_luck = list(declined.get("declined_luck_decisions") or [])
-        narration, _ = await _process_round(
-            dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
-        )
+        try:
+            narration, _ = await _process_round(
+                dependencies, instance, game_key=game_key, on_delta=on_delta, on_reset=on_reset,
+            )
+        except RoundProcessingError as exc:
+            return exc.result
         payload = _round_payload(instance, narration, ok=True, viewer_uid=actor_uid)
         if forced_waiting:
             payload["forced_waiting"] = forced_waiting

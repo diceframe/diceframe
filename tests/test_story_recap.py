@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -107,3 +108,130 @@ async def test_story_recap_only_uses_rounds_after_previous_recap():
     assert instance.log[-1]["story_recaps"][0]["to_round"] == 37
     restored = GameInstance.from_dict(instance.to_dict())
     assert restored.log[-1]["story_recaps"][0]["text"] == "Recap number 2"
+
+
+@pytest.mark.asyncio
+async def test_story_recap_does_not_hold_process_lock_during_llm_call():
+    """回归：概览的模型调用不得持有回合锁，否则会顶掉并发回合推进。"""
+    instance = GameInstance(
+        game_key=("web", "recap-lock", "bot"),
+        language="en",
+        players={"p1": {"character_name": "Avery"}},
+        round_number=3,
+    )
+    instance.log = [_entry(round_number) for round_number in range(1, 4)]
+
+    class LockProbeLLM(RecapLLM):
+        def __init__(self, target: GameInstance) -> None:
+            super().__init__()
+            self._target = target
+
+        async def call(self, system_prompt: str, user_message: str, **kwargs) -> LLMResponse:
+            assert not self._target._process_lock.locked()
+            # 修复前这里全程持锁，回合推进在锁上等待会一直被跳过。
+            await asyncio.wait_for(self._target._process_lock.acquire(), 1)
+            self._target._process_lock.release()
+            return await super().call(system_prompt, user_message, **kwargs)
+
+    generator = StoryRecapGenerator(LockProbeLLM(instance))
+
+    result = await generator.generate(instance)
+
+    assert result["ok"] is True
+    assert not instance._process_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_story_recap_failure_releases_process_lock():
+    instance = GameInstance(
+        game_key=("web", "recap-fail", "bot"),
+        language="en",
+        players={"p1": {"character_name": "Avery"}},
+        round_number=2,
+    )
+    instance.log = [_entry(1), _entry(2)]
+
+    class BoomLLM:
+        async def call(self, **_kwargs) -> LLMResponse:
+            raise RuntimeError("boom")
+
+    generator = StoryRecapGenerator(BoomLLM())
+
+    result = await generator.generate(instance)
+
+    assert result["ok"] is False
+    assert not instance._process_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_story_recap_attaches_to_live_entry_after_new_round_completes():
+    """生成期间有新回合完成：概览仍挂到快照时的目标回合，不误报变化。"""
+    instance = GameInstance(
+        game_key=("web", "recap-race", "bot"),
+        language="en",
+        players={"p1": {"character_name": "Avery"}},
+        round_number=2,
+    )
+    instance.log = [_entry(1), _entry(2)]
+
+    class SlowThenGrowLLM(RecapLLM):
+        def __init__(self, target: GameInstance) -> None:
+            super().__init__()
+            self._target = target
+
+        async def call(self, system_prompt: str, user_message: str, **kwargs) -> LLMResponse:
+            # 模拟概览生成期间回合处理完成并追加了新日志。
+            self._target.log.append(_entry(3))
+            self._target.round_number = 3
+            return await super().call(system_prompt, user_message, **kwargs)
+
+    class _Registry:
+        def __init__(self, target) -> None:
+            self._target = target
+
+        def get(self, _key):
+            return self._target
+
+    generator = StoryRecapGenerator(SlowThenGrowLLM(instance), registry=_Registry(instance))
+
+    result = await generator.generate(instance)
+
+    assert result["ok"] is True
+    assert result["recap"]["to_round"] == 2
+    assert instance.log[1]["story_recaps"][0]["text"] == "Recap number 1"
+    assert "story_recaps" not in instance.log[2]
+
+
+@pytest.mark.asyncio
+async def test_story_recap_rejects_round_rewritten_during_generation():
+    """生成期间同一回合被回滚重写：旧概览不得挂到新剧情上。
+
+    回归（PR #241 审核 P2）：只校验实例身份 + round 号是不够的——回滚后重新生成
+    会得到同号但不同正文的条目，概览必须判过期而不是落卡。
+    """
+    instance = GameInstance(
+        game_key=("web", "recap-rewrite", "bot"),
+        language="en",
+        players={"p1": {"character_name": "Avery"}},
+        round_number=2,
+    )
+    instance.log = [_entry(1), _entry(2)]
+
+    class RewriteLLM(RecapLLM):
+        def __init__(self, target: GameInstance) -> None:
+            super().__init__()
+            self._target = target
+
+        async def call(self, system_prompt: str, user_message: str, **kwargs) -> LLMResponse:
+            # 回滚 + 重新生成同一回合：round 号不变，公开正文变了。
+            self._target.log[1]["gm_response"] = "rewritten narration 2"
+            return await super().call(system_prompt, user_message, **kwargs)
+
+    generator = StoryRecapGenerator(RewriteLLM(instance))
+
+    result = await generator.generate(instance)
+
+    assert result["ok"] is False
+    assert "changed" in result["error"]
+    assert "story_recaps" not in instance.log[1]
+    assert instance.log[1]["gm_response"] == "rewritten narration 2"

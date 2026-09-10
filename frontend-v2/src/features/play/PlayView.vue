@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
-import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, MapOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
+import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, MapOutline, PlayForwardOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, hasAccessToken, isNotFoundError } from '@/api/client'
 import { currentBackendUrl, isStandaloneFrontend } from '@/api/connection'
@@ -244,6 +244,7 @@ const canEditOwnPortrait = computed(() => Boolean(
 const pendingLuckDecisions = computed(() => game.detail.value?.pending_luck_decisions || [])
 const revealChecks = computed(() => game.detail.value?.round_check_results || pendingLuckDecisions.value)
 const serverJudging = computed(() => game.detail.value?.state === 'active_judgment' && !pendingLuckDecisions.value.length)
+const roundJudgmentStuck = computed(() => game.detail.value?.state === 'active_judgment')
 const showGmThinking = computed(() => gmThinking.value || serverJudging.value)
 const sceneTitle = computed(() => game.detail.value?.scene || t('unknownScene'))
 const stateLabel = computed(() => {
@@ -445,7 +446,22 @@ async function command(path: string, body: JsonObject = {}) {
     if (path !== 'advance' && r.narration) toast.success(r.narration)
     else toast.success(t('operationDone'))
     await game.refresh()
-  } catch (e: unknown) { toast.error(errorMessage(e)) } finally { if (thinkingCommand) gmThinking.value = false }
+  } catch (e: unknown) {
+    toast.error(errorMessage(e))
+    // 判定失败时后端可能已回滚到行动阶段，立即刷新让"生成中"横幅消失。
+    await game.refresh()
+  } finally { if (thinkingCommand) gmThinking.value = false }
+}
+
+async function onForceAdvance() {
+  const accepted = await confirm({
+    title: t('gmForceAdvanceConfirmTitle'),
+    content: t('gmForceAdvanceConfirm'),
+    positiveText: t('gmForceAdvance'),
+    type: 'warning',
+  })
+  if (!accepted) return
+  await command('advance', { force: true })
 }
 
 async function generateStoryRecap() {
@@ -1222,6 +1238,20 @@ onBeforeUnmount(() => {
         <button class="rail-toggle" @click="toggleRailPanel" :title="mobilePanel === 'controls' ? t('close') : railCollapsed ? t('expandGmControls') : t('collapseGmControls')">
           <NIcon :component="railCollapsed ? ChevronBack : ChevronForward" size="16" />
         </button>
+        <section
+          v-if="game.isGm.value && roundJudgmentStuck"
+          class="gm-force-advance panel"
+        >
+          <button
+            type="button"
+            class="primary gm-force-advance-trigger"
+            data-testid="gm-force-advance"
+            :disabled="gmThinking"
+            @click="onForceAdvance"
+          ><NIcon :component="PlayForwardOutline" size="14" /> {{ t('gmForceAdvance') }}</button>
+          <p class="muted">{{ t('gmForceAdvanceHint') }}</p>
+        </section>
+
         <GmToolbar
           v-if="game.isGm.value"
           :detail="game.detail.value"

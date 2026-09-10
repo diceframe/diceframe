@@ -9,7 +9,7 @@ import pytest
 
 from src.commands.check_planner import normalize_check_specs
 from src.commands.combat_resolver import CombatResolver
-from src.commands.round_processor import RoundProcessor
+from src.commands.round_processor import RoundNotProcessed, RoundProcessor
 from src.engine.checks import (
     build_check_request,
     is_explicit_attack_action,
@@ -17,7 +17,7 @@ from src.engine.checks import (
     roll_check_request,
 )
 from src.engine.combat import calculate_attack_damage, resolve_attack
-from src.engine.game_instance import GameInstance, GameState
+from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.rules.rule_system import RuleSystem
 
 
@@ -401,6 +401,96 @@ def test_repeated_resolution_reuses_outcome_without_rng_or_second_hp_mutation(mo
     assert "combat_outcome" not in check
 
 
+@pytest.mark.asyncio
+async def test_retry_after_abort_reapplies_damage_consistently() -> None:
+    """P1 端到端：失败回滚后重试，战斗结算记录必须与实际 HP 一致。
+
+    审核复现路径：真实 CombatResolver 结算 → 判定失败 abort（玩家快照恢复血量）
+    → 用同一骰值重新结算。修复前缓存被重放（不重掷也不扣血），于是 HP 停在恢复
+    后的满血而结算记录仍宣称造成了伤害。
+    """
+    instance = GameInstance(game_key=("test", "abort-retry-damage", "bot"), rule_id="dnd5e")
+    instance.players = {"a": _player("甲"), "b": _player("乙", hp=30)}
+    instance.action_queue = [{
+        "user_id": "a",
+        "text": "我用长剑攻击乙。",
+        "check_request": _request("attack-a", "a", "b"),
+        "dice_value": 12,
+    }]
+    resolver = CombatResolver()
+
+    # 判定入口：快照 + 第一次结算（伤害生效并写入 combat_outcome）。
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.round_start_snapshot = _snapshot_players(instance)
+    check = _result("attack-a", "a", "b", roll=12)
+    instance.last_checks = [check]
+    resolver.resolve_combat(instance, "ignored", "hp_based")
+
+    first_record = dict(instance.action_queue[0]["combat_outcome"])
+    hp_after_first = instance.get_character_sheet("b")["hp"]
+    assert first_record["actual_damage"] > 0
+    assert hp_after_first == first_record["target_hp_after"] < 30
+
+    # 判定/叙事失败：回滚到行动阶段。
+    assert await instance.abort_round_processing() is True
+    assert instance.get_character_sheet("b")["hp"] == 30
+    assert "combat_outcome" not in instance.action_queue[0]
+
+    # 重试：骰值保留，检定重新规划为同一条结果后重新结算。
+    instance.last_checks = [_result("attack-a", "a", "b", roll=12)]
+    resolver.resolve_combat(instance, "ignored", "hp_based")
+    retry_record = instance.action_queue[0]["combat_outcome"]
+
+    assert retry_record["target_hp_before"] == 30
+    assert retry_record["target_hp_after"] == instance.get_character_sheet("b")["hp"]
+    assert retry_record["target_hp_before"] - retry_record["target_hp_after"] == retry_record["actual_damage"]
+    # 重试与第一次结果一致（骰值稳定），不是"记录说受伤、HP 没变"。
+    assert retry_record["actual_damage"] == first_record["actual_damage"]
+    assert retry_record["target_hp_after"] == hp_after_first
+
+
+@pytest.mark.asyncio
+async def test_abort_restores_npc_damage_so_revised_target_retry_is_clean() -> None:
+    """实体快照让 NPC 伤害也能回滚，改目标的合法重试不会留下"幽灵伤害"。
+
+    没有实体快照时：失败回合对哥布林的伤害留在 npcs 上；玩家改打另一个目标后
+    重试，缓存因目标不匹配被拒绝 → 哥布林白挨伤害、新目标毫发无伤。
+    """
+    instance = GameInstance(game_key=("test", "abort-npc-revision", "bot"), rule_id="dnd5e")
+    instance.players = {"a": _player("甲")}
+    instance.npcs = {"goblin": _npc("哥布林"), "orc": _npc("兽人")}
+    instance.action_queue = [{
+        "user_id": "a",
+        "text": "我用长剑攻击哥布林。",
+        "check_request": _request("attack-a", "a", "npc:goblin"),
+        "dice_value": 12,
+    }]
+    resolver = CombatResolver()
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.capture_round_entity_snapshot()
+    instance.round_start_snapshot = _snapshot_players(instance)
+    instance.last_checks = [_result("attack-a", "a", "npc:goblin", roll=12)]
+
+    resolver.resolve_combat(instance, "ignored", "hp_based")
+    assert instance.npcs["goblin"]["hp"] < 30
+
+    # 判定/叙事失败 → 回滚。
+    assert await instance.abort_round_processing() is True
+    assert instance.npcs["goblin"]["hp"] == 30  # 实体快照还原
+    assert "combat_outcome" not in instance.action_queue[0]
+
+    # 玩家改打兽人后重试：只有兽人掉血，哥布林保持满血。
+    instance.action_queue[0]["text"] = "我改用长剑攻击兽人。"
+    instance.action_queue[0]["check_request"] = _request("attack-a", "a", "npc:orc")
+    instance.last_checks = [_result("attack-a", "a", "npc:orc", roll=12)]
+    resolver.resolve_combat(instance, "ignored", "hp_based")
+
+    outcome = instance.action_queue[0]["combat_outcome"]
+    assert outcome["target_ref"] == "npc:orc"
+    assert instance.npcs["orc"]["hp"] == outcome["target_hp_after"] < 30
+    assert instance.npcs["goblin"]["hp"] == 30
+
+
 def test_dnd_attack_dc_comes_from_server_target_armor_class() -> None:
     instance = GameInstance(game_key=("test", "trusted-ac", "bot"), rule_id="dnd5e")
     instance.players = {"a": _player("甲")}
@@ -722,9 +812,11 @@ async def test_pending_attack_luck_never_applies_hp_damage() -> None:
     processor._schedule_luck_timeouts = lambda _instance: None
     hp_before = instance.npcs["goblin"]["hp"]
 
-    result = await processor.process_round(instance)
+    with pytest.raises(RoundNotProcessed) as rejected:
+        await processor.process_round(instance)
 
-    assert result == ("", None)
+    # 幸运等待上报为"本轮未处理"，而不是空正文的成功回合。
+    assert rejected.value.reason == "luck_pending"
     assert instance.npcs["goblin"]["hp"] == hp_before
     assert "combat_outcome" not in instance.action_queue[0]
 
