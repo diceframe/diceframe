@@ -267,6 +267,11 @@ class GameInstance:
     combat_extension_round_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     # 内部：每条 pending 幸运检定的超时定时器（check_id -> asyncio.Task），不序列化
     _luck_timers: dict = field(default_factory=dict, repr=False)
+    # 内部：正在处理本轮的 task（仅判定期间有值，不序列化）。GM 明确要求强制推进
+    # 时用它中止在飞生成；`_process_lock` 本身拿不到持有者。
+    _process_task: asyncio.Task[Any] | None = field(default=None, repr=False, compare=False)
+    # 内部：本次取消是否来自显式的抢占请求（区分关服/断连等外部取消）。
+    _preempt_requested: bool = field(default=False, repr=False, compare=False)
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
@@ -1163,6 +1168,62 @@ class GameInstance:
             return int(raw)
         except (TypeError, ValueError):
             return None
+
+    @asynccontextmanager
+    async def track_round_processing(self) -> AsyncIterator[None]:
+        """登记本轮处理 task，供 GM 抢占时定位并取消。
+
+        与 ``_process_lock`` 配合使用：先拿锁再登记，退出时先注销。锁只能表达
+        "被占用"，拿不到持有者，所以抢占需要这个显式引用。
+        """
+        task = asyncio.current_task()
+        self._process_task = task
+        try:
+            yield
+        finally:
+            if self._process_task is task:
+                self._process_task = None
+
+    def round_processing_in_flight(self) -> bool:
+        """本轮是否真的有在飞的处理 task（区别于"锁被占用"）。"""
+        task = self._process_task
+        return task is not None and not task.done()
+
+    def consume_preempt_request(self) -> bool:
+        """读取并清除抢占标记；供被取消的处理边界决定退出语义。"""
+        requested = self._preempt_requested
+        self._preempt_requested = False
+        return requested
+
+    async def cancel_round_processing(self, *, timeout: float = 10.0) -> bool:
+        """中止在飞的本轮处理，等它退出（含失败回滚）后返回是否成功。
+
+        只给"GM 明确强制推进"这类需要抢占的入口使用：取消会让 ``process_round``
+        把对局退回行动阶段并把取消转成结构化结果，不会留下半截状态。等 task 真正
+        退出再返回，调用方才能安全地重新推进（否则立刻又撞上 ``_process_lock``）。
+        超时说明处理没有在期限内退出，此时不保证已回滚，调用方按"仍在处理中"处理。
+        """
+        task = self._process_task
+        if task is None or task.done() or task is asyncio.current_task():
+            return False
+        self._preempt_requested = True
+        task.cancel()
+        done, _pending = await asyncio.wait({task}, timeout=timeout)
+        if task not in done:
+            logger.warning(
+                "中止在飞回合处理超时: game=%s timeout=%ss", self.game_key, timeout,
+            )
+            return False
+        # 认领异常，避免 "Task exception was never retrieved"；被取消时本方法
+        # 自身会抛 CancelledError，属预期结果。
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
+        # 处理边界正常消费过标记时这里是空操作；若取消落在边界之外（刚好卡在
+        # 处理返回与 task 结束之间），标记会残留并把下一次取消误判成抢占，清掉。
+        self.consume_preempt_request()
+        return True
 
     def iter_player_sheets(self):
         """遍历玩家及其角色卡，yield (uid, player_data, character_sheet)。"""

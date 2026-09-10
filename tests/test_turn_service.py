@@ -81,6 +81,10 @@ class FakeInstance:
             return True
         return False
 
+    def round_processing_in_flight(self) -> bool:
+        """镜像 GameInstance：替身默认没有在飞处理（抢占路径需显式模拟）。"""
+        return False
+
     def pending_luck_checks(self) -> list[dict]:
         return list(self.pending_luck)
 

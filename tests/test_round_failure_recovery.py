@@ -3,15 +3,18 @@
 回归目标（生产事故 2026-09-10 21:42 / 22:10）：
 - 生成失败必须回滚到行动阶段，不能把对局永久留在 ACTIVE_JUDGMENT；
 - 回滚后行动队列与已掷骰值保留，重试可以直接成功；
-- 本轮仍在生成中时，推进必须返回结构化 409，而不是"空正文 + 200"。
+- 本轮仍在生成中时，推进必须返回结构化 409，而不是"空正文 + 200"；
+- GM 明确强制推进时抢占在飞生成：中止 → 回滚 → 重新处理本回合。
 """
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.commands.round_processor import RoundProcessingFailure
-from src.engine.game_instance import GameState
+from src.engine.game_instance import GameInstance, GameState
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
 
 
@@ -28,6 +31,41 @@ async def _new_game(api, registry):
     await instance.activate()
     await instance.start_round()
     return game_key, instance, uid
+
+
+async def _two_player_game(api, registry):
+    created = await api.create_game(
+        "template_world",
+        "Preemption",
+        players=[
+            {"character_name": "GM甲", "attributes": {"str": 12}, "gold": 20},
+            {"character_name": "玩家乙", "attributes": {"str": 10}, "gold": 20},
+        ],
+    )
+    game_key = created["game_key"]
+    instance = registry.get(api._parse_key(game_key))
+    gm_uid, player_uid = list(instance.players)[:2]
+    instance.gm_uid = gm_uid
+    await instance.activate()
+    await instance.start_round()
+    return game_key, instance, gm_uid, player_uid
+
+
+def _block_first_llm_call(llm, monkeypatch) -> asyncio.Event:
+    """让第一次模型调用永远挂起（只能被取消），之后恢复正常。"""
+    entered = asyncio.Event()
+    original = llm.call
+    calls = {"n": 0}
+
+    async def blocking_call(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            entered.set()
+            await asyncio.Event().wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(llm, "call", blocking_call)
+    return entered
 
 
 @pytest.mark.asyncio
@@ -142,3 +180,79 @@ async def test_luck_timeout_failure_rolls_back_instead_of_sticking(web_api, monk
     assert len(instance.log) == log_before
     assert [action["user_id"] for action in instance.action_queue] == [uid]
 
+
+@pytest.mark.asyncio
+async def test_force_advance_preempts_in_flight_generation(web_api, monkeypatch) -> None:
+    """GM 强制推进抢占在飞生成：中止 → 回滚 → 用同一条队列重新处理本回合。
+
+    被中止的玩家请求拿到结构化 409（preempted），而不是把对局留在"生成中"。
+    """
+    api, _lorebook, registry, llm, _worlds = web_api
+    game_key, instance, gm_uid, player_uid = await _two_player_game(api, registry)
+    await instance.add_action(gm_uid, "我警戒四周", "str")
+    instance.round_checks_prepared = True  # 跳过检定规划，把挂起点锁进叙事阶段
+    round_before = instance.round_number
+    log_before = len(instance.log)
+
+    entered = _block_first_llm_call(llm, monkeypatch)
+    player_task = asyncio.create_task(
+        api.submit_action(game_key, player_uid, "我推开石门", selected_attribute="str"),
+    )
+    await asyncio.wait_for(entered.wait(), 5)
+    assert instance.state == GameState.ACTIVE_JUDGMENT
+    assert instance.round_processing_in_flight() is True
+
+    gm_result = await api.advance_turn(game_key, gm_uid, force=True)
+
+    player_result = await asyncio.wait_for(player_task, 5)
+    assert player_result["status"] == 409
+    assert player_result["payload"]["error_code"] == "ROUND_NOT_PROCESSED"
+    assert player_result["payload"]["reason"] == "preempted"
+
+    # GM 的推进继续完成本轮：只多出一条日志，队列已清空。
+    assert gm_result["status"] == 200
+    assert gm_result["payload"]["narration"]
+    assert instance.round_number == round_before + 1
+    assert len(instance.log) == log_before + 1
+    assert instance.log[-1]["round"] == round_before
+    assert instance.action_queue == []
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.round_processing_in_flight() is False
+
+
+@pytest.mark.asyncio
+async def test_external_cancellation_rolls_back_and_reraises(web_api, monkeypatch) -> None:
+    """非抢占的取消（关服/断连）同样回滚，但保留 CancelledError 语义。"""
+    api, _lorebook, registry, llm, _worlds = web_api
+    game_key, instance, gm_uid, player_uid = await _two_player_game(api, registry)
+    await instance.add_action(gm_uid, "我警戒四周", "str")
+    instance.round_checks_prepared = True
+
+    entered = _block_first_llm_call(llm, monkeypatch)
+    player_task = asyncio.create_task(
+        api.submit_action(game_key, player_uid, "我推开石门", selected_attribute="str"),
+    )
+    await asyncio.wait_for(entered.wait(), 5)
+
+    player_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await player_task
+
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.round_processing_in_flight() is False
+    assert [action["user_id"] for action in instance.action_queue] == [gm_uid, player_uid]
+
+
+@pytest.mark.asyncio
+async def test_cancel_round_processing_needs_an_in_flight_task() -> None:
+    """没有在飞 task 时抢占是空操作，不得取消调用者自己。"""
+    instance = GameInstance(game_key=("web", "no-inflight", "bot"))
+
+    assert instance.round_processing_in_flight() is False
+    assert await instance.cancel_round_processing() is False
+
+    async with instance.track_round_processing():
+        # 在飞处理就是当前 task：不能自己取消自己。
+        assert instance.round_processing_in_flight() is True
+        assert await instance.cancel_round_processing() is False
+    assert instance.round_processing_in_flight() is False

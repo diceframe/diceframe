@@ -395,7 +395,16 @@ class RoundProcessor:
             raise RoundNotProcessed("busy")
         try:
             async with instance._process_lock:
-                return await self.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
+                async with instance.track_round_processing():
+                    return await self.process_round_impl(instance, on_delta=on_delta, on_reset=on_reset)
+        except asyncio.CancelledError:
+            # 被取消（GM 抢占 / 关服 / 断连）同样不能把对局留在判定阶段。
+            logger.info("回合处理被取消，回滚到行动阶段: game=%s", instance.game_key)
+            await self._recover_failed_round(instance, on_reset=on_reset)
+            if instance.consume_preempt_request():
+                # 显式抢占：转成结构化"未处理"，让被中止的请求照常返回客户端。
+                raise RoundNotProcessed("preempted") from None
+            raise
         except RoundNotProcessed:
             raise
         except Exception as exc:

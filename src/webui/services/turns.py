@@ -299,7 +299,7 @@ def _round_failure_result(instance: "GameInstance", *, rolled_back: bool) -> Tur
 
 
 def _not_processed_result(instance: "GameInstance", reason: str) -> TurnResult:
-    """本轮未执行：区分"有人在生成中"和"状态已变化"。"""
+    """本轮未执行：区分"有人在生成中""已被 GM 抢占"和"状态已变化"。"""
     if reason == "busy":
         return _result({
             "ok": False,
@@ -310,6 +310,20 @@ def _not_processed_result(instance: "GameInstance", reason: str) -> TurnResult:
                 "ja": "このターンはまだ生成中です。少し待ってから再試行してください。",
             }),
             "phase": "processing",
+            "reason": reason,
+        }, 409)
+    if reason == "preempted":
+        return _result({
+            "ok": False,
+            "error_code": "ROUND_NOT_PROCESSED",
+            "error": _round_message(instance, {
+                "zh-CN": "本轮生成已被 GM 中止并退回行动阶段，请确认行动后重新提交",
+                "en": "The GM aborted this round's generation; it is back in the action phase. "
+                      "Review your action and submit again.",
+                "ja": "GM がこのターンの生成を中止し、行動フェーズに戻しました。"
+                      "行動を確認して再提出してください。",
+            }),
+            "phase": "error",
             "reason": reason,
         }, 409)
     return _result({
@@ -635,8 +649,14 @@ async def advance_round(
     force: bool = False,
     on_delta: NarrationDelta | None = None,
     on_reset: NarrationReset | None = None,
+    _allow_preempt: bool = True,
 ) -> TurnResult:
-    """GM 推进回合，统一处理卡死恢复、待掷骰和待幸运选择。"""
+    """GM 推进回合，统一处理卡死恢复、待掷骰和待幸运选择。
+
+    ``force=True`` 且本轮**正在**生成时，GM 的中止意图优先：先抢占在飞处理
+    （取消 + 回滚 + 落盘），再按正常流程重新处理本回合。只允许抢占一次，
+    避免与另一个推进入口互相抢占成环。
+    """
     instance = dependencies.get_instance(
         dependencies.parse_game_key(game_key)
     )
@@ -644,6 +664,14 @@ async def advance_round(
         return _result({"error": "not found"}, 404)
     if actor_uid != instance.gm_uid:
         return _result({"ok": False, "error": "仅 GM 可推进"}, 403)
+    if force and _allow_preempt and instance.round_processing_in_flight():
+        if await instance.cancel_round_processing():
+            logger.warning("GM 强制推进：已中止在飞生成 - game_key=%s", game_key)
+            return await advance_round(
+                dependencies, game_key, actor_uid,
+                force=True, on_delta=on_delta, on_reset=on_reset,
+                _allow_preempt=False,
+            )
     await _retry_external_economy_effects(dependencies, instance)
     if has_blocking_economy_decision(
         instance, auto_reward_gold_cap=_auto_reward_cap(dependencies, instance),
