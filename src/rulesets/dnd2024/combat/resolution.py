@@ -74,6 +74,8 @@ class CombatResolutionMixin:
             "encounter_instance_id": str(intent.get("encounter_instance_id") or ""),
             "encounter_preset_id": str(intent.get("encounter_preset_id") or ""),
             "origin_step_id": str(intent.get("origin_step_id") or ""),
+            "mode": str(intent.get("mode") or "sandbox"),
+            "adventure_binding": deepcopy(intent.get("adventure_binding")),
         }
 
     def _attack_events(

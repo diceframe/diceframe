@@ -31,6 +31,10 @@ class EncounterAccess:
     encounter_instance_id: str = ""
     encounter_preset_id: str = ""
     origin_step_id: str = ""
+    adventure_id: str = ""
+    # 活动冒险包存在，但当前剧情没有给出合法 canonical 遭遇绑定时为 True。
+    # 这种状态必须对 GM 可解释，且不得静默降级为通用训练预设。
+    unprepared: bool = False
 
     @property
     def can_start(self) -> bool:
@@ -43,6 +47,18 @@ class EncounterAccess:
     @classmethod
     def sandbox(cls) -> "EncounterAccess":
         return cls(mode="sandbox", status="pending")
+
+    @classmethod
+    def unbound_story(cls, adventure_id: str = "", origin_step_id: str = "") -> "EncounterAccess":
+        """An active adventure that has no legal canonical encounter binding."""
+
+        return cls(
+            mode="blocked",
+            status="blocked",
+            adventure_id=str(adventure_id or ""),
+            origin_step_id=str(origin_step_id or ""),
+            unprepared=True,
+        )
 
 
 def resolve_story_encounter_access(
@@ -95,4 +111,5 @@ def resolve_story_encounter_access(
         encounter_instance_id=encounter_id,
         encounter_preset_id=str(step.get("encounter_preset_id") or ""),
         origin_step_id=step_id,
+        adventure_id=adventure_id,
     )

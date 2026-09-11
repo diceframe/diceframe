@@ -81,6 +81,17 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   ready: '准备', cancelReady: '取消准备', partyReady: '队伍准备状态', readyStatus: '已准备', unreadyStatus: '未准备',
   readySummary: '队友准备', startHint: 'GM 可在确认敌情与队伍状态后开始战斗。',
   manualEncounter: '手动准备遭遇',
+  chooseFreeEncounter: '选择自由遭遇',
+  sandboxHint: 'AI GM 没能把当前敌情匹配到合法遭遇。请由 GM 手动准备一场自由遭遇。',
+  unpreparedTitle: '当前剧情尚未配置专业战斗遭遇',
+  unpreparedHint: '剧情已经进入交战态势，但这个冒险包没有为当前敌情绑定合法的专业遭遇。服务端不会用通用训练遭遇替代它。',
+  unpreparedAction: '脱离冒险，准备自由遭遇',
+  sandboxWarning: '确认后将离开当前冒险包，创建一场不属于剧情绑定的自由遭遇。',
+  storyMode: '剧情遭遇',
+  sandboxMode: '自由遭遇',
+  sandboxOutsideAdventure: '自由战斗 · 不属于当前冒险包',
+  missingPreset: '冒险包引用的遭遇不存在，需要先修复冒险包内容。',
+  encounterSource: '遭遇',
   nextEncounter: '准备下一场遭遇', nextEncounterHint: '当前战斗已经结算。可返回冒险，或由 GM 明确准备下一场战斗。', returnToAdventure: '返回冒险', cancelNextEncounter: '暂不准备',
   turnGuide: '本回合可以组合使用移动、一个动作和可用的附赠动作；完成操作后请手动结束回合。脱离接战只会避免本回合的机会攻击，仍需移动离开敌人范围。',
   canEndTurn: '当前可结束回合',
@@ -109,6 +120,17 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   ready: 'Ready', cancelReady: 'Cancel ready', partyReady: 'Party readiness', readyStatus: 'Ready', unreadyStatus: 'Not ready',
   readySummary: 'Party ready', startHint: 'The GM can start after reviewing the opposition and party status.',
   manualEncounter: 'Prepare encounter manually',
+  chooseFreeEncounter: 'Select a free encounter',
+  sandboxHint: 'The AI GM could not match the current opposition to a legal encounter. The GM can prepare a free encounter manually.',
+  unpreparedTitle: 'The current story has no prepared encounter',
+  unpreparedHint: 'The story has entered combat, but this adventure package binds no legal encounter to the current opposition. The server will not substitute a generic training encounter.',
+  unpreparedAction: 'Leave the adventure and prepare a free encounter',
+  sandboxWarning: 'This leaves the active adventure package and creates a free encounter that is not story-bound.',
+  storyMode: 'Story encounter',
+  sandboxMode: 'Free encounter',
+  sandboxOutsideAdventure: 'Free combat · not part of the active adventure',
+  missingPreset: 'The adventure package references an encounter that does not exist; fix the package content first.',
+  encounterSource: 'Encounter',
   nextEncounter: 'Prepare next encounter', nextEncounterHint: 'This combat is resolved. Return to the adventure, or have the GM explicitly prepare another encounter.', returnToAdventure: 'Return to adventure', cancelNextEncounter: 'Not yet',
   turnGuide: 'You can combine movement, one action, and an available bonus action this turn. End the turn when finished. Disengage prevents opportunity attacks for this turn; you still need to move out of enemy range.',
   canEndTurn: 'You can end the turn now',
@@ -136,6 +158,17 @@ const guidedCombatPreset = computed(() => guidedCombatStep.value
   : undefined)
 const narrativeCombatPending = computed(() => gameplay.value?.encounter_request?.status === 'pending')
 const encounterReadiness = computed(() => gameplay.value?.encounter_request?.readiness)
+// 服务端权威模式：story=剧情绑定遭遇，sandbox=自由遭遇，
+// blocked+unprepared=活动冒险包尚未配置专业战斗遭遇。
+const encounterAccess = computed(() => gameplay.value?.encounter_access)
+const encounterMode = computed(() => String(encounterAccess.value?.mode || ''))
+const storyUnprepared = computed(() => Boolean(encounterAccess.value?.unprepared))
+const sandboxFlow = computed(() => encounterMode.value !== 'story')
+const combatMode = computed(() => String(combat.value?.mode || ''))
+const adventureActive = computed(() => String(
+  gameplay.value?.campaign?.tutorial?.status || '',
+) === 'active')
+const sandboxDeclared = ref(false)
 const readyAction = computed(() => action('encounter.ready'))
 const unreadyAction = computed(() => action('encounter.unready'))
 const isReady = computed(() => Boolean(
@@ -359,7 +392,6 @@ function resetSelections(): void {
   const shouldSelectEncounter = Boolean(
     guidedCombatStep.value
     || requestedCombatPreset.value
-    || narrativeCombatPending.value
     || manualEncounterOpen.value,
   )
   if (!shouldSelectEncounter) selectedPresetId.value = ''
@@ -388,12 +420,20 @@ function clearGameScopedState(): void {
   selectedTargetId.value = ''
   nextEncounterOpen.value = false
   manualEncounterOpen.value = false
+  sandboxDeclared.value = false
   movementDistance.value = 5
   staged.value = null
   returnFocus = null
 }
 
 function openManualEncounter(): void {
+  manualEncounterOpen.value = true
+  resetSelections()
+}
+
+// GM 明确选择“脱离当前冒险包，准备自由遭遇”后才允许使用通用目录。
+function declareSandboxEncounter(): void {
+  sandboxDeclared.value = true
   manualEncounterOpen.value = true
   resetSelections()
 }
@@ -499,13 +539,16 @@ function stageSimple(type: string): void {
 
 async function startCombat(): Promise<void> {
   if (!selectedPreset.value) return
-  await submit({
+  const payload: JsonObject = {
     intent_id: intentId(), type: 'combat.start',
     expected_version: gameplay.value?.state_version ?? 0,
     encounter_preset_id: selectedPreset.value.id,
     encounter_instance_id: action('combat.start')?.encounter_instance_id,
     enemies: selectedPreset.value.enemies,
-  })
+  }
+  // 自由遭遇必须由 GM 明确声明，服务端据此拒绝把通用预设当成剧情绑定。
+  if (sandboxFlow.value) payload.mode = 'sandbox'
+  await submit(payload)
 }
 
 async function toggleReady(): Promise<void> {
@@ -581,7 +624,14 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         <p class="eyebrow">5E 2024 SRD · {{ copy.authority }}</p>
         <h2 id="dnd-combat-title">{{ copy.title }}</h2>
       </div>
-      <button :disabled="busy" @click="load()">{{ copy.refresh }}</button>
+      <div class="combat-header-tools">
+        <span v-if="combatMode" class="combat-mode-badge" :class="combatMode">
+          {{ combatMode === 'story'
+            ? copy.storyMode
+            : adventureActive ? copy.sandboxOutsideAdventure : copy.sandboxMode }}
+        </span>
+        <button :disabled="busy" @click="load()">{{ copy.refresh }}</button>
+      </div>
     </header>
 
     <p v-if="busy && !data" class="combat-state" role="status">{{ copy.loading }}</p>
@@ -616,8 +666,22 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         <div v-if="guidedCombatStep" class="guided-preset">
           <span>{{ copy.guidedEncounter }}</span>
           <strong>{{ guidedCombatPreset?.name || guidedCombatStep.encounter_preset_id }}</strong>
+          <small class="encounter-source">{{ copy.encounterSource }}：{{ guidedCombatStep.encounter_preset_id }}</small>
           <p>{{ guidedCombatPreset?.description }}</p>
-          <small>{{ copy.guidedOnly }}</small>
+          <p v-if="!guidedCombatPreset" class="combat-error" role="alert">{{ copy.missingPreset }}</p>
+          <small v-else>{{ copy.guidedOnly }}</small>
+        </div>
+        <div v-else-if="storyUnprepared && !sandboxDeclared" class="guided-preset unprepared">
+          <strong>{{ copy.unpreparedTitle }}</strong>
+          <p>{{ copy.unpreparedHint }}</p>
+          <div class="unprepared-actions">
+            <button type="button" @click="emit('navigate', 'campaign')">
+              <NIcon :component="PlayForwardOutline" />{{ copy.returnToAdventure }}
+            </button>
+            <button v-if="isGm" type="button" class="combat-primary" @click="declareSandboxEncounter">
+              <NIcon :component="ShieldOutline" />{{ copy.unpreparedAction }}
+            </button>
+          </div>
         </div>
         <div v-else-if="requestedCombatPreset" class="guided-preset">
           <span>{{ copy.recommendedEncounter }}</span>
@@ -654,14 +718,16 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </button>
         </section>
 
-        <template v-if="isGm && action('combat.start')">
+        <template v-if="isGm && (action('combat.start') || sandboxDeclared)">
           <template v-if="!guidedCombatStep && !requestedCombatPreset">
-            <button v-if="!narrativeCombatPending && !manualEncounterOpen" type="button" class="manual-encounter-toggle" @click="openManualEncounter">
+            <button v-if="!manualEncounterOpen && !sandboxDeclared" type="button" class="manual-encounter-toggle" @click="openManualEncounter">
               <NIcon :component="ShieldOutline" />{{ copy.manualEncounter }}
             </button>
             <template v-else>
+              <p v-if="sandboxDeclared" class="combat-warning">{{ copy.sandboxWarning }}</p>
+              <p v-else-if="narrativeCombatPending" class="combat-state">{{ copy.sandboxHint }}</p>
               <label>
-                <span>{{ copy.chooseEncounter }}</span>
+                <span>{{ copy.chooseFreeEncounter }}</span>
                 <select v-model="selectedPresetId">
                   <option v-for="preset in selectableEncounterPresets" :key="preset.id" :value="preset.id">
                     {{ preset.name }} · {{ localizedTerm(preset.difficulty) }}
@@ -673,7 +739,12 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </template>
           <p v-if="!guidedCombatStep && !selectableEncounterPresets.length" class="combat-state">{{ copy.noEncounter }}</p>
           <p v-if="encounterReadiness?.required_count" class="combat-state">{{ copy.startHint }}</p>
-          <button v-if="guidedCombatStep || requestedCombatPreset || narrativeCombatPending || manualEncounterOpen" class="combat-primary" :disabled="busy || !selectedPreset" @click="startCombat">
+          <button
+            v-if="guidedCombatStep || requestedCombatPreset || manualEncounterOpen || sandboxDeclared"
+            class="combat-primary"
+            :disabled="busy || !selectedPreset"
+            @click="startCombat"
+          >
             <NIcon :component="PlayForwardOutline" />{{ guidedCombatStep ? copy.guidedStart : copy.start }}
           </button>
         </template>
@@ -897,6 +968,15 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .story-bridge p { color: #e3d9c6; line-height: 1.6; }
 .story-bridge aside { padding: 9px 11px; border-left: 3px solid #d5a64f; background: rgb(14 20 24 / 56%); color: #f2e6cf; line-height: 1.55; }
 .guided-preset { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid #a17b3f; border-radius: 10px; background: rgb(91 62 26 / 24%); }.guided-preset span, .guided-preset small { color: #f0c975; font-size: 12px; }.guided-preset strong { font-size: 17px; }.guided-preset p { margin: 0; color: #e3d9c6; line-height: 1.5; }
+.guided-preset.unprepared { border-color: #b0803c; background: rgb(70 48 20 / 34%); }
+.guided-preset.unprepared strong { color: #f4d9a4; }
+.guided-preset .unprepared-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.guided-preset .unprepared-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.encounter-source { color: #d9cba6; font-size: 11px; }
+.combat-header-tools { display: flex; align-items: center; gap: 9px; }
+.combat-mode-badge { padding: 3px 9px; border: 1px solid #6d5a35; border-radius: 999px; color: #f0d79c; background: rgb(64 46 20 / 55%); font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
+.combat-mode-badge.sandbox { border-color: #46626f; color: #bcd8e6; background: rgb(20 44 56 / 55%); }
+.combat-warning { margin: 0; padding: 9px 11px; border: 1px solid #b0803c; border-radius: 9px; background: rgb(70 48 20 / 34%); color: #f2d9a8; font-size: 13px; line-height: 1.5; }
 .encounter-alternatives { margin-top: 5px; }
 .encounter-alternatives summary { color: #d5c5aa; cursor: pointer; font-size: 12px; }
 .encounter-alternatives label { margin-top: 8px; }
@@ -984,6 +1064,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:f
 :global(body.light .dnd-combat .turn-banner.enemy) { border-color: #c59b9b; background: linear-gradient(135deg, #fff0ef, #fff); }
 :global(body.light .dnd-combat .turn-banner small), :global(body.light .dnd-combat .combat-rules-note), :global(body.light .dnd-combat .preset-description), :global(body.light .dnd-combat .combat-state), :global(body.light .dnd-combat .combat-summary small) { color: #514b43; }
 :global(body.light .dnd-combat .resolution-log li) { background: #e8eef0; color: #27383e; }
+:global(body.light .dnd-combat .guided-preset) { border-color: #b08a44; background: #fdf5e6; }
+:global(body.light .dnd-combat .guided-preset p), :global(body.light .dnd-combat .guided-preset strong) { color: #3b3226; }
+:global(body.light .dnd-combat .guided-preset.unprepared), :global(body.light .dnd-combat .combat-warning) { border-color: #b0803c; background: #fdf3de; }
+:global(body.light .dnd-combat .combat-mode-badge) { border-color: #ad8a4b; background: #f6ecd6; color: #4b3a1c; }
+:global(body.light .dnd-combat .combat-mode-badge.sandbox) { border-color: #8ba7b5; background: #eaf3f7; color: #26414d; }
 @media (max-width: 700px) {
   .dnd-combat { gap: 10px; margin-inline: 0; padding: 10px; border-radius: 12px; }
   .combat-summary { display: flex; gap: 7px; padding-bottom: 3px; overflow-x: auto; scroll-snap-type: x proximity; }
