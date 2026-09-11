@@ -19,6 +19,7 @@ from src.web_transport.config import TLS_MODE_OFF, TLS_MODE_SELF_SIGNED, WebTran
 from src.web_transport.listeners import (
     ListenerPlan,
     build_listener_plan,
+    internal_loopback_host,
     normalize_hosts,
     parse_port,
     split_hosts,
@@ -152,6 +153,36 @@ def test_host_helpers() -> None:
     assert parse_port(0) is None
     assert parse_port("65536") is None
     assert parse_port("") is None
+
+
+def test_startup_url_uses_the_same_address_family() -> None:
+    """启动日志不能对 IPv6-only 监听打印一个不可用的 IPv4 回环地址。"""
+
+    ipv6_plan, _warnings = build_listener_plan(
+        hosts=["::"], port=18000, transport=_http_transport(),
+    )
+    assert ipv6_plan[0].url() == "http://[::1]:18000"
+
+    ipv4_plan, _warnings = build_listener_plan(
+        hosts=["0.0.0.0"], port=18000, transport=_http_transport(),
+    )
+    assert ipv4_plan[0].url() == "http://127.0.0.1:18000"
+
+    explicit, _warnings = build_listener_plan(
+        hosts=["10.0.0.9"], port=18000, transport=_http_transport(),
+    )
+    assert explicit[0].url() == "http://10.0.0.9:18000"
+
+
+def test_internal_loopback_follows_the_bound_family() -> None:
+    """插件用的 TRPG_API_BASE 必须指向真的在监听的地址族。"""
+
+    assert internal_loopback_host(["0.0.0.0"]) == "127.0.0.1"
+    assert internal_loopback_host(["0.0.0.0", "::"]) == "127.0.0.1"
+    assert internal_loopback_host(["127.0.0.1"]) == "127.0.0.1"
+    assert internal_loopback_host(["::"]) == "::1"
+    assert internal_loopback_host(["::", "::1"]) == "::1"
+    assert internal_loopback_host([]) == "127.0.0.1"
 
 
 @pytest.mark.asyncio

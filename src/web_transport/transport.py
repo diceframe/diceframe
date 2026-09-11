@@ -52,8 +52,17 @@ def _build_ssl_context(cert_path: Path, key_path: Path) -> ssl.SSLContext:
     return context
 
 
-def build_server_transport(config: WebTransportConfig, data_dir: Path, port: int) -> ServerTransport:
-    """根据配置构建 ServerTransport。off 模式 ssl_context=None。"""
+def build_server_transport(
+    config: WebTransportConfig,
+    data_dir: Path,
+    port: int,
+    local_host: str = "127.0.0.1",
+) -> ServerTransport:
+    """根据配置构建 ServerTransport。off 模式 ssl_context=None。
+
+    ``local_host`` 是本机内部调用（插件、健康检查）使用的回环地址，跟随实际
+    监听地址族：纯 IPv6 监听时传 ``::1``，否则插件会连一个没在监听的地址。
+    """
     store = CertificateStore(data_dir)
 
     def http_transport(error: str = "") -> ServerTransport:
@@ -61,7 +70,7 @@ def build_server_transport(config: WebTransportConfig, data_dir: Path, port: int
             scheme="http",
             tls_mode=TLS_MODE_OFF,
             ssl_context=None,
-            endpoint=ServerEndpoint(scheme="http", port=port),
+            endpoint=ServerEndpoint(scheme="http", port=port, local_host=local_host),
             degraded_error=error,
             provider=None,
             store=store,
@@ -110,7 +119,7 @@ def build_server_transport(config: WebTransportConfig, data_dir: Path, port: int
         scheme="https",
         tls_mode=config.tls_mode,
         ssl_context=ssl_context,
-        endpoint=ServerEndpoint(scheme="https", port=port),
+        endpoint=ServerEndpoint(scheme="https", port=port, local_host=local_host),
         provider=provider,
         store=store,
         config=config,

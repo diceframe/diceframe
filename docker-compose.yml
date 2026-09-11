@@ -13,6 +13,12 @@ services:
     environment:
       TRPG_WEB_HOST: "0.0.0.0"
       TRPG_WEB_PORT: "9876"
+      # 额外监听地址（例如 IPv6 的 ::）与附加 HTTP/HTTPS 端口。
+      # 注意：容器里监听了端口还需要在 ports 里映射出来，见
+      # docker-compose.extra-ports.yml 与 .env.example 的说明。
+      TRPG_WEB_HOSTS: "${TRPG_WEB_HOSTS:-}"
+      TRPG_WEB_HTTP_PORT: "${TRPG_WEB_HTTP_PORT:-}"
+      TRPG_WEB_HTTPS_PORT: "${TRPG_WEB_HTTPS_PORT:-}"
       TRPG_DATA_DIR: "/app/data"
       # The image already defaults to Asia/Shanghai; set TZ in .env to change it.
       TZ: "${TZ:-Asia/Shanghai}"
