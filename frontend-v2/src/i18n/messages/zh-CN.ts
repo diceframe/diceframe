@@ -623,7 +623,7 @@ export const zhCN = {
   gmPaymentRewards: '确认后获得：{items}',
   gmPaymentReason: '（{reason}）',
   gmPaymentHelp: '确认后才会扣款并交付关联物品或结果；拒绝不会扣款。关闭窗口等同“稍后处理”，可从桌面顶部重新打开。',
-  createPaymentProposal: '发起支付提案',
+  createPaymentProposal: '支付提案',
   paymentPayer: '付款角色',
   paymentRecipient: '物品接收角色',
   paymentAmount: '金额',

@@ -1259,6 +1259,7 @@ onBeforeUnmount(() => {
           :is-gm="game.isGm.value"
           :recap-busy="storyRecapBusy"
           @advance="command('advance', { force: true })"
+          @force-advance="onForceAdvance"
           @rollback="command('rollback')"
           @recap="generateStoryRecap"
           @invite="invite"

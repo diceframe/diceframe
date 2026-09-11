@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { NIcon } from 'naive-ui'
 import {
   PlayForwardOutline, ArrowUndoOutline, ShareOutline, BugOutline,
@@ -8,13 +8,18 @@ import {
   TrashOutline, SendOutline, ImageOutline, MapOutline,
   ReaderOutline,
   CashOutline,
+  StopCircleOutline,
 } from '@vicons/ionicons5'
 import type { GameDetail, Player } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean; recapBusy?: boolean }>()
+// 强制推进 = 中止在飞生成并重新处理本回合；只有本轮真的在判定/生成时才有意义
+// （平时点它等同于「推进」，所以平时禁用，避免两个按钮行为重复）。
+const forceAdvanceAvailable = computed(() => props.detail?.state === 'active_judgment')
 const emit = defineEmits<{
   advance: []
+  'force-advance': []
   rollback: []
   recap: []
   invite: []
@@ -77,6 +82,12 @@ function awardXp(userId: string) {
     <div class="gm-group gm-flow-group">
       <h4>{{ t('flow') }}</h4>
       <button @click="emit('advance')"><NIcon :component="PlayForwardOutline" size="14" /> {{ t('advance') }}</button>
+      <button
+        type="button"
+        :disabled="!forceAdvanceAvailable"
+        :title="t('gmForceAdvanceHint')"
+        @click="emit('force-advance')"
+      ><NIcon :component="StopCircleOutline" size="14" /> {{ t('gmForceAdvance') }}</button>
       <button @click="emit('rollback')"><NIcon :component="ArrowUndoOutline" size="14" /> {{ t('rollback') }}</button>
       <button @click="emit('payment')"><NIcon :component="CashOutline" size="14" /> {{ t('createPaymentProposal') }}</button>
       <button :disabled="recapBusy" @click="emit('recap')"><NIcon :component="ReaderOutline" size="14" /> {{ recapBusy ? t('storyRecapGenerating') : t('storyRecapGenerate') }}</button>

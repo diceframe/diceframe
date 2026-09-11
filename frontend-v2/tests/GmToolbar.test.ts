@@ -13,6 +13,27 @@ function findSelectWithOption(wrapper: VueWrapper, value: string) {
 }
 
 describe('GmToolbar',()=>{
+  it('exposes force advance inside the flow group and only enables it while generating',async()=>{
+    i18n.global.locale.value = 'zh-CN'
+    const mountWithState=(state:string)=>mount(GmToolbar,{global:{plugins:[i18n]},props:{
+      detail:{game_key:'web|room|bot',round_number:4,state},
+      players:[],
+      isGm:true,
+    }})
+
+    const idle=mountWithState('active_action')
+    const idleButton=idle.findAll('button').find(item => item.text().includes('强制推进'))
+    expect(idleButton, '强制推进应常驻在 GM 控台里，否则用户找不到').toBeTruthy()
+    expect(idleButton!.element.closest('.gm-flow-group'), '应放在「流程」分组里').toBeTruthy()
+    expect(idleButton!.attributes('disabled'), '非判定阶段应禁用，避免与「推进」行为重复').toBeDefined()
+
+    const busy=mountWithState('active_judgment')
+    const busyButton=busy.findAll('button').find(item => item.text().includes('强制推进'))!
+    expect(busyButton.attributes('disabled')).toBeUndefined()
+    await busyButton.trigger('click')
+    expect(busy.emitted('force-advance')).toHaveLength(1)
+  })
+
   it('emits one recap request and exposes its busy state',async()=>{
     i18n.global.locale.value = 'en'
     const wrapper=mount(GmToolbar,{global:{plugins:[i18n]},props:{
