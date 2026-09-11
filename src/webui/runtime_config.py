@@ -34,6 +34,7 @@ from src.network_proxy import (
     mask_proxy_url,
 )
 from src.web_transport import ServerTransport, build_server_transport, parse_web_transport
+from src.web_transport.listeners import normalize_hosts, parse_port, split_hosts
 from src.webui.access_password import mask_access_password, normalize_access_password
 from src.webui.cors import normalize_cors_origins, parse_cors_origins
 from src.webui.services import legal as legal_svc
@@ -97,6 +98,10 @@ class RuntimeConfig:
     secrets: dict[str, Any]
     host: str
     port: int
+    # 额外监听拓扑：hosts 至少含 host；两个可选端口用于同时提供 HTTP/HTTPS。
+    hosts: tuple[str, ...]
+    http_port: int | None
+    https_port: int | None
     transport: ServerTransport
     cors_env_value: str
     cors_config_value: str
@@ -161,6 +166,13 @@ class ConfigStore:
         model = saved.get("model", "")
         port = int(env.get("TRPG_WEB_PORT") or saved.get("web_port", 18000))
         host = str(env.get("TRPG_WEB_HOST") or saved.get("web_host", "0.0.0.0"))
+        # 多地址监听：TRPG_WEB_HOSTS 只做追加，不改变 TRPG_WEB_HOST 的既有语义。
+        extra_hosts = normalize_hosts(
+            split_hosts(env.get("TRPG_WEB_HOSTS") or saved.get("web_hosts") or "")
+        )
+        hosts = normalize_hosts([host, *extra_hosts]) or [host]
+        http_port = parse_port(env.get("TRPG_WEB_HTTP_PORT") or saved.get("web_http_port"))
+        https_port = parse_port(env.get("TRPG_WEB_HTTPS_PORT") or saved.get("web_https_port"))
         transport_config = parse_web_transport(saved.get("web_transport"), env)
         transport = build_server_transport(
             transport_config,
@@ -356,6 +368,9 @@ class ConfigStore:
                 "legal_privacy_acknowledged_version", ""
             ),
             "web_transport": dict(saved.get("web_transport") or {}),
+            "web_hosts": ",".join(hosts),
+            "web_http_port": http_port or "",
+            "web_https_port": https_port or "",
         }
         return RuntimeConfig(
             paths=self.paths,
@@ -364,6 +379,9 @@ class ConfigStore:
             secrets=secret_values,
             host=host,
             port=port,
+            hosts=tuple(hosts),
+            http_port=http_port,
+            https_port=https_port,
             transport=transport,
             cors_env_value=cors_env_value,
             cors_config_value=cors_config_value,
