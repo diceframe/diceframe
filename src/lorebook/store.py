@@ -190,7 +190,9 @@ class LorebookStore:
             fields[k] = v
         if not fields:
             return
-        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        # 列名必须加引号：白名单里的 order / group 都是 SQL 保留字，
+        # 裸写会让 SQLite 直接语法错误（add_entry 的 INSERT 同样是加引号的）。
+        set_clause = ", ".join(f'"{k}" = ?' for k in fields)
         params.extend(fields.values())
         params.append(entry_id)
         self._execute(

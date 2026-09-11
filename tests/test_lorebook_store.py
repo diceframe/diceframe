@@ -119,6 +119,35 @@ class TestEntryCRUD:
             store.close()
             path.unlink(missing_ok=True)
 
+    def test_update_entry_supports_reserved_word_columns(self):
+        """回归：order / group 是 SQL 保留字，编辑条目必须能保存。
+
+        前端保存会把整条条目 PUT 上来（含 order/group）。修复前列名未加引号，
+        UPDATE 会拼出 `SET order = ?` 并抛 sqlite3.OperationalError: near "order"，
+        表现为「世界书保存按钮失效」（路由 500）。
+        """
+        store, path = _temp_store()
+        try:
+            store.create_world("w1", "测试")
+            store.add_entry({"id": "e1", "world_id": "w1", "name": "草药师",
+                            "keywords": ["草药"], "content": "旧内容"})
+            store.update_entry("e1", {
+                "content": "新内容",
+                "order": 42,
+                "group": "NPC",
+                "group_weight": 3,
+                "probability": 80,
+            })
+            entry = store.get_entry("e1")
+            assert entry["content"] == "新内容"
+            assert entry["order"] == 42
+            assert entry["group"] == "NPC"
+            assert entry["group_weight"] == 3
+            assert entry["probability"] == 80
+        finally:
+            store.close()
+            path.unlink(missing_ok=True)
+
     def test_list_entries_by_world(self):
         store, path = _temp_store()
         try:

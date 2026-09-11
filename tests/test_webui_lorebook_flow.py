@@ -179,3 +179,33 @@ async def test_copy_lorebook_copies_selected_source_entries(web_api):
     assert entries[0]["world_id"] == "template_world_copy_case"
 
 
+@pytest.mark.asyncio
+async def test_update_entry_accepts_frontend_payload_with_reserved_word_fields(web_api):
+    """回归：前端保存已有条目会整份提交（含 order/group），路由必须能落盘。
+
+    修复前 SET 子句列名未加引号，UPDATE 拼出 `SET "order" = ?` 的反例
+    （裸 `order = ?`）→ sqlite3.OperationalError: near "order" → 路由 500，
+    用户看到的就是「世界书保存按钮失效」。
+    """
+    api, lorebook, _registry, _llm, _worlds = web_api
+    lorebook.create_world("edit_world", "编辑世界")
+    lorebook.add_entry({
+        "id": "npc_herbalist", "world_id": "edit_world", "name": "草药师",
+        "type": "npc", "keywords": ["草药"], "content": "旧内容",
+    })
+
+    api.update_entry("npc_herbalist", {
+        "id": "npc_herbalist", "world_id": "edit_world", "name": "草药师", "type": "npc",
+        "keywords": ["草药", "药草"], "content": "新内容",
+        "visible_to": [], "connected_to": [], "triggers_recursive": [],
+        "order": 42, "group": "NPC", "group_weight": 3, "probability": 80,
+    })
+
+    entry = lorebook.get_entry("npc_herbalist")
+    assert entry["content"] == "新内容"
+    assert entry["keywords"] == ["草药", "药草"]
+    assert entry["order"] == 42
+    assert entry["group"] == "NPC"
+    assert entry["group_weight"] == 3
+
+
