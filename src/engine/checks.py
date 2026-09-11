@@ -707,7 +707,10 @@ def resolve_check_request(
         "attribute": attribute_label,
         "attribute_key": attribute_key,
         "modifier": modifier,
+        # 明细要让玩家能从总额倒推：属性加值 + 规则/技能加值 + 情境修正，
+        # 三项依次列出，否则「modifier=5」和明细里的「熟练加值 +2」对不上账。
         "modifier_breakdown": "；".join(filter(None, [
+            f"{attribute_label or '属性'}加值 {attribute_modifier:+d}" if attribute_modifier else "",
             bonus_label,
             f"情境修正 {circumstance_modifier:+d}" if circumstance_modifier else "",
             _duplicate_channel_note(instance.language)

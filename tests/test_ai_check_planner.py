@@ -605,6 +605,38 @@ def test_disadvantage_with_reason_changes_only_the_roll_mode() -> None:
     assert check["dc"] == 15
 
 
+def test_modifier_breakdown_lists_attribute_skill_and_circumstance_sources() -> None:
+    """明细要能从总额倒推：属性加值 + 熟练加值 + 情境修正。
+
+    否则卡面会出现「modifier=+5」但明细只写「熟练加值 +2」的对不上账情况。
+    """
+    instance = _door_instance(strength=16)
+    sheet = instance.players["p1"]["character_sheet"]
+    sheet["attributes"] = {"str": 16, "dex": 12, "wis": 16}
+    sheet["skills"] = [{"name": "察觉", "value": 5}]
+    rule = _dnd5e_rule()
+
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "wis", "skill": "察觉", "target": 15,
+        "dc_reason": "泥浆下透光处被泥层与气泡遮蔽，属困难观察",
+    })
+    check = _resolve(instance, rule, request, roll=7)
+
+    assert check["modifier"] == 5  # 感知 +3 + 察觉熟练 +2
+    assert check["modifier_breakdown"] == "感知加值 +3；熟练加值 +2"
+    assert check["total"] == 12  # 7 + 5，与明细一致
+
+    stacked = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 15,
+        "dc_reason": "石门本身沉重，需要持续发力",
+        "modifier": -2,
+        "modifier_reason": "火把熄灭后只能摸黑发力",
+    })
+    stacked_check = _resolve(instance, rule, stacked, roll=10)
+    assert stacked_check["modifier"] == 1  # 力量 +3 -2
+    assert stacked_check["modifier_breakdown"] == "力量加值 +3；情境修正 -2"
+
+
 def test_independent_environment_modifier_stacks_on_the_dc() -> None:
     instance = _door_instance()
     rule = _dnd5e_rule()
