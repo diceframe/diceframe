@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.engine.check_channels import normalize_check_channels
 from src.engine.checks import (
     build_check_request,
     detect_advantage_mode,
@@ -126,7 +127,11 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         "dice_system": dice_system,
         "mechanic": mechanic,
         "attributes": attributes,
-        "dc_table": rule.dc_table if rule else {"easy": 8, "normal": 10, "hard": 15},
+        # 没有规则集时也要与通用 d20 尺度一致（base_d20/dnd5e 都是 10/15/20/25）；
+        # prompt 要求档位以本表为准，这里再给一套 8/10/15 会让模型收到互相矛盾的数据。
+        "dc_table": rule.dc_table if rule else {
+            "easy": 10, "normal": 15, "hard": 20, "extreme": 25,
+        },
         "target_policy": (
             "server_uses_character_sheet_percentile"
             if dice_system == "d100"
@@ -362,6 +367,24 @@ def normalize_check_specs(
             and (rule is None or rule.supports_advantage_mode(advantage))
             else ""
         )
+        # 同一情境事实只能进入一条渠道（DC / 优势劣势 / 环境 modifier）。
+        # 模型把同一不利事实重复表达（抬 DC + 负 modifier + 劣势）时按固定
+        # 优先级折叠，并留下 notes/dropped 审计信息，而不是全量执行。
+        channels = normalize_check_channels(
+            target=target if dice_system == "d20" else None,
+            modifier=modifier,
+            advantage_mode=advantage_mode,
+            baseline_dc=rule.dc_for_difficulty(instance.difficulty, "normal") if rule else None,
+            dc_cap=d20_dc_cap(rule),
+            supports_advantage=rule is None or rule.supports_advantage_mode(advantage),
+            dc_reason=str(raw.get("dc_reason") or ""),
+            advantage_reason=str(raw.get("advantage_reason") or ""),
+            modifier_reason=str(raw.get("modifier_reason") or ""),
+        )
+        if dice_system == "d20" and channels.target is not None:
+            target = channels.target
+        modifier = channels.modifier
+        advantage_mode = channels.advantage_mode
         kind = str(raw.get("kind") or "check")
         if kind not in {"check", "save", "attack"}:
             kind = "check"
@@ -401,6 +424,14 @@ def normalize_check_specs(
             "circumstance_modifier": modifier,
             "advantage_mode": advantage_mode,
             "advantage_note": str(raw.get("reason") or "")[:160] or None,
+            # 理由在策略里用完整字符串做同源比较，落库/持久化时才按 schema 声明的
+            # 160 字符上限截断（provider 不严格执行 maxLength 时也不能把超长文本
+            # 写进游戏状态），与 advantage_note 的既有做法一致。
+            "dc_reason": (channels.dc_reason[:160] or None),
+            "advantage_reason": (channels.advantage_reason[:160] or None),
+            "modifier_reason": (channels.modifier_reason[:160] or None),
+            "planner_notes": list(channels.notes),
+            "planner_dropped": dict(channels.dropped),
             "kind": kind,
             "opponent": opponent,
             "assist": assistants,

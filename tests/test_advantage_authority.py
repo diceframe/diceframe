@@ -15,7 +15,12 @@ from src.commands.check_planner import (
     _apply_explicit_advantage_modes,
     normalize_check_specs,
 )
-from src.engine.checks import build_check_request, detect_advantage_mode, roll_check_request
+from src.engine.checks import (
+    build_check_request,
+    detect_advantage_mode,
+    resolve_check_request,
+    roll_check_request,
+)
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
 
@@ -211,3 +216,43 @@ def test_coc_context_words_never_grant_penalty_and_llm_bonus_die_works(monkeypat
 
     assert result["rolls"] == [100, 30]
     assert result["value"] == 30
+
+
+def test_llm_advantage_without_reason_is_preserved_and_audited() -> None:
+    """任务三：缺少 advantage_reason 只追加审计提示，不改写掷骰方式。
+
+    项目方案只要求非零 ``modifier`` 必须给出理由；优势/劣势是模型已声明的合法
+    判定，没有依据不足以证明它与其它渠道重复，因此服务端保留 advantage 并记
+    ``advantage_without_reason``。该 note 只用于审计，不给玩家追加解释行。
+    """
+    rule = _rule("dnd5e.json")
+    instance = _instance()
+    instance.action_queue = [{"user_id": "a", "text": "我潜行绕过守卫"}]
+
+    planned, errors = normalize_check_specs(
+        instance, rule, [{
+            "player": "尤落", "attribute": "dex", "target": 12,
+            "advantage": "advantage",
+        }]
+    )
+
+    assert not errors and len(planned) == 1
+    request = planned[0][1]
+    assert request["advantage_mode"] == "advantage"
+    assert request["advantage_reason"] is None
+    assert request["planner_notes"] == ["advantage_without_reason"]
+    assert request["planner_dropped"] == {}
+
+    check = resolve_check_request(instance, {
+        "user_id": "a",
+        "text": "我潜行绕过守卫",
+        "check_request": request,
+        "dice_value": 17,
+        "dice_rolls": [5, 17],
+    }, rule)
+
+    assert check is not None
+    assert check["advantage_mode"] == "advantage"
+    assert check["roll"] == 17  # 优势仍取两枚 d20 的高值
+    assert check["planner_notes"] == ["advantage_without_reason"]
+    assert "单一渠道" not in (check["modifier_breakdown"] or "")

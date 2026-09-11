@@ -61,8 +61,19 @@ class CombatValidationMixin:
                 raise CombatIntentError("only the GM can start combat")
             if combat.get("status") == "active":
                 raise CombatIntentError("combat is already active")
+            if self.encounter_access.unprepared:
+                # 活动冒险包内没有合法绑定：这是可解释的“尚未准备遭遇”，
+                # 而不是让 GM 在通用目录里随手挑一个顶上。
+                raise CombatIntentError(
+                    "the active adventure has no bound encounter; declare a sandbox encounter explicitly"
+                )
             if not self.encounter_access.can_start:
                 raise CombatIntentError("the current story does not allow an encounter to start")
+            declared_mode = str(intent.get("mode") or "")
+            if declared_mode not in {"", "sandbox"}:
+                # 客户端只能声明“这是 GM 主动准备的一场自由遭遇”，
+                # 不能自己声明剧情模式或其它模式。
+                raise CombatIntentError("encounter mode is invalid")
             preset_id = str(intent.get("encounter_preset_id") or "")
             guided_preset_id = (
                 self.encounter_access.encounter_preset_id
@@ -70,6 +81,12 @@ class CombatValidationMixin:
                 else ""
             )
             if guided_preset_id:
+                # 剧情已绑定遭遇：不接受在战斗开始页改用通用目录，也不接受
+                # 用 "sandbox" 声明把这场战斗从冒险包里摘出去。
+                if declared_mode == "sandbox":
+                    raise CombatIntentError(
+                        "the current story requires its assigned encounter preset"
+                    )
                 if preset_id != guided_preset_id:
                     raise CombatIntentError(
                         "the current story requires its assigned encounter preset"

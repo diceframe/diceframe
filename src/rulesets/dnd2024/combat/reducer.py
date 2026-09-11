@@ -50,6 +50,8 @@ class CombatReducerMixin:
                 "encounter_instance_id": str(event.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(event.get("encounter_preset_id") or ""),
                 "origin_step_id": str(event.get("origin_step_id") or ""),
+                "mode": str(event.get("mode") or "sandbox"),
+                "adventure_binding": deepcopy(event.get("adventure_binding")),
             }
             return
         if event_type == "dnd2024.reaction.spent":

@@ -43,6 +43,15 @@ const diceFaces = computed(() => {
   const rolls = props.check.rolls?.length ? props.check.rolls : [props.check.roll]
   return rolls.filter((value): value is number => typeof value === 'number').join(', ')
 })
+// 服务端保留的渠道来源：DC / 掷骰方式 / 环境修正各自为什么被采用。
+const plannerSources = computed(() => {
+  const check = props.check
+  return [
+    check.dc_reason ? t('checkDcReason', { detail: check.dc_reason }) : '',
+    check.advantage_reason ? t('checkAdvantageReason', { detail: check.advantage_reason }) : '',
+    check.modifier_reason ? t('checkModifierReason', { detail: check.modifier_reason }) : '',
+  ].filter(Boolean).join('；')
+})
 
 onMounted(() => {
   if (!props.animate) return
@@ -79,6 +88,7 @@ onUnmounted(() => {
       </span>
       <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
       <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
+      <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>
       <span v-if="check.assist?.length">{{ t('checkAssist', { players: check.assist.join(', ') }) }}</span>
     </details>
     <div v-if="revealed && check.luck_decision === 'pending'" class="luck-decision-actions">

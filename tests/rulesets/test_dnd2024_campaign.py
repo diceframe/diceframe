@@ -705,6 +705,129 @@ def test_guided_combat_uses_story_preset_and_ignores_forged_enemy_stats() -> Non
     assert started["enemies"]["goblin-minion-1"]["hp"] == 7
 
 
+def test_active_adventure_without_binding_reports_unprepared_instead_of_generic_presets() -> None:
+    """活动冒险包内没有绑定遭遇时，必须可解释地停在“尚未准备”，不得回退通用目录。"""
+
+    runtime, instance = _instance(adventure=True)
+    _agreement(runtime, instance)
+    _submit(runtime, instance, "tutorial.start", adventure_id="lanterns_of_greymoor")
+
+    gameplay = runtime.gameplay_view(instance, "gm", True)
+    access = gameplay["encounter_access"]
+    assert gameplay["campaign"]["tutorial"]["status"] == "active"
+    assert access["mode"] == "blocked"
+    assert access["unprepared"] is True
+    assert access["can_start"] is False
+    assert access["catalog"] == "bundle"
+    assert access["encounter_preset_id"] == ""
+
+    # 没有 combat.start 可用动作：前端不会（也不该）拿到通用目录的开始入口。
+    assert not any(
+        item["type"] == "combat.start"
+        for item in runtime.available_intents(instance, "gm")
+    )
+
+    # 叙事提出「开战」，即使模型硬塞一个通用 preset，也不会被写进请求。
+    assert runtime.apply_narrative_combat_signal(instance, "start", {
+        "kind": "combat", "mode": "assist", "confidence": 0.92,
+        "encounter_preset_id": "goblin_patrol",
+    }) is True
+    request = runtime.gameplay_view(instance, "gm", True)["encounter_request"]
+    assert request["status"] == "pending"
+    assert "encounter_preset_id" not in request
+
+    # 不带显式 sandbox 声明的开战请求被拒绝，并给出可解释原因。
+    denied = runtime.validate_intent(instance, {
+        "intent_id": "silent-fallback-start", "type": "combat.start",
+        "expected_version": instance.ruleset_state["version"],
+        "submitted_by": "gm", "encounter_preset_id": "goblin_patrol",
+    })
+    assert denied["ok"] is False
+    assert "no bound encounter" in denied["error"]
+
+    # GM 显式声明自由遭遇后才允许使用通用目录，并且模式被持久化为 sandbox。
+    _submit(
+        runtime, instance, "combat.start", mode="sandbox",
+        encounter_preset_id="goblin_patrol",
+    )
+    combat = runtime.gameplay_view(instance, "gm", True)["combat"]
+    assert combat["status"] == "active"
+    assert combat["mode"] == "sandbox"
+    assert combat["adventure_binding"] is None
+    assert combat["encounter_preset_id"] == "goblin_patrol"
+    assert {actor["actor_id"] for actor in combat["actors"] if actor["kind"] == "enemy"}
+
+
+def test_story_encounter_binding_is_recorded_and_cannot_be_downgraded_to_sandbox() -> None:
+    runtime, instance = _instance(adventure=True)
+    _agreement(runtime, instance)
+    _submit(runtime, instance, "tutorial.start", adventure_id="lanterns_of_greymoor")
+    _submit(runtime, instance, "tutorial.choose", choice_id="inspect_cold_ash")
+    _submit(runtime, instance, "tutorial.choose", choice_id="reassure_mira")
+    _submit(runtime, instance, "tutorial.choose", choice_id="follow_small_tracks")
+
+    gameplay = runtime.gameplay_view(instance, "gm", True)
+    access = gameplay["encounter_access"]
+    assert access["mode"] == "story"
+    assert access["catalog"] == "adventure"
+    assert access["encounter_preset_id"] == "first_skirmish"
+
+    # 剧情已绑定遭遇：既不能在开始页改用通用预设，也不能声明成自由遭遇。
+    for fields in (
+        {"mode": "sandbox", "encounter_preset_id": "goblin_patrol"},
+        {"mode": "sandbox", "encounter_preset_id": "first_skirmish",
+         "encounter_instance_id": access["encounter_instance_id"]},
+    ):
+        denied = runtime.validate_intent(instance, {
+            "intent_id": f"downgrade-{fields['encounter_preset_id']}",
+            "type": "combat.start",
+            "expected_version": instance.ruleset_state["version"],
+            "submitted_by": "gm", **fields,
+        })
+        assert denied["ok"] is False
+        assert "assigned encounter preset" in denied["error"]
+
+    _submit(
+        runtime, instance, "combat.start",
+        encounter_preset_id="first_skirmish",
+        encounter_instance_id=access["encounter_instance_id"],
+    )
+    combat = runtime.gameplay_view(instance, "gm", True)["combat"]
+    assert combat["mode"] == "story"
+    assert combat["encounter_preset_id"] == "first_skirmish"
+    assert combat["encounter_instance_id"] == "tutorial:lanterns_of_greymoor:thorn_ambush"
+    assert combat["adventure_binding"] == {
+        "adventure_id": "lanterns_of_greymoor",
+        "step_id": "thorn_ambush",
+        "encounter_preset_id": "first_skirmish",
+        "encounter_instance_id": "tutorial:lanterns_of_greymoor:thorn_ambush",
+    }
+    # actor / initiative / available actions 都来自同一个 encounter instance。
+    assert {actor["actor_id"] for actor in combat["actors"] if actor["kind"] == "enemy"} == {
+        "enemy:goblin-minion-1",
+    }
+    assert combat["initiative"] == [actor["actor_id"] for actor in combat["actors"]]
+    assert combat["current_actor_id"] in combat["initiative"]
+
+
+def test_free_play_start_persists_sandbox_mode_without_an_adventure_binding() -> None:
+    runtime, instance = _instance()
+    gameplay = runtime.gameplay_view(instance, "gm", True)
+    assert gameplay["encounter_access"]["mode"] == "sandbox"
+    assert gameplay["encounter_access"]["unprepared"] is False
+    assert gameplay["encounter_access"]["catalog"] == "bundle"
+
+    _submit(runtime, instance, "combat.start", encounter_preset_id="goblin_patrol")
+
+    combat = runtime.gameplay_view(instance, "gm", True)["combat"]
+    assert combat["status"] == "active"
+    assert combat["mode"] == "sandbox"
+    assert combat["adventure_binding"] is None
+    assert combat["encounter_instance_id"] == ""
+    # 战斗进行中时不再暴露 start 入口。
+    assert runtime.gameplay_view(instance, "gm", True)["encounter_access"]["can_start"] is False
+
+
 def test_campaign_intent_replay_is_idempotent() -> None:
     runtime, instance = _instance()
     defaults = runtime.gameplay_view(instance, "gm", True)["campaign"][

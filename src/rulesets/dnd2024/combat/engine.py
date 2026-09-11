@@ -342,7 +342,18 @@ class Dnd2024CombatEngine(
                     "encounter_instance_id": self.encounter_access.encounter_instance_id,
                     "encounter_preset_id": self.encounter_access.encounter_preset_id,
                     "origin_step_id": self.encounter_access.origin_step_id,
+                    "mode": "story",
+                    "adventure_binding": {
+                        "adventure_id": self.encounter_access.adventure_id,
+                        "step_id": self.encounter_access.origin_step_id,
+                        "encounter_preset_id": self.encounter_access.encounter_preset_id,
+                        "encounter_instance_id": self.encounter_access.encounter_instance_id,
+                    },
                 })
+            else:
+                # 自由遭遇不属于任何冒险包；把这个事实写进权威状态，界面才能
+                # 持续显示“自由战斗”，而叙事文本无法改变它。
+                resolved_intent.update({"mode": "sandbox", "adventure_binding": None})
             events.append(self._start_combat_event(instance, resolved_intent, rng))
         elif intent_type == "combat.end":
             events.append({"type": "dnd2024.combat.ended", "reason": "gm"})
@@ -461,9 +472,27 @@ class Dnd2024CombatEngine(
                 "encounter_instance_id": str(combat.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(combat.get("encounter_preset_id") or ""),
                 "origin_step_id": str(combat.get("origin_step_id") or ""),
+                "mode": str(combat.get("mode") or ""),
+                "adventure_binding": deepcopy(combat.get("adventure_binding")),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),
+            # 权威模式投影：前端据此区分“剧情绑定/剧情未准备/自由遭遇”，
+            # 不再靠显示名或通用目录推断当前敌情来源。
+            "encounter_access": {
+                "mode": self.encounter_access.mode,
+                "status": self.encounter_access.status,
+                # 进行中的战斗不再开放 start 入口，视图也要如实反映这一点。
+                "can_start": bool(
+                    self.encounter_access.can_start and combat.get("status") != "active"
+                ),
+                "unprepared": bool(self.encounter_access.unprepared),
+                "adventure_id": self.encounter_access.adventure_id,
+                "encounter_preset_id": self.encounter_access.encounter_preset_id,
+                "encounter_instance_id": self.encounter_access.encounter_instance_id,
+                "origin_step_id": self.encounter_access.origin_step_id,
+                "catalog": "adventure" if self.encounter_access.mode == "story" else "bundle",
+            },
         }
 
     def encounter_presets(self) -> list[dict[str, Any]]:

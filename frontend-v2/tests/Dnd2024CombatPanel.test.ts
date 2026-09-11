@@ -39,6 +39,12 @@ function response(status: 'none' | 'active' = 'none') {
         id: 'first_skirmish', name: 'First Skirmish', description: 'Standard encounter',
         difficulty: 'standard', enemies: [{ id: 'goblin-1', hp: 7 }],
       }],
+      encounter_access: {
+        mode: 'sandbox', status: active ? 'active' : 'pending',
+        can_start: !active, unprepared: false,
+        encounter_preset_id: '', encounter_instance_id: '', origin_step_id: '',
+        catalog: 'bundle',
+      },
       combat: {
         status, round: active ? 1 : 0, turn_index: 0,
         current_actor_id: active ? 'player:gm' : '',
@@ -46,6 +52,8 @@ function response(status: 'none' | 'active' = 'none') {
         position_mode: 'theater',
         economy: active ? { action: 1, bonus_action: 1, movement: 30, reaction: 1 } : {},
         reactions: {}, pending_decisions: [],
+        mode: active ? 'sandbox' : '',
+        adventure_binding: null,
         actors: active ? [
           { actor_id: 'player:gm', kind: 'player', name: 'Guardian', hp: 12, max_hp: 12, position: 0, armor_class: 16, conditions: {} },
           { actor_id: 'enemy:goblin-1', kind: 'enemy', name: 'Goblin', hp: 7, max_hp: 7, position: 5, armor_class: 12, conditions: {} },
@@ -133,8 +141,128 @@ describe('D&D 2024 combat panel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('The AI GM detected an engagement')
-    expect(wrapper.text()).toContain('Select the encounter')
-    expect(wrapper.find('.encounter-start .combat-primary').exists()).toBe(true)
+    // 没有匹配到合法遭遇时不得自动展示通用目录，更不能默认选中地精。
+    expect(wrapper.find('.encounter-start select').exists()).toBe(false)
+    expect(wrapper.find('.encounter-start .combat-primary').exists()).toBe(false)
+    await wrapper.get('.manual-encounter-toggle').trigger('click')
+    expect(wrapper.text()).toContain('Select a free encounter')
+    expect(wrapper.text()).toContain('could not match the current opposition')
+    expect(wrapper.get('.encounter-start select').element).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('reports an unprepared story encounter instead of substituting a generic preset', async () => {
+    const unprepared = response('none') as any
+    unprepared.gameplay.encounter_access = {
+      mode: 'blocked', status: 'blocked', can_start: false, unprepared: true,
+      adventure_id: 'lanterns_of_greymoor', encounter_preset_id: '',
+      encounter_instance_id: '', origin_step_id: 'greycloak_standoff',
+      catalog: 'bundle',
+    }
+    unprepared.gameplay.campaign = {
+      session_zero: { status: 'locked', revision: 1, responses: {} },
+      session_zero_defaults: {}, proposals: [], entities: {}, chapter_summaries: [],
+      tutorial: {
+        status: 'active', coach_enabled: true, history: [], hints_used: {},
+        adventure: { id: 'lanterns_of_greymoor', name: 'The Lost Lanterns', summary: '', estimated_minutes: 90, chapter_count: 3 },
+        current_step: {
+          id: 'greycloak_standoff', chapter_id: 'greycloak', title: 'Cloaked Strangers',
+          narration: 'Two cloaked figures block the road.', objective: 'Decide how to approach.',
+          hint: 'Talk or fight.', requires: 'none', encounter_preset_id: '', choices: [],
+        }, requirement_met: false,
+      },
+    }
+    unprepared.gameplay.encounter_request = { status: 'pending', source: 'narrative', round: 2 }
+    unprepared.available_actions = []
+    mocks.fetch.mockResolvedValueOnce(unprepared)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('The current story has no prepared encounter')
+    expect(wrapper.text()).toContain('will not substitute a generic training encounter')
+    // 地精/狼既不显示，也不能被一键开战。
+    expect(wrapper.find('.encounter-start select').exists()).toBe(false)
+    expect(wrapper.find('.encounter-start > .combat-primary').exists()).toBe(false)
+    expect(wrapper.find('.manual-encounter-toggle').exists()).toBe(false)
+
+    // GM 明确“脱离冒险，准备自由遭遇”后才出现通用目录，且提交必须声明 sandbox。
+    await wrapper.get('.guided-preset .unprepared-actions .combat-primary').trigger('click')
+    expect(wrapper.text()).toContain('leaves the active adventure package')
+    await wrapper.get('.encounter-start .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'combat.start', mode: 'sandbox', encounter_preset_id: 'first_skirmish',
+    })
+    wrapper.unmount()
+  })
+
+  it('never declares a story-bound encounter as sandbox', async () => {
+    const guided = response('none') as any
+    guided.gameplay.encounter_access = {
+      mode: 'story', status: 'pending', can_start: true, unprepared: false,
+      adventure_id: 'lanterns_of_greymoor', encounter_preset_id: 'first_skirmish',
+      encounter_instance_id: 'tutorial:lanterns_of_greymoor:thorn_ambush',
+      origin_step_id: 'thorn_ambush', catalog: 'adventure',
+    }
+    guided.available_actions = [{
+      type: 'combat.start', label: 'Start Combat', expected_version: 0,
+      requires: ['encounter_preset_id'], encounter_preset_id: 'first_skirmish',
+      encounter_instance_id: 'tutorial:lanterns_of_greymoor:thorn_ambush',
+    }]
+    guided.gameplay.campaign = {
+      session_zero: { status: 'locked', revision: 1, responses: {} },
+      session_zero_defaults: {}, proposals: [], entities: {}, chapter_summaries: [],
+      tutorial: {
+        status: 'active', coach_enabled: true, history: [], hints_used: {},
+        adventure: { id: 'lanterns_of_greymoor', name: 'The Lost Lanterns', summary: '', estimated_minutes: 90, chapter_count: 3 },
+        current_step: {
+          id: 'thorn_ambush', chapter_id: 'thorn_glade', title: 'The First Encounter',
+          narration: 'A goblin notices you in the grove.', objective: 'Learn initiative and take one action.',
+          hint: 'Move or shoot.', requires: 'combat_ended', encounter_preset_id: 'first_skirmish', choices: [],
+        }, requirement_met: false,
+      },
+    }
+    mocks.fetch.mockResolvedValueOnce(guided)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.guided-preset strong').text()).toBe('First Skirmish')
+    expect(wrapper.text()).toContain('Encounter：first_skirmish')
+    await wrapper.get('.encounter-start .combat-primary').trigger('click')
+    await flushPromises()
+    const payload = mocks.submit.mock.calls[0][1]
+    expect(payload).toMatchObject({
+      type: 'combat.start', encounter_preset_id: 'first_skirmish',
+      encounter_instance_id: 'tutorial:lanterns_of_greymoor:thorn_ambush',
+    })
+    expect(payload).not.toHaveProperty('mode')
+    wrapper.unmount()
+  })
+
+  it('flags an active free combat as outside the adventure package', async () => {
+    const free = response('active') as any
+    free.gameplay.combat.mode = 'sandbox'
+    free.gameplay.combat.adventure_binding = null
+    free.gameplay.campaign = {
+      session_zero: { status: 'locked', revision: 1, responses: {} },
+      session_zero_defaults: {}, proposals: [], entities: {}, chapter_summaries: [],
+      tutorial: {
+        status: 'active', coach_enabled: true, history: [], hints_used: {},
+        adventure: { id: 'lanterns_of_greymoor', name: 'The Lost Lanterns', summary: '', estimated_minutes: 90, chapter_count: 3 },
+        current_step: null, requirement_met: false,
+      },
+    }
+    mocks.fetch.mockResolvedValueOnce(free)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.combat-mode-badge').text()).toBe('Free combat · not part of the active adventure')
     wrapper.unmount()
   })
 
@@ -155,6 +283,8 @@ describe('D&D 2024 combat panel', () => {
     expect(wrapper.find('.encounter-ended select').exists()).toBe(false)
     await wrapper.get('.encounter-ended-actions .combat-primary').trigger('click')
     expect(wrapper.find('.encounter-ended select').exists()).toBe(true)
+    // 与「手动准备遭遇」一致：打开选择器后必须立刻可开战，而不是等用户先动一下下拉框。
+    expect(wrapper.get('.next-encounter-picker .combat-primary').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -245,6 +375,12 @@ describe('D&D 2024 combat panel', () => {
 
   it('carries the selected adventure into its story encounter and selects its preset', async () => {
     const guided = response('none') as any
+    guided.gameplay.encounter_access = {
+      mode: 'story', status: 'pending', can_start: true, unprepared: false,
+      adventure_id: 'lanterns_of_greymoor', encounter_preset_id: 'first_skirmish',
+      encounter_instance_id: 'tutorial:lanterns_of_greymoor:thorn_ambush',
+      origin_step_id: 'thorn_ambush', catalog: 'adventure',
+    }
     guided.gameplay.campaign = {
       session_zero: { status: 'locked', revision: 1, responses: {} },
       session_zero_defaults: {}, proposals: [], entities: {}, chapter_summaries: [],

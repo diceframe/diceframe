@@ -216,11 +216,41 @@ class Dnd2024Runtime:
         return Dnd2024CombatEngine(self.load_bundle(locale), access, catalog)
 
     @staticmethod
-    def _encounter_access(instance: Any, campaign: dict[str, Any]) -> EncounterAccess:
-        """Prefer a bound story encounter; otherwise keep the GM combat tool usable."""
+    def _encounter_access(
+        instance: Any, campaign: dict[str, Any], intent: dict[str, Any] | None = None,
+    ) -> EncounterAccess:
+        """Resolve the authoritative encounter mode for one call.
+
+        Story binding wins. Without one, a loaded but inactive adventure leaves
+        free play available. An active adventure that does not grant a canonical
+        encounter never falls back to the generic training catalog: it reports
+        ``unprepared`` unless the GM explicitly declares a sandbox encounter.
+        """
 
         story = resolve_story_encounter_access(instance, campaign)
-        return story if story.mode == "story" else EncounterAccess.sandbox()
+        if story.mode == "story":
+            # 剧情步骤声明了战斗，却没有可用的 canonical preset：这同样是
+            # “尚未准备遭遇”，不能拿通用目录里的预设顶上。
+            if story.status == "pending" and not story.encounter_preset_id:
+                return EncounterAccess.unbound_story(
+                    adventure_id=story.adventure_id,
+                    origin_step_id=story.origin_step_id,
+                )
+            return story
+        tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None
+        tutorial = tutorial if isinstance(tutorial, dict) else {}
+        if str(tutorial.get("status") or "") == "active":
+            # 只有 GM 在提交里显式声明 sandbox 时才离开冒险包；这是刻意的
+            # "准备自由遭遇"操作，而不是缺绑定时的隐式回退。
+            if str((intent or {}).get("mode") or "") == "sandbox":
+                return EncounterAccess.sandbox()
+            step = tutorial.get("current_step")
+            step = step if isinstance(step, dict) else {}
+            return EncounterAccess.unbound_story(
+                adventure_id=str(tutorial.get("adventure_id") or ""),
+                origin_step_id=str(step.get("id") or ""),
+            )
+        return EncounterAccess.sandbox()
 
     def _builder(self, draft: dict[str, Any]) -> Dnd2024CharacterBuilder:
         return Dnd2024CharacterBuilder(self.load_bundle(str(draft.get("locale") or "")))
@@ -508,7 +538,7 @@ class Dnd2024Runtime:
             return self._campaign_engine(instance, locale).validate_intent(instance, intent)
         campaign_engine = self._campaign_engine(instance, locale)
         campaign = campaign_engine.gameplay_view(instance)
-        access = self._encounter_access(instance, campaign)
+        access = self._encounter_access(instance, campaign, intent)
         return self._combat_engine(instance, access, locale).validate_intent(instance, intent)
 
     def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
@@ -518,7 +548,7 @@ class Dnd2024Runtime:
             return self._campaign_engine(instance, locale).resolve_intent(instance, intent, rng)
         campaign_engine = self._campaign_engine(instance, locale)
         campaign = campaign_engine.gameplay_view(instance)
-        access = self._encounter_access(instance, campaign)
+        access = self._encounter_access(instance, campaign, intent)
         return self._combat_engine(instance, access, locale).resolve_intent(instance, intent, rng)
 
     def apply_event_batch(
@@ -734,20 +764,27 @@ class Dnd2024Runtime:
             locale = str(getattr(instance, "language", "") or "")
             campaign = self._campaign_engine(instance, locale).gameplay_view(instance)
             access = self._encounter_access(instance, campaign)
-            preset = next(
-                (
-                    item for item in self._combat_engine(instance, access, locale).encounter_presets()
-                    if item.get("id") == preset_id
-                ),
-                None,
+            # 剧情未绑定遭遇（unprepared）时不得把通用目录里的预设写进请求：
+            # 那等于用叙事文本静默替换 canonical 敌情。
+            story_bound = (
+                access.mode != "story" or preset_id == access.encounter_preset_id
             )
-            if preset is not None:
-                request["encounter_preset_id"] = preset_id
-                try:
-                    confidence = float((proposal or {}).get("confidence", 0) or 0)
-                except (TypeError, ValueError):
-                    confidence = 0.0
-                request["confidence"] = max(0.0, min(1.0, confidence))
+            if access.mode != "blocked" and story_bound:
+                preset = next(
+                    (
+                        item
+                        for item in self._combat_engine(instance, access, locale).encounter_presets()
+                        if item.get("id") == preset_id
+                    ),
+                    None,
+                )
+                if preset is not None:
+                    request["encounter_preset_id"] = preset_id
+                    try:
+                        confidence = float((proposal or {}).get("confidence", 0) or 0)
+                    except (TypeError, ValueError):
+                        confidence = 0.0
+                    request["confidence"] = max(0.0, min(1.0, confidence))
         state["encounter_request"] = request
         return True
 

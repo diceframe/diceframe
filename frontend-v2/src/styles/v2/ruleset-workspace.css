@@ -31,9 +31,20 @@
   background: color-mix(in srgb, var(--df-interactive) 14%, var(--df-surface-2));
 }
 
-.dnd-toolbox-dialog > .campaign-panel,
-.dnd-toolbox-dialog > .dnd-combat {
+/* Modal slot 的中间层。Flex 子项默认 min-height:auto 会被内容撑开，弹窗又是
+   overflow:hidden，所以这里必须显式允许收缩，否则内部面板的下半部分会被直接裁掉。 */
+.dnd-toolbox-dialog > .ruleset-play-host {
   flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 纵向滚动只交给当前工具面板这一层，避免弹窗、host、面板三层争夺滚动。
+   align-content:start 让网格面板在内容不足时不把各行摊开。 */
+.ruleset-play-host > .campaign-panel,
+.ruleset-play-host > .dnd-combat {
+  align-content: start;
   min-width: 0;
   min-height: 0;
   overflow: auto;
