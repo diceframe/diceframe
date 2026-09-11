@@ -91,5 +91,13 @@ const copy = computed(() => extension.value?.copy(String(locale.value)) || {
 </template>
 
 <style scoped>
-.ruleset-play-host { display: grid; gap: 12px; }
+/* 标签栏固定高度，当前工具面板占满剩余空间并自己滚动（minmax(0,…) 才能让
+   overflow:auto 生效；否则自动行会被内容撑开，滚动条永远不出现）。 */
+.ruleset-play-host {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
 </style>

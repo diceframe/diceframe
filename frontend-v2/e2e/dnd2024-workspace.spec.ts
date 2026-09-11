@@ -3,6 +3,68 @@ import { expect, test } from './fixtures'
 
 const DND_GAME = 'web%7Ce2e-dnd2024%7Cweb_bot'
 
+const PANEL_GEOMETRY = (panelSelector: string) => {
+  const panel = document.querySelector<HTMLElement>(panelSelector)!
+  const dialog = document.querySelector<HTMLElement>('.dnd-toolbox-dialog')!
+  const overflowY = (element: HTMLElement) => getComputedStyle(element).overflowY
+  // 只有 overflow:auto/scroll 且内容真的超出时，才算是用户可滚动的 owner
+  const scrollable = (element: HTMLElement) => (
+    (overflowY(element) === 'auto' || overflowY(element) === 'scroll')
+    && element.scrollHeight - element.clientHeight > 1
+  )
+  let owner: HTMLElement | null = null
+  for (let node: HTMLElement | null = panel; node && node !== document.documentElement; node = node.parentElement) {
+    if (scrollable(node)) {
+      owner = node
+      break
+    }
+  }
+  const tail = panel.lastElementChild?.getBoundingClientRect()
+  return {
+    documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    panelOverflowY: overflowY(panel),
+    panelBottom: Math.round(panel.getBoundingClientRect().bottom),
+    dialogBottom: Math.round(dialog.getBoundingClientRect().bottom),
+    dialogTop: Math.round(dialog.getBoundingClientRect().top),
+    dialogLeft: Math.round(dialog.getBoundingClientRect().left),
+    dialogWidth: Math.round(dialog.getBoundingClientRect().width),
+    dialogHeight: Math.round(dialog.getBoundingClientRect().height),
+    tailBottom: tail ? Math.round(tail.bottom) : null,
+    panelScrollHeight: panel.scrollHeight,
+    panelClientHeight: panel.clientHeight,
+    owner: owner ? `${owner.tagName.toLowerCase()}.${String(owner.className).split(' ')[0]}` : null,
+    ownerScrollTop: owner ? Math.round(owner.scrollTop) : null,
+    ownerScrollRange: owner ? Math.round(owner.scrollHeight - owner.clientHeight) : null,
+  }
+}
+
+async function expectToolPanelReachable(page: Page, panelSelector: string, label: string) {
+  const before = await page.evaluate(PANEL_GEOMETRY, panelSelector)
+  expect(before.documentOverflow, `${label}: document must not overflow horizontally`).toBe(0)
+  // 弹窗是 overflow:hidden：面板盒子如果超出弹窗，就必须有人能滚，否则内容被永久裁掉
+  expect(
+    before.panelBottom <= before.dialogBottom + 2 || before.owner,
+    `${label}: clipped panel needs a user-scrollable owner (geometry ${JSON.stringify(before)})`,
+  ).toBe(true)
+
+  // 滚轮必须真的滚动内容，并把面板最后一段带进弹窗视口
+  await page.mouse.move(before.dialogLeft + before.dialogWidth / 2, before.dialogTop + Math.min(180, before.dialogHeight / 2))
+  await page.mouse.wheel(0, 8000)
+  await page.waitForTimeout(150)
+  const after = await page.evaluate(PANEL_GEOMETRY, panelSelector)
+  if (after.owner && after.ownerScrollRange) {
+    expect(after.ownerScrollTop, `${label}: mouse wheel must scroll ${after.owner}`).toBeGreaterThan(0)
+    expect(
+      after.ownerScrollTop!,
+      `${label}: scrolling must reach the end of ${after.owner}`,
+    ).toBeGreaterThanOrEqual(after.ownerScrollRange - 2)
+  }
+  expect(
+    after.tailBottom,
+    `${label}: the last section must be reachable inside the dialog (geometry ${JSON.stringify(after)})`,
+  ).toBeLessThanOrEqual(after.dialogBottom + 2)
+}
+
 async function openDndTable(page: Page) {
   await page.goto(`/#/play?game=${DND_GAME}`)
   await expect(page.getByRole('heading', { name: 'D&D 2024 新手桌' })).toBeVisible()
@@ -88,6 +150,102 @@ test('professional rules keep one timeline and expose combat as a tool', async (
   await expect(page.locator('.dnd-combat')).toBeVisible()
   await expect(page.getByTestId('timeline')).toBeVisible()
   await expect(page.locator('.dnd-party-feed')).toHaveCount(0)
+})
+
+test('professional toolbox keeps long tool panels scrollable inside the dialog', async ({ page }) => {
+  for (const viewport of [
+    { width: 1280, height: 620 },
+    { width: 1024, height: 600 },
+    { width: 390, height: 700 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await openDndTable(page)
+    await page.locator('[data-testid="dnd5e-campaign-tool"]:visible').click()
+    await expect(page.locator('.campaign-panel .session-card')).toBeVisible()
+
+    const geometry = await page.evaluate(PANEL_GEOMETRY, '.campaign-panel')
+    console.log(`[tool-panel] campaign ${viewport.width}x${viewport.height} ${JSON.stringify(geometry)}`)
+    // 冒险面板一定比弹窗高：必须有真正可滚动的 owner，否则内容被 overflow:hidden 永久裁掉
+    expect(geometry.owner, `campaign panel needs a scrollable owner at ${viewport.width}px: ${JSON.stringify(geometry)}`).toBeTruthy()
+    await expectToolPanelReachable(page, '.campaign-panel', `campaign @ ${viewport.width}x${viewport.height}`)
+    await expect(page.locator('.campaign-panel')).toBeVisible()
+
+    await page.locator('.dnd-toolbox-dialog .modal-x').click()
+    await expect(page.locator('.dnd-toolbox-dialog')).toHaveCount(0)
+  }
+})
+
+test('professional combat tool keeps its content reachable at short desktop and phone viewports', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 620 })
+  await openDndTable(page)
+  await page.locator('[data-testid="dnd5e-campaign-tool"]:visible').click()
+  const dialog = page.locator('.dnd-toolbox-dialog')
+  const panel = page.locator('.dnd-combat')
+  await dialog.getByRole('button', { name: '战斗工具' }).click()
+  await expect(panel.locator('.encounter-start, .turn-banner').first()).toBeVisible()
+
+  // 同一份 e2e 存档会被 desktop/mobile 两个 project 先后使用，战斗可能是
+  // “未开始 / 已结束 / 进行中”三种之一；三者都必须能进入可滚动的战斗面板。
+  if (await panel.locator('.turn-banner').count() === 0) {
+    if (await panel.locator('.encounter-ended-actions .combat-primary').count() > 0) {
+      await panel.locator('.encounter-ended-actions .combat-primary').click()
+      await expect(panel.locator('.next-encounter-picker select')).toBeVisible()
+      await panel.locator('.next-encounter-picker .combat-primary').click()
+    } else {
+      await panel.getByRole('button', { name: '手动准备遭遇' }).click()
+      await expect(panel.locator('.encounter-start select')).toBeVisible()
+      await panel.getByRole('button', { name: '确认进入战斗' }).click()
+    }
+  }
+  await expect(panel.locator('.turn-banner')).toBeVisible({ timeout: 20_000 })
+  await expect(panel.locator('.actor-card')).not.toHaveCount(0)
+
+  for (const viewport of [
+    { width: 1280, height: 620 },
+    { width: 1024, height: 600 },
+    { width: 390, height: 700 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(panel.locator('.turn-banner')).toBeVisible()
+    const geometry = await page.evaluate(PANEL_GEOMETRY, '.dnd-combat')
+    console.log(`[tool-panel] combat ${viewport.width}x${viewport.height} ${JSON.stringify(geometry)}`)
+    await expectToolPanelReachable(page, '.dnd-combat', `combat @ ${viewport.width}x${viewport.height}`)
+  }
+
+  // 纵向修复不得破坏移动端的横向滚动（initiative / 行动者卡 / 动作卡）。
+  const lane = page.locator('.dnd-combat .actor-grid').first()
+  const laneGeometry = await lane.evaluate(element => ({
+    overflowX: getComputedStyle(element).overflowX,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+    scrollLeft: element.scrollLeft,
+  }))
+  console.log(`[tool-panel] lane ${JSON.stringify(laneGeometry)}`)
+  expect(['auto', 'scroll']).toContain(laneGeometry.overflowX)
+  if (laneGeometry.scrollWidth > laneGeometry.clientWidth) {
+    // 目标值取最大值：卡片带使用 scroll-snap，中间偏移会被吸附回去。
+    await lane.evaluate(element => { element.scrollLeft = element.scrollWidth })
+    expect(await lane.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+  }
+
+  // 键盘滚动仍可用：焦点在面板内部时 PageDown 必须滚动画板。
+  await panel.locator('.combat-header button').first().focus()
+  await panel.evaluate(element => { element.scrollTop = 0 })
+  await page.keyboard.press('PageDown')
+  await page.waitForTimeout(150)
+  const keyboardAfter = await panel.evaluate(element => element.scrollTop)
+  console.log(`[tool-panel] keyboard scrollTop 0 -> ${keyboardAfter}`)
+  expect(keyboardAfter, 'PageDown must scroll the focused panel').toBeGreaterThan(0)
+
+  // 收尾：把这场遭遇结束掉，避免影响同一存档上的其它用例
+  const endCombat = panel.locator('.compact-actions').getByRole('button', { name: '结束战斗' })
+  if (await endCombat.isVisible()) {
+    await endCombat.click()
+    const confirmCard = panel.locator('.confirm-card')
+    await expect(confirmCard).toBeVisible()
+    await confirmCard.locator('.combat-primary').click()
+    await expect(page.getByText('dnd2024.combat.ended').first()).toBeVisible({ timeout: 20_000 })
+  }
 })
 
 test('professional surfaces keep explicit labels and readable light-mode colors', async ({ page }) => {
