@@ -13,10 +13,8 @@ from dataclasses import dataclass
 class ServerEndpoint:
     scheme: str
     port: int
-
-    @property
-    def local_host(self) -> str:
-        return "127.0.0.1"
+    # 本机内部调用（插件、健康检查）使用的回环地址；纯 IPv6 监听时为 ::1。
+    local_host: str = "127.0.0.1"
 
     def url(self, host: str | None = None, path: str = "") -> str:
         target = host or self.local_host

@@ -42,6 +42,7 @@ from src.webui.bootstrap import (
     WebUIBootstrap,
 )
 from src.webui.access_control import WebAccessControl
+from src.web_transport.lifecycle import run_with_graceful_shutdown
 from src.web_transport.listeners import build_listener_plan, start_listeners
 from src.webui.config_controller import (
     ConfigController,
@@ -291,19 +292,16 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
         if not started:
             raise OSError(failures[0] if failures else "没有可用的监听地址")
         for item in started:
-            print(f"DiceFrame WebUI: {item.url('127.0.0.1')}  (host={item.host})")
+            print(f"DiceFrame WebUI: {item.url()}  (host={item.host})")
         stop_event = asyncio.Event()
         try:
             loop.add_signal_handler(signal.SIGINT, stop_event.set)
             loop.add_signal_handler(signal.SIGTERM, stop_event.set)
         except NotImplementedError:
-            # Windows 的事件循环不支持 add_signal_handler；Ctrl+C 仍会中断
-            # 主线程并由下面的 except 走清理路径。
+            # Windows 的事件循环不支持 add_signal_handler；停止信号由
+            # run_with_graceful_shutdown 统一处理（Ctrl+C 与重启接口都走那里）。
             pass
-        try:
-            await stop_event.wait()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
+        await stop_event.wait()
     finally:
         await runner.cleanup()
     return bool(app["runtime_control"]["restart_requested"])
@@ -318,8 +316,13 @@ if __name__ == "__main__":
         print("请在 WebUI 的 AI 服务商与模型配置中设置主模型。")
     runtime_loop = asyncio.new_event_loop()
     install_runtime_exception_handler(runtime_loop)
+    serve_task = runtime_loop.create_task(_serve(runtime_loop))
     try:
-        restart_requested = runtime_loop.run_until_complete(_serve(runtime_loop))
+        restart_requested = run_with_graceful_shutdown(
+            runtime_loop,
+            serve_task,
+            lambda: bool(app["runtime_control"]["restart_requested"]),
+        )
     finally:
         runtime_loop.close()
     if restart_requested:

@@ -34,7 +34,12 @@ from src.network_proxy import (
     mask_proxy_url,
 )
 from src.web_transport import ServerTransport, build_server_transport, parse_web_transport
-from src.web_transport.listeners import normalize_hosts, parse_port, split_hosts
+from src.web_transport.listeners import (
+    internal_loopback_host,
+    normalize_hosts,
+    parse_port,
+    split_hosts,
+)
 from src.webui.access_password import mask_access_password, normalize_access_password
 from src.webui.cors import normalize_cors_origins, parse_cors_origins
 from src.webui.services import legal as legal_svc
@@ -156,6 +161,18 @@ class ConfigStore:
                 self.logger.error("%s无法读取且未能隔离：%s", label, exc)
             return {}
 
+    def _optional_port(self, raw: Any, name: str) -> int | None:
+        """解析可选端口；非法值必须显式告警，不能静默丢弃用户配置。"""
+
+        if raw is None or raw == "":
+            return None
+        port = parse_port(raw)
+        if port is None:
+            self.logger.warning(
+                "忽略 %s=%r：端口必须是 1-65535 的整数", name, raw
+            )
+        return port
+
     def load(self) -> RuntimeConfig:
         self.paths.data_dir.mkdir(parents=True, exist_ok=True)
         saved = self.load_json_object(self.paths.config_file, "主配置")
@@ -171,13 +188,20 @@ class ConfigStore:
             split_hosts(env.get("TRPG_WEB_HOSTS") or saved.get("web_hosts") or "")
         )
         hosts = normalize_hosts([host, *extra_hosts]) or [host]
-        http_port = parse_port(env.get("TRPG_WEB_HTTP_PORT") or saved.get("web_http_port"))
-        https_port = parse_port(env.get("TRPG_WEB_HTTPS_PORT") or saved.get("web_https_port"))
+        http_port = self._optional_port(
+            env.get("TRPG_WEB_HTTP_PORT") or saved.get("web_http_port"),
+            "TRPG_WEB_HTTP_PORT",
+        )
+        https_port = self._optional_port(
+            env.get("TRPG_WEB_HTTPS_PORT") or saved.get("web_https_port"),
+            "TRPG_WEB_HTTPS_PORT",
+        )
         transport_config = parse_web_transport(saved.get("web_transport"), env)
         transport = build_server_transport(
             transport_config,
             self.paths.data_dir,
             port,
+            internal_loopback_host(hosts),
         )
         cors_env_value = str(env.get("TRPG_WEB_CORS_ORIGINS") or "").strip()
         cors_config_value = cors_env_value or str(saved.get("web_cors_origins") or "")

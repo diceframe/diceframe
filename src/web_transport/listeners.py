@@ -42,9 +42,30 @@ class ListenerPlan:
         host = f"[{self.host}]" if ":" in self.host else self.host
         return f"{host}:{self.port}"
 
-    def url(self, display_host: str = "127.0.0.1") -> str:
-        host = f"[{display_host}]" if ":" in str(display_host) else str(display_host)
+    def display_host(self) -> str:
+        """启动日志里给人看的地址：通配地址按同族回环展示。"""
+
+        if self.host in {"", "*", "0.0.0.0", "::"}:
+            return "::1" if ":" in self.host else "127.0.0.1"
+        return self.host
+
+    def url(self, display_host: str | None = None) -> str:
+        host = str(display_host) if display_host else self.display_host()
+        host = f"[{host}]" if ":" in host else host
         return f"{self.scheme}://{host}:{self.port}"
+
+
+def internal_loopback_host(hosts: Sequence[str]) -> str:
+    """内部客户端（插件、健康检查）应连接的回环地址。
+
+    只要绑定地址里存在 IPv4（含 0.0.0.0）就用 127.0.0.1；纯 IPv6 监听时用 ::1，
+    否则插件会去连一个根本没在监听的 IPv4 localhost。
+    """
+
+    normalized = normalize_hosts(hosts)
+    if normalized and all(":" in host for host in normalized):
+        return "::1"
+    return "127.0.0.1"
 
 
 def split_hosts(raw: object) -> list[str]:

@@ -132,7 +132,9 @@ class WebUIBootstrap:
             dependencies.paths.data_dir / "plugins",
             builtin_dir=dependencies.paths.root / "plugins",
             base_env={
-                "TRPG_API_BASE": dependencies.transport.endpoint.url("127.0.0.1")
+                # 跟随实际监听地址族：纯 IPv6 监听时为 [::1]，避免插件连不上
+                # 根本没在监听的 127.0.0.1。
+                "TRPG_API_BASE": dependencies.transport.endpoint.url()
             },
             on_plugin_stopped=on_plugin_stopped,
             hub_client=hub_client,
