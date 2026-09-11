@@ -127,7 +127,11 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         "dice_system": dice_system,
         "mechanic": mechanic,
         "attributes": attributes,
-        "dc_table": rule.dc_table if rule else {"easy": 8, "normal": 10, "hard": 15},
+        # 没有规则集时也要与通用 d20 尺度一致（base_d20/dnd5e 都是 10/15/20/25）；
+        # prompt 要求档位以本表为准，这里再给一套 8/10/15 会让模型收到互相矛盾的数据。
+        "dc_table": rule.dc_table if rule else {
+            "easy": 10, "normal": 15, "hard": 20, "extreme": 25,
+        },
         "target_policy": (
             "server_uses_character_sheet_percentile"
             if dice_system == "d100"

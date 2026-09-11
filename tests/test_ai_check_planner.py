@@ -54,6 +54,30 @@ def make_rule() -> RuleSystem:
     })
 
 
+def test_planner_context_publishes_the_ruleset_dc_bands() -> None:
+    """prompt 的档位以 ruleset.dc_table 为准，上下文必须给出一致的表。
+
+    历史问题：prompt 写死「简单 8 / 普通 10 / 困难 15 / 极限 20」，而无规则集时
+    的兜底也只有 8/10/15，但真实规则表（base_d20/dnd5e）都是 10/15/20/25，
+    模型因此把普通档 DC 15 当成"困难"档来报。
+    """
+    import json
+
+    from src.commands.check_planner import _planner_context
+
+    instance = make_instance()
+    fallback = json.loads(_planner_context(instance, None))["ruleset"]
+    assert fallback["dc_table"] == {"easy": 10, "normal": 15, "hard": 20, "extreme": 25}
+
+    rule = _dnd5e_rule()
+    published = json.loads(_planner_context(instance, rule))["ruleset"]
+    assert published["dc_table"] == rule.dc_table
+
+    for locale in ("zh", "en", "ja"):
+        prompt = (ROOT / f"prompts/check_planner_{locale}.md").read_text(encoding="utf-8")
+        assert "ruleset.dc_table" in prompt or "`dc_table`" in prompt
+
+
 def test_d20_target_is_clamped_to_dc_cap() -> None:
     """后期失控 DC（25–30）必须被钳到规则显式硬上限。"""
     from src.engine.dice import d20_dc_cap

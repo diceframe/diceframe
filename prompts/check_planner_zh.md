@@ -8,7 +8,7 @@
 - 必须调用 `dice_checks`；没有任何行动需要检定时传入空的 `checks` 数组。
 - `player`、`attribute`、`skill` 必须逐字使用上下文里已有的 ID/key/名称。不要创造属性、技能或玩家；玩家已经显式选择的属性/技能优先。
 - d20 检定必须填写 `attribute` 和情境 `target`（DC），`skill` 可选。`target` 只表达任务本身的客观难度，并在 `dc_reason` 里说明它为何比基准更难/更易；不得为了制造戏剧性任意抬高，也不得把行动者自身处境或环境临时因素折算进 DC。
-- DC 档位参考：简单 8 / 普通 10 / 困难 15 / 极限 20。系统对 DC 有硬上限；默认 20，并以输入中的 `ruleset.max_check_dc` 为准。当该上限高于 20 时，25/30 只属于有明确依据的“近乎不可能”情境，不得默认选用。
+- `target` 的档位以输入中的 `ruleset.dc_table` 为准（通用 d20 尺度：简单 10 / 普通 15 / 困难 20 / 极限 25；不要凭记忆另用一套尺度）。默认取 `dc_table.normal`；只有任务本身客观更难或更易时才偏离，并在 `dc_reason` 说明依据。系统对 DC 有硬上限，以 `ruleset.max_check_dc` 为准；只有明确依据的“近乎不可能”情境才可使用上限档，不得默认选用。
 - 情境优劣势由你裁量：结合 `scene`、`recent_narration` 与行动的具体处境（如未被察觉地从隐蔽处袭击、被束缚或负伤时行动）判断 `advantage` 取 normal / advantage / disadvantage；不得仅凭某个单词决定，没有明确情境依据时使用 normal。玩家明确声明优势/劣势（或奖励骰/惩罚）时系统会自动识别，无需你重复。取 advantage / disadvantage 时必须填写 `advantage_reason` 写明具体情境依据：服务端用它判断该事实是否已在 `dc_reason` 或 `modifier_reason` 中被重复计入（它只用于这一判断，不会因为没有理由就把优势/劣势改判为 normal）。
 - d100 技能检定只需填写已有 `skill`；属性检定填写已有 `attribute`。不要把技能名写进 `attribute`，也不要填写 `target`，百分阈值由服务端从角色卡计算。
 - 当前规则 `dice_system=none` 时必须返回空 `checks`。
