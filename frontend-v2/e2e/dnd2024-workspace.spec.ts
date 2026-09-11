@@ -38,6 +38,40 @@ const PANEL_GEOMETRY = (panelSelector: string) => {
   }
 }
 
+async function endActiveCombat(page: Page, gameKey: string) {
+  // 界面上的「结束战斗」只在轮到自己时出现；GM 结束战斗本身不受回合限制，
+  // 所以收尾走接口，确保不把进行中的战斗留给同一存档上的后续用例。
+  return page.evaluate(async (key: string) => {
+    const authorization = `Bearer ${localStorage.getItem('trpg_access_token') || ''}`
+    const headers = { 'Content-Type': 'application/json', Authorization: authorization }
+    const path = `/api/games/${encodeURIComponent(key)}`
+    const view = await (await fetch(`${path}/available-actions`, { headers })).json() as {
+      gameplay?: { state_version?: number; combat?: { status?: string } }
+    }
+    if (view?.gameplay?.combat?.status !== 'active') return 'not-active'
+    const response = await fetch(`${path}/intents`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        intent_id: `e2e-cleanup-combat-${Date.now()}`,
+        type: 'combat.end',
+        expected_version: view.gameplay.state_version ?? 0,
+      }),
+    })
+    return response.ok ? 'ended' : `failed:${response.status}`
+  }, gameKey)
+}
+
+async function combatStatus(page: Page, gameKey: string) {
+  return page.evaluate(async (key: string) => {
+    const authorization = `Bearer ${localStorage.getItem('trpg_access_token') || ''}`
+    const body = await (await fetch(`/api/games/${encodeURIComponent(key)}/available-actions`, {
+      headers: { Authorization: authorization },
+    })).json() as { gameplay?: { combat?: { status?: string } } }
+    return String(body?.gameplay?.combat?.status || '')
+  }, gameKey)
+}
+
 async function expectToolPanelReachable(page: Page, panelSelector: string, label: string) {
   const before = await page.evaluate(PANEL_GEOMETRY, panelSelector)
   expect(before.documentOverflow, `${label}: document must not overflow horizontally`).toBe(0)
@@ -189,7 +223,10 @@ test('professional combat tool keeps its content reachable at short desktop and 
   if (await panel.locator('.turn-banner').count() === 0) {
     if (await panel.locator('.encounter-ended-actions .combat-primary').count() > 0) {
       await panel.locator('.encounter-ended-actions .combat-primary').click()
-      await expect(panel.locator('.next-encounter-picker select')).toBeVisible()
+      const picker = panel.locator('.next-encounter-picker select')
+      await expect(picker).toBeVisible()
+      // 与手动准备一致：明确选中一条目录遭遇后再开战。
+      await picker.selectOption({ index: 0 })
       await panel.locator('.next-encounter-picker .combat-primary').click()
     } else {
       await panel.getByRole('button', { name: '手动准备遭遇' }).click()
@@ -237,15 +274,10 @@ test('professional combat tool keeps its content reachable at short desktop and 
   console.log(`[tool-panel] keyboard scrollTop 0 -> ${keyboardAfter}`)
   expect(keyboardAfter, 'PageDown must scroll the focused panel').toBeGreaterThan(0)
 
-  // 收尾：把这场遭遇结束掉，避免影响同一存档上的其它用例
-  const endCombat = panel.locator('.compact-actions').getByRole('button', { name: '结束战斗' })
-  if (await endCombat.isVisible()) {
-    await endCombat.click()
-    const confirmCard = panel.locator('.confirm-card')
-    await expect(confirmCard).toBeVisible()
-    await confirmCard.locator('.combat-primary').click()
-    await expect(page.getByText('dnd2024.combat.ended').first()).toBeVisible({ timeout: 20_000 })
-  }
+  // 收尾：结束这场遭遇，避免给同一存档上的后续用例留下进行中的战斗。
+  const gameKey = decodeURIComponent(DND_GAME)
+  await endActiveCombat(page, gameKey)
+  await expect.poll(() => combatStatus(page, gameKey), { timeout: 15_000 }).not.toBe('active')
 })
 
 test('professional surfaces keep explicit labels and readable light-mode colors', async ({ page }) => {

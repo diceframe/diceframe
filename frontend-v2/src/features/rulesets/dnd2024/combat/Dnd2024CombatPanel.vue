@@ -392,7 +392,10 @@ function resetSelections(): void {
   const shouldSelectEncounter = Boolean(
     guidedCombatStep.value
     || requestedCombatPreset.value
-    || manualEncounterOpen.value,
+    || manualEncounterOpen.value
+    // GM 明确点了「准备下一场遭遇」：与手动准备一样，预选目录第一条，
+    // 否则开始按钮会一直是禁用状态。
+    || nextEncounterOpen.value,
   )
   if (!shouldSelectEncounter) selectedPresetId.value = ''
   else if (guidedPresetId && guidedCombatPreset.value) selectedPresetId.value = guidedPresetId
@@ -429,6 +432,13 @@ function clearGameScopedState(): void {
 function openManualEncounter(): void {
   manualEncounterOpen.value = true
   resetSelections()
+}
+
+// 与「手动准备遭遇」对称：打开下一场遭遇选择器时立即预选目录条目，
+// 否则开始按钮会在用户没碰过下拉框前保持禁用。
+function toggleNextEncounter(): void {
+  nextEncounterOpen.value = !nextEncounterOpen.value
+  if (nextEncounterOpen.value) resetSelections()
 }
 
 // GM 明确选择“脱离当前冒险包，准备自由遭遇”后才允许使用通用目录。
@@ -755,7 +765,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           <p>{{ copy.nextEncounterHint }}</p>
           <div class="encounter-ended-actions">
             <button type="button" @click="emit('navigate', 'campaign')"><NIcon :component="PlayForwardOutline" />{{ copy.returnToAdventure }}</button>
-            <button v-if="isGm && action('combat.start')" type="button" class="combat-primary" @click="nextEncounterOpen = !nextEncounterOpen">
+            <button v-if="isGm && action('combat.start')" type="button" class="combat-primary" @click="toggleNextEncounter">
               <NIcon :component="PlayForwardOutline" />{{ nextEncounterOpen ? copy.cancelNextEncounter : copy.nextEncounter }}
             </button>
           </div>

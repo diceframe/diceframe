@@ -283,6 +283,8 @@ describe('D&D 2024 combat panel', () => {
     expect(wrapper.find('.encounter-ended select').exists()).toBe(false)
     await wrapper.get('.encounter-ended-actions .combat-primary').trigger('click')
     expect(wrapper.find('.encounter-ended select').exists()).toBe(true)
+    // 与「手动准备遭遇」一致：打开选择器后必须立刻可开战，而不是等用户先动一下下拉框。
+    expect(wrapper.get('.next-encounter-picker .combat-primary').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
