@@ -49,6 +49,17 @@ _EXPLICIT_ATTACK_WORD = re.compile(
 )
 _GENERIC_ENEMY_WORDS = ("敌人", "敌方", "怪物", "对手", "enemy", "foe", "target")
 
+# 只有这些规划器 note 才意味着“数值或渠道真的被改过”，需要在给玩家的说明里
+# 体现；``advantage_without_reason`` 仅是审计提示、不改写掷骰方式，因此不触发
+# breakdown 说明行（其审计信息仍完整保留在 CheckResult.planner_notes 中）。
+_MATERIAL_PLANNER_NOTES = frozenset({
+    "same_fact_as_advantage",
+    "same_fact_as_dc",
+    "stacked_penalty",
+    "stacked_bonus",
+    "modifier_without_reason",
+})
+
 
 def is_non_combat_declaration(text: object) -> bool:
     """识别“声明不战斗”，但保留同句中转而发动的真实攻击。"""
@@ -511,6 +522,19 @@ def _attack_target_dc(rule: RuleSystem | None, target: dict[str, Any]) -> int | 
     return max(minimum, min(maximum, total))
 
 
+def _duplicate_channel_note(language: object) -> str:
+    """规划器的情境修正被折叠时，给玩家的单行解释（跟随界面语言）。
+
+    覆盖两类“计入项被忽略”：同一事实重复进入多条渠道，以及没有依据、无法审计
+    的修正被按 0 处理。仅审计提示（如 ``advantage_without_reason``）不触发本行。
+    """
+    return localized_text(language, {
+        "en": "The situational adjustment contained a duplicated or unsupported entry; only one channel was applied.",
+        "zh-CN": "情境修正存在重复或无依据的计入项，已按单一渠道结算。",
+        "ja": "状況修正に重複または根拠のない計上項目があったため、単一の経路のみで処理した。",
+    })
+
+
 def resolve_check_request(
     instance: GameInstance,
     action: dict[str, Any],
@@ -583,6 +607,11 @@ def resolve_check_request(
         "opponent_name": opponent_name,
         "assist": list(request.get("assist") or []),
         "planner_source": str(request.get("planner_source") or "legacy"),
+        # 规划器最终采用的渠道理由与折叠审计（旧请求缺省为空，不改变数值）。
+        "dc_reason": str(request.get("dc_reason") or "") or None,
+        "advantage_reason": str(request.get("advantage_reason") or "") or None,
+        "modifier_reason": str(request.get("modifier_reason") or "") or None,
+        "planner_notes": list(request.get("planner_notes") or []),
     }
 
     if dice_system == "d100":
@@ -681,6 +710,9 @@ def resolve_check_request(
         "modifier_breakdown": "；".join(filter(None, [
             bonus_label,
             f"情境修正 {circumstance_modifier:+d}" if circumstance_modifier else "",
+            _duplicate_channel_note(instance.language)
+            if any(note in _MATERIAL_PLANNER_NOTES for note in common["planner_notes"])
+            else "",
         ])) or None,
         "total": total,
         "dc": dc,

@@ -54,11 +54,32 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                     "threshold from the selected character attribute or skill."
                                 ),
                             },
+                            "dc_reason": {
+                                "type": "string",
+                                "maxLength": 160,
+                                "description": (
+                                    "Why the task ITSELF is harder or easier than the baseline difficulty. "
+                                    "Describe only the objective difficulty of the task; never restate the "
+                                    "actor's own circumstances or a temporary environment factor here."
+                                ),
+                            },
                             "modifier": {
                                 "type": "integer",
                                 "minimum": -20,
                                 "maximum": 20,
-                                "description": "Optional situational modifier; do not include sheet bonuses here.",
+                                "description": (
+                                    "Optional situational modifier; do not include sheet bonuses here. "
+                                    "Defaults to 0, and any non-zero value requires modifier_reason."
+                                ),
+                            },
+                            "modifier_reason": {
+                                "type": "string",
+                                "maxLength": 160,
+                                "description": (
+                                    "The independent, auditable temporary circumstance behind a non-zero "
+                                    "modifier. Never repeat a fact already expressed through dc_reason or "
+                                    "advantage_reason: the same fact may only enter one channel."
+                                ),
                             },
                             "advantage": {
                                 "type": "string",
@@ -69,6 +90,15 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                     "Use only with clear situational grounds, never from a single word; default "
                                     "normal. Mapped to the ruleset mechanic (d20 keep high/low, d100 bonus/penalty "
                                     "dice) and validated server-side."
+                                ),
+                            },
+                            "advantage_reason": {
+                                "type": "string",
+                                "maxLength": 160,
+                                "description": (
+                                    "The concrete situational ground for this roll mode. Required whenever "
+                                    "advantage is not normal; leave empty for normal. The server uses it to "
+                                    "detect a fact already counted in dc_reason or modifier_reason."
                                 ),
                             },
                             "kind": {

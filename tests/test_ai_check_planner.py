@@ -6,8 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from src.commands.check_planner import normalize_check_specs, plan_round_checks
+from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_instance() -> GameInstance:
@@ -497,3 +500,323 @@ def test_economy_tool_schema_requires_price_provenance() -> None:
     assert props["amount_scope"]["enum"] == ["unit", "total"]
     assert actions["items"]["required"] == ["player", "type", "target"]
     assert "never invent, estimate, or infer a price" in props["price_source"]["description"]
+
+
+# ---------------------------------------------------------------------------
+# 任务三：消除检定重复惩罚（同一情境事实只能进入一条渠道）
+#
+# 固定骰值、固定规则与角色卡，不依赖任何模型输出：normalize_check_specs 负责
+# 渠道归一，resolve_check_request 负责按请求结算，两层都断言审计字段。
+# ---------------------------------------------------------------------------
+
+
+def _dnd5e_rule() -> RuleSystem:
+    # dc_table.normal = 15，即“任务本身难度”的基准 DC。
+    return RuleSystem.load(ROOT / "templates" / "rules" / "dnd5e.json")
+
+
+def _door_instance(*, strength: int = 16) -> GameInstance:
+    instance = GameInstance(game_key=("web", "room", "channels"), rule_id="dnd5e")
+    instance.players = {
+        "p1": {
+            "user_id": "p1",
+            "character_name": "阿岚",
+            "character_sheet": {
+                "attributes": {"str": strength, "dex": 12},
+                "skills": [],
+                "level": 1,
+            },
+        },
+    }
+    instance.action_queue = [{"user_id": "p1", "text": "我用力推开沉重的石门"}]
+    return instance
+
+
+def _plan_one(instance: GameInstance, rule: RuleSystem, raw: dict) -> dict:
+    planned, errors = normalize_check_specs(instance, rule, [raw])
+    assert errors == []
+    assert len(planned) == 1
+    return planned[0][1]
+
+
+def _resolve(instance: GameInstance, rule: RuleSystem, request: dict, *, roll: int,
+             rolls: list[int] | None = None) -> dict:
+    action = {
+        "user_id": str(request["actor_uid"]),
+        "text": "我用力推开沉重的石门",
+        "check_request": request,
+        "dice_value": roll,
+        "dice_rolls": list(rolls or [roll]),
+    }
+    result = resolve_check_request(instance, action, rule)
+    assert result is not None
+    return result
+
+
+def test_planned_check_without_duplicates_keeps_plain_numbers() -> None:
+    """基线：力量 16（+3）、DC 15、modifier 0、normal → total = roll + 3。"""
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 15,
+        "dc_reason": "石门本身沉重，需要持续发力",
+    })
+
+    assert request["target"] == 15
+    assert request["circumstance_modifier"] == 0
+    assert request["advantage_mode"] == ""
+    assert request["dc_reason"] == "石门本身沉重，需要持续发力"
+    assert request["planner_notes"] == []
+    assert request["planner_dropped"] == {}
+
+    check = _resolve(instance, rule, request, roll=10)
+    assert check["modifier"] == 3
+    assert check["total"] == 13
+    assert check["dc"] == 15
+    assert check["advantage_mode"] == ""
+    assert check["planner_notes"] == []
+    assert "单一渠道" not in (check["modifier_breakdown"] or "")
+
+
+def test_disadvantage_with_reason_changes_only_the_roll_mode() -> None:
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 15,
+        "dc_reason": "石门本身沉重，需要持续发力",
+        "advantage": "disadvantage",
+        "advantage_reason": "站在齐膝深的泥水里难以发力",
+    })
+
+    assert request["advantage_mode"] == "disadvantage"
+    assert request["advantage_reason"] == "站在齐膝深的泥水里难以发力"
+    assert request["target"] == 15
+    assert request["circumstance_modifier"] == 0
+    assert request["planner_notes"] == []
+
+    # 劣势固定取 min(rolls)：取值错误会被结算层拒绝。
+    with pytest.raises(ValueError):
+        _resolve(instance, rule, request, roll=17, rolls=[4, 17])
+    check = _resolve(instance, rule, request, roll=4, rolls=[4, 17])
+    assert check["roll"] == 4
+    assert check["advantage_mode"] == "disadvantage"
+    assert check["modifier"] == 3
+    assert check["total"] == 7
+    assert check["dc"] == 15
+
+
+def test_independent_environment_modifier_stacks_on_the_dc() -> None:
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 15,
+        "dc_reason": "石门本身沉重，需要持续发力",
+        "modifier": -2,
+        "modifier_reason": "火把熄灭后只能摸黑发力",
+    })
+
+    assert request["target"] == 15
+    assert request["circumstance_modifier"] == -2
+    assert request["modifier_reason"] == "火把熄灭后只能摸黑发力"
+    assert request["planner_notes"] == []
+
+    check = _resolve(instance, rule, request, roll=10)
+    assert check["modifier"] == 1  # +3 -2
+    assert check["total"] == 11
+    assert check["dc"] == 15
+    assert "情境修正 -2" in check["modifier_breakdown"]
+
+
+def test_same_fact_in_three_channels_keeps_only_the_disadvantage() -> None:
+    """同一事实写进 DC + 劣势 + modifier：只保留劣势，DC 回基线、modifier 归零。"""
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    fact = "光线昏暗难以看清门闩"
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 18,
+        "dc_reason": fact,
+        "advantage": "disadvantage",
+        "advantage_reason": f"{fact}！",
+        "modifier": -6,
+        "modifier_reason": f"  {fact.replace('难以', ', 难以')}  ",
+    })
+
+    assert request["target"] == 15  # 回到难度基准 DC
+    assert request["circumstance_modifier"] == 0
+    assert request["advantage_mode"] == "disadvantage"
+    assert request["planner_notes"] == ["same_fact_as_advantage", "same_fact_as_advantage"]
+    assert request["planner_dropped"] == {"target": 18, "modifier": -6}
+    # 审计字段保留模型给出的原始理由，说明为何被折叠。
+    assert request["dc_reason"] == fact
+    assert request["modifier_reason"].strip().startswith("光线昏暗")
+
+    check = _resolve(instance, rule, request, roll=4, rolls=[4, 17])
+    assert check["modifier"] == 3
+    assert check["dc"] == 15
+    assert check["advantage_mode"] == "disadvantage"
+    assert check["total"] == 7
+    assert check["planner_notes"] == ["same_fact_as_advantage", "same_fact_as_advantage"]
+    assert check["dc_reason"] == fact
+    assert check["advantage_reason"] == f"{fact}！"
+    assert "情境修正存在重复或无依据的计入项" in check["modifier_breakdown"]
+
+
+def test_reason_comparison_uses_the_full_text_before_persisting_the_160_char_cap() -> None:
+    """同源比较用完整理由；写入 request 的字段按 schema 声明截断到 160 字符。"""
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    fact = "光线昏暗难以看清门闩" * 30  # 300 字符，超过 schema 的 maxLength=160
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 18,
+        "dc_reason": fact,
+        "advantage": "disadvantage",
+        "advantage_reason": fact,
+        "modifier": -6,
+        "modifier_reason": fact,
+    })
+
+    # 截断发生在策略之后：300 字符的同一理由依然被判为同源并折叠。
+    assert request["planner_notes"] == ["same_fact_as_advantage", "same_fact_as_advantage"]
+    assert request["planner_dropped"] == {"target": 18, "modifier": -6}
+    assert request["target"] == 15
+    assert request["circumstance_modifier"] == 0
+    for key in ("dc_reason", "advantage_reason", "modifier_reason"):
+        assert len(request[key]) == 160
+        assert request[key] == fact[:160]
+
+
+def test_reasons_differing_only_after_160_chars_are_not_the_same_fact() -> None:
+    """截断只在持久化时发生：160 字符之后才不同的理由不算同一事实。"""
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    shared = "光线昏暗难以看清门闩" * 16  # 160 字符
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 18,
+        "dc_reason": f"{shared}{'甲' * 20}",
+        "modifier": -3,
+        "modifier_reason": f"{shared}{'乙' * 20}",
+    })
+
+    assert request["planner_notes"] == []
+    assert request["planner_dropped"] == {}
+    assert request["target"] == 18
+    assert request["circumstance_modifier"] == -3
+    assert len(request["dc_reason"]) == 160
+    assert len(request["modifier_reason"]) == 160
+
+
+def test_reasonless_modifier_is_zeroed_but_reasonless_advantage_survives() -> None:
+    """非零 modifier 缺理由 → 归零；advantage 缺理由 → 保留，只记审计提示。"""
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 15,
+        "modifier": -4,
+        "advantage": "advantage",
+    })
+
+    assert request["circumstance_modifier"] == 0
+    assert request["advantage_mode"] == "advantage"
+    assert request["planner_notes"] == [
+        "modifier_without_reason", "advantage_without_reason",
+    ]
+    assert request["planner_dropped"] == {"modifier": -4}
+
+    # advantage 仍按两枚 d20 取高结算；modifier 的归零是 material note，
+    # 因此 breakdown 会出现说明行（advantage 的提示本身不会触发它）。
+    check = _resolve(instance, rule, request, roll=10, rolls=[10, 4])
+    assert check["roll"] == 10
+    assert check["modifier"] == 3
+    assert check["total"] == 13
+    assert check["advantage_mode"] == "advantage"
+    assert check["planner_notes"] == [
+        "modifier_without_reason", "advantage_without_reason",
+    ]
+    assert "情境修正存在重复或无依据的计入项" in check["modifier_breakdown"]
+
+
+def test_hard_task_dc_and_independent_penalty_with_distinct_reasons_both_survive() -> None:
+    instance = _door_instance()
+    rule = _dnd5e_rule()
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 18,
+        "dc_reason": "门闩锈死，需要持续蛮力",
+        "modifier": -2,
+        "modifier_reason": "火把熄灭后只能摸黑发力",
+    })
+
+    assert request["target"] == 18
+    assert request["circumstance_modifier"] == -2
+    assert request["planner_notes"] == []
+    assert request["planner_dropped"] == {}
+
+    check = _resolve(instance, rule, request, roll=10)
+    assert check["dc"] == 18
+    assert check["modifier"] == 1
+    assert check["total"] == 11
+
+
+def test_attack_keeps_server_armor_class_and_drops_duplicate_check_penalty() -> None:
+    instance = _door_instance()
+    instance.npcs = {
+        "goblin": {
+            "name": "哥布林",
+            "character_name": "哥布林",
+            "hp": 30,
+            "max_hp": 30,
+            "armor": 0,
+            "attributes": {"dex": 10},
+        },
+    }
+    instance.action_queue = [{"user_id": "p1", "text": "我挥剑劈向哥布林"}]
+    rule = _dnd5e_rule()
+    fact = "哥布林举盾格挡，难以命中"
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 20, "kind": "attack",
+        "opponent": "哥布林",
+        "dc_reason": fact,
+        "advantage": "disadvantage",
+        "advantage_reason": fact,
+        "modifier": -5,
+        "modifier_reason": fact,
+    })
+
+    assert request["opponent"] == "npc:goblin"
+    assert request["target"] == 15
+    assert request["circumstance_modifier"] == 0
+    assert request["planner_notes"] == ["same_fact_as_advantage", "same_fact_as_advantage"]
+    assert request["planner_dropped"] == {"target": 20, "modifier": -5}
+
+    check = _resolve(instance, rule, request, roll=5, rolls=[5, 18])
+    # 命中 DC 仍由服务端 AC 决定：既不是模型 DC，也不叠加检定 DC 惩罚。
+    assert check["target_source"] == "server_armor_class"
+    assert check["dc"] == 10
+    assert check["advantage_mode"] == "disadvantage"
+    assert check["modifier"] == rule.attribute_modifier(16) + rule.proficiency_bonus(1)
+    assert check["total"] == check["roll"] + check["modifier"]
+    # 没有任何情境数值修正进入 AC 命中结算，只留下“重复计入被忽略”的解释行。
+    assert "情境修正 -5" not in (check["modifier_breakdown"] or "")
+    assert "情境修正 +" not in (check["modifier_breakdown"] or "")
+    assert "情境修正存在重复或无依据的计入项" in check["modifier_breakdown"]
+
+
+@pytest.mark.parametrize("language, expected", [
+    ("zh-CN", "情境修正存在重复或无依据的计入项"),
+    ("en", "duplicated or unsupported entry"),
+    ("ja", "重複または根拠のない計上項目"),
+])
+def test_duplicate_note_line_follows_the_interface_language(language: str, expected: str) -> None:
+    instance = _door_instance()
+    instance.language = language
+    rule = _dnd5e_rule()
+    fact = "光线昏暗难以看清门闩"
+    request = _plan_one(instance, rule, {
+        "player": "p1", "attribute": "str", "target": 18,
+        "dc_reason": fact,
+        "modifier": -6,
+        "modifier_reason": fact,
+    })
+
+    check = _resolve(instance, rule, request, roll=10)
+    assert check["planner_notes"] == ["same_fact_as_dc"]
+    assert expected in check["modifier_breakdown"]

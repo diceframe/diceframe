@@ -47,6 +47,11 @@ class CheckRequest(TypedDict, total=False):
     circumstance_modifier: int
     advantage_mode: Literal["", "advantage", "disadvantage"]
     advantage_note: str | None
+    dc_reason: str | None
+    advantage_reason: str | None
+    modifier_reason: str | None
+    planner_notes: list[str]
+    planner_dropped: dict[str, int | str]
     kind: Literal["check", "save", "attack"]
     opponent: str
     opponent_name: str
@@ -86,6 +91,10 @@ class CheckResult(TypedDict, total=False):
     verdict: str
     advantage_mode: str
     advantage_note: str | None
+    dc_reason: str | None
+    advantage_reason: str | None
+    modifier_reason: str | None
+    planner_notes: list[str]
     luck_spend_available: bool
     luck_cost: int | None
     luck_decision: Literal["pending", "spent", "declined"]
