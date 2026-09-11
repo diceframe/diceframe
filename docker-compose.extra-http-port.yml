@@ -1,0 +1,18 @@
+# 追加一个 HTTP 端口（可选叠加文件）。
+#
+# 最常见场景：主端口已经是 HTTPS（TRPG_TLS_MODE=self_signed 或 lets_encrypt），
+# 还想同时保留一个明文 HTTP 端口。
+#
+#   1) 在 .env 里设置：
+#        TRPG_TLS_MODE=self_signed
+#        TRPG_WEB_HTTP_PORT=18080
+#   2) docker compose -f docker-compose.yml -f docker-compose.extra-http-port.yml up -d
+#
+# 只用主端口（不加附加端口）时不要叠加本文件：Docker 的端口映射无法"按需"生效，
+# 写进 ports 就会占用宿主端口，所以默认 compose 保持只发布 9876。
+services:
+  web:
+    environment:
+      TRPG_WEB_HTTP_PORT: "${TRPG_WEB_HTTP_PORT:?请在 .env 设置 TRPG_WEB_HTTP_PORT}"
+    ports:
+      - "${TRPG_WEB_HTTP_PORT:?}:${TRPG_WEB_HTTP_PORT:?}"

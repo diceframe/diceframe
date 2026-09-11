@@ -8,6 +8,9 @@ services:
     container_name: diceframe-web
     ports:
       - "${DICEFRAME_HTTP_PORT:-9876}:9876"
+      # Let's Encrypt http-01 验证需要容器内监听 TRPG_TLS_ACME_CHALLENGE_PORT
+      # （默认 80）；启用 lets_encrypt 时取消下面这行的注释。
+      # - "80:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -15,10 +18,20 @@ services:
       TRPG_WEB_PORT: "9876"
       # 额外监听地址（例如 IPv6 的 ::）与附加 HTTP/HTTPS 端口。
       # 注意：容器里监听了端口还需要在 ports 里映射出来，见
-      # docker-compose.extra-ports.yml 与 .env.example 的说明。
+      # docker-compose.extra-http-port.yml / docker-compose.extra-https-port.yml
+      # 与 .env.example 的说明。
       TRPG_WEB_HOSTS: "${TRPG_WEB_HOSTS:-}"
       TRPG_WEB_HTTP_PORT: "${TRPG_WEB_HTTP_PORT:-}"
       TRPG_WEB_HTTPS_PORT: "${TRPG_WEB_HTTPS_PORT:-}"
+      # TLS 设置。Compose 的 .env 只用于变量替换，不会自动传进容器，所以这里
+      # 必须显式透传，否则用户在 .env 里写 TRPG_TLS_MODE 是不生效的。
+      # TRPG_TLS_CERT_FILE / TRPG_TLS_KEY_FILE 属于未开放的预留项，故意不透传。
+      TRPG_TLS_MODE: "${TRPG_TLS_MODE:-}"
+      TRPG_TLS_IDENTIFIER_TYPE: "${TRPG_TLS_IDENTIFIER_TYPE:-}"
+      TRPG_TLS_IDENTIFIER: "${TRPG_TLS_IDENTIFIER:-}"
+      TRPG_TLS_CONTACT_EMAIL: "${TRPG_TLS_CONTACT_EMAIL:-}"
+      TRPG_TLS_CHALLENGE_TYPE: "${TRPG_TLS_CHALLENGE_TYPE:-}"
+      TRPG_TLS_ACME_CHALLENGE_PORT: "${TRPG_TLS_ACME_CHALLENGE_PORT:-}"
       TRPG_DATA_DIR: "/app/data"
       # The image already defaults to Asia/Shanghai; set TZ in .env to change it.
       TZ: "${TZ:-Asia/Shanghai}"

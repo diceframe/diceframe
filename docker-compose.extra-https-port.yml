@@ -1,0 +1,19 @@
+# 追加第二个 HTTPS 端口（可选叠加文件，较少用）。
+#
+# 只有在需要"两个 TLS 端口"时才需要它：例如主端口是 HTTP
+# （TRPG_TLS_MODE=off，用于内网明文访问），同时想让另一个端口提供 HTTPS。
+#
+#   1) 在 .env 里设置：
+#        TRPG_TLS_MODE=self_signed
+#        TRPG_WEB_HTTPS_PORT=18443
+#   2) docker compose -f docker-compose.yml -f docker-compose.extra-https-port.yml up -d
+#
+# 与 docker-compose.extra-http-port.yml 可以同时叠加。
+# 注意 TRPG_WEB_HTTPS_PORT 需要容器里存在可用的 TLS 上下文；TRPG_TLS_MODE=off 时
+# 服务端会忽略该端口并在启动日志里给出 warning。
+services:
+  web:
+    environment:
+      TRPG_WEB_HTTPS_PORT: "${TRPG_WEB_HTTPS_PORT:?请在 .env 设置 TRPG_WEB_HTTPS_PORT}"
+    ports:
+      - "${TRPG_WEB_HTTPS_PORT:?}:${TRPG_WEB_HTTPS_PORT:?}"
