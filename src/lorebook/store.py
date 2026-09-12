@@ -1,4 +1,8 @@
-﻿"""Lorebook SQLite 存储 —— 世界书条目的 CRUD 操作。"""
+﻿"""Lorebook SQLite 存储 —— 世界书条目的 CRUD 操作。
+
+查询构造走 peewee（src.lorebook.models）；连接、PRAGMA、SCHEMA 建表、
+user_version 迁移与事务提交仍由本类持有，行为契约与迁移前一致。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,10 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from peewee import SQL
+
+from src.lorebook.models import LorebookEntry, World
+from src.lorebook.models import database as _models_database
 from src.migrations.lorebook import migrate as migrate_lorebook
 
 logger = logging.getLogger("trpg")
@@ -86,12 +94,14 @@ class LorebookStore:
         if self._conn.execute("PRAGMA foreign_key_check").fetchone():
             raise sqlite3.IntegrityError("lorebook foreign key check failed")
         self._conn.commit()
+        _models_database.attach(self._conn)
         logger.info("Lorebook 数据库已打开: %s", self.db_path)
 
     def close(self) -> None:
         if self._conn:
             self._conn.close()
             self._conn = None
+            _models_database.detach()
             logger.info("Lorebook 数据库已关闭")
 
     def _execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -102,74 +112,77 @@ class LorebookStore:
     # ---- 世界 CRUD ----
 
     def create_world(self, world_id: str, name: str, **kwargs) -> None:
-        self._execute(
-            "INSERT OR REPLACE INTO worlds(id, name, description, language, author, version) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (world_id, name, kwargs.get("description", ""),
-             kwargs.get("language", "zh-CN"), kwargs.get("author", ""), kwargs.get("version", "1.0")),
-        )
-        self._conn.commit()
+        # INSERT OR REPLACE 会重置 created_at 并按外键级联清掉旧条目，
+        # 与迁移前行为一致，属既有语义（模板导入依赖）。
+        with self._lock:
+            World.insert(
+                id=world_id,
+                name=name,
+                description=kwargs.get("description", ""),
+                language=kwargs.get("language", "zh-CN"),
+                author=kwargs.get("author", ""),
+                version=kwargs.get("version", "1.0"),
+            ).on_conflict_replace().execute()
+            self._conn.commit()
 
     def get_world(self, world_id: str) -> dict | None:
-        row = self._execute(
-            "SELECT * FROM worlds WHERE id = ?", (world_id,)
-        ).fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            world = World.get_or_none(World.id == world_id)
+        return dict(world.__data__) if world else None
 
     def update_world_language(self, world_id: str, language: str) -> None:
         """Correct world language metadata without replacing the world or its entries."""
-        self._execute(
-            "UPDATE worlds SET language = ?, updated_at = datetime('now') WHERE id = ?",
-            (language, world_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            World.update(
+                language=language, updated_at=SQL("datetime('now')"),
+            ).where(World.id == world_id).execute()
+            self._conn.commit()
 
     def list_worlds(self) -> list[dict]:
-        rows = self._execute("SELECT * FROM worlds ORDER BY updated_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            rows = list(World.select().order_by(World.updated_at.desc()))
+        return [dict(w.__data__) for w in rows]
 
     def delete_world(self, world_id: str) -> None:
-        self._execute("DELETE FROM worlds WHERE id = ?", (world_id,))
-        self._conn.commit()
+        with self._lock:
+            World.delete().where(World.id == world_id).execute()
+            self._conn.commit()
 
     # ---- 条目 CRUD ----
 
     def add_entry(self, entry: dict) -> None:
-        keywords = json.dumps(entry.get("keywords", []), ensure_ascii=False)
-        triggers = json.dumps(entry.get("triggers_recursive", []), ensure_ascii=False)
-        visible = json.dumps(entry.get("visible_to", []), ensure_ascii=False)
-        connected = json.dumps(entry.get("connected_to", []), ensure_ascii=False)
-        self._execute(
-            "INSERT OR REPLACE INTO lorebook_entries "
-            "(id, world_id, name, type, keywords, content, unreliable, "
-            " sync_on_enter, tier, triggers_recursive, visible_to, is_constant, match_mode, "
-            " sticky, cooldown, delay, \"order\", probability, \"group\", group_weight, connected_to, source_plugin) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (entry["id"], entry["world_id"], entry["name"], entry.get("type", "other"),
-             keywords, entry.get("content", ""),
-             int(entry.get("unreliable", False)),
-             int(entry.get("sync_on_enter", False)),
-             entry.get("tier", "background"),
-             triggers, visible,
-             int(entry.get("is_constant", False)),
-             entry.get("match_mode", "any"),
-             int(entry.get("sticky", 0)),
-             int(entry.get("cooldown", 0)),
-             int(entry.get("delay", 0)),
-             int(entry.get("order", 100)),
-             int(entry.get("probability", 100)),
-             entry.get("group", ""),
-             int(entry.get("group_weight", 1)),
-             connected,
-             entry.get("source_plugin", "")),
-        )
-        self._conn.commit()
+        with self._lock:
+            LorebookEntry.insert(
+                id=entry["id"],
+                world_id=entry["world_id"],
+                name=entry["name"],
+                type=entry.get("type", "other"),
+                keywords=json.dumps(entry.get("keywords", []), ensure_ascii=False),
+                content=entry.get("content", ""),
+                unreliable=int(entry.get("unreliable", False)),
+                sync_on_enter=int(entry.get("sync_on_enter", False)),
+                tier=entry.get("tier", "background"),
+                triggers_recursive=json.dumps(
+                    entry.get("triggers_recursive", []), ensure_ascii=False),
+                visible_to=json.dumps(entry.get("visible_to", []), ensure_ascii=False),
+                is_constant=int(entry.get("is_constant", False)),
+                match_mode=entry.get("match_mode", "any"),
+                sticky=int(entry.get("sticky", 0)),
+                cooldown=int(entry.get("cooldown", 0)),
+                delay=int(entry.get("delay", 0)),
+                order=int(entry.get("order", 100)),
+                probability=int(entry.get("probability", 100)),
+                group=entry.get("group", ""),
+                group_weight=int(entry.get("group_weight", 1)),
+                connected_to=json.dumps(entry.get("connected_to", []), ensure_ascii=False),
+                source_plugin=entry.get("source_plugin", ""),
+            ).on_conflict_replace().execute()
+            self._conn.commit()
 
     def get_entry(self, entry_id: str) -> dict | None:
-        row = self._execute(
-            "SELECT * FROM lorebook_entries WHERE id = ?", (entry_id,)
-        ).fetchone()
-        return _row_to_entry(row) if row else None
+        with self._lock:
+            entry = LorebookEntry.get_or_none(LorebookEntry.id == entry_id)
+        return _entry_to_dict(entry) if entry else None
 
     def update_entry(self, entry_id: str, updates: dict) -> None:
         allowed = {"name", "type", "content", "unreliable",
@@ -177,7 +190,6 @@ class LorebookStore:
                    "is_constant", "match_mode", "sticky", "cooldown", "delay", "order",
                    "probability", "group", "group_weight", "connected_to"}
         fields = {}
-        params: list = []
         for k, v in updates.items():
             if k not in allowed:
                 continue
@@ -190,92 +202,83 @@ class LorebookStore:
             fields[k] = v
         if not fields:
             return
-        # 列名必须加引号：白名单里的 order / group 都是 SQL 保留字，
-        # 裸写会让 SQLite 直接语法错误（add_entry 的 INSERT 同样是加引号的）。
-        set_clause = ", ".join(f'"{k}" = ?' for k in fields)
-        params.extend(fields.values())
-        params.append(entry_id)
-        self._execute(
-            f"UPDATE lorebook_entries SET {set_clause}, "
-            "updated_at = datetime('now') WHERE id = ?",
-            tuple(params),
-        )
-        self._conn.commit()
+        with self._lock:
+            LorebookEntry.update(
+                **fields, updated_at=SQL("datetime('now')"),
+            ).where(LorebookEntry.id == entry_id).execute()
+            self._conn.commit()
 
     def delete_entry(self, entry_id: str) -> None:
-        self._execute("DELETE FROM lorebook_entries WHERE id = ?", (entry_id,))
-        self._conn.commit()
+        with self._lock:
+            LorebookEntry.delete().where(LorebookEntry.id == entry_id).execute()
+            self._conn.commit()
 
     def delete_world_cascade(self, world_id: str) -> None:
         """删除世界及其所有条目。"""
-        self._execute("DELETE FROM lorebook_entries WHERE world_id = ?", (world_id,))
-        self._execute("DELETE FROM worlds WHERE id = ?", (world_id,))
-        self._conn.commit()
+        with self._lock:
+            LorebookEntry.delete().where(LorebookEntry.world_id == world_id).execute()
+            World.delete().where(World.id == world_id).execute()
+            self._conn.commit()
 
     def count_entries_by_plugin(self, plugin_id: str) -> int:
-        row = self._execute(
-            "SELECT COUNT(*) FROM lorebook_entries WHERE source_plugin = ?", (plugin_id,)
-        ).fetchone()
-        return int(row[0] if row else 0)
+        with self._lock:
+            return LorebookEntry.select().where(
+                LorebookEntry.source_plugin == plugin_id,
+            ).count()
 
     def delete_entries_by_plugin(self, plugin_id: str) -> int:
         """删除该插件来源的全部世界书条目，返回删除条数。"""
-        cur = self._execute(
-            "DELETE FROM lorebook_entries WHERE source_plugin = ?", (plugin_id,)
-        )
-        self._conn.commit()
-        return cur.rowcount
+        with self._lock:
+            rowcount = LorebookEntry.delete().where(
+                LorebookEntry.source_plugin == plugin_id,
+            ).execute()
+            self._conn.commit()
+        return rowcount
 
     def list_plugin_worlds(self, plugin_id: str) -> list[dict]:
         """该插件创建的、仍含其来源条目的世界（用于条件删除判定）。"""
-        rows = self._execute(
-            "SELECT DISTINCT w.* FROM worlds w "
-            "JOIN lorebook_entries e ON e.world_id = w.id "
-            "WHERE e.source_plugin = ?",
-            (plugin_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        with self._lock:
+            rows = list(
+                World.select()
+                .join(LorebookEntry, on=(LorebookEntry.world_id == World.id))
+                .where(LorebookEntry.source_plugin == plugin_id)
+                .distinct()
+            )
+        return [dict(w.__data__) for w in rows]
 
     def list_entries(self, world_id: str, entry_type: str | None = None) -> list[dict]:
-        if entry_type:
-            rows = self._execute(
-                "SELECT * FROM lorebook_entries WHERE world_id = ? AND type = ? "
-                "ORDER BY tier, name",
-                (world_id, entry_type),
-            ).fetchall()
-        else:
-            rows = self._execute(
-                "SELECT * FROM lorebook_entries WHERE world_id = ? "
-                "ORDER BY tier, name",
-                (world_id,),
-            ).fetchall()
-        return [_row_to_entry(r) for r in rows]
+        with self._lock:
+            query = LorebookEntry.select().where(LorebookEntry.world_id == world_id)
+            if entry_type:
+                query = query.where(LorebookEntry.type == entry_type)
+            rows = list(query.order_by(LorebookEntry.tier, LorebookEntry.name))
+        return [_entry_to_dict(e) for e in rows]
 
     def search_entries(self, world_id: str, keyword: str) -> list[dict]:
-        rows = self._execute(
-            "SELECT * FROM lorebook_entries WHERE world_id = ? AND "
-            "(name LIKE ? OR content LIKE ? OR keywords LIKE ?) "
-            "ORDER BY tier, name",
-            (world_id, f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
-        ).fetchall()
-        return [_row_to_entry(r) for r in rows]
+        # peewee 的 SQLite 方言把 ilike 编译为 SQL LIKE（like 会被编译成 GLOB，
+        # 通配符语义不同，不要改用 like）。
+        pattern = f"%{keyword}%"
+        with self._lock:
+            rows = list(
+                LorebookEntry.select()
+                .where(
+                    (LorebookEntry.world_id == world_id)
+                    & (
+                        LorebookEntry.name.ilike(pattern)
+                        | LorebookEntry.content.ilike(pattern)
+                        | LorebookEntry.keywords.ilike(pattern)
+                    )
+                )
+                .order_by(LorebookEntry.tier, LorebookEntry.name)
+            )
+        return [_entry_to_dict(e) for e in rows]
 
 
-def _row_to_entry(row: sqlite3.Row) -> dict:
-    d = dict(row)
+def _entry_to_dict(entry: LorebookEntry) -> dict:
+    d = dict(entry.__data__)
     d["keywords"] = json.loads(d.get("keywords", "[]"))
     d["triggers_recursive"] = json.loads(d.get("triggers_recursive", "[]"))
     d["visible_to"] = json.loads(d.get("visible_to", "[]"))
-    d["unreliable"] = bool(d.get("unreliable", 0))
-    d["sync_on_enter"] = bool(d.get("sync_on_enter", 0))
-    d["is_constant"] = bool(d.get("is_constant", 0))
-    d["sticky"] = int(d.get("sticky", 0))
-    d["cooldown"] = int(d.get("cooldown", 0))
-    d["delay"] = int(d.get("delay", 0))
-    d["order"] = int(d.get("order", 100))
-    d["probability"] = int(d.get("probability", 100))
-    d["group"] = d.get("group", "")
-    d["group_weight"] = int(d.get("group_weight", 1))
     d["connected_to"] = json.loads(d.get("connected_to", "[]"))
     d["source_plugin"] = d.get("source_plugin", "") or ""
     return d

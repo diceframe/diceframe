@@ -1,4 +1,8 @@
-"""记忆 delta 存储 —— 将 LLM 输出的 memory_delta 写入 SQLite，处理冲突消解。"""
+"""记忆 delta 存储 —— 将 LLM 输出的 memory_delta 写入 SQLite，处理冲突消解。
+
+查询构造走 peewee（src.memory.models）；连接、SCHEMA 建表、user_version 迁移、
+asyncio.Lock 与事务提交仍由本类持有，行为契约与迁移前一致。
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,12 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
+from functools import reduce
+from operator import or_
 from pathlib import Path
 
+from src.memory.models import MemoryEconomyDelivery, MemoryEntry
+from src.memory.models import database as _models_database
 from src.migrations.memory import migrate as migrate_memory
 
 logger = logging.getLogger("trpg")
@@ -36,6 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_memory_status  ON memory_entries(game_key, status
 PRAGMA journal_mode=WAL;
 """
 
+_ACTIVE = MemoryEntry.status == "active"
+
+
+def _active_query(game_key: str):
+    return MemoryEntry.select().where(
+        (MemoryEntry.game_key == str(game_key)) & _ACTIVE,
+    )
+
+
 class MemoryStore:
     """长期记忆 SQLite 存储，处理 memory_delta 的冲突消解。"""
 
@@ -55,10 +72,13 @@ class MemoryStore:
         self._conn.executescript(SCHEMA)
         migrate_memory(self._conn)
         self._conn.commit()
+        _models_database.attach(self._conn)
 
     def close(self) -> None:
         if self._conn:
             self._conn.close()
+            self._conn = None
+            _models_database.detach()
 
     async def edit_entry(self, game_key: str, entry_id: int, updates: dict) -> bool:
         """Edit one active memory while preserving game ownership."""
@@ -67,25 +87,29 @@ class MemoryStore:
             return False
         allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
         allowed["embedding"] = None
-        assignments = ", ".join(f"{key}=?" for key in allowed)
         async with self._lock:
-            cursor = self._conn.execute(
-                f"UPDATE memory_entries SET {assignments} WHERE id=? AND game_key=? AND status='active'",
-                (*allowed.values(), int(entry_id), str(game_key)),
-            )
+            rowcount = MemoryEntry.update(**allowed).where(
+                (MemoryEntry.id == int(entry_id))
+                & (MemoryEntry.game_key == str(game_key))
+                & _ACTIVE,
+            ).execute()
             self._conn.commit()
-        return cursor.rowcount == 1
+        return rowcount == 1
 
     async def forget_entry(self, game_key: str, entry_id: int) -> bool:
         if not self._conn:
             return False
         async with self._lock:
-            cursor = self._conn.execute(
-                "UPDATE memory_entries SET status='forgotten', updated_at=? WHERE id=? AND game_key=? AND status='active'",
-                (datetime.now(timezone.utc).isoformat(), int(entry_id), str(game_key)),
-            )
+            rowcount = MemoryEntry.update(
+                status="forgotten",
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            ).where(
+                (MemoryEntry.id == int(entry_id))
+                & (MemoryEntry.game_key == str(game_key))
+                & _ACTIVE,
+            ).execute()
             self._conn.commit()
-        return cursor.rowcount == 1
+        return rowcount == 1
 
     async def clear_game(self, game_key: str) -> int:
         """Remove every memory entry owned by one game session.
@@ -99,16 +123,14 @@ class MemoryStore:
         if not self._conn:
             return 0
         async with self._lock:
-            cursor = self._conn.execute(
-                "DELETE FROM memory_entries WHERE game_key=?",
-                (str(game_key),),
-            )
-            self._conn.execute(
-                "DELETE FROM memory_economy_deliveries WHERE game_key=?",
-                (str(game_key),),
-            )
+            rowcount = MemoryEntry.delete().where(
+                MemoryEntry.game_key == str(game_key),
+            ).execute()
+            MemoryEconomyDelivery.delete().where(
+                MemoryEconomyDelivery.game_key == str(game_key),
+            ).execute()
             self._conn.commit()
-        return int(cursor.rowcount or 0)
+        return int(rowcount or 0)
 
     # ---- Delta 处理 ----
 
@@ -152,12 +174,11 @@ class MemoryStore:
         keys = self._delta_keys(delta)
         new_ids: list[int] = []
         async with self._lock:
-            existing = self._conn.execute(
-                "SELECT status FROM memory_economy_deliveries "
-                "WHERE game_key=? AND delivery_id=?",
-                (gk, effect_id),
-            ).fetchone()
-            if existing is not None:
+            delivered = MemoryEconomyDelivery.select().where(
+                (MemoryEconomyDelivery.game_key == gk)
+                & (MemoryEconomyDelivery.delivery_id == effect_id),
+            ).exists()
+            if delivered:
                 return
             try:
                 before = self._snapshot_keys(gk, keys)
@@ -165,19 +186,14 @@ class MemoryStore:
                     gk, delta, int(round_number), now,
                 )
                 after = self._snapshot_keys(gk, keys)
-                self._conn.execute(
-                    "INSERT INTO memory_economy_deliveries "
-                    "(game_key, delivery_id, before_state, after_state, status, created_at) "
-                    "VALUES (?,?,?,?,?,?)",
-                    (
-                        gk,
-                        effect_id,
-                        json.dumps(before, ensure_ascii=False, sort_keys=True),
-                        json.dumps(after, ensure_ascii=False, sort_keys=True),
-                        "applied",
-                        now,
-                    ),
-                )
+                MemoryEconomyDelivery.insert(
+                    game_key=gk,
+                    delivery_id=effect_id,
+                    before_state=json.dumps(before, ensure_ascii=False, sort_keys=True),
+                    after_state=json.dumps(after, ensure_ascii=False, sort_keys=True),
+                    status="applied",
+                    created_at=now,
+                ).execute()
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
@@ -197,53 +213,56 @@ class MemoryStore:
         gk = str(game_key)
         effect_id = str(delivery_id)
         async with self._lock:
-            record = self._conn.execute(
-                "SELECT before_state, after_state, status "
-                "FROM memory_economy_deliveries WHERE game_key=? AND delivery_id=?",
-                (gk, effect_id),
-            ).fetchone()
+            record = MemoryEconomyDelivery.get_or_none(
+                (MemoryEconomyDelivery.game_key == gk)
+                & (MemoryEconomyDelivery.delivery_id == effect_id),
+            )
             if record is None:
                 return False
-            if record["status"] == "reversed":
+            if record.status == "reversed":
                 return True
             before_rows = {
                 int(item["id"]): item
-                for item in json.loads(record["before_state"] or "[]")
+                for item in json.loads(record.before_state or "[]")
             }
             after_rows = {
                 int(item["id"]): item
-                for item in json.loads(record["after_state"] or "[]")
+                for item in json.loads(record.after_state or "[]")
             }
             try:
                 for entry_id, after in after_rows.items():
-                    current = self._conn.execute(
-                        "SELECT * FROM memory_entries WHERE id=? AND game_key=?",
-                        (entry_id, gk),
-                    ).fetchone()
-                    if current is None or not self._same_memory_state(dict(current), after):
+                    current = MemoryEntry.get_or_none(
+                        (MemoryEntry.id == entry_id)
+                        & (MemoryEntry.game_key == gk),
+                    )
+                    if current is None or not self._same_memory_state(
+                        dict(current.__data__), after,
+                    ):
                         continue
                     before = before_rows.get(entry_id)
                     if before is None:
-                        self._conn.execute(
-                            "DELETE FROM memory_entries WHERE id=? AND game_key=?",
-                            (entry_id, gk),
-                        )
+                        MemoryEntry.delete().where(
+                            (MemoryEntry.id == entry_id)
+                            & (MemoryEntry.game_key == gk),
+                        ).execute()
                     else:
                         self._restore_memory_row(before)
                 for entry_id, before in before_rows.items():
                     if entry_id in after_rows:
                         continue
-                    current = self._conn.execute(
-                        "SELECT 1 FROM memory_entries WHERE id=?",
-                        (entry_id,),
-                    ).fetchone()
-                    if current is None:
+                    still_exists = MemoryEntry.select().where(
+                        MemoryEntry.id == entry_id,
+                    ).exists()
+                    if not still_exists:
                         self._insert_memory_row(before)
-                self._conn.execute(
-                    "UPDATE memory_economy_deliveries SET status='reversed', reversed_at=? "
-                    "WHERE game_key=? AND delivery_id=? AND status='applied'",
-                    (datetime.now(timezone.utc).isoformat(), gk, effect_id),
-                )
+                MemoryEconomyDelivery.update(
+                    status="reversed",
+                    reversed_at=datetime.now(timezone.utc).isoformat(),
+                ).where(
+                    (MemoryEconomyDelivery.game_key == gk)
+                    & (MemoryEconomyDelivery.delivery_id == effect_id)
+                    & (MemoryEconomyDelivery.status == "applied"),
+                ).execute()
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
@@ -277,11 +296,14 @@ class MemoryStore:
             entity = item.get("entity", "")
             relation = item.get("relation", "")
             if confidence >= 0.5:
-                self._conn.execute(
-                    "UPDATE memory_entries SET status='forgotten', updated_at=? "
-                    "WHERE game_key=? AND entity=? AND relation=? AND status='active'",
-                    (now, gk, entity, relation),
-                )
+                MemoryEntry.update(
+                    status="forgotten", updated_at=now,
+                ).where(
+                    (MemoryEntry.game_key == gk)
+                    & (MemoryEntry.entity == entity)
+                    & (MemoryEntry.relation == relation)
+                    & _ACTIVE,
+                ).execute()
         return new_ids
 
     @staticmethod
@@ -308,14 +330,12 @@ class MemoryStore:
     ) -> list[dict]:
         rows: list[dict] = []
         for entity, relation in keys:
-            rows.extend(
-                dict(row)
-                for row in self._conn.execute(
-                    "SELECT * FROM memory_entries "
-                    "WHERE game_key=? AND entity=? AND relation=? ORDER BY id",
-                    (game_key, entity, relation),
-                ).fetchall()
-            )
+            matches = MemoryEntry.select().where(
+                (MemoryEntry.game_key == game_key)
+                & (MemoryEntry.entity == entity)
+                & (MemoryEntry.relation == relation),
+            ).order_by(MemoryEntry.id)
+            rows.extend(dict(row.__data__) for row in matches)
         return rows
 
     @staticmethod
@@ -327,29 +347,21 @@ class MemoryStore:
         return all(current.get(field) == expected.get(field) for field in fields)
 
     def _restore_memory_row(self, row: dict) -> None:
-        self._conn.execute(
-            "UPDATE memory_entries SET game_key=?, entity=?, relation=?, value=?, "
-            "confidence=?, status=?, source_round=?, embedding=?, created_at=?, updated_at=? "
-            "WHERE id=?",
-            (
-                row["game_key"], row["entity"], row["relation"], row["value"],
-                row["confidence"], row["status"], row.get("source_round"),
-                row.get("embedding"), row["created_at"], row["updated_at"], row["id"],
-            ),
-        )
+        MemoryEntry.update(
+            game_key=row["game_key"], entity=row["entity"], relation=row["relation"],
+            value=row["value"], confidence=row["confidence"], status=row["status"],
+            source_round=row.get("source_round"), embedding=row.get("embedding"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        ).where(MemoryEntry.id == row["id"]).execute()
 
     def _insert_memory_row(self, row: dict) -> None:
-        self._conn.execute(
-            "INSERT INTO memory_entries "
-            "(id, game_key, entity, relation, value, confidence, status, source_round, "
-            "embedding, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                row["id"], row["game_key"], row["entity"], row["relation"],
-                row["value"], row["confidence"], row["status"],
-                row.get("source_round"), row.get("embedding"), row["created_at"],
-                row["updated_at"],
-            ),
-        )
+        MemoryEntry.insert(
+            id=row["id"], game_key=row["game_key"], entity=row["entity"],
+            relation=row["relation"], value=row["value"],
+            confidence=row["confidence"], status=row["status"],
+            source_round=row.get("source_round"), embedding=row.get("embedding"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        ).execute()
 
     def _insert_or_update(self, gk: str, item: dict, round_num: int,
                           now: str, force_add: bool) -> int | None:
@@ -377,44 +389,41 @@ class MemoryStore:
         new_id = None
 
         # 检查是否存在 active 条目
-        existing = self._conn.execute(
-            "SELECT id, entity, relation, value, confidence, status FROM memory_entries "
-            "WHERE game_key=? AND entity=? AND relation=? AND status='active'",
-            (gk, entity, relation),
-        ).fetchone()
+        existing = MemoryEntry.select(
+            MemoryEntry.id, MemoryEntry.entity, MemoryEntry.relation,
+            MemoryEntry.value, MemoryEntry.confidence, MemoryEntry.status,
+        ).where(
+            (MemoryEntry.game_key == gk)
+            & (MemoryEntry.entity == entity)
+            & (MemoryEntry.relation == relation)
+            & _ACTIVE,
+        ).first()
 
         if existing:
             if force_add:
-                existing_value = existing["value"]
-                existing_entity = existing["entity"]
-                existing_relation = existing["relation"]
-                if (existing_entity == entity and existing_relation == relation
-                        and existing_value == value):
-                    self._conn.execute(
-                        "UPDATE memory_entries SET source_round=?, updated_at=? "
-                        "WHERE id=?", (round_num, now, existing["id"]))
-                    return existing["id"]
-                self._conn.execute(
-                    "UPDATE memory_entries SET status='forgotten', updated_at=? "
-                    "WHERE id=?", (now, existing["id"]))
-                cur = self._conn.execute(
-                    "INSERT INTO memory_entries "
-                    "(game_key, entity, relation, value, confidence, status, source_round) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    (gk, entity, relation, value, confidence, status, round_num))
-                new_id = cur.lastrowid
+                if (existing.entity == entity and existing.relation == relation
+                        and existing.value == value):
+                    MemoryEntry.update(
+                        source_round=round_num, updated_at=now,
+                    ).where(MemoryEntry.id == existing.id).execute()
+                    return existing.id
+                MemoryEntry.update(
+                    status="forgotten", updated_at=now,
+                ).where(MemoryEntry.id == existing.id).execute()
+                new_id = MemoryEntry.insert(
+                    game_key=gk, entity=entity, relation=relation, value=value,
+                    confidence=confidence, status=status, source_round=round_num,
+                ).execute()
             else:
-                self._conn.execute(
-                    "UPDATE memory_entries SET value=?, confidence=?, status=?, "
-                    "source_round=?, updated_at=? WHERE id=?",
-                    (value, confidence, status, round_num, now, existing["id"]))
+                MemoryEntry.update(
+                    value=value, confidence=confidence, status=status,
+                    source_round=round_num, updated_at=now,
+                ).where(MemoryEntry.id == existing.id).execute()
         else:
-            cur = self._conn.execute(
-                "INSERT INTO memory_entries "
-                "(game_key, entity, relation, value, confidence, status, source_round) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (gk, entity, relation, value, confidence, status, round_num))
-            new_id = cur.lastrowid
+            new_id = MemoryEntry.insert(
+                game_key=gk, entity=entity, relation=relation, value=value,
+                confidence=confidence, status=status, source_round=round_num,
+            ).execute()
         return new_id
 
     # ---- 召回 ----
@@ -424,55 +433,73 @@ class MemoryStore:
         gk = str(game_key)
         if not keywords:
             return []
-        clauses = " OR ".join(["entity LIKE ?" for _ in keywords])
-        params = [f"%{kw}%" for kw in keywords]
-        params.insert(0, gk)
-        rows = self._conn.execute(
-            f"SELECT * FROM memory_entries WHERE game_key=? AND status='active' AND ({clauses}) "
-            "ORDER BY confidence DESC, updated_at DESC LIMIT ? OFFSET ?",
-            tuple(params + [max(1, int(limit)), max(0, int(offset))]),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        conditions = reduce(
+            or_,
+            (MemoryEntry.entity.ilike(f"%{kw}%") for kw in keywords),
+        )
+        rows = (
+            _active_query(gk)
+            .where(conditions)
+            .order_by(MemoryEntry.confidence.desc(), MemoryEntry.updated_at.desc())
+            .limit(max(1, int(limit)))
+            .offset(max(0, int(offset)))
+        )
+        return [dict(r.__data__) for r in rows]
+
+    def search_active_by_terms(self, game_key: str, terms: list[str],
+                               limit: int = 1000) -> list[dict]:
+        """按词项对 entity/relation/value 做 LIKE 粗筛（recall 增强通道）。"""
+        gk = str(game_key)
+        if not terms:
+            return []
+        conditions = reduce(or_, (
+            (
+                MemoryEntry.entity.ilike(f"%{term}%")
+                | MemoryEntry.relation.ilike(f"%{term}%")
+                | MemoryEntry.value.ilike(f"%{term}%")
+            )
+            for term in terms
+        ))
+        rows = (
+            _active_query(gk)
+            .where(conditions)
+            .order_by(MemoryEntry.updated_at.desc())
+            .limit(max(1, int(limit)))
+        )
+        return [dict(r.__data__) for r in rows]
 
     def list_entries(self, game_key: str, limit: int = 50, offset: int = 0) -> list[dict]:
         """List active memories for management UIs without weakening recall semantics."""
         if not self._conn:
             return []
-        rows = self._conn.execute(
-            "SELECT * FROM memory_entries WHERE game_key=? AND status='active' "
-            "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (str(game_key), max(1, int(limit)), max(0, int(offset))),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        rows = (
+            _active_query(game_key)
+            .order_by(MemoryEntry.updated_at.desc())
+            .limit(max(1, int(limit)))
+            .offset(max(0, int(offset)))
+        )
+        return [dict(row.__data__) for row in rows]
 
     def count_entries(self, game_key: str, keyword: str = "") -> int:
         """统计活跃记忆总数（可按 entity 关键词过滤，与 recall 口径一致）。"""
         if not self._conn:
             return 0
-        gk = str(game_key)
+        query = _active_query(game_key)
         if keyword:
-            row = self._conn.execute(
-                "SELECT COUNT(*) as cnt FROM memory_entries "
-                "WHERE game_key=? AND status='active' AND entity LIKE ?",
-                (gk, f"%{keyword}%"),
-            ).fetchone()
-        else:
-            row = self._conn.execute(
-                "SELECT COUNT(*) as cnt FROM memory_entries "
-                "WHERE game_key=? AND status='active'",
-                (gk,),
-            ).fetchone()
-        return row["cnt"] if row else 0
+            query = query.where(MemoryEntry.entity.ilike(f"%{keyword}%"))
+        return query.count()
 
     def recall_by_text(self, game_key: str, text: str, limit: int = 10) -> list[dict]:
         """根据文本内容召回匹配的记忆（检查 entity 是否出现在 text 中）。"""
         gk = str(game_key)
-        rows = self._conn.execute(
-            "SELECT * FROM memory_entries WHERE game_key=? AND status='active' "
-            "ORDER BY updated_at DESC LIMIT 500",
-            (gk,),
-        ).fetchall()
-        matched = [dict(r) for r in rows if r["entity"] and r["entity"] in text]
+        rows = (
+            _active_query(gk)
+            .order_by(MemoryEntry.updated_at.desc())
+            .limit(500)
+        )
+        matched = [
+            dict(r.__data__) for r in rows if r.entity and r.entity in text
+        ]
         return matched[:limit]
 
     # ---- 向量召回 ----
@@ -483,15 +510,16 @@ class MemoryStore:
         from src.memory.embedding import cosine_similarity
 
         gk = str(game_key)
-        rows = self._conn.execute(
-            "SELECT * FROM memory_entries WHERE game_key=? AND status='active' "
-            "AND embedding IS NOT NULL ORDER BY updated_at DESC LIMIT 500",
-            (gk,),
-        ).fetchall()
+        rows = (
+            _active_query(gk)
+            .where(MemoryEntry.embedding.is_null(False))
+            .order_by(MemoryEntry.updated_at.desc())
+            .limit(500)
+        )
 
         scored: list[tuple[float, dict]] = []
         for row in rows:
-            entry = dict(row)
+            entry = dict(row.__data__)
             emb_json = entry.get("embedding")
             if not emb_json:
                 continue
@@ -509,10 +537,9 @@ class MemoryStore:
     async def store_embedding(self, entry_id: int, embedding: list[float]) -> None:
         """为指定记忆条目存储向量。"""
         async with self._lock:
-            self._conn.execute(
-                "UPDATE memory_entries SET embedding=? WHERE id=?",
-                (json.dumps(embedding), entry_id),
-            )
+            MemoryEntry.update(
+                embedding=json.dumps(embedding),
+            ).where(MemoryEntry.id == entry_id).execute()
             self._conn.commit()
 
     async def _embed_new_entries(self, entry_ids: list[int]) -> None:
@@ -521,13 +548,10 @@ class MemoryStore:
             return
         for eid in entry_ids:
             try:
-                row = self._conn.execute(
-                    "SELECT entity, relation, value FROM memory_entries WHERE id=?",
-                    (eid,),
-                ).fetchone()
+                row = MemoryEntry.get_or_none(MemoryEntry.id == eid)
                 if not row:
                     continue
-                text = f"{row['entity']}: {row['relation']} → {row['value']}"
+                text = f"{row.entity}: {row.relation} → {row.value}"
                 emb = await self.embedding_client.embed(text)
                 if emb:
                     await self.store_embedding(eid, emb)
@@ -561,10 +585,9 @@ class MemoryStore:
             async with self._lock:
                 for i, entry in enumerate(entries):
                     if i < len(embeddings) and embeddings[i]:
-                        self._conn.execute(
-                            "UPDATE memory_entries SET embedding=? WHERE id=?",
-                            (json.dumps(embeddings[i]), entry["id"]),
-                        )
+                        MemoryEntry.update(
+                            embedding=json.dumps(embeddings[i]),
+                        ).where(MemoryEntry.id == entry["id"]).execute()
                         count += 1
                 self._conn.commit()
             logger.info("批量 embedding 完成: %d/%d", count, len(entries))
@@ -575,29 +598,26 @@ class MemoryStore:
 
     def get_unembedded_count(self, game_key: str) -> int:
         """获取尚未向量化的记忆数量。"""
-        gk = str(game_key)
-        row = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM memory_entries "
-            "WHERE game_key=? AND status='active' AND embedding IS NULL",
-            (gk,),
-        ).fetchone()
-        return row["cnt"] if row else 0
+        return (
+            _active_query(game_key)
+            .where(MemoryEntry.embedding.is_null())
+            .count()
+        )
 
     def get_unembedded(self, game_key: str, limit: int = 100) -> list[dict]:
         """获取尚未向量化的记忆条目。"""
-        gk = str(game_key)
-        rows = self._conn.execute(
-            "SELECT * FROM memory_entries "
-            "WHERE game_key=? AND status='active' AND embedding IS NULL "
-            "LIMIT ?", (gk, limit),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        rows = (
+            _active_query(game_key)
+            .where(MemoryEntry.embedding.is_null())
+            .limit(limit)
+        )
+        return [dict(r.__data__) for r in rows]
 
     def get_all_unembedded(self, limit: int = 100) -> list[dict]:
         """获取所有游戏中尚未向量化的记忆条目。"""
-        rows = self._conn.execute(
-            "SELECT * FROM memory_entries "
-            "WHERE status='active' AND embedding IS NULL "
-            "LIMIT ?", (limit,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        rows = (
+            MemoryEntry.select()
+            .where(_ACTIVE & MemoryEntry.embedding.is_null())
+            .limit(limit)
+        )
+        return [dict(r.__data__) for r in rows]

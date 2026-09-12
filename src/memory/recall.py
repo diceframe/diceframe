@@ -143,7 +143,7 @@ def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
     ngrams = _extract_ngrams(text, n=2)
 
     # P2-H：先用 LIKE 按文本实体词粗筛，避免固定 LIMIT 500 漏掉靠后但相关的旧记忆；
-    # 无实体词时回退最近 500 条。SQL 参数化防注入，词数限制防 OR 子句过长。
+    # 无实体词时回退最近 500 条。词数限制防 OR 子句过长。
     terms: list[str] = []
     seen: set[str] = set()
     for entity in entities:
@@ -153,21 +153,9 @@ def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
             if len(terms) >= 20:
                 break
     if terms:
-        placeholders = " OR ".join(["entity LIKE ? OR relation LIKE ? OR value LIKE ?"] * len(terms))
-        params: list = []
-        for term in terms:
-            params += [f"%{term}%"] * 3
-        all_rows = store._conn.execute(
-            f"SELECT * FROM memory_entries WHERE game_key=? AND status='active' AND ({placeholders}) "
-            "ORDER BY updated_at DESC LIMIT 1000",
-            (gk, *params),
-        ).fetchall()
+        all_rows = store.search_active_by_terms(gk, terms, limit=1000)
     else:
-        all_rows = store._conn.execute(
-            "SELECT * FROM memory_entries WHERE game_key=? AND status='active' "
-            "ORDER BY updated_at DESC LIMIT 500",
-            (gk,),
-        ).fetchall()
+        all_rows = store.list_entries(gk, limit=500)
 
     scored: list[tuple[int, dict]] = []
     for row in all_rows:

@@ -5,3 +5,4 @@ aiohttp>=3.9,<4
 cryptography>=43,<46
 edge-tts>=7,<8
 Pillow>=10,<13
+peewee>=4.5,<5
