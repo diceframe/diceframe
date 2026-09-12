@@ -9,6 +9,7 @@ Combat Engine 权威结算。
 from __future__ import annotations
 
 import copy
+import json
 import random
 from types import SimpleNamespace
 
@@ -57,8 +58,10 @@ class _FakeLLM:
         self.arguments = arguments
         self.error = error
         self.tool_name = tool_name
+        self.calls = []
 
     async def call_tools(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         if self.error is not None:
             raise self.error
         tool_calls = (
@@ -228,6 +231,29 @@ async def test_plan_requires_tool_call_and_validates_output() -> None:
         await plan_temporary_encounter(instance, {}, _FakeLLM(error=RuntimeError("llm timeout")))
 
 
+@pytest.mark.asyncio
+async def test_generation_context_reads_dnd2024_canonical_party_fields() -> None:
+    runtime, instance = _runtime_instance()
+    llm = _FakeLLM(arguments=copy.deepcopy(_WOLF_RAW))
+
+    await plan_temporary_encounter(instance, {}, llm)
+
+    assert len(llm.calls) == 1
+    context = json.loads(llm.calls[0][0][1])
+    members = context["party"]["members"]
+    by_name = {member["name"]: member for member in members}
+    canonical = instance.players["gm"]["character_sheet"]["ruleset_character"]
+    first_class = canonical["build"]["class_levels"][0]
+    assert by_name[canonical["identity"]["name"]] == {
+        "name": canonical["identity"]["name"],
+        "class": first_class["class_ref"],
+        "level": canonical["build"]["level"],
+        "hp": canonical["resources"]["hp"],
+        "max_hp": canonical["resources"]["max_hp"],
+        "armor_class": canonical["derived"]["armor_class"],
+    }
+
+
 # ---- service：权限 / 覆盖拒绝 / 无副作用 / 失败 ----
 
 
@@ -275,8 +301,48 @@ async def test_player_cannot_plan_temporary_encounter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_pending_encounter_rejects_without_calling_llm() -> None:
+    runtime, instance = _runtime_instance()
+    registry = _SaveRegistry()
+    registry.items[tuple(instance.game_key)] = instance
+    llm = _FakeLLM(arguments=copy.deepcopy(_WOLF_RAW))
+    deps = _dependencies(runtime, registry, instance, llm)
+
+    result = await ruleset_gameplay.plan_temporary_encounter(
+        deps, "test|temp-encounter|bot", "gm", True,
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "NO_PENDING_ENCOUNTER"
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_existing_legal_preset_rejects_without_calling_llm() -> None:
+    runtime, instance = _runtime_instance()
+    apply_ruleset_combat_signal(instance, {"combat_command": "start"}, runtime)
+    preset_id = runtime._combat_engine(instance).encounter_presets()[0]["id"]
+    instance.ruleset_state["encounter_request"]["encounter_preset_id"] = preset_id
+    registry = _SaveRegistry()
+    registry.items[tuple(instance.game_key)] = instance
+    llm = _FakeLLM(arguments=copy.deepcopy(_WOLF_RAW))
+    deps = _dependencies(runtime, registry, instance, llm)
+
+    result = await ruleset_gameplay.plan_temporary_encounter(
+        deps, "test|temp-encounter|bot", "gm", True,
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "ENCOUNTER_ALREADY_PREPARED"
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
 async def test_story_encounter_cannot_be_overridden() -> None:
     runtime, instance = _runtime_instance(adventure=True, walk_to_combat=True)
+    instance.ruleset_state["encounter_request"] = {
+        "status": "pending", "encounter_preset_id": "first_skirmish",
+    }
     registry = _SaveRegistry()
     registry.items[tuple(instance.game_key)] = instance
     deps = _dependencies(runtime, registry, instance, _FakeLLM(arguments=copy.deepcopy(_WOLF_RAW)))

@@ -130,15 +130,44 @@ def _generation_context(instance: Any, campaign: dict[str, Any]) -> dict[str, An
     for uid, player in players.items():
         sheet = player.get("character_sheet") if isinstance(player, dict) else {}
         sheet = sheet if isinstance(sheet, dict) else {}
-        profile = sheet.get("ruleset_character")
-        profile = profile if isinstance(profile, dict) else sheet
+        canonical = sheet.get("ruleset_character")
+        canonical = canonical if isinstance(canonical, dict) else {}
+        identity = canonical.get("identity")
+        identity = identity if isinstance(identity, dict) else {}
+        build = canonical.get("build")
+        build = build if isinstance(build, dict) else {}
+        resources = canonical.get("resources")
+        resources = resources if isinstance(resources, dict) else {}
+        derived = canonical.get("derived")
+        derived = derived if isinstance(derived, dict) else {}
+        class_levels = build.get("class_levels")
+        class_levels = class_levels if isinstance(class_levels, list) else []
+        primary_class = ""
+        if class_levels and isinstance(class_levels[0], dict):
+            primary_class = str(class_levels[0].get("class_ref") or "")
         member = {
-            "name": str(profile.get("character_name") or sheet.get("character_name") or uid)[:60],
-            "class": str(profile.get("class") or profile.get("class_name") or "")[:40],
-            "level": profile.get("level"),
-            "hp": profile.get("hp"),
-            "max_hp": profile.get("max_hp"),
-            "armor_class": profile.get("armor_class"),
+            "name": str(
+                identity.get("name")
+                or canonical.get("character_name")
+                or sheet.get("character_name")
+                or uid
+            )[:60],
+            "class": str(
+                primary_class
+                or canonical.get("class")
+                or canonical.get("class_name")
+                or sheet.get("class")
+                or sheet.get("class_name")
+                or ""
+            )[:80],
+            "level": build.get("level", canonical.get("level", sheet.get("level"))),
+            "hp": resources.get("hp", canonical.get("hp", sheet.get("hp"))),
+            "max_hp": resources.get(
+                "max_hp", canonical.get("max_hp", sheet.get("max_hp")),
+            ),
+            "armor_class": derived.get(
+                "armor_class", canonical.get("armor_class", sheet.get("armor_class")),
+            ),
         }
         members.append({key: value for key, value in member.items() if value not in (None, "")})
     tutorial = campaign.get("tutorial") if isinstance(campaign, dict) else None

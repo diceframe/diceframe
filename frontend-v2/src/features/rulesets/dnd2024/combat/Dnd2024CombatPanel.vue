@@ -205,6 +205,13 @@ const requestedCombatPreset = computed(() => {
     ? selectableEncounterPresets.value.find(preset => preset.id === presetId)
     : undefined
 })
+const canPlanTemporaryEncounter = computed(() => Boolean(
+  props.isGm
+  && combat.value?.status !== 'active'
+  && narrativeCombatPending.value
+  && encounterMode.value !== 'story'
+  && !requestedCombatPreset.value
+))
 const attackAction = computed(() => action('attack'))
 const spellAction = computed(() => action('cast_spell'))
 const moveAction = computed(() => action('move'))
@@ -761,7 +768,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             <button type="button" @click="emit('navigate', 'campaign')">
               <NIcon :component="PlayForwardOutline" />{{ copy.returnToAdventure }}
             </button>
-            <button v-if="isGm" type="button" class="combat-primary" :disabled="aiBusy" @click="planTemporaryEncounter">
+            <button v-if="canPlanTemporaryEncounter" type="button" class="combat-primary" :disabled="aiBusy" @click="planTemporaryEncounter">
               <NIcon :component="SparklesOutline" />{{ aiBusy ? copy.aiPreparing : copy.aiPrepare }}
             </button>
             <button v-if="isGm" type="button" @click="declareSandboxEncounter">
@@ -839,7 +846,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <button type="button" class="manual-encounter-toggle" @click="openManualEncounter">
                 <NIcon :component="ShieldOutline" />{{ copy.manualEncounter }}
               </button>
-              <button type="button" class="ai-encounter-toggle" :disabled="aiBusy" @click="planTemporaryEncounter">
+              <button v-if="canPlanTemporaryEncounter" type="button" class="ai-encounter-toggle" :disabled="aiBusy" @click="planTemporaryEncounter">
                 <NIcon :component="SparklesOutline" />{{ aiBusy ? copy.aiPreparing : copy.aiPrepare }}
               </button>
             </div>
