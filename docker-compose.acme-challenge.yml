@@ -1,0 +1,18 @@
+# 发布 Let's Encrypt http-01 验证端口（可选叠加文件）。
+#
+# ACME 的验证响应器会在**容器内**监听 TRPG_TLS_ACME_CHALLENGE_PORT（默认 80），
+# 校验方要从公网访问它，所以必须把同一个端口发布到宿主机：
+#
+#   1) 在 .env 里设置（不设则用默认 80）：
+#        TRPG_TLS_MODE=lets_encrypt
+#        TRPG_TLS_ACME_CHALLENGE_PORT=80
+#   2) docker compose -f docker-compose.yml -f docker-compose.acme-challenge.yml up -d
+#
+# 只把自定义端口透传进容器而不发布，验证一定失败 —— 因此这里发布的端口与
+# TRPG_TLS_ACME_CHALLENGE_PORT 保持同一个变量，不会出现"配置 8080、发布 80"。
+services:
+  web:
+    environment:
+      TRPG_TLS_ACME_CHALLENGE_PORT: "${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"
+    ports:
+      - "${TRPG_TLS_ACME_CHALLENGE_PORT:-80}:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"

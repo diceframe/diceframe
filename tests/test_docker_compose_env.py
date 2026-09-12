@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "docker-compose.yml"
 EXTRA_HTTP = ROOT / "docker-compose.extra-http-port.yml"
 EXTRA_HTTPS = ROOT / "docker-compose.extra-https-port.yml"
+ACME = ROOT / "docker-compose.acme-challenge.yml"
 
 # src/web_transport/config.py 里对外支持的 TLS 环境变量。
 SUPPORTED_TLS_ENV = (
@@ -107,6 +108,25 @@ def test_base_compose_publishes_only_the_main_port() -> None:
     """默认不额外占用宿主端口：附加端口必须由用户显式叠加文件。"""
 
     assert _published_ports(COMPOSE) == ['"${DICEFRAME_HTTP_PORT:-9876}:9876"']
+
+
+def test_acme_challenge_override_publishes_the_configured_port() -> None:
+    """ACME 验证端口必须"配多少发布多少"，否则 http-01 一定失败。"""
+
+    assert _compose_env_keys(ACME) == {"TRPG_TLS_ACME_CHALLENGE_PORT"}
+    assert _published_ports(ACME) == [
+        '"${TRPG_TLS_ACME_CHALLENGE_PORT:-80}:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"'
+    ]
+
+
+def test_documented_docker_overrides_exist() -> None:
+    """文档里点名的叠加文件必须真实存在，避免用户照抄命令却报找不到文件。"""
+
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    for name in ("extra-http-port", "extra-https-port", "acme-challenge"):
+        path = ROOT / f"docker-compose.{name}.yml"
+        assert path.is_file()
+        assert f"docker-compose.{name}.yml" in example
 
 
 def test_parser_ignores_comments() -> None:
