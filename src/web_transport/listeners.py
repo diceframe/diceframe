@@ -64,18 +64,27 @@ class ListenerPlan:
 def internal_api_listener(plan: Sequence[ListenerPlan]) -> ListenerPlan | None:
     """从监听计划里挑一个内部客户端能连上的监听器。
 
-    优先级：显式回环 > 通配（按同族回环连接）> 第一个具体地址。真正启用后还要用
-    :func:`resolve_internal_listener` 对照“实际成功启动”的列表复核。
+    内部客户端（插件）是普通 aiohttp 会话，不做任何 TLS 信任配置：主端口自签名、
+    或证书域名与本机回环/IP 地址不匹配时都会验证失败。因此存在明文 HTTP 监听器
+    时优先选它，外部继续走 HTTPS；同一 scheme 内再按 显式回环 > 通配（按同族回环
+    连接）> 第一个具体地址 选。真正启用后还要用 :func:`resolve_internal_listener`
+    对照“实际成功启动”的列表复核。
     """
 
     loopbacks = {"127.0.0.1", "::1", "localhost"}
-    for item in plan:
-        if item.host in loopbacks:
-            return item
-    for item in plan:
-        if item.host in {"", "*", "0.0.0.0", "::"}:
-            return item
-    return plan[0] if plan else None
+    wildcards = {"", "*", "0.0.0.0", "::"}
+
+    def pick(items: list[ListenerPlan]) -> ListenerPlan | None:
+        for item in items:
+            if item.host in loopbacks:
+                return item
+        for item in items:
+            if item.host in wildcards:
+                return item
+        return items[0] if items else None
+
+    plain = [item for item in plan if not item.tls]
+    return pick(plain) or pick([item for item in plan if item.tls])
 
 
 def internal_api_base(listener: ListenerPlan) -> str:
@@ -100,7 +109,8 @@ def resolve_internal_listener(
         return wanted, ""
     if not started:
         return None, f"内部 API 期望的监听器 {wanted.address} 未启动，且没有其它可用监听器"
-    fallback = started[0]
+    # 回退也按同样规则在"实际启动"里挑最适合内部的那个，而不是简单取第一个。
+    fallback = internal_api_listener(started) or started[0]
     return fallback, (
         f"内部 API 期望的监听器 {wanted.address} 未成功监听，"
         f"已改用 {fallback.address}"

@@ -411,3 +411,39 @@ def test_version_below_semantics():
     assert version_below("2.0.0", "1.9.12") is True
 
 
+@pytest.mark.asyncio
+async def test_restart_api_consumers_only_restarts_running_http_plugins(tmp_path, monkeypatch):
+    """内部 API 基址被修正后，只有"在运行 + 依赖 diceframe.http"的插件需要重启。
+
+    插件进程在 spawn 时快照 TRPG_API_BASE；基址回退到实际成功的监听器后，
+    未启动的插件下次 start 自然读到新值，只有运行中的必须重启进程。
+    """
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+
+    def runtime_with(permissions, process):
+        return SimpleNamespace(
+            manifest={"permissions": permissions},
+            schema={},
+            config={},
+            process=process,
+        )
+
+    host.plugins = {
+        "http-running": runtime_with(["diceframe.http"], SimpleNamespace(returncode=None)),
+        "http-exited": runtime_with(["diceframe.http"], SimpleNamespace(returncode=0)),
+        "http-no-process": runtime_with(["diceframe.http"], None),
+        "other-running": runtime_with(["plugin.config"], SimpleNamespace(returncode=None)),
+    }
+    restarted: list[str] = []
+
+    async def fake_restart(plugin_id, *, require_enabled=True):
+        restarted.append(plugin_id)
+
+    monkeypatch.setattr(host, "restart", fake_restart)
+    count = await host.restart_api_consumers()
+
+    assert restarted == ["http-running"]
+    assert count == 1
+
+

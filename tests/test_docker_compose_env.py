@@ -110,13 +110,15 @@ def test_base_compose_publishes_only_the_main_port() -> None:
     assert _published_ports(COMPOSE) == ['"${DICEFRAME_HTTP_PORT:-9876}:9876"']
 
 
-def test_acme_challenge_override_publishes_the_configured_port() -> None:
-    """ACME 验证端口必须"配多少发布多少"，否则 http-01 一定失败。"""
+def test_acme_challenge_override_maps_host_80_to_the_container_port() -> None:
+    """http-01 校验方只访问公网 80：映射必须是 宿主机 80 → 容器 challenge 端口。
+
+    "配置 8080、发布 8080" 对 Let's Encrypt 无效 —— 它不会去访问 8080；容器内
+    改监听 8080 时，宿主机侧仍要固定 80。
+    """
 
     assert _compose_env_keys(ACME) == {"TRPG_TLS_ACME_CHALLENGE_PORT"}
-    assert _published_ports(ACME) == [
-        '"${TRPG_TLS_ACME_CHALLENGE_PORT:-80}:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"'
-    ]
+    assert _published_ports(ACME) == ['"80:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"']
 
 
 def test_documented_docker_overrides_exist() -> None:

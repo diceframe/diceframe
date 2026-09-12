@@ -238,6 +238,66 @@ def test_internal_api_uses_an_extra_listener_when_the_primary_failed() -> None:
     assert chosen is None and "没有其它可用监听器" in warning
 
 
+def test_internal_api_listener_prefers_plain_http_over_tls(tmp_path: Path) -> None:
+    """插件客户端不做 TLS 信任配置：有明文 HTTP 监听器时必须优先于 HTTPS 主端口。"""
+
+    transport = _tls_transport(tmp_path)
+    plan, _warnings = build_listener_plan(
+        hosts=["0.0.0.0"], port=18000, transport=transport, http_port=18080,
+    )
+    assert [(item.port, item.scheme) for item in plan] == [(18000, "https"), (18080, "http")]
+
+    chosen = internal_api_listener(plan)
+    assert chosen is plan[1]
+    assert internal_api_base(chosen) == "http://127.0.0.1:18080"
+
+
+def test_internal_api_listener_scheme_outranks_reachability() -> None:
+    """明文 HTTP 优先于任何 HTTPS 监听器：验证必败的回环 HTTPS 不如可直连的明文。"""
+
+    plan = [
+        ListenerPlan(host="127.0.0.1", port=18000, tls=True),
+        ListenerPlan(host="10.0.0.9", port=18080, tls=False),
+    ]
+    assert internal_api_listener(plan) is plan[1]
+
+
+def test_internal_api_listener_keeps_https_when_no_plain_listener(tmp_path: Path) -> None:
+    """只有 HTTPS 时行为不变：仍按 回环 > 通配 > 具体地址 挑。"""
+
+    transport = _tls_transport(tmp_path)
+    plan, _warnings = build_listener_plan(
+        hosts=["0.0.0.0"], port=18000, transport=transport,
+    )
+    assert internal_api_base(internal_api_listener(plan)) == "https://127.0.0.1:18000"
+
+
+def test_internal_api_fallback_applies_the_same_preference() -> None:
+    """期望的监听器没起来时，回退也要按同样规则挑 started 里最适合内部的那个。"""
+
+    # 期望的明文 18080 失败：实际起了 HTTPS 主端口与明文具体地址，
+    # 回退必须仍选明文，而不是 started 里的第一个 HTTPS。
+    plan = [
+        ListenerPlan(host="127.0.0.1", port=18000, tls=True),
+        ListenerPlan(host="127.0.0.1", port=18080, tls=False),
+        ListenerPlan(host="10.0.0.9", port=19000, tls=False),
+    ]
+    chosen, warning = resolve_internal_listener(plan, [plan[0], plan[2]])
+    assert chosen == plan[2]
+    assert internal_api_base(chosen) == "http://10.0.0.9:19000"
+    assert "未成功监听" in warning
+
+    # 回退同样优先"按同族回环连接"的通配地址，而不是 started 里的第一个具体地址。
+    plan = [
+        ListenerPlan(host="127.0.0.1", port=18000, tls=False),
+        ListenerPlan(host="10.0.0.9", port=19000, tls=False),
+        ListenerPlan(host="0.0.0.0", port=18080, tls=False),
+    ]
+    chosen, warning = resolve_internal_listener(plan, [plan[1], plan[2]])
+    assert chosen == plan[2]
+    assert internal_api_base(chosen) == "http://127.0.0.1:18080"
+
+
 @pytest.mark.asyncio
 async def test_dual_listeners_actually_serve_http_and_https(tmp_path: Path) -> None:
     """真实起两个监听器：HTTPS 主端口 + HTTP 附加端口，两边都要能连上。"""
