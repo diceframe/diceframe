@@ -24,7 +24,7 @@ type GalleryCard = {
   adventureName: string
 }
 
-const DEFAULT_STYLE: GmStyle = { tone: '', verbosity: 'normal', custom_instructions: '' }
+const DEFAULT_STYLE: GmStyle = { tone: '', verbosity: 'normal', pace: 'normal', custom_instructions: '' }
 
 const { locale, t } = useLocale()
 const router = useRouter()
@@ -372,6 +372,14 @@ function coverStyle(card: GalleryCard): Record<string, string> {
               <option value="brief">{{ t('worldsVerbosityBrief') }}</option>
               <option value="normal">{{ t('worldsVerbosityNormal') }}</option>
               <option value="detailed">{{ t('worldsVerbosityDetailed') }}</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ t('gmStylePace') }}</span>
+            <select v-model="styleForm.pace">
+              <option value="slow">{{ t('gmStylePaceSlow') }}</option>
+              <option value="normal">{{ t('gmStylePaceNormal') }}</option>
+              <option value="fast">{{ t('gmStylePaceFast') }}</option>
             </select>
           </label>
           <label>

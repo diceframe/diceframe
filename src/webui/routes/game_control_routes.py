@@ -127,6 +127,28 @@ async def api_set_narrative_perspective(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 
+async def api_set_gm_style(request: web.Request) -> web.Response:
+    """GM-only：设置当前对局叙事风格覆盖（gm_style=null 恢复跟随世界）。"""
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    if not is_game_gm(
+        inst,
+        request.get("user_id", ""),
+        bool(request.get("owner_authenticated", False)),
+    ):
+        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    body = await request.json()
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"ok": False, "error": "GM 叙事风格设置无效"}, status=400,
+        )
+    result = await api.set_gm_style(gk, body.get("gm_style"))
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
 async def api_set_luck_timeout(request: web.Request) -> web.Response:
     """GM 按局设置幸运超时秒数（0=禁用，异步局建议 0，实时局默认 60）。"""
     api = _get_api(request)

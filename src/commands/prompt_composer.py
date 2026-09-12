@@ -176,7 +176,12 @@ class PromptComposer:
         """构造系统 prompt：基础 prompt + 规则附录 + 世界 GM 风格 + 剧情追踪 + 多人权限范围。"""
         language = getattr(instance, "language", DEFAULT_LANGUAGE)
         gm_prompt = self.load_gm_prompt(rule_appendix, language)
-        style_section = render_gm_style_section(world_data, language)
+        # 有效风格二选一：对局覆盖非 None 时只渲染覆盖，否则渲染世界 gm_style。
+        style_section = render_gm_style_section(
+            world_data,
+            language,
+            override=getattr(instance, "gm_style_override", None),
+        )
         if style_section:
             gm_prompt = gm_prompt + "\n\n" + style_section
         plot_text = instance.plot_tracker.format_for_context() if instance.plot_tracker else ""

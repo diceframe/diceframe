@@ -240,6 +240,23 @@ class GameControlService:
             "narrative_perspective": instance.narrative_perspective,
         }
 
+    async def set_gm_style(self, game_key: str, raw: Any) -> dict[str, Any]:
+        """当前对局 GM 叙事风格覆盖：None=恢复跟随世界，dict=显式覆盖。"""
+        instance = self._instance(game_key)
+        if not instance:
+            return {"ok": False, "error": "游戏不存在"}
+        if raw is not None and not isinstance(raw, dict):
+            return {"ok": False, "error": "GM 叙事风格设置无效"}
+        try:
+            instance.set_gm_style_override(raw)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        await self._dependencies.save_instance(instance)
+        return {
+            "ok": True,
+            "gm_style_override": instance.gm_style_override,
+        }
+
     async def mark_health_event(
         self,
         game_key: str,

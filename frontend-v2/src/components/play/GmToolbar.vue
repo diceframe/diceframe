@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import {
   PlayForwardOutline, ArrowUndoOutline, ShareOutline, BugOutline,
@@ -10,7 +10,7 @@ import {
   CashOutline,
   StopCircleOutline,
 } from '@vicons/ionicons5'
-import type { GameDetail, Player } from '@/api/types'
+import type { GameDetail, GmStyle, Player } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean; recapBusy?: boolean }>()
@@ -26,6 +26,7 @@ const emit = defineEmits<{
   'bot-bind': []
   mode: []
   'narrative-perspective': [perspective: 'auto' | 'immersive' | 'third_person']
+  'gm-style': [payload: { gm_style: GmStyle | null }]
   'advancement-control': [payload: Record<string, string | number>]
   access: []
   command: [text: string]
@@ -46,6 +47,54 @@ const percTarget = ref('')
 const percText = ref('')
 const xpAwards = reactive<Record<string, number>>({})
 const { t } = useLocale()
+
+// 当前对局 GM 叙事风格：detail.gm_style_override === null/undefined → 跟随世界；
+// 显式 dict（含全缺省）→ 对局覆盖。draft 用纯 string 承载控件值，保存时收敛。
+const gmStyleFollowWorld = computed(() => props.detail?.gm_style_override == null)
+const gmStyleDraft = reactive({ tone: '', verbosity: 'normal', pace: 'normal', custom_instructions: '' })
+watch(() => props.detail?.gm_style_override, (override) => {
+  const style: GmStyle = override ?? {}
+  gmStyleDraft.tone = String(style.tone ?? '')
+  gmStyleDraft.verbosity = String(style.verbosity ?? 'normal')
+  gmStyleDraft.pace = String(style.pace ?? 'normal')
+  gmStyleDraft.custom_instructions = String(style.custom_instructions ?? '')
+}, { immediate: true })
+
+const tonePresets = [
+  { value: '', key: 'gmStyleToneDefault' },
+  { value: 'literary', key: 'gmStyleToneLiterary' },
+  { value: 'direct', key: 'gmStyleToneDirect' },
+  { value: 'humorous', key: 'gmStyleToneHumorous' },
+  { value: 'dark', key: 'gmStyleToneDark' },
+] as const
+const verbosityOptions = [
+  { value: 'brief', key: 'gmStyleVerbosityBrief' },
+  { value: 'normal', key: 'gmStyleVerbosityNormal' },
+  { value: 'detailed', key: 'gmStyleVerbosityDetailed' },
+] as const
+const paceOptions = [
+  { value: 'slow', key: 'gmStylePaceSlow' },
+  { value: 'normal', key: 'gmStylePaceNormal' },
+  { value: 'fast', key: 'gmStylePaceFast' },
+] as const
+
+function saveGmStyle() {
+  // draft 用宽松 string 承载控件值；服务端 normalize 才是取值 authority。
+  emit('gm-style', { gm_style: { ...gmStyleDraft } as GmStyle })
+}
+function setGmStyleField(field: 'tone' | 'verbosity' | 'pace', value: string) {
+  gmStyleDraft[field] = value
+  saveGmStyle()
+}
+function toggleGmStyleFollowWorld(event: Event) {
+  if ((event.target as HTMLInputElement).checked) {
+    emit('gm-style', { gm_style: null })
+    return
+  }
+  // 关闭"跟随世界"= 显式中性覆盖（区别于 null），随后控件可编辑。
+  Object.assign(gmStyleDraft, { tone: '', verbosity: 'normal', pace: 'normal', custom_instructions: '' })
+  saveGmStyle()
+}
 
 function run() { if (cmdText.value.trim()) { emit('command', cmdText.value.trim()); cmdText.value = '' } }
 function sendPerc() { if (percTarget.value && percText.value.trim()) { emit('perception', percTarget.value, percText.value.trim()); percText.value = '' } }
@@ -118,6 +167,45 @@ function awardXp(userId: string) {
           </select>
           <small>{{ t('narrativeChangeHint') }}</small>
         </label>
+        <label class="gm-narrative-setting">
+          <span>{{ t('gmStyleTitle') }}</span>
+          <label class="gm-style-follow">
+            <input type="checkbox" :checked="gmStyleFollowWorld" @change="toggleGmStyleFollowWorld">
+            <span>{{ t('gmStyleFollowWorld') }}</span>
+          </label>
+          <small>{{ t('gmStyleHint') }}</small>
+        </label>
+        <template v-if="!gmStyleFollowWorld">
+          <label class="gm-narrative-setting">
+            <span>{{ t('gmStyleTone') }}</span>
+            <div class="gm-style-options">
+              <button v-for="preset in tonePresets" :key="preset.value" type="button"
+                      :class="{ active: gmStyleDraft.tone === preset.value }"
+                      @click="setGmStyleField('tone', preset.value)">{{ t(preset.key) }}</button>
+            </div>
+          </label>
+          <label class="gm-narrative-setting">
+            <span>{{ t('gmStyleVerbosity') }}</span>
+            <div class="gm-style-options">
+              <button v-for="option in verbosityOptions" :key="option.value" type="button"
+                      :class="{ active: gmStyleDraft.verbosity === option.value }"
+                      @click="setGmStyleField('verbosity', option.value)">{{ t(option.key) }}</button>
+            </div>
+          </label>
+          <label class="gm-narrative-setting">
+            <span>{{ t('gmStylePace') }}</span>
+            <div class="gm-style-options">
+              <button v-for="option in paceOptions" :key="option.value" type="button"
+                      :class="{ active: gmStyleDraft.pace === option.value }"
+                      @click="setGmStyleField('pace', option.value)">{{ t(option.key) }}</button>
+            </div>
+          </label>
+          <label class="gm-narrative-setting">
+            <span>{{ t('gmStyleCustom') }}</span>
+            <textarea v-model="gmStyleDraft.custom_instructions" rows="3" maxlength="2000"
+                      :placeholder="t('gmStyleCustomPlaceholder')" @change="saveGmStyle"></textarea>
+          </label>
+        </template>
         <button @click="emit('access')"><NIcon :component="detail.player_access_open === false ? LockOpenOutline : LockClosedOutline" size="14" /> {{ detail.player_access_open === false ? t('openAccess') : t('closeAccess') }}</button>
       </div>
     </details>

@@ -507,6 +507,30 @@
   line-height: 1.4;
 }
 
+.gm-style-follow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--df-text-primary);
+}
+
+.gm-style-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gm-style-options button {
+  flex: 1 1 auto;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.gm-style-options button.active {
+  border-color: var(--df-accent, #6c9ef8);
+  color: var(--df-accent, #6c9ef8);
+}
+
 .gm-advancement-settings,
 .gm-advancement-players {
   display: grid;

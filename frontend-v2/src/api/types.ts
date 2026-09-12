@@ -461,6 +461,7 @@ export interface GameSummary {
   language?: string
   solo_mode?: boolean
   narrative_perspective?: 'auto' | 'immersive' | 'third_person' | string
+  gm_style_override?: GmStyle | null
   gm_uid?: string
   round_number?: number
   player_count?: number
@@ -1315,6 +1316,7 @@ export interface BotBindTokenResponse {
 export interface GmStyle {
   tone?: string
   verbosity?: 'brief' | 'normal' | 'detailed'
+  pace?: 'slow' | 'normal' | 'fast'
   custom_instructions?: string
 }
 

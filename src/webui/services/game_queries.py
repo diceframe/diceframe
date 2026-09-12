@@ -189,6 +189,7 @@ def game_detail(
         "narrative_perspective": getattr(
             instance, "narrative_perspective", "auto"
         ),
+        "gm_style_override": getattr(instance, "gm_style_override", None),
         "max_players": instance.max_players,
         "multiplayer": instance.multiplayer_status(),
         "rest_session": public_rest_session(instance),

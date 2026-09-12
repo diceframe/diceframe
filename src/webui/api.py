@@ -1302,6 +1302,9 @@ class WebAPI:
             game_key, perspective,
         )
 
+    async def set_gm_style(self, game_key: str, raw: Any) -> dict[str, Any]:
+        return await self._game_controls.set_gm_style(game_key, raw)
+
     async def mark_game_health_event(
         self,
         game_key: str,
