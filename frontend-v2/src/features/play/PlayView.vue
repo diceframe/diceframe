@@ -5,7 +5,7 @@ import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, Ma
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, hasAccessToken, isNotFoundError } from '@/api/client'
 import { currentBackendUrl, isStandaloneFrontend } from '@/api/connection'
-import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, RulesetDirectorProposal, RulesetGameplayView, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
+import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RuleMeta, RulesetDirectorProposal, RulesetGameplayView, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { queryString } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { useGame } from '@/composables/useGame'
@@ -487,6 +487,9 @@ function onPerception(uid: string, text: string) { command('private-message', { 
 function onMode() { command('mode', { solo: !game.detail.value?.solo_mode }) }
 function onNarrativePerspective(perspective: 'auto' | 'immersive' | 'third_person') {
   command('settings/narrative-perspective', { perspective })
+}
+function onGmStyle(payload: { gm_style: GmStyle | null }) {
+  command('settings/gm-style', payload)
 }
 async function onAdvancementControl(payload: Record<string, string | number>) {
   if (!game.currentGame.value) return
@@ -1266,6 +1269,7 @@ onBeforeUnmount(() => {
           @bot-bind="copyBotBind"
           @mode="onMode"
           @narrative-perspective="onNarrativePerspective"
+          @gm-style="onGmStyle"
           @advancement-control="onAdvancementControl"
           @access="onAccess"
           @command="onCommand"

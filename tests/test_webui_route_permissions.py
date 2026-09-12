@@ -89,6 +89,10 @@ class FakeAPI:
         self.calls.append(("narrative-perspective", game_key, perspective))
         return {"ok": True, "narrative_perspective": perspective}
 
+    async def set_gm_style(self, game_key: str, raw) -> dict:
+        self.calls.append(("gm-style", game_key, raw))
+        return {"ok": True, "gm_style_override": raw}
+
     async def set_economy_reward_policy(self, game_key: str, policy: dict) -> dict:
         self.calls.append(("reward-policy", game_key, policy))
         return {"ok": True, "economy_reward_policy": policy}
@@ -317,6 +321,37 @@ async def test_only_gm_can_change_narrative_perspective(tmp_path):
 
     assert player_response.status == 403
     assert player_api.calls == []
+
+
+@pytest.mark.asyncio
+async def test_only_gm_can_change_gm_style(tmp_path):
+    registry = FakeRegistry(tmp_path)
+    registry.items[("web", "room", "bot")] = SimpleNamespace(gm_uid="gm")
+
+    owner_request, owner_api = make_request(
+        registry, user_id="gm", body={"gm_style": {"tone": "literary"}},
+    )
+    owner_response = await games.api_set_gm_style(owner_request)
+
+    assert owner_response.status == 200
+    assert owner_api.calls == [
+        ("gm-style", "web|room|bot", {"tone": "literary"}),
+    ]
+
+    player_request, player_api = make_request(
+        registry, user_id="player", body={"gm_style": {"tone": "dark"}},
+    )
+    player_response = await games.api_set_gm_style(player_request)
+
+    assert player_response.status == 403
+    assert player_api.calls == []
+
+    # 非法载荷（非 object body）→ 400，且绝不静默解释成"跟随世界"。
+    bad_request, bad_api = make_request(registry, user_id="gm", body="junk")
+    bad_response = await games.api_set_gm_style(bad_request)
+
+    assert bad_response.status == 400
+    assert bad_api.calls == []
 
 
 @pytest.mark.asyncio

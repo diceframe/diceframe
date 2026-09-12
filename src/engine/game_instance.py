@@ -222,6 +222,10 @@ class GameInstance:
     # 叙事视角（展示偏好，不参与规则判定）
     narrative_perspective: str = "auto"  # auto / immersive / third_person
 
+    # 当前对局 GM 叙事风格覆盖：None=跟随世界 gm_style；dict=显式覆盖
+    # （全缺省 dict 也是合法的"恢复中性风格"，与 None 语义严格区分）。
+    gm_style_override: dict[str, str] | None = None
+
     # 叙事语言
     language: str = DEFAULT_LANGUAGE  # "zh-CN" / "en"
 
@@ -581,6 +585,17 @@ class GameInstance:
 
     def set_narrative_perspective(self, perspective: str) -> None:
         self.narrative_perspective = validate_narrative_perspective(perspective)
+
+    def set_gm_style_override(self, raw: Any) -> None:
+        """设置当前对局 GM 叙事风格覆盖。
+
+        None=跟随世界 gm_style；dict=显式覆盖（normalize 后保存，全缺省 dict
+        是合法的"恢复中性风格"）；其它类型拒绝，绝不静默解释成跟随世界。
+        """
+
+        from src.content.gm_style import normalize_gm_style_override
+
+        self.gm_style_override = normalize_gm_style_override(raw)
 
     def append_log_entry(self, entry: RoundLogEntry) -> None:
         self.log.append(entry)
@@ -1713,6 +1728,7 @@ class GameInstance:
             saved_group_name = self.group_name
             saved_solo = self.solo_mode
             saved_narrative_perspective = self.narrative_perspective
+            saved_gm_style_override = copy.deepcopy(self.gm_style_override)
             saved_language = normalize_language(self.language)
             saved_ruleset_runtime = copy.deepcopy(self.ruleset_runtime)
             saved_adventure_binding = copy.deepcopy(self.adventure_binding)
@@ -1770,6 +1786,7 @@ class GameInstance:
             self.group_name = saved_group_name
             self.solo_mode = saved_solo
             self.narrative_perspective = saved_narrative_perspective
+            self.gm_style_override = saved_gm_style_override
             self.language = saved_language
             self.seed_code = saved_seed
             logger.info("游戏已重置 (seed=%s) - game_key=%s", self.seed_code, self.game_key)

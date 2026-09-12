@@ -144,6 +144,7 @@ class GamePersistedState(TypedDict, total=False):
     seed_code: str
     difficulty: str
     narrative_perspective: str
+    gm_style_override: OpaqueState | None
     language: str
     luck_timeout_seconds: int
     economy_reward_policy: OpaqueState

@@ -232,10 +232,14 @@ def test_clone_deprecated_template_fails(tmp_path) -> None:
 # ---- normalize_gm_style ----
 
 def test_normalize_gm_style_defaults_and_fallback() -> None:
-    assert normalize_gm_style(None) == {"tone": "", "verbosity": "normal", "custom_instructions": ""}
+    assert normalize_gm_style(None) == {
+        "tone": "", "verbosity": "normal", "pace": "normal", "custom_instructions": "",
+    }
     assert normalize_gm_style("junk")["verbosity"] == "normal"
     assert normalize_gm_style({"verbosity": "WEIRD"})["verbosity"] == "normal"
     assert normalize_gm_style({"verbosity": "  Detailed "})["verbosity"] == "detailed"
+    assert normalize_gm_style({"tone": "dark", "verbosity": "detailed"})["pace"] == "normal"
+    assert normalize_gm_style({"pace": "super_fast"})["pace"] == "normal"
 
 
 def test_normalize_gm_style_truncates() -> None:
@@ -257,7 +261,8 @@ def test_render_gm_style_section_contains_guard_and_fields() -> None:
     section = render_gm_style_section(world, "zh-CN")
     assert "## GM 叙事风格" in section
     assert "不得覆盖上文规则与机制判定" in section
-    assert "dark" in section
+    # "dark" 是文风预设 token：服务端渲染预设正文，而不是"叙事口吻：dark"。
+    assert "克制、压抑、紧张的叙述风格" in section
     assert "CUSTOM_MARKER" in section
 
 
@@ -274,7 +279,9 @@ def test_update_gm_style_saves_normalized_for_user_world(tmp_path) -> None:
     )
 
     assert result["ok"] is True
-    assert result["gm_style"] == {"tone": "gothic", "verbosity": "normal", "custom_instructions": "keep it short"}
+    assert result["gm_style"] == {
+        "tone": "gothic", "verbosity": "normal", "pace": "normal", "custom_instructions": "keep it short",
+    }
     data = json.loads((tmp_path / f"{world_id}.json").read_text(encoding="utf-8"))
     assert data["gm_style"] == result["gm_style"]
 
@@ -313,7 +320,7 @@ def test_update_gm_style_materializes_legacy_lore_only_world(tmp_path) -> None:
 
     listed = worlds_service.list_worlds(api)["worlds"][0]
     assert listed["gm_style"] == {
-        "tone": "", "verbosity": "normal", "custom_instructions": "",
+        "tone": "", "verbosity": "normal", "pace": "normal", "custom_instructions": "",
     }
 
     result = worlds_service.update_world_gm_style(api, world_id, {"tone": "noir"})
@@ -342,7 +349,7 @@ def test_list_worlds_exposes_gm_style_only_for_user_worlds(tmp_path) -> None:
 
     assert by_id["default_fantasy"]["gm_style"] is None
     assert by_id["custom_book_demo_1"]["gm_style"] == {
-        "tone": "noir", "verbosity": "normal", "custom_instructions": "",
+        "tone": "noir", "verbosity": "normal", "pace": "normal", "custom_instructions": "",
     }
 
 

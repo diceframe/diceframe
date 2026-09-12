@@ -31,6 +31,7 @@ from src.webui.routes.game_control_routes import (
     api_mark_health_event,
     api_set_solo_mode,
     api_set_narrative_perspective,
+    api_set_gm_style,
     api_set_luck_timeout,
     api_set_reward_policy,
     api_set_player_away,
@@ -119,6 +120,9 @@ def register_games(app: web.Application) -> None:
     app.router.add_post(
         "/api/games/{game_key}/settings/narrative-perspective",
         api_set_narrative_perspective,
+    )
+    app.router.add_post(
+        "/api/games/{game_key}/settings/gm-style", api_set_gm_style
     )
     app.router.add_post(
         "/api/games/{game_key}/settings/luck-timeout", api_set_luck_timeout

@@ -189,6 +189,12 @@ def game_detail(
         "narrative_perspective": getattr(
             instance, "narrative_perspective", "auto"
         ),
+        # custom_instructions 可能包含剧透级 GM 笔记：gm_style_override 只下发给 GM。
+        "gm_style_override": (
+            getattr(instance, "gm_style_override", None)
+            if viewer_uid and viewer_uid == (instance.gm_uid or "")
+            else None
+        ),
         "max_players": instance.max_players,
         "multiplayer": instance.multiplayer_status(),
         "rest_session": public_rest_session(instance),

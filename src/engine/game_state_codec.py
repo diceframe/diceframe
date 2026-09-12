@@ -62,6 +62,10 @@ class GameStateCodec:
             "seed_code": instance.seed_code,
             "difficulty": instance.difficulty,
             "narrative_perspective": instance.narrative_perspective,
+            "gm_style_override": (
+                dict(instance.gm_style_override)
+                if isinstance(instance.gm_style_override, dict) else None
+            ),
             "language": normalize_language(instance.language),
             "luck_timeout_seconds": instance.luck_timeout_seconds,
             "economy_reward_policy": dict(instance.economy_reward_policy or {}),
@@ -161,6 +165,11 @@ class GameStateCodec:
             seed_code=data.get("seed_code", ""),
             difficulty=data.get("difficulty", "标准"),
             narrative_perspective=data.get("narrative_perspective", "auto"),
+            # 旧存档无该字段 → None=跟随世界 gm_style；只有 dict 才是显式覆盖。
+            gm_style_override=(
+                data.get("gm_style_override")
+                if isinstance(data.get("gm_style_override"), dict) else None
+            ),
             language=normalize_language(data.get("language", DEFAULT_LANGUAGE)),
             luck_timeout_seconds=int(data.get("luck_timeout_seconds", 60) or 0),
             economy_reward_policy=(
