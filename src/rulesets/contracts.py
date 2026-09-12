@@ -231,6 +231,19 @@ class NarrativeDirectorPlanningRuntime(Protocol):
 
 
 @runtime_checkable
+class TemporaryEncounterPlannerRuntime(Protocol):
+    """Optional read-only AI proposal for a temporary free encounter.
+
+    The proposal never touches persisted state; the GM confirms and the
+    authoritative combat.start validation still applies.
+    """
+
+    async def plan_temporary_encounter(
+        self, instance: Any, llm_client: Any,
+    ) -> dict[str, Any] | None: ...
+
+
+@runtime_checkable
 class AutomaticIntentRuntime(Protocol):
     """Optional server-owned turn automation for non-player actors."""
 

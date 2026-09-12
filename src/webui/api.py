@@ -483,6 +483,7 @@ class WebAPI:
                 apply_memory_delta=(
                     self._mem.apply_delta if self._mem is not None else None
                 ),
+                resolve_llm_client=lambda: self._llm_client,
             )
         )
         self._turn_dependencies = turns.TurnDependencies(
@@ -1898,6 +1899,16 @@ class WebAPI:
             requester_id,
             requester_is_gm,
             body,
+        )
+
+    async def ruleset_plan_temporary_encounter(
+        self, game_key: str, requester_id: str, requester_is_gm: bool,
+    ) -> dict[str, Any]:
+        return await ruleset_gameplay.plan_temporary_encounter(
+            self._ruleset_gameplay_dependencies,
+            game_key,
+            requester_id,
+            requester_is_gm,
         )
 
     # ---- 世界模板 ----

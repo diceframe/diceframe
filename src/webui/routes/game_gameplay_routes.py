@@ -175,7 +175,7 @@ def _ruleset_gameplay_status(result: dict) -> int:
     code = str(result.get("code") or "")
     if code in {"GAME_NOT_FOUND", "RULE_NOT_FOUND"}:
         return 404
-    if code in {"AUTH_REQUIRED", "PLAYER_NOT_IN_GAME"}:
+    if code in {"AUTH_REQUIRED", "PLAYER_NOT_IN_GAME", "GM_ONLY"}:
         return 403
     if code in {"RULESET_INTENTS_UNAVAILABLE", "RULESET_RUNTIME_UNAVAILABLE"}:
         return 409
@@ -205,6 +205,21 @@ async def api_ruleset_available_actions(request: web.Request) -> web.Response:
     requester_id = str(request.get("user_id", "") or "")
     requester_is_gm = _ruleset_requester_is_gm(request, inst)
     result = await api.ruleset_available_actions(
+        game_key,
+        requester_id,
+        requester_is_gm,
+    )
+    return web.json_response(result, status=_ruleset_gameplay_status(result))
+
+
+async def api_ruleset_temporary_encounter(request: web.Request) -> web.Response:
+    """GM-only AI 临时遭遇提案：只读生成，不改任何游戏状态。"""
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    inst = api.get_game_instance(game_key)
+    requester_id = str(request.get("user_id", "") or "")
+    requester_is_gm = _ruleset_requester_is_gm(request, inst)
+    result = await api.ruleset_plan_temporary_encounter(
         game_key,
         requester_id,
         requester_is_gm,

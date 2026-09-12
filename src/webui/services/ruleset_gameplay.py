@@ -16,6 +16,7 @@ from src.rulesets.contracts import (
     AuthoritativeIntentHooks,
     AutomaticIntentRuntime,
     PublicTimelineProjectionRuntime,
+    TemporaryEncounterPlannerRuntime,
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -32,6 +33,8 @@ class RulesetGameplayDependencies:
     resolve_adventure_binding: Callable[[str, Any, str, str], dict[str, Any]]
     save_instance: Callable[[Any], Awaitable[None]]
     apply_memory_delta: Callable[[str, dict[str, Any], int], Awaitable[Any]] | None
+    # AI 临时遭遇等只读 LLM 提案使用；None 表示环境没有可用的 AI 服务商。
+    resolve_llm_client: Callable[[], Any | None] | None = None
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
@@ -191,6 +194,90 @@ async def _ensure_compatible_adventure_binding(
         await dependencies.save_instance(instance)
     return None
 
+
+
+async def plan_temporary_encounter(
+    dependencies: RulesetGameplayDependencies,
+    game_key: str,
+    requester_id: str,
+    requester_is_gm: bool = False,
+) -> dict[str, Any]:
+    """AI 临时遭遇提案（GM-only，只读）：生成 → GM 预览 → 确认后才 combat.start。
+
+    本函数不改 combat、不加 state version、不写 EventBatch / adventure /
+    encounter catalog；生成失败完全无副作用。
+    """
+
+    instance, rule, runtime, effective_requester, error = _context(
+        dependencies, game_key, requester_id, requester_is_gm,
+    )
+    if error:
+        return error
+    if not requester_is_gm:
+        return _error("GM_ONLY", "只有 GM 可以生成临时遭遇")
+    if not isinstance(runtime, TemporaryEncounterPlannerRuntime):
+        return _error(
+            "TEMPORARY_ENCOUNTER_UNAVAILABLE",
+            "当前规则不支持 AI 临时遭遇",
+        )
+    async with instance._lock:
+        binding_error = await _ensure_compatible_adventure_binding(
+            dependencies, runtime, instance,
+        )
+        if binding_error:
+            return binding_error
+        view = runtime.gameplay_view(instance, effective_requester, True)
+        access = view.get("encounter_access") if isinstance(view, dict) else None
+        combat = view.get("combat") if isinstance(view, dict) else None
+        request = view.get("encounter_request") if isinstance(view, dict) else None
+        if isinstance(combat, dict) and combat.get("status") == "active":
+            return _error("COMBAT_ACTIVE", "战斗进行中，无法生成临时遭遇")
+        if (
+            not isinstance(request, dict)
+            or str(request.get("status") or "") != "pending"
+        ):
+            return _error(
+                "NO_PENDING_ENCOUNTER",
+                "当前没有待准备的敌情，不能生成临时遭遇",
+            )
+        if not isinstance(access, dict) or str(access.get("mode") or "") == "story":
+            # 正式剧情遭遇永远优先：有绑定 preset 时绝不能用临时生成绕过。
+            return _error(
+                "STORY_ENCOUNTER_BOUND",
+                "当前剧情已绑定正式遭遇，不能覆盖为临时遭遇",
+            )
+        requested_preset_id = str(request.get("encounter_preset_id") or "")
+        available_preset_ids = {
+            str(item.get("id") or "")
+            for item in (view.get("encounter_presets") or [])
+            if isinstance(item, dict)
+        }
+        if requested_preset_id and requested_preset_id in available_preset_ids:
+            return _error(
+                "ENCOUNTER_ALREADY_PREPARED",
+                "当前敌情已经匹配到合法遭遇，无需生成临时遭遇",
+            )
+    llm_client = (
+        dependencies.resolve_llm_client() if dependencies.resolve_llm_client else None
+    )
+    if llm_client is None:
+        return _error("LLM_NOT_CONFIGURED", "未配置可用的 AI 服务商")
+    try:
+        proposal = await runtime.plan_temporary_encounter(instance, llm_client)
+    except ValueError as exc:
+        return _error("TEMPORARY_ENCOUNTER_INVALID", str(exc))
+    except Exception:
+        logger.exception("AI temporary encounter planning failed")
+        return _error(
+            "LLM_REQUEST_FAILED",
+            "AI 生成临时遭遇失败，你仍可以手动选择自由遭遇",
+        )
+    if not isinstance(proposal, dict):
+        return _error(
+            "TEMPORARY_ENCOUNTER_INVALID",
+            "无法生成合法的临时遭遇，你仍可以手动选择自由遭遇",
+        )
+    return {"ok": True, "encounter": proposal}
 
 
 async def available_actions(

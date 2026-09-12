@@ -1005,6 +1005,40 @@ export interface RulesetEncounterPreset extends JsonObject {
   enemies: JsonObject[]
 }
 
+export interface RulesetTemporaryEncounterAttack extends JsonObject {
+  id?: string
+  name?: string
+  attack_bonus?: number
+  damage?: string
+  range?: number
+  long_range?: number
+}
+
+export interface RulesetTemporaryEncounterEnemy extends JsonObject {
+  id?: string
+  name?: string
+  hp?: number
+  armor_class?: number
+  speed?: number
+  position?: number
+  initiative_modifier?: number
+  attacks?: RulesetTemporaryEncounterAttack[]
+}
+
+export interface RulesetTemporaryEncounter extends JsonObject {
+  title: string
+  description: string
+  enemies: RulesetTemporaryEncounterEnemy[]
+  planner?: JsonObject
+}
+
+export interface RulesetTemporaryEncounterResponse extends JsonObject {
+  ok?: boolean
+  code?: string
+  error?: string
+  encounter?: RulesetTemporaryEncounter
+}
+
 export interface RulesetSessionZeroAgreement extends JsonObject {
   tone: string
   difficulty: 'story' | 'standard' | 'challenging' | 'lethal' | string

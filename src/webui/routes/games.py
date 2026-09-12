@@ -51,6 +51,7 @@ from src.webui.routes.game_gameplay_routes import (
     _ruleset_gameplay_status,
     _ruleset_requester_is_gm,
     api_ruleset_available_actions,
+    api_ruleset_temporary_encounter,
     api_combat_action,
     api_combat_scheduler_advance,
     api_ruleset_submit_intent,
@@ -144,6 +145,10 @@ def register_games(app: web.Application) -> None:
         "/api/games/{game_key}/available-actions", api_ruleset_available_actions
     )
     app.router.add_post("/api/games/{game_key}/intents", api_ruleset_submit_intent)
+    app.router.add_post(
+        "/api/games/{game_key}/ruleset/temporary-encounter",
+        api_ruleset_temporary_encounter,
+    )
     app.router.add_post("/api/games/{game_key}/combat/action", api_combat_action)
     app.router.add_post("/api/games/{game_key}/combat/scheduler/advance", api_combat_scheduler_advance)
     app.router.add_post(
