@@ -55,6 +55,7 @@ from src.webui.config_controller import (
     ConfigController,
     ConfigControllerDependencies,
 )
+from src.version import MIN_CLIENT_VERSION, __version__
 
 logger = logging.getLogger("trpg")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
@@ -125,7 +126,13 @@ def _mask_secret(value: str) -> dict:
 
 
 def _public_config() -> dict:
-    return CONFIG_STORE.public_view(RUNTIME_CONFIG)
+    # 版本元数据是组合层事实而非配置状态，在这里注入而不是写进 ConfigStore：
+    # 公开的 /api/config 是客户端（移动端）登录前唯一可匿名探测的端点，
+    # 客户端据此做双向版本兼容提示（App 过旧 / 服务器过旧）。
+    public = CONFIG_STORE.public_view(RUNTIME_CONFIG)
+    public["server_version"] = __version__
+    public["min_client_version"] = MIN_CLIENT_VERSION
+    return public
 
 
 def save_config():
