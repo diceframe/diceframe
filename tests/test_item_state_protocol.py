@@ -236,9 +236,54 @@ def test_rule_canonical_item_definition_beats_tag_damage():
     cs_armor = _apply({
         "equipment_ops": [{"op": "equip", "name": "卫兵板甲", "slot": "body", "legacy": True}],
     }, rule=rule)
-    armor = _equip_slot(cs_armor, "body")
+    # canonical armor 自带 slot="armor"：显式 body 不得覆盖 slot authority。
+    armor = _equip_slot(cs_armor, "armor")
     assert armor["ac_base"] == 16 and armor["type"] == "armor"
     assert armor["item_key"] == "watch_armor"
+    assert _equip_slot(cs_armor, "body") is None
+
+
+def test_canonical_slot_authority_beats_llm_slot():
+    """canonical 槽位 authority：白名单内的 LLM slot 也不能覆盖，更不能挤掉旧装备。"""
+    rule = RuleSystem({
+        "rule_id": "item_rule", "rule_name": "物品测试", "dice_system": "d20",
+        "items": {
+            "watch_armor": {"name": "卫兵板甲", "type": "armor", "armor_category": "heavy", "ac_base": 16},
+            "crystal_focus": {"name": "水晶法器", "type": "focus"},
+        },
+    })
+    instance = _instance()
+    cs = instance.players["p1"]["character_sheet"]
+    cs["equipment"].append({"name": "铁剑", "type": "weapon", "damage": 6, "slot": "main_hand", "quality": "common"})
+    PlayerStateApplier(MadnessTracker()).apply_players(instance, {
+        "p1": {"equipment_ops": [{"op": "equip", "name": "卫兵板甲", "slot": "main_hand", "legacy": True}]},
+    }, rule=rule)
+    # "板甲 → main_hand" 被拒绝：canonical slot=armor 生效，主手铁剑没被挤回背包。
+    armor = _equip_slot(cs, "armor")
+    assert armor is not None and armor["item_key"] == "watch_armor"
+    main_hand = _equip_slot(cs, "main_hand")
+    assert main_hand is not None and main_hand["name"] == "铁剑"
+    assert _inv(cs, "铁剑") is None
+
+
+def test_canonical_focus_without_slot_keeps_empty_slot():
+    rule = RuleSystem({
+        "rule_id": "item_rule", "rule_name": "物品测试", "dice_system": "d20",
+        "items": {"crystal_focus": {"name": "水晶法器", "type": "focus"}},
+    })
+    # canonical focus 无默认槽位且无显式请求：保持空 slot，不强制落到 body。
+    cs = _apply({
+        "equipment_ops": [{"op": "equip", "name": "水晶法器", "legacy": True}],
+    }, rule=rule)
+    focus = next(item for item in cs["equipment"] if item.get("type") == "focus")
+    assert focus["slot"] == ""
+    assert _equip_slot(cs, "body") is None
+
+    # 有显式合法 slot 时仍然接受。
+    cs_off_hand = _apply({
+        "equipment_ops": [{"op": "equip", "name": "水晶法器", "slot": "off_hand", "legacy": True}],
+    }, rule=rule)
+    assert _equip_slot(cs_off_hand, "off_hand") is not None
 
 
 def test_freeform_weapon_uses_legacy_damage_when_no_authority():

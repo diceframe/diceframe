@@ -373,14 +373,17 @@ def _finalize_equipment_entry(
     """补全 type/slot/damage，使条目成为合法的装备槽条目。
 
     规则集 canonical 定义存在时整体采用它（item 自带杂项 metadata 保留）；
-    slot 优先级：显式指定 > 物品自带 > 按类型推断。
+    slot authority：canonical 自带槽位 > 显式指定 > 物品自带 > 按类型推断。
+    canonical 槽位为空（focus 等）时保持空，不强制占用部位。
     """
 
     canonical = canonical_equipment_entry(requested_name, rule)
     canonical_damage: int | None = None
+    canonical_slot = ""
     if canonical is not None:
         if canonical.get("type") == "weapon":
             canonical_damage = int(canonical.get("damage", 0) or 0)
+        canonical_slot = str(canonical.get("slot") or "")
         for key, value in entry.items():
             # canonical 定义的数值字段优先；物品自带的其它 metadata（effect 等）保留。
             if key not in canonical and key not in {"qty", "slot"}:
@@ -392,10 +395,18 @@ def _finalize_equipment_entry(
         entry.setdefault("quality", inferred.get("quality", "common"))
         if int(entry.get("damage", 0) or 0) == 0:
             entry.setdefault("damage", int(inferred.get("damage", 0) or 0))
-    if slot:
+    if canonical_slot:
+        # 规则集 canonical 已绑定槽位：slot authority 在 canonical，LLM 显式
+        # slot（即使在白名单内）也不得覆盖 —— 否则"板甲→main_hand"会把
+        # 主手旧装备真的挤回背包，不只是显示问题。
+        entry["slot"] = canonical_slot
+    elif slot:
+        # canonical 没有槽位定义（focus 等空 slot）或没有 canonical 时，
+        # 才接受白名单内的显式 slot。
         entry["slot"] = slot
-    if not str(entry.get("slot") or ""):
+    if not str(entry.get("slot") or "") and canonical is None:
         entry["slot"] = "main_hand" if entry.get("type") == "weapon" else "body"
+    # canonical 存在且槽位为空（focus）：保持空，不强制落到 body。
     if entry.get("type") == "weapon":
         damage = _resolve_weapon_damage(entry, requested_name, custom_damage, canonical_damage)
         if isinstance(custom_damage, int) and custom_damage > 0 and damage != custom_damage:
