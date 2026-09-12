@@ -18,6 +18,7 @@ REQUIREMENTS = ROOT / "requirements.txt"
 RUNTIME_IMPORTS = {
     "aiohttp": "aiohttp",
     "Pillow": "PIL",
+    "peewee": "peewee",
 }
 
 
