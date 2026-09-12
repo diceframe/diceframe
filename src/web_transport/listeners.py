@@ -42,17 +42,69 @@ class ListenerPlan:
         host = f"[{self.host}]" if ":" in self.host else self.host
         return f"{host}:{self.port}"
 
-    def display_host(self) -> str:
-        """启动日志里给人看的地址：通配地址按同族回环展示。"""
+    def connect_host(self) -> str:
+        """本机客户端（插件、健康检查）应连接的主机名。
 
-        if self.host in {"", "*", "0.0.0.0", "::"}:
-            return "::1" if ":" in self.host else "127.0.0.1"
+        通配地址按同族回环连接；具体地址（例如 10.0.0.9）就用它自己 —— 服务只监听
+        那个地址，连 127.0.0.1 会连不上。
+        """
+
+        if self.host in {"", "*", "0.0.0.0"}:
+            return "127.0.0.1"
+        if self.host == "::":
+            return "::1"
         return self.host
 
     def url(self, display_host: str | None = None) -> str:
-        host = str(display_host) if display_host else self.display_host()
+        host = str(display_host) if display_host else self.connect_host()
         host = f"[{host}]" if ":" in host else host
         return f"{self.scheme}://{host}:{self.port}"
+
+
+def internal_api_listener(plan: Sequence[ListenerPlan]) -> ListenerPlan | None:
+    """从监听计划里挑一个内部客户端能连上的监听器。
+
+    优先级：显式回环 > 通配（按同族回环连接）> 第一个具体地址。真正启用后还要用
+    :func:`resolve_internal_listener` 对照“实际成功启动”的列表复核。
+    """
+
+    loopbacks = {"127.0.0.1", "::1", "localhost"}
+    for item in plan:
+        if item.host in loopbacks:
+            return item
+    for item in plan:
+        if item.host in {"", "*", "0.0.0.0", "::"}:
+            return item
+    return plan[0] if plan else None
+
+
+def internal_api_base(listener: ListenerPlan) -> str:
+    """内部 API 基址：与 ``ServerEndpoint.url()`` 一样处理 IPv6 字面量。"""
+
+    return listener.url()
+
+
+def resolve_internal_listener(
+    plan: Sequence[ListenerPlan], started: Sequence[ListenerPlan],
+) -> tuple[ListenerPlan | None, str]:
+    """对照实际启动结果，确定内部 API 用哪个监听器。
+
+    返回 (监听器, 警告)。计划里选中的监听器没能成功启动时，退回第一个成功启动的
+    监听器并给出警告 —— 否则插件会一直去连一个不存在的地址。
+    """
+
+    wanted = internal_api_listener(plan)
+    if wanted is None:
+        return None, ""
+    if wanted in started:
+        return wanted, ""
+    if not started:
+        return None, f"内部 API 期望的监听器 {wanted.address} 未启动，且没有其它可用监听器"
+    fallback = started[0]
+    return fallback, (
+        f"内部 API 期望的监听器 {wanted.address} 未成功监听，"
+        f"已改用 {fallback.address}"
+    )
 
 
 def internal_loopback_host(hosts: Sequence[str]) -> str:

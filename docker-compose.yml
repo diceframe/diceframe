@@ -8,9 +8,10 @@ services:
     container_name: diceframe-web
     ports:
       - "${DICEFRAME_HTTP_PORT:-9876}:9876"
-      # Let's Encrypt http-01 验证需要容器内监听 TRPG_TLS_ACME_CHALLENGE_PORT
-      # （默认 80）；启用 lets_encrypt 时取消下面这行的注释。
-      # - "80:80"
+      # 启用 lets_encrypt 时还要发布 ACME 验证端口（容器内监听
+      # TRPG_TLS_ACME_CHALLENGE_PORT，默认 80）。叠加文件会按同一个变量发布，
+      # 避免"容器监听 8080、宿主机只开 80"这种验证必失败的组合：
+      #   docker compose -f docker-compose.yml -f docker-compose.acme-challenge.yml up -d
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

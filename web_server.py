@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import replace
 
 import asyncio
 import logging
@@ -43,7 +44,13 @@ from src.webui.bootstrap import (
 )
 from src.webui.access_control import WebAccessControl
 from src.web_transport.lifecycle import run_with_graceful_shutdown
-from src.web_transport.listeners import build_listener_plan, start_listeners
+from src.web_transport.listeners import (
+    build_listener_plan,
+    internal_api_base,
+    internal_api_listener,
+    resolve_internal_listener,
+    start_listeners,
+)
 from src.webui.config_controller import (
     ConfigController,
     ConfigControllerDependencies,
@@ -76,6 +83,26 @@ STATE = RUNTIME_CONFIG.state
 HOST = RUNTIME_CONFIG.host
 PORT = RUNTIME_CONFIG.port
 TRANSPORT = RUNTIME_CONFIG.transport
+# 监听计划在创建 app 之前就定好：插件/内部客户端用的 API 基址必须指向一个
+# 本机真的能连上的监听器（具体地址就用它自己，通配地址用同族回环）。
+LISTENER_PLAN, LISTENER_PLAN_WARNINGS = build_listener_plan(
+    hosts=RUNTIME_CONFIG.hosts,
+    port=PORT,
+    transport=TRANSPORT,
+    http_port=RUNTIME_CONFIG.http_port,
+    https_port=RUNTIME_CONFIG.https_port,
+)
+INTERNAL_LISTENER = internal_api_listener(LISTENER_PLAN)
+if INTERNAL_LISTENER is not None:
+    TRANSPORT = replace(
+        TRANSPORT,
+        endpoint=replace(
+            TRANSPORT.endpoint,
+            scheme=INTERNAL_LISTENER.scheme,
+            port=INTERNAL_LISTENER.port,
+            local_host=INTERNAL_LISTENER.connect_host(),
+        ),
+    )
 WEB_CORS_ENV_VALUE = RUNTIME_CONFIG.cors_env_value
 WEB_CORS_CONFIG_VALUE = RUNTIME_CONFIG.cors_config_value
 WEB_CORS_ORIGINS = RUNTIME_CONFIG.cors_origins
@@ -275,24 +302,18 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
     处理都在 web_transport.listeners 里，未启动任何监听器时按原语义抛错退出。
     """
 
-    plan, warnings = build_listener_plan(
-        hosts=RUNTIME_CONFIG.hosts,
-        port=PORT,
-        transport=TRANSPORT,
-        http_port=RUNTIME_CONFIG.http_port,
-        https_port=RUNTIME_CONFIG.https_port,
-    )
-    for message in warnings:
+    for message in LISTENER_PLAN_WARNINGS:
         logger.warning("%s", message)
 
     runner = web.AppRunner(app)
     await runner.setup()
     try:
-        started, failures = await start_listeners(runner, plan, TRANSPORT)
+        started, failures = await start_listeners(runner, LISTENER_PLAN, TRANSPORT)
         if not started:
             raise OSError(failures[0] if failures else "没有可用的监听地址")
         for item in started:
             print(f"DiceFrame WebUI: {item.url()}  (host={item.host})")
+        _align_internal_api(started)
         stop_event = asyncio.Event()
         try:
             loop.add_signal_handler(signal.SIGINT, stop_event.set)
@@ -305,6 +326,23 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
     finally:
         await runner.cleanup()
     return bool(app["runtime_control"]["restart_requested"])
+
+
+def _align_internal_api(started: list) -> None:
+    """监听器真正起来后复核内部 API 地址，必要时改到确实在监听的那个。"""
+
+    listener, warning = resolve_internal_listener(LISTENER_PLAN, started)
+    if warning:
+        logger.warning("%s", warning)
+    if listener is None:
+        return
+    plugin_host = app.get("plugin_host")
+    if plugin_host is None:
+        return
+    base = internal_api_base(listener)
+    if plugin_host.base_env.get("TRPG_API_BASE") != base:
+        plugin_host.base_env["TRPG_API_BASE"] = base
+        logger.info("插件 API 基址已调整为 %s", base)
 
 
 if __name__ == "__main__":

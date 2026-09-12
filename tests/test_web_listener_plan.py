@@ -19,9 +19,12 @@ from src.web_transport.config import TLS_MODE_OFF, TLS_MODE_SELF_SIGNED, WebTran
 from src.web_transport.listeners import (
     ListenerPlan,
     build_listener_plan,
+    internal_api_base,
+    internal_api_listener,
     internal_loopback_host,
     normalize_hosts,
     parse_port,
+    resolve_internal_listener,
     split_hosts,
     start_listeners,
 )
@@ -183,6 +186,56 @@ def test_internal_loopback_follows_the_bound_family() -> None:
     assert internal_loopback_host(["::"]) == "::1"
     assert internal_loopback_host(["::", "::1"]) == "::1"
     assert internal_loopback_host([]) == "127.0.0.1"
+
+
+def test_internal_api_listener_prefers_a_reachable_listener() -> None:
+    """内部 API 必须挑一个本机真的连得上的监听器，而不是只看配置字符串。"""
+
+    plan, _warnings = build_listener_plan(
+        hosts=["10.0.0.9"], port=18000, transport=_http_transport(),
+    )
+    assert internal_api_listener(plan) is plan[0]
+    assert internal_api_base(plan[0]) == "http://10.0.0.9:18000"
+
+    wildcard, _warnings = build_listener_plan(
+        hosts=["0.0.0.0", "::"], port=18000, transport=_http_transport(),
+    )
+    chosen = internal_api_listener(wildcard)
+    assert chosen is wildcard[0]
+    assert internal_api_base(chosen) == "http://127.0.0.1:18000"
+
+    ipv6_only, _warnings = build_listener_plan(
+        hosts=["::"], port=18000, transport=_http_transport(),
+    )
+    assert internal_api_base(internal_api_listener(ipv6_only)) == "http://[::1]:18000"
+
+    explicit_loopback, _warnings = build_listener_plan(
+        hosts=["192.168.1.5", "127.0.0.1"], port=18000, transport=_http_transport(),
+    )
+    assert internal_api_base(internal_api_listener(explicit_loopback)) == "http://127.0.0.1:18000"
+
+    assert internal_api_listener([]) is None
+
+
+def test_internal_api_uses_an_extra_listener_when_the_primary_failed() -> None:
+    """主端口没起来、附加端口起来了：内部地址要跟着实际成功的那个走。"""
+
+    plan, _warnings = build_listener_plan(
+        hosts=["127.0.0.1"], port=18000, transport=_http_transport(),
+        http_port=18080,
+    )
+    primary, extra = plan
+
+    chosen, warning = resolve_internal_listener(plan, [primary])
+    assert chosen == primary and warning == ""
+
+    chosen, warning = resolve_internal_listener(plan, [extra])
+    assert chosen == extra
+    assert internal_api_base(chosen) == "http://127.0.0.1:18080"
+    assert "未成功监听" in warning and str(primary.port) in warning
+
+    chosen, warning = resolve_internal_listener(plan, [])
+    assert chosen is None and "没有其它可用监听器" in warning
 
 
 @pytest.mark.asyncio
