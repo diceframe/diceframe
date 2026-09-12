@@ -313,7 +313,7 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
             raise OSError(failures[0] if failures else "没有可用的监听地址")
         for item in started:
             print(f"DiceFrame WebUI: {item.url()}  (host={item.host})")
-        _align_internal_api(started)
+        await _align_internal_api(started)
         stop_event = asyncio.Event()
         try:
             loop.add_signal_handler(signal.SIGINT, stop_event.set)
@@ -328,7 +328,7 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
     return bool(app["runtime_control"]["restart_requested"])
 
 
-def _align_internal_api(started: list) -> None:
+async def _align_internal_api(started: list) -> None:
     """监听器真正起来后复核内部 API 地址，必要时改到确实在监听的那个。"""
 
     listener, warning = resolve_internal_listener(LISTENER_PLAN, started)
@@ -336,6 +336,13 @@ def _align_internal_api(started: list) -> None:
         logger.warning("%s", warning)
     if listener is None:
         return
+    if listener.tls:
+        logger.warning(
+            "内部 API 使用 HTTPS 监听器 %s：插件客户端不做 TLS 信任配置，"
+            "自签名或证书与地址不匹配时插件将无法连接；建议设置 TRPG_WEB_HTTP_PORT "
+            "提供一个明文内部端口",
+            listener.address,
+        )
     plugin_host = app.get("plugin_host")
     if plugin_host is None:
         return
@@ -343,6 +350,10 @@ def _align_internal_api(started: list) -> None:
     if plugin_host.base_env.get("TRPG_API_BASE") != base:
         plugin_host.base_env["TRPG_API_BASE"] = base
         logger.info("插件 API 基址已调整为 %s", base)
+        # 已启动的插件在 spawn 时就快照了旧地址，只有重启进程才能拿到新基址。
+        restarted = await plugin_host.restart_api_consumers()
+        if restarted:
+            logger.info("已重启 %d 个使用内部 API 的插件以应用新基址", restarted)
 
 
 if __name__ == "__main__":

@@ -910,6 +910,23 @@ class PluginHost:
             if "ai.providers" in permissions and uses_ai_provider and process_running:
                 await self.restart(plugin_id, require_enabled=False)
 
+    async def restart_api_consumers(self) -> int:
+        """重启正在运行且依赖 diceframe.http 的插件，返回重启数量。
+
+        插件进程在 spawn 时从 base_env 快照 TRPG_API_BASE，之后不再感知变化；
+        内部 API 基址在监听器启动后被修正（回退到实际成功的监听器）时，只有
+        重启进程才能拿到新地址。还没启动的插件下次 start 时自然读到新值。
+        """
+
+        restarted = 0
+        for plugin_id, runtime in self.plugins.items():
+            permissions = set(self._plugin_permissions(runtime))
+            process_running = bool(runtime.process and runtime.process.returncode is None)
+            if "diceframe.http" in permissions and process_running:
+                await self.restart(plugin_id, require_enabled=False)
+                restarted += 1
+        return restarted
+
     def _host_generation_path(self, plugin_id: str) -> Path:
         return (self.data_dir / plugin_id / "runtime" / ".host-generation").resolve()
 

@@ -1,18 +1,25 @@
 # 发布 Let's Encrypt http-01 验证端口（可选叠加文件）。
 #
-# ACME 的验证响应器会在**容器内**监听 TRPG_TLS_ACME_CHALLENGE_PORT（默认 80），
-# 校验方要从公网访问它，所以必须把同一个端口发布到宿主机：
+# http-01 的校验方（Let's Encrypt）从公网访问的永远是 80 端口，这一点无法配置。
+# 验证响应器在**容器内**监听 TRPG_TLS_ACME_CHALLENGE_PORT（默认 80），所以映射
+# 固定为「宿主机 80 → 容器的 challenge 端口」：
 #
-#   1) 在 .env 里设置（不设则用默认 80）：
+#   公网 :80 → 宿主机 :80 → 容器 :TRPG_TLS_ACME_CHALLENGE_PORT
+#
+#   1) 在 .env 里设置（不设则容器内也监听 80）：
 #        TRPG_TLS_MODE=lets_encrypt
-#        TRPG_TLS_ACME_CHALLENGE_PORT=80
+#        TRPG_TLS_ACME_CHALLENGE_PORT=8080
 #   2) docker compose -f docker-compose.yml -f docker-compose.acme-challenge.yml up -d
 #
-# 只把自定义端口透传进容器而不发布，验证一定失败 —— 因此这里发布的端口与
-# TRPG_TLS_ACME_CHALLENGE_PORT 保持同一个变量，不会出现"配置 8080、发布 80"。
+# 注意两种都会让验证失败的写法：
+#   - 只透传端口不发布：公网 80 没人应答；
+#   - "配置 8080、发布 8080"：Let's Encrypt 不会去访问 8080。
+# 宿主机自己的 80 被其它服务占用时，compose 会绑定失败而显式报错 —— 此时应在
+# 宿主机外层做端口转发/反代把公网 80 引到本机，或改用 DNS-01 验证；如果公网 80
+# 由路由器转发到本机其它端口，请自行追加对应的 ports 映射。
 services:
   web:
     environment:
       TRPG_TLS_ACME_CHALLENGE_PORT: "${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"
     ports:
-      - "${TRPG_TLS_ACME_CHALLENGE_PORT:-80}:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"
+      - "80:${TRPG_TLS_ACME_CHALLENGE_PORT:-80}"
