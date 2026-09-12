@@ -31,16 +31,20 @@ language is only recorded as a request. The GM must create an explicit order
 in the GM console with the payer, amount, item(s), recipient, and immediate or
 deferred delivery. The payer confirms that order before the server debits
 currency. Never charge from numbers in narration, and never emit purchased
-items as LOOT/KEY_ITEM/WEAPON/EQUIP before the order settles. A declined or
-invalid order leaves the original request open for correction.
+items as LOOT/KEY_ITEM/WEAPON_GAIN/WEAPON/EQUIP/EQUIP_ITEM before the order
+settles. A declined or invalid order leaves the original request open for
+correction.
 SCENE:new scene name           (when the scene changes)
 SCENE_IMAGE:visual description (output ONCE only on a major scene change or the first appearance of a new location/level: one short English sentence describing subject, environment, mood and art style, e.g. SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style. Never output it without a major scene change, or when the scene matches the previous image)
 NPC:name:relationship          (register named NPCs on first appearance)
 LOOT:player_id:item name       (ordinary inventory items)
 KEY_ITEM:player_id:item name   (important physical clues, keys, documents, maps, quest items)
 USE:player_id:item name        (a player uses an item)
-WEAPON:player_id:weapon name   (gained or switched weapon)
-EQUIP:player_id:equipment name (non-weapon equipment)
+WEAPON_GAIN:player_id:weapon name (gain a weapon into the backpack only; do not auto-equip it)
+WEAPON:player_id:weapon name   (switch to / equip a weapon the player already owns; never for gaining a new weapon)
+EQUIP:player_id:equipment name (gain non-weapon equipment: armor, trinkets, foci, cyberware; into the backpack only, not auto-equipped)
+EQUIP_ITEM:player_id:equipment name (equip non-weapon equipment the player already owns)
+UNEQUIP_ITEM:player_id:equipment name (unequip the item and return it to the backpack)
 DECISION:decision summary      (important plot decisions)
 QUEST:quest name:status        (only on first appearance or status change)
 PRIVATE:player_id:message      (message visible only to that player)

@@ -9,10 +9,33 @@ def summarize_tags(data: dict) -> dict:
     state_update = data.get("state_update", {})
     players = state_update.get("players", {})
     for uid, player_update in players.items():
+        if not isinstance(player_update, dict):
+            continue
         if player_update.get("hp_change"):
             tags.append(f"HP:{uid}:{player_update['hp_change']}")
         if player_update.get("gold_change"):
             tags.append(f"GOLD:{uid}:{player_update['gold_change']}")
+        # 物品事件是列表：一轮多件物品要完整输出，不能再被压成一条。
+        for gain in player_update.get("item_gains") or []:
+            if not isinstance(gain, dict) or not gain.get("name"):
+                continue
+            category = str(gain.get("category") or "")
+            tag = "WEAPON_GAIN" if category == "weapon" else "EQUIP" if category == "equipment" else "LOOT"
+            tags.append(f"{tag}:{uid}:{gain['name']}")
+        for op in player_update.get("equipment_ops") or []:
+            if not isinstance(op, dict) or not op.get("name"):
+                continue
+            if op.get("op") == "unequip":
+                tags.append(f"UNEQUIP_ITEM:{uid}:{op['name']}")
+            elif op.get("slot") == "main_hand":
+                tags.append(f"WEAPON:{uid}:{op['name']}")
+            else:
+                tags.append(f"EQUIP_ITEM:{uid}:{op['name']}")
+        for use in player_update.get("item_uses") or []:
+            name = use.get("name") if isinstance(use, dict) else use
+            if name:
+                tags.append(f"USE:{uid}:{name}")
+        # 旧单值字段（compatibility input）作为 fallback。
         if player_update.get("weapon_change"):
             tags.append(f"WEAPON:{uid}:{player_update['weapon_change']}")
         if player_update.get("equip_gain"):

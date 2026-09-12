@@ -25,7 +25,7 @@
 HP:玩家ID:变化量         （变化量=增减。例：受到8点伤害->HP:web_user:-8；治疗5点->HP:web_user:5）
 STAT:玩家ID:资源key:变化量（规则特殊资源增减，仅用规则说明列出的资源key。例：KPI提升10->STAT:web_user:kpi:10。HP/金币/法力/理智/幸运不用 STAT，用专属标签；规则没有特殊资源时不要输出 STAT）
 GOLD:玩家ID:变化量:原因  （提出剧情奖励。只允许正数，且必须写本轮新发生的明确原因。例：完成悬赏获得30→GOLD:web_user:30:完成黑石镇悬赏。禁止把当前余额、初始金币或此前奖励重复输出。）
-购买和付款不再使用 PAY/TEAM_PAY 标签。玩家的购买只记录为待处理购买请求；GM 必须在 GM 控制台明确填写付款人、金额、商品和交付方式，随后由付款角色确认，系统才扣款。不要根据叙事中的数字自动收费，也不要把购买物品写入 LOOT/KEY_ITEM/WEAPON/EQUIP。
+购买和付款不再使用 PAY/TEAM_PAY 标签。玩家的购买只记录为待处理购买请求；GM 必须在 GM 控制台明确填写付款人、金额、商品和交付方式，随后由付款角色确认，系统才扣款。不要根据叙事中的数字自动收费，也不要把购买物品写入 LOOT/KEY_ITEM/WEAPON_GAIN/EQUIP/WEAPON/EQUIP_ITEM。
                          （重要：单纯社交、打听情报、观察、移动不要附加 GOLD 标签！）
 SCENE:新场景名           （场景切换时使用。例：SCENE:石桥镇铁匠铺）
 SCENE_IMAGE:画面描述     （仅在本轮发生重大场景切换、进入新关卡/新地点首次出现时输出一次：用一句简短英文描述画面（主体、环境、时间氛围、美术风格），如 SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style。无重大场景切换、或场景与上一张图相同就绝不输出）
@@ -33,8 +33,11 @@ NPC:名称:关系            （每个首次登场的有名 NPC 必须登记。�
 LOOT:玩家ID:物品名       （获得普通背包物品：消耗品、材料、工具、杂物。不要用于装备、关键物品或人物）
 KEY_ITEM:玩家ID:物品名   （获得关键物品：钥匙、凭证、信件、手稿、地图、线索、任务道具等。仅用于实体物品，禁止用于人物/NPC--人物用 NPC 标签登记，情报用 MEMORY 标签记录）
 USE:玩家ID:道具名        （玩家使用道具。例：USE:web_user:医疗包）
-WEAPON:玩家ID:武器名     （获得或切换武器。例：获得长剑→WEAPON:web_user:步兵长剑）
-EQUIP:玩家ID:装备名      （获得非武器装备：护甲、饰品、法器、义体等。例：EQUIP:web_user:硬牛皮甲）
+WEAPON_GAIN:玩家ID:武器名 （获得武器，仅加入背包，不自动装备。例：WEAPON_GAIN:web_user:步兵长剑）
+WEAPON:玩家ID:武器名     （切换/装备已经拥有的武器，不用于获得新武器。例：WEAPON:web_user:步兵长剑）
+EQUIP:玩家ID:装备名      （获得非武器装备：护甲、饰品、法器、义体等，仅加入背包，不自动穿戴。例：EQUIP:web_user:硬牛皮甲）
+EQUIP_ITEM:玩家ID:装备名 （穿戴已经拥有的非武器装备。例：EQUIP_ITEM:web_user:硬牛皮甲）
+UNEQUIP_ITEM:玩家ID:装备名（卸下当前装备并放回背包。例：UNEQUIP_ITEM:web_user:硬牛皮甲）
 DECISION:决策描述         （重要剧情决策。例：DECISION:玩家选择进入洞穴而非返回镇子）
 QUEST:任务名:状态         （任务状态变更。只在任务首次出现或状态变化时写入——不要每轮重复同一状态。例：QUEST:找回魔法书:active、QUEST:找回魔法书:completed。任务完成/失败后也不再重复）
 PRIVATE:玩家ID:私聊消息  （仅指定玩家可见的信息。例：PRIVATE:user_001:你注意到墙角暗门）

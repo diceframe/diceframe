@@ -709,7 +709,10 @@ def filter_unconfirmed_purchase_grants(
     Same-round unpriced purchase intents (in-memory round state only, never
     persisted) are matched the same way: a purchase whose price nobody has
     stated yet must not be delivered through a narrative LOOT tag either.
-    Other loot and rewards continue through the normal narrative pipeline.
+    Narrative item events (item_gains / equip equipment_ops) are filtered
+    entry by entry with the same authority; unequip ops grant nothing and
+    pass through.  Other loot and rewards continue through the normal
+    narrative pipeline.
     """
 
     state_update = data.get("state_update")
@@ -757,6 +760,38 @@ def filter_unconfirmed_purchase_grants(
                 if value and blocked(str(uid), value):
                     update.pop(field, None)
                     removed += 1
+            # 新列表事件逐条执行同样的 authority：未确认购买的商品既不能通过
+            # 叙事获得（item_gains），也不能借装备操作凭空上身（equip op）。
+            # 卸下（unequip）不授予任何物品，不过滤。
+            gains = update.get("item_gains")
+            if isinstance(gains, list):
+                kept_gains = [
+                    gain for gain in gains
+                    if not (
+                        isinstance(gain, dict)
+                        and blocked(str(uid), str(gain.get("name") or ""))
+                    )
+                ]
+                removed += len(gains) - len(kept_gains)
+                if kept_gains:
+                    update["item_gains"] = kept_gains
+                else:
+                    update.pop("item_gains", None)
+            ops = update.get("equipment_ops")
+            if isinstance(ops, list):
+                kept_ops = [
+                    op for op in ops
+                    if not (
+                        isinstance(op, dict)
+                        and op.get("op") == "equip"
+                        and blocked(str(uid), str(op.get("name") or ""))
+                    )
+                ]
+                removed += len(ops) - len(kept_ops)
+                if kept_ops:
+                    update["equipment_ops"] = kept_ops
+                else:
+                    update.pop("equipment_ops", None)
     loot = state_update.get("loot")
     if isinstance(loot, list):
         kept = []
