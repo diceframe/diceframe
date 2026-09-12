@@ -1841,6 +1841,10 @@ export interface BotTokenResponse {
 }
 
 export interface AppConfig {
+  /** 服务器版本（/api/config 公开下发，供客户端做版本兼容提示） */
+  server_version?: string
+  /** 服务器仍能正确服务的最低客户端版本；客户端版本低于它应提示升级 App */
+  min_client_version?: string
   model?: string
   ai_providers?: AiProvider[]
   llm_provider_ref?: string
