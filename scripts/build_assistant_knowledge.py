@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -34,24 +35,49 @@ sys.modules[_spec.name] = ak  # 注册后 exec，dataclass 才能解析模块
 _spec.loader.exec_module(ak)
 
 _CONTENT_REPO_CHECKOUT = ROOT.parent / "diceframe-content"
+# 与运行时一致：DICEFRAME_DOCS_BASE_URL 优先，其次 GitHub raw。此前这里写死
+# GITHUB_DOCS_BASE_URL，用户配了镜像也没用，离线/受限网络下每个文档都要等超时。
+_FETCH_TIMEOUT_SECONDS = 8
 
 
-def _read_content_doc(lang_key: str, path: str) -> str | None:
-    """从相邻 diceframe-content 检出读文档；没有检出时退回 GitHub raw。"""
+def _local_only_requested(explicit: bool | None = None) -> bool:
+    """是否只使用本地 diceframe-content 检出（不发网络请求）。
+
+    显式参数优先；否则读 DICEFRAME_DOCS_LOCAL_ONLY，便于离线打包与测试。
+    """
+
+    if explicit is not None:
+        return explicit
+    return str(os.getenv("DICEFRAME_DOCS_LOCAL_ONLY", "")).strip().lower() in {
+        "1", "true", "yes",
+    }
+
+
+def _read_content_doc(lang_key: str, path: str, *, allow_remote: bool = True) -> str | None:
+    """从相邻 diceframe-content 检出读文档；没有检出时退回配置的文档源。"""
+
     local = _CONTENT_REPO_CHECKOUT / "docs" / lang_key / path
     if local.exists():
         return local.read_text(encoding="utf-8")
-    url = f"{ak.GITHUB_DOCS_BASE_URL}/{lang_key}/{path}"
-    try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
-            return resp.read().decode("utf-8")
-    except Exception:
-        print(f"  ! 跳过（本地无检出且拉取失败）: docs/{lang_key}/{path}")
+    if not allow_remote:
         return None
+    bases = tuple(getattr(ak, "_DOCS_BASE_URLS", ()) or (ak.GITHUB_DOCS_BASE_URL,))
+    for base in bases:
+        url = f"{base}/{lang_key}/{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_SECONDS) as resp:
+                return resp.read().decode("utf-8")
+        except Exception:
+            continue
+    print(f"  ! 跳过（本地无检出且拉取失败）: docs/{lang_key}/{path}")
+    return None
 
 
-def build(output: Path | None = None) -> Path:
+def build(output: Path | None = None, *, local_only: bool | None = None) -> Path:
     target = output or ak.INDEX_FILE
+    allow_remote = not _local_only_requested(local_only)
+    if not allow_remote:
+        print("  · 仅使用本地 diceframe-content 检出（跳过远程文档）")
     index: dict[str, list[dict]] = {}
     for lang_key in ("zh", "en"):
         chunks: list[dict] = []
@@ -63,7 +89,7 @@ def build(output: Path | None = None) -> Path:
             for chunk in ak._parse_markdown(relative, text):
                 chunks.append(_chunk_payload(chunk))
         for doc_path in ak._CONTENT_DOC_PATHS[lang_key]:
-            text = _read_content_doc(lang_key, doc_path)
+            text = _read_content_doc(lang_key, doc_path, allow_remote=allow_remote)
             if text is None:
                 continue
             source = f"docs/{lang_key}/{doc_path}"
@@ -94,8 +120,13 @@ def _chunk_payload(chunk) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the AI assistant local knowledge index.")
     parser.add_argument("--output", type=Path, default=None, help="Output index file path")
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="只使用本地 diceframe-content 检出，不访问网络（也可用 DICEFRAME_DOCS_LOCAL_ONLY=1）",
+    )
     args = parser.parse_args()
-    build(args.output)
+    build(args.output, local_only=args.local_only or None)
     return 0
 
 

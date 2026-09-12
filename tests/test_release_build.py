@@ -47,6 +47,9 @@ def test_prepare_package_tree_excludes_non_server_projects(monkeypatch, tmp_path
     (root / "mobile" / "package.json").write_text("{}", encoding="utf-8")
     package = tmp_path / "package"
     monkeypatch.setattr(build_release, "ROOT", root)
+    # 打包会重建助手知识索引，而索引默认会去 diceframe-content 拉文档。测试必须
+    # 离线：否则受限网络下每个文档都要等一次超时（曾让这个用例跑 220s）。
+    monkeypatch.setenv("DICEFRAME_DOCS_LOCAL_ONLY", "1")
 
     build_release.prepare_package_tree(package)
 
