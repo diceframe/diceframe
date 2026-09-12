@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import copy
+import logging
 import re
 from typing import Iterable
+
+logger = logging.getLogger("trpg")
 
 # GM 常把数量直接写进物品串（"回复药水x5"、"地图×2"）。识别并剥离这个后缀，
 # 让数量进入 qty 字段而不是污染物品名。只认结尾的 x/X/× + 数字，避免误伤
@@ -11,6 +15,13 @@ from typing import Iterable
 _ITEM_QTY_SUFFIX = re.compile(r"^(.+?)\s*[xX×]\s*(\d{1,2})$")
 
 _MAX_GRANT_QTY = 99
+
+# narrative 装备操作允许显式指定的槽位。LLM 不是装备规则 authority：不在表内
+# 的 slot 会被丢弃，由服务端按物品信息推断。
+EQUIPMENT_SLOTS = frozenset({
+    "main_hand", "off_hand", "body", "armor", "head", "hands",
+    "waist", "feet", "back", "accessory", "pack",
+})
 
 
 def split_item_quantity(item_name: str) -> tuple[str, int]:
@@ -189,3 +200,302 @@ def grant_classified_item(
         append_inventory_item(character_sheet, item_name, category="丹药", qty=qty)
     else:
         append_inventory_item(character_sheet, item_name, qty=qty)
+
+
+def canonical_equipment_entry(item_name: str, rule=None) -> dict | None:
+    """规则集 template.items 定义了该物品时，按 canonical 定义构造装备条目。
+
+    规则集 canonical 定义是装备数值的 authority（damage/ac_bonus/item_key 等）；
+    没有定义时返回 None，由调用方回退到名称推断。
+    """
+
+    if rule is None:
+        return None
+    template = getattr(rule, "template", None)
+    item_defs = template.get("items") if isinstance(template, dict) else None
+    if not isinstance(item_defs, dict) or not item_defs:
+        return None
+    from src.engine.constants import canonical_item_key
+
+    display_key = str(item_name or "").strip().casefold()
+    if not display_key:
+        return None
+    item_key = canonical_item_key(item_name) or ""
+    item_def = item_defs.get(item_key) if item_key else None
+    if not isinstance(item_def, dict):
+        item_def = None
+        for candidate_key, candidate in item_defs.items():
+            if (
+                isinstance(candidate, dict)
+                and str(candidate.get("name") or "").strip().casefold() == display_key
+            ):
+                item_key, item_def = str(candidate_key), candidate
+                break
+    if not isinstance(item_def, dict):
+        return None
+    item_type = str(item_def.get("type") or "").strip().casefold()
+    entry: dict = {
+        "name": str(item_def.get("name") or item_name),
+        "quality": "common",
+        "slot": "",
+    }
+    if item_key:
+        entry["item_key"] = item_key
+    if item_type == "weapon":
+        entry.update({
+            "type": "weapon",
+            "damage": int(item_def.get("damage", 0) or 0),
+            "slot": "main_hand",
+        })
+        if item_def.get("damage_dice"):
+            entry["damage_dice"] = item_def["damage_dice"]
+    elif item_type == "shield":
+        entry.update({
+            "type": "shield",
+            "slot": "off_hand",
+            "ac_bonus": int(item_def.get("ac_bonus", 0) or 0),
+        })
+    elif item_type == "armor":
+        entry.update({
+            "type": "armor",
+            "slot": "armor",
+            "armor_category": str(item_def.get("armor_category") or ""),
+            "ac_base": int(item_def.get("ac_base", 0) or 0),
+        })
+        if "armor" in item_def:
+            entry["armor"] = int(item_def["armor"] or 0)
+        if "dex_cap" in item_def:
+            entry["dex_cap"] = item_def["dex_cap"]
+    elif item_type == "focus":
+        entry["type"] = "focus"
+    else:
+        return None
+    return entry
+
+
+def _find_inventory_row(
+    inventory: list, item_name: str,
+) -> tuple[int | None, dict | None]:
+    """按 canonical item_key 优先、名称其次找一行 qty>0 的库存。"""
+
+    from src.engine.constants import canonical_item_key
+
+    wanted_key = canonical_item_key(item_name) or ""
+    wanted_name = str(item_name or "").strip().casefold()
+    fallback: tuple[int, dict] | None = None
+    for index, row in enumerate(inventory):
+        if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
+            continue
+        row_key = str(row.get("item_key") or "")
+        if wanted_key and row_key and row_key == wanted_key:
+            return index, row
+        if (
+            fallback is None
+            and str(row.get("name") or "").strip().casefold() == wanted_name
+        ):
+            fallback = (index, row)
+    return fallback if fallback is not None else (None, None)
+
+
+def take_from_inventory(character_sheet: dict, item_name: str) -> dict | None:
+    """从背包取走 1 件物品，返回携带完整 metadata 的条目副本。
+
+    qty 永远不会变成负数；数量减到 0 时移除该行。找不到返回 None。
+    """
+
+    inventory = character_sheet.setdefault("inventory", [])
+    index, row = _find_inventory_row(inventory, item_name)
+    if index is None or row is None:
+        return None
+    entry = copy.deepcopy(row)
+    row["qty"] = int(row.get("qty", 1) or 1) - 1
+    if row["qty"] <= 0:
+        inventory.pop(index)
+    entry["qty"] = 1
+    return entry
+
+
+def return_equipment_to_inventory(character_sheet: dict, entry: dict) -> None:
+    """把装备条目放回背包：整条 metadata 随行，不从名字重猜属性。"""
+
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return
+    inventory = character_sheet.setdefault("inventory", [])
+    entry = copy.deepcopy(entry)
+    entry["qty"] = 1
+    for row in inventory:
+        if (
+            isinstance(row, dict)
+            and str(row.get("name") or "").strip().casefold() == name.casefold()
+        ):
+            row["qty"] = int(row.get("qty", 0) or 0) + 1
+            for key, value in entry.items():
+                # 行里已有的字段不动（避免覆盖同名牌的既有属性），
+                # 只补齐行缺失的装备 metadata（item_key/damage/type/slot…）。
+                if key not in row:
+                    row[key] = value
+            return
+    inventory.append(entry)
+
+
+def _resolve_weapon_damage(
+    entry: dict,
+    requested_name: str,
+    custom_damage: int | None,
+    canonical_damage: int | None,
+) -> int:
+    """武器伤害 authority 顺序：规则集定义 > 物品自带 > 全局武器表 > legacy 值。"""
+
+    if canonical_damage is not None:
+        return max(0, int(canonical_damage))
+    existing = int(entry.get("damage", 0) or 0)
+    if existing > 0:
+        return existing
+    from src.engine.constants import WEAPON_DAMAGE
+
+    name = str(entry.get("name") or requested_name)
+    table_damage = WEAPON_DAMAGE.get(name, WEAPON_DAMAGE.get(requested_name, 0))
+    if table_damage > 0:
+        return int(table_damage)
+    if isinstance(custom_damage, int) and custom_damage > 0:
+        return custom_damage
+    return 0
+
+
+def _finalize_equipment_entry(
+    entry: dict,
+    requested_name: str,
+    slot: str,
+    custom_damage: int | None,
+    rule=None,
+) -> dict:
+    """补全 type/slot/damage，使条目成为合法的装备槽条目。
+
+    规则集 canonical 定义存在时整体采用它（item 自带杂项 metadata 保留）；
+    slot authority：canonical 自带槽位 > 显式指定 > 物品自带 > 按类型推断。
+    canonical 槽位为空（focus 等）时保持空，不强制占用部位。
+    """
+
+    canonical = canonical_equipment_entry(requested_name, rule)
+    canonical_damage: int | None = None
+    canonical_slot = ""
+    if canonical is not None:
+        if canonical.get("type") == "weapon":
+            canonical_damage = int(canonical.get("damage", 0) or 0)
+        canonical_slot = str(canonical.get("slot") or "")
+        for key, value in entry.items():
+            # canonical 定义的数值字段优先；物品自带的其它 metadata（effect 等）保留。
+            if key not in canonical and key not in {"qty", "slot"}:
+                canonical[key] = value
+        entry = canonical
+    else:
+        inferred = equipment_entry(requested_name)
+        entry.setdefault("type", inferred.get("type", "armor"))
+        entry.setdefault("quality", inferred.get("quality", "common"))
+        if int(entry.get("damage", 0) or 0) == 0:
+            entry.setdefault("damage", int(inferred.get("damage", 0) or 0))
+    if canonical_slot:
+        # 规则集 canonical 已绑定槽位：slot authority 在 canonical，LLM 显式
+        # slot（即使在白名单内）也不得覆盖 —— 否则"板甲→main_hand"会把
+        # 主手旧装备真的挤回背包，不只是显示问题。
+        entry["slot"] = canonical_slot
+    elif slot:
+        # canonical 没有槽位定义（focus 等空 slot）或没有 canonical 时，
+        # 才接受白名单内的显式 slot。
+        entry["slot"] = slot
+    if not str(entry.get("slot") or "") and canonical is None:
+        entry["slot"] = "main_hand" if entry.get("type") == "weapon" else "body"
+    # canonical 存在且槽位为空（focus）：保持空，不强制落到 body。
+    if entry.get("type") == "weapon":
+        damage = _resolve_weapon_damage(entry, requested_name, custom_damage, canonical_damage)
+        if isinstance(custom_damage, int) and custom_damage > 0 and damage != custom_damage:
+            logger.info(
+                "武器 %s 伤害采用权威值 %d，忽略标签提供的 %d",
+                requested_name, damage, custom_damage,
+            )
+        entry["damage"] = damage
+    return entry
+
+
+def equip_owned_item(
+    character_sheet: dict,
+    item_name: str,
+    *,
+    slot: str = "",
+    custom_damage: int | None = None,
+    legacy_gain: bool = False,
+    rule=None,
+) -> bool:
+    """装备一件背包里的物品：inventory -1，目标槽旧装备返回背包。
+
+    - 未拥有时默认 warning 并忽略，绝不凭空装备；
+    - ``legacy_gain=True`` 是 legacy WEAPON 标签的兼容路径：旧 Prompt 把"获得
+      武器"与"装备武器"混在同一标签里，未拥有时先获得 1 件再立即装备；
+    - 装备条目携带物品自身 metadata 往返（equipment -> inventory -> equipment
+      不丢 item_key/damage/slot 等），不从 display name 重猜。
+    """
+
+    name = str(item_name or "").strip()
+    if not name:
+        return False
+    entry = take_from_inventory(character_sheet, name)
+    if entry is None:
+        if not legacy_gain:
+            logger.warning("忽略装备未拥有物品: %s", name)
+            return False
+        logger.info(
+            "legacy WEAPON acquisition compatibility: %s 不在背包，先获得再装备", name,
+        )
+        entry = canonical_equipment_entry(name, rule) or equipment_entry(name)
+        entry["qty"] = 1
+    slot = str(slot or "").strip().lower()
+    if slot and slot not in EQUIPMENT_SLOTS:
+        logger.warning("未知装备槽位 %s，已丢弃（由服务端推断）: %s", slot, name)
+        slot = ""
+    entry = _finalize_equipment_entry(entry, name, slot, custom_damage, rule)
+    target_slot = str(entry.get("slot") or "")
+    equipment = character_sheet.setdefault("equipment", [])
+    if target_slot:
+        previous = next(
+            (
+                item for item in equipment
+                if isinstance(item, dict) and str(item.get("slot") or "") == target_slot
+            ),
+            None,
+        )
+        if previous is not None:
+            equipment.remove(previous)
+            return_equipment_to_inventory(character_sheet, previous)
+    equipment.append(entry)
+    return True
+
+
+def unequip_item(character_sheet: dict, item_name: str) -> bool:
+    """卸下当前装备中的一件并放回背包；未装备时 warning + no-op。"""
+
+    from src.engine.constants import canonical_item_key
+
+    name = str(item_name or "").strip()
+    if not name:
+        return False
+    wanted_key = canonical_item_key(name) or ""
+    wanted_name = name.casefold()
+    equipment = character_sheet.setdefault("equipment", [])
+    entry = next(
+        (
+            item for item in equipment
+            if isinstance(item, dict)
+            and (
+                (wanted_key and str(item.get("item_key") or "") == wanted_key)
+                or str(item.get("name") or "").strip().casefold() == wanted_name
+            )
+        ),
+        None,
+    )
+    if entry is None:
+        logger.warning("忽略卸下未装备的物品: %s", name)
+        return False
+    equipment.remove(entry)
+    return_equipment_to_inventory(character_sheet, entry)
+    return True

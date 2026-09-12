@@ -71,12 +71,59 @@ def _string_update(value: str, result: dict, field: str, message: str) -> None:
         logger.info(message, uid, text)
 
 
+def _append_event(result: dict, uid: str, field: str, event: dict) -> None:
+    """物品事件统一走列表：同一轮多个同类事件必须全部保留，不能互相覆盖。"""
+
+    update = _player_update(result, uid)
+    update.setdefault(field, []).append(event)
+
+
 def _use(value: str, result: dict, _limits: dict) -> None:
-    _string_update(value, result, "use_item", "道具使用: %s 使用了 %s")
+    if split := _split(value):
+        uid, text = split
+        _append_event(result, uid, "item_uses", {"name": text})
+        logger.info("道具使用: %s 使用了 %s", uid, text)
 
 
 def _equip(value: str, result: dict, _limits: dict) -> None:
-    _string_update(value, result, "equip_gain", "装备获得: %s 获得 %s")
+    if split := _split(value):
+        uid, text = split
+        # 兼容语义保持不变：EQUIP 只代表"获得非武器装备"，仅加入背包，不自动穿戴。
+        _append_event(result, uid, "item_gains", {"name": text, "category": "equipment", "qty": 1})
+        logger.info("装备获得: %s 获得 %s", uid, text)
+
+
+def _weapon_gain(value: str, result: dict, _limits: dict) -> None:
+    if split := _split(value):
+        uid, text = split
+        _append_event(result, uid, "item_gains", {"name": text, "category": "weapon", "qty": 1})
+        logger.info("武器获得: %s 获得 %s（仅入背包）", uid, text)
+
+
+def _equip_item(value: str, result: dict, _limits: dict) -> None:
+    parts = [part.strip() for part in value.split(":")]
+    if len(parts) < 2 or not parts[1]:
+        return
+    uid, name = parts[0], parts[1]
+    slot = parts[2].strip().lower() if len(parts) >= 3 else ""
+    if slot:
+        from src.commands.state_items import EQUIPMENT_SLOTS
+
+        if slot not in EQUIPMENT_SLOTS:
+            logger.warning("EQUIP_ITEM 未知槽位 %s，已丢弃（由服务端推断）: %s = %s", slot, uid, name)
+            slot = ""
+    event: dict = {"op": "equip", "name": name}
+    if slot:
+        event["slot"] = slot
+    _append_event(result, uid, "equipment_ops", event)
+    logger.info("装备穿戴: %s 装备 %s", uid, name)
+
+
+def _unequip_item(value: str, result: dict, _limits: dict) -> None:
+    if split := _split(value):
+        uid, name = split
+        _append_event(result, uid, "equipment_ops", {"op": "unequip", "name": name})
+        logger.info("装备卸下: %s 卸下 %s", uid, name)
 
 
 def _weapon(value: str, result: dict, limits: dict) -> None:
@@ -90,14 +137,13 @@ def _weapon(value: str, result: dict, limits: dict) -> None:
         if parsed is not None:
             custom_damage = parsed
             weapon_name = name_part.strip()
-    from src.engine.constants import WEAPON_DAMAGE
-
-    damage = custom_damage or WEAPON_DAMAGE.get(weapon_name, 3)
-    damage = max(1, min(damage, limits["weapon"]))
-    update = _player_update(result, uid)
-    update["weapon_change"] = weapon_name
-    update["weapon_damage"] = damage
-    logger.info("武器切换: %s 装备 %s (伤害%d)", uid, weapon_name, damage)
+    event: dict = {"op": "equip", "name": weapon_name, "slot": "main_hand", "legacy": True}
+    if custom_damage is not None:
+        # legacy WEAPON:uid:name:damage：数值只对没有权威定义的自由武器生效，
+        # 且在这里统一钳制到 combat model 上限；canonical 优先级在 applier 侧裁决。
+        event["damage"] = max(1, min(custom_damage, limits["weapon"]))
+    _append_event(result, uid, "equipment_ops", event)
+    logger.info("武器切换: %s 装备 %s", uid, weapon_name)
 
 
 def _xp(value: str, result: dict, _limits: dict) -> None:
@@ -201,6 +247,9 @@ PLAYER_TAG_HANDLERS: dict[str, PlayerTagHandler] = {
     "USE": _use,
     "EQUIP": _equip,
     "WEAPON": _weapon,
+    "WEAPON_GAIN": _weapon_gain,
+    "EQUIP_ITEM": _equip_item,
+    "UNEQUIP_ITEM": _unequip_item,
     "XP": _xp,
     "MILESTONE": _milestone,
     "SAN": _san,

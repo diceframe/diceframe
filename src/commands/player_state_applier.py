@@ -24,7 +24,8 @@ from src.commands.resource_triggers import check_resource_triggers
 from src.commands.state_items import (
     add_owned_equipment_to_inventory,
     append_inventory_item,
-    equipment_entry,
+    equip_owned_item,
+    unequip_item,
 )
 
 logger = logging.getLogger("trpg")
@@ -76,68 +77,8 @@ class PlayerStateApplier:
                 )
             if "status" in pud:
                 cs["status"] = pud["status"]
-            # 使用道具
-            use_item = pud.get("use_item")
-            if use_item:
-                inv = cs.get("inventory", [])
-                for item in inv:
-                    if item.get("name") == use_item and item.get("qty", 0) > 0:
-                        item["qty"] -= 1
-                        effect = item.get("effect", "")
-                        if "HP" in effect:
-                            m = re.search(r"\d+", effect)
-                            if m:
-                                heal = int(m.group())
-                                apply_hp_delta(cs, heal, bounded=False)
-                        logger.info("道具已使用: %s x %s, HP=%d", use_item, effect, cs["hp"])
-                        break
-            # 切换武器
-            weapon_name = pud.get("weapon_change")
-            if weapon_name:
-                requested = str(weapon_name).strip()
-                inventory = cs.setdefault("inventory", [])
-                owned_index = next(
-                    (
-                        index for index, item in enumerate(inventory)
-                        if isinstance(item, dict)
-                        and str(item.get("name") or "").strip().casefold()
-                        == requested.casefold()
-                        and int(item.get("qty", 1) or 1) > 0
-                    ),
-                    None,
-                )
-                if owned_index is None:
-                    logger.warning(
-                        "忽略未拥有武器的装备切换: uid=%s weapon=%s round=%d",
-                        uid, requested, instance.round_number,
-                    )
-                else:
-                    owned = inventory[owned_index]
-                    owned["qty"] = int(owned.get("qty", 1) or 1) - 1
-                    if owned["qty"] <= 0:
-                        inventory.pop(owned_index)
-                    eq = cs.setdefault("equipment", [])
-                    previous = next(
-                        (item for item in eq if isinstance(item, dict) and item.get("slot") == "main_hand"),
-                        None,
-                    )
-                    if previous is not None:
-                        append_inventory_item(
-                            cs,
-                            str(previous.get("name") or "").strip(),
-                            quality=str(previous.get("quality") or "common"),
-                            category="equipment",
-                        )
-                    eq[:] = [item for item in eq if item is not previous]
-                    equipped = equipment_entry(requested)
-                    equipped["slot"] = "main_hand"
-                    eq.append(equipped)
-            equip_gain = pud.get("equip_gain")
-            if equip_gain:
-                # EQUIP is an acquisition marker in the narrative protocol,
-                # not an instruction to replace the active loadout.  Explicit
-                # WEAPON/equip actions are the only path that changes slots.
-                add_owned_equipment_to_inventory(cs, str(equip_gain))
+            # 物品事件：固定顺序 获得 -> 装备/卸下 -> 使用，再结算其它资源状态。
+            self._apply_item_events(instance, uid, cs, pud, rule)
             # 法力变化
             mana_change = pud.get("mana_change")
             if isinstance(mana_change, (int, float)):
@@ -232,3 +173,106 @@ class PlayerStateApplier:
                             instance.players[uid].get("character_name", uid),
                             instance.round_number, cs.get("hp", 0))
             instance.set_character_sheet(uid, cs)
+
+    def _apply_item_events(
+        self,
+        instance: GameInstance,
+        uid: str,
+        cs: dict,
+        pud: dict,
+        rule=None,
+    ) -> None:
+        """结算一轮的物品事件，固定顺序：获得 -> 装备/卸下 -> 使用。
+
+        所有物品事件都是列表，同一轮多条同类标签全部按原始顺序执行，不再互相
+        覆盖。旧版单值字段（equip_gain/weapon_change/use_item）作为 compatibility
+        input 继续接受；对应列表字段存在时跳过 scalar，避免同轮重复结算。
+        """
+
+        item_gains = pud.get("item_gains")
+        if isinstance(item_gains, list):
+            for gain in item_gains:
+                if not isinstance(gain, dict):
+                    continue
+                name = str(gain.get("name") or "").strip()
+                if not name:
+                    continue
+                try:
+                    qty = max(1, min(99, int(gain.get("qty", 1) or 1)))
+                except (TypeError, ValueError):
+                    qty = 1
+                category = str(gain.get("category") or "").strip()
+                if category in ("weapon", "equipment"):
+                    # 获得武器/装备只进背包：获得 != 装备，绝不自动替换当前装备。
+                    add_owned_equipment_to_inventory(cs, name, qty=qty)
+                else:
+                    append_inventory_item(cs, name, qty=qty)
+        equipment_ops = pud.get("equipment_ops")
+        if isinstance(equipment_ops, list):
+            for op in equipment_ops:
+                if not isinstance(op, dict):
+                    continue
+                name = str(op.get("name") or "").strip()
+                if not name:
+                    continue
+                if op.get("op") == "unequip":
+                    unequip_item(cs, name)
+                else:
+                    custom_damage = op.get("damage")
+                    equip_owned_item(
+                        cs,
+                        name,
+                        slot=str(op.get("slot") or ""),
+                        custom_damage=custom_damage if isinstance(custom_damage, int) else None,
+                        legacy_gain=bool(op.get("legacy")),
+                        rule=rule,
+                    )
+        item_uses = pud.get("item_uses")
+        if isinstance(item_uses, list):
+            for use in item_uses:
+                name = (
+                    str(use.get("name") or "").strip()
+                    if isinstance(use, dict) else str(use or "").strip()
+                )
+                if name:
+                    self._use_inventory_item(instance, uid, cs, name)
+        # ---- legacy 单值字段兼容（旧解析器/外部注入的数据）----
+        if "item_gains" not in pud and "equipment_ops" not in pud:
+            equip_gain = pud.get("equip_gain")
+            if equip_gain:
+                # EQUIP 在叙事协议里只代表"获得装备"，不改变当前穿戴。
+                add_owned_equipment_to_inventory(cs, str(equip_gain))
+            weapon_name = pud.get("weapon_change")
+            if weapon_name:
+                equip_owned_item(
+                    cs, str(weapon_name), slot="main_hand", legacy_gain=True, rule=rule,
+                )
+        if "item_uses" not in pud:
+            use_item = pud.get("use_item")
+            if use_item:
+                self._use_inventory_item(instance, uid, cs, str(use_item))
+
+    def _use_inventory_item(
+        self, instance: GameInstance, uid: str, cs: dict, item_name: str,
+    ) -> None:
+        """使用一件背包物品：qty -1（永不为负），effect 含 HP 数字时回血。"""
+
+        for item in cs.get("inventory", []):
+            if (
+                not isinstance(item, dict)
+                or str(item.get("name") or "").strip().casefold() != item_name.casefold()
+                or int(item.get("qty", 0) or 0) <= 0
+            ):
+                continue
+            item["qty"] = int(item.get("qty", 1) or 1) - 1
+            effect = str(item.get("effect") or "")
+            if "HP" in effect:
+                m = re.search(r"\d+", effect)
+                if m:
+                    apply_hp_delta(cs, int(m.group()), bounded=False)
+            logger.info("道具已使用: %s x %s, HP=%d", item_name, effect, cs.get("hp", 0))
+            return
+        logger.warning(
+            "忽略使用未拥有的物品: uid=%s item=%s round=%d",
+            uid, item_name, instance.round_number,
+        )
