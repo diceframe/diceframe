@@ -13,6 +13,7 @@ export {
   resolveLiveCharacterRest,
   resolveRulesetRest,
   resolveRulesetDecision,
+  planRulesetTemporaryEncounter,
   submitRulesetIntent,
   validateRulesetBuilderDraft,
 } from '@/api/rulesets'

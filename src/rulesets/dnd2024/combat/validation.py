@@ -15,10 +15,81 @@ from .primitives import (
 )
 
 
+def validate_enemy_profiles(enemies: Any) -> None:
+    """Public enemy profile validation shared by combat.start, preset
+    loading, and AI temporary-encounter generation.
+
+    Only one implementation of the safety boundary exists; callers must not
+    copy or relax it.
+    """
+
+    if not isinstance(enemies, list) or not 1 <= len(enemies) <= 50:
+        raise CombatIntentError("combat requires 1 to 50 enemies")
+    seen: set[str] = set()
+    for enemy in enemies:
+        if not isinstance(enemy, dict):
+            raise CombatIntentError("enemy must be an object")
+        enemy_id = str(enemy.get("id") or "")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", enemy_id) or enemy_id in seen:
+            raise CombatIntentError("enemy id is invalid or duplicated")
+        seen.add(enemy_id)
+        if len(str(enemy.get("name") or enemy_id)) > 120:
+            raise CombatIntentError("enemy name is too long")
+        for field_name, minimum, maximum in (
+            ("hp", 1, 10000), ("armor_class", 1, 40),
+            ("speed", 0, 200), ("position", -10000, 10000),
+            ("initiative_modifier", -20, 30),
+        ):
+            default = (
+                30 if field_name in {"speed", "position"}
+                else 0 if field_name == "initiative_modifier" else None
+            )
+            value = enemy.get(field_name, default)
+            if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+                raise CombatIntentError(f"enemy {field_name} is invalid")
+        attacks = enemy.get("attacks")
+        if not isinstance(attacks, list) or not 1 <= len(attacks) <= 20:
+            raise CombatIntentError("enemy requires 1 to 20 attacks")
+        attack_ids: set[str] = set()
+        for attack in attacks:
+            if not isinstance(attack, dict):
+                raise CombatIntentError("enemy attack profile is invalid")
+            attack_id = str(attack.get("id") or "")
+            formula = str(attack.get("damage") or "")
+            dice_match = DICE_RE.fullmatch(formula)
+            attack_bonus = attack.get("attack_bonus")
+            normal_range = attack.get("range", 5)
+            long_range = attack.get("long_range", normal_range)
+            if (
+                not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id)
+                or attack_id in attack_ids
+                or dice_match is None
+                or isinstance(attack_bonus, bool)
+                or not isinstance(attack_bonus, int)
+                or not -20 <= attack_bonus <= 30
+                or isinstance(normal_range, bool)
+                or not isinstance(normal_range, int)
+                or not 1 <= normal_range <= 1000
+                or isinstance(long_range, bool)
+                or not isinstance(long_range, int)
+                or long_range < normal_range
+                or long_range > 2000
+            ):
+                raise CombatIntentError("enemy attack profile is invalid")
+            dice_count, dice_sides = int(dice_match.group(1)), int(dice_match.group(2))
+            if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
+                raise CombatIntentError("enemy attack damage dice are invalid")
+            attack_ids.add(attack_id)
+
+
 class CombatValidationMixin:
     """Validate combat declarations without resolving dice or changing state."""
 
     __slots__ = ()
+
+    @staticmethod
+    def _validate_enemies(enemies: Any) -> None:
+        validate_enemy_profiles(enemies)
 
     def _validate(self, instance: Any, intent: dict[str, Any]) -> None:
         if not isinstance(intent, dict):
@@ -256,66 +327,6 @@ class CombatValidationMixin:
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
             raise CombatIntentError("spell damage_type choice is required")
-
-    @staticmethod
-    def _validate_enemies(enemies: Any) -> None:
-        if not isinstance(enemies, list) or not 1 <= len(enemies) <= 50:
-            raise CombatIntentError("combat requires 1 to 50 enemies")
-        seen: set[str] = set()
-        for enemy in enemies:
-            if not isinstance(enemy, dict):
-                raise CombatIntentError("enemy must be an object")
-            enemy_id = str(enemy.get("id") or "")
-            if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", enemy_id) or enemy_id in seen:
-                raise CombatIntentError("enemy id is invalid or duplicated")
-            seen.add(enemy_id)
-            if len(str(enemy.get("name") or enemy_id)) > 120:
-                raise CombatIntentError("enemy name is too long")
-            for field_name, minimum, maximum in (
-                ("hp", 1, 10000), ("armor_class", 1, 40),
-                ("speed", 0, 200), ("position", -10000, 10000),
-                ("initiative_modifier", -20, 30),
-            ):
-                default = (
-                    30 if field_name in {"speed", "position"}
-                    else 0 if field_name == "initiative_modifier" else None
-                )
-                value = enemy.get(field_name, default)
-                if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-                    raise CombatIntentError(f"enemy {field_name} is invalid")
-            attacks = enemy.get("attacks")
-            if not isinstance(attacks, list) or not 1 <= len(attacks) <= 20:
-                raise CombatIntentError("enemy requires 1 to 20 attacks")
-            attack_ids: set[str] = set()
-            for attack in attacks:
-                if not isinstance(attack, dict):
-                    raise CombatIntentError("enemy attack profile is invalid")
-                attack_id = str(attack.get("id") or "")
-                formula = str(attack.get("damage") or "")
-                dice_match = DICE_RE.fullmatch(formula)
-                attack_bonus = attack.get("attack_bonus")
-                normal_range = attack.get("range", 5)
-                long_range = attack.get("long_range", normal_range)
-                if (
-                    not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id)
-                    or attack_id in attack_ids
-                    or dice_match is None
-                    or isinstance(attack_bonus, bool)
-                    or not isinstance(attack_bonus, int)
-                    or not -20 <= attack_bonus <= 30
-                    or isinstance(normal_range, bool)
-                    or not isinstance(normal_range, int)
-                    or not 1 <= normal_range <= 1000
-                    or isinstance(long_range, bool)
-                    or not isinstance(long_range, int)
-                    or long_range < normal_range
-                    or long_range > 2000
-                ):
-                    raise CombatIntentError("enemy attack profile is invalid")
-                dice_count, dice_sides = int(dice_match.group(1)), int(dice_match.group(2))
-                if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
-                    raise CombatIntentError("enemy attack damage dice are invalid")
-                attack_ids.add(attack_id)
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:

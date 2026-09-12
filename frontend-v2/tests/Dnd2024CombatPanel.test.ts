@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  fetch: vi.fn(), submit: vi.fn(), decide: vi.fn(),
+  fetch: vi.fn(), submit: vi.fn(), decide: vi.fn(), plan: vi.fn(),
   locale: 'en',
 }))
 
@@ -11,6 +11,7 @@ vi.mock('../src/features/rulesets/dnd2024/api', () => ({
   fetchRulesetAvailableActions: mocks.fetch,
   submitRulesetIntent: mocks.submit,
   resolveRulesetDecision: mocks.decide,
+  planRulesetTemporaryEncounter: mocks.plan,
 }))
 vi.mock('../src/composables/useLocale', () => ({
   useLocale: () => ({ locale: ref(mocks.locale) }),
@@ -82,6 +83,7 @@ describe('D&D 2024 combat panel', () => {
     mocks.fetch.mockReset().mockResolvedValue(response('none'))
     mocks.submit.mockReset().mockResolvedValue(response('active'))
     mocks.decide.mockReset().mockResolvedValue(response('active'))
+    mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
   })
 
   it('keeps the catalog hidden in a fresh game and starts from a server-provided preset after explicit preparation', async () => {
@@ -187,9 +189,13 @@ describe('D&D 2024 combat panel', () => {
     expect(wrapper.find('.encounter-start > .combat-primary').exists()).toBe(false)
     expect(wrapper.find('.manual-encounter-toggle').exists()).toBe(false)
 
-    // GM 明确“脱离冒险，准备自由遭遇”后才出现通用目录，且提交必须声明 sandbox。
+    // AI 临时准备遭遇：只调用只读 plan API，不自动开战、不出现通用目录。
     await wrapper.get('.guided-preset .unprepared-actions .combat-primary').trigger('click')
-    expect(wrapper.text()).toContain('leaves the active adventure package')
+    expect(mocks.plan).toHaveBeenCalledWith('web|combat|bot')
+    expect(wrapper.find('.encounter-start select').exists()).toBe(false)
+    // GM 明确“临时准备自由遭遇”后才出现通用目录，且提交必须声明 sandbox。
+    await wrapper.get('.guided-preset .unprepared-actions button:last-child').trigger('click')
+    expect(wrapper.text()).toContain('not written into the adventure package')
     await wrapper.get('.encounter-start .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({

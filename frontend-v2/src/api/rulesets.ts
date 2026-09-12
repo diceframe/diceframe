@@ -10,6 +10,7 @@ import type {
   RulesetProgressionResponse,
   RulesetRestResponse,
   RulesetGameplayResponse,
+  RulesetTemporaryEncounterResponse,
 } from '@/api/types'
 
 function rulePath(ruleId: string, suffix: string, language = ''): string {
@@ -217,6 +218,16 @@ export function submitRulesetIntent(
   return api<RulesetGameplayResponse>(
     `/games/${encodeURIComponent(gameKey)}/intents`,
     { method: 'POST', body: JSON.stringify(intent) },
+  )
+}
+
+// AI 临时遭遇提案：只读生成，不改任何游戏状态；确认后走现有 /intents combat.start。
+export function planRulesetTemporaryEncounter(
+  gameKey: string,
+): Promise<RulesetTemporaryEncounterResponse> {
+  return api<RulesetTemporaryEncounterResponse>(
+    `/games/${encodeURIComponent(gameKey)}/ruleset/temporary-encounter`,
+    { method: 'POST', body: JSON.stringify({}) },
   )
 }
 

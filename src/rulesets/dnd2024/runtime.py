@@ -22,6 +22,7 @@ from src.rulesets.dnd2024.director.planner import (
     plan_adventure_choice,
     plan_encounter_preset,
 )
+from src.rulesets.dnd2024.director.temporary_encounter import plan_temporary_encounter
 from src.rulesets.dnd2024.play import (
     EncounterAccess,
     is_public_story_milestone,
@@ -953,6 +954,20 @@ class Dnd2024Runtime:
         locale = str(getattr(instance, "language", "") or "")
         presets = self._combat_engine(instance, access, locale).encounter_presets()
         return await plan_encounter_preset(instance, proposal, presets, llm_client)
+
+    async def plan_temporary_encounter(
+        self, instance: Any, llm_client: Any,
+    ) -> dict[str, Any] | None:
+        """AI 临时遭遇提案：只读生成，不落任何权威状态。
+
+        GM 确认后提交现有 ``combat.start``（mode=sandbox），服务端权威校验
+        仍然完整生效。剧情已绑定正式遭遇时不提供这条兜底路径。
+        """
+
+        campaign = self._campaign_engine(
+            instance, str(getattr(instance, "language", "") or ""),
+        ).gameplay_view(instance)
+        return await plan_temporary_encounter(instance, campaign, llm_client)
 
     def filter_narrative_state_update(
         self, instance: Any, update: dict[str, Any],
