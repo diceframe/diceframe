@@ -18,8 +18,10 @@ from src.content.gm_style import (
     render_gm_style_section,
 )
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
+from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services import game_controls
 from src.webui.services._common import _GAME_KEY_SEP
+from src.webui.services.game_queries import GameQueryDependencies, game_detail
 
 
 def _composer(tmp_path, monkeypatch) -> PromptComposer:
@@ -219,3 +221,33 @@ async def test_set_gm_style_service_roundtrip_and_errors(tmp_path):
 
     missing = await service.set_gm_style("web|ghost|bot", {})
     assert missing == {"ok": False, "error": "游戏不存在"}
+
+
+def test_game_detail_hides_gm_style_override_from_players(tmp_path):
+    """custom_instructions 可能包含剧透级 GM 笔记：gm_style_override 只下发给 GM。"""
+
+    registry = GameRegistry(tmp_path)
+    instance = _instance()
+    instance.gm_uid = "gm"
+    instance.players["ally"] = {"character_name": "Mira", "character_sheet": {}}
+    instance.gm_style_override = {
+        "tone": "dark", "verbosity": "normal", "pace": "normal",
+        "custom_instructions": "保持克制，暂时不要透露真正凶手是镇长。",
+    }
+    registry.register(instance)
+    dependencies = GameQueryDependencies(
+        list_instances=registry.list_all,
+        get_instance=registry.get,
+        parse_game_key=lambda game_key: tuple(game_key.split("|")),
+        load_world_template=None,
+        load_rule_for_game=lambda _instance: None,
+        ruleset_registry=RulesetRuntimeRegistry(),
+    )
+
+    gm_view = game_detail(dependencies, "web|style|bot", viewer_uid="gm")
+    assert gm_view is not None
+    assert gm_view["gm_style_override"]["custom_instructions"].endswith("镇长。")
+
+    player_view = game_detail(dependencies, "web|style|bot", viewer_uid="ally")
+    assert player_view is not None
+    assert player_view["gm_style_override"] is None
