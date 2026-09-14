@@ -75,6 +75,7 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   confirm: '确认并交给服务器结算', cancel: '取消', resolve: '发动反应', decline: '放弃反应',
   legalOnly: '这里只显示当前合法动作；若状态已经变化，服务器会拒绝过期请求并说明原因。',
   yourTurn: '轮到你行动', enemyTurn: 'AI GM 正在处理敌方回合', partyTurn: '队友回合', availableActions: '当前可用动作',
+  companionTurn: 'AI 队友正在行动', explorationCast: '非战斗施法',
   waiting: '尚未轮到你的角色。', waitingForTeammate: '等待队友行动', enemyActing: '敌方正在由服务器自动行动…', ended: '战斗已经结束。', conditions: '状态',
   lastResult: '最近结算', none: '无', economy: '本回合资源', available: '可用', spent: '已用',
   inRange: '可用', longRange: '远距攻击（劣势）', tooFar: '距离不足',
@@ -135,6 +136,7 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   confirm: 'Confirm and let the server resolve', cancel: 'Cancel', resolve: 'Use Reaction', decline: 'Decline',
   legalOnly: 'Only currently legal actions are shown. The server rejects stale requests with a reason.',
   yourTurn: 'Your turn', enemyTurn: 'AI GM is resolving the enemy turn', partyTurn: 'Party turn', availableActions: 'Available actions',
+  companionTurn: 'AI companion is acting', explorationCast: 'Cast a spell (exploration)',
   waiting: 'Waiting for your character’s turn.', waitingForTeammate: 'Waiting for teammate', enemyActing: 'The enemy is acting automatically…', ended: 'Combat has ended.', conditions: 'Conditions',
   lastResult: 'Latest Resolution', none: 'None', economy: 'Turn Resources', available: 'Available', spent: 'Spent',
   inRange: 'In range', longRange: 'Long range (disadvantage)', tooFar: 'Out of range',
@@ -251,6 +253,15 @@ const canPlanTemporaryEncounter = computed(() => Boolean(
 ))
 const attackAction = computed(() => action('attack'))
 const spellAction = computed(() => action('cast_spell'))
+// 非战斗施法（§35.3）：仅当 server available_intents 提供 exploration.cast_spell
+// 时渲染入口，不永久硬编码按钮。
+const explorationAction = computed(() => action('exploration.cast_spell'))
+const explorationSpellRef = ref('')
+const explorationSlot = ref(0)
+const explorationTargetId = ref('')
+const explorationSpell = computed(() => (
+  (explorationAction.value?.spells || []).find(item => item.spell_ref === explorationSpellRef.value) || null
+))
 const moveAction = computed(() => action('move'))
 const pendingDecision = computed(() => (
   action('decision.resolve')?.decisions?.[0]
@@ -286,6 +297,10 @@ const waitingText = computed(() => {
   const current = String(combat.value?.current_actor_id || '')
   if (!current) return copy.value.waiting
   if (current.startsWith('enemy:')) return copy.value.enemyActing
+  if (current.startsWith('companion:')) {
+    // §35.1：队友回合显示"米拉正在行动…"，而不是"等待队友点击"。
+    return `${targetName(current)}（AI 队友）正在行动…`
+  }
   if (current === `player:${props.actorId}`) return copy.value.waiting
   return `${copy.value.waitingForTeammate}：${targetName(current)}`
 })
@@ -310,6 +325,7 @@ const currentTurnLabel = computed(() => {
   const actorId = String(combat.value?.current_actor_id || '')
   if (actorId === `player:${props.actorId}`) return copy.value.yourTurn
   if (actorId.startsWith('enemy:')) return copy.value.enemyTurn
+  if (actorId.startsWith('companion:')) return copy.value.companionTurn
   return copy.value.partyTurn
 })
 const stagedSummary = computed(() => {
@@ -456,6 +472,9 @@ function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
 }
 
 function resetSelections(): void {
+  explorationSpellRef.value = ''
+  explorationSlot.value = 0
+  explorationTargetId.value = ''
   const guidedPresetId = guidedCombatStep.value?.encounter_preset_id
   const preset = guidedCombatPreset.value || requestedCombatPreset.value || selectableEncounterPresets.value[0]
   const shouldSelectEncounter = Boolean(
@@ -723,6 +742,18 @@ function stageSpell(): void {
     type: 'cast_spell', actor_id: spellAction.value.actor_id,
     target_id: selectedTargetId.value, spell_ref: spell.spell_ref,
     slot_level: selectedSlot.value,
+  })
+}
+
+function stageExplorationSpell(): void {
+  const actionPayload = explorationAction.value
+  if (!actionPayload) return
+  stage({
+    type: 'exploration.cast_spell',
+    actor_id: String(actionPayload.actor_id || ''),
+    spell_ref: explorationSpellRef.value,
+    slot_level: explorationSlot.value,
+    target_ids: explorationTargetId.value ? [explorationTargetId.value] : [],
   })
 }
 
@@ -1176,6 +1207,31 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               </select>
             </label>
             <button :disabled="busy || !selectedSpell || !selectedTarget" @click="stageSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
+          </section>
+
+          <section v-if="explorationAction" class="action-card">
+            <h3><NIcon :component="SparklesOutline" />{{ copy.explorationCast }}</h3>
+            <label>{{ copy.spell }}
+              <select v-model="explorationSpellRef">
+                <option v-for="spellItem in explorationAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
+                  {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
+                </option>
+              </select>
+            </label>
+            <label v-if="explorationSpell?.level">
+              {{ copy.slot }}
+              <select v-model.number="explorationSlot">
+                <option v-for="level in explorationSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
+              </select>
+            </label>
+            <label>{{ copy.target }}
+              <select v-model="explorationTargetId">
+                <option v-for="targetItem in explorationAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                </option>
+              </select>
+            </label>
+            <button :disabled="busy || !explorationSpellRef" @click="stageExplorationSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
           </section>
 
           <section v-if="moveAction" class="action-card">
