@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from src.commands.check_planner import _planner_context, normalize_check_specs
@@ -70,6 +71,8 @@ def test_planner_context_lists_active_companions() -> None:
     context = _planner_context(instance, rule)
     assert '"actor_ref":"companion:mira"' in context
     assert "米拉" in context
+    payload = json.loads(context)
+    assert payload["companions"][0]["attributes"]["str"] == 18
 
 
 def test_delegated_companion_check_uses_companion_sheet() -> None:

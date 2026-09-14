@@ -76,6 +76,23 @@ function response(status: 'none' | 'active' = 'none') {
   }
 }
 
+function explorationResponse(availableSlotLevels: number[] = [1, 2]) {
+  const result = response('active') as any
+  result.available_actions = [{
+    type: 'exploration.cast_spell', label: 'Cast a spell', actor_id: 'player:gm',
+    expected_version: 0,
+    spells: [{
+      spell_ref: 'spell:cure_wounds', name: 'Cure Wounds', level: 1,
+      casting_time: 'action', available_slot_levels: availableSlotLevels,
+    }],
+    targets: [{
+      actor_id: 'player:gm', kind: 'player', name: 'Guardian',
+      hp: 8, max_hp: 12, position: 0,
+    }],
+  }]
+  return result
+}
+
 describe('D&D 2024 combat panel', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -84,6 +101,35 @@ describe('D&D 2024 combat panel', () => {
     mocks.submit.mockReset().mockResolvedValue(response('active'))
     mocks.decide.mockReset().mockResolvedValue(response('active'))
     mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
+  })
+
+  it('uses the first legal slot for an exploration spell and rejects an empty slot list', async () => {
+    mocks.fetch.mockResolvedValueOnce(explorationResponse())
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    const card = wrapper.findAll('.action-card').find(item => item.text().includes('Cure Wounds'))!
+    await card.find('select').setValue('spell:cure_wounds')
+    await card.get('button').trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'exploration.cast_spell', spell_ref: 'spell:cure_wounds', slot_level: 1,
+    })
+    wrapper.unmount()
+
+    mocks.fetch.mockResolvedValueOnce(explorationResponse([]))
+    const unavailable = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+    const unavailableCard = unavailable.findAll('.action-card')
+      .find(item => item.text().includes('Cure Wounds'))!
+    await unavailableCard.find('select').setValue('spell:cure_wounds')
+    expect(unavailableCard.get('button').attributes('disabled')).toBeDefined()
+    unavailable.unmount()
   })
 
   it('keeps the catalog hidden in a fresh game and starts from a server-provided preset after explicit preparation', async () => {

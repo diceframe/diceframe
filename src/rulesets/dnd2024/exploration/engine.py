@@ -138,6 +138,8 @@ class Dnd2024ExplorationEngine:
                 ]
                 if int(spell["level"]) > 0 else [0]
             )
+            if int(spell["level"]) > 0 and not available_slots:
+                continue
             spells.append({
                 "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
                 "casting_time": spell["casting_time"], "available_slot_levels": available_slots,

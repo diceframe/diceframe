@@ -61,6 +61,23 @@ def test_exploration_cast_available_only_outside_combat() -> None:
     assert not any(item["type"] == "exploration.cast_spell" for item in available)
 
 
+def test_exploration_does_not_expose_leveled_spells_without_available_slots() -> None:
+    _, instance, engine = _wizard_instance()
+    canonical = instance.players["gm"]["character_sheet"]["ruleset_character"]
+    canonical["spellcasting"]["class"]["slots_current"] = {"1": 0}
+
+    available = engine.available_intents(instance, "player:gm")
+    action = next(
+        (item for item in available if item["type"] == "exploration.cast_spell"),
+        None,
+    )
+    exposed_refs = {
+        spell["spell_ref"] for spell in (action or {}).get("spells", [])
+    }
+    assert "spell:cure_wounds" not in exposed_refs
+    assert "spell:bless" not in exposed_refs
+
+
 def test_exploration_heal_consumes_slot_and_heals_party_target() -> None:
     """§37.11/37.12：扣法术位、写 cast 事件（context=exploration）、HP 恢复不超上限。"""
     runtime, instance, engine = _wizard_instance()

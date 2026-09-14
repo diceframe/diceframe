@@ -402,7 +402,7 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
             {
                 "actor_ref": f"companion:{companion_id}",
                 "character_name": str(companion.get("name") or companion_id),
-                "attributes": companion["ruleset_character"].get("attributes", {}),
+                "attributes": _companion_sheet(instance, companion_id).get("attributes", {}),
                 "skills": _skill_rows(_companion_sheet(instance, companion_id)),
             }
             for companion_id, companion in sorted(_companion_roster(instance).items())

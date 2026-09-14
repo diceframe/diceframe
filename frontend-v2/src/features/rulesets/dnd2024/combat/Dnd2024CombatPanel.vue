@@ -262,6 +262,10 @@ const explorationTargetId = ref('')
 const explorationSpell = computed(() => (
   (explorationAction.value?.spells || []).find(item => item.spell_ref === explorationSpellRef.value) || null
 ))
+const explorationSlotValid = computed(() => Boolean(
+  explorationSpell.value
+  && explorationSpell.value.available_slot_levels.includes(explorationSlot.value)
+))
 const moveAction = computed(() => action('move'))
 const pendingDecision = computed(() => (
   action('decision.resolve')?.decisions?.[0]
@@ -747,7 +751,7 @@ function stageSpell(): void {
 
 function stageExplorationSpell(): void {
   const actionPayload = explorationAction.value
-  if (!actionPayload) return
+  if (!actionPayload || !explorationSpell.value || !explorationSlotValid.value) return
   stage({
     type: 'exploration.cast_spell',
     actor_id: String(actionPayload.actor_id || ''),
@@ -833,6 +837,9 @@ watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
   selectedTargetId.value = targetsFor(spell)[0]?.actor_id || ''
+})
+watch(explorationSpellRef, () => {
+  explorationSlot.value = explorationSpell.value?.available_slot_levels?.[0] ?? 0
 })
 watch(selectedTargetId, () => chooseUsableWeapon())
 watch(() => props.gameKey, (next, previous) => {
@@ -1231,7 +1238,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 </option>
               </select>
             </label>
-            <button :disabled="busy || !explorationSpellRef" @click="stageExplorationSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
+            <button :disabled="busy || !explorationSpellRef || !explorationSlotValid" @click="stageExplorationSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
           </section>
 
           <section v-if="moveAction" class="action-card">
