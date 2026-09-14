@@ -16,9 +16,27 @@ DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC /
 
 It brings the Web UI, character sheets, lorebooks, dice checks, state changes, campaign logs, and optional chat-bot play into one shared game state. Players describe what they want to do in natural language; DiceFrame passes those actions to a GM model, handles dice and state tags, then syncs the result back to the browser.
 
+## Language support
+
+DiceFrame WebUI currently supports the following interface languages:
+
+- Simplified Chinese
+- English
+- Japanese
+- German
+
+> Note: German support has been available since version v2.5.9-beta.1.
+
+On first launch, DiceFrame automatically selects the interface language based on the browser language. Users can switch languages at any time from the language selector in the top-right corner, and the selected language is remembered.
+
+Game language currently supports Simplified Chinese, English, and German for AI GM narration, prompts, and the main gameplay flow. Ruleset content or specialized interfaces that do not yet provide a translation may fall back to English.
+
+Japanese is currently supported across the WebUI and primary interface text. Some game content and ruleset resources may still fall back to English.
+
 ## What It Does
 
 - A Web UI organized around Overview, Play, Characters, Content, and Management. Content contains Lorebook, Worlds, Adventures, and Rules; Management contains Memory, Logs, Plugins, and Settings.
+- Multilingual UI: the WebUI supports Simplified Chinese, English, Japanese, and German. Game language currently supports Simplified Chinese, English, and German, with untranslated content falling back to English.
 - Solo and multiplayer play, with invite links, waiting states, away players, GM force-advance, SSE updates, and experimental WebRTC player direct connect through one-time link codes.
 - Layered resolution for D&D 5e-inspired Lite, custom d20, CoC 7e-inspired d100, and no-dice narrative rules, including rule-declared advantage/disadvantage, CoC bonus/penalty dice, HP, gold, items, XP, death, revival, and scene changes.
 - Lorebook entries for NPCs, locations, items, events, puzzles, and factions.
