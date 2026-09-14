@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
+import pytest
+
 from src.engine.game_instance import GameInstance
 from src.commands.round_effects import apply_revive_commands
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
@@ -544,3 +546,201 @@ def test_llm_view_uses_canonical_state_and_resolved_event_batch() -> None:
     assert authority["runtime_id"] == "core:dnd2024"
     assert authority["latest_event_batch"]["batch_id"] == batch["batch_id"]
     assert "combat_enemies" not in view
+
+
+def _companion(
+    companion_id: str, name: str, *, hp: int = 20, max_hp: int | None = None,
+    str_value: int = 18,
+    slots: dict[int, int] | None = None, prepared: list[str] | None = None,
+) -> dict:
+    return {
+        "id": companion_id, "name": name, "controller": "ai", "active": True,
+        "ruleset_character": {
+            "resources": {"hp": hp, "max_hp": max_hp if max_hp is not None else hp},
+            "conditions": {},
+            "abilities": {
+                "str": str_value, "dex": 12, "con": 14, "int": 10, "wis": 12, "cha": 10,
+            },
+            "derived": {
+                "armor_class": 16, "speed": 30, "initiative": 1,
+                "proficiency_bonus": 2, "saving_throws": {"str": 4, "con": 2},
+            },
+            "proficiencies": {
+                "skill_values": {"athletics": 6, "medicine": 4},
+                "weapon_category_refs": ["weapon_category:martial"],
+            },
+            "equipment": {"item_refs": ["item:greatsword"]},
+            "spellcasting": {"class": {
+                "ability": "wis", "slots_current": {str(k): v for k, v in (slots or {}).items()},
+                "concentration": None, "prepared_spell_refs": prepared or [],
+                "cantrip_refs": [],
+            }},
+            "build": {"class_levels": [{"class_ref": "class:fighter", "level": 5}]},
+        },
+    }
+
+
+def _seed_companion(instance: GameInstance, companion: dict) -> None:
+    party = instance.ruleset_state.setdefault("party", {"companions": {}})
+    party.setdefault("companions", {})[companion["id"]] = companion
+
+
+def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str) -> None:
+    combat = instance.ruleset_state["combat"]
+    combat["turn_index"] = combat["initiative"].index(actor_id)
+    actor = engine._actor_view(instance, combat, actor_id)
+    combat["economy"] = engine._fresh_economy(actor)
+
+
+def test_companion_actor_identity_and_view() -> None:
+    from src.rulesets.dnd2024.combat.primitives import (
+        CombatIntentError, actor_kind, actor_side, companion_actor,
+    )
+
+    assert actor_kind("companion:mira") == ("companion", "mira")
+    assert actor_side("companion") == "party"
+    assert actor_side("player") == "party"
+    assert actor_side("enemy") == "enemy"
+
+    engine, instance = _instance()
+    _seed_companion(instance, _companion("mira", "Mira"))
+    view = engine._actor_view(instance, {"enemies": {}}, companion_actor("mira"))
+    assert view["kind"] == "companion"
+    assert view["side"] == "party"
+    assert view["actor_id"] == "companion:mira"
+    assert view["hp"] == 20
+    assert view["armor_class"] == 16
+
+    with pytest.raises(CombatIntentError):
+        engine._actor_view(instance, {"enemies": {}}, "companion:ghost")
+
+
+def test_companion_joins_initiative_with_party_side() -> None:
+    engine, instance = _instance()
+    _seed_companion(instance, _companion("mira", "Mira"))
+    batch = _start(engine, instance)
+    combat = instance.ruleset_state["combat"]
+
+    assert "player:gm" in combat["initiative"]
+    assert "companion:mira" in combat["initiative"]
+    assert "enemy:goblin-1" in combat["initiative"]
+    kinds = {row["actor_id"]: row["kind"] for row in combat["initiative_rolls"]}
+    assert kinds["companion:mira"] == "companion"
+
+    companion_view = engine._actor_view(instance, combat, "companion:mira")
+    assert companion_view["side"] == "party"
+    hostile = engine._hostile_targets(instance, combat, "companion:mira")
+    assert {item["actor_id"] for item in hostile} == {"enemy:goblin-1"}
+
+
+def test_companion_cannot_attack_party_members() -> None:
+    engine, instance = _instance()
+    _seed_companion(instance, _companion("mira", "Mira"))
+    _start(engine, instance)
+    _set_turn(engine, instance, "companion:mira")
+    version = instance.ruleset_state["version"]
+
+    friendly = engine.validate_intent(instance, {
+        "intent_id": "c-attack-ally", "type": "attack", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "companion:mira",
+        "target_id": "player:gm", "weapon_ref": "item:greatsword",
+    })
+    assert friendly["ok"] is False
+
+    hostile = engine.validate_intent(instance, {
+        "intent_id": "c-attack-enemy", "type": "attack", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "companion:mira",
+        "target_id": "enemy:goblin-1", "weapon_ref": "item:greatsword",
+    })
+    assert hostile["ok"] is True
+
+
+def test_enemy_can_attack_companion_and_hp_syncs() -> None:
+    engine, instance = _instance()
+    _seed_companion(instance, _companion("mira", "Mira", hp=10))
+    _start(engine, instance)
+    _set_turn(engine, instance, "enemy:goblin-1")
+
+    intent = engine.next_automatic_intent(instance)
+    # 同距离下 HP 更低的目标优先：mira(10) 会被敌人在自动回合选中。
+    assert intent is not None and intent["type"] == "attack"
+    assert intent["target_id"] == "companion:mira"
+
+    resolved = engine.resolve_intent(instance, intent, SequenceRng([20, 1]))
+    applied = engine.apply_batch(instance, resolved["event_batch"])
+    assert applied["applied"] is True
+    mira = instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+    assert mira["resources"]["hp"] < 10
+
+
+def test_companion_automatic_turn_attacks_through_authoritative_chain() -> None:
+    engine, instance = _instance()
+    _seed_companion(instance, _companion("mira", "Mira"))
+    _start(engine, instance)
+    _set_turn(engine, instance, "companion:mira")
+
+    intent = engine.next_automatic_intent(instance)
+    assert intent is not None
+    assert intent["type"] in {"attack", "cast_spell", "move", "dodge", "end_turn"}
+    assert intent["submitted_by"] == "gm"
+
+    if intent["type"] == "attack":
+        resolved = engine.resolve_intent(instance, intent, SequenceRng([15, 4, 5]))
+        applied = engine.apply_batch(instance, resolved["event_batch"])
+        assert applied["applied"] is True
+
+
+def test_player_can_heal_companion() -> None:
+    engine, instance = _instance(wizard=True)
+    _seed_companion(instance, _companion("mira", "Mira", hp=6, max_hp=20))
+    _start(engine, instance)
+    sheet = instance.players["gm"]["character_sheet"]
+    prepared = sheet["ruleset_character"]["spellcasting"]["class"].setdefault(
+        "prepared_spell_refs", [],
+    )
+    prepared.append("spell:cure_wounds")
+    _set_turn(engine, instance, "player:gm")
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "heal-companion", "type": "cast_spell", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "spell_ref": "spell:cure_wounds", "slot_level": 1,
+        "target_ids": ["companion:mira"],
+    }, SequenceRng([3, 4]))
+    applied = engine.apply_batch(instance, resolved["event_batch"])
+    assert applied["applied"] is True
+    mira = instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+    assert mira["resources"]["hp"] > 6
+    assert mira["resources"]["hp"] <= mira["resources"]["max_hp"]
+
+
+def test_companion_spell_slot_consumed() -> None:
+    engine, instance = _instance()
+    _seed_companion(instance, _companion(
+        "mira", "Mira", slots={1: 2}, prepared=["spell:cure_wounds"],
+    ))
+    _start(engine, instance)
+    _set_turn(engine, instance, "companion:mira")
+    version = instance.ruleset_state["version"]
+
+    slots_before = (
+        instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+        ["spellcasting"]["class"]["slots_current"]["1"]
+    )
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "companion-heal", "type": "cast_spell", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "companion:mira",
+        "spell_ref": "spell:cure_wounds", "slot_level": 1,
+        "target_ids": ["player:gm"],
+    }, SequenceRng([2, 3]))
+    applied = engine.apply_batch(instance, resolved["event_batch"])
+    assert applied["applied"] is True
+    slots_after = (
+        instance.ruleset_state["party"]["companions"]["mira"]["ruleset_character"]
+        ["spellcasting"]["class"]["slots_current"]["1"]
+    )
+    assert slots_after == slots_before - 1
+    assert any(
+        event["type"] == "dnd2024.spell.cast" and event["actor_id"] == "companion:mira"
+        for event in resolved["event_batch"]["events"]
+    )
