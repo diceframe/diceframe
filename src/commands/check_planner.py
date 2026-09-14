@@ -93,6 +93,122 @@ def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
     return rows
 
 
+def _context_match_text(value: str) -> str:
+    return re.sub(r"\s+", "", value).casefold()
+
+
+def _item_context(sheet: dict[str, Any], action: str, target: str) -> dict[str, Any]:
+    """只读压缩现有物品；partial 表示该清单不能提供物品不存在的证据。"""
+    texts = [_context_match_text(action), _context_match_text(target)]
+    candidates: list[tuple[int, dict[str, Any]]] = []
+    partial = False
+    for source_index, source in enumerate(("equipment", "key_items", "inventory")):
+        entries = sheet.get(source)
+        if not isinstance(entries, list):
+            partial = True
+            continue
+        for entry in entries:
+            row: dict[str, Any] = {"source": source}
+            if isinstance(entry, str) and entry.strip():
+                row["name"] = entry.strip()
+            elif isinstance(entry, dict):
+                for key in ("name", "item_ref", "type"):
+                    value = entry.get(key)
+                    if isinstance(value, str) and value.strip():
+                        row[key] = value.strip()
+                    elif key in entry:
+                        partial = True
+                quantity_key = "qty" if "qty" in entry else "quantity"
+                if quantity_key in entry:
+                    quantity = entry[quantity_key]
+                    if type(quantity) is int and quantity >= 0:
+                        row["qty"] = quantity
+                    else:
+                        partial = True
+            if not row.get("name") and not row.get("item_ref"):
+                partial = True
+                continue
+            matched = any(
+                _context_match_text(row[key]) in text
+                for key in ("name", "item_ref") if row.get(key)
+                for text in texts
+            )
+            if source == "inventory" and len(entries) > 20 and not matched:
+                partial = True
+                continue
+            candidates.append((0 if matched else source_index + 1, row))
+
+    result: dict[str, Any] = {"items": [], "partial": partial}
+    for _, row in sorted(candidates, key=lambda candidate: candidate[0]):
+        result["items"].append(row)
+        if len(result["items"]) > 20 or len(json.dumps(
+            result, ensure_ascii=False, separators=(",", ":"),
+        )) > 1500:
+            result["items"].pop()
+            result["partial"] = True
+    return result
+
+
+def _npc_context(
+    instance: GameInstance, uid: str, action: str, target: str,
+) -> dict[str, Any] | None:
+    """复用目标解析，只附带明确、无歧义 NPC 的身份和已记录关系。"""
+    reference = (
+        _match_opponent(instance, target)
+        if target.strip() else find_action_opponent(instance, uid, action)
+    )
+    if not reference.startswith("npc:"):
+        return None
+    npc_id = reference[4:]
+    npc = instance.npcs.get(npc_id)
+    if not isinstance(npc, dict):
+        return None
+
+    # 原解析器的精确名称分支可能返回首个同名对象；摘要不得据此消除歧义。
+    aliases = {
+        key: {
+            value.strip().casefold()
+            for value in (key, record.get("name"), record.get("character_name"))
+            if isinstance(value, str) and value.strip()
+        }
+        for key, record in instance.npcs.items() if isinstance(record, dict)
+    }
+    if target.strip():
+        query = target.strip().casefold()
+        matches = {key for key, names in aliases.items() if query in names}
+        if not matches and len(query) >= 2:
+            matches = {
+                key for key, names in aliases.items()
+                if any(query in name or name in query for name in names)
+            }
+    else:
+        text = _context_match_text(action)
+        hits = [
+            (len(name), key)
+            for key, names in aliases.items()
+            for alias in names
+            if (name := _context_match_text(alias)) and name in text
+        ]
+        longest = max((length for length, _ in hits), default=0)
+        matches = {key for length, key in hits if length == longest}
+    if matches != {npc_id}:
+        return None
+
+    name = next((
+        value.strip() for value in (npc.get("name"), npc.get("character_name"), npc_id)
+        if isinstance(value, str) and value.strip()
+    ), npc_id)
+    result = {"reference": reference, "name": name}
+    relation = npc.get("relation")
+    if isinstance(relation, str) and relation.strip():
+        result["relation"] = relation
+    if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 400:
+        result.pop("relation", None)
+    if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 400:
+        return None
+    return result
+
+
 def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     players = []
     for action in instance.action_queue:
@@ -102,16 +218,22 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         if not is_conscious(instance.get_character_sheet(uid)):
             continue
         sheet = instance.get_character_sheet(uid)
+        action_text = str(action.get("text") or "")[:1000]
+        target_text = str(action.get("target_text") or "")
         players.append({
             "player_id": uid,
             "character_name": instance.players[uid].get("character_name") or uid,
-            "action": str(action.get("text") or "")[:1000],
+            "action": action_text,
             "attributes": sheet.get("attributes", {}),
             "skills": _skill_rows(sheet),
             "selected_attribute": str(action.get("selected_attribute") or ""),
             "selected_skill": str(action.get("selected_skill") or ""),
-            "target_text": str(action.get("target_text") or ""),
+            "target_text": target_text,
+            "item_context": _item_context(sheet, action_text, target_text),
         })
+        npc_context = _npc_context(instance, uid, action_text, target_text)
+        if npc_context is not None:
+            players[-1]["npc_context"] = npc_context
     mechanic = rule.check_mechanic if rule else {
         "dice": "d20",
         "comparison": "roll_plus_modifier_gte_target",

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from src.commands.check_planner import normalize_check_specs, plan_round_checks
+from src.commands.check_planner import _planner_context, normalize_check_specs, plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
@@ -876,3 +878,183 @@ def test_duplicate_note_line_follows_the_interface_language(language: str, expec
     check = _resolve(instance, rule, request, roll=10)
     assert check["planner_notes"] == ["same_fact_as_dc"]
     assert expected in check["modifier_breakdown"]
+
+
+def test_planner_item_context_is_compact_actor_scoped_and_read_only() -> None:
+    instance = make_instance()
+    instance.players["p3"] = deepcopy(instance.players["p1"])
+    instance.players["p3"]["character_sheet"]["inventory"] = ["未行动者的密信"]
+    instance.get_character_sheet("p1").update({
+        "equipment": [{"name": "锤子", "type": "tool", "description": "不要传入", "damage": "1d4"}],
+        "key_items": ["黄铜钥匙"],
+        "inventory": [
+            {"name": "绳索", "item_ref": "item:rope", "qty": 0, "quantity": 99, "price": 50},
+            {"name": "火把", "quantity": 2},
+            "干粮",
+        ],
+        "background": "不要传入的背景",
+    })
+    instance.get_character_sheet("p2").update({
+        "equipment": [], "key_items": [], "inventory": ["白露的药水"],
+    })
+    instance.action_queue[0]["text"] = "看看 ITEM: ROPE，再用那把钥匙"
+    before = deepcopy((instance.players, instance.action_queue))
+    players = json.loads(_planner_context(instance, make_rule()))["players"]
+    assert [player["player_id"] for player in players] == ["p1", "p2"]
+    assert players[0]["item_context"] == {
+        "items": [
+            {"source": "inventory", "name": "绳索", "item_ref": "item:rope", "qty": 0},
+            {"source": "equipment", "name": "锤子", "type": "tool"},
+            {"source": "key_items", "name": "黄铜钥匙"},
+            {"source": "inventory", "name": "火把", "qty": 2},
+            {"source": "inventory", "name": "干粮"},
+        ],
+        "partial": False,
+    }
+    assert players[1]["item_context"]["items"] == [{"source": "inventory", "name": "白露的药水"}]
+    assert (instance.players, instance.action_queue) == before
+
+
+@pytest.mark.parametrize("size", [20, 21])
+def test_planner_large_inventory_only_includes_explicit_matches(size: int) -> None:
+    instance = make_instance()
+    instance.get_character_sheet("p1").update({
+        "equipment": [], "key_items": [],
+        "inventory": [f"物品{i:02}" for i in range(size - 1)] + ["铜钥匙"],
+    })
+    instance.action_queue[0].update(text="仔细看它", target_text="铜钥匙")
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert context["items"][0]["name"] == "铜钥匙"
+    assert len(context["items"]) == (20 if size == 20 else 1)
+    assert context["partial"] is (size > 20)
+
+
+def test_planner_item_limits_preserve_priority_and_whole_entries() -> None:
+    instance = make_instance()
+    sheet = instance.get_character_sheet("p1")
+    sheet.update({
+        "equipment": [f"装备{i:02}" for i in range(21)],
+        "key_items": ["钥匙"], "inventory": ["目标物"],
+    })
+    instance.action_queue[0]["text"] = "使用目标物"
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert len(context["items"]) == 20
+    assert [row["name"] for row in context["items"]] == ["目标物", *sheet["equipment"][:19]]
+    assert context["partial"] is True
+
+    sheet.update({"equipment": ["长" * 1500, *["工具" + str(i) + "细" * 200 for i in range(9)]],
+                  "key_items": [], "inventory": ["目标物"]})
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert len(json.dumps(context, ensure_ascii=False, separators=(",", ":"))) <= 1500
+    assert context["partial"] is True
+    assert context["items"][0]["name"] == "目标物"
+    assert all(row["name"] in sheet[row["source"]] for row in context["items"])
+    assert "长" * 1500 not in [row["name"] for row in context["items"]]
+
+
+def test_planner_missing_and_malformed_items_are_partial_without_invented_values() -> None:
+    instance = make_instance()
+    assert json.loads(_planner_context(instance, None))["players"][0]["item_context"] == {
+        "items": [], "partial": True,
+    }
+    instance.get_character_sheet("p1").update({
+        "equipment": {"name": "不是清单"}, "key_items": None,
+        "inventory": [None, 12, {}, " ", {"name": []},
+                      {"name": "药水", "qty": "2", "quantity": 3, "type": {}},
+                      {"name": "干粮", "qty": True}, {"item_ref": "item:rope"}],
+    })
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert context == {"partial": True, "items": [
+        {"source": "inventory", "name": "药水"},
+        {"source": "inventory", "name": "干粮"},
+        {"source": "inventory", "item_ref": "item:rope"},
+    ]}
+
+
+@pytest.mark.parametrize(("target", "action", "expected"), [
+    ("keeper", "询问另一人", "keeper"),
+    ("老汤姆", "看看周围", "keeper"),
+    ("主任", "看看周围", "professor"),
+    ("", "问老汤姆旅店是否营业", "keeper"),
+    ("", "问keeper旅店是否营业", "keeper"),
+    ("不存在", "询问老汤姆", None),
+    ("敌人", "询问老汤姆", None),
+    ("", "看看周围", None),
+    ("", "攻击敌人", None),
+    ("白露", "询问老汤姆", None),
+])
+def test_planner_npc_context_requires_an_explicit_resolved_npc(target, action, expected) -> None:
+    instance = make_instance()
+    instance.npcs = {
+        "keeper": {"name": "老汤姆", "relation": "friendly", "hp": 20, "description": "长篇背景"},
+        "professor": {"character_name": "考古学系主任"},
+    }
+    instance.scene = "老汤姆和考古学系主任所在的旅店"
+    instance.combat_state = "active"
+    instance.combat_enemies = [{"name": "强盗", "hp": 10}]
+    instance.action_queue[0].update(text=action, target_text=target)
+    before = deepcopy(instance.npcs)
+    player = json.loads(_planner_context(instance, None))["players"][0]
+    if expected == "keeper":
+        assert player["npc_context"] == {
+            "reference": "npc:keeper", "name": "老汤姆", "relation": "friendly",
+        }
+    elif expected == "professor":
+        assert player["npc_context"] == {"reference": "npc:professor", "name": "考古学系主任"}
+    else:
+        assert "npc_context" not in player
+    assert instance.npcs == before
+
+
+@pytest.mark.parametrize(("target", "action", "names"), [
+    ("守卫", "询问守卫", ["守卫", "守卫"]),
+    ("", "询问守卫", ["守卫", "守卫"]),
+    ("主任", "询问守卫", ["考古学系主任", "历史系主任"]),
+])
+def test_planner_npc_context_rejects_ambiguous_names(target, action, names) -> None:
+    instance = make_instance()
+    instance.npcs = {f"npc{i}": {"name": name} for i, name in enumerate(names)}
+    instance.action_queue[0].update(text=action, target_text=target)
+    player = json.loads(_planner_context(instance, None))["players"][0]
+    assert "npc_context" not in player
+
+
+def test_planner_npc_context_drops_oversized_fields_without_truncating_identity() -> None:
+    instance = make_instance()
+    instance.npcs = {"keeper": {"name": "老汤姆", "relation": "长" * 401}}
+    instance.action_queue[0]["target_text"] = "keeper"
+    context = json.loads(_planner_context(instance, None))["players"][0]["npc_context"]
+    assert context == {"reference": "npc:keeper", "name": "老汤姆"}
+    instance.npcs["keeper"]["name"] = "长" * 401
+    assert "npc_context" not in json.loads(_planner_context(instance, None))["players"][0]
+
+
+@pytest.mark.asyncio
+async def test_new_context_reaches_single_planner_call_without_changing_safety_net() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "询问老汤姆", "selected_attribute": "str"}]
+    instance.get_character_sheet("p1").update({
+        "equipment": [], "key_items": ["旅店钥匙"], "inventory": [],
+    })
+    instance.npcs = {"keeper": {"name": "老汤姆", "relation": "friendly"}}
+
+    class CapturingClient:
+        calls = 0
+
+        async def call_tools(self, prompt, context, **kwargs):
+            self.calls += 1
+            player = json.loads(context)["players"][0]
+            assert player["item_context"]["items"][0]["name"] == "旅店钥匙"
+            assert player["npc_context"]["reference"] == "npc:keeper"
+            assert kwargs["tools"][0]["function"]["name"] == "dice_checks"
+            return SimpleNamespace(
+                tool_calls=[{"name": "dice_checks", "arguments": {"checks": []}}],
+                total_tokens=10, provider_used="fake", native_tools=True,
+            )
+
+    client = CapturingClient()
+    planned, metadata = await plan_round_checks(instance, make_rule(), client)
+    assert client.calls == 1
+    assert metadata["errors"] == []
+    assert len(planned) == 1
+    assert planned[0][1]["planner_source"] == "deterministic_safety_net"
