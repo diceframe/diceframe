@@ -36,7 +36,6 @@
 - 存量大型/高耦合模块按计划渐进拆分，不要求贡献者在无关 PR 中顺手重构；但已有技术债也不应被当作新增同类耦合的先例。
 - 新的 provider、ruleset、plugin、transport 等实现优先复用 capability / adapter / registry / generic connector，而不是把具体实现分支追加到通用路径。
 - 不提交运行时存档、个人数据、API Key、构建产物或本机配置。
-- 自动化账号（例如 `claude[bot]`、`github-actions[bot]`、`web-flow`）的提交记录保持原样，不通过改作者信息来隐藏或冒充人工贡献。
 
 ## Pull Request
 
