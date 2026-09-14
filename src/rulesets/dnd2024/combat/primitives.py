@@ -31,6 +31,10 @@ def player_actor(uid: str) -> str:
     return f"player:{uid}"
 
 
+def companion_actor(companion_id: str) -> str:
+    return f"companion:{companion_id}"
+
+
 def enemy_actor(enemy_id: str) -> str:
     return f"enemy:{enemy_id}"
 
@@ -38,9 +42,16 @@ def enemy_actor(enemy_id: str) -> str:
 def actor_kind(actor_id: str) -> tuple[str, str]:
     if actor_id.startswith("player:"):
         return "player", actor_id.removeprefix("player:")
+    if actor_id.startswith("companion:"):
+        return "companion", actor_id.removeprefix("companion:")
     if actor_id.startswith("enemy:"):
         return "enemy", actor_id.removeprefix("enemy:")
     return "", ""
+
+
+def actor_side(kind: str) -> str:
+    """kind → 阵营的统一入口；敌我判断必须基于 side，而不是 kind。"""
+    return {"player": "party", "companion": "party", "enemy": "enemy"}.get(kind, "")
 
 
 def roll(formula: str, rng: Any, *, critical: bool = False) -> tuple[int, list[int]]:

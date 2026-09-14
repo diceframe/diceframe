@@ -8,7 +8,9 @@ from typing import Any
 from .primitives import (
     CombatIntentError,
     actor_kind as _actor_kind,
+    actor_side as _actor_side,
     canonical as _canonical,
+    companion_actor as _companion_actor,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
@@ -19,6 +21,28 @@ class CombatViewMixin:
 
     __slots__ = ()
 
+    def _companion(self, instance: Any, raw_id: str) -> dict[str, Any]:
+        """从 DND party companion 权威状态读取一个活跃的 AI 队友。"""
+        state = getattr(instance, "ruleset_state", None)
+        party = state.get("party") if isinstance(state, dict) else None
+        companions = party.get("companions") if isinstance(party, dict) else None
+        companion = companions.get(raw_id) if isinstance(companions, dict) else None
+        if not isinstance(companion, dict) or not companion.get("active", True):
+            raise CombatIntentError("companion actor does not exist")
+        return companion
+
+    def _active_companions(self, instance: Any) -> dict[str, dict[str, Any]]:
+        state = getattr(instance, "ruleset_state", None)
+        party = state.get("party") if isinstance(state, dict) else None
+        companions = party.get("companions") if isinstance(party, dict) else None
+        if not isinstance(companions, dict):
+            return {}
+        return {
+            companion_id: companion
+            for companion_id, companion in companions.items()
+            if isinstance(companion, dict) and companion.get("active", True)
+        }
+
     def _actor_view(self, instance: Any, combat: dict[str, Any], actor_id: str) -> dict[str, Any]:
         kind, raw_id = _actor_kind(actor_id)
         if kind == "player":
@@ -26,12 +50,20 @@ class CombatViewMixin:
                 raise CombatIntentError("player actor does not exist")
             character = _canonical(instance.get_character_sheet(raw_id))
             return self._player_view(raw_id, character)
+        if kind == "companion":
+            # Companion 是"己方角色"：复用 player canonical 视图结构与装备/法术
+            # 目录，不走 enemy attack profile。
+            character = self._companion(instance, raw_id).get("ruleset_character") or {}
+            view = self._player_view(raw_id, character)
+            view["actor_id"] = _companion_actor(raw_id)
+            view["kind"] = "companion"
+            return view
         if kind == "enemy":
             enemy = combat.get("enemies", {}).get(raw_id)
             if not isinstance(enemy, dict):
                 raise CombatIntentError("enemy actor does not exist")
             return {
-                "actor_id": actor_id, "kind": "enemy", "id": raw_id,
+                "actor_id": actor_id, "kind": "enemy", "id": raw_id, "side": "enemy",
                 "hp": int(enemy.get("hp", 0) or 0),
                 "max_hp": int(enemy.get("max_hp", 0) or 0),
                 "armor_class": int(enemy.get("armor_class", 10) or 10),
@@ -48,10 +80,17 @@ class CombatViewMixin:
 
     def _actor_view_from_data(
         self, instance: Any, enemies: dict[str, dict[str, Any]], actor_id: str,
+        companions: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         kind, raw_id = _actor_kind(actor_id)
         if kind == "player":
             return self._player_view(raw_id, _canonical(instance.get_character_sheet(raw_id)))
+        if kind == "companion":
+            companion = (companions or {}).get(raw_id) or self._companion(instance, raw_id)
+            view = self._player_view(raw_id, companion.get("ruleset_character") or {})
+            view["actor_id"] = _companion_actor(raw_id)
+            view["kind"] = "companion"
+            return view
         enemy = enemies[raw_id]
         return {
             "actor_id": actor_id, "kind": "enemy", "hp": enemy["hp"],
@@ -65,7 +104,7 @@ class CombatViewMixin:
         conditions = character.get("conditions")
         conditions = conditions if isinstance(conditions, dict) else {}
         return {
-            "actor_id": _player_actor(uid), "kind": "player", "id": uid,
+            "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(character.get("resources", {}).get("hp", 0) or 0),
             "max_hp": int(character.get("resources", {}).get("max_hp", 0) or 0),
             "armor_class": int(character.get("derived", {}).get("armor_class", 10) or 10),
@@ -125,7 +164,7 @@ class CombatViewMixin:
     def _available_spells(
         self, actor: dict[str, Any], economy: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if actor["kind"] != "player":
+        if actor["kind"] not in {"player", "companion"}:
             return []
         result = []
         for ref in actor["spell_refs"]:
@@ -153,14 +192,21 @@ class CombatViewMixin:
         for uid in instance.players:
             view = self._actor_view(instance, combat, _player_actor(uid))
             targets.append({
-                "actor_id": view["actor_id"], "kind": "player", "hp": view["hp"],
+                "actor_id": view["actor_id"], "kind": "player", "side": "party", "hp": view["hp"],
                 "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
                 "name": str(instance.players[uid].get("character_name") or uid),
+            })
+        for companion_id in sorted(self._active_companions(instance)):
+            view = self._actor_view(instance, combat, _companion_actor(companion_id))
+            targets.append({
+                "actor_id": view["actor_id"], "kind": "companion", "side": "party", "hp": view["hp"],
+                "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
+                "name": str(self._companion(instance, companion_id).get("name") or companion_id),
             })
         for enemy_id in combat.get("enemies", {}):
             view = self._actor_view(instance, combat, _enemy_actor(enemy_id))
             targets.append({
-                "actor_id": view["actor_id"], "kind": "enemy", "hp": view["hp"],
+                "actor_id": view["actor_id"], "kind": "enemy", "side": "enemy", "hp": view["hp"],
                 "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
                 "name": str(combat["enemies"][enemy_id].get("name") or enemy_id),
             })
@@ -170,4 +216,9 @@ class CombatViewMixin:
         self, instance: Any, combat: dict[str, Any], actor_id: str,
     ) -> list[dict[str, Any]]:
         kind, _raw = _actor_kind(actor_id)
-        return [target for target in self._all_targets(instance, combat) if target["kind"] != kind]
+        actor_side = _actor_side(kind)
+        # 敌我判断只基于 side：companion 与 player 同为 party，互不视为敌对。
+        return [
+            target for target in self._all_targets(instance, combat)
+            if target.get("side", _actor_side(target["kind"])) != actor_side
+        ]
