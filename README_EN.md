@@ -16,6 +16,23 @@ DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC /
 
 It brings the Web UI, character sheets, lorebooks, dice checks, state changes, campaign logs, and optional chat-bot play into one shared game state. Players describe what they want to do in natural language; DiceFrame passes those actions to a GM model, handles dice and state tags, then syncs the result back to the browser.
 
+## Language support
+
+DiceFrame WebUI currently supports the following interface languages:
+
+- Simplified Chinese
+- English
+- Japanese
+- German
+
+> Note: German support has been available since version v2.5.9-beta.1.
+
+On first launch, DiceFrame automatically selects the interface language based on the browser language. Users can switch languages at any time from the language selector in the top-right corner, and the selected language is remembered.
+
+Game language currently supports Simplified Chinese, English, and German for AI GM narration, prompts, and the main gameplay flow. Ruleset content or specialized interfaces that do not yet provide a translation may fall back to English.
+
+Japanese is currently supported across the WebUI and primary interface text. Some game content and ruleset resources may still fall back to English.
+
 ## What It Does
 
 - A Web UI organized around Overview, Play, Characters, Content, and Management. Content contains Lorebook, Worlds, Adventures, and Rules; Management contains Memory, Logs, Plugins, and Settings.
