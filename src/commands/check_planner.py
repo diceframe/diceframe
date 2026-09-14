@@ -121,6 +121,9 @@ def _item_context(sheet: dict[str, Any], action: str, target: str) -> dict[str, 
                 quantity_key = "qty" if "qty" in entry else "quantity"
                 if quantity_key in entry:
                     quantity = entry[quantity_key]
+                    if source == "inventory" and type(quantity) is int and quantity <= 0:
+                        partial = True
+                        continue
                     if type(quantity) is int and quantity >= 0:
                         row["qty"] = quantity
                     else:
@@ -183,14 +186,12 @@ def _npc_context(
             }
     else:
         text = _context_match_text(action)
-        hits = [
-            (len(name), key)
+        # 多个不同 NPC 都被提及时，名字长短不能证明谁是行动目标。
+        matches = {
+            key
             for key, names in aliases.items()
-            for alias in names
-            if (name := _context_match_text(alias)) and name in text
-        ]
-        longest = max((length for length, _ in hits), default=0)
-        matches = {key for length, key in hits if length == longest}
+            if any(_context_match_text(name) in text for name in names)
+        }
     if matches != {npc_id}:
         return None
 

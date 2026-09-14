@@ -888,7 +888,7 @@ def test_planner_item_context_is_compact_actor_scoped_and_read_only() -> None:
         "equipment": [{"name": "锤子", "type": "tool", "description": "不要传入", "damage": "1d4"}],
         "key_items": ["黄铜钥匙"],
         "inventory": [
-            {"name": "绳索", "item_ref": "item:rope", "qty": 0, "quantity": 99, "price": 50},
+            {"name": "绳索", "item_ref": "item:rope", "qty": 2, "quantity": 99, "price": 50},
             {"name": "火把", "quantity": 2},
             "干粮",
         ],
@@ -903,7 +903,7 @@ def test_planner_item_context_is_compact_actor_scoped_and_read_only() -> None:
     assert [player["player_id"] for player in players] == ["p1", "p2"]
     assert players[0]["item_context"] == {
         "items": [
-            {"source": "inventory", "name": "绳索", "item_ref": "item:rope", "qty": 0},
+            {"source": "inventory", "name": "绳索", "item_ref": "item:rope", "qty": 2},
             {"source": "equipment", "name": "锤子", "type": "tool"},
             {"source": "key_items", "name": "黄铜钥匙"},
             {"source": "inventory", "name": "火把", "qty": 2},
@@ -913,6 +913,24 @@ def test_planner_item_context_is_compact_actor_scoped_and_read_only() -> None:
     }
     assert players[1]["item_context"]["items"] == [{"source": "inventory", "name": "白露的药水"}]
     assert (instance.players, instance.action_queue) == before
+
+
+@pytest.mark.parametrize("quantity_fields", [
+    {"qty": 0}, {"qty": -1}, {"quantity": 0}, {"quantity": -2},
+    {"qty": 0, "quantity": 99},
+])
+def test_planner_excludes_nonpositive_inventory_even_when_named(quantity_fields) -> None:
+    instance = make_instance()
+    instance.get_character_sheet("p1").update({
+        "equipment": [], "key_items": [],
+        "inventory": [{"name": "绳索", **quantity_fields}, {"name": "火把", "qty": 1}],
+    })
+    instance.action_queue[0]["text"] = "使用绳索"
+    before = deepcopy(instance.players)
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert context["items"] == [{"source": "inventory", "name": "火把", "qty": 1}]
+    assert context["partial"] is True
+    assert instance.players == before
 
 
 @pytest.mark.parametrize("size", [20, 21])
@@ -1017,6 +1035,30 @@ def test_planner_npc_context_rejects_ambiguous_names(target, action, names) -> N
     instance.action_queue[0].update(text=action, target_text=target)
     player = json.loads(_planner_context(instance, None))["players"][0]
     assert "npc_context" not in player
+
+
+@pytest.mark.parametrize(("action", "target", "expected"), [
+    ("问教授老汤姆在哪里", "", None),
+    ("问老汤姆教授在哪里", "", None),
+    ("问教授老汤姆在哪里", "教授", "professor"),
+    ("问教授老汤姆在哪里", "老汤姆", "keeper"),
+    ("问教授老汤姆在哪里", "不存在", None),
+    ("问教授，professor能帮忙吗", "", "professor"),
+])
+def test_planner_requires_explicit_target_when_action_names_multiple_npcs(action, target, expected) -> None:
+    instance = make_instance()
+    instance.npcs = {
+        "professor": {"name": "教授", "relation": "neutral"},
+        "keeper": {"name": "老汤姆", "relation": "friendly"},
+    }
+    instance.action_queue[0].update(text=action, target_text=target)
+    player = json.loads(_planner_context(instance, None))["players"][0]
+    if expected is None:
+        assert "npc_context" not in player
+    else:
+        assert player["npc_context"] == {
+            "reference": f"npc:{expected}", **instance.npcs[expected],
+        }
 
 
 def test_planner_npc_context_drops_oversized_fields_without_truncating_identity() -> None:
