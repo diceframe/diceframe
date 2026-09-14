@@ -25,23 +25,6 @@ DiceFrame 是一个可以自己部署的 **AI 跑团引擎**，支持 **D&D / Co
 
 当前版本仍处于早期发布阶段。功能已经能跑，但接口、存档结构和文档还会继续整理。
 
-## 语言支持
-
-DiceFrame WebUI 目前支持以下界面语言：
-
-- 简体中文
-- English
-- 日本語
-- Deutsch
-
-> 注：德语支持自 v2.5.9-beta.1 版本起提供。
-
-首次打开时会根据浏览器语言自动选择界面语言，也可以随时在右上角手动切换；手动选择后会记住该设置。
-
-对局语言目前支持简体中文、English 和 Deutsch，可用于 AI GM 叙事、提示词与主要游戏流程。部分尚未提供对应翻译的规则内容或专业界面会回退到 English。
-
-日本語目前已支持 WebUI 与主要界面文本；部分对局内容与规则资源仍可能使用 English 回退。
-
 ## 交流与反馈
 
 问题反馈和改进建议请优先通过 [GitHub Issues](https://github.com/diceframe/diceframe/issues) 提交，代码贡献欢迎发起 PR。提交前请阅读 [贡献指南](CONTRIBUTING.md)。
@@ -236,6 +219,23 @@ DiceFrame Hub 为插件商店提供审核信息、版本状态和详情。Hub �
 | 插件开发 | [插件开发](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/plugin-development.md) | [Plugin development](https://github.com/diceframe/diceframe-content/blob/main/docs/en/plugin-development.md) |
 | 插件索引与审核 | [插件索引与审核](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/plugin-registry.md) | [Plugin registry](https://github.com/diceframe/diceframe-content/blob/main/docs/en/plugin-registry.md) |
 | Bot Bridge 核心 | [Bot Bridge 核心](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/bot-bridge-core.md) | [Bot Bridge Core](https://github.com/diceframe/diceframe-content/blob/main/docs/en/bot-bridge-core.md) |
+
+## 语言支持
+
+DiceFrame WebUI 目前支持以下界面语言：
+
+- 简体中文
+- English
+- 日本語
+- Deutsch
+
+> 注：德语支持自 v2.5.9-beta.1 版本起提供。
+
+首次打开时会根据浏览器语言自动选择界面语言，也可以随时在右上角手动切换；手动选择后会记住该设置。
+
+对局语言目前支持简体中文、English 和 Deutsch，可用于 AI GM 叙事、提示词与主要游戏流程。部分尚未提供对应翻译的规则内容或专业界面会回退到 English。
+
+日本語目前已支持 WebUI 与主要界面文本；部分对局内容与规则资源仍可能使用 English 回退。
 
 
 ## 数据与隐私
