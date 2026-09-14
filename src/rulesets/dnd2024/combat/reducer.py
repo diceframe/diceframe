@@ -176,9 +176,13 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
-            if kind != "player":
-                raise EventBatchError("only player spell slots are canonical")
-            slots = snapshot["characters"][raw_id]["spellcasting"]["class"]["slots_current"]
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion spell slots are canonical")
+            slots = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )["spellcasting"]["class"]["slots_current"]
             level = str(event["slot_level"])
             if int(slots.get(level, 0) or 0) < 1:
                 raise EventBatchError("spell slot is already spent")
@@ -187,16 +191,20 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
-            if kind == "player":
-                snapshot["characters"][raw_id]["spellcasting"]["class"]["concentration"] = {
+            if kind in {"player", "companion"}:
+                self._canonical_of(snapshot, kind, raw_id)["spellcasting"]["class"][
+                    "concentration"
+                ] = {
                     "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
                 }
             return
         if event_type == "dnd2024.concentration.ended":
             owner = str(event["actor_id"])
             kind, raw_id = _actor_kind(owner)
-            if kind == "player":
-                snapshot["characters"][raw_id]["spellcasting"]["class"]["concentration"] = None
+            if kind in {"player", "companion"}:
+                self._canonical_of(snapshot, kind, raw_id)["spellcasting"]["class"][
+                    "concentration"
+                ] = None
             self._remove_concentration_conditions(snapshot, combat, owner)
             return
         if event_type == "dnd2024.turn.advanced":
@@ -237,12 +245,33 @@ class CombatReducerMixin:
             return
         raise EventBatchError(f"unsupported event type: {event_type}")
 
+    def _companion_character(self, snapshot: dict[str, Any], companion_id: str) -> dict[str, Any]:
+        """从 detached snapshot 读取 companion 的权威 canonical 角色。"""
+        companions = (
+            snapshot["ruleset_state"].setdefault("party", {}).setdefault("companions", {})
+        )
+        companion = companions.get(companion_id)
+        if not isinstance(companion, dict) or not isinstance(
+            companion.get("ruleset_character"), dict,
+        ):
+            raise EventBatchError("companion canonical character is missing")
+        return companion["ruleset_character"]
+
+    def _canonical_of(self, snapshot: dict[str, Any], kind: str, raw_id: str) -> dict[str, Any]:
+        if kind == "player":
+            return snapshot["characters"][raw_id]
+        return self._companion_character(snapshot, raw_id)
+
     def _apply_hp_change(self, snapshot: dict[str, Any], event: dict[str, Any]) -> None:
         target_id = str(event["target_id"])
         kind, raw_id = _actor_kind(target_id)
         delta = int(event["delta"])
-        if kind == "player":
-            character = snapshot["characters"][raw_id]
+        if kind in {"player", "companion"}:
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
             resources = character["resources"]
             before = int(resources.get("hp", 0) or 0)
             maximum = int(resources.get("max_hp", 0) or 0)

@@ -18,6 +18,7 @@ from .primitives import (
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
+    companion_actor as _companion_actor,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
@@ -32,6 +33,7 @@ class CombatResolutionMixin:
         enemies: dict[str, dict[str, Any]] = {}
         initiatives: list[dict[str, Any]] = []
         positions: dict[str, int] = {}
+        companions = self._active_companions(instance)
         for uid in sorted(instance.players):
             canonical = _canonical(instance.get_character_sheet(uid))
             actor_id = _player_actor(uid)
@@ -42,6 +44,17 @@ class CombatResolutionMixin:
                 "total": roll + modifier, "kind": "player",
             })
             positions[actor_id] = int(intent.get("player_positions", {}).get(uid, 0) or 0)
+        for companion_id in sorted(companions):
+            canonical = companions[companion_id].get("ruleset_character") or {}
+            actor_id = _companion_actor(companion_id)
+            roll = int(rng.randint(1, 20))
+            modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
+            initiatives.append({
+                "actor_id": actor_id, "roll": roll, "modifier": modifier,
+                "total": roll + modifier, "kind": "companion",
+            })
+            # Companion 缺省与队伍同一起始位置，不引入复杂布阵。
+            positions[actor_id] = int(intent.get("player_positions", {}).get(companion_id, 0) or 0)
         for raw in intent["enemies"]:
             enemy_id = str(raw["id"])
             actor_id = _enemy_actor(enemy_id)
@@ -65,7 +78,7 @@ class CombatResolutionMixin:
             positions[actor_id] = int(raw.get("position", 30) or 30)
         initiatives.sort(key=lambda row: (-int(row["total"]), row["kind"] != "player", row["actor_id"]))
         order = [row["actor_id"] for row in initiatives]
-        first = self._actor_view_from_data(instance, enemies, order[0])
+        first = self._actor_view_from_data(instance, enemies, order[0], companions)
         return {
             "type": "dnd2024.combat.started", "round": 1, "initiative": order,
             "initiative_rolls": initiatives, "enemies": enemies, "positions": positions,
@@ -85,7 +98,9 @@ class CombatResolutionMixin:
         target_id = str(intent["target_id"])
         actor = self._actor_view(instance, combat, actor_id)
         target = self._actor_view(instance, combat, target_id)
-        if actor["kind"] == "player":
+        if actor["kind"] in {"player", "companion"}:
+            # Companion 是"己方角色"：武器攻击走玩家同一套装备/目录确定性链，
+            # 不走 enemy attack profile。
             weapon_id = str(intent["weapon_ref"]).removeprefix("item:")
             weapon = self.catalog.weapons[weapon_id]
             distance = self._distance(combat, actor_id, target_id)
@@ -399,7 +414,8 @@ class CombatResolutionMixin:
             if next_index == 0:
                 wraps += 1
             candidate = self._actor_view(instance, combat, order[next_index])
-            if candidate["kind"] == "enemy" and candidate["hp"] <= 0:
+            # 失能单位跳过回合：敌人/队友 HP 归零即跳过；玩家 0 HP 走死亡豁免。
+            if candidate["kind"] in {"enemy", "companion"} and candidate["hp"] <= 0:
                 continue
             if "dead" in candidate["conditions"] or "stable" in candidate["conditions"]:
                 continue

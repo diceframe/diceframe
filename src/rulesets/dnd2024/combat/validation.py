@@ -231,6 +231,12 @@ class CombatValidationMixin:
             raise CombatIntentError("actor_id is invalid")
         if kind == "player" and submitted_by != raw_id:
             raise CombatIntentError("a player can submit intents only for their own character")
+        if kind == "companion":
+            # AI 队友由 GM/server automation authority 提交；玩家不能直接控制。
+            if submitted_by != gm_uid:
+                raise CombatIntentError("only the GM can submit companion intents")
+            if intent_type == "death_save":
+                raise CombatIntentError("companions do not make death saves")
         if kind == "enemy" and submitted_by != gm_uid:
             raise CombatIntentError("only the GM can submit enemy intents")
         actor = self._actor_view(instance, combat, actor_id)
@@ -271,9 +277,12 @@ class CombatValidationMixin:
     ) -> None:
         target_id = str(intent.get("target_id") or "")
         target = self._actor_view(instance, combat, target_id)
-        if target["kind"] == actor["kind"] or target["hp"] <= 0:
+        # 敌我判断基于 side：companion/player 同为 party，互不视为合法攻击目标。
+        actor_side = str(actor.get("side") or "")
+        target_side = str(target.get("side") or "")
+        if target_side == actor_side or target["hp"] <= 0:
             raise CombatIntentError("attack target must be a living hostile actor")
-        if actor["kind"] == "player":
+        if actor["kind"] in {"player", "companion"}:
             weapon_ref = str(intent.get("weapon_ref") or "")
             if weapon_ref not in actor["equipment_refs"]:
                 raise CombatIntentError("weapon is not equipped by the actor")
@@ -298,7 +307,7 @@ class CombatValidationMixin:
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
         actor: dict[str, Any], economy: dict[str, Any],
     ) -> None:
-        if actor["kind"] != "player":
+        if actor["kind"] not in {"player", "companion"}:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
@@ -333,12 +342,14 @@ class CombatValidationMixin:
             raise CombatIntentError(f"spell requires 1 to {required_count} unique targets")
         for target_id in target_ids:
             target = self._actor_view(instance, combat, target_id)
+            actor_side = str(actor.get("side") or "")
+            target_side = str(target.get("side") or "")
             if effect["mode"] in {"healing", "buff"}:
-                if target["kind"] != actor["kind"]:
+                if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
                 if "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
-            elif target["kind"] == actor["kind"]:
+            elif target_side == actor_side:
                 raise CombatIntentError("offensive spells require a hostile target")
             if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff"}:
                 raise CombatIntentError("spell target is not active")
