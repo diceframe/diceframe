@@ -1270,6 +1270,22 @@ class GameInstance:
             and (not user_id or str(check.get("actor_uid") or "") == user_id)
         ]
 
+    def effective_luck_timeout_seconds(self) -> int:
+        """Return the timeout used by the runtime for pending Luck decisions.
+
+        Keep an explicitly configured timeout intact.  The historical default
+        of 60 seconds is lengthened for a live multiplayer table so one
+        player's pending choice is not treated as an early failure while the
+        rest of the party is still deciding.  A value of zero continues to
+        disable the timer for asynchronous games.
+        """
+        timeout = int(self.luck_timeout_seconds or 0)
+        if timeout <= 0:
+            return 0
+        if timeout == 60 and not self.solo_mode and len(self.active_alive_players) > 1:
+            return 180
+        return timeout
+
     async def resolve_luck_decision(
         self,
         check_id: str,

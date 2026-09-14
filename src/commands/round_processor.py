@@ -473,9 +473,14 @@ class RoundProcessor:
         """为每条 pending 幸运检定挂独立超时；到点只 decline 该条，全清则重新推进回合。
 
         每玩家每轮只有一条主检定，故 per-check 即 per-player。已在计时的不重复挂。
+        默认实时单人局为 60 秒，多人局自动放宽到 180 秒；显式配置仍优先，
         luck_timeout_seconds=0 时禁用（异步局可设 0 让幸运选择无限等待）。
         """
-        timeout = int(getattr(instance, "luck_timeout_seconds", 60) or 0)
+        effective_timeout = getattr(instance, "effective_luck_timeout_seconds", None)
+        timeout = int(
+            effective_timeout() if callable(effective_timeout)
+            else getattr(instance, "luck_timeout_seconds", 60) or 0
+        )
         if timeout <= 0:
             return
         for check in instance.pending_luck_checks():

@@ -1219,6 +1219,119 @@ async def test_system_decline_luck_missing_check():
     assert res["code"] == "CHECK_NOT_FOUND"
 
 
+def test_multiplayer_luck_timeout_uses_a_longer_default_without_overriding_custom_values():
+    single = GameInstance(("web", "luck-timeout-single", "bot"))
+    single.players["p1"] = {"character_sheet": {"deceased": False}}
+    assert single.effective_luck_timeout_seconds() == 60
+
+    multiplayer = GameInstance(("web", "luck-timeout-multi", "bot"))
+    multiplayer.players = {
+        "p1": {"character_sheet": {"deceased": False}},
+        "p2": {"character_sheet": {"deceased": False}},
+    }
+    assert multiplayer.effective_luck_timeout_seconds() == 180
+
+    multiplayer.configure_session(luck_timeout_seconds=120)
+    assert multiplayer.effective_luck_timeout_seconds() == 120
+    multiplayer.configure_session(luck_timeout_seconds=0)
+    assert multiplayer.effective_luck_timeout_seconds() == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_luck_decisions_leave_both_results_resolved_once():
+    """并发处理不同玩家的幸运选择时，逐条原子落地且不丢 pending。"""
+    inst = GameInstance(("web", "luck-concurrent", "bot"), state=GameState.ACTIVE_JUDGMENT)
+    inst.round_checks_prepared = True
+    inst.players = {
+        "p1": {"character_sheet": {"luck": 30}},
+        "p2": {"character_sheet": {"luck": 30}},
+    }
+    inst.last_checks = [
+        {
+            "check_id": "a", "actor_uid": "p1", "dice": "d100", "roll": 22,
+            "threshold": 20, "verdict": "失败", "luck_spend_available": True,
+            "luck_decision": "pending",
+        },
+        {
+            "check_id": "b", "actor_uid": "p2", "dice": "d100", "roll": 23,
+            "threshold": 20, "verdict": "失败", "luck_spend_available": True,
+            "luck_decision": "pending",
+        },
+    ]
+
+    first, second = await asyncio.gather(
+        inst.resolve_luck_decision("a", "p1", True),
+        inst.resolve_luck_decision("b", "p2", False),
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert inst.pending_luck_checks() == []
+    assert [check["luck_decision"] for check in inst.last_checks] == ["spent", "declined"]
+    assert inst.get_character_sheet("p1")["luck"] == 28
+
+
+@pytest.mark.asyncio
+async def test_concurrent_luck_timeouts_decline_each_check_without_overwriting():
+    inst = GameInstance(("web", "luck-timeouts-race", "bot"), state=GameState.ACTIVE_JUDGMENT)
+    inst.round_checks_prepared = True
+    inst.last_checks = [
+        {"check_id": "a", "actor_uid": "p1", "luck_decision": "pending"},
+        {"check_id": "b", "actor_uid": "p2", "luck_decision": "pending"},
+    ]
+
+    first, second = await asyncio.gather(
+        inst.system_decline_luck("a"),
+        inst.system_decline_luck("b"),
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert inst.pending_luck_checks() == []
+    assert all(check["luck_decision"] == "declined" for check in inst.last_checks)
+    assert all(check["luck_timeout"] is True for check in inst.last_checks)
+
+
+def _luck_race_instance(check_id: str) -> GameInstance:
+    inst = GameInstance(("web", f"luck-race-{check_id}", "bot"), state=GameState.ACTIVE_JUDGMENT)
+    inst.round_checks_prepared = True
+    inst.players["p1"] = {"character_sheet": {"luck": 30}}
+    inst.last_checks = [{
+        "check_id": check_id, "actor_uid": "p1", "dice": "d100", "roll": 22,
+        "threshold": 20, "verdict": "失败", "luck_spend_available": True,
+        "luck_decision": "pending",
+    }]
+    return inst
+
+
+@pytest.mark.asyncio
+async def test_manual_luck_wins_timeout_race():
+    inst = _luck_race_instance("manual-first")
+    manual = await inst.resolve_luck_decision("manual-first", "p1", True)
+    timeout = await inst.system_decline_luck("manual-first")
+
+    assert manual["ok"] is True
+    assert timeout["ok"] is False
+    assert timeout["code"] == "LUCK_ALREADY_RESOLVED"
+    assert inst.last_checks[0]["luck_decision"] == "spent"
+    assert "luck_timeout" not in inst.last_checks[0]
+    assert inst.get_character_sheet("p1")["luck"] == 28
+
+
+@pytest.mark.asyncio
+async def test_timeout_wins_manual_luck_race():
+    inst = _luck_race_instance("timeout-first")
+    timeout = await inst.system_decline_luck("timeout-first")
+    manual = await inst.resolve_luck_decision("timeout-first", "p1", True)
+
+    assert timeout["ok"] is True
+    assert manual["ok"] is False
+    assert manual["code"] == "LUCK_ALREADY_RESOLVED"
+    assert inst.last_checks[0]["luck_decision"] == "declined"
+    assert inst.last_checks[0]["luck_timeout"] is True
+    assert inst.get_character_sheet("p1")["luck"] == 30
+
+
 @pytest.mark.asyncio
 async def test_resolve_luck_decision_cancels_timer():
     """手动决议先于超时到达时，对应定时器被取消。"""

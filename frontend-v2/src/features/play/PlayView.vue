@@ -286,9 +286,14 @@ const tableNotice = computed(() => {
   if (showGmThinking.value) return t('gmProcessingNotice')
   if (pendingLuckDecisions.value.length) {
     const own = pendingLuckDecisions.value.some(check => check.actor_uid === actorId.value)
-    if (own || game.isGm.value) return t('luckDecisionOwnNotice')
-    const names = joinNames(pendingLuckDecisions.value.map(check => String(check.actor_name || check.actor_uid || '')))
-    return t('luckDecisionWaitingNotice', { names })
+    const others = pendingLuckDecisions.value.filter(check => check.actor_uid !== actorId.value)
+    if (own && others.length) {
+      const names = joinNames(others.map(check => String(check.actor_name || check.actor_uid || '')))
+      return t('luckDecisionOwnAndWaitingNotice', { count: others.length, names })
+    }
+    if (own) return t('luckDecisionOwnNotice')
+    const names = joinNames(others.map(check => String(check.actor_name || check.actor_uid || '')))
+    return t('luckDecisionWaitingNotice', { count: others.length, names })
   }
   const detail = game.detail.value
   if (!detail) return ''
