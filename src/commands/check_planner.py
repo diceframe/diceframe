@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,43 @@ def _context_match_text(value: str) -> str:
     return re.sub(r"\s+", "", value).casefold()
 
 
+def _positive_inventory_quantity(value: Any) -> int | None:
+    """接受可可靠解释的正整数数量，不把无效数量降级成无数量物品。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        quantity = int(value)
+    except (ValueError, OverflowError):
+        return None
+    if isinstance(value, float) and value != quantity:
+        return None
+    return quantity if quantity > 0 else None
+
+
+def _action_mentions_name(action: str, name: object) -> bool:
+    """拉丁名称/ID 要求词边界；中文等名称允许紧邻中文叙述。"""
+    if not isinstance(name, str) or not name.strip():
+        return False
+    name = name.strip().casefold()
+    text = action.casefold()
+
+    def identifier_char(char: str) -> bool:
+        return (
+            char == "_" or char.isdigit()
+            or unicodedata.name(char, "").startswith("LATIN ")
+            or unicodedata.category(char).startswith("M")
+        )
+
+    pattern = r"\s*".join(re.escape(part) for part in name.split())
+    for match in re.finditer(pattern, text):
+        if identifier_char(name[0]) and match.start() and identifier_char(text[match.start() - 1]):
+            continue
+        if identifier_char(name[-1]) and match.end() < len(text) and identifier_char(text[match.end()]):
+            continue
+        return True
+    return False
+
+
 def _item_context(sheet: dict[str, Any], action: str, target: str) -> dict[str, Any]:
     """只读压缩现有物品；partial 表示该清单不能提供物品不存在的证据。"""
     texts = [_context_match_text(action), _context_match_text(target)]
@@ -121,10 +159,13 @@ def _item_context(sheet: dict[str, Any], action: str, target: str) -> dict[str, 
                 quantity_key = "qty" if "qty" in entry else "quantity"
                 if quantity_key in entry:
                     quantity = entry[quantity_key]
-                    if source == "inventory" and type(quantity) is int and quantity <= 0:
-                        partial = True
-                        continue
-                    if type(quantity) is int and quantity >= 0:
+                    if source == "inventory":
+                        quantity = _positive_inventory_quantity(quantity)
+                        if quantity is None:
+                            partial = True
+                            continue
+                        row["qty"] = quantity
+                    elif type(quantity) is int and quantity >= 0:
                         row["qty"] = quantity
                     else:
                         partial = True
@@ -185,12 +226,21 @@ def _npc_context(
                 if any(query in name or name in query for name in names)
             }
     else:
-        text = _context_match_text(action)
-        # 多个不同 NPC 都被提及时，名字长短不能证明谁是行动目标。
+        # 同时提到其他玩家或敌人，也无法仅凭名字判断谁是受话者。
+        if any(
+            _action_mentions_name(action, name)
+            for player_id, player in instance.players.items() if player_id != uid
+            for name in (player_id, player.get("character_name"))
+        ) or any(
+            _action_mentions_name(action, name)
+            for enemy in instance.combat_enemies
+            for name in (enemy.get("name"), enemy.get("character_name"))
+        ):
+            return None
         matches = {
             key
             for key, names in aliases.items()
-            if any(_context_match_text(name) in text for name in names)
+            if any(_action_mentions_name(action, name) for name in names)
         }
     if matches != {npc_id}:
         return None

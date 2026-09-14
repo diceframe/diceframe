@@ -918,6 +918,11 @@ def test_planner_item_context_is_compact_actor_scoped_and_read_only() -> None:
 @pytest.mark.parametrize("quantity_fields", [
     {"qty": 0}, {"qty": -1}, {"quantity": 0}, {"quantity": -2},
     {"qty": 0, "quantity": 99},
+    {"qty": "0"}, {"qty": "-1"}, {"qty": 0.0}, {"qty": -1.0},
+    {"qty": False}, {"qty": True}, {"qty": None}, {"qty": "unknown"},
+    {"qty": []}, {"qty": {}}, {"qty": 1.5}, {"qty": float("inf")},
+    {"quantity": "0"}, {"quantity": False}, {"quantity": None},
+    {"qty": "0", "quantity": 99},
 ])
 def test_planner_excludes_nonpositive_inventory_even_when_named(quantity_fields) -> None:
     instance = make_instance()
@@ -931,6 +936,17 @@ def test_planner_excludes_nonpositive_inventory_even_when_named(quantity_fields)
     assert context["items"] == [{"source": "inventory", "name": "火把", "qty": 1}]
     assert context["partial"] is True
     assert instance.players == before
+
+
+@pytest.mark.parametrize("quantity", [2, "2", " +2 ", 2.0])
+@pytest.mark.parametrize("field", ["qty", "quantity"])
+def test_planner_preserves_reliably_positive_inventory_quantity(field, quantity) -> None:
+    instance = make_instance()
+    instance.get_character_sheet("p1").update({
+        "equipment": [], "key_items": [], "inventory": [{"name": "绳索", field: quantity}],
+    })
+    context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
+    assert context == {"items": [{"source": "inventory", "name": "绳索", "qty": 2}], "partial": False}
 
 
 @pytest.mark.parametrize("size", [20, 21])
@@ -983,8 +999,7 @@ def test_planner_missing_and_malformed_items_are_partial_without_invented_values
     })
     context = json.loads(_planner_context(instance, None))["players"][0]["item_context"]
     assert context == {"partial": True, "items": [
-        {"source": "inventory", "name": "药水"},
-        {"source": "inventory", "name": "干粮"},
+        {"source": "inventory", "name": "药水", "qty": 2},
         {"source": "inventory", "item_ref": "item:rope"},
     ]}
 
@@ -1059,6 +1074,47 @@ def test_planner_requires_explicit_target_when_action_names_multiple_npcs(action
         assert player["npc_context"] == {
             "reference": f"npc:{expected}", **instance.npcs[expected],
         }
+
+
+@pytest.mark.parametrize(("name", "action", "expected"), [
+    ("Ann", "I cannot open the door.", False),
+    ("Ann", "Ask Annette about the door.", False),
+    ("Ann", "Ask ANN about the door.", True),
+    ("Ann", "问Ann门在哪里", True),
+    ("Ann", "Ask (Ann).", True),
+    ("Li", "Listen to the door.", False),
+    ("Émile", "Ask PréÉmile.", False),
+    ("Émile", "Ask ÉMILE.", True),
+    ("Mary Ann", "Ask Mary Annette.", False),
+    ("Mary Ann", "Ask Mary  Ann.", True),
+    ("npc_1", "Ask npc_12.", False),
+    ("npc_1", "Ask npc_1.", True),
+    ("老汤姆", "问老汤姆门在哪里", True),
+])
+def test_planner_npc_mentions_respect_latin_boundaries(name, action, expected) -> None:
+    instance = make_instance()
+    instance.npcs = {"person": {"name": name, "relation": "friendly"}}
+    instance.action_queue[0]["text"] = action
+    player = json.loads(_planner_context(instance, None))["players"][0]
+    assert ("npc_context" in player) is expected
+
+
+@pytest.mark.parametrize(("action", "target", "expected"), [
+    ("问白露老汤姆在哪里", "", False),
+    ("问守卫老汤姆在哪里", "", False),
+    ("问p2老汤姆在哪里", "", False),
+    ("问白露老汤姆在哪里", "老汤姆", True),
+    ("问守卫老汤姆在哪里", "老汤姆", True),
+    ("问老汤姆门在哪里", "", True),
+    ("阿岚问老汤姆门在哪里", "", True),
+])
+def test_planner_npc_inference_rejects_player_and_enemy_ambiguity(action, target, expected) -> None:
+    instance = make_instance()
+    instance.npcs = {"keeper": {"name": "老汤姆", "relation": "friendly"}}
+    instance.combat_enemies = [{"name": "守卫", "hp": 10}]
+    instance.action_queue[0].update(text=action, target_text=target)
+    player = json.loads(_planner_context(instance, None))["players"][0]
+    assert ("npc_context" in player) is expected
 
 
 def test_planner_npc_context_drops_oversized_fields_without_truncating_identity() -> None:
