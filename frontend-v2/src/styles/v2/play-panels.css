@@ -440,7 +440,10 @@
 
 .play-control-rail .gm-toolbar .gm-flow-group {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  /* Preserve the classic two-column flow controls. Translated labels may
+     wrap inside a button, but the flow itself should not collapse to one
+     button per row in the desktop control rail. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 

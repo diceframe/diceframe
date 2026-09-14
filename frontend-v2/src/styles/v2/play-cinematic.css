@@ -7,7 +7,7 @@
 
   .play-layout,
   .play-layout.no-console {
-    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(245px, 286px);
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(280px, 340px);
     height: calc(100dvh - 58px);
   }
 
@@ -16,7 +16,7 @@
   }
 
   .play-layout.collapsed {
-    grid-template-columns: 48px minmax(0, 1fr) minmax(245px, 286px);
+    grid-template-columns: 48px minmax(0, 1fr) minmax(280px, 340px);
   }
 
   .play-layout.collapsed.no-console {
