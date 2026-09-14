@@ -34,6 +34,14 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                 "type": "string",
                                 "description": "Exact player id or character name from the supplied roster.",
                             },
+                            "actor": {
+                                "type": "string",
+                                "description": (
+                                    "Optional explicit check subject as player:<uid> or companion:<id> "
+                                    "from the supplied roster/companion list. Use it when the player action "
+                                    "delegates the task to an AI companion; omit to default to the player."
+                                ),
+                            },
                             "attribute": {
                                 "type": "string",
                                 "description": (

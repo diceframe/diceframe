@@ -93,6 +93,80 @@ def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
     return rows
 
 
+def _companion_roster(instance: GameInstance) -> dict[str, dict[str, Any]]:
+    """DND party companions（ruleset_state.party.companions）；其他规则集为空。
+
+    只返回活跃且有 canonical 角色卡的队友；generic planner 不感知规则集差异，
+    没有该状态时（CoC 等）自然为空。
+    """
+    state = getattr(instance, "ruleset_state", None)
+    party = state.get("party") if isinstance(state, dict) else None
+    companions = party.get("companions") if isinstance(party, dict) else None
+    if not isinstance(companions, dict):
+        return {}
+    return {
+        companion_id: companion
+        for companion_id, companion in companions.items()
+        if isinstance(companion, dict) and companion.get("active", True)
+        and isinstance(companion.get("ruleset_character"), dict)
+    }
+
+
+def _companion_sheet(instance: GameInstance, companion_id: str) -> dict[str, Any]:
+    """companion canonical 角色卡；proficiencies.skill_values 合成 skills 列表。"""
+    companion = _companion_roster(instance).get(companion_id)
+    if not companion:
+        return {}
+    sheet = companion["ruleset_character"]
+    # DND canonical 用 abilities（3-18）；generic 检定读 attributes——缺失时镜像，
+    # 与玩家侧 webui 投影（attributes/skills 镜像进 character_sheet）语义一致。
+    merged = dict(sheet)
+    if not merged.get("attributes"):
+        merged["attributes"] = dict(sheet.get("abilities") or {})
+    if not merged.get("skills"):
+        skill_values = sheet.get("proficiencies", {}).get("skill_values") or {}
+        merged["skills"] = [
+            {"name": name, "value": value}
+            for name, value in sorted(skill_values.items())
+        ]
+    return merged
+
+
+def _match_actor(instance: GameInstance, value: object) -> tuple[str, str]:
+    """把模型输出解析为检定主体 (kind, id)。
+
+    支持显式前缀（player:<uid> / companion:<id>）、玩家 uid/名、队友 id/名。
+    精确匹配优先；歧义、不存在时返回 ("", "")，绝不从纯叙事 NPC 猜测。
+    """
+    query = str(value or "").strip()
+    if not query:
+        return "", ""
+    lowered = query.lower()
+    if lowered.startswith("player:"):
+        uid = query.removeprefix("player:").strip()
+        return ("player", uid) if uid in instance.players else ("", "")
+    if lowered.startswith("companion:"):
+        companion_id = query.removeprefix("companion:").strip()
+        return (
+            ("companion", companion_id)
+            if companion_id in _companion_roster(instance) else ("", "")
+        )
+    player_uid = _match_player(instance, query)
+    if player_uid:
+        return "player", player_uid
+    matches = [
+        companion_id
+        for companion_id, companion in _companion_roster(instance).items()
+        if query.casefold() in {
+            companion_id.casefold(),
+            str(companion.get("name") or "").strip().casefold(),
+        }
+    ]
+    if len(matches) == 1:
+        return "companion", matches[0]
+    return "", ""
+
+
 def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     players = []
     for action in instance.action_queue:
@@ -151,6 +225,17 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         "difficulty": instance.difficulty,
         "ruleset": ruleset,
         "players": players,
+        # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
+        # 数值仍由服务器角色卡决定。
+        "companions": [
+            {
+                "actor_ref": f"companion:{companion_id}",
+                "character_name": str(companion.get("name") or companion_id),
+                "attributes": companion["ruleset_character"].get("attributes", {}),
+                "skills": _skill_rows(_companion_sheet(instance, companion_id)),
+            }
+            for companion_id, companion in sorted(_companion_roster(instance).items())
+        ],
         "recent_purchases": _recent_purchases(instance),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -299,7 +384,25 @@ def normalize_check_specs(
         if uid in seen_players:
             errors.append(f"checks[{index}] 同一玩家每轮只允许一个主检定")
             continue
-        sheet = instance.get_character_sheet(uid)
+        # 检定主体：默认行动玩家本人；模型显式委派 AI 队友时切换到队友角色卡。
+        # 行动仍然挂回委派玩家（骰子由玩家掷，safety net 以 actor_uid 去重）。
+        actor_kind_raw, actor_id = _match_actor(instance, raw.get("actor"))
+        if raw.get("actor") and not actor_kind_raw:
+            errors.append(f"checks[{index}] actor 不存在或存在歧义")
+            continue
+        if actor_kind_raw == "player" and actor_id != uid:
+            errors.append(f"checks[{index}] actor 与行动玩家不一致")
+            continue
+        is_companion = actor_kind_raw == "companion"
+        actor_ref = f"{actor_kind_raw}:{actor_id}" if is_companion else f"player:{uid}"
+        actor_name = (
+            str(_companion_roster(instance)[actor_id].get("name") or actor_id)
+            if is_companion else (instance.players[uid].get("character_name") or uid)
+        )
+        sheet = (
+            _companion_sheet(instance, actor_id) if is_companion
+            else instance.get_character_sheet(uid)
+        )
         action = action_by_uid[uid]
         selected_attribute = str(action.get("selected_attribute") or "").strip()
         selected_skill = str(action.get("selected_skill") or "").strip()
@@ -400,13 +503,17 @@ def normalize_check_specs(
         assistants: list[str] = []
         invalid_assistant = False
         for assistant in (raw.get("assist") or [])[:5]:
-            assistant_uid = _match_player(instance, assistant)
-            if not assistant_uid:
-                errors.append(f"checks[{index}] assist 包含不存在的玩家")
+            assist_kind, assist_id = _match_actor(instance, assistant)
+            if not assist_kind:
+                errors.append(f"checks[{index}] assist 包含不存在的玩家或队友")
                 invalid_assistant = True
                 break
-            if assistant_uid != uid and assistant_uid not in assistants:
-                assistants.append(assistant_uid)
+            # 玩家沿用 uid 兼容既有显示；队友用 companion:<id> 引用。
+            assistant_ref = (
+                f"companion:{assist_id}" if assist_kind == "companion" else assist_id
+            )
+            if assistant_ref not in {uid, actor_ref} and assistant_ref not in assistants:
+                assistants.append(assistant_ref)
         if invalid_assistant:
             continue
         assistance_grant = str(rule.advantage_mechanic.get("assistance_grants") or "") if rule else ""
@@ -416,7 +523,8 @@ def normalize_check_specs(
             "check_id": uuid.uuid4().hex,
             "required": True,
             "actor_uid": uid,
-            "actor_name": instance.players[uid].get("character_name") or uid,
+            "actor_ref": actor_ref,
+            "actor_name": actor_name,
             "dice_system": "d100" if dice_system == "d100" else "d20",
             "label": _label(instance, rule, attribute, skill, kind),
             "intent": "ai_planned",
