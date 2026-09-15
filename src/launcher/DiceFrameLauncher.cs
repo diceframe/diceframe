@@ -10,6 +10,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Microsoft.Win32;
 
 internal static class DiceFrameLauncher
 {
@@ -19,8 +20,21 @@ internal static class DiceFrameLauncher
     private const int ProbationMinSeconds = 10;
     private const int ProbationMaxSeconds = 600;
     private const int ProbationFailureGraceSeconds = 20;
+    // WER per-app 配置按 exe 名匹配；bundled interpreter 也叫 python.exe，
+    // 因此只在 DiceFrame 生命周期内临时写入，退出时必须恢复用户原值。
+    private const string LocalDumpsPythonKey =
+        @"Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\python.exe";
+    private const int MaxCrashDumps = 3;
+    // 异常退出后等待 WER 写 dump 的窗口（秒）：过短会丢掉本来能拿到的 dump。
+    private const int CrashDumpWaitSeconds = 8;
     private static Process serverProcess;
     private static bool shuttingDown;
+    // 异常退出取证：记录当前 server 的启动信息；主动停止（更新/关机）不报 crash。
+    private static DateTime serverStartedAtUtc = DateTime.MinValue;
+    private static int serverPid;
+    private static bool suppressCrashReport;
+    // 临时 WER 配置快照：finally 与 ProcessExit 都可能触发恢复，只恢复一次。
+    private static CrashDumpRegistrySnapshot crashDumpSnapshot;
     // 本机 DiceFrame endpoint 解析结果：数据目录 + 端口 → scheme 与自签指纹。
     private static string launcherDataDir = "";
     private static string launcherPort = DefaultPort;
@@ -67,15 +81,63 @@ internal static class DiceFrameLauncher
         Console.WriteLine("========================================");
         Console.WriteLine();
 
-        AppDomain.CurrentDomain.ProcessExit += delegate { StopServer(); };
+        AppDomain.CurrentDomain.ProcessExit += delegate
+        {
+            // 进程退出兜底：即使走不到 Main 的 finally，也尽量恢复用户 WER 配置。
+            StopServer();
+            TryRestoreCrashDumpCapture();
+        };
         Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs eventArgs)
         {
             eventArgs.Cancel = true;
             shuttingDown = true;
             StopServer();
-            Environment.Exit(0);
+            // 不调用 Environment.Exit：那会跳过 Main 的 finally，导致临时
+            // WER 配置残留；这里让主循环自然结束并由 finally 恢复。
         };
 
+        try
+        {
+            // 崩溃取证失败绝不能阻止 DiceFrame 启动（内部只打印提示）。
+            crashDumpSnapshot = EnableCrashDumpCapture(logsDir);
+            return RunPortable(
+                installRoot,
+                dataDir,
+                logsDir,
+                updaterDir,
+                restartSignal,
+                currentPointer,
+                url,
+                activeDir
+            );
+        }
+        finally
+        {
+            // 正常关闭、python crash、更新重启、启动失败都必须恢复用户原配置。
+            TryRestoreCrashDumpCapture();
+        }
+    }
+
+    private static void TryRestoreCrashDumpCapture()
+    {
+        CrashDumpRegistrySnapshot snapshot = Interlocked.Exchange(
+            ref crashDumpSnapshot,
+            null
+        );
+        RestoreCrashDumpCapture(snapshot);
+    }
+
+    private static int RunPortable(
+        string installRoot,
+        string dataDir,
+        string logsDir,
+        string updaterDir,
+        string restartSignal,
+        string currentPointer,
+        string url,
+        string activeDir
+    )
+    {
         try
         {
             serverProcess = StartServer(installRoot, activeDir, dataDir);
@@ -93,6 +155,13 @@ internal static class DiceFrameLauncher
         }
         else if (serverProcess.HasExited)
         {
+            // 启动阶段就异常退出（例如 python.exe native crash）同样要留取证：
+            // 这类退出不是用户主动关闭，也不属于更新切换。
+            if (!suppressCrashReport)
+            {
+                HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
+                return serverProcess.ExitCode;
+            }
             return Fail("DiceFrame exited before the Web UI became ready.");
         }
         else
@@ -119,6 +188,10 @@ internal static class DiceFrameLauncher
 
             if (serverProcess == null || serverProcess.HasExited)
             {
+                if (serverProcess != null && !suppressCrashReport)
+                {
+                    HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
+                }
                 return serverProcess == null ? 1 : serverProcess.ExitCode;
             }
             Thread.Sleep(500);
@@ -136,6 +209,9 @@ internal static class DiceFrameLauncher
         string url
     )
     {
+        // 更新期间进程切换是主动行为：候选/回滚的退出由更新状态记录，
+        // 不写 last-crash.json（StartServer 会重新打开取证）。
+        suppressCrashReport = true;
         string signal;
         try
         {
@@ -298,7 +374,12 @@ internal static class DiceFrameLauncher
         info.EnvironmentVariables["TRPG_DATA_DIR"] = dataDir;
         info.EnvironmentVariables["TRPG_INSTALL_ROOT"] = installRoot;
         info.EnvironmentVariables["TRPG_ACTIVE_VERSION_DIR"] = activeDir;
-        return Process.Start(info);
+        Process started = Process.Start(info);
+        // 异常退出取证的基准：本次 server 的启动时间与 pid。
+        serverStartedAtUtc = DateTime.UtcNow;
+        serverPid = started == null ? 0 : started.Id;
+        suppressCrashReport = false;
+        return started;
     }
 
     private static string ResolveActiveDirectory(
@@ -1142,6 +1223,8 @@ internal static class DiceFrameLauncher
 
     private static void StopServer()
     {
+        // 主动停止（退出、更新切换、回滚）不算异常退出，不产生 crash 记录。
+        suppressCrashReport = true;
         StopProcess(serverProcess);
     }
 
@@ -1217,8 +1300,381 @@ internal static class DiceFrameLauncher
     {
         Console.WriteLine(message);
         Console.WriteLine();
-        Console.WriteLine("Press any key to close.");
-        Console.ReadKey(true);
+        // 重定向（CI / 自动化 / 被其它程序拉起）时不能等待按键：Console.ReadKey
+        // 在没有真实控制台时会抛 InvalidOperationException，把可读的失败变成崩溃。
+        if (!Console.IsInputRedirected && !Console.IsOutputRedirected)
+        {
+            Console.WriteLine("Press any key to close.");
+            Console.ReadKey(true);
+        }
         return 1;
+    }
+
+    // ---- 崩溃取证（Windows Portable） ------------------------------------
+    // 目标：python.exe native crash 时自动留下 MiniDump 与异常退出 metadata，
+    // 用户只需把 logs 文件夹打包反馈。这里不尝试诊断崩溃原因本身。
+
+    private sealed class CrashDumpRegistryValue
+    {
+        public bool Existed;
+        public object Data;
+        public RegistryValueKind Kind;
+    }
+
+    private sealed class CrashDumpRegistrySnapshot
+    {
+        public bool KeyExisted;
+        public CrashDumpRegistryValue DumpFolder;
+        public CrashDumpRegistryValue DumpType;
+        public CrashDumpRegistryValue DumpCount;
+    }
+
+    private static CrashDumpRegistryValue CaptureRegistryValue(RegistryKey key, string name)
+    {
+        CrashDumpRegistryValue captured = new CrashDumpRegistryValue();
+        object data = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        if (data == null)
+        {
+            // 值不存在时 GetValueKind 会抛异常，因此只在实际存在时读取。
+            captured.Existed = false;
+            captured.Kind = RegistryValueKind.String;
+            return captured;
+        }
+        captured.Existed = true;
+        captured.Data = data;
+        captured.Kind = key.GetValueKind(name);
+        return captured;
+    }
+
+    /// <summary>
+    /// 临时启用 WER LocalDumps（MiniDump，最多 3 个）并返回原值快照。
+    /// 任何失败都只打印提示并返回 null——绝不阻止 DiceFrame 启动。
+    /// </summary>
+    private static CrashDumpRegistrySnapshot EnableCrashDumpCapture(string logsDir)
+    {
+        try
+        {
+            string dumpDir = Path.Combine(logsDir, "crash-dumps");
+            Directory.CreateDirectory(dumpDir);
+            PruneCrashDumps(dumpDir, MaxCrashDumps);
+
+            using (RegistryKey existing = Registry.CurrentUser.OpenSubKey(LocalDumpsPythonKey, false))
+            {
+                if (existing != null)
+                {
+                    existing.Close();
+                }
+            }
+
+            CrashDumpRegistrySnapshot snapshot = new CrashDumpRegistrySnapshot();
+            using (RegistryKey probe = Registry.CurrentUser.OpenSubKey(LocalDumpsPythonKey, false))
+            {
+                snapshot.KeyExisted = probe != null;
+            }
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(LocalDumpsPythonKey))
+            {
+                if (key == null)
+                {
+                    throw new InvalidOperationException("cannot open LocalDumps key");
+                }
+                // 只快照本功能会改动的三个值，不动用户 key 里的其它配置。
+                snapshot.DumpFolder = CaptureRegistryValue(key, "DumpFolder");
+                snapshot.DumpType = CaptureRegistryValue(key, "DumpType");
+                snapshot.DumpCount = CaptureRegistryValue(key, "DumpCount");
+
+                key.SetValue("DumpFolder", dumpDir, RegistryValueKind.ExpandString);
+                // DumpType = 1：MiniDump（本轮不做 Full Dump）。
+                key.SetValue("DumpType", 1, RegistryValueKind.DWord);
+                key.SetValue("DumpCount", MaxCrashDumps, RegistryValueKind.DWord);
+            }
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Crash diagnostics could not be enabled: " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>恢复用户原有 WER 配置；失败只告警，不影响退出。</summary>
+    private static void RestoreCrashDumpCapture(CrashDumpRegistrySnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return;
+        }
+        try
+        {
+            bool removeEmptyKey = false;
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(LocalDumpsPythonKey, true))
+            {
+                if (key == null)
+                {
+                    return;
+                }
+                RestoreRegistryValue(key, "DumpFolder", snapshot.DumpFolder);
+                RestoreRegistryValue(key, "DumpType", snapshot.DumpType);
+                RestoreRegistryValue(key, "DumpCount", snapshot.DumpCount);
+                removeEmptyKey = !snapshot.KeyExisted
+                    && key.ValueCount == 0
+                    && key.SubKeyCount == 0;
+                if (removeEmptyKey)
+                {
+                    // 删除前必须先关闭句柄，否则 DeleteSubKey 会失败。
+                    key.Close();
+                }
+            }
+            if (removeEmptyKey)
+            {
+                Registry.CurrentUser.DeleteSubKey(LocalDumpsPythonKey, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Crash diagnostics registry cleanup failed: " + ex.Message);
+        }
+    }
+
+    private static void RestoreRegistryValue(
+        RegistryKey key,
+        string name,
+        CrashDumpRegistryValue original
+    )
+    {
+        if (original != null && original.Existed && original.Data != null)
+        {
+            key.SetValue(name, original.Data, original.Kind);
+            return;
+        }
+        // 原本没有该值：只删掉本次临时写入的，不影响其它配置。
+        if (key.GetValue(name) != null)
+        {
+            key.DeleteValue(name, false);
+        }
+    }
+
+    /// <summary>只保留最近若干个 dump，避免长期占用磁盘。</summary>
+    private static void PruneCrashDumps(string dumpDir, int keep)
+    {
+        try
+        {
+            FileInfo[] dumps = new DirectoryInfo(dumpDir).GetFiles("*.dmp");
+            if (dumps.Length <= keep)
+            {
+                return;
+            }
+            Array.Sort(dumps, delegate(FileInfo left, FileInfo right)
+            {
+                return right.LastWriteTimeUtc.CompareTo(left.LastWriteTimeUtc);
+            });
+            for (int index = keep; index < dumps.Length; index++)
+            {
+                TryDelete(dumps[index].FullName);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>WER 自己决定 dump 文件名，这里按时间找本次崩溃对应的那个。</summary>
+    private static string FindLatestCrashDump(string dumpDir, DateTime sinceUtc)
+    {
+        try
+        {
+            if (!Directory.Exists(dumpDir))
+            {
+                return null;
+            }
+            FileInfo newest = null;
+            foreach (FileInfo file in new DirectoryInfo(dumpDir).GetFiles("*.dmp"))
+            {
+                // 允许少量时钟/文件时间粒度误差，避免漏掉刚写出的 dump。
+                if (file.LastWriteTimeUtc.AddSeconds(2) < sinceUtc)
+                {
+                    continue;
+                }
+                if (newest == null || file.LastWriteTimeUtc > newest.LastWriteTimeUtc)
+                {
+                    newest = file;
+                }
+            }
+            return newest == null ? null : newest.FullName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string WaitForCrashDump(string dumpDir, DateTime sinceUtc, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        while (true)
+        {
+            string found = FindLatestCrashDump(dumpDir, sinceUtc);
+            if (found != null || DateTime.UtcNow >= deadline)
+            {
+                return found;
+            }
+            Thread.Sleep(500);
+        }
+    }
+
+    private static string FormatExitCode(int exitCode)
+    {
+        return "0x" + unchecked((uint)exitCode).ToString("X8", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>仅用于展示的粗分类；不据此自动下结论。</summary>
+    private static string ClassifyExitCode(uint code)
+    {
+        switch (code)
+        {
+            case 0xC0000005:
+                return "access_violation";
+            case 0xC00000FD:
+                return "stack_overflow";
+            case 0xC000001D:
+                return "illegal_instruction";
+            case 0xC0000374:
+                return "heap_corruption";
+            case 0xC0000409:
+                return "fail_fast";
+            default:
+                return "unexpected_exit";
+        }
+    }
+
+    /// <summary>
+    /// 记录一次异常退出并给出反馈路径。只写诊断所需的最小信息：
+    /// 不含 API key / token / prompt / 聊天正文 / 角色信息 / 环境变量。
+    /// </summary>
+    private static void HandleUnexpectedServerExit(
+        string logsDir,
+        Process process,
+        string activeDir
+    )
+    {
+        int exitCode;
+        try
+        {
+            exitCode = process.ExitCode;
+        }
+        catch
+        {
+            exitCode = 1;
+        }
+        DateTime crashedAtUtc = DateTime.UtcNow;
+        uint code = unchecked((uint)exitCode);
+        string formatted = FormatExitCode(exitCode);
+        string classification = ClassifyExitCode(code);
+        DateTime dumpSinceUtc = serverStartedAtUtc == DateTime.MinValue
+            ? crashedAtUtc
+            : serverStartedAtUtc;
+        // WER 由 WerFault 异步写盘：给一个有限窗口再判定，既能让 dump 落到我们的
+        // 目录（临时配置此时仍然有效），也不会让退出流程无限等待。
+        string dumpFile = WaitForCrashDump(
+            Path.Combine(logsDir, "crash-dumps"),
+            dumpSinceUtc,
+            TimeSpan.FromSeconds(CrashDumpWaitSeconds)
+        );
+
+        try
+        {
+            WriteCrashRecord(
+                logsDir,
+                exitCode: formatted,
+                classification: classification,
+                crashedAtUtc: crashedAtUtc,
+                dumpFile: dumpFile,
+                activeDir: activeDir
+            );
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Crash diagnostics could not be written: " + ex.Message);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("DiceFrame 后端异常退出。");
+        Console.WriteLine();
+        Console.WriteLine("错误代码：" + formatted);
+        Console.WriteLine("类型：" + classification);
+        Console.WriteLine();
+        if (dumpFile != null)
+        {
+            Console.WriteLine("崩溃诊断文件已保存到：");
+            Console.WriteLine(Path.GetDirectoryName(dumpFile));
+            Console.WriteLine();
+        }
+        Console.WriteLine("反馈问题时请将 logs 文件夹打包发送。");
+        WaitForExitAcknowledgement();
+    }
+
+    private static void WriteCrashRecord(
+        string logsDir,
+        string exitCode,
+        string classification,
+        DateTime crashedAtUtc,
+        string dumpFile,
+        string activeDir
+    )
+    {
+        DateTime startedUtc = serverStartedAtUtc == DateTime.MinValue ? crashedAtUtc : serverStartedAtUtc;
+        double uptimeSeconds = Math.Max(0d, (crashedAtUtc - startedUtc).TotalSeconds);
+        string dumpRelative = "";
+        if (dumpFile != null)
+        {
+            string dumpDir = Path.Combine(logsDir, "crash-dumps");
+            dumpRelative = IsUnder(dumpFile, dumpDir)
+                ? "crash-dumps/" + Path.GetFileName(dumpFile)
+                : Path.GetFileName(dumpFile);
+        }
+        StringBuilder json = new StringBuilder();
+        json.Append("{\n");
+        json.Append("  \"schema\": 1,\n");
+        json.Append("  \"process\": \"python.exe\",\n");
+        json.Append("  \"pid\": " + serverPid.ToString(CultureInfo.InvariantCulture) + ",\n");
+        json.Append("  \"exit_code\": \"" + JsonEscape(exitCode) + "\",\n");
+        json.Append("  \"classification\": \"" + JsonEscape(classification) + "\",\n");
+        json.Append(
+            "  \"started_at_utc\": \"" +
+            startedUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) +
+            "\",\n"
+        );
+        json.Append(
+            "  \"crashed_at_utc\": \"" +
+            crashedAtUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) +
+            "\",\n"
+        );
+        json.Append(
+            "  \"uptime_seconds\": " +
+            ((long)Math.Round(uptimeSeconds)).ToString(CultureInfo.InvariantCulture) +
+            ",\n"
+        );
+        json.Append("  \"dump\": " + (dumpRelative.Length == 0 ? "null" : "\"" + JsonEscape(dumpRelative) + "\"") + ",\n");
+        string versionDir = string.IsNullOrEmpty(activeDir) ? "" : activeDir;
+        json.Append("  \"active_version_dir\": \"" + JsonEscape(versionDir) + "\"\n");
+        json.Append("}\n");
+        AtomicWriteText(Path.Combine(logsDir, "last-crash.json"), json.ToString());
+    }
+
+    /// <summary>交互式运行时让用户看到反馈路径；重定向（CI/自动化）时不阻塞。</summary>
+    private static void WaitForExitAcknowledgement()
+    {
+        try
+        {
+            if (Console.IsInputRedirected || Console.IsOutputRedirected)
+            {
+                return;
+            }
+            Console.WriteLine();
+            Console.WriteLine("按 Enter 键退出……");
+            Console.ReadLine();
+        }
+        catch
+        {
+        }
     }
 }
