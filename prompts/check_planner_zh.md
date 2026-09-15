@@ -70,6 +70,8 @@ d100 技能检定只需填写已有 `skill`；属性检定填写已有 `attribut
 
 `amount` 必须是十进制字符串（如 "0.25"、"12.50"、"25"）；`unit` 必须使用 `ruleset.currency_units` 中列出的 canonical unit id（如 "dollar"、"cent"、"unit"），与人类原话所用的单位一致。不要自行换算单位、也不要换算成最小单位，服务端会统一转换为 canonical 金额。
 
+如果玩家明确表达了购买意图，但价格单位无法对应 `ruleset.currency_units` 中的任何 canonical unit id：仍然必须输出该 economy_action 的 player/type/target/quantity，并省略 `amount` 与 `unit`、将 `price_source` 设为 "none"。不要为了满足 unit 字段而猜测、换算或发明货币单位；服务端会将其视为无价购买意图，在该轮内拦截该商品的免费发放。绝不要因为价格无法表示而整个丢弃购买意图。
+
 该字段与 checks 规划互不影响；不确定时留空。付款人会在弹窗中确认，你无权直接扣款。
 
 浏览、询问（「还有什么」「还有别的货吗」）、寒暄、使用或消耗已购买的物品，都不是购买意图，不要输出 economy_actions。`recent_purchases` 列出了最近的购买提案：同一玩家同一商品已有 `pending` / `committed` / `declined` 记录时，除非玩家本轮行动再次明确说出购买（例如「再买5瓶」），否则不要再次输出该商品的 economy_actions，避免成交后每回合重复弹窗。

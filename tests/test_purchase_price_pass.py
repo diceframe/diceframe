@@ -120,9 +120,13 @@ def test_normalize_economy_actions_keeps_unpriced_intents() -> None:
     assert unpriced == [
         {"payer_uid": "p1", "target": "回复药水", "quantity": 5},
         {"payer_uid": "p1", "target": "长剑", "quantity": 1},
+        # 有 amount 但 price_source 非法：价格不可结算 → 降级为 unpriced，
+        # 购买意图不消失（fail-safe：可拒付，不可免费发货）。
+        {"payer_uid": "p2", "target": "弓", "quantity": 1},
     ]
-    # 有 amount 却没有 price_source 的拒绝行为保持不变。
-    assert errors == ["economy_actions[4] price_source='' 无效"]
+    assert errors == [
+        "economy_actions[4] price_source='' 无效；已降级为 unpriced purchase intent",
+    ]
 
 
 @pytest.mark.asyncio

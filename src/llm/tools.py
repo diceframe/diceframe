@@ -172,7 +172,10 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                         "Price questions ('多少钱?', 'いくら?', 'how much?') or hypothetical talk are NOT "
                         "intents. Report only prices that a human actually stated in this round's text. "
                         "The payer always confirms in a dialog before anything is deducted; you cannot "
-                        "charge anyone directly. Leave empty when unsure."
+                        "charge anyone directly. If a clear purchase intent uses a price unit that cannot "
+                        "be mapped to any provided canonical currency unit, still emit the action with "
+                        "player/type/target/quantity, omit amount and unit, and use price_source=\"none\" — "
+                        "never drop the purchase intent. Leave empty when unsure."
                     ),
                     "items": {
                         "type": "object",

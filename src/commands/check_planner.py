@@ -886,6 +886,27 @@ def _apply_explicit_advantage_modes(
     return planned
 
 
+def append_unpriced_purchase_intent(
+    unpriced: list[dict[str, Any]],
+    seen: set[tuple[str, str, int]],
+    *,
+    uid: str,
+    target: str,
+    quantity: int,
+) -> None:
+    """Record one deduplicated unpriced purchase intent (round memory only)."""
+
+    key = (uid, target.casefold(), quantity)
+    if key in seen:
+        return
+    seen.add(key)
+    unpriced.append({
+        "payer_uid": uid,
+        "target": target,
+        "quantity": quantity,
+    })
+
+
 def normalize_economy_actions(
     instance: GameInstance,
     raw_actions: list[Any],
@@ -896,15 +917,29 @@ def normalize_economy_actions(
     新货币协议：``amount`` 是十进制字符串、``unit`` 是规则货币的 canonical
     unit id；服务端经 CurrencyCodec 转成 canonical base-unit 整数，模型绝不
     自行换算。price_source=none 或缺价时安全跳过（没有人说出价格就不产生
-    扣款提案），但有效的意图会以 ``unpriced`` 形式返回，供本轮 LOOT 拦截
-    使用；它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
+    扣款提案），有效的意图以 ``unpriced`` 形式返回，供本轮 LOOT 拦截使用；
+    它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
     price_source 必须是明确的转述来源。单条无效不影响同批。
+
+    意图与报价分层：player/target/quantity 校验通过后购买意图即成立；
+    之后任何「报价不可结算」（unit 无法映射、金额无法 canonicalize、
+    amount_scope/price_source 非法、超出上限）都只降级为 unpriced intent
+    并记录 error——绝不因为价格解析失败让购买意图消失，否则 LOOT gate
+    会放行免费发放。fail closed：可以不收费，但不能免费交货。
     """
     currency_spec = rule.currency_spec if rule else legacy_currency_spec("")
     offers: list[dict[str, Any]] = []
     unpriced: list[dict[str, Any]] = []
     errors: list[str] = []
     seen_unpriced: set[tuple[str, str, int]] = set()
+
+    def downgrade_to_unpriced(index: int, reason: str) -> None:
+        errors.append(f"economy_actions[{index}] {reason}；已降级为 unpriced purchase intent")
+        append_unpriced_purchase_intent(
+            unpriced, seen_unpriced,
+            uid=uid, target=target, quantity=quantity,
+        )
+
     for index, raw in enumerate(raw_actions[:8]):
         if not isinstance(raw, dict):
             errors.append(f"economy_actions[{index}] 不是 object")
@@ -920,65 +955,54 @@ def normalize_economy_actions(
         if not target:
             errors.append(f"economy_actions[{index}] target 为空")
             continue
+        quantity = 1
+        if raw.get("quantity") is not None:
+            try:
+                quantity = int(raw.get("quantity") or 1)
+            except (TypeError, ValueError):
+                errors.append(f"economy_actions[{index}] quantity 无效")
+                continue
+        if not 1 <= quantity <= 8:
+            errors.append(f"economy_actions[{index}] quantity 超出范围")
+            continue
+        # —— 以上通过后购买意图已可靠成立；以下失败只降级，不丢弃 ——
+
         price_source = str(raw.get("price_source") or "").strip()
         if price_source != "none" and raw.get("amount") is None:
             # 有目标但没有金额：与 price_source=none 同样处理为无价意图。
             price_source = "none"
         if price_source == "none":
-            quantity = 1
-            if raw.get("quantity") is not None:
-                try:
-                    quantity = int(raw.get("quantity") or 1)
-                except (TypeError, ValueError):
-                    errors.append(f"economy_actions[{index}] quantity 无效")
-                    continue
-                if not 1 <= quantity <= 8:
-                    errors.append(f"economy_actions[{index}] quantity 超出范围")
-                    continue
-            key = (uid, target.casefold(), quantity)
-            if key not in seen_unpriced:
-                seen_unpriced.add(key)
-                unpriced.append({
-                    "payer_uid": uid,
-                    "target": target,
-                    "quantity": quantity,
-                })
+            append_unpriced_purchase_intent(
+                unpriced, seen_unpriced,
+                uid=uid, target=target, quantity=quantity,
+            )
             continue
-        try:
-            quantity = int(raw.get("quantity", 1) or 1)
-        except (TypeError, ValueError):
-            errors.append(f"economy_actions[{index}] quantity 无效")
-            continue
-        if not 1 <= quantity <= 8:
-            errors.append(f"economy_actions[{index}] quantity 超出范围")
-            continue
-        amount_raw = raw.get("amount")
         amount_scope = str(raw.get("amount_scope") or "total").strip()
         if amount_scope not in {"unit", "total"}:
-            errors.append(f"economy_actions[{index}] amount_scope={amount_scope!r} 无效")
+            downgrade_to_unpriced(index, f"amount_scope={amount_scope!r} 无效")
+            continue
+        if price_source not in {"player_stated", "gm_narrated"}:
+            downgrade_to_unpriced(index, f"price_source={price_source!r} 无效")
             continue
         unit_input = str(raw.get("unit") or "").strip()
         # 单位缺省时按展示单位理解（legacy 单单位规则两者一致）。
         unit = currency_spec.unit(unit_input) if unit_input else currency_spec.display
         if unit is None:
-            errors.append(
-                f"economy_actions[{index}] unit={unit_input!r} 不在当前规则货币单位中",
+            downgrade_to_unpriced(
+                index, f"unit={unit_input!r} 不在当前规则货币单位中",
             )
             continue
         try:
-            amount = parse_currency_amount(amount_raw, unit.id, currency_spec)
+            amount = parse_currency_amount(raw.get("amount"), unit.id, currency_spec)
         except CurrencySystemError as exc:
-            errors.append(f"economy_actions[{index}] {exc}")
+            downgrade_to_unpriced(index, str(exc))
             continue
         if amount > MAX_ECONOMY_AMOUNT:
-            errors.append(f"economy_actions[{index}] amount 超出范围")
-            continue
-        if price_source not in {"player_stated", "gm_narrated"}:
-            errors.append(f"economy_actions[{index}] price_source={price_source!r} 无效")
+            downgrade_to_unpriced(index, "amount 超出范围")
             continue
         total_amount = amount * quantity if amount_scope == "unit" else amount
         if not 0 < total_amount <= MAX_ECONOMY_AMOUNT:
-            errors.append(f"economy_actions[{index}] total amount 超出范围")
+            downgrade_to_unpriced(index, "total amount 超出范围")
             continue
         offers.append({
             "payer_uid": uid,
