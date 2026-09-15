@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -532,3 +533,104 @@ async def test_auto_reward_default_cap_is_server_fallback(web_api) -> None:
         created["game_key"], {"mode": "auto_small_cash", "auto_reward_cap": 120},
     )
     assert api.economy_auto_reward_settings(instance) == (True, 120)
+
+
+# ---------- FREE_GRANT：只绕过 unpriced gate，绝不绕过 pending proposal ----------
+
+def _grant_data(
+    *,
+    grant_player: str = "p1",
+    grant_item: str = "黑麦面包",
+    loot_player: str = "p1",
+    loot_item: str = "黑麦面包",
+) -> dict:
+    return {"state_update": {
+        "free_grants": [{"player": grant_player, "item": grant_item}],
+        "loot": [{"player": loot_player, "item": loot_item, "qty": 1}],
+    }}
+
+
+def test_free_grant_allows_unpriced_intent_delivery() -> None:
+    """明确免费（FREE_GRANT）→ unpriced gate 放行，物品保留。"""
+
+    instance = _instance()
+    data = _grant_data()
+    intents = [{"payer_uid": "p1", "target": "黑麦面包", "quantity": 1}]
+    removed = filter_unconfirmed_purchase_grants(
+        instance, data, unpriced_purchase_intents=intents,
+    )
+    assert removed == 0
+    assert [entry["item"] for entry in data["state_update"]["loot"]] == ["黑麦面包"]
+    # 授权标记被消费，不会持久化。
+    assert "free_grants" not in data["state_update"]
+
+
+def test_free_grant_marker_is_consumed_even_without_intents() -> None:
+    """无任何购买语境时标记同样被消费，非购买奖励不受影响。"""
+
+    instance = _instance()
+    data = _grant_data(grant_item="任务徽章", loot_item="任务徽章")
+    removed = filter_unconfirmed_purchase_grants(instance, data)
+    assert removed == 0
+    assert data["state_update"]["loot"]
+    assert "free_grants" not in data["state_update"]
+
+
+def test_free_grant_cannot_bypass_pending_proposal() -> None:
+    """已有待确认扣款提案：FREE_GRANT 无权绕过（防止免费发货后再扣款）。"""
+
+    instance = _instance()
+    queue_purchase_offer(
+        instance, payer_uid="p1", amount=250, items=["黑麦面包"],
+        reason="黑麦面包", source="table_offer",
+    )
+    data = _grant_data()
+    removed = filter_unconfirmed_purchase_grants(instance, data)
+    assert removed == 1
+    assert data["state_update"].get("loot") == []
+    assert "free_grants" not in data["state_update"]
+
+
+def test_free_grant_requires_matching_player_and_item() -> None:
+    instance = _instance()
+    intents = [{"payer_uid": "p1", "target": "黑麦面包", "quantity": 1}]
+
+    # 错玩家：授权标记给 p2，LOOT 仍是 p1 → 标记不匹配 p1 的意图，拦截。
+    wrong_player = _grant_data(grant_player="p2")
+    assert filter_unconfirmed_purchase_grants(
+        instance, wrong_player, unpriced_purchase_intents=intents,
+    ) == 1
+
+    # 错物品：授权苹果，LOOT 仍是黑麦面包 → 标记不匹配意图，拦截。
+    wrong_item = _grant_data(grant_item="苹果")
+    assert filter_unconfirmed_purchase_grants(
+        instance, wrong_item, unpriced_purchase_intents=intents,
+    ) == 1
+
+
+def test_free_grant_allows_weapon_item_gains_path() -> None:
+    """武器/item_gains 通道沿用同一 gate：FREE_GRANT 放行且标记被消费。"""
+
+    instance = _instance()
+    data = {"state_update": {
+        "free_grants": [{"player": "p1", "item": "旧猎枪"}],
+        "players": {"p1": {"item_gains": [{"name": "旧猎枪", "qty": 1}]}},
+    }}
+    intents = [{"payer_uid": "p1", "target": "旧猎枪", "quantity": 1}]
+    removed = filter_unconfirmed_purchase_grants(
+        instance, data, unpriced_purchase_intents=intents,
+    )
+    assert removed == 0
+    assert data["state_update"]["players"]["p1"]["item_gains"]
+    assert "free_grants" not in data["state_update"]
+
+
+def test_planner_prompts_no_longer_promise_second_price_pass() -> None:
+    """ADR 已撤销第二轮价格复查：四语言 prompt 不得再承诺。"""
+
+    prompts = Path(__file__).resolve().parents[1] / "prompts"
+    stale = ("复查", "re-checks this round's narration", "再確認", "noch einmal auf einen von einem Menschen")
+    for name in ("check_planner_zh.md", "check_planner_en.md", "check_planner_ja.md", "check_planner_de.md"):
+        text = (prompts / name).read_text(encoding="utf-8")
+        for phrase in stale:
+            assert phrase not in text, (name, phrase)

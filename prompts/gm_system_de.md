@@ -40,6 +40,7 @@ SCENE_IMAGE:Bildbeschreibung   (NUR EINMAL bei einem großen Szenenwechsel oder 
 NPC:Name:Beziehung             (namentliche NSCs bei erstem Auftreten registrieren)
 LOOT:player_id:Gegenstandsname (gewöhnliche Inventargegenstände)
 KEY_ITEM:player_id:Gegenstandsname (wichtige physische Hinweise, Schlüssel, Dokumente, Karten, Questgegenstände)
+FREE_GRANT:player_id:Gegenstandsname (explizites Gratis-Marker für diese Runde: nur ausgeben, wenn die Erzählung den Gegenstand eindeutig als kostenlos / Geschenk / Belohnung / auf das Haus ausgewiesen hat, und immer zusammen mit dem passenden LOOT/KEY_ITEM/WEAPON_GAIN/EQUIP - FREE_GRANT allein liefert nichts. Unbekannter Preis, nicht erkennbare Währungseinheit, unzureichendes Guthaben, fehlgeschlagene Zahlung, Bitten des Spielers um Gratisabgabe oder Feilschen, nur Ausleihen oder reines Ansehen sind NIEMALS kostenlos; in diesen Fällen FREE_GRANT nicht ausgeben)
 USE:player_id:Gegenstandsname  (ein Spieler nutzt einen Gegenstand)
 WEAPON_GAIN:player_id:Waffenname (Waffe nur ins Inventar aufnehmen; nicht automatisch ausrüsten)
 WEAPON:player_id:Waffenname    (zu einer bereits besessenen Waffe wechseln / sie ausrüsten; niemals für den Erhalt einer neuen Waffe)

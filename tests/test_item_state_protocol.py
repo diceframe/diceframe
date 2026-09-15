@@ -388,3 +388,33 @@ def test_prompt_tag_contract_synced(lang: str):
     assert "獲得または持ち替え" not in text
     # 购买防绕过说明覆盖新标签
     assert "LOOT/KEY_ITEM/WEAPON_GAIN" in text
+
+
+# ---------- FREE_GRANT 授权标记：可解析、不发货、只作 gate 凭据 ----------
+
+def test_free_grant_tag_parses_into_ephemeral_marker():
+    data = _parse("FREE_GRANT:p1:黑麦面包\nLOOT:p1:黑麦面包")
+    assert data["state_update"]["free_grants"] == [
+        {"player": "p1", "item": "黑麦面包"},
+    ]
+    # 授权标记不取代实际发放通道：LOOT 照常解析。
+    assert data["state_update"]["loot"] == [
+        {"player": "p1", "item": "黑麦面包", "qty": 1},
+    ]
+
+
+def test_free_grant_tag_strips_quantity_suffix():
+    data = _parse("FREE_GRANT:p1:黑麦面包x2")
+    assert data["state_update"]["free_grants"] == [
+        {"player": "p1", "item": "黑麦面包"},
+    ]
+
+
+def test_gm_prompts_document_free_grant_constraints():
+    """四语言 GM prompt 都必须给出 FREE_GRANT 的窄边界。"""
+
+    for name in ("gm_system_zh.md", "gm_system_en.md", "gm_system_ja.md", "gm_system_de.md"):
+        text = (PROMPTS / name).read_text(encoding="utf-8")
+        assert "FREE_GRANT" in text, name
+        # unknown price / 余额不足 / 讨价还价等绝不等于免费（§19）。
+        assert ("免费" in text) or ("free" in text) or ("無償" in text) or ("kostenlos" in text), name

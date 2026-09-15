@@ -722,12 +722,32 @@ def filter_unconfirmed_purchase_grants(
     entry by entry with the same authority; unequip ops grant nothing and
     pass through.  Other loot and rewards continue through the normal
     narrative pipeline.
+
+    Three authority layers: pending chargeable proposals always block (a
+    FREE_GRANT can never bypass a real offer); unpriced purchase intents
+    block unless the same round carries an explicit FREE_GRANT marker
+    (GM narrated the item as genuinely free/gifted/rewarded) for the same
+    player and item.  The marker channel ``state_update.free_grants`` is
+    ephemeral: consumed here, never persisted.
     """
 
     state_update = data.get("state_update")
     if not isinstance(state_update, dict):
         return 0
-    pending_items: dict[str, set[str]] = {}
+    # FREE_GRANT 是本轮 ephemeral 授权标记（GM 叙事明确免费/赠送/奖励时输出）：
+    # 无论是否发生拦截都立即消费，绝不持久化。
+    free_grant_items: dict[str, set[str]] = {}
+    for marker in state_update.pop("free_grants", None) or []:
+        if not isinstance(marker, dict):
+            continue
+        uid = str(marker.get("player") or "").strip()
+        name = str(marker.get("item") or "").strip().casefold()
+        if uid and name:
+            free_grant_items.setdefault(uid, set()).add(name)
+
+    # 第一层：待确认扣款提案（payment/purchase）。FREE_GRANT 无权绕过——
+    # 否则物品先免费发放、付款人之后仍可能确认扣款，形成双重状态错误。
+    pending_purchase_items: dict[str, set[str]] = {}
     for proposal in instance.economy.get("proposals", []):
         if not isinstance(proposal, dict) or proposal.get("status") != "pending":
             continue
@@ -740,23 +760,30 @@ def filter_unconfirmed_purchase_grants(
                 if isinstance(reward, dict) else str(reward).strip().casefold()
             )
             if uid and name:
-                pending_items.setdefault(uid, set()).add(name)
+                pending_purchase_items.setdefault(uid, set()).add(name)
+    # 第二层：无价购买意图（价格未知/无法 canonicalize）。默认拦截；
+    # 本轮 GM 明确免费（FREE_GRANT）才放行。unknown price != free。
+    unpriced_purchase_items: dict[str, set[str]] = {}
     for intent in unpriced_purchase_intents or []:
         if not isinstance(intent, dict):
             continue
         uid = str(intent.get("payer_uid") or "")
         name = str(intent.get("target") or "").strip().casefold()
         if uid and name:
-            pending_items.setdefault(uid, set()).add(name)
+            unpriced_purchase_items.setdefault(uid, set()).add(name)
+
+    def _matches(names: set[str], key: str) -> bool:
+        return any(name and (name in key or key in name) for name in names)
 
     def blocked(uid: str, item: str) -> bool:
         key = str(item or "").strip().casefold()
         if not uid or not key:
             return False
-        return any(
-            name and (name in key or key in name)
-            for name in pending_items.get(uid, set())
-        )
+        if _matches(pending_purchase_items.get(uid, set()), key):
+            return True
+        if _matches(unpriced_purchase_items.get(uid, set()), key):
+            return not _matches(free_grant_items.get(uid, set()), key)
+        return False
 
     removed = 0
     players = state_update.get("players")

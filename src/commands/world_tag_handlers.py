@@ -76,6 +76,18 @@ def parse_loot_tag(tag: str, value: str, result: dict) -> None:
             name, quantity = split_item_quantity(item)
             entry: dict = {"player": uid, "item": name[:120], "qty": quantity}
             result["state_update"]["loot"].append(entry)
+    elif tag == "FREE_GRANT":
+        # 本轮「明确免费」授权标记：只作为 purchase grant gate 的放行凭据，
+        # 自身不发物品、不改余额、不创建提案，也不会被持久化。
+        parts = value.split(":", 1)
+        if len(parts) == 2:
+            uid, item = parts[0].strip(), parts[1].strip()
+            name, _quantity = split_item_quantity(item)
+            if uid and name:
+                result["state_update"].setdefault("free_grants", []).append({
+                    "player": uid,
+                    "item": name[:120],
+                })
     elif tag == "KEY_ITEM":
         parts = value.split(":", 1)
         if len(parts) == 2:

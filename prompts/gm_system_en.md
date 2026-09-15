@@ -39,6 +39,7 @@ SCENE_IMAGE:visual description (output ONCE only on a major scene change or the 
 NPC:name:relationship          (register named NPCs on first appearance)
 LOOT:player_id:item name       (ordinary inventory items)
 KEY_ITEM:player_id:item name   (important physical clues, keys, documents, maps, quest items)
+FREE_GRANT:player_id:item name (explicit free-gift marker for this round: output it ONLY when the story has clearly established the item as free, a gift, a reward, or on the house, and always pair it with the matching LOOT/KEY_ITEM/WEAPON_GAIN/EQUIP - FREE_GRANT itself grants nothing. Unknown price, unrecognized currency unit, insufficient funds, failed payment, a player asking for it for free or haggling, borrowing, or just browsing are NEVER free; do not output FREE_GRANT for them)
 USE:player_id:item name        (a player uses an item)
 WEAPON_GAIN:player_id:weapon name (gain a weapon into the backpack only; do not auto-equip it)
 WEAPON:player_id:weapon name   (switch to / equip a weapon the player already owns; never for gaining a new weapon)
