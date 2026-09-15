@@ -9,6 +9,31 @@ if TYPE_CHECKING:
 
 __all__ = ["migrate_legacy_character_sheet", "normalize_character_sheet", "normalize_character_payload"]
 
+# 技能效果说明是玩家自定义文本（descriptive metadata，非规则权威）：
+# 长度上限同时防止单技能塞入超长文本撑大 planner context。
+MAX_SKILL_EFFECT_CHARS = 500
+
+
+def _skill_row(skill: Any) -> dict[str, Any]:
+    """Normalize one skill while preserving the optional ``effect`` text.
+
+    字符串技能与旧对象技能继续归一化为 ``{name, value}``；只有确有非空
+    ``effect`` 时才写入该字段（旧卡不凭空长出空字段）。
+    """
+
+    if isinstance(skill, str):
+        return {"name": skill, "value": 20}
+    if not isinstance(skill, dict):
+        return {"name": "", "value": 20}
+    row: dict[str, Any] = {
+        "name": skill.get("name", ""),
+        "value": skill.get("value", 20),
+    }
+    effect = str(skill.get("effect") or "").strip()
+    if effect:
+        row["effect"] = effect[:MAX_SKILL_EFFECT_CHARS]
+    return row
+
 
 def migrate_legacy_character_sheet(
     character_sheet: dict[str, Any],
@@ -105,13 +130,9 @@ def normalize_character_sheet(
         currency["amount"] = int(character_sheet.get("gold", 0) or 0)
     else:
         character_sheet["gold"] = int(currency.get("amount", 0) or 0)
-    skills: list[dict[str, Any]] = []
-    for skill in character_sheet.get("skills", []):
-        if isinstance(skill, str):
-            skills.append({"name": skill, "value": 20})
-        elif isinstance(skill, dict):
-            skills.append({"name": skill.get("name", ""), "value": skill.get("value", 20)})
-    character_sheet["skills"] = skills
+    character_sheet["skills"] = [
+        _skill_row(skill) for skill in character_sheet.get("skills", [])
+    ]
     return character_sheet
 
 

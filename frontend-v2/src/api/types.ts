@@ -4,7 +4,8 @@ export interface CharacterResource { current?: number; max?: number; min?: numbe
 
 export interface CharacterIdentity { [key: string]: string | number | undefined }
 
-export interface CharacterSkill { name: string; value?: number }
+/** `effect` is player-authored skill description: display / AI context only, never mechanics. */
+export interface CharacterSkill { name: string; value?: number; effect?: string }
 
 export interface CharacterItem { name?: string; type?: string; damage?: number; slot?: string; quality?: string; qty?: number; effect?: string; category?: string; note?: string; [key: string]: unknown }
 

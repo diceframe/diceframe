@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { CharacterSkill, RuleMeta, SkillSpec } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import { localizedField, skillPointCost } from '@/utils/ruleSchema'
 
+const SKILL_EFFECT_MAX_CHARS = 500
 const props = defineProps<{ modelValue: CharacterSkill[]; pool?: Array<string | SkillSpec>; meta?: RuleMeta | null }>()
 const emit = defineEmits<{ 'update:modelValue': [v: CharacterSkill[]] }>()
 const { t } = useLocale()
@@ -31,6 +32,26 @@ function updateVal(i: number, v: number) {
   arr[i] = { ...arr[i], value: v || 0 }
   skills.value = arr
 }
+function updateEffect(i: number, v: string) {
+  const arr = [...skills.value]
+  const effect = v.slice(0, SKILL_EFFECT_MAX_CHARS)
+  if (effect) {
+    arr[i] = { ...arr[i], effect }
+  } else {
+    // 清空时移除字段，避免旧卡/空说明被写成空字符串。
+    const { effect: _cleared, ...rest } = arr[i]
+    arr[i] = rest as CharacterSkill
+  }
+  skills.value = arr
+}
+// 效果说明默认折叠：技能多时不应铺开一排 textarea。
+const openEffects = ref<Set<number>>(new Set())
+function toggleEffect(i: number) {
+  const next = new Set(openEffects.value)
+  if (next.has(i)) next.delete(i)
+  else next.add(i)
+  openEffects.value = next
+}
 
 const skillHint = computed(() => localizedField<string>(props.meta, 'skill_hint') || '')
 const maxSkills = computed(() => Number(props.meta?.max_skills || 0))
@@ -53,10 +74,29 @@ const skillOverLimit = computed(() =>
       <span v-if="skillPointTotal"> · {{ t('skillPointsSpent', { spent: skillSpent, total: skillPointTotal }) }}</span>
       <span v-if="maxSkillValue"> · {{ t('maxSingleSkill', { max: maxSkillValue }) }}</span>
     </p>
-    <div v-for="(s, i) in skills" :key="i" class="skill-row">
-      <input :value="s.name" :placeholder="t('skillName')" @input="updateName(i, ($event.target as HTMLInputElement).value)">
-      <input type="number" :value="s.value" min="0" :class="{ warn: maxSkillValue && (Number(s.value || 0) || 0) > maxSkillValue }" @input="updateVal(i, Number(($event.target as HTMLInputElement).value))">
-      <button class="modal-x" :title="t('delete')" @click="remove(i)">×</button>
+    <div v-for="(s, i) in skills" :key="i" class="skill-block">
+      <div class="skill-row">
+        <input :value="s.name" :placeholder="t('skillName')" @input="updateName(i, ($event.target as HTMLInputElement).value)">
+        <input type="number" :value="s.value" min="0" :class="{ warn: maxSkillValue && (Number(s.value || 0) || 0) > maxSkillValue }" @input="updateVal(i, Number(($event.target as HTMLInputElement).value))">
+        <button
+          type="button"
+          class="chip skill-effect-toggle"
+          :class="{ active: openEffects.has(i) || Boolean(s.effect) }"
+          :aria-expanded="openEffects.has(i)"
+          :title="t('skillEffect')"
+          @click="toggleEffect(i)"
+        >{{ t('skillEffect') }}</button>
+        <button class="modal-x" :title="t('delete')" @click="remove(i)">×</button>
+      </div>
+      <textarea
+        v-if="openEffects.has(i)"
+        class="skill-effect-input"
+        rows="2"
+        :maxlength="SKILL_EFFECT_MAX_CHARS"
+        :value="s.effect || ''"
+        :placeholder="t('skillEffectPlaceholder')"
+        @input="updateEffect(i, ($event.target as HTMLTextAreaElement).value)"
+      />
     </div>
     <button class="chip" @click="add()">+ {{ t('addSkill') }}</button>
     <div v-if="pool.length" class="skill-pool">

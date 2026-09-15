@@ -735,3 +735,36 @@ def test_character_api_localizes_persisted_lorebook_npcs_for_game_language(web_a
     assert result["npcs"][0]["status"] == "Lorebook"
 
 
+@pytest.mark.asyncio
+async def test_character_skill_effect_round_trip(web_api):
+    """技能效果说明（effect）在保存 → 重新读取 → 再次编辑后都必须保留。"""
+
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    created = await api.create_game(
+        "template_world",
+        "技能效果测试",
+        players=[{"character_name": "冒险者", "attributes": {"str": 10}}],
+        gm_uid="web_session_gm",
+    )
+    uid = created["players"][0]["user_id"]
+    effect = "向目标发射火球，造成火焰伤害。"
+
+    saved = await api.update_character(created["game_key"], uid, {
+        "skills": [
+            {"name": "火焰球", "value": 80, "effect": effect},
+            {"name": "侦查", "value": 45},
+        ],
+    })
+    assert saved["ok"] is True
+    inst = registry.get(api._parse_key(created["game_key"]))
+    assert inst.players[uid]["character_sheet"]["skills"] == [
+        {"name": "火焰球", "value": 80, "effect": effect},
+        {"name": "侦查", "value": 45},
+    ]
+
+    # 之后编辑其它字段（不提技能）也不能让 effect 消失或被清空。
+    again = await api.update_character(created["game_key"], uid, {"level": 2})
+    assert again["ok"] is True
+    skills = inst.players[uid]["character_sheet"]["skills"]
+    assert skills[0]["effect"] == effect
+    assert "effect" not in skills[1]

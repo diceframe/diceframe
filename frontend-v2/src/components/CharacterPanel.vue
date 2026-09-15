@@ -93,8 +93,11 @@ function restCount(len: number): number {
 function skillDetail(s: string | CharacterSkill): string {
   if (typeof s === 'string') return ''
   const parts: string[] = []
+  // effect 是玩家填写的技能说明：正式识别为「效果：…」，不再按通用 key: value 展示。
+  const effect = String(s.effect || '').trim()
+  if (effect) parts.push(t('skillEffectLine', { effect }))
   for (const [key, value] of Object.entries(s)) {
-    if (key === 'name' || key === 'value' || key === 'type' || key === 'key') continue
+    if (key === 'name' || key === 'value' || key === 'type' || key === 'key' || key === 'effect') continue
     if (value === undefined || value === null || value === '') continue
     parts.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`)
   }

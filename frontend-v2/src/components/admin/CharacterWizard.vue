@@ -138,7 +138,19 @@ async function generateByAI() {
 }
 
 function skillToDraft(skill: string | CharacterSkill): CharacterSkill {
-  return typeof skill === 'string' ? { name: skill, value: 20 } : { name: skill.name || '', value: skill.value || 20 }
+  if (typeof skill === 'string') return { name: skill, value: 20 }
+  const row: CharacterSkill = { name: skill.name || '', value: skill.value || 20 }
+  const effect = String(skill.effect || '').trim()
+  if (effect) row.effect = effect
+  return row
+}
+
+/** 提交侧技能投影；effect 只做长度收口，不改机械字段。 */
+function skillToPayload(skill: CharacterSkill): CharacterSkill {
+  const row: CharacterSkill = { name: String(skill.name).trim(), value: Number(skill.value) || 0 }
+  const effect = String(skill.effect || '').trim().slice(0, 500)
+  if (effect) row.effect = effect
+  return row
 }
 
 function applyCharacter(c: CharacterSheet) {
@@ -193,7 +205,7 @@ function finish() {
     portrait: portrait.value ? { ...portrait.value } : null,
     identity,
     attributes: { ...attrs.value },
-    skills: skills.value.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
+    skills: skills.value.filter(s => s.name?.trim()).map(skillToPayload),
     equipment: equipment.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), type: it.type || 'weapon', damage: Number(it.damage) || 0, slot: it.slot || 'main_hand', quality: it.quality || 'common' })),
     inventory: inventory.value.filter(it => String(it.name || '').trim()).map(it => ({ name: String(it.name).trim(), qty: Number(it.qty) || 1, effect: it.effect || '' })),
     background: background.value,

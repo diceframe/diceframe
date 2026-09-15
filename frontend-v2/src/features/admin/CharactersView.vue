@@ -149,7 +149,25 @@ const editRuleAttrs = computed<RuleAttr[]>(() => {
 
 function errorMessage(err: unknown): string { return err instanceof Error ? err.message : String(err || t('operationFailed')) }
 function toSkillList(input: CharacterSheet['skills']): CharacterSkill[] {
-  return (input || []).map(s => typeof s === 'string' ? { name: s, value: 20 } : { name: s.name || '', value: s.value || 20 })
+  return (input || []).map(s => {
+    if (typeof s === 'string') return { name: s, value: 20 }
+    const row: CharacterSkill = { name: s.name || '', value: s.value || 20 }
+    const effect = String(s.effect || '').trim()
+    if (effect) row.effect = effect
+    return row
+  })
+}
+
+/** 保存侧技能投影：effect 是玩家说明文本，编辑路径不得丢失。 */
+function toSkillPayload(skills: CharacterSkill[]): CharacterSkill[] {
+  return skills
+    .filter(s => s.name?.trim())
+    .map(s => {
+      const row: CharacterSkill = { name: s.name.trim(), value: Number(s.value) || 0 }
+      const effect = String(s.effect || '').trim().slice(0, 500)
+      if (effect) row.effect = effect
+      return row
+    })
 }
 function itemLines(items: CharacterItem[] | undefined, fields: Array<keyof CharacterItem>, defaults: Record<string, string | number>): string {
   return (items || []).map(item => fields.map(field => String(item[field] ?? defaults[String(field)] ?? '')).join('|')).join('\n')
@@ -479,7 +497,7 @@ async function saveCharacter() {
       currency: { amount: gold },
       progression: { level, xp: cs.xp || 0 },
       attributes: e.attributes,
-      skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
+      skills: toSkillPayload(e.skills),
       background: e.background,
       hp: hpCurrent,
       max_hp: hpMax,
@@ -574,7 +592,7 @@ async function saveCardEdit() {
       character_name: e.character_name.trim() || t('unnamed'),
       race: e.race.trim() || t('human'),
       class: e.class.trim() || t('adventurer'),
-      skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
+      skills: toSkillPayload(e.skills),
       background: e.background.trim(),
       gold: parsedGold,
       portrait: e.portrait ? { ...e.portrait } : null,

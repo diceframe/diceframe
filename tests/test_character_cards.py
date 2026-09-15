@@ -212,3 +212,35 @@ def test_import_tavern_carries_play_directives_and_nsfw_warning(tmp_path):
         assert _tavern_has_nsfw(tavern) is False
     finally:
         store.close()
+
+
+def test_export_import_roundtrip_preserves_skill_effect(tmp_path):
+    """导出 → 导入后 skills[].effect 仍然存在。"""
+
+    import asyncio
+    import base64
+    import json
+    from src.webui.services.character_cards import export_character_cards, import_character_card
+
+    cards_path = tmp_path / "cards.json"
+    dependencies = CharacterCardDependencies(cards_path=cards_path)
+    card = {
+        "id": "df_effect",
+        "schema_version": 2,
+        "character_name": "Himmel",
+        "attributes": {},
+        "skills": [
+            {"name": "火焰球", "value": 80, "effect": "向目标发射火球。"},
+            {"name": "侦查", "value": 45},
+        ],
+    }
+    cards_path.write_text(json.dumps([card], ensure_ascii=False), encoding="utf-8")
+    exported = export_character_cards(dependencies, ["df_effect"])
+    file_data = base64.b64encode(exported["payload"]).decode()
+    imported = asyncio.run(
+        import_character_card(
+            dependencies, file_data=file_data, file_name="Himmel.json",
+        )
+    )
+    assert imported["ok"] is True
+    assert imported["card"]["skills"] == card["skills"]

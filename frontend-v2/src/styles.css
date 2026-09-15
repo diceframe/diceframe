@@ -241,7 +241,15 @@ details:not([open])>:not(summary){display:none}
 .attrs{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
 .attrs label{display:grid;grid-template-columns:80px 1fr 90px;align-items:center}
 .skills-title{display:flex;justify-content:space-between;align-items:center}
-.skill-row{display:grid;grid-template-columns:1fr 130px 42px;gap:7px;margin:7px 0}
+.skill-row{display:grid;grid-template-columns:1fr 130px auto 42px;gap:7px;margin:7px 0}
+.skill-block{margin:7px 0}
+.skill-block .skill-row{margin:0}
+.skill-effect-toggle{align-self:center;white-space:nowrap}
+.skill-effect-toggle.active{border-color:var(--df-interactive);color:var(--df-interactive)}
+.skill-effect-input{width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-surface-1);color:var(--df-text);font:inherit;font-size:12px;line-height:1.45;resize:vertical}
+.skill-entry{margin:7px 0}
+.skill-entry .skill-row{margin:0;grid-template-columns:1fr 90px auto 36px}
+.skill-detail-meta{white-space:pre-line}
 .join-form .submit{width:100%;margin-top:10px}
 .card-choice{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 12px;align-items:center;justify-content:stretch;margin:7px 0;text-align:left}
 .card-choice-copy{display:grid;gap:3px;color:var(--df-text-muted)}.card-choice-copy strong{color:var(--df-text)}
@@ -438,7 +446,7 @@ details:not([open])>:not(summary){display:none}
 .switch-inline{display:flex;align-items:center;gap:8px;flex:1}
 /* 响应式 */
 @media(max-width:800px){.app-shell{flex-direction:column}.top-nav{height:auto;padding:8px 10px 7px;gap:8px 10px;flex-wrap:wrap;align-items:center}.top-brand{order:1;flex:1 1 auto;min-width:0}.top-brand small{display:none}.top-right{order:2;margin-left:auto;gap:6px}.top-menu{order:3;flex:1 0 100%;width:100%;overflow-x:auto;padding:1px 0 2px}.top-menu .n-menu{min-width:max-content}.top-nav .n-menu-item-content{padding:0 10px!important}.locale-select span{display:none}.locale-select select{min-width:104px;padding:6px 24px 6px 8px}.app-version{max-width:110px;overflow:hidden;text-overflow:ellipsis}.view{padding:15px}.play-layout{grid-template-columns:1fr;height:auto}.game-sidebar{border-right:0;display:grid;grid-template-columns:1fr 1fr;gap:0 14px;max-height:none}.play-main{min-height:70vh;padding:10px}.settings-grid{grid-template-columns:1fr}.topbar{position:relative}.topbar p{margin-left:0}.game-row,.data-row{align-items:flex-start}.composer-row{grid-template-columns:1fr}.composer-row button{width:100%}}
-@media(max-width:480px){.game-sidebar{grid-template-columns:1fr}.topbar{align-items:flex-start}.toolbar{justify-content:flex-end}.view-title{align-items:flex-start}.game-row,.data-row{display:grid}.game-row>div:last-child{display:flex}.message{padding:9px}.play-main{padding:7px}.dialog{padding:14px}.two-cols,.attrs{grid-template-columns:1fr}.attrs label{grid-template-columns:70px 1fr 75px}.skill-row{grid-template-columns:1fr 90px 40px}.lore-tools{grid-template-columns:1fr}}
+@media(max-width:480px){.game-sidebar{grid-template-columns:1fr}.topbar{align-items:flex-start}.toolbar{justify-content:flex-end}.view-title{align-items:flex-start}.game-row,.data-row{display:grid}.game-row>div:last-child{display:flex}.message{padding:9px}.play-main{padding:7px}.dialog{padding:14px}.two-cols,.attrs{grid-template-columns:1fr}.attrs label{grid-template-columns:70px 1fr 75px}.skill-row{grid-template-columns:1fr 80px auto 36px}.lore-tools{grid-template-columns:1fr}}
 
 /* Archive/admin pages: readable game records instead of plain admin tables. */
 .archive-page{max-width:1180px}.archive-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding:18px 0 14px;border-bottom:1px solid var(--df-border-soft);margin-bottom:14px}.archive-hero h1{font-size:30px}.archive-hero p{margin-top:6px}.archive-stats{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:10px;margin:14px 0}.archive-stats article{padding:12px 14px;border:1px solid var(--df-border-soft);border-radius:8px;background:linear-gradient(180deg,rgba(216,173,82,.09),rgba(35,27,20,.7));box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}.archive-stats strong{display:block;color:var(--df-accent-strong);font-size:22px}.archive-stats span{display:block;margin-top:4px;color:var(--df-text-muted);font-size:12px}
