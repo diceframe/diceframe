@@ -31,7 +31,9 @@ def migrate_legacy_character_sheet(
     currency = character_sheet.setdefault("currency", {})
     currency.setdefault("amount", int(character_sheet.get("gold", 0) or 0))
     if rule:
-        currency.setdefault("base_unit", rule.currency_system.get("base_unit", "unit"))
+        # base_unit 只描述「1 canonical amount 是什么单位」，legacy 规则不做
+        # 任何数值换算（gold → currency.amount 保留原值）。
+        currency.setdefault("base_unit", rule.currency_spec.base_unit)
         currency.setdefault("label", rule.ui_schema.get("currency_label", rule.currency))
 
     resources = character_sheet.setdefault("resources", {})

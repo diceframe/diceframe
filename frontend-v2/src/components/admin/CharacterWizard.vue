@@ -12,6 +12,8 @@ import {
   isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, localizedField,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
+import type { CurrencySystem } from '@/utils/currency'
+import { currencyInputStep, formatCurrencyAmount, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterSubmit extends CharacterSheet { character_name: string }
 
@@ -58,7 +60,11 @@ const diceHint = computed(() =>
 
 const skills = ref<CharacterSkill[]>([])
 const background = ref('')
+// canonical 金额内部保存；输入框按展示单位编辑（0.25），提交前经 parser 换算。
 const gold = ref(0)
+const goldInput = ref('0')
+const currencySystem = computed<CurrencySystem | null>(() => props.ruleMeta?.currency_system || null)
+const goldInvalid = computed(() => parseCurrencyInput(goldInput.value, currencySystem.value, { allowZero: true }) === null)
 const equipment = ref<CharacterItem[]>([])
 const inventory = ref<CharacterItem[]>([])
 const pool = computed(() => props.skillPool || [])
@@ -100,6 +106,7 @@ function resetFields() {
   skills.value = []
   background.value = ''
   gold.value = 0
+  goldInput.value = '0'
   equipment.value = []
   inventory.value = []
   step.value = 1
@@ -155,7 +162,13 @@ function applyCharacter(c: CharacterSheet) {
   if (c.background) background.value = c.background
   if (c.currency?.amount !== undefined) gold.value = Number(c.currency.amount) || 0
   else if (c.gold !== undefined) gold.value = Number(c.gold) || 0
+  goldInput.value = formatCurrencyAmount(gold.value, currencySystem.value)
 }
+
+watch(goldInput, (text) => {
+  const parsed = parseCurrencyInput(text, currencySystem.value, { allowZero: true })
+  if (parsed !== null) gold.value = parsed
+})
 
 function canNext() {
   if (step.value === 1) return characterName.value.trim().length > 0
@@ -165,6 +178,10 @@ function next() { if (canNext() && step.value < 4) step.value = (step.value + 1)
 function prev() { if (step.value > 1) step.value = (step.value - 1) as 1 | 2 | 3 | 4 }
 
 function finish() {
+  const parsedGold = parseCurrencyInput(goldInput.value, currencySystem.value, { allowZero: true })
+  if (parsedGold === null) { toast.error(t('invalidAmount')); return }
+  gold.value = parsedGold
+
   const fields = identitySchema(props.ruleMeta)
   const updates: SheetUpdate = {}
   for (const f of fields) setIdentityUpdate(updates, f, identityValues.value[f.key] || '')
@@ -240,7 +257,7 @@ function finish() {
       </p>
       <SkillEditor v-model="skills" :pool="pool" />
       <label>{{ t('backgroundStory') }}<textarea v-model="background" rows="4" :placeholder="t('backgroundPlaceholder')"></textarea></label>
-      <label>{{ currencyLabel(ruleMeta) }}<input type="number" v-model.number="gold" min="0"></label>
+      <label>{{ currencyLabel(ruleMeta) }}<input type="text" inputmode="decimal" v-model="goldInput" :step="currencyInputStep(currencySystem)" :class="{ invalid: goldInvalid }"></label>
     </div>
 
     <div v-else-if="step === 4" class="wizard-pane">

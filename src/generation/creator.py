@@ -6,6 +6,7 @@ import copy
 import json
 import logging
 from src.engine.character_utils import initial_special_stat_value, set_hp
+from src.engine.currency import CurrencySystemError, validate_currency_system
 from src.engine.language import DEFAULT_LANGUAGE, localized_field, localized_text, normalize_language
 
 logger = logging.getLogger("trpg")
@@ -315,6 +316,7 @@ _RULE_SYSTEM_PROMPT = """你是TRPG规则设计师。请基于给定“母版规
   "skill_mode": "narrative",
   "skill_hint": "给玩家的技能填写说明",
   "currency": "货币名",
+  "currency_system": {"schema_version":2,"base_unit":"fen","display_unit":"yuan","units":[{"id":"yuan","name":"人民币","symbol":"¥","rate":100},{"id":"fen","name":"分","rate":1}]},
   "classes": [{"name":"职业/身份","description":"定位","starter_equipment":["初始装备"]}],
   "skill_pools": {"职业/身份":["技能1","技能2"]},
   "item_categories": {"equipment":["物品"],"consumable":["消耗品"],"misc":["杂项"]},
@@ -329,7 +331,8 @@ _RULE_SYSTEM_PROMPT = """你是TRPG规则设计师。请基于给定“母版规
 - 属性数量建议 5-8 个；必须能支撑建卡。
 - gm_prompt_appendix 要具体，能约束AI不串题材。
 - gm_prompt_appendix 不得发明或要求使用新的大写协议标签；状态标签由 DiceFrame 的系统提示统一提供。
-- 所有中文文本自然、短而实用。"""
+- 所有中文文本自然、短而实用。
+- currency_system 可选：只有当题材明确存在更小货币单位时才生成（schema_version 固定为 2；base_unit 必须是 units 里 rate=1 的单位；所有 unit id 用英文小写下划线；rate 必须是正整数）。没有更小单位时省略整个字段，不要为凑字段而发明单位。"""
 
 _RULE_SYSTEM_PROMPT_EN = """You are a TRPG rules designer. Based on the provided master rule JSON and the user's genre description, generate a lightweight custom rule JSON that can be used directly by DiceFrame.
 
@@ -354,6 +357,7 @@ Output strict JSON only. Preserve DiceFrame-compatible fields:
   "skill_mode": "narrative",
   "skill_hint": "English skill creation guidance",
   "currency": "Gold",
+  "currency_system": {"schema_version":2,"base_unit":"cent","display_unit":"dollar","units":[{"id":"dollar","name":"Dollar","symbol":"$","rate":100},{"id":"cent","name":"Cent","rate":1}]},
   "classes": [{"name":"English role / identity","description":"English role description","starter_equipment":["starter equipment"]}],
   "skill_pools": {"English role / identity":["skill 1","skill 2"]},
   "item_categories": {"equipment":["item"],"consumable":["consumable"],"misc":["misc"]},
@@ -369,7 +373,8 @@ Requirements:
 - Use 5-8 attributes when possible and make character creation practical.
 - gm_prompt_appendix must be concrete enough to keep AI on genre.
 - gm_prompt_appendix must not invent or require new uppercase protocol tags; DiceFrame supplies state-tag instructions separately.
-- Player-facing display text should be natural, concise English. Keep required JSON keys and enum values unchanged."""
+- Player-facing display text should be natural, concise English. Keep required JSON keys and enum values unchanged.
+- currency_system is optional: emit it only when the genre clearly has a smaller denomination (schema_version fixed to 2; base_unit must be the units entry with rate 1; unit ids use lowercase English/underscores; rates are positive integers). Omit the whole field when there is no smaller unit; never invent units just to fill it."""
 
 _RULE_SYSTEM_PROMPT_DE = """Du bist ein TRPG-Regeldesigner. Erzeuge basierend auf dem bereitgestellten Master-Regel-JSON und der Genre-Beschreibung des Nutzers ein leichtgewichtiges benutzerdefiniertes Regel-JSON, das direkt von DiceFrame verwendet werden kann.
 
@@ -394,6 +399,7 @@ Gib ausschließlich striktes JSON aus. Behalte DiceFrame-kompatible Felder bei:
   "skill_mode": "narrative",
   "skill_hint": "deutsche Anleitung zur Fertigkeitsvergabe",
   "currency": "Gold",
+  "currency_system": {"schema_version":2,"base_unit":"cent","display_unit":"dollar","units":[{"id":"dollar","name":"Dollar","symbol":"$","rate":100},{"id":"cent","name":"Cent","rate":1}]},
   "classes": [{"name":"deutsche Rolle / Identität","description":"deutsche Rollenbeschreibung","starter_equipment":["Startausrüstung"]}],
   "skill_pools": {"deutsche Rolle / Identität":["Fertigkeit 1","Fertigkeit 2"]},
   "item_categories": {"equipment":["Gegenstand"],"consumable":["Verbrauchsgegenstand"],"misc":["Sonstiges"]},
@@ -409,7 +415,8 @@ Anforderungen:
 - Verwende möglichst 5-8 Attribute und mache die Charaktererstellung praktikabel.
 - gm_prompt_appendix muss konkret genug sein, um die KI im Genre zu halten.
 - gm_prompt_appendix darf keine neuen großgeschriebenen Protokoll-Tags erfinden oder verlangen; DiceFrame liefert Status-Tag-Anweisungen separat.
-- Der spielerseitige Anzeigetext sollte natürliches, prägnantes Deutsch sein. Behalte erforderliche JSON-Schlüssel und Enum-Werte unverändert bei."""
+- Der spielerseitige Anzeigetext sollte natürliches, prägnantes Deutsch sein. Behalte erforderliche JSON-Schlüssel und Enum-Werte unverändert bei.
+- currency_system ist optional: gib es nur an, wenn das Genre klar eine kleinere Währungseinheit hat (schema_version fest auf 2; base_unit muss der units-Eintrag mit rate 1 sein; unit-ids in Kleinbuchstaben/Unterstrich; rates sind positive ganze Zahlen). Lasse das Feld weg, wenn es keine kleinere Einheit gibt; erfinde keine Einheiten nur zum Ausfüllen."""
 
 
 def _localized_rule_text(value: dict | str | None, language: str, fallback: str = "") -> str:
@@ -875,6 +882,7 @@ async def generate_rule(
   "skill_mode": "narrative",
   "skill_hint": "日本語のスキル入力ガイド",
   "currency": "Gold",
+  "currency_system": {"schema_version":2,"base_unit":"cent","display_unit":"dollar","units":[{"id":"dollar","name":"Dollar","symbol":"$","rate":100},{"id":"cent","name":"Cent","rate":1}]},
   "classes": [{"name":"日本語の職業 / 出自","description":"日本語の職業説明","starter_equipment":["初期装備"]}],
   "skill_pools": {"日本語の職業 / 出自":["スキル1","スキル2"]},
   "item_categories": {"equipment":["アイテム"],"consumable":["消耗品"],"misc":["雑貨"]},
@@ -890,7 +898,8 @@ async def generate_rule(
 - 可能なら属性は 5〜8 個にし、キャラクター作成が実用的であること。
 - gm_prompt_appendix はジャンルを逸脱させないよう十分具体的に書く。
 - gm_prompt_appendix で新しい大文字のプロトコルタグを創作・要求しない。状態タグの指示は DiceFrame のシステムプロンプトが別途提供する。
-- プレイヤー向け表示テキストは自然で簡潔な日本語にする。必須の JSON キーと enum 値は変更しない。""",
+- プレイヤー向け表示テキストは自然で簡潔な日本語にする。必須の JSON キーと enum 値は変更しない。
+- currency_system は任意：ジャンルに明確な補助通貨単位がある場合のみ出力する（schema_version は 2 固定；base_unit は units の中で rate が 1 の単位；unit id は英小文字とアンダースコア；rate は正の整数）。補助単位がなければフィールド全体を省略し、埋め合わせに単位を捏造しない。""",
         }),
         user_message=user_prompt,
         temperature=0.55,
@@ -900,6 +909,17 @@ async def generate_rule(
     if not data:
         return None
     _materialize_generated_de_fields(data, language)
+    # AI 输出的 V2 货币声明必须服务端校验，坏 schema 不允许落盘（fail closed，
+    # 不做语义猜测修复）；模型未输出时优先继承母版规则的 currency_system，
+    # 母版也没有则不生成字段，运行时按 legacy rate=1 兼容，不按名称猜单位。
+    generated_system = data.get("currency_system")
+    if generated_system is not None:
+        try:
+            validate_currency_system(generated_system)
+        except CurrencySystemError as exc:
+            raise ValueError(f"AI 生成规则 currency_system 非法: {exc}") from None
+    elif isinstance(source_rule.get("currency_system"), dict):
+        data["currency_system"] = copy.deepcopy(source_rule["currency_system"])
     data["rule_id"] = rule_id
     data["custom"] = True
     data["source_rule_id"] = source_rule_id

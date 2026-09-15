@@ -26,6 +26,10 @@ check_untyped_defs = true
 files = [
     "scripts/architecture_fitness.py",
     "src/engine/contracts.py",
+    "src/engine/currency/codec.py",
+    "src/engine/currency/migration.py",
+    "src/engine/currency/models.py",
+    "src/engine/currency/validation.py",
     "src/engine/game_context_projector.py",
     "src/engine/game_instance.py",
     "src/engine/game_state_codec.py",

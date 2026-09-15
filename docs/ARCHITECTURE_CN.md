@@ -75,6 +75,10 @@ V2 资源 ID 必须已经是 canonical 形式；注册器不会替插件把大�
 
 持久化 `GameInstance` 加载后的迁移统一经过 `src.migrations.migrate_instance` 编排入口。各数据域的具体迁移可以由 `src/compat/` 提供纯适配实现，但 service、route 和 runtime 不得直接分散调用域适配器。迁移必须幂等、可测试、按明确的版本/identity/digest 边界执行；无法证明安全迁移时 fail closed。新增功能应新增版本化迁移步骤，不修改已发布迁移的语义。
 
+## 货币模型（Currency Model）
+
+规则货币结构的唯一权威是 `src.engine.currency` 的 `CurrencySpec`：`currency_system`（`schema_version: 2`）声明 `base_unit`（canonical 整数的计数单位，rate 恒为 1）、`display_unit` 与各单位正整数 rate；只有 `currency` 名称的旧规则按 legacy rate=1 spec 兼容，不按名称猜单位。`parse_currency_amount` / `format_currency_amount` 是显示金额 ↔ canonical 整数的唯一转换入口（Decimal、不精确即拒绝），economy 引擎只处理 canonical base-unit 整数，不感知货币名称；禁止业务代码散落 ×100 / ÷100 或引入 float。V2 声明在 `RuleSystem` 构造与 `RuleBundleLoader` 加载边界 fail-fast，规则 CRUD、AI 生成规则与插件规则安装都复用同一校验；显示换算在前端 `frontend-v2/src/utils/currency.ts` 收口。`MAX_ECONOMY_AMOUNT` 是 base-unit 下的技术上限。只有 base_unit 语义变更的规则才迁移存量数据（当前仅内置 `freeform_coc` 美元→美分，×100 一次，经 schema v12 版本化迁移）；旧自定义规则与 legacy 规则数据不动，已有游戏实例的规则禁止通过编辑器修改 base_unit 语义。
+
 ## GameInstance 聚合边界
 
 `GameInstance` 是单局对局的 Aggregate Root，继续拥有权威运行时状态、不变量、状态转换以及 `_authority_lock` / `_process_lock` / `_lock` 协调权。锁顺序固定为 authority → process → state；runtime lock 不进入存档，也不随 persisted-state replacement 复制。历史重写独占 authority gate，普通 live writer 通过同一原子 gate 在修改前拒绝，不能用分离的布尔检查制造 TOCTOU。玩家、战斗、回合和支付不会仅为缩短文件而拆成彼此独立的 aggregate。

@@ -9,6 +9,7 @@ from typing import Any
 
 from src.compat.rules_v1 import load_v1_template
 from src.content.rule_locale import materialize_rule
+from src.engine.currency import is_v2_currency_system, validate_currency_system
 
 
 class RuleBundleLoader:
@@ -27,8 +28,13 @@ class RuleBundleLoader:
         if int(raw.get("rule_schema_version", raw.get("content_schema_version", 1)) or 1) >= 2:
             if not str(raw.get("rule_id") or raw.get("id") or "").strip():
                 raise ValueError("V2 rule bundle requires rule_id")
-            return self._resolve_v2(source, raw)
-        return load_v1_template(source)
+            template = self._resolve_v2(source, raw)
+        else:
+            template = load_v1_template(source)
+        # 显式 V2 货币声明在加载边界 fail-fast：坏 schema 的规则/插件不允许进入运行时。
+        if is_v2_currency_system(template.get("currency_system")):
+            validate_currency_system(template.get("currency_system"))
+        return template
 
     def _resolve_v2(self, source: Path, raw: dict[str, Any], seen: set[Path] | None = None) -> dict[str, Any]:
         parent = raw.get("extends")

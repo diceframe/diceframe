@@ -558,6 +558,9 @@ class WebAPI:
             rules_dir=self._rules_dir,
             ruleset_registry=self._ruleset_registry,
             plugin_host=plugin_host,
+            has_games_using_rule=lambda rule_id: any(
+                instance.rule_id == rule_id for instance in self._reg.list_all()
+            ),
         )
         self._ruleset_builder_dependencies = ruleset_builder.RulesetBuilderDependencies(
             load_rule=self._load_rule_by_id,

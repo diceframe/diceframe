@@ -105,6 +105,15 @@
   "skill_mode": "point_buy",
   "skill_hint": "CoC 技能按 d100 阈值理解：普通成功≤技能值，困难成功≤一半，极难成功≤五分之一。玩家可新增自定义技能；开卡建议单技能不超过 85，技能点只计算超过基础值的部分。",
   "currency": "美元",
+  "currency_system": {
+    "schema_version": 2,
+    "base_unit": "cent",
+    "display_unit": "dollar",
+    "units": [
+      {"id": "dollar", "name": "美元", "symbol": "$", "rate": 100},
+      {"id": "cent", "name": "美分", "rate": 1}
+    ]
+  },
   "item_categories": {
     "equipment": [
       "左轮手枪",

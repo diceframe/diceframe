@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { CharacterItem, CharacterSheet, CharacterSkill, Player, RuleAttribute, RuleMeta } from '@/api/types'
 import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel, type RuleAttr } from '@/utils/ruleSchema'
+import { formatCurrencyAmount } from '@/utils/currency'
 import { buildSpecialStats, primaryResourceList } from '@/utils/play'
 import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
@@ -18,7 +19,12 @@ const cs = computed<CharacterSheet>(() => props.player?.character_sheet || {})
 const hp = computed(() => getResourceValue(cs.value, 'hp'))
 const hpPct = computed(() => Math.max(0, Math.min(100, hp.value.current / Math.max(1, hp.value.max) * 100)))
 const gold = computed(() => getCurrencyAmount(cs.value))
-const currencyName = computed(() => currencyLabel(props.ruleMeta))
+// canonical 金额统一经 formatter（25 美分 → $0.25），无 currency_system 时回退「label 金额」。
+const goldText = computed(() => formatCurrencyAmount(
+  gold.value,
+  props.ruleMeta?.currency_system || null,
+  currencyLabel(props.ruleMeta),
+))
 const attrs = computed(() => {
   const a = cs.value.attributes || {}
   const defs = ((props.ruleMeta?.attributes_schema as RuleAttribute[] | undefined) || props.ruleMeta?.attributes || [])
@@ -147,7 +153,7 @@ function submitLevelUp(attrs: Record<string, number>) {
         <h3>{{ player.character_name }}</h3>
         <span v-if="cs.deceased" class="tag tag-deceased">{{ t('unavailable') }}</span>
         <span v-if="cs.status" class="tag tag-warn">{{ statusLabel }}</span>
-        <span class="gold">{{ currencyName }} {{ gold }}</span>
+        <span class="gold">{{ goldText }}</span>
       </div>
     </div>
     <div class="character-vitals">

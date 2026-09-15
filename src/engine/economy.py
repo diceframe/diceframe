@@ -1,4 +1,10 @@
-"""Ruleset-neutral authoritative economy proposals and transactions."""
+"""Ruleset-neutral authoritative economy proposals and transactions.
+
+``amount`` / ``delta`` / ledger entries are canonical base-unit integers
+(see ``src.engine.currency``).  This engine never learns currency names,
+rule ids, or any real-world denomination; display conversion happens only
+at the CurrencyCodec / frontend boundary.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +20,10 @@ from src.engine.memory_outbox import (
     pending_memory_reversals,
 )
 
-MAX_ECONOMY_AMOUNT = 100_000
+# Technical limit in canonical base units.  With V2 currency systems the base
+# unit can be a minor denomination (e.g. CoC dollars → cents), so this cap must
+# stay far above any real-world display amount instead of shrinking 100×.
+MAX_ECONOMY_AMOUNT = 10_000_000
 # transfer/fee/all_contributors 已随 schema 8 退役：PAY/TEAM_PAY 标签契约
 # 在 schema 6 停用后，它们没有任何存活创建路径（见 migrations.instance）。
 ECONOMY_KINDS = {"payment", "purchase", "reward"}

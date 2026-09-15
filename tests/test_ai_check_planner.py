@@ -1156,3 +1156,82 @@ async def test_new_context_reaches_single_planner_call_without_changing_safety_n
     assert metadata["errors"] == []
     assert len(planned) == 1
     assert planned[0][1]["planner_source"] == "deterministic_safety_net"
+
+
+def make_currency_rule() -> RuleSystem:
+    """Currency V2 规则（美元/美分）：验证 amount 字符串 + unit 协议。"""
+
+    return RuleSystem({
+        "rule_id": "test_coc",
+        "name": "Test CoC",
+        "dice_system": "d20",
+        "currency": "美元",
+        "currency_system": {
+            "schema_version": 2,
+            "base_unit": "cent",
+            "display_unit": "dollar",
+            "units": [
+                {"id": "dollar", "name": "美元", "symbol": "$", "rate": 100},
+                {"id": "cent", "name": "美分", "rate": 1},
+            ],
+        },
+    })
+
+
+@pytest.mark.asyncio
+async def test_economy_offer_decimal_amount_with_canonical_unit() -> None:
+    """新协议：amount 是十进制字符串、unit 是 canonical unit id；服务端换算。"""
+
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买一瓶药水"}]
+    planned, metadata = await plan_round_checks(
+        instance, make_currency_rule(),
+        _client_returning({"checks": [], "economy_actions": [
+            {
+                "player": "p1", "type": "purchase", "target": "药水",
+                "amount": "0.25", "unit": "dollar", "price_source": "gm_narrated",
+            },
+            {
+                "player": "p1", "type": "purchase", "target": "火柴",
+                "amount": "25", "unit": "cent", "price_source": "player_stated",
+            },
+        ]}),
+    )
+    assert planned == []
+    assert metadata["errors"] == []
+    assert [offer["amount"] for offer in metadata["economy_offers"]] == [25, 25]
+
+
+@pytest.mark.asyncio
+async def test_economy_offer_unknown_unit_and_fractional_minor_rejected() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买点东西"}]
+    planned, metadata = await plan_round_checks(
+        instance, make_currency_rule(),
+        _client_returning({"checks": [], "economy_actions": [
+            {
+                "player": "p1", "type": "purchase", "target": "药水",
+                "amount": "1", "unit": "euro", "price_source": "gm_narrated",
+            },
+            {
+                "player": "p1", "type": "purchase", "target": "纽扣",
+                "amount": "0.001", "unit": "dollar", "price_source": "gm_narrated",
+            },
+        ]}),
+    )
+    assert planned == []
+    assert metadata["economy_offers"] == []
+    assert any("euro" in error for error in metadata["errors"])
+    assert any("无法精确转换" in error or "0.001" in error for error in metadata["errors"])
+
+
+def test_planner_context_lists_currency_units() -> None:
+    import json as _json
+
+    from src.commands.check_planner import _planner_context
+
+    instance = make_instance()
+    payload = _json.loads(_planner_context(instance, make_currency_rule()))
+    units = payload["ruleset"]["currency_units"]
+    assert {unit["id"] for unit in units} == {"dollar", "cent"}
+    assert payload["ruleset"]["currency_display_unit"] == "dollar"

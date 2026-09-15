@@ -59,25 +59,15 @@ def format_skills(skills: list) -> list[dict]:
 
 
 def format_currency(currency: dict | int | float | None, rule: RuleSystem | None = None) -> str:
-    """Format generic currency data using a rule currency_system."""
-    system = rule.currency_system if rule else {
-        "base_unit": "unit",
-        "units": [{"id": "unit", "name": "金币", "rate": 1}],
-    }
+    """Format generic currency data through the unified CurrencyCodec."""
+    from src.engine.currency import format_currency_amount, legacy_currency_spec
+
+    if rule is not None:
+        spec = rule.currency_spec
+    else:
+        spec = legacy_currency_spec("金币")
     amount = currency.get("amount", 0) if isinstance(currency, dict) else int(currency or 0)
-    units = sorted(system.get("units", []), key=lambda u: int(u.get("rate", 1) or 1), reverse=True)
-    if not units:
-        return str(amount)
-    parts: list[str] = []
-    remaining = int(amount)
-    for unit in units:
-        rate = max(1, int(unit.get("rate", 1) or 1))
-        count, remaining = divmod(remaining, rate)
-        if count:
-            parts.append(f"{count} {unit.get('name', unit.get('id', ''))}".strip())
-    if not parts:
-        parts.append(f"0 {units[-1].get('name', units[-1].get('id', ''))}".strip())
-    return " ".join(parts)
+    return format_currency_amount(int(amount), spec)
 
 
 def get_resource(character_sheet: dict, key: str) -> dict | None:

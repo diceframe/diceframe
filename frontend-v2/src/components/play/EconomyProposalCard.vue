@@ -3,11 +3,14 @@ import { computed } from 'vue'
 import { CashOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import type { PendingPayment } from '@/api/types'
+import type { CurrencySystem } from '@/utils/currency'
+import { formatCurrencyAmount } from '@/utils/currency'
 import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{
   proposal: PendingPayment
   currency: string
+  currencySystem?: CurrencySystem | null
   playerName: (uid?: string) => string
   dismissLabel: string
   help: string
@@ -21,21 +24,26 @@ const reward = computed(() => props.proposal.kind === 'reward')
 const tone = computed(() => reward.value ? 'reward' : 'payment')
 const title = computed(() => reward.value ? t('economyRewardTitle') : t('gmPaymentTitle'))
 const icon = computed(() => reward.value ? CheckmarkCircleOutline : CashOutline)
+// canonical 金额统一经 formatter 换算为显示金额（25 美分 → $0.25），
+// 组件内不自行 ÷100。
+const amountText = computed(() => formatCurrencyAmount(
+  props.proposal.amount ?? 0,
+  props.currencySystem,
+  props.currency,
+))
 const description = computed(() => {
   const p = props.proposal
   if (reward.value) {
     const values = {
       target: props.playerName(p.recipient_uid || p.uid),
-      amount: p.amount ?? 0,
-      currency: props.currency,
+      amount: amountText.value,
       reason: p.reason || '',
     }
     return t(props.solo ? 'economySoloRewardContent' : 'economyRewardContent', values)
   }
   return t('gmPaymentContent', {
     target: props.playerName(p.payer_uid || p.uid),
-    amount: p.amount ?? 0,
-    currency: props.currency,
+    amount: amountText.value,
     reason: p.reason ? t('gmPaymentReason', { reason: p.reason }) : '',
   })
 })

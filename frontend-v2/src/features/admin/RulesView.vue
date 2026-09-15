@@ -53,7 +53,7 @@ function toRuleAttr(attr: Partial<RuleAttributeEdit> = {}): RuleAttributeEdit {
 }
 
 function buildForm(template: RuleTemplate): RuleForm {
-  return {
+  const form: RuleForm = {
     rule_id: String(template.rule_id || ''),
     rule_name: String(template.rule_name || ''),
     description: String(template.description || ''),
@@ -65,10 +65,44 @@ function buildForm(template: RuleTemplate): RuleForm {
     max_skills: Number(template.max_skills || 0),
     skill_point_total: Number(template.skill_point_total || 0),
     currency: String(template.currency || t('goldCurrency')),
+    currency_has_minor: false,
+    currency_major: String(template.currency || t('goldCurrency')),
+    currency_minor: '',
+    currency_rate: 100,
+    currency_symbol: '',
+    currency_simple_editable: true,
     hp_formula: String(template.hp_formula || ''),
     gm_prompt_appendix: String(template.gm_prompt_appendix || ''),
     attributes: (template.attributes || []).map(toRuleAttr),
   }
+  const system = template.currency_system as {
+    schema_version?: number
+    base_unit?: string
+    display_unit?: string
+    units?: Array<{ id: string; name: string; symbol?: string; rate: number }>
+  } | undefined
+  if (system && system.schema_version === 2 && Array.isArray(system.units)) {
+    const units = system.units
+    if (units.length === 1) {
+      form.currency_has_minor = false
+      form.currency_major = String(units[0].name || form.currency_major)
+      form.currency_symbol = String(units[0].symbol || '')
+    } else if (units.length === 2) {
+      const display = units.find(u => u.id === system.display_unit) || units[0]
+      const base = units.find(u => u.id === system.base_unit)
+        || units.find(u => Number(u.rate) === 1)
+        || units[1]
+      form.currency_has_minor = true
+      form.currency_major = String(display.name || form.currency_major)
+      form.currency_symbol = String(display.symbol || '')
+      form.currency_minor = String(base.name || '')
+      form.currency_rate = Number(display.rate) || 100
+    } else {
+      // 多单位高级货币：简单模式不覆盖，交给高级 JSON。
+      form.currency_simple_editable = false
+    }
+  }
+  return form
 }
 
 function jsonTemplate(): RuleTemplate {
@@ -117,6 +151,25 @@ function applyFormToJson(): RuleTemplate {
   template.max_skills = Number(form.max_skills) || 0
   template.skill_point_total = Number(form.skill_point_total) || 0
   template.currency = form.currency || t('goldCurrency')
+  if (form.currency_simple_editable) {
+    const majorName = form.currency_major.trim() || form.currency || t('goldCurrency')
+    const minorName = form.currency_minor.trim()
+    if (form.currency_has_minor && minorName) {
+      const rate = Math.max(2, Math.round(Number(form.currency_rate) || 100))
+      const slug = (name: string, fallback: string) => (/^[a-z0-9_-]+$/i.test(name) ? name.toLowerCase() : fallback)
+      template.currency_system = {
+        schema_version: 2,
+        base_unit: slug(minorName, 'minor'),
+        display_unit: slug(majorName, 'major'),
+        units: [
+          { id: slug(majorName, 'major'), name: majorName, rate, ...(form.currency_symbol.trim() ? { symbol: form.currency_symbol.trim() } : {}) },
+          { id: slug(minorName, 'minor'), name: minorName, rate: 1 },
+        ],
+      }
+    } else {
+      delete template.currency_system
+    }
+  }
   template.hp_formula = form.hp_formula || ''
   template.gm_prompt_appendix = form.gm_prompt_appendix || ''
   template.attributes = form.attributes
@@ -276,7 +329,20 @@ async function deleteRule(rule: RuleSummary) {
           <label>{{ t('mechanics') }}<input v-model="ruleForm.mechanics"></label>
           <label>{{ t('rulesetLevel') }}<input v-model="ruleForm.ruleset_level"></label>
           <label>{{ t('attributePointTotal') }}<input type="number" v-model.number="ruleForm.attribute_points"></label>
-          <label>{{ t('currencyName') }}<input v-model="ruleForm.currency"></label>
+          <label>{{ t('currencyName') }}<input v-model="ruleForm.currency" :disabled="!ruleForm.currency_simple_editable"></label>
+          <template v-if="ruleForm.currency_simple_editable">
+            <label class="currency-toggle">
+              <input type="checkbox" v-model="ruleForm.currency_has_minor">
+              {{ t('currencyHasMinor') }}
+            </label>
+          </template>
+          <p v-else class="form-hint">{{ t('currencyAdvancedNote') }}</p>
+          <template v-if="ruleForm.currency_simple_editable && ruleForm.currency_has_minor">
+            <label>{{ t('currencyMajorUnit') }}<input v-model="ruleForm.currency_major" :placeholder="ruleForm.currency"></label>
+            <label>{{ t('currencyMinorUnit') }}<input v-model="ruleForm.currency_minor"></label>
+            <label>{{ t('currencyRateLabel') }}<input type="number" v-model.number="ruleForm.currency_rate" min="2"></label>
+            <label>{{ t('currencySymbolLabel') }}<input v-model="ruleForm.currency_symbol" maxlength="4"></label>
+          </template>
           <label>{{ t('maxSkills') }}<input type="number" v-model.number="ruleForm.max_skills"></label>
           <label>{{ t('skillPointTotal') }}<input type="number" v-model.number="ruleForm.skill_point_total"></label>
         </div>

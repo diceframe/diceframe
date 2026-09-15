@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
 import type { Player } from '@/api/types'
+import type { CurrencySystem } from '@/utils/currency'
+import { currencyInputStep, parseCurrencyInput } from '@/utils/currency'
 
 const { t } = useLocale()
 
@@ -11,6 +13,7 @@ const props = defineProps<{
   payerUid: string
   recipientUid: string
   busy?: boolean
+  currencySystem?: CurrencySystem | null
 }>()
 
 const emit = defineEmits<{
@@ -22,19 +25,21 @@ const emit = defineEmits<{
 // 不再依赖"值变化才触发"的 watch。
 const payerUid = ref(props.payerUid)
 const recipientUid = ref(props.recipientUid)
-const amount = ref(1)
+// 金额按展示单位输入（0.25 / 12.50），提交前经统一 parser 转为 canonical 整数。
+const amount = ref('1')
 const reason = ref('')
 const items = ref('')
 
 const normalizedItems = computed(() => items.value.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean))
-const canSubmit = computed(() => Boolean(payerUid.value) && amount.value >= 1)
+const canonicalAmount = computed(() => parseCurrencyInput(amount.value, props.currencySystem))
+const canSubmit = computed(() => Boolean(payerUid.value) && canonicalAmount.value !== null)
 
 function submit() {
   if (!canSubmit.value) return
   emit('submit', {
     payer_uid: payerUid.value,
     recipient_uid: recipientUid.value || payerUid.value,
-    amount: Math.trunc(amount.value),
+    amount: canonicalAmount.value as number,
     reason: reason.value.trim(),
     items: normalizedItems.value,
   })
@@ -58,7 +63,7 @@ function submit() {
       </label>
       <label>
         <span>{{ t('paymentAmount') }}</span>
-        <input v-model.number="amount" type="number" min="1" max="100000">
+        <input v-model="amount" type="text" inputmode="decimal" :step="currencyInputStep(currencySystem)">
       </label>
       <label>
         <span>{{ t('paymentReason') }}</span>

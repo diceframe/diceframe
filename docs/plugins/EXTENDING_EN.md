@@ -9,8 +9,9 @@ Every plugin starts with `plugin.json`. `schema_version`, `id`, `name`, `version
 1. Use `plugin_type: "content-pack"`; new packages should prefer `content_schema_version: 2` and typed locales.
 2. Declare relative paths for rules, world templates, characters, NPCs, items, spells, classes, or maps under `contributes`.
 3. Keep canonical IDs separate from display names. Locales translate display fields and never change identity or mechanics.
-4. Follow `plugins/examples/starter-content-v2/` and test content validation, locale fallback, and duplicate-ID rejection.
-5. Validate and package with:
+4. Declare rule currency through `currency_system` (`schema_version: 2`): `base_unit` is what the canonical integer counts (its rate must be 1), `display_unit` is the default display unit, and unit rates are positive integers. Loading/installing validates through `RuleBundleLoader` -> `validate_currency_system` and fails closed on bad declarations; rules carrying only a `currency` label keep legacy rate=1 semantics and are never reinterpreted by name. See `plugins/examples/starter-content-v2/content/rules/moonlight.json` for an example.
+5. Follow `plugins/examples/starter-content-v2/` and test content validation, locale fallback, and duplicate-ID rejection.
+6. Validate and package with:
 
 ```bash
 python scripts/package_plugin.py path/to/plugin

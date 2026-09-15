@@ -22,6 +22,7 @@ from src.content.worlds import localize_lorebook_entries
 from src.engine.language import localized_text
 from src.engine.health import record_health_event
 from src.engine.economy import (
+    MAX_ECONOMY_AMOUNT,
     complete_effect_group,
     queue_proposal,
     queue_purchase_offer,
@@ -209,8 +210,8 @@ async def create_payment_proposal(
         amount = int(amount)
     except (TypeError, ValueError):
         return {"ok": False, "error": "金额必须是整数"}
-    if not 0 < amount <= 100_000:
-        return {"ok": False, "error": "金额必须在 1 到 100000 之间"}
+    if not 0 < amount <= MAX_ECONOMY_AMOUNT:
+        return {"ok": False, "error": f"金额必须在 1 到 {MAX_ECONOMY_AMOUNT} 之间"}
     if payer_uid not in inst.players:
         return {"ok": False, "error": "付款角色不存在"}
     if recipient_uid not in inst.players:

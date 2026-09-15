@@ -9,8 +9,9 @@
 1. 使用 `plugin_type: "content-pack"`，新包优先使用 `content_schema_version: 2` 和 typed locale。
 2. 在 `contributes` 中声明 rules、world templates、characters、NPC、items、spells、classes 或 maps 的相对路径。
 3. canonical ID 与显示名分离；Locale 只翻译展示字段，不改 identity 和 mechanics。
-4. 参考 `plugins/examples/starter-content-v2/`，并为内容校验、locale fallback 和重复 ID 行为添加测试。
-5. 打包前运行：
+4. 规则货币结构用 `currency_system`（`schema_version: 2`）声明：`base_unit` 是 canonical 整数的计数单位（rate 必须为 1），`display_unit` 是默认展示单位，units 的 rate 为正整数。加载/安装时经 `RuleBundleLoader` → `validate_currency_system` 校验，非法声明直接失败；只有 `currency` 名称的旧规则按 legacy rate=1 兼容，不按名称猜单位。示例见 `plugins/examples/starter-content-v2/content/rules/moonlight.json`。
+5. 参考 `plugins/examples/starter-content-v2/`，并为内容校验、locale fallback 和重复 ID 行为添加测试。
+6. 打包前运行：
 
 ```bash
 python scripts/package_plugin.py path/to/plugin

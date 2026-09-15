@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.rules.rule_system import SUPPORTED_DICE_SYSTEMS, RuleSystem
 from src.rules.loader import RuleBundleLoader
+from src.engine.currency import (
+    CurrencySystemError,
+    is_v2_currency_system,
+    legacy_currency_spec,
+    validate_currency_system,
+)
 from src.engine.language import field_suffixes
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
 from src.rulesets.registry import RulesetRuntimeRegistry
@@ -27,6 +34,8 @@ class RuleDependencies:
     rules_dir: Path
     ruleset_registry: RulesetRuntimeRegistry = _LEGACY_SERVICE_REGISTRY
     plugin_host: Any | None = None
+    # composition root 注入：该规则当前是否被任何游戏实例使用（含已结束存档）。
+    has_games_using_rule: Callable[[str], bool] | None = None
 
 
 def _ruleset_runtime_metadata(
@@ -42,6 +51,46 @@ def _ruleset_runtime_metadata(
     """
 
     return dependencies.ruleset_registry.describe(template).to_dict()
+
+
+def _validate_currency_declaration(template: dict[str, Any]) -> str | None:
+    """Validate a rule template's explicit currency_system declaration.
+
+    Returns an error message, or None when the declaration is absent/valid.
+    """
+
+    raw = template.get("currency_system")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return "currency_system 必须是对象"
+    if is_v2_currency_system(raw):
+        try:
+            validate_currency_system(raw)
+        except CurrencySystemError as exc:
+            return f"currency_system 声明非法: {exc}"
+    return None
+
+
+def _currency_semantic_signature(template: dict[str, Any]) -> str:
+    """Numeric meaning of ``1 canonical amount``（与显示名称无关）。
+
+    legacy（含未声明 V2 的旧 currency_system）：1 amount = 1 个货币标签单位，
+    记为 ``legacy``。V2 的数值语义只由各单位相对 base 的 rate 结构决定——
+    改名/换 id（cent→fen）不改变存量整数的含义，不触发保护；rate 结构变化
+    （legacy → yuan/fen、加单位、改 rate）才会触发保护。
+    """
+
+    raw = template.get("currency_system")
+    if is_v2_currency_system(raw):
+        try:
+            spec = validate_currency_system(raw)
+        except CurrencySystemError:
+            return "invalid"
+        rates = ",".join(sorted(str(unit.rate) for unit in spec.units))
+        # 显式单单位 rate=1 与 legacy 数值等价（1 amount = 1 标签单位）。
+        return "legacy" if rates == "1" else f"v2|{rates}"
+    return "legacy"
 
 def is_valid_rule_id(rule_id: str) -> bool:
     return bool(_RULE_ID_RE.fullmatch((rule_id or "").strip()))
@@ -163,6 +212,10 @@ def save_custom_rule(
     template["source_rule_id"] = source_rule_id
     template["rule_version"] = str(data.get("rule_version") or template.get("rule_version", "1.1"))
 
+    currency_error = _validate_currency_declaration(template)
+    if currency_error:
+        return {"ok": False, "error": currency_error}
+
     dependencies.rules_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = target_path.with_suffix(".json.tmp")
     tmp_path.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -276,6 +329,24 @@ def update_custom_rule(
             combat_extension_from_template(template)
         except ValueError as exc:
             return {"ok": False, "error": f"combat 声明非法: {exc}"}
+
+    currency_error = _validate_currency_declaration(template)
+    if currency_error:
+        return {"ok": False, "error": currency_error}
+    # 已有游戏实例使用该规则时禁止修改 base_unit 数值语义：旧余额会被重新
+    # 解释（如 legacy 人民币改成 yuan/fen 后 100 元静默变成 1 元）。名称/
+    # 符号等显示字段仍可自由编辑。第一版不做在线迁移 UI，fail closed。
+    if _currency_semantic_signature(old_template) != _currency_semantic_signature(template):
+        has_games = dependencies.has_games_using_rule
+        if has_games is None or has_games(rule_id):
+            return {
+                "ok": False,
+                "error": (
+                    "currency_system 的 base_unit 语义发生变化。"
+                    "该规则可能已有游戏实例，直接修改会让已有余额被重新解释；"
+                    "请复制为新规则使用，或先结束相关对局"
+                ),
+            }
 
     template["rule_id"] = rule_id
     template["custom"] = True

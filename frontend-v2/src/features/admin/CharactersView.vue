@@ -24,6 +24,7 @@ import {
   isAutoHpRule, calcAutoHp, attrDisplayName,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
+import { currencyInputStep, formatCurrencyAmount, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterData extends CharacterListResponse { cards: CharacterCard[] }
 interface ResourceEdit { current: number; max: number }
@@ -34,6 +35,7 @@ interface CharacterEditForm {
   level: number
   hp: ResourceEdit
   gold: number
+  goldText: string
   attributes: Record<string, number>
   skills: CharacterSkill[]
   background: string
@@ -54,6 +56,7 @@ interface CardEditForm {
   skills: CharacterSkill[]
   background: string
   gold: number
+  goldText: string
   portrait?: CharacterPortrait | null
   rule_id?: string
 }
@@ -416,6 +419,7 @@ function openEdit(p: import('@/api/types').Player) {
     level: Number(cs.level || 1),
     hp: getResourceValue(cs, 'hp') as ResourceEdit,
     gold: getCurrencyAmount(cs),
+    goldText: formatCurrencyAmount(getCurrencyAmount(cs), ruleMeta.value.currency_system || null),
     attributes: attrs,
     skills: toSkillList(cs.skills),
     background: String(cs.background || ''),
@@ -458,7 +462,9 @@ async function saveCharacter() {
   busy.value = true
   try {
     const level = parseInt(String(e.level)) || 1
-    const gold = parseInt(String(e.gold)) || 0
+    const parsedGold = parseCurrencyInput(e.goldText, ruleMeta.value.currency_system || null, { allowZero: true })
+    if (parsedGold === null) throw new Error(t('invalidAmount'))
+    const gold = parsedGold
     const hpCurrent = parseInt(String(e.hp.current)) || 0
     const hpMax = parseInt(String(e.hp.max)) || 50
     const updates: UpdateCharacterPayload = {
@@ -531,6 +537,7 @@ function openCardEdit(c: CharacterCard) {
     skills: toSkillList(c.skills),
     background: c.background || '',
     gold: Number(c.gold ?? 30),
+    goldText: formatCurrencyAmount(Number(c.gold ?? 30), ruleMeta.value.currency_system || null),
     portrait: c.portrait ? { ...c.portrait } : undefined,
     rule_id: c.rule_id,
   }
@@ -559,7 +566,7 @@ async function saveCardEdit() {
       class: e.class.trim() || t('adventurer'),
       skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
       background: e.background.trim(),
-      gold: parseInt(String(e.gold)) || 0,
+      gold: parseCurrencyInput(e.goldText, ruleMeta.value.currency_system || null, { allowZero: true }) ?? 0,
       portrait: e.portrait ? { ...e.portrait } : null,
     }
     const r = await api<{ ok?: boolean; error?: string }>(`/character-cards/${encodeURIComponent(e.card_id)}`, { method: 'PUT', body: JSON.stringify(patch) })
@@ -805,7 +812,7 @@ async function onWizardSubmit(c: CharacterSheet) {
         </div>
       </label>
       <p v-if="autoHp" class="form-hint">{{ t('ruleSuggestedHp') }}: <strong>{{ autoHpValue }}</strong>{{ t('manualHpStillAllowed') }}</p>
-      <label>{{ currencyLabel(ruleMeta) }}<input type="number" v-model.number="edit.gold"></label>
+      <label>{{ currencyLabel(ruleMeta) }}<input type="text" inputmode="decimal" v-model="edit.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
       <label>{{ t('attributes') }} <span class="attr-points">{{ t('pointsRemaining', { points: attrPoints }) }}</span></label>
       <div class="attr-sliders">
         <div v-for="a in editRuleAttrs" :key="a.key" class="attr-row">
@@ -843,7 +850,7 @@ async function onWizardSubmit(c: CharacterSheet) {
       <label>{{ t('skills') }}</label>
       <SkillEditor v-model="editCard.skills" :pool="skillPool" :meta="ruleMeta" />
       <label>{{ t('background') }}<textarea rows="4" v-model="editCard.background"></textarea></label>
-      <label>{{ t('initialMoney') }}<input type="number" v-model.number="editCard.gold"></label>
+      <label>{{ t('initialMoney') }}<input type="text" inputmode="decimal" v-model="editCard.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
       <template #actions>
         <button @click="editCard = null">{{ t('cancel') }}</button>
         <button class="primary" :disabled="busy" @click="saveCardEdit">{{ t('saveAction') }}</button>

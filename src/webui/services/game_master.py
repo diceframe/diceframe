@@ -16,6 +16,13 @@ from src.engine.character_utils import (
     revive_character,
     wake_character,
 )
+from src.engine.currency import (
+    CurrencySystemError,
+    format_currency_amount,
+    legacy_currency_spec,
+    parse_currency_amount,
+)
+from src.engine.currency.models import CurrencySpec, CurrencyUnit
 from src.engine.game_instance import GameState
 from src.engine.health import record_health_event
 from src.rules.rule_system import RuleSystem
@@ -51,6 +58,9 @@ _GM_RESOURCE_ALIASES = {
     "热度": "heat",
 }
 
+# 泛化的“钱”称呼：始终解析为规则的展示单位，不做任何数值换算。
+_CURRENCY_GENERIC_ALIASES = ("金币", "金钱", "货币", "gold")
+
 
 @dataclass(frozen=True)
 class GameMasterDependencies:
@@ -84,6 +94,8 @@ def _resource_aliases_for_rule(rule: RuleSystem | None) -> dict[str, str]:
 def _resource_display_label(
     resource_key: str, matched_alias: str, rule: RuleSystem | None,
 ) -> str:
+    if resource_key == "currency" and rule:
+        return rule.currency_spec.display.name
     if rule:
         for spec in rule.resource_schema:
             if str(spec.get("key") or "") == resource_key:
@@ -93,6 +105,184 @@ def _resource_display_label(
     if resource_key == "currency":
         return "金币"
     return matched_alias
+
+
+def _currency_aliases_for_rule(
+    rule: RuleSystem | None,
+) -> tuple[CurrencySpec, dict[str, CurrencyUnit]]:
+    """GM 指令可用的货币单位别名 → CurrencyUnit（name/symbol/id + 泛化称呼）。"""
+
+    spec = rule.currency_spec if rule else legacy_currency_spec("")
+    aliases: dict[str, CurrencyUnit] = {}
+    for unit in spec.units:
+        for label in (unit.name, unit.symbol, unit.id):
+            key = str(label or "").strip().lower()
+            if key:
+                aliases.setdefault(key, unit)
+    for generic in _CURRENCY_GENERIC_ALIASES:
+        aliases.setdefault(generic, spec.display)
+    return spec, aliases
+
+
+def _parse_currency_delta(
+    match: re.Match[str],
+    *,
+    sign: int,
+    spec: CurrencySpec,
+    unit: CurrencyUnit,
+) -> int:
+    """把 GM 指令里的金额经 CurrencyCodec 换算为 canonical base-unit 整数。"""
+
+    raw_delta = match.groupdict().get("delta")
+    if raw_delta:
+        delta_sign = -1 if raw_delta.startswith("-") else 1
+        magnitude = raw_delta[1:]
+    else:
+        delta_sign = sign
+        magnitude = match.group("amount")
+    canonical = parse_currency_amount(magnitude, unit.id, spec)
+    return delta_sign * canonical
+
+
+def _parse_gm_resource_change(
+    instance: Any, command: str, rule: RuleSystem | None,
+) -> dict[str, Any] | None:
+    compact = re.sub(r"\s+", "", command).lower()
+    resource_aliases = _resource_aliases_for_rule(rule)
+    aliases = sorted(resource_aliases, key=len, reverse=True)
+    resource_group = "|".join(re.escape(alias) for alias in aliases)
+
+    # 货币走专属分支：金额允许小数（0.25 / 12.50），单位别名来自规则货币
+    # 结构（美元/美分/$/灵石……），换算统一经 CurrencyCodec，本层不做 ×100。
+    # 同时兼容两种语序：「增加0.25美元」（金额在前）与「加金币5」（单位在前）。
+    currency_spec, currency_aliases = _currency_aliases_for_rule(rule)
+    currency_group = "|".join(
+        re.escape(alias)
+        for alias in sorted(currency_aliases, key=len, reverse=True)
+    )
+    decimal_amount = r"\d+(?:\.\d+)?"
+    currency_patterns: tuple[tuple[re.Pattern[str], int], ...] = (
+        (re.compile(rf"^给(?P<target>.+?)(?:加|增加|恢复|补充|给予)(?P<amount>{decimal_amount})点?(?P<resource>{currency_group})$"), 1),
+        (re.compile(rf"^给(?P<target>.+?)(?:加|增加|恢复|补充|给予)(?P<resource>{currency_group})(?P<amount>{decimal_amount})点?$"), 1),
+        (re.compile(rf"^(?P<target>.+?)(?:的)?(?P<resource>{currency_group})(?P<delta>[+-]{decimal_amount})点?$"), 1),
+        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<amount>{decimal_amount})点?(?P<resource>{currency_group})$"), -1),
+        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<resource>{currency_group})(?P<amount>{decimal_amount})点?$"), -1),
+        (re.compile(rf"^(?:give|add)(?P<amount>{decimal_amount})(?P<resource>{currency_group})(?:to)?(?P<target>.+)$"), 1),
+        (re.compile(rf"^(?:remove|subtract)(?P<amount>{decimal_amount})(?P<resource>{currency_group})(?:from)?(?P<target>.+)$"), -1),
+    )
+
+    currency_match: re.Match[str] | None = None
+    currency_sign = 1
+    for pattern, candidate_sign in currency_patterns:
+        currency_match = pattern.fullmatch(compact)
+        if currency_match:
+            currency_sign = candidate_sign
+            break
+
+    match: re.Match[str] | None = None
+    sign = 1
+    delta = 0
+    unit: CurrencyUnit | None = None
+    if currency_match and currency_match.group("resource") in currency_aliases:
+        resource_alias = currency_match.group("resource")
+        unit = currency_aliases[resource_alias]
+        resource_key = "currency"
+        try:
+            delta = _parse_currency_delta(
+                currency_match, sign=currency_sign, spec=currency_spec, unit=unit,
+            )
+        except CurrencySystemError as exc:
+            return {"error": str(exc)}
+    else:
+        currency_match = None
+        generic_patterns: tuple[tuple[re.Pattern[str], int], ...] = (
+            (re.compile(rf"^给(?P<target>.+?)(?:加|增加|恢复|补充|给予)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), 1),
+            (re.compile(rf"^(?P<target>.+?)(?:的)?(?P<resource>{resource_group})(?P<delta>[+-]\d+)点?$"), 1),
+            (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), -1),
+            (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<amount>\d+)点?(?P<resource>{resource_group})$"), -1),
+            (re.compile(rf"^(?:give|add)(?P<amount>\d+)(?P<resource>{resource_group})(?:to)?(?P<target>.+)$"), 1),
+            (re.compile(rf"^(?:remove|subtract)(?P<amount>\d+)(?P<resource>{resource_group})(?:from)?(?P<target>.+)$"), -1),
+        )
+        for pattern, candidate_sign in generic_patterns:
+            match = pattern.fullmatch(compact)
+            if match:
+                sign = candidate_sign
+                break
+        if not match:
+            return None
+        resource_alias = match.group("resource")
+        resource_key = resource_aliases[resource_alias]
+        raw_delta = match.groupdict().get("delta")
+        delta = int(raw_delta) if raw_delta else sign * int(match.group("amount"))
+    if delta == 0:
+        return {"error": "修正值不能为 0"}
+
+    target_source = currency_match or match
+    user_id, error = _resolve_gm_command_target(
+        instance, target_source.group("target")
+    )
+    if error:
+        return {"error": error}
+    character_sheet = instance.get_character_sheet(user_id)
+    allowed_resources = {
+        "currency",
+        *(
+            str(spec.get("key") or "")
+            for spec in (rule.resource_schema if rule else [])
+        ),
+    }
+    if (
+        resource_key not in allowed_resources
+        and get_resource(character_sheet, resource_key) is None
+    ):
+        return {"error": f"当前规则没有资源：{resource_alias}"}
+    before_resource = (
+        None
+        if resource_key == "currency"
+        else get_resource(character_sheet, resource_key)
+    )
+    before = (
+        int(character_sheet.get("gold", 0) or 0)
+        if resource_key == "currency"
+        else int(
+            (before_resource or {}).get(
+                "current", character_sheet.get(resource_key, 0)
+            )
+            or 0
+        )
+    )
+    after = apply_resource_delta(character_sheet, resource_key, delta, rule)
+    actual_delta = after - before
+    revived = False
+    if resource_key == "hp" and after > 0 and character_sheet.get("deceased"):
+        character_sheet["deceased"] = False
+        character_sheet.pop("death_round", None)
+        revived = True
+    if resource_key == "hp" and after > 0:
+        wake_character(character_sheet)
+    result = {
+        "uid": user_id,
+        "character_name": (
+            instance.players.get(user_id, {}).get("character_name") or user_id
+        ),
+        "resource": resource_key,
+        "resource_label": _resource_display_label(
+            resource_key, resource_alias, rule
+        ),
+        "requested_delta": delta,
+        "actual_delta": actual_delta,
+        "before": before,
+        "after": after,
+        "revived": revived,
+    }
+    if currency_match and unit is not None:
+        # 小数货币只透出格式化后的显示金额，避免把 canonical base-unit
+        # 整数当成展示值（25 美分显示为 $0.25）。
+        result["resource_label"] = unit.name
+        result["display_before"] = format_currency_amount(before, currency_spec)
+        result["display_after"] = format_currency_amount(after, currency_spec)
+        result["display_delta"] = format_currency_amount(actual_delta, currency_spec)
+    return result
 
 
 def _resolve_gm_command_target(
@@ -145,93 +335,6 @@ def _resolve_gm_command_target(
     ]
     suffix = f"；可用角色：{'、'.join(names)}" if names else ""
     return None, f"找不到角色：{raw_target}{suffix}"
-
-
-def _parse_gm_resource_change(
-    instance: Any, command: str, rule: RuleSystem | None,
-) -> dict[str, Any] | None:
-    compact = re.sub(r"\s+", "", command).lower()
-    resource_aliases = _resource_aliases_for_rule(rule)
-    aliases = sorted(resource_aliases, key=len, reverse=True)
-    resource_group = "|".join(re.escape(alias) for alias in aliases)
-    patterns: tuple[tuple[re.Pattern[str], int], ...] = (
-        (re.compile(rf"^给(?P<target>.+?)(?:加|增加|恢复|补充|给予)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), 1),
-        (re.compile(rf"^(?P<target>.+?)(?:的)?(?P<resource>{resource_group})(?P<delta>[+-]\d+)点?$"), 1),
-        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<resource>{resource_group})(?P<amount>\d+)点?$"), -1),
-        (re.compile(rf"^(?:扣除|减少)(?P<target>.+?)(?P<amount>\d+)点?(?P<resource>{resource_group})$"), -1),
-        (re.compile(rf"^(?:give|add)(?P<amount>\d+)(?P<resource>{resource_group})(?:to)?(?P<target>.+)$"), 1),
-        (re.compile(rf"^(?:remove|subtract)(?P<amount>\d+)(?P<resource>{resource_group})(?:from)?(?P<target>.+)$"), -1),
-    )
-    match = None
-    sign = 1
-    for pattern, candidate_sign in patterns:
-        match = pattern.fullmatch(compact)
-        if match:
-            sign = candidate_sign
-            break
-    if not match:
-        return None
-
-    user_id, error = _resolve_gm_command_target(
-        instance, match.group("target")
-    )
-    if error:
-        return {"error": error}
-    resource_alias = match.group("resource")
-    resource_key = resource_aliases[resource_alias]
-    raw_delta = match.groupdict().get("delta")
-    delta = int(raw_delta) if raw_delta else sign * int(match.group("amount"))
-    if delta == 0:
-        return {"error": "修正值不能为 0"}
-
-    character_sheet = instance.get_character_sheet(user_id)
-    allowed_resources = {
-        "currency",
-        *(
-            str(spec.get("key") or "")
-            for spec in (rule.resource_schema if rule else [])
-        ),
-    }
-    if (
-        resource_key not in allowed_resources
-        and get_resource(character_sheet, resource_key) is None
-    ):
-        return {"error": f"当前规则没有资源：{resource_alias}"}
-    before_resource = get_resource(character_sheet, resource_key)
-    before = (
-        int(character_sheet.get("gold", 0) or 0)
-        if resource_key == "currency"
-        else int(
-            (before_resource or {}).get(
-                "current", character_sheet.get(resource_key, 0)
-            )
-            or 0
-        )
-    )
-    after = apply_resource_delta(character_sheet, resource_key, delta, rule)
-    actual_delta = after - before
-    revived = False
-    if resource_key == "hp" and after > 0 and character_sheet.get("deceased"):
-        character_sheet["deceased"] = False
-        character_sheet.pop("death_round", None)
-        revived = True
-    if resource_key == "hp" and after > 0:
-        wake_character(character_sheet)
-    return {
-        "uid": user_id,
-        "character_name": (
-            instance.players.get(user_id, {}).get("character_name") or user_id
-        ),
-        "resource": resource_key,
-        "resource_label": _resource_display_label(
-            resource_key, resource_alias, rule
-        ),
-        "requested_delta": delta,
-        "actual_delta": actual_delta,
-        "before": before,
-        "after": after,
-        "revived": revived,
-    }
 
 
 def _normalize_revive_method(raw: str) -> str:

@@ -196,11 +196,22 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                 ),
                             },
                             "amount": {
-                                "type": "integer",
-                                "minimum": 1,
+                                "type": "string",
+                                "pattern": "^[0-9]+(\\.[0-9]+)?$",
                                 "description": (
-                                    "The price a human stated in this round's text. Omit when nobody has "
-                                    "stated one; never infer, estimate, or invent a price yourself."
+                                    "The price a human stated in this round's text, as a decimal string in "
+                                    "that stated unit (e.g. \"0.25\" with unit \"dollar\", \"25\" with unit "
+                                    "\"cent\"). Never convert or exchange units yourself. Omit when nobody "
+                                    "has stated a price; never infer, estimate, or invent a price yourself."
+                                ),
+                            },
+                            "unit": {
+                                "type": "string",
+                                "description": (
+                                    "Canonical currency unit id from the ruleset's currency_units list, "
+                                    "matching the unit the human's stated amount was expressed in. "
+                                    "Use the display unit only when the human did not name a smaller "
+                                    "unit. The server converts to the canonical amount."
                                 ),
                             },
                             "quantity": {

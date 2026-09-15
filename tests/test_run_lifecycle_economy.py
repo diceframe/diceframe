@@ -389,7 +389,7 @@ def test_resolve_auto_reward_policy_precedence() -> None:
         game_policy={"mode": "nonsense"}, global_cap=200,
     ) == (True, 200)
     assert resolve_auto_reward_policy(
-        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 999999},
+        game_policy={"mode": "auto_small_cash", "auto_reward_cap": 99_999_999},
         global_cap=200,
     ) == (True, 200)
 

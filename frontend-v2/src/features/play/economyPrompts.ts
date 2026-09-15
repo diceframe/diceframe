@@ -1,4 +1,6 @@
 import type { PendingPayment } from '@/api/types'
+import type { CurrencySystem } from '@/utils/currency'
+import { parseCurrencyInput } from '@/utils/currency'
 
 /** Narrow client-side mirror of the server's fail-closed postpone policy. */
 export function isNonBlockingPersonalPurchase(proposal: PendingPayment): boolean {
@@ -54,11 +56,16 @@ export function buildRewardPolicySave(
   touched: boolean,
   mode: string,
   cap: string,
+  currencySystem?: CurrencySystem | null,
 ): { mode: string; auto_reward_cap: number | null } | null {
   if (!touched) return null
   const trimmed = String(cap || '').trim()
-  return {
-    mode,
-    auto_reward_cap: trimmed !== '' ? Number(trimmed) : null,
+  if (trimmed === '') return { mode, auto_reward_cap: null }
+  // 输入按展示单位理解（¥12.50 / "50 灵石" 均可），换算经统一 parser。
+  const leading = trimmed.match(/^\d+(?:\.\d+)?/)?.[0] || ''
+  const auto_reward_cap = leading ? parseCurrencyInput(leading, currencySystem) : null
+  if (auto_reward_cap === null) {
+    throw new Error('invalid auto_reward_cap amount')
   }
+  return { mode, auto_reward_cap }
 }

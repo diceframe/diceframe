@@ -13,11 +13,19 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from src.compat.dnd2024_adventure_bindings import apply_unreleased_adventure_binding_migration
+from src.engine.currency.migration import scale_game_state_payload_for_base_unit_change
 
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 11
+CURRENT_INSTANCE_SCHEMA_VERSION = 12
+
+# 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
+# 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
+# 才能保持同样的现实金额。这是唯一做 base_unit 语义迁移的内置规则；其它规则
+# （含从 CoC 复制的自定义规则）的 legacy 单位语义不变，数据不动。
+_BASE_UNIT_MIGRATION_RULES = {"freeform_coc"}
+_BASE_UNIT_MIGRATION_FACTOR = 100
 
 
 def _legacy_run_id(payload: Mapping[str, Any]) -> str:
@@ -214,6 +222,25 @@ def _migrate_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v11_to_v12(payload: dict[str, Any]) -> dict[str, Any]:
+    """Currency Model V2: scale canonical amounts for base-unit semantic changes.
+
+    Only the built-in ``freeform_coc`` rule changed base-unit semantics in this
+    release (1 amount = 1 美元 → 1 amount = 1 美分), so only saves bound to that
+    rule are scaled (×100), exactly once, gated by the schema version.  Saves
+    without a resolvable ``rule_id`` are left untouched: migration correctness
+    beats completeness and no amount is reinterpreted by guessing.  Legacy and
+    custom rules keep their rate=1 semantics, so their data never moves.
+    """
+    rule_id = str(payload.get("rule_id") or "").strip()
+    if rule_id in _BASE_UNIT_MIGRATION_RULES:
+        scale_game_state_payload_for_base_unit_change(
+            payload, _BASE_UNIT_MIGRATION_FACTOR,
+        )
+    payload["instance_schema_version"] = 12
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -251,6 +278,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 10:
         payload = _migrate_v10_to_v11(payload)
         version = 11
+    if version == 11:
+        payload = _migrate_v11_to_v12(payload)
+        version = 12
     payload["instance_schema_version"] = version
     return payload
 
