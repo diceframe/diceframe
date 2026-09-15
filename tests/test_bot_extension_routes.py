@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 
 import pytest
 
 from src.webui.routes import bot
 from src.webui.services import bot_extensions
+from src.bots.bridge_core import card_renderer
+
 
 
 class FakeApi:
@@ -133,6 +137,13 @@ class MaterializeApi:
         return self.extensions.bridge_card_path(name)
 
 
+requires_cjk_font = pytest.mark.skipif(
+    not any(Path(path).exists() for path in card_renderer._font_paths()),
+    reason="no CJK font installed on this host",
+)
+
+
+@requires_cjk_font
 def test_materialize_cards_turns_card_output_into_image(tmp_path):
     api = MaterializeApi(str(tmp_path))
     outputs = [
@@ -155,6 +166,26 @@ def test_materialize_cards_turns_card_output_into_image(tmp_path):
     # 渲染出的文件真实存在
     card_dir = tmp_path / "bot" / "cards"
     assert any(card_dir.glob("card_*.png"))
+
+
+def test_materialize_cards_degrades_to_card_without_cjk_font(tmp_path, monkeypatch):
+    """宿主没有 CJK 字体时：渲染明确失败，原 card 输出保留（渠道降级纯文本）。"""
+
+    api = MaterializeApi(str(tmp_path))
+    monkeypatch.setattr(card_renderer, "_font_paths", lambda: [])
+    outputs = [{
+        "type": "card",
+        "title": "DiceFrame 测试",
+        "subtitle": "机器人帮助",
+        "lines": ["GM 可以使用以下命令"],
+        "fallback_text": "DiceFrame 测试\n机器人帮助\nGM 可以使用以下命令",
+    }]
+
+    result = api.extensions.materialize_cards(outputs)
+
+    assert result == outputs
+    # 没有生成任何卡片 PNG（既不是方框图，也不是可发的图片输出）。
+    assert not list((tmp_path / "bot" / "cards").glob("card_*.png"))
 
 
 def test_materialize_cards_keeps_non_card_outputs_untouched(tmp_path):

@@ -46,6 +46,22 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/data /app/plugins /opt/diceframe-launcher /opt/diceframe-seed
 
+# Bot 卡片渲染需要真实 CJK 字形（src/bots/bridge_core/card_renderer.py 的
+# _font_paths()）。这里在构建期确认 apt 包把字体装在了被查找的路径上：包名或
+# 路径一旦变化就构建失败，而不是发布一个只能画出 □□□□ 的镜像。
+RUN for candidate in \
+        /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc \
+        /usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf \
+        /usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc \
+        /usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc; do \
+        if [ -f "$candidate" ]; then found="$candidate"; break; fi; \
+    done; \
+    if [ -z "$found" ]; then \
+        echo "fonts-noto-cjk installed but no expected CJK font path exists" >&2; \
+        exit 1; \
+    fi; \
+    echo "CJK font present: $found"
+
 COPY src/docker_launcher/ /opt/diceframe-launcher/
 
 WORKDIR /app

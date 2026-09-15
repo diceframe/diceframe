@@ -3,45 +3,102 @@
 Renders a title/subtitle/lines card to a PNG, using Pillow when available and
 falling back to system fonts. Callers should treat send failure as a
 degradation path and continue with plain text.
+
+卡面文本是中文为主的展示文本，因此字体解析必须拿到**真正含 CJK 字形**的
+字体：找不到就明确失败（由调用方降级为纯文本），绝不静默使用只含拉丁字形
+的默认字体生成满屏 ``□□□□`` 的图片。
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from pathlib import Path
 from typing import Iterable
 
 
+logger = logging.getLogger("trpg.bridge")
+
 BRAND_NAME = "DiceFrame"
 BRAND_SLOGAN = "把一句话，掷成冒险"
 BRAND_FOOTER = f"{BRAND_NAME} · {BRAND_SLOGAN}"
 
+# 无 CJK 字体时每次渲染都会失败，warning 只记一次，避免刷日志。
+_CJK_FONT_WARNING_EMITTED = False
+
 
 def _font_paths() -> list[str]:
+    """Candidate CJK font paths (Windows / Linux / macOS), most preferred first."""
+
     return [
         r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\msyh.ttf",
         r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
         "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
     ]
 
 
+def _font_supports_cjk(font) -> bool:
+    """Whether ``font`` really draws CJK glyphs instead of ``.notdef`` boxes.
+
+    只检查 ``getmask().getbbox()`` 不够：只含拉丁字形的字体（包括 Pillow 的
+    默认字体）会为中文画出 .notdef 方框，bbox 依然非空。这里再比较同长度
+    中文与私用区码点的位图——只含拉丁字形时两者完全相同（都是方框），
+    真正含 CJK 字形的字体则不同。
+    """
+
+    try:
+        cjk_mask = font.getmask("中文测试")
+        if cjk_mask.getbbox() is None:
+            return False
+        return bytes(cjk_mask) != bytes(font.getmask("\ue003\ue003\ue003\ue003"))
+    except Exception:
+        return False
+
+
 def _load_font(size: int):
+    """Load a CJK-capable font at ``size``.
+
+    Raises :class:`RuntimeError` when no usable CJK font exists on this host;
+    callers already treat card rendering as a degradation path (plain text).
+    """
+
     from PIL import ImageFont
 
     for path in _font_paths():
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size=size)
-            except Exception:
-                continue
-    # Pillow's scalable bundled fallback keeps measurements close to the
-    # requested UI size even when the host has no CJK font installed.
-    return ImageFont.load_default(size=size)
+        if not Path(path).exists():
+            continue
+        try:
+            font = ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+        if _font_supports_cjk(font):
+            logger.debug("Bot card font loaded: %s", path)
+            return font
+
+    global _CJK_FONT_WARNING_EMITTED
+    if not _CJK_FONT_WARNING_EMITTED:
+        _CJK_FONT_WARNING_EMITTED = True
+        logger.warning(
+            "No usable CJK font found for bot card rendering; "
+            "install a CJK font (e.g. fonts-noto-cjk on Linux)",
+        )
+    # 绝不回退到 Pillow 默认字体：它不含 CJK 字形，会渲染出满屏 □□□□。
+    raise RuntimeError("No usable CJK font found for bot card rendering")
 
 
 def render_card_png(

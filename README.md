@@ -179,6 +179,8 @@ DiceFrame 提供独立的 Android 客户端，源码在 [diceframe-mobile](https
 
 DiceFrame Bot API Token 由宿主自动生成并注入，内置 QQ / NapCat 无需填写。外部 MaiBot Bridge 等适配器可在“管理 → 设置 → Bot API”复制服务地址和 Token。
 
+Bot 图片卡片需要系统提供中文字体：Windows 与 Docker 镜像（已内置 `fonts-noto-cjk`）开箱可用；直接在 Linux 主机上运行 `python web_server.py` 时请自行安装 CJK 字体（如 Debian/Ubuntu 的 `fonts-noto-cjk`），否则卡片渲染会失败并自动降级为纯文本消息。
+
 Bot 会跟随绑定对局的语言显示帮助和主要操作提示；中文与英文对局都可直接使用对应语言的命令。
 
 群聊里常用命令：
