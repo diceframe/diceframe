@@ -52,6 +52,50 @@ def _font_paths() -> list[str]:
     ]
 
 
+# 发行版把 CJK 字体装到别的目录时，显式路径表会全部落空；这里再按文件名
+# 扫一遍标准字体根目录兜底（只认名字带 CJK 特征的字体，保持可预测且廉价）。
+_FONT_ROOTS = (
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+    "/System/Library/Fonts",
+    "/Library/Fonts",
+)
+_CJK_NAME_HINTS = ("cjk", "noto", "wqy", "hei", "song", "ming", "kai", "yahei", "pingfang", "sourcehan", "hanazono")
+
+
+def _scan_font_files() -> list[str]:
+    """Name-filtered scan of standard font roots (deterministic order)."""
+
+    found: list[str] = []
+    for root in _FONT_ROOTS:
+        base = Path(root)
+        if not base.is_dir():
+            continue
+        for pattern in ("**/*.ttc", "**/*.otf", "**/*.ttf"):
+            try:
+                candidates = sorted(base.glob(pattern))
+            except OSError:
+                continue
+            for candidate in candidates:
+                name = candidate.name.casefold()
+                if any(hint in name for hint in _CJK_NAME_HINTS):
+                    found.append(str(candidate))
+    return found
+
+
+def _cjk_font_candidates() -> list[str]:
+    """Font candidates tried by :func:`_load_font` (explicit paths first, then scan).
+
+    Single seam for tests/hosts that need deterministic font resolution.
+    """
+
+    ordered: list[str] = []
+    for path in [*_font_paths(), *_scan_font_files()]:
+        if path not in ordered:
+            ordered.append(path)
+    return ordered
+
+
 def _font_supports_cjk(font) -> bool:
     """Whether ``font`` really draws CJK glyphs instead of ``.notdef`` boxes.
 
@@ -79,7 +123,7 @@ def _load_font(size: int):
 
     from PIL import ImageFont
 
-    for path in _font_paths():
+    for path in _cjk_font_candidates():
         if not Path(path).exists():
             continue
         try:

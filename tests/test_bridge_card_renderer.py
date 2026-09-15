@@ -9,8 +9,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from src.bots.bridge_core import card_renderer
 from src.bots.bridge_core.card_renderer import (
+    _cjk_font_candidates,
     _fit_by_pixel,
-    _font_paths,
     _font_supports_cjk,
     _load_font,
     _text_width,
@@ -21,12 +21,13 @@ from src.bots.bridge_core.card_renderer import (
 
 # 这些断言要求宿主机存在 CJK 字体（Windows 自带；Docker 镜像装了 fonts-noto-cjk）；
 # 纯开发容器没有字体时跳过，而不是让整套测试失败。
-CJK_FONT_AVAILABLE = any(Path(path).exists() for path in _font_paths())
+CJK_FONT_AVAILABLE = any(Path(path).exists() for path in _cjk_font_candidates())
 requires_cjk_font = pytest.mark.skipif(
     not CJK_FONT_AVAILABLE, reason="no CJK font installed on this host",
 )
 
 
+@requires_cjk_font
 def test_wrapping_accounts_for_first_line_indent():
     font = _load_font(21)
     image = Image.new("RGB", (10, 10))
@@ -114,7 +115,7 @@ def test_load_font_returns_cjk_capable_font() -> None:
 
 
 def test_load_font_without_cjk_font_raises(monkeypatch) -> None:
-    monkeypatch.setattr(card_renderer, "_font_paths", lambda: [])
+    monkeypatch.setattr(card_renderer, "_cjk_font_candidates", lambda: [])
     with pytest.raises(RuntimeError, match="No usable CJK font"):
         _load_font(20)
 
@@ -125,7 +126,7 @@ def test_load_font_rejects_latin_only_font_file(tmp_path, monkeypatch) -> None:
     latin_only = ImageFont.load_default(size=20)
     candidate = tmp_path / "latin-only.ttf"
     candidate.write_bytes(b"placeholder")
-    monkeypatch.setattr(card_renderer, "_font_paths", lambda: [str(candidate)])
+    monkeypatch.setattr(card_renderer, "_cjk_font_candidates", lambda: [str(candidate)])
     monkeypatch.setattr(ImageFont, "truetype", lambda path, size=20: latin_only)
     with pytest.raises(RuntimeError, match="No usable CJK font"):
         _load_font(20)
@@ -134,7 +135,7 @@ def test_load_font_rejects_latin_only_font_file(tmp_path, monkeypatch) -> None:
 def test_render_card_png_propagates_missing_font_error(tmp_path, monkeypatch) -> None:
     """渲染器不得吞掉字体错误：上层据此降级为纯文本，而不是发方框图。"""
 
-    monkeypatch.setattr(card_renderer, "_font_paths", lambda: [])
+    monkeypatch.setattr(card_renderer, "_cjk_font_candidates", lambda: [])
     with pytest.raises(RuntimeError, match="No usable CJK font"):
         render_card_png(tmp_path, title="DiceFrame 测试", subtitle="机器人帮助")
 
@@ -152,3 +153,12 @@ def test_render_card_png_chinese_smoke(tmp_path) -> None:
     assert path.stat().st_size > 0
     with Image.open(path) as image:
         assert image.size[0] > 0 and image.size[1] > 0
+
+
+def test_font_candidates_prefer_explicit_paths_and_dedupe(monkeypatch) -> None:
+    """候选集 = 显式路径（优先）+ 系统扫描兜底，且不重复。"""
+
+    monkeypatch.setattr(card_renderer, "_font_paths", lambda: ["/a.ttc", "/b.ttc"])
+    monkeypatch.setattr(card_renderer, "_scan_font_files", lambda: ["/b.ttc", "/c.ttc"])
+
+    assert _cjk_font_candidates() == ["/a.ttc", "/b.ttc", "/c.ttc"]

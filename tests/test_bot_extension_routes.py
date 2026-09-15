@@ -10,6 +10,19 @@ from src.webui.routes import bot
 from src.webui.services import bot_extensions
 from src.bots.bridge_core import card_renderer
 
+# 卡片文件名与渲染器一致：card_<32 位十六进制>.png
+_CARD_NAME = "card_" + "a" * 32 + ".png"
+
+
+def _write_card_file(tmp_path):
+    """直接放一张卡片文件，用于与字体无关的路径/路由测试。"""
+
+    card_dir = tmp_path / "bot" / "cards"
+    card_dir.mkdir(parents=True, exist_ok=True)
+    path = card_dir / _CARD_NAME
+    path.write_bytes(b"png-stub")
+    return path
+
 
 
 class FakeApi:
@@ -138,7 +151,7 @@ class MaterializeApi:
 
 
 requires_cjk_font = pytest.mark.skipif(
-    not any(Path(path).exists() for path in card_renderer._font_paths()),
+    not any(Path(path).exists() for path in card_renderer._cjk_font_candidates()),
     reason="no CJK font installed on this host",
 )
 
@@ -172,7 +185,7 @@ def test_materialize_cards_degrades_to_card_without_cjk_font(tmp_path, monkeypat
     """宿主没有 CJK 字体时：渲染明确失败，原 card 输出保留（渠道降级纯文本）。"""
 
     api = MaterializeApi(str(tmp_path))
-    monkeypatch.setattr(card_renderer, "_font_paths", lambda: [])
+    monkeypatch.setattr(card_renderer, "_cjk_font_candidates", lambda: [])
     outputs = [{
         "type": "card",
         "title": "DiceFrame 测试",
@@ -210,43 +223,28 @@ def test_bridge_card_path_rejects_bad_names(tmp_path):
 
 
 def test_bridge_card_path_serves_rendered_file(tmp_path):
+    """路径解析与渲染字体无关：直接放置卡片文件即可覆盖。"""
+
     api = MaterializeApi(str(tmp_path))
-    # 先物化产生一张卡
-    api.extensions.materialize_cards([{
-        "type": "card",
-        "title": "T",
-        "subtitle": "S",
-        "lines": ["L"],
-        "fallback_text": "",
-    }])
-    card_dir = tmp_path / "bot" / "cards"
-    files = list(card_dir.glob("card_*.png"))
-    assert files, "物化应生成卡片文件"
-    path = api.extensions.bridge_card_path(files[0].name)
-    assert path == files[0].resolve()
+    card_file = _write_card_file(tmp_path)
+
+    path = api.extensions.bridge_card_path(card_file.name)
+
+    assert path == card_file.resolve()
 
 
 @pytest.mark.asyncio
 async def test_bridge_card_asset_route_returns_image(tmp_path):
     api = MaterializeApi(str(tmp_path))
-    api.extensions.materialize_cards([{
-        "type": "card",
-        "title": "T",
-        "subtitle": "S",
-        "lines": ["L"],
-        "fallback_text": "",
-    }])
-    card_dir = tmp_path / "bot" / "cards"
-    files = list(card_dir.glob("card_*.png"))
-    assert files
+    card_file = _write_card_file(tmp_path)
 
-    request = FakeRequest(api, match_info={"name": files[0].name})
+    request = FakeRequest(api, match_info={"name": card_file.name})
     response = await bot.api_bridge_card_asset(request)
 
     assert response.status == 200
     # FileResponse 未 prepare 时 body_length 为 0，验证底层文件路径指向渲染产物且非空
     served = response._path
-    assert served == files[0].resolve()
+    assert served == card_file.resolve()
     assert served.stat().st_size > 0
     assert response.headers.get("Cache-Control") == "no-store"
     assert response.headers.get("X-Content-Type-Options") == "nosniff"

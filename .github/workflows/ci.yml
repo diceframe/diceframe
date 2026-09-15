@@ -36,6 +36,11 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      - name: Install CJK font for bot card rendering
+        # Bot 卡片渲染要求真实 CJK 字形（与 Docker 镜像一致）；测试环境没有
+        # 字体时相关用例会 skip，装了字体才能在 CI 真正覆盖中文渲染路径。
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
       - name: Lint with ruff
         run: python -m ruff check src/
 
