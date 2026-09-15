@@ -14,17 +14,18 @@ __all__ = ["migrate_legacy_character_sheet", "normalize_character_sheet", "norma
 MAX_SKILL_EFFECT_CHARS = 500
 
 
-def _skill_row(skill: Any) -> dict[str, Any]:
+def _skill_row(skill: Any) -> dict[str, Any] | None:
     """Normalize one skill while preserving the optional ``effect`` text.
 
-    字符串技能与旧对象技能继续归一化为 ``{name, value}``；只有确有非空
-    ``effect`` 时才写入该字段（旧卡不凭空长出空字段）。
+    字符串技能与旧对象技能继续归一化为 ``{name, value}``；非法条目返回
+    ``None`` 由调用方跳过（不凭空生成 ``{"name": "", "value": 20}``）；
+    只有确有非空 ``effect`` 时才写入该字段（旧卡不凭空长出空字段）。
     """
 
     if isinstance(skill, str):
         return {"name": skill, "value": 20}
     if not isinstance(skill, dict):
-        return {"name": "", "value": 20}
+        return None
     row: dict[str, Any] = {
         "name": skill.get("name", ""),
         "value": skill.get("value", 20),
@@ -130,9 +131,12 @@ def normalize_character_sheet(
         currency["amount"] = int(character_sheet.get("gold", 0) or 0)
     else:
         character_sheet["gold"] = int(currency.get("amount", 0) or 0)
-    character_sheet["skills"] = [
-        _skill_row(skill) for skill in character_sheet.get("skills", [])
-    ]
+    skills: list[dict[str, Any]] = []
+    for skill in character_sheet.get("skills", []):
+        row = _skill_row(skill)
+        if row is not None:
+            skills.append(row)
+    character_sheet["skills"] = skills
     return character_sheet
 
 

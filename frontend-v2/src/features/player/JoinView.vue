@@ -9,6 +9,7 @@ import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ru
 import { useLocale, type Locale } from '@/composables/useLocale'
 import { useConfirm } from '@/composables/useConfirm'
 import { characterCardNeedsConversion, characterCardRuleName } from '@/utils/characterCards'
+import { joinSkillsPayload } from '@/features/player/joinSkills'
 import { activePeerGameClient } from '@/peer/game/bridge'
 import { usePeerSessionStore } from '@/peer/store/peerSession'
 import { friendlyPeerDetail } from '@/features/peer/friendlyDetail'
@@ -281,16 +282,7 @@ async function create() {
     const payload = {
       ...form.value,
       hp: form.value.hp === '' ? undefined : Number(form.value.hp),
-      skills: form.value.skills
-        .filter(s => s.name.trim())
-        .map(s => {
-          const row: JoinSkill = { name: s.name.trim(), value: s.value }
-          const effect = String(s.effect || '').trim().slice(0, 500)
-          if (effect) row.effect = effect
-          return row
-        })
-        .filter(s => s.name.trim())
-        .map(s => ({ name: s.name.trim(), value: s.value === '' ? undefined : Number(s.value) })),
+      skills: joinSkillsPayload(form.value.skills),
       join_as_new: true,
     }
     const r = await api<PlayerCreateResponse>(`/games/${encodeURIComponent(gameKey.value)}/players`, { method: 'POST', body: JSON.stringify(payload) })

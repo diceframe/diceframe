@@ -87,6 +87,18 @@ def test_clearing_effect_is_not_written_as_empty_string() -> None:
     assert "effect" not in sheet["skills"][0]
 
 
+def test_invalid_skill_entries_are_skipped_not_blanked() -> None:
+    """非法技能条目直接跳过，不凭空生成 {name:"", value:20}（旧兼容语义）。"""
+
+    sheet = normalize_character_sheet({
+        "skills": [None, 42, {"name": "火焰球", "value": 80}, [], "侦查"],
+    })
+    assert sheet["skills"] == [
+        {"name": "火焰球", "value": 80},
+        {"name": "侦查", "value": 20},
+    ]
+
+
 # ---------- Planner context：只给当前行动命中的技能附 effect ----------
 
 def _skills_instance(*, action: str) -> GameInstance:
@@ -120,6 +132,24 @@ def test_planner_context_attaches_effect_only_for_matching_skill() -> None:
 def test_planner_context_without_skill_mention_carries_no_effect() -> None:
     skills = _context_skills(_skills_instance(action="我环顾四周，观察房间"))
     assert skills == [{"name": "火焰球", "value": 80}, {"name": "急救", "value": 85}]
+
+
+def test_planner_context_carries_effect_for_selected_skill() -> None:
+    """玩家显式选中技能（selected_skill）时，action 文本没写技能名也要带 effect。"""
+
+    instance = _skills_instance(action="我攻击那个怪物")
+    instance.action_queue[0]["selected_skill"] = "火焰球"
+    skills = _context_skills(instance)
+    assert skills[0] == {"name": "火焰球", "value": 80, "effect": "向目标发射火焰弹。"}
+    assert skills[1] == {"name": "急救", "value": 85}
+
+
+def test_selected_skill_does_not_attach_effects_to_other_skills() -> None:
+    instance = _skills_instance(action="我攻击那个怪物")
+    instance.action_queue[0]["selected_skill"] = "急救"
+    skills = _context_skills(instance)
+    assert skills[0] == {"name": "火焰球", "value": 80}
+    assert skills[1] == {"name": "急救", "value": 85, "effect": "处理伤口。"}
 
 
 def test_planner_context_effect_is_length_capped() -> None:
