@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.engine.currency import CurrencySystemError, validate_currency_system
+from src.engine.currency import CurrencySystemError, validate_declared_currency_system
 from src.rules.rule_system import RuleSystem  # noqa: E402
 
 SCAN_GLOBS = [
@@ -122,11 +122,13 @@ def audit_file(path: Path) -> tuple[list[str], list[str]]:
     if not str(raw.get("rule_id") or "").strip():
         return [f"{rel}: 缺少 rule_id"], []
 
-    # Currency V2 声明属于 hard error：加载边界同样 fail-fast，这里独立报告
-    # 具体原因（base_unit 缺失 / rate 非法 / id 重复等），方便内容作者修复。
-    if raw.get("currency_system") is not None:
+    # 显式声明版本的货币 schema 属于 hard error：加载边界同样 fail-fast，
+    # 这里独立报告具体原因（版本非法 / base_unit 缺失 / rate 非法 / id 重复等），
+    # 方便内容作者修复；无版本键的旧规则继续按 legacy 兼容，不误伤。
+    declared_system = raw.get("currency_system")
+    if declared_system is not None:
         try:
-            validate_currency_system(raw.get("currency_system"))
+            validate_declared_currency_system(declared_system)
         except CurrencySystemError as exc:
             errors.append(f"{rel}: currency_system 非法: {exc}")
 

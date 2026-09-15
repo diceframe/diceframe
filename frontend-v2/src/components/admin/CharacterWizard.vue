@@ -13,7 +13,7 @@ import {
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
 import type { CurrencySystem } from '@/utils/currency'
-import { currencyInputStep, formatCurrencyAmount, parseCurrencyInput } from '@/utils/currency'
+import { currencyAmountToInputText, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterSubmit extends CharacterSheet { character_name: string }
 
@@ -162,7 +162,7 @@ function applyCharacter(c: CharacterSheet) {
   if (c.background) background.value = c.background
   if (c.currency?.amount !== undefined) gold.value = Number(c.currency.amount) || 0
   else if (c.gold !== undefined) gold.value = Number(c.gold) || 0
-  goldInput.value = formatCurrencyAmount(gold.value, currencySystem.value)
+  goldInput.value = currencyAmountToInputText(gold.value, currencySystem.value)
 }
 
 watch(goldInput, (text) => {

@@ -14,9 +14,11 @@ from src.rules.rule_system import SUPPORTED_DICE_SYSTEMS, RuleSystem
 from src.rules.loader import RuleBundleLoader
 from src.engine.currency import (
     CurrencySystemError,
+    declares_currency_schema,
     is_v2_currency_system,
     legacy_currency_spec,
     validate_currency_system,
+    validate_declared_currency_system,
 )
 from src.engine.language import field_suffixes
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
@@ -64,11 +66,10 @@ def _validate_currency_declaration(template: dict[str, Any]) -> str | None:
         return None
     if not isinstance(raw, dict):
         return "currency_system 必须是对象"
-    if is_v2_currency_system(raw):
-        try:
-            validate_currency_system(raw)
-        except CurrencySystemError as exc:
-            return f"currency_system 声明非法: {exc}"
+    try:
+        validate_declared_currency_system(raw)
+    except CurrencySystemError as exc:
+        return f"currency_system 声明非法: {exc}"
     return None
 
 

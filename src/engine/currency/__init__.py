@@ -9,15 +9,19 @@ from src.engine.currency.codec import format_currency_amount, parse_currency_amo
 from src.engine.currency.models import CurrencySpec, CurrencyUnit
 from src.engine.currency.validation import (
     CurrencySystemError,
+    declares_currency_schema,
     is_v2_currency_system,
     legacy_currency_spec,
     validate_currency_system,
+    validate_declared_currency_system,
 )
 
 __all__ = [
     "CurrencySpec",
     "CurrencySystemError",
     "CurrencyUnit",
+    "declares_currency_schema",
+    "validate_declared_currency_system",
     "format_currency_amount",
     "is_v2_currency_system",
     "legacy_currency_spec",

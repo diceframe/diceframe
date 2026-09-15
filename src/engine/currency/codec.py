@@ -81,6 +81,8 @@ def format_currency_amount(amount: int, spec: CurrencySpec) -> str:
     """Format one canonical base-unit integer for display.
 
     例如：25 cent → ``$0.25``；1250 fen → ``¥12.50``；25 灵石 → ``25 灵石``。
+    display.rate 无法用有限十进制表示（如 rate=3）时，不做小数近似，
+    始终按单位面额贪心分解，剩余部分以 base_unit 显示（1 → ``1 铜币``）。
     """
 
     if isinstance(amount, bool) or not isinstance(amount, int):
@@ -94,7 +96,8 @@ def format_currency_amount(amount: int, spec: CurrencySpec) -> str:
             quantum = Decimal(10) ** -decimals
             text = str((Decimal(value) / Decimal(display.rate)).quantize(quantum))
             return sign + _format_with_symbol(display, text)
-    # display 即 base（或 rate 无法精确十进制表示）：按单位面额贪心分解。
+    # display 即 base（或 rate 无法精确十进制表示）：按单位面额贪心分解，
+    # 剩余（含 value 小于最小高面额的情形）一律落在 base_unit 上。
     larger = sorted(
         (unit for unit in spec.units if unit.rate > 1 and unit.rate <= value),
         key=lambda unit: unit.rate,
@@ -110,4 +113,7 @@ def format_currency_amount(amount: int, spec: CurrencySpec) -> str:
         if remaining or not parts:
             parts.append(f"{remaining} {spec.base.name}")
         return sign + " ".join(parts)
-    return sign + _format_with_symbol(display, f"{value}")
+    if display.rate == 1:
+        return sign + _format_with_symbol(display, f"{value}")
+    # value 不足以兑任何高面额单位：以 base_unit 显示，绝不冒充高面额单位。
+    return sign + _format_with_symbol(spec.base, f"{value}")

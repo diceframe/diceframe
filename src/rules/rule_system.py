@@ -11,10 +11,10 @@ from pathlib import Path
 
 from src.engine.currency import (
     CurrencySpec,
-    CurrencySystemError,
     is_v2_currency_system,
     legacy_currency_spec,
     validate_currency_system,
+    validate_declared_currency_system,
 )
 from src.engine.language import (
     DEFAULT_LANGUAGE,
@@ -146,9 +146,9 @@ class RuleSystem:
         if self._dice_system not in SUPPORTED_DICE_SYSTEMS:
             supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
             raise ValueError(f"不支持的检定骰制: {self._dice_system}（当前支持 {supported}）")
-        # V2 货币声明在构造时 fail-fast：坏 schema 的规则不允许进入运行时。
-        if is_v2_currency_system(template.get("currency_system")):
-            validate_currency_system(template.get("currency_system"))
+        # 显式声明版本的货币 schema（含非法/未支持版本）在构造时 fail-fast；
+        # 无版本键的旧规则与显式 legacy（schema_version: 1）继续按 legacy 处理。
+        validate_declared_currency_system(template.get("currency_system"))
 
     def mechanics_snapshot(self) -> str:
         """Return a locale-invariant representation of deterministic mechanics."""
@@ -578,6 +578,8 @@ class RuleSystem:
         """
 
         raw = self.template.get("currency_system")
+        # __init__ 已对显式声明做过 fail-fast：这里要么是 V2（严格校验），
+        # 要么是无版本/显式 legacy（宽松归一化）。
         if is_v2_currency_system(raw):
             return validate_currency_system(raw)
         return legacy_currency_spec(

@@ -24,7 +24,7 @@ import {
   isAutoHpRule, calcAutoHp, attrDisplayName,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
-import { currencyInputStep, formatCurrencyAmount, parseCurrencyInput } from '@/utils/currency'
+import { currencyAmountToInputText, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterData extends CharacterListResponse { cards: CharacterCard[] }
 interface ResourceEdit { current: number; max: number }
@@ -419,7 +419,7 @@ function openEdit(p: import('@/api/types').Player) {
     level: Number(cs.level || 1),
     hp: getResourceValue(cs, 'hp') as ResourceEdit,
     gold: getCurrencyAmount(cs),
-    goldText: formatCurrencyAmount(getCurrencyAmount(cs), ruleMeta.value.currency_system || null),
+    goldText: currencyAmountToInputText(getCurrencyAmount(cs), ruleMeta.value.currency_system || null),
     attributes: attrs,
     skills: toSkillList(cs.skills),
     background: String(cs.background || ''),
@@ -537,7 +537,7 @@ function openCardEdit(c: CharacterCard) {
     skills: toSkillList(c.skills),
     background: c.background || '',
     gold: Number(c.gold ?? 30),
-    goldText: formatCurrencyAmount(Number(c.gold ?? 30), ruleMeta.value.currency_system || null),
+    goldText: currencyAmountToInputText(Number(c.gold ?? 30), ruleMeta.value.currency_system || null),
     portrait: c.portrait ? { ...c.portrait } : undefined,
     rule_id: c.rule_id,
   }
@@ -558,6 +558,11 @@ function openCardEditor(c: CharacterCard) {
 async function saveCardEdit() {
   const e = editCard.value
   if (!e) return
+  const parsedGold = parseCurrencyInput(e.goldText, ruleMeta.value.currency_system || null, { allowZero: true })
+  if (parsedGold === null) {
+    toast.error(t('invalidAmount'))
+    return
+  }
   busy.value = true
   try {
     const patch: CharacterCardPatch = {
@@ -566,7 +571,7 @@ async function saveCardEdit() {
       class: e.class.trim() || t('adventurer'),
       skills: e.skills.filter(s => s.name?.trim()).map(s => ({ name: s.name.trim(), value: Number(s.value) || 0 })),
       background: e.background.trim(),
-      gold: parseCurrencyInput(e.goldText, ruleMeta.value.currency_system || null, { allowZero: true }) ?? 0,
+      gold: parsedGold,
       portrait: e.portrait ? { ...e.portrait } : null,
     }
     const r = await api<{ ok?: boolean; error?: string }>(`/character-cards/${encodeURIComponent(e.card_id)}`, { method: 'PUT', body: JSON.stringify(patch) })

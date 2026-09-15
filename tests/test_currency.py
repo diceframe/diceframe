@@ -499,3 +499,138 @@ def test_coc_v2_payment_flow_settles_in_base_units():
     assert failed["ok"] is False
     assert failed["code"] == "INSUFFICIENT_FUNDS"
     assert broke.sheet["currency"]["amount"] == 100
+
+
+# ===== 非十进制 rate 的展示（rate=3：剩余必须落在 base unit） =====
+
+SILVER_COPPER_SPEC = validate_currency_system({
+    "schema_version": 2,
+    "base_unit": "copper",
+    "display_unit": "silver",
+    "units": [
+        {"id": "silver", "name": "银币", "rate": 3},
+        {"id": "copper", "name": "铜币", "rate": 1},
+    ],
+})
+
+
+@pytest.mark.parametrize("amount,expected", [
+    (1, "1 铜币"),
+    (3, "1 银币"),
+    (4, "1 银币 1 铜币"),
+    (6, "2 银币"),
+    (0, "0 铜币"),
+    (2, "2 铜币"),
+])
+def test_format_non_decimal_rate_uses_mixed_decomposition(amount, expected):
+    assert format_currency_amount(amount, SILVER_COPPER_SPEC) == expected
+
+
+# ===== schema_version fail-fast：显式声明版本必须合法且受支持 =====
+
+@pytest.mark.parametrize("version", ["abc", True, False, 0, 3, "3", 2.5])
+def test_validate_rejects_any_declared_but_unsupported_version(version):
+    with pytest.raises(CurrencySystemError):
+        validate_currency_system({
+            "schema_version": version,
+            "base_unit": "cent",
+            "units": [{"id": "cent", "name": "分", "rate": 1}],
+        })
+
+
+def test_versionless_system_stays_legacy():
+    """没有 schema_version 的旧 currency_system 继续 legacy，不误伤。"""
+
+    from src.engine.currency import declares_currency_schema
+
+    raw = {"base_unit": "credit", "units": [{"id": "credit", "name": "Credit", "rate": 1}]}
+    assert not declares_currency_schema(raw)
+    spec = legacy_currency_spec("金币", raw)
+    assert spec.schema_version == 1
+
+
+@pytest.mark.parametrize("version", ["abc", 3])
+def test_rule_system_rejects_declared_unsupported_version(tmp_path, version):
+    (tmp_path / "versioned_rule.json").write_text(json.dumps({
+        "rule_id": "versioned_rule",
+        "rule_name": "Versioned",
+        "currency_system": {
+            "schema_version": version,
+            "base_unit": "cent",
+            "units": [{"id": "cent", "name": "分", "rate": 1}],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="schema_version"):
+        RuleSystem.load(tmp_path / "versioned_rule.json")
+
+
+@pytest.mark.parametrize("version", ["abc", 3])
+def test_bundle_loader_rejects_declared_unsupported_version(tmp_path, version):
+    (tmp_path / "versioned_bundle.json").write_text(json.dumps({
+        "rule_schema_version": 2,
+        "rule_id": "versioned_bundle",
+        "currency_system": {
+            "schema_version": version,
+            "base_unit": "cent",
+            "units": [{"id": "cent", "name": "分", "rate": 1}],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="schema_version"):
+        RuleBundleLoader().load(tmp_path / "versioned_bundle.json")
+
+
+def test_crud_rejects_declared_unsupported_version(tmp_path):
+    from src.webui.services.rules import update_custom_rule
+
+    (tmp_path / "custom_rule.json").write_text(json.dumps({
+        "rule_id": "custom_rule", "rule_name": "Custom", "custom": True,
+    }, ensure_ascii=False), encoding="utf-8")
+    deps = _rules_dependencies(tmp_path)
+    result = update_custom_rule(deps, "custom_rule", {
+        "rule_id": "custom_rule",
+        "rule_name": "Custom",
+        "custom": True,
+        "currency_system": {"schema_version": 3, "base_unit": "a", "units": [{"id": "a", "name": "a", "rate": 1}]},
+    })
+    assert result["ok"] is False
+    assert "currency_system 声明非法" in result["error"]
+
+
+def test_declared_boundary_accepts_v1_and_rejects_unsupported():
+    """显式 schema_version: 1 是受支持的 legacy 声明；0/3/"abc"/bool 拒绝。"""
+
+    from src.engine.currency import validate_declared_currency_system
+
+    # 无版本键 → 直接放行（legacy）。
+    validate_declared_currency_system({"base_unit": "gold", "units": [{"id": "gold", "name": "金币", "rate": 1}]})
+    validate_declared_currency_system(None)
+    # 显式 legacy 声明 → 放行。
+    validate_declared_currency_system({
+        "schema_version": 1,
+        "base_unit": "credit",
+        "units": [{"id": "credit", "name": "Credit", "rate": 1}],
+    })
+    for version in (0, 3, "abc", True, 2.5):
+        with pytest.raises(CurrencySystemError):
+            validate_declared_currency_system({
+                "schema_version": version,
+                "base_unit": "a",
+                "units": [{"id": "a", "name": "a", "rate": 1}],
+            })
+
+
+def test_rule_system_loads_declared_legacy_version(tmp_path):
+    (tmp_path / "legacy_declared.json").write_text(json.dumps({
+        "rule_id": "legacy_declared",
+        "rule_name": "Legacy",
+        "currency": "金币",
+        "currency_system": {
+            "schema_version": 1,
+            "base_unit": "gold",
+            "units": [{"id": "gold", "name": "金币", "rate": 1}],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    rule = RuleSystem.load(tmp_path / "legacy_declared.json")
+    spec = rule.currency_spec
+    assert spec.schema_version == 1
+    assert spec.base_unit == "gold"

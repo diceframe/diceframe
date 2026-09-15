@@ -47,7 +47,7 @@ import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { fileToBase64, resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 import { fetchRulesetAvailableActions } from '@/api/rulesets'
 import { currencyLabel } from '@/utils/ruleSchema'
-import { formatCurrencyAmount } from '@/utils/currency'
+import { currencyAmountToInputText } from '@/utils/currency'
 import type { CurrencySystem } from '@/utils/currency'
 import { buildRewardPolicySave, isEconomyProposalActionable, isNonBlockingPersonalPurchase, nextEconomyProposal } from '@/features/play/economyPrompts'
 
@@ -536,7 +536,7 @@ function onRoomPassword() {
   const policy = game.detail.value?.economy_reward_policy || {}
   rewardPolicyMode.value = policy.mode || ''
   rewardPolicyCap.value = policy.auto_reward_cap
-    ? formatCurrencyAmount(policy.auto_reward_cap, economyCurrencySystem.value)
+    ? currencyAmountToInputText(policy.auto_reward_cap, economyCurrencySystem.value)
     : ''
   // 只有 GM 真正改动了奖励策略字段才提交：detail 未加载或未触碰时提交
   // 会把空 mode 当作“清除本局覆盖”，改密码/超时就会误重置奖励策略。

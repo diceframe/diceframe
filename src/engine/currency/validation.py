@@ -36,6 +36,40 @@ def is_v2_currency_system(raw: Any) -> bool:
     return _declares_v2(raw)
 
 
+def validate_declared_currency_system(raw: Any) -> None:
+    """Fail fast on any explicitly declared but unsupported/invalid version.
+
+    原则：无版本键 → legacy（直接放行）；显式声明 → 必须合法且受支持。
+    ``schema_version: 1`` 是受支持的 legacy 声明（结构校验保持宽松），
+    ``2`` 走严格 V2 校验，其余（0 / 3 / "abc" / bool / float）一律拒绝，
+    绝不静默当 legacy。
+    """
+
+    if not declares_currency_schema(raw):
+        return
+    assert isinstance(raw, dict)
+    version = raw.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise CurrencySystemError(f"currency_system.schema_version 非法: {version!r}")
+    if version == SCHEMA_VERSION:
+        validate_currency_system(raw)
+        return
+    if version != 1:
+        raise CurrencySystemError(
+            f"currency_system.schema_version 仅支持 1（legacy）或 {SCHEMA_VERSION}，收到 {version}",
+        )
+
+
+def declares_currency_schema(raw: Any) -> bool:
+    """Whether ``raw`` carries an explicit (any-version) ``schema_version``.
+
+    无版本键的旧规则继续走 legacy；只要显式声明了版本（哪怕非法/未支持），
+    调用方必须走 ``validate_currency_system`` fail-fast，不得静默当 legacy。
+    """
+
+    return isinstance(raw, dict) and raw.get("schema_version") is not None
+
+
 def validate_currency_system(raw: Any) -> CurrencySpec:
     """Validate one explicit V2 ``currency_system`` declaration.
 
@@ -48,10 +82,11 @@ def validate_currency_system(raw: Any) -> CurrencySpec:
     version = raw.get("schema_version")
     if version is None:
         raise CurrencySystemError("currency_system 缺少 schema_version")
-    try:
-        version_int = int(version)
-    except (TypeError, ValueError):
-        raise CurrencySystemError(f"currency_system.schema_version 非法: {version!r}") from None
+    # 显式声明必须受支持且为整型：bool/float/字符串等一切歧义类型 fail-fast，
+    # 不做 int() 截断或解析猜测。
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise CurrencySystemError(f"currency_system.schema_version 非法: {version!r}")
+    version_int = version
     if version_int != SCHEMA_VERSION:
         raise CurrencySystemError(
             f"currency_system.schema_version 仅支持 {SCHEMA_VERSION}，收到 {version_int}",

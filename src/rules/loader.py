@@ -9,7 +9,7 @@ from typing import Any
 
 from src.compat.rules_v1 import load_v1_template
 from src.content.rule_locale import materialize_rule
-from src.engine.currency import is_v2_currency_system, validate_currency_system
+from src.engine.currency import validate_declared_currency_system
 
 
 class RuleBundleLoader:
@@ -31,9 +31,9 @@ class RuleBundleLoader:
             template = self._resolve_v2(source, raw)
         else:
             template = load_v1_template(source)
-        # 显式 V2 货币声明在加载边界 fail-fast：坏 schema 的规则/插件不允许进入运行时。
-        if is_v2_currency_system(template.get("currency_system")):
-            validate_currency_system(template.get("currency_system"))
+        # 显式声明版本的货币 schema 在加载边界 fail-fast（非法/未支持版本）；
+        # 无版本键的旧规则与显式 legacy（schema_version: 1）继续按 legacy 处理。
+        validate_declared_currency_system(template.get("currency_system"))
         return template
 
     def _resolve_v2(self, source: Path, raw: dict[str, Any], seen: set[Path] | None = None) -> dict[str, Any]:
