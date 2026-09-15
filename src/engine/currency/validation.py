@@ -61,13 +61,14 @@ def validate_declared_currency_system(raw: Any) -> None:
 
 
 def declares_currency_schema(raw: Any) -> bool:
-    """Whether ``raw`` carries an explicit (any-version) ``schema_version``.
+    """Whether ``raw`` carries a ``schema_version`` key (any value, any version).
 
-    无版本键的旧规则继续走 legacy；只要显式声明了版本（哪怕非法/未支持），
-    调用方必须走 ``validate_currency_system`` fail-fast，不得静默当 legacy。
+    完全没有该 key 的旧规则继续走 legacy；只要 key 存在（哪怕值为 null /
+    非法 / 未支持版本），调用方必须走 ``validate_declared_currency_system``
+    fail-fast，不得静默当 legacy。
     """
 
-    return isinstance(raw, dict) and raw.get("schema_version") is not None
+    return isinstance(raw, dict) and "schema_version" in raw
 
 
 def validate_currency_system(raw: Any) -> CurrencySpec:

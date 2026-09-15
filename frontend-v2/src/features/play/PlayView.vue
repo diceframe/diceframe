@@ -47,7 +47,7 @@ import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { fileToBase64, resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 import { fetchRulesetAvailableActions } from '@/api/rulesets'
 import { currencyLabel } from '@/utils/ruleSchema'
-import { currencyAmountToInputText } from '@/utils/currency'
+import { currencyAmountToInputText, currencyEditableUnitLabel } from '@/utils/currency'
 import type { CurrencySystem } from '@/utils/currency'
 import { buildRewardPolicySave, isEconomyProposalActionable, isNonBlockingPersonalPurchase, nextEconomyProposal } from '@/features/play/economyPrompts'
 
@@ -723,6 +723,11 @@ const payResolving = ref(false)
 const dismissedPaymentIds = ref<Set<string>>(new Set())
 const economyCurrencyName = computed(() => currencyLabel(ruleMeta.value))
 const economyCurrencySystem = computed<CurrencySystem | null>(() => ruleMeta.value.currency_system || null)
+const economyEditableUnitSuffix = computed(() => {
+  // 奖励上限输入按可编辑单位解析（rate=3 等结构回退 base unit），标签必须一致。
+  const name = currencyEditableUnitLabel(economyCurrencySystem.value)
+  return name ? `（${name}）` : ''
+})
 const economyProposalList = computed(() => game.detail.value?.economy_proposals || [])
 const actionableEconomyProposals = computed(() => economyProposalList.value.filter(proposal => (
   isEconomyProposalActionable(
@@ -1463,7 +1468,7 @@ onBeforeUnmount(() => {
             <option value="gm_confirm">{{ t('rewardPolicyGmConfirm') }}</option>
           </select>
         </label>
-        <label v-if="rewardPolicyMode === 'auto_small_cash'">{{ t('rewardPolicyCap') }}<input type="text" inputmode="decimal" v-model="rewardPolicyCap" :placeholder="t('rewardPolicyCapPlaceholder')" @input="rewardPolicyTouched = true"></label>
+        <label v-if="rewardPolicyMode === 'auto_small_cash'">{{ t('rewardPolicyCap') }}{{ economyEditableUnitSuffix }}<input type="text" inputmode="decimal" v-model="rewardPolicyCap" :placeholder="t('rewardPolicyCapPlaceholder')" @input="rewardPolicyTouched = true"></label>
         <div class="actions">
           <button @click="showRoomPassword = false">{{ t('cancel') }}</button>
           <button class="primary" @click="setRoomPassword">{{ t('saveAction') }}</button>

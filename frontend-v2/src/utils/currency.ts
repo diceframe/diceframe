@@ -115,6 +115,20 @@ export function formatCurrencyAmount(
 }
 
 /**
+ * 当前金额输入框实际使用的单位名（与 parser 同单位）。
+ * display.rate 无法有限十进制表示时是 base unit 名（如「铜币」），
+ * 让标签不会与 parse 行为不一致；拿不到名称时回退 fallbackLabel。
+ */
+export function currencyEditableUnitLabel(
+  cs?: CurrencySystem | null,
+  fallbackLabel?: string,
+): string {
+  const unit = resolveEditableUnit(cs)
+  if (unit?.name) return unit.name
+  return fallbackLabel || ''
+}
+
+/**
  * canonical integer → 仅供编辑框使用的纯数字字符串（不含 $/¥/单位名）。
  * 与 `parseCurrencyInput` 使用同一个可编辑单位，保证 round-trip。
  */

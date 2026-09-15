@@ -528,7 +528,7 @@ def test_format_non_decimal_rate_uses_mixed_decomposition(amount, expected):
 
 # ===== schema_version fail-fast：显式声明版本必须合法且受支持 =====
 
-@pytest.mark.parametrize("version", ["abc", True, False, 0, 3, "3", 2.5])
+@pytest.mark.parametrize("version", [None, "abc", True, False, 0, 3, "3", 2.5])
 def test_validate_rejects_any_declared_but_unsupported_version(version):
     with pytest.raises(CurrencySystemError):
         validate_currency_system({
@@ -541,12 +541,16 @@ def test_validate_rejects_any_declared_but_unsupported_version(version):
 def test_versionless_system_stays_legacy():
     """没有 schema_version 的旧 currency_system 继续 legacy，不误伤。"""
 
-    from src.engine.currency import declares_currency_schema
+    from src.engine.currency import declares_currency_schema, validate_declared_currency_system
 
     raw = {"base_unit": "credit", "units": [{"id": "credit", "name": "Credit", "rate": 1}]}
     assert not declares_currency_schema(raw)
     spec = legacy_currency_spec("金币", raw)
     assert spec.schema_version == 1
+    # key 存在但值为 null：属于显式声明，必须 fail-fast，不得当 legacy。
+    assert declares_currency_schema({"schema_version": None})
+    with pytest.raises(CurrencySystemError):
+        validate_declared_currency_system({"schema_version": None})
 
 
 @pytest.mark.parametrize("version", ["abc", 3])
@@ -610,7 +614,7 @@ def test_declared_boundary_accepts_v1_and_rejects_unsupported():
         "base_unit": "credit",
         "units": [{"id": "credit", "name": "Credit", "rate": 1}],
     })
-    for version in (0, 3, "abc", True, 2.5):
+    for version in (None, 0, 3, "abc", True, 2.5):
         with pytest.raises(CurrencySystemError):
             validate_declared_currency_system({
                 "schema_version": version,

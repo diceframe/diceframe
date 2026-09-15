@@ -4,7 +4,7 @@ import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
 import type { Player } from '@/api/types'
 import type { CurrencySystem } from '@/utils/currency'
-import { currencyInputStep, parseCurrencyInput } from '@/utils/currency'
+import { currencyInputStep, parseCurrencyInput, resolveEditableUnit } from '@/utils/currency'
 
 const { t } = useLocale()
 
@@ -32,6 +32,12 @@ const items = ref('')
 
 const normalizedItems = computed(() => items.value.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean))
 const canonicalAmount = computed(() => parseCurrencyInput(amount.value, props.currencySystem))
+// 输入框实际解析单位（rate=3 等结构会回退 base unit），必须让 GM 可见。
+const editableUnitName = computed(() => resolveEditableUnit(props.currencySystem).name)
+const amountLabel = computed(() => {
+  const name = editableUnitName.value
+  return name ? `${t('paymentAmount')}（${name}）` : t('paymentAmount')
+})
 const canSubmit = computed(() => Boolean(payerUid.value) && canonicalAmount.value !== null)
 
 function submit() {
@@ -62,7 +68,7 @@ function submit() {
         </select>
       </label>
       <label>
-        <span>{{ t('paymentAmount') }}</span>
+        <span>{{ amountLabel }}</span>
         <input v-model="amount" type="text" inputmode="decimal" :step="currencyInputStep(currencySystem)">
       </label>
       <label>

@@ -13,7 +13,7 @@ import {
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
 import type { CurrencySystem } from '@/utils/currency'
-import { currencyAmountToInputText, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
+import { currencyAmountToInputText, currencyEditableUnitLabel, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterSubmit extends CharacterSheet { character_name: string }
 
@@ -257,7 +257,7 @@ function finish() {
       </p>
       <SkillEditor v-model="skills" :pool="pool" />
       <label>{{ t('backgroundStory') }}<textarea v-model="background" rows="4" :placeholder="t('backgroundPlaceholder')"></textarea></label>
-      <label>{{ currencyLabel(ruleMeta) }}<input type="text" inputmode="decimal" v-model="goldInput" :step="currencyInputStep(currencySystem)" :class="{ invalid: goldInvalid }"></label>
+      <label>{{ currencyEditableUnitLabel(currencySystem, currencyLabel(ruleMeta)) }}<input type="text" inputmode="decimal" v-model="goldInput" :step="currencyInputStep(currencySystem)" :class="{ invalid: goldInvalid }"></label>
     </div>
 
     <div v-else-if="step === 4" class="wizard-pane">

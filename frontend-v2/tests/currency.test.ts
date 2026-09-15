@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   currencyAmountToInputText,
+  currencyEditableUnitLabel,
   currencyInputStep,
   formatCurrencyAmount,
   parseCurrencyInput,
@@ -187,5 +188,24 @@ describe('currencyInputStep derives from editable unit rate', () => {
     expect(currencyInputStep(spirit)).toBe('1')
     expect(currencyInputStep(silverCopper)).toBe('1')
     expect(currencyInputStep(null)).toBe('1')
+  })
+})
+
+
+describe('currencyEditableUnitLabel matches the parse unit', () => {
+  it('shows the base unit name when editing falls back (rate=3)', () => {
+    expect(currencyEditableUnitLabel(silverCopper, '银币')).toBe('铜币')
+    expect(currencyEditableUnitLabel(silverCopper)).toBe('铜币')
+  })
+
+  it('shows the display unit name for decimal-friendly rates', () => {
+    expect(currencyEditableUnitLabel(dollarCent, '美元')).toBe('美元')
+    expect(currencyEditableUnitLabel(yuanFen, '人民币')).toBe('人民币')
+    expect(currencyEditableUnitLabel(spirit, '灵石')).toBe('灵石')
+  })
+
+  it('falls back to the provided label when units have no name', () => {
+    expect(currencyEditableUnitLabel(null, '金币')).toBe('金币')
+    expect(currencyEditableUnitLabel(null)).toBe('')
   })
 })

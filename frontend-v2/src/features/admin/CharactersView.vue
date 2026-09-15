@@ -24,7 +24,7 @@ import {
   isAutoHpRule, calcAutoHp, attrDisplayName,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
-import { currencyAmountToInputText, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
+import { currencyAmountToInputText, currencyEditableUnitLabel, currencyInputStep, parseCurrencyInput } from '@/utils/currency'
 
 interface CharacterData extends CharacterListResponse { cards: CharacterCard[] }
 interface ResourceEdit { current: number; max: number }
@@ -452,6 +452,11 @@ const attrSum = computed(() => {
   return Object.values(attrs).reduce((sum, value) => sum + (parseInt(String(value)) || 0), 0)
 })
 const attrPoints = computed(() => Math.max(ruleAttrsTotal.value, attrSum.value) - attrSum.value)
+const editableUnitSuffix = computed(() => {
+  // 编辑框实际解析单位（可与顶层货币名不同，如 rate=3 时回退铜币）。
+  const name = currencyEditableUnitLabel(ruleMeta.value.currency_system || null)
+  return name ? `（${name}）` : ''
+})
 const autoHp = computed(() => isAutoHpRule(ruleMeta.value))
 const autoHpValue = computed(() => calcAutoHp(edit.value?.attributes || {}, ruleMeta.value))
 
@@ -817,7 +822,7 @@ async function onWizardSubmit(c: CharacterSheet) {
         </div>
       </label>
       <p v-if="autoHp" class="form-hint">{{ t('ruleSuggestedHp') }}: <strong>{{ autoHpValue }}</strong>{{ t('manualHpStillAllowed') }}</p>
-      <label>{{ currencyLabel(ruleMeta) }}<input type="text" inputmode="decimal" v-model="edit.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
+      <label>{{ currencyEditableUnitLabel(ruleMeta.currency_system || null, currencyLabel(ruleMeta)) }}<input type="text" inputmode="decimal" v-model="edit.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
       <label>{{ t('attributes') }} <span class="attr-points">{{ t('pointsRemaining', { points: attrPoints }) }}</span></label>
       <div class="attr-sliders">
         <div v-for="a in editRuleAttrs" :key="a.key" class="attr-row">
@@ -855,7 +860,7 @@ async function onWizardSubmit(c: CharacterSheet) {
       <label>{{ t('skills') }}</label>
       <SkillEditor v-model="editCard.skills" :pool="skillPool" :meta="ruleMeta" />
       <label>{{ t('background') }}<textarea rows="4" v-model="editCard.background"></textarea></label>
-      <label>{{ t('initialMoney') }}<input type="text" inputmode="decimal" v-model="editCard.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
+      <label>{{ t('initialMoney') }}{{ editableUnitSuffix }}<input type="text" inputmode="decimal" v-model="editCard.goldText" :step="currencyInputStep(ruleMeta.currency_system || null)"></label>
       <template #actions>
         <button @click="editCard = null">{{ t('cancel') }}</button>
         <button class="primary" :disabled="busy" @click="saveCardEdit">{{ t('saveAction') }}</button>
