@@ -209,9 +209,9 @@ internal static class DiceFrameLauncher
         string url
     )
     {
-        // 更新期间进程切换是主动行为：候选/回滚的退出由更新状态记录，
-        // 不写 last-crash.json（StartServer 会重新打开取证）。
-        suppressCrashReport = true;
+        // 注意：这里不能提前 suppress——更新信号读取或候选校验失败时会 early
+        // return，旧 server 继续正常运行，若提前置位会让后续真实 crash 不再取证。
+        // 只有真正准备切换（StopServer 之前）才临时抑制。
         string signal;
         try
         {
@@ -252,6 +252,9 @@ internal static class DiceFrameLauncher
         }
 
         Console.WriteLine("Applying DiceFrame " + version + "...");
+        // 走到这里才真正开始主动切换：StopServer 与候选/回滚进程的退出由更新
+        // 状态记录，不写 last-crash.json；候选 StartServer 会重新打开取证。
+        suppressCrashReport = true;
         StopServer();
 
         Process candidateProcess = null;
@@ -1352,21 +1355,16 @@ internal static class DiceFrameLauncher
     /// </summary>
     private static CrashDumpRegistrySnapshot EnableCrashDumpCapture(string logsDir)
     {
+        // 快照必须在 try 之外持有：三个 value 写到一半失败时，catch 里要立刻把
+        // 已经写进去的部分恢复掉，否则会永久污染用户的 LocalDumps 配置。
+        CrashDumpRegistrySnapshot snapshot = null;
         try
         {
             string dumpDir = Path.Combine(logsDir, "crash-dumps");
             Directory.CreateDirectory(dumpDir);
             PruneCrashDumps(dumpDir, MaxCrashDumps);
 
-            using (RegistryKey existing = Registry.CurrentUser.OpenSubKey(LocalDumpsPythonKey, false))
-            {
-                if (existing != null)
-                {
-                    existing.Close();
-                }
-            }
-
-            CrashDumpRegistrySnapshot snapshot = new CrashDumpRegistrySnapshot();
+            snapshot = new CrashDumpRegistrySnapshot();
             using (RegistryKey probe = Registry.CurrentUser.OpenSubKey(LocalDumpsPythonKey, false))
             {
                 snapshot.KeyExisted = probe != null;
@@ -1391,6 +1389,8 @@ internal static class DiceFrameLauncher
         }
         catch (Exception ex)
         {
+            // 部分写入失败也要回滚到原值（RestoreCrashDumpCapture 支持只写了一部分）。
+            RestoreCrashDumpCapture(snapshot);
             Console.WriteLine("Crash diagnostics could not be enabled: " + ex.Message);
             return null;
         }
@@ -1477,18 +1477,28 @@ internal static class DiceFrameLauncher
         }
     }
 
-    /// <summary>WER 自己决定 dump 文件名，这里按时间找本次崩溃对应的那个。</summary>
+    /// <summary>
+    /// 找本次崩溃对应的 dump。WER 自己决定文件名（常见 python.exe.&lt;pid&gt;.dmp），
+    /// 这里只接受文件名包含当前 server pid、且晚于启动时间的那个：同机另一个
+    /// python.exe 恰好崩溃时，不能把别人的 dump 当成本次崩溃的证据。
+    /// 找不到就返回 null（metadata 照常写）。
+    /// </summary>
     private static string FindLatestCrashDump(string dumpDir, DateTime sinceUtc)
     {
         try
         {
-            if (!Directory.Exists(dumpDir))
+            if (!Directory.Exists(dumpDir) || serverPid <= 0)
             {
                 return null;
             }
+            string pidToken = "." + serverPid.ToString(CultureInfo.InvariantCulture) + ".";
             FileInfo newest = null;
             foreach (FileInfo file in new DirectoryInfo(dumpDir).GetFiles("*.dmp"))
             {
+                if (file.Name.IndexOf(pidToken, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
                 // 允许少量时钟/文件时间粒度误差，避免漏掉刚写出的 dump。
                 if (file.LastWriteTimeUtc.AddSeconds(2) < sinceUtc)
                 {
