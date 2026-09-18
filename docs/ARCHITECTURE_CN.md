@@ -1,207 +1,5832 @@
-# DiceFrame 架构事实来源
+# DiceFrame 系统架构文档（开发者版）
 
-本文描述当前实现，不是路线图。代码依赖方向为 `routes -> WebAPI -> services -> 核心`；核心层不得导入 `src.webui`，WebAPI 是委托层，跨 service 调用经由 API 委托。
+> **文档性质：Current Architecture / System Architecture**
+>
+> 本文描述 DiceFrame 当前 `main` 分支已经合并并可从源码验证的系统架构。它不是路线图、需求清单、PR 汇总，也不是“以后应该怎样”的设计稿。
+>
+> **核验基线**
+>
+> - 仓库：`diceframe/diceframe`
+> - 分支：`main`
+> - Commit：`962fda45a68caa24bac38fd2313d92d66fa59a7a`
+> - Release：`2.6.1`
+> - 当前 GameInstance persisted schema：`15`
+> - 当前 Lorebook SQLite schema（`PRAGMA user_version`）：`4`
+> - 文档核验日期：2026-09-18
+>
+> **明确不计入当前架构的内容**
+>
+> - 未合并 PR / 未合并 feature branch；
+> - 本地工作区草稿；
+> - 只有设计说明、但当前 `main` 没有实现的能力。
+>
+> 上述内容可以作为未来架构输入，但不得在本文件中写成“现状”。
 
-## WebUI 启动与配置
 
-`web_server.py` 是源码版、Windows 便携版和 Docker 共用的稳定启动入口，主要负责加载项目环境、组合明确的 WebUI owner，并启动 aiohttp listener。具体职责位于：
+---
 
-- `src/webui/runtime_config.py`：`RuntimeConfig` / `ConfigStore`，唯一应用 `env > secrets.json > config.json` 优先级并负责敏感配置分离、脱敏与原子写入；
-- `src/webui/composition.py`：从显式路径、配置状态和 factory 构造核心 subsystem 与 `WebAPI`；
-- `src/webui/application.py`：`create_app`、middleware 与 route composition，不启动监听器；
-- `src/webui/bootstrap.py`：模板同步、插件/Hub 启动、后台任务、存档恢复和清理；
-- `src/webui/access_control.py`：owner、Bot、SSE ticket、玩家分享与房间密码访问边界；
-- `src/webui/config_controller.py`：配置热重载事务和服务商连接测试。
+# 0. 开发者快速入口
 
-AI 应用配置仅使用 `ai_providers` 与各能力的 `*_provider_ref`；凭据以 `ai_provider_key_<id>` 单独保存。旧能力级直填地址/密钥/API 格式及 AI 能力环境入口不再参与解析，更新请求包含旧字段时明确拒绝，不自动迁移或创建服务商。缺失/未知引用不会激活残留配置；browser、edge-tts 与 disabled ASR 无需引用，本地服务商允许空 key。composition 解析后传给服务的内部 `*_base_url` / `*_api_key` 仍是有效运行时契约。
+这一章是给“第一次进仓库、准备改代码”的开发者看的。
 
-模板同步和配置默认值迁移写盘只在真实 application startup 发生，不在导入独立 owner 模块时发生。配置热重载必须先完整构造候选 runtime，写盘成功后才替换活动状态；构造或写盘失败均保留旧 runtime。
+原文后面的完整架构章节全部保留；这里不替代它们，只提供**功能入口、主要文件和权威边界**。
 
-WebUI service 不直接导入另一个 service。跨域业务调用使用 composition root 注入的 callable/protocol；多域共同使用但不执行业务编排的纯契约和投影位于 `src/webui/` 根边界，例如生命周期事务上下文、规则草稿 shape 校验、休息只读投影及角色卡 identity/deduplication。类型检查专用导入不构成运行时依赖。
+## 0.1 先记住三个问题
 
-## 访问凭据与扫码配对
-
-Owner 访问有两类平级凭据，都以 `Authorization: Bearer` 提交，由 `src/webui/access_control.py` 统一判定：
-
-- 访问密码：`STATE["access_token"]` 只保存 PBKDF2 哈希，服务端不掌握明文，任何接口都不得把它兑换出去；
-- 设备令牌：`src/webui/device_tokens.py` 的高熵随机串，落盘只存 sha256 摘要（随机 token 无需 KDF，且它在每个请求上验证），逐台可吊销，吊销不牵连主密码与其它设备。
-
-扫码登录由 `src/webui/pairing.py` 与 `src/webui/routes/pairing.py` 负责：owner 会话调 `POST /api/pairing` 签发一次性短 TTL 配对码（服务端同样只存摘要），移动端匿名调 `POST /api/pairing/claim` 兑换成设备令牌。兑换端点必须匿名可达（此刻手机还没有任何凭据），因此它与 `/api/login` 共用 abuse-guard 限流桶并写入同一份登录审计；配对码一次性、过期即作废、不续期。设备清单 `GET /api/devices` 与吊销 `DELETE /api/devices/{id}` / `POST /api/devices/revoke-all` 只对 owner 开放，清单不返回任何可用于鉴权的字段。
-
-免密服务器上 `POST /api/pairing` 对任何能连上的客户端开放，那时签发的设备令牌等价于「谁连得上谁就是 owner」。因此首次设置访问密码（`access_token` 从未配置变为已配置）会连带吊销全部设备令牌与待兑换配对码；已有密码时再改密码不吊销——设备令牌是与访问密码平级的独立凭据，设置页有单独的逐台 / 全部吊销入口。
-
-二维码要编的地址只有服务端知道——GM 本机浏览器的 origin 往往是 localhost，对手机无意义。`GET /api/system/network`（owner 限定）基于 `src/web_transport/local_addresses.py` 返回本机可达候选地址；该模块同时是自签证书 SAN 的地址来源。
-
-## Content V2
-
-所有输入先经过兼容边界，再进入当前 canonical model：
+接任何 issue / PR 前，先问：
 
 ```text
-Legacy / V1 Rule / Plugin / Save / World / Character
-                    ↓
-              Compatibility
-                    ↓
-          Canonical Current Model
-                    ↓
-            Runtime Mechanics
-                    ↓
-             Typed Locale
-                    ↓
-                   UI
+1. 这个功能的最终 authority 在哪里？
+2. 用户请求从哪里进入，经过哪些 service / runtime？
+3. 我现在要改的是表现层、应用编排，还是权威状态？
 ```
 
-Canonical identity 是稳定引用键，例如 `fighter`、`longsword`、`chain_mail`、`athletics`、`str`、`npc_innkeeper`。`战士 / Fighter`、`长剑 / Longsword / ロングソード`、`老汤姆 / Old Tom` 只是 display text。切换语言不得改变 ID。
+DiceFrame 最容易出问题的改法不是“代码写错”，而是：
+
+```text
+在错误的层写了一份正确逻辑
+```
+
+例如：
+
+```text
+前端自己计算 D&D 规则
+LLM 文本直接修改 HP
+AI 托管复制一份角色
+WorldState 和 memory 各记一份“当前世界”
+service 之间互相 import 形成环
+```
+
+这些都可能短期能跑，但会产生第二套 authority。
+
+---
+
+## 0.2 功能 → 第一入口 → 核心 Owner
+
+| 我要改什么 | 第一入口 | 继续追到哪里 | 最终 Authority / Owner |
+|---|---|---|---|
+| 玩家提交行动 | `src/webui/services/turns.py` | `GameInstance` → `RoundProcessor` | `GameInstance` / Ruleset |
+| 多人行动 barrier | `turns.py` | `GameInstance.human_actions_ready()` / `try_advance()` | `GameInstance` |
+| AI GM 回合 | `src/commands/round_processor.py` | Check Planner / Prompt / State Applier | Server + Ruleset |
+| 检定规划 | `src/commands/check_planner.py` | normalize / dice / rules | Server RNG / Rules |
+| AI 托管 PC（探索） | `src/commands/ai_player.py` | `turns.py` | Player Control + canonical action queue |
+| 玩家控制权 | `src/webui/services/game_controls.py` | `src/engine/player_control.py` | `players[uid].control` |
+| 暂离 / AI 临时接管 | `game_controls.py` | away policy / control revision | Player Control |
+| AI 托管 PC（D&D 战斗） | `src/rulesets/automation.py` | `src/rulesets/dnd2024/combat/` | D&D Runtime |
+| 当前世界事实 | `src/engine/world_state.py` | world ops | `GameInstance.world_state` |
+| 地点 / 路线是否合法 | `src/engine/world_legality.py` | planner requirement / RoundProcessor | WorldState |
+| 世界时间 / 定时事件 | `src/engine/world_events.py` | `world_state.scheduled_events` | WorldState |
+| 长期记忆 | `src/memory/delta.py` | `src/engine/memory_outbox.py` | MemoryStore |
+| D&D 2024 Runtime | `src/rulesets/dnd2024/runtime.py` | 各 domain | D&D Runtime |
+| D&D 战斗 | `src/rulesets/dnd2024/combat/` | validate / resolve / reducer | D&D Combat State |
+| D&D Campaign / Session 0 | `src/rulesets/dnd2024/campaign/` | EventBatch / reducer | D&D Ruleset State |
+| D&D 角色 | `src/rulesets/dnd2024/character/` | ruleset character lifecycle | `ruleset_character` |
+| D&D 休息 | `src/webui/services/ruleset_rest.py` | D&D resting domain | D&D Runtime |
+| D&D 升级 | `src/webui/services/ruleset_advancement.py` | progression / character reconciliation | D&D Runtime |
+| Ruleset capability | `src/rulesets/contracts.py` | `registry.py` | Runtime capability contract |
+| 通用战斗扩展 | `src/webui/services/combat_extension.py` | `src/engine/combat_*` | Generic combat primitives |
+| 经济 / 支付 | `src/engine/economy.py` | proposal / settlement / outbox | Economy |
+| 货币模型 | `src/engine/currency/` | frontend currency utility | CurrencySpec |
+| 存档 encode/decode | `src/engine/game_state_codec.py` | migrations | GamePersistedState |
+| 存档迁移 | `src/migrations/instance.py` | schema sequence | Migration layer |
+| reset / restart | lifecycle service | aggregate replacement / run_id | GameInstance |
+| rollback / swipe | lifecycle / GameHandler | authority lock / snapshots | GameInstance |
+| 世界书内容 | `src/lorebook/store.py` | locale view / CRUD / canonical entries | LorebookStore |
+| 世界书检索 | `src/lorebook/retrieval.py` | KeywordMatcher / optional EmbeddingClient / context projection | LoreRetriever（检索编排；不拥有 mechanics authority） |
+| 世界模板 | `src/content/` / worlds service | Content V2 | World Content |
+| Adventure Bundle | `src/adventures/` | ruleset adventure binding | Adventure package |
+| 插件 | `src/plugin_host/host.py` | descriptors / capabilities | PluginHost |
+| Bot | `src/bots/bridge_core/` | DiceFrame HTTP API | Server API |
+| Web 登录 / Access | `src/webui/access_control.py` | middleware / session | Web Access |
+| 手机扫码登录 | `src/webui/pairing.py` | routes / device token | Access Control |
+| WebUI 启动 | `web_server.py` | composition / application / bootstrap | Composition Root |
+| 配置热重载 | `src/webui/config_controller.py` | RuntimeConfig / composition | ConfigStore |
+| 前端开房 | `frontend-v2/src/features/create/CreateView.vue` | API / server validation | Server |
+| 前端游玩主页面 | `frontend-v2/src/features/play/PlayView.vue` | play components / ruleset UI | Projection only |
+| D&D 战斗前端 | `frontend-v2/src/features/rulesets/dnd2024/combat/` | gameplay projection | Server projection |
+| 图片生成 | `src/imagegen/` | generated image service / assets | Image service |
+| TTS / ASR | `src/tts/` / `src/asr/` | webui services | Media service |
+| 更新器 | updater service | launcher / docker launcher | Deployment boundary |
+
+---
+
+## 0.3 开发者的查代码顺序
+
+遇到一个功能问题，不建议只全文搜索按钮文字。
+
+推荐：
+
+```text
+UI / Bot 入口
+↓
+HTTP route
+↓
+WebAPI delegate
+↓
+WebUI service
+↓
+GameInstance / Engine / Ruleset Runtime
+↓
+Persistence / Migration
+↓
+对应 tests
+```
+
+如果中途已经找到“最终 authority”，就不要再向表现层复制一份逻辑。
+
+---
+
+## 0.4 常见请求的真实链路
+
+### 普通玩家行动
+
+```text
+ActionComposer / Bot
+↓
+HTTP action route
+↓
+turns.submit_action
+↓
+validate actor / run / state
+↓
+GameInstance.add_action
+↓
+save action
+↓
+多人 barrier
+↓
+AI-hosted seat 补行动（若需要）
+↓
+try_advance
+↓
+RoundProcessor.process_round
+↓
+Check Planner
+↓
+server normalize / rules / dice
+↓
+PromptComposer
+↓
+LLM GM
+↓
+stale fence
+↓
+state/economy/deferred effect gate
+↓
+authoritative save
+↓
+memory outbox
+↓
+SSE / Bot projection
+```
+
+### 玩家控制权切换
+
+```text
+Web / Bot 控制请求
+↓
+GameControlService
+↓
+control_change_block
+↓
+players[uid].control
+↓
+revision++
+↓
+save
+↓
+human → ai 时 resume_after_control_change
+↓
+复用原 turns progression
+```
+
+### WorldState 合法性
+
+```text
+玩家自然语言行动
+↓
+Check Planner 提出 world_requirements
+↓
+world_legality 使用权威 WorldState
+↓
+未知事实：不猜、不阻断
+已证明冲突：结构化拒绝 / 可信裁定
+↓
+合法 move 才写回 canonical location
+```
+
+### D&D 权威战斗
+
+```text
+Intent
+↓
+D&D validation
+↓
+resolution
+↓
+EventBatch
+↓
+combat reducer
+↓
+canonical combat state
+↓
+projection
+↓
+LLM 只负责叙述已确认结果
+```
+
+---
+
+## 0.5 “文件在哪”和“谁说了算”不是同一个问题
+
+例如：
+
+```text
+frontend-v2/src/features/play/PlayView.vue
+```
+
+可能是按钮所在位置，但它不是战斗 authority。
+
+同理：
+
+```text
+src/commands/ai_player.py
+```
+
+负责产生 AI 玩家行动文本，但不拥有角色 HP、装备、世界位置，也不决定骰子结果。
+
+开发者应该区分：
+
+```text
+入口文件
+编排文件
+状态 Owner
+规则 Authority
+持久化 Owner
+```
+
+---
+
+## 0.6 当前 main 最近新增的架构级能力
+
+从原始文档 2026-09-16 的历史基线到当前 2026-09-18 `main`，已经合入以下**架构级**能力：
+
+```text
+WorldState v1
+├─ 权威 facts
+├─ public / gm 可见性
+├─ 逻辑世界时钟
+├─ scheduled events
+├─ 简单地点/路线合法性
+└─ world ops 原子写入口
+
+Player Control
+├─ human
+├─ ai
+├─ unclaimed
+├─ revision
+├─ temporary
+├─ resume_mode
+└─ away_control_policy
+
+AI-hosted PC
+├─ 探索轮自动补行动
+├─ human readiness gate
+├─ 控制权变化后即时 resume
+├─ control revision stale guard
+├─ 角色卡 persona 约束
+└─ D&D 战斗 deterministic automatic intent
+
+D&D Class Feature Runtime v1
+├─ src/rulesets/dnd2024/features/
+├─ class_feature_catalog 参数化
+├─ class resource 投影与 resize policy
+├─ 装备前提 / capability 投影
+└─ 继续复用既有 combat / rest / advancement authority
+
+Hybrid Lore Retrieval
+├─ 所有标准 Ruleset 共用同一 LoreRetriever
+├─ action + scene + canonical location + present NPC 锚点
+├─ KeywordMatcher + optional semantic retrieval
+├─ 复用 MemoryStore.embedding_client
+├─ lorebook_embeddings 派生缓存
+├─ 无 embedding / embedding failure 自动 lexical fallback
+└─ WorldState / Ruleset authority 高于 Lorebook
+
+Access / UX supporting architecture
+├─ owner device token
+├─ one-time pairing code
+├─ 手机扫码登录
+├─ 创建游戏逐角色 control mode
+└─ QR 共享入口
+```
+
+这些内容在后文增加了开发者专章。
+
+---
+
+## 0.7 当前明确**没有**的能力
+
+不要在开发中误以为以下东西已经存在：
+
+```text
+通用 Entity Registry
+通用 Relation Graph
+完整 Long-running Process Engine
+地图拓扑 / Pathfinding
+统一 Confirmed Event → World Memory Manager
+跨 Ruleset 的通用 Class Feature Runtime（当前只有 D&D 2024 专属 `features/` runtime）
+```
+
+WorldState v1 已经有 facts / clock / scheduled events，但这不等于 Entity / Relation / Process 已完成。
+
+---
+
+
+## 1. 文档目标
+
+DiceFrame 已经不是“一个调用 LLM 的跑团页面”，而是一个包含以下能力的自托管 TRPG 系统：
+
+- 多人/单人游戏运行时；
+- 世界、规则、角色、冒险内容系统；
+- 权威 WorldState（facts / 可见性 / 逻辑时钟 / 定时事件 / 简单行动合法性）；
+- Player Control 与 AI 托管 PC（human / ai / unclaimed）；
+- LLM GM、结构化检定、长期记忆；
+- 通用 Hybrid Lore Retrieval（场景锚点 + 关键词 + 可选语义检索）；
+- 权威 D&D 2024 runtime 与 Class Feature Runtime v1；
+- legacy CoC / Freeform 等兼容规则路径；
+- 权威战斗与通用战斗 primitives；
+- 经济结算、回滚和跨存储 outbox；
+- 插件宿主与渠道 Bot；
+- Web 前端、SSE、玩家分享入口；
+- 图像、TTS、ASR 等附属媒体服务；
+- Source / Windows Portable / Docker 三种部署与更新路径。
+
+因此，架构文档的核心任务不是罗列功能，而是回答：
+
+1. **哪个模块拥有哪类状态与权威？**
+2. **请求从客户端进入后经过哪些层？**
+3. **LLM 能决定什么，不能决定什么？**
+4. **多人并发、重开、回滚、结算时如何避免旧写入污染新状态？**
+5. **legacy 与新 Ruleset Runtime 如何共存？**
+6. **规则、世界、冒险、插件内容如何区分 identity、locale 与 mechanics？**
+7. **外部副作用如何在崩溃、重试、rollback 后保持一致性？**
+8. **新增能力应该扩展哪个边界，而不是把逻辑继续塞进一个大文件？**
+
+本文以这些问题为主线。
+
+---
+
+# 2. 架构总览
+
+## 2.1 系统上下文
+
+```mermaid
+flowchart LR
+    GM[GM / Owner]
+    P[Players]
+    BOT[Channel Bot / Plugin]
+    HUB[DiceFrame Hub]
+    LLM[LLM / Embedding / Image / Speech Providers]
+
+    subgraph DF[DiceFrame Server]
+        WEB[WebUI / HTTP / SSE]
+        APP[Application Services]
+        CORE[Game / Rules / Runtime Core]
+        PLUG[Plugin Host]
+        STORE[(Saves / SQLite / Assets)]
+    end
+
+    GM --> WEB
+    P --> WEB
+    BOT --> PLUG
+    PLUG --> WEB
+
+    WEB --> APP
+    APP --> CORE
+    CORE --> STORE
+    APP --> STORE
+
+    APP --> LLM
+    CORE --> LLM
+    PLUG --> HUB
+```
+
+DiceFrame 的关键边界是：
+
+- **浏览器、Bot、插件、LLM 都不是最终游戏状态权威。**
+- `GameInstance`、规则 runtime、服务端 reducer / resolver 才是机械与持久状态权威。
+- LLM 主要承担：
+  - 叙事；
+  - 语义理解；
+  - 候选结构化计划；
+  - 低可信 proposal。
+- 任何会修改：
+  - HP；
+  - 余额；
+  - 法术位；
+  - 状态；
+  - 战斗顺序；
+  - campaign facts；
+  - persisted identity；
+  - 玩家权限；
+  - 规则 mechanics  
+  的操作，都必须回到服务端合法化、验证和持久化路径。
+
+---
+
+## 2.2 分层与依赖方向
+
+当前应用的核心依赖方向可以概括为：
+
+```text
+Frontend / Bot / Plugin Client
+          │
+          ▼
+     HTTP Routes / SSE
+          │
+          ▼
+         WebAPI
+          │
+          ▼
+   WebUI Application Services
+          │
+          ├─────────────┐
+          ▼             ▼
+      GameHandler    Ruleset Runtime
+          │             │
+          ▼             ▼
+      Generic Engine / Rules / Content
+          │
+          ├───────────────┬───────────────┐
+          ▼               ▼               ▼
+       Saves          Lorebook DB       Memory DB
+```
+
+`tests/architecture/test_dependencies.py` 用 AST 级 import 分析保护真实依赖方向。当前明确保护：
+
+- `engine / generation / lorebook / memory / rules`
+  - 不得依赖 `webui`；
+  - 不得依赖具体 `dnd2024` runtime；
+  - 不得随意依赖 legacy compat；
+- `rulesets`
+  - 不得依赖 `webui / compat`；
+- `dnd2024/combat`
+  - 不得依赖 `campaign / webui`；
+- `adventures`
+  - 不得依赖具体 ruleset / webui / compat；
+- `web_transport`
+  - 不得反向依赖游戏、规则或 WebUI 业务；
+- 游戏/规则/AI 层
+  - 不得感知 TLS、证书或具体 transport。
+
+这是当前最重要的“硬架构边界”之一。
+
+---
+
+## 2.3 Authority Model：谁有权决定什么
+
+| 参与者 / 层 | 可以做 | 不可以直接做 |
+|---|---|---|
+| 浏览器前端 | 提交 intent、行动文本、选择、确认、显示 projection | 提交可信伤害、余额、权限结论、战斗结果 |
+| Bot / Channel Adapter | 代表合法 actor 调用 HTTP API | 绕过 actor / game / room 权限 |
+| LLM GM | 叙事、生成候选 tags / check plans / proposals | 直接成为 persisted mechanics authority |
+| Check Planner LLM | 提出“需要什么检定”的候选 | 最终决定合法 actor、数值、骰子结果 |
+| Ruleset Runtime | 解释规则、验证 intent、resolve、apply event | 反向控制 WebUI / transport |
+| GameInstance | 单局权威状态与生命周期 | 感知 HTTP、TLS、Vue 等表现层 |
+| Economy Engine | 余额、proposal、transaction、rollback | 让模型文本直接扣钱 |
+| Memory Store | 长期记忆外部存储 | 在权威 settlement 前自行写入 |
+| Plugin | 声明 contribution / capability / RPC | 绕过 host 权限直接变成核心 authority |
+| Web Transport | HTTP/HTTPS、listener、cert、endpoint | 感知游戏规则 |
+
+---
+
+# 3. 仓库与模块地图
+
+## 3.1 后端主要目录
+
+当前 `src/` 的重要架构域如下：
+
+```text
+src/
+├─ adventures/          独立 Adventure Bundle loader / graph contracts
+├─ asr/                 语音识别能力
+├─ bots/                Bot bridge 共用逻辑
+├─ commands/            回合编排、检定、LLM、state apply 等应用/领域 orchestration
+├─ compat/              旧格式兼容边界
+├─ content/             Content V2、GM style 等内容语义
+├─ db/                  DB 辅助
+├─ docker_launcher/     Managed Docker 安装提交与回滚边界
+├─ engine/              GameInstance、骰子、经济、战斗 primitives、持久化 projection
+├─ generation/          内容生成
+├─ imagegen/            图像生成 backend / asset contracts
+├─ knowledge/           助手/知识能力
+├─ launcher/            Windows Portable launcher
+├─ llm/                 LLM client / context / parser / tools
+├─ lorebook/            世界书存储、关键词匹配、Hybrid retrieval、embedding 派生缓存
+├─ memory/              长期记忆存储、检索、delta
+├─ migrations/          Persisted schema migration
+├─ plugin_host/         插件宿主、进程、descriptor、capability
+├─ plugin_sdk/          插件 SDK
+├─ rules/               Legacy / generic RuleSystem 与 bundle loader
+├─ rulesets/            版本化 Ruleset Runtime
+├─ tts/                 TTS 能力
+├─ web_transport/       HTTP/HTTPS / TLS / listener / endpoint
+└─ webui/               aiohttp application、routes、services、WebAPI
+```
+
+需要特别注意：
+
+- `src/commands/` 不是 HTTP 层；
+- `src/webui/services/` 才是 Web 应用服务层；
+- `src/engine/` 不应继续吸入具体 D&D 语义；
+- `src/rulesets/dnd2024/` 是 D&D 专属规则权威；
+- `src/compat/` 是“旧世界进入新模型”的边界，不是新代码默认依赖层。
+
+---
+
+## 3.2 Web 后端结构
+
+```text
+src/webui/
+├─ application.py       aiohttp app + middleware + route composition
+├─ bootstrap.py         startup / recovery / plugin / background jobs / cleanup
+├─ composition.py       runtime composition root
+├─ runtime_config.py    配置加载与持久化
+├─ access_control.py    owner / player-share / bot / SSE auth
+├─ api.py               WebAPI delegation facade
+├─ routes/              HTTP 层
+└─ services/            应用服务层
+```
+
+当前 `services/` 已经按功能域拆分，包括但不限于：
+
+- `turns.py`
+- `game_lifecycle.py`
+- `game_queries.py`
+- `game_master.py`
+- `game_controls.py`
+- `ruleset_gameplay.py`
+- `ruleset_characters.py`
+- `ruleset_advancement.py`
+- `ruleset_rest.py`
+- `combat_extension.py`
+- `characters.py`
+- `character_cards.py`
+- `manual_rolls.py`
+- `generated_images.py`
+- `memory.py`
+- `plugins.py`
+- `worlds.py`
+- `rules.py`
+- `adventures.py`
+- `updater.py`
+- `security.py`
+- `speech.py`
+- `asr.py`
+
+架构意图是：**route 负责 HTTP shape，service 负责用例，WebAPI 负责委托/组合，核心负责权威 mechanics。**
+
+---
+
+## 3.3 前端结构
+
+当前前端位于 `frontend-v2/`，采用 Vue/TypeScript 的 feature-oriented 结构：
+
+```text
+frontend-v2/src/
+├─ api/                 后端 API client
+├─ components/          通用 UI
+├─ composables/         可复用状态/行为
+├─ features/
+│  ├─ admin/
+│  ├─ auth/
+│  ├─ create/
+│  ├─ legal/
+│  ├─ lorebook/
+│  ├─ overview/
+│  ├─ peer/
+│  ├─ play/
+│  ├─ player/
+│  ├─ plugins/
+│  ├─ rulesets/
+│  └─ worlds/
+├─ i18n/
+├─ navigation/
+├─ peer/
+├─ router/
+├─ App.vue
+└─ main.ts
+```
+
+前端的规则：
+
+- 不复制后端 Content V2 逻辑；
+- 不根据“名字像 D&D”推断规则能力；
+- 对专业规则能力使用后端 `ruleset capabilities / available_intents`；
+- 不把按钮是否显示当成权限检查；
+- UI capability gating 只是体验层，服务端仍需重新校验。
+
+---
+
+# 4. 启动与 Composition Root
+
+## 4.1 为什么拆 `web_server / composition / application / bootstrap`
+
+DiceFrame 当前启动过程已经从“大型入口脚本”拆出四类 owner：
+
+| 模块 | Owner |
+|---|---|
+| `web_server.py` | 环境入口、listener 实际启动 |
+| `runtime_config.py` | 配置来源与写盘 |
+| `composition.py` | runtime dependency graph |
+| `application.py` | aiohttp app / middleware / routes |
+| `bootstrap.py` | startup / recover / plugin / background jobs / cleanup |
+
+这样做的核心价值不是“文件更短”，而是避免以下问题：
+
+- import 一个模块就发生配置迁移写盘；
+- listener 与游戏业务互相引用；
+- runtime hot reload 只换一半依赖；
+- route 构造业务对象；
+- 测试启动逻辑必须真的开端口。
+
+---
+
+## 4.2 启动序列
+
+```mermaid
+sequenceDiagram
+    participant WS as web_server.py
+    participant RC as RuntimeConfig/ConfigStore
+    participant CP as composition.py
+    participant APP as application.py
+    participant BS as bootstrap.py
+    participant CF as common_factory.py
+    participant PH as PluginHost
+    participant REG as GameRegistry
+
+    WS->>RC: load config / secrets / env
+    WS->>CP: build composition state
+    CP->>APP: create_app(dependencies)
+    APP-->>WS: aiohttp Application
+    WS->>WS: build listener plan
+    WS->>WS: start HTTP/HTTPS listeners
+
+    APP->>BS: on_startup()
+    BS->>BS: sync built-in rules/worlds/adventures
+    BS->>CF: build_subsystems()
+    CF-->>BS: TRPGSubsystems
+    BS->>PH: discover plugins
+    BS->>CP: make_api(...)
+    CP-->>BS: WebAPI
+    BS->>REG: recover_all()
+    BS->>WebAPI: recover economy outboxes
+    BS->>PH: start_enabled()
+    BS->>BS: start periodic save / embedding / docs / cert renewal
+```
+
+---
+
+## 4.3 `TRPGSubsystems`
+
+`src/common_factory.py` 定义当前核心 subsystem bundle：
+
+```text
+TRPGSubsystems
+├─ registry            GameRegistry
+├─ llm_client          LLMClient
+├─ lorebook_store      LorebookStore
+├─ lorebook_matcher
+├─ memory_store        MemoryStore
+├─ ruleset_registry    RulesetRuntimeRegistry
+└─ handler             GameHandler
+```
+
+这是一条非常重要的 composition seam。
+
+WebUI runtime reload 时，可以：
+
+- 保留现有 registry；
+- 保留 lorebook/memory；
+- 重建 LLM client / provider 配置；
+- 在候选 runtime 完整构造成功后切换。
+
+它避免了“热重载模型配置时游戏实例被清空”。
+
+需要注意，`EmbeddingClient` 当前不是 `TRPGSubsystems` 的顶层字段。`common_factory.py` 在候选 runtime 完整构造后把新客户端切到：
+
+```text
+MemoryStore.embedding_client
+```
+
+`GameHandler.lore_retriever` 再通过惰性 provider 复用这一**同一个**客户端。因此长期记忆和世界书语义检索共享：
+
+```text
+embedding_enabled
+embedding_provider_ref
+embedding_model
+embedding_max_input
+```
+
+而不是各自维护第二套配置或第二个客户端。`LoreRetriever` 也不是新的状态 authority，它只是 `GameHandler` 内的检索编排组件。
+
+---
+
+# 5. Web Transport 与 Listener 拓扑
+
+## 5.1 Transport 不是业务层
+
+`src/web_transport/` 专门管理：
+
+- HTTP / HTTPS；
+- self-signed / Let's Encrypt 等证书；
+- endpoint；
+- listener topology；
+- graceful lifecycle。
+
+业务模块不得 import 它。
+
+---
+
+## 5.2 ListenerPlan
+
+每个监听器由：
+
+```text
+ListenerPlan
+- host
+- port
+- tls
+```
+
+描述。
+
+例如一个实例可以同时有：
+
+```text
+0.0.0.0:8000  HTTP
+0.0.0.0:8443  HTTPS
+[::]:8000      HTTP
+[::]:8443      HTTPS
+```
+
+每个 site 独立启动：
+
+- 某个 host bind 失败，不自动判定其它 listener 失败；
+- 失败必须记录；
+- 不能因为 IPv6 失败就把 IPv4 正常 listener 一起当成失败。
+
+---
+
+## 5.3 内部插件 API 地址
+
+插件通过 `TRPG_API_BASE` 调用 DiceFrame 自身 HTTP API。
+
+问题在于：
+
+- 外部主 listener 可能是 self-signed HTTPS；
+- 插件普通 aiohttp client 未必信任该证书；
+- 服务可能只监听 IPv6；
+- 某个计划中的 listener 可能实际 bind 失败。
+
+因此内部地址选择分两步：
+
+```text
+计划阶段：
+internal_api_listener(plan)
+    ↓
+优先 HTTP
+    ↓
+同 scheme 下优先 loopback → wildcard → concrete host
+
+启动后：
+resolve_internal_listener(plan, started)
+    ↓
+验证原选择真的启动成功
+    ↓
+失败则从 started 重新选 fallback + warning
+```
+
+如果启动后的实际内部 base URL 与插件启动时的值不同：
+
+```text
+web_server
+  └─ update PluginHost.base_env["TRPG_API_BASE"]
+       └─ restart_api_consumers()
+```
+
+只重启：
+
+- 已运行；
+- 声明使用 `diceframe.http`
+
+的插件，而不是全量重启所有插件。
+
+---
+
+# 6. aiohttp Application 与 HTTP 边界
+
+## 6.1 Middleware 顺序
+
+`create_app()` 当前组合的主要 middleware/response hook 包括：
+
+```text
+CORS
+  ↓
+Session
+  ↓
+Abuse Guard
+  ↓
+Authentication / Access Control
+  ↓
+Error Code Normalization
+  ↓
+Response Security Headers
+```
+
+同时 application 持有：
+
+- `SessionManager`
+- `AbuseGuard`
+- `LoginAuditStore`
+- `ConnectionPool`
+- `SseTicketStore`
+- runtime control
+- web transport
+- security transport service
+
+这些都属于 Web application state，不进入 GameInstance。
+
+---
+
+## 6.2 Route ownership
+
+HTTP routes 按 domain 注册，例如：
+
+- games
+- auth
+- bot
+- plugins
+- security
+- hub
+- system
+- updater
+- speech / ASR
+- generated images
+- worlds
+- rules
+- adventures
+- character cards
+- avatars
+- scene images
+- maps
+- generation
+- SSE
+- memory
+
+原则：
+
+```text
+request parsing
+    ↓
+identity / auth extraction
+    ↓
+call WebAPI
+    ↓
+service / core
+    ↓
+serialize response
+```
+
+Route 不应自己：
+
+- 结算经济；
+- 决定 D&D 伤害；
+- 操作 migration；
+- 直接拼一套新的 LLM pipeline。
+
+---
+
+# 7. WebAPI 与 Service 架构
+
+## 7.1 WebAPI 的定位
+
+`src/webui/api.py` 仍然是一个很大的 facade，但架构上它的角色是：
+
+- 统一暴露 JSON-safe application API；
+- 组装 service dependencies；
+- 将复杂用例委托到 `src/webui/services/*`；
+- 把共享 registry/lorebook/memory/ruleset registry/handler 注入 service。
+
+它不应该继续吸收具体业务实现。
+
+---
+
+## 7.2 Service 间调用
+
+当前原则是：
+
+> **WebUI service 不直接 import 另一个 service 来完成跨域 orchestration。**
+
+跨域调用使用：
+
+- dependency dataclass；
+- callable；
+- protocol；
+- composition root 注入。
+
+这样可以防止：
+
+```text
+characters -> turns -> payments -> characters -> ...
+```
+
+形成隐式循环。
+
+---
+
+## 7.3 典型依赖注入
+
+以角色服务为例，WebAPI 构造：
+
+```text
+CharacterDependencies
+├─ games
+│  ├─ get_instance
+│  ├─ parse_game_key
+│  └─ save_instance
+├─ rules
+│  ├─ load_rule_by_id
+│  ├─ load_rule_for_game
+│  └─ ruleset_registry
+├─ assets
+│  ├─ lorebook
+│  ├─ world template loader
+│  ├─ avatar resolver
+│  └─ generated image resolver
+└─ economy hooks
+   ├─ commit deferred effects
+   ├─ schedule deferred scene image
+   ├─ apply memory
+   └─ reverse memory
+```
+
+Service 只拿它真正需要的 capability，而不是拿整个 `WebAPI` 当 service locator。
+
+---
+
+# 8. GameHandler：游戏编排层
+
+`src/commands/game_handler.py` 是核心游戏编排 facade。
+
+它组合：
+
+```text
+GameHandler
+├─ CombatResolver            legacy/generic combat path
+├─ DiceResolver
+├─ PuzzleProcessor
+├─ PromptComposer
+├─ LoreRetriever             shared by round / swipe / KP Q&A
+├─ GameFactory
+├─ StateUpdateApplier
+├─ ProgressionResolver
+├─ RoundProcessor
+├─ SwipeGenerator
+├─ GameLifecycle
+├─ StoryRecapGenerator
+└─ KPQuestionResponder
+```
+
+## 8.1 为什么它不是 Aggregate Root
+
+`GameHandler` 不拥有单局状态。
+
+单局状态归 `GameInstance`。
+
+GameHandler 的职责更接近：
+
+> **Application / Domain Orchestrator**
+
+它负责把：
+
+- LLM；
+- rules；
+- lore retrieval / projection；
+- memory；
+- combat；
+- state applier；
+- lifecycle
+
+串成完整流程。
+
+---
+
+## 8.2 安全入口与内部入口
+
+一个关键架构事实：
+
+- `process_round()` 是受保护入口；
+- `_process_round_impl()` / `process_round_impl()` 只是内部实现 seam。
+
+内部实现不保证：
+
+- 获取正确 process lock；
+- failure rollback；
+- stale-run guard；
+- failure persistence。
+
+因此外部 transport / service 不应绕过安全入口直接调用内部 round implementation。
+
+---
+
+# 9. GameInstance：单局 Aggregate Root
+
+## 9.1 核心职责
+
+`GameInstance` 是当前单局游戏的权威 Aggregate Root。
+
+它拥有：
+
+- 游戏 identity；
+- run identity；
+- 玩家与 NPC；
+- round state；
+- action queues；
+- legacy combat state；
+- ruleset binding / state；
+- adventure binding；
+- economy；
+- checks；
+- manual rolls；
+- narrative state；
+- private/public logs；
+- media references；
+- rollback snapshots；
+- health/degraded state；
+- runtime concurrency locks。
+
+---
+
+## 9.2 GameState
+
+当前状态机：
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+
+    CREATED --> WAITING
+    WAITING --> ACTIVE_ACTION
+
+    ACTIVE_ACTION --> ACTIVE_JUDGMENT: 玩家行动完成 / 强制推进
+    ACTIVE_JUDGMENT --> ACTIVE_ACTION: 判定 + 叙事提交成功
+    ACTIVE_JUDGMENT --> ACTIVE_ACTION: abort_round_processing
+
+    ACTIVE_ACTION --> PUZZLE
+    PUZZLE --> ACTIVE_ACTION
+
+    ACTIVE_ACTION --> PAUSED
+    ACTIVE_JUDGMENT --> PAUSED
+    PAUSED --> ACTIVE_ACTION
+
+    CREATED --> ENDED
+    WAITING --> ENDED
+    ACTIVE_ACTION --> ENDED
+    ACTIVE_JUDGMENT --> ENDED
+    PUZZLE --> ENDED
+```
+
+这里需要区分两个概念：
+
+### Judgment Abort
+
+本轮已经进入判定，但处理失败：
+
+```text
+ACTIVE_JUDGMENT
+    ↓
+abort_round_processing
+    ↓
+恢复本轮进入判定前快照
+    ↓
+ACTIVE_ACTION
+```
+
+它不是“回滚一个已经完成的历史回合”。
+
+### Historical Rollback / Swipe
+
+对已经提交过的回合进行历史改写：
+
+```text
+authoritative history
+    ↓
+restore target snapshot
+    ↓
+cut discarded branch
+    ↓
+regenerate / apply new branch
+    ↓
+persist
+```
+
+这两个生命周期不能混在一起。
+
+---
+
+# 10. 单局并发模型
+
+## 10.1 三层锁
+
+GameInstance 当前的锁顺序：
+
+```text
+_authority_lock
+      ↓
+_process_lock
+      ↓
+_lock
+```
+
+含义大致是：
+
+### `_authority_lock`
+
+保护：
+
+- 历史 rewrite；
+- aggregate replacement；
+- 高级 authority gate。
+
+### `_process_lock`
+
+保护：
+
+- process_round；
+- generate_swipe；
+- 同局不能同时跑两条完整叙事处理流水线。
+
+### `_lock`
+
+保护：
+
+- 较细粒度 state mutation；
+- 行动队列/状态切换等 aggregate 内部操作。
+
+顺序固定的目的，是降低死锁和逆序获取风险。
+
+---
+
+## 10.2 `run_id`
+
+`game_key` 表示：
+
+> “这是哪一局槽位”。
+
+`run_id` 表示：
+
+> “这个槽位现在是哪一次运行”。
+
+例如：
+
+```text
+game_key = web:roomA:default
+
+run_1    ---- restart ----> run_2
+            same game_key
+```
+
+旧请求可能还持有 `run_1`。
+
+因此 mutation path 必须检查：
+
+```text
+request.expected_run_id == current_instance.run_id
+```
+
+否则拒绝 stale write。
+
+---
+
+## 10.3 Aggregate Replacement
+
+重开/重置不是直接在旧对象上逐字段清空。
+
+正确语义是：
+
+```text
+Old GameInstance
+     │
+     ├─ lock authority
+     │
+     ├─ construct candidate
+     │
+     ├─ initialize candidate
+     │
+     └─ atomic registry replacement
+                    ↓
+             New GameInstance
+```
+
+这样，等待锁的旧 writer 恢复执行后仍然指向旧 object / old run，可以被 stale fence 拦截。
+
+---
+
+# 11. 持久化架构
+
+## 11.1 Save Projection
+
+持久化 projection 的 owner 是：
+
+```text
+src/engine/game_state_codec.py
+```
+
+而不是把序列化逻辑继续堆在 `GameInstance.to_dict()`。
+
+流程：
+
+```mermaid
+flowchart LR
+    GI[GameInstance] --> ENC[GameStateCodec.encode]
+    ENC --> SAVE[Persisted Game State]
+
+    SAVE --> MIG[normalize / migrate]
+    MIG --> DEC[GameStateCodec.decode]
+    DEC --> GI2[GameInstance]
+```
+
+---
+
+## 11.2 Persisted 主要状态
+
+当前 codec 覆盖的主要类别：
+
+| 类别 | 示例 |
+|---|---|
+| identity | game_key, run_id, memory_namespace |
+| binding | world_id, rule_id, ruleset_runtime, adventure_binding |
+| runtime state | ruleset_state, event_ledger |
+| world state | world_state: facts / clock / scheduled_events / revision |
+| player control | players[uid].control / away_control_policy |
+| game lifecycle | state, round_number |
+| participants | players, npcs, ready/away |
+| actions | action_queue, pending_actions |
+| legacy combat | combat_active, enemies, initiative |
+| generic combat extension | combat_extension, round snapshots |
+| narrative | scene, game_time, log, summary, key_facts |
+| presentation prefs | language, difficulty, narrative_perspective, gm_style_override |
+| economy | proposals / transactions / effects / outbox |
+| checks | last_check, last_checks, manual_roll_requests |
+| rollback safety | round_start_snapshot, round_entity_snapshot, death save outcomes |
+| access | GM, player access, bot bind, room credentials |
+| media | scene_image, map_background |
+| health | health_events, health_status |
+| private channels | private_log, table_talk |
+
+不是所有 runtime-only 对象都会序列化，例如：
+
+- asyncio locks；
+- active tasks；
+- timer task handles；
+- transient in-flight context。
+
+---
+
+## 11.3 Persisted Schema Migration
+
+当前：
+
+```text
+CURRENT_INSTANCE_SCHEMA_VERSION = 15
+```
+
+迁移必须顺序执行：
+
+```text
+v1 → v2 → v3 → ... → v15
+```
+
+而不是：
+
+```text
+if old_version:
+    guess latest shape
+```
+
+当前重要 migration 历史：
+
+| 版本 | 关键变化 |
+|---|---|
+| 1→2 | `run_id`、memory namespace、economy 基础形态 |
+| 2→3 | durable external-effect outbox |
+| 4→5 | 曾引入 purchase request/order |
+| 5→6 | 清理已废弃 narration-priced purchase state |
+| 6→7 | 收敛为 payer-confirmed proposals |
+| 7→8 | 淘汰 transfer / fee / all_contributors surface |
+| 8→9 | persisted manual roll requests |
+| 9→10 | 明确 `play_mode` |
+| 10→11 | manual roll purpose / target / comparison |
+| 11→12 | Currency V2；内置 CoC dollar→cent |
+| 12→13 | WorldState core；为旧存档创建显式空世界状态容器 |
+| 13→14 | Player Control contract；旧席位无猜测地默认 `human` |
+| 14→15 | `away_control_policy`；旧存档默认 `pause`，不静默交给 AI |
+
+迁移实现：
+
+- 先 `deepcopy`；
+- 不修改 caller 原对象；
+- 不支持的未来版本直接拒绝；
+- 不确定的金额语义不猜。
+
+---
+
+## 11.4 Import 与 Identity Rebind
+
+导入一个 save 不是“继续使用原 run identity”。
+
+导入路径会：
+
+```text
+old game_key
+old run_id
+old memory namespace
+       │
+       ▼
+rebind_imported_game_state_payload
+       │
+       ├─ new local game_key
+       ├─ new run_id
+       ├─ new memory namespace
+       └─ rebind economy run_id
+```
+
+外部 memory store 本身不在存档包内，所以：
+
+- 未投递 pending payload 可以转到新 namespace；
+- 已投递 receipt 不伪装成新局已投递。
+
+---
+
+# 12. 完整玩家行动 / 回合流水线
+
+这是 DiceFrame 最核心的运行链路。
+
+```mermaid
+sequenceDiagram
+    participant P as Player
+    participant R as HTTP Route
+    participant T as turns.py
+    participant GI as GameInstance
+    participant CP as Check Planner
+    participant DR as Dice / Rules
+    participant RP as RoundProcessor
+    participant LR as LoreRetriever
+    participant PC as PromptComposer
+    participant L as LLM
+    participant AP as State Applier
+    participant E as Economy
+    participant S as Save
+    participant M as Memory Outbox
+    participant SSE as SSE / Clients
+
+    P->>R: POST /action
+    R->>T: submit_action
+    T->>GI: validate actor/run/state
+    T->>GI: persist action immediately
+
+    alt multiplayer still waiting
+        T-->>P: waiting
+    else ready to adjudicate
+        T->>GI: ACTIVE_JUDGMENT
+        T->>RP: process_round()
+
+        RP->>CP: plan structured checks
+        CP-->>RP: candidate checks
+        RP->>DR: server normalize / roll / validate
+
+        alt luck decision pending
+            RP-->>T: RoundNotProcessed(luck_pending)
+        else checks complete
+            RP->>LR: action + scene + location + present NPC
+            LR->>LR: keyword + optional semantic + visibility + merge/rank
+            LR-->>RP: matched lore entries
+            RP->>PC: compose prompt + authoritative context
+            PC->>L: GM request / stream
+            L-->>RP: narration + protocol tags
+
+            RP->>RP: stale run/economy/instance fence
+            RP->>E: proposals / deferred effect gate
+            RP->>AP: apply permitted state updates
+            RP->>S: authoritative save
+            S-->>RP: success
+
+            RP->>M: drain committed memory effects
+            RP-->>SSE: broadcast committed result
+        end
+    end
+```
+
+---
+
+## 12.1 为什么行动先持久化
+
+多人局中，一个玩家行动后可能需要等其他玩家。
+
+如果 action 只存在 HTTP handler 的局部变量里：
+
+```text
+player A submits
+server crash
+player B submits later
+```
+
+A 的行动会丢失。
+
+因此 Web/Bot action flow 在等待 barrier 前就把行动写入 GameInstance / save。
+
+---
+
+## 12.2 Multiplayer Barrier
+
+多人不是“谁说一句就让 LLM 回一次”。
+
+基本语义：
+
+```text
+current alive/present participants
+       ↓
+collect actions
+       ↓
+all required actors ready
+       ↓
+one judgment phase
+       ↓
+checks + one GM narrative
+```
+
+这保证：
+
+- 同一 round 的多人行动可以一起判定；
+- 不把先发消息的人变成隐性 initiative authority；
+- GM prompt 可以看到完整本轮声明。
+
+---
+
+
+# 12A. Player Control 与 AI 托管 PC
+
+这一节是 2026-09-17 合入 `main` 的重要架构变化。
+
+## 12A.1 控制器不是角色
+
+权威记录：
+
+```text
+players[uid].control
+```
+
+当前控制模式：
+
+```text
+human
+ai
+unclaimed
+```
+
+并包含：
+
+```text
+revision
+temporary
+resume_mode
+```
+
+它回答的是：
+
+> **“谁在玩这个角色？”**
+
+而不是：
+
+> “这个角色是什么？”
+
+角色本体仍然只有一份：
+
+```text
+GameInstance.players[uid]
+character_sheet
+ruleset_character
+player:<uid> combat actor
+```
+
+切换控制器不会复制：
+
+```text
+HP
+装备
+状态
+法术位
+世界位置
+战斗 actor
+```
+
+因此绝对不要为了 AI 托管创建：
+
+```text
+companion:<same-character>
+```
+
+否则会产生双份状态。
+
+### 开发入口
+
+```text
+src/engine/player_control.py
+src/webui/services/game_controls.py
+src/engine/game_instance.py
+src/engine/game_state_codec.py
+src/migrations/instance.py
+```
+
+---
+
+## 12A.2 `human`
+
+真人负责该席位。
+
+真人身份仍由现有 Web session / share / Bot 映射识别。
+
+Player Control 不建立第二套账号体系。
+
+---
+
+## 12A.3 `ai`
+
+服务器负责为该 PC 产生行动。
+
+角色仍然是：
+
+```text
+player:<uid>
+```
+
+探索行动与权威 D&D 战斗使用不同生成通道，但最后都回到既有 authority。
+
+---
+
+## 12A.4 `unclaimed`
+
+席位存在，但当前没有真人，也不由服务器 AI 玩。
+
+它不应：
+
+```text
+阻塞真人 ready barrier
+自动产生探索行动
+```
+
+是否进入具体权威战斗由战斗参与者规则决定，而不是 control record 自己偷偷加 actor。
+
+---
+
+## 12A.5 控制变更安全边界
+
+控制权变更不是任意时刻都允许。
+
+服务端通过：
+
+```text
+control_change_block
+```
+
+检查当前阶段与是否存在在飞处理。
+
+典型安全窗口：
+
+```text
+ACTIVE_ACTION
+且没有正在执行的完整处理流程
+```
+
+否则：
+
+```text
+CONTROL_CHANGE_BUSY
+```
+
+并让调用方稍后重试。
+
+---
+
+## 12A.6 `control.revision`
+
+每次控制权变化都推进 revision。
+
+AI 行动请求发出前捕获：
+
+```text
+run_id
+round
+uid
+control.revision
+phase
+```
+
+LLM 返回后全部复核。
+
+例如 AI 正在思考时玩家认领角色：
+
+```text
+ai → human
+revision changed
+↓
+旧 AI 输出丢弃
+```
+
+这避免旧 controller 的结果污染新 controller。
+
+---
+
+# 12B. AI 托管探索行动
+
+入口：
+
+```text
+src/commands/ai_player.py
+```
+
+探索 AI 玩家只生成：
+
+```text
+普通行动文本
+```
+
+它不直接生成可信：
+
+```text
+DC
+攻击命中
+伤害
+骰子结果
+世界事实
+余额变化
+```
+
+流程：
+
+```text
+human_actions_ready()
+↓
+AI 为仍缺行动的 ai seat 生成行动
+↓
+GameInstance.add_action
+↓
+与真人动作进入同一 Check Planner / WorldState / RoundProcessor
+```
+
+---
+
+## 12B.1 Human Gate
+
+AI 并不是“看到自己没行动就立刻抢跑”。
+
+AI 补行动发生在真人闸门满足后。
+
+示例：
+
+```text
+A 已行动
+B 仍是真人且未行动
+C 是 AI
+```
+
+此时：
+
+```text
+human_actions_ready() == false
+```
+
+C 不应提前生成并推动回合。
+
+只有需要等待的真人全部就绪后，才补 AI seats。
+
+---
+
+## 12B.2 每席位隔离
+
+AI 玩家 prompt 只允许使用该角色可见的信息：
+
+```text
+自己的角色卡
+公开剧情
+自己的私密感知
+明确对该角色可见的信息
+本轮已声明行动
+```
+
+不应读取：
+
+```text
+GM 私密事实
+gm_directives
+别人的 private_log
+未来剧情
+```
+
+---
+
+## 12B.3 Persona
+
+AI 托管是：
+
+> **扮演这个角色。**
+
+不是：
+
+> “替真人计算全局战术最优解”。
+
+System prompt 要优先遵循：
+
+```text
+身份 / 背景
+性格
+价值观
+目标 / 动机
+关系
+个人经历
+已知线索
+当前身体 / 资源状态
+```
+
+角色卡仍是唯一 persona 来源。
+
+不要新增第二份：
+
+```text
+ai_persona
+```
+
+去和 character sheet 漂移。
+
+---
+
+# 12C. 控制权变化后的即时 Resume
+
+`human → ai` 写入成功后，系统不要求真人再额外发一条消息才能“叫醒”回合。
+
+入口：
 
-正常 V2 runtime 的 mechanics authority 是 canonical rule/content。`ARMOR_LITE`、`WEAPON_DAMAGE`、`WEAPON_DAMAGE_DICE` 等旧表只用于旧存档、V1 或 legacy fallback。
+```text
+GameControlService.set_player_control
+        ↓
+turns.resume_after_control_change
+```
+
+它复用已有 progression：
 
-## Rule Locale
+```text
+检查 phase
+↓
+检查 human gate
+↓
+fill AI actions
+↓
+try_advance
+↓
+prepare checks / process round
+```
+
+禁止通过前端提交：
+
+```text
+空行动
+假行动
+```
+
+来触发。
+
+---
 
-Rule core 保留 `dice_system`、`damage_dice`、`ac_base`、`dex_cap`、`attribute_points`、`proficiency`、`combat_model`、`skill_pools`、`item_categories`、伤害/死亡机制以及 permissions、capabilities、scripts。职业技能池使用 class/skill canonical ID；typed locale 只能翻译这些 ID 的显示名，不能替换技能池或物品分类。嵌套 unknown/mechanics 字段必须拒绝。
+# 12D. AI 托管的 D&D 权威战斗
+
+探索 AI 和 D&D 战斗 AI 不是同一类输出。
 
-## World Locale
+权威战斗中：
 
-World core 拥有 `world_id`、`default_rule`、`recommended_rules`、`suggested_difficulty` 以及 starter lorebook 的 entry set/order、ID、type、tier、`unreliable`、`sync_on_enter`、`triggers_recursive`、`visible_to`、`match_mode`、`sticky`、`cooldown`、`delay`、`order`、`probability`、`group`、`group_weight`、`connected_to` 等确定性字段。
+```text
+AI-hosted PC
+↓
+AutomaticIntentRuntime
+↓
+structured intent
+↓
+validate
+↓
+resolve
+↓
+apply EventBatch
+```
 
-World locale 只能修改 `world_name`、`description`、`world_setting`、`starter_scene`，以及按 canonical lore entry ID 修改 `name`、`keywords`、`content`。World Locale cannot replace `starter_lorebook` entries. Language changes cannot add, remove, or rename canonical lore identities。
+入口：
 
-例如 core ID 为 `npc_innkeeper`，中文可以是 `npc_innkeeper.name = 老汤姆`，英文可以是 `npc_innkeeper.name = Old Tom`；identity 永远是 `npc_innkeeper`。
+```text
+src/rulesets/automation.py
+src/rulesets/dnd2024/combat/
+```
 
-世界书数据库保存 canonical/core 条目；关键词匹配、prompt 和谜题初始化按每局 `GameInstance.language` 构造只读本地化视图，不把译文写回共享数据库。
+当前自动阶梯是确定性的规则逻辑，不使用 LLM 战术。
 
-所有 Ruleset 共用同一套通用 Lore 检索（`src/lorebook/retrieval.py`）：正常回合、swipe 与桌外问答都走同一个 `LoreRetriever`，检索输入是本轮行动加当前 scene / canonical location / 在场 NPC 锚点。既有 `KeywordMatcher` 仍是基础检索，语义检索只是可选的增强——沿用现有 embedding 配置，并复用 `MemoryStore.embedding_client` 这一个 `EmbeddingClient` 实例，不新建第二套 embedding 客户端；未配置或调用失败时自动退回锚点加关键词，绝不阻断回合。条目向量存在 `lorebook.db` 的 `lorebook_embeddings` 派生缓存里（按 entry / language / embedding_profile 隔离，`content_hash` 变化即重建），它不是 authority，删掉可自动重建。语义命中只代表"可能相关"，仍要过可见性与预算，既不写 WorldState 也不改 Ruleset 裁定，也不触发任何事件。
+典型行为：
 
-## Plugin Content V2
+```text
+治疗濒危
+↓
+攻击最近敌对
+↓
+合法移动
+↓
+Dodge
+↓
+End Turn
+```
 
-Manifest 当前支持：`schema_version = 1`、`content_schema_version = 1 or 2`、`locale_schema_version = 1`，以及 package locale fallback 的 `default_locale`。Locale fallback 为 exact requested locale -> base locale -> package/default locale -> base(default locale) -> canonical/core display fallback。
+当当前 combat actor 正好被交给 AI：
 
-`ResourceRef` 示例：`core:item:longsword`、`plugin:my-pack:item:moon_blade`。普通 V2 item/class/spell/npc/character_template 可以通过 namespace 共存。Rule/World 仍主要使用 plain `rule_id` / `world_id`，因此不同 V2 plugin 的重复 Rule/World ID 必须明确拒绝，不能 first-wins 或 last-wins。
+```text
+ruleset_gameplay.resume_authoritative_combat
+```
 
-V2 资源 ID 必须已经是 canonical 形式；注册器不会替插件把大小写、空格或非 ASCII ID 悄悄归一化。V2 locale 或内容校验失败时，目录 API 返回 `CONTENT_VALIDATION_FAILED`，不得省略损坏资源或回退到未本地化内容。应用内内容包导出器始终生成 Content V2 core + typed locale 布局；V1 全文副本只在导入适配器中支持。
+复用同一 automatic-intent loop，直到：
 
-## Plugin 运行时扩展边界
+```text
+轮到真人
+战斗结束
+没有自动意图
+```
 
-`src/plugin_host/support.py` 是插件类型、process mode、推导权限和 contribution mapping 的单一元数据来源。`src/plugin_host/descriptors.py` 负责将不可信 initialize payload 校验为 typed descriptor；`src/plugin_host/capabilities.py` 负责 RPC capability 初始化、查询和投影；`PluginHost` 保留 package、process、lifecycle、security 与兼容 facade 职责。
+不要另写第二套 AI combat loop。
 
-新增合法 provider capability kind 只需插件实现、SDK 契约和测试，不修改 `PluginHost`。只有真正新增 plugin type 时，才评估 support descriptor、runtime initializer、permissions、cleanup 和对外 metadata。贡献路径见 `docs/plugins/EXTENDING_CN.md`。
+---
 
-## Migration 与 Compatibility
 
-`src/migrations/` 负责 persisted schema upgrade；`src/compat/` 负责 old external/runtime shape 到当前 canonical model 的兼容。V1 包通过适配器读取，不能把兼容分支散回正常业务逻辑。
 
-持久化 `GameInstance` 加载后的迁移统一经过 `src.migrations.migrate_instance` 编排入口。各数据域的具体迁移可以由 `src/compat/` 提供纯适配实现，但 service、route 和 runtime 不得直接分散调用域适配器。迁移必须幂等、可测试、按明确的版本/identity/digest 边界执行；无法证明安全迁移时 fail closed。新增功能应新增版本化迁移步骤，不修改已发布迁移的语义。
+# 13. Check Planner 与服务端判定
 
-## 货币模型（Currency Model）
+## 13.1 Planner 的定位
 
-规则货币结构的唯一权威是 `src.engine.currency` 的 `CurrencySpec`：`currency_system`（`schema_version: 2`）声明 `base_unit`（canonical 整数的计数单位，rate 恒为 1）、`display_unit` 与各单位正整数 rate；只有 `currency` 名称的旧规则按 legacy rate=1 spec 兼容，不按名称猜单位。`parse_currency_amount` / `format_currency_amount` 是显示金额 ↔ canonical 整数的唯一转换入口（Decimal、不精确即拒绝），economy 引擎只处理 canonical base-unit 整数，不感知货币名称；禁止业务代码散落 ×100 / ÷100 或引入 float。V2 声明在 `RuleSystem` 构造与 `RuleBundleLoader` 加载边界 fail-fast，规则 CRUD、AI 生成规则与插件规则安装都复用同一校验；显示换算在前端 `frontend-v2/src/utils/currency.ts` 收口。`MAX_ECONOMY_AMOUNT` 是 base-unit 下的技术上限。只有 base_unit 语义变更的规则才迁移存量数据（当前仅内置 `freeform_coc` 美元→美分，×100 一次，经 schema v12 版本化迁移）；旧自定义规则与 legacy 规则数据不动，已有游戏实例的规则禁止通过编辑器修改 base_unit 语义。
+`src/commands/check_planner.py` 使用模型理解：
 
-## GameInstance 聚合边界
+- 哪个行动需要检定；
+- 谁是 actor；
+- target / opponent；
+- intent 类型；
+- 可能关联的技能/物品/NPC；
+- economy purchase intent 等。
 
-`GameInstance` 是单局对局的 Aggregate Root，继续拥有权威运行时状态、不变量、状态转换以及 `_authority_lock` / `_process_lock` / `_lock` 协调权。锁顺序固定为 authority → process → state；runtime lock 不进入存档，也不随 persisted-state replacement 复制。历史重写独占 authority gate，普通 live writer 通过同一原子 gate 在修改前拒绝，不能用分离的布尔检查制造 TOCTOU。玩家、战斗、回合和支付不会仅为缩短文件而拆成彼此独立的 aggregate。
+但它输出的是 **candidate plan**。
 
-每个存档同时具有稳定 `game_key` 和可轮换 `run_id`。程序恢复保留 `run_id`；重置与重开在旧聚合写锁内构造候选聚合并完成原子替换，等待中的旧 run 写入在替换后按 stale run 拒绝，开场已经应用到候选角色的状态不会被旧角色整表覆盖。历史 swipe 重写与正常回合共用 `_process_lock`，并一直持锁到“恢复旧快照 → LLM → 应用新分支 → 权威存档”完成；玩家行动在重写期间于写入前拒绝。经济回滚是整轮语义（ADR 0003）：回滚到第 N 轮会撤销第 N 轮及之后的一切结算，早于该轮创建、在其后才结算的提案恢复为待确认；物品恢复使用绝对快照投影，不做选择性库存差分；swipe 同时截断目标轮之后的日志分支并从该轮重放。长期记忆通过持久化 `memory_namespace` 隔离，隔离不依赖先删除旧记录。重开保留角色、资产和成长但清除死亡、战斗、剧情与待处理提案；重置同时清除角色。存档 shape 的升级只经 `src/migrations/instance.py` 的顺序迁移入口。
+最终必须经过：
 
-通用经济状态属于 `GameInstance`。叙事 `GOLD` / `PAY`、世界书文本与 AI 输出只能创建提案；余额变化必须经过服务端权限、余额、run identity 与幂等校验并写入事务流水。`currency.amount` 是余额 authority，`gold` 仅为兼容投影。个人支付由付款人确认，自由叙事奖励由 GM 确认——小额单人纯货币奖励可在本局奖励策略允许时经同一结算路径免 GM 点击自动到账；策略按 本局覆盖 → 规则模板 `economy_defaults` → 服务器全局兜底 解析，物品奖励、多人分摊与超上限奖励一律不自动结算。叙事奖励不做“任务完成证据”启发式拦截（该层会无声吞掉应得奖励），一律进入提案交由策略与 GM 判定。Web、Bot 与其它 transport 进入同一经济路径。
+```text
+normalize_check_specs
+    ↓
+server actor resolution
+    ↓
+rule/dice validation
+    ↓
+server RNG
+    ↓
+CheckResult
+```
 
-经济提案同时是叙事提交屏障：当前 run 仍有待决定提案、未提交效果组或待投递/待撤销外部效果时，行动、强制推进、幸运续接、SSE 与直接回合处理均不得开始下一段叙事。同一模型回复中的场景、角色状态、物品、任务、记忆、私密信息与快捷行动先持久化为挂起效果，不得在付款决定前成为权威状态。单项确认后提交一次；同轮多项提案必须全部提交后才应用整组效果，任一拒绝、取消或余额不足都会丢弃整组效果。SQLite 记忆属于跨存储外部效果：先随游戏存档写入持久 outbox，再以 delivery identity 幂等投递并记录可验证的前后镜像；swipe/rollback 会持久化撤销请求并恢复仍属于该 delivery 的记忆，且投递或撤销回执未落盘均可在启动或下一次推进前重试。交易关联的场景图 prompt 在 staged 效果中被隔离，只有第一次权威存档成功后才允许启动异步生图。最终结果写入有界经济 outcome，并作为可信服务端上下文覆盖此前模型叙事；叙事生成前后比较经济指纹（提案 id→状态快照），决定期间的合法结算不判过期，而新增提案或回滚会使仍在飞行的旧 AI 回复失效。重开与重置均清空提案、流水、outcome、挂起效果、outbox 和修订号；重开只保留已经结算进角色卡的余额，重置同时清除角色。
+---
 
-附属投影有独立 owner：`src/engine/game_state_codec.py` 负责稳定存档投影与重建，`src/engine/game_context_projector.py` 负责通用 LLM/展示视图；旧存档 payload 的 shape 归一化位于 `src/migrations/instance.py`，在构造聚合前对副本执行，不修改调用方输入。`GameInstance.to_dict()`、`from_dict()` 与 `to_llm_view()` 是兼容委托，不再实现这些投影。旧版属性修正、护甲求和和字符串技能默认值由独立的 `src/engine/legacy_game_projection.py` 提供，并由 `LegacyRulesetAdapter` 显式采用；Ruleset runtime 可以在通用投影之上追加自己的权威视图，但不能把具体 mechanics 写回通用 projector。
+## 13.2 Actor Resolution
 
-这是第一轮 codec / projection / migration 边界抽取，不表示 generic state shape 已经终局化或完全去规则化。通用投影为兼容现有世界、存档与 prompt，仍保留 `hp`、`max_hp`、`class`、`race`、`level`、`attributes`、`equipment`、`skills`、`inventory` 等传统角色字段；这些 compatibility shape 后续仍可在不破坏存档和规则运行时契约的前提下继续收口。
+当前 planner 支持明确 actor：
 
-`src/engine/game_state_contracts.py` 声明存档顶层、通用上下文和玩家回滚快照的 typed contract。`ruleset_runtime`、`ruleset_state`、`adventure_binding` 扩展 payload、event payload 和 character extension fields 在 generic engine 内有意保持 opaque。新增持久化字段时，必须依次检查：`GameInstance` 权威字段 → `GamePersistedState` → codec encode/decode → migration/default 兼容 → 只在 LLM/UI 需要时才增加 projection → behavior regression。
+```text
+player:<uid>
+companion:<id>
+```
 
-## 应用更新边界
+以及精确玩家/队友名称匹配。
 
-Windows source/portable 与托管 Docker 共用 `src/webui/services/updater.py` 的下载状态机，但安装提交权分离：source 使用备份事务，portable 由 Windows launcher 提交，Docker 候选只能由镜像内稳定的 `src/docker_launcher/` 在健康检查和观察期通过后提交。Docker 应用进程只能写相对候选路径的 restart signal，不得控制 Docker daemon、挂载 Docker socket或覆盖当前版本目录。
+规则：
 
-Docker Update schema 1 绑定版本、`linux-amd64`、CPython ABI、launcher schema、基础 runtime API 与 `data_rollback_safe`。更新包构建器、应用 updater 和 launcher 必须复用同一 contracts 校验；checksum、平台、ABI、runtime、数据回滚声明或路径安全失败全部 fail closed。版本化应用副本位于 `data/_updater/docker-versions/`，业务数据迁移仍归 `src/migrations/`，程序目录回滚不得冒充数据 schema 回滚。
+- 唯一匹配：可用；
+- 多个同名：拒绝；
+- 不存在：拒绝；
+- 普通 narrative NPC 不能因为名字“像队友”就变机械 actor。
 
-运行日志统一由 `src/runtime_logging.py` 管理，launcher 和业务服务不得各自实现轮转或保留策略。便携版日志位于安装根目录 `logs/`，托管 Docker 位于持久化 `data/logs/`，默认保留 30 天；清理接口只允许删除 DiceFrame 运行日志，不得触碰对局记录、存档或第三方日志。
+---
 
-DF 助手仅在 owner 主动提出检查运行日志时，经 `src/runtime_diagnostics.py` 读取 DiceFrame 自身最近两个日志文件；本地只负责凭据脱敏、成功轮询过滤、重复事件压缩和上下文限额，故障判断仍由当前配置的模型完成。发送上下文最多 24,000 字符，不得读取任意文件，也不得把日志内容当成指令。
+## 13.3 Context 不是 Authority
 
-## Frontend 与规则边界
+Planner 可以看到压缩后的：
 
-Backend materializes V2 locale，frontend 只渲染返回字段，不重新实现 Content V2 locale architecture。D&D 如何使用 d20 不等于修改 generic d20 本身；D&D 专属行为必须留在 D&D 边界内。
+- inventory；
+- equipment；
+- NPC；
+- relationships；
+- recent purchases；
+- companions；
+- recent narration。
 
-## Ruleset Runtime
+这些只是帮助语义理解。
 
-`src/rulesets/` 是版本化规则运行时边界。规则模板缺少 `runtime` 时显式回退到 `core:legacy`，继续使用现有 RuleSystem、RoundProcessor、CombatResolver 和 ProgressionResolver。新运行时必须由 canonical `runtime.id` 绑定，不能根据 `rule_id`、翻译名或 mechanics 字符串模糊推断。未知或版本不兼容的 runtime 必须拒绝。
+例如：
 
-Ruleset runtime 可导入通用 engine 原语；generic engine、generic d20、memory、lorebook 不得反向导入任何具体规则运行时。WebAPI 和前端只通过 `ruleset_runtime` capabilities 了解体验能力。
+> Planner 看到“背包里有撬棍”，不代表它有权直接把撬棍数量改成 0。
 
-当前完成的是第一轮 ruleset capability normalization：主要 D&D 专属语义已移出 generic 层，并建立了可继续收缩的 optional runtime capability 边界。`RulesetRuntime` 主协议仍承载角色构建、验证、intent、事件、投影和迁移等较宽的基础契约；这不是“所有规则能力都已独立 capability 化”或 runtime 协议已经最小化的声明。
+真正 mutation 仍走 state applier / ruleset runtime。
 
-## 通用战斗扩展
+---
 
-通用战斗扩展（Issue 212 / ADR 0004）提供规则无关的公式 DSL、资源池、效果引擎与调度器原语。依赖方向固定为 contracts → primitives → ruleset adapter → ruleset catalog → transport，generic engine 不含任何 per-ruleset 分支。动作、效果与消耗全部是数据（通用 kind 词表），法术/遁术/丹药等身份由规则动作目录的 canonical `action_id` 表达；伤害与消耗金额经受限 JSON-AST 公式求值——白名单节点、深度/节点/骰子/结果上限、未知引用 fail closed、可注入确定性骰源，绝不 eval。资源池与调度器由规则 runtime 显式声明 capability（`combat_action_effects` / `combat_resource_pools` / `combat_scheduler`）后启用，客户端只提交 intent 并渲染服务端投影，伤害、速度与资源结算值不可信。D&D 2024 的伤害/治疗骰式已经由 D&D 侧适配器改经通用公式 AST 求值，法术位、专注、豁免与胜利判定仍归 D&D reducer；调度器与资源池的持久化随首个消费规则集落地。
+## 13.4 Skill `effect`
 
-## 世界状态（World State）
+角色技能支持：
 
-`GameInstance.world_state` 是“当前世界真相”的唯一权威容器，仍属于单局聚合根，不引入第二个 aggregate、独立数据库或后台运行器。第一版结构固定为 `schema_version / revision / clock / facts / scheduled_events`：fact 是 canonical key（`actor:<uid>.location`、`bridge:old.passable` 这类坐标，不接受翻译后的 display name）加标量值与 `public | gm` 可见性，并记录 `source_round` 与 `updated_revision`；`clock` 是逻辑世界时间（day + minute）；`scheduled_events` 是待结算事件的持久化数据，按稳定 `event_id` 索引。
+```json
+{
+  "name": "调查",
+  "value": 60,
+  "effect": "擅长从凌乱现场识别不自然的缺口"
+}
+```
 
-唯一写入口是 `src/engine/world_state.py` 的 `apply_world_ops(instance, ops)`：整批 op 先校验再原子提交，越界、未知 op/字段、非法 key/value、损坏或未来 schema 都 fail closed 且不写入；事实可见性只由 world ops 决定，缺省更新不会把 GM 私有事实降级为公开。世界真相不使用 `ruleset_state`、`key_facts`、`lorebook_timed_state` 或 memory 作为容器，也不允许 LLM 直接写入。
+`effect` 当前是：
 
-持久化与生命周期遵循既有 `GameInstance` / codec / migration 模式：schema 12 → 13 为旧存档补一个空世界容器（不猜测任何事实，且可重复执行）；save/load、import/rebind 保留世界真相并隔离 run 身份；重置与重开从空世界重新开始；世界 ops 属于写入它的那一轮，整轮回滚、判定中止与 swipe 分支切换都按 ADR 0003 的整轮语义把它一起撤销。
+> **描述性 metadata，不是 mechanics。**
 
-世界真相不等于玩家可见真相：`project_visible_state(instance, viewer_is_gm=...)` 是唯一的读取入口，`gm` 私有事实只进入 GM 上下文块（并明确标注玩家不可见），玩家视角只拿 `public` 投影。行动合法性由 server 侧 `world_legality` 判定，模型只能通过结构化 `world_requirements`（`act` / `move` + canonical 地点 id）提议；判定只使用已登记地点与明确 `passable=false` 这类可证明证据——`passable=false` 阻止的是进入 / 经过 / 抵达，因此 `move` 只检查声明的 `via` 与目的地，行动者当前所在地点不参与该检查，已经身处不可通行地点的角色仍然可以离开；空世界、未知地点、行动者位置未知一律不阻断，已证明矛盾则向 GM 注入「需要先移动 / 未能完成」的可信裁定块，合法移动由 server 写入世界真相。该通道与 overreach 相互独立：overreach 管玩家替世界或他人声明事实，合法性管玩家自己的动作与权威世界事实矛盾。逻辑世界时间只经 `world_events.advance_world_time(+N)` 推进：它把时钟推到新的时刻，按 `(day, minute, event_id)` 稳定顺序结算到期事件，并把每个事件持久化为 `applied` 或 `failed`（到期时 ops 已不可应用）——没有后台 tick、没有独立 scheduler；持久化事件的 `ops` 在读取时按与 `schedule_event` 写入路径同一套结构契约逐条校验，损坏数据 fail closed，不会被静默过滤成「没有执行任何 op 却标记 applied」的伪成功状态；同一事件不会因重试、重复保存或刷新页面执行两次，结算结果与时钟同属 `world_state`，因此完整继承整轮回滚 / swipe / 重置 / 重开语义。
+Planner 只有在：
 
-## 玩家控制（Player Control）
+- 玩家行动文本明确命中技能；
+- 或客户端明确 selected_skill
 
-`players[uid].control` 是席位控制者的权威记录：`human`（真人负责）/ `ai`（服务器负责产生行动）/ `unclaimed`（席位已存在但暂无人玩），并带 `revision`、`temporary` 与 `resume_mode`。它回答的是“谁在玩这个角色”，不是“这个角色是什么”：角色本体、HP、装备、法术槽、状态、世界位置与战斗 actor（`player:<uid>`）在任何模式下都只有一份，控制器切换不复制、不搬运、不改键。第一版词汇表刻意封闭，不含 gm / remote_bot / script / hybrid 等模式。
+时才附带 effect。
 
-唯一写入口是 `src/engine/player_control.py` 的 `set_control`；所有读取也经过同一模块——未知席位读出保守默认值，损坏记录降级为 `human`（即契约出现前的行为），而写入对未知席位、未知模式、缺少恢复目标的临时托管一律 fail closed。控制器属于桌面会话状态而非剧情世界结果：`revision` 只在记录真正变化时递增，整轮回滚、判定中止与 swipe 只回滚角色卡与世界事实，不重新指派席位；`temporary=true` 的暂离托管必须能回到 `resume_mode`，不得在重启后变成永久 AI。
+它不能改变：
 
-持久化使用 schema **13 → 14**：旧存档的每个席位一律获得 `human`，迁移不按在线状态、角色名或历史行为猜测谁是 AI，且可重复执行。`control` 与 `character_sheet` 同级，属于玩家记录本身，因此随 save/load 往返，并在席位被清理（例如加载时的幽灵玩家清理）时一并消失，不会留下 orphan control。
+- 技能数值；
+- DC；
+- advantage/disadvantage；
+- 骰子；
+- damage；
+- HP；
+- status；
+- resource；
+- inventory。
 
-控制模式现在是权威的准入判定：`submission_block(instance, uid)` 决定真人能否提交普通行动——`ai` 席位返回 `PLAYER_AI_CONTROLLED`、`unclaimed` 返回 `PLAYER_UNCLAIMED`，Web 与 SSE 共用的 `turns.submit_action` 对两者返回 409；它只决定"真人不得代打"，不改变服务器 AI 自身何时出手（见下文的补行动与即时接管）。
+未来若某个技能需要真正的机械效果，应进入 ruleset runtime / rule catalog，不应扩大 `effect` 自由文本的 authority。
 
-多人 ready barrier 只看真人：`GameInstance.active_human_players` = 存活、未暂离且 `control.mode == human`，`all_alive_ready()` 与 `multiplayer_status()` 的 ready / waiting 集合都由它计算，因此 AI 托管与未认领的席位不会阻塞推进；它们分别在 `ai_players` / `unclaimed_players` 及其计数中列出，说明"还差谁"以外那部分席位由谁负责。暂离真人依旧不阻塞（`active_alive_players` 语义未变，仍供幸运超时等只看人数的调用点使用）。
+---
 
-认领转换统一走同一权威：`claim_seat` 是 Web 加入已有席位的规范入口，把 `ai` / `unclaimed` 无损转为 `human`（角色本体、HP、装备、法术、世界位置与战斗 actor 都不搬运），并在 `expected_revision` 过期时以 `CONTROL_STALE`、对已是真人的席位以 `CONTROL_NOT_CLAIMABLE` fail closed；新建席位仍由 `put_player` 直接生成为 `human`。控制权变更的安全边界由 `control_change_block` 判定：只有处于 `ACTIVE_ACTION` 且没有在飞处理锁时为 `""`，否则 `CONTROL_CHANGE_BUSY`。
+# 14. Manual Roll 子系统
 
-`ai` 席位在普通探索轮由 `src/commands/ai_player.py` 补行动：闸门是 `GameInstance.human_actions_ready()`（真人一侧交齐，且与 `should_advance()` 是两个不同问题），在唯一的推进入口——`turns.submit_action` 里真人闸门满足之后、`try_advance()` 之前——调用一次。每个席位一次 plain-text 调用、按 uid 串行，因此它只知道自己的角色卡、player-safe 公开上下文与本轮已宣告的行动，读不到 GM 私有世界事实、`gm_directives`、他人 `private_log` 或未来剧情，也不额外传 lorebook。产出只是一段普通行动文本（不含 DC / 加值 / 成败），经 `add_action` 走真人同一条 canonical 入口，由既有 Check Planner 与 WorldState 合法性裁定；行动带 `source` / `control_revision` / `generated_for_round` 元数据，仅用于去重与调试。调用前捕获 run / round / 席位 / `control.revision`，返回后四者与阶段全部复核，任一变化即丢弃；供应商错误或不可用输出记录 `AI_ACTION_SKIPPED` 后继续，不阻塞本轮。席位在本轮已经声明过行动时（例如真人先出手、GM 之后才把它交给 AI）不会被补行动覆盖——补行动只补还没行动的席位。
+手动骰不是简单前端随机数。
 
-System prompt 明确要求**按角色卡扮演**而不是替玩家做战术最优决策：身份与背景、性格、价值观、目标 / 动机、已建立的人际关系、个人经历、自己已经知道的线索、私密感知、当前身体与资源状态优先，冲突时只要行为仍合理合法就保持角色一致性，且不得编造角色卡里不存在的人设、经历或关系。角色卡仍是唯一的人物设定来源：不新增 `ai_persona` 之类的第二份存储，可见性通道也不变（自己的角色卡 / 公开剧情 / 本人私密感知 / 明确对该角色可见的知识）。
+当前 owner：
 
-控制权变更本身就是一次唤醒：`human → ai` 写入成功后，`GameControlService.set_player_control`（以及 `ai_takeover` 的暂离托管）调用 `turns.resume_after_control_change`——它只判断阶段是否可推进、真人闸门是否满足，然后调用上面**同一个**推进入口，因此不需要真人再发一句话，也绝不伪造空行动；仍有真人未行动时照样不抢跑，同一 round 重复 `set ai` 仍幂等，AI 席位的补行动若已写入则一并落盘。`ai → human` 不受影响：飞行中的旧 AI 结果继续由 control revision 竞争守卫丢弃。
+```text
+src/webui/services/manual_rolls.py
+```
 
-探索之外的权威战斗走另一条路：AI 托管 PC 的战斗回合由 `next_automatic_intent` 以 server/GM automation authority 提交**结构化意图**，而不是叙事行动，并且复用 companion 已有的同一条确定性阶梯（`_allied_automatic_intent`：治疗濒危 → 攻击最近敌对 → 移动 → Dodge → End Turn），不新增第二套战斗引擎，本阶段也不接 LLM。控制权变更时，如果当前 actor 正是刚交给 AI 的席位，唯一入口是 `ruleset_gameplay.resume_authoritative_combat`：它复用同一个自动阶梯循环（`src/rulesets/automation.py` 的 `advance_automatic_intents`，`submit_intent` 也走它），一直推进到轮到真人、战斗结束或没有自动意图，并把推进与控制权一起落盘；当前 actor 不是该席位时一个状态字节都不改，绝不顺手替别的 actor 出手。失败时整段事务回滚并返回结构化错误（`AUTOMATIC_TURN_FAILED`），不半提交。它与 companion 的唯一真实差异是 0 HP：companion 不做死亡豁免，玩家角色必须做，否则战斗会卡在该席位。意图仍走 validate / resolve / apply 同一权威链，受同一行动经济约束（action / attacks_remaining / movement），只看该席位自己的角色卡；候选意图在当前状态下不合法时退回合法 `end_turn`，保证托管席位的回合一定结束。校验侧同步收紧：`player:` actor 只有在席位确实处于 `ai` 托管时才允许 `submitted_by == gm_uid` 代提交，否则维持「玩家只能提交自己角色」；真人既不能代打 AI 席位，也不能手动操控它。`human` 与 `unclaimed` 席位永远不产生自动意图。
+请求持久化到：
 
-房间与桌面可以**表达**谁来玩：开房时逐张角色卡可选「我来控制 / 等待玩家认领 / AI 托管」，另有「未认领角色默认」的全局快捷项，逐卡选择优先于全局默认；两者都缺省时保持旧行为（每个席位 `human`），未知模式在开房阶段直接 fail closed（`INVALID_PLAYER_CONTROL`），不会悄悄建成默认席位。席位列表按控制记录显示四种徽章：真人 / AI 托管 / 等待认领 / AI 临时托管。
+```text
+GameInstance.manual_roll_requests
+```
 
-「暂离」的含义由房间设置 `away_control_policy` 决定，默认 `pause`：暂离只改在场状态，**绝不**把角色交给 AI。设为 `ai_takeover` 时，玩家暂离会把席位交给服务器 AI 的**临时**形态（`{mode: ai, temporary: true, resume_mode: human}`），点「回来」即归还并清空 `temporary` / `resume_mode`；临时托管在重启后仍可归还，不会变成永久 AI。GM 另有托管控件「设为 AI / 停止 AI 托管」，只改控制记录——不复制角色、不动 Web 身份与 Bot 绑定、不重置 ready、不重置 HP、不重建战斗 actor。所有控制权变更只发生在安全边界（`ACTIVE_ACTION` 且没有在飞处理锁），否则返回可重试的 `CONTROL_CHANGE_BUSY`。断线**不会**触发 AI 接管：接管只能来自 GM 的明确操作、玩家的明确暂离，或房间的明确配置。该房间设置随存档持久化，schema 为 **14 → 15**，旧存档一律补 `pause`（即旧版本的真实行为），损坏值同样降级为 `pause`。
+每个请求包含：
 
-群聊（Bot）入口与 Web 等价：`托管 角色名` / `取消托管 角色名` 让 GM 在群里直接改变席位归属，走的是同一个服务端控制权 API（桥接层不保存任何控制状态，也没有第二份权威）。这两条与 `暂离` / `回来` 是不同契约——后者改在场状态、前者改控制者——且都需要 GM 或授权账号；目标角色必须唯一匹配 roster，否则回复可用角色而不是猜测。服务端返回 `CONTROL_CHANGE_BUSY` 时，群里得到的是「本轮结束后再试」的友好提示，而不是原始失败文案。
+- request id；
+- `operation_id` 幂等 identity；
+- `run_id`；
+- round；
+- created_by；
+- targets；
+- formula；
+- purpose；
+- target/comparison；
+- visibility；
+- results。
 
-## Ruleset Bundle v1
+---
 
-`templates/rulesets/<directory_id>/` 是第一方高级规则的离线内容快照，不是 Plugin Content V2 的替代。Bundle manifest 绑定 `bundle_id`、`runtime_id`、规则/内容版本、locale 与归属文件。Canonical entity 必须具有稳定 `kind:id`、`source_ref` 和 `automation_level`。
+## 14.1 Purpose
 
-Bundle locale 只能物化白名单展示字段。效果使用白名单 DSL；任意代码执行键、未知效果原语、重复 ID、无效内部引用、越界归属路径或 locale mechanics override 都会使整个 bundle 加载失败。详细格式见 `docs/rulesets/dnd2024/CONTENT_BUNDLE_CN.md`。
+当前：
 
-## Adventure Bundle v1
+```text
+free
+check
+contest
+```
 
-高级玩法由四个相互独立的输入组成：Ruleset Runtime 提供机制，Worldbook 提供世界设定与 lore，可选 Adventure Bundle 提供剧情图、场景、NPC、地图位置与冒险专属遭遇，Coach 只在前端提供本地帮助。未绑定 Adventure Bundle 就是标准自由对局，不得暗中加载固定教学剧情。
+### free
 
-独立冒险位于 `templates/adventures/<directory_id>/`，采用 `diceframe:adventure-graph-v1`。Manifest 声明 canonical adventure ID、版本、世界策略以及最低 runtime 契约。创建游戏时先校验规则、runtime、格式和世界兼容性，再不可变地保存 `adventure_id / version / format / content_digest / world_id`；重开必须保留并重新校验同一绑定，内容丢失、被改动或 fixed-world 不匹配时直接拒绝。详细格式见 `docs/adventures/ADVENTURE_BUNDLE_CN.md`。
+普通独立骰。
 
-服务启动时，内置冒险包以完整目录为单位同步到 `data/templates/adventures/`；DND runtime、目录 API 和管理 API 共同读取该运行目录。内置包只读，自定义包使用独立 canonical identity，可复制、校验编辑、ZIP 导入/导出和删除。任何已被存档绑定的包禁止编辑或删除，避免破坏固定摘要与重开确定性；所有写入先在临时目录通过同一个 `AdventureBundleLoader` 完整校验，再替换正式目录。
+默认不注入之后的 AI GM 上下文。
 
-冒险步骤只能替代当前剧情入口，不能替代玩家选择的世界书。叙事上下文始终包含实际 Worldbook 的设定、起始场景与匹配 lore；冒险完成后回到同一世界的标准自由对局，而不是停留在“教程已结束”死页。
+只有 API 明确传 JSON boolean：
 
-## D&D 2024 权威游戏状态
+```json
+true
+```
 
-`core:dnd2024` 的战斗、Session 0 与战役记录共享 `GameInstance.ruleset_state.version` 和 EventBatch ledger；可选冒险通过精确绑定向同一状态机提供剧情输入，但不是 Ruleset Bundle 的一部分。战斗事件只由战斗 reducer 应用，战役事件只由 campaign reducer 应用；runtime composition root 按显式 `intent_type` 分派，generic engine 不导入 D&D 实现。
+才会进入 AI context。
 
-高级规则角色的机械权威是 `ruleset_character`。创建、共享卡库导入/编辑、加入游戏、游戏内资料编辑、升级和休息均经由 `character_lifecycle` capability；legacy 顶层角色字段只是兼容投影。资料编辑不得覆盖属性、HP、AC、成长历史、runtime/content/state 版本等机械字段，机械更新必须从 canonical 选择与历史重新验证或回放。
+字符串 `"true"` 或数字 `1` 不算。
 
-职业特性边界是 `src/rulesets/dnd2024/features/`：它只回答“这个角色拥有什么”——职业与职业等级、已获得的 feature、feature 的标量参数、职业资源当前值/上限，以及当前可用的 combat capability。职业表（`progression_catalog`）仍是获得等级的权威，`class_feature_catalog` 只做 parameterize 与展示标签（含 locale overlay）。Combat 只消费 capability id、动作/资源成本、目标要求与底层 canonical action，不在 generic engine 或前端判断职业；职业资源仍写在既有 `resources.class` 结构里，创建、升级与休息恢复继续由现有 rest/advancement 路径负责，没有第二套资源表、第二套 action economy 或第二套攻击结算。feature 的**装备前提**也由这个边界回答（`features/equipment.py`）：它只读 canonical `equipment.item_refs` 的 item type 与 combat catalog 的武器档案（category / ranged / 是否 Light），因此武艺不再只看职业等级，装备变化经既有 reconciliation 重新投影，前端与战斗结算只消费投影结果。职业资源如何随升级后的新上限调整是 rest catalog 上的显式 `resize_policy`（默认 `preserve_spent` 保持既有语义，`preserve_current` 保留合法 current 并夹取溢出），没有任何按 class / resource id 的分支。
+### check
 
-Session 0 的每次修订都会清空旧成员确认，只有全部当前玩家接受后 GM 才能锁定。任务、线索、事实、重要物品和关系先保存为 pending proposal，再由 GM 以独立 Intent 确认或拒绝。章节摘要是已确认事件的确定性投影，并在存档成功后写入长期记忆；记忆投影失败不得回滚或伪装已经持久化的权威状态。
+有 target/comparison，服务端产生 success/failure。
 
-自然语言行动继续使用 DiceFrame 唯一的 `/action` 回合流程：单人即时推进，多人先收齐当前存活且在场成员的行动，再统一进行检定与 GM 回复。D&D runtime 只向同一 LLM 上下文追加权威战斗、战役和当前冒险节点的只读信息；所选 Worldbook 与匹配 lore 仍由通用叙事管线提供。LLM 不得直接创建战役事实、扣减资源或推进权威冒险步骤。
+### contest
 
-前端保留通用的单时间线、单行动输入框、角色卡、队伍状态、地图、场景图库、规则说明、世界书和 GM 控制台。左侧 `DND5E工具` 只包含冒险/战役与权威战斗两个 D&D 专属入口；工具以有界弹层覆盖主游玩区，不建立第二套消息流或第二套叙事提交接口。冒险节点进入遭遇门槛时会切换到战斗工具；自由剧情中 GM 明确裁定进入先攻，或玩家提交明确攻击并通过通用判定规划识别后，会产生只负责唤醒界面的 `encounter_request`，具体预设、先攻与所有机械结算仍须经过权威战斗 Intent。结束后回到同一条公共时间线继续游玩。
+完成所有目标后服务端比较 totals，形成 winner/loss。
 
-剧情遭遇访问权由 runtime composition root 根据 canonical adventure step 投影成 `EncounterAccess`；campaign 与 combat 引擎不得互相导入。战斗开始事件保存 canonical `encounter_instance_id`、preset 与来源 step，结束后写入 bounded history；剧情门槛只接受匹配的 encounter identity，因此已消费的冒险遭遇不能再次启动。敌方回合由服务端按同一验证、事件和 reducer 管线自动结算；每位玩家只能操作自己的角色，非当前玩家明确处于等待状态。场景、NPC 与地图位置使用 Adventure Bundle canonical refs，locale 只物化显示字段。直接联机桥接对玩家 Intent 使用字段白名单。
+`check / contest` 结果强制进入后续 AI context，因为它们已经成为权威桌面事件。
+
+---
+
+# 15. LLM 子系统
+
+## 15.1 模块边界
+
+```text
+src/llm/
+├─ client.py
+├─ context_builder.py
+├─ parser.py
+├─ protocol.py
+└─ tools.py
+```
+
+LLMClient 负责 provider-facing 能力。
+
+Prompt / turn orchestration 则主要在：
+
+```text
+src/commands/
+├─ prompt_composer.py
+├─ round_llm.py
+├─ round_processor.py
+└─ ...
+```
+
+---
+
+## 15.2 PromptComposer
+
+`PromptComposer` 是 GM prompt 的集中 owner。
+
+最终 prompt 由以下层次组成：
+
+```text
+base GM system prompt
+    +
+current rule appendix
+    +
+difficulty instructions
+    +
+resource protocol appendix
+    +
+effective GM narration style
+    +
+plot tracker
+    +
+multiplayer authority scope
+    +
+narrative perspective
+    +
+ruleset advancement instructions
+    +
+language instruction
+```
+
+一个非常关键的规则：
+
+> `instance.rule_id` 是已经开局后的权威规则选择。
+
+World template 的 `default_rule` 只负责创建页默认值，运行时不能把玩家选定的规则悄悄换回世界默认规则。
+
+---
+
+## 15.3 Runtime LLM Projection
+
+专业 ruleset 可以通过：
+
+```text
+runtime.build_llm_view(instance)
+```
+
+向 generic LLM context 增加 authoritative projection。
+
+因此正确关系是：
+
+```text
+Generic game context
+      +
+Ruleset authoritative read-only view
+      +
+WorldState / Hybrid Lore projection
+      +
+Memory
+      +
+Current actions/checks
+      ↓
+LLM
+```
+
+而不是让 context_builder 自己 import D&D 并计算 D&D 状态。
+
+---
+
+## 15.4 Player-safe Q&A
+
+面向玩家的 GM/KP 问答与完整 GM context 是分开的。
+
+`build_player_safe_context()` 用受限上下文，避免：
+
+- GM 私密 directives；
+- hidden facts；
+- 不应对该玩家公开的内容
+
+从完整 GM prompt 中泄漏。
+
+桌外问答并没有第二套世界书检索。`KPQuestionResponder` 复用 `GameHandler.lore_retriever`，但以玩家视角运行：
+
+```text
+viewer_is_gm = false
+mutate_timers = false
+```
+
+候选 Lore 在语义排序前就先做 `visible_to` 过滤，避免隐藏条目仅因为向量相似而进入 player-safe candidate set；计时状态使用副本，因此桌外提问不会推进 sticky / cooldown / delay。玩家安全投影继续保留：
+
+```text
+type
+tier
+unreliable
+name
+content
+```
+
+但不输出内部 canonical lore entry ID，避免 `npc_traitor_mary`、`clue_real_murderer_john` 这类 ID 本身泄漏幕后信息。GM 完整上下文仍可保留 canonical ID 用于诊断和一致性。
+
+---
+
+## 15.5 Reasoning 防泄漏
+
+模型 provider 有时把 reasoning 混进 content：
+
+```text
+<think>...</think>
+```
+
+DiceFrame 当前做双边界过滤：
+
+### 非流式
+
+`src/llm/client.py`
+
+- 完整 think block；
+- 孤立 closing tag；
+- 未闭合 reasoning
+
+都会被清理。
+
+### 流式
+
+`src/commands/round_llm.py`
+
+需要处理：
+
+```text
+chunk1 = "<thi"
+chunk2 = "nk>..."
+```
+
+因此 filtering 是 stateful 的，未闭合 think 不能在最终 flush 时被吐给玩家。
+
+---
+
+# 16. LLM 返回后的 Stale Fence
+
+调用 LLM 是长耗时操作。
+
+在这几秒/几十秒中可能发生：
+
+- 玩家结算；
+- GM rollback；
+- restart；
+- reset；
+- 新 proposal；
+- instance replacement。
+
+因此响应回来时不能直接 apply。
+
+RoundProcessor 会重新比较：
+
+```text
+registry current instance identity
+run_id
+economy fingerprint
+```
+
+如果旧 request 已经过期：
+
+```text
+LLM response
+    ↓
+stale fence
+    ↓
+discard
+```
+
+而不是覆盖新状态。
+
+---
+
+# 17. Economy 架构
+
+## 17.1 基本原则
+
+模型文本不能：
+
+```text
+“你花了 20 金币”
+```
+
+然后系统就：
+
+```python
+gold -= 20
+```
+
+权威路径是：
+
+```text
+Narrative / Planner
+      ↓
+proposal
+      ↓
+server validation
+      ↓
+payer / GM decision
+      ↓
+transaction
+      ↓
+balance mutation
+```
+
+---
+
+## 17.2 Currency V2
+
+规则定义货币：
+
+```text
+CurrencySpec
+├─ base_unit
+├─ display_unit
+└─ positive integer rates
+```
+
+例如 CoC：
+
+```text
+base_unit = cent
+display_unit = dollar
+```
+
+engine 内只处理 canonical integer：
+
+```text
+$12.34
+  ↓ parse
+1234
+  ↓ engine
+1234 cents
+  ↓ format
+$12.34
+```
+
+业务层禁止散落：
+
+```python
+amount * 100
+amount / 100
+float(amount)
+```
+
+---
+
+## 17.3 Unknown Price != Free
+
+如果已经识别：
+
+> “我要买这瓶药”。
+
+但价格单位不能 canonicalize：
+
+系统不会：
+
+- 收错钱；
+- 也不会免费发货。
+
+而是记录本轮：
+
+```text
+round_unpriced_purchase_intents
+```
+
+并阻断相关物品 grant。
+
+---
+
+## 17.4 FREE_GRANT
+
+只有叙事明确表示它真的免费/赠与/奖励时，可以产生瞬时：
+
+```text
+FREE_GRANT
+```
+
+它：
+
+- 不扣钱；
+- 不加钱；
+- 不自己发物品；
+- 不产生 proposal；
+- 不持久化；
+- 只作为 item grant gate 的授权凭据。
+
+而且：
+
+> 有真实 pending paid proposal 时，FREE_GRANT 不能绕过付款。
+
+---
+
+# 18. Narrative Commit Barrier
+
+Economy 在 DiceFrame 中不仅是“记账”。
+
+它还承担：
+
+> **同一模型回复的权威提交屏障。**
+
+假设模型一条回复同时生成：
+
+```text
+NPC 给玩家一把剑
+玩家支付 100
+任务进入下一阶段
+记忆写入“已成交”
+场景切换
+```
+
+如果先应用：
+
+```text
+剑到账
+任务推进
+记忆写入
+```
+
+然后付款被拒绝，就产生不一致。
+
+所以当前模型是：
+
+```mermaid
+flowchart TD
+    LLM[LLM response]
+    PARSE[Parse candidate effects]
+    PROP[Create proposal]
+    DEFER[Persist deferred effect group]
+    DEC{Decision}
+    COMMIT[Commit shared effects]
+    DROP[Discard shared effects]
+
+    LLM --> PARSE
+    PARSE --> PROP
+    PARSE --> DEFER
+    PROP --> DEC
+    DEC -->|accepted| COMMIT
+    DEC -->|declined / insufficient / cancelled| DROP
+```
+
+只要当前 run 还有：
+
+- pending proposal；
+- pending effect group；
+- memory delivery；
+- memory reversal；
+
+下一段权威 narration 就被 barrier 阻断。
+
+---
+
+# 19. Memory Outbox 与跨存储一致性
+
+Game state save 和 memory SQLite 是两个存储域。
+
+不能做到一个真正跨两个系统的数据库 transaction。
+
+DiceFrame 采用 durable outbox。
+
+```mermaid
+sequenceDiagram
+    participant G as Game Save
+    participant O as economy.external_effects_outbox
+    participant M as Memory Store
+
+    G->>O: persist pending memory_delta
+    G->>G: authoritative save succeeds
+
+    O->>M: idempotent delivery
+    M-->>O: applied
+    O->>G: mark delivered
+    G->>G: persist receipt
+
+    Note over O,M: crash before receipt? retry by delivery identity
+```
+
+---
+
+## 19.1 Outbox Owner
+
+Outbox 数据存放在：
+
+```text
+economy.external_effects_outbox
+```
+
+原因：
+
+- 它必须跟 economy rollback window 一起持久化；
+- effect group 与 settlement 有明确 identity。
+
+但：
+
+> delivery state machine 属于 memory domain，而不是 economy ledger。
+
+---
+
+## 19.2 Rollback Reversal
+
+已写进 memory 的状态在历史 rollback 时不能放着不管。
+
+流程：
+
+```text
+delivered
+   ↓ historical rollback
+reversal_pending
+   ↓
+reverse memory delta
+   ↓
+reversed
+```
+
+若 reverse 成功但 receipt 未保存：
+
+- 下次恢复继续；
+- 利用 identity 保持幂等。
+
+---
+
+# 20. Item / Equipment 状态协议
+
+旧版单值字段无法表达：
+
+> 同一回合获得 3 件物品、穿一件、用一件。
+
+当前结构化状态使用：
+
+```text
+item_gains[]
+equipment_ops[]
+item_uses[]
+```
+
+例如：
+
+```json
+{
+  "item_gains": [
+    {"name": "皮甲", "category": "equipment", "qty": 1},
+    {"name": "治疗药", "category": "consumable", "qty": 2}
+  ],
+  "equipment_ops": [
+    {"op": "equip", "name": "皮甲", "slot": "body"}
+  ],
+  "item_uses": [
+    {"name": "治疗药"}
+  ]
+}
+```
+
+旧：
+
+```text
+equip_gain
+weapon_gain
+...
+```
+
+只作为 compatibility fallback。
+
+---
+
+# 21. Ruleset Runtime 总架构
+
+## 21.1 为什么存在 Ruleset Runtime
+
+Legacy `RuleSystem` 能处理大量自定义：
+
+- d20 / d100；
+- 技能；
+- 资源；
+- 通用 combat model；
+- prompt appendix。
+
+但完整 D&D 需要：
+
+- canonical class/spell identity；
+- slot；
+- concentration；
+- conditions；
+- advancement；
+- Session 0；
+- adventure encounter binding；
+- authoritative event ledger；
+- deterministic combat。
+
+这些不能继续塞进 generic `RuleSystem`。
+
+所以引入：
+
+```text
+src/rulesets/
+```
+
+---
+
+## 21.2 Registry
+
+当前 default registry：
+
+```text
+RulesetRuntimeRegistry
+├─ LegacyRulesetAdapter
+└─ Dnd2024Runtime
+```
+
+规则 template 的 binding：
+
+```json
+{
+  "runtime": {
+    "id": "core:dnd2024",
+    "minimum_version": 1
+  }
+}
+```
+
+缺 `runtime`：
+
+```text
+core:legacy
+```
+
+不是通过：
+
+- rule name；
+- display language；
+- “dice_system == d20”；
+- `rule_id` 前缀
+
+猜测 runtime。
+
+---
+
+## 21.3 Runtime 主协议
+
+`RulesetRuntime` 当前主协议仍较宽，包含：
+
+```text
+describe_experience
+builder_choices
+validate_character
+derive_character
+finalize_character
+normalize_character_submission
+
+available_intents
+validate_intent
+resolve_intent
+apply_event_batch
+
+gameplay_view
+build_llm_view
+project_legacy_character
+
+migrate_state
+```
+
+这表示当前架构已经把规则 runtime 抽出，但协议还不是“最终最小接口”。
+
+---
+
+## 21.4 Optional Capability Protocols
+
+为了避免所有 runtime 都实现越来越多方法，额外能力通过可选 Protocol 暴露，例如：
+
+- `AuthoritativeIntentHooks`
+- `NarrativeStatePolicyRuntime`
+- `NarrativeCombatSignalRuntime`
+- `NarrativeCheckPolicyRuntime`
+- `NarrativeAdvancementRuntime`
+- `NarrativeDirectorRuntime`
+- `NarrativeDirectorAutomationRuntime`
+- `NarrativeDirectorPlanningRuntime`
+- `TemporaryEncounterPlannerRuntime`
+- `AutomaticIntentRuntime`
+- `GameDetailProjectionRuntime`
+- `PlayerJoinRuntime`
+- `CharacterRevivalRuntime`
+- `LiveAdvancementPolicyRuntime`
+- `LiveAdvancementTransactionRuntime`
+- `AdventureBindingMigrationRuntime`
+- `RunLifecycleRuntime`
+- `PublicTimelineProjectionRuntime`
+
+正确扩展方式通常是：
+
+```text
+新增一个明确 optional capability
+```
+
+而不是把 D&D 特例写进：
+
+```text
+engine
+WebAPI generic method
+frontend generic component
+```
+
+---
+
+# 22. Generic Combat Extension
+
+通用战斗扩展的目标不是实现“一个万能 TRPG 规则”。
+
+它只提供足够稳定的 primitives：
+
+```text
+Combat Contracts
+       ↓
+Formula DSL
+Resource Pools
+Effect Engine
+Schedulers
+       ↓
+Ruleset Adapter
+       ↓
+Concrete Ruleset
+```
+
+---
+
+## 22.1 Formula DSL
+
+不是 `eval()`。
+
+公式是受限 JSON AST。
+
+约束：
+
+- node whitelist；
+- depth limit；
+- node count limit；
+- dice-node limit；
+- bounded result；
+- unknown reference fail closed；
+- deterministic roller injectable。
+
+因此具体 D&D damage：
+
+```text
+1d8 + STR
+```
+
+可以被 D&D adapter 翻成 generic AST，但：
+
+- spell slot；
+- concentration；
+- save semantics；
+- class feature；
+
+仍由 D&D runtime 拥有。
+
+---
+
+## 22.2 Resource Pools
+
+Generic pool 负责：
+
+- current / max；
+- atomic multi-pool spend；
+- clamp restore/set。
+
+如果一次 action 需要：
+
+```text
+2 Mana
+1 Action Point
+```
+
+任意一个不足：
+
+```text
+whole cost fails
+```
+
+不能扣掉 Mana 后才发现 Action Point 不足。
+
+---
+
+## 22.3 Scheduler
+
+当前通用 scheduler primitives 支持：
+
+- round robin；
+- initiative；
+- threshold / ATB。
+
+但只有 ruleset capability 显式声明后才启用。
+
+generic engine 不通过“看到 speed 字段”自动猜启用 ATB。
+
+---
+
+# 23. Ruleset Bundle v1
+
+Ruleset Bundle 用于第一方高级规则内容快照。
+
+它与 Plugin Content V2 是不同概念。
+
+```text
+templates/rulesets/<directory_id>/
+```
+
+Bundle 绑定：
+
+- `bundle_id`
+- `runtime_id`
+- rules version
+- content version
+- locale
+- owned files
+
+Canonical entity 具有：
+
+```text
+kind:id
+source_ref
+automation_level
+```
+
+---
+
+## 23.1 Locale 与 Mechanics 分离
+
+Bundle locale 只能改展示。
+
+不允许 locale：
+
+```text
+把 Fireball 伤害从 8d6 改成 20d6
+```
+
+以下内容会让 bundle 整体拒绝：
+
+- 任意代码执行 key；
+- unknown effect primitive；
+- duplicate IDs；
+- broken internal refs；
+- ownership path escape；
+- locale mechanics override。
+
+---
+
+# 24. Adventure Bundle v1
+
+## 24.1 四种输入
+
+高级玩法不是“一个世界包全包”。
+
+当前逻辑是：
+
+```text
+Ruleset Runtime  → mechanics
+Worldbook        → setting + lore
+Adventure Bundle → story graph + scene + NPC + encounters
+Coach            → local presentation/help
+```
+
+四者是独立输入。
+
+没有 Adventure Bundle：
+
+```text
+standard free play
+```
+
+不能偷偷启用固定教程。
+
+---
+
+## 24.2 Immutable Binding
+
+开局时保存：
+
+```text
+adventure_id
+version
+format
+content_digest
+world_id
+```
+
+重启时必须重新验证。
+
+如果：
+
+- 文件丢了；
+- content 改了；
+- fixed-world 不匹配；
+
+则 fail closed。
+
+不能静默载入“同名但已经不同”的冒险。
+
+---
+
+## 24.3 Adventure 与 Worldbook
+
+Adventure step 可以决定：
+
+> “现在剧情走到哪一个节点”。
+
+但不能替代玩家选择的 Worldbook。
+
+所以 LLM context 仍然同时有：
+
+```text
+actual selected world
++
+matched lore
++
+current adventure step
+```
+
+冒险结束：
+
+```text
+same world → free play
+```
+
+不是进入“教程完成，游戏结束”。
+
+---
+
+# 25. D&D 2024 Runtime
+
+## 25.1 顶层组成
+
+当前 `src/rulesets/dnd2024/` 已明显按 domain 拆分：
+
+```text
+dnd2024/
+├─ character/
+├─ campaign/
+├─ combat/
+├─ director/
+├─ exploration/
+├─ features/
+├─ play/
+├─ progression/
+├─ resting/
+├─ spells/
+├─ advancement_access.py
+├─ adventure_migrations.py
+└─ runtime.py
+```
+
+`Dnd2024Runtime` 是 composition boundary，而不是把全部实现放进一个文件。
+
+当前：
+
+```text
+runtime_id = core:dnd2024
+runtime_version = 1
+```
+
+capabilities 包括：
+
+- professional character builder；
+- rules-aware lifecycle；
+- authoritative intents；
+- deterministic combat；
+- class feature runtime v1；
+- versioned state；
+- Session 0；
+- coach；
+- narrative turns；
+- Adventure graph format。
+
+---
+
+## 25.2 角色权威
+
+高级 D&D 角色的机械权威：
+
+```text
+ruleset_character
+```
+
+Legacy 顶层字段：
+
+```text
+hp
+class
+race
+level
+attributes
+skills
+...
+```
+
+主要用于：
+
+- 通用 UI；
+- legacy compatibility；
+- generic projections。
+
+不能反过来随便覆盖 canonical ruleset character。
+
+---
+
+## 25.3 Character Lifecycle
+
+专业角色流程：
+
+```mermaid
+flowchart LR
+    D[Draft]
+    V[Validate]
+    DER[Derive Canonical]
+    F[Finalize]
+    C[Ruleset Character]
+    P[Legacy Projection]
+
+    D --> V --> DER --> F --> C
+    C --> P
+```
+
+共享角色卡、加入游戏、编辑、升级、休息都要经过 rules-aware lifecycle。
+
+资料编辑不能直接覆盖：
+
+- abilities；
+- HP；
+- AC；
+- progression history；
+- runtime/content/state version。
+
+机械变化需要基于 canonical choices/history 重新验证。
+
+---
+
+## 25.4 Class Feature Runtime v1
+
+当前职业特性边界：
+
+```text
+src/rulesets/dnd2024/features/
+├─ models.py
+├─ resolver.py
+├─ combat.py
+├─ equipment.py
+└─ resources.py
+```
+
+这个边界只回答：
+
+> **“这个角色当前拥有什么职业特性、资源和可用 combat capability？”**
+
+它不是第二套角色系统，也不是第二套战斗引擎。
+
+获得职业特性的 authority 仍然是 progression / character lifecycle。关系是：
+
+```text
+canonical class + class level + progression history
+        ↓
+progression_catalog
+        ↓
+获得哪些 feature
+        ↓
+class_feature_catalog
+        ↓
+parameterize / label / capability projection
+```
+
+`class_feature_catalog` 不负责重新决定角色等级，也不能绕过 progression history 自行“授予”特性。
+
+当前 class feature runtime 负责投影的主要内容包括：
+
+```text
+已获得 feature ID
+feature 标量参数
+class resource current / max
+当前 combat capability
+装备前提是否满足
+```
+
+职业资源继续写在既有：
+
+```text
+ruleset_character.resources.class
+```
+
+创建、升级、休息恢复继续走原有 character / advancement / resting authority。不会为职业特性新增：
+
+```text
+第二套 resource table
+第二套 action economy
+第二套 attack resolver
+```
+
+Combat 侧只消费已经投影出来的 capability ID、动作/资源成本、目标要求以及底层 canonical action；generic engine 和前端都不根据“职业名字”自行推断 mechanics。
+
+装备前提由：
+
+```text
+src/rulesets/dnd2024/features/equipment.py
+```
+
+读取 canonical `equipment.item_refs` 与 combat catalog 的武器档案，例如：
+
+```text
+weapon category
+ranged / melee
+Light 等 canonical property
+```
+
+装备发生变化时，经既有 reconciliation 重新投影 capability。也就是说，职业特性是否可用由 D&D runtime 回答，而不是前端按钮或自由文本回答。
+
+升级造成 class resource 最大值变化时，行为由 rest catalog 的显式：
+
+```text
+resize_policy
+```
+
+控制。当前默认：
+
+```text
+preserve_spent
+```
+
+表示保留已经消耗的资源语义；需要时也可声明：
+
+```text
+preserve_current
+```
+
+保留合法 current 并夹取溢出。禁止在代码里按具体 class / resource ID 写隐式分支。
+
+这套 feature runtime 当前是 **D&D 2024 专属 domain boundary**。它并不意味着已经存在跨 Ruleset 的通用 Class Feature Runtime；如果其它专业规则未来有自己的职业/天赋系统，应先证明存在真正共享的 primitive，再决定是否上提。
+
+---
+
+# 26. D&D Campaign / Session 0
+
+D&D campaign state 与 combat state 都进入：
+
+```text
+GameInstance.ruleset_state
+```
+
+并通过 versioned event batches 演进。
+
+---
+
+## 26.1 Session 0 Consent
+
+每次 Session 0 修订：
+
+```text
+invalidate old consent
+```
+
+只有所有当前成员再次接受：
+
+```text
+GM can lock
+```
+
+这避免：
+
+> GM 改了设定，但系统还拿旧的“已同意”状态当新版本 consent。
+
+---
+
+## 26.2 Campaign Facts
+
+以下事实不会由 LLM 一句话直接成为 campaign authority：
+
+- tasks；
+- clues；
+- facts；
+- important items；
+- relationships。
+
+流程是：
+
+```text
+AI / player narrative
+      ↓
+pending proposal
+      ↓
+GM authoritative intent
+      ↓
+confirmed / rejected
+```
+
+---
+
+# 27. D&D Combat
+
+## 27.1 事件与 Reducer
+
+战斗不是靠 LLM 自由文本更新 HP。
+
+流程：
+
+```text
+Intent
+  ↓
+validate
+  ↓
+resolve
+  ↓
+EventBatch
+  ↓
+combat reducer
+  ↓
+ruleset_state
+```
+
+敌方自动行动也走同一套：
+
+```text
+validate → resolve → events → reducer
+```
+
+而不是“AI 说怪物打了 8 点，所以扣 8”。
+
+---
+
+## 27.2 Encounter Access
+
+剧情 encounter 和 sandbox encounter 需要明确区分。
+
+优先级：
+
+```text
+bound story encounter
+       >
+explicit sandbox
+       >
+unprepared
+```
+
+如果 Adventure 当前节点声明了战斗但没有有效 canonical preset：
+
+```text
+unprepared
+```
+
+不会偷偷用 generic training encounter 顶上。
+
+---
+
+## 27.3 Campaign / Combat 解耦
+
+Campaign engine 不 import combat engine。
+
+Combat engine 也不 import campaign。
+
+Runtime composition root 先从剧情状态投影：
+
+```text
+EncounterAccess
+```
+
+然后注入 combat。
+
+这样避免：
+
+```text
+campaign <-> combat
+```
+
+双向依赖。
+
+---
+
+# 28. D&D AI Companions
+
+AI 队友不是只存在 prompt 文本里的 NPC。
+
+Canonical companion state 位于：
+
+```text
+ruleset_state.party.companions[*].ruleset_character
+```
+
+它们不塞入：
+
+```text
+instance.players
+```
+
+因为 `players` 仍代表真正玩家身份/权限。
+
+---
+
+## 28.1 Actor Identity
+
+统一 actor ref：
+
+```text
+player:<uid>
+companion:<id>
+enemy:<id>
+```
+
+这解决：
+
+- 谁能控制谁；
+- 检定是谁做；
+- initiative 上是谁；
+- spell slot 属于谁；
+- conditions 应用给谁。
+
+---
+
+## 28.2 自动行动
+
+Companion 自动回合是：
+
+```text
+server-owned automatic intent
+    ↓
+normal validation
+    ↓
+normal resolution
+    ↓
+normal reducer
+```
+
+玩家不能提交“伪造的 companion intent”绕过 ownership。
+
+---
+
+# 29. D&D Delegated Checks
+
+玩家可以声明：
+
+> “让队友去推门”。
+
+Planner 会尝试解析：
+
+```text
+actor_ref = companion:...
+```
+
+后续检定使用 companion canonical sheet。
+
+这和“用玩家自身力量检定，然后叙事里说是队友推的”不同。
+
+如果队友 identity 歧义：
+
+```text
+fail closed
+```
+
+而不是随便找一个。
+
+---
+
+# 30. D&D Exploration Spellcasting
+
+战斗外施法不是第二套 spell system。
+
+入口：
+
+```text
+exploration.cast_spell
+```
+
+前端只有在：
+
+```text
+available_intents
+```
+
+返回该 intent 时才显示。
+
+它与 combat 共用：
+
+- canonical spell known/prepared；
+- spell slots；
+- conditions；
+- concentration；
+- actor identity。
+
+---
+
+## 30.1 Exploration 可做什么
+
+确定性：
+
+- heal；
+- buff；
+- resource spend；
+
+由服务端 resolve。
+
+如果是：
+
+> 必须针对 hostile combat target 的 damage spell
+
+则在 exploration context 拒绝。
+
+如果法术是合法已知法术、资源可合法扣除，但效果是 narrative / 非确定数值：
+
+```text
+consume legal resource
+    ↓
+narrative resolution
+```
+
+LLM 可以讲故事，但不能自己重写 numerical mechanics。
+
+---
+
+# 31. D&D Director 与临时遭遇
+
+## 31.1 Director
+
+Director 是规则 runtime 的可选层：
+
+```text
+current campaign state
+      ↓
+read-only proposal
+      ↓
+assist / manual / auto policy
+```
+
+它不等于让 LLM直接写 campaign state。
+
+---
+
+## 31.2 Temporary Encounter Proposal
+
+自由剧情中，如果没有正式 Adventure encounter，AI 可以帮助生成临时遭遇候选。
+
+关键点：
+
+```text
+plan_temporary_encounter
+```
+
+是：
+
+> **只读 proposal。**
+
+它：
+
+- 不直接写 combat state；
+- 不自动开战；
+- 可以给 GM 预览/编辑；
+- 最终仍经过 `combat.start` 的 authoritative validation。
+
+正式绑定的 Adventure encounter access 优先，temporary proposal 不能伪造剧情 encounter identity。
+
+---
+
+# 32. 单一叙事时间线原则
+
+即使 D&D 有：
+
+- campaign 工具；
+- combat 工具；
+- adventure；
+- companions；
+- spells；
+
+DiceFrame 仍保持：
+
+```text
+ONE public timeline
+ONE action composer
+ONE round loop
+```
+
+DND5E 工具是同一 Play 页的结构化工具 surface。
+
+不是：
+
+```text
+剧情聊天室 A
++
+战斗聊天室 B
++
+AI 队友聊天室 C
+```
+
+这样可避免：
+
+- 历史分叉；
+- context 不一致；
+- 多个“谁才是最新 scene”的 authority。
+
+---
+
+
+# 32A. WorldState：当前世界真相
+
+这是 2026-09-17 合入 `main` 的另一条核心 authority。
+
+入口：
+
+```text
+src/engine/world_state.py
+src/engine/world_legality.py
+src/engine/world_events.py
+src/llm/world_prompt.py
+```
+
+`GameInstance.world_state` 是：
+
+> **当前世界真相的唯一权威容器。**
+
+它仍然属于 GameInstance Aggregate，不是第二个独立 aggregate，也没有独立数据库。
+
+---
+
+## 32A.1 当前结构
+
+第一版：
+
+```text
+world_state
+├─ schema_version
+├─ revision
+├─ clock
+├─ facts
+└─ scheduled_events
+```
+
+### `facts`
+
+使用 canonical key。
+
+示例：
+
+```text
+actor:p1.location
+location:old_bridge.passable
+ritual:clearing.status
+npc:mayor.alive
+```
+
+不要把本地化 display name 当 identity。
+
+每个 fact 还携带：
+
+```text
+visibility
+source_round
+updated_revision
+```
+
+visibility：
+
+```text
+public
+gm
+```
+
+---
+
+## 32A.2 唯一写入口
+
+```text
+apply_world_ops(instance, ops)
+```
+
+原则：
+
+```text
+整批 op 先校验
+↓
+全部合法
+↓
+原子提交
+```
+
+以下情况 fail closed：
+
+```text
+未知 op
+未知字段
+非法 canonical key
+非法 scalar
+坏 schema
+未来 schema
+损坏 scheduled event op
+```
+
+LLM 不应直接：
+
+```text
+instance.world_state["facts"][...]=...
+```
+
+---
+
+## 32A.3 WorldState 和其它容器的边界
+
+当前世界真相不要写进：
+
+```text
+ruleset_state
+key_facts
+lorebook_timed_state
+memory
+```
+
+这些容器可以提供信息，但不能成为 WorldState 的替代 authority。
+
+---
+
+# 32B. WorldState 可见性
+
+读取入口：
+
+```text
+project_visible_state(...)
+```
+
+原则：
+
+```text
+World truth
+≠
+Player-visible truth
+```
+
+GM-only facts 只能进入 GM 可见上下文。
+
+普通玩家 projection 只得到：
+
+```text
+public
+```
+
+内容。
+
+不要为了“让 AI 更聪明”把完整 world_state 无筛选塞给玩家问答或 AI 玩家。
+
+---
+
+# 32C. 世界行动合法性
+
+入口：
+
+```text
+src/engine/world_legality.py
+```
+
+LLM / Planner 只提出：
+
+```text
+world_requirements
+```
+
+例如：
+
+```text
+act at location
+move to destination
+via location ids
+```
+
+最终 legality 由 server 使用权威 facts 判定。
+
+---
+
+## 32C.1 保守 fail-open on unknown，fail-closed on proven contradiction
+
+如果世界明确记录：
+
+```text
+location:old_bridge.passable = false
+```
+
+玩家声明路线经过它，可以阻断。
+
+如果：
+
+```text
+WorldState 空
+地点不存在
+角色位置未知
+```
+
+不能凭常识瞎补并阻断。
+
+也就是说：
+
+```text
+未知 ≠ false
+```
+
+这一点对 AI 跑团非常重要。
+
+---
+
+## 32C.2 合法移动写回
+
+当移动经过权威合法性确认后，server 才能写：
+
+```text
+actor:<uid>.location = ...
+```
+
+不是让 GM 文本里一句“你来到了教堂”直接改 canonical location。
+
+---
+
+# 32D. 逻辑世界时间与定时事件
+
+入口：
+
+```text
+src/engine/world_events.py
+```
+
+世界时间只经：
+
+```text
+advance_world_time(+N)
+```
+
+推进。
+
+流程：
+
+```text
+当前 logical clock
+↓
+推进到新时间
+↓
+按 (day, minute, event_id) 稳定排序
+↓
+结算所有到期 scheduled_events
+↓
+applied / failed
+```
+
+没有：
+
+```text
+后台实时 tick
+独立世界 scheduler 进程
+```
+
+所以：
+
+```text
+页面刷新
+重复保存
+进程重启
+```
+
+不会自动把同一事件结算两次。
+
+---
+
+## 32D.1 Process 目前做到哪
+
+当前能很好表达：
+
+```text
+20 分钟后毒发
+14:00 仪式完成
+明早城门关闭
+两小时后援军到达
+```
+
+但还没有 first-class：
+
+```text
+Process {
+  id
+  participants
+  progress
+  state
+  transitions
+  end_condition
+}
+```
+
+因此：
+
+```text
+NPC 正在从 A 前往 B
+搜捕进度 63%
+火势持续扩散
+长期阵营战争逐步升级
+```
+
+还不是通用 Process Engine。
+
+开发者不要因为已有 `scheduled_events` 就把 Entity / Relation / Process 写成“已完成”。
+
+---
+
+# 32E. Entity / Relation / Process 的未来扩展边界
+
+未来如果要做：
+
+```text
+Entity
+Relation
+Long-running Process
+```
+
+应该继续以：
+
+```text
+GameInstance.world_state
+```
+
+作为当前世界 authority 的基础演进。
+
+不要新增：
+
+```text
+WorldState2
+EntityStateDB
+LLMWorldTruth
+```
+
+这种并列 authority。
+
+---
+
+
+
+# 33. Lorebook / World / Memory
+
+## 33.1 World 与 Lorebook
+
+World core 负责：
+
+- world identity；
+- default/recommended rules；
+- setting；
+- starter scene；
+- starter lore entry identities；
+- deterministic lore metadata。
+
+World core 中会固定 entry 的 canonical 语义，例如：
+
+```text
+id
+type
+tier
+unreliable
+sync_on_enter
+triggers_recursive
+visible_to
+is_constant
+match_mode
+sticky
+cooldown
+delay
+order
+probability
+group
+group_weight
+connected_to
+```
+
+Locale 只负责：
+
+```text
+name
+keywords
+content
+```
+
+等 display / language text。共享 `lorebook.db` 保存 canonical/core 条目，每局根据：
+
+```text
+instance.language
+```
+
+物化只读 locale view。语言切换不得新增、删除或重命名 canonical lore identity。
+
+---
+
+## 33.2 Hybrid Lore Retrieval
+
+当前所有走标准叙事管线的 Ruleset 共用：
+
+```text
+src/lorebook/retrieval.py
+LoreRetriever
+```
+
+它不是某个 D&D / CoC / Freeform 的专用实现。正常回合、历史 swipe 和桌外 GM/KP 问答都走同一个 retriever，只在：
+
+```text
+viewer scope
+timer mutation policy
+```
+
+上有所不同。
+
+第一版检索输入不是只看本轮玩家原句，而是：
+
+```text
+当前 actions_text
++
+instance.scene
++
+WorldState 中的 canonical location
++
+当前 scene 实际出现的 NPC
+```
+
+默认**不扫描多轮历史**，避免旧关键词反复激活 sticky / cooldown / delay。
+
+为了避免结构标签污染关键词检索，retriever 构造两份 query：
+
+```text
+lexical_query
+  = 只有 action / scene / location / NPC 的实际值
+  → KeywordMatcher
+
+semantic_query
+  = 带 [action] / [scene] / [location] / [present_npcs] 标签
+  → EmbeddingClient
+```
+
+因此英文 Lore 的关键词如果恰好是 `scene`、`location`、`action`，不会仅因为 query 标签本身而每轮误命中。
+
+既有 `KeywordMatcher` 仍然是基础检索，继续拥有：
+
+```text
+keyword / regex
+any / all / not_any / not_all
+constant
+recursive trigger
+sticky
+cooldown
+delay
+probability
+group / group_weight
+tier / order
+```
+
+语义检索只是可选增强，不替代这些语义。
+
+---
+
+## 33.3 Embedding 与派生缓存
+
+世界书语义检索复用长期记忆已经使用的：
+
+```text
+MemoryStore.embedding_client
+```
+
+`GameHandler` 通过惰性 provider 把同一个客户端提供给 `LoreRetriever`，因此不存在第二套：
+
+```text
+LoreEmbeddingClient
+LoreEmbeddingProvider
+LoreEmbeddingSettings
+```
+
+配置仍然是统一的：
+
+```text
+embedding_enabled
+embedding_provider_ref
+embedding_model
+embedding_max_input
+```
+
+未配置 embedding，或 provider / query / batch 调用失败时：
+
+```text
+semantic skipped
+        ↓
+scene/location/NPC anchors + KeywordMatcher continue
+        ↓
+round continues
+```
+
+Embedding failure **不得**让正常回合失败。非数字、空向量、`NaN`、`Inf`、维度不一致等坏数据同样 fail-soft。
+
+世界书 entry 向量缓存在 `lorebook.db`：
+
+```text
+lorebook_embeddings
+```
+
+当前 Lorebook SQLite `user_version = 4`。缓存键：
+
+```text
+(entry_id, language, embedding_profile)
+```
+
+并保存：
+
+```text
+content_hash
+embedding
+updated_at
+```
+
+`embedding_profile` 绑定模型 / endpoint identity / max input，不包含 API key；`content_hash` 对真正送去 embedding 的：
+
+```text
+name
+type
+keywords
+content
+```
+
+计算。内容变化、语言变化、模型/端点变化都会自然 cache miss 并 lazy batch 重建。
+
+这张表是：
+
+> **纯派生缓存，不是世界知识 authority。**
+
+整表删除后系统仍能重新构建；条目、世界或插件内容删除时同步清理相关 cache row。
+
+当前没有引入：
+
+```text
+FAISS
+Chroma
+Qdrant
+Milvus
+pgvector
+```
+
+世界书规模下仍使用 SQLite + Python cosine similarity。
+
+---
+
+## 33.4 Hybrid Merge / Visibility / Timer 边界
+
+当 embedding 可用时，Keyword 与 semantic 可以在同一轮都提供候选。
+
+最终结果按 canonical entry ID 去重，并稳定排序：
+
+```text
+tier
+↓
+order
+↓
+source priority
+↓
+semantic score
+↓
+id
+```
+
+`core / background / archived` 与 entry `order` 始终高于“它是 keyword 还是 semantic 命中”；source priority 只在同 tier + 同 order 时作 tie-break，避免低优先级条目先吃掉 Lore budget。
+
+Pure semantic hit 只是：
+
+> **“可能相关的已有条目”**
+
+不是：
+
+> “当前世界刚刚发生了这件事”。
+
+因此 semantic hit：
+
+```text
+不写 WorldState
+不写 Memory
+不改 Ruleset state
+不触发 scheduled event
+不决定战斗 / 检定 / 经济结果
+```
+
+玩家视角检索在 semantic rank **之前**就先做 `visible_to` 过滤，防止 GM-only 条目因为向量相似而进入 player-safe candidate set。
+
+现有 `lorebook_timed_state` 的 sticky / cooldown / delay 仍由 KeywordMatcher 语义控制。Pure semantic candidate 不偷偷推进 timer；桌外问答使用计时状态副本，不改变真实 timer。
+
+---
+
+## 33.5 Lore Prompt Projection 与 Authority
+
+GM 上下文中的 Lore 不再只是弱语义的：
+
+```text
+【世界观知识】
+[type] name: content
+```
+
+当前投影使用：
+
+```text
+【当前相关世界设定】
+
+[id=...][type=...][tier=...][unreliable?]
+name:
+content
+```
+
+并明确告诉模型：
+
+```text
+WorldState / 系统裁定 / Ruleset Runtime
+        >
+Lorebook explicit canon
+        >
+history / memory
+        >
+LLM improvisation
+```
+
+这里的 `>` 是 authority / current-truth precedence，不是“Lorebook 必须照剧本演”。
+
+具体约束是：
+
+```text
+Lorebook 只约束它明确声明的事实
+未声明部分属于开放空间，可以合理即兴
+Lorebook 不是剧情脚本，不要求玩家按预定路线行动
+玩家/系统造成的后续变化以当前 WorldState 为准
+unreliable 是传闻 / NPC 认知 / 主观陈述，不自动升级为客观事实
+```
+
+例如 Lorebook 说旧桥初始可通行，但游戏过程中 WorldState 已经记录：
+
+```text
+location:old_bridge.passable = false
+```
+
+则当前事实以 WorldState 为准。
+
+这保证增强世界书的目标是：
+
+```text
+减少遗忘 / 设定冲突
+```
+
+而不是：
+
+```text
+降低玩家自由度
+```
+
+GM 完整上下文可以保留 canonical Lore entry ID 作为一致性和诊断线索；player-safe Q&A 不输出内部 ID，只保留：
+
+```text
+type
+tier
+unreliable
+name
+content
+```
+
+避免内部命名本身剧透。
+
+Lore 仍受既有 token/char budget。`context_builder` 会记录最终注入和因预算裁掉的 entry ID；结合 retriever 的 keyword / semantic / final debug 信息，可以区分：
+
+```text
+没有召回
+召回但被 budget 裁掉
+召回并注入但模型没有遵循
+```
+
+---
+
+## 33.6 Long-term Memory
+
+Memory 与 Lorebook 不是同一东西。
+
+### Lorebook
+
+偏“世界固有设定 / 规则化世界知识”。
+
+### Memory
+
+偏“这局实际发生了什么”。
+
+Memory 可能带：
+
+- embedding；
+- delta；
+- namespace；
+- economy outbox delivery。
+
+Hybrid Lore Retrieval 复用同一个 `EmbeddingClient`，并不意味着两个存储合并：Lorebook 仍在 `lorebook.db`，长期记忆仍在 `memory.db`，authority 与生命周期不变。
+
+---
+
+### 当前 Confirmed Event → World Memory 的真实程度
+
+当前 `main` 已有：
+
+```text
+普通 memory_delta → MemoryStore
+durable memory outbox
+rollback reversal
+D&D 部分权威 EventBatch → memory projection
+```
+
+但尚未有一个通用的：
+
+```text
+所有 Confirmed Event
+↓
+统一长期价值筛选
+↓
+World Memory
+```
+
+管理器。
+
+因此不要把：
+
+```text
+confirmed_items
+```
+
+和：
+
+```text
+MemoryStore 长期记忆
+```
+
+当成同一个概念。
+
+前者更接近“已经确认、需要在当前/后续上下文避免反复讨论的事项”；后者是独立长期存储与召回系统。
+
+## 33.7 Namespace
+
+长期记忆按：
+
+```text
+memory_namespace
+```
+
+隔离。
+
+重开/重置会旋转 namespace。
+
+
+# 34. Content V2
+
+## 34.1 Canonical Identity
+
+例如：
+
+```text
+fighter
+longsword
+athletics
+npc_innkeeper
+```
+
+是 identity。
+
+```text
+战士
+Fighter
+ファイター
+```
+
+是 display。
+
+不能把翻译名拿去做：
+
+- save key；
+- rules reference；
+- internal joins。
+
+---
+
+## 34.2 Compatibility Pipeline
+
+```text
+Legacy / V1
+      ↓
+Compatibility Adapter
+      ↓
+Canonical Current Model
+      ↓
+Runtime Mechanics
+      ↓
+Typed Locale
+      ↓
+UI
+```
+
+旧 shape 的支持应集中在入口 adapter。
+
+不应在所有业务代码里充斥：
+
+```python
+if old_field:
+elif new_field:
+elif another_old_field:
+```
+
+---
+
+# 35. Rule Locale 与 World Locale
+
+## 35.1 Rule Locale
+
+Rule locale 可以翻译：
+
+- ability name；
+- skill name；
+- item display；
+- descriptions。
+
+不能替换：
+
+- damage formula；
+- skill pools；
+- permissions；
+- capabilities；
+- combat model；
+- mechanics categories。
+
+---
+
+## 35.2 World Locale
+
+World locale 只能修改：
+
+- world name；
+- description；
+- setting；
+- starter scene；
+- lore `name/keywords/content`。
+
+不能：
+
+- 增删 lore entry；
+- 重命名 canonical entry identity；
+- 修改 deterministic trigger/config。
+
+---
+
+# 36. Plugin Architecture
+
+## 36.1 Plugin Host
+
+主要边界：
+
+```text
+src/plugin_host/
+├─ host.py
+├─ support.py
+├─ descriptors.py
+├─ capabilities.py
+├─ content.py
+├─ contracts.py
+├─ marketplace.py
+├─ mirrors.py
+└─ ...
+```
+
+---
+
+## 36.2 插件类型
+
+当前 descriptor 单一来源 `support.py` 包括：
+
+| Type | Mode |
+|---|---|
+| content-pack | static |
+| theme | static |
+| voice-pack | static |
+| channel-adapter | plain subprocess |
+| provider | JSON-RPC provider process |
+| tool | JSON-RPC tool process |
+| bot-extension | JSON-RPC bridge process |
+| import-export | reserved |
+
+---
+
+## 36.3 Process Boundary
+
+```mermaid
+flowchart LR
+    HOST[PluginHost]
+
+    subgraph Static[Static]
+      C[Content Pack]
+      T[Theme]
+      V[Voice Pack]
+    end
+
+    subgraph Proc[Plugin Processes]
+      CA[Channel Adapter]
+      TOOL[RPC Tool]
+      PROV[RPC Provider]
+      BOT[RPC Bot Extension]
+    end
+
+    HOST --> C
+    HOST --> T
+    HOST --> V
+
+    HOST <--> CA
+    HOST <--> TOOL
+    HOST <--> PROV
+    HOST <--> BOT
+```
+
+插件进程不等于 in-process 任意 Python import。
+
+RPC plugin 经过：
+
+- descriptor validation；
+- capability init；
+- permission；
+- host lifecycle。
+
+---
+
+## 36.4 Plugin Type Descriptor
+
+插件类型的：
+
+- support level；
+- process mode；
+- inferred permissions；
+- required permission；
+- contribution mapping；
+- cleanup semantics；
+
+集中在 `support.py`。
+
+新增 plugin type 不应该：
+
+```text
+host.py 加一个 if
+frontend 再加一个 if
+permissions 再加一个 if
+registry 再加一个 if
+```
+
+而应该扩展 descriptor 及对应 runtime initializer。
+
+---
+
+# 37. Bot / Channel Adapter 边界
+
+Bot 不是一套独立游戏引擎。
+
+Channel Adapter 的职责：
+
+```text
+Platform message
+      ↓
+normalize actor/game
+      ↓
+DiceFrame HTTP API
+      ↓
+same service / GameInstance path
+```
+
+因此：
+
+- Web 玩家；
+- QQ/Telegram/其它 channel；
+- plugin transport
+
+应该最终进入相同 authority path。
+
+---
+
+## 37.1 Bot Authentication
+
+Bot 请求可以来自：
+
+- global bot token；
+- plugin-specific API token。
+
+如果代表玩家，还需要：
+
+- game identity；
+- `X-Bot-Actor`；
+- actor allowed；
+- player access open。
+
+Bot token 只证明：
+
+> “这个请求来自被授权的 Bot/Plugin”。
+
+不证明：
+
+> “它可以替任意玩家做任意事”。
+
+---
+
+## 37.2 Bot Card Rendering
+
+`src/bots/bridge_core/card_renderer.py` 的 PNG card 是 presentation side effect。
+
+CJK 字体必须通过真实 glyph 检查。
+
+找不到字体：
+
+```text
+render fails
+    ↓
+caller degrades to plain text
+```
+
+绝不回退到不含 CJK 的 Pillow default font 生成满屏 `□□□□`。
+
+这说明：
+
+> 卡片渲染失败不能成为游戏命令失败原因。
+
+---
+
+# 38. Web Access / Security
+
+## 38.1 Owner
+
+Owner 使用 access password / bearer 进入后台管理能力。
+
+---
+
+## 38.2 Player Share
+
+Player share 不是把 owner token 发给玩家。
+
+访问会解析：
+
+- game；
+- share user；
+- player access state；
+- room password/token；
+- endpoint allowlist。
+
+Owner 预览玩家视角时会保留 viewer identity 与 acting player identity 的区分。
+
+---
+
+## 38.3 Room Password
+
+如果本局设置 room password：
+
+```text
+verify password
+   ↓
+obtain room_token
+   ↓
+player API
+```
+
+而不是每个 endpoint 都直接接受后台 access token。
+
+---
+
+## 38.4 SSE Ticket
+
+SSE 支持一次性 ticket：
+
+```text
+obtain ticket
+    ↓
+GET SSE?ticket=...
+    ↓
+consume
+```
+
+无效/过期票据拒绝。
+
+这避免在 EventSource URL 上长期暴露更高权限 credential。
+
+---
+
+## 38.5 Owner 设备令牌与扫码配对
+
+当前 owner access 有两类平级凭据：
+
+```text
+访问密码
+设备令牌
+```
+
+访问密码：
+
+```text
+只保存 PBKDF2 hash
+服务端不持有明文
+```
+
+设备令牌：
+
+```text
+高熵随机 token
+落盘只存 SHA-256 digest
+可逐台吊销
+```
+
+### 配对入口
+
+后端：
+
+```text
+src/webui/pairing.py
+src/webui/routes/pairing.py
+src/webui/device_tokens.py
+```
+
+大致流程：
+
+```text
+已登录 Owner
+↓
+POST /api/pairing
+↓
+生成一次性短 TTL pairing code
+↓
+手机匿名 POST /api/pairing/claim
+↓
+兑换 device token
+↓
+后续作为 Authorization: Bearer
+```
+
+`claim` 在设备还没有任何 credential 时发生，因此必须匿名可达；安全性来自：
+
+```text
+短 TTL
+一次性
+摘要存储
+abuse guard
+login audit
+```
+
+不要把 `/pairing/claim` 简单塞进“必须已登录 owner”的 middleware，否则扫码登录流程会自锁。
+
+### 前端入口
+
+相关区域：
+
+```text
+frontend-v2/src/components/DevicePairingButton.vue
+frontend-v2/src/features/admin/settings/DevicePairingModal.vue
+frontend-v2/src/features/admin/settings/DevicePairingPanel.vue
+frontend-v2/src/components/common/QrCode.vue
+```
+
+QR 只是 transport / UX，最终 authority 仍在 access control 与 pairing service。
+
+
+
+# 39. Generated Images / Scene Media
+
+## 39.1 Asset 与 Game State 分离
+
+图像后端保存独立 asset。
+
+GameInstance 只保存：
+
+```text
+ImageReference
+asset_id
+```
+
+而不是把 base64 图片塞进 save。
+
+---
+
+## 39.2 Scene Image 与 Map Background 分离
+
+两个概念：
+
+```text
+scene_image      当前叙事/轮次视觉
+map_background   地图背景
+```
+
+生成一个 scene image 不会自动替换地图。
+
+---
+
+## 39.3 Manual Current-round Generation
+
+GM 手动生成当前回合图时：
+
+```text
+read target narration
+   ↓
+generate image
+   ↓
+re-fetch current instance
+   ↓
+verify run_id unchanged
+   ↓
+verify target round still exists
+   ↓
+attach reference
+   ↓
+save
+```
+
+如果期间：
+
+- restart；
+- reset；
+- rollback；
+
+旧图不会写进新 run。
+
+---
+
+## 39.4 Save Failure
+
+如果 image provider 成功，但：
+
+```text
+save_instance failed
+```
+
+service 会恢复原来的 scene image refs。
+
+避免：
+
+```text
+memory says new asset
+disk save still old state
+```
+
+的半提交。
+
+---
+
+# 40. Narrative Presentation Controls
+
+当前 per-game persisted controls 包括：
+
+- `play_mode`
+- `narrative_perspective`
+- `gm_style_override`
+
+---
+
+## 40.1 `play_mode`
+
+明确区分：
+
+```text
+free
+adventure
+```
+
+不再只用“有没有 adventure_binding”到处猜当前玩法。
+
+---
+
+## 40.2 GM Style
+
+World 可以提供：
+
+```text
+gm_style
+```
+
+GameInstance 可以：
+
+```text
+None  → 跟随 world
+dict  → 显式覆盖
+```
+
+最终 prompt 只渲染一份 effective style。
+
+GM style 只能影响：
+
+- tone；
+- verbosity；
+- pace；
+- custom narration instructions。
+
+不能影响 mechanics。
+
+---
+
+# 41. Frontend Capability Gating
+
+前端不应该：
+
+```ts
+if (ruleId === "dnd") showSpellButton()
+```
+
+正确方式是：
+
+```text
+backend ruleset metadata
+available_intents
+capabilities
+        ↓
+frontend render
+```
+
+例如战斗外施法按钮只有在：
+
+```text
+exploration.cast_spell
+```
+
+出现在服务端 available intents 时显示。
+
+这意味着：
+
+- custom D&D-like ruleset 不必被 `rule_id` 特判；
+- runtime 可以逐步扩展 capability；
+- 客户端不成为 mechanics detection owner。
+
+---
+
+# 42. Update / Deployment 架构
+
+DiceFrame 当前支持：
+
+```text
+Source
+Windows Portable
+Managed Docker
+```
+
+下载更新状态机可共享，但“谁有权提交安装”不同。
+
+---
+
+## 42.1 Source
+
+更新使用本地 backup transaction。
+
+---
+
+## 42.2 Windows Portable
+
+候选版本由 Windows launcher 控制切换。
+
+应用本身不能在运行中假装完成 launcher 的原子版本切换。
+
+---
+
+## 42.3 Managed Docker
+
+Docker application process：
+
+- 不挂 Docker socket；
+- 不直接控制 Docker daemon；
+- 不覆盖当前 version dir。
+
+它只能写：
+
+```text
+restart signal + relative candidate path
+```
+
+稳定 `docker_launcher` 才负责：
+
+- health；
+- probation；
+- commit；
+- rollback。
+
+---
+
+# 43. Runtime Logging 与 Diagnostics
+
+统一 owner：
+
+```text
+src/runtime_logging.py
+```
+
+默认：
+
+- Portable：`<install>/logs`
+- Docker：`data/logs`
+- retention：30 days
+
+业务 service 不应各自发明独立 log retention。
+
+---
+
+## 43.1 DF Assistant Log Diagnosis
+
+只有 owner 主动要求时：
+
+```text
+runtime_diagnostics.py
+```
+
+才读取 DiceFrame 自身最近两个 log。
+
+本地预处理：
+
+- credential redaction；
+- successful poll filtering；
+- duplicate compaction；
+- context bound。
+
+上送模型最多约 24,000 chars。
+
+Log 永远被当作 data，不当作 instructions。
+
+---
+
+# 44. Windows Portable Native Crash Forensics
+
+Windows launcher 当前对 bundled `python.exe` 提供 native crash evidence capture。
+
+运行期间临时设置当前用户：
+
+```text
+HKCU\
+Software\Microsoft\Windows\Windows Error Reporting\
+LocalDumps\python.exe
+```
+
+使用：
+
+```text
+MiniDump
+DumpType = 1
+Max dumps = 3
+```
+
+输出到：
+
+```text
+logs/crash-dumps/
+```
+
+异常退出还会生成：
+
+```text
+logs/last-crash.json
+```
+
+记录最小 crash metadata。
+
+---
+
+## 44.1 这个能力不是什么
+
+它不是：
+
+- root cause classifier；
+- 自动上传崩溃 dump；
+- 自动读取用户聊天；
+- 自动发送角色/世界书；
+- “exit code = 一定是某个 bug”的诊断器。
+
+它的职责只是：
+
+> **把原生崩溃从“窗口一闪而过”变成可分析证据。**
+
+---
+
+# 45. Failure Model
+
+系统的 failure handling 不是统一“catch Exception 然后继续”。
+
+不同边界使用不同策略：
+
+| Failure | 策略 |
+|---|---|
+| 未知 persisted future schema | fail closed |
+| Unknown ruleset runtime | fail closed |
+| Invalid ruleset minimum version | fail closed |
+| Adventure digest changed | fail closed |
+| Locale mechanics override | fail closed |
+| LLM narration failure | rollback current judgment where possible |
+| Stale LLM response | discard |
+| Image generation failure | degrade / do not rollback mechanics |
+| Bot card font missing | degrade to text |
+| Memory receipt missing after external success | retry idempotently |
+| One listener bind failure | keep other valid listeners + warn |
+| Runtime hot reload candidate build failure | keep old runtime |
+| Plugin provider failure | capability-specific failure/degrade |
+| Native Python crash | launcher records evidence; process dies |
+
+---
+
+# 46. Rollback 模型
+
+DiceFrame 至少有三种“撤回”，不能混称 rollback。
+
+## 46.1 Current Judgment Abort
+
+```text
+本轮还没成功提交
+```
+
+恢复进入 judgment 前 snapshot。
+
+---
+
+## 46.2 Historical Swipe
+
+```text
+过去回合已经存在
+```
+
+恢复 snapshot + cut branch + regenerate。
+
+---
+
+## 46.3 Economy Whole-round Rollback
+
+回到 round N：
+
+> 撤回 **N 及之后** 的相关 settlement era。
+
+这不是只看：
+
+```text
+proposal.origin_round == N
+```
+
+因为：
+
+- proposal 可以 round 3 创建；
+- round 5 才付款；
+- rollback round 4 时，round 5 的 settlement 仍必须撤销。
+
+---
+
+# 47. Architecture Guardrails / Tests
+
+当前 repo 不是只靠文档约束架构。
+
+至少有 AST 级 dependency tests。
+
+核心守卫：
+
+```text
+core domains !-> webui
+core domains !-> dnd2024
+rulesets !-> webui
+rulesets !-> compat
+dnd combat !-> campaign
+dnd combat !-> webui
+adventures !-> dnd2024
+adventures !-> webui
+web_transport !-> business
+business !-> web_transport
+```
+
+测试解析真正的 import AST，包括：
+
+- 普通 import；
+- 函数内 delayed import；
+- relative import。
+
+因此单纯改注释不会误报，而真实依赖变化会被捕获。
+
+---
+
+# 48. 数据 Ownership Matrix
+
+| 数据 / 状态 | 权威 Owner | 持久化 | 可读 Projection | Mutation Path |
+|---|---|---|---|---|
+| Game lifecycle | GameInstance | save | game detail | lifecycle / turns |
+| WorldState | GameInstance / world_state engine | save | visible world projection / LLM context | `apply_world_ops` / world events |
+| Player control | GameInstance player record / player_control | save | roster / game detail | game controls / claim seat |
+| Players | GameInstance | save | generic context / UI | character services |
+| Canonical D&D character | D&D runtime | save under player/companion | legacy projection | character lifecycle |
+| Ruleset state | Ruleset runtime | save | gameplay / LLM view | intents + reducers |
+| Combat event result | Ruleset reducer | event ledger / state | combat UI | authoritative intent |
+| Legacy combat | GameInstance + CombatResolver | save | generic UI | round/combat resolver |
+| Economy balances | Economy + character state | save | UI / trusted context | proposal settlement |
+| Economy proposals | Economy | save | proposal card | planner / GM / payer |
+| Memory | MemoryStore | SQLite | context retrieval | outbox delivery |
+| Lorebook | LorebookStore | SQLite | localized read view | content/world management |
+| Adventure graph | Adventure Bundle | files | runtime read | package management |
+| World template | Content V2 | files/DB | localized read | content management |
+| Ruleset bundle | Ruleset Bundle | files | runtime catalog | package release |
+| Scene image asset | Image backend | asset files | reference | image service |
+| scene_image ref | GameInstance | save | timeline/UI | generated image service |
+| Plugin state/process | PluginHost | plugin data/config | admin UI | host lifecycle |
+| Runtime config | ConfigStore | config/secrets | settings | config controller |
+| HTTP listener | web_transport/web_server | runtime only | system status | restart |
+| Native crash dump | Windows/WER | logs | diagnostics | OS/launcher |
+
+---
+
+# 49. Extension Matrix：新增功能应该改哪里
+
+## 49.1 新增规则集
+
+如果是完整专业规则：
+
+```text
+src/rulesets/<new_runtime>/
+    +
+RulesetRuntime implementation
+    +
+canonical runtime id/version
+    +
+capabilities
+    +
+bundle/content
+```
+
+不应：
+
+```text
+在 generic d20 里加 if new_rule
+```
+
+---
+
+## 49.2 新增通用战斗 primitive
+
+只有多个规则都合理共享时才进入：
+
+```text
+src/engine/combat_*
+```
+
+具体：
+
+- spell；
+- cultivation technique；
+- feat；
+
+identity 仍留在 concrete ruleset catalog。
+
+---
+
+## 49.3 新增 persisted GameInstance 字段
+
+检查顺序：
+
+```text
+GameInstance field
+    ↓
+GamePersistedState contract
+    ↓
+GameStateCodec.encode/decode
+    ↓
+migration/default
+    ↓
+projection only if UI/LLM needs it
+    ↓
+rollback/restart/reset semantics
+    ↓
+tests
+```
+
+不能只加 dataclass field。
+
+---
+
+## 49.4 新增 Web 功能
+
+```text
+route
+  ↓
+WebAPI delegate
+  ↓
+service
+  ↓
+core/ruleset
+```
+
+如果只是 transport 参数：
+
+```text
+web_transport
+```
+
+不要进入 engine。
+
+---
+
+## 49.5 新增 plugin capability
+
+优先：
+
+```text
+plugin implementation
++
+SDK contract
++
+capability descriptor
++
+tests
+```
+
+只有真正新增 plugin type 才扩：
+
+```text
+support descriptor / initializer / permissions / cleanup
+```
+
+---
+
+## 49.6 新增模型 provider
+
+配置层继续通过：
+
+```text
+ai_providers
+*_provider_ref
+```
+
+不要重新引入：
+
+```text
+chat_base_url
+chat_key
+image_base_url
+...
+```
+
+散落的 capability-specific credential truth。
+
+---
+
+# 50. 当前仍存在的架构债务 / 非终局边界
+
+这一节只记录当前源码明确可见的“尚未终局”，不是批评。
+
+## 50.1 `RulesetRuntime` 主协议仍然偏宽
+
+它同时承担：
+
+- character；
+- intent；
+- event；
+- projection；
+- migration。
+
+已经有 optional protocols 在逐步拆分，但主协议还没有完全 capability 化。
+
+---
+
+## 50.2 Generic character projection 仍保留传统字段
+
+为兼容：
+
+- 旧世界；
+- 旧 save；
+- prompt；
+- generic UI；
+
+通用 state 仍有：
+
+```text
+hp
+max_hp
+class
+race
+level
+attributes
+equipment
+skills
+inventory
+```
+
+所以当前不能宣称 generic state 已经“完全 ruleset-agnostic”。
+
+---
+
+## 50.3 Legacy 与 professional runtime 双路径仍并存
+
+当前默认 registry 同时有：
+
+```text
+core:legacy
+core:dnd2024
+```
+
+这是一种有意的 compatibility architecture。
+
+不能因为 D&D runtime 已经存在，就把 legacy fallback 全部删掉。
+
+---
+
+## 50.4 WebAPI 仍然是较大的 facade
+
+许多业务已经拆到 services，但 `WebAPI.__init__` 仍承担大量 dependency wiring。
+
+当前设计方向是：
+
+- 保持 facade compatibility；
+- 继续让实际 domain logic 下沉到 services/core；
+- 不因“文件大”就盲目拆出新的 cross-service coupling。
+
+---
+
+## 50.5 GameInstance 仍是大 Aggregate
+
+这是有意设计。
+
+玩家、round、economy、combat 等有大量：
+
+- atomicity；
+- rollback；
+- run identity；
+- concurrent write；
+
+约束。
+
+因此不能只因为 dataclass 大，就把它拆成多个独立 Aggregate，然后失去单局 transaction boundary。
+
+可继续拆的是：
+
+- codec；
+- projector；
+- helper；
+- resolver；
+- domain service。
+
+而不是随意拆 authority。
+
+---
+
+
+## 50.6 WorldState v1 不是完整世界模拟器
+
+当前已经有：
+
+```text
+facts
+visibility
+logical clock
+scheduled events
+simple action legality
+```
+
+但没有：
+
+```text
+generic Entity Registry
+Relation Graph
+Long-running Process Engine
+map topology / pathfinding
+```
+
+因此后续扩展应在现有 WorldState authority 上渐进增强，而不是另起一套“更高级世界状态”。
+
+---
+
+## 50.7 AI-hosted PC 已有 authority，但 AI 玩家能力仍应保持受限
+
+当前 AI 托管已经进入：
+
+```text
+control contract
+exploration action fill
+authoritative D&D combat automation
+Web / Bot control UX
+```
+
+但这不意味着应该让 AI controller 获得：
+
+```text
+GM private context
+跨角色私密信息
+直接 mechanics mutation
+新的角色副本
+```
+
+后续增强 AI 行为时要继续沿用：
+
+```text
+same PC
+same action authority
+same combat authority
+different controller
+```
+
+这一原则。
+
+
+# 51. 关键端到端架构图
+
+```mermaid
+flowchart TB
+    subgraph Client
+      FE[Vue Frontend]
+      CH[Channel Adapter]
+    end
+
+    subgraph Transport
+      HTTP[aiohttp Routes]
+      SSE[SSE]
+      TLS[web_transport]
+    end
+
+    subgraph Application
+      API[WebAPI]
+      SVC[WebUI Services]
+      GH[GameHandler]
+    end
+
+    subgraph Domain
+      GI[GameInstance]
+      RS[Ruleset Runtime Registry]
+      LEG[core:legacy]
+      DND[core:dnd2024]
+      ECO[Economy]
+      CHECK[Checks / Dice]
+      COMBAT[Combat Primitives]
+    end
+
+    subgraph AI
+      PC[PromptComposer]
+      CTX[Context Builder]
+      LLM[LLM Client]
+    end
+
+    subgraph Storage
+      SAVES[(Save Packages)]
+      LORE[(Lorebook SQLite)]
+      MEM[(Memory SQLite)]
+      ASSET[(Media / Plugin Assets)]
+    end
+
+    subgraph Extensions
+      PH[PluginHost]
+      PLUG[Plugin Processes]
+    end
+
+    FE --> HTTP
+    CH --> HTTP
+    TLS --> HTTP
+    HTTP --> API
+    HTTP --> SSE
+
+    API --> SVC
+    SVC --> GH
+    SVC --> GI
+    SVC --> RS
+
+    GH --> GI
+    GH --> PC
+    GH --> CHECK
+    GH --> ECO
+
+    RS --> LEG
+    RS --> DND
+
+    DND --> COMBAT
+
+    PC --> CTX
+    CTX --> LLM
+
+    GI --> SAVES
+    ECO --> SAVES
+    CTX --> LORE
+    CTX --> MEM
+
+    API --> ASSET
+
+    PH <--> PLUG
+    PLUG --> HTTP
+```
+
+---
+
+# 52. 一条 D&D 玩家攻击的实际权威链路
+
+为了把上述抽象架构落地，可以用“玩家在 D&D 对局中攻击敌人”举例。
+
+```text
+1. 玩家 Web/Channel 提交自然语言行动
+       ↓
+2. turns service 识别 game / actor / run
+       ↓
+3. action 写入 GameInstance
+       ↓
+4. multiplayer barrier 满足
+       ↓
+5. round 进入 ACTIVE_JUDGMENT
+       ↓
+6. Check Planner 理解该声明是否属于结构化攻击/检定
+       ↓
+7. D&D runtime / combat intent boundary 识别 authoritative mechanics
+       ↓
+8. 服务端校验 actor ownership、目标、当前战斗、turn 等
+       ↓
+9. 服务端 RNG / formula AST 计算
+       ↓
+10. EventBatch
+       ↓
+11. D&D combat reducer 修改 canonical combat state
+       ↓
+12. 该权威结果进入 LLM read-only context
+       ↓
+13. LLM 根据“已经发生的结果”写叙事
+       ↓
+14. reasoning/tag parse / stale fence
+       ↓
+15. apply 允许的 narrative side effects
+       ↓
+16. save
+       ↓
+17. SSE/Bot 输出
+```
+
+最重要的顺序是：
+
+```text
+mechanics result
+    BEFORE
+narrative description of that mechanics result
+```
+
+而不是让 LLM 叙事反过来定义机械结果。
+
+---
+
+# 53. 一条购买物品的实际权威链路
+
+```text
+1. 玩家：“我买这把剑”
+2. Planner识别 purchase intent
+3. 能解析价格：
+       → purchase proposal
+   不能解析价格：
+       → unpriced intent
+4. 模型同时输出“你拿到了剑”
+5. filter_unconfirmed_purchase_grants()
+       pending paid proposal? block
+       unpriced intent? block
+       explicit legal FREE_GRANT? allow only matching genuinely free grant
+6. payer decision
+7. balance validation
+8. transaction
+9. deferred item effect commit
+10. authoritative save
+11. memory outbox delivery
+12. next narration may proceed
+```
+
+这说明 economy 和 inventory 的架构已经是联动 transaction boundary，而不是两个彼此独立的 tag parser。
+
+---
+
+# 54. 一条历史 Swipe 的实际边界
+
+```mermaid
+sequenceDiagram
+    participant GM
+    participant AUTH as Authority Gate
+    participant PROC as Process Lock
+    participant GI as GameInstance
+    participant ECO as Economy
+    participant MEM as Memory
+    participant LLM
+    participant SAVE
+
+    GM->>AUTH: request swipe
+    AUTH->>PROC: acquire
+    PROC->>GI: restore target snapshot
+    GI->>ECO: reverse round-era settlements
+    ECO->>MEM: queue reversal(s)
+    GI->>GI: cut discarded log branch
+    GI->>LLM: regenerate branch
+    LLM-->>GI: new narrative/state candidates
+    GI->>SAVE: persist new authoritative branch
+    SAVE-->>GI: success
+    MEM->>MEM: drain pending reversals
+    PROC-->>AUTH: release
+```
+
+普通 live action 在 rewrite 期间必须在写入前拒绝。
+
+否则可能发生：
+
+```text
+swipe restores old state
+player writes new action into old branch
+swipe commits new branch
+```
+
+导致 branch contamination。
+
+---
+
+# 55. 维护规则：判断“这段代码应该放哪”
+
+遇到新需求时，可用以下决策：
+
+### 它是否是 HTTP/TLS/证书问题？
+
+是 → `web_transport / webui`
+
+### 它是否是 Web 用例编排，但不是核心规则？
+
+是 → `webui/services`
+
+### 它是否是单局 state invariant / generic mechanics？
+
+是 → `engine`
+
+### 它是否只属于 D&D？
+
+是 → `rulesets/dnd2024`
+
+### 它是否属于所有专业 ruleset 都能共享的 primitive？
+
+是 → generic `engine` 或 `rulesets/contracts`
+
+### 它是否只是旧格式适配？
+
+是 → `compat / migrations`
+
+### 它是否只是展示或 locale？
+
+是 → Content locale / frontend
+
+### 它是否是外部插件能力？
+
+是 → `plugin_host` descriptor/capability 或 plugin package
+
+### 它是否只是叙事生成辅助？
+
+是 → commands / llm，但不能因此获得 persisted mechanics authority
+
+---
+
+# 56. 结论：当前 DiceFrame 的架构中心
+
+当前 DiceFrame 的架构中心不是 LLM。
+
+真正的中心是：
+
+```text
+GameInstance Aggregate
+        +
+Versioned Ruleset Runtime
+        +
+Server-side Authority
+        +
+Explicit Persistence / Migration
+        +
+Transactional Side-effect Boundaries
+```
+
+LLM 是围绕这套 authority model 工作的“语义与叙事引擎”。
+
+可以把当前系统浓缩成一句话：
+
+> **DiceFrame 是一个以 GameInstance 为单局事务边界、以 Ruleset Runtime 为规则权威、以 LLM 为受约束叙事/规划器、并通过版本化内容、持久化迁移、outbox 与 capability boundary 支撑多人 TRPG 的自托管运行时。**
+
+---
+
+# 57. 源码核验索引
+
+本文重点对应当前源码：
+
+```text
+启动 / Web
+web_server.py
+src/webui/runtime_config.py
+src/webui/composition.py
+src/webui/application.py
+src/webui/bootstrap.py
+src/webui/access_control.py
+src/webui/api.py
+src/webui/routes/*
+src/webui/services/*
+
+核心编排
+src/common_factory.py
+src/commands/game_handler.py
+src/commands/round_processor.py
+src/commands/check_planner.py
+src/commands/prompt_composer.py
+src/commands/round_llm.py
+src/commands/state_update_applier.py
+
+Aggregate / Persistence
+src/engine/game_instance.py
+src/engine/game_state_codec.py
+src/engine/game_state_contracts.py
+src/migrations/instance.py
+
+WorldState
+src/engine/world_state.py
+src/engine/world_legality.py
+src/engine/world_events.py
+src/llm/world_prompt.py
+
+Player Control / AI-hosted PC
+src/engine/player_control.py
+src/commands/ai_player.py
+src/webui/services/game_controls.py
+src/webui/services/turns.py
+src/rulesets/automation.py
+
+Economy / Memory
+src/engine/economy.py
+src/engine/memory_outbox.py
+src/memory/*
+
+LLM
+src/llm/client.py
+src/llm/context_builder.py
+src/llm/parser.py
+src/llm/protocol.py
+src/llm/tools.py
+
+规则 Runtime
+src/rulesets/contracts.py
+src/rulesets/registry.py
+src/rulesets/builtin.py
+src/rulesets/legacy_adapter.py
+src/rulesets/dnd2024/*
+src/rulesets/dnd2024/features/*
+
+内容
+src/rules/*
+src/content/*
+src/lorebook/store.py
+src/lorebook/matcher.py
+src/lorebook/retrieval.py
+src/migrations/lorebook.py
+src/adventures/*
+
+插件
+src/plugin_host/*
+src/plugin_sdk/*
+
+Transport / Deployment
+src/web_transport/*
+src/docker_launcher/*
+src/launcher/*
+src/runtime_logging.py
+src/runtime_diagnostics.py
+
+前端
+frontend-v2/src/api/*
+frontend-v2/src/features/*
+frontend-v2/src/composables/*
+frontend-v2/src/i18n/*
+frontend-v2/src/router/*
+
+架构守卫
+tests/architecture/test_dependencies.py
+```
+
+---
+
+
+# 57A. 给开发者维护这份文档的规则
+
+这份开发者版不要求“每个 PR 都重写全文”，但以下变化必须同步：
+
+```text
+Authority owner 改变
+Persisted schema 改变
+新增 GameInstance 核心字段
+新的 ruleset capability
+新的跨存储 outbox
+新的 Player Control mode / semantics
+WorldState contract 改变
+Lore retrieval / prompt authority / embedding cache contract 改变
+主要端到端请求链变化
+```
+
+而这些通常只需要更新“开发入口”，不需要改 architecture core：
+
+```text
+按钮换位置
+Modal 改样式
+文案调整
+普通 CSS
+不会改变 authority 的组件拆分
+```
+
+开发者入口表里的路径如果发生真实 owner 迁移，也必须同步，否则它会比没有文档更危险。
+
+---
+
+# 58. 文档维护策略
+
+以后更新这份文档时，不建议按“每个 PR 都加一句”维护。
+
+只在以下情况更新：
+
+1. authority owner 改变；
+2. 模块 dependency direction 改变；
+3. persisted schema / identity 语义改变；
+4. 新增或删除 runtime / capability boundary；
+5. 新增新的跨存储 transaction/outbox；
+6. transport / plugin process / deployment topology 改变；
+7. Lore retrieval / context authority / semantic cache 边界发生结构变化；
+8. end-to-end request sequence 发生结构变化；
+9. 一个“兼容路径”正式变成“正常主路径”，或反之。
+
+纯 UI 文案、普通 bugfix、小型组件移动，不应污染核心架构文档。
+
+对于重大设计变更：
+
+```text
+ARCHITECTURE_CN.md = 当前事实
+ADR               = 为什么作出该长期决策
+PR / Issue         = 实施过程与讨论
+```
+
+三者职责不要混在一起。
+
+
+---
+
+# 附录：这份“开发者版”和原架构文档的关系
+
+这份文件保留了原架构文档的完整主体，没有把 73 KB 的系统事实压缩成一份短导览。
+
+新增内容主要是：
+
+```text
+开发者快速入口
+当前 main 新增的 WorldState
+Player Control / AI-hosted PC
+D&D Class Feature Runtime v1
+Hybrid Lore Retrieval / Semantic Retrieval / Lore Prompt authority
+扫码配对
+Confirmed Event / World Memory 当前边界
+GameInstance schema 13 / 14 / 15 + Lorebook SQLite schema 4
+开发者维护与定位规则
+```
+
+也就是说：
+
+```text
+原架构正文
++
+开发入口索引
++
+最新 main 架构事实
+=
+本开发者版
+```
+
+如果未来要拆文件，建议拆成：
+
+```text
+ARCHITECTURE_CN.md          当前架构事实（长文）
+DEVELOPER_GUIDE_CN.md       功能入口与代码导航
+ENGINEERING_RULES.md        工程约束
+ADR/*                       长期设计决策原因
+```
+
+但在拆分之前，这一份可以直接作为“新人开发者完整入口”使用。
