@@ -937,9 +937,13 @@ class WebAPI:
         )
 
     async def install_plugin(self, payload: bytes, overwrite: bool = False) -> dict[str, Any]:
-        return await plugins.install_plugin(
+        result = await plugins.install_plugin(
             self._plugin_lifecycle_dependencies, payload, overwrite,
         )
+        if result.get("ok"):
+            self._sync_plugin_adventure_sources()
+            self._sync_module_catalogs()
+        return result
 
     async def list_plugin_marketplace(self) -> dict[str, Any]:
         return await plugins.list_plugin_marketplace(
@@ -947,9 +951,25 @@ class WebAPI:
         )
 
     async def install_marketplace_plugin(self, plugin_id: str, overwrite: bool = False) -> dict[str, Any]:
-        return await plugins.install_marketplace_plugin(
+        result = await plugins.install_marketplace_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, overwrite,
         )
+        if result.get("ok"):
+            self._sync_plugin_adventure_sources()
+            self._sync_module_catalogs()
+        return result
+
+    async def import_module(self, payload: bytes, overwrite: bool = False) -> dict[str, Any]:
+        """Install a local content-module package through the canonical host."""
+
+        return await self.install_plugin(payload, overwrite)
+
+    async def install_marketplace_module(
+        self, module_id: str, overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Install a marketplace content module through the canonical host."""
+
+        return await self.install_marketplace_plugin(module_id, overwrite)
 
     async def update_marketplace_plugin(self, plugin_id: str) -> dict[str, Any]:
         return await plugins.update_marketplace_plugin(
