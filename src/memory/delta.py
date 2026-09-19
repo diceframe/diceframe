@@ -15,6 +15,8 @@ from functools import reduce
 from operator import or_
 from pathlib import Path
 
+from peewee import fn as peewee_fn
+
 from src.memory.models import MemoryEconomyDelivery, MemoryEntry
 from src.memory.models import database as _models_database
 from src.migrations.memory import migrate as migrate_memory
@@ -467,6 +469,27 @@ class MemoryStore:
         return new_id
 
     # ---- 召回 ----
+
+    def kind_summary(self, game_key: str) -> dict[str, int]:
+        """Read-only World Memory source summary（母方案 §103/§169，WR-10）。
+
+        按记忆分类聚合（authoritative_world / soft / legacy_soft / 未知），供
+        诊断视图回答"AI 的长期记忆里都是些什么来源"。未知值按 legacy_soft 归类。
+        """
+
+        if self._conn is None:
+            raise RuntimeError("memory store is not open")
+        rows = MemoryEntry.select(
+            MemoryEntry.memory_kind,
+            peewee_fn.COUNT(MemoryEntry.id).alias("total"),
+        ).where(
+            MemoryEntry.game_key == str(game_key),
+            _ACTIVE,
+        ).group_by(MemoryEntry.memory_kind)
+        summary = {"authoritative_world": 0, "soft": 0, "legacy_soft": 0}
+        for row in rows:
+            summary[memory_kind_of(row.memory_kind)] += int(row.total)
+        return summary
 
     def recall(self, game_key: str, keywords: list[str], limit: int = 10, offset: int = 0) -> list[dict]:
         """根据关键词召回相关记忆。"""
