@@ -89,6 +89,70 @@ def _validate_transition(raw: Any, label: str) -> dict[str, Any]:
     return {"to": to_id, "conditions": conditions}
 
 
+# 种子上界（母方案 §167）：与 world 容器上限同量级、收紧到冒险种子语义。
+MAX_SEED_ENTITIES = 128
+MAX_SEED_RELATIONS = 128
+MAX_SEED_FACTS = 128
+MAX_SEED_PROCESSES = 32
+
+
+def _validate_world_seed(raw: Any) -> dict[str, Any]:
+    """Validate the optional v2 world seed（结构性校验，母方案 §119）。
+
+    种子条目就是 world ops 的**载荷字段**（去掉 op 名）：entity/relation/fact
+    /process 四类；最终合法性由物化时的唯一写入口 apply_world_ops fail closed
+    把关（process due_at 相对物化时刻的未来性等）。
+    """
+
+    if raw is None:
+        return {"entities": [], "relations": [], "facts": [], "processes": []}
+    if not isinstance(raw, dict):
+        raise AdventureGraphV2Error("world_seed must be an object")
+    extra = sorted(set(raw) - {"entities", "relations", "facts", "processes"})
+    if extra:
+        raise AdventureGraphV2Error(f"world_seed has unknown field: {extra[0]!r}")
+    entities = _bounded_list(raw.get("entities", []), "world_seed.entities", MAX_SEED_ENTITIES)
+    relations = _bounded_list(raw.get("relations", []), "world_seed.relations", MAX_SEED_RELATIONS)
+    facts = _bounded_list(raw.get("facts", []), "world_seed.facts", MAX_SEED_FACTS)
+    processes = _bounded_list(raw.get("processes", []), "world_seed.processes", MAX_SEED_PROCESSES)
+    for entity in entities:
+        if not isinstance(entity, dict) or not entity.get("entity_id") or not entity.get("kind"):
+            raise AdventureGraphV2Error("world_seed entity needs entity_id and kind")
+        extra = sorted(set(entity) - {"entity_id", "kind", "visibility", "source_ref"})
+        if extra:
+            raise AdventureGraphV2Error(f"world_seed entity has unknown field: {extra[0]!r}")
+    for relation in relations:
+        if not isinstance(relation, dict) or not all(
+            relation.get(field) for field in ("relation_id", "kind", "from_ref", "to_ref")
+        ):
+            raise AdventureGraphV2Error(
+                "world_seed relation needs relation_id/kind/from_ref/to_ref"
+            )
+        extra = sorted(set(relation) - {"relation_id", "kind", "from_ref", "to_ref", "visibility", "source_ref"})
+        if extra:
+            raise AdventureGraphV2Error(f"world_seed relation has unknown field: {extra[0]!r}")
+    for fact in facts:
+        if not isinstance(fact, dict) or not fact.get("key") or "value" not in fact:
+            raise AdventureGraphV2Error("world_seed fact needs key and value")
+        extra = sorted(set(fact) - {"key", "value", "visibility"})
+        if extra:
+            raise AdventureGraphV2Error(f"world_seed fact has unknown field: {extra[0]!r}")
+    for process in processes:
+        if not isinstance(process, dict) or not process.get("process_id") or not process.get("kind"):
+            raise AdventureGraphV2Error("world_seed process needs process_id and kind")
+        extra = sorted(
+            set(process) - {"process_id", "kind", "participants", "location", "due_at", "visibility", "source_ref"}
+        )
+        if extra:
+            raise AdventureGraphV2Error(f"world_seed process has unknown field: {extra[0]!r}")
+    return {
+        "entities": [dict(item) for item in entities],
+        "relations": [dict(item) for item in relations],
+        "facts": [dict(item) for item in facts],
+        "processes": [dict(item) for item in processes],
+    }
+
+
 def validate_graph_v2(adventure: Any) -> dict[str, Any]:
     """Validate one v2 adventure record (entity kind ``adventure``) and return it.
 
@@ -107,6 +171,8 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
         "kind", "source_ref", "automation_level", "estimated_minutes",
         "recommended_level", "player_count", "world_policy",
         "recommended_world_id",
+        # ADV2-03：初始世界种子（entity/relation/fact/process）。
+        "world_seed",
     }
     extra = sorted(set(adventure) - allowed)
     if extra:
@@ -256,9 +322,12 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
                 )
         milestones.append(milestone)
 
+    world_seed = _validate_world_seed(adventure.get("world_seed"))
+
     return {
         "id": adventure_id,
         "format": ADVENTURE_GRAPH_FORMAT_V2,
+        "world_seed": world_seed,
         "visibility": visibility,
         "chapters": list(chapters.values()),
         "nodes": list(nodes.values()),

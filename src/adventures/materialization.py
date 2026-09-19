@@ -46,7 +46,13 @@ def world_entity_id(bundle_kind: str, entity_id: str) -> str:
 
 
 def world_seed_ops(bundle: LoadedAdventureBundle) -> list[dict[str, Any]]:
-    """Derive the deterministic initial ``register_entity`` ops for a bundle."""
+    """Derive the deterministic initial world ops for a bundle.
+
+    v1 bundle：只物化 npc / map_location 实体。v2 bundle：额外展开 adventure
+    实体声明的 world_seed（entity / relation / fact / process 四类，ADV2-03）。
+    种子是纯数据推导；合法性由物化时的唯一写入口把
+    关（fail closed）。
+    """
 
     source_ref = f"adventure:{bundle.manifest.adventure_id}"
     ops: list[dict[str, Any]] = []
@@ -59,6 +65,18 @@ def world_seed_ops(bundle: LoadedAdventureBundle) -> list[dict[str, Any]]:
                 "visibility": "public",
                 "source_ref": source_ref,
             })
+    adventures = bundle.entities.get("adventure") or {}
+    if adventures:
+        graph = next(iter(adventures.values()))
+        seed = graph.get("world_seed") or {}
+        for entity in seed.get("entities") or []:
+            ops.append({"op": "register_entity", **entity, "source_ref": entity.get("source_ref") or source_ref})
+        for relation in seed.get("relations") or []:
+            ops.append({"op": "add_relation", **relation, "source_ref": relation.get("source_ref") or source_ref})
+        for fact in seed.get("facts") or []:
+            ops.append({"op": "set_fact", **fact})
+        for process in seed.get("processes") or []:
+            ops.append({"op": "start_process", **process, "source_ref": process.get("source_ref") or source_ref})
     return ops
 
 

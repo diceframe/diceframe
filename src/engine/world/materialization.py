@@ -18,7 +18,13 @@ from typing import Any
 
 from src.adventures.bundle import LoadedAdventureBundle
 from src.adventures.materialization import MAX_OPS_PER_BATCH, world_seed_ops
-from src.engine.world_state import apply_world_ops, world_entities
+from src.engine.world_state import (
+    apply_world_ops,
+    world_entities,
+    world_facts,
+    world_processes,
+    world_relations,
+)
 
 
 def materialize_world_seed(
@@ -30,13 +36,45 @@ def materialize_world_seed(
     """Materialize a bundle's initial world seed; idempotent."""
 
     existing = world_entities(instance.world_state)
+    existing_relations = world_relations(instance.world_state)
     created: list[str] = []
     skipped: list[str] = []
     pending: list[dict[str, Any]] = []
     for op in world_seed_ops(bundle):
-        entity_id = str(op["entity_id"])
-        if entity_id in existing:
-            skipped.append(entity_id)
+        # 幂等键：register_entity/add_relation 按 id 跳过已存在的；fact /
+        # process 种子（set_fact/start_process）没有独立 id 身份，重放语义
+        # 由 op 本身的幂等性保证（set_fact 幂等；start_process 重 id 拒绝——
+        # 即重放会命中已存在进程并被跳过到 receipt 的 skipped 之外，行为是
+        # "不重复创建"）。
+        if op["op"] == "register_entity":
+            entity_id = str(op["entity_id"])
+            if entity_id in existing:
+                skipped.append(entity_id)
+                continue
+            pending.append(op)
+        elif op["op"] == "add_relation":
+            relation_id = str(op["relation_id"])
+            if relation_id in world_relations(instance.world_state) or relation_id in existing_relations:
+                skipped.append(relation_id)
+                continue
+            pending.append(op)
+        elif op["op"] == "start_process":
+            if str(op.get("process_id") or "") in world_processes(instance.world_state):
+                skipped.append(str(op.get("process_id") or ""))
+                continue
+            pending.append(op)
+        elif op["op"] == "set_fact":
+            current = world_facts(instance.world_state).get(str(op.get("key") or ""))
+            if (
+                current is not None
+                and current.get("value") == op.get("value")
+                and str(current.get("visibility") or "public")
+                == str(op.get("visibility") or "public")
+            ):
+                # 相同值/可见性的事实重放 = 无操作（幂等，不推进 revision）。
+                skipped.append(str(op.get("key") or ""))
+                continue
+            pending.append(op)
         else:
             pending.append(op)
 
@@ -46,7 +84,10 @@ def materialize_world_seed(
             instance, batch,
             source_round=source_round,
         )
-        created.extend(str(op["entity_id"]) for op in batch)
+        created.extend(
+            str(op.get("entity_id") or op.get("relation_id") or op.get("key") or op.get("process_id") or "")
+            for op in batch
+        )
 
     return {
         "adventure_id": str(bundle.manifest.adventure_id),

@@ -41,11 +41,16 @@ WORLD_FILES = (
 # （webui / commands / llm / lorebook / migrations / engine 内部是当前既有的
 # 合法调用方；本守卫冻结的是"新增越界"，不追溯现有路径。）
 FORBIDDEN_WORLD_IMPORTERS = (
-    "src.adventures",
     "src.rulesets",
     "src.plugin_host",
     "src.bots",
 )
+
+# adventures 域的特殊语义（母方案 §25 gate / §9 source_ref）：允许 world_state
+# 的**读取端**（fact_value / world_entities / ...），但写入口符号仍然禁止——
+# Adventure 是定义层，物化必须走 engine 侧 materialization（WR-09）。
+ADVENTURES_WORLD_READ_OK = "src.engine.world_state"
+ADVENTURES_WORLD_WRITE_SYMBOLS = frozenset({"apply_world_ops", "apply_ops_to_state"})
 
 # content_modules 允许复用 world.contracts 的 source 语法真值（纯校验词表，
 # 母方案 §9），但同样禁止触碰世界写侧（MOD-05）。
@@ -120,10 +125,22 @@ def test_unplanned_domains_do_not_import_world_runtime_directly() -> None:
                     "src.engine.world.contracts."
                 ):
                     continue
+                if top_package == "src.adventures" and module == ADVENTURES_WORLD_READ_OK:
+                    continue  # 读取端可用（由下方写符号检查兜底）
                 violations.append(
                     f"{path.relative_to(ROOT)} imports {module} "
                     f"(forbidden: {top_package} must reach the world via engine ops)"
                 )
+        # adventures：world_state 读取端可用，但写入口符号禁止（WR-09 分工）。
+        if top_package == "src.adventures":
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+                if isinstance(node, ast.ImportFrom) and node.module == ADVENTURES_WORLD_READ_OK:
+                    for alias in node.names:
+                        if alias.name in ADVENTURES_WORLD_WRITE_SYMBOLS:
+                            violations.append(
+                                f"{path.relative_to(ROOT)} imports world write symbol "
+                                f"{alias.name} (adventures must materialize via engine)"
+                            )
     assert not violations, "\n".join(violations)
 
 
