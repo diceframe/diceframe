@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 
@@ -33,6 +34,7 @@ type AdventureResponse = {
 
 const props = defineProps<{ gameKey: string; isGm: boolean }>()
 const { t } = useLocale()
+const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const adventure = ref<AdventureResponse['adventure']>(null)
@@ -67,6 +69,15 @@ function linkedNames(ids: string[] | undefined): string {
   if (!ids?.length) return t('adventureNoLinkedNodes')
   const labels = new Map((graph.value?.nodes || []).map(node => [node.id, nodeLabel(node)]))
   return ids.map(id => labels.get(id) || id).join(' · ')
+}
+function openModuleRecovery(): void {
+  void router.push({
+    name: 'modules',
+    query: {
+      adventure: adventure.value?.binding?.adventure_id || '',
+      version: adventure.value?.binding?.version || '',
+    },
+  })
 }
 
 async function load(): Promise<void> {
@@ -103,6 +114,8 @@ onMounted(() => { void load() })
     <template v-else-if="!adventure.available">
       <p class="error-copy">{{ t('adventurePanelUnavailable') }}</p>
       <p class="muted">{{ unavailableReason }}</p>
+      <p class="muted adventure-binding">{{ t('adventureRecoveryRequired', { adventure: adventure.binding?.adventure_id || '', version: adventure.binding?.version || '' }) }}</p>
+      <button class="primary recovery-button" type="button" @click="openModuleRecovery">{{ t('adventureRecoveryOpenModules') }}</button>
     </template>
     <template v-else-if="!graph">
       <p class="muted">{{ t('adventurePanelLegacy') }}</p>

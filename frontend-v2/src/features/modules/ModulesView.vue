@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { errorMessage } from '@/api/client'
 import { moduleApi, type ModulePreviewResponse, type ModuleSummary } from '@/api/modules'
 import { useLocale } from '@/composables/useLocale'
 
 const { t } = useLocale()
+const route = useRoute()
 const modules = ref<ModuleSummary[]>([])
 const error = ref('')
 const loading = ref(false)
@@ -15,6 +16,8 @@ const importBusy = ref(false)
 const totalContent = (module: ModuleSummary) => Object.values(module.content_counts)
   .reduce((total, count) => total + count, 0)
 const installedModules = computed(() => modules.value.filter(module => module.status !== 'disabled'))
+const recoveryAdventure = computed(() => String(route.query.adventure || '').trim())
+const recoveryVersion = computed(() => String(route.query.version || '').trim())
 
 async function load() {
   loading.value = true
@@ -77,6 +80,10 @@ async function importModule() {
     <p class="eyebrow">{{ t('modulesKicker') }}</p>
     <h1>{{ t('navModules') }}</h1>
     <p class="view-intro">{{ t('modulesIntro') }}</p>
+    <section v-if="recoveryAdventure" class="module-recovery" role="status">
+      <strong>{{ t('modulesRecoveryTitle') }}</strong>
+      <p>{{ t('modulesRecoveryHint', { adventure: recoveryAdventure, version: recoveryVersion || t('modulesRecoveryUnknownVersion') }) }}</p>
+    </section>
     <section class="module-import" :aria-label="t('modulesImport')">
       <label>{{ t('modulesImport') }} <input type="file" accept=".dfplugin" @change="selectImportFile"></label>
       <button type="button" :disabled="!importFile || importBusy" @click="previewImport">{{ t('modulesPreview') }}</button>
@@ -110,6 +117,8 @@ async function importModule() {
 <style scoped>
 .modules-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
 .module-import { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin: 1.5rem 0; padding: 1rem; border: 1px solid var(--border-color, #d6d0c4); border-radius: 1rem; }
+.module-recovery { margin: 1rem 0; padding: 1rem; border-left: 3px solid var(--primary); background: var(--surface-color, #fff); }
+.module-recovery p { margin: .4rem 0 0; }
 .module-card { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--border-color, #d6d0c4); border-radius: 1rem; background: var(--surface-color, #fff); }
 .module-card h2 { margin: 0; }
 .module-card dl { display: flex; gap: 1.5rem; margin: 0; }
