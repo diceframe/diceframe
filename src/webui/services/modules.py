@@ -316,3 +316,57 @@ class ModuleInUse(ValueError):
         )
 
 
+
+
+# ---- LIFE-02：Module Usage Index（母方案 §125/§169）-------------------------
+
+
+def module_usages(deps: Any, module_id: str) -> dict[str, Any]:
+    """模块使用索引：哪个模块 / 哪个冒险被哪些存档绑定（只读聚合）。"""
+
+    runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
+    if runtime is None:
+        return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
+    plugin_id = str(runtime.manifest.get("id") or "")
+    adventure_ids: set[str] = set()
+    if deps.adventure_registry is not None:
+        source = deps.adventure_registry.source_for("plugin", plugin_id)
+        if source is not None:
+            try:
+                adventure_ids = {
+                    bundle.manifest.adventure_id for bundle in source.loader.list("")
+                }
+            except Exception:  # noqa: BLE001
+                adventure_ids = set()
+    by_adventure: dict[str, list[dict[str, Any]]] = {
+        adventure_id: [] for adventure_id in sorted(adventure_ids)
+    }
+    for instance in deps.list_instances():
+        binding = getattr(instance, "adventure_binding", {}) or {}
+        adventure_id = str(binding.get("adventure_id") or "")
+        if adventure_id in by_adventure:
+            by_adventure[adventure_id].append({
+                "game_key": "|".join(str(part) for part in instance.game_key),
+                "run_id": str(instance.run_id or ""),
+                "content_digest": str(binding.get("content_digest") or ""),
+            })
+    usages = [
+        {"adventure_id": adventure_id, "games": games}
+        for adventure_id, games in by_adventure.items()
+    ]
+    total = sum(len(item["games"]) for item in usages)
+    return {"ok": True, "module_id": plugin_id, "usages": usages, "total_games": total}
+
+
+__all__ = [
+    "ModuleInUse",
+    "PROTECTED_MODULE_ACTIONS",
+    "assert_module_action_allowed",
+    "list_modules",
+    "module_bound_games",
+    "module_content",
+    "module_detail",
+    "module_usages",
+    "parse_requires",
+    "preview_module_install",
+]

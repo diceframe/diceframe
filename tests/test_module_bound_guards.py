@@ -114,3 +114,33 @@ def test_unknown_module_has_no_bound_games(tmp_path: Path) -> None:
     deps = _Deps(host, registry, [])
     assert module_bound_games(deps, "nope") == []
     assert_module_action_allowed(deps, "nope", "uninstall")  # 不抛
+
+
+# ---- LIFE-02：使用索引 ----
+
+from src.webui.services.modules import module_usages  # noqa: E402
+
+
+def test_module_usages_groups_games_by_adventure(tmp_path: Path) -> None:
+    from src.engine.game_instance import GameInstance
+
+    host, registry = _make_module(tmp_path)
+    bound = GameInstance(game_key=("web", "room-a", "bot"))
+    bound.world_id = "greymoor"
+    assert bound.bind_adventure({
+        "adventure_id": "plugin:castle-quest", "version": "1", "format": "v1",
+        "content_digest": "sha256:aaa", "world_id": "greymoor",
+    })
+    unbound = GameInstance(game_key=("web", "room-b", "bot"))
+    deps = _Deps(host, registry, [bound, unbound])
+
+    result = module_usages(deps, "castle-module")
+    assert result["ok"] is True
+    assert result["total_games"] == 1
+    usage = result["usages"][0]
+    assert usage["adventure_id"] == "plugin:castle-quest"
+    assert usage["games"][0]["game_key"] == "web|room-a|bot"
+    assert usage["games"][0]["content_digest"] == "sha256:aaa"
+
+    result = module_usages(deps, "nope")
+    assert result == {"ok": False, "error_code": "MODULE_NOT_FOUND"}
