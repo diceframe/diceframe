@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from aiohttp import web
+from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.webui.routes.modules import register_modules
@@ -29,6 +29,15 @@ class FakeAPI:
         if (module_id, kind, key, language) == ("castle-module", "npc", "keeper", "zh-CN"):
             return {"ok": True, "content": {"id": "keeper"}}
         return {"ok": False, "error_code": "CONTENT_NOT_FOUND"}
+
+    def module_compatibility(self, module_id: str) -> dict[str, object]:
+        if module_id == "castle-module":
+            return {"ok": True, "module_id": module_id, "blockers": [], "warnings": []}
+        return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
+
+    def preview_module_import(self, payload: bytes) -> dict[str, object]:
+        assert payload == b"module-zip"
+        return {"ok": True, "blockers": [], "warnings": ["catalog_mode_content_not_autoloaded"]}
 
 
 def _app() -> web.Application:
@@ -90,3 +99,26 @@ async def test_module_content_route_preserves_module_and_language_scope() -> Non
 
         missing = await client.get("/api/modules/castle-module/content/npc/missing")
         assert missing.status == 404
+
+
+@pytest.mark.asyncio
+async def test_module_compatibility_routes_expose_installed_and_import_previews() -> None:
+    async with TestClient(TestServer(_app())) as client:
+        installed = await client.get("/api/modules/castle-module/compatibility")
+        assert installed.status == 200
+        assert await installed.json() == {
+            "ok": True,
+            "module_id": "castle-module",
+            "blockers": [],
+            "warnings": [],
+        }
+
+        form = FormData()
+        form.add_field("file", b"module-zip", filename="castle.dfplugin")
+        imported = await client.post("/api/modules/import/preview", data=form)
+        assert imported.status == 200
+        assert await imported.json() == {
+            "ok": True,
+            "blockers": [],
+            "warnings": ["catalog_mode_content_not_autoloaded"],
+        }

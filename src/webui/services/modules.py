@@ -40,6 +40,7 @@ class ModuleDependencies:
 
     plugin_host: Any | None
     adventure_registry: Any | None
+    ruleset_registry: Any | None = None
 
 
 def _installed_content_packs(plugin_host: Any) -> list[Any]:
@@ -260,6 +261,16 @@ def preview_module_install(deps: Any, manifest: dict[str, Any]) -> dict[str, Any
     }
 
 
+def module_compatibility(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
+    """Preview the installed module's declared runtime compatibility."""
+
+    runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
+    if runtime is None or str(runtime.manifest.get("plugin_type") or "") != "content-pack":
+        return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
+    result = preview_module_install(deps, runtime.manifest)
+    return {**result, "module_id": str(runtime.manifest.get("id") or "")}
+
+
 __all__ = [
     "ModuleDependencies",
     "ModuleInUse",
@@ -269,6 +280,7 @@ __all__ = [
     "module_adventures",
     "module_bound_games",
     "module_content",
+    "module_compatibility",
     "module_detail",
     "parse_requires",
     "preview_module_install",
@@ -392,6 +404,7 @@ __all__ = [
     "module_adventures",
     "module_bound_games",
     "module_content",
+    "module_compatibility",
     "module_detail",
     "module_usages",
     "parse_requires",

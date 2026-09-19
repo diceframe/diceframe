@@ -411,6 +411,7 @@ class WebAPI:
         self._module_dependencies = modules.ModuleDependencies(
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
+            ruleset_registry=self._ruleset_registry,
         )
         self._world_dependencies = worlds.WorldDependencies(
             lorebook=self._lore,
@@ -791,6 +792,15 @@ class WebAPI:
         return modules.module_content(
             self._module_dependencies, module_id, kind, key, language=language,
         )
+
+    def module_compatibility(self, module_id: str) -> dict[str, Any]:
+        return modules.module_compatibility(self._module_dependencies, module_id)
+
+    def preview_module_import(self, payload: bytes) -> dict[str, Any]:
+        if self._plugins is None:
+            return {"ok": False, "error": "插件宿主未启用"}
+        _, manifest = self._plugins.inspect_package_manifest(payload)
+        return modules.preview_module_install(self._module_dependencies, manifest)
 
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)

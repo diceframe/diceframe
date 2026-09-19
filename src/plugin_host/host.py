@@ -1278,6 +1278,11 @@ class PluginHost:
             expanded.append(value)
         return expanded
 
+    def inspect_package_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
+        """Validate a package archive and return its declared plugin identity."""
+
+        return self._inspect_zip_manifest(payload)
+
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:
             raise ValueError("插件包为空")
