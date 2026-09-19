@@ -45,7 +45,16 @@ FORBIDDEN_WORLD_IMPORTERS = (
     "src.rulesets",
     "src.plugin_host",
     "src.bots",
-    "src.content_modules",
+)
+
+# content_modules 允许复用 world.contracts 的 source 语法真值（纯校验词表，
+# 母方案 §9），但同样禁止触碰世界写侧（MOD-05）。
+CONTENT_MODULES_WRITE_SIDE_MODULES = (
+    "src.engine.world_state",
+    "src.engine.world_events",
+    "src.engine.world_legality",
+    "src.engine.world.ops",
+    "src.engine.world.materialization",
 )
 
 
@@ -107,5 +116,20 @@ def test_unplanned_domains_do_not_import_world_runtime_directly() -> None:
                     violations.append(
                         f"{path.relative_to(ROOT)} imports {module} "
                         f"(forbidden: {top_package} must reach the world via engine ops)"
+                    )
+    assert not violations, "\n".join(violations)
+
+
+def test_content_modules_does_not_touch_world_write_side() -> None:
+    """content_modules 只准用 contracts 语法真值，禁止触碰世界写侧（MOD-05）。"""
+
+    violations: list[str] = []
+    for path in sorted((ROOT / "src" / "content_modules").rglob("*.py")):
+        for module in sorted(_imported_modules(path)):
+            for world_module in CONTENT_MODULES_WRITE_SIDE_MODULES:
+                if _depends_on(module, world_module):
+                    violations.append(
+                        f"{path.relative_to(ROOT)} imports {module} "
+                        "(forbidden: content_modules must not touch the world write-side)"
                     )
     assert not violations, "\n".join(violations)
