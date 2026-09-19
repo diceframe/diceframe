@@ -216,7 +216,8 @@ def test_world_op_batch_summary_shape_is_frozen() -> None:
         {"op": "remove_fact", "key": "door.open"},
         {"op": "set_fact", "key": "a.b", "value": 1},
     ])
-    assert set(summary) == {"revision", "clock", "applied"}
+    # WR-05 起 summary 增加 events（WorldEvent receipts，不持久化）。
+    assert set(summary) == {"revision", "clock", "applied", "events"}
     assert summary["revision"] == world_revision(before) + 1
     assert summary["clock"] == world_clock(instance.world_state)
     assert [item["op"] for item in summary["applied"]] == [

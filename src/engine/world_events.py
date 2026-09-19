@@ -65,10 +65,13 @@ def advance_world_time(
     state = ensure_world_state(getattr(instance, "world_state", None))
     target = clock_to_minutes(world_clock(state)) + amount
     # 时钟推进同样是世界 ops：单批提交，失败则整次推进不生效。
-    draft, _ = apply_ops_to_state(
+    draft, advance_summary = apply_ops_to_state(
         state, [{"op": "advance_time", "minutes": amount}],
         source_round=round_number,
     )
+    # 聚合本次推进全部子事务的 WorldEvent receipts（推进 + 每个事件结算 + 每个
+    # 进程结算）；receipts 只随返回值交付，不写进 world_state。
+    receipts: list[dict[str, Any]] = list(advance_summary.get("events") or [])
     settled: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     for event in due_events(draft, target_minutes=target):
@@ -79,16 +82,17 @@ def advance_world_time(
         # 不再静默过滤非法 op（那会把「事件没执行任何东西」伪装成 applied）。
         nested = [dict(op) for op in (event.get("ops") or [])]
         try:
-            draft, _ = apply_ops_to_state(
+            draft, settle_summary = apply_ops_to_state(
                 draft,
                 [*nested, {
                     "op": "complete_event", "event_id": event_id, "status": "applied",
                 }],
                 source_round=round_number,
             )
+            receipts.extend(settle_summary.get("events") or [])
         except WorldStateError as exc:
             message = str(exc)[:160]
-            draft, _ = apply_ops_to_state(
+            draft, settle_summary = apply_ops_to_state(
                 draft,
                 [{
                     "op": "complete_event", "event_id": event_id,
@@ -96,6 +100,7 @@ def advance_world_time(
                 }],
                 source_round=round_number,
             )
+            receipts.extend(settle_summary.get("events") or [])
             failed.append({
                 "event_id": event_id, "label": label, "due_at": due_at,
                 "error": message,
@@ -109,11 +114,12 @@ def advance_world_time(
     settled_processes: list[dict[str, Any]] = []
     for process in due_processes(draft, target_minutes=target):
         process_id = str(process["process_id"])
-        draft, _ = apply_ops_to_state(
+        draft, process_summary = apply_ops_to_state(
             draft,
             [{"op": "complete_process", "process_id": process_id}],
             source_round=round_number,
         )
+        receipts.extend(process_summary.get("events") or [])
         settled_processes.append({
             "process_id": process_id,
             "kind": str(process.get("kind") or ""),
@@ -127,6 +133,7 @@ def advance_world_time(
         "applied": settled,
         "failed": failed,
         "processes": settled_processes,
+        "events": receipts,
     }
 
 

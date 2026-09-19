@@ -77,6 +77,7 @@ from src.engine.world.contracts import (
     validate_relation_record,
 )
 from src.engine.world import ops as world_record_ops
+from src.engine.world.receipts import receipts_from_applied
 
 WORLD_STATE_SCHEMA_VERSION = 2
 
@@ -417,10 +418,16 @@ def apply_ops_to_state(
     draft["scheduled_events"] = {
         key: draft["scheduled_events"][key] for key in sorted(draft["scheduled_events"])
     }
+    # WorldEvent receipts（母方案 §18/§19，WR-05）：每个提交批产出结构化凭据，
+    # 随 summary 返回给消费方；不写入持久化容器。
+    receipts = receipts_from_applied(
+        applied, revision=revision, clock=dict(draft["clock"]), source_round=round_number,
+    )
     return draft, {
         "revision": revision,
         "clock": dict(draft["clock"]),
         "applied": applied,
+        "events": receipts,
     }
 
 
@@ -606,10 +613,12 @@ def _op_remove_fact(
 ) -> dict[str, Any]:
     _reject_unknown_fields(raw, {"op", "key"}, position)
     key = _fact_key(raw.get("key"), position)
-    if key not in draft["facts"]:
+    previous = draft["facts"].get(key)
+    if previous is None:
         raise WorldStateError(f"world op #{position} removes an unknown fact: {key!r}")
+    visibility = str(previous.get("visibility") or "public")
     draft["facts"].pop(key)
-    return {"op": "remove_fact", "key": key}
+    return {"op": "remove_fact", "key": key, "visibility": visibility}
 
 
 def _op_advance_time(

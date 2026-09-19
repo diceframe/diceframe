@@ -122,7 +122,10 @@ def _apply_entity_op(
         }
         validate_entity_record(record)
         draft["entities"][entity_id] = record
-        return {"op": "register_entity", "entity_id": entity_id, "kind": entity_kind}
+        return {
+            "op": "register_entity", "entity_id": entity_id,
+            "kind": entity_kind, "visibility": visibility,
+        }
 
     _reject_unknown_fields(raw, {"op", "entity_id"}, position)
     entity_id = canonical_id(raw.get("entity_id"), field=f"world op #{position} entity_id")
@@ -135,9 +138,10 @@ def _apply_entity_op(
         raise WorldContractError(
             f"world op #{position} retires an inactive entity: {entity_id!r}"
         )
+    visibility = str(entity.get("visibility") or "public")
     entity["status"] = "retired"
     validate_entity_record(entity)
-    return {"op": "retire_entity", "entity_id": entity_id}
+    return {"op": "retire_entity", "entity_id": entity_id, "visibility": visibility}
 
 
 # ---------- Relation -------------------------------------------------------
@@ -179,7 +183,10 @@ def _apply_relation_op(
         }
         validate_relation_record(record)
         draft["relations"][relation_id] = record
-        return {"op": "add_relation", "relation_id": relation_id, "kind": relation_kind}
+        return {
+            "op": "add_relation", "relation_id": relation_id,
+            "kind": relation_kind, "visibility": visibility,
+        }
 
     if kind == "set_relation_status":
         _reject_unknown_fields(raw, {"op", "relation_id", "status"}, position)
@@ -196,7 +203,10 @@ def _apply_relation_op(
             )
         relation["status"] = status
         validate_relation_record(relation)
-        return {"op": "set_relation_status", "relation_id": relation_id, "status": status}
+        return {
+            "op": "set_relation_status", "relation_id": relation_id,
+            "status": status, "visibility": str(relation.get("visibility") or "public"),
+        }
 
     _reject_unknown_fields(raw, {"op", "relation_id"}, position)
     relation_id = canonical_id(raw.get("relation_id"), field=f"world op #{position} relation_id")
@@ -204,8 +214,11 @@ def _apply_relation_op(
         raise WorldContractError(
             f"world op #{position} removes an unknown relation: {relation_id!r}"
         )
+    visibility = str(draft["relations"][relation_id].get("visibility") or "public")
     del draft["relations"][relation_id]
-    return {"op": "remove_relation", "relation_id": relation_id}
+    return {
+        "op": "remove_relation", "relation_id": relation_id, "visibility": visibility,
+    }
 
 
 
@@ -237,9 +250,13 @@ def _apply_process_op(
         "cancel_process": "cancelled",
         "fail_process": "failed",
     }[kind]
+    visibility = str(process.get("visibility") or "public")
     process["status"] = status
     validate_process_record(process)
-    return {"op": kind, "process_id": process_id, "status": status}
+    return {
+        "op": kind, "process_id": process_id, "status": status,
+        "visibility": visibility,
+    }
 
 
 def _start_process(
@@ -302,7 +319,10 @@ def _start_process(
     }
     validate_process_record(record)
     draft["processes"][process_id] = record
-    return {"op": "start_process", "process_id": process_id, "kind": process_kind}
+    return {
+        "op": "start_process", "process_id": process_id,
+        "kind": process_kind, "visibility": visibility,
+    }
 
 
 __all__ = [
