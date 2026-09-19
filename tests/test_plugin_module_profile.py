@@ -96,3 +96,47 @@ def test_host_manifest_validation_rejects_bad_module_profile(tmp_path) -> None:
     host = PluginHost(plugins_dir=plugins_root, data_dir=tmp_path / "data")
     with pytest.raises(ValueError, match="catalog"):
         host._load_runtime(plugin_dir)
+
+
+# ---- LIFE-03：marketplace 模组元数据 ----
+
+
+def test_marketplace_item_carries_module_metadata() -> None:
+    """Hub 清单中的模组字段透传到规范化条目（content_profile/规则目标/冒险数/语言）。"""
+    from src.plugin_host.marketplace import _normalize_market_item
+
+    item = {
+        "id": "castle-module",
+        "manifest": {
+            "id": "castle-module", "name": "Castle Module", "version": "1.0.0",
+            "plugin_type": "content-pack",
+            "content_profile": "adventure-module",
+            "content_delivery_mode": "catalog",
+            "automation_level": "guided",
+            "supported_locales": ["zh-CN", "en"],
+            "adventure_packages": ["adventures/castle", "adventures/crypt"],
+            "requires": {"rulesets": [{"id": "core:dnd2024", "minimum_version": 1}]},
+            "license": "CC-BY-4.0",
+        },
+    }
+    normalized = _normalize_market_item(item)
+    assert normalized["content_profile"] == "adventure-module"
+    assert normalized["content_delivery_mode"] == "catalog"
+    assert normalized["ruleset_targets"] == ["core:dnd2024"]
+    assert normalized["adventure_count"] == 2
+    assert normalized["automation_level"] == "guided"
+    assert normalized["languages"] == ["zh-CN", "en"]
+    assert normalized["license"] == "CC-BY-4.0"
+
+
+def test_marketplace_item_defaults_for_legacy_plugins() -> None:
+    from src.plugin_host.marketplace import _normalize_market_item
+
+    normalized = _normalize_market_item({
+        "id": "legacy-pack",
+        "manifest": {"id": "legacy-pack", "name": "Legacy", "plugin_type": "content-pack"},
+    })
+    assert normalized["content_profile"] == "content-pack"
+    assert normalized["content_delivery_mode"] == "legacy_autoimport"
+    assert normalized["ruleset_targets"] == []
+    assert normalized["adventure_count"] == 0

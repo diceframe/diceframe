@@ -298,6 +298,31 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         "license": item.get("license") or manifest.get("license") or "",
         "tags": tags,
         "trust_level": trust_level,
+        # 模组元数据（LIFE-03，母方案 §126）：仅 content-pack 携带；
+        # 规则目标 / 冒险数 / 自动化等级 / 语言供模块库过滤与卡片展示。
+        "content_profile": str(manifest.get("content_profile") or "content-pack"),
+        "content_delivery_mode": str(manifest.get("content_delivery_mode") or "legacy_autoimport"),
+        "ruleset_targets": [
+            str(requirement.get("id") or "")
+            for requirement in (
+                (manifest.get("requires") or {}).get("rulesets") or []
+                if isinstance(manifest.get("requires") or {}, dict) else []
+            )
+            if isinstance(requirement, dict) and requirement.get("id")
+        ],
+        "adventure_count": (
+            len(manifest.get("adventure_packages") or [])
+            if isinstance(manifest.get("adventure_packages"), list) else 0
+        ),
+        # automation_level 只能在 manifest 顶层显式声明（冒险实体的自动化
+        # 等级要等包下载后才能统计，Marketplace 清单不猜，母方案 §12/§165）。
+        "automation_level": str(manifest.get("automation_level") or ""),
+        "languages": [
+            str(locale) for locale in (
+                manifest.get("supported_locales") or []
+                if isinstance(manifest.get("supported_locales"), list) else []
+            )
+        ],
         "commit_sha": str(item.get("commit_sha") or item.get("commitSha") or ""),
         "approved_permissions": _string_list(item.get("approved_permissions")),
         "permissions": _string_list(manifest.get("permissions") or item.get("permissions")),
