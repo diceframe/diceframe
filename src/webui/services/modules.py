@@ -21,6 +21,7 @@ lifecycle**。本模块只做三件事：
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 from src.plugin_host.support import (
@@ -41,6 +42,7 @@ class ModuleDependencies:
     plugin_host: Any | None
     adventure_registry: Any | None
     ruleset_registry: Any | None = None
+    list_instances: Callable[[], list[Any]] | None = None
 
 
 def _installed_content_packs(plugin_host: Any) -> list[Any]:
@@ -295,7 +297,7 @@ PROTECTED_MODULE_ACTIONS = ("uninstall", "disable", "update")
 
 
 def module_bound_games(
-    deps: Any,
+    deps: ModuleDependencies,
     module_id: str,
 ) -> list[dict[str, Any]]:
     """List the games bound to one module's adventures（§35 UI 数据源）。"""
@@ -315,7 +317,7 @@ def module_bound_games(
             except Exception:  # noqa: BLE001 - 坏包不拖垮保护检查
                 adventure_ids = set()
     bound: list[dict[str, Any]] = []
-    for instance in deps.list_instances():
+    for instance in (deps.list_instances or (lambda: []))():
         binding = getattr(instance, "adventure_binding", {}) or {}
         if str(binding.get("adventure_id") or "") in adventure_ids:
             bound.append({
@@ -326,7 +328,7 @@ def module_bound_games(
     return bound
 
 
-def assert_module_action_allowed(deps: Any, module_id: str, action: str) -> None:
+def assert_module_action_allowed(deps: ModuleDependencies, module_id: str, action: str) -> None:
     """Guard for uninstall/disable/update（母方案 §124：默认 block）。
 
     绑定存档存在时抛 :class:`ModuleInUse`；调用方（插件生命周期 API）
@@ -358,7 +360,7 @@ class ModuleInUse(ValueError):
 # ---- LIFE-02：Module Usage Index（母方案 §125/§169）-------------------------
 
 
-def module_usages(deps: Any, module_id: str) -> dict[str, Any]:
+def module_usages(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
     """模块使用索引：哪个模块 / 哪个冒险被哪些存档绑定（只读聚合）。"""
 
     runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
@@ -378,7 +380,7 @@ def module_usages(deps: Any, module_id: str) -> dict[str, Any]:
     by_adventure: dict[str, list[dict[str, Any]]] = {
         adventure_id: [] for adventure_id in sorted(adventure_ids)
     }
-    for instance in deps.list_instances():
+    for instance in (deps.list_instances or (lambda: []))():
         binding = getattr(instance, "adventure_binding", {}) or {}
         adventure_id = str(binding.get("adventure_id") or "")
         if adventure_id in by_adventure:

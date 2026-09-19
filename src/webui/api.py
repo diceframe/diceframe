@@ -412,6 +412,7 @@ class WebAPI:
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
             ruleset_registry=self._ruleset_registry,
+            list_instances=self._reg.list_all,
         )
         self._world_dependencies = worlds.WorldDependencies(
             lorebook=self._lore,
@@ -796,6 +797,9 @@ class WebAPI:
     def module_compatibility(self, module_id: str) -> dict[str, Any]:
         return modules.module_compatibility(self._module_dependencies, module_id)
 
+    def module_usages(self, module_id: str) -> dict[str, Any]:
+        return modules.module_usages(self._module_dependencies, module_id)
+
     def preview_module_import(self, payload: bytes) -> dict[str, Any]:
         if self._plugins is None:
             return {"ok": False, "error": "插件宿主未启用"}
@@ -947,11 +951,19 @@ class WebAPI:
         return plugins.read_plugin_docs(self._plugin_host_dependencies, plugin_id)
 
     async def update_plugin_config(self, plugin_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        if changes.get("enabled") is False:
+            modules.assert_module_action_allowed(
+                self._module_dependencies, plugin_id, "disable",
+            )
         return await plugins.update_plugin_config(
             self._plugin_lifecycle_dependencies, plugin_id, changes,
         )
 
     async def control_plugin(self, plugin_id: str, action: str) -> dict[str, Any]:
+        if action == "stop":
+            modules.assert_module_action_allowed(
+                self._module_dependencies, plugin_id, "disable",
+            )
         return await plugins.control_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, action,
         )
@@ -992,11 +1004,13 @@ class WebAPI:
         return await self.install_marketplace_plugin(module_id, overwrite)
 
     async def update_marketplace_plugin(self, plugin_id: str) -> dict[str, Any]:
+        modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "update")
         return await plugins.update_marketplace_plugin(
             self._plugin_host_dependencies, plugin_id,
         )
 
     async def uninstall_plugin(self, plugin_id: str, delete_data: bool = False) -> dict[str, Any]:
+        modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "uninstall")
         return await plugins.uninstall_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, delete_data,
         )

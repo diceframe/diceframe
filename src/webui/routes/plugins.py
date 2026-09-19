@@ -4,6 +4,20 @@ from aiohttp import web
 from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.webui.routes._common import _get_api, _require_confirmed_request
+from src.webui.services.modules import ModuleInUse
+
+
+def _module_in_use_response(exc: ModuleInUse) -> web.Response:
+    return web.json_response(
+        {
+            "ok": False,
+            "error_code": "MODULE_IN_USE",
+            "module_id": exc.module_id,
+            "action": exc.action,
+            "games": exc.games,
+        },
+        status=409,
+    )
 
 async def api_plugins(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).list_plugins())
@@ -33,6 +47,7 @@ async def api_plugin_config(request: web.Request) -> web.Response:
     if denied is not None: return denied
     try: return web.json_response(await _get_api(request).update_plugin_config(request.match_info["plugin_id"],await request.json()))
     except KeyError as exc: return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ModuleInUse as exc: return _module_in_use_response(exc)
     except ValueError as exc: return web.json_response({"ok":False,"error":str(exc)},status=400)
 
 async def api_plugin_control(request: web.Request) -> web.Response:
@@ -40,6 +55,7 @@ async def api_plugin_control(request: web.Request) -> web.Response:
     if denied is not None: return denied
     try: return web.json_response(await _get_api(request).control_plugin(request.match_info["plugin_id"],request.match_info["action"]))
     except KeyError as exc: return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ModuleInUse as exc: return _module_in_use_response(exc)
 
 async def api_plugin_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
@@ -115,6 +131,8 @@ async def api_plugin_tool_invoke(request: web.Request) -> web.Response:
         )
     except KeyError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ModuleInUse as exc:
+        return _module_in_use_response(exc)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
     except PluginInvocationError as exc:
@@ -236,6 +254,8 @@ async def api_plugin_marketplace_update(request: web.Request) -> web.Response:
         result = await _get_api(request).update_marketplace_plugin(request.match_info["plugin_id"])
     except KeyError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ModuleInUse as exc:
+        return _module_in_use_response(exc)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
     return web.json_response(result,status=200 if result.get("ok") else 400)
@@ -296,6 +316,8 @@ async def api_plugin_uninstall(request: web.Request) -> web.Response:
         result = await _get_api(request).uninstall_plugin(request.match_info["plugin_id"], bool(body.get("delete_data")))
     except KeyError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=404)
+    except ModuleInUse as exc:
+        return _module_in_use_response(exc)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
     return web.json_response(result,status=200 if result.get("ok") else 400)

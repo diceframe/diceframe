@@ -37,6 +37,11 @@ async def api_module_compatibility(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
 
+async def api_module_usages(request: web.Request) -> web.Response:
+    result = _get_api(request).module_usages(request.match_info["module_id"])
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
 async def api_module_import_preview(request: web.Request) -> web.Response:
     if request.content_type != "multipart/form-data":
         return web.json_response(
@@ -133,5 +138,6 @@ def register_modules(app: web.Application) -> None:
     app.router.add_get("/api/modules/{module_id}/adventures", api_module_adventures)
     app.router.add_get("/api/modules/{module_id}/content/{kind}/{key}", api_module_content)
     app.router.add_get("/api/modules/{module_id}/compatibility", api_module_compatibility)
+    app.router.add_get("/api/modules/{module_id}/usages", api_module_usages)
     app.router.add_post("/api/modules/import/preview", api_module_import_preview)
     app.router.add_get("/api/modules/{module_id}", api_module_detail)

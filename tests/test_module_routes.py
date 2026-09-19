@@ -35,6 +35,11 @@ class FakeAPI:
             return {"ok": True, "module_id": module_id, "blockers": [], "warnings": []}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
 
+    def module_usages(self, module_id: str) -> dict[str, object]:
+        if module_id == "castle-module":
+            return {"ok": True, "module_id": module_id, "usages": [], "total_games": 0}
+        return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
+
     def preview_module_import(self, payload: bytes) -> dict[str, object]:
         assert payload == b"module-zip"
         return {"ok": True, "blockers": [], "warnings": ["catalog_mode_content_not_autoloaded"]}
@@ -121,4 +126,17 @@ async def test_module_compatibility_routes_expose_installed_and_import_previews(
             "ok": True,
             "blockers": [],
             "warnings": ["catalog_mode_content_not_autoloaded"],
+        }
+
+
+@pytest.mark.asyncio
+async def test_module_usage_route_returns_the_bound_game_index() -> None:
+    async with TestClient(TestServer(_app())) as client:
+        response = await client.get("/api/modules/castle-module/usages")
+        assert response.status == 200
+        assert await response.json() == {
+            "ok": True,
+            "module_id": "castle-module",
+            "usages": [],
+            "total_games": 0,
         }
