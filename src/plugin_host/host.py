@@ -68,6 +68,7 @@ from .support import (
     PLUGIN_TYPE_SUPPORT,
     plugin_type_support,
     plugin_type_descriptor,
+    validate_content_module_profile,
     STATIC_PLUGIN_TYPES as _STATIC_PLUGIN_TYPES,
     RPC_PLUGIN_TYPES as _RPC_PLUGIN_TYPES,
 )
@@ -1160,6 +1161,7 @@ class PluginHost:
         self._ensure_inside(plugin_dir, schema_path)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self._validate_schema(schema)
+        validate_content_module_profile(manifest)
         self._validate_manifest_permissions(manifest)
         self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)

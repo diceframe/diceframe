@@ -192,3 +192,59 @@ def list_plugin_types() -> list[PluginTypeListView]:
         })
     items.sort(key=lambda item: (item["filter_order"], item["id"]))
     return items
+
+
+# ---- Content Module profile（母方案 MOD-00，WR2/MOD 程序）------------------
+
+# 模组（用户视角）在技术上仍是 plugin_type: content-pack；content_profile 与
+# content_delivery_mode 是 manifest 上的可选扩展字段：
+# - content_profile: "content-pack"（默认，传统内容包）| "adventure-module"
+# - content_delivery_mode: "legacy_autoimport"（默认，启用即灌注世界/卡库）
+#   | "catalog"（启用只注册内容库，运行 Adventure 时按需物化）
+# 兼容红线（母方案 §73）：旧包零行为变化——缺省字段一律 legacy_autoimport；
+# adventure-module MUST catalog（母方案 §6），不得静默灌注。
+CONTENT_PROFILES = ("content-pack", "adventure-module")
+CONTENT_DELIVERY_MODES = ("legacy_autoimport", "catalog")
+
+
+def content_profile(manifest: dict) -> str:
+    """Return the declared content profile, defaulting to ``content-pack``."""
+
+    profile = str((manifest or {}).get("content_profile") or "").strip()
+    return profile if profile in CONTENT_PROFILES else "content-pack"
+
+
+def content_delivery_mode(manifest: dict) -> str:
+    """Return the declared delivery mode, defaulting to ``legacy_autoimport``."""
+
+    mode = str((manifest or {}).get("content_delivery_mode") or "").strip()
+    return mode if mode in CONTENT_DELIVERY_MODES else "legacy_autoimport"
+
+
+def validate_content_module_profile(manifest: dict) -> None:
+    """Validate the content module profile fields; fail closed on bad combos.
+
+    - 未知 content_profile / content_delivery_mode 拒绝；
+    - ``content_profile: "adventure-module"`` 必须 ``catalog``（母方案 §6
+      MUST：新模组安装=注册内容库，运行 Adventure 时按需物化，绝不启用即
+      灌注）。
+    """
+
+    manifest = manifest or {}
+    raw_profile = manifest.get("content_profile")
+    if raw_profile is not None and str(raw_profile).strip() not in CONTENT_PROFILES:
+        raise ValueError(f"不支持的 content_profile：{raw_profile!r}")
+    raw_mode = manifest.get("content_delivery_mode")
+    if raw_mode is not None and str(raw_mode).strip() not in CONTENT_DELIVERY_MODES:
+        raise ValueError(f"不支持的 content_delivery_mode：{raw_mode!r}")
+    if content_profile(manifest) == "adventure-module" and content_delivery_mode(manifest) != "catalog":
+        raise ValueError(
+            "adventure-module 必须使用 content_delivery_mode: catalog"
+            "（安装只注册内容库，运行时按需物化）"
+        )
+
+
+def is_adventure_module(manifest: dict) -> bool:
+    """Whether this content-pack presents itself as a user-facing 模组."""
+
+    return content_profile(manifest) == "adventure-module"
