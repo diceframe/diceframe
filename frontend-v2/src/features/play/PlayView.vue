@@ -1186,7 +1186,7 @@ onBeforeUnmount(() => {
         </section>
 
         <AdventurePanel
-          v-if="game.isGm.value && hasAdventureBinding"
+          v-if="hasAdventureBinding"
           :game-key="game.currentGame.value"
           :is-gm="game.isGm.value"
         />
