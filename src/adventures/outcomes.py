@@ -20,14 +20,14 @@ Adventure **不写 authority**（§26）：它只声明 *Outcome Proposal*；本
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-from src.rulesets.dnd2024.content.rewards import (
-    RewardIntentError,
-    reward_intent_from_ref,
-)
-
 OUTCOME_TYPES = ("world_op", "item_reward", "progress_event")
+
+# item_reward → reward intent 的转换器由调用方注入（D&D 实现在
+# src.rulesets.dnd2024.content.rewards；依赖方向 adventures ⇏ rulesets，
+# 见 tests/architecture/test_dependencies.py）。
 
 _PROGRESS_EVENT_KINDS = (
     "node_completed",
@@ -80,7 +80,7 @@ def validate_outcome(raw: Any) -> dict[str, Any]:
 def outcomes_to_intents(
     outcomes: list[dict[str, Any]] | None,
     *,
-    catalog: Any = None,
+    reward_converter: Callable[[Any, str, str], dict[str, Any]] | None = None,
     default_source: str,
     recipient_uid: str = "",
 ) -> dict[str, list[dict[str, Any]]]:
@@ -88,7 +88,9 @@ def outcomes_to_intents(
 
     Returns ``{"world_ops": [...], "reward_intents": [...],
     "progress_events": [...]}``。world_ops 的完整校验在唯一写入口；
-    reward intent 由 DNDMOD-03 桥解析（catalog 缺席时 fail closed）。
+    item_reward 经注入的 ``reward_converter(ref, default_source, recipient)``
+    转换（D&D 实现传入 DNDMOD-03 桥；converter 缺席时 fail closed——
+    本模块不 import 具体 ruleset，保持 adventures 规则无关）。
     """
 
     world_ops: list[dict[str, Any]] = []
@@ -100,17 +102,13 @@ def outcomes_to_intents(
         if outcome_type == "world_op":
             world_ops.append(outcome["op"])
         elif outcome_type == "item_reward":
-            if catalog is None:
-                raise OutcomeError("item_reward requires a content catalog")
-            try:
-                reward_intents.append(reward_intent_from_ref(
-                    catalog,
-                    outcome["ref"],
-                    default_source=default_source,
-                    recipient_uid=outcome["recipient_uid"] or recipient_uid,
-                ))
-            except RewardIntentError as exc:
-                raise OutcomeError(str(exc)) from exc
+            if reward_converter is None:
+                raise OutcomeError("item_reward requires a reward converter")
+            reward_intents.append(reward_converter(
+                outcome["ref"],
+                default_source,
+                outcome["recipient_uid"] or recipient_uid,
+            ))
         else:
             progress_events.append({
                 "kind": outcome["kind"],

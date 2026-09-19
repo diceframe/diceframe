@@ -16,6 +16,10 @@ from src.adventures.outcomes import (
     validate_outcome,
 )
 from src.rulesets.dnd2024.content.catalog import catalog_from_sources
+from src.rulesets.dnd2024.content.rewards import (
+    RewardIntentError,
+    reward_intent_from_ref,
+)
 
 
 SIGIL = {
@@ -59,6 +63,14 @@ def test_unknown_outcome_type_and_fields_fail_closed() -> None:
         validate_outcome({"type": "progress_event", "kind": "world_destroyed", "id": "x"})
 
 
+def _converter():
+    """D&D 侧提供的转换器（生产组合由 ruleset content 包注入）。"""
+    catalog = _catalog()
+    return lambda ref, default_source, recipient: reward_intent_from_ref(
+        catalog, ref, default_source=default_source, recipient_uid=recipient,
+    )
+
+
 def test_outcomes_to_intents_splits_all_three_kinds() -> None:
     intents = outcomes_to_intents(
         [
@@ -66,7 +78,7 @@ def test_outcomes_to_intents_splits_all_three_kinds() -> None:
             {"type": "item_reward", "ref": "item:castle_sigil", "recipient_uid": "p1"},
             {"type": "progress_event", "kind": "milestone_reached", "id": "mile_castle"},
         ],
-        catalog=_catalog(),
+        reward_converter=_converter(),
         default_source="module:castle-module",
         recipient_uid="p2",
     )
@@ -78,19 +90,21 @@ def test_outcomes_to_intents_splits_all_three_kinds() -> None:
     assert intents["progress_events"] == [{"kind": "milestone_reached", "id": "mile_castle"}]
 
 
-def test_item_reward_requires_catalog() -> None:
-    with pytest.raises(OutcomeError, match="requires a content catalog"):
+def test_item_reward_requires_converter() -> None:
+    with pytest.raises(OutcomeError, match="requires a reward converter"):
         outcomes_to_intents(
             [{"type": "item_reward", "ref": "item:castle_sigil"}],
-            catalog=None,
+            reward_converter=None,
             default_source="module:castle-module",
         )
 
 
 def test_unresolvable_reward_ref_fails_closed() -> None:
-    with pytest.raises(OutcomeError, match="unresolved"):
+    # 转换器（D&D 侧）对未解析引用抛 RewardIntentError——异常穿透，
+    # 调用方据其阻断 outcome 执行。
+    with pytest.raises(RewardIntentError, match="unresolved"):
         outcomes_to_intents(
             [{"type": "item_reward", "ref": "item:missing"}],
-            catalog=_catalog(),
+            reward_converter=_converter(),
             default_source="module:castle-module",
         )

@@ -22,7 +22,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.plugin_host.support import content_delivery_mode, content_profile
+from src.plugin_host.support import (
+    content_delivery_mode,
+    content_profile,
+    validate_content_module_profile,
+)
 
 _MODULE_CONTENT_KINDS = (
     "npc", "item", "spell", "class", "character_template", "world_template",
@@ -149,3 +153,88 @@ def module_content(
 
 
 __all__ = ["list_modules", "module_content", "module_detail"]
+
+
+# ---- LIFE-00：安装前兼容性预览（母方案 §33/§123）--------------------------
+
+_PREVIEW_SUPPORTED_FORMATS = ("diceframe:adventure-graph-v1", "diceframe:adventure-graph-v2")
+
+
+def parse_requires(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse manifest ``requires.rulesets``（声明目标 runtime 与最低版本）。
+
+    结构：``{"rulesets": [{"id": "core:dnd2024", "minimum_version": 2}]}``；
+    缺省 = 无 runtime 要求（传统 content-pack）。
+    """
+
+    requires = manifest.get("requires")
+    if requires is None:
+        return []
+    if not isinstance(requires, dict):
+        raise ValueError("requires 必须是对象")
+    rulesets = requires.get("rulesets")
+    if rulesets is None:
+        return []
+    if not isinstance(rulesets, list):
+        raise ValueError("requires.rulesets 必须是数组")
+    parsed: list[dict[str, Any]] = []
+    for entry in rulesets:
+        if not isinstance(entry, dict):
+            raise ValueError("requires.rulesets entry 必须是对象")
+        extra = sorted(set(entry) - {"id", "minimum_version"})
+        if extra:
+            raise ValueError(f"requires.rulesets entry has unknown field: {extra[0]!r}")
+        runtime_id = str(entry.get("id") or "").strip()
+        if not runtime_id:
+            raise ValueError("requires.rulesets entry id is required")
+        minimum = entry.get("minimum_version", 1)
+        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+            raise ValueError("requires.rulesets minimum_version must be a positive integer")
+        parsed.append({"id": runtime_id, "minimum_version": minimum})
+    return parsed
+
+
+def preview_module_install(deps: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+    """安装前兼容性预览：blockers（阻断）与 warnings（警告）分离（§57）。"""
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    profile = content_profile(manifest)
+    delivery = content_delivery_mode(manifest)
+    try:
+        validate_content_module_profile(manifest)
+        requires = parse_requires(manifest)
+    except ValueError as exc:
+        return {"ok": True, "blockers": [str(exc)], "warnings": list(warnings)}
+
+    for requirement in requires:
+        runtime_id = str(requirement["id"])
+        minimum = int(requirement["minimum_version"])
+        try:
+            runtime = deps.ruleset_registry.get(runtime_id, minimum_version=minimum)
+        except Exception:  # noqa: BLE001 - registry 对未知/过旧 runtime 抛错
+            runtime = None
+        if runtime is None:
+            blockers.append(f"ruleset_runtime_missing:{runtime_id}>={minimum}")
+
+    format_id = str(manifest.get("format") or "")
+    if format_id and format_id not in _PREVIEW_SUPPORTED_FORMATS:
+        blockers.append(f"adventure_format_unsupported:{format_id}")
+
+    if profile == "adventure-module" and not manifest.get("adventure_packages"):
+        warnings.append("adventure_module_without_adventures")
+    if delivery == "catalog":
+        warnings.append("catalog_mode_content_not_autoloaded")
+
+    return {
+        "ok": True,
+        "content_profile": profile,
+        "content_delivery_mode": delivery,
+        "requires": requires,
+        "blockers": blockers,
+        "warnings": warnings,
+        "blockers_count": len(blockers),
+    }
+
+
+__all__ = ["list_modules", "module_content", "module_detail", "parse_requires", "preview_module_install"]
