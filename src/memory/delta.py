@@ -21,6 +21,34 @@ from src.migrations.memory import migrate as migrate_memory
 
 logger = logging.getLogger("trpg")
 
+# World Memory 分类（母方案 §21）：authoritative_world 只能由确定性投影写入；
+# LLM 提取的 delta 一律 soft；升级前的旧行读取时按 legacy_soft 分类。
+# 未知 memory_kind 一律降级为 soft——降方向安全，绝不静默升 authority。
+MEMORY_KINDS = ("authoritative_world", "soft", "legacy_soft")
+MEMORY_VISIBILITIES = ("public", "gm")
+_DELTA_PROVENANCE_FIELDS = ("memory_kind", "source_kind", "source_id", "world_revision", "visibility")
+
+
+def _delta_provenance(delta: dict) -> dict:
+    """Validate the provenance a delta carries; degrade unknown values down."""
+
+    raw_kind = delta.get("memory_kind")
+    memory_kind = raw_kind if raw_kind in MEMORY_KINDS and raw_kind != "legacy_soft" else "soft"
+    visibility = delta.get("visibility")
+    if visibility not in MEMORY_VISIBILITIES:
+        visibility = None
+    world_revision = delta.get("world_revision")
+    if isinstance(world_revision, bool) or not isinstance(world_revision, int) or world_revision < 0:
+        world_revision = None
+    provenance = {
+        "memory_kind": memory_kind,
+        "source_kind": str(delta.get("source_kind") or "") or None,
+        "source_id": str(delta.get("source_id") or "") or None,
+        "world_revision": world_revision,
+        "visibility": visibility,
+    }
+    return provenance
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +173,10 @@ class MemoryStore:
 
         async with self._lock:
             try:
-                new_ids = self._apply_delta_locked(gk, delta, round_number, now)
+                new_ids = self._apply_delta_locked(
+                    gk, delta, round_number, now,
+                    provenance=_delta_provenance(delta),
+                )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -184,6 +215,7 @@ class MemoryStore:
                 before = self._snapshot_keys(gk, keys)
                 new_ids = self._apply_delta_locked(
                     gk, delta, int(round_number), now,
+                    provenance=_delta_provenance(delta),
                 )
                 after = self._snapshot_keys(gk, keys)
                 MemoryEconomyDelivery.insert(
@@ -275,17 +307,22 @@ class MemoryStore:
         delta: dict,
         round_number: int,
         now: str,
+        *,
+        provenance: dict | None = None,
     ) -> list[int]:
+        provenance = provenance or _delta_provenance(delta)
         new_ids: list[int] = []
         for item in delta.get("add", []):
             entry_id = self._insert_or_update(
                 gk, item, round_number, now, force_add=True,
+                provenance=provenance,
             )
             if entry_id:
                 new_ids.append(entry_id)
         for item in delta.get("update", []):
             entry_id = self._insert_or_update(
                 gk, item, round_number, now, force_add=False,
+                provenance=provenance,
             )
             if entry_id:
                 new_ids.append(entry_id)
@@ -364,7 +401,8 @@ class MemoryStore:
         ).execute()
 
     def _insert_or_update(self, gk: str, item: dict, round_num: int,
-                          now: str, force_add: bool) -> int | None:
+                          now: str, force_add: bool,
+                          provenance: dict | None = None) -> int | None:
         """插入或更新记忆，返回新条目的 id（如果是新插入的话）。"""
         if isinstance(item, str):
             text = item.strip()
@@ -413,6 +451,7 @@ class MemoryStore:
                 new_id = MemoryEntry.insert(
                     game_key=gk, entity=entity, relation=relation, value=value,
                     confidence=confidence, status=status, source_round=round_num,
+                    **(provenance or {}),
                 ).execute()
             else:
                 MemoryEntry.update(
@@ -423,6 +462,7 @@ class MemoryStore:
             new_id = MemoryEntry.insert(
                 game_key=gk, entity=entity, relation=relation, value=value,
                 confidence=confidence, status=status, source_round=round_num,
+                **(provenance or {}),
             ).execute()
         return new_id
 
@@ -621,3 +661,14 @@ class MemoryStore:
             .limit(limit)
         )
         return [dict(r.__data__) for r in rows]
+
+
+def memory_kind_of(stored: str | None) -> str:
+    """Read-side classification of one memory row's kind.
+
+    升级前的旧行（``memory_kind`` 为 NULL）按 ``legacy_soft`` 分类（母方案
+    §69：旧记忆保留为 legacy_soft，永不升级为 authority）；未知值同样降级，
+    绝不猜成 authoritative_world。
+    """
+
+    return stored if stored in MEMORY_KINDS else "legacy_soft"

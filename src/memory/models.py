@@ -36,6 +36,14 @@ class MemoryEntry(Model):
     )
     source_round = IntegerField(null=True)
     embedding = TextField(null=True)
+    # World Memory 分类（母方案 §21/§99）：authoritative_world / soft /
+    # legacy_soft。旧行为 NULL，读取时按 legacy_soft 分类（§69：旧记忆保留、
+    # 永不升级为 authority）。
+    memory_kind = CharField(null=True)
+    source_kind = CharField(null=True)
+    source_id = CharField(null=True)
+    world_revision = IntegerField(null=True)
+    visibility = CharField(null=True)
     created_at = CharField(constraints=[SQL("DEFAULT (datetime('now'))")])
     updated_at = CharField(constraints=[SQL("DEFAULT (datetime('now'))")])
 

@@ -25,7 +25,8 @@ class TestDeltaApplication:
         store = MemoryStore(tmp_path / "memory.db")
         store.open()
         try:
-            assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+            # WR-06：memory schema 3 增加世界记忆来源列（纯加列，旧行 NULL）。
+            assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 3
             table = store._conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 ("memory_economy_deliveries",),

@@ -32,5 +32,18 @@ def _v2(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v3(conn: sqlite3.Connection) -> None:
+    """World Memory provenance columns (母方案 §21/§99，WR-06).
+
+    纯加列迁移：旧行全部为 NULL，读取端按 legacy_soft 分类；不回填、不猜测。
+    """
+
+    ensure_column(conn, "memory_entries", "memory_kind", "TEXT")
+    ensure_column(conn, "memory_entries", "source_kind", "TEXT")
+    ensure_column(conn, "memory_entries", "source_id", "TEXT")
+    ensure_column(conn, "memory_entries", "world_revision", "INTEGER")
+    ensure_column(conn, "memory_entries", "visibility", "TEXT")
+
+
 def migrate(conn: sqlite3.Connection) -> int:
-    return run_migrations(conn, ((1, _v1), (2, _v2)))
+    return run_migrations(conn, ((1, _v1), (2, _v2), (3, _v3)))

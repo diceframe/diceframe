@@ -68,6 +68,7 @@ from src.engine import combat_narrative
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
+from src.engine.world.memory_projection import queue_world_memory
 from src.engine.world_legality import evaluate_world_requirements
 from src.engine.world_state import WorldStateError
 from src.llm.world_prompt import (
@@ -451,6 +452,13 @@ class RoundProcessor:
                         {**item, "status": "failed"}
                         for item in outcome.get("failed") or []
                     ]
+                    # World Memory 投影（母方案 §21/§22）：确定性地把白名单内的
+                    # WorldEvent receipts 排入 memory outbox（幂等，authoritative_
+                    # world 类）；只读 receipts、只写 memory 侧，不触碰世界真相。
+                    queue_world_memory(
+                        instance, outcome.get("events") or [],
+                        round_number=instance.round_number,
+                    )
             build_dice_constraint_block(
                 instance,
                 actions_text,
