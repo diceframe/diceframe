@@ -26,7 +26,7 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
-from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
+from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
@@ -408,6 +408,10 @@ class WebAPI:
         self._plugin_host_dependencies = plugins.PluginHostDependencies(
             plugin_host=self._plugins,
         )
+        self._module_dependencies = modules.ModuleDependencies(
+            plugin_host=self._plugins,
+            adventure_registry=self._adventure_source_registry,
+        )
         self._world_dependencies = worlds.WorldDependencies(
             lorebook=self._lore,
             worlds_dir=self._worlds_dir,
@@ -771,6 +775,12 @@ class WebAPI:
 
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)
+
+    def list_modules(self) -> dict[str, Any]:
+        return modules.list_modules(self._module_dependencies)
+
+    def module_detail(self, module_id: str) -> dict[str, Any]:
+        return modules.module_detail(self._module_dependencies, module_id)
 
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)

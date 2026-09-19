@@ -35,6 +35,7 @@ from src.webui.routes.hub import register_hub
 from src.webui.routes.legal import register_legal
 from src.webui.routes.maps import register_maps
 from src.webui.routes.memory import register_memory
+from src.webui.routes.modules import register_modules
 from src.webui.routes.pages import add_response_security_headers, register_pages
 from src.webui.routes.pairing import PAIRING_SERVICE_KEY, register_pairing
 from src.webui.routes.plugins import register_plugins
@@ -144,6 +145,7 @@ def register_routes(
     register_worlds(application)
     register_rules(application)
     register_adventures(application)
+    register_modules(application)
     register_character_cards(application)
     register_avatars(application)
     register_scene_images(application)

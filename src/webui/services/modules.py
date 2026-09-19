@@ -20,6 +20,7 @@ lifecycle**。本模块只做三件事：
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from src.plugin_host.support import (
@@ -31,6 +32,14 @@ from src.plugin_host.support import (
 _MODULE_CONTENT_KINDS = (
     "npc", "item", "spell", "class", "character_template", "world_template",
 )
+
+
+@dataclass(frozen=True)
+class ModuleDependencies:
+    """Explicit read-side dependencies for the module catalogue facade."""
+
+    plugin_host: Any | None
+    adventure_registry: Any | None
 
 
 def _installed_content_packs(plugin_host: Any) -> list[Any]:
@@ -66,7 +75,7 @@ def _contribution_counts(contributions: Any, plugin_id: str) -> dict[str, int]:
     return counts
 
 
-def list_modules(deps: Any) -> dict[str, Any]:
+def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
     """模块库列表（母方案 §51：已安装；在线/本地导入由 marketplace 提供）。"""
 
     modules: list[dict[str, Any]] = []
@@ -89,7 +98,7 @@ def list_modules(deps: Any) -> dict[str, Any]:
     return {"ok": True, "modules": modules}
 
 
-def module_detail(deps: Any, module_id: str) -> dict[str, Any]:
+def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
     """单个模组详情：概览 + 内容分组计数 + 冒险清单（只读）。"""
 
     runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
@@ -139,7 +148,7 @@ def module_detail(deps: Any, module_id: str) -> dict[str, Any]:
 
 
 def module_content(
-    deps: Any, module_id: str, kind: str, key: str, *, language: str = "",
+    deps: ModuleDependencies, module_id: str, kind: str, key: str, *, language: str = "",
 ) -> dict[str, Any]:
     """内容库只读详情；委托 PluginContentCatalog（不新建存储）。"""
 
@@ -238,6 +247,7 @@ def preview_module_install(deps: Any, manifest: dict[str, Any]) -> dict[str, Any
 
 
 __all__ = [
+    "ModuleDependencies",
     "ModuleInUse",
     "PROTECTED_MODULE_ACTIONS",
     "assert_module_action_allowed",
@@ -359,6 +369,7 @@ def module_usages(deps: Any, module_id: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "ModuleDependencies",
     "ModuleInUse",
     "PROTECTED_MODULE_ACTIONS",
     "assert_module_action_allowed",
