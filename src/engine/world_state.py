@@ -67,7 +67,11 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.world.contracts import (
+    MAX_CLOCK_DAY,
+    MINUTES_PER_DAY,
     WorldContractError,
+    clock_from_total_minutes,
+    clock_minutes,
     validate_entity_record,
     validate_process_record,
     validate_relation_record,
@@ -88,9 +92,10 @@ OP_KINDS = (
     # 仅由 server 侧结算写入（见 world_events.advance_world_time），planner 不会
     # 产生这个 op。
     "complete_event",
-    # WorldState v2 record ops（母方案 §96，实现见 world/ops.py）。
+    # WorldState v2 record ops（母方案 §96/§97，实现见 world/ops.py）。
     "register_entity", "retire_entity",
     "add_relation", "set_relation_status", "remove_relation",
+    "start_process", "complete_process", "cancel_process", "fail_process",
 )
 RECORD_OP_KINDS = world_record_ops.RECORD_OP_KINDS
 SETTLED_EVENT_STATUSES = ("applied", "failed")
@@ -98,7 +103,7 @@ SETTLED_EVENT_STATUSES = ("applied", "failed")
 # 会依赖递归，不再确定性）。
 EVENT_OP_KINDS = ("set_fact", "remove_fact")
 
-MINUTES_PER_DAY = 1440
+# 逻辑时钟常量与换算的单一真值在 world.contracts；此处 re-export 保持既有导入面。
 MAX_FACTS = 512
 MAX_SCHEDULED_EVENTS = 256
 MAX_OPS_PER_BATCH = 64
@@ -109,7 +114,6 @@ MAX_PROCESSES = 128
 MAX_STRING_CHARS = 400
 MAX_LABEL_CHARS = 160
 MAX_ABSOLUTE_INT = 1_000_000_000
-MAX_CLOCK_DAY = 365_000
 MAX_ADVANCE_MINUTES = MINUTES_PER_DAY * 30
 # canonical key：允许平台 uid / canonical ref 常见字符，但拒绝空白、Unicode 展示名
 # 与路径分隔符——世界坐标不能是翻译后的 display name。
@@ -560,6 +564,7 @@ def _apply_op(
         try:
             return world_record_ops.apply_record_op(
                 draft, raw, revision=revision, position=position,
+                now_minutes=_instant_minutes(draft["clock"], "clock"),
             )
         except WorldContractError as exc:
             raise WorldStateError(str(exc)) from exc
@@ -792,26 +797,16 @@ def _instant(value: Any, position: int) -> dict[str, int]:
 def _instant_minutes(value: Any, field: str) -> int | None:
     """Convert ``{"day": n, "minute": m}`` into absolute logical minutes."""
 
-    if not isinstance(value, Mapping):
-        return None
-    day, minute = value.get("day"), value.get("minute")
-    if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= MAX_CLOCK_DAY:
-        return None
-    if isinstance(minute, bool) or not isinstance(minute, int):
-        return None
-    if not 0 <= minute < MINUTES_PER_DAY:
-        return None
-    return (day - 1) * MINUTES_PER_DAY + minute
+    return clock_minutes(value)
 
 
 def _clock_from_minutes(total: int, position: int) -> dict[str, int]:
-    if total < 0:
-        raise WorldStateError(f"world op #{position} moves the clock before day 1")
-    day, minute = divmod(total, MINUTES_PER_DAY)
-    day += 1
-    if day > MAX_CLOCK_DAY:
+    clock = clock_from_total_minutes(total)
+    if clock is None:
+        if total < 0:
+            raise WorldStateError(f"world op #{position} moves the clock before day 1")
         raise WorldStateError(f"world op #{position} moves the clock too far")
-    return {"day": day, "minute": minute}
+    return clock
 
 
 __all__ = [

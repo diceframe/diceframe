@@ -23,19 +23,24 @@ from typing import Any
 
 from src.engine.world.contracts import (
     ENTITY_KINDS,
+    MAX_PROCESS_PARTICIPANTS,
     RELATION_KINDS,
     RELATION_STATUSES,
     VISIBILITIES,
     WorldContractError,
     canonical_id,
+    clock_from_total_minutes,
+    clock_minutes,
     validate_entity_record,
+    validate_process_record,
     validate_relation_record,
     validate_source_ref,
 )
 
 ENTITY_OP_KINDS = ("register_entity", "retire_entity")
 RELATION_OP_KINDS = ("add_relation", "set_relation_status", "remove_relation")
-RECORD_OP_KINDS = ENTITY_OP_KINDS + RELATION_OP_KINDS
+PROCESS_OP_KINDS = ("start_process", "complete_process", "cancel_process", "fail_process")
+RECORD_OP_KINDS = ENTITY_OP_KINDS + RELATION_OP_KINDS + PROCESS_OP_KINDS
 
 
 def _reject_unknown_fields(raw: Mapping[str, Any], allowed: set[str], position: int) -> None:
@@ -64,14 +69,25 @@ def apply_record_op(
     *,
     revision: int,
     position: int,
+    now_minutes: int | None = None,
 ) -> dict[str, Any]:
-    """Apply one record op to the validated draft and return the applied summary."""
+    """Apply one record op to the validated draft and return the applied summary.
+
+    ``now_minutes`` 是分发时草稿的当前逻辑时刻（绝对分钟），供
+    ``start_process`` 校验 ``due_at`` 必须在未来；由 ``world_state`` 每条 op
+    现场计算，本模块不自行读钟。
+    """
 
     kind = raw.get("op")
     if kind in ENTITY_OP_KINDS:
         return _apply_entity_op(draft, raw, kind=kind, revision=revision, position=position)
     if kind in RELATION_OP_KINDS:
         return _apply_relation_op(draft, raw, kind=kind, revision=revision, position=position)
+    if kind in PROCESS_OP_KINDS:
+        return _apply_process_op(
+            draft, raw, kind=kind, revision=revision, position=position,
+            now_minutes=now_minutes,
+        )
     raise WorldContractError(f"unknown world op: {kind!r}")
 
 
@@ -192,4 +208,107 @@ def _apply_relation_op(
     return {"op": "remove_relation", "relation_id": relation_id}
 
 
-__all__ = ["ENTITY_OP_KINDS", "RECORD_OP_KINDS", "RELATION_OP_KINDS", "apply_record_op"]
+
+
+# ---------- Process（母方案 §16/§97，WR-04）--------------------------------
+
+
+def _apply_process_op(
+    draft: dict[str, Any], raw: Mapping[str, Any], *,
+    kind: str, revision: int, position: int, now_minutes: int | None,
+) -> dict[str, Any]:
+    if kind == "start_process":
+        return _start_process(
+            draft, raw, revision=revision, position=position, now_minutes=now_minutes,
+        )
+    _reject_unknown_fields(raw, {"op", "process_id"}, position)
+    process_id = canonical_id(raw.get("process_id"), field=f"world op #{position} process_id")
+    process = draft["processes"].get(process_id)
+    if process is None:
+        raise WorldContractError(
+            f"world op #{position} settles an unknown process: {process_id!r}"
+        )
+    if process.get("status") != "running":
+        raise WorldContractError(
+            f"world op #{position} settles a non-running process: {process_id!r}"
+        )
+    status = {
+        "complete_process": "completed",
+        "cancel_process": "cancelled",
+        "fail_process": "failed",
+    }[kind]
+    process["status"] = status
+    validate_process_record(process)
+    return {"op": kind, "process_id": process_id, "status": status}
+
+
+def _start_process(
+    draft: dict[str, Any], raw: Mapping[str, Any], *,
+    revision: int, position: int, now_minutes: int | None,
+) -> dict[str, Any]:
+    _reject_unknown_fields(
+        raw,
+        {"op", "process_id", "kind", "participants", "location", "due_at", "visibility", "source_ref"},
+        position,
+    )
+    process_id = canonical_id(raw.get("process_id"), field=f"world op #{position} process_id")
+    process_kind = canonical_id(raw.get("kind"), field=f"world op #{position} process kind")
+    if process_id in draft["processes"]:
+        raise WorldContractError(
+            f"world op #{position} reuses process id: {process_id!r}"
+        )
+    participants = raw.get("participants", [])
+    if not isinstance(participants, list) or len(participants) > MAX_PROCESS_PARTICIPANTS:
+        raise WorldContractError(
+            f"world op #{position} process participants must be a list of at most "
+            f"{MAX_PROCESS_PARTICIPANTS} ids"
+        )
+    participants = [
+        canonical_id(item, field=f"world op #{position} process participant")
+        for item in participants
+    ]
+    location = raw.get("location")
+    if location is not None:
+        canonical_id(location, field=f"world op #{position} process location")
+    visibility = _visibility(raw.get("visibility"), position)
+    source_ref = _optional_source_ref(raw.get("source_ref"), position)
+    due_at = raw.get("due_at")
+    if due_at is not None:
+        due_minutes = clock_minutes(due_at)
+        if due_minutes is None:
+            raise WorldContractError(
+                f"world op #{position} process due_at is invalid: {due_at!r}"
+            )
+        if now_minutes is None or due_minutes <= now_minutes:
+            raise WorldContractError(
+                f"world op #{position} starts a process already past its due_at: {process_id!r}"
+            )
+        normalized = clock_from_total_minutes(due_minutes)
+        if normalized is None:  # pragma: no cover - clock_minutes 已限界
+            raise WorldContractError(
+                f"world op #{position} process due_at is invalid: {due_at!r}"
+            )
+        due_at = normalized
+    record = {
+        "process_id": process_id,
+        "kind": process_kind,
+        "status": "running",
+        "participants": participants,
+        "location": location,
+        "started_at": dict(draft["clock"]),
+        "due_at": due_at,
+        "visibility": visibility,
+        "source_ref": source_ref,
+    }
+    validate_process_record(record)
+    draft["processes"][process_id] = record
+    return {"op": "start_process", "process_id": process_id, "kind": process_kind}
+
+
+__all__ = [
+    "ENTITY_OP_KINDS",
+    "PROCESS_OP_KINDS",
+    "RECORD_OP_KINDS",
+    "RELATION_OP_KINDS",
+    "apply_record_op",
+]

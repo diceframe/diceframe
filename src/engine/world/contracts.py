@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, Final
 
 # ---- canonical id / source_ref 语法 ---------------------------------------
@@ -86,6 +87,43 @@ def _visibility(value: Any, field: str) -> str:
     if value not in VISIBILITIES:
         raise WorldContractError(f"world {field} visibility is invalid: {value!r}")
     return str(value)
+
+
+# ---- 逻辑时钟（单一真值；world_state 的错误包装委托到这里）----------------
+
+MINUTES_PER_DAY = 1440
+MAX_CLOCK_DAY = 365_000
+
+
+def clock_minutes(value: Any) -> int | None:
+    """Convert ``{"day": n, "minute": m}`` into absolute logical minutes.
+
+    Pure helper shared by the world write path and record ops; returns ``None``
+    for any unusable value instead of raising.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    day, minute = value.get("day"), value.get("minute")
+    if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= MAX_CLOCK_DAY:
+        return None
+    if isinstance(minute, bool) or not isinstance(minute, int):
+        return None
+    if not 0 <= minute < MINUTES_PER_DAY:
+        return None
+    return (day - 1) * MINUTES_PER_DAY + minute
+
+
+def clock_from_total_minutes(total: int) -> dict[str, int] | None:
+    """Inverse of :func:`clock_minutes`; ``None`` when out of world bounds."""
+
+    if total < 0:
+        return None
+    day, minute = divmod(int(total), MINUTES_PER_DAY)
+    day += 1
+    if day > MAX_CLOCK_DAY:
+        return None
+    return {"day": day, "minute": minute}
 
 
 # ---- Entity（母方案 §14）--------------------------------------------------
@@ -333,7 +371,9 @@ __all__ = [
     "ENTITY_KINDS",
     "ENTITY_STATUSES",
     "MAX_CANONICAL_ID_CHARS",
+    "MAX_CLOCK_DAY",
     "MAX_PROCESS_PARTICIPANTS",
+    "MINUTES_PER_DAY",
     "PROCESS_STATUSES",
     "RELATION_KINDS",
     "RELATION_STATUSES",
@@ -342,6 +382,8 @@ __all__ = [
     "WORLD_EVENT_KINDS",
     "WorldContractError",
     "canonical_id",
+    "clock_from_total_minutes",
+    "clock_minutes",
     "validate_entity_record",
     "validate_process_record",
     "validate_relation_record",
