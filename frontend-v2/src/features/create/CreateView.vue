@@ -24,6 +24,7 @@ import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { resolveSceneImageUrl, revokeSceneImageUrl, sceneImageStyle, uploadSceneImage } from '@/api/sceneImages'
 import { mapBackgroundSelection, uploadMapBackground } from '@/api/mapBackgrounds'
 import { isLlmConfigReady } from '@/utils/modelConfiguration'
+import { moduleApi, type ModuleSummary } from '@/api/modules'
 import {
   cardControlAt,
   cycleCardControl,
@@ -82,6 +83,9 @@ const aiAutoRule = ref(false), aiGeneratedRule = ref<GeneratedRuleResponse | nul
 const loreChoice = ref('__builtin__')
 const adventures = ref<AdventureSummary[]>([])
 const adventureId = ref('')
+const modules = ref<ModuleSummary[]>([])
+const moduleId = ref('')
+const moduleAdventureIds = ref<string[]>([])
 const seed = ref(''), busy = ref(false), error = ref('')
 const settingsChecked = ref(false)
 const sceneImageFile = ref<File | null>(null)
@@ -113,6 +117,9 @@ const showAdventurePackages = computed(() => (
   && supportsAdventurePackages.value
 ))
 const selectedAdventure = computed(() => adventures.value.find(item => item.adventure_id === adventureId.value))
+const availableModuleAdventures = computed(() => moduleId.value
+  ? adventures.value.filter(item => moduleAdventureIds.value.includes(item.adventure_id))
+  : adventures.value)
 
 function selectPlayMode(value: PlayMode): void {
   playMode.value = value
@@ -303,6 +310,15 @@ watch(usesProfessionalBuilder, (enabled) => {
     characters.value = [{ character_name: gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer', DEFAULT_ADVENTURER_DE), background: '', identity: {}, attributes: {}, skills: [] }]
   }
 })
+watch(moduleId, async (value) => {
+  moduleAdventureIds.value = []
+  adventureId.value = ''
+  if (!value) return
+  try {
+    const result = await moduleApi.detail(value)
+    moduleAdventureIds.value = result.module?.adventures.map(item => item.adventure_id) || []
+  } catch { /* the adventure selector remains empty until the module detail is available */ }
+})
 watch(sceneImageFile, (file) => {
   revokeSceneImageUrl(customSceneImageUrl.value)
   customSceneImageUrl.value = file ? URL.createObjectURL(file) : ''
@@ -376,6 +392,7 @@ onMounted(async () => {
     ? worldDefaultRule
     : (rules.value[0]?.rule_id || '')
   aiRule.value = rule.value
+  void moduleApi.list().then(result => { modules.value = result.modules || [] }).catch(() => {})
   characters.value = usesProfessionalBuilder.value
     ? []
     : [{ character_name: gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer', DEFAULT_ADVENTURER_DE), background: '', identity: {}, attributes: {}, skills: [] }]
@@ -664,9 +681,13 @@ async function create() {
                     </button>
                   </div>
                   <div v-if="playMode === 'adventure'" class="create-adventure-select-row">
+                    <select v-if="modules.length" v-model="moduleId">
+                      <option value="">{{ t('navModules') }}</option>
+                      <option v-for="item in modules" :key="item.id" :value="item.id">{{ item.name }}</option>
+                    </select>
                     <select v-model="adventureId">
                       <option value="" disabled>{{ gameDefault('请选择冒险包', 'Choose an adventure package', 'Abenteuerpaket wählen') }}</option>
-                      <option v-for="item in adventures" :key="item.adventure_id" :value="item.adventure_id" :disabled="item.compatibility !== 'compatible'">
+                      <option v-for="item in availableModuleAdventures" :key="item.adventure_id" :value="item.adventure_id" :disabled="item.compatibility !== 'compatible'">
                         {{ item.name }} · {{ item.estimated_minutes }} {{ gameDefault('分钟', 'min', 'Min.') }}{{ item.compatibility !== 'compatible' ? gameDefault('（需匹配推荐世界）', ' (requires its recommended world)', ' (benötigt die empfohlene Welt)') : '' }}
                       </option>
                     </select>
