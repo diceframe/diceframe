@@ -23,8 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
-# World Runtime 的实现文件（含 WR-01+ 即将出现的 world/ 包）。
+# World Runtime 的实现文件（含 WR-01 起的 world/ 包）。
 WORLD_MODULES = (
+    "src.engine.world",
     "src.engine.world_state",
     "src.engine.world_events",
     "src.engine.world_legality",
