@@ -190,3 +190,58 @@ def test_next_candidates_only_lists_existing_targets() -> None:
     record = _adventure()
     candidates = next_candidates(record, ["gate", "ghost"])
     assert candidates == {"gate": ["bridge", "tunnel"]}
+
+
+# ---- ADV2-05：Secrets + Visibility 投影 ----
+
+from src.adventures.graph_v2 import project_graph_v2  # noqa: E402
+
+
+def _graph_with_secrets() -> dict:
+    record = _adventure()
+    record["nodes"].append(_node(
+        "secret_ritual", "scene", visibility="gm", optional=True,
+        name="秘密仪式", description="GM 私密：伯爵在地下室进行仪式",
+        transitions=[{"to": "throne"}],
+    ))
+    record["nodes"][3]["transitions"].append({"to": "secret_ritual"})
+    record["objectives"].append({
+        "id": "obj_secret_patron", "name": "秘密赞助人",
+        "visibility": "gm", "node_ids": ["secret_ritual"],
+    })
+    record["milestones"].append({
+        "id": "mile_betrayal", "name": "背叛揭露",
+        "visibility": "gm", "node_ids": ["secret_ritual"],
+    })
+    record["chapters"].append({"id": "ch_secret", "name": "隐藏章节", "visibility": "gm"})
+    return validate_graph_v2(record)
+
+
+def test_gm_projection_contains_secrets() -> None:
+    view = project_graph_v2(_graph_with_secrets(), viewer_is_gm=True)
+    ids = {node["id"] for node in view["nodes"]}
+    assert "secret_ritual" in ids
+    assert "obj_secret_patron" in {item["id"] for item in view["objectives"]}
+    assert "ch_secret" in {item["id"] for item in view["chapters"]}
+
+
+def test_player_projection_never_leaks_secret_content_or_ids() -> None:
+    """E2E 防泄漏（母方案 §121/§191）：秘密内容与 id 都不得出现在玩家投影。"""
+    view = project_graph_v2(_graph_with_secrets(), viewer_is_gm=False)
+    rendered = json.dumps(view, ensure_ascii=False)
+    assert "secret_ritual" not in rendered
+    assert "秘密仪式" not in rendered
+    assert "GM 私密" not in rendered
+    assert "obj_secret_patron" not in rendered
+    assert "秘密赞助人" not in rendered
+    assert "mile_betrayal" not in rendered
+    assert "ch_secret" not in rendered
+    # 公开节点仍然可见；指向秘密节点的 transition 被丢弃（id 即剧透）。
+    throne = next(node for node in view["nodes"] if node["id"] == "throne")
+    assert all(transition["to"] != "secret_ritual" for transition in throne["transitions"])
+
+
+def test_gm_sees_transitions_into_secret_nodes() -> None:
+    view = project_graph_v2(_graph_with_secrets(), viewer_is_gm=True)
+    throne = next(node for node in view["nodes"] if node["id"] == "throne")
+    assert any(transition["to"] == "secret_ritual" for transition in throne["transitions"])

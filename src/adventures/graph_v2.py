@@ -344,6 +344,7 @@ __all__ = [
     "NODE_TYPES",
     "AdventureGraphV2Error",
     "next_candidates",
+    "project_graph_v2",
     "reachable_nodes",
     "validate_graph_v2",
 ]
@@ -398,3 +399,68 @@ def next_candidates(
             if str(transition.get("to") or "") in nodes
         ]
     return candidates
+
+
+# ---- Secrets + Visibility 投影（ADV2-05，母方案 §60/§79/§121/§191）----------
+
+
+def project_graph_v2(graph: dict[str, Any], *, viewer_is_gm: bool = False) -> dict[str, Any]:
+    """Project one validated v2 graph for a viewer; secrets never leak.
+
+    GM 视图：全量（含 gm 可见性节点 / 秘密目标 / 私密章节）。
+    玩家视图：
+    - 只保留 ``visibility == "public"`` 的节点 / 目标 / 里程碑 / 章节；
+    - 指向隐藏节点的 transition 一并丢弃（目标 id 本身就是剧透，§60/§191）；
+    - 隐藏节点的内容（id / name / description / refs）绝不出现——秘密保护在
+      projection 层，不依赖 prompt 自觉（§191）。
+    """
+
+    nodes = graph.get("nodes", [])
+    visible_ids = {
+        node["id"] for node in nodes
+        if viewer_is_gm or node.get("visibility") == "public"
+    }
+
+    def _project_node(node: dict[str, Any]) -> dict[str, Any] | None:
+        if node["id"] not in visible_ids:
+            return None
+        projected = dict(node)
+        if not viewer_is_gm:
+            projected["transitions"] = [
+                transition for transition in node.get("transitions", [])
+                if str(transition.get("to") or "") in visible_ids
+            ]
+        return projected
+
+    projected_nodes = [
+        projected for projected in (
+            _project_node(node) for node in nodes
+        ) if projected is not None
+    ]
+    projected_objectives = [
+        objective for objective in graph.get("objectives", [])
+        if viewer_is_gm or objective.get("visibility") == "public"
+    ]
+    projected_milestones = [
+        milestone for milestone in graph.get("milestones", [])
+        if viewer_is_gm or milestone.get("visibility") == "public"
+    ]
+    projected_chapters = [
+        chapter for chapter in graph.get("chapters", [])
+        if viewer_is_gm or chapter.get("visibility") == "public"
+    ]
+    start_node_ids = [
+        node_id for node_id in graph.get("start_node_ids", [])
+        if viewer_is_gm or node_id in visible_ids
+    ]
+    return {
+        "id": graph.get("id"),
+        "format": graph.get("format"),
+        "visibility": graph.get("visibility"),
+        "viewer": "gm" if viewer_is_gm else "player",
+        "chapters": projected_chapters,
+        "nodes": projected_nodes,
+        "objectives": projected_objectives,
+        "milestones": projected_milestones,
+        "start_node_ids": start_node_ids,
+    }
