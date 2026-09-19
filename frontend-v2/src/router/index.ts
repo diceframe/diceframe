@@ -21,6 +21,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/worlds', name: 'worlds', component: () => import('@/features/worlds/WorldsView.vue') },
   { path: '/adventures', name: 'adventures', component: () => import('@/features/admin/AdventuresView.vue') },
   { path: '/modules', name: 'modules', component: () => import('@/features/modules/ModulesView.vue') },
+  { path: '/modules/:moduleId', name: 'module-detail', component: () => import('@/features/modules/ModuleDetailView.vue') },
   { path: '/memory', name: 'memory', component: () => import('@/features/admin/MemoryView.vue') },
   { path: '/logs', name: 'logs', component: () => import('@/features/admin/LogsView.vue') },
   { path: '/rules', name: 'rules', component: () => import('@/features/admin/RulesView.vue') },

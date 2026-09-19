@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { errorMessage } from '@/api/client'
 import { moduleApi, type ModuleSummary } from '@/api/modules'
 import { useLocale } from '@/composables/useLocale'
@@ -39,7 +40,7 @@ onMounted(load)
       <p>{{ t('modulesEmpty') }}</p>
     </div>
     <div v-else class="modules-grid">
-      <article v-for="module in installedModules" :key="module.id" class="module-card">
+      <RouterLink v-for="module in installedModules" :key="module.id" :to="{ name: 'module-detail', params: { moduleId: module.id } }" class="module-card">
         <div>
           <p class="eyebrow">{{ module.is_module ? t('modulesAdventureModule') : t('modulesContentPack') }}</p>
           <h2>{{ module.name }}</h2>
@@ -49,7 +50,7 @@ onMounted(load)
           <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ module.adventure_count }}</dd></div>
           <div><dt>{{ t('modulesContentCount') }}</dt><dd>{{ totalContent(module) }}</dd></div>
         </dl>
-      </article>
+      </RouterLink>
     </div>
   </section>
 </template>

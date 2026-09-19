@@ -17,6 +17,28 @@ export type ModulesResponse = {
   modules: ModuleSummary[]
 }
 
+export type ModuleDetail = ModuleSummary & {
+  content: Record<string, Array<{ key: string; title: string; description: string }>>
+  adventures: Array<{ adventure_id: string; version: string; format: string; directory_id: string }>
+}
+
+export type ModuleDetailResponse = { ok: boolean; module?: ModuleDetail; error_code?: string }
+export type ModuleCompatibilityResponse = {
+  ok: boolean
+  module_id?: string
+  blockers?: string[]
+  warnings?: string[]
+}
+export type ModuleUsageResponse = {
+  ok: boolean
+  module_id?: string
+  usages?: Array<{ adventure_id: string; games: Array<{ game_key: string; run_id: string; content_digest: string }> }>
+  total_games?: number
+}
+
 export const moduleApi = {
   list: () => api<ModulesResponse>('/modules'),
+  detail: (moduleId: string) => api<ModuleDetailResponse>(`/modules/${encodeURIComponent(moduleId)}`),
+  compatibility: (moduleId: string) => api<ModuleCompatibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/compatibility`),
+  usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
 }
