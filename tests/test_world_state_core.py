@@ -69,6 +69,9 @@ def test_new_game_starts_with_an_explicit_empty_world() -> None:
         "clock": {"day": 1, "minute": 0},
         "facts": {},
         "scheduled_events": {},
+        "entities": {},
+        "relations": {},
+        "processes": {},
     }
     assert world_facts(instance.world_state) == {}
     assert world_scheduled_events(instance.world_state) == {}
@@ -332,13 +335,20 @@ def test_unknown_or_corrupt_world_state_fails_closed_on_write() -> None:
     with pytest.raises(WorldStateError, match="unsupported world state schema"):
         set_location(instance, "village_east")
 
+    # WR-02 起 v2 是当前 schema：裸 v1 容器在权威写路径同样 fail closed
+    # （装载路径的 ensure/migration 才负责 v1 → v2 升级）。
     instance.world_state = {"schema_version": 1, "revision": "x"}
+    with pytest.raises(WorldStateError, match="unsupported world state schema"):
+        set_location(instance, "village_east")
+
+    instance.world_state = {"schema_version": 2, "revision": "x"}
     with pytest.raises(WorldStateError, match="revision"):
         set_location(instance, "village_east")
 
     instance.world_state = {
-        "schema_version": 1, "revision": 0, "clock": {"day": 1, "minute": 0},
+        "schema_version": 2, "revision": 0, "clock": {"day": 1, "minute": 0},
         "facts": {"ok": {"value": 1, "visibility": "public"}}, "scheduled_events": {},
+        "entities": {}, "relations": {}, "processes": {},
     }
     apply_world_ops(instance, [{"op": "set_fact", "key": "second", "value": 2}])
     assert set(world_facts(instance.world_state)) == {"ok", "second"}

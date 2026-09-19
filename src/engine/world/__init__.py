@@ -16,8 +16,6 @@
 from src.engine.world.contracts import (
     ENTITY_KINDS,
     ENTITY_STATUSES,
-    EVENT_OP_KINDS,
-    EVENT_STATUSES,
     PROCESS_STATUSES,
     RELATION_KINDS,
     RELATION_STATUSES,
@@ -36,8 +34,6 @@ from src.engine.world.contracts import (
 __all__ = [
     "ENTITY_KINDS",
     "ENTITY_STATUSES",
-    "EVENT_OP_KINDS",
-    "EVENT_STATUSES",
     "PROCESS_STATUSES",
     "RELATION_KINDS",
     "RELATION_STATUSES",

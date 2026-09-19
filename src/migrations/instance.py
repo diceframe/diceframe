@@ -21,7 +21,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 15
+CURRENT_INSTANCE_SCHEMA_VERSION = 16
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -303,6 +303,29 @@ def _migrate_v14_to_v15(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v15_to_v16(payload: dict[str, Any]) -> dict[str, Any]:
+    """WorldState v2 containers (World Runtime v2 WR-02).
+
+    v1 world payloads gain the empty ``entities`` / ``relations`` /
+    ``processes`` containers and move to world ``schema_version = 2``; facts,
+    clock, and scheduled events are preserved verbatim and nothing is guessed
+    into the new containers.  A payload that is already v2 (or carries an
+    unknown world schema, which the write path rejects) is left untouched, so
+    the step is idempotent.
+    """
+
+    raw = payload.get("world_state")
+    if not isinstance(raw, dict) or not raw:
+        payload["world_state"] = fresh_world_state()
+    elif raw.get("schema_version") == 1:
+        raw["schema_version"] = 2
+        for key in ("entities", "relations", "processes"):
+            if key not in raw:
+                raw[key] = {}
+    payload["instance_schema_version"] = 16
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -352,6 +375,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 14:
         payload = _migrate_v14_to_v15(payload)
         version = 15
+    if version == 15:
+        payload = _migrate_v15_to_v16(payload)
+        version = 16
     payload["instance_schema_version"] = version
     return payload
 

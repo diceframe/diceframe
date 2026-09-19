@@ -10,10 +10,10 @@ validates the shape.  Callers must not poke ``instance.world_state["facts"]``
 directly; they must go through world ops so that validation, bounds, revision
 bookkeeping and provenance stay in one place.
 
-Persisted schema (``schema_version = 1``)::
+Persisted schema (``schema_version = 2``)::
 
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "revision": 3,
       "clock": {"day": 1, "minute": 720},
       "facts": {
@@ -34,8 +34,16 @@ Persisted schema (``schema_version = 1``)::
             {"op": "set_fact", "key": "ritual:clearing.status", "value": "completed"}
           ]
         }
-      }
+      },
+      "entities": {},
+      "relations": {},
+      "processes": {}
     }
+
+v2 在 v1（facts / clock / scheduled_events）之上新增 Entity / Relation /
+Process 三个容器（母方案 §13-§16）。v1 容器由 :func:`ensure_world_state` 与
+实例迁移（instance schema 15 → 16）幂等升级：旧事实原样保留，新容器一律为
+空，不猜测、不回填。记录 shape 由 ``src.engine.world.contracts`` 校验。
 
 Design boundaries (deliberately small for the first version):
 
@@ -58,7 +66,14 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-WORLD_STATE_SCHEMA_VERSION = 1
+from src.engine.world.contracts import (
+    WorldContractError,
+    validate_entity_record,
+    validate_process_record,
+    validate_relation_record,
+)
+
+WORLD_STATE_SCHEMA_VERSION = 2
 
 # 事实可见性：第一版只有公开与 GM 私有。更细的 ACL / group graph 不在本层。
 FACT_VISIBILITIES = ("public", "gm")
@@ -105,21 +120,45 @@ def fresh_world_state() -> dict[str, Any]:
         "clock": {"day": 1, "minute": 0},
         "facts": {},
         "scheduled_events": {},
+        # WorldState v2 容器（母方案 §13）：Entity / Relation / Process。
+        # 它们只承载身份 / 结构 / 生命周期，机制数据（HP / AC / 法术位 /
+        # 余额 / 先攻）永远不进世界容器。
+        "entities": {},
+        "relations": {},
+        "processes": {},
     }
 
 
 def ensure_world_state(raw: Any) -> dict[str, Any]:
     """Return a usable container for ``GameInstance.world_state``.
 
-    Unset / malformed input becomes a fresh empty state.  Anything else is
-    passed through unchanged: persisted data is untrusted, and an unsupported
-    or corrupted payload must be rejected by the write path instead of being
-    silently overwritten with a default that would destroy user data.
+    Unset / malformed input becomes a fresh empty state.  A persisted v1
+    container (schema 13-15 saves) is upgraded to the v2 shape by adding the
+    empty ``entities`` / ``relations`` / ``processes`` containers: old facts,
+    clock, and scheduled events are preserved verbatim, and nothing is guessed
+    into the new containers (母方案 §67).  The upgrade is idempotent.  Any
+    other non-empty mapping is passed through unchanged: persisted data is
+    untrusted, and an unsupported or corrupted payload must be rejected by the
+    write path instead of being silently overwritten with a default that would
+    destroy user data.
     """
 
     if isinstance(raw, Mapping) and raw:
-        return deepcopy(dict(raw))
+        state = deepcopy(dict(raw))
+        if state.get("schema_version") == 1:
+            return _upgrade_world_state_v1_to_v2(state)
+        return state
     return fresh_world_state()
+
+
+def _upgrade_world_state_v1_to_v2(state: dict[str, Any]) -> dict[str, Any]:
+    """Materialize the v2 containers on a v1 payload without guessing."""
+
+    state["schema_version"] = WORLD_STATE_SCHEMA_VERSION
+    for key in ("entities", "relations", "processes"):
+        if key not in state:
+            state[key] = {}
+    return state
 
 
 # ---- 读取入口：投影与合法性判断都必须经这里，且对损坏存档保持沉默降级 ----
@@ -191,6 +230,38 @@ def world_scheduled_events(state: Any) -> dict[str, dict[str, Any]]:
         for key, value in raw.items()
         if isinstance(value, Mapping)
     }
+
+
+def _world_record_container(state: Any, name: str) -> dict[str, dict[str, Any]]:
+    """Defensive reader for the v2 record containers (entities/relations/processes)."""
+
+    payload = _current_payload(state)
+    raw = payload.get(name) if payload is not None else None
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(key): deepcopy(dict(value))
+        for key, value in raw.items()
+        if isinstance(value, Mapping)
+    }
+
+
+def world_entities(state: Any) -> dict[str, dict[str, Any]]:
+    """All registered entities (copies).  Malformed entries are not guessed."""
+
+    return _world_record_container(state, "entities")
+
+
+def world_relations(state: Any) -> dict[str, dict[str, Any]]:
+    """All established relations (copies).  Malformed entries are not guessed."""
+
+    return _world_record_container(state, "relations")
+
+
+def world_processes(state: Any) -> dict[str, dict[str, Any]]:
+    """All known processes (copies).  Malformed entries are not guessed."""
+
+    return _world_record_container(state, "processes")
 
 
 def clock_to_minutes(clock: Any) -> int:
@@ -396,6 +467,30 @@ def _validated_copy(state: Any) -> dict[str, Any]:
         # 不能被静默归一化成一个「什么都没做却标记 applied」的成功结果。
         for nested_position, nested in enumerate(event_ops):
             _validate_event_op(nested, nested_position)
+    # WorldState v2 容器：Entity / Relation / Process 记录按 world contracts
+    # 校验（fail closed），且容器 key 必须与记录自身 id 一致——损坏或被外部
+    # 工具改坏的记录不会以"看起来正常"的形状重新进入权威状态。
+    for name, validate_record, id_field in (
+        ("entities", validate_entity_record, "entity_id"),
+        ("relations", validate_relation_record, "relation_id"),
+        ("processes", validate_process_record, "process_id"),
+    ):
+        container = draft.get(name)
+        if not isinstance(container, Mapping):
+            raise WorldStateError(f"world state {name} must be an object")
+        for key, record in container.items():
+            if not isinstance(key, str) or not _KEY_RE.fullmatch(key):
+                raise WorldStateError(f"world state {name} key is invalid: {key!r}")
+            try:
+                validated = validate_record(record)
+            except WorldContractError as exc:
+                raise WorldStateError(
+                    f"world state {name} record is invalid: {key!r}: {exc}"
+                ) from exc
+            if validated.get(id_field) != key:
+                raise WorldStateError(
+                    f"world state {name} record id does not match its key: {key!r}"
+                )
     draft["facts"] = dict(facts)
     draft["scheduled_events"] = dict(events)
     draft["clock"] = dict(clock)
@@ -716,7 +811,10 @@ __all__ = [
     "fresh_world_state",
     "project_visible_state",
     "world_clock",
+    "world_entities",
     "world_facts",
+    "world_processes",
+    "world_relations",
     "world_revision",
     "world_scheduled_events",
 ]

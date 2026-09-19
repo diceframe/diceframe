@@ -328,22 +328,10 @@ def validate_world_event_record(record: Any) -> dict[str, Any]:
     }
 
 
-# ---- 兼容 op 词表（引用 world_state 的既有定义，保持单一真值）--------------
-
-# v1 的 op / 事件状态词表留在 ``src.engine.world_state``；这里 re-export 供
-# 契约消费者使用，避免第二份词表漂移。注意：import 是模块级的，无循环
-# （world_state 不 import 本包）。
-from src.engine.world_state import (  # noqa: E402
-    EVENT_OP_KINDS,
-    EVENT_STATUSES,
-)
-
 __all__ = [
     "CANONICAL_ID_PATTERN",
     "ENTITY_KINDS",
     "ENTITY_STATUSES",
-    "EVENT_OP_KINDS",
-    "EVENT_STATUSES",
     "MAX_CANONICAL_ID_CHARS",
     "MAX_PROCESS_PARTICIPANTS",
     "PROCESS_STATUSES",

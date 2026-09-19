@@ -94,7 +94,7 @@ def test_registry_roundtrip_preserves_world_events_and_outbox(tmp_path) -> None:
     assert again["applied"] == [] and again["failed"] == []
 
 
-# ---------- 未来 schema 版本围栏（WR-02 将有意更新这条 seam）----------
+# ---------- 未来 schema 版本围栏（WR-02 已把当前版本推进到 2）----------
 
 
 def test_future_world_schema_reads_degrade_and_writes_fail_closed() -> None:
