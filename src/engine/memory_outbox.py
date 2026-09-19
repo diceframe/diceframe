@@ -37,6 +37,17 @@ def queue_memory_delivery(
         None,
     )
     if existing is not None:
+        if existing.get("status") == "superseded":
+            # 该投递身份曾被整轮回滚标记 superseded（payload 已剥离）。同一
+            # 身份再次入队只发生在 abort/重放后权威地重新产生了同一批世界
+            # 事件（revision 与 event_id 确定性重现）：此时世界变更真实存在，
+            # 记忆必须随之恢复，否则重放轮会留下"世界变了但没有记忆"的
+            # 幽灵缺失。恢复 payload 并重新置为 pending（WR-07）。
+            existing["run_id"] = instance.run_id
+            existing["payload"] = deepcopy(memory_delta)
+            existing["round"] = int(round_number)
+            existing["status"] = "pending"
+            existing["created_at"] = datetime.now(timezone.utc).isoformat()
         return existing
     delivery = {
         "id": delivery_id,
