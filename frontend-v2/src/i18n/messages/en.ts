@@ -32,6 +32,8 @@ export const en = {
   modulesImport: 'Import local module',
   modulesPreview: 'Preview installation impact',
   modulesInstall: 'Install module',
+  gameAdventureBinding: 'Current adventure',
+  gameAdventureVersion: 'Version {version}',
   contentWorkspaceLorebookHint: 'People, places, and hidden truths',
   contentWorkspaceWorldsHint: 'Stages, covers, and narration style',
   contentWorkspaceAdventuresHint: 'Chapters, scenes, and story structure',

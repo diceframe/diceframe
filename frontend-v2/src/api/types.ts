@@ -339,6 +339,13 @@ export interface GameDetail {
   pending_luck_decisions?: CheckResult[]
   round_check_results?: CheckResult[]
   manual_rolls?: ManualRollTimelineEntry[]
+  adventure_binding?: {
+    adventure_id?: string
+    version?: string
+    format?: string
+    content_digest?: string
+    [key: string]: unknown
+  }
   total_tokens?: number
   token_budget_bump?: TokenBudgetBump | null
   ruleset_runtime?: RulesetRuntimeMeta & {

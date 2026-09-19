@@ -32,6 +32,8 @@ export const ja = {
   modulesImport: 'ローカルモジュールをインポート',
   modulesPreview: 'インストールの影響をプレビュー',
   modulesInstall: 'モジュールをインストール',
+  gameAdventureBinding: '現在のアドベンチャー',
+  gameAdventureVersion: 'バージョン {version}',
   contentWorkspaceLorebookHint: '資料、人物、隠された真実',
   contentWorkspaceWorldsHint: '舞台、カバー、語り口',
   contentWorkspaceAdventuresHint: '章、シーン、物語構造',

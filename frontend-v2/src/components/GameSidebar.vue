@@ -23,6 +23,7 @@ const notableRelations = computed(() => Object.values(pt.value.relations || {}).
 const recentDecisions = computed(() => (pt.value.decisions || []).slice(-5).reverse())
 const hasPlot = computed(() => activeQuests.value.length || doneQuests.value.length || notableRelations.value.length || recentDecisions.value.length)
 const recentPerceptions = computed(() => props.privateMessages.slice(-3).reverse())
+const adventureBinding = computed(() => props.detail.adventure_binding || null)
 function fmtDecision(d: Decision | string) {
   if (typeof d === 'string') return d
   const text = d.title || d.summary || d.description
@@ -94,6 +95,14 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     </details>
 
     <slot name="after-perception" />
+
+    <details v-if="adventureBinding?.adventure_id" class="panel sidebar-disclosure">
+      <summary><strong>{{ t('gameAdventureBinding') }}</strong><span>{{ adventureBinding.adventure_id }}</span></summary>
+      <div class="sidebar-disclosure-body">
+        <p>{{ t('gameAdventureVersion', { version: adventureBinding.version || '—' }) }}</p>
+        <p v-if="adventureBinding.format" class="muted">{{ adventureBinding.format }}</p>
+      </div>
+    </details>
 
     <details class="panel sidebar-disclosure">
       <summary><strong>{{ t('statusInfo') }}</strong><span>{{ stateLabel(detail.state) }}</span></summary>

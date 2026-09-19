@@ -32,6 +32,8 @@ export const zhCN = {
   modulesImport: '导入本地模组',
   modulesPreview: '预览安装影响',
   modulesInstall: '安装模组',
+  gameAdventureBinding: '当前冒险',
+  gameAdventureVersion: '版本 {version}',
   contentWorkspaceLorebookHint: '资料、人物与隐藏真相',
   contentWorkspaceWorldsHint: '舞台、封面与叙事风格',
   contentWorkspaceAdventuresHint: '章节、场景与剧情结构',

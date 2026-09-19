@@ -32,6 +32,8 @@ export const de = {
   modulesImport: 'Lokales Modul importieren',
   modulesPreview: 'Installationsfolgen prüfen',
   modulesInstall: 'Modul installieren',
+  gameAdventureBinding: 'Aktuelles Abenteuer',
+  gameAdventureVersion: 'Version {version}',
   contentWorkspaceLorebookHint: 'Personen, Orte und verborgene Wahrheiten',
   contentWorkspaceWorldsHint: 'Schauplätze, Titelbilder und Erzählstil',
   contentWorkspaceAdventuresHint: 'Kapitel, Szenen und Handlungsstruktur',
