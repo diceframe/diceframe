@@ -1248,6 +1248,19 @@ class WebAPI:
             viewer_is_gm,
         )
 
+    def game_adventure_projection(
+        self, game_key: str, *, viewer_is_gm: bool,
+    ) -> dict[str, Any] | None:
+        """Read the bound adventure through the viewer-safe projection seam."""
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return None
+        self._sync_plugin_adventure_sources()
+        return adventures.game_adventure_projection(
+            self._adventure_dependencies, instance, viewer_is_gm=viewer_is_gm,
+        )
+
     def get_game_instance(self, game_key: str):
         """Resolve a public game key without exposing registry/parser internals."""
 

@@ -19,6 +19,12 @@ from src.adventures import (
     LoadedAdventureBundle,
     is_builtin_adventure_directory,
 )
+from src.adventures.graph_v2 import (
+    ADVENTURE_GRAPH_FORMAT_V2,
+    AdventureGraphV2Error,
+    project_graph_v2,
+    validate_graph_v2,
+)
 from src.rulesets.registry import RulesetRuntimeRegistry
 
 _DIRECTORY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -36,6 +42,9 @@ class AdventureDependencies:
     ruleset_registry: RulesetRuntimeRegistry
     default_runtime_requirement: Callable[[], dict[str, Any]]
     builtin_adventures_dir: Path | None = None
+    # MOD-02 的跨来源目录是可选依赖：保留 standalone 测试与旧嵌入的
+    # 单一 loader 构造方式，同时让 WebAPI 可以解析 content-pack 来源。
+    adventure_registry: AdventureSourceRegistry | None = None
 
 
 def _runtime_for_rule(
@@ -148,6 +157,11 @@ def _resolve_bundle(
     language: str = "",
 ) -> LoadedAdventureBundle:
     try:
+        if dependencies.adventure_registry is not None:
+            bundle, _source = dependencies.adventure_registry.resolve(
+                str(adventure_id or ""), language,
+            )
+            return bundle
         return dependencies.adventure_loader.resolve(
             str(adventure_id or ""), language,
         )
@@ -595,10 +609,98 @@ def resolve_binding_for_runtime(
     if not wanted:
         return {}
     try:
-        bundle = dependencies.adventure_loader.resolve(wanted, language)
-    except AdventureBundleError as exc:
+        bundle = _resolve_bundle(dependencies, wanted, language)
+    except ValueError as exc:
         raise ValueError(str(exc)) from exc
     status, reasons = _compatibility(bundle, runtime, world_id)
     if status != "compatible":
         raise ValueError(f"adventure package is incompatible: {', '.join(reasons)}")
     return bundle.binding(world_id)
+
+
+def game_adventure_projection(
+    dependencies: AdventureDependencies,
+    instance: Any,
+    *,
+    viewer_is_gm: bool,
+) -> dict[str, Any]:
+    """Return only the bound v2 graph that this viewer may inspect.
+
+    This is deliberately game-scoped rather than reusing the owner catalogue
+    endpoint: package files may contain GM material, while this projection
+    applies the v2 visibility boundary before an HTTP response exists.
+    """
+
+    binding = dict(getattr(instance, "adventure_binding", {}) or {})
+    public_binding = {
+        key: str(binding.get(key) or "")
+        for key in ("adventure_id", "version", "format", "content_digest")
+        if binding.get(key)
+    }
+    if not public_binding.get("adventure_id"):
+        return {"ok": True, "adventure": None}
+    try:
+        bundle = _resolve_bundle(
+            dependencies,
+            public_binding["adventure_id"],
+            str(getattr(instance, "language", "") or ""),
+        )
+    except ValueError:
+        return {
+            "ok": True,
+            "adventure": {
+                "binding": public_binding,
+                "available": False,
+                "reason": "package_unavailable",
+            },
+        }
+
+    # A changed package must never silently become the content of an existing
+    # save. The normal gameplay guard makes the same fail-closed decision.
+    expected = bundle.binding(str(getattr(instance, "world_id", "") or ""))
+    if any(
+        public_binding.get(key)
+        and public_binding[key] != str(expected.get(key) or "")
+        for key in ("version", "format", "content_digest")
+    ):
+        return {
+            "ok": True,
+            "adventure": {
+                "binding": public_binding,
+                "available": False,
+                "reason": "binding_changed",
+            },
+        }
+    if bundle.manifest.format != ADVENTURE_GRAPH_FORMAT_V2:
+        return {
+            "ok": True,
+            "adventure": {
+                "binding": public_binding,
+                "available": True,
+                "format": bundle.manifest.format,
+                "projection": None,
+            },
+        }
+    try:
+        # Locale overlays may replace display fields. Revalidate the final
+        # loaded graph so visibility defaults and its fail-closed contract are
+        # applied to exactly the data that will be projected.
+        graph = validate_graph_v2(bundle.adventure)
+    except AdventureGraphV2Error:
+        return {
+            "ok": True,
+            "adventure": {
+                "binding": public_binding,
+                "available": False,
+                "reason": "package_invalid",
+            },
+        }
+    return {
+        "ok": True,
+        "adventure": {
+            "binding": public_binding,
+            "available": True,
+            "format": bundle.manifest.format,
+            "projection": project_graph_v2(graph, viewer_is_gm=viewer_is_gm),
+        },
+    }

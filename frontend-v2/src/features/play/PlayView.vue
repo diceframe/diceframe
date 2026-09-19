@@ -39,6 +39,7 @@ import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
 import MapBackgroundSettingsModal from '@/components/play/MapBackgroundSettingsModal.vue'
 import ManualRollsPanel from '@/features/play/manual-rolls/ManualRollsPanel.vue'
+import AdventurePanel from '@/components/play/AdventurePanel.vue'
 import RulesetCharacterCenterHost from '@/features/rulesets/RulesetCharacterCenterHost.vue'
 import RulesetPlayHost from '@/features/rulesets/RulesetPlayHost.vue'
 import { resolveRulesetPlayExtension } from '@/features/rulesets/registry'
@@ -173,6 +174,7 @@ const hasCampaignGuidance = computed(() => Boolean(
   game.detail.value?.ruleset_runtime?.capabilities?.session_zero
   || game.detail.value?.ruleset_runtime?.capabilities?.tutorial_coach,
 ))
+const hasAdventureBinding = computed(() => Boolean(game.detail.value?.adventure_binding?.adventure_id))
 type RulesetTool = 'campaign' | 'combat'
 const activeRulesetTool = ref<RulesetTool | ''>('')
 const directorProposal = ref<RulesetDirectorProposal | null>(null)
@@ -1182,6 +1184,12 @@ onBeforeUnmount(() => {
             <span v-if="game.detail.value.world_id">{{ game.detail.value.world_id }}</span>
           </div>
         </section>
+
+        <AdventurePanel
+          v-if="game.isGm.value && hasAdventureBinding"
+          :game-key="game.currentGame.value"
+          :is-gm="game.isGm.value"
+        />
 
         <DirectorProposalCard
           v-if="directorProposal"

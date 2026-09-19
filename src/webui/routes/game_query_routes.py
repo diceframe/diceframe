@@ -32,6 +32,20 @@ async def api_detail(request: web.Request) -> web.Response:
         if instance and request.get("owner_authenticated", False)
         else ""
     )
+
+
+async def api_game_adventure_projection(request: web.Request) -> web.Response:
+    """Game-scoped adventure read model; player output is projected server-side."""
+
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    instance = api.get_game_instance(game_key)
+    viewer_uid = request.get("user_id", "")
+    effective_viewer_uid = viewer_uid or (
+        instance.gm_uid
+        if instance and request.get("owner_authenticated", False)
+        else ""
+    )
     d = api.game_detail(
         game_key,
         effective_viewer_uid,
@@ -44,6 +58,19 @@ async def api_detail(request: web.Request) -> web.Response:
     return (
         web.json_response(d)
         if d
+        else web.json_response({"error": "not found"}, status=404)
+    )
+    result = api.game_adventure_projection(
+        game_key,
+        viewer_is_gm=is_game_gm(
+            instance,
+            effective_viewer_uid,
+            bool(request.get("owner_authenticated", False)),
+        ),
+    )
+    return (
+        web.json_response(result)
+        if result is not None
         else web.json_response({"error": "not found"}, status=404)
     )
 
