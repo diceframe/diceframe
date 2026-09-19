@@ -271,7 +271,61 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
 __all__ = [
     "ADVENTURE_GRAPH_FORMAT_V2",
     "MAX_NODES",
+    "MAX_TRAVERSAL_STEPS",
     "NODE_TYPES",
     "AdventureGraphV2Error",
+    "next_candidates",
+    "reachable_nodes",
     "validate_graph_v2",
 ]
+
+
+# ---- 遍历语义（ADV2-01，母方案 §24/§77）------------------------------------
+
+# 有界遍历：回流合法，但任何计算都必须有步数上限（§77 结构遍历必须有 bound）。
+MAX_TRAVERSAL_STEPS = 512
+
+
+def reachable_nodes(
+    graph: dict[str, Any],
+    start_node_ids: list[str],
+    *,
+    max_steps: int = MAX_TRAVERSAL_STEPS,
+) -> set[str]:
+    """Bounded forward traversal from start nodes; backflow cannot loop forever."""
+
+    nodes = {node["id"]: node for node in graph.get("nodes", [])}
+    visited: set[str] = set()
+    frontier = [node_id for node_id in start_node_ids if node_id in nodes]
+    steps = 0
+    while frontier and steps < max_steps:
+        node_id = frontier.pop()
+        if node_id in visited:
+            continue
+        visited.add(node_id)
+        steps += 1
+        for transition in nodes[node_id].get("transitions", []):
+            target = str(transition.get("to") or "")
+            if target in nodes and target not in visited:
+                frontier.append(target)
+    return visited
+
+
+def next_candidates(
+    graph: dict[str, Any], active_node_ids: list[str],
+) -> dict[str, list[str]]:
+    """Open transitions from each active node（conditions 在 ADV2-02 前恒为空集，
+    因此所有 transition 都开放）。"""
+
+    nodes = {node["id"]: node for node in graph.get("nodes", [])}
+    candidates: dict[str, list[str]] = {}
+    for node_id in active_node_ids:
+        node = nodes.get(node_id)
+        if node is None:
+            continue
+        candidates[node_id] = [
+            str(transition.get("to") or "")
+            for transition in node.get("transitions", [])
+            if str(transition.get("to") or "") in nodes
+        ]
+    return candidates

@@ -154,3 +154,34 @@ def test_v1_format_still_validated_by_v1_graph(tmp_path: Path) -> None:
     loader, package = _copied_package(tmp_path)
     bundle = loader.load("v2-quest", "zh-CN")
     assert bundle.manifest.format == "diceframe:adventure-graph-v1"
+
+
+# ---- ADV2-01：遍历语义 ----
+
+from src.adventures.graph_v2 import next_candidates, reachable_nodes  # noqa: E402
+
+
+def test_reachable_nodes_follows_branches_and_bounded_backflow() -> None:
+    record = _adventure()
+    record["nodes"][3]["transitions"].append({"to": "gate"})  # 回流到入口
+    reached = reachable_nodes(record, ["gate"])
+    assert reached == {"gate", "bridge", "tunnel", "throne"}
+
+
+def test_backflow_cannot_loop_forever() -> None:
+    a = _node("a", transitions=[{"to": "b"}])
+    b = _node("b", transitions=[{"to": "a"}])
+    record = _adventure(nodes=[a, b], start_node_ids=["a"])
+    assert reachable_nodes(record, ["a"]) == {"a", "b"}
+
+
+def test_unreachable_optional_node_is_reported() -> None:
+    record = _adventure()
+    record["nodes"].append(_node("secret_room", "scene", optional=True))
+    assert "secret_room" not in reachable_nodes(record, ["gate"])
+
+
+def test_next_candidates_only_lists_existing_targets() -> None:
+    record = _adventure()
+    candidates = next_candidates(record, ["gate", "ghost"])
+    assert candidates == {"gate": ["bridge", "tunnel"]}
