@@ -47,6 +47,7 @@ from src.engine.world_state import (
     WorldStateError,
     apply_world_ops,
     world_facts,
+    world_relations,
 )
 
 logger = logging.getLogger("trpg")
@@ -92,13 +93,14 @@ def evaluate_world_requirements(
         return {"notes": notes, "applied": applied}
     try:
         facts = world_facts(getattr(instance, "world_state", None))
+        relations = world_relations(getattr(instance, "world_state", None))
     except Exception:  # pragma: no cover - world_facts is already defensive
         logger.warning("世界真相读取失败，本轮不做合法性判定", exc_info=True)
         return {"notes": notes, "applied": applied}
-    if not facts:
+    if not facts and not relations:
         # 空世界（旧游戏、未建立任何事实）没有任何可证明的矛盾。
         return {"notes": notes, "applied": applied}
-    known_locations = _known_locations(facts)
+    known_locations = _known_locations(facts, relations)
     players = getattr(instance, "players", None) or {}
     for raw in list(requirements)[:MAX_WORLD_REQUIREMENTS]:
         if not isinstance(raw, Mapping):
@@ -128,7 +130,7 @@ def evaluate_world_requirements(
             continue
         # 只检查声明的路线（via + 目的地）：passable=false 阻止进入/经过/抵达，
         # 不能因为行动者已经身处该地点就永久阻止其离开。
-        blocked = _first_impassable(facts, route)
+        blocked = _first_impassable(facts, route, relations)
         if blocked:
             notes.append({
                 "player": uid,
@@ -155,13 +157,17 @@ def evaluate_world_requirements(
     return {"notes": notes, "applied": applied}
 
 
-def _known_locations(facts: Mapping[str, Mapping[str, Any]]) -> set[str]:
+def _known_locations(
+    facts: Mapping[str, Mapping[str, Any]],
+    relations: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
     """Canonical locations the world has actually established.
 
-    A location counts as known when some ``location:<id>.*`` fact exists or when
+    A location counts as known when some ``location:<id>.*`` fact exists, when
     it appears as the value of a ``*.location`` fact (the actor locations the
-    server itself writes).  Anything else is unknown, and unknown means "no
-    evidence" rather than "illegal".
+    server itself writes), or when it is an endpoint of a ``connects`` /
+    ``located_at`` relation (WR-08：世界结构也是地点存在的证据).  Anything
+    else is unknown, and unknown means "no evidence" rather than "illegal".
     """
 
     known: set[str] = set()
@@ -174,6 +180,15 @@ def _known_locations(facts: Mapping[str, Mapping[str, Any]]) -> set[str]:
             value = fact.get("value")
             if isinstance(value, str) and value:
                 known.add(value)
+    for relation in relations.values():
+        if str(relation.get("kind") or "") not in ("connects", "located_at"):
+            continue
+        for side in ("from_ref", "to_ref"):
+            endpoint = str(relation.get(side) or "")
+            if endpoint.startswith(_LOCATION_PREFIX):
+                location_id = endpoint[len(_LOCATION_PREFIX):]
+                if location_id:
+                    known.add(location_id)
     return known
 
 
@@ -195,15 +210,55 @@ def _route(via: Any, destination: str) -> list[str]:
 
 
 def _first_impassable(
-    facts: Mapping[str, Mapping[str, Any]], route: Sequence[str],
+    facts: Mapping[str, Mapping[str, Any]],
+    route: Sequence[str],
+    relations: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
-    for location_id in route:
-        if not location_id:
-            continue
+    """The first location on the route the world proves impassable.
+
+    Evidence sources (both are authoritative world truth; visibility never
+    softens legality — GM-only truth still blocks):
+
+    - ``location:<id>.passable = false`` fact（v1 既有路径，原样保留）；
+    - 一条 ``severed`` 的 ``connects`` 关系（WR-08）：声明路线中相邻两跳之间
+      的连接被切断，则后一跳不可达。方向无关（connects 是无向证据）。
+    """
+
+    hops = [str(location_id) for location_id in route if location_id]
+    for index, location_id in enumerate(hops):
         fact = facts.get(passable_fact_key(location_id))
         if isinstance(fact, Mapping) and fact.get("value") is False:
             return str(location_id)
+        if index + 1 < len(hops) and relations:
+            next_hop = hops[index + 1]
+            if _severed_connection(relations, location_id, next_hop):
+                return next_hop
     return ""
+
+
+def _severed_connection(
+    relations: Mapping[str, Mapping[str, Any]],
+    from_location: str,
+    to_location: str,
+) -> bool:
+    """Whether a ``connects`` relation between two locations is proven severed."""
+
+    for relation in relations.values():
+        if str(relation.get("kind") or "") != "connects":
+            continue
+        if str(relation.get("status") or "") != "severed":
+            continue
+        endpoints = {
+            str(relation.get("from_ref") or ""),
+            str(relation.get("to_ref") or ""),
+        }
+        location_pair = {
+            f"{_LOCATION_PREFIX}{from_location}",
+            f"{_LOCATION_PREFIX}{to_location}",
+        }
+        if endpoints == location_pair:
+            return True
+    return False
 
 
 __all__ = [
