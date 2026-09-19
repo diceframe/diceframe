@@ -504,6 +504,45 @@ class PluginHost:
                 total += 1
         return total
 
+    @staticmethod
+    def _validate_ruleset_catalogs(
+        manifest: dict[str, Any], plugin_dir: Path,
+    ) -> tuple[Path, tuple[str, ...]] | None:
+        """Validate manifest ``ruleset_catalogs``（DNDMOD-04，母方案 §7/§107）。
+
+        与 adventure_packages 同规则：相对/不越界/真实目录/共享父目录；目录内
+        是 catalog JSON（装载时经 DNDMOD-01 契约校验）。仅 content-pack。
+        """
+
+        declared = manifest.get("ruleset_catalogs")
+        if declared is None:
+            return None
+        if str(manifest.get("plugin_type") or "") != "content-pack":
+            raise ValueError("ruleset_catalogs 仅支持 content-pack")
+        if not isinstance(declared, list) or not declared:
+            raise ValueError("ruleset_catalogs 必须是非空字符串数组")
+        base = plugin_dir.resolve()
+        catalogs: list[Path] = []
+        for pattern in declared:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("ruleset_catalogs 路径必须是非空字符串")
+            normalized = pattern.strip().replace("\\", "/")
+            candidate = Path(normalized)
+            if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
+                raise ValueError("ruleset_catalogs 路径不能是绝对路径或包含 ..")
+            resolved = (base / candidate).resolve()
+            if resolved != base and base not in resolved.parents:
+                raise ValueError("ruleset_catalogs 路径越界")
+            if resolved.is_symlink() or not resolved.is_dir():
+                raise ValueError(f"ruleset_catalogs 必须是已存在的目录：{normalized}")
+            catalogs.append(resolved)
+        parents = {catalog.parent for catalog in catalogs}
+        if len(parents) != 1:
+            raise ValueError("ruleset_catalogs 必须共享同一父目录")
+        parent = catalogs[0].parent
+        directories = tuple(sorted(catalog.name for catalog in catalogs))
+        return parent, directories
+
     async def install_from_zip(
         self,
         payload: bytes,
@@ -1170,10 +1209,16 @@ class PluginHost:
         adventure_root, adventure_dirs = (
             adventure_packages if adventure_packages is not None else (None, ())
         )
+        ruleset_catalogs = self._validate_ruleset_catalogs(manifest, plugin_dir)
+        catalog_root, catalog_dirs = (
+            ruleset_catalogs if ruleset_catalogs is not None else (None, ())
+        )
         return plugin_id, PluginRuntime(
             manifest, schema, plugin_dir,
             adventure_packages_root=adventure_root,
             adventure_package_directories=adventure_dirs,
+            ruleset_catalogs_root=catalog_root,
+            ruleset_catalog_directories=catalog_dirs,
         )
 
     @staticmethod

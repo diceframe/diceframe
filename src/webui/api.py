@@ -159,6 +159,7 @@ class WebAPI:
             adventures_dir or self._builtin_adventures_dir
         )
         # MOD-02：builtin/user 双来源统一注册表（plugin 来源随 MOD-03 注册）。
+        self._dnd_module_catalogs: list[tuple[str, Any]] = []
         self._adventure_source_registry = AdventureSourceRegistry.from_directories(
             self._builtin_adventures_dir,
             (
@@ -2025,6 +2026,43 @@ class WebAPI:
                 ),
             ))
         self._adventure_source_registry.sync_plugin_sources(sources)
+
+    def _sync_module_catalogs(self) -> None:
+        """DNDMOD-04：把启用的 content-pack 模组声明的 ruleset_catalogs 装载为
+        模块目录来源（DNDMOD-01 契约校验，fail closed；坏包让该模块目录缺席
+        并记日志，不拖垮其它模块）。"""
+
+        if self._plugins is None:
+            return
+        from src.rulesets.dnd2024.content.catalog import load_catalog_dir
+
+        sources: list[tuple[str, Any]] = []
+        for runtime in self._plugins.plugins.values():
+            root = getattr(runtime, "ruleset_catalogs_root", None)
+            if root is None or runtime.status == "disabled":
+                continue
+            label = f"module:{runtime.manifest.get('id') or ''}"
+            for directory in getattr(runtime, "ruleset_catalog_directories", ()):
+                try:
+                    source = load_catalog_dir(Path(root) / directory, source_label=label)
+                except Exception as exc:
+                    logger.warning(
+                        "module catalog load failed: %s: %s", label, exc,
+                    )
+                    continue
+                sources.append((source.label, source.records))
+        self._dnd_module_catalogs = sources
+
+    def module_catalog(self) -> Any:
+        """DNDMOD-04：合并的模块内容目录（每次调用前同步）。"""
+
+        self._sync_plugin_adventure_sources()
+        self._sync_module_catalogs()
+        from src.rulesets.dnd2024.content.catalog import DndContentCatalog
+
+        return DndContentCatalog([
+            (label, records) for label, records in self._dnd_module_catalogs
+        ])
 
     def list_adventures(
         self, rule_id: str = "", world_id: str = "", language: str = "",

@@ -38,3 +38,6 @@ class PluginRuntime:
     # MOD-03：content-pack 声明的 adventure_packages（declared-only 世界来源）。
     adventure_packages_root: Path | None = None
     adventure_package_directories: tuple[str, ...] = ()
+    # DNDMOD-04：content-pack 声明的 ruleset catalogs（declared-only 目录）。
+    ruleset_catalogs_root: Path | None = None
+    ruleset_catalog_directories: tuple[str, ...] = ()
