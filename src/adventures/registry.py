@@ -101,6 +101,16 @@ class AdventureSourceRegistry:
                 return source
         return None
 
+    def sync_plugin_sources(self, sources: list["AdventureSource"]) -> None:
+        """Replace every plugin-kind source with the given set (MOD-03).
+
+        插件启停/重扫后由 WebAPI 调用：期望集合之外的 plugin 来源被移除，
+        期望集合内的来源按 (kind, source_id) 更新。builtin/user 不受影响。
+        """
+
+        kept = [source for source in self._sources if source.kind != "plugin"]
+        self._sources = kept + list(sources)
+
     def user_source(self) -> AdventureSource | None:
         return self.source_for("user")
 

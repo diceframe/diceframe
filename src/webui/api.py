@@ -16,7 +16,7 @@ from src.engine.game_instance import GameRegistry
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.lorebook.store import LorebookStore
 from src.adventures import AdventureBundleLoader
-from src.adventures.registry import AdventureSourceRegistry
+from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 from src.rules.loader import RuleBundleLoader
@@ -2001,9 +2001,35 @@ class WebAPI:
 
     # ---- 世界模板 ----
 
+    def _sync_plugin_adventure_sources(self) -> None:
+        """MOD-03：把启用的 content-pack 模组声明的 adventure_packages 同步为
+        registry 的 plugin 来源（declared-only loader）。
+
+        只读 plugin runtime 状态，幂等重建 plugin 来源集合；插件禁用/卸载后
+        其来源自动消失。
+        """
+
+        if self._adventure_source_registry is None or self._plugins is None:
+            return
+        sources = []
+        for runtime in self._plugins.plugins.values():
+            root = getattr(runtime, "adventure_packages_root", None)
+            if root is None or runtime.status == "disabled":
+                continue
+            sources.append(AdventureSource(
+                "plugin",
+                str(runtime.manifest.get("id") or ""),
+                AdventureBundleLoader(
+                    root,
+                    allowed_directory_ids=getattr(runtime, "adventure_package_directories", ()),
+                ),
+            ))
+        self._adventure_source_registry.sync_plugin_sources(sources)
+
     def list_adventures(
         self, rule_id: str = "", world_id: str = "", language: str = "",
     ) -> dict[str, Any]:
+        self._sync_plugin_adventure_sources()
         return adventures.list_adventures(
             self._adventure_dependencies,
             rule_id,
@@ -2012,6 +2038,7 @@ class WebAPI:
         )
 
     def adventure_detail(self, adventure_id: str, language: str = "") -> dict[str, Any]:
+        self._sync_plugin_adventure_sources()
         return adventures.adventure_detail(
             self._adventure_dependencies,
             adventure_id,

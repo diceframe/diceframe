@@ -1166,7 +1166,58 @@ class PluginHost:
         self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)
         validate_contributes(manifest, plugin_dir)
-        return plugin_id, PluginRuntime(manifest, schema, plugin_dir)
+        adventure_packages = self._validate_adventure_packages(manifest, plugin_dir)
+        adventure_root, adventure_dirs = (
+            adventure_packages if adventure_packages is not None else (None, ())
+        )
+        return plugin_id, PluginRuntime(
+            manifest, schema, plugin_dir,
+            adventure_packages_root=adventure_root,
+            adventure_package_directories=adventure_dirs,
+        )
+
+    @staticmethod
+    def _validate_adventure_packages(
+        manifest: dict[str, Any], plugin_dir: Path,
+    ) -> tuple[Path, tuple[str, ...]] | None:
+        """Validate manifest ``adventure_packages``（MOD-03，母方案 §107）。
+
+        声明式冒险包：路径相对、不越界、真实目录（非 symlink）、含
+        manifest.json；全部包必须共享同一父目录（v1 约束：一个 plugin =
+        一个 declared-only loader）。仅 content-pack 允许声明。返回
+        (公共父目录, 包目录名集合)，未声明返回 None。
+        """
+
+        declared = manifest.get("adventure_packages")
+        if declared is None:
+            return None
+        if str(manifest.get("plugin_type") or "") != "content-pack":
+            raise ValueError("adventure_packages 仅支持 content-pack")
+        if not isinstance(declared, list) or not declared:
+            raise ValueError("adventure_packages 必须是非空字符串数组")
+        base = plugin_dir.resolve()
+        packages: list[Path] = []
+        for pattern in declared:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("adventure_packages 路径必须是非空字符串")
+            normalized = pattern.strip().replace("\\", "/")
+            candidate = Path(normalized)
+            if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
+                raise ValueError("adventure_packages 路径不能是绝对路径或包含 ..")
+            resolved = (base / candidate).resolve()
+            if resolved != base and base not in resolved.parents:
+                raise ValueError("adventure_packages 路径越界")
+            if resolved.is_symlink() or not resolved.is_dir():
+                raise ValueError(f"adventure_packages 必须是已存在的目录：{normalized}")
+            if not (resolved / "manifest.json").is_file():
+                raise ValueError(f"adventure_packages 缺少 manifest.json：{normalized}")
+            packages.append(resolved)
+        parents = {package.parent for package in packages}
+        if len(parents) != 1:
+            raise ValueError("adventure_packages 必须共享同一父目录")
+        parent = packages[0].parent
+        directories = tuple(sorted(package.name for package in packages))
+        return parent, directories
 
     def _expand_entrypoint(self, plugin_id: str, runtime: PluginRuntime, command: list[str]) -> list[str]:
         data_dir = (self.data_dir / plugin_id / "runtime").resolve()

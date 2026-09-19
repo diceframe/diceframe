@@ -35,3 +35,6 @@ class PluginRuntime:
     started_at: float = 0.0
     restart_delay_sec: float = 3.0
     source: str = "user"
+    # MOD-03：content-pack 声明的 adventure_packages（declared-only 世界来源）。
+    adventure_packages_root: Path | None = None
+    adventure_package_directories: tuple[str, ...] = ()

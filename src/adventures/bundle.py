@@ -159,8 +159,25 @@ def _merge_locale(target: dict[str, Any], fields: dict[str, Any], kind: str) -> 
 class AdventureBundleLoader:
     """Load and validate installed adventure directories as one atomic unit."""
 
-    def __init__(self, adventures_dir: str | Path):
+    def __init__(
+        self,
+        adventures_dir: str | Path,
+        allowed_directory_ids: frozenset[str] | set[str] | tuple[str, ...] | None = None,
+    ):
         self.adventures_dir = Path(adventures_dir)
+        # MOD-03：declared-only 访问——plugin 来源只暴露 manifest 声明的包目录，
+        # 同目录下未声明的兄弟包不进入 list/resolve（母方案 §76）。
+        self.allowed_directory_ids = (
+            frozenset(allowed_directory_ids)
+            if allowed_directory_ids is not None
+            else None
+        )
+
+    def _is_allowed(self, directory_id: str) -> bool:
+        return (
+            self.allowed_directory_ids is None
+            or str(directory_id) in self.allowed_directory_ids
+        )
 
     def list(self, locale: str = "") -> list[LoadedAdventureBundle]:
         if not self.adventures_dir.is_dir():
@@ -168,7 +185,9 @@ class AdventureBundleLoader:
         return [
             self.load(path.name, locale)
             for path in sorted(self.adventures_dir.iterdir())
-            if path.is_dir() and (path / "manifest.json").is_file()
+            if path.is_dir()
+            and (path / "manifest.json").is_file()
+            and self._is_allowed(path.name)
         ]
 
     def resolve(self, adventure_id: str, locale: str = "") -> LoadedAdventureBundle:
@@ -185,6 +204,8 @@ class AdventureBundleLoader:
 
     def load(self, directory_id: str, locale: str = "") -> LoadedAdventureBundle:
         directory_id = _required_text(directory_id, "directory_id", _ID_RE)
+        if not self._is_allowed(directory_id):
+            raise AdventureBundleError(f"adventure package does not exist: {directory_id}")
         base = self.adventures_dir.resolve()
         root = (base / directory_id).resolve()
         if not root.is_relative_to(base) or not root.is_dir():
