@@ -35,10 +35,13 @@ export type ModuleUsageResponse = {
   usages?: Array<{ adventure_id: string; games: Array<{ game_key: string; run_id: string; content_digest: string }> }>
   total_games?: number
 }
+export type ModulePreviewResponse = { ok: boolean; blockers: string[]; warnings: string[] }
 
 export const moduleApi = {
   list: () => api<ModulesResponse>('/modules'),
   detail: (moduleId: string) => api<ModuleDetailResponse>(`/modules/${encodeURIComponent(moduleId)}`),
   compatibility: (moduleId: string) => api<ModuleCompatibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/compatibility`),
   usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
+  previewImport: (body: FormData) => api<ModulePreviewResponse>('/modules/import/preview', { method: 'POST', body }),
+  import: (body: FormData) => api<{ ok: boolean; id?: string }>('/modules/import', { method: 'POST', body }),
 }
