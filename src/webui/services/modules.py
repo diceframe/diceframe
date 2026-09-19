@@ -237,4 +237,82 @@ def preview_module_install(deps: Any, manifest: dict[str, Any]) -> dict[str, Any
     }
 
 
-__all__ = ["list_modules", "module_content", "module_detail", "parse_requires", "preview_module_install"]
+__all__ = [
+    "ModuleInUse",
+    "PROTECTED_MODULE_ACTIONS",
+    "assert_module_action_allowed",
+    "list_modules",
+    "module_bound_games",
+    "module_content",
+    "module_detail",
+    "parse_requires",
+    "preview_module_install",
+]
+
+
+# ---- LIFE-01：绑定存档保护（母方案 §35/§36/§37/§124）------------------------
+
+# 受保护操作 → 绑定存档存在时是否阻断。更新/禁用/卸载一律默认 block；
+# 母方案 §35：更新改变 bound adventure digest → BLOCK。
+PROTECTED_MODULE_ACTIONS = ("uninstall", "disable", "update")
+
+
+def module_bound_games(
+    deps: Any,
+    module_id: str,
+) -> list[dict[str, Any]]:
+    """List the games bound to one module's adventures（§35 UI 数据源）。"""
+
+    runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
+    if runtime is None:
+        return []
+    plugin_id = str(runtime.manifest.get("id") or "")
+    adventure_ids: set[str] = set()
+    if deps.adventure_registry is not None:
+        source = deps.adventure_registry.source_for("plugin", plugin_id)
+        if source is not None:
+            try:
+                adventure_ids = {
+                    bundle.manifest.adventure_id for bundle in source.loader.list("")
+                }
+            except Exception:  # noqa: BLE001 - 坏包不拖垮保护检查
+                adventure_ids = set()
+    bound: list[dict[str, Any]] = []
+    for instance in deps.list_instances():
+        binding = getattr(instance, "adventure_binding", {}) or {}
+        if str(binding.get("adventure_id") or "") in adventure_ids:
+            bound.append({
+                "game_key": "|".join(str(part) for part in instance.game_key),
+                "adventure_id": str(binding.get("adventure_id") or ""),
+                "run_id": str(instance.run_id or ""),
+            })
+    return bound
+
+
+def assert_module_action_allowed(deps: Any, module_id: str, action: str) -> None:
+    """Guard for uninstall/disable/update（母方案 §124：默认 block）。
+
+    绑定存档存在时抛 :class:`ModuleInUse`；调用方（插件生命周期 API）
+    把它转成结构化错误，UI 展示"哪些存档正在使用"。
+    """
+
+    if action not in PROTECTED_MODULE_ACTIONS:
+        return
+    bound = module_bound_games(deps, module_id)
+    if bound:
+        raise ModuleInUse(module_id, action, bound)
+
+
+class ModuleInUse(ValueError):
+    """The module is bound by games; the protected action must not proceed."""
+
+    def __init__(self, module_id: str, action: str, games: list[dict[str, Any]]) -> None:
+        self.module_id = str(module_id)
+        self.action = str(action)
+        self.games = list(games)
+        super().__init__(
+            f"module {self.module_id!r} is used by {len(self.games)} game(s); "
+            f"{self.action} blocked"
+        )
+
+
