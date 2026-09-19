@@ -147,6 +147,20 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
     }
 
 
+def module_adventures(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
+    """Dedicated adventure-list read model for one module (API-02)."""
+
+    detail = module_detail(deps, module_id)
+    if not detail.get("ok"):
+        return detail
+    module = detail["module"]
+    return {
+        "ok": True,
+        "module_id": module["id"],
+        "adventures": module["adventures"],
+    }
+
+
 def module_content(
     deps: ModuleDependencies, module_id: str, kind: str, key: str, *, language: str = "",
 ) -> dict[str, Any]:
@@ -252,6 +266,7 @@ __all__ = [
     "PROTECTED_MODULE_ACTIONS",
     "assert_module_action_allowed",
     "list_modules",
+    "module_adventures",
     "module_bound_games",
     "module_content",
     "module_detail",
@@ -374,6 +389,7 @@ __all__ = [
     "PROTECTED_MODULE_ACTIONS",
     "assert_module_action_allowed",
     "list_modules",
+    "module_adventures",
     "module_bound_games",
     "module_content",
     "module_detail",

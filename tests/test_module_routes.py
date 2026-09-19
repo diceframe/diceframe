@@ -18,6 +18,11 @@ class FakeAPI:
             return {"ok": True, "module": {"id": module_id}}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
 
+    def module_adventures(self, module_id: str) -> dict[str, object]:
+        if module_id == "castle-module":
+            return {"ok": True, "module_id": module_id, "adventures": [{"adventure_id": "castle"}]}
+        return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
+
 
 def _app() -> web.Application:
     app = web.Application()
@@ -52,4 +57,16 @@ async def test_module_detail_route_returns_404_for_unknown_module() -> None:
         assert await response.json() == {
             "ok": False,
             "error_code": "MODULE_NOT_FOUND",
+        }
+
+
+@pytest.mark.asyncio
+async def test_module_adventures_route_has_a_dedicated_read_model() -> None:
+    async with TestClient(TestServer(_app())) as client:
+        response = await client.get("/api/modules/castle-module/adventures")
+        assert response.status == 200
+        assert await response.json() == {
+            "ok": True,
+            "module_id": "castle-module",
+            "adventures": [{"adventure_id": "castle"}],
         }
