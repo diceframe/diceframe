@@ -69,13 +69,18 @@ def test_multiple_start_nodes_and_backflow_are_legal() -> None:
     assert validated["start_node_ids"] == ["gate", "tunnel"]
 
 
-def test_transition_conditions_rejected_until_gates_land() -> None:
+def test_transition_conditions_validated_against_gate_vocabulary() -> None:
+    """ADV2-02 起 conditions 走结构化 gate 词表（§25）；非法 gate fail closed。"""
     record = _adventure()
     record["nodes"][0]["transitions"] = [
         {"to": "bridge", "conditions": [{"type": "world.fact_equals"}]},
     ]
-    with pytest.raises(AdventureGraphV2Error, match="ADV2-02"):
+    with pytest.raises(AdventureGraphV2Error, match="requires key"):
         validate_graph_v2(record)
+    record["nodes"][0]["transitions"] = [
+        {"to": "bridge", "conditions": [{"type": "world.fact_equals", "key": "location:bridge.passable", "value": True}]},
+    ]
+    validate_graph_v2(record)  # 合法 gate 通过
 
 
 @pytest.mark.parametrize("mutation", [

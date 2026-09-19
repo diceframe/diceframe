@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.adventures.gates import GateError, validate_gates
+
 ADVENTURE_GRAPH_FORMAT_V2 = "diceframe:adventure-graph-v2"
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -80,13 +82,11 @@ def _validate_transition(raw: Any, label: str) -> dict[str, Any]:
     if extra:
         raise AdventureGraphV2Error(f"{label} transition has unknown field: {extra[0]!r}")
     to_id = _required_id(raw.get("to"), f"{label} transition.to")
-    conditions = raw.get("conditions", [])
-    # ADV2-00：gate 词表未定稿前不允许任何条件（防提前发明 DSL，§25）。
-    if not isinstance(conditions, list) or conditions:
-        raise AdventureGraphV2Error(
-            f"{label} transition conditions are not supported until ADV2-02 gates land"
-        )
-    return {"to": to_id, "conditions": []}
+    try:
+        conditions = validate_gates(raw.get("conditions", []), label=label)
+    except GateError as exc:
+        raise AdventureGraphV2Error(f"{label} {exc}") from exc
+    return {"to": to_id, "conditions": conditions}
 
 
 def validate_graph_v2(adventure: Any) -> dict[str, Any]:
