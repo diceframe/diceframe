@@ -124,4 +124,11 @@ async function importModule() {
 .module-card dl { display: flex; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--text-muted, #69707d); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.3rem; font-weight: 700; }
+@media (max-width: 480px) {
+  .module-import { align-items: stretch; flex-direction: column; margin: 1rem 0; }
+  .module-import label, .module-import button { width: 100%; }
+  .module-import input[type="file"] { display: block; width: 100%; margin-top: .45rem; }
+  .modules-grid { grid-template-columns: 1fr; }
+  .module-card { padding: 1rem; }
+}
 </style>

@@ -168,4 +168,11 @@ onMounted(() => { void load() })
 .adventure-node-heading span { color: var(--text-tertiary); font-size: .75rem; }
 .adventure-node p, .adventure-goals p { font-size: .82rem; line-height: 1.45; }
 .error-copy { color: var(--error); }
+@media (max-width: 480px) {
+  .adventure-panel { gap: 10px; margin-bottom: 10px; }
+  .adventure-panel header { align-items: center; }
+  .adventure-node { padding-left: 8px; }
+  .adventure-node-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .recovery-button { width: 100%; min-height: 40px; }
+}
 </style>
