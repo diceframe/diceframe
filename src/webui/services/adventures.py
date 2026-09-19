@@ -13,6 +13,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
+from src.adventures.resolver import (
+    AdventureResolution,
+    AdventureResolver,
+    AdventureSourceConflict,
+    binding_matches,
+    binding_source,
+    is_source_aware_binding,
+)
 from src.adventures import (
     AdventureBundleError,
     AdventureBundleLoader,
@@ -36,7 +44,7 @@ MAX_ADVENTURE_FILES = 256
 
 @dataclass(frozen=True)
 class AdventureDependencies:
-    adventure_loader: AdventureBundleLoader
+    adventure_loader: AdventureBundleLoader | AdventureResolver
     list_instances: Callable[[], list[Any]]
     load_rule_by_id: Callable[[str, str], Any | None]
     ruleset_registry: RulesetRuntimeRegistry
@@ -45,6 +53,9 @@ class AdventureDependencies:
     # MOD-02 的跨来源目录是可选依赖：保留 standalone 测试与旧嵌入的
     # 单一 loader 构造方式，同时让 WebAPI 可以解析 content-pack 来源。
     adventure_registry: AdventureSourceRegistry | None = None
+    # FIX-02 §4.1：唯一 resolver（来源互斥 + 明确来源 + 冲突 fail closed）。
+    # 给出时优先于 registry/loader 两条旧路径。
+    adventure_resolver: AdventureResolver | None = None
 
 
 def _runtime_for_rule(
@@ -94,15 +105,18 @@ def list_adventures(
 ) -> dict[str, Any]:
     runtime = _runtime_for_rule(dependencies, rule_id, language)
     try:
-        bundles = dependencies.adventure_loader.list(language)
+        resolutions = _list_resolutions(dependencies, language)
     except AdventureBundleError as exc:
         return {"ok": False, "error_code": "ADVENTURE_CATALOG_INVALID", "error": str(exc)}
     items: list[dict[str, Any]] = []
-    for bundle in bundles:
+    for resolution in resolutions:
+        bundle = resolution.bundle
         status, reasons = _compatibility(bundle, runtime, world_id)
         adventure = bundle.adventure
         usages = _bound_games(dependencies, bundle.manifest.adventure_id)
-        builtin = _is_builtin_bundle(dependencies, bundle)
+        builtin = resolution.source_kind == "builtin" or _is_builtin_bundle(
+            dependencies, bundle,
+        )
         items.append({
             "adventure_id": bundle.manifest.adventure_id,
             "version": bundle.manifest.version,
@@ -120,11 +134,56 @@ def list_adventures(
             "incompatibility_reasons": reasons,
             "directory_id": bundle.root.name,
             "source": "builtin" if builtin else "custom",
+            "source_kind": resolution.source_kind,
+            "source_id": resolution.source_id,
             "custom": not builtin,
             "editable": not builtin and not usages,
             "in_use": len(usages),
         })
-    return {"ok": True, "adventures": items}
+    conflicts = _source_conflicts(dependencies, language)
+    result: dict[str, Any] = {"ok": True, "adventures": items}
+    if conflicts:
+        # §4.2：重名必须显式暴露给 UI（recovery），不静默挑一个来源。
+        result["source_conflicts"] = conflicts
+    return result
+
+
+def _list_resolutions(
+    dependencies: AdventureDependencies,
+    language: str = "",
+) -> list[AdventureResolution]:
+    resolver = dependencies.adventure_resolver
+    if resolver is not None:
+        return resolver.list_resolutions(language)
+    registry = dependencies.adventure_registry
+    if registry is not None:
+        return [
+            AdventureResolution(bundle, source.kind, source.source_id)
+            for bundle, source in registry.list(language)
+        ]
+    return [
+        AdventureResolution(bundle, "", "")
+        for bundle in dependencies.adventure_loader.list(language)
+    ]
+
+
+def _source_conflicts(
+    dependencies: AdventureDependencies,
+    language: str = "",
+) -> dict[str, list[str]]:
+    resolver = dependencies.adventure_resolver
+    if resolver is not None:
+        try:
+            return resolver.conflicts(language)
+        except Exception:  # noqa: BLE001 - 冲突信息是诊断，不影响目录本身
+            return {}
+    registry = dependencies.adventure_registry
+    if registry is not None:
+        try:
+            return registry.conflicts(language)
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
 
 
 def _bound_games(
@@ -156,15 +215,47 @@ def _resolve_bundle(
     adventure_id: str,
     language: str = "",
 ) -> LoadedAdventureBundle:
+    return _resolve_with_source(dependencies, adventure_id, language).bundle
+
+
+def _resolve_with_source(
+    dependencies: AdventureDependencies,
+    adventure_id: str,
+    language: str = "",
+    *,
+    source_kind: str = "",
+    source_id: str = "",
+) -> AdventureResolution:
+    """Resolve through the single resolver (FIX-02 §4.1).
+
+    ``AdventureSourceConflict`` (id 跨来源重名且未指定来源) 以
+    :class:`ValueError` 形式向上冒泡：调用方必须 fail closed 并给出 recovery，
+    不允许静默挑一个来源。
+    """
+
     try:
-        if dependencies.adventure_registry is not None:
-            bundle, _source = dependencies.adventure_registry.resolve(
+        if dependencies.adventure_resolver is not None:
+            return dependencies.adventure_resolver.resolve_with_source(
                 str(adventure_id or ""), language,
+                source_kind=source_kind, source_id=source_id,
             )
-            return bundle
-        return dependencies.adventure_loader.resolve(
-            str(adventure_id or ""), language,
-        )
+        # 组合根也可能把 resolver 作为 adventure_loader 传进来（同一对象同时提供
+        # loader 表面与来源感知解析）。
+        loader = dependencies.adventure_loader
+        resolve_with_source = getattr(loader, "resolve_with_source", None)
+        if callable(resolve_with_source):
+            return resolve_with_source(
+                str(adventure_id or ""), language,
+                source_kind=source_kind, source_id=source_id,
+            )
+        if dependencies.adventure_registry is not None:
+            bundle, source = dependencies.adventure_registry.resolve(
+                str(adventure_id or ""), language,
+                source_kind=source_kind, source_id=source_id,
+            )
+            return AdventureResolution(bundle, source.kind, source.source_id)
+        bundle = loader.resolve(str(adventure_id or ""), language)
+        return AdventureResolution(bundle, "", "")
     except AdventureBundleError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -586,16 +677,39 @@ def import_adventure(
     }
 
 
+def _resolve_binding_resolution(
+    dependencies: AdventureDependencies,
+    binding: Any,
+    language: str = "",
+) -> AdventureResolution:
+    """Resolve the package a **persisted binding** refers to (FIX-02 §4.2)."""
+
+    resolver = dependencies.adventure_resolver
+    if resolver is not None:
+        return resolver.resolve_binding(binding, language)
+    source_kind, source_id = binding_source(binding)
+    return _resolve_with_source(
+        dependencies,
+        str((binding or {}).get("adventure_id") or "") if isinstance(binding, dict) else "",
+        language,
+        source_kind=source_kind,
+        source_id=source_id,
+    )
+
+
 def resolve_binding(
     dependencies: AdventureDependencies,
     adventure_id: str,
     rule_id: str,
     world_id: str,
     language: str,
+    source_kind: str = "",
+    source_id: str = "",
 ) -> dict[str, Any]:
     runtime = _runtime_for_rule(dependencies, rule_id, language)
     return resolve_binding_for_runtime(
         dependencies, adventure_id, runtime, world_id, language,
+        source_kind=source_kind, source_id=source_id,
     )
 
 
@@ -604,18 +718,28 @@ def resolve_binding_for_runtime(
     adventure_id: str,
     runtime: Any | None,
     world_id: str, language: str,
+    *, source_kind: str = "", source_id: str = "",
 ) -> dict[str, Any]:
+    """Resolve the package for a NEW binding and return its source-aware identity.
+
+    FIX-02 §4.2：新绑定带 ``source_kind``/``source_id``，因此"同一个
+    adventure_id 存在于多个来源"时后来也能明确解析回同一个包。
+    """
+
     wanted = str(adventure_id or "").strip()
     if not wanted:
         return {}
     try:
-        bundle = _resolve_bundle(dependencies, wanted, language)
+        resolution = _resolve_with_source(
+            dependencies, wanted, language,
+            source_kind=source_kind, source_id=source_id,
+        )
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
-    status, reasons = _compatibility(bundle, runtime, world_id)
+    status, reasons = _compatibility(resolution.bundle, runtime, world_id)
     if status != "compatible":
         raise ValueError(f"adventure package is incompatible: {', '.join(reasons)}")
-    return bundle.binding(world_id)
+    return resolution.binding(world_id)
 
 
 def game_adventure_projection(
@@ -632,6 +756,7 @@ def game_adventure_projection(
     """
 
     binding = dict(getattr(instance, "adventure_binding", {}) or {})
+    locale = str(getattr(instance, "language", "") or "")
     public_binding = {
         key: str(binding.get(key) or "")
         for key in ("adventure_id", "version", "format", "content_digest")
@@ -639,12 +764,25 @@ def game_adventure_projection(
     }
     if not public_binding.get("adventure_id"):
         return {"ok": True, "adventure": None}
+    if is_source_aware_binding(binding):
+        source_kind, source_id = binding_source(binding)
+        public_binding["source_kind"] = source_kind
+        public_binding["source_id"] = source_id
+
+    # FIX-02 §4.2：按 binding 的来源身份解析。旧绑定（无来源）在当前唯一时正常，
+    # 跨来源重名时 fail closed —— 不静默挑一个，交给 recovery UI。
     try:
-        bundle = _resolve_bundle(
-            dependencies,
-            public_binding["adventure_id"],
-            str(getattr(instance, "language", "") or ""),
-        )
+        resolution = _resolve_binding_resolution(dependencies, binding, locale)
+    except AdventureSourceConflict as exc:
+        return {
+            "ok": True,
+            "adventure": {
+                "binding": public_binding,
+                "available": False,
+                "reason": "source_conflict",
+                "sources": [source.label() for source in exc.sources],
+            },
+        }
     except ValueError:
         return {
             "ok": True,
@@ -655,20 +793,24 @@ def game_adventure_projection(
             },
         }
 
+    bundle = resolution.bundle
     # A changed package must never silently become the content of an existing
     # save. The normal gameplay guard makes the same fail-closed decision.
-    expected = bundle.binding(str(getattr(instance, "world_id", "") or ""))
-    if any(
-        public_binding.get(key)
-        and public_binding[key] != str(expected.get(key) or "")
-        for key in ("version", "format", "content_digest")
-    ):
+    expected = resolution.binding(str(getattr(instance, "world_id", "") or ""))
+    if not binding_matches(binding, expected):
+        reason = (
+            "source_changed"
+            if is_source_aware_binding(binding)
+            and binding_source(binding)
+            != (expected.get("source_kind"), expected.get("source_id"))
+            else "binding_changed"
+        )
         return {
             "ok": True,
             "adventure": {
                 "binding": public_binding,
                 "available": False,
-                "reason": "binding_changed",
+                "reason": reason,
             },
         }
     if bundle.manifest.format != ADVENTURE_GRAPH_FORMAT_V2:

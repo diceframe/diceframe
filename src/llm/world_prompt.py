@@ -10,10 +10,11 @@ opinion about what is true.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from src.engine.language import localized_text
-from src.engine.world_state import project_visible_state
+from src.engine.world.read import project_visible_state
 
 _HEADING = {
     "en": (
@@ -100,8 +101,7 @@ _LEGALITY_NOTE = {
 }
 
 
-_EVENTS_HEADING = {
-    "en": (
+_EVENTS_HEADING = {    "en": (
         "## Settled World Events · Must Follow\n"
         "Logical world time advanced and these scheduled events took effect this round. Narrate "
         "their consequences; they are settled facts, not suggestions:"
@@ -136,16 +136,89 @@ _EVENT_FAILED_LINE = {
 }
 
 
+# FIX-05 §7.3：有界 viewer-safe 投影的其余三段（相关实体 / 关系 / 进程）。
+_ENTITY_HEADING = {
+    "en": "Relevant world entities (only what this viewer may see):",
+    "zh-CN": "相关世界实体（仅当前视角可见）：",
+    "ja": "関連する世界エンティティ（この視点で見えるもののみ）：",
+    "de": "Relevante Weltentitäten (nur was diese Sicht sehen darf):",
+}
+_RELATION_HEADING = {
+    "en": "Relevant world relations:",
+    "zh-CN": "相关世界关系：",
+    "ja": "関連する世界の関係：",
+    "de": "Relevante Weltbeziehungen:",
+}
+_PROCESS_HEADING = {
+    "en": "Relevant world processes:",
+    "zh-CN": "相关世界进程：",
+    "ja": "関連する世界プロセス：",
+    "de": "Relevante Weltprozesse:",
+}
+_TRUNCATED_NOTE = {
+    "en": "(more world records exist; only the most relevant are shown)",
+    "zh-CN": "（还有更多世界记录，这里只列出最相关的部分）",
+    "ja": "（他にも世界記録があるが、関連するもののみ表示）",
+    "de": "(es existieren weitere Weltdatensätze; nur die relevantesten werden gezeigt)",
+}
+
+
+def _entity_line(entity_id: str, entity: dict[str, Any]) -> str:
+    parts = [entity_id]
+    for key in ("kind", "status"):
+        value = str(entity.get(key) or "")
+        if value:
+            parts.append(value)
+    location = str(entity.get("location") or "")
+    if location:
+        parts.append(f"@{location}")
+    return "- " + " · ".join(parts)
+
+
+def _relation_line(relation_id: str, relation: dict[str, Any]) -> str:
+    parts = [relation_id]
+    kind = str(relation.get("kind") or "")
+    if kind:
+        parts.append(kind)
+    endpoints = f"{relation.get('from_ref') or ''}→{relation.get('to_ref') or ''}"
+    parts.append(endpoints)
+    status = str(relation.get("status") or "")
+    if status:
+        parts.append(status)
+    return "- " + " · ".join(part for part in parts if part and part != "→")
+
+
+def _process_line(process_id: str, process: dict[str, Any]) -> str:
+    parts = [process_id]
+    for key in ("kind", "status"):
+        value = str(process.get(key) or "")
+        if value:
+            parts.append(value)
+    due = process.get("due_at") if isinstance(process.get("due_at"), dict) else None
+    if due:
+        parts.append(f"due day {due.get('day', 1)} minute {due.get('minute', 0)}")
+    return "- " + " · ".join(parts)
+
+
 def format_world_state_block(
     instance: Any, *, viewer_is_gm: bool, viewer_uid: str = "",
+    location: str = "", participants: Iterable[str] = (),
 ) -> str:
-    """Render world truth for one viewer; empty when nothing is established."""
+    """Render the bounded, viewer-safe world projection（FIX-05 §7.3）。
+
+    内容 = 权威事实 + 相关实体 / 关系 / 进程 + 逻辑时钟；玩家视角不包含
+    ``gm`` 可见性记录，且投影本身有上界（不会 dump 全世界）。世界为空时返回空串。
+    """
 
     projection = project_visible_state(
         instance, viewer_uid=viewer_uid, viewer_is_gm=bool(viewer_is_gm),
+        location=location, participants=participants,
     )
     facts = projection.get("facts") or {}
-    if not facts:
+    entities = projection.get("entities") or {}
+    relations = projection.get("relations") or {}
+    processes = projection.get("processes") or {}
+    if not (facts or entities or relations or processes):
         return ""
     language = getattr(instance, "language", "zh-CN")
     lines = []
@@ -155,6 +228,17 @@ def format_world_state_block(
         if str(fact.get("visibility") or "") == "gm":
             suffix = localized_text(language, _GM_ONLY_SUFFIX)
         lines.append(f"- {key} = {value}{suffix}")
+    if entities:
+        lines.append(localized_text(language, _ENTITY_HEADING))
+        lines.extend(_entity_line(key, item) for key, item in entities.items())
+    if relations:
+        lines.append(localized_text(language, _RELATION_HEADING))
+        lines.extend(_relation_line(key, item) for key, item in relations.items())
+    if processes:
+        lines.append(localized_text(language, _PROCESS_HEADING))
+        lines.extend(_process_line(key, item) for key, item in processes.items())
+    if projection.get("truncated"):
+        lines.append(localized_text(language, _TRUNCATED_NOTE))
     clock = projection.get("clock") or {}
     clock_line = localized_text(language, _CLOCK).format(
         day=clock.get("day", 1), minute=clock.get("minute", 0),

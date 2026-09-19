@@ -1588,14 +1588,14 @@ async def test_economy_memory_outbox_closes_save_crash_window(
         )
         assert live_proposal["status"] == "pending"
         assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
-        assert memory.list_entries(instance.memory_namespace) == []
+        assert memory.list_entries(instance.memory_namespace, viewer_is_gm=True) == []
 
         api._character_dependencies = memory_dependencies
         committed = await api.resolve_payment(
             created["game_key"], proposal["id"], True, uid,
         )
         assert committed["external_effects_committed"] is True
-        assert len(memory.list_entries(instance.memory_namespace)) == 1
+        assert len(memory.list_entries(instance.memory_namespace, viewer_is_gm=True)) == 1
         assert pending_memory_deliveries(instance) == []
 
         second = queue_proposal(
@@ -1641,7 +1641,7 @@ async def test_economy_memory_outbox_closes_save_crash_window(
             await api.resolve_payment(
                 created["game_key"], second["id"], True, uid,
             )
-        assert len(memory.list_entries(instance.memory_namespace)) == 2
+        assert len(memory.list_entries(instance.memory_namespace, viewer_is_gm=True)) == 2
 
         recovered_registry = GameRegistry(registry.save_dir)
         recovered = await recovered_registry.load(instance.game_key)
@@ -1659,7 +1659,7 @@ async def test_economy_memory_outbox_closes_save_crash_window(
             recovery_dependencies, recovered,
         ) is True
         assert pending_memory_deliveries(recovered) == []
-        assert len(memory.list_entries(recovered.memory_namespace)) == 2
+        assert len(memory.list_entries(recovered.memory_namespace, viewer_is_gm=True)) == 2
     finally:
         memory.close()
 
@@ -1729,7 +1729,7 @@ async def test_delivered_economy_memory_is_reversed_with_round(
         )
 
         assert committed["external_effects_committed"] is True
-        assert memory.list_entries(instance.memory_namespace)[0]["value"] == "已经取得"
+        assert memory.list_entries(instance.memory_namespace, viewer_is_gm=True)[0]["value"] == "已经取得"
         delivery = instance.economy["external_effects_outbox"][0]
         assert delivery["status"] == "delivered"
 
@@ -1748,7 +1748,7 @@ async def test_delivered_economy_memory_is_reversed_with_round(
         with pytest.raises(OSError, match="after external memory reversal"):
             await api.rollback_round(created["game_key"])
 
-        restored = memory.list_entries(instance.memory_namespace)
+        restored = memory.list_entries(instance.memory_namespace, viewer_is_gm=True)
         assert len(restored) == 1
         assert restored[0]["value"] == "尚未取得"
 

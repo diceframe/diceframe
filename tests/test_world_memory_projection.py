@@ -31,7 +31,8 @@ def make_instance() -> GameInstance:
 
 
 def _receipt(kind: str, subject: str | None, *, event_id: str = "evt:000001:0:x",
-             visibility: str = "public", revision: int = 7) -> dict:
+             visibility: str = "public", revision: int = 7,
+             summary: str = "") -> dict:
     return {
         "event_id": event_id,
         "kind": kind,
@@ -40,7 +41,7 @@ def _receipt(kind: str, subject: str | None, *, event_id: str = "evt:000001:0:x"
         "source_round": 3,
         "visibility": visibility,
         "subject": subject,
-        "summary": "",
+        "summary": summary,
     }
 
 
@@ -65,13 +66,21 @@ def test_fact_and_bookkeeping_receipts_are_not_promoted(kind: str) -> None:
 
 def test_promoted_receipt_becomes_provenance_stamped_delta() -> None:
     delta = world_memory_delta(
-        _receipt("relation_status_changed", "rel:east-harbor", visibility="gm"),
+        _receipt(
+            "relation_status_changed", "rel:east-harbor", visibility="gm",
+            summary="kind=alliance status=broken",
+        ),
     )
     assert delta is not None
     assert delta["add"] == [{
         "entity": "rel:east-harbor",
         "relation": "world_event",
-        "value": "relation_status_changed @ evt:000001:0:x",
+        # FIX-05 §7.5：确定性语义（事件种类 / 主体 / relation·process 状态 /
+        # 来源 revision / event id）全部保留，不再只是 "kind @ evt"。
+        "value": (
+            "relation_status_changed · rel:east-harbor · kind=alliance status=broken"
+            " · rev 7 · @ evt:000001:0:x"
+        ),
     }]
     assert delta["memory_kind"] == "authoritative_world"
     assert delta["source_kind"] == "worldevent"
@@ -79,6 +88,31 @@ def test_promoted_receipt_becomes_provenance_stamped_delta() -> None:
     assert delta["world_revision"] == 7
     # GM 私密世界事件 → GM 私密记忆；玩家上下文不得召回。
     assert delta["visibility"] == "gm"
+
+
+def test_receipt_summary_carries_deterministic_semantics() -> None:
+    """§7.5：receipt.summary 是确定性 "k=v" 语义，不依赖 LLM。"""
+
+    from src.engine.world.receipts import receipts_from_applied
+
+    receipts = receipts_from_applied(
+        [
+            {"op": "add_relation", "relation_id": "rel:harbor", "kind": "alliance",
+             "visibility": "public"},
+            {"op": "complete_process", "process_id": "ritual", "status": "completed",
+             "visibility": "gm"},
+        ],
+        revision=12,
+        clock={"day": 2, "minute": 0},
+        source_round=4,
+    )
+
+    assert receipts[0]["summary"] == "kind=alliance"
+    assert receipts[1]["summary"] == "status=completed"
+    delta = world_memory_delta(receipts[1])
+    assert delta is not None
+    assert "status=completed" in delta["add"][0]["value"]
+    assert "rev 12" in delta["add"][0]["value"]
 
 
 def test_receipt_without_subject_is_not_promoted() -> None:

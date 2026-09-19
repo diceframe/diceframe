@@ -61,6 +61,85 @@ class EncounterAccess:
         )
 
 
+def v2_encounter_instance_id(adventure_id: str, node_id: str) -> str:
+    """Canonical identity for one Adventure v2 story encounter occurrence."""
+
+    adventure = str(adventure_id or "").strip()
+    node = str(node_id or "").strip()
+    return f"adventure:{adventure}:{node}" if adventure and node else ""
+
+
+def resolve_v2_encounter_access(
+    instance: Any, adventure: Any, progress: Any,
+) -> EncounterAccess:
+    """FIX-04 §6.9：从 Adventure v2 进度推导剧情遭遇访问权。
+
+    v2 的权威提示是**当前 active 节点**声明的 ``encounter_ref``（
+    ``encounter_profile:<id>``）；预设立即 ``_preset`` 能查到的 canonical id。
+    没有 active 遭遇的节点时返回 ``blocked()``（自由玩/沙盒由调用方另行决定）。
+
+    结算状态与 v1 同一套约定：该 encounter instance 出现在 combat（ended）或
+    history 里 → resolved；正在进行 → active；否则 pending。
+    """
+
+    if not isinstance(adventure, dict) or not isinstance(progress, dict):
+        return EncounterAccess.blocked()
+    active = [str(item) for item in progress.get("active_nodes") or []]
+    if not active:
+        return EncounterAccess.blocked()
+    nodes = {
+        str(node.get("id") or ""): node
+        for node in adventure.get("nodes") or []
+        if isinstance(node, dict)
+    }
+    adventure_id = str(adventure.get("id") or "")
+    for node_id in active:
+        node = nodes.get(node_id)
+        if node is None:
+            continue
+        raw_ref = str(node.get("encounter_ref") or "")
+        if ":" not in raw_ref:
+            continue
+        kind, _, preset_id = raw_ref.partition(":")
+        if kind != "encounter_profile" or not preset_id:
+            continue
+        encounter_id = v2_encounter_instance_id(
+            str(progress.get("adventure_id") or adventure_id), node_id,
+        )
+        state = getattr(instance, "ruleset_state", {})
+        combat = state.get("combat") if isinstance(state, dict) else None
+        combat = combat if isinstance(combat, dict) else {}
+        history = state.get("combat_history") if isinstance(state, dict) else []
+        history = history if isinstance(history, list) else []
+        resolved = (
+            combat.get("encounter_instance_id") == encounter_id
+            and combat.get("status") == "ended"
+        ) or any(
+            isinstance(item, dict) and item.get("encounter_instance_id") == encounter_id
+            for item in history
+        )
+        if resolved:
+            status: EncounterStatus = "resolved"
+        elif (
+            combat.get("status") == "active"
+            and combat.get("encounter_instance_id") == encounter_id
+        ):
+            status = "active"
+        elif combat.get("status") == "active":
+            status = "blocked"
+        else:
+            status = "pending"
+        return EncounterAccess(
+            mode="story",
+            status=status,
+            encounter_instance_id=encounter_id,
+            encounter_preset_id=preset_id,
+            origin_step_id=node_id,
+            adventure_id=adventure_id,
+        )
+    return EncounterAccess.blocked()
+
+
 def resolve_story_encounter_access(
     instance: Any, campaign: dict[str, Any],
 ) -> EncounterAccess:

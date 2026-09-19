@@ -41,6 +41,17 @@ PROMOTED_EVENT_KINDS = (
 def world_memory_delta(receipt: dict[str, Any]) -> dict[str, Any] | None:
     """Turn one WorldEvent receipt into a provenance-stamped memory delta.
 
+    FIX-05 §7.5：权威记忆必须保留**确定性语义**，而不是只存
+    ``relation_added @ evt``。value 由四段组成（全部来自 receipt 本身，确定性）：
+
+    ```text
+    <kind> <subject> [· <summary>] · rev <revision> @ <event_id>
+    ```
+
+    其中 ``summary`` 是 receipt 携带的结构化语义（relation kind / status、
+    process status、fact key/value 等，见 ``world/receipts.py``）。后续 LLM 可以
+    把这些字段润色成叙事，但"什么真实发生过"永远由这里的字段决定。
+
     Returns ``None`` for receipts the deterministic policy does not promote.
     """
 
@@ -51,16 +62,23 @@ def world_memory_delta(receipt: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(subject, str) or not subject:
         return None
     event_id = str(receipt.get("event_id") or "")
+    revision = receipt.get("revision")
+    summary = str(receipt.get("summary") or "").strip()
+    parts = [kind, subject]
+    if summary:
+        parts.append(summary)
+    parts.append(f"rev {revision}")
+    parts.append(f"@ {event_id}")
     return {
         "add": [{
             "entity": subject,
             "relation": "world_event",
-            "value": f"{kind} @ {event_id}",
+            "value": " · ".join(parts),
         }],
         "memory_kind": "authoritative_world",
         "source_kind": WORLD_MEMORY_SOURCE_KIND,
         "source_id": event_id,
-        "world_revision": receipt.get("revision"),
+        "world_revision": revision,
         "visibility": receipt.get("visibility") or "public",
     }
 

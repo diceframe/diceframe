@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { expect, test } from './fixtures'
 import { accessToken } from './support'
 
@@ -23,6 +25,84 @@ test('all required viewport widths remain contained', async ({ page }) => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow, `overflow at ${width}px`).toBe(0)
   }
+})
+
+test('phone module recovery stays contained and exposes local import', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/#/modules?adventure=core%3Acastle&version=1.0.0')
+  await expect(page.getByRole('heading', { name: '模组', exact: true })).toBeVisible()
+  await expect(page.getByText('恢复本局冒险')).toBeVisible()
+  await expect(page.locator('.module-import input[type="file"]')).toBeVisible()
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBe(0)
+})
+
+test('module library separates installed, local import, and online modules', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.goto('/#/modules')
+
+  // §8：三个区块同页可见，不再把在线模组甩给插件页面。
+  await expect(page.getByTestId('modules-installed')).toBeVisible()
+  await expect(page.getByTestId('modules-local-import')).toBeVisible()
+  await expect(page.getByTestId('modules-online')).toBeVisible()
+  await expect(page.getByTestId('modules-installed').getByText('E2E Module')).toBeVisible()
+})
+
+test('module detail renders metadata and server-guarded actions', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.goto('/#/modules/e2e-module')
+
+  await expect(page.getByTestId('module-metadata').getByText('e2e-module')).toBeVisible()
+  await expect(page.getByTestId('module-metadata').getByText('catalog')).toBeVisible()
+  await expect(page.getByTestId('module-adventures').getByText('plugin:module_quest')).toBeVisible()
+  // 该模组没有被任何存档绑定 → 服务端 guard 判定受保护操作都可用；按钮文案则由
+  // 服务端的模块状态决定（发现但未启用的包显示"启用"）。
+  const actions = page.getByTestId('module-actions')
+  await expect(actions.getByRole('button', { name: '更新' })).toBeEnabled()
+  await expect(actions.getByRole('button', { name: '启用' })).toBeEnabled()
+  await expect(actions.getByRole('button', { name: '卸载' })).toBeEnabled()
+  await expect(page.getByTestId('module-action-blocked')).toHaveCount(0)
+})
+
+function adventureRecoveryUrl(digest: string): string {
+  const dataDir = process.env.DICEFRAME_E2E_DATA_DIR!
+  const save = JSON.parse(readFileSync(
+    resolve(dataDir, 'saves', 'web#e2e-adventure#web_bot', 'state.json'), 'utf8',
+  )) as { adventure_binding: Record<string, string> }
+  const binding = save.adventure_binding
+  const query = new URLSearchParams({
+    adventure: binding.adventure_id,
+    version: binding.version,
+    digest,
+    source_kind: binding.source_kind,
+    source_id: binding.source_id,
+    game: 'web|e2e-adventure|web_bot',
+  })
+  return `/#/modules?${query.toString()}`
+}
+
+test('module recovery validates the saved digest before offering resume', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  const dataDir = process.env.DICEFRAME_E2E_DATA_DIR!
+  const save = JSON.parse(readFileSync(
+    resolve(dataDir, 'saves', 'web#e2e-adventure#web_bot', 'state.json'), 'utf8',
+  )) as { adventure_binding: Record<string, string> }
+
+  // 指纹一致 → 服务端投影可用且来源一致 → 才出现"返回本局"。
+  await page.goto(adventureRecoveryUrl(save.adventure_binding.content_digest))
+  await expect(page.getByTestId('modules-recovery-ready')).toBeVisible()
+  await expect(page.getByRole('link', { name: '返回本局' })).toBeVisible()
+
+  // 同 id 不同 package：即使包可用也不得"恢复"，绝不自动绑定。
+  await page.goto(adventureRecoveryUrl('sha256:0000000000000000000000000000000000000000000000000000000000000000'))
+  await expect(page.getByTestId('modules-recovery-blocked')).toBeVisible()
+  await expect(page.getByText('当前可用的模组内容与存档指纹不一致，不会自动绑定。')).toBeVisible()
+  await expect(page.getByRole('link', { name: '返回本局' })).toHaveCount(0)
 })
 
 test('phone shell uses a compact header and fixed bottom navigation', async ({ page }) => {

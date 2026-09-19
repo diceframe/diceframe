@@ -164,6 +164,8 @@ class AdventureBundleLoader:
         self,
         adventures_dir: str | Path,
         allowed_directory_ids: frozenset[str] | set[str] | tuple[str, ...] | None = None,
+        *,
+        include_builtin_directories: bool = True,
     ):
         self.adventures_dir = Path(adventures_dir)
         # MOD-03：declared-only 访问——plugin 来源只暴露 manifest 声明的包目录，
@@ -173,12 +175,24 @@ class AdventureBundleLoader:
             if allowed_directory_ids is not None
             else None
         )
+        # FIX-02：runtime 数据目录里同时存放"同步过来的内置包"（带
+        # ``.diceframe-builtin`` 标记）与"用户自建包"。用户来源必须排除前者，
+        # 否则同一个 adventure_id 会同时出现在 builtin 与 user 两个来源里，
+        # 变成假冲突（母方案 §31 的显式来源语义要求两个来源真正互斥）。
+        self.include_builtin_directories = bool(include_builtin_directories)
 
     def _is_allowed(self, directory_id: str) -> bool:
         return (
             self.allowed_directory_ids is None
             or str(directory_id) in self.allowed_directory_ids
         )
+
+    def _is_visible(self, path: Path) -> bool:
+        if self.include_builtin_directories:
+            return True
+        from src.adventures.catalog import is_builtin_adventure_directory
+
+        return not is_builtin_adventure_directory(path)
 
     def list(self, locale: str = "") -> list[LoadedAdventureBundle]:
         if not self.adventures_dir.is_dir():
@@ -189,6 +203,7 @@ class AdventureBundleLoader:
             if path.is_dir()
             and (path / "manifest.json").is_file()
             and self._is_allowed(path.name)
+            and self._is_visible(path)
         ]
 
     def resolve(self, adventure_id: str, locale: str = "") -> LoadedAdventureBundle:

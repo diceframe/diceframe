@@ -12,6 +12,15 @@ async def api_modules(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).list_modules())
 
 
+async def api_module_marketplace(request: web.Request) -> web.Response:
+    """Online content-module catalogue (FIX-06 §8: ModulesView 的在线区块)."""
+
+    result = await _get_api(request).list_module_marketplace(
+        request.query.get("keyword", ""),
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 502)
+
+
 async def api_module_detail(request: web.Request) -> web.Response:
     result = _get_api(request).module_detail(request.match_info["module_id"])
     return web.json_response(result, status=200 if result.get("ok") else 404)
@@ -133,6 +142,8 @@ async def api_module_marketplace_install(request: web.Request) -> web.Response:
 
 def register_modules(app: web.Application) -> None:
     app.router.add_get("/api/modules", api_modules)
+    # 先注册静态段：``/api/modules/{module_id}`` 会吞掉 ``marketplace``。
+    app.router.add_get("/api/modules/marketplace", api_module_marketplace)
     app.router.add_post("/api/modules/import", api_module_import)
     app.router.add_post("/api/modules/{module_id}/install", api_module_marketplace_install)
     app.router.add_get("/api/modules/{module_id}/adventures", api_module_adventures)

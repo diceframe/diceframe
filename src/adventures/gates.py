@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from src.engine.world_state import (
+from src.engine.world.read import (
     fact_value,
     world_entities,
     world_processes,

@@ -116,6 +116,47 @@ def test_unknown_module_has_no_bound_games(tmp_path: Path) -> None:
     assert_module_action_allowed(deps, "nope", "uninstall")  # 不抛
 
 
+def test_source_aware_binding_only_blocks_its_own_module(tmp_path: Path) -> None:
+    """Same adventure id in two modules must not over-block the other source."""
+
+    from src.engine.game_instance import GameInstance
+    from src.webui.api import WebAPI
+
+    host, registry = _make_module(tmp_path)
+    second_dir = host.plugins_dir / "tower-module"
+    shutil.copytree(host.plugins_dir / "castle-module", second_dir)
+    plugin_json = second_dir / "plugin.json"
+    manifest = json.loads(plugin_json.read_text(encoding="utf-8"))
+    manifest["id"] = "tower-module"
+    plugin_json.write_text(json.dumps(manifest), encoding="utf-8")
+    _, second_runtime = host._load_runtime(second_dir)
+    second_runtime.status = "enabled"
+    host.plugins["tower-module"] = second_runtime
+    api = WebAPI.__new__(WebAPI)
+    api._adventure_source_registry = registry
+    api._plugins = host
+    api._sync_plugin_adventure_sources()
+
+    bound = GameInstance(game_key=("web", "source-aware", "bot"))
+    bound.world_id = "greymoor"
+    assert bound.bind_adventure({
+        "adventure_id": "plugin:castle-quest", "version": "1", "format": "v1",
+        "content_digest": "deadbeef", "world_id": "greymoor",
+        "source_kind": "plugin", "source_id": "castle-module",
+    })
+    deps = _Deps(host, registry, [bound])
+    assert [row["game_key"] for row in module_bound_games(deps, "castle-module")] == [
+        "web|source-aware|bot",
+    ]
+    assert module_bound_games(deps, "tower-module") == []
+
+    # Legacy saves have no source proof, so both candidates remain blocked.
+    bound.adventure_binding.pop("source_kind")
+    bound.adventure_binding.pop("source_id")
+    assert module_bound_games(deps, "castle-module")
+    assert module_bound_games(deps, "tower-module")
+
+
 # ---- LIFE-02：使用索引 ----
 
 from src.webui.services.modules import module_usages  # noqa: E402

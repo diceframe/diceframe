@@ -128,7 +128,12 @@ def test_project_visible_state_payload_shape_is_frozen() -> None:
     populate_world(instance)
 
     player_view = project_visible_state(instance, viewer_uid="p1", viewer_is_gm=False)
-    assert set(player_view) == {"schema_version", "viewer", "revision", "clock", "facts"}
+    # FIX-05 §7.3 有意扩展了投影形状：facts + clock 之外还带上有界的
+    # 相关实体/关系/进程与 truncated 标记（viewer-safe 投影，不 dump 全世界）。
+    assert set(player_view) == {
+        "schema_version", "viewer", "revision", "clock", "facts",
+        "entities", "relations", "processes", "truncated",
+    }
     assert player_view["schema_version"] == WORLD_STATE_SCHEMA_VERSION
     assert player_view["viewer"] == "player:p1"
     assert "actor:p1.location" in player_view["facts"]
@@ -136,6 +141,11 @@ def test_project_visible_state_payload_shape_is_frozen() -> None:
     assert all(
         fact["visibility"] == "public" for fact in player_view["facts"].values()
     )
+    # 空世界结构容器投影为空容器 + 未截断（不是 None、不是省略键）。
+    assert player_view["entities"] == {}
+    assert player_view["relations"] == {}
+    assert player_view["processes"] == {}
+    assert player_view["truncated"] is False
 
     gm_view = project_visible_state(instance, viewer_is_gm=True)
     assert gm_view["viewer"] == "gm"

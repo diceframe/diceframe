@@ -73,6 +73,38 @@ MAX_SAVE_UNPACKED_BYTES = 128 * 1024 * 1024
 
 # ---------- GameInstance ------------------------------------
 
+# FIX-02 §4.2：adventure binding 的基础身份字段。来源身份（source_kind/source_id）
+# 是可选新增字段；engine 只按身份字段比较，不认识 adventure 域的具体语义。
+_ADVENTURE_BINDING_BASE_FIELDS = (
+    "adventure_id", "version", "format", "content_digest", "world_id",
+)
+
+
+def _same_adventure_binding(current: Any, candidate: Any) -> bool:
+    """Whether two bindings describe the same immutable package.
+
+    基础身份必须一致；来源身份只在**双方都声明**时比较——这样旧存档的
+    5 字段绑定可以与重启/重开后重新解析出的来源感知绑定视为同一绑定，
+    而"同一个 id 换成另一个来源"仍然被拒绝。
+    """
+
+    if not isinstance(current, dict) or not isinstance(candidate, dict):
+        return current == candidate
+    if current == candidate:
+        return True
+    for key in _ADVENTURE_BINDING_BASE_FIELDS:
+        if str(current.get(key) or "") != str(candidate.get(key) or ""):
+            return False
+    current_source = str(current.get("source_kind") or "")
+    candidate_source = str(candidate.get("source_kind") or "")
+    if not current_source or not candidate_source:
+        return True
+    return (
+        current_source == candidate_source
+        and str(current.get("source_id") or "") == str(candidate.get("source_id") or "")
+    )
+
+
 @dataclass
 class GameInstance:
     """单个跑团游戏的全部运行时状态。
@@ -92,6 +124,10 @@ class GameInstance:
     ruleset_runtime: dict[str, Any] = field(default_factory=dict)
     ruleset_state: dict[str, Any] = field(default_factory=dict)
     adventure_binding: dict[str, Any] = field(default_factory=dict)
+    # FIX-04 §6.2：Adventure v2 进度（active/completed nodes/objectives/milestones +
+    # history）的权威持久化位置。v1 的 campaign 进度仍在 ruleset_state，两者并存
+    # 互不迁移（母方案 §71/§122）。
+    adventure_progress: dict[str, Any] = field(default_factory=dict)
     # Explicitly separates standard free play from an adventure story flow.
     # Empty means legacy/in-memory construction; runtime derives from the
     # bound adventure until creation/migration writes an explicit mode.
@@ -525,16 +561,33 @@ class GameInstance:
         return True
 
     def bind_adventure(self, binding: dict[str, Any] | None) -> bool:
-        """Bind one immutable adventure package, or explicitly select sandbox."""
+        """Bind one immutable adventure package, or explicitly select sandbox.
+
+        FIX-02 §4.2：绑定新增可选的来源身份 ``source_kind`` / ``source_id``，
+        让"同一个 adventure_id 存在于多个来源"时能明确解析。旧存档的 5 字段绑定
+        （无来源身份）继续合法，按"当前唯一"解析；两者必须成对出现，混合形状
+        一律拒绝（不猜）。读取旧绑定时不改写存档：来源身份只在**新绑定**里落盘。
+        """
 
         value = dict(binding or {})
         if value:
             required = {"adventure_id", "version", "format", "content_digest", "world_id"}
-            if set(value) != required or not all(str(value.get(key) or "") for key in required):
+            allowed = required | {"source_kind", "source_id"}
+            if not required.issubset(value) or set(value) - allowed:
+                return False
+            if not all(str(value.get(key) or "") for key in required):
+                return False
+            has_kind = "source_kind" in value
+            has_id = "source_id" in value
+            if has_kind != has_id:
+                return False
+            if has_kind and not str(value.get("source_kind") or "").strip():
                 return False
             if str(value["world_id"]) != str(self.world_id or ""):
                 return False
-        if self.adventure_binding and self.adventure_binding != value:
+        if self.adventure_binding and not _same_adventure_binding(
+            self.adventure_binding, value,
+        ):
             return False
         self.adventure_binding = value
         return True

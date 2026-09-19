@@ -9,16 +9,16 @@ class FakeMemoryRepository:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def recall(self, game_key, keywords, limit, offset):
-        self.calls.append(("recall", game_key, keywords, limit, offset))
+    def recall(self, game_key, keywords, limit, offset, *, viewer_is_gm):
+        self.calls.append(("recall", game_key, keywords, limit, offset, viewer_is_gm))
         return [{"id": 1, "value": "dragon"}]
 
-    def list_entries(self, game_key, limit, offset):
-        self.calls.append(("list", game_key, limit, offset))
+    def list_entries(self, game_key, limit, offset, *, viewer_is_gm):
+        self.calls.append(("list", game_key, limit, offset, viewer_is_gm))
         return [{"id": 2, "value": "castle"}]
 
-    def count_entries(self, game_key, keyword=""):
-        self.calls.append(("count", game_key, keyword))
+    def count_entries(self, game_key, keyword="", *, viewer_is_gm):
+        self.calls.append(("count", game_key, keyword, viewer_is_gm))
         return 1
 
     async def edit_entry(self, game_key, entry_id, updates):
@@ -41,15 +41,17 @@ def test_memory_listing_uses_canonical_storage_key_and_query_mode():
     repository = FakeMemoryRepository()
     service = _service(repository)
 
-    result = service.list("web|room|bot", "dragon", limit=5, offset=2)
+    result = service.list(
+        "web|room|bot", "dragon", limit=5, offset=2, viewer_is_gm=True,
+    )
 
     assert result == {
         "memories": [{"id": 1, "value": "dragon"}],
         "total": 1,
     }
     assert repository.calls == [
-        ("recall", "('web', 'room', 'bot')", ["dragon"], 5, 2),
-        ("count", "('web', 'room', 'bot')", "dragon"),
+        ("recall", "('web', 'room', 'bot')", ["dragon"], 5, 2, True),
+        ("count", "('web', 'room', 'bot')", "dragon", True),
     ]
 
 

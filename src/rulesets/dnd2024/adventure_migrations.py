@@ -40,6 +40,16 @@ def migrate_unreleased_adventure_binding(
     for field in ("adventure_id", "version", "format", "world_id"):
         if str(current.get(field) or "") != str(canonical.get(field) or ""):
             return None
+    # FIX-02 §4.3：来源身份只能"补上"，不能被这次迁移**改写**——旧绑定本来没写
+    # 来源，迁移成当前唯一解析出的来源是可以证明的；但如果存档已经声明了来源，
+    # 而 canonical 指向另一个来源，那是冲突，必须 fail closed，不许猜。
+    current_source = str(current.get("source_kind") or "")
+    canonical_source = str(canonical.get("source_kind") or "")
+    if current_source and canonical_source and (
+        current_source != canonical_source
+        or str(current.get("source_id") or "") != str(canonical.get("source_id") or "")
+    ):
+        return None
     migration_key = (
         str(current.get("adventure_id") or ""),
         str(current.get("version") or ""),
@@ -49,7 +59,14 @@ def migrate_unreleased_adventure_binding(
     migrated_digest = _KNOWN_UNRELEASED_DIGEST_MIGRATIONS.get(migration_key)
     if migrated_digest != str(canonical.get("content_digest") or ""):
         return None
-    return canonical
+    migrated = dict(canonical)
+    if not current_source:
+        # §4.3：这次迁移只负责把**已知的未发布 digest** 修正为当前包。旧存档不会
+        # 因为它获得来源身份——来源身份只在应用真正创建绑定（选择冒险开局）时
+        # 落盘，避免在读存档的冷路径上改写身份语义。
+        migrated.pop("source_kind", None)
+        migrated.pop("source_id", None)
+    return migrated
 
 
 def apply_unreleased_adventure_binding_migration(

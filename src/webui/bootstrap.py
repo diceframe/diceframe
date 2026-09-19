@@ -183,6 +183,13 @@ class WebUIBootstrap:
             plugin_host,
             hub_client=hub_client,
         )
+        # FIX-01 §3.3/§3.5：把安装事务内的包校验与 bound-save guard 接到宿主上，
+        # 所有能改 package bytes 的路径（本地导入 / 市场安装 / 覆盖 / 后台自动
+        # 更新 / 卸载）共用同一条 choke point。
+        app["api"].attach_package_hooks(plugin_host)
+        # FIX-07 §10：启动即刷新一次内容来源。否则"重启后直接开局"会在任何人
+        # 读过冒险/模组页面之前解析不到已启用模组的冒险包。
+        app["api"].refresh_content_sources()
         dependencies.activate_api_runtime(subsystems, app["api"])
         app["updater"] = updater_svc.UpdaterService(
             updater_svc.UpdaterDependencies(

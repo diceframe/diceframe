@@ -14,7 +14,11 @@ from src.content.rule_locale import materialize_rule
 from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
-from src.plugin_host.support import list_plugin_types as _support_plugin_types, plugin_type_descriptor
+from src.plugin_host.support import (
+    content_delivery_mode,
+    list_plugin_types as _support_plugin_types,
+    plugin_type_descriptor,
+)
 from src.bots.bridge_core.card_renderer import cleanup_card_cache
 
 logger = logging.getLogger("trpg")
@@ -209,6 +213,22 @@ def _autoimport_plugin_content(
                 logger.warning("自动灌注插件 %s 内容失败（%s）", plugin_id, kind, exc_info=True)
 
 
+def _legacy_autoimport_allowed(host: Any, plugin_id: str) -> bool:
+    """FIX-01 §3.2：catalog 交付模式的模组**不 autoimport**。
+
+    ``legacy_autoimport``（含缺省字段的传统 content-pack）保持旧行为：启用即把
+    世界书/角色模板灌进 Lorebook 与卡库。``catalog`` 模式（adventure-module 必须
+    用它）只注册内容库 / Adventure 来源，运行时按需物化，绝不写用户数据。
+    """
+
+    runtime = getattr(host, "plugins", {}).get(str(plugin_id or ""))
+    manifest = getattr(runtime, "manifest", None)
+    if not isinstance(manifest, dict):
+        # 未知插件（例如主题）维持旧行为。
+        return True
+    return content_delivery_mode(manifest) == "legacy_autoimport"
+
+
 def _maybe_autoimport_after_install(
     dependencies: PluginLifecycleDependencies,
     plugin_id: str,
@@ -222,6 +242,8 @@ def _maybe_autoimport_after_install(
     except Exception:
         return
     if not detail.get("enabled") or detail.get("status") != "active":
+        return
+    if not _legacy_autoimport_allowed(host, plugin_id):
         return
     try:
         sync_plugin_lorebooks(dependencies.content)
@@ -240,7 +262,7 @@ async def update_plugin_config(
     result = await host.update_config(plugin_id, changes)
     # update_config 失败会抛异常，能走到这行即成功；public_detail 不含 ok，故不再判断 result.get("ok")。
     # 启用内容包/主题时立即同步世界书 + 自动灌注全部内容资源，避免用户还得手动一键导入。
-    if changes.get("enabled") is True:
+    if changes.get("enabled") is True and _legacy_autoimport_allowed(host, plugin_id):
         sync_plugin_lorebooks(dependencies.content)
         _autoimport_plugin_content(dependencies.content, plugin_id)
     return {"ok": True, **result}
@@ -257,7 +279,7 @@ async def control_plugin(
     method = {"start": host.start, "stop": host.stop, "restart": host.restart}.get(action)
     if not method: return {"ok": False, "error": "插件操作无效"}
     await method(plugin_id, **start_kwargs)
-    if action in ("start", "restart"):
+    if action in ("start", "restart") and _legacy_autoimport_allowed(host, plugin_id):
         sync_plugin_lorebooks(dependencies.content)
     return {"ok": True, **host.public_detail(plugin_id)}
 
@@ -265,11 +287,14 @@ async def install_plugin(
     dependencies: PluginLifecycleDependencies,
     payload: bytes,
     overwrite: bool = False,
+    expected_plugin_type: str = "",
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
         return {"ok": False, "error": "插件宿主未启用"}
-    detail = await host.install_from_zip(payload, overwrite=overwrite)
+    detail = await host.install_from_zip(
+        payload, overwrite=overwrite, expected_plugin_type=expected_plugin_type,
+    )
     _maybe_autoimport_after_install(dependencies, detail.get("id", ""))
     return {"ok": True, **detail}
 
@@ -285,11 +310,14 @@ async def install_marketplace_plugin(
     dependencies: PluginLifecycleDependencies,
     plugin_id: str,
     overwrite: bool = False,
+    expected_plugin_type: str = "",
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
         return {"ok": False, "error": "插件宿主未启用"}
-    result = await host.install_from_marketplace(plugin_id, overwrite=overwrite)
+    result = await host.install_from_marketplace(
+        plugin_id, overwrite=overwrite, expected_plugin_type=expected_plugin_type,
+    )
     _maybe_autoimport_after_install(dependencies, plugin_id)
     return {"ok": True, **result}
 

@@ -213,6 +213,11 @@ class GameHandler:
         if hasattr(self._swipe_generator, "set_scene_image_hook"):
             self._swipe_generator.set_scene_image_hook(self._round_processor.schedule_scene_image)
 
+    def set_adventure_world_advance(self, callback) -> None:
+        """Connect optional Adventure v2 gate reevaluation to round settlement."""
+
+        self._round_processor.set_adventure_world_advance(callback)
+
     async def _init_world_from_template(self, world_id: str, template: dict) -> None:
         """兼容旧内部调用；实际逻辑已拆到 GameFactory。"""
         await self._factory.init_world_from_template(world_id, template)

@@ -53,7 +53,7 @@ class GameLifecycleDependencies:
     parse_game_key: Callable[[str], GameKey]
     llm_configuration_error: Callable[[str], dict[str, Any] | None]
     load_rule_by_id: Callable[[str, str], RuleSystem | None]
-    resolve_adventure_binding: Callable[[str, Any | None, str, str], dict[str, Any]]
+    resolve_adventure_binding: Callable[..., dict[str, Any]]
     resolve_default_scene_image: Callable[[str, str], dict[str, str]]
     materialize_scene_image: Callable[[Any], dict[str, str]]
     validate_map_background: Callable[[Any], dict[str, str]]
@@ -62,6 +62,9 @@ class GameLifecycleDependencies:
     refresh_lorebook_index: Callable[[str], None]
     project_rule_id: Callable[[Any], str]
     clean_public_narration: Callable[[str], str]
+    # FIX-04 §6.5：v2 冒险的创建事务步骤（进度初始化 + 世界种子原子物化）。
+    # 在创建事务内调用；v1 / 未绑定冒险时是 no-op。
+    initialize_adventure_run: Callable[[Any], dict[str, Any]] | None = None
 
 
 class CreationPhase(str, Enum):

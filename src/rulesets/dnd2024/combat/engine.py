@@ -11,6 +11,7 @@ from src.engine.player_control import is_ai_controlled
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
+from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.play.contracts import EncounterAccess
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
@@ -40,6 +41,11 @@ class Dnd2024CombatEngine(
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
     encounter_catalog: dict[str, Any] | None = None
+    # FIX-03 §5.3：运行时内容目录（adventure-local → module → core）。命中模块
+    # encounter_profile / ContentRef enemy 时，敌人实例来自这里，而不是内联
+    # statblock；未注入时退化为纯内联（legacy 冒险包行为不变）。
+    content_catalog: Any | None = None
+    content_source: str = ""
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
     features: Dnd2024ClassFeatureResolver = field(init=False)
@@ -813,7 +819,11 @@ class Dnd2024CombatEngine(
             raw_attack_labels if isinstance(raw_attack_labels, dict) else {}
         )
         result: list[dict[str, Any]] = []
-        for raw in catalog.get("presets") or []:
+        seen_preset_ids: set[str] = set()
+        for raw in [
+            *(catalog.get("presets") or []),
+            *self._module_presets(),
+        ]:
             if not isinstance(raw, dict):
                 continue
             preset = deepcopy(raw)
@@ -823,21 +833,82 @@ class Dnd2024CombatEngine(
             ):
                 continue
             preset_id = str(preset.get("id") or "")
+            if not preset_id or preset_id in seen_preset_ids:
+                continue
+            seen_preset_ids.add(preset_id)
             text = preset_labels.get(preset_id, {})
             text = text if isinstance(text, dict) else {}
-            preset["name"] = str(text.get("name") or preset_id or "Encounter")
-            preset["description"] = str(text.get("description") or "")
-            for enemy in preset.get("enemies") or []:
+            preset["name"] = str(
+                text.get("name") or preset.get("name") or preset_id or "Encounter"
+            )
+            preset["description"] = str(
+                text.get("description") or preset.get("description") or ""
+            )
+            preset["enemies"] = self._preset_enemies(preset)
+            for enemy in preset["enemies"]:
                 profile_id = str(enemy.pop("profile_id", "") or "")
                 enemy["name"] = str(
-                    profile_labels.get(profile_id) or profile_id or enemy["id"]
+                    profile_labels.get(profile_id) or enemy.get("name") or profile_id or enemy["id"]
                 )
                 for attack in enemy.get("attacks") or []:
                     attack_id = str(attack.get("id") or "")
                     attack["name"] = str(attack_labels.get(attack_id) or attack_id)
-            self._validate_enemies(preset.get("enemies"))
+            self._validate_enemies(preset["enemies"])
             result.append(preset)
         return result
+
+    def _preset_enemies(self, preset: dict[str, Any]) -> list[dict[str, Any]]:
+        """Enemy instances for one preset: module ContentRefs or inline statblocks.
+
+        FIX-03 §5.3：引用式敌人（``enemies[].ref``）经运行时内容目录解析为
+        canonical enemy 实例；内联 statblock（v1 冒险包）原样保留。解析失败
+        fail closed —— 绝不用别的怪物顶上。
+        """
+
+        enemies = preset.get("enemies")
+        if not isinstance(enemies, list):
+            return []
+        if not any(isinstance(entry, dict) and entry.get("ref") for entry in enemies):
+            return deepcopy(enemies)
+        catalog = self.content_catalog
+        if catalog is None:
+            raise CombatIntentError(
+                "module encounter requires the runtime content catalog"
+            )
+        refs = [entry for entry in enemies if isinstance(entry, dict)]
+        if len(refs) != len(enemies):
+            raise CombatIntentError("encounter enemy entry must be an object")
+        return expand_encounter_enemies(
+            catalog,
+            refs,
+            default_source=str(preset.get("source_ref") or self.content_source or ""),
+        )
+
+    def _module_presets(self) -> list[dict[str, Any]]:
+        """Encounter presets contributed by the runtime content catalog (§5.3)."""
+
+        catalog = self.content_catalog
+        if catalog is None:
+            return []
+        records = getattr(catalog, "records_for", None)
+        source: Any
+        if callable(records):
+            source = records("encounter_profile")
+        else:  # pragma: no cover - 目录实现始终提供 records_for
+            source = {}
+        presets: list[dict[str, Any]] = []
+        for record in (source or {}).values():
+            if not isinstance(record, dict):
+                continue
+            presets.append({
+                "id": str(record.get("encounter_id") or ""),
+                "name": str(record.get("name") or ""),
+                "description": str(record.get("description") or ""),
+                "difficulty": str(record.get("difficulty") or "standard"),
+                "source_ref": str(record.get("source_ref") or ""),
+                "enemies": deepcopy(record.get("enemies") or []),
+            })
+        return [preset for preset in presets if preset["id"]]
 
     def _preset(self, preset_id: str) -> dict[str, Any] | None:
         wanted = str(preset_id or "")

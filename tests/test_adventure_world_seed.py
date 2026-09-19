@@ -16,7 +16,7 @@ import pytest
 from src.adventures.bundle import AdventureBundleError, AdventureBundleLoader
 from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2, AdventureGraphV2Error
 from src.engine.game_instance import GameInstance
-from src.engine.world.materialization import materialize_world_seed
+from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.world_state import (
     fact_value,
     fact_visibility,

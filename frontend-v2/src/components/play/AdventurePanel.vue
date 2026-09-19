@@ -24,7 +24,14 @@ type AdventureGraph = {
 }
 type AdventureResponse = {
   adventure: null | {
-    binding?: { adventure_id?: string; version?: string; format?: string }
+    binding?: {
+      adventure_id?: string
+      version?: string
+      format?: string
+      content_digest?: string
+      source_kind?: string
+      source_id?: string
+    }
     available: boolean
     reason?: string
     format?: string
@@ -71,11 +78,18 @@ function linkedNames(ids: string[] | undefined): string {
   return ids.map(id => labels.get(id) || id).join(' · ')
 }
 function openModuleRecovery(): void {
+  const binding = adventure.value?.binding || {}
+  // §8 Recovery：把**存档里的绑定身份**（版本 / 内容指纹 / 来源）与对局一起交给
+  // 模组库，恢复页才能校验"同 id 但不同 package"并回到本局。
   void router.push({
     name: 'modules',
     query: {
-      adventure: adventure.value?.binding?.adventure_id || '',
-      version: adventure.value?.binding?.version || '',
+      adventure: binding.adventure_id || '',
+      version: binding.version || '',
+      digest: binding.content_digest || '',
+      source_kind: binding.source_kind || '',
+      source_id: binding.source_id || '',
+      game: props.gameKey || '',
     },
   })
 }

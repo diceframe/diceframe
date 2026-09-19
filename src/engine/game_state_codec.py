@@ -33,6 +33,7 @@ class GameStateCodec:
             "world_id": instance.world_id,
             "rule_id": instance.rule_id,
             "adventure_binding": instance.adventure_binding,
+            "adventure_progress": instance.adventure_progress,
             "play_mode": instance.play_mode,
             "scene_image": instance.scene_image,
             "map_background": instance.map_background,
@@ -143,6 +144,13 @@ class GameStateCodec:
             ruleset_runtime=data.get("ruleset_runtime") or {},
             ruleset_state=data.get("ruleset_state") or {},
             adventure_binding=data.get("adventure_binding") or {},
+            # FIX-04 §6.2/§6.3：旧存档没有这个键 → 空进度（不猜进度，不迁移 v1
+            # campaign 状态）；非 dict 的脏值同样降级为空进度。
+            adventure_progress=(
+                data.get("adventure_progress")
+                if isinstance(data.get("adventure_progress"), dict)
+                else {}
+            ),
             play_mode=(
                 str(data.get("play_mode") or "")
                 if str(data.get("play_mode") or "").casefold() in {"free", "adventure"}

@@ -802,8 +802,10 @@ async def build_context(
                 gm_resp = sanitize_narration(entry.get("gm_response", ""))
                 if gm_resp:
                     recall_source += "\n" + gm_resp
+            # GM context builder：GM 视角可以召回 gm 私密记忆（§7.4）。
             memory_text = await recall_and_format(
                 memory_store, instance.memory_namespace, recall_source, limit=8,
+                viewer_is_gm=True,
             )
             if memory_text:
                 memory_text = _truncate(memory_text, budget_memory)

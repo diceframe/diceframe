@@ -263,6 +263,83 @@ async def recover_all(registry: GameRegistry) -> list[GameInstance]:
     return recovered
 
 
+def _metadata_game_key(registry: GameRegistry, directory_name: str) -> str:
+    """Derive the public game key from a save directory name (legacy separators aware)."""
+
+    parts = directory_name.split(registry._KEY_SEPARATOR)
+    if len(parts) < 3:
+        for old_sep in ("|", ","):
+            parts = directory_name.split(old_sep)
+            if len(parts) >= 3:
+                break
+    return "|".join(str(part) for part in parts[:3])
+
+
+def _state_metadata(path: Path) -> dict[str, Any] | None:
+    """Read only the module-usage fields of one persisted state file."""
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    binding = data.get("adventure_binding")
+    binding = binding if isinstance(binding, dict) else {}
+    state = data.get("state")
+    if isinstance(state, dict):
+        state = state.get("value")
+    return {
+        "adventure_id": str(binding.get("adventure_id") or ""),
+        "content_digest": str(binding.get("content_digest") or ""),
+        "source_kind": str(binding.get("source_kind") or ""),
+        "source_id": str(binding.get("source_id") or ""),
+        "run_id": str(data.get("run_id") or ""),
+        "state": str(state or ""),
+    }
+
+
+def scan_save_metadata(registry: GameRegistry) -> list[dict[str, Any]]:
+    """Read-only metadata scan over every persisted save (FIX-01 §3.7).
+
+    Module usage protection must cover **all persisted saves**, not only the
+    in-memory instances recovered at startup: paused / ended saves and saves
+    that failed to load but whose metadata is still readable all count.
+
+    Never loads or mutates a save; a save whose state files are unreadable is
+    still reported (``metadata_readable: False``) so the caller can surface it
+    instead of silently treating it as unbound.
+    """
+
+    save_dir = registry.save_dir
+    if not save_dir.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in sorted(save_dir.iterdir(), key=lambda item: item.name):
+        if not entry.is_dir():
+            continue
+        state_path = entry / "state.json"
+        backup_path = entry / "state.backup.json"
+        if not state_path.is_file() and not backup_path.is_file():
+            continue
+        metadata: dict[str, Any] | None = None
+        for candidate in (state_path, backup_path):
+            if candidate.is_file():
+                metadata = _state_metadata(candidate)
+                if metadata is not None:
+                    break
+        rows.append({
+            "game_key": _metadata_game_key(registry, entry.name),
+            "metadata_readable": metadata is not None,
+            **(
+                metadata
+                if metadata is not None
+                else {"adventure_id": "", "content_digest": "", "source_kind": "", "source_id": "", "run_id": "", "state": ""}
+            ),
+        })
+    return rows
+
+
 async def import_save_zip(
     registry: GameRegistry,
     payload: bytes,

@@ -280,6 +280,7 @@ class WebAccessControl:
         if len(parts) >= 4:
             tail = parts[3]
             if request.method == "GET" and tail in {
+                "adventure",
                 "characters",
                 "character-cards",
                 "log",

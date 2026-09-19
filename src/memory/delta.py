@@ -77,6 +77,23 @@ PRAGMA journal_mode=WAL;
 _ACTIVE = MemoryEntry.status == "active"
 
 
+def _viewer_filter(query, *, viewer_is_gm: bool):
+    """FIX-05 §7.4：记忆读取的 viewer policy（无处可漏）。
+
+    - GM：``public`` + ``gm``（含未声明可见性的 soft 记忆）；
+    - 玩家安全面：只保留**非 GM 私有**（``visibility`` 为 NULL 或 ``public``）。
+
+    未声明可见性按公开处理，与 ``src.engine.world.read.project_visible_state``
+    同一口径：只有显式标记 ``gm`` 的记录才是秘密。
+    """
+
+    if viewer_is_gm:
+        return query
+    return query.where(
+        (MemoryEntry.visibility.is_null(True)) | (MemoryEntry.visibility != "gm"),
+    )
+
+
 def _active_query(game_key: str):
     return MemoryEntry.select().where(
         (MemoryEntry.game_key == str(game_key)) & _ACTIVE,
@@ -491,8 +508,9 @@ class MemoryStore:
             summary[memory_kind_of(row.memory_kind)] += int(row.total)
         return summary
 
-    def recall(self, game_key: str, keywords: list[str], limit: int = 10, offset: int = 0) -> list[dict]:
-        """根据关键词召回相关记忆。"""
+    def recall(self, game_key: str, keywords: list[str], limit: int = 10,
+               offset: int = 0, *, viewer_is_gm: bool) -> list[dict]:
+        """根据关键词召回相关记忆（viewer policy 见 _viewer_filter）。"""
         gk = str(game_key)
         if not keywords:
             return []
@@ -501,8 +519,7 @@ class MemoryStore:
             (MemoryEntry.entity.ilike(f"%{kw}%") for kw in keywords),
         )
         rows = (
-            _active_query(gk)
-            .where(conditions)
+            _viewer_filter(_active_query(gk).where(conditions), viewer_is_gm=viewer_is_gm)
             .order_by(MemoryEntry.confidence.desc(), MemoryEntry.updated_at.desc())
             .limit(max(1, int(limit)))
             .offset(max(0, int(offset)))
@@ -510,7 +527,7 @@ class MemoryStore:
         return [dict(r.__data__) for r in rows]
 
     def search_active_by_terms(self, game_key: str, terms: list[str],
-                               limit: int = 1000) -> list[dict]:
+                               limit: int = 1000, *, viewer_is_gm: bool) -> list[dict]:
         """按词项对 entity/relation/value 做 LIKE 粗筛（recall 增强通道）。"""
         gk = str(game_key)
         if not terms:
@@ -524,39 +541,41 @@ class MemoryStore:
             for term in terms
         ))
         rows = (
-            _active_query(gk)
-            .where(conditions)
+            _viewer_filter(_active_query(gk).where(conditions), viewer_is_gm=viewer_is_gm)
             .order_by(MemoryEntry.updated_at.desc())
             .limit(max(1, int(limit)))
         )
         return [dict(r.__data__) for r in rows]
 
-    def list_entries(self, game_key: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    def list_entries(self, game_key: str, limit: int = 50, offset: int = 0,
+                     *, viewer_is_gm: bool) -> list[dict]:
         """List active memories for management UIs without weakening recall semantics."""
         if not self._conn:
             return []
         rows = (
-            _active_query(game_key)
+            _viewer_filter(_active_query(game_key), viewer_is_gm=viewer_is_gm)
             .order_by(MemoryEntry.updated_at.desc())
             .limit(max(1, int(limit)))
             .offset(max(0, int(offset)))
         )
         return [dict(row.__data__) for row in rows]
 
-    def count_entries(self, game_key: str, keyword: str = "") -> int:
+    def count_entries(self, game_key: str, keyword: str = "", *,
+                      viewer_is_gm: bool) -> int:
         """统计活跃记忆总数（可按 entity 关键词过滤，与 recall 口径一致）。"""
         if not self._conn:
             return 0
-        query = _active_query(game_key)
+        query = _viewer_filter(_active_query(game_key), viewer_is_gm=viewer_is_gm)
         if keyword:
             query = query.where(MemoryEntry.entity.ilike(f"%{keyword}%"))
         return query.count()
 
-    def recall_by_text(self, game_key: str, text: str, limit: int = 10) -> list[dict]:
+    def recall_by_text(self, game_key: str, text: str, limit: int = 10, *,
+                       viewer_is_gm: bool) -> list[dict]:
         """根据文本内容召回匹配的记忆（检查 entity 是否出现在 text 中）。"""
         gk = str(game_key)
         rows = (
-            _active_query(gk)
+            _viewer_filter(_active_query(gk), viewer_is_gm=viewer_is_gm)
             .order_by(MemoryEntry.updated_at.desc())
             .limit(500)
         )
@@ -568,14 +587,16 @@ class MemoryStore:
     # ---- 向量召回 ----
 
     def recall_by_vector(self, game_key: str, query_embedding: list[float],
-                         limit: int = 10) -> list[dict]:
+                         limit: int = 10, *, viewer_is_gm: bool) -> list[dict]:
         """基于向量余弦相似度的记忆召回。"""
         from src.memory.embedding import cosine_similarity
 
         gk = str(game_key)
         rows = (
-            _active_query(gk)
-            .where(MemoryEntry.embedding.is_null(False))
+            _viewer_filter(
+                _active_query(gk).where(MemoryEntry.embedding.is_null(False)),
+                viewer_is_gm=viewer_is_gm,
+            )
             .order_by(MemoryEntry.updated_at.desc())
             .limit(500)
         )

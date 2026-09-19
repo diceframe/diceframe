@@ -29,9 +29,35 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.adventures.bundle import AdventureBundleError, AdventureBundleLoader  # noqa: E402
 from src.plugin_host.host import PluginHost  # noqa: E402
-from src.rulesets.dnd2024.content.catalog import load_catalog_dir  # noqa: E402
+from src.rulesets.builtin import (  # noqa: E402
+    build_default_ruleset_registry,
+    default_adventure_runtime_requirement,
+)
+
+
+def _validation_dependencies() -> Any:
+    """Same runtime availability the server judges installs against."""
+
+    from src.webui.services.module_validation import ModuleValidationDependencies
+
+    return ModuleValidationDependencies(
+        ruleset_registry=build_default_ruleset_registry(),
+        default_runtime_requirement=default_adventure_runtime_requirement,
+    )
+
+
+def _report_blockers(blockers: tuple[str, ...]) -> list[str]:
+    """Map shared-validator blockers onto the CLI report's legacy phrasing."""
+
+    errors: list[str] = []
+    for blocker in blockers:
+        if blocker.startswith("ruleset_catalog_invalid:"):
+            _, directory, detail = blocker.split(":", 2)
+            errors.append(f"catalog {directory}: {detail}")
+        else:
+            errors.append(blocker)
+    return errors
 
 
 def validate_module(plugin_dir: Path) -> dict[str, Any]:
@@ -69,38 +95,29 @@ def validate_module(plugin_dir: Path) -> dict[str, Any]:
         errors.append(f"manifest validation failed: {exc}")
         return report
 
-    # 2) 冒险包全量校验（graph / locale / digest）。
-    if runtime.adventure_packages_root is not None:
-        loader = AdventureBundleLoader(
-            runtime.adventure_packages_root,
-            allowed_directory_ids=runtime.adventure_package_directories,
-        )
-        for bundle in loader.list(""):
-            report["adventures"].append({
-                "adventure_id": bundle.manifest.adventure_id,
-                "format": bundle.manifest.format,
-                "content_digest": bundle.content_digest,
-            })
-    else:
-        report["warnings"].append("no adventure_packages declared")
+    # 2/3) 深度校验走与安装/预览**完全同一套** rules（FIX-01 §3.3），
+    #      不再在这里维护第二份 Adventure / catalog 校验逻辑。
+    from src.webui.services.module_validation import validate_module_package
 
-    # 3) ruleset catalog 契约校验（D&D）。
-    if runtime.ruleset_catalogs_root is not None:
-        for directory in runtime.ruleset_catalog_directories:
-            try:
-                source = load_catalog_dir(
-                    runtime.ruleset_catalogs_root / directory,
-                    source_label=f"module:{manifest.get('id')}",
-                )
-            except Exception as exc:  # noqa: BLE001
-                report["ok"] = False
-                errors.append(f"catalog {directory}: {exc}")
-                continue
-            report["catalogs"].append({
-                "directory": directory,
-                "records": len(source.records),
-            })
-    else:
+    validation = validate_module_package(
+        dict(runtime.manifest),
+        deps=_validation_dependencies(),
+        directory=plugin_dir,
+        require_content_pack=True,
+    )
+    if validation.blockers:
+        report["ok"] = False
+        errors.extend(_report_blockers(validation.blockers))
+    report["adventures"] = [dict(item) for item in validation.adventures]
+    report["catalogs"] = [
+        {"directory": item["directory"], "records": item["records"]}
+        for item in validation.catalogs
+    ]
+    report["warnings"].extend(validation.warnings)
+
+    if runtime.adventure_packages_root is None:
+        report["warnings"].append("no adventure_packages declared")
+    if runtime.ruleset_catalogs_root is None:
         report["warnings"].append("no ruleset_catalogs declared")
 
     return report

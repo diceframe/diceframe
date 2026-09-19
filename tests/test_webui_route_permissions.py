@@ -111,8 +111,9 @@ class FakeAPI:
         self.calls.append(("log", game_key, page, per_page))
         return {"log": [], "total": 0, "page": page, "total_pages": 1}
 
-    def list_memories(self, game_key: str, keyword: str = "", limit: int = 20, offset: int = 0) -> dict:
-        self.calls.append(("memories", game_key, keyword, limit, offset))
+    def list_memories(self, game_key: str, keyword: str = "", limit: int = 20,
+                      offset: int = 0, *, viewer_is_gm: bool = False) -> dict:
+        self.calls.append(("memories", game_key, keyword, limit, offset, viewer_is_gm))
         return {"entries": [], "total": 0}
 
 
@@ -533,6 +534,27 @@ async def test_memory_route_rejects_invalid_pagination(tmp_path):
 
     assert response.status == 400
     assert response_json(response)["error"] == "分页参数必须是整数"
+
+
+@pytest.mark.asyncio
+async def test_memory_route_derives_viewer_from_request_identity(tmp_path):
+    """FIX-05 §7.4：记忆列表的 viewer policy 由请求身份决定，不由客户端声明。"""
+
+    registry = FakeRegistry(tmp_path)
+    key = ("web", "room", "bot")
+    registry.items[key] = SimpleNamespace(gm_uid="gm")
+
+    gm_req, gm_api = make_request(registry, user_id="gm", method="GET")
+    await memory.api_memories(gm_req)
+    assert gm_api.calls == [("memories", "web|room|bot", "", 50, 0, True)]
+
+    player_req, player_api = make_request(registry, user_id="player", method="GET")
+    await memory.api_memories(player_req)
+    assert player_api.calls == [("memories", "web|room|bot", "", 50, 0, False)]
+
+    anon_req, anon_api = make_request(registry, user_id="", method="GET")
+    await memory.api_memories(anon_req)
+    assert anon_api.calls == [("memories", "web|room|bot", "", 50, 0, False)]
 
 
 @pytest.mark.asyncio

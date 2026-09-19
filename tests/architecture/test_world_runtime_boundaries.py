@@ -46,10 +46,11 @@ FORBIDDEN_WORLD_IMPORTERS = (
     "src.bots",
 )
 
-# adventures 域的特殊语义（母方案 §25 gate / §9 source_ref）：允许 world_state
-# 的**读取端**（fact_value / world_entities / ...），但写入口符号仍然禁止——
-# Adventure 是定义层，物化必须走 engine 侧 materialization（WR-09）。
-ADVENTURES_WORLD_READ_OK = "src.engine.world_state"
+# adventures 域的特殊语义（母方案 §25 gate / §9 source_ref）：允许 import 世界
+# **读取投影** ``src.engine.world.read``，但禁止 import 世界 authority 模块
+# （``world_state`` / ``world_events`` / ``world_legality``）——定义层永远不能
+# 直接写世界（FIX-05 §7.2；物化走 application adapter）。
+ADVENTURES_WORLD_READ_OK = "src.engine.world.read"
 ADVENTURES_WORLD_WRITE_SYMBOLS = frozenset({"apply_world_ops", "apply_ops_to_state"})
 
 # content_modules 允许复用 world.contracts 的 source 语法真值（纯校验词表，
@@ -59,7 +60,6 @@ CONTENT_MODULES_WRITE_SIDE_MODULES = (
     "src.engine.world_events",
     "src.engine.world_legality",
     "src.engine.world.ops",
-    "src.engine.world.materialization",
 )
 
 
@@ -99,7 +99,16 @@ def test_world_runtime_stays_inside_the_engine_core_domain() -> None:
     violations: list[str] = []
     for path in world_files:
         for module in sorted(_imported_modules(path)):
-            for banned in ("src.webui", "src.rulesets", "src.compat", "src.web_transport"):
+            # FIX-05 §7.1/§7.2：World Runtime 不认识 Adventure / 具体 ruleset /
+            # webui / 插件宿主，也不感知 transport 与 compat 适配层。
+            for banned in (
+                "src.webui",
+                "src.rulesets",
+                "src.compat",
+                "src.web_transport",
+                "src.adventures",
+                "src.plugin_host",
+            ):
                 if _depends_on(module, banned):
                     violations.append(
                         f"{path.relative_to(ROOT)} imports {module} (forbidden: {banned})"
@@ -125,22 +134,54 @@ def test_unplanned_domains_do_not_import_world_runtime_directly() -> None:
                     "src.engine.world.contracts."
                 ):
                     continue
-                if top_package == "src.adventures" and module == ADVENTURES_WORLD_READ_OK:
-                    continue  # 读取端可用（由下方写符号检查兜底）
+                if top_package == "src.adventures" and _depends_on(
+                    module, ADVENTURES_WORLD_READ_OK,
+                ):
+                    continue  # 只读投影可用（写侧符号由下方检查兜底）
                 violations.append(
                     f"{path.relative_to(ROOT)} imports {module} "
                     f"(forbidden: {top_package} must reach the world via engine ops)"
                 )
-        # adventures：world_state 读取端可用，但写入口符号禁止（WR-09 分工）。
+        # adventures：只读投影可用，但写入口符号禁止（WR-09 / FIX-05 分工）。
         if top_package == "src.adventures":
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
-                if isinstance(node, ast.ImportFrom) and node.module == ADVENTURES_WORLD_READ_OK:
-                    for alias in node.names:
-                        if alias.name in ADVENTURES_WORLD_WRITE_SYMBOLS:
-                            violations.append(
-                                f"{path.relative_to(ROOT)} imports world write symbol "
-                                f"{alias.name} (adventures must materialize via engine)"
-                            )
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                if not _depends_on(node.module or "", ADVENTURES_WORLD_READ_OK) and (
+                    node.module or ""
+                ) != "src.engine.world_state":
+                    continue
+                for alias in node.names:
+                    if alias.name in ADVENTURES_WORLD_WRITE_SYMBOLS:
+                        violations.append(
+                            f"{path.relative_to(ROOT)} imports world write symbol "
+                            f"{alias.name} (adventures must materialize via the application adapter)"
+                        )
+    assert not violations, "\n".join(violations)
+
+
+def test_adventure_definition_layer_never_imports_world_authority() -> None:
+    """FIX-05 §7.2：Adventure 只能用只读投影，不得 import world authority。
+
+    这是 ``test_unplanned_domains_do_not_import_world_runtime_directly`` 的显式
+    版本：把"定义层 vs authority"这条契约单独钉住，违反时给出可读诊断。
+    """
+
+    authority_modules = (
+        "src.engine.world_state",
+        "src.engine.world_events",
+        "src.engine.world_legality",
+        "src.engine.world.ops",
+    )
+    violations: list[str] = []
+    for path in sorted((SRC / "adventures").rglob("*.py")):
+        for module in sorted(_imported_modules(path)):
+            for authority in authority_modules:
+                if _depends_on(module, authority):
+                    violations.append(
+                        f"{path.relative_to(ROOT)} imports {module} "
+                        f"(forbidden: adventures may only use src.engine.world.read / contracts)"
+                    )
     assert not violations, "\n".join(violations)
 
 

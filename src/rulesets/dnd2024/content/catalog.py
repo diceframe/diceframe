@@ -103,6 +103,22 @@ def load_catalog_dir(path: Path, *, source_label: str) -> CatalogSource:
     return CatalogSource(label=source_label, records=records)
 
 
+def validate_catalog_record(kind: str, record: Any) -> dict[str, Any]:
+    """Validate one in-memory catalog record of ``kind`` (fail closed).
+
+    FIX-03 §5.1：adventure-local 内容要作为链首来源时，必须过与模块目录同一套
+    契约校验；不合契约的实体（v1 bundle 信封形状）由调用方跳过。
+    """
+
+    validator = _VALIDATORS.get(kind)
+    if validator is None:
+        raise CatalogLoadError(f"unknown catalog kind: {kind!r}")
+    if not isinstance(record, Mapping):
+        raise CatalogLoadError(f"catalog entry must be an object: {kind}")
+    payload = {key: value for key, value in record.items() if key != "kind"}
+    return validator(payload)
+
+
 class DndContentCatalog:
     """Aggregated, source-aware view over loaded catalog sources."""
 
@@ -118,7 +134,12 @@ class DndContentCatalog:
         return tuple(self._sources)
 
     def resolve(self, ref: ContentRef) -> dict[str, Any] | None:
-        """Direct source-aware lookup for one validated ref."""
+        """Direct source-aware lookup for one validated ref.
+
+        v1 裸 ``kind:id``（非 explicit）由调用方归属**它自己声明的默认来源**
+        （母方案 §9：跨来源引用必须显式，不猜、不静默替换）；因此这里只做
+        label 精确匹配，链序回溯留给显式声明来源的调用方自行决定。
+        """
 
         for source in self._sources:
             if source.label == ref.source:
@@ -159,6 +180,23 @@ class DndContentCatalog:
             raise CatalogLoadError(f"unknown catalog kind: {kind!r}")
         return sum(1 for source in self._sources for key in source.records if key[0] == kind)
 
+    def records_for(self, kind: str) -> dict[str, dict[str, Any]]:
+        """Flat ``{record_id: record}`` view of one kind, in chain order.
+
+        FIX-03 §5.3：运行时需要按 kind 枚举目录内容（例如把模组的
+        ``encounter_profile`` 投影成战斗遭遇预设）。同名跨来源时**链序在前者胜出**，
+        与 v1 裸 ``kind:id`` 引用的解析语义一致（显式来源引用仍走 resolve）。
+        """
+
+        if kind not in CATALOG_KINDS:
+            raise CatalogLoadError(f"unknown catalog kind: {kind!r}")
+        flat: dict[str, dict[str, Any]] = {}
+        for source in self._sources:
+            for (record_kind, record_id), record in source.records.items():
+                if record_kind == kind and record_id not in flat:
+                    flat[record_id] = record
+        return flat
+
 
 def _source_from_mapping(label: str, records: Mapping[str, Mapping[str, Any]]) -> CatalogSource:
     """Build one source from an in-memory {kind: {id: record}} mapping (tests/轻量路径)。
@@ -171,7 +209,13 @@ def _source_from_mapping(label: str, records: Mapping[str, Mapping[str, Any]]) -
         if kind not in _VALIDATORS:
             raise CatalogLoadError(f"catalog entry kind is invalid: {kind!r}")
         for record_id, record in by_id.items():
-            validated = _VALIDATORS[kind](record)
+            # 与文件装载一致：record 可以自带 ``kind``（文件里的自描述条目），
+            # 契约本身不接受该字段。
+            payload = (
+                {key: value for key, value in record.items() if key != "kind"}
+                if isinstance(record, Mapping) else record
+            )
+            validated = _VALIDATORS[kind](payload)
             key = (kind, str(record_id))
             if key in normalized:
                 raise CatalogLoadError(f"catalog duplicate ref in {label}: {key[0]}:{key[1]}")

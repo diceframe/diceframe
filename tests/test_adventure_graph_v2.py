@@ -245,3 +245,51 @@ def test_gm_sees_transitions_into_secret_nodes() -> None:
     view = project_graph_v2(_graph_with_secrets(), viewer_is_gm=True)
     throne = next(node for node in view["nodes"] if node["id"] == "throne")
     assert any(transition["to"] == "secret_ritual" for transition in throne["transitions"])
+
+
+@pytest.mark.parametrize(
+    ("field", "record", "match"),
+    [
+        ("objectives", {"id": "public_obj", "name": "Public", "node_ids": ["secret_ritual"]}, "public objective"),
+        ("milestones", {"id": "public_mile", "name": "Public", "node_ids": ["secret_ritual"]}, "public milestone"),
+    ],
+)
+def test_public_collections_cannot_reference_gm_nodes(field, record, match) -> None:
+    graph = _graph_with_secrets()
+    graph[field].append(record)
+    with pytest.raises(AdventureGraphV2Error, match=match):
+        validate_graph_v2(graph)
+
+
+def test_public_node_cannot_reference_a_gm_chapter() -> None:
+    graph = _graph_with_secrets()
+    graph["nodes"][0]["chapter_id"] = "ch_secret"
+    with pytest.raises(AdventureGraphV2Error, match="public node"):
+        validate_graph_v2(graph)
+
+
+def test_player_projection_sanitizes_legacy_cross_references_and_gate_payloads() -> None:
+    graph = _graph_with_secrets()
+    graph["objectives"].append({
+        "id": "legacy_public", "name": "Public", "node_ids": ["gate", "secret_ritual"],
+    })
+    graph["nodes"][0]["transitions"] = [{
+        "to": "bridge", "conditions": [{"type": "world.fact_equals", "key": "gm:secret", "value": "ritual"}],
+    }]
+    # Simulate an already-installed historical package: projection must remain
+    # safe even when it predates the stricter admission validator.
+    view = project_graph_v2(graph, viewer_is_gm=False)
+    rendered = json.dumps(view, ensure_ascii=False)
+    assert "secret_ritual" not in rendered
+    assert "gm:secret" not in rendered
+    assert "ritual" not in rendered
+    assert next(item for item in view["objectives"] if item["id"] == "legacy_public")["node_ids"] == ["gate"]
+    assert next(item for item in view["nodes"] if item["id"] == "gate")["transitions"] == [{"to": "bridge"}]
+
+
+def test_gm_only_root_has_no_player_projection() -> None:
+    graph = _graph_with_secrets()
+    graph["visibility"] = "gm"
+    view = project_graph_v2(graph, viewer_is_gm=False)
+    assert view["available"] is False
+    assert view["nodes"] == []

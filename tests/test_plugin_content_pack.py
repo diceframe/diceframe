@@ -1127,7 +1127,7 @@ async def test_install_marketplace_plugin_triggers_autoimport_when_enabled():
         def __init__(self):
             self.synced = False
 
-        async def install_from_marketplace(self, plugin_id, overwrite=False):
+        async def install_from_marketplace(self, plugin_id, overwrite=False, **_kwargs):
             return {"id": plugin_id, "name": "pack"}
 
         def public_detail(self, plugin_id):
@@ -1185,7 +1185,7 @@ async def test_install_marketplace_plugin_skips_autoimport_when_disabled():
     from src.webui.services.plugins import install_marketplace_plugin
 
     class _Plugins:
-        async def install_from_marketplace(self, plugin_id, overwrite=False):
+        async def install_from_marketplace(self, plugin_id, overwrite=False, **_kwargs):
             return {"id": plugin_id, "name": "pack"}
 
         def public_detail(self, plugin_id):

@@ -257,6 +257,7 @@ class RoundProcessor:
         summary_max_tokens: int,
         analysis_max_tokens: int,
         lore_retriever: Any | None = None,
+        advance_adventure_world: Callable[[GameInstance], dict[str, Any]] | None = None,
     ):
         self.registry = registry
         self.llm_client = llm_client
@@ -275,6 +276,10 @@ class RoundProcessor:
         self.narrative_max_tokens = narrative_max_tokens
         self.summary_max_tokens = summary_max_tokens
         self.analysis_max_tokens = analysis_max_tokens
+        # The application composition root injects this optional callback.  The
+        # generic round processor owns world-time settlement but must not import
+        # the Adventure application service or a concrete ruleset.
+        self._advance_adventure_world = advance_adventure_world
         # 后台摘要任务引用持有，避免被 GC 中断
         self._pending_summary_tasks: set = set()
         self._image_generation = None
@@ -283,6 +288,13 @@ class RoundProcessor:
 
     def set_image_generation_service(self, service) -> None:
         self._image_generation = service
+
+    def set_adventure_world_advance(
+        self, callback: Callable[[GameInstance], dict[str, Any]] | None,
+    ) -> None:
+        """Attach the v2 gate reevaluation at the existing time-authority seam."""
+
+        self._advance_adventure_world = callback
 
     def _ruleset_runtime(self, instance: GameInstance) -> Any | None:
         binding = dict(getattr(instance, "ruleset_runtime", {}) or {})
@@ -437,12 +449,24 @@ class RoundProcessor:
             # 结算到期事件（无后台 tick、无独立 scheduler）。
             time_advance = metadata.get("world_time_advance")
             if isinstance(time_advance, dict) and time_advance.get("minutes"):
+                before_world = deepcopy(getattr(instance, "world_state", None))
+                before_progress = deepcopy(getattr(instance, "adventure_progress", None))
                 try:
                     outcome = advance_world_time(
                         instance, int(time_advance["minutes"]),
                         source_round=instance.round_number,
                     )
+                    if self._advance_adventure_world is not None:
+                        self._advance_adventure_world(instance)
                 except (WorldStateError, ValueError, TypeError) as exc:
+                    # World settlement and its dependent Adventure gate update
+                    # are one in-memory authority transaction.  Restoring the
+                    # before-images makes a retry perform the same settlement
+                    # exactly once rather than advancing only half the state.
+                    if before_world is not None:
+                        instance.world_state = before_world
+                    if before_progress is not None:
+                        instance.adventure_progress = before_progress
                     logger.warning("世界时间推进被拒绝: %s", exc)
                 else:
                     instance.last_world_events = [

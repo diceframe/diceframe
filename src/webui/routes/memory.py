@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.routes._common import _get_api, _require_confirmed_request
+from src.webui.services._common import is_game_gm
 
 
 async def api_memories(request: web.Request) -> web.Response:
@@ -16,7 +17,16 @@ async def api_memories(request: web.Request) -> web.Response:
         offset = max(0, int(request.query.get("offset", "0")))
     except (TypeError, ValueError):
         return web.json_response({"ok": False, "error": "分页参数必须是整数"}, status=400)
-    result = _get_api(request).list_memories(gk, keyword, limit, offset)
+    api = _get_api(request)
+    # FIX-05 §7.4：viewer 由请求身份决定——共享玩家链接拿不到 GM 私有记忆。
+    viewer_is_gm = is_game_gm(
+        api.get_game_instance(gk),
+        request.get("user_id", ""),
+        bool(request.get("owner_authenticated", False)),
+    )
+    result = api.list_memories(
+        gk, keyword, limit, offset, viewer_is_gm=viewer_is_gm,
+    )
     return web.json_response(result)
 
 

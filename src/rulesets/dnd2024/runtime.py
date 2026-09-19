@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from src.adventures import ADVENTURE_GRAPH_FORMAT, AdventureBundleLoader, LoadedAdventureBundle
+from src.adventures import (
+    ADVENTURE_GRAPH_FORMAT,
+    AdventureResolver,
+    LoadedAdventureBundle,
+    binding_matches,
+)
+from src.adventures.graph_v2 import (
+    ADVENTURE_GRAPH_FORMAT_V2,
+    AdventureGraphV2Error,
+    validate_graph_v2,
+)
 from src.engine.legacy_game_projection import project_legacy_game_context
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
@@ -21,6 +32,12 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
+from src.rulesets.dnd2024.content.catalog import DndContentCatalog
+from src.rulesets.dnd2024.content.provider import (
+    DndContentCatalogProvider,
+    adventure_local_records,
+)
+from src.rulesets.dnd2024.content.rewards import reward_intents_from_outcome
 from src.rulesets.dnd2024.exploration import (
     EXPLORATION_INTENT_TYPES, Dnd2024ExplorationEngine,
 )
@@ -35,6 +52,7 @@ from src.rulesets.dnd2024.play import (
     is_public_story_milestone,
     public_timeline_projection,
     resolve_story_encounter_access,
+    resolve_v2_encounter_access,
 )
 from src.rulesets.dnd2024.progression import (
     Dnd2024AdvancementEngine,
@@ -59,7 +77,7 @@ class Dnd2024Runtime:
         session_zero=True,
         tutorial_coach=True,
         narrative_turns=True,
-        adventure_formats=(ADVENTURE_GRAPH_FORMAT,),
+        adventure_formats=(ADVENTURE_GRAPH_FORMAT, ADVENTURE_GRAPH_FORMAT_V2),
     )
 
     def initialize_new_run(
@@ -80,11 +98,237 @@ class Dnd2024Runtime:
         default = Path(__file__).resolve().parents[3] / "templates" / "rulesets"
         self._loader = RulesetBundleLoader(bundles_dir or default)
         self._bundle_cache: dict[str, LoadedRulesetBundle] = {}
-        adventures = adventures_dir or (
+        default_adventures = (
             Path(__file__).resolve().parents[3] / "templates" / "adventures"
         )
-        self._adventure_loader = AdventureBundleLoader(adventures)
+        adventures = adventures_dir or default_adventures
+        # FIX-02 §4.1：runtime 不再自己持有"另一个 loader"。默认建一个单目录
+        # resolver（standalone / 测试用；随应用发布的目录语义上是 builtin），
+        # 生产由组合根注入全局唯一 resolver（set_adventure_resolver），因此
+        # WebAPI 与 runtime 解析到同一个包。
+        self._adventure_loader = AdventureResolver.single_directory(
+            adventures,
+            source_kind="user" if adventures_dir else "builtin",
+        )
+        # FIX-03 §5.2：模组 catalog 来源由组合根注入（默认无模组）。
+        self._module_content_sources: Any = None
         self._director = Dnd2024Director(director_mode if director_mode in {"auto", "assist", "manual"} else "assist")
+
+    def set_adventure_resolver(self, resolver: Any) -> None:
+        """Adopt the application's unique AdventureResolver (composition injection)."""
+
+        if resolver is None:
+            return
+        self._adventure_loader = resolver
+
+    def set_module_content_sources(self, provider: Any) -> None:
+        """Adopt the application's module catalog sources (FIX-03 §5.2).
+
+        组合根只提供"哪些模组声明了哪些 catalog 目录"这一事实；链路顺序
+        （adventure-local → owning module → 其它模组 → core）与解析语义由
+        runtime 自己决定，WebAPI 不拥有 gameplay catalog 真相。
+        """
+
+        self._module_content_sources = provider
+
+    def owning_module_id(self, instance: Any) -> str:
+        """The content-pack module that owns the instance's bound adventure."""
+
+        binding = getattr(instance, "adventure_binding", None)
+        if not isinstance(binding, dict):
+            return ""
+        if str(binding.get("source_kind") or "") != "plugin":
+            return ""
+        return str(binding.get("source_id") or "")
+
+    def _bound_adventure_or_none(self, instance: Any, locale: str) -> Any:
+        """The bound adventure, or None when it cannot be resolved.
+
+        内容目录只是"能解析出什么内容"的视图：绑定的冒险包缺失/变更时，游戏本身
+        由战斗/战役路径 fail closed（``load_adventure`` 抛错），但目录链不应该跟着
+        崩掉——模组内容仍然可解析（recovery / 诊断场景）。
+        """
+
+        try:
+            return self.load_adventure(instance, locale)
+        except Exception:  # noqa: BLE001 - 目录链对缺失冒险降级
+            return None
+
+    def content_catalog(self, instance: Any) -> DndContentCatalog:
+        """The runtime's ordered content catalog chain (§5.1).
+
+        adventure-local（绑定冒险里 catalog 形状的内容）→ owning module → 其它
+        模组 → core D&D content。组合根只注入模组来源。
+        """
+
+        locale = str(getattr(instance, "language", "") or "")
+        adventure = self._bound_adventure_or_none(instance, locale)
+        provider = DndContentCatalogProvider(
+            module_sources=self._module_content_sources,
+            core_sources=lambda _instance: self._core_content_sources(),
+        )
+        return provider.catalog_for(
+            instance,
+            owning_module_id=self.owning_module_id(instance),
+            adventure_label=(
+                f"adventure:{adventure.manifest.adventure_id}"
+                if adventure is not None else ""
+            ),
+            adventure_records=(
+                adventure_local_records(adventure.entities)
+                if adventure is not None else None
+            ),
+        )
+
+    def adventure_reward_intents(
+        self,
+        instance: Any,
+        outcome: Mapping[str, Any],
+        *,
+        recipient_uid: str = "",
+        locale: str = "",
+    ) -> list[dict[str, Any]]:
+        """FIX-03 §5.5：adventure outcome 的 item_reward → 权威奖励 intent.
+
+        只做"引用 → 结构化 intent"；是否发放、怎么发放仍由既有 proposal /
+        settlement 权威决定（本方法不写 inventory）。
+        """
+
+        return reward_intents_from_outcome(
+            self.content_catalog(instance),
+            dict(outcome or {}),
+            default_source=self.adventure_content_source(instance),
+            recipient_uid=str(recipient_uid or ""),
+        )
+
+    def adventure_content_source(self, instance: Any) -> str:
+        """Default source for v1 bare refs: the owning module, else the adventure."""
+
+        owning = self.owning_module_id(instance)
+        if owning:
+            return f"module:{owning}"
+        locale = str(getattr(instance, "language", "") or "")
+        adventure = self._bound_adventure_or_none(instance, locale)
+        if adventure is not None:
+            return f"adventure:{adventure.manifest.adventure_id}"
+        return ""
+
+    def _core_content_sources(self) -> list[tuple[str, dict[str, dict[str, Any]]]]:
+        """Core D&D content contributed by the ruleset bundle itself.
+
+        目前 bundle 只带 encounter_catalog（内联 statblock）与 combat/spell
+        catalog，没有 ``monster`` 记录；因此核心来源在 ContentRef 链上是空集，
+        但链路位置保留——模块引用 core ``item``/怪物时语义不变。
+        """
+
+        return []
+
+    def adventure_rules_evaluator(self, instance: Any) -> Any:
+        """FIX-04 §6.4：``rules.*`` gate 的 D&D adapter（证据不足 = 不放行）。
+
+        只读权威状态，不掷骰、不改状态；未知 outcome id 返回 False（不猜）。
+        """
+
+        def evaluator(gate_type: str, gate_id: str, expected: Any) -> bool:
+            try:
+                if gate_type == "rules.party_level":
+                    return self._party_level(instance) >= int(expected or 0)
+                if gate_type == "rules.item_possession":
+                    return self._party_has_item(instance, gate_id) is bool(expected)
+                if gate_type == "rules.outcome":
+                    return self._rules_outcome(instance, gate_id) == str(expected or "")
+            except Exception:  # noqa: BLE001 - 读取失败 = 证据不足 = 不满足
+                return False
+            return False
+
+        return evaluator
+
+    @staticmethod
+    def _party_level(instance: Any) -> int:
+        def level_of(sheet: Any) -> int:
+            sheet = sheet if isinstance(sheet, dict) else {}
+            raw_canonical = sheet.get("ruleset_character")
+            canonical: dict[str, Any] = (
+                raw_canonical if isinstance(raw_canonical, dict) else {}
+            )
+            raw_build = canonical.get("build")
+            build: dict[str, Any] = raw_build if isinstance(raw_build, dict) else {}
+            levels = build.get("class_levels") or sheet.get("class_levels") or []
+            highest = max(
+                (
+                    int(row.get("level", 0) or 0)
+                    for row in levels
+                    if isinstance(row, dict)
+                ),
+                default=0,
+            )
+            try:
+                return max(highest, int(sheet.get("level", 0) or 0))
+            except (TypeError, ValueError):
+                return highest
+
+        return max(
+            (level_of(instance.get_character_sheet(uid)) for uid in instance.players),
+            default=0,
+        )
+
+    @staticmethod
+    def _party_has_item(instance: Any, item_id: str) -> bool:
+        wanted = str(item_id or "").strip().casefold()
+        if not wanted:
+            return False
+        for uid in instance.players:
+            sheet = instance.get_character_sheet(uid) or {}
+            rows: list[Any] = []
+            for key in ("inventory", "equipment", "key_items"):
+                value = sheet.get(key)
+                if isinstance(value, list):
+                    rows.extend(value)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key in ("id", "name", "item_id"):
+                    if str(row.get(key) or "").strip().casefold() == wanted:
+                        return True
+        return False
+
+    @staticmethod
+    def _rules_outcome(instance: Any, outcome_id: str) -> str:
+        """One canonical rules outcome id → its current status string."""
+
+        state = getattr(instance, "ruleset_state", None)
+        state = state if isinstance(state, dict) else {}
+        raw_combat = state.get("combat")
+        combat: dict[str, Any] = raw_combat if isinstance(raw_combat, dict) else {}
+        if str(outcome_id or "") == "combat_ended":
+            status = str(combat.get("status") or "none")
+            if status == "ended":
+                return "ended"
+            if status == "active":
+                return "active"
+            return "pending"
+        outcomes = state.get("outcomes")
+        if isinstance(outcomes, dict):
+            return str(outcomes.get(str(outcome_id or "")) or "")
+        return ""
+
+    def adventure_reward_converter(self, instance: Any) -> Any:
+        """FIX-04 §6.7/§5.5：adventure item_reward → DNDMOD-03 reward intent。"""
+
+        from src.rulesets.dnd2024.content.rewards import reward_intent_from_ref
+
+        catalog = self.content_catalog(instance)
+        default_source = self.adventure_content_source(instance)
+
+        def converter(raw_ref: Any, source: str, recipient: str) -> dict[str, Any]:
+            return reward_intent_from_ref(
+                catalog,
+                raw_ref,
+                default_source=str(source or default_source),
+                recipient_uid=recipient,
+            )
+
+        return converter
 
     def load_adventure(
         self, instance: Any, locale: str = "",
@@ -92,7 +336,10 @@ class Dnd2024Runtime:
         binding = getattr(instance, "adventure_binding", None)
         if not isinstance(binding, dict) or not str(binding.get("adventure_id") or ""):
             return None
-        bundle = self._adventure_loader.resolve(str(binding["adventure_id"]), locale)
+        # 来源身份存在时只在该来源内解析（不回退）；旧绑定按"当前唯一"解析，
+        # 重名冲突由 resolve_binding 抛 AdventureSourceConflict → 调用方 fail closed。
+        resolution = self._adventure_loader.resolve_binding(binding, locale)
+        bundle = resolution.bundle
         if (
             bundle.manifest.required_runtime_id != self.runtime_id
             or bundle.manifest.required_runtime_version > self.runtime_version
@@ -105,8 +352,8 @@ class Dnd2024Runtime:
             != bundle.manifest.recommended_world_id
         ):
             raise ValueError("bound adventure package is incompatible with the selected world")
-        expected = bundle.binding(str(getattr(instance, "world_id", "") or ""))
-        if binding != expected:
+        expected = resolution.binding(str(getattr(instance, "world_id", "") or ""))
+        if not binding_matches(binding, expected):
             raise ValueError("bound adventure package is missing or has changed")
         return bundle
 
@@ -221,14 +468,26 @@ class Dnd2024Runtime:
         if len(catalogs) > 1:
             raise ValueError("adventure package contains multiple encounter catalogs")
         catalog = catalogs[0] if catalogs else None
+        # FIX-03 §5.3：把运行时内容目录交给战斗引擎，模块 encounter_profile /
+        # ContentRef enemy 才能解析成 canonical 敌人实例。
+        content_catalog = self.content_catalog(instance)
+        content_source = (
+            f"adventure:{adventure.manifest.adventure_id}"
+            if adventure is not None
+            else ""
+        )
         if access is None:
             return Dnd2024CombatEngine(
                 self.load_bundle(locale), encounter_catalog=catalog,
+                content_catalog=content_catalog, content_source=content_source,
             )
-        return Dnd2024CombatEngine(self.load_bundle(locale), access, catalog)
+        return Dnd2024CombatEngine(
+            self.load_bundle(locale), access, catalog,
+            content_catalog=content_catalog, content_source=content_source,
+        )
 
-    @staticmethod
     def _encounter_access(
+        self,
         instance: Any, campaign: dict[str, Any], intent: dict[str, Any] | None = None,
     ) -> EncounterAccess:
         """Resolve the authoritative encounter mode for one call.
@@ -241,6 +500,22 @@ class Dnd2024Runtime:
 
         if str(getattr(instance, "play_mode", "") or "").casefold() == "free":
             return EncounterAccess.sandbox()
+        # FIX-04 §6.9：绑定的是 Adventure v2 → 遭遇由**v2 进度**（active 节点的
+        # encounter_ref）决定，不再走 v1 tutorial step；v1 路径原样保留。
+        v2 = self._v2_encounter_access(instance)
+        if v2 is not None:
+            if v2.mode == "story":
+                if v2.status == "pending" and not v2.encounter_preset_id:
+                    return EncounterAccess.unbound_story(
+                        adventure_id=v2.adventure_id,
+                        origin_step_id=v2.origin_step_id,
+                    )
+                return v2
+            if str((intent or {}).get("mode") or "") == "sandbox":
+                return EncounterAccess.sandbox()
+            if v2.unprepared:
+                return v2
+            return EncounterAccess.sandbox() if v2.status == "resolved" else v2
         story = resolve_story_encounter_access(instance, campaign)
         if story.mode == "story":
             # 剧情步骤声明了战斗，却没有可用的 canonical preset：这同样是
@@ -265,6 +540,25 @@ class Dnd2024Runtime:
                 origin_step_id=str(step.get("id") or ""),
             )
         return EncounterAccess.sandbox()
+
+    def _v2_encounter_access(self, instance: Any) -> EncounterAccess | None:
+        """§6.9：v2 绑定时的剧情遭遇访问权；非 v2 返回 ``None``（走 v1 路径）。"""
+
+        progress = getattr(instance, "adventure_progress", None)
+        if not isinstance(progress, dict) or not progress:
+            return None
+        try:
+            locale = str(getattr(instance, "language", "") or "")
+            bundle = self.load_adventure(instance, locale)
+        except Exception:  # noqa: BLE001 - 绑定不可解析时交给既有路径 fail closed
+            return None
+        if bundle is None or str(bundle.manifest.format) != ADVENTURE_GRAPH_FORMAT_V2:
+            return None
+        try:
+            adventure = validate_graph_v2(bundle.adventure)
+        except AdventureGraphV2Error:
+            return None
+        return resolve_v2_encounter_access(instance, adventure, progress)
 
     def _builder(self, draft: dict[str, Any]) -> Dnd2024CharacterBuilder:
         return Dnd2024CharacterBuilder(self.load_bundle(str(draft.get("locale") or "")))

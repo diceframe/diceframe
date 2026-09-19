@@ -360,6 +360,10 @@ def capture_round_entity_snapshot(instance: GameInstance) -> None:
         "initiative_order": copy.deepcopy(list(instance.initiative_order or [])),
         "initiative_current": int(instance.initiative_current or 0),
         "world_state": copy.deepcopy(instance.world_state),
+        # FIX-07 §10 步骤 23：Adventure 进度与世界真相由同一次权威事务写入
+        # （FIX-04 §6.7），所以"本轮改过的东西"必须包含它——否则回滚会把世界
+        # 退回去、把进度留在被丢弃的分支上。
+        "adventure_progress": copy.deepcopy(instance.adventure_progress),
     }
 
 
@@ -377,6 +381,9 @@ def restore_round_entity_snapshot(instance: GameInstance) -> bool:
     # 世界真相按整轮语义回滚（ADR 0003）：本轮写入的 world ops 随本轮撤销。
     if "world_state" in snapshot:
         instance.world_state = ensure_world_state(snapshot.get("world_state"))
+    # Adventure 进度与世界真相同一事务（FIX-04 §6.7），必须一起回到判定入口。
+    if "adventure_progress" in snapshot:
+        instance.adventure_progress = copy.deepcopy(snapshot.get("adventure_progress") or {})
     return True
 
 

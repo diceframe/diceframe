@@ -60,6 +60,28 @@ _OP_SUBJECT_FIELDS = {
     "fail_process": "process_id",
 }
 
+# FIX-05 §7.5：receipt 的 ``summary`` 携带**确定性语义**（relation kind /
+# status、process status 等），让权威记忆不必只存 "relation_added @ evt"。
+# 只做 "k=v" 拼接，不做任何自然语言生成（deterministic，可断言）。
+_SUMMARY_FIELDS = ("kind", "status", "key", "value")
+_MAX_SUMMARY_CHARS = 400
+
+
+def _receipt_summary(applied: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for field in _SUMMARY_FIELDS:
+        if field not in applied:
+            continue
+        value = applied.get(field)
+        if value is None or isinstance(value, (dict, list)):
+            continue
+        text = str(value)
+        if not text:
+            continue
+        parts.append(f"{field}={text}")
+    summary = " ".join(parts)
+    return summary[:_MAX_SUMMARY_CHARS]
+
 
 def _receipt_visibility(applied: dict[str, Any]) -> str:
     """Derive a receipt's visibility from the op that produced it.
@@ -104,7 +126,7 @@ def receipts_from_applied(
             "source_round": source_round,
             "visibility": _receipt_visibility(applied_op),
             "subject": subject,
-            "summary": "",
+            "summary": _receipt_summary(applied_op),
         }
         receipts.append(validate_world_event_record(receipt))
     return receipts

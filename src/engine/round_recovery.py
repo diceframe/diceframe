@@ -83,6 +83,11 @@ def rollback_last_round_locked(instance: GameInstance) -> int | None:
     # 之后写入的 world ops 必须一起撤销，否则世界会记住一个被丢弃的分支。
     if isinstance(last.get("pre_world_state"), dict) and last["pre_world_state"]:
         instance.world_state = ensure_world_state(last["pre_world_state"])
+    # FIX-07 §10 步骤 23：Adventure 进度与世界真相由同一次权威事务写入
+    # （FIX-04 §6.7），整轮回滚必须一起撤销，否则会出现"世界退回去了、进度还
+    # 留在被丢弃的分支上"的半回滚。
+    if isinstance(last.get("pre_adventure_progress"), dict):
+        instance.adventure_progress = copy.deepcopy(last["pre_adventure_progress"])
     instance.round_number = max(1, rolled_back_round)
     instance.action_queue.clear()
     instance.pending_actions.clear()
@@ -203,6 +208,13 @@ def finish_judgment_locked(
         # 写入的 world ops（与玩家、战斗扩展快照同一语义）。
         "pre_world_state": copy.deepcopy(
             instance.round_entity_snapshot.get("world_state", instance.world_state)
+        ),
+        # FIX-07 §10 步骤 23：Adventure 进度与世界真相同属"本轮结算出来的东西"，
+        # 回滚必须一起撤销（否则世界退回去了、进度还留在被丢弃的分支上）。
+        "pre_adventure_progress": copy.deepcopy(
+            instance.round_entity_snapshot.get(
+                "adventure_progress", instance.adventure_progress,
+            )
         ),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })

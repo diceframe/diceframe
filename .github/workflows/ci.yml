@@ -107,7 +107,8 @@ jobs:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    # FIX-07 §9：浏览器 smoke 不允许 continue-on-error —— 它必须能让总 workflow 变红，
+    # 否则 PR 上的假绿会掩盖真实的浏览器回归。
 
     steps:
       - name: Checkout

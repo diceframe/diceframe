@@ -77,9 +77,24 @@ from src.engine.world.contracts import (
     validate_relation_record,
 )
 from src.engine.world import ops as world_record_ops
+from src.engine.world.read import (
+    WORLD_STATE_SCHEMA_VERSION,
+    fact_value,
+    fact_visibility,
+    project_visible_state,
+    state_payload as _current_payload,
+    world_clock,
+    world_entities,
+    world_facts,
+    world_processes,
+    world_relations,
+    world_revision,
+    world_scheduled_events,
+)
 from src.engine.world.receipts import receipts_from_applied
 
-WORLD_STATE_SCHEMA_VERSION = 2
+# WORLD_STATE_SCHEMA_VERSION：单一真值在 world/read.py（读半区），此处 re-export
+# 保持既有导入面。
 
 # 事实可见性：第一版只有公开与 GM 私有。更细的 ACL / group graph 不在本层。
 FACT_VISIBILITIES = ("public", "gm")
@@ -176,106 +191,8 @@ def _upgrade_world_state_v1_to_v2(state: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---- 读取入口：投影与合法性判断都必须经这里，且对损坏存档保持沉默降级 ----
-
-
-def _current_payload(state: Any) -> Mapping[str, Any] | None:
-    if not isinstance(state, Mapping):
-        return None
-    if state.get("schema_version") != WORLD_STATE_SCHEMA_VERSION:
-        return None
-    return state
-
-
-def world_revision(state: Any) -> int:
-    payload = _current_payload(state)
-    if payload is None:
-        return 0
-    revision = payload.get("revision")
-    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
-        return 0
-    return revision
-
-
-def world_clock(state: Any) -> dict[str, int]:
-    """The logical world time; a corrupt clock reads as day 1, 00:00."""
-
-    payload = _current_payload(state)
-    raw = payload.get("clock") if payload is not None else None
-    if not isinstance(raw, Mapping):
-        return {"day": 1, "minute": 0}
-    day, minute = raw.get("day"), raw.get("minute")
-    if (
-        isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= MAX_CLOCK_DAY
-        or isinstance(minute, bool) or not isinstance(minute, int)
-        or not 0 <= minute < MINUTES_PER_DAY
-    ):
-        return {"day": 1, "minute": 0}
-    return {"day": day, "minute": minute}
-
-
-def world_facts(state: Any) -> dict[str, dict[str, Any]]:
-    """All established facts (copies).  Malformed entries are not guessed."""
-
-    payload = _current_payload(state)
-    raw = payload.get("facts") if payload is not None else None
-    if not isinstance(raw, Mapping):
-        return {}
-    facts: dict[str, dict[str, Any]] = {}
-    for key, value in raw.items():
-        if isinstance(key, str) and isinstance(value, Mapping) and "value" in value:
-            facts[key] = deepcopy(dict(value))
-    return facts
-
-
-def fact_value(state: Any, key: str, default: Any = None) -> Any:
-    """Read one fact value without exposing the mutable container."""
-
-    fact = world_facts(state).get(str(key or ""))
-    return default if fact is None else fact.get("value", default)
-
-
-def world_scheduled_events(state: Any) -> dict[str, dict[str, Any]]:
-    payload = _current_payload(state)
-    raw = payload.get("scheduled_events") if payload is not None else None
-    if not isinstance(raw, Mapping):
-        return {}
-    return {
-        str(key): deepcopy(dict(value))
-        for key, value in raw.items()
-        if isinstance(value, Mapping)
-    }
-
-
-def _world_record_container(state: Any, name: str) -> dict[str, dict[str, Any]]:
-    """Defensive reader for the v2 record containers (entities/relations/processes)."""
-
-    payload = _current_payload(state)
-    raw = payload.get(name) if payload is not None else None
-    if not isinstance(raw, Mapping):
-        return {}
-    return {
-        str(key): deepcopy(dict(value))
-        for key, value in raw.items()
-        if isinstance(value, Mapping)
-    }
-
-
-def world_entities(state: Any) -> dict[str, dict[str, Any]]:
-    """All registered entities (copies).  Malformed entries are not guessed."""
-
-    return _world_record_container(state, "entities")
-
-
-def world_relations(state: Any) -> dict[str, dict[str, Any]]:
-    """All established relations (copies).  Malformed entries are not guessed."""
-
-    return _world_record_container(state, "relations")
-
-
-def world_processes(state: Any) -> dict[str, dict[str, Any]]:
-    """All known processes (copies).  Malformed entries are not guessed."""
-
-    return _world_record_container(state, "processes")
+# FIX-05 §7.2：读实现已迁到 ``src/engine/world/read.py``（读半区，可被 Adventure
+# 等定义层依赖）；本模块 re-export 它们，写入口仍只在本模块。
 
 
 def clock_to_minutes(clock: Any) -> int:
@@ -305,44 +222,6 @@ def ensure_clock(clock: Any, *, fallback: Mapping[str, Any] | None = None) -> di
             return _clock_from_minutes(fallback_minutes, 0)
     return {"day": 1, "minute": 0}
 
-
-def project_visible_state(
-    instance: Any, *, viewer_uid: str = "", viewer_is_gm: bool = False,
-) -> dict[str, Any]:
-    """World truth as one specific viewer is allowed to see it.
-
-    ``public`` facts are visible to everyone; ``gm`` facts only to the GM.
-    Player-facing surfaces must go through this projection instead of reading
-    ``instance.world_state`` directly, so hidden world truth cannot leak into a
-    player context by accident.  A corrupt container projects as an empty world
-    rather than raising.
-    """
-
-    state = getattr(instance, "world_state", None)
-    facts = world_facts(state)
-    if not viewer_is_gm:
-        facts = {
-            key: fact for key, fact in facts.items()
-            if str(fact.get("visibility") or "") == "public"
-        }
-    if viewer_is_gm:
-        viewer = "gm"
-    else:
-        viewer = f"player:{viewer_uid}" if viewer_uid else "player"
-    return {
-        "schema_version": WORLD_STATE_SCHEMA_VERSION,
-        "viewer": viewer,
-        "revision": world_revision(state),
-        "clock": world_clock(state),
-        "facts": facts,
-    }
-
-
-def fact_visibility(state: Any, key: str) -> str:
-    """Visibility of one fact, or an empty string when it is not established."""
-
-    fact = world_facts(state).get(str(key or ""))
-    return str(fact.get("visibility") or "") if fact is not None else ""
 
 
 # ---- 写入口 ---------------------------------------------------------------

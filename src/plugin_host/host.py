@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +85,13 @@ _RESTART_STABLE_SECONDS = 10.0
 # 插件自动更新总开关。默认关闭：商店只提醒有新版，用户手动点更新。
 # 保留自动更新的实现骨架，将来要恢复时把此值改为 True 即可。
 _PLUGIN_AUTO_UPDATE_ENABLED = False
+
+# FIX-01 §3.3/§3.4：安装事务内的包校验钩子。签名 ``(plugin_dir, manifest) -> None``，
+# 有 blocker 时抛 ValueError；宿主在**任何 mutation 之前**调用它（依赖倒置）。
+PackageValidator = Callable[[Path, dict[str, Any]], None]
+# FIX-01 §3.5：破坏性 package 操作 guard。签名 ``(plugin_id, action) -> None``，
+# 被绑定的存档引用时抛 ValueError（实现方决定哪些 plugin_type 受保护）。
+ContentModuleGuard = Callable[[str, str], None]
 _PLUGIN_TYPES = set(PLUGIN_TYPE_SUPPORT)
 _ALLOWED_PERMISSIONS = PERMISSION_DETAILS
 
@@ -127,6 +134,8 @@ class PluginHost:
         on_plugin_stopped: PluginStoppedCallback | None = None,
         hub_client: Any | None = None,
         ai_provider_resolver: AIProviderResolver | None = None,
+        package_validator: PackageValidator | None = None,
+        content_module_guard: ContentModuleGuard | None = None,
     ) -> None:
         self.builtin_dir = builtin_dir
         self.plugins_dir = plugins_dir
@@ -134,6 +143,10 @@ class PluginHost:
         self.base_env = base_env or {}
         # 接线层注入：插件被真正停止/卸载时（keep_enabled=False）回调，用于释放隧道发布。
         self._on_plugin_stopped = on_plugin_stopped
+        # 接线层注入（FIX-01 §3.3/§3.5）：安装事务内的包校验与破坏性操作 guard。
+        # 宿主只按契约调用，不认识 game/module 语义（依赖倒置，不是第二 authority）。
+        self._package_validator = package_validator
+        self._content_module_guard = content_module_guard
         self.plugins: dict[str, PluginRuntime] = {}
         self.logger = logging.getLogger("trpg.plugins")
         self.mirrors = MirrorManager(self.data_dir / "_marketplace" / "mirrors.json")
@@ -543,12 +556,50 @@ class PluginHost:
         directories = tuple(sorted(catalog.name for catalog in catalogs))
         return parent, directories
 
+    def set_package_hooks(
+        self,
+        *,
+        package_validator: PackageValidator | None = None,
+        content_module_guard: ContentModuleGuard | None = None,
+    ) -> None:
+        """Attach the composition root's install-transaction hooks (FIX-01 §3.3/§3.5).
+
+        单一接线点：组合根（WebAPI）与测试都走这里，避免"某条安装路径没接线"。
+        """
+
+        self._package_validator = package_validator
+        self._content_module_guard = content_module_guard
+
+    def _guard_package_mutation(self, plugin_id: str, action: str) -> None:
+        """Ask the injected guard before changing/removing installed package bytes."""
+
+        guard = self._content_module_guard
+        if guard is None:
+            return
+        guard(str(plugin_id or ""), str(action))
+
+    def _validate_package_before_install(
+        self, plugin_dir: Path, manifest: dict[str, Any], expected_plugin_type: str,
+    ) -> None:
+        """Run the injected package validator inside the install transaction."""
+
+        plugin_type = str(manifest.get("plugin_type") or "")
+        if expected_plugin_type and plugin_type != expected_plugin_type:
+            raise ValueError(
+                f"该接口只接受 {expected_plugin_type} 包，实际为 {plugin_type or 'missing'}"
+            )
+        validator = self._package_validator
+        if validator is None:
+            return
+        validator(plugin_dir, dict(manifest))
+
     async def install_from_zip(
         self,
         payload: bytes,
         *,
         overwrite: bool = False,
         allow_any_root: bool = False,
+        expected_plugin_type: str = "",
     ) -> PluginPublicDetail:
         if not payload:
             raise ValueError("插件包为空")
@@ -562,13 +613,21 @@ class PluginHost:
             temp_dir = Path(temp_name)
             self._extract_zip(payload, temp_dir)
             source_dir = self._find_install_root(temp_dir)
-            plugin_id, _runtime = self._load_runtime(source_dir, require_directory_match=False)
+            plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
             if not allow_any_root and source_dir != temp_dir and source_dir.name != plugin_id:
                 raise ValueError("插件包顶层目录名必须与插件 ID 一致")
             target_dir = (self.plugins_dir / plugin_id).resolve()
             self._ensure_inside(self.plugins_dir, target_dir)
             if target_dir.exists() and not overwrite:
                 raise ValueError(f"插件 {plugin_id} 已存在；如需更新请启用覆盖安装")
+
+            # FIX-01 §3.4/§3.5：包校验与 bound-save guard 必须在任何 mutation
+            # （staging/rename/元数据写入）之前完成。
+            self._validate_package_before_install(
+                source_dir, dict(runtime.manifest), expected_plugin_type,
+            )
+            if target_dir.exists():
+                self._guard_package_mutation(plugin_id, "overwrite")
 
             staging_dir = (self.plugins_dir / f".{plugin_id}.installing-{secrets.token_hex(6)}").resolve()
             backup_dir = (self.plugins_dir / f".{plugin_id}.backup-{secrets.token_hex(6)}").resolve()
@@ -624,11 +683,18 @@ class PluginHost:
             lock = self._install_locks[plugin_id] = asyncio.Lock()
         return lock
 
-    async def install_from_marketplace(self, plugin_id: str, *, overwrite: bool = False) -> dict[str, Any]:
+    async def install_from_marketplace(
+        self, plugin_id: str, *, overwrite: bool = False, expected_plugin_type: str = "",
+    ) -> dict[str, Any]:
         async with self._install_lock(plugin_id):
-            return await self._install_from_marketplace_unlocked(plugin_id, overwrite=overwrite)
+            return await self._install_from_marketplace_unlocked(
+                plugin_id, overwrite=overwrite,
+                expected_plugin_type=expected_plugin_type,
+            )
 
-    async def _install_from_marketplace_unlocked(self, plugin_id: str, *, overwrite: bool = False) -> dict[str, Any]:
+    async def _install_from_marketplace_unlocked(
+        self, plugin_id: str, *, overwrite: bool = False, expected_plugin_type: str = "",
+    ) -> dict[str, Any]:
         package = await self.marketplace.package_for_plugin(plugin_id)
         if not package.get("ok"):
             raise ValueError(str(package.get("error") or "插件市场安装失败"))
@@ -649,7 +715,10 @@ class PluginHost:
                 "up_to_date": True,
                 **self.public_detail(plugin_id),
             }
-        detail = await self.install_from_zip(package["payload"], overwrite=overwrite, allow_any_root=True)
+        detail = await self.install_from_zip(
+            package["payload"], overwrite=overwrite, allow_any_root=True,
+            expected_plugin_type=expected_plugin_type,
+        )
         self._save_marketplace_metadata(plugin_id, {
             "repository_url": market_item.get("repository_url", ""),
             "release_tag": market_item.get("release_tag", ""),
@@ -712,6 +781,9 @@ class PluginHost:
         runtime = self._require(plugin_id)
         if runtime.source == "builtin":
             raise ValueError("内置插件不可卸载")
+        # FIX-01 §3.5：删除 package bytes 前必须过 bound-save guard（与覆盖安装
+        # 同一条 choke point，任何入口都绕不过）。
+        self._guard_package_mutation(plugin_id, "uninstall")
         await self.stop(plugin_id)
         plugin_dir = runtime.directory.resolve()
         self._ensure_inside(self.plugins_dir, plugin_dir)
@@ -1282,6 +1354,25 @@ class PluginHost:
         """Validate a package archive and return its declared plugin identity."""
 
         return self._inspect_zip_manifest(payload)
+
+    def validate_package(self, payload: bytes, validate: Callable[[Path, dict[str, Any]], Any]) -> Any:
+        """Extract a package and run ``validate(directory, manifest)`` inside it.
+
+        FIX-01 §3.3：预览必须能对**已解压的真实包**做同一套深度校验，而不是只看
+        manifest；临时目录的生命周期由宿主管理，校验结果原样返回。
+        """
+
+        if not payload:
+            raise ValueError("插件包为空")
+        if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
+            raise ValueError("插件包不能超过 20 MB")
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="plugin-validate-", dir=str(self.data_dir)) as temp_name:
+            temp_dir = Path(temp_name)
+            self._extract_zip(payload, temp_dir)
+            source_dir = self._find_install_root(temp_dir)
+            _plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
+            return validate(source_dir, dict(runtime.manifest))
 
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:

@@ -12,13 +12,16 @@ GameKey = tuple[str, ...]
 class MemoryRepository(Protocol):
     def recall(
         self, game_key: str, keywords: list[str], limit: int, offset: int,
+        *, viewer_is_gm: bool,
     ) -> list[dict[str, Any]]: ...
 
     def list_entries(
-        self, game_key: str, limit: int, offset: int,
+        self, game_key: str, limit: int, offset: int, *, viewer_is_gm: bool,
     ) -> list[dict[str, Any]]: ...
 
-    def count_entries(self, game_key: str, keyword: str = "") -> int: ...
+    def count_entries(
+        self, game_key: str, keyword: str = "", *, viewer_is_gm: bool,
+    ) -> int: ...
     async def edit_entry(
         self, game_key: str, entry_id: int, updates: dict[str, Any],
     ) -> bool: ...
@@ -39,14 +42,23 @@ def _memory_namespace(dependencies: MemoryDependencies, game_key: str) -> str:
 
 
 def list_memories(dependencies: MemoryDependencies, game_key: str, keyword: str = "",
-                  limit: int = 20, offset: int = 0) -> dict[str, Any]:
+                  limit: int = 20, offset: int = 0, *,
+                  viewer_is_gm: bool) -> dict[str, Any]:
+    """列出记忆；``viewer_is_gm`` 决定是否包含 GM 私有记忆（FIX-05 §7.4）。"""
+
     # game_key 来自 URL（# 分隔），需转为 str(tuple) 与存储路径一致
     gk = _memory_namespace(dependencies, game_key)
     if keyword:
-        entries = dependencies.repository.recall(gk, [keyword], limit, offset)
+        entries = dependencies.repository.recall(
+            gk, [keyword], limit, offset, viewer_is_gm=viewer_is_gm,
+        )
     else:
-        entries = dependencies.repository.list_entries(gk, limit, offset)
-    total = dependencies.repository.count_entries(gk, keyword)
+        entries = dependencies.repository.list_entries(
+            gk, limit, offset, viewer_is_gm=viewer_is_gm,
+        )
+    total = dependencies.repository.count_entries(
+        gk, keyword, viewer_is_gm=viewer_is_gm,
+    )
     return {"memories": entries, "total": total}
 
 
@@ -72,9 +84,11 @@ class MemoryService:
 
     def list(
         self, game_key: str, keyword: str = "", limit: int = 20, offset: int = 0,
+        *, viewer_is_gm: bool,
     ) -> dict[str, Any]:
         return list_memories(
             self._dependencies, game_key, keyword, limit, offset,
+            viewer_is_gm=viewer_is_gm,
         )
 
     async def update(

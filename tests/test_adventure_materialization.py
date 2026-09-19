@@ -12,7 +12,7 @@ import pytest
 from src.adventures.bundle import AdventureBundleLoader
 from src.adventures.materialization import world_entity_id, world_seed_ops
 from src.engine.game_instance import GameInstance
-from src.engine.world.materialization import materialize_world_seed
+from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.world_state import world_entities
 
 

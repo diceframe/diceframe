@@ -584,10 +584,23 @@ def queue_proposal(
     """Queue one idempotent proposal; no balance is changed here."""
 
     amount = int(amount)
-    if not 0 < amount <= MAX_ECONOMY_AMOUNT:
-        raise ValueError("economy amount is out of range")
+    kind = str(kind)
     if kind not in ECONOMY_KINDS:
         raise ValueError("unsupported economy proposal kind")
+    named_rewards = [
+        reward for reward in (rewards or [])
+        if isinstance(reward, dict) and str(reward.get("name") or "").strip()
+    ]
+    if kind == "reward":
+        # FIX-08 §10 步骤 12：``reward`` 允许 ``amount = 0`` —— "只给物品、不给
+        # 货币"的奖励本来就没有金额。但零金额提案必须真的带物品，否则它什么都不做
+        # （宁可拒绝，也不留一条永远无效果的空提案）。
+        if not 0 <= amount <= MAX_ECONOMY_AMOUNT:
+            raise ValueError("economy amount is out of range")
+        if amount == 0 and not named_rewards:
+            raise ValueError("a zero-amount reward proposal requires item rewards")
+    elif not 0 < amount <= MAX_ECONOMY_AMOUNT:
+        raise ValueError("economy amount is out of range")
     if approval_policy not in APPROVAL_POLICIES:
         raise ValueError("unsupported economy approval policy")
     if kind in PAYER_ECONOMY_KINDS and approval_policy != "payer":
@@ -842,6 +855,37 @@ def filter_unconfirmed_purchase_grants(
     return removed
 
 
+def _grant_rewards_with_snapshot(
+    instance: Any,
+    recipient_uid: str,
+    rewards: list[dict[str, Any]],
+    grant_reward: Callable[[dict[str, Any], dict[str, Any]], None],
+    reward_snapshots: list[dict[str, Any]],
+) -> None:
+    """Grant one settlement's item rewards and record their absolute before-image.
+
+    FIX-08：付款/购买与纯物品奖励（``amount = 0``）共用这一条发放路径，所以
+    "整轮回滚能精确还原物品"对两者同样成立（ADR 0003：靠绝对 before-image，
+    不做选择性 diff）。
+    """
+
+    recipient = instance.get_character_sheet(recipient_uid)
+    reward_snapshots.append({
+        "recipient_uid": recipient_uid,
+        "before": {
+            key: deepcopy(recipient.get(key, []))
+            for key in ("inventory", "equipment", "key_items")
+        },
+    })
+    for reward in rewards:
+        grant_reward(recipient, reward)
+    instance.set_character_sheet(recipient_uid, recipient)
+    reward_snapshots[-1]["after"] = {
+        key: deepcopy(recipient.get(key, []))
+        for key in ("inventory", "equipment", "key_items")
+    }
+
+
 def resolve_proposal(
     instance: Any,
     proposal_id: str,
@@ -902,7 +946,9 @@ def resolve_proposal(
         }
 
     amount = int(proposal.get("amount", 0) or 0)
-    if not 0 < amount <= MAX_ECONOMY_AMOUNT:
+    # FIX-08：零金额只在 ``reward``（纯物品奖励）下合法；付款/购买永远需要正金额。
+    minimum = 0 if kind == "reward" else 1
+    if amount < minimum or amount > MAX_ECONOMY_AMOUNT:
         return {"ok": False, "code": "INVALID_AMOUNT", "error": "经济金额无效"}
     entries: list[dict[str, Any]] = []
     reward_snapshots: list[dict[str, Any]] = []
@@ -941,36 +987,39 @@ def resolve_proposal(
             "after": None,
         })
         if rewards and grant_reward:
-            recipient = instance.get_character_sheet(recipient_uid)
-            reward_snapshots.append({
-                "recipient_uid": recipient_uid,
-                "before": {
-                    key: deepcopy(recipient.get(key, []))
-                    for key in ("inventory", "equipment", "key_items")
-                },
-            })
-            for reward in rewards:
-                grant_reward(recipient, reward)
-            instance.set_character_sheet(recipient_uid, recipient)
-            reward_snapshots[-1]["after"] = {
-                key: deepcopy(recipient.get(key, []))
-                for key in ("inventory", "equipment", "key_items")
-            }
+            _grant_rewards_with_snapshot(
+                instance, recipient_uid, rewards, grant_reward, reward_snapshots,
+            )
     elif kind == "reward":
         if recipient_uid not in instance.players:
             return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": "奖励角色不存在"}
+        rewards = list(proposal.get("rewards") or [])
+        if rewards and grant_reward is None:
+            # 有物品奖励却没有发放通道时绝不能提交：那会留下"提案已结算、物品没到
+            # 手"的半截状态。宁可 fail closed 让调用方补上通道。
+            return {
+                "ok": False, "code": "REWARD_UNSUPPORTED",
+                "error": "物品奖励缺少发放通道",
+            }
         recipient = instance.get_character_sheet(recipient_uid)
-        currency = recipient.get("currency") if isinstance(recipient.get("currency"), dict) else {}
-        before = int(currency.get("amount", recipient.get("gold", 0)) or 0)
-        after = apply_currency_delta(recipient, amount)
-        instance.set_character_sheet(recipient_uid, recipient)
-        entries.append({"account": f"character:{recipient_uid}", "delta": amount, "before": before, "after": after})
-        entries.append({
-            "account": "system:world",
-            "delta": -amount,
-            "before": None,
-            "after": None,
-        })
+        if amount:
+            currency = recipient.get("currency") if isinstance(recipient.get("currency"), dict) else {}
+            before = int(currency.get("amount", recipient.get("gold", 0)) or 0)
+            after = apply_currency_delta(recipient, amount)
+            instance.set_character_sheet(recipient_uid, recipient)
+            entries.append({"account": f"character:{recipient_uid}", "delta": amount, "before": before, "after": after})
+            entries.append({
+                "account": "system:world",
+                "delta": -amount,
+                "before": None,
+                "after": None,
+            })
+        if rewards:
+            # FIX-08 §10 步骤 12：纯物品奖励（amount = 0）也走同一条结算路径——
+            # 物品仍然只在这里写，并记录 before-image，整轮回滚照旧能精确还原。
+            _grant_rewards_with_snapshot(
+                instance, recipient_uid, rewards, grant_reward, reward_snapshots,
+            )
     else:
         return {"ok": False, "code": "UNSUPPORTED_KIND", "error": "不支持的经济提案类型"}
 

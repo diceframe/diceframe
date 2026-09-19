@@ -81,7 +81,7 @@ async def test_successful_plugin_install_refreshes_module_read_models(monkeypatc
     api._sync_plugin_adventure_sources = lambda: refreshed.append("adventures")
     api._sync_module_catalogs = lambda: refreshed.append("catalogs")
 
-    async def install(_dependencies, _payload, _overwrite):
+    async def install(_dependencies, _payload, _overwrite, **_kwargs):
         return {"ok": True, "id": "castle-module"}
 
     monkeypatch.setattr(plugins, "install_plugin", install)

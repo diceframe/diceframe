@@ -94,7 +94,9 @@ def test_rollback_supersedes_pending_and_reverses_delivered_world_memory(tmp_pat
         asyncio.run(instance.finish_judgment("一声巨响，桥塌了。"))
 
         def recalled(entity_kw: str) -> list[tuple[str, str]]:
-            rows = store.recall(str(instance.game_key), [entity_kw], limit=10)
+            rows = store.recall(
+            str(instance.game_key), [entity_kw], limit=10, viewer_is_gm=True,
+        )
             return [(row["entity"], row["value"]) for row in rows]
 
         assert recalled("rel:bridge-road"), "投递后记忆应可召回"
@@ -143,7 +145,9 @@ def test_swipe_branch_cut_reverses_world_memory_of_the_cut_round(tmp_path) -> No
                 str(instance.game_key), str(delivery["id"]),
             ))
             complete_memory_reversal(instance, str(delivery["id"]))
-        rows = store.recall(str(instance.game_key), ["npc:count"], limit=10)
+        rows = store.recall(
+            str(instance.game_key), ["npc:count"], limit=10, viewer_is_gm=True,
+        )
         assert rows == []
     finally:
         store.close()

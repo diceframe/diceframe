@@ -84,6 +84,15 @@ class Dnd2024CampaignEngine:
             if isinstance(item, dict) and item.get("id")
         }
         start_step = str((self.adventure or {}).get("start_step_id") or "")
+        # FIX-04 §6.9：Adventure v2 图不是 v1 steps/choices 模型——它的推进由
+        # application 层的 adventure_progress 权威决定。这里只做"v2 图不接受
+        # v1 校验/不伪造 v1 tutorial"的分支，v1 行为完全不变。
+        self.is_v2_adventure = bool(
+            self.adventure is not None and not self.steps
+            and (self.adventure.get("start_node_ids") or self.adventure.get("nodes"))
+        )
+        if self.is_v2_adventure:
+            return
         if self.adventure is not None and start_step not in self.steps:
             raise CampaignIntentError("starter adventure start_step_id is invalid")
         for step_id, step in self.steps.items():
@@ -126,7 +135,12 @@ class Dnd2024CampaignEngine:
             "proposals": {},
             "entities": {kind: {} for kind in sorted(ENTITY_KINDS)},
             "tutorial": {
-                "status": "not_started" if self.adventure is not None else "unavailable",
+                # v2：v1 tutorial 不适用（推进由 adventure_progress 权威决定）。
+                "status": (
+                    "not_applicable" if getattr(self, "is_v2_adventure", False)
+                    else "not_started" if self.adventure is not None
+                    else "unavailable"
+                ),
                 "adventure_id": "",
                 "current_step_id": "",
                 "history": [],

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.webui.ruleset_draft_validation import validate_draft_shape
+from src.adventures import binding_matches
 from src.rulesets.automation import (
     advance_automatic_intents,
     append_public_timeline_entry,
@@ -34,11 +35,14 @@ class RulesetGameplayDependencies:
     parse_game_key: Callable[[str], tuple[str, ...]]
     load_rule_for_game: Callable[[Any], Any | None]
     ruleset_registry: RulesetRuntimeRegistry
-    resolve_adventure_binding: Callable[[str, Any, str, str], dict[str, Any]]
+    resolve_adventure_binding: Callable[..., dict[str, Any]]
     save_instance: Callable[[Any], Awaitable[None]]
     apply_memory_delta: Callable[[str, dict[str, Any], int], Awaitable[Any]] | None
     # AI 临时遭遇等只读 LLM 提案使用；None 表示环境没有可用的 AI 服务商。
     resolve_llm_client: Callable[[], Any | None] | None = None
+    # Existing authoritative-intent HTTP seam for Adventure v2 completion.
+    # The callback is explicit so this service never reaches through WebAPI.
+    complete_adventure_node: Callable[[Any, str, str, str], dict[str, Any]] | None = None
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
@@ -191,15 +195,31 @@ async def _ensure_compatible_adventure_binding(
     if not binding:
         return None
     try:
-        expected = dependencies.resolve_adventure_binding(
-            str(binding.get("adventure_id") or ""),
-            runtime,
-            str(getattr(instance, "world_id", "") or ""),
-            str(getattr(instance, "language", "") or ""),
-        )
+        try:
+            expected = dependencies.resolve_adventure_binding(
+                str(binding.get("adventure_id") or ""),
+                runtime,
+                str(getattr(instance, "world_id", "") or ""),
+                str(getattr(instance, "language", "") or ""),
+                str(binding.get("source_kind") or ""),
+                str(binding.get("source_id") or ""),
+            )
+        except TypeError:
+            # Older standalone harnesses expose the original four-argument
+            # resolver.  Production composition always uses the source-aware
+            # signature above; this compatibility branch cannot select a
+            # source in a real WebAPI process.
+            expected = dependencies.resolve_adventure_binding(
+                str(binding.get("adventure_id") or ""),
+                runtime,
+                str(getattr(instance, "world_id", "") or ""),
+                str(getattr(instance, "language", "") or ""),
+            )
     except ValueError as exc:
         return _error("INCOMPATIBLE_ADVENTURE", str(exc))
-    if binding == expected:
+    # FIX-02 §4.2：形状感知比较——旧存档的 5 字段绑定与重新解析出的来源感知
+    # 绑定视为同一包；只有包身份真的变了才进入迁移/失败路径。
+    if binding_matches(binding, expected):
         return None
     if not isinstance(runtime, AdventureBindingMigrationRuntime):
         return _error(
@@ -345,6 +365,54 @@ async def submit_intent(
     )
     if error:
         return error
+    # Adventure v2 completion is a GM-authorized application command that
+    # deliberately reuses the normal authenticated intent endpoint.  It is not
+    # a ruleset runtime event and therefore must be dispatched before the
+    # concrete runtime validates its own intent vocabulary.
+    if isinstance(body, dict) and body.get("type") == "adventure.node.complete":
+        if not requester_is_gm:
+            return _error("GM_ONLY", "只有 GM 可以确认冒险节点完成")
+        node_id = str(body.get("node_id") or "").strip()
+        if not node_id:
+            return _error("INVALID_ADVENTURE_NODE", "node_id is required")
+        if dependencies.complete_adventure_node is None:
+            return _error("ADVENTURE_RUNTIME_UNAVAILABLE", "Adventure v2 runtime is unavailable")
+        async with instance._lock:
+            binding_error = await _ensure_compatible_adventure_binding(
+                dependencies, runtime, instance,
+            )
+            if binding_error:
+                return binding_error
+            before = {
+                "world_state": deepcopy(getattr(instance, "world_state", None)),
+                "adventure_progress": deepcopy(getattr(instance, "adventure_progress", None)),
+                "economy": deepcopy(getattr(instance, "economy", None)),
+            }
+            try:
+                completed = dependencies.complete_adventure_node(
+                    instance, node_id, effective_requester, effective_requester,
+                )
+                await dependencies.save_instance(instance)
+            except (ValueError, KeyError, TypeError) as exc:
+                for field, value in before.items():
+                    if value is not None:
+                        setattr(instance, field, value)
+                return _error("ADVENTURE_NODE_REJECTED", str(exc))
+            except Exception:
+                for field, value in before.items():
+                    if value is not None:
+                        setattr(instance, field, value)
+                logger.exception("Adventure node transaction failed and was restored")
+                return _error(
+                    "ADVENTURE_NODE_FAILED",
+                    "冒险节点结算失败，权威状态已恢复，请重试",
+                )
+            return _response(
+                dependencies, rule, runtime, instance, effective_requester,
+                requester_is_gm=True,
+                result={"adventure_node": completed},
+            )
+
     try:
         intent = deepcopy(validate_draft_shape(body))
     except ValueError as exc:

@@ -11,11 +11,13 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
-from src.engine.economy import resolve_auto_reward_policy
+from src.engine.economy import queue_proposal, resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
+from src.engine import persistence
+from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.lorebook.store import LorebookStore
-from src.adventures import AdventureBundleLoader
+from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
@@ -28,6 +30,7 @@ from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
 from src.webui.services import combat_extension as combat_extension_service
+from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
@@ -155,12 +158,12 @@ class WebAPI:
         self._builtin_adventures_dir = (
             Path(__file__).parent.parent.parent / "templates" / "adventures"
         ).resolve()
-        self._adventure_loader = AdventureBundleLoader(
-            adventures_dir or self._builtin_adventures_dir
-        )
-        # MOD-02：builtin/user 双来源统一注册表（plugin 来源随 MOD-03 注册）。
+        # FIX-02 §4.1：唯一的 AdventureResolver。builtin（runtime 数据目录里的
+        # 同步副本或发布目录）/ user（不含 builtin 标记的目录）/ plugin（模组声明）
+        # 三类来源由它统一解析；WebAPI 与 D&D Runtime 共用同一个实例
+        # （见下方 set_adventure_resolver 注入）。
         self._dnd_module_catalogs: list[tuple[str, Any]] = []
-        self._adventure_source_registry = AdventureSourceRegistry.from_directories(
+        self._adventure_resolver = AdventureResolver.from_directories(
             self._builtin_adventures_dir,
             (
                 adventures_dir
@@ -169,6 +172,21 @@ class WebAPI:
                 else None
             ),
         )
+        self._adventure_source_registry = self._adventure_resolver.registry
+        self._adventure_loader = self._adventure_resolver
+        # 让 runtime（D&D load_adventure）也走同一个 resolver，消除双解析路径。
+        self._ruleset_registry.set_adventure_resolver(self._adventure_resolver)
+        # FIX-03 §5.2：把"模组 catalog 来源"注入 runtime；gameplay catalog 的
+        # 链路与解析语义留在 runtime，WebAPI 不拥有它。
+        self._ruleset_registry.set_module_content_sources(self.module_content_sources)
+        # Some embedders construct GameHandler before WebAPI and provide it a
+        # distinct registry.  Its RoundProcessor is still a production path,
+        # so inject the same application-owned sources there as well instead
+        # of letting it silently fall back to a private Adventure loader.
+        handler_registry = getattr(self._handler, "ruleset_registry", None)
+        if handler_registry is not None and handler_registry is not self._ruleset_registry:
+            handler_registry.set_adventure_resolver(self._adventure_resolver)
+            handler_registry.set_module_content_sources(self.module_content_sources)
         self._character_cards_path = self._reg.save_dir.parent / "character_cards.json"
         self._character_dependencies = characters.CharacterDependencies(
             games=characters.CharacterGameDependencies(
@@ -413,7 +431,40 @@ class WebAPI:
             adventure_registry=self._adventure_source_registry,
             ruleset_registry=self._ruleset_registry,
             list_instances=self._reg.list_all,
+            # FIX-01 §3.7：绑定存档保护必须覆盖所有持久化存档（paused / ended /
+            # 加载失败但元数据可读），不能只看内存 active GameInstance。
+            list_save_metadata=lambda: persistence.scan_save_metadata(self._reg),
+            # FIX-01 §3.6：destructive module action 前刷新来源注册表。
+            refresh_adventure_sources=self._sync_plugin_adventure_sources,
+            default_runtime_requirement=default_adventure_runtime_requirement,
+            # FIX-06 §8：在线模组区块复用既有插件市场索引（含 installed 判定）。
+            list_marketplace_plugins=(
+                self._plugins.marketplace_plugins if self._plugins is not None else None
+            ),
         )
+        self._adventure_runtime_dependencies = adventure_runtime.AdventureRuntimeDependencies(
+            resolve_binding=lambda instance: self._adventure_resolver.resolve_binding(
+                getattr(instance, "adventure_binding", None) or {},
+                str(getattr(instance, "language", "") or ""),
+            ),
+            materialize_world_seed=materialize_world_seed,
+            rules_evaluator=lambda instance: self._adventure_runtime_adapter(
+                instance, "adventure_rules_evaluator",
+            ),
+            reward_converter=lambda instance: self._adventure_runtime_adapter(
+                instance, "adventure_reward_converter",
+            ),
+            # FIX-08 §10 步骤 12：item_reward 的权威出口（既有 reward proposal /
+            # GM 确认 / rollback 快照），adventure runtime 绝不直接写 inventory。
+            queue_reward_intents=self._queue_adventure_reward_intents,
+            save_instance=self._reg.save,
+        )
+        if self._handler is not None and hasattr(self._handler, "set_adventure_world_advance"):
+            self._handler.set_adventure_world_advance(
+                lambda instance: adventure_runtime.advance_adventure_world(
+                    self._adventure_runtime_dependencies, instance,
+                )
+            )
         self._world_dependencies = worlds.WorldDependencies(
             lorebook=self._lore,
             worlds_dir=self._worlds_dir,
@@ -488,6 +539,7 @@ class WebAPI:
         self._adventure_dependencies = adventures.AdventureDependencies(
             adventure_loader=self._adventure_loader,
             adventure_registry=self._adventure_source_registry,
+            adventure_resolver=self._adventure_resolver,
             list_instances=self._reg.list_all,
             load_rule_by_id=self._load_rule_by_id,
             ruleset_registry=self._ruleset_registry,
@@ -500,14 +552,23 @@ class WebAPI:
                 parse_game_key=_parse_game_key,
                 load_rule_for_game=self._load_rule_for_game,
                 ruleset_registry=self._ruleset_registry,
-                resolve_adventure_binding=lambda adventure_id, runtime, world_id, language: adventures.resolve_binding_for_runtime(
+                resolve_adventure_binding=lambda adventure_id, runtime, world_id, language, source_kind="", source_id="": adventures.resolve_binding_for_runtime(
                     self._adventure_dependencies,
                     adventure_id,
                     runtime,
                     world_id,
                     language,
+                    source_kind=source_kind,
+                    source_id=source_id,
                 ),
                 save_instance=self._reg.save,
+                complete_adventure_node=lambda instance, node_id, recipient_uid, actor_uid: adventure_runtime.complete_adventure_node(
+                    self._adventure_runtime_dependencies,
+                    instance,
+                    node_id,
+                    recipient_uid=recipient_uid,
+                    actor_uid=actor_uid,
+                ),
                 apply_memory_delta=(
                     self._mem.apply_delta if self._mem is not None else None
                 ),
@@ -696,12 +757,18 @@ class WebAPI:
                 parse_game_key=_parse_game_key,
                 llm_configuration_error=self._llm_configuration_error,
                 load_rule_by_id=self._load_rule_by_id,
-                resolve_adventure_binding=lambda adventure_id, runtime, world_id, language: adventures.resolve_binding_for_runtime(
+                resolve_adventure_binding=lambda adventure_id, runtime, world_id, language, source_kind="", source_id="": adventures.resolve_binding_for_runtime(
                     self._adventure_dependencies,
                     adventure_id,
                     runtime,
                     world_id,
                     language,
+                    source_kind=source_kind,
+                    source_id=source_id,
+                ),
+                # FIX-04 §6.5：v2 冒险的创建事务步骤（进度 + 原子世界种子）。
+                initialize_adventure_run=lambda instance: adventure_runtime.initialize_adventure_run(
+                    self._adventure_runtime_dependencies, instance,
                 ),
                 resolve_default_scene_image=self.resolve_default_scene_image,
                 materialize_scene_image=self.materialize_scene_image,
@@ -781,6 +848,13 @@ class WebAPI:
     def list_modules(self) -> dict[str, Any]:
         return modules.list_modules(self._module_dependencies)
 
+    async def list_module_marketplace(self, keyword: str = "") -> dict[str, Any]:
+        """Online content-module catalogue for the modules view (FIX-06 §8)."""
+
+        return await modules.module_marketplace(
+            self._module_dependencies, keyword=keyword,
+        )
+
     def module_detail(self, module_id: str) -> dict[str, Any]:
         return modules.module_detail(self._module_dependencies, module_id)
 
@@ -803,8 +877,43 @@ class WebAPI:
     def preview_module_import(self, payload: bytes) -> dict[str, Any]:
         if self._plugins is None:
             return {"ok": False, "error": "插件宿主未启用"}
-        _, manifest = self._plugins.inspect_package_manifest(payload)
-        return modules.preview_module_install(self._module_dependencies, manifest)
+        # FIX-01 §3.3：预览与安装共用同一套深度校验（真实解压 + Adventure/catalog
+        # 真装载），所以"预览显示 blocker"与"直接 API 安装被拒"结论一致。
+        return self._plugins.validate_package(
+            payload,
+            lambda directory, manifest: modules.preview_module_install(
+                self._module_dependencies, manifest, directory=directory,
+            ),
+        )
+
+    def validate_module_package(
+        self, directory: Any, manifest: dict[str, Any],
+    ) -> None:
+        """Install-transaction hook: refuse the package when it has blockers."""
+
+        modules.validate_module_directory(
+            self._module_dependencies, directory, manifest,
+            require_content_pack=False,
+        )
+
+    def guard_module_mutation(self, plugin_id: str, action: str) -> None:
+        """Package-mutation hook shared by every install/uninstall path."""
+
+        modules.assert_module_action_allowed(
+            self._module_dependencies, plugin_id, action,
+        )
+
+    def attach_package_hooks(self, plugin_host: Any) -> None:
+        """Wire the FIX-01 install-transaction hooks onto the plugin host.
+
+        单一接线点：bootstrap 与测试共用，保证本地导入 / 市场安装 / 覆盖安装 /
+        后台自动更新 / 卸载都经过同一条校验与 bound-save guard。
+        """
+
+        plugin_host.set_package_hooks(
+            package_validator=self.validate_module_package,
+            content_module_guard=self.guard_module_mutation,
+        )
 
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)
@@ -955,26 +1064,37 @@ class WebAPI:
             modules.assert_module_action_allowed(
                 self._module_dependencies, plugin_id, "disable",
             )
-        return await plugins.update_plugin_config(
+        result = await plugins.update_plugin_config(
             self._plugin_lifecycle_dependencies, plugin_id, changes,
         )
+        if result.get("ok"):
+            # FIX-07：启用/禁用会改变模块贡献的内容 → 立刻刷新来源与 catalog 链，
+            # 否则"启用模组后马上开局"会解析不到它的冒险（解析不得依赖
+            # "碰巧同步过 registry"，与 §3.6 同一原则）。
+            self.refresh_content_sources()
+        return result
 
     async def control_plugin(self, plugin_id: str, action: str) -> dict[str, Any]:
         if action == "stop":
             modules.assert_module_action_allowed(
                 self._module_dependencies, plugin_id, "disable",
             )
-        return await plugins.control_plugin(
+        result = await plugins.control_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, action,
         )
+        if result.get("ok"):
+            self.refresh_content_sources()
+        return result
 
-    async def install_plugin(self, payload: bytes, overwrite: bool = False) -> dict[str, Any]:
+    async def install_plugin(
+        self, payload: bytes, overwrite: bool = False, expected_plugin_type: str = "",
+    ) -> dict[str, Any]:
         result = await plugins.install_plugin(
             self._plugin_lifecycle_dependencies, payload, overwrite,
+            expected_plugin_type=expected_plugin_type,
         )
         if result.get("ok"):
-            self._sync_plugin_adventure_sources()
-            self._sync_module_catalogs()
+            self.refresh_content_sources()
         return result
 
     async def list_plugin_marketplace(self) -> dict[str, Any]:
@@ -982,26 +1102,36 @@ class WebAPI:
             self._plugin_host_dependencies,
         )
 
-    async def install_marketplace_plugin(self, plugin_id: str, overwrite: bool = False) -> dict[str, Any]:
+    async def install_marketplace_plugin(
+        self, plugin_id: str, overwrite: bool = False, expected_plugin_type: str = "",
+    ) -> dict[str, Any]:
         result = await plugins.install_marketplace_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, overwrite,
+            expected_plugin_type=expected_plugin_type,
         )
         if result.get("ok"):
-            self._sync_plugin_adventure_sources()
-            self._sync_module_catalogs()
+            self.refresh_content_sources()
         return result
 
     async def import_module(self, payload: bytes, overwrite: bool = False) -> dict[str, Any]:
-        """Install a local content-module package through the canonical host."""
+        """Install a local content-module package through the canonical host.
 
-        return await self.install_plugin(payload, overwrite)
+        FIX-01 §3.1：模组安装面只接受 data-only content-pack——类型门在服务端
+        package inspection 之后强制（前端分类不可信）。
+        """
+
+        return await self.install_plugin(
+            payload, overwrite, expected_plugin_type=modules.MODULE_PLUGIN_TYPE,
+        )
 
     async def install_marketplace_module(
         self, module_id: str, overwrite: bool = False,
     ) -> dict[str, Any]:
         """Install a marketplace content module through the canonical host."""
 
-        return await self.install_marketplace_plugin(module_id, overwrite)
+        return await self.install_marketplace_plugin(
+            module_id, overwrite, expected_plugin_type=modules.MODULE_PLUGIN_TYPE,
+        )
 
     async def update_marketplace_plugin(self, plugin_id: str) -> dict[str, Any]:
         modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "update")
@@ -1011,9 +1141,12 @@ class WebAPI:
 
     async def uninstall_plugin(self, plugin_id: str, delete_data: bool = False) -> dict[str, Any]:
         modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "uninstall")
-        return await plugins.uninstall_plugin(
+        result = await plugins.uninstall_plugin(
             self._plugin_lifecycle_dependencies, plugin_id, delete_data,
         )
+        if result.get("ok"):
+            self.refresh_content_sources()
+        return result
 
     def list_plugin_mirrors(self) -> dict[str, Any]:
         return plugins.list_plugin_mirrors(self._plugin_host_dependencies)
@@ -1204,6 +1337,78 @@ class WebAPI:
     def _load_runtime_for_game(self, inst):
         rule = self._load_rule_for_game(inst)
         return self._ruleset_registry.resolve(rule.template) if rule else None
+
+    def _adventure_runtime_adapter(self, instance: Any, hook: str) -> Any:
+        """Ask the instance's ruleset runtime for an adventure adapter (FIX-04).
+
+        ``rules.*`` gate 求值与 ``item_reward`` 转换都属于 ruleset 的职责
+        （D&D 实现见 Dnd2024Runtime）；其它 runtime 没有该能力时返回 None →
+        gate 证据不足 = 不放行 / reward 缺少转换器 = fail closed。
+        """
+
+        try:
+            runtime = self._load_runtime_for_game(instance)
+        except Exception:  # noqa: BLE001 - 适配器缺席不等于放行
+            return None
+        getter = getattr(runtime, hook, None)
+        if not callable(getter):
+            return None
+        try:
+            return getter(instance)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _queue_adventure_reward_intents(
+        self, instance: Any, intents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """FIX-08 §10 步骤 12：adventure item_reward → 既有奖励提案权威。
+
+        Adventure 的 ``item_reward`` 只声明"该给什么"（reward intent）；发放必须走
+        既有 proposal/settlement 权威，**绝不直接写 inventory**：
+        ``kind="reward"`` 且 ``amount=0``（纯物品、无货币）、``approval_policy="gm"``
+        → 提案 pending，GM 用既有的支付确认路径结算，物品才由
+        ``characters.grant_reward`` 写入角色卡（带 before-image，整轮回滚可还原）。
+
+        幂等：``source_ref`` 由奖励内容 + 收件人确定（同一批奖励不会被排两次队），
+        重放/中止后同一身份会走 ``_existing_by_source`` 的既有语义。
+        """
+
+        named = [
+            {
+                "name": str(intent.get("name") or ""),
+                "category": str(intent.get("category") or ""),
+            }
+            for intent in intents or []
+            if str(intent.get("kind") or "") == "item_grant"
+            and str(intent.get("name") or "").strip()
+        ]
+        if not named:
+            return []
+        recipient_uid = str((intents or [{}])[0].get("recipient_uid") or "")
+        if not recipient_uid:
+            raise ValueError("adventure reward intent has no recipient")
+        refs = sorted({
+            f"{intent.get('ref', {}).get('source', '')}:{intent.get('ref', {}).get('id', '')}"
+            for intent in intents or []
+            if isinstance(intent.get("ref"), dict)
+        } | {reward["name"] for reward in named})
+        proposal = queue_proposal(
+            instance,
+            kind="reward",
+            amount=0,
+            recipient_uid=recipient_uid,
+            reason="冒险奖励",
+            source="adventure",
+            source_ref=f"adventure_reward:{recipient_uid}:{'|'.join(refs)}",
+            approval_policy="gm",
+            rewards=named,
+            visibility="party",
+        )
+        return [{
+            "proposal_id": str(proposal.get("id") or ""),
+            "status": str(proposal.get("status") or ""),
+            "kind": "reward",
+        }]
 
     def _project_game_rule_id(self, instance) -> str:
         return game_queries.projected_rule_id(
@@ -2079,6 +2284,17 @@ class WebAPI:
 
     # ---- 世界模板 ----
 
+    def refresh_content_sources(self) -> None:
+        """Recompute plugin adventure sources + module catalogs from host state.
+
+        FIX-07：安装 / 启用 / 停用 / 卸载 / 启动都经过这一个刷新入口。解析与目录
+        读取都不得依赖"碰巧同步过 registry"（§3.6 同一原则）——否则"启用模组后
+        马上开局"或"重启后马上开局"会解析不到模组的冒险包。
+        """
+
+        self._sync_plugin_adventure_sources()
+        self._sync_module_catalogs()
+
     def _sync_plugin_adventure_sources(self) -> None:
         """MOD-03：把启用的 content-pack 模组声明的 adventure_packages 同步为
         registry 的 plugin 来源（declared-only loader）。
@@ -2127,7 +2343,12 @@ class WebAPI:
                         "module catalog load failed: %s: %s", label, exc,
                     )
                     continue
-                sources.append((source.label, source.records))
+                # catalog_from_sources / 运行时期望 {kind: {record_id: record}}；
+                # CatalogSource.records 是 (kind, id) 键——这里统一成嵌套形状。
+                nested: dict[str, dict[str, Any]] = {}
+                for (kind, record_id), record in source.records.items():
+                    nested.setdefault(str(kind), {})[str(record_id)] = record
+                sources.append((source.label, nested))
         self._dnd_module_catalogs = sources
 
     def module_catalog(self) -> Any:
@@ -2135,11 +2356,28 @@ class WebAPI:
 
         self._sync_plugin_adventure_sources()
         self._sync_module_catalogs()
-        from src.rulesets.dnd2024.content.catalog import DndContentCatalog
+        from src.rulesets.dnd2024.content.catalog import catalog_from_sources
 
-        return DndContentCatalog([
-            (label, records) for label, records in self._dnd_module_catalogs
-        ])
+        if not self._dnd_module_catalogs:
+            return catalog_from_sources([])
+        return catalog_from_sources(self._dnd_module_catalogs)
+
+    def module_content_sources(self, instance: Any = None) -> list[tuple[str, Any]]:
+        """FIX-03 §5.1：模组 catalog 来源链（owning module 优先，其余按 label）。
+
+        只提供"哪些模组声明了哪些 catalog"这一事实；链路语义由 runtime 决定。
+        """
+
+        self._sync_module_catalogs()
+        sources = list(self._dnd_module_catalogs)
+        owning = ""
+        binding = getattr(instance, "adventure_binding", None)
+        if isinstance(binding, dict) and str(binding.get("source_kind") or "") == "plugin":
+            owning = str(binding.get("source_id") or "")
+        if owning:
+            owner_label = f"module:{owning}"
+            sources.sort(key=lambda item: 0 if item[0] == owner_label else 1)
+        return sources
 
     def list_adventures(
         self, rule_id: str = "", world_id: str = "", language: str = "",
@@ -2243,6 +2481,8 @@ class WebAPI:
                            scene_image: dict[str, Any] | None = None,
                            map_background: dict[str, Any] | None = None,
                            adventure_id: str = "",
+                           adventure_source_kind: str = "",
+                           adventure_source_id: str = "",
                            play_mode: str = "",
                            narrative_perspective: str = "auto",
                            gm_style_override: dict[str, Any] | None = None,
@@ -2259,6 +2499,8 @@ class WebAPI:
             room_password=room_password, language=language,
             scene_image=scene_image, map_background=map_background,
             adventure_id=adventure_id,
+            adventure_source_kind=adventure_source_kind,
+            adventure_source_id=adventure_source_id,
             play_mode=play_mode,
             narrative_perspective=narrative_perspective,
             gm_style_override=gm_style_override,
@@ -2372,8 +2614,13 @@ class WebAPI:
     # ---- 内存 ----
 
     def list_memories(self, game_key: str, keyword: str = "",
-                      limit: int = 20, offset: int = 0) -> dict[str, Any]:
-        return self._memory_service.list(game_key, keyword, limit, offset)
+                      limit: int = 20, offset: int = 0, *,
+                      viewer_is_gm: bool = False) -> dict[str, Any]:
+        """列出记忆；默认按玩家安全面过滤（GM 私有记忆需显式 viewer_is_gm）。"""
+
+        return self._memory_service.list(
+            game_key, keyword, limit, offset, viewer_is_gm=bool(viewer_is_gm),
+        )
 
     async def update_memory(self, game_key: str, entry_id: int, updates: dict[str, Any]) -> dict[str, Any]:
         return await self._memory_service.update(game_key, entry_id, updates)

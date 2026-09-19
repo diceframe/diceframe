@@ -112,10 +112,22 @@ def test_completing_inactive_node_fails_closed() -> None:
 def test_objectives_and_milestones_are_idempotent() -> None:
     graph = _graph()
     progress = new_progress(graph)
-    assert complete_objective(progress, "obj_crown") is True
-    assert complete_objective(progress, "obj_crown") is False
-    assert complete_milestone(progress, "mile_castle") is True
-    assert complete_milestone(progress, "mile_castle") is False
+    assert complete_objective(progress, "obj_crown", graph=graph) is True
+    assert complete_objective(progress, "obj_crown", graph=graph) is False
+    assert complete_milestone(progress, "mile_castle", graph=graph) is True
+    assert complete_milestone(progress, "mile_castle", graph=graph) is False
+
+
+def test_unknown_objective_and_milestone_fail_closed() -> None:
+    """FIX-04 §6.3：进度只能推进图上真实存在的 objective / milestone。"""
+
+    graph = _graph()
+    progress = new_progress(graph)
+
+    with pytest.raises(ProgressError, match="objective does not exist"):
+        complete_objective(progress, "obj_ghost", graph=graph)
+    with pytest.raises(ProgressError, match="milestone does not exist"):
+        complete_milestone(progress, "mile_ghost", graph=graph)
 
 
 def test_history_is_bounded() -> None:

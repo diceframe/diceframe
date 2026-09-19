@@ -111,21 +111,45 @@ def complete_node(
     return activated
 
 
-def complete_objective(progress: dict[str, Any], objective_id: str) -> bool:
+def complete_objective(
+    progress: dict[str, Any], objective_id: str, *, graph: dict[str, Any],
+) -> bool:
+    """Complete one declared objective; unknown ids fail closed (§6.3)."""
+
+    wanted = str(objective_id or "")
+    declared = {
+        str(item.get("id") or "")
+        for item in graph.get("objectives", [])
+        if isinstance(item, dict)
+    }
+    if wanted not in declared:
+        raise ProgressError(f"objective does not exist: {wanted!r}")
     completed = progress.setdefault("completed_objectives", [])
-    if objective_id in completed:
+    if wanted in completed:
         return False
-    completed.append(objective_id)
-    _append_history(progress, {"kind": "objective_completed", "id": objective_id})
+    completed.append(wanted)
+    _append_history(progress, {"kind": "objective_completed", "id": wanted})
     return True
 
 
-def complete_milestone(progress: dict[str, Any], milestone_id: str) -> bool:
+def complete_milestone(
+    progress: dict[str, Any], milestone_id: str, *, graph: dict[str, Any],
+) -> bool:
+    """Reach one declared milestone; unknown ids fail closed (§6.3)."""
+
+    wanted = str(milestone_id or "")
+    declared = {
+        str(item.get("id") or "")
+        for item in graph.get("milestones", [])
+        if isinstance(item, dict)
+    }
+    if wanted not in declared:
+        raise ProgressError(f"milestone does not exist: {wanted!r}")
     completed = progress.setdefault("completed_milestones", [])
-    if milestone_id in completed:
+    if wanted in completed:
         return False
-    completed.append(milestone_id)
-    _append_history(progress, {"kind": "milestone_reached", "id": milestone_id})
+    completed.append(wanted)
+    _append_history(progress, {"kind": "milestone_reached", "id": wanted})
     return True
 
 

@@ -4,7 +4,8 @@
 Bundle（v1 graph）推导为 WorldState v2 的初始 ``register_entity`` ops
 （plain data）。它**不 import world authority、不写任何状态**——定义层
 （Adventure）不直接触碰权威世界；应用的执行由 engine 侧的
-``src.engine.world.materialization.materialize_world_seed`` 经既有唯一写入口
+``src.webui.services.adventure_materialization.materialize_world_seed``（application
+adapter，§7.1）经既有唯一写入口
 ``apply_world_ops`` 完成（母方案 §26：定义声明，适配器转成 World Ops）。
 
 边界：

@@ -80,10 +80,15 @@ def format_recalled(entries: list[dict]) -> str:
 
 
 async def recall_and_format(store: MemoryStore, game_key: str, text: str,
-                            limit: int = 10) -> str:
-    """从 memory store 召回记忆并格式化。优先向量召回，fallback 文本匹配。"""
+                            limit: int = 10, *, viewer_is_gm: bool) -> str:
+    """从 memory store 召回记忆并格式化。优先向量召回，fallback 文本匹配。
+
+    FIX-05 §7.4：``viewer_is_gm`` 是必填的 viewer policy——调用方无法"忘记过滤"。
+    """
     try:
-        entries = await recall_best(store, game_key, text, limit=limit)
+        entries = await recall_best(
+            store, game_key, text, limit=limit, viewer_is_gm=viewer_is_gm,
+        )
         return format_recalled(entries)
     except Exception:
         logger.exception("记忆召回失败")
@@ -91,7 +96,7 @@ async def recall_and_format(store: MemoryStore, game_key: str, text: str,
 
 
 async def recall_best(store: MemoryStore, game_key: str, text: str,
-                      limit: int = 10) -> List[Dict]:
+                      limit: int = 10, *, viewer_is_gm: bool) -> List[Dict]:
     """合并向量召回与文本匹配，取并集去重后按相关度排序。
 
     向量召回捕获语义相近但字面不同的记忆，文本匹配捕获精确实体命中。
@@ -105,17 +110,23 @@ async def recall_best(store: MemoryStore, game_key: str, text: str,
         try:
             emb = await emb_client.embed(text)
             if emb:
-                vector_results = store.recall_by_vector(game_key, emb, limit=limit)
+                vector_results = store.recall_by_vector(
+                    game_key, emb, limit=limit, viewer_is_gm=viewer_is_gm,
+                )
                 if vector_results:
                     logger.debug("向量召回: %d 条", len(vector_results))
         except Exception:
             logger.exception("向量召回异常，降级文本匹配")
 
     # 2. 文本匹配（改进版：实体提取 + n-gram 打分）
-    text_results = recall_by_text_improved(store, game_key, text, limit=limit)
+    text_results = recall_by_text_improved(
+        store, game_key, text, limit=limit, viewer_is_gm=viewer_is_gm,
+    )
     if not text_results:
         # 3. 基础文本匹配（fallback）
-        text_results = store.recall_by_text(game_key, text, limit=limit)
+        text_results = store.recall_by_text(
+            game_key, text, limit=limit, viewer_is_gm=viewer_is_gm,
+        )
 
     # 合并去重：向量结果在前，文本结果补充不重复的
     seen_ids = set()
@@ -133,7 +144,7 @@ async def recall_best(store: MemoryStore, game_key: str, text: str,
 
 
 def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
-                            limit: int = 10) -> List[Dict]:
+                            limit: int = 10, *, viewer_is_gm: bool) -> List[Dict]:
     """改进版文本召回：使用实体提取 + n-gram 匹配。"""
     gk = str(game_key)
     if not text:
@@ -153,9 +164,11 @@ def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
             if len(terms) >= 20:
                 break
     if terms:
-        all_rows = store.search_active_by_terms(gk, terms, limit=1000)
+        all_rows = store.search_active_by_terms(
+            gk, terms, limit=1000, viewer_is_gm=viewer_is_gm,
+        )
     else:
-        all_rows = store.list_entries(gk, limit=500)
+        all_rows = store.list_entries(gk, limit=500, viewer_is_gm=viewer_is_gm)
 
     scored: list[tuple[int, dict]] = []
     for row in all_rows:

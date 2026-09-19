@@ -78,6 +78,6 @@ def test_like_coarse_filter_hits_old_entries(tmp_path):
     )
     store._conn.commit()
 
-    result = recall_by_text_improved(store, "g1", "我们查看了古井", limit=5)
+    result = recall_by_text_improved(store, "g1", "我们查看了古井", limit=5, viewer_is_gm=True)
     assert any(e["entity"] == "古井" for e in result), "LIKE 粗筛应命中旧的相关记忆"
     store.close()
