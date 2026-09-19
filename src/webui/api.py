@@ -16,6 +16,7 @@ from src.engine.game_instance import GameRegistry
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.lorebook.store import LorebookStore
 from src.adventures import AdventureBundleLoader
+from src.adventures.registry import AdventureSourceRegistry
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem
 from src.rules.loader import RuleBundleLoader
@@ -156,6 +157,16 @@ class WebAPI:
         ).resolve()
         self._adventure_loader = AdventureBundleLoader(
             adventures_dir or self._builtin_adventures_dir
+        )
+        # MOD-02：builtin/user 双来源统一注册表（plugin 来源随 MOD-03 注册）。
+        self._adventure_source_registry = AdventureSourceRegistry.from_directories(
+            self._builtin_adventures_dir,
+            (
+                adventures_dir
+                if adventures_dir is not None
+                and adventures_dir.resolve() != self._builtin_adventures_dir
+                else None
+            ),
         )
         self._character_cards_path = self._reg.save_dir.parent / "character_cards.json"
         self._character_dependencies = characters.CharacterDependencies(
@@ -469,6 +480,7 @@ class WebAPI:
         )
         self._adventure_dependencies = adventures.AdventureDependencies(
             adventure_loader=self._adventure_loader,
+            adventure_registry=self._adventure_source_registry,
             list_instances=self._reg.list_all,
             load_rule_by_id=self._load_rule_by_id,
             ruleset_registry=self._ruleset_registry,

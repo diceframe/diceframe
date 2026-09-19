@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
+from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.adventures import (
     AdventureBundleError,
     AdventureBundleLoader,
