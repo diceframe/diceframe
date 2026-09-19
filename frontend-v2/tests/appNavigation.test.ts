@@ -20,12 +20,13 @@ describe('app navigation', () => {
 
   it('keeps content and management route identity independent of labels', () => {
     expect(appNavGroups.find(group => group.id === 'content')?.itemIds)
-      .toEqual(['lorebook', 'worlds', 'adventures', 'rules'])
+      .toEqual(['lorebook', 'worlds', 'adventures', 'modules', 'rules'])
     expect(appNavGroups.find(group => group.id === 'content')?.defaultItemId).toBe('lorebook')
     expect(appNavGroups.find(group => group.id === 'management')?.itemIds)
       .toEqual(['memory', 'logs', 'plugins', 'settings'])
     expect(appNavGroups.find(group => group.id === 'management')?.defaultItemId).toBe('settings')
     expect(navGroupForRoute('worlds')).toBe('content')
+    expect(navGroupForRoute('modules')).toBe('content')
     expect(navGroupForRoute('settings')).toBe('management')
     expect(navGroupForRoute('overview')).toBeNull()
   })

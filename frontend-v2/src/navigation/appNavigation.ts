@@ -20,6 +20,7 @@ export type AppNavItemId =
   | 'characters'
   | 'worlds'
   | 'adventures'
+  | 'modules'
   | 'lorebook'
   | 'rules'
   | 'memory'
@@ -50,6 +51,7 @@ export const appNavItems = [
   { id: 'characters', labelKey: 'navCharacters', icon: PersonOutline },
   { id: 'worlds', labelKey: 'navWorlds', icon: EarthOutline },
   { id: 'adventures', labelKey: 'navAdventures', icon: MapOutline },
+  { id: 'modules', labelKey: 'navModules', icon: BookOutline },
   { id: 'lorebook', labelKey: 'navLorebook', icon: BookOutline },
   { id: 'rules', labelKey: 'navRules', icon: OptionsOutline },
   { id: 'memory', labelKey: 'navMemory', icon: CloudOutline },
@@ -64,7 +66,7 @@ export const appNavGroups = [
     labelKey: 'navContent',
     icon: BookOutline,
     defaultItemId: 'lorebook',
-    itemIds: ['lorebook', 'worlds', 'adventures', 'rules'],
+    itemIds: ['lorebook', 'worlds', 'adventures', 'modules', 'rules'],
   },
   {
     id: 'management',
