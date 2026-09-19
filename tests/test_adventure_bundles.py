@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from src.adventures import AdventureBundleError, AdventureBundleLoader
+# MOD-01：encounter mechanics（hp/ac/attacks）由 core:dnd2024 runtime validator
+# 校验；生产组合必然导入 dnd2024，测试在此显式导入以完成注册。
+from src.rulesets.dnd2024 import adventure_validation  # noqa: F401
 
 
 ROOT = Path(__file__).parents[1]

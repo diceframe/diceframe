@@ -15,6 +15,8 @@ ADVENTURE_GRAPH_FORMAT = "diceframe:adventure-graph-v1"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _REF_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*$")
 _PACKAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]*$")
+from src.adventures.runtime_validation import adventure_validator_for
+
 _AUTOMATION_LEVELS = frozenset({"deterministic", "guided", "reference"})
 _ENCOUNTER_DIFFICULTIES = frozenset({"story", "standard", "challenging", "lethal"})
 _FORBIDDEN_KEYS = frozenset({
@@ -191,6 +193,14 @@ class AdventureBundleLoader:
         active_locale = self._locale(manifest, locale)
         entities, source_paths = self._entities(root)
         self._validate_graph(entities)
+        # Runtime-specific mechanics validation（母方案 §8/§185/§186，MOD-01）：
+        # generic loader 只管结构；hp / armor_class / attack_bonus 等 D&D
+        # mechanics 由目标 runtime 注册的 validator 校验。未注册时 generic
+        # 结构仍可读，mechanics compatibility = unresolved，由安装/运行侧
+        # 按上下文决定是否阻断。
+        runtime_validator = adventure_validator_for(str(manifest.required_runtime_id or ""))
+        if runtime_validator is not None:
+            runtime_validator(entities)
         self._apply_locale(root, manifest.default_locale, entities)
         if active_locale != manifest.default_locale:
             self._apply_locale(root, active_locale, entities)
@@ -356,17 +366,11 @@ class AdventureBundleLoader:
                         raise AdventureBundleError(f"encounter enemy must be an object: {preset_id}")
                     _required_text(enemy.get("id"), "encounter enemy id", _ID_RE)
                     _required_text(enemy.get("profile_id"), "encounter enemy profile_id", _ID_RE)
-                    _bounded_int(enemy.get("hp", 0), "encounter enemy hp", 1, 100000)
-                    _bounded_int(enemy.get("armor_class", 0), "encounter enemy armor_class", 1, 40)
-                    attacks = enemy.get("attacks")
-                    if not isinstance(attacks, list) or not attacks:
-                        raise AdventureBundleError(f"encounter enemy must contain attacks: {preset_id}")
-                    for attack in attacks:
-                        if not isinstance(attack, dict):
-                            raise AdventureBundleError(f"encounter attack must be an object: {preset_id}")
-                        _required_text(attack.get("id"), "encounter attack id", _ID_RE)
-                        _required_text(attack.get("damage"), "encounter attack damage")
-                        _bounded_int(attack.get("attack_bonus", 0), "encounter attack bonus", -20, 20)
+                    # MOD-01：hp / armor_class / attacks / damage / attack_bonus
+                    # 是 D&D mechanics —— 已迁到
+                    # src/rulesets/dnd2024/adventure_validation.py（经
+                    # runtime_validation 注册表按 required_runtime 分发），
+                    # generic loader 不再堆 D&D-specific if/else（母方案 §8）。
         if str(adventure.get("start_step_id") or "") not in steps:
             raise AdventureBundleError("adventure start_step_id is invalid")
 

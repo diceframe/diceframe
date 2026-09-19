@@ -43,6 +43,7 @@ from src.rulesets.dnd2024.progression import (
 )
 from src.rulesets.dnd2024.resting import Dnd2024RestEngine
 from src.rulesets.dnd2024.spells import Dnd2024SpellSelection, SpellCatalogError
+from src.rulesets.dnd2024 import adventure_validation  # noqa: F401  (MOD-01: 注册 adventure mechanics validator)
 
 
 class Dnd2024Runtime:
