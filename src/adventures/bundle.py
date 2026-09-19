@@ -15,6 +15,7 @@ ADVENTURE_GRAPH_FORMAT = "diceframe:adventure-graph-v1"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _REF_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*$")
 _PACKAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]*$")
+from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2, validate_graph_v2
 from src.adventures.runtime_validation import adventure_validator_for
 
 _AUTOMATION_LEVELS = frozenset({"deterministic", "guided", "reference"})
@@ -213,7 +214,14 @@ class AdventureBundleLoader:
         manifest = self._manifest(root)
         active_locale = self._locale(manifest, locale)
         entities, source_paths = self._entities(root)
-        self._validate_graph(entities)
+        if manifest.format == ADVENTURE_GRAPH_FORMAT_V2:
+            # ADV2-00：v2 图契约（多入口 / transitions / objectives / milestones）。
+            adventures = entities.get("adventure", {})
+            if len(adventures) != 1:
+                raise AdventureBundleError("adventure package must contain one adventure")
+            validate_graph_v2(next(iter(adventures.values())))
+        else:
+            self._validate_graph(entities)
         # Runtime-specific mechanics validation（母方案 §8/§185/§186，MOD-01）：
         # generic loader 只管结构；hp / armor_class / attack_bonus 等 D&D
         # mechanics 由目标 runtime 注册的 validator 校验。未注册时 generic
@@ -259,7 +267,7 @@ class AdventureBundleLoader:
         if world_policy not in {"fixed", "portable", "agnostic"}:
             raise AdventureBundleError("world_policy must be fixed, portable, or agnostic")
         format_id = _required_text(raw.get("format"), "format", _PACKAGE_ID_RE)
-        if format_id != ADVENTURE_GRAPH_FORMAT:
+        if format_id not in (ADVENTURE_GRAPH_FORMAT, ADVENTURE_GRAPH_FORMAT_V2):
             raise AdventureBundleError(f"unsupported adventure format: {format_id}")
         recommended_world_id = str(raw.get("recommended_world_id") or "").strip()
         if world_policy == "fixed" and not recommended_world_id:
