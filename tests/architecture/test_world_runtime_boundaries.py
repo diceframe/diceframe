@@ -112,11 +112,18 @@ def test_unplanned_domains_do_not_import_world_runtime_directly() -> None:
             continue
         for module in sorted(_imported_modules(path)):
             for world_module in WORLD_MODULES:
-                if _depends_on(module, world_module):
-                    violations.append(
-                        f"{path.relative_to(ROOT)} imports {module} "
-                        f"(forbidden: {top_package} must reach the world via engine ops)"
-                    )
+                if not _depends_on(module, world_module):
+                    continue
+                # world.contracts 是纯数据语法词表（source_ref / canonical id），
+                # 与 game_state 契约同级：任何域都可复用，不构成写路径。
+                if module == "src.engine.world.contracts" or module.startswith(
+                    "src.engine.world.contracts."
+                ):
+                    continue
+                violations.append(
+                    f"{path.relative_to(ROOT)} imports {module} "
+                    f"(forbidden: {top_package} must reach the world via engine ops)"
+                )
     assert not violations, "\n".join(violations)
 
 
