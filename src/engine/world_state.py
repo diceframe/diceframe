@@ -72,6 +72,7 @@ from src.engine.world.contracts import (
     validate_process_record,
     validate_relation_record,
 )
+from src.engine.world import ops as world_record_ops
 
 WORLD_STATE_SCHEMA_VERSION = 2
 
@@ -87,7 +88,11 @@ OP_KINDS = (
     # 仅由 server 侧结算写入（见 world_events.advance_world_time），planner 不会
     # 产生这个 op。
     "complete_event",
+    # WorldState v2 record ops（母方案 §96，实现见 world/ops.py）。
+    "register_entity", "retire_entity",
+    "add_relation", "set_relation_status", "remove_relation",
 )
+RECORD_OP_KINDS = world_record_ops.RECORD_OP_KINDS
 SETTLED_EVENT_STATUSES = ("applied", "failed")
 # 定时事件内部只允许改事实；不允许事件嵌套调度或自己推进时间（否则结算顺序
 # 会依赖递归，不再确定性）。
@@ -97,6 +102,10 @@ MINUTES_PER_DAY = 1440
 MAX_FACTS = 512
 MAX_SCHEDULED_EVENTS = 256
 MAX_OPS_PER_BATCH = 64
+# v2 记录容器上限（母方案 §167：具体值基于现有限制制定；与 facts 同量级）。
+MAX_ENTITIES = 512
+MAX_RELATIONS = 512
+MAX_PROCESSES = 128
 MAX_STRING_CHARS = 400
 MAX_LABEL_CHARS = 160
 MAX_ABSOLUTE_INT = 1_000_000_000
@@ -393,6 +402,11 @@ def apply_ops_to_state(
         raise WorldStateError(
             f"world state exceeds {MAX_SCHEDULED_EVENTS} scheduled events"
         )
+    for name, limit in (
+        ("entities", MAX_ENTITIES), ("relations", MAX_RELATIONS), ("processes", MAX_PROCESSES),
+    ):
+        if len(draft[name]) > limit:
+            raise WorldStateError(f"world state exceeds {limit} {name}")
     draft["revision"] = revision
     # 持久化形状按 canonical key 排序：存档 diff 与测试断言都不依赖插入顺序。
     draft["facts"] = {key: draft["facts"][key] for key in sorted(draft["facts"])}
@@ -542,6 +556,13 @@ def _apply_op(
         return _op_schedule_event(draft, raw, revision=revision, position=position)
     if kind == "cancel_event":
         return _op_cancel_event(draft, raw, position=position)
+    if kind in RECORD_OP_KINDS:
+        try:
+            return world_record_ops.apply_record_op(
+                draft, raw, revision=revision, position=position,
+            )
+        except WorldContractError as exc:
+            raise WorldStateError(str(exc)) from exc
     return _op_complete_event(draft, raw, position=position)
 
 
@@ -797,6 +818,7 @@ __all__ = [
     "EVENT_STATUSES",
     "FACT_VISIBILITIES",
     "OP_KINDS",
+    "RECORD_OP_KINDS",
     "SETTLED_EVENT_STATUSES",
     "WORLD_STATE_SCHEMA_VERSION",
     "WorldStateError",
