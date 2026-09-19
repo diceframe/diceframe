@@ -785,6 +785,13 @@ class WebAPI:
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
 
+    def module_content(
+        self, module_id: str, kind: str, key: str, language: str = "",
+    ) -> dict[str, Any]:
+        return modules.module_content(
+            self._module_dependencies, module_id, kind, key, language=language,
+        )
+
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)
 

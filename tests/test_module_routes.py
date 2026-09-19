@@ -23,6 +23,13 @@ class FakeAPI:
             return {"ok": True, "module_id": module_id, "adventures": [{"adventure_id": "castle"}]}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
 
+    def module_content(
+        self, module_id: str, kind: str, key: str, language: str = "",
+    ) -> dict[str, object]:
+        if (module_id, kind, key, language) == ("castle-module", "npc", "keeper", "zh-CN"):
+            return {"ok": True, "content": {"id": "keeper"}}
+        return {"ok": False, "error_code": "CONTENT_NOT_FOUND"}
+
 
 def _app() -> web.Application:
     app = web.Application()
@@ -70,3 +77,16 @@ async def test_module_adventures_route_has_a_dedicated_read_model() -> None:
             "module_id": "castle-module",
             "adventures": [{"adventure_id": "castle"}],
         }
+
+
+@pytest.mark.asyncio
+async def test_module_content_route_preserves_module_and_language_scope() -> None:
+    async with TestClient(TestServer(_app())) as client:
+        response = await client.get(
+            "/api/modules/castle-module/content/npc/keeper?language=zh-CN",
+        )
+        assert response.status == 200
+        assert await response.json() == {"ok": True, "content": {"id": "keeper"}}
+
+        missing = await client.get("/api/modules/castle-module/content/npc/missing")
+        assert missing.status == 404

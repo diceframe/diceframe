@@ -22,6 +22,16 @@ async def api_module_adventures(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
 
+async def api_module_content(request: web.Request) -> web.Response:
+    result = _get_api(request).module_content(
+        request.match_info["module_id"],
+        request.match_info["kind"],
+        request.match_info["key"],
+        request.query.get("language", ""),
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
 async def api_module_import(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
@@ -83,4 +93,5 @@ def register_modules(app: web.Application) -> None:
     app.router.add_post("/api/modules/import", api_module_import)
     app.router.add_post("/api/modules/{module_id}/install", api_module_marketplace_install)
     app.router.add_get("/api/modules/{module_id}/adventures", api_module_adventures)
+    app.router.add_get("/api/modules/{module_id}/content/{kind}/{key}", api_module_content)
     app.router.add_get("/api/modules/{module_id}", api_module_detail)
