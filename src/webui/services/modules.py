@@ -41,9 +41,11 @@ _MODULE_CONTENT_KINDS = (
 )
 _MARKETPLACE_CONTENT_PROFILES = frozenset({"adventure-module", "content-pack"})
 _RULESET_FILTER_ALIASES = {
-    "dnd2024": "core:dnd2024",
-    "coc": "core:coc7",
-    "freeform": "core:freeform",
+    # Generic module code matches the registry's stable short id, without
+    # importing or hard-coding a concrete ruleset runtime identifier.
+    "dnd2024": "dnd2024",
+    "coc": "coc7",
+    "freeform": "freeform",
 }
 
 
@@ -187,7 +189,8 @@ async def module_marketplace(
         if profile not in _MARKETPLACE_CONTENT_PROFILES:
             continue
         targets = [str(target) for target in (item.get("ruleset_targets") or [])]
-        if ruleset_filter and ruleset_filter not in targets:
+        target_ids = {target.rsplit(":", 1)[-1].lower() for target in targets}
+        if ruleset_filter and ruleset_filter not in targets and ruleset_filter not in target_ids:
             continue
         if needle and needle not in _market_search_text(item):
             continue
