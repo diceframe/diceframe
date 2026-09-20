@@ -56,6 +56,8 @@ export const de = {
   modulesUninstallConfirmBody: 'Spielstände, die dieses Modul nutzen, können seine Inhalte danach nicht mehr lesen. Trotzdem deinstallieren?',
   modulesOnlineSearch: 'Online-Module suchen',
   modulesOnlineSearchPlaceholder: 'Nach Name, Tag oder Regelsystem suchen',
+  modulesOnlineFilter: 'Regelsystem',
+  modulesOnlineFilterAll: 'Alle',
   modulesOnlineEmpty: 'Noch keine Module im Marktplatz.',
   modulesOnlineUnavailable: 'Der Modulmarktplatz ist derzeit nicht lesbar: {error}',
   modulesInstallOnline: 'Aus dem Marktplatz installieren',

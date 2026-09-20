@@ -94,9 +94,13 @@ export const moduleApi = {
   usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
   previewImport: (body: FormData) => api<ModulePreviewResponse>('/modules/import/preview', { method: 'POST', body }),
   import: (body: FormData) => api<{ ok: boolean; id?: string }>('/modules/import', { method: 'POST', body }),
-  marketplace: (keyword = '') => api<ModuleMarketplaceResponse>(
-    `/modules/marketplace${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`,
-  ),
+  marketplace: (keyword = '', ruleset = 'all') => {
+    const query = new URLSearchParams({
+      ...(keyword ? { keyword } : {}),
+      ...(ruleset && ruleset !== 'all' ? { ruleset } : {}),
+    }).toString()
+    return api<ModuleMarketplaceResponse>(`/modules/marketplace${query ? `?${query}` : ''}`)
+  },
   installFromMarketplace: (moduleId: string, overwrite = false) => api<{ ok: boolean; id?: string }>(
     `/modules/${encodeURIComponent(moduleId)}/install`,
     { method: 'POST', body: JSON.stringify({ overwrite }) },
