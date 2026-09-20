@@ -134,9 +134,9 @@ async function run(action: 'update' | 'disable' | 'enable' | 'uninstall') {
 
       <section class="module-detail-section" data-testid="module-lorebooks">
         <h2>{{ t('modulesLorebooks') }}</h2>
-        <p v-if="!module.lorebooks.length" class="muted">{{ t('modulesNoLorebooks') }}</p>
+        <p v-if="!(module.lorebooks || []).length" class="muted">{{ t('modulesNoLorebooks') }}</p>
         <ul v-else>
-          <li v-for="book in module.lorebooks" :key="book.id">{{ book.name }} · {{ book.language }}</li>
+          <li v-for="book in (module.lorebooks || [])" :key="book.id">{{ book.name }} · {{ book.language }}</li>
         </ul>
       </section>
 
