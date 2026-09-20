@@ -33,6 +33,7 @@ from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
+from src.webui.services import module_import_adapters
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 logger = logging.getLogger("trpg")
@@ -884,6 +885,15 @@ class WebAPI:
             lambda directory, manifest: modules.preview_module_install(
                 self._module_dependencies, manifest, directory=directory,
             ),
+        )
+
+    def preview_external_module_import(
+        self, payload: bytes, source_name: str = "",
+    ) -> dict[str, Any]:
+        """Preview a data-only external VTT module; never executes its runtime."""
+
+        return module_import_adapters.preview_external_module_import(
+            payload, source_name=source_name,
         )
 
     def validate_module_package(

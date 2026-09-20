@@ -51,6 +51,18 @@ export type ModuleUsageResponse = {
   total_games?: number
 }
 export type ModulePreviewResponse = { ok: boolean; blockers: string[]; warnings: string[] }
+export type ExternalModulePreviewResponse = {
+  ok: boolean
+  adapter?: string
+  format?: string
+  source_name?: string
+  manifest?: Record<string, unknown>
+  warnings?: string[]
+  blockers?: string[]
+  review_required?: boolean
+  auto_installable?: boolean
+  error?: string
+}
 
 /** 在线模组（复用插件市场索引，只保留 content-pack；FIX-06 §8）。 */
 export type ModuleMarketplaceItem = {
@@ -93,6 +105,7 @@ export const moduleApi = {
   compatibility: (moduleId: string) => api<ModuleCompatibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/compatibility`),
   usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
   previewImport: (body: FormData) => api<ModulePreviewResponse>('/modules/import/preview', { method: 'POST', body }),
+  previewExternalImport: (body: FormData) => api<ExternalModulePreviewResponse>('/modules/external/preview', { method: 'POST', body }),
   import: (body: FormData) => api<{ ok: boolean; id?: string }>('/modules/import', { method: 'POST', body }),
   marketplace: (keyword = '') => api<ModuleMarketplaceResponse>(
     `/modules/marketplace${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''}`,

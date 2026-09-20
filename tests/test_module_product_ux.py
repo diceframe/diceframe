@@ -19,6 +19,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.engine import persistence
@@ -269,3 +270,22 @@ async def test_module_detail_route_serves_guard_state(env) -> None:
     module = body["module"]
     assert [row["game_key"] for row in module["bound_games"]] == [game_key]
     assert module["actions"]["disable"]["allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_external_module_preview_is_review_only(env) -> None:
+    form = FormData()
+    form.add_field(
+        "file",
+        b'{"id":"foundry.keep","title":"Keep","esmodules":["boot.js"]}',
+        filename="module.json",
+        content_type="application/json",
+    )
+    async with TestClient(TestServer(_module_app(env.api))) as client:
+        response = await client.post("/api/modules/external/preview", data=form)
+        body = await response.json()
+
+    assert response.status == 200
+    assert body["format"] == "foundry"
+    assert body["review_required"] is True
+    assert body["auto_installable"] is False
