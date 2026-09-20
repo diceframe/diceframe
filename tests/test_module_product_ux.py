@@ -169,6 +169,29 @@ async def test_module_detail_actions_are_allowed_until_a_save_binds_it(env) -> N
     assert set(free["actions"]) == set(MODULE_ACTIONS)
     assert all(state["allowed"] for state in free["actions"].values())
 
+
+@pytest.mark.asyncio
+async def test_module_exposes_only_explicit_canonical_lorebook_sources(env) -> None:
+    await env.api.import_module(_zip_payload(_module_files(catalog=True)))
+    env.lorebook.create_lorebook({
+        "id": "module-book",
+        "name": "Castle Lore",
+        "source_kind": "module",
+        "source_id": MODULE_ID,
+    })
+    env.lorebook.create_lorebook({
+        "id": "world-book",
+        "name": "World Lore",
+        "source_kind": "world",
+        "source_id": "world-a",
+    })
+
+    listed = {item["id"]: item for item in env.api.list_modules()["modules"]}
+    assert listed[MODULE_ID]["lorebook_count"] == 1
+    detail = env.api.module_detail(MODULE_ID)["module"]
+    assert [book["id"] for book in detail["lorebooks"]] == ["module-book"]
+    assert env.api.module_lorebooks(MODULE_ID)["lorebooks"][0]["source_kind"] == "module"
+
     game_key = await _persist_bound_save(env)
 
     bound = env.api.module_detail(MODULE_ID)["module"]

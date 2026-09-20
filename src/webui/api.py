@@ -430,6 +430,7 @@ class WebAPI:
         self._module_dependencies = modules.ModuleDependencies(
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
+            lorebook_store=self._lore,
             ruleset_registry=self._ruleset_registry,
             list_instances=self._reg.list_all,
             # FIX-01 §3.7：绑定存档保护必须覆盖所有持久化存档（paused / ended /
@@ -861,6 +862,9 @@ class WebAPI:
 
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
+
+    def module_lorebooks(self, module_id: str) -> dict[str, Any]:
+        return modules.module_lorebooks(self._module_dependencies, module_id)
 
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",

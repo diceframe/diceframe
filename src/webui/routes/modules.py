@@ -31,6 +31,11 @@ async def api_module_adventures(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
 
+async def api_module_lorebooks(request: web.Request) -> web.Response:
+    result = _get_api(request).module_lorebooks(request.match_info["module_id"])
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
 async def api_module_content(request: web.Request) -> web.Response:
     result = _get_api(request).module_content(
         request.match_info["module_id"],
@@ -181,6 +186,7 @@ def register_modules(app: web.Application) -> None:
     app.router.add_post("/api/modules/external/preview", api_external_module_preview)
     app.router.add_post("/api/modules/{module_id}/install", api_module_marketplace_install)
     app.router.add_get("/api/modules/{module_id}/adventures", api_module_adventures)
+    app.router.add_get("/api/modules/{module_id}/lorebooks", api_module_lorebooks)
     app.router.add_get("/api/modules/{module_id}/content/{kind}/{key}", api_module_content)
     app.router.add_get("/api/modules/{module_id}/compatibility", api_module_compatibility)
     app.router.add_get("/api/modules/{module_id}/usages", api_module_usages)

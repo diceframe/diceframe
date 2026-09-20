@@ -132,6 +132,14 @@ async function run(action: 'update' | 'disable' | 'enable' | 'uninstall') {
         <ul v-else><li v-for="adventure in module.adventures" :key="adventure.adventure_id">{{ adventure.adventure_id }} · {{ adventure.version }}</li></ul>
       </section>
 
+      <section class="module-detail-section" data-testid="module-lorebooks">
+        <h2>{{ t('modulesLorebooks') }}</h2>
+        <p v-if="!module.lorebooks.length" class="muted">{{ t('modulesNoLorebooks') }}</p>
+        <ul v-else>
+          <li v-for="book in module.lorebooks" :key="book.id">{{ book.name }} · {{ book.language }}</li>
+        </ul>
+      </section>
+
       <section class="module-detail-section" data-testid="module-content">
         <h2>{{ t('modulesContentCount') }}</h2>
         <ul><li v-for="(items, kind) in module.content" :key="kind">{{ kind }} · {{ items.length }}</li></ul>

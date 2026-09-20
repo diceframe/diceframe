@@ -10,6 +10,7 @@ export type ModuleSummary = {
   status: string
   adventure_count: number
   content_counts: Record<string, number>
+  lorebook_count: number
 }
 
 export type ModulesResponse = {
@@ -33,6 +34,7 @@ export type ModuleActionGuard = {
 export type ModuleDetail = ModuleSummary & {
   content: Record<string, Array<{ key: string; title: string; description: string }>>
   adventures: Array<{ adventure_id: string; version: string; format: string; directory_id: string }>
+  lorebooks: Array<{ id: string; name: string; description: string; language: string; enabled: boolean; source_kind: string; source_id: string }>
   bound_games?: ModuleBoundGame[]
   actions?: Record<string, ModuleActionGuard>
 }
@@ -104,6 +106,7 @@ export const moduleApi = {
   detail: (moduleId: string) => api<ModuleDetailResponse>(`/modules/${encodeURIComponent(moduleId)}`),
   compatibility: (moduleId: string) => api<ModuleCompatibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/compatibility`),
   usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
+  lorebooks: (moduleId: string) => api<{ ok: boolean; module_id?: string; lorebooks?: ModuleDetail['lorebooks']; error_code?: string }>(`/modules/${encodeURIComponent(moduleId)}/lorebooks`),
   previewImport: (body: FormData) => api<ModulePreviewResponse>('/modules/import/preview', { method: 'POST', body }),
   previewExternalImport: (body: FormData) => api<ExternalModulePreviewResponse>('/modules/external/preview', { method: 'POST', body }),
   import: (body: FormData) => api<{ ok: boolean; id?: string }>('/modules/import', { method: 'POST', body }),
