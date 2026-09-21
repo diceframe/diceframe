@@ -238,6 +238,52 @@ class PromptComposer:
             if advancement_prompt:
                 gm_prompt = gm_prompt + "\n\n" + advancement_prompt
         gm_prompt = gm_prompt + "\n\n" + gm_language_instruction(getattr(instance, "language", "zh-CN"))
+        if self.auto_storyboard:
+            gm_prompt = gm_prompt + "\n\n" + localized_text(language, {
+                "en": (
+                    "## Automatic storyboard (enabled; required)\n"
+                    "For every response that contains public narration, append at least one SCENE_PANEL "
+                    "line in the protocol block after `---`. Use exactly one panel for one continuous visual "
+                    "beat, and split into multiple panels only for simultaneous locations or visually independent "
+                    "actions, results, reveals, or clear scene/time changes. Preserve story order and context. "
+                    "Each panel must use stable player IDs, a publicly supported location, and a concise visible "
+                    "description. Put each panel on its own line; do not use `|` inside a description or concatenate "
+                    "multiple SCENE_PANEL records on one line. Never omit the panel line just to save tokens; "
+                    "never include private facts, secrets, or merely mentioned destinations. Do not output a standalone "
+                    "NONE instead of the required panel; if there are no other state changes, NONE may appear only "
+                    "after the SCENE_PANEL line."
+                ),
+                "zh-CN": (
+                    "## 自动分镜（已启用，必须输出）\n"
+                    "每次回复包含公开剧情正文时，都必须在 `---` 后的状态标签块中至少输出一条 "
+                    "SCENE_PANEL。只有一个连续视觉节拍时输出一格；同时异地、独立的关键动作/结果、重大揭示 "
+                    "或明确场景/时间转换才拆成多格。保持剧情顺序和上下文。每格使用稳定玩家 ID、公开剧情中有依据的地点，"
+                    "以及简短的可见画面描述。每格必须单独占一行；描述中不要使用 `|`，不要把多个 SCENE_PANEL "
+                    "拼在同一行。不要为了省 token 省略分镜；不得写私聊、秘密或只是被提及的目的地。"
+                    "自动分镜开启时禁止只输出 NONE 代替分镜；如果没有其他状态变更，NONE 只能放在 SCENE_PANEL 之后。"
+                ),
+                "ja": (
+                    "## 自動分鏡（有効・必須）\n"
+                    "公開ナレーションを含む全ての返答では、`---` 後のタグブロックに少なくとも一行の "
+                    "SCENE_PANEL を出力する。連続した一つの視覚的ビートなら一コマ、同時に異なる場所、独立した重要な "
+                    "行動/結果、重大な発見、明確な場面/時間転換だけ複数コマに分ける。物語の順序と文脈を保ち、安定した "
+                    "プレイヤー ID、公開根拠のある場所、簡潔で見える描写を使う。秘密や言及だけの目的地は含めない。"
+                    "各コマは必ず別行に書き、描写内に `|` を使わず、複数の SCENE_PANEL を同じ行に連結しない。"
+                    "自動分鏡が有効な場合、SCENE_PANEL の代わりに NONE だけを出力してはならない。"
+                    "他の状態変更がない場合のみ、NONE は SCENE_PANEL の後に置く。"
+                ),
+                "de": (
+                    "## Automatisches Storyboard (aktiv; erforderlich)\n"
+                    "Jede Antwort mit öffentlicher Erzählung muss im Tag-Block nach `---` mindestens eine "
+                    "SCENE_PANEL-Zeile enthalten. Eine zusammenhängende visuelle Szene bleibt ein Panel; nur "
+                    "gleichzeitige Orte, unabhängige wichtige Handlungen/Ergebnisse, Enthüllungen oder klare Szenen-/"
+                    "Zeitwechsel werden geteilt. Verwende stabile Spieler-IDs, öffentlich belegte Orte und sichtbare, "
+                    "knappe Beschreibungen. Schreibe jedes Panel in eine eigene Zeile, verwende kein `|` in der "
+                    "Beschreibung und verbinde mehrere SCENE_PANEL nicht in einer Zeile; keine Geheimnisse oder nur "
+                    "erwähnte Ziele. Gib bei aktivem Storyboard niemals nur NONE statt eines Panels aus; falls "
+                    "keine anderen Statusänderungen vorliegen, darf NONE erst nach der SCENE_PANEL-Zeile stehen."
+                ),
+            })
         return gm_prompt
 
     async def build_user_context(

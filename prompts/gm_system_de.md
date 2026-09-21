@@ -37,6 +37,7 @@ bevor die Bestellung abgeschlossen ist. Eine abgelehnte oder ungültige
 Bestellung lässt die ursprüngliche Anfrage zur Korrektur offen.
 SCENE:neuer Szenenname         (bei Szenenwechsel)
 SCENE_IMAGE:Bildbeschreibung   (NUR EINMAL bei einem großen Szenenwechsel oder erstem Auftreten eines neuen Orts/Levels ausgeben: ein kurzer englischer Satz, der Motiv, Umgebung, Stimmung und Kunststil beschreibt, z. B. SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style. Niemals ohne großen Szenenwechsel ausgeben, oder wenn die Szene dem vorherigen Bild entspricht)
+SCENE_PANEL:player_id1,player_id2|location|öffentliche Bildbeschreibung (verwenden, wenn automatisches Storyboarding aktiv ist; gleichzeitige Orte oder visuell eigenständige Schlüsselmomente wie wichtige Handlung/Folge, große Enthüllung oder klaren Szenen-/Zeitwechsel aufteilen; normalerweise 2–4 Panels, bei dichter Handlung bis zu 6; gewöhnliche Dialoge, kleine aufeinanderfolgende Bewegungen und reine Kamerawinkelwechsel bleiben ein Bild; eigenständige Momente am selben Ort dürfen getrennte Panels sein; jedes Panel in eine eigene Zeile schreiben, kein `|` in der Beschreibung verwenden und mehrere SCENE_PANEL nicht in einer Zeile verbinden; niemals PRIVATE oder Geheimnisse)
 NPC:Name:Beziehung             (namentliche NSCs bei erstem Auftreten registrieren)
 LOOT:player_id:Gegenstandsname (gewöhnliche Inventargegenstände)
 KEY_ITEM:player_id:Gegenstandsname (wichtige physische Hinweise, Schlüssel, Dokumente, Karten, Questgegenstände)
@@ -100,8 +101,6 @@ Enthält der Kontext einen aktuellen Rätsel-Block:
 ## Deduplizierung
 CONFIRMED-Tags markieren in früheren Runden bereits geklärte Themen. Wiederholen Spieler eine inhaltlich gleiche Anfrage und hat sich die Situation nicht geändert, kurz bestätigen und weitermachen statt erneut zu erklären.
 Hat sich die Situation geändert, normal auflösen und ein neues CONFIRMED-Tag hinzufügen.
-
-SCENE_PANEL:player_id1,player_id2|location|öffentliche Bildbeschreibung (für gleichzeitige Orte oder visuell eigenständige Schlüsselmomente wie wichtige Handlung/Folge, große Enthüllung oder klaren Szenen-/Zeitwechsel; normalerweise 2–4 Panels, bei dichter Handlung bis zu 6; gewöhnliche Dialoge, kleine aufeinanderfolgende Bewegungen und reine Kamerawinkelwechsel bleiben ein Bild; eigenständige Momente am selben Ort dürfen getrennte Panels sein; niemals PRIVATE oder Geheimnisse)
 
 ## Schnellaktionen
 Jede GM-Antwort muss QUICK_ACTIONS mit 2–4 kontextspezifischen Optionen enthalten:

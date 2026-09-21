@@ -80,6 +80,7 @@ from src.lorebook.retrieval import LoreRetriever
 from src.imagegen import (
     ImageGenerationError,
     ImageGenerationRequest,
+    StoryboardInferenceError,
     game_image_owner_id,
     infer_scene_panels,
     normalize_scene_panels,
@@ -279,6 +280,10 @@ class RoundProcessor:
         self._image_generation = None
         # 每局同一时间只允许一个生图任务：连续快速推进时跳过新请求
         self._scene_image_tasks: dict[tuple[tuple[str, ...], str], asyncio.Task] = {}
+        # GM 漏掉 SCENE_PANEL 时的后台补分镜任务。只保存公开分镜草稿，不触发生图。
+        self._storyboard_draft_tasks: dict[
+            tuple[tuple[str, ...], str, int, int, str], asyncio.Task
+        ] = {}
 
     def set_image_generation_service(self, service) -> None:
         self._image_generation = service
@@ -643,6 +648,207 @@ class RoundProcessor:
             compressed_count=compressed_count,
         )
 
+    def _maybe_schedule_storyboard_draft(
+        self,
+        instance: GameInstance,
+        data: dict,
+    ) -> asyncio.Task | None:
+        """Fill a missing GM storyboard in the background without generating art.
+
+        ``SCENE_IMAGE`` remains the only automatic image trigger.  Rounds that
+        carry that tag are handled by the image task, which already performs a
+        bounded storyboard inference; this draft-only path therefore skips
+        them to avoid duplicate model calls.
+        """
+        service = self._image_generation
+        if service is None or not bool(getattr(service, "auto_storyboard", False)):
+            return None
+        # Skip only when the real automatic image task will handle the same
+        # inference.  If automatic images are disabled/unavailable, a
+        # SCENE_IMAGE tag must not prevent the manual storyboard draft from
+        # being prepared.
+        if (
+            str(data.get("scene_image_prompt") or "").strip()
+            and bool(getattr(service, "available", False))
+            and bool(getattr(service, "auto_scene", False))
+        ):
+            return None
+        declared, _ = normalize_scene_panels(
+            data.get("scene_panels"), merge_same_location=False,
+        )
+        if declared:
+            return None
+
+        completed_round = int(instance.round_number) - 1
+        if completed_round < 0:
+            return None
+        entry = next(
+            (
+                item for item in reversed(instance.log)
+                if _log_round(item, -1) == completed_round
+                and str(item.get("gm_response") or "").strip()
+            ),
+            None,
+        )
+        if entry is None:
+            return None
+
+        game_key = instance.game_key
+        expected_run_id = instance.run_id
+        expected_swipe = int(entry.get("current_swipe") or 0)
+        source_revision = storyboard_source_revision(entry)
+        task_key = (
+            game_key,
+            expected_run_id,
+            completed_round,
+            expected_swipe,
+            source_revision,
+        )
+        existing = self._storyboard_draft_tasks.get(task_key)
+        if existing is not None and not existing.done():
+            return None
+
+        task = asyncio.create_task(self._infer_storyboard_draft_background(
+            game_key=game_key,
+            expected_run_id=expected_run_id,
+            round_number=completed_round,
+            expected_swipe=expected_swipe,
+            source_revision=source_revision,
+            narration=str(entry.get("gm_response") or ""),
+            actions=deepcopy(entry.get("actions") or []),
+            current_scene=str(getattr(instance, "scene", "") or ""),
+            players=deepcopy(getattr(instance, "players", {}) or {}),
+        ))
+        self._storyboard_draft_tasks[task_key] = task
+        task.add_done_callback(
+            lambda completed, key=task_key: (
+                self._storyboard_draft_tasks.pop(key, None)
+                if self._storyboard_draft_tasks.get(key) is completed
+                else None
+            )
+        )
+        return task
+
+    async def _infer_storyboard_draft_background(
+        self,
+        *,
+        game_key: tuple[str, ...],
+        expected_run_id: str,
+        round_number: int,
+        expected_swipe: int,
+        source_revision: str,
+        narration: str,
+        actions: Any,
+        current_scene: str,
+        players: Any,
+    ) -> None:
+        """Infer and persist one version-bound public storyboard draft."""
+        try:
+            panels, _compressed = await infer_scene_panels(
+                self.llm_client,
+                narration=narration,
+                actions=actions,
+                current_scene=current_scene,
+                players=players,
+                global_prompt="",
+                declared_panels=[],
+                # This is an optional UI prefill.  Unlike automatic image
+                # generation it may safely fall back to a public single-panel
+                # draft when the model is unavailable.
+                strict=False,
+            )
+            panels, _ = normalize_scene_panels(
+                panels, merge_same_location=False,
+            )
+            if not panels:
+                logger.warning(
+                    "GM 漏掉分镜且后台分析未返回草稿 "
+                    "(game=%s round=%d swipe=%d)",
+                    game_key,
+                    round_number,
+                    expected_swipe,
+                )
+                return
+
+            current = self.registry.get(game_key)
+            if current is None or current.run_id != expected_run_id:
+                return
+            entry = next(
+                (
+                    item for item in reversed(current.log)
+                    if _log_round(item, -1) == round_number
+                    and str(item.get("gm_response") or "").strip()
+                ),
+                None,
+            )
+            if (
+                entry is None
+                or int(entry.get("current_swipe") or 0) != expected_swipe
+                or storyboard_source_revision(entry) != source_revision
+            ):
+                return
+            # A GM panel or a user-applied panel may have appeared while the
+            # model call was in flight. Never overwrite that newer draft.
+            existing, _ = normalize_scene_panels(
+                entry.get("scene_panels"), merge_same_location=False,
+            )
+            if existing:
+                return
+
+            old_panels = deepcopy(entry.get("scene_panels"))
+            old_meta = deepcopy(entry.get("scene_panel_meta"))
+            entry["scene_panels"] = deepcopy(panels)
+            draft_revision = storyboard_source_revision(entry)
+            entry["scene_panel_meta"] = storyboard_panel_metadata(
+                panels,
+                narration=narration,
+                actions=actions,
+                current_scene=current_scene,
+                source_revision=draft_revision,
+            )
+            try:
+                await self.registry.save(current)
+            except Exception:
+                # A save may have waited behind another writer.  Only roll
+                # back our own fields when the target entry is still the
+                # exact revision we attempted to persist; otherwise a newer
+                # swipe/round writer owns the current value.
+                if storyboard_source_revision(entry) == draft_revision:
+                    if old_panels is None:
+                        entry.pop("scene_panels", None)
+                    else:
+                        entry["scene_panels"] = old_panels
+                    if old_meta is None:
+                        entry.pop("scene_panel_meta", None)
+                    else:
+                        entry["scene_panel_meta"] = old_meta
+                logger.exception(
+                    "GM 漏掉分镜的后台草稿保存失败 "
+                    "(game=%s round=%d swipe=%d)",
+                    game_key,
+                    round_number,
+                    expected_swipe,
+                )
+                return
+            logger.info(
+                "GM 漏掉分镜，后台草稿已保存 "
+                "(game=%s round=%d swipe=%d panels=%d)",
+                game_key,
+                round_number,
+                expected_swipe,
+                len(panels),
+            )
+        except Exception:
+            # Draft inference is optional and must never fail the completed
+            # narrative turn.
+            logger.exception(
+                "GM 漏掉分镜的后台分析失败 "
+                "(game=%s round=%d swipe=%d)",
+                game_key,
+                round_number,
+                expected_swipe,
+            )
+
     def schedule_opening_scene_image(self, instance: GameInstance) -> asyncio.Task | None:
         """Schedule an opening image only when round zero explicitly requested one."""
         opening = next(
@@ -767,6 +973,7 @@ class RoundProcessor:
             if entry is None:
                 return
             source_revision = storyboard_source_revision(entry)
+            inferred_from_backend = False
             if panels:
                 inferred_panels, inferred_compressed = normalize_scene_panels(
                     panels, merge_same_location=False,
@@ -775,17 +982,36 @@ class RoundProcessor:
             # false).  Keep a true compatibility default for lightweight
             # injected test/extension services that predate this attribute.
             elif bool(getattr(self._image_generation, "auto_storyboard", True)):
-                inferred_panels, inferred_compressed = await infer_scene_panels(
-                    self.llm_client,
-                    narration=str(entry.get("gm_response") or ""),
-                    actions=entry.get("actions") or [],
-                    current_scene=current_scene or str(getattr(current, "scene", "") or ""),
-                    players=getattr(current, "players", {}),
-                    global_prompt=prompt,
-                    declared_panels=panels,
-                    strict=(hasattr(self._image_generation, "auto_storyboard")
-                            and bool(getattr(self._image_generation, "auto_storyboard", False))),
-                )
+                try:
+                    inferred_panels, inferred_compressed = await infer_scene_panels(
+                        self.llm_client,
+                        narration=str(entry.get("gm_response") or ""),
+                        actions=entry.get("actions") or [],
+                        current_scene=current_scene or str(getattr(current, "scene", "") or ""),
+                        players=getattr(current, "players", {}),
+                        global_prompt=prompt,
+                        declared_panels=panels,
+                        strict=(hasattr(self._image_generation, "auto_storyboard")
+                                and bool(getattr(self._image_generation, "auto_storyboard", False))),
+                    )
+                    # A backend-generated draft must be available to the
+                    # manual image dialog even when the image request later
+                    # fails.  Only real image services opt into this
+                    # persistence; lightweight compatibility test services
+                    # without the setting retain their old behavior.
+                    inferred_from_backend = bool(
+                        hasattr(self._image_generation, "auto_storyboard")
+                        and getattr(self._image_generation, "auto_storyboard", False)
+                        and inferred_panels
+                    )
+                except StoryboardInferenceError as exc:
+                    logger.warning(
+                        "自动场景图分镜分析失败，跳过本次生图 (game=%s round=%d): %s",
+                        game_key,
+                        round_number,
+                        exc,
+                    )
+                    return
             else:
                 inferred_panels, inferred_compressed = [], 0
             panels = inferred_panels
@@ -793,6 +1019,64 @@ class RoundProcessor:
                 max(0, int(compressed_count or 0))
                 + max(0, int(inferred_compressed or 0))
             )
+
+            if inferred_from_backend:
+                # The inference call yielded while another round/swipe may
+                # have changed the public source.  Re-resolve the live entry
+                # before writing the draft so an old analysis cannot attach
+                # itself to a newer narrative.
+                current = self.registry.get(game_key)
+                if current is None or current.run_id != expected_run_id:
+                    return
+                entry = next(
+                    (
+                        item for item in reversed(current.log)
+                        if _log_round(item, -1) == round_number
+                        and str(item.get("gm_response") or "").strip()
+                    ),
+                    None,
+                )
+                if entry is None or storyboard_source_revision(entry) != source_revision:
+                    return
+                old_panels = deepcopy(entry.get("scene_panels"))
+                old_meta = deepcopy(entry.get("scene_panel_meta"))
+                entry["scene_panels"] = deepcopy(panels)
+                draft_revision = storyboard_source_revision(entry)
+                entry["scene_panel_meta"] = storyboard_panel_metadata(
+                    panels,
+                    narration=str(entry.get("gm_response") or ""),
+                    actions=entry.get("actions") or [],
+                    current_scene=current_scene or str(getattr(current, "scene", "") or ""),
+                    source_revision=draft_revision,
+                )
+                try:
+                    await self.registry.save(current)
+                except Exception:
+                    if old_panels is None:
+                        entry.pop("scene_panels", None)
+                    else:
+                        entry["scene_panels"] = old_panels
+                    if old_meta is None:
+                        entry.pop("scene_panel_meta", None)
+                    else:
+                        entry["scene_panel_meta"] = old_meta
+                    logger.exception(
+                        "自动场景图分镜草稿保存失败，跳过本次生图 (game=%s round=%d)",
+                        game_key,
+                        round_number,
+                    )
+                    return
+                # scene_panels is part of the source revision.  Use the new
+                # revision for the image request and the post-request stale
+                # check, otherwise a successful inference would be rejected
+                # as stale as soon as it was persisted.
+                source_revision = draft_revision
+                logger.info(
+                    "自动场景图分镜草稿已保存 (game=%s round=%d panels=%d)",
+                    game_key,
+                    round_number,
+                    len(panels),
+                )
             context: dict[str, Any] = {
                 "round": round_number,
                 "run_id": expected_run_id,
@@ -811,14 +1095,24 @@ class RoundProcessor:
                     context["storyboard"]["character_appearances"] = dict(
                         character_appearances,
                     )
-            result = await self._image_generation.generate(ImageGenerationRequest(
-                prompt=prompt,
-                purpose="scene",
-                owner_type="game",
-                owner_id=game_image_owner_id(game_key),
-                aspect_ratio="16:9",
-                context=context,
-            ))
+            try:
+                result = await self._image_generation.generate(ImageGenerationRequest(
+                    prompt=prompt,
+                    purpose="scene",
+                    owner_type="game",
+                    owner_id=game_image_owner_id(game_key),
+                    aspect_ratio="16:9",
+                    context=context,
+                ))
+            except ImageGenerationError as exc:
+                logger.warning(
+                    "自动场景图图像服务失败 (game=%s round=%d panels=%d): %s",
+                    game_key,
+                    round_number,
+                    len(panels),
+                    exc,
+                )
+                return
             # 重开/重置可能发生在生图 await 期间。旧任务不得写入新一局，
             # 同一局的 swipe 也可能已经删除或替换目标回合。
             current = self.registry.get(game_key)
@@ -1178,6 +1472,9 @@ class RoundProcessor:
         self._maybe_schedule_summary(instance, gm_prompt)
         # 场景图生成慢（生图 API 10-60s），同样延后到后台，完成后再推给前端。
         self._maybe_schedule_scene_image(instance, data)
+        # 如果 GM 漏了 SCENE_PANEL，自动分镜仍可在后台补一份可编辑草稿。
+        # 这不改变 SCENE_IMAGE 触发规则，也不新增图像调用。
+        self._maybe_schedule_storyboard_draft(instance, data)
 
         try:
             await self.registry.save(instance)

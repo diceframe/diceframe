@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from src.commands.state_items import split_item_quantity
 
@@ -20,9 +21,55 @@ _PERSON_SUFFIXES = (
     "失踪者", "门徒", "弟子", "信徒", "追随者",
 )
 
+# `SCENE_PANEL` is specified as one protocol line per panel.  Some model
+# providers nevertheless compact several lines into one value (or repeat the
+# tag token inline); keep the parser tolerant at this compatibility boundary.
+_SCENE_PANEL_TOKEN_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])SCENE_PANEL\s*[:：]")
+
 
 def _looks_like_person(name: str) -> bool:
     return any(name.endswith(suffix) for suffix in _PERSON_SUFFIXES)
+
+
+def _scene_panel_triplets(value: str) -> list[tuple[str, str, str]]:
+    """Extract one or more ``participants|location|description`` records.
+
+    The public protocol uses one ``SCENE_PANEL`` per line.  For compatibility
+    with model output that loses newlines, accept a compact stream of complete
+    triplets as well as repeated inline ``SCENE_PANEL:`` tokens.  A single
+    description is allowed to contain ``|``; compact multi-panel parsing is
+    only enabled when the number of fields is an exact multiple of three.
+    """
+    source = str(value or "").strip()
+    if not source:
+        return []
+
+    # A provider may emit ``a|loc|desc SCENE_PANEL:b|loc|desc`` on one line.
+    # Split only on an explicit protocol token; ordinary text remains part of
+    # the description and is handled by the single-record fallback below.
+    if _SCENE_PANEL_TOKEN_RE.search(source):
+        chunks = [chunk.strip() for chunk in _SCENE_PANEL_TOKEN_RE.split(source) if chunk.strip()]
+    else:
+        chunks = [source]
+
+    records: list[tuple[str, str, str]] = []
+    for chunk in chunks:
+        raw_fields = chunk.split("|")
+        fields = [field.strip() for field in raw_fields]
+        if len(fields) >= 6 and len(fields) % 3 == 0:
+            # The compact form has no field escaping; only treat an exact
+            # sequence of triplets as compact panels to avoid truncating a
+            # legitimate pipe in a single description.
+            records.extend(
+                (fields[index], fields[index + 1], fields[index + 2])
+                for index in range(0, len(fields), 3)
+            )
+            continue
+        if len(fields) >= 3:
+            # Preserve any extra separators in a normal single-panel
+            # description rather than silently discarding text.
+            records.append((fields[0], fields[1], "|".join(raw_fields[2:]).strip()))
+    return records
 
 
 def parse_world_tag(tag: str, value: str, result: dict) -> None:
@@ -38,9 +85,7 @@ def parse_world_tag(tag: str, value: str, result: dict) -> None:
     elif tag == "SCENE_IMAGE":
         result["scene_image_prompt"] = value[:300]
     elif tag == "SCENE_PANEL":
-        parts = value.split("|", 2)
-        if len(parts) == 3:
-            participants, location, description = (part.strip() for part in parts)
+        for participants, location, description in _scene_panel_triplets(value):
             if location and description:
                 result.setdefault("scene_panels", []).append({
                     "participants": participants,

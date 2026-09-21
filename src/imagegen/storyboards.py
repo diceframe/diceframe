@@ -601,7 +601,7 @@ async def infer_scene_panels(
     if force_single:
         return fallback, 0
     if llm_client is None or not hasattr(llm_client, "call"):
-        if strict:
+        if strict or requested_panel_count is not None:
             raise StoryboardInferenceError("自动分镜分析不可用：尚未配置文本模型")
         return fallback, 0
 
@@ -644,7 +644,7 @@ async def infer_scene_panels(
         "current_scene": _text(current_scene, 160),
         "players": public_players,
         "public_actions": public_actions,
-        "public_gm_narration": _text(narration, 1600),
+        "public_gm_narration": _text(narration, 6000),
         "gm_visual_draft": _text(global_prompt, 1800),
         "public_evidence": evidence_segments,
     }
@@ -652,15 +652,13 @@ async def infer_scene_panels(
         payload["requested_panel_count"] = requested_panel_count
     system_prompt = (
         "You analyze public tabletop RPG narration for scene illustration. "
-        "Return only one JSON object with a panels array. Use 2-4 panels for distinct simultaneous "
-        "locations OR visually independent key beats such as a meaningful action/result, reveal, "
-        "or clear time/location transition; use 5-6 only for unusually dense public story. "
-        "Do not split ordinary dialogue, tiny consecutive motions, or camera angles. "
-        "Merge characters at the same location unless the key beats are visually independent. "
+        "Return only one JSON object with a panels array. "
         "Preserve story order. Each panel must contain participants (exact player IDs), location, "
         "description, and evidence_ids referencing one or more public_evidence IDs. "
         "Every location and beat must be supported by its referenced evidence. Never infer secrets "
-        "or private content. Maximum six panels. Also return compressed_count."
+        "or private content. Keep descriptions concise; describe visible moments, not commentary. "
+        "Do not turn locations merely mentioned in dialogue or future plans into present scenes. "
+        "Maximum six panels. Also return compressed_count."
     )
     if requested_panel_count is not None:
         system_prompt += (
@@ -672,12 +670,20 @@ async def infer_scene_panels(
             "Do not duplicate content, create empty filler, or mechanically split isolated sentences. "
             "Keep enough context in every panel to preserve continuity."
         )
+    else:
+        system_prompt += (
+            " Use 2-4 panels for distinct simultaneous locations OR visually independent key beats "
+            "such as a meaningful action/result, reveal, or clear time/location transition; "
+            "use 5-6 only for unusually dense public story. "
+            "Do not split ordinary dialogue, tiny consecutive motions, or camera angles. "
+            "Merge characters at the same location unless the key beats are visually independent."
+        )
 
     async def call_model(request_system_prompt: str, request_payload: dict[str, Any]) -> dict[str, Any]:
         # Six structured panels need more room than the compact automatic draft.
         token_budget = 900
         if requested_panel_count is not None:
-            token_budget = min(1600, max(900, requested_panel_count * 220))
+            token_budget = max(900, 300 + requested_panel_count * 360)
         response = await llm_client.call(
             request_system_prompt,
             json.dumps(request_payload, ensure_ascii=False, separators=(",", ":")),
@@ -686,6 +692,54 @@ async def infer_scene_panels(
             json_mode=True,
         )
         return _json_object(getattr(response, "content", ""))
+
+    if requested_panel_count is not None:
+        # Fixed counts have their own bounded path. Neither normalization
+        # truncation nor the automatic single-scene fallback can satisfy it.
+        request_payload = payload
+        actual_count = 0
+        for attempt in range(2):
+            try:
+                parsed = await call_model(system_prompt, request_payload)
+            except Exception as exc:
+                raise StoryboardInferenceError("分镜分析请求失败，请重试") from exc
+            raw_panels = parsed.get("panels")
+            actual_count = len(raw_panels) if isinstance(raw_panels, list) else 0
+            inferred, removed, valid = _resolve_model_panels(
+                raw_panels, public_players=public_players, evidence_segments=evidence_segments,
+            )
+            complete = isinstance(raw_panels, list) and all(
+                isinstance(panel, dict)
+                and _text(panel.get("description"), 700)
+                and _text(panel.get("location"), 160)
+                and _panel_evidence_ids(panel)
+                for panel in raw_panels
+            )
+            unique = len({
+                (panel["location"], tuple(panel["participants"]), panel["description"])
+                for panel in inferred
+            }) == requested_panel_count
+            if valid and complete and unique and actual_count == requested_panel_count and len(inferred) == requested_panel_count:
+                if strict and not _panels_within_narration_budget(inferred, narration):
+                    raise StoryboardInferenceError("自动分镜摘要超过本轮公开正文长度")
+                return inferred, removed
+            if attempt == 0:
+                request_payload = {
+                    **payload,
+                    "first_pass": parsed,
+                    "review_instruction": (
+                        f"The first pass produced {len(inferred)} valid panels ({actual_count} raw), "
+                        f"but the user requires exactly {requested_panel_count}. "
+                        f"Missing panels: {max(0, requested_panel_count - len(inferred))}. "
+                        "Discard that plan and return a complete replacement of the required count. "
+                        "Split meaningful actions, results, reactions or reveals at the same location "
+                        "when necessary, preserving context. Do not duplicate, truncate or add empty filler. "
+                        "Every panel needs exact player IDs, supported location, description and evidence_ids."
+                    ),
+                }
+        raise StoryboardInferenceError(
+            f"分镜模型未按指定格数返回有效分镜（要求 {requested_panel_count} 格，实际 {actual_count} 格），请重新分析"
+        )
 
     try:
         parsed = await call_model(system_prompt, payload)
@@ -697,29 +751,6 @@ async def infer_scene_panels(
         if strict:
             raise StoryboardInferenceError("自动分镜分析失败") from exc
     if not valid or not inferred:
-        if requested_panel_count is not None:
-            review_payload = {
-                **payload,
-                "first_pass": parsed,
-                "review_instruction": (
-                    f"The first pass was invalid or empty. Return a complete replacement with exactly "
-                    f"{requested_panel_count} panels. Re-plan the public beats into meaningful visual "
-                    "actions, results, reactions, or reveals without empty filler or duplicated content."
-                ),
-            }
-            try:
-                reviewed = await call_model(system_prompt, review_payload)
-                reviewed_panels, reviewed_removed, reviewed_valid = _resolve_model_panels(
-                    reviewed.get("panels"), public_players=public_players, evidence_segments=evidence_segments,
-                )
-                if reviewed_valid and reviewed_panels:
-                    inferred, removed, valid, parsed = reviewed_panels, reviewed_removed, True, reviewed
-            except Exception:
-                pass
-            if not valid or not inferred or len(inferred) != requested_panel_count:
-                raise StoryboardInferenceError(
-                    f"分镜模型未按指定格数返回（要求 {requested_panel_count} 格），请重新分析"
-                )
         if not inferred:
             deterministic = _deterministic_candidate_panels(
                 narration=narration, current_scene=current_scene, players=public_players,
@@ -727,24 +758,17 @@ async def infer_scene_panels(
             if strict:
                 raise StoryboardInferenceError("自动分镜分析未返回有效公开分镜")
             return (deterministic, 0) if deterministic else (fallback, 0)
-    count_mismatch = requested_panel_count is not None and len(inferred) != requested_panel_count
     if len(inferred) == 1 and not inferred[0]["participants"]:
         inferred[0]["participants"] = fallback[0]["participants"]
 
-    if (len(inferred) == 1 and _has_multiple_candidates(evidence_segments, narration)) or count_mismatch:
+    if len(inferred) == 1 and _has_multiple_candidates(evidence_segments, narration):
         review_payload = {
             **payload,
             "first_pass": parsed,
             "review_instruction": (
-                (f"The first pass produced {len(inferred)} valid panels, but the user requires exactly "
-                 f"{requested_panel_count}. Discard that panel plan and return a complete replacement "
-                 f"containing exactly {requested_panel_count} panels. Split meaningful actions, results, "
-                 "reactions, or reveals at the same location when necessary. Do not truncate, duplicate, "
-                 "or create empty filler. Include all required fields and public evidence IDs in every panel. "
-                 if requested_panel_count is not None else
                  "Re-evaluate the first-pass single panel. Split only if the public evidence contains "
                  "at least two visually independent key beats or simultaneous locations. Return the "
-                 "same schema with evidence_ids; otherwise keep one panel.")
+                 "same schema with evidence_ids; otherwise keep one panel."
             ),
         }
         try:
@@ -757,10 +781,6 @@ async def infer_scene_panels(
                 parsed = reviewed
         except Exception:
             pass
-    if requested_panel_count is not None and len(inferred) != requested_panel_count:
-        raise StoryboardInferenceError(
-            f"分镜模型未按指定格数返回（要求 {requested_panel_count} 格，实际 {len(inferred)} 格），请重新分析"
-        )
     if len(inferred) == 1 and _has_multiple_candidates(evidence_segments, narration):
         deterministic = _deterministic_candidate_panels(
             narration=narration,
@@ -892,44 +912,48 @@ def build_storyboard_prompt(
 
 
 def _fit_storyboard_prompt(lines: list[str], panel_count: int, max_chars: int) -> str:
-    """Compact verbose panel text without dropping a declared panel."""
+    """Shorten descriptions, never panel identities or later panel markers."""
 
     prompt = "\n".join(lines)
     if len(prompt) <= max_chars:
         return prompt
 
-    compact = [line for line in lines if "appearance references:" not in line]
-    prompt = "\n".join(compact)
-    if len(prompt) <= max_chars:
-        return prompt
-
-    panel_indexes = [
-        index for index, line in enumerate(compact)
-        if line.startswith(("Scene ", "Panel "))
+    compact = [
+        line for line in lines
+        if "appearance references:" not in line and not line.startswith("Overall context and style:")
     ]
-    other_chars = sum(
-        len(line) + 1 for index, line in enumerate(compact)
-        if index not in panel_indexes
+    prompt = "\n".join(compact)
+    if len(prompt) <= max_chars:
+        return prompt
+
+    header = (
+        f"Create one image with exactly {panel_count} distinct panels in listed order; "
+        f"exactly {panel_count} regions. Choose an adaptive layout. Do not merge, omit, add or repeat panels. No text."
+        if panel_count > 1 else
+        "Create one continuous scene in a single frame. No panels, grids, collages, internal dividers or text."
     )
-    panel_budget = max(32, (max_chars - other_chars) // max(1, panel_count))
-    for index in panel_indexes:
-        compact[index] = compact[index][:panel_budget]
-
-    prompt = "\n".join(compact)
-    if len(prompt) <= max_chars:
-        return prompt
-
-    compact = [line for line in compact if not line.startswith("Overall context and style:")]
-    prompt = "\n".join(compact)
-    if len(prompt) <= max_chars:
-        return prompt
-
-    # Preserve every numbered panel marker. If the provider budget is tight,
-    # reduce prose around and inside each panel instead of slicing off the tail.
-    panel_lines = [line for line in compact if line.startswith(("Scene ", "Panel "))]
-    structural = [line for line in compact if line not in panel_lines]
-    essential = structural[:3] if panel_count > 1 else structural[:2]
-    available = max(12 * panel_count, max_chars - sum(len(line) + 1 for line in essential))
-    per_panel = max(12, available // max(1, panel_count))
-    shortened = [line[:per_panel] for line in panel_lines]
-    return "\n".join([*essential, *shortened])
+    parts = [
+        line.replace(
+            "only people explicitly named in this panel description; no other party members",
+            "only explicitly described people",
+        ).partition("; visual description ")
+        for line in compact if line.startswith(("Scene:", "Panel "))
+    ]
+    prefixes = [prefix + separator for prefix, separator, _ in parts]
+    descriptions = [description for _, _, description in parts]
+    available = max_chars - len(header) - len(parts) - sum(map(len, prefixes))
+    minimums = [min(16, len(description)) for description in descriptions]
+    if available < sum(minimums):
+        raise StoryboardInferenceError("提示词预算不足以保留全部分镜的地点、人物和动作，请缩短内容")
+    allowances = minimums[:]
+    remaining = available - sum(allowances)
+    while remaining and any(allowances[i] < len(text) for i, text in enumerate(descriptions)):
+        for index, text in enumerate(descriptions):
+            if remaining and allowances[index] < len(text):
+                allowances[index] += 1
+                remaining -= 1
+    shortened = [
+        prefix + (text if len(text) <= allowance else text[:allowance - 1] + "…")
+        for prefix, text, allowance in zip(prefixes, descriptions, allowances)
+    ]
+    return "\n".join([header, *shortened])

@@ -1782,9 +1782,11 @@ class WebAPI:
         self, game_key: str, user_id: str, prompt: str, round_number: int,
         panels: Any = None, use_avatar_references: bool = False,
         panel_count: int | None = None,
+        combine_avatar_references: bool = True,
     ) -> dict[str, Any]:
         return await self._generated_images.generate_current_round(
             game_key, user_id, prompt, round_number, panels, use_avatar_references, panel_count,
+            combine_avatar_references,
         )
 
     def list_game_generated_images(

@@ -11,7 +11,8 @@ from urllib.parse import urlparse
 from .assets import ImageAssetError, ImageAssetStore
 from .contracts import IMAGE_PROVIDER_IDS, IMAGE_PURPOSES, ImageGenerationRequest, ImageGenerationResult
 from .providers import ImageProvider, ImageProviderError, create_image_provider
-from .storyboards import build_storyboard_prompt
+from .reference_sheet import ReferenceSheetError, combine_portrait_references
+from .storyboards import StoryboardInferenceError, build_storyboard_prompt
 
 
 PURPOSE_PROMPT_SUFFIXES = {
@@ -91,25 +92,24 @@ class ImageGenerationService:
         storyboard = request.context.get("storyboard") if isinstance(request.context, dict) else None
         storyboard_metadata: dict[str, Any] = {}
         if purpose == "scene" and isinstance(storyboard, dict):
-            storyboard_prompt, storyboard_metadata = build_storyboard_prompt(
-                storyboard.get("panels"),
-                global_prompt=prompt,
-                character_appearances=storyboard.get("character_appearances"),
-                max_chars=(
-                    MINIMAX_STORYBOARD_CHAR_BUDGET
-                    if prompt_limit <= 1_500
-                    else 8_000
-                ),
-            )
+            try:
+                storyboard_prompt, storyboard_metadata = build_storyboard_prompt(
+                    storyboard.get("panels"),
+                    global_prompt=prompt,
+                    character_appearances=storyboard.get("character_appearances"),
+                    max_chars=(
+                        MINIMAX_STORYBOARD_CHAR_BUDGET
+                        if prompt_limit <= 1_500
+                        else 8_000
+                    ),
+                )
+            except StoryboardInferenceError as exc:
+                raise ImageGenerationError(str(exc)) from exc
             try:
                 storyboard_metadata["compressed_count"] += max(0, int(storyboard.get("compressed_count") or 0))
             except (TypeError, ValueError):
                 pass
             prompt = storyboard_prompt
-        composed_prompt, prompt_budget = self._compose_prompt(
-            prompt, purpose, request.style, request.context, prompt_limit,
-        )
-        request.context["prompt_budget"] = prompt_budget
         size = self._size_for(request, purpose)
         try:
             references = tuple(request.reference_images or ())
@@ -131,7 +131,24 @@ class ImageGenerationService:
                 request.context["reference_character_ids"] = list(dict.fromkeys(
                     str(reference.character_id or "")[:80] for reference in references if str(reference.character_id or "").strip()
                 ))
+                request.context["reference_source_count"] = len(references)
+                request.context["reference_combined"] = (
+                    len(references) > 1 and request.context.get("combine_avatar_references", True) is True
+                )
+                # The numbered sheet and text mapping share the actual file
+                # order, never roster order or unverified participant names.
+                names = request.context.get("avatar_reference_names") or {}
+                request.context["avatar_reference_names"] = {
+                    reference.character_id: names.get(reference.character_id) or reference.character_id
+                    for reference in references
+                }
+                if request.context["reference_combined"]:
+                    references = (await asyncio.to_thread(combine_portrait_references, references),)
                 request.context["reference_count"] = len(references)
+            composed_prompt, prompt_budget = self._compose_prompt(
+                prompt, purpose, request.style, request.context, prompt_limit,
+            )
+            request.context["prompt_budget"] = prompt_budget
             async with self._semaphore:
                 if references:
                     generated = await provider.generate(composed_prompt, size=size, quality=self.quality, reference_images=references)
@@ -151,7 +168,7 @@ class ImageGenerationService:
                 owner_id=request.owner_id,
                 context=request.context,
             )
-        except (ImageProviderError, ImageAssetError) as exc:
+        except (ImageProviderError, ImageAssetError, ReferenceSheetError, StoryboardInferenceError) as exc:
             raise ImageGenerationError(str(exc)) from exc
 
     def _provider(self) -> ImageProvider:
@@ -205,9 +222,19 @@ class ImageGenerationService:
         }
         reference_names = context.get("avatar_reference_names")
         if isinstance(reference_names, dict) and reference_names:
-            segments["reference_labels"] = "Uploaded portrait references correspond to these visible characters: " + ", ".join(
-                f"{str(name)[:100]} ({str(uid)[:80]})" for uid, name in reference_names.items() if str(name).strip()
+            combined = len(reference_names) > 1 and context.get("combine_avatar_references", True) is True
+            segments["reference_labels"] = (
+                "The single uploaded portrait sheet maps "
+                if combined else "Uploaded portrait references correspond to these visible characters: "
+            ) + ", ".join(
+                (f"Ref {index}: " if combined else "") + f"{str(name)[:100]} ({str(uid)[:80]})"
+                for index, (uid, name) in enumerate(reference_names.items(), 1) if str(name).strip()
             ) + ". Keep their identity and appearance consistent."
+            if combined:
+                segments["reference_labels"] += (
+                    " The sheet is for character identity only, not composition. Do not copy its grid, "
+                    "labels or portrait count into the output; use the requested scene panels instead."
+                )
         reduced: list[str] = []
 
         def compose() -> str:
@@ -217,17 +244,32 @@ class ImageGenerationService:
             len(segments["purpose"]),
             int(prompt_limit or DEFAULT_PROMPT_CHAR_LIMIT),
         )
-        for key in ("style_prefix", "rules", "template", "request_style", "reference_labels", "scene"):
+        for key in ("style_prefix", "rules", "template", "request_style", "scene"):
             overflow = len(compose()) - prompt_limit
             if overflow <= 0:
                 break
-            current = segments[key]
+            current = segments.get(key, "")
             if not current:
                 continue
-            segments[key] = current[:max(0, len(current) - overflow)]
+            storyboard = context.get("storyboard")
+            if key == "scene" and isinstance(storyboard, dict) and storyboard.get("panels"):
+                available = len(current) - overflow
+                if available < 256:
+                    raise ImageGenerationError("提示词预算不足以保留全部分镜和头像标识，请缩短人物或地点名称")
+                try:
+                    segments[key], _ = build_storyboard_prompt(
+                        storyboard["panels"], max_chars=available,
+                        character_appearances=storyboard.get("character_appearances"),
+                    )
+                except StoryboardInferenceError as exc:
+                    raise ImageGenerationError(str(exc)) from exc
+            else:
+                segments[key] = current[:max(0, len(current) - overflow)]
             reduced.append(key)
 
         composed = compose()
+        if len(composed) > prompt_limit:
+            raise ImageGenerationError("提示词预算不足以保留全部分镜和头像标识，请缩短人物或地点名称")
         return composed, {
             "limit": prompt_limit,
             "used": len(composed),

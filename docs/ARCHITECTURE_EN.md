@@ -2,6 +2,12 @@
 
 This document describes the current implementation, not a roadmap. The dependency direction is `routes -> WebAPI -> services -> core`; core code must not import `src.webui`, WebAPI methods are delegates, and cross-service calls go through API delegates.
 
+## Scene images and portrait references
+
+Scene generation follows `routes/generated_images -> WebAPI -> services/generated_images -> src/imagegen`; manual generation and storyboard analysis remain GM/server-only operations, with no new player/P2P write surface. The optional boolean `combine_avatar_references` defaults to `true` and only applies when portrait references are enabled by the user. `src/imagegen/reference_sheet.py` combines selected portraits in input order into one ephemeral numbered sheet; the prompt maps `Ref N` to stable player IDs and public names. A single portrait remains unchanged; explicitly disabling combination preserves separate uploads. The sheet is not an output layout, and image inputs are not persisted. Generation metadata retains character IDs, source count, upload count and combination status.
+
+Omitting manual `panel_count` selects automatic mode; explicit values must be integers 1–6. Fixed mode has separate model instructions and at most one correction, validating raw count, effective content and evidence before returning a candidate. Truncation, blank filler and automatic fallback cannot satisfy a fixed count. Candidates and caches are scoped to story revision and requested count. Changing the frontend target preserves the applied draft and invalidates mismatched candidates. Generation validates count again, includes every panel in the prompt and fails explicitly if the budget cannot preserve each location, subject and action. The image model chooses geometry; software adds no dividers and does not treat the requested count as visual verification. The automatic-storyboard toggle and `SCENE_IMAGE` trigger semantics are unchanged.
+
 ## WebUI Startup and Configuration
 
 `web_server.py` remains the stable source, Windows portable, and Docker entrypoint. It primarily loads the project environment, composes the explicit WebUI owners, and starts the aiohttp listener. Responsibilities are owned by:

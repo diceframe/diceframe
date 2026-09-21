@@ -2,6 +2,12 @@
 
 本文描述当前实现，不是路线图。代码依赖方向为 `routes -> WebAPI -> services -> 核心`；核心层不得导入 `src.webui`，WebAPI 是委托层，跨 service 调用经由 API 委托。
 
+## 场景生图与参考头像
+
+场景图沿 `routes/generated_images -> WebAPI -> services/generated_images -> src/imagegen` 生成；手动生图与分镜分析仍为 GM/server-only 操作，不新增玩家或 P2P 写入口。手动请求的 `combine_avatar_references` 是可选布尔值，省略时为 `true`，仅在用户启用头像参考时生效。`src/imagegen/reference_sheet.py` 将实际选中的多个头像按输入顺序拼成一张临时编号参考图，提示词绑定 `Ref N` 与稳定玩家 ID / 公开名称；单头像保持原文件，显式关闭拼接则保留多文件上传。参考表不是输出分镜布局，不持久化图像输入；生成记录仅保留角色 ID、来源数量、实际上传数量及拼接状态。
+
+手动分镜的 `panel_count` 省略表示自动，指定时只接受整数 1–6。固定模式使用独立的模型数量要求，最多纠正一次，原始数量、有效内容和证据均通过才返回候选，不允许通过截断、空格补齐或自动回退满足数量。候选与缓存绑定剧情版本及目标格数；前端修改目标不覆盖已应用稿，不匹配的候选不能应用。生图入口再次验证数量，所有格均进入提示词，预算不足以保留每格地点、人物与动作时明确失败。图像模型自行选择构图，程序不加分割线，也不将请求格数视为视觉验证结果。自动分镜开关及 `SCENE_IMAGE` 触发语义不变。
+
 ## WebUI 启动与配置
 
 `web_server.py` 是源码版、Windows 便携版和 Docker 共用的稳定启动入口，主要负责加载项目环境、组合明确的 WebUI owner，并启动 aiohttp listener。具体职责位于：

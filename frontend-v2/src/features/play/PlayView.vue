@@ -501,12 +501,12 @@ async function generateStoryRecap() {
   }
 }
 
-async function generateCurrentRoundImageRequest(payload: { prompt: string; round: number; panels: unknown[]; panel_count?: number; use_avatar_references: boolean }) {
+async function generateCurrentRoundImageRequest(payload: { prompt: string; round: number; panels: unknown[]; panel_count?: number; use_avatar_references: boolean; combine_avatar_references: boolean }) {
   if (!game.currentGame.value || currentRoundImageBusy.value) return
   currentRoundImageBusy.value = true
   showCurrentRoundImage.value = false
   try {
-    const result = await generateCurrentRoundImage(game.currentGame.value, { prompt: payload.prompt, round: payload.round, panels: payload.panels, panelCount: payload.panel_count, useAvatarReferences: payload.use_avatar_references })
+    const result = await generateCurrentRoundImage(game.currentGame.value, { prompt: payload.prompt, round: payload.round, panels: payload.panels, panelCount: payload.panel_count, useAvatarReferences: payload.use_avatar_references, combineAvatarReferences: payload.combine_avatar_references })
     await game.refresh(true)
     toast.success(t('imageGenerated'))
     if (result.prompt_budget?.adjusted) toast.warning(t('imagePromptAdjusted'))
@@ -1439,8 +1439,8 @@ onBeforeUnmount(() => {
       @background-saved="refreshMapAfterBackground"
     />
     <CurrentRoundImageModal
-      v-if="showCurrentRoundImage && game.currentGame.value && game.detail.value"
-      open :game-key="game.currentGame.value" :detail="game.detail.value" :log="game.log.value" :players="game.players.value"
+      v-if="game.currentGame.value && game.detail.value"
+      :open="showCurrentRoundImage" :game-key="game.currentGame.value" :detail="game.detail.value" :log="game.log.value" :players="game.players.value"
       :auto-storyboard="!!settings.config.imagegen_auto_storyboard"
       @close="showCurrentRoundImage = false" @generate="generateCurrentRoundImageRequest"
     />

@@ -53,15 +53,21 @@ export async function generateImage(input: GenerateImageInput): Promise<Generate
   return result
 }
 
-export async function generateCurrentRoundImage(gameKey: string, input: { prompt: string; round?: number; panels?: unknown[]; panelCount?: number; useAvatarReferences?: boolean }): Promise<GenerateImageResponse> {
+export async function generateCurrentRoundImage(gameKey: string, input: { prompt: string; round?: number; panels?: unknown[]; panelCount?: number; useAvatarReferences?: boolean; combineAvatarReferences?: boolean }): Promise<GenerateImageResponse> {
   const result = await api<GenerateImageResponse>(`/games/${encodeURIComponent(gameKey)}/generated-images/current-round`, {
-    method: 'POST', body: JSON.stringify({ prompt: input.prompt, round: input.round || 0, panels: input.panels || [], panel_count: input.panelCount, use_avatar_references: !!input.useAvatarReferences }),
+    method: 'POST', body: JSON.stringify({ prompt: input.prompt, round: input.round || 0, panels: input.panels || [], panel_count: input.panelCount, use_avatar_references: !!input.useAvatarReferences, combine_avatar_references: input.combineAvatarReferences ?? true }),
   })
   if (!result.ok || !result.asset_id) throw new Error(result.error || 'image-generation-failed')
   return result
 }
 
-export async function fetchStoryboardDraft(gameKey: string, round = 0): Promise<{ ok?: boolean; round?: number; panels?: unknown[]; error?: string }> {
+export async function fetchStoryboardDraft(gameKey: string, round = 0): Promise<{
+  ok?: boolean
+  round?: number
+  panels?: unknown[]
+  candidate?: { panels?: unknown[]; requested_panel_count?: number | null; compressed_count?: number; source_revision?: string } | null
+  error?: string
+}> {
   return api(`/games/${encodeURIComponent(gameKey)}/generated-images/storyboard?round=${round}`)
 }
 

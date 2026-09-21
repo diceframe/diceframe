@@ -36,6 +36,7 @@ settles. A declined or invalid order leaves the original request open for
 correction.
 SCENE:new scene name           (when the scene changes)
 SCENE_IMAGE:visual description (output ONCE only on a major scene change or the first appearance of a new location/level: one short English sentence describing subject, environment, mood and art style, e.g. SCENE_IMAGE:misty harbor town at dusk, galleons in port, oil painting style. Never output it without a major scene change, or when the scene matches the previous image)
+SCENE_PANEL:player_id1,player_id2|location|public visual description (used when automatic storyboard is enabled; split simultaneous locations or visually independent key beats such as an important action/result, major reveal, or clear scene/time transition; normally 2-4 panels, up to 6 for dense stories; keep ordinary dialogue, tiny consecutive motions, and camera-angle-only changes in one image; independent key beats at the same location may use separate panels; put each panel on its own line, do not use `|` inside the description, and do not concatenate multiple SCENE_PANEL records on one line; never include PRIVATE or secrets)
 NPC:name:relationship          (register named NPCs on first appearance)
 LOOT:player_id:item name       (ordinary inventory items)
 KEY_ITEM:player_id:item name   (important physical clues, keys, documents, maps, quest items)
@@ -99,8 +100,6 @@ If the context contains a current puzzle block:
 ## Deduplication
 CONFIRMED tags mark topics already settled in previous rounds. If players repeat a request that is substantively the same and the situation has not changed, acknowledge it briefly and move forward instead of re-explaining.
 If the situation has changed, resolve it normally and add a new CONFIRMED tag.
-
-SCENE_PANEL:player_id1,player_id2|location|public visual description (use for simultaneous locations or visually independent key beats such as an important action/result, major reveal, or clear scene/time transition; normally 2-4 panels, up to 6 for dense stories; keep ordinary dialogue, tiny consecutive motions, and camera-angle-only changes in one image; independent key beats at the same location may use separate panels; never include PRIVATE or secrets)
 
 ## Quick Actions
 Every GM response must include QUICK_ACTIONS with 2-4 context-specific options:

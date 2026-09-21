@@ -11,10 +11,10 @@ const show = ref(false)
 
 <template>
   <NButton size="small" secondary class="help-btn" :class="{ compact: props.compact }" :title="title" :aria-label="title" @click="show = true">
-    <template #icon>
+    <template v-if="props.compact" #icon>
       <NIcon :component="HelpCircleOutline" />
     </template>
-    {{ buttonLabel ?? t('help') }}
+    <span v-if="!props.compact">{{ buttonLabel ?? t('help') }}</span>
   </NButton>
   <NModal v-model:show="show" preset="card" :title="title" style="max-width:520px" :bordered="false">
     <div class="help-tutorial">
@@ -25,7 +25,8 @@ const show = ref(false)
 
 <style scoped>
 .help-btn{min-height:30px;font-size:12px;font-weight:650;color:var(--df-interactive-strong)}
-.help-btn.compact{min-height:20px;min-width:20px;padding:0 4px;margin-left:4px;border-radius:50%;font-size:12px;line-height:1;vertical-align:middle}
+.help-btn.compact{min-height:24px;min-width:24px;width:24px;padding:0;margin-left:6px;border-radius:50%;font-size:0;line-height:1;vertical-align:middle}
+.help-btn.compact :deep(.n-button__icon){margin:0}
 .help-btn :deep(.n-button__icon){font-size:16px}
 .help-tutorial h4{margin:14px 0 4px}
 .help-tutorial h4:first-child{margin-top:0}
