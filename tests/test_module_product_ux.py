@@ -19,6 +19,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.engine import persistence
@@ -168,6 +169,29 @@ async def test_module_detail_actions_are_allowed_until_a_save_binds_it(env) -> N
     assert set(free["actions"]) == set(MODULE_ACTIONS)
     assert all(state["allowed"] for state in free["actions"].values())
 
+
+@pytest.mark.asyncio
+async def test_module_exposes_only_explicit_canonical_lorebook_sources(env) -> None:
+    await env.api.import_module(_zip_payload(_module_files(catalog=True)))
+    env.lorebook.create_lorebook({
+        "id": "module-book",
+        "name": "Castle Lore",
+        "source_kind": "module",
+        "source_id": MODULE_ID,
+    })
+    env.lorebook.create_lorebook({
+        "id": "world-book",
+        "name": "World Lore",
+        "source_kind": "world",
+        "source_id": "world-a",
+    })
+
+    listed = {item["id"]: item for item in env.api.list_modules()["modules"]}
+    assert listed[MODULE_ID]["lorebook_count"] == 1
+    detail = env.api.module_detail(MODULE_ID)["module"]
+    assert [book["id"] for book in detail["lorebooks"]] == ["module-book"]
+    assert env.api.module_lorebooks(MODULE_ID)["lorebooks"][0]["source_kind"] == "module"
+
     game_key = await _persist_bound_save(env)
 
     bound = env.api.module_detail(MODULE_ID)["module"]
@@ -269,3 +293,22 @@ async def test_module_detail_route_serves_guard_state(env) -> None:
     module = body["module"]
     assert [row["game_key"] for row in module["bound_games"]] == [game_key]
     assert module["actions"]["disable"]["allowed"] is False
+
+
+@pytest.mark.asyncio
+async def test_external_module_preview_is_review_only(env) -> None:
+    form = FormData()
+    form.add_field(
+        "file",
+        b'{"id":"foundry.keep","title":"Keep","esmodules":["boot.js"]}',
+        filename="module.json",
+        content_type="application/json",
+    )
+    async with TestClient(TestServer(_module_app(env.api))) as client:
+        response = await client.post("/api/modules/external/preview", data=form)
+        body = await response.json()
+
+    assert response.status == 200
+    assert body["format"] == "foundry"
+    assert body["review_required"] is True
+    assert body["auto_installable"] is False

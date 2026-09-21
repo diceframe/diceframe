@@ -35,6 +35,7 @@ from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
+from src.webui.services import module_import_adapters
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 logger = logging.getLogger("trpg")
@@ -441,6 +442,7 @@ class WebAPI:
         self._module_dependencies = modules.ModuleDependencies(
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
+            lorebook_store=self._lore,
             ruleset_registry=self._ruleset_registry,
             list_instances=self._reg.list_all,
             # FIX-01 §3.7：绑定存档保护必须覆盖所有持久化存档（paused / ended /
@@ -873,6 +875,9 @@ class WebAPI:
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
 
+    def module_lorebooks(self, module_id: str) -> dict[str, Any]:
+        return modules.module_lorebooks(self._module_dependencies, module_id)
+
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",
     ) -> dict[str, Any]:
@@ -896,6 +901,15 @@ class WebAPI:
             lambda directory, manifest: modules.preview_module_install(
                 self._module_dependencies, manifest, directory=directory,
             ),
+        )
+
+    def preview_external_module_import(
+        self, payload: bytes, source_name: str = "",
+    ) -> dict[str, Any]:
+        """Preview a data-only external VTT module; never executes its runtime."""
+
+        return module_import_adapters.preview_external_module_import(
+            payload, source_name=source_name,
         )
 
     def validate_module_package(

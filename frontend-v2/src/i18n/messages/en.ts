@@ -21,6 +21,8 @@ export const en = {
   modulesContentPack: 'Content pack',
   modulesVersion: 'Version {version}',
   modulesAdventures: 'Adventures',
+  modulesLorebooks: 'Lorebooks',
+  modulesNoLorebooks: 'This module has no canonical lorebooks bound.',
   modulesContentCount: 'Content',
   modulesBack: 'Back to modules',
   modulesNotFound: 'This module was not found.',
