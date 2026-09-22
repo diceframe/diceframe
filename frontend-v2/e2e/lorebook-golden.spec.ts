@@ -167,6 +167,12 @@ test.describe('Lorebook Golden (real chain)', () => {
     await bookMenu.getByRole('button', { name: '启用', exact: true }).click()
     await expect(contextBar.locator('.lore-book-state')).toContainText('启用中')
 
+    // 点击菜单外任意位置应自动收起下拉菜单。
+    await bookMenu.locator('summary').click()
+    await expect(bookMenu).toHaveAttribute('open')
+    await page.locator('.view-title h1').click()
+    await expect(bookMenu).not.toHaveAttribute('open')
+
     // ---- 5. 使用范围管理：新增一条 world 范围并移除 ------------------------
     await bookMenu.locator('summary').click()
     await bookMenu.getByRole('button', { name: '使用范围', exact: true }).click()

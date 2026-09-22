@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, errorMessage } from '@/api/client'
 import type { CharacterListResponse, GameSummary, GamesResponse, LorebookResponse, LoreEntry, LoreGenerateResponse, Player, WorldCreateResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import { readCurrentGame } from '@/stores/gameContext'
@@ -216,6 +216,17 @@ async function loadLore() {
 }
 
 onMounted(loadWorlds)
+
+// 管理菜单是零依赖的 details/summary：点击菜单外（或打开另一个菜单）时自动收起，
+// 菜单项自身由 runBookMenu 收起。
+function closeOpenLoreMenus(event: Event) {
+  const anchor = (event.target as HTMLElement | null)?.closest('details.lore-menu')
+  document.querySelectorAll('.lore-menu[open]').forEach(menu => {
+    if (menu !== anchor) menu.removeAttribute('open')
+  })
+}
+onMounted(() => document.addEventListener('click', closeOpenLoreMenus))
+onBeforeUnmount(() => document.removeEventListener('click', closeOpenLoreMenus))
 
 function openLore(entry?: LoreEntry) {
   loreEdit.value = entry ? cloneLore(entry) : {
