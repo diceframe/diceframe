@@ -109,11 +109,11 @@ test.describe('Lorebook Golden (real chain)', () => {
     const bookMenu = contextBar.locator('details.lore-menu').nth(1)
     await worldSelect.selectOption(LORE_WORLD_ID)
 
-    // 迁移产物：主世界书是默认当前 Book，信息行表达 primary + 使用范围。
+    // 迁移产物：主世界书是默认当前 Book，信息行表达 primary + 当前上下文。
     await expect(bookSelect).toBeVisible()
     const bookMeta = contextBar.locator('.lore-book-meta')
     await expect(bookMeta).toContainText('主世界书')
-    await expect(bookMeta).toContainText('使用范围：当前世界')
+    await expect(bookMeta).toContainText('当前上下文：当前世界')
     // 真实条目来自迁移后的 SQLite，不是测试 fabricate 的 JSON。
     await expect(page.locator('.lore-row', { hasText: '旧城门' }).first()).toBeVisible()
 
@@ -248,7 +248,9 @@ test.describe('Lorebook Golden (real chain)', () => {
     await expect(roundTripDialog).toBeHidden()
 
     // ---- 9. 删除非主世界书；主世界书没有删除入口 --------------------------
-    await bookSelect.selectOption({ label: 'Golden Lore World' })
+    await bookSelect.selectOption(`world:${LORE_WORLD_ID}`)
+    await expect(bookSelect).toHaveValue(`world:${LORE_WORLD_ID}`)
+    await expect(bookMeta).toContainText('主世界书')
     await bookMenu.locator('summary').click()
     await expect(bookMenu.getByRole('button', { name: '删除', exact: true })).toHaveCount(0)
     await bookMenu.locator('summary').click()

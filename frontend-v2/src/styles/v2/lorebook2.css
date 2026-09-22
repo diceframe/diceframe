@@ -453,6 +453,15 @@ body.light .lore-filter-options button.active:not(.primary):not(.danger):not(.su
   }
 }
 
+@media (max-width: 600px) {
+  /* 窄屏行会换行；菜单从触发器左缘展开，避免右对齐后越出视口左侧。 */
+  .lore-context-row .lore-menu-list {
+    right: auto;
+    left: 0;
+    max-width: calc(100vw - 24px);
+  }
+}
+
 /* 条目搜索/筛选与批量操作：纯前端过滤，样式沿用类型 tab 的 token 语言 */
 .lorebook-page .lore-entry-toolbar {
   display: grid;

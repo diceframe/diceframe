@@ -190,7 +190,11 @@ async function loadWorlds() {
   } catch (e: unknown) { error.value = errorMessage(e) }
 }
 
-watch(currentWorldId, () => { if (currentWorldId.value) { loadLore(); loadLorebooks() } })
+watch(currentWorldId, async () => {
+  if (!currentWorldId.value) return
+  await loadLorebooks()
+  await loadLore()
+})
 watch(worldLanguage, () => {
   if (languageWorlds.value.some(w => worldIdOf(w) === currentWorldId.value)) return
   currentWorldId.value = worldIdOf(languageWorlds.value[0])
@@ -648,7 +652,9 @@ async function loadLorebooks() {
     if (!activeBookId.value || !lorebookBooks.value.some(book => book.id === activeBookId.value)) activeBookId.value = `world:${currentWorldId.value}`
   } catch {
     const world = currentWorld.value
-    lorebookBooks.value = world ? [{ id: currentWorldId.value, name: worldNameOf(world), primary: true, scope: 'world' }] : []
+    const fallbackBookId = `world:${currentWorldId.value}`
+    lorebookBooks.value = world ? [{ id: fallbackBookId, name: worldNameOf(world), primary: true, scope: 'world' }] : []
+    if (world) activeBookId.value = fallbackBookId
   }
 }
 
@@ -699,10 +705,10 @@ const currentBookScopeLabel = computed(() => {
   return scope ? t(SCOPE_LABEL_KEYS[scope] ?? 'loreBooksUnbound') : t('loreBooksUnbound')
 })
 
-/** 菜单项点击后先收起菜单，再执行既有 Book handler；不复制任何管理逻辑。 */
-function runBookMenu(event: Event, action: (book: never) => unknown, book?: LorebookCard) {
+/** 菜单项点击后先收起菜单，再执行既有 handler；参数由调用处的 closure 显式绑定。 */
+function runBookMenu(event: Event, action: () => void | Promise<void>) {
   (event.currentTarget as HTMLElement | null)?.closest('details')?.removeAttribute('open')
-  void (action as (b?: LorebookCard) => unknown)(book)
+  void action()
 }
 function triggerImport() { fileInput.value?.click() }
 
@@ -742,7 +748,7 @@ async function renameBook(book: LorebookCard) {
 }
 
 async function removeBook(book: LorebookCard) {
-  if (book.primary) return
+  if (book.id === primaryBookId.value) return
   const ok = await confirm({
     title: t('loreBookDeleteTitle'),
     content: t('loreBookDeleteContent', { name: book.name }),
@@ -755,7 +761,7 @@ async function removeBook(book: LorebookCard) {
     await api(`/lorebooks/${encodeURIComponent(book.id)}`, { method: 'DELETE' })
     if (activeBookId.value === book.id) activeBookId.value = primaryBookId.value
     await loadLorebooks(); await loadLore()
-    toast.success('已删除')
+    toast.success(t('loreBookDeleted'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
@@ -843,8 +849,8 @@ async function removeBinding(bindingId: string) {
         <details class="lore-menu">
           <summary class="lore-menu-trigger">{{ t('loreWorldManage') }}</summary>
           <div class="lore-menu-list">
-            <button type="button" @click="runBookMenu($event, toggleNewWorld)">{{ t('newWorld') }}</button>
-            <button v-if="currentWorldId" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, deleteWorld)">{{ t('deleteWorldAction') }}</button>
+            <button type="button" @click="runBookMenu($event, () => toggleNewWorld())">{{ t('newWorld') }}</button>
+            <button v-if="currentWorldId" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => deleteWorld())">{{ t('deleteWorldAction') }}</button>
           </div>
         </details>
       </div>
@@ -867,19 +873,19 @@ async function removeBinding(bindingId: string) {
         <details class="lore-menu">
           <summary class="lore-menu-trigger">{{ t('loreBookManage') }}</summary>
           <div class="lore-menu-list">
-            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, renameBook, currentBook ?? undefined)">{{ t('loreBooksRename') }}</button>
-            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, openBindings, currentBook ?? undefined)">{{ t('loreBookUsageScope') }}</button>
-            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, toggleBookEnabled, currentBook ?? undefined)">
+            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, () => renameBook(currentBook!))">{{ t('loreBooksRename') }}</button>
+            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, () => openBindings(currentBook!))">{{ t('loreBookUsageScope') }}</button>
+            <button type="button" :disabled="busy || !currentBook" @click="runBookMenu($event, () => toggleBookEnabled(currentBook!))">
               {{ currentBook?.enabled === false ? t('loreBooksEnable') : t('loreBooksDisable') }}
             </button>
-            <button type="button" :disabled="busy || !data?.entries?.length" @click="runBookMenu($event, exportLore)">{{ t('export') }}</button>
-            <button type="button" :disabled="busy || !currentWorldId" @click="runBookMenu($event, triggerImport)">{{ t('import') }}</button>
-            <button v-if="currentBook && !currentBook.primary" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, removeBook, currentBook)">{{ t('loreBooksDelete') }}</button>
+            <button type="button" :disabled="busy || !data?.entries?.length" @click="runBookMenu($event, () => exportLore())">{{ t('export') }}</button>
+            <button type="button" :disabled="busy || !currentWorldId" @click="runBookMenu($event, () => triggerImport())">{{ t('import') }}</button>
+            <button v-if="currentBook && currentBook.id !== primaryBookId" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => removeBook(currentBook!))">{{ t('loreBooksDelete') }}</button>
           </div>
         </details>
       </div>
       <p v-if="currentBook" class="lore-book-meta">
-        <template v-if="currentBook.primary">{{ t('loreBooksPrimaryBadge') }} · </template>{{ t('loreBookUsageScope') }}：{{ currentBookScopeLabel }}
+        <template v-if="currentBook.id === primaryBookId">{{ t('loreBooksPrimaryBadge') }} · </template>{{ t('loreBookContextScope') }}：{{ currentBookScopeLabel }}
       </p>
     </div>
 

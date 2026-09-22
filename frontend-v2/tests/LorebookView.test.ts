@@ -106,6 +106,35 @@ describe('LorebookView perspective inspector', () => {
     }))
   }
 
+  it('keeps the canonical primary book id and path when the book list request fails', async () => {
+    mocks.api.mockImplementation(async (path: string) => {
+      const p = String(path)
+      if (p.startsWith('/lorebooks?')) throw new Error('book list unavailable')
+      if (p.includes('/preview')) return previewFor(p)
+      if (p.includes('/characters')) return characters
+      if (p.includes('/games')) return games
+      if (p.includes('/lorebook/')) return lorebook
+      if (p.includes('/worlds')) return worlds
+      throw new Error(`unexpected path ${p}`)
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await flushPromises()
+
+    const bookSelect = wrapper.findAll('.lore-context-select')[1]
+    expect((bookSelect.element as HTMLSelectElement).value).toBe('world:w1')
+    expect(bookSelect.find('option').attributes('value')).toBe('world:w1')
+
+    mocks.api.mockClear()
+    await bookSelect.trigger('change')
+    await flushPromises()
+
+    expect(mocks.api.mock.calls.some(call => String(call[0]) === '/lorebook/w1')).toBe(true)
+    expect(mocks.api.mock.calls.some(call => String(call[0]) === '/lorebooks/world%3Aw1/entries')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('collapses the inspector by default on narrow screens and opens on demand', async () => {
     stubNarrowViewport()
     const wrapper = mountView()
