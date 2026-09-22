@@ -292,4 +292,33 @@ test.describe('Lorebook Golden (real chain)', () => {
 
     expect(failures, `backend 5xx during the golden run:\n${failures.join('\n')}`).toEqual([])
   })
+
+  /**
+   * 内容语言选择器必须覆盖全局四个 Locale（zh-CN / en / ja / de），且与 UI 语言独立。
+   * fixture 里备了 ja / de 标记的 world，切换内容语言后 world selector 按 filterByContentLanguage 过滤。
+   */
+  test('content language selector covers all four locales and filters worlds', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'Uses the desktop inspector layout')
+
+    await page.goto('/#/lorebook')
+    await expect(page.locator('.lorebook-page')).toBeVisible()
+
+    const languageSelect = page.locator('.lore-language-filter select')
+    const worldSelect = page.locator('.lore-world-bar select').nth(1)
+
+    // 语言名统一走 i18n 自身名称契约，值与全局 Locale 一致。
+    await expect(languageSelect.locator('option')).toHaveText(['简体中文', 'English', '日本語', 'Deutsch'])
+
+    await languageSelect.selectOption('ja')
+    const jaOption = worldSelect.locator('option', { hasText: 'ゴールデン・ロア・ワールド' })
+    await expect(jaOption).toHaveCount(1)
+    await worldSelect.selectOption('e2e_lore_golden_ja')
+
+    await languageSelect.selectOption('de')
+    await expect(worldSelect.locator('option', { hasText: 'Golden Lore Welt' })).toHaveCount(1)
+
+    // 回到 zh-CN：legacy 未标记内容仍按 zh-CN 归类，不被语言切换破坏。
+    await languageSelect.selectOption('zh-CN')
+    await expect(worldSelect.locator('option', { hasText: 'Golden Lore World' })).toHaveCount(1)
+  })
 })

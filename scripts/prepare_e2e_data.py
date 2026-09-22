@@ -387,6 +387,15 @@ def _write_legacy_lorebook_db(data_dir: Path) -> Path:
             "INSERT OR IGNORE INTO worlds (id, name, description, language) VALUES (?, ?, ?, ?)",
             (E2E_LORE_WORLD_ID, "Golden Lore World", "Lorebook Golden E2E", "zh-CN"),
         )
+        # 内容语言选择器回归数据：ja / de 标记的世界，供语言切换用例筛选。
+        for world_id, name, language in (
+            ("e2e_lore_golden_ja", "ゴールデン・ロア・ワールド", "ja"),
+            ("e2e_lore_golden_de", "Golden Lore Welt", "de"),
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO worlds (id, name, description, language) VALUES (?, ?, ?, ?)",
+                (world_id, name, f"Lorebook Golden E2E ({language})", language),
+            )
         for entry in _legacy_lore_entries():
             columns = ", ".join(f'"{key}"' for key in entry)
             placeholders = ", ".join("?" for _ in entry)
