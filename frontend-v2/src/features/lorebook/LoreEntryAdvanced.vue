@@ -6,6 +6,8 @@ import { normalizeVectorActivation } from './entryFilters'
 
 export interface LoreEntryAdvancedModel {
   secondary_keys: string[]
+  /** canonical「次级关键词是否参与过滤」开关；selective=false 时 keys 仅作为数据保留。 */
+  selective?: boolean
   selective_logic: string
   use_regex: boolean
   case_sensitive: boolean
@@ -44,7 +46,7 @@ const { t } = useLocale()
 function update<K extends keyof LoreEntryAdvancedModel>(key:K, value:LoreEntryAdvancedModel[K]) { emit('update:modelValue', { ...props.modelValue, [key]: value }) }
 function updateList(key: 'secondary_keys' | 'groups' | 'connected_to' | 'triggers_recursive', value: string) { update(key, value.split(',').map(item => item.trim()).filter(Boolean)) }
 function updateNumber<K extends 'scan_depth' | 'priority' | 'probability' | 'group_weight' | 'sticky' | 'cooldown' | 'delay' | 'order' | 'recursion_level'>(key: K, event: Event) { update(key, Number((event.target as HTMLInputElement).value) as LoreEntryAdvancedModel[K]) }
-function updateCheckbox<K extends 'use_regex' | 'case_sensitive' | 'match_whole_words' | 'non_recursable' | 'prevent_further_recursion' | 'delay_until_recursion' | 'prioritize_inclusion' | 'unreliable' | 'sync_on_enter' | 'is_constant'>(key: K, event: Event) { update(key, (event.target as HTMLInputElement).checked as LoreEntryAdvancedModel[K]) }
+function updateCheckbox<K extends 'selective' | 'use_regex' | 'case_sensitive' | 'match_whole_words' | 'non_recursable' | 'prevent_further_recursion' | 'delay_until_recursion' | 'prioritize_inclusion' | 'unreliable' | 'sync_on_enter' | 'is_constant'>(key: K, event: Event) { update(key, (event.target as HTMLInputElement).checked as LoreEntryAdvancedModel[K]) }
 </script>
 
 <template>
@@ -61,25 +63,28 @@ function updateCheckbox<K extends 'use_regex' | 'case_sensitive' | 'match_whole_
       <label data-field="is_constant"><input type="checkbox" :checked="!!modelValue.is_constant" @change="updateCheckbox('is_constant', $event)"> {{ t('loreActivationAlways') }}</label>
     </div>
     <label data-field="match_mode">{{ t('loreActivationLegacy') }} <select :value="modelValue.match_mode || 'any'" @change="update('match_mode', ($event.target as HTMLSelectElement).value)"><option value="any">{{ t('matchAny') }}</option><option value="all">{{ t('matchAll') }}</option><option value="not_any">{{ t('matchNotAny') }}</option><option value="not_all">{{ t('matchNotAll') }}</option></select></label>
-    <label data-field="secondary_keys">Secondary keys (comma-separated) <input type="text" :value="(modelValue.secondary_keys || []).join(', ')" @input="updateList('secondary_keys', ($event.target as HTMLInputElement).value)"></label>
-    <label data-field="selective_logic">Selective logic <select :value="modelValue.selective_logic" @change="update('selective_logic', ($event.target as HTMLSelectElement).value)"><option>any</option><option>all</option><option>not_any</option><option>not_all</option></select></label>
-    <label data-field="use_regex"><input type="checkbox" :checked="modelValue.use_regex" @change="updateCheckbox('use_regex', $event)"> Regex</label>
-    <label data-field="case_sensitive"><input type="checkbox" :checked="modelValue.case_sensitive" @change="updateCheckbox('case_sensitive', $event)"> Case-sensitive</label>
-    <label data-field="match_whole_words"><input type="checkbox" :checked="modelValue.match_whole_words" @change="updateCheckbox('match_whole_words', $event)"> Match whole words</label>
+    <!-- match_mode / selective / selective_logic 是三个独立概念：主匹配逻辑、次级门控开关、次级组合逻辑。 -->
+    <!-- 读回路径里 SQLite 布尔列是 0/1：必须布尔化再判断，缺省（undefined）按 canonical 默认 true。 -->
+    <label data-field="selective"><input type="checkbox" :checked="!!(modelValue.selective ?? true)" @change="updateCheckbox('selective', $event)"> {{ t('loreEntrySelective') }}</label>
+    <label data-field="secondary_keys">{{ t('loreEntrySecondaryKeys') }} <input type="text" :value="(modelValue.secondary_keys || []).join(', ')" @input="updateList('secondary_keys', ($event.target as HTMLInputElement).value)"></label>
+    <label data-field="selective_logic">{{ t('loreEntrySelectiveLogic') }} <select :value="modelValue.selective_logic" @change="update('selective_logic', ($event.target as HTMLSelectElement).value)"><option>any</option><option>all</option><option>not_any</option><option>not_all</option></select></label>
+    <label data-field="use_regex"><input type="checkbox" :checked="modelValue.use_regex" @change="updateCheckbox('use_regex', $event)"> {{ t('loreEntryRegex') }}</label>
+    <label data-field="case_sensitive"><input type="checkbox" :checked="modelValue.case_sensitive" @change="updateCheckbox('case_sensitive', $event)"> {{ t('loreEntryCaseSensitive') }}</label>
+    <label data-field="match_whole_words"><input type="checkbox" :checked="modelValue.match_whole_words" @change="updateCheckbox('match_whole_words', $event)"> {{ t('loreEntryMatchWholeWords') }}</label>
     <label data-field="vector_activation">{{ t('loreVectorActivation') }} <select :value="normalizeVectorActivation(modelValue.vector_activation)" @change="update('vector_activation', ($event.target as HTMLSelectElement).value)"><option value="off">off</option><option value="hybrid">hybrid</option><option value="vector_only">vector only</option></select></label>
-    <label data-field="scan_depth">Scan depth <input type="number" :value="modelValue.scan_depth" @input="updateNumber('scan_depth', $event)"></label>
-    <label data-field="priority">Priority <input type="number" :value="modelValue.priority" @input="updateNumber('priority', $event)"></label>
-    <label data-field="probability">Probability <input type="number" min="0" max="100" :value="modelValue.probability" @input="updateNumber('probability', $event)"></label>
-    <label data-field="groups">Groups (comma-separated) <input type="text" :value="(modelValue.groups || []).join(', ')" @input="updateList('groups', ($event.target as HTMLInputElement).value)"></label>
-    <label data-field="group_weight">Group weight <input type="number" :value="modelValue.group_weight" @input="updateNumber('group_weight', $event)"></label>
-    <label data-field="group_scoring">Group scoring <input type="text" :value="modelValue.group_scoring || ''" @input="update('group_scoring', ($event.target as HTMLInputElement).value)"></label>
-    <label data-field="sticky">Sticky <input type="number" :value="modelValue.sticky ?? 0" @input="updateNumber('sticky', $event)"></label>
-    <label data-field="cooldown">Cooldown <input type="number" :value="modelValue.cooldown ?? 0" @input="updateNumber('cooldown', $event)"></label>
-    <label data-field="delay">Delay <input type="number" :value="modelValue.delay ?? 0" @input="updateNumber('delay', $event)"></label>
-    <label data-field="non_recursable"><input type="checkbox" :checked="modelValue.non_recursable" @change="updateCheckbox('non_recursable', $event)"> Non-recursable</label>
-    <label data-field="prevent_further_recursion"><input type="checkbox" :checked="modelValue.prevent_further_recursion" @change="updateCheckbox('prevent_further_recursion', $event)"> Prevent further recursion</label>
-    <label data-field="delay_until_recursion"><input type="checkbox" :checked="modelValue.delay_until_recursion" @change="updateCheckbox('delay_until_recursion', $event)"> Delay until recursion</label>
-    <label data-field="recursion_level">Recursion level <input type="number" :value="modelValue.recursion_level" @input="updateNumber('recursion_level', $event)"></label>
-    <label data-field="prompt_slot">Prompt slot <input type="text" :value="modelValue.prompt_slot" @input="update('prompt_slot', ($event.target as HTMLInputElement).value)"></label>
+    <label data-field="scan_depth">{{ t('loreEntryScanDepth') }} <input type="number" :value="modelValue.scan_depth" @input="updateNumber('scan_depth', $event)"></label>
+    <label data-field="priority">{{ t('loreEntryPriority') }} <input type="number" :value="modelValue.priority" @input="updateNumber('priority', $event)"></label>
+    <label data-field="probability">{{ t('loreEntryProbability') }} <input type="number" min="0" max="100" :value="modelValue.probability" @input="updateNumber('probability', $event)"></label>
+    <label data-field="groups">{{ t('loreEntryGroups') }} <input type="text" :value="(modelValue.groups || []).join(', ')" @input="updateList('groups', ($event.target as HTMLInputElement).value)"></label>
+    <label data-field="group_weight">{{ t('loreEntryGroupWeight') }} <input type="number" :value="modelValue.group_weight" @input="updateNumber('group_weight', $event)"></label>
+    <label data-field="group_scoring">{{ t('loreEntryGroupScoring') }} <input type="text" :value="modelValue.group_scoring || ''" @input="update('group_scoring', ($event.target as HTMLInputElement).value)"></label>
+    <label data-field="sticky">{{ t('loreEntrySticky') }} <input type="number" :value="modelValue.sticky ?? 0" @input="updateNumber('sticky', $event)"></label>
+    <label data-field="cooldown">{{ t('loreEntryCooldown') }} <input type="number" :value="modelValue.cooldown ?? 0" @input="updateNumber('cooldown', $event)"></label>
+    <label data-field="delay">{{ t('loreEntryDelay') }} <input type="number" :value="modelValue.delay ?? 0" @input="updateNumber('delay', $event)"></label>
+    <label data-field="non_recursable"><input type="checkbox" :checked="modelValue.non_recursable" @change="updateCheckbox('non_recursable', $event)"> {{ t('loreEntryNonRecursable') }}</label>
+    <label data-field="prevent_further_recursion"><input type="checkbox" :checked="modelValue.prevent_further_recursion" @change="updateCheckbox('prevent_further_recursion', $event)"> {{ t('loreEntryPreventRecursion') }}</label>
+    <label data-field="delay_until_recursion"><input type="checkbox" :checked="modelValue.delay_until_recursion" @change="updateCheckbox('delay_until_recursion', $event)"> {{ t('loreEntryDelayUntilRecursion') }}</label>
+    <label data-field="recursion_level">{{ t('loreEntryRecursionLevel') }} <input type="number" :value="modelValue.recursion_level" @input="updateNumber('recursion_level', $event)"></label>
+    <label data-field="prompt_slot">{{ t('loreEntryPromptSlot') }} <input type="text" :value="modelValue.prompt_slot" @input="update('prompt_slot', ($event.target as HTMLInputElement).value)"></label>
   </details>
 </template>

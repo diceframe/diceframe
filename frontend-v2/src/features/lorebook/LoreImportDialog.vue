@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 
 export interface LoreImportPreview {
   format: string
@@ -29,6 +30,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close:[]; confirm:[decision: LoreImportDecision] }>()
 
+const { t } = useLocale()
+
 type Target = 'new' | 'existing'
 type BindingChoice = 'world' | 'game' | 'character' | 'global' | 'none'
 
@@ -45,8 +48,8 @@ const characterEntryCount = computed(() => props.preview?.character?.entries ?? 
 const hasCharacterBook = computed(() => isCharacterCard.value && characterEntryCount.value > 0)
 const characterSummary = computed(() =>
   characterName.value
-    ? `角色 ${characterName.value} 包含世界书 ${characterEntryCount.value} 条`
-    : `角色包含世界书 ${characterEntryCount.value} 条`,
+    ? t('loreImportCharacterSummaryNamed', { name: characterName.value, count: characterEntryCount.value })
+    : t('loreImportCharacterSummary', { count: characterEntryCount.value }),
 )
 
 /** 卡里的名字能对上当前游戏的角色时才有 canonical uid 可绑。 */
@@ -62,6 +65,9 @@ const canBindGame = computed(() => !!props.gameKey)
 // 导入进主世界书是破坏性的（条目会并入当前世界的主世界书），必须显式提示。
 const importsIntoPrimaryWorldBook = computed(() =>
   target.value === 'existing' && !!existingBookId.value && existingBookId.value === props.primaryBookId,
+)
+const primaryWarning = computed(() =>
+  t('loreImportPrimaryWarning', { nameHint: props.worldName ? `（${props.worldName}）` : '' }),
 )
 
 const needsCharacterUid = computed(() => binding.value === 'character' && !characterUid.value)
@@ -108,85 +114,84 @@ function decide(): LoreImportDecision {
 </script>
 
 <template>
-  <div v-if="open" class="lore-import-dialog" role="dialog" aria-modal="true" aria-label="Import lorebook">
+  <div v-if="open" class="lore-import-dialog" role="dialog" aria-modal="true" :aria-label="t('loreImportTitle')">
     <div class="lore-import-dialog__panel">
-      <h2>Import lorebook</h2>
+      <h2>{{ t('loreImportTitle') }}</h2>
 
       <p v-if="preview">
-        Detected: <strong>{{ preview.format }}</strong> · {{ preview.counts.entries }} entries ·
-        {{ preview.counts.mapped }} mapped
+        {{ t('loreImportDetected', { format: preview.format, entries: preview.counts.entries, mapped: preview.counts.mapped }) }}
       </p>
       <ul v-if="preview?.warnings?.length" class="lore-import-dialog__warnings">
         <li v-for="warning in preview.warnings" :key="warning">{{ warning }}</li>
       </ul>
       <p v-if="preview?.counts.unsupported" class="warning">
-        {{ preview.counts.unsupported }} unsupported fields are preserved and will not execute.
+        {{ t('loreImportUnsupported', { count: preview.counts.unsupported }) }}
       </p>
 
       <!-- Character Card：先说清「这张卡带了世界书」，再问绑到哪里 -->
       <section v-if="hasCharacterBook" class="lore-import-dialog__character">
         <p class="lore-import-dialog__character-summary">{{ characterSummary }}</p>
         <p v-if="!matchedCharacter" class="muted lore-import-dialog__imported-lore">
-          当前游戏没有同名的角色，这批条目会被标记为 Imported character lore。
+          {{ t('loreImportCharacterNoMatch') }}
         </p>
       </section>
 
       <fieldset class="lore-import-dialog__target">
-        <legend>导入目标</legend>
+        <legend>{{ t('loreImportTargetLegend') }}</legend>
         <label>
-          <input v-model="target" type="radio" value="new"> 新建独立 Book
+          <input v-model="target" type="radio" value="new"> {{ t('loreImportTargetNew') }}
         </label>
         <label>
-          <input v-model="target" type="radio" value="existing"> 导入到现有 Book
+          <input v-model="target" type="radio" value="existing"> {{ t('loreImportTargetExisting') }}
         </label>
         <select
           v-if="target === 'existing'"
           v-model="existingBookId"
           class="lore-import-dialog__book"
-          aria-label="选择导入目标 Book"
+          :aria-label="t('loreImportTargetBookAria')"
         >
-          <option value="">请选择…</option>
+          <option value="">{{ t('loreImportPickBook') }}</option>
           <option v-for="book in books || []" :key="book.id" :value="book.id">
-            {{ book.name }}{{ book.primary ? '（主世界书）' : '' }}
+            {{ book.name }}{{ book.primary ? t('loreImportPrimarySuffix') : '' }}
           </option>
         </select>
         <p v-if="importsIntoPrimaryWorldBook" class="warning lore-import-dialog__primary-warning">
-          将导入当前世界主世界书{{ worldName ? `（${worldName}）` : '' }}，条目会并入其中。
+          {{ primaryWarning }}
         </p>
       </fieldset>
 
       <fieldset class="lore-import-dialog__binding">
-        <legend>绑定</legend>
+        <legend>{{ t('loreImportBindingLegend') }}</legend>
         <label>
           <input v-model="binding" type="radio" value="world">
-          当前 world{{ worldName ? `（${worldName}）` : '' }}
+          {{ t('loreScopeWorld') }}{{ worldName ? `（${worldName}）` : '' }}
         </label>
         <label>
-          <input v-model="binding" type="radio" value="game" :disabled="!canBindGame"> 当前 game
+          <input v-model="binding" type="radio" value="game" :disabled="!canBindGame"> {{ t('loreScopeGame') }}
         </label>
         <label>
-          <input v-model="binding" type="radio" value="character" :disabled="!canBindCharacter"> 某 character
+          <input v-model="binding" type="radio" value="character" :disabled="!canBindCharacter"> {{ t('loreBindingsScopeCharacter') }}
         </label>
         <select
           v-if="binding === 'character'"
           v-model="characterUid"
           class="lore-import-dialog__character-select"
-          aria-label="选择绑定的角色"
+          :aria-label="t('loreBindingsCharacterSelectAria')"
         >
-          <option value="">请选择角色…</option>
+          <option value="">{{ t('loreBindingsPickCharacter') }}</option>
           <option v-for="item in characters || []" :key="item.uid" :value="item.uid">{{ item.name }}</option>
         </select>
         <label>
-          <input v-model="binding" type="radio" value="global"> global
+          <input v-model="binding" type="radio" value="global"> {{ t('loreScopeGlobal') }}
         </label>
         <label>
-          <input v-model="binding" type="radio" value="none"> 暂不绑定
+          <input v-model="binding" type="radio" value="none"> {{ t('loreImportBindingNone') }}
         </label>
       </fieldset>
 
       <div class="lore-import-dialog__buttons">
-        <button @click="emit('close')">Cancel</button>
-        <button :disabled="confirmDisabled" @click="emit('confirm', decide())">Import</button>
+        <button @click="emit('close')">{{ t('cancel') }}</button>
+        <button :disabled="confirmDisabled" @click="emit('confirm', decide())">{{ t('import') }}</button>
       </div>
     </div>
   </div>

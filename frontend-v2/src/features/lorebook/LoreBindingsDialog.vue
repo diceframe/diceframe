@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 
 export interface LoreBinding {
   id: string
@@ -28,6 +29,8 @@ const emit = defineEmits<{
   remove:[bindingId: string]
 }>()
 
+const { t } = useLocale()
+
 type ScopeChoice = 'world' | 'game' | 'character' | 'global'
 const scope = ref<ScopeChoice>('world')
 const characterUid = ref('')
@@ -43,7 +46,7 @@ watch(() => props.open, isOpen => {
 })
 
 function scopeTargetLabel(binding: LoreBinding): string {
-  if (binding.scope_kind === 'global') return 'global'
+  if (binding.scope_kind === 'global') return binding.scope_kind
   if (binding.scope_kind === 'character') {
     const match = (props.characters || []).find(item => item.uid === binding.scope_id)
     return match ? match.name : binding.scope_id
@@ -63,13 +66,13 @@ function add() {
 </script>
 
 <template>
-  <div v-if="open" class="lore-bindings-dialog" role="dialog" aria-modal="true" aria-label="Manage bindings">
+  <div v-if="open" class="lore-bindings-dialog" role="dialog" aria-modal="true" :aria-label="t('loreBindingsAria')">
     <div class="lore-bindings-dialog__panel">
-      <h2>绑定<template v-if="bookName">：{{ bookName }}</template></h2>
+      <h2>{{ t('loreBindingsAria') }}<template v-if="bookName">：{{ bookName }}</template></h2>
 
       <table class="lore-bindings-dialog__table">
         <thead>
-          <tr><th>scope</th><th>目标</th><th>role</th><th></th></tr>
+          <tr><th>{{ t('loreBindingsScopeTh') }}</th><th>{{ t('loreBindingsTargetTh') }}</th><th>{{ t('loreBindingsRoleTh') }}</th><th></th></tr>
         </thead>
         <tbody>
           <tr v-for="binding in bindings || []" :key="binding.id" class="lore-binding-row">
@@ -80,36 +83,36 @@ function add() {
               <button
                 class="danger"
                 :disabled="busy"
-                :aria-label="`解除绑定 ${binding.scope_kind}`"
+                :aria-label="t('loreBindingsRemoveAria', { kind: binding.scope_kind })"
                 @click="emit('remove', binding.id)"
-              >解除</button>
+              >{{ t('loreBindingsRemove') }}</button>
             </td>
           </tr>
           <tr v-if="!(bindings || []).length">
-            <td colspan="4" class="muted">这本世界书当前没有绑定（不会被任何运行时作用域加载）。</td>
+            <td colspan="4" class="muted">{{ t('loreBindingsEmpty') }}</td>
           </tr>
         </tbody>
       </table>
 
       <fieldset class="lore-bindings-dialog__add">
-        <legend>新增绑定</legend>
-        <label><input v-model="scope" type="radio" value="world"> 当前 world</label>
-        <label><input v-model="scope" type="radio" value="game" :disabled="!canBindGame"> 当前 game</label>
-        <label><input v-model="scope" type="radio" value="character" :disabled="!canBindCharacter"> 某 character</label>
+        <legend>{{ t('loreBindingsAddLegend') }}</legend>
+        <label><input v-model="scope" type="radio" value="world"> {{ t('loreScopeWorld') }}</label>
+        <label><input v-model="scope" type="radio" value="game" :disabled="!canBindGame"> {{ t('loreScopeGame') }}</label>
+        <label><input v-model="scope" type="radio" value="character" :disabled="!canBindCharacter"> {{ t('loreBindingsScopeCharacter') }}</label>
         <select
           v-if="scope === 'character'"
           v-model="characterUid"
-          aria-label="选择绑定的角色"
+          :aria-label="t('loreBindingsCharacterSelectAria')"
         >
-          <option value="">请选择角色…</option>
+          <option value="">{{ t('loreBindingsPickCharacter') }}</option>
           <option v-for="item in characters || []" :key="item.uid" :value="item.uid">{{ item.name }}</option>
         </select>
-        <label><input v-model="scope" type="radio" value="global"> global</label>
-        <button :disabled="addDisabled" @click="add()">新增</button>
+        <label><input v-model="scope" type="radio" value="global"> {{ t('loreScopeGlobal') }}</label>
+        <button :disabled="addDisabled" @click="add()">{{ t('loreBindingsAdd') }}</button>
       </fieldset>
 
       <div class="lore-bindings-dialog__buttons">
-        <button @click="emit('close')">关闭</button>
+        <button @click="emit('close')">{{ t('close') }}</button>
       </div>
     </div>
   </div>

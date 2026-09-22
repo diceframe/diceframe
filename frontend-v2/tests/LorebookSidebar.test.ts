@@ -1,6 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import LorebookSidebar from '../src/features/lorebook/LorebookSidebar.vue'
+import { i18n } from '../src/i18n'
+
+// jsdom 的 navigator 是 en-US；这些断言固定在产品默认语言 zh-CN 上。
+i18n.global.locale.value = 'zh-CN'
 
 const BOOKS = [
   { id: 'primary', name: 'Primary', primary: true, scope: 'world', enabled: true },
@@ -9,7 +13,7 @@ const BOOKS = [
 ]
 
 function mountSidebar(props: Record<string, unknown> = {}) {
-  return mount(LorebookSidebar, { props: { books: BOOKS, activeId: 'secondary', ...props } })
+  return mount(LorebookSidebar, { props: { books: BOOKS, activeId: 'secondary', ...props }, global: { plugins: [i18n] } })
 }
 
 /** Book 条目按钮（排除筛选/操作按钮）。 */

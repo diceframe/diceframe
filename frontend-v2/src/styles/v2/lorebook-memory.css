@@ -13,7 +13,7 @@
 
 .lorebook-page .lore-tools {
   display: grid;
-  grid-template-columns: auto minmax(240px, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(240px, 1fr) auto;
   gap: 9px;
   margin: 12px 0;
   padding: 10px;

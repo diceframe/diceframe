@@ -42,16 +42,16 @@ function playerLabel(p: Player): string {
     </header>
 
     <section class="lore-inspector-block">
-      <span class="lore-inspector-label">Activation Inspector</span>
+      <span class="lore-inspector-label">{{ t('loreActivationInspectorTitle') }}</span>
       <textarea
         class="lore-activation-input"
         :value="actionText"
         rows="3"
-        placeholder="Describe the action to preview activation…"
+        :placeholder="t('loreActivationInputPlaceholder')"
         @input="emit('update:action-text', ($event.target as HTMLTextAreaElement).value)"
       />
       <button type="button" :disabled="activationLoading" @click="emit('refresh-activation')">
-        {{ activationLoading ? 'Refreshing…' : 'Preview activation' }}
+        {{ activationLoading ? t('loreActivationRefreshing') : t('loreActivationPreview') }}
       </button>
       <p v-if="activationError" class="error-banner">{{ activationError }}</p>
       <ul v-else-if="activation?.trace?.length" class="lore-activation-trace">
@@ -60,7 +60,7 @@ function playerLabel(p: Player): string {
           <span>{{ row.final_state || 'candidate' }} · {{ row.reason_code || '—' }}</span>
         </li>
       </ul>
-      <p v-else class="muted small">No activation trace returned.</p>
+      <p v-else class="muted small">{{ t('loreActivationTraceEmpty') }}</p>
     </section>
 
     <section class="lore-inspector-block">

@@ -44,6 +44,8 @@ interface LoreEdit extends LoreEntry {
   group?: string
   group_weight: number
   secondary_keys: string[]
+  /** canonical 次级关键词门控开关；与 selective_logic（组合逻辑）是两个概念。 */
+  selective: boolean
   selective_logic: string
   use_regex: boolean
   case_sensitive: boolean
@@ -219,7 +221,7 @@ function openLore(entry?: LoreEntry) {
     match_mode: 'any', unreliable: false, sync_on_enter: false, is_constant: false,
     triggers_recursive: [], visible_to: [], connected_to: [], sticky: 0,
     cooldown: 0, delay: 0, order: 100, probability: 100, group: '', group_weight: 1,
-    secondary_keys: [], selective_logic: 'any', use_regex: false, case_sensitive: false,
+    secondary_keys: [], selective: true, selective_logic: 'any', use_regex: false, case_sensitive: false,
     match_whole_words: false, scan_depth: 0, priority: 100, prompt_slot: 'world_background', groups: [],
     // canonical 默认与后端 payload.setdefault 对齐：显式发值必须等于后端默认，否则 UI 与库里不一致。
     vector_activation: 'hybrid',
@@ -812,7 +814,8 @@ async function removeBinding(bindingId: string) {
           <option value="en">{{ t('english') }}</option>
         </select>
       </label>
-      <select v-model="currentWorldId">
+      <!-- World 选择/创建/删除：World 管理与左侧 Book 操作分属两个对象层级。 -->
+      <select v-model="currentWorldId" :aria-label="t('loreWorldSelectAria')">
         <option value="" disabled>{{ t('chooseWorldEllipsis') }}</option>
         <option v-for="w in languageWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldNameOf(w) }} ({{ t('entriesCount', { count: w.entry_count || 0 }) }})</option>
       </select>
@@ -837,8 +840,7 @@ async function removeBinding(bindingId: string) {
       <button class="success" :disabled="!currentWorldId" @click="openLore()">{{ t('addLoreEntry') }}</button>
       <input v-model="generatePrompt" :placeholder="t('generateLorePlaceholder')">
       <button @click="generateLore" :disabled="busy || !currentWorldId">{{ t('aiGenerate') }}</button>
-      <button @click="exportLore" :disabled="!data?.entries?.length">{{ t('export') }}</button>
-      <button @click="fileInput?.click()" :disabled="!currentWorldId">{{ t('import') }}</button>
+      <!-- Import / Export 是 Book 生命周期操作，唯一入口在左侧 Books 区。 -->
       <input ref="fileInput" type="file" accept="application/json" @change="importLore" hidden>
     </div>
 
