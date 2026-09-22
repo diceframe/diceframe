@@ -1,17 +1,93 @@
-/* Lorebook: content column + right-side perspective & visibility inspector. */
+/* Lorebook: Books sidebar + content column + right-side perspective & visibility inspector. */
 .lorebook-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 
 .lorebook-shell.inspector-open {
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) 280px;
 }
 
 .lorebook-workspace {
   min-width: 0;
+}
+
+/* Books 侧栏：轨道宽度由 shell grid 固定，这里只负责内容排版与溢出安全。 */
+.lorebook-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  background: linear-gradient(180deg, var(--df-surface-1), var(--df-surface-2));
+}
+
+.lorebook-sidebar__title {
+  margin: 0;
+  color: var(--df-accent-strong);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.lorebook-sidebar__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lorebook-sidebar__search,
+.lorebook-sidebar__scope {
+  min-width: 0;
+  width: 100%;
+}
+
+.lorebook-sidebar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lorebook-sidebar__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lorebook-sidebar__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lorebook-sidebar__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  min-width: 0;
+  width: 100%;
+  text-align: left;
+}
+
+.lorebook-sidebar__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lorebook-sidebar__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .lore-header-actions {
@@ -325,8 +401,9 @@ body.light .lore-filter-options button.active:not(.primary):not(.danger):not(.su
   padding: 14px 18px 17px;
 }
 
-/* 窄屏：检查器从常驻右栏降级为右侧抽屉，由工具栏按钮开关 */
+/* 窄屏：Books 侧栏堆叠到主区上方，检查器从常驻右栏降级为右侧抽屉（由工具栏按钮开关） */
 @media (max-width: 1100px) {
+  .lorebook-shell,
   .lorebook-shell.inspector-open {
     grid-template-columns: minmax(0, 1fr);
   }
