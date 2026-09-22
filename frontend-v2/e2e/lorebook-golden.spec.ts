@@ -103,32 +103,35 @@ test.describe('Lorebook Golden (real chain)', () => {
     await page.goto('/#/lorebook')
     await expect(page.locator('.lorebook-page')).toBeVisible()
 
-    const worldSelect = page.locator('.lore-world-bar select').nth(1)
+    const contextBar = page.locator('.lore-context-bar')
+    const worldSelect = contextBar.locator('select').nth(1)
+    const bookSelect = contextBar.locator('select').nth(2)
+    const bookMenu = contextBar.locator('details.lore-menu').nth(1)
     await worldSelect.selectOption(LORE_WORLD_ID)
 
-    const sidebar = page.locator('.lorebook-sidebar')
-    await expect(sidebar.locator('.lorebook-sidebar__item').first()).toBeVisible()
-    // 迁移产物：主世界书存在，并标成 Primary + 当前世界。
-    const primaryItem = sidebar.locator('.lorebook-sidebar__item', { hasText: '主世界书' }).first()
-    await expect(primaryItem).toContainText('主世界书')
-    await expect(primaryItem).toContainText('当前世界')
+    // 迁移产物：主世界书是默认当前 Book，信息行表达 primary + 使用范围。
+    await expect(bookSelect).toBeVisible()
+    const bookMeta = contextBar.locator('.lore-book-meta')
+    await expect(bookMeta).toContainText('主世界书')
+    await expect(bookMeta).toContainText('使用范围：当前世界')
     // 真实条目来自迁移后的 SQLite，不是测试 fabricate 的 JSON。
     await expect(page.locator('.lore-row', { hasText: '旧城门' }).first()).toBeVisible()
 
-    // 桌面布局 contract：Books 侧栏固定窄轨（260–320px），主工作区占剩余宽度，
-    // 页面不得出现横向溢出（#398 曾因 shell 轨道未纳入 sidebar 而整体挤压）。
+    // 桌面布局 contract：无 Books 侧栏，主工作区占据主要宽度，检查器不越出视口，
+    // 页面不得出现横向滚动。
     const layout = await page.evaluate(() => {
       const width = (selector: string) =>
         document.querySelector(selector)?.getBoundingClientRect().width ?? 0
+      const inspector = document.querySelector('.lore-perspective-inspector')
       return {
-        sidebar: width('.lorebook-sidebar'),
         workspace: width('.lorebook-workspace'),
+        inspectorRight: inspector ? inspector.getBoundingClientRect().right : 0,
+        viewport: document.documentElement.clientWidth,
         pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       }
     })
-    expect(layout.sidebar).toBeGreaterThanOrEqual(260)
-    expect(layout.sidebar).toBeLessThanOrEqual(320)
-    expect(layout.sidebar).toBeLessThan(layout.workspace)
+    expect(layout.workspace).toBeGreaterThan(600)
+    expect(layout.inspectorRight).toBeLessThanOrEqual(layout.viewport)
     expect(layout.pageOverflow).toBe(false)
 
     // ---- 2. 真实 matcher：keyword → recursion，GM 视角看得到密档 ------------
@@ -148,28 +151,31 @@ test.describe('Lorebook Golden (real chain)', () => {
 
     // ---- 4. Book 产品流：新建 → 重命名 → 停用/启用 -------------------------
     page.once('dialog', dialog => dialog.accept('Golden Extra Book'))
-    await sidebar.getByRole('button', { name: '新建世界书', exact: true }).click()
-    const extraRow = sidebar.locator('.lorebook-sidebar__row', { hasText: 'Golden Extra Book' })
-    await expect(extraRow).toBeVisible()
+    await contextBar.getByRole('button', { name: '新建世界书', exact: true }).click()
+    // 新建后自动选中：book selector 立即指向它。
+    await expect(bookSelect.locator('option', { hasText: 'Golden Extra Book' })).toHaveCount(1)
 
     page.once('dialog', dialog => dialog.accept('Golden Renamed Book'))
-    await extraRow.getByRole('button', { name: /^重命名/ }).click()
-    const renamedRow = sidebar.locator('.lorebook-sidebar__row', { hasText: 'Golden Renamed Book' })
-    await expect(renamedRow).toBeVisible()
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '重命名', exact: true }).click()
+    await expect(bookSelect.locator('option', { hasText: 'Golden Renamed Book' })).toHaveCount(1)
 
-    await renamedRow.getByRole('button', { name: /^停用/ }).click()
-    await expect(renamedRow.locator('.lorebook-sidebar__item')).toContainText('已停用')
-    await renamedRow.getByRole('button', { name: /^启用/ }).click()
-    await expect(renamedRow.locator('.lorebook-sidebar__item')).toContainText('启用中')
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '停用', exact: true }).click()
+    await expect(contextBar.locator('.lore-book-state')).toContainText('已停用')
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '启用', exact: true }).click()
+    await expect(contextBar.locator('.lore-book-state')).toContainText('启用中')
 
-    // ---- 5. binding 管理：新增一条 world binding 并解除 --------------------
-    await renamedRow.getByRole('button', { name: /^绑定/ }).click()
-    const bindingsDialog = page.getByRole('dialog', { name: '绑定管理' })
+    // ---- 5. 使用范围管理：新增一条 world 范围并移除 ------------------------
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '使用范围', exact: true }).click()
+    const bindingsDialog = page.getByRole('dialog', { name: '使用范围管理' })
     await expect(bindingsDialog).toBeVisible()
     await bindingsDialog.getByRole('button', { name: '新增', exact: true }).click()
     await expect(bindingsDialog.locator('.lore-binding-row')).toHaveCount(1)
     await expect(bindingsDialog.locator('.lore-binding-row')).toContainText('world')
-    await bindingsDialog.getByRole('button', { name: /^解除绑定/ }).click()
+    await bindingsDialog.getByRole('button', { name: /^移除/ }).click()
     await expect(bindingsDialog.locator('.lore-binding-row')).toHaveCount(0)
     await bindingsDialog.getByRole('button', { name: '关闭', exact: true }).click()
 
@@ -193,10 +199,10 @@ test.describe('Lorebook Golden (real chain)', () => {
     // 「潮汐钟」直接命中，其正文提到「沉船账本」→ recursion 带出子条目。
     await activationInput.fill('我敲响潮汐钟')
     await page.getByRole('button', { name: '预览触发', exact: true }).click()
-    await expect(trace).toContainText('recursive')
+    await expect(trace).toContainText('递归带入')
     // trace 会列出作用域内**每一条**条目（含 omitted），所以要数真正进入结果的行。
     // 存档的 scene 本身也是检索锚点，因此这里只断言「多了一条」，不钉死绝对值。
-    const included = trace.locator('li', { hasText: 'included' })
+    const included = trace.locator('li', { hasText: '已触发' })
     const withoutMoon = await included.count()
     expect(withoutMoon).toBeGreaterThan(0)
     // 「巡夜人」的 secondary key 是「满月」：只有提到满月才应额外激活它。
@@ -217,7 +223,8 @@ test.describe('Lorebook Golden (real chain)', () => {
 
     // ---- 8. export → reimport 往返（真实 exporter / importer）-------------
     const download = page.waitForEvent('download')
-    await sidebar.getByRole('button', { name: '导出', exact: true }).click()
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '导出', exact: true }).click()
     const exported = await download
     const stream = await exported.createReadStream()
     const chunks: Buffer[] = []
@@ -235,12 +242,16 @@ test.describe('Lorebook Golden (real chain)', () => {
     await expect(roundTripDialog).toBeHidden()
 
     // ---- 9. 删除非主世界书；主世界书没有删除入口 --------------------------
-    const primaryRow = sidebar.locator('.lorebook-sidebar__row', { hasText: '主世界书' }).first()
-    await expect(primaryRow.getByRole('button', { name: /^删除/ })).toHaveCount(0)
+    await bookSelect.selectOption({ label: 'Golden Lore World' })
+    await bookMenu.locator('summary').click()
+    await expect(bookMenu.getByRole('button', { name: '删除', exact: true })).toHaveCount(0)
+    await bookMenu.locator('summary').click()
 
-    await renamedRow.getByRole('button', { name: /^删除/ }).click()
+    await bookSelect.selectOption({ label: 'Golden Renamed Book' })
+    await bookMenu.locator('summary').click()
+    await bookMenu.getByRole('button', { name: '删除', exact: true }).click()
     await page.getByRole('button', { name: '删除世界书', exact: true }).click()
-    await expect(sidebar.locator('.lorebook-sidebar__row', { hasText: 'Golden Renamed Book' })).toHaveCount(0)
+    await expect(bookSelect.locator('option', { hasText: 'Golden Renamed Book' })).toHaveCount(0)
 
     expect(failures, `backend 5xx during the golden run:\n${failures.join('\n')}`).toEqual([])
   })
@@ -260,7 +271,7 @@ test.describe('Lorebook Golden (real chain)', () => {
 
     await page.goto('/#/lorebook')
     await expect(page.locator('.lorebook-page')).toBeVisible()
-    await page.locator('.lore-world-bar select').nth(1).selectOption(LORE_WORLD_ID)
+    await page.locator('.lore-context-bar select').nth(1).selectOption(LORE_WORLD_ID)
 
     // ---- SillyTavern World Info ------------------------------------------
     await page.locator('input[type=file]').setInputFiles({
@@ -304,7 +315,7 @@ test.describe('Lorebook Golden (real chain)', () => {
     await expect(page.locator('.lorebook-page')).toBeVisible()
 
     const languageSelect = page.locator('.lore-language-filter select')
-    const worldSelect = page.locator('.lore-world-bar select').nth(1)
+    const worldSelect = page.locator('.lore-context-bar select').nth(1)
 
     // 语言名统一走 i18n 自身名称契约，值与全局 Locale 一致。
     await expect(languageSelect.locator('option')).toHaveText(['简体中文', 'English', '日本語', 'Deutsch'])

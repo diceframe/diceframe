@@ -356,12 +356,10 @@
 }
 
 @media (max-width: 800px) {
-  .lorebook-page .lore-world-bar,
   .lorebook-page .lore-tools {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .lorebook-page .lore-world-bar > select,
   .lorebook-page .lore-tools > input {
     grid-column: 1 / -1;
   }
