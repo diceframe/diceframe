@@ -1,6 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import LoreImportDialog from '../src/features/lorebook/LoreImportDialog.vue'
+import { i18n } from '../src/i18n'
+
+// jsdom 的 navigator 是 en-US；这些断言固定在产品默认语言 zh-CN 上。
+i18n.global.locale.value = 'zh-CN'
 
 const ST_PREVIEW = {
   format: 'sillytavern',
@@ -31,6 +35,7 @@ const BASE_PROPS = {
 function mountDialog(props: Record<string, unknown> = {}) {
   return mount(LoreImportDialog, {
     props: { ...BASE_PROPS, primaryBookId: 'world:w-golden', preview: ST_PREVIEW, ...props },
+    global: { plugins: [i18n] },
   })
 }
 

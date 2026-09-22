@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import LoreEntryAdvanced, { type LoreEntryAdvancedModel } from '../src/features/lorebook/LoreEntryAdvanced.vue'
 import { i18n } from '../src/i18n'
 
+// jsdom 的 navigator 是 en-US；这些断言固定在产品默认语言 zh-CN 上。
+i18n.global.locale.value = 'zh-CN'
+
 const model: LoreEntryAdvancedModel = {
   secondary_keys: [], selective_logic: 'any', use_regex: false, case_sensitive: false,
   match_whole_words: false, vector_activation: 'off', scan_depth: 0, priority: 0,
