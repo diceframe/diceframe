@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.engine.contracts import ActionRecord
+from src.engine import progression
 from src.engine.game_state import GameState
 from src.engine.player_control import (
     ai_controlled_players,
@@ -305,7 +306,7 @@ def add_action_locked(
 
 def start_round_locked(instance: GameInstance) -> None:
     """``start_round`` 的持锁实现（调用方必须已持有 ``_lock``）。"""
-    instance.round_number += 1
+    progression.open_next_round(instance)
     current = str(instance.round_number)
     instance.death_save_outcomes = {
         current: instance.death_save_outcomes.get(current, {})

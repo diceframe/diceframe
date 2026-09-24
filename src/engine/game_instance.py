@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from uuid import uuid4
 
-from src.engine import instance_lifecycle, round_recovery, round_snapshots, turn_state
+from src.engine import instance_lifecycle, progression, round_recovery, round_snapshots, turn_state
 from src.engine.action_gate import (
     AI_SEAT_COMMIT_POLICY, GateRequest, SOURCE_AI_SEAT, SOURCE_HUMAN,
     StructuredIntentRequirement, check_run_unchanged, evaluate,
@@ -629,7 +629,7 @@ class GameInstance:
         if "log" in snapshot:
             self.log = copy.deepcopy(snapshot["log"])
         if "round_number" in snapshot:
-            self.round_number = int(snapshot["round_number"])
+            progression.restore_from_snapshot(self, snapshot["round_number"])
 
     def set_player_access(self, open_access: bool) -> None:
         self.player_access_open = bool(open_access)

@@ -29,6 +29,7 @@ HELPER_MODULES = (
     "src/engine/turn_state.py",
     "src/engine/round_recovery.py",
     "src/engine/instance_lifecycle.py",
+    "src/engine/progression.py",
     "src/engine/module_state.py",
     "src/engine/modules/lorebook_runtime.py",
 )

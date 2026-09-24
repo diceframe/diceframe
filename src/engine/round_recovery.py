@@ -26,6 +26,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from src.engine import progression
 from src.engine.game_state import GameState
 from src.engine.round_snapshots import restore_players, snapshot_players
 from src.engine.world_state import ensure_world_state
@@ -88,7 +89,7 @@ def rollback_last_round_locked(instance: GameInstance) -> int | None:
     # 留在被丢弃的分支上"的半回滚。
     if isinstance(last.get("pre_adventure_progress"), dict):
         instance.adventure_progress = copy.deepcopy(last["pre_adventure_progress"])
-    instance.round_number = max(1, rolled_back_round)
+    progression.rewind_after_rollback(instance, rolled_back_round)
     instance.action_queue.clear()
     instance.pending_actions.clear()
     instance.ready_players.clear()

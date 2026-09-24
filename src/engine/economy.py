@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
+from src.engine import progression
 from src.engine.character_utils import apply_currency_delta
 from src.engine.memory_outbox import (
     MAX_EXTERNAL_EFFECT_DELIVERIES,
@@ -50,7 +51,7 @@ def era_key(instance: Any) -> int:
     whole-round rollback semantics remain unchanged.
     """
 
-    return int(getattr(instance, "round_number", 0) or 0)
+    return progression.current_era(instance)
 
 
 def proposal_transition_allowed(current_status: Any, next_status: str) -> bool:

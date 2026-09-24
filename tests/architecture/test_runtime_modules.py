@@ -227,6 +227,59 @@ def test_gate_dependency_guard_resolves_import_forms(source, prefix) -> None:
     assert any(_under(name, prefix) for _, name in _imports(path, ast.parse(source)))
 
 
+def _round_counter_writes(path: Path, tree: ast.AST) -> list[int]:
+    # Field declarations and constructor keywords (e.g. DecisionEntry's independent
+    # round_number) are not runtime attribute writes. No file-wide exceptions.
+    # Like the other ownership guards, this does not track aliases or setattr.
+    if path == SRC / "engine" / "progression.py":
+        return []
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr == "round_number"
+    ]
+
+
+def test_only_progression_writes_round_counter() -> None:
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _round_counter_writes(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: round counter write outside progression")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "instance.round_number = 3",
+    "self.round_number += 1",
+    "instance.round_number: int = 3",
+    "other.round_number, (x, self.round_number) = values",
+    "del instance.round_number",
+])
+def test_round_counter_guard_rejects_attribute_writes(source) -> None:
+    tree = ast.parse(source)
+    for path in ("engine/game_instance.py", "engine/plot_tracker.py", "rulesets/automation.py"):
+        assert _round_counter_writes(SRC / path, tree)
+    assert not _round_counter_writes(SRC / "engine/progression.py", tree)
+
+
+def test_round_counter_guard_allows_independent_fields_and_construction() -> None:
+    tree = ast.parse("class Decision:\n    round_number: int = 0\nd = Decision(round_number=3)")
+    assert not _round_counter_writes(SRC / "engine/plot_tracker.py", tree)
+
+
+def test_progression_does_not_import_transport_commands_or_rulesets() -> None:
+    path = SRC / "engine" / "progression.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    violations = [
+        f"{path.relative_to(ROOT)}:{line}: forbidden import {name}"
+        for line, name in _imports(path, tree)
+        if any(_under(name, prefix) for prefix in ("src.webui", "src.commands", "src.rulesets"))
+    ]
+    assert not violations, "\n".join(violations)
+
+
 def test_game_instance_top_level_field_count_does_not_grow() -> None:
     path = SRC / "engine" / "game_instance.py"
     tree = ast.parse(path.read_text(encoding="utf-8-sig"))

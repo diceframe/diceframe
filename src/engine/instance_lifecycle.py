@@ -24,6 +24,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from src.engine import progression
 from src.engine.game_state import GameState
 from src.engine.language import normalize_language
 from src.engine.world_state import fresh_world_state
@@ -78,7 +79,7 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     instance.rotate_run_identity()
     instance.players.clear()
     instance.npcs.clear()
-    instance.round_number = 0
+    progression.reset(instance)
     instance.action_queue.clear()
     instance.pending_actions.clear()
     instance.ready_players.clear()

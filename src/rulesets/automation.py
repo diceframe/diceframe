@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from src.engine import progression
 from src.rulesets.contracts import (
     AutomaticIntentRuntime,
     NarrativeDirectorAutomationRuntime,
@@ -42,11 +43,7 @@ def append_public_timeline_entry(
         ),
         "",
     )
-    next_round = max(
-        int(getattr(instance, "round_number", 0) or 0) + 1,
-        max((int(item.get("round", 0) or 0) for item in instance.log), default=0) + 1,
-    )
-    instance.round_number = next_round
+    next_round = progression.advance_for_public_timeline(instance, instance.log)
     instance.append_log_entry({
         "round": next_round,
         "actions": [{
