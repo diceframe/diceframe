@@ -40,6 +40,7 @@ from src.engine.game_instance import GameState
 from src.engine.language import localized_text
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.engine.player_control import SUBMISSION_BLOCK_CODES
+from src.engine.visibility_rules import proposal_visible_to
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
 
 if TYPE_CHECKING:
@@ -129,16 +130,9 @@ def _visible_economy_proposals(instance: "GameInstance", viewer_uid: str = "") -
     return [
         proposal
         for proposal in pending_economy_proposals(instance)
-        if (
-            not viewer_uid
-            or viewer_uid == instance.gm_uid
-            or proposal.get("visibility") == "party"
-            or viewer_uid == str(proposal.get("payer_uid") or proposal.get("uid") or "")
-            or viewer_uid in {
-                str(item.get("uid") or "")
-                for item in (proposal.get("contributors") or [])
-                if isinstance(item, dict)
-            }
+        if proposal_visible_to(
+            proposal, viewer_uid=viewer_uid,
+            viewer_is_gm=bool(viewer_uid) and viewer_uid == instance.gm_uid,
         )
     ]
 
@@ -153,18 +147,9 @@ def economy_decision_pending_payload(
     visible = [
         proposal
         for proposal in unresolved
-        if (
-            not viewer_uid
-            or viewer_uid == instance.gm_uid
-            or proposal.get("visibility") == "party"
-            or viewer_uid
-            == str(proposal.get("payer_uid") or proposal.get("uid") or "")
-            or viewer_uid
-            in {
-                str(item.get("uid") or "")
-                for item in (proposal.get("contributors") or [])
-                if isinstance(item, dict)
-            }
+        if proposal_visible_to(
+            proposal, viewer_uid=viewer_uid,
+            viewer_is_gm=bool(viewer_uid) and viewer_uid == instance.gm_uid,
         )
     ]
     return {
