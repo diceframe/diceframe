@@ -179,7 +179,7 @@ def _ruleset_gameplay_status(result: dict) -> int:
         return 403
     if code in {"RULESET_INTENTS_UNAVAILABLE", "RULESET_RUNTIME_UNAVAILABLE"}:
         return 409
-    if code in {"SESSION_ZERO_REQUIRED", "COMBAT_ACTION_REQUIRED"}:
+    if code in {"SESSION_ZERO_REQUIRED", "COMBAT_ACTION_REQUIRED", "ROUND_PROCESSING"}:
         return 409
     if code == "LLM_NOT_CONFIGURED":
         return 503

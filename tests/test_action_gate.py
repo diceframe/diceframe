@@ -298,14 +298,19 @@ def test_ai_control_revision_and_duplicate_matching_remain_exact() -> None:
     assert gate.check_round_unchanged(instance, replace(req, expected_round_number=None)) == ""
 
 
-@pytest.mark.parametrize("member, gm, expected", [
-    (False, False, "PLAYER_NOT_IN_GAME"), (False, True, ""), (True, False, ""),
-])
-def test_structured_policy_only_checks_membership_and_preserves_gm_bypass(member, gm, expected) -> None:
+@pytest.mark.parametrize("state", list(GameState))
+@pytest.mark.parametrize("member, gm", [(False, False), (False, True), (True, False)])
+def test_structured_policy_membership_precedes_judgment_gm_only_bypasses_membership(member, gm, state) -> None:
+    # R5-c1 deliberately replaces R4's membership-only contract. Other phases,
+    # control, death and economy remain outside structured-intent admission.
     instance = instance_with_seats()
     set_control(instance, "actor", "ai")
     instance.players["actor"]["character_sheet"]["deceased"] = True
-    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.state = state
+    expected = (
+        "PLAYER_NOT_IN_GAME" if not member and not gm
+        else "ROUND_PROCESSING" if state == GameState.ACTIVE_JUDGMENT else ""
+    )
     if not member:
         instance.players.pop("actor")
     economy = Mock(side_effect=AssertionError("intent policy must not inspect economy"))

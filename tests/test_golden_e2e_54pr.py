@@ -722,6 +722,16 @@ async def test_golden_steps_13_to_17_process_consequence_and_world_memory(golden
 
     # 步骤 16：进程完成后 gate 才开放后果节点，公开后果由它自己的 world op 落地。
     assert "aftermath" in instance.adventure_progress["active_nodes"]
+    # R5-c1: planning alone leaves judgment in flight. Node completion must wait
+    # for the real narrative processor to finish, even when its gate is open.
+    gm_uid = str(created["players"][0]["user_id"])
+    rejected = await golden.api.ruleset_submit_intent(
+        game_key, gm_uid, True,
+        {"type": "adventure.node.complete", "node_id": "aftermath"},
+    )
+    assert rejected["code"] == "ROUND_PROCESSING"
+    assert await golden.api.drain_economy_outbox(game_key) is True
+    await golden.api._handler.process_round(instance)
     await _complete_node(golden, created, "aftermath")
     assert fact_value(instance.world_state, PUBLIC_CONSEQUENCE_FACT) is True
     # 后果满足后秘密节点才对 GM 开放（玩家看不到它）。

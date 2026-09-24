@@ -1868,9 +1868,40 @@ authority/state locks, after stale, human and duplicate checks, with no await be
 enqueue. Unknown/incompatible runtimes and missing rules for bound instances fail
 closed. The engine has no ruleset-specific branch. Optional `False` / `None` inputs
 retain the direct-call contract; guarded callers must forward the live predicate.
-The instance schema remains 20. R4-b b3 adds no AI economy gate (the progression
-barrier already owns settlement); b4 stage alignment is deferred to R5. See the
-Chinese architecture document §12E for the ordered policy table and decisions.
+R4-b b3 adds no AI economy gate (the progression barrier already owns settlement).
+R4-b b4 is implemented by R5-c1 below. See the Chinese architecture document §12E
+for the ordered policy table and decisions.
+
+R5-c1 decision: implement. On R5b `d1d64927`, the actual
+`RoundProcessor.process_round_impl` paused at a fake LLM await while a concurrent
+real D&D `combat.start` was accepted by the gameplay service. Both narrative
+submissions with and without a run token moved round 3 to 5 and produced two log
+entries numbered 4. The existing run/economy fences do not isolate these writes
+within the same run.
+
+`STRUCTURED_INTENT_POLICY` now checks membership, then `check_not_judging`.
+Only `ACTIVE_JUDGMENT` is newly rejected; GM bypass applies to membership only.
+No new control, death, economy or other phase restrictions are added.
+`submit_intent` evaluates live admission inside the actual state lock before
+binding migration or transaction writes. The lock remains held across binding
+save awaits, event reduction, public timeline projection and attached automatic
+intents, closing the lock-wait race. The special `adventure.node.complete` command
+uses the same admission check after its existing GM-only authorization. Rejection
+returns service `code=ROUND_PROCESSING`, mapped to HTTP 409 by the route, without
+state, log, resource, save or memory writes. Shared `_context` remains membership
+only, preserving available-actions and temporary encounter proposal behavior,
+including existing binding compatibility handling.
+
+Control-triggered `resume_authoritative_combat` checks the same judgment condition
+under the state lock before binding handling or automatic progression. It returns
+the existing resume shape with `error_code=ROUND_PROCESSING`, `handled=True` and
+`resumed=False`. A control change already saved remains successful; only its
+subsequent combat resume is refused. Runtime-internal intent mechanics and the
+narrative processor's own director automation are unchanged. R4's membership-only
+test expectation is explicitly replaced by c1 coverage, retaining missing-seat
+priority and GM bypass of membership only. R5-c1 retains instance schema 21 from
+R5b, does not change `game_time`, and leaves the two judgment completion/opening
+lock sections to the separate c2 decision.
 
 ---
 

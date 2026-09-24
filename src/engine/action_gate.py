@@ -159,7 +159,7 @@ AI_SEAT_COMMIT_POLICY: tuple[Check, ...] = (
     check_structured_intent,
 )
 AI_SEAT_POLICY: tuple[Check, ...] = AI_SEAT_STALE_POLICY + AI_SEAT_COMMIT_POLICY
-STRUCTURED_INTENT_POLICY: tuple[Check, ...] = (check_seat_exists,)
+STRUCTURED_INTENT_POLICY: tuple[Check, ...] = (check_seat_exists, check_not_judging)
 
 
 def evaluate(instance: Any, request: GateRequest, policy: tuple[Check, ...]) -> str:
