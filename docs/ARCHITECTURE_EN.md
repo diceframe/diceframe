@@ -1225,6 +1225,51 @@ Old GameInstance
 
 This means an old writer that had been waiting for the lock still points at the old object / old run when it resumes, allowing the stale fence to reject it.
 
+## 10.4 R5-c Progression Boundary Decisions
+
+**c2: implement.** `GameInstance.finish_judgment` validates progression writability
+and the economy module, then calls synchronous
+`round_recovery.finish_judgment_locked` and `turn_state.start_round_locked` in the
+same `_lock` section. There is no `await` between committing the log and opening
+the next round, and no call to public `start_round` that would reacquire the lock.
+Queued state-lock writers therefore observe the new log, next round number, and
+`ACTIVE_ACTION` together. Cancellation while waiting for the lock commits no log;
+a queued canceller after commit cannot leave the game with a committed log but
+still in judgment. This is atomicity under the state lock, not a rollback
+transaction for the entire LLM pipeline. Existing owners retain responsibility
+for log, snapshot, pending-action, check/timer, and SSE projection semantics.
+
+The baseline characterization queued `finish_judgment` in round 3, followed by a
+state-lock writer. That writer observed the new round-3 log with
+`ACTIVE_JUDGMENT` before round 4 opened. Regression coverage includes the real
+WebAPI → GameHandler → RoundProcessor pipeline, cancellation while waiting,
+queued writers, and unchanged state on refusal of unknown progression modes or
+schemas and economy/combat module schemas.
+
+Public `start_round(expected_run_id=...)` retains its run check under the lock;
+stale tokens return before module validation. `finish_judgment` retains its
+internal commit contract without a token, while existing pipeline fences still
+check run / registry identity. c2 adds no fence parameter and makes no guarantee
+against arbitrary direct writes that bypass authority or pipeline fences.
+
+The remaining decisions are recorded without new behavior:
+
+- **c3: retain.** Authoritative intents advance the public log timeline through
+  `progression.advance_for_public_timeline` to keep numbering continuous. This
+  does not traverse the narrative state machine or open an ordinary narrative round.
+- **c4: retain.** `GameState.PUZZLE` currently has no runtime entry path, but remains
+  a persisted enum value. Removing it would require migration without a benefit
+  in this change; a comment beside the enum explains why it remains.
+- **c5: preserve legacy/imported `game_time` values.** The field is not always empty:
+  construction, the codec, and imports can preserve nonempty text; reset clears it.
+  No display format or locale-to-logical-clock rule has been approved, so existing
+  text must not be derived over, deleted, or migrated on that assumption.
+  WorldState's day/minute clock continues to own time advancement independently;
+  the two existing context reads remain unchanged.
+- **c6: unchanged.** Lorebook delay gates retain the existing round tick. A second
+  progression mode and content-track clock adaptation need a separate design;
+  R6 is outside this change.
+
 ---
 
 # 11. Persistence Architecture
@@ -1900,8 +1945,8 @@ subsequent combat resume is refused. Runtime-internal intent mechanics and the
 narrative processor's own director automation are unchanged. R4's membership-only
 test expectation is explicitly replaced by c1 coverage, retaining missing-seat
 priority and GM bypass of membership only. R5-c1 retains instance schema 21 from
-R5b, does not change `game_time`, and leaves the two judgment completion/opening
-lock sections to the separate c2 decision.
+R5b and does not change `game_time`. R5-c2 now commits judgment and opens the next
+round in one state-lock section; see §10.4 for that boundary and the c3–c6 decisions.
 
 ---
 

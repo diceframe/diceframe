@@ -17,6 +17,6 @@ class GameState(Enum):
     WAITING = "waiting"                  # 等待玩家加入
     ACTIVE_ACTION = "active_action"      # 行动阶段：接受玩家声明
     ACTIVE_JUDGMENT = "active_judgment"  # 判定阶段：LLM 处理中
-    PUZZLE = "puzzle"                    # 谜题阶段：等待玩家解谜
+    PUZZLE = "puzzle"                    # 当前无运行时入口；保留持久化枚举以兼容旧存档
     PAUSED = "paused"                    # 暂停（bot 重启后恢复为此状态）
     ENDED = "ended"                      # 已结束

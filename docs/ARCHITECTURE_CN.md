@@ -1232,6 +1232,41 @@ Old GameInstance
 
 这样，等待锁的旧 writer 恢复执行后仍然指向旧 object / old run，可以被 stale fence 拦截。
 
+## 10.4 R5-c 推进边界决定
+
+**c2：做。** `GameInstance.finish_judgment` 在同一段 `_lock` 内先校验
+progression 可写性与 economy 模块，再依次调用同步的
+`round_recovery.finish_judgment_locked` 和 `turn_state.start_round_locked`。
+日志提交和下一轮开启之间没有 `await`，也不调用会重新取锁的公开 `start_round`。
+已排队的状态锁 writer 因此只能在二者完成后观察到新日志、下一回合号与
+`ACTIVE_ACTION`；等待锁时取消完成任务不会提交日志，提交后排队的取消者也不能
+把它留在“日志已提交但仍在判定”的中间状态。这是状态锁内原子边界，不是整条
+LLM 流水线的回滚事务；既有日志、快照、pending actions、检查/计时器和 SSE
+投影语义继续由原 owner 负责。
+
+基线特征测试在第 3 轮先排队 `finish_judgment`，再排队状态锁 writer；后者实际
+读到了第 3 轮新日志与 `ACTIVE_JUDGMENT`，随后才开启第 4 轮。修复覆盖真实
+WebAPI → GameHandler → RoundProcessor 流水线，以及等待取消、排队写入、未知
+progression mode/schema 和 economy/combat module schema 的拒绝前不变性。
+
+公开 `start_round(expected_run_id=...)` 保留锁内 run 检查，过期 token 在模块校验
+前直接返回；`finish_judgment` 沿用无 token 的内部提交契约，run / registry identity
+围栏仍由既有调用流水线负责。c2 不新增围栏参数，也不声称防住任意绕过 authority
+或流水线围栏的直接写入。
+
+其余决定（本次仅记录）：
+
+- **c3：保持。** 权威意图经 `progression.advance_for_public_timeline` 推进公共
+  日志时间线，使其编号连续；它不表示经过叙事状态机，不改成普通叙事开轮。
+- **c4：不删。** `GameState.PUZZLE` 当前没有运行时进入路径，但它仍是持久化
+  枚举值；删除需要迁移而没有本次收益，仅在枚举旁注明保留原因。
+- **c5：保持 legacy/imported `game_time` 原值。** “永远为空”不成立：构造、codec
+  与导入都可保留非空文本，reset 才清空。当前没有批准的显示格式或 locale 与逻辑
+  时钟联动规则，不能据此派生覆盖、删除或迁移已有文本。WorldState 的 day/minute
+  时钟继续独立拥有时间推进；两处既有上下文读取保持原样。
+- **c6：不改。** lorebook 延迟门继续使用现有回合 tick；第二种推进模式及内容轨道
+  的时钟适配另行设计，本次不涉及 R6。
+
 ---
 
 # 11. 持久化架构

@@ -1380,6 +1380,7 @@ class GameInstance:
         pre_state_snapshot 应为 _apply_state_update 之前拍摄的快照，
         确保 swipe 重生成时恢复到本轮初始状态而非应用后状态。
         state_changes 为本轮玩家可见状态变动摘要，随 log entry 持久化供群机器人单独转发。
+        日志提交与下一轮开启共用状态锁，中间不释放锁或 await。
         """
         async with self._lock:
             progression.require_writable(self)
@@ -1391,7 +1392,7 @@ class GameInstance:
                 state_changes=state_changes,
                 pre_combat_extension_snapshot=pre_combat_extension_snapshot,
             )
-        await self.start_round()
+            turn_state.start_round_locked(self)
 
     async def finish_judgment_with_swipe(
         self,
