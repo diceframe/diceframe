@@ -98,6 +98,11 @@ class WebAccessControl:
                     {"ok": False, "error": "本局玩家入口已关闭"},
                     status=403,
                 )
+            if not owner_authenticated and self.share_uid_is_gm_seat(request, share_uid):
+                return web.json_response(
+                    {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": "GM 席位需要房主登录"},
+                    status=403,
+                )
             viewer_uid = request.get("user_id", "")
             request["viewer_user_id"] = viewer_uid
             request["user_id"] = share_uid
@@ -133,6 +138,11 @@ class WebAccessControl:
                     if self.player_access_is_closed(request):
                         return web.json_response(
                             {"ok": False, "error": "本局玩家入口已关闭"},
+                            status=403,
+                        )
+                    if self.share_uid_is_gm_seat(request, share_uid):
+                        return web.json_response(
+                            {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": "GM 席位需要房主登录"},
                             status=403,
                         )
                     request["user_id"] = share_uid
@@ -244,6 +254,15 @@ class WebAccessControl:
         if not api or not subsystems:
             return None
         return subsystems.registry.get(api._parse_key(game_key))
+
+    def share_uid_is_gm_seat(self, request: web.Request, share_uid: str) -> bool:
+        """A non-owner share request may never act as the table's GM seat."""
+
+        if not share_uid:
+            return False
+        instance = self.request_game_instance(request)
+        gm_uid = str(getattr(instance, "gm_uid", "") or "") if instance is not None else ""
+        return bool(gm_uid) and share_uid == gm_uid
 
     @staticmethod
     def requires_room_token(

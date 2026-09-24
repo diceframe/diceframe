@@ -91,6 +91,8 @@ def _should_rebind_player_session(
         return False
     if session_uid and session_uid == gm_uid:
         return False
+    if gm_uid and str(result.get("user_id") or "") == gm_uid:
+        return False
     return bool(
         (requested_uid and result.get("user_id") == requested_uid) or join_as_new
     )
