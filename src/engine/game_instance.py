@@ -15,7 +15,8 @@ from uuid import uuid4
 
 from src.engine import instance_lifecycle, round_recovery, round_snapshots, turn_state
 from src.engine.action_gate import (
-    AI_SEAT_COMMIT_POLICY, GateRequest, SOURCE_AI_SEAT, StructuredIntentRequirement, evaluate,
+    AI_SEAT_COMMIT_POLICY, GateRequest, SOURCE_AI_SEAT, SOURCE_HUMAN,
+    StructuredIntentRequirement, check_run_unchanged, evaluate,
 )
 from src.engine.contracts import (
     ActionRecord,
@@ -1038,9 +1039,13 @@ class GameInstance:
         """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。"""
         return turn_state.should_advance(self)
 
-    async def start_round(self) -> None:
-        """开启新一轮行动阶段。"""
+    async def start_round(self, *, expected_run_id: str = "") -> None:
+        """开启新一轮行动阶段；可选 run fence 在状态锁内检查。"""
         async with self._lock:
+            if expected_run_id and check_run_unchanged(
+                self, GateRequest(actor_uid="", source=SOURCE_HUMAN, expected_run_id=expected_run_id),
+            ):
+                return
             economy_state.state(self)
             turn_state.start_round_locked(self)
 
@@ -1051,7 +1056,8 @@ class GameInstance:
                          check_request: dict | None = None,
                          count_revision: bool = True,
                          action_metadata: dict | None = None,
-                         defer_out_of_phase: bool = True) -> bool:
+                         defer_out_of_phase: bool = True,
+                         expected_run_id: str = "") -> bool:
         """玩家声明行动。判决阶段中的发言缓存到下一轮。
 
         selected_attribute/selected_skill/target_text 为前端可选提交的结构化
@@ -1060,10 +1066,15 @@ class GameInstance:
         ``action_metadata`` 是调用方自带的机器可读标记（例如服务器 AI 行动的
         ``source`` / ``control_revision`` / ``generated_for_round``），只用于去重
         与调试，不参与任何裁定；``defer_out_of_phase=False`` 表示这条行动带有
-        轮次身份，判定阶段只能拒绝，不得缓存进下一轮。
+        轮次身份，判定阶段只能拒绝，不得缓存进下一轮。非空
+        ``expected_run_id`` 在两层锁内复核；不匹配返回 False，不修改队列。
         """
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
+                return False
+            if expected_run_id and check_run_unchanged(
+                self, GateRequest(actor_uid=user_id, source=SOURCE_HUMAN, expected_run_id=expected_run_id),
+            ):
                 return False
             return self._add_action_locked(
                 user_id, action_text,
@@ -1390,8 +1401,12 @@ class GameInstance:
         async with self._lock:
             instance_lifecycle.pause_locked(self)
 
-    async def resume(self) -> None:
+    async def resume(self, *, expected_run_id: str = "") -> None:
         async with self._lock:
+            if expected_run_id and check_run_unchanged(
+                self, GateRequest(actor_uid="", source=SOURCE_HUMAN, expected_run_id=expected_run_id),
+            ):
+                return
             instance_lifecycle.resume_locked(self)
 
     async def end(self) -> None:

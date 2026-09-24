@@ -1874,7 +1874,7 @@ ruleset_gameplay.resume_authoritative_combat
 
 # 12E. 行动闸门
 
-真人自由文本、AI 席位提交和结构化意图的服务层准入共用 `src/engine/action_gate.py`。策略是检查函数的有序元组；顺序是契约，返回第一个非空拒绝码。共用检查实现不意味着三条路径的策略已经对齐，R4-a 收口检查，R4-b b1 对齐 AI 结构化意图门后保留以下差异：
+真人自由文本、AI 席位提交和结构化意图的服务层准入共用 `src/engine/action_gate.py`。策略是检查函数的有序元组；顺序是契约，返回第一个非空拒绝码。共用检查实现不意味着三条路径的策略已经对齐，R4-a 收口检查，R4-b b1 对齐 AI 结构化意图门、b2 增加可选真人 run guard 后保留以下差异：
 
 | 检查项 | 真人自由文本 `turns.submit_action` | AI 席位 `GameInstance.commit_ai_player_action` | 结构化意图 `ruleset_gameplay._context` |
 |---|---|---|---|
@@ -1884,7 +1884,7 @@ ruleset_gameplay.resume_authoritative_combat
 | 死亡 | `is_dead` → `ACTOR_DECEASED`，403；入队仍有 deceased 兜底 | gate 不查；生成端跳过非存活席位，入队仍有 deceased 兜底 | 服务层不查；具体规则运行时按战斗 actor 状态校验 |
 | 经济阻塞 | 先 await outbox 重试，再查经济；`ECONOMY_DECISION_PENDING`，409 | gate 不查；推进处仍有经济 barrier（R4-b b3 决定不加） | 无；权威 intent 的结算归规则运行时，不新增叙事 barrier |
 | 阶段 | gate 仅拒绝 `ACTIVE_JUDGMENT`，`ROUND_PROCESSING`，409；原有暂停恢复与入队阶段规则保留 | `ACTIVE_ACTION`，否则 `phase_changed` | 服务层无叙事阶段限制；战斗有独立回合 / version（R4-b b4 延后 R5） |
-| run 一致 | 无，保留 R4-b b2 的待决差异 | `run_changed` | 无通用 run 检查；保留现有 runtime / version 验证 |
+| run 一致 | 非空 `expected_run_id` 启用共享 `check_run_unchanged` 与 registry identity fence；过期返回 `STALE_RUN`，409 | `run_changed` | 无通用 run 检查；保留现有 runtime / version 验证 |
 | 回合一致 | 无客户端 expected round 输入 | `round_changed` | 具体规则运行时的 `expected_version` 乐观并发 |
 | 真人闸门 | 不适用，真人正在提交自身行动 | 有活跃真人且未交齐 → `human_gate_changed`；全 AI 桌无需等待真人 | 不适用，按权威战斗 actor 顺序 |
 | 同源重复 | gate 外保留原有单人行动上限 / 多人修订上限 | `duplicate` | 具体规则运行时的 intent identity / `INTENT_ID_CONFLICT` |
@@ -1899,9 +1899,17 @@ R4-b b1 **决定：做**。特征测试以真实 D&D `combat.start` / EventBatch
 
 服务层通过 `TurnDependencies` 当前规则与 runtime capabilities 提供同步、只读的 `requires_structured_intent` 查询，经 handler 和命令层原样传入 aggregate。命令层生成前按 AI 策略预检，初始受阻时不调用模型；最终提交在原有 authority / state 双锁内、旧拒绝检查之后重新读取当前 runtime、能力与 `ruleset_state.combat.status`，检查与入队间没有 await。因此生成中或等待锁期间开始战斗，旧结果也不会入队。engine 不解析 runtime，也不包含 D&D 分支。未知 / 不兼容 runtime，或已有 runtime binding 却无法加载规则时，查询返回拒绝，自由文本 fail closed（AI outcome 为 `STRUCTURED_INTENT_REQUIRED`，不新增 HTTP 响应）。无 binding 且无规则保留旧叙事路径；直接命令 / aggregate 调用省略参数或传 `False` / `None` 仍保持旧契约，需要动态保护的调用方必须传查询，不能缓存生成前的 bool。注入的 fill 实现必须接收并转发该关键字参数。
 
-R4-b b3 **决定：不加经济 gate**。`try_advance` 已在推进边界阻止未结算经济事务，AI 行动只是在排队；提前拒绝可能让全 AI 且付款方也是 AI 的桌子无法继续处理。R4-b b4 **延后 R5** 再确定战斗与叙事阶段的并发模型，本步不新增结构化意图阶段限制。b2 真人 run 检查不属于本步。
+R4-b b3 **决定：不加经济 gate**。`try_advance` 已在推进边界阻止未结算经济事务，AI 行动只是在排队；提前拒绝可能让全 AI 且付款方也是 AI 的桌子无法继续处理。R4-b b4 **延后 R5** 再确定战斗与叙事阶段的并发模型，本步不新增结构化意图阶段限制。b2 真人 run 检查见下文。
 
-R4-a / R4-b b1 不改变 persisted 形状，实例 schema 保持 **20**，无需迁移。AST 守卫禁止 action gate 导入 webui / commands / rulesets，并禁止 engine 新增 commands 依赖；唯一既存例外是 `economy.py` 中导入 `commands.state_items.normalized_reward_entries` 的局部调用，待后续经济效果职责收口。
+R4-b2 决定实施可选真人 run guard：`turns.submit_action(..., expected_run_id: str = "")`；省略与空字符串完全保留旧路径，WebAPI 原有 `**kwargs` 委托即可转发，route / client 暂不传。非空时的刻意新顺序是：游戏 / runtime → 成员 / 控制权 / 结构化意图 / 死亡 → run → authority 准入与 run 复核 → outbox retry → run 复核 → 经济 / 阶段 → 行动上限 / 恢复 / 入队。因此原先的前置权限与错误优先级保留，stale 优先于 retry、经济、阶段和行动上限；stale 响应为 `{"ok": false, "error_code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}`，HTTP 409，不投影成员、行动或经济数据。
+
+只有带非空 token 的提交持有现有、task-reentrant `authoritative_write`，覆盖 retry、恢复、入队、保存及后续推进；等待 authority 后同时核对 run 和 registry 对象 identity，防止旧对象在 reset/restart replacement 后仍保留相同 run_id。`start_round`、`resume`、`add_action` 的新增可选 `expected_run_id` 在各自状态锁内委托共享检查；`add_action` 保留 bool 契约，stale 返回 False。服务在 await 返回后复核，过期时不继续恢复、入队或保存；推进 helper 在 AI 补行动、`try_advance`、检定准备及处理返回后也复核，禁止过期结果继续下一步或自动结算奖励，奖励循环每次结算前复核。注入 processor 抛错且 run 已变时，不对新 run 执行兜底回滚 / 保存。无 token 时不新增 authority 范围，也不向既有调用方传新关键字。
+
+生产 `GameHandler.process_round` → `RoundProcessor.process_round` 直接 await，沿用提交任务；AI 填充也是逐席位直接 await，aggregate commit 在同任务重入 authority。processor 获取 process → state 锁，不创建并等待一个需要重新获取 authority 的子任务；摘要、场景图与幸运计时任务只后台调度，不在持有 authority 时等待其完成。自定义适配器不得持有父任务 authority 又等待一个需要 authority 的子任务；task-reentrant 不代表子任务继承锁。
+
+保证范围是现有遵守 authority gate 的生产 reset/restart/rewrite：它们不能在带 token 的提交中途换 run。持锁时间包含 outbox、AI 和叙事等待，可能延后同局其他 authority writer。低层 `rotate_run_identity()` / `reset()` 本身并非统一 authority transaction；状态锁内的 guard 与 await 后复核能拒绝提交继续写入，但不能回滚任意注入 callback 内已经发生的外部投递或写入，也不承诺对绕过 authority 的任意并发 mutator 提供全局事务隔离。统一这些低层生命周期及所有 callback 的事务契约不在 b2 范围内；不把本次 run guard 宣称为全引擎原子事务。AI b1 与结构化意图 b4 策略未变。
+
+R4-a / R4-b b1 / R4-b2 不改变 persisted 形状，实例 schema 保持 **20**，无需迁移。AST 守卫禁止 action gate 导入 webui / commands / rulesets，并禁止 engine 新增 commands 依赖；唯一既存例外是 `economy.py` 中导入 `commands.state_items.normalized_reward_entries` 的局部调用，待后续经济效果职责收口。
 
 ---
 
