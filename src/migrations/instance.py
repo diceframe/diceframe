@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 21
+CURRENT_INSTANCE_SCHEMA_VERSION = 30
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -440,6 +440,206 @@ def _migrate_v20_to_v21(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v21_to_v22(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move private channels into their slot; existing slots take precedence."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    private_log = payload.pop("private_log", None)
+    table_talk = payload.pop("table_talk", None)
+    if not isinstance(modules.get("private_channels"), dict):
+        modules["private_channels"] = {
+            "schema_version": 1,
+            "private_log": private_log if isinstance(private_log, dict) else {},
+            "table_talk": table_talk if isinstance(table_talk, list) else [],
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 22
+    return payload
+
+
+def _migrate_v22_to_v23(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move media references into their slot without overwriting existing slots."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    scene_image = payload.pop("scene_image", None)
+    map_background = payload.pop("map_background", None)
+    if not isinstance(modules.get("media"), dict):
+        modules["media"] = {
+            "schema_version": 1,
+            "scene_image": scene_image if isinstance(scene_image, dict) else {},
+            "map_background": map_background if isinstance(map_background, dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 23
+    return payload
+
+
+def _migrate_v23_to_v24(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move health state into its slot; leave event retention to serialization."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    health_events = payload.pop("health_events", None)
+    health_status = payload.pop("health_status", None)
+    if not isinstance(modules.get("health"), dict):
+        modules["health"] = {
+            "schema_version": 1,
+            "health_events": health_events if isinstance(health_events, list) else [],
+            "health_status": health_status if isinstance(health_status, dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 24
+    return payload
+
+
+def _migrate_v24_to_v25(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move narrative notes without interpreting the legacy game-time string."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    summary = payload.pop("summary", None)
+    key_facts = payload.pop("key_facts", None)
+    confirmed_items = payload.pop("confirmed_items", None)
+    game_time = payload.pop("game_time", None)
+    if not isinstance(modules.get("narrative_notes"), dict):
+        modules["narrative_notes"] = {
+            "schema_version": 1,
+            "summary": summary if isinstance(summary, dict) else {},
+            "key_facts": key_facts if isinstance(key_facts, list) else [],
+            "confirmed_items": confirmed_items if isinstance(confirmed_items, list) else [],
+            "game_time": game_time if isinstance(game_time, str) else "",
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 25
+    return payload
+
+
+def _migrate_v25_to_v26(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move round presentation into its slot without changing existing slots."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    gm_directives = payload.pop("gm_directives", None)
+    quick_actions = payload.pop("quick_actions", None)
+    last_state_update = payload.pop("last_state_update", None)
+    last_token_budget_bump = payload.pop("last_token_budget_bump", None)
+    pending_combat_results = payload.pop("pending_combat_results", None)
+    if not isinstance(modules.get("round_presentation"), dict):
+        modules["round_presentation"] = {
+            "schema_version": 1,
+            "gm_directives": gm_directives if isinstance(gm_directives, list) else [],
+            "quick_actions": quick_actions if isinstance(quick_actions, list) else [],
+            "last_state_update": last_state_update if isinstance(last_state_update, dict) else None,
+            "last_token_budget_bump": last_token_budget_bump if isinstance(last_token_budget_bump, dict) else None,
+            "pending_combat_results": pending_combat_results if isinstance(pending_combat_results, list) else [],
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 26
+    return payload
+
+
+def _migrate_v26_to_v27(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move world reports into their slot; existing slots take precedence."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    last_overreach = payload.pop("last_overreach", None)
+    last_world_legality = payload.pop("last_world_legality", None)
+    last_world_events = payload.pop("last_world_events", None)
+    if not isinstance(modules.get("world_reports"), dict):
+        modules["world_reports"] = {
+            "schema_version": 1,
+            "last_overreach": last_overreach if isinstance(last_overreach, list) else [],
+            "last_world_legality": last_world_legality if isinstance(last_world_legality, list) else [],
+            "last_world_events": last_world_events if isinstance(last_world_events, list) else [],
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 27
+    return payload
+
+
+def _migrate_v27_to_v28(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move table settings as-is; currency caps were already converted in v12."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    defaults: dict[str, Any] = {
+        "difficulty": "标准",
+        "narrative_perspective": "auto",
+        "gm_style_override": None,
+        "solo_mode": False,
+        "seed_code": "",
+        "entry_point": "web",
+        "luck_timeout_seconds": 60,
+        "economy_reward_policy": {},
+    }
+    values = {key: payload.pop(key, None) for key in defaults}
+    try:
+        timeout = int(values["luck_timeout_seconds"] or 0) if values["luck_timeout_seconds"] is not None else 60
+    except (TypeError, ValueError, OverflowError):
+        timeout = 60
+    if not isinstance(modules.get("table_settings"), dict):
+        modules["table_settings"] = {
+            "schema_version": 1,
+            "difficulty": values["difficulty"] if isinstance(values["difficulty"], str) else defaults["difficulty"],
+            "narrative_perspective": values["narrative_perspective"] if isinstance(values["narrative_perspective"], str) else defaults["narrative_perspective"],
+            "gm_style_override": values["gm_style_override"] if isinstance(values["gm_style_override"], dict) else None,
+            "solo_mode": values["solo_mode"] if isinstance(values["solo_mode"], bool) else False,
+            "seed_code": values["seed_code"] if isinstance(values["seed_code"], str) else defaults["seed_code"],
+            "entry_point": values["entry_point"] if isinstance(values["entry_point"], str) else defaults["entry_point"],
+            "luck_timeout_seconds": timeout,
+            "economy_reward_policy": values["economy_reward_policy"] if isinstance(values["economy_reward_policy"], dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 28
+    return payload
+
+
+def _migrate_v28_to_v29(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move room access values verbatim, defaulting only absent keys."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    defaults: dict[str, Any] = {
+        "max_players": 6,
+        "player_access_open": True,
+        "bot_bind_token": "",
+        "room_password": "",
+        "room_token": "",
+    }
+    values = {key: payload.pop(key, default) for key, default in defaults.items()}
+    if not isinstance(modules.get("room_access"), dict):
+        modules["room_access"] = {"schema_version": 1, **values}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 29
+    return payload
+
+
+def _migrate_v29_to_v30(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move session statistics into their slot without overwriting existing slots."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    defaults: dict[str, Any] = {
+        "total_llm_calls": 0, "total_tokens": 0,
+        "started_at": "", "last_activity": "",
+    }
+    values = {key: payload.pop(key, default) for key, default in defaults.items()}
+    for key in ("total_llm_calls", "total_tokens"):
+        if type(values[key]) is not int or values[key] < 0:
+            values[key] = 0
+    for key in ("started_at", "last_activity"):
+        if not isinstance(values[key], str):
+            values[key] = ""
+    if not isinstance(modules.get("session_stats"), dict):
+        modules["session_stats"] = {"schema_version": 1, **values}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 30
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -507,6 +707,33 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 20:
         payload = _migrate_v20_to_v21(payload)
         version = 21
+    if version == 21:
+        payload = _migrate_v21_to_v22(payload)
+        version = 22
+    if version == 22:
+        payload = _migrate_v22_to_v23(payload)
+        version = 23
+    if version == 23:
+        payload = _migrate_v23_to_v24(payload)
+        version = 24
+    if version == 24:
+        payload = _migrate_v24_to_v25(payload)
+        version = 25
+    if version == 25:
+        payload = _migrate_v25_to_v26(payload)
+        version = 26
+    if version == 26:
+        payload = _migrate_v26_to_v27(payload)
+        version = 27
+    if version == 27:
+        payload = _migrate_v27_to_v28(payload)
+        version = 28
+    if version == 28:
+        payload = _migrate_v28_to_v29(payload)
+        version = 29
+    if version == 29:
+        payload = _migrate_v29_to_v30(payload)
+        version = 30
     payload["instance_schema_version"] = version
     return payload
 

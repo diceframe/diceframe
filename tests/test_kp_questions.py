@@ -21,8 +21,8 @@ def _instance() -> GameInstance:
         world_id="",
         world_name="阿卡姆疑云",
         gm_uid="gm",
-        solo_mode=False,
     )
+    instance.solo_mode = False
     instance.players = {
         "p1": {
             "user_id": "p1",

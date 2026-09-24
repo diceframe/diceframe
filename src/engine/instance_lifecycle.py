@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import copy
 import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from src.engine import progression
@@ -37,10 +36,12 @@ logger = logging.getLogger("trpg")
 
 def activate_locked(instance: GameInstance) -> None:
     """``activate`` 的持锁实现（调用方必须已持有 ``_lock``）。"""
+    from src.engine.modules import session_stats
+
+    session_stats.require_writable(instance)
     instance.state = GameState.ACTIVE_ACTION
-    if not instance.started_at:
-        instance.started_at = datetime.now(timezone.utc).isoformat()
-    instance.last_activity = datetime.now(timezone.utc).isoformat()
+    session_stats.mark_started(instance)
+    session_stats.touch(instance)
     logger.info("游戏激活 - game_key=%s", instance.game_key)
 
 
@@ -66,6 +67,9 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     集合与基线逐句一致。reset 的真实契约由
     ``tests/test_game_instance_reset_characterization.py`` 冻结。
     """
+    from src.engine.modules import session_stats
+
+    session_stats.require_writable(instance)
     saved_seed = instance.seed_code if keep_seed else ""
     saved_world_id = instance.world_id
     saved_world_name = instance.world_name
@@ -95,10 +99,7 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     instance.key_facts.clear()
     # 世界真相属于这一轮 run：重置与重开都从空世界重新开始。
     instance.world_state = fresh_world_state()
-    instance.total_llm_calls = 0
-    instance.total_tokens = 0
-    instance.started_at = ""
-    instance.last_activity = ""
+    session_stats.reset(instance)
     instance.puzzle_manager = None
     instance.plot_tracker = None
     instance.pending_combat_results.clear()

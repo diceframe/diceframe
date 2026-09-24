@@ -118,11 +118,13 @@ class GameLifecycle:
             narrative_perspective=source.narrative_perspective,
             economy_reward_policy=dict(source.economy_reward_policy or {}),
         )
-        candidate.max_players = source.max_players
-        candidate.player_access_open = source.player_access_open
-        candidate.gm_style_override = copy.deepcopy(source.gm_style_override)
-        candidate.bot_bind_token = source.bot_bind_token
-        candidate.room_token = source.room_token
+        from src.engine.modules import room_access, table_settings
+
+        room_access.replace_max_players(candidate, source.max_players)
+        room_access.replace_player_access_open(candidate, source.player_access_open)
+        table_settings.replace_gm_style_override(candidate, copy.deepcopy(source.gm_style_override))
+        room_access.replace_bot_bind_token(candidate, source.bot_bind_token)
+        room_access.replace_room_token(candidate, source.room_token)
         candidate.ruleset_runtime = copy.deepcopy(source.ruleset_runtime)
         candidate.ruleset_state = (
             {
@@ -174,7 +176,10 @@ class GameLifecycle:
         persist: bool = True,
     ) -> str:
         """激活游戏，生成开场叙事，进入第一轮。"""
+        from src.engine.modules import session_stats
+
         progression.require_writable(instance)
+        session_stats.require_writable(instance)
         await instance.activate()
         await instance.start_round()
         if publish:

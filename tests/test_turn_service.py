@@ -18,6 +18,7 @@ from src.webui.services.turns import (
 
 class FakeInstance:
     def __init__(self) -> None:
+        self.modules = {}  # Missing session_stats slot has a documented fresh default.
         self.players = {
             "gm": {"user_id": "gm", "character_name": "守密人"},
             "p2": {"user_id": "p2", "character_name": "调查员"},
