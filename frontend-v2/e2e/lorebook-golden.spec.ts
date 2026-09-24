@@ -115,6 +115,22 @@ test.describe('Lorebook Golden (real chain)', () => {
     // 真实条目来自迁移后的 SQLite，不是测试 fabricate 的 JSON。
     await expect(page.locator('.lore-row', { hasText: '旧城门' }).first()).toBeVisible()
 
+    // 桌面布局 contract：Books 侧栏固定窄轨（260–320px），主工作区占剩余宽度，
+    // 页面不得出现横向溢出（#398 曾因 shell 轨道未纳入 sidebar 而整体挤压）。
+    const layout = await page.evaluate(() => {
+      const width = (selector: string) =>
+        document.querySelector(selector)?.getBoundingClientRect().width ?? 0
+      return {
+        sidebar: width('.lorebook-sidebar'),
+        workspace: width('.lorebook-workspace'),
+        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      }
+    })
+    expect(layout.sidebar).toBeGreaterThanOrEqual(260)
+    expect(layout.sidebar).toBeLessThanOrEqual(320)
+    expect(layout.sidebar).toBeLessThan(layout.workspace)
+    expect(layout.pageOverflow).toBe(false)
+
     // ---- 2. 真实 matcher：keyword → recursion，GM 视角看得到密档 ------------
     const activationInput = page.locator('.lore-activation-input')
     await activationInput.fill('我去旧城门看看')
