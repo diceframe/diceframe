@@ -860,11 +860,13 @@ class WebAPI:
     def list_modules(self) -> dict[str, Any]:
         return modules.list_modules(self._module_dependencies)
 
-    async def list_module_marketplace(self, keyword: str = "") -> dict[str, Any]:
+    async def list_module_marketplace(
+        self, keyword: str = "", ruleset: str = "",
+    ) -> dict[str, Any]:
         """Online content-module catalogue for the modules view (FIX-06 §8)."""
 
         return await modules.module_marketplace(
-            self._module_dependencies, keyword=keyword,
+            self._module_dependencies, keyword=keyword, ruleset=ruleset,
         )
 
     def module_detail(self, module_id: str) -> dict[str, Any]:

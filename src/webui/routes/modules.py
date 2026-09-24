@@ -17,6 +17,7 @@ async def api_module_marketplace(request: web.Request) -> web.Response:
 
     result = await _get_api(request).list_module_marketplace(
         request.query.get("keyword", ""),
+        request.query.get("ruleset", ""),
     )
     return web.json_response(result, status=200 if result.get("ok") else 502)
 

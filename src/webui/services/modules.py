@@ -39,6 +39,14 @@ from src.webui.services.module_validation import (
 _MODULE_CONTENT_KINDS = (
     "npc", "item", "spell", "class", "character_template", "world_template",
 )
+_MARKETPLACE_CONTENT_PROFILES = frozenset({"adventure-module", "content-pack"})
+_RULESET_FILTER_ALIASES = {
+    # Generic module code matches the registry's stable short id, without
+    # importing or hard-coding a concrete ruleset runtime identifier.
+    "dnd2024": "dnd2024",
+    "coc": "coc7",
+    "freeform": "freeform",
+}
 
 
 @dataclass(frozen=True)
@@ -136,7 +144,7 @@ def _refresh_adventure_sources(deps: ModuleDependencies) -> None:
 
 
 async def module_marketplace(
-    deps: ModuleDependencies, *, keyword: str = "",
+    deps: ModuleDependencies, *, keyword: str = "", ruleset: str = "",
 ) -> dict[str, Any]:
     """在线模组库（FIX-06 §8：ModulesView 的 Online / Marketplace 区块）。
 
@@ -168,9 +176,21 @@ async def module_marketplace(
             "error": str(listing.get("error") or ""), "modules": [],
         }
     needle = str(keyword or "").strip().lower()
+    ruleset_filter = str(ruleset or "").strip().lower()
+    if ruleset_filter in {"", "all"}:
+        ruleset_filter = ""
+    else:
+        ruleset_filter = _RULESET_FILTER_ALIASES.get(ruleset_filter, ruleset_filter)
     modules: list[dict[str, Any]] = []
     for item in listing.get("plugins") or []:
         if str(item.get("plugin_type") or "") != MODULE_PLUGIN_TYPE:
+            continue
+        profile = str(item.get("content_profile") or "content-pack")
+        if profile not in _MARKETPLACE_CONTENT_PROFILES:
+            continue
+        targets = [str(target) for target in (item.get("ruleset_targets") or [])]
+        target_ids = {target.rsplit(":", 1)[-1].lower() for target in targets}
+        if ruleset_filter and ruleset_filter not in targets and ruleset_filter not in target_ids:
             continue
         if needle and needle not in _market_search_text(item):
             continue
@@ -183,10 +203,10 @@ async def module_marketplace(
             "version": str(item.get("version") or ""),
             "latest_version": latest_version,
             "description": str(item.get("description") or ""),
-            "content_profile": str(item.get("content_profile") or ""),
+            "content_profile": profile,
             "content_delivery_mode": str(item.get("content_delivery_mode") or ""),
             "adventure_count": int(item.get("adventure_count") or 0),
-            "ruleset_targets": list(item.get("ruleset_targets") or []),
+            "ruleset_targets": targets,
             "languages": list(item.get("languages") or []),
             "tags": list(item.get("tags") or []),
             "trust_level": str(item.get("trust_level") or ""),

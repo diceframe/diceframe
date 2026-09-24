@@ -56,6 +56,8 @@ export const ja = {
   modulesUninstallConfirmBody: 'アンインストールすると、このモジュールを使うセーブは内容を読み込めなくなります。続行しますか？',
   modulesOnlineSearch: 'オンラインモジュールを検索',
   modulesOnlineSearchPlaceholder: '名前・タグ・ルールで検索',
+  modulesOnlineFilter: 'ルール選択',
+  modulesOnlineFilterAll: 'すべて',
   modulesOnlineEmpty: 'マーケットにモジュールがありません。',
   modulesOnlineUnavailable: '現在モジュールマーケットを読み込めません：{error}',
   modulesInstallOnline: 'マーケットからインストール',

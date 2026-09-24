@@ -56,6 +56,8 @@ export const zhCN = {
   modulesUninstallConfirmBody: '卸载后，使用该模组的存档将无法继续读取其内容。仍要卸载吗？',
   modulesOnlineSearch: '搜索在线模组',
   modulesOnlineSearchPlaceholder: '按名称、标签或规则搜索',
+  modulesOnlineFilter: '规则筛选',
+  modulesOnlineFilterAll: '全部',
   modulesOnlineEmpty: '市场中暂无模组。',
   modulesOnlineUnavailable: '暂时无法读取模组市场：{error}',
   modulesInstallOnline: '从市场安装',
