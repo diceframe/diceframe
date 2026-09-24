@@ -156,10 +156,10 @@ def append_timeline(instance):
 def test_public_timeline_transaction_rollback_restores_round_and_history():
     instance = GameInstance(
         game_key=("test", "progression-transaction", "bot"),
-        round_number=3,
         state=GameState.ACTIVE_JUDGMENT,
         log=[{"round": 8, "gm_response": "Earlier history"}],
     )
+    instance.round_number = 3
     before = deepcopy({
         "ruleset_state": instance.ruleset_state,
         "event_ledger": instance.event_ledger,

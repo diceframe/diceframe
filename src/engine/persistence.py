@@ -168,7 +168,8 @@ async def load(registry: GameRegistry, game_key: tuple) -> GameInstance | None:
         )
     _restore_chatlog(registry, instance, sp)
     registry.register(instance)
-    logger.info("存档已加载: %s, round=%d", game_key, instance.round_number)
+    # Loading opaque future module data must not require runtime interpretation.
+    logger.info("存档已加载: %s", game_key)
     return instance
 
 
@@ -445,9 +446,8 @@ async def import_save_zip(
     if chatlog_data:
         sp.with_name("chatlog.jsonl").write_bytes(chatlog_data)
     # 立即加载并注册进内存，否则 list_games（只遍历内存）看不到导入的对局
-    instance = await load(registry, new_key)
-    rounds = instance.round_number if instance else -1
-    logger.info("已导入存档为新对局: %s (round=%d)", sp.parent.name, rounds)
+    await load(registry, new_key)
+    logger.info("已导入存档为新对局: %s", sp.parent.name)
     return {"ok": True, "game_key": list(new_key)}
 
 

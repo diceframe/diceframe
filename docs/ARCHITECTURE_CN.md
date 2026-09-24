@@ -10,7 +10,7 @@
 > - 分支：`main`
 > - Commit：`962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release：`2.6.1`
-> - 当前 GameInstance persisted schema：`20`
+> - 当前 GameInstance persisted schema：`21`
 > - 当前 Lorebook SQLite schema（`PRAGMA user_version`）：`9`
 > - 文档核验日期：2026-09-18
 >

@@ -29,6 +29,7 @@ def append_public_timeline_entry(
     AI-hosted turn is as visible in the public story as a human one.
     """
 
+    progression.require_writable(instance)
     intent_type = str(batch.get("intent_type") or "")
     projection = runtime.public_timeline_projection(
         batch, str(getattr(instance, "language", "") or ""),
@@ -91,6 +92,8 @@ def advance_automatic_intents(
     reused from any entry point without inventing a second transaction model.
     """
 
+    if on_applied is not None:
+        progression.require_writable(instance)
     batches: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
     for _ in range(limit):

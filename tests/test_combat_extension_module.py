@@ -110,7 +110,7 @@ def test_legacy_migration_preserves_data_input_and_both_idempotency_boundaries()
     original = deepcopy(payload)
     migrated = migrate_game_state_payload(payload)
     assert payload == original
-    assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION == 20
+    assert migrated["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
     assert migrated["modules"][combat.MODULE_NAME] == {
         "schema_version": 1,
         "current": original["combat_extension"],
@@ -154,7 +154,7 @@ def test_full_prior_migration_chain_loads_combat(version):
     payload.update(instance_schema_version=version, modules={},
                    combat_extension={"opaque": [1]}, combat_extension_round_snapshots={2: {"opaque": [3]}})
     restored = GameInstance.from_dict(payload)
-    assert restored.instance_schema_version == 20
+    assert restored.instance_schema_version == CURRENT_INSTANCE_SCHEMA_VERSION
     assert restored.combat_extension == {"opaque": [1]}
     assert restored.combat_extension_round_snapshots == {"2": {"opaque": [3]}}
     assert restored.away_control_policy == "pause"
@@ -164,7 +164,7 @@ def test_full_prior_migration_chain_loads_combat(version):
 
 def test_future_instance_schema_rejected():
     payload = dict(make_instance().to_dict())
-    payload["instance_schema_version"] = 21
+    payload["instance_schema_version"] = CURRENT_INSTANCE_SCHEMA_VERSION + 1
     with pytest.raises(ValueError, match="unsupported game instance schema"):
         GameInstance.from_dict(payload)
 

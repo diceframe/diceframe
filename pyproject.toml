@@ -43,6 +43,7 @@ files = [
     "src/engine/modules/economy_state.py",
     "src/engine/modules/lorebook_runtime.py",
     "src/engine/modules/player_control_state.py",
+    "src/engine/modules/progression_state.py",
     "src/engine/persistence.py",
     "src/engine/progression.py",
     "src/migrations/instance.py",

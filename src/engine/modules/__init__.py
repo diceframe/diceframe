@@ -5,4 +5,5 @@ from src.engine.modules import (  # noqa: F401
     economy_state,
     lorebook_runtime,
     player_control_state,
+    progression_state,
 )

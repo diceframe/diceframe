@@ -272,11 +272,11 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="E2E Adventure",
         group_name="Browser Tests",
         state=GameState.ACTIVE_ACTION,
-        round_number=2,
         solo_mode=False,
         gm_uid="e2e-gm",
         scene="Town Gate",
     )
+    instance.round_number = 2
     instance.players = _e2e_players()
     instance.log = [{
         "round": 1,
@@ -296,11 +296,11 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="E2E Adventure Module",
         group_name="Adventure Browser Tests",
         state=GameState.ACTIVE_ACTION,
-        round_number=1,
         solo_mode=False,
         gm_uid="e2e-gm",
         scene="Town Gate",
     )
+    adventure_instance.round_number = 1
     adventure_instance.players = _e2e_players()
     if not adventure_instance.bind_adventure(_write_e2e_adventure(data_dir)):
         raise RuntimeError("failed to bind the E2E adventure in the fixture")
@@ -351,12 +351,12 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="Golden Lore World",
         group_name="Lorebook Golden",
         state=GameState.ACTIVE_ACTION,
-        round_number=2,
         solo_mode=False,
         gm_uid="e2e-gm",
         scene="旧城门前",
         language="zh-CN",
     )
+    lore_instance.round_number = 2
     lore_instance.players = _e2e_players()
     _write_save(data_dir, lore_instance)
     return save_file

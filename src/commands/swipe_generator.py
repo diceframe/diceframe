@@ -126,12 +126,13 @@ class SwipeGenerator:
             return None, None
 
         swipes = target_entry.get("swipes", [])
-        if not swipes:
-            swipes = [target_entry.get("gm_response", "")]
-            target_entry["swipes"] = swipes
         if len(swipes) >= 5:
             logger.warning("Swipe 已达上限 (5), round=%d", round_num)
             return None, None
+        progression.require_writable(instance)
+        if not swipes:
+            swipes = [target_entry.get("gm_response", "")]
+            target_entry["swipes"] = swipes
 
         snapshot = target_entry.get("pre_state_snapshot", {})
         if snapshot:

@@ -123,8 +123,9 @@ def test_generic_game_queries_do_not_import_dnd() -> None:
 def test_game_detail_projects_manual_roll_results_with_private_visibility(tmp_path: Path) -> None:
     registry = GameRegistry(tmp_path)
     instance = GameInstance(
-        game_key=("web", "rolls", "bot"), gm_uid="gm", round_number=3,
+        game_key=("web", "rolls", "bot"), gm_uid="gm",
     )
+    instance.round_number = 3
     instance.manual_roll_requests = [
         {
             "id": "party-roll", "round_number": 2, "label": "察觉鉴定",

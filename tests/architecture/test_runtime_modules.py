@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 91
+MAX_TOP_LEVEL_FIELDS = 90
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",

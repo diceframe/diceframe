@@ -12,6 +12,7 @@ from typing import Any
 
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.adventures import binding_matches
+from src.engine import progression
 from src.engine.action_gate import GateRequest, SOURCE_INTENT, STRUCTURED_INTENT_POLICY, evaluate
 from src.rulesets.automation import (
     advance_automatic_intents,
@@ -434,6 +435,7 @@ async def submit_intent(
     )
 
     async with instance._lock:
+        progression.require_writable(instance)
         binding_error = await _ensure_compatible_adventure_binding(
             dependencies, runtime, instance,
         )
@@ -540,6 +542,7 @@ async def resume_authoritative_combat(
         }
 
     async with instance._lock:
+        progression.require_writable(instance)
         binding_error = await _ensure_compatible_adventure_binding(
             dependencies, runtime, instance,
         )

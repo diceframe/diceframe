@@ -134,7 +134,8 @@ def test_damage_to_stable_character_restarts_downed_and_records_failure() -> Non
 
 
 def test_round_tracker_reuses_same_round_outcome_without_reroll(monkeypatch) -> None:
-    instance = GameInstance(game_key=("web", "ds-retry", "bot"), rule_id="dnd5e", round_number=4)
+    instance = GameInstance(game_key=("web", "ds-retry", "bot"), rule_id="dnd5e")
+    instance.round_number = 4
     instance.players["a"] = {
         "character_name": "尤落",
         "character_sheet": {"hp": 0, "max_hp": 10, "status": "downed", "death_saves": {"success": 0, "failure": 0}},
@@ -156,7 +157,8 @@ def test_round_tracker_reuses_same_round_outcome_without_reroll(monkeypatch) -> 
 
 
 def test_round_tracker_caches_each_downed_player_independently(monkeypatch) -> None:
-    instance = GameInstance(game_key=("web", "ds-party", "bot"), rule_id="dnd5e", round_number=4)
+    instance = GameInstance(game_key=("web", "ds-party", "bot"), rule_id="dnd5e")
+    instance.round_number = 4
     for uid in ("a", "b"):
         instance.players[uid] = {
             "character_name": uid,

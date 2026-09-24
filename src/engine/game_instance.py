@@ -41,6 +41,7 @@ from src.engine.modules import (
     economy_state,
     lorebook_runtime,
     player_control_state,
+    progression_state,
 )
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.engine.player_control import (
@@ -155,7 +156,6 @@ class GameInstance:
     npcs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # 回合
-    round_number: int = 0
     action_queue: list[ActionRecord] = field(default_factory=list)
     pending_actions: list[ActionRecord] = field(default_factory=list)
     ready_players: set[str] = field(default_factory=set)
@@ -328,6 +328,14 @@ class GameInstance:
         # 与手工修改过的 players 都在这里补齐，读取方永远不必自己猜。唯一写入口
         # 仍是 src.engine.player_control.set_control。
         ensure_controls(self)
+
+    @property
+    def round_number(self) -> int:
+        return progression_state.round_value(self)
+
+    @round_number.setter
+    def round_number(self, value: int) -> None:
+        progression_state.set_round_value(self, value)
 
     @property
     def economy(self) -> dict[str, Any]:
@@ -615,6 +623,9 @@ class GameInstance:
         the rollback assignment here preserves the aggregate write boundary
         while allowing ruleset orchestration to remain transaction-aware.
         """
+        if "round_number" in snapshot:
+            progression.require_writable(self)
+            restored_round = int(snapshot["round_number"])
         self.ruleset_state = copy.deepcopy(snapshot["ruleset_state"])
         self.event_ledger = copy.deepcopy(snapshot["event_ledger"])
         self.players = copy.deepcopy(snapshot["players"])
@@ -629,7 +640,7 @@ class GameInstance:
         if "log" in snapshot:
             self.log = copy.deepcopy(snapshot["log"])
         if "round_number" in snapshot:
-            progression.restore_from_snapshot(self, snapshot["round_number"])
+            progression.restore_from_snapshot(self, restored_round)
 
     def set_player_access(self, open_access: bool) -> None:
         self.player_access_open = bool(open_access)
@@ -773,6 +784,7 @@ class GameInstance:
 
     def begin_round_processing(self) -> None:
         """清理仅属于上一轮展示的短期状态。"""
+        progression.require_writable(self)
         self.last_token_budget_bump = None
         self.pending_combat_results.clear()
         self.update_lorebook_timed_state()
@@ -865,6 +877,7 @@ class GameInstance:
         async with self._lock:
             if self.log:
                 # Reject before history or snapshots can be changed.
+                progression.require_writable(self)
                 economy_state.state(self)
                 combat_extension_state.current(self)
             return round_recovery.rollback_last_round_locked(self)
@@ -886,6 +899,7 @@ class GameInstance:
         """
         async with self._lock:
             if self.state == GameState.ACTIVE_JUDGMENT:
+                progression.require_writable(self)
                 economy_state.state(self)
                 combat_extension_state.current(self)
             return round_recovery.abort_round_processing_locked(self)
@@ -1046,6 +1060,7 @@ class GameInstance:
                 self, GateRequest(actor_uid="", source=SOURCE_HUMAN, expected_run_id=expected_run_id),
             ):
                 return
+            progression.require_writable(self)
             economy_state.state(self)
             turn_state.start_round_locked(self)
 
@@ -1104,6 +1119,7 @@ class GameInstance:
         内完成两件事：自己在锁内复核，再调用这里追加，而不是写两层加锁。
         实现见 ``turn_state.add_action_locked``。
         """
+        progression.require_writable(self)
         return turn_state.add_action_locked(
             self, user_id, action_text,
             selected_attribute=selected_attribute,
@@ -1320,6 +1336,7 @@ class GameInstance:
         async with self._lock:
             from src.engine.economy import has_blocking_economy_decision
 
+            progression.require_writable(self)
             if has_blocking_economy_decision(self):
                 return False
             return self._do_advance_locked()
@@ -1329,6 +1346,7 @@ class GameInstance:
         async with self._lock:
             from src.engine.economy import has_blocking_economy_decision
 
+            progression.require_writable(self)
             if has_blocking_economy_decision(self):
                 return False
             if self.state != GameState.ACTIVE_ACTION:
@@ -1339,6 +1357,7 @@ class GameInstance:
 
     def _do_advance_locked(self) -> bool:
         """在锁内执行推进（调用方需持锁；实现见 turn_state）。"""
+        progression.require_writable(self)
         return turn_state.do_advance_locked(self)
 
     def capture_round_entity_snapshot(self) -> None:
@@ -1363,6 +1382,7 @@ class GameInstance:
         state_changes 为本轮玩家可见状态变动摘要，随 log entry 持久化供群机器人单独转发。
         """
         async with self._lock:
+            progression.require_writable(self)
             economy_state.state(self)
             round_recovery.finish_judgment_locked(
                 self,
@@ -1395,6 +1415,7 @@ class GameInstance:
 
     async def activate(self) -> None:
         async with self._lock:
+            progression.require_writable(self)
             instance_lifecycle.activate_locked(self)
 
     async def pause(self) -> None:
@@ -1407,6 +1428,7 @@ class GameInstance:
                 self, GateRequest(actor_uid="", source=SOURCE_HUMAN, expected_run_id=expected_run_id),
             ):
                 return
+            progression.require_writable(self)
             instance_lifecycle.resume_locked(self)
 
     async def end(self) -> None:
@@ -1421,6 +1443,7 @@ class GameInstance:
         """
         async with self._lock:
             # Validate fallible slots before rotating the run or clearing state.
+            progression.require_writable(self)
             combat_extension_state.current(self)
             lorebook_runtime.timers(self)
             instance_lifecycle.reset_locked(self, keep_seed=keep_seed)

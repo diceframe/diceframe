@@ -210,7 +210,8 @@ def test_unknown_module_schema_round_trips_and_runtime_fails_without_mutation(ve
 
 
 def _unsupported_economy_instance(version):
-    instance = GameInstance(game_key=("web", "future-lifecycle", "u"), round_number=2)
+    instance = GameInstance(game_key=("web", "future-lifecycle", "u"))
+    instance.round_number = 2
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 10, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
     instance.scene = "gate"
@@ -311,7 +312,8 @@ def test_era_key_retains_round_coercion(round_number):
 
 
 def test_all_new_economy_records_use_era_key_and_keep_proposal_origin(monkeypatch):
-    instance = GameInstance(game_key=("web", "era", "u"), round_number=3, gm_uid="p")
+    instance = GameInstance(game_key=("web", "era", "u"), gm_uid="p")
+    instance.round_number = 3
     instance.players = {"p": {"character_sheet": {"gold": 30, "currency": {"amount": 30}}}}
     monkeypatch.setattr(economy, "era_key", lambda _: 11)
     proposal = economy.queue_proposal(instance, kind="payment", source="gm_manual", payer_uid="p", amount=5)

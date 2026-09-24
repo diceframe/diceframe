@@ -125,7 +125,6 @@ class GamePersistedState(TypedDict, total=False):
     state: str
     players: dict[str, PlayerData]
     npcs: dict[str, OpaqueState]
-    round_number: int
     action_queue: list[ActionRecord]
     pending_actions: list[ActionRecord]
     ready_players: list[str]

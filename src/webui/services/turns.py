@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from src.commands.round_processor import RoundNotProcessed, RoundProcessingFailure
+from src.engine import progression
 from src.engine.action_gate import (
     ACTOR_DECEASED,
     ECONOMY_DECISION_PENDING,
@@ -593,6 +594,7 @@ async def _advance_progression(
     # AI 托管席位的补行动只有一个注入点：真人闸门满足之后、本轮推进之前。
     # 这里不做任何 AI 判断（闸门、顺序、幂等、竞争守卫都在 ai_player 里），
     # 也不让它的失败挡住真人这一轮。
+    progression.require_writable(instance)
     wrote_ai_actions = await _fill_ai_player_actions(
         dependencies, instance, game_key=game_key,
     )
@@ -767,6 +769,7 @@ async def submit_action(
                 "error_code": "REWRITE_IN_PROGRESS",
                 "error": "GM 正在重写历史回合，请等待完成后再提交行动",
             }, 409)
+        progression.require_writable(instance)
         # Retry stays after the pre-retry guards, outside the pure gate.
         await _retry_external_economy_effects(dependencies, instance)
         if run_changed():
@@ -954,6 +957,7 @@ async def advance_round(
         return _result({"error": "not found"}, 404)
     if actor_uid != instance.gm_uid:
         return _result({"ok": False, "error": "仅 GM 可推进"}, 403)
+    progression.require_writable(instance)
     if force and _allow_preempt and instance.round_processing_in_flight():
         if await instance.cancel_round_processing():
             logger.warning("GM 强制推进：已中止在飞生成 - game_key=%s", game_key)

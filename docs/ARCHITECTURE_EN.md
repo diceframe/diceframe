@@ -10,7 +10,7 @@
 > - Branch: `main`
 > - Commit: `962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release: `2.6.1`
-> - Current GameInstance persisted schema: `20`
+> - Current GameInstance persisted schema: `21`
 > - Current Lorebook SQLite schema (`PRAGMA user_version`): `9`
 > - Document verification date: 2026-09-18
 >

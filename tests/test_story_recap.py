@@ -55,8 +55,8 @@ async def test_story_recap_uses_recent_public_rounds_and_does_not_add_fake_round
         game_key=("web", "recap", "bot"),
         language="en",
         players={"p1": {"character_name": "Avery"}},
-        round_number=12,
     )
+    instance.round_number = 12
     instance.log = [_entry(round_number) for round_number in range(1, 13)]
     public_signature_before = _play_public_signature(instance, "p1")
 
@@ -117,8 +117,8 @@ async def test_story_recap_does_not_hold_process_lock_during_llm_call():
         game_key=("web", "recap-lock", "bot"),
         language="en",
         players={"p1": {"character_name": "Avery"}},
-        round_number=3,
     )
+    instance.round_number = 3
     instance.log = [_entry(round_number) for round_number in range(1, 4)]
 
     class LockProbeLLM(RecapLLM):
@@ -147,8 +147,8 @@ async def test_story_recap_failure_releases_process_lock():
         game_key=("web", "recap-fail", "bot"),
         language="en",
         players={"p1": {"character_name": "Avery"}},
-        round_number=2,
     )
+    instance.round_number = 2
     instance.log = [_entry(1), _entry(2)]
 
     class BoomLLM:
@@ -170,8 +170,8 @@ async def test_story_recap_attaches_to_live_entry_after_new_round_completes():
         game_key=("web", "recap-race", "bot"),
         language="en",
         players={"p1": {"character_name": "Avery"}},
-        round_number=2,
     )
+    instance.round_number = 2
     instance.log = [_entry(1), _entry(2)]
 
     class SlowThenGrowLLM(RecapLLM):
@@ -213,8 +213,8 @@ async def test_story_recap_rejects_round_rewritten_during_generation():
         game_key=("web", "recap-rewrite", "bot"),
         language="en",
         players={"p1": {"character_name": "Avery"}},
-        round_number=2,
     )
+    instance.round_number = 2
     instance.log = [_entry(1), _entry(2)]
 
     class RewriteLLM(RecapLLM):

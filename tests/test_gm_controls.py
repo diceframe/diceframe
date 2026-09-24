@@ -138,7 +138,8 @@ async def test_narrative_perspective_is_ruleset_neutral_and_persisted(tmp_path):
 async def test_gm_private_message_appends_private_log(tmp_path):
     registry = GameRegistry(tmp_path)
     key = ("web", "game", "bot")
-    inst = GameInstance(game_key=key, state=GameState.ACTIVE_ACTION, round_number=3)
+    inst = GameInstance(game_key=key, state=GameState.ACTIVE_ACTION)
+    inst.round_number = 3
     inst.players["p1"] = {"character_name": "艾伦", "character_sheet": {"deceased": False}}
     registry.register(inst)
 
@@ -156,7 +157,8 @@ async def test_gm_private_message_appends_private_log(tmp_path):
 def test_private_log_for_user_only_returns_own_messages(tmp_path):
     registry = GameRegistry(tmp_path)
     key = ("web", "game", "bot")
-    inst = GameInstance(game_key=key, state=GameState.ACTIVE_ACTION, round_number=3)
+    inst = GameInstance(game_key=key, state=GameState.ACTIVE_ACTION)
+    inst.round_number = 3
     inst.players["p1"] = {"character_name": "艾伦", "character_sheet": {"deceased": False}}
     inst.players["p2"] = {"character_name": "贝拉", "character_sheet": {"deceased": False}}
     inst.private_log["p1"] = [{"round": 1, "text": "你听到门后有冷风。", "source": "gm"}]

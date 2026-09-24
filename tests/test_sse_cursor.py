@@ -18,9 +18,9 @@ def _instance() -> GameInstance:
     inst = GameInstance(
         game_key=("web", "room", "bot"),
         state=GameState.ACTIVE_ACTION,
-        round_number=12,
         scene="旧塔入口",
     )
+    inst.round_number = 12
     inst.players = {
         "p1": {
             "user_id": "p1",

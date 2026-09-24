@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 20
+CURRENT_INSTANCE_SCHEMA_VERSION = 21
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -422,6 +422,24 @@ def _migrate_v19_to_v20(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v20_to_v21(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move the narrative round into progression (R5-b), once at this boundary.
+
+    Existing dict slots, even empty/unknown ones, win over the legacy counter.
+    Historical migrations and log/snapshot round keys retain their semantics.
+    """
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    legacy = payload.pop("round_number", 0)
+    if not isinstance(modules.get("progression"), dict):
+        value = legacy if isinstance(legacy, int) and not isinstance(legacy, bool) and legacy >= 0 else 0
+        modules["progression"] = {"schema_version": 1, "mode": "narrative_round", "round": value}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 21
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -486,6 +504,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 19:
         payload = _migrate_v19_to_v20(payload)
         version = 20
+    if version == 20:
+        payload = _migrate_v20_to_v21(payload)
+        version = 21
     payload["instance_schema_version"] = version
     return payload
 

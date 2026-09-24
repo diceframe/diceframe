@@ -26,6 +26,7 @@ from src.commands.tag_parser import (
 )
 from src.commands.tag_json import extract_narration_from_response
 from src.commands.tag_summary import summarize_tags
+from src.engine import progression
 from src.engine.character_utils import reset_character_for_restart
 from src.engine.economy import queue_effect_group
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
@@ -173,6 +174,7 @@ class GameLifecycle:
         persist: bool = True,
     ) -> str:
         """激活游戏，生成开场叙事，进入第一轮。"""
+        progression.require_writable(instance)
         await instance.activate()
         await instance.start_round()
         if publish:
@@ -412,6 +414,7 @@ class GameLifecycle:
 
     async def resume_game(self, instance: GameInstance) -> str:
         """从 PAUSED 状态恢复游戏，生成「上回说到」续接叙事。"""
+        progression.require_writable(instance)
         if instance.state != GameState.PAUSED:
             await instance.activate()
             return ""
@@ -509,6 +512,7 @@ class GameLifecycle:
         *,
         preserve_players: bool,
     ) -> GameInstance:
+        progression.require_writable(previous)
         candidate = await self._new_run_candidate(
             previous, preserve_players=preserve_players,
         )
