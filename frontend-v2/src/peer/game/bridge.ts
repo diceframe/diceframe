@@ -29,6 +29,38 @@ const MUTATING_OPERATIONS = new Set<PeerGameOperation>([
 const MAX_REQUESTS_PER_MINUTE = 120
 const MAX_IN_FLIGHT_PER_PEER = 8
 
+const LOBBY_DETAIL_FIELDS = [
+  'game_key', 'player_access_open', 'player_count', 'max_players',
+  'has_room_password', 'world_name', 'scene', 'rule_id', 'solo_mode',
+] as const
+
+const JOIN_CHARACTER_FIELDS = [
+  'rule_attrs', 'rule_attrs_total', 'rule_classes',
+  'rule_special_stats', 'rule_meta', 'ruleset_runtime',
+] as const
+
+const LOBBY_MULTIPLAYER_FIELDS = [
+  'state', 'round_number', 'solo_mode', 'player_count', 'max_players',
+  'ready_count', 'alive_count', 'active_count', 'away_count', 'ai_count',
+  'unclaimed_count', 'can_accept_actions', 'can_advance', 'action_count',
+  'pending_action_count', 'player_access_open',
+] as const
+
+function lobbyMultiplayer(value: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out
+  const current = value as Record<string, unknown>
+  for (const key of LOBBY_MULTIPLAYER_FIELDS) if (key in current) out[key] = current[key]
+  return out
+}
+
+function lobbyDetail(current: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of LOBBY_DETAIL_FIELDS) if (key in current) out[key] = current[key]
+  if ('multiplayer' in current) out.multiplayer = lobbyMultiplayer(current.multiplayer)
+  return out
+}
+
 /**
  * 对端 payload 字段白名单：只放行各操作实际需要的字段，其余全部剥离。
  * 对端是其他玩家的浏览器，任意 JSON 直通本地 API 会造成越权注入
@@ -239,19 +271,31 @@ export class PeerHostGameBridge {
     )
 
     if (operation === 'game.detail') {
-      return { ...current, has_room_password: false, peer_transport: true }
+      const detail = actorId ? await read('') : lobbyDetail(current)
+      return { ...detail, has_room_password: false, peer_transport: true }
     }
-    if (operation === 'game.characters') return read('/characters')
     if (operation === 'game.player_context') {
       return { ok: true, preview: false, delegate: false, user_id: actorId }
     }
+    if (!actorId) {
+      // JoinView needs the public ruleset bootstrap before binding, never the host roster.
+      if (operation === 'game.characters') {
+        const source = await read('/characters')
+        const result: Record<string, unknown> = { players: [], npcs: [] }
+        for (const field of JOIN_CHARACTER_FIELDS) {
+          if (field in source) result[field] = source[field]
+        }
+        return result
+      }
+      throw new Error('player_identity_required')
+    }
+    if (operation === 'game.characters') return read('/characters')
     if (operation === 'roll.requests') return read('/roll-requests')
     if (operation === 'game.log') {
       const page = boundedInteger(payload.page, 1, 10_000, 1)
       const perPage = boundedInteger(payload.per_page, 1, 100, 50)
       return read(`/log?page=${page}&per_page=${perPage}`)
     }
-    if (!actorId) throw new Error('player_identity_required')
     if (operation === 'game.private_log') return read('/private-log')
     if (operation === 'game.table_talk') return read('/table-talk')
     if (operation === 'game.map') return read('/map')

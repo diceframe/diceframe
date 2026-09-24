@@ -7,6 +7,133 @@ import {
 import type { MultiPeerConnectionSession } from '@/peer/session/MultiPeerConnectionSession'
 
 describe('peer host game bridge', () => {
+  const lobbyMultiplayer = {
+    state: 'active_action', round_number: 3, solo_mode: false,
+    player_count: 5, max_players: 6, ready_count: 1, alive_count: 5,
+    active_count: 4, away_count: 1, ai_count: 1, unclaimed_count: 1,
+    can_accept_actions: true, can_advance: true, action_count: 1,
+    pending_action_count: 0, player_access_open: true,
+  }
+  const privatePlayer = { user_id: 'p1-secret', character_name: 'Character-secret' }
+  const privateAction = {
+    ...privatePlayer, text: 'Secret submitted action',
+    check_request: { skill: 'Secret check payload' },
+  }
+  const hostDetail = {
+    game_key: 'web|game|host', player_access_open: true, player_count: 5, max_players: 6,
+    has_room_password: true, world_name: 'World', scene: 'Gate', rule_id: 'freeform',
+    solo_mode: false,
+    multiplayer: {
+      ...lobbyMultiplayer, gm_uid: 'gm-secret',
+      ready_players: [privatePlayer], waiting_players: [privatePlayer],
+      away_players: [privatePlayer], ai_players: [privatePlayer],
+      unclaimed_players: [privatePlayer], submitted_actions: [privateAction],
+      away_control_policy: 'pause', future_private: 'Future-secret',
+    },
+    players: [privatePlayer], npcs: [{ character_name: 'NPC-secret' }],
+    gm_style_override: { note: 'GM-secret-note' }, economy_proposals: ['Economy-secret'],
+    plot_tracker: { note: 'Plot-secret' }, future_private: 'Future-secret',
+  }
+  const privateValues = [
+    'gm-secret', 'p1-secret', 'Character-secret', 'NPC-secret',
+    'Secret submitted action', 'Secret check payload', 'check_request',
+    'submitted_actions', 'ready_players', 'waiting_players', 'away_players',
+    'ai_players', 'unclaimed_players', 'gm_uid', 'GM-secret-note',
+    'Economy-secret', 'Plot-secret', 'Future-secret',
+  ]
+
+  it('L4 returns the bound actor detail fetched with delegated identity', async () => {
+    const current = { game_key: 'web|game|host', player_access_open: true, gm_style_override: { note: 'secret' } }
+    const projected = { game_key: 'web|game|host', gm_style_override: null, scene: 'player scene' }
+    const executor = vi.fn<PeerLocalApiExecutor>(async (path) => (
+      path === '/games/web%7Cgame%7Chost' ? current : projected
+    ))
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined, {}, { peer_1: 'player_1' })
+    const result = await bridge.handle('peer_1', 'game.detail', {})
+    expect(executor.mock.calls.map(([path]) => path)).toEqual([
+      '/games/web%7Cgame%7Chost',
+      '/games/web%7Cgame%7Chost?user=player_1&share=1&delegate=1',
+    ])
+    expect(result).toEqual({ ...projected, has_room_password: false, peer_transport: true })
+  })
+
+  it('L4 returns only lobby fields for an unbound peer', async () => {
+    const executor = vi.fn<PeerLocalApiExecutor>(async () => hostDetail)
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+    const result = await bridge.handle('peer_1', 'game.detail', {})
+    expect(result).toEqual({
+      game_key: 'web|game|host', player_access_open: true, player_count: 5, max_players: 6,
+      has_room_password: false, world_name: 'World', scene: 'Gate', rule_id: 'freeform',
+      solo_mode: false, multiplayer: lobbyMultiplayer, peer_transport: true,
+    })
+    for (const value of privateValues) expect(JSON.stringify(result)).not.toContain(value)
+    expect(executor.mock.calls).toEqual([['/games/web%7Cgame%7Chost', undefined]])
+  })
+
+  it('projects only ruleset bootstrap fields to an unbound joiner, without host identities', async () => {
+    const characters = {
+      players: [privatePlayer], npcs: [{ character_name: 'NPC-secret' }],
+      rule_attrs: [{ key: 'str', name: '力量', min: 1, max: 20 }],
+      rule_attrs_total: 27, rule_classes: ['战士'], rule_special_stats: [],
+      rule_meta: { rule_id: 'dnd2024_srd' },
+      ruleset_runtime: { capabilities: { character_builder: 'professional' } },
+      user_id: 'gm-secret', cards: [{ character_name: 'Card-secret' }],
+      actions: [privateAction],
+    }
+    const executor = vi.fn<PeerLocalApiExecutor>(async (path) => (
+      path === '/games/web%7Cgame%7Chost' ? hostDetail : characters
+    ))
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+    const result = await bridge.handle('peer_1', 'game.characters', {})
+    expect(result).toEqual({
+      players: [], npcs: [],
+      rule_attrs: characters.rule_attrs, rule_attrs_total: characters.rule_attrs_total,
+      rule_classes: characters.rule_classes, rule_special_stats: characters.rule_special_stats,
+      rule_meta: characters.rule_meta, ruleset_runtime: characters.ruleset_runtime,
+    })
+    const serialized = JSON.stringify(result)
+    expect(serialized).not.toContain('user_id')
+    for (const name of ['Character-secret', 'NPC-secret', 'Card-secret']) {
+      expect(serialized).not.toContain(name)
+    }
+    expect(executor.mock.calls).toEqual([
+      ['/games/web%7Cgame%7Chost', undefined],
+      ['/games/web%7Cgame%7Chost/characters?share=1', undefined],
+    ])
+  })
+
+  it.each(['roll.requests', 'game.log'] as const)(
+    'rejects unbound %s without fetching GM-view data', async (operation) => {
+      const executor = vi.fn<PeerLocalApiExecutor>(async (path) => (
+        path === '/games/web%7Cgame%7Chost'
+          ? hostDetail
+          : { requests: [privateAction], log: [privateAction], total: 1 }
+      ))
+      const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+      await expect(bridge.handle('peer_1', operation, {}))
+        .rejects.toThrow(/^player_identity_required$/u)
+      expect(executor.mock.calls).toEqual([['/games/web%7Cgame%7Chost', undefined]])
+    },
+  )
+
+  it.each([
+    ['game.characters', '/characters', { players: [privatePlayer], npcs: [] }],
+    ['roll.requests', '/roll-requests', { requests: [privateAction] }],
+    ['game.log', '/log?page=2&per_page=10', { log: [privateAction], total: 1 }],
+  ] as const)('keeps bound %s delegated and preserves its response', async (operation, suffix, projected) => {
+    const executor = vi.fn<PeerLocalApiExecutor>(async (path) => (
+      path === '/games/web%7Cgame%7Chost' ? hostDetail : projected
+    ))
+    const bridge = new PeerHostGameBridge(
+      'web|game|host', executor, () => undefined, {}, { peer_1: 'player_1' },
+    )
+    expect(await bridge.handle('peer_1', operation, { page: 2, per_page: 10 })).toEqual(projected)
+    expect(executor.mock.calls.map(([path]) => path)).toEqual([
+      '/games/web%7Cgame%7Chost',
+      `/games/web%7Cgame%7Chost${suffix}${suffix.includes('?') ? '&' : '?'}user=player_1&share=1&delegate=1`,
+    ])
+  })
+
   it('resolves a roll for the bound actor and ignores forged target fields', async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = []
     const executor: PeerLocalApiExecutor = async (path, init) => {

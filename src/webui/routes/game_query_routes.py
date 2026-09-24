@@ -9,7 +9,7 @@ from aiohttp import web
 from src.webui.routes._common import (
     _get_api,
 )
-from src.webui.services._common import is_game_gm
+from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
@@ -23,24 +23,8 @@ async def api_detail(request: web.Request) -> web.Response:
     api = _get_api(request)
     game_key = request.match_info["game_key"]
     instance = api.get_game_instance(game_key)
-    viewer_uid = request.get("user_id", "")
-    # Owner sessions may omit the player query id. Keep the shared GM guard
-    # strict about empty identities, while projecting this authenticated
-    # owner's own GM view for the read-only detail endpoint.
-    effective_viewer_uid = viewer_uid or (
-        instance.gm_uid
-        if instance and request.get("owner_authenticated", False)
-        else ""
-    )
-    d = api.game_detail(
-        game_key,
-        effective_viewer_uid,
-        viewer_is_gm=is_game_gm(
-            instance,
-            effective_viewer_uid,
-            bool(request.get("owner_authenticated", False)),
-        ),
-    )
+    viewer = viewer_for(request, instance)
+    d = api.game_detail(game_key, viewer.uid, viewer_is_gm=viewer.is_gm)
     return (
         web.json_response(d)
         if d
@@ -54,20 +38,8 @@ async def api_game_adventure_projection(request: web.Request) -> web.Response:
     api = _get_api(request)
     game_key = request.match_info["game_key"]
     instance = api.get_game_instance(game_key)
-    viewer_uid = request.get("user_id", "")
-    effective_viewer_uid = viewer_uid or (
-        instance.gm_uid
-        if instance and request.get("owner_authenticated", False)
-        else ""
-    )
-    result = api.game_adventure_projection(
-        game_key,
-        viewer_is_gm=is_game_gm(
-            instance,
-            effective_viewer_uid,
-            bool(request.get("owner_authenticated", False)),
-        ),
-    )
+    viewer = viewer_for(request, instance)
+    result = api.game_adventure_projection(game_key, viewer_is_gm=viewer.is_gm)
     return (
         web.json_response(result)
         if result is not None
@@ -133,11 +105,8 @@ async def api_log(request: web.Request) -> web.Response:
     api = _get_api(request)
     game_key = request.match_info["game_key"]
     inst = api.get_game_instance(game_key)
-    include_internal = is_game_gm(
-        inst,
-        request.get("user_id", ""),
-        bool(request.get("owner_authenticated", False)),
-    )
+    viewer = viewer_for(request, inst)
+    include_internal = viewer.is_gm
     if include_internal:
         return web.json_response(api.get_log(game_key, page, per_page, True))
     return web.json_response(api.get_log(game_key, page, per_page))
