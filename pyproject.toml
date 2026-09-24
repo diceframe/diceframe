@@ -99,6 +99,7 @@ files = [
     "src/webui/services/content_pack_maps.py",
     "src/webui/services/game_queries.py",
     "src/webui/services/generation.py",
+    "src/webui/services/lorebooks.py",
     "src/webui/services/maps.py",
     "src/webui/services/plugins.py",
     "src/webui/services/rules.py",
