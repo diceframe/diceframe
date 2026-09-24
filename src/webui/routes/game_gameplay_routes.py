@@ -12,6 +12,7 @@ from src.webui.routes._common import (
     _get_api,
 )
 from src.webui.services._common import is_game_gm
+from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import (
@@ -189,13 +190,7 @@ def _ruleset_gameplay_status(result: dict) -> int:
 
 
 def _ruleset_requester_is_gm(request: web.Request, inst) -> bool:
-    if request.get("player_preview", False):
-        return False
-    return is_game_gm(
-        inst,
-        str(request.get("user_id", "") or ""),
-        bool(request.get("owner_authenticated", False)),
-    )
+    return viewer_for(request, inst).is_gm
 
 
 async def api_ruleset_available_actions(request: web.Request) -> web.Response:
