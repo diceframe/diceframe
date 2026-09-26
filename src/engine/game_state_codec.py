@@ -33,8 +33,6 @@ class GameStateCodec:
             "adventure_binding": instance.adventure_binding,
             "adventure_progress": instance.adventure_progress,
             "play_mode": instance.play_mode,
-            "scene_image": instance.scene_image,
-            "map_background": instance.map_background,
             "world_name": instance.world_name,
             "group_name": instance.group_name,
             "state": instance.state.value,
@@ -96,8 +94,6 @@ class GameStateCodec:
             "last_token_budget_bump": instance.last_token_budget_bump,
             "gm_directives": instance.gm_directives,
             "confirmed_items": instance.confirmed_items,
-            "private_log": instance.private_log,
-            "table_talk": instance.table_talk,
         }
         if instance.ruleset_runtime:
             data["ruleset_runtime"] = instance.ruleset_runtime
@@ -153,8 +149,6 @@ class GameStateCodec:
                 )
             ),
             event_ledger=data.get("event_ledger") or [],
-            scene_image=data.get("scene_image", {}),
-            map_background=data.get("map_background", {}),
             world_name=data.get("world_name", ""),
             group_name=data.get("group_name", ""),
             state=state_type(data["state"]),
@@ -231,12 +225,6 @@ class GameStateCodec:
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
             confirmed_items=data.get("confirmed_items", []),
-            private_log=data.get("private_log", {}),
-            table_talk=[
-                item
-                for item in (data.get("table_talk") or [])
-                if isinstance(item, dict) and item.get("visibility") == "party"
-            ][-50:],
         )
 
         puzzles_data = data.get("puzzles")

@@ -40,7 +40,9 @@ from src.engine.modules import (
     combat_extension_state,
     economy_state,
     lorebook_runtime,
+    media,
     player_control_state,
+    private_channels,
     progression_state,
 )
 from src.engine.narrative_perspective import validate_narrative_perspective
@@ -145,8 +147,6 @@ class GameInstance:
     # bound adventure until creation/migration writes an explicit mode.
     play_mode: str = ""
     event_ledger: list[dict[str, Any]] = field(default_factory=list)
-    scene_image: dict[str, str] = field(default_factory=dict)
-    map_background: dict[str, str] = field(default_factory=dict)
     world_name: str = ""
     group_name: str = ""
     state: GameState = GameState.CREATED
@@ -175,9 +175,6 @@ class GameInstance:
     bot_bind_token: str = ""  # 渠道 Bot 绑定本局的一次性管理凭证
     room_password: str = ""  # 房间密码（空=开放）；玩家凭此进入游戏，替代后台 access_token
     room_token: str = ""  # 玩家凭房间密码换取的会话凭证（random secrets，校验通过后颁发）
-    private_log: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # user_id → 私聊历史
-    # 公开桌边问答与回合日志分离；正常 GM 上下文不会读取此字段。
-    table_talk: list[TableTalkExchange] = field(default_factory=list)
 
     # 场景
     scene: str = ""
@@ -313,6 +310,38 @@ class GameInstance:
     _tag_fail_streak: int = field(default=0, repr=False)
     # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
     confirmed_items: list = field(default_factory=list)
+
+    @property
+    def scene_image(self) -> dict[str, str]:
+        return media.scene_image(self)
+
+    @scene_image.setter
+    def scene_image(self, value: Any) -> None:
+        media.replace_scene_image(self, value)
+
+    @property
+    def map_background(self) -> dict[str, str]:
+        return media.map_background(self)
+
+    @map_background.setter
+    def map_background(self, value: Any) -> None:
+        media.replace_map_background(self, value)
+
+    @property
+    def private_log(self) -> dict[str, list[dict[str, Any]]]:
+        return private_channels.private_log(self)
+
+    @private_log.setter
+    def private_log(self, value: Any) -> None:
+        private_channels.replace_private_log(self, value)
+
+    @property
+    def table_talk(self) -> list[TableTalkExchange]:
+        return private_channels.table_talk(self)
+
+    @table_talk.setter
+    def table_talk(self, value: Any) -> None:
+        private_channels.replace_table_talk(self, value)
 
     def __post_init__(self) -> None:
         if not self.run_id:
