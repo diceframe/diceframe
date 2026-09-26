@@ -96,8 +96,6 @@ class GameStateCodec:
             "last_token_budget_bump": instance.last_token_budget_bump,
             "gm_directives": instance.gm_directives,
             "confirmed_items": instance.confirmed_items,
-            "private_log": instance.private_log,
-            "table_talk": instance.table_talk,
         }
         if instance.ruleset_runtime:
             data["ruleset_runtime"] = instance.ruleset_runtime
@@ -231,12 +229,6 @@ class GameStateCodec:
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
             confirmed_items=data.get("confirmed_items", []),
-            private_log=data.get("private_log", {}),
-            table_talk=[
-                item
-                for item in (data.get("table_talk") or [])
-                if isinstance(item, dict) and item.get("visibility") == "party"
-            ][-50:],
         )
 
         puzzles_data = data.get("puzzles")
