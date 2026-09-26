@@ -14,7 +14,6 @@ from src.engine.contracts import (
     CheckResult,
     PlayerData,
     RoundLogEntry,
-    TableTalkExchange,
     TokenBudgetBump,
 )
 
@@ -118,8 +117,6 @@ class GamePersistedState(TypedDict, total=False):
     adventure_progress: dict[str, Any]
     play_mode: str
     event_ledger: list[OpaqueState]
-    scene_image: dict[str, str]
-    map_background: dict[str, str]
     world_name: str
     group_name: str
     state: str
@@ -135,10 +132,7 @@ class GamePersistedState(TypedDict, total=False):
     initiative_order: list[str]
     initiative_current: int
     scene: str
-    game_time: str
     log: list[RoundLogEntry]
-    summary: OpaqueState
-    key_facts: list[Any]
     world_state: OpaqueState
     total_llm_calls: int
     total_tokens: int
@@ -162,8 +156,6 @@ class GamePersistedState(TypedDict, total=False):
     pending_combat_results: list[OpaqueState]
     modules: dict[str, dict[str, Any]]
     quick_actions: list[str]
-    health_events: list[OpaqueState]
-    health_status: OpaqueState
     last_check: CheckResult | None
     last_checks: list[CheckResult]
     manual_roll_requests: list[dict[str, Any]]
@@ -177,8 +169,5 @@ class GamePersistedState(TypedDict, total=False):
     last_state_update: OpaqueState | None
     last_token_budget_bump: TokenBudgetBump | None
     gm_directives: list[OpaqueState]
-    confirmed_items: list[Any]
-    private_log: dict[str, list[OpaqueState]]
-    table_talk: list[TableTalkExchange]
     puzzles: OpaqueState
     plot_tracker: OpaqueState

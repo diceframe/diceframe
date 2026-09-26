@@ -10,7 +10,7 @@
 > - Branch: `main`
 > - Commit: `962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release: `2.6.1`
-> - Current GameInstance persisted schema: `21`
+> - Current GameInstance persisted schema: `25`
 > - Current Lorebook SQLite schema (`PRAGMA user_version`): `9`
 > - Document verification date: 2026-09-18
 >
@@ -1947,6 +1947,21 @@ test expectation is explicitly replaced by c1 coverage, retaining missing-seat
 priority and GM bypass of membership only. R5-c1 retains instance schema 21 from
 R5b and does not change `game_time`. R5-c2 now commits judgment and opens the next
 round in one state-lock section; see §10.4 for that boundary and the c3–c6 decisions.
+
+---
+
+## Public Log Projection (R6-a2)
+
+`services/logs.get_log(include_internal=False)` filters GM directives and limits
+entries to `PUBLIC_LOG_FIELDS`. Nested `actions` and list-form `player_actions`
+are further limited to `PUBLIC_ACTION_FIELDS`: `user_id` and `text`. Historical
+renderers parse dice display from text and resolve names from the player roster;
+live-action revision and pending-dice status belong to a separate contract.
+Unknown ActionRecord fields remain internal by default. User-to-text mappings in
+`player_actions` retain their existing shape. Swipes contain narration strings;
+check results are separately constructed records, not raw ActionRecords. The GM
+path retains full records with existing narration sanitization. Projection does
+not mutate the source log or persisted state.
 
 ---
 

@@ -10,7 +10,7 @@
 > - 分支：`main`
 > - Commit：`962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release：`2.6.1`
-> - 当前 GameInstance persisted schema：`21`
+> - 当前 GameInstance persisted schema：`25`
 > - 当前 Lorebook SQLite schema（`PRAGMA user_version`）：`9`
 > - 文档核验日期：2026-09-18
 >
@@ -1951,6 +1951,32 @@ R5-c1 **决定：做**。在 R5b `d1d64927` 上，真实 `RoundProcessor.process
 控制权保存后的 `resume_authoritative_combat` 也在状态锁内、绑定处理与自动阶梯之前复核 `check_not_judging`，返回原 resume 契约的 `error_code=ROUND_PROCESSING`、`handled=True`、`resumed=False`；已经成功保存的控制权切换仍成功，拒绝只阻止后续战斗推进。普通 intent 附带的自动阶梯与其主事务共用状态锁。这里不改变 runtime 内部意图机制或叙事处理器自身的 director automation；不合并 `finish_judgment` / `start_round` 的两段锁（c2），不改 `game_time`。R4 membership-only 测试显式更新为 c1 契约，保留非成员优先和 GM 仅绕过成员的覆盖。
 
 R4-a / R4-b b1 / R4-b2 未改变 persisted 形状；R5-c1 沿用 R5b 的实例 schema **21**，无需新增迁移。AST 守卫禁止 action gate 导入 webui / commands / rulesets，并禁止 engine 新增 commands 依赖；唯一既存例外是 `economy.py` 中导入 `commands.state_items.normalized_reward_entries` 的局部调用，待后续经济效果职责收口。
+
+---
+
+# 12F. 参与者视图
+
+R6-a 的只读身份由 `src/engine/participant_view.py` 的 `Viewer` / `resolve_viewer` 统一解析，HTTP 适配位于 `src/webui/viewer.py`。`Viewer.kind` 为 `gm`、`seat` 或 `outsider`；解析顺序是：
+
+1. `player_preview` 为真时，本局成员返回 `seat(user_id)`，非成员返回 `outsider(user_id)`；预览永远不是 GM。
+2. `user_id` 为空且 owner 已登录时返回 `gm(gm_uid)`。
+3. `user_id == gm_uid` 时返回 GM。
+4. owner 已登录时返回 `gm(user_id)`。
+5. `user_id` 在本局玩家中时返回席位；否则返回 outsider。
+
+只有分享白名单内的路由会设置 `player_preview`。P2P 读请求使用 owner 凭据并携带 `user`、`share=1`、`delegate=1`，仍必须投影为玩家视图。Bot 不设置 owner 身份，按本局 GM / 成员判断。写路由沿用原有 `is_game_gm`；本节不扩大分享白名单或写权限。
+
+| 编号 | 原泄露位置 | 内容与受影响者 | 处理 |
+|---|---|---|---|
+| L1 | `api_private_log` | P2P 玩家、owner 预览收到全部玩家私聊 | R6-a1 使用统一观看者 |
+| L2 | `api_log` | 同上，错误启用 `include_internal`，下发 GM 指令 | R6-a1 使用统一观看者 |
+| L3 | `api_detail` | 同上，错误下发 `gm_style_override` | R6-a1 使用统一观看者 |
+| L4 | P2P `bridge.ts` 的 `game.detail` | 对端玩家收到房主 GM 详情 | R6-a1 使用玩家详情投影 |
+| L5（撤回） | `api_combat_action` | 不是泄露：该路由不在分享白名单，仍以 owner 本人执行；P2P 不转发战斗操作 | 战斗功能缺口不在 R6 范围 |
+| L6 | `services/logs.get_log` | 所有玩家收到世界、玩家与战斗快照，包含 GM 事实 | R6-a2 非 GM 日志白名单投影 |
+| L7 | `services/characters.list_characters`（`GET /characters`） | 任何成员收到本局 NPC 原始记录（HP、阵营等级、AI 附加字段）与世界书全部 NPC 条目（含未登场者的名字、关系与完整描述） | R6-a3 非 GM 返回空 `npcs`；服务函数强制显式传入 `viewer_is_gm` |
+
+`get_log(include_internal=False)` 先保留既有 GM 指令过滤，再仅返回公开字段：`round`、`actions`、`player_actions`、`gm_response`、`state_changes`、`check_results`、`swipes`、`current_swipe`、`timestamp`、`story_recaps`、`scene_image`。快照、`pre_world_state`、`pre_adventure_progress`、`tags_summary` 及未知新字段默认不公开；新增公开字段必须显式加入 `PUBLIC_LOG_FIELDS`。`actions` 及列表形式的 `player_actions` 在过滤 GM 指令后，再按 `PUBLIC_ACTION_FIELDS` 仅投影 `user_id`、`text`；历史日志 UI 从文本解析骰子展示，并从玩家列表取得角色名，不需要 live-action 的修订或待掷骰字段。ActionRecord 的内部字段与未知新字段默认不公开；`player_actions` 的用户到文本映射保持原样。`swipes` 由叙事字符串构成，`check_results` 由独立的检定结果构造，不透传 ActionRecord。GM 日志保留原有完整响应与叙事清洗，投影不修改存档或原始日志。R6-a 不新增持久化字段，沿用实例 schema **21**；世界书内容投影另属 R6-b。
 
 ---
 
