@@ -39,9 +39,14 @@ from src.engine.module_state import ensure_module_states
 from src.engine.modules import (
     combat_extension_state,
     economy_state,
+    health,
     lorebook_runtime,
+    media,
+    narrative_notes,
     player_control_state,
+    private_channels,
     progression_state,
+    round_presentation,
 )
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.engine.player_control import (
@@ -145,8 +150,6 @@ class GameInstance:
     # bound adventure until creation/migration writes an explicit mode.
     play_mode: str = ""
     event_ledger: list[dict[str, Any]] = field(default_factory=list)
-    scene_image: dict[str, str] = field(default_factory=dict)
-    map_background: dict[str, str] = field(default_factory=dict)
     world_name: str = ""
     group_name: str = ""
     state: GameState = GameState.CREATED
@@ -175,18 +178,12 @@ class GameInstance:
     bot_bind_token: str = ""  # 渠道 Bot 绑定本局的一次性管理凭证
     room_password: str = ""  # 房间密码（空=开放）；玩家凭此进入游戏，替代后台 access_token
     room_token: str = ""  # 玩家凭房间密码换取的会话凭证（random secrets，校验通过后颁发）
-    private_log: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # user_id → 私聊历史
-    # 公开桌边问答与回合日志分离；正常 GM 上下文不会读取此字段。
-    table_talk: list[TableTalkExchange] = field(default_factory=list)
 
     # 场景
     scene: str = ""
-    game_time: str = ""
 
-    # 日志与摘要
+    # 回合日志
     log: list[RoundLogEntry] = field(default_factory=list)
-    summary: dict = field(default_factory=dict)
-    key_facts: list = field(default_factory=list)
 
     # 权威世界真相（Issue #284）：世界事实 / 逻辑时钟 / 定时事件容器。它不是
     # key_facts 这类叙事摘要，也不属于 ruleset_state；唯一写入口是
@@ -230,12 +227,6 @@ class GameInstance:
     # retries reuse the same roll without leaking it into future rounds.
     death_save_outcomes: dict[str, dict[str, dict]] = field(default_factory=dict)
 
-    # GM 私密指令：只注入 GM 上下文，不作为玩家/系统行动公开记录
-    gm_directives: list[dict] = field(default_factory=list)
-
-    # 状态变化 recap：最近一回合的 state_update（前端渲染用）
-    last_state_update: dict | None = None
-
     # 本轮裁判标注的越权声明（仅多人局且开关启用时注入 GM 上下文）
     last_overreach: list = field(default_factory=list)
 
@@ -249,9 +240,6 @@ class GameInstance:
     # {"event_id", "label", "due_at", "status": "applied"|"failed", "error"?}，
     # 供 GM 可信块叙述与前端提示使用。
     last_world_events: list = field(default_factory=list)
-
-    # 最近一回合因输出截断触发的 token 预算升档（给 GM 的低打扰提示）
-    last_token_budget_bump: TokenBudgetBump | None = None
 
     # 单人模式
     solo_mode: bool = False  # True=单人模式, 行动后自动推进
@@ -274,16 +262,6 @@ class GameInstance:
 
     # 入口模式
     entry_point: str = "web"  # "web" / "plugin"
-
-    # 战斗结算缓存（供 WebUI 展示）
-    pending_combat_results: list[dict] = field(default_factory=list)
-
-    # WebUI 快捷行动建议
-    quick_actions: list[str] = field(default_factory=list)
-
-    # 系统健康 / 降级事件
-    health_events: list[dict] = field(default_factory=list)
-    health_status: dict = field(default_factory=dict)
 
     # 内部：并发锁
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
@@ -311,8 +289,132 @@ class GameInstance:
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
-    # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
-    confirmed_items: list = field(default_factory=list)
+
+    @property
+    def gm_directives(self) -> list[dict]:
+        # GM 私密指令：只注入 GM 上下文，不作为玩家/系统行动公开记录。
+        return round_presentation.gm_directives(self)
+
+    @gm_directives.setter
+    def gm_directives(self, value: Any) -> None:
+        round_presentation.replace_gm_directives(self, value)
+
+    @property
+    def quick_actions(self) -> list[str]:
+        # WebUI 快捷行动建议。
+        return round_presentation.quick_actions(self)
+
+    @quick_actions.setter
+    def quick_actions(self, value: Any) -> None:
+        round_presentation.replace_quick_actions(self, value)
+
+    @property
+    def last_state_update(self) -> dict | None:
+        # 最近一回合的 state_update（前端渲染用）。
+        return round_presentation.last_state_update(self)
+
+    @last_state_update.setter
+    def last_state_update(self, value: Any) -> None:
+        round_presentation.replace_last_state_update(self, value)
+
+    @property
+    def last_token_budget_bump(self) -> TokenBudgetBump | None:
+        # 最近一回合因输出截断触发的 token 预算升档（给 GM 的低打扰提示）。
+        return round_presentation.last_token_budget_bump(self)
+
+    @last_token_budget_bump.setter
+    def last_token_budget_bump(self, value: Any) -> None:
+        round_presentation.replace_last_token_budget_bump(self, value)
+
+    @property
+    def pending_combat_results(self) -> list[dict]:
+        # 战斗结算缓存（供 WebUI 展示）。
+        return round_presentation.pending_combat_results(self)
+
+    @pending_combat_results.setter
+    def pending_combat_results(self, value: Any) -> None:
+        round_presentation.replace_pending_combat_results(self, value)
+
+    @property
+    def summary(self) -> dict:
+        return narrative_notes.summary(self)
+
+    @summary.setter
+    def summary(self, value: Any) -> None:
+        narrative_notes.replace_summary(self, value)
+
+    @property
+    def key_facts(self) -> list:
+        return narrative_notes.key_facts(self)
+
+    @key_facts.setter
+    def key_facts(self, value: Any) -> None:
+        narrative_notes.replace_key_facts(self, value)
+
+    @property
+    def confirmed_items(self) -> list:
+        # CONFIRMED 标签累积，注入 LLM 上下文防重复讨论。
+        return narrative_notes.confirmed_items(self)
+
+    @confirmed_items.setter
+    def confirmed_items(self, value: Any) -> None:
+        narrative_notes.replace_confirmed_items(self, value)
+
+    @property
+    def game_time(self) -> str:
+        return narrative_notes.game_time(self)
+
+    @game_time.setter
+    def game_time(self, value: Any) -> None:
+        narrative_notes.replace_game_time(self, value)
+
+    @property
+    def health_events(self) -> list[dict]:
+        return health.health_events(self)
+
+    @health_events.setter
+    def health_events(self, value: Any) -> None:
+        health.replace_health_events(self, value)
+
+    @property
+    def health_status(self) -> dict:
+        return health.health_status(self)
+
+    @health_status.setter
+    def health_status(self, value: Any) -> None:
+        health.replace_health_status(self, value)
+
+    @property
+    def scene_image(self) -> dict[str, str]:
+        return media.scene_image(self)
+
+    @scene_image.setter
+    def scene_image(self, value: Any) -> None:
+        media.replace_scene_image(self, value)
+
+    @property
+    def map_background(self) -> dict[str, str]:
+        return media.map_background(self)
+
+    @map_background.setter
+    def map_background(self, value: Any) -> None:
+        media.replace_map_background(self, value)
+
+    @property
+    def private_log(self) -> dict[str, list[dict[str, Any]]]:
+        return private_channels.private_log(self)
+
+    @private_log.setter
+    def private_log(self, value: Any) -> None:
+        private_channels.replace_private_log(self, value)
+
+    @property
+    def table_talk(self) -> list[TableTalkExchange]:
+        return private_channels.table_talk(self)
+
+    @table_talk.setter
+    def table_talk(self, value: Any) -> None:
+        private_channels.replace_table_talk(self, value)
 
     def __post_init__(self) -> None:
         if not self.run_id:
