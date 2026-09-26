@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 90
+MAX_TOP_LEVEL_FIELDS = 64
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",
@@ -69,6 +69,126 @@ def test_combat_guard_rejects_direct_writes_including_game_instance(source) -> N
     assert _combat_property_writes(SRC / "webui" / "routes" / "outsider.py", tree)
     for owner in COMBAT_WRITERS:
         assert not _combat_property_writes(owner, tree)
+
+
+def test_only_private_channel_owners_assign_compatibility_properties() -> None:
+    # Aggregate methods own appends/removal; lifecycle owns reset clears.
+    owners = {
+        MODULES / "private_channels.py",
+        SRC / "engine" / "game_instance.py",
+        SRC / "engine" / "instance_lifecycle.py",
+        SRC / "migrations" / "instance.py",
+    }
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path in owners:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Attribute, ast.Subscript)) or not isinstance(node.ctx, (ast.Store, ast.Del)):
+                continue
+            target = node
+            while isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in {"private_log", "table_talk"}:
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: private channel write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+def test_only_media_owners_assign_compatibility_properties() -> None:
+    # Aggregate setters own updates; lifecycle retains its existing reset policy.
+    owners = {
+        MODULES / "media.py",
+        SRC / "engine" / "game_instance.py",
+        SRC / "engine" / "instance_lifecycle.py",
+        SRC / "migrations" / "instance.py",
+    }
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path in owners:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Attribute, ast.Subscript)) or not isinstance(node.ctx, (ast.Store, ast.Del)):
+                continue
+            target = node
+            while isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in {"scene_image", "map_background"}:
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: media write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+def _world_report_property_writes(path: Path, tree: ast.AST) -> list[int]:
+    if path == MODULES / "world_reports.py":
+        return []
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr in {"last_overreach", "last_world_legality", "last_world_events"}
+    ]
+
+
+def test_only_world_report_owner_assigns_compatibility_properties() -> None:
+    # GameInstance.reset_round_checks owns existing in-place clears. This guard
+    # covers direct attribute assignment/deletion, as the combat guard does.
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _world_report_property_writes(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: world report property write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "instance.last_overreach = []",
+    "self.last_world_legality: list = []",
+    "instance.last_world_events += []",
+    "instance.last_overreach, (x, self.last_world_events) = values",
+    "del instance.last_world_legality",
+])
+def test_world_report_guard_rejects_direct_writes(source) -> None:
+    tree = ast.parse(source)
+    for path in ("engine/game_instance.py", "commands/round_processor.py", "webui/routes/outsider.py"):
+        assert _world_report_property_writes(SRC / path, tree)
+    assert not _world_report_property_writes(MODULES / "world_reports.py", tree)
+
+
+def _table_settings_property_writes(path: Path, tree: ast.AST) -> list[int]:
+    if path in {MODULES / "table_settings.py", SRC / "engine" / "game_instance.py", SRC / "engine" / "instance_lifecycle.py"}:
+        return []
+    fields = {
+        "difficulty", "narrative_perspective", "gm_style_override", "solo_mode",
+        "seed_code", "entry_point", "luck_timeout_seconds", "economy_reward_policy",
+    }
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr in fields
+    ]
+
+
+def test_only_table_settings_owners_assign_compatibility_properties() -> None:
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _table_settings_property_writes(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: table settings write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "candidate.gm_style_override = {}",
+    "instance.solo_mode: bool = True",
+    "instance.seed_code += 'x'",
+    "del instance.economy_reward_policy",
+])
+def test_table_settings_guard_rejects_external_writes(source) -> None:
+    tree = ast.parse(source)
+    assert _table_settings_property_writes(SRC / "commands" / "game_lifecycle.py", tree)
+    assert not _table_settings_property_writes(MODULES / "table_settings.py", tree)
 
 
 def _runtime_nodes(node: ast.AST):
@@ -277,6 +397,41 @@ def test_progression_does_not_import_transport_commands_or_rulesets() -> None:
         for line, name in _imports(path, tree)
         if any(_under(name, prefix) for prefix in ("src.webui", "src.commands", "src.rulesets"))
     ]
+    assert not violations, "\n".join(violations)
+
+
+def test_participant_view_does_not_import_transport_or_runtime() -> None:
+    path = SRC / "engine" / "participant_view.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    forbidden = ("src.webui", "src.commands", "src.rulesets", "src.engine.game_instance")
+    violations = [
+        f"{path.relative_to(ROOT)}:{line}: forbidden import {name}"
+        for line, name in _imports(path, tree)
+        if any(_under(name, prefix) for prefix in forbidden)
+    ]
+    assert not violations, "\n".join(violations)
+
+
+def test_read_routes_use_participant_viewer_instead_of_legacy_gm_check() -> None:
+    protected = {
+        "api_detail", "api_game_adventure_projection", "api_log",
+        "api_private_log", "api_table_talk", "_ruleset_requester_is_gm",
+    }
+    found = set()
+    violations = []
+    for path in sorted((SRC / "webui" / "routes").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name not in protected:
+                continue
+            found.add(node.name)
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                name = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+                if name == "is_game_gm":
+                    violations.append(f"{path.relative_to(ROOT)}:{call.lineno}: legacy read identity")
+    assert found == protected
     assert not violations, "\n".join(violations)
 
 

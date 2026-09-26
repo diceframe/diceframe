@@ -11,6 +11,7 @@ from src.webui.routes._common import (
     _get_api,
 )
 from src.webui.services._common import is_game_gm
+from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 
@@ -283,13 +284,11 @@ async def api_private_log(request: web.Request) -> web.Response:
     inst = api.get_game_instance(gk)
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
-    session_uid = request.get("user_id", "")
-    if session_uid and is_game_gm(
-        inst, session_uid, bool(request.get("owner_authenticated", False))
-    ):
+    viewer = viewer_for(request, inst)
+    if viewer.is_gm:
         result = _get_api(request).private_log(gk)
-    elif session_uid in inst.players:
-        result = _get_api(request).private_log_for_user(gk, session_uid)
+    elif viewer.is_seat:
+        result = _get_api(request).private_log_for_user(gk, viewer.uid)
     else:
         return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
     return web.json_response(result, status=200 if result.get("ok") else 404)
@@ -302,9 +301,8 @@ async def api_table_talk(request: web.Request) -> web.Response:
     inst = api.get_game_instance(gk)
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
-    session_uid = str(request.get("user_id", "") or "")
-    owner = bool(request.get("owner_authenticated", False))
-    if not is_game_gm(inst, session_uid, owner) and session_uid not in inst.players:
+    viewer = viewer_for(request, inst)
+    if not viewer.is_member:
         return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
     return web.json_response(api.table_talk(gk))
 
