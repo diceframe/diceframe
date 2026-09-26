@@ -26,6 +26,8 @@ check_untyped_defs = true
 files = [
     "scripts/architecture_fitness.py",
     "src/engine/action_gate.py",
+    "src/engine/participant_view.py",
+    "src/webui/viewer.py",
     "src/engine/contracts.py",
     "src/engine/currency/codec.py",
     "src/engine/currency/migration.py",
@@ -88,6 +90,7 @@ files = [
     "src/webui/services/content_pack_maps.py",
     "src/webui/services/game_queries.py",
     "src/webui/services/generation.py",
+    "src/webui/services/lorebooks.py",
     "src/webui/services/maps.py",
     "src/webui/services/plugins.py",
     "src/webui/services/rules.py",
