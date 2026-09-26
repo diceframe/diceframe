@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from src.engine.language import normalize_language
+from src.engine.modules.media import replace_scene_image
 from src.imagegen import (
     ImageGenerationError,
     ImageGenerationRequest,
@@ -428,7 +429,7 @@ class GeneratedImageService:
         except Exception:
             if old_entry is None: entry.pop("scene_image", None)
             else: entry["scene_image"] = old_entry
-            current.scene_image = old_top
+            replace_scene_image(current, old_top)
             return {"ok": False, "error": "图片生成成功，但存档保存失败，未写入图片引用"}
         return {"ok": True, **result.public_dict(), "reference": reference, "requested_round": requested_round, "target_round": target_round, "prompt_budget": context.get("prompt_budget", {}), **({"reference_character_ids": context.get("reference_character_ids", []), "reference_count": int(context.get("reference_count") or 0)} if refs else {}), **({"layout": storyboard_layout(len(normalized_panels)), "panels": normalized_panels, "compressed_count": compressed_count} if normalized_panels else {})}
 

@@ -2067,8 +2067,10 @@ class WebAPI:
 
     # ---- 角色管理 ----
 
-    def list_characters(self, game_key: str) -> dict[str, Any]:
-        return characters.list_characters(self._character_dependencies, game_key)
+    def list_characters(self, game_key: str, *, viewer_is_gm: bool) -> dict[str, Any]:
+        return characters.list_characters(
+            self._character_dependencies, game_key, viewer_is_gm=viewer_is_gm,
+        )
 
     def character_schema(self, rule_id: str, language: str = "") -> dict[str, Any]:
         return characters.character_schema(

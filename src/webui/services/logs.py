@@ -10,6 +10,26 @@ from src.llm.parser import sanitize_narration
 
 GameKey = tuple[str, ...]
 
+PUBLIC_LOG_FIELDS = frozenset({
+    "round", "actions", "player_actions", "gm_response", "state_changes",
+    "check_results", "swipes", "current_swipe", "timestamp",
+    "story_recaps", "scene_image",
+})
+
+# Historical action renderers use the actor identity and display text only.
+# Live-action revision/dice status and internal adjudication are separate contracts.
+PUBLIC_ACTION_FIELDS = frozenset({"user_id", "text"})
+
+
+def _public_action(action: Any) -> Any:
+    if not isinstance(action, dict):
+        return action
+    return {
+        key: copy.deepcopy(value)
+        for key, value in action.items()
+        if key in PUBLIC_ACTION_FIELDS
+    }
+
 
 class LogRegistry(Protocol):
     def get(self, game_key: GameKey) -> Any | None: ...
@@ -46,17 +66,22 @@ def get_log(
             ]
     if not include_internal:
         for entry in page_items:
-            actions = entry.get("actions")
-            if not isinstance(actions, list):
-                continue
-            entry["actions"] = [
-                action for action in actions
-                if not (
-                    isinstance(action, dict)
-                    and action.get("user_id") == "system"
-                    and str(action.get("text") or "").lstrip().startswith(("【GM指令】", "[GM Directive]"))
-                )
-            ]
+            for field in ("actions", "player_actions"):
+                actions = entry.get(field)
+                if not isinstance(actions, list):
+                    continue
+                entry[field] = [
+                    _public_action(action) for action in actions
+                    if not (
+                        isinstance(action, dict)
+                        and action.get("user_id") == "system"
+                        and str(action.get("text") or "").lstrip().startswith(("【GM指令】", "[GM Directive]"))
+                    )
+                ]
+        page_items = [
+            {key: value for key, value in entry.items() if key in PUBLIC_LOG_FIELDS}
+            for entry in page_items
+        ]
     return {
         "log": page_items,
         "total": total,
