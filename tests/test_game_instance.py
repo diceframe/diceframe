@@ -103,7 +103,8 @@ def test_narrative_perspective_round_trips_and_old_saves_default_to_auto() -> No
 
     restored = GameInstance.from_dict(instance.to_dict())
     legacy_data = instance.to_dict()
-    legacy_data.pop("narrative_perspective")
+    settings = (legacy_data.get("modules") or {}).get("table_settings")
+    (settings if isinstance(settings, dict) and "narrative_perspective" in settings else legacy_data).pop("narrative_perspective")
 
     assert restored.narrative_perspective == "third_person"
     assert GameInstance.from_dict(legacy_data).narrative_perspective == "auto"
@@ -366,7 +367,8 @@ class TestGameInstance:
         assert action["target_text"] == "哥布林"
 
     async def test_multiplayer_action_revision_replaces_previous_action(self):
-        inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=False)
+        inst = GameInstance(game_key=("qq", "123", "bot1"))
+        inst.solo_mode = False
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "先观察门口\n(系统掷骰: d20=17)")
         await inst.add_action("user1", "改为检查窗户\n(系统掷骰: d20=2)")
@@ -376,7 +378,8 @@ class TestGameInstance:
         assert inst.action_queue[0]["text"] == "改为检查窗户\n(系统掷骰: d20=17)"
 
     async def test_pending_dice_blocks_advance_until_roll_is_applied(self):
-        inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=False)
+        inst = GameInstance(game_key=("qq", "123", "bot1"))
+        inst.solo_mode = False
         inst.players["user1"] = {"character_name": "艾琳", "character_sheet": {"deceased": False}}
         inst.state = GameState.ACTIVE_ACTION
 
@@ -397,7 +400,8 @@ class TestGameInstance:
 
     async def test_solo_action_replaces_previous(self):
         # 切换行动应替换旧行动，而不是追加堆积（避免触发 3 条上限、旧检定残留）
-        inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=True)
+        inst = GameInstance(game_key=("qq", "123", "bot1"))
+        inst.solo_mode = True
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "第一步")
         await inst.add_action("user1", "第二步")
@@ -406,7 +410,8 @@ class TestGameInstance:
 
     async def test_solo_action_replaces_old_pending_dice(self):
         # 回归：solo 反复切换待掷骰行动，应只保留最新一条，且旧检定作废
-        inst = GameInstance(game_key=("qq", "123", "bot1"), solo_mode=True)
+        inst = GameInstance(game_key=("qq", "123", "bot1"))
+        inst.solo_mode = True
         inst.state = GameState.ACTIVE_ACTION
         inst.players["user1"] = {"character_name": "冒险者"}
         for i in range(5):

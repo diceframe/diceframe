@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
 from uuid import uuid4
 
+from src.engine.modules.private_channels import remove_table_talk_exchange
+
 logger = logging.getLogger("trpg")
 GameKey = tuple[str, ...]
 
@@ -138,10 +140,7 @@ async def ask(
                 try:
                     await dependencies.registry.save(instance)
                 except Exception:
-                    instance.table_talk[:] = [
-                        item for item in instance.table_talk
-                        if item.get("id") != exchange["id"]
-                    ]
+                    remove_table_talk_exchange(instance, exchange["id"])
                     raise
         except Exception:
             logger.exception("公开桌边问答保存失败: game=%s actor=%s", game_key, actor_uid)

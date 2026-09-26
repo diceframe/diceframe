@@ -41,7 +41,10 @@ async def test_bind_token_is_persisted_but_not_exposed_in_multiplayer_status():
     assert len(created["bind_token"]) >= 18
     assert api._reg.saved == 1
     assert "bot_bind_token" not in inst.multiplayer_status()
-    assert inst.to_dict()["bot_bind_token"] == created["bind_token"]
+    persisted = inst.to_dict()
+    room = (persisted.get("modules") or {}).get("room_access")
+    stored = room["bot_bind_token"] if isinstance(room, dict) and "bot_bind_token" in room else persisted["bot_bind_token"]
+    assert stored == created["bind_token"]
 
 
 @pytest.mark.asyncio
