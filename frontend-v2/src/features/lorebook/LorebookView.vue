@@ -7,8 +7,9 @@ import { activePeerGameClient } from '@/peer/game/bridge'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { SUPPORTED_LOCALES } from '@/i18n'
 import type { MessageKey } from '@/i18n'
-import { contentLanguageOf, filterByContentLanguage } from '@/utils/contentLanguage'
+import { contentLanguageOf, filterByContentLanguage, localeLabel } from '@/utils/contentLanguage'
 import Modal from '@/components/ui/Modal.vue'
 import LorePerspectiveInspector from './LorePerspectiveInspector.vue'
 import LoreVisibilityBadge from './LoreVisibilityBadge.vue'
@@ -808,8 +809,7 @@ async function removeBinding(bindingId: string) {
       <label class="lore-language-filter">
         <span>{{ t('contentLanguage') }}</span>
         <select v-model="worldLanguage">
-          <option value="zh-CN">{{ t('chinese') }}</option>
-          <option value="en">{{ t('english') }}</option>
+          <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeLabel(code) }}</option>
         </select>
       </label>
       <select v-model="currentWorldId">
@@ -825,8 +825,7 @@ async function removeBinding(bindingId: string) {
       <label>{{ t('worldName') }}<input v-model="newWorld.name" :placeholder="t('nameNewWorld')"></label>
       <label>{{ t('contentLanguage') }}
         <select v-model="newWorld.language">
-          <option value="zh-CN">{{ t('chinese') }}</option>
-          <option value="en">{{ t('english') }}</option>
+          <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeLabel(code) }}</option>
         </select>
       </label>
       <label>{{ t('description') }}<textarea rows="2" v-model="newWorld.description"></textarea></label>
@@ -843,7 +842,7 @@ async function removeBinding(bindingId: string) {
     </div>
 
     <p class="memory-meta" v-if="currentWorldId">
-      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ worldLanguage === 'en' ? t('english') : t('chinese') }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
+      {{ worldNameOf(currentWorld) || currentWorldId }} · {{ localeLabel(worldLanguage) }} · {{ t('lorebookEntryCount', { count: entries.length }) }}
     </p>
 
     <section v-if="entries.length" class="lore-entry-toolbar" :aria-label="t('loreFilterLabel')">

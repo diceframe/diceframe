@@ -22,6 +22,7 @@ import { ApiError, api, apiBlob, errorMessage } from '@/api/client'
 import { speechApi } from '@/api/speech'
 import { pluginApi } from '@/api/plugins'
 import { securityApi, type SecurityTransportStatus } from '@/api/security'
+import { speechLocaleTag } from '@/i18n'
 import type { MessageKey } from '@/i18n'
 import type { SecretKey } from '@/stores/useSettingsStore'
 import type { AppConfig, HubPreferences, LoginAuditEntry, LoginAuditResponse, TestResult, TtsVoiceCatalog } from '@/api/types'
@@ -376,7 +377,7 @@ async function testTts() {
     const blob = await speechApi.test({
       text: t('ttsTestText'),
       voice: String(store.config.tts_gm_voice || store.config.tts_default_voice || ''),
-      language: locale.value === 'ja' ? 'ja-JP' : locale.value === 'en' ? 'en-US' : 'zh-CN',
+      language: speechLocaleTag(locale.value),
       speed: ttsRateValue.value,
     })
     const url = URL.createObjectURL(blob)

@@ -57,7 +57,9 @@ _is_non_combat_declaration = is_non_combat_declaration
 
 
 def _prompt_text(language: str) -> str:
-    suffix = localized_text(language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de"})
+    suffix = localized_text(
+        language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de", "ru": "ru"}
+    )
     path = Path(__file__).resolve().parents[2] / "prompts" / f"check_planner_{suffix}.md"
     return path.read_text(encoding="utf-8")
 

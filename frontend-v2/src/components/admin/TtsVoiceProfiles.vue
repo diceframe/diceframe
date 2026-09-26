@@ -5,6 +5,7 @@ import { speechApi } from '@/api/speech'
 import type { TtsPersonalVoiceProfile, TtsPersonalVoiceProfileInput } from '@/api/types'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
+import { speechLocaleTag } from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import { errorMessage } from '@/api/client'
 
@@ -140,7 +141,7 @@ async function testProfile(profile: TtsPersonalVoiceProfile) {
     const blob = await speechApi.test({
       text: t('ttsTestText'),
       voice: profile.id,
-      language: locale.value === 'ja' ? 'ja-JP' : locale.value === 'en' ? 'en-US' : 'zh-CN',
+      language: speechLocaleTag(locale.value),
       speed: 1,
     })
     const url = URL.createObjectURL(blob)

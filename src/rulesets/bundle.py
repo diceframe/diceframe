@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from src.engine.language import content_locale_candidates
 
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -254,15 +255,15 @@ class RulesetBundleLoader:
 
     @staticmethod
     def _select_locale(manifest: RulesetBundleManifest, requested: str) -> str:
-        requested = str(requested or "").replace("_", "-")
-        if not requested:
+        if not str(requested or "").strip():
             return manifest.default_locale
-        if requested in manifest.supported_locales:
-            return requested
-        language = requested.split("-", 1)[0].lower()
-        for candidate in manifest.supported_locales:
-            if candidate.split("-", 1)[0].lower() == language:
+        for candidate in content_locale_candidates(requested):
+            if candidate in manifest.supported_locales:
                 return candidate
+            language = candidate.split("-", 1)[0].lower()
+            for supported in manifest.supported_locales:
+                if supported.split("-", 1)[0].lower() == language:
+                    return supported
         return manifest.default_locale
 
     @staticmethod

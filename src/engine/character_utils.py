@@ -9,6 +9,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from src.engine.language import localized_text
 from src.rules.rule_system import RuleSystem
 from src.rules.loader import RuleBundleLoader
 from src.compat.characters import (
@@ -699,10 +700,32 @@ def make_default_character(
     lo = 6
     hi = 16
     hp = 35
-    default_class_name = "冒险者"
-    default_equipment: list[dict] = [{"name": "铁剑", "type": "weapon", "damage": 6, "slot": "main_hand", "quality": "common"}]
-    default_inventory: list[dict] = [{"name": "医疗包", "qty": 2, "effect": "回复20HP"}]
-    default_skills = ["基础攻击"]
+    # These stand in only when the rule supplies no classes or starter items.
+    # They used to be hardcoded Chinese, so every non-Chinese game started with
+    # a character sheet that mixed Chinese into the GM's context.
+    default_class_name = localized_text(language, {
+        "zh-CN": "冒险者", "en": "Adventurer", "ja": "冒険者",
+        "de": "Abenteurer", "ru": "Искатель приключений",
+    })
+    default_weapon_name = localized_text(language, {
+        "zh-CN": "铁剑", "en": "Iron Sword", "ja": "鉄の剣",
+        "de": "Eisenschwert", "ru": "Железный меч",
+    })
+    default_medkit_name = localized_text(language, {
+        "zh-CN": "医疗包", "en": "Medkit", "ja": "救急キット",
+        "de": "Verbandskasten", "ru": "Аптечка",
+    })
+    default_medkit_effect = localized_text(language, {
+        "zh-CN": "回复20HP", "en": "Restores 20 HP", "ja": "HPを20回復",
+        "de": "Stellt 20 HP wieder her", "ru": "Восстанавливает 20 HP",
+    })
+    default_skill_name = localized_text(language, {
+        "zh-CN": "基础攻击", "en": "Basic Attack", "ja": "基本攻撃",
+        "de": "Standardangriff", "ru": "Обычная атака",
+    })
+    default_equipment: list[dict] = [{"name": default_weapon_name, "type": "weapon", "damage": 6, "slot": "main_hand", "quality": "common"}]
+    default_inventory: list[dict] = [{"name": default_medkit_name, "qty": 2, "effect": default_medkit_effect}]
+    default_skills = [default_skill_name]
     gold = 30
 
     rules_dir = (
@@ -729,7 +752,7 @@ def make_default_character(
             if rule.classes:
                 first_class = rule.classes[0]
                 default_class_name = first_class["name"]
-                default_skills_raw = rule.get_skill_pool(default_class_name) or ["基础攻击"]
+                default_skills_raw = rule.get_skill_pool(default_class_name) or [default_skill_name]
                 default_skills = [
                     {"name": sn, "value": skill_base_values.get(sn, 20)}
                     for sn in default_skills_raw
@@ -753,8 +776,18 @@ def make_default_character(
     if rule_id == "freeform_coc":
         gold = 0
 
+    default_race = localized_text(language, {
+        "zh-CN": "人类", "en": "Human", "ja": "人間", "de": "Mensch", "ru": "Человек",
+    })
+    hp_label = localized_text(language, {
+        "zh-CN": "生命", "en": "HP", "ja": "生命", "de": "Leben", "ru": "Здоровье",
+    })
+
     cs = {
-        "race": "人类", "class": default_class_name, "level": 1, "xp": 0,
+        "race": default_race, "class": default_class_name, "level": 1, "xp": 0,
+        # Written explicitly so set_hp()'s legacy Chinese setdefault never fires
+        # for a freshly created sheet.
+        "resources": {"hp": {"label": hp_label, "min": 0, "current": hp, "max": hp}},
         "attributes": attrs,
         "hp": hp, "max_hp": hp,
         "equipment": default_equipment,

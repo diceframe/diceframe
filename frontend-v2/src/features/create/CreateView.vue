@@ -5,6 +5,7 @@ import { api, errorMessage } from '@/api/client'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, CharacterCardsResponse, CharacterSheet, GameMutationResponse, GeneratedRuleResponse, GeneratedWorldResponse, GmStyle, RuleDetailResponse, RuleSummary, RuleTemplate, RulesResponse, SceneImageRef, WorldListResponse, WorldSummary, WorldTemplateSummary, WorldTemplatesResponse } from '@/api/types'
 import { useToast } from '@/composables/useToast'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { SUPPORTED_LOCALES, localeChain, normalizeLocale } from '@/i18n'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import PortraitImage from '@/components/PortraitImage.vue'
@@ -14,7 +15,7 @@ import RulesetExperienceHost from '@/features/rulesets/RulesetExperienceHost.vue
 import { importTavernCard } from '@/utils/characterImport'
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { useSettingsStore } from '@/stores/useSettingsStore'
-import { filterByContentLanguage } from '@/utils/contentLanguage'
+import { filterByContentLanguage, localeLabel } from '@/utils/contentLanguage'
 import { recommendedRuleSummaries } from '@/utils/recommendedRules'
 import {
   characterCardHasCompatibleProfessionalBlueprint,
@@ -173,18 +174,21 @@ function worldIdOf(w: WorldTemplateSummary | WorldSummary): string { return Stri
 function worldNameOf(w: WorldTemplateSummary | WorldSummary): string { return String(w.world_name || w.name || w.id || '') }
 function worldLanguageLabel(w: WorldTemplateSummary | WorldSummary): string {
   const language = String((w as WorldTemplateSummary).active_locale || (w as WorldSummary).language || '').toLowerCase()
-  if (language.startsWith('ja')) return '日本語'
-  if (language.startsWith('de')) return t('german')
-  if (language.startsWith('en')) return t('english')
-  return t('chinese')
+  return localeLabel(normalizeLocale(language))
 }
 function worldOptionLabel(w: WorldTemplateSummary | WorldSummary): string { return `${worldNameOf(w)} · ${worldLanguageLabel(w)}` }
 function ruleNameOf(r: RuleSummary): string { return String(r.rule_name || r.rule_id) }
 function ruleDescriptionOf(r: RuleSummary): string { return String(r.description || '') }
 function cloneCharacter<T extends CharacterSheet>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 function gameDefault(zh: string, en: string, de?: string): string {
-  if (gameLanguage.value === 'de') return de ?? en
-  return gameLanguage.value === 'en' ? en : zh
+  // Same fallback order as the backend: requested locale, then English, then
+  // Chinese. Previously every locale except de/en fell straight to Chinese.
+  const byLocale: Partial<Record<Locale, string>> = { 'zh-CN': zh, en, de }
+  for (const candidate of localeChain(gameLanguage.value)) {
+    const value = byLocale[candidate]
+    if (value) return value
+  }
+  return en
 }
 function stepTitle(value: number): string { return t(stepTitleKeys[value - 1] || 'stepConfirm') }
 function ensureCharacter(value: CharacterSheet): CreateCharacter {
@@ -639,7 +643,7 @@ async function create() {
 
         <section v-if="step === 1" class="create-step-card create-content-stage">
           <div class="create-field-grid create-field-grid-compact">
-            <label><span>{{ t('gameLanguage') }}</span><select v-model="gameLanguage"><option value="zh-CN">{{ t('chinese') }}</option><option value="en">{{ t('english') }}</option><option value="de">{{ t('german') }}</option></select><small>{{ t('gameLanguageHint') }}</small></label>
+            <label><span>{{ t('gameLanguage') }}</span><select v-model="gameLanguage"><option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeLabel(code) }}</option></select><small>{{ t('gameLanguageHint') }}</small></label>
             <label><span>{{ t('seedCode') }}</span><input v-model="seed" :placeholder="t('seedPlaceholder')"><small>{{ t('restoreBySeed') }}</small></label>
           </div>
           <template v-if="!seed">

@@ -74,12 +74,15 @@ class PromptComposer:
         global _GM_PROMPT_CACHE
         if _GM_PROMPT_CACHE is None:
             _GM_PROMPT_CACHE = {}
-        cache_key = localized_text(language, {"en": "en", "zh-CN": "zh-CN", "ja": "ja", "de": "de"})
+        cache_key = localized_text(
+            language, {"en": "en", "zh-CN": "zh-CN", "ja": "ja", "de": "de", "ru": "ru"}
+        )
         if cache_key not in _GM_PROMPT_CACHE:
             filename = {
                 "en": "gm_system_en.md",
                 "ja": "gm_system_ja.md",
                 "de": "gm_system_de.md",
+                "ru": "gm_system_ru.md",
             }.get(cache_key, "gm_system_zh.md")
             path = self.prompts_dir / filename
             if path.exists():
@@ -106,7 +109,13 @@ class PromptComposer:
         if rule_appendix:
             heading = localized_text(
                 cache_key,
-                {"en": "## Current Rules", "zh-CN": "## 当前规则", "ja": "## 現在のルール", "de": "## Aktuelle Regeln"},
+                {
+                    "en": "## Current Rules",
+                    "zh-CN": "## 当前规则",
+                    "ja": "## 現在のルール",
+                    "de": "## Aktuelle Regeln",
+                    "ru": "## Текущие правила",
+                },
             )
             prompt += f"\n\n{heading}\n{rule_appendix}"
         return prompt

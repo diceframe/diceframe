@@ -11,6 +11,7 @@ import { useGame } from '@/composables/useGame'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { SUPPORTED_LOCALES, localeEndonym } from '@/i18n'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import InviteQrModal from '@/features/play/InviteQrModal.vue'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -1051,8 +1052,7 @@ onBeforeUnmount(() => {
         <label v-if="isPlayer" class="locale-select play-locale-select">
           <span>{{ t('language') }}</span>
           <select :value="locale" @change="onLocaleChange">
-            <option value="zh-CN">{{ t('chinese') }}</option>
-            <option value="en">{{ t('english') }}</option>
+            <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeEndonym(code) }}</option>
           </select>
         </label>
         <button class="play-secondary-action" @click="openCards">{{ t('characters') }}</button>
