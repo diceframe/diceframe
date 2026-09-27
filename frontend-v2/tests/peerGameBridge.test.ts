@@ -35,25 +35,43 @@ describe('peer host game bridge', () => {
       game_key: 'web|game|host', player_access_open: true, player_count: 2, max_players: 4,
       has_room_password: true, world_name: 'World', scene: 'Public', rule_id: 'freeform', solo_mode: false,
       gm_uid: 'secret-gm', gm_style_override: { tone: 'secret' }, cards: ['secret'],
-      multiplayer: { state: 'active', player_count: 2, ready_count: 1, waiting_players: ['secret'] },
+      multiplayer: {
+        state: 'active', round_number: 3, solo_mode: false, player_count: 2, max_players: 4,
+        ready_count: 1, alive_count: 2, active_count: 2, away_count: 0,
+        ai_count: 0, unclaimed_count: 0, can_accept_actions: true, can_advance: false,
+        action_count: 1, pending_action_count: 1, player_access_open: true,
+        waiting_players: ['secret'],
+      },
     })
     const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
     const detail = await bridge.handle('peer_1', 'game.detail', {})
     expect(detail).toEqual({
       game_key: 'web|game|host', player_access_open: true, player_count: 2, max_players: 4,
       has_room_password: false, world_name: 'World', scene: 'Public', rule_id: 'freeform', solo_mode: false,
-      multiplayer: { state: 'active', player_count: 2, ready_count: 1 }, peer_transport: true,
+      multiplayer: {
+        state: 'active', round_number: 3, solo_mode: false, player_count: 2, max_players: 4,
+        ready_count: 1, alive_count: 2, active_count: 2, away_count: 0,
+        ai_count: 0, unclaimed_count: 0, can_accept_actions: true, can_advance: false,
+        action_count: 1, pending_action_count: 1, player_access_open: true,
+      }, peer_transport: true,
     })
     expect(JSON.stringify(detail)).not.toContain('secret')
   })
 
   it('returns only character bootstrap metadata before an actor is bound', async () => {
-    const executor: PeerLocalApiExecutor = async () => ({
+    const calls: string[] = []
+    const executor: PeerLocalApiExecutor = async (path) => {
+      calls.push(path)
+      if (path.endsWith('/characters?share=1')) return {
+        rule_attrs: ['might'], rule_attrs_total: 6, rule_classes: ['fighter'],
+        rule_special_stats: [{ key: 'hp' }], rule_meta: { version: 1 },
+        ruleset_runtime: { id: 'core:dnd2024' }, players: [{ user_id: 'secret' }],
+      }
+      return {
       game_key: 'web|game|host', player_access_open: true,
-      rule_attrs: ['might'], rule_attrs_total: 6, rule_classes: ['fighter'],
-      rule_special_stats: [{ key: 'hp' }], rule_meta: { version: 1 },
-      ruleset_runtime: { id: 'core:dnd2024' }, players: [{ user_id: 'secret' }],
-    })
+      gm_uid: 'secret-gm', gm_style_override: { tone: 'secret' },
+      }
+    }
     const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
     const characters = await bridge.handle('peer_1', 'game.characters', {})
     expect(characters).toMatchObject({
@@ -62,6 +80,10 @@ describe('peer host game bridge', () => {
       ruleset_runtime: { id: 'core:dnd2024' }, players: [], npcs: [],
     })
     expect(JSON.stringify(characters)).not.toContain('secret')
+    expect(calls).toEqual([
+      '/games/web%7Cgame%7Chost',
+      '/games/web%7Cgame%7Chost/characters?share=1',
+    ])
   })
 
   it('resolves a roll for the bound actor and ignores forged target fields', async () => {

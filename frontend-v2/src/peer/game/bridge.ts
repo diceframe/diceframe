@@ -40,8 +40,32 @@ const JOIN_CHARACTER_FIELDS = [
 const MULTIPLAYER_FIELDS = [
   'state', 'round_number', 'solo_mode', 'player_count', 'max_players',
   'ready_count', 'alive_count', 'active_count', 'away_count',
-  'can_accept_actions', 'can_advance',
+  'ai_count', 'unclaimed_count', 'can_accept_actions', 'can_advance',
+  'action_count', 'pending_action_count', 'player_access_open',
 ] as const
+
+function lobbyMultiplayer(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  return Object.fromEntries(
+    MULTIPLAYER_FIELDS
+      .filter(field => field in source)
+      .map(field => [field, source[field]]),
+  )
+}
+
+function lobbyDetail(value: Record<string, unknown>): Record<string, unknown> {
+  const lobby = Object.fromEntries(
+    LOBBY_DETAIL_FIELDS
+      .filter(field => field in value)
+      .map(field => [field, value[field]]),
+  )
+  const multiplayer = lobbyMultiplayer(value.multiplayer)
+  if (multiplayer) lobby.multiplayer = multiplayer
+  lobby.has_room_password = false
+  lobby.peer_transport = true
+  return lobby
+}
 
 /**
  * 对端 payload 字段白名单：只放行各操作实际需要的字段，其余全部剥离。
@@ -257,27 +281,15 @@ export class PeerHostGameBridge {
         const detail = await read('')
         return { ...detail, has_room_password: false, peer_transport: true }
       }
-      const lobby = Object.fromEntries(
-        LOBBY_DETAIL_FIELDS
-          .filter(field => field in current)
-          .map(field => [field, current[field]]),
-      )
-      const multiplayer = current.multiplayer as Record<string, unknown> | undefined
-      if (multiplayer && typeof multiplayer === 'object') {
-        lobby.multiplayer = Object.fromEntries(
-          MULTIPLAYER_FIELDS
-            .filter(field => field in multiplayer)
-            .map(field => [field, multiplayer[field]]),
-        )
-      }
-      return { ...lobby, has_room_password: false, peer_transport: true }
+      return lobbyDetail(current)
     }
     if (operation === 'game.characters') {
       if (!actorId) {
+        const characters = await read('/characters')
         const bootstrap = Object.fromEntries(
           JOIN_CHARACTER_FIELDS
-            .filter(field => field in current)
-            .map(field => [field, current[field]]),
+            .filter(field => field in characters)
+            .map(field => [field, characters[field]]),
         )
         return { ...bootstrap, players: [], npcs: [] }
       }

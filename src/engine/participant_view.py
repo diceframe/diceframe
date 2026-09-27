@@ -5,15 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+ViewerKind = Literal["gm", "seat", "outsider"]
 
-ViewerRole = Literal["gm", "seat", "outsider"]
+__all__ = ["Viewer", "ViewerKind", "resolve_viewer"]
 
 
 @dataclass(frozen=True)
 class Viewer:
     """The server-derived read identity, never a client-supplied role."""
 
-    kind: ViewerRole
+    kind: ViewerKind
     uid: str = ""
 
     @property
