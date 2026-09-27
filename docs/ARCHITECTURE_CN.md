@@ -1983,6 +1983,12 @@ R6-a 的只读身份由 `src/engine/participant_view.py` 的 `Viewer` / `resolve
 
 ---
 
+### 分享身份与 GM 席位
+
+`WebAccessControl` 在分享身份进入路由前加固 GM 席位边界：非 owner 的分享请求不能使用该局 GM 身份，拒绝时返回 HTTP 403 与 `GM_SEAT_REQUIRES_OWNER`。GM 使用分享入口时须先登录 owner 或完成扫码配对；owner 预览、P2P 委托和 bot 认证保持原有规则。`POST /players` 不再将调用者会话改绑到 GM 席位；新会话 uid 由服务端独立随机生成，已有会话 uid 保持不变。本次不改变持久化形状，实例 schema 仍为 **21**。未配置访问密码的部署没有 owner 边界，不属于本次加固范围。
+
+---
+
 # 13. Check Planner 与服务端判定
 
 ## 13.1 Planner 的定位
