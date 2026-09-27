@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 88
+MAX_TOP_LEVEL_FIELDS = 86
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",
@@ -92,6 +92,30 @@ def test_only_private_channel_owners_assign_compatibility_properties() -> None:
                 target = target.value
             if isinstance(target, ast.Attribute) and target.attr in {"private_log", "table_talk"}:
                 violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: private channel write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+def test_only_media_owners_assign_compatibility_properties() -> None:
+    # Aggregate setters own updates; lifecycle retains its existing reset policy.
+    owners = {
+        MODULES / "media.py",
+        SRC / "engine" / "game_instance.py",
+        SRC / "engine" / "instance_lifecycle.py",
+        SRC / "migrations" / "instance.py",
+    }
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path in owners:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Attribute, ast.Subscript)) or not isinstance(node.ctx, (ast.Store, ast.Del)):
+                continue
+            target = node
+            while isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in {"scene_image", "map_background"}:
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: media write outside owner")
     assert not violations, "\n".join(violations)
 
 

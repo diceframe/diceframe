@@ -40,6 +40,7 @@ from src.engine.modules import (
     combat_extension_state,
     economy_state,
     lorebook_runtime,
+    media,
     player_control_state,
     private_channels,
     progression_state,
@@ -146,8 +147,6 @@ class GameInstance:
     # bound adventure until creation/migration writes an explicit mode.
     play_mode: str = ""
     event_ledger: list[dict[str, Any]] = field(default_factory=list)
-    scene_image: dict[str, str] = field(default_factory=dict)
-    map_background: dict[str, str] = field(default_factory=dict)
     world_name: str = ""
     group_name: str = ""
     state: GameState = GameState.CREATED
@@ -311,6 +310,22 @@ class GameInstance:
     _tag_fail_streak: int = field(default=0, repr=False)
     # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
     confirmed_items: list = field(default_factory=list)
+
+    @property
+    def scene_image(self) -> dict[str, str]:
+        return media.scene_image(self)
+
+    @scene_image.setter
+    def scene_image(self, value: Any) -> None:
+        media.replace_scene_image(self, value)
+
+    @property
+    def map_background(self) -> dict[str, str]:
+        return media.map_background(self)
+
+    @map_background.setter
+    def map_background(self, value: Any) -> None:
+        media.replace_map_background(self, value)
 
     @property
     def private_log(self) -> dict[str, list[dict[str, Any]]]:

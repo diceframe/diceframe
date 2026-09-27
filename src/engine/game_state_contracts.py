@@ -117,8 +117,6 @@ class GamePersistedState(TypedDict, total=False):
     adventure_progress: dict[str, Any]
     play_mode: str
     event_ledger: list[OpaqueState]
-    scene_image: dict[str, str]
-    map_background: dict[str, str]
     world_name: str
     group_name: str
     state: str

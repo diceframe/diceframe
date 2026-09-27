@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 22
+CURRENT_INSTANCE_SCHEMA_VERSION = 23
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -458,6 +458,24 @@ def _migrate_v21_to_v22(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v22_to_v23(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move media references into their slot without overwriting existing slots."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    scene_image = payload.pop("scene_image", None)
+    map_background = payload.pop("map_background", None)
+    if not isinstance(modules.get("media"), dict):
+        modules["media"] = {
+            "schema_version": 1,
+            "scene_image": scene_image if isinstance(scene_image, dict) else {},
+            "map_background": map_background if isinstance(map_background, dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 23
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -528,6 +546,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 21:
         payload = _migrate_v21_to_v22(payload)
         version = 22
+    if version == 22:
+        payload = _migrate_v22_to_v23(payload)
+        version = 23
     payload["instance_schema_version"] = version
     return payload
 

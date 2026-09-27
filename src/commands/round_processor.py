@@ -67,6 +67,7 @@ from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_i
 from src.engine import combat_narrative, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
+from src.engine.modules.media import replace_scene_image
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
 from src.engine.world.memory_projection import queue_world_memory
@@ -907,7 +908,7 @@ class RoundProcessor:
                     entry.pop("scene_image", None)
                 else:
                     entry["scene_image"] = old_scene_image
-                current.scene_image = old_top_scene_image
+                replace_scene_image(current, old_top_scene_image)
                 raise
             logger.info("场景图已生成 (round=%d, asset=%s)", round_number, result.asset_id)
         except ImageGenerationError as exc:

@@ -33,8 +33,6 @@ class GameStateCodec:
             "adventure_binding": instance.adventure_binding,
             "adventure_progress": instance.adventure_progress,
             "play_mode": instance.play_mode,
-            "scene_image": instance.scene_image,
-            "map_background": instance.map_background,
             "world_name": instance.world_name,
             "group_name": instance.group_name,
             "state": instance.state.value,
@@ -151,8 +149,6 @@ class GameStateCodec:
                 )
             ),
             event_ledger=data.get("event_ledger") or [],
-            scene_image=data.get("scene_image", {}),
-            map_background=data.get("map_background", {}),
             world_name=data.get("world_name", ""),
             group_name=data.get("group_name", ""),
             state=state_type(data["state"]),
