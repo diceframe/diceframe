@@ -42,6 +42,7 @@ from src.engine.modules import (
     health,
     lorebook_runtime,
     media,
+    narrative_notes,
     player_control_state,
     private_channels,
     progression_state,
@@ -179,12 +180,9 @@ class GameInstance:
 
     # 场景
     scene: str = ""
-    game_time: str = ""
 
-    # 日志与摘要
+    # 回合日志
     log: list[RoundLogEntry] = field(default_factory=list)
-    summary: dict = field(default_factory=dict)
-    key_facts: list = field(default_factory=list)
 
     # 权威世界真相（Issue #284）：世界事实 / 逻辑时钟 / 定时事件容器。它不是
     # key_facts 这类叙事摘要，也不属于 ruleset_state；唯一写入口是
@@ -305,8 +303,39 @@ class GameInstance:
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
-    # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
-    confirmed_items: list = field(default_factory=list)
+
+    @property
+    def summary(self) -> dict:
+        return narrative_notes.summary(self)
+
+    @summary.setter
+    def summary(self, value: Any) -> None:
+        narrative_notes.replace_summary(self, value)
+
+    @property
+    def key_facts(self) -> list:
+        return narrative_notes.key_facts(self)
+
+    @key_facts.setter
+    def key_facts(self, value: Any) -> None:
+        narrative_notes.replace_key_facts(self, value)
+
+    @property
+    def confirmed_items(self) -> list:
+        # CONFIRMED 标签累积，注入 LLM 上下文防重复讨论。
+        return narrative_notes.confirmed_items(self)
+
+    @confirmed_items.setter
+    def confirmed_items(self, value: Any) -> None:
+        narrative_notes.replace_confirmed_items(self, value)
+
+    @property
+    def game_time(self) -> str:
+        return narrative_notes.game_time(self)
+
+    @game_time.setter
+    def game_time(self, value: Any) -> None:
+        narrative_notes.replace_game_time(self, value)
 
     @property
     def health_events(self) -> list[dict]:

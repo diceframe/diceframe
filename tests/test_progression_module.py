@@ -89,6 +89,14 @@ def test_live_property_and_roundtrip_have_one_storage_owner():
     assert instance.round_number == 8
 
 
+def _game_time(payload):
+    """Where game_time lives after the latest migration (top level before R7-d)."""
+    notes = (payload.get("modules") or {}).get("narrative_notes")
+    if isinstance(notes, dict) and "game_time" in notes:
+        return notes["game_time"]
+    return payload.get("game_time")
+
+
 @pytest.mark.parametrize("legacy, expected", [(7, 7), (0, 0), (None, 0), (-3, 0), (True, 0), ("5", 0), (2.5, 0), ({}, 0)])
 def test_v20_migration_is_deepcopied_sequential_and_idempotent(legacy, expected):
     original = {"instance_schema_version": 20, "round_number": legacy, "game_time": "dusk", "log": [{"round": 12}], "other": {"values": [1]}}
@@ -98,7 +106,7 @@ def test_v20_migration_is_deepcopied_sequential_and_idempotent(legacy, expected)
     assert result["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION >= 21
     assert result["modules"]["progression"]["round"] == expected
     assert "round_number" not in result
-    assert result["log"] == original["log"] and result["game_time"] == "dusk"
+    assert result["log"] == original["log"] and _game_time(result) == "dusk"
     assert migrate_game_state_payload(result) == result
     step = _migrate_v20_to_v21(deepcopy(original))
     assert _migrate_v20_to_v21(deepcopy(step)) == step
@@ -114,7 +122,7 @@ def test_historical_chain_preserves_round_and_history(version):
     assert raw == before
     assert migrated["modules"]["progression"]["round"] == 5
     assert migrated["log"] == [{"round": 2}]
-    assert migrated["game_time"] == "legacy time"
+    assert _game_time(migrated) == "legacy time"
     assert migrate_game_state_payload(migrated) == migrated
 
 
@@ -180,7 +188,7 @@ def test_unknown_slot_encode_decode_and_rebind_preserve_opaque_data(slot):
     assert restored.to_dict()["modules"]["progression"] == slot
     rebound = rebind_imported_game_state_payload(before, game_key=("web", "imported", "bot"), run_id="new-run")
     assert rebound["modules"]["progression"] == slot
-    assert rebound["game_time"] == "Third Age, dusk"
+    assert _game_time(rebound) == "Third Age, dusk"
     assert instance.to_dict() == before
     if slot["schema_version"] == 1 and isinstance(slot["round"], int):
         assert restored.round_number == progression.current_round(restored) == 7

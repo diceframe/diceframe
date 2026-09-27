@@ -132,10 +132,7 @@ class GamePersistedState(TypedDict, total=False):
     initiative_order: list[str]
     initiative_current: int
     scene: str
-    game_time: str
     log: list[RoundLogEntry]
-    summary: OpaqueState
-    key_facts: list[Any]
     world_state: OpaqueState
     total_llm_calls: int
     total_tokens: int
@@ -172,6 +169,5 @@ class GamePersistedState(TypedDict, total=False):
     last_state_update: OpaqueState | None
     last_token_budget_bump: TokenBudgetBump | None
     gm_directives: list[OpaqueState]
-    confirmed_items: list[Any]
     puzzles: OpaqueState
     plot_tracker: OpaqueState

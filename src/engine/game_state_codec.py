@@ -50,10 +50,7 @@ class GameStateCodec:
             "initiative_order": instance.initiative_order,
             "initiative_current": instance.initiative_current,
             "scene": instance.scene,
-            "game_time": instance.game_time,
             "log": instance.log[-100:],
-            "summary": instance.summary,
-            "key_facts": instance.key_facts,
             "world_state": instance.world_state,
             "total_llm_calls": instance.total_llm_calls,
             "total_tokens": instance.total_tokens,
@@ -93,7 +90,6 @@ class GameStateCodec:
             "last_state_update": instance.last_state_update,
             "last_token_budget_bump": instance.last_token_budget_bump,
             "gm_directives": instance.gm_directives,
-            "confirmed_items": instance.confirmed_items,
         }
         if instance.ruleset_runtime:
             data["ruleset_runtime"] = instance.ruleset_runtime
@@ -162,10 +158,7 @@ class GameStateCodec:
             initiative_order=data.get("initiative_order", []),
             initiative_current=data.get("initiative_current", 0),
             scene=data.get("scene", ""),
-            game_time=data.get("game_time", ""),
             log=data.get("log", []),
-            summary=data.get("summary", {}),
-            key_facts=data.get("key_facts", []),
             # 旧存档没有这个键：空世界（不是"猜测世界事实"）。
             world_state=(
                 data.get("world_state")
@@ -222,7 +215,6 @@ class GameStateCodec:
             gm_directives=data.get("gm_directives", []),
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
-            confirmed_items=data.get("confirmed_items", []),
         )
 
         puzzles_data = data.get("puzzles")
