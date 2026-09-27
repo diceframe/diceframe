@@ -96,9 +96,10 @@ async def api_game_scene_image_update(request: web.Request) -> web.Response:
 
 
 async def api_chars(request: web.Request) -> web.Response:
-    return web.json_response(
-        _get_api(request).list_characters(request.match_info["game_key"])
-    )
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    viewer = viewer_for(request, api.get_game_instance(game_key))
+    return web.json_response(api.list_characters(game_key, viewer_is_gm=viewer.is_gm))
 
 
 async def api_log(request: web.Request) -> web.Response:

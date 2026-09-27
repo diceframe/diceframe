@@ -1171,7 +1171,7 @@ async def test_character_api_exposes_rule_creation_hints(web_api):
         "模板世界",
         players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
     )
-    result = api.list_characters(created["game_key"])
+    result = api.list_characters(created["game_key"], viewer_is_gm=True)
 
     assert result["rule_attrs_total"] == 60
     assert result["rule_meta"]["attr_hint"] == "属性测试提示"
@@ -1196,7 +1196,7 @@ async def test_character_list_normalizes_legacy_and_resource_hp(web_api):
     stored["resources"]["hp"]["current"] = 41
     stored["resources"]["hp"]["max"] = 41
 
-    result = api.list_characters(created["game_key"])
+    result = api.list_characters(created["game_key"], viewer_is_gm=True)
 
     cs = result["players"][0]["character_sheet"]
     assert cs["resources"]["hp"]["current"] == 46
@@ -1335,7 +1335,7 @@ async def test_npc_portrait_is_explicit_and_persisted(web_api):
     inst = registry.get(api._parse_key(created["game_key"]))
     inst.npcs["npc-guide"] = {"name": "向导", "character_name": "向导"}
 
-    before = api.list_characters(created["game_key"])["npcs"][0]
+    before = api.list_characters(created["game_key"], viewer_is_gm=True)["npcs"][0]
     assert "portrait" not in before
 
     updated = await api.update_npc_portrait(
@@ -1691,7 +1691,7 @@ def test_character_api_exposes_generic_rule_meta(web_api):
     inst = registry.get_or_create(("web", "meta", "bot"))
     inst.world_id = "template_world"
 
-    result = api.list_characters("web|meta|bot")
+    result = api.list_characters("web|meta|bot", viewer_is_gm=True)
 
     assert result["rule_meta"]["conflict_model"]["type"] == "hp_based"
     assert result["rule_meta"]["currency_system"]["units"]
@@ -1735,7 +1735,7 @@ def test_character_api_localizes_persisted_lorebook_npcs_for_game_language(web_a
     instance.world_id = world_id
     instance.language = "en"
 
-    result = api.list_characters("web|localized-npcs|bot")
+    result = api.list_characters("web|localized-npcs|bot", viewer_is_gm=True)
 
     assert result["npcs"][0]["npc_id"] == "npc_guide"
     assert result["npcs"][0]["name"] == "Old Guide"
