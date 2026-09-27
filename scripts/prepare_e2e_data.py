@@ -272,7 +272,6 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="E2E Adventure",
         group_name="Browser Tests",
         state=GameState.ACTIVE_ACTION,
-        solo_mode=False,
         gm_uid="e2e-gm",
         scene="Town Gate",
     )
@@ -296,7 +295,6 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="E2E Adventure Module",
         group_name="Adventure Browser Tests",
         state=GameState.ACTIVE_ACTION,
-        solo_mode=False,
         gm_uid="e2e-gm",
         scene="Town Gate",
     )
@@ -324,7 +322,6 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="D&D 2024 新手桌",
         group_name="Professional Ruleset Browser Tests",
         state=GameState.ACTIVE_ACTION,
-        solo_mode=False,
         gm_uid="e2e-gm",
         max_players=2,
         scene="灰沼村议事厅",
@@ -351,7 +348,6 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         world_name="Golden Lore World",
         group_name="Lorebook Golden",
         state=GameState.ACTIVE_ACTION,
-        solo_mode=False,
         gm_uid="e2e-gm",
         scene="旧城门前",
         language="zh-CN",

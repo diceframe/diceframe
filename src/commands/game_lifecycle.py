@@ -120,7 +120,9 @@ class GameLifecycle:
         )
         candidate.max_players = source.max_players
         candidate.player_access_open = source.player_access_open
-        candidate.gm_style_override = copy.deepcopy(source.gm_style_override)
+        from src.engine.modules import table_settings
+
+        table_settings.replace_gm_style_override(candidate, copy.deepcopy(source.gm_style_override))
         candidate.bot_bind_token = source.bot_bind_token
         candidate.room_token = source.room_token
         candidate.ruleset_runtime = copy.deepcopy(source.ruleset_runtime)

@@ -36,7 +36,8 @@ UNKNOWN_SLOTS = [
 
 
 def instance_with_state(slot=None):
-    instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm", solo_mode=True)
+    instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm")
+    instance.solo_mode = True
     instance.round_number = 7
     instance.state = GameState.ACTIVE_ACTION
     instance.players = {"gm": {"character_name": "Hero", "character_sheet": {"hp": 12, "gold": 20}}}

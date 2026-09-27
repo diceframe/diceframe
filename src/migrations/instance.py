@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 27
+CURRENT_INSTANCE_SCHEMA_VERSION = 28
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -560,6 +560,43 @@ def _migrate_v26_to_v27(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v27_to_v28(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move table settings as-is; currency caps were already converted in v12."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    defaults: dict[str, Any] = {
+        "difficulty": "标准",
+        "narrative_perspective": "auto",
+        "gm_style_override": None,
+        "solo_mode": False,
+        "seed_code": "",
+        "entry_point": "web",
+        "luck_timeout_seconds": 60,
+        "economy_reward_policy": {},
+    }
+    values = {key: payload.pop(key, None) for key in defaults}
+    try:
+        timeout = int(values["luck_timeout_seconds"] or 0) if values["luck_timeout_seconds"] is not None else 60
+    except (TypeError, ValueError, OverflowError):
+        timeout = 60
+    if not isinstance(modules.get("table_settings"), dict):
+        modules["table_settings"] = {
+            "schema_version": 1,
+            "difficulty": values["difficulty"] if isinstance(values["difficulty"], str) else defaults["difficulty"],
+            "narrative_perspective": values["narrative_perspective"] if isinstance(values["narrative_perspective"], str) else defaults["narrative_perspective"],
+            "gm_style_override": values["gm_style_override"] if isinstance(values["gm_style_override"], dict) else None,
+            "solo_mode": values["solo_mode"] if isinstance(values["solo_mode"], bool) else False,
+            "seed_code": values["seed_code"] if isinstance(values["seed_code"], str) else defaults["seed_code"],
+            "entry_point": values["entry_point"] if isinstance(values["entry_point"], str) else defaults["entry_point"],
+            "luck_timeout_seconds": timeout,
+            "economy_reward_policy": values["economy_reward_policy"] if isinstance(values["economy_reward_policy"], dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 28
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -645,6 +682,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 26:
         payload = _migrate_v26_to_v27(payload)
         version = 27
+    if version == 27:
+        payload = _migrate_v27_to_v28(payload)
+        version = 28
     payload["instance_schema_version"] = version
     return payload
 

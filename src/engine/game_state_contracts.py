@@ -137,15 +137,7 @@ class GamePersistedState(TypedDict, total=False):
     total_tokens: int
     started_at: str
     last_activity: str
-    solo_mode: bool
-    seed_code: str
-    difficulty: str
-    narrative_perspective: str
-    gm_style_override: OpaqueState | None
     language: str
-    luck_timeout_seconds: int
-    economy_reward_policy: OpaqueState
-    entry_point: str
     max_players: int
     gm_uid: str
     player_access_open: bool

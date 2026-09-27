@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 72
+MAX_TOP_LEVEL_FIELDS = 64
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",
@@ -153,6 +153,42 @@ def test_world_report_guard_rejects_direct_writes(source) -> None:
     for path in ("engine/game_instance.py", "commands/round_processor.py", "webui/routes/outsider.py"):
         assert _world_report_property_writes(SRC / path, tree)
     assert not _world_report_property_writes(MODULES / "world_reports.py", tree)
+
+
+def _table_settings_property_writes(path: Path, tree: ast.AST) -> list[int]:
+    if path in {MODULES / "table_settings.py", SRC / "engine" / "game_instance.py", SRC / "engine" / "instance_lifecycle.py"}:
+        return []
+    fields = {
+        "difficulty", "narrative_perspective", "gm_style_override", "solo_mode",
+        "seed_code", "entry_point", "luck_timeout_seconds", "economy_reward_policy",
+    }
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr in fields
+    ]
+
+
+def test_only_table_settings_owners_assign_compatibility_properties() -> None:
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _table_settings_property_writes(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: table settings write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "candidate.gm_style_override = {}",
+    "instance.solo_mode: bool = True",
+    "instance.seed_code += 'x'",
+    "del instance.economy_reward_policy",
+])
+def test_table_settings_guard_rejects_external_writes(source) -> None:
+    tree = ast.parse(source)
+    assert _table_settings_property_writes(SRC / "commands" / "game_lifecycle.py", tree)
+    assert not _table_settings_property_writes(MODULES / "table_settings.py", tree)
 
 
 def _runtime_nodes(node: ast.AST):

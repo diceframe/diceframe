@@ -47,6 +47,7 @@ from src.engine.modules import (
     private_channels,
     progression_state,
     round_presentation,
+    table_settings,
     world_reports,
 )
 from src.engine.narrative_perspective import validate_narrative_perspective
@@ -228,27 +229,8 @@ class GameInstance:
     # retries reuse the same roll without leaking it into future rounds.
     death_save_outcomes: dict[str, dict[str, dict]] = field(default_factory=dict)
 
-    # 单人模式
-    solo_mode: bool = False  # True=单人模式, 行动后自动推进
-
-    # 种子码
-    seed_code: str = ""
-
-    # 难度
-    difficulty: str = "标准"  # 轻松 / 标准 / 硬核
-
-    # 叙事视角（展示偏好，不参与规则判定）
-    narrative_perspective: str = "auto"  # auto / immersive / third_person
-
-    # 当前对局 GM 叙事风格覆盖：None=跟随世界 gm_style；dict=显式覆盖
-    # （全缺省 dict 也是合法的"恢复中性风格"，与 None 语义严格区分）。
-    gm_style_override: dict[str, str] | None = None
-
     # 叙事语言
     language: str = DEFAULT_LANGUAGE  # "zh-CN" / "en"
-
-    # 入口模式
-    entry_point: str = "web"  # "web" / "plugin"
 
     # 内部：并发锁
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
@@ -260,12 +242,6 @@ class GameInstance:
     _authority_depth: int = field(default=0, repr=False)
     _rewrite_in_progress: bool = field(default=False, repr=False)
     _save_fail_count: int = field(default=0, repr=False)
-    # 幸运超时（秒）：每条 pending 幸运检定独立倒计时，到点按失败继续；0=禁用（异步局可设 0）
-    luck_timeout_seconds: int = 60
-    # 奖励自动结算策略（表级偏好，重开保留）：{"mode": "auto_small_cash"|"gm_confirm",
-    # "auto_reward_cap": int}。{} 表示未设置，结算时回退规则模板 economy_defaults
-    # 与服务器全局配置；归属见 economy.resolve_auto_reward_policy。
-    economy_reward_policy: dict = field(default_factory=dict)
     # 内部：每条 pending 幸运检定的超时定时器（check_id -> asyncio.Task），不序列化
     _luck_timers: dict = field(default_factory=dict, repr=False)
     # 内部：正在处理本轮的 task（仅判定期间有值，不序列化）。GM 明确要求强制推进
@@ -276,6 +252,70 @@ class GameInstance:
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
+
+    @property
+    def difficulty(self) -> str:
+        return table_settings.difficulty(self)
+
+    @difficulty.setter
+    def difficulty(self, value: str) -> None:
+        table_settings.replace_difficulty(self, value)
+
+    @property
+    def narrative_perspective(self) -> str:
+        return table_settings.narrative_perspective(self)
+
+    @narrative_perspective.setter
+    def narrative_perspective(self, value: str) -> None:
+        table_settings.replace_narrative_perspective(self, value)
+
+    @property
+    def gm_style_override(self) -> dict[str, str] | None:
+        return table_settings.gm_style_override(self)
+
+    @gm_style_override.setter
+    def gm_style_override(self, value: dict[str, str] | None) -> None:
+        table_settings.replace_gm_style_override(self, value)
+
+    @property
+    def solo_mode(self) -> bool:
+        return table_settings.solo_mode(self)
+
+    @solo_mode.setter
+    def solo_mode(self, value: bool) -> None:
+        table_settings.replace_solo_mode(self, value)
+
+    @property
+    def seed_code(self) -> str:
+        return table_settings.seed_code(self)
+
+    @seed_code.setter
+    def seed_code(self, value: str) -> None:
+        table_settings.replace_seed_code(self, value)
+
+    @property
+    def entry_point(self) -> str:
+        return table_settings.entry_point(self)
+
+    @entry_point.setter
+    def entry_point(self, value: str) -> None:
+        table_settings.replace_entry_point(self, value)
+
+    @property
+    def luck_timeout_seconds(self) -> int:
+        return table_settings.luck_timeout_seconds(self)
+
+    @luck_timeout_seconds.setter
+    def luck_timeout_seconds(self, value: int) -> None:
+        table_settings.replace_luck_timeout_seconds(self, value)
+
+    @property
+    def economy_reward_policy(self) -> dict:
+        return table_settings.economy_reward_policy(self)
+
+    @economy_reward_policy.setter
+    def economy_reward_policy(self, value: dict) -> None:
+        table_settings.replace_economy_reward_policy(self, value)
 
     @property
     def last_overreach(self) -> list:

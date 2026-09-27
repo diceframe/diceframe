@@ -56,18 +56,7 @@ class GameStateCodec:
             "total_tokens": instance.total_tokens,
             "started_at": instance.started_at,
             "last_activity": instance.last_activity,
-            "solo_mode": instance.solo_mode,
-            "seed_code": instance.seed_code,
-            "difficulty": instance.difficulty,
-            "narrative_perspective": instance.narrative_perspective,
-            "gm_style_override": (
-                dict(instance.gm_style_override)
-                if isinstance(instance.gm_style_override, dict) else None
-            ),
             "language": normalize_language(instance.language),
-            "luck_timeout_seconds": instance.luck_timeout_seconds,
-            "economy_reward_policy": dict(instance.economy_reward_policy or {}),
-            "entry_point": instance.entry_point,
             "max_players": instance.max_players,
             "gm_uid": instance.gm_uid,
             "player_access_open": instance.player_access_open,
@@ -161,23 +150,7 @@ class GameStateCodec:
             total_tokens=data.get("total_tokens", 0),
             started_at=data.get("started_at", ""),
             last_activity=data.get("last_activity", ""),
-            solo_mode=data.get("solo_mode", False),
-            seed_code=data.get("seed_code", ""),
-            difficulty=data.get("difficulty", "标准"),
-            narrative_perspective=data.get("narrative_perspective", "auto"),
-            # 旧存档无该字段 → None=跟随世界 gm_style；只有 dict 才是显式覆盖。
-            gm_style_override=(
-                data.get("gm_style_override")
-                if isinstance(data.get("gm_style_override"), dict) else None
-            ),
             language=normalize_language(data.get("language", DEFAULT_LANGUAGE)),
-            luck_timeout_seconds=int(data.get("luck_timeout_seconds", 60) or 0),
-            economy_reward_policy=(
-                data.get("economy_reward_policy")
-                if isinstance(data.get("economy_reward_policy"), dict)
-                else {}
-            ),
-            entry_point=data.get("entry_point", "web"),
             max_players=data.get("max_players", 6),
             gm_uid=data.get("gm_uid", ""),
             player_access_open=data.get("player_access_open", True),

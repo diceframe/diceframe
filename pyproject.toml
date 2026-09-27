@@ -50,6 +50,7 @@ files = [
     "src/engine/modules/narrative_notes.py",
     "src/engine/modules/round_presentation.py",
     "src/engine/modules/world_reports.py",
+    "src/engine/modules/table_settings.py",
     "src/engine/modules/player_control_state.py",
     "src/engine/modules/private_channels.py",
     "src/engine/modules/progression_state.py",
