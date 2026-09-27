@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 90
+MAX_TOP_LEVEL_FIELDS = 88
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",
@@ -69,6 +69,30 @@ def test_combat_guard_rejects_direct_writes_including_game_instance(source) -> N
     assert _combat_property_writes(SRC / "webui" / "routes" / "outsider.py", tree)
     for owner in COMBAT_WRITERS:
         assert not _combat_property_writes(owner, tree)
+
+
+def test_only_private_channel_owners_assign_compatibility_properties() -> None:
+    # Aggregate methods own appends/removal; lifecycle owns reset clears.
+    owners = {
+        MODULES / "private_channels.py",
+        SRC / "engine" / "game_instance.py",
+        SRC / "engine" / "instance_lifecycle.py",
+        SRC / "migrations" / "instance.py",
+    }
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path in owners:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Attribute, ast.Subscript)) or not isinstance(node.ctx, (ast.Store, ast.Del)):
+                continue
+            target = node
+            while isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in {"private_log", "table_talk"}:
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: private channel write outside owner")
+    assert not violations, "\n".join(violations)
 
 
 def _runtime_nodes(node: ast.AST):
