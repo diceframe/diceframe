@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 23
+CURRENT_INSTANCE_SCHEMA_VERSION = 24
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -476,6 +476,24 @@ def _migrate_v22_to_v23(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v23_to_v24(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move health state into its slot; leave event retention to serialization."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    health_events = payload.pop("health_events", None)
+    health_status = payload.pop("health_status", None)
+    if not isinstance(modules.get("health"), dict):
+        modules["health"] = {
+            "schema_version": 1,
+            "health_events": health_events if isinstance(health_events, list) else [],
+            "health_status": health_status if isinstance(health_status, dict) else {},
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 24
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -549,6 +567,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 22:
         payload = _migrate_v22_to_v23(payload)
         version = 23
+    if version == 23:
+        payload = _migrate_v23_to_v24(payload)
+        version = 24
     payload["instance_schema_version"] = version
     return payload
 

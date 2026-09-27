@@ -39,6 +39,7 @@ from src.engine.module_state import ensure_module_states
 from src.engine.modules import (
     combat_extension_state,
     economy_state,
+    health,
     lorebook_runtime,
     media,
     player_control_state,
@@ -278,10 +279,6 @@ class GameInstance:
     # WebUI 快捷行动建议
     quick_actions: list[str] = field(default_factory=list)
 
-    # 系统健康 / 降级事件
-    health_events: list[dict] = field(default_factory=list)
-    health_status: dict = field(default_factory=dict)
-
     # 内部：并发锁
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     # 内部：process_round/generate_swipe 互斥锁，防并发处理同一实例
@@ -310,6 +307,22 @@ class GameInstance:
     _tag_fail_streak: int = field(default=0, repr=False)
     # D1: 已确认事项（CONFIRMED 标签累积），注入 LLM 上下文防重复讨论
     confirmed_items: list = field(default_factory=list)
+
+    @property
+    def health_events(self) -> list[dict]:
+        return health.health_events(self)
+
+    @health_events.setter
+    def health_events(self, value: Any) -> None:
+        health.replace_health_events(self, value)
+
+    @property
+    def health_status(self) -> dict:
+        return health.health_status(self)
+
+    @health_status.setter
+    def health_status(self, value: Any) -> None:
+        health.replace_health_status(self, value)
 
     @property
     def scene_image(self) -> dict[str, str]:

@@ -44,6 +44,7 @@ files = [
     "src/engine/modules/__init__.py",
     "src/engine/modules/combat_extension_state.py",
     "src/engine/modules/economy_state.py",
+    "src/engine/modules/health.py",
     "src/engine/modules/lorebook_runtime.py",
     "src/engine/modules/media.py",
     "src/engine/modules/player_control_state.py",

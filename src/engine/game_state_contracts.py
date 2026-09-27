@@ -159,8 +159,6 @@ class GamePersistedState(TypedDict, total=False):
     pending_combat_results: list[OpaqueState]
     modules: dict[str, dict[str, Any]]
     quick_actions: list[str]
-    health_events: list[OpaqueState]
-    health_status: OpaqueState
     last_check: CheckResult | None
     last_checks: list[CheckResult]
     manual_roll_requests: list[dict[str, Any]]

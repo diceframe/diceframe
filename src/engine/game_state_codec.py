@@ -23,6 +23,8 @@ class GameStateCodec:
 
     @staticmethod
     def encode(instance: GameInstance) -> GamePersistedState:
+        from src.engine.modules import health
+
         data: GamePersistedState = {
             "instance_schema_version": instance.instance_schema_version,
             "run_id": instance.run_id,
@@ -76,10 +78,8 @@ class GameStateCodec:
             "room_password": instance.room_password,
             "room_token": instance.room_token,
             "pending_combat_results": instance.pending_combat_results,
-            "modules": instance.modules,
+            "modules": {**instance.modules, "health": health.persisted_state(instance)},
             "quick_actions": instance.quick_actions,
-            "health_events": instance.health_events[-100:],
-            "health_status": instance.health_status,
             "last_check": instance.last_check,
             "last_checks": instance.last_checks,
             "manual_roll_requests": instance.manual_roll_requests,
@@ -202,8 +202,6 @@ class GameStateCodec:
             pending_combat_results=data.get("pending_combat_results", []),
             modules=data.get("modules") if isinstance(data.get("modules"), dict) else {},
             quick_actions=data.get("quick_actions", []),
-            health_events=data.get("health_events", []),
-            health_status=data.get("health_status", {}),
             last_check=data.get("last_check"),
             last_checks=data.get("last_checks") or [],
             manual_roll_requests=data.get("manual_roll_requests") or [],

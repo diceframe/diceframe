@@ -3,6 +3,7 @@
 from src.engine.modules import (  # noqa: F401
     combat_extension_state,
     economy_state,
+    health,
     lorebook_runtime,
     media,
     player_control_state,
