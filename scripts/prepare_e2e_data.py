@@ -323,11 +323,11 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         group_name="Professional Ruleset Browser Tests",
         state=GameState.ACTIVE_ACTION,
         gm_uid="e2e-gm",
-        max_players=2,
         scene="灰沼村议事厅",
         rule_id="dnd2024_srd",
         language="zh-CN",
     )
+    dnd_instance.max_players = 2
     dnd_instance.players = {
         "e2e-gm": {
             "character_name": "新手守护者",

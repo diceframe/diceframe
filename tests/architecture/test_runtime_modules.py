@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 64
+MAX_TOP_LEVEL_FIELDS = 59
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",
@@ -189,6 +189,42 @@ def test_table_settings_guard_rejects_external_writes(source) -> None:
     tree = ast.parse(source)
     assert _table_settings_property_writes(SRC / "commands" / "game_lifecycle.py", tree)
     assert not _table_settings_property_writes(MODULES / "table_settings.py", tree)
+
+
+def _room_access_property_writes(path: Path, tree: ast.AST) -> list[int]:
+    # Aggregate methods retain their existing room access mutation policy.
+    if path in {MODULES / "room_access.py", SRC / "engine" / "game_instance.py"}:
+        return []
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr in {"max_players", "player_access_open", "bot_bind_token", "room_password", "room_token"}
+    ]
+
+
+def test_only_room_access_owners_assign_compatibility_properties() -> None:
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _room_access_property_writes(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: room access write outside owner")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "candidate.max_players = 4",
+    "instance.player_access_open: bool = False",
+    "instance.bot_bind_token += 'x'",
+    "instance.room_password, (x, instance.room_token) = values",
+    "del instance.room_token",
+])
+def test_room_access_guard_rejects_external_writes(source) -> None:
+    tree = ast.parse(source)
+    assert _room_access_property_writes(SRC / "commands" / "game_lifecycle.py", tree)
+    assert _room_access_property_writes(SRC / "webui" / "routes" / "outsider.py", tree)
+    assert not _room_access_property_writes(MODULES / "room_access.py", tree)
+    assert not _room_access_property_writes(SRC / "engine" / "game_instance.py", tree)
 
 
 def _runtime_nodes(node: ast.AST):

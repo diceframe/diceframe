@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 28
+CURRENT_INSTANCE_SCHEMA_VERSION = 29
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -597,6 +597,26 @@ def _migrate_v27_to_v28(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v28_to_v29(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move room access values verbatim, defaulting only absent keys."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    defaults: dict[str, Any] = {
+        "max_players": 6,
+        "player_access_open": True,
+        "bot_bind_token": "",
+        "room_password": "",
+        "room_token": "",
+    }
+    values = {key: payload.pop(key, default) for key, default in defaults.items()}
+    if not isinstance(modules.get("room_access"), dict):
+        modules["room_access"] = {"schema_version": 1, **values}
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 29
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -685,6 +705,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 27:
         payload = _migrate_v27_to_v28(payload)
         version = 28
+    if version == 28:
+        payload = _migrate_v28_to_v29(payload)
+        version = 29
     payload["instance_schema_version"] = version
     return payload
 

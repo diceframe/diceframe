@@ -48,6 +48,7 @@ files = [
     "src/engine/modules/lorebook_runtime.py",
     "src/engine/modules/media.py",
     "src/engine/modules/narrative_notes.py",
+    "src/engine/modules/room_access.py",
     "src/engine/modules/round_presentation.py",
     "src/engine/modules/world_reports.py",
     "src/engine/modules/table_settings.py",

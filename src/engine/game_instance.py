@@ -46,6 +46,7 @@ from src.engine.modules import (
     player_control_state,
     private_channels,
     progression_state,
+    room_access,
     round_presentation,
     table_settings,
     world_reports,
@@ -174,12 +175,7 @@ class GameInstance:
     initiative_current: int = 0
 
     # 玩家管理
-    max_players: int = 6
     gm_uid: str = ""  # 创建游戏的 GM 的 user_id
-    player_access_open: bool = True  # False 时所有玩家分享链接失效
-    bot_bind_token: str = ""  # 渠道 Bot 绑定本局的一次性管理凭证
-    room_password: str = ""  # 房间密码（空=开放）；玩家凭此进入游戏，替代后台 access_token
-    room_token: str = ""  # 玩家凭房间密码换取的会话凭证（random secrets，校验通过后颁发）
 
     # 场景
     scene: str = ""
@@ -252,6 +248,46 @@ class GameInstance:
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
+
+    @property
+    def max_players(self) -> int:
+        return room_access.max_players(self)
+
+    @max_players.setter
+    def max_players(self, value: int) -> None:
+        room_access.replace_max_players(self, value)
+
+    @property
+    def player_access_open(self) -> bool:
+        return room_access.player_access_open(self)
+
+    @player_access_open.setter
+    def player_access_open(self, value: bool) -> None:
+        room_access.replace_player_access_open(self, value)
+
+    @property
+    def bot_bind_token(self) -> str:
+        return room_access.bot_bind_token(self)
+
+    @bot_bind_token.setter
+    def bot_bind_token(self, value: str) -> None:
+        room_access.replace_bot_bind_token(self, value)
+
+    @property
+    def room_password(self) -> str:
+        return room_access.room_password(self)
+
+    @room_password.setter
+    def room_password(self, value: str) -> None:
+        room_access.replace_room_password(self, value)
+
+    @property
+    def room_token(self) -> str:
+        return room_access.room_token(self)
+
+    @room_token.setter
+    def room_token(self, value: str) -> None:
+        room_access.replace_room_token(self, value)
 
     @property
     def difficulty(self) -> str:

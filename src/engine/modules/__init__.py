@@ -10,6 +10,7 @@ from src.engine.modules import (  # noqa: F401
     player_control_state,
     private_channels,
     progression_state,
+    room_access,
     round_presentation,
     table_settings,
     world_reports,

@@ -138,12 +138,7 @@ class GamePersistedState(TypedDict, total=False):
     started_at: str
     last_activity: str
     language: str
-    max_players: int
     gm_uid: str
-    player_access_open: bool
-    bot_bind_token: str
-    room_password: str
-    room_token: str
     modules: dict[str, dict[str, Any]]
     last_check: CheckResult | None
     last_checks: list[CheckResult]
