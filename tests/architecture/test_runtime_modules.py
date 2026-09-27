@@ -280,6 +280,84 @@ def test_progression_does_not_import_transport_commands_or_rulesets() -> None:
     assert not violations, "\n".join(violations)
 
 
+def test_participant_view_does_not_import_transport_or_runtime() -> None:
+    path = SRC / "engine" / "participant_view.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    forbidden = ("src.webui", "src.commands", "src.rulesets", "src.engine.game_instance")
+    violations = [
+        f"{path.relative_to(ROOT)}:{line}: forbidden import {name}"
+        for line, name in _imports(path, tree)
+        if any(_under(name, prefix) for prefix in forbidden)
+    ]
+    assert not violations, "\n".join(violations)
+
+
+def test_visibility_rules_do_not_import_transport_or_runtime() -> None:
+    path = SRC / "engine" / "visibility_rules.py"
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    forbidden = ("src.webui", "src.commands", "src.rulesets", "src.engine.game_instance")
+    violations = [
+        f"{path.relative_to(ROOT)}:{line}: forbidden import {name}"
+        for line, name in _imports(path, tree)
+        if any(_under(name, prefix) for prefix in forbidden)
+    ]
+    assert not violations, "\n".join(violations)
+
+
+def _duplicate_proposal_visibility_checks(path: Path, tree: ast.AST) -> list[int]:
+    if path in {SRC / "engine" / "visibility_rules.py", SRC / "engine" / "economy.py",
+                SRC / "llm" / "context_builder.py"}:
+        return []
+    return [
+        getattr(node, "lineno", 0) for node in ast.walk(tree)
+        if isinstance(node, (ast.BoolOp, ast.Compare, ast.comprehension))
+        and {"contributors", "payer_uid"}.issubset({
+            child.value for child in ast.walk(node)
+            if isinstance(child, ast.Constant) and isinstance(child.value, str)
+        })
+    ]
+
+
+def test_proposal_visibility_is_not_reimplemented() -> None:
+    violations = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for line in _duplicate_proposal_visibility_checks(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: duplicate proposal visibility")
+    assert not violations, "\n".join(violations)
+
+
+@pytest.mark.parametrize("source", [
+    "proposal.get('payer_uid') == uid or uid in proposal.get('contributors', [])",
+    "[p for p in records if p.get('payer_uid') and p.get('contributors')]",
+])
+def test_proposal_visibility_guard_rejects_duplicate_checks(source: str) -> None:
+    assert _duplicate_proposal_visibility_checks(SRC / "webui" / "routes" / "other.py", ast.parse(source))
+
+
+def test_read_routes_use_participant_viewer_instead_of_legacy_gm_check() -> None:
+    protected = {
+        "api_detail", "api_game_adventure_projection", "api_log",
+        "api_private_log", "api_table_talk", "_ruleset_requester_is_gm",
+    }
+    found = set()
+    violations = []
+    for path in sorted((SRC / "webui" / "routes").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name not in protected:
+                continue
+            found.add(node.name)
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                name = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+                if name == "is_game_gm":
+                    violations.append(f"{path.relative_to(ROOT)}:{call.lineno}: legacy read identity")
+    assert found == protected
+    assert not violations, "\n".join(violations)
+
+
 def test_game_instance_top_level_field_count_does_not_grow() -> None:
     path = SRC / "engine" / "game_instance.py"
     tree = ast.parse(path.read_text(encoding="utf-8-sig"))

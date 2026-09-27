@@ -1975,6 +1975,9 @@ R6-a 的只读身份由 `src/engine/participant_view.py` 的 `Viewer` / `resolve
 | L5（撤回） | `api_combat_action` | 不是泄露：该路由不在分享白名单，仍以 owner 本人执行；P2P 不转发战斗操作 | 战斗功能缺口不在 R6 范围 |
 | L6 | `services/logs.get_log` | 所有玩家收到世界、玩家与战斗快照，包含 GM 事实 | R6-a2 非 GM 日志白名单投影 |
 | L7 | `services/characters.list_characters`（`GET /characters`） | 任何成员收到本局 NPC 原始记录（HP、阵营等级、AI 附加字段）与世界书全部 NPC 条目（含未登场者的名字、关系与完整描述） | R6-a3 非 GM 返回空 `npcs`；服务函数强制显式传入 `viewer_is_gm` |
+| L8 | 控制权切换后的 `resume_after_control_change` | 空观看者收到其它席位的私密经济提案 | R6-a4 空观看者仅见公开提案；推进不猜测观看者席位 |
+
+经济提案与手动骰的私密记录统一由 `src/engine/visibility_rules.py` 的纯谓词投影。提案对 GM、付款方、旧版 `uid`、收款方与任一出资人可见；手动骰对 GM、发起者与目标可见。两者的公开记录均对所有人可见，手动骰缺省可见性按公开处理；空观看者仅能看到公开记录。对局详情、回合结果、经济阻塞、SSE 签名、掷骰列表与 AI 上下文共用这些规则；GM 的叙事经济上下文仍只读取公开提案，防止私下交易进入公开叙述。
 
 `get_log(include_internal=False)` 先保留既有 GM 指令过滤，再仅返回公开字段：`round`、`actions`、`player_actions`、`gm_response`、`state_changes`、`check_results`、`swipes`、`current_swipe`、`timestamp`、`story_recaps`、`scene_image`。快照、`pre_world_state`、`pre_adventure_progress`、`tags_summary` 及未知新字段默认不公开；新增公开字段必须显式加入 `PUBLIC_LOG_FIELDS`。`actions` 及列表形式的 `player_actions` 在过滤 GM 指令后，再按 `PUBLIC_ACTION_FIELDS` 仅投影 `user_id`、`text`；历史日志 UI 从文本解析骰子展示，并从玩家列表取得角色名，不需要 live-action 的修订或待掷骰字段。ActionRecord 的内部字段与未知新字段默认不公开；`player_actions` 的用户到文本映射保持原样。`swipes` 由叙事字符串构成，`check_results` 由独立的检定结果构造，不透传 ActionRecord。GM 日志保留原有完整响应与叙事清洗，投影不修改存档或原始日志。R6-a 不新增持久化字段，沿用实例 schema **21**；世界书内容投影另属 R6-b。
 

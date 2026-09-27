@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 from src.engine.dice_rng import parse_dice_formula, roll
+from src.engine.visibility_rules import manual_roll_visible_to
 
 @dataclass(frozen=True)
 class ManualRollDependencies:
@@ -20,12 +21,12 @@ class ManualRollService:
     def _inst(self, key): return self.d.get_instance(self.d.parse_game_key(key))
     def _rule(self, inst): return self.d.load_rule(inst) if self.d.load_rule else None
     @staticmethod
-    def _visible(req, uid):
-        return req.get("visibility") == "party" or uid == req.get("created_by") or uid in req.get("target_uids", [])
+    def _visible(req, uid, gm_uid=""):
+        return manual_roll_visible_to(req, viewer_uid=uid, viewer_is_gm=bool(uid) and uid == gm_uid)
     def list(self, key, uid):
         inst=self._inst(key)
         if not inst: return None
-        return [r for r in inst.manual_roll_requests if self._visible(r, uid)]
+        return [r for r in inst.manual_roll_requests if self._visible(r, uid, inst.gm_uid)]
 
     @staticmethod
     def _purpose(value: object) -> str:

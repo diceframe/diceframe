@@ -26,6 +26,9 @@ check_untyped_defs = true
 files = [
     "scripts/architecture_fitness.py",
     "src/engine/action_gate.py",
+    "src/engine/participant_view.py",
+    "src/engine/visibility_rules.py",
+    "src/webui/viewer.py",
     "src/engine/contracts.py",
     "src/engine/currency/codec.py",
     "src/engine/currency/migration.py",
