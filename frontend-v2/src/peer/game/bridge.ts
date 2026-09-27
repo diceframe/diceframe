@@ -239,7 +239,21 @@ export class PeerHostGameBridge {
     )
 
     if (operation === 'game.detail') {
-      return { ...current, has_room_password: false, peer_transport: true }
+      if (actorId) {
+        const detail = await read('')
+        return { ...detail, has_room_password: false, peer_transport: true }
+      }
+      const lobbyFields = [
+        'game_key', 'world_id', 'rule_id', 'world_name', 'group_name',
+        'state', 'player_count', 'max_players', 'player_access_open',
+        'language',
+      ] as const
+      const lobby = Object.fromEntries(
+        lobbyFields
+          .filter(field => field in current)
+          .map(field => [field, current[field]]),
+      )
+      return { ...lobby, has_room_password: false, peer_transport: true }
     }
     if (operation === 'game.characters') return read('/characters')
     if (operation === 'game.player_context') {

@@ -1,0 +1,63 @@
+"""Canonical participant identity projection for read-side requests."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Literal
+
+
+ViewerRole = Literal["gm", "seat", "outsider"]
+
+
+@dataclass(frozen=True)
+class Viewer:
+    """The server-derived read identity, never a client-supplied role."""
+
+    role: ViewerRole
+    uid: str = ""
+
+    @property
+    def is_gm(self) -> bool:
+        return self.role == "gm"
+
+    @property
+    def kind(self) -> ViewerRole:
+        """Alias used by projection callers that describe the role as a kind."""
+        return self.role
+
+    @property
+    def user_id(self) -> str:
+        return self.uid
+
+    @property
+    def is_seat(self) -> bool:
+        return self.role == "seat"
+
+
+def resolve_viewer(
+    instance: Any,
+    user_id: str = "",
+    *,
+    owner_authenticated: bool = False,
+    preview: bool = False,
+) -> Viewer:
+    """Resolve a request to GM, a player seat, or an outsider.
+
+    Preview is deliberately evaluated first: an owner viewing a player seat
+    must receive that seat's projection and can never regain GM visibility.
+    """
+
+    if instance is None:
+        return Viewer("outsider", str(user_id or "").strip())
+    uid = str(user_id or "").strip()
+    players = getattr(instance, "players", {}) or {}
+    if preview:
+        return Viewer("seat", uid) if uid and uid in players else Viewer("outsider", uid)
+    if uid and uid == str(getattr(instance, "gm_uid", "") or ""):
+        return Viewer("gm", uid)
+    if owner_authenticated:
+        gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        return Viewer("gm", gm_uid or uid)
+    if uid and uid in players:
+        return Viewer("seat", uid)
+    return Viewer("outsider", uid)
