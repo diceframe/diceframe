@@ -11,6 +11,7 @@ from src.engine.modules import (  # noqa: F401
     private_channels,
     progression_state,
     room_access,
+    session_stats,
     round_presentation,
     table_settings,
     world_reports,

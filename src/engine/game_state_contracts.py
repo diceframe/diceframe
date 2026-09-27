@@ -133,10 +133,6 @@ class GamePersistedState(TypedDict, total=False):
     scene: str
     log: list[RoundLogEntry]
     world_state: OpaqueState
-    total_llm_calls: int
-    total_tokens: int
-    started_at: str
-    last_activity: str
     language: str
     gm_uid: str
     modules: dict[str, dict[str, Any]]

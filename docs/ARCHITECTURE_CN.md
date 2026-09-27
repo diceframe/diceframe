@@ -10,7 +10,8 @@
 > - 分支：`main`
 > - Commit：`962fda45a68caa24bac38fd2313d92d66fa59a7a`
 > - Release：`2.6.1`
-> - 当前 GameInstance persisted schema：`29`
+> - 当前 GameInstance persisted schema：`30`
+> - R8-a：统计字段 `total_llm_calls`、`total_tokens`、`started_at`、`last_activity` 存于 `modules.session_stats`；旧属性代理保留，29→30 迁移删除旧顶层键。
 > - 当前 Lorebook SQLite schema（`PRAGMA user_version`）：`9`
 > - 文档核验日期：2026-09-18
 >

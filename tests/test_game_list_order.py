@@ -16,20 +16,22 @@ def _query_dependencies(registry: GameRegistry) -> GameQueryDependencies:
 
 def test_list_games_returns_most_recent_activity_first(tmp_path):
     registry = GameRegistry(tmp_path)
-    registry.register(GameInstance(
+    old = GameInstance(
         game_key=("web", "old", "bot"),
         rule_id="freeform_fantasy",
         world_name="Old",
-        started_at="2026-08-01T10:00:00+00:00",
-        last_activity="2026-08-02T10:00:00+00:00",
-    ))
-    registry.register(GameInstance(
+    )
+    old.started_at = "2026-08-01T10:00:00+00:00"
+    old.last_activity = "2026-08-02T10:00:00+00:00"
+    registry.register(old)
+    new = GameInstance(
         game_key=("web", "new", "bot"),
         rule_id="freeform_fantasy",
         world_name="New",
-        started_at="2026-08-19T10:00:00+00:00",
-        last_activity="2026-08-20T10:00:00+00:00",
-    ))
+    )
+    new.started_at = "2026-08-19T10:00:00+00:00"
+    new.last_activity = "2026-08-20T10:00:00+00:00"
+    registry.register(new)
     registry.register(GameInstance(
         game_key=("web", "undated", "bot"),
         rule_id="freeform_fantasy",

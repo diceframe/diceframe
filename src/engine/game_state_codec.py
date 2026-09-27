@@ -52,10 +52,6 @@ class GameStateCodec:
             "scene": instance.scene,
             "log": instance.log[-100:],
             "world_state": instance.world_state,
-            "total_llm_calls": instance.total_llm_calls,
-            "total_tokens": instance.total_tokens,
-            "started_at": instance.started_at,
-            "last_activity": instance.last_activity,
             "language": normalize_language(instance.language),
             "gm_uid": instance.gm_uid,
             "modules": {**instance.modules, "health": health.persisted_state(instance)},
@@ -141,10 +137,6 @@ class GameStateCodec:
                 if isinstance(data.get("world_state"), dict)
                 else {}
             ),
-            total_llm_calls=data.get("total_llm_calls", 0),
-            total_tokens=data.get("total_tokens", 0),
-            started_at=data.get("started_at", ""),
-            last_activity=data.get("last_activity", ""),
             language=normalize_language(data.get("language", DEFAULT_LANGUAGE)),
             gm_uid=data.get("gm_uid", ""),
             modules=data.get("modules") if isinstance(data.get("modules"), dict) else {},
