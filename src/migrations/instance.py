@@ -23,7 +23,7 @@ from src.engine.world_state import fresh_world_state
 
 logger = logging.getLogger("trpg")
 
-CURRENT_INSTANCE_SCHEMA_VERSION = 25
+CURRENT_INSTANCE_SCHEMA_VERSION = 26
 
 # 内置 freeform_coc 在 Currency Model V2 中把 base_unit 从「美元」升级为
 # 「美分」（1 amount = 1 美分），存量 CoC 存档的所有 canonical 金额必须 ×100
@@ -516,6 +516,30 @@ def _migrate_v24_to_v25(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v25_to_v26(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move round presentation into its slot without changing existing slots."""
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        modules = {}
+    gm_directives = payload.pop("gm_directives", None)
+    quick_actions = payload.pop("quick_actions", None)
+    last_state_update = payload.pop("last_state_update", None)
+    last_token_budget_bump = payload.pop("last_token_budget_bump", None)
+    pending_combat_results = payload.pop("pending_combat_results", None)
+    if not isinstance(modules.get("round_presentation"), dict):
+        modules["round_presentation"] = {
+            "schema_version": 1,
+            "gm_directives": gm_directives if isinstance(gm_directives, list) else [],
+            "quick_actions": quick_actions if isinstance(quick_actions, list) else [],
+            "last_state_update": last_state_update if isinstance(last_state_update, dict) else None,
+            "last_token_budget_bump": last_token_budget_bump if isinstance(last_token_budget_bump, dict) else None,
+            "pending_combat_results": pending_combat_results if isinstance(pending_combat_results, list) else [],
+        }
+    payload["modules"] = modules
+    payload["instance_schema_version"] = 26
+    return payload
+
+
 def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Apply sequential, idempotent migrations to one persisted save payload."""
 
@@ -595,6 +619,9 @@ def migrate_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     if version == 24:
         payload = _migrate_v24_to_v25(payload)
         version = 25
+    if version == 25:
+        payload = _migrate_v25_to_v26(payload)
+        version = 26
     payload["instance_schema_version"] = version
     return payload
 

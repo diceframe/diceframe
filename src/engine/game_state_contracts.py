@@ -14,7 +14,6 @@ from src.engine.contracts import (
     CheckResult,
     PlayerData,
     RoundLogEntry,
-    TokenBudgetBump,
 )
 
 
@@ -153,9 +152,7 @@ class GamePersistedState(TypedDict, total=False):
     bot_bind_token: str
     room_password: str
     room_token: str
-    pending_combat_results: list[OpaqueState]
     modules: dict[str, dict[str, Any]]
-    quick_actions: list[str]
     last_check: CheckResult | None
     last_checks: list[CheckResult]
     manual_roll_requests: list[dict[str, Any]]
@@ -166,8 +163,5 @@ class GamePersistedState(TypedDict, total=False):
     round_start_snapshot: PlayerRollbackSnapshot
     round_entity_snapshot: OpaqueState
     death_save_outcomes: dict[str, dict[str, OpaqueState]]
-    last_state_update: OpaqueState | None
-    last_token_budget_bump: TokenBudgetBump | None
-    gm_directives: list[OpaqueState]
     puzzles: OpaqueState
     plot_tracker: OpaqueState

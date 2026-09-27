@@ -74,9 +74,7 @@ class GameStateCodec:
             "bot_bind_token": instance.bot_bind_token,
             "room_password": instance.room_password,
             "room_token": instance.room_token,
-            "pending_combat_results": instance.pending_combat_results,
             "modules": {**instance.modules, "health": health.persisted_state(instance)},
-            "quick_actions": instance.quick_actions,
             "last_check": instance.last_check,
             "last_checks": instance.last_checks,
             "manual_roll_requests": instance.manual_roll_requests,
@@ -87,9 +85,6 @@ class GameStateCodec:
             "round_start_snapshot": instance.round_start_snapshot,
             "round_entity_snapshot": instance.round_entity_snapshot,
             "death_save_outcomes": instance.death_save_outcomes,
-            "last_state_update": instance.last_state_update,
-            "last_token_budget_bump": instance.last_token_budget_bump,
-            "gm_directives": instance.gm_directives,
         }
         if instance.ruleset_runtime:
             data["ruleset_runtime"] = instance.ruleset_runtime
@@ -192,9 +187,7 @@ class GameStateCodec:
             bot_bind_token=data.get("bot_bind_token", ""),
             room_password=data.get("room_password", ""),
             room_token=data.get("room_token", ""),
-            pending_combat_results=data.get("pending_combat_results", []),
             modules=data.get("modules") if isinstance(data.get("modules"), dict) else {},
-            quick_actions=data.get("quick_actions", []),
             last_check=data.get("last_check"),
             last_checks=data.get("last_checks") or [],
             manual_roll_requests=data.get("manual_roll_requests") or [],
@@ -210,9 +203,6 @@ class GameStateCodec:
                 else {}
             ),
             death_save_outcomes=death_save_outcomes,
-            last_state_update=data.get("last_state_update"),
-            last_token_budget_bump=data.get("last_token_budget_bump"),
-            gm_directives=data.get("gm_directives", []),
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
         )
