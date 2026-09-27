@@ -13,17 +13,12 @@ ViewerRole = Literal["gm", "seat", "outsider"]
 class Viewer:
     """The server-derived read identity, never a client-supplied role."""
 
-    role: ViewerRole
+    kind: ViewerRole
     uid: str = ""
 
     @property
     def is_gm(self) -> bool:
-        return self.role == "gm"
-
-    @property
-    def kind(self) -> ViewerRole:
-        """Alias used by projection callers that describe the role as a kind."""
-        return self.role
+        return self.kind == "gm"
 
     @property
     def user_id(self) -> str:
@@ -31,15 +26,19 @@ class Viewer:
 
     @property
     def is_seat(self) -> bool:
-        return self.role == "seat"
+        return self.kind == "seat"
+
+    @property
+    def is_member(self) -> bool:
+        return self.kind in {"gm", "seat"}
 
 
 def resolve_viewer(
     instance: Any,
-    user_id: str = "",
     *,
+    user_id: str = "",
     owner_authenticated: bool = False,
-    preview: bool = False,
+    player_preview: bool = False,
 ) -> Viewer:
     """Resolve a request to GM, a player seat, or an outsider.
 
@@ -51,7 +50,7 @@ def resolve_viewer(
         return Viewer("outsider", str(user_id or "").strip())
     uid = str(user_id or "").strip()
     players = getattr(instance, "players", {}) or {}
-    if preview:
+    if player_preview:
         return Viewer("seat", uid) if uid and uid in players else Viewer("outsider", uid)
     if uid and uid == str(getattr(instance, "gm_uid", "") or ""):
         return Viewer("gm", uid)

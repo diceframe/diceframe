@@ -29,6 +29,20 @@ const MUTATING_OPERATIONS = new Set<PeerGameOperation>([
 const MAX_REQUESTS_PER_MINUTE = 120
 const MAX_IN_FLIGHT_PER_PEER = 8
 
+const LOBBY_DETAIL_FIELDS = [
+  'game_key', 'player_access_open', 'player_count', 'max_players',
+  'has_room_password', 'world_name', 'scene', 'rule_id', 'solo_mode',
+] as const
+const JOIN_CHARACTER_FIELDS = [
+  'rule_attrs', 'rule_attrs_total', 'rule_classes', 'rule_special_stats',
+  'rule_meta', 'ruleset_runtime',
+] as const
+const MULTIPLAYER_FIELDS = [
+  'state', 'round_number', 'solo_mode', 'player_count', 'max_players',
+  'ready_count', 'alive_count', 'active_count', 'away_count',
+  'can_accept_actions', 'can_advance',
+] as const
+
 /**
  * 对端 payload 字段白名单：只放行各操作实际需要的字段，其余全部剥离。
  * 对端是其他玩家的浏览器，任意 JSON 直通本地 API 会造成越权注入
@@ -243,19 +257,32 @@ export class PeerHostGameBridge {
         const detail = await read('')
         return { ...detail, has_room_password: false, peer_transport: true }
       }
-      const lobbyFields = [
-        'game_key', 'world_id', 'rule_id', 'world_name', 'group_name',
-        'state', 'player_count', 'max_players', 'player_access_open',
-        'language',
-      ] as const
       const lobby = Object.fromEntries(
-        lobbyFields
+        LOBBY_DETAIL_FIELDS
           .filter(field => field in current)
           .map(field => [field, current[field]]),
       )
+      const multiplayer = current.multiplayer as Record<string, unknown> | undefined
+      if (multiplayer && typeof multiplayer === 'object') {
+        lobby.multiplayer = Object.fromEntries(
+          MULTIPLAYER_FIELDS
+            .filter(field => field in multiplayer)
+            .map(field => [field, multiplayer[field]]),
+        )
+      }
       return { ...lobby, has_room_password: false, peer_transport: true }
     }
-    if (operation === 'game.characters') return read('/characters')
+    if (operation === 'game.characters') {
+      if (!actorId) {
+        const bootstrap = Object.fromEntries(
+          JOIN_CHARACTER_FIELDS
+            .filter(field => field in current)
+            .map(field => [field, current[field]]),
+        )
+        return { ...bootstrap, players: [], npcs: [] }
+      }
+      return read('/characters')
+    }
     if (operation === 'game.player_context') {
       return { ok: true, preview: false, delegate: false, user_id: actorId }
     }
