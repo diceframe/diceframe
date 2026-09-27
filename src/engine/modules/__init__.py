@@ -11,4 +11,5 @@ from src.engine.modules import (  # noqa: F401
     private_channels,
     progression_state,
     round_presentation,
+    world_reports,
 )

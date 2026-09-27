@@ -156,9 +156,6 @@ class GamePersistedState(TypedDict, total=False):
     last_check: CheckResult | None
     last_checks: list[CheckResult]
     manual_roll_requests: list[dict[str, Any]]
-    last_overreach: list[Any]
-    last_world_legality: list[Any]
-    last_world_events: list[Any]
     round_checks_prepared: bool
     round_start_snapshot: PlayerRollbackSnapshot
     round_entity_snapshot: OpaqueState

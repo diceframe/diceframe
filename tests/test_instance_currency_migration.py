@@ -8,6 +8,14 @@ from src.migrations.instance import (
 )
 
 
+def _reward_policy(payload: dict) -> dict:
+    """economy_reward_policy at its current home (top level before R7-g)."""
+    settings = (payload.get("modules") or {}).get("table_settings")
+    if isinstance(settings, dict) and "economy_reward_policy" in settings:
+        return settings["economy_reward_policy"]
+    return payload["economy_reward_policy"]
+
+
 def _coc_payload() -> dict:
     """一个典型的 CoC 存档：余额、待确认提案、流水、奖励上限与回合快照。"""
 
@@ -58,7 +66,7 @@ def test_coc_save_amounts_scale_by_100_once():
     entries = payload["modules"]["economy"]["state"]["transactions"][0]["entries"]
     assert entries[0] == {"account": "character:p1", "delta": -500, "before": 8_000, "after": 7_500}
     assert entries[1]["delta"] == 500
-    assert payload["economy_reward_policy"]["auto_reward_cap"] == 5_000
+    assert _reward_policy(payload)["auto_reward_cap"] == 5_000
     assert payload["round_start_snapshot"]["p1"]["currency"]["amount"] == 6_000
     assert payload["log"][0]["round_start_snapshot"]["p1"]["gold"] == 8_000
     assert payload["log"][0]["pre_state_snapshot"]["p1"]["gold"] == 7_000
@@ -66,7 +74,7 @@ def test_coc_save_amounts_scale_by_100_once():
     # 二次 load 不重复 ×100（幂等）。
     again = migrate_game_state_payload(payload)
     assert again["players"]["p1"]["character_sheet"]["currency"]["amount"] == 10_000
-    assert again["economy_reward_policy"]["auto_reward_cap"] == 5_000
+    assert _reward_policy(again)["auto_reward_cap"] == 5_000
 
 
 def test_non_coc_rules_are_not_migrated():
@@ -80,7 +88,7 @@ def test_non_coc_rules_are_not_migrated():
         })
         assert payload["players"]["p1"]["character_sheet"]["gold"] == 100
         assert payload["modules"]["economy"]["state"]["proposals"][0]["amount"] == 25
-        assert payload["economy_reward_policy"]["auto_reward_cap"] == 50
+        assert _reward_policy(payload)["auto_reward_cap"] == 50
         assert payload["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
 
 

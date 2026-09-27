@@ -47,6 +47,7 @@ from src.engine.modules import (
     private_channels,
     progression_state,
     round_presentation,
+    world_reports,
 )
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.engine.player_control import (
@@ -227,20 +228,6 @@ class GameInstance:
     # retries reuse the same roll without leaking it into future rounds.
     death_save_outcomes: dict[str, dict[str, dict]] = field(default_factory=dict)
 
-    # 本轮裁判标注的越权声明（仅多人局且开关启用时注入 GM 上下文）
-    last_overreach: list = field(default_factory=list)
-
-    # 本轮由 server 判定的行动合法性矛盾（Issue #284）：每条含
-    # player / code / location / current，供可信裁定块与前端提示使用。
-    # 与 last_overreach 分开：越权是玩家替世界/他人声明事实，合法性是玩家
-    # 自己的动作与权威世界真相矛盾。
-    last_world_legality: list = field(default_factory=list)
-
-    # 本轮逻辑时间推进后确定性结算的定时事件（Issue #284 / WP6）：每条形如
-    # {"event_id", "label", "due_at", "status": "applied"|"failed", "error"?}，
-    # 供 GM 可信块叙述与前端提示使用。
-    last_world_events: list = field(default_factory=list)
-
     # 单人模式
     solo_mode: bool = False  # True=单人模式, 行动后自动推进
 
@@ -289,6 +276,34 @@ class GameInstance:
     # 恢复后是否仍有待幸运决定的检定（recover_all 设置，供前端提示；定时器不跨重启）
     pending_luck_after_recovery: bool = False
     _tag_fail_streak: int = field(default=0, repr=False)
+
+    @property
+    def last_overreach(self) -> list:
+        # 本轮裁判标注的越权声明（仅多人局且开关启用时注入 GM 上下文）。
+        return world_reports.last_overreach(self)
+
+    @last_overreach.setter
+    def last_overreach(self, value: Any) -> None:
+        world_reports.replace_last_overreach(self, value)
+
+    @property
+    def last_world_legality(self) -> list:
+        # server 判定的行动合法性矛盾：player / code / location / current。
+        # 与替世界/他人声明事实的 overreach 分开，供可信裁定块与前端提示使用。
+        return world_reports.last_world_legality(self)
+
+    @last_world_legality.setter
+    def last_world_legality(self, value: Any) -> None:
+        world_reports.replace_last_world_legality(self, value)
+
+    @property
+    def last_world_events(self) -> list:
+        # 本轮确定性结算的定时事件：event_id / label / due_at / status / error。
+        return world_reports.last_world_events(self)
+
+    @last_world_events.setter
+    def last_world_events(self, value: Any) -> None:
+        world_reports.replace_last_world_events(self, value)
 
     @property
     def gm_directives(self) -> list[dict]:
