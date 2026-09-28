@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
+from src.engine.visibility_rules import manual_roll_visible_to
 from src.knowledge.visibility import PUBLIC_VISIBILITY_MARKERS, visibility_values
 from src.llm.parser import sanitize_narration
 from src.llm.world_prompt import format_world_state_block
@@ -317,10 +318,8 @@ def _manual_roll_enters_ai_context(req: dict) -> bool:
 
 
 def _manual_roll_visible_to_viewer(req: dict, viewer_is_gm: bool, viewer_uid: str | None) -> bool:
-    """私密投掷仅 GM/AI 视角与目标本人可见；玩家视角缺 uid 时 fail closed 排除。"""
-    if viewer_is_gm or req.get("visibility") != "private":
-        return True
-    return bool(viewer_uid) and str(viewer_uid) in req.get("target_uids", [])
+    """Apply the shared roll visibility policy to AI context."""
+    return manual_roll_visible_to(req, viewer_uid=str(viewer_uid or ""), viewer_is_gm=viewer_is_gm)
 
 
 def _signed_number(value: object) -> str:

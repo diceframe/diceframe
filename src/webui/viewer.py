@@ -1,0 +1,16 @@
+"""HTTP adaptation for the engine participant read identity."""
+
+from __future__ import annotations
+
+from aiohttp import web
+
+from src.engine.participant_view import Viewer, resolve_viewer
+
+
+def viewer_for(request: web.Request, instance) -> Viewer:
+    return resolve_viewer(
+        instance,
+        user_id=str(request.get("user_id", "") or ""),
+        owner_authenticated=bool(request.get("owner_authenticated", False)),
+        player_preview=bool(request.get("player_preview", False)),
+    )

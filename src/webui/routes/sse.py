@@ -12,6 +12,7 @@ from aiohttp import web
 
 from src.engine.economy import has_blocking_economy_decision, pending_economy_proposals
 from src.engine.game_instance import GameState
+from src.engine.visibility_rules import proposal_visible_to
 from src.llm.parser import sanitize_narration
 from src.webui.connection_pool import ConnectionPool
 from src.webui.routes._common import MAX_ACTION_CHARS, _get_api
@@ -295,15 +296,9 @@ def _play_public_signature(inst, user_id: str) -> str:
         "quick_actions": getattr(inst, "quick_actions", []),
         "economy_proposals": [
             proposal for proposal in pending_economy_proposals(inst)
-            if (
-                user_id == inst.gm_uid
-                or proposal.get("visibility") == "party"
-                or user_id == str(proposal.get("payer_uid") or proposal.get("uid") or "")
-                or user_id in {
-                    str(item.get("uid") or "")
-                    for item in (proposal.get("contributors") or [])
-                    if isinstance(item, dict)
-                }
+            if proposal_visible_to(
+                proposal, viewer_uid=user_id,
+                viewer_is_gm=bool(user_id) and user_id == inst.gm_uid,
             )
         ],
         "multiplayer": inst.multiplayer_status(),

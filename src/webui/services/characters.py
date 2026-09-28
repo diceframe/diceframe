@@ -477,6 +477,8 @@ def format_attribute_map(attributes: dict, rule_attrs: list[dict]) -> str:
 def list_characters(
     dependencies: CharacterDependencies,
     game_key: str,
+    *,
+    viewer_is_gm: bool,
 ) -> dict[str, Any]:
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
@@ -491,33 +493,34 @@ def list_characters(
         normalize_character_sheet(cs, rule)
         cs["attributes_display"] = format_attribute_map(cs.get("attributes", {}), rule_attrs)
     npcs_by_name: dict[str, dict[str, Any]] = {}
-    for nid, npc in inst.npcs.items():
-        name = npc.get("character_name") or npc.get("name") or nid
-        npcs_by_name[name] = {"npc_id": nid, **npc, "name": name}
-    if dependencies.assets.lorebook and inst.world_id:
-        entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
-        world_data = dependencies.assets.load_world_template(
-            inst.world_id,
-            str(getattr(inst, "language", "") or ""),
-        )
-        lore_status = localized_text(
-            getattr(inst, "language", ""),
-            {"en": "Lorebook", "zh-CN": "世界书", "ja": "ワールドブック", "de": "Lorebook"},
-        )
-        for entry in localize_lorebook_entries(entries, world_data):
-            name = entry.get("name", "")
-            if not name or name in npcs_by_name:
-                continue
-            npcs_by_name[name] = {
-                "npc_id": entry.get("id", name),
-                "name": name,
-                "character_name": name,
-                "tier": entry.get("tier", ""),
-                "status": lore_status,
-                "relation": entry.get("relation", ""),
-                "content": entry.get("content", ""),
-                "portrait": entry.get("portrait"),
-            }
+    if viewer_is_gm:
+        for nid, npc in inst.npcs.items():
+            name = npc.get("character_name") or npc.get("name") or nid
+            npcs_by_name[name] = {"npc_id": nid, **npc, "name": name}
+        if dependencies.assets.lorebook and inst.world_id:
+            entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
+            world_data = dependencies.assets.load_world_template(
+                inst.world_id,
+                str(getattr(inst, "language", "") or ""),
+            )
+            lore_status = localized_text(
+                getattr(inst, "language", ""),
+                {"en": "Lorebook", "zh-CN": "世界书", "ja": "ワールドブック", "de": "Lorebook"},
+            )
+            for entry in localize_lorebook_entries(entries, world_data):
+                name = entry.get("name", "")
+                if not name or name in npcs_by_name:
+                    continue
+                npcs_by_name[name] = {
+                    "npc_id": entry.get("id", name),
+                    "name": name,
+                    "character_name": name,
+                    "tier": entry.get("tier", ""),
+                    "status": lore_status,
+                    "relation": entry.get("relation", ""),
+                    "content": entry.get("content", ""),
+                    "portrait": entry.get("portrait"),
+                }
     npcs = list(npcs_by_name.values())
     rule_attrs_total = _get_rule_attrs_total(dependencies, inst)
     result: dict[str, Any] = {

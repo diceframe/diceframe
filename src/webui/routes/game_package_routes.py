@@ -57,10 +57,10 @@ async def api_export_game(request: web.Request) -> web.Response:
 
     result = api.export_game_package(game_key)
     if not result.get("ok"):
-        return web.json_response(
-            {"error": str(result.get("error") or "导出失败")},
-            status=int(result.get("status") or 500),
-        )
+        error = {"error": str(result.get("error") or "导出失败")}
+        if result.get("error_code"):
+            error["error_code"] = str(result["error_code"])
+        return web.json_response(error, status=int(result.get("status") or 500))
     body = result["payload"]
     filename = str(result["filename"])
     ascii_fallback = str(result["ascii_filename"])

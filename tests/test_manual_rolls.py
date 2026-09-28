@@ -16,6 +16,7 @@ def _make_service(instance, saves):
 
 def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
     instance = SimpleNamespace(
+        modules={},
         gm_uid="gm",
         run_id="run-1",
         round_number=2,
@@ -59,6 +60,7 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
 
 def test_manual_roll_purpose_check_and_contest_are_evaluated_without_state_effects():
     instance = SimpleNamespace(
+        modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}, "p2": {"character_name": "Bob"}},
         manual_roll_requests=[], last_activity="",
@@ -100,6 +102,7 @@ def test_manual_roll_purpose_check_and_contest_are_evaluated_without_state_effec
 
 def test_manual_roll_create_normalizes_include_in_ai_context():
     instance = SimpleNamespace(
+        modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}},
         manual_roll_requests=[], last_activity="",
@@ -211,6 +214,7 @@ def _context_instance(requests, run_id="run-1", language="zh-CN"):
 
 def test_resolved_service_requests_flow_into_ai_context():
     instance = SimpleNamespace(
+        modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
         players={"p1": {"character_name": "Alice"}, "p2": {"character_name": "Bob"}},
         manual_roll_requests=[], last_activity="",

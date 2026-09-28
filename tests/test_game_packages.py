@@ -6,7 +6,10 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import FormData, web
+from aiohttp.test_utils import TestClient, TestServer
 
+from src.webui.routes import game_package_routes
 from src.webui.services import game_packages
 
 
@@ -92,6 +95,43 @@ async def test_import_game_package_delegates_assets_and_publicizes_key(tmp_path)
     assert result == {"ok": True, "game_key": "web|imported|bot"}
     assert registry.import_payload == b"zip-payload"
     assert [kind for kind, _payload in uploads] == ["scene", "map"]
+
+
+@pytest.mark.asyncio
+async def test_package_routes_report_unsupported_media_as_bad_request() -> None:
+    failure = {
+        "ok": False,
+        "error_code": "UNSUPPORTED_MEDIA_SCHEMA",
+        "error": "unsupported media module schema: 99",
+        "status": 400,
+    }
+
+    async def import_package(_payload):
+        return dict(failure)
+
+    @web.middleware
+    async def authenticate(request, handler):
+        request["user_id"] = "gm"
+        return await handler(request)
+
+    app = web.Application(middlewares=[authenticate])
+    app["api"] = SimpleNamespace(
+        get_game_instance=lambda _key: SimpleNamespace(gm_uid="gm"),
+        export_game_package=lambda _key: dict(failure),
+        import_game_package=import_package,
+    )
+    app.router.add_get("/games/{game_key}/export", game_package_routes.api_export_game)
+    app.router.add_post("/games/import", game_package_routes.api_import_game)
+    async with TestClient(TestServer(app)) as client:
+        exported = await client.get("/games/test/export")
+        upload = FormData()
+        upload.add_field("file", b"package", filename="save.zip", content_type="application/zip")
+        imported = await client.post("/games/import", data=upload, headers={"X-TRPG-Confirm": "true"})
+        for response in (exported, imported):
+            assert response.status == 400
+            body = await response.json()
+            assert body["error_code"] == failure["error_code"]
+            assert body["error"] == failure["error"]
 
 
 def test_export_game_package_includes_resolved_scene_and_map_assets(tmp_path) -> None:

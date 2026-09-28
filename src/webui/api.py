@@ -17,8 +17,6 @@ from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.lorebook.store import LorebookStore
-from src.lorebook.activation import DEFAULT_VECTOR_ACTIVATION
-from src.lorebook.exporter import export_lorebook_native, export_lorebook_v3
 from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
@@ -30,24 +28,17 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
-from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
+from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
 from src.webui.services import memory as memory_service
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
-logger = logging.getLogger("trpg")
+# Preserve the existing public import used by callers while the service owns the value.
+CANONICAL_ENTRY_DEFAULTS = lorebooks.CANONICAL_ENTRY_DEFAULTS
 
-#: Canonical defaults for a *newly created* entry. Legacy adapter drafts and the
-#: world-copy / NPC compatibility paths keep their own historical defaults; these
-#: apply only at the canonical create-entry boundary.
-CANONICAL_ENTRY_DEFAULTS: dict[str, Any] = {
-    "priority": 100,
-    "order": 100,
-    "prompt_slot": "world_background",
-    "vector_activation": DEFAULT_VECTOR_ACTIVATION,
-}
+logger = logging.getLogger("trpg")
 
 
 def can_modify_character(session_uid: str, target_uid: str, gm_uid: str, owner: bool = False) -> bool:
@@ -1800,241 +1791,66 @@ class WebAPI:
     def import_entries(self, world_id: str, entries: list) -> dict[str, Any]:
         return worlds.import_entries(self._world_dependencies, world_id, entries)
 
+    def _lorebook_dependencies(self) -> lorebooks.LorebookDependencies:
+        registry = getattr(self, "_reg", None)
+        handler = getattr(self, "_handler", None)
+        return lorebooks.LorebookDependencies(
+            lorebook=self._lore,
+            get_instance=lambda key: (
+                registry.get(_parse_game_key(key)) if registry is not None and key else None
+            ),
+            get_lore_retriever=lambda: getattr(handler, "lore_retriever", None),
+        )
+
     def list_lorebooks(self, world_id: str = "", game_key: str = "") -> dict[str, Any]:
-        """List canonical books visible in a world-management scope.
-
-        Each row carries the binding-derived ``scope`` / ``primary`` facts the
-        management UI has to show (name · Primary · scope · enabled). They are
-        derived from the canonical bindings rather than stored on the book, so a
-        book bound in several scopes reports the most specific one it has here.
-        """
-
-        bindings_by_book: dict[str, list[dict[str, Any]]] = {}
-        for binding in self._lore.list_bindings():
-            bindings_by_book.setdefault(str(binding.get("book_id") or ""), []).append(binding)
-        books = self._lore.list_lorebooks(scope_kind="world", scope_id=world_id) if world_id else []
-        global_books = self._lore.list_lorebooks(scope_kind="global", scope_id="")
-        game_books = self._game_scoped_lorebooks(game_key) if game_key else []
-        # 完全没有 binding 的 Book 也必须可见：否则「新建世界书」和「暂不绑定」导入
-        # 都会产出一本谁也管不到的隐形书，用户再也无法给它加绑定。
-        unbound = [
-            book for book in self._lore.list_lorebooks()
-            if not bindings_by_book.get(str(book.get("id") or ""))
-        ]
-        seen: set[str] = set()
-        merged = []
-        for book in [*books, *global_books, *game_books, *unbound]:
-            book_id = str(book.get("id") or "")
-            if not book_id or book_id in seen:
-                continue
-            seen.add(book_id)
-            row = dict(book)
-            bindings = bindings_by_book.get(book_id, [])
-            row["bindings"] = bindings
-            row["scope"] = self._book_scope(bindings)
-            row["primary"] = any(str(b.get("role") or "") == "primary" for b in bindings)
-            merged.append(row)
-        return {"books": merged}
-
-    def _game_scoped_lorebooks(self, game_key: str) -> list[dict[str, Any]]:
-        """Books bound to this game, or to one of its characters.
-
-        Without this the workspace's 当前游戏 / 角色 scope filters would be
-        decorative: such books exist in the canonical store but would never be
-        listed for management.
-        """
-
-        rows = list(self._lore.list_lorebooks(scope_kind="game", scope_id=game_key))
-        instance = self._reg.get(_parse_game_key(game_key)) if game_key else None
-        players = getattr(instance, "players", None) if instance is not None else None
-        for uid in sorted(players or {}):
-            rows.extend(self._lore.list_lorebooks(scope_kind="character", scope_id=str(uid)))
-        return rows
-
-    @staticmethod
-    def _book_scope(bindings: list[dict[str, Any]]) -> str:
-        """The scope label for a book: most specific binding wins, else unbound."""
-
-        order = ("character", "game", "world", "global")
-        kinds = {str(binding.get("scope_kind") or "") for binding in bindings}
-        for kind in order:
-            if kind in kinds:
-                return kind
-        return ""
+        return lorebooks.list_lorebooks(self._lorebook_dependencies(), world_id, game_key)
 
     def create_lorebook(self, book: dict[str, Any]) -> dict[str, Any]:
-        book = dict(book)
-        if not str(book.get("id") or "").strip() or not str(book.get("name") or "").strip():
-            return {"ok": False, "error": "id and name are required"}
-        if self._lore.get_lorebook(book["id"]):
-            return {"ok": False, "error": "Lorebook already exists"}
-        self._lore.create_lorebook(book)
-        return {"ok": True, "book": self._lore.get_lorebook(book["id"])}
+        return lorebooks.create_lorebook(self._lorebook_dependencies(), book)
 
     def update_lorebook(self, book_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-        if self._lore.get_lorebook(book_id) is None:
-            return {"ok": False, "error": "Lorebook not found"}
-        self._lore.update_lorebook(book_id, updates)
-        return {"ok": True, "book": self._lore.get_lorebook(book_id)}
+        return lorebooks.update_lorebook(self._lorebook_dependencies(), book_id, updates)
 
     def delete_lorebook(self, book_id: str) -> dict[str, Any]:
-        try:
-            deleted = self._lore.delete_lorebook(book_id)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": deleted, **({} if deleted else {"error": "Lorebook not found"}), "book_id": book_id}
+        return lorebooks.delete_lorebook(self._lorebook_dependencies(), book_id)
 
     def list_lorebook_bindings(self, book_id: str) -> dict[str, Any]:
-        if self._lore.get_lorebook(book_id) is None:
-            return {"ok": False, "error": "Lorebook not found", "bindings": []}
-        return {"ok": True, "bindings": [b for b in self._lore.list_bindings() if b.get("book_id") == book_id]}
+        return lorebooks.list_lorebook_bindings(self._lorebook_dependencies(), book_id)
 
     def create_lorebook_binding(self, book_id: str, binding: dict[str, Any]) -> dict[str, Any]:
-        if self._lore.get_lorebook(book_id) is None:
-            return {"ok": False, "error": "Lorebook not found"}
-        payload = dict(binding)
-        payload["book_id"] = book_id
-        if not str(payload.get("id") or "").strip():
-            return {"ok": False, "error": "id is required"}
-        self._lore.bind_lorebook(payload)
-        return {"ok": True, "binding": next((b for b in self._lore.list_bindings() if b["id"] == payload["id"]), None)}
+        return lorebooks.create_lorebook_binding(self._lorebook_dependencies(), book_id, binding)
 
     def update_lorebook_binding(self, binding_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-        try:
-            changed = self._lore.update_binding(binding_id, updates)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not changed:
-            return {"ok": False, "error": "Binding not found"}
-        return {"ok": True, "binding": next((b for b in self._lore.list_bindings() if b["id"] == binding_id), None)}
+        return lorebooks.update_lorebook_binding(self._lorebook_dependencies(), binding_id, updates)
 
     def delete_lorebook_binding(self, binding_id: str) -> dict[str, Any]:
-        try:
-            deleted = self._lore.delete_binding(binding_id)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": deleted, **({} if deleted else {"error": "Binding not found"}), "binding_id": binding_id}
+        return lorebooks.delete_lorebook_binding(self._lorebook_dependencies(), binding_id)
 
     def list_lorebook_entries(self, book_id: str) -> dict[str, Any]:
-        book = self._lore.get_lorebook(book_id)
-        if not book:
-            return {"ok": False, "error": "Lorebook not found", "entries": []}
-        return {"ok": True, "book": book, "entries": self._lore.list_book_entries(book_id)}
+        return lorebooks.list_lorebook_entries(self._lorebook_dependencies(), book_id)
 
     def save_lorebook_entry(self, book_id: str, entry: dict[str, Any]) -> dict[str, Any]:
-        book_id = str(book_id or "")
-        if self._lore.get_lorebook(book_id) is None:
-            return {"ok": False, "error": "Lorebook not found", "error_code": "book_not_found"}
-        payload = dict(entry)
-        payload["book_id"] = book_id
-        payload.setdefault("id", f"{book_id}:entry:{time.time_ns()}")
-        entry_id = str(payload["id"])
-        if self._lore.get_entry(entry_id) is not None:
-            # Ownership isolation: entry.id is a global canonical PK, but it may
-            # only be rewritten through the book that actually owns it.
-            if not self._lore.update_book_entry(book_id, entry_id, payload):
-                return {"ok": False, "error": "Entry belongs to another lorebook",
-                        "error_code": "entry_book_mismatch", "entry_id": entry_id}
-            return {"ok": True, "entry": self._lore.get_entry(entry_id)}
-        # Canonical new-entry defaults apply on create only. An update must be
-        # able to clear a field without it silently snapping back to a default.
-        for key, value in CANONICAL_ENTRY_DEFAULTS.items():
-            payload.setdefault(key, value)
-        self._lore.add_entry(payload)
-        return {"ok": True, "entry": self._lore.get_entry(entry_id)}
+        return lorebooks.save_lorebook_entry(self._lorebook_dependencies(), book_id, entry)
 
     def move_lorebook_entry(
         self, book_id: str, entry_id: str, target_book_id: str,
     ) -> dict[str, Any]:
-        """Move an entry to another book, keeping its canonical entry id."""
-
-        target_book_id = str(target_book_id or "")
-        if self._lore.get_lorebook(str(book_id or "")) is None:
-            return {"ok": False, "error": "Lorebook not found", "error_code": "book_not_found"}
-        if not target_book_id or self._lore.get_lorebook(target_book_id) is None:
-            return {"ok": False, "error": "Target lorebook not found",
-                    "error_code": "target_book_not_found"}
-        if not self._lore.move_entry(str(book_id), target_book_id, str(entry_id or "")):
-            # Distinguish "no such entry" from "that entry belongs to another
-            # book": the second is an ownership conflict, not a 404.
-            if self._lore.get_entry(str(entry_id or "")) is not None:
-                return {"ok": False, "error": "Entry belongs to another lorebook",
-                        "error_code": "entry_book_mismatch", "entry_id": str(entry_id)}
-            return {"ok": False, "error": "Entry not found in this lorebook",
-                    "error_code": "entry_not_found", "entry_id": str(entry_id)}
-        return {
-            "ok": True, "entry": self._lore.get_entry(str(entry_id)),
-            "entry_id": str(entry_id), "book_id": target_book_id,
-        }
+        return lorebooks.move_lorebook_entry(self._lorebook_dependencies(), book_id, entry_id, target_book_id)
 
     def delete_lorebook_entry(self, book_id: str, entry_id: str) -> dict[str, Any]:
-        # Ownership isolation: a DELETE through book A must never remove an
-        # entry that lives in book B.
-        book_id = str(book_id or "")
-        if self._lore.get_lorebook(book_id) is None:
-            return {"ok": False, "error": "Lorebook not found", "error_code": "book_not_found"}
-        if not self._lore.delete_book_entry(book_id, str(entry_id or "")):
-            return {"ok": False, "error": "Entry not found in this lorebook",
-                    "error_code": "entry_not_found", "entry_id": entry_id}
-        return {"ok": True, "entry_id": entry_id}
+        return lorebooks.delete_lorebook_entry(self._lorebook_dependencies(), book_id, entry_id)
 
     def export_lorebook(self, book_id: str) -> dict[str, Any]:
-        book = self._lore.get_lorebook(book_id)
-        if not book:
-            return {"ok": False, "error": "Lorebook not found"}
-        v3 = export_lorebook_v3(self._lore, book_id)
-        return {"ok": True, "format": "lorebook_v3", **v3,
-                "native_backup": export_lorebook_native(self._lore, book_id)}
+        return lorebooks.export_lorebook(self._lorebook_dependencies(), book_id)
 
     async def lorebook_activation_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Dry-run the same retriever used by rounds and return its safe trace."""
-        game_key = str(payload.get("game_key") or "")
-        instance = self._reg.get(_parse_game_key(game_key)) if game_key else None
-        retriever = getattr(self._handler, "lore_retriever", None)
-        if instance is None or retriever is None:
-            return {"ok": False, "error": "game_key must reference an active game"}
-        viewer = payload.get("viewer") if isinstance(payload.get("viewer"), dict) else {}
-        viewer_is_gm = bool(viewer.get("is_gm", True))
-        viewer_uid = str(viewer.get("uid") or "")
-        matches = await retriever.retrieve(
-            instance, str(payload.get("action_text") or ""),
-            viewer_is_gm=viewer_is_gm, viewer_uid=viewer_uid or None,
-            viewer_name=str(viewer.get("name") or ""), mutate_timers=False,
-            action_actor_uids=[viewer_uid] if viewer_uid and not viewer_is_gm else [],
-        )
-        trace = list(getattr(instance, "lorebook_activation_trace", []) or [])
-        return {"ok": True, "entries": matches if viewer_is_gm else [row for row in matches if row.get("id")], "trace": trace}
+        return await lorebooks.lorebook_activation_preview(self._lorebook_dependencies(), payload)
 
     def preview_lorebook_import(self, payload: dict[str, Any]) -> dict[str, Any]:
-        from dataclasses import asdict
-        from src.lorebook.importer import preview_lorebook_import
-
-        result = preview_lorebook_import(payload)
-        result["book"] = asdict(result["book"])
-        return result
+        return lorebooks.preview_lorebook_import(self._lorebook_dependencies(), payload)
 
     def commit_lorebook_import(self, payload: dict[str, Any], binding: dict[str, Any] | None = None, book_id: str | None = None) -> dict[str, Any]:
-        from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
-        from src.lorebook.store import normalize_scope_kind
-
-        draft = draft_lorebook_import(payload)
-        # Validate the requested binding before any canonical write so a bad
-        # scope cannot leave a half-imported book behind.
-        if binding is not None:
-            if not isinstance(binding, dict):
-                return {"ok": False, "error": "binding must be an object"}
-            if "scope_kind" not in binding:
-                return {"ok": False, "error": "binding requires a canonical scope_kind"}
-            try:
-                normalize_scope_kind(binding.get("scope_kind"))
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-        try:
-            imported_book_id = commit_lorebook_import(self._lore, draft, binding, book_id=book_id)
-        except ValueError as exc:
-            # The store boundary is the authority for scope validity.
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "book_id": imported_book_id, "entries": len(draft.entries), "warnings": draft.warnings}
+        return lorebooks.commit_lorebook_import(self._lorebook_dependencies(), payload, binding, book_id)
 
     async def generate_lorebook_entries(self, world_id: str, prompt: str, language: str = "") -> dict[str, Any]:
         return await worlds.generate_lorebook_entries(
@@ -2067,8 +1883,10 @@ class WebAPI:
 
     # ---- 角色管理 ----
 
-    def list_characters(self, game_key: str) -> dict[str, Any]:
-        return characters.list_characters(self._character_dependencies, game_key)
+    def list_characters(self, game_key: str, *, viewer_is_gm: bool) -> dict[str, Any]:
+        return characters.list_characters(
+            self._character_dependencies, game_key, viewer_is_gm=viewer_is_gm,
+        )
 
     def character_schema(self, rule_id: str, language: str = "") -> dict[str, Any]:
         return characters.character_schema(

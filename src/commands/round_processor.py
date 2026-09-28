@@ -67,6 +67,8 @@ from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_i
 from src.engine import combat_narrative, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
+from src.engine.modules.media import replace_scene_image
+from src.engine.modules import session_stats, world_reports
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
 from src.engine.world.memory_projection import queue_world_memory
@@ -352,6 +354,7 @@ class RoundProcessor:
     async def prepare_round_checks_ai(self, instance: GameInstance) -> list[dict]:
         """阶段 1：由 GM 模型统一规划检定，再由服务端一次性掷骰结算。"""
         progression.require_writable(instance)
+        session_stats.require_writable(instance)
         if instance.round_checks_prepared:
             return list(instance.last_checks)
         if instance.state != GameState.ACTIVE_JUDGMENT:
@@ -442,13 +445,13 @@ class RoundProcessor:
             errors = metadata.get("errors") or []
             if errors:
                 logger.warning("部分 AI 检定参数被拒绝: %s", "; ".join(str(item) for item in errors))
-            instance.last_overreach = list(metadata.get("overreach") or [])
+            world_reports.replace_last_overreach(instance, list(metadata.get("overreach") or []))
             # 世界合法性：模型只提议结构化地点，server 对照权威世界真相后才阻断或
             # 落库合法移动；空世界/未知地点一律不阻断（旧游戏行为不变）。
             world_result = evaluate_world_requirements(
                 instance, metadata.get("world_requirements") or [],
             )
-            instance.last_world_legality = list(world_result.get("notes") or [])
+            world_reports.replace_last_world_legality(instance, list(world_result.get("notes") or []))
             # 逻辑世界时间：模型只报告本轮经过的时间，server 推进时钟并确定性
             # 结算到期事件（无后台 tick、无独立 scheduler）。
             time_advance = metadata.get("world_time_advance")
@@ -471,13 +474,13 @@ class RoundProcessor:
                     instance.adventure_progress = before_progress
                     logger.warning("世界时间推进被拒绝: %s", exc)
                 else:
-                    instance.last_world_events = [
+                    world_reports.replace_last_world_events(instance, [
                         {**item, "status": "applied"}
                         for item in outcome.get("applied") or []
                     ] + [
                         {**item, "status": "failed"}
                         for item in outcome.get("failed") or []
-                    ]
+                    ])
                     # World Memory 投影（母方案 §21/§22）：确定性地把白名单内的
                     # WorldEvent receipts 排入 memory outbox（幂等，authoritative_
                     # world 类）；只读 receipts、只写 memory 侧，不触碰世界真相。
@@ -520,6 +523,7 @@ class RoundProcessor:
         if not instance or instance.state != GameState.ACTIVE_JUDGMENT:
             raise RoundNotProcessed("not_judging")
         progression.require_writable(instance)
+        session_stats.require_writable(instance)
         if has_blocking_economy_decision(instance):
             logger.info("等待经济提案结算，暂不生成叙事: %s", instance.game_key)
             raise RoundNotProcessed("economy_pending")
@@ -907,7 +911,7 @@ class RoundProcessor:
                     entry.pop("scene_image", None)
                 else:
                     entry["scene_image"] = old_scene_image
-                current.scene_image = old_top_scene_image
+                replace_scene_image(current, old_top_scene_image)
                 raise
             logger.info("场景图已生成 (round=%d, asset=%s)", round_number, result.asset_id)
         except ImageGenerationError as exc:
@@ -918,6 +922,7 @@ class RoundProcessor:
     async def process_round_impl(self, instance: GameInstance, *, on_delta=None, on_reset=None) -> tuple[str, dict | None]:
         """实际的判定处理逻辑。"""
         progression.require_writable(instance)
+        session_stats.require_writable(instance)
         expected_run_id = instance.run_id
         if not instance.round_checks_prepared:
             await self.prepare_round_checks_ai(instance)
