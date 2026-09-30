@@ -17,6 +17,7 @@ from src.webui.map_domain.locations import (
 from src.webui.map_domain.presentation import apply_map_presentation, public_map_definition
 from src.webui.map_domain.selection import select_map_definition, select_plugin_map
 from src.webui.map_presets import builtin_map_preset
+from src.content_modules.projection import ContentProjectionService
 
 @dataclass(frozen=True)
 class MapDependencies:
@@ -29,6 +30,7 @@ class MapDependencies:
     load_world_template: Callable[[str], dict[str, Any] | None]
     map_background_file: Callable[[str], Path | None]
     generated_image_file: Callable[[str], Path | None]
+    content_projection: ContentProjectionService | None = None
 
 
 def get_map_locations(
@@ -42,7 +44,12 @@ def get_map_locations(
     if not instance or not instance.world_id:
         return {"locations": [], "current_scene": "", "current_location_id": ""}
 
-    entries = dependencies.list_lore_entries(instance.world_id, "location")
+    if dependencies.content_projection is not None:
+        entries = dependencies.content_projection.for_game(
+            instance, viewer_kind="gm", entry_type="location",
+        )
+    else:
+        entries = dependencies.list_lore_entries(instance.world_id, "location")
     locations = lore_locations(entries)
     assets = _content_map_assets(dependencies, instance.world_id)
     merge_contributed_locations(locations, assets.get("locations", []))

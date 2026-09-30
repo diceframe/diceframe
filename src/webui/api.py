@@ -211,6 +211,7 @@ class WebAPI:
                 generated_image_file=lambda asset_id: self.generated_image_file(
                     asset_id,
                 ),
+                content_projection=getattr(handler, "content_projection", None),
             ),
             save_character_card=lambda character: character_cards.save_character_card(
                 self._character_card_dependencies, character,
@@ -482,6 +483,7 @@ class WebAPI:
                 else None
             ),
             list_instances=self._reg.list_all,
+            content_projection=getattr(self._handler, "content_projection", None),
         )
         self._plugin_content_dependencies = plugins.PluginContentDependencies(
             plugin_host=self._plugins,
@@ -631,6 +633,7 @@ class WebAPI:
             load_world_template=self._load_world_template,
             map_background_file=self.map_background_file,
             generated_image_file=self.generated_image_file,
+            content_projection=getattr(handler, "content_projection", None),
         )
         self._assistant_dependencies = assistant.AssistantDependencies(
             list_plugins=self.list_plugins,
@@ -2577,7 +2580,9 @@ class WebAPI:
                            gm_style_override: dict[str, Any] | None = None,
                            advancement_mode: str = "milestone",
                            advancement_authority: str = "ai_gm",
-                           unclaimed_control_default: str = "") -> dict[str, Any]:
+                           unclaimed_control_default: str = "",
+                           world_ref: dict[str, Any] | None = None,
+                           book_bindings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return await self._game_lifecycle.create_game(
             world_id=world_id, game_name=game_name, group_name=group_name,
             rule_id=rule_id, solo=solo, lorebook_world_id=lorebook_world_id,
@@ -2596,6 +2601,8 @@ class WebAPI:
             advancement_mode=advancement_mode,
             advancement_authority=advancement_authority,
             unclaimed_control_default=unclaimed_control_default,
+            world_ref=world_ref,
+            book_bindings=book_bindings,
         )
 
     # ---- 重开引用码 ----

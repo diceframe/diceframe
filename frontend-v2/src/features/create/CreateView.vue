@@ -585,10 +585,13 @@ async function create() {
     else if (loreChoice.value === '__blank__') {
       payload.source_world_id = worldId; payload.world_id = worldId + '_blank_' + Date.now()
       payload.game_name = String(payload.game_name || '') + gameDefault(BLANK_LOREBOOK_SUFFIX_ZH, ' (Blank Lorebook)', BLANK_LOREBOOK_SUFFIX_DE); payload.create_lorebook = true; payload.blank_lorebook = true
+      payload.world_ref = { source_kind: 'world', source_id: String(payload.world_id), kind: 'world', id: String(payload.world_id), digest: '' }
     } else if (loreChoice.value.startsWith('copy:')) {
       const src = loreChoice.value.slice(5)
       payload.source_world_id = worldId; payload.world_id = worldId + '_copy_' + Date.now()
       payload.game_name = String(payload.game_name || '') + gameDefault(COPIED_LOREBOOK_SUFFIX_ZH, ' (Copied Lorebook)', COPIED_LOREBOOK_SUFFIX_DE); payload.create_lorebook = true; payload.lorebook_world_id = src
+      payload.world_ref = { source_kind: 'world', source_id: String(payload.world_id), kind: 'world', id: String(payload.world_id), digest: '' }
+      payload.book_bindings = [{ ref: { source_kind: 'world', source_id: src, kind: 'lorebook', id: `world:${src}`, digest: '' }, role: 'runtime', order: 110 }]
     }
     const r = await api<GameMutationResponse>('/games/create', { method: 'POST', body: JSON.stringify(payload) })
     if (!r.ok && r.error) throw new Error(r.error)

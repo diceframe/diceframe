@@ -270,10 +270,38 @@ async def lorebook_activation_preview(deps: LorebookDependencies, payload: dict[
 
 def preview_lorebook_import(deps: LorebookDependencies, payload: dict[str, Any]) -> dict[str, Any]:
     from dataclasses import asdict
+    from src.content_modules.refs import ContentRef
     from src.lorebook.importer import preview_lorebook_import
 
-    result = preview_lorebook_import(payload)
+    existing_refs: list[ContentRef] = []
+    for book in deps.lorebook.list_lorebooks():
+        source_kind = str(book.get("source_kind") or "").strip()
+        source_id = str(book.get("source_id") or "").strip()
+        if not source_kind or not source_id:
+            continue
+        try:
+            existing_refs.append(ContentRef(
+                source_kind=source_kind,
+                source_id=source_id,
+                kind="lorebook",
+                id=source_id,
+                explicit=True,
+                digest=str(book.get("source_digest") or ""),
+            ))
+        except ValueError:
+            # Historical books without portable provenance are not silently
+            # matched to an external draft; they remain explicit legacy data.
+            continue
+
+    result = preview_lorebook_import(
+        payload,
+        existing_refs=existing_refs,
+        duplicate_policy=str(payload.get("duplicate_policy") or "update"),
+    )
     result["book"] = asdict(result["book"])
+    for key in ("content_draft", "commit_plan"):
+        if key in result:
+            result[key] = result[key].to_portable_dict()
     return result
 
 def commit_lorebook_import(deps: LorebookDependencies, payload: dict[str, Any], binding: dict[str, Any] | None = None, book_id: str | None = None) -> dict[str, Any]:

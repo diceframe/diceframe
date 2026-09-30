@@ -36,6 +36,7 @@ from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
 from src.lorebook.retrieval import LoreRetriever
+from src.content_modules.projection import ContentProjectionService
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -77,6 +78,10 @@ class GameHandler:
         )
         self.worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
         self._plugin_host = None
+        self.content_projection = ContentProjectionService(
+            self.lorebook_store,
+            load_world_template=self._load_world_template,
+        )
         # 通用 Lore 检索：所有走标准回合管线的 Ruleset 共用同一实例。embedding 客户端
         # 复用现有 MemoryStore.embedding_client（同一份 embedding_enabled /
         # embedding_provider_ref / embedding_model / embedding_max_input 配置），
@@ -85,6 +90,7 @@ class GameHandler:
             self.matcher,
             store=self.lorebook_store,
             load_world_template=self._load_world_template,
+            content_projection=self.content_projection,
             embedding_client_provider=self._embedding_client,
         )
         self._factory = GameFactory(self.registry, self.lorebook_store, self.worlds_dir)
@@ -111,6 +117,7 @@ class GameHandler:
             summary_max_tokens,
             analysis_max_tokens,
             lore_retriever=self.lore_retriever,
+            content_projection=self.content_projection,
         )
         self._swipe_generator = SwipeGenerator(
             self.llm_client,

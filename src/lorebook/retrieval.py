@@ -348,6 +348,7 @@ class LoreRetriever:
         *,
         store: Any | None = None,
         load_world_template: Callable[[str, str], Any] | None = None,
+        content_projection: Any | None = None,
         embedding_client_provider: Callable[[], Any] | None = None,
         semantic_top_k: int = DEFAULT_SEMANTIC_TOP_K,
         semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
@@ -355,6 +356,7 @@ class LoreRetriever:
         self._matcher = matcher
         self._store = store
         self._load_world_template = load_world_template
+        self._content_projection = content_projection
         self._embedding_client_provider = embedding_client_provider
         self._semantic_top_k = max(0, int(semantic_top_k))
         self._semantic_threshold = float(semantic_threshold)
@@ -384,7 +386,10 @@ class LoreRetriever:
         scope = (str(world_id or ""), str(language or DEFAULT_LANGUAGE), str(revision))
         if scope == self._scope:
             return
-        entries = self._store.list_entries(str(world_id))
+        if self._content_projection is not None:
+            entries = self._content_projection.for_world_authoring(str(world_id))
+        else:
+            entries = self._store.list_entries(str(world_id))
         if self._load_world_template is not None:
             from src.content.worlds import localize_lorebook_entries
 

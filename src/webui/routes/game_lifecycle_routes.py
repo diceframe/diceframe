@@ -59,6 +59,8 @@ async def api_create_game(request: web.Request) -> web.Response:
         ),
         # 逐卡控制方式与「未认领角色默认」；缺省时保持旧行为（每个席位 human）。
         unclaimed_control_default=str(body.get("unclaimed_control_default", "") or ""),
+        world_ref=body.get("world_ref"),
+        book_bindings=body.get("book_bindings"),
     )
     return web.json_response(result)
 

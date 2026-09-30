@@ -17,10 +17,35 @@ from pathlib import Path
 from typing import Any
 
 from src.engine.character_utils import parse_character_card_document, parse_tavern_card
+from src.content_modules.refs import ContentDraft, collect_content_refs
 from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
 from src.webui.character_card_projection import card_signature, dedupe_cards
 
 logger = logging.getLogger("trpg")
+
+
+def character_content_draft(
+    card: dict[str, Any], *, source_id: str = "local-card",
+    kind: str = "character_template",
+) -> ContentDraft:
+    """Produce the shared, side-effect-free draft used by card adapters."""
+
+    safe_source = "".join(ch.lower() if ch.isascii() and (ch.isalnum() or ch in "_-") else "_" for ch in source_id).strip("_") or "local-card"
+    safe_external = "".join(
+        ch.lower() if ch.isascii() and (ch.isalnum() or ch in "_-") else "_"
+        for ch in str(card.get("id") or card.get("character_name") or "card")
+    ).strip("_").lower() or "card"
+    if not safe_external[0].isalpha() or not safe_external[0].isascii():
+        safe_external = f"card-{safe_external}"
+    return ContentDraft(
+        kind=kind,
+        source_kind="device",
+        source_id=safe_source[:120],
+        external_id=safe_external[:96],
+        payload=copy.deepcopy(card),
+        references=collect_content_refs(card, default_source=f"device:{safe_source[:120]}"),
+        provenance={"adapter": "character_card"},
+    )
 
 
 @dataclass(frozen=True)
@@ -404,7 +429,13 @@ def _import_tavern_as_npc(
     if dependencies.rebuild_lorebook_index is not None:
         dependencies.rebuild_lorebook_index(world_id)
     logger.info("酒馆卡已导入为 NPC: %s -> world=%s（含 %d 条世界书）", name, world_id, book_imported)
-    result: dict[str, Any] = {"ok": True, "imported_as": "npc", "npc_name": name, "world_id": world_id, "lorebook_entries": book_imported}
+    result: dict[str, Any] = {
+        "ok": True, "imported_as": "npc", "npc_name": name,
+        "world_id": world_id, "lorebook_entries": book_imported,
+        "content_draft": character_content_draft(
+            npc_entry, source_id=f"{world_id}-{safe_name}", kind="npc"
+        ).to_portable_dict(),
+    }
     if _tavern_has_nsfw(tavern):
         result["nsfw_warning"] = True
     result["lorebook_book_id"] = embedded_book_id
@@ -461,6 +492,7 @@ async def import_character_card(
             "card": saved["card"],
             "imported_as": "character_card",
             "format": "diceframe",
+            "content_draft": character_content_draft(saved["card"], source_id=safe_name).to_portable_dict(),
         }
 
     tmp_path = Path(tempfile.gettempdir()) / f"trpg_card_import_{int(time.time_ns())}_{safe_name}"
@@ -482,7 +514,8 @@ async def import_character_card(
     cards = _read_cards(dependencies)
     cards.append(card)
     _write_cards(dependencies, cards)
-    result: dict[str, Any] = {"ok": True, "card": card, "imported_as": "character_card", "format": "tavern"}
+    result: dict[str, Any] = {"ok": True, "card": card, "imported_as": "character_card", "format": "tavern",
+                              "content_draft": character_content_draft(card, source_id=safe_name).to_portable_dict()}
     # A Character Card's embedded character_book is real lore, not a footnote:
     # when the user keeps it checked it must reach the canonical store through
     # the same adapter/preview/commit path as every other import. Unchecked means

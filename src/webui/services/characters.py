@@ -39,6 +39,7 @@ from src.engine.memory_outbox import (
 )
 from src.engine.game_instance import GameInstance
 from src.engine.player_control import claim_seat, is_human_controlled
+from src.content_modules.projection import ContentProjectionService
 from src.commands.economy_effects import pending_decision_notice
 from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime, PlayerJoinRuntime
@@ -175,6 +176,7 @@ class CharacterAssetDependencies:
     load_world_template: Callable[[str, str], dict[str, Any] | None]
     avatar_file: Callable[[str], Path | None]
     generated_image_file: Callable[[str], Path | None]
+    content_projection: ContentProjectionService | None = None
 
 
 @dataclass(frozen=True)
@@ -498,7 +500,12 @@ def list_characters(
             name = npc.get("character_name") or npc.get("name") or nid
             npcs_by_name[name] = {"npc_id": nid, **npc, "name": name}
         if dependencies.assets.lorebook and inst.world_id:
-            entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
+            if dependencies.assets.content_projection is not None:
+                entries = dependencies.assets.content_projection.for_game(
+                    inst, viewer_kind="gm", entry_type="npc",
+                )
+            else:
+                entries = dependencies.assets.lorebook.list_entries(inst.world_id, "npc")
             world_data = dependencies.assets.load_world_template(
                 inst.world_id,
                 str(getattr(inst, "language", "") or ""),
@@ -818,8 +825,17 @@ async def _update_npc_portrait_authority(
                 npc_key, npc = key, candidate
                 break
     if npc is None and dependencies.assets.lorebook and inst.world_id:
-        entry = dependencies.assets.lorebook.get_entry(npc_key)
-        if entry and entry.get("world_id") == inst.world_id and entry.get("type") == "npc":
+        if dependencies.assets.content_projection is not None:
+            entries = dependencies.assets.content_projection.for_game(
+                inst, viewer_kind="gm", entry_type="npc",
+            )
+            entry = next(
+                (candidate for candidate in entries if str(candidate.get("id") or "") == npc_key),
+                None,
+            )
+        else:
+            entry = dependencies.assets.lorebook.get_entry(npc_key)
+        if entry and ("world_id" not in entry or entry.get("world_id") == inst.world_id) and entry.get("type") == "npc":
             world_data = dependencies.assets.load_world_template(
                 inst.world_id,
                 str(getattr(inst, "language", "") or ""),

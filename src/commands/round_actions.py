@@ -148,6 +148,7 @@ def initialize_puzzles_from_lorebook(
     lorebook_store: Any,
     *,
     world_data: dict | None = None,
+    content_projection: Any | None = None,
 ) -> None:
     """从世界书初始化谜题（仅新增未注册的谜题）。"""
     if not instance.world_id or not lorebook_store or not instance.puzzle_manager:
@@ -155,10 +156,13 @@ def initialize_puzzles_from_lorebook(
 
     from src.content.worlds import localize_lorebook_entries
 
-    all_entries = localize_lorebook_entries(
-        lorebook_store.list_entries(instance.world_id),
-        world_data,
-    )
+    if content_projection is not None:
+        entries = content_projection.for_game(
+            instance, viewer_kind="gm",
+        )
+    else:
+        entries = lorebook_store.list_entries(instance.world_id)
+    all_entries = localize_lorebook_entries(entries, world_data)
     for entry in all_entries:
         if entry.get("type") != "puzzle":
             continue

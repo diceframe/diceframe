@@ -10,9 +10,14 @@ from src.content_modules.refs import (
     ContentRef,
     ContentRefChain,
     ContentRefError,
+    ContentDraft,
+    CommitOperation,
+    CommitPlan,
     ContentKindRegistry,
     ContentKindSpec,
     ContentResolution,
+    build_commit_plan,
+    collect_content_refs,
     parse_content_ref,
 )
 from src.content_modules.projection import ContentProjection, ContentProjectionService
@@ -27,6 +32,8 @@ __all__ = [
     "ContentRefChain",
     "ContentRefError",
     "ContentResolution",
+    "ContentDraft", "CommitOperation", "CommitPlan",
+    "build_commit_plan", "collect_content_refs",
     "parse_content_ref",
     "ContentProjection", "ContentProjectionService",
     "ImportReceipt", "ImportReceiptStore",

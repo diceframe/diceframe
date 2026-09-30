@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
@@ -36,6 +36,8 @@ class LifecycleLorebook(Protocol):
     def list_entries(self, world_id: str) -> list[dict[str, Any]]: ...
     def get_entry(self, entry_id: str) -> dict[str, Any] | None: ...
     def add_entry(self, entry: dict[str, Any]) -> Any: ...
+    def bind_lorebook(self, binding: dict[str, Any]) -> Any: ...
+    def delete_binding(self, binding_id: str) -> bool: ...
 
 
 class LifecycleRulesets(Protocol):
@@ -98,6 +100,11 @@ class CreationTransaction:
     game_key: GameKey
     world_id: str
     phase: CreationPhase = CreationPhase.PREFLIGHTED
+    created_binding_ids: list[str] = field(default_factory=list)
+
+    def track_binding(self, binding_id: str) -> None:
+        if binding_id and binding_id not in self.created_binding_ids:
+            self.created_binding_ids.append(binding_id)
 
     def advance(self, phase: CreationPhase) -> None:
         if phase not in _NEXT_CREATION_PHASES.get(self.phase, set()):
@@ -119,6 +126,14 @@ class CreationTransaction:
             logger.warning("清理创建失败的存档目录失败: %s", save_dir, exc_info=True)
         finally:
             self.dependencies.registry.remove(self.game_key)
+        lorebook = getattr(self.dependencies, "lorebook", None)
+        delete_binding = getattr(lorebook, "delete_binding", None)
+        if callable(delete_binding):
+            for binding_id in reversed(self.created_binding_ids):
+                try:
+                    delete_binding(binding_id)
+                except Exception:
+                    logger.warning("清理创建失败的 Lorebook binding 失败: %s", binding_id, exc_info=True)
         if self.world_id:
             try:
                 self.dependencies.cleanup_orphan_game_templates(self.world_id)

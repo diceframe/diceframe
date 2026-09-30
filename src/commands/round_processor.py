@@ -261,6 +261,7 @@ class RoundProcessor:
         summary_max_tokens: int,
         analysis_max_tokens: int,
         lore_retriever: Any | None = None,
+        content_projection: Any | None = None,
         advance_adventure_world: Callable[[GameInstance], dict[str, Any]] | None = None,
     ):
         self.registry = registry
@@ -268,6 +269,7 @@ class RoundProcessor:
         self.matcher = matcher
         self.lore_retriever = lore_retriever or LoreRetriever(matcher)
         self.lorebook_store = lorebook_store
+        self.content_projection = content_projection
         self.memory_store = memory_store
         self._prompt = prompt
         self._dice = dice
@@ -978,6 +980,7 @@ class RoundProcessor:
             instance,
             self.lorebook_store,
             world_data=world_data,
+            content_projection=self.content_projection,
         )
 
         # 昏迷角色的死亡豁免先于战斗/叙事结算，文本并入行动块供 GM 遵循。

@@ -10,6 +10,8 @@ import time
 from typing import Any
 
 from src.engine.game_instance import GameState
+from src.engine.modules import content_binding
+from src.content_modules.refs import ContentRefError, parse_content_ref
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.content.gm_style import normalize_gm_style_override
@@ -55,6 +57,18 @@ def delete_game(
     world_id = str(getattr(instance, "world_id", "") or "") or _saved_world_id(
         dependencies, parsed_key
     )
+    game_scope = _GAME_KEY_SEP.join(str(part) for part in parsed_key)
+    lorebook = getattr(dependencies, "lorebook", None)
+    if lorebook is None and dependencies.handler is not None:
+        lorebook = getattr(dependencies.handler, "lorebook", None)
+    # Game bindings are owned by the save lifecycle.  Remove only the exact
+    # game scope; world/global bindings remain user content and survive.
+    if lorebook is not None and hasattr(lorebook, "list_bindings"):
+        for binding in list(lorebook.list_bindings(scope_kind="game", scope_id=game_scope)):
+            try:
+                lorebook.delete_binding(str(binding.get("id") or ""))
+            except Exception:
+                logger.warning("删除游戏内容绑定失败: %s", binding.get("id"), exc_info=True)
     try:
         shutil.rmtree(save_dir)
     except Exception as exc:
@@ -99,15 +113,53 @@ async def create_game(
     advancement_mode: str = "milestone",
     advancement_authority: str = "ai_gm",
     unclaimed_control_default: str = "",
+    world_ref: dict[str, Any] | None = None,
+    book_bindings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not dependencies.handler or not dependencies.registry:
         return {"ok": False, "error": "系统未就绪"}
     if config_error := dependencies.llm_configuration_error(language):
         return config_error
+    if world_ref is not None:
+        try:
+            parsed_world_ref = parse_content_ref(
+                world_ref,
+                default_source=f"world:{world_id}",
+            )
+            if parsed_world_ref.kind != "world":
+                raise ContentRefError("world_ref must reference kind=world")
+            if str(world_id or "") and str(world_id) != parsed_world_ref.id:
+                raise ContentRefError("world_id disagrees with world_ref")
+            world_id = parsed_world_ref.id
+        except ContentRefError as exc:
+            return {"ok": False, "error_code": "INVALID_WORLD_REF", "error": str(exc)}
     if not _is_safe_world_id(world_id):
         return {"ok": False, "error": "非法 world_id"}
     if source_world_id and not _is_safe_world_id(source_world_id):
         return {"ok": False, "error": "非法 source_world_id"}
+    normalized_book_bindings: list[dict[str, Any]] = []
+    if book_bindings is not None:
+        if not isinstance(book_bindings, list):
+            return {"ok": False, "error_code": "INVALID_BOOK_BINDINGS", "error": "book_bindings must be a list"}
+        try:
+            for raw_binding in book_bindings:
+                if not isinstance(raw_binding, dict):
+                    raise ContentRefError("book binding must be an object")
+                raw_ref = raw_binding.get("ref", raw_binding)
+                ref = parse_content_ref(raw_ref, default_source=f"world:{world_id}")
+                if ref.kind != "lorebook":
+                    raise ContentRefError("book binding must reference kind=lorebook")
+                normalized_book_bindings.append({
+                    "ref": ref,
+                    "role": str(raw_binding.get("role") or "runtime"),
+                    "order": int(raw_binding.get("order", 110)),
+                })
+        except (ContentRefError, TypeError, ValueError) as exc:
+            return {"ok": False, "error_code": "INVALID_BOOK_BINDINGS", "error": str(exc)}
+        if normalized_book_bindings and not lorebook_world_id:
+            first_ref = normalized_book_bindings[0]["ref"]
+            if first_ref.source_kind == "world":
+                lorebook_world_id = first_ref.source_id
     if not players:
         return {"ok": False, "error": "请至少创建或选择 1 名队伍角色"}
     try:
@@ -242,6 +294,13 @@ async def create_game(
     )
     if binding_error is not None:
         return binding_error
+    content_binding.set_world_ref(instance, {
+        "source_kind": "world",
+        "source_id": world_id,
+        "kind": "world",
+        "id": world_id,
+        "digest": "",
+    })
     instance.set_difficulty(difficulty)
     if not instance.bind_adventure(adventure_binding):
         transaction.rollback()
@@ -250,6 +309,22 @@ async def create_game(
             "error_code": "INVALID_ADVENTURE_BINDING",
             "error": "冒险包绑定无效，未留下半成品存档。",
         }
+    if adventure_binding:
+        try:
+            content_binding.add_adventure_ref(instance, {
+                "source_kind": str(adventure_binding.get("source_kind") or "adventure"),
+                "source_id": str(adventure_binding.get("source_id") or adventure_binding.get("adventure_id") or ""),
+                "kind": "adventure",
+                "id": str(adventure_binding.get("adventure_id") or ""),
+                "digest": str(adventure_binding.get("content_digest") or ""),
+            })
+        except ContentRefError:
+            transaction.rollback()
+            return {
+                "ok": False,
+                "error_code": "INVALID_ADVENTURE_BINDING",
+                "error": "冒险包来源引用无效，未留下半成品存档。",
+            }
     instance.play_mode = normalized_play_mode
     # FIX-04 §6.5/§6.6：v2 冒险在同一创建事务里初始化进度并原子物化世界种子；
     # 失败即整体回滚（不留下 partial save / partial world）。
@@ -291,13 +366,63 @@ async def create_game(
             }
     transaction.advance(CreationPhase.INSTANCE_CONFIGURED)
 
-    game_creation_phases.copy_lorebook_entries(
+    lorebook_binding_id = game_creation_phases.copy_lorebook_entries(
         dependencies,
-        source_world_id=lorebook_world_id,
+        source_world_id=lorebook_world_id if book_bindings is None else "",
         world_id=world_id,
         world_name=resolved_world_name,
         language=resolved_language,
+        game_key=game_key,
+        canonical=book_bindings is not None,
     )
+    if lorebook_binding_id:
+        transaction.track_binding(lorebook_binding_id)
+        source_book_id = (
+            dependencies.lorebook.primary_world_book_id(lorebook_world_id)
+            if dependencies.lorebook is not None
+            and hasattr(dependencies.lorebook, "primary_world_book_id")
+            else f"world:{lorebook_world_id}"
+        )
+        content_binding.add_book_ref(instance, {
+            "source_kind": "world",
+            "source_id": lorebook_world_id,
+            "kind": "lorebook",
+            "id": source_book_id,
+            "digest": "",
+        })
+    if normalized_book_bindings:
+        store = dependencies.lorebook
+        if store is None or not hasattr(store, "bind_lorebook"):
+            transaction.rollback()
+            return {"ok": False, "error_code": "BOOK_BINDING_UNAVAILABLE", "error": "canonical lorebook store is unavailable"}
+        game_scope = _GAME_KEY_SEP.join(str(part) for part in game_key)
+        for item in normalized_book_bindings:
+            ref = item["ref"]
+            book_id = (
+                store.primary_world_book_id(ref.source_id)
+                if ref.source_kind == "world" and hasattr(store, "primary_world_book_id")
+                else ref.id
+            )
+            if not store.get_lorebook(book_id):
+                transaction.rollback()
+                return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
+            binding_id = f"binding:game:{game_scope}:lorebook:{book_id}"
+            store.bind_lorebook({
+                "id": binding_id,
+                "book_id": book_id,
+                "scope_kind": "game",
+                "scope_id": game_scope,
+                "role": item["role"],
+                "order": item["order"],
+            })
+            transaction.track_binding(binding_id)
+            content_binding.add_book_ref(instance, {
+                "source_kind": ref.source_kind,
+                "source_id": ref.source_id,
+                "kind": "lorebook",
+                "id": book_id,
+                "digest": ref.digest,
+            })
     created_players, player_error = await game_creation_phases.create_players(
         dependencies,
         transaction,

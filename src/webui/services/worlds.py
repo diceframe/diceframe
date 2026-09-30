@@ -20,6 +20,7 @@ from src.generation import creator
 from src.lorebook.bootstrap import ensure_world_from_template
 from src.template_catalog import is_user_template_file
 from src.webui.services._common import MAX_LOREBOOK_CHARS
+from src.content_modules.projection import ContentProjectionService
 
 logger = logging.getLogger("trpg")
 
@@ -45,6 +46,7 @@ class WorldDependencies:
     character_gen_max_tokens: int
     invalidate_lorebook_index: Callable[[str], None] | None
     list_instances: Callable[[], list[Any]]
+    content_projection: ContentProjectionService | None = None
 
 
 def _user_world_base(name: str) -> str:
@@ -147,7 +149,11 @@ def _ensure_user_world_template(
 def list_worlds(dependencies: WorldDependencies) -> dict[str, Any]:
     worlds = dependencies.lorebook.list_worlds()
     for w in worlds:
-        entries = dependencies.lorebook.list_entries(w["id"])
+        entries = (
+            dependencies.content_projection.for_world_authoring(w["id"])
+            if dependencies.content_projection is not None
+            else dependencies.lorebook.list_entries(w["id"])
+        )
         w["entry_count"] = len(entries)
         w["gm_style"] = _read_user_template_gm_style(
             dependencies, str(w.get("id") or ""),

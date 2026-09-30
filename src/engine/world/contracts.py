@@ -41,6 +41,8 @@ SOURCE_REF_KINDS: Final = (
     "builtin",    # 随 DiceFrame 发布的内置世界/规则
     "core",       # core ruleset bundle / SRD
     "module",     # content-pack adventure-module
+    "plugin",     # installed plugin adventure source
+    "user",       # user-imported standalone adventure source
     "adventure",  # adventure package 本地内容
     "world",      # world template 自带
     "gm",         # GM 手工建立

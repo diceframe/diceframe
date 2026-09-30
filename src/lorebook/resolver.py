@@ -23,6 +23,12 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
         return []
     bindings = store.list_bindings()
     actors = set(str(uid) for uid in action_actor_uids or [])
+    game_scopes = {str(getattr(instance, "game_id", "") or "")}
+    raw_game_key = getattr(instance, "game_key", "")
+    if raw_game_key:
+        game_scopes.add(str(raw_game_key))
+        if isinstance(raw_game_key, (tuple, list)):
+            game_scopes.add("|".join(str(part) for part in raw_game_key))
     refs = []
     books = {}
     if hasattr(store, "get_lorebook"):
@@ -65,7 +71,7 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
         elif kind == "world" and scope == world_id:
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
-        elif kind == "game" and scope in {str(getattr(instance, "game_id", "") or ""), str(getattr(instance, "game_key", "") or "")}:
+        elif kind == "game" and scope in game_scopes:
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
         elif kind == "character" and viewer_kind != "party" and (scope == viewer_uid or scope in actors):
             refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))

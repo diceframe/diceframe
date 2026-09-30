@@ -27,9 +27,9 @@ this layer does not invent an algorithm or recalculate it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from src.engine.world.contracts import canonical_id, validate_source_ref
 
@@ -264,6 +264,161 @@ def parse_content_ref(raw: Any, *, default_source: str) -> ContentRef:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ContentDraft:
+    """Portable preview representation produced by external-content adapters.
+
+    Drafts are deliberately side-effect free.  The owner of ``kind`` decides
+    how ``payload`` is validated and committed; this contract only fixes
+    provenance, identity and references shared by every import surface.
+    """
+
+    kind: str
+    source_kind: str
+    source_id: str
+    external_id: str
+    payload: dict[str, Any]
+    references: tuple[ContentRef, ...] = ()
+    provenance: dict[str, Any] | None = None
+    digest: str = ""
+
+    def __post_init__(self) -> None:
+        try:
+            normalized_kind = CONTENT_KIND_REGISTRY.validate(self.kind)
+            source = validate_source_ref(f"{self.source_kind}:{self.source_id}")
+            normalized_source_id = source.partition(":")[2]
+            normalized_external = canonical_id(
+                self.external_id or normalized_source_id,
+                field="external id",
+            )
+        except ValueError as exc:
+            raise ContentRefError(str(exc)) from exc
+        if not isinstance(self.payload, dict):
+            raise TypeError("content draft payload must be an object")
+        if not all(isinstance(ref, ContentRef) for ref in self.references):
+            raise TypeError("content draft references must be ContentRef values")
+        object.__setattr__(self, "kind", normalized_kind)
+        object.__setattr__(self, "source_kind", source.partition(":")[0])
+        object.__setattr__(self, "source_id", normalized_source_id)
+        object.__setattr__(self, "external_id", normalized_external)
+        object.__setattr__(self, "payload", dict(self.payload))
+        object.__setattr__(self, "provenance", dict(self.provenance or {}))
+        object.__setattr__(self, "digest", str(self.digest or ""))
+
+    @property
+    def ref(self) -> ContentRef:
+        return ContentRef(
+            source_kind=self.source_kind,
+            source_id=self.source_id,
+            kind=self.kind,
+            id=self.external_id,
+            explicit=True,
+            digest=self.digest,
+        )
+
+    def to_portable_dict(self) -> dict[str, Any]:
+        return {
+            "ref": self.ref.to_portable_dict(),
+            "external_id": self.external_id,
+            "payload": dict(self.payload),
+            "references": [ref.to_portable_dict() for ref in self.references],
+            "provenance": dict(self.provenance or {}),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CommitOperation:
+    """One deterministic create/update/skip operation in a commit plan."""
+
+    action: Literal["create", "update", "skip"]
+    draft_ref: ContentRef
+    existing_ref: ContentRef | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CommitPlan:
+    """User-visible import preview; not itself permission to mutate storage."""
+
+    drafts: tuple[ContentDraft, ...]
+    operations: tuple[CommitOperation, ...]
+    unresolved_references: tuple[ContentRef, ...] = ()
+    duplicate_policy: Literal["update", "duplicate", "skip"] = "update"
+
+    @property
+    def conflicts(self) -> tuple[CommitOperation, ...]:
+        return tuple(op for op in self.operations if op.existing_ref is not None)
+
+    def to_portable_dict(self) -> dict[str, Any]:
+        return {
+            "drafts": [draft.to_portable_dict() for draft in self.drafts],
+            "operations": [
+                {
+                    "action": operation.action,
+                    "draft_ref": operation.draft_ref.to_portable_dict(),
+                    "existing_ref": (
+                        operation.existing_ref.to_portable_dict()
+                        if operation.existing_ref is not None else None
+                    ),
+                    "reason": operation.reason,
+                }
+                for operation in self.operations
+            ],
+            "unresolved_references": [
+                ref.to_portable_dict() for ref in self.unresolved_references
+            ],
+            "duplicate_policy": self.duplicate_policy,
+        }
+
+
+def build_commit_plan(
+    drafts: Iterable[ContentDraft],
+    *,
+    existing: Iterable[ContentRef] = (),
+    duplicate_policy: Literal["update", "duplicate", "skip"] = "update",
+) -> CommitPlan:
+    """Build a stable plan with the explicit duplicate choice."""
+
+    if duplicate_policy not in {"update", "duplicate", "skip"}:
+        raise ValueError("duplicate_policy must be update, duplicate, or skip")
+    draft_rows = tuple(drafts)
+    existing_by_key = {ref.canonical(): ref for ref in existing}
+    operations: list[CommitOperation] = []
+    for draft in draft_rows:
+        old = existing_by_key.get(draft.ref.canonical())
+        if old is None:
+            operations.append(CommitOperation("create", draft.ref))
+        elif duplicate_policy == "update":
+            operations.append(CommitOperation("update", draft.ref, old, "same source and external_id"))
+        elif duplicate_policy == "skip":
+            operations.append(CommitOperation("skip", draft.ref, old, "same source and external_id"))
+        else:
+            operations.append(CommitOperation("create", draft.ref, old, "duplicate requested"))
+    return CommitPlan(
+        drafts=draft_rows,
+        operations=tuple(operations),
+        duplicate_policy=duplicate_policy,
+    )
+
+
+def collect_content_refs(value: Any, *, default_source: str) -> tuple[ContentRef, ...]:
+    """Collect only explicitly marked refs recursively; prose is never guessed."""
+
+    found: list[ContentRef] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key) in {"refs", "references", "content_refs"}:
+                rows = child if isinstance(child, list) else [child]
+                for raw in rows:
+                    found.append(parse_content_ref(raw, default_source=default_source))
+            else:
+                found.extend(collect_content_refs(child, default_source=default_source))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(collect_content_refs(child, default_source=default_source))
+    return tuple(dict.fromkeys(found))
+
+
 # ---- 解析链（母方案 §10：显式来源优先，v1 引用按链回溯）--------------------
 
 Lookup = Callable[[str, str], Any]
@@ -311,9 +466,14 @@ __all__ = [
     "CONTENT_KIND_REGISTRY",
     "ContentKindRegistry",
     "ContentKindSpec",
+    "ContentDraft",
+    "CommitOperation",
+    "CommitPlan",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",
     "ContentResolution",
+    "build_commit_plan",
+    "collect_content_refs",
     "parse_content_ref",
 ]
