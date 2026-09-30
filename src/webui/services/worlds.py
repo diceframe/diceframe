@@ -373,7 +373,12 @@ def list_entries(
     world_id: str,
     entry_type: str | None = None,
 ) -> dict[str, Any]:
-    entries = dependencies.lorebook.list_entries(world_id, entry_type)
+    if dependencies.content_projection is not None:
+        entries = dependencies.content_projection.for_world_authoring(
+            world_id, entry_type=entry_type,
+        )
+    else:
+        entries = dependencies.lorebook.list_entries(world_id, entry_type)
     return {"entries": entries, "total": len(entries)}
 
 

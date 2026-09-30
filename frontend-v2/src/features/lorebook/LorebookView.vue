@@ -199,8 +199,16 @@ async function loadLore() {
   error.value = ''; data.value = { entries: [] }
   try {
     const bookId = activeBookId.value || `world:${currentWorldId.value}`
-    const result = await api<{ entries: LoreEntry[] }>(`/lorebooks/${encodeURIComponent(bookId)}/entries`)
-    data.value = { entries: result.entries || [] }
+    try {
+      const result = await api<{ entries: LoreEntry[] }>(`/lorebooks/${encodeURIComponent(bookId)}/entries`)
+      data.value = { entries: result.entries || [] }
+    } catch (canonicalError) {
+      // Older deployments expose the primary-world adapter only.  Keep this
+      // fallback at the UI boundary while new servers use the canonical Book
+      // route above; the adapter can disappear once all clients migrate.
+      if (bookId !== `world:${currentWorldId.value}`) throw canonicalError
+      data.value = await api<LorebookResponse>(`/lorebook/${encodeURIComponent(currentWorldId.value)}`)
+    }
     // 换书/刷新后旧 id 不能再指向任何条目，否则批量操作会打向不存在的目标。
     const loaded = new Set((data.value.entries || []).map(entry => entry.id).filter(Boolean) as string[])
     bulkSelectedIds.value = new Set([...bulkSelectedIds.value].filter(id => loaded.has(id)))
@@ -386,7 +394,13 @@ async function saveLore() {
     ? `/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`
     : `/lorebooks/${encodeURIComponent(bookId)}/entries`
   try {
-    await api<unknown>(path, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    try {
+      await api<unknown>(path, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    } catch (canonicalError) {
+      if (bookId !== `world:${currentWorldId.value}`) throw canonicalError
+      const legacyPath = entry.id ? `/lorebook/${encodeURIComponent(entry.id)}` : '/lorebook'
+      await api<unknown>(legacyPath, { method: entry.id ? 'PUT' : 'POST', body: JSON.stringify(entry) })
+    }
     toast.success(entry.id ? t('updated') : t('created'))
     loreEdit.value = null
     await loadLore()
@@ -401,7 +415,12 @@ async function deleteLore(entry: LoreEntry) {
   if (!ok) return
   try {
     const bookId = activeBookId.value || `world:${currentWorldId.value}`
-    await api<unknown>(`/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    try {
+      await api<unknown>(`/lorebooks/${encodeURIComponent(bookId)}/entries/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    } catch (canonicalError) {
+      if (bookId !== `world:${currentWorldId.value}`) throw canonicalError
+      await api<unknown>(`/lorebook/${encodeURIComponent(entry.id)}`, { method: 'DELETE' })
+    }
     toast.success(t('deleted'))
     if (selectedEntryId.value === entry.id) selectedEntryId.value = ''
     await loadLore()

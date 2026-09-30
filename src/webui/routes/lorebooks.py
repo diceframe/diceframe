@@ -1,6 +1,7 @@
 """Canonical Lorebook v2 import routes; legacy world routes remain façades."""
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from aiohttp import web
 
 from src.webui.routes._common import _get_api
@@ -20,6 +21,18 @@ def _result_response(result: dict) -> web.Response:
         404 if "not found" in error.lower() else 400
     )
     return web.json_response(result, status=status)
+
+
+def _json_safe(value):
+    """Serialize preview dataclasses for lightweight API adapters and tests."""
+
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 async def api_lorebook_create(request: web.Request) -> web.Response:
@@ -80,7 +93,7 @@ async def api_lorebook_import_preview(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict):
         return web.json_response({"ok": False, "error": "Lorebook payload must be an object"}, status=400)
-    return web.json_response(_get_api(request).preview_lorebook_import(body))
+    return web.json_response(_json_safe(_get_api(request).preview_lorebook_import(body)))
 
 
 async def api_lorebook_import_commit(request: web.Request) -> web.Response:
