@@ -167,6 +167,7 @@ async def api_plugin_content_import(request: web.Request) -> web.Response:
             body.get("plugin_id", ""),
             body.get("target_world_id", body.get("world_id", "")),
             bool(body.get("overwrite")),
+            body.get("target_book_id", body.get("book_id", "")),
         )
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
@@ -180,6 +181,7 @@ async def api_plugin_content_import_all(request: web.Request) -> web.Response:
         result = _get_api(request).import_all_plugin_content(
             body.get("plugin_id", ""),
             body.get("target_world_id", body.get("world_id", "")),
+            body.get("target_book_id", body.get("book_id", "")),
         )
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)

@@ -99,8 +99,8 @@ async function openExportModal() {
   }
 }
 const {
-  contentByPlugin, contentGroupCount, contentLoading, contentTargetWorldId, worldOptions,
-  loadContentResources, loadWorlds, contentTitle, contentSubtitle, importContent, importAllContent,
+  contentByPlugin, contentGroupCount, contentLoading, contentTargetBookId, bookOptions,
+  loadContentResources, loadLorebooks, contentTitle, contentSubtitle, importContent, importAllContent,
 } = usePluginContent(busy)
 
 async function refreshPluginSurfaces() {
@@ -189,7 +189,7 @@ async function loadPluginDocs(pluginId: string) {
 onMounted(async () => {
   await load()
   await Promise.all([
-    loadMarketplace(), loadMirrors(), loadContentResources(), loadWorlds(), loadTypes(), settingsStore.load(),
+    loadMarketplace(), loadMirrors(), loadContentResources(), loadLorebooks(), loadTypes(), settingsStore.load(),
   ])
 })
 </script>
@@ -283,8 +283,8 @@ onMounted(async () => {
         :content-by-plugin="contentByPlugin"
         :content-group-count="contentGroupCount"
         :content-loading="contentLoading"
-        v-model:content-target-world-id="contentTargetWorldId"
-        :world-options="worldOptions"
+        v-model:content-target-book-id="contentTargetBookId"
+        :book-options="bookOptions"
         :busy="busy"
         :load-content-resources="loadContentResources"
         :content-title="contentTitle"

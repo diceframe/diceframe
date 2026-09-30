@@ -37,6 +37,9 @@ class PluginContentStoreDependencies:
     save_character_card: Callable[[dict[str, Any]], dict[str, Any]]
     delete_character_card: Callable[[str], dict[str, Any]]
     save_entry: Callable[[dict[str, Any]], dict[str, Any]]
+    # Canonical Book-scoped writer.  ``None`` is an explicit compatibility
+    # boundary for integrations that still expose only the world adapter.
+    save_book_entry: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +511,8 @@ def import_plugin_content(
     plugin_id: str = "",
     target_world_id: str = "",
     overwrite: bool = False,
+    *,
+    target_book_id: str = "",
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
@@ -516,6 +521,7 @@ def import_plugin_content(
     resource_id = (resource_id or "").strip()
     plugin_id = (plugin_id or "").strip()
     target_world_id = (target_world_id or "").strip()
+    target_book_id = (target_book_id or "").strip()
     resource = host.get_content_resource(kind, resource_id, plugin_id=plugin_id)
     if not resource:
         return {"ok": False, "error": "插件内容不存在或未启用"}
@@ -528,15 +534,30 @@ def import_plugin_content(
             result["source_plugin_id"] = resource.get("plugin_id", "")
         return result
 
-    if not target_world_id:
-        return {"ok": False, "error": "请选择要导入到的世界书"}
     lorebook = dependencies.store.lorebook
+    if target_book_id:
+        if not lorebook or not lorebook.get_lorebook(target_book_id):
+            return {"ok": False, "error": "目标世界书不存在", "error_code": "book_not_found"}
+        world_projection = getattr(lorebook, "bound_world_projection_for_book", None)
+        target_world_id = (
+            str(world_projection(target_book_id) or "")
+            if callable(world_projection) else ""
+        )
+    elif not target_world_id:
+        return {"ok": False, "error": "请选择要导入到的世界书"}
     if not lorebook or not lorebook.get_world(target_world_id):
-        return {"ok": False, "error": "目标世界书不存在"}
-    entry = _content_to_lore_entry(resource, kind, target_world_id)
+        # A standalone canonical Book intentionally has no world projection.
+        if not target_book_id:
+            return {"ok": False, "error": "目标世界书不存在"}
+    entry = _content_to_lore_entry(
+        resource, kind, target_world_id, book_id=target_book_id,
+    )
     if lorebook.get_entry(entry["id"]) and not overwrite:
         entry["id"] = f"{entry['id']}_{int(time.time() * 1000)}"
-    result = dependencies.store.save_entry(entry)
+    result = (
+        _save_plugin_book_entry(dependencies, target_book_id, entry)
+        if target_book_id else dependencies.store.save_entry(entry)
+    )
     if result.get("ok"):
         result["imported_as"] = "lorebook_entry"
         result["entry"] = entry
@@ -548,6 +569,8 @@ def import_all_plugin_content(
     dependencies: PluginContentDependencies,
     plugin_id: str,
     target_world_id: str = "",
+    *,
+    target_book_id: str = "",
 ) -> dict[str, Any]:
     """一键导入插件全部内容：角色卡→卡库，NPC/道具/魔法/职业→指定世界书。"""
     host = dependencies.plugin_host
@@ -555,6 +578,16 @@ def import_all_plugin_content(
         return {"ok": False, "error": "插件宿主未启用"}
     plugin_id = (plugin_id or "").strip()
     target_world_id = (target_world_id or "").strip()
+    target_book_id = (target_book_id or "").strip()
+    lorebook = dependencies.store.lorebook
+    if target_book_id:
+        if not lorebook or not lorebook.get_lorebook(target_book_id):
+            return {"ok": False, "error": "目标世界书不存在", "error_code": "book_not_found"}
+        world_projection = getattr(lorebook, "bound_world_projection_for_book", None)
+        target_world_id = (
+            str(world_projection(target_book_id) or "")
+            if callable(world_projection) else ""
+        )
     resources = host.list_content_resources()
     kinds = ("character_template", "npc", "item", "spell", "class")
     imported: list[dict[str, Any]] = []
@@ -574,19 +607,29 @@ def import_all_plugin_content(
                     else:
                         errors.append({"kind": kind, "name": _content_name(resource), "error": result.get("error", "")})
                 else:
-                    if not target_world_id:
+                    if not target_book_id and not target_world_id:
                         skipped.append({"kind": kind, "name": _content_name(resource), "reason": "未选择世界书"})
                         continue
                     lorebook = dependencies.store.lorebook
-                    if not lorebook or not lorebook.get_world(target_world_id):
+                    if not target_book_id and (not lorebook or not lorebook.get_world(target_world_id)):
                         return {"ok": False, "error": "目标世界书不存在"}
-                    entry = _content_to_lore_entry(resource, kind, target_world_id)
+                    entry = _content_to_lore_entry(
+                        resource, kind, target_world_id, book_id=target_book_id,
+                    )
                     if lorebook.get_entry(entry["id"]):
                         # 幂等：已存在则更新，不创建时间戳副本（避免重复导入产生重复条目）
-                        lorebook.update_entry(entry["id"], entry)
-                        result = {"ok": True}
+                        if target_book_id:
+                            result = _save_plugin_book_entry(
+                                dependencies, target_book_id, entry,
+                            )
+                        else:
+                            lorebook.update_entry(entry["id"], entry)
+                            result = {"ok": True}
                     else:
-                        result = dependencies.store.save_entry(entry)
+                        result = (
+                            _save_plugin_book_entry(dependencies, target_book_id, entry)
+                            if target_book_id else dependencies.store.save_entry(entry)
+                        )
                     if result.get("ok"):
                         imported.append({"kind": kind, "name": _content_name(resource), "as": "lorebook_entry"})
                     else:
@@ -1228,7 +1271,33 @@ def _package_portrait(
     return {"kind": "asset", "path": relative_path}
 
 
-def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -> dict[str, Any]:
+def _save_plugin_book_entry(
+    dependencies: PluginContentDependencies,
+    book_id: str,
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    """Write plugin content through the canonical Book boundary."""
+
+    writer = dependencies.store.save_book_entry
+    if callable(writer):
+        return writer(str(book_id), entry)
+    lorebook = dependencies.store.lorebook
+    if lorebook is None:
+        return {"ok": False, "error": "世界书存储不可用"}
+    add_book_entry = getattr(lorebook, "add_book_entry", None)
+    if callable(add_book_entry):
+        add_book_entry(str(book_id), entry)
+        return {"ok": True}
+    return {"ok": False, "error": "目标世界书不支持规范导入", "error_code": "book_writer_unavailable"}
+
+
+def _content_to_lore_entry(
+    resource: dict[str, Any],
+    kind: str,
+    world_id: str,
+    *,
+    book_id: str = "",
+) -> dict[str, Any]:
     name = _content_name(resource)
     plugin_id = str(resource.get("plugin_id") or "plugin")
     resource_id = str(resource.get("id") or name)
@@ -1244,8 +1313,9 @@ def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -
     clean_keywords = [str(item).strip() for item in keywords if str(item).strip()]
     if name and name not in clean_keywords:
         clean_keywords.insert(0, name)
+    owner_id = str(book_id or world_id)
     entry = {
-        "id": f"{world_id}_plugin_{safe_id_part(kind)}_{safe_id_part(plugin_id)}_{safe_id_part(resource_id)}",
+        "id": f"{owner_id}_plugin_{safe_id_part(kind)}_{safe_id_part(plugin_id)}_{safe_id_part(resource_id)}",
         "world_id": world_id,
         "name": name,
         "type": kind if kind in ("npc", "item", "spell", "class") else "other",
@@ -1258,6 +1328,8 @@ def _content_to_lore_entry(resource: dict[str, Any], kind: str, world_id: str) -
         "group": "插件内容包",
         "source_plugin": plugin_id,
     }
+    if book_id:
+        entry["book_id"] = str(book_id)
     portrait = resource.get("portrait")
     if isinstance(portrait, dict) and portrait.get("kind") in {"builtin", "upload", "generated"}:
         entry["portrait"] = dict(portrait)

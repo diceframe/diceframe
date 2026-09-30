@@ -88,7 +88,10 @@ def safe_id_part(value: Any) -> str:
 class PluginContentCatalog:
     """读取已注册静态贡献；不参与插件进程生命周期。"""
 
-    CONTENT_KINDS = frozenset({"character_template", "npc", "item", "spell", "class", "rule"})
+    CONTENT_KINDS = frozenset({
+        "character_template", "npc", "item", "spell", "class", "rule",
+        "world", "lorebook", "adventure",
+    })
 
     def __init__(
         self,

@@ -216,6 +216,49 @@ async def test_module_detail_lists_adventures_without_a_synced_registry(env) -> 
 
 
 @pytest.mark.asyncio
+async def test_module_lorebooks_only_lists_canonical_books_owned_by_module(env) -> None:
+    await env.api.import_module(_zip_payload(_module_files(catalog=True)))
+    env.lorebook.create_lorebook({
+        "id": "module-book",
+        "name": "Module Book",
+        "source_kind": "module",
+        "source_id": MODULE_ID,
+    })
+    env.lorebook.create_lorebook({
+        "id": "world-book",
+        "name": "World Book",
+        "source_kind": "world",
+        "source_id": MODULE_ID,
+    })
+    env.lorebook.create_lorebook({
+        "id": "other-module-book",
+        "name": "Other Module Book",
+        "source_kind": "module",
+        "source_id": "other-module",
+    })
+
+    listed = {item["id"]: item for item in env.api.list_modules()["modules"]}
+    detail = env.api.module_detail(MODULE_ID)["module"]
+    lorebooks = env.api.module_lorebooks(MODULE_ID)
+
+    assert listed[MODULE_ID]["lorebook_count"] == 1
+    assert detail["lorebooks"] == [{
+        "id": "module-book",
+        "name": "Module Book",
+        "description": "",
+        "language": "zh-CN",
+        "enabled": True,
+        "source_kind": "module",
+        "source_id": MODULE_ID,
+    }]
+    assert lorebooks == {
+        "ok": True,
+        "module_id": MODULE_ID,
+        "lorebooks": detail["lorebooks"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_module_detail_guard_is_unknown_for_non_modules(env) -> None:
     # 通用插件面可以装 tool；它不该出现在模组详情里（§8：模组库不是插件列表）。
     await env.api.install_plugin(_zip_payload(_module_files(

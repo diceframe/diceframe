@@ -433,6 +433,7 @@ class WebAPI:
         self._module_dependencies = modules.ModuleDependencies(
             plugin_host=self._plugins,
             adventure_registry=self._adventure_source_registry,
+            lorebook_store=self._lore,
             ruleset_registry=self._ruleset_registry,
             list_instances=self._reg.list_all,
             # FIX-01 §3.7：绑定存档保护必须覆盖所有持久化存档（paused / ended /
@@ -498,6 +499,9 @@ class WebAPI:
                 ),
                 save_entry=lambda entry: worlds.save_entry(
                     self._world_dependencies, entry,
+                ),
+                save_book_entry=lambda book_id, entry: lorebooks.save_lorebook_entry(
+                    self._lorebook_dependencies(), book_id, entry,
                 ),
             ),
             portraits=plugins.PluginPortraitDependencies(
@@ -866,6 +870,9 @@ class WebAPI:
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
 
+    def module_lorebooks(self, module_id: str) -> dict[str, Any]:
+        return modules.module_lorebooks(self._module_dependencies, module_id)
+
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",
     ) -> dict[str, Any]:
@@ -1231,6 +1238,7 @@ class WebAPI:
         plugin_id: str = "",
         target_world_id: str = "",
         overwrite: bool = False,
+        target_book_id: str = "",
     ) -> dict[str, Any]:
         return plugins.import_plugin_content(
             self._plugin_content_dependencies,
@@ -1239,11 +1247,20 @@ class WebAPI:
             plugin_id,
             target_world_id,
             overwrite,
+            target_book_id=target_book_id,
         )
 
-    def import_all_plugin_content(self, plugin_id: str, target_world_id: str = "") -> dict[str, Any]:
+    def import_all_plugin_content(
+        self,
+        plugin_id: str,
+        target_world_id: str = "",
+        target_book_id: str = "",
+    ) -> dict[str, Any]:
         return plugins.import_all_plugin_content(
-            self._plugin_content_dependencies, plugin_id, target_world_id,
+            self._plugin_content_dependencies,
+            plugin_id,
+            target_world_id,
+            target_book_id=target_book_id,
         )
 
     def export_content_pack(

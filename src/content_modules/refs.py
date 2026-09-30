@@ -38,6 +38,8 @@ from src.engine.world.contracts import canonical_id, validate_source_ref
 CONTENT_KINDS = (
     # generic adventure entities（v1 bundle kinds）
     "scene", "npc", "map_location", "encounter_catalog",
+    # canonical Content Package resources
+    "world", "lorebook", "adventure",
     # D&D ruleset catalog（§29）
     "monster", "npc_statblock", "item", "spell", "class_extension",
     "feature", "hazard", "trap", "encounter_profile", "reward",

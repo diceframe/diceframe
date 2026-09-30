@@ -27,6 +27,7 @@ _VOICE_ENGINES = frozenset({"openai-compatible", "gpt-sovits", "edge-tts"})
 _NAMESPACED_KINDS = MAP_KINDS | frozenset({"voice_profile", "voice_asset"})
 _V2_CANONICAL_KINDS = frozenset({
     "character_template", "npc", "item", "spell", "class", "rule", "world_template",
+    "world", "lorebook", "adventure",
 })
 
 

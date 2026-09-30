@@ -33,6 +33,11 @@ PROCESS_MODES = (
 _CONTENT_CONTRIBUTIONS = {
     "rules": "rule",
     "world_templates": "world_template",
+    # Canonical Content Package resources.  ``world_templates`` remains the
+    # legacy auto-import contribution; these kinds are catalog-only data.
+    "worlds": "world",
+    "lorebooks": "lorebook",
+    "adventure_resources": "adventure",
     "character_templates": "character_template",
     "characters": "character_template",
     "npcs": "npc",

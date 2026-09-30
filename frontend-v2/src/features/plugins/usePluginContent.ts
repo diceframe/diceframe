@@ -4,7 +4,7 @@ import { pluginApi } from '@/api/plugins'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
 import type { MessageKey } from '@/i18n'
-import type { PluginContentResource, WorldListResponse } from '@/api/types'
+import type { PluginContentResource } from '@/api/types'
 
 const CONTENT_GROUPS = [
   { key: 'character_template', labelKey: 'contentGroupCharacterTemplate' },
@@ -18,9 +18,9 @@ export function usePluginContent(busy: Ref<string>) {
   const toast = useToast()
   const { t } = useLocale()
   const contentResources = ref<Record<string, PluginContentResource[]>>({})
-  const worlds = ref<WorldListResponse['worlds']>([])
+  const lorebooks = ref<Array<{ id?: string; name?: string }>>([])
   const contentLoading = ref(false)
-  const contentTargetWorldId = ref('')
+  const contentTargetBookId = ref('')
 
   const contentGroups = computed(() => CONTENT_GROUPS.map(group => ({
     ...group,
@@ -55,10 +55,10 @@ export function usePluginContent(busy: Ref<string>) {
   const contentGroupCount = computed(() =>
     Object.values(contentResources.value).reduce((sum, arr) => sum + (arr?.length || 0), 0),
   )
-  const worldOptions = computed(() => (worlds.value || []).map(world => {
-    const id = String(world.id || world.world_id || '')
+  const bookOptions = computed(() => (lorebooks.value || []).map(book => {
+    const id = String(book.id || '')
     return {
-      label: String(world.name || world.world_name || id),
+      label: String(book.name || id),
       value: id,
     }
   }).filter(item => item.value))
@@ -76,12 +76,12 @@ export function usePluginContent(busy: Ref<string>) {
     }
   }
 
-  async function loadWorlds() {
+  async function loadLorebooks() {
     try {
-      const response = await pluginApi.worlds()
-      worlds.value = response.worlds || []
-      if (!contentTargetWorldId.value && worldOptions.value.length) {
-        contentTargetWorldId.value = String(worldOptions.value[0].value)
+      const response = await pluginApi.lorebooks()
+      lorebooks.value = response.books || []
+      if (!contentTargetBookId.value && bookOptions.value.length) {
+        contentTargetBookId.value = String(bookOptions.value[0].value)
       }
     } catch (error: unknown) {
       toast.error(errorMessage(error))
@@ -95,7 +95,7 @@ export function usePluginContent(busy: Ref<string>) {
     [item.plugin_name || item.plugin_id || '', item.description || ''].filter(Boolean).join(' · ')
 
   async function importContent(kind: string, item: PluginContentResource) {
-    if (kind !== 'character_template' && !contentTargetWorldId.value) {
+    if (kind !== 'character_template' && !contentTargetBookId.value) {
       toast.error(t('selectLorebookTarget'))
       return
     }
@@ -106,7 +106,7 @@ export function usePluginContent(busy: Ref<string>) {
         kind,
         item.id,
         item.plugin_id || '',
-        kind === 'character_template' ? '' : contentTargetWorldId.value,
+        kind === 'character_template' ? '' : contentTargetBookId.value,
       )
       if (!response.ok) throw new Error(response.error || t('importFailed'))
       toast.success(kind === 'character_template' ? t('importedCharacterLibrary') : t('importedLorebook'))
@@ -118,13 +118,13 @@ export function usePluginContent(busy: Ref<string>) {
   }
 
   async function importAllContent(pluginId: string) {
-    if (!contentTargetWorldId.value) {
+    if (!contentTargetBookId.value) {
       toast.error(t('selectLorebookTarget'))
       return
     }
     busy.value = `import-all:${pluginId}`
     try {
-      const response = await pluginApi.importAllContent(pluginId, contentTargetWorldId.value)
+      const response = await pluginApi.importAllContent(pluginId, contentTargetBookId.value)
       if (!response.ok) throw new Error(response.error || t('importFailed'))
       const imported = response.imported_count || 0
       const errors = response.error_count || 0
@@ -142,10 +142,10 @@ export function usePluginContent(busy: Ref<string>) {
     contentByPlugin,
     contentGroupCount,
     contentLoading,
-    contentTargetWorldId,
-    worldOptions,
+    contentTargetBookId,
+    bookOptions,
     loadContentResources,
-    loadWorlds,
+    loadLorebooks,
     contentTitle,
     contentSubtitle,
     importContent,

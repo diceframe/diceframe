@@ -76,13 +76,14 @@ export const pluginApi = {
   mirrors: () => api<PluginMirrorsResponse>('/plugins/mirrors'),
   content: () => api<PluginContentResponse>('/plugins/content'),
   worlds: () => api<WorldListResponse>('/worlds'),
+  lorebooks: () => api<{ books?: Array<{ id?: string; name?: string }> }>('/lorebooks'),
   docs: (pluginId: string) => api<{ ok: boolean; found?: boolean; name?: string; content?: string; error?: string }>(
     pluginPath(pluginId, '/docs'),
   ),
-  importAllContent: (pluginId: string, targetWorldId: string) =>
+  importAllContent: (pluginId: string, targetBookId: string) =>
     api<{ ok: boolean; imported_count?: number; error_count?: number; error?: string }>(
       '/plugins/content/import-all',
-      { method: 'POST', body: JSON.stringify({ plugin_id: pluginId, target_world_id: targetWorldId }) },
+      { method: 'POST', body: JSON.stringify({ plugin_id: pluginId, target_book_id: targetBookId }) },
     ),
   exportContent: (payload: {
     plugin_id: string
@@ -135,14 +136,14 @@ export const pluginApi = {
       method: 'POST',
       body: JSON.stringify({ mirror_id: mirrorId }),
     }),
-  importContent: (kind: string, itemId: unknown, pluginId: string, targetWorldId: string) =>
+  importContent: (kind: string, itemId: unknown, pluginId: string, targetBookId: string) =>
     api<PluginContentImportResponse>('/plugins/content/import', {
       method: 'POST',
       body: JSON.stringify({
         kind,
         id: itemId,
         plugin_id: pluginId,
-        target_world_id: targetWorldId,
+        target_book_id: targetBookId,
       }),
     }),
 }

@@ -12,8 +12,8 @@ defineProps<{
   contentByPlugin: ContentPluginEntry[]
   contentGroupCount: number
   contentLoading: boolean
-  contentTargetWorldId: string
-  worldOptions: { label: string; value: string }[]
+  contentTargetBookId: string
+  bookOptions: { label: string; value: string }[]
   busy: string
   loadContentResources: () => Promise<void> | void
   contentTitle: (item: PluginContentResource) => string
@@ -21,7 +21,7 @@ defineProps<{
   importContent: (kind: string, item: PluginContentResource) => Promise<void> | void
   importAllContent: (pluginId: string) => Promise<void> | void
 }>()
-const emit = defineEmits<{ 'update:contentTargetWorldId': [value: string]; 'open-export': [] }>()
+const emit = defineEmits<{ 'update:contentTargetBookId': [value: string]; 'open-export': [] }>()
 
 const { t } = useLocale()
 
@@ -36,11 +36,11 @@ function contentPortrait(item: PluginContentResource): CharacterPortrait | undef
 <template>
   <section class="toolbar-row content-pack-toolbar">
     <NSelect
-      :value="contentTargetWorldId"
-      :options="worldOptions"
+      :value="contentTargetBookId"
+      :options="bookOptions"
       :placeholder="t('selectLorebook')"
       class="content-world-select"
-      @update:value="(v) => emit('update:contentTargetWorldId', String(v || ''))"
+      @update:value="(v) => emit('update:contentTargetBookId', String(v || ''))"
     />
     <span class="muted">{{ t('contentTotalCount', { count: contentGroupCount }) }}</span>
     <NButton :loading="contentLoading" @click="loadContentResources">
@@ -99,7 +99,7 @@ function contentPortrait(item: PluginContentResource): CharacterPortrait | undef
                 <NButton
                   size="small"
                   secondary
-                  :disabled="group.key !== 'character_template' && !contentTargetWorldId"
+                  :disabled="group.key !== 'character_template' && !contentTargetBookId"
                   :loading="busy === `${group.key}:${item.plugin_id}:${item.id || item.name || item.character_name}`"
                   @click="importContent(group.key, item)"
                 >

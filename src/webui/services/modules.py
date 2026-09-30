@@ -47,6 +47,9 @@ class ModuleDependencies:
 
     plugin_host: Any | None
     adventure_registry: Any | None
+    # Canonical Book sources contributed by a module are read-only catalog data;
+    # legacy world auto-imports are intentionally not inferred here.
+    lorebook_store: Any | None = None
     ruleset_registry: Any | None = None
     list_instances: Callable[[], list[Any]] | None = None
     # FIX-01 §3.7：保护目标是"所有持久化存档"，不能只看内存 active GameInstance。
@@ -96,6 +99,33 @@ def _contribution_counts(contributions: Any, plugin_id: str) -> dict[str, int]:
     return counts
 
 
+def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str, Any]]:
+    """Return canonical Lorebook sources explicitly owned by one module."""
+
+    store = getattr(deps, "lorebook_store", None)
+    lister = getattr(store, "list_lorebooks", None)
+    if not callable(lister):
+        return []
+    try:
+        books = lister() or []
+    except Exception:  # noqa: BLE001 - an optional source must not hide the catalog
+        return []
+    return [
+        {
+            "id": str(book.get("id") or ""),
+            "name": str(book.get("name") or book.get("id") or ""),
+            "description": str(book.get("description") or ""),
+            "language": str(book.get("language") or "zh-CN"),
+            "enabled": bool(book.get("enabled", True)),
+            "source_kind": "module",
+            "source_id": str(module_id),
+        }
+        for book in books
+        if str(book.get("source_kind") or "") == "module"
+        and str(book.get("source_id") or "") == str(module_id)
+    ]
+
+
 def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
     """模块库列表（母方案 §51：已安装；在线/本地导入由 marketplace 提供）。"""
 
@@ -104,6 +134,7 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
         plugin_id = str(runtime.manifest.get("id") or "")
         profile = content_profile(runtime.manifest)
         counts = _contribution_counts(deps.plugin_host.contributions, plugin_id)
+        lorebooks = _module_lorebooks(deps, plugin_id)
         modules.append({
             "id": plugin_id,
             "name": str(runtime.manifest.get("name") or plugin_id),
@@ -115,6 +146,7 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
             "status": str(runtime.status or ""),
             "adventure_count": _adventure_count(deps.adventure_registry, plugin_id),
             "content_counts": counts,
+            "lorebook_count": len(lorebooks),
         })
     return {"ok": True, "modules": modules}
 
@@ -243,6 +275,7 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
             "description": item.description,
         })
     adventures = _module_adventure_rows(deps, module_id)
+    lorebooks = _module_lorebooks(deps, module_id)
     return {
         "ok": True,
         "module": {
@@ -255,9 +288,23 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
             "content_counts": _contribution_counts(deps.plugin_host.contributions, plugin_id),
             "content": grouped,
             "adventures": adventures,
+            "lorebooks": lorebooks,
             "bound_games": bound_games,
             "actions": actions,
         },
+    }
+
+
+def module_lorebooks(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
+    """List canonical Lorebook sources owned by an installed module."""
+
+    detail = module_detail(deps, module_id)
+    if not detail.get("ok"):
+        return detail
+    return {
+        "ok": True,
+        "module_id": str(module_id),
+        "lorebooks": list(detail["module"].get("lorebooks") or []),
     }
 
 

@@ -194,6 +194,84 @@ def test_import_all_plugin_content_imports_characters_and_entries(tmp_path):
     assert len(api._lore.entries) == 1
 
 
+def test_plugin_content_import_can_target_standalone_canonical_book(tmp_path):
+    """Book scoped imports do not require a legacy world projection."""
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "standalone-pack",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"npcs": ["npc/*.json"]}},
+    )
+    (plugins / "standalone-pack" / "npc").mkdir()
+    (plugins / "standalone-pack" / "npc" / "guide.json").write_text(
+        json.dumps({"id": "guide", "name": "Guide", "description": "A guide"}),
+        encoding="utf-8",
+    )
+    data_dir = tmp_path / "data"
+    (data_dir / "standalone-pack").mkdir(parents=True)
+    (data_dir / "standalone-pack" / "config.json").write_text(
+        json.dumps({"enabled": True}), encoding="utf-8",
+    )
+    host = PluginHost(plugins, data_dir)
+    host.discover()
+
+    class _Lore:
+        def __init__(self):
+            self.books = {"standalone-book": {"id": "standalone-book"}}
+            self.entries = {}
+
+        def get_lorebook(self, book_id):
+            return self.books.get(book_id)
+
+        def bound_world_projection_for_book(self, book_id):
+            return None
+
+        def get_world(self, world_id):
+            return None
+
+        def get_entry(self, entry_id):
+            return self.entries.get(entry_id)
+
+        def add_book_entry(self, book_id, entry):
+            payload = dict(entry)
+            payload["book_id"] = book_id
+            payload["world_id"] = None
+            self.entries[payload["id"]] = payload
+
+    class _Api:
+        def __init__(self):
+            self._plugins = host
+            self._lore = _Lore()
+
+        def save_character_card(self, card):
+            return {"ok": True, "card": card}
+
+        def save_entry(self, entry):
+            return {"ok": False, "error": "legacy world writer should not be used"}
+
+    api = _Api()
+    dependencies = _plugin_content_dependencies(api)
+
+    single = plugin_service.import_plugin_content(
+        dependencies, "npc", "guide", "standalone-pack", target_book_id="standalone-book",
+    )
+    batch = plugin_service.import_all_plugin_content(
+        dependencies, "standalone-pack", target_book_id="standalone-book",
+    )
+
+    assert single["ok"] is True
+    assert single["entry"]["book_id"] == "standalone-book"
+    assert single["entry"]["world_id"] == ""
+    assert batch["ok"] is True
+    assert batch["imported_count"] == 1
+    assert len(api._lore.entries) == 1
+    saved = next(iter(api._lore.entries.values()))
+    assert saved["book_id"] == "standalone-book"
+    assert saved["world_id"] is None
+
+
 def test_content_pack_portraits_preview_and_import_as_local_uploads(tmp_path):
     from src.webui.services.plugins import import_all_plugin_content
 
