@@ -14,7 +14,7 @@ from src.content_modules.refs import (
     ContentResolution,
     parse_content_ref,
 )
-from src.content_modules.projection import ContentProjection
+from src.content_modules.projection import ContentProjection, ContentProjectionService
 
 __all__ = [
     "CONTENT_KINDS",
@@ -25,5 +25,5 @@ __all__ = [
     "ContentRefError",
     "ContentResolution",
     "parse_content_ref",
-    "ContentProjection",
+    "ContentProjection", "ContentProjectionService",
 ]

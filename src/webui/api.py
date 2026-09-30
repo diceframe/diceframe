@@ -28,6 +28,7 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
+from src.content_modules.projection import ContentProjectionService
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
@@ -725,6 +726,7 @@ class WebAPI:
                 lorebook=self._lore,
                 get_instance=self._reg.get,
                 parse_game_key=_parse_game_key,
+                content_projection=ContentProjectionService(self._lore),
             )
         )
         kp_answerer = (

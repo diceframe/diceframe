@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, TypedDict
 
+from src.content_modules.projection import ContentProjectionService
 from src.knowledge.projection import Viewer, project_entries
 from src.knowledge.visibility import classify_audience
 
@@ -23,6 +24,7 @@ class LorePreviewDependencies:
     lorebook: LorePreviewStore | None
     get_instance: Callable[[GameKey], Any | None]
     parse_game_key: Callable[[str], GameKey]
+    content_projection: ContentProjectionService | None = None
 
 
 class LorePreviewResult(TypedDict):
@@ -67,7 +69,12 @@ def preview(
         resolved = Viewer("character", viewer, str(player.get("character_name") or viewer))
 
     assert dependencies.lorebook is not None
-    entries = dependencies.lorebook.list_entries(world_id)
+    projection = dependencies.content_projection
+    entries = (
+        projection.for_world_authoring(world_id)
+        if projection is not None
+        else dependencies.lorebook.list_entries(world_id)
+    )
     projections = project_entries(entries, resolved)
     audience_counts = {"public": 0, "character": 0, "gm": 0}
     for entry in entries:
