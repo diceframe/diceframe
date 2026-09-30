@@ -975,7 +975,14 @@ class Dnd2024Runtime:
                 str(item) for item in request.get("ready_player_ids") or [] if str(item)
             }
             gm_uid = str(getattr(instance, "gm_uid", "") or "")
-            required_ids = [str(uid) for uid in instance.players if str(uid) != gm_uid]
+            # 与普通回合 human_actions_ready 同一设计：AI 托管、未认领、暂离
+            # 或已倒下的席位不参与人工 ready barrier，避免一个不会点按钮的
+            # AI 座位把整桌遭遇卡成永久 pending。
+            human_seats = instance.active_human_players
+            required_ids = [
+                str(uid) for uid in instance.players
+                if str(uid) != gm_uid and str(uid) in human_seats
+            ]
             projected_request["readiness"] = {
                 "ready_player_ids": sorted(ready_ids),
                 "required_player_ids": required_ids,
