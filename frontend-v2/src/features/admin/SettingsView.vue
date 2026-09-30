@@ -16,6 +16,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { shouldAutoDownloadUpdate, updateStateForVersion, useUpdater } from '@/composables/useUpdater'
 import { useLocale } from '@/composables/useLocale'
+import { selectReleaseNotes } from '@/utils/releaseNotes'
 import { initializeTts, ttsRate, setTtsRate } from '@/utils/tts'
 import { asrLanguageFor, initializeAsr, startRecording, type RecordingSession } from '@/utils/asr'
 import { ApiError, api, apiBlob, errorMessage } from '@/api/client'
@@ -73,6 +74,10 @@ const {
   waitForApplicationRestart,
 } = useUpdater()
 const { t, locale } = useLocale()
+// Release 保持中英双语单文；展示层按界面语言选段，识别不到分段时整段回退。
+const releaseNotesText = computed(() =>
+  selectReleaseNotes(updateInfo.value?.latest?.body, locale.value).text,
+)
 const { current: themeMode, skin: activeSkin, builtinSkins, apply: applyThemeMode, applySkin } = useTheme()
 const standaloneFrontend = isStandaloneFrontend()
 const backendUrl = ref(standaloneFrontend ? currentBackendUrl() : '')
@@ -2120,7 +2125,7 @@ function redownloadUpdatePackage() {
               <p v-else-if="updateInfo?.update_available" class="muted">{{ t('updateAvailableHelp') }}</p>
               <div v-if="updateInfo?.latest?.body" class="update-notes">
                 <strong>{{ t('releaseNotes') }}</strong>
-                <pre>{{ updateInfo.latest.body }}</pre>
+                <pre>{{ releaseNotesText }}</pre>
               </div>
               <div v-if="updateInfo?.update_available && updateStatus" class="update-download">
                 <div v-if="!updateStatus.self_update.supported" class="muted">
