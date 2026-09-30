@@ -48,6 +48,45 @@ describe('CheckRevealCard', () => {
     expect(details).not.toContain('undefined')
   })
 
+  it('badges the dice mode and marks which die the server took', () => {
+    const wrapper = mount(CheckRevealCard, {
+      global: { plugins: [i18n] },
+      props: {
+        check: {
+          check_id: 'c4', actor_name: '米拉', label: '攻击检定', dice: 'd20',
+          roll: 6, rolls: [17, 6], modifier: 3, total: 9, dc: 14,
+          advantage_mode: 'disadvantage', advantage_note: '长距离射击：劣势',
+          verdict: '失败',
+        },
+      },
+    })
+    expect(wrapper.get('.check-mode-badge').text()).toBe('劣势')
+    expect(wrapper.get('.check-mode-badge').classes()).toContain('disadvantage')
+    const chips = wrapper.findAll('.check-die-chip')
+    expect(chips).toHaveLength(2)
+    expect(chips[0].text()).toContain('17')
+    expect(chips[0].classes()).not.toContain('taken')
+    expect(chips[1].text()).toContain('6')
+    expect(chips[1].classes()).toContain('taken')
+    expect(chips[1].text()).toContain('采用')
+  })
+
+  it('keeps the plain faces line for single-die results', () => {
+    const wrapper = mount(CheckRevealCard, {
+      global: { plugins: [i18n] },
+      props: {
+        check: {
+          check_id: 'c5', actor_name: '阿岚', label: '感知检定', dice: 'd20',
+          roll: 11, rolls: [11], modifier: 0, total: 11, dc: 12,
+          verdict: '失败',
+        },
+      },
+    })
+    expect(wrapper.find('.check-mode-badge').exists()).toBe(false)
+    expect(wrapper.find('.check-dice-chips').exists()).toBe(false)
+    expect(wrapper.find('details').text()).toContain('骰面：11')
+  })
+
   it('reveals the server result after the roll animation', async () => {
     vi.useFakeTimers()
     const wrapper = mount(CheckRevealCard, {

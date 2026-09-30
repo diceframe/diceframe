@@ -43,6 +43,21 @@ const diceFaces = computed(() => {
   const rolls = props.check.rolls?.length ? props.check.rolls : [props.check.roll]
   return rolls.filter((value): value is number => typeof value === 'number').join(', ')
 })
+// 双骰（优势/劣势、奖励骰/惩罚骰）时逐枚展示，并标出权威结算采用的那一枚；
+// 单骰或缺失 rolls 时保持纯文本，不改变既有展示。
+const diceChips = computed<{ value: number; taken: boolean }[]>(() => {
+  const rolls = (props.check.rolls?.length ? props.check.rolls : [props.check.roll])
+    .filter((value): value is number => typeof value === 'number')
+  if (rolls.length < 2) return []
+  const takenIndex = rolls.findIndex((value) => value === props.check.roll)
+  return rolls.map((value, index) => ({ value, taken: index === (takenIndex >= 0 ? takenIndex : 0) }))
+})
+const modeBadge = computed(() => {
+  const mode = String(props.check.advantage_mode || '')
+  if (mode === 'advantage') return t('checkModeAdvantage')
+  if (mode === 'disadvantage') return t('checkModeDisadvantage')
+  return ''
+})
 // 服务端保留的渠道来源：DC / 掷骰方式 / 环境修正各自为什么被采用。
 const plannerSources = computed(() => {
   const check = props.check
@@ -74,13 +89,22 @@ onUnmounted(() => {
       <div>
         <strong>{{ check.label || t('checkLabel') }} · {{ check.actor_name }}</strong>
         <small>{{ check.dice || 'd20' }} · {{ check.attribute || check.skill || t('checkAttribute') }}</small>
+        <small v-if="modeBadge" class="check-mode-badge" :class="check.advantage_mode">{{ modeBadge }}</small>
       </div>
       <b class="check-verdict">{{ revealed ? statusLabel : t('diceRolling') }}</b>
     </div>
     <p v-if="revealed" class="check-math">{{ math }}</p>
     <details v-if="revealed">
       <summary>{{ t('checkDetails') }}</summary>
-      <span>{{ t('checkDiceFaces', { rolls: diceFaces }) }}</span>
+      <span v-if="diceChips.length" class="check-dice-chips" :aria-label="t('checkDiceFaces', { rolls: diceFaces })">
+        <span
+          v-for="(chip, index) in diceChips"
+          :key="index"
+          class="check-die-chip"
+          :class="{ taken: chip.taken }"
+        >{{ chip.value }}<small v-if="chip.taken">{{ t('checkDiceTaken') }}</small></span>
+      </span>
+      <span v-else>{{ t('checkDiceFaces', { rolls: diceFaces }) }}</span>
       <span>{{ t('checkCalculation', { calculation: math }) }}</span>
       <span>{{ t('checkVerdictDetail', { verdict: statusLabel }) }}</span>
       <span v-if="typeof check.hard_threshold === 'number'">
@@ -113,6 +137,13 @@ onUnmounted(() => {
 .check-reveal-head{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px}
 .check-reveal-head strong{display:block;color:var(--df-accent-strong)}
 .check-reveal-head small{display:block;margin-top:2px;color:var(--df-text-muted)}
+.check-mode-badge{display:inline-block;margin-top:3px;padding:1px 7px;border:1px solid var(--df-border-soft);border-radius:8px;font-size:11px;font-weight:700}
+.check-mode-badge.advantage{color:var(--df-success);border-color:var(--df-success)}
+.check-mode-badge.disadvantage{color:var(--df-danger);border-color:var(--df-danger)}
+.check-dice-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.check-die-chip{display:inline-flex;align-items:baseline;gap:4px;min-width:30px;justify-content:center;padding:2px 8px;border:1px dashed var(--df-border-soft);border-radius:8px;color:var(--df-text-muted);font-variant-numeric:tabular-nums}
+.check-die-chip.taken{border-style:solid;border-color:var(--df-accent-strong);color:var(--df-accent-strong);font-weight:800}
+.check-die-chip small{font-size:10px;font-weight:400}
 .check-die{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--df-border-soft);border-radius:10px;background:rgba(0,0,0,.2);font-size:18px;font-weight:900;color:var(--df-accent-strong)}
 .rolling .check-die{animation:check-roll .72s cubic-bezier(.2,.8,.2,1) infinite}
 .check-verdict{color:var(--df-text);white-space:nowrap}
