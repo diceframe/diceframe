@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from src.engine.modules import check_reveals, table_settings
 from src.llm.parser import sanitize_narration
 
 GameKey = tuple[str, ...]
@@ -82,11 +83,29 @@ def get_log(
             {key: value for key, value in entry.items() if key in PUBLIC_LOG_FIELDS}
             for entry in page_items
         ]
+    # 揭示标记与揭示方式是展示层信息：与日志同页返回，供时间线恢复
+    # 已揭示/未揭示卡片状态。records 上限有界（模块内裁剪），整包返回。
+    page_ids: set[str] = set()
+    for entry in page_items:
+        results = entry.get("check_results")
+        if not isinstance(results, list):
+            continue
+        for check in results:
+            if isinstance(check, dict) and str(check.get("check_id") or ""):
+                page_ids.add(str(check.get("check_id")))
+    reveal_records = check_reveals.records(inst)
+    check_reveals_map = {
+        check_id: copy.deepcopy(record)
+        for check_id, record in reveal_records.items()
+        if isinstance(record, dict) and (check_id in page_ids or not page_ids)
+    }
     return {
         "log": page_items,
         "total": total,
         "page": page,
         "total_pages": max(1, (total + per_page - 1) // per_page),
+        "check_reveals": check_reveals_map,
+        "dice_reveal_mode": table_settings.dice_reveal_mode(inst),
     }
 
 

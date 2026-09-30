@@ -475,6 +475,14 @@ class GameInstance:
         table_settings.replace_luck_timeout_seconds(self, value)
 
     @property
+    def dice_reveal_mode(self) -> str:
+        return table_settings.dice_reveal_mode(self)
+
+    @dice_reveal_mode.setter
+    def dice_reveal_mode(self, value: str) -> None:
+        table_settings.replace_dice_reveal_mode(self, value)
+
+    @property
     def economy_reward_policy(self) -> dict:
         return table_settings.economy_reward_policy(self)
 
@@ -836,11 +844,14 @@ class GameInstance:
         luck_timeout_seconds: int | None = None,
         narrative_perspective: str | None = None,
         economy_reward_policy: dict | None = None,
+        dice_reveal_mode: str | None = None,
     ) -> None:
         """集中更新入口与房间身份配置，保留旧存档字段。
 
         luck_timeout_seconds：每玩家幸运超时秒数（0=禁用，异步局建议 0）。
         economy_reward_policy：本局奖励自动结算策略；非法载荷整体拒绝。
+        dice_reveal_mode：纯表现偏好（auto=自动出结果，click=点击共享揭示），
+        不改变任何机械判定与推进语义。
         """
         if solo_mode is not None:
             self.solo_mode = bool(solo_mode)
@@ -854,6 +865,10 @@ class GameInstance:
             if not 0 <= int(luck_timeout_seconds) <= 3600:
                 raise ValueError("幸运超时需在 0..3600 秒之间（0=禁用）")
             self.luck_timeout_seconds = int(luck_timeout_seconds)
+        if dice_reveal_mode is not None:
+            if dice_reveal_mode not in {"auto", "click"}:
+                raise ValueError("骰子揭示方式仅支持 auto 或 click")
+            self.dice_reveal_mode = dice_reveal_mode
         if narrative_perspective is not None:
             self.set_narrative_perspective(narrative_perspective)
         if economy_reward_policy is not None:

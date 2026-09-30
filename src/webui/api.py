@@ -28,7 +28,7 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
-from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls
+from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.webui.services import ruleset_characters
@@ -387,6 +387,7 @@ class WebAPI:
             )
         )
         self._manual_rolls = manual_rolls.ManualRollService(manual_rolls.ManualRollDependencies(_parse_game_key, self._reg.get, self._reg.save, self._load_rule_for_game))
+        self._check_reveals = check_reveals.CheckRevealService(check_reveals.CheckRevealDependencies(_parse_game_key, self._reg.get, self._reg.save))
         self._game_master = game_master.GameMasterService(
             game_master.GameMasterDependencies(
                 parse_game_key=_parse_game_key,
@@ -1485,6 +1486,9 @@ class WebAPI:
 
     async def cancel_manual_roll_request(self, game_key, user_id, request_id, body):
         return await self._manual_rolls.cancel(game_key, user_id, request_id, body)
+
+    async def reveal_check(self, game_key: str, check_id: str, user_id: str):
+        return await self._check_reveals.reveal(game_key, check_id, user_id)
 
     async def save_game_instance(self, instance) -> None:
         """Persist an already-authorized aggregate through the application facade."""

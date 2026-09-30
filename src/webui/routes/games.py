@@ -34,6 +34,7 @@ from src.webui.routes.game_control_routes import (
     api_set_narrative_perspective,
     api_set_gm_style,
     api_set_luck_timeout,
+    api_set_dice_reveal_mode,
     api_set_reward_policy,
     api_set_player_away,
     api_set_player_control,
@@ -60,6 +61,7 @@ from src.webui.routes.game_gameplay_routes import (
     api_ruleset_submit_intent,
     api_ruleset_resolve_decision,
     api_luck_decision,
+    api_check_reveal,
     api_advance,
     api_payment_create,
     api_payment_resolve,
@@ -138,6 +140,9 @@ def register_games(app: web.Application) -> None:
         "/api/games/{game_key}/settings/luck-timeout", api_set_luck_timeout
     )
     app.router.add_post(
+        "/api/games/{game_key}/settings/dice-reveal-mode", api_set_dice_reveal_mode
+    )
+    app.router.add_post(
         "/api/games/{game_key}/settings/reward-policy", api_set_reward_policy
     )
     app.router.add_post(
@@ -172,6 +177,9 @@ def register_games(app: web.Application) -> None:
     )
     app.router.add_post(
         "/api/games/{game_key}/checks/{check_id}/luck", api_luck_decision
+    )
+    app.router.add_post(
+        "/api/games/{game_key}/checks/{check_id}/reveal", api_check_reveal
     )
     app.router.add_post("/api/games/{game_key}/advance", api_advance)
     app.router.add_post("/api/games/{game_key}/gm-command", api_gm_command)

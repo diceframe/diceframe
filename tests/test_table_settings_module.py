@@ -30,7 +30,7 @@ def test_upgrade_moves_values_verbatim_without_mutating_input():
     result = migrate_game_state_payload(payload)
     assert payload == before
     assert result["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION
-    assert result["modules"][module.MODULE_NAME] == {"schema_version": 1, **VALUES}
+    assert result["modules"][module.MODULE_NAME] == {"schema_version": 1, **VALUES, "dice_reveal_mode": "click"}
     assert all(key not in result for key in VALUES)
     assert migrate_game_state_payload(result) == result
     single = _migrate_v27_to_v28(deepcopy(payload))
@@ -57,6 +57,7 @@ def test_missing_values_use_the_same_defaults_as_the_old_codec():
         "schema_version": 1, "difficulty": "标准", "narrative_perspective": "auto",
         "gm_style_override": None, "solo_mode": False, "seed_code": "", "entry_point": "web",
         "luck_timeout_seconds": 60, "economy_reward_policy": {},
+        "dice_reveal_mode": "click",
     }
     assert module.ensure(None) == module.fresh()
 

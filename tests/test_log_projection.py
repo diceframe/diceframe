@@ -63,7 +63,8 @@ def log_context():
     # A log without actions must still go through the public projection.
     second = {key: deepcopy(value) for key, value in entry.items() if key != "actions"}
     second["round"] = 2
-    instance = SimpleNamespace(log=[entry, second])
+    # get_log 还读取模块槽（check_reveals / table_settings）作展示附加信息。
+    instance = SimpleNamespace(log=[entry, second], modules={})
     dependencies = logs.LogDependencies(
         registry={("web", "room", "bot"): instance},
         parse_game_key=lambda key: tuple(key.split("|")),
@@ -104,7 +105,11 @@ def test_gm_log_retains_complete_entries_without_mutating_source(log_context):
 
     result = logs.get_log(dependencies, "web|room|bot", include_internal=True)
 
-    assert result == {"log": before, "total": 2, "page": 1, "total_pages": 1}
+    assert result["log"] == before
+    assert result["total"] == 2 and result["page"] == 1 and result["total_pages"] == 1
+    # 展示层附加信息随日志返回（无揭示记录、默认自动模式）。
+    assert result["check_reveals"] == {}
+    assert result["dice_reveal_mode"] == "click"
     result["log"][0]["pre_world_state"]["facts"].clear()
     assert instance.log == before
 

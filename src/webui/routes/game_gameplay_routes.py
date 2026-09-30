@@ -321,6 +321,26 @@ async def api_luck_decision(request: web.Request) -> web.Response:
     return web.json_response(result["payload"], status=result["status"])
 
 
+async def api_check_reveal(request: web.Request) -> web.Response:
+    """共享骰子揭示：提交揭示意图（只带 check_id，不带骰值），幂等。"""
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    result = await api.reveal_check(
+        gk,
+        request.match_info["check_id"],
+        request.get("user_id", ""),
+    )
+    status = int(result.pop("status", 200))
+    if result.get("ok") and not result.get("already"):
+        pool = request.app.get("connection_pool")
+        if pool is not None:
+            await pool.broadcast(gk, {
+                "type": "check_revealed",
+                "check_id": result.get("check_id", ""),
+            })
+    return web.json_response(result, status=status)
+
+
 async def api_advance(request: web.Request) -> web.Response:
     api = _get_api(request)
     gk = request.match_info["game_key"]

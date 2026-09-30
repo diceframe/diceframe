@@ -21,6 +21,7 @@ def fresh() -> dict[str, Any]:
         "entry_point": "web",
         "luck_timeout_seconds": 60,
         "economy_reward_policy": {},
+        "dice_reveal_mode": "click",
     }
 
 
@@ -45,6 +46,10 @@ def ensure(raw: Any) -> dict[str, Any]:
         raw["luck_timeout_seconds"] = int(raw.get("luck_timeout_seconds", 60) or 0)
     except (TypeError, ValueError, OverflowError):
         raw["luck_timeout_seconds"] = 60
+    # 骰子揭示方式是纯表现偏好：click=行动者/GM 点击共享揭示（默认），
+    # auto=结果即出。缺键或未知值不猜，回退默认 click。
+    if raw.get("dice_reveal_mode") not in {"auto", "click"}:
+        raw["dice_reveal_mode"] = "click"
     return raw
 
 
@@ -110,6 +115,14 @@ def economy_reward_policy(instance: Any) -> dict:
 
 def replace_economy_reward_policy(instance: Any, value: dict) -> None:
     get_module_state(instance, MODULE_NAME)["economy_reward_policy"] = value
+
+
+def dice_reveal_mode(instance: Any) -> str:
+    return get_module_state(instance, MODULE_NAME)["dice_reveal_mode"]
+
+
+def replace_dice_reveal_mode(instance: Any, value: str) -> None:
+    get_module_state(instance, MODULE_NAME)["dice_reveal_mode"] = value
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

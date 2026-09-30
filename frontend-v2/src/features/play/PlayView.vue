@@ -66,7 +66,8 @@ const { confirm } = useConfirm()
 const { locale, setLocale, t } = useLocale()
 const help = ref(false), ruleMeta = ref<RuleMeta>({}), preview = ref(false), delegate = ref(false), cards = ref<CharacterCard[]>([]), showCards = ref(false), health = ref<HealthResponse>({ events: [] })
 const showKpQuestion = ref(false)
-const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false), showRoomPassword = ref(false), roomPasswordInput = ref(''), luckTimeoutInput = ref('')
+const worldCandidates = ref<WorldCandidate[]>([]), showWorldSwitch = ref(false), showRoomPassword = ref(false), roomPasswordInput = ref(''), luckTimeoutInput = ref(''), diceRevealModeInput = ref('click')
+const diceRevealModeTouched = ref(false)
 // 邀请/接管二维码弹窗：title 非空即展示，关闭时置空。链接由弹窗自己按选中的
 // 可达地址算（见 InviteQrModal），这里只交代给谁开、开哪一局。
 const inviteTitle = ref(''), inviteHint = ref(''), inviteUser = ref('')
@@ -456,6 +457,24 @@ async function onLuckDecision(check: CheckResult, spend: boolean) {
     if (resolvingRound) gmThinking.value = false
   }
 }
+// 共享骰子揭示：请求只带 check_id（服务端权威结果已存在），幂等；
+// 成功后本地乐观更新，SSE 广播再让全桌静默刷新对齐。
+async function onCheckReveal(check: CheckResult) {
+  const checkId = String(check.check_id || '')
+  if (!checkId) return
+  try {
+    const result = await api<{ ok?: boolean; error?: string; reveal?: { by?: string; at?: string } }>(`/games/${encodeURIComponent(game.currentGame.value)}/checks/${encodeURIComponent(checkId)}/reveal`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    if (result.ok === false || result.error) throw new Error(result.error || t('operationFailed'))
+    if (result.reveal?.by) {
+      game.checkReveals.value = { ...game.checkReveals.value, [checkId]: { by: String(result.reveal.by), at: String(result.reveal.at || '') } }
+    }
+  } catch (error: unknown) {
+    toast.error(errorMessage(error))
+  }
+}
 async function command(path: string, body: JsonObject = {}) {
   const thinkingCommand = path === 'advance'
   if (thinkingCommand) gmThinking.value = true
@@ -550,6 +569,8 @@ function onRoomPassword() {
   roomPasswordInput.value = ''
   passwordTouched.value = false
   luckTimeoutInput.value = ''
+  diceRevealModeInput.value = game.diceRevealMode.value === 'auto' ? 'auto' : 'click'
+  diceRevealModeTouched.value = false
   awayPolicyInput.value = game.detail.value?.away_control_policy === 'ai_takeover' ? 'ai_takeover' : 'pause'
   awayPolicyTouched.value = false
   const policy = game.detail.value?.economy_reward_policy || {}
@@ -577,6 +598,13 @@ async function setRoomPassword() {
       const ltR = await api<{ ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.currentGame.value)}/settings/luck-timeout`, { method: 'POST', body: JSON.stringify({ seconds: Number(lt) }) })
       if (ltR.error || ltR.ok === false) throw new Error(ltR.error || t('settingFailed'))
       toast.success(t('luckTimeoutSaved', { seconds: lt }))
+    }
+    // 骰子揭示方式仅在 GM 实际改动过时提交；纯表现偏好，不影响任何判定。
+    if (diceRevealModeTouched.value) {
+      const drR = await api<{ ok?: boolean; error?: string }>(`/games/${encodeURIComponent(game.currentGame.value)}/settings/dice-reveal-mode`, { method: 'POST', body: JSON.stringify({ mode: diceRevealModeInput.value }) })
+      if (drR.error || drR.ok === false) throw new Error(drR.error || t('settingFailed'))
+      game.diceRevealMode.value = diceRevealModeInput.value === 'auto' ? 'auto' : 'click'
+      toast.success(t('diceRevealModeSaved'))
     }
     // 奖励策略仅在 GM 实际改动过时提交；显式选“跟随默认”仍会清除覆盖。
     const rewardSave = buildRewardPolicySave(
@@ -1216,8 +1244,11 @@ onBeforeUnmount(() => {
           :current-user-id="actorId"
           :luck-busy-id="luckBusyId"
           :manual-rolls="game.detail.value.manual_rolls"
+          :check-reveals="game.checkReveals.value"
+          :dice-reveal-mode="game.diceRevealMode.value"
           @refresh="game.refresh"
           @luck="onLuckDecision"
+          @reveal="onCheckReveal"
         />
 
         <EconomyProposalCard
@@ -1533,6 +1564,12 @@ onBeforeUnmount(() => {
         <p>{{ t('roomPasswordHelp') }}</p>
         <label>{{ t('newPassword') }}<input type="password" v-model="roomPasswordInput" :placeholder="t('emptyCancelsPassword')" @input="passwordTouched = true" @keyup.enter="setRoomPassword"></label>
         <label>{{ t('luckTimeoutSeconds') }}<input type="number" v-model="luckTimeoutInput" :placeholder="t('luckTimeoutPlaceholder')" min="0" max="3600"></label>
+        <label>{{ t('diceRevealModeLabel') }}
+          <select v-model="diceRevealModeInput" @change="diceRevealModeTouched = true">
+            <option value="auto">{{ t('diceRevealModeAuto') }}</option>
+            <option value="click">{{ t('diceRevealModeClick') }}</option>
+          </select>
+        </label>
         <label>{{ t('rewardPolicyMode') }}
           <select v-model="rewardPolicyMode" @change="rewardPolicyTouched = true">
             <option value="">{{ t('rewardPolicyFollowDefault') }}</option>

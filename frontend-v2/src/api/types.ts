@@ -774,11 +774,18 @@ export interface WorldCreateResponse {
   id?: string
   [key: string]: unknown
 }
+export interface CheckRevealRecord {
+  by: string
+  at: string
+}
+
 export interface GameLogResponse {
   log?: LogEntry[]
   total?: number
   total_pages?: number
   page?: number
+  check_reveals?: Record<string, CheckRevealRecord>
+  dice_reveal_mode?: string
 }
 
 export interface PrivateLogResponse {

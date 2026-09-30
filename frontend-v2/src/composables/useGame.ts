@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, gameEventSource, hasAccessToken, isNotFoundError } from '@/api/client'
-import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage, TableTalkExchange, TableTalkResponse } from '@/api/types'
+import type { CharacterListResponse, GameDetail, GameLogResponse, LogEntry, CheckRevealRecord, LorebookResponse, LoreEntry, MapData, Player, PrivateLogResponse, PrivateMessage, TableTalkExchange, TableTalkResponse } from '@/api/types'
 import type { LoreKeywords } from '@/utils/renderer'
 import { clearCurrentGame, gameFromQuery, queryString, readCurrentGame, rememberCurrentGame } from '@/stores/gameContext'
 import { resolveMapBackgroundAsset, revokeMapBackgroundAsset } from '@/api/mapBackgrounds'
@@ -32,6 +32,7 @@ export function useGame(){
   const detail = ref<GameDetail|null>(null), players = ref<Player[]>([]), log = ref<LogEntry[]>([]), liveNarration = ref('')
   const rulesetStateSignal = ref(0)
   const privateMessages = ref<PrivateMessage[]>([]), tableTalk = ref<TableTalkExchange[]>([]), map = ref<MapData>({locations:[]}), lore = ref<LoreKeywords>({}), loreEntries = ref<LoreEntry[]>([]), loading=ref(false), error=ref('')
+  const checkReveals = ref<Record<string, CheckRevealRecord>>({}), diceRevealMode = ref<'auto'|'click'>('click')
   let source:EventSource|null=null
   let unsubscribePeerEvents:(()=>void)|null=null
   let pollTimer:number|undefined
@@ -88,6 +89,8 @@ export function useGame(){
     detail.value = null
     players.value = []
     log.value = []
+    checkReveals.value = {}
+    diceRevealMode.value = 'click'
     privateMessages.value = []
     tableTalk.value = []
     revokeMapBackgroundAsset(map.value)
@@ -129,6 +132,9 @@ export function useGame(){
       setIfChanged('detail', detail, d)
       setIfChanged('players', players, c.players||[])
       setIfChanged('log', log, l.log||[])
+      // 展示层附加信息：揭示标记与揭示方式（自动/点击）。
+      checkReveals.value = l.check_reveals || {}
+      diceRevealMode.value = l.dice_reveal_mode === 'auto' ? 'auto' : 'click'
       setIfChanged('privateMessages', privateMessages, p.messages||p.private_log||[])
       setIfChanged('tableTalk', tableTalk, tt.exchanges||[])
       const nextMap = m || { locations: [] }
@@ -243,5 +249,5 @@ export function useGame(){
   // 须按最新条目的 round 判断，否则“GM 思考中”在正式输出落地后残留。
   watch(() => log.value[log.value.length - 1]?.round, (next, prev) => { if (next !== prev) liveNarration.value = '' })
   onBeforeUnmount(()=>{connectVersion++;source?.close();unsubscribePeerEvents?.();revokeMapBackgroundAsset(map.value);clearRefreshTimer();if(pollTimer)clearInterval(pollTimer);if(reconnectTimer)clearTimeout(reconnectTimer)})
-  return {currentGame,userId,actorId,detail,players,player,log,privateMessages,tableTalk,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration,rulesetStateSignal}
+  return {currentGame,userId,actorId,detail,players,player,log,privateMessages,tableTalk,map,lore,loreEntries,loading,error,isGm,refresh,connect,selectGame,liveNarration,rulesetStateSignal,checkReveals,diceRevealMode}
 }

@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { CheckmarkCircleOutline, WarningOutline, InformationCircleOutline, ReaderOutline } from '@vicons/ionicons5'
-import type { CheckResult, LogEntry, ManualRollTimelineEntry, PublicAction, Player, StoryRecap } from '@/api/types'
+import type { CheckResult, LogEntry, ManualRollTimelineEntry, PublicAction, Player, StoryRecap, CheckRevealRecord } from '@/api/types'
 import type { DiceTag } from '@/utils/play'
 import { parseAction, playerColor } from '@/utils/play'
 import { api } from '@/api/client'
@@ -13,8 +13,16 @@ import CheckRevealCard from '@/components/play/CheckRevealCard.vue'
 import SceneImageBlock from '@/components/play/SceneImageBlock.vue'
 import { initializeTts, speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
 
-const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string; manualRolls?: ManualRollTimelineEntry[] }>()
-const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean] }>()
+const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string; manualRolls?: ManualRollTimelineEntry[]; checkReveals?: Record<string, CheckRevealRecord>; diceRevealMode?: string }>()
+const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult] }>()
+const clickRevealOn = computed(() => props.diceRevealMode === 'click')
+function revealOf(check: CheckResult): CheckRevealRecord | null {
+  const id = String(check.check_id || '')
+  return (id && props.checkReveals?.[id]) || null
+}
+function canReveal(check: CheckResult): boolean {
+  return !!props.isGm || (!!props.currentUserId && String(check.actor_uid || '') === props.currentUserId)
+}
 
 const box = ref<HTMLElement | null>(null), hasNew = ref(false), awayFromBottom = ref(false)
 const swipeError = ref("")
@@ -239,7 +247,16 @@ watch(() => rounds.value, async (latest) => {
             <span v-if="a.dice" class="dice-tag">🎲 {{ a.dice.system }}={{ a.dice.value }}</span>
           </div>
         </div>
-        <CheckRevealCard v-for="check in checks(item.entry)" :key="check.check_id || `${check.actor_uid}-${check.roll}`" :check="check" />
+        <CheckRevealCard
+          v-for="check in checks(item.entry)"
+          :key="check.check_id || `${check.actor_uid}-${check.roll}`"
+          :check="check"
+          :click-mode="clickRevealOn"
+          :reveal="revealOf(check)"
+          :can-reveal="canReveal(check)"
+          :revealer-name="revealOf(check) ? name(revealOf(check)!.by) : ''"
+          @reveal="check => emit('reveal', check)"
+        />
         <div v-if="item.gm" class="message gm message-with-avatar">
           <span class="narrator-avatar" aria-hidden="true">GM</span>
           <div class="message-copy">
@@ -333,7 +350,12 @@ watch(() => rounds.value, async (latest) => {
         animate
         :can-decide-luck="check.luck_decision === 'pending' && canDecideLuck(check)"
         :busy="!!luckBusyId"
+        :click-mode="clickRevealOn"
+        :reveal="revealOf(check)"
+        :can-reveal="canReveal(check)"
+        :revealer-name="revealOf(check) ? name(revealOf(check)!.by) : ''"
         @luck="emitLuck"
+        @reveal="check => emit('reveal', check)"
       />
       <div v-if="processing" class="message gm thinking-message message-with-avatar" aria-live="polite">
         <span class="narrator-avatar" aria-hidden="true">GM</span>

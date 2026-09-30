@@ -150,6 +150,30 @@ async def api_set_gm_style(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 
+async def api_set_dice_reveal_mode(request: web.Request) -> web.Response:
+    """GM 按局设置骰子揭示方式（auto=自动出结果，click=行动者/GM 点击揭示）。"""
+    api = _get_api(request)
+    gk = request.match_info["game_key"]
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    if request.get("user_id", "") != inst.gm_uid:
+        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    body = await request.json()
+    try:
+        inst.configure_session(dice_reveal_mode=str(body.get("mode") or ""))
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    await api.save_game_instance(inst)
+    pool = request.app.get("connection_pool")
+    if pool is not None:
+        await pool.broadcast(gk, {"type": "table_settings_changed"})
+    return web.json_response({
+        "ok": True,
+        "dice_reveal_mode": inst.dice_reveal_mode,
+    })
+
+
 async def api_set_luck_timeout(request: web.Request) -> web.Response:
     """GM 按局设置幸运超时秒数（0=禁用，异步局建议 0，实时局默认 60）。"""
     api = _get_api(request)

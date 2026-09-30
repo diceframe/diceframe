@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type { CheckResult } from '@/api/types'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { CheckResult, CheckRevealRecord } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 
 const props = withDefaults(defineProps<{
@@ -8,11 +8,51 @@ const props = withDefaults(defineProps<{
   animate?: boolean
   canDecideLuck?: boolean
   busy?: boolean
-}>(), { animate: false, canDecideLuck: false, busy: false })
-const emit = defineEmits<{ luck: [check: CheckResult, spend: boolean] }>()
+  clickMode?: boolean
+  reveal?: CheckRevealRecord | null
+  canReveal?: boolean
+  revealerName?: string
+}>(), { animate: false, canDecideLuck: false, busy: false, clickMode: false, reveal: null, canReveal: false, revealerName: '' })
+const emit = defineEmits<{ luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult] }>()
 const { t } = useLocale()
-const revealed = ref(!props.animate)
+// 点击揭示模式下：服务端结果已权威落盘，这里只做共享揭示的表现遮罩。
+// 不遮蔽数据本身（时间线公开结果），未揭示也不阻塞任何流程。
+// 超时没人揭示时只在本地翻开：不请求服务端、不记录揭示者，各客户端各自计时。
+const AUTO_REVEAL_SECONDS = 10
+const autoRevealed = ref(false)
+const autoRevealLeft = ref(AUTO_REVEAL_SECONDS)
+const pendingClickReveal = computed(() => props.clickMode && !props.reveal && !autoRevealed.value)
+const revealed = ref(!props.animate && !pendingClickReveal.value)
 let revealTimer: number | undefined
+let autoRevealTicker: number | undefined
+
+function stopAutoReveal() {
+  if (autoRevealTicker !== undefined) window.clearInterval(autoRevealTicker)
+  autoRevealTicker = undefined
+}
+
+function startAutoReveal() {
+  if (autoRevealTicker !== undefined || !pendingClickReveal.value) return
+  autoRevealLeft.value = AUTO_REVEAL_SECONDS
+  autoRevealTicker = window.setInterval(() => {
+    autoRevealLeft.value -= 1
+    if (autoRevealLeft.value > 0) return
+    stopAutoReveal()
+    autoRevealed.value = true
+  }, 1000)
+}
+
+function startRevealTimer() {
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  revealTimer = window.setTimeout(() => { revealed.value = true }, reduced ? 0 : 720)
+}
+
+watch(pendingClickReveal, (pending) => {
+  if (pending) { revealed.value = false; startAutoReveal(); return }
+  stopAutoReveal()
+  if (props.animate && !revealTimer) startRevealTimer()
+  else revealed.value = true
+})
 
 const status = computed<'critical' | 'fumble' | 'success' | 'failure'>(() => {
   if (props.check.is_critical) return 'critical'
@@ -54,12 +94,13 @@ const plannerSources = computed(() => {
 })
 
 onMounted(() => {
+  if (pendingClickReveal.value) { startAutoReveal(); return }
   if (!props.animate) return
-  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  revealTimer = window.setTimeout(() => { revealed.value = true }, reduced ? 0 : 720)
+  startRevealTimer()
 })
 onUnmounted(() => {
   if (revealTimer !== undefined) window.clearTimeout(revealTimer)
+  stopAutoReveal()
 })
 </script>
 
@@ -75,7 +116,7 @@ onUnmounted(() => {
         <strong>{{ check.label || t('checkLabel') }} · {{ check.actor_name }}</strong>
         <small>{{ check.dice || 'd20' }} · {{ check.attribute || check.skill || t('checkAttribute') }}</small>
       </div>
-      <b class="check-verdict">{{ revealed ? statusLabel : t('diceRolling') }}</b>
+      <b class="check-verdict">{{ revealed ? statusLabel : (pendingClickReveal ? t('checkRevealPending') : t('diceRolling')) }}</b>
     </div>
     <p v-if="revealed" class="check-math">{{ math }}</p>
     <details v-if="revealed">
@@ -91,6 +132,13 @@ onUnmounted(() => {
       <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>
       <span v-if="check.assist?.length">{{ t('checkAssist', { players: check.assist.join(', ') }) }}</span>
     </details>
+    <div v-if="pendingClickReveal" class="check-reveal-actions">
+      <button v-if="canReveal" class="dice-tag dice-tag-button" type="button" :disabled="busy" @click="emit('reveal', check)">{{ t('checkRevealAction') }}</button>
+      <span v-else class="dice-tag">{{ t('checkRevealWaiting') }}</span>
+      <span class="dice-tag check-reveal-countdown">{{ t('checkRevealAutoIn', { seconds: autoRevealLeft }) }}</span>
+    </div>
+    <span v-else-if="clickMode && reveal" class="dice-tag check-revealed-by">{{ t('checkRevealBy', { name: revealerName || reveal.by || '' }) }}</span>
+    <span v-else-if="clickMode && autoRevealed" class="dice-tag check-revealed-by">{{ t('checkRevealAuto') }}</span>
     <div v-if="revealed && check.luck_decision === 'pending'" class="luck-decision-actions">
       <template v-if="canDecideLuck">
         <button class="dice-tag dice-tag-button" type="button" :disabled="busy" @click="emit('luck', check, true)">{{ t('spendLuckForSuccess', { cost: check.luck_cost || 0 }) }}</button>
@@ -123,6 +171,9 @@ onUnmounted(() => {
 details{margin:5px 0 0 54px;color:var(--df-text-muted);font-size:12px}
 details span{display:block;margin-top:3px}
 summary{cursor:pointer}
+.check-reveal-actions{margin:8px 0 0 54px}
+.check-revealed-by{display:inline-block;margin-top:6px;margin-left:54px}
+@media(max-width:520px){.check-reveal-actions,.check-revealed-by{margin-left:0}}
 @keyframes check-roll{0%{transform:rotate(0) scale(.9)}50%{transform:rotate(190deg) scale(1.08)}100%{transform:rotate(360deg) scale(.9)}}
 @media(max-width:520px){.check-reveal-head{grid-template-columns:38px minmax(0,1fr)}.check-die{width:36px;height:36px}.check-verdict{grid-column:2}.check-math,details{padding-left:0;margin-left:0}}
 @media(prefers-reduced-motion:reduce){.rolling .check-die{animation:none}}

@@ -269,6 +269,7 @@ def _table_settings_property_writes(path: Path, tree: ast.AST) -> list[int]:
     fields = {
         "difficulty", "narrative_perspective", "gm_style_override", "solo_mode",
         "seed_code", "entry_point", "luck_timeout_seconds", "economy_reward_policy",
+        "dice_reveal_mode",
     }
     return [
         node.lineno for node in ast.walk(tree)
