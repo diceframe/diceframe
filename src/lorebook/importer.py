@@ -132,9 +132,22 @@ def commit_lorebook_import(store: Any, draft: LorebookDraft, binding: dict[str, 
             payload = {"id": entry_id, "book_id": book_id, "world_id": world_id, "name": entry.name, "content": entry.content, "keywords": entry.keys, "secondary_keys": entry.secondary_keys, "enabled": entry.enabled, "is_constant": entry.constant, "match_mode": match_mode, "selective_logic": selective_logic, "selective": entry.selective, "use_regex": entry.use_regex, "regex_executable": entry.regex_executable, "case_sensitive": entry.case_sensitive, "match_whole_words": entry.match_whole_words, "scan_depth": entry.scan_depth, "priority": entry.priority, "order": entry.insertion_order, "probability": entry.probability, "groups": entry.groups, "group_weight": entry.group_weight, "sticky": entry.timed.get("sticky", 0), "cooldown": entry.timed.get("cooldown", 0), "delay": entry.timed.get("delay", 0), "prompt_slot": entry.prompt_slot, "prioritize_inclusion": entry.prioritize_inclusion, "group_scoring": entry.group_scoring, "vector_activation": entry.vector_activation, "non_recursable": entry.recursion_flags.get("non_recursable", False), "prevent_further_recursion": entry.recursion_flags.get("prevent_further_recursion", False), "delay_until_recursion": entry.recursion_flags.get("delay_until_recursion", False), "recursion_level": int(entry.recursion_flags.get("recursion_level", 0) or 0), "provenance": provenance, "extensions": entry.extensions}
             payload.update(diceframe_compat_fields(entry))
             if hasattr(store, "get_entry") and store.get_entry(entry_id) is not None:
-                store.update_entry(entry_id, payload)
+                # Once a store exposes the Book-scoped boundary, never let an
+                # import update an entry through its global id alone.  The
+                # legacy method remains a compatibility fallback for older
+                # integrations that do not yet expose ownership-aware CRUD.
+                update_book_entry = getattr(store, "update_book_entry", None)
+                if callable(update_book_entry):
+                    if not update_book_entry(book_id, entry_id, payload):
+                        raise ValueError("entry does not belong to imported book")
+                else:
+                    store.update_entry(entry_id, payload)
             else:
-                store.add_entry(payload)
+                add_book_entry = getattr(store, "add_book_entry", None)
+                if callable(add_book_entry):
+                    add_book_entry(book_id, payload)
+                else:
+                    store.add_entry(payload)
 
     # One atomic commit for book + bindings + entries + provenance: a fatal
     # failure must roll back instead of leaving a half-imported book behind.

@@ -183,19 +183,28 @@ def save_lorebook_entry(deps: LorebookDependencies, book_id: str, entry: dict[st
     payload["book_id"] = book_id
     payload.setdefault("id", f"{book_id}:entry:{time.time_ns()}")
     entry_id = str(payload["id"])
+    get_book_entry = getattr(deps.lorebook, "get_book_entry", None)
     if deps.lorebook.get_entry(entry_id) is not None:
         # Ownership isolation: entry.id is a global canonical PK, but it may
         # only be rewritten through the book that actually owns it.
         if not deps.lorebook.update_book_entry(book_id, entry_id, payload):
             return {"ok": False, "error": "Entry belongs to another lorebook",
                     "error_code": "entry_book_mismatch", "entry_id": entry_id}
-        return {"ok": True, "entry": deps.lorebook.get_entry(entry_id)}
+        saved = get_book_entry(book_id, entry_id) if callable(get_book_entry) else deps.lorebook.get_entry(entry_id)
+        return {"ok": True, "entry": saved}
     # Canonical new-entry defaults apply on create only. An update must be
     # able to clear a field without it silently snapping back to a default.
     for key, value in CANONICAL_ENTRY_DEFAULTS.items():
         payload.setdefault(key, value)
-    deps.lorebook.add_entry(payload)
-    return {"ok": True, "entry": deps.lorebook.get_entry(entry_id)}
+    add_book_entry = getattr(deps.lorebook, "add_book_entry", None)
+    if callable(add_book_entry):
+        add_book_entry(book_id, payload)
+    else:
+        # Compatibility stores from older integrations still expose only the
+        # legacy add_entry adapter; keep this fallback at the service boundary.
+        deps.lorebook.add_entry(payload)
+    saved = get_book_entry(book_id, entry_id) if callable(get_book_entry) else deps.lorebook.get_entry(entry_id)
+    return {"ok": True, "entry": saved}
 
 def move_lorebook_entry(
     deps: LorebookDependencies, book_id: str, entry_id: str, target_book_id: str,

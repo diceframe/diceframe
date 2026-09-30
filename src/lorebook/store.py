@@ -345,7 +345,10 @@ class LorebookStore:
                 "SELECT 1 FROM lorebook_bindings WHERE book_id = ? "
                 "AND role = 'primary' AND scope_kind = 'world' LIMIT 1", (book_id,)
             ).fetchone()
-            if primary is not None or str(book_id).startswith("world:"):
+            # Primary is a relationship owned by the Binding row.  The
+            # ``world:<id>`` book id is only a compatibility projection and
+            # must not become a second authority for deletion semantics.
+            if primary is not None:
                 raise ValueError("primary world lorebook cannot be deleted")
             entry_ids = [r[0] for r in self._conn.execute(
                 "SELECT id FROM lorebook_entries WHERE book_id = ?", (book_id,)
@@ -447,10 +450,15 @@ class LorebookStore:
             if entry.get("world_id") and requested_book_id and str(requested_book_id).startswith("world:") and requested_book_id != self.primary_world_book_id(entry["world_id"]):
                 requested_book_id = None
             book_id = requested_book_id or self._ensure_primary_book_locked(entry["world_id"])
+            # ``world_id`` is a compatibility projection, never a second
+            # ownership input.  Derive it from the primary Binding so a
+            # standalone Book whose id merely starts with ``world:`` remains
+            # independent.
+            projected_world_id = self._bound_world_projection_for_book_locked(book_id)
             LorebookEntry.insert(
                 id=entry["id"],
                 book_id=book_id,
-                world_id=entry.get("world_id"),
+                world_id=projected_world_id,
                 name=entry["name"],
                 type=entry.get("type", "other"),
                 keywords=json.dumps(entry.get("keywords", []), ensure_ascii=False),
@@ -498,6 +506,24 @@ class LorebookStore:
             ).on_conflict_replace().execute()
             self._bump_book_revision_locked(book_id)
             self._commit_locked()
+
+    def add_book_entry(self, book_id: str, entry: dict) -> None:
+        """Add an entry through its canonical Book owner.
+
+        New content paths must name the owning Book explicitly.  The legacy
+        ``add_entry`` method remains as an adapter for world/template callers;
+        this boundary deliberately derives the compatibility ``world_id``
+        projection from the Book instead of accepting a second owner from the
+        payload.
+        """
+
+        book_id = str(book_id or "")
+        if not book_id or self.get_lorebook(book_id) is None:
+            raise ValueError("lorebook book does not exist")
+        payload = dict(entry)
+        payload["book_id"] = book_id
+        payload["world_id"] = self.bound_world_projection_for_book(book_id)
+        self.add_entry(payload)
 
     def get_entry(self, entry_id: str) -> dict | None:
         with self._lock:
@@ -549,6 +575,23 @@ class LorebookStore:
             "SELECT book_id FROM lorebook_entries WHERE id = ?", (entry_id,)
         ).fetchone()
         return str(row[0]) if row and row[0] else None
+
+    def _bound_world_projection_for_book_locked(self, book_id: str) -> str | None:
+        """Return the world scope of a primary Binding (caller holds the lock)."""
+
+        row = self._conn.execute(
+            "SELECT scope_id FROM lorebook_bindings "
+            "WHERE book_id = ? AND role = 'primary' AND scope_kind = 'world' "
+            "LIMIT 1",
+            (str(book_id or ""),),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
+    def bound_world_projection_for_book(self, book_id: str) -> str | None:
+        """Return the compatibility ``world_id`` owned by a Book binding."""
+
+        with self._lock:
+            return self._bound_world_projection_for_book_locked(book_id)
 
     def delete_entry(self, entry_id: str) -> None:
         with self._lock:
@@ -647,7 +690,7 @@ class LorebookStore:
                 return False
             LorebookEntry.update(
                 book_id=target_book_id,
-                world_id=self.world_projection_for_book(target_book_id),
+                world_id=self._bound_world_projection_for_book_locked(target_book_id),
                 updated_at=SQL("datetime('now')"),
             ).where(LorebookEntry.id == entry_id).execute()
             self._bump_book_revision_locked(source_book_id)
@@ -675,13 +718,28 @@ class LorebookStore:
         return True
 
     def delete_world_cascade(self, world_id: str) -> None:
-        """删除世界及其所有条目。"""
+        """Delete a world through its primary Book ownership boundary.
+
+        ``world_id`` on an entry is only a compatibility projection.  Delete
+        the entries owned by the primary ``world:<id>`` Book, and detach any
+        stale projection on another/unknown Book before removing the World so
+        SQLite's legacy foreign-key cascade cannot delete foreign content.
+        """
         with self._lock:
             entry_ids = [
                 str(row.id) for row in
-                LorebookEntry.select(LorebookEntry.id).where(LorebookEntry.world_id == world_id)
+                LorebookEntry.select(LorebookEntry.id).where(
+                    LorebookEntry.book_id == self.primary_world_book_id(world_id)
+                )
             ]
-            LorebookEntry.delete().where(LorebookEntry.world_id == world_id).execute()
+            self._conn.execute(
+                "UPDATE lorebook_entries SET world_id = NULL "
+                "WHERE world_id = ? AND (book_id IS NULL OR book_id != ?)",
+                (world_id, self.primary_world_book_id(world_id)),
+            )
+            LorebookEntry.delete().where(
+                LorebookEntry.book_id == self.primary_world_book_id(world_id)
+            ).execute()
             self._delete_embeddings_locked(entry_ids)
             World.delete().where(World.id == world_id).execute()
             self._bump_book_revision_locked(self.primary_world_book_id(world_id))

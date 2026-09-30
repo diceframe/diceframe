@@ -54,6 +54,14 @@ def test_primary_world_book_delete_and_scope_change_fail_closed(store: LorebookS
         store.delete_binding(primary_binding)
 
 
+def test_world_prefix_alone_does_not_mark_book_primary(store: LorebookStore):
+    """A compatibility-shaped id is not ownership; the Binding is authoritative."""
+
+    store.create_lorebook({"id": "world:standalone", "name": "Imported World-shaped Book"})
+    assert store.delete_lorebook("world:standalone")
+    assert store.get_lorebook("world:standalone") is None
+
+
 class _RouteAPI:
     def __init__(self):
         self.books = {"book-1": {"id": "book-1", "name": "Book"}}

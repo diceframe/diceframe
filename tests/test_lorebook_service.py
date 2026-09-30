@@ -53,6 +53,23 @@ def test_service_create_save_and_list_match_webapi(store: LorebookStore) -> None
     assert lorebooks.list_lorebooks(deps, game_key="web|room|gm") == api.list_lorebooks(game_key="web|room|gm")
 
 
+def test_service_entry_create_uses_book_owner_for_legacy_world_projection(
+    store: LorebookStore,
+) -> None:
+    deps = _deps(store)
+    store.create_lorebook({"id": "book:standalone", "name": "Standalone"})
+
+    result = lorebooks.save_lorebook_entry(
+        deps,
+        "book:standalone",
+        {"id": "entry:standalone", "world_id": "world-1", "name": "Entry"},
+    )
+
+    assert result["ok"] is True
+    entry = store.get_book_entry("book:standalone", "entry:standalone")
+    assert entry and entry["world_id"] is None
+
+
 @pytest.mark.asyncio
 async def test_missing_retriever_keeps_original_activation_error(store: LorebookStore) -> None:
     api = _api(store)
