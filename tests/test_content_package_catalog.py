@@ -55,6 +55,9 @@ def test_catalog_exposes_world_lorebook_and_adventure_resources_without_material
     assert CONTENT_KIND_REGISTRY.supports("world")
     assert CONTENT_KIND_REGISTRY.supports("lorebook")
     assert CONTENT_KIND_REGISTRY.supports("adventure")
+    assert CONTENT_KIND_REGISTRY.spec("character_template").import_target == "character_card"
+    assert CONTENT_KIND_REGISTRY.spec("npc").import_target == "lorebook_entry"
+    assert CONTENT_KIND_REGISTRY.spec("world").import_target == "catalog"
     assert resources["world"][0]["id"] == "harbor"
     assert resources["lorebook"][0]["name"] == "Harbor Lore"
     assert resources["adventure"][0]["id"] == "intro"

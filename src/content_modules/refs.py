@@ -39,7 +39,7 @@ CONTENT_KINDS = (
     # generic adventure entities（v1 bundle kinds）
     "scene", "npc", "map_location", "encounter_catalog",
     # canonical Content Package resources
-    "world", "lorebook", "adventure",
+    "world", "lorebook", "adventure", "character_template", "rule", "class",
     # D&D ruleset catalog（§29）
     "monster", "npc_statblock", "item", "spell", "class_extension",
     "feature", "hazard", "trap", "encounter_profile", "reward",
@@ -48,6 +48,32 @@ CONTENT_KINDS = (
 
 class ContentRefError(ValueError):
     """A content reference is malformed or unresolvable: fail closed."""
+
+
+@dataclass(frozen=True, slots=True)
+class ContentKindSpec:
+    """Routing metadata shared by catalog and explicit import callers."""
+
+    authority: str
+    portable_schema: str
+    import_target: str
+    runtime_projection: str
+    editable: bool = False
+    cloneable: bool = False
+
+
+_CONTENT_KIND_SPECS: dict[str, ContentKindSpec] = {
+    "world": ContentKindSpec("world", "world-v3", "catalog", "world", cloneable=True),
+    "lorebook": ContentKindSpec("book", "lorebook-v3", "catalog", "lorebook", cloneable=True),
+    "adventure": ContentKindSpec("adventure", "adventure-v2", "catalog", "adventure", cloneable=True),
+    "character_template": ContentKindSpec("character", "character-card", "character_card", "character"),
+    "npc": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
+    "item": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
+    "spell": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
+    "class": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
+    "class_extension": ContentKindSpec("ruleset", "class-extension", "catalog", "ruleset"),
+    "rule": ContentKindSpec("ruleset", "rule-v2", "catalog", "ruleset"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +102,13 @@ class ContentKindRegistry:
 
     def supports(self, kind: str) -> bool:
         return str(kind) in self._kinds
+
+    def spec(self, kind: str) -> ContentKindSpec:
+        validated = self.validate(kind)
+        return _CONTENT_KIND_SPECS.get(
+            validated,
+            ContentKindSpec("content_package", "opaque", "catalog", "content"),
+        )
 
     def validate(self, value: Any) -> str:
         try:
@@ -277,6 +310,7 @@ __all__ = [
     "CONTENT_KINDS",
     "CONTENT_KIND_REGISTRY",
     "ContentKindRegistry",
+    "ContentKindSpec",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",

@@ -158,13 +158,17 @@ def test_import_all_plugin_content_imports_characters_and_entries(tmp_path):
                  manifest_extra={"docs": "README.md", "contributes": {
                      "characters": ["characters/*.json"],
                      "npcs": ["npc/*.json"],
+                     "classes": ["classes/*.json"],
                  }})
     (plugins / "packs" / "characters").mkdir()
     (plugins / "packs" / "npc").mkdir()
+    (plugins / "packs" / "classes").mkdir()
     (plugins / "packs" / "characters" / "hero.json").write_text(json.dumps({
         "id": "hero", "character_name": "Hero", "attributes": {}, "skills": []}), encoding="utf-8")
     (plugins / "packs" / "npc" / "mentor.json").write_text(json.dumps({
         "id": "mentor", "name": "Mentor", "description": "old mentor"}), encoding="utf-8")
+    (plugins / "packs" / "classes" / "scout.json").write_text(json.dumps({
+        "id": "scout", "name": "Scout", "description": "old scout"}), encoding="utf-8")
     data_dir = tmp_path / "data"
     cfg = data_dir / "packs"
     cfg.mkdir(parents=True)
@@ -189,9 +193,9 @@ def test_import_all_plugin_content_imports_characters_and_entries(tmp_path):
     result = import_all_plugin_content(_plugin_content_dependencies(api), "packs", "w1")
 
     assert result["ok"] is True
-    assert result["imported_count"] == 2
+    assert result["imported_count"] == 3
     assert len(api.cards) == 1
-    assert len(api._lore.entries) == 1
+    assert len(api._lore.entries) == 2
 
 
 def test_plugin_content_import_can_target_standalone_canonical_book(tmp_path):

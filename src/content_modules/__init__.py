@@ -11,19 +11,23 @@ from src.content_modules.refs import (
     ContentRefChain,
     ContentRefError,
     ContentKindRegistry,
+    ContentKindSpec,
     ContentResolution,
     parse_content_ref,
 )
 from src.content_modules.projection import ContentProjection, ContentProjectionService
+from src.content_modules.receipts import ImportReceipt, ImportReceiptStore
 
 __all__ = [
     "CONTENT_KINDS",
     "CONTENT_KIND_REGISTRY",
     "ContentKindRegistry",
+    "ContentKindSpec",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",
     "ContentResolution",
     "parse_content_ref",
     "ContentProjection", "ContentProjectionService",
+    "ImportReceipt", "ImportReceiptStore",
 ]
