@@ -46,6 +46,7 @@ SOURCE_REF_KINDS: Final = (
     "gm",         # GM 手工建立
     "player",     # 玩家行动合法衍生
     "system",     # 服务器规则结算衍生
+    "device",     # 客户端离线内容来源（同步时保持可追溯）
 )
 SOURCE_REF_PATTERN: Final = re.compile(
     r"^([a-z][a-z0-9_-]{0,31}):(.{1,119})$"

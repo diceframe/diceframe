@@ -4,8 +4,15 @@
 哪个模组"，也无法支撑跨来源同名内容）。v2 引入结构化三元组：
 
 ```json
-{"source": "module:example-castle-module", "kind": "monster", "id": "ash_vampire"}
+{
+  "source_kind": "module", "source_id": "example-castle-module",
+  "kind": "monster", "id": "ash_vampire", "digest": "sha256:..."
+}
 ```
+
+The older ``{"source": "module:...", ...}`` spelling remains an adapter for
+existing content and saves.  ``digest`` is an opaque package-provided value;
+this layer does not invent an algorithm or recalculate it.
 
 硬规则（母方案 §9）：
 
@@ -42,6 +49,46 @@ class ContentRefError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class ContentKindRegistry:
+    """Closed vocabulary for portable content references.
+
+    The registry intentionally carries only canonical kind identities in PR A.
+    Per-kind portable schemas belong here once each kind has a real owner and
+    caller; inventing those schemas now would make the registry a second
+    authority.
+    """
+
+    _kinds: frozenset[str]
+
+    def __init__(self, kinds: Sequence[str] = CONTENT_KINDS) -> None:
+        normalized = tuple(str(kind) for kind in kinds)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("content kind registry contains duplicates")
+        object.__setattr__(self, "_kinds", frozenset(normalized))
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        """Stable sorted view for clients and diagnostics."""
+
+        return tuple(sorted(self._kinds))
+
+    def supports(self, kind: str) -> bool:
+        return str(kind) in self._kinds
+
+    def validate(self, value: Any) -> str:
+        try:
+            validated = canonical_id(value, field="content kind")
+        except ValueError as exc:
+            raise ContentRefError(str(exc)) from exc
+        if not self.supports(validated):
+            raise ContentRefError(f"content kind is not supported: {validated!r}")
+        return validated
+
+
+CONTENT_KIND_REGISTRY = ContentKindRegistry()
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class ContentRef:
     """One validated cross-package content reference.
 
@@ -54,11 +101,80 @@ class ContentRef:
     kind: str
     id: str
     explicit: bool = False
+    digest: str = ""
+
+    def __init__(
+        self,
+        source: str | None = None,
+        kind: str = "",
+        id: str = "",
+        explicit: bool = False,
+        digest: str = "",
+        *,
+        source_kind: str | None = None,
+        source_id: str | None = None,
+    ) -> None:
+        """Construct a ref using the legacy or source-aware spelling.
+
+        ``source=...`` remains the compatibility constructor used by existing
+        ruleset callers.  New callers may pass ``source_kind`` and
+        ``source_id``; supplying both spellings with different values fails
+        closed instead of guessing which identity wins.
+        """
+
+        has_parts = source_kind is not None or source_id is not None
+        if has_parts:
+            if source_kind is None or source_id is None:
+                raise ValueError("source_kind and source_id must be provided together")
+            split_source = f"{source_kind}:{source_id}"
+            if source is not None and str(source) != split_source:
+                raise ValueError("source and source_kind/source_id disagree")
+            source = split_source
+        if source is None:
+            raise ValueError("content ref source is required")
+        object.__setattr__(self, "source", str(source))
+        object.__setattr__(self, "kind", str(kind))
+        object.__setattr__(self, "id", str(id))
+        object.__setattr__(self, "explicit", bool(explicit))
+        object.__setattr__(self, "digest", str(digest or ""))
+
+    @property
+    def source_kind(self) -> str:
+        """The source registry kind (the first component of ``source``)."""
+
+        return self.source.partition(":")[0]
+
+    @property
+    def source_id(self) -> str:
+        """The source identity (everything after the first colon)."""
+
+        return self.source.partition(":")[2]
 
     def canonical(self) -> str:
         """Deterministic string key (diagnostics / dedupe / logging)."""
 
         return f"{self.source}|{self.kind}|{self.id}"
+
+    def to_portable_dict(self) -> dict[str, str]:
+        """Return the client-readable source-aware reference shape.
+
+        ``explicit`` is a resolver detail rather than portable identity.  A
+        serialized ref is therefore always source-bound and unambiguous.
+        ``digest`` remains opaque here; its producer/algorithm is owned by the
+        package or bundle that supplied the content.
+        """
+
+        return {
+            "source_kind": self.source_kind,
+            "source_id": self.source_id,
+            "kind": self.kind,
+            "id": self.id,
+            "digest": self.digest,
+        }
+
+    # Aliases for callers that use common mapping terminology.
+    as_dict = to_portable_dict
+    to_dict = to_portable_dict
 
 
 def parse_content_ref(raw: Any, *, default_source: str) -> ContentRef:
@@ -73,15 +189,29 @@ def parse_content_ref(raw: Any, *, default_source: str) -> ContentRef:
     explicit = False
     if isinstance(raw, dict):
         declared_source = str(raw.get("source") or "").strip()
+        declared_kind = raw.get("source_kind")
+        declared_id = raw.get("source_id")
+        if declared_kind is not None or declared_id is not None:
+            if not isinstance(declared_kind, str) or not isinstance(declared_id, str):
+                raise ContentRefError(f"content ref source_kind/source_id are invalid: {raw!r}")
+            split_source = f"{declared_kind.strip()}:{declared_id.strip()}"
+            if declared_source and declared_source != split_source:
+                raise ContentRefError(f"content ref source fields disagree: {raw!r}")
+            declared_source = split_source
         explicit = bool(declared_source)
         source = declared_source or source
         kind = raw.get("kind")
         ref_id = raw.get("id")
+        digest = raw.get("digest", "")
+        if not isinstance(digest, str):
+            raise ContentRefError(f"content ref digest is invalid: {raw!r}")
+        digest = digest.strip()
     elif isinstance(raw, str):
         text = raw.strip()
         if ":" not in text:
             raise ContentRefError(f"content ref must be kind:id or a structured object: {raw!r}")
         kind, _, ref_id = text.partition(":")
+        digest = ""
     else:
         raise ContentRefError(f"content ref must be an object or string: {raw!r}")
 
@@ -89,15 +219,13 @@ def parse_content_ref(raw: Any, *, default_source: str) -> ContentRef:
         raise ContentRefError(f"content ref has no source: {raw!r}")
     try:
         validated_source = validate_source_ref(source)
-        validated_kind = canonical_id(kind, field="content kind")
+        validated_kind = CONTENT_KIND_REGISTRY.validate(kind)
         validated_id = canonical_id(ref_id, field="content id")
     except ValueError as exc:
         raise ContentRefError(str(exc)) from exc
-    if validated_kind not in CONTENT_KINDS:
-        raise ContentRefError(f"content kind is not supported: {validated_kind!r}")
     return ContentRef(
         source=validated_source, kind=validated_kind, id=validated_id,
-        explicit=explicit,
+        explicit=explicit, digest=digest,
     )
 
 
@@ -145,6 +273,8 @@ class ContentRefChain:
 
 __all__ = [
     "CONTENT_KINDS",
+    "CONTENT_KIND_REGISTRY",
+    "ContentKindRegistry",
     "ContentRef",
     "ContentRefChain",
     "ContentRefError",

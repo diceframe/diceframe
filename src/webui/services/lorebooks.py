@@ -7,10 +7,11 @@ Must not import sibling services; cross-service behaviour arrives injected.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from src.content_modules.projection import ContentProjection
 from src.lorebook.activation import DEFAULT_VECTOR_ACTIVATION
 from src.lorebook.exporter import export_lorebook_native, export_lorebook_v3
 
@@ -30,6 +31,32 @@ class LorebookDependencies:
     lorebook: Any
     get_instance: Callable[[str], Any | None]
     get_lore_retriever: Callable[[], Any | None]
+
+
+class LorebookRowProjection:
+    """Project one canonical Book onto the existing management-row shape.
+
+    The row is a read-only copy assembled from the canonical book and its
+    binding facts.  Keeping this implementation behind the shared
+    ``ContentProjection`` contract gives later PR D a real caller without
+    changing the current HTTP response or moving ownership into the UI.
+    """
+
+    def project(
+        self,
+        content: Mapping[str, Any],
+        *,
+        context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = dict(content)
+        bindings = [dict(binding) for binding in ((context or {}).get("bindings") or [])]
+        row["bindings"] = bindings
+        row["scope"] = _book_scope(bindings)
+        row["primary"] = any(str(b.get("role") or "") == "primary" for b in bindings)
+        return row
+
+
+_LOREBOOK_ROW_PROJECTION: ContentProjection = LorebookRowProjection()
 
 
 def list_lorebooks(deps: LorebookDependencies, world_id: str = "", game_key: str = "") -> dict[str, Any]:
@@ -60,12 +87,8 @@ def list_lorebooks(deps: LorebookDependencies, world_id: str = "", game_key: str
         if not book_id or book_id in seen:
             continue
         seen.add(book_id)
-        row = dict(book)
         bindings = bindings_by_book.get(book_id, [])
-        row["bindings"] = bindings
-        row["scope"] = _book_scope(bindings)
-        row["primary"] = any(str(b.get("role") or "") == "primary" for b in bindings)
-        merged.append(row)
+        merged.append(_LOREBOOK_ROW_PROJECTION.project(book, context={"bindings": bindings}))
     return {"books": merged}
 
 def _game_scoped_lorebooks(deps: LorebookDependencies, game_key: str) -> list[dict[str, Any]]:

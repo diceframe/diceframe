@@ -10,7 +10,9 @@ from __future__ import annotations
 import pytest
 
 from src.content_modules import (
+    CONTENT_KIND_REGISTRY,
     CONTENT_KINDS,
+    ContentKindRegistry,
     ContentRef,
     ContentRefChain,
     ContentRefError,
@@ -63,6 +65,74 @@ def test_malformed_refs_fail_closed(raw: object) -> None:
 def test_content_kind_vocabulary_is_declared() -> None:
     assert "monster" in CONTENT_KINDS and "encounter_profile" in CONTENT_KINDS
     assert "scene" in CONTENT_KINDS and "npc" in CONTENT_KINDS
+    assert CONTENT_KIND_REGISTRY.supports("monster")
+    assert CONTENT_KIND_REGISTRY.validate("monster") == "monster"
+    assert not CONTENT_KIND_REGISTRY.supports("not_a_content_kind")
+
+
+def test_source_aware_ref_keeps_legacy_identity_and_adds_digest() -> None:
+    ref = parse_content_ref(
+        {
+            "source_kind": "module",
+            "source_id": "castle-module",
+            "kind": "monster",
+            "id": "ash_vampire",
+            "digest": "sha256:abc",
+        },
+        default_source=DEFAULT_SOURCE,
+    )
+    assert ref.source == "module:castle-module"
+    assert ref.source_kind == "module"
+    assert ref.source_id == "castle-module"
+    assert ref.digest == "sha256:abc"
+    assert ref.canonical() == "module:castle-module|monster|ash_vampire"
+    assert ref.to_portable_dict() == {
+        "source_kind": "module",
+        "source_id": "castle-module",
+        "kind": "monster",
+        "id": "ash_vampire",
+        "digest": "sha256:abc",
+    }
+
+
+def test_device_is_a_first_class_portable_source() -> None:
+    ref = parse_content_ref(
+        {
+            "source_kind": "device",
+            "source_id": "tablet-01",
+            "kind": "npc",
+            "id": "scout",
+        },
+        default_source=DEFAULT_SOURCE,
+    )
+    assert (ref.source_kind, ref.source_id, ref.digest) == ("device", "tablet-01", "")
+
+
+def test_source_aware_and_legacy_source_fields_cannot_disagree() -> None:
+    with pytest.raises(ContentRefError, match="disagree"):
+        parse_content_ref(
+            {
+                "source": "module:castle-module",
+                "source_kind": "device",
+                "source_id": "tablet-01",
+                "kind": "npc",
+                "id": "scout",
+            },
+            default_source=DEFAULT_SOURCE,
+        )
+
+
+def test_source_aware_constructor_accepts_split_source() -> None:
+    ref = ContentRef(
+        source_kind="module", source_id="castle-module", kind="monster", id="goblin",
+    )
+    assert ref.source == "module:castle-module"
+    assert ref.source_kind == "module" and ref.source_id == "castle-module"
+
+
+def test_kind_registry_rejects_duplicate_entries() -> None:
+    with pytest.raises(ValueError, match="duplicates"):
+        ContentKindRegistry(("npc", "npc"))
 
 
 # ---- 解析链 ----
