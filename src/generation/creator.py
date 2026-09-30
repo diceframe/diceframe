@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from dataclasses import asdict
 from src.engine.character_utils import initial_special_stat_value, set_hp
 from src.engine.currency import CurrencySystemError, validate_currency_system
 from src.engine.language import DEFAULT_LANGUAGE, localized_field, localized_text, normalize_language
@@ -757,11 +758,23 @@ async def generate_world(llm_client, prompt: str, rule_id: str = "freeform_fanta
                 entry["world_id"] = world_id
                 lorebook_store.add_entry(entry)
 
+    # Preserve the historical response fields for existing clients, while
+    # exposing a commit-neutral split for the canonical World/Book pipeline.
+    # The draft is derived after the generator's safety normalization and does
+    # not grant the model a direct persistence authority.
+    from src.lorebook.adapters.world_legacy import from_generated_world_payload
+
+    world_draft, lorebook_draft = from_generated_world_payload(data)
+
     return {
         "ok": True, "world_id": world_id, "world_name": data.get("world_name", ""),
         "language": language,
         "description": data.get("description", ""), "starter_scene": data.get("starter_scene", ""),
         "lorebook_count": len(data.get("starter_lorebook", [])),
+        "draft": {
+            "world": world_draft.as_dict(),
+            "lorebook": asdict(lorebook_draft),
+        },
     }
 
 
