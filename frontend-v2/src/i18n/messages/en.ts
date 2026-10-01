@@ -56,6 +56,8 @@ export const en = {
   modulesUninstallConfirmBody: 'Saves that use this module will no longer be able to read its content. Uninstall anyway?',
   modulesOnlineSearch: 'Search online modules',
   modulesOnlineSearchPlaceholder: 'Search by name, tag, or ruleset',
+  modulesOnlineFilter: 'Ruleset',
+  modulesOnlineFilterAll: 'All',
   modulesOnlineEmpty: 'No modules in the marketplace yet.',
   modulesOnlineUnavailable: 'Cannot read the module marketplace right now: {error}',
   modulesInstallOnline: 'Install from marketplace',
