@@ -67,34 +67,72 @@ def test_future_version_is_rejected():
         migrate_game_state_payload({"instance_schema_version": CURRENT_INSTANCE_SCHEMA_VERSION + 1})
 
 
-def test_properties_share_the_slot_object():
+ACCESS = {
+    "difficulty": (module.difficulty, module.replace_difficulty),
+    "narrative_perspective": (module.narrative_perspective, module.replace_narrative_perspective),
+    "gm_style_override": (module.gm_style_override, module.replace_gm_style_override),
+    "solo_mode": (module.solo_mode, module.replace_solo_mode),
+    "seed_code": (module.seed_code, module.replace_seed_code),
+    "entry_point": (module.entry_point, module.replace_entry_point),
+    "luck_timeout_seconds": (module.luck_timeout_seconds, module.replace_luck_timeout_seconds),
+    "economy_reward_policy": (module.economy_reward_policy, module.replace_economy_reward_policy),
+    "dice_reveal_mode": (module.dice_reveal_mode, module.replace_dice_reveal_mode),
+}
+
+
+def _apply_values(instance: GameInstance) -> None:
+    for key, value in VALUES.items():
+        ACCESS[key][1](instance, deepcopy(value))
+
+
+def test_deleted_table_settings_facades_are_not_game_instance_attributes():
+    instance = GameInstance(game_key=("web", "settings", "bot"))
+    for name in ACCESS:
+        assert not hasattr(GameInstance, name), name
+        assert not hasattr(instance, name), name
+        with pytest.raises(AttributeError, match="was removed"):
+            setattr(instance, name, None)
+        assert name not in vars(instance)
+
+
+def test_module_api_shares_the_slot_object():
     instance = GameInstance(game_key=("web", "settings", "bot"))
     policy = {"mode": "auto_small_cash", "auto_reward_cap": 10}
-    instance.economy_reward_policy = policy
-    assert instance.economy_reward_policy is policy is instance.modules[module.MODULE_NAME]["economy_reward_policy"]
+    module.replace_economy_reward_policy(instance, policy)
+    assert module.economy_reward_policy(instance) is policy is instance.modules[module.MODULE_NAME]["economy_reward_policy"]
     policy["auto_reward_cap"] = 20
-    assert instance.economy_reward_policy["auto_reward_cap"] == 20
+    assert module.economy_reward_policy(instance)["auto_reward_cap"] == 20
     instance.set_narrative_perspective("immersive")
     assert instance.modules[module.MODULE_NAME]["narrative_perspective"] == "immersive"
 
 
 def test_codec_roundtrip_preserves_all_settings():
     instance = GameInstance(game_key=("web", "roundtrip", "bot"))
-    for key, value in VALUES.items():
-        setattr(instance, key, deepcopy(value))
+    _apply_values(instance)
     payload = instance.to_dict()
     assert all(key not in payload for key in VALUES)
     restored = GameInstance.from_dict(payload)
-    for key, value in VALUES.items():
-        assert getattr(restored, key) == value
+    assert module.difficulty(restored) == "硬核"
+    assert module.narrative_perspective(restored) == "third_person"
+    assert module.gm_style_override(restored) == {"tone": "grim"}
+    assert module.solo_mode(restored) is True
+    assert module.seed_code(restored) == "SEED42"
+    assert module.entry_point(restored) == "bot"
+    assert module.luck_timeout_seconds(restored) == 0
+    assert module.economy_reward_policy(restored) == {"mode": "auto_small_cash", "auto_reward_cap": 5_000}
+    assert module.dice_reveal_mode(restored) == "click"
 
 
 @pytest.mark.asyncio
 async def test_reset_keeps_preserved_settings_and_does_not_clear_the_others():
     instance = GameInstance(game_key=("web", "reset", "bot"))
-    for key, value in VALUES.items():
-        setattr(instance, key, deepcopy(value))
+    _apply_values(instance)
     await instance.reset()
-    for key in ("solo_mode", "narrative_perspective", "gm_style_override", "seed_code",
-                "difficulty", "entry_point", "luck_timeout_seconds", "economy_reward_policy"):
-        assert getattr(instance, key) == VALUES[key], key
+    assert module.solo_mode(instance) is True
+    assert module.narrative_perspective(instance) == "third_person"
+    assert module.gm_style_override(instance) == {"tone": "grim"}
+    assert module.seed_code(instance) == "SEED42"
+    assert module.difficulty(instance) == "硬核"
+    assert module.entry_point(instance) == "bot"
+    assert module.luck_timeout_seconds(instance) == 0
+    assert module.economy_reward_policy(instance) == {"mode": "auto_small_cash", "auto_reward_cap": 5_000}

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from src.engine.contracts import ActionRecord
 from src.engine import progression
 from src.engine.game_state import GameState
-from src.engine.modules import progression_state
+from src.engine.modules import progression_state, table_settings
 from src.engine.player_control import (
     ai_controlled_players,
     away_control_policy,
@@ -97,7 +97,7 @@ def multiplayer_status(instance: GameInstance) -> dict:
     return {
         "state": instance.state.value,
         "round_number": progression_state.round_value(instance),
-        "solo_mode": instance.solo_mode,
+        "solo_mode": table_settings.solo_mode(instance),
         "player_count": len(instance.players),
         "max_players": instance.max_players,
         "ready_count": len(ready),
@@ -154,7 +154,7 @@ def should_advance(instance: GameInstance) -> bool:
     """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。"""
     if instance.has_pending_dice():
         return False
-    if instance.solo_mode and instance.action_queue:
+    if table_settings.solo_mode(instance) and instance.action_queue:
         return True
     return instance.all_alive_ready()
 

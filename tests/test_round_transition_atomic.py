@@ -7,6 +7,7 @@ from copy import deepcopy
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import combat_extension_state
@@ -38,7 +39,7 @@ async def test_queued_writer_sees_complete_transition(cancel_finish):
             observations.append((instance.state, instance.round_number, deepcopy(instance.log)))
             if cancel_finish:
                 finish.cancel()
-            instance.scene = "queued writer"
+            narrative_notes.replace_scene(instance, "queued writer")
 
     async with instance._lock:
         finish = asyncio.create_task(instance.finish_judgment("narrative"))
@@ -53,7 +54,7 @@ async def test_queued_writer_sees_complete_transition(cancel_finish):
         assert [(entry["round"], entry["gm_response"]) for entry in log] == [(6, "Before"), (7, "narrative")]
         assert instance.action_queue == pending
         assert instance.pending_actions == []
-        assert instance.scene == "queued writer"
+        assert narrative_notes.scene(instance) == "queued writer"
         assert not finish.cancelled()
         assert not instance._lock.locked()
     finally:
@@ -208,7 +209,7 @@ async def test_real_submission_pipeline_commits_and_opens_before_queued_writer(w
         queued.set()
         async with instance._lock:
             observations.append((instance.state, instance.round_number, deepcopy(instance.log[-1])))
-            instance.scene = "after atomic completion"
+            narrative_notes.replace_scene(instance, "after atomic completion")
 
     monkeypatch.setattr(instance, "finish_judgment", finish)
     kwargs = {"expected_run_id": run_before} if guarded else {}

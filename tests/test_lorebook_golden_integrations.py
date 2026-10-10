@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes, progression_state
 from src.engine.game_instance import GameInstance
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.resolver import resolve_active_books
@@ -74,8 +75,9 @@ def _add(store: LorebookStore, book_id: str, entry: dict) -> None:
 
 def _instance(store: LorebookStore, **overrides):
     base = dict(
-        world_id=WORLD, language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=1, lorebook_timed_state={},
+        world_id=WORLD, language="zh-CN", npcs={}, players={},
+        modules={"narrative_notes": narrative_notes.fresh(), "progression": {**progression_state.fresh(), "round": 1}},
+        world_state={}, lorebook_timed_state={},
         lorebook_store=store, game_id=GAME_KEY, game_key=GAME_KEY,
         action_actor_uids=[],
     )

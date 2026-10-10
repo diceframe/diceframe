@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from src.engine import progression
 from src.engine.language import normalize_language
+from src.engine.modules import narrative_notes
 from src.engine.modules.media import replace_scene_image
 from src.imagegen import (
     ImageGenerationError,
@@ -136,7 +137,7 @@ class GeneratedImageService:
                     self._dependencies.llm_client,
                     narration=str(entry.get("gm_response") or ""),
                     actions=entry.get("actions") or [],
-                    current_scene=str(getattr(instance, "scene", "") or ""),
+                    current_scene=str(narrative_notes.scene(instance) or ""),
                     players=getattr(instance, "players", {}),
                     global_prompt="",
                     declared_panels=[],
@@ -166,7 +167,7 @@ class GeneratedImageService:
         if user_id != instance.gm_uid:
             return {"ok": False, "error": "仅 GM 可预览提示词"}
         normalized, compressed = normalize_scene_panels(panels, merge_same_location=False)
-        context = {"manual": True, "scene": str(getattr(instance, "scene", "") or ""), "panels": normalized, "storyboard": {"panels": normalized, "compressed_count": compressed}}
+        context = {"manual": True, "scene": str(narrative_notes.scene(instance) or ""), "panels": normalized, "storyboard": {"panels": normalized, "compressed_count": compressed}}
         try:
             composed, budget = backend.preview_prompt(str(prompt or "").strip(), "scene", context)
         except Exception as exc:
@@ -378,7 +379,7 @@ class GeneratedImageService:
                 self._dependencies.llm_client,
                 narration=str(entry.get("gm_response") or ""),
                 actions=entry.get("actions") or [],
-                current_scene=str(getattr(instance, "scene", "") or ""),
+                current_scene=str(narrative_notes.scene(instance) or ""),
                 players=getattr(instance, "players", {}),
                 global_prompt=prompt,
                 declared_panels=declared_panels,
@@ -388,7 +389,7 @@ class GeneratedImageService:
         else:
             normalized_panels, compressed_count = [], 0
         appearances = public_character_appearances(getattr(instance, "players", {}))
-        context: dict[str, Any] = {"round": target_round, "requested_round": requested_round, "run_id": expected_run_id, "source_revision": source_revision, "target": "current-round", "manual": True, "scene": str(getattr(instance, "scene", "") or ""), "narration": str(entry.get("gm_response") or "")[:1600], "actions": str(entry.get("actions") or "")[:1200], "panels": normalized_panels, "character_appearances": dict(appearances)}
+        context: dict[str, Any] = {"round": target_round, "requested_round": requested_round, "run_id": expected_run_id, "source_revision": source_revision, "target": "current-round", "manual": True, "scene": str(narrative_notes.scene(instance) or ""), "narration": str(entry.get("gm_response") or "")[:1600], "actions": str(entry.get("actions") or "")[:1200], "panels": normalized_panels, "character_appearances": dict(appearances)}
         if normalized_panels:
             context["storyboard"] = {"panels": normalized_panels, "compressed_count": compressed_count}
             if appearances:

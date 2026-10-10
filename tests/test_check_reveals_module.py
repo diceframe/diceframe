@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from src.engine.game_instance import GameInstance
-from src.engine.modules import check_reveals as module
+from src.engine.modules import check_reveals as module, table_settings
 from src.migrations.instance import (
     CURRENT_INSTANCE_SCHEMA_VERSION,
     _migrate_v34_to_v35,
@@ -171,7 +171,7 @@ async def test_queued_reveal_proceeds_on_the_same_instance() -> None:
 
 def test_log_response_carries_reveals_and_mode() -> None:
     inst = _instance()
-    inst.dice_reveal_mode = "click"
+    table_settings.replace_dice_reveal_mode(inst, "click")
     module.mark_revealed(inst, "chk-1", "ally")
     inst.log = [{
         "round": 1,
@@ -193,9 +193,9 @@ def test_log_response_carries_reveals_and_mode() -> None:
 
 def test_configure_session_validates_and_persists_mode() -> None:
     inst = _instance()
-    assert inst.dice_reveal_mode == "click"
+    assert table_settings.dice_reveal_mode(inst) == "click"
     inst.configure_session(dice_reveal_mode="auto")
-    assert inst.dice_reveal_mode == "auto"
+    assert table_settings.dice_reveal_mode(inst) == "auto"
     with pytest.raises(ValueError):
         inst.configure_session(dice_reveal_mode="ritual")
-    assert inst.dice_reveal_mode == "auto"
+    assert table_settings.dice_reveal_mode(inst) == "auto"

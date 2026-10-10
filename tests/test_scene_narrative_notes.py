@@ -90,14 +90,14 @@ def test_scene_values_are_kept_verbatim(scene):
     migrated = migrate_game_state_payload(v39_payload(scene=scene))
     assert migrated["modules"]["narrative_notes"]["scene"] == scene
     restored = GameInstance.from_dict(v39_payload(scene=scene))
-    assert restored.scene == scene
-    assert GameInstance.from_dict(restored.to_dict()).scene == scene
+    assert module.scene(restored) == scene
+    assert module.scene(GameInstance.from_dict(restored.to_dict())) == scene
 
 
 def test_missing_scene_defaults_to_empty():
     payload = v39_payload()
     del payload["scene"]
-    assert GameInstance.from_dict(payload).scene == ""
+    assert module.scene(GameInstance.from_dict(payload)) == ""
     raw = {**NOTES_V1, "schema_version": 2}
     assert module.ensure(raw) is raw and raw["scene"] == ""
 
@@ -111,7 +111,7 @@ def test_unknown_slot_schema_fails_closed_and_is_preserved():
     slot = {"schema_version": 1, **{k: v for k, v in NOTES_V1.items() if k != "schema_version"}}
     instance = GameInstance(game_key=tuple(KEY), modules={"narrative_notes": deepcopy(slot)})
     with pytest.raises(ModuleStateError, match="unsupported narrative_notes module schema"):
-        instance.scene
+        module.scene(instance)
     with pytest.raises(ModuleStateError, match="unsupported narrative_notes module schema"):
         instance.set_scene("x")
     assert instance.modules["narrative_notes"] == slot
@@ -121,18 +121,18 @@ def test_unknown_slot_schema_fails_closed_and_is_preserved():
 # ---- proxy and reset -------------------------------------------------------------
 
 
-def test_property_uses_the_live_slot_and_roundtrips():
+def test_accessor_uses_the_live_slot_and_roundtrips():
     instance = GameInstance(game_key=tuple(KEY))
     assert "scene" not in {item.name for item in fields(instance)}
     assert "scene" not in vars(instance)
     instance.set_scene(SCENE)
-    assert instance.modules["narrative_notes"]["scene"] == SCENE == instance.scene
+    assert instance.modules["narrative_notes"]["scene"] == SCENE == module.scene(instance)
     encoded = instance.to_dict()
     assert "scene" not in encoded
     restored = GameInstance.from_dict(deepcopy(encoded))
-    assert restored.scene == SCENE
+    assert module.scene(restored) == SCENE
     other = GameInstance(game_key=("web", "other", "bot"))
-    assert other.scene == ""
+    assert module.scene(other) == ""
 
 
 @pytest.mark.asyncio
@@ -140,10 +140,10 @@ async def test_reset_clears_the_scene_with_the_other_notes():
     from tests.test_game_instance_reset_characterization import _make_populated_instance
 
     instance = _make_populated_instance()
-    assert instance.scene
+    assert module.scene(instance)
     slot = instance.modules["narrative_notes"]
     await instance.reset()
-    assert instance.scene == ""
+    assert module.scene(instance) == ""
     assert instance.modules["narrative_notes"] is slot
 
 
@@ -159,9 +159,9 @@ def test_ruleset_transaction_restores_the_scene():
     instance = GameInstance(game_key=tuple(KEY))
     instance.set_scene("after")
     instance.restore_ruleset_transaction(_ruleset_snapshot(instance, SCENE))
-    assert instance.scene == SCENE
+    assert module.scene(instance) == SCENE
     instance.restore_ruleset_transaction(_ruleset_snapshot(instance, None))
-    assert instance.scene == SCENE
+    assert module.scene(instance) == SCENE
 
 
 # ---- projection contracts ----------------------------------------------------------

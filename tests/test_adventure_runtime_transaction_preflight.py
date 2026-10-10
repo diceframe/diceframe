@@ -11,7 +11,7 @@ import pytest
 from src.engine import round_recovery, round_snapshots, turn_state
 from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import adventure_runtime_state
+from src.engine.modules import adventure_runtime_state, table_settings
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 from test_golden_e2e_54pr import golden  # noqa: F401  (fixture re-export)
 
@@ -235,7 +235,7 @@ async def test_seed_creation_rejects_unsupported_source_slot_before_registering(
     before = deepcopy(source.to_dict())
     with pytest.raises(ModuleStateError, match=MATCH):
         await golden.api.create_from_seed(
-            source.seed_code, players=_dnd_characters(1), gm_uid="seed_gm", language="zh-CN",
+            table_settings.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm", language="zh-CN",
         )
     assert [game["game_key"] for game in golden.api.list_games()["games"]] == games_before
     assert source.to_dict() == before

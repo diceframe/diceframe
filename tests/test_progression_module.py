@@ -14,10 +14,11 @@ import zipfile
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine import progression
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import progression_state
+from src.engine.modules import progression_state, table_settings
 from src.engine.modules import combat_extension_state
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
 from tests.test_round_failure_recovery import _new_game
@@ -39,7 +40,7 @@ UNKNOWN_SLOTS = [
 
 def instance_with_state(slot=None):
     instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm")
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.round_number = 7
     instance.state = GameState.ACTIVE_ACTION
     instance.players = {"gm": {"character_name": "Hero", "character_sheet": {"hp": 12, "gold": 20}}}
@@ -54,7 +55,7 @@ def instance_with_state(slot=None):
     instance.adventure_progress = {"active_nodes": ["gate"]}
     ruleset_runtime.replace_state(instance, {"version": 4})
     ruleset_runtime.replace_event_ledger(instance, [{"id": "old"}])
-    instance.game_time = "Third Age, dusk"
+    narrative_notes.replace_game_time(instance, "Third Age, dusk")
     if slot is not None:
         instance.modules["progression"] = deepcopy(slot)
     return instance
@@ -69,10 +70,11 @@ def transaction_snapshot(instance, **extra):
     return deepcopy({
         "ruleset_state": ruleset_runtime.state(instance),
         "event_ledger": ruleset_runtime.event_ledger(instance),
+        "scene": narrative_notes.scene(instance),
     } | {
         key: getattr(instance, key) for key in (
             "players", "combat_state", "combat_active",
-            "initiative_order", "initiative_current", "scene", "last_activity", "log",
+            "initiative_order", "initiative_current", "last_activity", "log",
         )
     } | extra)
 
@@ -90,7 +92,7 @@ def test_live_property_and_roundtrip_have_one_storage_owner():
     assert "round_number" not in encoded
     restored = GameInstance.from_dict(encoded)
     assert restored.round_number == 8
-    assert restored.game_time == "Third Age, dusk"
+    assert narrative_notes.game_time(restored) == "Third Age, dusk"
     instance.replace_persisted_state_from(restored)
     assert instance.round_number == 8
 
@@ -454,7 +456,7 @@ async def test_registry_load_and_import_keep_opaque_future_slots(tmp_path, slot)
     assert result["ok"]
     imported = registry.get(tuple(result["game_key"]))
     assert imported.modules["progression"] == slot
-    assert imported.game_time == instance.game_time
+    assert narrative_notes.game_time(imported) == narrative_notes.game_time(instance)
 
 
 @pytest.mark.parametrize("slot", UNKNOWN_SLOTS)
@@ -569,7 +571,7 @@ async def test_current_package_export_import_and_unknown_mode_sse(tmp_path):
     cursor = _event_cursor(loaded.round_number, 0, _play_action_signature(loaded), _play_public_signature(loaded, "gm"))
     assert _parse_event_cursor(cursor)[0] == 7
     assert loaded.to_dict() == before
-    assert loaded.game_time == "Third Age, dusk"
+    assert narrative_notes.game_time(loaded) == "Third Age, dusk"
 
 
 def test_e2e_seed_script_constructs_and_encodes_all_fixtures(tmp_path):

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.webui.services import map_backgrounds
 from src.webui.services import maps as map_service
@@ -74,7 +75,7 @@ class GameMapApi(MapBackgroundApi):
         self.instance = SimpleNamespace(
             world_id="default_fantasy",
             rule_id="freeform_dnd",
-            scene="",
+            modules={"narrative_notes": narrative_notes.fresh()},
             map_background=selection,
         )
         self._plugins = None

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameState
 from src.webui.routes import sse as sse_routes
 from src.webui.routes.sse import (
@@ -19,7 +20,7 @@ def _instance() -> GameInstance:
         game_key=("web", "room", "bot"),
         state=GameState.ACTIVE_ACTION,
     )
-    inst.scene = "旧塔入口"
+    narrative_notes.replace_scene(inst, "旧塔入口")
     inst.round_number = 12
     inst.players = {
         "p1": {
@@ -92,7 +93,7 @@ def test_action_and_other_public_changes_advance_distinct_cursor_digests():
     assert after_action[2] != before[2]
     assert after_action[3] != before[3]
 
-    inst.scene = "旧塔大厅"
+    narrative_notes.replace_scene(inst, "旧塔大厅")
     after_scene = _parse_event_cursor(_current_cursor(inst))
     assert after_scene is not None
     assert after_scene[2] == after_action[2]

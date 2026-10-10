@@ -12,7 +12,7 @@ from aiohttp import web
 
 from src.engine.economy import has_blocking_economy_decision, pending_economy_proposals
 from src.engine.game_instance import GameState
-from src.engine.modules import checks, progression_state
+from src.engine.modules import checks, narrative_notes, progression_state
 from src.engine.visibility_rules import proposal_visible_to
 from src.llm.parser import sanitize_narration
 from src.webui.connection_pool import ConnectionPool
@@ -291,7 +291,7 @@ def _play_public_signature(inst, user_id: str) -> str:
         "state": inst.state.value,
         "last_activity": inst.last_activity,
         "log_count": len(inst.log),
-        "scene": inst.scene,
+        "scene": narrative_notes.scene(inst),
         "scene_image": inst.scene_image,
         "log_scene_image": (inst.log[-1].get("scene_image") if inst.log else None),
         "quick_actions": getattr(inst, "quick_actions", []),

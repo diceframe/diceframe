@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes, progression_state
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.game_instance import GameInstance
@@ -39,8 +40,9 @@ def _store(tmp_path: Path) -> LorebookStore:
 
 def _instance(store: LorebookStore, **overrides):
     base = dict(
-        world_id=WORLD, language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=1, lorebook_timed_state={},
+        world_id=WORLD, language="zh-CN", npcs={}, players={},
+        modules={"narrative_notes": narrative_notes.fresh(), "progression": {**progression_state.fresh(), "round": 1}},
+        world_state={}, lorebook_timed_state={},
         lorebook_store=store, game_id="", game_key="", action_actor_uids=[],
     )
     base.update(overrides)

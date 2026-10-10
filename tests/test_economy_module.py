@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine import economy
 from src.engine.game_instance import GameInstance, _snapshot_players, restore_players
 from src.engine.game_state import GameState
@@ -216,7 +217,7 @@ def _unsupported_economy_instance(version):
     instance.round_number = 2
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 10, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
-    instance.scene = "gate"
+    narrative_notes.replace_scene(instance, "gate")
     instance.state = GameState.ACTIVE_JUDGMENT
     instance.action_queue = [{"user_id": "p", "text": "open gate"}]
     instance.pending_actions = [{"user_id": "p", "text": "wait"}]

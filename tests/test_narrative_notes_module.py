@@ -56,49 +56,59 @@ def test_wrong_container_types_default():
                           "confirmed_items": "sword", "game_time": ["dusk"]}) == module.fresh()
 
 
-def test_live_properties_replace_objects_and_roundtrip():
+def test_live_accessors_replace_objects_and_roundtrip():
     instance = GameInstance(game_key=("web", "notes", "bot"))
-    values = {"summary": {"narrative": "A meeting"}, "key_facts": ["gate"],
-              "confirmed_items": ["sword"], "game_time": "Third Age, dusk"}
-    for field, value in values.items():
-        setattr(instance, field, value)
-        assert getattr(instance, field) is value is instance.modules["narrative_notes"][field]
-    instance.summary["extra"] = "kept"
-    instance.key_facts.append("bridge")
-    instance.confirmed_items.append("rope")
+    summary, key_facts, confirmed = {"narrative": "A meeting"}, ["gate"], ["sword"]
+    module.replace_summary(instance, summary)
+    module.replace_key_facts(instance, key_facts)
+    module.replace_confirmed_items(instance, confirmed)
+    module.replace_game_time(instance, "Third Age, dusk")
+    slot = instance.modules["narrative_notes"]
+    assert module.summary(instance) is summary is slot["summary"]
+    assert module.key_facts(instance) is key_facts is slot["key_facts"]
+    assert module.confirmed_items(instance) is confirmed is slot["confirmed_items"]
+    assert module.game_time(instance) == "Third Age, dusk" == slot["game_time"]
+    module.summary(instance)["extra"] = "kept"
+    module.key_facts(instance).append("bridge")
+    module.confirmed_items(instance).append("rope")
     saved = instance.to_dict()
     assert all(field not in saved for field in FIELDS)
     restored = GameInstance.from_dict(saved)
     assert restored.modules["narrative_notes"] == instance.modules["narrative_notes"]
-    for field, default in module.fresh().items():
-        if field in FIELDS:
-            setattr(instance, field, default)
-            assert getattr(instance, field) is default
-            assert values[field]
+    fresh = module.fresh()
+    module.replace_summary(instance, fresh["summary"])
+    assert module.summary(instance) is fresh["summary"]
+    module.replace_key_facts(instance, fresh["key_facts"])
+    assert module.key_facts(instance) is fresh["key_facts"]
+    module.replace_confirmed_items(instance, fresh["confirmed_items"])
+    assert module.confirmed_items(instance) is fresh["confirmed_items"]
+    module.replace_game_time(instance, fresh["game_time"])
+    assert module.game_time(instance) is fresh["game_time"]
+    assert summary and key_facts and confirmed
 
 
 @pytest.mark.parametrize("game_time", ["", "14:00", "  第三纪元，暮色\n", "not-a-calendar 0001"])
 def test_game_time_preserved_verbatim_without_affecting_progression(game_time):
     instance = GameInstance.from_dict({"game_key": ["web", "clock", "bot"], "state": "created",
                                        "instance_schema_version": 20, "round_number": 7, "game_time": game_time})
-    assert instance.game_time == game_time
+    assert module.game_time(instance) == game_time
     assert instance.round_number == 7
     restored = GameInstance.from_dict(instance.to_dict())
-    assert restored.game_time == game_time
+    assert module.game_time(restored) == game_time
     assert restored.round_number == 7
 
 
 def test_aggregate_methods_keep_summary_and_confirmed_item_behavior():
     instance = GameInstance(game_key=("web", "mutators", "bot"))
-    summary = instance.summary
-    confirmed = instance.confirmed_items
+    summary = module.summary(instance)
+    confirmed = module.confirmed_items(instance)
     instance.set_summary_narrative("A summary")
     assert summary == {"narrative": "A summary"}
     facts = ["one", "two"]
     instance.set_key_facts(facts)
-    assert instance.key_facts == facts and instance.key_facts is not facts
+    assert module.key_facts(instance) == facts and module.key_facts(instance) is not facts
     instance.add_confirmed_items(["sword", "sword", "rope", "torch"], limit=2)
-    assert instance.confirmed_items is confirmed
+    assert module.confirmed_items(instance) is confirmed
     assert confirmed == ["rope", "torch"]
 
 
@@ -111,7 +121,14 @@ def test_future_instance_and_module_versions_reject_runtime_access():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={"narrative_notes": slot})
     for field in FIELDS:
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            getattr(module, field)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, None)
+            getattr(module, f"replace_{field}")(instance, None)
     assert instance.to_dict()["modules"]["narrative_notes"] == before
+
+
+def test_game_instance_has_no_narrative_notes_facades():
+    instance = GameInstance(game_key=("web", "notes", "u"))
+    for name in (*FIELDS, "scene"):
+        assert not hasattr(GameInstance, name)
+        assert not hasattr(instance, name)

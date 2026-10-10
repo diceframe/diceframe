@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import narrative_notes, ruleset_runtime
 
 from src.rulesets.dnd2024.director import Dnd2024Director
 from src.rulesets.dnd2024.director.context import build_director_context
@@ -10,11 +10,13 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 def _instance(*actions, scene="金狮酒馆", combat_status="none", players=None):
     return SimpleNamespace(
-        scene=scene,
         world_id="greymoor",
-        modules={"ruleset_runtime": {
-            **ruleset_runtime.fresh(), "state": {"combat": {"status": combat_status}},
-        }},
+        modules={
+            "ruleset_runtime": {
+                **ruleset_runtime.fresh(), "state": {"combat": {"status": combat_status}},
+            },
+            "narrative_notes": {**narrative_notes.fresh(), "scene": scene},
+        },
         action_queue=[{"user_id": uid, "text": text} for uid, text in actions],
         players=players or {"p1": {}, "p2": {}},
     )

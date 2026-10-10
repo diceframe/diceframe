@@ -17,6 +17,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from src import password_hashing
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import room_access
@@ -612,14 +613,14 @@ def test_committing_a_staged_aggregate_keeps_the_live_room_access() -> None:
     live.run_id = "run-1"
     old_token, _ = room_access.issue_room_token(live)
     staged = GameInstance.from_dict(deepcopy(live.to_dict()))  # e.g. before an LLM call
-    staged.scene = "staged scene"
+    narrative_notes.replace_scene(staged, "staged scene")
     # Meanwhile the GM changes the password and a player gets a seat link.
     live.set_room_password("new-password")
     seat_token = room_access.issue_seat_token(live, "p1")
 
     live.replace_persisted_state_from(staged)
 
-    assert live.scene == "staged scene"  # the staged domain change is committed
+    assert narrative_notes.scene(live) == "staged scene"  # the staged domain change is committed
     assert room_access.verify_room_password(live, "new-password")
     assert not room_access.verify_room_password(live, "old-password")
     assert not room_access.verify_room_token(live, old_token)

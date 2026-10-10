@@ -6,6 +6,7 @@ import re
 
 from src.engine.constants import COMBAT_INTENT_KEYWORDS
 from src.engine.game_instance import GameInstance
+from src.engine.modules import narrative_notes, table_settings
 
 _DECISION_KEYWORDS = ("是否", "选择", "赌上", "决定", "要么")
 
@@ -16,7 +17,7 @@ def should_multi_step(instance: GameInstance, actions_text: str) -> bool:
     多步分析只允许由“当前”确实存在的复杂条件触发；累计的历史 NPC 数
     （instance.npcs 包含全部历史 NPC）不代表当前局势复杂，不能据此增加模型调用。
     """
-    if instance.entry_point != "web":
+    if table_settings.entry_point(instance) != "web":
         return False
     if instance.puzzle_manager and instance.puzzle_manager.get_active_puzzles():
         return True
@@ -33,7 +34,7 @@ def _current_scene_has_multiple_npcs(instance: GameInstance) -> bool:
     用当前场景文本而非累计 NPC 总数，避免历史 NPC 堆积触发多余的局势分析。
     名字长度不足 2 的单字名称容易与场景文本误匹配，不予计数。
     """
-    scene_text = str(getattr(instance, "scene", "") or "")
+    scene_text = str(narrative_notes.scene(instance) or "")
     if not scene_text:
         return False
     present = 0
