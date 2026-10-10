@@ -11,6 +11,7 @@ from src.engine.game_state_contracts import (
     PlayerContextView,
 )
 from src.engine.language import normalize_language
+from src.engine.modules import narrative_notes, round_presentation, table_settings
 
 if TYPE_CHECKING:
     from src.engine.game_instance import GameInstance
@@ -72,9 +73,9 @@ class GameContextProjector:
         state: GameContextView = {
             "world_name": instance.world_name,
             "round_number": progression_state.round_value(instance),
-            "scene": instance.scene,
-            "game_time": instance.game_time,
-            "difficulty": instance.difficulty,
+            "scene": narrative_notes.scene(instance),
+            "game_time": narrative_notes.game_time(instance),
+            "difficulty": table_settings.difficulty(instance),
             "language": normalize_language(instance.language),
             "players": players_view,
             "away_players": away_names,
@@ -83,7 +84,7 @@ class GameContextProjector:
             "combat_enemies": instance.combat_enemies,
             "initiative_order": instance.initiative_order,
             "initiative_current": instance.initiative_current,
-            "quick_actions": instance.quick_actions,
+            "quick_actions": round_presentation.quick_actions(instance),
         }
         if away_names:
             state["attendance_note"] = (
@@ -92,7 +93,7 @@ class GameContextProjector:
             )
         if instance.combat_state == "active":
             state["combat_active"] = True
-        if instance.solo_mode:
+        if table_settings.solo_mode(instance):
             state["solo_mode"] = True
         if instance.puzzle_manager and hasattr(instance.puzzle_manager, "to_active_dict"):
             puzzles = instance.puzzle_manager.to_active_dict()

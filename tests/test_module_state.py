@@ -39,27 +39,27 @@ def test_fresh_instance_has_registered_slots():
     assert first.modules["lorebook_runtime"] == {"schema_version": 1, "timers": {}}
     for spec in registered_module_states():
         assert first.modules[spec.name]["schema_version"] == spec.schema_version
-    first.lorebook_timed_state["e1"] = _timer(sticky=2)
-    assert second.lorebook_timed_state == {}
+    lorebook_runtime.timers(first)["e1"] = _timer(sticky=2)
+    assert lorebook_runtime.timers(second) == {}
 
 
 def test_property_proxy_returns_live_dict():
     instance = GameInstance(game_key=("web", "t", "u"))
-    timers = instance.lorebook_timed_state
+    timers = lorebook_runtime.timers(instance)
     assert timers is instance.modules["lorebook_runtime"]["timers"]
     timers["e1"] = _timer(sticky=2)
     instance.update_lorebook_timed_state()
-    assert instance.lorebook_timed_state is timers
+    assert lorebook_runtime.timers(instance) is timers
     assert instance.modules["lorebook_runtime"]["timers"]["e1"]["sticky_remaining"] == 1
 
 
 def test_property_setter_replaces_slot_timers():
     instance = GameInstance(game_key=("web", "t", "u"))
-    previous = instance.lorebook_timed_state
-    instance.lorebook_timed_state = {"e1": {"status": "cooldown", "remaining": 2}}
-    assert instance.lorebook_timed_state is instance.modules["lorebook_runtime"]["timers"]
-    assert instance.lorebook_timed_state is not previous
-    assert instance.lorebook_timed_state == {"e1": _timer(cooldown=2)}
+    previous = lorebook_runtime.timers(instance)
+    lorebook_runtime.replace_timers(instance, {"e1": {"status": "cooldown", "remaining": 2}})
+    assert lorebook_runtime.timers(instance) is instance.modules["lorebook_runtime"]["timers"]
+    assert lorebook_runtime.timers(instance) is not previous
+    assert lorebook_runtime.timers(instance) == {"e1": _timer(cooldown=2)}
 
 
 @pytest.mark.parametrize(("legacy", "expected"), [
@@ -140,7 +140,7 @@ def test_unknown_module_schema_is_kept_verbatim():
     assert restored.to_dict()["modules"]["lorebook_runtime"] == slot
     before = deepcopy(restored.modules)
     with pytest.raises(ModuleStateError, match="unsupported lorebook_runtime module schema"):
-        restored.lorebook_timed_state = {}
+        lorebook_runtime.replace_timers(restored, {})
     with pytest.raises(ModuleStateError):
         set_module_state(restored, "lorebook_runtime", lorebook_runtime.fresh())
     assert restored.modules == before
@@ -158,14 +158,14 @@ def test_unregistered_module_key_survives_round_trip():
 def test_save_load_round_trip_preserves_timers():
     instance = GameInstance(game_key=("web", "t", "u"))
     expected = {"sticky": _timer(sticky=3, pending=2, tick=4), "cooldown": _timer(cooldown=2)}
-    instance.lorebook_timed_state = deepcopy(expected)
+    lorebook_runtime.replace_timers(instance, deepcopy(expected))
     payload = instance.to_dict()
     assert "lorebook_timed_state" not in payload
     restored = GameInstance.from_dict(payload)
-    assert restored.lorebook_timed_state == expected
-    assert restored.lorebook_timed_state is restored.modules["lorebook_runtime"]["timers"]
+    assert lorebook_runtime.timers(restored) == expected
+    assert lorebook_runtime.timers(restored) is restored.modules["lorebook_runtime"]["timers"]
     restored.update_lorebook_timed_state()
-    assert instance.lorebook_timed_state == expected
+    assert lorebook_runtime.timers(instance) == expected
 
 
 def test_old_save_load_migrates_before_constructing_instance():
@@ -174,14 +174,14 @@ def test_old_save_load_migrates_before_constructing_instance():
         "instance_schema_version": 16,
         "lorebook_timed_state": {"e1": {"remaining": 3, "status": "active"}},
     })
-    assert restored.lorebook_timed_state == {"e1": _timer(sticky=3)}
+    assert lorebook_runtime.timers(restored) == {"e1": _timer(sticky=3)}
     assert restored.instance_schema_version == CURRENT_INSTANCE_SCHEMA_VERSION
 
 
 @pytest.mark.asyncio
 async def test_reset_clears_live_module_timer_dict():
     instance = GameInstance(game_key=("web", "t", "u"))
-    timers = instance.lorebook_timed_state
+    timers = lorebook_runtime.timers(instance)
     timers["e1"] = _timer(sticky=2)
     await instance.reset()
     assert instance.modules["lorebook_runtime"]["timers"] is timers
@@ -192,13 +192,13 @@ def test_staged_state_replacement_copies_modules_without_runtime_locks():
     instance = GameInstance(game_key=("web", "t", "u"))
     lock = instance._lock
     staged = GameInstance.from_dict(instance.to_dict())
-    staged.lorebook_timed_state["e1"] = _timer(sticky=3)
+    lorebook_runtime.timers(staged)["e1"] = _timer(sticky=3)
     instance.replace_persisted_state_from(staged)
     assert instance.modules == staged.modules
-    assert instance.lorebook_timed_state is not staged.lorebook_timed_state
+    assert lorebook_runtime.timers(instance) is not lorebook_runtime.timers(staged)
     assert instance._lock is lock
-    staged.lorebook_timed_state.clear()
-    assert instance.lorebook_timed_state == {"e1": _timer(sticky=3)}
+    lorebook_runtime.timers(staged).clear()
+    assert lorebook_runtime.timers(instance) == {"e1": _timer(sticky=3)}
 
 
 def test_registry_access_rejects_missing_container_and_unregistered_module():
@@ -214,7 +214,7 @@ def test_slot_replacement_returns_live_dict_and_rejects_future_input():
         "schema_version": 1, "timers": {"e1": _timer(sticky=3)},
     })
     assert slot is instance.modules["lorebook_runtime"]
-    assert instance.lorebook_timed_state == {"e1": _timer(sticky=3)}
+    assert lorebook_runtime.timers(instance) == {"e1": _timer(sticky=3)}
     with pytest.raises(ModuleStateError):
         set_module_state(instance, "lorebook_runtime", {"schema_version": 99})
     assert instance.modules["lorebook_runtime"] is slot

@@ -3,7 +3,7 @@
 import logging
 
 import pytest
-from src.engine.modules import checks, economy_state, progression_state
+from src.engine.modules import checks, economy_state, narrative_notes, private_channels, progression_state, table_settings
 from src.llm.context_builder import (
     _INVENTORY_STATE_LIMIT,
     _KEY_ITEMS_STATE_LIMIT,
@@ -173,9 +173,6 @@ class TestShrinkToWindow:
 
 class DummyInstance:
     game_key = ("web", "dummy", "bot")
-    summary = {}
-    key_facts = []
-    confirmed_items = []
     log = []
 
     def __init__(self):
@@ -462,7 +459,7 @@ async def test_build_context_enforces_window_with_extreme_inputs(caplog, monkeyp
     """极端配置（海量已确认事项/世界书 + 超长玩家消息）下，上下文仍不超窗。"""
     monkeypatch.setenv("TRPG_MAX_CONTEXT_CHARS", "3000")
     instance = DummyInstance()
-    instance.confirmed_items = [f"已确认事项{i}" * 20 for i in range(200)]
+    narrative_notes.replace_confirmed_items(instance, [f"已确认事项{i}" * 20 for i in range(200)])
     instance.log = [
         {
             "round": i,
@@ -514,11 +511,11 @@ def _manual_roll_instance(requests):
     instance.away_players = set()
     instance.world_name = "测试世界"
     instance.modules = {"progression": {**progression_state.fresh(), "round": 2}}
-    instance.scene = "测试场景"
-    instance.game_time = ""
-    instance.difficulty = "normal"
+    narrative_notes.replace_scene(instance, "测试场景")
+    narrative_notes.replace_game_time(instance, "")
+    table_settings.replace_difficulty(instance, "normal")
     instance.combat_state = {}
-    instance.private_log = {}
+    private_channels.replace_private_log(instance, {})
     instance.modules = {}
     checks.replace_manual_roll_requests(instance, list(requests))
     return instance

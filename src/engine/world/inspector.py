@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.engine.modules import world_reports
 from src.engine.world_state import (
     world_clock,
     world_entities,
@@ -71,7 +72,7 @@ def world_inspector(instance: Any, *, viewer_is_gm: bool = False) -> dict[str, A
         "fact_count": len(world_facts(state)),
         "scheduled_event_count": len(world_scheduled_events(state)),
         # 最近一轮确定性结算（含 failed），GM 排障用；非 GM 视图为空。
-        "recent_events": list(getattr(instance, "last_world_events", []) or [])
+        "recent_events": list(world_reports.last_world_events(instance) or [])
         if viewer_is_gm else [],
     }
 

@@ -14,10 +14,11 @@ import zipfile
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine import progression
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import progression_state
+from src.engine.modules import progression_state, table_settings
 from src.engine.modules import combat_extension_state
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
 from tests.test_round_failure_recovery import _new_game
@@ -27,7 +28,7 @@ from src.migrations.instance import (
     migrate_game_state_payload,
     rebind_imported_game_state_payload,
 )
-from src.engine.modules import checks, ruleset_runtime
+from src.engine.modules import adventure_runtime_state, checks, round_safety, ruleset_runtime, session_stats
 
 
 UNKNOWN_SLOTS = [
@@ -39,7 +40,7 @@ UNKNOWN_SLOTS = [
 
 def instance_with_state(slot=None):
     instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm")
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.round_number = 7
     instance.state = GameState.ACTIVE_ACTION
     instance.players = {"gm": {"character_name": "Hero", "character_sheet": {"hp": 12, "gold": 20}}}
@@ -48,13 +49,13 @@ def instance_with_state(slot=None):
     instance.pending_actions = [{"user_id": "gm", "text": "Follow"}]
     instance.ready_players = {"gm"}
     instance.log = [{"round": 6, "gm_response": "Before", "pre_state_snapshot": {"gm": {"hp": 15}}}]
-    instance.round_start_snapshot = {"gm": {"hp": 15}}
-    instance.round_entity_snapshot = {"npcs": {"guide": {"hp": 10}}}
+    round_safety.capture_players(instance, {"gm": {"hp": 15}})
+    round_safety.replace_entity_snapshot(instance, {"npcs": {"guide": {"hp": 10}}})
     combat_extension_state.round_snapshots(instance)["7"] = {"opaque": [1]}
-    instance.adventure_progress = {"active_nodes": ["gate"]}
+    adventure_runtime_state.replace_progress(instance, {"active_nodes": ["gate"]})
     ruleset_runtime.replace_state(instance, {"version": 4})
     ruleset_runtime.replace_event_ledger(instance, [{"id": "old"}])
-    instance.game_time = "Third Age, dusk"
+    narrative_notes.replace_game_time(instance, "Third Age, dusk")
     if slot is not None:
         instance.modules["progression"] = deepcopy(slot)
     return instance
@@ -69,10 +70,12 @@ def transaction_snapshot(instance, **extra):
     return deepcopy({
         "ruleset_state": ruleset_runtime.state(instance),
         "event_ledger": ruleset_runtime.event_ledger(instance),
+        "last_activity": session_stats.last_activity(instance),
+        "scene": narrative_notes.scene(instance),
     } | {
         key: getattr(instance, key) for key in (
             "players", "combat_state", "combat_active",
-            "initiative_order", "initiative_current", "scene", "last_activity", "log",
+            "initiative_order", "initiative_current", "log",
         )
     } | extra)
 
@@ -90,7 +93,7 @@ def test_live_property_and_roundtrip_have_one_storage_owner():
     assert "round_number" not in encoded
     restored = GameInstance.from_dict(encoded)
     assert restored.round_number == 8
-    assert restored.game_time == "Third Age, dusk"
+    assert narrative_notes.game_time(restored) == "Third Age, dusk"
     instance.replace_persisted_state_from(restored)
     assert instance.round_number == 8
 
@@ -454,7 +457,7 @@ async def test_registry_load_and_import_keep_opaque_future_slots(tmp_path, slot)
     assert result["ok"]
     imported = registry.get(tuple(result["game_key"]))
     assert imported.modules["progression"] == slot
-    assert imported.game_time == instance.game_time
+    assert narrative_notes.game_time(imported) == narrative_notes.game_time(instance)
 
 
 @pytest.mark.parametrize("slot", UNKNOWN_SLOTS)
@@ -569,7 +572,7 @@ async def test_current_package_export_import_and_unknown_mode_sse(tmp_path):
     cursor = _event_cursor(loaded.round_number, 0, _play_action_signature(loaded), _play_public_signature(loaded, "gm"))
     assert _parse_event_cursor(cursor)[0] == 7
     assert loaded.to_dict() == before
-    assert loaded.game_time == "Third Age, dusk"
+    assert narrative_notes.game_time(loaded) == "Third Age, dusk"
 
 
 def test_e2e_seed_script_constructs_and_encodes_all_fixtures(tmp_path):

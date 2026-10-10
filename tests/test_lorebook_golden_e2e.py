@@ -6,6 +6,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.lorebook.activation import migrate_timed_state
 from src.lorebook.exporter import export_lorebook_native, export_lorebook_v3
 from src.lorebook.importer import preview_lorebook_import, commit_lorebook_import
@@ -14,6 +15,7 @@ from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.retrieval import LoreRetriever
 from src.webui.routes.lorebooks import register_lorebooks
 from src.webui.api import WebAPI
+from src.engine.modules import lorebook_runtime
 
 
 def test_golden_old_db_import_preview_bind_export_restart(tmp_path):
@@ -117,7 +119,7 @@ async def test_golden_real_route_import_to_multi_book_retrieval(tmp_path):
         store.create_lorebook({"id": "global-book", "name": "Global"})
         store.bind_lorebook({"id": "binding:global", "book_id": "global-book", "scope_kind": "global", "scope_id": ""})
         store.add_entry({"id": "global-clue", "book_id": "global-book", "name": "Global", "keywords": ["secret"], "content": "global"})
-        instance = SimpleNamespace(world_id="w", language="zh-CN", scene="", npcs={}, players={}, world_state={}, lorebook_timed_state={}, lorebook_store=store)
+        instance = SimpleNamespace(world_id="w", language="zh-CN", npcs={}, players={}, world_state={}, modules={"narrative_notes": narrative_notes.fresh(), "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": {}}}, lorebook_store=store)
         hits = await LoreRetriever(KeywordMatcher(), store=store).retrieve(instance, "harbor secret")
         assert {entry["content"] for entry in hits} == {"harbor secret", "global"}
     finally:

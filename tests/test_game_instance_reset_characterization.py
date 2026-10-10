@@ -17,11 +17,16 @@ from __future__ import annotations
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.modules import economy_state
-from src.engine.modules import room_access
+from src.engine.modules import media, private_channels, room_access, session_stats
 from src.engine.world_state import fresh_world_state
-from src.engine.modules import checks, combat_extension_state, ruleset_runtime
+from src.engine.modules import checks, combat_extension_state, ruleset_runtime, table_settings
+from src.engine.modules import (
+    adventure_runtime_state, health, lorebook_runtime, round_presentation, round_safety, world_reports,
+)
+from src.engine.player_control import away_control_policy, set_away_control_policy
 
 
 def _make_populated_instance() -> GameInstance:
@@ -57,10 +62,10 @@ def _make_populated_instance() -> GameInstance:
         "content_digest": "deadbeef",
         "world_id": "world-1",
     }
-    instance.play_mode = "adventure"
+    adventure_runtime_state.replace_play_mode(instance, "adventure")
     ruleset_runtime.replace_event_ledger(instance, [{"event": "e1"}])
-    instance.scene_image = {"asset_id": "img-1"}
-    instance.map_background = {"asset_id": "map-1"}
+    media.replace_scene_image(instance, {"asset_id": "img-1"})
+    media.replace_map_background(instance, {"asset_id": "map-1"})
     instance.group_name = "Group"
     instance.state = GameState.ACTIVE_JUDGMENT
     instance.players = {
@@ -81,20 +86,20 @@ def _make_populated_instance() -> GameInstance:
     instance.combat_state = "active"
     instance.initiative_order = ["u1"]
     instance.initiative_current = 1
-    instance.max_players = 9
+    room_access.replace_max_players(instance, 9)
     instance.gm_uid = "gm1"
-    instance.player_access_open = False
-    instance.away_control_policy = "ai_takeover"
-    instance.bot_bind_token = "bind-token"
+    room_access.replace_player_access_open(instance, False)
+    set_away_control_policy(instance, "ai_takeover")
+    room_access.replace_bot_bind_token(instance, "bind-token")
     instance.set_room_password("secret-pass")
     room_access.issue_room_token(instance, token="room-token")
-    instance.private_log = {"u1": [{"role": "gm", "text": "hi"}]}
-    instance.table_talk = [{"speaker": "u1", "text": "tt"}]
-    instance.scene = "老桥"
-    instance.game_time = "14:00"
+    private_channels.replace_private_log(instance, {"u1": [{"role": "gm", "text": "hi"}]})
+    private_channels.replace_table_talk(instance, [{"speaker": "u1", "text": "tt"}])
+    narrative_notes.replace_scene(instance, "老桥")
+    narrative_notes.replace_game_time(instance, "14:00")
     instance.log = [{"round": 4, "gm_response": "叙事"}]
-    instance.summary = {"narrative": "sum"}
-    instance.key_facts = ["fact"]
+    narrative_notes.replace_summary(instance, {"narrative": "sum"})
+    narrative_notes.replace_key_facts(instance, ["fact"])
     instance.world_state = {
         "schema_version": 1,
         "revision": 5,
@@ -102,46 +107,46 @@ def _make_populated_instance() -> GameInstance:
         "facts": {"actor:u1.location": {"value": "bridge"}},
         "scheduled_events": [],
     }
-    instance.adventure_progress = {
+    adventure_runtime_state.replace_progress(instance, {
         "active_nodes": ["vault"], "completed_nodes": ["gate"], "history": [],
-    }
+    })
     instance.last_saved_log_count = 3
-    instance.total_llm_calls = 11
-    instance.total_tokens = 2222
-    instance.started_at = "2026-01-01T00:00:00+00:00"
-    instance.last_activity = "2026-01-01T01:00:00+00:00"
+    session_stats.replace_total_llm_calls(instance, 11)
+    session_stats.replace_total_tokens(instance, 2222)
+    session_stats.replace_started_at(instance, "2026-01-01T00:00:00+00:00")
+    session_stats.replace_last_activity(instance, "2026-01-01T01:00:00+00:00")
     checks.replace_last_check(instance, {"check_id": "c1"})
     checks.replace_last_checks(instance, [{"check_id": "c1"}])
     checks.replace_manual_roll_requests(instance, [{"request_id": "r1"}])
     instance.round_unpriced_purchase_intents = [{"item": "potion"}]
     checks.replace_round_checks_prepared(instance, True)
-    instance.round_start_snapshot = {"u1": {"hp": 10}}
-    instance.round_entity_snapshot = {"npcs": {"goblin": {"hp": 7}}}
-    instance.death_save_outcomes = {"3": {"u1": {"roll": 18}}}
-    instance.gm_directives = [{"id": "d1"}]
-    instance.last_state_update = {"hp": "10"}
-    instance.last_overreach = [{"player": "u1"}]
-    instance.last_world_legality = [{"player": "u1"}]
-    instance.last_world_events = [{"event_id": "e1"}]
-    instance.last_token_budget_bump = {"kind": "narrative", "from": 1, "to": 2}
-    instance.solo_mode = True
-    instance.seed_code = "SEED42"
-    instance.difficulty = "硬核"
-    instance.narrative_perspective = "immersive"
-    instance.gm_style_override = {"tone": "grim"}
+    round_safety.capture_players(instance, {"u1": {"hp": 10}})
+    round_safety.replace_entity_snapshot(instance, {"npcs": {"goblin": {"hp": 7}}})
+    round_safety.replace_death_save_outcomes(instance, {"3": {"u1": {"roll": 18}}})
+    round_presentation.replace_gm_directives(instance, [{"id": "d1"}])
+    round_presentation.replace_last_state_update(instance, {"hp": "10"})
+    world_reports.replace_last_overreach(instance, [{"player": "u1"}])
+    world_reports.replace_last_world_legality(instance, [{"player": "u1"}])
+    world_reports.replace_last_world_events(instance, [{"event_id": "e1"}])
+    round_presentation.replace_last_token_budget_bump(instance, {"kind": "narrative", "from": 1, "to": 2})
+    table_settings.replace_solo_mode(instance, True)
+    table_settings.replace_seed_code(instance, "SEED42")
+    table_settings.replace_difficulty(instance, "硬核")
+    table_settings.replace_narrative_perspective(instance, "immersive")
+    table_settings.replace_gm_style_override(instance, dict(PRESERVED_GM_STYLE_OVERRIDE))
     instance.language = "en"
-    instance.entry_point = "plugin"
-    instance.pending_combat_results = [{"damage": 5}]
-    instance.lorebook_timed_state = {"e1": {"remaining": 3}}
-    instance.quick_actions = ["attack"]
-    instance.health_events = [{"kind": "degraded"}]
-    instance.health_status = {"degraded": True}
-    instance.luck_timeout_seconds = 90
-    instance.economy_reward_policy = {"mode": "auto_small_cash", "auto_reward_cap": 10}
+    table_settings.replace_entry_point(instance, "plugin")
+    round_presentation.replace_pending_combat_results(instance, [{"damage": 5}])
+    lorebook_runtime.replace_timers(instance, {"e1": {"remaining": 3}})
+    round_presentation.replace_quick_actions(instance, ["attack"])
+    health.replace_health_events(instance, [{"kind": "degraded"}])
+    health.replace_health_status(instance, {"degraded": True})
+    table_settings.replace_luck_timeout_seconds(instance, 90)
+    table_settings.replace_economy_reward_policy(instance, {"mode": "auto_small_cash", "auto_reward_cap": 10})
     combat_extension_state.replace_current(instance, {"schema_version": 1, "pools": {"p1": {}}})
     combat_extension_state.replace_round_snapshots(instance, {"4": {"schema_version": 1}})
     instance.pending_luck_after_recovery = True
-    instance.confirmed_items = ["sword"]
+    narrative_notes.replace_confirmed_items(instance, ["sword"])
     return instance
 
 
@@ -149,9 +154,6 @@ EXPECTED_PRESERVED = {
     "world_id": "world-1",
     "world_name": "Test World",
     "group_name": "Group",
-    "solo_mode": True,
-    "narrative_perspective": "immersive",
-    "gm_style_override": {"tone": "grim"},
     "language": "en",
     "adventure_binding": {
         "adventure_id": "adv-1",
@@ -161,6 +163,24 @@ EXPECTED_PRESERVED = {
         "world_id": "world-1",
     },
 }
+
+# Table settings are module state (no GameInstance attributes). reset() saves
+# and restores these explicitly; the others it never touches.
+PRESERVED_GM_STYLE_OVERRIDE = {"tone": "grim"}
+
+
+def _assert_table_settings_preserved(instance: GameInstance) -> None:
+    assert table_settings.solo_mode(instance) is True
+    assert table_settings.narrative_perspective(instance) == "immersive"
+    assert table_settings.gm_style_override(instance) == PRESERVED_GM_STYLE_OVERRIDE
+
+
+def _assert_table_settings_implicitly_preserved(instance: GameInstance) -> None:
+    assert table_settings.difficulty(instance) == "硬核"
+    assert table_settings.entry_point(instance) == "plugin"
+    assert table_settings.luck_timeout_seconds(instance) == 90
+    assert table_settings.economy_reward_policy(instance) == {"mode": "auto_small_cash", "auto_reward_cap": 10}
+
 
 # The ruleset runtime binding is module state (no GameInstance attribute).
 EXPECTED_PRESERVED_RULESET_BINDING = {
@@ -174,42 +194,36 @@ EXPECTED_PRESERVED_RULESET_BINDING = {
 EXPECTED_CLEARED = {
     "npcs": {},
     "log": [],
-    "summary": {},
-    "key_facts": [],
-    "pending_combat_results": [],
-    "lorebook_timed_state": {},
-    "health_events": [],
-    "health_status": {},
-    "quick_actions": [],
-    "confirmed_items": [],
-    "private_log": {},
-    "table_talk": [],
-    "gm_directives": [],
+}
+
+# Module-backed fields the baseline reset() clears (no GameInstance attribute).
+EXPECTED_CLEARED_MODULE_STATE = {
+    "pending_combat_results": (round_presentation.pending_combat_results, []),
+    "lorebook_timed_state": (lorebook_runtime.timers, {}),
+    "health_events": (health.health_events, []),
+    "health_status": (health.health_status, {}),
+    "quick_actions": (round_presentation.quick_actions, []),
+    "gm_directives": (round_presentation.gm_directives, []),
 }
 
 # 基线 reset() 根本不触碰的字段 —— "隐式保留"。这里冻结的是基线行为本身。
 EXPECTED_IMPLICIT_PRESERVED = {
     "rule_id": "coc7",
-    "play_mode": "adventure",
-    "scene_image": {"asset_id": "img-1"},
-    "map_background": {"asset_id": "map-1"},
     "away_players": {"u2"},
-    "max_players": 9,
     "gm_uid": "gm1",
-    "player_access_open": False,
-    "away_control_policy": "ai_takeover",
-    "bot_bind_token": "bind-token",
-    "difficulty": "硬核",
-    "entry_point": "plugin",
-    "luck_timeout_seconds": 90,
-    "economy_reward_policy": {"mode": "auto_small_cash", "auto_reward_cap": 10},
     "last_saved_log_count": 3,
     "pending_luck_after_recovery": True,
     "round_unpriced_purchase_intents": [{"item": "potion"}],
-    "death_save_outcomes": {"3": {"u1": {"roll": 18}}},
-    "last_overreach": [{"player": "u1"}],
-    "last_world_legality": [{"player": "u1"}],
-    "last_world_events": [{"event_id": "e1"}],
+}
+
+# Module-backed fields the baseline reset() never touches.
+EXPECTED_IMPLICIT_PRESERVED_MODULE_STATE = {
+    "play_mode": (adventure_runtime_state.play_mode, "adventure"),
+    "away_control_policy": (away_control_policy, "ai_takeover"),
+    "death_save_outcomes": (round_safety.death_save_outcomes, {"3": {"u1": {"roll": 18}}}),
+    "last_overreach": (world_reports.last_overreach, [{"player": "u1"}]),
+    "last_world_legality": (world_reports.last_world_legality, [{"player": "u1"}]),
+    "last_world_events": (world_reports.last_world_events, [{"event_id": "e1"}]),
 }
 
 
@@ -219,20 +233,21 @@ async def test_reset_keeps_seed_and_preserves_configuration_fields() -> None:
     await instance.reset(keep_seed=True)
 
     assert instance.state == GameState.CREATED
-    assert instance.seed_code == "SEED42"
+    assert table_settings.seed_code(instance) == "SEED42"
+    _assert_table_settings_preserved(instance)
     for field, expected in EXPECTED_PRESERVED.items():
         actual = getattr(instance, field)
         assert actual == expected, f"reset 必须保留 {field}"
     assert ruleset_runtime.binding(instance) == EXPECTED_PRESERVED_RULESET_BINDING, "reset 必须保留 ruleset_runtime"
     # 保留字段应是深拷贝，reset 后修改不影响旧对象引用。
-    assert instance.gm_style_override is not EXPECTED_PRESERVED["gm_style_override"]
+    assert table_settings.gm_style_override(instance) is not PRESERVED_GM_STYLE_OVERRIDE
 
 
 @pytest.mark.asyncio
 async def test_reset_without_seed_clears_seed_code() -> None:
     instance = _make_populated_instance()
     await instance.reset(keep_seed=False)
-    assert instance.seed_code == ""
+    assert table_settings.seed_code(instance) == ""
 
 
 @pytest.mark.asyncio
@@ -250,16 +265,16 @@ async def test_reset_clears_runtime_and_narrative_state() -> None:
     assert instance.combat_state == "none"
     assert instance.initiative_order == []
     assert instance.initiative_current == 0
-    assert instance.scene == ""
-    assert instance.game_time == ""
+    assert narrative_notes.scene(instance) == ""
+    assert narrative_notes.game_time(instance) == ""
     assert instance.world_state == fresh_world_state()
     # Progress and world truth belong to the same run: never keep "node
     # completed" after the world that recorded its consequences is wiped.
-    assert instance.adventure_progress == {}
-    assert instance.total_llm_calls == 0
-    assert instance.total_tokens == 0
-    assert instance.started_at == ""
-    assert instance.last_activity == ""
+    assert adventure_runtime_state.progress(instance) == {}
+    assert session_stats.total_llm_calls(instance) == 0
+    assert session_stats.total_tokens(instance) == 0
+    assert session_stats.started_at(instance) == ""
+    assert session_stats.last_activity(instance) == ""
     assert instance.puzzle_manager is None
     assert instance.plot_tracker is None
     assert combat_extension_state.current(instance) == {}
@@ -267,12 +282,19 @@ async def test_reset_clears_runtime_and_narrative_state() -> None:
     assert checks.last_check(instance) is None
     assert checks.last_checks(instance) == []
     assert checks.round_checks_prepared(instance) is False
-    assert instance.round_start_snapshot == {}
-    assert instance.round_entity_snapshot == {}
-    assert instance.last_state_update is None
-    assert instance.last_token_budget_bump is None
+    assert round_safety.round_start_snapshot(instance) == {}
+    assert round_safety.round_entity_snapshot(instance) == {}
+    assert round_presentation.last_state_update(instance) is None
+    assert round_presentation.last_token_budget_bump(instance) is None
     for key, expected_empty in EXPECTED_CLEARED.items():
         assert getattr(instance, key) == expected_empty, f"reset 必须清空 {key}"
+    for key, (read, expected_empty) in EXPECTED_CLEARED_MODULE_STATE.items():
+        assert read(instance) == expected_empty, f"reset 必须清空 {key}"
+    assert private_channels.private_log(instance) == {}, "reset 必须清空 private_log"
+    assert private_channels.table_talk(instance) == [], "reset 必须清空 table_talk"
+    assert narrative_notes.summary(instance) == {}, "reset 必须清空 summary"
+    assert narrative_notes.key_facts(instance) == [], "reset 必须清空 key_facts"
+    assert narrative_notes.confirmed_items(instance) == [], "reset 必须清空 confirmed_items"
     assert ruleset_runtime.event_ledger(instance) == [], "reset 必须清空 event_ledger"
 
 
@@ -302,11 +324,21 @@ async def test_reset_does_not_touch_implicit_preserve_fields() -> None:
     instance = _make_populated_instance()
     await instance.reset(keep_seed=True)
 
+    _assert_table_settings_implicitly_preserved(instance)
     for field, expected in EXPECTED_IMPLICIT_PRESERVED.items():
         actual = getattr(instance, field)
         assert actual == expected, (
             f"基线 reset() 不触碰 {field}；extraction 不得改变这一行为"
         )
+    for field, (read, expected) in EXPECTED_IMPLICIT_PRESERVED_MODULE_STATE.items():
+        assert read(instance) == expected, (
+            f"基线 reset() 不触碰 {field}；extraction 不得改变这一行为"
+        )
+    assert media.scene_image(instance) == {"asset_id": "img-1"}
+    assert media.map_background(instance) == {"asset_id": "map-1"}
+    assert room_access.max_players(instance) == 9
+    assert room_access.player_access_open(instance) is False
+    assert room_access.bot_bind_token(instance) == "bind-token"
     assert checks.manual_roll_requests(instance) == [{"request_id": "r1"}]
 
 
@@ -315,7 +347,7 @@ async def test_reset_keeps_the_room_password_and_room_tokens() -> None:
     instance = _make_populated_instance()
     await instance.reset(keep_seed=True)
 
-    assert instance.has_room_password is True
+    assert room_access.has_room_password(instance) is True
     assert room_access.verify_room_password(instance, "secret-pass")
     assert room_access.verify_room_token(instance, "room-token")
     # Only hashes are kept; no plaintext attribute rides along.

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.commands.check_planner import _planner_context, normalize_check_specs, plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
@@ -1045,7 +1046,7 @@ def test_planner_npc_context_requires_an_explicit_resolved_npc(target, action, e
         "keeper": {"name": "老汤姆", "relation": "friendly", "hp": 20, "description": "长篇背景"},
         "professor": {"character_name": "考古学系主任"},
     }
-    instance.scene = "老汤姆和考古学系主任所在的旅店"
+    narrative_notes.replace_scene(instance, "老汤姆和考古学系主任所在的旅店")
     instance.combat_state = "active"
     instance.combat_enemies = [{"name": "强盗", "hp": 10}]
     instance.action_queue[0].update(text=action, target_text=target)

@@ -74,6 +74,8 @@ from src.webui.services.module_validation import ModulePackageError
 
 from webapi_harness import FakeLLMClient
 from src.engine.modules import ruleset_runtime
+from src.engine.modules import adventure_runtime_state
+from src.engine.modules import world_reports
 
 MODULE_ID = "golden-module"
 MODULE_LABEL = f"module:{MODULE_ID}"
@@ -426,7 +428,7 @@ async def _advance_time_through_round_processor(
     instance.reset_round_checks()
     with patch("src.commands.round_processor.plan_round_checks", planned):
         await golden.api._handler.prepare_round_checks_ai(instance)
-    return list(instance.last_world_events)
+    return list(world_reports.last_world_events(instance))
 
 
 def _zip_module_files() -> bytes:
@@ -469,7 +471,7 @@ async def test_golden_steps_1_to_4_install_and_create_through_http(golden) -> No
     assert facts[SECRET_FACT]["visibility"] == "gm"
     assert "npc:warden" in instance.world_state["entities"]
     # 进度初始化，起始节点 active。
-    assert instance.adventure_progress["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["gate"]
 
 
 # ---- 5–7：GM / shared player 视角 ------------------------------------------
@@ -551,13 +553,13 @@ async def test_golden_steps_8_to_11_encounter_uses_module_monsters(golden) -> No
     result = await _complete_node(golden, created, "gate")
 
     assert result["activated_nodes"] == ["vault"]
-    assert instance.adventure_progress["completed_nodes"] == ["gate"]
-    assert "obj_open" in instance.adventure_progress["completed_objectives"]
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == ["gate"]
+    assert "obj_open" in adventure_runtime_state.progress(instance)["completed_objectives"]
     # 步骤 13：GM 的秘密进程已启动（gm 可见性）。
     ritual = world_processes(instance.world_state)["ritual"]
     assert ritual["status"] == "running" and ritual["visibility"] == "gm"
     # 后果节点要等进程结算（gate: world.process_status）——现在还不该开放。
-    assert "aftermath" not in instance.adventure_progress["active_nodes"]
+    assert "aftermath" not in adventure_runtime_state.progress(instance)["active_nodes"]
 
 
 @pytest.mark.asyncio
@@ -608,7 +610,7 @@ async def test_golden_world_time_transaction_restores_on_unexpected_adventure_fa
     created = await _created_golden(golden)
     instance = golden.instance(created["game_key"])
     before_world = deepcopy(instance.world_state)
-    before_progress = deepcopy(instance.adventure_progress)
+    before_progress = deepcopy(adventure_runtime_state.progress(instance))
 
     def fail_after_world_advance(_instance):
         raise RuntimeError("injected adventure gate failure")
@@ -617,7 +619,7 @@ async def test_golden_world_time_transaction_restores_on_unexpected_adventure_fa
     await _advance_time_through_round_processor(golden, instance, 60)
 
     assert instance.world_state == before_world
-    assert instance.adventure_progress == before_progress
+    assert adventure_runtime_state.progress(instance) == before_progress
 
 
 # ---- 12：item reward 走权威奖励路径 ----------------------------------------
@@ -682,7 +684,7 @@ async def test_golden_node_save_failure_restores_world_progress_and_economy(gold
     await _complete_node(golden, created, "gate")
     before = {
         "world_state": json.loads(json.dumps(instance.world_state)),
-        "adventure_progress": json.loads(json.dumps(instance.adventure_progress)),
+        "adventure_progress": json.loads(json.dumps(adventure_runtime_state.progress(instance))),
         "economy": json.loads(json.dumps(economy_state.state(instance))),
     }
     original = golden.api._ruleset_gameplay_dependencies
@@ -703,7 +705,7 @@ async def test_golden_node_save_failure_restores_world_progress_and_economy(gold
         golden.api._ruleset_gameplay_dependencies = original
     assert result["code"] == "ADVENTURE_NODE_FAILED"
     assert instance.world_state == before["world_state"]
-    assert instance.adventure_progress == before["adventure_progress"]
+    assert adventure_runtime_state.progress(instance) == before["adventure_progress"]
     assert economy_state.state(instance) == before["economy"]
 
 
@@ -723,7 +725,7 @@ async def test_golden_steps_13_to_17_process_consequence_and_world_memory(golden
     assert world_processes(instance.world_state)["ritual"]["status"] == "completed"
 
     # 步骤 16：进程完成后 gate 才开放后果节点，公开后果由它自己的 world op 落地。
-    assert "aftermath" in instance.adventure_progress["active_nodes"]
+    assert "aftermath" in adventure_runtime_state.progress(instance)["active_nodes"]
     # R5-c1: planning alone leaves judgment in flight. Node completion must wait
     # for the real narrative processor to finish, even when its gate is open.
     gm_uid = str(created["players"][0]["user_id"])
@@ -737,7 +739,7 @@ async def test_golden_steps_13_to_17_process_consequence_and_world_memory(golden
     await _complete_node(golden, created, "aftermath")
     assert fact_value(instance.world_state, PUBLIC_CONSEQUENCE_FACT) is True
     # 后果满足后秘密节点才对 GM 开放（玩家看不到它）。
-    assert SECRET_NODE in instance.adventure_progress["active_nodes"]
+    assert SECRET_NODE in adventure_runtime_state.progress(instance)["active_nodes"]
 
     # 步骤 17：WorldEvent receipts → 确定性 memory 投影 → outbox → MemoryStore。
     assert await golden.api.drain_economy_outbox(game_key) is True
@@ -777,7 +779,7 @@ async def test_golden_steps_18_to_21_survive_restart_with_sources(golden) -> Non
 
         # 步骤 20：世界 / 进度 / 绑定一起活过重启。
         assert fact_value(loaded.world_state, "location:cellar.door") == "locked"
-        assert loaded.adventure_progress["completed_nodes"] == ["gate"]
+        assert adventure_runtime_state.progress(loaded)["completed_nodes"] == ["gate"]
         assert loaded.adventure_binding["adventure_id"] == ADVENTURE_ID
 
         # 步骤 21：Adventure 与模组来源都正确（source-aware 解析回同一个包）。
@@ -806,7 +808,7 @@ async def test_golden_steps_22_to_23_rollback_restores_world_and_progress(golden
 
     capture_round_entity_snapshot(instance)
     world_before = json.loads(json.dumps(instance.world_state))
-    progress_before = json.loads(json.dumps(instance.adventure_progress))
+    progress_before = json.loads(json.dumps(adventure_runtime_state.progress(instance)))
     memories_before = golden.api.list_memories(game_key, viewer_is_gm=True)["total"]
 
     # 本轮结算：完成节点（世界 + 进度）+ 物品奖励 + 时间推进（进程结算 + 权威记忆）。
@@ -832,8 +834,8 @@ async def test_golden_steps_22_to_23_rollback_restores_world_and_progress(golden
     assert result["ok"] is True, result
     # 步骤 23：世界真相与 Adventure 进度一起回到 before-image（不留半回滚）。
     assert instance.world_state == world_before
-    assert instance.adventure_progress == progress_before
-    assert instance.adventure_progress["completed_nodes"] == []
+    assert adventure_runtime_state.progress(instance) == progress_before
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == []
     # 物品奖励同样被撤销（reward_snapshots 的 before-image）。
     assert "Brass Key" not in json.dumps(
         instance.get_character_sheet(gm_uid) or {}, ensure_ascii=False,

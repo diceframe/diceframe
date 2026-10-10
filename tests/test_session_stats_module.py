@@ -92,9 +92,9 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     before = deepcopy(instance.modules)
     for key, value in VALUES.items():
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            getattr(module, key)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, value)
+            getattr(module, f"replace_{key}")(instance, value)
     for operation in (module.touch, module.mark_started, module.record_llm_usage, module.reset):
         with pytest.raises(ModuleStateError):
             operation(instance)
@@ -110,11 +110,11 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
     assert not VALUES.keys() & {item.name for item in fields(instance)}
     assert not VALUES.keys() & instance.__dict__.keys()
     for key, value in VALUES.items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
         assert slot[key] is value
-        assert getattr(instance, key) is slot[key]
+        assert getattr(module, key)(instance) is slot[key]
     slot["total_tokens"] = 5678
-    assert instance.total_tokens == 5678
+    assert module.total_tokens(instance) == 5678
     encoded = instance.to_dict()
     assert not VALUES.keys() & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
@@ -127,7 +127,7 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
 async def test_reset_clears_all_four_statistics():
     instance = new_instance()
     for key, value in VALUES.items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] == module.fresh()
 
@@ -148,29 +148,29 @@ async def test_activate_twice_preserves_start_time_and_touches_activity(monkeypa
     monkeypatch.setattr(module, "datetime", Clock)
     instance = new_instance()
     await instance.activate()
-    assert (instance.started_at, instance.last_activity) == ("first-start", "first-touch")
+    assert (module.started_at(instance), module.last_activity(instance)) == ("first-start", "first-touch")
     await instance.activate()
-    assert (instance.started_at, instance.last_activity) == ("first-start", "second-touch")
+    assert (module.started_at(instance), module.last_activity(instance)) == ("first-start", "second-touch")
 
 
 def test_touch_preserves_explicit_timestamp_including_empty_string():
     instance = new_instance()
     module.touch(instance, at=VALUES["last_activity"])
-    assert instance.last_activity == VALUES["last_activity"]
+    assert module.last_activity(instance) == VALUES["last_activity"]
     module.touch(instance, at="")
-    assert instance.last_activity == ""
+    assert module.last_activity(instance) == ""
     before = datetime.now(timezone.utc)
     module.touch(instance)
-    assert before <= datetime.fromisoformat(instance.last_activity) <= datetime.now(timezone.utc)
+    assert before <= datetime.fromisoformat(module.last_activity(instance)) <= datetime.now(timezone.utc)
 
 
 def test_record_usage_preserves_coercion_clamping_and_does_not_touch_time():
     instance = new_instance()
-    instance.last_activity = VALUES["last_activity"]
+    module.replace_last_activity(instance, VALUES["last_activity"])
     instance.record_llm_usage(12)
     module.record_llm_usage(instance, -10, calls=-2)
-    assert (instance.total_tokens, instance.total_llm_calls) == (12, 1)
+    assert (module.total_tokens(instance), module.total_llm_calls(instance)) == (12, 1)
     module.record_llm_usage(instance, "7", calls="2")
     module.record_llm_usage(instance, None, calls=None)
-    assert (instance.total_tokens, instance.total_llm_calls) == (19, 3)
-    assert instance.last_activity == VALUES["last_activity"]
+    assert (module.total_tokens(instance), module.total_llm_calls(instance)) == (19, 3)
+    assert module.last_activity(instance) == VALUES["last_activity"]

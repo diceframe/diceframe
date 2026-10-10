@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from src.engine.modules import narrative_notes
 from src.lorebook.activation import evaluate_probability, eligible_for_recursion
 from src.lorebook.budget import apply_token_budget
 from src.lorebook.resolver import resolve_active_books
@@ -7,6 +8,7 @@ from src.lorebook.trace import ActivationTrace
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.retrieval import LoreRetriever
 from src.engine.game_instance import GameInstance
+from src.engine.modules import lorebook_runtime
 
 
 def test_probability_trace_is_injected_and_deterministic():
@@ -50,7 +52,7 @@ def test_retriever_loads_world_and_global_books(tmp_path):
         store.create_lorebook({"id": "global-book", "name": "Global"})
         store.bind_lorebook({"id": "global-binding", "book_id": "global-book", "scope_kind": "global", "scope_id": ""})
         store.add_entry({"id": "global-entry", "book_id": "global-book", "name": "Global clue", "keywords": ["clue"], "content": "global"})
-        instance = SimpleNamespace(world_id="w", language="zh-CN", scene="", npcs={}, players={}, world_state={}, lorebook_timed_state={}, lorebook_store=store)
+        instance = SimpleNamespace(world_id="w", language="zh-CN", npcs={}, players={}, world_state={}, modules={"narrative_notes": narrative_notes.fresh(), "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": {}}}, lorebook_store=store)
         retriever = LoreRetriever(KeywordMatcher(), store=store)
         import asyncio
         hits = asyncio.run(retriever.retrieve(instance, "clue"))
@@ -90,13 +92,13 @@ def test_matcher_recursive_scan_uses_entry_content_and_depth():
 
 def test_timed_state_is_migrated_at_game_save_load_boundary():
     instance = GameInstance(game_key=("web", "timers", "gm"))
-    instance.lorebook_timed_state = {"entry": {"status": "cooldown", "remaining": 2}}
+    lorebook_runtime.replace_timers(instance, {"entry": {"status": "cooldown", "remaining": 2}})
     payload = instance.to_dict()
     assert payload["modules"]["lorebook_runtime"]["timers"]["entry"]["cooldown_remaining"] == 2
     restored = GameInstance.from_dict(payload)
-    assert restored.lorebook_timed_state["entry"]["cooldown_remaining"] == 2
+    assert lorebook_runtime.timers(restored)["entry"]["cooldown_remaining"] == 2
     restored.update_lorebook_timed_state()
-    assert restored.lorebook_timed_state["entry"]["cooldown_remaining"] == 1
+    assert lorebook_runtime.timers(restored)["entry"]["cooldown_remaining"] == 1
 
 
 def test_fuzzy_matching_is_book_scoped_and_legacy_compatible():

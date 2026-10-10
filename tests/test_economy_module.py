@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine import economy
 from src.engine.game_instance import GameInstance, _snapshot_players, restore_players
 from src.engine.game_state import GameState
@@ -18,6 +19,9 @@ from src.migrations.instance import (
     rebind_imported_game_state_payload,
 )
 from src.engine.modules import checks
+from src.engine.modules import player_control_state
+from src.engine.modules import round_safety
+from src.engine.player_control import set_away_control_policy
 
 
 def _ledger(run_id="run_source"):
@@ -158,7 +162,7 @@ def test_run_rotation_clears_ledger_without_mutating_old_snapshot_or_other_slots
     economy_state.replace_state(instance, _ledger(instance.run_id))
     old_ledger = economy_state.state(instance)
     before = deepcopy(old_ledger)
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     old, new = instance.rotate_run_identity()
     assert old == before["run_id"]
     assert old != new == instance.run_id
@@ -166,7 +170,7 @@ def test_run_rotation_clears_ledger_without_mutating_old_snapshot_or_other_slots
     assert economy_state.state(instance) == economy_state.fresh_economy_state(new)
     assert old_ledger == before
     assert economy_state.state(instance) is not old_ledger
-    assert instance.away_control_policy == "ai_takeover"
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
 
 
 @pytest.mark.asyncio
@@ -216,21 +220,21 @@ def _unsupported_economy_instance(version):
     instance.round_number = 2
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 10, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
-    instance.scene = "gate"
+    narrative_notes.replace_scene(instance, "gate")
     instance.state = GameState.ACTIVE_JUDGMENT
     instance.action_queue = [{"user_id": "p", "text": "open gate"}]
     instance.pending_actions = [{"user_id": "p", "text": "wait"}]
     instance.ready_players = {"p"}
-    instance.round_start_snapshot = {"p": {"hp": 10, "gold": 20}}
+    round_safety.capture_players(instance, {"p": {"hp": 10, "gold": 20}})
     instance.capture_round_entity_snapshot()
     combat_extension_state.replace_current(instance, {"schema_version": 1, "pending_summaries": ["guard hit"]})
     combat_extension_state.replace_round_snapshots(instance, {"2": {"schema_version": 1, "phase": "before"}})
     instance.log = [{
         "round": 1, "gm_response": "previous round", "swipes": [],
-        "round_start_snapshot": deepcopy(instance.round_start_snapshot),
+        "round_start_snapshot": deepcopy(round_safety.round_start_snapshot(instance)),
     }]
     checks.replace_last_checks(instance, [{"id": "check"}])
-    instance.death_save_outcomes = {"2": {"p": {"outcome": "stable"}}}
+    round_safety.replace_death_save_outcomes(instance, {"2": {"p": {"outcome": "stable"}}})
     economy_state.replace_state(instance, _ledger(instance.run_id))
     payload = instance.to_dict()
     payload["modules"]["economy"]["schema_version"] = version

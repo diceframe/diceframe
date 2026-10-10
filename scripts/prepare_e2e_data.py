@@ -18,6 +18,7 @@ from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.adventures.progress import new_progress
 from src.engine.game_instance import GameInstance, GameState
+from src.engine.modules import adventure_runtime_state, room_access
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.webui.services.legal import bundled_documents
 
@@ -307,7 +308,7 @@ def prepare_e2e_data(data_dir: Path) -> Path:
     adventure_bundle = AdventureBundleLoader(
         data_dir / "templates" / "adventures",
     ).resolve(E2E_ADVENTURE_ID, "zh-CN")
-    adventure_instance.adventure_progress = new_progress(adventure_bundle.adventure)
+    adventure_runtime_state.replace_progress(adventure_instance, new_progress(adventure_bundle.adventure))
     _write_save(data_dir, adventure_instance)
 
     runtime = Dnd2024Runtime()
@@ -327,7 +328,7 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         language="zh-CN",
     )
     dnd_instance.set_scene("灰沼村议事厅")
-    dnd_instance.max_players = 2
+    room_access.replace_max_players(dnd_instance, 2)
     dnd_instance.players = {
         "e2e-gm": {
             "character_name": "新手守护者",

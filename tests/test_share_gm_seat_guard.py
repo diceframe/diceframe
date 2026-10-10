@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
 from src.engine.game_state import GameState
-from src.engine.modules import economy_state
+from src.engine.modules import economy_state, private_channels
 from src.engine.modules import room_access
 from src.webui.session import SessionManager, session_middleware
 from test_game_query_routes_http import (
@@ -34,10 +34,10 @@ def share_env(play_env, tmp_path):
     instance.state = GameState.ACTIVE_ACTION
     instance.players[instance.gm_uid] = {"character_name": "GM", "character_sheet": {}}
     instance.players["p2"] = {"character_name": "乙", "character_sheet": {}}
-    instance.private_log = {
+    private_channels.replace_private_log(instance, {
         "p1": [{"round": 1, "text": "A private", "source": "gm"}],
         "p2": [{"round": 1, "text": "B private", "source": "gm"}],
-    }
+    })
     sessions = SessionManager(tmp_path / "sessions")
     token, _ = sessions.get_or_create(None)
     sessions.rebind(token, "p1")

@@ -13,6 +13,7 @@ from src.engine.module_state import ModuleStateError
 from src.engine.modules import legacy_combat
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 from src.engine.modules import ruleset_runtime
+from src.engine.modules import round_safety
 
 
 def live_state(instance):
@@ -116,7 +117,7 @@ def test_ruleset_restore_rejects_before_any_field_assignment():
 @pytest.mark.parametrize("operation", ["capture", "restore"])
 def test_entity_snapshot_entries_reject_before_npc_or_snapshot_writes(operation, direct):
     instance = unsupported_instance()
-    instance.round_entity_snapshot = {"npcs": {"different": {"hp": 1}}, "combat_enemies": []}
+    round_safety.replace_entity_snapshot(instance, {"npcs": {"different": {"hp": 1}}, "combat_enemies": []})
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported legacy_combat module schema"):
         if direct:
@@ -135,7 +136,7 @@ async def test_existing_noop_guards_remain_before_preflight(operation):
     if operation in {"abort", "advance"}:
         instance.state = GameState.WAITING
     if operation == "empty_entity_restore":
-        instance.round_entity_snapshot.clear()
+        round_safety.round_entity_snapshot(instance).clear()
     before = deepcopy(live_state(instance))
     if operation == "rollback":
         assert await instance.rollback_last_round() is None

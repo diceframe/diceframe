@@ -10,7 +10,7 @@ from src.engine.economy import era_key
 from src.engine.game_instance import GameInstance
 from src.engine.game_state import GameState
 from src.rulesets.automation import append_public_timeline_entry
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import ruleset_runtime, session_stats
 
 
 @pytest.mark.parametrize("value, expected", [(0, 1), (7, 8), (2.5, 3.5)])
@@ -171,7 +171,7 @@ def test_public_timeline_transaction_rollback_restores_round_and_history():
         "initiative_current": instance.initiative_current,
         "round_number": instance.round_number,
         "log": instance.log,
-        "last_activity": instance.last_activity,
+        "last_activity": session_stats.last_activity(instance),
     })
     append_timeline(instance)
     append_timeline(instance)

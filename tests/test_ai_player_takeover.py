@@ -65,7 +65,8 @@ from src.webui.services.turns import (
     resume_after_control_change,
     submit_action,
 )
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import ruleset_runtime, table_settings
+from src.engine.player_control import set_away_control_policy
 
 GAME_KEY = "web|ai-takeover|bot"
 GAME_KEY_PARTS = ("web", "ai-takeover", "bot")
@@ -145,7 +146,7 @@ def make_instance(
     instance = GameInstance(game_key=GAME_KEY_PARTS, rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    instance.solo_mode = solo
+    table_settings.replace_solo_mode(instance, solo)
     for uid in (*humans, *ai):
         sheet = HUMAN_SHEET if uid in humans else AI_SHEET
         instance.put_player(uid, {
@@ -426,7 +427,7 @@ async def test_the_control_change_and_the_generated_action_are_both_saved() -> N
 @pytest.mark.asyncio
 async def test_away_takeover_resumes_immediately() -> None:
     instance = make_instance(humans=("h1", "h2"))
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     await instance.add_action("h1", "我点亮提灯。")
     fixture = TakeoverFixture(instance, FakePlayerLLM(replies=["我先找个掩体。"]), SaveRecorder())
 
@@ -476,7 +477,7 @@ async def test_away_takeover_that_cannot_resume_is_refused_while_the_round_is_bu
     """进行中的回合里控制权切换仍然被拒——即时接管没有放松安全边界。"""
 
     instance = make_instance(humans=("h1", "h2"))
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     instance.state = GameState.ACTIVE_JUDGMENT
     fixture = TakeoverFixture(instance, FakePlayerLLM(), SaveRecorder())
 

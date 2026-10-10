@@ -138,7 +138,7 @@ async def test_manual_roll_rejection_preserves_requests_and_status(operation, at
         instance = SimpleNamespace(
             modules={}, gm_uid=instance.gm_uid,
             game_key=instance.game_key, run_id=instance.run_id,
-            round_number=instance.round_number, players=instance.players, last_activity="",
+            round_number=instance.round_number, players=instance.players,
         )
     save = AsyncMock()
     service = ManualRollService(ManualRollDependencies(

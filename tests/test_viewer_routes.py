@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aiohttp.test_utils import TestClient, TestServer
-from src.engine.modules import room_access
+from src.engine.modules import private_channels, room_access
 import pytest
 
 from src.webui.session import SessionManager, session_middleware
@@ -20,10 +20,10 @@ from test_game_query_routes_http import (
 def viewer_env(play_env, tmp_path):
     game_key, instance = _make_game(play_env, "viewer")
     instance.players["p2"] = {"character_name": "乙", "character_sheet": {}}
-    instance.private_log = {
+    private_channels.replace_private_log(instance, {
         "p1": [{"round": 1, "text": "A private", "source": "gm"}],
         "p2": [{"round": 1, "text": "B private", "source": "gm"}],
-    }
+    })
     instance.log = [{
         "round": 1, "gm_response": "Public narration",
         "actions": [

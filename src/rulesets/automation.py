@@ -154,7 +154,7 @@ def apply_director_automation(
         "combat_active": instance.combat_active,
         "initiative_order": deepcopy(instance.initiative_order),
         "initiative_current": instance.initiative_current,
-        "scene": getattr(instance, "scene", None),
+        "scene": narrative_notes.scene(instance),
     }
     batches: list[dict[str, Any]] = []
     try:

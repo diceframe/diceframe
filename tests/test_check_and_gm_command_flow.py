@@ -17,6 +17,7 @@ from src.rules.rule_system import RuleSystem
 from src.webui.services import game_controls, game_master
 from src.webui.services.logs import GameLogService, LogDependencies
 from src.engine.modules import checks as checks_module
+from src.engine.modules import round_presentation
 
 
 def _coc_instance() -> tuple[GameInstance, RuleSystem]:
@@ -439,7 +440,7 @@ async def test_gm_resource_command_updates_luck_directly_without_public_action()
     assert result["kind"] == "resource_update"
     assert instance.get_character_sheet("p1")["luck"] == 50
     assert instance.action_queue == []
-    assert instance.gm_directives == []
+    assert round_presentation.gm_directives(instance) == []
 
 
 def _office_like_rule(tmp_path: Path) -> RuleSystem:
@@ -534,7 +535,7 @@ async def test_gm_revive_command_revives_dead_character():
     assert sheet["hp"] == 50
     assert "death_round" not in sheet
     assert instance.action_queue == []
-    assert instance.gm_directives == []
+    assert round_presentation.gm_directives(instance) == []
 
 
 @pytest.mark.asyncio
@@ -734,7 +735,7 @@ async def test_gm_narrative_command_is_private_and_cannot_trigger_check_detectio
 
     assert result["kind"] == "directive"
     assert instance.action_queue == []
-    assert instance.gm_directives[0]["text"] == "让下一次判定伴随更强的死亡风险"
+    assert round_presentation.gm_directives(instance)[0]["text"] == "让下一次判定伴随更强的死亡风险"
     assert "GM指令" not in collect_actions_text(instance)
 
 

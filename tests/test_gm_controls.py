@@ -12,7 +12,7 @@ from src.webui.services import (
     game_queries,
 )
 from src.webui.services._common import _GAME_KEY_SEP
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import private_channels, ruleset_runtime, table_settings
 
 
 class DummyAPI:
@@ -102,7 +102,7 @@ async def test_set_solo_mode_marks_pending_round_ready(tmp_path):
     )
 
     assert result["ok"]
-    assert inst.solo_mode is True
+    assert table_settings.solo_mode(inst) is True
     assert inst.ready_players == {"gm", "p1"}
 
 
@@ -123,7 +123,7 @@ async def test_narrative_perspective_is_ruleset_neutral_and_persisted(tmp_path):
 
     assert result == {"ok": True, "narrative_perspective": "third_person"}
     persisted = GameInstance.from_dict(json.loads(registry._save_path(key).read_text(encoding="utf-8")))
-    assert persisted.narrative_perspective == "third_person"
+    assert table_settings.narrative_perspective(persisted) == "third_person"
 
     generic_key = ("web", "generic-game", "bot")
     generic = GameInstance(game_key=generic_key, rule_id="freeform_fantasy")
@@ -132,7 +132,7 @@ async def test_narrative_perspective_is_ruleset_neutral_and_persisted(tmp_path):
         _GAME_KEY_SEP.join(generic_key), "immersive",
     )
     assert generic_result == {"ok": True, "narrative_perspective": "immersive"}
-    assert generic.narrative_perspective == "immersive"
+    assert table_settings.narrative_perspective(generic) == "immersive"
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_gm_private_message_appends_private_log(tmp_path):
     log = game_queries.private_log(_game_queries(registry), _GAME_KEY_SEP.join(key))
 
     assert result["ok"]
-    assert inst.private_log["p1"][0]["source"] == "gm"
+    assert private_channels.private_log(inst)["p1"][0]["source"] == "gm"
     assert log["messages"][0]["character_name"] == "艾伦"
     assert "冷风" in log["messages"][0]["text"]
 
@@ -162,8 +162,8 @@ def test_private_log_for_user_only_returns_own_messages(tmp_path):
     inst.round_number = 3
     inst.players["p1"] = {"character_name": "艾伦", "character_sheet": {"deceased": False}}
     inst.players["p2"] = {"character_name": "贝拉", "character_sheet": {"deceased": False}}
-    inst.private_log["p1"] = [{"round": 1, "text": "你听到门后有冷风。", "source": "gm"}]
-    inst.private_log["p2"] = [{"round": 1, "text": "你发现窗边有脚印。", "source": "gm"}]
+    private_channels.private_log(inst)["p1"] = [{"round": 1, "text": "你听到门后有冷风。", "source": "gm"}]
+    private_channels.private_log(inst)["p2"] = [{"round": 1, "text": "你发现窗边有脚印。", "source": "gm"}]
     registry.register(inst)
 
     log = game_queries.private_log_for_user(
@@ -203,7 +203,7 @@ async def test_delete_character_cleans_player_runtime_state(tmp_path):
     inst.ready_players.add("p1")
     inst.action_queue.append({"user_id": "p1", "text": "act"})
     inst.pending_actions.append({"user_id": "p1", "text": "next"})
-    inst.private_log["p1"] = [{"text": "secret"}]
+    private_channels.private_log(inst)["p1"] = [{"text": "secret"}]
     registry.register(inst)
 
     api = DummyAPI(registry)
@@ -217,7 +217,7 @@ async def test_delete_character_cleans_player_runtime_state(tmp_path):
     assert "p1" not in inst.ready_players
     assert not inst.action_queue
     assert not inst.pending_actions
-    assert "p1" not in inst.private_log
+    assert "p1" not in private_channels.private_log(inst)
 
 
 def test_gm_target_prioritizes_exact_player_name_over_generic():

@@ -54,17 +54,17 @@ def test_live_properties_replacement_and_round_trip():
     instance = GameInstance(game_key=("web", "media", "bot"))
     for field in ("scene_image", "map_background"):
         reference = {"kind": "upload", "asset_id": field}
-        setattr(instance, field, reference)
-        assert getattr(instance, field) is reference is instance.modules["media"][field]
-        getattr(instance, field)["extra"] = "retained"
+        getattr(module, f"replace_{field}")(instance, reference)
+        assert getattr(module, field)(instance) is reference is instance.modules["media"][field]
+        getattr(module, field)(instance)["extra"] = "retained"
     saved = instance.to_dict()
     assert "scene_image" not in saved and "map_background" not in saved
     restored = GameInstance.from_dict(saved)
     assert restored.modules["media"] == instance.modules["media"]
-    old = instance.scene_image
+    old = module.scene_image(instance)
     replacement = {"kind": "none"}
     module.replace_scene_image(instance, replacement)
-    assert instance.scene_image is replacement
+    assert module.scene_image(instance) is replacement
     assert old["asset_id"] == "scene_image"
 
 
@@ -77,9 +77,9 @@ def test_future_versions_preserved_and_runtime_access_rejected():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={"media": slot})
     for field in ("scene_image", "map_background"):
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            getattr(module, field)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, {})
+            getattr(module, f"replace_{field}")(instance, {})
     assert instance.to_dict()["modules"]["media"] == before
 
 
@@ -182,8 +182,8 @@ async def test_package_operations_reject_unsupported_media_before_any_asset_or_s
 async def test_export_then_import_preserves_both_asset_attachments(tmp_path, legacy):
     registry = GameRegistry(tmp_path / "saves")
     instance = registry.get_or_create(("web", "assets", "bot"))
-    instance.scene_image = {"kind": "upload", "asset_id": "scene"}
-    instance.map_background = {"kind": "upload", "asset_id": "map"}
+    module.replace_scene_image(instance, {"kind": "upload", "asset_id": "scene"})
+    module.replace_map_background(instance, {"kind": "upload", "asset_id": "map"})
     await registry.save(instance)
     state_path = registry.save_package_state_path(instance.game_key)
     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -211,8 +211,8 @@ async def test_export_then_import_preserves_both_asset_attachments(tmp_path, leg
         get_instance=registry.get,
         state_path_for=registry.save_package_state_path,
         import_save_zip=registry.import_save_zip,
-        resolve_scene_image_file=lambda reference: files["scene"] if reference == instance.scene_image else None,
-        resolve_map_background_file=lambda reference: files["map"] if reference == instance.map_background else None,
+        resolve_scene_image_file=lambda reference: files["scene"] if reference == module.scene_image(instance) else None,
+        resolve_map_background_file=lambda reference: files["map"] if reference == module.map_background(instance) else None,
         save_scene_image_upload=lambda encoded: upload(encoded, "scene", "scene_image"),
         save_map_background_upload=lambda encoded: upload(encoded, "map", "map_background"),
     ))
@@ -230,11 +230,11 @@ async def test_export_then_import_preserves_both_asset_attachments(tmp_path, leg
     assert result["ok"] is True
     imported_key = tuple(result["game_key"].split("|"))
     restored = registry.get(imported_key)
-    assert restored.scene_image == {"kind": "upload", "asset_id": "imported-scene"}
-    assert restored.map_background == {"kind": "upload", "asset_id": "imported-map"}
+    assert module.scene_image(restored) == {"kind": "upload", "asset_id": "imported-scene"}
+    assert module.map_background(restored) == {"kind": "upload", "asset_id": "imported-map"}
     assert restored.run_id != instance.run_id
     for kind in ("scene", "map"):
         assert imported_files[kind].read_bytes() == files[kind].read_bytes()
     reloaded = await registry.load(imported_key)
-    assert reloaded.scene_image == restored.scene_image
-    assert reloaded.map_background == restored.map_background
+    assert module.scene_image(reloaded) == module.scene_image(restored)
+    assert module.map_background(reloaded) == module.map_background(restored)

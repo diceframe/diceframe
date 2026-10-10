@@ -33,6 +33,7 @@ from src.adventures.graph_v2 import (
     project_graph_v2,
     validate_graph_v2,
 )
+from src.engine.modules import adventure_runtime_state
 from src.rulesets.registry import RulesetRuntimeRegistry
 
 _DIRECTORY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -843,7 +844,7 @@ def game_adventure_projection(
         for node in projection.get("nodes", [])
         if isinstance(node, dict)
     }
-    progress = getattr(instance, "adventure_progress", {})
+    progress = adventure_runtime_state.progress(instance)
     progress = progress if isinstance(progress, dict) else {}
     active_nodes = [
         node_id

@@ -20,10 +20,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.engine.modules import content_binding
+from src.engine.modules import content_binding, table_settings
 from src.webui.services import adventure_runtime
 from src.engine.world_state import world_facts
 from src.llm.client import LLMResponse
+from src.engine.modules import adventure_runtime_state
 from test_golden_e2e_54pr import (  # noqa: F401  (fixture re-export)
     ADVENTURE_ID,
     _complete_node,
@@ -44,25 +45,25 @@ async def test_new_run_keeps_identity_and_reinitializes_v2_progress(golden, tran
     created = await _created_golden(golden)
     game_key = created["game_key"]
     before = golden.instance(game_key)
-    assert before.play_mode == "adventure"
+    assert adventure_runtime_state.play_mode(before) == "adventure"
     world_ref = content_binding.world_ref(before)
     book_refs = content_binding.book_refs(before)
     assert world_ref
     await _complete_node(golden, created, "gate")
-    assert before.adventure_progress["completed_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(before)["completed_nodes"] == ["gate"]
 
     await getattr(golden.api, transition)(game_key)
     after = golden.instance(game_key)
 
     assert after is not before
     assert after.run_id != before.run_id
-    assert after.play_mode == "adventure"
+    assert adventure_runtime_state.play_mode(after) == "adventure"
     assert after.adventure_binding["adventure_id"] == ADVENTURE_ID
     assert content_binding.world_ref(after) == world_ref
     assert content_binding.book_refs(after) == book_refs
     # Fresh v2 progress for the new run, plus the atomically materialized seed.
-    assert after.adventure_progress["active_nodes"] == ["gate"]
-    assert after.adventure_progress.get("completed_nodes", []) == []
+    assert adventure_runtime_state.progress(after)["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(after).get("completed_nodes", []) == []
     assert world_facts(after.world_state)["location:cellar.door"]["value"] == "locked"
     # Survives a save/load round trip.
     payload = after.to_dict()
@@ -78,7 +79,7 @@ async def test_failed_v2_initialization_keeps_previous_run_current(golden, monke
     game_key = created["game_key"]
     before = golden.instance(game_key)
     await _complete_node(golden, created, "gate")
-    progress = dict(before.adventure_progress)
+    progress = dict(adventure_runtime_state.progress(before))
     run_id = before.run_id
 
     def failing(_instance):
@@ -92,7 +93,7 @@ async def test_failed_v2_initialization_keeps_previous_run_current(golden, monke
     current = golden.instance(game_key)
     assert current is before
     assert current.run_id == run_id
-    assert current.adventure_progress == progress
+    assert adventure_runtime_state.progress(current) == progress
 
 
 @pytest.mark.asyncio
@@ -104,7 +105,7 @@ async def test_unresolvable_v2_adventure_rejects_new_run_with_error_code(
     game_key = created["game_key"]
     before = golden.instance(game_key)
     run_id = before.run_id
-    progress = dict(before.adventure_progress)
+    progress = dict(adventure_runtime_state.progress(before))
 
     def missing_source(*_args, **_kwargs):
         raise ValueError("adventure source is not installed")
@@ -117,7 +118,7 @@ async def test_unresolvable_v2_adventure_rejects_new_run_with_error_code(
     current = golden.instance(game_key)
     assert current is before
     assert current.run_id == run_id
-    assert current.adventure_progress == progress
+    assert adventure_runtime_state.progress(current) == progress
 
 
 @pytest.mark.asyncio
@@ -151,9 +152,9 @@ async def test_v1_adventure_restart_still_works(web_api) -> None:
     assert result["ok"] is True, result
     after = registry.get(api._parse_key(created["game_key"]))
     assert after is not before
-    assert after.play_mode == "adventure"
+    assert adventure_runtime_state.play_mode(after) == "adventure"
     assert after.adventure_binding == before.adventure_binding
-    assert after.adventure_progress == {}
+    assert adventure_runtime_state.progress(after) == {}
 
 
 def test_new_run_initializer_skips_v1_and_unbound_bindings() -> None:
@@ -181,16 +182,16 @@ async def test_seed_created_v2_adventure_initializes_progress_and_play_mode(gold
     await _complete_node(golden, created, "gate")
 
     seeded = await golden.api.create_from_seed(
-        source.seed_code, players=_dnd_characters(1), gm_uid="seed_gm",
+        table_settings.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm",
         language="zh-CN",
     )
 
     assert seeded["ok"] is True, seeded
     instance = golden.instance(seeded["game_key"])
     assert instance is not source
-    assert instance.play_mode == "adventure"
-    assert instance.adventure_progress["active_nodes"] == ["gate"]
-    assert instance.adventure_progress.get("completed_nodes", []) == []
+    assert adventure_runtime_state.play_mode(instance) == "adventure"
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance).get("completed_nodes", []) == []
     assert world_facts(instance.world_state)["location:cellar.door"]["value"] == "locked"
 
 

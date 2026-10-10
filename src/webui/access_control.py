@@ -103,7 +103,7 @@ class WebAccessControl:
             instance = self.request_game_instance(request)
             if (
                 instance
-                and getattr(instance, "has_room_password", False)
+                and room_access.has_room_password(instance)
                 and not self.request_room_token_ok(instance, request)
             ):
                 return web.json_response(
@@ -490,4 +490,4 @@ class WebAccessControl:
             instance = subsystems.registry.get(api._parse_key(parts[2]))
         except Exception:
             return False
-        return bool(instance and not getattr(instance, "player_access_open", True))
+        return bool(instance and not room_access.player_access_open(instance))

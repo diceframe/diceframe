@@ -37,6 +37,7 @@ from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.world_state import apply_world_ops, world_facts, world_processes
 from src.webui.services import adventure_runtime
 from src.engine.modules import ruleset_runtime
+from src.engine.modules import adventure_runtime_state
 
 PACKAGE_ID = "v2_quest"
 ADVENTURE_ID = "user:v2_quest"
@@ -193,9 +194,9 @@ def test_adventure_progress_persists_through_save_and_reload(tmp_path) -> None:
     payload = instance.to_dict()
     restored = GameInstance.from_dict(payload)
 
-    assert restored.adventure_progress == instance.adventure_progress
-    assert restored.adventure_progress["completed_nodes"] == ["gate"]
-    assert restored.adventure_progress["active_nodes"] == ["vault"]
+    assert adventure_runtime_state.progress(restored) == adventure_runtime_state.progress(instance)
+    assert adventure_runtime_state.progress(restored)["completed_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(restored)["active_nodes"] == ["vault"]
 
 
 def _progress_home(payload: dict) -> tuple[dict, str]:
@@ -214,7 +215,7 @@ def test_legacy_save_without_progress_loads_as_empty(tmp_path) -> None:
 
     restored = GameInstance.from_dict(payload)
 
-    assert restored.adventure_progress == {}
+    assert adventure_runtime_state.progress(restored) == {}
 
 
 # ---- §6.5 / §6.6 initialize -------------------------------------------------
@@ -232,7 +233,7 @@ def test_initialize_adventure_run_sets_progress_and_materializes_seed(tmp_path) 
 
     assert result["initialized"] is True
     assert result["active_nodes"] == ["gate"]
-    assert instance.adventure_progress["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["gate"]
     assert "location:vault" in (instance.world_state.get("entities") or {})
 
 
@@ -266,7 +267,7 @@ def test_initialize_failure_leaves_no_partial_progress(tmp_path) -> None:
     with pytest.raises(Exception):
         adventure_runtime.initialize_adventure_run(_deps(resolver), instance)
 
-    assert instance.adventure_progress == {}
+    assert adventure_runtime_state.progress(instance) == {}
     assert not (instance.world_state.get("entities") or {})
 
 
@@ -284,7 +285,7 @@ def test_complete_node_applies_outcomes_and_activates_successors(tmp_path) -> No
     # §6.4：on_complete 的 world_op 让 gate 满足 → 后继节点开放。
     assert result["activated_nodes"] == ["vault"]
     assert world_facts(instance.world_state)["gate.open"]["value"] is True
-    assert instance.adventure_progress["active_nodes"] == ["vault"]
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["vault"]
 
 
 def test_rollback_restores_adventure_progress_with_the_world(tmp_path) -> None:
@@ -303,19 +304,19 @@ def test_rollback_restores_adventure_progress_with_the_world(tmp_path) -> None:
 
     capture_round_entity_snapshot(instance)
     world_before = deepcopy(instance.world_state)
-    progress_before = deepcopy(instance.adventure_progress)
+    progress_before = deepcopy(adventure_runtime_state.progress(instance))
 
     adventure_runtime.complete_adventure_node(deps, instance, "gate")
-    assert instance.adventure_progress["completed_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == ["gate"]
     asyncio.run(instance.finish_judgment("推进了一轮"))
 
     rolled = asyncio.run(instance.rollback_last_round())
 
     assert rolled is not None
     assert instance.world_state == world_before
-    assert instance.adventure_progress == progress_before
-    assert instance.adventure_progress["completed_nodes"] == []
-    assert instance.adventure_progress["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance) == progress_before
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == []
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["gate"]
 
 
 def test_objective_milestone_validation_still_applies_inside_runtime(tmp_path) -> None:
@@ -333,8 +334,8 @@ def test_objective_milestone_validation_still_applies_inside_runtime(tmp_path) -
         adventure_runtime.complete_adventure_node(deps, instance, "vault")
 
     # 全量回滚：进度与世界都不动。
-    assert instance.adventure_progress["completed_nodes"] == ["gate"]
-    assert instance.adventure_progress["active_nodes"] == ["vault"]
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["vault"]
 
 
 def test_item_reward_without_reward_sink_fails_closed_and_rolls_back(tmp_path) -> None:
@@ -356,8 +357,8 @@ def test_item_reward_without_reward_sink_fails_closed_and_rolls_back(tmp_path) -
 
     # §6.7：世界改动与进度一起回滚。
     assert instance.world_state == before_world
-    assert instance.adventure_progress["completed_nodes"] == []
-    assert instance.adventure_progress["active_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == []
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["gate"]
 
 
 def test_item_reward_goes_through_the_injected_authority_sink(tmp_path) -> None:
@@ -391,7 +392,7 @@ def test_item_reward_goes_through_the_injected_authority_sink(tmp_path) -> None:
 
     assert result["queued_rewards"] == ["Brass Key"]
     assert queued[0]["recipient_uid"] == "gm"
-    assert instance.adventure_progress["completed_nodes"] == ["gate"]
+    assert adventure_runtime_state.progress(instance)["completed_nodes"] == ["gate"]
 
 
 def test_completing_an_unknown_or_inactive_node_fails_closed(tmp_path) -> None:
@@ -443,7 +444,7 @@ def test_time_advance_settles_the_process_and_opens_the_consequence_node(tmp_pat
 
     adventure_runtime.complete_adventure_node(deps, instance, "gate")
     # gate 未满足：后果节点不该在完成瞬间开放。
-    assert instance.adventure_progress["active_nodes"] == []
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == []
     assert world_processes(instance.world_state)["ritual"]["status"] == "running"
 
     from src.engine.world_events import advance_world_time
@@ -455,7 +456,7 @@ def test_time_advance_settles_the_process_and_opens_the_consequence_node(tmp_pat
     advanced = adventure_runtime.advance_adventure_world(deps, instance)
 
     assert advanced["activated_nodes"] == ["aftermath"]
-    assert instance.adventure_progress["active_nodes"] == ["aftermath"]
+    assert adventure_runtime_state.progress(instance)["active_nodes"] == ["aftermath"]
     adventure_runtime.complete_adventure_node(deps, instance, "aftermath")
     assert world_facts(instance.world_state)["world.ritual_resolved"]["value"] is True
     # 幂等：再次推进不会重复激活。

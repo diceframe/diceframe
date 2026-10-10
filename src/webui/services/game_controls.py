@@ -10,6 +10,7 @@ from src.engine.checks import build_check_request, roll_check_request
 from src.engine.dice import d20_critical_thresholds, roll
 from src.engine.game_instance import GameState
 from src.engine.health import mark_health_event
+from src.engine.modules import room_access, table_settings
 from src.engine.player_control import (
     PlayerControlError,
     away_control_policy,
@@ -197,7 +198,7 @@ class GameControlService:
         await self._dependencies.save_instance(instance)
         return {
             "ok": True,
-            "player_access_open": instance.player_access_open,
+            "player_access_open": room_access.player_access_open(instance),
         }
 
     def check_request_for_action(
@@ -351,7 +352,7 @@ class GameControlService:
         await self._dependencies.save_instance(instance)
         return {
             "ok": True,
-            "solo_mode": instance.solo_mode,
+            "solo_mode": table_settings.solo_mode(instance),
             "multiplayer": instance.multiplayer_status(),
         }
 
@@ -368,7 +369,7 @@ class GameControlService:
         await self._dependencies.save_instance(instance)
         return {
             "ok": True,
-            "narrative_perspective": instance.narrative_perspective,
+            "narrative_perspective": table_settings.narrative_perspective(instance),
         }
 
     async def set_gm_style(self, game_key: str, raw: Any) -> dict[str, Any]:
@@ -385,7 +386,7 @@ class GameControlService:
         await self._dependencies.save_instance(instance)
         return {
             "ok": True,
-            "gm_style_override": instance.gm_style_override,
+            "gm_style_override": table_settings.gm_style_override(instance),
         }
 
     async def mark_health_event(

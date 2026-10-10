@@ -21,7 +21,7 @@ from src.adventures.graph_v2 import (
 )
 from src.engine import progression
 from src.engine.legacy_game_projection import project_legacy_game_context
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import adventure_runtime_state, ruleset_runtime
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
 )
@@ -517,7 +517,7 @@ class Dnd2024Runtime:
         ``unprepared`` unless the GM explicitly declares a sandbox encounter.
         """
 
-        if str(getattr(instance, "play_mode", "") or "").casefold() == "free":
+        if str(adventure_runtime_state.play_mode(instance) or "").casefold() == "free":
             return EncounterAccess.sandbox()
         # FIX-04 §6.9：绑定的是 Adventure v2 → 遭遇由**v2 进度**（active 节点的
         # encounter_ref）决定，不再走 v1 tutorial step；v1 路径原样保留。
@@ -563,7 +563,7 @@ class Dnd2024Runtime:
     def _v2_encounter_access(self, instance: Any) -> EncounterAccess | None:
         """§6.9：v2 绑定时的剧情遭遇访问权；非 v2 返回 ``None``（走 v1 路径）。"""
 
-        progress = getattr(instance, "adventure_progress", None)
+        progress = adventure_runtime_state.progress(instance)
         if not isinstance(progress, dict) or not progress:
             return None
         try:

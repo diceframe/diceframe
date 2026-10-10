@@ -49,18 +49,18 @@ def test_live_properties_replacement_and_roundtrip():
     instance = GameInstance(game_key=("web", "health", "bot"))
     events = [{"id": "one"}]
     status = {"save": "error"}
-    instance.health_events = events
-    instance.health_status = status
-    assert instance.health_events is events is instance.modules["health"]["health_events"]
-    assert instance.health_status is status is instance.modules["health"]["health_status"]
-    instance.health_events.append({"id": "two"})
+    module.replace_health_events(instance, events)
+    module.replace_health_status(instance, status)
+    assert module.health_events(instance) is events is instance.modules["health"]["health_events"]
+    assert module.health_status(instance) is status is instance.modules["health"]["health_status"]
+    module.health_events(instance).append({"id": "two"})
     saved = instance.to_dict()
     assert "health_events" not in saved and "health_status" not in saved
     restored = GameInstance.from_dict(saved)
-    assert restored.health_events == events
-    assert restored.health_status == status
-    instance.health_events = []
-    instance.health_status = {}
+    assert module.health_events(restored) == events
+    assert module.health_status(restored) == status
+    module.replace_health_events(instance, [])
+    module.replace_health_status(instance, {})
     assert events and status
 
 
@@ -75,27 +75,27 @@ def test_only_encode_limits_events_without_mutating_input_or_live_alias(legacy):
         state["modules"] = {"health": {"schema_version": 1, "health_events": events, "health_status": {"llm": "warning"}}}
     before = deepcopy(state)
     instance = GameInstance.from_dict(state)
-    live = instance.health_events
+    live = module.health_events(instance)
     assert live == events  # The former decoder did not truncate.
     assert module.ensure(instance.modules["health"])["health_events"] is live
     saved = instance.to_dict()
     assert saved["modules"]["health"]["health_events"] == events[-100:]
-    assert instance.health_events is live
+    assert module.health_events(instance) is live
     assert live == events and len(live) == 105
     assert state == before
     restored = GameInstance.from_dict(saved)
-    assert restored.health_events == events[-100:]
+    assert module.health_events(restored) == events[-100:]
 
 
 def test_existing_reporting_and_resolution_update_live_slot():
     instance = GameInstance(game_key=("web", "report", "bot"))
-    events = instance.health_events
-    status = instance.health_status
+    events = module.health_events(instance)
+    status = module.health_status(instance)
     for i in range(105):
         event = record_health_event(instance, "save", str(i), "warning", "save warning")
-    assert instance.health_events is events and len(events) == 100
+    assert module.health_events(instance) is events and len(events) == 100
     assert events[0]["code"] == "5"
-    assert instance.health_status is status and status["save"] == "warning"
+    assert module.health_status(instance) is status and status["save"] == "warning"
     assert mark_health_event(instance, event["id"], resolved=True)
     assert event not in health_payload(instance)["events"]
     assert event in health_payload(instance, include_resolved=True)["events"]
@@ -108,9 +108,12 @@ def test_future_versions_fail_closed_and_opaque_slot_survives_encoding():
     before = deepcopy(slot)
     assert module.ensure(slot) is slot
     instance = GameInstance(game_key=("web", "future", "bot"), modules={"health": slot})
-    for field in ("health_events", "health_status"):
+    for read, write in (
+        (module.health_events, module.replace_health_events),
+        (module.health_status, module.replace_health_status),
+    ):
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            read(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, None)
+            write(instance, None)
     assert instance.to_dict()["modules"]["health"] == before

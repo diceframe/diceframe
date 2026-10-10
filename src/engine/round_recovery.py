@@ -136,8 +136,8 @@ def abort_round_processing_locked(instance: GameInstance) -> bool:
     legacy_combat.require_writable(instance)
     ruleset_runtime.require_writable(instance)
     restored = False
-    if instance.round_start_snapshot:
-        restore_players(instance, instance.round_start_snapshot)
+    if round_safety.round_start_snapshot(instance):
+        restore_players(instance, round_safety.round_start_snapshot(instance))
         restored = True
     combat_snapshot = combat_extension_state.round_snapshots(instance).get(
         str(progression_state.round_value(instance)),
@@ -209,8 +209,8 @@ def finish_judgment_locked(
         "state_changes": combined_state_changes,
         "check_results": [dict(item) for item in checks.last_checks(instance)],
         "round_start_snapshot": (
-            copy.deepcopy(instance.round_start_snapshot)
-            if instance.round_start_snapshot else snapshot_players(instance)
+            copy.deepcopy(round_safety.round_start_snapshot(instance))
+            if round_safety.round_start_snapshot(instance) else snapshot_players(instance)
         ),
         "combat_extension_round_start": copy.deepcopy(
             combat_extension_state.round_snapshots(instance).get(
@@ -229,13 +229,13 @@ def finish_judgment_locked(
         # 判定入口的世界真相：整轮回滚 / swipe 分支切换时一起撤销本轮
         # 写入的 world ops（与玩家、战斗扩展快照同一语义）。
         "pre_world_state": copy.deepcopy(
-            instance.round_entity_snapshot.get("world_state", instance.world_state)
+            round_safety.round_entity_snapshot(instance).get("world_state", instance.world_state)
         ),
         # FIX-07 §10 步骤 23：Adventure 进度与世界真相同属"本轮结算出来的东西"，
         # 回滚必须一起撤销（否则世界退回去了、进度还留在被丢弃的分支上）。
         "pre_adventure_progress": copy.deepcopy(
-            instance.round_entity_snapshot.get(
-                "adventure_progress", instance.adventure_progress,
+            round_safety.round_entity_snapshot(instance).get(
+                "adventure_progress", adventure_runtime_state.progress(instance),
             )
         ),
         "timestamp": datetime.now(timezone.utc).isoformat(),

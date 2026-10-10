@@ -12,7 +12,7 @@ advance_adventure_world    §6.8      逻辑时间推进后（进程 due_at 结�
 硬边界：
 
 - Adventure 定义层不写 authority：world ops 只经 ``apply_world_ops``，奖励只经
-  注入的 reward sink（既有 proposal 权威），进度只写 ``instance.adventure_progress``；
+  注入的 reward sink（既有 proposal 权威），进度只写 ``adventure_runtime_state`` 槽位；
 - **全有或全无**（§6.7）：任一环节失败 → 恢复进度与世界状态的 before-image；
 - v2 进度与 v1 campaign 并存互不迁移（§6.9/母方案 §71）：本模块只在绑定为 v2
   图上工作，v1 路径完全不变。
@@ -184,7 +184,7 @@ def complete_adventure_node(
         raise AdventureRuntimeError(f"node does not exist: {wanted!r}")
 
     adventure_runtime_state.require_writable(instance)
-    progress = getattr(instance, "adventure_progress", None)
+    progress = adventure_runtime_state.progress(instance)
     if not isinstance(progress, dict) or not progress.get("active_nodes"):
         if not isinstance(progress, dict) or not progress:
             raise AdventureRuntimeError("adventure progress is not initialized")
@@ -300,7 +300,7 @@ def advance_adventure_world(
     if graph is None:
         return {"ok": True, "advanced": False, "reason": "v1"}
     adventure_runtime_state.require_writable(instance)
-    progress = getattr(instance, "adventure_progress", None)
+    progress = adventure_runtime_state.progress(instance)
     if not isinstance(progress, dict) or not progress:
         raise AdventureRuntimeError("adventure progress is not initialized")
 

@@ -18,6 +18,7 @@ from src.migrations.instance import (
     _migrate_v17_to_v18,
     migrate_game_state_payload,
 )
+from src.engine.player_control import normalize_away_control_policy
 
 
 @pytest.mark.parametrize(("legacy", "expected"), [
@@ -70,11 +71,11 @@ def test_new_instances_have_isolated_room_policy_slots():
     first = GameInstance(game_key=("web", "first", "u"))
     second = GameInstance(game_key=("web", "second", "u"))
     assert first.modules["player_control"] == {"schema_version": 1, "away_control_policy": "pause"}
-    first.away_control_policy = "ai_takeover"
+    set_away_control_policy(first, "ai_takeover")
     assert first.modules["player_control"]["away_control_policy"] == "ai_takeover"
     assert away_control_policy(first) == "ai_takeover"
     assert away_control_policy(second) == "pause"
-    first.away_control_policy = "invalid"
+    player_control_state.set_away_control_policy_value(first, normalize_away_control_policy("invalid"))
     assert away_control_policy(first) == "pause"
 
 
@@ -97,10 +98,10 @@ def test_policy_round_trip_uses_only_the_module_slot():
     assert "away_control_policy" not in payload
     assert payload["modules"]["player_control"]["away_control_policy"] == "ai_takeover"
     restored = GameInstance.from_dict(payload)
-    assert restored.away_control_policy == "ai_takeover"
+    assert player_control_state.away_control_policy(restored) == "ai_takeover"
     assert restored.players == instance.players
-    restored.away_control_policy = "pause"
-    assert instance.away_control_policy == "ai_takeover"
+    set_away_control_policy(restored, "pause")
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
 
 
 @pytest.mark.parametrize("version", [14, 17])
@@ -110,7 +111,7 @@ def test_old_save_load_defaults_to_pause_without_taking_over_seats(version):
         "game_key": ["web", "legacy", "u"], "state": "created",
         "players": {"p": {"name": "P"}},
     })
-    assert instance.away_control_policy == "pause"
+    assert player_control_state.away_control_policy(instance) == "pause"
     assert instance.players["p"]["control"]["mode"] == "human"
 
 
@@ -131,7 +132,7 @@ def test_future_module_schema_round_trips_but_rejects_access():
     with pytest.raises(ModuleStateError):
         set_away_control_policy(restored, "pause")
     with pytest.raises(ModuleStateError):
-        restored.away_control_policy = "pause"
+        set_away_control_policy(restored, "pause")
     assert restored.modules["player_control"] == slot
 
 
@@ -143,7 +144,7 @@ def test_future_instance_schema_is_rejected():
 @pytest.mark.asyncio
 async def test_reset_preserves_room_policy():
     instance = GameInstance(game_key=("web", "reset", "u"))
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     await instance.reset()
     assert instance.modules["player_control"]["away_control_policy"] == "ai_takeover"
 
@@ -151,8 +152,8 @@ async def test_reset_preserves_room_policy():
 def test_staged_replacement_copies_policy_without_aliasing():
     instance = GameInstance(game_key=("web", "staged", "u"))
     staged = GameInstance.from_dict(instance.to_dict())
-    staged.away_control_policy = "ai_takeover"
+    set_away_control_policy(staged, "ai_takeover")
     instance.replace_persisted_state_from(staged)
-    assert instance.away_control_policy == "ai_takeover"
-    staged.away_control_policy = "pause"
-    assert instance.away_control_policy == "ai_takeover"
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
+    set_away_control_policy(staged, "pause")
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"

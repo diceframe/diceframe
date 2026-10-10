@@ -10,6 +10,7 @@ from src.engine import instance_lifecycle, round_recovery, round_snapshots, turn
 from src.engine.game_instance import GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import ruleset_runtime
+from src.engine.modules import round_safety
 from tests.test_game_instance_reset_characterization import _make_populated_instance
 from tests.test_legacy_combat_transaction_preflight import live_state
 
@@ -107,7 +108,7 @@ def test_owner_and_aggregate_entries_reject_before_mutation(operation):
 @pytest.mark.parametrize("operation", ["capture", "restore"])
 def test_entity_snapshot_entries_reject_before_npc_or_snapshot_writes(operation, direct):
     instance = unsupported_instance()
-    instance.round_entity_snapshot = {"npcs": {"different": {"hp": 1}}, "combat_enemies": []}
+    round_safety.replace_entity_snapshot(instance, {"npcs": {"different": {"hp": 1}}, "combat_enemies": []})
     before = deepcopy(live_state(instance))
     with pytest.raises(ModuleStateError, match="unsupported ruleset_runtime module schema"):
         if direct:
@@ -122,7 +123,7 @@ def test_entity_snapshot_entries_reject_before_npc_or_snapshot_writes(operation,
 async def test_existing_readonly_returns_remain_before_preflight(operation):
     instance = unsupported_instance()
     instance.state = GameState.WAITING
-    instance.round_entity_snapshot.clear()
+    round_safety.round_entity_snapshot(instance).clear()
     before = deepcopy(live_state(instance))
     if operation == "abort":
         assert await instance.abort_round_processing() is False

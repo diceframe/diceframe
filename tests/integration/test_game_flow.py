@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
 from src.lorebook.matcher import KeywordMatcher
 from src.webui.api import WebAPI
+from src.engine.modules import round_presentation
 
 
 @pytest.mark.asyncio
@@ -32,7 +34,7 @@ async def test_create_act_save_reload_keeps_state_consistent(game_env, create_tw
     assert await inst.try_advance() is True
     narration, _ = await api._handler.process_round(inst)
 
-    assert "走廊" in inst.scene
+    assert "走廊" in narrative_notes.scene(inst)
     assert inst.round_number == 2
     hp_after = inst.get_character_sheet(gm_uid)["hp"]
 
@@ -62,10 +64,10 @@ async def test_create_act_save_reload_keeps_state_consistent(game_env, create_tw
 
     assert reloaded is not None
     assert reloaded.round_number == 2
-    assert reloaded.scene == "走廊"
+    assert narrative_notes.scene(reloaded) == "走廊"
     assert reloaded.get_character_sheet(gm_uid)["hp"] == hp_after
     assert set(reloaded.players) == {gm_uid, player_uid}
-    assert reloaded.quick_actions == ["搜索", "撤退"]
+    assert round_presentation.quick_actions(reloaded) == ["搜索", "撤退"]
     assert narration  # 回合叙事真实产生
     # 重载后可以继续推进（状态机没有损坏）
     game_env["llm"].responses.append("剧情继续。\n---\nSCENE:深处")
@@ -73,5 +75,5 @@ async def test_create_act_save_reload_keeps_state_consistent(game_env, create_tw
     await reloaded.add_action(player_uid, "跟上", selected_attribute="dex")
     assert await reloaded.try_advance() is True
     await fresh_api._handler.process_round(reloaded)
-    assert reloaded.scene == "深处"
+    assert narrative_notes.scene(reloaded) == "深处"
     assert reloaded.round_number == 3

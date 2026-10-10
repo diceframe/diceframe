@@ -83,24 +83,25 @@ def replace_last_activity(instance: Any, value: str) -> None:
 
 
 def touch(instance: Any, at: str | None = None) -> None:
-    instance.last_activity = datetime.now(timezone.utc).isoformat() if at is None else at
+    replace_last_activity(instance, datetime.now(timezone.utc).isoformat() if at is None else at)
 
 
 def mark_started(instance: Any) -> None:
-    if not instance.started_at:
-        instance.started_at = datetime.now(timezone.utc).isoformat()
+    if not started_at(instance):
+        replace_started_at(instance, datetime.now(timezone.utc).isoformat())
 
 
 def record_llm_usage(instance: Any, tokens: int = 0, *, calls: int = 1) -> None:
-    instance.total_tokens += max(0, int(tokens or 0))
-    instance.total_llm_calls += max(0, int(calls or 0))
+    state = get_module_state(instance, MODULE_NAME)
+    state["total_tokens"] += max(0, int(tokens or 0))
+    state["total_llm_calls"] += max(0, int(calls or 0))
 
 
 def reset(instance: Any) -> None:
-    instance.total_llm_calls = 0
-    instance.total_tokens = 0
-    instance.started_at = ""
-    instance.last_activity = ""
+    replace_total_llm_calls(instance, 0)
+    replace_total_tokens(instance, 0)
+    replace_started_at(instance, "")
+    replace_last_activity(instance, "")
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

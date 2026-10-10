@@ -19,6 +19,13 @@ VALUES = {
     "round_entity_snapshot": {"npcs": {"guard": {"hp": 20}}, "opaque": [None, 1]},
     "death_save_outcomes": {"3": {"u1": {"roll": 12}}, "4": {"u1": {"roll": 20}}},
 }
+# GameInstance facades are retired; the module API is the only access path.
+READ = {key: getattr(module, key) for key in VALUES}
+WRITE = {
+    "round_start_snapshot": module.capture_players,
+    "round_entity_snapshot": module.replace_entity_snapshot,
+    "death_save_outcomes": module.replace_death_save_outcomes,
+}
 
 
 def new_instance(**kwargs):
@@ -28,7 +35,7 @@ def new_instance(**kwargs):
 def populated_instance():
     instance = new_instance()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        WRITE[key](instance, value)
     return instance
 
 
@@ -102,16 +109,16 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     before = deepcopy(instance.modules)
     for key, value in VALUES.items():
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            READ[key](instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, value)
+            WRITE[key](instance, value)
     assert instance.modules == before
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == raw
     assert GameInstance.from_dict(encoded).modules[module.MODULE_NAME] == raw
 
 
-def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
+def test_module_api_uses_live_slot_and_roundtrip_has_one_storage_owner():
     instance = populated_instance()
     other = new_instance()
     slot = instance.modules[module.MODULE_NAME]
@@ -119,11 +126,11 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
     assert not VALUES.keys() & {item.name for item in fields(instance)}
     assert not VALUES.keys() & vars(instance).keys()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        WRITE[key](instance, value)
         assert slot[key] is value
-        assert getattr(instance, key) is slot[key]
-        assert getattr(instance, key) is not getattr(other, key)
-    instance.round_start_snapshot["u1"]["inventory"].append("sword")
+        assert READ[key](instance) is slot[key]
+        assert READ[key](instance) is not READ[key](other)
+    module.round_start_snapshot(instance)["u1"]["inventory"].append("sword")
     encoded = instance.to_dict()
     assert not VALUES.keys() & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
@@ -138,20 +145,20 @@ def test_capture_replaces_snapshots_without_copying():
     entities = {"npcs": {"guard": {"hp": 10}}}
     module.capture_players(instance, players)
     module.replace_entity_snapshot(instance, entities)
-    assert instance.round_start_snapshot is players
+    assert module.round_start_snapshot(instance) is players
     assert instance.modules[module.MODULE_NAME]["round_start_snapshot"] is players
-    assert instance.round_entity_snapshot is entities
+    assert module.round_entity_snapshot(instance) is entities
     assert instance.modules[module.MODULE_NAME]["round_entity_snapshot"] is entities
 
 
 def test_clear_snapshots_keeps_cache_and_preserves_snapshot_identity():
     instance = populated_instance()
-    objects = {key: getattr(instance, key) for key in VALUES}
+    objects = {key: READ[key](instance) for key in VALUES}
     module.clear_snapshots(instance)
-    assert instance.round_start_snapshot == {}
-    assert instance.round_entity_snapshot == {}
-    assert instance.death_save_outcomes == VALUES["death_save_outcomes"]
-    assert all(getattr(instance, key) is value for key, value in objects.items())
+    assert module.round_start_snapshot(instance) == {}
+    assert module.round_entity_snapshot(instance) == {}
+    assert module.death_save_outcomes(instance) == VALUES["death_save_outcomes"]
+    assert all(READ[key](instance) is value for key, value in objects.items())
 
 
 def test_discard_round_clears_all_three_in_original_order():
@@ -169,33 +176,33 @@ def test_discard_round_clears_all_three_in_original_order():
 
     objects = {key: TracedDict(key, value) for key, value in VALUES.items()}
     for key, value in objects.items():
-        setattr(instance, key, value)
+        WRITE[key](instance, value)
     module.discard_round(instance)
     assert cleared == ["death_save_outcomes", "round_start_snapshot", "round_entity_snapshot"]
     assert instance.modules[module.MODULE_NAME] == module.fresh()
-    assert all(getattr(instance, key) is value for key, value in objects.items())
+    assert all(READ[key](instance) is value for key, value in objects.items())
 
 
 @pytest.mark.parametrize("round_key", ["4", "5"])
 def test_keep_death_saves_replaces_outer_dict_but_reuses_current_cache(round_key):
     instance = populated_instance()
-    previous = instance.death_save_outcomes
+    previous = module.death_save_outcomes(instance)
     cache = previous.get(round_key, {})
     module.keep_death_saves_for(instance, round_key)
-    assert instance.death_save_outcomes == {round_key: cache}
-    assert instance.death_save_outcomes is not previous
+    assert module.death_save_outcomes(instance) == {round_key: cache}
+    assert module.death_save_outcomes(instance) is not previous
     if round_key in previous:
-        assert instance.death_save_outcomes[round_key] is previous[round_key]
+        assert module.death_save_outcomes(instance)[round_key] is previous[round_key]
     assert previous == VALUES["death_save_outcomes"]
 
 
 def test_death_save_cache_returns_same_live_object_for_existing_and_new_rounds():
     instance = populated_instance()
-    old = instance.death_save_outcomes["4"]
+    old = module.death_save_outcomes(instance)["4"]
     assert module.death_save_cache(instance, "4") is old
     new = module.death_save_cache(instance, "5")
     assert new is module.death_save_cache(instance, "5")
-    assert new is instance.death_save_outcomes["5"]
+    assert new is module.death_save_outcomes(instance)["5"]
     new["u2"] = {"roll": 10}
     assert instance.modules[module.MODULE_NAME]["death_save_outcomes"]["5"]["u2"]["roll"] == 10
 
@@ -203,10 +210,10 @@ def test_death_save_cache_returns_same_live_object_for_existing_and_new_rounds()
 @pytest.mark.asyncio
 async def test_reset_preserves_death_save_outcomes_implicitly():
     instance = populated_instance()
-    cache = instance.death_save_outcomes
+    cache = module.death_save_outcomes(instance)
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] == {**module.fresh(), "death_save_outcomes": cache}
-    assert instance.death_save_outcomes is cache
+    assert module.death_save_outcomes(instance) is cache
     assert cache == VALUES["death_save_outcomes"]
 
 
@@ -217,4 +224,4 @@ def test_log_entry_snapshot_shape_stays_independent_of_instance_slot():
     assert encoded["log"][0]["round_start_snapshot"] == {"u1": {"hp": 7}}
     restored = GameInstance.from_dict(deepcopy(encoded))
     assert restored.log == instance.log
-    assert restored.round_start_snapshot == VALUES["round_start_snapshot"]
+    assert module.round_start_snapshot(restored) == VALUES["round_start_snapshot"]

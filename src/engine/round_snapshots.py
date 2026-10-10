@@ -378,16 +378,17 @@ def capture_round_entity_snapshot(instance: GameInstance) -> None:
         # FIX-07 §10 步骤 23：Adventure 进度与世界真相由同一次权威事务写入
         # （FIX-04 §6.7），所以"本轮改过的东西"必须包含它——否则回滚会把世界
         # 退回去、把进度留在被丢弃的分支上。
-        "adventure_progress": copy.deepcopy(instance.adventure_progress),
+        "adventure_progress": copy.deepcopy(adventure_runtime_state.progress(instance)),
     })
 
 
 def restore_round_entity_snapshot(instance: GameInstance) -> bool:
     """还原判定入口的旧版实体快照；没有快照时返回 False（不动状态）。"""
-    snapshot = instance.round_entity_snapshot
+    from src.engine.modules import adventure_runtime_state, legacy_combat, round_safety, ruleset_runtime
+
+    snapshot = round_safety.round_entity_snapshot(instance)
     if not isinstance(snapshot, dict) or not snapshot:
         return False
-    from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
 
     adventure_runtime_state.require_writable(instance)
     legacy_combat.require_writable(instance)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state
+from src.engine.modules import progression_state, table_settings
 
 logger = logging.getLogger("trpg")
 
@@ -23,7 +23,7 @@ class NpcStateApplier:
             else:
                 # D10: NPC 默认战斗属性（按 tier 和难度推断，避免一击必杀）
                 tier = nud.get("tier", nud.get("relation", "neutral"))
-                diff = instance.difficulty
+                diff = table_settings.difficulty(instance)
                 base_hp = {"friendly": 15, "neutral": 20, "hostile": 30, "boss": 60}.get(tier, 20)
                 if diff == "硬核":
                     base_hp = int(base_hp * 1.3)

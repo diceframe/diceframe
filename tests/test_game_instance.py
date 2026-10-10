@@ -9,7 +9,7 @@ from src.engine.character_utils import reset_character_for_restart
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.health import health_payload, mark_health_event, record_health_event
 from src.commands.progression_resolver import ProgressionResolver
-from src.engine.modules import checks, economy_state, ruleset_runtime
+from src.engine.modules import checks, economy_state, health as health_state, media, private_channels, round_presentation, round_safety, ruleset_runtime, session_stats, table_settings
 
 
 def test_round_entity_snapshot_round_trips_and_defaults_empty() -> None:
@@ -20,8 +20,8 @@ def test_round_entity_snapshot_round_trips_and_defaults_empty() -> None:
     instance.capture_round_entity_snapshot()
 
     restored = GameInstance.from_dict(instance.to_dict())
-    assert restored.round_entity_snapshot["npcs"]["goblin"]["hp"] == 12
-    assert restored.round_entity_snapshot["combat_state"] == "active"
+    assert round_safety.round_entity_snapshot(restored)["npcs"]["goblin"]["hp"] == 12
+    assert round_safety.round_entity_snapshot(restored)["combat_state"] == "active"
 
     legacy = instance.to_dict()
     # Drop the key from wherever it is stored (top level before R8-c2).
@@ -29,7 +29,7 @@ def test_round_entity_snapshot_round_trips_and_defaults_empty() -> None:
     safety = (legacy.get("modules") or {}).get("round_safety")
     if isinstance(safety, dict):
         safety.pop("round_entity_snapshot", None)
-    assert GameInstance.from_dict(legacy).round_entity_snapshot == {}
+    assert round_safety.round_entity_snapshot(GameInstance.from_dict(legacy)) == {}
 
 
 def test_versioned_ruleset_state_is_optional_and_round_trips() -> None:
@@ -99,7 +99,7 @@ def test_persisted_boundary_preserves_opaque_state_and_filters_transient_entries
     assert ruleset_runtime.state(restored) == payload["ruleset_state"]
     assert restored.adventure_binding == payload["adventure_binding"]
     assert ruleset_runtime.event_ledger(restored) == payload["event_ledger"]
-    assert [item["id"] for item in restored.table_talk] == ["party"]
+    assert [item["id"] for item in private_channels.table_talk(restored)] == ["party"]
 
 
 def test_narrative_perspective_round_trips_and_old_saves_default_to_auto() -> None:
@@ -111,8 +111,8 @@ def test_narrative_perspective_round_trips_and_old_saves_default_to_auto() -> No
     settings = (legacy_data.get("modules") or {}).get("table_settings")
     (settings if isinstance(settings, dict) and "narrative_perspective" in settings else legacy_data).pop("narrative_perspective")
 
-    assert restored.narrative_perspective == "third_person"
-    assert GameInstance.from_dict(legacy_data).narrative_perspective == "auto"
+    assert table_settings.narrative_perspective(restored) == "third_person"
+    assert table_settings.narrative_perspective(GameInstance.from_dict(legacy_data)) == "auto"
     with pytest.raises(ValueError, match="叙事视角"):
         instance.set_narrative_perspective("角色名")
 
@@ -131,7 +131,7 @@ async def test_abort_round_processing_restores_action_phase_without_touching_que
 
     # 模拟判定入口到叙事失败之间的状态变更：扣血、死亡豁免、检定/幸运、骰值。
     instance.get_character_sheet("p1")["hp"] = 7
-    instance.death_save_outcomes[str(instance.round_number)] = {"p1": "fail"}
+    round_safety.death_save_outcomes(instance)[str(instance.round_number)] = {"p1": "fail"}
     instance.record_check({"check_id": "check-1", "luck_decision": "pending"})
     instance.complete_round_check_preparation()
     luck_timer = asyncio.create_task(asyncio.sleep(30))
@@ -145,8 +145,8 @@ async def test_abort_round_processing_restores_action_phase_without_touching_que
     assert checks.last_checks(instance) == []
     assert checks.last_check(instance) is None
     assert checks.round_checks_prepared(instance) is False
-    assert instance.death_save_outcomes == {}
-    assert instance.round_start_snapshot == {}
+    assert round_safety.death_save_outcomes(instance) == {}
+    assert round_safety.round_start_snapshot(instance) == {}
     assert instance._luck_timers == {}
     await asyncio.sleep(0)  # 让取消请求在事件循环中落地
     assert luck_timer.cancelled()
@@ -184,7 +184,7 @@ async def test_abort_restores_entities_and_drops_all_combat_caches() -> None:
     assert await instance.add_action("p1", "攻击哥布林")
     assert await instance.advance_round()
     assert instance.state == GameState.ACTIVE_JUDGMENT
-    assert instance.round_entity_snapshot["npcs"]["goblin"]["hp"] == 30
+    assert round_safety.round_entity_snapshot(instance)["npcs"]["goblin"]["hp"] == 30
 
     # 判定期间：p2 被打到 25（旧版 CombatResolver 用裸 uid 表示玩家目标），
     # 哥布林被打到 12。
@@ -218,7 +218,7 @@ async def test_abort_restores_entities_and_drops_all_combat_caches() -> None:
     assert instance.npcs["goblin"]["hp"] == 30
     assert "combat_outcome" not in instance.action_queue[0]
     assert "combat_outcome" not in instance.action_queue[1]
-    assert instance.round_entity_snapshot == {}
+    assert round_safety.round_entity_snapshot(instance) == {}
     # 骰值仍然保留，重试结果稳定。
     assert instance.action_queue[0]["dice_value"] == 15
     assert instance.action_queue[1]["dice_value"] == 18
@@ -245,7 +245,7 @@ async def test_abort_without_entity_snapshot_keeps_unverifiable_combat_cache() -
     instance.npcs = {"goblin": {"name": "哥布林", "hp": 12, "max_hp": 30}}
     assert await instance.add_action("p1", "攻击哥布林")
     assert await instance.advance_round()
-    instance.round_entity_snapshot.clear()  # 模拟改动前落盘的旧存档
+    round_safety.round_entity_snapshot(instance).clear()  # 模拟改动前落盘的旧存档
 
     instance.get_character_sheet("p2")["hp"] = 25
     instance.action_queue[0]["combat_outcome"] = {
@@ -341,7 +341,7 @@ class TestGameInstance:
         inst = GameInstance(game_key=("qq", "123", "bot1"))
         await inst.activate()
         assert inst.state == GameState.ACTIVE_ACTION
-        assert inst.started_at != ""
+        assert session_stats.started_at(inst) != ""
 
     async def test_start_round(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
@@ -373,7 +373,7 @@ class TestGameInstance:
 
     async def test_multiplayer_action_revision_replaces_previous_action(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        inst.solo_mode = False
+        table_settings.replace_solo_mode(inst, False)
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "先观察门口\n(系统掷骰: d20=17)")
         await inst.add_action("user1", "改为检查窗户\n(系统掷骰: d20=2)")
@@ -384,7 +384,7 @@ class TestGameInstance:
 
     async def test_pending_dice_blocks_advance_until_roll_is_applied(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        inst.solo_mode = False
+        table_settings.replace_solo_mode(inst, False)
         inst.players["user1"] = {"character_name": "艾琳", "character_sheet": {"deceased": False}}
         inst.state = GameState.ACTIVE_ACTION
 
@@ -406,7 +406,7 @@ class TestGameInstance:
     async def test_solo_action_replaces_previous(self):
         # 切换行动应替换旧行动，而不是追加堆积（避免触发 3 条上限、旧检定残留）
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        inst.solo_mode = True
+        table_settings.replace_solo_mode(inst, True)
         inst.state = GameState.ACTIVE_ACTION
         await inst.add_action("user1", "第一步")
         await inst.add_action("user1", "第二步")
@@ -416,7 +416,7 @@ class TestGameInstance:
     async def test_solo_action_replaces_old_pending_dice(self):
         # 回归：solo 反复切换待掷骰行动，应只保留最新一条，且旧检定作废
         inst = GameInstance(game_key=("qq", "123", "bot1"))
-        inst.solo_mode = True
+        table_settings.replace_solo_mode(inst, True)
         inst.state = GameState.ACTIVE_ACTION
         inst.players["user1"] = {"character_name": "冒险者"}
         for i in range(5):
@@ -455,19 +455,19 @@ class TestGameInstance:
         await inst.finish_judgment("门被踹开了")
         assert inst.state == GameState.ACTIVE_ACTION
         assert inst.round_number == 2
-        assert inst.total_llm_calls == 1
+        assert session_stats.total_llm_calls(inst) == 1
 
     async def test_serialization_roundtrip(self):
         inst = GameInstance(game_key=("qq", "123", "bot1"))
         inst.players["u1"] = {"character_name": "剑士"}
         inst.round_number = 5
-        inst.quick_actions = ["调查脚印", "询问守卫"]
+        round_presentation.replace_quick_actions(inst, ["调查脚印", "询问守卫"])
         data = inst.to_dict()
         restored = GameInstance.from_dict(data)
         assert restored.game_key == inst.game_key
         assert restored.round_number == 5
         assert restored.players["u1"]["character_name"] == "剑士"
-        assert restored.quick_actions == ["调查脚印", "询问守卫"]
+        assert round_presentation.quick_actions(restored) == ["调查脚印", "询问守卫"]
 
     async def test_from_dict_prunes_unreferenced_ghost_players(self):
         data = {
@@ -928,7 +928,7 @@ class TestGameRegistry:
         assert imported_payloads == [b"portable-scene"]
         registry = GameRegistry(tmp_path / "saves")
         restored = await registry.load(tuple(result["game_key"]))
-        assert restored.scene_image == {"kind": "upload", "asset_id": "local-scene"}
+        assert media.scene_image(restored) == {"kind": "upload", "asset_id": "local-scene"}
 
     @pytest.mark.asyncio
     async def test_import_save_zip_materializes_portable_map_background(self, tmp_path):
@@ -960,7 +960,7 @@ class TestGameRegistry:
         restored = GameRegistry(tmp_path / "saves")
         instance = await restored.load(tuple(result["game_key"]))
         assert instance is not None
-        assert instance.map_background == {"kind": "upload", "asset_id": "local-map"}
+        assert media.map_background(instance) == {"kind": "upload", "asset_id": "local-map"}
 
     async def test_import_save_zip_rejects_missing_state(self, tmp_path):
         """存档包缺 state.json 报错。"""
@@ -1048,9 +1048,9 @@ def test_health_events_trim_to_limit():
     for idx in range(105):
         record_health_event(inst, "save", f"E{idx}", "info", f"event {idx}")
 
-    assert len(inst.health_events) == 100
-    assert inst.health_events[0]["code"] == "E5"
-    assert inst.health_events[-1]["code"] == "E104"
+    assert len(health_state.health_events(inst)) == 100
+    assert health_state.health_events(inst)[0]["code"] == "E5"
+    assert health_state.health_events(inst)[-1]["code"] == "E104"
 
 
 def test_reset_character_for_restart_preserves_zero_gold():
@@ -1373,7 +1373,7 @@ async def test_luck_timeout_schedules_and_resumes_round():
 
     inst = GameInstance(("web", "luck_timer", "bot"), state=GameState.ACTIVE_JUDGMENT)
     checks.replace_round_checks_prepared(inst, True)
-    inst.luck_timeout_seconds = 1
+    table_settings.replace_luck_timeout_seconds(inst, 1)
     checks.replace_last_checks(inst, [{"check_id": "a", "actor_uid": "p1", "luck_decision": "pending"}])
 
     class FakeRegistry:
@@ -1418,7 +1418,7 @@ async def test_luck_timeout_disabled_when_zero():
 
     inst = GameInstance(("web", "luck_disabled", "bot"), state=GameState.ACTIVE_JUDGMENT)
     checks.replace_round_checks_prepared(inst, True)
-    inst.luck_timeout_seconds = 0
+    table_settings.replace_luck_timeout_seconds(inst, 0)
     checks.replace_last_checks(inst, [{"check_id": "a", "actor_uid": "p1", "luck_decision": "pending"}])
 
     class FakeRegistry:
@@ -1442,11 +1442,11 @@ async def test_finished_round_keeps_an_independent_start_snapshot_for_rollback()
         "character_name": "调查员",
         "character_sheet": {"luck": 28},
     }
-    inst.round_start_snapshot = {"p1": {"luck": 30}}
+    round_safety.capture_players(inst, {"p1": {"luck": 30}})
 
     await inst.finish_judgment("本轮结束")
 
-    assert inst.round_start_snapshot == {}
+    assert round_safety.round_start_snapshot(inst) == {}
     assert inst.log[-1]["round_start_snapshot"]["p1"]["luck"] == 30
 
 
@@ -1455,23 +1455,23 @@ async def test_configure_session_luck_timeout_validation():
     """P1-D：configure_session 校验幸运超时范围并落字段。"""
     inst = GameInstance(("web", "luck_cfg", "bot"))
     inst.configure_session(luck_timeout_seconds=120)
-    assert inst.luck_timeout_seconds == 120
+    assert table_settings.luck_timeout_seconds(inst) == 120
     inst.configure_session(luck_timeout_seconds=0)
-    assert inst.luck_timeout_seconds == 0
+    assert table_settings.luck_timeout_seconds(inst) == 0
     with pytest.raises(ValueError):
         inst.configure_session(luck_timeout_seconds=9999)
     with pytest.raises(ValueError):
         inst.configure_session(luck_timeout_seconds=-1)
     # 不传则不改变已有值
     inst.configure_session()
-    assert inst.luck_timeout_seconds == 0
+    assert table_settings.luck_timeout_seconds(inst) == 0
 
 
 def test_hardcore_blocks_revive():
     """P2-O：硬核难度禁止复活，角色保持死亡。"""
     from src.commands.round_effects import apply_revive_commands
     inst = GameInstance(("web", "revive_hard", "bot"))
-    inst.difficulty = "硬核"
+    table_settings.replace_difficulty(inst, "硬核")
     inst.players["p1"] = {"character_name": "勇者", "character_sheet": {"hp": 0, "deceased": True, "max_hp": 50}}
     apply_revive_commands(inst, {"revive_commands": [{"uid": "p1", "method": "法术"}]})
     assert inst.players["p1"]["character_sheet"]["deceased"] is True
@@ -1481,7 +1481,7 @@ def test_normal_allows_revive():
     """P2-O：标准难度可正常复活。"""
     from src.commands.round_effects import apply_revive_commands
     inst = GameInstance(("web", "revive_ok", "bot"))
-    inst.difficulty = "标准"
+    table_settings.replace_difficulty(inst, "标准")
     inst.players["p1"] = {"character_name": "勇者", "character_sheet": {"hp": 0, "deceased": True, "max_hp": 50}}
     apply_revive_commands(inst, {"revive_commands": [{"uid": "p1", "method": "法术"}]})
     cs = inst.players["p1"]["character_sheet"]

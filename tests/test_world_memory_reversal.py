@@ -25,7 +25,7 @@ from src.engine.memory_outbox import (
     pending_memory_deliveries,
     pending_memory_reversals,
 )
-from src.engine.modules import economy_state
+from src.engine.modules import economy_state, table_settings
 from src.engine.world.memory_projection import queue_world_memory
 from src.engine.world_state import apply_world_ops, fact_value
 from src.memory.delta import MemoryStore
@@ -63,7 +63,7 @@ def _drain_into_store(instance: GameInstance, store: MemoryStore) -> None:
 
 def test_rollback_supersedes_pending_and_reverses_delivered_world_memory(tmp_path) -> None:
     instance = make_instance()
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.players["p1"] = {"character_name": "Alice", "character_sheet": {"hp": 10}}
     store = MemoryStore(tmp_path / "memory.db")
     store.open()

@@ -19,6 +19,7 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.engine.modules import narrative_notes, progression_state
 from src.engine.modules.lorebook_runtime import normalize_timers as _normalize_lorebook_timed_state
 from src.lorebook.activation import (
     advance_timed_state,
@@ -29,6 +30,7 @@ from src.lorebook.activation import (
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.retrieval import LoreRetriever
 from src.lorebook.store import LorebookStore, normalize_vector_activation
+from src.engine.modules import lorebook_runtime
 
 # ---- 测试替身 ---------------------------------------------------------------
 
@@ -60,9 +62,12 @@ def _store(tmp_path: Path, entries: list[dict], *, book_settings: dict | None = 
 
 def _instance(store: LorebookStore, timed_state: dict | None = None, *, round_number: int = 0):
     return SimpleNamespace(
-        world_id="w", language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=round_number,
-        lorebook_timed_state=timed_state if timed_state is not None else {},
+        world_id="w", language="zh-CN", npcs={}, players={}, world_state={},
+        modules={
+            "narrative_notes": narrative_notes.fresh(),
+            "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": timed_state if timed_state is not None else {}},
+            "progression": {**progression_state.fresh(), "round": round_number},
+        },
         lorebook_store=store, action_actor_uids=[],
     )
 

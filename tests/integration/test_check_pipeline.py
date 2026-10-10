@@ -8,6 +8,7 @@ LLM 是脚本替身；骰子与结算管线真实执行。核心断言：骰值�
 from __future__ import annotations
 
 import pytest
+from src.engine.modules import narrative_notes
 from src.engine.modules import checks as checks_module
 
 
@@ -40,4 +41,4 @@ async def test_player_action_flows_through_server_side_check_pipeline(
     assert check["verdict"] in VALID_D20_VERDICTS
     # 回合推进与公开叙事正常产生
     assert inst.round_number == 2
-    assert inst.scene == "大厅"
+    assert narrative_notes.scene(inst) == "大厅"

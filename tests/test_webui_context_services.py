@@ -7,6 +7,7 @@ from src.engine.game_instance import GameInstance
 from src.webui.services.asr import AsrDependencies, WebAsrService
 from src.webui.services.knowledge import LorePreviewDependencies, LorePreviewService
 from src.webui.services.kp_questions import KPQuestionDependencies, KPQuestionService
+from src.engine.modules import private_channels
 
 
 class FakeRegistry:
@@ -116,4 +117,4 @@ async def test_party_kp_question_persists_only_the_public_exchange():
     assert private["payload"]["exchange"] is None
     assert registry.saved == 1
     assert party["payload"]["exchange"]["question"] == "public?"
-    assert instance.table_talk[-1]["visibility"] == "party"
+    assert private_channels.table_talk(instance)[-1]["visibility"] == "party"

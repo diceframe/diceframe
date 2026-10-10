@@ -16,6 +16,7 @@ from src.engine.game_instance import GameInstance
 from src.engine.checks import build_check_request, resolve_check_request, roll_check_request
 from src.rules.rule_system import RuleSystem
 from src.engine.modules import checks
+from src.engine.modules import round_presentation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,7 +99,7 @@ def test_magic_research_does_not_attack_first_player() -> None:
 
     assert text == ""
     assert instance.get_character_sheet("a")["hp"] == 14
-    assert instance.pending_combat_results == []
+    assert round_presentation.pending_combat_results(instance) == []
 
 
 def test_only_named_attacker_hits_named_target() -> None:
@@ -133,9 +134,9 @@ def test_only_named_attacker_hits_named_target() -> None:
     text = CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
     assert "星墨持法杖攻击冒险者" in text
-    assert len(instance.pending_combat_results) == 1
-    assert instance.pending_combat_results[0]["attacker"] == "星墨"
-    assert instance.pending_combat_results[0]["target"] == "冒险者"
+    assert len(round_presentation.pending_combat_results(instance)) == 1
+    assert round_presentation.pending_combat_results(instance)[0]["attacker"] == "星墨"
+    assert round_presentation.pending_combat_results(instance)[0]["target"] == "冒险者"
 
 
 def test_dnd_level_up_uses_active_rule_and_class_hit_die() -> None:

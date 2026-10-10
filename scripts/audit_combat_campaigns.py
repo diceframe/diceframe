@@ -18,6 +18,7 @@ from src.commands.combat_resolver import CombatResolver  # noqa: E402
 from src.engine.checks import resolve_check_request  # noqa: E402
 from src.engine.game_instance import GameInstance  # noqa: E402
 from src.engine.modules import checks as checks_module  # noqa: E402
+from src.engine.modules import round_presentation  # noqa: E402
 from src.rules.rule_system import RuleSystem  # noqa: E402
 
 
@@ -154,16 +155,16 @@ def _audit_round(round_index: int, *, percentile: bool, players: int) -> dict[st
     finally:
         dice_rng.random.randint = original_randint
 
-    if len(instance.pending_combat_results) != players:
+    if len(round_presentation.pending_combat_results(instance)) != players:
         raise AssertionError(
             f"round={round_index}: expected {players} combat records, "
-            f"got {len(instance.pending_combat_results)}"
+            f"got {len(round_presentation.pending_combat_results(instance))}"
         )
 
     damage_by_target: dict[str, int] = defaultdict(int)
     running_hp = {f"npc:{target_id}": hp for target_id, hp in before.items()}
     total_damage = 0
-    for index, record in enumerate(instance.pending_combat_results):
+    for index, record in enumerate(round_presentation.pending_combat_results(instance)):
         uid = f"p{index + 1}"
         target_ref = f"npc:target-{index % 3}"
         check_id = f"r{round_index}-{uid}"

@@ -12,6 +12,7 @@ from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.rulesets.builtin import default_adventure_runtime_requirement
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services import adventures
+from src.engine.modules import adventure_runtime_state
 
 
 def _dependencies(tmp_path: Path) -> tuple[adventures.AdventureDependencies, AdventureBundleLoader]:
@@ -69,7 +70,9 @@ def test_player_game_projection_never_exposes_bound_v2_secrets(tmp_path: Path) -
     bundle = loader.resolve("core:lanterns_of_greymoor", "zh-CN")
     instance = SimpleNamespace(
         adventure_binding=bundle.binding("greymoor"), language="zh-CN", world_id="greymoor",
-        adventure_progress={"active_nodes": ["gate", "ritual"]},
+        modules={"adventure_runtime": {
+            **adventure_runtime_state.fresh(), "progress": {"active_nodes": ["gate", "ritual"]},
+        }},
     )
 
     player = adventures.game_adventure_projection(
@@ -91,7 +94,9 @@ def test_gm_game_projection_receives_complete_bound_v2_graph(tmp_path: Path) -> 
     bundle = loader.resolve("core:lanterns_of_greymoor", "zh-CN")
     instance = SimpleNamespace(
         adventure_binding=bundle.binding("greymoor"), language="zh-CN", world_id="greymoor",
-        adventure_progress={"active_nodes": ["gate", "ritual"]},
+        modules={"adventure_runtime": {
+            **adventure_runtime_state.fresh(), "progress": {"active_nodes": ["gate", "ritual"]},
+        }},
     )
 
     gm = adventures.game_adventure_projection(dependencies, instance, viewer_is_gm=True)

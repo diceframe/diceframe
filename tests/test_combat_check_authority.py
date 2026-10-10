@@ -20,6 +20,8 @@ from src.engine.combat import calculate_attack_damage, resolve_attack
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.rules.rule_system import RuleSystem
 from src.engine.modules import checks as checks_module
+from src.engine.modules import round_presentation
+from src.engine.modules import round_safety
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -222,7 +224,7 @@ def test_failed_or_fumbled_authoritative_attack_never_deals_damage(
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
     assert instance.npcs["goblin"]["hp"] == 30
-    assert instance.pending_combat_results[0]["damage"] == 0
+    assert round_presentation.pending_combat_results(instance)[0]["damage"] == 0
 
 
 def test_coc_attack_uses_real_character_skill_threshold_not_fixed_fifty() -> None:
@@ -259,7 +261,7 @@ def test_coc_attack_uses_real_character_skill_threshold_not_fixed_fifty() -> Non
     CombatResolver().resolve_combat(instance, "ignored", "lethal_narrative")
 
     assert instance.npcs["cultist"]["hp"] < 20
-    assert instance.pending_combat_results[0]["check_id"] == "coc-shot"
+    assert round_presentation.pending_combat_results(instance)[0]["check_id"] == "coc-shot"
 
 
 def test_critical_changes_damage_without_any_hit_rng(monkeypatch) -> None:
@@ -327,7 +329,7 @@ def test_multiplayer_different_targets_and_check_ids_never_cross() -> None:
 
     text = CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
-    records = {item["attacker_uid"]: item for item in instance.pending_combat_results}
+    records = {item["attacker_uid"]: item for item in round_presentation.pending_combat_results(instance)}
     assert {uid: records[uid]["check_id"] for uid in records} == {
         "a": "check-a",
         "b": "check-b",
@@ -356,7 +358,7 @@ def test_actor_cannot_consume_another_players_check_id() -> None:
 
     assert CombatResolver().resolve_combat(instance, "ignored", "hp_based") == ""
     assert instance.npcs["goblin"]["hp"] == 30
-    assert instance.pending_combat_results == []
+    assert round_presentation.pending_combat_results(instance) == []
 
 
 def test_friendly_fire_reduction_is_applied_before_real_hp_mutation() -> None:
@@ -374,7 +376,7 @@ def test_friendly_fire_reduction_is_applied_before_real_hp_mutation() -> None:
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
-    record = instance.pending_combat_results[0]
+    record = round_presentation.pending_combat_results(instance)[0]
     target_hp = instance.get_character_sheet("b")["hp"]
     assert record["damage"] == 5
     assert record["target_hp_before"] - record["target_hp_after"] == record["damage"]
@@ -397,7 +399,7 @@ def test_repeated_resolution_reuses_outcome_without_rng_or_second_hp_mutation(mo
 
     assert first_text == second_text
     assert instance.npcs["goblin"]["hp"] == hp_after_first
-    assert len(instance.pending_combat_results) == 1
+    assert len(round_presentation.pending_combat_results(instance)) == 1
     assert instance.action_queue[0]["combat_outcome"]["target_hp_after"] == hp_after_first
     assert "combat_outcome" not in check
 
@@ -422,7 +424,7 @@ async def test_retry_after_abort_reapplies_damage_consistently() -> None:
 
     # 判定入口：快照 + 第一次结算（伤害生效并写入 combat_outcome）。
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.round_start_snapshot = _snapshot_players(instance)
+    round_safety.capture_players(instance, _snapshot_players(instance))
     check = _result("attack-a", "a", "b", roll=12)
     checks_module.replace_last_checks(instance, [check])
     resolver.resolve_combat(instance, "ignored", "hp_based")
@@ -469,7 +471,7 @@ async def test_abort_restores_npc_damage_so_revised_target_retry_is_clean() -> N
     resolver = CombatResolver()
     instance.state = GameState.ACTIVE_JUDGMENT
     instance.capture_round_entity_snapshot()
-    instance.round_start_snapshot = _snapshot_players(instance)
+    round_safety.capture_players(instance, _snapshot_players(instance))
     checks_module.replace_last_checks(instance, [_result("attack-a", "a", "npc:goblin", roll=12)])
 
     resolver.resolve_combat(instance, "ignored", "hp_based")
@@ -622,7 +624,7 @@ def test_coc_attack_thresholds_remain_character_owned_for_multiple_players() -> 
 
     CombatResolver().resolve_combat(instance, "ignored", "lethal_narrative")
 
-    by_actor = {item["attacker_uid"]: item for item in instance.pending_combat_results}
+    by_actor = {item["attacker_uid"]: item for item in round_presentation.pending_combat_results(instance)}
     assert checks[0]["threshold"] == 75 and checks[0]["verdict"] == "普通成功"
     assert checks[1]["threshold"] == 30 and checks[1]["verdict"] == "失败"
     assert by_actor["a"]["damage"] > 0
@@ -671,7 +673,7 @@ def test_two_attackers_apply_damage_to_one_target_in_real_order() -> None:
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
-    first, second = instance.pending_combat_results
+    first, second = round_presentation.pending_combat_results(instance)
     assert (first["target_hp_before"], first["target_hp_after"], first["damage"]) == (100, 90, 10)
     assert (second["target_hp_before"], second["target_hp_after"], second["damage"]) == (90, 83, 7)
     assert instance.npcs["orc"]["hp"] == 83
@@ -701,7 +703,7 @@ def test_six_players_keep_check_target_and_damage_independent() -> None:
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
-    records = {item["attacker_uid"]: item for item in instance.pending_combat_results}
+    records = {item["attacker_uid"]: item for item in round_presentation.pending_combat_results(instance)}
     assert len(records) == 6
     for index in range(6):
         uid = f"p{index}"
@@ -730,7 +732,7 @@ def test_combat_consumes_only_live_players_attack_checks() -> None:
 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
-    assert [item["attacker_uid"] for item in instance.pending_combat_results] == ["a"]
+    assert [item["attacker_uid"] for item in round_presentation.pending_combat_results(instance)] == ["a"]
 
 
 def test_negative_enemy_reference_is_rejected_instead_of_selecting_last_enemy() -> None:
@@ -747,7 +749,7 @@ def test_negative_enemy_reference_is_rejected_instead_of_selecting_last_enemy() 
     CombatResolver().resolve_combat(instance, "ignored", "hp_based")
 
     assert instance.combat_enemies[0]["hp"] == 30
-    assert instance.pending_combat_results == []
+    assert round_presentation.pending_combat_results(instance) == []
 
 
 def test_damage_calculation_is_pure_and_dice_system_aware() -> None:

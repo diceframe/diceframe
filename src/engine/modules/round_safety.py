@@ -75,27 +75,27 @@ def replace_death_save_outcomes(instance: Any, value: dict[str, dict[str, dict]]
 
 def clear_snapshots(instance: Any) -> None:
     require_writable(instance)
-    instance.round_start_snapshot.clear()
-    instance.round_entity_snapshot.clear()
+    round_start_snapshot(instance).clear()
+    round_entity_snapshot(instance).clear()
 
 
 def discard_round(instance: Any) -> None:
     require_writable(instance)
-    instance.death_save_outcomes.clear()
-    instance.round_start_snapshot.clear()
-    instance.round_entity_snapshot.clear()
+    death_save_outcomes(instance).clear()
+    round_start_snapshot(instance).clear()
+    round_entity_snapshot(instance).clear()
 
 
 def keep_death_saves_for(instance: Any, round_key: str) -> None:
     require_writable(instance)
-    instance.death_save_outcomes = {
-        round_key: instance.death_save_outcomes.get(round_key, {}),
-    }
+    replace_death_save_outcomes(instance, {
+        round_key: death_save_outcomes(instance).get(round_key, {}),
+    })
 
 
 def death_save_cache(instance: Any, round_key: str) -> dict:
     require_writable(instance)
-    return instance.death_save_outcomes.setdefault(round_key, {})
+    return death_save_outcomes(instance).setdefault(round_key, {})
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

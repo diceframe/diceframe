@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 
+from src.engine.modules import narrative_notes
 from src.commands.game_handler import GameHandler
 from src.commands.tag_parser import parse_tag_state
 from src.engine.economy import pending_proposals, queue_effect_group, queue_proposal
@@ -20,6 +21,7 @@ from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
 from src.webui.api import WebAPI, can_modify_character
 from src.webui.session import SessionManager
+from src.engine.modules import health as health_state
 
 from webapi_harness import FakeLLMClient, web_api, write_world
 
@@ -138,7 +140,7 @@ async def test_resolve_payment_rejected_adds_health_event(web_api):
     # 拒绝不扣金币
     assert inst.players[uid]["character_sheet"]["gold"] == 30
     # 通知 GM：健康事件
-    assert any(e.get("code") == "economy_declined" for e in inst.health_events)
+    assert any(e.get("code") == "economy_declined" for e in health_state.health_events(inst))
     assert res["proposal"]["status"] == "declined"
     assert pending_proposals(inst) == []
 
@@ -316,7 +318,7 @@ async def test_later_identical_reward_does_not_drop_deferred_effects(web_api):
     assert (await api.resolve_payment(
         result["game_key"], first[0]["id"], True, uid,
     ))["effects_committed"] is True
-    assert inst.scene == "第一天营地"
+    assert narrative_notes.scene(inst) == "第一天营地"
 
     inst.round_number += 1
     second = api._handler._state_applier.apply_state_update(inst, deepcopy(update))
@@ -328,7 +330,7 @@ async def test_later_identical_reward_does_not_drop_deferred_effects(web_api):
     assert (await api.resolve_payment(
         result["game_key"], second[0]["id"], True, uid,
     ))["effects_committed"] is True
-    assert inst.scene == "第二天营地"
+    assert narrative_notes.scene(inst) == "第二天营地"
 
 @pytest.mark.asyncio
 
