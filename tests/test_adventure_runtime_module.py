@@ -96,7 +96,7 @@ def test_play_mode_derivation_matches_the_previous_decoder(stored, binding, expe
     payload = legacy_payload(play_mode=stored, adventure_binding=binding)
     migrated = migrate_game_state_payload(payload)
     assert migrated["modules"][module.MODULE_NAME]["play_mode"] == expected
-    assert GameInstance.from_dict(payload).play_mode == expected
+    assert module.play_mode(GameInstance.from_dict(payload)) == expected
     assert module.derive_play_mode(stored, binding) == expected
 
 
@@ -104,19 +104,19 @@ def test_save_without_play_mode_or_progress_derives_and_defaults():
     payload = legacy_payload()
     del payload["play_mode"], payload["adventure_progress"]
     restored = GameInstance.from_dict(payload)
-    assert restored.play_mode == "adventure"
-    assert restored.adventure_progress == {}
+    assert module.play_mode(restored) == "adventure"
+    assert module.progress(restored) == {}
 
 
 @pytest.mark.parametrize("bound", [True, False])
 def test_empty_slot_mode_is_derived_on_every_load(bound):
     """A new run keeps play_mode empty in memory; loading still derives it."""
     instance = new_instance(adventure_binding=deepcopy(BINDING) if bound else {})
-    assert instance.play_mode == ""
+    assert module.play_mode(instance) == ""
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME]["play_mode"] == ""
     restored = GameInstance.from_dict(encoded)
-    assert restored.play_mode == ("adventure" if bound else "free")
+    assert module.play_mode(restored) == ("adventure" if bound else "free")
 
 
 @pytest.mark.parametrize("raw", [None, [], 12, "bad"])
@@ -136,11 +136,14 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     raw = {"schema_version": 99, "opaque": [1], "play_mode": ""}
     instance = new_instance(modules={module.MODULE_NAME: raw})
     before = deepcopy(instance.modules)
-    for key, value in (("adventure_progress", {"a": 1}), ("play_mode", "free")):
+    for read, write, value in (
+        (module.progress, module.replace_progress, {"a": 1}),
+        (module.play_mode, module.replace_play_mode, "free"),
+    ):
         with pytest.raises(ModuleStateError, match="unsupported adventure_runtime module schema"):
-            getattr(instance, key)
+            read(instance)
         with pytest.raises(ModuleStateError, match="unsupported adventure_runtime module schema"):
-            setattr(instance, key, value)
+            write(instance, value)
     assert instance.modules == before
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == raw
@@ -158,18 +161,18 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
     assert not FIELDS & {item.name for item in fields(instance)}
     assert not FIELDS & vars(instance).keys()
     progress = deepcopy(PROGRESS)
-    instance.adventure_progress = progress
-    instance.play_mode = "adventure"
+    module.replace_progress(instance, progress)
+    module.replace_play_mode(instance, "adventure")
     assert slot["progress"] is progress
-    assert instance.adventure_progress is progress
-    assert instance.adventure_progress is not other.adventure_progress
+    assert module.progress(instance) is progress
+    assert module.progress(instance) is not module.progress(other)
     assert slot["play_mode"] == "adventure"
-    instance.adventure_progress["active_nodes"].append("crypt")
+    module.progress(instance)["active_nodes"].append("crypt")
     encoded = instance.to_dict()
     assert not FIELDS & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
     assert restored.modules[module.MODULE_NAME] == slot
-    assert restored.adventure_progress["active_nodes"] == ["vault", "crypt"]
+    assert module.progress(restored)["active_nodes"] == ["vault", "crypt"]
     instance.replace_persisted_state_from(restored)
     assert instance.modules[module.MODULE_NAME] == slot
 
@@ -177,16 +180,16 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
 @pytest.mark.parametrize("value", [None, [], "bad"])
 def test_progress_setter_stores_empty_progress_for_non_dicts(value):
     instance = new_instance()
-    instance.adventure_progress = deepcopy(PROGRESS)
-    instance.adventure_progress = value
-    assert instance.adventure_progress == {}
+    module.replace_progress(instance, deepcopy(PROGRESS))
+    module.replace_progress(instance, value)
+    assert module.progress(instance) == {}
 
 
 @pytest.mark.parametrize("value", [None, 3, ["free"]])
 def test_play_mode_setter_stores_empty_mode_for_non_strings(value):
     instance = new_instance()
-    instance.play_mode = value
-    assert instance.play_mode == ""
+    module.replace_play_mode(instance, value)
+    assert module.play_mode(instance) == ""
 
 
 def test_owner_writes_reject_unknown_schema_before_mutation():
@@ -204,10 +207,10 @@ def test_owner_writes_reject_unknown_schema_before_mutation():
 @pytest.mark.asyncio
 async def test_in_place_reset_clears_progress_and_keeps_play_mode():
     instance = _make_populated_instance()
-    instance.adventure_progress = deepcopy(PROGRESS)
+    module.replace_progress(instance, deepcopy(PROGRESS))
     await instance.reset()
-    assert instance.play_mode == "adventure"
-    assert instance.adventure_progress == {}
+    assert module.play_mode(instance) == "adventure"
+    assert module.progress(instance) == {}
     assert instance.modules[module.MODULE_NAME]["progress"] == {}
 
 
@@ -219,7 +222,7 @@ async def test_new_run_candidate_keeps_play_mode_and_reinitializes_progress(init
     from src.commands.game_lifecycle import GameLifecycle
 
     source = _make_populated_instance()
-    source.adventure_progress = deepcopy(PROGRESS)
+    module.replace_progress(source, deepcopy(PROGRESS))
     fresh_progress = {"active_nodes": ["gate"], "completed_nodes": []}
 
     async def create_game(game_key, **kwargs):
@@ -234,10 +237,10 @@ async def test_new_run_candidate_keeps_play_mode_and_reinitializes_progress(init
     lifecycle._initialize_adventure_run = initialize_run if initialize else None
     candidate = await lifecycle._new_run_candidate(source, preserve_players=True)
     assert candidate.adventure_binding == source.adventure_binding
-    assert candidate.play_mode == source.play_mode == "adventure"
-    assert candidate.adventure_progress == (fresh_progress if initialize else {})
-    assert candidate.adventure_progress is not source.adventure_progress
-    assert source.adventure_progress == PROGRESS
+    assert module.play_mode(candidate) == module.play_mode(source) == "adventure"
+    assert module.progress(candidate) == (fresh_progress if initialize else {})
+    assert module.progress(candidate) is not module.progress(source)
+    assert module.progress(source) == PROGRESS
 
 
 @pytest.mark.parametrize("side", ["source", "candidate"])
@@ -286,7 +289,7 @@ def test_game_detail_play_mode_contract_is_unchanged(tmp_path, stored, bound, ex
 
     registry = GameRegistry(tmp_path)
     instance = new_instance(adventure_binding=deepcopy(BINDING) if bound else {})
-    instance.play_mode = stored
+    module.replace_play_mode(instance, stored)
     registry.register(instance)
     detail = game_detail(_query_dependencies(registry), "|".join(KEY), viewer_is_gm=True)
     # An empty in-memory mode is still reported as "free", as before the slot.

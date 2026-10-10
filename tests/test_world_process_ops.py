@@ -11,6 +11,7 @@ import asyncio
 
 import pytest
 
+from src.engine.modules import table_settings
 from src.engine.game_instance import GameInstance
 from src.engine.world_events import advance_world_time, due_processes
 from src.engine.world_state import (
@@ -184,7 +185,7 @@ def test_process_container_bound_is_enforced() -> None:
 
 def test_started_process_is_reverted_by_whole_round_rollback() -> None:
     instance = make_instance()
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.players["p1"] = {"character_name": "Alice", "character_sheet": {"hp": 10}}
     asyncio.run(instance.start_round())
     asyncio.run(instance.add_action("p1", "仪式开始"))

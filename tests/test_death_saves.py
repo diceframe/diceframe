@@ -18,6 +18,7 @@ from src.engine.character_utils import (
 from src.engine.game_instance import GameInstance
 from src.rules.rule_system import RuleSystem
 from src.engine.modules import checks
+from src.engine.modules import round_safety
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -170,7 +171,7 @@ def test_round_tracker_caches_each_downed_player_independently(monkeypatch) -> N
 
     resolve_round_death_saves(instance, _dnd())
 
-    outcomes = instance.death_save_outcomes["4"]
+    outcomes = round_safety.death_save_outcomes(instance)["4"]
     assert outcomes["a"]["roll"] == 12
     assert outcomes["b"]["roll"] == 3
     assert instance.get_character_sheet("a")["death_saves"] == {"success": 1, "failure": 0}

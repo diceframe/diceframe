@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import pytest
+from src.engine.modules import narrative_notes
 from src.engine.modules import checks
 
 
@@ -70,7 +71,7 @@ async def test_d20_and_d100_games_use_their_own_dice_systems_without_crossing(
 
     # 两局状态互不串扰
     assert d20_inst.round_number == 2 and d100_inst.round_number == 2
-    assert d20_inst.scene == "大厅" and d100_inst.scene == "门厅"
+    assert narrative_notes.scene(d20_inst) == "大厅" and narrative_notes.scene(d100_inst) == "门厅"
     assert d100_player not in d20_inst.players
     assert d20_player not in d100_inst.players
     assert d20_inst.rule_id != d100_inst.rule_id

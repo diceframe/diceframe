@@ -36,6 +36,7 @@ from src.engine.world_state import (
 )
 from src.llm.world_prompt import format_world_events_block
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import world_reports
 
 
 def make_instance() -> GameInstance:
@@ -352,10 +353,10 @@ def test_settled_events_render_for_the_gm_and_clear_each_round() -> None:
     instance = make_instance()
     assert format_world_events_block(instance) == ""
 
-    instance.last_world_events = [{
+    world_reports.replace_last_world_events(instance, [{
         "event_id": "ritual:clearing", "label": "清林仪式完成",
         "due_at": {"day": 1, "minute": 840}, "status": "applied",
-    }]
+    }])
     rendered = format_world_events_block(instance)
     assert "【世界时间推进·已结算事件】" in rendered
     assert "清林仪式完成" in rendered
@@ -363,17 +364,17 @@ def test_settled_events_render_for_the_gm_and_clear_each_round() -> None:
     instance.language = "en"
     assert "took effect" in format_world_events_block(instance)
 
-    instance.last_world_events = [{
+    world_reports.replace_last_world_events(instance, [{
         "event_id": "ward:fade", "label": "结界消散",
         "due_at": {"day": 1, "minute": 780}, "status": "failed", "error": "unknown fact",
-    }]
+    }])
     instance.language = "zh-CN"
     assert "未能结算" in format_world_events_block(instance)
 
     reloaded = GameInstance.from_dict(instance.to_dict())
-    assert reloaded.last_world_events == instance.last_world_events
+    assert world_reports.last_world_events(reloaded) == world_reports.last_world_events(instance)
     reloaded.reset_round_checks()
-    assert reloaded.last_world_events == []
+    assert world_reports.last_world_events(reloaded) == []
 
 
 # ---- planner seam -----------------------------------------------------------

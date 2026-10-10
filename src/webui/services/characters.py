@@ -39,7 +39,7 @@ from src.engine.memory_outbox import (
     queue_memory_delivery,
 )
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity
+from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity, table_settings
 from src.engine.player_control import claim_seat, is_human_controlled
 from src.content_modules.projection import ContentProjectionService
 from src.commands.economy_effects import pending_decision_notice
@@ -111,7 +111,7 @@ def _record_economy_outcome_in_round(
     if (
         str(outcome.get("visibility") or "private") != "party"
         and not is_purchase
-        and not bool(getattr(instance, "solo_mode", False))
+        and not bool(table_settings.solo_mode(instance))
     ):
         recipients = {
             str(outcome.get("payer_uid") or ""),
@@ -1384,7 +1384,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     # A new seat is issued its token in the same write, so the slot must be
     # writable before anything changes.
     room_access.require_writable(inst)
-    max_players = max(1, int(getattr(inst, "max_players", 6) or 6))
+    max_players = max(1, int(room_access.max_players(inst) or 6))
     if uid not in inst.players and len(inst.players) >= max_players:
         return {
             "ok": False,

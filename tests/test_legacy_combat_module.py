@@ -29,7 +29,7 @@ def new_instance(**kwargs):
 def populated_instance():
     instance = new_instance()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
     return instance
 
 
@@ -112,9 +112,9 @@ def test_unknown_module_version_is_preserved_and_access_fails_closed():
     before = deepcopy(instance.modules)
     for key, value in VALUES.items():
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            getattr(module, key)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, value)
+            getattr(module, f"replace_{key}")(instance, value)
     assert instance.modules == before
     encoded = instance.to_dict()
     assert encoded["modules"][module.MODULE_NAME] == raw
@@ -129,12 +129,12 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
     assert not VALUES.keys() & {item.name for item in fields(instance)}
     assert not VALUES.keys() & vars(instance).keys()
     for key, value in deepcopy(VALUES).items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
         assert slot[key] is value
-        assert getattr(instance, key) is slot[key]
-    assert instance.combat_enemies is not other.combat_enemies
-    assert instance.initiative_order is not other.initiative_order
-    instance.combat_enemies[0]["hp"] -= 3
+        assert getattr(module, key)(instance) is slot[key]
+    assert module.combat_enemies(instance) is not module.combat_enemies(other)
+    assert module.initiative_order(instance) is not module.initiative_order(other)
+    module.combat_enemies(instance)[0]["hp"] -= 3
     encoded = instance.to_dict()
     assert not VALUES.keys() & encoded.keys()
     restored = GameInstance.from_dict(deepcopy(encoded))
@@ -145,21 +145,21 @@ def test_properties_use_live_slot_and_roundtrip_has_one_storage_owner():
 
 def test_begin_copies_order_and_end_preserves_enemies_and_order_identity():
     instance = populated_instance()
-    enemies = instance.combat_enemies
+    enemies = module.combat_enemies(instance)
     order = ["guard", "u1"]
     instance.begin_combat(order)
-    assert instance.initiative_order == order
-    assert instance.initiative_order is not order
-    assert instance.combat_state == "active"
-    assert instance.combat_active is True
-    assert instance.initiative_current == 0
-    stored_order = instance.initiative_order
+    assert module.initiative_order(instance) == order
+    assert module.initiative_order(instance) is not order
+    assert module.combat_state(instance) == "active"
+    assert module.combat_active(instance) is True
+    assert module.initiative_current(instance) == 0
+    stored_order = module.initiative_order(instance)
     instance.end_combat()
-    assert instance.initiative_order is stored_order
+    assert module.initiative_order(instance) is stored_order
     assert stored_order == []
-    assert instance.combat_enemies is enemies
-    assert instance.combat_state == "none"
-    assert instance.combat_active is False
+    assert module.combat_enemies(instance) is enemies
+    assert module.combat_state(instance) == "none"
+    assert module.combat_active(instance) is False
 
 
 @pytest.mark.parametrize("status", ["active", "ended", "none", None])
@@ -168,14 +168,14 @@ def test_ruleset_projection_preserves_authority_and_enemies(status):
     combat = {"status": status, "initiative": ["player:u1"], "turn_index": "2"}
     ruleset_runtime.replace_state(instance, {"combat": combat})
     before = deepcopy(ruleset_runtime.state(instance))
-    enemies = instance.combat_enemies
+    enemies = module.combat_enemies(instance)
     module.project_from_ruleset(instance, combat)
-    assert instance.combat_state == ("active" if status == "active" else "none")
-    assert instance.combat_active is (status == "active")
-    assert instance.initiative_order == combat["initiative"]
-    assert instance.initiative_order is not combat["initiative"]
-    assert instance.initiative_current == 2
-    assert instance.combat_enemies is enemies
+    assert module.combat_state(instance) == ("active" if status == "active" else "none")
+    assert module.combat_active(instance) is (status == "active")
+    assert module.initiative_order(instance) == combat["initiative"]
+    assert module.initiative_order(instance) is not combat["initiative"]
+    assert module.initiative_current(instance) == 2
+    assert module.combat_enemies(instance) is enemies
     assert ruleset_runtime.state(instance) == before
     assert ruleset_runtime.state(instance)["combat"] is combat
 
@@ -183,7 +183,7 @@ def test_ruleset_projection_preserves_authority_and_enemies(status):
 @pytest.mark.parametrize("kind", ["entity", "transaction"])
 def test_restore_paths_keep_enemy_asymmetry_and_deepcopy(kind):
     instance = populated_instance()
-    enemies = instance.combat_enemies
+    enemies = module.combat_enemies(instance)
     snapshot = {
         "combat_enemies": [{"hp": 7}], "combat_state": 123,
         "combat_active": "truthy", "initiative_order": [{"opaque": [1]}],
@@ -191,20 +191,20 @@ def test_restore_paths_keep_enemy_asymmetry_and_deepcopy(kind):
     }
     operation = module.restore_from_entity_snapshot if kind == "entity" else module.restore_from_transaction
     operation(instance, snapshot)
-    assert instance.combat_state == "123"
-    assert instance.combat_active is True
-    assert instance.initiative_current == 3
-    assert instance.initiative_order == snapshot["initiative_order"]
-    assert instance.initiative_order is not snapshot["initiative_order"]
-    instance.initiative_order[0]["opaque"].append(2)
+    assert module.combat_state(instance) == "123"
+    assert module.combat_active(instance) is True
+    assert module.initiative_current(instance) == 3
+    assert module.initiative_order(instance) == snapshot["initiative_order"]
+    assert module.initiative_order(instance) is not snapshot["initiative_order"]
+    module.initiative_order(instance)[0]["opaque"].append(2)
     assert snapshot["initiative_order"][0]["opaque"] == [1]
     if kind == "entity":
-        assert instance.combat_enemies == snapshot["combat_enemies"]
-        assert instance.combat_enemies is not snapshot["combat_enemies"]
-        instance.combat_enemies[0]["hp"] = 1
+        assert module.combat_enemies(instance) == snapshot["combat_enemies"]
+        assert module.combat_enemies(instance) is not snapshot["combat_enemies"]
+        module.combat_enemies(instance)[0]["hp"] = 1
         assert snapshot["combat_enemies"][0]["hp"] == 7
     else:
-        assert instance.combat_enemies is enemies
+        assert module.combat_enemies(instance) is enemies
         assert enemies == VALUES["combat_enemies"]
 
 
@@ -216,16 +216,26 @@ def test_entity_restore_defaults_and_transaction_keeps_its_distinct_coercions():
         "combat_state": None, "combat_active": 0,
         "initiative_order": ("u1",), "initiative_current": "2",
     })
-    assert instance.combat_state == "None"
-    assert instance.initiative_order == ("u1",)
-    assert instance.initiative_current == 2
+    assert module.combat_state(instance) == "None"
+    assert module.initiative_order(instance) == ("u1",)
+    assert module.initiative_current(instance) == 2
+
+
+def test_retired_combat_facades_are_not_game_instance_attributes():
+    instance = new_instance()
+    for key in VALUES:
+        assert not hasattr(GameInstance, key)
+        assert not hasattr(instance, key)
+        with pytest.raises(AttributeError, match="was removed"):
+            setattr(instance, key, VALUES[key])
+    assert instance.modules[module.MODULE_NAME] == module.fresh()
 
 
 @pytest.mark.asyncio
 async def test_reset_clears_all_fields_preserving_list_identity():
     instance = populated_instance()
-    enemies, order = instance.combat_enemies, instance.initiative_order
+    enemies, order = module.combat_enemies(instance), module.initiative_order(instance)
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] == module.fresh()
-    assert instance.combat_enemies is enemies
-    assert instance.initiative_order is order
+    assert module.combat_enemies(instance) is enemies
+    assert module.initiative_order(instance) is order

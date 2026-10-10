@@ -1,5 +1,6 @@
 from src.engine.game_instance import GameInstance, GameState
 from src.webui.routes.sse import _play_public_signature
+from src.engine.modules import session_stats
 
 
 def test_public_signature_changes_for_same_round_rollback():
@@ -22,7 +23,7 @@ def test_public_signature_changes_for_same_round_rollback():
     inst.get_character_sheet("player-1")["inventory"] = []
     inst.action_queue.clear()
     inst.log.clear()
-    inst.last_activity = "after-rollback"
+    session_stats.replace_last_activity(inst, "after-rollback")
     after = _play_public_signature(inst, "player-1")
 
     assert inst.round_number == 3

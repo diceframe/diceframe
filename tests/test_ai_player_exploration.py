@@ -54,11 +54,13 @@ from src.commands.ai_player import (
 from src.commands.check_planner import plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance, GameState
+from src.engine.modules import table_settings
 from src.engine.player_control import get_control, set_control
 from src.engine.world_state import apply_world_ops
 from src.rules.rule_system import RuleSystem
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services.turns import TurnDependencies, submit_action
+from src.engine.modules import private_channels, round_presentation, session_stats
 
 HUMAN_SHEET = {"hp": 10, "max_hp": 10, "attributes": {"str": 14, "dex": 10}}
 AI_SHEET = {"hp": 8, "max_hp": 8, "attributes": {"str": 8, "dex": 16}}
@@ -102,7 +104,7 @@ def make_instance(
     instance = GameInstance(game_key=("web", "ai-player", "bot"), rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    instance.solo_mode = solo
+    table_settings.replace_solo_mode(instance, solo)
     for uid in humans:
         # 走真实席位写入路径：控制记录由聚合保证存在。
         instance.put_player(uid, {
@@ -286,8 +288,8 @@ async def test_each_ai_seat_calls_once_in_sorted_uid_order() -> None:
     assert "我执行编号0的任务" in llm.prompt(2)
     assert "我执行编号1的任务" in llm.prompt(2)
     # token 计入既有记账，而不是第二套计费。
-    assert instance.total_llm_calls == 3
-    assert instance.total_tokens == 39
+    assert session_stats.total_llm_calls(instance) == 3
+    assert session_stats.total_tokens(instance) == 39
 
 
 # ---- 3. 真人未交齐：什么都不生成 --------------------------------------------
@@ -338,7 +340,7 @@ async def test_solo_mode_fills_ai_actions_then_auto_advances() -> None:
     llm = FakePlayerLLM()
     dependencies = make_dependencies(instance, llm_client=llm)
 
-    assert instance.solo_mode is True
+    assert table_settings.solo_mode(instance) is True
     result = await submit_action(dependencies, "game", "h1", "我点亮提灯。")
 
     assert result["payload"]["advanced"] is True
@@ -665,13 +667,13 @@ async def test_gm_hidden_truth_never_reaches_the_ai_prompt() -> None:
         {"op": "set_fact", "key": "secret:cult.leader", "value": "GM-SECRET-VALUE-7f2a",
          "visibility": "gm"},
     ])
-    instance.gm_directives = [{
+    round_presentation.replace_gm_directives(instance, [{
         "id": "d1", "text": "DIRECTIVE-TOKEN-9c1", "target_round": 1,
-    }]
-    instance.private_log = {
+    }])
+    private_channels.replace_private_log(instance, {
         "h1": [{"round": 1, "text": "OTHER-PRIVATE-1a2"}],
         "a1": [{"round": 1, "text": "OWN-PRIVATE-4d5"}],
-    }
+    })
     llm = FakePlayerLLM(replies=["我搜查船坞。"])
     dependencies = make_dependencies(instance, llm_client=llm)
 

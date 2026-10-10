@@ -125,11 +125,11 @@ def test_present_values_are_preserved_by_migration_ensure_and_codec(value):
     roundtrip = GameInstance.from_dict(restored.to_dict())
     for instance in (restored, roundtrip):
         for key in SETTINGS:
-            assert getattr(instance, key) == value
-            assert type(getattr(instance, key)) is type(value)
+            assert getattr(module, key)(instance) == value
+            assert type(getattr(module, key)(instance)) is type(value)
         # A falsy legacy password means "no password"; a truthy one keeps the
         # room locked, and only a real string password can be entered.
-        assert instance.has_room_password is bool(value)
+        assert module.has_room_password(instance) is bool(value)
         assert module.verify_room_password(instance, str(value)) is (value == "unconventional")
 
 
@@ -145,11 +145,11 @@ def test_future_module_version_is_preserved_but_rejected_on_access():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={module.MODULE_NAME: slot})
     for key in SETTINGS:
         with pytest.raises(ModuleStateError):
-            getattr(instance, key)
+            getattr(module, key)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, key, VALUES[key])
+            getattr(module, f"replace_{key}")(instance, VALUES[key])
     with pytest.raises(ModuleStateError):
-        instance.has_room_password
+        module.has_room_password(instance)
     with pytest.raises(ModuleStateError):
         instance.set_room_password("new-password")
     assert slot == before
@@ -159,19 +159,19 @@ def test_future_module_version_is_preserved_but_rejected_on_access():
 def test_properties_return_and_replace_the_same_object(key):
     instance = GameInstance(game_key=("web", "identity", "bot"))
     value = {"opaque": []}
-    setattr(instance, key, value)
-    assert getattr(instance, key) is value is instance.modules[module.MODULE_NAME][key]
+    getattr(module, f"replace_{key}")(instance, value)
+    assert getattr(module, key)(instance) is value is instance.modules[module.MODULE_NAME][key]
     value["opaque"].append("changed")
-    assert getattr(instance, key)["opaque"] == ["changed"]
+    assert getattr(module, key)(instance)["opaque"] == ["changed"]
     replacement = ["replacement"]
-    setattr(instance, key, replacement)
-    assert getattr(instance, key) is replacement is instance.modules[module.MODULE_NAME][key]
+    getattr(module, f"replace_{key}")(instance, replacement)
+    assert getattr(module, key)(instance) is replacement is instance.modules[module.MODULE_NAME][key]
 
 
 def test_codec_roundtrip_preserves_all_room_settings():
     instance = GameInstance(game_key=("web", "roundtrip", "bot"), gm_uid="gm")
     for key, value in SETTINGS.items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
     instance.set_room_password("plain-password")
     module.issue_room_token(instance, token="room-token")
     payload = instance.to_dict()
@@ -182,7 +182,7 @@ def test_codec_roundtrip_preserves_all_room_settings():
     assert payload["gm_uid"] == "gm"
     restored = GameInstance.from_dict(payload)
     for key, value in SETTINGS.items():
-        assert getattr(restored, key) == value
+        assert getattr(module, key)(restored) == value
     assert module.verify_room_password(restored, "plain-password")
     assert module.verify_room_token(restored, "room-token")
     assert restored.gm_uid == "gm"
@@ -197,7 +197,7 @@ def test_set_room_password_stores_only_a_hash_and_revokes_tokens(password):
     slot = instance.modules[module.MODULE_NAME]
     assert slot["room_tokens"] == []
     assert not module.verify_room_token(instance, "previous-session")
-    assert instance.has_room_password is bool(password)
+    assert module.has_room_password(instance) is bool(password)
     assert not module.verify_room_password(instance, "old-password")
     if password:
         assert slot["room_password_hash"] != password and password not in str(slot)
@@ -210,14 +210,14 @@ def test_set_room_password_stores_only_a_hash_and_revokes_tokens(password):
 async def test_reset_preserves_room_access_values_and_slot_identity():
     instance = GameInstance(game_key=("web", "reset", "bot"))
     for key, value in SETTINGS.items():
-        setattr(instance, key, value)
+        getattr(module, f"replace_{key}")(instance, value)
     instance.set_room_password("plain-password")
     module.issue_room_token(instance, token="room-token")
     slot = instance.modules[module.MODULE_NAME]
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] is slot
     for key, value in SETTINGS.items():
-        assert getattr(instance, key) == value
+        assert getattr(module, key)(instance) == value
     assert module.verify_room_password(instance, "plain-password")
     assert module.verify_room_token(instance, "room-token")
 
@@ -226,7 +226,7 @@ async def test_reset_preserves_room_access_values_and_slot_identity():
 async def test_new_run_candidate_copies_room_access_settings():
     source = GameInstance(game_key=("web", "new-run", "bot"), gm_uid="gm")
     for key, value in SETTINGS.items():
-        setattr(source, key, value)
+        getattr(module, f"replace_{key}")(source, value)
     source.set_room_password("plain-password")
     module.issue_room_token(source, token="room-token")
     candidate = GameInstance(game_key=source.game_key)
@@ -239,7 +239,7 @@ async def test_new_run_candidate_copies_room_access_settings():
     assert result is candidate
     assert result.modules[module.MODULE_NAME] is not source.modules[module.MODULE_NAME]
     for key, value in SETTINGS.items():
-        assert getattr(result, key) == value
+        assert getattr(module, key)(result) == value
     # Same password, and players already inside keep their room token.
     assert module.verify_room_password(result, "plain-password")
     assert module.verify_room_token(result, "room-token")

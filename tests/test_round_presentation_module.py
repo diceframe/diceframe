@@ -20,6 +20,9 @@ VALUES = {
     "last_token_budget_bump": {"kind": "narrative", "from": 100, "to": 200},
     "pending_combat_results": [{"damage": 5}],
 }
+# GameInstance facades are retired; every field is read/replaced via the module.
+READ = {field: getattr(module, field) for field in VALUES}
+WRITE = {field: getattr(module, f"replace_{field}") for field in VALUES}
 
 
 def test_upgrade_removes_legacy_keys_without_mutating_input():
@@ -57,21 +60,21 @@ def test_missing_values_use_defaults():
 
 
 @pytest.mark.parametrize("field", VALUES)
-def test_property_identity_replacement_and_mutation(field):
+def test_module_api_identity_replacement_and_mutation(field):
     instance = GameInstance(game_key=("web", "presentation", "bot"))
     other = GameInstance(game_key=("web", "other", "bot"))
     value = deepcopy(VALUES[field])
-    setattr(instance, field, value)
-    assert getattr(instance, field) is value is instance.modules[module.MODULE_NAME][field]
+    WRITE[field](instance, value)
+    assert READ[field](instance) is value is instance.modules[module.MODULE_NAME][field]
     if isinstance(value, list):
         value.append("mutation")
     else:
         value["mutation"] = True
-    assert getattr(instance, field) == value
+    assert READ[field](instance) == value
     replacement = [] if isinstance(value, list) else {}
-    setattr(instance, field, replacement)
-    assert getattr(instance, field) is replacement
-    assert getattr(other, field) == module.fresh()[field]
+    WRITE[field](instance, replacement)
+    assert READ[field](instance) is replacement
+    assert READ[field](other) == module.fresh()[field]
 
 
 @pytest.mark.parametrize("legacy", [True, False])
@@ -90,44 +93,44 @@ def test_codec_roundtrip_preserves_all_values(legacy):
     assert saved["modules"][module.MODULE_NAME] == {"schema_version": 1, **VALUES}
     again = GameInstance.from_dict(saved)
     for field, value in VALUES.items():
-        assert getattr(again, field) == value
+        assert READ[field](again) == value
 
 
 def test_existing_mutation_methods_keep_their_behavior():
     instance = GameInstance(game_key=("web", "methods", "bot"))
     instance.set_quick_actions(["", "  ", "Wait"])
-    assert instance.quick_actions == ["Wait"]
+    assert module.quick_actions(instance) == ["Wait"]
     instance.add_gm_directive({"id": "keep"})
     instance.add_gm_directive({"id": "consume"})
     instance.consume_gm_directives({"consume"})
-    assert instance.gm_directives == [{"id": "keep"}]
+    assert module.gm_directives(instance) == [{"id": "keep"}]
     instance.set_state_update_recap({})
-    assert instance.last_state_update is None
+    assert module.last_state_update(instance) is None
     instance.set_state_update_recap({"hp": "10"})
-    assert instance.last_state_update == {"hp": "10"}
+    assert module.last_state_update(instance) == {"hp": "10"}
     instance.set_token_budget_bump(100, 200)
-    assert instance.last_token_budget_bump == VALUES["last_token_budget_bump"]
+    assert module.last_token_budget_bump(instance) == VALUES["last_token_budget_bump"]
     instance.set_token_budget_bump(100, 100)
-    assert instance.last_token_budget_bump is None
+    assert module.last_token_budget_bump(instance) is None
     instance.record_combat_result({"damage": 5})
     instance.set_token_budget_bump(100, 200)
     instance.begin_round_processing()
-    assert instance.pending_combat_results == []
-    assert instance.last_token_budget_bump is None
-    assert instance.quick_actions == ["Wait"]
-    assert instance.gm_directives == [{"id": "keep"}]
+    assert module.pending_combat_results(instance) == []
+    assert module.last_token_budget_bump(instance) is None
+    assert module.quick_actions(instance) == ["Wait"]
+    assert module.gm_directives(instance) == [{"id": "keep"}]
 
 
 @pytest.mark.asyncio
 async def test_reset_clears_all_five_fields_and_preserves_list_identity():
     instance = GameInstance(game_key=("web", "reset", "bot"))
     for field, value in deepcopy(VALUES).items():
-        setattr(instance, field, value)
-    lists = {field: getattr(instance, field) for field in VALUES if isinstance(VALUES[field], list)}
+        WRITE[field](instance, value)
+    lists = {field: READ[field](instance) for field in VALUES if isinstance(VALUES[field], list)}
     await instance.reset()
     assert instance.modules[module.MODULE_NAME] == module.fresh()
     for field, value in lists.items():
-        assert getattr(instance, field) is value
+        assert READ[field](instance) is value
 
 
 def test_unknown_versions_are_preserved_but_runtime_access_is_rejected():
@@ -139,9 +142,9 @@ def test_unknown_versions_are_preserved_but_runtime_access_is_rejected():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={module.MODULE_NAME: slot})
     for field in VALUES:
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            READ[field](instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, deepcopy(VALUES[field]))
+            WRITE[field](instance, deepcopy(VALUES[field]))
     saved = instance.to_dict()
     assert saved["modules"][module.MODULE_NAME] == before
     assert GameInstance.from_dict(saved).to_dict()["modules"][module.MODULE_NAME] == before

@@ -27,7 +27,9 @@ from src.engine.dice import d20_dc_cap
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import economy_state, progression_state, ruleset_runtime
+from src.engine.modules import (
+    economy_state, legacy_combat, narrative_notes, progression_state, ruleset_runtime, table_settings,
+)
 from src.engine.world_events import MAX_ADVANCE_MINUTES
 from src.engine.world_legality import (
     MAX_ROUTE_HOPS,
@@ -357,7 +359,7 @@ def _npc_context(
             for name in (player_id, player.get("character_name"))
         ) or any(
             _action_mentions_name(action, name)
-            for enemy in instance.combat_enemies
+            for enemy in legacy_combat.combat_enemies(instance)
             for name in (enemy.get("name"), enemy.get("character_name"))
         ):
             return None
@@ -456,13 +458,13 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         ruleset["max_check_dc"] = d20_dc_cap(rule)
     payload = {
         "round": progression_state.round_value(instance),
-        "scene": str(instance.scene or "")[:500],
+        "scene": str(narrative_notes.scene(instance) or "")[:500],
         "recent_narration": [
             sanitize_narration(str(entry.get("gm_response") or ""))[:1000]
             for entry in instance.log[-2:]
             if entry.get("gm_response")
         ],
-        "difficulty": instance.difficulty,
+        "difficulty": table_settings.difficulty(instance),
         "ruleset": ruleset,
         "players": players,
         # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
@@ -518,7 +520,7 @@ def _match_opponent(instance: GameInstance, value: object) -> str:
         }
         if query in names:
             return f"npc:{npc_id}"
-    for index, enemy in enumerate(instance.combat_enemies):
+    for index, enemy in enumerate(legacy_combat.combat_enemies(instance)):
         names = {
             str(enemy.get("name") or "").strip().casefold(),
             str(enemy.get("character_name") or "").strip().casefold(),
@@ -731,7 +733,7 @@ def normalize_check_specs(
             target=target if dice_system == "d20" else None,
             modifier=modifier,
             advantage_mode=advantage_mode,
-            baseline_dc=rule.dc_for_difficulty(instance.difficulty, "normal") if rule else None,
+            baseline_dc=rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else None,
             dc_cap=d20_dc_cap(rule),
             supports_advantage=rule is None or rule.supports_advantage_mode(advantage),
             dc_reason=str(raw.get("dc_reason") or ""),
@@ -841,7 +843,7 @@ def _safety_net_subjects(
         for value in (npc_id, npc.get("name"), npc.get("character_name")):
             if str(value or "").strip():
                 foreign.add(str(value).strip())
-    for enemy in getattr(instance, "combat_enemies", None) or []:
+    for enemy in legacy_combat.combat_enemies(instance) or []:
         if not isinstance(enemy, dict):
             continue
         for value in (enemy.get("name"), enemy.get("character_name")):

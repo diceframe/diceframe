@@ -369,25 +369,26 @@ def capture_round_entity_snapshot(instance: GameInstance) -> None:
     ruleset_runtime.require_writable(instance)
     round_safety.replace_entity_snapshot(instance, {
         "npcs": copy.deepcopy(instance.npcs),
-        "combat_enemies": copy.deepcopy(instance.combat_enemies),
-        "combat_state": str(instance.combat_state or "none"),
-        "combat_active": bool(instance.combat_active),
-        "initiative_order": copy.deepcopy(list(instance.initiative_order or [])),
-        "initiative_current": int(instance.initiative_current or 0),
+        "combat_enemies": copy.deepcopy(legacy_combat.combat_enemies(instance)),
+        "combat_state": str(legacy_combat.combat_state(instance) or "none"),
+        "combat_active": bool(legacy_combat.combat_active(instance)),
+        "initiative_order": copy.deepcopy(list(legacy_combat.initiative_order(instance) or [])),
+        "initiative_current": int(legacy_combat.initiative_current(instance) or 0),
         "world_state": copy.deepcopy(instance.world_state),
         # FIX-07 §10 步骤 23：Adventure 进度与世界真相由同一次权威事务写入
         # （FIX-04 §6.7），所以"本轮改过的东西"必须包含它——否则回滚会把世界
         # 退回去、把进度留在被丢弃的分支上。
-        "adventure_progress": copy.deepcopy(instance.adventure_progress),
+        "adventure_progress": copy.deepcopy(adventure_runtime_state.progress(instance)),
     })
 
 
 def restore_round_entity_snapshot(instance: GameInstance) -> bool:
     """还原判定入口的旧版实体快照；没有快照时返回 False（不动状态）。"""
-    snapshot = instance.round_entity_snapshot
+    from src.engine.modules import adventure_runtime_state, legacy_combat, round_safety, ruleset_runtime
+
+    snapshot = round_safety.round_entity_snapshot(instance)
     if not isinstance(snapshot, dict) or not snapshot:
         return False
-    from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
 
     adventure_runtime_state.require_writable(instance)
     legacy_combat.require_writable(instance)
@@ -457,8 +458,10 @@ def entity_hp(instance: GameInstance, target_ref: str) -> int | None:
         if isinstance(npc, Mapping):
             raw = npc.get("hp")
     elif target_ref.startswith("enemy:"):
+        from src.engine.modules import legacy_combat
+
         try:
-            enemy = instance.combat_enemies[int(target_ref.removeprefix("enemy:"))]
+            enemy = legacy_combat.combat_enemies(instance)[int(target_ref.removeprefix("enemy:"))]
         except (ValueError, IndexError):
             return None
         if isinstance(enemy, Mapping):

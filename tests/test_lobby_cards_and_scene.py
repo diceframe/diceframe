@@ -7,6 +7,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import pytest
 import pytest_asyncio
 
+from src.engine.modules import narrative_notes
 from src.engine.modules import room_access
 from src.webui.routes.character_cards import register_character_cards as register_character_cards
 from test_game_query_routes_http import (
@@ -104,7 +105,7 @@ async def test_seated_player_cannot_adopt_a_card_it_cannot_list(cards_env):
 @pytest.mark.asyncio
 async def test_password_room_lobby_hides_scene_without_room_token(share_env):
     env = share_env
-    env.instance.scene = "The harbor at midnight"
+    narrative_notes.replace_scene(env.instance, "The harbor at midnight")
     stranger, _ = env.sessions.get_or_create(None)
     async with TestClient(TestServer(env.app), headers=ROOM_HEADER) as client:
         hidden = await (await client.get(
@@ -125,7 +126,7 @@ async def test_password_room_lobby_hides_scene_without_room_token(share_env):
 async def test_open_room_lobby_shows_scene(share_env, play_env):
     env = share_env
     open_key, open_game = _make_game(play_env, "open-room-scene", bind_adventure=False)
-    open_game.scene = "Market square"
+    narrative_notes.replace_scene(open_game, "Market square")
     stranger, _ = env.sessions.get_or_create(None)
     async with TestClient(TestServer(env.app), headers=ROOM_HEADER) as client:
         body = await (await client.get(
@@ -138,7 +139,7 @@ async def test_open_room_lobby_shows_scene(share_env, play_env):
 @pytest.mark.asyncio
 async def test_seated_player_and_owner_keep_scene(share_env):
     env = share_env
-    env.instance.scene = "The harbor at midnight"
+    narrative_notes.replace_scene(env.instance, "The harbor at midnight")
     seat = {"X-Seat-Token": room_access.issue_seat_token(env.instance, "p1")}
     async with TestClient(TestServer(env.app), headers=ROOM_HEADER) as client:
         seated = await (await client.get(f"/api/games/{env.key}?share=1", headers=seat)).json()

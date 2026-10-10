@@ -10,7 +10,7 @@ from src.commands.state_recap import build_state_change_messages
 from src.engine.character_utils import revive_character
 from src.engine.game_instance import GameInstance
 from src.engine.health import record_health_event
-from src.engine.modules import progression_state
+from src.engine.modules import legacy_combat, progression_state, table_settings
 from src.engine.puzzle import PuzzleState
 from src.rulesets.contracts import (
     CharacterRevivalRuntime,
@@ -47,7 +47,7 @@ def apply_puzzle_updates(instance: GameInstance, data: dict) -> None:
 
 def apply_combat_command(instance: GameInstance, data: dict) -> None:
     combat_cmd = data.get("combat_command", "")
-    if combat_cmd == "end" and instance.combat_state == "active":
+    if combat_cmd == "end" and legacy_combat.combat_state(instance) == "active":
         instance.end_combat()
         logger.info("战斗结束 (round=%d)", progression_state.round_value(instance))
 
@@ -73,7 +73,7 @@ def apply_revive_commands(
 ) -> None:
     revive_commands = data.get("revive_commands", [])
     # P2-O：硬核难度禁止复活，落实"硬核=角色可永久死亡"的机制差异（不只靠 GM prompt 文案）。
-    hardcore = str(getattr(instance, "difficulty", "") or "") == "硬核"
+    hardcore = str(table_settings.difficulty(instance) or "") == "硬核"
     for cmd in revive_commands:
         uid = cmd["uid"]
         method = cmd.get("method", "法术")

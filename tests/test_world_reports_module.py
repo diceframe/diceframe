@@ -22,6 +22,9 @@ VALUES = {
         {"event_id": "e2", "status": "failed", "error": "missing target"},
     ],
 }
+# GameInstance facades are retired; every report is read/replaced via the module.
+READ = {field: getattr(module, field) for field in VALUES}
+WRITE = {field: getattr(module, f"replace_{field}") for field in VALUES}
 
 
 def test_upgrade_removes_legacy_keys_without_mutating_input():
@@ -58,18 +61,18 @@ def test_missing_values_use_defaults():
 
 
 @pytest.mark.parametrize("field", VALUES)
-def test_property_identity_replacement_and_mutation(field):
+def test_module_api_identity_replacement_and_mutation(field):
     instance = GameInstance(game_key=("web", "reports", "bot"))
     other = GameInstance(game_key=("web", "other", "bot"))
     value = deepcopy(VALUES[field])
-    setattr(instance, field, value)
-    assert getattr(instance, field) is value is instance.modules[module.MODULE_NAME][field]
+    WRITE[field](instance, value)
+    assert READ[field](instance) is value is instance.modules[module.MODULE_NAME][field]
     value.append({"mutation": True})
-    assert getattr(instance, field) == value
+    assert READ[field](instance) == value
     replacement = [{"replacement": True}]
     getattr(module, f"replace_{field}")(instance, replacement)
-    assert getattr(instance, field) is replacement
-    assert getattr(other, field) == []
+    assert READ[field](instance) is replacement
+    assert READ[field](other) == []
 
 
 @pytest.mark.parametrize("legacy", [True, False])
@@ -88,7 +91,7 @@ def test_codec_roundtrip_preserves_all_reports(legacy):
     assert saved["modules"][module.MODULE_NAME] == {"schema_version": 1, **VALUES}
     again = GameInstance.from_dict(saved)
     for field, value in VALUES.items():
-        assert getattr(again, field) == value
+        assert READ[field](again) == value
 
 
 @pytest.mark.asyncio
@@ -96,14 +99,14 @@ async def test_reset_retains_reports_and_reset_round_checks_clears_in_place():
     instance = GameInstance(game_key=("web", "reset", "bot"))
     values = deepcopy(VALUES)
     for field, value in values.items():
-        setattr(instance, field, value)
+        WRITE[field](instance, value)
     await instance.reset()
     for field, value in values.items():
-        assert getattr(instance, field) is value
+        assert READ[field](instance) is value
         assert value == VALUES[field]
     instance.reset_round_checks(prepared=True)
     for field, value in values.items():
-        assert getattr(instance, field) is value
+        assert READ[field](instance) is value
         assert value == []
     assert checks.round_checks_prepared(instance) is True
 
@@ -117,9 +120,9 @@ def test_unknown_versions_are_preserved_but_runtime_access_is_rejected():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={module.MODULE_NAME: slot})
     for field in VALUES:
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            READ[field](instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, deepcopy(VALUES[field]))
+            WRITE[field](instance, deepcopy(VALUES[field]))
     saved = instance.to_dict()
     assert saved["modules"][module.MODULE_NAME] == before
     assert GameInstance.from_dict(saved).to_dict()["modules"][module.MODULE_NAME] == before

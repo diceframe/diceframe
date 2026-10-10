@@ -7,6 +7,7 @@ import pytest
 from src.commands.round_llm import _NarrationDeltaFilter, call_llm_with_tag_retry
 from src.engine.game_instance import GameInstance
 from src.llm.client import LLMResponse, OutputTruncatedError
+from src.engine.modules import health as health_state
 
 
 def _make_response(content: str, provider: str = "stream-test") -> LLMResponse:
@@ -524,6 +525,6 @@ def test_three_round_failure_sequence_records_health_event():
             assert "系统提示" in response.system_notices[0]  # 第三轮追加提示
 
     assert inst._tag_fail_streak == 3
-    codes = [e.get("code") for e in inst.health_events]
+    codes = [e.get("code") for e in health_state.health_events(inst)]
     assert "TAG_PARSE_STREAK" in codes
     assert "NARRATION_ONLY_FALLBACK" in codes

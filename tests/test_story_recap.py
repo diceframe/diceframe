@@ -9,6 +9,7 @@ from src.commands.story_recap import StoryRecapGenerator
 from src.engine.game_instance import GameInstance
 from src.llm.client import LLMResponse
 from src.webui.routes.sse import _play_public_signature
+from src.engine.modules import session_stats
 
 
 class RecapLLM:
@@ -67,8 +68,8 @@ async def test_story_recap_uses_recent_public_rounds_and_does_not_add_fake_round
     assert instance.round_number == 12
     assert instance.log[-1]["story_recaps"][0]["from_round"] == 3
     assert instance.log[-1]["story_recaps"][0]["to_round"] == 12
-    assert instance.total_llm_calls == 1
-    assert instance.total_tokens == 17
+    assert session_stats.total_llm_calls(instance) == 1
+    assert session_stats.total_tokens(instance) == 17
     assert _play_public_signature(instance, "p1") != public_signature_before
     prompt = llm.calls[0]["user_message"]
     assert "Round 3" in prompt

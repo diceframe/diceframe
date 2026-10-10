@@ -11,7 +11,7 @@ import pytest
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
 from src.engine.health import record_health_event
-from src.engine.modules import economy_state
+from src.engine.modules import economy_state, room_access
 from src.engine.modules import room_access
 from src.llm.client import LLMResponse
 from src.lorebook.matcher import KeywordMatcher
@@ -20,6 +20,7 @@ from src.webui.api import WebAPI, can_modify_character
 from src.webui.game_lifecycle_context import CreationTransaction
 from src.webui.session import SessionManager
 from src.engine.modules import ruleset_runtime
+from src.engine.modules import round_presentation
 
 
 class FakeLLMClient:
@@ -1257,7 +1258,7 @@ async def test_player_join_rejects_new_seat_when_game_is_full(web_api):
         players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
     )
     inst = registry.get(api._parse_key(created["game_key"]))
-    inst.max_players = 1
+    room_access.replace_max_players(inst, 1)
 
     rejected = await api.create_player(created["game_key"], {"name": "洛恩"})
     restored = await api.create_player(created["game_key"], {
@@ -1453,7 +1454,7 @@ async def test_game_detail_exposes_multiplayer_status(web_api):
     inst = registry.get(api._parse_key(created["game_key"]))
     first_uid = created["players"][0]["user_id"]
     await inst.add_action(first_uid, "我观察门口")
-    inst.last_token_budget_bump = {"kind": "narrative", "from": 2048, "to": 4096}
+    round_presentation.replace_last_token_budget_bump(inst, {"kind": "narrative", "from": 2048, "to": 4096})
 
     detail = api.game_detail(created["game_key"])
     status = api.multiplayer_status(created["game_key"])
@@ -1828,14 +1829,14 @@ async def test_create_game_room_password_tristate(web_api):
     assert r2["ok"] is True
     assert r2.get("generated_password") is None
     inst2 = registry.get(api._parse_key(r2["game_key"]))
-    assert inst2.has_room_password is False
+    assert room_access.has_room_password(inst2) is False
 
     # 3) 单人局未声明 → 不生成（solo 自玩无需密码）
     r3 = await api.create_game("template_world", "单人局", players=list(players), solo=True, room_password=None)
     assert r3["ok"] is True
     assert r3.get("generated_password") is None
     inst3 = registry.get(api._parse_key(r3["game_key"]))
-    assert inst3.has_room_password is False
+    assert room_access.has_room_password(inst3) is False
 
     # 4) 太短 → 拒绝
     keys_before_rejection = {instance.game_key for instance in registry.list_all()}

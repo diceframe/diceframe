@@ -16,6 +16,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.engine.modules import narrative_notes, progression_state
 from src.llm.context_builder import lore_char_budget
 from src.lorebook.activation import migrate_timed_state
 from src.lorebook.budget import estimate_entry_chars, max_entries_within_budget
@@ -26,6 +27,7 @@ from src.lorebook.matcher import (
 )
 from src.lorebook.retrieval import LoreRetriever
 from src.lorebook.store import LorebookStore
+from src.engine.modules import lorebook_runtime
 
 
 def _build(entries: list[dict], *, rng=None) -> KeywordMatcher:
@@ -56,8 +58,8 @@ def _store(tmp_path: Path, entries: list[dict], *, token_budget: int | None = No
 
 def _instance(store: LorebookStore, *, round_number: int = 0):
     return SimpleNamespace(
-        world_id="w", language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=round_number, lorebook_timed_state={},
+        world_id="w", language="zh-CN", npcs={}, players={}, world_state={},
+        modules={"narrative_notes": narrative_notes.fresh(), "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": {}}, "progression": {**progression_state.fresh(), "round": round_number}},
         lorebook_store=store, action_actor_uids=[],
     )
 
@@ -423,7 +425,7 @@ def test_trace_records_cooldown_and_delay_blocks(tmp_path: Path) -> None:
     try:
         retriever = LoreRetriever(KeywordMatcher(), store=store)
         instance = _instance(store, round_number=1)
-        instance.lorebook_timed_state = {"cool": {"cooldown_remaining": 2}}
+        lorebook_runtime.replace_timers(instance, {"cool": {"cooldown_remaining": 2}})
         asyncio.run(retriever.retrieve(instance, "clue"))
         trace = _trace_by_id(retriever)
         assert trace["cool"]["reason_code"] == "cooldown"

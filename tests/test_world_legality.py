@@ -34,6 +34,7 @@ from src.llm.world_prompt import (
     format_world_state_block,
 )
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import world_reports
 
 
 def make_instance(*, world: bool = True, language: str = "zh-CN") -> GameInstance:
@@ -103,10 +104,10 @@ def test_player_facing_blocks_never_contain_gm_only_facts() -> None:
 
 def test_gm_context_carries_world_truth_and_legality_blocks() -> None:
     instance = make_instance()
-    instance.last_world_legality = [{
+    world_reports.replace_last_world_legality(instance, [{
         "player": "p1", "code": "ACTION_LOCATION_MISMATCH",
         "location": "village_west", "current": "village_east",
-    }]
+    }])
 
     context = await_build_context(instance)
 
@@ -303,29 +304,29 @@ def test_malformed_requirements_are_ignored(requirements: object) -> None:
 
 def test_legality_notes_persist_separately_from_overreach() -> None:
     instance = make_instance()
-    instance.last_world_legality = [{
+    world_reports.replace_last_world_legality(instance, [{
         "player": "p1", "code": "ACTION_LOCATION_MISMATCH",
         "location": "village_west", "current": "village_east",
-    }]
-    instance.last_overreach = [{"player": "p1", "reason": "把世界事实当既成事实"}]
+    }])
+    world_reports.replace_last_overreach(instance, [{"player": "p1", "reason": "把世界事实当既成事实"}])
 
     reloaded = GameInstance.from_dict(instance.to_dict())
 
-    assert reloaded.last_world_legality == instance.last_world_legality
-    assert reloaded.last_overreach == instance.last_overreach
+    assert world_reports.last_world_legality(reloaded) == world_reports.last_world_legality(instance)
+    assert world_reports.last_overreach(reloaded) == world_reports.last_overreach(instance)
     reloaded.reset_round_checks()
-    assert reloaded.last_world_legality == []
-    assert reloaded.last_overreach == []
+    assert world_reports.last_world_legality(reloaded) == []
+    assert world_reports.last_overreach(reloaded) == []
 
 
 def test_legality_block_is_localized_and_empty_without_notes() -> None:
     instance = make_instance()
     assert format_world_legality_block(instance) == ""
 
-    instance.last_world_legality = [{
+    world_reports.replace_last_world_legality(instance, [{
         "player": "p1", "code": "ACTION_LOCATION_MISMATCH",
         "location": "village_west", "current": "village_east",
-    }]
+    }])
     zh = format_world_legality_block(instance)
     assert "阿岚" in zh and "village_west" in zh
 

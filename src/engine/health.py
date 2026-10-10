@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 from src.engine import progression
+from src.engine.modules import health as health_state
 
 _MAX_HEALTH_EVENTS = 100
 _SEVERITIES = {"info", "warning", "error", "critical"}
@@ -44,18 +45,12 @@ def record_health_event(
         "resolved": False,
         "ignored": False,
     }
-    events = getattr(instance, "health_events", None)
-    if not isinstance(events, list):
-        events = []
-        setattr(instance, "health_events", events)
+    events = health_state.health_events(instance)
     events.append(event)
     if len(events) > _MAX_HEALTH_EVENTS:
         del events[:len(events) - _MAX_HEALTH_EVENTS]
 
-    status = getattr(instance, "health_status", None)
-    if not isinstance(status, dict):
-        status = {}
-        setattr(instance, "health_status", status)
+    status = health_state.health_status(instance)
     status[component] = severity if severity != "info" else "ok"
     status["last_event_at"] = event["time"]
     return event
@@ -63,7 +58,7 @@ def record_health_event(
 
 def mark_health_event(instance, event_id: str, *, resolved: bool = False, ignored: bool = False) -> bool:
     """Mark a health event as resolved or ignored."""
-    for event in getattr(instance, "health_events", []) or []:
+    for event in health_state.health_events(instance):
         if event.get("id") == event_id:
             if resolved:
                 event["resolved"] = True
@@ -77,7 +72,7 @@ def mark_health_event(instance, event_id: str, *, resolved: bool = False, ignore
 
 def health_payload(instance, include_resolved: bool = False) -> dict:
     """Build the API payload for a GameInstance health view."""
-    events = list(getattr(instance, "health_events", []) or [])
+    events = list(health_state.health_events(instance))
     if not include_resolved:
         events = [
             e for e in events
@@ -85,7 +80,7 @@ def health_payload(instance, include_resolved: bool = False) -> dict:
         ]
     return {
         "ok": True,
-        "status": getattr(instance, "health_status", {}) or {},
+        "status": health_state.health_status(instance),
         "events": events[-_MAX_HEALTH_EVENTS:],
         "total": len(events),
     }

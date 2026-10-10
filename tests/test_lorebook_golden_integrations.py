@@ -17,11 +17,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes, progression_state
 from src.engine.game_instance import GameInstance
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.resolver import resolve_active_books
 from src.lorebook.retrieval import LoreRetriever
 from src.lorebook.store import LorebookStore
+from src.engine.modules import lorebook_runtime
 
 WORLD = "w"
 GAME_KEY = "web|room|gm"
@@ -74,12 +76,17 @@ def _add(store: LorebookStore, book_id: str, entry: dict) -> None:
 
 def _instance(store: LorebookStore, **overrides):
     base = dict(
-        world_id=WORLD, language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=1, lorebook_timed_state={},
+        world_id=WORLD, language="zh-CN", npcs={}, players={}, world_state={},
         lorebook_store=store, game_id=GAME_KEY, game_key=GAME_KEY,
         action_actor_uids=[],
     )
+    timers = overrides.pop("lorebook_timed_state", {})
     base.update(overrides)
+    base["modules"] = {
+        "narrative_notes": narrative_notes.fresh(),
+        "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": timers},
+        "progression": {**progression_state.fresh(), "round": 1},
+    }
     return SimpleNamespace(**base)
 
 
@@ -235,19 +242,19 @@ def test_golden_b_timed_state_survives_save_restart_reload(tmp_path):
     """sticky → cooldown 的完整生命周期跨 save/restart/reload 保持一致。"""
 
     instance = GameInstance(game_key=("web", "room", "gm"))
-    instance.lorebook_timed_state = {
+    lorebook_runtime.replace_timers(instance, {
         "e1": {"sticky_remaining": 2, "cooldown_remaining": 0,
                "pending_cooldown": 1, "delay_remaining": 0},
-    }
+    })
 
     seen: list[dict] = []
     for _ in range(3):
         # 每一轮都走真实的持久化边界：save → restart → reload。
         reloaded = GameInstance.from_dict(instance.to_dict())
-        saved = reloaded.lorebook_timed_state["e1"]
+        saved = lorebook_runtime.timers(reloaded)["e1"]
         # save/load 是 repair 边界（会补齐缺省字段），所以比较计时语义而非整个 dict。
         for field in ("sticky_remaining", "cooldown_remaining", "pending_cooldown"):
-            assert saved[field] == instance.lorebook_timed_state["e1"][field], (
+            assert saved[field] == lorebook_runtime.timers(instance)["e1"][field], (
                 f"save/restart 丢了 {field}"
             )
         seen.append(dict(saved))
@@ -260,7 +267,7 @@ def test_golden_b_timed_state_survives_save_restart_reload(tmp_path):
         "sticky 用尽时必须 arm cooldown"
     )
     # 第 3 次 tick 之后整体过期，计时状态被清掉。
-    assert "e1" not in instance.lorebook_timed_state
+    assert "e1" not in lorebook_runtime.timers(instance)
 
 
 # ---- C: 真实 SwipeGenerator staged 路径 -----------------------------------
@@ -285,7 +292,7 @@ def test_golden_c_swipe_rewrite_runs_on_a_staged_clone_and_never_commits_on_fail
         instance.world_id = WORLD
         instance.language = "zh-CN"
         instance.lorebook_store = store
-        instance.lorebook_timed_state = {}
+        lorebook_runtime.replace_timers(instance, {})
         instance.players = {"p1": {"character_name": "Aster"}}
         instance.round_number = 1
         instance.log = [{
@@ -392,15 +399,15 @@ def test_golden_b_round_tick_drives_delay(tmp_path):
     """delay 由权威 round tick 驱动，而不是倒计时自减。"""
 
     instance = GameInstance(game_key=("web", "room", "gm"))
-    instance.lorebook_timed_state = {
+    lorebook_runtime.replace_timers(instance, {
         "e1": {"sticky_remaining": 0, "cooldown_remaining": 0,
                "pending_cooldown": 0, "delay_remaining": 2},
-    }
+    })
     payload = instance.to_dict()
     restored = GameInstance.from_dict(payload)
-    assert restored.lorebook_timed_state["e1"]["delay_remaining"] == 2
+    assert lorebook_runtime.timers(restored)["e1"]["delay_remaining"] == 2
     restored.update_lorebook_timed_state()
-    assert restored.lorebook_timed_state["e1"]["delay_remaining"] == 1
+    assert lorebook_runtime.timers(restored)["e1"]["delay_remaining"] == 1
     restored.update_lorebook_timed_state()
     # delay 归零后条目整体过期，计时状态被清掉而不是留一个 0 的僵尸项。
-    assert "e1" not in restored.lorebook_timed_state
+    assert "e1" not in lorebook_runtime.timers(restored)

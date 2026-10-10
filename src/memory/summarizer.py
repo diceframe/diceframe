@@ -9,7 +9,7 @@ import logging
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import progression_state
+from src.engine.modules import narrative_notes, progression_state
 from src.llm.parser import sanitize_narration
 
 logger = logging.getLogger("trpg")
@@ -206,9 +206,10 @@ async def summarize(instance: GameInstance, llm_client, system_prompt: str,
     滚动累积：有旧摘要时融合生成，无旧摘要时全新生成。
     """
     log_text = build_summary_input(instance)
+    previous_summary = narrative_notes.summary(instance)
     prev_narrative = (
-        sanitize_narration(instance.summary.get("narrative", ""))
-        if instance.summary else ""
+        sanitize_narration(previous_summary.get("narrative", ""))
+        if previous_summary else ""
     )
     if prev_narrative:
         template = localized_text(instance.language, {
@@ -254,7 +255,8 @@ async def summarize(instance: GameInstance, llm_client, system_prompt: str,
         logger.exception("摘要生成失败")
         # 降级：保留旧摘要，不覆盖（旧摘要可能仍然有效）
         # 仅在没有任何旧摘要时才用 GM 回复兜底
-        if not (instance.summary and instance.summary.get("narrative")):
+        summary = narrative_notes.summary(instance)
+        if not (summary and summary.get("narrative")):
             recent_gm = [
                 sanitize_narration(e.get("gm_response", ""))
                 for e in instance.log[-3:]

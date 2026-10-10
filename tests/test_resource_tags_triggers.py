@@ -14,6 +14,7 @@ from src.commands.state_recap import build_state_change_messages, snapshot_publi
 from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameInstance, GameState
 from src.rules.rule_system import RuleSystem
+from src.engine.modules import round_presentation
 
 
 def _rule_with_resources(tmp_path: Path) -> RuleSystem:
@@ -93,7 +94,7 @@ def test_up_trigger_fires_once_and_injects_gm_directive(tmp_path):
     fired = check_resource_triggers(instance, "p1", rule)
     assert len(fired) == 1
     assert "转正" in fired[0]
-    assert any("转正" in d["text"] for d in instance.gm_directives)
+    assert any("转正" in d["text"] for d in round_presentation.gm_directives(instance))
 
     again = check_resource_triggers(instance, "p1", rule)
     assert again == []  # 一次性

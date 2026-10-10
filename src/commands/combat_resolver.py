@@ -15,7 +15,7 @@ from src.engine.constants import WEAPON_DAMAGE, canonical_item_key
 from src.engine.dice import roll_initiative
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import checks, progression_state
+from src.engine.modules import checks, legacy_combat, progression_state, round_presentation, table_settings
 
 logger = logging.getLogger("trpg")
 
@@ -90,7 +90,7 @@ class CombatResolver:
                 index = int(target_ref.split(":", 1)[1])
                 if index < 0:
                     return None, "", ""
-                enemy = instance.combat_enemies[index]
+                enemy = legacy_combat.combat_enemies(instance)[index]
             except (ValueError, IndexError):
                 return None, "", ""
             name = str(enemy.get("character_name") or enemy.get("name") or f"敌人{index + 1}")
@@ -140,7 +140,7 @@ class CombatResolver:
         """保持旧字段并补齐多人结算引用；同 check_id 不重复追加。"""
         if any(
             str(item.get("check_id") or "") == result.check_id
-            for item in instance.pending_combat_results
+            for item in round_presentation.pending_combat_results(instance)
         ):
             return
         instance.record_combat_result({
@@ -231,7 +231,7 @@ class CombatResolver:
                     weapon=weapon,
                     attr_value=attr_value,
                     combat_model=combat_model,
-                    difficulty=instance.difficulty,
+                    difficulty=table_settings.difficulty(instance),
                     check_result=check,
                     same_faction=same_faction,
                     attacker_uid=actor_uid,
@@ -365,7 +365,7 @@ class CombatResolver:
                 initiative.total,
             )
 
-        for enemy in instance.combat_enemies:
+        for enemy in legacy_combat.combat_enemies(instance):
             enemy_id = enemy.get("name", enemy.get("character_name", "敌人"))
             dexterity = enemy.get("character_sheet", {}).get("attributes", {}).get("dex", 10)
             initiative = roll_initiative((dexterity - 10) // 2)

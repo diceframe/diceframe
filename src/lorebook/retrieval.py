@@ -27,6 +27,7 @@ from typing import Any
 
 from src.engine import progression
 from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import lorebook_runtime, narrative_notes
 from src.engine.world_legality import actor_location_fact_key
 from src.engine.world_state import project_visible_state
 from src.knowledge.visibility import entry_visible_to_viewer
@@ -215,7 +216,7 @@ def lore_query_anchors(
 ) -> dict[str, Any]:
     """本轮锚点：scene / canonical location / 在场 NPC。"""
 
-    scene = str(getattr(instance, "scene", "") or "").strip()
+    scene = str(narrative_notes.scene(instance) or "").strip()
     return {
         "scene": scene,
         "location": lore_query_location(
@@ -635,7 +636,7 @@ class LoreRetriever:
 
     @staticmethod
     def _timed_state(instance: Any, *, mutate_timers: bool) -> dict[str, dict] | None:
-        state = getattr(instance, "lorebook_timed_state", None)
+        state = lorebook_runtime.timers(instance)
         if not isinstance(state, dict):
             return None
         return state if mutate_timers else copy.deepcopy(state)

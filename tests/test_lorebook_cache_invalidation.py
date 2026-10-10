@@ -20,10 +20,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes, progression_state
 from src.lorebook.importer import commit_lorebook_import, preview_lorebook_import
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.retrieval import LoreRetriever
 from src.lorebook.store import LorebookStore
+from src.engine.modules import lorebook_runtime
 
 WORLD_BOOK = "world:w"
 
@@ -42,8 +44,8 @@ def _store(tmp_path: Path, entries: list[dict] | None = None) -> LorebookStore:
 
 def _instance(store: LorebookStore):
     return SimpleNamespace(
-        world_id="w", language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=0, lorebook_timed_state={},
+        world_id="w", language="zh-CN", npcs={}, players={}, world_state={},
+        modules={"narrative_notes": narrative_notes.fresh(), "lorebook_runtime": {**lorebook_runtime.fresh(), "timers": {}}, "progression": {**progression_state.fresh(), "round": 0}},
         lorebook_store=store, action_actor_uids=[],
     )
 

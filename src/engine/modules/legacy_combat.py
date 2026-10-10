@@ -100,52 +100,58 @@ def replace_initiative_current(instance: Any, value: int) -> None:
 
 def begin(instance: Any, order: list[str]) -> None:
     require_writable(instance)
-    instance.initiative_order = list(order)
-    instance.initiative_current = 0
-    instance.combat_state = "active"
-    instance.combat_active = True
+    state = get_module_state(instance, MODULE_NAME)
+    state["initiative_order"] = list(order)
+    state["initiative_current"] = 0
+    state["combat_state"] = "active"
+    state["combat_active"] = True
 
 
 def end(instance: Any) -> None:
     require_writable(instance)
-    instance.combat_state = "none"
-    instance.combat_active = False
-    instance.initiative_order.clear()
-    instance.initiative_current = 0
+    state = get_module_state(instance, MODULE_NAME)
+    state["combat_state"] = "none"
+    state["combat_active"] = False
+    state["initiative_order"].clear()
+    state["initiative_current"] = 0
 
 
 def project_from_ruleset(instance: Any, combat: dict[str, Any]) -> None:
     require_writable(instance)
-    instance.combat_state = "active" if combat.get("status") == "active" else "none"
-    instance.combat_active = instance.combat_state == "active"
-    instance.initiative_order = list(combat.get("initiative") or [])
-    instance.initiative_current = int(combat.get("turn_index", 0) or 0)
+    state = get_module_state(instance, MODULE_NAME)
+    state["combat_state"] = "active" if combat.get("status") == "active" else "none"
+    state["combat_active"] = state["combat_state"] == "active"
+    state["initiative_order"] = list(combat.get("initiative") or [])
+    state["initiative_current"] = int(combat.get("turn_index", 0) or 0)
 
 
 def restore_from_entity_snapshot(instance: Any, snapshot: dict[str, Any]) -> None:
     require_writable(instance)
-    instance.combat_enemies = deepcopy(snapshot.get("combat_enemies") or [])
-    instance.combat_state = str(snapshot.get("combat_state") or "none")
-    instance.combat_active = bool(snapshot.get("combat_active"))
-    instance.initiative_order = deepcopy(list(snapshot.get("initiative_order") or []))
-    instance.initiative_current = int(snapshot.get("initiative_current") or 0)
+    state = get_module_state(instance, MODULE_NAME)
+    state["combat_enemies"] = deepcopy(snapshot.get("combat_enemies") or [])
+    state["combat_state"] = str(snapshot.get("combat_state") or "none")
+    state["combat_active"] = bool(snapshot.get("combat_active"))
+    state["initiative_order"] = deepcopy(list(snapshot.get("initiative_order") or []))
+    state["initiative_current"] = int(snapshot.get("initiative_current") or 0)
 
 
 def restore_from_transaction(instance: Any, snapshot: dict[str, Any]) -> None:
     require_writable(instance)
-    instance.combat_state = str(snapshot["combat_state"])
-    instance.combat_active = bool(snapshot["combat_active"])
-    instance.initiative_order = deepcopy(snapshot["initiative_order"])
-    instance.initiative_current = int(snapshot["initiative_current"])
+    state = get_module_state(instance, MODULE_NAME)
+    state["combat_state"] = str(snapshot["combat_state"])
+    state["combat_active"] = bool(snapshot["combat_active"])
+    state["initiative_order"] = deepcopy(snapshot["initiative_order"])
+    state["initiative_current"] = int(snapshot["initiative_current"])
 
 
 def reset(instance: Any) -> None:
     require_writable(instance)
-    instance.combat_active = False
-    instance.combat_enemies.clear()
-    instance.combat_state = "none"
-    instance.initiative_order.clear()
-    instance.initiative_current = 0
+    state = get_module_state(instance, MODULE_NAME)
+    state["combat_active"] = False
+    state["combat_enemies"].clear()
+    state["combat_state"] = "none"
+    state["initiative_order"].clear()
+    state["initiative_current"] = 0
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

@@ -7,9 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import combat_extension_state as combat
+from src.engine.modules import combat_extension_state as combat, table_settings
 from src.engine.modules import economy_state
 from src.migrations.instance import (
     CURRENT_INSTANCE_SCHEMA_VERSION,
@@ -17,6 +18,11 @@ from src.migrations.instance import (
     migrate_game_state_payload,
 )
 from src.engine.modules import checks
+from src.engine.modules import adventure_runtime_state
+from src.engine.modules import lorebook_runtime
+from src.engine.modules import player_control_state
+from src.engine.modules import round_safety
+from src.engine.player_control import set_away_control_policy
 
 
 ATTRS = [
@@ -174,9 +180,9 @@ def test_full_prior_migration_chain_loads_combat(version):
     assert restored.instance_schema_version == CURRENT_INSTANCE_SCHEMA_VERSION
     assert combat.current(restored) == {"opaque": [1]}
     assert combat.round_snapshots(restored) == {"2": {"opaque": [3]}}
-    assert restored.away_control_policy == "pause"
+    assert player_control_state.away_control_policy(restored) == "pause"
     assert economy_state.state(restored)["run_id"] == restored.run_id
-    assert restored.lorebook_timed_state == {}
+    assert lorebook_runtime.timers(restored) == {}
 
 
 def test_future_instance_schema_rejected():
@@ -238,23 +244,23 @@ def lifecycle_instance():
     populate(instance)
     instance.round_number = 2
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.seed_code = "keep-seed"
+    table_settings.replace_seed_code(instance, "keep-seed")
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 20, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
-    instance.scene = "gate"
+    narrative_notes.replace_scene(instance, "gate")
     instance.action_queue = [{"user_id": "p", "text": "attack"}]
     instance.pending_actions = [{"user_id": "p", "text": "wait"}]
     instance.ready_players = {"p"}
-    instance.round_start_snapshot = {"p": {"hp": 20, "gold": 10}}
+    round_safety.capture_players(instance, {"p": {"hp": 20, "gold": 10}})
     instance.capture_round_entity_snapshot()
     instance.log = [{
         "round": 1, "gm_response": "previous round", "swipes": [],
-        "round_start_snapshot": deepcopy(instance.round_start_snapshot),
+        "round_start_snapshot": deepcopy(round_safety.round_start_snapshot(instance)),
     }]
     checks.replace_last_checks(instance, [{"id": "check"}])
-    instance.death_save_outcomes = {"2": {"p": {"outcome": "stable"}}}
+    round_safety.replace_death_save_outcomes(instance, {"2": {"p": {"outcome": "stable"}}})
     economy_state.state(instance)["next_sequence"] = 7
-    instance.lorebook_timed_state = {"entry": {"sticky": 2}}
+    lorebook_runtime.replace_timers(instance, {"entry": {"sticky": 2}})
     return instance
 
 
@@ -331,7 +337,7 @@ def test_roundtrip_projects_only_module_storage_and_clones_nested_data(json_roun
     populate(instance)
     # A loaded save always carries an explicit play mode; set it so the
     # whole-module comparison below is not about play-mode derivation.
-    instance.play_mode = "free"
+    adventure_runtime_state.replace_play_mode(instance, "free")
     payload = instance.to_dict()
     assert all(name not in payload for name, _ in ATTRS)
     # The module projection is live, not a detached snapshot (unlike the old
@@ -352,7 +358,7 @@ def test_roundtrip_projects_only_module_storage_and_clones_nested_data(json_roun
 async def test_reset_replaces_current_clears_snapshots_in_place_and_retains_policy(use_lifecycle):
     instance = make_instance()
     populate(instance)
-    instance.away_control_policy = "ai_takeover"
+    set_away_control_policy(instance, "ai_takeover")
     instance.modules["other"] = {"schema_version": 77, "keep": [1]}
     slot = instance.modules[combat.MODULE_NAME]
     slot["extra"] = {"keep": True}
@@ -372,7 +378,7 @@ async def test_reset_replaces_current_clears_snapshots_in_place_and_retains_poli
     assert combat.round_snapshots(instance) is snapshots and snapshots == {}
     assert slot["extra"] == {"keep": True}
     assert instance.modules["other"] is other
-    assert instance.away_control_policy == "ai_takeover"
+    assert player_control_state.away_control_policy(instance) == "ai_takeover"
 
 
 def test_staged_aggregate_commit_deepcopies_combat_and_retains_runtime_identity():

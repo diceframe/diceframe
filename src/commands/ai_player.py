@@ -50,6 +50,7 @@ from src.engine.action_gate import (
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.language import DEFAULT_LANGUAGE, localized_text
 from src.engine.player_control import ai_controlled_players, get_control
+from src.engine.modules import room_access
 from src.llm.context_builder import build_player_safe_context
 from src.llm.parser import sanitize_narration
 
@@ -317,7 +318,7 @@ def _ai_seats(instance: GameInstance) -> list[str]:
     """AI-hosted seats in stable uid order, capped by the table's player limit."""
 
     uids = ai_controlled_players(instance)
-    limit = max(0, int(getattr(instance, "max_players", 0) or 0))
+    limit = max(0, int(room_access.max_players(instance) or 0))
     return uids[:limit] if limit else uids
 
 

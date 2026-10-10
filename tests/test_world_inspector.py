@@ -12,6 +12,7 @@ from src.engine.game_instance import GameInstance
 from src.engine.world.inspector import world_inspector
 from src.engine.world_state import apply_world_ops
 from src.memory.delta import MemoryStore
+from src.engine.modules import world_reports
 
 
 def make_instance() -> GameInstance:
@@ -32,9 +33,9 @@ def _populated_instance() -> GameInstance:
         {"op": "start_process", "process_id": "process:ritual", "kind": "ritual",
          "visibility": "gm"},
     ])
-    instance.last_world_events = [
+    world_reports.replace_last_world_events(instance, [
         {"event_id": "ritual", "label": "仪式", "status": "applied"},
-    ]
+    ])
     return instance
 
 

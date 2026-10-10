@@ -1,6 +1,7 @@
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.webui.services.game_queries import GameQueryDependencies, list_games
+from src.engine.modules import room_access, session_stats
 
 
 def _query_dependencies(registry: GameRegistry) -> GameQueryDependencies:
@@ -21,16 +22,16 @@ def test_list_games_returns_most_recent_activity_first(tmp_path):
         rule_id="freeform_fantasy",
         world_name="Old",
     )
-    old.started_at = "2026-08-01T10:00:00+00:00"
-    old.last_activity = "2026-08-02T10:00:00+00:00"
+    session_stats.replace_started_at(old, "2026-08-01T10:00:00+00:00")
+    session_stats.replace_last_activity(old, "2026-08-02T10:00:00+00:00")
     registry.register(old)
     new = GameInstance(
         game_key=("web", "new", "bot"),
         rule_id="freeform_fantasy",
         world_name="New",
     )
-    new.started_at = "2026-08-19T10:00:00+00:00"
-    new.last_activity = "2026-08-20T10:00:00+00:00"
+    session_stats.replace_started_at(new, "2026-08-19T10:00:00+00:00")
+    session_stats.replace_last_activity(new, "2026-08-20T10:00:00+00:00")
     registry.register(new)
     registry.register(GameInstance(
         game_key=("web", "undated", "bot"),
@@ -55,7 +56,7 @@ def test_list_games_reports_each_saves_real_player_limit(tmp_path):
         rule_id="freeform_fantasy",
         world_name="Three seats",
     )
-    instance.max_players = 3
+    room_access.replace_max_players(instance, 3)
     registry.register(instance)
 
     result = list_games(_query_dependencies(registry))

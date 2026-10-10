@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from datetime import datetime, timezone
 
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import legacy_combat, ruleset_runtime
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.webui.ruleset_rest_projection import public_rest_session, saved_rest_session
 
@@ -326,7 +326,7 @@ async def _resolve_live_party_authority(
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
-    if instance.combat_active or instance.combat_state == "active":
+    if legacy_combat.combat_active(instance) or legacy_combat.combat_state(instance) == "active":
         return _failure("REST_NOT_AVAILABLE", "战斗进行中不能休息；请先结束战斗")
 
     async with instance._lock:

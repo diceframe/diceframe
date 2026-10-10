@@ -12,7 +12,9 @@ from aiohttp import web
 
 from src.engine.economy import has_blocking_economy_decision, pending_economy_proposals
 from src.engine.game_instance import GameState
-from src.engine.modules import checks, progression_state
+from src.engine.modules import (
+    checks, media, narrative_notes, private_channels, progression_state, round_presentation, session_stats,
+)
 from src.engine.visibility_rules import proposal_visible_to
 from src.llm.parser import sanitize_narration
 from src.webui.connection_pool import ConnectionPool
@@ -201,7 +203,7 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
         # 页面已先通过 HTTP 获取完整快照。首次 SSE 连接只建立当前基线，
         # 不把既有回合、行动和私聊误报成新事件，再触发一整组重复 GET。
         last_round = progression_state.round_value(inst)
-        last_private_count = len(inst.private_log.get(user_id, []))
+        last_private_count = len(private_channels.private_log(inst).get(user_id, []))
         last_action_digest = _signature_digest(action_signature)
         last_public_digest = _signature_digest(public_signature)
     else:
@@ -266,7 +268,7 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
                     # 同回合回滚、角色状态恢复等操作不会改变既有 SSE 游标，
                     # 仍需显式唤醒玩家端重新拉取完整公开状态。
                     await _write_play_event(resp, last_round, last_private_count, action_signature, public_signature, {'type':'refresh'})
-            priv = inst.private_log.get(user_id, [])
+            priv = private_channels.private_log(inst).get(user_id, [])
             if len(priv) < last_private_count:
                 # 清空私聊等回退操作也要更新游标；客户端通过完整刷新移除旧消息。
                 last_private_count = len(priv)
@@ -289,12 +291,12 @@ def _play_public_signature(inst, user_id: str) -> str:
     payload = {
         "round_number": progression_state.round_value(inst),
         "state": inst.state.value,
-        "last_activity": inst.last_activity,
+        "last_activity": session_stats.last_activity(inst),
         "log_count": len(inst.log),
-        "scene": inst.scene,
-        "scene_image": inst.scene_image,
+        "scene": narrative_notes.scene(inst),
+        "scene_image": media.scene_image(inst),
         "log_scene_image": (inst.log[-1].get("scene_image") if inst.log else None),
-        "quick_actions": getattr(inst, "quick_actions", []),
+        "quick_actions": round_presentation.quick_actions(inst),
         "economy_proposals": [
             proposal for proposal in pending_economy_proposals(inst)
             if proposal_visible_to(

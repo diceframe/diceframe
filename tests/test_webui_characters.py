@@ -19,7 +19,7 @@ from src.webui.services import character_cards
 from src.webui.session import SessionManager
 
 from webapi_harness import FakeLLMClient, web_api, write_world
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import room_access, ruleset_runtime
 
 def test_session_rebind_persists_restored_player_identity(tmp_path):
     manager = SessionManager(tmp_path)
@@ -476,7 +476,7 @@ async def test_player_join_rejects_new_seat_when_game_is_full(web_api):
         players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
     )
     inst = registry.get(api._parse_key(created["game_key"]))
-    inst.max_players = 1
+    room_access.replace_max_players(inst, 1)
 
     rejected = await api.create_player(created["game_key"], {"name": "洛恩"})
     restored = await api.create_player(created["game_key"], {

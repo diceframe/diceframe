@@ -11,7 +11,7 @@ from typing import Any
 
 from src.commands.game_lifecycle import RunInitializationError
 from src.engine.game_instance import GameState
-from src.engine.modules import adventure_runtime_state, content_binding, progression_state, room_access
+from src.engine.modules import adventure_runtime_state, content_binding, progression_state, room_access, table_settings
 from src.content_modules.refs import ContentRef, ContentRefError, parse_content_ref
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.narrative_perspective import validate_narrative_perspective
@@ -480,7 +480,7 @@ async def create_game(
         "players": created_players,
         "round_number": progression_state.round_value(instance),
         "state": instance.state.value,
-        "seed_code": instance.seed_code,
+        "seed_code": table_settings.seed_code(instance),
         "adventure_binding": dict(instance.adventure_binding),
     }
 
@@ -513,7 +513,7 @@ async def reset_game(
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": inst.seed_code,
+        "seed_code": table_settings.seed_code(inst),
     }
 
 
@@ -542,7 +542,7 @@ async def restart_game(
         "narration": dependencies.clean_public_narration(
             inst.log[-1].get("gm_response", "") if inst.log else ""
         ),
-        "seed_code": inst.seed_code,
+        "seed_code": table_settings.seed_code(inst),
     }
 
 
