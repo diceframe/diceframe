@@ -176,7 +176,7 @@ def _system_prompt(
     runtime_log_files: int = 0,
 ) -> str:
     norm_lang = normalize_language(language)
-    lang = norm_lang if norm_lang in ("en", "de") else "zh"
+    lang = norm_lang if norm_lang in ("en", "de", "ru") else "zh"
     base = (PROMPTS_DIR / f"assistant_system_{lang}.md").read_text(encoding="utf-8")
     documents = knowledge or "（没有检索到与本问题可靠相关的公开文档片段）"
     plugins_text = _plugin_context(dependencies, query)

@@ -10,6 +10,7 @@ from typing import Any
 from src.compat.rules_v1 import load_v1_template
 from src.content.rule_locale import materialize_rule
 from src.engine.currency import validate_declared_currency_system
+from src.engine.language import content_locale_candidates
 
 
 class RuleBundleLoader:
@@ -77,13 +78,10 @@ class RuleBundleLoader:
             except (OSError, ValueError):
                 requested = ""
         if requested:
-            exact = root / "locales" / requested / f"{rule_id}.json"
-            if exact.exists():
-                return self.load(exact)
-            base = requested.split("-", 1)[0]
-            fallback = root / "locales" / base / f"{rule_id}.json"
-            if fallback.exists():
-                return self.load(fallback)
+            for candidate in content_locale_candidates(requested):
+                localized = root / "locales" / candidate / f"{rule_id}.json"
+                if localized.exists():
+                    return self.load(localized)
         return self.load(core)
 
     def load_system(self, path: str | Path, locale: str = "") -> Any:

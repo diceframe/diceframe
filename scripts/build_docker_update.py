@@ -131,7 +131,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if build_release.git_dirty() and not args.allow_dirty:
+    # --allow-dirty must short-circuit: git_dirty() shells out to git, which is
+    # absent from the python:3.11-slim build stage (and .dockerignore strips .git),
+    # so evaluating it first makes every in-image build die on FileNotFoundError.
+    if not args.allow_dirty and build_release.git_dirty():
         print("Working tree is dirty; commit first or use --allow-dirty.", file=sys.stderr)
         return 2
     output = build_package(
