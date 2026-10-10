@@ -227,3 +227,15 @@ There is no 3-way merge.
 
 - **Push:** when `server_modified` is true, the user picks overwrite (`update`), keep both (`duplicate`) or `skip`.
 - **Pull** onto a locally modified item: keep both locally.
+
+## Other error codes
+
+Codes not covered above that a client can receive from `/api/content/*`:
+
+| Code | When |
+|---|---|
+| `IMPORT_SOURCE_INVALID` | the item's `source` / `external_id` is missing or not canonical (a card push must declare both), or `canonical_hint` is not a string |
+| `CARD_V3_INVALID` | a card item's `document` is not a `chara_card_v3` envelope: wrong `spec`, no `data` object, or no `data.extensions.diceframe` body |
+| `CARD_IDENTITY_CONFLICT` | defensive: another card already tracks this identity when the item is written. Returned per item with 409; re-run preview |
+| `LOREBOOK_IDENTITY_CONFLICT` | the same, for a lorebook; per item with 409 |
+| `BOOK_NOT_IMPORTED` | **warning**, not an error: the card's `character_book` was skipped because lorebooks are disabled on this server |

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://diceframe.dev/schemas/content-sync/card-body-2.json",
+  "$id": "https://diceframe.dev/schemas/content-sync/card-body.schema.json",
   "title": "DiceFrame character card body (schema 2)",
   "description": "The body a client puts in data.extensions.diceframe of a chara_card_v3 envelope. Only character_name and schema_version are required; every other field falls back to a server default. Server-only fields (id, card_id, provenance, source_plugin, plugin_content_id, raw_sillytavern, ruleset_revision, ruleset_operation_log, ruleset_runtime) are ignored on push.",
   "type": "object",

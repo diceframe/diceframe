@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://diceframe.dev/schemas/content-sync/lorebook-v3.json",
+  "$id": "https://diceframe.dev/schemas/content-sync/lorebook-v3.schema.json",
   "title": "Portable lorebook (lorebook_v3)",
   "description": "The shape clients push and receive. Entries are mirrored by id, so every entry needs a stable id. Limits: at most 2000 entries per book and 32 KB per entry.",
   "type": "object",
