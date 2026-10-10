@@ -19,6 +19,7 @@ from src.webui.map_domain.selection import select_map_definition, select_plugin_
 from src.webui.map_presets import builtin_map_preset
 from src.content_modules.projection import ContentProjectionService
 from src.engine.participant_view import Viewer
+from src.engine.modules import media, narrative_notes
 from src.knowledge.visibility import entry_visible_to_viewer
 
 @dataclass(frozen=True)
@@ -88,7 +89,7 @@ def get_map_locations(
         )
     apply_map_presentation(locations, active_definition, assets)
 
-    current_scene = str(instance.scene or "")
+    current_scene = str(narrative_notes.scene(instance) or "")
     current_location_id = _append_current_scene(locations, current_scene)
     automatic_map = public_map_definition(active_definition, assets) or builtin_map_preset(
         str(instance.world_id or ""),
@@ -175,7 +176,7 @@ def map_background_asset(
         return None
     try:
         selection = dependencies.validate_background_selection(
-            getattr(instance, "map_background", None),
+            media.map_background(instance),
         )
     except ValueError:
         return None
@@ -306,7 +307,7 @@ def _saved_background_selection(
 ) -> dict[str, str]:
     try:
         return dependencies.validate_background_selection(
-            getattr(instance, "map_background", None)
+            media.map_background(instance)
         )
     except ValueError:
         return {"kind": "auto"}

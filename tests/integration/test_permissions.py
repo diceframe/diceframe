@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from src.engine.modules import private_channels
 
 SECRET = "只有乙能看见的暗门机关"
 
@@ -39,8 +40,8 @@ async def test_private_message_reaches_only_its_owner(game_env, create_two_playe
 
     inst = game_env["registry"].get(game_env["api"]._parse_key(game_key))
     # 私有消息只投递给属主
-    assert inst.private_log[player_uid][-1]["text"] == SECRET
-    assert not inst.private_log.get(gm_uid)
+    assert private_channels.private_log(inst)[player_uid][-1]["text"] == SECRET
+    assert not private_channels.private_log(inst).get(gm_uid)
     # 公开叙事不携带私有内容
     assert SECRET not in narration
     # 日志视图（玩家可见面）不泄露私有内容
@@ -64,8 +65,8 @@ async def test_private_isolation_survives_save_and_reload(game_env, create_two_p
     reloaded = await registry.load(api._parse_key(game_key))
 
     assert reloaded is not None
-    assert reloaded.private_log[player_uid][-1]["text"] == SECRET
-    assert not reloaded.private_log.get(gm_uid)
+    assert private_channels.private_log(reloaded)[player_uid][-1]["text"] == SECRET
+    assert not private_channels.private_log(reloaded).get(gm_uid)
 
 
 @pytest.mark.asyncio
@@ -82,9 +83,9 @@ async def test_gm_whisper_is_player_scoped_and_rejects_outsiders(game_env, creat
     assert rejected["ok"] is False
 
     inst = game_env["registry"].get(api._parse_key(game_key))
-    assert inst.private_log[player_uid][-1]["text"] == "GM 对乙的悄悄话"
+    assert private_channels.private_log(inst)[player_uid][-1]["text"] == "GM 对乙的悄悄话"
     assert all(
         "GM 对乙的悄悄话" not in json.dumps(msgs, ensure_ascii=False)
-        for uid, msgs in inst.private_log.items()
+        for uid, msgs in private_channels.private_log(inst).items()
         if uid != player_uid
     )

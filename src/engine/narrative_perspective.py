@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.engine.language import localized_text
+from src.engine.modules import table_settings
 
 NARRATIVE_PERSPECTIVE_AUTO = "auto"
 NARRATIVE_PERSPECTIVE_IMMERSIVE = "immersive"
@@ -42,13 +43,13 @@ def resolve_narrative_perspective(instance: Any) -> str:
     """Resolve ``auto`` against the current session mode, including live switches."""
 
     configured = normalize_narrative_perspective(
-        getattr(instance, "narrative_perspective", NARRATIVE_PERSPECTIVE_AUTO),
+        table_settings.narrative_perspective(instance),
     )
     if configured != NARRATIVE_PERSPECTIVE_AUTO:
         return configured
     return (
         NARRATIVE_PERSPECTIVE_IMMERSIVE
-        if bool(getattr(instance, "solo_mode", False))
+        if bool(table_settings.solo_mode(instance))
         else NARRATIVE_PERSPECTIVE_THIRD_PERSON
     )
 

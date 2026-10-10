@@ -297,7 +297,7 @@ class SwipeGenerator:
             normalized_panels,
             narration=str(target_entry.get("gm_response") or ""),
             actions=target_entry.get("actions") or [],
-            current_scene=str(getattr(instance, "scene", "") or ""),
+            current_scene=str(narrative_notes.scene(instance) or ""),
             source_revision=storyboard_source_revision(target_entry),
         )
         prompt_history = target_entry.setdefault("swipe_scene_image_prompts", [])

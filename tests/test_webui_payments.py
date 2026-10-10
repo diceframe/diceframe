@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 
+from src.engine.modules import narrative_notes
 from src.commands.game_handler import GameHandler
 from src.commands.tag_parser import parse_tag_state
 from src.engine.economy import pending_proposals, queue_effect_group, queue_proposal
@@ -316,7 +317,7 @@ async def test_later_identical_reward_does_not_drop_deferred_effects(web_api):
     assert (await api.resolve_payment(
         result["game_key"], first[0]["id"], True, uid,
     ))["effects_committed"] is True
-    assert inst.scene == "第一天营地"
+    assert narrative_notes.scene(inst) == "第一天营地"
 
     inst.round_number += 1
     second = api._handler._state_applier.apply_state_update(inst, deepcopy(update))
@@ -328,7 +329,7 @@ async def test_later_identical_reward_does_not_drop_deferred_effects(web_api):
     assert (await api.resolve_payment(
         result["game_key"], second[0]["id"], True, uid,
     ))["effects_committed"] is True
-    assert inst.scene == "第二天营地"
+    assert narrative_notes.scene(inst) == "第二天营地"
 
 @pytest.mark.asyncio
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.commands.round_processor import RoundProcessor
-from src.engine.modules import progression_state
+from src.engine.modules import narrative_notes, progression_state
 
 
 class _FakeLLM:
@@ -31,14 +31,17 @@ def _make_processor(content: str = '{"narrative":"摘要内容","key_facts":[]}'
 def _make_instance(round_number: int) -> SimpleNamespace:
     instance = SimpleNamespace(
         game_key=("web", "test"),
-        modules={"progression": {**progression_state.fresh(), "round": round_number}},
+        modules={
+            "progression": {**progression_state.fresh(), "round": round_number},
+            "narrative_notes": narrative_notes.fresh(),
+        },
         language="zh",
         log=[{"round": 1, "actions": [{"user_id": "p1", "text": "环顾四周"}], "gm_response": "一个房间"}],
-        summary={},
-        key_facts=[],
     )
-    instance.set_summary_narrative = lambda narrative: instance.summary.__setitem__("narrative", narrative)
-    instance.set_key_facts = lambda facts: setattr(instance, "key_facts", list(facts))
+    instance.set_summary_narrative = (
+        lambda narrative: narrative_notes.summary(instance).__setitem__("narrative", narrative)
+    )
+    instance.set_key_facts = lambda facts: narrative_notes.replace_key_facts(instance, list(facts))
     return instance
 
 
@@ -55,7 +58,7 @@ async def test_summary_deferred_when_due():
 
     await task
     assert proc.llm_client.called is True
-    assert inst.summary["narrative"] == "摘要内容"
+    assert narrative_notes.summary(inst)["narrative"] == "摘要内容"
     # done 回调已从集合中清理
     assert task not in proc._pending_summary_tasks
 

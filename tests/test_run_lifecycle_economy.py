@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.economy import (
     blocking_economy_proposals,
     cancel_proposals_for_player,
@@ -24,7 +25,7 @@ from src.engine.economy import (
     resolve_proposal,
     set_proposal_status,
 )
-from src.engine.modules import economy_state
+from src.engine.modules import economy_state, media, private_channels, session_stats, table_settings
 from src.commands.economy_effects import (
     guard_unbacked_payment_narration,
     defer_narrative_effects,
@@ -402,17 +403,17 @@ def test_configure_session_reward_policy_normalization() -> None:
     instance.configure_session(
         economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": 120},
     )
-    assert instance.economy_reward_policy == {
+    assert table_settings.economy_reward_policy(instance) == {
         "mode": "auto_small_cash", "auto_reward_cap": 120,
     }
     # 空模式=显式清空，回退规则/全局默认。
     instance.configure_session(economy_reward_policy={"mode": ""})
-    assert instance.economy_reward_policy == {}
+    assert table_settings.economy_reward_policy(instance) == {}
     # 重开拷贝语义：空 dict 幂等。
-    instance.configure_session(economy_reward_policy=dict(instance.economy_reward_policy or {}))
-    assert instance.economy_reward_policy == {}
+    instance.configure_session(economy_reward_policy=dict(table_settings.economy_reward_policy(instance) or {}))
+    assert table_settings.economy_reward_policy(instance) == {}
     instance.configure_session(economy_reward_policy={"mode": "gm_confirm"})
-    assert instance.economy_reward_policy == {"mode": "gm_confirm"}
+    assert table_settings.economy_reward_policy(instance) == {"mode": "gm_confirm"}
     with pytest.raises(ValueError):
         instance.configure_session(economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": -1})
     with pytest.raises(ValueError):
@@ -1238,8 +1239,8 @@ async def test_private_payment_outcome_does_not_leak_into_party_log(web_api) -> 
     assert result["ok"] is True
     assert "economy_resolutions" not in instance.log[-1]
     assert not any("私下报价" in item for item in instance.log[-1]["state_changes"])
-    assert instance.private_log[payer_uid][-1]["kind"] == "economy_resolution"
-    assert other_uid not in instance.private_log
+    assert private_channels.private_log(instance)[payer_uid][-1]["kind"] == "economy_resolution"
+    assert other_uid not in private_channels.private_log(instance)
 
 
 @pytest.mark.asyncio
@@ -1271,7 +1272,7 @@ async def test_purchase_settlement_is_party_visible_even_for_legacy_private_outc
     })
 
     assert any("购买通行证" in item for item in instance.log[-1]["state_changes"])
-    assert not instance.private_log
+    assert not private_channels.private_log(instance)
 
 
 @pytest.mark.asyncio
@@ -1322,7 +1323,7 @@ async def test_payment_decision_commits_or_discards_linked_effects(web_api) -> N
 
     assert committed["effects_committed"] is True
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 15
-    assert instance.scene == "城门内"
+    assert narrative_notes.scene(instance) == "城门内"
     sheet = instance.get_character_sheet(uid)
     owned_items = [
         item
@@ -1331,7 +1332,7 @@ async def test_payment_decision_commits_or_discards_linked_effects(web_api) -> N
         if isinstance(item, dict)
     ]
     assert any(item.get("name") == "城门通行证" for item in owned_items)
-    assert "已经取得城门通行证" in instance.confirmed_items
+    assert "已经取得城门通行证" in narrative_notes.confirmed_items(instance)
     assert instance.get_character_sheet(uid)["xp"] == 7
     assert accepted_group is not None
     assert next(
@@ -1362,7 +1363,7 @@ async def test_payment_decision_commits_or_discards_linked_effects(web_api) -> N
 
     assert rejected["accepted"] is False
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 15
-    assert instance.scene == "城门内"
+    assert narrative_notes.scene(instance) == "城门内"
     assert declined_group is not None
     discarded_group = next(
         item for item in economy_state.state(instance)["effect_groups"]
@@ -1419,7 +1420,7 @@ async def test_effect_failure_rolls_back_the_whole_economy_decision(
 
     assert failed["code"] == "EFFECT_COMMIT_FAILED"
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
-    assert instance.scene != "不应提交的半成品场景"
+    assert narrative_notes.scene(instance) != "不应提交的半成品场景"
     assert proposal["status"] == "pending"
     assert economy_state.state(instance)["transactions"] == []
     assert economy_state.state(instance)["outcomes"] == []
@@ -1435,7 +1436,7 @@ async def test_effect_failure_rolls_back_the_whole_economy_decision(
 
     assert retried["ok"] is True
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 15
-    assert instance.scene == "收费区内"
+    assert narrative_notes.scene(instance) == "收费区内"
     assert len(economy_state.state(instance)["transactions"]) == 1
     assert next(
         item for item in economy_state.state(instance)["effect_groups"]
@@ -1458,7 +1459,7 @@ async def test_economy_scene_image_starts_only_after_authoritative_save(
     instance = registry.get(api._parse_key(created["game_key"]))
     uid = next(iter(instance.players))
     instance.gm_uid = uid
-    instance.scene_image = {"kind": "upload", "asset_id": "old-scene"}
+    media.replace_scene_image(instance, {"kind": "upload", "asset_id": "old-scene"})
     proposal = queue_proposal(
         instance,
         kind="purchase",
@@ -1492,7 +1493,7 @@ async def test_economy_scene_image_starts_only_after_authoritative_save(
         await api.resolve_payment(created["game_key"], proposal["id"], True, uid)
 
     assert schedule_calls == []
-    assert instance.scene_image == {"kind": "upload", "asset_id": "old-scene"}
+    assert media.scene_image(instance) == {"kind": "upload", "asset_id": "old-scene"}
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
 
     api._character_dependencies = replace(
@@ -1830,11 +1831,11 @@ async def test_private_reward_and_payment_stay_out_of_public_gm_context(
     assert "秘密转账-不可公开" not in context
     assert any(
         "秘密线人奖励" in item.get("text", "")
-        for item in instance.private_log[agent_uid]
+        for item in private_channels.private_log(instance)[agent_uid]
     )
     assert any(
         "秘密转账" in item.get("text", "")
-        for item in instance.private_log[agent_uid]
+        for item in private_channels.private_log(instance)[agent_uid]
     )
 
 
@@ -1963,7 +1964,7 @@ async def test_in_flight_narration_is_discarded_after_rollback(
         await processing
 
     assert rejected.value.reason == "stale"
-    assert instance.scene != "错误场景"
+    assert narrative_notes.scene(instance) != "错误场景"
     assert not any(entry.get("gm_response") == "这条叙事已经过期。" for entry in instance.log)
 
 
@@ -1996,7 +1997,7 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
     )
     entered = asyncio.Event()
     release = asyncio.Event()
-    calls_before = instance.total_llm_calls
+    calls_before = session_stats.total_llm_calls(instance)
 
     async def delayed_plan(target, rule, client):
         entered.set()
@@ -2028,7 +2029,7 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
     assert len(checks) == 1
     assert checks_module.round_checks_prepared(instance) is True
     assert "check_request" in instance.action_queue[0]
-    assert instance.total_llm_calls > calls_before
+    assert session_stats.total_llm_calls(instance) > calls_before
 
 
 @pytest.mark.asyncio
@@ -2145,7 +2146,7 @@ async def test_restart_opening_character_effect_survives(web_api, monkeypatch) -
     assert result["ok"] is True
     assert sheet["hp"] == sheet["max_hp"] - 3
     assert sheet["mana"] == 10
-    assert restarted.scene == "风暴海岸"
+    assert narrative_notes.scene(restarted) == "风暴海岸"
 
 
 @pytest.mark.asyncio

@@ -54,20 +54,20 @@ def test_properties_keep_assigned_objects_and_round_trip():
     instance = GameInstance(game_key=("web", "private-module", "bot"))
     logs = {"p1": [{"text": "secret"}]}
     talks = [{"id": "a", "visibility": "party"}]
-    instance.private_log = logs
-    instance.table_talk = talks
+    module.replace_private_log(instance, logs)
+    module.replace_table_talk(instance, talks)
     slot = instance.modules["private_channels"]
-    assert instance.private_log is logs is slot["private_log"]
-    assert instance.table_talk is talks is slot["table_talk"]
-    instance.private_log["p1"].append({"text": "another secret"})
+    assert module.private_log(instance) is logs is slot["private_log"]
+    assert module.table_talk(instance) is talks is slot["table_talk"]
+    module.private_log(instance)["p1"].append({"text": "another secret"})
     saved = instance.to_dict()
     assert "private_log" not in saved and "table_talk" not in saved
     restored = GameInstance.from_dict(saved)
-    assert restored.private_log == logs
-    assert restored.table_talk == talks
+    assert module.private_log(restored) == logs
+    assert module.table_talk(restored) == talks
     assert restored.to_dict()["modules"]["private_channels"] == saved["modules"]["private_channels"]
-    instance.private_log = {}
-    instance.table_talk = []
+    module.replace_private_log(instance, {})
+    module.replace_table_talk(instance, [])
     assert logs and talks  # replacement does not clear the old containers
 
 
@@ -82,15 +82,15 @@ def test_decode_filters_before_truncating_and_ensure_keeps_list_identity():
     assert module.ensure(slot) == before
     instance = GameInstance.from_dict({"game_key": ["web", "filter", "bot"], "state": "created",
                                       "table_talk": entries + [{"visibility": "private"}]})
-    assert instance.table_talk == entries
+    assert module.table_talk(instance) == entries
 
 
 def test_failed_save_removal_preserves_live_list_and_other_exchanges():
     instance = GameInstance(game_key=("web", "rollback", "bot"))
     entries = [{"id": "keep", "visibility": "party"}, {"id": "remove", "visibility": "party"}]
-    instance.table_talk = entries
+    module.replace_table_talk(instance, entries)
     module.remove_table_talk_exchange(instance, "remove")
-    assert instance.table_talk is entries
+    assert module.table_talk(instance) is entries
     assert entries == [{"id": "keep", "visibility": "party"}]
 
 
@@ -103,7 +103,7 @@ def test_future_instance_and_module_versions_fail_closed():
     instance = GameInstance(game_key=("web", "future", "bot"), modules={"private_channels": slot})
     for field in ("private_log", "table_talk"):
         with pytest.raises(ModuleStateError):
-            getattr(instance, field)
+            getattr(module, field)(instance)
         with pytest.raises(ModuleStateError):
-            setattr(instance, field, None)
+            getattr(module, f"replace_{field}")(instance, None)
     assert instance.to_dict()["modules"]["private_channels"] == before

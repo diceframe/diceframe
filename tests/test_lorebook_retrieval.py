@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.world_state import fresh_world_state
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.retrieval import (
@@ -80,7 +81,10 @@ def _instance(**overrides):
         "log": [],
     }
     data.update(overrides)
-    return SimpleNamespace(**data)
+    scene = data.pop("scene")
+    instance = SimpleNamespace(**data, modules={})
+    narrative_notes.replace_scene(instance, scene)
+    return instance
 
 
 class _FakeEmbeddingClient:
@@ -234,7 +238,7 @@ async def test_case_d_present_npc_anchor_only_covers_npcs_in_the_scene() -> None
         },
     )
 
-    assert present_npc_names(instance, instance.scene) == ["院长"]
+    assert present_npc_names(instance, narrative_notes.scene(instance)) == ["院长"]
     hits = await _ids(retriever, instance, "我推开门")
     assert hits == ["warden"]
 

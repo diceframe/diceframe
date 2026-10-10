@@ -65,7 +65,7 @@ from src.webui.services.turns import (
     resume_after_control_change,
     submit_action,
 )
-from src.engine.modules import ruleset_runtime
+from src.engine.modules import ruleset_runtime, table_settings
 
 GAME_KEY = "web|ai-takeover|bot"
 GAME_KEY_PARTS = ("web", "ai-takeover", "bot")
@@ -145,7 +145,7 @@ def make_instance(
     instance = GameInstance(game_key=GAME_KEY_PARTS, rule_id="test")
     instance.state = GameState.ACTIVE_ACTION
     instance.round_number = 1
-    instance.solo_mode = solo
+    table_settings.replace_solo_mode(instance, solo)
     for uid in (*humans, *ai):
         sheet = HUMAN_SHEET if uid in humans else AI_SHEET
         instance.put_player(uid, {

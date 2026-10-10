@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
-from src.engine.modules import checks, economy_state, progression_state
+from src.engine.modules import checks, economy_state, narrative_notes, private_channels, progression_state, table_settings
 from src.engine.visibility_rules import manual_roll_visible_to
 from src.knowledge.visibility import entry_visible_to_viewer
 from src.llm.parser import sanitize_narration
@@ -676,14 +676,15 @@ async def build_context(
     )
 
     # 3. 摘要 + 关键事实
-    summary = sanitize_narration(instance.summary.get("narrative", ""))
+    summary = sanitize_narration(narrative_notes.summary(instance).get("narrative", ""))
     summary_section_parts: list[str] = []
     if summary:
         summary_section_parts.append(_truncate(summary, budget_summary))
-    if instance.key_facts:
+    key_facts = narrative_notes.key_facts(instance)
+    if key_facts:
         facts_lines = [
             f"- {f.get('content', '')}"
-            for f in instance.key_facts
+            for f in key_facts
             if isinstance(f, dict) and f.get("content")
         ]
         if facts_lines:
@@ -694,12 +695,13 @@ async def build_context(
         sec_idx["summary"] = len(parts) - 1
 
     # D1: 已确认事项（防 GM 重复讨论；有预算上限，超窗收尾时优先让出）
-    if instance.confirmed_items:
+    confirmed_items = narrative_notes.confirmed_items(instance)
+    if confirmed_items:
         confirmed_text = localized_text(language, {
-            "en": "; ".join(instance.confirmed_items[-20:]),
-            "zh-CN": "、".join(instance.confirmed_items[-20:]),
-            "ja": "、".join(instance.confirmed_items[-20:]),
-            "de": "; ".join(instance.confirmed_items[-20:]),
+            "en": "; ".join(confirmed_items[-20:]),
+            "zh-CN": "、".join(confirmed_items[-20:]),
+            "ja": "、".join(confirmed_items[-20:]),
+            "de": "; ".join(confirmed_items[-20:]),
         })
         confirmed_text = _truncate(confirmed_text, budget_confirmed)
         heading = localized_text(language, {
@@ -973,9 +975,9 @@ def _player_safe_state(
     return {
         "world_name": instance.world_name,
         "round_number": progression_state.round_value(instance),
-        "scene": instance.scene,
-        "game_time": instance.game_time,
-        "difficulty": instance.difficulty,
+        "scene": narrative_notes.scene(instance),
+        "game_time": narrative_notes.game_time(instance),
+        "difficulty": table_settings.difficulty(instance),
         "language": instance.language,
         "questioning_character": actor_view,
         "public_party_roster": party,
@@ -1044,12 +1046,12 @@ async def build_player_safe_context(
         sec_idx["lorebook"] = len(parts) - 1
 
     summary_parts: list[str] = []
-    narrative = sanitize_narration(str((instance.summary or {}).get("narrative") or ""))
+    narrative = sanitize_narration(str((narrative_notes.summary(instance) or {}).get("narrative") or ""))
     if narrative:
         summary_parts.append(narrative)
     facts = [
         f"- {fact.get('content', '')}"
-        for fact in (instance.key_facts or [])
+        for fact in (narrative_notes.key_facts(instance) or [])
         if isinstance(fact, dict) and fact.get("content")
     ]
     if facts:
@@ -1063,8 +1065,9 @@ async def build_player_safe_context(
         }) + "\n" + _truncate("\n".join(summary_parts), budget_summary))
         sec_idx["summary"] = len(parts) - 1
 
-    if instance.confirmed_items:
-        confirmed = "\n".join(f"- {item}" for item in instance.confirmed_items[-20:])
+    confirmed_items = narrative_notes.confirmed_items(instance)
+    if confirmed_items:
+        confirmed = "\n".join(f"- {item}" for item in confirmed_items[-20:])
         parts.append(localized_text(language, {
             "en": "## Public Confirmed Items",
             "zh-CN": "【公开确认事项】",
@@ -1094,7 +1097,7 @@ async def build_player_safe_context(
 
     own_private = []
     for item in (
-        (instance.private_log or {}).get(actor_uid, []) if visibility == "private" else []
+        (private_channels.private_log(instance) or {}).get(actor_uid, []) if visibility == "private" else []
     ):
         if not isinstance(item, dict):
             continue

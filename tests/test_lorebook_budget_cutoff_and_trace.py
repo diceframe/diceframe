@@ -16,6 +16,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.engine.modules import narrative_notes, progression_state
 from src.llm.context_builder import lore_char_budget
 from src.lorebook.activation import migrate_timed_state
 from src.lorebook.budget import estimate_entry_chars, max_entries_within_budget
@@ -56,8 +57,9 @@ def _store(tmp_path: Path, entries: list[dict], *, token_budget: int | None = No
 
 def _instance(store: LorebookStore, *, round_number: int = 0):
     return SimpleNamespace(
-        world_id="w", language="zh-CN", scene="", npcs={}, players={},
-        world_state={}, round_number=round_number, lorebook_timed_state={},
+        world_id="w", language="zh-CN", npcs={}, players={},
+        modules={"narrative_notes": narrative_notes.fresh(), "progression": {**progression_state.fresh(), "round": round_number}},
+        world_state={}, lorebook_timed_state={},
         lorebook_store=store, action_actor_uids=[],
     )
 

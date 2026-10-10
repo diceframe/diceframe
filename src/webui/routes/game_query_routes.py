@@ -15,6 +15,7 @@ from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
+from src.engine.modules import media, room_access
 
 
 async def api_games(request: web.Request) -> web.Response:
@@ -34,7 +35,7 @@ async def api_detail(request: web.Request) -> web.Response:
         # lobby only: no uids, GM identity, plot, recap, luck or economy data.
         lobby = lobby_detail(d)
         if (
-            getattr(instance, "has_room_password", False)
+            room_access.has_room_password(instance)
             and not WebAccessControl.request_room_token_ok(instance, request)
         ):
             # Story text stays behind the room password.
@@ -70,7 +71,7 @@ async def api_game_scene_image_file(request: web.Request) -> web.StreamResponse:
     reference = (
         api.resolve_default_scene_image(inst.world_id, inst.rule_id)
         if use_default
-        else inst.scene_image
+        else media.scene_image(inst)
         or api.resolve_default_scene_image(inst.world_id, inst.rule_id)
     )
     path = api.resolve_scene_image_file(reference)

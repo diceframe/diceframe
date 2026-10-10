@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from src.engine.modules import narrative_notes
 from src.lorebook.activation import evaluate_probability, eligible_for_recursion
 from src.lorebook.budget import apply_token_budget
 from src.lorebook.resolver import resolve_active_books
@@ -50,7 +51,7 @@ def test_retriever_loads_world_and_global_books(tmp_path):
         store.create_lorebook({"id": "global-book", "name": "Global"})
         store.bind_lorebook({"id": "global-binding", "book_id": "global-book", "scope_kind": "global", "scope_id": ""})
         store.add_entry({"id": "global-entry", "book_id": "global-book", "name": "Global clue", "keywords": ["clue"], "content": "global"})
-        instance = SimpleNamespace(world_id="w", language="zh-CN", scene="", npcs={}, players={}, world_state={}, lorebook_timed_state={}, lorebook_store=store)
+        instance = SimpleNamespace(world_id="w", language="zh-CN", modules={"narrative_notes": narrative_notes.fresh()}, npcs={}, players={}, world_state={}, lorebook_timed_state={}, lorebook_store=store)
         retriever = LoreRetriever(KeywordMatcher(), store=store)
         import asyncio
         hits = asyncio.run(retriever.retrieve(instance, "clue"))

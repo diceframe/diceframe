@@ -27,6 +27,7 @@ from typing import Any
 
 from src.engine import progression
 from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import narrative_notes
 from src.engine.world_legality import actor_location_fact_key
 from src.engine.world_state import project_visible_state
 from src.knowledge.visibility import entry_visible_to_viewer
@@ -215,7 +216,7 @@ def lore_query_anchors(
 ) -> dict[str, Any]:
     """本轮锚点：scene / canonical location / 在场 NPC。"""
 
-    scene = str(getattr(instance, "scene", "") or "").strip()
+    scene = str(narrative_notes.scene(instance) or "").strip()
     return {
         "scene": scene,
         "location": lore_query_location(

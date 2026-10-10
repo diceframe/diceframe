@@ -1,6 +1,7 @@
 """D 批次修复验证测试：B2 难度叠加、D9 命中检定、B1 存档原子性。"""
 import asyncio
 
+from src.engine.modules import narrative_notes
 from src.engine.combat import resolve_attack
 from src.engine.game_instance import GameInstance, GameRegistry
 
@@ -55,12 +56,12 @@ def test_save_load_roundtrip(tmp_path):
     inst = GameInstance(game_key=("test", "g1", "bot"))
     inst.world_id = "test_world"
     inst.world_name = "测试世界"
-    inst.scene = "酒馆"
+    narrative_notes.replace_scene(inst, "酒馆")
     inst.round_number = 5
     asyncio.run(reg.save(inst))
     loaded = asyncio.run(reg.load(("test", "g1", "bot")))
     assert loaded is not None
-    assert loaded.scene == "酒馆"
+    assert narrative_notes.scene(loaded) == "酒馆"
     assert loaded.round_number == 5
     assert loaded.world_name == "测试世界"
 
@@ -69,10 +70,10 @@ def test_save_backup_exists(tmp_path):
     """E1: save 后存在 backup 文件（原子写三步法的回退依据）。"""
     reg = GameRegistry(tmp_path)
     inst = GameInstance(game_key=("test", "g2", "bot"))
-    inst.scene = "场景1"
+    narrative_notes.replace_scene(inst, "场景1")
     asyncio.run(reg.save(inst))
     # 第二次 save 应生成 backup
-    inst.scene = "场景2"
+    narrative_notes.replace_scene(inst, "场景2")
     asyncio.run(reg.save(inst))
     backup = tmp_path / "test#g2#bot" / "state.backup.json"
     assert backup.exists()

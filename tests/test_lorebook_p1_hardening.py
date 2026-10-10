@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.lorebook.activation import normalize_selective_logic
 from src.lorebook.importer import commit_lorebook_import, preview_lorebook_import
 from src.lorebook.matcher import KeywordMatcher
@@ -369,7 +370,7 @@ def _semantic_store(tmp_path: Path, entries: list[dict], *, recursive: bool = Fa
 
 def _instance(store: LorebookStore, timed_state: dict | None = None) -> SimpleNamespace:
     return SimpleNamespace(
-        world_id="w", language="zh-CN", scene="", npcs={}, players={},
+        world_id="w", language="zh-CN", modules={"narrative_notes": narrative_notes.fresh()}, npcs={}, players={},
         world_state={},
         # An empty dict must still be handed through by identity, otherwise the
         # retriever mutates a different object than the one the test inspects.

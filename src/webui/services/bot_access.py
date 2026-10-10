@@ -6,6 +6,8 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from src.engine.modules import room_access
+
 
 GameKey = tuple[str, ...]
 
@@ -25,17 +27,17 @@ async def get_bind_token(dependencies: BotAccessDependencies, game_key: str, rot
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
-    if rotate or not getattr(inst, "bot_bind_token", ""):
+    if rotate or not room_access.bot_bind_token(inst):
         inst.set_bot_bind_token(secrets.token_urlsafe(18))
         await dependencies.registry.save(inst)
-    return {"ok": True, "bind_token": inst.bot_bind_token}
+    return {"ok": True, "bind_token": room_access.bot_bind_token(inst)}
 
 
 async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, bind_token: str) -> dict[str, Any]:
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
-    expected = str(getattr(inst, "bot_bind_token", "") or "")
+    expected = str(room_access.bot_bind_token(inst) or "")
     if not expected or not secrets.compare_digest(expected, str(bind_token or "")):
         return {"ok": False, "error": "绑定凭证无效或已使用，请由 GM 在网页重新生成一次性绑定命令"}
     result = {
@@ -44,7 +46,7 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
         "gm_uid": inst.gm_uid,
         "world_name": inst.world_name,
         "language": str(getattr(inst, "language", "") or "zh-CN"),
-        "player_access_open": bool(getattr(inst, "player_access_open", True)),
+        "player_access_open": bool(room_access.player_access_open(inst)),
         "players": [
             {
                 "user_id": user_id,

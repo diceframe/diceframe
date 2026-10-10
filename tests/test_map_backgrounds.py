@@ -6,10 +6,12 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameRegistry
 from src.webui.services import map_backgrounds
 from src.webui.services import maps as map_service
 from src.engine.participant_view import Viewer
+from src.engine.modules import media
 
 GM_VIEWER = Viewer("gm", "gm")
 
@@ -74,8 +76,10 @@ class GameMapApi(MapBackgroundApi):
         self.instance = SimpleNamespace(
             world_id="default_fantasy",
             rule_id="freeform_dnd",
-            scene="",
-            map_background=selection,
+            modules={
+                "narrative_notes": narrative_notes.fresh(),
+                "media": {**media.fresh(), "map_background": selection},
+            },
         )
         self._plugins = None
         self._reg = SimpleNamespace(get=lambda _key: self.instance)
@@ -127,7 +131,7 @@ def test_existing_game_can_disable_or_replace_automatic_background(tmp_path):
 def test_uploaded_background_uses_game_scoped_asset_url(tmp_path):
     api = GameMapApi(tmp_path, {"kind": "auto"})
     uploaded = api.map_backgrounds.save_upload(png_payload(), "map.png")
-    api.instance.map_background = uploaded["map_background"]
+    media.replace_map_background(api.instance, uploaded["map_background"])
 
     result = map_service.get_map_locations(_map_dependencies(api), "save-1", viewer=GM_VIEWER)
     asset_id = uploaded["map_background"]["asset_id"]
@@ -180,7 +184,7 @@ async def test_map_background_update_is_persisted(tmp_path):
             registry._save_path(instance.game_key).read_text(encoding="utf-8")
         )
     )
-    assert persisted.map_background == {"kind": "none"}
+    assert media.map_background(persisted) == {"kind": "none"}
 
 
 def test_map_background_asset_is_scoped_to_the_game_selection(tmp_path):

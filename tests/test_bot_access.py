@@ -4,6 +4,7 @@ import pytest
 
 from src.engine.game_instance import GameInstance
 from src.webui.services import bot_access
+from src.engine.modules import room_access
 
 
 class FakeRegistry:
@@ -59,7 +60,7 @@ async def test_bind_verification_and_actor_authorization():
     bound = await api.bot_access.verify_bind_game("web|room|bot", token)
     assert bound["gm_uid"] == "gm"
     assert bound["language"] == "en"
-    assert inst.bot_bind_token == ""
+    assert room_access.bot_bind_token(inst) == ""
     assert api._reg.saved == 2
     assert (await api.bot_access.verify_bind_game("web|room|bot", token))["ok"] is False
     assert api.bot_access.actor_allowed("web|room|bot", "player-1") is True

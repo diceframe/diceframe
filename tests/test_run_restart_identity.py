@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.engine.modules import content_binding
+from src.engine.modules import content_binding, table_settings
 from src.webui.services import adventure_runtime
 from src.engine.world_state import world_facts
 from src.llm.client import LLMResponse
@@ -181,7 +181,7 @@ async def test_seed_created_v2_adventure_initializes_progress_and_play_mode(gold
     await _complete_node(golden, created, "gate")
 
     seeded = await golden.api.create_from_seed(
-        source.seed_code, players=_dnd_characters(1), gm_uid="seed_gm",
+        table_settings.seed_code(source), players=_dnd_characters(1), gm_uid="seed_gm",
         language="zh-CN",
     )
 

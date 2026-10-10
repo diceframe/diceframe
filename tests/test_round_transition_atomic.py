@@ -7,9 +7,10 @@ from copy import deepcopy
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import combat_extension_state
+from src.engine.modules import combat_extension_state, session_stats
 from tests.test_progression_module import UNKNOWN_SLOTS, instance_with_state
 from tests.test_round_failure_recovery import _new_game
 from webapi_harness import web_api  # noqa: F401
@@ -38,7 +39,7 @@ async def test_queued_writer_sees_complete_transition(cancel_finish):
             observations.append((instance.state, instance.round_number, deepcopy(instance.log)))
             if cancel_finish:
                 finish.cancel()
-            instance.scene = "queued writer"
+            narrative_notes.replace_scene(instance, "queued writer")
 
     async with instance._lock:
         finish = asyncio.create_task(instance.finish_judgment("narrative"))
@@ -53,7 +54,7 @@ async def test_queued_writer_sees_complete_transition(cancel_finish):
         assert [(entry["round"], entry["gm_response"]) for entry in log] == [(6, "Before"), (7, "narrative")]
         assert instance.action_queue == pending
         assert instance.pending_actions == []
-        assert instance.scene == "queued writer"
+        assert narrative_notes.scene(instance) == "queued writer"
         assert not finish.cancelled()
         assert not instance._lock.locked()
     finally:
@@ -97,7 +98,7 @@ async def test_completion_preserves_log_snapshots_checks_and_timer_semantics(pen
     combat_extension_state.round_snapshots(instance)["7"] = {"schema_version": 1, "phase": "before"}
     timer = asyncio.create_task(asyncio.Event().wait())
     instance._luck_timers["check"] = timer
-    calls_before = instance.total_llm_calls
+    calls_before = session_stats.total_llm_calls(instance)
     pre_state = {"gm": {"hp": 18}}
     pre_combat = {"schema_version": 1, "phase": "pre-update"}
     try:
@@ -116,8 +117,8 @@ async def test_completion_preserves_log_snapshots_checks_and_timer_semantics(pen
         assert entry["pre_world_state"] == instance.world_state
         assert entry["pre_adventure_progress"] == instance.adventure_progress
         assert entry["swipes"] == [] and entry["current_swipe"] == 0
-        assert entry["timestamp"] <= instance.last_activity
-        assert instance.total_llm_calls == calls_before + 1
+        assert entry["timestamp"] <= session_stats.last_activity(instance)
+        assert session_stats.total_llm_calls(instance) == calls_before + 1
         assert "pending_summaries" not in combat_extension_state.current(instance)
         assert "7" not in combat_extension_state.round_snapshots(instance)
         assert instance.state == GameState.ACTIVE_ACTION
@@ -208,7 +209,7 @@ async def test_real_submission_pipeline_commits_and_opens_before_queued_writer(w
         queued.set()
         async with instance._lock:
             observations.append((instance.state, instance.round_number, deepcopy(instance.log[-1])))
-            instance.scene = "after atomic completion"
+            narrative_notes.replace_scene(instance, "after atomic completion")
 
     monkeypatch.setattr(instance, "finish_judgment", finish)
     kwargs = {"expected_run_id": run_before} if guarded else {}

@@ -8,7 +8,7 @@ from typing import Any
 
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import adventure_runtime_state, content_binding, progression_state
+from src.engine.modules import adventure_runtime_state, content_binding, media, progression_state, table_settings
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.migrations import migrate_instance
 from src.rulesets.contracts import LiveAdvancementPolicyRuntime
@@ -48,7 +48,7 @@ async def create_from_seed(
         return config_error
     target_inst = None
     for inst in dependencies.registry.list_all():
-        if inst.seed_code == seed_code:
+        if table_settings.seed_code(inst) == seed_code:
             target_inst = inst
             break
     if not target_inst:
@@ -66,7 +66,7 @@ async def create_from_seed(
     rule_id = _instance_rule_id(dependencies, target_inst)
     resolved_narrative_perspective = (
         narrative_perspective
-        or getattr(target_inst, "narrative_perspective", "auto")
+        or table_settings.narrative_perspective(target_inst)
         or "auto"
     )
     try:
@@ -128,7 +128,7 @@ async def create_from_seed(
             scene_image
             if scene_image
             else (
-                getattr(target_inst, "scene_image", None)
+                media.scene_image(target_inst)
                 or dependencies.resolve_default_scene_image(world_id, rule_id)
             )
         )
@@ -163,7 +163,7 @@ async def create_from_seed(
             world_name=world_name,
             group_name="Web端",
             seed_code=seed_code,
-            difficulty=target_inst.difficulty,
+            difficulty=table_settings.difficulty(target_inst),
             rule_id=rule_id,
             language=resolved_language,
         )
@@ -224,7 +224,7 @@ async def create_from_seed(
                 "error": f"冒险初始化失败，未留下半成品存档：{exc}",
             }
     instance.set_scene_image(selected_scene_image)
-    instance.set_map_background(dict(getattr(target_inst, "map_background", {}) or {}))
+    instance.set_map_background(dict(media.map_background(target_inst) or {}))
     transaction.advance(CreationPhase.INSTANCE_CONFIGURED)
     created_players, player_error = await game_creation_phases.create_players(
         dependencies,

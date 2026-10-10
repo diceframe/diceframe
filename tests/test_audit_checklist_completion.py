@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from src.engine.modules import narrative_notes
 from src.commands.game_handler import GameHandler
 from src.commands.tag_parser import parse_tag_state
 from src.engine.game_instance import GameRegistry
@@ -213,7 +214,7 @@ async def test_logs_pagination_overflow_and_corrupted_save_backup_recovery(audit
         },
     }
     await registry.save(inst)
-    inst.scene = "备份后的新场景"
+    narrative_notes.replace_scene(inst, "备份后的新场景")
     await registry.save(inst)
     registry._save_path(inst.game_key).write_text("{坏掉的 JSON", encoding="utf-8")
     registry._instances.clear()
@@ -221,7 +222,7 @@ async def test_logs_pagination_overflow_and_corrupted_save_backup_recovery(audit
     recovered = await registry.load(inst.game_key)
 
     assert recovered is not None
-    assert recovered.scene != "备份后的新场景"
+    assert narrative_notes.scene(recovered) != "备份后的新场景"
     assert any(e.get("code") == "SAVE_RECOVERED_FROM_BACKUP" for e in recovered.health_events)
 
 

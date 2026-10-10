@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from src.engine.modules import narrative_notes
 from src.plugin_host import PluginHost
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.rules.rule_system import RuleSystem
@@ -1433,7 +1434,7 @@ async def test_content_pack_maps_are_consumed_by_map_service(tmp_path):
         def get(self, key):
             class Instance:
                 world_id = "pack_world"
-                scene = ""
+                modules = {"narrative_notes": narrative_notes.fresh()}
             return Instance()
 
     class Lore:
@@ -1462,7 +1463,7 @@ def test_fantasy_world_uses_builtin_map_background_without_plugin(tmp_path):
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="default_fantasy", scene="")
+            return SimpleNamespace(world_id="default_fantasy", modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1494,7 +1495,7 @@ def test_copied_world_uses_builtin_background_recommended_by_rule(rule_id, asset
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="custom_copy_123", rule_id=rule_id, scene="")
+            return SimpleNamespace(world_id="custom_copy_123", rule_id=rule_id, modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1520,7 +1521,7 @@ def test_old_save_without_rule_uses_world_template_rule_for_builtin_background()
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="legacy_copy_123", rule_id="", scene="")
+            return SimpleNamespace(world_id="legacy_copy_123", rule_id="", modules={"narrative_notes": narrative_notes.fresh()})
 
     class Lore:
         @staticmethod
@@ -1588,7 +1589,7 @@ async def test_content_pack_map_definition_applies_background_icons_and_stable_c
     class Registry:
         @staticmethod
         def get(_key):
-            return SimpleNamespace(world_id="coc_horror", scene="Station")
+            return SimpleNamespace(world_id="coc_horror", modules={"narrative_notes": {**narrative_notes.fresh(), "scene": "Station"}})
 
     class Lore:
         @staticmethod

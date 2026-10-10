@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.engine.game_instance import GameRegistry, GameState
+from src.engine.modules import narrative_notes
 from src.llm.client import LLMClient, ProviderConfig
 from src.lorebook.matcher import KeywordMatcher
 from src.lorebook.store import LorebookStore
@@ -111,7 +112,7 @@ async def main() -> None:
         print_info("继续已有游戏……")
         await instance.resume()
         await instance.start_round()
-        print_gm(f"\n游戏恢复。当前场景: {instance.scene}\n")
+        print_gm(f"\n游戏恢复。当前场景: {narrative_notes.scene(instance)}\n")
 
     # 命令行交互
     print_info("输入行动描述参与游戏，输入 /go 推进回合，/状态 查看信息，/存档 保存，/退出 结束")
@@ -152,7 +153,7 @@ async def main() -> None:
                 print_warn("当前不能推进（可能已在判定中）")
 
         elif user_input in ("/状态", "/status"):
-            print_info(f"Round {instance.round_number} | 场景: {instance.scene} | "
+            print_info(f"Round {instance.round_number} | 场景: {narrative_notes.scene(instance)} | "
                         f"状态: {instance.state.value}")
             for uid, p in instance.players.items():
                 cs = p.get("character_sheet", {})
