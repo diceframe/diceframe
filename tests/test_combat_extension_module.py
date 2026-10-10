@@ -9,7 +9,7 @@ import pytest
 
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import combat_extension_state as combat
+from src.engine.modules import combat_extension_state as combat, table_settings
 from src.engine.modules import economy_state
 from src.migrations.instance import (
     CURRENT_INSTANCE_SCHEMA_VERSION,
@@ -238,7 +238,7 @@ def lifecycle_instance():
     populate(instance)
     instance.round_number = 2
     instance.state = GameState.ACTIVE_JUDGMENT
-    instance.seed_code = "keep-seed"
+    table_settings.replace_seed_code(instance, "keep-seed")
     instance.players = {"p": {"character_sheet": {"hp": 3, "max_hp": 20, "gold": 7}}}
     instance.npcs = {"guard": {"hp": 4}}
     instance.scene = "gate"

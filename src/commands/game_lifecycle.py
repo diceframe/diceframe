@@ -121,7 +121,7 @@ class GameLifecycle:
         *,
         preserve_players: bool,
     ) -> GameInstance:
-        from src.engine.modules import adventure_runtime_state, content_binding, ruleset_runtime
+        from src.engine.modules import adventure_runtime_state, content_binding, ruleset_runtime, table_settings
 
         ruleset_runtime.require_writable(source)
         adventure_runtime_state.require_writable(source)
@@ -137,27 +137,27 @@ class GameLifecycle:
             world_id=source.world_id,
             world_name=source.world_name,
             group_name=source.group_name,
-            seed_code=source.seed_code,
+            seed_code=table_settings.seed_code(source),
             rule_id=source.rule_id,
-            difficulty=source.difficulty,
+            difficulty=table_settings.difficulty(source),
             language=normalize_language(source.language),
             fresh_instance=True,
         )
         ruleset_runtime.require_writable(candidate)
         adventure_runtime_state.require_writable(candidate)
         candidate.configure_session(
-            solo_mode=source.solo_mode,
-            entry_point=source.entry_point,
+            solo_mode=table_settings.solo_mode(source),
+            entry_point=table_settings.entry_point(source),
             gm_uid=source.gm_uid,
-            luck_timeout_seconds=source.luck_timeout_seconds,
-            narrative_perspective=source.narrative_perspective,
-            economy_reward_policy=dict(source.economy_reward_policy or {}),
+            luck_timeout_seconds=table_settings.luck_timeout_seconds(source),
+            narrative_perspective=table_settings.narrative_perspective(source),
+            economy_reward_policy=dict(table_settings.economy_reward_policy(source) or {}),
         )
-        from src.engine.modules import room_access, table_settings
+        from src.engine.modules import room_access
 
         room_access.replace_max_players(candidate, source.max_players)
         room_access.replace_player_access_open(candidate, source.player_access_open)
-        table_settings.replace_gm_style_override(candidate, copy.deepcopy(source.gm_style_override))
+        table_settings.replace_gm_style_override(candidate, copy.deepcopy(table_settings.gm_style_override(source)))
         room_access.replace_bot_bind_token(candidate, source.bot_bind_token)
         room_access.copy_room_password(candidate, source)
         ruleset_runtime.copy_binding_for_new_run(candidate, source)

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import table_settings
 from src.commands.round_helpers import should_multi_step
 from src.commands.round_llm import append_multistep_analysis
 from src.engine.game_instance import GameInstance
@@ -24,7 +25,7 @@ def _make_instance(
     puzzles: list[str] | None = None,
 ) -> GameInstance:
     instance = GameInstance(game_key=("web", "test", "bot"))
-    instance.entry_point = entry_point
+    table_settings.replace_entry_point(instance, entry_point)
     instance.npcs = npcs or {}
     instance.scene = scene
     if puzzles:

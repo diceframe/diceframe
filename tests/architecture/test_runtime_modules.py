@@ -360,19 +360,46 @@ def test_world_report_guard_rejects_direct_writes(source) -> None:
     assert not _world_report_property_writes(MODULES / "world_reports.py", tree)
 
 
+TABLE_SETTINGS_FIELDS = frozenset({
+    "difficulty", "narrative_perspective", "gm_style_override", "solo_mode",
+    "seed_code", "entry_point", "luck_timeout_seconds", "economy_reward_policy",
+    "dice_reveal_mode",
+})
+# The GameInstance table settings facades are gone: writes go through
+# ``table_settings.replace_<field>(...)``. Aggregate methods (configure_*/set_*)
+# and the reset lifecycle own those calls; new-run construction in
+# commands/game_lifecycle.py copies the source run's gm_style_override.
+TABLE_SETTINGS_REPLACE_CALLERS = {
+    MODULES / "table_settings.py",
+    SRC / "engine" / "game_instance.py",
+    SRC / "engine" / "instance_lifecycle.py",
+    SRC / "commands" / "game_lifecycle.py",
+}
+
+
 def _table_settings_property_writes(path: Path, tree: ast.AST) -> list[int]:
-    if path in {MODULES / "table_settings.py", SRC / "engine" / "game_instance.py", SRC / "engine" / "instance_lifecycle.py"}:
+    """Direct attribute stores of a retired name (would raise on GameInstance)."""
+    if path == MODULES / "table_settings.py":
         return []
-    fields = {
-        "difficulty", "narrative_perspective", "gm_style_override", "solo_mode",
-        "seed_code", "entry_point", "luck_timeout_seconds", "economy_reward_policy",
-        "dice_reveal_mode",
-    }
     return [
         node.lineno for node in ast.walk(tree)
         if isinstance(node, ast.Attribute)
         and isinstance(node.ctx, (ast.Store, ast.Del))
-        and node.attr in fields
+        and node.attr in TABLE_SETTINGS_FIELDS
+    ]
+
+
+def _table_settings_replace_calls(path: Path, tree: ast.AST) -> list[int]:
+    if path in TABLE_SETTINGS_REPLACE_CALLERS:
+        return []
+    return [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "table_settings"
+        and node.func.attr.startswith("replace_")
+        and node.func.attr.removeprefix("replace_") in TABLE_SETTINGS_FIELDS
     ]
 
 
@@ -381,7 +408,9 @@ def test_only_table_settings_owners_assign_compatibility_properties() -> None:
     for path in sorted(SRC.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         for line in _table_settings_property_writes(path, tree):
-            violations.append(f"{path.relative_to(ROOT)}:{line}: table settings write outside owner")
+            violations.append(f"{path.relative_to(ROOT)}:{line}: table settings attribute write")
+        for line in _table_settings_replace_calls(path, tree):
+            violations.append(f"{path.relative_to(ROOT)}:{line}: table settings replace call outside owner")
     assert not violations, "\n".join(violations)
 
 
@@ -390,11 +419,22 @@ def test_only_table_settings_owners_assign_compatibility_properties() -> None:
     "instance.solo_mode: bool = True",
     "instance.seed_code += 'x'",
     "del instance.economy_reward_policy",
+    "self.difficulty = '硬核'",
 ])
 def test_table_settings_guard_rejects_external_writes(source) -> None:
     tree = ast.parse(source)
-    assert _table_settings_property_writes(SRC / "commands" / "game_lifecycle.py", tree)
+    for path in ("commands/game_lifecycle.py", "engine/game_instance.py", "engine/instance_lifecycle.py"):
+        assert _table_settings_property_writes(SRC / path, tree)
     assert not _table_settings_property_writes(MODULES / "table_settings.py", tree)
+
+
+def test_table_settings_guard_rejects_replace_calls_outside_owners() -> None:
+    tree = ast.parse("table_settings.replace_solo_mode(x, True)\n"
+                     "table_settings.replace_economy_reward_policy(x, {})\n"
+                     "table_settings.solo_mode(x)")
+    assert len(_table_settings_replace_calls(SRC / "webui" / "services" / "game_controls.py", tree)) == 2
+    for owner in TABLE_SETTINGS_REPLACE_CALLERS:
+        assert not _table_settings_replace_calls(owner, tree)
 
 
 def _room_access_property_writes(path: Path, tree: ast.AST) -> list[int]:

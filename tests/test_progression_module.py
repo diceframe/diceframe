@@ -17,7 +17,7 @@ import pytest
 from src.engine import progression
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.module_state import ModuleStateError
-from src.engine.modules import progression_state
+from src.engine.modules import progression_state, table_settings
 from src.engine.modules import combat_extension_state
 from webapi_harness import web_api  # noqa: F401  # pytest fixture
 from tests.test_round_failure_recovery import _new_game
@@ -39,7 +39,7 @@ UNKNOWN_SLOTS = [
 
 def instance_with_state(slot=None):
     instance = GameInstance(game_key=("web", "progression", "bot"), gm_uid="gm")
-    instance.solo_mode = True
+    table_settings.replace_solo_mode(instance, True)
     instance.round_number = 7
     instance.state = GameState.ACTIVE_ACTION
     instance.players = {"gm": {"character_name": "Hero", "character_sheet": {"hp": 12, "gold": 20}}}

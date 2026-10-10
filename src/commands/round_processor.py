@@ -70,7 +70,7 @@ from src.engine.module_state import ModuleStateError
 from src.engine.modules.media import replace_scene_image
 from src.engine.modules import (
     adventure_runtime_state, checks, legacy_combat, narrative_notes, progression_state, round_safety,
-    ruleset_runtime, session_stats, world_reports,
+    ruleset_runtime, session_stats, table_settings, world_reports,
 )
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
@@ -604,7 +604,7 @@ class RoundProcessor:
         effective_timeout = getattr(instance, "effective_luck_timeout_seconds", None)
         timeout = int(
             effective_timeout() if callable(effective_timeout)
-            else getattr(instance, "luck_timeout_seconds", 60) or 0
+            else table_settings.luck_timeout_seconds(instance) or 0
         )
         if timeout <= 0:
             return

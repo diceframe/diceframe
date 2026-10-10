@@ -27,7 +27,7 @@ from src.engine.dice import d20_dc_cap
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
-from src.engine.modules import economy_state, progression_state, ruleset_runtime
+from src.engine.modules import economy_state, progression_state, ruleset_runtime, table_settings
 from src.engine.world_events import MAX_ADVANCE_MINUTES
 from src.engine.world_legality import (
     MAX_ROUTE_HOPS,
@@ -462,7 +462,7 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
             for entry in instance.log[-2:]
             if entry.get("gm_response")
         ],
-        "difficulty": instance.difficulty,
+        "difficulty": table_settings.difficulty(instance),
         "ruleset": ruleset,
         "players": players,
         # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
@@ -731,7 +731,7 @@ def normalize_check_specs(
             target=target if dice_system == "d20" else None,
             modifier=modifier,
             advantage_mode=advantage_mode,
-            baseline_dc=rule.dc_for_difficulty(instance.difficulty, "normal") if rule else None,
+            baseline_dc=rule.dc_for_difficulty(table_settings.difficulty(instance), "normal") if rule else None,
             dc_cap=d20_dc_cap(rule),
             supports_advantage=rule is None or rule.supports_advantage_mode(advantage),
             dc_reason=str(raw.get("dc_reason") or ""),

@@ -16,6 +16,7 @@ from src.engine.game_instance import GameRegistry
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
+from src.engine.modules import table_settings
 from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
 from src.adventures import AdventureBundleLoader, AdventureResolver
@@ -2113,7 +2114,7 @@ class WebAPI:
     def economy_auto_reward_settings(self, instance: Any = None) -> tuple[bool, int]:
         """按局解析奖励自动结算 (enabled, gold_cap)。
 
-        优先级：本局 GM 覆盖（instance.economy_reward_policy）→ 规则模板
+        优先级：本局 GM 覆盖（table_settings.economy_reward_policy）→ 规则模板
         economy_defaults（D&D 金币与 COC 美元的量级不同）→ 服务器全局配置
         兜底。规则模板读取失败时按无默认值处理，不影响本局覆盖与全局兜底。
         """
@@ -2130,7 +2131,7 @@ class WebAPI:
         except Exception:
             logger.warning("读取规则模板奖励默认值失败，回退全局配置", exc_info=True)
         return resolve_auto_reward_policy(
-            game_policy=getattr(instance, "economy_reward_policy", None),
+            game_policy=table_settings.economy_reward_policy(instance),
             rule_template=rule_template,
             global_enabled=global_enabled,
             global_cap=global_cap,
@@ -2147,7 +2148,7 @@ class WebAPI:
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         await self.save_game_instance(instance)
-        return {"ok": True, "economy_reward_policy": instance.economy_reward_policy}
+        return {"ok": True, "economy_reward_policy": table_settings.economy_reward_policy(instance)}
 
     async def combat_extension_scheduler_advance(self, game_key: str) -> dict[str, Any]:
         """通用战斗扩展：GM 推进 ATB 时间（gauge 累积至有人就绪）。"""

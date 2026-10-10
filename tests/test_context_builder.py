@@ -3,7 +3,7 @@
 import logging
 
 import pytest
-from src.engine.modules import checks, economy_state, progression_state
+from src.engine.modules import checks, economy_state, progression_state, table_settings
 from src.llm.context_builder import (
     _INVENTORY_STATE_LIMIT,
     _KEY_ITEMS_STATE_LIMIT,
@@ -516,7 +516,7 @@ def _manual_roll_instance(requests):
     instance.modules = {"progression": {**progression_state.fresh(), "round": 2}}
     instance.scene = "测试场景"
     instance.game_time = ""
-    instance.difficulty = "normal"
+    table_settings.replace_difficulty(instance, "normal")
     instance.combat_state = {}
     instance.private_log = {}
     instance.modules = {}

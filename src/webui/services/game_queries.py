@@ -9,7 +9,7 @@ from typing import Any, Callable
 from src.engine.game_instance import GameState
 from src.engine.health import health_payload
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
-from src.engine.modules import checks, economy_state, progression_state, ruleset_runtime
+from src.engine.modules import checks, economy_state, progression_state, ruleset_runtime, table_settings
 from src.engine.player_control import away_control_policy
 from src.engine.visibility_rules import manual_roll_visible_to, proposal_visible_to
 from src.llm.parser import sanitize_narration
@@ -78,14 +78,12 @@ def list_games(dependencies: GameQueryDependencies) -> dict[str, Any]:
             "total_tokens": instance.total_tokens,
             "started_at": instance.started_at,
             "last_activity": instance.last_activity,
-            "seed_code": instance.seed_code,
+            "seed_code": table_settings.seed_code(instance),
             "language": normalize_language(
                 getattr(instance, "language", DEFAULT_LANGUAGE)
             ),
-            "solo_mode": instance.solo_mode,
-            "narrative_perspective": getattr(
-                instance, "narrative_perspective", "auto"
-            ),
+            "solo_mode": table_settings.solo_mode(instance),
+            "narrative_perspective": table_settings.narrative_perspective(instance),
             "gm_uid": instance.gm_uid or "",
             "ready_count": multiplayer["ready_count"],
             "alive_count": multiplayer["alive_count"],
@@ -200,7 +198,7 @@ def game_detail(
         "total_tokens": instance.total_tokens,
         "started_at": instance.started_at,
         "last_activity": instance.last_activity,
-        "seed_code": instance.seed_code,
+        "seed_code": table_settings.seed_code(instance),
         "language": normalize_language(
             getattr(instance, "language", DEFAULT_LANGUAGE)
         ),
@@ -212,7 +210,7 @@ def game_detail(
         "away_control_policy": away_control_policy(instance),
         "has_room_password": bool(getattr(instance, "has_room_password", False)),
         "economy_reward_policy": dict(
-            getattr(instance, "economy_reward_policy", {}) or {}
+            table_settings.economy_reward_policy(instance) or {}
         ),
         "combat_extension": _combat_extension_projection(instance, dependencies, viewer_uid),
         "quick_actions": getattr(instance, "quick_actions", []),
@@ -226,14 +224,12 @@ def game_detail(
             )
             else []
         ),
-        "difficulty": instance.difficulty,
-        "solo_mode": instance.solo_mode,
-        "narrative_perspective": getattr(
-            instance, "narrative_perspective", "auto"
-        ),
+        "difficulty": table_settings.difficulty(instance),
+        "solo_mode": table_settings.solo_mode(instance),
+        "narrative_perspective": table_settings.narrative_perspective(instance),
         # custom_instructions 可能包含剧透级 GM 笔记：gm_style_override 只下发给 GM。
         "gm_style_override": (
-            getattr(instance, "gm_style_override", None)
+            table_settings.gm_style_override(instance)
             if viewer_is_gm or (viewer_uid and viewer_uid == (instance.gm_uid or ""))
             else None
         ),

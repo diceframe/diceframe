@@ -71,7 +71,7 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     """
     from src.engine.modules import (
         adventure_runtime_state, checks, legacy_combat, narrative_notes, round_safety, ruleset_runtime,
-        seat_activity, session_stats,
+        seat_activity, session_stats, table_settings,
     )
     from src.engine.modules import combat_extension_state
 
@@ -83,13 +83,13 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     adventure_runtime_state.require_writable(instance)
     narrative_notes.require_writable(instance)
     seat_activity.require_writable(instance)
-    saved_seed = instance.seed_code if keep_seed else ""
+    saved_seed = table_settings.seed_code(instance) if keep_seed else ""
     saved_world_id = instance.world_id
     saved_world_name = instance.world_name
     saved_group_name = instance.group_name
-    saved_solo = instance.solo_mode
-    saved_narrative_perspective = instance.narrative_perspective
-    saved_gm_style_override = copy.deepcopy(instance.gm_style_override)
+    saved_solo = table_settings.solo_mode(instance)
+    saved_narrative_perspective = table_settings.narrative_perspective(instance)
+    saved_gm_style_override = copy.deepcopy(table_settings.gm_style_override(instance))
     saved_language = normalize_language(instance.language)
     saved_ruleset_runtime = copy.deepcopy(ruleset_runtime.binding(instance))
     saved_adventure_binding = copy.deepcopy(instance.adventure_binding)
@@ -139,9 +139,9 @@ def reset_locked(instance: GameInstance, *, keep_seed: bool = True) -> None:
     instance.world_id = saved_world_id
     instance.world_name = saved_world_name
     instance.group_name = saved_group_name
-    instance.solo_mode = saved_solo
-    instance.narrative_perspective = saved_narrative_perspective
-    instance.gm_style_override = saved_gm_style_override
+    table_settings.replace_solo_mode(instance, saved_solo)
+    table_settings.replace_narrative_perspective(instance, saved_narrative_perspective)
+    table_settings.replace_gm_style_override(instance, saved_gm_style_override)
     instance.language = saved_language
-    instance.seed_code = saved_seed
-    logger.info("游戏已重置 (seed=%s) - game_key=%s", instance.seed_code, instance.game_key)
+    table_settings.replace_seed_code(instance, saved_seed)
+    logger.info("游戏已重置 (seed=%s) - game_key=%s", table_settings.seed_code(instance), instance.game_key)

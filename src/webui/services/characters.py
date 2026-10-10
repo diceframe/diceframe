@@ -39,7 +39,7 @@ from src.engine.memory_outbox import (
     queue_memory_delivery,
 )
 from src.engine.game_instance import GameInstance
-from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity
+from src.engine.modules import progression_state, room_access, ruleset_runtime, seat_activity, table_settings
 from src.engine.player_control import claim_seat, is_human_controlled
 from src.content_modules.projection import ContentProjectionService
 from src.commands.economy_effects import pending_decision_notice
@@ -111,7 +111,7 @@ def _record_economy_outcome_in_round(
     if (
         str(outcome.get("visibility") or "private") != "party"
         and not is_purchase
-        and not bool(getattr(instance, "solo_mode", False))
+        and not bool(table_settings.solo_mode(instance))
     ):
         recipients = {
             str(outcome.get("payer_uid") or ""),

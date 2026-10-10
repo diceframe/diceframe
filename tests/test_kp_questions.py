@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.engine.modules import table_settings
 from src.bots.bridge_core.commands import kp_question
 from src.commands.kp_questions import KPQuestionResponder, build_kp_question_prompt
 from src.engine.game_instance import GameInstance
@@ -22,7 +23,7 @@ def _instance() -> GameInstance:
         world_name="阿卡姆疑云",
         gm_uid="gm",
     )
-    instance.solo_mode = False
+    table_settings.replace_solo_mode(instance, False)
     instance.players = {
         "p1": {
             "user_id": "p1",

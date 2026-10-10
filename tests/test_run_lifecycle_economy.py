@@ -24,7 +24,7 @@ from src.engine.economy import (
     resolve_proposal,
     set_proposal_status,
 )
-from src.engine.modules import economy_state
+from src.engine.modules import economy_state, table_settings
 from src.commands.economy_effects import (
     guard_unbacked_payment_narration,
     defer_narrative_effects,
@@ -402,17 +402,17 @@ def test_configure_session_reward_policy_normalization() -> None:
     instance.configure_session(
         economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": 120},
     )
-    assert instance.economy_reward_policy == {
+    assert table_settings.economy_reward_policy(instance) == {
         "mode": "auto_small_cash", "auto_reward_cap": 120,
     }
     # 空模式=显式清空，回退规则/全局默认。
     instance.configure_session(economy_reward_policy={"mode": ""})
-    assert instance.economy_reward_policy == {}
+    assert table_settings.economy_reward_policy(instance) == {}
     # 重开拷贝语义：空 dict 幂等。
-    instance.configure_session(economy_reward_policy=dict(instance.economy_reward_policy or {}))
-    assert instance.economy_reward_policy == {}
+    instance.configure_session(economy_reward_policy=dict(table_settings.economy_reward_policy(instance) or {}))
+    assert table_settings.economy_reward_policy(instance) == {}
     instance.configure_session(economy_reward_policy={"mode": "gm_confirm"})
-    assert instance.economy_reward_policy == {"mode": "gm_confirm"}
+    assert table_settings.economy_reward_policy(instance) == {"mode": "gm_confirm"}
     with pytest.raises(ValueError):
         instance.configure_session(economy_reward_policy={"mode": "auto_small_cash", "auto_reward_cap": -1})
     with pytest.raises(ValueError):
