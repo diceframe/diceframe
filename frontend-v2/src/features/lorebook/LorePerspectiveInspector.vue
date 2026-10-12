@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { LoreActivationPreviewResponse, LoreEntry, LorePreviewResponse, LoreProjection, Player } from '@/api/types'
+import type { MessageKey } from '@/i18n'
 import { useLocale } from '@/composables/useLocale'
 import LoreVisibilityBadge from './LoreVisibilityBadge.vue'
 
@@ -32,6 +33,41 @@ const { t } = useLocale()
 function playerLabel(p: Player): string {
   return String(p.character_name || p.user_id)
 }
+
+// trace 的 final_state / reason_code 保持底层原值（title 里可见），展示层给用户可读的话术。
+const TRACE_STATE_KEYS: Record<string, 'loreTraceIncluded' | 'loreTraceOmitted'> = {
+  included: 'loreTraceIncluded',
+  omitted: 'loreTraceOmitted',
+}
+const TRACE_REASON_KEYS: Record<string, MessageKey> = {
+  keyword: 'loreReasonKeyword',
+  not_a_candidate: 'loreReasonNotCandidate',
+  constant: 'loreReasonConstant',
+  recursive: 'loreReasonRecursive',
+  budget: 'loreReasonBudget',
+  hidden: 'loreReasonHidden',
+  disabled: 'loreReasonDisabled',
+  matched: 'loreReasonMatched',
+  not_matched: 'loreReasonNotMatched',
+  probability_rejected: 'loreReasonProbability',
+}
+function traceStateLabel(state: string): string {
+  const key = TRACE_STATE_KEYS[state]
+  return key ? t(key) : state
+}
+function traceReasonLabel(reason: string): string {
+  if (!reason) return '—'
+  const key = TRACE_REASON_KEYS[reason]
+  return key ? t(key) : reason
+}
+function traceRowText(row: { final_state?: unknown; reason_code?: unknown }): string {
+  const state = String(row.final_state || 'candidate')
+  const reason = String(row.reason_code || '')
+  return `${traceStateLabel(state)} · ${traceReasonLabel(reason)}`
+}
+function traceRowRaw(row: { final_state?: unknown; reason_code?: unknown }): string {
+  return `${row.final_state || 'candidate'} · ${row.reason_code || '—'}`
+}
 </script>
 
 <template>
@@ -57,7 +93,7 @@ function playerLabel(p: Player): string {
       <ul v-else-if="activation?.trace?.length" class="lore-activation-trace">
         <li v-for="(row, index) in activation.trace.filter(item => viewer === 'gm' || Boolean(item.entry_id))" :key="`${row.entry_id || 'safe'}-${index}`">
           <code>{{ row.entry_id || 'hidden' }}</code>
-          <span>{{ row.final_state || 'candidate' }} · {{ row.reason_code || '—' }}</span>
+          <span :title="traceRowRaw(row)">{{ traceRowText(row) }}</span>
         </li>
       </ul>
       <p v-else class="muted small">{{ t('loreActivationTraceEmpty') }}</p>

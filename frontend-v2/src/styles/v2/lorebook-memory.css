@@ -1,16 +1,4 @@
 /* Lorebook and memory are dense reference desks, with controls separated from records. */
-.lorebook-page .lore-world-bar {
-  display: grid;
-  grid-template-columns: minmax(180px, .5fr) minmax(240px, 1.35fr) auto auto;
-  gap: 10px;
-  margin-top: 18px;
-  padding: 12px;
-  border-radius: var(--df-radius-md);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--df-accent) 6%, transparent), transparent),
-    var(--df-surface-1);
-}
-
 .lorebook-page .lore-tools {
   display: grid;
   grid-template-columns: auto minmax(240px, 1fr) auto;

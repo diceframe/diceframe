@@ -189,6 +189,50 @@ test('long admin pages keep the workspace background through all content', async
   expect(geometry.workspaceBottom).toBeGreaterThanOrEqual(Math.max(geometry.pageBottom, geometry.viewportHeight) - 1)
 })
 
+test('lorebook context controls and editor stay usable from phone through desktop', async ({ page }) => {
+  const token = accessToken()
+  await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  await page.addInitScript(() => localStorage.setItem('currentGame', 'web|e2e-lore-golden|web_bot'))
+
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/#/lorebook')
+    await page.evaluate(() => localStorage.removeItem('lore_inspector_open'))
+    await page.reload()
+    await expect(page.locator('.lorebook-page')).toBeVisible()
+
+    const context = page.locator('.lore-context-bar')
+    await expect(context.locator('.lore-context-select')).toHaveCount(2)
+    await expect(context.locator('.lore-context-select').nth(0)).toBeVisible()
+    await expect(context.locator('.lore-context-select').nth(1)).toBeVisible()
+
+    const menu = context.locator('details.lore-menu').nth(1)
+    await menu.locator('summary').click()
+    const geometry = await page.evaluate(() => {
+      const list = document.querySelectorAll<HTMLElement>('.lore-context-bar .lore-menu-list')[1]
+      const bounds = list.getBoundingClientRect()
+      return {
+        left: bounds.left,
+        right: bounds.right,
+        viewport: document.documentElement.clientWidth,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+    expect(geometry.left, `menu left at ${width}px`).toBeGreaterThanOrEqual(0)
+    expect(geometry.right, `menu right at ${width}px`).toBeLessThanOrEqual(geometry.viewport)
+    expect(geometry.overflow, `overflow at ${width}px`).toBe(0)
+    await menu.locator('summary').click()
+
+    if (width <= 1100) await expect(page.locator('.lore-perspective-inspector')).toBeHidden()
+    else await expect(page.locator('.lore-perspective-inspector')).toBeVisible()
+
+    await page.getByRole('button', { name: '新增条目', exact: true }).click()
+    const editor = page.locator('.dialog', { has: page.getByRole('heading', { name: '新增世界书条目' }) })
+    await expect(editor).toBeVisible()
+    await editor.getByRole('button', { name: '取消', exact: true }).click()
+  }
+})
+
 test('phone play side panels open as drawers without entering document flow', async ({ page }) => {
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)

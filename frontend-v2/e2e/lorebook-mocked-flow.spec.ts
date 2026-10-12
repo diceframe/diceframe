@@ -81,7 +81,8 @@ test('Lorebook mocked frontend flow: import, select, activate safely, and export
       await route.fulfill({ json: { format: 'lorebook_v3', counts: { entries: 1, mapped: 1, warnings: 0, unsupported: 0 }, warnings: [] } }); return
     }
     if (request.method() === 'POST' && path === '/lorebooks/import') {
-      expect(body).toMatchObject({ book_id: 'world:w-golden' })
+      // #398 起 import 是 binding-aware 的：默认「新建独立 Book」+ 用户显式选择的绑定。
+      expect(body).toMatchObject({ binding: { scope_kind: 'world', scope_id: 'w-golden' } })
       await route.fulfill({ json: { ok: true, book_id: 'world:w-golden', imported: 1 } }); return
     }
     if (request.method() === 'POST' && path === '/lorebooks/activation-preview') {
@@ -112,32 +113,37 @@ test('Lorebook mocked frontend flow: import, select, activate safely, and export
 
   await page.goto('/#/lorebook')
   await expect(page.locator('.lorebook-page')).toBeVisible()
-  await expect(page.locator('.lorebook-sidebar__item').first()).toHaveClass(/active/)
+
+  const bookSelect = page.locator('.lore-context-bar select').nth(2)
+  const bookMenu = page.locator('.lore-context-bar details.lore-menu').nth(1)
+  // 默认当前 Book = 主世界书伪 id（world:<world id>）。
+  await expect(bookSelect).toHaveValue('world:w-golden')
 
   const importPayload = JSON.stringify({ spec: 'lorebook_v3', data: { lorebook: { name: 'Imported', entries: importedEntries } } })
   await page.locator('input[type=file]').setInputFiles({ name: 'golden.json', mimeType: 'application/json', buffer: Buffer.from(importPayload) })
   const importDialog = page.getByRole('dialog')
   await expect(importDialog).toContainText('lorebook_v3')
-  await importDialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await importDialog.getByRole('button', { name: '导入', exact: true }).click()
   await expect.poll(() => requests.filter(item => item.path === '/lorebooks/import').length).toBe(1)
 
-  await page.getByRole('button', { name: 'Imported Book', exact: true }).click()
-  await expect(page.locator('.lorebook-sidebar__item.active')).toHaveText(/Imported Book/)
+  await bookSelect.selectOption('book:imported')
+  await expect(bookSelect).toHaveValue('book:imported')
   await expect(page.locator('.lore-row strong')).toContainText('Imported clue')
 
   const activationInput = page.locator('.lore-activation-input')
   await activationInput.fill('open the sigil archive')
-  await page.getByRole('button', { name: 'Preview activation', exact: true }).click()
+  await page.getByRole('button', { name: '预览触发', exact: true }).click()
   await expect(page.locator('.lore-activation-trace')).toContainText('gm-secret')
-  await expect(page.locator('.lore-activation-trace')).toContainText('recursive')
+  await expect(page.locator('.lore-activation-trace')).toContainText('递归带入')
 
   await page.getByRole('button', { name: 'Alice', exact: true }).click()
-  await page.getByRole('button', { name: 'Preview activation', exact: true }).click()
+  await page.getByRole('button', { name: '预览触发', exact: true }).click()
   await expect(page.locator('.lore-activation-trace')).toContainText('primary-entry')
   await expect(page.locator('.lore-activation-trace')).not.toContainText('gm-secret')
   await expect(page.locator('.lore-activation-trace')).not.toContainText('secondary-entry')
 
-  await page.getByRole('button', { name: '导出', exact: true }).click()
+  await bookMenu.locator('summary').click()
+  await bookMenu.getByRole('button', { name: '导出', exact: true }).click()
   await expect.poll(() => requests.filter(item => item.path.endsWith('/export')).length).toBe(1)
   expect(requests.some(item => item.path.endsWith('/export'))).toBe(true)
 })

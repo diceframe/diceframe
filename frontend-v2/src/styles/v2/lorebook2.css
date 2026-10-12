@@ -1,93 +1,119 @@
-/* Lorebook: Books sidebar + content column + right-side perspective & visibility inspector. */
+/* Lorebook: content column + right-side perspective & visibility inspector.
+   World / Book / Entry 层级集中在主工作区的上下文条表达，不再有常驻 Books 侧栏。 */
 .lorebook-shell {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 
 .lorebook-shell.inspector-open {
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 280px;
 }
 
 .lorebook-workspace {
   min-width: 0;
 }
 
-/* Books 侧栏：轨道宽度由 shell grid 固定，这里只负责内容排版与溢出安全。 */
-.lorebook-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
+/* World → Book → Entry 上下文条：每行一个层级，Book 行带状态与管理菜单。 */
+.lore-context-bar {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
   padding: 12px;
+  border-radius: var(--df-radius-md);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--df-accent) 6%, transparent), transparent),
+    var(--df-surface-1);
+}
+
+.lore-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lore-context-label {
+  flex: 0 0 auto;
+  min-width: 72px;
+  color: var(--df-text-muted);
+  font-size: .82rem;
+}
+
+.lore-context-select {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 460px;
+}
+
+.lore-book-state {
+  flex: 0 0 auto;
+  color: var(--df-success);
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.lore-book-state.off {
+  color: var(--df-text-muted);
+}
+
+.lore-book-meta {
+  margin: 0;
+  color: var(--df-text-muted);
+  font-size: .8rem;
+}
+
+/* 下拉管理菜单：details/summary，零依赖；菜单项点击后由 runBookMenu 收起。 */
+.lore-menu {
+  position: relative;
+}
+
+.lore-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 .9rem;
   border: 1px solid var(--df-border-soft);
-  border-radius: var(--df-radius-lg);
-  background: linear-gradient(180deg, var(--df-surface-1), var(--df-surface-2));
-}
-
-.lorebook-sidebar__title {
-  margin: 0;
-  color: var(--df-accent-strong);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-
-.lorebook-sidebar__filters {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.lorebook-sidebar__search,
-.lorebook-sidebar__scope {
-  min-width: 0;
-  width: 100%;
-}
-
-.lorebook-sidebar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.lorebook-sidebar__list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
+  border-radius: var(--df-radius-md);
+  cursor: pointer;
   list-style: none;
+  user-select: none;
 }
 
-.lorebook-sidebar__row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+.lore-menu-trigger::-webkit-details-marker {
+  display: none;
 }
 
-.lorebook-sidebar__item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  min-width: 0;
+.lore-menu[open] .lore-menu-trigger {
+  border-color: color-mix(in srgb, var(--df-accent) 45%, var(--df-border-soft));
+}
+
+.lore-menu-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 180px;
+  padding: 6px;
+  gap: 2px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: var(--df-surface-1);
+  box-shadow: var(--df-shadow);
+}
+
+.lore-menu-list button {
+  justify-content: flex-start;
   width: 100%;
+  border: 0;
+  background: transparent;
   text-align: left;
 }
 
-.lorebook-sidebar__name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.lorebook-sidebar__row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.lore-menu-list button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--df-accent) 12%, transparent);
 }
 
 .lore-header-actions {
@@ -273,12 +299,8 @@ body.light .lore-filter-options button.active:not(.primary):not(.danger):not(.su
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--df-accent) 18%, transparent);
 }
 
-.lorebook-page .lore-world-bar {
-  grid-template-columns: minmax(125px, .35fr) minmax(260px, 1.2fr) auto auto;
-}
-
 .lorebook-page .lore-tools {
-  grid-template-columns: auto minmax(260px, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(260px, 1fr) auto;
 }
 
 .lorebook-page .lore-categories {
@@ -401,9 +423,8 @@ body.light .lore-filter-options button.active:not(.primary):not(.danger):not(.su
   padding: 14px 18px 17px;
 }
 
-/* 窄屏：Books 侧栏堆叠到主区上方，检查器从常驻右栏降级为右侧抽屉（由工具栏按钮开关） */
+/* 窄屏：检查器从常驻右栏降级为右侧抽屉，由工具栏按钮开关；上下文条天然单列堆叠 */
 @media (max-width: 1100px) {
-  .lorebook-shell,
   .lorebook-shell.inspector-open {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -429,6 +450,15 @@ body.light .lore-filter-options button.active:not(.primary):not(.danger):not(.su
 
   .lore-perspective-inspector .lore-inspector-close {
     display: inline-flex;
+  }
+}
+
+@media (max-width: 600px) {
+  /* 窄屏行会换行；菜单从触发器左缘展开，避免右对齐后越出视口左侧。 */
+  .lore-context-row .lore-menu-list {
+    right: auto;
+    left: 0;
+    max-width: calc(100vw - 24px);
   }
 }
 
