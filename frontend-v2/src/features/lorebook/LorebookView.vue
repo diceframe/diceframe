@@ -727,7 +727,7 @@ const SCOPE_LABEL_KEYS: Record<string, MessageKey> = {
   world: 'loreScopeWorld', game: 'loreScopeGame', character: 'loreScopeCharacter', global: 'loreScopeGlobal',
 }
 const currentBookScopeLabel = computed(() => {
-  const scope = String(currentBook.value?.scope || '')
+  const scope = String(currentBook.value?.scope || (currentBook.value?.id === primaryBookId.value ? 'world' : ''))
   return scope ? t(SCOPE_LABEL_KEYS[scope] ?? 'loreBooksUnbound') : t('loreBooksUnbound')
 })
 
