@@ -39,6 +39,7 @@ from src.webui.services import character_card_import
 from src.webui.services import content_sync
 from src.lorebook.sync import LorebookSyncExporter, LorebookSyncImporter
 from src.webui.services import memory as memory_service
+from src.webui.services import module_import_adapters
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 
 # Preserve the existing public import used by callers while the service owns the value.
@@ -918,6 +919,15 @@ class WebAPI:
             lambda directory, manifest: modules.preview_module_install(
                 self._module_dependencies, manifest, directory=directory,
             ),
+        )
+
+    def preview_external_module_import(
+        self, payload: bytes, source_name: str = "",
+    ) -> dict[str, Any]:
+        """Preview a data-only external VTT module; never executes its runtime."""
+
+        return module_import_adapters.preview_external_module_import(
+            payload, source_name=source_name,
         )
 
     def validate_module_package(

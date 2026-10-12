@@ -10,6 +10,7 @@ export type ModuleSummary = {
   status: string
   adventure_count: number
   content_counts: Record<string, number>
+  lorebook_count: number
 }
 
 export type ModulesResponse = {
@@ -33,6 +34,7 @@ export type ModuleActionGuard = {
 export type ModuleDetail = ModuleSummary & {
   content: Record<string, Array<{ key: string; title: string; description: string }>>
   adventures: Array<{ adventure_id: string; version: string; format: string; directory_id: string }>
+  lorebooks: Array<{ id: string; name: string; description: string; language: string; enabled: boolean; source_kind: string; source_id: string }>
   bound_games?: ModuleBoundGame[]
   actions?: Record<string, ModuleActionGuard>
 }
@@ -51,6 +53,18 @@ export type ModuleUsageResponse = {
   total_games?: number
 }
 export type ModulePreviewResponse = { ok: boolean; blockers: string[]; warnings: string[] }
+export type ExternalModulePreviewResponse = {
+  ok: boolean
+  adapter?: string
+  format?: string
+  source_name?: string
+  manifest?: Record<string, unknown>
+  warnings?: string[]
+  blockers?: string[]
+  review_required?: boolean
+  auto_installable?: boolean
+  error?: string
+}
 
 /** 在线模组（复用插件市场索引，只保留 content-pack；FIX-06 §8）。 */
 export type ModuleMarketplaceItem = {

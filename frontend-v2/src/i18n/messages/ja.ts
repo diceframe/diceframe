@@ -21,6 +21,8 @@ export const ja = {
   modulesContentPack: 'コンテンツパック',
   modulesVersion: 'バージョン {version}',
   modulesAdventures: 'アドベンチャー',
+  modulesLorebooks: 'ロアブック',
+  modulesNoLorebooks: 'このモジュールには canonical ロアブックがありません。',
   modulesContentCount: 'コンテンツ',
   modulesBack: 'モジュール一覧に戻る',
   modulesNotFound: 'このモジュールは見つかりませんでした。',

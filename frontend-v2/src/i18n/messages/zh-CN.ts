@@ -21,6 +21,8 @@ export const zhCN = {
   modulesContentPack: '内容包',
   modulesVersion: '版本 {version}',
   modulesAdventures: '冒险',
+  modulesLorebooks: '世界书',
+  modulesNoLorebooks: '此模组没有绑定 canonical 世界书。',
   modulesContentCount: '内容',
   modulesBack: '返回模组库',
   modulesNotFound: '未找到该模组。',
