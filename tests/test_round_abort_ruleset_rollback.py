@@ -127,3 +127,20 @@ def test_out_of_range_ledger_mark_restores_state_but_not_ledger(length) -> None:
 
     assert ruleset_runtime.state(instance) == {"state_schema_version": 1, "marker": 1}
     assert [b["batch_id"] for b in ruleset_runtime.event_ledger(instance)] == ["a"]
+
+
+def test_empty_entry_ledger_keeps_an_ambiguous_replacement() -> None:
+    instance = GameInstance(game_key=("web", "entry-empty", "bot"))
+    bind_dnd_combat(instance)
+    entry_state = {"state_schema_version": 1, "marker": 1}
+    entry = {
+        "state": deepcopy(entry_state),
+        "ledger_length": 0,
+        "ledger_last_batch_id": "",
+    }
+    replacement = [_batch("replacement")]
+    ruleset_runtime.replace_event_ledger(instance, deepcopy(replacement))
+
+    assert ruleset_runtime.restore_round_entry(instance, entry) is False
+    assert ruleset_runtime.state(instance) == entry_state
+    assert ruleset_runtime.event_ledger(instance) == replacement

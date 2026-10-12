@@ -163,6 +163,12 @@ def restore_round_entry(instance: Any, entry: Any) -> bool:
     ledger = event_ledger(instance)
     if type(length) is not int or length < 0 or length > len(ledger):
         return False
+    # With an empty entry ledger there is no marker to distinguish an
+    # append-only extension from a ledger that was replaced wholesale.  Keep
+    # the current ledger rather than clearing unrelated events; the caller
+    # still restores the ruleset state and logs the ambiguous ledger.
+    if length == 0 and ledger:
+        return False
     if length:
         last = ledger[length - 1]
         last_id = str(last.get("batch_id") or "") if isinstance(last, dict) else ""
