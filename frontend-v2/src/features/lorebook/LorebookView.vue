@@ -719,6 +719,10 @@ const bindingsDialogOpen = ref(false)
 const bindingsBook = ref<LorebookCard | null>(null)
 const bookBindings = ref<LoreBinding[]>([])
 
+function isPrimaryBook(book: LorebookCard | null | undefined): boolean {
+  return !!book && (book.primary === true || book.id === primaryBookId.value)
+}
+
 /** 当前编辑的 Book：显式选择优先，回落到世界主世界书。 */
 const currentBookId = computed(() => activeBookId.value || primaryBookId.value)
 const currentBook = computed(() => lorebookBooks.value.find(book => book.id === currentBookId.value) || null)
@@ -773,7 +777,7 @@ async function renameBook(book: LorebookCard) {
 }
 
 async function removeBook(book: LorebookCard) {
-  if (book.id === primaryBookId.value) return
+  if (isPrimaryBook(book)) return
   const ok = await confirm({
     title: t('loreBookDeleteTitle'),
     content: t('loreBookDeleteContent', { name: book.name }),
@@ -905,12 +909,12 @@ async function removeBinding(bindingId: string) {
             </button>
             <button type="button" :disabled="busy || !data?.entries?.length" @click="runBookMenu($event, () => exportLore())">{{ t('export') }}</button>
             <button type="button" :disabled="busy || !currentWorldId" @click="runBookMenu($event, () => triggerImport())">{{ t('import') }}</button>
-            <button v-if="currentBook && !currentBook.primary" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => removeBook(currentBook!))">{{ t('loreBooksDelete') }}</button>
+            <button v-if="currentBook && !isPrimaryBook(currentBook)" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => removeBook(currentBook!))">{{ t('loreBooksDelete') }}</button>
           </div>
         </details>
       </div>
       <p v-if="currentBook" class="lore-book-meta">
-        <template v-if="currentBook.id === primaryBookId">{{ t('loreBooksPrimaryBadge') }} · </template>{{ t('loreBookContextScope') }}：{{ currentBookScopeLabel }}
+        <template v-if="isPrimaryBook(currentBook)">{{ t('loreBooksPrimaryBadge') }} · </template>{{ t('loreBookContextScope') }}：{{ currentBookScopeLabel }}
       </p>
     </div>
 
