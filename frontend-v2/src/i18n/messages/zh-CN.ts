@@ -2073,6 +2073,7 @@ export const zhCN = {
   contentLangEn: 'English',
   contentLangJa: '日本語',
   contentLangDe: 'Deutsch',
+  contentLangRu: 'Русский',
   loreEntryInsertionOrder: '插入顺序',
   loreEntryPrioritizeInclusion: '优先纳入',
   ruleEditor: '规则编辑器',

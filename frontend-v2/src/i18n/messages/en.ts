@@ -2073,6 +2073,7 @@ export const en = {
   contentLangEn: 'English',
   contentLangJa: '日本語',
   contentLangDe: 'Deutsch',
+  contentLangRu: 'Русский',
   loreEntryInsertionOrder: 'Insertion order',
   loreEntryPrioritizeInclusion: 'Prioritize inclusion',
   ruleEditor: 'Rule Editor',

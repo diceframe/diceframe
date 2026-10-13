@@ -5,7 +5,7 @@ import { api, errorMessage, setAccessToken, validateAccessToken } from '@/api/cl
 import { currentBackendUrl, isStandaloneFrontend, normalizeBackendUrl, setBackendUrl } from '@/api/connection'
 import type { AppConfig } from '@/api/types'
 import { useLocale, type Locale } from '@/composables/useLocale'
-import { LOCALE_STORAGE_KEY } from '@/i18n'
+import { LOCALE_STORAGE_KEY, SUPPORTED_LOCALES, localeEndonym } from '@/i18n'
 import BrandLogo from '@/components/BrandLogo.vue'
 
 const route = useRoute()
@@ -97,8 +97,7 @@ onMounted(() => {
     <template v-else>
       <label class="locale-switch" :aria-label="t('language')">
         <select :value="locale" @change="onLocaleChange">
-          <option value="zh-CN">中文</option>
-          <option value="en">EN</option>
+          <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeEndonym(code) }}</option>
         </select>
       </label>
       <div class="login-stage" aria-hidden="true"><i v-for="n in 12" :key="n" /></div>

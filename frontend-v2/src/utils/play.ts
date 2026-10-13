@@ -24,8 +24,11 @@ const STATE_LABELS: Record<string, { zh: string; en: string }> = {
 }
 export function gameStateLabel(state?: string): string {
   const label = state ? STATE_LABELS[state] : undefined
-  if (label) return i18n.global.locale.value === 'en' ? label.en : label.zh
-  return state || (i18n.global.locale.value === 'en' ? 'Unknown' : '未知')
+  // Only Chinese takes the zh string; every other locale reads better in
+  // English than in Chinese, matching the backend fallback chain.
+  const chinese = i18n.global.locale.value === 'zh-CN'
+  if (label) return chinese ? label.zh : label.en
+  return state || (chinese ? '未知' : 'Unknown')
 }
 
 export function playerColor(userId: string): string {

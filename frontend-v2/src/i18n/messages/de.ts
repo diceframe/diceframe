@@ -2070,6 +2070,7 @@ export const de = {
   contentLangEn: 'English',
   contentLangJa: '日本語',
   contentLangDe: 'Deutsch',
+  contentLangRu: 'Русский',
   loreEntryInsertionOrder: 'Einfügereihenfolge',
   loreEntryPrioritizeInclusion: 'Aufnahme priorisieren',
   ruleEditor: 'Regeleditor',

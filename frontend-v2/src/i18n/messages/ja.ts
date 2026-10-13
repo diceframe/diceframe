@@ -2070,6 +2070,7 @@ export const ja = {
   contentLangEn: 'English',
   contentLangJa: '日本語',
   contentLangDe: 'Deutsch',
+  contentLangRu: 'Русский',
   loreEntryInsertionOrder: '挿入順',
   loreEntryPrioritizeInclusion: '優先的に含める',
   ruleEditor: 'ルールエディター',

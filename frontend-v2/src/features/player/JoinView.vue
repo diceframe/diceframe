@@ -8,6 +8,7 @@ import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { ROOM_TOKEN_REJECTED_EVENT, SEAT_TOKEN_HEADER, readRoomToken, readSeatToken, storeRoomToken, storeSeatToken } from '@/utils/seatToken'
 import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ruleSchema'
 import { useLocale, type Locale } from '@/composables/useLocale'
+import { SUPPORTED_LOCALES, localeEndonym } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { characterCardNeedsConversion, characterCardRuleName } from '@/utils/characterCards'
 import { joinSkillsPayload } from '@/features/player/joinSkills'
@@ -383,8 +384,7 @@ async function create() {
         <label class="locale-select">
           <span>{{ t('language') }}</span>
           <select :value="locale" @change="onLocaleChange">
-            <option value="zh-CN">{{ t('chinese') }}</option>
-            <option value="en">{{ t('english') }}</option>
+            <option v-for="code in SUPPORTED_LOCALES" :key="code" :value="code">{{ localeEndonym(code) }}</option>
           </select>
         </label>
         <button @click="router.push({ name: 'overview' })">{{ t('backToOverview') }}</button>

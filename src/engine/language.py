@@ -8,12 +8,16 @@ DEFAULT_LANGUAGE = "zh-CN"
 # *_ja 规则模板/词表/prompt + 前端 ja 消息，见 P3-A）。de（German）按同一模式
 # 追加：核心 UI/GM 输出与规则附录已支持，内置世界模板/SRD 等大体量内容仍随
 # localized_text 的回退链落回英文，尚未逐条翻译（与 ja 现状一致）。
-SUPPORTED_LANGUAGES = {"zh-CN", "en", "ja", "de"}
+# ru (Russian) follows the same pattern as de: the language is registered here
+# so it can be selected, the GM output instruction and the front-end messages
+# are translated, and everything else rides the localized_text fallback chain
+# down to English until it is translated entry by entry.
+SUPPORTED_LANGUAGES = {"zh-CN", "en", "ja", "de", "ru"}
 
 # 本地化字段后缀登记：中文（zh-*）无后缀（直接用原字段）；
 # 新增语言在此登记后缀后，{key}_{suffix} 式字段即可被 localized_field 查到。
 # 字段可选，缺失时回退原字段，不强制维护。
-_LANG_FIELD_SUFFIXES = {"en": "en", "ja": "ja", "de": "de"}
+_LANG_FIELD_SUFFIXES = {"en": "en", "ja": "ja", "de": "de", "ru": "ru"}
 
 
 def normalize_language(value: object) -> str:
@@ -24,6 +28,8 @@ def normalize_language(value: object) -> str:
         return "ja"
     if text in {"de", "de-de", "de-at", "de-ch", "german", "deutsch"}:
         return "de"
+    if text in {"ru", "ru-ru", "ru-by", "ru-kz", "russian", "русский"}:
+        return "ru"
     if text in {"zh", "zh-cn", "cn", "chinese", "简体中文", "中文"}:
         return "zh-CN"
     return DEFAULT_LANGUAGE
@@ -42,6 +48,30 @@ def localized_text(language: object, texts: dict[str, str], fallback: str = "") 
     """
     lang = normalize_language(language)
     return texts.get(lang) or texts.get("en") or texts.get("zh-CN") or fallback
+
+
+def content_locale_candidates(locale: object) -> list[str]:
+    """Ordered locale tags to try when resolving localized content on disk.
+
+    Mirrors the `localized_text` chain: the requested tag, its bare language
+    subtag, then English. Chinese is deliberately left out of the chain — the
+    core template file already carries the Chinese text, so a Chinese request
+    must fall through to it instead of picking up an English overlay.
+
+    Without the English step, every locale that ships no content of its own
+    (ru, de today; ja for worlds) resolved straight to the Chinese core, so a
+    Russian game listed Chinese worlds and rules.
+    """
+    requested = str(locale or "").strip().replace("_", "-")
+    if not requested:
+        return []
+    candidates: list[str] = []
+    for value in (requested, requested.split("-", 1)[0]):
+        if value and value not in candidates:
+            candidates.append(value)
+    if not requested.lower().startswith("zh") and "en" not in candidates:
+        candidates.append("en")
+    return candidates
 
 
 def lang_suffix(language: object) -> str:
@@ -84,6 +114,8 @@ def language_name(value: object) -> str:
         return "日本語"
     if lang == "de":
         return "Deutsch"
+    if lang == "ru":
+        return "Русский"
     return "简体中文"
 
 
@@ -132,6 +164,22 @@ def gm_language_instruction(value: object) -> str:
             "- キャラクターID・タグ名・JSONキー・ダイス表記は翻訳しない。"
             "プレイヤー向けの散文だけ翻訳する。\n"
             "- 料金や報酬はサーバー側の明示的な提案なしに完了として描写しないこと。"
+        )
+    if lang == "ru":
+        return (
+            "## Язык вывода\n"
+            "- Повествование ведущего, описания сцен, приватные сообщения и "
+            "варианты QUICK_ACTIONS, обращённые к игроку, должны быть написаны "
+            "на естественном русском языке.\n"
+            "- Структурный протокол остаётся без изменений: разделитель `---` и "
+            "теги HP, GOLD, LOOT, SCENE, PRIVATE, QUICK_ACTIONS, NONE должны "
+            "выводиться ровно в требуемом формате заглавными буквами.\n"
+            "- Не переводить идентификаторы персонажей, имена тегов, ключи JSON "
+            "и запись бросков кубов. Переводить только текст, предназначенный "
+            "игрокам.\n"
+            "- Никогда не описывать списание платы или выдачу награды как "
+            "совершившиеся без явного серверного предложения; покупки проводятся "
+            "через оформление заказа у ведущего."
         )
     return (
         "## 输出语言\n"
