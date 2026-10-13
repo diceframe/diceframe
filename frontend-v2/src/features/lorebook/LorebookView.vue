@@ -685,7 +685,6 @@ async function loadLorebooks() {
 }
 
 function selectLorebook(bookId: string) {
-  if (!lorebookBooks.value.some(item => item.id === bookId)) return
   activeBookId.value = bookId
   void loadLore()
 }
