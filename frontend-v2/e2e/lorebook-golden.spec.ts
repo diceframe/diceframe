@@ -313,10 +313,10 @@ test.describe('Lorebook Golden (real chain)', () => {
   })
 
   /**
-   * 内容语言选择器必须覆盖全局四个 Locale（zh-CN / en / ja / de），且与 UI 语言独立。
+   * 内容语言选择器必须覆盖全局五个 Locale（zh-CN / en / ja / de / ru），且与 UI 语言独立。
    * fixture 里备了 ja / de 标记的 world，切换内容语言后 world selector 按 filterByContentLanguage 过滤。
    */
-  test('content language selector covers all four locales and filters worlds', async ({ page }, testInfo) => {
+  test('content language selector covers all five locales and filters worlds', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'Uses the desktop inspector layout')
 
     await page.goto('/#/lorebook')
@@ -326,7 +326,7 @@ test.describe('Lorebook Golden (real chain)', () => {
     const worldSelect = page.locator('.lore-context-bar select').nth(1)
 
     // 语言名统一走 i18n 自身名称契约，值与全局 Locale 一致。
-    await expect(languageSelect.locator('option')).toHaveText(['简体中文', 'English', '日本語', 'Deutsch'])
+    await expect(languageSelect.locator('option')).toHaveText(['简体中文', 'English', '日本語', 'Deutsch', 'Русский'])
 
     await languageSelect.selectOption('ja')
     const jaOption = worldSelect.locator('option', { hasText: 'ゴールデン・ロア・ワールド' })

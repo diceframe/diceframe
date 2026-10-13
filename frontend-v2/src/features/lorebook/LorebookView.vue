@@ -906,7 +906,7 @@ async function removeBinding(bindingId: string) {
             </button>
             <button type="button" :disabled="busy || !data?.entries?.length" @click="runBookMenu($event, () => exportLore())">{{ t('export') }}</button>
             <button type="button" :disabled="busy || !currentWorldId" @click="runBookMenu($event, () => triggerImport())">{{ t('import') }}</button>
-            <button v-if="currentBook && currentBook.id !== primaryBookId" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => removeBook(currentBook!))">{{ t('loreBooksDelete') }}</button>
+            <button v-if="currentBook && !currentBook.primary" type="button" class="danger" :disabled="busy" @click="runBookMenu($event, () => removeBook(currentBook!))">{{ t('loreBooksDelete') }}</button>
           </div>
         </details>
       </div>
