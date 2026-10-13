@@ -139,6 +139,39 @@ class _FakeApi:
         return {"ok": True, "map_background": selection}
 
 
+class _StoryboardLlm:
+    """Small deterministic public-storyboard model used by service tests."""
+
+    def __init__(self, content: str):
+        self.content = content
+        self.calls = 0
+
+    async def call(self, *_args, **_kwargs):
+        self.calls += 1
+        return SimpleNamespace(narration=self.content, content=self.content)
+
+
+def _storyboard_instance() -> SimpleNamespace:
+    return SimpleNamespace(
+        gm_uid="gm",
+        game_key=("web", "room", "bot"),
+        run_id="run-1",
+        scene="雾港",
+        players={
+            "alice": {"character_name": "Alice"},
+            "bob": {"character_name": "Bob"},
+        },
+        log=[{
+            "round": 3,
+            "gm_response": "Alice在码头守望。与此同时，Bob在塔底检查残骸。",
+            "actions": [],
+            "current_swipe": 0,
+            "scene_panels": [],
+        }],
+        scene_image=None,
+    )
+
+
 class _Request:
     def __init__(
         self,
@@ -149,6 +182,7 @@ class _Request:
         query=None,
         game_key="web|room|bot",
         owner_authenticated=False,
+        player_preview=False,
         access_password_configured=False,
         asset_id=ASSET_ID,
         confirmed=True,
@@ -162,6 +196,7 @@ class _Request:
         self._values = {
             "user_id": user_id,
             "owner_authenticated": owner_authenticated,
+            "player_preview": player_preview,
             ACCESS_PASSWORD_CONFIGURED_KEY: access_password_configured,
         }
         self.can_read_body = body is not None
@@ -274,6 +309,98 @@ def test_avatar_references_only_include_explicit_panel_participants(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_multiplayer_avatar_generation_uses_only_effective_reference_labels(tmp_path):
+    """Missing portraits must not create an N-files-to-N+1-names mapping."""
+
+    alice_avatar = tmp_path / "alice.webp"
+    bob_avatar = tmp_path / "bob.webp"
+    alice_avatar.write_bytes(b"alice")
+    bob_avatar.write_bytes(b"bob")
+
+    class _Instance(SimpleNamespace):
+        def set_scene_image(self, reference):
+            self.scene_image = reference
+
+    instance = _Instance(
+        gm_uid="gm",
+        game_key=("web", "room", "bot"),
+        run_id="run-1",
+        round_number=3,
+        scene="雾港",
+        players={
+            "alice": {
+                "character_name": "Alice",
+                "character_sheet": {
+                    "portrait": {"kind": "upload", "asset_id": "a"},
+                },
+            },
+            "bob": {
+                "character_name": "Bob",
+                "character_sheet": {
+                    "portrait": {"kind": "upload", "asset_id": "b"},
+                },
+            },
+            # Charlie is visibly present but has no uploaded portrait.
+            "charlie": {"character_name": "Charlie", "character_sheet": {}},
+        },
+        log=[{
+            "round": 3,
+            "gm_response": "Alice、Bob和Charlie一起站在雾港码头。",
+            "actions": [],
+            "current_swipe": 0,
+            "scene_panels": [],
+        }],
+        scene_image=None,
+    )
+
+    class _UnexpectedLlm:
+        calls = 0
+
+        async def call(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("manual single-image generation must not infer a storyboard")
+
+    async def save(_instance):
+        return None
+
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    llm = _UnexpectedLlm()
+    service = GeneratedImageService(GeneratedImageDependencies(
+        imagegen=imagegen,
+        get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None,
+        avatar_file=lambda asset_id: {
+            "a": alice_avatar,
+            "b": bob_avatar,
+        }.get(asset_id),
+        save_instance=save,
+        llm_client=llm,
+    ))
+
+    result = await service.generate_current_round(
+        "web|room|bot",
+        "gm",
+        "Alice、Bob和Charlie在码头并肩调查。",
+        3,
+        panels=[],
+        use_avatar_references=True,
+    )
+
+    assert result["ok"] is True
+    assert llm.calls == 0
+    request = imagegen.requests[-1]
+    assert [reference.character_id for reference in request.reference_images] == [
+        "alice",
+        "bob",
+    ]
+    assert request.context["avatar_reference_names"] == {
+        "alice": "Alice",
+        "bob": "Bob",
+    }
+
+
+@pytest.mark.asyncio
 async def test_global_generation_requires_admin_and_returns_generated_reference(tmp_path):
     api = _FakeApi(tmp_path)
     denied = await generated_images.api_generate_image(_Request(
@@ -334,6 +461,263 @@ async def test_game_generation_enforces_purpose_permissions(tmp_path):
         body={"prompt": "portrait", "purpose": "avatar"},
     ))
     assert outsider.status == 403
+
+
+@pytest.mark.asyncio
+async def test_owner_authenticated_session_uses_persisted_gm_identity(tmp_path):
+    """The local owner session id (web_*) is not the game's gm_uid."""
+    api = _FakeApi(tmp_path)
+    owner = _Request(
+        api,
+        user_id="web_local_session",
+        owner_authenticated=True,
+    )
+
+    generated = await generated_images.api_generate_image(
+        _Request(
+            api,
+            user_id="web_local_session",
+            owner_authenticated=True,
+            body={"prompt": "harbor", "purpose": "scene"},
+        )
+    )
+    assert generated.status == 200
+
+    history = await generated_images.api_game_generated_images(owner)
+    assert history.status == 200
+
+    background = await generated_images.api_generated_image_as_map_background(owner)
+    assert background.status == 200
+
+    preview = await generated_images.api_generate_image(
+        _Request(
+            api,
+            user_id="player",
+            owner_authenticated=True,
+            player_preview=True,
+            body={"prompt": "harbor", "purpose": "scene"},
+        )
+    )
+    assert preview.status == 403
+
+
+@pytest.mark.asyncio
+async def test_owner_identity_is_forwarded_to_current_round_route(tmp_path):
+    api = _FakeApi(tmp_path)
+    seen = {}
+
+    async def fake_generate_current_round_image(
+        game_key, user_id, prompt, round_number, panels, use_avatar_references,
+        panel_count, combine_avatar_references,
+    ):
+        seen["game_key"] = game_key
+        seen["user_id"] = user_id
+        assert combine_avatar_references is True
+        return {"ok": True}
+
+    api.generate_current_round_image = fake_generate_current_round_image
+    response = await generated_images.api_generate_current_round_image(
+        _Request(
+            api,
+            user_id="web_local_session",
+            owner_authenticated=True,
+            body={"prompt": "harbor"},
+        )
+    )
+
+    assert response.status == 200
+    assert seen == {"game_key": "web|room|bot", "user_id": "gm"}
+
+
+@pytest.mark.asyncio
+async def test_storyboard_candidate_is_persisted_and_read_after_service_recreation(tmp_path):
+    """Closing/unmounting the modal must not lose an unapplied candidate."""
+    instance = _storyboard_instance()
+    saves = []
+
+    async def save(current):
+        saves.append(current)
+
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    llm = _StoryboardLlm(
+        '{"panels":['
+        '{"participants":["alice"],"location":"码头",'
+        '"description":"Alice在雾中守望","evidence_ids":["n1"]},'
+        '{"participants":["bob"],"location":"塔底",'
+        '"description":"Bob检查潮湿残骸","evidence_ids":["n2"]}]}',
+    )
+    deps = GeneratedImageDependencies(
+        imagegen=imagegen,
+        get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None,
+        save_instance=save,
+        llm_client=llm,
+    )
+    first = GeneratedImageService(deps)
+
+    result = await first.analyze_storyboard("web|room|bot", "gm", 3)
+    assert result["ok"] is True
+    assert len(result["panels"]) == 2
+    assert instance.log[-1]["scene_panels"] == []
+    assert instance.log[-1]["scene_panel_candidate"]["requested_panel_count"] is None
+    assert len(saves) == 1
+
+    # A new service instance represents a dialog/component being recreated;
+    # the persisted candidate, not the in-memory cache, is the source of truth.
+    recreated = GeneratedImageService(deps)
+    draft = recreated.storyboard_draft("web|room|bot", "gm", 3)
+    assert draft["panels"] == []
+    assert draft["candidate"]["panels"] == result["panels"]
+    assert draft["candidate"]["requested_panel_count"] is None
+
+
+@pytest.mark.asyncio
+async def test_stale_storyboard_candidate_is_ignored_after_applied_draft_changes(tmp_path):
+    instance = _storyboard_instance()
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    llm = _StoryboardLlm(
+        '{"panels":[{"participants":["alice"],"location":"码头",'
+        '"description":"Alice在雾中守望","evidence_ids":["n1"]},'
+        '{"participants":["bob"],"location":"塔底",'
+        '"description":"Bob检查潮湿残骸","evidence_ids":["n2"]}]}',
+    )
+    service = GeneratedImageService(GeneratedImageDependencies(
+        imagegen=imagegen,
+        get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None,
+        llm_client=llm,
+    ))
+    result = await service.analyze_storyboard("web|room|bot", "gm", 3)
+    assert result["ok"] is True
+    candidate = instance.log[-1]["scene_panel_candidate"]
+
+    # Applying/editing a draft changes the source revision.  The old
+    # candidate must not be shown as if it were still applicable.
+    instance.log[-1]["scene_panels"] = [{
+        "participants": ["alice"],
+        "location": "码头",
+        "description": "已应用的单图草稿",
+    }]
+    assert instance.log[-1]["scene_panel_candidate"] == candidate
+    draft = service.storyboard_draft("web|room|bot", "gm", 3)
+    assert draft["panels"][0]["description"] == "已应用的单图草稿"
+    assert draft["candidate"] is None
+
+
+@pytest.mark.asyncio
+async def test_fixed_count_candidate_is_bound_to_requested_count(tmp_path):
+    instance = _storyboard_instance()
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    llm = _StoryboardLlm(
+        '{"panels":[{"participants":["alice"],"location":"码头",'
+        '"description":"Alice守望","evidence_ids":["n1"]},'
+        '{"participants":["bob"],"location":"塔底",'
+        '"description":"Bob检查","evidence_ids":["n2"]}]}',
+    )
+    service = GeneratedImageService(GeneratedImageDependencies(
+        imagegen=imagegen,
+        get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None,
+        llm_client=llm,
+    ))
+    result = await service.analyze_storyboard("web|room|bot", "gm", 3, panel_count=2)
+    assert result["ok"] is True
+    assert instance.log[-1]["scene_panel_candidate"]["requested_panel_count"] == 2
+
+    # The generic draft projection still exposes it for a reopened dialog,
+    # while a mismatched fixed-count lookup rejects it.
+    draft = service.storyboard_draft("web|room|bot", "gm", 3)
+    assert draft["candidate"]["requested_panel_count"] == 2
+    assert service._read_persisted_candidate(
+        instance.log[-1], requested_panel_count=3,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_fixed_count_failed_analysis_is_not_cached_or_saved(tmp_path):
+    instance = _storyboard_instance()
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    llm = _StoryboardLlm(json.dumps({"panels": [
+        {"participants": ["alice"], "location": "码头", "description": f"动作{i}", "evidence_ids": ["n1"]}
+        for i in range(3)
+    ]}))
+    service = GeneratedImageService(GeneratedImageDependencies(
+        imagegen=imagegen, get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None, llm_client=llm,
+    ))
+    automatic = await service.analyze_storyboard("web|room|bot", "gm", 3)
+    assert automatic["ok"] and len(automatic["panels"]) == 3
+    old_candidate = instance.log[-1]["scene_panel_candidate"].copy()
+    for _ in range(2):
+        result = await service.analyze_storyboard("web|room|bot", "gm", 3, panel_count=6)
+        assert result["ok"] is False and "要求 6 格" in result["error"]
+    assert llm.calls == 5  # automatic once, then two attempts per fixed request.
+    assert instance.log[-1]["scene_panel_candidate"] == old_candidate
+    assert all(key[2] != 6 for key in service._storyboard_cache)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", range(1, 7))
+async def test_fixed_generation_keeps_count_in_request_and_saved_layout(tmp_path, count):
+    instance = _storyboard_instance()
+    instance.set_scene_image = lambda reference: setattr(instance, "scene_image", reference)
+    imagegen = _FakeImageGenerationService(tmp_path / "unused.webp")
+    imagegen.auto_storyboard = True
+    panels = [
+        {"participants": ["alice"], "location": "码头", "description": f"动作{i}"}
+        for i in range(count)
+    ]
+
+    async def save(_instance):
+        pass
+
+    service = GeneratedImageService(GeneratedImageDependencies(
+        imagegen=imagegen, get_instance=lambda _key: instance,
+        update_map_background=lambda *_args: None, save_instance=save,
+    ))
+    rejected = await service.generate_current_round("web|room|bot", "gm", "公开要求", 3, panels + [panels[0]], False, count)
+    assert not rejected["ok"] and not imagegen.requests
+    result = await service.generate_current_round("web|room|bot", "gm", "公开要求", 3, panels, False, count)
+    assert result["ok"]
+    assert len(result["panels"]) == count
+    assert imagegen.requests[0].context["requested_panel_count"] == count
+    assert imagegen.requests[0].context["storyboard"]["panels"] == panels
+    assert instance.log[-1]["scene_image"]["panels"] == panels
+    if count == 6:
+        assert result["layout"] == instance.log[-1]["scene_image"]["layout"] == "six-panel"
+
+
+@pytest.mark.asyncio
+async def test_current_round_route_forwards_uncombined_reference_choice(tmp_path):
+    api = _FakeApi(tmp_path)
+
+    async def generate(*args):
+        assert args[-1] is False
+        return {"ok": True}
+
+    api.generate_current_round_image = generate
+    result = await generated_images.api_generate_current_round_image(_Request(
+        api, owner_authenticated=True,
+        body={"prompt": "harbor", "combine_avatar_references": False},
+    ))
+    assert result.status == 200
+    result = await generated_images.api_generate_current_round_image(_Request(
+        api, body={"prompt": "harbor", "combine_avatar_references": "false"},
+    ))
+    assert result.status == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 7, 2.5, True, "6"])
+async def test_storyboard_routes_reject_invalid_fixed_counts(tmp_path, count):
+    api = _FakeApi(tmp_path)
+    for route in (generated_images.api_analyze_storyboard, generated_images.api_generate_current_round_image):
+        result = await route(_Request(api, body={"prompt": "harbor", "panel_count": count}))
+        assert result.status == 400
 
 
 @pytest.mark.asyncio

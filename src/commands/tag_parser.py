@@ -44,9 +44,17 @@ def _extract_tag_lines(text: str, result: dict) -> list[str]:
     if "---" in text:
         parts = text.split("---", 1)
         tag_block = parts[1].strip()
-        if tag_block.upper().startswith("NONE"):
-            return []
-        return tag_block.split("\n")
+        # ``NONE`` is a valid marker for "no other state changes", but it
+        # must not hide a required SCENE_PANEL that follows it.  Older
+        # parsing stopped at any block beginning with NONE, so a model that
+        # emitted ``NONE`` before its storyboard silently lost the panels.
+        # Skip standalone NONE lines and continue parsing the remaining
+        # protocol records.  A block containing only NONE still yields no
+        # executable tags as before.
+        return [
+            line for line in tag_block.splitlines()
+            if line.strip().upper() != "NONE"
+        ]
     result.setdefault("_missing_tag_separator", True)
     return []
 

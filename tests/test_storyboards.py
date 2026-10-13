@@ -501,3 +501,64 @@ def test_empty_participants_do_not_expand_to_the_shared_party() -> None:
 
     assert "only people explicitly named in this panel description" in prompt
     assert "艾琳" not in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", range(1, 7))
+async def test_fixed_counts_bypass_automatic_density_and_fallback(count):
+    raw = [{
+        "participants": ["alice"], "location": "后院",
+        "description": f"Alice打开门链后的反应{index}", "evidence_ids": ["n1"],
+    } for index in range(count)]
+    llm = _PanelLLM(json.dumps({"panels": raw}))
+    panels, _ = await infer_scene_panels(
+        llm, narration="Alice在后院打开门链。与此同时，Bob在塔底搜索。Alice随后回到前厅。",
+        actions=[], current_scene="后院",
+        players={"alice": {"character_name": "Alice", "private_log": "SECRET"}, "bob": {}},
+        requested_panel_count=count,
+    )
+    assert len(panels) == count
+    assert len(llm.calls) == 1
+    system, payload, options = llm.calls[0]
+    assert f"exactly {count} panels" in system
+    assert "Use 2-4" not in system
+    assert "only for unusually dense" not in system
+    assert json.loads(payload)["requested_panel_count"] == count
+    assert "SECRET" not in payload
+    assert options["max_tokens"] >= 300 + count * 360
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["too_many", "empty", "duplicate", "no_evidence"])
+async def test_fixed_count_rejects_invalid_six_even_after_correction(kind):
+    raw = [{
+        "participants": ["alice"], "location": "后院",
+        "description": f"动作{index}", "evidence_ids": ["n1"],
+    } for index in range(7 if kind == "too_many" else 6)]
+    if kind == "empty":
+        raw[-1]["description"] = ""
+    if kind == "duplicate":
+        raw[-1] = raw[0].copy()
+    if kind == "no_evidence":
+        raw[-1].pop("evidence_ids")
+    llm = _PanelLLM(json.dumps({"panels": raw}))
+    with pytest.raises(StoryboardInferenceError, match="要求 6 格"):
+        await infer_scene_panels(
+            llm, narration="Alice在后院打开门链并发现暗号。",
+            actions=[], current_scene="后院", players={"alice": {"character_name": "Alice"}},
+            requested_panel_count=6,
+        )
+    assert len(llm.calls) == 2
+
+
+def test_tight_budget_keeps_every_location_and_subject_or_reports_error():
+    panels = [{
+        "participants": [f"hero-{index}"], "location": f"place-{index}",
+        "description": "A meaningful action with a visible result. " * 20,
+    } for index in range(6)]
+    prompt, _ = build_storyboard_prompt(panels, max_chars=900)
+    for index in range(6):
+        assert f"hero-{index}" in prompt and f"place-{index}" in prompt
+    assert len(prompt) <= 900
+    with pytest.raises(StoryboardInferenceError, match="预算不足"):
+        build_storyboard_prompt(panels, max_chars=256)

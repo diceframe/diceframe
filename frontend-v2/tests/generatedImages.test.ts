@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { generatedImageUrl } from '../src/api/generatedImages'
+import { analyzeStoryboard, generateCurrentRoundImage, generatedImageUrl } from '../src/api/generatedImages'
 
 afterEach(() => {
   localStorage.clear()
@@ -8,6 +8,24 @@ afterEach(() => {
 })
 
 describe('generated images', () => {
+  it('sends fixed counts and defaults to combined avatar references', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      JSON.stringify({ ok: true, asset_id: 'asset-1', panels: [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    vi.stubGlobal('fetch', fetchMock)
+    await analyzeStoryboard('web|room|bot', 3, 6)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ round: 3, panel_count: 6 })
+    await generateCurrentRoundImage('web|room|bot', {
+      prompt: 'scene', panelCount: 6, useAvatarReferences: true,
+    })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      panel_count: 6, use_avatar_references: true, combine_avatar_references: true,
+    })
+    await generateCurrentRoundImage('web|room|bot', { prompt: 'scene', combineAvatarReferences: false })
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).combine_avatar_references).toBe(false)
+  })
+
   it('loads game images through the scoped endpoint with application auth', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('image', {
       status: 200,

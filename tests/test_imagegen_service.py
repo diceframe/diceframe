@@ -16,6 +16,7 @@ from src.imagegen import (
     ImageGenerationError,
     ImageGenerationRequest,
     ImageGenerationService,
+    ImageReference,
 )
 from src.imagegen.providers import (
     ImageProviderError,
@@ -410,6 +411,78 @@ async def test_openai_provider_accepts_url_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_openai_provider_sends_multiple_references_as_image_array():
+    """The OpenAI-compatible edit contract uses repeated ``image[]`` parts."""
+
+    seen = {"fields": [], "files": []}
+
+    async def image_edit_handler(request):
+        reader = await request.multipart()
+        while part := await reader.next():
+            if part.filename:
+                seen["files"].append({
+                    "name": part.name,
+                    "filename": part.filename,
+                    "content_type": part.headers.get("Content-Type"),
+                    "body": await part.read(),
+                })
+            else:
+                seen["fields"].append((part.name, await part.text()))
+        return web.json_response({
+            "data": [{
+                "b64_json": base64.b64encode(_png_bytes()).decode("ascii"),
+            }],
+        })
+
+    app = web.Application()
+    app.router.add_post("/v1/images/edits", image_edit_handler)
+    async with TestServer(app) as server:
+        provider = OpenAICompatibleImageProvider(
+            base_url=str(server.make_url("/v1")),
+            api_key="secret",
+            model="image-model",
+            timeout_seconds=30,
+        )
+        result = await provider.generate(
+            "Alice and Bob at the harbor",
+            size="1024x1024",
+            reference_images=(
+                ImageReference(
+                    character_id="alice",
+                    content=b"alice-image",
+                    content_type="image/webp",
+                    file_name="alice.webp",
+                ),
+                ImageReference(
+                    character_id="bob",
+                    content=b"bob-image",
+                    content_type="image/webp",
+                    file_name="bob.webp",
+                ),
+            ),
+        )
+
+    assert result.content_type == "image/png"
+    assert ("model", "image-model") in seen["fields"]
+    assert ("prompt", "Alice and Bob at the harbor") in seen["fields"]
+    assert ("response_format", "b64_json") in seen["fields"]
+    assert seen["files"] == [
+        {
+            "name": "image[]",
+            "filename": "alice.webp",
+            "content_type": "image/webp",
+            "body": b"alice-image",
+        },
+        {
+            "name": "image[]",
+            "filename": "bob.webp",
+            "content_type": "image/webp",
+            "body": b"bob-image",
+        },
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("base_path", ["/v1", "/v1/image_generation"])
 async def test_minimax_provider_uses_native_request_and_base64_response(base_path):
     seen = {}
@@ -660,3 +733,96 @@ def test_generation_records_are_valid_json(tmp_path):
     result = asyncio.run(service.generate(ImageGenerationRequest(prompt="harbor")))
     record_path = service.assets.records_dir / f"{result.generation_id}.json"
     assert json.loads(record_path.read_text(encoding="utf-8"))["asset_id"] == result.asset_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("count", "combine"), [(1, True), (3, True), (4, True), (8, True), (3, False)])
+async def test_portrait_sheet_real_multipart_upload_and_name_mapping(tmp_path, count, combine):
+    """Exercise core -> provider -> real HTTP multipart, without a paid API."""
+    seen = {"files": [], "fields": {}}
+
+    async def handler(request):
+        reader = await request.multipart()
+        while part := await reader.next():
+            if part.filename:
+                seen["files"].append((part.name, part.headers["Content-Type"], bytes(await part.read())))
+            else:
+                seen["fields"][part.name] = await part.text()
+        return web.json_response({"data": [{"b64_json": base64.b64encode(_png_bytes()).decode()}]})
+
+    refs = tuple(
+        ImageReference(f"hero-{i}", _png_bytes((128, 256), (20 + i * 20, 70, 90)), "image/png", f"{i}.png")
+        for i in range(count)
+    )
+    context = {
+        "manual": True,
+        "avatar_reference_names": {f"hero-{i}": f"角色{i}" for i in reversed(range(count))},
+        "storyboard": {"panels": [{
+            "participants": [f"hero-{i % count}"], "location": f"地点{i}", "description": f"动作{i}",
+        } for i in range(6)]},
+    }
+    # Omission exercises the default, rather than explicitly enabling it.
+    if not combine:
+        context["combine_avatar_references"] = False
+    app = web.Application()
+    app.router.add_post("/v1/images/edits", handler)
+    async with TestServer(app) as server:
+        service = ImageGenerationService(_config(imagegen_base_url=str(server.make_url("/v1"))), tmp_path)
+        result = await service.generate(ImageGenerationRequest(
+            prompt="Characters investigate.", purpose="scene", context=context, reference_images=refs,
+        ))
+    combined = combine and count > 1
+    assert len(seen["files"]) == (1 if combine else count)
+    assert seen["files"][0][0] == ("image" if combine else "image[]")
+    if combined:
+        assert seen["files"][0][1] == "image/jpeg"
+        with Image.open(io.BytesIO(seen["files"][0][2])) as sheet:
+            assert sheet.width <= 840 and sheet.height <= 924
+        for i in range(count):
+            assert f"Ref {i + 1}: 角色{i} (hero-{i})" in seen["fields"]["prompt"]
+        assert "not composition" in seen["fields"]["prompt"]
+    else:
+        assert seen["files"][0][2] == refs[0].content
+        assert "Ref 1:" not in seen["fields"]["prompt"]
+    assert "exactly 6 distinct panels" in seen["fields"]["prompt"]
+    assert all(f"Panel {i}:" in seen["fields"]["prompt"] for i in range(1, 7))
+    assert context["reference_count"] == (1 if combine else count)
+    assert context["reference_source_count"] == count
+    assert context["reference_character_ids"] == [ref.character_id for ref in refs]
+    assert context["reference_combined"] is combined
+    assert service.assets.file(result.asset_id).exists()
+    assert len(list(service.assets.images_dir.iterdir())) == 1  # No persisted reference sheet.
+
+
+@pytest.mark.asyncio
+async def test_bad_portrait_fails_before_provider_request(tmp_path):
+    provider = _FakeProvider()
+    provider.supports_reference_images = True
+    service = _service(tmp_path, provider)
+    with pytest.raises(ImageGenerationError, match="参考头像 2 无法读取"):
+        await service.generate(ImageGenerationRequest(
+            prompt="Alice and Bob", purpose="scene",
+            reference_images=(ImageReference("alice", _png_bytes()), ImageReference("bob", b"broken")),
+        ))
+    assert not provider.calls
+
+
+def test_prompt_budget_preserves_sheet_identity_and_all_six_panels(tmp_path):
+    provider = _FakeProvider()
+    provider.prompt_char_limit = 1500
+    service = _service(tmp_path, provider, imagegen_style_prefix="style " * 1000)
+    context = {
+        "avatar_reference_names": {f"hero{i}": f"Name{i}" for i in range(3)},
+        "storyboard": {"panels": [{
+            "participants": [f"hero{i % 3}"], "location": f"Location{i}",
+            "description": "an important action " * 50,
+        } for i in range(6)]},
+    }
+    result = asyncio.run(service.generate(ImageGenerationRequest(
+        prompt="long narration " * 500, purpose="scene", context=context,
+    )))
+    prompt = provider.calls[0][0]
+    assert len(prompt) <= 1500
+    assert all(f"Panel {i}:" in prompt for i in range(1, 7))
+    assert all(f"Ref {i + 1}: Name{i} (hero{i})" in prompt for i in range(3))
+    assert service.assets.file(result.asset_id).exists()

@@ -39,6 +39,23 @@ def test_gm_prompt_appends_english_language_instruction(tmp_path: Path, monkeypa
     assert "QUICK_ACTIONS" in prompt
 
 
+def test_auto_storyboard_prompt_does_not_allow_none_instead_of_panel(tmp_path: Path, monkeypatch):
+    prompts = tmp_path / "prompts"
+    rules = tmp_path / "rules"
+    prompts.mkdir()
+    rules.mkdir()
+    (prompts / "gm_system_zh.md").write_text("BASE GM PROMPT", encoding="utf-8")
+    inst = GameInstance(game_key=("web", "storyboard", "bot"), language="zh-CN")
+    monkeypatch.setattr(prompt_module, "_GM_PROMPT_CACHE", None)
+
+    composer = PromptComposer(prompts, rules)
+    composer.set_auto_storyboard(True)
+    prompt = composer.compose_gm_prompt(inst)
+
+    assert "SCENE_PANEL" in prompt
+    assert "禁止只输出 NONE 代替分镜" in prompt
+
+
 def test_language_instruction_keeps_protocol_tags_in_english_mode():
     instruction = gm_language_instruction("en")
 
