@@ -51,7 +51,8 @@ describe('content language helpers', () => {
     const withRu = [...items, { id: 'ru', language: 'ru' }]
     expect(filterByContentLanguage(withRu, 'ru').map(item => item.id)).toEqual(['ru'])
     expect(filterByContentLanguage(items, 'ru').map(item => item.id)).toEqual(['en', 'en-us'])
-    expect(filterByContentLanguage([{ id: 'legacy' }], 'ru').map(item => item.id)).toEqual(['legacy'])
+    const legacyOnly = [{ id: 'legacy' }] as Array<{ id: string; language?: unknown }>
+    expect(filterByContentLanguage(legacyOnly, 'ru').map(item => item.id)).toEqual(['legacy'])
   })
 })
 
