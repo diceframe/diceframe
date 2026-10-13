@@ -20,6 +20,7 @@ export interface LoreImportDecision {
 
 const props = defineProps<{
   open: boolean
+  busy?: boolean
   preview?: LoreImportPreview
   books?: LoreImportTargetBook[]
   characters?: LoreImportCharacter[]
@@ -72,7 +73,7 @@ const primaryWarning = computed(() =>
 
 const needsCharacterUid = computed(() => binding.value === 'character' && !characterUid.value)
 const confirmDisabled = computed(() =>
-  !props.preview
+  props.busy || !props.preview
   || (target.value === 'existing' && !existingBookId.value)
   || needsCharacterUid.value,
 )
@@ -114,7 +115,7 @@ function decide(): LoreImportDecision {
 </script>
 
 <template>
-  <div v-if="open" class="lore-import-dialog" role="dialog" aria-modal="true" :aria-label="t('loreImportTitle')">
+  <div v-if="open" class="lore-import-dialog" role="dialog" aria-modal="true" :aria-busy="busy || undefined" :aria-label="t('loreImportTitle')">
     <div class="lore-import-dialog__panel">
       <h2>{{ t('loreImportTitle') }}</h2>
 
@@ -136,7 +137,7 @@ function decide(): LoreImportDecision {
         </p>
       </section>
 
-      <fieldset class="lore-import-dialog__target">
+      <fieldset class="lore-import-dialog__target" :disabled="busy">
         <legend>{{ t('loreImportTargetLegend') }}</legend>
         <label>
           <input v-model="target" type="radio" value="new"> {{ t('loreImportTargetNew') }}
@@ -160,7 +161,7 @@ function decide(): LoreImportDecision {
         </p>
       </fieldset>
 
-      <fieldset class="lore-import-dialog__binding">
+      <fieldset class="lore-import-dialog__binding" :disabled="busy">
         <legend>{{ t('loreImportBindingLegend') }}</legend>
         <label>
           <input v-model="binding" type="radio" value="world">
@@ -190,7 +191,7 @@ function decide(): LoreImportDecision {
       </fieldset>
 
       <div class="lore-import-dialog__buttons">
-        <button @click="emit('close')">{{ t('cancel') }}</button>
+        <button :disabled="busy" @click="emit('close')">{{ t('cancel') }}</button>
         <button :disabled="confirmDisabled" @click="emit('confirm', decide())">{{ t('import') }}</button>
       </div>
     </div>
