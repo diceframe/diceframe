@@ -17,12 +17,6 @@ DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC /
 It brings the Web UI, character sheets, lorebooks, dice checks, state changes, campaign logs, and optional chat-bot play into one shared game state. Players describe what they want to do in natural language; DiceFrame passes those actions to a GM model, handles dice and state tags, then syncs the result back to the browser.
 
 
-## Language maintenance
-
-English and Simplified Chinese are the officially maintained interface and documentation languages. Japanese, German and Russian remain available as community translations; volunteers maintain them, and adding a language does not make the core project owner responsible for future translations.
-
-Missing or unreviewed central UI translations fall back to English. Community catalogs can be paused without deleting locale IDs or changing saved games and mechanics. See the [translation policy](docs/en/translations.md) for status, source review and contributor responsibilities.
-
 ## What It Does
 
 - A Web UI organized around Overview, Play, Characters, Content, and Manage. Content contains Content library, World notes, Content packs, and Rules; Manage contains Memory, Logs, Plugins, and Settings. The world gallery, adventure workbench and script import open from the content library.
@@ -192,6 +186,12 @@ To develop or publish a plugin, see the [plugin development guide](https://githu
 | Plugin index and review | [Plugin registry](https://github.com/diceframe/diceframe-content/blob/main/docs/en/plugin-registry.md) | [插件索引与审核](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/plugin-registry.md) |
 | Bot Bridge core | [Bot Bridge Core](https://github.com/diceframe/diceframe-content/blob/main/docs/en/bot-bridge-core.md) | [Bot Bridge 核心](https://github.com/diceframe/diceframe-content/blob/main/docs/zh/bot-bridge-core.md) |
 
+
+## Language maintenance
+
+English and Simplified Chinese are the officially maintained interface and documentation languages. Japanese, German and Russian remain available as community translations; volunteers maintain them, and adding a language does not make the core project owner responsible for future translations.
+
+Missing or unreviewed central UI translations fall back to English. Community catalogs can be paused without deleting locale IDs or changing saved games and mechanics. See the [translation policy](docs/en/translations.md) for status, source review and contributor responsibilities.
 
 ## Upgrading existing data
 
