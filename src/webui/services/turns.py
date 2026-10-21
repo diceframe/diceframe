@@ -1132,8 +1132,13 @@ async def advance_round(
         try:
             await _prepare_checks(dependencies, instance)
         except CheckModelNotConfigured:
-            # This is an already-progressed recovery path.  Keep its state and
-            # let the next attempt resume after configuration repair.
+            # A legacy RuntimeError could leave the instance in judgment before
+            # check preparation completed.  That state is safe to abort and
+            # must not remain a permanent "stuck" round.  Once checks were
+            # prepared, the normal path above would have returned early.
+            if not checks.round_checks_prepared(instance):
+                if not await _rollback_unprocessed_advance(dependencies, instance, game_key):
+                    return _round_rollback_failed_result(instance)
             return _check_model_config_result(instance)
         pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:

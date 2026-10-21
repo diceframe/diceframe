@@ -77,6 +77,14 @@ async def test_missing_dedicated_client_returns_409_for_submit_and_force_advance
     assert forced["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
     assert instance.state == GameState.ACTIVE_ACTION
 
+    # A save from the old RuntimeError path may leave a partially advanced
+    # judgment state behind.  Force recovery must clear that stale phase too.
+    instance.state = GameState.ACTIVE_JUDGMENT
+    stale = await api.advance_turn(game_key, uid, force=True)
+    assert stale["status"] == 409
+    assert stale["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert instance.state == GameState.ACTIVE_ACTION
+
 
 @pytest.mark.asyncio
 async def test_direct_process_round_rolls_back_dedicated_provider_failure(
