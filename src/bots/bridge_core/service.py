@@ -450,6 +450,31 @@ class DiceFrameBridgeService:
         user_id = str(matches[0].get("user_id") or "")
         if not user_id:
             return bridge_text(language, "匹配到的角色缺少 user_id，无法认领。", "The matched character has no user ID and cannot be claimed.", de="Dem gefundenen Charakter fehlt eine user_id, er kann nicht beansprucht werden.")
+        # Bot-side binding used to update only the bridge's local mapping.  A
+        # seat created as ``unclaimed`` therefore stayed blocked at the server
+        # action gate even though the bridge had just told the player it was
+        # claimed.  The roster is read as the GM above, so hand the same seat
+        # back to the server's single control authority before writing the local
+        # mapping or acknowledging it.
+        control = matches[0].get("control")
+        mode = str(control.get("mode") or "") if isinstance(control, dict) else ""
+        if mode in {"ai", "unclaimed"}:
+            try:
+                await self.client.set_player_control(
+                    game_key,
+                    str(group.get("gm_uid") or gm_uid),
+                    user_id,
+                    mode="human",
+                )
+            except DiceFrameHTTPError as exc:
+                if getattr(exc, "status", 0) == 409:
+                    return bridge_text(
+                        language,
+                        "正在推进剧情，请等本轮结束后再认领角色。",
+                        "The round is being processed; claim the character after it finishes.",
+                        de="Die Runde wird gerade verarbeitet; beanspruche den Charakter danach.",
+                    )
+                raise
         ok = await self.store.bind_player(message.stream_id, message.platform_user_id, user_id)
         if not ok:
             return bridge_text(language, "该角色已被其他成员认领。", "That character has already been claimed by another member.", de="Dieser Charakter wurde bereits von einem anderen Mitglied beansprucht.")

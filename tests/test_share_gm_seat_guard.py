@@ -284,6 +284,12 @@ async def test_f4_join_gm_seat_does_not_rebind_session(share_env, owner):
 @pytest.mark.asyncio
 async def test_rejoin_with_seat_token_rebinds_session(share_env):
     env = share_env
+    from src.engine.player_control import control_mode, set_control
+
+    # A GM control link must do more than authenticate the browser: opening it
+    # for an unclaimed seat is the actual handover to a human controller.
+    set_control(env.instance, "p2", "unclaimed")
+    assert control_mode(env.instance, "p2") == "unclaimed"
     async with TestClient(TestServer(env.app), headers=ROOM_HEADER) as client:
         response = await client.post(
             _share_url(env, "players"),
@@ -297,6 +303,7 @@ async def test_rejoin_with_seat_token_rebinds_session(share_env):
     assert body["reused"] is True
     assert "seat_token" not in body
     assert env.sessions._sessions[env.token]["user_id"] == "p2"
+    assert control_mode(env.instance, "p2") == "human"
 
 
 @pytest.mark.asyncio

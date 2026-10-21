@@ -14,6 +14,7 @@ class EnglishBridgeClient:
     def __init__(self) -> None:
         self.questions: list[tuple[str, str, str]] = []
         self.resolved_proposals: list[tuple[str, str, str, bool]] = []
+        self.control_calls: list[tuple[str, str, str, str]] = []
 
     async def bind_game(self, game_key: str, bind_token: str) -> dict:
         assert bind_token == "bind-ok"
@@ -34,6 +35,7 @@ class EnglishBridgeClient:
             "players": [{
                 "user_id": "player-1",
                 "character_name": "Erin",
+                "control": {"mode": "unclaimed"},
                 "character_sheet": {
                     "hp": 8,
                     "max_hp": 10,
@@ -43,6 +45,12 @@ class EnglishBridgeClient:
                 },
             }],
         }
+
+    async def set_player_control(
+        self, game_key: str, actor: str, user_id: str, *, mode: str,
+    ) -> dict:
+        self.control_calls.append((game_key, actor, user_id, mode))
+        return {"ok": True, "user_id": user_id, "mode": mode}
 
     async def build_join_link(self, game_key: str, user: str = "") -> str:
         return f"https://table.example/#/join?game={game_key}&user={user}"
@@ -96,6 +104,7 @@ async def test_english_binding_persists_language_and_drives_shared_replies(tmp_p
 
     joined = await service.handle(BridgeInput("discord-channel", "player-platform", "/df join Erin"))
     assert joined.replies == ["Character claimed: Erin"]
+    assert client.control_calls == [("game-1", "gm-1", "player-1", "human")]
 
     question = await service.handle(BridgeInput("discord-channel", "player-platform", "/df ask kp what is this seal?"))
     assert question.replies == ["GM: You recognize the university seal, but nothing more."]
