@@ -51,6 +51,34 @@ async def test_dedicated_provider_failure_does_not_use_offline_check_fallback(
 
 
 @pytest.mark.asyncio
+async def test_missing_dedicated_client_returns_409_for_submit_and_force_advance(web_api) -> None:
+    """The missing-client guard must use the same structured recovery path."""
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world",
+        "Missing check client",
+        players=[{"character_name": "Hero", "attributes": {"str": 12}}],
+    )
+    game_key = created["game_key"]
+    instance = registry.get(api._parse_key(game_key))
+    uid = next(iter(instance.players))
+    processor = api._handler._round_processor
+    processor.check_model_enabled = True
+    processor.check_llm_client = None
+
+    submitted = await api.submit_action(game_key, uid, "我调查石门")
+    assert submitted["status"] == 409
+    assert submitted["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert submitted["payload"]["advanced"] is False
+    assert instance.state == GameState.ACTIVE_ACTION
+
+    forced = await api.advance_turn(game_key, uid, force=True)
+    assert forced["status"] == 409
+    assert forced["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert instance.state == GameState.ACTIVE_ACTION
+
+
+@pytest.mark.asyncio
 async def test_direct_process_round_rolls_back_dedicated_provider_failure(
     web_api, monkeypatch,
 ) -> None:

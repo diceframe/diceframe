@@ -406,7 +406,9 @@ class RoundProcessor:
         if instance.state != GameState.ACTIVE_JUDGMENT:
             return []
         if self.check_model_enabled and self.check_llm_client is None:
-            raise RuntimeError("独立检定模型未配置，请在设置中选择有效服务商和模型，或关闭独立检定模型")
+            raise CheckModelNotConfigured(
+                "独立检定模型未配置，请在设置中选择有效服务商和模型，或关闭独立检定模型"
+            )
         actions_text = collect_actions_text(instance)
         rule_ctx = self._prompt.load_rule_context(instance, self._load_world_template)
         instance.reset_round_checks()
