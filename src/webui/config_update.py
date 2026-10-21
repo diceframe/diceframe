@@ -18,6 +18,7 @@ from src.ai_providers import (
     is_provider_secret_key,
     normalize_ai_providers,
     reconcile_model_capability_routes,
+    resolve_provider,
     strip_dangling_provider_refs,
     strip_orphan_provider_secrets,
 )
@@ -349,6 +350,20 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
     strip_dangling_provider_refs(candidate)
     cleared_model_routes = reconcile_model_capability_routes(candidate)
     _degrade_speech_engines_lost_provider(candidate, refs_before)
+
+    # 候选状态整体校验：启用独立检定时，服务商引用、地址与模型名必须同时有效，
+    # 否则拒绝保存——不允许"开关开着、客户端构建不出来"的配置进入运行时，
+    # 把失败推迟到回合推进时才暴露（曾导致推进 500 / 伪成功）。
+    if candidate.get("check_model_enabled"):
+        check_route = resolve_provider(candidate, candidate.get("check_provider_ref", ""))
+        check_model = str(candidate.get("check_model") or "").strip()
+        if not (check_route and check_route["base_url"] and check_model):
+            return PreparedConfigUpdate(
+                candidate,
+                changed_keys,
+                access_password_changed,
+                "独立检定模型需要有效的服务商和模型名，请在设置中补全后保存，或关闭独立检定模型",
+            )
 
     imagegen_ref = str(candidate.get("imagegen_provider_ref") or "").strip()
     if imagegen_ref:

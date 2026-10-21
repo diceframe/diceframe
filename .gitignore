@@ -58,3 +58,6 @@ docs/I18N_PLAN_*.md
 
 # AI 编码助手的本地工作区（会话记录等），不入库
 .zcode/
+
+.video-data
+/videos

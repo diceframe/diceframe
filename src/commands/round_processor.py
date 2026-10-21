@@ -241,12 +241,12 @@ class RoundProcessingFailure(RuntimeError):
 
 
 class CheckModelNotConfigured(RuntimeError):
-    """The dedicated check model cannot complete check planning.
+    """独立检定模型已启用但无法构建客户端，检定规划无法进行。
 
-    A provider/tool failure is a recoverable configuration/runtime problem for
-    the dedicated check-model path.  Callers translate this type into the
-    stable ``CHECK_MODEL_NOT_CONFIGURED`` response instead of silently running
-    the legacy offline planner.
+    这是可恢复的配置错误而不是程序缺陷：调用方必须翻译成稳定的
+    ``error_code``（``CHECK_MODEL_NOT_CONFIGURED``）与非 2xx 响应，并把对局
+    状态完整退回（见回合服务的推进回滚），绝不让它冒泡成 500 或被当成
+    成功回合。``error_code`` 是对外契约，不得随文案改动。
     """
 
     error_code = "CHECK_MODEL_NOT_CONFIGURED"
@@ -264,7 +264,6 @@ class CheckModelNotConfigured(RuntimeError):
         # direct caller (luck timeout/CLI).
         self.rolled_back = rolled_back
         self.rollback_failed = rollback_failed
-
 
 class RoundProcessor:
     """处理完整的一轮判定：context 拼接 → LLM 调用 → 解析 → 更新状态 → 播报。"""

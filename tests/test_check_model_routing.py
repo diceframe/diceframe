@@ -90,3 +90,52 @@ async def test_failed_runtime_candidate_closes_both_clients():
     await ConfigController._close_candidate_runtime(candidate, None, None)
     main.close.assert_awaited_once()
     check.close.assert_awaited_once()
+
+
+def test_config_update_rejects_enabling_check_model_without_provider_ref():
+    """启用独立检定但从未选择服务商：整体校验拒绝保存，提示可操作。"""
+    state = {**_state(), "check_provider_ref": "", "check_model": ""}
+    updated = prepare_config_update(state, {"check_model_enabled": True})
+    assert updated.error
+    assert "独立检定模型" in updated.error
+    # 拒绝时不落半更新状态：开关保持提交值，由调用方整体丢弃。
+    assert updated.state["check_model_enabled"] is True
+
+
+def test_config_update_rejects_check_model_with_empty_model_name():
+    """服务商存在但模型名被清空：同样拒绝保存。"""
+    updated = prepare_config_update(_state(), {"check_model": ""})
+    assert updated.error
+    assert "独立检定模型" in updated.error
+    assert updated.state["check_model_enabled"] is True
+
+
+def test_config_update_self_heals_dangling_check_ref():
+    """引用指向已删除服务商（旧配置残留）：任意保存都会清引用并自动关闭开关。
+
+    这条走既有的引用失效降级路径；拒绝报错只针对"开启且补不出有效组合"的
+    提交（见上面两个用例）。磁盘上的坏配置在运行时由 composition 诊断日志
+    与回合服务的 CHECK_MODEL_NOT_CONFIGURED 兜底。
+    """
+    state = {**_state(), "check_provider_ref": "gone"}
+    updated = prepare_config_update(state, {"check_model": "judge"})
+    assert not updated.error
+    assert updated.state["check_provider_ref"] == ""
+    assert not updated.state["check_model_enabled"]
+
+
+def test_config_update_accepts_complete_check_model_state():
+    """合法组合正常保存，不受校验影响。"""
+    updated = prepare_config_update(_state(), {"check_model_enabled": True})
+    assert not updated.error
+    assert updated.state["check_model_enabled"] is True
+    assert updated.state["check_provider_ref"] == "local"
+    assert updated.state["check_model"] == "judge"
+
+
+def test_config_update_keeps_autodisable_on_provider_removal():
+    """同一次保存里删除服务商：既有降级逻辑自动关闭开关，不报错。"""
+    state = {**_state(), "ai_provider_key_local": "synthetic"}
+    updated = prepare_config_update(state, {"ai_providers": []})
+    assert not updated.error
+    assert not updated.state["check_model_enabled"]

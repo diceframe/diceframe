@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.commands.round_processor import RoundNotProcessed
+from src.commands.round_processor import CheckModelNotConfigured, RoundNotProcessed
 from src.engine.game_instance import GameState
 from src.engine.modules import economy_state
 from src.rulesets.registry import RulesetRuntimeRegistry
@@ -630,3 +630,102 @@ async def test_multiple_rewards_settle_independently() -> None:
     assert [r[1] for r in api.resolved_rewards] == ["reward-a", "reward-b"]
     by_id = {p["id"]: p for p in economy_state.state(instance)["proposals"]}
     assert by_id["reward-b"]["status"] == "pending"
+
+
+def _unconfigured_check_prepare():
+    async def prepare(_instance):
+        raise CheckModelNotConfigured(
+            "独立检定模型未配置，请在设置中选择有效服务商和模型，或关闭独立检定模型"
+        )
+    return prepare
+
+
+@pytest.mark.asyncio
+async def test_check_model_not_configured_rolls_back_and_returns_409() -> None:
+    """独立检定模型未配置：推进入口必须回滚并返回 409 + 稳定错误码，而非裸 500。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    instance.flip_state_on_advance = True
+    instance.action_queue = [{"user_id": "p2", "text": "观察门缝"}]
+    api = FakeApi(instance)
+    dependencies = replace(api.dependencies, prepare_round_checks_ai=_unconfigured_check_prepare())
+
+    result = await submit_action(dependencies, "game", "gm", "调查石门")
+
+    assert result["status"] == 409
+    assert result["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert result["payload"]["advanced"] is False
+    assert result["payload"]["phase"] == "error"
+    assert "独立检定模型" in result["payload"]["error"]
+    # 完整回滚：退回行动阶段并落盘，队列原样保留，修复配置后可直接重试。
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.aborts == 1
+    assert api._reg.saved == 1
+    assert [action["user_id"] for action in instance.action_queue] == ["p2", "gm"]
+    assert api._handler.processed == 0
+
+
+@pytest.mark.asyncio
+async def test_check_model_fixed_same_instance_resumes_without_duplicates() -> None:
+    """配置修复后，同一对局原行动可继续推进，不重复处理或重复叙事。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    instance.flip_state_on_advance = True
+    api = FakeApi(instance)
+
+    async def unconfigured(_instance):
+        raise CheckModelNotConfigured("独立检定模型未配置")
+
+    async def configured(_instance):
+        return []
+
+    broken = replace(api.dependencies, prepare_round_checks_ai=unconfigured)
+    failed = await submit_action(broken, "game", "gm", "调查石门")
+    assert failed["status"] == 409
+    assert instance.state == GameState.ACTIVE_ACTION
+
+    fixed = replace(api.dependencies, prepare_round_checks_ai=configured)
+    resumed = await submit_action(fixed, "game", "gm", "继续前进")
+
+    assert resumed["status"] == 200
+    assert resumed["payload"]["advanced"] is True
+    assert api._handler.processed == 1  # 只生成过一次叙事
+    assert instance.state == GameState.ACTIVE_JUDGMENT or instance.action_queue
+
+
+@pytest.mark.asyncio
+async def test_force_advance_with_unconfigured_check_model_returns_409_and_rolls_back() -> None:
+    """强制推进遇到检定模型未配置：同样回滚并返回业务错误，不冒泡 500。"""
+    instance = FakeInstance()
+    instance.advance_result = True
+    instance.flip_state_on_advance = True
+    instance.action_queue = [{"user_id": "p2", "text": "行动"}]
+    api = FakeApi(instance)
+    dependencies = replace(api.dependencies, prepare_round_checks_ai=_unconfigured_check_prepare())
+
+    result = await advance_round(dependencies, "game", "gm", force=True)
+
+    assert result["status"] == 409
+    assert result["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.aborts == 1
+    assert instance.action_queue == [{"user_id": "p2", "text": "行动"}]
+    assert api._handler.processed == 0
+
+
+@pytest.mark.asyncio
+async def test_advance_stuck_recovery_with_unprepared_check_model_rolls_back() -> None:
+    """卡死恢复分支若尚未完成检定准备：返回 409 并清掉半完成的推进状态。"""
+    instance = FakeInstance()
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.action_queue = [{"user_id": "gm", "text": "行动"}]
+    api = FakeApi(instance)
+    dependencies = replace(api.dependencies, prepare_round_checks_ai=_unconfigured_check_prepare())
+
+    result = await advance_round(dependencies, "game", "gm")
+
+    assert result["status"] == 409
+    assert result["payload"]["error_code"] == "CHECK_MODEL_NOT_CONFIGURED"
+    assert instance.state == GameState.ACTIVE_ACTION
+    assert instance.aborts == 1
+    assert instance.action_queue == [{"user_id": "gm", "text": "行动"}]

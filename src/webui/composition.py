@@ -7,6 +7,7 @@ the aiohttp application lifecycle.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ from src.migrations.config import DEFAULT_NARRATIVE_MAX_TOKENS
 from src.network_proxy import effective_proxy_url
 from src.tts import SpeechService
 from src.webui.api import WebAPI
+
+logger = logging.getLogger("trpg")
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,16 @@ class RuntimeComposition:
             ProviderConfig("check", check_route["base_url"], check_route["api_key"], check_model, api_format=check_route["api_format"])
             if check_route and check_route["base_url"] and check_model else None
         )
+        # 启动 / 热重载诊断：旧配置可能在磁盘上保留"已启用却解析不出客户端"
+        # 的组合（不走配置保存校验）。只记录引用与模型名，不记录任何凭据；
+        # 该组合会在回合推进时被拒绝并返回 CHECK_MODEL_NOT_CONFIGURED。
+        if bool(runtime_config.get("check_model_enabled", False)) and check_provider is None:
+            logger.warning(
+                "独立检定模型已启用但配置无效（服务商引用、地址或模型名缺失），回合推进将被拒绝:"
+                " check_provider_ref=%r check_model=%r",
+                str(runtime_config.get("check_provider_ref") or ""),
+                check_model,
+            )
         return self.factories.create_subsystems(
             data_dir=self.paths.data_dir,
             prompts_dir=self.paths.prompts_dir,

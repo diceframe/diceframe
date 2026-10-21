@@ -1254,3 +1254,14 @@ See [ADR-0011](adr/0011-application-actions-and-agent-delegation.md).
 第七项提醒我们：
 
 > DiceFrame 的架构应该能够继续变得更好，而不是因为规范而停止演进。
+
+---
+
+## 24. 官方内容与渠道边界
+
+适用于项目自身运营与分发的四个面：Hub、随仓库分发的内置内容、官方社区与文档口径、插件与玩法的默认行为。约束的是**项目分发了什么、默认做了什么**，不管制用户自托管实例中的私有内容。背景与完整决策见 [ADR-0010](adr/0010-gal-first-non-trpg-gameplay.md)。
+
+- 随仓库分发的玩法内容（含样板 gal、默认提示词、模板）**MUST** 保持全年龄，**MUST NOT** 包含以情感依恋为留存目标的措辞设计。
+- Hub 收录的内容 **MUST** 全年龄；NSFW 内容与版权角色二创卡 **MUST NOT** 上架；AI 生成的图像 / 语音内容 **MUST** 携带生成标注。
+- 官方口径（README、官网、Release Notes、社区公告）**MUST** 使用游戏语言（章节、路线、结局、通关），**MUST NOT** 使用情感陪伴语言或暗示"AI 角色不是 AI"。
+- 玩法模式的 transport 能力由模式契约声明（`bot_surface: full | read_only | none`），绑定准入单点执行；新增玩法 **MUST NOT** 在 bot bridge、平台插件或 generic path 中以具体玩法分支实现限制或放行。

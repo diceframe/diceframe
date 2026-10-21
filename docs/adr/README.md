@@ -14,9 +14,11 @@ ADR 用来记录“为什么做出一个长期架构决定”，不是所有 PR 
 
 DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权与领域 authority 边界见 [ADR-0011：应用动作与 Agent 委托](0011-application-actions-and-agent-delegation.md)（`Accepted`，本地实现，尚未发布）。当前实现范围和剩余边界见 [DF_AGENT_IMPLEMENTATION.md](../design/DF_AGENT_IMPLEMENTATION.md) 与 [DF_AGENT_CAPABILITY_EVOLUTION.md](../design/DF_AGENT_CAPABILITY_EVOLUTION.md)。
 
+[ADR-0010：GAL 作为第一个非跑团玩法](0010-gal-first-non-trpg-gameplay.md) — `Accepted`；gal 立项与八项边界决策（定位、组合式实现、好感度模块、推进模式、节点权威、transport 声明、立绘资产、合规边界）。施工顺序见[轨道 P 计划](../GAL_TRACK_PLAN.md)。
+
 以下记录仍是提案：
 
-- [ADR-0005：通用底座、玩法拼装与具体游戏](0005-composable-game-platform.md) — `Proposed`；记录跨玩法架构的目标边界、取舍与验证方式，尚未落地，不替代当前架构事实来源。
+- [ADR-0005：通用底座、玩法拼装与具体游戏](0005-composable-game-platform.md) — 拆能力部分 `Accepted`（轨道 R 已落地）；组合层部分保持 `Proposed`，触发条件已满足（见 ADR-0010），契约从实现中归纳。
 
 ## 什么时候需要 ADR
 

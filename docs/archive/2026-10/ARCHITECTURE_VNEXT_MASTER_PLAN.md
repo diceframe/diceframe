@@ -132,7 +132,7 @@
 ## 3.6 ADR 的处理
 
 - ADR-0005 拆成两部分：拆能力部分改为 Accepted，范围即本文轨道 R；组合层部分保持 Proposed，触发条件是第一个非跑团玩法立项。
-- 内容架构 vNext 的 authority 模型（内容方案 §3–§8、§29、§41）另写 ADR-0006，与 PR A 同步 Accepted。
+- 内容架构 vNext 的 authority 模型（内容方案 §3–§8、§29、§41）另写 ADR-0006，与 PR A 同步 Accepted。（2026-10 注：该 ADR 届时取实际撰写时的下一空号，编号不再预留——ADR-0007 已用于轨道 P 立项。）
 - ADR-0003 的整数回合作为经济回滚纪元键，在 R2 中换成抽象纪元键；R2 合并时给 ADR-0003 加 superseded 注记。
 
 ## 3.7 客户端离线内容：移动端不是纯服务器附属，但也不带 core
@@ -260,7 +260,7 @@ R1、R2、R3 与 PR A、B、C 完全并行，互不阻塞。轨道 M 整体排�
 
 合并两份计划的禁止清单：
 
-- 不启动组合层：不写机制模块格式、组合配置、依赖检查、DSL、可视化编辑器。
+- 不启动组合层：不写机制模块格式、组合配置、依赖检查、DSL、可视化编辑器。（2026-10 起此条因轨道 P 立项解除，见 §9 与 ADR-0007；其余各条不受影响。）
 - 不拆 `GameInstance` 之外的东西来凑模块数量；模块数不是指标。
 - 不做内容方案 §40 的六种假重构：包一层 `list_entries`、UI 新数据旧、Plugin 仍灌 World、保留 `Entry.world_id` 备用、各 service 自己 resolve Books、Module 自建 store。
 - 不在投影替换 PR 里改流程，不在拆模块 PR 里改玩法，不在页面 PR 里改 ownership。
@@ -327,4 +327,5 @@ backend full pytest、frontend unit、vue-tsc、lint、production build、E2E �
 - ADR-0005 记录方向，本文记录路线；路线完成后回头更新 ADR-0005 状态。
 - 内容架构 vNext 母方案是轨道 C 的详细设计，本文 §4 的 PR A–I 与其 §39 一一对应；其 §3–§38 的具体定义继续有效，未在本文重复。
 - Native Module / Content Package 方向整理是轨道 M 的详细设计，本文 §4 的 M1–M6 与其 §28 一一对应；其 §29 的九条不变量是轨道 C 不变量的子集，不另行维护。
+- 轨道 P（GAL，2026-10-13 立项）：[ADR-0010](../../adr/0010-gal-first-non-trpg-gameplay.md) 记录立项与八项边界决策，[轨道 P 计划](../../GAL_TRACK_PLAN.md) 记录 PR 序列与完成标准。§2.9 "组合层不启动"的触发条件由此满足：组合层契约仍按原原则从 gal 实现中归纳，不预先设计 DSL。
 - 本文本身不是 ADR，属于实施计划；当某一步改变了长期依赖方向或持久化模型时，仍按 [ADR 规则](../../adr/README.md) 单独记录。

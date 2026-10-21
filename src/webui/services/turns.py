@@ -547,7 +547,11 @@ async def _rollback_failed_round(
 
 
 def _check_model_config_result(instance: "GameInstance") -> TurnResult:
-    """Translate a dedicated check-model failure to a stable 409 response."""
+    """独立检定模型配置无效：统一 409 + 稳定错误码，绝不让配置问题伪装成成功。
+
+    ``advanced=False`` 配合推进入口的事先回滚：行动保留在队列里，修复配置后
+    同一对局可直接重试，不需要重建存档或重新提交行动。
+    """
     return _result({
         "ok": False,
         "error_code": CheckModelNotConfigured.error_code,

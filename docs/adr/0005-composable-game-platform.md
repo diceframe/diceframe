@@ -1,7 +1,7 @@
 # ADR-0005: 通用底座、玩法拼装与具体游戏
 
-- Status: Proposed
-- Date: 2026-09-21
+- Status: Accepted（仅拆能力部分：轨道 R 已落地，范围见[母方案](../archive/2026-10/ARCHITECTURE_VNEXT_MASTER_PLAN.md) §3.6）；组合层部分保持 Proposed，其触发条件已满足——GAL 立项，见 [ADR-0010](0010-gal-first-non-trpg-gameplay.md)——组合契约按原原则从 gal 实现中归纳，不预先设计 DSL
+- Date: 2026-09-21（状态更新：2026-10-13）
 
 > 本文记录下一阶段架构演进的目标方向，供后续设计与重构使用；不表示三层架构已经实现，也不定义已经可用的 API、schema 或插件格式。
 > 当前实现仍以 [中文架构文档](../ARCHITECTURE_CN.md)、[英文架构文档](../ARCHITECTURE_EN.md)及源码为准。本文不自动替代已有 ADR 或现行产品契约。

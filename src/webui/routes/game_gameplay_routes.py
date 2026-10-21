@@ -118,10 +118,13 @@ async def api_action(request: web.Request) -> web.Response:
         logger.exception("action 处理异常")
         return web.json_response(
             {
+                "ok": False,
+                "error": "处理请求时出错，请查看服务器日志",
                 "narration": "处理请求时出错，请查看服务器日志",
                 "advanced": False,
                 "phase": "error",
-            }
+            },
+            status=500,
         )
 
 
@@ -365,13 +368,27 @@ async def api_advance(request: web.Request) -> web.Response:
     except Exception:
         body = {}
     on_delta, on_reset = _narration_callbacks(request, gk)
-    result = await api.advance_turn(
-        gk,
-        request.get("user_id", ""),
-        force=bool(body.get("force")),
-        on_delta=on_delta,
-        on_reset=on_reset,
-    )
+    try:
+        result = await api.advance_turn(
+            gk,
+            request.get("user_id", ""),
+            force=bool(body.get("force")),
+            on_delta=on_delta,
+            on_reset=on_reset,
+        )
+    except Exception:
+        # 业务错误（如检定模型未配置）由服务层以结构化 TurnResult 返回；
+        # 这里只兜真正的编程缺陷，避免裸 500 丢掉可读的错误响应。
+        logger.exception("advance 处理异常")
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "推进请求处理出错，请查看服务器日志",
+                "advanced": False,
+                "phase": "error",
+            },
+            status=500,
+        )
     return web.json_response(result["payload"], status=result["status"])
 
 
