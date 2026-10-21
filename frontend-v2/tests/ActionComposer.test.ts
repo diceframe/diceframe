@@ -289,6 +289,26 @@ describe('ActionComposer rollback refresh', () => {
     unknown.unmount()
   })
 
+  it('requires refresh for dedicated-model and rollback-recovery failures', async () => {
+    for (const [index, [code, message]] of [
+      ['CHECK_MODEL_NOT_CONFIGURED', '独立检定模型未配置'],
+      ['ROUND_ROLLBACK_FAILED', '回合恢复失败'],
+    ].entries()) {
+      mockedApi.mockRejectedValueOnce({ code })
+      const wrapper = mount(ActionComposer, {
+        global: { plugins: [i18n] },
+        props: { gameKey: 'web|room|bot', userId: 'player-1', detail: detail(false, 4 + index) },
+      })
+      await wrapper.get('textarea').setValue('需要恢复的行动')
+      await actionButton(wrapper).trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-testid="action-recovery-refresh"]').exists()).toBe(true)
+      expect(wrapper.get('[data-testid="action-recovery"]').text()).toContain(message)
+      expect(wrapper.get('textarea').attributes('disabled')).toBeDefined()
+      wrapper.unmount()
+    }
+  })
+
   it('restores a recovery bar and draft only for the same game, run, actor, and round', async () => {
     mockedApi.mockRejectedValueOnce({ code: 'ROUND_PROCESSING_FAILED', message: 'round failed' })
     const first = mount(ActionComposer, {

@@ -80,7 +80,7 @@ function codeOf(error: unknown): ActionRecoveryCode {
     : error && typeof error === 'object' && 'code' in error
       ? String((error as { code?: unknown }).code || '')
       : ''
-  if (code === 'ROUND_PROCESSING_FAILED' || code === 'ROUND_POST_COMMIT_FAILED' || code === 'ROUND_NOT_PROCESSED') return code
+  if (code === 'ROUND_PROCESSING_FAILED' || code === 'ROUND_POST_COMMIT_FAILED' || code === 'ROUND_NOT_PROCESSED' || code === 'CHECK_MODEL_NOT_CONFIGURED' || code === 'ROUND_ROLLBACK_FAILED') return code
   return 'UNKNOWN'
 }
 
