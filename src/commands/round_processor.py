@@ -94,6 +94,7 @@ from src.imagegen import (
     storyboard_panel_metadata,
 )
 from src.memory.summarizer import needs_summary, summarize
+from src.llm.client import LLMToolCallError
 from src.rulesets.contracts import (
     NarrativeCheckPolicyRuntime,
     NarrativeDirectorPlanningRuntime,
@@ -237,6 +238,32 @@ class RoundProcessingFailure(RuntimeError):
     def __init__(self, message: str, *, rolled_back: bool) -> None:
         super().__init__(message)
         self.rolled_back = rolled_back
+
+
+class CheckModelNotConfigured(RuntimeError):
+    """The dedicated check model cannot complete check planning.
+
+    A provider/tool failure is a recoverable configuration/runtime problem for
+    the dedicated check-model path.  Callers translate this type into the
+    stable ``CHECK_MODEL_NOT_CONFIGURED`` response instead of silently running
+    the legacy offline planner.
+    """
+
+    error_code = "CHECK_MODEL_NOT_CONFIGURED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rolled_back: bool | None = None,
+        rollback_failed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        # ``prepare_round_checks_ai`` raises this before it owns progression;
+        # ``process_round`` fills these fields when it performs recovery for a
+        # direct caller (luck timeout/CLI).
+        self.rolled_back = rolled_back
+        self.rollback_failed = rollback_failed
 
 
 class RoundProcessor:
@@ -525,6 +552,25 @@ class RoundProcessor:
                 planned_only=True,
                 skip_action_indexes=deferred_indexes,
             )
+        except LLMToolCallError as exc:
+            if self.check_model_enabled:
+                # A configured dedicated model is an explicit user choice.  If
+                # every provider/tool call fails, falling back to the shared
+                # offline planner would make that choice appear to work while
+                # silently changing the check-model contract.
+                logger.warning(
+                    "独立检定模型调用失败，不进入离线兼容路径: game=%s",
+                    instance.game_key,
+                    exc_info=True,
+                )
+                raise CheckModelNotConfigured(
+                    "独立检定模型调用失败，请检查服务商和模型配置，或关闭独立检定模型",
+                ) from exc
+            logger.exception("AI 检定规划失败，进入离线检定兼容路径: %s", instance.game_key)
+            if not planning_target_is_current():
+                instance.reset_round_checks()
+                return []
+            return self.prepare_round_checks(instance)
         except Exception:
             logger.exception("AI 检定规划失败，进入离线检定兼容路径: %s", instance.game_key)
             if not planning_target_is_current():
@@ -563,7 +609,18 @@ class RoundProcessor:
         if has_blocking_economy_decision(instance):
             logger.info("等待经济提案结算，暂不生成叙事: %s", instance.game_key)
             raise RoundNotProcessed("economy_pending")
-        await self.prepare_round_checks_ai(instance)
+        try:
+            await self.prepare_round_checks_ai(instance)
+        except CheckModelNotConfigured as exc:
+            # Direct callers (luck timeout/CLI) may enter process_round without
+            # the turns service's preparation boundary.  Never leave those
+            # callers in ACTIVE_JUDGMENT after a dedicated provider failure.
+            rolled_back = await self._recover_failed_round(instance, on_reset=on_reset)
+            if not rolled_back:
+                raise CheckModelNotConfigured(
+                    str(exc), rolled_back=False, rollback_failed=True,
+                ) from exc
+            raise CheckModelNotConfigured(str(exc), rolled_back=True) from exc
         from src.engine import check_decisions
 
         if check_decisions.pending_any(instance):
