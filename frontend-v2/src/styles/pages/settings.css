@@ -187,22 +187,24 @@ body.light .system-status-card {
   background: rgba(18,15,12,.22);
 }
 
-.update-notes strong {
+.update-notes > strong {
   display: block;
   margin-bottom: 7px;
   color: var(--df-accent-strong);
   font-size: 13px;
 }
 
-.update-notes pre {
+.update-notes-body {
   max-height: 220px;
   margin: 0;
   overflow: auto;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--df-text);
   font: 13px/1.65 var(--df-font-body);
 }
+
+.update-notes-body > :first-child { margin-top: 0; }
+.update-notes-body > :last-child { margin-bottom: 0; }
 
 .update-download {
   margin-top: 12px;

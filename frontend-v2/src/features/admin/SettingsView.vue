@@ -17,6 +17,7 @@ import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { shouldAutoDownloadUpdate, updateStateForVersion, useUpdater } from '@/composables/useUpdater'
 import { useLocale } from '@/composables/useLocale'
 import { selectReleaseNotes } from '@/utils/releaseNotes'
+import { renderSafeMarkdown } from '@/utils/markdown'
 import { initializeTts, ttsRate, setTtsRate } from '@/utils/tts'
 import { initializeAsr } from '@/utils/asr'
 import { api, apiBlob, errorMessage } from '@/api/client'
@@ -115,6 +116,7 @@ const assistantOutputHint = computed(() => assistantOutputEngine.value === 'serv
 const releaseNotesText = computed(() =>
   selectReleaseNotes(updateInfo.value?.latest?.body, locale.value).text,
 )
+const releaseNotesHtml = computed(() => renderSafeMarkdown(releaseNotesText.value))
 const { current: themeMode, skin: activeSkin, builtinSkins, apply: applyThemeMode, applySkin } = useTheme()
 const standaloneFrontend = isStandaloneFrontend()
 const backendUrl = ref(standaloneFrontend ? currentBackendUrl() : '')
@@ -2122,7 +2124,7 @@ function redownloadUpdatePackage() {
               <p v-else-if="updateInfo?.update_available" class="muted">{{ t('updateAvailableHelp') }}</p>
               <div v-if="updateInfo?.latest?.body" class="update-notes">
                 <strong>{{ t('releaseNotes') }}</strong>
-                <pre>{{ releaseNotesText }}</pre>
+                <div class="update-notes-body safe-markdown" v-html="releaseNotesHtml" />
               </div>
               <div v-if="updateStatus && (updateInfo?.update_available || isDisplayedUpdateBusy)" class="update-download">
                 <div v-if="!updateStatus.self_update.supported" class="muted">

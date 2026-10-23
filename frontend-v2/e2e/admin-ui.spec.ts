@@ -25,6 +25,24 @@ test('updates stay in About while rollback lives in General maintenance', async 
   await page.screenshot({ path: info.outputPath('maintenance-rollback.png') })
 })
 
+test('renders release notes as Markdown in About', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('diceframe_locale', 'zh-CN'))
+  await page.route('**/api/system/update-check', route => route.fulfill({ json: {
+    ok: true, current_version: '3.0.1', update_available: false,
+    latest: {
+      tag_name: 'v3.0.2', version: '3.0.2', published_at: '2026-10-22T18:32:02Z',
+      body: '# DiceFrame v3.0.2\n\n## 中文\n\n### 修复\n\n- **资料册日志**现在按 Markdown 排版显示。',
+    },
+  } }))
+
+  await page.goto('/#/settings?section=about')
+  const notes = page.locator('.update-notes')
+  await expect(notes).toBeVisible()
+  await expect(notes.locator('.safe-markdown h3')).toHaveText('修复')
+  await expect(notes.locator('.safe-markdown strong')).toHaveText('资料册日志')
+  await expect(notes.locator('pre')).toHaveCount(0)
+})
+
 test('settings status summary stays structured and destructive confirmations are explicit', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token())
 
