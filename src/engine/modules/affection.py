@@ -1,12 +1,14 @@
 """Affection: how a character feels about the party (persisted module slot).
 
-One bounded integer score per subject (a world-style canonical id: an NPC,
-a heroine card, ...), from ``MIN_SCORE`` to ``MAX_SCORE``.  The score is the
+One bounded integer score per subject, from ``MIN_SCORE`` to ``MAX_SCORE``.
+A subject is the key a character is known by in this run: an ``instance.npcs``
+key (narrator NPCs are keyed by display name, so any script is allowed) or a
+world entity id.  The score is the
 attitude toward the party / protagonist; per-seat attitudes would be a new
 slot schema, never guessed from this one.
 
 This module owns only the authoritative numbers and their invariants (range,
-subject id shape, subject count).  Balance (tiers, per-round caps, decay) is
+subject key shape, subject count).  Balance (tiers, per-round caps, decay) is
 gameplay configuration and stays out of the engine.  Narrator output never
 writes here directly: a later settlement step validates model proposals and
 calls ``adjust`` (ENGINEERING_RULES §13).
@@ -20,7 +22,6 @@ through ``module_hooks``; without it a game simply has no affection.
 from __future__ import annotations
 
 from copy import deepcopy
-import re
 from typing import Any
 
 from src.engine import module_hooks
@@ -33,10 +34,10 @@ SCHEMA_VERSION = 1
 MIN_SCORE = -100
 MAX_SCORE = 100
 MAX_SUBJECTS = 64
+# Matches the NPC tag's name truncation.
+MAX_SUBJECT_CHARS = 80
 LOG_FIELD = "pre_affection"
 _BEFORE_ROUND = "_before_round"
-# Same shape as world canonical ids, so a world entity id is a valid subject.
-_SUBJECT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 
 
 def fresh() -> dict[str, Any]:
@@ -44,7 +45,12 @@ def fresh() -> dict[str, Any]:
 
 
 def _valid_subject(subject: Any) -> bool:
-    return isinstance(subject, str) and bool(_SUBJECT_PATTERN.fullmatch(subject))
+    return (
+        isinstance(subject, str)
+        and 0 < len(subject) <= MAX_SUBJECT_CHARS
+        and subject == subject.strip()
+        and subject.isprintable()
+    )
 
 
 def _valid_score(score: Any) -> bool:

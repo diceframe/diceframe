@@ -32,7 +32,7 @@ def test_adjust_starts_at_zero_clamps_to_range_and_reports_applied_change():
 
 
 @pytest.mark.parametrize("subject, delta", [
-    ("", 1), ("bad id", 1), ("-leading", 1), (None, 1), ("x" * 121, 1),
+    ("", 1), (" padded", 1), ("line" + chr(10) + "break", 1), (None, 1), ("x" * 81, 1),
     ("npc:heroine", 1.5), ("npc:heroine", True), ("npc:heroine", "3"),
 ])
 def test_adjust_rejects_malformed_input_without_mutation(subject, delta):
@@ -41,6 +41,13 @@ def test_adjust_rejects_malformed_input_without_mutation(subject, delta):
     with pytest.raises(ValueError):
         affection.adjust(inst, subject, delta)
     assert inst.to_dict() == before
+
+
+def test_npc_display_names_in_any_script_are_subjects():
+    inst = game()
+    assert affection.adjust(inst, "艾莉丝", 5) == 5
+    assert affection.adjust(inst, "老格里莫 the Elder", -3) == -3
+    assert affection.scores(inst) == {"艾莉丝": 5, "老格里莫 the Elder": -3}
 
 
 def test_subject_count_is_bounded():
@@ -54,9 +61,9 @@ def test_subject_count_is_bounded():
 
 def test_ensure_drops_malformed_entries_instead_of_guessing():
     slot = affection.ensure({"schema_version": 1, "scores": {
-        "npc:ok": 5, "npc:float": 2.5, "npc:bool": True, "npc:high": 101, "bad id": 3,
+        "npc:ok": 5, "艾莉丝": 3, "npc:float": 2.5, "npc:bool": True, "npc:high": 101, " padded": 3,
     }, "_before_round": "damaged"})
-    assert slot == {"schema_version": 1, "scores": {"npc:ok": 5}}
+    assert slot == {"schema_version": 1, "scores": {"npc:ok": 5, "艾莉丝": 3}}
     assert affection.ensure("damaged") == affection.fresh()
     assert affection.ensure({"schema_version": 1, "scores": []})["scores"] == {}
 
