@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from src.engine.modules import room_access
+
 
 def _projection(instance: Any) -> dict:
     result = deepcopy(instance.to_dict())
@@ -23,6 +25,30 @@ def fork_domain_state(instance: Any) -> Any:
     staged = type(instance)(game_key=instance.game_key, run_id=instance.run_id)
     staged.replace_persisted_state_from(instance)
     return staged
+
+
+def replace_persisted_state(target: Any, source: Any) -> None:
+    """Publish persisted domain fields without replacing runtime coordination.
+
+    The live aggregate keeps its locks, timers, save counters and other
+    process-local state. Room access is committed independently so a staged
+    copy cannot roll back a password change or a newly issued seat link.
+    """
+
+    if source.game_key != target.game_key or source.run_id != target.run_id:
+        raise ValueError("staged game state belongs to a different run")
+    runtime_only = {
+        "last_saved_log_count",
+        "pending_luck_after_recovery",
+        # Process-local coordination for same-round unpriced purchases.
+        "round_unpriced_purchase_intents",
+    }
+    live_room_access = room_access.capture_slot(target)
+    for name, value in source.__dict__.items():
+        if name.startswith("_") or name in runtime_only:
+            continue
+        setattr(target, name, deepcopy(value))
+    room_access.restore_slot(target, live_room_access)
 
 
 class StagedGameTransaction:

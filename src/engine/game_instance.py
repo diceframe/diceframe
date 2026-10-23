@@ -1513,33 +1513,10 @@ class GameInstance:
         return GameStateCodec.encode(self)
 
     def replace_persisted_state_from(self, source: "GameInstance") -> None:
-        """Commit a staged aggregate without replacing its runtime identity.
+        """Commit a staged aggregate without replacing runtime coordination."""
+        from src.engine.staged_transaction import replace_persisted_state
 
-        Economy decisions are prepared against an isolated ``GameInstance`` so
-        a failing dependent effect cannot leave half of a transaction applied.
-        Only persisted domain fields cross this boundary; locks, timers, save
-        counters and other process-local coordination remain attached to the
-        live instance.
-        """
-
-        if source.game_key != self.game_key or source.run_id != self.run_id:
-            raise ValueError("staged game state belongs to a different run")
-        runtime_only = {
-            "last_saved_log_count",
-            "pending_luck_after_recovery",
-            # 回合内的无价购买意图是 process-local 协调状态：不入持久化投影，
-            # 生成期间的合法结算回写不得清空它（否则同轮 LOOT 拦截会失效）。
-            "round_unpriced_purchase_intents",
-        }
-        # Room access (password hash, room tokens, seat credentials) is never
-        # part of a staged change and is committed on its own; a staged copy
-        # taken earlier must not roll back a password change or a new seat link.
-        live_room_access = room_access.capture_slot(self)
-        for name, value in source.__dict__.items():
-            if name.startswith("_") or name in runtime_only:
-                continue
-            setattr(self, name, copy.deepcopy(value))
-        room_access.restore_slot(self, live_room_access)
+        replace_persisted_state(self, source)
 
     def to_llm_view(self) -> GameContextView:
         """LLM 决策所需的精简状态视图。
