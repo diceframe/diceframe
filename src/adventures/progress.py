@@ -8,6 +8,7 @@ progress
 ├─ completed_nodes         已完成节点（可回流重访）
 ├─ completed_objectives    并行目标
 ├─ completed_milestones    里程碑
+├─ ending_node_id          已达成的结局节点（仅结束后存在）
 └─ history                 有界事件历史（最近 100 条）
 \`\`\`
 
@@ -17,6 +18,8 @@ progress
   进入 active（gate 评估见 ADV2-02；证据不足的分支不激活，不猜）；
 - **回流安全**：目标已在 completed/active 中时 no-op（history 不重复）；
 - **幂等**：重复完成同一节点只产生一次效果；
+- **结局即终局**（GAL 轨道 P4）：完成 ending 节点记录 ``ending_node_id``，
+  关闭其余开放节点与选择请求；此后任何节点都不能再完成；
 - **持久化形态是 plain dict**：存放位置由接线方决定（v2 走 application 层
   的 adventure progress state；v1 campaign 的 ruleset_state 路径原样保留，
   两者并存互不迁移——母方案 §71/§122 的 v1 兼容）。
@@ -27,6 +30,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.adventures.gates import GateError, gates_satisfied
+from src.adventures.graph_v2 import ENDING_NODE_TYPE
 
 MAX_HISTORY = 100
 
@@ -48,6 +52,13 @@ def new_progress(graph: dict[str, Any]) -> dict[str, Any]:
             {"kind": "node_activated", "id": node_id} for node_id in start_nodes
         ],
     }
+
+
+def ending_node_id(progress: Any) -> str:
+    """The reached ending node id, or ``""`` while the adventure continues."""
+
+    value = progress.get("ending_node_id") if isinstance(progress, dict) else None
+    return value if isinstance(value, str) else ""
 
 
 def _append_history(progress: dict[str, Any], entry: dict[str, Any]) -> None:
@@ -97,6 +108,8 @@ def complete_node(
 
     nodes = _node_map(graph)
     validate_choice_state(progress, graph)
+    if "ending_node_id" in progress:
+        raise ProgressError(f"adventure has ended: {progress.get('ending_node_id')!r}")
     if node_id not in nodes:
         raise ProgressError(f"node does not exist: {node_id!r}")
     active = progress.setdefault("active_nodes", [])
@@ -130,6 +143,12 @@ def complete_node(
         _append_history(progress, {"kind": "choice_selected", "id": node_id, "choice_id": choice_id})
         # Requests are advisory; resolution clears all requests for this node.
         progress["choice_requests"] = [request for request in progress.get("choice_requests", []) if request.get("node_id") != node_id]
+    if node.get("type") == ENDING_NODE_TYPE:
+        progress["ending_node_id"] = node_id
+        progress["active_nodes"] = []
+        progress["choice_requests"] = []
+        _append_history(progress, {"kind": "ending_reached", "id": node_id})
+        return []
     activated: list[str] = []
     for transition in transitions:
         target = str(transition.get("to") or "")
@@ -198,5 +217,6 @@ __all__ = [
     "complete_milestone",
     "complete_node",
     "complete_objective",
+    "ending_node_id",
     "new_progress",
 ]

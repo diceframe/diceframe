@@ -54,7 +54,7 @@ gal = 组合：freeform 系规则皮 + affection 模块槽 + Adventure 图（补
 | P1 | **v0 gal 预览**：gal 规则皮 JSON（照 tavern_free）；创建流入口（实验性标注）；现有 GameTimeline / 头像 / TTS / swipe 呈现。无好感度、无路线锁、无结局，仅需求验证，不作为正式功能宣传 | P0 | `templates/rules/`、创建流前端 |
 | P2 | affection 模块槽：五件套（状态 / codec / 迁移 / 投影 / 测试），按当前模块槽 + lifecycle hooks 模式（#525–#532 之后的模板），实例 schema +1；relation 数值投影供 gates；TRPG 侧 NPC 态度复用同一模块 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
 | P3 | affection 结算权威：prompt 注入好感状态；模型提议 → 引擎校验钳制结算（仿 economy proposal）；拒绝路径与测试 | P2 | `engine/affection_*`、`commands/`、prompt 组装 |
-| P4 | Adventure ending 语义：NODE_TYPES 增 ending（可选枚举，旧图照常）；进度投影；达成即终局 | 无（可与 P2/P3 并行） | `src/adventures/graph_v2.py`、`progress.py`、投影 |
+| P4 | Adventure ending 语义（已实施）：NODE_TYPES 增 `ending`；结局节点不得有 transitions / 选择，`on_complete` 不得再完成其它节点；完成结局节点记录 `progress.ending_node_id`，关闭其余开放节点与选择请求，此后任何节点不可再完成。不升图 schema：旧运行时不认识该类型会整图拒绝（fail closed）。投影带 `ended`（所有人）与 `ending_node_id`（仅结局对该视角可见时）；场景上下文提示叙事者只写结局与尾声，隐藏结局不泄露文本。"达成即终局"止于冒险进度；对局本身的结束（run finale）由 P6 / P7 驱动 | 无（可与 P2/P3 并行） | `src/adventures/graph_v2.py`、`progress.py`、`scene_context.py`、`webui/services/adventures.py` |
 | P5 | 叙事响应应用链泛化：`apply_parsed_data_to_response` 出回合管线，行为不变，跑团全绿为验收 | 无（可并行） | `commands/round_llm.py`、`round_processor.py` |
 | P6 | 节点完成 proposal + 激活钩：LLM 提议节点完成，引擎按 gates 权威确认（fail-closed）；节点激活触发场景叙事 | P4、P5 | `services/ruleset_gameplay.py`、`src/webui/services/adventure_runtime.py` |
 | P7 | 推进模式 `scene`：`KNOWN_MODES` 新值；回合状态机、经济纪元键、单人行动条数按模式分支，收口在 progression；`narrative_round` 行为不变 | P0（建议在 P6 后合入以缩小状态机分支面） | `engine/modules/progression_state.py`、`engine/progression.py`、`economy.py` |

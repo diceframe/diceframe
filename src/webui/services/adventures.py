@@ -27,6 +27,7 @@ from src.adventures import (
     LoadedAdventureBundle,
     is_builtin_adventure_directory,
 )
+from src.adventures.progress import ending_node_id
 from src.adventures.scene_context import project_scene_objectives
 from src.adventures.graph_v2 import (
     ADVENTURE_GRAPH_FORMAT_V2,
@@ -975,6 +976,12 @@ def game_adventure_projection(
     # The client receives only server-derived, viewer-safe active identities.
     # It never infers completable nodes from graph transitions.
     projection["progress"] = {"active_nodes": active_nodes}
+    ending_id = ending_node_id(progress)
+    if ending_id:
+        # Everyone learns the adventure ended; a hidden ending keeps its identity private.
+        projection["progress"]["ended"] = True
+        if ending_id in visible_node_ids:
+            projection["progress"]["ending_node_id"] = ending_id
     if viewer_is_gm:
         suggestions = progress.get("completion_suggestions")
         projected_suggestions = [

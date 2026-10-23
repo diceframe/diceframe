@@ -45,8 +45,10 @@ New package starters declare only the locales they actually ship (`en` and
 contributors can add a locale by supplying and validating its translations,
 without making it a core-maintained language.
 
-The profile supports scenes, objectives, decisions, milestones, references and
-world/progress gates/outcomes. It rejects encounter nodes/references, `rules.*`
+The profile supports scenes, objectives, decisions, milestones, references,
+endings and world/progress gates/outcomes. An `ending` node has no transitions
+and cannot complete other nodes; completing one ends the adventure, closes every
+open node and freezes progress (`ending_node_id`). It rejects encounter nodes/references, `rules.*`
 gates, `item_reward` outcomes and mechanical item/reward/encounter resources.
 Imported source resources can remain inert records with `automation_level:
 "reference"` and only `schema_version`, `kind`, `id`, `source_ref`,
