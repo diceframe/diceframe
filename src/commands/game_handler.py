@@ -29,7 +29,7 @@ from src.commands.round_helpers import (
     should_multi_step,
     validate_dice_constraint,
 )
-from src.commands.round_processor import RoundProcessor
+from src.commands.round_processor import RoundNotProcessed, RoundProcessor
 from src.commands.state_update_applier import StateUpdateApplier
 from src.commands.state_recap import (
     build_state_change_messages as _build_state_change_messages,
@@ -38,6 +38,9 @@ from src.commands.state_recap import (
 from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
+from src.engine.modules import adventure_runtime_state
+from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+from src.gameplays.contracts import TURN_DRIVER_NARRATIVE_ROUND, TurnDriverRegistry
 
 from src.lorebook.retrieval import LoreRetriever
 from src.content_modules.projection import ContentProjectionService
@@ -131,6 +134,8 @@ class GameHandler:
             lore_retriever=self.lore_retriever,
             content_projection=self.content_projection,
         )
+        self._turn_drivers = TurnDriverRegistry()
+        self._turn_drivers.bind(TURN_DRIVER_NARRATIVE_ROUND, self._round_processor)
         self._swipe_generator = SwipeGenerator(
             self.llm_client,
             self.matcher,
@@ -299,8 +304,16 @@ class GameHandler:
 
         Returns: (narration: str, info_asymmetry: dict | None)
             info_asymmetry 格式: {"user_qq_xxx": "仅该玩家可见的消息", ...}
+
+        推进由对局玩法声明的驱动执行（ADR-0012 §2）；跑团各模式绑定 RoundProcessor。
         """
-        result = await self._round_processor.process_round(instance, on_delta=on_delta, on_reset=on_reset)
+        driver = self._turn_drivers.for_mode(
+            DEFAULT_GAMEPLAYS, adventure_runtime_state.peek_play_mode(instance).casefold(),
+        )
+        if driver is None:
+            # Fail closed: a run whose gameplay has no bound driver is not advanced.
+            raise RoundNotProcessed("unsupported_gameplay")
+        result = await driver.process_round(instance, on_delta=on_delta, on_reset=on_reset)
         callback = getattr(self, "_after_round_completed", None)
         if callback is not None:
             callback(instance)
