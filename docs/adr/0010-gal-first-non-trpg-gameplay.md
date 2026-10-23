@@ -111,4 +111,4 @@ affection 是自持五件套的模块槽（状态 / codec / 迁移 / 投影 / �
 
 ## Supersedes / Superseded By
 
-None。本 ADR 触发 [ADR-0005](0005-composable-game-platform.md) 组合层部分的立项条件，不取代它。
+None。本 ADR 触发 [ADR-0005](0005-composable-game-platform.md) 组合层部分的立项条件，不取代它。§2 的 gal 概念落点与 §4 的实施方式由 [ADR-0012](0012-gameplay-packages.md) 修订。

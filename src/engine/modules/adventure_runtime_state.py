@@ -9,13 +9,12 @@ has done with that binding:
   an Adventure v2 graph.  It is written in the same authoritative transaction
   as world truth, so round snapshots and rollbacks carry it alongside
   ``world_state``.
-- ``play_mode``: ``"free"``, ``"adventure"`` or ``"gal"`` chosen at creation.
+- ``play_mode``: a gameplay mode id from ``src.gameplays`` chosen at creation.
   An empty or unknown value is derived from the binding when a save is
   decoded, exactly as the codec did when the field lived at the top level.
-- ``bot_surface``: the transport capability declared per play mode.  It is
-  data on the mode registry and is enforced only at the bind admission
-  point; transports (bot bridge, platform plugins) never branch on specific
-  modes.
+  This slot only stores the id (transitional location, ADR-0012); the modes
+  themselves, their bot surface and creation rules belong to the gameplay
+  registry.
 
 Run transitions: the in-place reset clears ``progress`` together with world
 truth and keeps ``play_mode``; a new run (reset/restart/seed) keeps the play
@@ -29,25 +28,15 @@ import uuid
 from typing import Any
 
 from src.engine import module_hooks
+from src.gameplays import builtin as gameplay_builtin
 from src.engine.module_state import (
     ModuleStateError, ModuleStateSpec, get_module_state, register_module_state,
 )
 
 MODULE_NAME = "adventure_runtime"
 SCHEMA_VERSION = 1
-PLAY_MODES = frozenset({"free", "adventure", "gal"})
-
-BOT_SURFACE_FULL = "full"
-BOT_SURFACE_READ_ONLY = "read_only"
-BOT_SURFACE_NONE = "none"
-BOT_SURFACES = frozenset({BOT_SURFACE_FULL, BOT_SURFACE_READ_ONLY, BOT_SURFACE_NONE})
 MAX_COMPLETION_SUGGESTIONS = 64
 MAX_IGNORED_COMPLETION_NODES = 256
-MODE_BOT_SURFACES: dict[str, str] = {
-    "free": BOT_SURFACE_FULL,
-    "adventure": BOT_SURFACE_FULL,
-    "gal": BOT_SURFACE_READ_ONLY,
-}
 
 
 def fresh() -> dict[str, Any]:
@@ -81,7 +70,7 @@ def require_writable(instance: Any) -> None:
 def derive_play_mode(value: Any, adventure_binding: Any) -> str:
     """The decode rule: keep a known mode verbatim, otherwise derive it."""
     text = str(value or "")
-    if text.casefold() in PLAY_MODES:
+    if text.casefold() in gameplay_builtin.DEFAULT_GAMEPLAYS.mode_ids():
         return text
     if isinstance(adventure_binding, dict) and adventure_binding.get("adventure_id"):
         return "adventure"
@@ -237,14 +226,21 @@ def normalize_decoded_play_mode(instance: Any) -> None:
     slot["play_mode"] = derive_play_mode(slot.get("play_mode"), getattr(instance, "adventure_binding", None))
 
 
-def bot_surface(mode: Any) -> str:
-    """Fail closed: unknown or empty modes expose no bot surface at all."""
-    return MODE_BOT_SURFACES.get(str(mode or ""), BOT_SURFACE_NONE)
+def peek_play_mode(instance: Any) -> str:
+    """Effective play mode without repairing or materializing the slot.
+
+    A missing, corrupt or unknown-schema slot reads as an empty stored value,
+    so the decode-time derivation from the Adventure binding applies.
+    """
+    modules = getattr(instance, "modules", None)
+    slot = modules.get(MODULE_NAME) if isinstance(modules, dict) else None
+    stored = slot.get("play_mode") if isinstance(slot, dict) and slot.get("schema_version") == SCHEMA_VERSION else ""
+    return derive_play_mode(stored, getattr(instance, "adventure_binding", None))
 
 
 def effective_bot_surface(instance: Any) -> str:
     """Bot surface of the run's effective play mode (decode-time derivation)."""
-    return bot_surface(
+    return gameplay_builtin.DEFAULT_GAMEPLAYS.bot_surface(
         derive_play_mode(play_mode(instance), getattr(instance, "adventure_binding", None))
     )
 

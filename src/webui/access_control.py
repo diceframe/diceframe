@@ -12,7 +12,7 @@ from src.webui.access_password import (
     verify_access_password,
 )
 from src.engine.modules import room_access
-from src.engine.modules import adventure_runtime_state
+from src.gameplays import contracts as gameplay_contracts
 from src.webui.device_tokens import DEVICE_TOKENS_KEY
 from src.webui.sse_ticket import SSE_GRANT_KEY, BotGrant, OwnerGrant, token_digest
 from src.webui.services._common import canonical_game_key
@@ -276,9 +276,9 @@ class WebAccessControl:
         surface = (
             api.bot_surface(game_key)
             if api is not None and hasattr(api, "bot_surface")
-            else adventure_runtime_state.BOT_SURFACE_NONE
+            else gameplay_contracts.BOT_SURFACE_NONE
         )
-        if surface not in adventure_runtime_state.BOT_SURFACES:
+        if surface not in gameplay_contracts.BOT_SURFACES:
             return web.json_response(
                 {
                     "ok": False,
@@ -288,7 +288,7 @@ class WebAccessControl:
                 status=403,
             )
         request["bot_surface"] = surface
-        if surface == adventure_runtime_state.BOT_SURFACE_NONE:
+        if surface == gameplay_contracts.BOT_SURFACE_NONE:
             return web.json_response(
                 {
                     "ok": False,
@@ -297,7 +297,7 @@ class WebAccessControl:
                 },
                 status=403,
             )
-        if surface == adventure_runtime_state.BOT_SURFACE_READ_ONLY:
+        if surface == gameplay_contracts.BOT_SURFACE_READ_ONLY:
             path_tail = request.path.rsplit("/", 1)[-1]
             if request.method != "GET" and path_tail not in _BOT_READ_ONLY_POST_TAILS:
                 return web.json_response(
