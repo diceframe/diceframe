@@ -372,11 +372,11 @@ MODULE_API_WRITERS: dict[str, tuple[frozenset[str], frozenset[Path]]] = {
         frozenset({"mark_acted", "forget_seat", "reset", "seat_acted"}),
         frozenset(),
     ),
-    # Reset is reached only through module_hooks; adjust has no writer until
-    # the affection settlement step (GAL track P3) becomes its single owner.
+    # Reset is reached only through module_hooks; narrator proposals are
+    # settled in one place.
     "affection": (
         frozenset({"adjust", "reset"}),
-        frozenset(),
+        frozenset({SRC / "commands" / "affection_effects.py"}),
     ),
     # Reached only through module_hooks (engine.player_control reads/writes state).
     "player_control_state": (
