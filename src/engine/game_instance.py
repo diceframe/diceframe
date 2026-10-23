@@ -1134,69 +1134,24 @@ class GameInstance:
         requires_structured_intent: StructuredIntentRequirement = False,
         admission_check: Callable[[], str] | None = None,
     ) -> str:
-        """Atomically re-confirm a hosted seat and commit its action.
-
-        The LLM call deliberately happens *outside* every lock; the danger is that
-        the world moves between "the model answered" and "we write the answer".
-        So the re-confirmation and the write are one boundary: this method takes
-        the authoritative write permission and ``_lock`` once, re-checks every
-        identity the caller captured (run, round, seat, control mode, control
-        revision, phase), re-checks that the **human gate is still open**, that
-        this round has no action from ``source`` yet, and only then appends.
-
-        The human gate matters on its own: a hosted seat only ever acts *after*
-        the humans are done. If somebody claims another seat (or a player returns
-        from away) while this result was in flight, the table suddenly has an
-        active human who has not submitted yet, and an action written now would
-        break "AI acts after the humans" — so it is discarded instead.
-
-        Returns ``""`` on commit, otherwise the reason the result was dropped:
-        ``rejected`` / ``run_changed`` / ``round_changed`` / ``seat_removed`` /
-        ``control_changed`` / ``phase_changed`` / ``human_gate_changed`` /
-        ``duplicate`` / ``STRUCTURED_INTENT_REQUIRED`` / ``action_rejected``.
-        A supplied structured-intent predicate reads current admission state here,
-        synchronously under both locks, after the existing rejection checks.
-        Callers must treat a non-empty
-        result as "write nothing"; the action never lands.
-        """
+        """Atomically re-confirm a hosted seat and commit its action."""
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
-                # 判定/重写正在进行：这一轮不再接受带轮次身份的行动。
                 return "rejected"
-            stale = self.ai_player_action_stale_reason(
+            return turn_state.commit_ai_player_action_locked(
+                self,
                 user_id,
+                action_text,
+                source=source,
                 expected_run_id=expected_run_id,
                 expected_round_number=expected_round_number,
                 expected_control_revision=expected_control_revision,
-            )
-            if stale:
-                return stale
-            if admission_check is not None:
-                code = admission_check()
-                if code:
-                    return code
-            code = evaluate(
-                self,
-                GateRequest(
-                    actor_uid=user_id,
-                    source=SOURCE_AI_SEAT,
-                    expected_run_id=expected_run_id,
-                    expected_round_number=expected_round_number,
-                    expected_control_revision=expected_control_revision,
-                    action_source=source,
-                    requires_structured_intent=requires_structured_intent,
-                ),
-                AI_SEAT_COMMIT_POLICY,
-            )
-            if code:
-                return code
-            added = self._add_action_locked(
-                user_id, action_text,
-                source=source,
                 action_metadata=action_metadata,
-                defer_out_of_phase=False,
+                requires_structured_intent=requires_structured_intent,
+                admission_check=admission_check,
+                evaluate_fn=evaluate,
+                policy=AI_SEAT_COMMIT_POLICY,
             )
-            return "" if added else "action_rejected"
 
     def ai_player_action_stale_reason(
         self,
