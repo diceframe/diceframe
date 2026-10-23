@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from src.engine.modules import adventure_runtime_state, room_access
+from src.gameplays import contracts as gameplay_contracts
 
 
 GameKey = tuple[str, ...]
@@ -41,7 +42,7 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
     if not expected or not secrets.compare_digest(expected, str(bind_token or "")):
         return {"ok": False, "error": "绑定凭证无效或已使用，请由 GM 在网页重新生成一次性绑定命令"}
     surface = adventure_runtime_state.effective_bot_surface(inst)
-    if surface == adventure_runtime_state.BOT_SURFACE_NONE:
+    if surface == gameplay_contracts.BOT_SURFACE_NONE:
         return {"ok": False, "error": "该玩法模式不支持群聊绑定"}
     result = {
         "ok": True,
@@ -79,7 +80,7 @@ def surface_for_game(dependencies: BotAccessDependencies, game_key: str) -> str:
 
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     if not inst:
-        return adventure_runtime_state.BOT_SURFACE_NONE
+        return gameplay_contracts.BOT_SURFACE_NONE
     return adventure_runtime_state.effective_bot_surface(inst)
 
 

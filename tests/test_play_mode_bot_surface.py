@@ -4,6 +4,8 @@ import pytest
 
 from src.engine.game_instance import GameInstance
 from src.engine.modules import adventure_runtime_state
+from src.gameplays import builtin as gameplay_builtin
+from src.gameplays.contracts import BOT_SURFACE_NONE, GameplayMode, GameplayRegistry
 from src.webui.services import bot_access
 
 
@@ -68,7 +70,9 @@ async def test_read_only_surface_binds_but_declares_surface():
 @pytest.mark.asyncio
 async def test_none_surface_refuses_binding(monkeypatch):
     inst = GameInstance(game_key=("web", "room", "bot"), gm_uid="gm")
-    monkeypatch.setitem(adventure_runtime_state.MODE_BOT_SURFACES, "free", "none")
+    monkeypatch.setattr(gameplay_builtin, "DEFAULT_GAMEPLAYS", GameplayRegistry([
+        GameplayMode("free", BOT_SURFACE_NONE, lambda _request: None),
+    ]))
     service = _service(inst)
     token = await _bind_token(service, "web|room|bot")
 

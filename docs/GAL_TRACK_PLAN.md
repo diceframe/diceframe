@@ -2,7 +2,7 @@
 
 > 基线：`origin/main` @ 2026-10-13（实例 schema 43；轨道 R 完成 R0–R8 并经 #525–#532 演进为模块 lifecycle hooks；轨道 C 的 A–I 已全部合并；lorebook canonical spec 为 `lorebook_v3`）。本仓库本地 main 若落后 origin/main，先同步再基于本计划开工。
 >
-> 决策来源：[ADR-0010](adr/0010-gal-first-non-trpg-gameplay.md)（GAL 立项与八项边界决策）。本文只定义施工顺序、同步点与完成标准；与源码冲突时以源码和 [ENGINEERING_RULES](ENGINEERING_RULES.md) 为准。
+> 决策来源：[ADR-0010](adr/0010-gal-first-non-trpg-gameplay.md)（GAL 立项与八项边界决策）；[ADR-0012](adr/0012-gameplay-packages.md)（玩法包边界，2026-10-23 修订 P7 / P9 的落点并在 P2 前插入 P0.5a–d，其中 P0.5b 推迟）。本文只定义施工顺序、同步点与完成标准；与源码冲突时以源码和 [ENGINEERING_RULES](ENGINEERING_RULES.md) 为准。
 >
 > 轨道代号取 **P**（Playmode）：R / C / M 已被占用，且轨道 C 的步骤代号（PR A–I，上游提交信息使用 G2a–G2d 等）不应与玩法轨道的步骤号混淆。
 
@@ -46,20 +46,24 @@ gal = 组合：freeform 系规则皮 + affection 模块槽 + Adventure 图（补
 
 # 3. PR 序列
 
-**v0 = P0 + P1；v1 = P2–P10。** 一个 PR 只做一件事；schema 各归各。
+**v0 = P0 + P1；玩法包边界 = P0.5a / c / d（ADR-0012，先于 P2；P0.5b 推迟）；v1 = P2–P10。** 一个 PR 只做一件事；schema 各归各。gal 专属代码一律落在 `src/gameplays/gal/` 与 `frontend-v2/src/features/gal/`。
 
 | 步骤 | 内容 | 依赖 | 主要落点 |
 |---|---|---|---|
 | P0 | 契约与守卫：`play_mode` 增 `gal`（创建流接受 / 校验，fail-closed）；玩法模式 transport 声明 `bot_surface`；绑定准入单点检查（现有跑团 = full，行为不变）；`tests/architecture/` 守卫：generic path 无具体玩法分支、bot bridge 与插件无玩法词表。纯契约，gal 尚不可玩 | 无 | `services/game_lifecycle.py`、`routes/pairing.py` / bind 命令、`tests/architecture/` |
 | P1 | **v0 gal 预览**：gal 规则皮 JSON（照 tavern_free）；创建流入口（实验性标注）；现有 GameTimeline / 头像 / TTS / swipe 呈现。无好感度、无路线锁、无结局，仅需求验证，不作为正式功能宣传 | P0 | `templates/rules/`、创建流前端 |
+| P0.5a | 玩法注册表外移：`src/gameplays/`（contracts / builtin / trpg / gal 包），bot surface 与创建校验归注册表，`game_lifecycle.py` 不再内联 gal 分支；守卫 `test_gameplay_packages.py`。行为不变 | P1 | `src/gameplays/`、`adventure_runtime_state.py`、`game_lifecycle.py` |
+| P0.5b | **推迟**（ADR-0012 §3）：玩法 id 迁入独立 `gameplay` 模块槽、实例 schema +1。gal 绑定路线图不依赖它（P4 / P6 时只改 gal 创建校验）；出现确实需要的消费方时再做 | P0.5a | `src/gameplays/`、`engine/modules/`、`migrations/instance.py` |
+| P0.5c | 推进驱动接缝：`RoundProcessor` 原样登记为跑团 `narrative_round` 驱动，回合入口按玩法分发；跑团全绿为验收 | P0.5a | `src/gameplays/`、`commands/game_handler.py` |
+| P0.5d | 前端按玩法分发视图：`/play` 入口从注册表选视图，新建 `features/gal/` 骨架；`PlayView.vue` 不加 gal 分支 | P0.5a | `frontend-v2/src/features/game-profiles/`、`features/gal/` |
 | P2 | affection 模块槽：五件套（状态 / codec / 迁移 / 投影 / 测试），按当前模块槽 + lifecycle hooks 模式（#525–#532 之后的模板），实例 schema +1；relation 数值投影供 gates；TRPG 侧 NPC 态度复用同一模块 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
 | P3 | affection 结算权威：prompt 注入好感状态；模型提议 → 引擎校验钳制结算（仿 economy proposal）；拒绝路径与测试 | P2 | `engine/affection_*`、`commands/`、prompt 组装 |
 | P4 | Adventure ending 语义：NODE_TYPES 增 ending（可选枚举，旧图照常）；进度投影；达成即终局 | 无（可与 P2/P3 并行） | `src/adventures/graph_v2.py`、`progress.py`、投影 |
 | P5 | 叙事响应应用链泛化：`apply_parsed_data_to_response` 出回合管线，行为不变，跑团全绿为验收 | 无（可并行） | `commands/round_llm.py`、`round_processor.py` |
 | P6 | 节点完成 proposal + 激活钩：LLM 提议节点完成，引擎按 gates 权威确认（fail-closed）；节点激活触发场景叙事 | P4、P5 | `services/ruleset_gameplay.py`、`src/webui/services/adventure_runtime.py` |
-| P7 | 推进模式 `scene`：`KNOWN_MODES` 新值；回合状态机、经济纪元键、单人行动条数按模式分支，收口在 progression；`narrative_round` 行为不变 | P0（建议在 P6 后合入以缩小状态机分支面） | `engine/modules/progression_state.py`、`engine/progression.py`、`economy.py` |
+| P7 | 推进模式 `scene`：gal 场景驱动在 `src/gameplays/gal/` 实现（ADR-0012 §2）；`KNOWN_MODES` 只增存储标识，不在 progression / 回合管线 / economy 里按模式分支；`narrative_round` 行为不变 | P0.5c（建议在 P6 后合入） | `src/gameplays/gal/`、`engine/modules/progression_state.py` |
 | P8 | 立绘资产类型 + 音色绑定：standing portrait 新增为 ContentKind（registry 已随轨道 C PR A 合并，直接扩展；portable schema 须客户端可独立读写，母方案 §3.7），含可选表情差分集，v1 UI 可只消费首图；角色 ↔ voice profile 绑定 | 无（可并行，建议 P4 后） | `src/content_modules/` ContentKind 注册、资产服务、`tts/profile_store.py` |
-| P9 | VN 呈现层：对话框模式、立绘层、好感条、路线 / 结局 UI、自动播放 / 快进；全部界面语言 | P2–P8 | `frontend-v2`（新增 gal 呈现组件，复用 GameTimeline 数据层） |
+| P9 | VN 呈现层：对话框模式、立绘层、好感条、路线 / 结局 UI、自动播放 / 快进；全部界面语言 | P0.5d、P2–P8 | `frontend-v2/src/features/gal/`（独立视图，复用 GameTimeline 数据层与共享组件，不改 PlayView） |
 | P10 | 样板 gal 内容包（全年龄）：女主卡 + 路线图 + 事件条目 + 默认音色 / 立绘配置。内容工作，与 P7+ 并行排期，不阻塞代码 PR；走统一 Draft → CommitPlan 导入导出路径 | P4 契约定型 | `templates/` 或内容包 |
 
 ---
