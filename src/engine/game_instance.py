@@ -1245,19 +1245,15 @@ class GameInstance:
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered:
                 return "CONTROL_CHANGE_BUSY"
-            handover = away and policy == "ai_takeover"
-            if handover or not away:
-                block = control_change_block(self)
-                if block:
-                    return block
-            if not self._set_player_away_locked(user_id, away):
-                return "UNKNOWN_PLAYER"
-            if handover:
-                begin_away_hosting(self, user_id)
-            elif not away:
-                # 只在席位确实是「临时托管」时归还；GM 永久交给 AI 的席位不会被抢回。
-                end_away_hosting(self, user_id)
-            return ""
+            return turn_state.apply_away_transition_locked(
+                self,
+                user_id,
+                away,
+                policy=policy,
+                control_change_block_fn=control_change_block,
+                begin_away_hosting_fn=begin_away_hosting,
+                end_away_hosting_fn=end_away_hosting,
+            )
 
     async def apply_player_control_change(self, user_id: str, mode: str) -> str:
         """GM 托管控件：安全边界复核 + 控制权变更，同一个 transaction。
@@ -1269,20 +1265,14 @@ class GameInstance:
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
                 return "CONTROL_CHANGE_BUSY"
-            block = control_change_block(self)
-            if block:
-                return block
-            if user_id not in self.players:
-                return "UNKNOWN_PLAYER"
-            try:
-                set_control(self, user_id, mode)
-            except PlayerControlError:
-                logger.warning(
-                    "拒绝托管切换: game_key=%s uid=%s mode=%s",
-                    self.game_key, user_id, mode, exc_info=True,
-                )
-                return "CONTROL_REJECTED"
-            return ""
+            return turn_state.apply_player_control_change_locked(
+                self,
+                user_id,
+                mode,
+                control_change_block_fn=control_change_block,
+                set_control_fn=set_control,
+                player_control_error_type=PlayerControlError,
+            )
 
     async def advance_round(self) -> bool:
         """显式推进回合。未行动的存活玩家标记为已就绪。"""

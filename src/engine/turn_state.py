@@ -470,6 +470,57 @@ def set_player_away_locked(instance: GameInstance, user_id: str, away: bool) -> 
     return True
 
 
+def apply_away_transition_locked(
+    instance: GameInstance,
+    user_id: str,
+    away: bool,
+    *,
+    policy: str,
+    control_change_block_fn: Any,
+    begin_away_hosting_fn: Any,
+    end_away_hosting_fn: Any,
+) -> str:
+    """Apply presence and temporary control handover in one held-lock boundary."""
+    handover = away and policy == "ai_takeover"
+    if handover or not away:
+        block = control_change_block_fn(instance)
+        if block:
+            return block
+    if not instance._set_player_away_locked(user_id, away):
+        return "UNKNOWN_PLAYER"
+    if handover:
+        begin_away_hosting_fn(instance, user_id)
+    elif not away:
+        end_away_hosting_fn(instance, user_id)
+    return ""
+
+
+def apply_player_control_change_locked(
+    instance: GameInstance,
+    user_id: str,
+    mode: str,
+    *,
+    control_change_block_fn: Any,
+    set_control_fn: Any,
+    player_control_error_type: type[Exception],
+) -> str:
+    """Apply a GM control handover while the authority/state locks are held."""
+    block = control_change_block_fn(instance)
+    if block:
+        return block
+    if user_id not in instance.players:
+        return "UNKNOWN_PLAYER"
+    try:
+        set_control_fn(instance, user_id, mode)
+    except player_control_error_type:
+        logger.warning(
+            "拒绝托管切换: game_key=%s uid=%s mode=%s",
+            instance.game_key, user_id, mode, exc_info=True,
+        )
+        return "CONTROL_REJECTED"
+    return ""
+
+
 def do_advance_locked(instance: GameInstance) -> bool:
     """在锁内执行推进（调用方需持锁）。"""
     if instance.state != GameState.ACTIVE_ACTION:
