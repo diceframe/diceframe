@@ -2,8 +2,8 @@
 
 GameRegistry 保留薄委托（公共方法 + 被外部调用的 _save_path），调用方零改动。
 纯私有方法（_chatlog_path/_append_chatlog/_truncate_chatlog/_restore_chatlog）
-仅本模块内部使用，不设委托。循环 import 由 game_instance.py 文件末尾
-`from src.engine import persistence` 触发（届时 GameInstance/GameRegistry 已定义）。
+仅本模块内部使用，不设委托。GameRegistry 通过延迟加载 persistence，避免
+与本模块形成初始化循环。
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from uuid import uuid4
 
 from src.engine import game_instance
 from src.engine import check_decisions, module_hooks
-from src.engine.game_instance import GameInstance, GameRegistry, GameState
+from src.engine.game_instance import GameInstance, GameState
+from src.engine.game_registry import GameRegistry
 from src.engine.health import record_health_event
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import checks, media, room_access
