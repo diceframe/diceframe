@@ -97,6 +97,16 @@ def parse_world_tag(tag: str, value: str, result: dict) -> None:
         if len(parts) == 2:
             name, relation = parts[0].strip()[:80], parts[1].strip()[:40]
             result["state_update"]["npcs"][name] = {"name": name, "tier": relation}
+    elif tag == "AFFECTION":
+        # AFFECTION:NPC名:变化量[:原因]。只是提议；是否启用、对象与幅度由
+        # affection_effects 按规则配置结算。
+        parts = value.split(":", 2)
+        if len(parts) >= 2:
+            result["state_update"].setdefault("affection", []).append({
+                "subject": parts[0].strip()[:80],
+                "delta": parts[1].strip()[:8],
+                "reason": parts[2].strip()[:240] if len(parts) == 3 else "",
+            })
     elif tag == "DECISION":
         result["plot_update"]["decisions"].append(value[:300])
     elif tag == "QUEST":
