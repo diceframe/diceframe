@@ -437,16 +437,19 @@ class GameInstance:
         language: str,
         state: GameState = GameState.WAITING,
     ) -> None:
-        """配置新局身份信息；调用方在并发路径中应持有 ``_lock``。"""
-        game_config.require_writable(self)
-        self.world_id = world_id
-        self.rule_id = rule_id or "freeform_fantasy"
-        self.world_name = world_name
-        self.group_name = group_name
-        game_config.replace_seed_code(self, seed_code)
-        game_config.replace_difficulty(self, difficulty)
-        self.language = normalize_language(language)
-        self.state = state
+        from src.engine import game_configuration
+
+        game_configuration.configure_game(
+            self,
+            world_id=world_id,
+            rule_id=rule_id,
+            world_name=world_name,
+            group_name=group_name,
+            seed_code=seed_code,
+            difficulty=difficulty,
+            language=language,
+            state=state,
+        )
 
     def configure_session(
         self,
@@ -460,58 +463,19 @@ class GameInstance:
         economy_reward_policy: dict | None = None,
         dice_reveal_mode: str | None = None,
     ) -> None:
-        """集中更新入口与房间身份配置，保留旧存档字段。
+        from src.engine import game_configuration
 
-        luck_timeout_seconds：每玩家幸运超时秒数（0=禁用，异步局建议 0）。
-        economy_reward_policy：本局奖励自动结算策略；非法载荷整体拒绝。
-        dice_reveal_mode：纯表现偏好（auto=自动出结果，click=点击共享揭示），
-        不改变任何机械判定与推进语义。
-        """
-        # Validate every participating owner and value before writing any part
-        # of this configuration transaction.
-        if solo_mode is not None or entry_point is not None:
-            game_config.require_writable(self)
-        if room_password is not None:
-            room_access.require_writable(self)
-        if luck_timeout_seconds is not None or dice_reveal_mode is not None:
-            module_hooks.preflight(self, module_hooks.CHECK_PRESENTATION)
-        if narrative_perspective is not None:
-            module_hooks.preflight(self, module_hooks.NARRATION_PREFERENCES)
-        if luck_timeout_seconds is not None:
-            luck_timeout_seconds = int(luck_timeout_seconds)
-            if not 0 <= luck_timeout_seconds <= 3600:
-                raise ValueError("幸运超时需在 0..3600 秒之间（0=禁用）")
-        if dice_reveal_mode is not None and dice_reveal_mode not in {"auto", "click"}:
-            raise ValueError("骰子揭示方式仅支持 auto 或 click")
-        if economy_reward_policy is not None:
-            from src.engine.economy import normalize_reward_policy
-
-            economy_state.require_writable(self)
-            if not isinstance(economy_reward_policy, dict):
-                raise ValueError("奖励策略无效")
-            if not str(economy_reward_policy.get("mode") or "").strip():
-                economy_reward_policy = {}
-            else:
-                normalized = normalize_reward_policy(economy_reward_policy)
-                if not normalized:
-                    raise ValueError("奖励策略无效（mode 或 auto_reward_cap 不合法）")
-                economy_reward_policy = normalized
-        if solo_mode is not None:
-            game_config.replace_solo_mode(self, bool(solo_mode))
-        if entry_point is not None:
-            game_config.replace_entry_point(self, entry_point)
-        if room_password is not None:
-            room_access.set_room_password(self, room_password)
-        if gm_uid is not None:
-            self.gm_uid = gm_uid
-        if luck_timeout_seconds is not None:
-            module_hooks.record(self, module_hooks.LUCK_TIMEOUT_SECONDS, int(luck_timeout_seconds))
-        if dice_reveal_mode is not None:
-            module_hooks.record(self, module_hooks.DICE_REVEAL_MODE, dice_reveal_mode)
-        if narrative_perspective is not None:
-            self.set_narrative_perspective(narrative_perspective)
-        if economy_reward_policy is not None:
-            economy_state.replace_reward_policy(self, economy_reward_policy)
+        game_configuration.configure_session(
+            self,
+            solo_mode=solo_mode,
+            entry_point=entry_point,
+            room_password=room_password,
+            gm_uid=gm_uid,
+            luck_timeout_seconds=luck_timeout_seconds,
+            narrative_perspective=narrative_perspective,
+            economy_reward_policy=economy_reward_policy,
+            dice_reveal_mode=dice_reveal_mode,
+        )
 
     @staticmethod
     def _normalized_ruleset_binding(binding: dict[str, Any]) -> dict[str, Any] | None:
