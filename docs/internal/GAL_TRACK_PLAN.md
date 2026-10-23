@@ -56,7 +56,7 @@ gal = 组合：freeform 系规则皮 + affection 模块槽 + Adventure 图（补
 | P0.5b | **推迟**（ADR-0012 §3）：玩法 id 迁入独立 `gameplay` 模块槽、实例 schema +1。gal 绑定路线图不依赖它（P4 / P6 时只改 gal 创建校验）；出现确实需要的消费方时再做 | P0.5a | `src/gameplays/`、`engine/modules/`、`migrations/instance.py` |
 | P0.5c | 推进驱动接缝：`RoundProcessor` 原样登记为跑团 `narrative_round` 驱动，回合入口按玩法分发；跑团全绿为验收 | P0.5a | `src/gameplays/`、`commands/game_handler.py` |
 | P0.5d | 前端按玩法分发视图：`/play` 入口从注册表选视图，新建 `features/gal/` 骨架；`PlayView.vue` 不加 gal 分支 | P0.5a | `frontend-v2/src/features/game-profiles/`、`features/gal/` |
-| P2 | affection 模块槽：五件套（状态 / codec / 迁移 / 投影 / 测试），按当前模块槽 + lifecycle hooks 模式（#525–#532 之后的模板），实例 schema +1；relation 数值投影供 gates；TRPG 侧 NPC 态度复用同一模块 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
+| P2 | affection 模块槽（已实施）：`src/engine/modules/affection.py`，每个对象一个 [-100, 100] 整数分（对象 id 沿用世界 canonical id 形状，至多 64 个），表示对队伍 / 主角的态度；按 lifecycle hooks 参与回合提交 / 中止 / 回退 / 重置（日志条目带 `pre_affection`）；实例 schema 47 → 48 为读者护栏，旧存档不补数据。分档、单轮上限、衰减等平衡参数归玩法配置，不进引擎。写入 API `adjust` 暂无调用方，P3 结算成为唯一写入者（架构守卫）。gates 接入改为新增 `affection.*` gate 类型，不投影到 `world.relation_status`（世界关系状态只有 active / inactive / severed，表达不了好感分档，投影会形成双权威），随 P3 或 P4 落地 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
 | P3 | affection 结算权威：prompt 注入好感状态；模型提议 → 引擎校验钳制结算（仿 economy proposal）；拒绝路径与测试 | P2 | `engine/affection_*`、`commands/`、prompt 组装 |
 | P4 | Adventure ending 语义（已实施）：NODE_TYPES 增 `ending`；结局节点不得有 transitions / 选择，`on_complete` 不得再完成其它节点；完成结局节点记录 `progress.ending_node_id`，关闭其余开放节点与选择请求，此后任何节点不可再完成。不升图 schema：旧运行时不认识该类型会整图拒绝（fail closed）。投影带 `ended`（所有人）与 `ending_node_id`（仅结局对该视角可见时）；场景上下文提示叙事者只写结局与尾声，隐藏结局不泄露文本。"达成即终局"止于冒险进度；对局本身的结束（run finale）由 P6 / P7 驱动 | 无（可与 P2/P3 并行） | `src/adventures/graph_v2.py`、`progress.py`、`scene_context.py`、`webui/services/adventures.py` |
 | P5 | 叙事响应应用链泛化（已实施）：`apply_parsed_data_to_response` 移入 `commands/narrative_application.py`（`round_llm` 留 re-export 维持既有 import 路径），新增可选 `context_label` 供链外调用以自定义日志上下文；抽取通用尾部链 `apply_narrative_effects`（成长奖励 → 快捷行动 → 记忆 → embedding 冲刷 → 剧情 → 私信），`process_round_impl` 改为调用，链序与参数不变。`commit_deferred_economy_effects` 的手工链刻意不迁移：其步骤顺序与"记忆失败必须抛出以中止结算事务"的语义是刻意设计。行为不变，backend full pytest 全绿 | 无（可并行） | `commands/narrative_application.py`、`round_llm.py`、`round_processor.py` |
@@ -109,7 +109,7 @@ gal 局 bot_surface = read_only：群聊仅可查询进度，绑定游玩被明�
 # 7. 开放问题
 
 1. 立绘差分集的消费优先级：v1 UI 只用首图还是上表情切换（影响 P8/P9 切分）。
-2. affection 数值模型（连续数值 vs 分级）与 TRPG NPC 态度共用投影的粒度，P2 定契约时决定。
+2. ~~affection 数值模型~~：P2 已定为有界整数（[-100, 100]，对队伍 / 主角），分级由玩法配置从数值派生；按席位区分的态度需要新的槽 schema，不从现有数据推测。
 3. gal 皮与 tavern_free 的边界：纯规则皮，还是携带预设 prompt / 界面偏好（若后者，需明确归属，防止玩法配置渗进引擎）。
 4. 样板 gal 的题材选择与作者排期（内容工作，现在立项）。
 5. 好感度上限 / 衰减等平衡参数：留在玩法配置，不进引擎。
