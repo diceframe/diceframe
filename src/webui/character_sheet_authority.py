@@ -29,8 +29,11 @@ ADOPT_REQUIRES_GM = "ADOPT_REQUIRES_GM"
 DELETE_REQUIRES_GM = "DELETE_REQUIRES_GM"
 
 # Presentation only: no engine path reads these as numbers or rule identity.
+# GAL P8 的立绘 / 表情差分 / 音色绑定同为呈现字段（引用经资产边界校验，
+# 不参与任何机制读取）。
 PLAYER_PROFILE_FIELDS = frozenset({
     "character_name", "race", "background", "identity", "portrait",
+    "standing_portrait", "standing_portrait_expressions", "voice_profile",
 })
 
 # Engine / GM owned.  ``class`` is included because classic rules key hit

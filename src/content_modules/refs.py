@@ -45,7 +45,7 @@ CONTENT_KINDS = (
     # D&D ruleset catalog（§29）
     "monster", "npc_statblock", "item", "spell", "class_extension",
     "feature", "hazard", "trap", "encounter_profile", "reward",
-    "portrait_asset", "scene_image_asset",
+    "portrait_asset", "scene_image_asset", "standing_portrait",
 )
 
 
@@ -78,6 +78,12 @@ _CONTENT_KIND_SPECS: dict[str, ContentKindSpec] = {
     "rule": ContentKindSpec("ruleset", "rule-v2", "catalog", "ruleset"),
     "portrait_asset": ContentKindSpec("portrait", "avatar-ref", "avatar_upload", "portrait", cloneable=True),
     "scene_image_asset": ContentKindSpec("scene_image", "scene-image-ref", "scene_image_upload", "scene_image", cloneable=True),
+    # GAL P8（ADR-0010 §7）：全身透明立绘。与头像同属 portrait authority 域，
+    # 但 portable schema 与投影面独立；表情差分集随角色绑定走，不进 kind 词表。
+    "standing_portrait": ContentKindSpec(
+        "portrait", "standing-portrait-ref", "standing_portrait_upload",
+        "standing_portrait", cloneable=True,
+    ),
 }
 
 

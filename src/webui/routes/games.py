@@ -79,6 +79,8 @@ from src.webui.routes.game_character_routes import (
     api_live_character_rest,
     api_char_delete,
     api_npc_portrait_update,
+    api_npc_standing_portrait_update,
+    api_npc_voice_update,
     api_player_create,
     api_seat_token_claim,
     api_seat_token_issue,
@@ -262,6 +264,14 @@ def register_games(app: web.Application) -> None:
     )
     app.router.add_route(
         "PUT", "/api/games/{game_key}/npc/{npc_id}/portrait", api_npc_portrait_update
+    )
+    app.router.add_route(
+        "PUT",
+        "/api/games/{game_key}/npc/{npc_id}/standing-portrait",
+        api_npc_standing_portrait_update,
+    )
+    app.router.add_route(
+        "PUT", "/api/games/{game_key}/npc/{npc_id}/voice", api_npc_voice_update
     )
     app.router.add_post("/api/games/{game_key}/players", api_player_create)
     app.router.add_post(

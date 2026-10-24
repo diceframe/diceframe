@@ -310,6 +310,42 @@ async def api_npc_portrait_update(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
+async def api_npc_standing_portrait_update(request: web.Request) -> web.Response:
+    """GAL P8：设置 NPC 立绘主图与表情差分集（GM-only）。"""
+    gk = request.match_info["game_key"]
+    npc_id = request.match_info["npc_id"]
+    api = _get_api(request)
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"error": "游戏不存在"}, status=404)
+    if request.get("user_id", "") != inst.gm_uid:
+        return web.json_response({"error": "仅 GM 可修改 NPC 立绘"}, status=403)
+    body = await request.json()
+    result = await api.update_npc_standing_portrait(
+        gk, npc_id,
+        body.get("standing_portrait"),
+        body.get("standing_portrait_expressions"),
+    )
+    status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200
+    return web.json_response(result, status=status)
+
+
+async def api_npc_voice_update(request: web.Request) -> web.Response:
+    """GAL P8：绑定 NPC 固定音色（GM-only）。"""
+    gk = request.match_info["game_key"]
+    npc_id = request.match_info["npc_id"]
+    api = _get_api(request)
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"error": "游戏不存在"}, status=404)
+    if request.get("user_id", "") != inst.gm_uid:
+        return web.json_response({"error": "仅 GM 可修改 NPC 音色"}, status=403)
+    body = await request.json()
+    result = await api.update_npc_voice(gk, npc_id, body.get("voice_profile"))
+    status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200
+    return web.json_response(result, status=status)
+
+
 async def api_player_create(request: web.Request) -> web.Response:
     gk = request.match_info["game_key"]
     body = await request.json()
