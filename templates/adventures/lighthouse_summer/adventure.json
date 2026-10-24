@@ -1,0 +1,119 @@
+{
+  "schema_version": 2,
+  "kind": "adventure",
+  "id": "lighthouse_summer",
+  "source_ref": "diceframe:lighthouse-summer",
+  "recommended_world_id": "horizon_strait",
+  "automation_level": "guided",
+  "format": "diceframe:adventure-graph-v2",
+  "name": "灯塔之夏",
+  "summary": "搬来汐澜镇的第一个夏天：旧灯塔图书室、一场夏末祭典，与三个不一样的告别（全年龄视觉小说样板，三章 + 双路线 + 三结局）。",
+  "tutorial": {
+    "name": "灯塔之夏",
+    "summary": "gal 样板内容：与林晚晴对话推进剧情；好感度达到 40 后，祭典之夜的\"说出那句话\"选项才会解锁。结局由好感度与祭典抉择共同决定。"
+  },
+  "chapters": [
+    {"id": "ch1_arrival", "name": "第一章 初遇"},
+    {"id": "ch2_closeness", "name": "第二章 靠近"},
+    {"id": "ch3_choice", "name": "第三章 抉择"}
+  ],
+  "nodes": [
+    {
+      "id": "n_arrival",
+      "type": "scene",
+      "chapter_id": "ch1_arrival",
+      "name": "搬来汐澜镇",
+      "description": "搬来汐澜镇的第一天。你沿着石板路走向镇北，在防波堤尽头遇见那座白灯塔，以及正在门口擦窗的林晚晴。",
+      "transitions": [{"to": "n_lighthouse"}],
+      "on_complete": [
+        {"type": "world_op", "op": {"op": "set_fact", "key": "story.met_wanqing", "value": true}}
+      ]
+    },
+    {
+      "id": "n_lighthouse",
+      "type": "scene",
+      "chapter_id": "ch2_closeness",
+      "name": "旧灯塔图书室",
+      "description": "午后的图书室。旋梯上的书架、海藻书签、窗边被阳光占据的读书桌——你们开始分享彼此关于这座小镇的发现。",
+      "transitions": [{"to": "n_festival"}],
+      "on_complete": [
+        {"type": "world_op", "op": {"op": "set_fact", "key": "story.library_afternoons", "value": true}}
+      ]
+    },
+    {
+      "id": "n_festival",
+      "type": "scene",
+      "chapter_id": "ch3_choice",
+      "name": "夏末祭典",
+      "description": "祭典之夜。防波堤挂满灯笼，烟花在海面炸开。人群中你找到了独自看海的林晚晴——有些话，今晚不说就没有机会了。",
+      "transitions": [{"to": "n_confession"}],
+      "on_complete": [
+        {"type": "world_op", "op": {"op": "set_fact", "key": "story.festival_night", "value": true}}
+      ]
+    },
+    {
+      "id": "n_confession",
+      "type": "decision",
+      "choice_mode": "exclusive",
+      "chapter_id": "ch3_choice",
+      "name": "说，还是不说",
+      "description": "烟花落尽的间隙，你们并肩坐在堤石上。晚晴轻声说：『祭典夜里说出口的约定，会被灯塔记住。』好感不足时，那句话是说不出口的。",
+      "transitions": [
+        {
+          "to": "n_warm_end",
+          "choice_id": "confess",
+          "choice_label": "说出那句话",
+          "conditions": [
+            {"type": "affection.score", "id": "林晚晴", "value": 40}
+          ]
+        },
+        {"to": "n_quiet_end", "choice_id": "stay_friends", "choice_label": "仍做朋友"},
+        {"to": "n_summer_end", "choice_id": "drift_apart", "choice_label": "让沉默替你回答"}
+      ]
+    },
+    {
+      "id": "n_warm_end",
+      "type": "ending",
+      "chapter_id": "ch3_choice",
+      "name": "灯塔记住的约定",
+      "description": "你把那句话说出口。晚晴愣了很久，然后在下一轮烟花亮起时轻轻点头。夏天结束了，但灯塔记住了这个约定。"
+    },
+    {
+      "id": "n_quiet_end",
+      "type": "ending",
+      "chapter_id": "ch3_choice",
+      "name": "并肩看海的夏夜",
+      "description": "有些话留在了心里。你们并肩看完最后一发烟花，约定明年还来这里看海。这是一个温柔而克制的结局。"
+    },
+    {
+      "id": "n_summer_end",
+      "type": "ending",
+      "chapter_id": "ch3_choice",
+      "name": "未说出口的夏天",
+      "description": "好感尚浅的你们在祭典人潮中走散。开学后偶尔在图书室相遇，也只是点头微笑。那个夏天最终没有说出口。"
+    }
+  ],
+  "objectives": [],
+  "milestones": [],
+  "start_node_ids": ["n_arrival"],
+  "world_seed": {
+    "entities": [
+      {
+        "entity_id": "lin_wanqing",
+        "kind": "npc",
+        "visibility": "public",
+        "source_ref": "adventure:lighthouse_summer"
+      }
+    ],
+    "relations": [
+      {
+        "relation_id": "protagonist_wanqing",
+        "kind": "member_of",
+        "from_ref": "lin_wanqing",
+        "to_ref": "party"
+      }
+    ],
+    "facts": [],
+    "processes": []
+  }
+}

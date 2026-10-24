@@ -12,6 +12,9 @@
   "attribute_points": 0,
   "attr_hint": "GAL 模式不需要属性点分配，直接写角色设定即可。",
   "dice_system": "none",
+  "affection": {
+    "max_delta_per_round": 5
+  },
   "combat_model": "narrative",
   "hp_formula": "100",
   "valid_qualities": [],
@@ -68,6 +71,10 @@
     "硬核": 0
   },
   "rule_schema_version": 2,
+  "adventure_progression": {
+    "auto_confirm_completion": true,
+    "activation_narration": true
+  },
   "default_locale": "zh-CN",
   "locale_schema_version": 1
 }

@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {"kind": "adventure", "id": "lighthouse_summer"},
+  "fields": {
+    "name": "Lighthouse Summer",
+    "summary": "Your first summer in Horizon Strait: an old lighthouse library, an end-of-summer festival, and three different farewells (all-ages visual-novel sample; three chapters, two routes, three endings).",
+    "tutorial": {
+      "name": "Lighthouse Summer",
+      "summary": "A sample gal route: talk with Lin Wanqing to advance the story. The festival-night confession unlocks only when her affection reaches 40; the ending follows from affection plus that choice."
+    }
+  }
+}

@@ -158,9 +158,15 @@ def multiplayer_status(instance: GameInstance) -> dict:
 
 
 def should_advance(instance: GameInstance) -> bool:
-    """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。"""
+    """任一满足即推进：所有存活玩家已就绪，或单人模式下任一玩家已行动。
+
+    scene 推进（GAL P7）固定单人语义：任一行动即推进，不依赖 solo_mode
+    配置——防止未来非 solo 局误装 scene 模式时挂死在多人就绪屏障上。
+    """
     if instance.has_pending_dice():
         return False
+    if progression_state.mode(instance) == progression_state.SCENE:
+        return bool(instance.action_queue)
     if game_config.solo_mode(instance) and instance.action_queue:
         return True
     return instance.all_alive_ready()
@@ -328,6 +334,9 @@ def start_round_locked(instance: GameInstance) -> None:
     session_stats.require_writable(instance)
     checks.require_writable(instance)
     round_safety.require_writable(instance)
+    # GAL P7：scene 推进在冒险抵达结局（P4 冻结）后不再开启新推进；
+    # narrative_round 跑团不受影响（冻结的冒险进度不拦跑团回合）。
+    progression.ensure_advancement_allowed(instance)
     progression.open_next_round(instance)
     current = str(progression_state.round_value(instance))
     round_safety.keep_death_saves_for(instance, current)

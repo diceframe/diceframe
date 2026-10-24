@@ -45,14 +45,25 @@ New package starters declare only the locales they actually ship (`en` and
 contributors can add a locale by supplying and validating its translations,
 without making it a core-maintained language.
 
-The profile supports scenes, objectives, decisions, milestones, references and
-world/progress gates/outcomes. It rejects encounter nodes/references, `rules.*`
+The profile supports scenes, objectives, decisions, milestones, references,
+endings and world/progress gates/outcomes. An `ending` node has no transitions
+and cannot complete other nodes; completing one ends the adventure, closes every
+open node and freezes progress (`ending_node_id`). It rejects encounter nodes/references, `rules.*`
 gates, `item_reward` outcomes and mechanical item/reward/encounter resources.
 Imported source resources can remain inert records with `automation_level:
 "reference"` and only `schema_version`, `kind`, `id`, `source_ref`,
 `automation_level`, `visibility`, `name`, `description`, `source_record` fields.
 A reference label cannot conceal extra mechanical fields. Source numbers remain
 evidence, not executable effects. Data packages still forbid execution entry points.
+
+Narrator-proposed completion stays advisory unless the rule skin declares an
+`adventure_progression` block (`auto_confirm_completion`, optionally
+`activation_narration`). With the block on, the engine settles proposals after
+each round through the same completion transaction the GM command uses — gates,
+ending freeze and reward outlets included — and a rejected proposal is dropped
+with the route staying locked (fail closed). A confirmed activation may produce
+one narration-only scene transition; the narrator never gains state write
+access. Rules without the block keep the GM-click authority unchanged.
 
 Specific mechanics require their registered ruleset runtime and validator.
 Extensions advertise graph formats through the capability contract and supply

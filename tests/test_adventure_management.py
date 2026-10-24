@@ -54,8 +54,10 @@ def test_catalog_sync_marks_builtins_and_preserves_custom_directories(tmp_path: 
 
     second = sync_adventure_catalog(BUILTIN, runtime_dir)
 
-    assert first["copied"] == 1
+    # 内置包数量：灰沼失灯记（v1）+ 灯塔之夏（v2 gal 样板，GAL P10）。
+    assert first["copied"] == 2
     assert (runtime_dir / "lanterns_of_greymoor" / ".diceframe-builtin").is_file()
+    assert (runtime_dir / "lighthouse_summer" / ".diceframe-builtin").is_file()
     assert custom.is_dir()
     assert second["updated"] == 0
 

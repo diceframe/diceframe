@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.compat.callbacks import load_world_template as load_world_template_compat
+from src.commands.affection_effects import settle_affection
 from src.engine.game_instance import GameInstance
 from src.commands.item_category_resolver import ItemCategoryResolver
 from src.commands.madness_tracker import MadnessTracker
@@ -22,6 +23,7 @@ from src.commands.state_items import (
     classify_item,
     grant_classified_item,
 )
+from src.rules.loader import RuleBundleLoader
 from src.rules.rule_system import RuleSystem
 from src.rulesets.contracts import (
     CharacterItemPreparationRuntime,
@@ -108,6 +110,18 @@ class StateUpdateApplier:
             logger.warning("STAT 规则加载失败: world_id=%s", instance.world_id, exc_info=True)
             return None
 
+    def _load_active_rule(self, instance: GameInstance) -> RuleSystem | None:
+        """The run's chosen rule (as the GM prompt sees it), not the world default."""
+        rule_id = str(getattr(instance, "rule_id", "") or "").strip()
+        language = str(getattr(instance, "language", "") or "")
+        if rule_id:
+            if (self._rules_dir / f"{rule_id}.json").exists():
+                return RuleSystem(RuleBundleLoader().load_rule(self._rules_dir, rule_id, language))
+            rule_path = RuleSystem.path_for(self._rules_dir, rule_id, language)
+            if rule_path.exists():
+                return RuleSystem.load(rule_path)
+        return self._load_rule(instance)
+
     def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:
         """Expose the same category table the narrative pipeline classifies with."""
 
@@ -162,6 +176,11 @@ class StateUpdateApplier:
         scene_change = update.get("scene_change")
         if scene_change:
             instance.set_scene(scene_change)
+
+        # 好感提议：在 NPC 登记之后结算，同轮新登记的 NPC 也可以是对象。
+        if update.get("affection"):
+            active_rule = self._load_active_rule(instance)
+            settle_affection(instance, update["affection"], active_rule.affection if active_rule is not None else None)
 
         # 战利品 - 按规则 JSON 的 item_categories 智能分类；规则未定义时用内置回退
         rule_cats = self._item_cats.load_categories(instance)

@@ -50,6 +50,8 @@ from src.webui.services.resource_recovery import RecoveryDependencies, RecoveryS
 from src.game_preferences import UNSET, validate_preferences
 from src.webui.services.check_modes import CheckModeDependencies, CheckModeService
 from src.commands.hosted_combat import HostedCombatScheduler
+from src.commands import adventure_effects
+from src.commands.scene_transition import SceneTransitionNarrator
 from src.webui.services import ruleset_characters
 from src.webui.services import character_card_import
 from src.webui.services import content_sync
@@ -748,6 +750,7 @@ class WebAPI:
             drain_economy_outbox=self._drain_economy_outbox,
             economy_auto_reward_settings=self.economy_auto_reward_settings,
             resolve_reward=self.resolve_reward_as_gm,
+            settle_adventure_completion=self._settle_adventure_completion_for,
         )
         self._map_dependencies = maps.MapDependencies(
             get_instance=self._reg.get,
@@ -2573,6 +2576,62 @@ class WebAPI:
             global_enabled=global_enabled,
             global_cap=global_cap,
         )
+
+    async def _settle_adventure_completion_for(self, instance: Any) -> dict[str, Any] | None:
+        """回合提交后结算叙事者节点完成提议（GAL 轨道 P6）。
+
+        规则未声明 ``adventure_progression`` 时不做任何事（提议保持
+        advisory-only）。确认走标准完成事务（gates / world ops / ending
+        冻结 / 奖励出口，全有或全无回滚）；场景过渡叙事为纯文本，不向
+        叙事者开放状态写权。
+        """
+
+        try:
+            rule = self._load_rule_for_game(instance)
+        except Exception:
+            logger.warning("读取规则失败，跳过节点完成提议结算", exc_info=True)
+            return None
+        config = getattr(rule, "adventure_progression", None) if rule is not None else None
+        if config is None or not getattr(config, "auto_confirm_completion", False):
+            return None
+
+        async def confirm(node_id: str) -> dict[str, Any]:
+            # 与 GM 命令（adventure_commands.execute）同一并发边界：authoritative
+            # write + instance lock + STALE_RUN 检查；被拒时按 settle 契约丢弃提议。
+            async with instance.authoritative_write() as write_entered, instance._lock:
+                if not write_entered:
+                    raise RuntimeError("historical rewrite is in progress")
+                if self._reg.get(instance.game_key) is not instance:
+                    raise RuntimeError("game run was replaced")
+                return adventure_runtime.complete_adventure_node(
+                    self._adventure_runtime_dependencies,
+                    instance,
+                    node_id,
+                    actor_uid="narrator-auto",
+                )
+
+        narration_fn = None
+        if getattr(config, "activation_narration", False):
+            narrator = SceneTransitionNarrator(
+                self._llm_client,
+                getattr(self._handler, "prompt_composer", None),
+            )
+
+            async def narration_fn(result: dict[str, Any], activated_nodes: list[str]) -> str:
+                return await narrator.narrate(
+                    instance, completed_node_id=str(result.get("node_id") or ""),
+                )
+
+        settlement = await adventure_effects.settle_adventure_completion(
+            instance, config=config, confirm=confirm, narration=narration_fn,
+        )
+        if settlement is None:
+            return None
+        return {
+            "node_id": settlement.node_id,
+            "activated_nodes": settlement.activated_nodes,
+            "transition_narration": settlement.transition_narration,
+        }
 
     async def set_economy_reward_policy(
         self, game_key: str, policy: dict[str, Any],

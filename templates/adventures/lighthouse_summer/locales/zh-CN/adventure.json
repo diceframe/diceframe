@@ -1,0 +1,13 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {"kind": "adventure", "id": "lighthouse_summer"},
+  "fields": {
+    "name": "灯塔之夏",
+    "summary": "搬来汐澜镇的第一个夏天：旧灯塔图书室、一场夏末祭典，与三个不一样的告别（全年龄视觉小说样板，三章 + 双路线 + 三结局）。",
+    "tutorial": {
+      "name": "灯塔之夏",
+      "summary": "gal 样板内容：与林晚晴对话推进剧情；好感度达到 40 后，祭典之夜的\"说出那句话\"选项才会解锁。结局由好感度与祭典抉择共同决定。"
+    }
+  }
+}

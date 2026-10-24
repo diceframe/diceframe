@@ -97,7 +97,9 @@ def test_gate_vocabulary_is_closed_and_fail_closed() -> None:
         validate_gates(
             [{"type": "world.fact_equals", "key": "a.b", "value": 1}] * 9, label="t",
         )
-    assert len(GATE_TYPES) == 9
+    # GAL P2 预告的 affection.score 随 P10 落地：词表 10 项。
+    assert len(GATE_TYPES) == 10
+    assert "affection.score" in GATE_TYPES
 
 
 def test_corrupt_world_degrades_to_unsatisfied() -> None:

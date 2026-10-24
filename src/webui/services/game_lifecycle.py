@@ -215,8 +215,9 @@ async def create_game(
             return {"ok": False, "error_code": "GAL_REQUIRES_SOLO", "error": "GAL 玩法只能创建单人局"}
         if str(rule_id or "").strip() != "gal_narrative":
             return {"ok": False, "error_code": "GAL_REQUIRES_NARRATIVE_RULE", "error": "GAL 玩法必须使用 gal_narrative 叙事规则"}
-        if str(adventure_id or "").strip():
-            return {"ok": False, "error_code": "GAL_CANNOT_BIND_ADVENTURE", "error": "GAL 玩法不能绑定冒险包"}
+        # GAL P7：v0 预览时代的"不能绑定冒险包"限制解除——结构化 galgame
+        # 形态（路线图 + gates + P6 自动确认 + P4 结局）已就位，gal 局可绑
+        # Adventure v2 图作为女主路线。
     if normalized_play_mode == "adventure" and not str(adventure_id or "").strip():
         return {"ok": False, "error": "冒险包剧情模式必须选择冒险包"}
     if normalized_play_mode == "free" and str(adventure_id or "").strip():
@@ -383,6 +384,10 @@ async def create_game(
     # opening generation so the generation path sees the selected mode.
     module_hooks.record(instance, module_hooks.STORY_MODE, normalized_story_mode)
     adventure_runtime_state.replace_play_mode(instance, normalized_play_mode)
+    # GAL P7：gal 玩法安装 scene 推进（无回合屏障、按场景/事件推进）；
+    # 跑团玩法保持 narrative_round 不变。
+    if normalized_play_mode == "gal":
+        progression_state.set_mode(instance, progression_state.SCENE)
     # FIX-04 §6.5/§6.6：v2 冒险在同一创建事务里初始化进度并原子物化世界种子；
     # 失败即整体回滚（不留下 partial save / partial world）。
     if callable(getattr(dependencies, "initialize_adventure_run", None)):
