@@ -55,7 +55,7 @@ gal = 组合：freeform 系规则皮 + affection 模块槽 + Adventure 图（补
 | P2 | affection 模块槽：五件套（状态 / codec / 迁移 / 投影 / 测试），按当前模块槽 + lifecycle hooks 模式（#525–#532 之后的模板），实例 schema +1；relation 数值投影供 gates；TRPG 侧 NPC 态度复用同一模块 | P0 | `engine/modules/affection.py`、`migrations/instance.py`、`tests/` |
 | P3 | affection 结算权威：prompt 注入好感状态；模型提议 → 引擎校验钳制结算（仿 economy proposal）；拒绝路径与测试 | P2 | `engine/affection_*`、`commands/`、prompt 组装 |
 | P4 | Adventure ending 语义：NODE_TYPES 增 ending（可选枚举，旧图照常）；进度投影；达成即终局 | 无（可与 P2/P3 并行） | `src/adventures/graph_v2.py`、`progress.py`、投影 |
-| P5 | 叙事响应应用链泛化：`apply_parsed_data_to_response` 出回合管线，行为不变，跑团全绿为验收 | 无（可并行） | `commands/round_llm.py`、`round_processor.py` |
+| P5 | 叙事响应应用链泛化（已实施）：`apply_parsed_data_to_response` 移入 `commands/narrative_application.py`（`round_llm` 留 re-export 维持既有 import 路径），新增可选 `context_label` 供链外调用以自定义日志上下文；抽取通用尾部链 `apply_narrative_effects`（成长奖励 → 快捷行动 → 记忆 → embedding 冲刷 → 剧情 → 私信），`process_round_impl` 改为调用，链序与参数不变。`commit_deferred_economy_effects` 的手工链刻意不迁移：其步骤顺序与"记忆失败必须抛出以中止结算事务"的语义是刻意设计。行为不变，backend full pytest 全绿 | 无（可并行） | `commands/narrative_application.py`、`round_llm.py`、`round_processor.py` |
 | P6 | 节点完成 proposal + 激活钩：LLM 提议节点完成，引擎按 gates 权威确认（fail-closed）；节点激活触发场景叙事 | P4、P5 | `services/ruleset_gameplay.py`、`src/webui/services/adventure_runtime.py` |
 | P7 | 推进模式 `scene`：`KNOWN_MODES` 新值；回合状态机、经济纪元键、单人行动条数按模式分支，收口在 progression；`narrative_round` 行为不变 | P0（建议在 P6 后合入以缩小状态机分支面） | `engine/modules/progression_state.py`、`engine/progression.py`、`economy.py` |
 | P8 | 立绘资产类型 + 音色绑定：standing portrait 新增为 ContentKind（registry 已随轨道 C PR A 合并，直接扩展；portable schema 须客户端可独立读写，母方案 §3.7），含可选表情差分集，v1 UI 可只消费首图；角色 ↔ voice profile 绑定 | 无（可并行，建议 P4 后） | `src/content_modules/` ContentKind 注册、资产服务、`tts/profile_store.py` |
