@@ -1,0 +1,55 @@
+{
+  "world_schema_version": 2,
+  "world_id": "horizon_strait",
+  "world_name": "汐澜镇",
+  "default_rule": "gal_narrative",
+  "default_locale": "zh-CN",
+  "locale_schema_version": 1,
+  "suggested_difficulty": "轻松",
+  "recommended_rules": ["gal_narrative"],
+  "description": "海边小镇的夏末：旧灯塔、图书馆与一场未说出口的约定（全年龄视觉小说样板）。",
+  "world_setting": "汐澜镇是海岸线上一座安静的小镇。镇北的旧灯塔早已停用，塔下的图书室由镇公所代管，只有一位守灯人的孙女日日整理书架。夏末祭典将近，海风把蝉鸣送进窗子——这是一个关于相遇与告别的夏天。",
+  "starter_scene": "搬来汐澜镇的第一天。行李还堆在门口，你沿着石板路走向镇北，远处那座白色旧灯塔立在防波堤尽头。",
+  "starter_lorebook": [
+    {
+      "id": "region_horizon_strait",
+      "visible_to": ["*"],
+      "name": "汐澜镇",
+      "type": "region",
+      "keywords": ["汐澜镇", "小镇", "海边", "石板路"],
+      "content": "海岸线上的安静小镇，以渔业与夏季游客为生。镇上只有一条主街、一座小学和一间由旧灯塔改造的图书室。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "location_lighthouse_library",
+      "visible_to": ["*"],
+      "name": "旧灯塔图书室",
+      "type": "location",
+      "keywords": ["灯塔", "图书室", "图书馆", "塔"],
+      "content": "停用的白灯塔底层被改成小镇图书室。木书架沿着旋梯盘旋而上，窗边有一张总被午后阳光占据的读书桌。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_lin_wanqing",
+      "visible_to": ["*"],
+      "name": "林晚晴",
+      "type": "npc",
+      "keywords": ["林晚晴", "晚晴", "图书管理员", "守灯人的孙女"],
+      "content": "守灯人的孙女，旧灯塔图书室的管理员学徒。说话轻而慢，习惯把重要的话留到句子末尾；喜欢在书页间夹晒干的海藻作书签。对陌生人礼貌但保持距离，对认定的人异常认真。",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "event_summer_festival",
+      "visible_to": ["*"],
+      "name": "夏末祭典",
+      "type": "event",
+      "keywords": ["祭典", "夏末", "烟花", "庙会"],
+      "content": "汐澜镇在夏末最后一个周六举办祭典：防波堤上挂灯笼，渔船列队巡港，最后在海面放一整场烟花。镇上的说法是——祭典夜里说出口的约定，会被灯塔记住。",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "world_schema_version": 2,
+  "world_id": "horizon_strait",
+  "world_name": "Horizon Strait",
+  "default_rule": "gal_narrative",
+  "default_locale": "en",
+  "locale_schema_version": 1,
+  "suggested_difficulty": "轻松",
+  "recommended_rules": ["gal_narrative"],
+  "description": "A seaside town at summer's end: an old lighthouse, a small library, and a promise left unspoken (all-ages visual-novel sample).",
+  "world_setting": "Horizon Strait is a quiet town on the coast. The old lighthouse to the north has long been retired; its ground floor now serves as the town library, tended daily by the keeper's granddaughter. The end-of-summer festival is near, and the sea wind carries the cicadas in through the window — a story about meeting and parting.",
+  "starter_scene": "Your first day after moving to Horizon Strait. The boxes are still by the door; you walk the stone road north, toward the white lighthouse at the end of the breakwater.",
+  "starter_lorebook": [
+    {
+      "id": "region_horizon_strait",
+      "visible_to": ["*"],
+      "name": "Horizon Strait",
+      "type": "region",
+      "keywords": ["Horizon Strait", "town", "seaside", "stone road"],
+      "content": "A quiet coastal town living on fishing and summer visitors: one main street, one school, and a library built inside a retired lighthouse.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "location_lighthouse_library",
+      "visible_to": ["*"],
+      "name": "Old Lighthouse Library",
+      "type": "location",
+      "keywords": ["lighthouse", "library"],
+      "content": "The ground floor of the retired white lighthouse serves as the town library. Wooden shelves spiral up the stairwell; the reading desk by the window is always claimed by afternoon light.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "npc_lin_wanqing",
+      "visible_to": ["*"],
+      "name": "Lin Wanqing",
+      "type": "npc",
+      "keywords": ["Lin Wanqing", "librarian", "keeper's granddaughter"],
+      "content": "The keeper's granddaughter and apprentice librarian of the old lighthouse. She speaks softly and slowly, saving the important words for the end of a sentence; she presses dried seaweed into books as bookmarks. Polite but distant with strangers, uncommonly earnest with those she has decided to trust.",
+      "tier": "core",
+      "unreliable": false
+    },
+    {
+      "id": "event_summer_festival",
+      "visible_to": ["*"],
+      "name": "End-of-Summer Festival",
+      "type": "event",
+      "keywords": ["festival", "fireworks"],
+      "content": "On the last Saturday of summer the town hangs lanterns along the breakwater, the fishing boats parade the harbor, and the night ends with fireworks over the sea. The local saying: a promise spoken on festival night is remembered by the lighthouse.",
+      "tier": "core",
+      "unreliable": false
+    }
+  ]
+}
