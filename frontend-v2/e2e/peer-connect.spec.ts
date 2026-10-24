@@ -23,7 +23,7 @@ test('two clients establish a direct data channel through Hub signaling', async 
 
   await guest.goto('/#/peer')
   await guest.getByRole('button', { name: '我要加入' }).click()
-  await guest.getByLabel('粘贴房主发来的链接码').fill(invite)
+  await guest.getByLabel('邀请链接或直连码').fill(invite)
   await guest.locator('.peer-direct-consent input').check()
   await guest.getByRole('button', { name: '连接房主' }).click()
 
@@ -79,7 +79,7 @@ test('a separate peer client joins a DND 2024 table with a canonical professiona
     .getByRole('textbox')
     .inputValue()
 
-  await guest.getByLabel('粘贴房主发来的链接码').fill(invite)
+  await guest.getByLabel('邀请链接或直连码').fill(invite)
   await guest.locator('.peer-direct-consent input').check()
   await guest.getByRole('button', { name: '连接房主' }).click()
   await expect(guest.locator('.peer-state-connected')).toContainText('P2P 直连成功', { timeout: 20_000 })

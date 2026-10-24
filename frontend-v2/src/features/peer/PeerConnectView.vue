@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast'
 import { usePeerSessionStore } from '@/peer/store/peerSession'
 import { copyToClipboard } from '@/utils/clipboard'
 import { friendlyPeerDetail } from './friendlyDetail'
+import { classifyJoinInvitation, joinInvitationErrorKeys } from './joinInvitation'
 import {
   STUN_PRESETS,
   decodePeerInvite,
@@ -23,7 +24,11 @@ import {
   type StunPresetId,
 } from './inviteCode'
 
-withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  initialMode?: 'host' | 'guest'
+  initialInvite?: string
+}>(), { embedded: false, initialMode: 'host', initialInvite: '' })
 
 type Mode = 'host' | 'guest'
 type GuestStunChoice = 'invite' | StunPresetId
@@ -57,7 +62,7 @@ const { confirm } = useConfirm()
 const router = useRouter()
 const peerSession = usePeerSessionStore()
 const { connected, peerStates, roomCode, state, stateDetail } = storeToRefs(peerSession)
-const mode = ref<Mode>('host')
+const mode = ref<Mode>(props.initialMode)
 const busy = ref(false)
 const availableGames = ref<GameSummary[]>([])
 const hubMaxPeersPerRoom = ref(6)
@@ -72,7 +77,7 @@ const guestStunChoice = ref<GuestStunChoice>('invite')
 const guestCustomStunUrl = ref('')
 const directConsent = ref(false)
 const inviteCodes = ref<EncodedPeerInvite[]>([])
-const inviteInput = ref('')
+const inviteInput = ref(props.initialInvite)
 const invitePanel = ref<HTMLElement | null>(null)
 
 const stateLabel = computed(() => t(`peerState_${state.value}`))
@@ -108,6 +113,7 @@ const invitePreview = computed(() => {
     return null
   }
 })
+const joinInvitation = computed(() => classifyJoinInvitation(inviteInput.value))
 const selectedGame = computed(() => (
   availableGames.value.find(game => game.game_key === selectedGameKey.value)
 ))
@@ -294,7 +300,7 @@ async function createRoom() {
 }
 
 function joinRoom() {
-  if (!directConsent.value || sessionActive.value || busy.value) return
+  if (!directConsent.value || sessionActive.value || busy.value || joinInvitation.value.kind !== 'peer') return
   busy.value = true
   try {
     const invite = decodePeerInvite(inviteInput.value)
@@ -444,37 +450,45 @@ async function enterGame() {
 
         <template v-else>
           <label class="peer-field">
-            <span>{{ t('peerPasteInvite') }}</span>
-            <textarea v-model.trim="inviteInput" rows="4" :placeholder="t('peerInvitePlaceholder')" />
+            <span>{{ t('friendJoinLabel') }}</span>
+            <textarea v-model.trim="inviteInput" rows="4" :placeholder="t('friendJoinPlaceholder')" autocomplete="off" autocapitalize="off" spellcheck="false" />
           </label>
-          <div v-if="invitePreview" class="peer-invite-preview">
-            <span v-if="invitePreview.actorName">{{ t('peerInviteAssignedTo') }} <strong>{{ invitePreview.actorName }}</strong></span>
-            <span>{{ t('peerInviteStun') }}</span>
-            <div class="peer-invite-stun-list">
-              <code v-for="url in invitePreview.stunUrls" :key="url">{{ url }}</code>
-              <code v-if="!invitePreview.stunUrls.length">{{ t('peerStunPreset_none') }}</code>
-            </div>
+          <div v-if="joinInvitation.kind === 'link'" class="peer-invitation-link" role="status">
+            <strong>{{ t('friendJoinLinkReady') }}</strong>
+            <span>{{ joinInvitation.origin }}</span>
+            <a data-testid="peer-open-invitation" :href="joinInvitation.url" target="_blank" rel="noopener noreferrer">{{ t('friendJoinOpenLink') }}</a>
           </div>
-          <label class="peer-field">
-            <span>{{ t('peerGuestStunChoice') }}</span>
-            <select v-model="guestStunChoice">
-              <option value="invite">{{ t('peerStunUseInvite') }}</option>
-              <option v-for="preset in STUN_PRESETS" :key="preset.id" :value="preset.id">{{ t(`peerStunPreset_${preset.id}`) }}</option>
-            </select>
-            <small>{{ t('peerGuestStunHint') }}</small>
-          </label>
-          <label v-if="guestStunChoice === 'custom'" class="peer-field">
-            <span>{{ t('peerStunCustomAddress') }}</span>
-            <textarea v-model.trim="guestCustomStunUrl" rows="3" :placeholder="t('peerStunCustomPlaceholder')" />
-            <small>{{ t('peerStunHint') }}</small>
-          </label>
-          <label class="peer-direct-consent">
-            <input v-model="directConsent" type="checkbox">
-            <span>{{ t('peerDirectConsent') }} <RouterLink :to="{ name: 'legal-privacy' }" target="_blank" rel="noopener">{{ t('legalPrivacyTitle') }}</RouterLink></span>
-          </label>
-          <button class="primary success peer-primary" :disabled="!directConsent || !inviteInput || sessionActive || busy" @click="joinRoom">
-            <NIcon :component="LinkOutline" />{{ t('peerJoinRoom') }}
-          </button>
+          <template v-else>
+            <p v-if="joinInvitation.kind === 'invalid'" class="error-banner" role="alert">{{ t(joinInvitationErrorKeys[joinInvitation.reason]) }}</p>
+            <div v-if="invitePreview" class="peer-invite-preview">
+              <span v-if="invitePreview.actorName">{{ t('peerInviteAssignedTo') }} <strong>{{ invitePreview.actorName }}</strong></span>
+              <span>{{ t('peerInviteStun') }}</span>
+              <div class="peer-invite-stun-list">
+                <code v-for="url in invitePreview.stunUrls" :key="url">{{ url }}</code>
+                <code v-if="!invitePreview.stunUrls.length">{{ t('peerStunPreset_none') }}</code>
+              </div>
+            </div>
+            <label class="peer-field">
+              <span>{{ t('peerGuestStunChoice') }}</span>
+              <select v-model="guestStunChoice">
+                <option value="invite">{{ t('peerStunUseInvite') }}</option>
+                <option v-for="preset in STUN_PRESETS" :key="preset.id" :value="preset.id">{{ t(`peerStunPreset_${preset.id}`) }}</option>
+              </select>
+              <small>{{ t('peerGuestStunHint') }}</small>
+            </label>
+            <label v-if="guestStunChoice === 'custom'" class="peer-field">
+              <span>{{ t('peerStunCustomAddress') }}</span>
+              <textarea v-model.trim="guestCustomStunUrl" rows="3" :placeholder="t('peerStunCustomPlaceholder')" />
+              <small>{{ t('peerStunHint') }}</small>
+            </label>
+            <label class="peer-direct-consent">
+              <input v-model="directConsent" type="checkbox">
+              <span>{{ t('peerDirectConsent') }} <RouterLink :to="{ name: 'legal-privacy' }" target="_blank" rel="noopener">{{ t('legalPrivacyTitle') }}</RouterLink></span>
+            </label>
+            <button class="primary success peer-primary" :disabled="!directConsent || joinInvitation.kind !== 'peer' || sessionActive || busy" @click="joinRoom">
+              <NIcon :component="LinkOutline" />{{ t('peerJoinRoom') }}
+            </button>
+          </template>
         </template>
       </section>
 
@@ -552,3 +566,9 @@ async function enterGame() {
     </main>
   </section>
 </template>
+
+<style scoped>
+.peer-invitation-link { display: grid; gap: 12px; overflow-wrap: anywhere; }
+.peer-invitation-link span { color: var(--df-text-muted); font-size: 13px; }
+.peer-invitation-link a { color: var(--df-accent-strong); font-weight: 700; }
+</style>

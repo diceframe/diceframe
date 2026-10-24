@@ -413,10 +413,8 @@ onBeforeUnmount(deactivateOverview)
             </button>
           </template>
           <template #actions>
-            <div class="overview-actions" :class="{ 'overview-actions-peer': peerEntryVisible }">
-              <template v-if="peerEntryVisible">
-                <button class="overview-entry-action peer-launch-button" @click="peerModalOpen = true"><NIcon :component="LinkOutline" />{{ t('peerDirectConnect') }}</button>
-              </template>
+            <div class="overview-actions">
+              <button data-testid="overview-open-join" class="overview-entry-action peer-launch-button" @click="peerModalOpen = true"><NIcon :component="LinkOutline" />{{ t('friendJoinTitle') }}</button>
               <RouterLink data-testid="overview-adventure-library" class="overview-entry-action content-button" :to="{ name: 'library' }">{{ overviewCopy.adventureLibrary }}</RouterLink>
               <button data-testid="overview-create-adventure" class="overview-entry-action primary" @click="play('')">{{ t('createAdventure') }}</button>
               <button v-if="error" data-testid="overview-load-retry" type="button" @click="load" :disabled="busy"><NIcon :component="RefreshOutline" />{{ t('retry') }}</button>
@@ -432,7 +430,6 @@ onBeforeUnmount(deactivateOverview)
       v-if="!guideDismissed && !loading && !error"
       ref="guideCard"
       :has-games="games.length > 0"
-      :peer-available="peerEntryVisible"
       @connect="peerModalOpen = true"
       @dismiss="dismissGuide"
     />
@@ -560,7 +557,7 @@ onBeforeUnmount(deactivateOverview)
     </section>
       </div>
 
-      <PeerConnectModal v-model:show="peerModalOpen" />
+      <PeerConnectModal v-model:show="peerModalOpen" :peer-available="peerEntryVisible" />
       <GameSceneImageDialog
         v-if="coverTarget"
         :key="coverTarget.game_key"

@@ -9,14 +9,12 @@ test('home entries have equal dimensions and place new adventure after browsing'
     await page.goto('/#/overview')
     await page.reload()
     const actions = page.locator('.overview-actions .overview-entry-action')
-    await expect(actions).toHaveCount(peerVisible ? 3 : 2)
+    await expect(actions).toHaveCount(3)
     const boxes = await actions.evaluateAll(elements => elements.map(element => {
       const rect = element.getBoundingClientRect()
       return { text: element.textContent?.trim(), width: rect.width, height: rect.height }
     }))
-    expect(boxes.map(box => box.text)).toEqual(peerVisible
-      ? ['联机冒险', '浏览内容', '创建新冒险']
-      : ['浏览内容', '创建新冒险'])
+    expect(boxes.map(box => box.text)).toEqual(['加入好友', '浏览内容', '创建新冒险'])
     expect(Math.max(...boxes.map(box => box.width)) - Math.min(...boxes.map(box => box.width))).toBeLessThanOrEqual(1)
     expect(Math.max(...boxes.map(box => box.height)) - Math.min(...boxes.map(box => box.height))).toBeLessThanOrEqual(1)
     expect(Math.min(...boxes.map(box => box.height))).toBeGreaterThanOrEqual(44)

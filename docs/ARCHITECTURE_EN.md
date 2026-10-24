@@ -675,6 +675,8 @@ Frontend rules:
 - Do not treat whether a button is visible as authorization;
 - UI capability gating is an experience layer only; the server must validate again.
 
+The homepage's “Join friends” entry is owned by `features/peer/FriendJoinPanel.vue`. `joinInvitation.ts` classifies regular invitation URLs and `DFP2-` direct-connect codes locally without probing remote hosts or consuming credentials. Regular URLs retain their original origin, deployment path, backend parameter and seat credential and open only after an explicit click. Direct codes enter the existing P2P flow with its connection consent intact. The Hub entry switch gates experimental direct connect only; ordinary invitation joining remains available. The play invitation dialog links to official multiplayer documentation without attaching game or invitation credentials.
+
 Global styles load through the single `frontend-v2/src/styles/index.css` entry.
 `shared.css` owns document and control primitives, `navigation.css` owns application
 and section navigation, and `pages/<feature>.css` owns each feature's global layout,
@@ -5318,7 +5320,7 @@ The play view places the `AdventurePanel` trigger beside Checks in the scene hea
 
 Adventure v2 may receive an `ADVENTURE_COMPLETE` suggestion from the GM prompt. After the round log is committed, the server validates the active node, bounded reason, and cited existing GM-log rounds before storing it in Adventure runtime progress; the suggestion never advances a node or runs outcomes. Suggestions and evidence are projected to the GM only. In AdventurePanel the GM can review a suggestion, close its transient notice, or dismiss it; dismissal suppresses repeat suggestions for that node. The node still advances only through the existing GM-authorized `adventure.node.complete` command. Node completion clears its suggestion in the authoritative transaction, and failures restore it with the progress snapshot.
 
-On desktop and mobile the GM workbench closes through its explicit toggle or Escape; outside clicks and nested dialogs leave it open, and unfinished inputs stay mounted. Invite player and the GM-only Room password entry sit together below party members. `RoomPasswordDialog` owns password creation, replacement and explicit removal using the existing server validation and authorization endpoint. Game settings submit only edited reward and away policies and no longer own password fields or password writes.
+On desktop and mobile the GM workbench closes through its explicit toggle or Escape; outside clicks and nested dialogs leave it open, and unfinished inputs stay mounted. Invite friends and the GM-only Room password entry sit together below party members. `RoomPasswordDialog` owns password creation, replacement and explicit removal using the existing server validation and authorization endpoint. Game settings submit only edited reward and away policies and no longer own password fields or password writes.
 
 Version checks, update channels, downloads and installation belong to Settings → About; only the retained-version rollback entry belongs to General → System maintenance. Search and update-notification deep links target the corresponding locations. Rollback retains the existing confirmation and launcher flow.
 

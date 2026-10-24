@@ -26,14 +26,14 @@ test('new shell and Vue login route render', async ({ page }) => {
   expect(lowerRing).toBe('none')
 })
 
-test('hub controls whether the overview shows the direct-connect entry', async ({ page, request }) => {
+test('homepage always offers friend joining and gates the experimental direct-connect entry', async ({ page, request }) => {
   let entryVisible = false
   await page.route('**/api/hub/rendezvous/config*', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
       ok: true,
-      enabled: true,
+      enabled: entryVisible,
       entry_visible: entryVisible,
       load_level: 'normal',
       max_peers_per_room: 6,
@@ -44,13 +44,21 @@ test('hub controls whether the overview shows the direct-connect entry', async (
   await prepareAuthenticatedPage(page, request)
 
   await page.goto('/#/overview')
-  await expect(page.getByRole('button', { name: '联机冒险' })).toHaveCount(0)
+  const joinButton = page.getByTestId('overview-open-join')
+  await expect(joinButton).toBeVisible()
+  await expect(joinButton).toHaveText('加入好友')
+  await joinButton.click()
+  await expect(page.locator('.friend-join-panel h2')).toHaveText('加入好友')
+  await expect(page.getByTestId('friend-join-host')).toHaveCount(0)
+  await expect(page.locator('.peer-direct-consent')).toHaveCount(0)
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
 
   entryVisible = true
   await page.reload()
   await expect(page.locator('.adventure-library')).toBeVisible()
-  const peerButton = page.getByRole('button', { name: '联机冒险' })
+  const peerButton = page.getByTestId('overview-open-join')
   await expect(peerButton).toBeVisible()
+  await expect(peerButton).toHaveText('加入好友')
   const overviewActions = page.locator('.overview-actions')
   const createButton = overviewActions.getByRole('button', { name: '创建新冒险' })
   const importButton = page.locator('.library-heading-actions').getByRole('button', { name: '导入存档', exact: true })
@@ -108,10 +116,15 @@ test('hub controls whether the overview shows the direct-connect entry', async (
   await expect(selectAll).toHaveCount(0)
 
   await peerButton.click()
+  await expect(page.locator('.friend-join-panel h2')).toHaveText('加入好友')
+  const moreWays = page.locator('.friend-join-more')
+  await expect(moreWays).toBeVisible()
+  await moreWays.locator('summary').click()
+  await page.getByTestId('friend-join-host').click()
   await expect(page.getByText('实验性功能').first()).toBeVisible()
   await expect(page.getByRole('heading', { name: '和朋友一起进入冒险' })).toBeVisible()
   await page.getByRole('button', { name: '创建或加入' }).click()
-  const peerSetupHeading = page.getByRole('heading', { name: '创建或加入多人游戏' })
+  const peerSetupHeading = page.getByRole('heading', { name: '直连联机（实验性）' })
   const peerSetupBadge = page.locator('.peer-modal-toolbar .peer-experimental-badge')
   await expect(peerSetupHeading).toBeVisible()
   await expect(peerSetupBadge).toBeVisible()

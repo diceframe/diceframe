@@ -44,11 +44,17 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: [] }>()
 
-const { t } = useLocale()
+const { t, locale } = useLocale()
 const toast = useToast()
 const router = useRouter()
 const settings = useSettingsStore()
 const { hosts, loading: addressesLoading, load: loadReachable } = useReachableAddresses()
+
+const inviteHelpUrl = computed(() =>
+  locale.value.startsWith('zh')
+    ? 'https://github.com/diceframe/diceframe-content/blob/main/docs/zh/guide.md#外网联机'
+    : 'https://github.com/diceframe/diceframe-content/blob/main/docs/en/guide.md#multiplayer',
+)
 
 const selectedBase = ref('')
 // 候选地址回来之前不出码：默认值算出来之前的链接必然是本机 origin，先亮一条
@@ -160,7 +166,16 @@ function openShareSettings() {
 
 <template>
   <Modal :title="title" dialog-class="qr-share-dialog" @close="emit('close')">
-    <p v-if="hint" class="invite-desc">{{ hint }}</p>
+    <div class="invite-guidance">
+      <p v-if="hint" class="invite-desc">{{ hint }}</p>
+      <a
+        class="invite-multiplayer-help"
+        data-testid="invite-multiplayer-help"
+        :href="inviteHelpUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{{ t('inviteMultiplayerHelp') }}</a>
+    </div>
 
     <AddressPicker
       v-model:value="selectedBase"
@@ -201,10 +216,13 @@ function openShareSettings() {
 </template>
 
 <style scoped>
-.invite-desc{margin:0 0 18px;color:var(--df-text-muted);font-size:13px;line-height:1.6}
+.invite-guidance{display:grid;gap:10px;margin-bottom:18px}
+.invite-desc{margin:0;color:var(--df-text-muted);font-size:13px;line-height:1.6}
 .invite-address-settings{margin-left:4px;padding:0;border:0;background:none;color:var(--df-accent);font-size:12px;text-decoration:underline;cursor:pointer}
 .invite-address-local{color:var(--df-danger,var(--df-text-muted))}
 .invite-qr-meta{display:flex;flex-direction:column;gap:6px;width:100%}
 .invite-scan-hint{margin:0;color:var(--df-text-muted);font-size:13px}
 .invite-link{display:block;padding:8px 10px;border-radius:6px;background:color-mix(in srgb,var(--df-accent) 10%,transparent);font-family:var(--df-font-mono);font-size:12px;word-break:break-all;line-height:1.6;text-align:left}
+.invite-multiplayer-help{display:inline-flex;align-items:center;justify-content:center;justify-self:start;min-height:36px;padding:0 14px;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-surface-2);color:var(--df-text);font-size:13px;font-weight:650;text-decoration:none;transition:filter .12s,background .12s,border-color .12s}
+.invite-multiplayer-help:hover{filter:brightness(1.08);border-color:var(--df-accent)}
 </style>
