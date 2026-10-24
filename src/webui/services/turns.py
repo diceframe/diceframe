@@ -20,7 +20,15 @@ from src.commands.round_processor import (
     RoundProcessingFailure,
 )
 from src.engine import check_decisions, progression
-from src.engine.modules import adventure_runtime_state, checks, economy_state, round_safety, ruleset_runtime, session_stats
+from src.engine.modules import (
+    adventure_runtime_state,
+    checks,
+    economy_state,
+    progression_state,
+    round_safety,
+    ruleset_runtime,
+    session_stats,
+)
 from src.engine.action_gate import (
     ACTOR_DECEASED,
     ECONOMY_DECISION_PENDING,
@@ -122,6 +130,11 @@ class TurnDependencies:
     # 权威战斗的即时接管（src/webui/services/ruleset_gameplay.py）：控制权变更
     # 之后立刻把该席位的确定性回合走完。None 表示该运行时没有这条能力。
     resume_authoritative_combat: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+    # 叙事者节点完成提议的引擎权威结算（GAL 轨道 P6，src/commands/adventure_effects）：
+    # 规则声明 adventure_progression 时，回合提交后由引擎按 gates 权威确认提议的
+    # 节点完成，并可生成一次场景过渡叙事。返回结算结果 dict 或 None；
+    # None = 未配置（提议保持 advisory-only，行为不变）。
+    settle_adventure_completion: Callable[[Any], Awaitable[dict[str, Any] | None]] | None = None
 
 
 class TurnResult(TypedDict):
@@ -409,7 +422,51 @@ async def _process_round(
     if run_changed is not None and run_changed():
         raise RoundProcessingError(_gate_rejection(instance, "", RUN_CHANGED))
     await _auto_settle_rewards(dependencies, instance, game_key, run_changed=run_changed)
+    await _settle_adventure_completion(dependencies, instance, game_key, run_changed=run_changed)
     return narration, response
+
+
+async def _settle_adventure_completion(
+    dependencies: TurnDependencies,
+    instance: "GameInstance",
+    game_key: str,
+    *,
+    run_changed: Callable[[], bool] | None = None,
+) -> None:
+    """Confirm narrator-proposed node completions after a round commits (GAL P6).
+
+    规则未声明 ``adventure_progression`` 时依赖为 None，advisory-only 流程
+    原样保留。结算结果中的场景过渡叙事作为系统消息追加到刚完成的回合
+    （与 state_changes 同一呈现通道）；结算自身的失败绝不影响已成功的回合。
+    """
+
+    settle = dependencies.settle_adventure_completion
+    if settle is None:
+        return
+    if run_changed is not None and run_changed():
+        return
+    try:
+        settlement = await settle(instance)
+    except Exception:
+        logger.exception("节点完成提议结算失败，本轮跳过: game=%s", game_key)
+        return
+    if not isinstance(settlement, dict) or not settlement.get("node_id"):
+        return
+    transition = str(settlement.get("transition_narration") or "")
+    if not transition:
+        return
+    latest_round = int(progression_state.round_value(instance)) - 1
+    for entry in reversed(instance.log):
+        if not (isinstance(entry, dict) and int(entry.get("round") or 0) == latest_round):
+            continue
+        changes = entry.setdefault("state_changes", [])
+        if isinstance(changes, list):
+            changes.append(transition)
+            try:
+                await dependencies.save_instance(instance)
+            except Exception:
+                logger.exception("场景过渡叙事存档失败: game=%s", game_key)
+        break
 
 
 def _round_message(instance: "GameInstance", texts: dict[str, str]) -> str:

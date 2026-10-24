@@ -59,3 +59,47 @@ def test_specific_mode_literals_stay_in_the_mode_module_and_creation() -> None:
         if _GAL_TOKEN.search(text):
             offenders.append(path.relative_to(ROOT))
     assert not offenders
+
+
+def test_narrator_completion_settlement_keeps_one_writer_path() -> None:
+    """轨道 P6：叙事者提议的节点完成只有一条结算 writer 链。
+
+    ``settle_adventure_completion`` 只允许出现在：settle 本体（adventure_effects）、
+    回合后编排（turns 的依赖声明）、wiring（api）与既有实现 / GM 命令面
+    （adventure_runtime、adventure_commands）。任何新调用方都意味着绕过
+    gates 权威或 GM 命令面，必须先扩这条守卫的白名单并说明理由。
+    """
+    allowed = {
+        "src/commands/adventure_effects.py",
+        "src/webui/services/turns.py",
+        "src/webui/api.py",
+        "src/webui/services/adventure_runtime.py",
+        "src/webui/services/adventure_commands.py",
+    }
+    offenders: list[str] = []
+    for path in _py_sources(ROOT / "src"):
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "settle_adventure_completion" in text and rel not in allowed:
+            offenders.append(rel)
+    assert not offenders
+
+
+def test_only_the_gal_skin_declares_adventure_progression() -> None:
+    """``adventure_progression`` 能力声明只属于声明它的玩法皮；跑团皮零变化。"""
+    import json
+
+    rules_dir = ROOT / "templates" / "rules"
+    offenders: list[str] = []
+    for path in sorted(rules_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (
+            isinstance(data, dict)
+            and "adventure_progression" in data
+            and path.name != "gal_narrative.json"
+        ):
+            offenders.append(path.name)
+    assert not offenders

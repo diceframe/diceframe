@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2, project_graph_v2, validate_graph_v2
+from src.adventures.progress import ending_node_id
 from src.adventures.resolver import AdventureResolution, binding_matches
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
@@ -60,9 +61,20 @@ def project_scene_objectives(
         if viewer_is_gm:
             record["id"] = objective["id"]
         objectives.append(record)
-    if not nodes and not objectives:
+    ending = None
+    ending_id = ending_node_id(progress)
+    if ending_id:
+        node = visible_nodes.get(ending_id)
+        # A hidden ending still ends the adventure; only its text stays private.
+        ending = {"name": str(node.get("name") or "")[:160],
+                  "description": str(node.get("description") or "")[:800]} if node else {}
+        if node and viewer_is_gm:
+            ending["id"] = ending_id
+    if not nodes and not objectives and ending is None:
         return {}
     result: dict[str, Any] = {"current_nodes": nodes[:_MAX_ITEMS], "objectives": objectives[:_MAX_ITEMS]}
+    if ending is not None:
+        result["ending"] = ending
     if viewer_is_gm:
         successors = []
         seen = set()
@@ -122,9 +134,24 @@ def format_scene_context(view: dict[str, Any] | None, language: str, *, max_char
         "en": "## Current Scene and Objectives",
         "zh-CN": "【当前场景与目标】",
     })]
+    ending = view.get("ending")
+    if isinstance(ending, dict):
+        title = str(ending.get("name") or "")
+        lines.append(localized_text(language, {
+            "en": (
+                f"The adventure has reached its ending{': ' + title if title else ''}. "
+                "Narrate its resolution and epilogue only; do not open new branches or objectives."
+            ),
+            "zh-CN": (
+                f"冒险已抵达结局{'：' + title if title else ''}。只叙述结局与尾声，"
+                "不要开启新的分支或目标。"
+            ),
+        }))
+        if ending.get("description"):
+            lines.append(str(ending["description"]))
     for goal in view.get("objectives", [])[:_MAX_ITEMS]:
         lines.append(f"- [{goal.get('status', 'active')}] {str(goal.get('name') or '')[:240]}")
-    gm_nodes = [node for node in view.get("current_nodes", [])[:_MAX_ITEMS]
+    gm_nodes =[node for node in view.get("current_nodes", [])[:_MAX_ITEMS]
                 if isinstance(node, dict) and isinstance(node.get("id"), str)]
     for node in view.get("current_nodes", [])[:_MAX_ITEMS]:
         node_id = str(node.get("id") or "") if isinstance(node, dict) else ""

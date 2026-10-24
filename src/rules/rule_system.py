@@ -26,6 +26,7 @@ from src.engine.language import (
     normalize_language,
 )
 from src.content.rule_locale import materialize_rule
+from src.rules.adventure_progression_config import AdventureProgressionConfig
 
 logger = logging.getLogger("trpg")
 SUPPORTED_DICE_SYSTEMS = frozenset({"d20", "d100", "none"})
@@ -356,6 +357,17 @@ class RuleSystem:
     def attr_hint(self) -> str:
         """建卡属性分配说明，用于 WebUI 提示玩家当前规则的数值含义。"""
         return self.template.get("attr_hint", "")
+
+    @property
+    def adventure_progression(self) -> AdventureProgressionConfig | None:
+        """规则声明的冒险推进能力（GAL 轨道 P6）；未声明时为 None（功能关闭）。"""
+        from src.rules.adventure_progression_config import (
+            parse_adventure_progression_config,
+        )
+
+        return parse_adventure_progression_config(
+            self.template.get("adventure_progression"),
+        )
 
     # ---- 骰子与战斗 ----
 

@@ -68,6 +68,10 @@
     "硬核": 0
   },
   "rule_schema_version": 2,
+  "adventure_progression": {
+    "auto_confirm_completion": true,
+    "activation_narration": true
+  },
   "default_locale": "zh-CN",
   "locale_schema_version": 1
 }

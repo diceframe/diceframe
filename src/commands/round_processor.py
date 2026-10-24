@@ -28,7 +28,6 @@ from src.commands.round_effects import (
     append_state_change_messages,
     apply_confirmed_items,
     apply_growth_rewards,
-    apply_memory_delta,
     apply_plot_update,
     apply_puzzle_updates,
     apply_revive_commands,
@@ -43,9 +42,12 @@ from src.engine.economy import (
     queue_purchase_offer,
 )
 from src.commands.death_save_tracker import resolve_round_death_saves
+from src.commands.narrative_application import (
+    apply_narrative_effects,
+    apply_parsed_data_to_response,
+)
 from src.commands.round_llm import (
     append_multistep_analysis,
-    apply_parsed_data_to_response,
     call_llm_with_tag_retry,
 )
 from src.commands.round_actions import (
@@ -1553,19 +1555,13 @@ class RoundProcessor:
                 # The advisory encounter request remains visible for GM review.
                 logger.exception("D&D Director automation was rejected; waiting for GM")
         apply_revive_commands(instance, data, runtime)
-        system_changes.extend(apply_growth_rewards(
-            instance, data, response, rule, self._progression, runtime,
+        # 通用尾部链（成长奖励 → 快捷行动 → 记忆 → 剧情 → 私信）已泛化到
+        # narrative_application（GAL 轨道 P5），供链外叙事消费方复用。
+        system_changes.extend(await apply_narrative_effects(
+            instance, data, response,
+            rule=rule, progression=self._progression, runtime=runtime,
+            memory_store=self.memory_store,
         ))
-        update_quick_actions(instance, data)
-        await apply_memory_delta(instance, response, self.memory_store)
-        # 消费待处理 embedding 队列，让新记忆在运行中也能获得向量（此前从未被调用）
-        if self.memory_store and self.memory_store.embedding_client:
-            try:
-                await self.memory_store.flush_pending_embeddings()
-            except Exception:
-                logger.warning("flush_pending_embeddings 失败 (round=%d)", progression_state.round_value(instance), exc_info=True)
-        apply_plot_update(instance, response)
-        store_private_messages(instance, response)
         state_msgs = append_state_change_messages(instance, response, public_state_before, data)
         state_msgs.extend(system_changes)
         request = (

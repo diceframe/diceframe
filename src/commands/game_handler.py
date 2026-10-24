@@ -238,6 +238,11 @@ class GameHandler:
         if hasattr(self._swipe_generator, "set_scene_image_hook"):
             self._swipe_generator.set_scene_image_hook(self._round_processor.schedule_scene_image)
 
+    @property
+    def prompt_composer(self) -> PromptComposer:
+        """Composition seams for out-of-round narration services (scene transitions)."""
+        return self._prompt
+
     def set_scene_context_provider(self, provider: SceneContextProvider | None) -> None:
         """Share one safe scene source across opening, rounds and player Q&A."""
         self._prompt.set_scene_context_provider(provider)
