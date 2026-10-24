@@ -327,5 +327,5 @@ backend full pytest、frontend unit、vue-tsc、lint、production build、E2E �
 - ADR-0005 记录方向，本文记录路线；路线完成后回头更新 ADR-0005 状态。
 - 内容架构 vNext 母方案是轨道 C 的详细设计，本文 §4 的 PR A–I 与其 §39 一一对应；其 §3–§38 的具体定义继续有效，未在本文重复。
 - Native Module / Content Package 方向整理是轨道 M 的详细设计，本文 §4 的 M1–M6 与其 §28 一一对应；其 §29 的九条不变量是轨道 C 不变量的子集，不另行维护。
-- 轨道 P（GAL，2026-10-13 立项）：[ADR-0010](../../adr/0010-gal-first-non-trpg-gameplay.md) 记录立项与八项边界决策，[轨道 P 计划](../../GAL_TRACK_PLAN.md) 记录 PR 序列与完成标准。§2.9 "组合层不启动"的触发条件由此满足：组合层契约仍按原原则从 gal 实现中归纳，不预先设计 DSL。
+- 轨道 P（GAL，2026-10-13 立项）：[ADR-0010](../../adr/0010-gal-first-non-trpg-gameplay.md) 记录立项与八项边界决策，[轨道 P 计划](../../internal/GAL_TRACK_PLAN.md) 记录 PR 序列与完成标准。§2.9 "组合层不启动"的触发条件由此满足：组合层契约仍按原原则从 gal 实现中归纳，不预先设计 DSL。
 - 本文本身不是 ADR，属于实施计划；当某一步改变了长期依赖方向或持久化模型时，仍按 [ADR 规则](../../adr/README.md) 单独记录。

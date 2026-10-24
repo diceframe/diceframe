@@ -34,9 +34,9 @@ When changing navigation, labels, defaults or an operation's prerequisites:
 3. Check relative links and any affected screenshots. Capture screenshots only with demonstration data, without credentials, private saves or personal information.
 4. Base current instructions on merged implementation. Mark planned behavior as a proposal; coordinate related documentation PRs without presenting an unmerged feature as available. Before merging a docs-only follow-up, recheck the target branch's UI for changes.
 
-## Design and history
+## Internal notes and history
 
-`design/` contains scoped design notes and implementation contracts. Read each note's status before treating a planned feature as implemented. [DF Agent](design/DF_AGENT_IMPLEMENTATION.md) describes the current agent protocol; the product standards and execution proposal ([English](design/PRODUCT_STANDARDS_PROPOSAL.md) · [简体中文](design/PRODUCT_STANDARDS_PROPOSAL_CN.md)) inventories existing formats and proposes marketplace admission and staged delivery. It is not an adopted new API or release commitment.
+[Internal maintainer notes](internal/README.md) (`internal/`) hold construction plans, the content-architecture vNext master plan and dated design drafts. They describe local, possibly unreleased work: branch names, PR sequencing and unfinished boundaries there are internal coordination details, not product commitments. Do not link them from user-facing guides, the website or the public documentation repository, and do not present an unmerged feature they describe as available.
 
 [Archived plans and handoffs](archive/README.md) preserve historical decisions and unfinished inventories. Their branch names, PR ordering and test counts are historical. Temporary review reports, local paths, approval drafts and execution logs belong outside the published documentation; report their outcomes in the working conversation.
 

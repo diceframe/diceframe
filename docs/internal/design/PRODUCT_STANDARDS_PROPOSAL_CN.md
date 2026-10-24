@@ -2,7 +2,7 @@
 
 [English](PRODUCT_STANDARDS_PROPOSAL.md) | 简体中文
 
-状态：2026-10-15 维护者讨论稿。本文补充现状核对、格式约定与执行顺序，不等于已经新增 schema、API、市场审核能力或发布承诺。现行要求仍以[工程规则](../ENGINEERING_RULES.md)、[架构事实](../ARCHITECTURE_CN.md)和[已接受 ADR](../adr/README.md)为准。下文明确区分“已有”和“建议”。
+状态：2026-10-15 维护者讨论稿。本文补充现状核对、格式约定与执行顺序，不等于已经新增 schema、API、市场审核能力或发布承诺。现行要求仍以[工程规则](../../ENGINEERING_RULES.md)、[架构事实](../../ARCHITECTURE_CN.md)和[已接受 ADR](../../adr/README.md)为准。下文明确区分“已有”和“建议”。
 
 ## 要建立什么优势
 
@@ -127,13 +127,13 @@ SemVer 的 patch 用于兼容修正、minor 用于兼容新增、major 用于不
 | Hub | 发布者授权、目录状态、版本/产物/审核记录、分发决定 | 不接管游戏规则和存档权威 |
 | 作者/维护者 | 内容正确性、来源许可、支持版本、插件行为、认领的翻译 | 暂停维护不自动把义务转给核心维护者 |
 
-这次核对发现[外部插件指南](https://github.com/diceframe/diceframe-content/blob/main/docs/en/plugin-development.md)仍写旧包体积上限并把 Provider 列为预留，本地已有更大的 [package limits](../../src/plugin_host/package_limits.py) 与支持 Provider 的 [descriptor](../../src/plugin_host/support.py)。优先补版本匹配与示例 CI；能从常量/descriptor 生成的支持表和限制片段就生成，避免多处手抄。schema 的 `$id` 是标识，不代表对应网址已经托管。
+这次核对发现[外部插件指南](https://github.com/diceframe/diceframe-content/blob/main/docs/en/plugin-development.md)仍写旧包体积上限并把 Provider 列为预留，本地已有更大的 [package limits](../../../src/plugin_host/package_limits.py) 与支持 Provider 的 [descriptor](../../../src/plugin_host/support.py)。优先补版本匹配与示例 CI；能从常量/descriptor 生成的支持表和限制片段就生成，避免多处手抄。schema 的 `$id` 是标识，不代表对应网址已经托管。
 
 **插件索引仓库也必须同步调整。** 核对的 [registry validator](https://github.com/diceframe/diceframe-plugins/blob/e1cc03aec1a1f55aa851991cade4908912a19d73/scripts/registry.cjs)仍拒绝 Provider 投稿与核心已有的 `ai.providers` 权限；直接运行验证器还发现，它接受 `adventure-module + legacy_autoimport`，而核心会拒绝此组合。索引已经透传完整 manifest，不能简单说“完全没有冒险元数据”；缺口在对应语义校验与真实产物验收。当前 CI 运行索引自身测试/校验，没有接入核心的深度模块校验。
 
 建议将支持类型、实际权限策略、profile 组合和 Release 验证与明确的核心版本对齐，并保留最低应用版本要求。不能只给索引扩白名单，让旧客户端误以为也能使用新能力。用共用正反例验证“投稿、CI、安装判断一致”，全程不执行非可信插件入口；保留来源身份、已审核权限基线与风险变化后的重新审核。
 
-文档分工保持：架构写现状；工程规则写修改约束；schema/契约写精确格式；指南写作者操作；ADR 写重要决策原因；提案明确未实施。社区翻译沿用[现有维护政策](../zh/translations.md)，核心文档只承担英/简中。
+文档分工保持：架构写现状；工程规则写修改约束；schema/契约写精确格式；指南写作者操作；ADR 写重要决策原因；提案明确未实施。社区翻译沿用[现有维护政策](../../zh/translations.md)，核心文档只承担英/简中。
 
 ## 如何执行：按完成条件推进
 
@@ -149,8 +149,8 @@ SemVer 的 patch 用于兼容修正、minor 用于兼容新增、major 用于不
 
 **建议先做 A、B。** 第一份标准样例控制在两个场景、一个分支、一条私密线索、一本资料册、一张地图/图片，以及明确的 runtime 要求。用同一份产物完成验证、本地导入、导出重导入、开局、玩家可见性、存档重启、尝试不兼容更新。若声明确定性遭遇，就实际走规则 runtime；纯叙事示例如实写 reference/guided。
 
-本地实现已提供原创的[灯火港湾作者示例](../../plugins/examples/starter-adventure/README_zh-CN.md)。
-[对应验收](../../tests/test_starter_adventure_conformance.py)覆盖源目录与成品校验、安装、建局、
+本地实现已提供原创的[灯火港湾作者示例](../../../plugins/examples/starter-adventure/README_zh-CN.md)。
+[对应验收](../../../tests/test_starter_adventure_conformance.py)覆盖源目录与成品校验、安装、建局、
 秘密投影、存档重载、导出再导入和存档引用阻断；负例覆盖执行入口、越界路径、缺失运行时、
 非法世界关系和语言覆盖机制。它是包含关系地图的引导式示例，不是确定性战斗认证。
 C–E 中的市场准入、发布证据与外部作者里程碑仍是独立阶段。
@@ -174,4 +174,4 @@ python scripts/package_plugin.py path/to/my-content-pack
 
 对于模块划分，权限与事务/回滚正确性属于核心承诺；经济玩法本身可以选择。不能仅凭删模块后多少测试失败就决定内核归属。拆分 `table_settings` 应说明持久化 slot 与旧值迁移，而不是把它们搬进另一处大杂烩。
 
-实现定位：[引用契约](../../src/content_modules/refs.py)、[Content V2](../../src/content/contracts.py)、[冒险 loader](../../src/adventures/bundle.py)、[模块验证](../../src/webui/services/module_validation.py)、[市场 resolver](../../src/plugin_host/marketplace.py)、[导出器](../../src/webui/services/content_pack_export.py)、[扩展入门](../plugins/EXTENDING_CN.md)。
+实现定位：[引用契约](../../../src/content_modules/refs.py)、[Content V2](../../../src/content/contracts.py)、[冒险 loader](../../../src/adventures/bundle.py)、[模块验证](../../../src/webui/services/module_validation.py)、[市场 resolver](../../../src/plugin_host/marketplace.py)、[导出器](../../../src/webui/services/content_pack_export.py)、[扩展入门](../../plugins/EXTENDING_CN.md)。

@@ -4277,7 +4277,7 @@ Named plugin tools require explicit `agent_effect=read_only/mutation/destructive
 All three native-process classes require concrete manual approval; unknown effects
 are not registered. The legacy generic entry remains read-only. Declarations do not
 sandbox native processes, and plugin side effects have no generic undo. See
-`docs/design/DF_AGENT_DELETE_POLICY.md` for precise limits.
+`docs/internal/design/DF_AGENT_DELETE_POLICY.md` for precise limits.
 
 The v4 → v5 → v6 migrations preserve worlds and entry IDs, and create a deterministic
 `world:<id>` primary book for every world. `list_entries(world_id)` remains the
@@ -6416,7 +6416,7 @@ HTTP and Agent professional rests share `ruleset_rest.submit_live`: solo games k
 
 `assistant_agent_knowledge.py` registers read-only `search_documentation`, retrieved only when the Agent asks for usage guidance. The current-version mode in `assistant_knowledge.py` uses current local files or a version-matched bundled index and accepts only this repository's versioned document sources. Moving remote guides are excluded and no documentation is injected into every chat. Actual tools and service observations determine capabilities, canonical IDs and executable operations.
 
-`assistant_content.py` generates side-effect-free drafts and delegates to ContentTextReview's ContentDraft/CommitPlan review/commit boundary. Game creation preserves transactions, rules and explicit canonical book bindings; actions use the server actor and server dice. Durable execution receipts live under the data directory's `assistant_agent` folder. Repeated confirmations return the original result; interrupted writes with uncertain outcomes cannot be blindly replayed. See [DF_AGENT_IMPLEMENTATION.md](design/DF_AGENT_IMPLEMENTATION.md) for the complete capability and transport contract.
+`assistant_content.py` generates side-effect-free drafts and delegates to ContentTextReview's ContentDraft/CommitPlan review/commit boundary. Game creation preserves transactions, rules and explicit canonical book bindings; actions use the server actor and server dice. Durable execution receipts live under the data directory's `assistant_agent` folder. Repeated confirmations return the original result; interrupted writes with uncertain outcomes cannot be blindly replayed. See [DF_AGENT_IMPLEMENTATION.md](internal/design/DF_AGENT_IMPLEMENTATION.md) for the complete capability and transport contract.
 
 
 ## Storage branch recognition and integration ownership

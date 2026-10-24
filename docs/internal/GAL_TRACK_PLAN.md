@@ -2,7 +2,7 @@
 
 > 基线：`origin/main` @ 2026-10-13（实例 schema 43；轨道 R 完成 R0–R8 并经 #525–#532 演进为模块 lifecycle hooks；轨道 C 的 A–I 已全部合并；lorebook canonical spec 为 `lorebook_v3`）。本仓库本地 main 若落后 origin/main，先同步再基于本计划开工。
 >
-> 决策来源：[ADR-0010](adr/0010-gal-first-non-trpg-gameplay.md)（GAL 立项与八项边界决策）。本文只定义施工顺序、同步点与完成标准；与源码冲突时以源码和 [ENGINEERING_RULES](ENGINEERING_RULES.md) 为准。
+> 决策来源：[ADR-0010](../adr/0010-gal-first-non-trpg-gameplay.md)（GAL 立项与八项边界决策）。本文只定义施工顺序、同步点与完成标准；与源码冲突时以源码和 [ENGINEERING_RULES](../ENGINEERING_RULES.md) 为准。
 >
 > 轨道代号取 **P**（Playmode）：R / C / M 已被占用，且轨道 C 的步骤代号（PR A–I，上游提交信息使用 G2a–G2d 等）不应与玩法轨道的步骤号混淆。
 

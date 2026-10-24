@@ -10,11 +10,15 @@ ADR 用来记录“为什么做出一个长期架构决定”，不是所有 PR 
 
 自由计划、幕间成长、只读结团与 45→46 读者隔离见 [ADR-0008](0008-run-plans-and-finales.md)（本地实现，尚未发布）。
 
-资源恢复 authority 见 [ADR-0010：资源恢复的服务端 authority](0010-resource-recovery-authority.md)（本地实现，尚未发布）。
+规则中立 Adventure 包（graph v2 运行时契约）见 [ADR-0009：规则中立冒险包](0009-universal-adventures.md)（本地实现，尚未发布）。
 
-DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权与领域 authority 边界见 [ADR-0011：应用动作与 Agent 委托](0011-application-actions-and-agent-delegation.md)（`Accepted`，本地实现，尚未发布）。当前实现范围和剩余边界见 [DF_AGENT_IMPLEMENTATION.md](../design/DF_AGENT_IMPLEMENTATION.md) 与 [DF_AGENT_CAPABILITY_EVOLUTION.md](../design/DF_AGENT_CAPABILITY_EVOLUTION.md)。
+规则中立 Adventure 包（graph v2 运行时契约）见 [ADR-0009：规则中立冒险包](0009-universal-adventures.md)（本地实现，尚未发布）。
 
-[ADR-0010：GAL 作为第一个非跑团玩法](0010-gal-first-non-trpg-gameplay.md) — `Accepted`；gal 立项与八项边界决策（定位、组合式实现、好感度模块、推进模式、节点权威、transport 声明、立绘资产、合规边界）。施工顺序见[轨道 P 计划](../GAL_TRACK_PLAN.md)。
+资源恢复 authority 见 [ADR-0012：资源恢复的服务端 authority](0012-resource-recovery-authority.md)（本地实现，尚未发布）。
+
+DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权与领域 authority 边界见 [ADR-0011：应用动作与 Agent 委托](0011-application-actions-and-agent-delegation.md)（`Accepted`，本地实现，尚未发布）。当前实现范围和剩余边界见 [DF_AGENT_IMPLEMENTATION.md](../internal/design/DF_AGENT_IMPLEMENTATION.md) 与 [DF_AGENT_CAPABILITY_EVOLUTION.md](../internal/design/DF_AGENT_CAPABILITY_EVOLUTION.md)。
+
+[ADR-0010：GAL 作为第一个非跑团玩法](0010-gal-first-non-trpg-gameplay.md) — `Accepted`；gal 立项与八项边界决策（定位、组合式实现、好感度模块、推进模式、节点权威、transport 声明、立绘资产、合规边界）。施工顺序见[轨道 P 计划](../internal/GAL_TRACK_PLAN.md)。
 
 以下记录仍是提案：
 

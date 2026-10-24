@@ -4216,7 +4216,7 @@ Agent 不提供永久清空，归档仅限 10 个明确自建条目或不超过 
 插件、内置来源与整本主册受保护。插件具名工具进入 Agent 需明确声明
 `agent_effect=read_only/mutation/destructive`；动态具名适配器对三类原生插件调用均要求具体人工确认，
 未知声明不注册。旧通用插件入口仍只接受 read_only。该声明不构成原生插件进程沙箱，
-插件副作用不提供通用撤销。详细边界见 `docs/design/DF_AGENT_DELETE_POLICY.md`。
+插件副作用不提供通用撤销。详细边界见 `docs/internal/design/DF_AGENT_DELETE_POLICY.md`。
 
 v4 → v5 → v6 migration 保留 worlds 与 entry ids，并为每个 world 创建 deterministic
 `world:<id>` primary book；`list_entries(world_id)` 是该 primary book 的兼容 façade。
@@ -6352,7 +6352,7 @@ HTTP 与 Agent 的专业休息共同调用 `ruleset_rest.submit_live`：单人�
 
 `assistant_agent_knowledge.py` 注册只读 `search_documentation`，只在 Agent 请求使用说明时检索。`assistant_knowledge.py` 的当前版本模式使用现有本地文档或版本匹配的预建索引，只接受本仓库版本文档来源；不查询移动远程指南，不自动注入每条聊天。能力、canonical ID 与可执行操作仍由真实工具目录和服务观察决定。
 
-`assistant_content.py` 生成无副作用草稿，复用 ContentTextReview 的 review/commit 和 ContentDraft/CommitPlan。游戏创建沿用事务、规则和 canonical book bindings；行动采用当前服务端 actor 与服务器骰。执行记录保存在数据目录 `assistant_agent`，断线恢复与重复确认使用原结果；进程中断且结果未知的修改禁止盲目重放。完整协议与能力见 [DF_AGENT_IMPLEMENTATION.md](design/DF_AGENT_IMPLEMENTATION.md)。
+`assistant_content.py` 生成无副作用草稿，复用 ContentTextReview 的 review/commit 和 ContentDraft/CommitPlan。游戏创建沿用事务、规则和 canonical book bindings；行动采用当前服务端 actor 与服务器骰。执行记录保存在数据目录 `assistant_agent`，断线恢复与重复确认使用原结果；进程中断且结果未知的修改禁止盲目重放。完整协议与能力见 [DF_AGENT_IMPLEMENTATION.md](internal/design/DF_AGENT_IMPLEMENTATION.md)。
 
 
 ## 存储分叉读取与功能整合边界

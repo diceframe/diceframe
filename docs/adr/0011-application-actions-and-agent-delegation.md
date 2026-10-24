@@ -79,9 +79,9 @@ provider 报告的 `total_tokens` 在单次请求完成后检查并按响应累�
 - `src/webui/services/assistant_agent.py`
 - `src/webui/services/assistant_authorization.py`
 - `src/webui/routes/assistant_agent.py`
-- `docs/design/DF_AGENT_IMPLEMENTATION.md`
-- `docs/design/DF_AGENT_CAPABILITY_EVOLUTION.md`
-- `docs/design/DF_AGENT_DELETE_POLICY.md`
+- `docs/internal/design/DF_AGENT_IMPLEMENTATION.md`
+- `docs/internal/design/DF_AGENT_CAPABILITY_EVOLUTION.md`
+- `docs/internal/design/DF_AGENT_DELETE_POLICY.md`
 
 本 ADR 不授权发布版本、tag、Release 或对外说明；当前 Accepted 只表示本地代码和文档采用该长期边界。
 

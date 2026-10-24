@@ -3,6 +3,8 @@
 - Status: Proposed
 - Date: YYYY-MM-DD
 
+> Status 写明适用范围：未随发布版推出的实现用 `Accepted (local implementation; unreleased)`；`Accepted` 不等于已经发布。
+
 ## Context
 
 现在有什么问题？

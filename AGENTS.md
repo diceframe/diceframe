@@ -30,4 +30,6 @@
 - Orchestrator 负责组合与委托，feature/domain module 负责实现；存量肥大文件是渐进治理对象，不是新代码继续堆积的先例。
 - 新 provider / ruleset / plugin / transport 实现优先通过 capability / adapter / registry / public contract 扩展，避免在 generic path 增加具体实现分支。
 - 新 route 不得新增 `api._*` / `registry._*` 等私有成员穿透；新 service 优先使用显式依赖，不把完整 `WebAPI` 当 service locator。
+- `docs/internal/` 只存放维护者内部资料（施工计划、设计草案、未发布工作文档）：不得从玩家文档、网站或 `diceframe-content` 链接或引用，也不得当作对外契约；对外事实来源仍是 `docs/` 根下的架构、工程规则、ADR 与内容/插件契约。
+- `docs/internal/` 只存放维护者内部资料（施工计划、设计草案、未发布工作文档）：不得从玩家文档、网站或 `diceframe-content` 链接或引用，也不得当作对外契约；对外事实来源仍是 `docs/` 根下的架构、工程规则、ADR 与内容/插件契约。
 - 提交前检查最终 changed-file list，确认没有其它任务、其它测试或 AI 工作区残留串入当前 PR。

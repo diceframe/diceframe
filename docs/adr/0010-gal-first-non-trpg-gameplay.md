@@ -5,7 +5,7 @@
 
 ## Context
 
-[ADR-0005](0005-composable-game-platform.md) 与 [vNext 母方案](../ARCHITECTURE_VNEXT_MASTER_PLAN.md)把组合层的启动条件定为"第一个非跑团玩法立项"。本 ADR 记录该立项（GAL / 结构化视觉小说玩法）及其长期边界决策。施工顺序见 [轨道 P 计划](../GAL_TRACK_PLAN.md)，本文只记录决策。
+[ADR-0005](0005-composable-game-platform.md) 与 [vNext 母方案](../internal/CONTENT_ARCHITECTURE_VNEXT_MASTER_PLAN.md)把组合层的启动条件定为"第一个非跑团玩法立项"。本 ADR 记录该立项（GAL / 结构化视觉小说玩法）及其长期边界决策。施工顺序见 [轨道 P 计划](../internal/GAL_TRACK_PLAN.md)，本文只记录决策。
 
 ### 产品与市场
 

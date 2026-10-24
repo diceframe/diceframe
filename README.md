@@ -195,7 +195,7 @@ Missing or unreviewed central UI translations fall back to English. Community ca
 
 ## Upgrading existing data
 
-Supported saves and Lorebook databases migrate automatically on load/startup. This integration preserves the modular main contracts and recognizes the known unreleased local storage branches; unknown or future variants fail closed. The current save schema is 47 and Lorebook schema is 12; beta.2 and older programs cannot read the upgraded saves. Managed Docker keeps version/data pairs and can restore the older pair; source and portable program rollback alone cannot restore migrated data. Back up the complete `data/`, including updater data snapshots, with the server stopped before upgrading.
+Supported saves and Lorebook databases migrate automatically on load/startup. This integration preserves the modular main contracts; unknown or future variants fail closed. The current save schema is 47 and Lorebook schema is 12; beta.2 and older programs cannot read the upgraded saves. Managed Docker keeps version/data pairs and can restore the older pair; source and portable program rollback alone cannot restore migrated data. Back up the complete `data/`, including updater data snapshots, with the server stopped before upgrading.
 
 Legacy inline AI configuration is not automatically converted. Configure providers and role references in Settings. Some old player links require a fresh seat invitation. See [application updates](docs/en/updates.md) for the complete upgrade and downgrade procedure.
 

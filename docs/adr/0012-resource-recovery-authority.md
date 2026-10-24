@@ -1,4 +1,4 @@
-# ADR-0010: One-use resource recovery authority
+# ADR-0012: One-use resource recovery authority
 
 - Status: Accepted for 3.0.0-beta.3
 - Date: 2026-10-18
