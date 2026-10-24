@@ -11,7 +11,11 @@ from src.engine.module_state import (
 MODULE_NAME = "progression"
 SCHEMA_VERSION = 1
 NARRATIVE_ROUND = "narrative_round"
-KNOWN_MODES = (NARRATIVE_ROUND,)
+# GAL 轨道 P7（ADR-0010 §4）：scene 推进——无回合屏障、按场景/事件推进。
+# round 字段在 scene 模式下继续作为推进计数（经济纪元沿用同一单点）；
+# 旧运行时不认识 scene 时按未知 mode fail closed 拒绝写入。
+SCENE = "scene"
+KNOWN_MODES = (NARRATIVE_ROUND, SCENE)
 
 
 def fresh() -> dict[str, Any]:
@@ -82,6 +86,20 @@ def set_round_value(instance: Any, value: int) -> None:
     require_writable(instance)
     converted = int(value)
     get_module_state(instance, MODULE_NAME)["round"] = converted
+
+
+def set_mode(instance: Any, value: str) -> None:
+    """Install the progression mode (creation-time authority, GAL P7).
+
+    Only known modes are accepted; an unknown value fails closed rather than
+    being guessed into the slot.
+    """
+
+    require_writable(instance)
+    mode = str(value or "")
+    if mode not in KNOWN_MODES:
+        raise ModuleStateError(f"unsupported progression mode: {mode!r}")
+    get_module_state(instance, MODULE_NAME)["mode"] = mode
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

@@ -58,8 +58,30 @@ def current_round(instance: Any) -> int:
 
 
 def current_era(instance: Any) -> int:
-    """Settlement era for economy / effects in narrative-round progression."""
+    """Settlement era for economy / effects.
+
+    An era is one narrative round (ADR-0003); in scene progression (GAL P7)
+    the same counter keeps counting advances, so the era stays the advance
+    count — this remains the single seam for progression-model branching.
+    """
     return current_round(instance)
+
+
+def ensure_advancement_allowed(instance: Any) -> None:
+    """Scene-mode guard: an ended adventure never opens another advance (GAL P7).
+
+    narrative_round tables keep their existing behaviour (a frozen adventure
+    progress does not stop a tabletop round); scene progression treats the
+    reached ending (``ending_node_id``, track P4) as the run's terminal state.
+    """
+
+    if progression_state.mode(instance) != progression_state.SCENE:
+        return
+    from src.adventures.progress import ending_node_id
+    from src.engine.modules import adventure_runtime_state
+
+    if ending_node_id(adventure_runtime_state.progress(instance)):
+        raise ValueError("adventure has ended: scene progression does not advance further")
 
 
 def open_next_round(instance: Any) -> int:
@@ -118,4 +140,5 @@ __all__ = [
     "NARRATIVE_ROUND", "current_round", "current_era", "open_next_round",
     "rewind_after_rollback", "rewind_for_replay", "advance_for_public_timeline",
     "restore_from_snapshot", "reset", "require_writable",
+    "ensure_advancement_allowed",
 ]

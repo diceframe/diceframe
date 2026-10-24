@@ -9,7 +9,7 @@ v2 面向大型 D&D 模组的图模型（相对 v1 的线性 steps/next_step）�
 \`\`\`text
 Adventure
 ├─ chapters[]
-├─ nodes[]            scene / objective / encounter / decision / milestone / reference
+├─ nodes[]            scene / objective / encounter / decision / milestone / reference / ending
 ├─ objectives[]       可并行目标
 ├─ milestones[]
 └─ start_node_ids[]   多入口
@@ -23,6 +23,9 @@ Adventure
   引用必须存在；回流合法但结构仍受节点数上限约束。
 - 可见性（§79）：node / objective / milestone 均带 public|gm，secret 在
   projection 层过滤（ADV2-05）。
+- ending 节点（GAL 轨道 P4）是终局：不得有 transitions；完成任一 ending
+  节点即冒险结束（进度语义见 ``progress.complete_node``）。旧运行时不认识该
+  类型，会整图拒绝（fail closed），因此不升图 schema。
 - v1（diceframe:adventure-graph-v1）继续由既有 loader 校验，长期兼容（§71）。
 """
 
@@ -40,7 +43,8 @@ ADVENTURE_GRAPH_FORMAT_V2 = "diceframe:adventure-graph-v2"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _REF_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*$")
 VISIBILITIES = ("public", "gm")
-NODE_TYPES = ("scene", "objective", "encounter", "decision", "milestone", "reference")
+NODE_TYPES = ("scene", "objective", "encounter", "decision", "milestone", "reference", "ending")
+ENDING_NODE_TYPE = "ending"
 
 # 上界（母方案 §167；基于 v1 bounds 的同量级制定）。
 MAX_CHAPTERS = 32
@@ -303,6 +307,8 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
         choice_mode = raw.get("choice_mode", "parallel")
         if choice_mode not in {"parallel", "exclusive"}:
             raise AdventureGraphV2Error("unsupported node choice_mode")
+        if node_type == ENDING_NODE_TYPE and (transitions or choice_mode != "parallel"):
+            raise AdventureGraphV2Error(f"ending node {node_id!r} cannot have transitions or choices")
         validated_transitions = [_validate_transition(transition, f"node {node_id}", exclusive=choice_mode == "exclusive") for transition in transitions]
         if choice_mode == "exclusive":
             identities = [transition["choice_id"] for transition in validated_transitions]
@@ -324,6 +330,12 @@ def validate_graph_v2(adventure: Any) -> dict[str, Any]:
         }
         if choice_mode == "exclusive":
             nodes[node_id]["choice_mode"] = "exclusive"
+        if node_type == ENDING_NODE_TYPE and any(
+            outcome.get("type") == "progress_event" and outcome.get("kind") == "node_completed"
+            for outcome in nodes[node_id]["on_complete"]
+        ):
+            # 结局之后不能再推进节点；声明了也只会让结局事务整体回滚。
+            raise AdventureGraphV2Error(f"ending node {node_id!r} cannot complete other nodes")
     if not nodes:
         raise AdventureGraphV2Error("v2 adventure requires at least one node")
 
@@ -426,6 +438,7 @@ __all__ = [
     "ADVENTURE_GRAPH_FORMAT_V2",
     "MAX_NODES",
     "MAX_TRAVERSAL_STEPS",
+    "ENDING_NODE_TYPE",
     "NODE_TYPES",
     "AdventureGraphV2Error",
     "next_candidates",

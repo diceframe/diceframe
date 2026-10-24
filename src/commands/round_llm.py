@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from src.commands.narrative_application import apply_parsed_data_to_response as _apply_parsed
 from src.commands.round_helpers import should_multi_step, validate_dice_constraint
 from src.commands.protocol_repair import append_protocol_repair_instruction
 from src.commands.tag_json import safe_parse_json
@@ -693,82 +694,9 @@ async def call_llm_with_tag_retry(
 
 
 def apply_parsed_data_to_response(instance: GameInstance, response: Any, data: dict) -> None:
-    """把解析出的标签数据落到 response 对象，供后续状态应用阶段使用。"""
-    if data.get("state_update") or data.get("plot_update"):
-        response.is_narration_only = False
-        instance.set_tag_failure_streak(0)  # 成功解析即清零，防止 streak 累积误触发提示
-        response.state_update = data["state_update"]
-        response.memory_delta = data["memory_delta"]
-        response.info_asymmetry = data["info_asymmetry"]
-        response.plot_update = data["plot_update"]
-        state_update = data.get("state_update", {})
-        players_changed = list(state_update.get("players", {}).keys())
-        scene = state_update.get("scene_change", "")
-        loot = state_update.get("loot", [])
-        logger.info(
-            "标签解析成功 (round=%d): 玩家=%s, 场景=%s, 战利品=%d",
-            progression_state.round_value(instance),
-            players_changed if players_changed else "无变化",
-            scene or "不变",
-            len(loot),
-        )
-        return
+    """把解析出的标签数据落到 response 对象，供后续状态应用阶段使用。
 
-    if not response.state_update:
-        response.is_narration_only = True
-        streak = instance._tag_fail_streak + 1
-        instance.set_tag_failure_streak(streak)
-        if streak >= 3:
-            logger.error("标签连续%d轮解析失败！建议：检查模型是否支持当前prompt格式，或更换模型", streak)
-            record_health_event(
-                instance,
-                component="llm_parser",
-                code="TAG_PARSE_STREAK",
-                severity="error",
-                title="结构化解析连续失败",
-                message=f"标签已连续 {streak} 轮解析失败。",
-                impact="HP、资源、物品、任务和记忆等结构化状态可能持续未更新。",
-                fallback="narration_only",
-                repair_hint="建议暂停并检查模型、prompt 标签格式，或重新生成本轮。",
-            )
-            # P2-B：连续失败时给玩家可见提示，避免"叙事里受伤但 HP 没扣"的
-            # 状态漂移无声无息（health_event 仅 GM 可见）。作为系统事件展示。
-            _sync_notice = localized_text(
-                getattr(instance, "language", ""),
-                {
-                    "en": "⚠️ System: state sync has failed for several rounds; HP/resources/items "
-                          "may be out of date. Ask the GM to check, or regenerate this round.",
-                    "zh-CN": "⚠️ 系统提示：连续多轮状态同步失败，HP/资源/物品可能未更新。"
-                              "请告知 GM 检查，或重新生成本轮。",
-                    "ja": "⚠️ システム通知：複数ラウンドにわたり状態同期に失敗しています。"
-                          "HP/資源/アイテムが最新でない可能性があります。GM に確認を依頼するか、"
-                          "このラウンドを再生成してください。",
-                    "de": "⚠️ Systemhinweis: Die Statussynchronisation ist mehrere Runden in Folge "
-                          "fehlgeschlagen; TP/Ressourcen/Gegenstände sind möglicherweise veraltet. "
-                          "Bitte den GM um eine Prüfung oder generiere diese Runde neu.",
-                },
-            )
-            system_notices = getattr(response, "system_notices", None)
-            if not isinstance(system_notices, list):
-                system_notices = []
-                response.system_notices = system_notices
-            system_notices.append(_sync_notice)
-        else:
-            logger.warning("标签解析失败，本轮仅保留叙事 (round=%d, streak=%d)", progression_state.round_value(instance), streak)
-            record_health_event(
-                instance,
-                component="llm_parser",
-                code="NARRATION_ONLY_FALLBACK",
-                severity="warning",
-                title="结构化解析失败",
-                message="本轮 AI 回复未解析出状态标签，系统仅保留叙事。",
-                impact="HP、资源、物品、任务和记忆等结构化状态可能未更新。",
-                fallback="narration_only",
-                repair_hint="可重新生成本轮，或检查模型是否遵守 prompt 标签格式。",
-            )
-        response.state_update = {}
-        response.memory_delta = {"add": [], "update": [], "forget": []}
-        response.info_asymmetry = {}
-        response.plot_update = {"quests": [], "relations": [], "decisions": []}
-    else:
-        instance.set_tag_failure_streak(0)
+    实现已泛化到 `narrative_application`（GAL 轨道 P5），此处 re-export
+    维持回合管线的既有 import 路径。
+    """
+    return _apply_parsed(instance, response, data)
