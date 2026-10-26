@@ -159,6 +159,10 @@ def fingerprint(instance: Any) -> str:
     raw['log'] = deepcopy(instance.log)  # Codec can bound inline history.
     raw['modules'].pop(MODULE_NAME, None)
     raw['modules'].pop('session_stats', None)  # AI usage accounting is allowed.
+    # Room access is independent administrative state: staged publication keeps
+    # its live credentials/settings, and GM credential rotation remains legal
+    # while a finale is frozen.
+    raw['modules'].pop('room_access', None)
     growth = raw['modules'].get('skill_growth')
     if isinstance(growth, dict):
         growth.pop('entropy', None)  # Durable RNG reservation is not source material.
