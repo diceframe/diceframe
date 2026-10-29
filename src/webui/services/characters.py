@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.engine.modules import game_config
 
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -216,6 +217,9 @@ class CharacterAssetDependencies:
     avatar_file: Callable[[str], Path | None]
     generated_image_file: Callable[[str], Path | None]
     content_projection: ContentProjectionService | None = None
+    # GAL P8：立绘资产边界校验（与 avatar_file 同语义）。缺省 None 时立绘
+    # 引用一律拒绝（fail closed），不猜文件是否存在。
+    standing_portrait_file: Callable[[str], Path | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -228,6 +232,10 @@ class CharacterDependencies:
     schedule_economy_scene_image: Callable[[Any, dict[str, Any]], Any] | None = None
     apply_economy_memory: Callable[[str, str, dict[str, Any], int], Awaitable[None]] | None = None
     reverse_economy_memory: Callable[[str, str], Awaitable[bool]] | None = None
+    # GAL P8：个人音色存在性检查（speech 的 profile store）。投影用它把已删除
+    # 的音色绑定省略掉（失效引用保持未配置）；None 时投影原样带出，
+    # 合成端仍会 fail closed 明确报错。
+    voice_profile_exists: Callable[[str], bool] | None = None
 
 
 async def create_payment_proposal(
@@ -541,7 +549,9 @@ def list_characters(
     if viewer_is_gm:
         for nid, npc in inst.npcs.items():
             name = npc.get("character_name") or npc.get("name") or nid
-            npcs_by_name[name] = {"npc_id": nid, **npc, "name": name}
+            row = {"npc_id": nid, **npc, "name": name}
+            _project_npc_bindings(row, dependencies)
+            npcs_by_name[name] = row
         if dependencies.assets.lorebook and inst.world_id:
             if dependencies.assets.content_projection is not None:
                 entries = dependencies.assets.content_projection.for_game(
@@ -823,6 +833,49 @@ async def _update_character_authority(
             cs.pop("portrait", None)
         else:
             cs["portrait"] = portrait
+    # GAL P8：立绘 / 表情差分 / 音色绑定（全部可选字段，旧存档照常）。
+    standing_portrait_present = "standing_portrait" in updates
+    standing_expressions_present = "standing_portrait_expressions" in updates
+    if standing_portrait_present or standing_expressions_present:
+        try:
+            # A missing PATCH field means "leave it alone".  Validate every
+            # supplied field before mutating either stored value so a bad
+            # partial update cannot produce a half-applied standing portrait.
+            standing = (
+                _validated_standing_portrait(
+                    dependencies.assets, updates["standing_portrait"],
+                )
+                if standing_portrait_present else None
+            )
+            standing_expressions = (
+                _validated_standing_portrait_expressions(
+                    dependencies.assets, updates["standing_portrait_expressions"],
+                )
+                if standing_expressions_present else None
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if standing_portrait_present:
+            updates.pop("standing_portrait")
+            if standing is None:
+                cs.pop("standing_portrait", None)
+            else:
+                cs["standing_portrait"] = standing
+        if standing_expressions_present:
+            updates.pop("standing_portrait_expressions")
+            if standing_expressions is None:
+                cs.pop("standing_portrait_expressions", None)
+            else:
+                cs["standing_portrait_expressions"] = standing_expressions
+    if "voice_profile" in updates:
+        try:
+            voice = _validated_voice_profile(updates.pop("voice_profile"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if voice is None:
+            cs.pop("voice_profile", None)
+        else:
+            cs["voice_profile"] = voice
     explicit_hp_update = (
         "hp" in updates
         or "max_hp" in updates
@@ -943,6 +996,77 @@ def validate_character_portrait(
     raise ValueError("头像类型无效")
 
 
+# ---- GAL P8：立绘 / 表情差分 / 音色绑定 --------------------------------------
+
+_EXPRESSION_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+MAX_STANDING_PORTRAIT_EXPRESSIONS = 16
+_VOICE_PROFILE_ID_RE = re.compile(r"^personal:[a-f0-9]{32}$")
+_PLUGIN_VOICE_PREFIX = "plugin:"
+MAX_VOICE_PROFILE_ID_CHARS = 200
+
+
+def _validated_standing_portrait(
+    dependencies: CharacterAssetDependencies, value: Any,
+) -> dict[str, str] | None:
+    from src.webui.services.standing_portraits import validate_standing_portrait_ref
+
+    if dependencies.standing_portrait_file is None:
+        if value is None or value == {}:
+            return None
+        raise ValueError("立绘资产服务未配置")
+    return validate_standing_portrait_ref(value, dependencies.standing_portrait_file)
+
+
+def _validated_standing_portrait_expressions(
+    dependencies: CharacterAssetDependencies, value: Any,
+) -> dict[str, dict[str, str]] | None:
+    if value is None or value == {}:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("表情差分必须是对象")
+    if len(value) > MAX_STANDING_PORTRAIT_EXPRESSIONS:
+        raise ValueError(f"表情差分不能超过 {MAX_STANDING_PORTRAIT_EXPRESSIONS} 条")
+    normalized: dict[str, dict[str, str]] = {}
+    for label, reference in value.items():
+        if not _EXPRESSION_LABEL_RE.fullmatch(str(label or "")):
+            raise ValueError(f"表情标签无效：{label!r}（小写字母、数字、- 或 _，最长 32）")
+        item = _validated_standing_portrait(dependencies, reference)
+        if item is None:
+            raise ValueError(f"表情差分 {label!r} 缺少立绘引用")
+        normalized[str(label)] = item
+    return normalized
+
+
+def _validated_voice_profile(value: Any) -> str | None:
+    """Validate a voice id shape (speech vocabulary); existence is checked at use."""
+
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("音色绑定必须是字符串")
+    text = value.strip()
+    if not text or len(text) > MAX_VOICE_PROFILE_ID_CHARS:
+        raise ValueError("音色绑定无效")
+    if text.startswith("personal:") and not _VOICE_PROFILE_ID_RE.fullmatch(text):
+        raise ValueError("个人音色 ID 无效")
+    if text.startswith(_PLUGIN_VOICE_PREFIX) and len(text) <= len(_PLUGIN_VOICE_PREFIX):
+        raise ValueError("插件音色 ID 无效")
+    return text
+
+
+def _project_npc_bindings(row: dict[str, Any], dependencies: CharacterDependencies) -> None:
+    """Drop voice bindings whose profile no longer exists (fail closed).
+
+    失效引用保持未配置：投影省略后前端自然回退默认音色；未注入检查器时
+    原样带出，合成端仍会对已删除音色明确报错。
+    """
+
+    exists = dependencies.voice_profile_exists
+    voice = str(row.get("voice_profile") or "")
+    if voice and voice.startswith("personal:") and exists is not None and not exists(voice):
+        row.pop("voice_profile", None)
+
+
 async def update_npc_portrait(
     dependencies: CharacterDependencies,
     game_key: str,
@@ -965,15 +1089,16 @@ async def update_npc_portrait(
         )
 
 
-async def _update_npc_portrait_authority(
+def _resolve_npc_for_update(
     dependencies: CharacterDependencies,
     inst: GameInstance,
     npc_id: str,
-    portrait: Any,
-) -> dict[str, Any]:
+) -> tuple[str, dict[str, Any]] | None:
+    """Locate an NPC (by key or id), materializing a lorebook entry if needed."""
+
     npc_key = str(npc_id or "").strip()
     if not npc_key:
-        return {"ok": False, "error": "NPC 不存在"}
+        return None
     npc = inst.npcs.get(npc_key)
     if npc is None:
         for key, candidate in inst.npcs.items():
@@ -1005,7 +1130,20 @@ async def _update_npc_portrait_authority(
             }
             inst.npcs[npc_key] = npc
     if npc is None:
+        return None
+    return npc_key, npc
+
+
+async def _update_npc_portrait_authority(
+    dependencies: CharacterDependencies,
+    inst: GameInstance,
+    npc_id: str,
+    portrait: Any,
+) -> dict[str, Any]:
+    resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
+    if resolved is None:
         return {"ok": False, "error": "NPC 不存在"}
+    _npc_key, npc = resolved
     try:
         normalized = _validated_portrait(dependencies.assets, portrait)
     except ValueError as exc:
@@ -1016,6 +1154,90 @@ async def _update_npc_portrait_authority(
         npc["portrait"] = normalized
     await dependencies.games.save_instance(inst)
     return {"ok": True, "portrait": npc.get("portrait")}
+
+
+async def update_npc_standing_portrait(
+    dependencies: CharacterDependencies,
+    game_key: str,
+    npc_id: str,
+    standing_portrait: Any,
+    expressions: Any = None,
+) -> dict[str, Any]:
+    """GAL P8：设置 NPC 的立绘主图与表情差分集（一次事务，全有或全无）。"""
+
+    inst = dependencies.games.get_instance(
+        dependencies.games.parse_game_key(game_key),
+    )
+    if not inst:
+        return {"ok": False, "error": "游戏不存在"}
+    async with inst.authoritative_write() as write_entered:
+        if not write_entered:
+            return {
+                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
+                "error": "GM 正在重写历史回合，请等待完成后重试",
+            }
+        resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
+        if resolved is None:
+            return {"ok": False, "error": "NPC 不存在"}
+        _npc_key, npc = resolved
+        try:
+            normalized = _validated_standing_portrait(
+                dependencies.assets, standing_portrait,
+            )
+            normalized_expressions = _validated_standing_portrait_expressions(
+                dependencies.assets, expressions,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if normalized is None:
+            npc.pop("standing_portrait", None)
+        else:
+            npc["standing_portrait"] = normalized
+        if normalized_expressions is None:
+            npc.pop("standing_portrait_expressions", None)
+        else:
+            npc["standing_portrait_expressions"] = normalized_expressions
+        await dependencies.games.save_instance(inst)
+        return {
+            "ok": True,
+            "standing_portrait": npc.get("standing_portrait"),
+            "standing_portrait_expressions": npc.get("standing_portrait_expressions"),
+        }
+
+
+async def update_npc_voice(
+    dependencies: CharacterDependencies,
+    game_key: str,
+    npc_id: str,
+    voice_profile: Any,
+) -> dict[str, Any]:
+    """GAL P8：绑定 NPC 的固定音色（voice id，speech 同词汇）。"""
+
+    inst = dependencies.games.get_instance(
+        dependencies.games.parse_game_key(game_key),
+    )
+    if not inst:
+        return {"ok": False, "error": "游戏不存在"}
+    async with inst.authoritative_write() as write_entered:
+        if not write_entered:
+            return {
+                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
+                "error": "GM 正在重写历史回合，请等待完成后重试",
+            }
+        resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
+        if resolved is None:
+            return {"ok": False, "error": "NPC 不存在"}
+        _npc_key, npc = resolved
+        try:
+            normalized = _validated_voice_profile(voice_profile)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if normalized is None:
+            npc.pop("voice_profile", None)
+        else:
+            npc["voice_profile"] = normalized
+        await dependencies.games.save_instance(inst)
+        return {"ok": True, "voice_profile": npc.get("voice_profile")}
 
 
 async def resolve_payment(

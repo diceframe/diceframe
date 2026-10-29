@@ -39,6 +39,7 @@ from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
+from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.game_profiles.service import ProfileService, ProfileDependencies
@@ -276,6 +277,13 @@ class WebAPI:
                     asset_id,
                 ),
                 content_projection=getattr(handler, "content_projection", None),
+                standing_portrait_file=lambda asset_id: self.standing_portrait_file(
+                    asset_id,
+                ),
+            ),
+            # GAL P8：投影侧校验个人音色仍存在（失效省略，保持未配置）。
+            voice_profile_exists=(
+                lambda voice: self._voice_profile_exists(voice)
             ),
             # Table characters auto-saved into the library: never plugin cards.
             save_character_card=lambda character: character_cards.save_character_card(
@@ -393,6 +401,9 @@ class WebAPI:
             )
         )
         self._avatars = avatars.AvatarService(self._reg.save_dir.parent / "avatars")
+        self._standing_portraits = standing_portraits.StandingPortraitService(
+            self._reg.save_dir.parent / "standing-portraits",
+        )
         self._scene_images = scene_images.SceneImageService(
             scene_images.SceneImageDependencies(
                 images_dir=self._reg.save_dir.parent / "scene-images",
@@ -2515,6 +2526,22 @@ class WebAPI:
             self._character_dependencies, game_key, npc_id, portrait,
         )
 
+    async def update_npc_standing_portrait(
+        self, game_key: str, npc_id: str,
+        standing_portrait: Any, expressions: Any = None,
+    ) -> dict[str, Any]:
+        return await characters.update_npc_standing_portrait(
+            self._character_dependencies, game_key, npc_id,
+            standing_portrait, expressions,
+        )
+
+    async def update_npc_voice(
+        self, game_key: str, npc_id: str, voice_profile: Any,
+    ) -> dict[str, Any]:
+        return await characters.update_npc_voice(
+            self._character_dependencies, game_key, npc_id, voice_profile,
+        )
+
     async def set_story_mode(self, game_key: str, mode: Any) -> dict[str, Any]:
         return await self._storytelling.set_mode(game_key, mode)
 
@@ -2711,6 +2738,27 @@ class WebAPI:
 
     def delete_avatar(self, asset_id: str) -> dict[str, Any]:
         return self._avatars.delete(asset_id)
+
+    # GAL P8：立绘资产（透明保留、content-addressed，见 standing_portraits）。
+    def save_standing_portrait_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        return self._standing_portraits.save_upload(file_data, file_name)
+
+    def standing_portrait_file(self, asset_id: str) -> Path | None:
+        return self._standing_portraits.file(asset_id)
+
+    def delete_standing_portrait(self, asset_id: str) -> dict[str, Any]:
+        return self._standing_portraits.delete(asset_id)
+
+    def _voice_profile_exists(self, voice_id: str) -> bool:
+        """True when the personal voice profile still exists (GAL P8)."""
+
+        speech_service = getattr(self, "_speech", None)
+        if speech_service is None:
+            return True  # 无法校验时不省略：合成端仍会 fail closed 报错。
+        return any(
+            str(item.get("id") or "") == voice_id
+            for item in speech_service.editable_voice_profiles()
+        )
 
     def image_generation_status(self) -> dict[str, Any]:
         return self._generated_images.public_config()
