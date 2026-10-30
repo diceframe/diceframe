@@ -186,6 +186,18 @@ def test_ccv3_keyword_wins_over_chara_and_ztxt_is_supported(tmp_path, store):
     assert result["card"]["character_name"] == "Aster"
 
 
+def test_oversized_ztxt_chunk_is_rejected_not_expanded(tmp_path, store):
+    """压缩炸弹：解压后超限的 zTXt 不能被展开，按“未找到”处理。"""
+
+    bomb = zlib.compress(b"A" * 60_000_000)
+    png = _png_with_text_chunks((b"zTXt", b"ccv3\x00\x00" + bomb))
+
+    result = _import(tmp_path, store, png, "bomb.png", world_id="w1")
+
+    assert result["ok"] is False
+    assert "未找到角色卡数据" in result["error"]
+
+
 def test_png_without_card_chunk_reports_missing(tmp_path, store):
     result = _import(tmp_path, store, _png_with_text_chunks(), "empty.png", world_id="w1")
 

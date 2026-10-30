@@ -950,6 +950,18 @@ def _decode_card_text(payload: bytes) -> dict | None:
     return None
 
 
+_MAX_PNG_TEXT_BYTES = 50_000_000
+
+
+def _bounded_decompress(data: bytes) -> bytes:
+    """解压 zlib 数据并限制输出大小，防止压缩炸弹。"""
+    decompressor = zlib.decompressobj()
+    out = decompressor.decompress(data, _MAX_PNG_TEXT_BYTES + 1)
+    if len(out) > _MAX_PNG_TEXT_BYTES:
+        raise zlib.error("PNG 文本 chunk 解压后过大")
+    return out
+
+
 def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | None:
     """解出 tEXt / zTXt / iTXt chunk 的 (keyword, 文本字节)；其它 chunk 返回 None。"""
     null_pos = chunk_data.find(b"\x00")
@@ -961,7 +973,7 @@ def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | N
         return keyword, rest
     if chunk_type == "zTXt":
         # 1 字节压缩方法 + zlib 数据
-        return keyword, zlib.decompress(rest[1:])
+        return keyword, _bounded_decompress(rest[1:])
     if chunk_type == "iTXt":
         # 压缩标志、压缩方法、语言标签\0、翻译关键字\0、文本
         compressed = rest[0] == 1
@@ -971,7 +983,7 @@ def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | N
             if idx == -1:
                 return None
             rest = rest[idx + 1:]
-        return keyword, zlib.decompress(rest) if compressed else rest
+        return keyword, _bounded_decompress(rest) if compressed else rest
     return None
 
 
