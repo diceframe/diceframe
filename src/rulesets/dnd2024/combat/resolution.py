@@ -259,7 +259,12 @@ class CombatResolutionMixin:
             bless_bonus = int(rng.randint(1, 4))
         total = natural + attack_bonus + bless_bonus
         target_ac = effective_armor_class(target)
-        critical = natural == 20
+        # 精通重击 / 高效重击只拓宽武器与徒手攻击的重击阈值：取已拥有特性中
+        # 最小的阈值，缺省 20。天然 1 的失手判定继续由下方 hit 组合表达。
+        crit_threshold = self.features.min_feature_value(
+            self._feature_character(actor), "crit_threshold", 20,
+        )
+        critical = natural >= crit_threshold
         hit = natural != 1 and (critical or total >= target_ac)
         if (
             hit and not critical
@@ -281,6 +286,9 @@ class CombatResolutionMixin:
             "natural": natural, "modifier": attack_bonus, "bless_bonus": bless_bonus,
             "total": total, "target": target_ac, "success": hit, "critical": critical,
         }
+        if crit_threshold != 20:
+            # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
+            check_event["crit_threshold"] = crit_threshold
         events.append(check_event)
         if (
             target["kind"] == "enemy" and "rage" in actor["conditions"]

@@ -129,7 +129,9 @@ class Dnd2024ClassFeatureResolver:
         if state is None:
             return ()
         class_id, level = state
-        granted = self._granted_feature_ids(class_id, level)
+        granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
+            class_id, level,
+        )
         owned: list[ClassFeatureDefinition] = []
         for feature_id in self.catalog.by_class.get(class_id, ()):
             definition = self.catalog.features.get(feature_id)
@@ -205,6 +207,30 @@ class Dnd2024ClassFeatureResolver:
         if definition is None:
             return default
         return self._value(definition, character, key, default)
+
+    def min_feature_value(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+        default: Any = None,
+    ) -> Any:
+        """The smallest numeric value of one parameter across owned features.
+
+        Crit threshold and other "best value wins" primitives read through this
+        method, so a class never hardcodes a subclass feature id and two owned
+        declarations (19 and 18) resolve to the more generous 18 instead of
+        stacking.
+        """
+
+        name = str(key)
+        found: int | None = None
+        for definition in self.features_for(character):
+            value = definition.parameters.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            if found is None or value < found:
+                found = value
+        return default if found is None else found
 
     def feature_views(
         self, character: Mapping[str, Any] | None,
@@ -505,6 +531,27 @@ class Dnd2024ClassFeatureResolver:
             granted.update(str(feature_id) for feature_id in row)
         return frozenset(granted)
 
+    def _subclass_feature_ids(self, class_id: str, level: int) -> frozenset[str]:
+        """Subclass features granted up to ``level`` by the representative subclass.
+
+        Ownership is derived from ``(class_id, level)`` only: the SRD bundle
+        guarantees exactly one representative subclass per class, and the
+        advancement chain forces that subclass at the level it is introduced.
+        Consequently a directly built sheet without ``features.subclass_ref``
+        owns the same features as one advanced through the real path.
+        """
+
+        if self.progression is None:
+            return frozenset()
+        subclass = self.progression.subclasses.get(str(class_id))
+        if not subclass:
+            return frozenset()
+        granted: set[str] = set()
+        for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
+            if 1 <= int(raw_level) <= level:
+                granted.update(str(feature_id) for feature_id in feature_ids)
+        return frozenset(granted)
+
     def _track_value(
         self,
         character: Mapping[str, Any] | None,
@@ -543,7 +590,24 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"class feature {definition.id} references an unknown class table"
                 )
+            subclass = progression_catalog.subclasses.get(definition.class_id)
+            if subclass is not None:
+                for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
+                    # 声明等级与子职表授予等级漂移即拒绝：不允许"声明 3 级、
+                    # 实际 7 级才给"的静默错位。
+                    if definition.id in feature_ids and int(raw_level) != definition.minimum_level:
+                        raise ClassFeatureError(
+                            f"{definition.id}.minimum_level must match its subclass grant level"
+                        )
             for key, value in definition.parameters.items():
+                if key == "crit_threshold":
+                    if (
+                        isinstance(value, bool) or not isinstance(value, int)
+                        or not 2 <= value <= 19
+                    ):
+                        raise ClassFeatureError(
+                            f"{definition.id}.{key} must be an integer from 2 to 19"
+                        )
                 if key.endswith("_format"):
                     if (
                         not isinstance(value, str)

@@ -25,6 +25,8 @@
       "fighter": "Fighter",
       "second_wind": "Second Wind",
       "action_surge": "Action Surge",
+      "improved_critical": "Improved Critical",
+      "superior_critical": "Superior Critical",
       "barbarian": "Barbarian",
       "rage": "Rage",
       "rage_sustain": "Sustain Rage",

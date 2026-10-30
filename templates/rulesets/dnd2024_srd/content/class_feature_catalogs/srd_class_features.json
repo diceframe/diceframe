@@ -23,6 +23,8 @@
     "fighter": "Fighter",
     "second_wind": "Second Wind",
     "action_surge": "Action Surge",
+    "improved_critical": "Improved Critical",
+    "superior_critical": "Superior Critical",
     "barbarian": "Barbarian",
     "rage": "Rage",
     "rage_sustain": "Sustain Rage",
@@ -172,6 +174,20 @@
               "actions": [{"kind": "action_surge", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "improved_critical",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p49:improved-critical",
+          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 19 or 20.",
+          "parameters": {"crit_threshold": 19}
+        },
+        {
+          "id": "superior_critical",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p49:superior-critical",
+          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 18-20.",
+          "parameters": {"crit_threshold": 18}
         }
       ]
     },
