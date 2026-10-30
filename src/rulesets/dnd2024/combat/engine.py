@@ -97,7 +97,13 @@ class Dnd2024CombatEngine(
         re-entered while raging, and Sustain Rage is meaningless outside it.
         """
 
-        views = super()._available_class_capabilities(
+        # ``Dnd2024CombatEngine`` is a ``@dataclass(slots=True)`` class.  The
+        # decorator creates a replacement class object, so a zero-argument
+        # ``super()`` here keeps the stale ``__class__`` cell and raises
+        # ``TypeError: super(type, obj)`` at runtime.  Call the owning mixin
+        # explicitly to keep this override valid for slotted dataclasses.
+        views = CombatViewMixin._available_class_capabilities(
+            self,
             actor, economy, include_unavailable=include_unavailable,
         )
         if not views:
