@@ -216,6 +216,9 @@ class CombatReactionSpellsMixin:
             events.extend(self._submit_hit_damage(damage_event))
             defender = self._actor_view(instance, combat, defender_id)
             events.extend(self._concentration_events(defender, amount, rng))
+            events.extend(self._enemy_defeated_feature_events(
+                instance, combat, str(decision["attacker_id"]), defender, amount,
+            ))
             return events
         if intent["option"] == "cast":
             defender = self._actor_view(instance, combat, defender_id)
@@ -266,6 +269,10 @@ class CombatReactionSpellsMixin:
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._concentration_events(defender, int(damage_event["amount"]), rng))
+        events.extend(self._enemy_defeated_feature_events(
+            instance, combat, str(decision["attacker_id"]), defender,
+            int(damage_event["amount"]),
+        ))
         return events
 
     def _counter_spell_window(

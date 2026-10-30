@@ -677,6 +677,7 @@ class Dnd2024ClassFeatureResolver:
                         f"{definition.id}.{key} names an unknown progression track: {value}"
                     )
             self._validate_passive_parameters(definition)
+            self._validate_defeat_trigger_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -732,4 +733,40 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id} must declare turn_start_regen_base and "
                 "turn_start_regen_ability as a pair"
+            )
+
+    @staticmethod
+    def _validate_defeat_trigger_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the defeat-trigger payload.
+
+        The payload is a closed set: the temp-HP ability code plus two optional
+        knobs (a class-level flag and a share radius).  A payload that declares
+        any of them without the ability would silently resolve to nothing, so it
+        is rejected at load time instead of becoming an inert feature.
+        """
+
+        parameters = definition.parameters
+        keys = (
+            "defeat_temp_hp_ability",
+            "defeat_temp_hp_add_class_level",
+            "defeat_share_range_ft",
+        )
+        if not any(key in parameters for key in keys):
+            return
+        ability = parameters.get("defeat_temp_hp_ability")
+        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_temp_hp_ability must name an ability"
+            )
+        flag = parameters.get("defeat_temp_hp_add_class_level")
+        if "defeat_temp_hp_add_class_level" in parameters and not isinstance(flag, bool):
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_temp_hp_add_class_level must be a boolean"
+            )
+        share = parameters.get("defeat_share_range_ft")
+        if "defeat_share_range_ft" in parameters and (
+            isinstance(share, bool) or not isinstance(share, int) or not 1 <= share <= 120
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
             )

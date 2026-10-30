@@ -31,7 +31,9 @@
     "rage_sustain": "Sustain Rage",
     "rogue": "Rogue",
     "sneak_attack": "Sneak Attack",
-    "uncanny_dodge": "Uncanny Dodge"
+    "uncanny_dodge": "Uncanny Dodge",
+    "warlock": "Warlock",
+    "dark_ones_blessing": "Dark One's Blessing"
   },
   "classes": {
     "monk": {
@@ -255,6 +257,22 @@
           "summary": "When an attacker that you can see hits you with an attack, you can use your Reaction to halve the attack's damage against you (rounded down).",
           "parameters": {
             "damage_multiplier": 0.5
+          }
+        }
+      ]
+    },
+    "warlock": {
+      "source_ref": "srd-5.2.1:p70:warlock-features",
+      "features": [
+        {
+          "id": "dark_ones_blessing",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p58:dark-ones-blessing",
+          "summary": "When you reduce an enemy to 0 HP, or someone else reduces your enemy to 0 HP within 10 feet of you, you gain temporary hit points equal to your Charisma modifier plus your Warlock level (minimum 1).",
+          "parameters": {
+            "defeat_temp_hp_ability": "cha",
+            "defeat_temp_hp_add_class_level": true,
+            "defeat_share_range_ft": 10
           }
         }
       ]

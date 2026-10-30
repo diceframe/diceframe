@@ -33,7 +33,9 @@
       "rage_sustain": "Sustain Rage",
       "rogue": "Rogue",
       "sneak_attack": "Sneak Attack",
-      "uncanny_dodge": "Uncanny Dodge"
+      "uncanny_dodge": "Uncanny Dodge",
+      "warlock": "Warlock",
+      "dark_ones_blessing": "Dark One's Blessing"
     }
   }
 }

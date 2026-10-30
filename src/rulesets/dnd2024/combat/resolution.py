@@ -358,6 +358,9 @@ class CombatResolutionMixin:
             else:
                 events.extend(self._submit_hit_damage(damage_event))
                 events.extend(self._concentration_events(target, damage, rng))
+                events.extend(self._enemy_defeated_feature_events(
+                    instance, combat, actor_id, target, damage,
+                ))
                 if self._last_hostile_defeated(combat, target, damage):
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
@@ -467,6 +470,9 @@ class CombatResolutionMixin:
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
                     events.extend(self._concentration_events(target, damage, rng))
+                    events.extend(self._enemy_defeated_feature_events(
+                        instance, combat, actor_id, target, damage,
+                    ))
                     if self._last_hostile_defeated(combat, target, damage):
                         defeated_targets.add(target_id)
                 consumed_events = self._consume_attack_conditions(
@@ -539,6 +545,9 @@ class CombatResolutionMixin:
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
                         events.extend(self._concentration_events(target, damage, rng))
+                        events.extend(self._enemy_defeated_feature_events(
+                            instance, combat, actor_id, target, damage,
+                        ))
                         if self._last_hostile_defeated(combat, target, damage):
                             defeated_targets.add(target_id)
             elif mode == "automatic_damage":
@@ -560,6 +569,9 @@ class CombatResolutionMixin:
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
                 events.extend(self._concentration_events(target, damage, rng))
+                events.extend(self._enemy_defeated_feature_events(
+                    instance, combat, actor_id, target, damage,
+                ))
                 if self._last_hostile_defeated(combat, target, damage):
                     defeated_targets.add(target_id)
                 succeeded = True
@@ -773,6 +785,69 @@ class CombatResolutionMixin:
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
+        return events
+
+    def _enemy_defeated_feature_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], damage: int,
+    ) -> list[dict[str, Any]]:
+        """Temp-HP grants from owned features that trigger on a defeated enemy.
+
+        Called at every damage landing point with the *final* damage (after
+        resistance, saves and riders), so the trigger agrees with the existing
+        defeat check.  Features opt in through the closed parameter set
+        ``defeat_temp_hp_ability`` / ``defeat_temp_hp_add_class_level`` /
+        ``defeat_share_range_ft``; the engine never branches on a feature name.
+
+        Path a: the holder is the attacker (no range limit).  Path b: someone
+        else defeated the enemy while the holder is within the declared share
+        radius.  One event per holder and settlement, keep-max handled by the
+        reducer.
+        """
+
+        if target.get("kind") != "enemy":
+            return []
+        hp = int(target.get("hp", 0) or 0)
+        dealt = int(damage)
+        if hp <= 0 or hp - dealt > 0:
+            return []
+        target_id = str(target["actor_id"])
+        events: list[dict[str, Any]] = []
+        for raw_actor_id in combat.get("initiative") or []:
+            actor_id = str(raw_actor_id)
+            kind, _raw = _actor_kind(actor_id)
+            if kind not in {"player", "companion"}:
+                continue
+            view = self._actor_view(instance, combat, actor_id)
+            character = self._feature_character(view)
+            state = self.features.class_state(character)
+            if state is None:
+                # 同伴残表没有职业，按"不拥有任何职业特性"处理。
+                continue
+            for definition in self.features.features_for(character):
+                ability = definition.parameters.get("defeat_temp_hp_ability")
+                if not isinstance(ability, str) or not ability:
+                    continue
+                share = definition.parameters.get("defeat_share_range_ft")
+                eligible = actor_id == attacker_id
+                if not eligible and isinstance(share, int) and not isinstance(share, bool):
+                    eligible = self._distance(combat, actor_id, target_id) <= share
+                if not eligible:
+                    continue
+                modifier = ability_modifier(
+                    int((view.get("abilities") or {}).get(ability, 10) or 10)
+                )
+                level = (
+                    state[1]
+                    if definition.parameters.get("defeat_temp_hp_add_class_level") is True
+                    else 0
+                )
+                events.append({
+                    "type": "resource.changed", "resource": "temp_hp",
+                    "target_id": actor_id, "amount": max(1, modifier + level),
+                    "feature_id": definition.id,
+                })
+                break
         return events
 
     @staticmethod
