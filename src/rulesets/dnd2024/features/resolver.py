@@ -15,6 +15,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -231,6 +232,54 @@ class Dnd2024ClassFeatureResolver:
             if found is None or value < found:
                 found = value
         return default if found is None else found
+
+    def max_feature_value_source(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+        default: int = 0,
+    ) -> tuple[int, str]:
+        """The largest numeric value of one parameter and the declaration it came from.
+
+        Turn-start regeneration needs both the amount and the declaration that
+        supplied it (the paired ability lives in the same definition).  Multiple
+        owned declarations resolve to the single largest base instead of
+        stacking, mirroring ``min_feature_value`` for the most generous
+        threshold.
+        """
+
+        name = str(key)
+        found: int | None = None
+        source_id = ""
+        for definition in self.features_for(character):
+            value = definition.parameters.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            if found is None or value > found:
+                found = value
+                source_id = definition.id
+        if found is None:
+            return int(default), ""
+        return found, source_id
+
+    def feature_flag_sources(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+    ) -> list[str]:
+        """Owned declaration ids whose boolean parameter ``key`` is truthy.
+
+        Advantage provenance is built straight from this list: the resolver
+        never names a feature, it only reports which declarations asked for the
+        flag.
+        """
+
+        name = str(key)
+        return [
+            definition.id
+            for definition in self.features_for(character)
+            if definition.parameters.get(name)
+        ]
 
     def feature_views(
         self, character: Mapping[str, Any] | None,
@@ -627,6 +676,7 @@ class Dnd2024ClassFeatureResolver:
                     raise ClassFeatureError(
                         f"{definition.id}.{key} names an unknown progression track: {value}"
                     )
+            self._validate_passive_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -636,3 +686,50 @@ class Dnd2024ClassFeatureResolver:
                         f"{definition.id} references an undeclared class resource: "
                         f"{definition.resource_id}"
                     )
+
+    @staticmethod
+    def _validate_passive_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on passive primitives a consumer would otherwise misread.
+
+        A declared advantage flag must be exactly ``True``: a ``False``/truthy
+        lookalike would silently change death-save dice with no way to tell
+        intent from typo.  The regeneration pair must appear together so the
+        amount and its ability never drift apart.
+        """
+
+        parameters = definition.parameters
+        if "death_save_advantage" in parameters and (
+            parameters["death_save_advantage"] is not True
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.death_save_advantage must be true when declared"
+            )
+        threshold = parameters.get("death_save_crit_threshold")
+        if "death_save_crit_threshold" in parameters and (
+            isinstance(threshold, bool) or not isinstance(threshold, int)
+            or not 2 <= threshold <= 19
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 19"
+            )
+        base = parameters.get("turn_start_regen_base")
+        if "turn_start_regen_base" in parameters and (
+            isinstance(base, bool) or not isinstance(base, int) or base < 0
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.turn_start_regen_base must be a non-negative integer"
+            )
+        ability = parameters.get("turn_start_regen_ability")
+        if "turn_start_regen_ability" in parameters and (
+            not isinstance(ability, str) or ability not in ABILITY_IDS
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.turn_start_regen_ability must name an ability"
+            )
+        if (
+            "turn_start_regen_base" in parameters
+        ) != ("turn_start_regen_ability" in parameters):
+            raise ClassFeatureError(
+                f"{definition.id} must declare turn_start_regen_base and "
+                "turn_start_regen_ability as a pair"
+            )

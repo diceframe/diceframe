@@ -1122,6 +1122,44 @@ class CombatResolutionMixin:
             "turn_index": next_index, "actor_id": next_actor,
             "previous_actor_id": order[previous_index],
             "economy": self._fresh_economy(next_view),
+        }, *self._turn_start_regen_events(next_view)]
+
+    def _turn_start_regen_events(
+        self, actor: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Turn-start regeneration for the actor whose turn just began.
+
+        Gated by the Bloodied rule (``1 <= hp <= max_hp // 2``): a downed,
+        dead, stable, full or merely wounded actor never ticks.  The amount is
+        fixed by the declaration (``base + ability modifier``), never rolled,
+        and multiple declarations take the single largest base instead of
+        stacking.  ``cannot_regain_hp`` blocks the healing with a zero-delta
+        event so the reducer stays purely mechanical.
+        """
+
+        hp = int(actor["hp"])
+        maximum = int(actor["max_hp"])
+        if hp < 1 or maximum <= 0 or hp > maximum // 2:
+            return []
+        character = self._feature_character(actor)
+        base, source_id = self.features.max_feature_value_source(
+            character, "turn_start_regen_base", 0,
+        )
+        if base <= 0:
+            return []
+        ability = str(
+            self.features.feature_value(character, source_id, "turn_start_regen_ability", "con")
+        )
+        amount = max(0, base + ability_modifier(int(character["abilities"].get(ability, 10) or 0)))
+        if amount <= 0:
+            return []
+        blocked = "cannot_regain_hp" in actor["conditions"]
+        return [{
+            "type": "resource.changed", "resource": "hp",
+            "target_id": actor["actor_id"],
+            "delta": 0 if blocked else amount, "amount": 0 if blocked else amount,
+            "healing": True, "feature_id": source_id,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
         }]
 
     def _death_save_events(
@@ -1129,11 +1167,18 @@ class CombatResolutionMixin:
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
         actor = self._actor_view(instance, combat, actor_id)
-        roll = int(rng.randint(1, 20))
+        character = self._feature_character(actor)
+        advantage_sources = self.features.feature_flag_sources(character, "death_save_advantage")
+        crit_threshold = int(self.features.min_feature_value(
+            character, "death_save_crit_threshold", 20,
+        ))
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if advantage_sources else None
+        roll = max(first, second) if second is not None else first
         successes = int(actor["death_saves"].get("successes", 0) or 0)
         failures = int(actor["death_saves"].get("failures", 0) or 0)
         hp = 0
-        if roll == 20:
+        if roll >= crit_threshold:
             hp = 1
             successes = failures = 0
         elif roll == 1:
@@ -1144,11 +1189,20 @@ class CombatResolutionMixin:
             failures += 1
         stable = successes >= 3
         dead = failures >= 3
+        check_event = {
+            "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
+            "rolls": [value for value in (first, second) if value is not None],
+            "natural": roll, "target": 10, "success": roll >= 10,
+        }
+        if advantage_sources:
+            check_event["advantage_mode"] = "advantage"
+            check_event["advantage_sources"] = [
+                {"code": source_id, "mode": "advantage"} for source_id in advantage_sources
+            ]
+        if crit_threshold != 20:
+            check_event["crit_threshold"] = crit_threshold
         return [
-            {
-                "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
-                "rolls": [roll], "natural": roll, "target": 10, "success": roll >= 10,
-            },
+            check_event,
             {
                 "type": "dnd2024.death_save.resolved", "actor_id": actor_id,
                 "roll": roll, "successes": min(successes, 3), "failures": min(failures, 3),
