@@ -68,9 +68,7 @@ def _ccv3_json() -> bytes:
     return json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
 
 
-def _ccv3_png() -> bytes:
-    """A real PNG carrying the card JSON in a ``chara`` tEXt chunk."""
-
+def _png_with_text_chunks(*chunks: tuple[bytes, bytes]) -> bytes:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return (
             struct.pack(">I", len(data)) + kind + data
@@ -78,8 +76,15 @@ def _ccv3_png() -> bytes:
         )
 
     ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    text = b"chara\x00" + json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"tEXt", text) + chunk(b"IEND", b"")
+    body = b"".join(chunk(kind, data) for kind, data in chunks)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + body + chunk(b"IEND", b"")
+
+
+def _ccv3_png() -> bytes:
+    """A real SillyTavern-style PNG: base64(JSON) in a ``chara`` tEXt chunk."""
+
+    payload = base64.b64encode(json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8"))
+    return _png_with_text_chunks((b"tEXt", b"chara\x00" + payload))
 
 
 @pytest.fixture()
@@ -151,6 +156,41 @@ def test_ccv3_png_import_commits_card_and_embedded_book(tmp_path, store):
     assert result["card"]["character_name"] == "Aster"
     assert result["lorebook"]["entries"] == 2
     assert len(store.list_book_entries(result["lorebook"]["book_id"])) == 2
+
+
+def test_raw_json_png_chunk_still_imports(tmp_path, store):
+    """旧版直接写原始 JSON（未 base64）的 PNG 仍然兼容。"""
+
+    raw_json = json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
+    png = _png_with_text_chunks((b"tEXt", b"chara\x00" + raw_json))
+
+    result = _import(tmp_path, store, png, "aster.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "Aster"
+
+
+def test_ccv3_keyword_wins_over_chara_and_ztxt_is_supported(tmp_path, store):
+    """V3 的 ``ccv3`` 关键字优先于 ``chara``，压缩的 zTXt chunk 也能读。"""
+
+    v2 = {"spec": "chara_card_v2", "data": {"name": "OldName"}}
+    v3_b64 = base64.b64encode(json.dumps(_ccv3_payload()).encode("utf-8"))
+    png = _png_with_text_chunks(
+        (b"tEXt", b"chara\x00" + base64.b64encode(json.dumps(v2).encode("utf-8"))),
+        (b"zTXt", b"ccv3\x00\x00" + zlib.compress(v3_b64)),
+    )
+
+    result = _import(tmp_path, store, png, "aster.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "Aster"
+
+
+def test_png_without_card_chunk_reports_missing(tmp_path, store):
+    result = _import(tmp_path, store, _png_with_text_chunks(), "empty.png", world_id="w1")
+
+    assert result["ok"] is False
+    assert "未找到角色卡数据" in result["error"]
 
 
 def test_include_character_book_false_imports_card_only(tmp_path, store):

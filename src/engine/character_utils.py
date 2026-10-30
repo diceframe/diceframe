@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import random
 import struct
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -928,8 +931,56 @@ def _parse_tavern_png(raw_data: bytes) -> dict | None:
     return _extract_tavern_fields(data) if data else None
 
 
+def _decode_card_text(payload: bytes) -> dict | None:
+    """酒馆 PNG 的 chunk 文本通常是 base64(JSON)；兼容直接写入原始 JSON 的卡。"""
+    text = payload.strip()
+    candidates = []
+    try:
+        candidates.append(base64.b64decode(text, validate=False))
+    except (binascii.Error, ValueError):
+        pass
+    candidates.append(text)
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _png_text_chunk(chunk_type: str, chunk_data: bytes) -> tuple[str, bytes] | None:
+    """解出 tEXt / zTXt / iTXt chunk 的 (keyword, 文本字节)；其它 chunk 返回 None。"""
+    null_pos = chunk_data.find(b"\x00")
+    if null_pos == -1:
+        return None
+    keyword = chunk_data[:null_pos].decode("latin-1").lower()
+    rest = chunk_data[null_pos + 1:]
+    if chunk_type == "tEXt":
+        return keyword, rest
+    if chunk_type == "zTXt":
+        # 1 字节压缩方法 + zlib 数据
+        return keyword, zlib.decompress(rest[1:])
+    if chunk_type == "iTXt":
+        # 压缩标志、压缩方法、语言标签\0、翻译关键字\0、文本
+        compressed = rest[0] == 1
+        rest = rest[2:]
+        for _ in range(2):
+            idx = rest.find(b"\x00")
+            if idx == -1:
+                return None
+            rest = rest[idx + 1:]
+        return keyword, zlib.decompress(rest) if compressed else rest
+    return None
+
+
 def _parse_tavern_png_document(raw_data: bytes) -> dict | None:
-    """Extract the raw Character Card JSON from a PNG without projecting fields away."""
+    """Extract the raw Character Card JSON from a PNG without projecting fields away.
+
+    V3 卡写在 ``ccv3`` 关键字下，V2 卡写在 ``chara`` 下；两者并存时优先 V3。
+    """
+    found: dict[str, dict] = {}
     try:
         # 跳过 8 字节 PNG 签名
         pos = 8
@@ -947,20 +998,21 @@ def _parse_tavern_png_document(raw_data: bytes) -> dict | None:
             pos += length + 4  # 数据 + CRC
             chunk_count += 1
 
-            if chunk_type == "tEXt":
-                null_pos = chunk_data.find(b'\x00')
-                if null_pos == -1:
+            if chunk_type in ("tEXt", "zTXt", "iTXt"):
+                try:
+                    entry = _png_text_chunk(chunk_type, chunk_data)
+                except (IndexError, zlib.error):
+                    logger.debug("酒馆 PNG 文本 chunk 解压失败", exc_info=True)
                     continue
-                keyword = chunk_data[:null_pos].decode("latin-1")
-                if keyword.lower() == "chara":
-                    text = chunk_data[null_pos + 1:].decode("utf-8", errors="replace")
-                    data = json.loads(text)
-                    return data if isinstance(data, dict) else None
+                if entry and entry[0] in ("ccv3", "chara") and entry[0] not in found:
+                    data = _decode_card_text(entry[1])
+                    if data is not None:
+                        found[entry[0]] = data
             elif chunk_type == "IEND":
                 break
-    except (IndexError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+    except (IndexError, TypeError, ValueError):
         logger.debug("酒馆 PNG 角色元数据解析失败", exc_info=True)
-    return None
+    return found.get("ccv3") or found.get("chara")
 
 
 def _extract_tavern_fields(data: dict) -> dict:
