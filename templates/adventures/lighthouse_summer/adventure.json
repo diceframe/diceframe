@@ -64,7 +64,7 @@
           "choice_id": "confess",
           "choice_label": "说出那句话",
           "conditions": [
-            {"type": "affection.score", "id": "林晚晴", "value": 40}
+            {"type": "affection.score", "id": "npc:lin_wanqing", "value": 40}
           ]
         },
         {"to": "n_quiet_end", "choice_id": "stay_friends", "choice_label": "仍做朋友"},
@@ -99,7 +99,7 @@
   "world_seed": {
     "entities": [
       {
-        "entity_id": "lin_wanqing",
+        "entity_id": "npc:lin_wanqing",
         "kind": "npc",
         "visibility": "public",
         "source_ref": "adventure:lighthouse_summer"
@@ -109,7 +109,7 @@
       {
         "relation_id": "protagonist_wanqing",
         "kind": "member_of",
-        "from_ref": "lin_wanqing",
+        "from_ref": "npc:lin_wanqing",
         "to_ref": "party"
       }
     ],

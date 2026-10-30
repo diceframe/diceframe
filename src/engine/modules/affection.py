@@ -1,11 +1,10 @@
 """Affection: how a character feels about the party (persisted module slot).
 
 One bounded integer score per subject, from ``MIN_SCORE`` to ``MAX_SCORE``.
-A subject is the key a character is known by in this run: an ``instance.npcs``
-key (narrator NPCs are keyed by display name, so any script is allowed) or a
-world entity id.  The score is the
-attitude toward the party / protagonist; per-seat attitudes would be a new
-slot schema, never guessed from this one.
+New NPC records use a stable ``npc:...``/world entity id; narrator-facing
+display names remain accepted as proposal aliases for older saves and scripts.
+The score is the attitude toward the party / protagonist; per-seat attitudes
+would be a new slot schema, never guessed from this one.
 
 This module owns only the authoritative numbers and their invariants (range,
 subject key shape, subject count).  Balance (tiers, per-round caps, decay) is
@@ -38,6 +37,7 @@ MAX_SUBJECTS = 64
 MAX_SUBJECT_CHARS = 80
 LOG_FIELD = "pre_affection"
 _BEFORE_ROUND = "_before_round"
+_CANONICAL_PREFIXES = ("npc:", "entity:", "world:")
 
 
 def fresh() -> dict[str, Any]:
@@ -100,9 +100,61 @@ def score(instance: Any, subject: str) -> int | None:
     Callers deciding a branch (gates) must treat ``None`` as "no evidence".
     """
     try:
-        return get_module_state(instance, MODULE_NAME)["scores"].get(str(subject or ""))
+        resolved = resolve_subject(instance, subject) or str(subject or "")
+        return get_module_state(instance, MODULE_NAME)["scores"].get(resolved)
     except ModuleStateError:
         return None
+
+
+def resolve_subject(instance: Any, subject: Any) -> str | None:
+    """Resolve an NPC proposal/gate subject to its stable run identity.
+
+    New NPC records may carry ``npc_id``/``entity_id`` while older records are
+    still keyed by the narrator-facing display name.  Keep the legacy fallback
+    so old saves remain readable, but prefer the explicit canonical ID whenever
+    one is present.  A display name is therefore only an input alias, never the
+    identity of a newly canonicalized record.
+    """
+
+    text = str(subject or "").strip()
+    if not text:
+        return None
+    npcs = getattr(instance, "npcs", None)
+    if not isinstance(npcs, dict):
+        return None
+    for key, raw in npcs.items():
+        record = raw if isinstance(raw, dict) else {}
+        aliases = {
+            str(key),
+            str(record.get("name") or ""),
+            str(record.get("character_name") or ""),
+        }
+        canonical = (
+            record.get("affection_id")
+            or record.get("npc_id")
+            or record.get("world_entity_id")
+            or record.get("entity_id")
+            or (key if str(key).startswith(_CANONICAL_PREFIXES) else None)
+        )
+        canonical_text = str(canonical or "").strip()
+        if canonical_text and not canonical_text.startswith(_CANONICAL_PREFIXES):
+            canonical_text = f"npc:{canonical_text}"
+        if text in aliases or text == canonical_text:
+            return canonical_text or text
+    return None
+
+
+def display_subject(instance: Any, subject: str) -> str:
+    """Return the current localized display name for a canonical subject."""
+
+    npcs = getattr(instance, "npcs", None)
+    if isinstance(npcs, dict):
+        for key, raw in npcs.items():
+            record = raw if isinstance(raw, dict) else {}
+            canonical = resolve_subject(instance, key)
+            if canonical == subject:
+                return str(record.get("name") or record.get("character_name") or key)
+    return subject
 
 
 def adjust(instance: Any, subject: str, delta: int) -> int:

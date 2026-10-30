@@ -24,7 +24,8 @@ from src.webui.services import adventure_runtime
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES_ADVENTURES = ROOT / "templates" / "adventures"
 ADVENTURE_ID = "core:lighthouse_summer"
-HEROINE = "林晚晴"
+HEROINE_ID = "npc:lin_wanqing"
+HEROINE_NAMES = {"zh-CN": "林晚晴", "en": "Lin Wanqing"}
 
 
 def _sample_graph() -> dict:
@@ -42,21 +43,26 @@ def _runtime_deps():
     return resolver, _deps(resolver)
 
 
-def make_gal_instance(resolver) -> GameInstance:
+def make_gal_instance(resolver, locale: str = "zh-CN") -> GameInstance:
     from src.engine.modules import game_config
 
     instance = GameInstance(
         game_key=("web", "gal-sample", "bot"),
         world_id="horizon_strait", rule_id="gal_narrative",
-        language="zh-CN", gm_uid="gm",
+        language=locale, gm_uid="gm",
     )
-    binding = resolver.resolve_with_source(ADVENTURE_ID, "zh-CN").binding("horizon_strait")
+    binding = resolver.resolve_with_source(ADVENTURE_ID, locale).binding("horizon_strait")
     assert instance.bind_adventure(binding) is True
     # 创建流语义（P7）：gal 玩法安装 scene 推进；gal_narrative 皮启用
     # affection（P3）与自动确认（P6）由规则声明，无需在此重复设置。
     game_config.replace_solo_mode(instance, True)
     progression_state.set_mode(instance, progression_state.SCENE)
-    instance.npcs[HEROINE] = {"name": HEROINE, "character_name": HEROINE}
+    display_name = HEROINE_NAMES[locale]
+    instance.npcs[HEROINE_ID] = {
+        "npc_id": HEROINE_ID,
+        "name": display_name,
+        "character_name": display_name,
+    }
     return instance
 
 
@@ -72,7 +78,7 @@ def test_sample_package_loads_in_both_locales(locale):
     decision = next(node for node in graph["nodes"] if node["id"] == "n_confession")
     assert decision["choice_mode"] == "exclusive"
     confess = next(t for t in decision["transitions"] if t["choice_id"] == "confess")
-    assert {"type": "affection.score", "id": HEROINE, "value": 40} in confess["conditions"]
+    assert {"type": "affection.score", "id": HEROINE_ID, "value": 40} in confess["conditions"]
     assert {t["choice_id"] for t in decision["transitions"]} == {
         "confess", "stay_friends", "drift_apart",
     }
@@ -84,7 +90,7 @@ def test_sample_world_ships_the_heroine_lorebook():
     data = json.loads((ROOT / "templates" / "worlds" / "horizon_strait.json").read_text(encoding="utf-8"))
     assert data["world_id"] == "horizon_strait"
     entries = {entry["name"] for entry in data["starter_lorebook"]}
-    assert HEROINE in entries
+    assert HEROINE_NAMES["zh-CN"] in entries
 
 
 # ---- 全链端到端 ---------------------------------------------------------------
@@ -96,15 +102,17 @@ def _gal_rule():
 
 def _settle_affection(instance, total: str) -> None:
     rule = _gal_rule()
+    display_name = instance.npcs[HEROINE_ID]["name"]
     applied = settle_affection(instance, [
-        {"subject": HEROINE, "delta": total, "reason": "样板测试结算"},
+        {"subject": display_name, "delta": total, "reason": "样板测试结算"},
     ], rule.affection)
     assert applied, "affection settlement must apply on the gal skin"
 
 
-def test_full_gal_chain_high_affection_reaches_the_warm_ending():
+@pytest.mark.parametrize("locale", ["zh-CN", "en"])
+def test_full_gal_chain_high_affection_reaches_the_warm_ending(locale):
     resolver, runtime_deps = _runtime_deps()
-    instance = make_gal_instance(resolver)
+    instance = make_gal_instance(resolver, locale)
     adventure_runtime.initialize_adventure_run(runtime_deps, instance)
     progress = adventure_runtime_state.progress(instance)
     assert progress["active_nodes"] == ["n_arrival"]  # world_seed 已物化
@@ -114,7 +122,7 @@ def test_full_gal_chain_high_affection_reaches_the_warm_ending():
         _settle_affection(instance, "+5")
     from src.engine.modules import affection
 
-    assert affection.score(instance, HEROINE) == 50
+    assert affection.score(instance, HEROINE_ID) == 50
 
     # P4/P6：权威完成事务推进主线；n_festival 完成时按好感门评估后继。
     for node_id in ("n_arrival", "n_lighthouse"):
@@ -173,5 +181,5 @@ def test_affection_gate_fails_closed_without_a_score():
 
     resolver, _ = _runtime_deps()
     instance = make_gal_instance(resolver)  # 未做任何好感结算
-    gate = [{"type": "affection.score", "id": HEROINE, "value": 40}]
+    gate = [{"type": "affection.score", "id": HEROINE_ID, "value": 40}]
     assert gates_satisfied(gate, instance=instance, progress={}, rules_evaluator=None) is False

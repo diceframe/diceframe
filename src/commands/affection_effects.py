@@ -52,17 +52,18 @@ def settle_affection(instance: Any, proposals: Any, config: AffectionConfig | No
         if not isinstance(proposal, dict):
             continue
         subject = str(proposal.get("subject") or "").strip()
+        canonical_subject = affection.resolve_subject(instance, subject)
         delta = _delta(proposal.get("delta"))
-        if subject not in instance.npcs or delta is None:
+        if canonical_subject is None or delta is None:
             logger.warning(
                 "忽略好感提议：subject=%r delta=%r round=%d",
                 subject, proposal.get("delta"), round_number,
             )
             continue
-        if subject not in totals and len(totals) >= MAX_SUBJECTS_PER_ROUND:
+        if canonical_subject not in totals and len(totals) >= MAX_SUBJECTS_PER_ROUND:
             logger.warning("忽略好感提议：本轮对象过多 subject=%r round=%d", subject, round_number)
             continue
-        totals[subject] = totals.get(subject, 0) + delta
+        totals[canonical_subject] = totals.get(canonical_subject, 0) + delta
     cap = config.max_delta_per_round
     applied: list[dict[str, Any]] = []
     for subject, total in totals.items():
@@ -75,7 +76,11 @@ def settle_affection(instance: Any, proposals: Any, config: AffectionConfig | No
             logger.warning("好感结算失败 subject=%r round=%d", subject, round_number, exc_info=True)
             continue
         if change:
-            applied.append({"subject": subject, "delta": change, "score": affection.score(instance, subject)})
+            applied.append({
+                "subject": affection.display_subject(instance, subject),
+                "delta": change,
+                "score": affection.score(instance, subject),
+            })
     return applied
 
 
@@ -87,7 +92,10 @@ def affection_prompt_appendix(instance: Any, config: AffectionConfig | None, lan
         scores = affection.scores(instance)
     except ModuleStateError:
         return ""
-    listed = "; ".join(f"{subject}: {score}" for subject, score in scores.items())
+    listed = "; ".join(
+        f"{affection.display_subject(instance, subject)}: {score}"
+        for subject, score in scores.items()
+    )
     cap = config.max_delta_per_round
     lo, hi = affection.MIN_SCORE, affection.MAX_SCORE
     return localized_text(language, {
