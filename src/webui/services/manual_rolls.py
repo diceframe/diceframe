@@ -1,5 +1,6 @@
 """GM initiated, independent dice requests."""
 from __future__ import annotations
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
@@ -21,6 +22,16 @@ class ManualRollService:
     def __init__(self, deps: ManualRollDependencies): self.d = deps
     def _inst(self, key): return self.d.get_instance(self.d.parse_game_key(key))
     def _rule(self, inst): return self.d.load_rule(inst) if self.d.load_rule else None
+    @staticmethod
+    @asynccontextmanager
+    async def _mutation_lock(inst):
+        """Serialize resolution and cancellation for live GameInstance state."""
+        lock = getattr(inst, "_lock", None)
+        if lock is None:
+            yield
+            return
+        async with lock:
+            yield
     @staticmethod
     def _visible(req, uid, gm_uid=""):
         return manual_roll_visible_to(req, viewer_uid=uid, viewer_is_gm=bool(uid) and uid == gm_uid)
@@ -84,36 +95,42 @@ class ManualRollService:
     async def resolve(self,key,uid,rid,body):
         inst=self._inst(key)
         if not inst: return {"ok":False,"error":"游戏不存在"}
-        req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
-        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
-        target=str(body.get("target_uid") or uid)
-        if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":"无权投掷"}
-        if target in req["results"]: return {"ok":True,"result":req["results"][target],"idempotent":True}
-        session_stats.require_writable(inst)
-        checks.require_writable(inst)
-        result=roll(req["formula"]); value={"formula":result.formula,"rolls":result.rolls,"modifier":result.modifier,"total":result.total,"natural":result.natural,"rolled_by":uid,"rolled_at":_now()}
-        if req.get("purpose") == "check" and req.get("target") is not None:
-            value["target"] = int(req["target"])
-            value["comparison"] = str(req.get("comparison") or "at_least")
-            value["verdict"] = "success" if (
-                value["total"] >= value["target"]
-                if value["comparison"] == "at_least" else value["total"] <= value["target"]
-            ) else "failure"
-        req["results"][target]=value
-        if all(u in req["results"] for u in req["target_uids"]):
-            if req.get("purpose") == "contest":
-                totals = {u: int(item.get("total", 0)) for u, item in req["results"].items()}
-                best = max(totals.values()) if totals else 0
-                winners = {u for u, total in totals.items() if total == best}
-                for target_uid, item in req["results"].items():
-                    item["verdict"] = "winner" if target_uid in winners else "loss"
-            req["status"]="resolved"
-        session_stats.touch(inst); await self.d.save_instance(inst); return {"ok":True,"result":value,"request":req}
+        async with self._mutation_lock(inst):
+            req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
+            if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
+            target=str(body.get("target_uid") or uid)
+            if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":"无权投掷"}
+            if req.get("status") == "cancelled": return {"ok":False,"error":"请求已取消"}
+            if target in req["results"]: return {"ok":True,"result":req["results"][target],"idempotent":True}
+            if req.get("status") not in {None, "pending"}:
+                return {"ok":False,"error":"请求已结束"}
+            session_stats.require_writable(inst)
+            checks.require_writable(inst)
+            result=roll(req["formula"]); value={"formula":result.formula,"rolls":result.rolls,"modifier":result.modifier,"total":result.total,"natural":result.natural,"rolled_by":uid,"rolled_at":_now()}
+            if req.get("purpose") == "check" and req.get("target") is not None:
+                value["target"] = int(req["target"])
+                value["comparison"] = str(req.get("comparison") or "at_least")
+                value["verdict"] = "success" if (
+                    value["total"] >= value["target"]
+                    if value["comparison"] == "at_least" else value["total"] <= value["target"]
+                ) else "failure"
+            req["results"][target]=value
+            if all(u in req["results"] for u in req["target_uids"]):
+                if req.get("purpose") == "contest":
+                    totals = {u: int(item.get("total", 0)) for u, item in req["results"].items()}
+                    best = max(totals.values()) if totals else 0
+                    winners = {u for u, total in totals.items() if total == best}
+                    for target_uid, item in req["results"].items():
+                        item["verdict"] = "winner" if target_uid in winners else "loss"
+                req["status"]="resolved"
+            session_stats.touch(inst); await self.d.save_instance(inst); return {"ok":True,"result":value,"request":req}
     async def cancel(self,key,uid,rid,body):
         inst=self._inst(key)
         if not inst or uid!=getattr(inst,"gm_uid",None): return {"ok":False,"error":"GM only"}
-        req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
-        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
-        session_stats.require_writable(inst)
-        checks.require_writable(inst)
-        req["status"]="cancelled"; req["cancel_reason"]=str(body.get("reason") or "")[:200]; session_stats.touch(inst); await self.d.save_instance(inst); return {"ok":True,"request":req}
+        async with self._mutation_lock(inst):
+            req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
+            if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
+            if req.get("status") != "pending": return {"ok":False,"error":"请求已结束"}
+            session_stats.require_writable(inst)
+            checks.require_writable(inst)
+            req["status"]="cancelled"; req["cancel_reason"]=str(body.get("reason") or "")[:200]; session_stats.touch(inst); await self.d.save_instance(inst); return {"ok":True,"request":req}

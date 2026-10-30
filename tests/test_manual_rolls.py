@@ -201,6 +201,53 @@ def _resolved_free(**overrides):
     return req
 
 
+def test_cancel_only_allows_pending_requests():
+    request = _resolved_check()
+    instance = _context_instance([request])
+    service = _make_service(instance, [])
+    result = asyncio.run(service.cancel(
+        "game", "gm", request["id"], {"run_id": "run-1"},
+    ))
+    assert result["ok"] is False
+    assert request["status"] == "resolved"
+
+
+def test_resolve_and_cancel_are_serialized():
+    request = _resolved_check(status="pending", results={}, target_uids=["p1"])
+    instance = _context_instance([request])
+    instance._lock = asyncio.Lock()
+    entered_save = asyncio.Event()
+    release_save = asyncio.Event()
+
+    async def save(_value):
+        entered_save.set()
+        await release_save.wait()
+
+    service = ManualRollService(
+        ManualRollDependencies(lambda _: ("g",), lambda _: instance, save),
+    )
+
+    async def scenario():
+        resolving = asyncio.create_task(service.resolve(
+            "game", "p1", request["id"], {"run_id": "run-1", "target_uid": "p1"},
+        ))
+        await entered_save.wait()
+        cancelling = asyncio.create_task(service.cancel(
+            "game", "gm", request["id"], {"run_id": "run-1"},
+        ))
+        await asyncio.sleep(0)
+        assert not cancelling.done()
+        release_save.set()
+        resolved = await resolving
+        cancelled = await cancelling
+        assert resolved["ok"] is True
+        assert cancelled["ok"] is False
+        assert request["status"] == "resolved"
+        assert "p1" in request["results"]
+
+    asyncio.run(scenario())
+
+
 def _context_instance(requests, run_id="run-1", language="zh-CN"):
     instance = SimpleNamespace(
         modules={},
