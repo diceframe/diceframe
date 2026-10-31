@@ -248,3 +248,107 @@ def test_projection_drops_stale_personal_voice_binding():
     row3 = {"voice_profile": "zh-CN-XiaoxiaoNeural"}
     _project_npc_bindings(row3, deps)
     assert row3["voice_profile"] == "zh-CN-XiaoxiaoNeural"
+
+
+@pytest.mark.asyncio
+async def test_npc_standing_portrait_partial_updates_preserve_other_field(web_api):
+    """Same contract as the player sheet: an omitted field is left unchanged."""
+
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    game_key, inst = await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+
+    assert (await api.update_npc_standing_portrait(
+        game_key, "heroine", ref, {"smile": ref},
+    ))["ok"] is True
+    assert (await api.update_npc_standing_portrait(game_key, "heroine", ref))["ok"] is True
+    assert inst.npcs["heroine"]["standing_portrait_expressions"] == {"smile": ref}
+    assert (await api.update_npc_standing_portrait(
+        game_key, "heroine", expressions={"sad": ref},
+    ))["ok"] is True
+    assert inst.npcs["heroine"]["standing_portrait"] == ref
+    assert inst.npcs["heroine"]["standing_portrait_expressions"] == {"sad": ref}
+
+    # Explicit None clears only the named field; an empty request changes nothing.
+    assert (await api.update_npc_standing_portrait(game_key, "heroine", None))["ok"] is True
+    assert "standing_portrait" not in inst.npcs["heroine"]
+    assert inst.npcs["heroine"]["standing_portrait_expressions"] == {"sad": ref}
+    assert (await api.update_npc_standing_portrait(game_key, "heroine"))["ok"] is False
+    assert inst.npcs["heroine"]["standing_portrait_expressions"] == {"sad": ref}
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_a_round_snapshot_can_restore_it(web_api):
+    from src.engine.modules import round_safety
+
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    game_key, inst = await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    assert (await api.update_npc_standing_portrait(game_key, "heroine", ref))["ok"] is True
+    inst.capture_round_entity_snapshot()
+    assert (await api.update_npc_standing_portrait(game_key, "heroine", None))["ok"] is True
+
+    # A failed round restores the snapshot, and with it the NPC's portrait.
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]
+
+    round_safety.clear_snapshots(inst)
+    assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_an_unloaded_save_mentions_it(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    # A save startup recovery could not load (e.g. written by a newer runtime).
+    orphan = registry.save_dir / "web#unloadable#bot"
+    orphan.mkdir(parents=True)
+    (orphan / "state.json").write_text(
+        '{"schema_version": 999, "npcs": {"x": {"standing_portrait": '
+        f'{{"kind": "upload", "asset_id": "{ref["asset_id"]}"}}}}}}}}',
+        encoding="utf-8",
+    )
+
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]
+
+    (orphan / "state.json").write_text('{"schema_version": 999, "npcs": {}}', encoding="utf-8")
+    assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_an_old_round_beyond_the_save_window_mentions_it(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    _game_key, inst = await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    # Only the first of 150 rounds still carries the reference; the save
+    # encodes the recent rounds only, but a swipe can restore that one.
+    inst.log[:] = [
+        {"round": index + 1, "gm_response": "…", "actions": []} for index in range(150)
+    ]
+    inst.log[0]["pre_state_snapshot"] = {"npcs": {"heroine": {"standing_portrait": ref}}}
+
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]
+
+    inst.log[0].pop("pre_state_snapshot")
+    assert api.delete_standing_portrait(ref["asset_id"])["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_standing_portrait_kept_while_an_unloaded_chat_log_mentions_it(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    await _game_with_npc(api, registry)
+    ref = api.save_standing_portrait_upload(_portrait_b64())["standing_portrait"]
+    orphan = registry.save_dir / "web#unloadable#bot"
+    orphan.mkdir(parents=True)
+    (orphan / "state.json").write_text('{"schema_version": 999, "npcs": {}}', encoding="utf-8")
+    (orphan / "chatlog.jsonl").write_text(
+        '{"round": 1, "pre_state_snapshot": {"npcs": {"x": {"standing_portrait": '
+        f'{{"kind": "upload", "asset_id": "{ref["asset_id"]}"}}}}}}}}}}\n',
+        encoding="utf-8",
+    )
+
+    blocked = api.delete_standing_portrait(ref["asset_id"])
+    assert blocked["ok"] is False and "角色引用" in blocked["error"]

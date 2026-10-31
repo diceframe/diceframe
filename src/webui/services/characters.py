@@ -1156,14 +1156,21 @@ async def _update_npc_portrait_authority(
     return {"ok": True, "portrait": npc.get("portrait")}
 
 
+# Marks an NPC standing-portrait field the request did not carry.
+UNCHANGED: Any = object()
+
+
 async def update_npc_standing_portrait(
     dependencies: CharacterDependencies,
     game_key: str,
     npc_id: str,
-    standing_portrait: Any,
-    expressions: Any = None,
+    standing_portrait: Any = UNCHANGED,
+    expressions: Any = UNCHANGED,
 ) -> dict[str, Any]:
-    """GAL P8：设置 NPC 的立绘主图与表情差分集（一次事务，全有或全无）。"""
+    """GAL P8：设置 NPC 的立绘主图与表情差分集（一次事务，全有或全无）。
+
+    与玩家角色卡同一语义：未提供的字段保持不变，显式 ``None`` 清除该字段。
+    """
 
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
@@ -1180,23 +1187,32 @@ async def update_npc_standing_portrait(
         if resolved is None:
             return {"ok": False, "error": "NPC 不存在"}
         _npc_key, npc = resolved
+        portrait_present = standing_portrait is not UNCHANGED
+        expressions_present = expressions is not UNCHANGED
+        if not portrait_present and not expressions_present:
+            return {"ok": False, "error": "未提供立绘字段"}
         try:
-            normalized = _validated_standing_portrait(
-                dependencies.assets, standing_portrait,
+            # Validate every supplied field before mutating either one.
+            normalized = (
+                _validated_standing_portrait(dependencies.assets, standing_portrait)
+                if portrait_present else None
             )
-            normalized_expressions = _validated_standing_portrait_expressions(
-                dependencies.assets, expressions,
+            normalized_expressions = (
+                _validated_standing_portrait_expressions(dependencies.assets, expressions)
+                if expressions_present else None
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-        if normalized is None:
-            npc.pop("standing_portrait", None)
-        else:
-            npc["standing_portrait"] = normalized
-        if normalized_expressions is None:
-            npc.pop("standing_portrait_expressions", None)
-        else:
-            npc["standing_portrait_expressions"] = normalized_expressions
+        if portrait_present:
+            if normalized is None:
+                npc.pop("standing_portrait", None)
+            else:
+                npc["standing_portrait"] = normalized
+        if expressions_present:
+            if normalized_expressions is None:
+                npc.pop("standing_portrait_expressions", None)
+            else:
+                npc["standing_portrait_expressions"] = normalized_expressions
         await dependencies.games.save_instance(inst)
         return {
             "ok": True,

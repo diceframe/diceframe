@@ -321,11 +321,18 @@ async def api_npc_standing_portrait_update(request: web.Request) -> web.Response
     if request.get("user_id", "") != inst.gm_uid:
         return web.json_response({"error": "仅 GM 可修改 NPC 立绘"}, status=403)
     body = await request.json()
-    result = await api.update_npc_standing_portrait(
-        gk, npc_id,
-        body.get("standing_portrait"),
-        body.get("standing_portrait_expressions"),
-    )
+    if not isinstance(body, dict):
+        return web.json_response({"error": "请求体必须是对象"}, status=400)
+    # A field missing from the body is left unchanged; null clears it.
+    fields = {
+        name: body[key]
+        for key, name in (
+            ("standing_portrait", "standing_portrait"),
+            ("standing_portrait_expressions", "expressions"),
+        )
+        if key in body
+    }
+    result = await api.update_npc_standing_portrait(gk, npc_id, **fields)
     status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200
     return web.json_response(result, status=status)
 

@@ -2529,7 +2529,8 @@ class WebAPI:
 
     async def update_npc_standing_portrait(
         self, game_key: str, npc_id: str,
-        standing_portrait: Any, expressions: Any = None,
+        standing_portrait: Any = characters.UNCHANGED,
+        expressions: Any = characters.UNCHANGED,
     ) -> dict[str, Any]:
         return await characters.update_npc_standing_portrait(
             self._character_dependencies, game_key, npc_id,
@@ -2765,15 +2766,46 @@ class WebAPI:
                 return any(contains(item) for item in value)
             return False
 
-        for instance in self._reg.list_all():
-            if contains(getattr(instance, "players", {})) or contains(getattr(instance, "npcs", {})):
-                return True
+        registered_dirs = set()
         try:
+            for instance in self._reg.list_all():
+                registered_dirs.add(self._reg.save_package_state_path(instance.game_key).parent)
+                # The whole aggregate, not only players / npcs: round snapshots
+                # keep deep copies of NPCs that a rollback restores.  The save
+                # encodes only the recent log, but every loaded round can still
+                # be swiped, so the full in-memory log is scanned too.
+                if contains(instance.to_dict()) or contains(list(instance.log)):
+                    return True
+            if self._unregistered_save_mentions(asset_id, registered_dirs):
+                return True
             cards = character_cards._read_cards(self._character_card_dependencies, strict=True)
         except Exception:
             # A failed reference scan must not make a referenced asset deletable.
+            logger.exception("立绘引用扫描失败，拒绝删除: %s", asset_id)
             return True
         return contains(cards)
+
+    def _unregistered_save_mentions(self, asset_id: str, registered_dirs: set[Path]) -> bool:
+        """True when a save the registry did not load may reference ``asset_id``.
+
+        Startup recovery registers every loadable save, so what remains here is
+        a save that failed to load (corrupt, or written by a newer runtime).
+        Its schema cannot be trusted, so match the raw text: asset ids are
+        random hex, and a false match only keeps an asset that could be deleted.
+        Unreadable files raise and the caller refuses the deletion.
+        """
+
+        save_dir = self._reg.save_dir
+        if not save_dir.exists():
+            return False
+        for entry in save_dir.iterdir():
+            if not entry.is_dir() or entry in registered_dirs:
+                continue
+            for name in ("state.json", "state.backup.json", "chatlog.jsonl"):
+                state = entry / name
+                if state.is_file() and asset_id in state.read_text(encoding="utf-8", errors="replace"):
+                    return True
+        return False
 
     def _voice_profile_exists(self, voice_id: str) -> bool:
         """True when the personal voice profile still exists (GAL P8)."""
