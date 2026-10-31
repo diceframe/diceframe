@@ -71,7 +71,9 @@ def test_unknown_or_mixed_split_cannot_partially_convert_input(mutation):
     assert source == before
 
 
-@pytest.mark.parametrize("invalid", ["timeout", "dice", "policy", "future-narration", "future-checks"])
+@pytest.mark.parametrize("invalid", [
+    "timeout", "dice", "policy", "future-narration", "future-checks", "perspective", "password",
+])
 def test_session_configuration_preflights_all_fields_before_writing_kernel_values(invalid):
     from src.engine.game_instance import GameInstance
     instance = GameInstance(game_key=("web", "atomic-config", "bot"))
@@ -82,6 +84,10 @@ def test_session_configuration_preflights_all_fields_before_writing_kernel_value
         kwargs["dice_reveal_mode"] = "unknown"
     elif invalid == "policy":
         kwargs["economy_reward_policy"] = {"mode": "unknown"}
+    elif invalid == "perspective":
+        kwargs["narrative_perspective"] = "bogus"
+    elif invalid == "password":
+        kwargs["room_password"] = "short"
     elif invalid == "future-narration":
         instance.modules["narration_preferences"] = {"schema_version": 99, "opaque": [1]}
         kwargs["narrative_perspective"] = "third_person"

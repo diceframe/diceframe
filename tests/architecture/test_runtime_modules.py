@@ -732,6 +732,8 @@ TABLE_SETTINGS_REPLACE_CALLERS = {
     MODULES / "check_presentation.py",
     MODULES / "economy_state.py",
     SRC / "engine" / "game_instance.py",
+    # Session/game configuration writes extracted from the aggregate (#593).
+    SRC / "engine" / "game_configuration.py",
     SRC / "engine" / "instance_lifecycle.py",
     SRC / "commands" / "game_lifecycle.py",
 }

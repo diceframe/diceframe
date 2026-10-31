@@ -234,6 +234,25 @@ def commit_ai_player_action_locked(
 
     The aggregate remains the lock/authority owner and the public facade keeps
     the injectable ``GameInstance`` seams used by existing callers and tests.
+
+    The LLM call deliberately happens *outside* every lock; the danger is that
+    the world moves between "the model answered" and "we write the answer".
+    So the re-confirmation and the write are one boundary: every identity the
+    caller captured (run, round, seat, control mode, control revision, phase)
+    is re-checked, then that the **human gate is still open** and that this
+    round has no action from ``source`` yet, and only then the action lands.
+
+    The human gate matters on its own: a hosted seat only ever acts *after*
+    the humans are done. If somebody claims another seat (or a player returns
+    from away) while this result was in flight, the table suddenly has an
+    active human who has not submitted yet, and an action written now would
+    break "AI acts after the humans" — so it is discarded instead.
+
+    Returns ``""`` on commit, otherwise the reason the result was dropped
+    (``run_changed`` / ``round_changed`` / ``seat_removed`` /
+    ``control_changed`` / ``phase_changed`` / ``human_gate_changed`` /
+    ``duplicate`` / ``STRUCTURED_INTENT_REQUIRED`` / ``action_rejected``).
+    Callers must treat a non-empty result as "write nothing".
     """
     stale = instance.ai_player_action_stale_reason(
         user_id,
@@ -491,6 +510,7 @@ def apply_away_transition_locked(
     if handover:
         begin_away_hosting_fn(instance, user_id)
     elif not away:
+        # 只在席位确实是「临时托管」时归还；GM 永久交给 AI 的席位不会被抢回。
         end_away_hosting_fn(instance, user_id)
     return ""
 
