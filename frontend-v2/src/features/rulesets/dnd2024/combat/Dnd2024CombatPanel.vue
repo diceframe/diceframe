@@ -21,6 +21,7 @@ import type {
   CharacterClassResource,
   JsonObject,
   RulesetCombatAction,
+  RulesetCombatReactionFeature,
   RulesetCombatSpell,
   RulesetCombatTarget,
   RulesetCombatWeapon,
@@ -949,6 +950,9 @@ const reactionSlot = ref(0)
 const reactionSpells = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
   ? (pendingDecision.value.spells as RulesetCombatSpell[] | undefined) || []
   : [])
+const reactionFeatures = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
+  ? (pendingDecision.value.features as RulesetCombatReactionFeature[] | undefined) || []
+  : [])
 const reactionSpell = computed(() => (
   reactionSpells.value.find(item => item.spell_ref === reactionSpellRef.value) || reactionSpells.value[0] || null
 ))
@@ -1361,6 +1365,12 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <button v-if="reactionSpell" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'cast', { spell_ref: reactionSpell.spell_ref, slot_level: reactionSlot })">
                 {{ spellText.castReaction(reactionSpell.name, Number(reactionSpell.armor_class_bonus || 0), Number(pendingDecision.attack_total) < Number(pendingDecision.armor_class) + Number(reactionSpell.armor_class_bonus || 0)) }}
               </button>
+              <button
+                v-for="feature in reactionFeatures"
+                :key="feature.feature_id"
+                :disabled="busy"
+                @click="decide(pendingDecision, 'feature', { feature_id: feature.feature_id })"
+              >{{ spellText.useReactionFeature(feature.name, Number(feature.damage_multiplier)) }}</button>
               <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ spellText.declineReaction }}</button>
             </div>
           </template>

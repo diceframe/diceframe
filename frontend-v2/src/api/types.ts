@@ -1201,6 +1201,13 @@ export interface RulesetCombatSpell extends JsonObject {
   trigger_target_id?: string
 }
 
+export interface RulesetCombatReactionFeature extends JsonObject {
+  feature_id: string
+  name: string
+  mode: string
+  damage_multiplier?: number
+}
+
 export interface RulesetPendingDecision extends JsonObject {
   decision_id: string
   kind: string

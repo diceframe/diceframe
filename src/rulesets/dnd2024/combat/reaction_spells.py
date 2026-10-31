@@ -44,6 +44,8 @@ class CombatReactionSpellsMixin:
             return []
         if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
             return []
+        if "rage" in defender["conditions"]:
+            return []
         choices = []
         for ref in defender["spell_refs"]:
             spell = self.spells.get(ref)
@@ -64,6 +66,50 @@ class CombatReactionSpellsMixin:
                 })
         return choices
 
+    def _reaction_feature_choices(
+        self, combat: dict[str, Any], defender: dict[str, Any],
+        attacker: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Class features the defender may spend their reaction on when hit.
+
+        The reaction budget and the "already reacted" guards are the same ones
+        the reaction-spell path uses: both consume ``combat["reactions"]``, so a
+        character can never react twice in the same round through two paths.
+        Ownership comes from the feature boundary (class level), never from a
+        localized name.
+
+        Uncanny Dodge must see the attack, so a blinded defender or an
+        invisible attacker removes the choice.  ``attacker`` is optional:
+        callers without an attacker view keep the unrestricted behaviour.
+        """
+
+        if defender["kind"] not in {"player", "companion"} or defender["hp"] <= 0:
+            return []
+        if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
+            return []
+        if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
+            return []
+        if "blinded" in defender["conditions"]:
+            return []
+        if attacker is not None and "invisible" in (attacker.get("conditions") or {}):
+            return []
+        character = self._feature_character(defender)
+        if not self.features.has_feature(character, "uncanny_dodge"):
+            return []
+        multiplier = self.features.feature_value(character, "uncanny_dodge", "damage_multiplier", 0)
+        if (
+            isinstance(multiplier, bool)
+            or not isinstance(multiplier, (int, float))
+            or not 0 < float(multiplier) < 1
+        ):
+            return []
+        return [{
+            "feature_id": "uncanny_dodge",
+            "name": self.features.catalog.label("uncanny_dodge", "Uncanny Dodge"),
+            "mode": "reaction_defense",
+            "damage_multiplier": float(multiplier),
+        }]
+
     def _hit_reaction_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
         defender: dict[str, Any], check: dict[str, Any], damage_event: dict[str, Any],
@@ -71,8 +117,9 @@ class CombatReactionSpellsMixin:
     ) -> dict[str, Any] | None:
         if attacker.get("side") == defender.get("side"):
             return None
-        choices = self._reaction_spell_choices(combat, defender)
-        if not choices:
+        spells = self._reaction_spell_choices(combat, defender)
+        features = self._reaction_feature_choices(combat, defender, attacker)
+        if not spells and not features:
             return None
         kind, raw_id = actor_kind(defender["actor_id"])
         human = kind == "player" and not is_ai_controlled(instance, raw_id)
@@ -83,14 +130,15 @@ class CombatReactionSpellsMixin:
             "actor_id": defender["actor_id"],
             "attacker_id": attacker["actor_id"],
             "assigned_to": raw_id if human else str(getattr(instance, "gm_uid", "") or ""),
-            "options": ["cast", "decline"],
+            "options": [*(["cast"] if spells else []), *(["feature"] if features else []), "decline"],
             "attack_total": int(check["total"]),
             "armor_class": int(check["target"]),
             "critical": bool(check["critical"]),
             "damage_event": deepcopy(damage_event),
-            "spells": choices,
+            "spells": spells,
+            "features": features,
             # A hit-triggered spell (for example Divine Smite) is offered only
-            # after the defender has had the Shield reaction opportunity.
+            # after the defender has had the reaction opportunity.
             "next_decision": deepcopy(next_decision) if next_decision else None,
         }
 
@@ -98,21 +146,34 @@ class CombatReactionSpellsMixin:
         self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
         intent: dict[str, Any],
     ) -> None:
-        if intent.get("option") != "cast":
+        option = intent.get("option")
+        if option not in {"cast", "feature"}:
             return
         defender = self._actor_view(instance, combat, str(decision["actor_id"]))
+        if option == "cast":
+            choice = next(
+                (
+                    row for row in self._reaction_spell_choices(combat, defender)
+                    if row["spell_ref"] == intent.get("spell_ref")
+                ),
+                None,
+            )
+            if choice is None:
+                raise CombatIntentError("this reaction spell is not available")
+            slot_level = intent.get("slot_level", choice["available_slot_levels"][0])
+            if isinstance(slot_level, bool) or slot_level not in choice["available_slot_levels"]:
+                raise CombatIntentError("the selected spell slot is not available")
+            return
+        attacker = self._actor_view(instance, combat, str(decision["attacker_id"]))
         choice = next(
             (
-                row for row in self._reaction_spell_choices(combat, defender)
-                if row["spell_ref"] == intent.get("spell_ref")
+                row for row in self._reaction_feature_choices(combat, defender, attacker)
+                if row["feature_id"] == intent.get("feature_id")
             ),
             None,
         )
         if choice is None:
-            raise CombatIntentError("this reaction spell is not available")
-        slot_level = intent.get("slot_level", choice["available_slot_levels"][0])
-        if isinstance(slot_level, bool) or slot_level not in choice["available_slot_levels"]:
-            raise CombatIntentError("the selected spell slot is not available")
+            raise CombatIntentError("this reaction feature is not available")
 
     def _finish_hit_reaction(
         self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
@@ -124,6 +185,34 @@ class CombatReactionSpellsMixin:
             "option": intent["option"],
         }]
         armor_class = int(decision["armor_class"])
+        if intent["option"] == "feature":
+            choice = next(
+                row for row in decision["features"]
+                if row["feature_id"] == str(intent["feature_id"])
+            )
+            events.append({
+                "type": "dnd2024.reaction.spent", "actor_id": defender_id,
+                "reason": "reaction_feature",
+            })
+            damage_event = deepcopy(decision["damage_event"])
+            amount = int(int(damage_event["amount"]) * float(choice["damage_multiplier"]))
+            next_decision = decision.get("next_decision")
+            if isinstance(next_decision, dict):
+                next_decision = deepcopy(next_decision)
+                held = next_decision.get("damage_event")
+                if isinstance(held, dict):
+                    # 后续命中触发法术（如至圣斩）持有同一份基础伤害；
+                    # 减半必须发生在它被结算之前，否则半伤会丢失。
+                    held["amount"] = amount
+                    held["delta"] = -amount
+                events.append({"type": "dnd2024.decision.pending", **next_decision})
+                return events
+            damage_event["amount"] = amount
+            damage_event["delta"] = -amount
+            events.extend(self._submit_hit_damage(damage_event))
+            defender = self._actor_view(instance, combat, defender_id)
+            events.extend(self._concentration_events(defender, amount, rng))
+            return events
         if intent["option"] == "cast":
             defender = self._actor_view(instance, combat, defender_id)
             spell_ref = str(intent["spell_ref"])
@@ -164,8 +253,10 @@ class CombatReactionSpellsMixin:
         if isinstance(next_decision, dict):
             events.append({"type": "dnd2024.decision.pending", **deepcopy(next_decision)})
             return events
+        # Shield 没有改变结果（或只是被放弃）：命中成立，最终提交基础伤害，
+        # 连同延迟记录的特性使用。
         damage_event = deepcopy(decision["damage_event"])
-        events.append(damage_event)
+        events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._concentration_events(defender, int(damage_event["amount"]), rng))
         return events
@@ -183,16 +274,20 @@ class CombatReactionSpellsMixin:
             "submitted_by": str(getattr(instance, "gm_uid", "") or ""),
             "decision_id": str(decision["decision_id"]),
         }
-        # 只有加 AC 能让这次攻击落空时才代为施放，避免白白消耗法术位。
+        # 只有加 AC 能让这次攻击落空时才代为施放，避免白白消耗法术位；
+        # 否则有减伤特性就代为使用（不花法术位），都没有才放弃。
         useful = [
             row for row in decision.get("spells") or []
             if not decision.get("critical")
             and int(decision["attack_total"]) < int(decision["armor_class"]) + int(row["armor_class_bonus"])
         ]
-        if not useful:
-            return {**base, "option": "decline"}
-        choice = useful[0]
-        return {
-            **base, "option": "cast", "spell_ref": choice["spell_ref"],
-            "slot_level": choice["available_slot_levels"][0],
-        }
+        if useful:
+            choice = useful[0]
+            return {
+                **base, "option": "cast", "spell_ref": choice["spell_ref"],
+                "slot_level": choice["available_slot_levels"][0],
+            }
+        features = decision.get("features") or []
+        if features and int((decision.get("damage_event") or {}).get("amount", 0) or 0) > 0:
+            return {**base, "option": "feature", "feature_id": features[0]["feature_id"]}
+        return {**base, "option": "decline"}

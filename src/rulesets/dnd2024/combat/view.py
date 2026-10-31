@@ -266,6 +266,8 @@ class CombatViewMixin:
                 reason = "not_automated"
             elif not is_current:
                 reason = "not_your_turn"
+            elif "rage" in actor["conditions"]:
+                reason = "raging"
             elif effect["mode"] == "reaction_defense":
                 reason = "requires_being_hit"
             elif effect["mode"] == "triggered_damage" and not trigger:
@@ -379,6 +381,9 @@ class CombatViewMixin:
         trigger: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if actor["kind"] not in {"player", "companion"}:
+            return []
+        if "rage" in actor["conditions"]:
+            # 狂暴期间不能施法（SRD 5.2.1 Rage: No Concentration or Spells）。
             return []
         result = []
         for ref in actor["spell_refs"]:

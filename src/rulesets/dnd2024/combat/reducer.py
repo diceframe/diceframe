@@ -10,6 +10,15 @@ from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
 
 
+# 只有行动经济池可以被特性追加；其余 economy 字段（actor_id/speed/...）不是资源。
+_GRANTABLE_ECONOMY = frozenset({
+    "action", "bonus_action", "reaction", "movement", "surge_action",
+})
+# economy.granted 的 flags 是引擎内部记账（如 action_surge_used 的「每回合
+# 一次」），不是向 economy 任意写字段的通道；未知 flag fail closed。
+_GRANTABLE_FLAGS = frozenset({"action_surge_used"})
+
+
 class CombatReducerMixin:
     """Apply validated events to a detached authoritative snapshot."""
 
@@ -86,6 +95,7 @@ class CombatReducerMixin:
                 "economy": deepcopy(event["economy"]),
                 "pending_decisions": [], "position_mode": event["position_mode"],
                 "reactions": deepcopy(event["reactions"]),
+                "feature_usage": {},
                 "encounter_instance_id": str(event.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(event.get("encounter_preset_id") or ""),
                 "origin_step_id": str(event.get("origin_step_id") or ""),
@@ -104,6 +114,15 @@ class CombatReducerMixin:
             combat["status"] = "ended"
             combat["outcome"] = str(event.get("reason") or "ended")
             combat["economy"] = {}
+            # 狂暴靠每回合攻击或附赠动作续期；战斗结束后没有回合可续，
+            # 狂暴随之结束，不能带进下一场战斗。
+            for character in snapshot["characters"].values():
+                (character.get("conditions") or {}).pop("rage", None)
+            companions = (state.get("party") or {}).get("companions") or {}
+            for companion in companions.values():
+                canonical = companion.get("ruleset_character") if isinstance(companion, dict) else None
+                if isinstance(canonical, dict):
+                    (canonical.get("conditions") or {}).pop("rage", None)
             encounter_id = str(combat.get("encounter_instance_id") or "")
             if encounter_id:
                 history = state.setdefault("combat_history", [])
@@ -126,6 +145,51 @@ class CombatReducerMixin:
             if current < amount:
                 raise EventBatchError(f"combat resource is already spent: {resource}")
             combat["economy"][resource] = current - amount
+            return
+        if event_type == "dnd2024.economy.granted":
+            economy = combat["economy"]
+            if str(event["actor_id"]) != str(economy.get("actor_id") or ""):
+                raise EventBatchError("economy grants belong to the current actor")
+            grants = event.get("grants") or {}
+            flags = event.get("flags") or {}
+            if not isinstance(grants, dict) or not isinstance(flags, dict):
+                raise EventBatchError("economy grant payload is invalid")
+            for key, amount in grants.items():
+                if str(key) not in _GRANTABLE_ECONOMY:
+                    raise EventBatchError(f"economy grant key is unknown: {key}")
+                if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+                    raise EventBatchError("economy grant amount is invalid")
+                economy[str(key)] = int(economy.get(str(key), 0) or 0) + amount
+            for key, value in flags.items():
+                if str(key) not in _GRANTABLE_FLAGS:
+                    raise EventBatchError(f"economy grant flag is unknown: {key}")
+                economy[str(key)] = value
+            return
+        if event_type == "dnd2024.feature.used":
+            # 「每回合一次」按真实攻击者 + 具体回合（round + turn_index）记账。
+            # 借机攻击发生在别人的回合，因此不能读当前行动者的 economy。
+            actor_id = str(event["actor_id"])
+            round_index = int(event["round"])
+            turn_index = int(event["turn_index"])
+            feature_id = str(event["feature_id"])
+            usage = combat.setdefault("feature_usage", {})
+            if not isinstance(usage, dict):
+                raise EventBatchError("feature usage ledger is invalid")
+            record = usage.get(actor_id)
+            if (
+                not isinstance(record, dict)
+                or int(record.get("round", -1)) != round_index
+                or int(record.get("turn_index", -1)) != turn_index
+            ):
+                usage[actor_id] = {
+                    "round": round_index, "turn_index": turn_index,
+                    "feature_ids": [feature_id],
+                }
+                return
+            feature_ids = record.setdefault("feature_ids", [])
+            if feature_id in feature_ids:
+                raise EventBatchError(f"feature is already used this turn: {feature_id}")
+            feature_ids.append(feature_id)
             return
         if event_type == "dnd2024.class_resource.spent":
             # 职业资源永远写在既有的 canonical resources.class 结构里，
@@ -153,11 +217,14 @@ class CombatReducerMixin:
             economy = combat["economy"]
             if int(economy.get("attacks_remaining", 0) or 0) > 0:
                 economy["attacks_remaining"] -= 1
-            elif int(economy.get("action", 0) or 0) > 0:
-                economy["action"] -= 1
-                economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             else:
-                raise EventBatchError("Attack action is already spent")
+                # 支付选择由 resolution 的单一入口决定：普通 action 先用完，
+                # 只有它耗尽时 Action Surge 的 surge_action 才支付攻击。
+                resource = str(event.get("resource") or "action")
+                if int(economy.get(resource, 0) or 0) < 1:
+                    raise EventBatchError("Attack action is already spent")
+                economy[resource] -= 1
+                economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             return
         if event_type == "dnd2024.movement.granted":
             combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + int(
@@ -196,6 +263,13 @@ class CombatReducerMixin:
             self._conditions(snapshot, combat, str(event["target_id"])).pop(
                 str(event["condition"]), None
             )
+            return
+        if event_type == "dnd2024.condition.sustained":
+            conditions = self._conditions(snapshot, combat, str(event["target_id"]))
+            condition_id = str(event["condition"])
+            if condition_id not in conditions:
+                raise EventBatchError("sustained condition is not active")
+            conditions[condition_id]["sustained_this_turn"] = True
             return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
@@ -313,6 +387,8 @@ class CombatReducerMixin:
             conditions = character.setdefault("conditions", {})
             if resources["hp"] <= 0:
                 conditions["unconscious"] = {"source": "zero_hp"}
+                # 昏迷即失能：狂暴立即结束。
+                conditions.pop("rage", None)
                 death = conditions.setdefault("death_saves", {"successes": 0, "failures": 0})
                 if before == 0 and delta < 0:
                     death["failures"] = min(

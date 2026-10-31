@@ -14,7 +14,10 @@ from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.character.reconciliation import merge_live_character_projection
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    CombatCapabilityView,
+    Dnd2024ClassFeatureResolver,
+)
 from src.rulesets.dnd2024.play.contracts import EncounterAccess
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
@@ -22,6 +25,7 @@ from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch
 
 from .primitives import (
     INTENT_TYPES,
+    RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -82,6 +86,48 @@ class Dnd2024CombatEngine(
         if not isinstance(state.get("combat_history"), list):
             raise CombatIntentError("combat_history must be an array")
         return state
+
+    def _available_class_capabilities(
+        self, actor: dict[str, Any], economy: dict[str, Any],
+        *, include_unavailable: bool = False,
+    ) -> tuple[CombatCapabilityView, ...]:
+        """Feature capabilities with the actor's live conditions applied.
+
+        A capability that requires a condition the actor does not hold, or that
+        forbids one the actor currently holds, is never offered: Rage cannot be
+        re-entered while raging, and Sustain Rage is meaningless outside it.
+        """
+
+        # slots=True rebuilds the class, so zero-argument super() fails on
+        # Python < 3.14 (the __class__ cell still points at the old class).
+        views = super(Dnd2024CombatEngine, self)._available_class_capabilities(
+            actor, economy, include_unavailable=include_unavailable,
+        )
+        if not views:
+            return views
+        character = self._feature_character(actor)
+        conditions = actor.get("conditions") or {}
+        usable: list[CombatCapabilityView] = []
+        for view in views:
+            capability = self.features.declared_capability(character, view.id)
+            if capability is None:
+                continue
+            if (
+                capability.requires_condition
+                and capability.requires_condition not in conditions
+            ):
+                continue
+            if (
+                capability.forbidden_condition
+                and capability.forbidden_condition in conditions
+            ):
+                continue
+            if capability.once_per_turn and economy.get(f"{capability.id}_used"):
+                # 同一回合第二次使用：与被 requires/forbidden_condition 过滤
+                # 的能力同等处理——不出现在可用列表，伪造请求也走同一条拒绝。
+                continue
+            usable.append(view)
+        return tuple(usable)
 
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
         state = self.initialize_state(instance)
@@ -176,7 +222,7 @@ class Dnd2024CombatEngine(
         actions: list[dict[str, Any]] = []
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
-        ) > 0:
+        ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
             weapons = self._available_attacks(actor)
             if weapons:
                 actions.append({
@@ -308,9 +354,11 @@ class Dnd2024CombatEngine(
             str(target["actor_id"]),
         ))
         economy = combat.get("economy") or {}
-        can_act = int(economy.get("action", 0) or 0) > 0 or int(
-            economy.get("attacks_remaining", 0) or 0
-        ) > 0
+        can_act = (
+            int(economy.get("action", 0) or 0) > 0
+            or int(economy.get("attacks_remaining", 0) or 0) > 0
+            or int(economy.get("surge_action", 0) or 0) > 0
+        )
         if can_act and targets:
             target = targets[0]
             distance = self._distance(combat, actor_id, str(target["actor_id"]))
@@ -405,6 +453,7 @@ class Dnd2024CombatEngine(
         can_act = (
             int(economy.get("action", 0) or 0) > 0
             or int(economy.get("attacks_remaining", 0) or 0) > 0
+            or int(economy.get("surge_action", 0) or 0) > 0
         )
         allies = [
             target for target in self._all_targets(instance, combat)
@@ -985,9 +1034,9 @@ class Dnd2024CombatEngine(
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any],
     ) -> dict[str, Any]:
-        del combat
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
+            "resource": self._spend_action_resource(combat),
             "attacks_per_action": self._attacks_per_action(actor),
         }
 
@@ -1130,6 +1179,37 @@ class Dnd2024CombatEngine(
                         target_conditions.pop(condition_id, None)
                     else:
                         value["turns_remaining"] = remaining - 1
+        if previous_actor_id:
+            # Rage 的回合级生命周期。规则保证狂暴"持续至你的下个回合结束"：
+            # 进入回合结束时只把状态标记为已确立（第一轮无条件存续，本回合
+            # 是否攻击或延长都不影响）；从下个回合结束起，未续期即结束，
+            # 续期则消耗剩余轮数，归零即结束。昏迷则无条件结束。
+            previous_conditions = self._conditions(snapshot, combat, previous_actor_id)
+            rage = previous_conditions.get("rage")
+            if isinstance(rage, dict):
+                # 失能即结束狂暴：unconscious / incapacitated 以及所有
+                # 蕴含失能的条件（paralyzed / stunned / petrified）。
+                if any(
+                    condition in previous_conditions
+                    for condition in (
+                        "unconscious", "incapacitated", "paralyzed", "stunned", "petrified",
+                    )
+                ):
+                    previous_conditions.pop("rage", None)
+                elif not rage.get("established"):
+                    rage["established"] = True
+                    rage["sustained_this_turn"] = False
+                elif rage.get("sustained_this_turn"):
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
+                    if remaining <= 0:
+                        previous_conditions.pop("rage", None)
+                    else:
+                        rage["turns_remaining"] = remaining
+                        rage["sustained_this_turn"] = False
+                else:
+                    previous_conditions.pop("rage", None)
 
     @staticmethod
     def _last_hostile_defeated(

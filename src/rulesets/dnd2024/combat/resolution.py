@@ -16,6 +16,7 @@ from .action_adapter import (
 )
 from .primitives import (
     CombatIntentError,
+    RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
     canonical as _canonical,
@@ -103,6 +104,7 @@ class CombatResolutionMixin:
         target_id = str(intent["target_id"])
         actor = self._actor_view(instance, combat, actor_id)
         target = self._actor_view(instance, combat, target_id)
+        ability = ""
         if actor["kind"] in {"player", "companion"}:
             # Companion 是"己方角色"：武器与徒手攻击走玩家同一套目录/能力确定性链，
             # 不走 enemy attack profile。
@@ -115,8 +117,7 @@ class CombatResolutionMixin:
             # "在远处使用" 不等于 "这是远程武器"。属性选择只应被前者（真远程武器）
             # 排除，否则武僧把长矛/手斧扔出去就会被强制成 DEX。
             is_ranged_weapon = bool(weapon.get("ranged"))
-            ranged_use = is_ranged_weapon or distance > 5
-            ability = "dex" if ranged_use else "str"
+            ability = "dex" if is_ranged_weapon else "str"
             if weapon.get("finesse"):
                 ability = max(("str", "dex"), key=lambda key: ability_modifier(actor["abilities"][key]))
             # 职业特性投影出来的属性选择（武艺：徒手打击与 Monk Weapon 都可以改用
@@ -179,27 +180,73 @@ class CombatResolutionMixin:
             "total": total, "target": target_ac, "success": hit, "critical": critical,
         }
         events.append(check_event)
+        if (
+            target["kind"] == "enemy" and "rage" in actor["conditions"]
+            and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
+        ):
+            # 2024 狂暴：在你的回合对敌人进行一次攻击检定即延长一轮，
+            # 命中与否都算；借机攻击发生在别人的回合，不延长狂暴。
+            events.append({
+                "type": "dnd2024.condition.sustained", "target_id": actor_id,
+                "condition": "rage",
+            })
         if hit:
-            # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化）
-            # → 属性修正；重击翻倍仍由本层在 AST 上显式表达。
-            extra_dice = None
+            # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化、
+            # 偷袭，按调用方顺序）→ 属性修正；重击翻倍仍由本层在 AST 上显式表达。
+            extra_dice: list[str] = []
             if "hexed" in target["conditions"] and target["conditions"]["hexed"].get(
                 "source_actor_id"
             ) == actor_id:
-                extra_dice = "1d6"
+                extra_dice.append("1d6")
+            sneak_dice = self._sneak_attack_dice(
+                instance, combat, actor, target, weapon, check_mode,
+            )
+            if sneak_dice:
+                extra_dice.append(sneak_dice)
             damage_node = attack_damage_node(
                 damage_formula=damage_formula,
                 modifier=modifier,
                 critical=critical,
-                extra_dice_formula=extra_dice,
+                extra_dice_formulas=extra_dice,
             )
+            if ability == "str" and "rage" in actor["conditions"]:
+                # 狂暴加值只在力量攻击命中时附加到伤害，不影响攻击加值。
+                rage_damage = int(self.features.feature_value(
+                    self._feature_character(actor), "rage", "rage_damage", 0,
+                ) or 0)
+                if rage_damage:
+                    damage_node = {"op": "add", "args": [
+                        damage_node, {"op": "constant", "value": rage_damage},
+                    ]}
             damage, rolls = roll_damage_node(damage_node, rng)
             damage = max(0, damage)
+            resistance = None
+            if (
+                "rage" in target["conditions"]
+                and str(damage_type) in ("bludgeoning", "piercing", "slashing")
+            ):
+                # 2024 狂暴：承受的钝击/穿刺/挥砍伤害减半，
+                # 取整方式与反应减半（damage_multiplier）一致：向下取整。
+                halved = int(damage * 0.5)
+                if halved != damage:
+                    resistance = "rage"
+                    damage = halved
             damage_event = {
                 "type": "resource.changed", "resource": "hp", "target_id": target_id,
                 "delta": -damage, "amount": damage, "damage_type": damage_type,
                 "critical": critical, "rolls": rolls,
             }
+            if resistance:
+                damage_event["resistance"] = resistance
+            if sneak_dice:
+                # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
+                # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
+                damage_event["feature_use"] = {
+                    "actor_id": actor_id,
+                    "feature_id": "sneak_attack",
+                    "round": int(combat.get("round", 0)),
+                    "turn_index": int(combat.get("turn_index", 0)),
+                }
             offer = self._hit_spell_offer(instance, combat, actor, weapon, target_id, damage_event, intent)
             reaction = self._hit_reaction_offer(
                 instance, combat, actor, target, check_event, damage_event, intent,
@@ -208,7 +255,7 @@ class CombatResolutionMixin:
             if reaction or offer:
                 events.append({"type": "dnd2024.decision.pending", **(reaction or offer)})
             else:
-                events.append(damage_event)
+                events.extend(self._submit_hit_damage(damage_event))
                 events.extend(self._concentration_events(target, damage, rng))
                 if self._last_hostile_defeated(combat, target, damage):
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
@@ -291,17 +338,28 @@ class CombatResolutionMixin:
                 events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
             elif mode == "saving_throw":
                 save_ability = str(effect["save"])
-                roll = int(rng.randint(1, 20))
+                # 2024 狂暴：力量豁免具有优势（双骰取高），其它属性仍为单骰。
+                rage_advantage = "rage" in target["conditions"] and save_ability == "str"
+                first = int(rng.randint(1, 20))
+                second = int(rng.randint(1, 20)) if rage_advantage else None
+                roll = max(first, second) if second is not None else first
                 bless = int(rng.randint(1, 4)) if "blessed" in target["conditions"] else 0
                 modifier = int(target["saving_throws"].get(save_ability, 0) or 0)
                 total = roll + modifier + bless
                 succeeded = total >= int(actor["spell_save_dc"])
-                events.append({
+                check_event = {
                     "type": "check.resolved", "kind": "saving_throw", "actor_id": target_id,
-                    "source_actor_id": actor_id, "ability": save_ability, "rolls": [roll],
+                    "source_actor_id": actor_id, "ability": save_ability,
+                    "rolls": [value for value in (first, second) if value is not None],
                     "natural": roll, "modifier": modifier, "bless_bonus": bless, "total": total,
                     "target": actor["spell_save_dc"], "success": succeeded,
-                })
+                }
+                if rage_advantage:
+                    check_event["advantage_mode"] = "advantage"
+                    check_event["advantage_sources"] = [
+                        {"code": "rage", "mode": "advantage"},
+                    ]
+                events.append(check_event)
                 if effect.get("damage"):
                     damage_node = spell_formula_node(
                         str(effect["damage"]), effect.get("upcast_damage"),
@@ -402,6 +460,15 @@ class CombatResolutionMixin:
             if self._distance(combat, actor_id, target["actor_id"]) <= 5
             and self._distance_after_move(combat, actor_id, target["actor_id"], distance) > 5
             and int(combat.get("reactions", {}).get(target["actor_id"], 0)) > 0
+            # 借机攻击必须是近战武器攻击：远程武器的持有者不构成威胁，
+            # 也不应为一次无法结算的借机攻击消耗其反应。敌方档案与玩家
+            # 装备链都携带 range，缺失 range 的档案按近战处理。
+            and any(
+                int(attack.get("range") or 0) <= 5
+                for attack in self._available_attacks(
+                    self._actor_view(instance, combat, target["actor_id"])
+                )
+            )
         ]
         actor = self._actor_view(instance, combat, actor_id)
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
@@ -421,6 +488,127 @@ class CombatResolutionMixin:
         }]
 
     @staticmethod
+    def _submit_hit_damage(damage_event: dict[str, Any]) -> list[dict[str, Any]]:
+        """Commit a final hit's damage, then any deferred feature use.
+
+        Hit damage is rolled once and held while the defender decides on
+        Shield/Uncanny Dodge or the attacker decides on a hit-triggered spell.
+        Only the paths that actually land the damage call this helper, so a
+        reaction that turns the hit into a miss never records a feature use.
+        The internal ``feature_use`` metadata never reaches the wire shape of
+        ``resource.changed``.
+        """
+
+        event = deepcopy(damage_event)
+        feature_use = event.pop("feature_use", None)
+        events: list[dict[str, Any]] = [event]
+        if isinstance(feature_use, dict):
+            events.append({"type": "dnd2024.feature.used", **feature_use})
+        return events
+
+    @staticmethod
+    def _feature_used_this_turn(
+        combat: dict[str, Any], actor_id: str, feature_id: str,
+    ) -> bool:
+        """Whether ``actor_id`` already used ``feature_id`` in this exact turn.
+
+        The ledger is keyed by the actor who made the attack and by
+        ``round`` + ``turn_index`` of the turn it happened in.  It is deliberately
+        not the current economy: an opportunity attack is made on someone
+        else's turn, and the same actor may use a once-per-turn feature again
+        there.
+        """
+
+        usage = combat.get("feature_usage")
+        record = usage.get(actor_id) if isinstance(usage, dict) else None
+        if not isinstance(record, dict):
+            return False
+        if int(record.get("round", -1)) != int(combat.get("round", 0)):
+            return False
+        if int(record.get("turn_index", -1)) != int(combat.get("turn_index", 0)):
+            return False
+        return str(feature_id) in {str(item) for item in record.get("feature_ids") or []}
+
+    def _qualifying_sneak_ally(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any],
+    ) -> bool:
+        """An ally of the attacker within 5 feet of the target, able to help.
+
+        Every clause is rule text: the ally must be the *attacker's* ally, must
+        be alive and not Incapacitated (paralyzed/petrified/stunned/unconscious
+        all imply it), and the distance checked is ally-to-target.
+        """
+
+        actor_side = str(actor.get("side") or "")
+        target_id = str(target["actor_id"])
+        for row in self._all_targets(instance, combat):
+            ally_id = str(row["actor_id"])
+            if ally_id == actor["actor_id"] or str(row.get("side") or "") != actor_side:
+                continue
+            if int(row.get("hp", 0) or 0) <= 0:
+                continue
+            ally = self._actor_view(instance, combat, ally_id)
+            conditions = ally.get("conditions") or {}
+            if any(
+                code in conditions for code in (
+                    "defeated", "dead", "incapacitated", "paralyzed", "petrified",
+                    "stunned", "unconscious",
+                )
+            ):
+                continue
+            if self._distance(combat, ally_id, target_id) <= 5:
+                return True
+        return False
+
+    def _sneak_attack_dice(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], weapon: dict[str, Any], check_mode: dict[str, Any],
+    ) -> str | None:
+        """The Sneak Attack dice this hit may add, or ``None``.
+
+        Ownership, once-per-turn, weapon property, and the advantage/ally
+        predicate are checked in that order.  A rogue who owns the feature but
+        whose table value cannot be read fails closed instead of silently
+        dealing no extra damage.
+        """
+
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "sneak_attack"):
+            return None
+        if self._feature_used_this_turn(combat, str(actor["actor_id"]), "sneak_attack"):
+            return None
+        # 武器属性来自目录的 finesse / ranged；投掷一把非灵巧近战武器
+        # 不会让它变成远程武器。
+        if not (weapon.get("finesse") or weapon.get("ranged")):
+            return None
+        if check_mode["mode"] != "advantage":
+            if check_mode["mode"] == "disadvantage":
+                return None
+            if not self._qualifying_sneak_ally(instance, combat, actor, target):
+                return None
+        dice = self.features.feature_value(character, "sneak_attack", "damage_dice", "")
+        if not isinstance(dice, str) or not dice:
+            raise CombatIntentError("sneak attack damage dice are unavailable")
+        formula_node_from_dice_formula(dice)
+        return dice
+
+    @staticmethod
+    def _spend_action_resource(combat: dict[str, Any]) -> str:
+        """Which economy pool pays for a non-magical action.
+
+        Action Surge grants a separate ``surge_action`` pool precisely so the
+        Magic action can never spend it: spell costs only read ``action`` /
+        ``bonus_action``.  A non-magical action therefore spends the surge pool
+        first, keeping the ordinary action free for a later Magic action.
+        """
+
+        economy = combat.get("economy", {}) or {}
+        if int(economy.get("surge_action", 0) or 0) > 0:
+            return "surge_action"
+        return "action"
+
+    @staticmethod
     def _basic_action_events(
         combat: dict[str, Any], intent_type: str, actor_id: str,
         *, spend_action: bool = True,
@@ -429,7 +617,8 @@ class CombatResolutionMixin:
         if spend_action:
             events.append({
                 "type": "dnd2024.action.spent", "actor_id": actor_id,
-                "resource": "action", "amount": 1,
+                "resource": CombatResolutionMixin._spend_action_resource(combat),
+                "amount": 1,
             })
         if intent_type == "dash":
             speed = int(combat.get("economy", {}).get("speed", 0) or 0)
@@ -499,6 +688,58 @@ class CombatResolutionMixin:
                 events.extend(self._basic_action_events(
                     combat, action.kind, actor_id, spend_action=False,
                 ))
+            elif action.kind == "heal":
+                # 特性声明的治疗骰 + 等级加值；事件形状与法术治疗分支一致。
+                character = self._feature_character(actor)
+                dice = str(self.features.feature_value(
+                    character, capability.feature_id, "heal_dice", "",
+                ) or "")
+                bonus = int(self.features.feature_value(
+                    character, capability.feature_id, "heal_bonus", 0,
+                ) or 0)
+                healing_node = formula_node_from_dice_formula(dice)
+                if bonus:
+                    healing_node = {"op": "add", "args": [
+                        healing_node, {"op": "constant", "value": bonus},
+                    ]}
+                healing, rolls = roll_damage_node(healing_node, rng)
+                healing = max(1, healing)
+                blocked = "cannot_regain_hp" in actor["conditions"]
+                events.append({
+                    "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+                    "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
+                    "healing": True, "rolls": rolls,
+                    **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+                })
+            elif action.kind == "rage":
+                # 狂暴不能维持专注：进入狂暴即结束正在维持的专注法术。
+                if actor.get("concentration"):
+                    events.append({
+                        "type": "dnd2024.concentration.ended", "actor_id": actor_id,
+                        "reason": "rage",
+                    })
+                events.append({
+                    "type": "condition.applied", "target_id": actor_id,
+                    "condition": "rage", "duration": "rage", "turns_remaining": RAGE_MAX_ROUNDS,
+                    "sustained_this_turn": False, "established": False,
+                    "source_actor_id": actor_id,
+                })
+            elif action.kind == "rage_sustain":
+                # 只刷新续期标记；``turns_remaining`` 由回合结束的到期检查递减，
+                # 延长一次不等于重置 10 分钟上限。
+                events.append({
+                    "type": "dnd2024.condition.sustained", "target_id": actor_id,
+                    "condition": "rage",
+                })
+            elif action.kind == "action_surge":
+                # Action Surge 本身不消耗动作，只写入一份独立的 surge_action。
+                # 施法成本只读 action/bonus_action，因此这份额外动作天然不能
+                # 用于魔法动作；``action_surge_used`` 在同一回合阻止第二次使用。
+                events.append({
+                    "type": "dnd2024.economy.granted", "actor_id": actor_id,
+                    "grants": {"surge_action": 1},
+                    "flags": {"action_surge_used": True},
+                })
             else:  # pragma: no cover - catalog validation guards this
                 raise CombatIntentError("unsupported class capability action")
         return events
@@ -591,7 +832,7 @@ class CombatResolutionMixin:
         success = roll + medicine >= 10
         events = [{
             "type": "dnd2024.action.spent", "actor_id": actor["actor_id"],
-            "resource": "action", "amount": 1,
+            "resource": self._spend_action_resource(combat), "amount": 1,
         }, {
             "type": "check.resolved", "kind": "medicine", "actor_id": actor["actor_id"],
             "target_id": target_id, "rolls": [roll], "natural": roll,
@@ -625,19 +866,32 @@ class CombatResolutionMixin:
         if intent["option"] == "resolve":
             threat_id = str(decision["threat_actor_ids"][0])
             threat = self._actor_view(instance, combat, threat_id)
-            attack = threat["attacks"][0]
             attack_intent = {
                 "intent_id": f"{decision['decision_id']}:attack",
                 "actor_id": threat_id,
                 "target_id": str(movement["actor_id"]),
-                "attack_id": str(attack["id"]),
             }
-            opportunity = self._attack_events(instance, combat, attack_intent, rng)
-            opportunity[0] = {
-                "type": "dnd2024.reaction.spent", "actor_id": threat_id,
-                "reason": "opportunity_attack",
-            }
-            events.extend(opportunity)
+            # 借机攻击必须是近战武器攻击：只有射程 5 尺的攻击档案才能
+            # 用作借机攻击（长弓等远程武器不构成威胁）；没有近战档案时
+            # 不发生攻击，也不臆造档案。敌方档案与玩家装备链都带 range。
+            melee_attacks = [
+                attack for attack in self._available_attacks(threat)
+                if int(attack.get("range") or 0) <= 5
+            ]
+            if melee_attacks:
+                if threat["kind"] == "enemy":
+                    attack_intent["attack_id"] = str(melee_attacks[0]["id"])
+                else:
+                    attack_intent["weapon_ref"] = str(melee_attacks[0]["weapon_ref"])
+            else:
+                attack_intent = None
+            if attack_intent is not None:
+                opportunity = self._attack_events(instance, combat, attack_intent, rng)
+                opportunity[0] = {
+                    "type": "dnd2024.reaction.spent", "actor_id": threat_id,
+                    "reason": "opportunity_attack",
+                }
+                events.extend(opportunity)
         events.append({
             "type": "dnd2024.position.changed", "actor_id": movement["actor_id"],
             "distance": int(movement["distance"]),

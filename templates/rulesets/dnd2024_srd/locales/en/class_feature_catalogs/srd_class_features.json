@@ -21,7 +21,16 @@
       "action": "Action",
       "bonus_action": "Bonus Action",
       "paladin": "Paladin",
-      "paladins_smite": "Paladin’s Smite"
+      "paladins_smite": "Paladin’s Smite",
+      "fighter": "Fighter",
+      "second_wind": "Second Wind",
+      "action_surge": "Action Surge",
+      "barbarian": "Barbarian",
+      "rage": "Rage",
+      "rage_sustain": "Sustain Rage",
+      "rogue": "Rogue",
+      "sneak_attack": "Sneak Attack",
+      "uncanny_dodge": "Uncanny Dodge"
     }
   }
 }

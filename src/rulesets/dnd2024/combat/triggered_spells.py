@@ -146,7 +146,7 @@ class CombatTriggeredSpellsMixin:
                 "type": "dnd2024.decision.cleared",
                 "decision_id": decision["decision_id"],
             },
-            deepcopy(decision["damage_event"]),
+            *self._submit_hit_damage(decision["damage_event"]),
         ]
         total = int(decision["damage_event"]["amount"])
         if extra_damage:

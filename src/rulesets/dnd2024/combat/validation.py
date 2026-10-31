@@ -280,12 +280,15 @@ class CombatValidationMixin:
             raise CombatIntentError("a stable actor does not make death saves")
         economy = combat.get("economy") or {}
         if intent_type in {"attack", "dash", "dodge", "disengage", "stabilize"}:
+            has_action = int(economy.get("action", 0) or 0) > 0 or int(
+                economy.get("surge_action", 0) or 0
+            ) > 0
             if intent_type == "attack":
-                if int(economy.get("action", 0) or 0) < 1 and int(
+                if not has_action and int(
                     economy.get("attacks_remaining", 0) or 0
                 ) < 1:
                     raise CombatIntentError("the Attack action is no longer available")
-            elif int(economy.get("action", 0) or 0) < 1:
+            elif not has_action:
                 raise CombatIntentError("the action has already been spent")
         if intent_type == "move":
             distance = intent.get("distance")
@@ -322,6 +325,23 @@ class CombatValidationMixin:
         capability_id = str(intent.get("capability_id") or "")
         if not capability_id:
             raise CombatIntentError("capability_id is required")
+        capability = self.features.declared_capability(
+            self._feature_character(actor), capability_id,
+        )
+        if capability is not None:
+            conditions = actor.get("conditions") or {}
+            required = capability.requires_condition
+            if required and required not in conditions:
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} requires "
+                    f"the {self.features.catalog.label(required, required)} condition"
+                )
+            forbidden = capability.forbidden_condition
+            if forbidden and forbidden in conditions:
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
+                    f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
+                )
         views = {
             view.id: view
             for view in self._available_class_capabilities(
@@ -333,9 +353,6 @@ class CombatValidationMixin:
             raise CombatIntentError("class capability is not available to this actor")
         if not view.available:
             raise CombatIntentError(view.blocked_reason or "class capability is not available")
-        capability = self.features.declared_capability(
-            self._feature_character(actor), capability_id,
-        )
         if capability is None:  # pragma: no cover - availability already proved it
             raise CombatIntentError("class capability is not available to this actor")
         has_unarmed_strike = any(
@@ -382,6 +399,8 @@ class CombatValidationMixin:
     ) -> None:
         if actor["kind"] not in {"player", "companion"}:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
+        if "rage" in actor["conditions"]:
+            raise CombatIntentError("you cannot cast spells while raging")
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))

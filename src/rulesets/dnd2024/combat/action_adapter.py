@@ -143,16 +143,17 @@ def attack_damage_node(
     damage_formula: str,
     modifier: int,
     critical: bool,
-    extra_dice_formula: str | None = None,
+    extra_dice_formulas: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    """武器伤害 AST：主骰（可含奖励）→ 附加骰（如魔化）→ 属性修正。
+    """武器伤害 AST：主骰（可含奖励）→ 各附加骰（按调用方顺序）→ 属性修正。
 
-    骰节点顺序即 rng 消耗顺序：主骰在前、附加骰在后，与旧路径一致。
+    骰节点顺序即 rng 消耗顺序：主骰在前、附加骰按给定顺序在后，与旧路径
+    一致。重击翻倍覆盖主骰与全部附加骰，属性修正永远不翻倍。
     """
 
     node = formula_node_from_dice_formula(damage_formula)
-    if extra_dice_formula:
-        node = {"op": "add", "args": [node, formula_node_from_dice_formula(extra_dice_formula)]}
+    for extra in extra_dice_formulas or ():
+        node = {"op": "add", "args": [node, formula_node_from_dice_formula(extra)]}
     if critical:
         node = double_dice_counts(node)
     if modifier:
