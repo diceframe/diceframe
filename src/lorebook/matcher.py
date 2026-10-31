@@ -64,9 +64,8 @@ class KeywordMatcher:
     """关键词匹配器，支持精确匹配 + 模糊子串回退 + 逻辑门 + 概率 + 分组竞争。"""
 
     def __init__(self, *, rng: Callable[[], float] | None = None):
-        self._index: dict[str, set[str]] = {}
+        self._has_keywords = False
         self._entries: dict[str, dict] = {}
-        self._fuzzy_keys: list[str] = []
         self._rng = rng
         # 最近一次 activation 的逐条判定与工作量截断原因（ActivationTrace 用）。
         self.last_decisions: dict[str, dict[str, Any]] = {}
@@ -74,21 +73,15 @@ class KeywordMatcher:
 
     def build(self, entries: list[dict]) -> None:
         """从条目列表构建索引。每个条目的 keywords 字段为 JSON 数组。"""
-        self._index.clear()
-        self._entries.clear()
-        self._fuzzy_keys.clear()
-        for entry in entries:
-            eid = entry["id"]
-            self._entries[eid] = entry
-            keywords = self._keys(entry, "keywords") + self._keys(entry, "secondary_keys")
-            for kw in keywords:
-                kw = kw.strip()
-                if kw:
-                    self._index.setdefault(kw, set()).add(eid)
-                    if len(kw) >= MIN_FUZZY_KEY_LEN and kw not in self._fuzzy_keys:
-                        self._fuzzy_keys.append(kw)
+        self._entries = {entry["id"]: entry for entry in entries}
+        keywords = {
+            key for entry in entries for field in ("keywords", "secondary_keys")
+            for key in self._keys(entry, field)
+        }
+        self._has_keywords = bool(keywords)
         logger.info("关键词索引已构建: %d 关键词, %d 条目, %d 模糊键, %d 常量",
-                     len(self._index), len(self._entries), len(self._fuzzy_keys),
+                     len(keywords), len(self._entries),
+                     sum(len(key) >= MIN_FUZZY_KEY_LEN for key in keywords),
                      len(self._get_constant_ids()))
 
     def match(self, text: str, *, is_visible: Callable[[dict], bool] | None = None) -> list[dict]:
@@ -164,7 +157,7 @@ class KeywordMatcher:
         # trace 才能说出它们是因为 cooldown / delay 落选，而不是从未被发现。
         lexical_seeds: set[str] = set()
         lexical_discovered: set[str] = set()
-        if text and self._index:
+        if text and self._has_keywords:
             exact = {
                 eid for eid in self._candidate_ids(text)
                 if discover(self._entries[eid])
@@ -214,7 +207,7 @@ class KeywordMatcher:
 
         for eid in seeds:
             channel = "semantic" if eid in semantic_seeds and eid not in lexical_seeds else (
-                "constant" if eid in self._get_constant_ids() else
+                "constant" if eid in constants else
                 "sticky" if eid in sticky else "keyword"
             )
             self._record(eid, channel=channel, depth=0)
@@ -294,8 +287,9 @@ class KeywordMatcher:
             frontier, scanned = {}, set()
             all_children: set[str] = set()
             all_scanned: set[str] = set()
+            excluded = evaluated | activated
             for eid in sorted(winners):
-                children, child_scanned = self._children_of(eid, excluded=evaluated | activated)
+                children, child_scanned = self._children_of(eid, excluded=excluded)
                 for cid in children:
                     parents.setdefault(cid, eid)
                 frontier.update(children)
