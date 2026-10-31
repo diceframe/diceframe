@@ -37,7 +37,11 @@
       "warlock": "Warlock",
       "dark_ones_blessing": "Dark One's Blessing",
       "sorcerer": "Sorcerer",
-      "draconic_resilience": "Draconic Resilience"
+      "draconic_resilience": "Draconic Resilience",
+      "cleric": "Cleric",
+      "supreme_healing": "Supreme Healing",
+      "wizard": "Wizard",
+      "overchannel": "Overchannel"
     }
   }
 }

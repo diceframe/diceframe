@@ -35,7 +35,11 @@
     "warlock": "Warlock",
     "dark_ones_blessing": "Dark One's Blessing",
     "sorcerer": "Sorcerer",
-    "draconic_resilience": "Draconic Resilience"
+    "draconic_resilience": "Draconic Resilience",
+    "cleric": "Cleric",
+    "supreme_healing": "Supreme Healing",
+    "wizard": "Wizard",
+    "overchannel": "Overchannel"
   },
   "classes": {
     "monk": {
@@ -291,6 +295,35 @@
             "defeat_temp_hp_ability": "cha",
             "defeat_temp_hp_add_class_level": true,
             "defeat_share_range_ft": 10
+          }
+        }
+      ]
+    },
+    "cleric": {
+      "source_ref": "srd-5.2.1:p40:cleric-features",
+      "features": [
+        {
+          "id": "supreme_healing",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p40:supreme-healing",
+          "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
+          "parameters": {}
+        }
+      ]
+    },
+    "wizard": {
+      "source_ref": "srd-5.2.1:p82:wizard-features",
+      "features": [
+        {
+          "id": "overchannel",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p82:overchannel",
+          "summary": "When you cast a Wizard spell of level 1-5 that deals damage, you can maximize its damage. After the spell resolves, you immediately take 2d12 Necrotic damage per spell slot level, ignoring Resistance and Immunity.",
+          "parameters": {
+            "max_slot_level": 5,
+            "cost_dice_per_slot": 2,
+            "cost_die_sides": 12,
+            "cost_damage_type": "necrotic"
           }
         }
       ]

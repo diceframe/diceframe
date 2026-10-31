@@ -721,6 +721,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_passive_parameters(definition)
             self._validate_defeat_trigger_parameters(definition)
             self._validate_defense_parameters(definition)
+            self._validate_overchannel_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -840,3 +841,35 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.{key} must be an integer from 0 to 20"
                 )
+
+    @staticmethod
+    def _validate_overchannel_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the maximize-damage contract.
+
+        A typo in the slot cap or the self-damage dice would silently change
+        how much a maximized cast costs, so each declared knob is range-checked
+        at load time.  Missing knobs are fine: consumers fall back to their
+        documented defaults.
+        """
+
+        parameters = definition.parameters
+        for key, low, high in (
+            ("max_slot_level", 1, 9),
+            ("cost_dice_per_slot", 1, 10),
+            ("cost_die_sides", 2, 20),
+        ):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int)
+                or not low <= value <= high
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be an integer from {low} to {high}"
+                )
+        damage_type = parameters.get("cost_damage_type")
+        if "cost_damage_type" in parameters and (
+            not isinstance(damage_type, str) or not damage_type
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.cost_damage_type must name a damage type"
+            )

@@ -11,6 +11,7 @@ from .action_adapter import (
     double_dice_counts,
     formula_node_from_dice_formula,
     heal_ability_modifier_node,
+    maximize_dice_nodes,
     roll_damage_node,
     spell_formula_node,
 )
@@ -365,6 +366,13 @@ class CombatResolutionMixin:
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
+    def _maybe_overchannel(self, intent: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+        """门控已由 _validate_spell 完成（fail closed）；此处只做变换。"""
+
+        if not intent.get("maximize_damage"):
+            return node
+        return maximize_dice_nodes(node)
+
     def _spell_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
@@ -457,6 +465,7 @@ class CombatResolutionMixin:
                     )
                     if critical:
                         damage_node = double_dice_counts(damage_node)
+                    damage_node = self._maybe_overchannel(intent, damage_node)
                     damage, rolls = roll_damage_node(damage_node, rng)
                     damage_type = str(
                         intent.get("damage_type") or effect.get("damage_type") or ""
@@ -531,6 +540,7 @@ class CombatResolutionMixin:
                         str(effect["damage"]), effect.get("upcast_damage"),
                         spell, slot_level, actor,
                     )
+                    damage_node = self._maybe_overchannel(intent, damage_node)
                     damage, rolls = roll_damage_node(damage_node, rng)
                     if succeeded:
                         damage = damage // 2 if effect.get("half_on_success") else 0
@@ -560,6 +570,7 @@ class CombatResolutionMixin:
                     str(effect["damage"]), effect.get("upcast_damage"),
                     spell, slot_level, actor,
                 )
+                damage_node = self._maybe_overchannel(intent, damage_node)
                 damage, rolls = roll_damage_node(damage_node, rng)
                 damage_type = str(effect.get("damage_type") or "force")
                 damage, resistance = self._resist_damage(target, damage, damage_type)
@@ -588,6 +599,11 @@ class CombatResolutionMixin:
                 )
                 if effect.get("add_spell_ability"):
                     healing_node = heal_ability_modifier_node(healing_node, actor)
+                maximized = self.features.has_feature(
+                    self._feature_character(actor), "supreme_healing",
+                )
+                if maximized:
+                    healing_node = maximize_dice_nodes(healing_node)
                 healing, rolls = roll_damage_node(healing_node, rng)
                 healing = max(1, healing)
                 # 颤栗之触：目标在施法者回合结束前无法恢复生命值。
@@ -596,6 +612,7 @@ class CombatResolutionMixin:
                     "type": "resource.changed", "resource": "hp", "target_id": target_id,
                     "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
                     "healing": True, "rolls": rolls,
+                    **({"maximized": True} if maximized else {}),
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
                 succeeded = True
@@ -734,6 +751,27 @@ class CombatResolutionMixin:
         }
         if living_enemy_ids and living_enemy_ids.issubset(defeated_targets):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        if intent.get("maximize_damage"):
+            # 超限导能自伤：整道施法结算与胜利判定之后一次性落账（RNG 末位），
+            # 无视抗性与免疫，因此不经 _resist_damage。
+            character = self._feature_character(actor)
+            per_slot = int(self.features.feature_value(
+                character, "overchannel", "cost_dice_per_slot", 2,
+            ) or 0)
+            sides = int(self.features.feature_value(
+                character, "overchannel", "cost_die_sides", 12,
+            ) or 0)
+            damage_type = str(self.features.feature_value(
+                character, "overchannel", "cost_damage_type", "necrotic",
+            ) or "")
+            cost_node = formula_node_from_dice_formula(f"{per_slot * slot_level}d{sides}")
+            cost, cost_rolls = roll_damage_node(cost_node, rng)
+            events.append({
+                "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+                "delta": -cost, "amount": cost, "damage_type": damage_type,
+                "overchannel_cost": True, "rolls": cost_rolls,
+            })
+            events.extend(self._concentration_events(actor, cost, rng))
         return events
 
     def _movement_events(

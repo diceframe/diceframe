@@ -86,6 +86,31 @@ def double_dice_counts(node: Mapping[str, Any]) -> dict[str, Any]:
     return walked
 
 
+def maximize_dice_nodes(node: Mapping[str, Any]) -> dict[str, Any]:
+    """骰面最大化（Supreme Healing / Overchannel）：每个骰节点 → 常量节点。
+
+    D&D 侧 AST 变换，与 double_dice_counts 同构：RNG 零消耗、骰迹为空。
+    调用方约定：先 crit 翻倍、后最大化（数学等价，锁死顺序）。
+    """
+
+    if not isinstance(node, dict):
+        raise CombatIntentError("formula node must be an object")
+    walked = deepcopy(node)
+    op = walked.get("op")
+    if op == "dice":
+        count, sides = _parse_ndm(str(walked.get("formula") or ""))
+        return {"op": "constant", "value": count * sides}
+    if op in {"add", "subtract", "multiply", "min", "max"}:
+        args = walked.get("args")
+        if isinstance(args, list):
+            walked["args"] = [
+                maximize_dice_nodes(arg) if isinstance(arg, dict) else arg
+                for arg in args
+            ]
+        return walked
+    return walked
+
+
 def spell_formula_node(
     base: str, upcast: Any, spell: dict[str, Any], slot_level: int,
     actor: dict[str, Any],
@@ -177,6 +202,7 @@ __all__ = [
     "double_dice_counts",
     "formula_node_from_dice_formula",
     "heal_ability_modifier_node",
+    "maximize_dice_nodes",
     "roll_damage_node",
     "spell_formula_node",
 ]

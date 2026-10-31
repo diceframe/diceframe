@@ -37,7 +37,11 @@
       "warlock": "魔契师",
       "dark_ones_blessing": "黑暗赐福",
       "sorcerer": "术士",
-      "draconic_resilience": "龙族体魄"
+      "draconic_resilience": "龙族体魄",
+      "cleric": "牧师",
+      "supreme_healing": "极效治疗",
+      "wizard": "法师",
+      "overchannel": "超限导能"
     }
   }
 }

@@ -512,6 +512,21 @@ class CombatValidationMixin:
                 raise CombatIntentError("spell resist_type choice is required")
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
+        maximize = intent.get("maximize_damage")
+        if maximize is not None:
+            if not isinstance(maximize, bool):
+                raise CombatIntentError("maximize_damage must be a boolean")
+            character = self._feature_character(actor)
+            max_slot = int(self.features.feature_value(
+                character, "overchannel", "max_slot_level", 5,
+            ) or 0)
+            if not self.features.has_feature(character, "overchannel") or max_slot < 1:
+                raise CombatIntentError("overchannel is required to maximize damage")
+            if effect["mode"] not in {"spell_attack", "saving_throw", "automatic_damage"} \
+                    or not effect.get("damage"):
+                raise CombatIntentError("this spell does not deal damage")
+            if not 1 <= int(slot_level) <= max_slot:
+                raise CombatIntentError("maximized casting requires a spell slot of level 1-5")
         if effect["mode"] == "teleport":
             distance = intent.get("teleport_distance")
             if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
