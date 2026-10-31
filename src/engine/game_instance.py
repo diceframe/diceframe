@@ -437,16 +437,19 @@ class GameInstance:
         language: str,
         state: GameState = GameState.WAITING,
     ) -> None:
-        """配置新局身份信息；调用方在并发路径中应持有 ``_lock``。"""
-        game_config.require_writable(self)
-        self.world_id = world_id
-        self.rule_id = rule_id or "freeform_fantasy"
-        self.world_name = world_name
-        self.group_name = group_name
-        game_config.replace_seed_code(self, seed_code)
-        game_config.replace_difficulty(self, difficulty)
-        self.language = normalize_language(language)
-        self.state = state
+        from src.engine import game_configuration
+
+        game_configuration.configure_game(
+            self,
+            world_id=world_id,
+            rule_id=rule_id,
+            world_name=world_name,
+            group_name=group_name,
+            seed_code=seed_code,
+            difficulty=difficulty,
+            language=language,
+            state=state,
+        )
 
     def configure_session(
         self,
@@ -460,58 +463,19 @@ class GameInstance:
         economy_reward_policy: dict | None = None,
         dice_reveal_mode: str | None = None,
     ) -> None:
-        """集中更新入口与房间身份配置，保留旧存档字段。
+        from src.engine import game_configuration
 
-        luck_timeout_seconds：每玩家幸运超时秒数（0=禁用，异步局建议 0）。
-        economy_reward_policy：本局奖励自动结算策略；非法载荷整体拒绝。
-        dice_reveal_mode：纯表现偏好（auto=自动出结果，click=点击共享揭示），
-        不改变任何机械判定与推进语义。
-        """
-        # Validate every participating owner and value before writing any part
-        # of this configuration transaction.
-        if solo_mode is not None or entry_point is not None:
-            game_config.require_writable(self)
-        if room_password is not None:
-            room_access.require_writable(self)
-        if luck_timeout_seconds is not None or dice_reveal_mode is not None:
-            module_hooks.preflight(self, module_hooks.CHECK_PRESENTATION)
-        if narrative_perspective is not None:
-            module_hooks.preflight(self, module_hooks.NARRATION_PREFERENCES)
-        if luck_timeout_seconds is not None:
-            luck_timeout_seconds = int(luck_timeout_seconds)
-            if not 0 <= luck_timeout_seconds <= 3600:
-                raise ValueError("幸运超时需在 0..3600 秒之间（0=禁用）")
-        if dice_reveal_mode is not None and dice_reveal_mode not in {"auto", "click"}:
-            raise ValueError("骰子揭示方式仅支持 auto 或 click")
-        if economy_reward_policy is not None:
-            from src.engine.economy import normalize_reward_policy
-
-            economy_state.require_writable(self)
-            if not isinstance(economy_reward_policy, dict):
-                raise ValueError("奖励策略无效")
-            if not str(economy_reward_policy.get("mode") or "").strip():
-                economy_reward_policy = {}
-            else:
-                normalized = normalize_reward_policy(economy_reward_policy)
-                if not normalized:
-                    raise ValueError("奖励策略无效（mode 或 auto_reward_cap 不合法）")
-                economy_reward_policy = normalized
-        if solo_mode is not None:
-            game_config.replace_solo_mode(self, bool(solo_mode))
-        if entry_point is not None:
-            game_config.replace_entry_point(self, entry_point)
-        if room_password is not None:
-            room_access.set_room_password(self, room_password)
-        if gm_uid is not None:
-            self.gm_uid = gm_uid
-        if luck_timeout_seconds is not None:
-            module_hooks.record(self, module_hooks.LUCK_TIMEOUT_SECONDS, int(luck_timeout_seconds))
-        if dice_reveal_mode is not None:
-            module_hooks.record(self, module_hooks.DICE_REVEAL_MODE, dice_reveal_mode)
-        if narrative_perspective is not None:
-            self.set_narrative_perspective(narrative_perspective)
-        if economy_reward_policy is not None:
-            economy_state.replace_reward_policy(self, economy_reward_policy)
+        game_configuration.configure_session(
+            self,
+            solo_mode=solo_mode,
+            entry_point=entry_point,
+            room_password=room_password,
+            gm_uid=gm_uid,
+            luck_timeout_seconds=luck_timeout_seconds,
+            narrative_perspective=narrative_perspective,
+            economy_reward_policy=economy_reward_policy,
+            dice_reveal_mode=dice_reveal_mode,
+        )
 
     @staticmethod
     def _normalized_ruleset_binding(binding: dict[str, Any]) -> dict[str, Any] | None:
@@ -1134,69 +1098,24 @@ class GameInstance:
         requires_structured_intent: StructuredIntentRequirement = False,
         admission_check: Callable[[], str] | None = None,
     ) -> str:
-        """Atomically re-confirm a hosted seat and commit its action.
-
-        The LLM call deliberately happens *outside* every lock; the danger is that
-        the world moves between "the model answered" and "we write the answer".
-        So the re-confirmation and the write are one boundary: this method takes
-        the authoritative write permission and ``_lock`` once, re-checks every
-        identity the caller captured (run, round, seat, control mode, control
-        revision, phase), re-checks that the **human gate is still open**, that
-        this round has no action from ``source`` yet, and only then appends.
-
-        The human gate matters on its own: a hosted seat only ever acts *after*
-        the humans are done. If somebody claims another seat (or a player returns
-        from away) while this result was in flight, the table suddenly has an
-        active human who has not submitted yet, and an action written now would
-        break "AI acts after the humans" — so it is discarded instead.
-
-        Returns ``""`` on commit, otherwise the reason the result was dropped:
-        ``rejected`` / ``run_changed`` / ``round_changed`` / ``seat_removed`` /
-        ``control_changed`` / ``phase_changed`` / ``human_gate_changed`` /
-        ``duplicate`` / ``STRUCTURED_INTENT_REQUIRED`` / ``action_rejected``.
-        A supplied structured-intent predicate reads current admission state here,
-        synchronously under both locks, after the existing rejection checks.
-        Callers must treat a non-empty
-        result as "write nothing"; the action never lands.
-        """
+        """Atomically re-confirm a hosted seat and commit its action."""
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
-                # 判定/重写正在进行：这一轮不再接受带轮次身份的行动。
                 return "rejected"
-            stale = self.ai_player_action_stale_reason(
+            return turn_state.commit_ai_player_action_locked(
+                self,
                 user_id,
+                action_text,
+                source=source,
                 expected_run_id=expected_run_id,
                 expected_round_number=expected_round_number,
                 expected_control_revision=expected_control_revision,
-            )
-            if stale:
-                return stale
-            if admission_check is not None:
-                code = admission_check()
-                if code:
-                    return code
-            code = evaluate(
-                self,
-                GateRequest(
-                    actor_uid=user_id,
-                    source=SOURCE_AI_SEAT,
-                    expected_run_id=expected_run_id,
-                    expected_round_number=expected_round_number,
-                    expected_control_revision=expected_control_revision,
-                    action_source=source,
-                    requires_structured_intent=requires_structured_intent,
-                ),
-                AI_SEAT_COMMIT_POLICY,
-            )
-            if code:
-                return code
-            added = self._add_action_locked(
-                user_id, action_text,
-                source=source,
                 action_metadata=action_metadata,
-                defer_out_of_phase=False,
+                requires_structured_intent=requires_structured_intent,
+                admission_check=admission_check,
+                evaluate_fn=evaluate,
+                policy=AI_SEAT_COMMIT_POLICY,
             )
-            return "" if added else "action_rejected"
 
     def ai_player_action_stale_reason(
         self,
@@ -1290,19 +1209,15 @@ class GameInstance:
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered:
                 return "CONTROL_CHANGE_BUSY"
-            handover = away and policy == "ai_takeover"
-            if handover or not away:
-                block = control_change_block(self)
-                if block:
-                    return block
-            if not self._set_player_away_locked(user_id, away):
-                return "UNKNOWN_PLAYER"
-            if handover:
-                begin_away_hosting(self, user_id)
-            elif not away:
-                # 只在席位确实是「临时托管」时归还；GM 永久交给 AI 的席位不会被抢回。
-                end_away_hosting(self, user_id)
-            return ""
+            return turn_state.apply_away_transition_locked(
+                self,
+                user_id,
+                away,
+                policy=policy,
+                control_change_block_fn=control_change_block,
+                begin_away_hosting_fn=begin_away_hosting,
+                end_away_hosting_fn=end_away_hosting,
+            )
 
     async def apply_player_control_change(self, user_id: str, mode: str) -> str:
         """GM 托管控件：安全边界复核 + 控制权变更，同一个 transaction。
@@ -1314,20 +1229,14 @@ class GameInstance:
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
                 return "CONTROL_CHANGE_BUSY"
-            block = control_change_block(self)
-            if block:
-                return block
-            if user_id not in self.players:
-                return "UNKNOWN_PLAYER"
-            try:
-                set_control(self, user_id, mode)
-            except PlayerControlError:
-                logger.warning(
-                    "拒绝托管切换: game_key=%s uid=%s mode=%s",
-                    self.game_key, user_id, mode, exc_info=True,
-                )
-                return "CONTROL_REJECTED"
-            return ""
+            return turn_state.apply_player_control_change_locked(
+                self,
+                user_id,
+                mode,
+                control_change_block_fn=control_change_block,
+                set_control_fn=set_control,
+                player_control_error_type=PlayerControlError,
+            )
 
     async def advance_round(self) -> bool:
         """显式推进回合。未行动的存活玩家标记为已就绪。"""
@@ -1516,33 +1425,10 @@ class GameInstance:
         return GameStateCodec.encode(self)
 
     def replace_persisted_state_from(self, source: "GameInstance") -> None:
-        """Commit a staged aggregate without replacing its runtime identity.
+        """Commit a staged aggregate without replacing runtime coordination."""
+        from src.engine.staged_transaction import replace_persisted_state
 
-        Economy decisions are prepared against an isolated ``GameInstance`` so
-        a failing dependent effect cannot leave half of a transaction applied.
-        Only persisted domain fields cross this boundary; locks, timers, save
-        counters and other process-local coordination remain attached to the
-        live instance.
-        """
-
-        if source.game_key != self.game_key or source.run_id != self.run_id:
-            raise ValueError("staged game state belongs to a different run")
-        runtime_only = {
-            "last_saved_log_count",
-            "pending_luck_after_recovery",
-            # 回合内的无价购买意图是 process-local 协调状态：不入持久化投影，
-            # 生成期间的合法结算回写不得清空它（否则同轮 LOOT 拦截会失效）。
-            "round_unpriced_purchase_intents",
-        }
-        # Room access (password hash, room tokens, seat credentials) is never
-        # part of a staged change and is committed on its own; a staged copy
-        # taken earlier must not roll back a password change or a new seat link.
-        live_room_access = room_access.capture_slot(self)
-        for name, value in source.__dict__.items():
-            if name.startswith("_") or name in runtime_only:
-                continue
-            setattr(self, name, copy.deepcopy(value))
-        room_access.restore_slot(self, live_room_access)
+        replace_persisted_state(self, source)
 
     def to_llm_view(self) -> GameContextView:
         """LLM 决策所需的精简状态视图。
