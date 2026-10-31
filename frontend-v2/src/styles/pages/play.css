@@ -493,6 +493,7 @@
 
 .message-copy {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .message-copy>p:first-of-type {
