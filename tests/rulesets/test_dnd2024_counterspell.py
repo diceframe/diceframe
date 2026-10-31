@@ -552,3 +552,30 @@ def test_every_shipped_spell_declares_components() -> None:
     # The component gate in ``_counter_spell_window`` is therefore
     # conditionally unreachable: no shipped spell can exercise it today.
     assert all(row["components"] for row in rows)
+
+
+# --- the caster's own GM seat never decides the enemy's counter ---------
+
+def test_a_gm_who_plays_the_caster_does_not_decide_the_enemy_counter() -> None:
+    from src.rulesets.automation import advance_automatic_intents
+
+    runtime, engine, instance = new_combat()
+    assert instance.gm_uid == "gm" and "gm" in instance.players
+    cast(engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"])
+
+    intent = engine.next_automatic_intent(instance)
+    assert intent["type"] == "decision.resolve" and intent["option"] == "counter"
+
+    advance_automatic_intents(runtime, instance, SequenceRng([1] * 10))
+
+    assert not combat_of(instance)["pending_decisions"]
+    assert combat_of(instance)["reactions"]["enemy:goblin-1"] == 0
+
+
+def test_a_separate_gm_still_decides_the_counter_by_hand() -> None:
+    _runtime, engine, instance = new_combat()
+    instance.gm_uid = "host"
+    cast(engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"])
+
+    assert combat_of(instance)["pending_decisions"][0]["kind"] == "counter_spell"
+    assert engine.next_automatic_intent(instance) is None

@@ -18,8 +18,8 @@
 - 以附赠动作进入狂暴，消耗 1 次使用次数；次数曲线与恢复**已由现有 catalog 完整声明，本切片勿改**（见 §2）；
 - **狂暴伤害**：使用力量发动武器攻击或徒手打击并对目标造成伤害时，伤害掷骰获得额外加值（+2 / 9 级起 +3 / 16 级起 +4）；
 - **力量优势（2024 版语义）**：力量检定与力量豁免具有优势。**注意：2024 版不给攻击掷骰优势**（那是鲁莽攻击的事），不要接错管线；
-- **持续时间（2024 版语义）**：狂暴持续至你的下个回合结束。若下一回合狂暴仍激活，可通过以下方式延长一轮：对一名敌人进行一次攻击检定 / 以附赠动作延长。每次延长持续至下回合结束，至多维持 10 轮（10 分钟）；
-- **提前结束**：陷入失能（昏迷）状态时狂暴立即结束；
+- **持续时间（2024 版语义）**：狂暴持续至你的下个回合结束。若下一回合狂暴仍激活，可通过以下方式延长一轮：对一名敌人进行一次攻击检定 / 以附赠动作延长。每次延长持续至下回合结束，至多维持 10 分钟（100 轮）；
+- **提前结束**：陷入失能（昏迷）状态时狂暴立即结束；战斗结束时狂暴随之结束（之后没有回合可以续期）；
 - 规则原文出处：`.rulebooks/dnd5r/玩家手册2024/角色职业/野蛮人/野蛮人.htm` L58-77（狂暴完整文本）及 L36-56 特性表（狂暴次数列、狂暴伤害列）。
 
 **明确不做（本切片裁剪，勿实现）**：
@@ -112,7 +112,7 @@
 ### 3.3 `src/rulesets/dnd2024/combat/resolution.py`
 
 1. `_class_capability_events` 新增两个分支：
-   - `action.kind == "rage"`：产事件 `{"type": "condition.applied", "target_id": actor_id, "condition": "rage", "duration": "rage", "turns_remaining": 10}`；
+   - `action.kind == "rage"`：产事件 `{"type": "condition.applied", "target_id": actor_id, "condition": "rage", "duration": "rage", "turns_remaining": 100}`；
    - `action.kind == "rage_sustain"`：产事件 `{"type": "dnd2024.condition.sustained", "target_id": actor_id, "condition": "rage"}`（只刷新续期标记，**不得**重置 `turns_remaining`）。
 2. 攻击结算（`_attack_events` L182-202 命中分支）：当 `"rage" in actor["conditions"]` 且本次攻击 `ability == "str"` 时，将 `attack_damage_node(...)` 结果包装 `{"op": "add", "args": [node, {"op": "constant", "value": rage_damage}]}`（heal 分支同款），其中 `rage_damage = feature_value(self._feature_character(actor), "rage", "rage_damage")`；加值只影响伤害，不影响攻击加值。
 3. 攻击结算针对 `target["kind"] == "enemy"` 且 `"rage" in actor["conditions"]` 时，追加事件 `{"type": "dnd2024.condition.sustained", "target_id": actor_id, "condition": "rage"}`（自动续期）。**注意：规则原文是"对一名敌人进行一次攻击检定"即延长——不要求命中**，落空同样续期；只要求攻击对象是敌人。
@@ -154,7 +154,7 @@
 6. **自动续期**：raged 后对敌人进行攻击（含落空）→ 出现 `dnd2024.condition.sustained`；推进该 actor 回合结束后 rage 仍存在且 `turns_remaining` 减 1；对非敌对目标攻击不产生续期；
 7. **到期移除**：raged 后本回合未进行任何对敌攻击、未提交 `rage_sustain` → 回合结束后 rage 被移除；
 8. **附赠动作延长**：raged、本回合未攻击、提交 `rage_sustain` → 回合结束后 rage 保留；
-9. **上限**：连续续期至 `turns_remaining` 归 0 → rage 移除（可用直接改 snapshot 构造剩余轮数为 1 的前置状态，不必真打 10 轮）；
+9. **上限**：连续续期至 `turns_remaining` 归 0 → rage 移除（可用直接改 snapshot 构造剩余轮数为 1 的前置状态，不必真打 100 轮）；
 10. **豁免优势**：raged野蛮人作为法术 target 掷 str 豁免 → `rolls` 长度 2 且 `advantage_mode == "advantage"`；非 str 豁免单骰；
 11. **昏迷联动**：raged 野蛮人 hp 降至 0 → rage 被移除；
 12. **rage_sustain 前置**：未 raged 时 `rage_sustain` intent 校验失败（requires_condition）。

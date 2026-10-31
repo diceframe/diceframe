@@ -37,16 +37,38 @@ def effective_armor_class(target: dict[str, Any]) -> int:
 class CombatReactionSpellsMixin:
     __slots__ = ()
 
+    def _reaction_eligible(
+        self, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> bool:
+        """Whether ``actor`` may spend a reaction right now.
+
+        Shared by reaction spells, hit-triggered features, counterspell,
+        and opportunity attacks so every reaction path enforces the same
+        HP / reaction-budget / incapacitated / reaction-blocked boundary at
+        both window creation and final resolution.
+        """
+
+        if int(actor.get("hp", 0) or 0) <= 0:
+            return False
+        if int((combat.get("reactions") or {}).get(actor.get("actor_id"), 0) or 0) < 1:
+            return False
+        conditions = actor.get("conditions") or {}
+        if "reaction_blocked" in conditions:
+            return False
+        if condition_flags(self.catalog.conditions, conditions)["incapacitated"]:
+            return False
+        return True
+
     def _reaction_spell_choices(
         self, combat: dict[str, Any], defender: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if defender["kind"] not in {"player", "companion"} or defender["hp"] <= 0:
+        if defender["kind"] not in {"player", "companion"}:
             return []
-        if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
+        if "shield" in defender["conditions"]:
             return []
-        if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
+        if not self._reaction_eligible(combat, defender):
             return []
-        if condition_flags(self.catalog.conditions, defender["conditions"])["incapacitated"]:
+        if "rage" in defender["conditions"]:
             return []
         choices = []
         for ref in defender["spell_refs"]:
@@ -85,13 +107,11 @@ class CombatReactionSpellsMixin:
         callers without an attacker view keep the unrestricted behaviour.
         """
 
-        if defender["kind"] not in {"player", "companion"} or defender["hp"] <= 0:
+        if defender["kind"] not in {"player", "companion"}:
             return []
-        if int(combat.get("reactions", {}).get(defender["actor_id"], 0) or 0) < 1:
+        if "shield" in defender["conditions"]:
             return []
-        if "reaction_blocked" in defender["conditions"] or "shield" in defender["conditions"]:
-            return []
-        if condition_flags(self.catalog.conditions, defender["conditions"])["incapacitated"]:
+        if not self._reaction_eligible(combat, defender):
             return []
         if "blinded" in defender["conditions"]:
             return []
@@ -302,7 +322,8 @@ class CombatReactionSpellsMixin:
                 continue
             if int(enemy.get("counterspell_dc", 0) or 0) <= 0:
                 continue
-            if int((combat.get("reactions") or {}).get(threat_id, 0) or 0) < 1:
+            threat = self._actor_view(instance, combat, threat_id)
+            if not self._reaction_eligible(combat, threat):
                 continue
             if self._distance(combat, caster_id, threat_id) > 60:
                 continue
@@ -334,12 +355,17 @@ class CombatReactionSpellsMixin:
             return events
         threat_id = str(decision["threat_actor_ids"][0])
         caster_id = str(cast_intent["actor_id"])
+        threat = self._actor_view(instance, combat, threat_id)
+        if not self._reaction_eligible(combat, threat):
+            # 窗口打开后威胁者失去反应资格（失能 / 禁反应 / 反应已耗尽 / 倒地）：
+            # 反制无法兑现，按放弃处理并完整重放原施法。
+            events.extend(self._spell_events(instance, combat, cast_intent, rng))
+            return events
         events.append({
             "type": "dnd2024.reaction.spent", "actor_id": threat_id,
             "reason": "counterspell",
         })
         caster = self._actor_view(instance, combat, caster_id)
-        threat = self._actor_view(instance, combat, threat_id)
         dc = int(threat.get("counterspell_dc", 0) or 0)
         modifier = int(caster["saving_throws"].get("con", 0) or 0)
         auto_failed = "con" in condition_flags(

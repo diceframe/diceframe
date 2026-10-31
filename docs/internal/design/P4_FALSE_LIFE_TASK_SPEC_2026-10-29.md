@@ -274,3 +274,9 @@ if delta < 0 and temp > 0:
 5. **UI 投影未改造**：仅 `_player_view` 暴露 `temp_hp` 字段完成服务端契约；`gameplay_view` 等前端聚合层如何展示不在本切片。
 6. **对他人赋 temp 的 0 HP 边界**：当前引擎一律拒绝（见 10.3 第 2 条），未来若出现对倒地盟友赋 temp 的法术需重新评估该边界。
 
+
+### 10.6 勘误（2026-10-30，P1–P9 / R1 提交后修复）
+
+- 本任务书 §10.2 表 #10 与主计划 P4 审核记录中的旧结论「临时 HP 全部吸收伤害时不增加死亡豁免失败」不符合 2024 规则：0 HP 角色受到伤害时，即使伤害被临时 HP 完全吸收，仍视为受到伤害，普通伤害死亡豁免失败 +1、重击 +2。
+- 已在 `combat/reducer.py` 的 `_apply_hp_change` 修复：在临时 HP 吸收前保存原始伤害事实，死亡豁免按原始伤害判定。旧测试 `test_absorbed_damage_does_not_add_death_save_failures` 更名为 `test_fully_absorbed_damage_still_adds_a_death_save_failure` 并修正期望；新增重击 +2、部分吸收与穿透伤害用例。
+- 原文旧执行结果不重写；本勘误为准。

@@ -317,7 +317,9 @@ def test_a_thrown_non_finesse_weapon_never_qualifies_even_with_advantage() -> No
 
     assert _check(events)["success"] is True
     damage = _damage_to(events, "enemy:goblin-1")
-    assert damage["amount"] == 4 + 3
+    # 投掷的近战武器沿用近战属性（力量），也不带偷袭骰。
+    strength = instance.get_character_sheet("gm")["ruleset_character"]["abilities"]["str"]
+    assert damage["amount"] == 4 + (int(strength) - 10) // 2
     assert damage["rolls"] == [4]
     assert _feature_usage(instance) == {}
 

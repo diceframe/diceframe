@@ -22,6 +22,7 @@ from src.rulesets.dnd2024.combat.action_adapter import (
     spell_formula_node,
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
+from src.rulesets.dnd2024.combat.check_modes import condition_flags
 from src.rulesets.dnd2024.exploration.revive_effects import (
     UNSUPPORTED_MESSAGE,
     is_fully_implemented,
@@ -116,6 +117,22 @@ class Dnd2024ExplorationEngine:
             *list(class_magic.get("prepared_spell_refs") or []),
         ]))
 
+    def _casting_eligible(self, canonical: dict[str, Any]) -> bool:
+        """探索施法的公共资格：HP>0、非 dead、非失能。
+
+        ``available_intents`` 与 ``_validate`` 共用同一判定，避免出现“入口不
+        提供、但提交仍可结算”的裂缝。``reaction_blocked`` 只关反应，不禁止
+        普通施法，因此不在此列。
+        """
+
+        resources = canonical.get("resources") or {}
+        if int(resources.get("hp", 0) or 0) <= 0:
+            return False
+        conditions = canonical.get("conditions") or {}
+        if "dead" in conditions:
+            return False
+        return not condition_flags(self.catalog.conditions, conditions)["incapacitated"]
+
     # ------------------------------------------------------------------
     # intents
     # ------------------------------------------------------------------
@@ -128,6 +145,8 @@ class Dnd2024ExplorationEngine:
             return []
         uid = actor_id.removeprefix("player:")
         canonical = self._canonical_of(instance, actor_id)
+        if not self._casting_eligible(canonical):
+            return []
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         spells = []
@@ -189,6 +208,10 @@ class Dnd2024ExplorationEngine:
         if str(intent.get("submitted_by") or "") != uid:
             raise ExplorationIntentError("a player can only cast for their own character")
         canonical = self._canonical_of(instance, actor_id)
+        if not self._casting_eligible(canonical):
+            raise ExplorationIntentError(
+                "the spellcaster cannot cast while dead, at 0 HP, or incapacitated"
+            )
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         if spell is None:
@@ -246,6 +269,8 @@ class Dnd2024ExplorationEngine:
             for target_id in targets:
                 if target_id not in party_ids:
                     raise ExplorationIntentError("spell target must be a party member")
+            if effect.get("target_scope") == "self" and targets != [actor_id]:
+                raise ExplorationIntentError("this spell can only target the caster")
 
     def resolve_intent(
         self, instance: Any, intent: dict[str, Any], rng: Any,

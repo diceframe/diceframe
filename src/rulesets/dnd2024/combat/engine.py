@@ -23,9 +23,10 @@ from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
-from .check_modes import effective_speed
+from .check_modes import condition_flags, effective_speed
 from .primitives import (
     INTENT_TYPES,
+    RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -40,7 +41,11 @@ from .resolution import CombatResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
-from .reaction_spells import CombatReactionSpellsMixin, HIT_REACTION_DECISION
+from .reaction_spells import (
+    COUNTER_SPELL_DECISION,
+    CombatReactionSpellsMixin,
+    HIT_REACTION_DECISION,
+)
 
 
 @dataclass(slots=True)
@@ -98,7 +103,9 @@ class Dnd2024CombatEngine(
         re-entered while raging, and Sustain Rage is meaningless outside it.
         """
 
-        views = super()._available_class_capabilities(
+        # slots=True rebuilds the class, so zero-argument super() fails on
+        # Python < 3.14 (the __class__ cell still points at the old class).
+        views = super(Dnd2024CombatEngine, self)._available_class_capabilities(
             actor, economy, include_unavailable=include_unavailable,
         )
         if not views:
@@ -181,6 +188,19 @@ class Dnd2024CombatEngine(
                 "type": "decision.resolve", "label": "Reaction spell",
                 "expected_version": version, "decisions": deepcopy(reactions),
             }]
+        if actor_id == gm_uid:
+            # 反制/机会攻击等决策指派给 GM，可能出现在非自身回合（例如
+            # 敌方回合触发反制窗口）。不能因“不是当前玩家”而对真实 GM 隐藏。
+            gm_pending = [
+                item for item in combat.get("pending_decisions", [])
+                if item.get("assigned_to") == actor_id
+                and item.get("kind") not in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}
+            ]
+            if gm_pending:
+                return [*communication, {
+                    "type": "decision.resolve", "label": "Resolve reaction",
+                    "expected_version": version, "decisions": deepcopy(gm_pending),
+                }]
         if current.startswith("enemy:"):
             return communication
         requested = _player_actor(actor_id)
@@ -305,6 +325,20 @@ class Dnd2024CombatEngine(
                 return self._automatic_hit_spell(instance, combat, decision, version)
             if decision.get("kind") == HIT_REACTION_DECISION:
                 return self._automatic_hit_reaction(instance, combat, decision, version)
+            if decision.get("kind") == COUNTER_SPELL_DECISION:
+                # 反制是 GM 的人类判断；但 GM 自己在队伍里有角色时（单人局里
+                # GM 就是施法者），由他替敌人决定等于施法者决定自己是否被反制。
+                # 这时与借机攻击一致，由服务器替敌人确定性地选择反制。
+                if gm_uid not in instance.players:
+                    return None
+                return {
+                    "intent_id": f"auto:decision:{version}:{decision.get('decision_id', '')}",
+                    "type": "decision.resolve",
+                    "expected_version": version,
+                    "submitted_by": gm_uid,
+                    "decision_id": str(decision.get("decision_id") or ""),
+                    "option": "counter",
+                }
             threats = [str(item) for item in decision.get("threat_actor_ids") or []]
             option = (
                 "resolve"
@@ -332,16 +366,22 @@ class Dnd2024CombatEngine(
             "submitted_by": gm_uid,
             "actor_id": actor_id,
         }
-        if actor_kind == "companion":
-            # AI 队友第一阶段：确定性优先级（治疗濒危 → 攻击 → 移动 → Dodge →
-            # End Turn），由 GM/server automation authority 提交，走同一权威链。
-            return self._allied_automatic_intent(instance, combat, base)
+        end_turn = {**base, "intent_id": f"{base['intent_id']}:end", "type": "end_turn"}
         if actor_kind == "player":
             # AI 托管席位才由服务器代打；真人 / 未认领席位的回合仍然等着人来操作。
             if not is_ai_controlled(instance, actor_raw_id):
                 return None
             return self._ai_player_automatic_intent(instance, combat, base)
         actor = self._actor_view(instance, combat, actor_id)
+        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        if flags["incapacitated"] and int(actor.get("hp", 0) or 0) > 0:
+            # 失能单位不能执行动作，但它的回合照常存在（回合结束的重复豁免
+            # 也靠 end_turn 触发）；直接结束回合，否则校验拒绝会卡住整条自动化。
+            return end_turn
+        if actor_kind == "companion":
+            # AI 队友第一阶段：确定性优先级（治疗濒危 → 攻击 → 移动 → Dodge →
+            # End Turn），由 GM/server automation authority 提交，走同一权威链。
+            return self._allied_automatic_intent(instance, combat, base)
         targets = [
             target for target in self._hostile_targets(instance, combat, actor_id)
             if int(target.get("hp", 0) or 0) > 0
@@ -378,7 +418,7 @@ class Dnd2024CombatEngine(
                     "attack_id": str(attacks[0]["id"]),
                 }
             movement = int(economy.get("movement", 0) or 0)
-            if movement > 0:
+            if movement > 0 and not flags["speed_zero"]:
                 actor_position = self._position(combat, actor_id)
                 target_position = self._position(combat, str(target["actor_id"]))
                 desired_range = max(
@@ -1207,7 +1247,9 @@ class Dnd2024CombatEngine(
                     rage["established"] = True
                     rage["sustained_this_turn"] = False
                 elif rage.get("sustained_this_turn"):
-                    remaining = int(rage.get("turns_remaining", 10) or 10) - 1
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
                     if remaining <= 0:
                         previous_conditions.pop("rage", None)
                     else:

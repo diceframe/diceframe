@@ -17,6 +17,11 @@ _GRANTABLE_ECONOMY = frozenset({
 # economy.granted 的 flags 是引擎内部记账（如 action_surge_used 的「每回合
 # 一次」），不是向 economy 任意写字段的通道；未知 flag fail closed。
 _GRANTABLE_FLAGS = frozenset({"action_surge_used"})
+# 只在回合边界到期的条件时长；战斗结束时一并清除。
+_TURN_SCOPED_DURATIONS = frozenset({
+    "actor_turn_start", "target_turn_start", "caster_turn_end",
+    "caster_next_turn_end", "after_next_attack",
+})
 
 
 class CombatReducerMixin:
@@ -114,6 +119,23 @@ class CombatReducerMixin:
             combat["status"] = "ended"
             combat["outcome"] = str(event.get("reason") or "ended")
             combat["economy"] = {}
+            # 狂暴靠每回合攻击或附赠动作续期；按回合计时的效果也只在回合
+            # 边界到期。战斗结束后没有回合，它们随之结束，不能带进下一场战斗。
+            party = [*snapshot["characters"].values()]
+            companions = (state.get("party") or {}).get("companions") or {}
+            for companion in companions.values():
+                canonical = companion.get("ruleset_character") if isinstance(companion, dict) else None
+                if isinstance(canonical, dict):
+                    party.append(canonical)
+            for character in party:
+                conditions = character.get("conditions") or {}
+                for condition_id in [
+                    key for key, value in conditions.items()
+                    if key == "rage" or (
+                        isinstance(value, dict) and value.get("duration") in _TURN_SCOPED_DURATIONS
+                    )
+                ]:
+                    conditions.pop(condition_id, None)
             encounter_id = str(combat.get("encounter_instance_id") or "")
             if encounter_id:
                 history = state.setdefault("combat_history", [])
@@ -389,6 +411,9 @@ class CombatReducerMixin:
         target_id = str(event["target_id"])
         kind, raw_id = _actor_kind(target_id)
         delta = int(event["delta"])
+        # 临时 HP 会在下面被吸收，从而把 delta 改成 0；死亡豁免必须依据
+        # “0 HP 角色是否真的受到伤害”的原始事实，而不是吸收后的剩余伤害。
+        raw_damage = delta
         if kind in {"player", "companion"}:
             character = (
                 snapshot["characters"][raw_id]
@@ -412,7 +437,7 @@ class CombatReducerMixin:
                 # 昏迷即失能：狂暴立即结束。
                 conditions.pop("rage", None)
                 death = conditions.setdefault("death_saves", {"successes": 0, "failures": 0})
-                if before == 0 and delta < 0:
+                if before == 0 and raw_damage < 0:
                     death["failures"] = min(
                         3, int(death.get("failures", 0)) + (2 if event.get("critical") else 1)
                     )

@@ -215,7 +215,7 @@
           "id": "rage",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p28:rage",
-          "summary": "Bonus Action: enter a Rage. While raging, Strength attacks and Unarmed Strikes deal extra damage (see the Barbarian table), and your Strength saving throws have advantage. The Rage lasts until the end of your next turn; making an attack against an enemy, or using a Bonus Action, extends it for another turn, up to 10 turns. It ends early if you are Incapacitated. You regain one use on a Short Rest and all uses on a Long Rest.",
+          "summary": "Bonus Action: enter a Rage. While raging, Strength attacks and Unarmed Strikes deal extra damage (see the Barbarian table), and your Strength saving throws have advantage. You cannot cast spells or maintain Concentration while raging; entering a Rage ends Concentration. The Rage lasts until the end of your next turn; making an attack against an enemy, or using a Bonus Action, extends it for another turn, up to 10 turns. It ends early if you are Incapacitated. You regain one use on a Short Rest and all uses on a Long Rest.",
           "parameters": {
             "rage_damage_track": "rage_damage"
           },

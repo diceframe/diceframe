@@ -626,3 +626,31 @@ def test_incapacitated_defender_gets_no_reaction_decision() -> None:
         for event in events_of(result)
     )
     assert damage_to(result, "player:ally")["amount"] > 0
+
+
+# --- automation: an incapacitated enemy still gets (and ends) its turn ---
+
+@pytest.mark.parametrize("spell_ref,slot,position", [
+    ("spell:hold_person", 2, 5),
+    ("spell:sleep", 1, 50),  # out of reach: the ladder must not walk it over either
+])
+def test_automation_ends_the_turn_of_an_incapacitated_enemy(spell_ref, slot, position) -> None:
+    from src.rulesets.automation import advance_automatic_intents
+
+    runtime, engine, instance = new_combat(enemies=[enemy(position=position)])
+    cast(engine, instance, spell_ref, slot, ["enemy:goblin-1"], rolls=[1])
+    hp_before = canonical(instance)["resources"]["hp"]
+    resolve(engine, instance, {
+        "intent_id": "end-gm", "type": "end_turn", "submitted_by": "gm",
+        "actor_id": "player:gm",
+    })
+    combat = ruleset_runtime.state(instance)["combat"]
+    position_before = engine._position(combat, "enemy:goblin-1")
+
+    advance_automatic_intents(runtime, instance, SequenceRng([1] * 20))
+
+    combat = ruleset_runtime.state(instance)["combat"]
+    assert combat["initiative"][combat["turn_index"]] == "player:gm"
+    assert engine._position(combat, "enemy:goblin-1") == position_before
+    assert canonical(instance)["resources"]["hp"] == hp_before
+    assert enemy_conditions(instance)  # the failed repeat save kept the condition

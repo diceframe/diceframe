@@ -510,6 +510,15 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 迁移债确认（执行报告 4 项）：存量角色不追溯（三入口外零生效；存量角色换装一次即按新公式重算 AC——属三入口内行为，迁移时须向玩家说明，补发须走显式数据迁移批次）；极端敏捷下轻甲低于无甲仍取护甲的既有决定未重开；多职业化后 `class_state` 单行假设须改按 class 分算；ASI 后 AC 经 runtime `_live_projection` → reconcile 刷新、直接调 AdvancementEngine 不刷新（既有链路差异，`_update_derived` 未扩——停止条件 3 未触发）。
 - 主计划同步：进度表新增 S-P5 完成行（1C 汇总行改 4/12）。
 
+### P1–P9 / R1 提交后修复记录（2026-10-30）
+
+- 依据：`docs/internal/design/P1_P9_R1_POST_REVIEW_REMEDIATION_TASK_SPEC_2026-10-30.md`（v1.0，执行模型 dsv4.1f）；不新增法术切片，不重排 1C。
+- 修复 A（反应资格与 Counterspell）：人类 GM 的 `counter_spell` pending 不再被自动 `decline`，`available_intents` 允许 assigned GM（即使非当前行动者）处理决策；Counterspell 开窗/最终结算与借机攻击统一复查 HP>0、反应可用、非失能、非 `reaction_blocked`；前端补 counter 入口。
+- 修复 B（Self 与施法契约）：catalog 支持可选 `target_scope: "self"` 并对非法值 fail closed，`false_life` / `misty_step` 声明 Self，validation 统一替代 teleport 特判；`view.py` 投影 `target_side` / `target_count` / `upcast_target_count` / `repeat_targets` / `resist_choice` / target `is_dead`；前端改为投影驱动目标与参数（多目标、resist、teleport、Revivify 仅 dead 盟友）；P2P `ruleset.intent` 白名单新增 `resist_type` / `teleport_distance`。
+- 修复 C（探索资格与死亡豁免）：`exploration/engine.py` 建立并共用施法资格（HP>0、非 dead、非失能），`available_intents` 与 `_validate` 同步；`combat/reducer.py` 在临时 HP 吸收前保存原始伤害事实，0 HP 全吸收仍 +1 失败、重击 +2；P4 任务书已追加 §10.6 勘误。
+- 验收：后端定向 87 passed；全量见任务书 §11 执行报告；前端 86 passed，typecheck / lint / build 通过（环境 npm 11.13.0）。
+- 后置（§8 明确非目标，继续登记）：Counterspell 视觉与视线、复活家族扩展、hosted AI 自动策略、recent combat feed 白名单、全仓库行尾 renormalize 等。
+
 ## 待定决策
 
 | # | 决策点 | 选项 | 当前倾向 |

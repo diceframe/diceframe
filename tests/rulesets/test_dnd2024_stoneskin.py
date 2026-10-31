@@ -653,3 +653,65 @@ def test_fire_shield_resists_its_chosen_type_without_a_rider() -> None:
         attack_id="scimitar", rolls=[15, 5],
     )
     assert damage_to(cold, "player:gm")["amount"] == 7
+
+
+@pytest.mark.parametrize("spell_ref,slot,extra", [
+    ("spell:blur", 2, {}),
+    ("spell:see_invisibility", 2, {}),
+    ("spell:fire_shield", 4, {"resist_type": "fire"}),
+])
+def test_self_range_buffs_only_target_the_caster(spell_ref, slot, extra) -> None:
+    _runtime, engine, instance = wizard_and_ally()
+    grant(instance, "gm", spell_ref)
+    grant_slot(instance, "gm", slot)
+    set_turn(engine, instance, "player:gm")
+    version = ruleset_runtime.state(instance)["version"]
+
+    rejected = engine.resolve_intent(instance, {
+        "intent_id": "cast-ally", "type": "cast_spell", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "player:gm", "spell_ref": spell_ref,
+        "slot_level": slot, "target_ids": ["player:ally"], **extra,
+    }, SequenceRng([]))
+    assert rejected["ok"] is False
+
+    cast(engine, instance, "gm", spell_ref, slot, ["player:gm"], **extra)
+    assert canonical(instance, "gm")["conditions"]
+    assert not canonical(instance, "ally").get("conditions")
+
+
+def test_a_long_rest_ends_spell_effects_and_temporary_hit_points() -> None:
+    from src.rulesets.dnd2024.resting import Dnd2024RestEngine
+
+    runtime, engine, instance = wizard_instance()
+    grant(instance, "gm", "spell:stoneskin", "spell:false_life")
+    grant_slot(instance, "gm", 4)
+    grant_slot(instance, "gm", 1)
+    cast(engine, instance, "gm", "spell:stoneskin", 4, ["player:gm"])
+    cast(engine, instance, "gm", "spell:false_life", 1, ["player:gm"], rolls=[2, 2])
+    resolve(engine, instance, {"intent_id": "end", "type": "combat.end", "submitted_by": "gm"})
+    character = canonical(instance, "gm")
+    assert "stoneskinned" in character["conditions"]
+    assert int(character["resources"]["temp_hp"]) > 0
+
+    rested = Dnd2024RestEngine(runtime.load_bundle("en")).complete_long_rest(character)
+
+    assert "stoneskinned" not in rested["character"]["conditions"]
+    assert int(rested["character"]["resources"].get("temp_hp", 0) or 0) == 0
+    types = [event["type"] for event in rested["events"]]
+    assert {"end_concentration", "lose_temp_hp", "end_spell_effects"} <= set(types)
+
+
+def test_combat_end_clears_turn_scoped_conditions_but_keeps_timed_spells() -> None:
+    _runtime, engine, instance = wizard_instance()
+    grant(instance, "gm", "spell:stoneskin")
+    grant_slot(instance, "gm", 4)
+    cast(engine, instance, "gm", "spell:stoneskin", 4, ["player:gm"])
+    add_player_condition(instance, "gm", "dodging", {
+        "duration": "actor_turn_start", "source_actor_id": "player:gm",
+    })
+
+    resolve(engine, instance, {"intent_id": "end", "type": "combat.end", "submitted_by": "gm"})
+
+    conditions = canonical(instance, "gm")["conditions"]
+    assert "dodging" not in conditions
+    assert "stoneskinned" in conditions  # a 1-hour spell outlives the encounter

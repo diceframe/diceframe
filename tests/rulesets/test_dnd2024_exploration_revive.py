@@ -96,6 +96,14 @@ def ally_of(instance) -> dict:
     return instance.players["ally"]["character_sheet"]["ruleset_character"]
 
 
+def caster_of(instance) -> dict:
+    return instance.players["gm"]["character_sheet"]["ruleset_character"]
+
+
+def spell_intents(engine, instance) -> list[dict]:
+    return engine.available_intents(instance, "player:gm")
+
+
 def event_types(resolved: dict) -> list[str]:
     return [
         event["type"] for event in resolved["events"]
@@ -159,6 +167,96 @@ def test_hostile_target_is_rejected() -> None:
     assert resolved["ok"] is False
     assert resolved["error"] == "revivify requires a dead ally"
     assert_no_slot_change(instance, {"3": 1}, 3)
+
+
+# --- #2b exploration casting eligibility -----------------------------------
+
+
+def test_dead_caster_cannot_revive_itself() -> None:
+    _, instance, engine = _instance(slots={"3": 1})
+    caster = caster_of(instance)
+    caster["resources"]["hp"] = 0
+    caster["conditions"] = {
+        "dead": {"source": "death_saves"},
+        "death_saves": {"successes": 0, "failures": 3},
+    }
+    resolved = cast(engine, instance, "spell:revivify", 3, ["player:gm"])
+    assert resolved["ok"] is False
+    assert "cannot cast" in resolved["error"]
+    assert "events" not in resolved
+    assert_no_slot_change(instance, {"3": 1}, 3)
+
+
+def test_dead_caster_cannot_revive_another_ally() -> None:
+    _, instance, engine = _instance(slots={"3": 1})
+    caster = caster_of(instance)
+    caster["resources"]["hp"] = 0
+    caster["conditions"] = {
+        "dead": {"source": "death_saves"},
+        "death_saves": {"successes": 0, "failures": 3},
+    }
+    resolved = cast(engine, instance, "spell:revivify", 3, ["player:ally"])
+    assert resolved["ok"] is False
+    assert "cannot cast" in resolved["error"]
+    assert_no_slot_change(instance, {"3": 1}, 3)
+
+
+@pytest.mark.parametrize(
+    ("condition", "conditions"),
+    [
+        ("zero_hp_unconscious", {
+            "unconscious": {"source": "zero_hp"},
+            "death_saves": {"successes": 0, "failures": 2},
+        }),
+        ("paralyzed", {"paralyzed": {"source": "test"}}),
+        ("unconscious", {"unconscious": {"source": "test"}}),
+    ],
+)
+def test_incapacitated_casters_cannot_cast(condition: str, conditions: dict) -> None:
+    _, instance, engine = _instance(slots={"3": 1})
+    caster = caster_of(instance)
+    caster["conditions"] = dict(conditions)
+    if condition == "zero_hp_unconscious":
+        caster["resources"]["hp"] = 0
+    resolved = cast(engine, instance, "spell:revivify", 3, ["player:ally"])
+    assert resolved["ok"] is False
+    assert "cannot cast" in resolved["error"]
+    assert "events" not in resolved
+    assert_no_slot_change(instance, {"3": 1}, 3)
+
+
+@pytest.mark.parametrize(
+    ("condition", "conditions"),
+    [
+        ("dead", {
+            "dead": {"source": "death_saves"},
+            "death_saves": {"successes": 0, "failures": 3},
+        }),
+        ("zero_hp_unconscious", {
+            "unconscious": {"source": "zero_hp"},
+            "death_saves": {"successes": 0, "failures": 2},
+        }),
+        ("paralyzed", {"paralyzed": {"source": "test"}}),
+    ],
+)
+def test_ineligible_casters_have_no_exploration_spell_intent(
+    condition: str, conditions: dict,
+) -> None:
+    _, instance, engine = _instance(slots={"3": 1})
+    caster = caster_of(instance)
+    caster["conditions"] = dict(conditions)
+    if condition != "paralyzed":
+        caster["resources"]["hp"] = 0
+    assert spell_intents(engine, instance) == []
+
+
+def test_normal_and_reaction_blocked_casters_can_still_cast() -> None:
+    _, instance, engine = _instance(slots={"3": 1})
+    assert spell_intents(engine, instance)
+    caster_of(instance)["conditions"] = {"reaction_blocked": {"source": "test"}}
+    assert spell_intents(engine, instance)
+    resolved = cast(engine, instance, "spell:revivify", 3, ["player:ally"])
+    assert resolved["ok"] is True, resolved
 
 
 # --- #3 no slot -----------------------------------------------------------

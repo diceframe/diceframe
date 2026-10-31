@@ -325,9 +325,9 @@ def test_cannot_regain_hp_does_not_block_temp_hp() -> None:
     assert updated["hp"] == before["hp"]
 
 
-# --- #10 absorbed damage does not accumulate death save failures -----------
+# --- #10 absorbed damage still fails a death save at 0 HP -------------------
 
-def test_absorbed_damage_does_not_add_death_save_failures() -> None:
+def test_fully_absorbed_damage_still_adds_a_death_save_failure() -> None:
     _runtime, engine, instance = new_combat(level=1)
     canonical(instance)["resources"].update({"hp": 0, "temp_hp": 5})
     canonical(instance)["conditions"] = {
@@ -339,4 +339,40 @@ def test_absorbed_damage_does_not_add_death_save_failures() -> None:
     updated = resources(instance)
     assert updated["temp_hp"] == 2
     assert updated["hp"] == 0
-    assert canonical(instance)["conditions"]["death_saves"]["failures"] == 1
+    assert canonical(instance)["conditions"]["death_saves"]["failures"] == 2
+
+
+def test_fully_absorbed_critical_hit_adds_two_death_save_failures() -> None:
+    _runtime, engine, instance = new_combat(level=1)
+    canonical(instance)["resources"].update({"hp": 0, "temp_hp": 5})
+    canonical(instance)["conditions"] = {
+        "unconscious": {"source": "zero_hp"},
+        "death_saves": {"successes": 0, "failures": 0},
+    }
+    damage(engine, instance, 3, critical=True)
+
+    updated = resources(instance)
+    assert updated["temp_hp"] == 2
+    assert updated["hp"] == 0
+    assert canonical(instance)["conditions"]["death_saves"]["failures"] == 2
+
+
+@pytest.mark.parametrize(
+    ("temp_hp", "amount", "expected_temp", "expected_failures"),
+    [(5, 8, 0, 1), (0, 4, 0, 1)],
+)
+def test_partial_and_penetrating_damage_keep_hp_and_failure_counts(
+    temp_hp, amount, expected_temp, expected_failures,
+) -> None:
+    _runtime, engine, instance = new_combat(level=1)
+    canonical(instance)["resources"].update({"hp": 0, "temp_hp": temp_hp})
+    canonical(instance)["conditions"] = {
+        "unconscious": {"source": "zero_hp"},
+        "death_saves": {"successes": 0, "failures": 0},
+    }
+    damage(engine, instance, amount)
+
+    updated = resources(instance)
+    assert updated["temp_hp"] == expected_temp
+    assert updated["hp"] == 0
+    assert canonical(instance)["conditions"]["death_saves"]["failures"] == expected_failures

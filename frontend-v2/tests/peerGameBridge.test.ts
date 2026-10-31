@@ -389,6 +389,42 @@ describe('peer host game bridge', () => {
     })
   })
 
+  it('forwards declared spell parameters while stripping forged results', async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = []
+    const executor: PeerLocalApiExecutor = async (path, init) => {
+      calls.push({ path, init })
+      if (path === '/games/web%7Cgame%7Chost') {
+        return { game_key: 'web|game|host', player_access_open: true }
+      }
+      if (path === '/games/web%7Cgame%7Chost/players') {
+        return { ok: true, user_id: 'player_123' }
+      }
+      return { ok: true }
+    }
+    const bridge = new PeerHostGameBridge('web|game|host', executor, () => undefined)
+
+    await bridge.handle('p_abcdefghijk', 'player.create', { character_name: '调查员' })
+    // 法术参数 resist_type / teleport_distance 是服务端声明的合法 intent 字段，
+    // 必须随 P2P 透传；伪造的 HP、伤害和条件结果仍被剥离。
+    await bridge.handle('p_abcdefghijk', 'ruleset.intent', {
+      intent_id: 'intent-spell-1', type: 'cast_spell', expected_version: 3,
+      actor_id: 'player:someone', spell_ref: 'spell:chromatic_orb',
+      target_ids: ['enemy:goblin', 'enemy:goblin-2'], slot_level: 2,
+      resist_type: 'fire', teleport_distance: 30,
+      hp: 1, damage: 9999, conditions: { prone: true }, is_dead: true,
+    })
+    const spellCall = calls[calls.length - 1]
+    expect(spellCall.path).toBe(
+      '/games/web%7Cgame%7Chost/intents?user=player_123&share=1&delegate=1',
+    )
+    expect(JSON.parse(String(spellCall.init?.body))).toEqual({
+      intent_id: 'intent-spell-1', type: 'cast_spell', expected_version: 3,
+      actor_id: 'player:someone', spell_ref: 'spell:chromatic_orb',
+      target_ids: ['enemy:goblin', 'enemy:goblin-2'], slot_level: 2,
+      resist_type: 'fire', teleport_distance: 30,
+    })
+  })
+
   it('forwards the canonical professional character for authoritative host validation', async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = []
     const executor: PeerLocalApiExecutor = async (path, init) => {

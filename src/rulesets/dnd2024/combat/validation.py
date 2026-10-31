@@ -244,12 +244,11 @@ class CombatValidationMixin:
                 if decision.get("kind") == HIT_REACTION_DECISION:
                     self._validate_hit_reaction(instance, combat, decision, intent)
                     return
-            elif submitted_by != gm_uid:
+            elif submitted_by != str(decision.get("assigned_to") or gm_uid):
                 raise CombatIntentError("only the assigned GM can resolve this reaction")
-            if intent.get("option") == "resolve":
-                threat_ids = list(decision.get("threat_actor_ids") or [])
-                if not threat_ids or int(combat.get("reactions", {}).get(threat_ids[0], 0)) < 1:
-                    raise CombatIntentError("the threatening actor has no reaction available")
+            # 借机攻击的最终资格由 resolution 的 _reaction_eligible 复查：
+            # 开窗后威胁者失能 / 禁反应 / 反应耗尽时清除决策并继续移动。
+            # 这里若提前按反应预算拒绝，最终复查将永远不可达。
             return
         actor_id = str(intent.get("actor_id") or "")
         if actor_id != self._current_actor(combat):
@@ -414,6 +413,8 @@ class CombatValidationMixin:
     ) -> None:
         if actor["kind"] not in {"player", "companion"}:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
+        if "rage" in actor["conditions"]:
+            raise CombatIntentError("you cannot cast spells while raging")
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
@@ -481,9 +482,10 @@ class CombatValidationMixin:
                     raise CombatIntentError("dead targets require a resurrection effect")
             elif target_side == actor_side and effect["mode"] != "dispel":
                 raise CombatIntentError("offensive spells require a hostile target")
-            if effect["mode"] == "teleport" and target_id != str(actor["actor_id"]):
-                # RAW 施法距离自身：传送只能作用于施法者本人。
-                raise CombatIntentError("teleport spells can only target the caster")
+            if effect.get("target_scope") == "self" and target_id != str(actor["actor_id"]):
+                # 声明式 Self 约束：内容声明什么，这里就只校验什么，
+                # 不再为具体法术 mode 复制特判。
+                raise CombatIntentError("this spell can only target the caster")
             if effect["mode"] == "dispel" and "dead" in target.get("conditions", {}):
                 # 解除魔法可对任意阵营，但死亡目标不在"生物"范围内。
                 raise CombatIntentError("dead targets cannot be dispelled")

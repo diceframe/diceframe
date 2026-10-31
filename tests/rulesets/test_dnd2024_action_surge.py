@@ -171,16 +171,24 @@ def test_surged_attack_reopens_attack_and_pays_from_the_surge_pool() -> None:
     assert economy["action"] == 0
 
 
-def test_the_ordinary_action_is_always_paid_before_the_surge_pool() -> None:
-    engine, instance = _instance()
+def test_the_surge_pool_pays_first_so_the_ordinary_action_stays_free_for_magic() -> None:
+    engine, instance = _instance(mutate=_give_cantrip)
     _surge(engine, instance)
     assert (_economy(instance)["action"], _economy(instance)["surge_action"]) == (1, 1)
 
     _apply(engine, instance, _attack_intent(engine, instance), SequenceRng([15, 3, 4]))
 
     economy = _economy(instance)
-    assert economy["action"] == 0
-    assert economy["surge_action"] == 1
+    assert economy["surge_action"] == 0
+    assert economy["action"] == 1
+    assert "cast_spell" in _intent_types(engine, instance)
+    _apply(engine, instance, {
+        "intent_id": "cast-1", "type": "cast_spell",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "spell_ref": "spell:fire_bolt", "target_ids": ["enemy:goblin-1"], "slot_level": 0,
+    }, SequenceRng([15, 5]))
+    assert _economy(instance)["action"] == 0
 
 
 def test_basic_action_after_surge_spends_the_surge_pool() -> None:

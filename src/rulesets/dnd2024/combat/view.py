@@ -23,6 +23,19 @@ from .primitives import (
 )
 
 
+BENEFICIAL_MODES = frozenset({"healing", "buff", "stabilize", "temp_hp", "teleport", "revive"})
+
+
+def _target_side(mode: str) -> str:
+    """Server-owned target side for a spell effect, matching validation."""
+
+    if mode in BENEFICIAL_MODES:
+        return "ally"
+    if mode == "dispel":
+        return "any"
+    return "enemy"
+
+
 class CombatViewMixin:
     """Project canonical combat state into presentation-safe actor views."""
 
@@ -268,6 +281,8 @@ class CombatViewMixin:
                 reason = "not_automated"
             elif not is_current:
                 reason = "not_your_turn"
+            elif "rage" in actor["conditions"]:
+                reason = "raging"
             elif effect["mode"] == "reaction_defense":
                 reason = "requires_being_hit"
             elif effect["mode"] == "triggered_damage" and not trigger:
@@ -382,6 +397,9 @@ class CombatViewMixin:
     ) -> list[dict[str, Any]]:
         if actor["kind"] not in {"player", "companion"}:
             return []
+        if "rage" in actor["conditions"]:
+            # 狂暴期间不能施法（SRD 5.2.1 Rage: No Concentration or Spells）。
+            return []
         result = []
         for ref in actor["spell_refs"]:
             spell = self.spells.get(ref)
@@ -404,12 +422,24 @@ class CombatViewMixin:
                 available_slots.insert(0, 0)
             available_slots.sort()
             if available_slots:
-                result.append({
+                # 目标声明随法术一起投影：前端只消费服务端语义，不再按
+                # spell mode 硬编码"盟友/敌人"。
+                row = {
                     "spell_ref": ref, "name": spell["name"], "level": spell["level"],
                     "casting_time": spell["casting_time"], "range": effect["range"],
                     "mode": effect["mode"], "available_slot_levels": available_slots,
-                    **({"trigger_target_id": trigger["target_id"]} if effect["mode"] == "triggered_damage" else {}),
-                })
+                    "target_side": _target_side(effect["mode"]),
+                    "target_count": int(effect.get("target_count", 1) or 1),
+                    "upcast_target_count": int(effect.get("upcast_target_count", 0) or 0),
+                    "repeat_targets": bool(effect.get("repeat_targets", False)),
+                }
+                if effect.get("target_scope"):
+                    row["target_scope"] = effect["target_scope"]
+                if effect.get("resist_choice"):
+                    row["resist_choice"] = list(effect["resist_choice"])
+                if effect["mode"] == "triggered_damage":
+                    row["trigger_target_id"] = trigger["target_id"]
+                result.append(row)
         return result
 
     def _all_targets(self, instance: Any, combat: dict[str, Any]) -> list[dict[str, Any]]:
@@ -420,6 +450,7 @@ class CombatViewMixin:
                 "actor_id": view["actor_id"], "kind": "player", "side": "party", "hp": view["hp"],
                 "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
                 "name": str(instance.players[uid].get("character_name") or uid),
+                "is_dead": "dead" in view.get("conditions", {}),
             })
         for companion_id in sorted(self._active_companions(instance)):
             view = self._actor_view(instance, combat, _companion_actor(companion_id))
@@ -427,6 +458,7 @@ class CombatViewMixin:
                 "actor_id": view["actor_id"], "kind": "companion", "side": "party", "hp": view["hp"],
                 "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
                 "name": str(self._companion(instance, companion_id).get("name") or companion_id),
+                "is_dead": "dead" in view.get("conditions", {}),
             })
         for enemy_id in combat.get("enemies", {}):
             view = self._actor_view(instance, combat, _enemy_actor(enemy_id))
@@ -434,6 +466,7 @@ class CombatViewMixin:
                 "actor_id": view["actor_id"], "kind": "enemy", "side": "enemy", "hp": view["hp"],
                 "max_hp": view["max_hp"], "position": self._position(combat, view["actor_id"]),
                 "name": str(combat["enemies"][enemy_id].get("name") or enemy_id),
+                "is_dead": "dead" in view.get("conditions", {}),
             })
         return targets
 

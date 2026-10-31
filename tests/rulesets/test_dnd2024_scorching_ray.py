@@ -412,3 +412,35 @@ def test_second_level_slot_allows_firing_only_two_beams() -> None:
         target_ids=["enemy:goblin-1"] * 2,
     )
     assert two["ok"] is True
+
+
+# --- victory counts every beam of the same casting ------------------------
+
+@pytest.mark.parametrize("enemies,targets", [
+    ([("goblin-1", 5)], ["enemy:goblin-1"] * 3),  # no single beam kills it
+    ([("goblin-1", 2), ("goblin-2", 2)], ["enemy:goblin-1", "enemy:goblin-2", "enemy:goblin-1"]),
+])
+def test_beams_that_together_defeat_every_enemy_end_the_combat(enemies, targets) -> None:
+    _runtime, engine, instance = new_combat(enemies=[
+        enemy(enemy_id, position=5 * (index + 1), hp=hp)
+        for index, (enemy_id, hp) in enumerate(enemies)
+    ])
+
+    result = cast(
+        engine, instance, "spell:scorching_ray", 2, targets,
+        rolls=[10, 1, 1, 10, 1, 1, 10, 1, 1],
+    )
+
+    assert {"type": "dnd2024.combat.ended", "reason": "victory"} in events_of(result)
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "ended"
+
+
+def test_beams_that_leave_an_enemy_standing_do_not_end_the_combat() -> None:
+    _runtime, engine, instance = new_combat(enemies=[enemy("goblin-1", hp=7)])
+
+    result = cast(
+        engine, instance, "spell:scorching_ray", 2, ["enemy:goblin-1"] * 3,
+        rolls=[10, 1, 1, 10, 1, 1, 10, 1, 1],
+    )
+
+    assert "dnd2024.combat.ended" not in [event["type"] for event in events_of(result)]
