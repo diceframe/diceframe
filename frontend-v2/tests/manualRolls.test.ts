@@ -136,6 +136,27 @@ describe('manual rolls composer include_in_ai_context', () => {
     }
   })
 
+  it.each(['', '1.5'])('keeps an invalid check target "%s" editable and allows correction', async (invalidTarget) => {
+    const panel = await mountPanel()
+    await openComposer(panel)
+    await panel.get('select').setValue('check')
+    const targetInput = panel.get('input[type="number"]')
+    await targetInput.setValue(invalidTarget)
+    await buttonByText(panel, '发送请求').trigger('click')
+    await flushPromises()
+
+    expect(panel.text()).toContain('例如：15')
+    expect(mockedApi.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+    expect(buttonByText(panel, '稍后').attributes('disabled')).toBeUndefined()
+    expect(buttonByText(panel, '发送请求').attributes('disabled')).toBeUndefined()
+
+    await targetInput.setValue(15)
+    await buttonByText(panel, '发送请求').trigger('click')
+    await flushPromises()
+    expect(lastCreateBody()).toMatchObject({ purpose: 'check', target: 15 })
+    expect(panel.find('[role="dialog"]').exists()).toBe(false)
+  })
+
   it('shows a pending entry after postponing and keeps history readable without a create action for players', async () => {
     mockedApi.mockResolvedValue({ ok: true, run_id: 'run-1', requests: [request] })
     wrapper = mount(ManualRollsPanel, {

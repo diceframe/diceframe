@@ -59,8 +59,9 @@ function openComposer() { resetComposer(); composerOpen.value = true }
 function toggleTarget(uid: string) { targetUids.value = targetUids.value.includes(uid) ? targetUids.value.filter(item => item !== uid) : [...targetUids.value, uid] }
 async function create() {
   if (!targetUids.value.length) { submitError.value = copy.value.chooseTarget; return }
-  busy.value = true; submitError.value = ''
+  submitError.value = ''
   if (purpose.value === 'check' && (target.value === null || !Number.isInteger(target.value))) { submitError.value = copy.value.targetPlaceholder; return }
+  busy.value = true
   // 检定/对抗由服务端强制收录，前端不发送该开关；自由投掷按勾选发送严格布尔。
   const includeInAiContext = purpose.value === 'free' ? includeInAi.value : undefined
   try { draftOperationId.value = await rolls.create({ formula: formula.value, label: label.value, purpose: purpose.value, target: target.value, comparison: comparison.value, include_in_ai_context: includeInAiContext, target_uids: targetUids.value, visibility: visibility.value, operation_id: draftOperationId.value || undefined }); composerOpen.value = false; draftOperationId.value = '' }
