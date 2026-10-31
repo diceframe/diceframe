@@ -112,6 +112,38 @@ def test_group_loser_does_not_recurse_or_write_timed_state() -> None:
     assert timed_state == {}
 
 
+@pytest.mark.parametrize("initial_count", [1, 2])
+@pytest.mark.parametrize("recursive_count", [1, 2])
+def test_group_winner_blocks_later_recursive_members(initial_count, recursive_count) -> None:
+    entries = [
+        {"id": "a-seed", "keywords": ["door"], "content": "sigil", "group": "g"},
+        {"id": "leaf", "keywords": ["vault"], "content": ""},
+    ]
+    if initial_count == 2:
+        entries.append({"id": "b-loser", "keywords": ["door"], "group": "g"})
+    entries.extend(
+        {"id": f"child-{i}", "keywords": ["sigil"], "content": "vault", "group": "g"}
+        for i in range(recursive_count)
+    )
+    matcher = _build(entries, rng=lambda: 0.0)
+    hits = matcher.match_with_recursive("door")
+    assert {row["id"] for row in hits} == {"a-seed"}
+    for i in range(recursive_count):
+        decision = matcher.last_decisions[f"child-{i}"]
+        assert decision["reason_code"] == "group_lost"
+        assert decision["group"]["winner"] == "a-seed"
+    assert "leaf" not in matcher.last_decisions
+
+
+def test_allow_all_group_still_allows_recursive_members() -> None:
+    matcher = _build([
+        {"id": "seed", "keywords": ["door"], "content": "sigil", "group": "g",
+         "group_scoring": "allow_all"},
+        {"id": "child", "keywords": ["sigil"], "group": "g", "group_scoring": "allow_all"},
+    ])
+    assert {row["id"] for row in matcher.match_with_recursive("door")} == {"seed", "child"}
+
+
 # ---- P1: SillyTavern optional filter semantics ------------------------------
 
 

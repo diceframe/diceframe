@@ -672,11 +672,14 @@ class KeywordMatcher:
                     "outcome": "uncontested",
                 })
         for name, members in groups.items():
-            if len(members) <= 1 or any(self._group_allow_all(self._entries.get(m, {})) for m in members):
+            if any(self._group_allow_all(self._entries.get(m, {})) for m in members):
                 continue
             if name in decided:
                 winners -= {m for m in members if m != decided[name]}
                 self._record_group_outcome(name, members, decided[name])
+                continue
+            if len(members) == 1:
+                decided[name] = members[0]
                 continue
             pool = list(members)
             if any(self._group_scoring_on(self._entries.get(m, {})) for m in members):
