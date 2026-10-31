@@ -408,6 +408,10 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--df-danger) 16%, transparent);
 }
 
+@media (max-width: 800px) {
+  .quick-actions-toggle, .quick-actions button { min-height: 44px; }
+}
+
 @container action-composer (max-width: 260px) {
   .composer-input { grid-template-columns: minmax(0, 1fr) 56px; }
   .composer .has-skill .composer-input { grid-template-columns: minmax(0, 1fr) 72px; }
