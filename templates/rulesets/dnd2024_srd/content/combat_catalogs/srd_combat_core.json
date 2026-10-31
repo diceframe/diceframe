@@ -41,6 +41,10 @@
     "spare_the_dying": {"mode": "stabilize", "range": 15},
     "cure_wounds": {"mode": "healing", "healing": "2d8", "upcast_healing": "2d8", "add_spell_ability": true, "range": 5},
     "healing_word": {"mode": "healing", "healing": "2d4", "upcast_healing": "2d4", "add_spell_ability": true, "range": 60},
+    "false_life": {"mode": "temp_hp", "range": 5, "target_count": 1, "target_scope": "self", "temp_hp": "2d4+4", "upcast_flat": 5},
+    "misty_step": {"mode": "teleport", "range": 30, "target_count": 1, "target_scope": "self"},
+    "dispel_magic": {"mode": "dispel", "range": 120, "target_count": 1},
+    "revivify": {"mode": "revive", "range": 5},
     "magic_missile": {"mode": "automatic_damage", "damage": "3d4+3", "upcast_damage": "1d4+1", "damage_type": "force", "range": 120},
     "thunderwave": {"mode": "saving_throw", "save": "con", "damage": "2d8", "damage_type": "thunder", "range": 15, "half_on_success": true, "push": 10},
     "burning_hands": {"mode": "saving_throw", "save": "dex", "damage": "3d6", "upcast_damage": "1d6", "damage_type": "fire", "range": 15, "half_on_success": true},
@@ -50,7 +54,7 @@
     "shield": {"mode": "reaction_defense", "trigger": "hit_by_attack", "armor_class_bonus": 5, "range": 5, "condition": "shield", "condition_duration": "actor_turn_start"},
     "charm_person": {"mode": "saving_throw", "save": "wis", "range": 30, "condition": "charmed", "condition_duration": "1_hour"},
     "color_spray": {"mode": "saving_throw", "save": "con", "range": 15, "condition": "blinded", "condition_duration": "caster_turn_end"},
-    "sleep": {"mode": "saving_throw", "save": "wis", "range": 60, "condition": "incapacitated", "condition_duration": "concentration", "concentration": true},
+    "sleep": {"mode": "saving_throw", "save": "wis", "range": 60, "condition": "incapacitated", "condition_duration": "concentration", "concentration": true, "save_repeat": "wis"},
     "bless": {"mode": "buff", "range": 30, "target_count": 3, "condition": "blessed", "condition_duration": "concentration", "concentration": true},
     "shield_of_faith": {"mode": "buff", "range": 60, "target_count": 1, "condition": "shield_of_faith", "condition_duration": "concentration", "concentration": true},
     "hex": {"mode": "debuff", "range": 90, "target_count": 1, "condition": "hexed", "condition_duration": "concentration", "concentration": true},
@@ -68,6 +72,35 @@
       ],
       "damage_type": "radiant",
       "range": 5
-    }
+    },
+    "invisibility": {"mode": "buff", "range": 5, "target_count": 1, "upcast_target_count": 1, "condition": "invisible", "condition_duration": "concentration", "concentration": true, "ends_on": ["attack_roll", "damage_dealt", "spell_cast"]},
+    "greater_invisibility": {"mode": "buff", "range": 5, "target_count": 1, "condition": "invisible", "condition_duration": "concentration", "concentration": true},
+    "blur": {"mode": "buff", "range": 5, "target_count": 1, "target_scope": "self", "condition": "blurred", "condition_duration": "concentration", "concentration": true},
+    "see_invisibility": {"mode": "buff", "range": 5, "target_count": 1, "target_scope": "self", "condition": "see_invisibility", "condition_duration": "1_hour"},
+    "stoneskin": {"mode": "buff", "range": 5, "target_count": 1, "condition": "stoneskinned", "condition_duration": "concentration", "concentration": true},
+    "protection_from_energy": {"mode": "buff", "range": 5, "target_count": 1, "condition": "energy_resistant", "condition_duration": "concentration", "concentration": true, "resist_choice": ["acid", "cold", "fire", "lightning", "thunder"]},
+    "protection_from_poison": {"mode": "buff", "range": 5, "target_count": 1, "condition": "poison_resistant", "condition_duration": "1_hour", "removes_conditions": ["poisoned"]},
+    "fire_shield": {"mode": "buff", "range": 5, "target_count": 1, "target_scope": "self", "condition": "fire_shield_resistant", "condition_duration": "10_minute", "resist_choice": ["fire", "cold"]},
+    "hold_person": {"mode": "saving_throw", "save": "wis", "range": 60, "target_count": 1, "upcast_target_count": 1, "condition": "paralyzed", "condition_duration": "concentration", "concentration": true, "save_repeat": "wis", "target_creature_types": ["humanoid"]},
+    "scorching_ray": {"mode": "spell_attack", "damage": "2d6", "damage_type": "fire", "range": 120, "target_count": 3, "upcast_target_count": 1, "repeat_targets": true}
+  },
+  "conditions": {
+    "next_attack_advantage": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
+    "next_attack_disadvantage": {"attack_modes": [{"side": "actor", "mode": "disadvantage", "consume_on": "attack_resolved"}]},
+    "faerie_fire": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "dodging": {"attack_modes": [{"side": "target", "mode": "disadvantage"}]},
+    "blurred": {"attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}]},
+    "invisible": {"attack_modes": [
+      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight"]},
+      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
+    ]},
+    "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "stoneskinned": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "poison_resistant": {"resist_damage_types": ["poison"]},
+    "slowed_10": {"speed_modifier": -10},
+    "incapacitated": {"implies_incapacitated": true},
+    "paralyzed": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
+    "stunned": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "auto_fail_saves": ["str", "dex"]},
+    "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true}
   }
 }

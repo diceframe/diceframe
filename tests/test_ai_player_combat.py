@@ -632,3 +632,17 @@ def test_automatic_intent_is_deterministic_and_read_only() -> None:
 
     assert first is not None and first == second
     assert ruleset_runtime.state(instance) == before
+
+
+def test_an_incapacitated_companion_ends_its_turn_instead_of_attacking() -> None:
+    _runtime, engine, instance = _setup()
+    companion = _companion("mira", "Mira")
+    companion["ruleset_character"]["conditions"]["paralyzed"] = {"source": "test"}
+    _seed_companion(instance, companion)
+    _start(engine, instance, rolls=[20, 1, 10, 3])
+    _set_turn(engine, instance, "companion:mira")
+
+    intent = engine.next_automatic_intent(instance)
+
+    assert intent["type"] == "end_turn"
+    assert engine.validate_intent(instance, intent)["ok"] is True

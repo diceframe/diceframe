@@ -249,6 +249,72 @@ def test_move_out_of_reach_creates_a_pending_reaction_decision() -> None:
     assert instance.get_character_sheet("gm")["ruleset_character"]["resources"]["hp"] < 12
 
 
+def _ranged_only_attacks() -> list[dict]:
+    return [{
+        "id": "shortbow", "name": "Shortbow", "attack_bonus": 4,
+        "damage": "1d6+2", "damage_type": "piercing", "range": 80,
+    }]
+
+
+def test_moving_away_from_a_ranged_only_enemy_triggers_no_opportunity_attack() -> None:
+    """Only melee-range profiles threaten: a bowman does not get to react."""
+
+    engine, instance = _instance()
+    _start(engine, instance)
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["attacks"] = (
+        _ranged_only_attacks()
+    )
+
+    intent = {
+        "intent_id": "move-1", "type": "move", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": -10,
+    }
+    resolved = engine.resolve_intent(instance, intent, SequenceRng([]))
+    engine.apply_batch(instance, resolved["event_batch"])
+
+    assert not resolved.get("pending_decision")
+    combat = ruleset_runtime.state(instance)["combat"]
+    assert combat["positions"]["player:gm"] == -10
+    assert combat["reactions"]["enemy:goblin-1"] == 1
+
+
+def test_opportunity_attack_resolution_skips_a_threat_without_a_melee_weapon() -> None:
+    """The settlement side re-checks melee profiles instead of trusting the decision."""
+
+    engine, instance = _instance()
+    _start(engine, instance)
+    intent = {
+        "intent_id": "move-1", "type": "move", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": -10,
+    }
+    resolved = engine.resolve_intent(instance, intent, SequenceRng([]))
+    engine.apply_batch(instance, resolved["event_batch"])
+    assert resolved["pending_decision"]["kind"] == "opportunity_attack"
+
+    # 决策生成后、结算前，威胁者失去了全部近战档案：结算必须跳过这次
+    # 借机攻击（不消耗反应、不臆造武器），移动照常完成。
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["attacks"] = (
+        _ranged_only_attacks()
+    )
+
+    decision_intent = {
+        "intent_id": "decision-1", "type": "decision.resolve", "expected_version": 2,
+        "submitted_by": "gm", "decision_id": "decision:move-1", "option": "resolve",
+    }
+    decided = engine.resolve_intent(instance, decision_intent, SequenceRng([15, 4]))
+    assert decided["ok"] is True
+    engine.apply_batch(instance, decided["event_batch"])
+
+    combat = ruleset_runtime.state(instance)["combat"]
+    assert combat["positions"]["player:gm"] == -10
+    assert combat["pending_decisions"] == []
+    assert combat["reactions"]["enemy:goblin-1"] == 1
+    assert not any(
+        event["type"] == "check.resolved"
+        for event in decided["event_batch"]["events"]
+    )
+
+
 def test_natural_twenty_death_save_restores_one_hp() -> None:
     engine, instance = _instance()
     canonical = instance.get_character_sheet("gm")["ruleset_character"]

@@ -18,6 +18,7 @@ import type {
   CharacterClassResource,
   JsonObject,
   RulesetCombatAction,
+  RulesetCombatReactionFeature,
   RulesetCombatSpell,
   RulesetCombatTarget,
   RulesetCombatWeapon,
@@ -63,7 +64,12 @@ const selectedWeaponId = ref('')
 const selectedSpellRef = ref('')
 const selectedSlot = ref(0)
 const selectedTargetId = ref('')
-const selectedSpellTargetId = ref('')
+// 施法目标按"目标条目"维护：单目标仍是 1 条；升环或多射线时由 projection
+// 声明上限，前端只做条目编排，合法性仍由服务端判定。
+const selectedSpellTargets = ref<string[]>([''])
+const selectedSpellTargetCount = ref(1)
+const selectedResistType = ref('')
+const teleportDistance = ref<number | string>('')
 const movementDistance = ref(5)
 const staged = ref<JsonObject | null>(null)
 const confirmCard = ref<HTMLElement | null>(null)
@@ -140,9 +146,26 @@ const hasUsableWeapon = computed(() => (attackAction.value?.weapons || []).some(
 const selectedSpell = computed(() => spellAction.value?.spells?.find(
   item => item.spell_ref === selectedSpellRef.value,
 ))
-const selectedTarget = computed(() => targetsFor(selectedSpell.value).find(
-  item => item.actor_id === selectedSpellTargetId.value,
-))
+// 前端只按 projection 计算"可选择条目上限"（升环加目标/射线条数），
+// 不计算伤害、临时 HP 或任何结算结果。
+const spellTargetLimit = computed(() => {
+  const spell = selectedSpell.value
+  const base = Math.max(1, Number(spell?.target_count ?? 1))
+  const upcast = Math.max(0, Number(spell?.upcast_target_count ?? 0))
+  const slot = Number(selectedSlot.value)
+  const level = Number(spell?.level ?? 0)
+  return base + upcast * Math.max(0, slot - level)
+})
+const spellTargetsValid = computed(() => {
+  const spell = selectedSpell.value
+  if (!spell) return false
+  const ids = selectedSpellTargets.value.filter(Boolean)
+  if (!ids.length || ids.length > spellTargetLimit.value) return false
+  if (!spell.repeat_targets && new Set(ids).size !== ids.length) return false
+  if (spell.resist_choice?.length && !selectedResistType.value) return false
+  if (spell.mode === 'teleport' && !validTeleportDistance()) return false
+  return true
+})
 const latestEvents = computed(() => {
   const batches = data.value?.result?.resolved_event_batches
   if (Array.isArray(batches)) {
@@ -276,7 +299,7 @@ const selectedCapability = computed(() => capabilityActions.value.find(
 const aimedTargetId = computed(() => {
   switch (dockMode.value) {
     case 'attack': return selectedTargetId.value
-    case 'spell': return selectedSpellTargetId.value
+    case 'spell': return selectedSpellTargets.value[0] || ''
     case 'capability': return selectedCapability.value?.requires_target ? capabilityTargetId.value : ''
     case 'explore': return explorationTargetId.value
     default: return ''
@@ -334,7 +357,7 @@ const canStageDock = computed(() => {
   switch (dockMode.value) {
     case 'attack': return Boolean(selectedWeapon.value && selectedTargetId.value && selectedWeaponRange.value?.usable)
     // Only a spell listed under the open tab may be sent from it.
-    case 'spell': return Boolean(selectedTarget.value
+    case 'spell': return Boolean(spellTargetsValid.value
       && spellChoices.value.some(item => item.spell_ref === selectedSpellRef.value))
     case 'capability': return Boolean(selectedCapability.value
       && (!selectedCapability.value.requires_target || capabilityTargetId.value))
@@ -391,7 +414,14 @@ watch(
 function pickBattleTarget(actorId: string): void {
   inspectedId.value = actorId
   if (attackAction.value?.targets?.some(item => item.actor_id === actorId)) selectedTargetId.value = actorId
-  if (targetsFor(selectedSpell.value).some(item => item.actor_id === actorId)) selectedSpellTargetId.value = actorId
+  if (targetsFor(selectedSpell.value).some(item => item.actor_id === actorId)) {
+    const targets = selectedSpellTargets.value.slice()
+    if (!targets.includes(actorId)) {
+      const empty = targets.findIndex(id => !id)
+      targets[empty < 0 ? 0 : empty] = actorId
+      selectedSpellTargets.value = targets
+    }
+  }
   if (capabilityTargets.value.some(item => item.actor_id === actorId)) capabilityTargetId.value = actorId
   if (explorationAction.value?.targets?.some(item => item.actor_id === actorId)) explorationTargetId.value = actorId
 }
@@ -448,10 +478,53 @@ function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
   const targets = spellAction.value?.targets || attackAction.value?.targets || []
   if (!spell || !currentActor.value) return targets
   if (spell.trigger_target_id) return targets.filter(target => target.actor_id === spell.trigger_target_id)
-  const allied = spell.mode === 'healing' || spell.mode === 'buff' || spell.mode === 'stabilize'
-  return targets.filter(target => allied
-    ? target.kind === currentActor.value?.kind
-    : target.kind !== currentActor.value?.kind)
+  if (spell.target_scope === 'self') {
+    return targets.filter(target => target.actor_id === currentActor.value?.actor_id)
+  }
+  const allied = (target: RulesetCombatTarget): boolean => (
+    target.side ? target.side === 'party' : target.kind === currentActor.value?.kind
+  )
+  if (spell.mode === 'revive') {
+    // 死亡状态由服务端投影；只有明确 is_dead 的 player 盟友才可复活，
+    // 0 HP 仍在死亡豁免中的角色不算 dead。服务端 Revivify 只接受 player，
+    // 因此死亡 companion 不能作为合法候选出现。
+    return targets.filter(target => allied(target) && target.kind === 'player' && target.is_dead === true)
+  }
+  if (spell.target_side === 'ally') return targets.filter(allied)
+  if (spell.target_side === 'enemy') return targets.filter(target => !allied(target))
+  if (spell.target_side === 'any') return targets
+  // 旧服务端没有 target_side：保持原有 mode 语义作为兼容边界。
+  const beneficial = spell.mode === 'healing' || spell.mode === 'buff' || spell.mode === 'stabilize'
+  return targets.filter(target => beneficial ? allied(target) : !allied(target))
+}
+
+function validTeleportDistance(): boolean {
+  const distance = Number(teleportDistance.value)
+  return Number.isInteger(distance) && distance !== 0
+}
+
+function spellTargetOptions(): string[] {
+  return targetsFor(selectedSpell.value).map(target => target.actor_id)
+}
+
+function resizeSpellTargets(count: number): void {
+  const next = Math.max(1, Math.min(Number(count) || 1, spellTargetLimit.value))
+  const current = selectedSpellTargets.value.slice(0, next)
+  const options = spellTargetOptions()
+  while (current.length < next) {
+    const distinct = options.find(id => !current.includes(id))
+    current.push(distinct ?? options[0] ?? '')
+  }
+  selectedSpellTargets.value = current
+  selectedSpellTargetCount.value = next
+}
+
+function syncSpellTargets(): void {
+  const spell = selectedSpell.value
+  selectedSpellTargetCount.value = 1
+  selectedSpellTargets.value = [targetsFor(spell)[0]?.actor_id || '']
+  selectedResistType.value = spell?.resist_choice?.[0] || ''
+  teleportDistance.value = ''
 }
 
 // A refresh (the 30 s poll, a teammate's turn) must not throw away what the
@@ -475,7 +548,26 @@ function resetSelections(): void {
   const spell = spells.find(item => item.spell_ref === selectedSpellRef.value) || spellChoices.value[0] || spells[0]
   selectedSpellRef.value = spell?.spell_ref || ''
   selectedSlot.value = keepSlot(selectedSlot.value, spell?.available_slot_levels)
-  selectedSpellTargetId.value = spell ? keepOrFirst(selectedSpellTargetId.value, targetsFor(spell)) : ''
+  // 刷新时保留仍然合法的施法目标；目标数量与上限由投影重新收敛。
+  const legalSpellTargets = targetsFor(spell)
+  const keptSpellTargets = selectedSpellTargets.value.filter(id => (
+    id && legalSpellTargets.some(item => item.actor_id === id)
+  ))
+  const targetCount = Math.max(1, Math.min(keptSpellTargets.length || 1, spellTargetLimit.value))
+  const nextSpellTargets = keptSpellTargets.slice(0, targetCount)
+  while (nextSpellTargets.length < targetCount) {
+    const distinct = legalSpellTargets.find(item => !nextSpellTargets.includes(item.actor_id))
+    nextSpellTargets.push(distinct?.actor_id || legalSpellTargets[0]?.actor_id || '')
+  }
+  selectedSpellTargets.value = nextSpellTargets
+  selectedSpellTargetCount.value = targetCount
+  if (spell?.resist_choice?.length) {
+    if (!spell.resist_choice.includes(selectedResistType.value)) {
+      selectedResistType.value = spell.resist_choice[0] || ''
+    }
+  } else {
+    selectedResistType.value = ''
+  }
   selectedTargetId.value = keepOrFirst(selectedTargetId.value, attackAction.value?.targets || [])
   capabilityTargetId.value = keepOrFirst(capabilityTargetId.value, capabilityTargets.value)
   chooseUsableWeapon()
@@ -509,7 +601,10 @@ function clearGameScopedState(): void {
   selectedSpellRef.value = ''
   selectedSlot.value = 0
   selectedTargetId.value = ''
-  selectedSpellTargetId.value = ''
+  selectedSpellTargets.value = ['']
+  selectedSpellTargetCount.value = 1
+  selectedResistType.value = ''
+  teleportDistance.value = ''
   movementDistance.value = 5
   staged.value = null
   returnFocus = null
@@ -592,12 +687,18 @@ function stageAttack(): void {
 
 function stageSpell(): void {
   const spell = selectedSpell.value
-  if (!spell || !selectedSpellTargetId.value || !spellAction.value) return
-  stage({
+  if (!spell || !spellAction.value || !spellTargetsValid.value) return
+  const ids = selectedSpellTargets.value.filter(Boolean)
+  const payload: JsonObject = {
     type: 'cast_spell', actor_id: spellAction.value.actor_id,
-    target_id: selectedSpellTargetId.value, spell_ref: spell.spell_ref,
-    slot_level: selectedSlot.value,
-  })
+    spell_ref: spell.spell_ref, slot_level: selectedSlot.value,
+  }
+  // 单目标继续用 target_id，多目标才用 target_ids，两者互斥。
+  if (ids.length > 1) payload.target_ids = ids
+  else payload.target_id = ids[0]
+  if (spell.resist_choice?.length) payload.resist_type = selectedResistType.value
+  if (spell.mode === 'teleport') payload.teleport_distance = Number(teleportDistance.value)
+  stage(payload)
 }
 
 function stageExplorationSpell(): void {
@@ -647,6 +748,9 @@ const reactionSpellRef = ref('')
 const reactionSlot = ref(0)
 const reactionSpells = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
   ? (pendingDecision.value.spells as RulesetCombatSpell[] | undefined) || []
+  : [])
+const reactionFeatures = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
+  ? (pendingDecision.value.features as RulesetCombatReactionFeature[] | undefined) || []
   : [])
 const reactionSpell = computed(() => (
   reactionSpells.value.find(item => item.spell_ref === reactionSpellRef.value) || reactionSpells.value[0] || null
@@ -700,10 +804,17 @@ watch(selectedSpellRef, () => {
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
   // Switching spells keeps the unit the player clicked when the new spell can reach it.
   const legal = targetsFor(spell)
-  const kept = [inspectedId.value, selectedSpellTargetId.value]
+  const kept = [inspectedId.value, ...selectedSpellTargets.value]
     .find(id => id && legal.some(item => item.actor_id === id))
-  selectedSpellTargetId.value = kept || legal[0]?.actor_id || ''
+  syncSpellTargets()
+  if (kept) selectedSpellTargets.value = [kept]
 })
+watch(selectedSlot, () => {
+  if (selectedSpellTargets.value.length > spellTargetLimit.value) {
+    resizeSpellTargets(spellTargetLimit.value)
+  }
+})
+watch(selectedSpellTargetCount, count => resizeSpellTargets(count))
 watch(explorationSpellRef, () => {
   explorationSlot.value = explorationSpell.value?.available_slot_levels?.[0] ?? 0
 })
@@ -816,10 +927,17 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <button v-if="reactionSpell" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'cast', { spell_ref: reactionSpell.spell_ref, slot_level: reactionSlot })">
                 {{ spellText.castReaction(reactionSpell.name, Number(reactionSpell.armor_class_bonus || 0), Number(pendingDecision.attack_total) < Number(pendingDecision.armor_class) + Number(reactionSpell.armor_class_bonus || 0)) }}
               </button>
+              <button
+                v-for="feature in reactionFeatures"
+                :key="feature.feature_id"
+                :disabled="busy"
+                @click="decide(pendingDecision, 'feature', { feature_id: feature.feature_id })"
+              >{{ spellText.useReactionFeature(feature.name, Number(feature.damage_multiplier)) }}</button>
               <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ spellText.declineReaction }}</button>
             </div>
           </template>
           <div v-else>
+            <button v-if="pendingDecision.options.includes('counter')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'counter')">{{ copy.counter }}</button>
             <button v-if="pendingDecision.options.includes('resolve')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'resolve')">{{ copy.resolve }}</button>
             <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.decline : copy.decline }}</button>
           </div>
@@ -892,12 +1010,26 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                     <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
                   </select>
                 </label>
-                <label>{{ copy.target }}
-                  <select v-model="selectedSpellTargetId">
+                <label v-if="spellTargetLimit > 1">{{ copy.targetCount }}
+                  <select v-model.number="selectedSpellTargetCount">
+                    <option v-for="count in spellTargetLimit" :key="count" :value="count">{{ count }}</option>
+                  </select>
+                </label>
+                <label v-for="(_entry, index) in selectedSpellTargets" :key="index">
+                  {{ copy.target }}{{ selectedSpellTargets.length > 1 ? ` ${index + 1}` : '' }}
+                  <select v-model="selectedSpellTargets[index]">
                     <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
                       {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
                     </option>
                   </select>
+                </label>
+                <label v-if="selectedSpell?.resist_choice?.length">{{ copy.resistType }}
+                  <select v-model="selectedResistType">
+                    <option v-for="kind in selectedSpell.resist_choice" :key="kind" :value="kind">{{ localizedTerm(kind) }}</option>
+                  </select>
+                </label>
+                <label v-if="selectedSpell?.mode === 'teleport'">{{ copy.teleportDistance }}
+                  <input v-model.number="teleportDistance" type="number" step="5" />
                 </label>
               </template>
               <SpellAvailability :spells="spellActor?.spells || []" />

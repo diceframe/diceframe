@@ -1155,10 +1155,13 @@ export interface RulesetRestResponse extends JsonObject {
 export interface RulesetCombatTarget {
   actor_id: string
   kind: 'player' | 'enemy'
+  side?: 'party' | 'enemy'
   name: string
   hp: number
   max_hp: number
   position: number
+  /** Server-projected death state; clients must not infer it from hp === 0. */
+  is_dead?: boolean
   armor_class?: number
   speed?: number
   conditions?: Record<string, JsonObject>
@@ -1198,7 +1201,20 @@ export interface RulesetCombatSpell extends JsonObject {
   range: number
   mode: string
   available_slot_levels: number[]
+  target_scope?: 'self'
+  target_side?: 'ally' | 'enemy' | 'any'
+  target_count?: number
+  upcast_target_count?: number
+  repeat_targets?: boolean
+  resist_choice?: string[]
   trigger_target_id?: string
+}
+
+export interface RulesetCombatReactionFeature extends JsonObject {
+  feature_id: string
+  name: string
+  mode: string
+  damage_multiplier?: number
 }
 
 export interface RulesetPendingDecision extends JsonObject {

@@ -17,8 +17,9 @@ from .primitives import (
     actor_kind as _actor_kind,
     canonical as _canonical,
 )
+from .check_modes import condition_flags
 from .readiness import required_encounter_player_ids
-from .reaction_spells import HIT_REACTION_DECISION
+from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
 
 
@@ -48,10 +49,12 @@ def validate_enemy_profiles(enemies: Any) -> None:
             ("hp", 1, 10000), ("armor_class", 1, 40),
             ("speed", 0, 200), ("position", -10000, 10000),
             ("initiative_modifier", -20, 30),
+            # 反击法术能力：0 表示没有该项能力，缺省即 0。
+            ("counterspell_dc", 0, 30),
         ):
             default = (
                 30 if field_name in {"speed", "position"}
-                else 0 if field_name == "initiative_modifier" else None
+                else 0 if field_name in {"initiative_modifier", "counterspell_dc"} else None
             )
             value = enemy.get(field_name, default)
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
@@ -210,6 +213,8 @@ class CombatValidationMixin:
             raise CombatIntentError("resolve the melee hit spell decision first")
         if any(row.get("kind") == HIT_REACTION_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("waiting for the defender's reaction spell decision")
+        if any(row.get("kind") == COUNTER_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
+            raise CombatIntentError("resolve the counter spell decision first")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -239,12 +244,11 @@ class CombatValidationMixin:
                 if decision.get("kind") == HIT_REACTION_DECISION:
                     self._validate_hit_reaction(instance, combat, decision, intent)
                     return
-            elif submitted_by != gm_uid:
+            elif submitted_by != str(decision.get("assigned_to") or gm_uid):
                 raise CombatIntentError("only the assigned GM can resolve this reaction")
-            if intent.get("option") == "resolve":
-                threat_ids = list(decision.get("threat_actor_ids") or [])
-                if not threat_ids or int(combat.get("reactions", {}).get(threat_ids[0], 0)) < 1:
-                    raise CombatIntentError("the threatening actor has no reaction available")
+            # 借机攻击的最终资格由 resolution 的 _reaction_eligible 复查：
+            # 开窗后威胁者失能 / 禁反应 / 反应耗尽时清除决策并继续移动。
+            # 这里若提前按反应预算拒绝，最终复查将永远不可达。
             return
         actor_id = str(intent.get("actor_id") or "")
         if actor_id != self._current_actor(combat):
@@ -278,14 +282,27 @@ class CombatValidationMixin:
             raise CombatIntentError("death saves are only available at 0 HP")
         if intent_type == "death_save" and "stable" in actor["conditions"]:
             raise CombatIntentError("a stable actor does not make death saves")
+        # 失能族只禁"动作"（动作/附赠动作/反应），移动不是动作：纯 incapacitated
+        # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
+        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        if flags["incapacitated"] and intent_type in {
+            "attack", "cast_spell", "class_capability", "dash", "dodge",
+            "disengage", "stabilize",
+        }:
+            raise CombatIntentError("an incapacitated actor cannot take actions")
+        if flags["speed_zero"] and intent_type == "move":
+            raise CombatIntentError("an actor with speed zero cannot move")
         economy = combat.get("economy") or {}
         if intent_type in {"attack", "dash", "dodge", "disengage", "stabilize"}:
+            has_action = int(economy.get("action", 0) or 0) > 0 or int(
+                economy.get("surge_action", 0) or 0
+            ) > 0
             if intent_type == "attack":
-                if int(economy.get("action", 0) or 0) < 1 and int(
+                if not has_action and int(
                     economy.get("attacks_remaining", 0) or 0
                 ) < 1:
                     raise CombatIntentError("the Attack action is no longer available")
-            elif int(economy.get("action", 0) or 0) < 1:
+            elif not has_action:
                 raise CombatIntentError("the action has already been spent")
         if intent_type == "move":
             distance = intent.get("distance")
@@ -322,6 +339,23 @@ class CombatValidationMixin:
         capability_id = str(intent.get("capability_id") or "")
         if not capability_id:
             raise CombatIntentError("capability_id is required")
+        capability = self.features.declared_capability(
+            self._feature_character(actor), capability_id,
+        )
+        if capability is not None:
+            conditions = actor.get("conditions") or {}
+            required = capability.requires_condition
+            if required and required not in conditions:
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} requires "
+                    f"the {self.features.catalog.label(required, required)} condition"
+                )
+            forbidden = capability.forbidden_condition
+            if forbidden and forbidden in conditions:
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
+                    f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
+                )
         views = {
             view.id: view
             for view in self._available_class_capabilities(
@@ -333,9 +367,6 @@ class CombatValidationMixin:
             raise CombatIntentError("class capability is not available to this actor")
         if not view.available:
             raise CombatIntentError(view.blocked_reason or "class capability is not available")
-        capability = self.features.declared_capability(
-            self._feature_character(actor), capability_id,
-        )
         if capability is None:  # pragma: no cover - availability already proved it
             raise CombatIntentError("class capability is not available to this actor")
         has_unarmed_strike = any(
@@ -382,6 +413,8 @@ class CombatValidationMixin:
     ) -> None:
         if actor["kind"] not in {"player", "companion"}:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
+        if "rage" in actor["conditions"]:
+            raise CombatIntentError("you cannot cast spells while raging")
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
@@ -421,7 +454,13 @@ class CombatValidationMixin:
             str(item or "") for item in target_values if str(item or "")
         ]
         required_count = int(effect.get("target_count", 1) or 1)
-        if not target_ids or len(target_ids) > required_count or len(set(target_ids)) != len(target_ids):
+        upcast_targets = int(effect.get("upcast_target_count", 0) or 0)
+        if upcast_targets:
+            required_count += upcast_targets * max(0, slot_level - int(spell["level"]))
+        has_duplicates = len(set(target_ids)) != len(target_ids)
+        if not target_ids or len(target_ids) > required_count or (
+            has_duplicates and not effect.get("repeat_targets")
+        ):
             raise CombatIntentError(f"spell requires 1 to {required_count} unique targets")
         if effect["mode"] == "triggered_damage" and target_ids != [trigger["target_id"]]:
             raise CombatIntentError("this spell must target the creature hit by the melee attack")
@@ -429,25 +468,58 @@ class CombatValidationMixin:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")
             target_side = str(target.get("side") or "")
-            if effect["mode"] in {"healing", "buff", "stabilize"}:
+            if effect["mode"] in {
+                "healing", "buff", "stabilize", "temp_hp", "teleport", "revive",
+            }:
                 if target_side != actor_side:
                     raise CombatIntentError("healing and beneficial spells require an allied target")
-                if "dead" in target.get("conditions", {}):
+                if effect["mode"] == "revive":
+                    if target["kind"] != "player":
+                        raise CombatIntentError("revive spells target players only")
+                    if "dead" not in target.get("conditions", {}):
+                        raise CombatIntentError("revive spells require a dead target")
+                elif "dead" in target.get("conditions", {}):
                     raise CombatIntentError("dead targets require a resurrection effect")
-            elif target_side == actor_side:
+            elif target_side == actor_side and effect["mode"] != "dispel":
                 raise CombatIntentError("offensive spells require a hostile target")
+            if effect.get("target_scope") == "self" and target_id != str(actor["actor_id"]):
+                # 声明式 Self 约束：内容声明什么，这里就只校验什么，
+                # 不再为具体法术 mode 复制特判。
+                raise CombatIntentError("this spell can only target the caster")
+            if effect["mode"] == "dispel" and "dead" in target.get("conditions", {}):
+                # 解除魔法可对任意阵营，但死亡目标不在"生物"范围内。
+                raise CombatIntentError("dead targets cannot be dispelled")
             if effect["mode"] == "stabilize" and (
                 target["kind"] != "player" or target["hp"] > 0
                 or "stable" in target.get("conditions", {})
             ):
                 raise CombatIntentError("this spell requires a dying ally at 0 HP")
-            if target["hp"] <= 0 and effect["mode"] not in {"healing", "buff", "stabilize"}:
+            if target["hp"] <= 0 and effect["mode"] not in {
+                "healing", "buff", "stabilize", "dispel", "revive",
+            }:
                 raise CombatIntentError("spell target is not active")
+            allowed_types = effect.get("target_creature_types")
+            if allowed_types and str(target.get("creature_type") or "") not in allowed_types:
+                raise CombatIntentError("the spell target's creature type is not eligible")
             if effect["mode"] != "triggered_damage":
                 self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
             raise CombatIntentError("spell damage_type choice is required")
+        resist_choices = effect.get("resist_choice")
+        if resist_choices:
+            if intent.get("resist_type") not in resist_choices:
+                raise CombatIntentError("spell resist_type choice is required")
+        elif intent.get("resist_type") is not None:
+            raise CombatIntentError("this spell does not take a resist_type")
+        if effect["mode"] == "teleport":
+            distance = intent.get("teleport_distance")
+            if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
+                raise CombatIntentError("teleport distance must be a non-zero integer")
+            if abs(distance) > int(effect["range"]):
+                raise CombatIntentError("teleport distance exceeds the spell range")
+        elif intent.get("teleport_distance") is not None:
+            raise CombatIntentError("teleport distance is not valid for this spell")
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:

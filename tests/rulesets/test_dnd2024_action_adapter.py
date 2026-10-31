@@ -65,7 +65,7 @@ def test_crit_doubling_doubles_every_dice_node_in_order() -> None:
 
     node = attack_damage_node(
         damage_formula="1d8", modifier=2, critical=True,
-        extra_dice_formula="1d6",
+        extra_dice_formulas=["1d6"],
     )
     new_total, new_rolls = roll_damage_node(node, _SeqRng(list(values)))
 
@@ -73,6 +73,30 @@ def test_crit_doubling_doubles_every_dice_node_in_order() -> None:
     assert double_dice_counts({"op": "dice", "formula": "2d6"}) == {
         "op": "dice", "formula": "4d6",
     }
+
+
+def test_multiple_extra_dice_keep_caller_order_and_all_double_on_a_crit() -> None:
+    # 主骰 → Hex → 偷袭：rng 顺序即骰节点顺序，重击翻倍三组骰，
+    # 属性修正仍在最后且不翻倍。
+    values = [4, 5, 6, 2, 3, 3]
+    node = attack_damage_node(
+        damage_formula="1d8", modifier=3, critical=True,
+        extra_dice_formulas=["1d6", "1d6"],
+    )
+
+    total, rolls = roll_damage_node(node, _SeqRng(list(values)))
+
+    assert rolls == values
+    assert total == (4 + 5) + (6 + 2) + (3 + 3) + 3
+    # 非重击时同一顺序只掷一次每组骰。
+    values_plain = [4, 5, 6]
+    plain = attack_damage_node(
+        damage_formula="1d8", modifier=3, critical=False,
+        extra_dice_formulas=["1d6", "1d6"],
+    )
+    total_plain, rolls_plain = roll_damage_node(plain, _SeqRng(list(values_plain)))
+    assert rolls_plain == values_plain
+    assert total_plain == 4 + 5 + 6 + 3
 
 
 def test_spell_formula_node_upcast_and_cantrip_scaling() -> None:

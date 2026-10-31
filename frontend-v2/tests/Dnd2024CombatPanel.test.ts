@@ -165,6 +165,27 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('offers the counterspell option for a pending counter window', async () => {
+    mocks.locale = 'zh-CN'
+    const data = response('active') as any
+    const decision = {
+      decision_id: 'decision:cast', kind: 'counter_spell', assigned_to: 'gm',
+      options: ['counter', 'decline'], threat_actor_ids: ['enemy:goblin-1'],
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = wrapper.get('.decision-card')
+    expect(card.get('.combat-primary').text()).toBe('反制法术')
+    await card.get('.combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(mocks.decide.mock.calls[0][2]).toMatchObject({ option: 'counter' })
+    wrapper.unmount()
+  })
+
   it('offers the free use and exact hit target while a melee-hit decision is pending', async () => {
     mocks.locale = 'zh-CN'
     const data = response('active') as any
@@ -215,6 +236,212 @@ describe('D&D 2024 combat panel', () => {
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[1][1]).toMatchObject({ type: 'cast_spell', target_id: 'player:gm' })
+    wrapper.unmount()
+  })
+
+  it('projects a self-only spell onto the caster', async () => {
+    const data = response('active') as any
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { actor_id: 'player:ally', kind: 'player', side: 'party', name: 'Ally', hp: 12, max_hp: 12, position: 0, is_dead: false },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:false_life', name: 'False Life', level: 1, mode: 'temp_hp',
+        casting_time: 'Action', available_slot_levels: [1],
+        target_scope: 'self', target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(1)
+    expect((targetSelect.element as HTMLSelectElement).value).toBe('player:gm')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'cast_spell', target_id: 'player:gm' })
+    expect(mocks.submit.mock.calls[0][1]).not.toHaveProperty('target_ids')
+    wrapper.unmount()
+  })
+
+  it('offers only dead allies for a revive spell', async () => {
+    const data = response('active') as any
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { actor_id: 'player:fallen', kind: 'player', side: 'party', name: 'Fallen', hp: 0, max_hp: 12, position: 0, is_dead: true },
+      { actor_id: 'player:dying', kind: 'player', side: 'party', name: 'Dying', hp: 0, max_hp: 12, position: 0, is_dead: false },
+      // 服务端 Revivify 只接受 player，死亡 companion 不能出现在合法候选中。
+      { actor_id: 'companion:fallen', kind: 'companion', side: 'party', name: 'Fallen Companion', hp: 0, max_hp: 12, position: 0, is_dead: true },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:revivify', name: 'Revivify', level: 3, mode: 'revive',
+        casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(1)
+    expect((targetSelect.element as HTMLSelectElement).value).toBe('player:fallen')
+    wrapper.unmount()
+  })
+
+  it('submits multiple targets for an upcast spell', async () => {
+    const data = response('active') as any
+    const goblin = data.gameplay.combat.actors[1]
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { ...goblin, actor_id: 'enemy:goblin-2', name: 'Goblin 2' },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:hold_person', name: 'Hold Person', level: 2, mode: 'saving_throw',
+        casting_time: 'Action', available_slot_levels: [2, 3],
+        target_side: 'enemy', target_count: 1, upcast_target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    await card.findAll('select')[1]!.setValue('3')
+    await flushPromises()
+    await card.findAll('select')[2]!.setValue('2')
+    await flushPromises()
+    expect(card.findAll('select')[3]!.findAll('option')).toHaveLength(2)
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    const sent = mocks.submit.mock.calls[0][1]
+    expect(sent).toMatchObject({ type: 'cast_spell', target_ids: ['enemy:goblin-1', 'enemy:goblin-2'] })
+    expect(sent).not.toHaveProperty('target_id')
+    wrapper.unmount()
+  })
+
+  it('allows repeated targets for a ray spell', async () => {
+    const data = response('active') as any
+    const goblin = data.gameplay.combat.actors[1]
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { ...goblin, actor_id: 'enemy:goblin-2', name: 'Goblin 2' },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:scorching_ray', name: 'Scorching Ray', level: 2, mode: 'spell_attack',
+        casting_time: 'Action', available_slot_levels: [2],
+        target_side: 'enemy', target_count: 3, upcast_target_count: 1, repeat_targets: true,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    expect(card.findAll('select')[2]!.findAll('option')).toHaveLength(3)
+    await card.findAll('select')[2]!.setValue('3')
+    await flushPromises()
+    expect(card.findAll('select')).toHaveLength(6)
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    const sent = mocks.submit.mock.calls[0][1]
+    expect(sent).toMatchObject({ type: 'cast_spell' })
+    expect(sent.target_ids).toHaveLength(3)
+    expect(sent).not.toHaveProperty('target_id')
+    wrapper.unmount()
+  })
+
+  it('requires and submits a resistance choice', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:protection_from_energy', name: 'Protection from Energy', level: 3,
+        mode: 'buff', casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'ally', target_count: 1, resist_choice: ['acid', 'fire'],
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const resist = card.findAll('select').find(select => select.text().includes('Acid'))!
+    await resist.setValue('fire')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'player:gm', resist_type: 'fire',
+    })
+    wrapper.unmount()
+  })
+
+  it('requires and submits a teleport distance', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:misty_step', name: 'Misty Step', level: 2, mode: 'teleport',
+        casting_time: 'Bonus Action', available_slot_levels: [2],
+        target_scope: 'self', target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    await wrapper.get('#dock-tab-bonus').trigger('click')
+    const card = await openTile(wrapper, 'spell')
+    expect(wrapper.get('.dock-confirm').attributes('disabled')).toBeDefined()
+    await card.get('input[type=number]').setValue('25')
+    expect(wrapper.get('.dock-confirm').attributes('disabled')).toBeUndefined()
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'player:gm', teleport_distance: 25,
+    })
+    wrapper.unmount()
+  })
+
+  it('lets dispel magic target either side', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:dispel_magic', name: 'Dispel Magic', level: 3, mode: 'dispel',
+        casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'any', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(2)
+    await targetSelect.setValue('enemy:goblin-1')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'enemy:goblin-1',
+    })
     wrapper.unmount()
   })
 
