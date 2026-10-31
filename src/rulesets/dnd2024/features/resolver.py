@@ -262,6 +262,48 @@ class Dnd2024ClassFeatureResolver:
             return int(default), ""
         return found, source_id
 
+    def unarmored_ac_bonus_abilities(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[str, ...]:
+        """Ability ids whose modifiers add to an unarmored base AC.
+
+        Each owned declaration names exactly one additional ability. Multiple
+        declarations are alternative candidates for the "one base AC at a
+        time" rule, so the armor class formula takes the best candidate instead
+        of summing ability modifiers.
+        """
+
+        abilities: list[str] = []
+        for definition in self.features_for(character):
+            ability = definition.parameters.get("unarmored_ac_ability_bonus")
+            if isinstance(ability, str) and ability and ability not in abilities:
+                abilities.append(ability)
+        return tuple(abilities)
+
+    def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
+        """The Hit Point maximum increase granted by owned features.
+
+        ``max_hp_bonus_first`` applies at the declaring minimum level and
+        ``max_hp_bonus_per_level_after`` once per later class level. Ownership
+        is already resolved by ``features_for``, so this only counts levels
+        after the grant and never retroactively pays for earlier ones.
+        """
+
+        state = self.class_state(character)
+        if state is None:
+            return 0
+        _, level = state
+        total = 0
+        for definition in self.features_for(character):
+            first = definition.parameters.get("max_hp_bonus_first", 0)
+            per_level = definition.parameters.get("max_hp_bonus_per_level_after", 0)
+            if isinstance(first, bool) or not isinstance(first, int):
+                continue
+            if isinstance(per_level, bool) or not isinstance(per_level, int):
+                continue
+            total += first + per_level * max(0, level - definition.minimum_level)
+        return total
+
     def feature_flag_sources(
         self,
         character: Mapping[str, Any] | None,
@@ -678,6 +720,7 @@ class Dnd2024ClassFeatureResolver:
                     )
             self._validate_passive_parameters(definition)
             self._validate_defeat_trigger_parameters(definition)
+            self._validate_defense_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -770,3 +813,30 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
             )
+
+    @staticmethod
+    def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the defense-calculation contract.
+
+        The unarmored AC bonus is one ability id, never a stacked expression;
+        the two Hit Point knobs are bounded non-negative integers so a typo
+        cannot silently become a huge or negative maximum.
+        """
+
+        parameters = definition.parameters
+        ability = parameters.get("unarmored_ac_ability_bonus")
+        if "unarmored_ac_ability_bonus" in parameters and (
+            not isinstance(ability, str) or ability not in ABILITY_IDS
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.unarmored_ac_ability_bonus must name an ability"
+            )
+        for key in ("max_hp_bonus_first", "max_hp_bonus_per_level_after"):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int)
+                or not 0 <= value <= 20
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be an integer from 0 to 20"
+                )

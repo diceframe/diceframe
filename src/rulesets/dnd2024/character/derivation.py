@@ -7,8 +7,15 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.binding import rule_binding
+from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 from .primitives import ABILITY_IDS, ability_modifier, proficiency_bonus, ref_id as _ref_id
+
+
+def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
+    """The minimal canonical shape ``features_for`` needs to resolve ownership."""
+
+    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
 
 
 def derive_armor_class(
@@ -17,6 +24,7 @@ def derive_armor_class(
     bundle: Any,
     *,
     warnings: list[str] | None = None,
+    unarmored_ability_bonuses: Iterable[str] = (),
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -30,6 +38,13 @@ def derive_armor_class(
     resolve to the single best one instead of stacking their bases, only one
     shield bonus is ever applied, and an item the bundle does not define is
     skipped with a warning instead of guessing at a lookalike.
+
+    ``unarmored_ability_bonuses`` names the abilities that a feature may add to
+    an *unarmored* base AC.  "While you aren't wearing armor" is a hard
+    precondition: with any armor present the plain ``10 + Dexterity`` baseline
+    is used, so a feature formula never competes with the armor's own AC.  Each
+    named ability is an alternative candidate, and the best candidate wins --
+    ability modifiers are never summed.
     """
 
     dex_modifier = ability_modifier(int(abilities["dex"]))
@@ -67,6 +82,12 @@ def derive_armor_class(
                     warnings.append(f"extra shield ignored by armor class: {ref}")
                 continue
             shield_bonus = bonus
+    if best_armor is None:
+        for ability in unarmored_ability_bonuses:
+            unarmored = max(
+                unarmored,
+                10 + dex_modifier + ability_modifier(int(abilities[str(ability)])),
+            )
     return max(unarmored, best_armor if best_armor is not None else unarmored) + shield_bonus
 
 
@@ -145,7 +166,14 @@ class CharacterDerivationMixin:
         for ref in item_refs:
             # 建卡阶段仍要求装备包里每个引用都真实存在（validation 已保证）。
             self._required_entity(ref, "item")
-        armor_class = derive_armor_class(abilities, item_refs, self.bundle)
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        feature_proxy = _feature_proxy(draft["class_ref"], level)
+        armor_class = derive_armor_class(
+            abilities, item_refs, self.bundle,
+            unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(
+                feature_proxy
+            ),
+        )
 
         hit_die = int(class_entity["hit_die"])
         con_modifier = ability_modifier(abilities["con"])
@@ -154,6 +182,7 @@ class CharacterDerivationMixin:
         max_hp = max(1, hit_die + con_modifier)
         max_hp += max(0, level - 1) * max(1, fixed_hp + con_modifier)
         max_hp += species_hp_bonus * level
+        max_hp += features.feature_max_hp_bonus(feature_proxy)
         passive_perception = 10 + ability_modifier(abilities["wis"])
         if "skill:perception" in skill_refs:
             passive_perception += prof

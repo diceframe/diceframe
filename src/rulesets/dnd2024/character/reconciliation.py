@@ -318,7 +318,11 @@ class Dnd2024CharacterStateReconciler:
         if not isinstance(abilities, dict) or "dex" not in abilities:
             warnings.append("canonical abilities are unavailable; armor class not re-derived")
             return None
-        armor_class = derive_armor_class(abilities, item_refs, self.bundle, warnings=warnings)
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        armor_class = derive_armor_class(
+            abilities, item_refs, self.bundle, warnings=warnings,
+            unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
+        )
 
         canonical_equipment = canonical.setdefault("equipment", {})
         derived = canonical.setdefault("derived", {})
@@ -341,7 +345,7 @@ class Dnd2024CharacterStateReconciler:
         # 装备是职业特性生效前提的一部分（武艺要求未穿甲、未持盾、只持 Monk
         # Weapon）。canonical 装备刚变过，用户可见的职业特性/资源投影必须跟着
         # 变，否则界面会继续展示已经不再生效的武艺骰。
-        sheet.update(Dnd2024ClassFeatureResolver(self.bundle).projection_fields(canonical))
+        sheet.update(features.projection_fields(canonical))
         # §28：legacy / public mirror 必须与 canonical 一致，因为 Combat、UI、
         # LLM view 可能读不同层；但计算 authority 仍然只有上面那一处。
         sheet["armor_class"] = armor_class

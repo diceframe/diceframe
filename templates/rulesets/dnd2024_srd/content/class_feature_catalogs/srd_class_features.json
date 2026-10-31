@@ -33,7 +33,9 @@
     "sneak_attack": "Sneak Attack",
     "uncanny_dodge": "Uncanny Dodge",
     "warlock": "Warlock",
-    "dark_ones_blessing": "Dark One's Blessing"
+    "dark_ones_blessing": "Dark One's Blessing",
+    "sorcerer": "Sorcerer",
+    "draconic_resilience": "Draconic Resilience"
   },
   "classes": {
     "monk": {
@@ -257,6 +259,22 @@
           "summary": "When an attacker that you can see hits you with an attack, you can use your Reaction to halve the attack's damage against you (rounded down).",
           "parameters": {
             "damage_multiplier": 0.5
+          }
+        }
+      ]
+    },
+    "sorcerer": {
+      "source_ref": "srd-5.2.1:p64:sorcerer-features",
+      "features": [
+        {
+          "id": "draconic_resilience",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p52:draconic-resilience",
+          "summary": "Your Hit Point maximum increases by 3, and it increases by 1 again whenever you gain a Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
+          "parameters": {
+            "unarmored_ac_ability_bonus": "cha",
+            "max_hp_bonus_first": 3,
+            "max_hp_bonus_per_level_after": 1
           }
         }
       ]

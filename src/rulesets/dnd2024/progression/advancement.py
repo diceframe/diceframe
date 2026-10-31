@@ -8,6 +8,7 @@ from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
+from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -24,6 +25,12 @@ def _class_id(class_ref: str) -> str:
     prefix = "class:"
     value = str(class_ref or "")
     return value[len(prefix):] if value.startswith(prefix) else ""
+
+
+def _feature_state(class_ref: str, level: int) -> dict[str, Any]:
+    """The minimal canonical shape the class feature boundary reads."""
+
+    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
 
 
 def _slot_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
@@ -210,7 +217,14 @@ class Dnd2024AdvancementEngine:
         species_hp = int(species.get("hp_per_level_bonus", 0) or 0)
         new_level_hp = max(1, hp_base + new_con + species_hp)
         retrospective_con_hp = current_level * (new_con - old_con)
-        hp_gain = new_level_hp + retrospective_con_hp
+        # 防御类特性的生命值上限加成只按等级增量发放：2→3 得 +3，之后每级 +1。
+        # 用与建卡相同的 resolver 公式，不回溯 from_level 之前的等级。
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        feature_hp_gain = (
+            features.feature_max_hp_bonus(_feature_state(class_ref, target_level))
+            - features.feature_max_hp_bonus(_feature_state(class_ref, current_level))
+        )
+        hp_gain = new_level_hp + retrospective_con_hp + feature_hp_gain
 
         subclass_feature_ids = self._subclass_features(
             subclass, target_level, selected_subclass_ref == expected_subclass_ref

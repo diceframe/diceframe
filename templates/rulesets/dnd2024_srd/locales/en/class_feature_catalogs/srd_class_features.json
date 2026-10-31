@@ -35,7 +35,9 @@
       "sneak_attack": "Sneak Attack",
       "uncanny_dodge": "Uncanny Dodge",
       "warlock": "Warlock",
-      "dark_ones_blessing": "Dark One's Blessing"
+      "dark_ones_blessing": "Dark One's Blessing",
+      "sorcerer": "Sorcerer",
+      "draconic_resilience": "Draconic Resilience"
     }
   }
 }
