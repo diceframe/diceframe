@@ -1,0 +1,99 @@
+@import 'driver.js/dist/driver.css';
+
+/* driver.js ships a fixed light palette; map it to the active theme tokens so the
+   tour follows light/dark mode and skins. Loaded lazily with the library. */
+.driver-popover.df-tour-popover {
+  font-family: inherit;
+  color: var(--df-text);
+  background-color: var(--df-surface-raised);
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-lg);
+  box-shadow: var(--df-shadow-strong);
+  min-width: 260px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 16px;
+}
+
+.df-tour-popover .driver-popover-title {
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--df-text);
+}
+
+.df-tour-popover .driver-popover-description {
+  color: var(--df-text-secondary);
+  line-height: 1.6;
+}
+
+.df-tour-popover .driver-popover-progress-text {
+  color: var(--df-text-muted);
+}
+
+.df-tour-popover .driver-popover-title {
+  padding-right: 28px;
+}
+
+/* The app's global button styles would otherwise stretch this into a boxed control. */
+.df-tour-popover .driver-popover-close-btn {
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--df-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--df-radius-md);
+  box-shadow: none;
+}
+
+.df-tour-popover .driver-popover-close-btn:hover,
+.df-tour-popover .driver-popover-close-btn:focus-visible {
+  color: var(--df-text);
+  background: var(--df-hover);
+}
+
+.df-tour-popover .driver-popover-footer-btn {
+  color: var(--df-text);
+  background-color: var(--df-control-bg);
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.df-tour-popover .driver-popover-footer-btn:hover,
+.df-tour-popover .driver-popover-footer-btn:focus-visible {
+  background-color: var(--df-hover);
+}
+
+.df-tour-popover .driver-popover-footer-btn:focus-visible,
+.df-tour-popover .driver-popover-close-btn:focus-visible {
+  outline: 2px solid var(--df-interactive-strong);
+  outline-offset: 2px;
+}
+
+.df-tour-popover .driver-popover-next-btn,
+.df-tour-popover .driver-popover-done-btn {
+  color: var(--df-on-accent);
+  background-color: var(--df-interactive-strong);
+  border-color: var(--df-interactive-strong);
+}
+
+.df-tour-popover .driver-popover-next-btn:hover,
+.df-tour-popover .driver-popover-done-btn:hover,
+.df-tour-popover .driver-popover-next-btn:focus-visible,
+.df-tour-popover .driver-popover-done-btn:focus-visible {
+  background-color: var(--df-interactive);
+}
+
+.df-tour-popover .driver-popover-arrow-side-top { border-top-color: var(--df-surface-raised); }
+.df-tour-popover .driver-popover-arrow-side-bottom { border-bottom-color: var(--df-surface-raised); }
+.df-tour-popover .driver-popover-arrow-side-left { border-left-color: var(--df-surface-raised); }
+.df-tour-popover .driver-popover-arrow-side-right { border-right-color: var(--df-surface-raised); }

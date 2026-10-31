@@ -165,6 +165,7 @@ watch(open, (isOpen) => {
       class="assistant-shell-fab"
       :class="{ 'assistant-shell-fab-dragging': launcherDragging }"
       data-testid="assistant-shell-fab"
+      data-tour="assistant"
       :data-mood="avatarMood"
       :style="launcherStyle"
       :aria-label="t('toggleAssistant')"

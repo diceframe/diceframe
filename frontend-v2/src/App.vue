@@ -22,6 +22,7 @@ import StartupUpdateCheck from '@/components/common/StartupUpdateCheck.vue'
 import AssistantShell from '@/components/assistant/AssistantShell.vue'
 import UpdateReadinessBanner from '@/features/admin/UpdateReadinessBanner.vue'
 import SectionWorkspaceShell from '@/components/navigation/SectionWorkspaceShell.vue'
+import { useAppTourAutoStart } from '@/features/onboarding/useAppTour'
 import { gameFromQuery, readCurrentGame } from '@/stores/gameContext'
 import { isPublicRoute } from '@/router'
 import {
@@ -122,13 +123,30 @@ function onStartupPrivacySettled() {
   startupPrivacySettled.value = true
 }
 
+// The first-run tour waits for every startup dialog so it never stacks on top of one.
+const startupAnnouncementChecked = ref(false)
+const appTourReady = computed(() =>
+  !publicRoute.value
+  && activeKey.value === 'overview'
+  && startupPrivacySettled.value
+  && startupUpdateSettled.value
+  && startupAnnouncementChecked.value
+  && !announcementOpen.value
+  && !pairingOpen.value,
+)
+useAppTourAutoStart(appTourReady, locale)
+
 onMounted(() => {
   void initializeBackgroundImages()
   if (publicRoute.value) suspendPluginTheme()
   void loadOwnerPluginThemes()
-  void load(locale.value).then(() => {
-    tryOpenStartupAnnouncement()
-  })
+  void load(locale.value)
+    .then(() => {
+      tryOpenStartupAnnouncement()
+    })
+    .finally(() => {
+      startupAnnouncementChecked.value = true
+    })
 })
 watch(announcementOpen, (open) => { if (!open) markRead() })
 watch(locale, (next) => {
@@ -188,6 +206,7 @@ watch(publicRoute, (isPublic) => {
                       :key="item.id"
                       :to="menuTo(item.id)"
                       class="desktop-nav-link"
+                      :data-tour="`nav-${item.id}`"
                       :class="{ active: isNavItemActive(item.id, activeKey) }"
                     >
                       <NIcon :component="item.icon" />
@@ -198,6 +217,7 @@ watch(publicRoute, (isPublic) => {
                       :key="group.id"
                       :to="groupTo(group.id)"
                       class="desktop-nav-link"
+                      :data-tour="`nav-${group.id}`"
                       :class="{ active: groupIsActive(group.id) }"
                     >
                       <NIcon :component="group.icon" />
@@ -251,6 +271,7 @@ watch(publicRoute, (isPublic) => {
                   v-for="item in primaryItems"
                   :key="item.id"
                   :to="menuTo(item.id)"
+                  :data-tour="`nav-${item.id}`"
                   :class="{ active: isNavItemActive(item.id, activeKey) }"
                 >
                   <span class="mobile-nav-icon">
@@ -262,6 +283,7 @@ watch(publicRoute, (isPublic) => {
                   v-for="group in appNavGroups"
                   :key="group.id"
                   :to="groupTo(group.id)"
+                  :data-tour="`nav-${group.id}`"
                   :class="{ active: groupIsActive(group.id) }"
                 >
                   <span class="mobile-nav-icon">

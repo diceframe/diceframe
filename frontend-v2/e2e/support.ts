@@ -33,11 +33,13 @@ async function announcementHashes(request: APIRequestContext) {
 export async function prepareAuthenticatedPage(
   page: Page,
   request: APIRequestContext,
-  options?: { light?: boolean },
+  options?: { light?: boolean; firstRunTour?: boolean },
 ) {
   const hashes = await announcementHashes(request)
-  await page.addInitScript(({ token, hashes, light }) => {
+  await page.addInitScript(({ token, hashes, light, firstRunTour }) => {
     localStorage.setItem('trpg_access_token', token)
+    // The first-run tour overlays the page; only its own spec opts into it.
+    if (!firstRunTour) localStorage.setItem('diceframe:onboarding:tour:v1', '1')
     if (!localStorage.getItem('diceframe_locale')) localStorage.setItem('diceframe_locale', 'zh-CN')
     for (const [language, hash] of Object.entries(hashes)) {
       if (hash) localStorage.setItem(`diceframe_announcement_read_hash:${language}`, hash)
@@ -47,7 +49,7 @@ export async function prepareAuthenticatedPage(
       localStorage.setItem('diceframe_skin_v2', 'midnight')
       localStorage.removeItem('diceframe_plugin_theme_v2')
     }
-  }, { token: accessToken(), hashes, light: Boolean(options?.light) })
+  }, { token: accessToken(), hashes, light: Boolean(options?.light), firstRunTour: Boolean(options?.firstRunTour) })
 }
 
 export async function prepareAuthenticatedContext(
@@ -57,6 +59,7 @@ export async function prepareAuthenticatedContext(
   const hashes = await announcementHashes(request)
   await context.addInitScript(({ token, hashes }) => {
     localStorage.setItem('trpg_access_token', token)
+    localStorage.setItem('diceframe:onboarding:tour:v1', '1')
     if (!localStorage.getItem('diceframe_locale')) localStorage.setItem('diceframe_locale', 'zh-CN')
     for (const [language, hash] of Object.entries(hashes)) {
       if (hash) localStorage.setItem(`diceframe_announcement_read_hash:${language}`, hash)
