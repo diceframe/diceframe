@@ -1134,69 +1134,24 @@ class GameInstance:
         requires_structured_intent: StructuredIntentRequirement = False,
         admission_check: Callable[[], str] | None = None,
     ) -> str:
-        """Atomically re-confirm a hosted seat and commit its action.
-
-        The LLM call deliberately happens *outside* every lock; the danger is that
-        the world moves between "the model answered" and "we write the answer".
-        So the re-confirmation and the write are one boundary: this method takes
-        the authoritative write permission and ``_lock`` once, re-checks every
-        identity the caller captured (run, round, seat, control mode, control
-        revision, phase), re-checks that the **human gate is still open**, that
-        this round has no action from ``source`` yet, and only then appends.
-
-        The human gate matters on its own: a hosted seat only ever acts *after*
-        the humans are done. If somebody claims another seat (or a player returns
-        from away) while this result was in flight, the table suddenly has an
-        active human who has not submitted yet, and an action written now would
-        break "AI acts after the humans" — so it is discarded instead.
-
-        Returns ``""`` on commit, otherwise the reason the result was dropped:
-        ``rejected`` / ``run_changed`` / ``round_changed`` / ``seat_removed`` /
-        ``control_changed`` / ``phase_changed`` / ``human_gate_changed`` /
-        ``duplicate`` / ``STRUCTURED_INTENT_REQUIRED`` / ``action_rejected``.
-        A supplied structured-intent predicate reads current admission state here,
-        synchronously under both locks, after the existing rejection checks.
-        Callers must treat a non-empty
-        result as "write nothing"; the action never lands.
-        """
+        """Atomically re-confirm a hosted seat and commit its action."""
         async with self.authoritative_write() as write_entered, self._lock:
             if not write_entered or self._process_lock.locked():
-                # 判定/重写正在进行：这一轮不再接受带轮次身份的行动。
                 return "rejected"
-            stale = self.ai_player_action_stale_reason(
+            return turn_state.commit_ai_player_action_locked(
+                self,
                 user_id,
+                action_text,
+                source=source,
                 expected_run_id=expected_run_id,
                 expected_round_number=expected_round_number,
                 expected_control_revision=expected_control_revision,
-            )
-            if stale:
-                return stale
-            if admission_check is not None:
-                code = admission_check()
-                if code:
-                    return code
-            code = evaluate(
-                self,
-                GateRequest(
-                    actor_uid=user_id,
-                    source=SOURCE_AI_SEAT,
-                    expected_run_id=expected_run_id,
-                    expected_round_number=expected_round_number,
-                    expected_control_revision=expected_control_revision,
-                    action_source=source,
-                    requires_structured_intent=requires_structured_intent,
-                ),
-                AI_SEAT_COMMIT_POLICY,
-            )
-            if code:
-                return code
-            added = self._add_action_locked(
-                user_id, action_text,
-                source=source,
                 action_metadata=action_metadata,
-                defer_out_of_phase=False,
+                requires_structured_intent=requires_structured_intent,
+                admission_check=admission_check,
+                evaluate_fn=evaluate,
+                policy=AI_SEAT_COMMIT_POLICY,
             )
-            return "" if added else "action_rejected"
 
     def ai_player_action_stale_reason(
         self,
@@ -1516,33 +1471,10 @@ class GameInstance:
         return GameStateCodec.encode(self)
 
     def replace_persisted_state_from(self, source: "GameInstance") -> None:
-        """Commit a staged aggregate without replacing its runtime identity.
+        """Commit a staged aggregate without replacing runtime coordination."""
+        from src.engine.staged_transaction import replace_persisted_state
 
-        Economy decisions are prepared against an isolated ``GameInstance`` so
-        a failing dependent effect cannot leave half of a transaction applied.
-        Only persisted domain fields cross this boundary; locks, timers, save
-        counters and other process-local coordination remain attached to the
-        live instance.
-        """
-
-        if source.game_key != self.game_key or source.run_id != self.run_id:
-            raise ValueError("staged game state belongs to a different run")
-        runtime_only = {
-            "last_saved_log_count",
-            "pending_luck_after_recovery",
-            # 回合内的无价购买意图是 process-local 协调状态：不入持久化投影，
-            # 生成期间的合法结算回写不得清空它（否则同轮 LOOT 拦截会失效）。
-            "round_unpriced_purchase_intents",
-        }
-        # Room access (password hash, room tokens, seat credentials) is never
-        # part of a staged change and is committed on its own; a staged copy
-        # taken earlier must not roll back a password change or a new seat link.
-        live_room_access = room_access.capture_slot(self)
-        for name, value in source.__dict__.items():
-            if name.startswith("_") or name in runtime_only:
-                continue
-            setattr(self, name, copy.deepcopy(value))
-        room_access.restore_slot(self, live_room_access)
+        replace_persisted_state(self, source)
 
     def to_llm_view(self) -> GameContextView:
         """LLM 决策所需的精简状态视图。

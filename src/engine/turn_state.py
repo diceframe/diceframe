@@ -24,11 +24,18 @@ from __future__ import annotations
 from src.engine.modules import game_config
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.engine.contracts import ActionRecord
+from src.engine.action_gate import (
+    AI_SEAT_COMMIT_POLICY,
+    GateRequest,
+    SOURCE_AI_SEAT,
+    StructuredIntentRequirement,
+    evaluate,
+)
 from src.engine import module_hooks, progression
 from src.engine.game_state import GameState
 from src.engine.modules import progression_state, room_access
@@ -212,6 +219,67 @@ def ai_player_action_stale_reason(
         ),
         AI_SEAT_STALE_POLICY,
     )
+
+
+def commit_ai_player_action_locked(
+    instance: GameInstance,
+    user_id: str,
+    action_text: str,
+    *,
+    source: str,
+    expected_run_id: str,
+    expected_round_number: int,
+    expected_control_revision: int,
+    action_metadata: dict | None = None,
+    requires_structured_intent: StructuredIntentRequirement = False,
+    admission_check: Callable[[], str] | None = None,
+    evaluate_fn: Callable[..., str] = evaluate,
+    policy: Any = AI_SEAT_COMMIT_POLICY,
+) -> str:
+    """Re-confirm a hosted seat and commit its action while ``instance._lock`` is held.
+
+    The aggregate remains the lock/authority owner and the public facade keeps
+    the injectable ``GameInstance`` seams used by existing callers and tests.
+    """
+    stale = instance.ai_player_action_stale_reason(
+        user_id,
+        expected_run_id=expected_run_id,
+        expected_round_number=expected_round_number,
+        expected_control_revision=expected_control_revision,
+    )
+    if stale:
+        return stale
+    if admission_check is not None:
+        code = admission_check()
+        if code:
+            return code
+    code = evaluate_fn(
+        instance,
+        GateRequest(
+            actor_uid=user_id,
+            source=SOURCE_AI_SEAT,
+            expected_run_id=expected_run_id,
+            expected_round_number=expected_round_number,
+            expected_control_revision=expected_control_revision,
+            action_source=source,
+            requires_structured_intent=requires_structured_intent,
+        ),
+        policy,
+    )
+    if code:
+        return code
+    from src.engine.modules import session_stats
+
+    progression.require_writable(instance)
+    session_stats.require_writable(instance)
+    added = instance._add_action_locked(
+        user_id,
+        action_text,
+        source=source,
+        action_metadata=action_metadata,
+        defer_out_of_phase=False,
+    )
+    return "" if added else "action_rejected"
 
 
 def has_pending_dice(instance: GameInstance, user_id: str | None = None) -> bool:
