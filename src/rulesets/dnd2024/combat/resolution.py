@@ -26,6 +26,7 @@ from .primitives import (
     player_actor as _player_actor,
 )
 from .check_modes import condition_flags
+from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 
@@ -250,7 +251,16 @@ class CombatResolutionMixin:
             range_disadvantage = distance > int(weapon.get("range", 5) or 5)
         from .check_modes import attack_mode
 
-        check_mode = attack_mode(self, instance, actor, target, range_disadvantage, use_grant=spend_attack_action)
+        # Lucky's advantage face is declared before the roll: it adds one
+        # source and is consumed unconditionally (validation proves the pool).
+        spend_luck = bool(intent.get("spend_luck"))
+        extra_sources: tuple[dict[str, Any], ...] = (
+            ({"code": "lucky", "mode": "advantage"},) if spend_luck else ()
+        )
+        check_mode = attack_mode(
+            self, instance, actor, target, range_disadvantage,
+            use_grant=spend_attack_action, extra_sources=extra_sources,
+        )
         advantage, disadvantage = check_mode["mode"] == "advantage", check_mode["mode"] == "disadvantage"
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
@@ -267,11 +277,12 @@ class CombatResolutionMixin:
         )
         critical = natural >= crit_threshold
         hit = natural != 1 and (critical or total >= target_ac)
-        if (
+        crit_on_hit = bool(
             hit and not critical
             and condition_flags(self.catalog.conditions, target["conditions"])["crit_on_hit_within_5"]
             and distance <= 5
-        ):
+        )
+        if crit_on_hit:
             # 麻痹/昏迷：5 尺内攻击者的"命中"直接变重击（失手不升级）。
             critical = True
         events: list[dict[str, Any]] = [
@@ -280,6 +291,11 @@ class CombatResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(combat, actor)] if spend_attack_action else []),
         ]
+        if spend_luck:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "lucky_points",
+            })
         check_event = {
             "type": "check.resolved", "kind": "attack", "actor_id": actor_id,
             "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
@@ -290,11 +306,30 @@ class CombatResolutionMixin:
         if crit_threshold != 20:
             # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
             check_event["crit_threshold"] = crit_threshold
-        events.append(check_event)
-        if (
+        rage_sustain = bool(
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
-        ):
+        )
+        if hit:
+            settlement = {
+                "actor_id": actor_id, "target_id": target_id,
+                "weapon": deepcopy(weapon), "ability": ability, "modifier": modifier,
+                "damage_formula": damage_formula, "damage_type": damage_type,
+                "crit_on_hit": crit_on_hit, "rage_sustain": rage_sustain,
+                "exclude_bards": [], "spent_reactions": [],
+                "remaining_windows": [], "intent": deepcopy(intent),
+            }
+            window = self._attack_check_window_offer(
+                instance, combat, actor, target, check_event, settlement,
+            )
+            if window is not None:
+                # The check has been rolled but nothing has landed: no damage
+                # die is rolled and no resolution event is emitted until the
+                # window owner decides.
+                events.append({"type": "dnd2024.decision.pending", **window})
+                return events
+        events.append(check_event)
+        if rage_sustain:
             # 2024 狂暴：在你的回合对敌人进行一次攻击检定即延长一轮，
             # 命中与否都算；借机攻击发生在别人的回合，不延长狂暴。
             events.append({
@@ -302,70 +337,123 @@ class CombatResolutionMixin:
                 "condition": "rage",
             })
         if hit:
-            # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化、
-            # 偷袭，按调用方顺序）→ 属性修正；重击翻倍仍由本层在 AST 上显式表达。
-            extra_dice: list[str] = []
-            if "hexed" in target["conditions"] and target["conditions"]["hexed"].get(
-                "source_actor_id"
-            ) == actor_id:
-                extra_dice.append("1d6")
-            sneak_dice = self._sneak_attack_dice(
-                instance, combat, actor, target, weapon, check_mode,
-            )
-            if sneak_dice:
-                extra_dice.append(sneak_dice)
-            damage_node = attack_damage_node(
-                damage_formula=damage_formula,
-                modifier=modifier,
-                critical=critical,
-                extra_dice_formulas=extra_dice,
-            )
-            if ability == "str" and "rage" in actor["conditions"]:
-                # 狂暴加值只在力量攻击命中时附加到伤害，不影响攻击加值。
-                rage_damage = int(self.features.feature_value(
-                    self._feature_character(actor), "rage", "rage_damage", 0,
-                ) or 0)
-                if rage_damage:
-                    damage_node = {"op": "add", "args": [
-                        damage_node, {"op": "constant", "value": rage_damage},
-                    ]}
-            damage, rolls = roll_damage_node(damage_node, rng)
-            damage = max(0, damage)
-            damage, resistance = self._resist_damage(target, damage, damage_type)
-            damage_event = {
-                "type": "resource.changed", "resource": "hp", "target_id": target_id,
-                "delta": -damage, "amount": damage, "damage_type": damage_type,
-                "critical": critical, "rolls": rolls,
-            }
-            if resistance:
-                damage_event["resisted"] = True
-                damage_event["resistance"] = resistance
-            if sneak_dice:
-                # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
-                # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
-                damage_event["feature_use"] = {
-                    "actor_id": actor_id,
-                    "feature_id": "sneak_attack",
-                    "round": int(combat.get("round", 0)),
-                    "turn_index": int(combat.get("turn_index", 0)),
-                }
-            offer = self._hit_spell_offer(instance, combat, actor, weapon, target_id, damage_event, intent)
-            reaction = self._hit_reaction_offer(
-                instance, combat, actor, target, check_event, damage_event, intent,
-                next_decision=offer,
-            )
-            if reaction or offer:
-                events.append({"type": "dnd2024.decision.pending", **(reaction or offer)})
-            else:
-                events.extend(self._submit_hit_damage(damage_event))
-                events.extend(self._concentration_events(target, damage, rng))
-                events.extend(self._enemy_defeated_feature_events(
-                    instance, combat, actor_id, target, damage,
-                ))
-                if self._last_hostile_defeated(combat, target, damage):
-                    events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+            events.extend(self._hit_settlement_events(
+                instance, combat, actor, target, weapon, check_event, intent, rng,
+                ability=ability, modifier=modifier,
+                damage_formula=damage_formula, damage_type=damage_type,
+                crit_on_hit=crit_on_hit,
+            ))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
+
+    def _hit_settlement_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], weapon: dict[str, Any], check: dict[str, Any],
+        intent: dict[str, Any], rng: Any, *, ability: str, modifier: int,
+        damage_formula: str, damage_type: str, crit_on_hit: bool = False,
+        exclude_bards: tuple[str, ...] = (), spent_reactions: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Damage construction and commit for an already-hit attack.
+
+        Shared by the straight-through path and by check-window finishers.
+        Only damage dice are rolled here; window dice are rolled at resolve
+        time.  The straight-through sequence is byte-identical to the pre-slice
+        engine because the same construction, offers, and commits run in the
+        same order.
+        """
+
+        actor_id = str(actor["actor_id"])
+        target_id = str(target["actor_id"])
+        critical = bool(check.get("critical"))
+        if crit_on_hit and not critical:
+            critical = True
+        check_mode = {
+            "mode": str(check.get("advantage_mode") or ""),
+            "sources": list(check.get("advantage_sources") or []),
+        }
+        # 伤害骰经通用公式 AST 求值（Issue 212）：主骰 → 附加骰（魔化、
+        # 偷袭，按调用方顺序）→ 属性修正；重击翻倍仍由本层在 AST 上显式表达。
+        extra_dice: list[str] = []
+        if "hexed" in target["conditions"] and target["conditions"]["hexed"].get(
+            "source_actor_id"
+        ) == actor_id:
+            extra_dice.append("1d6")
+        sneak_dice = self._sneak_attack_dice(
+            instance, combat, actor, target, weapon, check_mode,
+        )
+        if sneak_dice:
+            extra_dice.append(sneak_dice)
+        damage_node = attack_damage_node(
+            damage_formula=damage_formula,
+            modifier=modifier,
+            critical=critical,
+            extra_dice_formulas=extra_dice,
+        )
+        if ability == "str" and "rage" in actor["conditions"]:
+            # 狂暴加值只在力量攻击命中时附加到伤害，不影响攻击加值。
+            rage_damage = int(self.features.feature_value(
+                self._feature_character(actor), "rage", "rage_damage", 0,
+            ) or 0)
+            if rage_damage:
+                damage_node = {"op": "add", "args": [
+                    damage_node, {"op": "constant", "value": rage_damage},
+                ]}
+        damage, rolls = roll_damage_node(damage_node, rng)
+        damage = max(0, damage)
+        damage, resistance = self._resist_damage(target, damage, damage_type)
+        damage_event = {
+            "type": "resource.changed", "resource": "hp", "target_id": target_id,
+            "delta": -damage, "amount": damage, "damage_type": damage_type,
+            "critical": critical, "rolls": rolls,
+        }
+        if resistance:
+            damage_event["resisted"] = True
+            damage_event["resistance"] = resistance
+        if sneak_dice:
+            # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
+            # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
+            damage_event["feature_use"] = {
+                "actor_id": actor_id,
+                "feature_id": "sneak_attack",
+                "round": int(combat.get("round", 0)),
+                "turn_index": int(combat.get("turn_index", 0)),
+            }
+        offer = self._hit_spell_offer(
+            instance, combat, actor, weapon, target_id, damage_event, intent,
+        )
+        damage_window = self._damage_window_offer(
+            instance, combat, actor, target, damage_event, intent,
+            exclude_bards=exclude_bards, next_decision=offer,
+        )
+        next_decision = damage_window or offer
+        reaction = self._hit_reaction_offer(
+            instance, combat, actor, target, check, damage_event, intent,
+            next_decision=next_decision,
+        )
+        if reaction is not None and str(target["actor_id"]) in spent_reactions:
+            # 同一反应预算已被本次攻击的检定面花掉：不能再开防守反应窗。
+            reaction = None
+        if reaction or damage_window or offer:
+            return [{"type": "dnd2024.decision.pending", **(reaction or damage_window or offer)}]
+        return self._resolve_committed_hit(
+            instance, combat, actor_id, target, damage_event, damage, rng,
+        )
+
+    def _resolve_committed_hit(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], damage_event: dict[str, Any], damage: int, rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Submit a final hit's damage and run its trailing consequences."""
+
+        events = list(self._submit_hit_damage(damage_event))
+        events.extend(self._concentration_with_dool(instance, combat, target, damage, rng))
+        events.extend(self._enemy_defeated_feature_events(
+            instance, combat, attacker_id, target, damage,
+        ))
+        if self._last_hostile_defeated(combat, target, damage):
+            events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        return events
+
     def _maybe_overchannel(self, intent: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
         """门控已由 _validate_spell 完成（fail closed）；此处只做变换。"""
 
@@ -414,6 +502,14 @@ class CombatResolutionMixin:
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
         })
+        # Lucky's advantage face declares one extra source for the first
+        # spell attack roll of this cast; validation proves the pool.
+        spend_luck = bool(intent.get("spend_luck")) and str(effect["mode"]) == "spell_attack"
+        if spend_luck:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "lucky_points",
+            })
         defeated_targets: set[str] = set()
         # 多道射线/多目标按目标累计本次伤害：每束都用施法前的 HP 判断会漏掉
         # 几束合计才击倒的目标，全部敌人倒下时战斗也不会结束。
@@ -421,7 +517,7 @@ class CombatResolutionMixin:
         # 同一次施法的多道射线共用一个事件批次：已消耗条件只在局部隐藏，
         # 事件仍在批次末尾统一移除，状态写入时机不变。
         consumed_conditions: set[tuple[str, str]] = set()
-        for target_id in target_ids:
+        for ray_index, target_id in enumerate(target_ids):
             target = self._actor_view(instance, combat, target_id)
             mode = str(effect["mode"])
             succeeded = False
@@ -430,7 +526,14 @@ class CombatResolutionMixin:
 
                 visible_actor = _without_consumed_conditions(actor, consumed_conditions)
                 visible_target = _without_consumed_conditions(target, consumed_conditions)
-                check_mode = attack_mode(self, instance, visible_actor, visible_target, False)
+                extra_sources = (
+                    ({"code": "lucky", "mode": "advantage"},)
+                    if spend_luck and ray_index == 0 else ()
+                )
+                check_mode = attack_mode(
+                    self, instance, visible_actor, visible_target, False,
+                    extra_sources=extra_sources,
+                )
                 rolls = [int(rng.randint(1, 20))]
                 if check_mode["mode"]:
                     rolls.append(int(rng.randint(1, 20)))
@@ -1301,27 +1404,20 @@ class CombatResolutionMixin:
         actor_id = str(intent["actor_id"])
         actor = self._actor_view(instance, combat, actor_id)
         character = self._feature_character(actor)
-        advantage_sources = self.features.feature_flag_sources(character, "death_save_advantage")
+        advantage_sources = list(
+            self.features.feature_flag_sources(character, "death_save_advantage")
+        )
         crit_threshold = int(self.features.min_feature_value(
             character, "death_save_crit_threshold", 20,
         ))
+        # Lucky's advantage face is declared before the roll and consumed
+        # unconditionally; validation proves the pool exists and has a point.
+        spend_luck = bool(intent.get("spend_luck"))
+        if spend_luck:
+            advantage_sources.append("lucky")
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage_sources else None
         roll = max(first, second) if second is not None else first
-        successes = int(actor["death_saves"].get("successes", 0) or 0)
-        failures = int(actor["death_saves"].get("failures", 0) or 0)
-        hp = 0
-        if roll >= crit_threshold:
-            hp = 1
-            successes = failures = 0
-        elif roll == 1:
-            failures += 2
-        elif roll >= 10:
-            successes += 1
-        else:
-            failures += 1
-        stable = successes >= 3
-        dead = failures >= 3
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
@@ -1330,15 +1426,62 @@ class CombatResolutionMixin:
         if advantage_sources:
             check_event["advantage_mode"] = "advantage"
             check_event["advantage_sources"] = [
-                {"code": source_id, "mode": "advantage"} for source_id in advantage_sources
+                {"code": source_id, "mode": "advantage"}
+                for source_id in advantage_sources
             ]
         if crit_threshold != 20:
             check_event["crit_threshold"] = crit_threshold
+        events: list[dict[str, Any]] = []
+        if spend_luck:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "lucky_points",
+            })
+        window = self._death_save_check_window(instance, combat, actor, check_event)
+        if window is not None:
+            # The save has been rolled but its failures are not yet applied:
+            # nothing is irreversible until the window owner decides.
+            events.append({"type": "dnd2024.decision.pending", **window})
+            return events
+        events.append(check_event)
+        events.extend(
+            self._death_save_outcome_events(instance, combat, actor, check_event, rng)
+        )
+        return events
+
+    def _death_save_outcome_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        check: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Apply a resolved death save to the stable/dead tally.
+
+        Shared by the straight-through path and the window finisher; the only
+        values a window can change are the save total and its success flag, so
+        the natural-roll special cases stay authoritative here.
+        """
+
+        actor_id = str(actor["actor_id"])
+        roll = int(check.get("natural", 0) or 0)
+        crit_threshold = int(check.get("crit_threshold", 20) or 20)
+        successes = int(actor["death_saves"].get("successes", 0) or 0)
+        failures = int(actor["death_saves"].get("failures", 0) or 0)
+        hp = 0
+        if roll >= crit_threshold:
+            hp = 1
+            successes = failures = 0
+        elif roll == 1:
+            failures += 2
+        elif bool(check.get("success")):
+            successes += 1
+        else:
+            failures += 1
+        stable = successes >= 3
+        dead = failures >= 3
         return [
-            check_event,
             {
                 "type": "dnd2024.death_save.resolved", "actor_id": actor_id,
-                "roll": roll, "successes": min(successes, 3), "failures": min(failures, 3),
+                "roll": int(check.get("total", roll) or roll),
+                "successes": min(successes, 3), "failures": min(failures, 3),
                 "stable": stable, "dead": dead, "hp": hp,
             },
             *([] if dead or hp else self._end_turn_events(instance, combat, rng)),
@@ -1382,6 +1525,10 @@ class CombatResolutionMixin:
             return self._finish_hit_reaction(instance, combat, decision, intent, rng)
         if decision.get("kind") == COUNTER_SPELL_DECISION:
             return self._finish_counter_spell(instance, combat, decision, intent, rng)
+        if decision.get("kind") == CHECK_WINDOW_DECISION:
+            return self._finish_check_window(instance, combat, decision, intent, rng)
+        if decision.get("kind") == DAMAGE_WINDOW_DECISION:
+            return self._finish_damage_window(instance, combat, decision, intent, rng)
         movement = decision["movement"]
         events: list[dict[str, Any]] = [{
             "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],

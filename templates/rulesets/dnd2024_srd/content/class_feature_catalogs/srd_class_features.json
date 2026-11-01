@@ -34,6 +34,9 @@
     "uncanny_dodge": "Uncanny Dodge",
     "warlock": "Warlock",
     "dark_ones_blessing": "Dark One's Blessing",
+    "dark_ones_own_luck": "Dark One's Own Luck",
+    "bard": "Bard",
+    "cutting_words": "Cutting Words",
     "sorcerer": "Sorcerer",
     "draconic_resilience": "Draconic Resilience",
     "cleric": "Cleric",
@@ -267,6 +270,20 @@
         }
       ]
     },
+    "bard": {
+      "source_ref": "srd-5.2.1:p31:bard-features",
+      "features": [
+        {
+          "id": "cutting_words",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p35:cutting-words",
+          "summary": "When a creature you can see within 60 feet makes a damage roll or succeeds on an ability check or attack roll, use your Reaction and spend one Bardic Inspiration use to roll your Bardic Inspiration die and subtract it from the roll.",
+          "parameters": {
+            "die_sides_track": "bardic_die"
+          }
+        }
+      ]
+    },
     "sorcerer": {
       "source_ref": "srd-5.2.1:p64:sorcerer-features",
       "features": [
@@ -295,6 +312,15 @@
             "defeat_temp_hp_ability": "cha",
             "defeat_temp_hp_add_class_level": true,
             "defeat_share_range_ft": 10
+          }
+        },
+        {
+          "id": "dark_ones_own_luck",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p76:dark-ones-own-luck",
+          "summary": "After you make an ability check or a saving throw and see the result but before it takes effect, spend one use to add 1d10 to the roll; once per roll; uses equal to Charisma modifier (min 1); regain all on a long rest.",
+          "parameters": {
+            "die_sides": 10
           }
         }
       ]

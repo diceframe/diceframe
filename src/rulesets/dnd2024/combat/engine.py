@@ -24,6 +24,11 @@ from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch
 
 
 from .check_modes import condition_flags, effective_speed
+from .check_windows import (
+    CHECK_WINDOW_DECISION,
+    CombatCheckWindowsMixin,
+    DAMAGE_WINDOW_DECISION,
+)
 from .primitives import (
     INTENT_TYPES,
     RAGE_MAX_ROUNDS,
@@ -51,7 +56,7 @@ from .reaction_spells import (
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
-    CombatReactionSpellsMixin,
+    CombatReactionSpellsMixin, CombatCheckWindowsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -178,10 +183,13 @@ class Dnd2024CombatEngine(
             "expected_version": version,
         }] if actor_id in instance.players else []
         current = self._current_actor(combat)
-        # 被命中时的反应法术（护盾术）通常出现在敌人回合：防守方不必是当前行动者。
+        # 被命中时的反应法术（护盾术）与掷后检定窗口通常出现在敌人回合：
+        # 防守方/窗口主人不必是当前行动者。
         reactions = [
             item for item in combat.get("pending_decisions", [])
-            if item.get("kind") == HIT_REACTION_DECISION and item.get("assigned_to") == actor_id
+            if item.get("kind") in {
+                HIT_REACTION_DECISION, CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION,
+            } and item.get("assigned_to") == actor_id
         ]
         if reactions:
             return [*communication, {
@@ -325,6 +333,12 @@ class Dnd2024CombatEngine(
                 return self._automatic_hit_spell(instance, combat, decision, version)
             if decision.get("kind") == HIT_REACTION_DECISION:
                 return self._automatic_hit_reaction(instance, combat, decision, version)
+            if decision.get("kind") == CHECK_WINDOW_DECISION:
+                # A window owned by a human seat yields no automatic intent:
+                # the server never spends a player's resource for them.
+                return self._automatic_check_window(instance, combat, decision, version)
+            if decision.get("kind") == DAMAGE_WINDOW_DECISION:
+                return self._automatic_damage_window(instance, combat, decision, version)
             if decision.get("kind") == COUNTER_SPELL_DECISION:
                 # 反制是 GM 的人类判断；但 GM 自己在队伍里有角色时（单人局里
                 # GM 就是施法者），由他替敌人决定等于施法者决定自己是否被反制。

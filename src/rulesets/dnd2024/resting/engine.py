@@ -54,23 +54,48 @@ class Dnd2024RestEngine:
                 if resource_id in seen:
                     raise RestError(f"class_resources.{class_id} duplicates {resource_id}")
                 seen.add(resource_id)
-                maximum_fields = {
-                    key for key in ("maximum_track", "maximum_fixed", "maximum_ability_modifier")
-                    if key in spec
-                }
-                if len(maximum_fields) != 1:
-                    raise RestError(f"class_resources.{class_id}.{resource_id} needs one maximum")
-                resize_policy = spec.get("resize_policy", DEFAULT_RESIZE_POLICY)
-                if resize_policy not in RESIZE_POLICIES:
-                    raise RestError(
-                        f"class_resources.{class_id}.{resource_id} has an unknown resize policy"
-                    )
-                if not str(spec.get("source_ref") or "").startswith("srd-5.2.1:"):
-                    raise RestError(f"class_resources.{class_id}.{resource_id} source is invalid")
+                self._validate_spec(spec, f"class_resources.{class_id}.{resource_id}")
+        feat_resources = rules.get("feat_resources")
+        if feat_resources is not None:
+            if not isinstance(feat_resources, dict):
+                raise RestError("rest feat_resources must be an object")
+            for feat_id, specs in feat_resources.items():
+                if self.bundle.get("feat", str(feat_id)) is None:
+                    raise RestError(f"feat_resources.{feat_id} references an unknown feat")
+                if not isinstance(specs, list):
+                    raise RestError(f"feat_resources.{feat_id} must be an array")
+                seen = set()
+                for spec in specs:
+                    if not isinstance(spec, dict) or not str(spec.get("id") or ""):
+                        raise RestError(f"feat_resources.{feat_id} has an invalid resource")
+                    resource_id = str(spec["id"])
+                    if resource_id in seen:
+                        raise RestError(f"feat_resources.{feat_id} duplicates {resource_id}")
+                    seen.add(resource_id)
+                    self._validate_spec(spec, f"feat_resources.{feat_id}.{resource_id}")
         spell_slots = rules.get("spell_slots")
         if not isinstance(spell_slots, dict) or set(spell_slots) != {"full", "half", "pact"}:
             raise RestError("rest spell-slot policies are incomplete")
         self.rules = rules
+
+    @staticmethod
+    def _validate_spec(spec: dict[str, Any], label: str) -> None:
+        maximum_fields = [
+            key for key in (
+                "maximum_track", "maximum_fixed", "maximum_ability_modifier",
+                "maximum_proficiency_bonus",
+            )
+            if key in spec
+        ]
+        if len(maximum_fields) != 1:
+            raise RestError(f"{label} needs one maximum")
+        if "maximum_proficiency_bonus" in spec and spec["maximum_proficiency_bonus"] is not True:
+            raise RestError(f"{label} maximum_proficiency_bonus must be true")
+        resize_policy = spec.get("resize_policy", DEFAULT_RESIZE_POLICY)
+        if resize_policy not in RESIZE_POLICIES:
+            raise RestError(f"{label} has an unknown resize policy")
+        if not str(spec.get("source_ref") or "").startswith("srd-5.2.1:"):
+            raise RestError(f"{label} source is invalid")
 
     def sync_resources(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add or resize class resources without silently refilling spent uses.
@@ -101,11 +126,33 @@ class Dnd2024RestEngine:
 
         resources = character.setdefault("resources", {})
         class_state = resources.setdefault("class", {})
-        for spec in self.rules["class_resources"][class_id]:
-            if level < int(spec.get("minimum_level", 1) or 1):
+        self._sync_specs(
+            self.rules["class_resources"][class_id], class_state, snapshot["tracks"],
+            character, level,
+        )
+        feat_refs = {
+            str(ref) for ref in (character.get("features") or {}).get("feat_refs") or []
+        }
+        for feat_id, specs in (self.rules.get("feat_resources") or {}).items():
+            # 专长池的资格判据是 canonical feat_refs；删专长后残留池必须消失，
+            # 不能凭旧存档里的键继续“拥有”一次 Lucky。
+            qualified = f"feat:{feat_id}" in feat_refs
+            self._sync_specs(
+                specs, class_state, snapshot["tracks"], character, level,
+                skip=not qualified,
+            )
+        return character
+
+    def _sync_specs(
+        self, specs: list[dict[str, Any]], class_state: dict[str, Any],
+        tracks: dict[str, int], character: dict[str, Any], level: int,
+        *, skip: bool = False,
+    ) -> None:
+        for spec in specs:
+            if skip or level < int(spec.get("minimum_level", 1) or 1):
                 class_state.pop(spec["id"], None)
                 continue
-            maximum = self._maximum(spec, snapshot["tracks"], character)
+            maximum = self._maximum(spec, tracks, character)
             previous = class_state.get(spec["id"])
             previous = previous if isinstance(previous, dict) else {}
             previous_maximum = int(previous.get("maximum", 0) or 0)
@@ -121,7 +168,6 @@ class Dnd2024RestEngine:
                 "maximum": maximum,
                 "source_ref": spec["source_ref"],
             }
-        return character
 
     def complete_short_rest(
         self, payload: dict[str, Any], hit_die_rolls: dict[str, list[int]] | None = None,
@@ -250,6 +296,9 @@ class Dnd2024RestEngine:
             return int(tracks.get(str(spec["maximum_track"]), 0) or 0)
         if "maximum_fixed" in spec:
             return int(spec["maximum_fixed"])
+        if "maximum_proficiency_bonus" in spec:
+            value = int(character.get("derived", {}).get("proficiency_bonus", 0) or 0)
+            return max(int(spec.get("minimum", 0) or 0), value)
         ability = str(spec["maximum_ability_modifier"])
         value = ability_modifier(int(character.get("abilities", {}).get(ability, 0) or 0))
         return max(int(spec.get("minimum", 0) or 0), value)
@@ -259,7 +308,24 @@ class Dnd2024RestEngine:
     ) -> None:
         _class_ref, class_id, level = self._class_state(character)
         class_state = character["resources"]["class"]
-        for spec in self.rules["class_resources"][class_id]:
+        self._recover_specs(
+            self.rules["class_resources"][class_id], class_state, level, rest, events,
+        )
+        # 专长池与职业池共享 ``resources.class`` 存储，但资格仍按 feat_refs 门控：
+        # 没有专长就没有池，也就谈不上恢复。
+        feat_refs = {
+            str(ref) for ref in (character.get("features") or {}).get("feat_refs") or []
+        }
+        for feat_id, specs in (self.rules.get("feat_resources") or {}).items():
+            if f"feat:{feat_id}" not in feat_refs:
+                continue
+            self._recover_specs(specs, class_state, level, rest, events)
+
+    def _recover_specs(
+        self, specs: list[dict[str, Any]], class_state: dict[str, Any],
+        level: int, rest: str, events: list[dict[str, Any]],
+    ) -> None:
+        for spec in specs:
             state = class_state.get(spec["id"])
             if not isinstance(state, dict):
                 continue

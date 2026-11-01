@@ -431,3 +431,84 @@ git diff --stat
 | 7 | Bardic Inspiration 授予面（给队友骰 + 队友检定失败附加） | 独立原语，1C 后续批次 |
 | 8 | feat_resources 目前仅 lucky 一条目 | 后续 feat 池（Battle Master 战技等同族需求）沿此区段扩展 |
 | 9 | check_event 的 bless_bonus 字段演进（SP10 移除为 check_bonus/check_bonus_rolls 时，本切片窗口骰迹字段需同步迁移） | SP10 执行时对齐 |
+
+### 8.3 执行结果（2026-10-31）
+
+```
+## S-P3 执行报告
+- 基线核对：HEAD=27dca1be；§2.2 偏移映射复核结果=漂移已消失并重锚
+  （P7/P8 在途改动 M catalog.py / M resolution.py +39 / M validation.py / M srd_combat_core.json /
+   未跟踪 test_dnd2024_dispel_magic.py 在 S-P2 提交后均已不存在；工作区只剩本切片改动，
+   §2.1 各锚点按 HEAD 重新锚定，原 L594+ 偏移映射不再适用）
+- 白名单符合性：改动文件清单 vs §3 白名单 diff=一致（无白名单外文件）
+  M src/rulesets/dnd2024/combat/check_modes.py
+  M src/rulesets/dnd2024/combat/engine.py
+  M src/rulesets/dnd2024/combat/resolution.py
+  M src/rulesets/dnd2024/combat/validation.py
+  M src/rulesets/dnd2024/features/resources.py
+  M src/rulesets/dnd2024/resting/engine.py
+  M templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json
+  M templates/rulesets/dnd2024_srd/content/rest_catalogs/srd_recovery.json
+  M tests/rulesets/test_bundle_loader.py（派生：新增 content/feats/lucky.json 后 feat 条目 6→7）
+  ?? src/rulesets/dnd2024/combat/check_windows.py
+  ?? templates/rulesets/dnd2024_srd/content/feats/lucky.json
+  ?? tests/rulesets/test_dnd2024_check_windows.py
+  ?? tests/rulesets/test_dnd2024_feat_resources.py
+- P7/P8 隔离：在途文件 diff 状态=未触碰
+  （catalog.py / srd_combat_core.json / reaction_spells.py / reducer.py / test_dnd2024_dispel_magic.py
+   均无 diff，也不在 git status；未知未跟踪文件 .gitattributes、scripts/worktree_guard.py 为既有残留，未清理）
+- source_ref 核实：DOOL=p76；lucky=p87；cutting_words=p35（原文路径+行号）
+  - DOOL：.rulebooks/dnd5r/玩家手册2024/角色职业/魔契师/邪魔宗主.htm L36-37
+    （6级：黑暗强运 Dark One's Own Luck；看到掷骰结果后、生效前 +1d10；次数=魅力调整值至少 1；每检定一次；长休全恢复）
+  - lucky：.rulebooks/dnd5r/玩家手册2024/专长/起源专长.htm L56-63
+    （幸运 Lucky：幸运点数量=熟练加值；长休恢复；优势面=为一次 D20 检定掷骰时花费；劣势面=对敌对己的攻击检定花费）
+  - cutting_words：.rulebooks/dnd5r/玩家手册2024/角色职业/吟游诗人/逸闻学院.htm L18-19
+    （3级：语出惊人 Cutting Words；60 尺内可见生物；反应 + 诗人激励；伤害掷骰或检定成功时减骰）
+- §4 测试矩阵：W/R/D/L/C/O/G/A 各项结果
+  - L（Lucky）L1-L8：8 passed（含优势面先掷两 d20 后扣点、掷后劣势窗口、平攻/劣势/自然 20/自然 1/空池/死亡豁免+法术攻击）
+  - C（Cutting Words）C1-C7：8 passed（检定面翻命中、不能翻也保留选择、60 尺、池与反应、同一诗人单面、诗人即防守者、伤害面 spend+decline）
+  - O（DOOL）O1-O3：5 passed（死亡豁免失败加 d10、参数化 1/10/20 不出窗口、专注失败窗口与 decline、每掷一次）
+  - G（门控/直通）G1-G4：4 passed（两种 pending 门控全部意图、仅 owner 可 resolve、直通事件与骰序完全一致）
+  - A（AI）A1-A3：3 passed（Lucky 只在取低骰可翻转时花点、CW 两面确定性、DOOL 到达 DC 时花点）
+  - R（feat 池）R1-R6：7 passed（DOOL 6 级/CHA 下限、短休 none 长休 all、Lucky PB 追踪与 preserve_spent、无 feat 清残留、
+    maximum 字段互斥与非 true 标志 fail closed（Catalog=ClassFeatureError / Rest=RestError）、12 职业桶与 feat 桶隔离）
+  - D（声明）D1-D3：6 passed（CW 等级=3 且漂移 fail closed、bardic_die 3/5/10/15→6/8/10/12、非法轨道 fail closed、
+    DOOL 直参 die_sides=10 与 minimum_level=6）
+  - pytest 摘要：test_dnd2024_check_windows.py = 32 passed；test_dnd2024_feat_resources.py = 14 passed
+  - 主回归 tests/rulesets：831 passed, 35 warnings in 2073.80s
+    （命令：.venv\Scripts\python.exe -m pytest tests/rulesets -x -q --ignore tests/rulesets/test_dnd2024_character_builder.py）
+  - 全量 tests：8 failed, 7810 passed, 7 skipped, 3 errors in 3661.33s
+    （命令：.venv\Scripts\python.exe -m pytest tests -q --ignore tests/rulesets/test_dnd2024_character_builder.py）
+  - §7.7 环境既有失败（不修复、不掩盖）：tests/rulesets/test_dnd2024_character_builder.py 全模块 39 test 在 Windows 上因
+    测试 bundle 写入 con.json 命中保留设备名，ability:con 未装载，抛
+    RulesetBundleError: unresolved reference 'ability:con' in background:soldier；与本切片无关，验收以 --ignore 排除。
+  - §7.7 环境既有失败（全量兜底，不修复、不掩盖，全部在 rulesets 之外且与本切片零交集）：
+    1) tests/test_docker_launcher.py 6 test + tests/test_docker_runtime_v1_upgrade.py 3 error +
+       tests/test_docker_data_generation.py 1 test，均为本地解释器 cp313 触发 launcher 的
+       `ValueError: Docker update requires cp311, running cp313`（data_generation 那条表现为
+       期望正则不匹配、实际消息即上述 ValueError）；
+    2) tests/test_docker_launcher.py::test_launcher_uses_previous_when_current_is_damaged 的
+       WindowsPath 断言差异同源于该版本门禁提前返回；
+    3) tests/test_content_sync_identity.py::test_concurrent_first_start_keeps_the_first_published_id 为
+       Windows 上临时文件原子改名 `OSError: [WinError 1] 函数不正确`。
+    以上均为既有环境/平台问题，与本切片改动文件无交集（本切片改动只在 src/rulesets/dnd2024 与 templates/rulesets）。
+- 直通不变式 G1：RNG 序列审计结果=通过
+  无窗口直通场景显式断言 SequenceRng.values == []（L1、L2 decline、G1 三处）；decline 路径事件序列去掉
+  intent.submitted/dnd2024.decision.pending/dnd2024.decision.cleared 后与无窗口基线逐字典相等；
+  窗口骰只在 decision.resolve 内 rng.randint 掷出，未并入攻击/豁免自身的骰序列；伤害面窗口骰在伤害掷骰之后。
+- §1.6 裁剪确认：8 项裁剪均未被越界实现
+  1) CW 法术伤害面未接，伤害面仅武器攻击直通路径；2) CW 敌方属性检定面未接；
+  3) DOOL save_repeat tick 面与以玩家为目标的法术豁免面未接；4) DOOL 只接攻击尾段专注豁免与死亡豁免两处，
+     reaction_spells 与其余 _concentration_events 调用点零改动；5) Lucky 优势面声明通道仅 attack/death_save/cast_spell；
+  6) Bardic Inspiration 授予面未实现；7) uncanny_dodge 未注册表化；8) Lucky 劣势面仅敌对己攻击检定一个触发源。
+- 遗留偏差与原因
+  1) 测试落位：按 §3.10 允许方案新建 test_dnd2024_check_windows.py（窗口端到端）与
+     test_dnd2024_feat_resources.py（R/D 矩阵），未改动既有 rest/resources 测试文件。
+  2) test_bundle_loader.py 的 feat 计数 6→7 是新增 content/feats/lucky.json 的派生改动。
+  3) lucky 池在测试中走真实 Dnd2024RestEngine.sync_resources 注入 feat_refs（运行时同路径
+     runtime._sync_class_resources），未新增 has_feat API、未改 view 投影形状。
+  4) _automatic_damage_window 读取 damage_sides（伤害窗口 payload 的字段名），修正了开发期 die_sides 误用；
+     A1/A2/A3 需要的构造值（敌人 attack_bonus=12、伤害 1d1、4d10+40 使集中豁免 DC=40）只出现在测试夹具，不是产品逻辑。
+  5) window_bonus / window_bonus_rolls 为 SP10 尚未合入的窗口骰迹命名；SP10 移除/重命名 bless_bonus 时需同步迁移
+     （§8.2 #9）。
+```

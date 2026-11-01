@@ -102,8 +102,12 @@ def mode_from_sources(sources: list[dict]) -> str:
 
 
 def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
-                range_disadvantage: bool, *, use_grant: bool = True) -> dict:
+                range_disadvantage: bool, *, use_grant: bool = True,
+                extra_sources: tuple[dict, ...] = ()) -> dict:
     sources = attack_sources(engine.catalog.conditions, actor, target, range_disadvantage)
+    # 意图声明的来源（如 Lucky）只在本次掷骰生效，不写进持续条件注册表：
+    # 追加到来源列表后由同一个归一函数处理优劣势抵消。
+    sources.extend(extra_sources)
     if use_grant and actor["kind"] == "player":
         grant = scoped(instance, actor["actor_id"].removeprefix("player:"), context_id(engine, instance)).get("grant")
         if grant:

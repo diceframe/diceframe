@@ -62,10 +62,16 @@
       {"id": "sorcery_points", "minimum_level": 2, "maximum_track": "sorcery_points", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p66:font-of-magic"}
     ],
     "warlock": [
-      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p72:magical-cunning"}
+      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p72:magical-cunning"},
+      {"id": "dark_ones_own_luck", "minimum_level": 6, "maximum_ability_modifier": "cha", "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p76:dark-ones-own-luck"}
     ],
     "wizard": [
       {"id": "arcane_recovery", "minimum_level": 1, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p78:arcane-recovery"}
+    ]
+  },
+  "feat_resources": {
+    "lucky": [
+      {"id": "lucky_points", "minimum_level": 1, "maximum_proficiency_bonus": true, "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p87:lucky"}
     ]
   }
 }
