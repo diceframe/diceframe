@@ -6,6 +6,7 @@ less fragile than in cmd.exe batch syntax.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -57,12 +58,23 @@ def run(cmd: list[str], cwd: Path) -> int:
 
 
 def frontend_dependencies_ready() -> bool:
-    """Return whether the local frontend install contains the build toolchain."""
-    bin_dir = FRONTEND_DIR / "node_modules" / ".bin"
-    return all(
+    """Return whether all package.json dependencies and build tools are installed."""
+    node_modules = FRONTEND_DIR / "node_modules"
+    bin_dir = node_modules / ".bin"
+    if not all(
         any((bin_dir / name).is_file() for name in (tool, f"{tool}.cmd", f"{tool}.ps1"))
         for tool in ("vue-tsc", "vite")
-    )
+    ):
+        return False
+    try:
+        package = json.loads((FRONTEND_DIR / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    dependencies = {
+        *package.get("dependencies", {}),
+        *package.get("devDependencies", {}),
+    }
+    return all((node_modules / name / "package.json").is_file() for name in dependencies)
 
 
 def ensure_frontend() -> int:
