@@ -17,6 +17,7 @@ const { t, locale } = useLocale()
 let notified = false
 let activeDialog: DialogReactive | null = null
 let settled = false
+const STARTUP_CHECK_TIMEOUT_MS = 5000
 
 function settle() {
   if (settled) return
@@ -85,7 +86,10 @@ async function checkOnce() {
     return
   }
   try {
-    const result = await checkForUpdates()
+    const result = await Promise.race([
+      checkForUpdates(),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), STARTUP_CHECK_TIMEOUT_MS)),
+    ])
     if (!notified && result?.ok && result.update_available && result.latest) {
       const version = result.latest.tag_name || result.latest.version || t('newVersion')
       if (alreadyNotified(result.latest.version || '')) {

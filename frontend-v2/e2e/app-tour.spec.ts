@@ -8,7 +8,7 @@ test.beforeEach(async ({ page, request }) => {
 test('first visit shows the interface tour once and it can be replayed', async ({ page }) => {
   await page.goto('/')
   const popover = page.locator('.driver-popover')
-  await expect(popover.getByText('欢迎来到 DiceFrame')).toBeVisible()
+  await expect(popover.getByText('欢迎来到 DiceFrame')).toBeVisible({ timeout: 15_000 })
 
   // Steps whose anchor is hidden (e.g. the mobile layout) are dropped, so read the total.
   const progress = popover.locator('.driver-popover-progress-text')
