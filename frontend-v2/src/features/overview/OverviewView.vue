@@ -27,6 +27,8 @@ import GameSceneImageDialog from '@/components/common/GameSceneImageDialog.vue'
 import GettingStartedCard from '@/features/onboarding/GettingStartedCard.vue'
 import { gettingStartedCopy } from '@/features/onboarding/copy'
 import { useGettingStartedGuide } from '@/features/onboarding/useGettingStartedGuide'
+import { appTourCopy } from '@/features/onboarding/tourCopy'
+import { startAppTour } from '@/features/onboarding/useAppTour'
 
 const router = useRouter()
 const overviewRoot = ref<HTMLElement | null>(null)
@@ -38,6 +40,7 @@ const toast = useToast()
 const { confirm } = useConfirm()
 const { locale, t } = useLocale()
 const guideCopy = computed(() => gettingStartedCopy(locale.value))
+const tourCopy = computed(() => appTourCopy(locale.value))
 const { guideDismissed, guideCard, guideLauncher, dismissGuide, reopenGuide } = useGettingStartedGuide()
 const overviewCopy = computed(() => {
   const lang = locale.value
@@ -411,12 +414,15 @@ onBeforeUnmount(deactivateOverview)
             <button ref="guideLauncher" type="button" class="overview-guide-launcher" data-df-ui="button" data-testid="overview-open-guide" @click="reopenGuide">
               <NIcon :component="HelpCircleOutline" aria-hidden="true" />{{ guideCopy.reopen }}
             </button>
+            <button type="button" class="overview-guide-launcher" data-df-ui="button" data-testid="overview-start-tour" @click="startAppTour(locale)">
+              <NIcon :component="CompassOutline" aria-hidden="true" />{{ tourCopy.replay }}
+            </button>
           </template>
           <template #actions>
             <div class="overview-actions">
               <button data-testid="overview-open-join" class="overview-entry-action peer-launch-button" @click="peerModalOpen = true"><NIcon :component="LinkOutline" />{{ t('friendJoinTitle') }}</button>
               <RouterLink data-testid="overview-adventure-library" class="overview-entry-action content-button" :to="{ name: 'library' }">{{ overviewCopy.adventureLibrary }}</RouterLink>
-              <button data-testid="overview-create-adventure" class="overview-entry-action primary" @click="play('')">{{ t('createAdventure') }}</button>
+              <button data-testid="overview-create-adventure" data-tour="create-game" class="overview-entry-action primary" @click="play('')">{{ t('createAdventure') }}</button>
               <button v-if="error" data-testid="overview-load-retry" type="button" @click="load" :disabled="busy"><NIcon :component="RefreshOutline" />{{ t('retry') }}</button>
               <!-- With no archive yet the library toolbar does not exist, so keep
                    an import entry here as a small empty-state escape hatch. -->
