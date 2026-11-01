@@ -29,6 +29,7 @@
     "barbarian": "Barbarian",
     "rage": "Rage",
     "rage_sustain": "Sustain Rage",
+    "retaliation": "Retaliation",
     "rogue": "Rogue",
     "sneak_attack": "Sneak Attack",
     "uncanny_dodge": "Uncanny Dodge",
@@ -243,6 +244,13 @@
               "actions": [{"kind": "rage_sustain", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "retaliation",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p30:retaliation",
+          "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
+          "parameters": {"counterattack_range": 5}
         }
       ]
     },

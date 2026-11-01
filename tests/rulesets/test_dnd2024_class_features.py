@@ -613,3 +613,32 @@ def test_uncanny_dodge_labels_follow_the_bundle_locale() -> None:
     assert chinese.catalog.label("rogue") == "游荡者"
     assert chinese.catalog.label("sneak_attack") == "偷袭"
     assert chinese.catalog.label("uncanny_dodge") == "直觉闪避"
+
+
+def test_retaliation_declares_no_capability_and_keeps_parameters() -> None:
+    """Retaliation is owned by the hit-reaction path, not the action list."""
+
+    _runtime, resolver = _resolver()
+    character = _barbarian(10)
+    definition = next(
+        feature for feature in resolver.features_for(character)
+        if feature.id == "retaliation"
+    )
+
+    assert definition.capabilities == ()
+    assert dict(definition.parameters) == {"counterattack_range": 5}
+    assert definition.minimum_level == 10
+    assert resolver.declared_capability(character, "retaliation") is None
+    assert resolver.feature_value(
+        character, "retaliation", "counterattack_range",
+    ) == 5
+
+
+def test_retaliation_is_not_owned_below_level_ten() -> None:
+    _runtime, resolver = _resolver()
+    character = _barbarian(9)
+
+    assert "retaliation" not in [
+        feature.id for feature in resolver.features_for(character)
+    ]
+    assert resolver.declared_capability(character, "retaliation") is None

@@ -22,6 +22,21 @@ from .triggered_spells import free_cast_resource
 HIT_REACTION_DECISION = "hit_reaction_spell"
 COUNTER_SPELL_DECISION = "counter_spell"
 
+# 受击反应特性效果注册表：条目 = 参数名 + 声明的效果种类。
+# 注册表之外不存在硬编码特性分支；新受击反应特性 = 注册表行 + 目录声明。
+REACTION_FEATURE_EFFECTS: dict[str, dict[str, Any]] = {
+    "uncanny_dodge": {
+        "effect_kind": "damage_multiplier",
+        "parameter": "damage_multiplier",
+        "requires_sight": True,
+    },
+    "retaliation": {
+        "effect_kind": "counterattack",
+        "parameter": "counterattack_range",
+        "requires_sight": False,
+    },
+}
+
 
 def effective_armor_class(target: dict[str, Any]) -> int:
     """AC after the defensive spell conditions currently on the target."""
@@ -93,6 +108,8 @@ class CombatReactionSpellsMixin:
     def _reaction_feature_choices(
         self, combat: dict[str, Any], defender: dict[str, Any],
         attacker: dict[str, Any] | None = None,
+        damage_event: dict[str, Any] | None = None,
+        next_decision: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Class features the defender may spend their reaction on when hit.
 
@@ -102,9 +119,12 @@ class CombatReactionSpellsMixin:
         Ownership comes from the feature boundary (class level), never from a
         localized name.
 
-        Uncanny Dodge must see the attack, so a blinded defender or an
-        invisible attacker removes the choice.  ``attacker`` is optional:
-        callers without an attacker view keep the unrestricted behaviour.
+        Effects come from :data:`REACTION_FEATURE_EFFECTS`; every entry reads
+        its own parameter and applies its own guards.  A damage multiplier
+        changes the landed damage, so it needs to see the attack; a
+        counterattack happens after the damage landed and needs the attacker
+        within its declared range plus a positive amount.  Missing or invalid
+        parameters fail closed (the choice is simply not offered).
         """
 
         if defender["kind"] not in {"player", "companion"}:
@@ -113,26 +133,56 @@ class CombatReactionSpellsMixin:
             return []
         if not self._reaction_eligible(combat, defender):
             return []
-        if "blinded" in defender["conditions"]:
-            return []
-        if attacker is not None and "invisible" in (attacker.get("conditions") or {}):
-            return []
         character = self._feature_character(defender)
-        if not self.features.has_feature(character, "uncanny_dodge"):
-            return []
-        multiplier = self.features.feature_value(character, "uncanny_dodge", "damage_multiplier", 0)
-        if (
-            isinstance(multiplier, bool)
-            or not isinstance(multiplier, (int, float))
-            or not 0 < float(multiplier) < 1
-        ):
-            return []
-        return [{
-            "feature_id": "uncanny_dodge",
-            "name": self.features.catalog.label("uncanny_dodge", "Uncanny Dodge"),
-            "mode": "reaction_defense",
-            "damage_multiplier": float(multiplier),
-        }]
+        choices: list[dict[str, Any]] = []
+        for feature_id, effect in REACTION_FEATURE_EFFECTS.items():
+            if not self.features.has_feature(character, feature_id):
+                continue
+            value = self.features.feature_value(
+                character, feature_id, effect["parameter"], 0,
+            )
+            if effect["effect_kind"] == "damage_multiplier":
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not 0 < float(value) < 1
+                ):
+                    continue
+            elif effect["effect_kind"] == "counterattack":
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    continue
+                if attacker is None or damage_event is None or next_decision is not None:
+                    # 反击的前提是伤害已经落地：挂起的后续命中触发法术意味着
+                    # 这份伤害还没有结算，此时不产出反击条目（时序矛盾）。
+                    continue
+                if int(damage_event.get("amount", 0) or 0) <= 0:
+                    # 没有造成伤害就不触发（例如全额抗性后归零）。
+                    continue
+                if self._distance(
+                    combat, defender["actor_id"], attacker["actor_id"],
+                ) > int(value):
+                    continue
+            else:  # pragma: no cover - the registry is closed
+                continue
+            if effect.get("requires_sight"):
+                if "blinded" in defender["conditions"]:
+                    continue
+                if attacker is not None and "invisible" in (attacker.get("conditions") or {}):
+                    continue
+            choice: dict[str, Any] = {
+                "feature_id": feature_id,
+                "name": self.features.catalog.label(
+                    feature_id, feature_id.replace("_", " ").title(),
+                ),
+                "mode": "reaction_defense",
+                "effect_kind": effect["effect_kind"],
+            }
+            if effect["effect_kind"] == "damage_multiplier":
+                choice["damage_multiplier"] = float(value)
+            else:
+                choice["counterattack_range"] = int(value)
+            choices.append(choice)
+        return choices
 
     def _hit_reaction_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
@@ -142,7 +192,9 @@ class CombatReactionSpellsMixin:
         if attacker.get("side") == defender.get("side"):
             return None
         spells = self._reaction_spell_choices(combat, defender)
-        features = self._reaction_feature_choices(combat, defender, attacker)
+        features = self._reaction_feature_choices(
+            combat, defender, attacker, damage_event, next_decision,
+        )
         if not spells and not features:
             return None
         kind, raw_id = actor_kind(defender["actor_id"])
@@ -191,7 +243,10 @@ class CombatReactionSpellsMixin:
         attacker = self._actor_view(instance, combat, str(decision["attacker_id"]))
         choice = next(
             (
-                row for row in self._reaction_feature_choices(combat, defender, attacker)
+                row for row in self._reaction_feature_choices(
+                    combat, defender, attacker,
+                    decision.get("damage_event"), decision.get("next_decision"),
+                )
                 if row["feature_id"] == intent.get("feature_id")
             ),
             None,
@@ -214,6 +269,10 @@ class CombatReactionSpellsMixin:
                 row for row in decision["features"]
                 if row["feature_id"] == str(intent["feature_id"])
             )
+            if str(choice.get("effect_kind") or "") == "counterattack":
+                return self._counterattack_events(
+                    instance, combat, decision, rng, events,
+                )
             events.append({
                 "type": "dnd2024.reaction.spent", "actor_id": defender_id,
                 "reason": "reaction_feature",
@@ -293,6 +352,59 @@ class CombatReactionSpellsMixin:
             instance, combat, str(decision["attacker_id"]), defender,
             int(damage_event["amount"]),
         ))
+        return events
+
+    def _counterattack_events(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        rng: Any, events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Retaliation: land the full damage first, then make one melee attack.
+
+        The counterattack is a complete melee attack resolved through the same
+        ``_attack_events`` chain as every other attack: its own attack roll
+        (with the shared advantage / bonus-die pipeline), its own damage dice,
+        resistance, and bookkeeping.  Only its cost differs -- it spends the
+        defender's reaction instead of the attack action, so the generic attack
+        cost event is replaced in place (the opportunity-attack precedent).
+        """
+
+        defender_id = str(decision["actor_id"])
+        attacker_id = str(decision["attacker_id"])
+        damage_event = deepcopy(decision["damage_event"])
+        amount = int(damage_event["amount"])
+        events.extend(self._submit_hit_damage(damage_event))
+        defender = self._actor_view(instance, combat, defender_id)
+        events.extend(self._concentration_events(defender, amount, rng))
+        events.extend(self._enemy_defeated_feature_events(
+            instance, combat, attacker_id, defender, amount,
+        ))
+        if int(defender.get("hp", 0) or 0) - amount <= 0:
+            # 原始伤害把防守者打倒：倒在 0 HP 的防守者不能花反应反击，
+            # 反应预算保留，也不发生攻击。
+            return events
+        melee_attacks = [
+            attack for attack in self._available_attacks(defender)
+            if int(attack.get("range") or 0) <= 5
+        ]
+        if not melee_attacks:
+            # 没有近战档案的防守者无法反击：不臆造档案，也不支付反应。
+            return events
+        attack_intent: dict[str, Any] = {
+            "intent_id": f"{decision['decision_id']}:retaliation",
+            "actor_id": defender_id,
+            "target_id": attacker_id,
+            "weapon_ref": str(melee_attacks[0]["weapon_ref"]),
+        }
+        counterattack = self._attack_events(instance, combat, attack_intent, rng)
+        cost_index = next(
+            index for index, event in enumerate(counterattack)
+            if event["type"] == "dnd2024.attack.spent"
+        )
+        counterattack[cost_index] = {
+            "type": "dnd2024.reaction.spent", "actor_id": defender_id,
+            "reason": "retaliation",
+        }
+        events.extend(counterattack)
         return events
 
     def _counter_spell_window(
@@ -445,5 +557,11 @@ class CombatReactionSpellsMixin:
             }
         features = decision.get("features") or []
         if features and int((decision.get("damage_event") or {}).get("amount", 0) or 0) > 0:
-            return {**base, "option": "feature", "feature_id": features[0]["feature_id"]}
+            # 反击的期望收益高于减半（原始伤害全额落地、防守者可能存活），
+            # 因此 AI 优先选择反击条目；存活守卫在结算内兜底，不会白花反应。
+            choose = next(
+                (row for row in features if row.get("effect_kind") == "counterattack"),
+                features[0],
+            )
+            return {**base, "option": "feature", "feature_id": choose["feature_id"]}
         return {**base, "option": "decline"}
