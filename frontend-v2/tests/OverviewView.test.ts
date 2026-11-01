@@ -92,12 +92,12 @@ describe('OverviewView loading recovery', () => {
     wrapper.unmount()
   })
 
-  it('keeps creation and content browsing without a manual join entry', async () => {
+  it('offers invitation joining even when experimental direct connect is unavailable', async () => {
     mocks.api.mockResolvedValue({ games: [{ game_key: 'web|join|gm', world_name: 'Joinable save', state: 'ended' }] })
     const wrapper = await render()
     expect(wrapper.find('[data-testid="overview-create-adventure"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="overview-adventure-library"]').attributes('href')).toContain('/library')
-    expect(wrapper.find('[data-testid="overview-open-join"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="overview-open-join"]').text()).toBe('加入好友')
     expect(wrapper.findAll('button').some(button => button.text() === '加入游戏')).toBe(false)
     wrapper.unmount()
   })

@@ -33,16 +33,21 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
             game_scopes.add("|".join(str(part) for part in raw_game_key))
     refs = []
     books = {}
-    if hasattr(store, "get_lorebook"):
-        for binding in bindings:
-            book_id = str(binding.get("book_id") or "")
-            if book_id and book_id not in books:
-                books[book_id] = store.get_lorebook(book_id) or {}
     for binding in bindings:
         if not binding.get("enabled", True):
             continue
         kind, scope = str(binding.get("scope_kind", "")), str(binding.get("scope_id", ""))
-        book = books.get(str(binding.get("book_id") or ""), {})
+        if not (
+            (kind == "global" and not explicit)
+            or (kind == "world" and scope == world_id and not explicit)
+            or (kind == "game" and scope in game_scopes)
+            or (kind == "character" and viewer_kind != "party" and (scope == viewer_uid or scope in actors))
+        ):
+            continue
+        book_id = str(binding.get("book_id") or "")
+        if book_id and book_id not in books and hasattr(store, "get_lorebook"):
+            books[book_id] = store.get_lorebook(book_id) or {}
+        book = books.get(book_id, {})
         # Disabling a Book is a runtime decision, not just a Sidebar label: a
         # disabled Book must stop contributing candidates entirely. Missing Book
         # rows stay tolerated (legacy bindings) and default to enabled.
@@ -69,12 +74,5 @@ def resolve_active_books(instance: Any, viewer_kind: str = "gm", viewer_uid: str
             updated_at=str(book.get("updated_at") or ""),
             revision=int(book.get("revision", 0) or 0),
         )
-        if kind == "global" and not explicit:
-            refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
-        elif kind == "world" and scope == world_id and not explicit:
-            refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
-        elif kind == "game" and scope in game_scopes:
-            refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
-        elif kind == "character" and viewer_kind != "party" and (scope == viewer_uid or scope in actors):
-            refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
+        refs.append(BookRef(str(binding["book_id"]), int(binding.get("order", 100)), str(binding.get("id", "")), str(binding.get("role", "")), **common))
     return sorted({ref.book_id: ref for ref in refs}.values(), key=lambda ref: (ref.order, ref.book_id, ref.binding_id))

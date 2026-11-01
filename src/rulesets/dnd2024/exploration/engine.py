@@ -22,6 +22,13 @@ from src.rulesets.dnd2024.combat.action_adapter import (
     spell_formula_node,
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
+from src.rulesets.dnd2024.combat.check_modes import condition_flags
+from src.rulesets.dnd2024.exploration.revive_effects import (
+    UNSUPPORTED_MESSAGE,
+    is_fully_implemented,
+    revive_definition,
+    revive_events,
+)
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
@@ -110,6 +117,22 @@ class Dnd2024ExplorationEngine:
             *list(class_magic.get("prepared_spell_refs") or []),
         ]))
 
+    def _casting_eligible(self, canonical: dict[str, Any]) -> bool:
+        """探索施法的公共资格：HP>0、非 dead、非失能。
+
+        ``available_intents`` 与 ``_validate`` 共用同一判定，避免出现“入口不
+        提供、但提交仍可结算”的裂缝。``reaction_blocked`` 只关反应，不禁止
+        普通施法，因此不在此列。
+        """
+
+        resources = canonical.get("resources") or {}
+        if int(resources.get("hp", 0) or 0) <= 0:
+            return False
+        conditions = canonical.get("conditions") or {}
+        if "dead" in conditions:
+            return False
+        return not condition_flags(self.catalog.conditions, conditions)["incapacitated"]
+
     # ------------------------------------------------------------------
     # intents
     # ------------------------------------------------------------------
@@ -122,6 +145,8 @@ class Dnd2024ExplorationEngine:
             return []
         uid = actor_id.removeprefix("player:")
         canonical = self._canonical_of(instance, actor_id)
+        if not self._casting_eligible(canonical):
+            return []
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         spells = []
@@ -183,6 +208,10 @@ class Dnd2024ExplorationEngine:
         if str(intent.get("submitted_by") or "") != uid:
             raise ExplorationIntentError("a player can only cast for their own character")
         canonical = self._canonical_of(instance, actor_id)
+        if not self._casting_eligible(canonical):
+            raise ExplorationIntentError(
+                "the spellcaster cannot cast while dead, at 0 HP, or incapacitated"
+            )
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         if spell is None:
@@ -204,14 +233,32 @@ class Dnd2024ExplorationEngine:
             if int(slots.get(str(slot_level), 0) or 0) < 1:
                 raise ExplorationIntentError("the selected spell slot is not available")
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
-        if effect is not None and str(effect.get("mode")) not in _SUPPORTED_EFFECT_MODES:
+        target_values = intent.get("target_ids")
+        targets = [str(item) for item in (target_values or []) if str(item)]
+        revive = revive_definition(spell_ref)
+        if revive is not None:
+            # 复活家族：语义表存在即走 revive 管线；任何未实现语义整体拒绝，
+            # 绝不静默降级为部分生效。拒绝发生在事件构造之前，因此不扣法术位。
+            if not is_fully_implemented(revive):
+                raise ExplorationIntentError(UNSUPPORTED_MESSAGE)
+            spell_name = spell_ref.removeprefix("spell:")
+            if len(targets) != 1:
+                raise ExplorationIntentError(f"{spell_name} requires a dead ally")
+            target_id = targets[0]
+            if (
+                not target_id.startswith("player:")
+                or target_id.removeprefix("player:") not in instance.players
+            ):
+                raise ExplorationIntentError(f"{spell_name} requires a dead ally")
+            conditions = self._canonical_of(instance, target_id).get("conditions") or {}
+            if "dead" not in conditions:
+                raise ExplorationIntentError(f"{spell_name} requires a dead ally")
+        elif effect is not None and str(effect.get("mode")) not in _SUPPORTED_EFFECT_MODES:
             # 伤害/豁免类确定性效果需要敌对目标，探索态不存在；这类请求拒绝，
             # 而不是让叙事层自行决定数值。
             raise ExplorationIntentError(
                 "this spell has no exploration-safe deterministic effect"
             )
-        target_values = intent.get("target_ids")
-        targets = [str(item) for item in (target_values or []) if str(item)]
         required_count = int(effect.get("target_count", 1) or 1) if effect else 1
         if effect is not None and effect.get("mode") in _SUPPORTED_EFFECT_MODES:
             if not targets or len(targets) > required_count or len(set(targets)) != len(targets):
@@ -222,6 +269,8 @@ class Dnd2024ExplorationEngine:
             for target_id in targets:
                 if target_id not in party_ids:
                     raise ExplorationIntentError("spell target must be a party member")
+            if effect.get("target_scope") == "self" and targets != [actor_id]:
+                raise ExplorationIntentError("this spell can only target the caster")
 
     def resolve_intent(
         self, instance: Any, intent: dict[str, Any], rng: Any,
@@ -268,6 +317,16 @@ class Dnd2024ExplorationEngine:
             "slot_level": slot_level, "target_ids": target_ids,
             "context": "exploration",
         })
+        revive = revive_definition(spell_ref)
+        if revive is not None:
+            for target_id in target_ids:
+                resources = self._canonical_of(instance, target_id).get("resources") or {}
+                max_hp = int(resources.get("max_hp", 0) or 0)
+                events.extend(revive_events(target_id, revive, max_hp))
+            return {
+                "ok": True, "events": events,
+                "event_batch": self._batch(intent_id, expected, events),
+            }
         if effect is None:
             # 未自动化的 utility spell：合法施放、扣资源、事件交给叙事层（§32）。
             events.append({
@@ -384,6 +443,23 @@ class Dnd2024ExplorationEngine:
     def _reduce_event(self, snapshot: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = str(event["type"])
         if event_type in {"intent.submitted", "dnd2024.spell.cast", "dnd2024.spell.narrative"}:
+            return
+        if event_type == "dnd2024.character.revived":
+            # 探索态没有 combat state，但 P9 的状态语义仍然适用：仅 player、
+            # hp 至少 1 且不超上限、清 dead/unconscious/stable/death_saves。
+            kind, raw_id = str(event["actor_id"]).split(":", 1)
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError("revived actor must be an existing player")
+            character = snapshot["characters"][raw_id]
+            resources = character.setdefault("resources", {})
+            maximum = int(resources.get("max_hp", 0) or 0)
+            hp = max(1, int(event.get("hp", 1) or 1))
+            if maximum > 0:
+                hp = min(maximum, hp)
+            resources["hp"] = hp
+            conditions = character.setdefault("conditions", {})
+            for condition in ("dead", "unconscious", "stable", "death_saves"):
+                conditions.pop(condition, None)
             return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = str(event["actor_id"]).split(":", 1)

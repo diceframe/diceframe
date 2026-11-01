@@ -14,14 +14,19 @@ from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.character.reconciliation import merge_live_character_projection
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    CombatCapabilityView,
+    Dnd2024ClassFeatureResolver,
+)
 from src.rulesets.dnd2024.play.contracts import EncounterAccess
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
+from .check_modes import condition_flags, effective_speed
 from .primitives import (
     INTENT_TYPES,
+    RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -36,7 +41,11 @@ from .resolution import CombatResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
-from .reaction_spells import CombatReactionSpellsMixin, HIT_REACTION_DECISION
+from .reaction_spells import (
+    COUNTER_SPELL_DECISION,
+    CombatReactionSpellsMixin,
+    HIT_REACTION_DECISION,
+)
 
 
 @dataclass(slots=True)
@@ -82,6 +91,48 @@ class Dnd2024CombatEngine(
         if not isinstance(state.get("combat_history"), list):
             raise CombatIntentError("combat_history must be an array")
         return state
+
+    def _available_class_capabilities(
+        self, actor: dict[str, Any], economy: dict[str, Any],
+        *, include_unavailable: bool = False,
+    ) -> tuple[CombatCapabilityView, ...]:
+        """Feature capabilities with the actor's live conditions applied.
+
+        A capability that requires a condition the actor does not hold, or that
+        forbids one the actor currently holds, is never offered: Rage cannot be
+        re-entered while raging, and Sustain Rage is meaningless outside it.
+        """
+
+        # slots=True rebuilds the class, so zero-argument super() fails on
+        # Python < 3.14 (the __class__ cell still points at the old class).
+        views = super(Dnd2024CombatEngine, self)._available_class_capabilities(
+            actor, economy, include_unavailable=include_unavailable,
+        )
+        if not views:
+            return views
+        character = self._feature_character(actor)
+        conditions = actor.get("conditions") or {}
+        usable: list[CombatCapabilityView] = []
+        for view in views:
+            capability = self.features.declared_capability(character, view.id)
+            if capability is None:
+                continue
+            if (
+                capability.requires_condition
+                and capability.requires_condition not in conditions
+            ):
+                continue
+            if (
+                capability.forbidden_condition
+                and capability.forbidden_condition in conditions
+            ):
+                continue
+            if capability.once_per_turn and economy.get(f"{capability.id}_used"):
+                # 同一回合第二次使用：与被 requires/forbidden_condition 过滤
+                # 的能力同等处理——不出现在可用列表，伪造请求也走同一条拒绝。
+                continue
+            usable.append(view)
+        return tuple(usable)
 
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
         state = self.initialize_state(instance)
@@ -137,6 +188,19 @@ class Dnd2024CombatEngine(
                 "type": "decision.resolve", "label": "Reaction spell",
                 "expected_version": version, "decisions": deepcopy(reactions),
             }]
+        if actor_id == gm_uid:
+            # 反制/机会攻击等决策指派给 GM，可能出现在非自身回合（例如
+            # 敌方回合触发反制窗口）。不能因“不是当前玩家”而对真实 GM 隐藏。
+            gm_pending = [
+                item for item in combat.get("pending_decisions", [])
+                if item.get("assigned_to") == actor_id
+                and item.get("kind") not in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}
+            ]
+            if gm_pending:
+                return [*communication, {
+                    "type": "decision.resolve", "label": "Resolve reaction",
+                    "expected_version": version, "decisions": deepcopy(gm_pending),
+                }]
         if current.startswith("enemy:"):
             return communication
         requested = _player_actor(actor_id)
@@ -176,7 +240,7 @@ class Dnd2024CombatEngine(
         actions: list[dict[str, Any]] = []
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
-        ) > 0:
+        ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
             weapons = self._available_attacks(actor)
             if weapons:
                 actions.append({
@@ -261,6 +325,20 @@ class Dnd2024CombatEngine(
                 return self._automatic_hit_spell(instance, combat, decision, version)
             if decision.get("kind") == HIT_REACTION_DECISION:
                 return self._automatic_hit_reaction(instance, combat, decision, version)
+            if decision.get("kind") == COUNTER_SPELL_DECISION:
+                # 反制是 GM 的人类判断；但 GM 自己在队伍里有角色时（单人局里
+                # GM 就是施法者），由他替敌人决定等于施法者决定自己是否被反制。
+                # 这时与借机攻击一致，由服务器替敌人确定性地选择反制。
+                if gm_uid not in instance.players:
+                    return None
+                return {
+                    "intent_id": f"auto:decision:{version}:{decision.get('decision_id', '')}",
+                    "type": "decision.resolve",
+                    "expected_version": version,
+                    "submitted_by": gm_uid,
+                    "decision_id": str(decision.get("decision_id") or ""),
+                    "option": "counter",
+                }
             threats = [str(item) for item in decision.get("threat_actor_ids") or []]
             option = (
                 "resolve"
@@ -288,16 +366,22 @@ class Dnd2024CombatEngine(
             "submitted_by": gm_uid,
             "actor_id": actor_id,
         }
-        if actor_kind == "companion":
-            # AI 队友第一阶段：确定性优先级（治疗濒危 → 攻击 → 移动 → Dodge →
-            # End Turn），由 GM/server automation authority 提交，走同一权威链。
-            return self._allied_automatic_intent(instance, combat, base)
+        end_turn = {**base, "intent_id": f"{base['intent_id']}:end", "type": "end_turn"}
         if actor_kind == "player":
             # AI 托管席位才由服务器代打；真人 / 未认领席位的回合仍然等着人来操作。
             if not is_ai_controlled(instance, actor_raw_id):
                 return None
             return self._ai_player_automatic_intent(instance, combat, base)
         actor = self._actor_view(instance, combat, actor_id)
+        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        if flags["incapacitated"] and int(actor.get("hp", 0) or 0) > 0:
+            # 失能单位不能执行动作，但它的回合照常存在（回合结束的重复豁免
+            # 也靠 end_turn 触发）；直接结束回合，否则校验拒绝会卡住整条自动化。
+            return end_turn
+        if actor_kind == "companion":
+            # AI 队友第一阶段：确定性优先级（治疗濒危 → 攻击 → 移动 → Dodge →
+            # End Turn），由 GM/server automation authority 提交，走同一权威链。
+            return self._allied_automatic_intent(instance, combat, base)
         targets = [
             target for target in self._hostile_targets(instance, combat, actor_id)
             if int(target.get("hp", 0) or 0) > 0
@@ -308,9 +392,11 @@ class Dnd2024CombatEngine(
             str(target["actor_id"]),
         ))
         economy = combat.get("economy") or {}
-        can_act = int(economy.get("action", 0) or 0) > 0 or int(
-            economy.get("attacks_remaining", 0) or 0
-        ) > 0
+        can_act = (
+            int(economy.get("action", 0) or 0) > 0
+            or int(economy.get("attacks_remaining", 0) or 0) > 0
+            or int(economy.get("surge_action", 0) or 0) > 0
+        )
         if can_act and targets:
             target = targets[0]
             distance = self._distance(combat, actor_id, str(target["actor_id"]))
@@ -332,7 +418,7 @@ class Dnd2024CombatEngine(
                     "attack_id": str(attacks[0]["id"]),
                 }
             movement = int(economy.get("movement", 0) or 0)
-            if movement > 0:
+            if movement > 0 and not flags["speed_zero"]:
                 actor_position = self._position(combat, actor_id)
                 target_position = self._position(combat, str(target["actor_id"]))
                 desired_range = max(
@@ -405,6 +491,7 @@ class Dnd2024CombatEngine(
         can_act = (
             int(economy.get("action", 0) or 0) > 0
             or int(economy.get("attacks_remaining", 0) or 0) > 0
+            or int(economy.get("surge_action", 0) or 0) > 0
         )
         allies = [
             target for target in self._all_targets(instance, combat)
@@ -594,14 +681,18 @@ class Dnd2024CombatEngine(
         elif intent_type == "class_capability":
             events.extend(self._class_capability_events(instance, combat, intent, rng))
         elif intent_type == "cast_spell":
-            events.extend(self._spell_events(instance, combat, intent, rng))
+            window = self._counter_spell_window(instance, combat, intent)
+            if window is not None:
+                events.append({"type": "dnd2024.decision.pending", **window})
+            else:
+                events.extend(self._spell_events(instance, combat, intent, rng))
         elif intent_type == "move":
             pending, movement_events = self._movement_events(instance, combat, intent)
             events.extend(movement_events)
         elif intent_type in {"dash", "dodge", "disengage"}:
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "end_turn":
-            events.extend(self._end_turn_events(instance, combat))
+            events.extend(self._end_turn_events(instance, combat, rng))
         elif intent_type == "death_save":
             events.extend(self._death_save_events(instance, combat, intent, rng))
         elif intent_type == "stabilize":
@@ -956,11 +1047,10 @@ class Dnd2024CombatEngine(
             raise CombatIntentError("combat initiative state is invalid")
         return str(order[index])
 
-    @staticmethod
-    def _fresh_economy(actor: dict[str, Any]) -> dict[str, Any]:
-        speed = max(0, int(actor.get("speed", 0) or 0))
-        if "slowed_10" in actor.get("conditions", {}):
-            speed = max(0, speed - 10)
+    def _fresh_economy(self, actor: dict[str, Any]) -> dict[str, Any]:
+        base = max(0, int(actor.get("speed", 0) or 0))
+        # 速度修正来自条件注册表：speed_zero 压倒修正，其余按 speed_modifier 求和。
+        speed = effective_speed(self.catalog.conditions, actor.get("conditions") or {}, base)
         return {
             "actor_id": actor["actor_id"], "action": 1, "bonus_action": 1,
             "reaction": 1, "movement": speed, "speed": speed,
@@ -985,36 +1075,37 @@ class Dnd2024CombatEngine(
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any],
     ) -> dict[str, Any]:
-        del combat
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
+            "resource": self._spend_action_resource(combat),
             "attacks_per_action": self._attacks_per_action(actor),
         }
 
-    @staticmethod
-    def _attack_modes(
-        actor: dict[str, Any], target: dict[str, Any], range_disadvantage: bool,
-    ) -> tuple[bool, bool]:
-        from .check_modes import attack_sources, mode_from_sources
-
-        mode = mode_from_sources(attack_sources(actor, target, range_disadvantage))
-        return mode == "advantage", mode == "disadvantage"
-
-    @staticmethod
     def _consume_attack_conditions(
-        actor_id: str, target_id: str, actor: dict[str, Any], target: dict[str, Any],
+        self, actor_id: str, target_id: str, actor: dict[str, Any], target: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        """Remove every condition the registry marks consumed by one attack roll.
+
+        The old hard-coded pair lives in catalog data now; the observable
+        behaviour is unchanged: whichever side a consuming declaration names,
+        that holder loses the condition after the attack is resolved.
+        """
+
         events = []
-        if "next_attack_disadvantage" in actor["conditions"]:
-            events.append({
-                "type": "condition.removed", "target_id": actor_id,
-                "condition": "next_attack_disadvantage",
-            })
-        if "next_attack_advantage" in target["conditions"]:
-            events.append({
-                "type": "condition.removed", "target_id": target_id,
-                "condition": "next_attack_advantage",
-            })
+        for condition_id, entry in self.catalog.conditions.items():
+            for declaration in entry.get("attack_modes") or []:
+                if declaration.get("consume_on") != "attack_resolved":
+                    continue
+                holder_id, holder = (
+                    (actor_id, actor) if declaration["side"] == "actor"
+                    else (target_id, target)
+                )
+                if condition_id in holder["conditions"]:
+                    events.append({
+                        "type": "condition.removed", "target_id": holder_id,
+                        "condition": condition_id,
+                    })
+                    break
         return events
 
     @staticmethod
@@ -1026,11 +1117,16 @@ class Dnd2024CombatEngine(
         dc = max(10, damage // 2)
         roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
-        success = roll + modifier >= dc
+        # 专注维持是一次体质豁免，Bless 对豁免同样生效（1d4）。
+        bless_bonus = 0
+        if "blessed" in (target.get("conditions") or {}):
+            bless_bonus = int(rng.randint(1, 4))
+        success = roll + modifier + bless_bonus >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [roll], "natural": roll, "modifier": modifier,
-            "total": roll + modifier, "target": dc, "success": success,
+            "bless_bonus": bless_bonus, "total": roll + modifier + bless_bonus,
+            "target": dc, "success": success,
         }]
         if not success:
             events.append({
@@ -1130,6 +1226,37 @@ class Dnd2024CombatEngine(
                         target_conditions.pop(condition_id, None)
                     else:
                         value["turns_remaining"] = remaining - 1
+        if previous_actor_id:
+            # Rage 的回合级生命周期。规则保证狂暴"持续至你的下个回合结束"：
+            # 进入回合结束时只把状态标记为已确立（第一轮无条件存续，本回合
+            # 是否攻击或延长都不影响）；从下个回合结束起，未续期即结束，
+            # 续期则消耗剩余轮数，归零即结束。昏迷则无条件结束。
+            previous_conditions = self._conditions(snapshot, combat, previous_actor_id)
+            rage = previous_conditions.get("rage")
+            if isinstance(rage, dict):
+                # 失能即结束狂暴：unconscious / incapacitated 以及所有
+                # 蕴含失能的条件（paralyzed / stunned / petrified）。
+                if any(
+                    condition in previous_conditions
+                    for condition in (
+                        "unconscious", "incapacitated", "paralyzed", "stunned", "petrified",
+                    )
+                ):
+                    previous_conditions.pop("rage", None)
+                elif not rage.get("established"):
+                    rage["established"] = True
+                    rage["sustained_this_turn"] = False
+                elif rage.get("sustained_this_turn"):
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
+                    if remaining <= 0:
+                        previous_conditions.pop("rage", None)
+                    else:
+                        rage["turns_remaining"] = remaining
+                        rage["sustained_this_turn"] = False
+                else:
+                    previous_conditions.pop("rage", None)
 
     @staticmethod
     def _last_hostile_defeated(

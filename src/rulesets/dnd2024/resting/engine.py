@@ -202,6 +202,20 @@ class Dnd2024RestEngine:
         if holder.get("concentration") is not None:
             events.append({"type": "end_concentration", "reason": "long_rest"})
             holder["concentration"] = None
+        # 临时 HP 在长休后消失；目录里的法术效果最长 1 小时，八小时后全部到期，
+        # 狂暴同理。只移除带服务端法术来源快照的条件，伤病类条件不受影响。
+        temp_hp = int(resources.get("temp_hp", 0) or 0)
+        if temp_hp:
+            resources["temp_hp"] = 0
+            events.append({"type": "lose_temp_hp", "before": temp_hp})
+        expired = sorted(
+            key for key, value in conditions.items()
+            if key == "rage" or (isinstance(value, dict) and value.get("source_spell_ref"))
+        )
+        for key in expired:
+            conditions.pop(key, None)
+        if expired:
+            events.append({"type": "end_spell_effects", "conditions": expired})
         return {
             "character": character,
             "events": events,

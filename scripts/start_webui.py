@@ -56,6 +56,15 @@ def run(cmd: list[str], cwd: Path) -> int:
     return subprocess.run(cmd, cwd=str(cwd)).returncode
 
 
+def frontend_dependencies_ready() -> bool:
+    """Return whether the local frontend install contains the build toolchain."""
+    bin_dir = FRONTEND_DIR / "node_modules" / ".bin"
+    return all(
+        any((bin_dir / name).is_file() for name in (tool, f"{tool}.cmd", f"{tool}.ps1"))
+        for tool in ("vue-tsc", "vite")
+    )
+
+
 def ensure_frontend() -> int:
     if frontend_built():
         return 0
@@ -68,8 +77,8 @@ def ensure_frontend() -> int:
             flush=True,
         )
         return 1
-    if not (FRONTEND_DIR / "node_modules").exists():
-        code = run([npm, "ci"], FRONTEND_DIR)
+    if not frontend_dependencies_ready():
+        code = run([npm, "ci", "--include=dev"], FRONTEND_DIR)
         if code:
             return code
     return run([npm, "run", "build"], FRONTEND_DIR)

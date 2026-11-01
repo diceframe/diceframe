@@ -10,10 +10,8 @@ import { gettingStartedCopy } from './copy'
 
 const props = withDefaults(defineProps<{
   hasGames?: boolean
-  peerAvailable?: boolean
 }>(), {
   hasGames: false,
-  peerAvailable: false,
 })
 
 const emit = defineEmits<{ connect: []; dismiss: [] }>()
@@ -175,7 +173,7 @@ defineExpose({ expand })
           <li>{{ copy.hostInvite }}</li>
           <li>{{ copy.playerJoin }}</li>
         </ol>
-        <Button v-if="peerAvailable" variant="primary" size="lg" data-testid="getting-started-connect" @click="emit('connect')">{{ copy.directConnect }}</Button>
+        <Button variant="primary" size="lg" data-testid="getting-started-connect" @click="emit('connect')">{{ copy.joinFriends }}</Button>
       </div>
 
       <div class="getting-started-example">

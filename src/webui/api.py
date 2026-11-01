@@ -20,6 +20,7 @@ from typing import Any, Literal
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
 from src.engine.economy import queue_proposal, resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
+from src.engine.game_state import GameState
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
@@ -42,6 +43,7 @@ from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
+from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
 from src.game_profiles.service import ProfileService, ProfileDependencies
@@ -281,6 +283,13 @@ class WebAPI:
                     asset_id,
                 ),
                 content_projection=getattr(handler, "content_projection", None),
+                standing_portrait_file=lambda asset_id: self.standing_portrait_file(
+                    asset_id,
+                ),
+            ),
+            # GAL P8：投影侧校验个人音色仍存在（失效省略，保持未配置）。
+            voice_profile_exists=(
+                lambda voice: self._voice_profile_exists(voice)
             ),
             # Table characters auto-saved into the library: never plugin cards.
             save_character_card=lambda character: character_cards.save_character_card(
@@ -398,6 +407,10 @@ class WebAPI:
             )
         )
         self._avatars = avatars.AvatarService(self._reg.save_dir.parent / "avatars")
+        self._standing_portraits = standing_portraits.StandingPortraitService(
+            self._reg.save_dir.parent / "standing-portraits",
+            is_referenced=lambda asset_id: self._standing_portrait_is_referenced(asset_id),
+        )
         self._scene_images = scene_images.SceneImageService(
             scene_images.SceneImageDependencies(
                 images_dir=self._reg.save_dir.parent / "scene-images",
@@ -2521,6 +2534,23 @@ class WebAPI:
             self._character_dependencies, game_key, npc_id, portrait,
         )
 
+    async def update_npc_standing_portrait(
+        self, game_key: str, npc_id: str,
+        standing_portrait: Any = characters.UNCHANGED,
+        expressions: Any = characters.UNCHANGED,
+    ) -> dict[str, Any]:
+        return await characters.update_npc_standing_portrait(
+            self._character_dependencies, game_key, npc_id,
+            standing_portrait, expressions,
+        )
+
+    async def update_npc_voice(
+        self, game_key: str, npc_id: str, voice_profile: Any,
+    ) -> dict[str, Any]:
+        return await characters.update_npc_voice(
+            self._character_dependencies, game_key, npc_id, voice_profile,
+        )
+
     async def set_story_mode(self, game_key: str, mode: Any) -> dict[str, Any]:
         return await self._storytelling.set_mode(game_key, mode)
 
@@ -2600,12 +2630,18 @@ class WebAPI:
 
         async def confirm(node_id: str) -> dict[str, Any]:
             # 与 GM 命令（adventure_commands.execute）同一并发边界：authoritative
-            # write + instance lock + STALE_RUN 检查；被拒时按 settle 契约丢弃提议。
+            # write + instance lock + STALE_RUN 检查 + 判定中拒绝；被拒时按
+            # settle 契约丢弃提议。
             async with instance.authoritative_write() as write_entered, instance._lock:
                 if not write_entered:
                     raise RuntimeError("historical rewrite is in progress")
                 if self._reg.get(instance.game_key) is not instance:
                     raise RuntimeError("game run was replaced")
+                if instance.state == GameState.ACTIVE_JUDGMENT:
+                    # Another round is being judged; confirming now could reach
+                    # an ending under it.  Keep the proposal: that round's own
+                    # settlement retries it once the round has committed.
+                    raise RuntimeError("a round is being judged")
                 before = {
                     "world_state": deepcopy(instance.world_state),
                     "adventure_progress": deepcopy(adventure_runtime_state.progress(instance)),
@@ -2623,6 +2659,12 @@ class WebAPI:
                         adventure_runtime.AdventureRuntimeError,
                         ProgressError,
                         OutcomeError,
+                        # Deterministic failures of the transaction itself (e.g.
+                        # WorldStateError from world ops) reject the proposal like
+                        # the GM command does; retrying them would block the queue.
+                        ValueError,
+                        KeyError,
+                        TypeError,
                     ) as exc:
                         raise adventure_effects.AdventureCompletionRejected(
                             str(exc),
@@ -2823,6 +2865,83 @@ class WebAPI:
 
     def delete_avatar(self, asset_id: str) -> dict[str, Any]:
         return self._avatars.delete(asset_id)
+
+    # GAL P8：立绘资产（透明保留、content-addressed，见 standing_portraits）。
+    def save_standing_portrait_upload(self, file_data: str, file_name: str = "") -> dict[str, Any]:
+        return self._standing_portraits.save_upload(file_data, file_name)
+
+    def standing_portrait_file(self, asset_id: str) -> Path | None:
+        return self._standing_portraits.file(asset_id)
+
+    def delete_standing_portrait(self, asset_id: str) -> dict[str, Any]:
+        return self._standing_portraits.delete(asset_id)
+
+    def _standing_portrait_is_referenced(self, asset_id: str) -> bool:
+        """Refuse asset deletion while any persisted/live character uses it."""
+
+        def contains(value: Any) -> bool:
+            if isinstance(value, dict):
+                if (
+                    value.get("kind") == "upload"
+                    and str(value.get("asset_id") or "") == asset_id
+                ):
+                    return True
+                return any(contains(item) for item in value.values())
+            if isinstance(value, list):
+                return any(contains(item) for item in value)
+            return False
+
+        registered_dirs = set()
+        try:
+            for instance in self._reg.list_all():
+                registered_dirs.add(self._reg.save_package_state_path(instance.game_key).parent)
+                # The whole aggregate, not only players / npcs: round snapshots
+                # keep deep copies of NPCs that a rollback restores.  The save
+                # encodes only the recent log, but every loaded round can still
+                # be swiped, so the full in-memory log is scanned too.
+                if contains(instance.to_dict()) or contains(list(instance.log)):
+                    return True
+            if self._unregistered_save_mentions(asset_id, registered_dirs):
+                return True
+            cards = character_cards._read_cards(self._character_card_dependencies, strict=True)
+        except Exception:
+            # A failed reference scan must not make a referenced asset deletable.
+            logger.exception("立绘引用扫描失败，拒绝删除: %s", asset_id)
+            return True
+        return contains(cards)
+
+    def _unregistered_save_mentions(self, asset_id: str, registered_dirs: set[Path]) -> bool:
+        """True when a save the registry did not load may reference ``asset_id``.
+
+        Startup recovery registers every loadable save, so what remains here is
+        a save that failed to load (corrupt, or written by a newer runtime).
+        Its schema cannot be trusted, so match the raw text: asset ids are
+        random hex, and a false match only keeps an asset that could be deleted.
+        Unreadable files raise and the caller refuses the deletion.
+        """
+
+        save_dir = self._reg.save_dir
+        if not save_dir.exists():
+            return False
+        for entry in save_dir.iterdir():
+            if not entry.is_dir() or entry in registered_dirs:
+                continue
+            for name in ("state.json", "state.backup.json", "chatlog.jsonl"):
+                state = entry / name
+                if state.is_file() and asset_id in state.read_text(encoding="utf-8", errors="replace"):
+                    return True
+        return False
+
+    def _voice_profile_exists(self, voice_id: str) -> bool:
+        """True when the personal voice profile still exists (GAL P8)."""
+
+        speech_service = getattr(self, "_speech", None)
+        if speech_service is None:
+            return True  # 无法校验时不省略：合成端仍会 fail closed 报错。
+        return any(
+            str(item.get("id") or "") == voice_id
+            for item in speech_service.editable_voice_profiles()
+        )
 
     def image_generation_status(self) -> dict[str, Any]:
         return self._generated_images.public_config()

@@ -16,6 +16,7 @@ from src.rulesets.events import EventBatchError
 
 from dnd2024_monk_common import (
     SequenceRng,
+    advance,
     capability_action,
     capability_actions,
     capability_intent,
@@ -338,7 +339,12 @@ def test_non_monk_never_gets_monk_capabilities() -> None:
     engine, instance = monk_instance(runtime, sheet)
     start_combat(engine, instance)
 
-    assert capability_actions(engine, instance) == []
+    assert {
+        item["capability_id"] for item in capability_actions(engine, instance)
+    }.isdisjoint({
+        "bonus_unarmed_strike", "flurry_of_blows", "patient_defense",
+        "patient_defense_focus", "step_of_the_wind", "step_of_the_wind_focus",
+    })
     unarmed = _attack_action(engine, instance)["weapons"][-1]
     assert unarmed["weapon_ref"] == "unarmed_strike"
     assert unarmed["damage"] == "1"
@@ -480,3 +486,125 @@ def test_every_combat_actor_view_projects_class_resources_as_a_list() -> None:
     assert [row["id"] for row in by_id["player:gm"]["class_resources"]] == ["focus_points"]
     # 敌人没有职业资源，但字段仍然存在，并且仍然是同一张列表。
     assert by_id["enemy:goblin-1"]["class_resources"] == []
+
+
+# --------------------------------------------------------------------------
+# Second Wind (Slice 1): the first ``heal`` capability action
+# --------------------------------------------------------------------------
+
+
+def _fighter_sheet(runtime: Dnd2024Runtime, *, level: int = 1) -> dict:
+    choices = runtime.builder_choices(None, {"locale": "en"})
+    preset = next(
+        item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian"
+    )
+    sheet = runtime.finalize_character(
+        None, {**preset["draft"], "locale": "en", "name": "Fighter"},
+    )
+    return advance(runtime, sheet, level) if level > 1 else sheet
+
+
+def _fighter_instance(
+    *, level: int = 1, second_wind_current: int | None = None,
+    conditions: dict | None = None,
+):
+    runtime = Dnd2024Runtime()
+    sheet = _fighter_sheet(runtime, level=level)
+    canonical = sheet["ruleset_character"]
+    if second_wind_current is not None:
+        canonical["resources"]["class"]["second_wind"]["current"] = second_wind_current
+    if conditions is not None:
+        canonical["conditions"] = conditions
+    engine, instance = monk_instance(runtime, sheet)
+    start_combat(engine, instance)
+    return engine, instance
+
+
+def _second_wind_events(engine, instance, rolls: list[int]) -> list[dict]:
+    intent = capability_intent(
+        engine, instance, "second_wind", intent_id="wind-1", target_id="",
+    )
+    resolved, _applied = _apply(engine, instance, intent, SequenceRng(rolls))
+    return resolved["event_batch"]["events"]
+
+
+def _heal_event(events: list[dict]) -> dict:
+    return next(
+        event for event in events
+        if event["type"] == "resource.changed" and event.get("healing") is True
+    )
+
+
+def test_second_wind_spends_its_costs_then_heals_the_actor() -> None:
+    engine, instance = _fighter_instance()
+    action = capability_action(engine, instance, "second_wind")
+
+    assert action is not None
+    assert action["requires_target"] is False
+    assert [cost["kind"] for cost in action["costs"]] == ["bonus_action", "resource"]
+
+    events = _second_wind_events(engine, instance, [7])
+    ordered = [
+        event for event in events
+        if event["type"] in {
+            "dnd2024.action.spent", "dnd2024.class_resource.spent", "resource.changed",
+        }
+    ]
+
+    assert [event["type"] for event in ordered] == [
+        "dnd2024.action.spent", "dnd2024.class_resource.spent", "resource.changed",
+    ]
+    action_event, resource_event, heal_event = ordered
+    assert (action_event["resource"], action_event["amount"]) == ("bonus_action", 1)
+    assert (resource_event["resource_id"], resource_event["amount"]) == ("second_wind", 1)
+    assert heal_event["target_id"] == "player:gm"
+    assert heal_event["rolls"] == [7]
+
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    assert canonical["resources"]["class"]["second_wind"]["current"] == 1
+
+
+@pytest.mark.parametrize("level,level_bonus", [(1, 1), (5, 5)])
+def test_second_wind_healing_is_one_d10_plus_the_fighter_level(
+    level: int, level_bonus: int,
+) -> None:
+    engine, instance = _fighter_instance(level=level)
+
+    heal_event = _heal_event(_second_wind_events(engine, instance, [9]))
+
+    assert heal_event["rolls"] == [9]
+    assert heal_event["delta"] == 9 + level_bonus
+
+
+def test_second_wind_is_rejected_without_a_use_and_emits_nothing() -> None:
+    engine, instance = _fighter_instance(second_wind_current=0)
+    intent = capability_intent(
+        engine, instance, "second_wind", intent_id="wind-0", target_id="",
+    )
+
+    validation = engine.validate_intent(instance, intent)
+    assert validation["ok"] is False
+    assert "Second Wind" in validation["error"]
+
+    resolved = engine.resolve_intent(instance, intent, SequenceRng([7]))
+    assert resolved["ok"] is False
+    assert "event_batch" not in resolved
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 1
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    assert canonical["resources"]["class"]["second_wind"]["current"] == 0
+
+
+def test_second_wind_restores_no_hp_under_cannot_regain_hp() -> None:
+    engine, instance = _fighter_instance(conditions={"cannot_regain_hp": True})
+
+    events = _second_wind_events(engine, instance, [9])
+    heal_event = _heal_event(events)
+
+    assert heal_event["healing"] is True
+    assert heal_event["delta"] == 0
+    assert heal_event["amount"] == 0
+    assert heal_event["blocked_by"] == "cannot_regain_hp"
+    assert any(
+        event["type"] == "dnd2024.class_resource.spent" for event in events
+    )

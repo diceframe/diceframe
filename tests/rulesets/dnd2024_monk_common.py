@@ -146,6 +146,7 @@ def goblin(*, position: int = 5, hp: int = 40) -> dict[str, Any]:
     return {
         "id": "goblin-1", "name": "Goblin", "hp": hp, "armor_class": 12,
         "speed": 30, "position": position, "initiative_modifier": 2,
+        "creature_type": "humanoid",
         "abilities": {"str": 8, "dex": 14, "con": 10, "int": 10, "wis": 8, "cha": 8},
         "saving_throws": {"dex": 2, "wis": -1, "con": 0},
         "attacks": [{

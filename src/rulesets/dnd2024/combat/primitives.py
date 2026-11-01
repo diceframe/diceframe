@@ -10,6 +10,8 @@ DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 # 徒手打击的 canonical 攻击引用：它是每个 player-like actor 的天然攻击能力，
 # 不是捆绑物品，因此没有 "item:" 前缀，也永远不写入 equipment.item_refs。
 UNARMED_STRIKE_REF = "unarmed_strike"
+# 狂暴至多持续 10 分钟；一轮 6 秒，即 100 轮。
+RAGE_MAX_ROUNDS = 100
 INTENT_TYPES = frozenset({
     "encounter.ready", "encounter.unready", "combat.start", "combat.end", "combat.message",
     "attack", "cast_spell", "move", "dash", "dodge", "disengage", "end_turn",

@@ -5,6 +5,7 @@
 `docs/internal/` holds maintainer-only working documents:
 
 - `GAL_TRACK_PLAN.md` — GAL 轨道施工顺序与完成标准；
+- `DND2024_FULL_EXPERIENCE_PLAN.md` — D&D 2024 完整网团体验施工计划（内容 / 效果原语 / 战术地图三层）；
 - `plans/` — 游戏化 / HD-2D 体验的施工路线图；
 - `CONTENT_ARCHITECTURE_VNEXT_MASTER_PLAN.md` — 内容架构 vNext 母方案；
 - `design/` — 带日期的设计草案与核查记录。

@@ -159,7 +159,7 @@ function stateLabel(state?: string) {
 .party-rail__members-actions :deep(.party-rail__access-actions button) { min-width: 0; padding-inline: 5px; font-size: 12px; }
 .party-rail__members-actions :deep(button) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 36px; border-color: color-mix(in srgb, var(--df-interactive) 72%, var(--df-border-soft)); background: color-mix(in srgb, var(--df-interactive) 15%, var(--df-surface-1)); color: var(--df-interactive-strong, var(--df-interactive)); }
 .party-rail__invite-hint { margin: 0; color: var(--df-text-muted); font-size: 11px; line-height: 1.45; }
-.party-rail__member { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px; border: 1px solid color-mix(in srgb, var(--party-color, var(--df-border-soft)) 28%, transparent); border-left: 3px solid var(--party-color, var(--df-border-soft)); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--party-color, var(--df-surface-2)) 7%, var(--df-surface-2)); }
+.party-rail__member { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px; border: 1px solid color-mix(in srgb, var(--party-color, var(--df-border-soft)) 28%, transparent); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--party-color, var(--df-surface-2)) 7%, var(--df-surface-2)); }
 .party-rail__member .portrait-image { border-color: color-mix(in srgb, var(--party-color, var(--df-border-soft)) 72%, var(--df-border-soft)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--party-color, transparent) 16%, transparent); }
 .party-rail__member.is-self { border-color: color-mix(in srgb, var(--df-interactive) 52%, var(--df-border-soft)); }
 .party-rail__member-copy { display: grid; min-width: 0; gap: 2px; }
@@ -172,7 +172,6 @@ function stateLabel(state?: string) {
 .party-rail__presence { width: 7px; height: 7px; border-radius: 50%; background: var(--party-color, var(--df-success-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--party-color, var(--df-success)) 18%, transparent); }
 .party-rail__member-trailing { display: grid; justify-items: center; align-content: center; gap: 6px; }
 .party-rail__empty, .party-rail__recap p { margin: 0; color: var(--df-text-muted); font-size: 12px; line-height: 1.55; }
-.party-rail__hints { display: grid; gap: 4px; margin-top: 9px; color: var(--df-text-secondary); font-size: 11px; }
-.party-rail__hints span { padding-left: 8px; border-left: 2px solid var(--df-accent); }
+.party-rail__hints { display: grid; gap: 8px; margin-top: 9px; color: var(--df-text-secondary); font-size: 11px; }
 @media (max-width: 1200px) and (min-width: 801px) { .party-rail { padding-inline: 7px; } .party-rail__section { padding: 9px; } .party-rail__resources { display: none; } }
 </style>

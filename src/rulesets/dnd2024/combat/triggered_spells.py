@@ -139,15 +139,23 @@ class CombatTriggeredSpellsMixin:
                 )
         return events
 
-    def _finish_hit_spell(self, instance, combat, decision, rng, extra_damage=None):
+    def _finish_hit_spell(
+        self, instance, combat, decision, rng, extra_damage=None, *, spell_cast=False,
+    ):
         target = self._actor_view(instance, combat, decision["target_id"])
         events = [
             {
                 "type": "dnd2024.decision.cleared",
                 "decision_id": decision["decision_id"],
             },
-            deepcopy(decision["damage_event"]),
         ]
+        if spell_cast:
+            # 施放命中触发法术（例如至圣斩）也是一条 "spell_cast" 触发；
+            # 在决策清空之后、伤害落地之前结算提前终止。
+            events.extend(self._spell_end_trigger_events(
+                self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
+            ))
+        events.extend(self._submit_hit_damage(decision["damage_event"]))
         total = int(decision["damage_event"]["amount"])
         if extra_damage:
             events.append(extra_damage)
@@ -203,7 +211,8 @@ class CombatTriggeredSpellsMixin:
                     "critical": decision["critical"],
                     "rolls": rolls,
                 },
-            )
+                spell_cast=True,
+            ),
         )
         return events
 

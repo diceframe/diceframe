@@ -15,17 +15,84 @@ def context_id(engine: Any, instance: Any) -> str:
     return f"combat:{int(ruleset_runtime.state(instance).get('version', 0))}:{current}"
 
 
-def attack_sources(actor: dict, target: dict, range_disadvantage: bool) -> list[dict]:
+def condition_flags(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
+) -> dict[str, Any]:
+    """Aggregate the registry-declared mechanical flags a condition set carries.
+
+    Incapacitation and speed-zero gate intents, the auto-fail list feeds saving
+    throws, and ``crit_on_hit_within_5`` upgrades an already-hit attack. Any
+    single source turns a boolean on; the save list is the union of every
+    source. The whole incapacitated family (paralyzed, stunned, unconscious,
+    and sleep's plain ``incapacitated``) therefore works without engine
+    branches naming each condition.
+    """
+
+    incapacitated = False
+    speed_zero = False
+    auto_fail_saves: set[str] = set()
+    crit_on_hit_within_5 = False
+    for condition_id, entry in registry.items():
+        if condition_id not in conditions:
+            continue
+        incapacitated = incapacitated or bool(entry.get("implies_incapacitated"))
+        speed_zero = speed_zero or bool(entry.get("speed_zero"))
+        crit_on_hit_within_5 = crit_on_hit_within_5 or bool(
+            entry.get("crit_on_hit_within_5")
+        )
+        auto_fail_saves.update(
+            str(ability) for ability in entry.get("auto_fail_saves") or []
+        )
+    return {
+        "incapacitated": incapacitated,
+        "speed_zero": speed_zero,
+        "auto_fail_saves": auto_fail_saves,
+        "crit_on_hit_within_5": crit_on_hit_within_5,
+    }
+
+
+def effective_speed(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any], base_speed: int,
+) -> int:
+    """回合开始的速度上限：speed_zero 压倒一切修正；否则叠加全部 speed_modifier，向下取整于 0。"""
+
+    if condition_flags(registry, conditions)["speed_zero"]:
+        return 0
+    total = 0
+    for condition_id, entry in registry.items():
+        if condition_id in conditions:
+            total += int(entry.get("speed_modifier", 0) or 0)
+    return max(0, int(base_speed) + total)
+
+
+def attack_sources(
+    registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
+) -> list[dict]:
+    """Collect the registry-declared attack modifiers for this attack roll.
+
+    A condition declares whether it matters when it sits on the attacker
+    (``side == "actor"``) or on the target (``side == "target"``). ``negated_by``
+    is checked against the *observer* -- the attacker for target-side
+    declarations, the target for actor-side ones -- so a creature that can see
+    through the trick does not grant/benefit from it.
+
+    ``long_range`` stays code-generated: it is a positional fact of the attack,
+    not a condition.
+    """
+
     sources = []
-    for code in ("next_attack_advantage", "faerie_fire"):
-        if code in target["conditions"]:
-            sources.append({"code": code, "mode": "advantage"})
+    for condition_id, entry in registry.items():
+        for declaration in entry.get("attack_modes") or []:
+            on_actor = declaration["side"] == "actor"
+            holder = actor if on_actor else target
+            observer = target if on_actor else actor
+            if condition_id not in holder["conditions"]:
+                continue
+            if any(code in observer["conditions"] for code in declaration.get("negated_by") or []):
+                continue
+            sources.append({"code": condition_id, "mode": declaration["mode"]})
     if range_disadvantage:
         sources.append({"code": "long_range", "mode": "disadvantage"})
-    if "dodging" in target["conditions"]:
-        sources.append({"code": "dodging", "mode": "disadvantage"})
-    if "next_attack_disadvantage" in actor["conditions"]:
-        sources.append({"code": "next_attack_disadvantage", "mode": "disadvantage"})
     return sources
 
 
@@ -36,7 +103,7 @@ def mode_from_sources(sources: list[dict]) -> str:
 
 def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
                 range_disadvantage: bool, *, use_grant: bool = True) -> dict:
-    sources = attack_sources(actor, target, range_disadvantage)
+    sources = attack_sources(engine.catalog.conditions, actor, target, range_disadvantage)
     if use_grant and actor["kind"] == "player":
         grant = scoped(instance, actor["actor_id"].removeprefix("player:"), context_id(engine, instance)).get("grant")
         if grant:

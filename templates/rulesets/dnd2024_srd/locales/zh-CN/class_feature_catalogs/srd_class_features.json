@@ -21,7 +21,16 @@
       "action": "动作",
       "bonus_action": "附赠动作",
       "paladin": "圣武士",
-      "paladins_smite": "圣武士斩击（免费至圣斩）"
+      "paladins_smite": "圣武士斩击（免费至圣斩）",
+      "fighter": "战士",
+      "second_wind": "回气",
+      "action_surge": "动作如潮",
+      "barbarian": "野蛮人",
+      "rage": "狂暴",
+      "rage_sustain": "延长狂暴",
+      "rogue": "游荡者",
+      "sneak_attack": "偷袭",
+      "uncanny_dodge": "直觉闪避"
     }
   }
 }

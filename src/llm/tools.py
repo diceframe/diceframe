@@ -58,8 +58,11 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                 "minimum": 1,
                                 "maximum": 100,
                                 "description": (
-                                    "Situational DC for d20. Omit for d100: the server derives the percentile "
-                                    "threshold from the selected character attribute or skill."
+                                    "Situational DC for d20: judge which ruleset dc_table band "
+                                    "(easy/normal/hard) objectively fits this task and submit that "
+                                    "band's value per check instead of always normal. Omit for d100: "
+                                    "the server derives the percentile threshold from the selected "
+                                    "character attribute or skill."
                                 ),
                             },
                             "dc_reason": {

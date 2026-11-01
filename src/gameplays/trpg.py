@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from src.gameplays.contracts import (
-    BOT_SURFACE_FULL, GameplayCreateRejection, GameplayCreateRequest, GameplayMode,
+    BOT_SURFACE_FULL, TURN_DRIVER_NARRATIVE_ROUND, GameplayCreateRejection, GameplayCreateRequest, GameplayMode,
 )
 
 
@@ -19,5 +19,11 @@ def _validate_adventure(request: GameplayCreateRequest) -> GameplayCreateRejecti
     return None
 
 
-FREE = GameplayMode(mode_id="free", bot_surface=BOT_SURFACE_FULL, validate_create=_validate_free)
-ADVENTURE = GameplayMode(mode_id="adventure", bot_surface=BOT_SURFACE_FULL, validate_create=_validate_adventure)
+FREE = GameplayMode(
+    mode_id="free", bot_surface=BOT_SURFACE_FULL, validate_create=_validate_free,
+    turn_driver=TURN_DRIVER_NARRATIVE_ROUND,
+)
+ADVENTURE = GameplayMode(
+    mode_id="adventure", bot_surface=BOT_SURFACE_FULL, validate_create=_validate_adventure,
+    turn_driver=TURN_DRIVER_NARRATIVE_ROUND,
+)

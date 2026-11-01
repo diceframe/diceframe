@@ -41,6 +41,7 @@ def install_runtime(target: Path) -> None:
         sys.executable, "-m", "pip", "install",
         "--require-hashes", "--no-deps", "--only-binary=:all:",
         "--platform", "manylinux_2_17_x86_64",
+        "--platform", "manylinux_2_28_x86_64",
         "--python-version", "3.11", "--implementation", "cp", "--abi", "cp311",
         "--target", str(target), "-r", str(LOCK_FILE),
     ]

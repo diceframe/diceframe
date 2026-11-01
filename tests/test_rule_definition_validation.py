@@ -57,3 +57,21 @@ async def test_valid_mana_and_stamina_declarations_are_loaded_and_initialize_new
     sheet = next(iter(instance.players.values()))['character_sheet']
     assert (sheet['mp'], sheet['max_mp']) == (15, 20)
     assert (sheet['stamina'], sheet['max_stamina']) == (30, 30)
+
+
+@pytest.mark.parametrize(("block", "value"), [
+    ("affection", {"max_delta_per_round": 30}),
+    ("affection", {"max_delta_per_round": 5, "unknown": 1}),
+    ("adventure_progression", {"auto_confirm_completion": "yes"}),
+])
+def test_invalid_gameplay_blocks_are_rejected_at_save_and_rules_stay_listable(web_api, block, value):
+    api, _, _, _, _ = web_api
+    assert api.save_custom_rule({"source_rule_id": "freeform_fantasy", "rule_id": "my_gal", "rule_name": "Mine"})["ok"]
+    original = api.get_rule_template("my_gal")["rule"]
+
+    result = api.update_custom_rule("my_gal", {**deepcopy(original), block: value})
+
+    assert result["ok"] is False
+    assert block in result["error"]
+    assert api.get_rule_template("my_gal")["rule"] == original
+    assert any(rule.get("rule_id") == "my_gal" for rule in api.list_rules()["rules"])

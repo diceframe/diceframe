@@ -453,8 +453,9 @@
 }
 
 .message.player {
+  --speaker-ink: color-mix(in srgb, var(--speaker-color) 30%, var(--df-text));
+  --speaker-mark: color-mix(in srgb, var(--speaker-color) 55%, var(--df-text));
   margin-left: auto;
-  border-left-width: 4px;
 }
 
 .message.gm {
@@ -493,6 +494,7 @@
 
 .message-copy {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .message-copy>p:first-of-type {
@@ -1182,10 +1184,6 @@ body.light .round-divider {
   color: var(--df-text-muted);
 }
 
-body.light .message.player strong {
-  color: var(--df-success-strong) !important;
-}
-
 @media (min-width:801px) {
   .play-hud {
     flex: 0 0 auto;
@@ -1299,7 +1297,6 @@ body.light .message.player strong {
   margin: 14px 0;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--df-warning) 52%, var(--df-border-soft));
-  border-left: 4px solid var(--df-warning);
   border-radius: var(--df-radius-md);
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-warning) 11%, var(--df-surface-2)), var(--df-surface-1));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045), var(--df-shadow);
@@ -1307,7 +1304,6 @@ body.light .message.player strong {
 
 .economy-proposal-card.economy-proposal-reward {
   border-color: color-mix(in srgb, var(--df-success) 58%, var(--df-border-soft));
-  border-left-color: var(--df-success);
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-success) 12%, var(--df-surface-2)), var(--df-surface-1));
 }
 
@@ -1486,12 +1482,10 @@ body.light .message.player strong {
 }
 
 .message.player {
-  border-left-color: var(--df-interactive);
-  background: linear-gradient(145deg, color-mix(in srgb, var(--df-interactive) 9%, var(--df-surface-1)), var(--df-surface-1));
+  background: var(--df-surface-1);
 }
 
 .message.gm {
-  border-color: color-mix(in srgb, var(--df-accent) 35%, var(--df-border-soft));
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-accent) 11%, var(--df-surface-2)), var(--df-surface-1));
 }
 
@@ -1500,7 +1494,6 @@ body.light .message.player strong {
 }
 
 .message.story-recap {
-  border-color: color-mix(in srgb, var(--df-interactive) 38%, var(--df-border-soft));
   background: radial-gradient(circle at 0 0, color-mix(in srgb, var(--df-interactive) 13%, transparent), transparent 34%),
     linear-gradient(145deg, color-mix(in srgb, var(--df-accent) 6%, var(--df-surface-2)), var(--df-surface-1));
 }
@@ -2106,24 +2099,13 @@ body.light .play-main {
   box-shadow: 0 9px 24px rgba(0, 0, 0, .14);
 }
 
-.play-main .message.player {
-  border: 1px solid color-mix(in srgb, var(--df-interactive) 28%, var(--df-border-soft));
-  border-right: 3px solid var(--df-interactive);
-  border-left-width: 1px !important;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-2)), var(--df-surface-1));
-}
-
 .play-main .message.gm {
-  border: 1px solid color-mix(in srgb, var(--df-accent) 32%, var(--df-border-soft));
-  border-left: 3px solid var(--df-accent);
   background: radial-gradient(circle at 0 0, color-mix(in srgb, var(--df-accent) 10%, transparent), transparent 27%),
     linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
 }
 
 .play-main .message.story-recap {
   width: min(980px, 100%);
-  border: 1px solid color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
-  border-left: 3px solid var(--df-interactive);
 }
 
 .play-main .message-copy > strong {
@@ -2132,6 +2114,53 @@ body.light .play-main {
   gap: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 64%, transparent);
+}
+
+.message.player .message-speaker {
+  min-height: 44px;
+  flex-wrap: wrap;
+  color: var(--df-text);
+}
+
+.message-speaker-name {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--df-radius-sm);
+  background: color-mix(in srgb, var(--speaker-color) 18%, var(--df-surface-1));
+  color: var(--speaker-ink);
+  font-size: 12px;
+}
+
+.message.player > .portrait-image {
+  border: 2px solid var(--speaker-mark);
+  outline: 2px solid color-mix(in srgb, var(--speaker-color) 20%, transparent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.message.player > .portrait-empty {
+  background: color-mix(in srgb, var(--speaker-color) 18%, var(--df-surface-1));
+  color: var(--df-text);
+}
+
+.message-speaker-meta {
+  color: var(--df-text-secondary);
+  font-weight: 400;
+}
+
+.message-speaker .tts-button {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin-left: auto;
+  opacity: 1;
+}
+
+.message-speaker .tts-button:focus-visible {
+  outline: 2px solid var(--df-interactive-strong);
+  outline-offset: 2px;
 }
 
 .play-main .composer {
@@ -2255,13 +2284,7 @@ body.light .scene-chips span {
   background: color-mix(in srgb, var(--df-surface-1) 82%, transparent);
 }
 
-body.light .play-main .message.player {
-  border-color: color-mix(in srgb, var(--df-interactive) 28%, var(--df-border-soft));
-  background: linear-gradient(135deg, color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-2)), var(--df-surface-1));
-}
-
 body.light .play-main .message.gm {
-  border-color: color-mix(in srgb, var(--df-accent) 32%, var(--df-border-soft));
   background: radial-gradient(circle at 0 0, color-mix(in srgb, var(--df-accent) 9%, transparent), transparent 27%),
     linear-gradient(145deg, var(--df-surface-2), var(--df-surface-1));
 }
@@ -2319,7 +2342,6 @@ body.light .thinking-message {
   border: 1px solid color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
   border-radius: var(--df-radius-md);
   background: color-mix(in srgb, var(--df-surface-2) 82%, var(--df-surface-1));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--df-interactive) 64%, transparent);
 }
 
 .character-vitals .hp, .character-vitals .stat-head {
@@ -2483,7 +2505,6 @@ body.light .thinking-message {
   min-height: 27px;
   padding: 4px 8px;
   border: 1px solid var(--df-border-soft);
-  border-left: 2px solid var(--df-accent);
   border-radius: 5px;
   background: linear-gradient(145deg, color-mix(in srgb, var(--df-surface-3) 58%, transparent), var(--df-surface-1));
   color: var(--df-text-secondary);
@@ -2593,7 +2614,6 @@ body.light .thinking-message {
   box-sizing: border-box;
   padding: 5px 8px;
   border: 1px solid var(--df-border-soft);
-  border-left: 2px solid var(--df-interactive);
   border-radius: 4px;
   background: color-mix(in srgb, var(--df-surface-3) 52%, var(--df-surface-1));
   color: var(--df-text-secondary);
@@ -3191,13 +3211,11 @@ body.light .thinking-message {
   margin-right: auto;
   padding: 9px 12px;
   border: 1px solid color-mix(in srgb, var(--df-border-soft) 52%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--df-accent) 68%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--df-surface-2) 54%, transparent);
 }
 
 .play-page-immersive .message.gm .message-copy {
-  border-left: 0;
   padding-left: 0;
 }
 

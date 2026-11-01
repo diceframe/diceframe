@@ -25,7 +25,7 @@ function router() {
   return createRouter({ history: createMemoryHistory(), routes })
 }
 
-function mountCard(props: { hasGames?: boolean; peerAvailable?: boolean } = {}) {
+function mountCard(props: { hasGames?: boolean } = {}) {
   return mount(GettingStartedCard, {
     props,
     global: { plugins: [i18n, router()] },
@@ -176,18 +176,15 @@ describe('GettingStartedCard', () => {
     expect(collapsed.emitted('collapse')).toBeUndefined()
   })
 
-  it('shows multiplayer help without fetching config and emits connect only when available', async () => {
-    const unavailable = mountCard({ peerAvailable: false })
-    await unavailable.get('[data-testid="getting-started-friends"]').trigger('click')
-    expect(unavailable.text()).toContain('邀请')
+  it('keeps the Join friends action available without fetching config', async () => {
+    const wrapper = mountCard()
+    await wrapper.get('[data-testid="getting-started-friends"]').trigger('click')
+    expect(wrapper.text()).toContain('邀请')
     expect(apiMock).not.toHaveBeenCalled()
-    expect(unavailable.find('[data-testid="getting-started-connect"]').exists()).toBe(false)
-    unavailable.unmount()
-
-    const available = mountCard({ peerAvailable: true })
-    await available.get('[data-testid="getting-started-friends"]').trigger('click')
-    await available.get('[data-testid="getting-started-connect"]').trigger('click')
-    expect(available.emitted('connect')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="getting-started-connect"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="getting-started-connect"]').text()).toBe('加入好友')
+    await wrapper.get('[data-testid="getting-started-connect"]').trigger('click')
+    expect(wrapper.emitted('connect')).toHaveLength(1)
     expect(apiMock).not.toHaveBeenCalled()
   })
 

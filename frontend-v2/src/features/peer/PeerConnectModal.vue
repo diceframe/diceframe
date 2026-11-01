@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { NIcon, NModal } from 'naive-ui'
 import {
   ArrowBackOutline,
@@ -12,15 +12,51 @@ import {
 } from '@vicons/ionicons5'
 import { useLocale } from '@/composables/useLocale'
 import PeerConnectView from './PeerConnectView.vue'
+import FriendJoinPanel from './FriendJoinPanel.vue'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; peerAvailable: boolean }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 const { t } = useLocale()
-const step = ref<'intro' | 'connect'>('intro')
+const step = ref<'join' | 'intro' | 'connect'>('join')
+const connectMode = ref<'host' | 'guest'>('host')
+const guestInvite = ref('')
+const connectVisited = ref(false)
+const connectRevision = ref(0)
+const modalElement = ref<HTMLElement | null>(null)
+
+watch(step, async value => {
+  await nextTick()
+  const selector = value === 'join' ? '.friend-join-panel textarea' : value === 'intro' ? '.peer-intro-actions button' : '.peer-modal-back'
+  modalElement.value?.querySelector<HTMLElement>(selector)?.focus()
+})
 
 watch(() => props.show, (show) => {
-  if (show) step.value = 'intro'
+  if (show) {
+    step.value = 'join'
+    connectVisited.value = false
+    guestInvite.value = ''
+  }
 })
+
+function openHost() {
+  connectMode.value = 'host'
+  guestInvite.value = ''
+  step.value = 'intro'
+}
+
+function openPeer(code: string) {
+  connectMode.value = 'guest'
+  guestInvite.value = code
+  connectVisited.value = true
+  connectRevision.value += 1
+  step.value = 'connect'
+}
+
+function openSetup() {
+  connectVisited.value = true
+  connectRevision.value += 1
+  step.value = 'connect'
+}
 
 function close(): void {
   emit('update:show', false)
@@ -38,14 +74,18 @@ function close(): void {
     <!-- 弹窗根节点必须是 div：naive-ui FocusTrap 用「起始哨兵后第一个 DIV 兄弟节点」
          识别受控内容，section 会让它误认末尾哨兵为内容，弹窗内所有输入框焦点被抢、无法输入。 -->
     <div
+      ref="modalElement"
       class="peer-connect-modal"
+      :class="{ 'peer-connect-modal-join': step === 'join' }"
       role="dialog"
       aria-modal="true"
-      :aria-label="t('peerLaunchModalTitle')"
+      :aria-label="t(step === 'join' ? 'friendJoinTitle' : 'peerLaunchModalTitle')"
     >
       <button class="peer-modal-close" :aria-label="t('close')" @click="close">
         <NIcon :component="CloseOutline" />
       </button>
+
+      <FriendJoinPanel v-if="show" v-show="step === 'join'" :peer-available="peerAvailable" @peer="openPeer" @host="openHost" />
 
       <div v-show="step === 'intro'" class="peer-intro">
         <div class="peer-intro-visual" aria-hidden="true">
@@ -76,16 +116,16 @@ function close(): void {
 
           <p class="peer-experimental-note">{{ t('peerExperimentalNote') }}</p>
           <div class="peer-intro-actions">
-            <button @click="close">{{ t('cancel') }}</button>
-            <button class="primary" @click="step = 'connect'">{{ t('peerStartSetup') }}</button>
+            <button @click="step = 'join'">{{ t('friendJoinBack') }}</button>
+            <button class="primary" @click="openSetup">{{ t('peerStartSetup') }}</button>
           </div>
         </div>
       </div>
 
       <div v-show="step === 'connect'" class="peer-connect-step">
         <header class="peer-modal-toolbar">
-          <button class="peer-modal-back" @click="step = 'intro'">
-            <NIcon :component="ArrowBackOutline" />{{ t('peerIntroBack') }}
+          <button class="peer-modal-back" @click="step = connectMode === 'guest' ? 'join' : 'intro'">
+            <NIcon :component="ArrowBackOutline" />{{ t(connectMode === 'guest' ? 'friendJoinBack' : 'peerIntroBack') }}
           </button>
           <div>
             <h2>{{ t('peerLaunchModalTitle') }}</h2>
@@ -93,7 +133,7 @@ function close(): void {
           </div>
         </header>
         <div class="peer-modal-scroll">
-          <PeerConnectView embedded />
+          <PeerConnectView v-if="show && connectVisited" :key="connectRevision" embedded :initial-mode="connectMode" :initial-invite="guestInvite" />
         </div>
       </div>
     </div>
@@ -114,6 +154,7 @@ function close(): void {
   color: var(--df-text);
   box-shadow: 0 28px 90px color-mix(in srgb, #000 42%, transparent);
 }
+.peer-connect-modal-join { width: min(600px, calc(100vw - 32px)); overflow-y: auto; }
 
 .peer-modal-close {
   position: absolute;
@@ -253,6 +294,7 @@ function close(): void {
     border: 0;
     border-radius: 0;
   }
+  .peer-connect-modal-join { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border: 1px solid var(--df-border); border-radius: 20px; }
   .peer-intro {
     display: block;
     height: 100dvh;

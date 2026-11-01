@@ -103,6 +103,45 @@ def test_compound_action_prompts_stop_at_the_earliest_blocking_checkpoint() -> N
         assert gm_markers[locale] in gm_prompt
 
 
+def test_planner_prompts_require_per_check_dc_band_judgment() -> None:
+    """DC 扁平化修复：planner 必须逐条判断难度档位，不得一律默认 normal。
+
+    存档审计发现 17/17 条检定 DC 全为 dc_table.normal（15），且 dc_reason
+    已写明“难于日常”却仍停在 normal 档——旧指令“默认取 normal、有依据才
+    偏离”让模型把默认档当成免检答案。新指令改为逐条判断档位并要求
+    dc_reason 与档位一致。
+    """
+    band_judgment_markers = {
+        "zh": "不是免于判断的默认值",
+        "en": "not a judgment-free default",
+        "ja": "判断を省くための既定値ではない",
+        "de": "kein urteilsfreier Standardwert",
+        "ru": "освобождающее от оценки",
+    }
+    unconditional_default_phrases = {
+        "zh": "默认取 `dc_table.normal`",
+        "en": "Default to `dc_table.normal`",
+        "ja": "既定は `dc_table.normal`",
+        "de": "Standard ist `dc_table.normal`",
+        "ru": "По умолчанию используй `dc_table.normal`",
+    }
+    for locale in band_judgment_markers:
+        prompt = (ROOT / f"prompts/check_planner_{locale}.md").read_text(encoding="utf-8")
+        assert band_judgment_markers[locale] in prompt, locale
+        assert unconditional_default_phrases[locale] not in prompt, locale
+
+
+def test_dice_checks_tool_target_description_requires_band_judgment() -> None:
+    """工具 schema 的 target 描述与提示词一致：逐条判断档位，而非恒报 normal。"""
+    from src.llm.tools import DICE_CHECKS_TOOL
+
+    description = (
+        DICE_CHECKS_TOOL["function"]["parameters"]["properties"]["checks"]["items"]
+        ["properties"]["target"]["description"]
+    )
+    assert "instead of always normal" in description
+
+
 def test_d20_target_is_clamped_to_dc_cap() -> None:
     """后期失控 DC（25–30）必须被钳到规则显式硬上限。"""
     from src.engine.dice import d20_dc_cap

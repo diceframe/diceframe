@@ -19,7 +19,16 @@
     "action": "Action",
     "bonus_action": "Bonus Action",
     "paladin": "Paladin",
-    "paladins_smite": "Paladin’s Smite"
+    "paladins_smite": "Paladin’s Smite",
+    "fighter": "Fighter",
+    "second_wind": "Second Wind",
+    "action_surge": "Action Surge",
+    "barbarian": "Barbarian",
+    "rage": "Rage",
+    "rage_sustain": "Sustain Rage",
+    "rogue": "Rogue",
+    "sneak_attack": "Sneak Attack",
+    "uncanny_dodge": "Uncanny Dodge"
   },
   "classes": {
     "monk": {
@@ -122,6 +131,102 @@
             "granted_spell_id": "divine_smite"
           },
           "resource_id": "paladins_smite"
+        }
+      ]
+    },
+    "fighter": {
+      "source_ref": "srd-5.2.1:p47:fighter-features",
+      "features": [
+        {
+          "id": "second_wind",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p48:second-wind",
+          "summary": "Bonus Action: regain HP equal to 1d10 plus your Fighter level. You have two uses (three at Fighter level 4, four at level 10); regain one use on a Short Rest and all uses on a Long Rest.",
+          "parameters": {
+            "heal_dice": "1d10",
+            "heal_bonus_track": "second_wind_heal_bonus"
+          },
+          "resource_id": "second_wind",
+          "capabilities": [
+            {
+              "id": "second_wind",
+              "cost": {"bonus_action": 1, "resources": [{"id": "second_wind", "amount": 1}]},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "heal", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "action_surge",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p48:action-surge",
+          "summary": "On your turn, you can take one additional action, except the Magic action. Starting at level 17, you can use it twice before a rest, but only once on a turn.",
+          "parameters": {},
+          "resource_id": "action_surge",
+          "capabilities": [
+            {
+              "id": "action_surge",
+              "cost": {"resources": [{"id": "action_surge", "amount": 1}]},
+              "requires_hostile_target": false,
+              "once_per_turn": true,
+              "actions": [{"kind": "action_surge", "count": 1}]
+            }
+          ]
+        }
+      ]
+    },
+    "barbarian": {
+      "source_ref": "srd-5.2.1:p28:barbarian-features",
+      "features": [
+        {
+          "id": "rage",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p28:rage",
+          "summary": "Bonus Action: enter a Rage. While raging, Strength attacks and Unarmed Strikes deal extra damage (see the Barbarian table), and your Strength saving throws have advantage. You cannot cast spells or maintain Concentration while raging; entering a Rage ends Concentration. The Rage lasts until the end of your next turn; making an attack against an enemy, or using a Bonus Action, extends it for another turn, up to 10 turns. It ends early if you are Incapacitated. You regain one use on a Short Rest and all uses on a Long Rest.",
+          "parameters": {
+            "rage_damage_track": "rage_damage"
+          },
+          "resource_id": "rages",
+          "capabilities": [
+            {
+              "id": "rage",
+              "cost": {"bonus_action": 1, "resources": [{"id": "rages", "amount": 1}]},
+              "requires_hostile_target": false,
+              "forbidden_condition": "rage",
+              "actions": [{"kind": "rage", "count": 1}]
+            },
+            {
+              "id": "rage_sustain",
+              "cost": {"bonus_action": 1},
+              "requires_hostile_target": false,
+              "requires_condition": "rage",
+              "actions": [{"kind": "rage_sustain", "count": 1}]
+            }
+          ]
+        }
+      ]
+    },
+    "rogue": {
+      "source_ref": "srd-5.2.1:p61:rogue-features",
+      "features": [
+        {
+          "id": "sneak_attack",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p61:sneak-attack",
+          "summary": "Once per turn, when you hit with an attack using a Finesse or Ranged weapon, deal extra damage if you have Advantage, or if an ally who is not Incapacitated is within 5 feet of the target and you do not have Disadvantage. The damage type matches the weapon.",
+          "parameters": {
+            "damage_dice_track": "sneak_attack_dice",
+            "damage_dice_format": "{die}d6"
+          }
+        },
+        {
+          "id": "uncanny_dodge",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p63:uncanny-dodge",
+          "summary": "When an attacker that you can see hits you with an attack, you can use your Reaction to halve the attack's damage against you (rounded down).",
+          "parameters": {
+            "damage_multiplier": 0.5
+          }
         }
       ]
     }

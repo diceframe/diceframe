@@ -43,6 +43,7 @@ GATE_TYPES = (
     "world.process_status",
     "adventure.milestone",
     "adventure.objective_status",
+    "affection.score",
     "rules.outcome",
     "rules.party_level",
     "rules.item_possession",
@@ -68,11 +69,21 @@ def validate_gate(raw: Any) -> dict[str, Any]:
     if extra:
         raise GateError(f"gate has unknown field: {extra[0]!r}")
     # 词表字段约定：world.fact_equals 用 key；其余用 id；value 一律必填。
+    # affection.score 的 value 是最低分阈值（达到才放行；分数未知 = 不放行）。
     gate = {"type": gate_type, "value": raw.get("value")}
     if gate_type == "world.fact_equals":
         gate["key"] = str(raw.get("key") or "")
         if not gate["key"]:
             raise GateError("world.fact_equals requires key")
+    elif gate_type == "affection.score":
+        gate["id"] = str(raw.get("id") or "")
+        if not gate["id"]:
+            raise GateError("affection.score requires id")
+        threshold = raw.get("value")
+        if type(threshold) is not int or not -100 <= threshold <= 100:
+            raise GateError(
+                f"affection.score value must be an integer from -100 to 100: {threshold!r}"
+            )
     elif gate_type in ("adventure.milestone", "adventure.objective_status", "rules.item_possession", "rules.outcome", "rules.party_level"):
         gate["id"] = str(raw.get("id") or "")
         if not gate["id"]:
@@ -126,6 +137,13 @@ def _gate_satisfied(
             completed = {str(item) for item in (progress.get("completed_objectives") or [])}
             status = "completed" if objective_id in completed else "active"
             return status == str(expected or "")
+        if gate_type == "affection.score":
+            # GAL P2 预告、P10 落地：好感分数阈值（达到才放行）。分数未知
+            # （未启用 affection / 未结算过该对象）= 证据不足 = 不放行。
+            from src.engine.modules import affection
+
+            current = affection.score(instance, str(gate.get("id") or ""))
+            return current is not None and current >= int(expected)
         if gate_type.startswith("rules."):
             if rules_evaluator is None:
                 return False  # 证据不足：不满足（不猜）。

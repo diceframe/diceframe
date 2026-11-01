@@ -108,6 +108,58 @@ describe('invite address guidance', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
+  it('provides a locale-aware multiplayer help link without exposing invitation data', async () => {
+    const wrapper = await render('seat-token-abc')
+    const help = wrapper.get('.invite-multiplayer-help')
+
+    expect(help.element.tagName).toBe('A')
+    expect(help.attributes('href')).toBe(
+      'https://github.com/diceframe/diceframe-content/blob/main/docs/zh/guide.md#外网联机',
+    )
+    expect(help.attributes('target')).toBe('_blank')
+    expect(help.attributes('rel')).toBe('noopener noreferrer')
+    expect(help.attributes('href')).not.toContain('seat-token-abc')
+    await help.trigger('click')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(push).not.toHaveBeenCalled()
+
+    i18n.global.locale.value = 'en'
+    const english = await render('seat-token-abc')
+    const englishHelp = english.get('.invite-multiplayer-help')
+    expect(englishHelp.attributes('href')).toBe(
+      'https://github.com/diceframe/diceframe-content/blob/main/docs/en/guide.md#multiplayer',
+    )
+    expect(englishHelp.attributes('href')).not.toContain('seat-token-abc')
+  })
+
+  it.each(['en', 'ja', 'de', 'ru'] as const)(
+    'uses the English guide for the %s locale without credentials',
+    async (locale) => {
+      i18n.global.locale.value = locale
+      const wrapper = await render('seat-token-abc')
+      const help = wrapper.get('[data-testid="invite-multiplayer-help"]')
+
+      expect(help.attributes('href')).toBe(
+        'https://github.com/diceframe/diceframe-content/blob/main/docs/en/guide.md#multiplayer',
+      )
+      expect(help.attributes('href')).not.toMatch(/seat-token-abc|game=|token|key/i)
+    },
+  )
+
+  it('keeps the multiplayer help link available while the address is loading', async () => {
+    const pending = deferredAddresses()
+    const wrapper = mountModal('seat-token-abc')
+    await nextTick()
+
+    const help = wrapper.get('.invite-multiplayer-help')
+    expect(help.attributes('target')).toBe('_blank')
+    expect(help.attributes('href')).not.toContain('seat-token-abc')
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    pending.settle([])
+    await flushPromises()
+  })
+
   it('warns only when the selected address is reachable from this machine alone', async () => {
     // 探测不到别的地址时，本机 origin 就是唯一候选。
     setOrigin('http://localhost:8080')

@@ -23,7 +23,10 @@ from src.rulesets.bundle import LoadedRulesetBundle
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 # v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
-ACTION_KINDS = frozenset({"unarmed_strike", "dash", "dodge", "disengage"})
+ACTION_KINDS = frozenset({
+    "unarmed_strike", "dash", "dodge", "disengage", "heal", "rage", "rage_sustain",
+    "action_surge",
+})
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
@@ -116,6 +119,9 @@ class FeatureCapability:
     cost: CapabilityCost
     requires_hostile_target: bool
     actions: tuple[CapabilityAction, ...]
+    requires_condition: str | None = None
+    forbidden_condition: str | None = None
+    once_per_turn: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,12 +350,30 @@ class Dnd2024ClassFeatureCatalog:
                     raw_action.get("count", 1), f"{capability_id} action count",
                 ),
             ))
+        requires_condition = str(raw.get("requires_condition") or "")
+        forbidden_condition = str(raw.get("forbidden_condition") or "")
+        if requires_condition and forbidden_condition:
+            raise ClassFeatureError(
+                f"{capability_id} cannot require and forbid a condition at the same time"
+            )
+        for condition_field, condition_value in (
+            ("requires_condition", requires_condition),
+            ("forbidden_condition", forbidden_condition),
+        ):
+            if condition_value:
+                _require_id(condition_value, f"{capability_id}.{condition_field}")
+        once_per_turn = raw.get("once_per_turn", False)
+        if not isinstance(once_per_turn, bool):
+            raise ClassFeatureError(f"{capability_id}.once_per_turn must be a boolean")
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
             cost=CapabilityCost(action=action, resources=tuple(resources)),
             requires_hostile_target=bool(raw.get("requires_hostile_target")),
             actions=tuple(actions),
+            requires_condition=requires_condition or None,
+            forbidden_condition=forbidden_condition or None,
+            once_per_turn=once_per_turn,
         )
 
     def label(self, key: str, default: str = "") -> str:

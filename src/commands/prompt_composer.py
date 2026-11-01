@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from src.adventures.scene_context import SceneContextProvider, format_scene_context
+from src.commands.affection_effects import affection_prompt_appendix
 from src.compat.callbacks import load_world_template as load_world_template_compat
 from src.content.gm_style import render_gm_style_section
 from src.engine.game_instance import GameInstance
@@ -191,6 +192,9 @@ class PromptComposer:
                     stat_appendix = rule.resource_tag_appendix(language)
                     if stat_appendix:
                         ctx.rule_appendix = ctx.rule_appendix + "\n\n" + stat_appendix
+                    affection_appendix = affection_prompt_appendix(instance, rule.affection, language)
+                    if affection_appendix:
+                        ctx.rule_appendix = ctx.rule_appendix + "\n\n" + affection_appendix
         except ValueError:
             raise
         except Exception:

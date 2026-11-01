@@ -236,7 +236,7 @@ test('professional combat tool keeps its content reachable at short desktop and 
     }
   }
   await expect(panel.locator('.turn-banner')).toBeVisible({ timeout: 20_000 })
-  await expect(panel.locator('.actor-card')).not.toHaveCount(0)
+  await expect(panel.locator('.battle-token')).not.toHaveCount(0)
 
   for (const viewport of [
     { width: 1280, height: 620 },
@@ -250,8 +250,8 @@ test('professional combat tool keeps its content reachable at short desktop and 
     await expectToolPanelReachable(page, '.dnd-combat', `combat @ ${viewport.width}x${viewport.height}`)
   }
 
-  // 纵向修复不得破坏移动端的横向滚动（initiative / 行动者卡 / 动作卡）。
-  const lane = page.locator('.dnd-combat .actor-grid').first()
+  // 纵向修复不得破坏移动端的横向滚动（战场 / 动作卡）。
+  const lane = page.locator('.dnd-combat .battlefield .stage-scroll').first()
   const laneGeometry = await lane.evaluate(element => ({
     overflowX: getComputedStyle(element).overflowX,
     scrollWidth: element.scrollWidth,

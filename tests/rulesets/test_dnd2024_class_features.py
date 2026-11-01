@@ -26,6 +26,15 @@ MONK_FEATURES_AT_TWO = (
     "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
     "step_of_the_wind",
 )
+MONK_FEATURE_IDS = frozenset({"martial_arts", *MONK_FEATURES_AT_TWO})
+MONK_CAPABILITY_IDS = frozenset({
+    "bonus_unarmed_strike",
+    "flurry_of_blows",
+    "patient_defense",
+    "patient_defense_focus",
+    "step_of_the_wind",
+    "step_of_the_wind_focus",
+})
 
 
 def _resolver(locale: str = "en") -> tuple[Dnd2024Runtime, Dnd2024ClassFeatureResolver]:
@@ -91,8 +100,15 @@ def test_non_monk_characters_never_own_monk_features(preset_id: str) -> None:
         None, {**preset["draft"], "locale": "en", "name": preset_id},
     )
 
-    assert resolver.features_for(sheet["ruleset_character"]) == ()
-    assert resolver.combat_capabilities(sheet["ruleset_character"], {"bonus_action": 1}) == ()
+    owned = [feature.id for feature in resolver.features_for(sheet["ruleset_character"])]
+    declared = {
+        capability.id for capability in resolver.combat_capabilities(
+            sheet["ruleset_character"], {"bonus_action": 1},
+        )
+    }
+
+    assert set(owned).isdisjoint(MONK_FEATURE_IDS)
+    assert declared.isdisjoint(MONK_CAPABILITY_IDS)
     assert sheet["ruleset_character"]["resources"]["class"].get("focus_points") is None
 
 
@@ -280,6 +296,10 @@ def _bad_cost_amount(catalog: dict) -> None:
     ] = 0
 
 
+def _bad_once_per_turn(catalog: dict) -> None:
+    catalog["classes"]["fighter"]["features"][1]["capabilities"][0]["once_per_turn"] = "yes"
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -289,6 +309,7 @@ def _bad_cost_amount(catalog: dict) -> None:
         _orphan_option,
         _undeclared_resource,
         _bad_cost_amount,
+        _bad_once_per_turn,
     ],
 )
 def test_malformed_feature_declarations_fail_closed(mutate) -> None:
@@ -327,3 +348,268 @@ def test_feature_and_rest_declarations_agree() -> None:
             assert entry.source_ref == str(spec["source_ref"])
             assert entry.short_rest == spec.get("short", "none")
             assert entry.long_rest == spec.get("long", "none")
+
+
+# --------------------------------------------------------------------------
+# Second Wind (Slice 1): heal primitive declaration, progression, and rest
+# --------------------------------------------------------------------------
+
+
+def _fighter(level: int, **extra) -> dict:
+    return _character(level, "class:fighter", **extra)
+
+
+def test_fighter_second_wind_declaration_and_capability_load() -> None:
+    _runtime, resolver = _resolver()
+    character = _fighter(1, resources={
+        "class": {"second_wind": {"current": 2, "maximum": 2}},
+    })
+
+    assert [feature.id for feature in resolver.features_for(character)] == ["second_wind"]
+    capability = resolver.declared_capability(character, "second_wind")
+
+    assert capability is not None
+    assert capability.requires_hostile_target is False
+    assert capability.cost.action == "bonus_action"
+    assert [
+        (cost.resource_id, cost.amount) for cost in capability.cost.resources
+    ] == [("second_wind", 1)]
+    assert [
+        (action.kind, action.count) for action in capability.actions
+    ] == [("heal", 1)]
+    assert resolver.feature_value(character, "second_wind", "heal_dice") == "1d10"
+    assert resolver.feature_value(character, "second_wind", "heal_bonus") == 1
+    assert resolver.catalog.label("second_wind") == "Second Wind"
+
+
+def test_second_wind_labels_follow_the_bundle_locale() -> None:
+    _runtime, chinese = _resolver("zh-CN")
+
+    assert chinese.catalog.label("fighter") == "战士"
+    assert chinese.catalog.label("second_wind") == "回气"
+
+
+def test_fighter_action_surge_declaration_and_capability_load() -> None:
+    _runtime, resolver = _resolver()
+    character = _fighter(2, resources={
+        "class": {"action_surge": {"current": 1, "maximum": 1}},
+    })
+
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "second_wind", "action_surge",
+    ]
+    capability = resolver.declared_capability(character, "action_surge")
+
+    assert capability is not None
+    assert capability.once_per_turn is True
+    assert capability.requires_hostile_target is False
+    assert capability.cost.action == ""
+    assert [
+        (cost.resource_id, cost.amount) for cost in capability.cost.resources
+    ] == [("action_surge", 1)]
+    assert [
+        (action.kind, action.count) for action in capability.actions
+    ] == [("action_surge", 1)]
+    assert resolver.catalog.label("action_surge") == "Action Surge"
+
+
+def test_action_surge_label_follows_the_bundle_locale() -> None:
+    _runtime, chinese = _resolver("zh-CN")
+
+    assert chinese.catalog.label("action_surge") == "动作如潮"
+
+
+def test_level_one_fighter_does_not_own_action_surge() -> None:
+    _runtime, resolver = _resolver()
+    character = _fighter(1, resources={
+        "class": {"second_wind": {"current": 2, "maximum": 2}},
+    })
+
+    assert [feature.id for feature in resolver.features_for(character)] == ["second_wind"]
+    assert resolver.declared_capability(character, "action_surge") is None
+
+
+def _rest_character(level: int) -> dict:
+    return {
+        "build": {"class_levels": [{"class_ref": "class:fighter", "level": level}]},
+        "abilities": {"str": 16, "dex": 12, "con": 14, "int": 10, "wis": 10, "cha": 8},
+        "resources": {"hp": 12, "max_hp": 24, "hit_dice": {"d10": level}},
+    }
+
+
+@pytest.mark.parametrize("level,maximum", [(1, 2), (4, 3), (10, 4)])
+def test_second_wind_maximum_follows_the_progression_track(
+    level: int, maximum: int,
+) -> None:
+    runtime = Dnd2024Runtime()
+    engine = Dnd2024RestEngine(runtime.load_bundle("en"))
+
+    synced = engine.sync_resources(_rest_character(level))
+    resource = synced["resources"]["class"]["second_wind"]
+
+    assert resource["maximum"] == maximum
+    assert resource["current"] == maximum
+
+
+def test_second_wind_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -> None:
+    runtime = Dnd2024Runtime()
+    engine = Dnd2024RestEngine(runtime.load_bundle("en"))
+    character = engine.sync_resources(_rest_character(4))
+    character["resources"]["class"]["second_wind"]["current"] = 0
+
+    short_rested = engine.complete_short_rest(character)["character"]
+    assert short_rested["resources"]["class"]["second_wind"]["current"] == 1
+
+    short_rested["resources"]["class"]["second_wind"]["current"] = 0
+    long_rested = engine.complete_long_rest(short_rested)["character"]
+    assert long_rested["resources"]["class"]["second_wind"]["current"] == 3
+
+
+# --------------------------------------------------------------------------
+# Rage (Slice 2): sustained condition declaration, progression, and rest
+# --------------------------------------------------------------------------
+
+
+def _barbarian(level: int, **extra) -> dict:
+    return _character(level, "class:barbarian", **extra)
+
+
+def test_barbarian_rage_declaration_and_capabilities_load() -> None:
+    _runtime, resolver = _resolver()
+    character = _barbarian(1, resources={
+        "class": {"rages": {"current": 2, "maximum": 2}},
+    })
+
+    assert [feature.id for feature in resolver.features_for(character)] == ["rage"]
+    enter = resolver.declared_capability(character, "rage")
+    sustain = resolver.declared_capability(character, "rage_sustain")
+
+    assert enter is not None and sustain is not None
+    assert enter.requires_hostile_target is False
+    assert enter.forbidden_condition == "rage" and enter.requires_condition is None
+    assert enter.cost.action == "bonus_action"
+    assert [(cost.resource_id, cost.amount) for cost in enter.cost.resources] == [
+        ("rages", 1),
+    ]
+    assert [(action.kind, action.count) for action in enter.actions] == [("rage", 1)]
+    assert sustain.requires_condition == "rage" and sustain.forbidden_condition is None
+    assert sustain.cost.action == "bonus_action"
+    assert [(action.kind, action.count) for action in sustain.actions] == [
+        ("rage_sustain", 1),
+    ]
+    assert resolver.catalog.label("rage") == "Rage"
+    assert resolver.catalog.label("rage_sustain") == "Sustain Rage"
+
+
+@pytest.mark.parametrize("level,bonus", [(1, 2), (9, 3), (16, 4)])
+def test_rage_damage_follows_the_progression_track(level: int, bonus: int) -> None:
+    _runtime, resolver = _resolver()
+
+    assert resolver.feature_value(_barbarian(level), "rage", "rage_damage") == bonus
+
+
+def test_rage_labels_follow_the_bundle_locale() -> None:
+    _runtime, chinese = _resolver("zh-CN")
+
+    assert chinese.catalog.label("barbarian") == "野蛮人"
+    assert chinese.catalog.label("rage") == "狂暴"
+    assert chinese.catalog.label("rage_sustain") == "延长狂暴"
+
+
+@pytest.mark.parametrize("level,maximum", [(1, 2), (3, 3), (6, 4), (12, 5), (17, 6)])
+def test_rage_maximum_follows_the_progression_track(level: int, maximum: int) -> None:
+    runtime = Dnd2024Runtime()
+    engine = Dnd2024RestEngine(runtime.load_bundle("en"))
+
+    synced = engine.sync_resources({
+        "build": {"class_levels": [{"class_ref": "class:barbarian", "level": level}]},
+        "abilities": {"str": 16, "dex": 12, "con": 14, "int": 10, "wis": 10, "cha": 8},
+        "resources": {"hp": 12, "max_hp": 24, "hit_dice": {"d12": level}},
+    })
+
+    assert synced["resources"]["class"]["rages"]["maximum"] == maximum
+
+
+def test_rage_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -> None:
+    runtime = Dnd2024Runtime()
+    engine = Dnd2024RestEngine(runtime.load_bundle("en"))
+    character = engine.sync_resources({
+        "build": {"class_levels": [{"class_ref": "class:barbarian", "level": 1}]},
+        "abilities": {"str": 16, "dex": 12, "con": 14, "int": 10, "wis": 10, "cha": 8},
+        "resources": {"hp": 12, "max_hp": 24, "hit_dice": {"d12": 1}},
+    })
+    assert character["resources"]["class"]["rages"]["maximum"] == 2
+    character["resources"]["class"]["rages"]["current"] = 0
+
+    short_rested = engine.complete_short_rest(character)["character"]
+    assert short_rested["resources"]["class"]["rages"]["current"] == 1
+
+    short_rested["resources"]["class"]["rages"]["current"] = 0
+    long_rested = engine.complete_long_rest(short_rested)["character"]
+    assert long_rested["resources"]["class"]["rages"]["current"] == 2
+
+
+# --------------------------------------------------------------------------
+# Uncanny Dodge (Slice 3): reaction-triggered capability declaration
+# --------------------------------------------------------------------------
+
+
+def _rogue(level: int, **extra) -> dict:
+    return _character(level, "class:rogue", **extra)
+
+
+def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
+    _runtime, resolver = _resolver()
+    character = _rogue(1)
+
+    assert [feature.id for feature in resolver.features_for(character)] == ["sneak_attack"]
+    feature = resolver.features_for(character)[0]
+    assert feature.capabilities == ()
+    assert feature.resource_id == ""
+    assert resolver.feature_value(character, "sneak_attack", "damage_dice") == "1d6"
+    assert resolver.declared_capability(character, "sneak_attack") is None
+    assert resolver.catalog.label("sneak_attack") == "Sneak Attack"
+
+
+@pytest.mark.parametrize(
+    "level, dice", [(1, "1d6"), (3, "2d6"), (5, "3d6"), (19, "10d6")],
+)
+def test_sneak_attack_dice_follow_the_rogue_progression(level: int, dice: str) -> None:
+    _runtime, resolver = _resolver()
+
+    assert resolver.feature_value(_rogue(level), "sneak_attack", "damage_dice") == dice
+
+
+def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> None:
+    """Uncanny Dodge is owned by the reaction path, not the action list.
+
+    It declares no capability on purpose: listing it in ``available_intents``
+    would surface a "use" action that the engine cannot resolve (the feature
+    reacts to being hit, it is never the player's turn action).  Its catalog
+    parameters stay authoritative for the reaction path.
+    """
+
+    _runtime, resolver = _resolver()
+    character = _rogue(5)
+
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "sneak_attack", "uncanny_dodge",
+    ]
+    assert resolver.declared_capability(character, "uncanny_dodge") is None
+    assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
+    assert resolver.catalog.label("uncanny_dodge") == "Uncanny Dodge"
+
+
+def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
+    _runtime, resolver = _resolver()
+
+    assert [feature.id for feature in resolver.features_for(_rogue(4))] == ["sneak_attack"]
+    assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
+
+
+def test_uncanny_dodge_labels_follow_the_bundle_locale() -> None:
+    _runtime, chinese = _resolver("zh-CN")
+
+    assert chinese.catalog.label("rogue") == "游荡者"
+    assert chinese.catalog.label("sneak_attack") == "偷袭"
+    assert chinese.catalog.label("uncanny_dodge") == "直觉闪避"

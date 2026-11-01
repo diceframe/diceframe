@@ -15,6 +15,8 @@ from src.engine.module_state import ModuleStateError
 from src.engine import module_hooks
 from src.engine.modules import adventure_runtime_state, content_binding, progression_state, storytelling
 from src.engine.narrative_perspective import validate_narrative_perspective
+from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+from src.gameplays.contracts import GameplayCreateRequest
 from src.migrations import migrate_instance
 from src.webui.services._common import (
     _GAME_KEY_SEP,
@@ -196,6 +198,22 @@ async def create_from_seed(
     # slot is rejected before anything is registered.
     adventure_runtime_state.require_writable(target_inst)
     source_play_mode = str(adventure_runtime_state.play_mode(target_inst) or "")
+    # A seed restart is a new game of the same gameplay: it passes the same
+    # creation validation (e.g. GAL is solo-only) and installs the same
+    # progression contract as normal creation.
+    effective_play_mode = source_play_mode or (
+        "adventure" if target_adventure_binding.get("adventure_id") else "free"
+    )
+    gameplay = DEFAULT_GAMEPLAYS.get(effective_play_mode)
+    if gameplay is None:
+        return {"ok": False, "error": "玩法模式无效"}
+    gameplay_rejection = gameplay.validate_create(GameplayCreateRequest(
+        solo=bool(solo),
+        rule_id=str(rule_id or "").strip(),
+        adventure_id=str(target_adventure_binding.get("adventure_id") or "").strip(),
+    ))
+    if gameplay_rejection is not None:
+        return gameplay_rejection.as_response()
 
     try:
         source_preferences = game_preferences.project(target_inst, runtime)
@@ -253,9 +271,8 @@ async def create_from_seed(
     # A seed restart is the same kind of game: keep its play mode (old saves
     # without one derive it from the binding, as the save migration does) and
     # run the same Adventure v2 initialization step as normal creation.
-    adventure_runtime_state.replace_play_mode(instance, source_play_mode or (
-        "adventure" if target_adventure_binding.get("adventure_id") else "free"
-    ))
+    adventure_runtime_state.replace_play_mode(instance, effective_play_mode)
+    progression_state.set_mode(instance, gameplay.progression_mode)
     if callable(getattr(dependencies, "initialize_adventure_run", None)):
         try:
             dependencies.initialize_adventure_run(instance)

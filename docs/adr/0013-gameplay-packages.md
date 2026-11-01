@@ -1,11 +1,11 @@
-# ADR-0012: 玩法包边界
+# ADR-0013: 玩法包边界
 
 - Status: Accepted
 - Date: 2026-10-23
 
 ## Context
 
-[ADR-0010](0010-gal-first-non-trpg-gameplay.md) 决定 gal 是"组合，不是引擎分支"，P0 / P1 已合入上游。继续施工前盘点（2026-10-23，upstream/main @ v3.0.2）发现，按[轨道 P 计划](../GAL_TRACK_PLAN.md)原排法，gal 与跑团的差异会以分支形式落进跑团自己的模块：
+[ADR-0010](0010-gal-first-non-trpg-gameplay.md) 决定 gal 是"组合，不是引擎分支"，P0 / P1 已合入上游。继续施工前盘点（2026-10-23，upstream/main @ v3.0.2）发现，按[轨道 P 计划](../internal/GAL_TRACK_PLAN.md)原排法，gal 与跑团的差异会以分支形式落进跑团自己的模块：
 
 - 玩法模式注册表（`PLAY_MODES` / `MODE_BOT_SURFACES`）放在 Adventure 进度模块 `adventure_runtime_state` 里；新增玩法要改冒险模块。
 - `play_mode` 一个枚举混了两条轴：`free` / `adventure` 是"跑团是否绑定冒险包"，`gal` 是"玩哪种游戏"。直接后果是 gal 创建拒绝绑定冒险包，而 v1 路线恰恰要用 Adventure 图。

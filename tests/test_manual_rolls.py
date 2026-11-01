@@ -57,6 +57,15 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
     asyncio.run(scenario())
 
 
+def test_cancelled_manual_roll_cannot_be_resolved():
+    request = _resolved_check(status="cancelled", results={})
+    service = _make_service(_context_instance([request]), [])
+    result = asyncio.run(service.resolve(
+        "game", "p1", request["id"], {"run_id": "run-1"},
+    ))
+    assert result["ok"] is False
+
+
 def test_manual_roll_purpose_check_and_contest_are_evaluated_without_state_effects():
     instance = SimpleNamespace(
         modules={},
@@ -360,3 +369,35 @@ def test_format_manual_roll_context_localizes_en_and_ja():
     assert "→ 勝ち" in ja_text
     assert "→ 負け" in ja_text
     assert "用途：自由ロール" in ja_text
+
+
+def test_resolved_manual_roll_cannot_be_cancelled_out_of_the_ai_context():
+    instance = _context_instance([_resolved_check()])
+    saves = []
+    service = _make_service(instance, saves)
+    before = format_manual_roll_context(instance, viewer_is_gm=True)
+    assert before
+
+    result = asyncio.run(service.cancel("game", "gm", "mr-check", {"run_id": "run-1"}))
+
+    assert result["ok"] is False
+    assert checks.manual_roll_requests(instance)[0]["status"] == "resolved"
+    assert format_manual_roll_context(instance, viewer_is_gm=True) == before
+    assert saves == []
+
+
+def test_partially_rolled_request_cancels_keeping_results_and_blocking_the_rest():
+    request = _resolved_check(status="pending", target_uids=["p1", "p2"],
+                              target_names={"p1": "Alice", "p2": "Bob"})
+    instance = _context_instance([request])
+    service = _make_service(instance, [])
+
+    cancelled = asyncio.run(service.cancel("game", "gm", "mr-check", {"run_id": "run-1"}))
+    assert cancelled["ok"] is True
+    again = asyncio.run(service.cancel("game", "gm", "mr-check", {"run_id": "run-1"}))
+    assert again["ok"] is True and again["idempotent"] is True
+
+    stored = checks.manual_roll_requests(instance)[0]
+    assert stored["status"] == "cancelled" and set(stored["results"]) == {"p1"}
+    blocked = asyncio.run(service.resolve("game", "p2", "mr-check", {"run_id": "run-1"}))
+    assert blocked["ok"] is False and "p2" not in stored["results"]

@@ -27,6 +27,19 @@ for (const width of [320, 390, 740]) test(`phone play at ${width}px uses one nav
   await page.screenshot({ path: info.outputPath('play-phone.png') })
   expect((await status.boundingBox())!.height).toBeLessThanOrEqual(32)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+  const quickActions = page.locator('.quick-actions button')
+  await expect(quickActions).toHaveCount(4)
+  const suggestions = await quickActions.evaluateAll(buttons => buttons.map(button => {
+    const rect = button.getBoundingClientRect()
+    return { top: rect.top, width: rect.width, height: rect.height, overflow: button.scrollWidth - button.clientWidth }
+  }))
+  expect(Math.max(...suggestions.map(button => button.top)) - Math.min(...suggestions.map(button => button.top))).toBeLessThanOrEqual(1)
+  for (const button of suggestions) {
+    expect(button.width).toBeGreaterThanOrEqual(44)
+    expect(button.height).toBeGreaterThanOrEqual(44)
+    expect(button.overflow).toBeLessThanOrEqual(1)
+  }
+  expect(await page.locator('.quick-actions').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
   await expect(page.locator('.mobile-drawer-trigger:visible')).toHaveCount(1)
   const characterEntry = page.getByTestId('play-character-toggle')
   await expect(characterEntry).toBeVisible()

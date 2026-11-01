@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { i18n } from '../src/i18n'
 import GameTimeline from '../src/components/GameTimeline.vue'
+import { playerColor } from '../src/utils/play'
 
 describe('GameTimeline',()=>{
   it('keeps streamed paragraphs separate and displays markup as plain text', () => {
@@ -56,6 +57,36 @@ describe('GameTimeline',()=>{
     expect(wrapper.text()).toContain('门缓缓打开')
     expect(wrapper.text()).toContain('艾琳 · 已公开 · 2/3')
     expect(wrapper.text()).toContain('我检查门锁')
+  })
+
+  it('shares stable speaker colour across history and live without colouring card edges or the GM', () => {
+    const wrapper = mount(GameTimeline, {
+      global: { plugins: [i18n] },
+      props: {
+        round: 2,
+        players: [{ user_id: 'p1', character_name: '艾琳' }, { user_id: 'p2', character_name: '林恩' }],
+        log: [{ round: 1, actions: [{ user_id: 'p1', text: '检查门锁' }, { user_id: 'p2', text: '观察窗户' }], gm_response: '门后传来脚步声。' }],
+        live: [{ user_id: 'p1', character_name: '艾琳·KeeperOfTheAncientNorthernArchive', text: '推开门' }],
+      },
+    })
+    const cards = wrapper.findAll('.message.player')
+    expect(cards).toHaveLength(3)
+    for (const [index, card] of cards.entries()) {
+      const uid = index === 1 ? 'p2' : 'p1'
+      const style = (card.element as HTMLElement).style
+      expect(style.borderLeftColor).toBe('')
+      expect(style.borderRightColor).toBe('')
+      expect(style.getPropertyValue('--speaker-color')).toBe(playerColor(uid))
+      const speaker = card.get('.message-speaker-name')
+      expect(speaker.text()).toContain(index === 1 ? '林恩' : '艾琳')
+      expect(card.find('.portrait-image').exists()).toBe(true)
+    }
+    expect(cards[2]!.get('.message-speaker-name').text()).toBe('艾琳·KeeperOfTheAncientNorthernArchive')
+    const gm = wrapper.get('.message.gm')
+    expect((gm.element as HTMLElement).style.getPropertyValue('--speaker-color')).toBe('')
+    expect(gm.get('.narrator-avatar').text()).toBe('GM')
+    expect(gm.find('.message-speaker-name').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('renders a bounded recent window and reveals older rounds in batches',async()=>{

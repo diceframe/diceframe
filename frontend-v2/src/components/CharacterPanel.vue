@@ -425,8 +425,6 @@ function submitLevelUp(attrs: Record<string, number>) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.character-detail-block .chips > span { border-left: 2px solid var(--df-interactive); }
-.character-detail-block .item-chip { border-left: 2px solid var(--df-accent); }
 .item-more-count { color: var(--df-text-muted); font-size: .72rem; align-self: center; }
 .item-empty { margin: 0; color: var(--df-text-muted); font-size: .78rem; }
 .item-view-all { width: fit-content; padding: 3px 0; border: 0; background: transparent; color: var(--df-accent-strong, var(--df-accent)); font-size: .75rem; cursor: pointer; }

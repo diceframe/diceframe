@@ -2,18 +2,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import {
-  CheckmarkCircleOutline,
-  ChevronDownOutline,
   FlashOutline,
   FootstepsOutline,
-  HourglassOutline,
   PlayForwardOutline,
+  RibbonOutline,
   ShieldOutline,
   SparklesOutline,
 } from '@vicons/ionicons5'
 import {
   fetchRulesetAvailableActions,
-  planRulesetTemporaryEncounter,
   resolveRulesetDecision,
   submitRulesetIntent,
 } from '@/features/rulesets/dnd2024/api'
@@ -21,17 +18,28 @@ import type {
   CharacterClassResource,
   JsonObject,
   RulesetCombatAction,
+  RulesetCombatReactionFeature,
   RulesetCombatSpell,
   RulesetCombatTarget,
   RulesetCombatWeapon,
   RulesetGameplayResponse,
   RulesetPendingDecision,
-  RulesetTemporaryEncounter,
-  RulesetTemporaryEncounterEnemy,
 } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
-import Modal from '@/components/ui/Modal.vue'
+import ActionDock, { type DockTab } from './hud/ActionDock.vue'
+import ActionTile from './hud/ActionTile.vue'
+import Battlefield from './hud/Battlefield.vue'
+import { battleDistance, buildBattleTokens } from './hud/battleView'
+import InitiativeBar from './hud/InitiativeBar.vue'
+import type { BattlefieldLabels } from './hud/labels'
+import TargetCard from './hud/TargetCard.vue'
+import { useFeedback } from './hud/useFeedback'
+import { combatCopy } from './combatCopy'
+import {
+  friendlyCombatError as friendlyCombatErrorFor, intentId, localizedTerm as localizedTermFor,
+} from './combatSupport'
+import EncounterPrep from './EncounterPrep.vue'
 import SpellAvailability from './SpellAvailability.vue'
 import { spellCopy } from './spellCopy'
 
@@ -52,14 +60,16 @@ const data = ref<RulesetGameplayResponse | null>(null)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
-const selectedPresetId = ref('')
 const selectedWeaponId = ref('')
 const selectedSpellRef = ref('')
 const selectedSlot = ref(0)
 const selectedTargetId = ref('')
-const selectedSpellTargetId = ref('')
-const nextEncounterOpen = ref(false)
-const manualEncounterOpen = ref(false)
+// 施法目标按"目标条目"维护：单目标仍是 1 条；升环或多射线时由 projection
+// 声明上限，前端只做条目编排，合法性仍由服务端判定。
+const selectedSpellTargets = ref<string[]>([''])
+const selectedSpellTargetCount = ref(1)
+const selectedResistType = ref('')
+const teleportDistance = ref<number | string>('')
 const movementDistance = ref(5)
 const staged = ref<JsonObject | null>(null)
 const confirmCard = ref<HTMLElement | null>(null)
@@ -67,135 +77,9 @@ let pollTimer: number | undefined
 let returnFocus: HTMLElement | null = null
 let loadSequence = 0
 
-const copy = computed(() => locale.value.startsWith('zh') ? {
-  title: '战斗', authority: 'D&D 5E 2024 · 权威规则结算', rulesNote: '结算说明',
-  loading: '正在同步战斗状态…', refresh: '刷新', start: '确认进入战斗',
-  chooseEncounter: '选择当前遭遇', noCombat: '当前没有进行中的战斗。', noEncounter: '当前没有可用于正式对局的遭遇。',
-  recommendedEncounter: 'AI GM 匹配的敌情', changeEncounter: '改用其他合法遭遇',
-  storyBridge: '剧情遭遇', storyPurpose: '当前敌情来自正在进行的冒险。', storyAction: '确认后进入先攻；敌方由 AI GM 自动行动，每位玩家只操作自己的角色。',
-  guidedEncounter: '当前敌情', guidedStart: '进入战斗', waitingForGm: '等待 GM 确认进入战斗。', guidedOnly: '遭遇已经由剧情绑定，无需再次选择。',
-  narrativeRequest: 'AI GM 已识别到交战态势。确认敌情后将直接进入先攻。',
-  round: '轮次', current: '当前行动者', position: '位置', hp: '生命值', ac: '护甲等级',
-  action: '动作', bonus: '附赠动作', movement: '移动', reaction: '反应',
-  attack: '攻击', cast: '施放法术', target: '目标', weapon: '武器', spell: '法术', slot: '法术位',
-  move: '移动', feet: '尺', dash: '疾走', dodge: '闪避', disengage: '脱离接战',
-  endTurn: '结束回合', endCombat: '结束战斗', deathSave: '死亡豁免', stabilize: '稳定伤者',
-  confirm: '确认并交给服务器结算', cancel: '取消', resolve: '发动反应', decline: '放弃反应',
-  legalOnly: '这里只显示当前合法动作；若状态已经变化，服务器会拒绝过期请求并说明原因。',
-  yourTurn: '轮到你行动', enemyTurn: 'AI GM 正在处理敌方回合', partyTurn: '队友回合', availableActions: '当前可用动作',
-  companionTurn: 'AI 队友正在行动', explorationCast: '非战斗施法',
-  waiting: '尚未轮到你的角色。', waitingForTeammate: '等待队友行动', enemyActing: '敌方正在由服务器自动行动…', ended: '战斗已经结束。', conditions: '状态',
-  lastResult: '最近结算', none: '无', economy: '本回合资源', available: '可用', spent: '已用',
-  inRange: '可用', longRange: '远距攻击（劣势）', tooFar: '距离不足',
-  targetDistance: '你与目标相距', autoWeapon: '已优先选择当前距离可用的武器。',
-  moveCloser: '当前武器都够不到目标。请先移动靠近，或改用射程更远的武器。',
-  tacticalTrack: '战术距离带', chooseDestination: '每格 5 尺；轮到你时可点击可达格选择移动距离。',
-  ready: '准备', cancelReady: '取消准备', partyReady: '队伍准备状态', readyStatus: '已准备', unreadyStatus: '未准备',
-  readySummary: '队友准备', startHint: 'GM 可在确认敌情与队伍状态后开始战斗。',
-  manualEncounter: '手动准备遭遇',
-  chooseFreeEncounter: '选择自由遭遇',
-  sandboxHint: 'AI GM 没能把当前敌情匹配到合法遭遇。可以由 AI 临时准备，或手动选择一场自由遭遇。',
-  unpreparedTitle: '当前剧情尚未配置专业战斗遭遇',
-  unpreparedHint: '剧情已经进入交战态势，但这个冒险包没有为当前敌情绑定合法的专业遭遇。服务端不会用通用训练遭遇替代它。',
-  aiPrepare: 'AI 生成临时遭遇',
-  aiHint: 'AI 会参考当前剧情生成一场临时自由遭遇；不会修改冒险包内容。',
-  aiPreparing: 'AI 正在生成临时遭遇…',
-  aiFailed: '无法生成合法的临时遭遇。你仍可以手动选择自由遭遇。',
-  aiPreviewTag: 'AI 生成的临时遭遇',
-  aiDifficulty: '难度：普通（已按当前队伍强度限制）',
-  aiDraftHint: '勾选要保留的敌人并可直接编辑数值与数量；确认后服务器会重新校验整场遭遇。',
-  aiName: '名称',
-  aiQuantity: '数量',
-  aiInitiative: '先攻加值',
-  aiAttackBonus: '攻击加值',
-  aiDamage: '伤害公式',
-  aiNormalRange: '普通射程',
-  aiLongRange: '最远射程',
-  aiAddAttack: '新增攻击',
-  aiRemoveAttack: '删除攻击',
-  aiRestore: '恢复 AI 原稿',
-  aiConfirmStart: '确认进入战斗',
-  aiRegenerate: '重新生成',
-  aiEncounterNote: '这场战斗不会写入冒险包的正式遭遇定义；战斗结束后仍可继续当前冒险剧情。',
-  tempSpeed: '速度',
-  unpreparedAction: '临时准备自由遭遇',
-  sandboxWarning: '这是一场临时自由遭遇：不会写入冒险包的正式遭遇定义，战斗结束后仍可继续当前冒险剧情。',
-  storyMode: '剧情遭遇',
-  sandboxMode: '自由遭遇',
-  sandboxOutsideAdventure: '自由战斗 · 不属于当前冒险包',
-  missingPreset: '冒险包引用的遭遇不存在，需要先修复冒险包内容。',
-  encounterSource: '遭遇',
-  nextEncounter: '准备下一场遭遇', nextEncounterHint: '当前战斗已经结算。可返回冒险，或由 GM 明确准备下一场战斗。', returnToAdventure: '返回冒险', cancelNextEncounter: '暂不准备',
-  turnGuide: '本回合可以组合使用移动、一个动作和可用的附赠动作；完成操作后请手动结束回合。脱离接战只会避免本回合的机会攻击，仍需移动离开敌人范围。',
-  canEndTurn: '当前可结束回合',
-  classFeatures: '职业能力',
-  noCapabilityTarget: '当前没有可指定的敌对目标',
-  noCapabilityAvailable: '本回合没有可用的职业能力。',
-} : {
-  title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
-  loading: 'Synchronizing combat…', refresh: 'Refresh', start: 'Confirm Combat',
-  chooseEncounter: 'Select the encounter', noCombat: 'No combat is active.', noEncounter: 'No encounter is available for standard play.',
-  recommendedEncounter: 'AI GM matched opposition', changeEncounter: 'Use another legal encounter',
-  storyBridge: 'Story encounter', storyPurpose: 'The current opposition comes from the active adventure.', storyAction: 'Confirm to enter initiative. The AI GM operates enemies while each player controls only their own character.',
-  guidedEncounter: 'Current opposition', guidedStart: 'Enter Combat', waitingForGm: 'Waiting for the GM to confirm combat.', guidedOnly: 'The story already selected this encounter; no additional preset choice is needed.',
-  narrativeRequest: 'The AI GM detected an engagement. Confirm the opposition to enter initiative.',
-  round: 'Round', current: 'Current actor', position: 'Position', hp: 'HP', ac: 'Armor Class',
-  action: 'Action', bonus: 'Bonus Action', movement: 'Movement', reaction: 'Reaction',
-  attack: 'Attack', cast: 'Cast Spell', target: 'Target', weapon: 'Weapon', spell: 'Spell', slot: 'Slot',
-  move: 'Move', feet: 'ft', dash: 'Dash', dodge: 'Dodge', disengage: 'Disengage',
-  endTurn: 'End Turn', endCombat: 'End Combat', deathSave: 'Death Save', stabilize: 'Stabilize',
-  confirm: 'Confirm and let the server resolve', cancel: 'Cancel', resolve: 'Use Reaction', decline: 'Decline',
-  legalOnly: 'Only currently legal actions are shown. The server rejects stale requests with a reason.',
-  yourTurn: 'Your turn', enemyTurn: 'AI GM is resolving the enemy turn', partyTurn: 'Party turn', availableActions: 'Available actions',
-  companionTurn: 'AI companion is acting', explorationCast: 'Cast a spell (exploration)',
-  waiting: 'Waiting for your character’s turn.', waitingForTeammate: 'Waiting for teammate', enemyActing: 'The enemy is acting automatically…', ended: 'Combat has ended.', conditions: 'Conditions',
-  lastResult: 'Latest Resolution', none: 'None', economy: 'Turn Resources', available: 'Available', spent: 'Spent',
-  inRange: 'In range', longRange: 'Long range (disadvantage)', tooFar: 'Out of range',
-  targetDistance: 'Distance to target', autoWeapon: 'A weapon usable at this distance is selected first.',
-  moveCloser: 'None of your weapons can reach this target. Move closer or use a longer-ranged weapon.',
-  tacticalTrack: 'Tactical distance track', chooseDestination: 'Each cell is 5 ft. On your turn, select a reachable cell to set movement.',
-  ready: 'Ready', cancelReady: 'Cancel ready', partyReady: 'Party readiness', readyStatus: 'Ready', unreadyStatus: 'Not ready',
-  readySummary: 'Party ready', startHint: 'The GM can start after reviewing the opposition and party status.',
-  manualEncounter: 'Prepare encounter manually',
-  chooseFreeEncounter: 'Select a free encounter',
-  sandboxHint: 'The AI GM could not match the current opposition to a legal encounter. Prepare one with AI, or pick a free encounter manually.',
-  unpreparedTitle: 'The current story has no prepared encounter',
-  unpreparedHint: 'The story has entered combat, but this adventure package binds no legal encounter to the current opposition. The server will not substitute a generic training encounter.',
-  aiPrepare: 'AI temporary encounter',
-  aiHint: 'The AI drafts a free encounter from the current story; the adventure package is never modified.',
-  aiPreparing: 'The AI is preparing an encounter…',
-  aiFailed: 'Could not generate a legal temporary encounter. You can still prepare a free encounter manually.',
-  aiPreviewTag: 'AI temporary encounter',
-  aiDifficulty: 'Difficulty: Standard (bounded to the current party)',
-  aiDraftHint: 'Tick the enemies to keep and edit their stats and quantity directly; the server re-validates the whole encounter on confirm.',
-  aiName: 'Name',
-  aiQuantity: 'Qty',
-  aiInitiative: 'Initiative modifier',
-  aiAttackBonus: 'Attack bonus',
-  aiDamage: 'Damage formula',
-  aiNormalRange: 'Normal range',
-  aiLongRange: 'Long range',
-  aiAddAttack: 'Add attack',
-  aiRemoveAttack: 'Remove attack',
-  aiRestore: 'Restore AI draft',
-  aiConfirmStart: 'Confirm and start combat',
-  aiRegenerate: 'Regenerate',
-  aiEncounterNote: 'This combat is not written into the adventure package; the story continues afterwards.',
-  tempSpeed: 'Speed',
-  unpreparedAction: 'Prepare a temporary free encounter',
-  sandboxWarning: 'This is a temporary free encounter: it is not written into the adventure package, and the story continues after combat.',
-  storyMode: 'Story encounter',
-  sandboxMode: 'Free encounter',
-  sandboxOutsideAdventure: 'Free combat · not part of the active adventure',
-  missingPreset: 'The adventure package references an encounter that does not exist; fix the package content first.',
-  encounterSource: 'Encounter',
-  nextEncounter: 'Prepare next encounter', nextEncounterHint: 'This combat is resolved. Return to the adventure, or have the GM explicitly prepare another encounter.', returnToAdventure: 'Return to adventure', cancelNextEncounter: 'Not yet',
-  turnGuide: 'You can combine movement, one action, and an available bonus action this turn. End the turn when finished. Disengage prevents opportunity attacks for this turn; you still need to move out of enemy range.',
-  canEndTurn: 'You can end the turn now',
-  classFeatures: 'Class features',
-  noCapabilityTarget: 'No hostile target is available',
-  noCapabilityAvailable: 'No class capability is available this turn.',
-})
+const copy = computed(() => combatCopy(locale.value))
+const localizedTerm = (value: unknown): string => localizedTermFor(value, locale.value)
+const friendlyCombatError = (cause: unknown): string => friendlyCombatErrorFor(cause, locale.value)
 
 const gameplay = computed(() => data.value?.gameplay)
 const combat = computed(() => gameplay.value?.combat)
@@ -204,83 +88,10 @@ const action = (type: string) => actions.value.find(item => item.type === type)
 const currentActor = computed(() => combat.value?.actors.find(
   actor => actor.actor_id === combat.value?.current_actor_id,
 ))
-const selectableEncounterPresets = computed(() => (gameplay.value?.encounter_presets || []).filter(
-  preset => String(preset.difficulty || '') !== 'tutorial',
-))
-const selectedPreset = computed(() => gameplay.value?.encounter_presets?.find(
-  preset => preset.id === selectedPresetId.value,
-))
-const guidedCombatStep = computed(() => {
-  const step = gameplay.value?.campaign?.tutorial?.current_step
-  return step?.requires === 'combat_ended' && step.encounter_preset_id ? step : null
-})
-const guidedCombatPreset = computed(() => guidedCombatStep.value
-  ? gameplay.value?.encounter_presets?.find(preset => preset.id === guidedCombatStep.value?.encounter_preset_id)
-  : undefined)
-// 非 GM 视图没有预设目录（含怪物数据块，GM-only）；展示只用服务端的无数值摘要。
-function encounterSummary(presetId: string | undefined): { name?: string; description?: string } | undefined {
-  const preview = gameplay.value?.encounter_preview
-  return presetId && preview?.id === presetId ? preview : undefined
-}
-const guidedCombatSummary = computed(() => (
-  guidedCombatPreset.value || encounterSummary(guidedCombatStep.value?.encounter_preset_id)
-))
-const narrativeCombatPending = computed(() => gameplay.value?.encounter_request?.status === 'pending')
-const encounterReadiness = computed(() => gameplay.value?.encounter_request?.readiness)
-// 服务端权威模式：story=剧情绑定遭遇，sandbox=自由遭遇，
-// blocked+unprepared=活动冒险包尚未配置专业战斗遭遇。
-const encounterAccess = computed(() => gameplay.value?.encounter_access)
-const encounterMode = computed(() => String(encounterAccess.value?.mode || ''))
-const storyUnprepared = computed(() => Boolean(encounterAccess.value?.unprepared))
-const sandboxFlow = computed(() => encounterMode.value !== 'story')
 const combatMode = computed(() => String(combat.value?.mode || ''))
 const adventureActive = computed(() => String(
   gameplay.value?.campaign?.tutorial?.status || '',
 ) === 'active')
-const sandboxDeclared = ref(false)
-// AI 临时遭遇：AI 生成 → 只读摘要 → 需要时才打开弹窗编辑草稿 → combat.start
-// 确认，与手动自由遭遇流程并行；确认走现有 combat.start(mode=sandbox)，服务端
-// 权威校验仍然完整生效。草稿只存在于组件状态，刷新丢失可接受，绝不持久化。
-type DraftEnemy = RulesetTemporaryEncounterEnemy & {
-  selected: boolean
-  quantity: number
-}
-const aiProposal = ref<RulesetTemporaryEncounter | null>(null)
-const aiDraft = ref<DraftEnemy[]>([])
-const aiBusy = ref(false)
-const aiError = ref('')
-// 编辑弹窗只在 GM 显式点击「编辑敌人」后打开，并编辑一份工作副本；保存前
-// 摘要与提交都只看 aiDraft，因此弹窗里的临时修改不会泄漏到摘要。
-const enemyEditorOpen = ref(false)
-const editDraft = ref<DraftEnemy[]>([])
-const expandedEnemies = ref<string[]>([])
-const readyAction = computed(() => action('encounter.ready'))
-const unreadyAction = computed(() => action('encounter.unready'))
-const isReady = computed(() => Boolean(
-  encounterReadiness.value?.ready_player_ids?.includes(props.actorId),
-))
-const requestedCombatPreset = computed(() => {
-  const presetId = gameplay.value?.encounter_request?.encounter_preset_id
-  return presetId
-    ? selectableEncounterPresets.value.find(preset => preset.id === presetId)
-    : undefined
-})
-const requestedCombatSummary = computed(() => (
-  requestedCombatPreset.value || encounterSummary(gameplay.value?.encounter_request?.encounter_preset_id)
-))
-const canPlanTemporaryEncounter = computed(() => Boolean(
-  props.isGm
-  && combat.value?.status !== 'active'
-  && encounterMode.value !== 'story'
-  && !requestedCombatPreset.value
-  && !aiProposal.value
-  // 冒险包未准备遭遇时，只有 AI 已发出交战请求才开放兜底；
-  // 标准自由对局则直接允许 GM 从战斗工具发起临时遭遇。
-  && (
-    narrativeCombatPending.value
-    || Boolean(action('combat.start') || sandboxDeclared.value)
-  )
-))
 const attackAction = computed(() => action('attack'))
 const spellAction = computed(() => action('cast_spell'))
 const spellActor = computed(() => combat.value?.actors?.find(actor => actor.actor_id === (spellAction.value?.actor_id || `player:${props.actorId}`)))
@@ -335,9 +146,26 @@ const hasUsableWeapon = computed(() => (attackAction.value?.weapons || []).some(
 const selectedSpell = computed(() => spellAction.value?.spells?.find(
   item => item.spell_ref === selectedSpellRef.value,
 ))
-const selectedTarget = computed(() => targetsFor(selectedSpell.value).find(
-  item => item.actor_id === selectedSpellTargetId.value,
-))
+// 前端只按 projection 计算"可选择条目上限"（升环加目标/射线条数），
+// 不计算伤害、临时 HP 或任何结算结果。
+const spellTargetLimit = computed(() => {
+  const spell = selectedSpell.value
+  const base = Math.max(1, Number(spell?.target_count ?? 1))
+  const upcast = Math.max(0, Number(spell?.upcast_target_count ?? 0))
+  const slot = Number(selectedSlot.value)
+  const level = Number(spell?.level ?? 0)
+  return base + upcast * Math.max(0, slot - level)
+})
+const spellTargetsValid = computed(() => {
+  const spell = selectedSpell.value
+  if (!spell) return false
+  const ids = selectedSpellTargets.value.filter(Boolean)
+  if (!ids.length || ids.length > spellTargetLimit.value) return false
+  if (!spell.repeat_targets && new Set(ids).size !== ids.length) return false
+  if (spell.resist_choice?.length && !selectedResistType.value) return false
+  if (spell.mode === 'teleport' && !validTeleportDistance()) return false
+  return true
+})
 const latestEvents = computed(() => {
   const batches = data.value?.result?.resolved_event_batches
   if (Array.isArray(batches)) {
@@ -359,20 +187,6 @@ const waitingText = computed(() => {
   if (current === `player:${props.actorId}`) return copy.value.waiting
   return `${copy.value.waitingForTeammate}：${targetName(current)}`
 })
-const trackMin = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || [0]
-  const movement = Number(moveAction.value?.movement_remaining || 0)
-  return Math.floor((Math.min(0, ...positions) - movement) / 5) * 5
-})
-const trackMax = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || [0]
-  const movement = Number(moveAction.value?.movement_remaining || 0)
-  return Math.ceil((Math.max(30, ...positions) + movement) / 5) * 5
-})
-const trackTicks = computed(() => Array.from(
-  { length: Math.max(1, (trackMax.value - trackMin.value) / 5 + 1) },
-  (_, index) => trackMin.value + index * 5,
-))
 const selectedDestination = computed(() => (
   currentActor.value ? Number(currentActor.value.position || 0) + Number(movementDistance.value || 0) : null
 ))
@@ -416,54 +230,200 @@ function canReachPosition(position: number): boolean {
 function chooseTrackPosition(position: number): void {
   if (!canReachPosition(position) || !currentActor.value) return
   movementDistance.value = position - Number(currentActor.value.position || 0)
+  selectDockTab('move')
 }
 
-const trackLaneCount = computed(() => {
-  const positions = combat.value?.actors.map(actor => Number(actor.position || 0)) || []
-  const counts = new Map<number, number>()
-  positions.forEach(position => counts.set(position, (counts.get(position) || 0) + 1))
-  return Math.max(1, ...counts.values())
-})
-const trackCanvasStyle = computed(() => ({
-  minWidth: `${Math.max(1, trackTicks.value.length) * 34}px`,
-  paddingTop: `${16 + trackLaneCount.value * 30}px`,
+const battleTokens = computed(() => buildBattleTokens(
+  combat.value?.actors || [],
+  String(combat.value?.current_actor_id || ''),
+  props.actorId,
+))
+const battlefieldLabels = computed<BattlefieldLabels>(() => ({
+  hp: copy.value.hp,
+  feet: copy.value.feet,
+  position: copy.value.position,
+  condition: localizedTerm,
+  selectTarget: name => `${copy.value.target}: ${name}`,
+}))
+const { floaters, play: playFeedback, clear: clearFeedback } = useFeedback(() => ({
+  miss: copy.value.feedbackMiss,
+  hit: copy.value.feedbackHit,
+  saveOk: copy.value.saveOk,
+  saveFail: copy.value.saveFail,
+  blocked: copy.value.healBlocked,
+  condition: localizedTerm,
 }))
 
-function tokenTrackStyle(position: number, index: number): Record<string, string> {
-  const numericPosition = Number(position || 0)
-  const tickIndex = Math.max(0, Math.min(
-    trackTicks.value.length - 1,
-    Math.round((numericPosition - trackMin.value) / 5),
-  ))
-  const earlierActors = combat.value?.actors.slice(0, index) || []
-  const lane = earlierActors.filter(actor => Number(actor.position || 0) === numericPosition).length
-  return {
-    left: `${(tickIndex + 0.5) / Math.max(1, trackTicks.value.length) * 100}%`,
-    top: `${8 + lane * 30}px`,
+type DockMode = '' | 'attack' | 'spell' | 'capability' | 'explore' | 'move'
+const dockTab = ref<'action' | 'bonus' | 'move' | 'reaction'>('action')
+const dockMode = ref<DockMode>('')
+const inspectedId = ref('')
+const selectedCapabilityId = ref('')
+
+const castingKey = (spell: RulesetCombatSpell) => String(spell.casting_time || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+const isBonusSpell = (spell: RulesetCombatSpell) => Boolean(spell.trigger_target_id) || castingKey(spell) === 'bonus_action'
+const isReactionSpell = (spell: RulesetCombatSpell) => castingKey(spell) === 'reaction' && !spell.trigger_target_id
+// Spells split by the turn resource they spend; reaction spells are answered
+// through the server's decision prompt instead of being picked here.
+const spellChoices = computed(() => (spellAction.value?.spells || []).filter(spell => (
+  !isReactionSpell(spell) && (dockTab.value === 'bonus' ? isBonusSpell(spell) : !isBonusSpell(spell))
+)))
+const showSpellTile = computed(() => {
+  if (dockTab.value === 'bonus') return spellChoices.value.length > 0
+  if (dockTab.value !== 'action') return false
+  return spellChoices.value.length > 0 || Boolean(spellActor.value?.spells?.length)
+})
+const visibleTileCount = computed(() => {
+  if (dockTab.value === 'move') return moveAction.value ? 1 : 0
+  if (dockTab.value === 'reaction') return 0
+  const spell = showSpellTile.value ? 1 : 0
+  if (dockTab.value === 'bonus') return spell
+  return spell + (attackAction.value ? 1 : 0) + (explorationAction.value ? 1 : 0) + simpleActions.value.length
+    + (capabilityActions.value.length || currentClassResources.value.length ? 1 : 0)
+})
+const simpleActions = computed(() => (['dash', 'dodge', 'disengage', 'death_save'] as const).filter(type => action(type)))
+const simpleLabel = (type: string) => ({
+  dash: copy.value.dash, dodge: copy.value.dodge, disengage: copy.value.disengage, death_save: copy.value.deathSave,
+}[type] || type)
+const battleTokenIds = computed(() => battleTokens.value.map(token => token.id))
+const targetCardLabels = computed(() => ({
+  hp: copy.value.hp, ac: copy.value.ac, distance: copy.value.distance, feet: copy.value.feet,
+  status: copy.value.status, none: copy.value.none, sideAlly: copy.value.sideAlly,
+  sideEnemy: copy.value.sideEnemy, empty: copy.value.pickTarget, listSeparator: t('listSeparator'),
+  condition: localizedTerm,
+}))
+const selectedCapability = computed(() => capabilityActions.value.find(
+  item => item.capability_id === selectedCapabilityId.value,
+))
+// The unit the open action would be sent at; empty while no aimed action is open.
+const aimedTargetId = computed(() => {
+  switch (dockMode.value) {
+    case 'attack': return selectedTargetId.value
+    case 'spell': return selectedSpellTargets.value[0] || ''
+    case 'capability': return selectedCapability.value?.requires_target ? capabilityTargetId.value : ''
+    case 'explore': return explorationTargetId.value
+    default: return ''
+  }
+})
+// The battlefield marks what will actually be hit; the side card shows whatever
+// the player clicked last, which may be a unit the open action cannot reach.
+const focusId = computed(() => aimedTargetId.value || inspectedId.value)
+const cardToken = computed(() => (
+  battleTokens.value.find(token => token.id === (inspectedId.value || focusId.value)) || null
+))
+const currentToken = computed(() => battleTokens.value.find(token => token.isCurrent) || null)
+const cardDistance = computed(() => (
+  currentToken.value && cardToken.value ? battleDistance(currentToken.value.coord, cardToken.value.coord) : null
+))
+const initiativeTokens = computed(() => (combat.value?.initiative || [])
+  .map(id => battleTokens.value.find(token => token.id === id))
+  .filter((token): token is NonNullable<typeof token> => Boolean(token)))
+const ownToken = computed(() => battleTokens.value.find(token => token.isOwn) || currentToken.value)
+// `combat.economy` belongs to whoever is acting, so the dock only opens on the
+// viewer's own turn; everyone else keeps the read-only waiting state.
+const isOwnTurn = computed(() => combat.value?.current_actor_id === `player:${props.actorId}`)
+const dockTabs = computed<DockTab[]>(() => {
+  const economy = combat.value?.economy || {}
+  const movement = Number(economy.movement ?? 0)
+  // Reactions are tracked per actor, not in the turn economy.
+  const reaction = Number(combat.value?.reactions?.[`player:${props.actorId}`] ?? 0) > 0
+  const spent = copy.value.spent
+  return [
+    { id: 'action', label: copy.value.tabAction, available: Boolean(economy.action), note: economy.action ? '' : spent },
+    { id: 'bonus', label: copy.value.tabBonus, available: Boolean(economy.bonus_action), note: economy.bonus_action ? '' : spent },
+    { id: 'move', label: copy.value.tabMove, available: movement > 0, note: `${movement} ${copy.value.feet}` },
+    { id: 'reaction', label: copy.value.tabReaction, available: reaction, note: reaction ? '' : spent },
+  ]
+})
+const dockTargetToken = computed(() => battleTokens.value.find(token => token.id === aimedTargetId.value) || null)
+const dockTargetDistance = computed(() => (
+  currentToken.value && dockTargetToken.value ? battleDistance(currentToken.value.coord, dockTargetToken.value.coord) : null
+))
+const dockCost = computed(() => {
+  if (dockMode.value === 'attack') return copy.value.action
+  if (dockMode.value === 'spell' || dockMode.value === 'explore') {
+    const spell = dockMode.value === 'spell' ? selectedSpell.value : explorationSpell.value
+    if (!spell) return ''
+    return spell.trigger_target_id ? copy.value.bonus : localizedTerm(spell.casting_time)
+  }
+  if (dockMode.value === 'capability') return selectedCapability.value ? capabilityCostLabel(selectedCapability.value) : ''
+  if (dockMode.value === 'move') return `${Math.abs(Number(movementDistance.value || 0))} ${copy.value.feet}`
+  return ''
+})
+const dockNeedsTarget = computed(() => dockMode.value === 'attack' || dockMode.value === 'spell'
+  || (dockMode.value === 'capability' && Boolean(selectedCapability.value?.requires_target)))
+const canStageDock = computed(() => {
+  if (busy.value) return false
+  switch (dockMode.value) {
+    case 'attack': return Boolean(selectedWeapon.value && selectedTargetId.value && selectedWeaponRange.value?.usable)
+    // Only a spell listed under the open tab may be sent from it.
+    case 'spell': return Boolean(spellTargetsValid.value
+      && spellChoices.value.some(item => item.spell_ref === selectedSpellRef.value))
+    case 'capability': return Boolean(selectedCapability.value
+      && (!selectedCapability.value.requires_target || capabilityTargetId.value))
+    case 'explore': return Boolean(explorationSpellRef.value && explorationSlotValid.value)
+    case 'move': return Boolean(movementDistance.value)
+    default: return false
+  }
+})
+
+function openDockMode(mode: DockMode, keepOpen = false): void {
+  dockMode.value = !keepOpen && dockMode.value === mode ? '' : mode
+  if (dockMode.value === 'spell') {
+    const choices = spellChoices.value
+    if (choices.length && !choices.some(item => item.spell_ref === selectedSpellRef.value)) {
+      selectedSpellRef.value = choices[0]!.spell_ref
+    }
+  }
+  if (dockMode.value === 'capability' && !selectedCapability.value) {
+    selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
+  }
+  if (dockMode.value === 'explore' && !explorationSpellRef.value) {
+    explorationSpellRef.value = explorationAction.value?.spells?.[0]?.spell_ref || ''
   }
 }
 
-function localizedTerm(value: unknown): string {
-  const raw = String(value || '')
-  const key = raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
-  const labels: Record<string, [string, string]> = {
-    tutorial: ['教学', 'Tutorial'], standard: ['标准', 'Standard'], challenging: ['挑战', 'Challenging'], lethal: ['致命', 'Lethal'],
-    action: ['动作', 'Action'], bonus_action: ['附赠动作', 'Bonus Action'], reaction: ['反应', 'Reaction'],
-    slashing: ['挥砍', 'Slashing'], piercing: ['穿刺', 'Piercing'], bludgeoning: ['钝击', 'Bludgeoning'],
-    acid: ['强酸', 'Acid'], cold: ['寒冷', 'Cold'], fire: ['火焰', 'Fire'], force: ['力场', 'Force'], lightning: ['闪电', 'Lightning'],
-    necrotic: ['黯蚀', 'Necrotic'], poison: ['毒素', 'Poison'], psychic: ['心灵', 'Psychic'], radiant: ['光耀', 'Radiant'], thunder: ['雷鸣', 'Thunder'],
-    opportunity_attack: ['借机攻击', 'Opportunity Attack'], attack: ['攻击检定', 'Attack'], spell_attack: ['法术攻击检定', 'Spell Attack'],
-    saving_throw: ['豁免检定', 'Saving Throw'], death_save: ['死亡豁免', 'Death Save'], medicine: ['医药检定', 'Medicine Check'], concentration: ['专注检定', 'Concentration Check'],
-    blessed: ['祝福', 'Blessed'], hexed: ['受诅咒', 'Hexed'], shield_of_faith: ['虔诚护盾', 'Shield of Faith'],
-  dodging: ['闪避', 'Dodging'], disengaged: ['已脱离接战', 'Disengaged'], stable: ['伤势稳定', 'Stable'], unconscious: ['昏迷', 'Unconscious'],
-    dead: ['死亡', 'Dead'], defeated: ['已击败', 'Defeated'], death_saves: ['死亡豁免记录', 'Death Saves'],
-    slowed_10: ['速度降低 10 尺', 'Speed reduced by 10 ft'], next_attack_advantage: ['下次攻击有优势', 'Next attack has advantage'],
-    next_attack_disadvantage: ['下次攻击有劣势', 'Next attack has disadvantage'], faerie_fire: ['妖火标记', 'Faerie Fire'],
-    shield: ['护盾术（AC +5）', 'Shield (+5 AC)'], cannot_regain_hp: ['无法恢复生命', 'Cannot regain HP'],
-    hit_reaction_spell: ['被命中反应', 'Reaction when hit'], reaction_defense: ['反应防御', 'Reaction defense'],
+function stageDock(): void {
+  if (!canStageDock.value) return
+  if (dockMode.value === 'attack') stageAttack()
+  else if (dockMode.value === 'spell') stageSpell()
+  else if (dockMode.value === 'capability' && selectedCapability.value) stageCapability(selectedCapability.value)
+  else if (dockMode.value === 'explore') stageExplorationSpell()
+  else if (dockMode.value === 'move') stageMove()
+}
+
+function selectDockTab(tab: string): void {
+  dockTab.value = tab as typeof dockTab.value
+  dockMode.value = tab === 'move' && moveAction.value ? 'move' : ''
+}
+
+// A landed melee hit lets the player add a bonus-action spell before damage;
+// bring that choice forward instead of leaving it behind another tab.
+watch(
+  () => (pendingDecision.value?.kind === 'melee_hit_spell' ? pendingDecision.value.decision_id : ''),
+  (decisionId) => {
+    if (!decisionId) return
+    dockTab.value = 'bonus'
+    openDockMode('spell', true)
+  },
+  { immediate: true },
+)
+
+// Clicking a unit aims every action that can legally reach it, so the choice
+// carries over when the player switches between attack, spell and ability.
+function pickBattleTarget(actorId: string): void {
+  inspectedId.value = actorId
+  if (attackAction.value?.targets?.some(item => item.actor_id === actorId)) selectedTargetId.value = actorId
+  if (targetsFor(selectedSpell.value).some(item => item.actor_id === actorId)) {
+    const targets = selectedSpellTargets.value.slice()
+    if (!targets.includes(actorId)) {
+      const empty = targets.findIndex(id => !id)
+      targets[empty < 0 ? 0 : empty] = actorId
+      selectedSpellTargets.value = targets
+    }
   }
-  const pair = labels[key]
-  return pair ? (locale.value.startsWith('zh') ? pair[0] : pair[1]) : raw.replaceAll('_', ' ')
+  if (capabilityTargets.value.some(item => item.actor_id === actorId)) capabilityTargetId.value = actorId
+  if (explorationAction.value?.targets?.some(item => item.actor_id === actorId)) explorationTargetId.value = actorId
 }
 
 function targetName(actorId: string): string {
@@ -514,282 +474,140 @@ function chooseUsableWeapon(): void {
   selectedWeaponId.value = best?.weapon_ref || best?.id || ''
 }
 
-function friendlyCombatError(cause: unknown): string {
-  const message = cause instanceof Error ? cause.message : String(cause)
-  if (!locale.value.startsWith('zh')) return message
-  const outOfRange = message.match(/target is out of range \((\d+) > (\d+) feet\)/i)
-  if (outOfRange) {
-    return `目标距离为 ${outOfRange[1]} 尺，这个武器最远只能攻击 ${outOfRange[2]} 尺。请换远程武器，或先移动靠近。`
-  }
-  if (/not your turn|requested actor is not the current actor/i.test(message)) return '现在还没轮到这个角色。请等待当前行动者结束回合。'
-  if (/already been spent|action is not available/i.test(message)) return '这个动作资源本回合已经用掉了。请选择仍可用的动作，或结束回合。'
-  if (/state version|stale|expected_version/i.test(message)) return '战斗状态刚刚发生变化，界面已为你刷新。请按最新状态再试一次。'
-  if (/resolve the melee hit spell decision first/i.test(message)) return '请先选择是否追加法术，结算这次命中后再继续行动。'
-  if (/automatic combat turn exceeded the safety limit/i.test(message)) return '敌方自动回合未能正常结束，本次操作已安全回滚。请刷新战斗状态后重试。'
-  return message
-}
-
 function targetsFor(spell?: RulesetCombatSpell): RulesetCombatTarget[] {
   const targets = spellAction.value?.targets || attackAction.value?.targets || []
   if (!spell || !currentActor.value) return targets
   if (spell.trigger_target_id) return targets.filter(target => target.actor_id === spell.trigger_target_id)
-  const allied = spell.mode === 'healing' || spell.mode === 'buff' || spell.mode === 'stabilize'
-  return targets.filter(target => allied
-    ? target.kind === currentActor.value?.kind
-    : target.kind !== currentActor.value?.kind)
+  if (spell.target_scope === 'self') {
+    return targets.filter(target => target.actor_id === currentActor.value?.actor_id)
+  }
+  const allied = (target: RulesetCombatTarget): boolean => (
+    target.side ? target.side === 'party' : target.kind === currentActor.value?.kind
+  )
+  if (spell.mode === 'revive') {
+    // 死亡状态由服务端投影；只有明确 is_dead 的 player 盟友才可复活，
+    // 0 HP 仍在死亡豁免中的角色不算 dead。服务端 Revivify 只接受 player，
+    // 因此死亡 companion 不能作为合法候选出现。
+    return targets.filter(target => allied(target) && target.kind === 'player' && target.is_dead === true)
+  }
+  if (spell.target_side === 'ally') return targets.filter(allied)
+  if (spell.target_side === 'enemy') return targets.filter(target => !allied(target))
+  if (spell.target_side === 'any') return targets
+  // 旧服务端没有 target_side：保持原有 mode 语义作为兼容边界。
+  const beneficial = spell.mode === 'healing' || spell.mode === 'buff' || spell.mode === 'stabilize'
+  return targets.filter(target => beneficial ? allied(target) : !allied(target))
 }
 
-function resetSelections(): void {
-  explorationSpellRef.value = ''
-  explorationSlot.value = 0
-  explorationTargetId.value = ''
-  const guidedPresetId = guidedCombatStep.value?.encounter_preset_id
-  const preset = guidedCombatPreset.value || requestedCombatPreset.value || selectableEncounterPresets.value[0]
-  const shouldSelectEncounter = Boolean(
-    guidedCombatStep.value
-    || requestedCombatPreset.value
-    || manualEncounterOpen.value
-    // GM 明确点了「准备下一场遭遇」：与手动准备一样，预选目录第一条，
-    // 否则开始按钮会一直是禁用状态。
-    || nextEncounterOpen.value,
-  )
-  if (!shouldSelectEncounter) selectedPresetId.value = ''
-  else if (guidedPresetId && guidedCombatPreset.value) selectedPresetId.value = guidedPresetId
-  else if (!selectableEncounterPresets.value.some(item => item.id === selectedPresetId.value)) {
-    selectedPresetId.value = preset?.id || ''
-  }
-  const spell = spellAction.value?.spells?.[0]
-  selectedSpellRef.value = spell?.spell_ref || ''
-  selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  selectedSpellTargetId.value = spell ? targetsFor(spell)[0]?.actor_id || '' : ''
-  selectedTargetId.value = attackAction.value?.targets?.[0]?.actor_id || ''
-  capabilityTargetId.value = capabilityTargets.value[0]?.actor_id || ''
-  chooseUsableWeapon()
-  movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+function validTeleportDistance(): boolean {
+  const distance = Number(teleportDistance.value)
+  return Number.isInteger(distance) && distance !== 0
 }
+
+function spellTargetOptions(): string[] {
+  return targetsFor(selectedSpell.value).map(target => target.actor_id)
+}
+
+function resizeSpellTargets(count: number): void {
+  const next = Math.max(1, Math.min(Number(count) || 1, spellTargetLimit.value))
+  const current = selectedSpellTargets.value.slice(0, next)
+  const options = spellTargetOptions()
+  while (current.length < next) {
+    const distinct = options.find(id => !current.includes(id))
+    current.push(distinct ?? options[0] ?? '')
+  }
+  selectedSpellTargets.value = current
+  selectedSpellTargetCount.value = next
+}
+
+function syncSpellTargets(): void {
+  const spell = selectedSpell.value
+  selectedSpellTargetCount.value = 1
+  selectedSpellTargets.value = [targetsFor(spell)[0]?.actor_id || '']
+  selectedResistType.value = spell?.resist_choice?.[0] || ''
+  teleportDistance.value = ''
+}
+
+// A refresh (the 30 s poll, a teammate's turn) must not throw away what the
+// player already picked: every choice survives while it is still legal.
+function resetSelections(): void {
+  const keepOrFirst = (current: string, legal: RulesetCombatTarget[]) => (
+    legal.some(item => item.actor_id === current) ? current : legal[0]?.actor_id || ''
+  )
+  const keepSlot = (current: number, levels: number[] | undefined) => (
+    levels?.includes(current) ? current : levels?.[0] ?? 0
+  )
+
+  const exploring = explorationAction.value?.spells?.find(item => item.spell_ref === explorationSpellRef.value)
+  explorationSpellRef.value = exploring?.spell_ref || ''
+  explorationSlot.value = exploring ? keepSlot(explorationSlot.value, exploring.available_slot_levels) : 0
+  if (!explorationAction.value?.targets?.some(item => item.actor_id === explorationTargetId.value)) {
+    explorationTargetId.value = ''
+  }
+
+  const spells = spellAction.value?.spells || []
+  const spell = spells.find(item => item.spell_ref === selectedSpellRef.value) || spellChoices.value[0] || spells[0]
+  selectedSpellRef.value = spell?.spell_ref || ''
+  selectedSlot.value = keepSlot(selectedSlot.value, spell?.available_slot_levels)
+  // 刷新时保留仍然合法的施法目标；目标数量与上限由投影重新收敛。
+  const legalSpellTargets = targetsFor(spell)
+  const keptSpellTargets = selectedSpellTargets.value.filter(id => (
+    id && legalSpellTargets.some(item => item.actor_id === id)
+  ))
+  const targetCount = Math.max(1, Math.min(keptSpellTargets.length || 1, spellTargetLimit.value))
+  const nextSpellTargets = keptSpellTargets.slice(0, targetCount)
+  while (nextSpellTargets.length < targetCount) {
+    const distinct = legalSpellTargets.find(item => !nextSpellTargets.includes(item.actor_id))
+    nextSpellTargets.push(distinct?.actor_id || legalSpellTargets[0]?.actor_id || '')
+  }
+  selectedSpellTargets.value = nextSpellTargets
+  selectedSpellTargetCount.value = targetCount
+  if (spell?.resist_choice?.length) {
+    if (!spell.resist_choice.includes(selectedResistType.value)) {
+      selectedResistType.value = spell.resist_choice[0] || ''
+    }
+  } else {
+    selectedResistType.value = ''
+  }
+  selectedTargetId.value = keepOrFirst(selectedTargetId.value, attackAction.value?.targets || [])
+  capabilityTargetId.value = keepOrFirst(capabilityTargetId.value, capabilityTargets.value)
+  chooseUsableWeapon()
+  if (!currentActor.value || !canReachPosition(Number(currentActor.value.position || 0) + Number(movementDistance.value || 0))) {
+    movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+  }
+  if (!capabilityActions.value.some(item => item.capability_id === selectedCapabilityId.value)) {
+    selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
+  }
+}
+
+// Back to a clean dock once an intent lands or the turn passes on.
+function resetDock(): void {
+  dockTab.value = 'action'
+  dockMode.value = ''
+  inspectedId.value = ''
+}
+// The first load is not a turn change, so it must not undo a decision prompt.
+watch(
+  () => (combat.value ? `${combat.value.round}:${combat.value.current_actor_id}` : ''),
+  (_next, previous) => { if (previous) resetDock() },
+)
 
 function clearGameScopedState(): void {
+  clearFeedback()
   data.value = null
   busy.value = false
   error.value = ''
   notice.value = ''
-  selectedPresetId.value = ''
   selectedWeaponId.value = ''
   selectedSpellRef.value = ''
   selectedSlot.value = 0
   selectedTargetId.value = ''
-  selectedSpellTargetId.value = ''
-  nextEncounterOpen.value = false
-  manualEncounterOpen.value = false
-  sandboxDeclared.value = false
-  aiProposal.value = null
-  aiDraft.value = []
-  aiError.value = ''
+  selectedSpellTargets.value = ['']
+  selectedSpellTargetCount.value = 1
+  selectedResistType.value = ''
+  teleportDistance.value = ''
   movementDistance.value = 5
   staged.value = null
   returnFocus = null
-}
-
-function openManualEncounter(): void {
-  manualEncounterOpen.value = true
-  resetSelections()
-}
-
-// 与「手动准备遭遇」对称：打开下一场遭遇选择器时立即预选目录条目，
-// 否则开始按钮会在用户没碰过下拉框前保持禁用。
-function toggleNextEncounter(): void {
-  nextEncounterOpen.value = !nextEncounterOpen.value
-  if (nextEncounterOpen.value) resetSelections()
-}
-
-// GM 明确选择“临时准备自由遭遇”后才允许使用通用目录。
-function declareSandboxEncounter(): void {
-  sandboxDeclared.value = true
-  manualEncounterOpen.value = true
-  resetSelections()
-}
-
-function cancelAiProposal(): void {
-  aiProposal.value = null
-  aiDraft.value = []
-  aiError.value = ''
-  closeEnemyEditor()
-}
-
-// 生成/重新生成成功后以 AI 原稿为底稿重建草稿：默认全选、数量 1。
-function buildDraftEnemies(proposal: RulesetTemporaryEncounter): DraftEnemy[] {
-  return (proposal.enemies || []).map(enemy => ({
-    ...enemy,
-    attacks: (enemy.attacks || []).map(attack => ({ ...attack })),
-    selected: true,
-    quantity: 1,
-  }))
-}
-
-// 工作副本：弹窗里的编辑只有点了「保存修改」才回到 aiDraft。
-function cloneDraftEnemies(draft: DraftEnemy[]): DraftEnemy[] {
-  return draft.map(enemy => ({
-    ...enemy,
-    attacks: (enemy.attacks || []).map(attack => ({ ...attack })),
-  }))
-}
-
-function openEnemyEditor(): void {
-  if (!aiProposal.value) return
-  editDraft.value = cloneDraftEnemies(aiDraft.value)
-  expandedEnemies.value = []
-  enemyEditorOpen.value = true
-}
-
-function closeEnemyEditor(): void {
-  enemyEditorOpen.value = false
-  editDraft.value = []
-  expandedEnemies.value = []
-}
-
-// 取消编辑：丢弃工作副本，摘要与确认仍然使用保存过的 aiDraft。
-function cancelEnemyEditor(): void {
-  closeEnemyEditor()
-}
-
-function saveEnemyEdits(): void {
-  aiDraft.value = editDraft.value
-  closeEnemyEditor()
-}
-
-// 恢复 AI 原稿：丢弃弹窗里的全部编辑，回到未动过的提案（仍需保存才生效）。
-function restoreEditDraft(): void {
-  if (aiProposal.value) editDraft.value = buildDraftEnemies(aiProposal.value)
-}
-
-function isEnemyExpanded(enemy: DraftEnemy): boolean {
-  return expandedEnemies.value.includes(enemy.id || '')
-}
-
-function toggleEnemyExpanded(enemy: DraftEnemy): void {
-  const id = enemy.id || ''
-  expandedEnemies.value = isEnemyExpanded(enemy)
-    ? expandedEnemies.value.filter(candidate => candidate !== id)
-    : [...expandedEnemies.value, id]
-}
-
-function addDraftAttack(enemy: DraftEnemy): void {
-  const attacks = enemy.attacks || []
-  if (attacks.length >= 3) return
-  const used = new Set(attacks.map(attack => String(attack.id || '')))
-  let index = attacks.length + 1
-  while (used.has(`attack-${index}`)) index += 1
-  enemy.attacks = [...attacks, {
-    id: `attack-${index}`, name: '', attack_bonus: 0,
-    damage: '1d6', range: 5, long_range: 5,
-  }]
-}
-
-function removeDraftAttack(enemy: DraftEnemy, attackId: string): void {
-  if (!enemy.attacks || enemy.attacks.length <= 1) return
-  enemy.attacks = enemy.attacks.filter(attack => attack.id !== attackId)
-}
-
-// 提交前把数量展开成独立实例：首个保留原 id，其余用稳定后缀并全局去重，
-// 保证 combat.start 的敌人 id 唯一；不发送后端不支持的 count 字段。
-function expandDraftEnemies(draft: DraftEnemy[]): RulesetTemporaryEncounterEnemy[] {
-  const expanded: RulesetTemporaryEncounterEnemy[] = []
-  const used = new Set<string>()
-  const claimId = (base: string): string => {
-    let candidate = base
-    let suffix = 2
-    while (used.has(candidate)) candidate = `${base}-${suffix++}`
-    used.add(candidate)
-    return candidate
-  }
-  for (const enemy of draft) {
-    if (!enemy.selected) continue
-    const quantity = Math.max(1, Math.floor(Number(enemy.quantity) || 1))
-    for (let index = 0; index < quantity; index += 1) {
-      expanded.push({
-        id: claimId(enemy.id || `enemy-${expanded.length + 1}`),
-        name: enemy.name,
-        hp: enemy.hp,
-        armor_class: enemy.armor_class,
-        speed: enemy.speed,
-        position: enemy.position,
-        initiative_modifier: enemy.initiative_modifier,
-        attacks: (enemy.attacks || []).map(attack => ({ ...attack })),
-      })
-    }
-  }
-  return expanded
-}
-
-const selectedDraftCount = computed(() => aiDraft.value.filter(enemy => enemy.selected).length)
-
-// 摘要按名称合并同种敌人，只显示勾选保留的部分；数量语义与提交展开一致。
-const aiSummary = computed<Array<{ name: string; quantity: number }>>(() => {
-  const entries: Array<{ name: string; quantity: number }> = []
-  for (const enemy of aiDraft.value) {
-    if (!enemy.selected) continue
-    const name = String(enemy.name || '').trim() || copy.value.aiName
-    const quantity = Math.max(1, Math.floor(Number(enemy.quantity) || 1))
-    const existing = entries.find(entry => entry.name === name)
-    if (existing) existing.quantity += quantity
-    else entries.push({ name, quantity })
-  }
-  return entries
-})
-
-// 生成与开战严格分两步：这里只拿提案并构建草稿，绝不自动开战；失败完全无副作用。
-async function planTemporaryEncounter(): Promise<void> {
-  const gameKey = props.gameKey
-  aiBusy.value = true
-  aiError.value = ''
-  try {
-    const response = await planRulesetTemporaryEncounter(gameKey)
-    if (props.gameKey !== gameKey) return
-    if (response.encounter) {
-      aiProposal.value = response.encounter
-      aiDraft.value = buildDraftEnemies(response.encounter)
-      // 重新生成即换底稿：任何未保存的弹窗编辑都必须作废，不能留在旧 draft 上。
-      closeEnemyEditor()
-    } else {
-      aiProposal.value = null
-      aiDraft.value = []
-      aiError.value = response.error || copy.value.aiFailed
-      closeEnemyEditor()
-    }
-  } catch (cause: unknown) {
-    if (props.gameKey !== gameKey) return
-    aiProposal.value = null
-    aiDraft.value = []
-    aiError.value = friendlyCombatError(cause) || copy.value.aiFailed
-    closeEnemyEditor()
-  } finally {
-    if (props.gameKey === gameKey) aiBusy.value = false
-  }
-}
-
-// 确认入口：过滤未勾选敌人、把数量展开成独立实例后，提交现有
-// combat.start（mode=sandbox + enemies，不带 encounter_preset_id）。
-// payload 携带 temporary_encounter 标记，服务端权威入口会重走生成期
-// 同一套范围与队伍安全上限校验——标记只追加校验，不存在跳过语义，
-// 篡改后的 payload 在 combat.start 一样会被整场拒绝。
-async function confirmAiEncounter(): Promise<void> {
-  if (!aiProposal.value) return
-  const enemies = expandDraftEnemies(aiDraft.value)
-  if (!enemies.length) return
-  await submit({
-    intent_id: intentId(),
-    type: 'combat.start',
-    expected_version: gameplay.value?.state_version ?? 0,
-    mode: 'sandbox',
-    temporary_encounter: true,
-    enemies,
-  })
-  if (!error.value) {
-    aiProposal.value = null
-    aiDraft.value = []
-    aiError.value = ''
-    closeEnemyEditor()
-  }
 }
 
 async function load(silent = false): Promise<void> {
@@ -801,7 +619,6 @@ async function load(silent = false): Promise<void> {
     const response = await fetchRulesetAvailableActions(gameKey)
     if (sequence !== loadSequence || props.gameKey !== gameKey) return
     data.value = response
-    if (data.value.gameplay.combat?.status !== 'ended') nextEncounterOpen.value = false
     error.value = ''
     resetSelections()
   } catch (cause: unknown) {
@@ -810,10 +627,6 @@ async function load(silent = false): Promise<void> {
   } finally {
     if (!silent && sequence === loadSequence && props.gameKey === gameKey) busy.value = false
   }
-}
-
-function intentId(): string {
-  return globalThis.crypto?.randomUUID?.() || `intent-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function stage(payload: JsonObject): void {
@@ -826,23 +639,28 @@ function stage(payload: JsonObject): void {
   void nextTick(() => confirmCard.value?.focus())
 }
 
-async function submit(payload: JsonObject): Promise<void> {
+// Resolves to true once the server accepted the intent.
+async function submit(payload: JsonObject): Promise<boolean> {
   const gameKey = props.gameKey
   busy.value = true
   try {
     const response = await submitRulesetIntent(gameKey, payload)
-    if (props.gameKey !== gameKey) return
+    if (props.gameKey !== gameKey) return false
     data.value = response
     staged.value = null
     error.value = ''
     notice.value = latestEvents.value.map(describeEvent).filter(Boolean).join(' · ')
+    playFeedback(latestEvents.value)
     resetSelections()
+    resetDock()
     emit('refresh')
     if (payload.type === 'combat.end') emit('navigate', 'campaign')
+    return true
   } catch (cause: unknown) {
-    if (props.gameKey !== gameKey) return
+    if (props.gameKey !== gameKey) return false
     error.value = friendlyCombatError(cause)
     await load(true)
+    return false
   } finally {
     if (props.gameKey === gameKey) busy.value = false
   }
@@ -869,12 +687,18 @@ function stageAttack(): void {
 
 function stageSpell(): void {
   const spell = selectedSpell.value
-  if (!spell || !selectedSpellTargetId.value || !spellAction.value) return
-  stage({
+  if (!spell || !spellAction.value || !spellTargetsValid.value) return
+  const ids = selectedSpellTargets.value.filter(Boolean)
+  const payload: JsonObject = {
     type: 'cast_spell', actor_id: spellAction.value.actor_id,
-    target_id: selectedSpellTargetId.value, spell_ref: spell.spell_ref,
-    slot_level: selectedSlot.value,
-  })
+    spell_ref: spell.spell_ref, slot_level: selectedSlot.value,
+  }
+  // 单目标继续用 target_id，多目标才用 target_ids，两者互斥。
+  if (ids.length > 1) payload.target_ids = ids
+  else payload.target_id = ids[0]
+  if (spell.resist_choice?.length) payload.resist_type = selectedResistType.value
+  if (spell.mode === 'teleport') payload.teleport_distance = Number(teleportDistance.value)
+  stage(payload)
 }
 
 function stageExplorationSpell(): void {
@@ -920,34 +744,13 @@ function stageCapability(capability: RulesetCombatAction): void {
   stage(payload)
 }
 
-async function startCombat(): Promise<void> {
-  if (!selectedPreset.value) return
-  const payload: JsonObject = {
-    intent_id: intentId(), type: 'combat.start',
-    expected_version: gameplay.value?.state_version ?? 0,
-    encounter_preset_id: selectedPreset.value.id,
-    encounter_instance_id: action('combat.start')?.encounter_instance_id,
-    enemies: selectedPreset.value.enemies,
-  }
-  // 自由遭遇必须由 GM 明确声明，服务端据此拒绝把通用预设当成剧情绑定。
-  if (sandboxFlow.value) payload.mode = 'sandbox'
-  await submit(payload)
-}
-
-async function toggleReady(): Promise<void> {
-  const item = isReady.value ? unreadyAction.value : readyAction.value
-  if (!item) return
-  await submit({
-    intent_id: intentId(),
-    type: item.type,
-    expected_version: gameplay.value?.state_version ?? 0,
-  })
-}
-
 const reactionSpellRef = ref('')
 const reactionSlot = ref(0)
 const reactionSpells = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
   ? (pendingDecision.value.spells as RulesetCombatSpell[] | undefined) || []
+  : [])
+const reactionFeatures = computed(() => pendingDecision.value?.kind === 'hit_reaction_spell'
+  ? (pendingDecision.value.features as RulesetCombatReactionFeature[] | undefined) || []
   : [])
 const reactionSpell = computed(() => (
   reactionSpells.value.find(item => item.spell_ref === reactionSpellRef.value) || reactionSpells.value[0] || null
@@ -970,6 +773,10 @@ async function decide(decision: RulesetPendingDecision, option: string, extra: J
     if (props.gameKey !== gameKey) return
     data.value = response
     error.value = ''
+    // A declined smite or a Shield answer is where a deferred hit lands.
+    playFeedback(latestEvents.value)
+    resetSelections()
+    resetDock()
     emit('refresh')
   } catch (cause: unknown) {
     if (props.gameKey !== gameKey) return
@@ -995,8 +802,19 @@ function describeEvent(event: JsonObject): string {
 watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
-  selectedSpellTargetId.value = targetsFor(spell)[0]?.actor_id || ''
+  // Switching spells keeps the unit the player clicked when the new spell can reach it.
+  const legal = targetsFor(spell)
+  const kept = [inspectedId.value, ...selectedSpellTargets.value]
+    .find(id => id && legal.some(item => item.actor_id === id))
+  syncSpellTargets()
+  if (kept) selectedSpellTargets.value = [kept]
 })
+watch(selectedSlot, () => {
+  if (selectedSpellTargets.value.length > spellTargetLimit.value) {
+    resizeSpellTargets(spellTargetLimit.value)
+  }
+})
+watch(selectedSpellTargetCount, count => resizeSpellTargets(count))
 watch(explorationSpellRef, () => {
   explorationSlot.value = explorationSpell.value?.available_slot_levels?.[0] ?? 0
 })
@@ -1048,299 +866,47 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
     </details>
 
     <template v-if="gameplay">
-      <section v-if="combat?.status !== 'active'" class="encounter-start">
-        <template v-if="combat?.status !== 'ended'">
-        <div v-if="narrativeCombatPending && !guidedCombatStep" class="story-bridge">
-          <span class="story-bridge-label">{{ copy.storyBridge }}</span>
-          <p>{{ copy.narrativeRequest }}</p>
-        </div>
-        <template v-if="guidedCombatStep && combat?.status !== 'ended'">
-          <div class="story-bridge">
-            <span class="story-bridge-label">{{ copy.storyBridge }}</span>
-            <h3>{{ guidedCombatStep.title }}</h3>
-            <p>{{ guidedCombatStep.narration }}</p>
-            <aside><b>{{ copy.storyPurpose }}</b> {{ copy.storyAction }}</aside>
-          </div>
-        </template>
-        <p v-else>{{ combat?.status === 'ended' ? copy.ended : copy.noCombat }}</p>
-        <div v-if="guidedCombatStep" class="guided-preset">
-          <span>{{ copy.guidedEncounter }}</span>
-          <strong>{{ guidedCombatSummary?.name || guidedCombatStep.encounter_preset_id }}</strong>
-          <small class="encounter-source">{{ copy.encounterSource }}：{{ guidedCombatStep.encounter_preset_id }}</small>
-          <p>{{ guidedCombatSummary?.description }}</p>
-          <p v-if="isGm && !guidedCombatPreset" class="combat-error" role="alert">{{ copy.missingPreset }}</p>
-          <small v-else>{{ copy.guidedOnly }}</small>
-        </div>
-        <div v-else-if="storyUnprepared && !sandboxDeclared" class="guided-preset unprepared">
-          <strong>{{ copy.unpreparedTitle }}</strong>
-          <p>{{ copy.unpreparedHint }}</p>
-          <div class="unprepared-actions">
-            <button type="button" @click="emit('navigate', 'campaign')">
-              <NIcon :component="PlayForwardOutline" />{{ copy.returnToAdventure }}
-            </button>
-            <button v-if="canPlanTemporaryEncounter" type="button" class="combat-primary" :disabled="aiBusy" @click="planTemporaryEncounter">
-              <NIcon :component="SparklesOutline" />{{ aiBusy ? copy.aiPreparing : copy.aiPrepare }}
-            </button>
-            <button v-if="isGm" type="button" @click="declareSandboxEncounter">
-              <NIcon :component="ShieldOutline" />{{ copy.unpreparedAction }}
-            </button>
-          </div>
-          <p v-if="isGm" class="combat-state">{{ copy.aiHint }}</p>
-        </div>
-        <div v-else-if="requestedCombatSummary" class="guided-preset">
-          <span>{{ copy.recommendedEncounter }}</span>
-          <strong>{{ requestedCombatSummary.name }}</strong>
-          <p>{{ requestedCombatSummary.description }}</p>
-          <details v-if="isGm && selectableEncounterPresets.length > 1" class="encounter-alternatives">
-            <summary>{{ copy.changeEncounter }}</summary>
-            <label>
-              <span>{{ copy.chooseEncounter }}</span>
-              <select v-model="selectedPresetId">
-                <option v-for="preset in selectableEncounterPresets" :key="preset.id" :value="preset.id">
-                  {{ preset.name }} · {{ localizedTerm(preset.difficulty) }}
-                </option>
-              </select>
-            </label>
-          </details>
-        </div>
-
-        <p v-if="aiError && !aiProposal" class="combat-error" role="alert">{{ aiError }}</p>
-
-        <section v-if="encounterReadiness?.required_count" class="party-readiness" aria-live="polite">
-          <header>
-            <strong>{{ copy.partyReady }}</strong>
-            <span>{{ copy.readySummary }} {{ encounterReadiness.ready_count }}/{{ encounterReadiness.required_count }}</span>
-          </header>
-          <ul>
-            <li v-for="player in encounterReadiness.players" :key="player.player_id" :class="{ ready: player.ready }">
-              <NIcon :component="player.ready ? CheckmarkCircleOutline : HourglassOutline" />
-              <span>{{ player.name }}</span>
-              <strong>{{ player.ready ? copy.readyStatus : copy.unreadyStatus }}</strong>
-            </li>
-          </ul>
-          <button v-if="!isGm && (readyAction || unreadyAction)" class="combat-primary" :disabled="busy" @click="toggleReady">
-            <NIcon :component="isReady ? HourglassOutline : CheckmarkCircleOutline" />
-            {{ isReady ? copy.cancelReady : copy.ready }}
-          </button>
-        </section>
-
-        <template v-if="isGm && (action('combat.start') || sandboxDeclared)">
-          <template v-if="!guidedCombatStep && !requestedCombatPreset">
-            <div v-if="!manualEncounterOpen && !sandboxDeclared" class="unprepared-actions">
-              <button type="button" class="manual-encounter-toggle" @click="openManualEncounter">
-                <NIcon :component="ShieldOutline" />{{ copy.manualEncounter }}
-              </button>
-              <button v-if="canPlanTemporaryEncounter" type="button" class="ai-encounter-toggle" :disabled="aiBusy" @click="planTemporaryEncounter">
-                <NIcon :component="SparklesOutline" />{{ aiBusy ? copy.aiPreparing : copy.aiPrepare }}
-              </button>
-            </div>
-            <template v-else>
-              <p v-if="sandboxDeclared" class="combat-warning">{{ copy.sandboxWarning }}</p>
-              <p v-else-if="narrativeCombatPending" class="combat-state">{{ copy.sandboxHint }}</p>
-              <label>
-                <span>{{ copy.chooseFreeEncounter }}</span>
-                <select v-model="selectedPresetId">
-                  <option v-for="preset in selectableEncounterPresets" :key="preset.id" :value="preset.id">
-                    {{ preset.name }} · {{ localizedTerm(preset.difficulty) }}
-                  </option>
-                </select>
-              </label>
-              <p class="preset-description">{{ selectedPreset?.description }}</p>
-            </template>
-          </template>
-          <p v-if="!guidedCombatStep && !selectableEncounterPresets.length" class="combat-state">{{ copy.noEncounter }}</p>
-          <p v-if="encounterReadiness?.required_count" class="combat-state">{{ copy.startHint }}</p>
-          <button
-            v-if="guidedCombatStep || requestedCombatPreset || manualEncounterOpen || sandboxDeclared"
-            class="combat-primary"
-            :disabled="busy || !selectedPreset"
-            @click="startCombat"
-          >
-            <NIcon :component="PlayForwardOutline" />{{ guidedCombatStep ? copy.guidedStart : copy.start }}
-          </button>
-        </template>
-        <p v-else-if="(guidedCombatStep || narrativeCombatPending) && combat?.status !== 'ended'" class="combat-state">{{ copy.waitingForGm }}</p>
-        </template>
-        <section v-else class="encounter-ended" aria-live="polite">
-          <strong>{{ copy.ended }}</strong>
-          <p>{{ copy.nextEncounterHint }}</p>
-          <div class="encounter-ended-actions">
-            <button type="button" @click="emit('navigate', 'campaign')"><NIcon :component="PlayForwardOutline" />{{ copy.returnToAdventure }}</button>
-            <button v-if="isGm && action('combat.start')" type="button" class="combat-primary" @click="toggleNextEncounter">
-              <NIcon :component="PlayForwardOutline" />{{ nextEncounterOpen ? copy.cancelNextEncounter : copy.nextEncounter }}
-            </button>
-            <button v-if="canPlanTemporaryEncounter" type="button" class="ai-encounter-toggle" :disabled="aiBusy" @click="planTemporaryEncounter">
-              <NIcon :component="SparklesOutline" />{{ aiBusy ? copy.aiPreparing : copy.aiPrepare }}
-            </button>
-          </div>
-          <div v-if="nextEncounterOpen" class="next-encounter-picker">
-            <label>
-              <span>{{ copy.chooseEncounter }}</span>
-              <select v-model="selectedPresetId">
-                <option v-for="preset in selectableEncounterPresets" :key="preset.id" :value="preset.id">
-                  {{ preset.name }} · {{ localizedTerm(preset.difficulty) }}
-                </option>
-              </select>
-            </label>
-            <p class="preset-description">{{ selectedPreset?.description }}</p>
-            <button class="combat-primary" :disabled="busy || !selectedPreset" @click="startCombat">
-              <NIcon :component="PlayForwardOutline" />{{ copy.start }}
-            </button>
-          </div>
-        </section>
-
-        <!-- AI 临时遭遇草稿：战斗未开始与已结算两种状态都要可见（结算态可
-             直接由 GM 发起下一场 AI 临时遭遇），因此挂在 encounter-start
-             分支之外、不受 combat.status!=='ended' 的 v-if/v-else 链约束。 -->
-        <!-- 默认只给摘要：十几个输入框直接铺开体验过重，编辑收进「编辑敌人」弹窗。 -->
-        <div v-if="isGm && aiProposal" class="guided-preset ai-encounter-preview">
-          <span>{{ copy.aiPreviewTag }}</span>
-          <strong>{{ aiProposal.title }}</strong>
-          <p>{{ aiProposal.description }}</p>
-          <small class="encounter-source">{{ copy.aiDifficulty }}</small>
-          <ul class="ai-encounter-summary" :aria-label="t('encounterSummary')">
-            <li v-for="entry in aiSummary" :key="entry.name">{{ entry.name }} ×{{ entry.quantity }}</li>
-          </ul>
-          <p v-if="!aiSummary.length" class="combat-state">{{ t('encounterNoEnemiesSelected') }}</p>
-          <p class="combat-state">{{ copy.aiEncounterNote }}</p>
-          <div class="unprepared-actions">
-            <button type="button" class="ai-encounter-edit" @click="openEnemyEditor">
-              {{ t('encounterEditEnemies') }}
-            </button>
-            <button type="button" :disabled="aiBusy" @click="planTemporaryEncounter">
-              <NIcon :component="SparklesOutline" />{{ copy.aiRegenerate }}
-            </button>
-            <button type="button" class="combat-primary" :disabled="busy || !selectedDraftCount" @click="confirmAiEncounter">
-              <NIcon :component="PlayForwardOutline" />{{ copy.aiConfirmStart }}
-            </button>
-            <button type="button" @click="cancelAiProposal">{{ copy.cancel }}</button>
-          </div>
-        </div>
-
-        <!-- 编辑弹窗：编辑工作副本，保存后才回到草稿与摘要；每个敌人默认折叠。 -->
-        <Modal
-          v-if="isGm && aiProposal && enemyEditorOpen"
-          :title="t('encounterEditorTitle')"
-          dialog-class="encounter-editor-dialog"
-          @close="cancelEnemyEditor"
-        >
-          <p class="combat-state">{{ copy.aiDraftHint }}</p>
-          <ul class="ai-encounter-enemies">
-            <li v-for="enemy in editDraft" :key="enemy.id">
-              <header class="ai-draft-head">
-                <input v-model="enemy.selected" type="checkbox" :aria-label="enemy.name || copy.aiName" />
-                <button
-                  type="button"
-                  class="ai-draft-toggle"
-                  :aria-expanded="isEnemyExpanded(enemy)"
-                  @click="toggleEnemyExpanded(enemy)"
-                >
-                  <NIcon :component="ChevronDownOutline" :class="['ai-draft-chevron', { open: isEnemyExpanded(enemy) }]" />
-                  <span>{{ enemy.name || copy.aiName }}</span>
-                  <small>×{{ enemy.quantity }}</small>
-                </button>
-              </header>
-              <template v-if="isEnemyExpanded(enemy)">
-                <div class="ai-draft-fields">
-                  <label><span>{{ copy.aiName }}</span><input v-model="enemy.name" type="text" maxlength="60" :aria-label="copy.aiName" /></label>
-                  <label><span>{{ copy.aiQuantity }}</span><input v-model.number="enemy.quantity" type="number" min="1" max="12" :aria-label="copy.aiQuantity" /></label>
-                  <label><span>{{ copy.hp }}</span><input v-model.number="enemy.hp" type="number" min="1" max="500" :aria-label="copy.hp" /></label>
-                  <label><span>{{ copy.ac }}</span><input v-model.number="enemy.armor_class" type="number" min="8" max="25" :aria-label="copy.ac" /></label>
-                  <label><span>{{ copy.tempSpeed }}</span><input v-model.number="enemy.speed" type="number" min="0" max="80" :aria-label="copy.tempSpeed" /></label>
-                  <label><span>{{ copy.aiInitiative }}</span><input v-model.number="enemy.initiative_modifier" type="number" min="-5" max="10" :aria-label="copy.aiInitiative" /></label>
-                </div>
-                <div v-for="attack in enemy.attacks || []" :key="attack.id" class="ai-draft-attack">
-                  <label><span>{{ copy.attack }}</span><input v-model="attack.name" type="text" maxlength="60" :aria-label="copy.attack" /></label>
-                  <label><span>{{ copy.aiAttackBonus }}</span><input v-model.number="attack.attack_bonus" type="number" min="-2" max="15" :aria-label="copy.aiAttackBonus" /></label>
-                  <label><span>{{ copy.aiDamage }}</span><input v-model="attack.damage" type="text" maxlength="40" :aria-label="copy.aiDamage" /></label>
-                  <label><span>{{ copy.aiNormalRange }}</span><input v-model.number="attack.range" type="number" min="5" max="600" :aria-label="copy.aiNormalRange" /></label>
-                  <label><span>{{ copy.aiLongRange }}</span><input v-model.number="attack.long_range" type="number" min="5" max="600" :aria-label="copy.aiLongRange" /></label>
-                  <button type="button" :disabled="(enemy.attacks?.length || 0) <= 1" @click="removeDraftAttack(enemy, attack.id || '')">
-                    {{ copy.aiRemoveAttack }}
-                  </button>
-                </div>
-                <button type="button" class="ai-draft-add-attack" :disabled="(enemy.attacks?.length || 0) >= 3" @click="addDraftAttack(enemy)">
-                  <NIcon :component="SparklesOutline" />{{ copy.aiAddAttack }}
-                </button>
-              </template>
-            </li>
-          </ul>
-          <template #actions>
-            <button type="button" @click="restoreEditDraft">{{ copy.aiRestore }}</button>
-            <button type="button" @click="cancelEnemyEditor">{{ copy.cancel }}</button>
-            <button type="button" class="combat-primary" @click="saveEnemyEdits">{{ t('encounterSaveChanges') }}</button>
-          </template>
-        </Modal>
-      </section>
+      <EncounterPrep
+        v-if="combat?.status !== 'active'"
+        :key="gameKey"
+        :game-key="gameKey"
+        :actor-id="actorId"
+        :is-gm="isGm"
+        :data="data"
+        :busy="busy"
+        :submit="submit"
+        @navigate="emit('navigate', $event)"
+      />
 
       <template v-else>
-        <section :class="['turn-banner', currentActor?.kind || 'player']" aria-live="polite">
-          <div><small>{{ copy.round }} {{ combat.round }}</small><strong>{{ currentTurnLabel }}</strong></div>
-          <span>{{ targetName(combat.current_actor_id) }}</span>
-        </section>
-
-        <div class="combat-summary">
-          <span><NIcon :component="FlashOutline" /><i><small>{{ copy.action }}</small><strong>{{ combat.economy.action ? copy.available : copy.spent }}</strong></i></span>
-          <span><NIcon :component="SparklesOutline" /><i><small>{{ copy.bonus }}</small><strong>{{ combat.economy.bonus_action ? copy.available : copy.spent }}</strong></i></span>
-          <span><NIcon :component="FootstepsOutline" /><i><small>{{ copy.movement }}</small><strong>{{ combat.economy.movement ?? 0 }} {{ copy.feet }}</strong></i></span>
-          <span><NIcon :component="ShieldOutline" /><i><small>{{ copy.reaction }}</small><strong>{{ combat.economy.reaction ? copy.available : copy.spent }}</strong></i></span>
-        </div>
+        <InitiativeBar
+          :order="initiativeTokens"
+          :round-label="`${copy.round} ${combat.round}`"
+          :turn-label="currentTurnLabel"
+          :acting-name="targetName(combat.current_actor_id)"
+          :list-label="copy.current"
+        />
         <p v-if="combat.current_actor_id === `player:${actorId}`" class="turn-guide">{{ copy.turnGuide }}</p>
 
-        <ol class="initiative" :aria-label="copy.current">
-          <li
-            v-for="(actorIdValue, index) in combat.initiative"
-            :key="actorIdValue"
-            :class="[{ current: actorIdValue === combat.current_actor_id }, actorIdValue.startsWith('enemy:') ? 'enemy' : 'player']"
-            :aria-current="actorIdValue === combat.current_actor_id ? 'step' : undefined"
-          >
-            <span>{{ index + 1 }}</span><strong>{{ targetName(actorIdValue) }}</strong>
-          </li>
-        </ol>
-
-        <section class="tactical-track" :aria-label="copy.tacticalTrack">
-          <header><strong>{{ copy.tacticalTrack }}</strong><span>{{ copy.chooseDestination }}</span></header>
-          <div class="track-surface">
-            <div class="track-canvas" :style="trackCanvasStyle">
-              <span
-                v-for="(actor, index) in combat.actors"
-                :key="`track-${actor.actor_id}`"
-                :class="['track-token', actor.kind, { current: actor.actor_id === combat.current_actor_id }]"
-                :style="tokenTrackStyle(actor.position, index)"
-                :title="`${actor.name} · ${actor.position} ${copy.feet}`"
-              >{{ actor.name.slice(0, 2) }}</span>
-              <div class="track-cells" :style="{ gridTemplateColumns: `repeat(${trackTicks.length}, minmax(34px, 1fr))` }">
-                <button
-                  v-for="position in trackTicks"
-                  :key="position"
-                  type="button"
-                  :class="{ reachable: canReachPosition(position), selected: selectedDestination === position }"
-                  :disabled="!canReachPosition(position)"
-                  :aria-label="`${copy.position} ${position} ${copy.feet}`"
-                  @click="chooseTrackPosition(position)"
-                ><span>{{ position }}</span></button>
-              </div>
-            </div>
+        <section class="battlefield" :aria-label="copy.tacticalTrack">
+          <div class="battlefield-body">
+            <Battlefield
+              :position-mode="combat.position_mode"
+              :tokens="battleTokens"
+              :movement-remaining="Number(moveAction?.movement_remaining || 0)"
+              :target-id="focusId"
+              :selectable-ids="battleTokenIds"
+              :selected-destination="dockMode === 'move' ? selectedDestination : null"
+              :can-reach="canReachPosition"
+              :labels="battlefieldLabels"
+              :floaters="floaters"
+              @select-token="pickBattleTarget"
+              @choose-position="chooseTrackPosition"
+            />
+            <TargetCard :token="cardToken" :distance="cardDistance" :labels="targetCardLabels" />
           </div>
+          <p class="battlefield-hint">{{ copy.chooseDestination }}</p>
         </section>
-
-        <div class="actor-grid">
-          <article v-for="actor in combat.actors" :key="actor.actor_id" :class="['actor-card', actor.kind, { current: actor.actor_id === combat.current_actor_id, defeated: actor.hp <= 0 }]">
-            <header><strong>{{ actor.name }}</strong><span>{{ actor.position }} {{ copy.feet }}</span></header>
-            <div
-              class="hp-track"
-              role="progressbar"
-              :aria-label="`${actor.name} ${copy.hp}`"
-              aria-valuemin="0"
-              :aria-valuemax="actor.max_hp"
-              :aria-valuenow="actor.hp"
-            ><i :style="{ width: `${Math.max(0, Math.min(100, actor.hp / Math.max(1, actor.max_hp) * 100))}%` }" /></div>
-            <p>{{ copy.hp }} {{ actor.hp }}/{{ actor.max_hp }} · {{ copy.ac }} {{ actor.armor_class }}</p>
-            <small v-if="Object.keys(actor.conditions || {}).length">
-              {{ copy.conditions }}: {{ Object.keys(actor.conditions || {}).map(localizedTerm).join('、') }}
-            </small>
-          </article>
-        </div>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
           <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
@@ -1361,153 +927,213 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <button v-if="reactionSpell" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'cast', { spell_ref: reactionSpell.spell_ref, slot_level: reactionSlot })">
                 {{ spellText.castReaction(reactionSpell.name, Number(reactionSpell.armor_class_bonus || 0), Number(pendingDecision.attack_total) < Number(pendingDecision.armor_class) + Number(reactionSpell.armor_class_bonus || 0)) }}
               </button>
+              <button
+                v-for="feature in reactionFeatures"
+                :key="feature.feature_id"
+                :disabled="busy"
+                @click="decide(pendingDecision, 'feature', { feature_id: feature.feature_id })"
+              >{{ spellText.useReactionFeature(feature.name, Number(feature.damage_multiplier)) }}</button>
               <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ spellText.declineReaction }}</button>
             </div>
           </template>
           <div v-else>
+            <button v-if="pendingDecision.options.includes('counter')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'counter')">{{ copy.counter }}</button>
             <button v-if="pendingDecision.options.includes('resolve')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'resolve')">{{ copy.resolve }}</button>
             <button :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.decline : copy.decline }}</button>
           </div>
         </section>
 
-        <section v-if="actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')" class="available-actions">
-          <h3>{{ copy.availableActions }}</h3>
-          <div class="combat-actions">
-          <section v-if="attackAction" class="action-card">
-            <h3><NIcon :component="FlashOutline" />{{ copy.action }} · {{ copy.attack }}</h3>
-            <label>{{ copy.weapon }}
-              <select v-model="selectedWeaponId">
-                <option
-                  v-for="weaponItem in attackAction.weapons"
-                  :key="weaponItem.weapon_ref || weaponItem.id"
-                  :value="weaponItem.weapon_ref || weaponItem.id"
-                  :disabled="!weaponRangeState(weaponItem, selectedTargetId).usable"
-                >
-                  {{ weaponItem.name || weaponItem.id }} · {{ weaponItem.damage }} {{ localizedTerm(weaponItem.damage_type) }} · {{ weaponRangeLabel(weaponItem) }}
-                </option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="selectedTargetId">
-                <option v-for="targetItem in attackAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <p v-if="selectedTargetId" :class="['range-guide', { blocked: !hasUsableWeapon }]">
-              {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
-              {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
-            </p>
-            <button :disabled="busy || !selectedWeapon || !selectedTargetId || !selectedWeaponRange?.usable" @click="stageAttack"><NIcon :component="FlashOutline" />{{ copy.attack }}</button>
-          </section>
+        <ActionDock
+          v-if="isOwnTurn && actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
+          :active-tab="dockTab"
+          :own="ownToken"
+          :hp-label="copy.hp"
+          :tabs="dockTabs"
+          :dock-label="copy.actionDock"
+          @update:active-tab="selectDockTab"
+        >
+          <template #tab-icon-action><NIcon :component="FlashOutline" /></template>
+          <template #tab-icon-bonus><NIcon :component="SparklesOutline" /></template>
+          <template #tab-icon-move><NIcon :component="FootstepsOutline" /></template>
+          <template #tab-icon-reaction><NIcon :component="ShieldOutline" /></template>
 
-          <section v-if="capabilityActions.length || currentClassResources.length" class="action-card capability-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.classFeatures }}</h3>
+          <template #identity>
             <div v-if="currentClassResources.length" class="class-resource-strip">
               <span v-for="resource in currentClassResources" :key="resource.id">
                 <small>{{ resource.name }}</small>
                 <strong>{{ resource.current }} / {{ resource.maximum }}</strong>
               </span>
             </div>
-            <template v-if="capabilityActions.length">
-              <label v-if="capabilityTargets.length">{{ copy.target }}
+          </template>
+
+          <template #options>
+            <p v-if="dockTab === 'reaction'" class="dock-hint">{{ copy.reactionHint }}</p>
+            <p v-else-if="!dockMode" class="dock-hint">{{ visibleTileCount ? copy.chooseModeHint : copy.noActionInTab }}</p>
+
+            <div v-if="dockMode === 'attack' && attackAction" class="mode-panel" data-mode="attack">
+              <label>{{ copy.weapon }}
+                <select v-model="selectedWeaponId">
+                  <option
+                    v-for="weaponItem in attackAction.weapons"
+                    :key="weaponItem.weapon_ref || weaponItem.id"
+                    :value="weaponItem.weapon_ref || weaponItem.id"
+                    :disabled="!weaponRangeState(weaponItem, selectedTargetId).usable"
+                  >
+                    {{ weaponItem.name || weaponItem.id }} · {{ weaponItem.damage }} {{ localizedTerm(weaponItem.damage_type) }} · {{ weaponRangeLabel(weaponItem) }}
+                  </option>
+                </select>
+              </label>
+              <label>{{ copy.target }}
+                <select v-model="selectedTargetId">
+                  <option v-for="targetItem in attackAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                    {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                  </option>
+                </select>
+              </label>
+              <p v-if="selectedTargetId" :class="['range-guide', { blocked: !hasUsableWeapon }]">
+                {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
+                {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
+              </p>
+            </div>
+
+            <div v-if="dockMode === 'spell'" class="mode-panel" data-mode="spell" data-testid="combat-spell-card">
+              <template v-if="spellAction && spellChoices.length">
+                <label>{{ copy.spell }}
+                  <select v-model="selectedSpellRef">
+                    <option v-for="spellItem in spellChoices" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
+                      {{ spellItem.name }} · {{ spellItem.trigger_target_id ? copy.bonus : localizedTerm(spellItem.casting_time) }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="selectedSpell?.level">{{ copy.slot }}
+                  <select v-model.number="selectedSlot">
+                    <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
+                  </select>
+                </label>
+                <label v-if="spellTargetLimit > 1">{{ copy.targetCount }}
+                  <select v-model.number="selectedSpellTargetCount">
+                    <option v-for="count in spellTargetLimit" :key="count" :value="count">{{ count }}</option>
+                  </select>
+                </label>
+                <label v-for="(_entry, index) in selectedSpellTargets" :key="index">
+                  {{ copy.target }}{{ selectedSpellTargets.length > 1 ? ` ${index + 1}` : '' }}
+                  <select v-model="selectedSpellTargets[index]">
+                    <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                      {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                    </option>
+                  </select>
+                </label>
+                <label v-if="selectedSpell?.resist_choice?.length">{{ copy.resistType }}
+                  <select v-model="selectedResistType">
+                    <option v-for="kind in selectedSpell.resist_choice" :key="kind" :value="kind">{{ localizedTerm(kind) }}</option>
+                  </select>
+                </label>
+                <label v-if="selectedSpell?.mode === 'teleport'">{{ copy.teleportDistance }}
+                  <input v-model.number="teleportDistance" type="number" step="5" />
+                </label>
+              </template>
+              <SpellAvailability :spells="spellActor?.spells || []" />
+            </div>
+
+            <div v-if="dockMode === 'capability'" class="mode-panel" data-mode="capability">
+              <div v-if="capabilityActions.length" class="capability-list" role="group" :aria-label="copy.capabilityChoice">
+                <button
+                  v-for="capability in capabilityActions"
+                  :key="capability.capability_id"
+                  type="button"
+                  :class="{ active: capability.capability_id === selectedCapabilityId }"
+                  :aria-pressed="capability.capability_id === selectedCapabilityId"
+                  @click="selectedCapabilityId = capability.capability_id || ''"
+                >
+                  <span class="capability-button-label">{{ capability.label }}</span>
+                  <small class="capability-button-cost">{{ capabilityCostLabel(capability) }}</small>
+                </button>
+              </div>
+              <p v-else class="range-guide">{{ copy.noCapabilityAvailable }}</p>
+              <label v-if="selectedCapability?.requires_target && capabilityTargets.length">{{ copy.target }}
                 <select v-model="capabilityTargetId">
                   <option v-for="targetItem in capabilityTargets" :key="targetItem.actor_id" :value="targetItem.actor_id">
                     {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
                   </option>
                 </select>
               </label>
-              <p v-else-if="capabilityActions.some(item => item.requires_target)" class="range-guide blocked">
-                {{ copy.noCapabilityTarget }}
-              </p>
-              <button
-                v-for="capability in capabilityActions"
-                :key="capability.capability_id"
-                :disabled="busy || (capability.requires_target && !capabilityTargetId)"
-                @click="stageCapability(capability)"
-              >
-                <NIcon :component="SparklesOutline" />
-                <span class="capability-button-label">{{ capability.label }}</span>
-                <small class="capability-button-cost">{{ capabilityCostLabel(capability) }}</small>
-              </button>
+              <p v-else-if="selectedCapability?.requires_target" class="range-guide blocked">{{ copy.noCapabilityTarget }}</p>
+            </div>
+
+            <div v-if="dockMode === 'explore' && explorationAction" class="mode-panel" data-mode="explore">
+              <label>{{ copy.spell }}
+                <select v-model="explorationSpellRef">
+                  <option v-for="spellItem in explorationAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
+                    {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="explorationSpell?.level">{{ copy.slot }}
+                <select v-model.number="explorationSlot">
+                  <option v-for="level in explorationSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
+                </select>
+              </label>
+              <label>{{ copy.target }}
+                <select v-model="explorationTargetId">
+                  <option v-for="targetItem in explorationAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
+                    {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div v-if="dockMode === 'move' && moveAction" class="mode-panel" data-mode="move">
+              <p class="dock-hint">{{ copy.moveHint }}</p>
+              <label>{{ copy.move }}
+                <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
+                <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
+              </label>
+            </div>
+          </template>
+
+          <template #tiles>
+            <template v-if="dockTab === 'action'">
+              <ActionTile v-if="attackAction" :label="copy.attack" :hint="selectedWeapon?.name || selectedWeapon?.id" :active="dockMode === 'attack'" data-tile="attack" @click="openDockMode('attack')">
+                <template #icon><NIcon :component="FlashOutline" /></template>
+              </ActionTile>
             </template>
-            <p v-else class="range-guide">{{ copy.noCapabilityAvailable }}</p>
-          </section>
-
-          <section v-if="spellAction || spellActor?.spells?.length" class="action-card" data-testid="combat-spell-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.action }} / {{ copy.bonus }} · {{ copy.cast }}</h3>
-            <template v-if="spellAction">
-            <label>{{ copy.spell }}
-              <select v-model="selectedSpellRef">
-                <option v-for="spellItem in spellAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
-                  {{ spellItem.name }} · {{ spellItem.trigger_target_id ? copy.bonus : localizedTerm(spellItem.casting_time) }}
-                </option>
-              </select>
-            </label>
-            <label v-if="selectedSpell?.level">{{ copy.slot }}
-              <select v-model.number="selectedSlot">
-                <option v-for="level in selectedSpell.available_slot_levels" :key="level" :value="level">{{ level === 0 ? spellText.free : level }}</option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="selectedSpellTargetId">
-                <option v-for="targetItem in targetsFor(selectedSpell)" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <button :disabled="busy || !selectedSpell || !selectedTarget" @click="stageSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
+            <ActionTile v-if="showSpellTile" :label="copy.cast" :active="dockMode === 'spell'" data-tile="spell" @click="openDockMode('spell')">
+              <template #icon><NIcon :component="SparklesOutline" /></template>
+            </ActionTile>
+            <template v-if="dockTab === 'action'">
+              <ActionTile v-if="capabilityActions.length || currentClassResources.length" :label="copy.classAbilities" :active="dockMode === 'capability'" data-tile="capability" @click="openDockMode('capability')">
+                <template #icon><NIcon :component="RibbonOutline" /></template>
+              </ActionTile>
+              <ActionTile v-if="explorationAction" :label="copy.explorationCast" :active="dockMode === 'explore'" data-tile="explore" @click="openDockMode('explore')">
+                <template #icon><NIcon :component="SparklesOutline" /></template>
+              </ActionTile>
+              <ActionTile v-for="type in simpleActions" :key="type" :label="simpleLabel(type)" :disabled="busy" @click="stageSimple(type)">
+                <template #icon><NIcon :component="type === 'dodge' ? ShieldOutline : type === 'death_save' ? SparklesOutline : FootstepsOutline" /></template>
+              </ActionTile>
             </template>
-            <SpellAvailability :spells="spellActor?.spells || []" />
-          </section>
+            <ActionTile v-if="dockTab === 'move' && moveAction" :label="copy.move" :hint="`${moveAction.movement_remaining} ${copy.feet}`" :active="dockMode === 'move'" data-tile="move" @click="openDockMode('move')">
+              <template #icon><NIcon :component="FootstepsOutline" /></template>
+            </ActionTile>
+          </template>
 
-          <section v-if="explorationAction" class="action-card">
-            <h3><NIcon :component="SparklesOutline" />{{ copy.explorationCast }}</h3>
-            <label>{{ copy.spell }}
-              <select v-model="explorationSpellRef">
-                <option v-for="spellItem in explorationAction.spells" :key="spellItem.spell_ref" :value="spellItem.spell_ref">
-                  {{ spellItem.name }} · {{ localizedTerm(spellItem.casting_time) }}
-                </option>
-              </select>
-            </label>
-            <label v-if="explorationSpell?.level">
-              {{ copy.slot }}
-              <select v-model.number="explorationSlot">
-                <option v-for="level in explorationSpell.available_slot_levels" :key="level" :value="level">{{ level }}</option>
-              </select>
-            </label>
-            <label>{{ copy.target }}
-              <select v-model="explorationTargetId">
-                <option v-for="targetItem in explorationAction.targets" :key="targetItem.actor_id" :value="targetItem.actor_id">
-                  {{ targetItem.name }} · {{ targetItem.hp }}/{{ targetItem.max_hp }} HP
-                </option>
-              </select>
-            </label>
-            <button :disabled="busy || !explorationSpellRef || !explorationSlotValid" @click="stageExplorationSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
-          </section>
-
-          <section v-if="moveAction" class="action-card">
-            <h3><NIcon :component="FootstepsOutline" />{{ copy.movement }}</h3>
-            <label>{{ copy.move }}
-              <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
-              <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
-            </label>
-            <button :disabled="busy || !movementDistance" @click="stageMove"><NIcon :component="FootstepsOutline" />{{ copy.move }}</button>
-          </section>
-
-          <section class="action-card compact-actions">
-            <h3><NIcon :component="ShieldOutline" />{{ copy.economy }}</h3>
-            <button v-if="action('dash')" :disabled="busy" @click="stageSimple('dash')"><NIcon :component="FootstepsOutline" />{{ copy.dash }}</button>
-            <button v-if="action('dodge')" :disabled="busy" @click="stageSimple('dodge')"><NIcon :component="ShieldOutline" />{{ copy.dodge }}</button>
-            <button v-if="action('disengage')" :disabled="busy" @click="stageSimple('disengage')"><NIcon :component="FootstepsOutline" />{{ copy.disengage }}</button>
-            <button v-if="action('death_save')" :disabled="busy" @click="stageSimple('death_save')"><NIcon :component="SparklesOutline" />{{ copy.deathSave }}</button>
+          <template #summary>
+            <div v-if="dockMode" class="dock-target">
+              <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
+              <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
+              <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
+            </div>
+            <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
+              <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
+            </button>
             <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
-            <button v-if="action('end_turn')" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
-            <button v-if="action('combat.end')" class="danger" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
-          </section>
-          </div>
-        </section>
-        <p v-else class="combat-state">{{ waitingText }}</p>
+            <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
+            <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+          </template>
+        </ActionDock>
+        <template v-else>
+          <p class="combat-state">{{ waitingText }}</p>
+          <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+        </template>
 
         <section v-if="staged" ref="confirmCard" class="confirm-card" role="group" :aria-label="copy.confirm" tabindex="-1">
           <strong>{{ copy.confirm }}</strong>
@@ -1531,8 +1157,8 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 </template>
 
 <style scoped>
-.dnd-combat { display: grid; grid-auto-rows: max-content; align-content: start; gap: 14px; margin: 14px 0; padding: 16px; border: 1px solid #806339; border-radius: 16px; background: linear-gradient(145deg, rgb(23 20 19 / 96%), rgb(19 27 35 / 96%)); color: #f2eadc; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
-.combat-header, .actor-card header, .decision-card, .confirm-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dnd-combat { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; gap: 14px; margin: 14px 0; padding: 16px; border: 1px solid #806339; border-radius: 16px; background: linear-gradient(145deg, rgb(23 20 19 / 96%), rgb(19 27 35 / 96%)); color: #f2eadc; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
+.combat-header, .decision-card, .confirm-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .combat-header h2 { margin: 2px 0 0; font: 700 clamp(19px, 2vw, 25px)/1.2 Georgia, serif; }
 .eyebrow { margin: 0; color: #d7b873; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .preset-description, .combat-state { margin: 0; color: #bcb5aa; font-size: 13px; }
@@ -1540,109 +1166,35 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .combat-rules-note summary { width: max-content; cursor: pointer; color: #d7b873; }
 .combat-rules-note p { margin: 7px 0 0; line-height: 1.5; }
 .combat-error { margin: 0; padding: 9px 11px; border: 1px solid #b85151; border-radius: 9px; background: rgb(115 28 28 / 25%); color: #ffd6d6; }
-.story-bridge { display: grid; gap: 8px; padding: 14px; border: 1px solid #a17b3f; border-radius: 12px; background: linear-gradient(135deg, rgb(91 62 26 / 42%), rgb(27 30 34 / 88%)); }
-.story-bridge-label { color: #f0c975; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.story-bridge h3, .story-bridge p { margin: 0; }
-.story-bridge p { color: #e3d9c6; line-height: 1.6; }
-.story-bridge aside { padding: 9px 11px; border-left: 3px solid #d5a64f; background: rgb(14 20 24 / 56%); color: #f2e6cf; line-height: 1.55; }
-.guided-preset { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid #a17b3f; border-radius: 10px; background: rgb(91 62 26 / 24%); }.guided-preset span, .guided-preset small { color: #f0c975; font-size: 12px; }.guided-preset strong { font-size: 17px; }.guided-preset p { margin: 0; color: #e3d9c6; line-height: 1.5; }
-.guided-preset.unprepared { border-color: #b0803c; background: rgb(70 48 20 / 34%); }
-.guided-preset.unprepared strong { color: #f4d9a4; }
-.unprepared-actions { display: flex; column-gap: 14px; row-gap: 10px; flex-wrap: wrap; margin-top: 8px; }
-.unprepared-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 7px 12px; }
-.ai-encounter-preview { border-color: #6d6f4a; background: rgb(52 56 24 / 28%); }
-.ai-encounter-summary { display: flex; gap: 8px 14px; flex-wrap: wrap; margin: 2px 0; padding: 0; list-style: none; }
-.ai-encounter-summary li { padding: 4px 10px; border: 1px solid #6d5a35; border-radius: 999px; color: #f0d79c; background: rgb(14 20 24 / 42%); font-size: 13px; }
-.ai-encounter-enemies { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.ai-encounter-enemies li { display: grid; gap: 7px; padding: 8px 10px; border: 1px solid #6d5a35; border-radius: 9px; background: rgb(14 20 24 / 42%); }
-.ai-draft-head { display: flex; align-items: center; gap: 8px; }
-.ai-draft-head input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; accent-color: #c59443; }
-.ai-draft-toggle { display: inline-flex; flex: 1; align-items: center; gap: 8px; min-width: 0; min-height: 34px; padding: 4px 10px; border: 1px solid #4a5560; border-radius: 8px; color: #f3eee7; background: #0d1319; font-size: 13px; text-align: left; cursor: pointer; }
-.ai-draft-toggle small { margin-left: auto; color: #cfc6b4; font-size: 11px; }
-.ai-draft-chevron { transition: transform .15s ease; }
-.ai-draft-chevron.open { transform: rotate(180deg); }
-.ai-draft-quantity { display: inline-flex; align-items: center; gap: 6px; color: #cfc6b4; font-size: 11px; }
-.ai-draft-quantity input { width: 64px; min-height: 34px; padding-inline: 8px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
-.ai-draft-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
-.ai-draft-fields label, .ai-draft-attack label { display: grid; gap: 3px; color: #cfc6b4; font-size: 11px; }
-.ai-draft-fields input, .ai-draft-attack input { min-height: 34px; padding-inline: 8px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
-.ai-draft-attack { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; align-items: end; padding: 7px 8px; border: 1px dashed #6d5a35; border-radius: 8px; }
-.ai-draft-attack button { min-height: 34px; padding: 4px 10px; font-size: 12px; color: #e8b7a9; }
-.ai-draft-add-attack { display: inline-flex; align-items: center; justify-content: center; gap: 6px; justify-self: start; min-height: 34px; padding: 4px 10px; font-size: 12px; }
-.encounter-source { color: #d9cba6; font-size: 11px; }
 .combat-header-tools { display: flex; align-items: center; gap: 9px; }
 .combat-mode-badge { padding: 3px 9px; border: 1px solid #6d5a35; border-radius: 999px; color: #f0d79c; background: rgb(64 46 20 / 55%); font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
 .combat-mode-badge.sandbox { border-color: #46626f; color: #bcd8e6; background: rgb(20 44 56 / 55%); }
-.combat-warning { margin: 0; padding: 9px 11px; border: 1px solid #b0803c; border-radius: 9px; background: rgb(70 48 20 / 34%); color: #f2d9a8; font-size: 13px; line-height: 1.5; }
-.encounter-alternatives { margin-top: 5px; }
-.encounter-alternatives summary { color: #d5c5aa; cursor: pointer; font-size: 12px; }
-.encounter-alternatives label { margin-top: 8px; }
-.party-readiness { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid #46525d; border-radius: 11px; background: rgb(14 21 28 / 72%); }
-.party-readiness header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.party-readiness header span { color: #b9c3ca; font-size: 12px; }
-.party-readiness ul { display: flex; gap: 7px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
-.party-readiness li { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #55464a; border-radius: 999px; color: #d6b9bb; background: #271d21; font-size: 12px; }
-.party-readiness li.ready { border-color: #56745b; color: #c7e3ca; background: #18271d; }
-.party-readiness li strong { font-size: 11px; }
-.party-readiness button, .combat-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.encounter-ended, .next-encounter-picker { display: grid; gap: 9px; }
-.encounter-ended { padding: 13px; border: 1px solid #56745b; border-radius: 11px; background: rgb(24 45 29 / 68%); }
-.encounter-ended > strong { color: #d2ebd3; font-size: 16px; }
-.encounter-ended > p { margin: 0; color: #c5d5c6; line-height: 1.55; }
-.encounter-ended-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.encounter-ended-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-.next-encounter-picker { margin-top: 4px; padding-top: 11px; border-top: 1px solid rgb(174 211 178 / 24%); }
-.turn-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 76px; padding: 13px 16px; border: 1px solid #4b6575; border-radius: 12px; background: linear-gradient(135deg, #173142, #111a22); }
-.turn-banner.enemy { border-color: #78484b; background: linear-gradient(135deg, #452326, #17181c); }
-.turn-banner div { display: grid; gap: 4px; }
-.turn-banner small { color: #9db7c6; font-size: 11px; text-transform: uppercase; }
-.turn-banner strong { font-size: 18px; }
-.turn-banner > span { color: #f4d48d; font: 700 clamp(19px, 3vw, 28px)/1.2 Georgia, serif; text-align: right; }
-.combat-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.combat-summary > span { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid #394551; border-radius: 10px; background: #151c23; }
-.combat-summary > span > .n-icon { flex: 0 0 auto; color: #e0b766; font-size: 20px; }
-.combat-summary i { display: grid; gap: 3px; min-width: 0; font-style: normal; }
-.combat-summary small { color: #9ca6ae; }
+.combat-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .turn-guide { margin: -4px 0 0; padding: 7px 10px; border-left: 3px solid #d2a855; color: #d9d1c4; background: rgb(80 58 23 / 24%); font-size: 12px; line-height: 1.5; }
-.initiative { display: flex; gap: 6px; min-height: 34px; margin: 0; padding: 0; overflow-x: auto; overflow-y: hidden; list-style: none; }
-.initiative li { display: inline-flex; align-items: center; gap: 6px; min-width: max-content; padding: 5px 9px 5px 6px; border: 1px solid #3b4650; border-radius: 999px; color: #aeb8c0; }
-.initiative li > span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: #26333d; font-size: 10px; }
-.initiative li.enemy > span { background: #522a2d; }
-.initiative li.current { border-color: #d2a855; background: #362b19; color: #ffe5a8; }
-.tactical-track { display: grid; gap: 7px; padding: 11px; border: 1px solid #3b4650; border-radius: 12px; background: #0e151c; }
-.tactical-track > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.tactical-track > header span { color: #aeb8c0; font-size: 12px; }
-.track-surface { width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: stable; }
-.track-canvas { position: relative; width: 100%; }
-.track-cells { display: grid; width: 100%; }
-.track-cells button { min-width: 34px; min-height: 34px; padding: 0; border-radius: 0; border-color: #35414b; color: #89949c; background: #151e26; font-size: 10px; }
-.track-cells button.reachable { border-color: #97783d; color: #f0cf8b; background: #2c261b; cursor: pointer; }
-.track-cells button.selected { border-color: #e4b75e; background: #5c421d; box-shadow: inset 0 0 0 2px #e4b75e; }
-.track-cells button:disabled { opacity: 1; cursor: default; }
-.track-token { position: absolute; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; transform: translateX(-50%); border: 2px solid #6ba2be; border-radius: 50%; background: #173347; color: #eef9ff; font-size: 10px; font-weight: 800; box-shadow: 0 4px 9px rgb(0 0 0 / 38%); }
-.track-token.enemy { border-color: #c56b6b; background: #55292b; }
-.track-token.current { outline: 3px solid #e4b75e; outline-offset: 2px; }
-.actor-grid, .combat-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.actor-card, .action-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #3b4650; border-radius: 12px; background: #111820; }
-.actor-card.enemy { border-color: #664446; }
-.actor-card.current { border-color: #d2a855; box-shadow: inset 0 0 0 1px rgb(210 168 85 / 34%); }
-.actor-card.defeated { opacity: .62; }
-.actor-card p, .action-card h3 { margin: 0; }
-.action-card h3, .action-card button { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.action-card h3 { justify-content: flex-start; }
-.available-actions { display: grid; gap: 9px; }
-.available-actions > h3 { margin: 0; color: #f0cf8b; font-size: 14px; }
+.battlefield { display: grid; gap: 6px; }
+.battlefield-body { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 10px; align-items: start; }
+.dock-hint { margin: 0; color: #8fa0ac; font-size: 12px; line-height: 1.5; }
+.mode-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; align-items: end; padding: 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.mode-panel > .range-guide, .mode-panel > .dock-hint, .mode-panel > .class-resource-strip, .mode-panel > .capability-list { grid-column: 1 / -1; }
+.mode-panel label { display: grid; gap: 4px; color: #aebcc6; font-size: 12px; }
+.mode-panel select, .mode-panel input { width: 100%; min-height: 40px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
+.capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
+.capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
+.dock-target { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.dock-target span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.dock-target small { color: #9aa9b4; }
+.dock-target b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.dock-confirm, .dock-end { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; border-radius: 12px; font-weight: 700; cursor: pointer; }
+.dock-confirm { border: 1px solid #e4b75e; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; box-shadow: 0 0 14px rgb(228 183 94 / 25%); }
+.dock-confirm:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; box-shadow: none; cursor: not-allowed; }
+.dock-end { border: 1px solid rgb(120 150 175 / 45%); background: linear-gradient(180deg, #1f3347, #131f2c); color: #e8eef2; }
+.dock-end.danger { border-color: #9d4a4f; background: linear-gradient(180deg, #4a1f24, #2a1013); }
+@media (max-width: 960px) { .battlefield-body { grid-template-columns: minmax(0, 1fr); } }
+.battlefield-hint { margin: 0; color: #8fa0ac; font-size: 12px; }
 .range-guide { margin: 0; color: #b8d7bc; font-size: 12px; line-height: 1.5; }
 .range-guide.blocked { color: #f0b3a7; }
-.actor-card small { color: #c5aa83; }
-.hp-track { height: 6px; overflow: hidden; border-radius: 999px; background: #3a3030; }
-.hp-track i { display: block; height: 100%; background: linear-gradient(90deg, #8d3030, #d77055); }
-.action-card label, .encounter-start label { display: grid; gap: 5px; color: #c8c2b8; font-size: 12px; }
 button, select, input { min-height: 44px; font: inherit; }
-.action-card select, .action-card input, .encounter-start select { width: 100%; min-height: 44px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
-.compact-actions { align-content: start; }
-.capability-card { align-content: start; }
-.capability-card > button { justify-content: flex-start; flex-wrap: wrap; row-gap: 2px; text-align: left; }
 .capability-button-label { font-weight: 700; }
 .capability-button-cost { width: 100%; color: #c8c2b8; font-size: 11px; }
 .class-resource-strip { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1660,35 +1212,13 @@ button, select, input { min-height: 44px; font: inherit; }
 .resolution-log li { padding: 4px 8px; border-radius: 7px; background: #202b34; color: #cdd7df; font-size: 12px; }
 button:focus-visible, select:focus-visible, input:focus-visible, .confirm-card:focus-visible { outline: 3px solid #e4b75e; outline-offset: 2px; }
 :global(body.light .dnd-combat) { border-color: #9b743a; background: linear-gradient(145deg, #fffaf0, #f1f6f7); color: #27231e; box-shadow: 0 14px 34px rgb(76 59 29 / 12%); }
-:global(body.light .dnd-combat .story-bridge) { border-color: #aa8546; background: #fff7e7; }
-:global(body.light .dnd-combat .story-bridge p), :global(body.light .dnd-combat .story-bridge aside) { color: #403728; }
-:global(body.light .dnd-combat .actor-card), :global(body.light .dnd-combat .action-card), :global(body.light .dnd-combat .combat-summary span) { border-color: #b8b2a6; background: #fff; }
-:global(body.light .dnd-combat .tactical-track) { border-color: #b8b2a6; background: #f7f9fa; }
-:global(body.light .dnd-combat .action-card select), :global(body.light .dnd-combat .action-card input), :global(body.light .dnd-combat .encounter-start select) { border-color: #908779; background: #fff; color: #211e1a; }
-:global(body.light .dnd-combat .class-resource-strip > span) { border-color: #b8b2a6; background: #fff; }
-:global(body.light .dnd-combat .capability-button-cost) { color: #514b43; }
-:global(body.light .dnd-combat .turn-banner) { border-color: #8ca4b0; background: linear-gradient(135deg, #edf6fa, #fff); }
-:global(body.light .dnd-combat .turn-banner.enemy) { border-color: #c59b9b; background: linear-gradient(135deg, #fff0ef, #fff); }
-:global(body.light .dnd-combat .turn-banner small), :global(body.light .dnd-combat .combat-rules-note), :global(body.light .dnd-combat .preset-description), :global(body.light .dnd-combat .combat-state), :global(body.light .dnd-combat .combat-summary small) { color: #514b43; }
+:global(body.light .dnd-combat .combat-rules-note), :global(body.light .dnd-combat .preset-description), :global(body.light .dnd-combat .combat-state), :global(body.light .dnd-combat .combat-summary small) { color: #514b43; }
 :global(body.light .dnd-combat .resolution-log li) { background: #e8eef0; color: #27383e; }
-:global(body.light .dnd-combat .guided-preset) { border-color: #b08a44; background: #fdf5e6; }
-:global(body.light .dnd-combat .guided-preset p), :global(body.light .dnd-combat .guided-preset strong) { color: #3b3226; }
-:global(body.light .dnd-combat .guided-preset.unprepared), :global(body.light .dnd-combat .combat-warning) { border-color: #b0803c; background: #fdf3de; }
-:global(body.light .dnd-combat .ai-draft-head input[type="text"]), :global(body.light .dnd-combat .ai-draft-fields input), :global(body.light .dnd-combat .ai-draft-attack input), :global(body.light .dnd-combat .ai-draft-quantity input) { border-color: #b08a44; background: #fffaf0; color: #3b3226; }
-:global(body.light .dnd-combat .ai-draft-fields label), :global(body.light .dnd-combat .ai-draft-attack label), :global(body.light .dnd-combat .ai-draft-quantity) { color: #514b43; }
 :global(body.light .dnd-combat .combat-mode-badge) { border-color: #ad8a4b; background: #f6ecd6; color: #4b3a1c; }
 :global(body.light .dnd-combat .combat-mode-badge.sandbox) { border-color: #8ba7b5; background: #eaf3f7; color: #26414d; }
 @media (max-width: 700px) {
   .dnd-combat { gap: 10px; margin-inline: 0; padding: 10px; border-radius: 12px; }
-  .combat-summary { display: flex; gap: 7px; padding-bottom: 3px; overflow-x: auto; scroll-snap-type: x proximity; }
-  .combat-summary > span { flex: 0 0 134px; scroll-snap-align: start; }
-  .actor-grid, .combat-actions { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; }
-  .actor-card, .action-card { flex: 0 0 min(82vw, 280px); scroll-snap-align: start; }
   .combat-header, .decision-card, .confirm-card { align-items: stretch; flex-direction: column; }
-  .turn-banner { align-items: flex-start; flex-direction: column; }
-  .turn-banner > span { text-align: left; }
-  .tactical-track > header, .party-readiness header { align-items: flex-start; flex-direction: column; }
-  .story-bridge, .guided-preset { padding: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

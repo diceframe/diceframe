@@ -31,6 +31,7 @@ from src.engine.modules import (
 )
 from src.engine.action_gate import (
     ACTOR_DECEASED,
+    ADVENTURE_ENDED,
     ECONOMY_DECISION_PENDING,
     HUMAN_FREE_TEXT_POST_RETRY_POLICY,
     HUMAN_FREE_TEXT_PRE_RETRY_POLICY,
@@ -216,6 +217,11 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
     if code == ROUND_PROCESSING:
         return _result({
             "error": "本轮正在推进剧情，请等待下一轮开始", "phase": "processing", "error_code": code,
+        }, 409)
+    if code == ADVENTURE_ENDED:
+        return _result({
+            "ok": False, "error_code": code, "phase": "ended",
+            "error": "故事已经抵达结局，不能再提交行动",
         }, 409)
     return _result({"ok": False, "error_code": code, "error": code}, 409)
 
@@ -445,6 +451,10 @@ async def _settle_adventure_completion(
         return
     if run_changed is not None and run_changed():
         return
+    # The round that just committed.  Read it before awaiting: settlement runs
+    # the transition narration call after confirming, and another request can
+    # start the next round meanwhile.
+    committed_round = int(progression_state.round_value(instance)) - 1
     try:
         settlement = await settle(instance)
     except Exception:
@@ -463,10 +473,9 @@ async def _settle_adventure_completion(
         )
         return
     transition = str(settlement.get("transition_narration") or "")
-    latest_round = int(progression_state.round_value(instance)) - 1
     if transition:
         for entry in reversed(instance.log):
-            if not (isinstance(entry, dict) and int(entry.get("round") or 0) == latest_round):
+            if not (isinstance(entry, dict) and int(entry.get("round") or 0) == committed_round):
                 continue
             changes = entry.setdefault("state_changes", [])
             if isinstance(changes, list):

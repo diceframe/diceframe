@@ -105,6 +105,7 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
   'ruleset.intent': [
     'intent_id', 'type', 'expected_version', 'actor_id', 'target_id', 'target_ids',
     'weapon_ref', 'attack_id', 'spell_ref', 'slot_level', 'damage_type', 'distance',
+    'resist_type', 'teleport_distance',
     'decision_id', 'option', 'response', 'comment', 'choice_id', 'enabled', 'text',
     'agreement', 'kind', 'visibility', 'entity_id', 'title', 'summary',
     'proposal_id', 'mode', 'adventure_id',

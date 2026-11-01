@@ -21,6 +21,7 @@ ACTOR_DECEASED = "ACTOR_DECEASED"
 STRUCTURED_INTENT_REQUIRED = "STRUCTURED_INTENT_REQUIRED"
 ECONOMY_DECISION_PENDING = "ECONOMY_DECISION_PENDING"
 ROUND_PROCESSING = "ROUND_PROCESSING"
+ADVENTURE_ENDED = "ADVENTURE_ENDED"
 
 RUN_CHANGED = "run_changed"
 ROUND_CHANGED = "round_changed"
@@ -90,6 +91,12 @@ def check_not_judging(instance: Any, req: GateRequest) -> str:
     return ROUND_PROCESSING if instance.state == GameState.ACTIVE_JUDGMENT else ""
 
 
+def check_advancement_open(instance: Any, req: GateRequest) -> str:
+    # A scene run that reached its ending opens no further advance; refuse the
+    # action here instead of queueing it and failing when the round would open.
+    return ADVENTURE_ENDED if progression.advancement_ended(instance) else ""
+
+
 def check_run_unchanged(instance: Any, req: GateRequest) -> str:
     if req.expected_run_id is None:
         return ""
@@ -144,6 +151,7 @@ HUMAN_FREE_TEXT_PRE_RETRY_POLICY: tuple[Check, ...] = (
 HUMAN_FREE_TEXT_POST_RETRY_POLICY: tuple[Check, ...] = (
     check_economy,
     check_not_judging,
+    check_advancement_open,
 )
 HUMAN_FREE_TEXT_POLICY: tuple[Check, ...] = (
     HUMAN_FREE_TEXT_PRE_RETRY_POLICY + HUMAN_FREE_TEXT_POST_RETRY_POLICY
@@ -154,6 +162,7 @@ AI_SEAT_STALE_POLICY: tuple[Check, ...] = (
     check_seat_present,
     check_ai_control_current,
     check_phase_active_action,
+    check_advancement_open,
 )
 # The aggregate keeps its public stale-reason facade as the prefix entry point.
 # Both segments run synchronously under the same authority/state lock boundary.

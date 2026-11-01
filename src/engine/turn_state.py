@@ -24,11 +24,18 @@ from __future__ import annotations
 from src.engine.modules import game_config
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.engine.contracts import ActionRecord
+from src.engine.action_gate import (
+    AI_SEAT_COMMIT_POLICY,
+    GateRequest,
+    SOURCE_AI_SEAT,
+    StructuredIntentRequirement,
+    evaluate,
+)
 from src.engine import module_hooks, progression
 from src.engine.game_state import GameState
 from src.engine.modules import progression_state, room_access
@@ -212,6 +219,86 @@ def ai_player_action_stale_reason(
         ),
         AI_SEAT_STALE_POLICY,
     )
+
+
+def commit_ai_player_action_locked(
+    instance: GameInstance,
+    user_id: str,
+    action_text: str,
+    *,
+    source: str,
+    expected_run_id: str,
+    expected_round_number: int,
+    expected_control_revision: int,
+    action_metadata: dict | None = None,
+    requires_structured_intent: StructuredIntentRequirement = False,
+    admission_check: Callable[[], str] | None = None,
+    evaluate_fn: Callable[..., str] = evaluate,
+    policy: Any = AI_SEAT_COMMIT_POLICY,
+) -> str:
+    """Re-confirm a hosted seat and commit its action while ``instance._lock`` is held.
+
+    The aggregate remains the lock/authority owner and the public facade keeps
+    the injectable ``GameInstance`` seams used by existing callers and tests.
+
+    The LLM call deliberately happens *outside* every lock; the danger is that
+    the world moves between "the model answered" and "we write the answer".
+    So the re-confirmation and the write are one boundary: every identity the
+    caller captured (run, round, seat, control mode, control revision, phase)
+    is re-checked, then that the **human gate is still open** and that this
+    round has no action from ``source`` yet, and only then the action lands.
+
+    The human gate matters on its own: a hosted seat only ever acts *after*
+    the humans are done. If somebody claims another seat (or a player returns
+    from away) while this result was in flight, the table suddenly has an
+    active human who has not submitted yet, and an action written now would
+    break "AI acts after the humans" — so it is discarded instead.
+
+    Returns ``""`` on commit, otherwise the reason the result was dropped
+    (``run_changed`` / ``round_changed`` / ``seat_removed`` /
+    ``control_changed`` / ``phase_changed`` / ``human_gate_changed`` /
+    ``duplicate`` / ``STRUCTURED_INTENT_REQUIRED`` / ``action_rejected``).
+    Callers must treat a non-empty result as "write nothing".
+    """
+    stale = instance.ai_player_action_stale_reason(
+        user_id,
+        expected_run_id=expected_run_id,
+        expected_round_number=expected_round_number,
+        expected_control_revision=expected_control_revision,
+    )
+    if stale:
+        return stale
+    if admission_check is not None:
+        code = admission_check()
+        if code:
+            return code
+    code = evaluate_fn(
+        instance,
+        GateRequest(
+            actor_uid=user_id,
+            source=SOURCE_AI_SEAT,
+            expected_run_id=expected_run_id,
+            expected_round_number=expected_round_number,
+            expected_control_revision=expected_control_revision,
+            action_source=source,
+            requires_structured_intent=requires_structured_intent,
+        ),
+        policy,
+    )
+    if code:
+        return code
+    from src.engine.modules import session_stats
+
+    progression.require_writable(instance)
+    session_stats.require_writable(instance)
+    added = instance._add_action_locked(
+        user_id,
+        action_text,
+        source=source,
+        action_metadata=action_metadata,
+        defer_out_of_phase=False,
+    )
+    return "" if added else "action_rejected"
 
 
 def has_pending_dice(instance: GameInstance, user_id: str | None = None) -> bool:
@@ -409,6 +496,58 @@ def set_player_away_locked(instance: GameInstance, user_id: str, away: bool) -> 
         instance.away_players.discard(user_id)
     session_stats.touch(instance)
     return True
+
+
+def apply_away_transition_locked(
+    instance: GameInstance,
+    user_id: str,
+    away: bool,
+    *,
+    policy: str,
+    control_change_block_fn: Any,
+    begin_away_hosting_fn: Any,
+    end_away_hosting_fn: Any,
+) -> str:
+    """Apply presence and temporary control handover in one held-lock boundary."""
+    handover = away and policy == "ai_takeover"
+    if handover or not away:
+        block = control_change_block_fn(instance)
+        if block:
+            return block
+    if not instance._set_player_away_locked(user_id, away):
+        return "UNKNOWN_PLAYER"
+    if handover:
+        begin_away_hosting_fn(instance, user_id)
+    elif not away:
+        # 只在席位确实是「临时托管」时归还；GM 永久交给 AI 的席位不会被抢回。
+        end_away_hosting_fn(instance, user_id)
+    return ""
+
+
+def apply_player_control_change_locked(
+    instance: GameInstance,
+    user_id: str,
+    mode: str,
+    *,
+    control_change_block_fn: Any,
+    set_control_fn: Any,
+    player_control_error_type: type[Exception],
+) -> str:
+    """Apply a GM control handover while the authority/state locks are held."""
+    block = control_change_block_fn(instance)
+    if block:
+        return block
+    if user_id not in instance.players:
+        return "UNKNOWN_PLAYER"
+    try:
+        set_control_fn(instance, user_id, mode)
+    except player_control_error_type:
+        logger.warning(
+            "拒绝托管切换: game_key=%s uid=%s mode=%s",
+            instance.game_key, user_id, mode, exc_info=True,
+        )
+        return "CONTROL_REJECTED"
+    return ""
 
 
 def do_advance_locked(instance: GameInstance) -> bool:

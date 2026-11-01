@@ -4,6 +4,14 @@ Player Direct Connect is intended for small groups that do not want to deploy a 
 
 DiceFrame Hub participates only in the brief connection handshake. It does not proxy game payloads or store campaign narration. Hosts should share link codes only with players they know and trust.
 
+## Join friends from the homepage
+
+The regular invitation link is the default way to join a friend. The host enters the play page, clicks “Invite friends”, and copies the generated invitation link. A guest can open that link directly or return to the homepage and paste it into “Join friends”. The QR code remains available for scanning in the DiceFrame app, or the regular link can be opened on a supported device.
+
+Regular invitation links usually contain game information in a form such as `#/join?game=...`. They enter the public Web play flow and keep the existing seat credentials, character identity binding, and access checks. Guests do not need to extract a room ID, player ID, or other fields from the link, and they do not need to configure a model. `DFP2-...` is an advanced direct-connect code and cannot be opened as a regular invitation link.
+
+Hosts should use the advanced path only when they need experimental client direct connect: from “Join friends” on the homepage, open “More connection methods” and choose “Start direct connect (experimental)”. This creates a temporary direct-connect room and codes to share. Direct-connect codes and regular invitation links have different purposes; the host must remain online and authoritative for a direct-connect room.
+
 ## Inviting existing characters and new players
 
 The direct-connect setup page shows the save's character seats. One click creates the room and generates every available P2P link code as a batch:

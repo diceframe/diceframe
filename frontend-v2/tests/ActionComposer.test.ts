@@ -88,6 +88,28 @@ describe('ActionComposer rollback refresh', () => {
     restored.unmount()
   })
 
+  it('pairs default suggestions with semantic icons and keeps generated text neutral and editable', async () => {
+    mockedApi.mockResolvedValue({})
+    const wrapper = mount(ActionComposer, { global: { plugins: [i18n] }, props: { gameKey: 'web|icons|bot', userId: 'player-1', detail: detail(false) } })
+    for (const icon of ['eye', 'compass', 'message-circle', 'swords']) {
+      expect(wrapper.find(`.quick-actions svg.lucide-${icon}`).attributes('aria-hidden')).toBe('true')
+    }
+    const observe = wrapper.findAll('.quick-actions button')[0]!
+    await observe.trigger('click')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(observe.text())
+    i18n.global.locale.value = 'en'
+    await flushPromises()
+    expect(wrapper.findAll('.quick-actions button').map(button => button.text())).toEqual(['look around', 'explore', 'talk', 'prepare for combat'])
+    await wrapper.setProps({ detail: { ...detail(false), quick_actions: ['Inspect the lock', 'Inspect the lock'] } })
+    expect(wrapper.findAll('.quick-actions svg.lucide-arrow-right')).toHaveLength(2)
+    await wrapper.findAll('.quick-actions button')[1]!.trigger('click')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Inspect the lock')
+    expect(mockedApi.mock.calls.filter(([, options]) => options?.method === 'POST')).toEqual([])
+    await wrapper.setProps({ disabled: true })
+    expect(wrapper.findAll('.quick-actions button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    wrapper.unmount()
+  })
+
   it('inherits the table visibility until the player chooses and keeps the input available', async () => {
     const wrapper = mount(ActionComposer, { global: { plugins: [i18n] }, props: { gameKey: 'web|room|bot', userId: 'player-1', detail: detail(false) } })
     expect(wrapper.findAll('.quick-actions button')).toHaveLength(4)

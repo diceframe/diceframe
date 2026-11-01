@@ -234,3 +234,51 @@ async def test_gal_creation_no_longer_refuses_adventure_binding(web_api):
     )
     assert rejected["error_code"] == "INCOMPATIBLE_ADVENTURE"
     assert {item.game_key for item in registry.list_all()} == before
+
+
+# ---- 结局后的行动入口 ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ended_scene_refuses_player_action_before_it_enters_any_queue(web_api):
+    """Settlement confirms the ending after the next advance was already opened.
+
+    The table therefore sits in ACTIVE_ACTION with a reached ending.  A player
+    submission must be refused at admission: nothing enters action_queue /
+    pending_actions and no narrator round runs.
+    """
+
+    import json
+
+    from src.engine.game_instance import GameState
+
+    api, _lorebook, registry, fake_llm, _worlds_dir = web_api
+    (api._rules_dir / "gal_narrative.json").write_text(
+        json.dumps({
+            "rule_id": "gal_narrative",
+            "rule_name": "GAL",
+            "dice_system": "none",
+            "mechanics": "narrative_only",
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    created = await api.create_game(
+        "template_world", "GAL ended", rule_id="gal_narrative", play_mode="gal",
+        solo=True, players=[{"character_name": "叙事者", "attributes": {}}],
+    )
+    assert created.get("ok"), created
+    inst = registry.get(api._parse_key(created["game_key"]))
+    actor_uid = next(iter(inst.players))
+    reach_ending(inst)
+    assert inst.state == GameState.ACTIVE_ACTION
+    round_before = progression_state.round_value(inst)
+    calls_before = len(fake_llm.calls)
+
+    result = await api.submit_action(created["game_key"], actor_uid, "我还想继续聊")
+
+    assert result["status"] == 409, result
+    assert result["payload"]["error_code"] == "ADVENTURE_ENDED"
+    assert inst.action_queue == [] and inst.pending_actions == []
+    assert inst.state == GameState.ACTIVE_ACTION
+    assert progression_state.round_value(inst) == round_before
+    assert len(fake_llm.calls) == calls_before

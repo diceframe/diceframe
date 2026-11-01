@@ -528,3 +528,26 @@ def test_structured_context_preserves_auth_gm_and_effective_requester(uid, gm, g
         assert result[-1] is None
         assert result[-2] == (gm_uid if gm else uid)
     assert instance.to_dict() == before
+
+
+@pytest.mark.parametrize("mode, ended, expected", [
+    ("scene", True, "ADVENTURE_ENDED"),
+    ("scene", False, ""),
+    ("narrative_round", True, ""),  # a frozen adventure never stops a tabletop round
+])
+def test_ended_scene_is_refused_by_human_and_hosted_seat_admission(mode, ended, expected) -> None:
+    from src.engine.modules import adventure_runtime_state, progression_state
+
+    instance = instance_with_seats()
+    progression_state.set_mode(instance, mode)
+    if ended:
+        adventure_runtime_state.replace_progress(instance, {
+            "schema_version": 1, "active_nodes": [], "completed_nodes": ["finale"],
+            "history": [], "ending_node_id": "finale",
+        })
+    set_control(instance, "actor", "ai")
+    before = deepcopy(instance.to_dict())
+    human = gate.GateRequest("human", gate.SOURCE_HUMAN, economy_blocked=Mock(return_value=False))
+    assert gate.evaluate(instance, human, gate.HUMAN_FREE_TEXT_POLICY) == expected
+    assert gate.evaluate(instance, ai_request(instance), gate.AI_SEAT_STALE_POLICY) == expected
+    assert instance.to_dict() == before

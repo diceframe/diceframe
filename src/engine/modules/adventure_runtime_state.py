@@ -12,7 +12,7 @@ has done with that binding:
 - ``play_mode``: a gameplay mode id from ``src.gameplays`` chosen at creation.
   An empty or unknown value is derived from the binding when a save is
   decoded, exactly as the codec did when the field lived at the top level.
-  This slot only stores the id (transitional location, ADR-0012); the modes
+  This slot only stores the id (transitional location, ADR-0013); the modes
   themselves, their bot surface and creation rules belong to the gameplay
   registry.
 
@@ -224,6 +224,18 @@ def normalize_decoded_play_mode(instance: Any) -> None:
     if not isinstance(slot, dict) or slot.get("schema_version") != SCHEMA_VERSION:
         return
     slot["play_mode"] = derive_play_mode(slot.get("play_mode"), getattr(instance, "adventure_binding", None))
+
+
+def peek_play_mode(instance: Any) -> str:
+    """Effective play mode without repairing or materializing the slot.
+
+    A missing, corrupt or unknown-schema slot reads as an empty stored value,
+    so the decode-time derivation from the Adventure binding applies.
+    """
+    modules = getattr(instance, "modules", None)
+    slot = modules.get(MODULE_NAME) if isinstance(modules, dict) else None
+    stored = slot.get("play_mode") if isinstance(slot, dict) and slot.get("schema_version") == SCHEMA_VERSION else ""
+    return derive_play_mode(stored, getattr(instance, "adventure_binding", None))
 
 
 def effective_bot_surface(instance: Any) -> str:

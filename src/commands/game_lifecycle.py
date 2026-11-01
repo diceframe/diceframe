@@ -36,6 +36,7 @@ from src.engine.game_instance import GameInstance, GameRegistry, GameState
 from src.engine.language import localized_text, normalize_language
 
 from src.engine.narrative_perspective import narrative_perspective_instruction
+from src.gameplays.builtin import DEFAULT_GAMEPLAYS
 from src.llm.parser import normalize_tag_protocol, sanitize_narration
 from src.rulesets.contracts import RunLifecycleRuntime
 
@@ -125,7 +126,7 @@ class GameLifecycle:
         *,
         preserve_players: bool,
     ) -> GameInstance:
-        from src.engine.modules import adventure_runtime_state, content_binding, ruleset_runtime
+        from src.engine.modules import adventure_runtime_state, content_binding, progression_state, ruleset_runtime
 
         ruleset_runtime.require_writable(source)
         adventure_runtime_state.require_writable(source)
@@ -174,6 +175,13 @@ class GameLifecycle:
         # source-aware World/Book refs selected at creation.  Lorebook binding
         # rows are game-scoped (same game_key), so the refs stay valid.
         adventure_runtime_state.replace_play_mode(candidate, source_play_mode)
+        # The gameplay package owns the progression contract, as at creation:
+        # a GAL run restarted keeps scene progression and its ending freeze.
+        gameplay = DEFAULT_GAMEPLAYS.get(source_play_mode)
+        progression_state.set_mode(
+            candidate,
+            gameplay.progression_mode if gameplay is not None else progression_state.NARRATIVE_ROUND,
+        )
         content_binding.require_writable(candidate)
         if source_world_ref:
             content_binding.set_world_ref(candidate, source_world_ref)

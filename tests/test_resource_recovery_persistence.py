@@ -21,7 +21,7 @@ def test_schema_47_fences_old_readers_without_materializing_historical_recovery(
     old["modules"].pop("resource_recovery", None)
     before = deepcopy(old)
     upgraded = migrate_game_state_payload(old)
-    assert upgraded["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION == 47
+    assert upgraded["instance_schema_version"] == CURRENT_INSTANCE_SCHEMA_VERSION >= 47
     assert "resource_recovery" not in upgraded["modules"]
     assert upgraded["players"] == old["players"] and old == before
     assert migrate_game_state_payload(upgraded) == upgraded

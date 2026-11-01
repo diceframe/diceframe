@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
+import { ArrowRight, Compass, Eye, MessageCircle, Swords } from 'lucide-vue-next'
 import { MicOutline, StopCircleOutline, CloseOutline, ChevronDownOutline, ChevronUpOutline } from '@vicons/ionicons5'
 import { api, ApiError } from '@/api/client'
 import type { ActionSubmitResponse, GameDetail, Player } from '@/api/types'
@@ -56,8 +57,16 @@ let disposed = false
 
 const own = computed(() => props.detail.multiplayer?.submitted_actions?.find(a => a.user_id === props.userId))
 const hint = computed(() => props.detail.solo_mode ? t('soloHint') : own.value ? t('submittedHint', { count: own.value.revision_count || 1 }) : t('defaultHint'))
-const defaultQuickActions = computed(() => [t('quickObserve'), t('quickExplore'), t('quickTalk'), t('quickPrepareCombat')])
-const quickActions = computed(() => (props.detail.quick_actions?.length ? props.detail.quick_actions : defaultQuickActions.value) as string[])
+const defaultQuickActions = computed(() => [
+  { text: t('quickObserve'), icon: Eye },
+  { text: t('quickExplore'), icon: Compass },
+  { text: t('quickTalk'), icon: MessageCircle },
+  { text: t('quickPrepareCombat'), icon: Swords },
+].map(action => ({ ...action, text: action.text.toLocaleLowerCase(locale.value) })))
+// Generated suggestions have no semantic action ID: never guess from their order or translated text.
+const quickActions = computed(() => props.detail.quick_actions?.length
+  ? props.detail.quick_actions.map(text => ({ text, icon: ArrowRight }))
+  : defaultQuickActions.value)
 const locked = computed(() => props.disabled || busy.value || requiresRefresh.value)
 
 function hydrateRecovery() {
@@ -242,8 +251,11 @@ onUnmounted(() => {
         <slot name="tools" />
       </div>
     </div>
-    <div v-if="suggestionsVisible" class="quick-actions" :aria-label="t('quickActions')">
-      <button v-for="action in quickActions" :key="action" :disabled="locked" @click="text = action">{{ action }}</button>
+    <div v-if="suggestionsVisible" class="quick-actions" :class="{ 'is-generated': detail.quick_actions?.length }" :aria-label="t('quickActions')">
+      <button v-for="(action, index) in quickActions" :key="index" type="button" :disabled="locked" @click="text = action.text">
+        <component :is="action.icon" :size="16" :stroke-width="1.5" aria-hidden="true" focusable="false" />
+        <span class="quick-action-label">{{ action.text }}</span>
+      </button>
     </div>
     <div v-if="dictationError && !dictationErrorDismissed" class="dictation-status error">
       <span class="dictation-error-copy">{{ dictationError }}</span>
@@ -295,9 +307,44 @@ onUnmounted(() => {
 .composer .composer-title-row > strong { flex-shrink: 0; white-space: nowrap; }
 .composer .composer-hint { white-space: nowrap; text-overflow: ellipsis; }
 .composer-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
-.quick-actions-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 4px 7px; font-size: 11px; white-space: nowrap; color: var(--df-text-muted); border-color: var(--df-border-soft); background: var(--df-control-bg); }
+.quick-actions-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 8px 12px; font-size: 13px; white-space: nowrap; color: var(--df-text-muted); border-color: var(--df-border-soft); background: var(--df-control-bg); }
 .composer { container: action-composer / inline-size; }
-@container action-composer (max-width: 480px) { .composer .composer-hint { display: none; } }
+.composer .quick-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 4px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.composer .quick-actions.is-generated { flex-wrap: wrap; max-height: 176px; }
+.composer .quick-actions::-webkit-scrollbar { width: 6px; height: 6px; }
+.composer .quick-actions button {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: start;
+  white-space: normal;
+}
+.composer .quick-actions button > svg { flex: none; color: currentColor; }
+.quick-action-label { min-width: 0; overflow-wrap: anywhere; }
+.composer .quick-actions button:focus-visible { outline: 2px solid var(--df-interactive); outline-offset: 2px; }
+@container action-composer (max-width: 480px) {
+  .composer .composer-hint { display: none; }
+  .composer .quick-actions:not(.is-generated) { gap: 4px; }
+  .composer .quick-actions:not(.is-generated) button { flex: 1 1 0; justify-content: center; gap: 4px; padding-inline: 4px; font-size: 12px; }
+  .composer .quick-actions.is-generated button { flex-basis: 100%; border-radius: var(--df-radius-md); }
+}
 
 .composer .composer-row {
   grid-template-columns: minmax(0, 1fr);
@@ -406,6 +453,10 @@ onUnmounted(() => {
 
 .dictation-error-close:hover {
   background: color-mix(in srgb, var(--df-danger) 16%, transparent);
+}
+
+@media (max-width: 800px) {
+  .quick-actions-toggle, .quick-actions button { min-height: 44px; }
 }
 
 @container action-composer (max-width: 260px) {

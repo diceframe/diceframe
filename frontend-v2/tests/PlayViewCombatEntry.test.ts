@@ -184,7 +184,7 @@ describe('combat actions entry near the action composer', () => {
     expect(actions.parentElement).toBe(members.parentElement)
     expect(actions.previousElementSibling).toBe(members)
     const invite = wrapper.get('[data-testid="play-invite-player"]')
-    expect(invite.text()).toContain('邀请玩家')
+    expect(invite.text()).toContain('邀请好友')
     await invite.trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="invite-title"]').text()).toBe('邀请链接')

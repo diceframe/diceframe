@@ -100,6 +100,17 @@ function explorationResponse(availableSlotLevels: number[] = [1, 2]) {
   return result
 }
 
+type Panel = ReturnType<typeof mount>
+
+// The dock works in two steps: pick an action tile, then confirm it.
+async function openTile(wrapper: Panel, tile: string) {
+  await wrapper.get(`[data-tile="${tile}"]`).trigger('click')
+  return wrapper.get(`.mode-panel[data-mode="${tile}"]`)
+}
+async function stageFromDock(wrapper: Panel) {
+  await wrapper.get('.dock-confirm').trigger('click')
+}
+
 describe('D&D 2024 combat panel', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -121,6 +132,7 @@ describe('D&D 2024 combat panel', () => {
     mocks.fetch.mockResolvedValue(data)
     const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
     await flushPromises()
+    await wrapper.get('[data-tile="spell"]').trigger('click')
     const card = wrapper.get('[data-testid=combat-spell-card]')
     expect(card.text()).toContain('至圣斩')
     expect(card.text()).toContain('近战武器或徒手攻击命中后可用')
@@ -153,6 +165,27 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('offers the counterspell option for a pending counter window', async () => {
+    mocks.locale = 'zh-CN'
+    const data = response('active') as any
+    const decision = {
+      decision_id: 'decision:cast', kind: 'counter_spell', assigned_to: 'gm',
+      options: ['counter', 'decline'], threat_actor_ids: ['enemy:goblin-1'],
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = wrapper.get('.decision-card')
+    expect(card.get('.combat-primary').text()).toBe('反制法术')
+    await card.get('.combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(mocks.decide.mock.calls[0][2]).toMatchObject({ option: 'counter' })
+    wrapper.unmount()
+  })
+
   it('offers the free use and exact hit target while a melee-hit decision is pending', async () => {
     mocks.locale = 'zh-CN'
     const data = response('active') as any
@@ -173,7 +206,7 @@ describe('D&D 2024 combat panel', () => {
     const card = wrapper.get('[data-testid=combat-spell-card]')
     expect(card.text()).toContain('免费施放（长休恢复）')
     expect(card.findAll('select').at(-1)?.findAll('option')).toHaveLength(1)
-    await card.get('button').trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit).toHaveBeenCalledOnce()
@@ -191,18 +224,254 @@ describe('D&D 2024 combat panel', () => {
     mocks.submit.mockResolvedValue(data)
     const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
     await flushPromises()
-    const attackCard = wrapper.findAll('.action-card').find(card => card.find('h3').text().includes('Attack'))!
-    const spellCard = wrapper.get('[data-testid=combat-spell-card]')
+    const attackCard = await openTile(wrapper, 'attack')
     expect((attackCard.findAll('select')[1]!.element as HTMLSelectElement).value).toBe('enemy:goblin-1')
-    expect((spellCard.findAll('select')[2]!.element as HTMLSelectElement).value).toBe('player:gm')
-    await attackCard.get('button').trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'attack', target_id: 'enemy:goblin-1' })
-    await spellCard.get('button').trigger('click')
+    const spellCard = await openTile(wrapper, 'spell')
+    expect((spellCard.findAll('select')[2]!.element as HTMLSelectElement).value).toBe('player:gm')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[1][1]).toMatchObject({ type: 'cast_spell', target_id: 'player:gm' })
+    wrapper.unmount()
+  })
+
+  it('projects a self-only spell onto the caster', async () => {
+    const data = response('active') as any
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { actor_id: 'player:ally', kind: 'player', side: 'party', name: 'Ally', hp: 12, max_hp: 12, position: 0, is_dead: false },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:false_life', name: 'False Life', level: 1, mode: 'temp_hp',
+        casting_time: 'Action', available_slot_levels: [1],
+        target_scope: 'self', target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(1)
+    expect((targetSelect.element as HTMLSelectElement).value).toBe('player:gm')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'cast_spell', target_id: 'player:gm' })
+    expect(mocks.submit.mock.calls[0][1]).not.toHaveProperty('target_ids')
+    wrapper.unmount()
+  })
+
+  it('offers only dead allies for a revive spell', async () => {
+    const data = response('active') as any
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { actor_id: 'player:fallen', kind: 'player', side: 'party', name: 'Fallen', hp: 0, max_hp: 12, position: 0, is_dead: true },
+      { actor_id: 'player:dying', kind: 'player', side: 'party', name: 'Dying', hp: 0, max_hp: 12, position: 0, is_dead: false },
+      // 服务端 Revivify 只接受 player，死亡 companion 不能出现在合法候选中。
+      { actor_id: 'companion:fallen', kind: 'companion', side: 'party', name: 'Fallen Companion', hp: 0, max_hp: 12, position: 0, is_dead: true },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:revivify', name: 'Revivify', level: 3, mode: 'revive',
+        casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(1)
+    expect((targetSelect.element as HTMLSelectElement).value).toBe('player:fallen')
+    wrapper.unmount()
+  })
+
+  it('submits multiple targets for an upcast spell', async () => {
+    const data = response('active') as any
+    const goblin = data.gameplay.combat.actors[1]
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { ...goblin, actor_id: 'enemy:goblin-2', name: 'Goblin 2' },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:hold_person', name: 'Hold Person', level: 2, mode: 'saving_throw',
+        casting_time: 'Action', available_slot_levels: [2, 3],
+        target_side: 'enemy', target_count: 1, upcast_target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    await card.findAll('select')[1]!.setValue('3')
+    await flushPromises()
+    await card.findAll('select')[2]!.setValue('2')
+    await flushPromises()
+    expect(card.findAll('select')[3]!.findAll('option')).toHaveLength(2)
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    const sent = mocks.submit.mock.calls[0][1]
+    expect(sent).toMatchObject({ type: 'cast_spell', target_ids: ['enemy:goblin-1', 'enemy:goblin-2'] })
+    expect(sent).not.toHaveProperty('target_id')
+    wrapper.unmount()
+  })
+
+  it('allows repeated targets for a ray spell', async () => {
+    const data = response('active') as any
+    const goblin = data.gameplay.combat.actors[1]
+    const targets = [
+      ...data.gameplay.combat.actors,
+      { ...goblin, actor_id: 'enemy:goblin-2', name: 'Goblin 2' },
+    ]
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets,
+      spells: [{
+        spell_ref: 'spell:scorching_ray', name: 'Scorching Ray', level: 2, mode: 'spell_attack',
+        casting_time: 'Action', available_slot_levels: [2],
+        target_side: 'enemy', target_count: 3, upcast_target_count: 1, repeat_targets: true,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    expect(card.findAll('select')[2]!.findAll('option')).toHaveLength(3)
+    await card.findAll('select')[2]!.setValue('3')
+    await flushPromises()
+    expect(card.findAll('select')).toHaveLength(6)
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    const sent = mocks.submit.mock.calls[0][1]
+    expect(sent).toMatchObject({ type: 'cast_spell' })
+    expect(sent.target_ids).toHaveLength(3)
+    expect(sent).not.toHaveProperty('target_id')
+    wrapper.unmount()
+  })
+
+  it('requires and submits a resistance choice', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:protection_from_energy', name: 'Protection from Energy', level: 3,
+        mode: 'buff', casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'ally', target_count: 1, resist_choice: ['acid', 'fire'],
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const resist = card.findAll('select').find(select => select.text().includes('Acid'))!
+    await resist.setValue('fire')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'player:gm', resist_type: 'fire',
+    })
+    wrapper.unmount()
+  })
+
+  it('requires and submits a teleport distance', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:misty_step', name: 'Misty Step', level: 2, mode: 'teleport',
+        casting_time: 'Bonus Action', available_slot_levels: [2],
+        target_scope: 'self', target_side: 'ally', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    await wrapper.get('#dock-tab-bonus').trigger('click')
+    const card = await openTile(wrapper, 'spell')
+    expect(wrapper.get('.dock-confirm').attributes('disabled')).toBeDefined()
+    await card.get('input[type=number]').setValue('25')
+    expect(wrapper.get('.dock-confirm').attributes('disabled')).toBeUndefined()
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'player:gm', teleport_distance: 25,
+    })
+    wrapper.unmount()
+  })
+
+  it('lets dispel magic target either side', async () => {
+    const data = response('active') as any
+    data.available_actions.push({ type: 'cast_spell', expected_version: 1, actor_id: 'player:gm',
+      targets: data.gameplay.combat.actors,
+      spells: [{
+        spell_ref: 'spell:dispel_magic', name: 'Dispel Magic', level: 3, mode: 'dispel',
+        casting_time: 'Action', available_slot_levels: [3],
+        target_side: 'any', target_count: 1,
+      }],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    const card = await openTile(wrapper, 'spell')
+    const targetSelect = card.findAll('select').at(-1)!
+    expect(targetSelect.findAll('option')).toHaveLength(2)
+    await targetSelect.setValue('enemy:goblin-1')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', target_id: 'enemy:goblin-1',
+    })
+    wrapper.unmount()
+  })
+
+  it('floats the resolved damage above the struck unit and clears it afterwards', async () => {
+    const data = response('active') as any
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockResolvedValue({
+      ...data,
+      result: {
+        resolved_event_batches: [{ events: [
+          { type: 'check.resolved', kind: 'attack', actor_id: 'player:gm', target_id: 'enemy:goblin-1', success: true },
+          { type: 'resource.changed', resource: 'hp', target_id: 'enemy:goblin-1', delta: -8 },
+        ] }],
+      },
+    })
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    await openTile(wrapper, 'attack')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    const goblin = wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]')
+    expect(goblin.get('.floater.damage').text()).toBe('-8')
+    expect(goblin.classes()).toContain('struck')
+    expect(wrapper.get('.battle-token[data-actor-id="player:gm"]').find('.floater').exists()).toBe(false)
+
+    vi.advanceTimersByTime(3000)
+    await flushPromises()
+    expect(wrapper.find('.floater').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -213,9 +482,9 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    const card = wrapper.findAll('.action-card').find(item => item.text().includes('Cure Wounds'))!
+    const card = await openTile(wrapper, 'explore')
     await card.find('select').setValue('spell:cure_wounds')
-    await card.get('button').trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({
@@ -228,10 +497,9 @@ describe('D&D 2024 combat panel', () => {
       props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
     })
     await flushPromises()
-    const unavailableCard = unavailable.findAll('.action-card')
-      .find(item => item.text().includes('Cure Wounds'))!
+    const unavailableCard = await openTile(unavailable, 'explore')
     await unavailableCard.find('select').setValue('spell:cure_wounds')
-    expect(unavailableCard.get('button').attributes('disabled')).toBeDefined()
+    expect(unavailable.get('.dock-confirm').attributes('disabled')).toBeDefined()
     unavailable.unmount()
   })
 
@@ -622,7 +890,8 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    await wrapper.get('.action-card button').trigger('click')
+    await openTile(wrapper, 'attack')
+    await stageFromDock(wrapper)
     expect(wrapper.find('.confirm-card').exists()).toBe(true)
     expect(mocks.submit).not.toHaveBeenCalled()
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
@@ -654,7 +923,7 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    const weaponSelect = wrapper.get('.action-card select')
+    const weaponSelect = (await openTile(wrapper, 'attack')).get('select')
     expect((weaponSelect.element as HTMLSelectElement).value).toBe('item:javelin')
     const options = weaponSelect.findAll('option')
     expect(options[0].attributes('disabled')).toBeDefined()
@@ -662,7 +931,7 @@ describe('D&D 2024 combat panel', () => {
     expect(options[1].text()).toContain('In range')
     expect(wrapper.text()).toContain('Distance to target 25 ft')
 
-    await wrapper.get('.action-card button').trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({ weapon_ref: 'item:javelin' })
@@ -699,8 +968,8 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('.action-card option').text()).toContain('巨剑 · 2d6 挥砍')
-    await wrapper.get('.action-card button').trigger('click')
+    expect((await openTile(wrapper, 'attack')).get('option').text()).toContain('巨剑 · 2d6 挥砍')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({ weapon_ref: 'item:greatsword' })
@@ -714,14 +983,143 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    expect(wrapper.findAll('.track-token')).toHaveLength(2)
+    expect(wrapper.findAll('.battle-token')).toHaveLength(2)
     const destination = wrapper.get('button[aria-label="Position 20 ft"]')
     expect(destination.classes()).toContain('reachable')
     await destination.trigger('click')
 
-    const movementInput = wrapper.get('.action-card input[type="number"]')
+    const movementInput = wrapper.get('.mode-panel[data-mode="move"] input[type="number"]')
     expect((movementInput.element as HTMLInputElement).value).toBe('20')
     expect(destination.classes()).toContain('selected')
+    wrapper.unmount()
+  })
+
+  it('aims the attack when a unit on the battlefield is clicked', async () => {
+    const twoFoes = response('active') as any
+    twoFoes.gameplay.combat.actors.push(
+      { actor_id: 'enemy:goblin-2', kind: 'enemy', name: 'Goblin Archer', hp: 5, max_hp: 5, position: 25, armor_class: 12, conditions: {} },
+    )
+    twoFoes.available_actions[0].targets.push(
+      { actor_id: 'enemy:goblin-2', kind: 'enemy', name: 'Goblin Archer', hp: 5, max_hp: 5, position: 25 },
+    )
+    mocks.fetch.mockResolvedValueOnce(twoFoes)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    const archer = wrapper.get('.battle-token[data-actor-id="enemy:goblin-2"]')
+    await archer.get('.token-hit').trigger('click')
+
+    expect(archer.classes()).toContain('targeted')
+    expect(wrapper.get('.range-bridge').text()).toContain('25 ft')
+    expect(wrapper.get('.target-card').text()).toContain('Goblin Archer')
+    expect(wrapper.get('.target-card').text()).toContain('Distance')
+    wrapper.unmount()
+  })
+
+  it('keeps marking the aimed target while the player inspects another unit', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.actors[0].conditions = { dodging: {}, blessed: {} }
+    mocks.fetch.mockResolvedValueOnce(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    await openTile(wrapper, 'attack')
+    await wrapper.get('.battle-token[data-actor-id="player:gm"] .token-hit').trigger('click')
+
+    expect(wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]').classes()).toContain('targeted')
+    expect(wrapper.get('.battle-token[data-actor-id="player:gm"]').classes()).not.toContain('targeted')
+    expect(wrapper.get('.dock-target').text()).toContain('Goblin')
+    // The side card follows the click, and lists statuses with the locale's separator.
+    expect(wrapper.get('.target-card').text()).toContain('Guardian')
+    expect(wrapper.get('.target-card').text()).toContain('Dodging, Blessed')
+    wrapper.unmount()
+  })
+
+  it('shows the movement ghost only while a move is being planned', async () => {
+    mocks.fetch.mockResolvedValueOnce(response('active'))
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    expect(wrapper.find('.move-ghost').exists()).toBe(false)
+    expect(wrapper.find('.stage-floor button.selected').exists()).toBe(false)
+    await wrapper.get('#dock-tab-move').trigger('click')
+    expect(wrapper.get('button[aria-label="Position 5 ft"]').find('.move-ghost').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('moves between dock tabs with the arrow keys', async () => {
+    mocks.fetch.mockResolvedValueOnce(response('active'))
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true }, attachTo: document.body,
+    })
+    await flushPromises()
+
+    const actionTab = wrapper.get('#dock-tab-action')
+    expect(actionTab.attributes('tabindex')).toBe('0')
+    expect(wrapper.get('#dock-tab-bonus').attributes('tabindex')).toBe('-1')
+    await actionTab.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.get('#dock-tab-bonus').attributes('aria-selected')).toBe('true')
+    expect(document.activeElement?.id).toBe('dock-tab-bonus')
+    await wrapper.get('#dock-tab-bonus').trigger('keydown', { key: 'End' })
+    expect(wrapper.get('#dock-tab-reaction').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('keeps a bonus-action spell and slot picked across the periodic refresh', async () => {
+    const data = response('active') as any
+    data.available_actions.push({
+      type: 'cast_spell', expected_version: 1, actor_id: 'player:gm', targets: data.gameplay.combat.actors,
+      spells: [
+        { spell_ref: 'spell:cure_wounds', name: 'Cure Wounds', level: 1, mode: 'healing', casting_time: 'Action', available_slot_levels: [1] },
+        { spell_ref: 'spell:healing_word', name: 'Healing Word', level: 1, mode: 'healing', casting_time: 'Bonus Action', available_slot_levels: [1, 2] },
+      ],
+    })
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    await wrapper.get('#dock-tab-bonus').trigger('click')
+    const card = await openTile(wrapper, 'spell')
+    expect((card.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('spell:healing_word')
+    await card.findAll('select')[1]!.setValue('2')
+
+    vi.advanceTimersByTime(30000)
+    await flushPromises()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', spell_ref: 'spell:healing_word', slot_level: 2,
+    })
+    wrapper.unmount()
+  })
+
+  it('floats the deferred hit damage once the melee-hit decision is declined', async () => {
+    const data = response('active') as any
+    const decision = { decision_id: 'hit:1', kind: 'melee_hit_spell', assigned_to: 'gm', options: ['decline'] }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }, ...data.available_actions]
+    mocks.fetch.mockResolvedValue(data)
+    mocks.decide.mockResolvedValue({
+      ...response('active'),
+      result: { resolved_event_batches: [{ events: [
+        { type: 'resource.changed', resource: 'hp', target_id: 'enemy:goblin-1', delta: -6 },
+      ] }] },
+    })
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+    expect(wrapper.get('#dock-tab-bonus').attributes('aria-selected')).toBe('true')
+
+    await wrapper.get('.decision-card button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"] .floater').text()).toBe('-6')
+    expect(wrapper.get('#dock-tab-action').attributes('aria-selected')).toBe('true')
     wrapper.unmount()
   })
 
@@ -739,6 +1137,53 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it("keeps the dock closed on another actor's turn and never shows their economy", async () => {
+    const data = response('active') as any
+    data.gameplay.combat.current_actor_id = 'enemy:goblin-1'
+    data.gameplay.combat.turn_index = 1
+    data.gameplay.combat.economy = { action: 0, bonus_action: 1, movement: 0, reaction: 1 }
+    data.gameplay.combat.reactions = { 'player:gm': 0 }
+    data.available_actions = [{ type: 'combat.message', label: 'Combat message', expected_version: 1 }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: false } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-tile]').exists()).toBe(false)
+    expect(wrapper.find('[role=tab]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Pick an action')
+    expect(wrapper.find('.combat-state').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('still lets the GM end the combat while an enemy acts', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.current_actor_id = 'enemy:goblin-1'
+    data.gameplay.combat.turn_index = 1
+    data.available_actions = [{ type: 'combat.end', label: 'End Combat', expected_version: 1 }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-tile]').exists()).toBe(false)
+    expect(wrapper.find('.dock-end').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it("reads the reaction tab from the viewer's own reaction, not the turn economy", async () => {
+    const data = response('active') as any
+    data.gameplay.combat.economy = { action: 1, bonus_action: 1, movement: 30, reaction: 1 }
+    data.gameplay.combat.reactions = { 'player:gm': 0 }
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, { props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true } })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[role=tab]')
+    const reaction = tabs[tabs.length - 1]
+    expect(reaction.text()).toContain('Reaction')
+    expect(reaction.classes()).toContain('spent')
+    wrapper.unmount()
+  })
+
   it('shows a seated player the exact current and maximum HP of a wounded enemy', async () => {
     const wounded = response('active') as any
     wounded.available_actions = []
@@ -749,7 +1194,7 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    const card = wrapper.findAll('.actor-card.enemy').find(item => item.text().includes('Goblin'))!
+    const card = wrapper.findAll('.battle-token.enemy').find(item => item.text().includes('Goblin'))!
     expect(card.text()).toContain('HP 3/7')
     const bar = card.get('.hp-track')
     expect(bar.attributes('aria-valuenow')).toBe('3')
@@ -771,7 +1216,7 @@ describe('D&D 2024 combat panel', () => {
     })
     await flushPromises()
 
-    await wrapper.get('.compact-actions .danger').trigger('click')
+    await wrapper.get('.dock-end.danger').trigger('click')
     await flushPromises()
     expect(wrapper.get('.confirm-card').element).toBe(document.activeElement)
     expect(wrapper.get('.confirm-card').attributes('role')).toBe('group')
@@ -1112,8 +1557,12 @@ async function mountMonk(payload: ReturnType<typeof monkResponse>) {
   return wrapper
 }
 
-function capabilityButtons(wrapper: ReturnType<typeof mount>) {
-  return wrapper.findAll('.capability-card button')
+async function capabilityButtons(wrapper: ReturnType<typeof mount>) {
+  if (!wrapper.find('.mode-panel[data-mode="capability"]').exists()) {
+    const tile = wrapper.find('[data-tile="capability"]')
+    if (tile.exists()) await tile.trigger('click')
+  }
+  return wrapper.findAll('.capability-list button')
 }
 
 describe('D&D 2024 combat panel class capabilities', () => {
@@ -1131,14 +1580,15 @@ describe('D&D 2024 combat panel class capabilities', () => {
       focus: 2, capabilities: levelTwoCapabilities(),
     }))
 
-    const card = wrapper.get('.capability-card')
-    expect(card.text()).toContain('Class features')
+    const buttons = await capabilityButtons(wrapper)
+    const card = wrapper.get('.mode-panel[data-mode="capability"]')
+    expect(wrapper.get('[data-tile="capability"]').text()).toContain('Class abilities')
     expect(card.text()).toContain('Flurry of Blows')
     expect(card.text()).toContain('Focus Points 1（2/2）')
     expect(card.text()).toContain('Bonus Unarmed Strike')
     expect(wrapper.get('.class-resource-strip').text()).toContain('Focus Points')
     expect(wrapper.get('.class-resource-strip').text()).toContain('2 / 2')
-    expect(capabilityButtons(wrapper).map(button => button.text())).toHaveLength(4)
+    expect(buttons.map(button => button.text())).toHaveLength(4)
     wrapper.unmount()
   })
 
@@ -1149,9 +1599,10 @@ describe('D&D 2024 combat panel class capabilities', () => {
     const spent = monkResponse({ focus: 1, bonusActionAvailable: false, capabilities: [] })
     mocks.submit.mockResolvedValueOnce(spent)
 
-    const flurry = capabilityButtons(wrapper)
+    const flurry = (await capabilityButtons(wrapper))
       .find(button => button.text().includes('Flurry of Blows'))!
     await flurry.trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
 
@@ -1163,15 +1614,15 @@ describe('D&D 2024 combat panel class capabilities', () => {
     })
     // 服务端在同一份响应里返回新状态：专注点与附赠动作立即刷新，无需重新加载。
     expect(wrapper.get('.class-resource-strip').text()).toContain('1 / 2')
+    expect(await capabilityButtons(wrapper)).toHaveLength(0)
     expect(wrapper.text()).toContain('No class capability is available this turn.')
-    expect(capabilityButtons(wrapper)).toHaveLength(0)
     wrapper.unmount()
   })
 
   it('never invents a capability the server did not return', async () => {
     const wrapper = await mountMonk(monkResponse({ focus: 2, capabilities: [] }))
 
-    expect(capabilityButtons(wrapper)).toHaveLength(0)
+    expect(await capabilityButtons(wrapper)).toHaveLength(0)
     // 资源仍然可见（服务端投影了 Focus），但按钮只可能来自服务端 capability。
     expect(wrapper.get('.class-resource-strip').text()).toContain('2 / 2')
     wrapper.unmount()
@@ -1186,7 +1637,8 @@ describe('D&D 2024 combat panel class capabilities', () => {
       }],
     }))
 
-    await capabilityButtons(wrapper)[0].trigger('click')
+    await (await capabilityButtons(wrapper))[0]!.trigger('click')
+    await stageFromDock(wrapper)
     await wrapper.get('.confirm-card .combat-primary').trigger('click')
     await flushPromises()
 
@@ -1203,7 +1655,7 @@ describe('D&D 2024 combat panel class capabilities', () => {
     }))
 
     expect(wrapper.find('.class-resource-strip').exists()).toBe(false)
-    expect(capabilityButtons(wrapper)).toHaveLength(1)
+    expect(await capabilityButtons(wrapper)).toHaveLength(1)
     wrapper.unmount()
   })
 
@@ -1211,8 +1663,8 @@ describe('D&D 2024 combat panel class capabilities', () => {
     // 非武僧（也没有任何职业能力）：不出现空的 Bonus Action / 职业能力入口。
     const wrapper = await mountMonk(response('active') as any)
 
-    expect(wrapper.find('.capability-card').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Class features')
+    expect(wrapper.find('[data-tile="capability"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Class abilities')
     wrapper.unmount()
   })
 
@@ -1229,7 +1681,7 @@ describe('D&D 2024 combat panel class capabilities', () => {
 
     expect(wrapper.find('.turn-banner').exists()).toBe(true)
     expect(wrapper.find('.class-resource-strip').exists()).toBe(false)
-    expect(wrapper.find('.capability-card').exists()).toBe(false)
+    expect(wrapper.find('[data-tile="capability"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -1246,7 +1698,7 @@ describe('D&D 2024 combat panel class capabilities', () => {
     const wrapper = await mountMonk(payload)
 
     expect(wrapper.find('.class-resource-strip').exists()).toBe(false)
-    expect(capabilityButtons(wrapper)).toHaveLength(1)
+    expect(await capabilityButtons(wrapper)).toHaveLength(1)
     wrapper.unmount()
   })
 
@@ -1262,7 +1714,7 @@ describe('D&D 2024 combat panel class capabilities', () => {
 
     expect(wrapper.find('.turn-banner').exists()).toBe(true)
     expect(wrapper.find('.class-resource-strip').exists()).toBe(false)
-    expect(wrapper.find('.capability-card').exists()).toBe(false)
+    expect(wrapper.find('[data-tile="capability"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

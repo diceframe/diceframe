@@ -75,11 +75,11 @@ The text marker `@choice label -> scene_id` defines a graph connection. Several 
 
 **Character card library** stores reusable cards; **This game's characters** manages participants in the active game. Applying a card to a character that has already acted requires GM authority. The reusable card and a character's current game state serve different purposes.
 
-On the play page, use **Invite Player** beneath the party list. Share the actual invitation URL and let the player open it. Players do not need to extract or type `web|room|host` from a link. Invitations and seat credentials follow the server's access policy; a bare legacy player ID is not a credential. If an old link no longer authenticates, the GM should issue a new invitation.
+On the play page, use **Invite friends** beneath the party list. Share the actual invitation URL and let the player open it, or paste it into **Join friends** on the homepage. Players do not need to extract or type `web|room|host` from a link. The invitation dialog's **Multiplayer help** button opens the official guide. Invitations and seat credentials follow the server's access policy; a bare legacy player ID is not a credential. If an old link no longer authenticates, the GM should issue a new invitation.
 
 The GM can open **⋯ Member actions** on the right of each member card for control links, editing, away/return, AI control and removal. Available actions follow the member's current state. Kick appears after a divider in a danger color and requires confirmation; the host and current actor cannot be kicked. The workbench player list retains status and rest notices, while member management uses this menu.
 
-The menu's **Control link** resumes an existing character; **Invite Player** beneath the list is for new players. Reissuing an existing seat link requires confirmation; reopening a valid link in the same GM session reuses it without disconnecting its player. Players do not see these management controls.
+The menu's **Control link** resumes an existing character; **Invite friends** beneath the list is for new players. Reissuing an existing seat link requires confirmation; reopening a valid link in the same GM session reuses it without disconnecting its player. Players do not see these management controls.
 
 AI-hosted seats and companions use the same server action and rules boundaries as human players. Their policy belongs to the game and survives saving/loading; narration cannot independently grant private information or bypass resource costs.
 
