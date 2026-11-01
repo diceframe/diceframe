@@ -253,6 +253,8 @@ def _real_bundle_draft(runtime: Dnd2024Runtime, class_ref: str, species_ref: str
         "background_equipment_package_ref": choices["background_equipment_packages"][0]["ref"],
         "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
     }
+    if "fighting_style" in (class_entity.get("level_1_feature_ids") or []):
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:defense"}
     if class_entity.get("recommended_spell_choices"):
         draft["class_spell_choices"] = class_entity["recommended_spell_choices"]
     choices = runtime.builder_choices(None, draft)

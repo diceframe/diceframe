@@ -137,7 +137,7 @@ function eventText(event?: RulesetCombatEvent): string {
     }
     if (kind === 'attack' || kind === 'spell_attack' || kind === 'opportunity_attack') {
       const dice = combatRollEvidence(event, locale.value)
-      const modifier = Number(event.modifier || 0) + Number(event.bless_bonus || 0)
+      const modifier = Number(event.modifier || 0) + Number(event.check_bonus || 0)
       return zh.value
         ? `${actor}攻击${target}：${dice} + ${modifier} = ${roll} vs AC ${dc}，${verdict}`
         : `${actor} attacks ${target}: ${dice} + ${modifier} = ${roll} vs AC ${dc}, ${verdict}`

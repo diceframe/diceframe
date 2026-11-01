@@ -65,6 +65,35 @@ def effective_speed(
     return max(0, int(base_speed) + total)
 
 
+def condition_check_bonus_rolls(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
+    kind: str, rng: Any,
+) -> list[dict[str, Any]]:
+    """Roll the registry-declared per-check bonus dice for this check kind.
+
+    ``kind`` is the rule-language semantic value (``attack`` covers every
+    attack roll including spell attacks, ``saving_throw`` covers every save
+    including repeat and concentration saves), never an event ``kind`` value.
+    Each matching condition contributes one die per declared bonus, so the
+    caller only sums the rolls and never names a condition. Catalog order is
+    roll order, which keeps the dice trail reproducible.
+    """
+
+    rolls: list[dict[str, Any]] = []
+    for condition_id, entry in registry.items():
+        if condition_id not in conditions:
+            continue
+        for declaration in entry.get("check_bonus_dice") or []:
+            if kind not in (declaration.get("kinds") or []):
+                continue
+            die = int(declaration["die"])
+            rolls.append({
+                "condition": str(condition_id), "die": die,
+                "roll": int(rng.randint(1, die)),
+            })
+    return rolls
+
+
 def attack_sources(
     registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
 ) -> list[dict]:

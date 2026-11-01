@@ -15,6 +15,9 @@ from src.rulesets.dnd2024.progression.catalog import (
 )
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
+# 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
+ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({"ranged_attack_bonus"})
+
 
 def _canonical(payload: dict[str, Any]) -> dict[str, Any]:
     nested = payload.get("ruleset_character")
@@ -56,10 +59,46 @@ class Dnd2024AdvancementEngine:
         labels = feat_catalog.get("labels")
         if not isinstance(labels, dict) or set(labels) != set(feat_catalog["feats"]):
             raise ProgressionCatalogError("advancement feat labels must cover the catalog")
+        for feat_id, feat in feat_catalog["feats"].items():
+            self._validate_feat_parameters(str(feat_id), feat)
         self.advancement_feats = deepcopy(feat_catalog["feats"])
         self.advancement_feat_labels = {
             str(feat_id): str(label) for feat_id, label in labels.items()
         }
+
+    @staticmethod
+    def _validate_feat_parameters(feat_id: str, feat: Any) -> None:
+        """Validate the closed parameter vocabulary an advancement feat declares.
+
+        Feat parameters are consumption contracts read by feature projections
+        (e.g. Archery's flat ranged attack bonus), so the catalog is the only
+        writer and every unknown key fails closed here instead of being
+        silently ignored downstream.
+        """
+
+        if not isinstance(feat, dict):
+            return
+        parameters = feat.get("parameters")
+        if parameters is None:
+            return
+        if not isinstance(parameters, dict):
+            raise ProgressionCatalogError(
+                f"advancement feat parameters must be an object: {feat_id}"
+            )
+        unknown = sorted(set(parameters) - ADVANCEMENT_FEAT_PARAMETER_KEYS)
+        if unknown:
+            raise ProgressionCatalogError(
+                f"advancement feat {feat_id} has an unknown parameter: {unknown[0]}"
+            )
+        for key, value in parameters.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 1 <= value <= 10
+            ):
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} parameter {key} must be an integer from 1 to 10"
+                )
 
     def preview_next_level(
         self,

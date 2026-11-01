@@ -525,7 +525,7 @@ class CombatCheckWindowsMixin:
                 "rolls": rolls,
                 "natural": natural,
                 "total": natural + int(check.get("modifier", 0) or 0)
-                + int(check.get("bless_bonus", 0) or 0),
+                + int(check.get("check_bonus", 0) or 0),
                 "critical": natural >= int(check.get("crit_threshold", 20) or 20),
             })
             check["success"] = self._attack_check_success(check)

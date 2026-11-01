@@ -180,6 +180,7 @@ class CombatViewMixin:
             "martial_arts_weapon_refs": list(
                 feature_projection["martial_arts_weapon_refs"]
             ),
+            "ranged_attack_bonus": int(feature_projection["ranged_attack_bonus"]),
         }
 
     @staticmethod

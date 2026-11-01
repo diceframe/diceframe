@@ -19,6 +19,9 @@
       "skill:perception",
       "skill:survival"
     ],
+    "class_feature_feat_choices": {
+      "fighting_style": "feat:defense"
+    },
     "equipment_package_ref": "equipment_package:fighter_a",
     "background_equipment_package_ref": "equipment_package:soldier_a",
     "ability_method": "standard_array",

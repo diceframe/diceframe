@@ -23,7 +23,7 @@ from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
-from .check_modes import condition_flags, effective_speed
+from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
 from .check_windows import (
     CHECK_WINDOW_DECISION,
     CombatCheckWindowsMixin,
@@ -1122,25 +1122,26 @@ class Dnd2024CombatEngine(
                     break
         return events
 
-    @staticmethod
     def _concentration_events(
-        target: dict[str, Any], damage: int, rng: Any,
+        self, target: dict[str, Any], damage: int, rng: Any,
     ) -> list[dict[str, Any]]:
         if not target.get("concentration") or damage <= 0:
             return []
         dc = max(10, damage // 2)
         roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
-        # 专注维持是一次体质豁免，Bless 对豁免同样生效（1d4）。
-        bless_bonus = 0
-        if "blessed" in (target.get("conditions") or {}):
-            bless_bonus = int(rng.randint(1, 4))
-        success = roll + modifier + bless_bonus >= dc
+        # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
+        check_bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
+        )
+        check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+        total = roll + modifier + check_bonus
+        success = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [roll], "natural": roll, "modifier": modifier,
-            "bless_bonus": bless_bonus, "total": roll + modifier + bless_bonus,
-            "target": dc, "success": success,
+            "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+            "total": total, "target": dc, "success": success,
         }]
         if not success:
             events.append({

@@ -22,6 +22,9 @@ DAMAGE_TYPES = frozenset({
     "thunder", "poison", "psychic", "force", "necrotic", "radiant",
 })
 SAVE_ABILITIES = frozenset({"str", "dex", "con", "int", "wis", "cha"})
+# check_bonus_dice 使用规则语言的语义检定类别，而不是事件 kind 值。
+CHECK_BONUS_KINDS = frozenset({"attack", "saving_throw", "ability_check"})
+CHECK_BONUS_DIE_SIDES = frozenset({4, 6, 8, 10, 12, 20})
 
 
 class CombatCatalogError(ValueError):
@@ -191,7 +194,7 @@ class Dnd2024CombatCatalog:
             if set(entry) - {
                 "attack_modes", "resist_damage_types", "implies_incapacitated",
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
-                "speed_modifier",
+                "speed_modifier", "check_bonus_dice",
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
@@ -236,11 +239,36 @@ class Dnd2024CombatCatalog:
                     f"combat condition resist types are invalid: {condition_id}"
                 )
             modes = entry.get("attack_modes")
-            # A condition may declare resistance or a passive flag only; if it
-            # declares neither mechanics nor attack modes the entry is still
-            # rejected, matching the P1 rule that every entry states something.
+            bonus_dice = entry.get("check_bonus_dice")
+            if bonus_dice is not None and (
+                not isinstance(bonus_dice, list)
+                or not bonus_dice
+                or any(
+                    not isinstance(declaration, dict)
+                    or set(declaration) != {"die", "kinds"}
+                    or isinstance(declaration.get("die"), bool)
+                    or not isinstance(declaration.get("die"), int)
+                    or declaration.get("die") not in CHECK_BONUS_DIE_SIDES
+                    or not isinstance(declaration.get("kinds"), list)
+                    or not declaration.get("kinds")
+                    or any(
+                        not isinstance(kind, str) or kind not in CHECK_BONUS_KINDS
+                        for kind in declaration["kinds"]
+                    )
+                    or len(set(declaration["kinds"])) != len(declaration["kinds"])
+                    for declaration in bonus_dice
+                )
+            ):
+                raise CombatCatalogError(
+                    f"combat condition bonus dice are invalid: {condition_id}"
+                )
+            # A condition may declare resistance, a passive flag, or bonus
+            # dice only; if it declares no mechanics and no attack modes the
+            # entry is still rejected, matching the P1 rule that every entry
+            # states something.
             if modes is None and (
                 resist_types is not None
+                or bonus_dice is not None
                 or any(
                     key in entry for key in (
                         "implies_incapacitated", "speed_zero",

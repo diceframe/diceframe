@@ -421,7 +421,7 @@ def test_successful_counter_save_lets_the_spell_resolve() -> None:
 
 # --- #7 bless adds its d4 to the counter save ---------------------------
 
-def test_bless_bonus_applies_to_the_counter_save() -> None:
+def test_condition_check_bonus_applies_to_the_counter_save() -> None:
     runtime = Dnd2024Runtime()
     _runtime, engine, instance = new_combat(sheet=paladin_sheet(runtime))
 
@@ -438,7 +438,7 @@ def test_bless_bonus_applies_to_the_counter_save() -> None:
     check = event_of(resolved, "check.resolved")
     assert check["kind"] == "saving_throw"
     assert check["rolls"] == [3]
-    assert check["bless_bonus"] == 2
+    assert check["check_bonus"] == 2
     assert check["success"] is False
     assert "dnd2024.spell.countered" in event_types(resolved)
     # The earlier bless keeps its concentration: the countered spell never cast.
@@ -446,6 +446,50 @@ def test_bless_bonus_applies_to_the_counter_save() -> None:
     assert "blessed" in engine._actor_view(
         instance, combat_of(instance), "player:gm",
     )["conditions"]
+
+
+def test_a_paralyzed_caster_still_rolls_the_con_counter_save() -> None:
+    runtime = Dnd2024Runtime()
+    _runtime, engine, instance = new_combat(sheet=paladin_sheet(runtime))
+
+    blessed = cast(engine, instance, "spell:bless", 1, ["player:gm"], tag="bless")
+    resolve_decision(engine, instance, pending_of(blessed)[0], "decline")
+
+    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], tag="cure")
+    decision = pending_of(result)[0]
+    # The shipped paralysis family only auto-fails STR/DEX saves, so the
+    # counterspell CON save still rolls d20 and then the bless d4.
+    canonical(instance)["conditions"] = {
+        "blessed": {"source": "test"}, "paralyzed": {},
+    }
+    resolved = resolve_decision(engine, instance, decision, "counter", rolls=[2, 3])
+
+    check = event_of(resolved, "check.resolved")
+    assert check["rolls"] == [2]
+    assert check["check_bonus"] == 3
+    assert "auto_failed" not in check
+
+
+def test_a_registry_declared_con_auto_fail_skips_every_bonus_die() -> None:
+    runtime = Dnd2024Runtime()
+    _runtime, engine, instance = new_combat(sheet=paladin_sheet(runtime))
+
+    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], tag="cure")
+    decision = pending_of(result)[0]
+    # No shipped condition auto-fails CON saves; a synthetic registry entry is
+    # the only way to exercise the generic auto-fail branch end to end.
+    engine.catalog.conditions["test_con_auto_fail"] = {"auto_fail_saves": ["con"]}
+    canonical(instance)["conditions"] = {
+        "blessed": {"source": "test"}, "test_con_auto_fail": {},
+    }
+    resolved = resolve_decision(engine, instance, decision, "counter")
+
+    check = event_of(resolved, "check.resolved")
+    assert check["auto_failed"] is True
+    assert check["rolls"] == []
+    assert check["check_bonus"] == 0
+    assert check["check_bonus_rolls"] == []
+    assert "dnd2024.spell.countered" in event_types(resolved)
 
 
 # --- #8 bonus-action spells spend the bonus action when countered -------

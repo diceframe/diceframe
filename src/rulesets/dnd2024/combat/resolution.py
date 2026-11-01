@@ -25,7 +25,7 @@ from .primitives import (
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
-from .check_modes import condition_flags
+from .check_modes import condition_check_bonus_rolls, condition_flags
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
@@ -236,6 +236,10 @@ class CombatResolutionMixin:
             else:
                 proficiency = 0
             attack_bonus = modifier + proficiency
+            if is_ranged_weapon:
+                # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
+                # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
+                attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
             damage_formula = str(weapon["damage"])
             damage_type = str(weapon["damage_type"])
             long_range = int(weapon.get("long_range") or weapon.get("thrown_range") or weapon["range"])
@@ -265,10 +269,11 @@ class CombatResolutionMixin:
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
         natural = max(first, second) if advantage and second else min(first, second) if disadvantage and second else first
-        bless_bonus = 0
-        if "blessed" in actor["conditions"]:
-            bless_bonus = int(rng.randint(1, 4))
-        total = natural + attack_bonus + bless_bonus
+        check_bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, actor["conditions"], "attack", rng,
+        )
+        check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+        total = natural + attack_bonus + check_bonus
         target_ac = effective_armor_class(target)
         # 精通重击 / 高效重击只拓宽武器与徒手攻击的重击阈值：取已拥有特性中
         # 最小的阈值，缺省 20。天然 1 的失手判定继续由下方 hit 组合表达。
@@ -300,7 +305,8 @@ class CombatResolutionMixin:
             "type": "check.resolved", "kind": "attack", "actor_id": actor_id,
             "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
             "target_id": target_id, "rolls": [value for value in (first, second) if value],
-            "natural": natural, "modifier": attack_bonus, "bless_bonus": bless_bonus,
+            "natural": natural, "modifier": attack_bonus,
+            "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "total": total, "target": target_ac, "success": hit, "critical": critical,
         }
         if crit_threshold != 20:
@@ -539,11 +545,12 @@ class CombatResolutionMixin:
                     rolls.append(int(rng.randint(1, 20)))
                 roll = max(rolls) if check_mode["mode"] == "advantage" else min(rolls)
                 bonus = int(actor["spell_attack_bonus"])
-                bless_bonus = 0
-                if "blessed" in visible_actor["conditions"]:
-                    # Bless 对每一次攻击掷骰各加一枚 d4，多道射线逐 beam 各掷一次。
-                    bless_bonus = int(rng.randint(1, 4))
-                total = roll + bonus + bless_bonus
+                check_bonus_rolls = condition_check_bonus_rolls(
+                    self.catalog.conditions, visible_actor["conditions"], "attack", rng,
+                )
+                # 加值骰逐掷骰各一枚：多道射线逐 beam 各掷一次。
+                check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+                total = roll + bonus + check_bonus
                 target_ac = effective_armor_class(target)
                 succeeded = roll != 1 and (roll == 20 or total >= target_ac)
                 critical = roll == 20
@@ -558,7 +565,9 @@ class CombatResolutionMixin:
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
                     "target_id": target_id, "rolls": rolls, "natural": roll,
                     "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
-                    "modifier": bonus, "bless_bonus": bless_bonus, "total": total,
+                    "modifier": bonus,
+                    "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                    "total": total,
                     "target": target_ac, "success": succeeded, "critical": critical,
                 })
                 if succeeded:
@@ -606,12 +615,13 @@ class CombatResolutionMixin:
                     self.catalog.conditions, target["conditions"],
                 )["auto_fail_saves"]
                 if auto_fail:
-                    # 麻痹/昏迷等自动失败：不消耗任何骰，也不请求 bless 骰。
+                    # 麻痹/昏迷等自动失败：不消耗任何骰，也不掷加值骰。
                     events.append({
                         "type": "check.resolved", "kind": "saving_throw",
                         "actor_id": target_id, "source_actor_id": actor_id,
                         "ability": save_ability, "rolls": [], "natural": 0,
-                        "modifier": modifier, "bless_bonus": 0, "total": 0,
+                        "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                        "total": 0,
                         "target": actor["spell_save_dc"], "success": False,
                         "auto_failed": True,
                     })
@@ -622,14 +632,19 @@ class CombatResolutionMixin:
                     first = int(rng.randint(1, 20))
                     second = int(rng.randint(1, 20)) if rage_advantage else None
                     roll = max(first, second) if second is not None else first
-                    bless = int(rng.randint(1, 4)) if "blessed" in target["conditions"] else 0
-                    total = roll + modifier + bless
+                    check_bonus_rolls = condition_check_bonus_rolls(
+                        self.catalog.conditions, target["conditions"], "saving_throw", rng,
+                    )
+                    check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+                    total = roll + modifier + check_bonus
                     succeeded = total >= int(actor["spell_save_dc"])
                     check_event = {
                         "type": "check.resolved", "kind": "saving_throw", "actor_id": target_id,
                         "source_actor_id": actor_id, "ability": save_ability,
                         "rolls": [value for value in (first, second) if value is not None],
-                        "natural": roll, "modifier": modifier, "bless_bonus": bless, "total": total,
+                        "natural": roll, "modifier": modifier,
+                        "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                        "total": total,
                         "target": actor["spell_save_dc"], "success": succeeded,
                     }
                     if rage_advantage:
@@ -754,7 +769,8 @@ class CombatResolutionMixin:
                             "type": "check.resolved", "kind": "ability_check",
                             "actor_id": actor_id, "target_id": target_id,
                             "ability": actor["spell_ability"], "rolls": [roll],
-                            "natural": roll, "modifier": modifier, "bless_bonus": 0,
+                            "natural": roll, "modifier": modifier,
+                            "check_bonus": 0, "check_bonus_rolls": [],
                             "total": roll + modifier, "target": 10 + source_level,
                             "success": success, "condition": condition_id,
                         })
@@ -1276,7 +1292,8 @@ class CombatResolutionMixin:
                     "actor_id": actor_id,
                     "source_actor_id": str(meta.get("source_actor_id") or ""),
                     "ability": ability, "rolls": [], "natural": 0,
-                    "modifier": modifier, "bless_bonus": 0, "total": 0,
+                    "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                    "total": 0,
                     "target": dc, "success": False, "auto_failed": True,
                     "repeat_save": True,
                 })
@@ -1285,8 +1302,11 @@ class CombatResolutionMixin:
             first = int(rng.randint(1, 20))
             second = int(rng.randint(1, 20)) if rage_advantage else None
             roll = max(first, second) if second is not None else first
-            bless = int(rng.randint(1, 4)) if "blessed" in actor["conditions"] else 0
-            total = roll + modifier + bless
+            check_bonus_rolls = condition_check_bonus_rolls(
+                self.catalog.conditions, actor["conditions"], "saving_throw", rng,
+            )
+            check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+            total = roll + modifier + check_bonus
             success = total >= dc
             check_event = {
                 "type": "check.resolved", "kind": "saving_throw",
@@ -1294,7 +1314,8 @@ class CombatResolutionMixin:
                 "source_actor_id": str(meta.get("source_actor_id") or ""),
                 "ability": ability,
                 "rolls": [value for value in (first, second) if value is not None],
-                "natural": roll, "modifier": modifier, "bless_bonus": bless,
+                "natural": roll, "modifier": modifier,
+                "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
                 "total": total, "target": dc, "success": success,
                 "repeat_save": True,
             }

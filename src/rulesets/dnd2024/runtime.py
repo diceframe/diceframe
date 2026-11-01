@@ -1124,7 +1124,8 @@ class Dnd2024Runtime:
             "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
             "total", "target", "success", "critical", "delta", "amount", "damage_type",
             "healing",
-            "rolls", "advantage_mode", "advantage_sources", "bless_bonus",
+            "rolls", "advantage_mode", "advantage_sources", "check_bonus",
+            "check_bonus_rolls",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
         }

@@ -118,7 +118,16 @@ class CharacterDerivationMixin:
 
         background_feat_refs = [str(background["feat_ref"])] if background.get("feat_ref") else []
         species_feat_refs = list(draft.get("species_feat_refs") or [])
-        feat_refs = list(dict.fromkeys([*background_feat_refs, *species_feat_refs]))
+        class_feature_feat_choices = deepcopy(draft.get("class_feature_feat_choices") or {})
+        class_feature_feat_refs = (
+            [str(class_feature_feat_choices["fighting_style"])]
+            if "fighting_style" in set(class_entity.get("level_1_feature_ids") or [])
+            and isinstance(class_feature_feat_choices.get("fighting_style"), str)
+            else []
+        )
+        feat_refs = list(dict.fromkeys([
+            *background_feat_refs, *species_feat_refs, *class_feature_feat_refs,
+        ]))
         feat_choice_answers = deepcopy(draft.get("feat_choice_answers") or {})
         skilled_refs = list(
             (feat_choice_answers.get("feat:skilled") or {}).get("proficiencies") or []
@@ -282,6 +291,7 @@ class CharacterDerivationMixin:
                 "species_choice_answers": deepcopy(draft.get("species_choice_answers") or {}),
                 "species_skill_refs": species_skills,
                 "species_feat_refs": species_feat_refs,
+                "class_feature_feat_choices": class_feature_feat_choices,
                 "feat_choice_answers": feat_choice_answers,
                 "class_tool_refs": list(draft.get("class_tool_refs") or []),
                 "language_refs": language_refs,

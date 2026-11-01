@@ -14,7 +14,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
-from .check_modes import condition_flags
+from .check_modes import condition_check_bonus_rolls, condition_flags
 from .primitives import CombatIntentError, actor_kind, enemy_actor
 from .triggered_spells import free_cast_resource
 
@@ -376,20 +376,26 @@ class CombatReactionSpellsMixin:
                 "type": "check.resolved", "kind": "saving_throw",
                 "actor_id": caster_id, "source_actor_id": threat_id,
                 "ability": "con", "rolls": [], "natural": 0, "modifier": modifier,
-                "bless_bonus": 0, "total": 0, "target": dc, "success": False,
+                "check_bonus": 0, "check_bonus_rolls": [],
+                "total": 0, "target": dc, "success": False,
                 "auto_failed": True, "counterspell": True,
             }
             succeeded = False
         else:
             roll = int(rng.randint(1, 20))
-            bless = int(rng.randint(1, 4)) if "blessed" in caster["conditions"] else 0
-            total = roll + modifier + bless
+            check_bonus_rolls = condition_check_bonus_rolls(
+                self.catalog.conditions, caster["conditions"], "saving_throw", rng,
+            )
+            check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+            total = roll + modifier + check_bonus
             succeeded = total >= dc
             check_event = {
                 "type": "check.resolved", "kind": "saving_throw",
                 "actor_id": caster_id, "source_actor_id": threat_id,
                 "ability": "con", "rolls": [roll], "natural": roll,
-                "modifier": modifier, "bless_bonus": bless, "total": total,
+                "modifier": modifier,
+                "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                "total": total,
                 "target": dc, "success": succeeded, "counterspell": True,
             }
         events.append(check_event)

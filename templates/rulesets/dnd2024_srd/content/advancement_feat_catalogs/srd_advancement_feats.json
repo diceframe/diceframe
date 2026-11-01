@@ -24,7 +24,8 @@
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p87:archery",
       "requires_feature": "fighting_style",
-      "repeatable": false
+      "repeatable": false,
+      "parameters": {"ranged_attack_bonus": 2}
     },
     "defense": {
       "category": "fighting_style",

@@ -447,6 +447,34 @@ def test_lucky_advantage_face_also_covers_death_saves_and_spell_attacks(runtime,
     assert _pool(instance, "lucky_points")["current"] == 1
 
 
+def test_a_blessed_attackers_bonus_die_survives_the_lucky_window(runtime, sheets) -> None:
+    """The window re-roll keeps the settled ``check_bonus`` (S-P3 #9 migration)."""
+
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[1, 20])
+    _grant_feat(runtime, instance)
+    _set_enemy_condition(instance, {"blessed": {"source": "test"}})
+    events = _enemy_attack(engine, instance, [15, 4])
+
+    decision = _pending(instance)[0]
+    assert decision["window_code"] == "lucky_disadvantage"
+    assert decision["check"]["check_bonus"] == 4
+    assert decision["check"]["check_bonus_rolls"] == [
+        {"condition": "blessed", "die": 4, "roll": 4},
+    ]
+
+    events = _resolve(engine, instance, decision, "spend", rng=SequenceRng([2]))
+    check = _checked(events)
+    assert check["natural"] == 2
+    assert check["modifier"] == 4
+    # The d4 is a settled bonus, not a window die: it is re-summed into the
+    # total but never renamed into the window_bonus family.
+    assert check["check_bonus"] == 4
+    assert check["total"] == 10
+    assert "window_bonus" not in check
+    assert "window_bonus_rolls" not in check
+    assert check["success"] is False
+
+
 # --------------------------------------------------------------------------
 # C — Cutting Words
 # --------------------------------------------------------------------------
