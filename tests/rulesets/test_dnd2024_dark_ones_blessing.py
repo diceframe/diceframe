@@ -395,6 +395,47 @@ def test_two_spell_beams_each_kill_once_and_keep_max() -> None:
     assert combat["enemies"]["goblin-2"]["hp"] == 0
 
 
+# --- #12b the same target hit by several beams triggers once --------------
+
+@pytest.mark.parametrize("beam_count", [2, 3])
+def test_repeated_beams_on_one_defeated_target_grant_once(beam_count: int) -> None:
+    _runtime, engine, instance = warlock_instance()
+    start(engine, instance, [enemy("goblin-1", hp=1)])
+    grant(instance, "gm", "spell:scorching_ray")
+
+    result = cast(
+        engine, instance, "spell:scorching_ray", 2,
+        ["enemy:goblin-1"] * beam_count,
+        rolls=[10, 1, 1] * beam_count,
+    )
+
+    damage_events = [
+        event for event in events_of(result)
+        if event["type"] == "resource.changed"
+        and event.get("target_id") == "enemy:goblin-1"
+    ]
+    assert len(damage_events) == beam_count
+    assert len(temp_events(result)) == 1
+    assert resources(instance)["temp_hp"] == 5
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 0
+
+
+def test_a_later_beam_that_first_crosses_the_threshold_grants_once() -> None:
+    _runtime, engine, instance = warlock_instance()
+    start(engine, instance, [enemy("goblin-1", hp=10)])
+    grant(instance, "gm", "spell:scorching_ray")
+
+    result = cast(
+        engine, instance, "spell:scorching_ray", 2,
+        ["enemy:goblin-1", "enemy:goblin-1"],
+        rolls=[10, 1, 1, 10, 6, 6],
+    )
+
+    assert len(temp_events(result)) == 1
+    assert resources(instance)["temp_hp"] == 5
+    assert ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["hp"] == 0
+
+
 # --- #13 the saving-throw damage path also triggers -----------------------
 
 def test_saving_throw_kill_grants_temp_hp() -> None:

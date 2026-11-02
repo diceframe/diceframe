@@ -198,11 +198,19 @@ class CombatResolutionMixin:
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
+        actor_view: dict[str, Any] | None = None,
+        target_view: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
         target_id = str(intent["target_id"])
-        actor = self._actor_view(instance, combat, actor_id)
-        target = self._actor_view(instance, combat, target_id)
+        actor = (
+            actor_view if actor_view is not None
+            else self._actor_view(instance, combat, actor_id)
+        )
+        target = (
+            target_view if target_view is not None
+            else self._actor_view(instance, combat, target_id)
+        )
         ability = ""
         if actor["kind"] in {"player", "companion"}:
             # Companion 是"己方角色"：武器与徒手攻击走玩家同一套目录/能力确定性链，
@@ -679,9 +687,11 @@ class CombatResolutionMixin:
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
                     events.extend(self._concentration_events(target, damage, rng))
-                    dealt[target_id] = dealt.get(target_id, 0) + damage
+                    prior_dealt = dealt.get(target_id, 0)
+                    dealt[target_id] = prior_dealt + damage
                     events.extend(self._enemy_defeated_feature_events(
                         instance, combat, actor_id, target, dealt[target_id],
+                        prior_damage=prior_dealt,
                     ))
                     if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                         defeated_targets.add(target_id)
@@ -777,9 +787,11 @@ class CombatResolutionMixin:
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
                         events.extend(self._concentration_events(target, damage, rng))
-                        dealt[target_id] = dealt.get(target_id, 0) + damage
+                        prior_dealt = dealt.get(target_id, 0)
+                        dealt[target_id] = prior_dealt + damage
                         events.extend(self._enemy_defeated_feature_events(
                             instance, combat, actor_id, target, dealt[target_id],
+                            prior_damage=prior_dealt,
                         ))
                         if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                             defeated_targets.add(target_id)
@@ -803,9 +815,11 @@ class CombatResolutionMixin:
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
                 events.extend(self._concentration_events(target, damage, rng))
-                dealt[target_id] = dealt.get(target_id, 0) + damage
+                prior_dealt = dealt.get(target_id, 0)
+                dealt[target_id] = prior_dealt + damage
                 events.extend(self._enemy_defeated_feature_events(
                     instance, combat, actor_id, target, dealt[target_id],
+                    prior_damage=prior_dealt,
                 ))
                 if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
                     defeated_targets.add(target_id)
@@ -1077,7 +1091,7 @@ class CombatResolutionMixin:
 
     def _enemy_defeated_feature_events(
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
-        target: dict[str, Any], damage: int,
+        target: dict[str, Any], damage: int, prior_damage: int = 0,
     ) -> list[dict[str, Any]]:
         """Temp-HP grants from owned features that trigger on a defeated enemy.
 
@@ -1085,10 +1099,13 @@ class CombatResolutionMixin:
         resistance, saves and riders), so the trigger agrees with the existing
         defeat check.  In multi-hit spell batches (extra rays/beams onto the
         same target) callers pass the per-target damage accumulated for this
-        cast, matching the batch defeat check that also uses the accumulated
-        total.  Features opt in through the closed parameter set
-        ``defeat_temp_hp_ability`` / ``defeat_temp_hp_add_class_level`` /
-        ``defeat_share_range_ft``; the engine never branches on a feature name.
+        cast plus the prior accumulated damage, matching the batch defeat check
+        that also uses the accumulated total.  Only the settlement that first
+        crosses the threshold triggers, so repeated beams on one target cannot
+        grant the same feature twice.  Features opt in through the closed
+        parameter set ``defeat_temp_hp_ability`` /
+        ``defeat_temp_hp_add_class_level`` / ``defeat_share_range_ft``; the
+        engine never branches on a feature name.
 
         Path a: the holder is the attacker (no range limit).  Path b: someone
         else defeated the enemy while the holder is within the declared share
@@ -1100,7 +1117,11 @@ class CombatResolutionMixin:
             return []
         hp = int(target.get("hp", 0) or 0)
         dealt = int(damage)
-        if hp <= 0 or hp - dealt > 0:
+        prior = int(prior_damage)
+        # Only the settlement that first crosses the defeat threshold triggers.
+        # A target already defeated by an earlier ray of the same batch keeps
+        # taking its damage events but grants no second defeat feature.
+        if hp <= 0 or hp - prior <= 0 or hp - dealt > 0:
             return []
         target_id = str(target["actor_id"])
         events: list[dict[str, Any]] = []

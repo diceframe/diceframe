@@ -377,7 +377,8 @@ class CombatReactionSpellsMixin:
         amount = int(damage_event["amount"])
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
-        events.extend(self._concentration_events(defender, amount, rng))
+        concentration_events = self._concentration_events(defender, amount, rng)
+        events.extend(concentration_events)
         events.extend(self._enemy_defeated_feature_events(
             instance, combat, attacker_id, defender, amount,
         ))
@@ -401,7 +402,33 @@ class CombatReactionSpellsMixin:
             "target_id": attacker_id,
             "weapon_ref": str(melee_attacks[0]["weapon_ref"]),
         }
-        counterattack = self._attack_events(instance, combat, attack_intent, rng)
+        counter_actor = defender
+        counter_target = self._actor_view(instance, combat, attacker_id)
+        if any(
+            event["type"] == "dnd2024.concentration.ended"
+            and str(event["actor_id"]) == defender_id
+            for event in concentration_events
+        ):
+            # The hit ended the defender's concentration.  The reducer has not
+            # applied that yet, so derive the post-damage view here: conditions
+            # owned by the ended concentration (Bless, Bane, ...) must not feed
+            # the counterattack's own check or damage.
+            counter_actor = deepcopy(defender)
+            counter_target = deepcopy(counter_target)
+            counter_actor["concentration"] = None
+            for view in (counter_actor, counter_target):
+                conditions = view.get("conditions") or {}
+                view["conditions"] = {
+                    condition_id: meta for condition_id, meta in conditions.items()
+                    if not (
+                        isinstance(meta, dict)
+                        and str(meta.get("concentration_owner") or "") == defender_id
+                    )
+                }
+        counterattack = self._attack_events(
+            instance, combat, attack_intent, rng,
+            actor_view=counter_actor, target_view=counter_target,
+        )
         cost_index = next(
             index for index, event in enumerate(counterattack)
             if event["type"] == "dnd2024.attack.spent"

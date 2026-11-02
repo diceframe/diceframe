@@ -153,6 +153,75 @@ def _reaction_feature_choices(engine, instance, *, amount: int = 6) -> list[dict
     )
 
 
+def _give_bless(instance: GameInstance, uid: str = "gm") -> None:
+    """Concentration-owned Bless on the defender, as the real spell applies it."""
+
+    character = _player(instance)
+    character.setdefault("conditions", {})["blessed"] = {
+        "concentration_owner": f"player:{uid}",
+        "source_spell_ref": "spell:bless",
+        "source_actor_id": f"player:{uid}",
+    }
+    magic = character.setdefault("spellcasting", {}).setdefault("class", {})
+    magic["concentration"] = {"spell_ref": "spell:bless"}
+
+
+def _counter_attack_check(events: list[dict]) -> dict:
+    return next(
+        event for event in events
+        if event["type"] == "check.resolved" and event["kind"] == "attack"
+    )
+
+
+def test_failed_concentration_from_the_hit_removes_bless_before_the_counterattack() -> None:
+    engine, instance = _instance()
+    _give_bless(instance)
+    # Force a genuinely failing save: the preset's +8 CON save would otherwise
+    # reach the DC 10 floor even on a natural 1.
+    _player(instance)["derived"].setdefault("saving_throws", {})["con"] = 0
+    _hit_once(engine, instance, [15, 4])
+
+    rng = SequenceRng([1, 1, 15, 4])
+    events = _resolve(
+        engine, instance, rng=rng,
+        option="feature", feature_id="retaliation",
+    )
+
+    assert rng.values == []
+    ended = next(
+        event for event in events if event["type"] == "dnd2024.concentration.ended"
+    )
+    assert ended["actor_id"] == "player:gm"
+    check = _counter_attack_check(events)
+    assert check["check_bonus"] == 0
+    assert check["check_bonus_rolls"] == []
+    assert _player(instance)["conditions"].get("blessed") is None
+
+
+def test_successful_concentration_from_the_hit_keeps_bless_for_the_counterattack() -> None:
+    engine, instance = _instance()
+    _give_bless(instance)
+    _hit_once(engine, instance, [15, 4])
+
+    rng = SequenceRng([20, 2, 15, 3, 4])
+    events = _resolve(
+        engine, instance, rng=rng,
+        option="feature", feature_id="retaliation",
+    )
+
+    assert rng.values == []
+    assert not any(
+        event["type"] == "dnd2024.concentration.ended" for event in events
+    )
+    check = _counter_attack_check(events)
+    assert check["check_bonus"] == 3
+    assert check["check_bonus_rolls"] == [
+        {"condition": "blessed", "die": 4, "roll": 3},
+    ]
+    assert check["total"] == 15 + int(check["modifier"]) + 3
+    assert "blessed" in _player(instance)["conditions"]
+
+
 def test_retaliation_is_offered_by_the_generic_hit_reaction_decision() -> None:
     engine, instance = _instance()
 

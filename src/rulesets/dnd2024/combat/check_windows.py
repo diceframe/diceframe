@@ -512,12 +512,21 @@ class CombatCheckWindowsMixin:
         }
         if code == "lucky_disadvantage":
             # Lucky imposes disadvantage: append the lucky d20 and keep the
-            # lower natural result. Re-normalizing the sources keeps
-            # advantage/disadvantage cancellation declarative.
+            # lower natural result.  Re-normalizing the sources keeps
+            # advantage/disadvantage cancellation declarative: an advantage
+            # roll cancelled by Lucky collapses to the single lucky d20.
             sources = list(check.get("advantage_sources") or [])
             sources.append({"code": "lucky", "mode": "disadvantage"})
             mode = mode_from_sources(sources)
-            natural = min(int(check["natural"]), die)
+            if mode == "disadvantage":
+                natural = min(int(check["natural"]), die)
+            elif mode == "advantage":  # pragma: no cover - Lucky only adds disadvantage
+                natural = max(int(check["natural"]), die)
+            else:
+                # Advantage and Lucky's disadvantage cancel: the lucky d20 is
+                # the single remaining roll, not a candidate in a keep-lowest
+                # comparison against the discarded advantage pair.
+                natural = die
             rolls = [*list(check.get("rolls") or []), die]
             check.update({
                 **window,

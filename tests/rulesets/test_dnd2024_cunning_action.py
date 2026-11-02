@@ -235,6 +235,62 @@ def test_hide_action_spends_the_action_and_applies_invisible() -> None:
     assert _economy(instance)["bonus_action"] == 1
 
 
+def _end_combat(instance, engine) -> dict:
+    return _resolve(instance, engine, {
+        "intent_id": "end-combat", "type": "combat.end", "submitted_by": "gm",
+    })
+
+
+def _start_next_combat(instance, engine) -> dict:
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-2", "type": "combat.start",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "enemies": [_goblin("goblin-2")],
+    }, SequenceRng([20, 1]))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    return ruleset_runtime.state(instance)["combat"]
+
+
+def test_hide_invisibility_ends_with_the_combat() -> None:
+    _runtime, engine, instance = _instance()
+    _hide(instance, engine, [13])
+    assert "invisible" in _canonical(instance)["conditions"]
+
+    _end_combat(instance, engine)
+
+    assert "invisible" not in _canonical(instance)["conditions"]
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "ended"
+
+
+def test_hide_invisibility_does_not_carry_into_the_next_combat() -> None:
+    _runtime, engine, instance = _instance()
+    _hide(instance, engine, [13])
+    _end_combat(instance, engine)
+
+    combat = _start_next_combat(instance, engine)
+
+    assert "invisible" not in _canonical(instance)["conditions"]
+    view = engine._actor_view(instance, combat, "player:gm")
+    assert "invisible" not in view["conditions"]
+
+
+def test_combat_end_clears_only_combat_and_turn_scoped_conditions() -> None:
+    _runtime, engine, instance = _instance()
+    _canonical(instance)["conditions"] = {
+        "stoneskinned": {"duration": "until_healed"},
+        "faerie_fire": {"duration": "actor_turn_start"},
+        "invisible": {"duration": "combat"},
+    }
+
+    _end_combat(instance, engine)
+
+    conditions = _canonical(instance)["conditions"]
+    assert "invisible" not in conditions
+    assert "faerie_fire" not in conditions
+    assert "stoneskinned" in conditions
+
+
 def test_failed_hide_resolves_the_check_without_a_condition() -> None:
     _runtime, engine, instance = _instance(enemies=[_goblin(wis=10)])
     result = _hide(instance, engine, [1])
