@@ -95,8 +95,9 @@ game carry for that continuity.
 
 ## Upgrade and support boundary
 
-The current writer uses instance schema 47; migration 46→47 adds the one-use
-resource recovery authority and reader fence. Existing values are retained;
+The current writer uses instance schema 48; migration 46→47 adds the one-use
+resource recovery authority and reader fence, while 47→48 fences affection
+rollback snapshots without inferring historical affection scores. Existing values are retained;
 historical plans and marks are not generated. Older programs cannot enforce the
 new archive authority and reject new saves. Preserve a complete data backup
 before upgrading and do not force new saves through an older reader. Cancel a
