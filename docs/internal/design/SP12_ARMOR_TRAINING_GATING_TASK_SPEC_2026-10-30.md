@@ -3,7 +3,7 @@
 - 阶段：1C 共用原语
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1C 切片表 S-P12 ——"护甲受训门控｜未受训穿甲 → 力量/敏捷检定劣势 + **不能施法**；含力量要求（速度 -10）、隐匿劣势、穿脱时长；直接影响战斗引擎与施法校验（Armor Training 专长同源）"
 - 前置依赖：改动 `combat/resolution.py`，与 1B 的 P6（misty_step）同文件。**必须在 P6 合入、工作区干净后开工**；当前工作区 resolution.py / check_modes.py / validation.py / engine.py 的未提交修改是 P6 会话半成品，一律不得触碰。本任务书锚点基于 `1009be03`，执行侧须重读工作区版本核对行号漂移。
-- 状态：已执行并审核通过（2026-11-02；执行报告见 §8，审核记录见 §9，迁移债 D1–D7 已登记）
+- 状态：未开工
 
 ## 1. 规则语义与原文出处
 
@@ -284,57 +284,3 @@ git grep -n "armor_training" -- src         # 确认改动面收敛在白名单�
 | D6 | Medium Armor Master（中甲敏上限 3）/ Heavy Armor Master（重甲减伤） | S-P5 族 AC 扩展 / 伤害减免切片 |
 | D7 | 前端展示 armor_training 状态（若玩家需要看到"未受训"警告） | 有真实需求时镜像 mirror + UI |
 ```
-
-### 执行报告（2026-11-02，S-P12 执行侧填写）
-
-## S-P12 执行报告
-
-- 基线：HEAD=`3cce67f`（P6 合入并推送 `origin/backup/cfp` 后开工；任务书原锚点 `1009be03` 已陈旧）。行号漂移按工作区重读：`resolution.py` attack 分支 `check_mode` 由旧 L249-255 → L269-319；saving_throw 由旧 L474-510 → L696-755；`_save_repeat_events` 由旧 L966-1008 → L1382-1465。`validation.py` `_validate_spell` 旧 L407-427 → L450-459；`view.py` `_player_view` 旧 L131-139 → L122-188；`reaction_spells.py` 旧 L42-65 → L77-109。
-- 改动文件清单（与 §3 白名单一致）：
-  - [x] §3.1 items ×4：`leather_armor.json`、`studded_leather_armor.json`、`chain_shirt.json`、`chain_mail.json`（`shield.json` 未改）
-  - [x] §3.2 `character/derivation.py`
-  - [x] §3.3 `character/reconciliation.py`
-  - [x] §3.4 `combat/view.py`
-  - [x] §3.5 `combat/validation.py`
-  - [x] §3.6 `combat/resolution.py`（attack 内联劣势）
-  - [x] §3.7 `combat/resolution.py`（saving_throw / save_repeat 两分支归一）
-  - [x] §3.8 `combat/reaction_spells.py`
-  - [x] §3.9 tests：新建 `test_dnd2024_armor_training.py`；`test_dnd2024_combat.py` 追加 8 例；`test_dnd2024_live_equipment_reconciliation.py` 两处调用补参；`test_dnd2024_draconic_resilience.py` 两处调用补参 + 未受训盾牌断言按新规则重写；`test_dnd2024_character_builder.py` 合成目录补 `category` 与 `armor_proficiencies`（本切片 fail-closed 暴露的测试夹具数据缺口，§7.6 逐一更新）
-- 测试矩阵：T1–T18 全部通过（20 条新用例 + 全量回归）：
-  - T1 `test_item_catalog_declares_armor_training_fields`
-  - T2 `test_shield_bonus_requires_training`
-  - T3 `test_untrained_armor_keeps_its_armor_class`
-  - T4 `test_trained_medium_armor_and_shield_have_no_training_gate` + `test_trained_armor_still_allows_spellcasting`
-  - T5 `test_untrained_heavy_armor_reports_every_consequence`
-  - T6 `test_meeting_the_strength_requirement_removes_the_speed_penalty`
-  - T7 `test_armor_without_a_category_fails_closed`
-  - T8 `test_creation_lands_armor_training_and_keeps_base_speed`
-  - T9 `test_reconciliation_recomputes_training_when_armor_changes` + `test_training_change_penetrates_an_equal_armor_class_shortcut`
-  - T10 `test_actor_speed_is_net_and_training_is_copied`
-  - T11 `test_untrained_armor_blocks_spellcasting` + `test_trained_armor_still_allows_spellcasting`
-  - T12 `test_untrained_armor_suppresses_reaction_spell_choices`
-  - T13 `test_untrained_armor_imposes_attack_disadvantage_and_cancels_advantage`
-  - T14 `test_untrained_armor_imposes_disadvantage_on_strength_and_dexterity_saves`
-  - T15 `test_rage_advantage_cancels_untrained_disadvantage_on_strength_saves`（法术豁免 + `_save_repeat_events` 两分支）
-  - T16 `test_spell_attacks_ignore_untrained_armor_disadvantage`
-  - T17 `test_companion_projection_inherits_armor_training`
-  - T18 `test_constitution_save_is_unaffected_by_untrained_armor` + `tests/rulesets` 全量回归
-- 验收命令输出摘要（Linux/Python 3.11，`/tmp/dfvenv`）：
-  - `test_dnd2024_armor_training.py` + `test_dnd2024_live_equipment_reconciliation.py`：**40 passed**
-  - `test_dnd2024_combat.py`：**38 passed**
-  - `tests/rulesets` 全量：**958 passed**（6:20；= S-P6 基线 938 + 本切片 20）
-  - `git grep -n "untrained_armor" -- src`：仅白名单 5 文件命中，`check_modes.py` **零命中**
-  - `git grep -l "armor_training" -- src`：恰为 derivation / reconciliation / view / validation / resolution / reaction_spells 6 文件
-- 停止条件触发记录：无。T15 的「rage + untrained 力量豁免相消」在 `_spell_events` 真实目录无 str 豁免法术，按 S-P2 先例在内存副本把 `sacred_flame.save` 改为 `str`（bundle 副本不落盘），并用 `_save_repeat_events` 的真实 str `save_repeat` 覆盖同一归一逻辑；不新增目录数据。
-- 与 S-P10 实现的合并顺序：S-P10 已合入本基线，本切片以 S-P10 的 `check_bonus` / `check_bonus_rolls` 结构为基，在其后叠加 untrained 归一；未改动 `check_modes.py`、事件白名单或 `bless_bonus` 管线，二者无冲突。
-- 迁移债：D1–D7 按上表维持登记；**D2 的运行时消费（Hide 双骰）仍归 S-P8**，本切片只交付数据与 `actor["armor_training"]["stealth_disadvantage"]` 派生标记。
-
-## 9. 审核记录（2026-11-02）
-
-- 验收复跑核实：审核端 Linux / Python 3.11 复跑 §5 验收——`test_dnd2024_armor_training.py` + `test_dnd2024_live_equipment_reconciliation.py` 40 passed、`test_dnd2024_combat.py` 38 passed（合计 78，与 §8 报告一致；任务书 §5 命令二的 `tests/rulesets/rulesets/` 双层路径系笔误，按实际路径 `tests/rulesets/test_dnd2024_combat.py` 复跑）；`git grep -n "untrained_armor" -- src` 命中恰为 derivation / resolution / validation / reaction_spells 白名单文件、`check_modes.py` 零命中；`git grep -l "armor_training" -- src` 恰为 6 文件；`tests/rulesets` 全量 976 passed（当前 HEAD `0867056`，= 本切片 958 + S-P8 18）。
-- 白名单合规：`git show 9f30794` 15 文件中 13 个在 §3 白名单内；2 个白名单外测试文件经 diff 复核均为 §8 声明的必要夹具更新，裁决接受——`test_dnd2024_character_builder.py`（合成目录补 `armor_proficiencies` 与 `category`，fail-closed 校验暴露的夹具数据缺口，非断言放水）、`test_dnd2024_draconic_resilience.py`（两处 `derive_armor_class` 调用补必填参数，属停止条件 6 预见的新调用方逐一更新；未受训盾牌断言 17→15 按新规则重推——术士无盾牌受训，旧断言在新规则下事实性错误，重写方向正确）。
-- 语义复核（对照 §1.1/§3 逐条）：`derive_armor_class` 新参数 keyword-only 必填、无默认值（§6.5）；盾牌受训才计 +2、armor 分支不动（未受训甲 AC 照常，条款 5）；`derive_armor_training_state` 对缺失/非法 `category` 抛 `ValueError` 含 item id（条款 7 fail closed）；速度罚值恒 10 不叠加、脱甲经 reconciliation 重算恢复；攻击劣势内联 attack 分支、`spell_attack` 分支零注入（A13 不误伤）；豁免两分支 `save_sources` 经 `mode_from_sources` 归一、rage 优势 + untrained 劣势相消回单骰（RAW）；auto_fail 分支不动；concentration（con）豁免零改动（T18 断言）；`_reaction_spell_choices` 守卫段屏蔽反应施法、`_reaction_feature_choices` 不动；幂等短路扩为四元组（皮甲换链甲衫 AC 相同 training 不同必穿透）；actor `speed` 净值下限 0、`armor_training` deepcopy 下发；mirror / 前端 / 事件字段白名单零新增。
-- 禁止事项核对（§6 九条）：`check_modes.py` 零改动（grep 核实）；无拒穿逻辑（validation 仅施法门控）；src 无本切片新增具体护甲 id 字面量（既有 4 处命中均为遗留 compat / legacy engine / docstring）；无 condition 注册表新条目、无 events 白名单改动；未顺手补齐其余护甲 / 专长 / 穿脱时长。
-- 停止条件：无触发，与 §8 声明一致；T15 的 sacred_flame 内存副本改 str 豁免系 S-P2 先例的测试内构造（不落盘、不新增目录数据），核实成立。
-- D2 交叉核对：§8 债表 D2（`stealth_disadvantage` 的 hide 双骰消费归 S-P8）已由 S-P8 实现销账——`_hide_events` 读 `actor["armor_training"]["stealth_disadvantage"]` 经既有 `mode_from_sources` 接线，来源码 `stealth_disadvantage` 与本切片 `untrained_armor` 正确区分（隐匿劣势与受训无关），S-P8 §9.4 与其测试 D2 锁定。D1/D3–D7 维持登记。
-- 结论：S-P12 审核通过。

@@ -3,31 +3,7 @@
 - 阶段：1C 共用原语
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1C 切片表 S-P10 ——"条件攻击加值（平坦值或骰式）｜Archery +2、Bless +1d4；区别于 advantage/disadvantage 模式，必须进入统一攻击加值与骰迹管线"
 - 前置依赖：无硬切片依赖；与 S-P1 的 resolver 目录校验风格保持一致。1B 法术原语（P 系列）与本文档并行推进时，所有 combat 基线读取以 `git show HEAD` / `git grep ... HEAD` 为准，行号以基线提交为准，改动前先重读工作区版本核对漂移。
-- 状态：执行中（v1.1）
-
-## 0. 修订记录
-
-### v1.1（2026-11-01，审核端裁决）
-
-执行前基线核对触发 §7.3（`bless_bonus` 超预期命中）。审核端独立复核后的完整盘点与裁决：
-
-| 类别 | 位置 | v1.0 状态 | v1.1 裁决 |
-|---|---|---|---|
-| 真消费点 ×6 | resolution L268 attack、L542 spell_attack、L632 saving_throw、L1297 save_repeat；engine L1135 concentration；reaction_spells L392 counterspell（P7） | 前 5 在 §3.9；counterspell 白名单外 | 扩容；counterspell → 语义 kind `"saving_throw"` |
-| 恒 0 事件站点 ×4 | resolution L614、L1279（已知）+ L757（P8 dispel `ability_check`）+ reaction_spells L379（P7 auto_fail） | L757/L379 未列 | 补站点清单，不掷骰（裁剪 5 语义正确） |
-| 字段读取点 ×1 | check_windows.py L528（S-P3 `lucky_disadvantage` 重算 `total = natural + modifier + check.get("bless_bonus")`） | 白名单外、v1.0 未覆盖 | **强制扩容**：改 `check.get("check_bonus", 0)`，否则 blessed 目标被 Lucky 窗口干预时静默丢 d4（行为回归） |
-| 投影白名单 ×1 | runtime L1127 | §3.11 已覆盖 | 无需扩 |
-| 前端 ×1 | CombatLiveBar.vue L140（全前端唯一命中） | A25「frontend 零命中」为错误结论 | 扩容，最小替换 `bless_bonus → check_bonus` |
-| 测试断言 ×5 | counterspell L441、dispel L426、scorching_ray L384/L386/L400 | A26 记 3 处为错 | 更正为 5 处 |
-
-配套更正：
-
-1. 白名单新增 3 文件：`src/rulesets/dnd2024/combat/reaction_spells.py`、`src/rulesets/dnd2024/combat/check_windows.py`、`frontend-v2/src/components/play/CombatLiveBar.vue`；§6.1 字面量禁令显式延伸至 reaction_spells。
-2. §1.1 计数更正：真消费点 6 处、恒 0 站点 4 处；§3.9 映射表补 counterspell 行，§3.10 站点清单补 L757/L379/L528。
-3. A25/A26 事实更正；§4 矩阵新增 3 行（19 counterspell bless 回归含 auto-fail、20 dispel 站点恒 0、21 blessed × lucky 劣势窗口交互）。
-4. `window_bonus` / `window_bonus_rolls` 维持独立命名族，理由修正为 §6.5 双写禁止与字段族语义混写风险（结算期条件骰 vs 掷后干预骰），而非"语义差异"这一表述；S-P3 §8.2 #9 的可执行部分只有 L528 读取点迁移，本切片承接。
-5. 前端只做最小替换，不展示 `check_bonus_rolls`（骰迹展示登记为 UI 债）。
-6. 记录 §7.3 正确触发（超预期命中 → 停止报告，未擅自扩大范围）。
+- 状态：未开工
 
 ## 1. 规则语义与原文出处
 
@@ -39,7 +15,7 @@
    - 范围限定：加值仅作用于**远程武器**的攻击检定；投掷一把近战武器（`ranged_use` 但非 `is_ranged_weapon`）**不**适用，与本仓库 resolution 既有注释（"真正的远程武器 vs 近战武器被投掷……属性选择只应被前者排除"）的语义划分一致。
 2. **祝福术（Bless）加值范围**：
    - 出处：`.rulebooks/dnd5r/玩家手册2024/法术详述/1环.htm` L33 ——"在法术终止前，受术目标进行的每次**攻击检定与豁免检定**都将获得**1d4**的加值。"
-   - 结论：加值范围 = 攻击检定（含法术攻击检定）与豁免检定（含回合结束重复豁免、专注豁免、反制豁免），**不含属性检定**。v1.1 计数：真消费点 6 处（attack / spell_attack / saving_throw / save_repeat / concentration / counterspell），恒 0 事件站点 4 处（resolution L614、L1279、L757 与 reaction_spells L379）；全部落在合法范围内，泛化**不引入行为收窄**。
+   - 结论：加值范围 = 攻击检定（含法术攻击检定）与豁免检定（含回合结束重复豁免、专注豁免），**不含属性检定**。现有 6 处消费点全部落在合法范围内，泛化**不引入行为收窄**。
 3. 统一管线要求（主计划原文）："区别于 advantage/disadvantage 模式，必须进入统一攻击加值与骰迹管线"：
    - 平坦加值并入聚合加值（modifier），不新增 advantage/disadvantage 分支；
    - 骰式加值必须有可审计骰迹（每枚加值骰独立记录），RNG 消耗顺序锁定。
@@ -82,8 +58,8 @@
 | A22 | `src/rulesets/dnd2024/features/resolver.py` L56-80 | resolver 类持有 `bundle`（`__init__`）；L247-271 `actor_projection`：一次性输出 combat 需要的 feature 投影（`spell_grants`/`class_resources`/`unarmed_damage_die`/`unarmed_ability_choice`/`martial_arts_weapon_refs`）——**新增投影字段的 owning module** |
 | A23 | `src/rulesets/dnd2024/combat/view.py` L119-176 | 玩家 actor 构造：`"build": deepcopy(character["build"])`（feat_refs 可达）；L166-167 `martial_arts_weapon_refs` 并入点（新字段同段并入） |
 | A24 | view.py L208-248 | `_available_attacks`：玩家武器档案 = `equipment_refs` → `catalog.weapons` + item name；`martial_arts_profile()` 是"特性→武器档案变换"先例 |
-| A25 | `src/rulesets/dnd2024/runtime.py` L1116-1128 | `_recent_combat_events` 投影 `allowed_fields`：含 `"bless_bonus"`——公开事件契约字段清单。**v1.1 更正**：前端确有消费（`frontend-v2/src/components/play/CombatLiveBar.vue` L140），v1.0「frontend 零命中」结论错误 |
-| A26 | tests | **v1.1 更正**：`bless_bonus` 断言 5 处——`test_dnd2024_counterspell.py` L441、`test_dnd2024_dispel_magic.py` L426、`test_dnd2024_scorching_ray.py` L384/L386/L400（v1.0 记 3 处为错）；`SequenceRng` 基建在 `tests/rulesets/rulesets/test_dnd2024_combat.py` L20 与 `test_dnd2024_monk_common.py` L23 |
+| A25 | `src/rulesets/dnd2024/runtime.py` L1116-1128 | `_recent_combat_events` 投影 `allowed_fields`：含 `"bless_bonus"`——公开事件契约字段清单（前端不消费 bless_bonus，已 grep 验证 frontend 零命中） |
+| A26 | tests | `bless_bonus` 断言仅 3 处（git grep HEAD -- tests 计数）；`SequenceRng` 基建在 `tests/rulesets/rulesets/test_dnd2024_combat.py` L20 与 `test_dnd2024_monk_common.py` L23 |
 
 ## 3. 白名单改动规格（逐文件）
 
@@ -186,7 +162,7 @@ conditions 目录（A10 段）新增条目：
 - `kinds` 使用**语义 kind**（规则语言），不是事件 kind 值：`"attack"` = 一切攻击检定（含法术攻击）；`"saving_throw"` = 一切豁免检定（含重复豁免与专注豁免）；`"ability_check"` 预留（§1.2 裁剪 5）。
 - 不给 blessed 加其它键（attack_modes/ends_on 等仍由法术 effect 与施法链路管理）。
 
-### 3.9 `resolution.py` + `engine.py` + `reaction_spells.py`（6 处真消费点收束 + 4 处恒 0 站点）
+### 3.9 `src/rulesets/dnd2024/combat/resolution.py` + `src/rulesets/dnd2024/combat/engine.py`（6 处消费点收束）
 
 用 `condition_check_bonus_rolls` 替换 6 处硬编码，语义 kind 映射：
 
@@ -197,7 +173,6 @@ conditions 目录（A10 段）新增条目：
 | resolution saving_throw（A5） | `saving_throw` | `"saving_throw"` |
 | resolution save_repeat（A6） | `saving_throw` | `"saving_throw"` |
 | engine concentration（A7） | `concentration` | `"saving_throw"` |
-| reaction_spells counterspell（v1.1 扩容，L385/L392） | `saving_throw` | `"saving_throw"` |
 
 替换形状（以 attack 为例）：
 
@@ -220,11 +195,9 @@ if is_ranged_weapon:
 
 放在 `attack_bonus = modifier + proficiency` 之后、bless 掷骰之前；事件 `modifier` 字段自然含 +2（§1.2 裁剪 7）。仅玩家侧分支（`_declared_attack` 路径）；敌人分支零改动。
 
-### 3.10 事件字段迁移（6 处真消费点 + 4 处恒 0 站点 + 1 处读取点）
+### 3.10 事件字段迁移（6 处事件构造点）
 
-- 真消费点 ×6：`"bless_bonus": <int>` → `"check_bonus": <int>, "check_bonus_rolls": [{"condition": str, "die": int, "roll": int}, ...]`（resolution attack/spell_attack/saving_throw/save_repeat、engine concentration、reaction_spells counterspell）。
-- 恒 0 站点 ×4（不调用辅助、不掷骰）：resolution L614（spell saving_throw auto_fail）、L1279（save_repeat auto_fail）、L757（P8 dispel `ability_check`，§1.2 裁剪 5 语义）、reaction_spells L379（counterspell auto_fail）→ 统一写 `"check_bonus": 0, "check_bonus_rolls": []`。
-- 读取点 ×1：`check_windows.py` L528 的 `check.get("bless_bonus")` → `check.get("check_bonus", 0)`（见 §3.13；这是 S-P3 §8.2 #9 的可执行部分）。
+- `"bless_bonus": <int>` → `"check_bonus": <int>, "check_bonus_rolls": [{"condition": str, "die": int, "roll": int}, ...]`。
 - `total` 计算式同步替换。
 - **完整移除 `bless_bonus`**：git grep 全库（src/templates/frontend/tests）零残留后才算完成。
 
@@ -235,31 +208,8 @@ if is_ranged_weapon:
 ### 3.12 测试
 
 - 新建 `tests/rulesets/test_dnd2024_fighting_style.py`：fighter 建卡选择 → 战斗行为的端到端 + fail closed 校验 + bless 回归（见 §4 矩阵）。
-- 既有测试最小更新：`bless_bonus` 断言 5 处（A26 v1.1：counterspell L441、dispel L426、scorching_ray L384/L386/L400）改 `check_bonus`；涉及 attack `modifier` 数值的既有用例若因 archery 投影字段默认 0 不受影响（未选专长时 `ranged_attack_bonus == 0`），禁止顺手改无关断言。
+- 既有测试最小更新：`bless_bonus` 断言 3 处（A26）改 `check_bonus`；涉及 attack `modifier` 数值的既有用例若因 archery 投影字段默认 0 不受影响（未选专长时 `ranged_attack_bonus == 0`），禁止顺手改无关断言。
 - 复用既有基建：`_instance`/`_start`/`SequenceRng`（test_dnd2024_combat.py L20）、`advance()`。
-
-### 3.13 `src/rulesets/dnd2024/combat/check_windows.py`（v1.1 扩容，强制）
-
-S-P3 `lucky_disadvantage` 在窗口 resolve 时按 `total = natural + modifier + check_bonus` 重算：
-
-- L528 附近 `check.get("bless_bonus")` → `check.get("check_bonus", 0)`；
-- 窗口内新掷的取低骰仍走 `window_bonus` / `window_bonus_rolls`，**不并入** `check_bonus`（§6.5 双写禁止；结算期条件骰与掷后干预骰字段族分离）；
-- CW / DOOL 面不重算成分（CW 从 `total` 直接减、DOOL 从 `total` 直接加），不加字段。
-
-### 3.14 `src/rulesets/dnd2024/combat/reaction_spells.py`（v1.1 扩容）
-
-P7 反制豁免（L374-394）改用 `condition_check_bonus_rolls(self.catalog.conditions, caster["conditions"], "saving_throw", rng)`：
-
-- 成功分支：`check_bonus` / `check_bonus_rolls` 替换 `bless` 局部变量与 `bless_bonus` 字段，`total = roll + modifier + check_bonus`；
-- auto_fail 分支（L379）：`"check_bonus": 0, "check_bonus_rolls": []`，不调用辅助、不掷骰；
-- 事件其余字段（`counterspell` / `auto_failed` / `ability`）零改动；RNG 位序不变（d20 → d4）。
-
-### 3.15 `frontend-v2/src/components/play/CombatLiveBar.vue`（v1.1 扩容）
-
-L140 最小替换：`Number(event.modifier || 0) + Number(event.bless_bonus || 0)` → `Number(event.modifier || 0) + Number(event.check_bonus || 0)`。
-
-- 不展示 `check_bonus_rolls`（骰迹展示登记为 UI 迁移债）；
-- 全前端仅此一处命中，其余文件零改动。
 
 ## 4. 测试矩阵
 
@@ -283,9 +233,6 @@ L140 最小替换：`Number(event.modifier || 0) + Number(event.bless_bonus || 0
 | 16 | runtime `_recent_combat_events` 输出含 `check_bonus`/`check_bonus_rolls`、不含 `bless_bonus` | 投影 |
 | 17 | 骰迹 RNG 顺序锁定：attack 分支 SequenceRng 消耗序列 = [d20, (d20), d4]，测试断言每一步取值 | 骰迹 |
 | 18 | grep 验收：`git grep -n bless_bonus` 全库零命中 | 收尾 |
-| 19 | blessed 施法者反制豁免（counterspell）：`check_bonus_rolls` 含 `{"condition": "blessed", "die": 4}`、`total` 含该骰；auto_fail 分支 `check_bonus == 0` 且 `check_bonus_rolls == []`、RNG 不消耗 | 扩容回归 |
-| 20 | dispel `ability_check` 站点（P8）：恒 `check_bonus == 0`、`check_bonus_rolls == []`，不掷骰 | 扩容回归 |
-| 21 | blessed + Lucky 劣势窗口交互：窗口重算 `total` 含 `check_bonus`（blessed 目标的 d4 不被窗口丢弃），`window_bonus` 字段族保持独立 | 扩容回归 |
 
 ## 5. 验收命令
 
@@ -308,7 +255,7 @@ python -m pytest tests -q
 
 ## 6. 禁止事项
 
-1. 禁止在 resolution/engine/view/derivation/validation/**reaction_spells/check_windows** 出现 `"archery"`、`"feat:archery"`、`"blessed"` 字符串字面量分支（目录声明驱动；`"blessed"` 仅允许出现在目录 JSON 与测试构造中）。v1.1 显式延伸至 reaction_spells。
+1. 禁止在 resolution/engine/view/derivation/validation 出现 `"archery"`、`"feat:archery"`、`"blessed"` 字符串字面量分支（目录声明驱动；`"blessed"` 仅允许出现在目录 JSON 与测试构造中）。
 2. 禁止用 advantage/disadvantage 模式实现加值（主计划明确"区别于"）。
 3. 禁止给武器档案（`_available_attacks` 输出、catalog.weapons）加 archery 相关字段——加值消费在 resolution 的 `is_ranged_weapon` 分支。
 4. 禁止把 `ranged_attack_bonus` 塞进 `derived`（build 派生全局值）——它是条件（远程武器才生效）战斗消费值，owning module 是 features 投影。
@@ -327,8 +274,6 @@ python -m pytest tests -q
 5. advancement catalog 的 locales 两份与 content 结构不同步（labels-only vs feats 镜像的歧义）→ 停止，报告三份文件的实际结构差异。
 6. 测试矩阵 #5（投掷近战不 +2）失败且根因在 `is_ranged_weapon` 既有语义 → 停止报告，不修改既有判定语义（那是 2024 Thrown 规则的实现契约）。
 
-**触发记录（2026-11-01，v1.1 由来）**：开工前基线核对触发 §7.3——`bless_bonus` 命中超出 v1.0 预期（reaction_spells.py 的 P7 反制豁免、frontend CombatLiveBar.vue、check_windows.py 的 S-P3 读取点）。执行端停止并提交完整命中清单，未擅自扩大范围；审核端独立复核后出具 v1.1 裁决（见 §0），扩容 3 文件后恢复执行。
-
 ## 8. 执行报告模板
 
 （沿用 SP1 协议：逐文件 diff 摘要 / 测试矩阵逐项结果 / 验收命令输出 / 偏离本任务书的每一处显式列出并附理由 / 停止条件触发记录 / 迁移债清单。）
@@ -337,127 +282,4 @@ python -m pytest tests -q
 - paladin 2 级 / ranger 2 级升期 fighting_style 选择、champion 7 级 additional_fighting_style（升期 choices 协议扩展）；
 - 建卡 UI 的 fighting_style 选择控件（draft 键协议已就绪）；
 - defense / great_weapon_fighting / two_weapon_fighting 的 parameters 与消费（各自归属切片）；
-- `"ability_check"` 语义 kind 的消费点（P10 属性检定阶段接入）；
-- 前端 `check_bonus_rolls` 骰迹展示（v1.1 只做 `bless_bonus → check_bonus` 最小替换）；
-- S-P3 §8.2 #9 结转结论：**已承接**（读取点迁移 L528）；`window_bonus` / `window_bonus_rolls` 命名族保持独立、不与 `check_bonus` 混写（依据 §6.5 双写禁止与字段族语义混写风险）。
-
-## 9. 执行报告（v1.1，2026-11-01）
-
-### 9.1 逐文件改动摘要
-
-| 文件 | 改动 |
-| --- | --- |
-| `templates/.../advancement_feat_catalogs/srd_advancement_feats.json` | archery 增加 `parameters: {"ranged_attack_bonus": 2}`；locales 实为 labels-only，无镜像改动 |
-| `templates/.../combat_catalogs/srd_combat_core.json` | conditions 新增 `blessed.check_bonus_dice`（die 4，kinds attack/saving_throw） |
-| `templates/.../presets/characters/stalwart_guardian.json` | 补 `class_feature_feat_choices: {"fighting_style": "feat:defense"}`（偏离，见 9.4） |
-| `src/rulesets/dnd2024/progression/advancement.py` | `ADVANCEMENT_FEAT_PARAMETER_KEYS` 与 `_validate_feat_parameters`（未知键 / 非 1..10 int / bool → `ProgressionCatalogError`） |
-| `src/rulesets/dnd2024/character/validation.py` | `class_feature_feat_choices` 门控（fighter 必填、他职业禁用）+ `_validate_fighting_style_choice` |
-| `src/rulesets/dnd2024/character/derivation.py` | class feature feat refs 并入 `feat_refs`；build 落账 `class_feature_feat_choices` |
-| `src/rulesets/dnd2024/character/builder.py` | `normalize_submission` 透传 `class_feature_feat_choices`（偏离，见 9.4） |
-| `src/rulesets/dnd2024/features/resolver.py` | `actor_projection["ranged_attack_bonus"]` + `_ranged_attack_bonus`（只聚合参数，不解释专长 id） |
-| `src/rulesets/dnd2024/combat/view.py` | 玩家 actor 投影 `ranged_attack_bonus`；敌人 actor 无该键 |
-| `src/rulesets/dnd2024/combat/check_modes.py` | 纯函数 `condition_check_bonus_rolls`（语义 kind、目录顺序、provenance 行） |
-| `src/rulesets/dnd2024/combat/catalog.py` | `CHECK_BONUS_KINDS` / 骰面校验；`_validated_conditions` 校验 `check_bonus_dice`（仅新键） |
-| `src/rulesets/dnd2024/combat/resolution.py` | archery 并入 `attack_bonus`（仅远程武器）；attack/spell_attack/saving_throw/dispel/save_repeat 字段迁移为 `check_bonus` / `check_bonus_rolls`；auto_fail 分支恒 `0` / `[]` |
-| `src/rulesets/dnd2024/combat/engine.py` | `_concentration_events` 改实例方法并走辅助（语义 kind `saving_throw`） |
-| `src/rulesets/dnd2024/combat/reaction_spells.py` | counterspell auto_fail 恒 `0` / `[]`；成功分支走辅助（语义 kind `saving_throw`） |
-| `src/rulesets/dnd2024/combat/check_windows.py` | L528 读取点迁移 `check.get("check_bonus", 0)`（v1.1 第 5 条强制项） |
-| `src/rulesets/dnd2024/runtime.py` | 投影白名单删除旧字段，加入 `check_bonus` / `check_bonus_rolls` |
-| `frontend-v2/src/components/play/CombatLiveBar.vue` | L140 最小替换为 `event.check_bonus`；不展示 `check_bonus_rolls`（登记 UI 债） |
-| `tests/rulesets/test_dnd2024_fighting_style.py`（新建） | 19 tests，覆盖矩阵 #1-#17 |
-| `tests/rulesets/test_dnd2024_check_windows.py` | 新增 #21（blessed × Lucky 劣势窗口） |
-| `tests/rulesets/test_dnd2024_counterspell.py` | 新增 #19 两侧断言；用例更名为 `test_condition_check_bonus_applies_to_the_counter_save` |
-| `tests/rulesets/test_dnd2024_dispel_magic.py` | #20 断言迁移为 `check_bonus == 0` / `check_bonus_rolls == []` |
-| `tests/rulesets/test_dnd2024_scorching_ray.py` | 3 处断言字段迁移（+ 既有攻击断言） |
-| `tests/rulesets/test_dnd2024_character_builder.py`、`test_dnd2024_live_equipment_reconciliation.py` | fighter draft helper 补 `class_feature_feat_choices`（新校验必填） |
-| 本任务书 §0/§4/§7 | v1.1 裁决落笔与新增矩阵 #19-#21 |
-
-### 9.2 测试矩阵逐项结果
-
-| # | 结果 | 落点 |
-| --- | --- | --- |
-| 1 | 通过 | `test_fighter_build_records_the_fighting_style_feat_choice` |
-| 2 | 通过 | `test_fighting_style_choice_fails_closed`（缺键 / 他职业携键 / `feat:grappler` / 未声明 ref） |
-| 3 | 通过 | `test_ranged_weapon_attack_gains_the_archery_bonus` |
-| 4 | 通过 | `test_melee_weapon_attack_is_unchanged_by_archery` |
-| 5 | 通过 | `test_thrown_melee_weapon_does_not_gain_the_archery_bonus` |
-| 6 | 通过 | `test_fighter_without_archery_projects_a_zero_bonus`（modifier 精确比对） |
-| 7 | 通过 | `test_blessed_weapon_attack_records_one_d4` |
-| 8 | 通过 | `test_blessed_spell_attack_rolls_one_d4`（逐次法术攻击各消耗一枚，scorching_ray 既有用例另行覆盖） |
-| 9 | 通过 | `test_blessed_enemy_save_gains_the_d4`、`test_auto_failed_save_rolls_no_bonus_die` |
-| 10 | 通过 | `test_blessed_repeat_save_gains_the_d4` |
-| 11 | 通过 | `test_blessed_concentration_save_gains_the_d4` |
-| 12 | 通过 | `test_archery_and_bless_stack_on_the_same_attack` |
-| 13 | 通过 | `test_plain_attack_keeps_the_stable_zero_fields` |
-| 14 | 通过 | `test_combat_catalog_rejects_invalid_bonus_dice`、`test_advancement_rejects_invalid_feat_parameters` |
-| 15 | 通过 | `test_view_projects_the_bonus_to_players_only` |
-| 16 | 通过 | `test_recent_combat_events_project_the_new_fields_only`（改为精确键集断言，见 9.4） |
-| 17 | 通过 | `test_bless_and_archery_consume_d20_then_d4_in_that_order`（`[(1,20),(1,4),(1,8)]`） |
-| 18 | 通过 | `git grep` 零命中（见 9.3） |
-| 19 | 通过 | `test_condition_check_bonus_applies_to_the_counter_save`、`test_a_paralyzed_caster_still_rolls_the_con_counter_save`、`test_a_registry_declared_con_auto_fail_skips_every_bonus_die` |
-| 20 | 通过 | `test_dnd2024_dispel_magic.py` 站点断言恒 0 |
-| 21 | 通过 | `test_a_blessed_attackers_bonus_die_survives_the_lucky_window`（`total == natural + modifier + check_bonus`，无 `window_bonus` 字段族） |
-
-### 9.3 验收命令输出
-
-```text
-pytest tests/rulesets/test_dnd2024_fighting_style.py -q       -> 19 passed
-pytest tests/rulesets -k "bless" -q                            -> 26 passed, 866 deselected
-pytest tests/rulesets/test_dnd2024_combat.py -q                -> 30 passed
-pytest tests/rulesets -k "advancement" -q                      -> 19 passed, 873 deselected
-pytest tests/rulesets -k "validation" -q                       -> 4 passed
-git grep -n -e bless_bonus -- src templates frontend tests     -> 零命中（exit 1）
-```
-
-`tests/rulesets/test_dnd2024_spell_blessed.py` 不存在，按任务书注明「以实际存在的测试文件为准」执行 `test_dnd2024_combat.py`。
-
-全量 `python -m pytest tests -q`（提交前，按 collect 序 61% 分两段执行，避免单次超时）：
-
-```text
-主段（前 61%，覆盖 tests/rulesets 全量） -> 仅 3 类既有环境失败，与 S-P10 无关
-尾段（后 39%，约 190 文件）              -> 3079 passed（20:38）
-```
-
-主段 3 类既有失败（均非本切片引入）：
-
-1. `tests/rulesets/test_dnd2024_character_builder.py` 11 项：测试自建 bundle 以 `con.json` 落盘，Windows 保留文件名使其缺失，报 `unresolved reference 'ability:con' in background:soldier`。已用 `git stash` 回退到 HEAD 基线复现同一失败（`test_derives_first_level_fighter_deterministically` 1 failed）。
-2. `tests/test_content_sync_identity.py`：Windows `os.link` WinError 1。
-3. `tests/test_docker_launcher.py`：cp311/cp313 解释器门禁。
-
-### 9.4 偏离本任务书清单
-
-1. **`character/builder.py` `normalize_submission` 透传新键**（v1.1 未列，必需）：build 已落账 `class_feature_feat_choices`，但重建 draft 时未带上，导致 fighter 的存档重建 / 升级重建触发「fighting_style requires a fighting style feat choice」，`test_dnd2024_progression.py::test_high_level_submission_is_rebuilt_...` 与 `test_dnd2024_character_lifecycle.py::test_card_advancement_...` 失败。补 3 行透传后两条用例通过（2 passed）。理由：不补则新必填键无法闭环，属契约缺陷而非风格调整。
-2. **`stalwart_guardian.json` 预设补 `feat:defense`**：新校验对 fighter 必填，预设自身必须合法。
-3. **两处既有测试 fighter draft helper 补键**：同上，属测试构造对新契约的同步（非断言改动）。
-4. **矩阵 #2 的 category 反例改用 `feat:grappler`**：`feat:skilled` 不在 advancement catalog，无法表达「目录内但 category 不符」。
-5. **矩阵 #16 改为精确键集断言**：原负向断言会让 legacy 字段名以字符串字面量留在 tests，违反 §4 #18 零命中口径；改为「投影键集合精确等于白名单输出」的强断言。
-6. **#19 auto-fail 侧使用合成 registry 条目**：出厂数据 `auto_fail_saves` 仅 `str`/`dex`，counterspell 是 CON 豁免，故 shipped 路径不可达；额外用 `paralyzed` 用例证明 CON 豁免仍掷 d20+d4，再用合成条目端到端验证通用 auto-fail 分支。该合成条目仅存在于该测试的临时 runtime。
-7. **测试函数更名** `test_bless_bonus_applies_to_the_counter_save` → `test_condition_check_bonus_applies_to_the_counter_save`：函数名含 legacy 字段名会破坏 §4 #18 的零命中验收。
-8. 前端仅做最小替换，`check_bonus_rolls` 骰迹展示未实现（已登记 UI 债，见 9.6）。
-
-### 9.5 停止条件记录
-
-- §7.3 已触发（2026-11-01，v1.1 由来）：开工前基线核对发现 `bless_bonus` 命中超出 v1.0 预期（reaction_spells、CombatLiveBar.vue、check_windows.py 读取点），执行端停止并提交完整清单，未擅自扩大移除范围；审核端复核后出具 v1.1 裁决（见 §0），扩容后恢复执行。
-- 本次执行期间未触发新的停止条件；未发现 1B 法术原语交叠或 P6/P7 半成品混入。
-
-### 9.6 迁移债清单（确认）
-
-- paladin 2 级 / ranger 2 级升期 fighting_style 选择、champion 7 级 additional_fighting_style（升期 choices 协议扩展）；
-- 建卡 UI 的 fighting_style 选择控件（draft 键协议已就绪）；
-- defense / great_weapon_fighting / two_weapon_fighting 的 parameters 与消费（各自归属切片）；
-- `"ability_check"` 语义 kind 的消费点（P10 属性检定阶段接入）；
-- 前端 `check_bonus_rolls` 骰迹展示；
-- S-P3 §8.2 #9 结转结论：**已承接**（读取点迁移 L528）；`window_bonus` / `window_bonus_rolls` 命名族保持独立、不与 `check_bonus` 混写。
-
-## 10 S-P10 审核记录（2026-11-02）
-
-- 验收复跑核实：审核端在 Linux / Python 3.11 复跑 §5 五条定向命令——`test_dnd2024_fighting_style.py` **19 passed**（6.31s）、`-k bless` **26 passed / 880 deselected**（12.92s）、`test_dnd2024_combat.py` **30 passed**（7.32s）、`-k advancement` **19 passed / 887 deselected**（4.83s）、`-k validation` **4 passed / 902 deselected**（5.23s）；`git grep -n bless_bonus -- src templates frontend tests` 零命中（exit 1）。审核修复后七文件定向回归 **161 passed**（1:09）、`tests/rulesets` 全量 **908 passed / 0 failed**（6:11；= 执行报告 906 + 审核新增 2 用例）。执行报告 §9.3 的三类 Windows 环境失败（`character_builder` 11 / `content_sync_identity` / `docker_launcher`）在 Linux 下均由各自文件复跑通过，确认非 S-P10 回归。
-- 白名单合规：`f66320e` 25 文件 = §3 白名单 + v1.1 扩容 + 执行报告 §9.4 的 8 项偏离（builder 透传、预设补 `feat:defense`、两处 fighter draft helper 补键、矩阵 #2 改 `feat:grappler`、#16 精确键集、#19 合成 auto-fail、用例更名、前端最小替换），审核裁决全部接受；`srd_advancement_feats.json` / `srd_combat_core.json` 的 locales 为 labels-only、无镜像改动，与 §3.1/§3.8"×3"的偏差属结构事实而非遗漏。`bless_bonus` 真消费 6 处、恒 0 站点 4 处、读取点 1 处的迁移逐一对应 v1.1 盘点。
-- 规则逐条核对（引用而非记忆）：`战斗风格专长.htm` L11-13——Archery +2 只作用于远程武器；`is_ranged_weapon` 门控使投掷近战武器（非 `ranged` 档案）不吃 +2（矩阵 #4/#5 锁定）。`1环.htm` L33——Bless 只加攻击检定与豁免检定、不加属性检定；6 处消费点的语义 kind 映射（attack / spell_attack → `"attack"`，saving_throw / save_repeat / concentration / counterspell → `"saving_throw"`）与原文一致，dispel `ability_check` 恒 0。
-- 管线与审计核对：平坦 +2 并入 `modifier`、骰式加值输出 `check_bonus` + `check_bonus_rolls`（逐骰 provenance），未借 advantage/disadvantage；RNG 顺序 `d20 →（优势第二枚）→ 条件 d4 → 窗口骰 → 伤害/治疗骰`（矩阵 #17 与 #21 锁定）；runtime 投影白名单与 `view` 玩家/敌人隔离正确；武器档案与 `derived` 零新增字段。
-- 禁止事项核对：白名单路径内 `"archery"` / `"feat:archery"` / `"blessed"` 字符串零命中；`bless_bonus` 无双写/兼容分支；bless 法术 effect 与 concentration 链路结构零改动；advancement `expected_category` 未动；catalog 只校验新增 `check_bonus_dice`（未知键、die∉{4,6,8,10,12,20}、kinds 非法/重复均抛 `CombatCatalogError`）；未出现"补天"表述。
-- 审核发现并修复（1 项，S-P7 结转）：**死亡豁免未消费 Bless**。S-P7 §1.2 / §6.4 明确把该裁决留给 S-P10；本任务书 §1.1 把 Bless 范围定义为"攻击检定与豁免检定（含回合结束重复豁免、专注豁免、反制豁免）"，死亡豁免同属豁免检定但矩阵与站点清单漏项。已在 `_death_save_events` 追加 `condition_check_bonus_rolls(..., "saving_throw")`、`total = d20 + check_bonus`、`success = total >= 10`；自然 1 / 20（含 S-P7 的 18–20 阈值）仍读 d20 面。同步把 `_death_save_check_window` 的"失败"判定由 `natural` 改为 `total`，否则 Bless 已把结果推到 10+ 后仍会误弹 Dark One's Own Luck 窗口。补两条回归：`test_bless_boosts_a_death_saving_throw`（8 + d4 4 = 12，successes +1）、`test_bless_can_make_a_death_save_succeed_without_opening_dool`（boost 后不再开窗、DOOL 池不消耗）。
-- 风险裁决（2 项，均登记迁移债、不阻塞）：① **旧战士存档缺 `class_feature_feat_choices`**：`normalize_character_submission` 会以可读错误 `fighting_style requires a fighting style feat choice` fail closed（审核端以 `stalwart_guardian` 删除该键复现）；按 AGENTS「migration correctness > completeness」与"不猜测迁移语义"，不自动补默认风格，须由 UI 补选后重建。② **前端未接新必填键**：`frontend-v2` 对该键零命中，`builder_choices` 也未暴露 fighting_style 候选；§1.2 裁剪 2 已显式登记，上线前须补候选数据源 + 建卡控件 + 旧档补选流程。
-- 迁移债确认（任务书 §9.6）：paladin 2 / ranger 2 升期、champion 7 级 additional_fighting_style、defense / great_weapon_fighting / two_weapon_fighting 参数、`"ability_check"` 消费点、前端 `check_bonus_rolls` 骰迹展示维持；新增上述 legacy 存档与建卡 UI 两条债。S-P3 §8.2 #9 读取点已承接、命名族独立约束保持。
-- 主计划同步：进度表新增 S-P10 完成行（1C 汇总行改 7/12）。
-
+- `"ability_check"` 语义 kind 的消费点（P10 属性检定阶段接入）。

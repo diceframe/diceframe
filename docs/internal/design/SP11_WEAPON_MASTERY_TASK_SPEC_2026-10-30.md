@@ -272,77 +272,13 @@ python -m pytest tests/rulesets -q
 
 ## §8 执行报告模板与迁移债登记
 
-### 执行报告（2026-11-02，S-P11 执行侧填写）
+### 执行报告（执行侧填写）
 
-#### 1. 改动文件清单（对照 §3 白名单）
-
-| 文件 | 实际改动 | 偏差 |
-|---|---|---|
-| `templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json` | 15 条 weapon 档案逐条追加 `mastery`，值与 §3.1 表全等；`conditions` / `spell_effects` / `unarmed_strike` / `labels` 零改动 | 无 |
-| `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json` | 仅 fighter 段 second_wind 与 action_surge 之间新增一条 `weapon_mastery`；labels 平铺区加英文标签 | **有**：§3.2 要求五段重复声明，但 feature id 全局唯一，`Dnd2024ClassFeatureCatalog.from_bundle` 遇重复 id 抛 `duplicate class feature id`。改为单条声明 + resolver 授权式归属（见下） |
-| `templates/rulesets/dnd2024_srd/locales/en/class_feature_catalogs/srd_class_features.json` | 加 `"weapon_mastery": "Weapon Mastery"` | 无 |
-| `templates/rulesets/dnd2024_srd/locales/zh-CN/class_feature_catalogs/srd_class_features.json` | 加 `"weapon_mastery": "武器精通"` | 无（D9 的中文 term 标签仍待 i18n 批次） |
-| `src/rulesets/dnd2024/combat/weapon_masteries.py`（新建） | `WEAPON_MASTERY_FEATURE_ID` + `WEAPON_MASTERY_EFFECTS`（8 词条，4 实现 / 4 `unimplemented`） | 无 |
-| `src/rulesets/dnd2024/combat/resolution.py` | 导入注册表；`_attack_events` miss 分支接入 `_miss_mastery_events`；新增 `_weapon_mastery_effect` / `_miss_mastery_events`；`_hit_settlement_events` 在 offer 链前写 held `mastery_effects`；`_submit_hit_damage` 与 `feature_use` 并列弹出并逐条转 `condition.applied` | 无。`mastery_effects` 条目额外携带 `source_actor_id`（slow 的"攻击者下回合开始"过期需要） |
-| `src/rulesets/dnd2024/combat/reducer.py` | `_TURN_SCOPED_DURATIONS` 加 `"attacker_next_turn_start"` | 无。实际过期动作发生在 `engine._expire_conditions`（由 `dnd2024.turn.advanced` 调用），见第 4 节 |
-| `src/rulesets/dnd2024/combat/engine.py` | `_expire_conditions` 新增分支：进入回合者 == `source_actor_id` 时移除 `attacker_next_turn_start` | 无（§3.4 允许按现有事件驱动机制落地） |
-| `src/rulesets/dnd2024/features/resolver.py` | `features_for` 按 progression 授权补入目录已声明、但不在本职业段的共享特性 id | **有**（单条声明方案的配套改动） |
-| `tests/rulesets/test_dnd2024_class_features.py` | fighter/barbarian/rogue 特性清单断言加入 `weapon_mastery`；`_bad_once_per_turn` 改为按 id 查找 action_surge | **有**：§4.2 要求零改动，但新增 1 级特性必然改变清单断言（功能正确性优先） |
-| `tests/rulesets/test_dnd2024_weapon_mastery.py`（新建） | M1–M14 + 2 条声明链数据守护，共 16 用例 | 无 |
-
-归属说明：效果注册表落在独立小模块 `src/rulesets/dnd2024/combat/weapon_masteries.py`（按 §3.3(a) 的 owning module 建议），resolution.py 只导入并分发。
-
-#### 2. §4 矩阵结果（16/16 绿）
-
-| # | 结果 | 守护点 |
-|---|---|---|
-| M1 | ✅ | 失手 `resource.changed` amount=3、slashing、`rolls=[]`、hp 40→37；事件无 `mastery_effects` 泄漏 |
-| M2 | ✅ | `stoneskinned` 抗性后 amount=1、`resisted=true`；专注 `check.resolved` DC 10 |
-| M3 | ✅ | 1 HP 敌人被擦掠 → `dnd2024.combat.ended reason=victory` |
-| M4 | ✅ | STR 8 失手无 `resource.changed`（max(0)） |
-| M5 | ✅ | STR 8 长剑 0 伤害命中仍 applied `next_attack_disadvantage`（sap 无伤害门槛） |
-| M6 | ✅ | 敌人下回合攻击 `advantage_mode=disadvantage` + `advantage_sources` 含该 condition，攻击后 `condition.removed` |
-| M7 | ✅ | handaxe 命中伤害 7 → applied `next_attack_advantage`；追击 advantage + 消耗移除 |
-| M8 | ✅ | 0 伤害命中 **不** applied（vex 伤害门槛，与 M5 对照） |
-| M9 | ✅ | javelin 命中 → applied `slowed_10 duration=attacker_next_turn_start`；敌人回合 `economy.speed=20`；攻击者下回合开始 condition 消失 |
-| M10 | ✅ | wizard 持长剑命中无任何 mastery 事件（解锁门控） |
-| M11 | ✅ | 手工 held 事件链 + Shield cast 改判 miss → 无 `next_attack_disadvantage`、无 HP 变化（held 正确作废） |
-| M12 | ✅ | 5 级 rogue companion UD 减半（7→3）后 mastery 照常 applied |
-| M13 | ✅ | greataxe(cleave)/quarterstaff(topple) 命中无额外效果、无异常（fail closed） |
-| M14 | ✅ | 15 条档案 `mastery` 与 §3.1 全等；`unarmed_strike` 无 mastery |
-| 附加 | ✅ | 五职业 `has_feature("weapon_mastery")` 为 true，wizard 为 false |
-
-回归面：`test_dnd2024_uncanny_dodge.py`、`test_dnd2024_origin_feat_spells.py`、`test_dnd2024_class_features.py`、`test_dnd2024_sneak_attack.py`、`test_dnd2024_stoneskin.py` 全绿；法术 condition 既有回归由全量套件覆盖（`ray_of_frost` / `vicious_mockery` / `chill_touch` 的 slowed / next_attack / caster duration 用例）。
-
-#### 3. §5 验收命令原样回贴
-
-定向（Linux/Python 3.11 等价命令）：
-
-```text
-python -m pytest tests/rulesets/test_dnd2024_weapon_mastery.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_origin_feat_spells.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_sneak_attack.py tests/rulesets/test_dnd2024_stoneskin.py -q
-131 passed in 45.79s
-```
-
-全量：
-
-```text
-python -m pytest tests/rulesets -q
-924 passed, 36 warnings in 354.80s (0:05:54)
-```
-
-#### 4. 行号偏移复核
-
-- §2.2 的 P7/P8 在途偏移已失效：P7/P8 已合入，工作区无未提交 P7/P8 文件；`_submit_hit_damage` 现位于 `resolution.py` L1008 附近，按语义位置改动。
-- `attacker_next_turn_start` 落点：`reducer.py` L22 `_TURN_SCOPED_DURATIONS`；真实过期在 `engine.py` `_expire_conditions`（L1208 起，新分支 L1235-1242），由 `dnd2024.turn.advanced` 经 `reducer.py` L334-338 调用。结论：duration 的消费是事件驱动而非 reducer 内联 tick，与 §3.4 的"对齐现有实现形状"一致。
-
-#### 5. 偏差与未尽事项
-
-1. **单条特性声明**：§3.2 的五段同形条目无法通过全局唯一 id 校验；采用 fighter 单条声明 + `features_for` 按 progression 授权归属。paladin/ranger 即使没有本职业特性段也正确获得 `weapon_mastery`。该方案改变 `features_for` 的通用归属语义（目录声明跨职业共享），已在代码注释说明；若未来要求"每职业独立声明"，需先放宽 id 唯一性或引入 per-class 别名。
-2. **`view.py` 零改动**：§3.3(e) 预期的一行拷贝不需要——`_available_attacks` 已用 `**deepcopy(weapon)` 整体展开档案，`mastery` 自动随 profile 进入结算。
-3. **class_features 测试更新**：§4.2 的"零改动"与新增 1 级特性冲突，按功能正确性更新断言。
-4. **graze 不触发击败特性**：按 §3.3(c) 事件流只做抗性→专注→victory，未调用 `_enemy_defeated_feature_events`；这是任务书的显式事件流，不是遗漏。
-5. **slow 过期实现位置**：见第 4 节，落在 `_expire_conditions` 而非新增 reducer tick。
-6. **D1/D3–D9 迁移债**：维持 §8 债务表登记，本切片不偿还。
+- 改动文件清单（对照 §3 白名单，逐文件：实际 diff 摘要 / 与规格的偏差及原因；`weapon_masteries` 注册表最终归属模块）；
+- §4 矩阵逐用例结果（M1-M14 + 回归清单，含 §4.2 定位到的法术 condition 回归文件名）；
+- §5 验收命令原样回贴（两次）；
+- 行号偏移复核结果（§2.2 是否仍成立；`attacker_next_turn_start` 枚举的 reducer 落点行号）；
+- 未尽事项与建议。
 
 ### 迁移债登记（本切片产生的显式债务）
 
@@ -356,46 +292,3 @@ python -m pytest tests/rulesets -q
 | D7 | Push 推离：15 条档案无载体武器（巨棒/长矛/战锤/重弩未入档）+ 位移 rider | 武器档案扩容 + P6 位移扩展批次 |
 | D8 | Topple 失衡：prone 条件族（起身移动消耗、对 prone 的距离谓词攻击优劣势）+ 命中后强破豁免（DC 8+调整值+熟练加值） | 条件系统批次 |
 | D9 | mastery 词条的中文标签与 feed 展示（labels/locales 层） | 阶段二 i18n 批次 |
-| D10 | `requires_damage` 门槛在武器基础伤害上判定，未在 UD / 语出惊人减伤归零与命中触发法术补伤后重判 | 命中伤害聚合点精化批次 |
-| D11 | 检定窗（语出惊人）与 Shield 改判失手不结算 graze（check_windows.py 属 §3.5 零改动清单） | 窗口 / 反应链批次 |
-| D12 | 多处 `slowed_10` 坍缩为单 condition，`source_actor_id` 与 duration 取最后写入者，多来源时过期时点可能提前 | 条件实例追踪批次 |
-| D13 | sap / vex 的 `after_next_attack` duration 在未被消耗时不会按原文在攻击者下回合开始 / 结束过期（复用 vicious_mockery 先例） | 条件时长精确化批次 |
-| D14 | 共享声明方案的数值 / 资源上下文：`features_for` 按 progression 授权补入跨职业声明，但 `ClassFeatureDefinition.class_id` 仍为声明职业（fighter）；共享特性若声明 `*_track`、`resource_id` 或 capabilities，`_value` 与 `class_resource_definition` 会按 fighter 的表解析，barbarian/rogue/paladin/ranger 会读到错误轨道 / 资源。当前 `weapon_mastery` 无参数、无资源、无 capability，故本切片无影响 | 共享特性 / 多职业原语批次；偿还前共享声明仅限解锁型（参数 / 资源 / capability 三空），或引入 ownership-aware 职业上下文 |
-| D15 | 跨职业 `source_ref` / summary 保真：单条声明把 fighter 的 `srd-5.2.1:p42:weapon-mastery` 复用于五个职业，而 §3.2 要求各职业取各自页码；该页码也与 fighter 其它特性的 p48/p49 体系不一致，需回原书核对。若 UI 展示 source_ref，四个职业会指向 fighter 页 | 内容 / i18n 批次：按职业提供 source_ref 元数据，或把 source_ref 移到 progression 授权层 |
-| D16 | graze 击杀不触发 `_enemy_defeated_feature_events`：按 §3.3(c) 显式事件流只做抗性 → 专注 → victory，擦掠把敌人打到 0 时，击败触发类特性不会结算。当前武器精通载体五职业均无击败触发特性，影响低 | 击败触发批次，与 S-P4 的失败触发路径一并归一 |
-| D17 | M11 降级后的验证缺口：测试用手工 held 元数据重挂 + 真实 `decision.resolve`，验证了 Shield 丢弃，但未覆盖生产路径 `_hit_settlement_events` → `_hit_reaction_offer` 的 held 传递；该合同目前只靠静态核对 | 测试补充批次：在 PvP / 同侧 offer 结构未开放前，补一条对 `_hit_reaction_offer` 深拷贝的单元断言或注记为已知未测分支 |
-
----
-
-## 9 S-P11 审核记录（2026-11-02）
-
-- 基线核对：S-P11 提交 `424f645`（13 文件）；审核基线 HEAD 同提交、工作区干净，`origin/backup/cfp` 已指向该提交。执行报告 §8 的改动清单与 `git show --stat` 一致；§8.4 的行号复核（`_submit_hit_damage` L1008 附近、`_expire_conditions` L1235-1242）与代码实际位置一致。
-- 定向复跑：审核端 Linux / Python 3.11 按 §5 六文件命令复跑 **131 passed**（42.52s）；新增文件加 `test_dnd2024_class_features.py` 合计 **74 passed**。
-- 主回归复跑：`tests/rulesets` 全量 **924 passed / 0 failed**（355.33s，5:56），与执行报告一致。
-- 声明链核对：15 条武器档案 `mastery` 与 §3.1 表逐条全等，`unarmed_strike` 无 `mastery`；fighter/barbarian/rogue/paladin/ranger 1 级 `has_feature("weapon_mastery")` 均为 True、wizard 为 False；跨职业授权扫描（目录声明 + progression 授予）仅 `weapon_mastery` 不在本职业段，`features_for` 的补入不会附带其它特性。
-- held 语义核对：命中面 `mastery_effects` 在 offer 链之前只写入 damage_event，弹出只发生在 `_submit_hit_damage`；`reaction_spells` 的 Shield 改判分支在 `_submit_hit_damage` 之前 return（L339-340），UD 与命中触发法术链均经 `_submit_hit_damage` 落地，满足 §2.1 / §6.1。
-- 规则核对（以任务书 §1 原文引用为准）：graze 仅在 `hit=False` 分支、`max(0, 属性修正)`、`rolls=[]`，经 `_resist_damage` → `_concentration_events` → victory，不泄漏内部键、不走 `_enemy_defeated_feature_events`（§3.3(c) 显式事件流）；sap 无伤害门槛、vex/slow 需伤害 > 0；slow 的 `attacker_next_turn_start` 仅在进入回合者等于 `source_actor_id` 时由 `_expire_conditions` 移除，reducer 白名单与战斗结束清理一致；同 id `slowed_10` 复用 dict 去重实现 -10 上限；cleave/nick/push/topple `unimplemented` 无事件无异常。
-- 边界核对：词条字符串只存在于 `weapon_masteries.py` 注册表、`resolution.py` 通用分发与 `engine.py` duration 分支；无按词条散落的 if 分支，`check_modes.py` / `_consume_attack_conditions` / conditions 目录 / `view.py` 零 diff，`mastery` 键经 `**deepcopy(weapon)` 自然进入 profile。
-- 审核发现（4 项，均不阻塞、不改代码，已登记 D10-D13）：
-  1. **requires_damage 判定时点**：门槛在 `_hit_settlement_events` 以武器基础伤害判定；UD / 语出惊人伤害窗把最终伤害降到 0 时 vex/slow 仍会应用（宽松方向），命中触发法术（至圣斩）把 0 基础伤害补成 > 0 时反被跳过（严格方向）。完整修复需把判定移到本次命中的所有伤害落地后的聚合点。
-  2. **改判失手漏 graze**：S-P3 检定窗把已命中改判失手时走 `_finish_attack_check_window`，不进入 `_attack_events` 的 miss 分支；Shield 改判失手按 §2.1 显式丢弃全部 held 效果。RAW 的"失手即擦掠"在两条改判路径上都未覆盖；`check_windows.py` 属 §3.5 零改动清单。
-  3. **多来源 slow 坍缩**：conditions 为 dict，同 id 重复 applied 由最后写入者覆盖 `source_actor_id` / duration；-10 上限正确，但多攻击者（或 ray_of_frost 与缓速）叠加时，过期时点可能早于仍存活的另一实例。
-  4. **sap / vex 时长**：`after_next_attack` 在未被消耗时不会按原文"直至你下回合开始 / 结束"过期，复用 vicious_mockery 先例；任务书 §3.3(a) 显式指定，属时长精确化而非本切片缺陷。
-- 迁移债确认（§8 D1/D3–D9）：维持原登记；D6（Nick 双持宿主）与 D7（Push 档案载体）仍无宿主，未偷做半实现。新增 D10-D13 对应上述四项。
-- 补充审核（2026-11-02 复盘，维护者缺席期裁决专查）：上述 4 项之外，另发现 4 项应登记事项——共享声明的 `class_id` 数值 / 资源上下文（D14）、跨职业 `source_ref` / summary 保真（D15）、graze 击杀不触发击败特性（D16）、M11 降级后的生产 held 传递验证缺口（D17）。均已登记，维护者事后批准见 §10。
-- 主计划同步：S-P11 行由"执行完成待审核"改为"执行完成并审核通过"，1C 汇总维持 9/12（S-P11 计入已审核）；2026-11-02 追加补充审批与 D14–D17 登记说明。
-
----
-
-## 10 S-P11 补充审批记录（2026-11-02）
-
-依据：维护者（用户）在 2026-11-02 复盘后下达"补充审批和登记"指令。以下批准仅针对 S-P11 执行期间在用户缺席时由执行侧自行裁决的偏差，不构成对 D1–D17 技术债的偿还承诺，也不授权任何新的代码改动。
-
-| # | 待批事项 | 裁决 | 附加约束 / 登记 |
-|---|---|---|---|
-| A1 | §3.2 五段同形声明无法通过全局唯一 id 校验，执行侧改为 fighter 单条声明 + `features_for` 按 progression 授权归属（改动了未列入 §3 白名单的 `features/resolver.py`） | **批准为正式 spec 修订** | 该归属规则只对"解锁型共享特性"成立：在 D14 偿还前，共享特性必须保持参数 / 资源 / capability 三空；不得据此给共享特性新增 `*_track`、`resource_id` 或 capabilities。新增跨职业声明须显式评审，禁止靠数据误写静默授予 |
-| A2 | §3.4 要求新增 duration，§3.5 又把 `engine.py` 列为零改动；执行侧在 `_expire_conditions` 落地 `attacker_next_turn_start` | **批准** | §3.5 的 `engine.py` 零改动条目以 §3.4 具体指令为准，视为 spec 勘误；实现位置与事件驱动机制一致，M9 为回归守护 |
-| A3 | M11 的 PvP / 同侧 offer 不可构造，执行侧按 M11 明文降级为手工 held 元数据 + 真实 `decision.resolve`；§7.3 同时要求"停止请示" | **批准降级** | 用户缺席期间以 M11 明文降级条款为准；§7.3 的停机要求在本项上豁免。降级带来的生产 held 传递验证缺口登记 D17，不得把 M11 描述为端到端覆盖 |
-| A4 | graze 击杀不调用 `_enemy_defeated_feature_events` | **批准为显式裁剪** | 依据 §3.3(c) 的事件流；规则完整性缺口登记 D16，归击败触发批次 |
-| A5 | 审核发现 D10–D13 未在审核轮修复 | **批准维持登记** | "审核通过"口径为"带登记近似通过"，不等于逐条 RAW 等价；D11、D13 是可达的 RAW 偏差 |
-| A6 | 补充登记 D14–D17 | **批准登记** | D14 共享声明上下文、D15 source_ref 保真、D16 graze 击败触发、D17 M11 验证缺口；偿还前不得扩大共享声明面 |

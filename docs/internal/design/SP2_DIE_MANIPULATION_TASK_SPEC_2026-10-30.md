@@ -3,7 +3,7 @@
 - 阶段：1C 共用原语
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1C 切片表 S-P2 ——"骰面操纵：最大化、掷后加骰、从敌方总数减骰｜Supreme Healing、Overchannel、Dark One's Own Luck、Cutting Words；统一骰迹与 RNG 顺序"
 - 前置依赖：**S-P1（子职特性所有权 + 特性参数消费 API）必须先合入**——本切片两个端到端载体（极效治疗、超限导能）均为子职特性，`has_feature` 在 S-P1 合入前对子职特性恒为 False，切片无法端到端验证。S-P3（检定反应中断）反向依赖本切片的事件契约，必须在本切片之后合入。基线：`4ef1d33d`（P6 misty_step 已合入，工作区干净）；与 1B 后续切片（P7+）并行推进时，resolution.py / validation.py 改动前先重读工作区核对行号漂移。
-- 状态：已执行（执行报告见 §8）
+- 状态：未开工
 
 ## 1. 规则语义与原文出处
 
@@ -343,62 +343,3 @@ git grep -n "check_penalty" -- src          # 零命中（契约归 S-P3，本�
 | D5 | `maximized` / `overchannel_cost` / penalty 系列字段进 feed 投影白名单 | 有前端展示需求时 |
 | D6 | Peerless Skill（失败后自身加骰，逸闻学院 14 级） | P10 属性检定域（主计划 L147 已定） |
 | D7 | 引导神力掷骰治疗（无骰的维持生命之外，未来有骰的 CD 治疗）对最大化的消费 | 阶段二引导神力管线 |
-
-## 9 S-P2 执行报告（执行侧填写，2026-10-31）
-
-- 基线：`HEAD=af94d3f3`（分支 `backup/cfp`，S-P5 + S-P1 已合入）。按 §3 重读工作区核对行号漂移（相对任务书 `4ef1d33d` 锚点）：
-  - `resolution.py`：`_maybe_overchannel` 落 369-374；spell_attack 调用点 439-444 → 468；saving_throw 511-515 → 543；automatic_damage 536-540 → 573；healing 分支 568-573 → 602-615；收尾自伤 754-774
-  - `validation.py`：`resist_type` 块之后 → 519-529
-  - `resolver.py`：`_validate_declarations` 调用点 724；新增 helper 845-875
-  - 漂移均为既有行号推移，分支结构未变（§7.7 未触发）
-- 改动文件清单（与 §3 白名单一致，`git diff --numstat`）
-  - [x] §3.1 `templates/.../content/class_feature_catalogs/srd_class_features.json` +34/-1
-  - [x] §3.1 `templates/.../locales/en/...` +5/-1、`locales/zh-CN/...` +5/-1
-  - [x] §3.2 `src/rulesets/dnd2024/features/resolver.py` +33
-  - [x] §3.3 `src/rulesets/dnd2024/combat/action_adapter.py` +26
-  - [x] §3.4 + §3.5 `src/rulesets/dnd2024/combat/resolution.py` +38（healing 分支 + 三处伤害分支 + 收尾）
-  - [x] §3.6 `src/rulesets/dnd2024/combat/validation.py` +15
-  - [x] §3.7 `tests/rulesets/test_dnd2024_die_manipulation.py`（新文件，15 用例）
-  - 白名单外零改动；既有测试零修改
-- 测试矩阵（`pytest tests/rulesets/test_dnd2024_die_manipulation.py -x -q` → 15 passed in 24.84s）
-  - T1 通过（三份目录 en/zh-CN 可读，17 / 14 级声明与子职表一致，overchannel 四参数精确）
-  - T2 通过（17 牧师 T / 16 牧师 F；14 法师 T / 13 法师 F）
-  - T3 通过（`2d8→16`；add/subtract/multiply/min/max 递归；constant 与未知 op 原样；入参树不变；`double_dice_counts` 后 maximize = 32）
-  - T4 通过（cure_wounds `16 + Wis 修正`、`rolls == []`、`maximized: true`、SequenceRng 该位零消耗）
-  - T5 通过（cure_wounds 3 环 = 48 + 修正；healing_word 2 环 = 16 + 修正；全骰最大化）
-  - T6 通过（16 级牧师正常掷骰 `[4,5]`，事件无 `maximized`）
-  - T7 通过（false_life temp_hp 分支照常掷骰 `[2,3]`，无 `maximized`）
-  - T8 通过（非塑能师 / 13 级 → "overchannel is required…"；治疗 → "this spell does not deal damage"；slot 0 与 6 环 → "maximized casting requires a spell slot of level 1-5"；非 bool → "maximize_damage must be a boolean"；不带参数零影响）
-  - T9 通过（thunderwave 失败目标 16、成功目标 8，`rolls == []`）
-  - T10 通过（magic_missile 3d4+3 → 15，逐份最大化；单目标内联目录缺省 target_count=1 已按现有目录行为裁剪）
-  - T11 通过（scorching_ray 2 环 3 beam：`[24,12,12]`；天然 20 先翻倍后最大化；check 事件无 `maximized`；自伤 4d12=26）
-  - T12 通过（自伤 7、`overchannel_cost: true`、`necrotic`、rolls 2 枚、victory 事件在自伤之前）
-  - T13 通过（注入 `necrotic_resistant` 后自伤 12，事件无 `resisted` / `resistance`）
-  - T14 通过（先 stoneskin 专注 → thunderwave 1 环自伤 11 → concentration check DC 10 紧随自伤事件）
-  - T15 通过（hp=1、自伤 24 → hp 0、unconscious、death_saves 0/0、无 dead；零特判）
-  - T16 通过（本切片零回归，见下）
-- 验收命令输出摘要（§5 五条）
-  1. `python -m pytest tests/rulesets/test_dnd2024_die_manipulation.py -x -q` → `15 passed in 24.84s`
-  2. `python -m pytest tests/rulesets -q` → `11 failed, 813 passed in 2797.93s (0:46:37)`；11 个失败**全部**在 `tests/rulesets/test_dnd2024_character_builder.py`，不在 §3 白名单、与本切片代码路径无关：
-     - 10 例 `RulesetBundleError: unresolved reference 'ability:con' in background:soldier`：该文件夹具向临时 bundle 写 `content/abilities/con.json`，Windows 保留设备名 `CON` 导致 `write_text` 静默不落盘（独立探针已复现：目录缺 `con.json`），属环境缺陷；
-     - 1 例 `test_builder_http_contract_and_request_size_limit`（`/api/rules/test_dnd2024/experience` 返回 404）：`src/webui/routes/rules.py` 未在本切片改动，测试文件亦未改动；
-     - 该文件在 `-x` 首跑即于第一个用例中止（`1 failed, 62 passed`），故无法在本树内先证基线红；判定依据为失败文件、代码路径与改动集合互不相交。
-  3. `git grep -n "supreme_healing" -- src` → 1 处：`combat/resolution.py:603`
-  4. `git grep -n "overchannel" -- src` → `resolution.py` 369/468/543/573/759/762/765/772 + `validation.py` 521/523/524 + `resolver.py` 724/846（resolver 两处为 §3.2 参数校验，属预期）
-  5. `git grep -n "maximize_dice_nodes" -- src` → `action_adapter.py` 89/107/205 + `resolution.py` 14/374/606；`git grep -n "check_penalty" -- src` → 0 命中（契约归 S-P3）
-- 停止条件触发记录：规则项均未触发。**执行过程异常（非规则停止条件，已恢复）**：执行中该工作目录被外部 checkout 从 `backup/cfp` 切到 `feat/dnd2024-p1-p9-r1-closure`，本切片未提交改动被收进 `stash@{0}`（含未跟踪测试文件，第三父提交）；期间跨切树的一次全量结果（`55 failed, 730 passed`）作废、不计入 T16。工作树恢复回 `backup/cfp` 后重跑全部验收命令，最终数据以本节为准。
-- 与 S-P1 / SP10 的合并顺序：S-P1 已合入（`features_for` 含子职特性，`has_feature` 端到端可用）；SP10 未合入，`check_bonus` / bless 消费点保持原状，与 §3.8 假设无冲突。后续 SP10 合入时只需在本切片事件上追加字段，不需回改 maximized / overchannel_cost 语义。
-- §3.8 契约偏差：无。`maximized`（healing 事件）与 `overchannel_cost` + `damage_type`（自伤事件）按本文落地；`check_penalty` / 窗口骰零落码，S-P3 可逐字按 §3.8 实现。
-- 任务书内部冲突处理（记录备查）：§6.4 明令 src 不得出现 `5` / `2` / `12` / `"necrotic"` 字面量，而 §3.5 / §3.6 的样板代码把这四项作为 `feature_value(..., default)` 内联缺省（§3.2 同时要求"键缺失按缺省值消费"）。执行侧按 §3.5 / §3.6 样板落地（缺省仅在目录漂移时生效，正常路径全部走 parameters）。若后续要求严格零字面量，需把这四个缺省提为具名常量（白名单内微调，未在本切片自作主张）。
-
-## 10 S-P2 审核记录（2026-11-02）
-
-- 验收复跑核实：审核端在 Linux / Python 3.11 复跑 §5 首要命令 `test_dnd2024_die_manipulation.py -x -q` → **15 passed**（6.07s，含审核修复新增的 false 回归断言）；`pytest tests/rulesets -q` → **906 passed / 0 failed**（344.89s）。执行报告 §9 的 11 failed 全部落在 `test_dnd2024_character_builder.py`，为 Windows 保留文件名（`con.json` 无法落盘）与同 fixture 的 404 环境问题；同一命令在 Linux 下全部通过，确认非 S-P2 回归。
-- 白名单合规：`27dca1b` 内容变更恰 9 文件——`combat/action_adapter.py`（+26）、`combat/resolution.py`（+38）、`combat/validation.py`（+15）、`features/resolver.py`（+33）、三份 `srd_class_features.json`（content +35/-1、en 与 zh-CN 各 +6/-1）、新建 `test_dnd2024_die_manipulation.py`（+621）、任务书执行报告（+49/-1）；`engine.py` / `reducer.py` / `view.py` / `runtime.py` / `frontend-v2` 零改动。
-- 规则逐条核对（引用而非记忆）：`生命领域.htm` L60-61——恢复生命的骰子直接取最高值（2d6→12）；本实现只替换 AST `dice` 节点，属性修正与固定加值照常附加，`temp_hp` 分支不受影响。`塑能师.htm` L43-44——1–5 环法术位施展会造成伤害的法师法术可令伤害取最大值；"首次免费/每多一次每环阶 +1d12"按 §1.2 裁剪 2 合并为每次必收 `2 × slot_level` d12（对玩家更严，无免费无限漏洞）。2024 等级（牧师 17 / 法师 14）与 `srd_subclasses.json` 一致，未沿用 2014 数值。
-- RNG 顺序与骰迹核对（§1.1 第 4 条 / §3.8）：最大化路径 `rolls == []` 且 RNG 零消耗（T4/T9/T10）；自然 20 先翻倍后最大化（T11）；窗口骰零落码，S-P3 可逐字按 §3.8 接线。
-- 禁止事项核对：`supreme_healing` 仅 `combat/resolution.py:603` 一处；`overchannel` 命中全部为特性声明、参数校验与单点 helper，无第二套最大化分支；`maximize_dice_nodes` 仅在 `action_adapter.py` 定义、`resolution.py` 消费；`check_penalty` 零命中（契约归 S-P3）；`temp_hp` / `stabilize` / `dispel` / `buff` / `debuff` / `teleport` 分支零改动；自伤不经 `_resist_damage`（T13 注入 `necrotic_resistant` 仍 12 点）；自伤位于全部目标结算与胜利判定之后（T12）。
-- 审核发现并修复（1 项）：`validation.py` 对 `maximize_damage=False` 仍执行 Overchannel 门控——13 级法师显式传 false 被拒（`overchannel is required to maximize damage`），而 `false` 应为无操作。已改为仅 `maximize=True` 校验特性/法术/环阶，非 bool 仍拒绝；补回归断言（false → magic_missile 9 点、无 `overchannel_cost`）。修复后定向 15 / 全量 906 全绿。
-- 偏差判定（1 项成立，裁决接受）：§6.4 禁止 `5` / `2` / `12` / `"necrotic"` 字面量，而 §3.5 / §3.6 样板把这四项作为 `feature_value(..., default)` 内联缺省。缺省只在目录漂移时生效，正常路径全部走 parameters；若要求严格零字面量，提为具名常量属白名单内微调，不阻塞本切片。
-- 迁移债确认（任务书 §8 表）：D1 Overchannel 免费次/递增、D2 法师法术列表溯源、D3 重掷形态、D5 feed 白名单、D6 Peerless Skill、D7 引导神力治疗，均维持原登记；D4（DOOL/CW/Lucky 窗口）由 S-P3 代码承接（其审核记录另记）。本切片无新增债。
-- 主计划同步：进度表新增 S-P2 完成行（1C 汇总行改 6/12）。
