@@ -260,6 +260,7 @@ class Dnd2024CombatEngine(
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
                 {"type": "dodge", "label": "Dodge", "actor_id": current, "expected_version": version},
                 {"type": "disengage", "label": "Disengage", "actor_id": current, "expected_version": version},
+                {"type": "hide", "label": "Hide", "actor_id": current, "expected_version": version},
             ])
             adjacent_downed = [
                 target for target in self._all_targets(instance, combat)
@@ -705,6 +706,8 @@ class Dnd2024CombatEngine(
             events.extend(movement_events)
         elif intent_type in {"dash", "dodge", "disengage"}:
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
+        elif intent_type == "hide":
+            events.extend(self._hide_events(instance, combat, intent, rng))
         elif intent_type == "end_turn":
             events.extend(self._end_turn_events(instance, combat, rng))
         elif intent_type == "death_save":

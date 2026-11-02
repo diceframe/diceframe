@@ -605,7 +605,8 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     character = _rogue(5)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "sneak_attack", "uncanny_dodge", "weapon_mastery",
+        "sneak_attack", "cunning_action", "fast_hands", "uncanny_dodge",
+        "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
@@ -616,7 +617,7 @@ def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
     _runtime, resolver = _resolver()
 
     assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
-        "sneak_attack", "weapon_mastery",
+        "sneak_attack", "cunning_action", "fast_hands", "weapon_mastery",
     ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
 

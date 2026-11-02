@@ -34,6 +34,8 @@
     "retaliation": "Retaliation",
     "rogue": "Rogue",
     "sneak_attack": "Sneak Attack",
+    "cunning_action": "Cunning Action",
+    "fast_hands": "Fast Hands",
     "uncanny_dodge": "Uncanny Dodge",
     "warlock": "Warlock",
     "dark_ones_blessing": "Dark One's Blessing",
@@ -284,6 +286,27 @@
             "damage_dice_track": "sneak_attack_dice",
             "damage_dice_format": "{die}d6"
           }
+        },
+        {
+          "id": "cunning_action",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p63:cunning-action",
+          "summary": "You can take the Dash, Disengage, or Hide action as a Bonus Action.",
+          "capabilities": [
+            {"id": "cunning_dash", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "dash"}]},
+            {"id": "cunning_disengage", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "disengage"}]},
+            {"id": "cunning_hide", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "hide"}]}
+          ]
+        },
+        {
+          "id": "fast_hands",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p64:fast-hands",
+          "summary": "You can use a Bonus Action to make a Sleight of Hand check or to take the Utilize action.",
+          "parameters": {}
         },
         {
           "id": "uncanny_dodge",

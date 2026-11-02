@@ -306,13 +306,13 @@ class CombatValidationMixin:
         flags = condition_flags(self.catalog.conditions, actor["conditions"])
         if flags["incapacitated"] and intent_type in {
             "attack", "cast_spell", "class_capability", "dash", "dodge",
-            "disengage", "stabilize",
+            "disengage", "hide", "stabilize",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
             raise CombatIntentError("an actor with speed zero cannot move")
         economy = combat.get("economy") or {}
-        if intent_type in {"attack", "dash", "dodge", "disengage", "stabilize"}:
+        if intent_type in {"attack", "dash", "dodge", "disengage", "hide", "stabilize"}:
             has_action = int(economy.get("action", 0) or 0) > 0 or int(
                 economy.get("surge_action", 0) or 0
             ) > 0

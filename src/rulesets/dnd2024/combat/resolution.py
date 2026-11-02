@@ -1268,6 +1268,63 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _hide_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+        *, spend_action: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Resolve the Hide action: one Dexterity (Stealth) check.
+
+        RAW 的 DC 由 DM 裁决、通常对抗被动察觉；战斗视图没有察觉熟练数据，
+        因此以存活敌人的感知豁免调整值作为被动察觉的数据代理（DC = 10 + 最高
+        值）。成功即施加 P1 的 ``invisible`` condition，攻击优劣势与终止全部由
+        该 condition 的既有 ``attack_modes`` / ``ends_on`` 元数据驱动。
+        """
+
+        actor_id = str(intent["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        events: list[dict[str, Any]] = []
+        if spend_action:
+            events.append({
+                "type": "dnd2024.action.spent", "actor_id": actor_id,
+                "resource": self._spend_action_resource(combat), "amount": 1,
+            })
+        stealth = int(actor["skill_values"].get("stealth", 0) or 0)
+        alive_wisdom = [
+            int((self._actor_view(instance, combat, f"enemy:{enemy_id}")["saving_throws"]
+                or {}).get("wis", 0) or 0)
+            for enemy_id, enemy in (combat.get("enemies") or {}).items()
+            if int(enemy.get("hp", 0) or 0) > 0
+        ]
+        dc = 10 + max(alive_wisdom, default=0)
+        # S-P12 迁移债 D2：未受训护甲的隐匿劣势在此接线。
+        sources: list[dict[str, Any]] = []
+        if bool((actor.get("armor_training") or {}).get("stealth_disadvantage")):
+            sources.append({"code": "stealth_disadvantage", "mode": "disadvantage"})
+        mode = mode_from_sources(sources)
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if mode == "disadvantage" else None
+        rolls = [first] if second is None else [first, second]
+        natural = min(rolls) if mode == "disadvantage" else first
+        total = natural + stealth
+        success = total >= dc
+        event: dict[str, Any] = {
+            "type": "check.resolved", "kind": "hide", "actor_id": actor_id,
+            "ability": "stealth", "rolls": rolls, "natural": natural,
+            "modifier": stealth, "total": total, "target": dc, "success": success,
+        }
+        if mode:
+            event["advantage_mode"] = mode
+            event["advantage_sources"] = sources
+        events.append(event)
+        if success:
+            events.append({
+                "type": "condition.applied", "target_id": actor_id,
+                "condition": "invisible", "duration": "combat",
+                "source_actor_id": actor_id,
+                "ends_on": ["attack_roll", "spell_cast"],
+            })
+        return events
+
     def _class_capability_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
@@ -1322,6 +1379,10 @@ class CombatResolutionMixin:
             elif action.kind in {"dash", "dodge", "disengage"}:
                 events.extend(self._basic_action_events(
                     combat, action.kind, actor_id, spend_action=False,
+                ))
+            elif action.kind == "hide":
+                events.extend(self._hide_events(
+                    instance, combat, {"actor_id": actor_id}, rng, spend_action=False,
                 ))
             elif action.kind == "heal":
                 # 特性声明的治疗骰 + 等级加值；事件形状与法术治疗分支一致。
