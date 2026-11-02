@@ -6,7 +6,7 @@ This page explains how to update DiceFrame itself. Plugins are updated separatel
 
 ## Upgrading existing data
 
-Supported saves and Lorebook databases migrate automatically on load/startup. This integration preserves the modular main contracts; unknown or future variants fail closed. The current save schema is 47 and Lorebook schema is 12; beta.2 and older programs cannot read the upgraded saves. Managed Docker keeps version/data pairs and can restore the older pair; source and portable program rollback alone cannot restore migrated data. Back up the complete `data/`, including updater data snapshots, with the server stopped before upgrading.
+Supported saves and Lorebook databases migrate automatically on load/startup. This integration preserves the modular main contracts; unknown or future variants fail closed. The current save schema is 48 and Lorebook schema is 12; beta.2 and older programs cannot read the upgraded saves. Managed Docker keeps version/data pairs and can restore the older pair; source and portable program rollback alone cannot restore migrated data. Back up the complete `data/`, including updater data snapshots, with the server stopped before upgrading.
 
 Legacy inline AI configuration is not automatically converted. Configure providers and role references in Settings. Some old player links require a fresh seat invitation. See [application updates](updates.md) for the complete upgrade and downgrade procedure.
 
@@ -42,11 +42,13 @@ Restarting a committed version reuses its data. A later upgrade copies the curre
 
 Back up the complete mounted `data/` directory. **Do not exclude `data/_updater/data-versions/`, `data-bindings/` or `data-pending/`: these contain business data and its recovery records.** The launcher retains current/previous program payloads; data cleanup retains their paired copies and any copies still referenced by local file paths in shared host settings, then removes verified retired copies. The initial legacy dataset stays intact. Copying needs additional disk space; if preparation cannot complete within the old launcher's startup window, the update fails safely and the old service resumes. Actual Python/system-runtime incompatibility still requires a new image.
 
-Supported game saves migrate to schema 47 and Lorebook databases to schema 12; ambiguous or unsupported inputs are rejected. Source and Windows portable installations retain their existing update mechanisms and need a complete pre-upgrade backup for cross-format recovery. Legacy inline AI configuration is not guessed into providers; configure valid provider/role references when needed.
+Supported game saves migrate to schema 48 and Lorebook databases to schema 12; ambiguous or unsupported inputs are rejected. Source and Windows portable installations retain their existing update mechanisms and need a complete pre-upgrade backup for cross-format recovery. Legacy inline AI configuration is not guessed into providers; configure valid provider/role references when needed.
 
 Save migration 44→45 separates kernel game configuration, narration preferences and dice presentation preferences, and moves reward policy into economy storage; 45→46 establishes a reader fence for the new story, growth and finale write contracts without guessing historical plans, growth marks or reversals. Perspective, `None` versus empty prompt overrides, zero luck timeout, reward amounts and ledger entries retain their values. Migration operates on a copy; unsupported slot versions or mixed layouts reject without overwriting the source save. This storage schema number is not an application release version.
 
 Migration 46→47 adds the one-use resource recovery authority and its reader fence. It does not invent recovery qualifications from historical narration or logs. Beta.2 and older programs cannot read upgraded saves; a downgrade needs the matching retained dataset or pre-upgrade backup. The startup world-identity upgrade also rebinds known legacy world and Book references while preserving display names and content; ambiguous, conflicting or unsupported future data stops the migration before publication.
+
+Migration 47→48 adds a reader fence for affection rollback snapshots. Older saves had no historical affection scores, so the migration leaves the slot absent and does not infer them.
 
 ## Windows Portable
 

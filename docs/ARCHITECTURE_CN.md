@@ -10,7 +10,7 @@
 > - 分支：`main`
 > - Commit：`dbc4b80af77015032007d4e0daa961af13c484d0`
 > - Release：`3.0.0-beta.2`
-> - 上游 GameInstance persisted schema：`46`；当前本地 writer 写入 `47`（45 为本局配置拆分，46 为剧情/成长/结团读写隔离，46→47 为恢复权威的旧读者隔离栏）。上游基线与本地工作区版本必须分开描述。
+> - 上游 GameInstance persisted schema：`46`；当前本地 writer 写入 `48`（45 为本局配置拆分，46 为剧情/成长/结团读写隔离，46→47 为恢复权威的旧读者隔离栏，47→48 为好感度回滚快照的旧读者隔离栏）。上游基线与本地工作区版本必须分开描述。
 > - 本地状态归属：`game_config` 为内核配置，`room_access` 与经济账本属于必要内核；`narration_preferences` 和 `check_presentation` 经 hooks 提供可选投影和新 run 偏好继承。44→45 迁移移动旧桌面字段与 `economy.reward_policy`，不换算金额、不改写事务账本；保留不透明扩展字段，拒绝未知或混杂结构。见 [ADR-0007](adr/0007-runtime-state-ownership.md)。
 > - R9-b：`scene` 权威状态存于 `modules.narrative_notes.scene`，该槽升到 v2；39→40 迁移删除旧顶层键，值原样保留。reset 照旧清空；写 scene 的事务（开局、回合处理、swipe、规则批次与 Director 自动化、ruleset 事务回滚、reset）经 `module_hooks.preflight(..., NARRATIVE_VIEW)` 对叙事拥有模块预检。列表、详情、大厅（含密码遮挡）、SSE、recap 与 LLM 视图的 `scene` 不变。
 > - R9-a：`adventure_progress` 与 `play_mode` 权威状态存于 `modules.adventure_runtime` 的 `progress`、`play_mode`；38→39 迁移删除旧顶层键。Adventure 身份仍只在顶层 `adventure_binding`。读档时空或未知的 play_mode 仍按绑定推导；原地 reset 清空 progress、保留 play_mode；新 run（reset/restart/种子）沿用 play_mode 并重新初始化 v2 进度，写入均经模块 owner 并先做预检。
@@ -2456,7 +2456,7 @@ reset/restart 不覆盖冻结/结束档案。
 资料册 owner 为新局物化 canonical 选择。普通角色卡库导入仍遵循建卡字段契约，
 不能与完整快照带入视为同一种操作。
 
-实例迁移 45→46 仅设剧情/成长/结团读者隔离；46→47 仅设恢复权威读者隔离，不猜历史计划、成长或恢复。未来/不支持的模块版本拒绝
+实例迁移 45→46 仅设剧情/成长/结团读者隔离；46→47 仅设恢复权威读者隔离；47→48 仅设好感度回滚快照读者隔离，不猜历史计划、成长、恢复或好感度分数。未来/不支持的模块版本拒绝
 写入；已存储的非对象模块及损坏模块容器在默认槽初始化前被拒绝，不能被静默清空后重新获得写权限。
 准备中的存档跨 run 导入被拒绝，先取消再导入。已结团存档导入后仍只读，
 回执保留原 run 来源；自由计划和历史计划快照在导入边界重绑新 run。

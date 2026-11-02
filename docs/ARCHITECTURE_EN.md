@@ -10,7 +10,7 @@
 > - Branch: `main`
 > - Commit: `dbc4b80af77015032007d4e0daa961af13c484d0`
 > - Release: `3.0.0-beta.2`
-> - Upstream GameInstance persisted schema: `46`; the current local writer writes `47` (45 splits table ownership; 46 fences story/development/finale authority; 46→47 is the reader fence for recovery authority). Keep the upstream baseline separate from the local working-tree writer.
+> - Upstream GameInstance persisted schema: `46`; the current local writer writes `48` (45 splits table ownership; 46 fences story/development/finale authority; 46→47 is the reader fence for recovery authority; 47→48 is the reader fence for affection rollback snapshots). Keep the upstream baseline separate from the local working-tree writer.
 > - Local state ownership: `game_config` is kernel configuration; `room_access` and the economy ledger are mandatory kernel dependencies. `narration_preferences` and `check_presentation` contribute optional projections and new-run preference carry through hooks. Migration 44→45 moves the old table fields and `economy.reward_policy` without rescaling or changing transaction state; opaque extras are retained and unknown/mixed shapes are refused. See [ADR-0007](adr/0007-runtime-state-ownership.md).
 > - R9-b: `scene` authority lives in `modules.narrative_notes.scene`, upgrading that slot to v2; migration 39→40 removes the old top-level key and keeps the value verbatim. Reset still clears it. Transactions that write the scene (run opening, round processing, swipe, ruleset batches and Director automation, ruleset transaction restore, reset) preflight the narrative owner through `module_hooks.preflight(..., NARRATIVE_VIEW)`. The `scene` in list, detail, lobby (including the password gate), SSE, recap and the LLM view is unchanged.
 > - R9-a: `adventure_progress` and `play_mode` have their authority in `modules.adventure_runtime` under `progress` and `play_mode`; migration 38→39 removes the old top-level keys. Adventure identity stays only in top-level `adventure_binding`. An empty or unknown play mode is still derived from the binding on load; in-place reset clears progress and keeps the play mode; a new run (reset/restart/seed) keeps the play mode and re-initializes v2 progress, all through the module owner after a preflight.
@@ -2484,8 +2484,9 @@ character-library import still follows its creation-field contract and is not
 equivalent to full-snapshot carry.
 
 Migration 45→46 is the story/development/finale reader fence; 46→47 is the
-recovery-authority reader fence. Neither reconstructs historical plans, marks or
-recovery.
+recovery-authority reader fence; 47→48 fences affection rollback snapshots.
+None of these migrations reconstruct historical plans, marks, recovery or
+affection scores.
 Explicitly damaged module containers are refused before defaults can erase authority.
 Unsupported/future module versions reject writes. Persisted non-object slots
 are rejected before generic defaults can silently discard their authority.
