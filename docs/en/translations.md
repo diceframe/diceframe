@@ -6,6 +6,12 @@ DiceFrame maintains **English and Simplified Chinese** as its core interface and
 
 Japanese, German and Russian are existing **community translations**. They remain selectable, but coverage and continued translation work belong to volunteers for those languages. Adding a language does not transfer an ongoing translation obligation to the core project owner. Existing contributions do not automatically appoint their authors as permanent maintainers.
 
+## Language maintenance overview
+
+English and Simplified Chinese are the officially maintained interface and documentation languages. Japanese, German and Russian remain available as community translations; volunteers maintain them, and adding a language does not make the core project owner responsible for future translations.
+
+Missing or unreviewed central UI translations fall back to English. Community catalogs can be paused without deleting locale IDs or changing saved games and mechanics. See the [translation policy](translations.md) for status, source review and contributor responsibilities.
+
 ## Status and fallback
 
 `src/localization/registry.json` declares each language's `core`/`community` tier, `active`/`paused` status and consenting maintainers. Empty community maintainer lists mean volunteers are welcome; existing catalogs remain active as an accepted baseline. A maintainer is listed only with their consent. New community languages need a volunteer, fallback verification and an integration PR.
