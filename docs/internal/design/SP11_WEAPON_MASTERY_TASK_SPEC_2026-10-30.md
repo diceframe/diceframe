@@ -360,6 +360,10 @@ python -m pytest tests/rulesets -q
 | D11 | 检定窗（语出惊人）与 Shield 改判失手不结算 graze（check_windows.py 属 §3.5 零改动清单） | 窗口 / 反应链批次 |
 | D12 | 多处 `slowed_10` 坍缩为单 condition，`source_actor_id` 与 duration 取最后写入者，多来源时过期时点可能提前 | 条件实例追踪批次 |
 | D13 | sap / vex 的 `after_next_attack` duration 在未被消耗时不会按原文在攻击者下回合开始 / 结束过期（复用 vicious_mockery 先例） | 条件时长精确化批次 |
+| D14 | 共享声明方案的数值 / 资源上下文：`features_for` 按 progression 授权补入跨职业声明，但 `ClassFeatureDefinition.class_id` 仍为声明职业（fighter）；共享特性若声明 `*_track`、`resource_id` 或 capabilities，`_value` 与 `class_resource_definition` 会按 fighter 的表解析，barbarian/rogue/paladin/ranger 会读到错误轨道 / 资源。当前 `weapon_mastery` 无参数、无资源、无 capability，故本切片无影响 | 共享特性 / 多职业原语批次；偿还前共享声明仅限解锁型（参数 / 资源 / capability 三空），或引入 ownership-aware 职业上下文 |
+| D15 | 跨职业 `source_ref` / summary 保真：单条声明把 fighter 的 `srd-5.2.1:p42:weapon-mastery` 复用于五个职业，而 §3.2 要求各职业取各自页码；该页码也与 fighter 其它特性的 p48/p49 体系不一致，需回原书核对。若 UI 展示 source_ref，四个职业会指向 fighter 页 | 内容 / i18n 批次：按职业提供 source_ref 元数据，或把 source_ref 移到 progression 授权层 |
+| D16 | graze 击杀不触发 `_enemy_defeated_feature_events`：按 §3.3(c) 显式事件流只做抗性 → 专注 → victory，擦掠把敌人打到 0 时，击败触发类特性不会结算。当前武器精通载体五职业均无击败触发特性，影响低 | 击败触发批次，与 S-P4 的失败触发路径一并归一 |
+| D17 | M11 降级后的验证缺口：测试用手工 held 元数据重挂 + 真实 `decision.resolve`，验证了 Shield 丢弃，但未覆盖生产路径 `_hit_settlement_events` → `_hit_reaction_offer` 的 held 传递；该合同目前只靠静态核对 | 测试补充批次：在 PvP / 同侧 offer 结构未开放前，补一条对 `_hit_reaction_offer` 深拷贝的单元断言或注记为已知未测分支 |
 
 ---
 
@@ -378,4 +382,20 @@ python -m pytest tests/rulesets -q
   3. **多来源 slow 坍缩**：conditions 为 dict，同 id 重复 applied 由最后写入者覆盖 `source_actor_id` / duration；-10 上限正确，但多攻击者（或 ray_of_frost 与缓速）叠加时，过期时点可能早于仍存活的另一实例。
   4. **sap / vex 时长**：`after_next_attack` 在未被消耗时不会按原文"直至你下回合开始 / 结束"过期，复用 vicious_mockery 先例；任务书 §3.3(a) 显式指定，属时长精确化而非本切片缺陷。
 - 迁移债确认（§8 D1/D3–D9）：维持原登记；D6（Nick 双持宿主）与 D7（Push 档案载体）仍无宿主，未偷做半实现。新增 D10-D13 对应上述四项。
-- 主计划同步：S-P11 行由"执行完成待审核"改为"执行完成并审核通过"，1C 汇总维持 9/12（S-P11 计入已审核）。
+- 补充审核（2026-11-02 复盘，维护者缺席期裁决专查）：上述 4 项之外，另发现 4 项应登记事项——共享声明的 `class_id` 数值 / 资源上下文（D14）、跨职业 `source_ref` / summary 保真（D15）、graze 击杀不触发击败特性（D16）、M11 降级后的生产 held 传递验证缺口（D17）。均已登记，维护者事后批准见 §10。
+- 主计划同步：S-P11 行由"执行完成待审核"改为"执行完成并审核通过"，1C 汇总维持 9/12（S-P11 计入已审核）；2026-11-02 追加补充审批与 D14–D17 登记说明。
+
+---
+
+## 10 S-P11 补充审批记录（2026-11-02）
+
+依据：维护者（用户）在 2026-11-02 复盘后下达"补充审批和登记"指令。以下批准仅针对 S-P11 执行期间在用户缺席时由执行侧自行裁决的偏差，不构成对 D1–D17 技术债的偿还承诺，也不授权任何新的代码改动。
+
+| # | 待批事项 | 裁决 | 附加约束 / 登记 |
+|---|---|---|---|
+| A1 | §3.2 五段同形声明无法通过全局唯一 id 校验，执行侧改为 fighter 单条声明 + `features_for` 按 progression 授权归属（改动了未列入 §3 白名单的 `features/resolver.py`） | **批准为正式 spec 修订** | 该归属规则只对"解锁型共享特性"成立：在 D14 偿还前，共享特性必须保持参数 / 资源 / capability 三空；不得据此给共享特性新增 `*_track`、`resource_id` 或 capabilities。新增跨职业声明须显式评审，禁止靠数据误写静默授予 |
+| A2 | §3.4 要求新增 duration，§3.5 又把 `engine.py` 列为零改动；执行侧在 `_expire_conditions` 落地 `attacker_next_turn_start` | **批准** | §3.5 的 `engine.py` 零改动条目以 §3.4 具体指令为准，视为 spec 勘误；实现位置与事件驱动机制一致，M9 为回归守护 |
+| A3 | M11 的 PvP / 同侧 offer 不可构造，执行侧按 M11 明文降级为手工 held 元数据 + 真实 `decision.resolve`；§7.3 同时要求"停止请示" | **批准降级** | 用户缺席期间以 M11 明文降级条款为准；§7.3 的停机要求在本项上豁免。降级带来的生产 held 传递验证缺口登记 D17，不得把 M11 描述为端到端覆盖 |
+| A4 | graze 击杀不调用 `_enemy_defeated_feature_events` | **批准为显式裁剪** | 依据 §3.3(c) 的事件流；规则完整性缺口登记 D16，归击败触发批次 |
+| A5 | 审核发现 D10–D13 未在审核轮修复 | **批准维持登记** | "审核通过"口径为"带登记近似通过"，不等于逐条 RAW 等价；D11、D13 是可达的 RAW 偏差 |
+| A6 | 补充登记 D14–D17 | **批准登记** | D14 共享声明上下文、D15 source_ref 保真、D16 graze 击败触发、D17 M11 验证缺口；偿还前不得扩大共享声明面 |
