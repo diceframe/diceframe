@@ -666,6 +666,27 @@ def test_dark_ones_own_luck_does_not_open_on_a_decisive_death_save(runtime, shee
     assert _pool(instance, "dark_ones_own_luck")["current"] == 2
 
 
+def test_bless_can_make_a_death_save_succeed_without_opening_dool(runtime, sheets) -> None:
+    """A bless-boosted save that reaches 10 is decisive even though the d20 is low."""
+
+    engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
+    _zero_hp(instance)
+    _canonical(instance).setdefault("conditions", {})["blessed"] = {"source": "bless"}
+    events = _apply(engine, instance, {
+        "intent_id": "ds-1", "type": "death_save",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng([8, 4]))
+
+    check = _checked(events, "death_save")
+    assert check["natural"] == 8
+    assert check["check_bonus"] == 4
+    assert check["total"] == 12
+    assert check["success"] is True
+    assert _pending(instance) == []
+    assert _pool(instance, "dark_ones_own_luck")["current"] == 2
+
+
 def test_dark_ones_own_luck_holds_off_the_concentration_failure(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["warlock"], rolls=[1, 20])
     _canonical(instance)["spellcasting"]["class"]["concentration"] = {"spell_ref": "spell:bless"}

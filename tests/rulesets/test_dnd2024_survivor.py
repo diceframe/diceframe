@@ -481,6 +481,28 @@ def test_level_seventeen_fighter_keeps_a_single_die_and_normal_success() -> None
     assert resolved["successes"] == 1
 
 
+def test_bless_boosts_a_death_saving_throw() -> None:
+    """A death saving throw is a saving throw: conditional d4s apply."""
+
+    runtime = Dnd2024Runtime()
+    sheet = _sheet(runtime, 1)
+    engine, instance = _combat(runtime, sheet)
+    _at_zero(engine, instance)
+    _canonical(instance)["conditions"]["blessed"] = {"source": "bless"}
+
+    events = _death_save(engine, instance, rolls=[8, 4])
+
+    check = _check(events)
+    assert check["natural"] == 8
+    assert check["check_bonus"] == 4
+    assert check["check_bonus_rolls"] == [
+        {"condition": "blessed", "die": 4, "roll": 4},
+    ]
+    assert check["total"] == 12
+    assert check["success"] is True
+    assert _resolved(events)["successes"] == 1
+
+
 @pytest.mark.parametrize("rolls, failures, successes", [
     ([1, 1], 3, 0),
     ([1, 15], 1, 1),

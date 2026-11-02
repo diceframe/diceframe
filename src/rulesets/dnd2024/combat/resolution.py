@@ -1439,10 +1439,19 @@ class CombatResolutionMixin:
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage_sources else None
         roll = max(first, second) if second is not None else first
+        # A death saving throw is still a saving throw, so conditional d4s
+        # (Bless) apply after the d20 faces and before the outcome is read.
+        check_bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, actor["conditions"], "saving_throw", rng,
+        )
+        check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+        total = roll + check_bonus
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
-            "natural": roll, "target": 10, "success": roll >= 10,
+            "natural": roll, "check_bonus": check_bonus,
+            "check_bonus_rolls": check_bonus_rolls, "total": total,
+            "target": 10, "success": total >= 10,
         }
         if advantage_sources:
             check_event["advantage_mode"] = "advantage"

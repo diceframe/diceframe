@@ -250,7 +250,8 @@ class CombatCheckWindowsMixin:
         """
 
         roll = int(check.get("natural", 0) or 0)
-        if roll == 1 or roll >= 10:
+        total = int(check.get("total", roll) or roll)
+        if roll == 1 or total >= 10:
             return None
         owner_id = self._dool_owner(instance, actor, failed=True)
         if not owner_id:
