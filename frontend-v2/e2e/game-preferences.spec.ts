@@ -38,7 +38,7 @@ test('players choose their own suggestion visibility while the GM only sets the 
     await player.reload()
     await expect(player.locator('.composer .quick-actions')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
     expect(await player.locator('.composer-title-row > strong').evaluate(el => el.getBoundingClientRect().height)).toBeLessThan(28)
-    if (info.project.name === 'mobile') await expect(player.locator('.composer-hint')).toBeHidden()
+    await expect(player.locator('.composer-guidance p')).toBeHidden()
     expect(personalWrites).toBe(0)
     expect((await (await request.get(endpoint, { headers })).json()).preferences.quick_actions_enabled).toBe(false)
     expect((await (await request.get('/api/config', { headers })).json()).game_defaults).toEqual(defaults)

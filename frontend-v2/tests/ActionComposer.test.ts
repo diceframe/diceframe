@@ -110,6 +110,15 @@ describe('ActionComposer rollback refresh', () => {
     wrapper.unmount()
   })
 
+  it('keeps action limits reachable in a disclosure instead of a truncated hint', () => {
+    const wrapper = mount(ActionComposer, { global: { plugins: [i18n] }, props: { gameKey: 'web|hint|bot', userId: 'player-1', detail: detail(false) } })
+    const guidance = wrapper.get('details.composer-guidance')
+    expect(guidance.attributes('open')).toBeUndefined()
+    expect(guidance.get('summary').text()).toBe('行动说明')
+    expect(guidance.get('p').text()).toBe(i18n.global.t('defaultHint'))
+    wrapper.unmount()
+  })
+
   it('inherits the table visibility until the player chooses and keeps the input available', async () => {
     const wrapper = mount(ActionComposer, { global: { plugins: [i18n] }, props: { gameKey: 'web|room|bot', userId: 'player-1', detail: detail(false) } })
     expect(wrapper.findAll('.quick-actions button')).toHaveLength(4)
