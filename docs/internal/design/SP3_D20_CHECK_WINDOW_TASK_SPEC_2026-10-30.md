@@ -512,3 +512,21 @@ git diff --stat
   5) window_bonus / window_bonus_rolls 为 SP10 尚未合入的窗口骰迹命名；SP10 移除/重命名 bless_bonus 时需同步迁移
      （§8.2 #9）。
 ```
+
+---
+
+## 9 S-P3 审核记录（2026-11-02）
+
+- 基线核对：S-P3 提交 `4a2e0ab`（14 文件）；审核基线 HEAD `26ed4a7`（已含 S-P2 `2ef9575`、S-P10 `26ed4a7` 的审核修复），工作区干净。执行报告 §8.3 的基线 `27dca1be` 与提交内容一致。
+- 定向复跑：审核端 Linux / Python 3.11 复跑 `test_dnd2024_check_windows.py` **34 passed**（2.30s）、`test_dnd2024_feat_resources.py` **14 passed**（2.38s），合计 **48 passed**（= 执行报告 46 + S-P10 审核新增的 2 条死亡豁免 Bless 用例）。
+- 主回归复跑：`tests/rulesets` 全量 **908 passed / 0 failed**（360.06s，6:00）。执行报告 §8.3 的 8 failed / 3 errors 全部落在 rulesets 之外（docker launcher 的 cp311 门禁、content sync 的 Windows 原子改名），S-P10 审核已在 Linux 下确认非本切片回归；`character_builder` 的 con.json 保留名问题在 Linux 下不复现。
+- 白名单合规：`git show --stat 4a2e0ab` = 14 文件，与 §3 白名单一致（`check_windows.py`、`feats/lucky.json`、两个新测试文件；`test_bundle_loader.py` 的 feat 计数 6→7 是新增 lucky.json 的派生改动；任务书 §8.3 +81）。`reaction_spells.py` / `reducer.py` / `catalog.py` / `srd_combat_core.json` / 前端零 diff；P7/P8 在途文件无残留。
+- 注册表边界核对：`WINDOW_REGISTRY` 四条的 surface / resource / feature / reaction 成本为唯一命名源；`resolution.py` / `validation.py` 只调用混合类方法，`lucky` / `cutting_words` / `dark_ones_own_luck` 无特性 if 分支（`"lucky"` 字符串仅作 advantage source 标签与资源 id，属声明通道）；窗口骰只在 `_finish_check_window` / `_finish_damage_window` 内 `rng.randint`，未并入攻击/豁免/伤害骰序列。
+- 规则核对（以任务书 §1 原文引用为准）：Lucky 池 = PB、长休全恢复，优势面三意图（attack / death_save / spell_attack）掷前声明且 `spend_luck` 严格布尔校验，劣势面仅敌对己攻击、命中后追加 d20 取低并重判 hit/crit，自然 1 不开窗；CW 六个候选守卫（可见/60 尺/诗人等级/池/反应/未在同攻击检定面花过），检定面减 total、伤害面减伤下限 0，诗人=防守者时与 Shield/UD 共享反应预算；DOOL 6 级、CHA 下限 1、长休全恢复，失败后 +d10 且一次一掷，仅接死亡豁免与攻击尾段专注豁免，`_concentration_events` 本体零改动；声明等级与子职表全等（cutting_words 3 / college_of_lore、DOOL 6 / fiend_patron），单子职模型下由 resolver 的 subclass grant 门控。feat 池资格按 `features.feat_refs` 门控，删专长后残留池在 sync 时清除。
+- 直通不变式：G1 用例以 `SequenceRng([15, 4])` / `[7]` 显式锁定无窗口攻击与死亡豁免的骰序；decline 路径事件除 `intent.submitted` / pending / cleared 外与无窗口基线逐字典相等；窗口骰位于 bless d4 之后、伤害骰之前（伤害面窗口骰位于伤害骰之后），与 SP2 §3.8 / SP10 §3 契约一致。
+- 审核发现（3 项，均不阻塞、不改代码）：
+  1. **CW 伤害窗与报偿（Retaliation）的链互斥（跨切片债）**：`reaction_spells._reaction_feature_choices` 在 `next_decision` 非空时不产出 counterattack 条目（S-P9 D1 的 fail-safe 前提，原判断"Smite + Retaliation 不可达"）。S-P3 把 CW 伤害窗挂入 `next_decision` 链后该组合变为可达：队伍中有合格诗人时，受击狂战士的报偿在本次攻击中被抑制，即使诗人随后 decline。方向为 fail-safe（少给一次反应、不额外增伤），但不符合 RAW"伤害落地后反应"；修复需要 post-damage 反应链接在伤害窗之后的新链形状，超出本切片白名单（`reaction_spells.py` 禁改），登记交后续批暂停/反应链切片。
+  2. **AI DOOL 死亡豁免阶梯忽略 check_bonus**：`_automatic_check_window` 以 `natural + d10` 对比 DC 10，未计入 Bless 的 `check_bonus`，只会导致本可救回时保守 decline（玩家侧仍可手动花点），不改变规则结果；登记为 AI 阶梯精化项。
+  3. **伤害窗 penalty 字段语义**：`damage_event.penalty` 存原始诗人骰面，而同批 `check.resolved(kind="damage_window")` 的 `penalty` 存钳制后的 `min(amount, die)`；无下游消费者差异，作为字段语义备注，后续统一骰迹时对齐。
+- 迁移债确认（§8.2 1–9）：1–9 维持原登记；#6（uncanny_dodge 注册表化）由 S-P9 销账；#9（`bless_bonus` 演进）由 S-P10 承接并完成（`check_bonus` / `check_bonus_rolls` 已切换）。新增上述第 1 条跨切片债与第 2、3 条精化项。
+- 主计划同步：新增 S-P3 完成行，1C 汇总 7/12 → 8/12。
