@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "en",
+  "target": {
+    "kind": "feat",
+    "id": "lucky"
+  },
+  "fields": {
+    "name": "Lucky",
+    "summary": "You have Luck Points equal to your Proficiency Bonus. Spend 1 to give yourself Advantage on a D20 Test, or to impose Disadvantage on an attack roll made against you. You regain all expended Luck Points when you finish a Long Rest."
+  }
+}
