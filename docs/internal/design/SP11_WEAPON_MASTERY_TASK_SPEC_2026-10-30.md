@@ -272,13 +272,77 @@ python -m pytest tests/rulesets -q
 
 ## §8 执行报告模板与迁移债登记
 
-### 执行报告（执行侧填写）
+### 执行报告（2026-11-02，S-P11 执行侧填写）
 
-- 改动文件清单（对照 §3 白名单，逐文件：实际 diff 摘要 / 与规格的偏差及原因；`weapon_masteries` 注册表最终归属模块）；
-- §4 矩阵逐用例结果（M1-M14 + 回归清单，含 §4.2 定位到的法术 condition 回归文件名）；
-- §5 验收命令原样回贴（两次）；
-- 行号偏移复核结果（§2.2 是否仍成立；`attacker_next_turn_start` 枚举的 reducer 落点行号）；
-- 未尽事项与建议。
+#### 1. 改动文件清单（对照 §3 白名单）
+
+| 文件 | 实际改动 | 偏差 |
+|---|---|---|
+| `templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json` | 15 条 weapon 档案逐条追加 `mastery`，值与 §3.1 表全等；`conditions` / `spell_effects` / `unarmed_strike` / `labels` 零改动 | 无 |
+| `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json` | 仅 fighter 段 second_wind 与 action_surge 之间新增一条 `weapon_mastery`；labels 平铺区加英文标签 | **有**：§3.2 要求五段重复声明，但 feature id 全局唯一，`Dnd2024ClassFeatureCatalog.from_bundle` 遇重复 id 抛 `duplicate class feature id`。改为单条声明 + resolver 授权式归属（见下） |
+| `templates/rulesets/dnd2024_srd/locales/en/class_feature_catalogs/srd_class_features.json` | 加 `"weapon_mastery": "Weapon Mastery"` | 无 |
+| `templates/rulesets/dnd2024_srd/locales/zh-CN/class_feature_catalogs/srd_class_features.json` | 加 `"weapon_mastery": "武器精通"` | 无（D9 的中文 term 标签仍待 i18n 批次） |
+| `src/rulesets/dnd2024/combat/weapon_masteries.py`（新建） | `WEAPON_MASTERY_FEATURE_ID` + `WEAPON_MASTERY_EFFECTS`（8 词条，4 实现 / 4 `unimplemented`） | 无 |
+| `src/rulesets/dnd2024/combat/resolution.py` | 导入注册表；`_attack_events` miss 分支接入 `_miss_mastery_events`；新增 `_weapon_mastery_effect` / `_miss_mastery_events`；`_hit_settlement_events` 在 offer 链前写 held `mastery_effects`；`_submit_hit_damage` 与 `feature_use` 并列弹出并逐条转 `condition.applied` | 无。`mastery_effects` 条目额外携带 `source_actor_id`（slow 的"攻击者下回合开始"过期需要） |
+| `src/rulesets/dnd2024/combat/reducer.py` | `_TURN_SCOPED_DURATIONS` 加 `"attacker_next_turn_start"` | 无。实际过期动作发生在 `engine._expire_conditions`（由 `dnd2024.turn.advanced` 调用），见第 4 节 |
+| `src/rulesets/dnd2024/combat/engine.py` | `_expire_conditions` 新增分支：进入回合者 == `source_actor_id` 时移除 `attacker_next_turn_start` | 无（§3.4 允许按现有事件驱动机制落地） |
+| `src/rulesets/dnd2024/features/resolver.py` | `features_for` 按 progression 授权补入目录已声明、但不在本职业段的共享特性 id | **有**（单条声明方案的配套改动） |
+| `tests/rulesets/test_dnd2024_class_features.py` | fighter/barbarian/rogue 特性清单断言加入 `weapon_mastery`；`_bad_once_per_turn` 改为按 id 查找 action_surge | **有**：§4.2 要求零改动，但新增 1 级特性必然改变清单断言（功能正确性优先） |
+| `tests/rulesets/test_dnd2024_weapon_mastery.py`（新建） | M1–M14 + 2 条声明链数据守护，共 16 用例 | 无 |
+
+归属说明：效果注册表落在独立小模块 `src/rulesets/dnd2024/combat/weapon_masteries.py`（按 §3.3(a) 的 owning module 建议），resolution.py 只导入并分发。
+
+#### 2. §4 矩阵结果（16/16 绿）
+
+| # | 结果 | 守护点 |
+|---|---|---|
+| M1 | ✅ | 失手 `resource.changed` amount=3、slashing、`rolls=[]`、hp 40→37；事件无 `mastery_effects` 泄漏 |
+| M2 | ✅ | `stoneskinned` 抗性后 amount=1、`resisted=true`；专注 `check.resolved` DC 10 |
+| M3 | ✅ | 1 HP 敌人被擦掠 → `dnd2024.combat.ended reason=victory` |
+| M4 | ✅ | STR 8 失手无 `resource.changed`（max(0)） |
+| M5 | ✅ | STR 8 长剑 0 伤害命中仍 applied `next_attack_disadvantage`（sap 无伤害门槛） |
+| M6 | ✅ | 敌人下回合攻击 `advantage_mode=disadvantage` + `advantage_sources` 含该 condition，攻击后 `condition.removed` |
+| M7 | ✅ | handaxe 命中伤害 7 → applied `next_attack_advantage`；追击 advantage + 消耗移除 |
+| M8 | ✅ | 0 伤害命中 **不** applied（vex 伤害门槛，与 M5 对照） |
+| M9 | ✅ | javelin 命中 → applied `slowed_10 duration=attacker_next_turn_start`；敌人回合 `economy.speed=20`；攻击者下回合开始 condition 消失 |
+| M10 | ✅ | wizard 持长剑命中无任何 mastery 事件（解锁门控） |
+| M11 | ✅ | 手工 held 事件链 + Shield cast 改判 miss → 无 `next_attack_disadvantage`、无 HP 变化（held 正确作废） |
+| M12 | ✅ | 5 级 rogue companion UD 减半（7→3）后 mastery 照常 applied |
+| M13 | ✅ | greataxe(cleave)/quarterstaff(topple) 命中无额外效果、无异常（fail closed） |
+| M14 | ✅ | 15 条档案 `mastery` 与 §3.1 全等；`unarmed_strike` 无 mastery |
+| 附加 | ✅ | 五职业 `has_feature("weapon_mastery")` 为 true，wizard 为 false |
+
+回归面：`test_dnd2024_uncanny_dodge.py`、`test_dnd2024_origin_feat_spells.py`、`test_dnd2024_class_features.py`、`test_dnd2024_sneak_attack.py`、`test_dnd2024_stoneskin.py` 全绿；法术 condition 既有回归由全量套件覆盖（`ray_of_frost` / `vicious_mockery` / `chill_touch` 的 slowed / next_attack / caster duration 用例）。
+
+#### 3. §5 验收命令原样回贴
+
+定向（Linux/Python 3.11 等价命令）：
+
+```text
+python -m pytest tests/rulesets/test_dnd2024_weapon_mastery.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_origin_feat_spells.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_sneak_attack.py tests/rulesets/test_dnd2024_stoneskin.py -q
+131 passed in 45.79s
+```
+
+全量：
+
+```text
+python -m pytest tests/rulesets -q
+924 passed, 36 warnings in 354.80s (0:05:54)
+```
+
+#### 4. 行号偏移复核
+
+- §2.2 的 P7/P8 在途偏移已失效：P7/P8 已合入，工作区无未提交 P7/P8 文件；`_submit_hit_damage` 现位于 `resolution.py` L1008 附近，按语义位置改动。
+- `attacker_next_turn_start` 落点：`reducer.py` L22 `_TURN_SCOPED_DURATIONS`；真实过期在 `engine.py` `_expire_conditions`（L1208 起，新分支 L1235-1242），由 `dnd2024.turn.advanced` 经 `reducer.py` L334-338 调用。结论：duration 的消费是事件驱动而非 reducer 内联 tick，与 §3.4 的"对齐现有实现形状"一致。
+
+#### 5. 偏差与未尽事项
+
+1. **单条特性声明**：§3.2 的五段同形条目无法通过全局唯一 id 校验；采用 fighter 单条声明 + `features_for` 按 progression 授权归属。paladin/ranger 即使没有本职业特性段也正确获得 `weapon_mastery`。该方案改变 `features_for` 的通用归属语义（目录声明跨职业共享），已在代码注释说明；若未来要求"每职业独立声明"，需先放宽 id 唯一性或引入 per-class 别名。
+2. **`view.py` 零改动**：§3.3(e) 预期的一行拷贝不需要——`_available_attacks` 已用 `**deepcopy(weapon)` 整体展开档案，`mastery` 自动随 profile 进入结算。
+3. **class_features 测试更新**：§4.2 的"零改动"与新增 1 级特性冲突，按功能正确性更新断言。
+4. **graze 不触发击败特性**：按 §3.3(c) 事件流只做抗性→专注→victory，未调用 `_enemy_defeated_feature_events`；这是任务书的显式事件流，不是遗漏。
+5. **slow 过期实现位置**：见第 4 节，落在 `_expire_conditions` 而非新增 reducer tick。
+6. **D1/D3–D9 迁移债**：维持 §8 债务表登记，本切片不偿还。
 
 ### 迁移债登记（本切片产生的显式债务）
 

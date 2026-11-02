@@ -1230,7 +1230,17 @@ class Dnd2024CombatEngine(
         for target_id in all_actor_ids:
             target_conditions = self._conditions(snapshot, combat, target_id)
             for condition_id, value in list(target_conditions.items()):
-                if not isinstance(value, dict) or value.get("source_actor_id") != previous_actor_id:
+                if not isinstance(value, dict):
+                    continue
+                if (
+                    value.get("duration") == "attacker_next_turn_start"
+                    and value.get("source_actor_id") == actor_id
+                ):
+                    # "Until the start of your next turn": the source actor's
+                    # turn has just begun, so this instance expires now.
+                    target_conditions.pop(condition_id, None)
+                    continue
+                if value.get("source_actor_id") != previous_actor_id:
                     continue
                 duration = value.get("duration")
                 if duration == "caster_turn_end":

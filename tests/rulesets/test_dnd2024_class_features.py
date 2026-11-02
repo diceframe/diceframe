@@ -297,7 +297,11 @@ def _bad_cost_amount(catalog: dict) -> None:
 
 
 def _bad_once_per_turn(catalog: dict) -> None:
-    catalog["classes"]["fighter"]["features"][1]["capabilities"][0]["once_per_turn"] = "yes"
+    action_surge = next(
+        row for row in catalog["classes"]["fighter"]["features"]
+        if row["id"] == "action_surge"
+    )
+    action_surge["capabilities"][0]["once_per_turn"] = "yes"
 
 
 @pytest.mark.parametrize(
@@ -365,7 +369,9 @@ def test_fighter_second_wind_declaration_and_capability_load() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
-    assert [feature.id for feature in resolver.features_for(character)] == ["second_wind"]
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "second_wind", "weapon_mastery",
+    ]
     capability = resolver.declared_capability(character, "second_wind")
 
     assert capability is not None
@@ -396,7 +402,7 @@ def test_fighter_action_surge_declaration_and_capability_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "action_surge",
+        "second_wind", "weapon_mastery", "action_surge",
     ]
     capability = resolver.declared_capability(character, "action_surge")
 
@@ -425,7 +431,9 @@ def test_level_one_fighter_does_not_own_action_surge() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
-    assert [feature.id for feature in resolver.features_for(character)] == ["second_wind"]
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "second_wind", "weapon_mastery",
+    ]
     assert resolver.declared_capability(character, "action_surge") is None
 
 
@@ -480,7 +488,9 @@ def test_barbarian_rage_declaration_and_capabilities_load() -> None:
         "class": {"rages": {"current": 2, "maximum": 2}},
     })
 
-    assert [feature.id for feature in resolver.features_for(character)] == ["rage"]
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "rage", "weapon_mastery",
+    ]
     enter = resolver.declared_capability(character, "rage")
     sustain = resolver.declared_capability(character, "rage_sustain")
 
@@ -562,7 +572,9 @@ def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
     _runtime, resolver = _resolver()
     character = _rogue(1)
 
-    assert [feature.id for feature in resolver.features_for(character)] == ["sneak_attack"]
+    assert [feature.id for feature in resolver.features_for(character)] == [
+        "sneak_attack", "weapon_mastery",
+    ]
     feature = resolver.features_for(character)[0]
     assert feature.capabilities == ()
     assert feature.resource_id == ""
@@ -593,7 +605,7 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     character = _rogue(5)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "sneak_attack", "uncanny_dodge",
+        "sneak_attack", "uncanny_dodge", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
@@ -603,7 +615,9 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
 def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
     _runtime, resolver = _resolver()
 
-    assert [feature.id for feature in resolver.features_for(_rogue(4))] == ["sneak_attack"]
+    assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
+        "sneak_attack", "weapon_mastery",
+    ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
 
 

@@ -29,6 +29,7 @@ from .check_modes import condition_check_bonus_rolls, condition_flags
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
+from .weapon_masteries import WEAPON_MASTERY_EFFECTS, WEAPON_MASTERY_FEATURE_ID
 
 
 def _without_consumed_conditions(
@@ -349,7 +350,66 @@ class CombatResolutionMixin:
                 damage_formula=damage_formula, damage_type=damage_type,
                 crit_on_hit=crit_on_hit,
             ))
+        else:
+            events.extend(self._miss_mastery_events(
+                combat, actor, target, weapon, modifier, damage_type, rng,
+            ))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
+        return events
+
+    def _weapon_mastery_effect(
+        self, actor: dict[str, Any], weapon: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The declared mastery effect this attack may use, or ``None``.
+
+        Unlock is the ``weapon_mastery`` feature; enemies have stat-block
+        attacks without a mastery slot and never qualify.  A catalog property
+        that is registered as ``unimplemented`` fails closed.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return None
+        mastery_id = str(weapon.get("mastery") or "")
+        effect = WEAPON_MASTERY_EFFECTS.get(mastery_id)
+        if not effect or effect.get("kind") == "unimplemented":
+            return None
+        if not self.features.has_feature(
+            self._feature_character(actor), WEAPON_MASTERY_FEATURE_ID,
+        ):
+            return None
+        return effect
+
+    def _miss_mastery_events(
+        self, combat: dict[str, Any], actor: dict[str, Any], target: dict[str, Any],
+        weapon: dict[str, Any], modifier: int, damage_type: str, rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Graze: fixed damage on a miss, with no damage dice.
+
+        ``rolls`` stays empty (SP2 ordering: no extra die slot), the ability
+        modifier floors at zero, and the damage still passes resistance,
+        concentration and the victory check.
+        """
+
+        effect = self._weapon_mastery_effect(actor, weapon)
+        if not effect or effect.get("kind") != "miss_damage":
+            return []
+        amount = max(0, int(modifier))
+        if amount <= 0:
+            return []
+        damage, resistance = self._resist_damage(target, amount, damage_type)
+        event = {
+            "type": "resource.changed", "resource": "hp",
+            "target_id": str(target["actor_id"]),
+            "delta": -damage, "amount": damage, "damage_type": damage_type,
+            "critical": False, "rolls": [],
+        }
+        if resistance:
+            event["resisted"] = True
+            event["resistance"] = resistance
+        events: list[dict[str, Any]] = [event]
+        events.extend(self._concentration_events(target, damage, rng))
+        if self._last_hostile_defeated(combat, target, damage):
+            events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
 
     def _hit_settlement_events(
@@ -424,6 +484,17 @@ class CombatResolutionMixin:
                 "round": int(combat.get("round", 0)),
                 "turn_index": int(combat.get("turn_index", 0)),
             }
+        mastery = self._weapon_mastery_effect(actor, weapon)
+        if mastery is not None and str(mastery.get("on")) == "hit" and (
+            not mastery.get("requires_damage") or damage > 0
+        ):
+            # Held like ``feature_use``: an attack that a reaction turns into a
+            # miss must not leave its mastery condition behind.
+            damage_event["mastery_effects"] = [{
+                "condition": str(mastery["condition"]),
+                "duration": str(mastery["duration"]),
+                "source_actor_id": actor_id,
+            }]
         offer = self._hit_spell_offer(
             instance, combat, actor, weapon, target_id, damage_event, intent,
         )
@@ -943,16 +1014,26 @@ class CombatResolutionMixin:
         Hit damage is rolled once and held while the defender decides on
         Shield/Uncanny Dodge or the attacker decides on a hit-triggered spell.
         Only the paths that actually land the damage call this helper, so a
-        reaction that turns the hit into a miss never records a feature use.
-        The internal ``feature_use`` metadata never reaches the wire shape of
+        reaction that turns the hit into a miss never records a feature use or
+        applies a mastery condition.  The internal ``feature_use`` and
+        ``mastery_effects`` metadata never reach the wire shape of
         ``resource.changed``.
         """
 
         event = deepcopy(damage_event)
         feature_use = event.pop("feature_use", None)
+        mastery_effects = event.pop("mastery_effects", None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
+        if isinstance(mastery_effects, list):
+            for effect in mastery_effects:
+                if not isinstance(effect, dict) or not effect.get("condition"):
+                    continue
+                events.append({
+                    "type": "condition.applied", "target_id": event["target_id"],
+                    **effect,
+                })
         return events
 
     def _enemy_defeated_feature_events(

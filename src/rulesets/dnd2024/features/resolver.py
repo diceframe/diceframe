@@ -134,7 +134,15 @@ class Dnd2024ClassFeatureResolver:
             class_id, level,
         )
         owned: list[ClassFeatureDefinition] = []
-        for feature_id in self.catalog.by_class.get(class_id, ()):
+        ordered = list(self.catalog.by_class.get(class_id, ()))
+        # Feature ids are canonical and global, while a class table may grant a
+        # feature declared under another class (Weapon Mastery is one such
+        # shared feature).  Ownership therefore follows the progression grant;
+        # the catalog only has to declare the id once.
+        for feature_id in sorted(granted):
+            if feature_id in self.catalog.features and feature_id not in ordered:
+                ordered.append(feature_id)
+        for feature_id in ordered:
             definition = self.catalog.features.get(feature_id)
             if definition is None or definition.minimum_level > level:
                 continue

@@ -22,6 +22,7 @@
     "paladins_smite": "Paladin’s Smite",
     "fighter": "Fighter",
     "second_wind": "Second Wind",
+    "weapon_mastery": "Weapon Mastery",
     "action_surge": "Action Surge",
     "improved_critical": "Improved Critical",
     "superior_critical": "Superior Critical",
@@ -170,6 +171,12 @@
               "actions": [{"kind": "heal", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "weapon_mastery",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:weapon-mastery",
+          "summary": "You can use the mastery properties of your weapons. (This slice approximates the chosen-weapons list with an 'equipped weapon' unlock; the count track is not yet consumed.)"
         },
         {
           "id": "action_surge",

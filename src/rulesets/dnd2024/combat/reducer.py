@@ -20,7 +20,7 @@ _GRANTABLE_FLAGS = frozenset({"action_surge_used"})
 # 只在回合边界到期的条件时长；战斗结束时一并清除。
 _TURN_SCOPED_DURATIONS = frozenset({
     "actor_turn_start", "target_turn_start", "caster_turn_end",
-    "caster_next_turn_end", "after_next_attack",
+    "caster_next_turn_end", "after_next_attack", "attacker_next_turn_start",
 })
 
 
