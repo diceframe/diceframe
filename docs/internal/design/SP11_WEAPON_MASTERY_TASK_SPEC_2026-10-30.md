@@ -356,3 +356,26 @@ python -m pytest tests/rulesets -q
 | D7 | Push 推离：15 条档案无载体武器（巨棒/长矛/战锤/重弩未入档）+ 位移 rider | 武器档案扩容 + P6 位移扩展批次 |
 | D8 | Topple 失衡：prone 条件族（起身移动消耗、对 prone 的距离谓词攻击优劣势）+ 命中后强破豁免（DC 8+调整值+熟练加值） | 条件系统批次 |
 | D9 | mastery 词条的中文标签与 feed 展示（labels/locales 层） | 阶段二 i18n 批次 |
+| D10 | `requires_damage` 门槛在武器基础伤害上判定，未在 UD / 语出惊人减伤归零与命中触发法术补伤后重判 | 命中伤害聚合点精化批次 |
+| D11 | 检定窗（语出惊人）与 Shield 改判失手不结算 graze（check_windows.py 属 §3.5 零改动清单） | 窗口 / 反应链批次 |
+| D12 | 多处 `slowed_10` 坍缩为单 condition，`source_actor_id` 与 duration 取最后写入者，多来源时过期时点可能提前 | 条件实例追踪批次 |
+| D13 | sap / vex 的 `after_next_attack` duration 在未被消耗时不会按原文在攻击者下回合开始 / 结束过期（复用 vicious_mockery 先例） | 条件时长精确化批次 |
+
+---
+
+## 9 S-P11 审核记录（2026-11-02）
+
+- 基线核对：S-P11 提交 `424f645`（13 文件）；审核基线 HEAD 同提交、工作区干净，`origin/backup/cfp` 已指向该提交。执行报告 §8 的改动清单与 `git show --stat` 一致；§8.4 的行号复核（`_submit_hit_damage` L1008 附近、`_expire_conditions` L1235-1242）与代码实际位置一致。
+- 定向复跑：审核端 Linux / Python 3.11 按 §5 六文件命令复跑 **131 passed**（42.52s）；新增文件加 `test_dnd2024_class_features.py` 合计 **74 passed**。
+- 主回归复跑：`tests/rulesets` 全量 **924 passed / 0 failed**（355.33s，5:56），与执行报告一致。
+- 声明链核对：15 条武器档案 `mastery` 与 §3.1 表逐条全等，`unarmed_strike` 无 `mastery`；fighter/barbarian/rogue/paladin/ranger 1 级 `has_feature("weapon_mastery")` 均为 True、wizard 为 False；跨职业授权扫描（目录声明 + progression 授予）仅 `weapon_mastery` 不在本职业段，`features_for` 的补入不会附带其它特性。
+- held 语义核对：命中面 `mastery_effects` 在 offer 链之前只写入 damage_event，弹出只发生在 `_submit_hit_damage`；`reaction_spells` 的 Shield 改判分支在 `_submit_hit_damage` 之前 return（L339-340），UD 与命中触发法术链均经 `_submit_hit_damage` 落地，满足 §2.1 / §6.1。
+- 规则核对（以任务书 §1 原文引用为准）：graze 仅在 `hit=False` 分支、`max(0, 属性修正)`、`rolls=[]`，经 `_resist_damage` → `_concentration_events` → victory，不泄漏内部键、不走 `_enemy_defeated_feature_events`（§3.3(c) 显式事件流）；sap 无伤害门槛、vex/slow 需伤害 > 0；slow 的 `attacker_next_turn_start` 仅在进入回合者等于 `source_actor_id` 时由 `_expire_conditions` 移除，reducer 白名单与战斗结束清理一致；同 id `slowed_10` 复用 dict 去重实现 -10 上限；cleave/nick/push/topple `unimplemented` 无事件无异常。
+- 边界核对：词条字符串只存在于 `weapon_masteries.py` 注册表、`resolution.py` 通用分发与 `engine.py` duration 分支；无按词条散落的 if 分支，`check_modes.py` / `_consume_attack_conditions` / conditions 目录 / `view.py` 零 diff，`mastery` 键经 `**deepcopy(weapon)` 自然进入 profile。
+- 审核发现（4 项，均不阻塞、不改代码，已登记 D10-D13）：
+  1. **requires_damage 判定时点**：门槛在 `_hit_settlement_events` 以武器基础伤害判定；UD / 语出惊人伤害窗把最终伤害降到 0 时 vex/slow 仍会应用（宽松方向），命中触发法术（至圣斩）把 0 基础伤害补成 > 0 时反被跳过（严格方向）。完整修复需把判定移到本次命中的所有伤害落地后的聚合点。
+  2. **改判失手漏 graze**：S-P3 检定窗把已命中改判失手时走 `_finish_attack_check_window`，不进入 `_attack_events` 的 miss 分支；Shield 改判失手按 §2.1 显式丢弃全部 held 效果。RAW 的"失手即擦掠"在两条改判路径上都未覆盖；`check_windows.py` 属 §3.5 零改动清单。
+  3. **多来源 slow 坍缩**：conditions 为 dict，同 id 重复 applied 由最后写入者覆盖 `source_actor_id` / duration；-10 上限正确，但多攻击者（或 ray_of_frost 与缓速）叠加时，过期时点可能早于仍存活的另一实例。
+  4. **sap / vex 时长**：`after_next_attack` 在未被消耗时不会按原文"直至你下回合开始 / 结束"过期，复用 vicious_mockery 先例；任务书 §3.3(a) 显式指定，属时长精确化而非本切片缺陷。
+- 迁移债确认（§8 D1/D3–D9）：维持原登记；D6（Nick 双持宿主）与 D7（Push 档案载体）仍无宿主，未偷做半实现。新增 D10-D13 对应上述四项。
+- 主计划同步：S-P11 行由"执行完成待审核"改为"执行完成并审核通过"，1C 汇总维持 9/12（S-P11 计入已审核）。
