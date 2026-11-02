@@ -52,7 +52,7 @@ R7（窗口 spend UI）与 R9（窗口生命周期）在基线后端已可用；
 
 ## 最终审查
 
-- changed files：见下方提交清单与 `git status --short`。
+- changed files：见下方“提交与 changed-file 清单”；`git status --short` 为空。
 - 公开契约/迁移变化：
   - 新增公开投影字段 `lucky_advantage_available`（attack / death_save / spell_attack 行）、`maximize_damage_available`（法术行）；`combat.actors[].class_resources` 纳入已拥有的起源专长资源池。均为 additive，不改变既有字段语义。
   - 决策事件 shape、通用事件 schema、storage/codec、rollback/replay 与多人权限契约未改；无需数据迁移，内容版本保持 `srd-5.2.1+r5`。
@@ -62,6 +62,58 @@ R7（窗口 spend UI）与 R9（窗口生命周期）在基线后端已可用；
   - 其余 §7.2 条件未命中。
 - 残余风险/迁移债：回滚中的窗口资源恢复仍由通用 rollback 边界缺失（同上）；Docker/edge-tts/日志归档/分块门禁为环境或既有问题，不阻塞本任务完成定义。
 - 最终 changed-file 与运行时产物检查：`git diff --check` 通过；无 lockfile、`static-v2` 构建产物、日志或测试缓存进入 changed-file list；公开文档无 `docs/internal/` 链接。
+- 独立 review：独立审查代理（只读）于 2026-11-02 给出 FAIL，唯一问题是 R6 兼容层虚构 `check_bonus_rolls`；提交 `52617c5d` 修复后复审 PASS。审查同时确认公开文档不应使用内部切片代号，已在 `7947d2e8` 修正。执行模型不声称 upstream approve。
+
+### 提交与 changed-file 清单
+
+提交（基于 `ba3f6f5d`）：
+
+1. `a313bfaf` `fix(dnd2024): correct 1C cross-feature combat resolution`（R1–R4）
+2. `946c2fbb` `fix(dnd2024): preserve legacy character and combat event behavior`（R5/R6）
+3. `4b329cb4` `feat(frontend): expose 1C combat decisions and declarations`（R7–R9）
+4. `8954bdd6` `docs(dnd2024): close 1C compatibility and rollout notes`（R10）
+5. `52617c5d` `fix(dnd2024): stop fabricating legacy check bonus rolls`（独立 review 修复）
+6. `7947d2e8` `docs(dnd2024): clarify legacy bonus projection in public coverage`（独立 review 修复）
+
+changed-file（A=新增，M=修改）：
+
+```text
+A docs/internal/design/1C_REVIEW_REMEDIATION_EXECUTION_REPORT_2026-11-02.md
+A docs/internal/design/1C_REVIEW_REMEDIATION_TASK_SPEC_2026-11-02.md
+M docs/rulesets/dnd2024/AUTOMATION_COVERAGE.md
+M frontend-v2/e2e/dnd2024-workspace.spec.ts
+M frontend-v2/src/api/types.ts
+M frontend-v2/src/features/rulesets/dnd2024/combat/Dnd2024CombatPanel.vue
+M frontend-v2/tests/CombatLiveBar.test.ts
+M frontend-v2/tests/Dnd2024CombatPanel.test.ts
+A scripts/e2e_dnd_window_fixture.py
+M scripts/prepare_e2e_data.py
+M src/rulesets/dnd2024/character/reconciliation.py
+M src/rulesets/dnd2024/combat/check_windows.py
+M src/rulesets/dnd2024/combat/engine.py
+M src/rulesets/dnd2024/combat/reaction_spells.py
+M src/rulesets/dnd2024/combat/reducer.py
+M src/rulesets/dnd2024/combat/resolution.py
+M src/rulesets/dnd2024/combat/triggered_spells.py
+M src/rulesets/dnd2024/combat/view.py
+M src/rulesets/dnd2024/features/resolver.py
+M src/rulesets/dnd2024/runtime.py
+M templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json
+M templates/rulesets/dnd2024_srd/locales/en/class_feature_catalogs/srd_class_features.json
+A templates/rulesets/dnd2024_srd/locales/en/feats/lucky.json
+M templates/rulesets/dnd2024_srd/locales/zh-CN/class_feature_catalogs/srd_class_features.json
+A templates/rulesets/dnd2024_srd/locales/zh-CN/feats/lucky.json
+M tests/rulesets/test_dnd2024_armor_training.py
+M tests/rulesets/test_dnd2024_campaign.py
+M tests/rulesets/test_dnd2024_check_windows.py
+M tests/rulesets/test_dnd2024_cunning_action.py
+M tests/rulesets/test_dnd2024_dark_ones_blessing.py
+M tests/rulesets/test_dnd2024_die_manipulation.py
+M tests/rulesets/test_dnd2024_retaliation.py
+M tests/rulesets/test_dnd2024_smite.py
+```
+
+修复后复核：`tests/rulesets` → `1006 passed`；`test_dnd2024_campaign.py` → `32 passed`；`ruff check src/rulesets/dnd2024/runtime.py` → `All checks passed!`。
 
 ## PR 风险声明
 
