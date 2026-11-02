@@ -52,7 +52,7 @@ def test_manual_roll_create_resolve_is_idempotent_and_bound_to_target():
         )
         assert result["result"] == again["result"]
         assert created["request"]["status"] == "resolved"
-        assert len(saves) == 2
+        assert len(saves) == 3  # The retry saves again before acknowledging the result.
 
     asyncio.run(scenario())
 
