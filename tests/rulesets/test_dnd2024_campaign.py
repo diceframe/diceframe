@@ -493,9 +493,8 @@ def test_legacy_bless_bonus_is_projected_once_as_check_bonus() -> None:
     event = next(item for item in events if item["type"] == "check.resolved")
 
     assert event["check_bonus"] == 4
-    assert event["check_bonus_rolls"] == [
-        {"condition": "blessed", "die": 4, "roll": 4},
-    ]
+    # The legacy shape carried no d4 trace; compatibility must not invent one.
+    assert "check_bonus_rolls" not in event
     assert "bless_bonus" not in event
     # The stored total already contained the d4: adding it again would be 28.
     assert event["total"] == event["natural"] + event["modifier"] + event["check_bonus"]

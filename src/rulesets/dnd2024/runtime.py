@@ -79,11 +79,12 @@ def _normalize_legacy_check_bonus(event: dict[str, Any]) -> dict[str, Any]:
     """Map pre-1C ``bless_bonus`` evidence onto the current public contract.
 
     Baseline check events stored the single Bless d4 as an integer
-    ``bless_bonus`` and already folded it into ``total``.  Current consumers
-    read ``check_bonus`` / ``check_bonus_rolls``.  Normalizing here -- in the
+    ``bless_bonus`` and already folded it into ``total``, with no roll trace.
+    Current consumers read ``check_bonus``.  Normalizing here -- in the
     presentation projection, not the persisted ledger -- keeps old saves
-    readable without rewriting history.  A zero or absent bonus is returned
-    unchanged, and an event that already carries the new fields wins.
+    readable without rewriting history.  Only the already-known bonus is
+    mapped; the absent d4 trace is not fabricated.  A zero or absent bonus is
+    returned unchanged, and an event that already carries ``check_bonus`` wins.
     """
 
     if "check_bonus" in event or "bless_bonus" not in event:
@@ -96,9 +97,6 @@ def _normalize_legacy_check_bonus(event: dict[str, Any]) -> dict[str, Any]:
         return event
     normalized = dict(event)
     normalized["check_bonus"] = bonus
-    normalized["check_bonus_rolls"] = [
-        {"condition": "blessed", "die": 4, "roll": bonus},
-    ]
     return normalized
 
 
