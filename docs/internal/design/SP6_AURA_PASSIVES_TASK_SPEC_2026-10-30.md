@@ -319,3 +319,16 @@ python -m pytest tests/rulesets -q
 - 代码边界核对：求值器无特性 id 硬编码；候选来自目录参数；`blocked_by_aura` 仅在拦截时出现；saving_throw 伤害仍正常落账（只跳过 condition 施加）。
 - 审核发现（3 项，均不阻塞、不改代码）：D7 持有者状态门控、D8 敌方施法端到端测试缺口、D9 条件免疫消费面仅 saving_throw。均已登记，未在审核轮修复。
 - 主计划同步：1C 汇总由 9/12 更新为 10/12；S-P6 行更新为"执行完成并审核通过"。下一片按推荐顺序为 S-P12（护甲受训门控），其后 S-P8（Hide 动作与附赠动作路由）。
+
+### 10.1 独立审核（2026-11-02，独立会话）
+
+与 §9/§10 同会话记录分离的复核轮，全部事实重新验证：
+
+- 基线：工作树干净，HEAD `072f0a7` = `origin/backup/cfp`（上方"仍为 6c9bb22"为 docs 推送前时点描述，现已同步）。
+- 改动面：`git diff 6c9bb22..072f0a7` 全量对 §3 白名单全等；§3.4 零改动清单（含前端）逐一验证零 diff。
+- §6 禁止事项逐条复核无违反：源码无 suppression / holy_nimbus / aura_of_protection 残留；求值器候选来自目录参数懒扫描，无特性 id 或 condition 白名单硬编码；`blocked_by_aura` 为既有 check.resolved 的可选字段，无新事件类型。
+- 代码语义复核通过：`_all_targets` 仅遍历 players/companions（敌方不投影）；fail closed 覆盖 bool 排除、正 int、非空字符串列表；`_distance <= aura_range` 含边界且本人距离 0 自覆盖；`save_check_index` 在多目标循环内逐迭代重置，自动失败（L692）与掷骰（L729）两路径均正确指向本目标豁免事件；拦截仅 `mode == "saving_throw"`，命中则 `condition.applied` 不产生；`_save_repeat_events`（L1357）tick 失败只发 check 事件从不重新 applied，与 A7 断言一致。
+- 测试独立复跑：定向五文件 109 passed（44.92s）；`tests/rulesets` 全量 938 passed（364.91s），两次结果与 §9.3 登记一致。
+- §9 行号（resolution L602/692/729/892-899、engine L1165、catalog L23/L153）与实际 diff 逐一对上。
+- 注记（不阻塞、不改代码）：§9.1 偏差 2 表述"多来源取目录序首个"在多持有人场景的严格优先序实为 roster 遍历序（外层 ally）先于目录序（内层 feature，`setdefault`）；当前目录仅 `aura_of_devotion` 一个光环条目，两种描述不可区分，未来新增第二个免疫光环时按实际序修正表述或补 roster 序断言。
+- 结论：审核通过，无新增迁移债（D7-D9 已覆盖）。
