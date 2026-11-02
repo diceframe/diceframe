@@ -320,7 +320,7 @@ def test_unarmored_armor_class_follows_the_bundle_formula(runtime) -> None:
 
     dex = int(game.canonical["abilities"]["dex"])
     assert game.armor_class == derive_armor_class(
-        {"dex": dex}, [], runtime.load_bundle("en"),
+        {"dex": dex}, [], runtime.load_bundle("en"), armor_category_refs=[],
     )
 
 
@@ -596,6 +596,9 @@ def test_creation_and_reconciliation_share_one_armor_class_formula(runtime) -> N
 
     assert game.armor_class == derive_armor_class(
         game.canonical["abilities"], game.item_refs, bundle,
+        armor_category_refs=list(
+            game.canonical["proficiencies"]["armor_category_refs"]
+        ),
     )
 
 

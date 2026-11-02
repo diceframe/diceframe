@@ -79,6 +79,9 @@ class CombatReactionSpellsMixin:
     ) -> list[dict[str, Any]]:
         if defender["kind"] not in {"player", "companion"}:
             return []
+        # 未受训护甲禁止一切施法，受击反应施法同样被挡。
+        if bool((defender.get("armor_training") or {}).get("untrained_armor_worn")):
+            return []
         if "shield" in defender["conditions"]:
             return []
         if not self._reaction_eligible(combat, defender):

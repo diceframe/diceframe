@@ -5,6 +5,7 @@
   "source_ref": "srd-5.2.1:p92:equipment",
   "automation_level": "deterministic",
   "item_type": "armor",
+  "category": "light",
   "ac_base": 12,
   "use_dex": true
 }

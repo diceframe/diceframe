@@ -287,6 +287,7 @@ def test_negative_ability_modifier_falls_back_to_the_baseline(runtime) -> None:
     resolver = _resolver(runtime)
     armor_class = derive_armor_class(
         abilities, [], runtime.load_bundle(LOCALE),
+        armor_category_refs=[],
         unarmored_ability_bonuses=resolver.unarmored_ac_bonus_abilities(
             _proxy("class:sorcerer", 3)
         ),
@@ -294,7 +295,7 @@ def test_negative_ability_modifier_falls_back_to_the_baseline(runtime) -> None:
 
     assert armor_class == 12  # 10 + Dex 2 beats 10 + Dex 2 + Cha -1
     assert armor_class == derive_armor_class(
-        abilities, [], runtime.load_bundle(LOCALE),
+        abilities, [], runtime.load_bundle(LOCALE), armor_category_refs=[],
     )
 
 
@@ -312,12 +313,14 @@ def test_wearing_armor_suppresses_the_draconic_formula(runtime) -> None:
     assert live.get("ruleset_operation_log")
 
 
-def test_unarmored_shield_keeps_the_draconic_formula_plus_two(runtime) -> None:
+def test_untrained_shield_does_not_add_to_the_draconic_formula(runtime) -> None:
+    """Sorcerers have no shield training, so the shield grants no +2."""
+
     sheet = _sorcerer_sheet(runtime, 3)
     live = _reconciled(runtime, sheet, [{"name": "Shield"}])
 
-    assert live["ruleset_character"]["derived"]["armor_class"] == 17  # 15 + 2
-    assert live["armor_class"] == 17
+    assert live["ruleset_character"]["derived"]["armor_class"] == 15
+    assert live["armor_class"] == 15
 
 
 def test_removing_armor_returns_to_the_draconic_ac(runtime) -> None:

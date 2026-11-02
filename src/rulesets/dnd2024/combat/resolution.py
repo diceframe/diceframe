@@ -25,7 +25,11 @@ from .primitives import (
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
-from .check_modes import condition_check_bonus_rolls, condition_flags
+from .check_modes import (
+    condition_check_bonus_rolls,
+    condition_flags,
+    mode_from_sources,
+)
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
@@ -254,7 +258,7 @@ class CombatResolutionMixin:
             damage_type = str(weapon.get("damage_type") or "bludgeoning")
             distance = self._distance(combat, actor_id, target_id)
             range_disadvantage = distance > int(weapon.get("range", 5) or 5)
-        from .check_modes import attack_mode
+        from .check_modes import attack_mode, mode_from_sources
 
         # Lucky's advantage face is declared before the roll: it adds one
         # source and is consumed unconditionally (validation proves the pool).
@@ -266,6 +270,14 @@ class CombatResolutionMixin:
             self, instance, actor, target, range_disadvantage,
             use_grant=spend_attack_action, extra_sources=extra_sources,
         )
+        # 未受训护甲：武器/徒手攻击（力/敏掷骰）具有劣势。这里内联而不进
+        # check_modes，因为 spell_attack 也用 attack_mode 但走施法属性，不能误伤。
+        if bool((actor.get("armor_training") or {}).get("untrained_armor_worn")):
+            sources = [
+                *check_mode["sources"],
+                {"code": "untrained_armor", "mode": "disadvantage"},
+            ]
+            check_mode = {"mode": mode_from_sources(sources), "sources": sources}
         advantage, disadvantage = check_mode["mode"] == "advantage", check_mode["mode"] == "disadvantage"
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
@@ -701,11 +713,26 @@ class CombatResolutionMixin:
                     })
                     succeeded = False
                 else:
-                    # 2024 狂暴：力量豁免具有优势（双骰取高），其它属性仍为单骰。
+                    # 狂暴（力量豁免优势）与未受训护甲（力/敏豁免劣势）走同一
+                    # 归一函数：优劣势相消时按 RAW 回到单骰。
                     rage_advantage = "rage" in target["conditions"] and save_ability == "str"
+                    untrained_disadvantage = bool(
+                        (target.get("armor_training") or {}).get("untrained_armor_worn")
+                    ) and save_ability in {"str", "dex"}
+                    save_sources: list[dict[str, Any]] = []
+                    if rage_advantage:
+                        save_sources.append({"code": "rage", "mode": "advantage"})
+                    if untrained_disadvantage:
+                        save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+                    save_mode = mode_from_sources(save_sources)
                     first = int(rng.randint(1, 20))
-                    second = int(rng.randint(1, 20)) if rage_advantage else None
-                    roll = max(first, second) if second is not None else first
+                    second = int(rng.randint(1, 20)) if save_mode else None
+                    if save_mode == "advantage":
+                        roll = max(first, second)
+                    elif save_mode == "disadvantage":
+                        roll = min(first, second)
+                    else:
+                        roll = first
                     check_bonus_rolls = condition_check_bonus_rolls(
                         self.catalog.conditions, target["conditions"], "saving_throw", rng,
                     )
@@ -721,11 +748,9 @@ class CombatResolutionMixin:
                         "total": total,
                         "target": actor["spell_save_dc"], "success": succeeded,
                     }
-                    if rage_advantage:
-                        check_event["advantage_mode"] = "advantage"
-                        check_event["advantage_sources"] = [
-                            {"code": "rage", "mode": "advantage"},
-                        ]
+                    if save_sources:
+                        check_event["advantage_mode"] = save_mode
+                        check_event["advantage_sources"] = save_sources
                     save_check_index = len(events)
                     events.append(check_event)
                 if effect.get("damage"):
@@ -1394,9 +1419,23 @@ class CombatResolutionMixin:
                 })
                 continue
             rage_advantage = "rage" in actor["conditions"] and ability == "str"
+            untrained_disadvantage = bool(
+                (actor.get("armor_training") or {}).get("untrained_armor_worn")
+            ) and ability in {"str", "dex"}
+            save_sources: list[dict[str, Any]] = []
+            if rage_advantage:
+                save_sources.append({"code": "rage", "mode": "advantage"})
+            if untrained_disadvantage:
+                save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+            save_mode = mode_from_sources(save_sources)
             first = int(rng.randint(1, 20))
-            second = int(rng.randint(1, 20)) if rage_advantage else None
-            roll = max(first, second) if second is not None else first
+            second = int(rng.randint(1, 20)) if save_mode else None
+            if save_mode == "advantage":
+                roll = max(first, second)
+            elif save_mode == "disadvantage":
+                roll = min(first, second)
+            else:
+                roll = first
             check_bonus_rolls = condition_check_bonus_rolls(
                 self.catalog.conditions, actor["conditions"], "saving_throw", rng,
             )
@@ -1414,11 +1453,9 @@ class CombatResolutionMixin:
                 "total": total, "target": dc, "success": success,
                 "repeat_save": True,
             }
-            if rage_advantage:
-                check_event["advantage_mode"] = "advantage"
-                check_event["advantage_sources"] = [
-                    {"code": "rage", "mode": "advantage"},
-                ]
+            if save_sources:
+                check_event["advantage_mode"] = save_mode
+                check_event["advantage_sources"] = save_sources
             events.append(check_event)
             if success:
                 events.append({

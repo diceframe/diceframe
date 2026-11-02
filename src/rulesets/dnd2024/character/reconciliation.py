@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-from .derivation import derive_armor_class
+from .derivation import derive_armor_class, derive_armor_training_state
 from .primitives import ref_id as _ref_id
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
@@ -319,8 +319,15 @@ class Dnd2024CharacterStateReconciler:
             warnings.append("canonical abilities are unavailable; armor class not re-derived")
             return None
         features = Dnd2024ClassFeatureResolver(self.bundle)
+        canonical_armor_category_refs = list(
+            (canonical.get("proficiencies") or {}).get("armor_category_refs") or []
+        )
+        armor_training = derive_armor_training_state(
+            abilities, item_refs, canonical_armor_category_refs, self.bundle,
+        )
         armor_class = derive_armor_class(
-            abilities, item_refs, self.bundle, warnings=warnings,
+            abilities, item_refs, self.bundle,
+            armor_category_refs=canonical_armor_category_refs, warnings=warnings,
             unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
         )
 
@@ -328,6 +335,7 @@ class Dnd2024CharacterStateReconciler:
         derived = canonical.setdefault("derived", {})
         previous_refs = list(canonical_equipment.get("item_refs") or [])
         previous_ac = derived.get("armor_class")
+        previous_training = derived.get("armor_training")
         mirror_ac = sheet.get("armor_class")
 
         for warning in warnings:
@@ -337,11 +345,15 @@ class Dnd2024CharacterStateReconciler:
             previous_refs == item_refs
             and previous_ac == armor_class
             and mirror_ac == armor_class
+            and previous_training == armor_training
         ):
             return None
 
         canonical_equipment["item_refs"] = item_refs
         derived["armor_class"] = armor_class
+        # 受训状态可以独立于 AC 变化（皮甲换链甲衫 AC 相同但门控不同），
+        # 因此幂等短路必须比较训练段。
+        derived["armor_training"] = armor_training
         # 装备是职业特性生效前提的一部分（武艺要求未穿甲、未持盾、只持 Monk
         # Weapon）。canonical 装备刚变过，用户可见的职业特性/资源投影必须跟着
         # 变，否则界面会继续展示已经不再生效的武艺骰。

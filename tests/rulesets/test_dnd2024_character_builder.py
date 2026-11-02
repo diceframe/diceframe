@@ -67,6 +67,7 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
     _write(root / "content" / "classes" / "fighter.json", _entity(
         "class", "fighter", hit_die=10,
         saving_throw_refs=["ability:str", "ability:con"],
+        armor_proficiencies=["heavy", "shield"],
         skill_choice={
             "count": 2,
             "allowed_refs": ["skill:athletics", "skill:perception", "skill:survival"],
@@ -86,7 +87,8 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
         "feat", "savage_attacker", automation_level="guided",
     ))
     _write(root / "content" / "items" / "chain_mail.json", _entity(
-        "item", "chain_mail", item_type="armor", ac_base=16, dex_cap=0,
+        "item", "chain_mail", item_type="armor", category="heavy",
+        ac_base=16, dex_cap=0,
     ))
     _write(root / "content" / "items" / "shield.json", _entity(
         "item", "shield", item_type="shield", ac_bonus=2,

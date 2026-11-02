@@ -140,7 +140,11 @@ class CombatViewMixin:
             "max_hp": int(resources.get("max_hp", 0) or 0),
             "temp_hp": int(resources.get("temp_hp", 0) or 0),
             "armor_class": int(character.get("derived", {}).get("armor_class", 10) or 10),
-            "speed": int(character.get("derived", {}).get("speed", 30) or 30),
+            "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)
+                - int((character.get("derived", {}).get("armor_training") or {}).get("speed_penalty", 0) or 0)),
+            "armor_training": deepcopy(
+                character.get("derived", {}).get("armor_training") or {}
+            ),
             "abilities": deepcopy(character.get("abilities") or {}),
             "saving_throws": deepcopy(character.get("derived", {}).get("saving_throws") or {}),
             "skill_values": deepcopy(character.get("proficiencies", {}).get("skill_values") or {}),

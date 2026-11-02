@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -9,6 +9,9 @@ import pytest
 from src.engine.game_instance import GameInstance
 from src.commands.round_effects import apply_revive_commands
 from src.rules.rule_system import RuleSystem
+from src.rulesets.dnd2024.character.reconciliation import (
+    Dnd2024CharacterStateReconciler,
+)
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
@@ -854,3 +857,285 @@ def test_companion_spell_slot_consumed() -> None:
         event["type"] == "dnd2024.spell.cast" and event["actor_id"] == "companion:mira"
         for event in resolved["event_batch"]["events"]
     )
+
+
+# --------------------------------------------------------------------------
+# Armor Training gates (S-P12): failed spellcasting, reaction spells, attack
+# disadvantage, Strength/Dexterity saving throws, and the spell_attack exemption.
+# --------------------------------------------------------------------------
+
+def _armored_sheet(runtime: Dnd2024Runtime, preset_id: str, names: list[str]) -> dict:
+    sheet = _character(runtime, preset_id, "Arden")
+    live = deepcopy(sheet)
+    live["equipment"] = [
+        {"name": name, "qty": 1, "category": "equipment"} for name in names
+    ]
+    bundle = runtime.load_bundle("en")
+    Dnd2024CharacterStateReconciler(bundle, locale_bundles=(bundle,)).reconcile(live)
+    return live
+
+
+def _instance_with_sheet(sheet: dict, bundle=None) -> tuple[Dnd2024CombatEngine, GameInstance]:
+    runtime = Dnd2024Runtime()
+    instance = GameInstance(
+        game_key=("test", "dnd2024-armor-training", "bot"),
+        rule_id="dnd2024_srd", gm_uid="gm", language="en",
+    )
+    instance.players["gm"] = {"character_name": "Arden", "character_sheet": sheet}
+    assert instance.bind_ruleset_runtime(sheet["rule_binding"])
+    return Dnd2024CombatEngine(
+        bundle if bundle is not None else runtime.load_bundle("en"),
+        EncounterAccess.sandbox(),
+    ), instance
+
+
+def _caster_companion(prepared: list[str]) -> dict:
+    return {
+        "id": "mira", "name": "Mira", "controller": "ai", "active": True,
+        "ruleset_character": {
+            "resources": {"hp": 20, "max_hp": 20},
+            "conditions": {},
+            "abilities": {
+                "str": 14, "dex": 12, "con": 14, "int": 10, "wis": 16, "cha": 10,
+            },
+            "derived": {
+                "armor_class": 15, "speed": 30, "proficiency_bonus": 2,
+                "saving_throws": {"wis": 5}, "spell_save_dc": 14,
+                "spell_attack_bonus": 5,
+            },
+            "proficiencies": {"skill_values": {}, "weapon_category_refs": []},
+            "equipment": {"item_refs": []},
+            "spellcasting": {"class": {
+                "ability": "wis", "slots_current": {"1": 2}, "concentration": None,
+                "prepared_spell_refs": prepared, "cantrip_refs": prepared,
+            }},
+            "build": {"class_levels": [{"class_ref": "class:fighter", "level": 1}]},
+        },
+    }
+
+
+def _cast_at_player(
+    engine: Dnd2024CombatEngine, instance: GameInstance, combat: dict,
+    spell_ref: str, rolls: list[int], *, slot_level: int = 0,
+) -> dict:
+    events = engine._spell_events(instance, combat, {
+        "actor_id": "companion:mira", "spell_ref": spell_ref,
+        "target_id": "player:gm", "slot_level": slot_level,
+    }, SequenceRng(list(rolls)))
+    return next(
+        event for event in events
+        if event["type"] == "check.resolved" and event["kind"] == "saving_throw"
+    )
+
+
+def test_untrained_armor_blocks_spellcasting() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _armored_sheet(runtime, "curious_arcanist", ["Chain Mail"])
+    engine, instance = _instance_with_sheet(sheet)
+    _start(engine, instance, position=30)
+    version = ruleset_runtime.state(instance)["version"]
+
+    rejected = engine.validate_intent(instance, {
+        "intent_id": "armored-cast", "type": "cast_spell",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-1",
+        "spell_ref": "spell:magic_missile", "slot_level": 1,
+    })
+
+    assert rejected == {
+        "ok": False, "code": "INVALID_INTENT",
+        "error": "armor you are not trained in blocks spellcasting",
+    }
+
+
+def test_trained_armor_still_allows_spellcasting() -> None:
+    engine, instance = _preset_instance("kindly_bulwark")
+    _start(engine, instance)
+    version = ruleset_runtime.state(instance)["version"]
+
+    allowed = engine.validate_intent(instance, {
+        "intent_id": "cleric-cast", "type": "cast_spell",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "player:gm",
+        "spell_ref": "spell:cure_wounds", "slot_level": 1,
+    })
+
+    assert allowed == {"ok": True}
+
+
+def test_untrained_armor_suppresses_reaction_spell_choices() -> None:
+    engine, _ = _instance()
+    defender = {
+        "kind": "player", "actor_id": "player:gm", "id": "gm",
+        "hp": 12, "max_hp": 12, "conditions": {},
+        "spell_refs": ["spell:shield"], "slots": {"1": 1},
+        "class_resources": {},
+        "armor_training": {
+            "untrained_armor_worn": False,
+            "speed_penalty": 0,
+            "stealth_disadvantage": False,
+        },
+    }
+    combat = {"reactions": {"player:gm": 1}}
+
+    choices = engine._reaction_spell_choices(combat, defender)
+    assert [choice["spell_ref"] for choice in choices] == ["spell:shield"]
+
+    untrained = {**defender, "armor_training": {
+        "untrained_armor_worn": True,
+        "speed_penalty": 0,
+        "stealth_disadvantage": False,
+    }}
+    assert engine._reaction_spell_choices(combat, untrained) == []
+
+
+def test_untrained_armor_imposes_attack_disadvantage_and_cancels_advantage() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _armored_sheet(runtime, "curious_arcanist", ["Leather Armor", "Quarterstaff"])
+    engine, instance = _instance_with_sheet(sheet)
+    _start(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "armored-attack", "type": "attack",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "target_id": "enemy:goblin-1", "weapon_ref": "item:quarterstaff",
+    }, SequenceRng([15, 5]))
+    check = next(
+        event for event in resolved["event_batch"]["events"]
+        if event["type"] == "check.resolved" and event["kind"] == "attack"
+    )
+
+    assert check["rolls"] == [15, 5]
+    assert check["natural"] == 5
+    assert check["advantage_mode"] == "disadvantage"
+    assert {"code": "untrained_armor", "mode": "disadvantage"} in check["advantage_sources"]
+
+    # 目标身上的 faerie_fire 提供优势：与未受训劣势相消，回到单骰。
+    combat["enemies"]["goblin-1"]["conditions"] = {"faerie_fire": {}}
+    combined = engine.resolve_intent(instance, {
+        "intent_id": "armored-attack-cancelled", "type": "attack",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "target_id": "enemy:goblin-1", "weapon_ref": "item:quarterstaff",
+    }, SequenceRng([7]))
+    check = next(
+        event for event in combined["event_batch"]["events"]
+        if event["type"] == "check.resolved" and event["kind"] == "attack"
+    )
+
+    assert check["rolls"] == [7]
+    assert check["natural"] == 7
+    assert check["advantage_mode"] == ""
+    assert {source["code"] for source in check["advantage_sources"]} == {
+        "faerie_fire", "untrained_armor",
+    }
+
+
+def test_untrained_armor_imposes_disadvantage_on_strength_and_dexterity_saves() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _armored_sheet(runtime, "curious_arcanist", ["Chain Mail"])
+    engine, instance = _instance_with_sheet(sheet)
+    _start(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    _seed_companion(instance, _caster_companion(["spell:sacred_flame", "spell:charm_person"]))
+
+    dex_check = _cast_at_player(engine, instance, combat, "spell:sacred_flame", [7, 18, 5])
+    assert dex_check["ability"] == "dex"
+    assert dex_check["rolls"] == [7, 18]
+    assert dex_check["natural"] == 7
+    assert dex_check["advantage_mode"] == "disadvantage"
+    assert dex_check["advantage_sources"] == [
+        {"code": "untrained_armor", "mode": "disadvantage"},
+    ]
+
+    # Wisdom 豁免不在力量/敏捷集合内：仍是单骰且不带优劣势字段。
+    wis_check = _cast_at_player(
+        engine, instance, combat, "spell:charm_person", [7], slot_level=1,
+    )
+    assert wis_check["ability"] == "wis"
+    assert wis_check["rolls"] == [7]
+    assert "advantage_mode" not in wis_check
+
+
+def test_rage_advantage_cancels_untrained_disadvantage_on_strength_saves() -> None:
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    entities["combat_catalog"]["srd_combat_core"]["spell_effects"]["sacred_flame"]["save"] = "str"
+    strength_bundle = replace(bundle, entities=entities)
+    sheet = _armored_sheet(runtime, "relentless_vanguard", ["Chain Mail"])
+    sheet["ruleset_character"]["conditions"] = {
+        "rage": {
+            "duration": "rage", "turns_remaining": 10, "source_actor_id": "player:gm",
+        },
+        "test_hold": {
+            "save_repeat": {"ability": "str", "dc": 14},
+            "source_actor_id": "companion:mira",
+        },
+    }
+    engine, instance = _instance_with_sheet(sheet, bundle=strength_bundle)
+    _start(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    _seed_companion(instance, _caster_companion(["spell:sacred_flame"]))
+
+    cast_check = _cast_at_player(engine, instance, combat, "spell:sacred_flame", [7, 5])
+    assert cast_check["ability"] == "str"
+    assert cast_check["rolls"] == [7]
+    assert cast_check["advantage_mode"] == ""
+    assert {source["code"] for source in cast_check["advantage_sources"]} == {
+        "rage", "untrained_armor",
+    }
+
+    repeat = next(
+        event for event in engine._save_repeat_events(
+            instance, combat, "player:gm", SequenceRng([7]),
+        )
+        if event["type"] == "check.resolved"
+    )
+    assert repeat["repeat_save"] is True
+    assert repeat["ability"] == "str"
+    assert repeat["rolls"] == [7]
+    assert repeat["advantage_mode"] == ""
+    assert {source["code"] for source in repeat["advantage_sources"]} == {
+        "rage", "untrained_armor",
+    }
+
+
+def test_constitution_save_is_unaffected_by_untrained_armor() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _armored_sheet(runtime, "curious_arcanist", ["Chain Mail"])
+    engine, instance = _instance_with_sheet(sheet)
+    _start(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    _seed_companion(instance, _caster_companion(["spell:thunderwave"]))
+
+    check = _cast_at_player(
+        engine, instance, combat, "spell:thunderwave", [7, 3, 4], slot_level=1,
+    )
+
+    assert check["ability"] == "con"
+    assert check["rolls"] == [7]
+    assert "advantage_mode" not in check
+
+
+def test_spell_attacks_ignore_untrained_armor_disadvantage() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _armored_sheet(runtime, "curious_arcanist", ["Chain Mail"])
+    engine, instance = _instance_with_sheet(sheet)
+    _start(engine, instance, position=30)
+    combat = ruleset_runtime.state(instance)["combat"]
+
+    events = engine._spell_events(instance, combat, {
+        "actor_id": "player:gm", "spell_ref": "spell:fire_bolt",
+        "target_id": "enemy:goblin-1", "slot_level": 0,
+    }, SequenceRng([17, 4, 5]))
+    check = next(event for event in events if event.get("kind") == "spell_attack")
+
+    assert check["rolls"] == [17]
+    assert check["natural"] == 17
+    assert check["advantage_mode"] == ""
+    assert "untrained_armor" not in {
+        source["code"] for source in check["advantage_sources"]
+    }
