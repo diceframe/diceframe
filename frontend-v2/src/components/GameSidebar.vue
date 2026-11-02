@@ -2,10 +2,12 @@
 import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
 import { ChevronBack, ChevronForward } from '@vicons/ionicons5'
+import { Activity, Eye, MapIcon, ScrollText } from 'lucide-vue-next'
 import type { GameDetail, MapData, Player, PrivateMessage, RuleMeta } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
 import CharacterPanel from './CharacterPanel.vue'
 import MapGraph from './play/MapGraph.vue'
+import SidebarRowIcon from './SidebarRowIcon.vue'
 
 interface Quest { title?: string; progress?: string; status?: string }
 interface Relation { npc_name?: string; tier?: string }
@@ -60,7 +62,7 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     <slot name="after-character" />
 
     <details class="panel sidebar-disclosure" v-if="hasPlot">
-      <summary><strong>{{ t('plotTracker') }}</strong><span>{{ activeQuests.length + doneQuests.length + notableRelations.length + recentDecisions.length }}</span></summary>
+      <summary><SidebarRowIcon :icon="ScrollText" /><strong>{{ t('plotTracker') }}</strong><span>{{ activeQuests.length + doneQuests.length + notableRelations.length + recentDecisions.length }}</span></summary>
       <div class="sidebar-disclosure-body">
       <div v-if="activeQuests.length" class="quest-group">
         <strong class="quest-head">{{ t('currentQuests') }}</strong>
@@ -82,7 +84,7 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     </details>
 
     <details class="panel sidebar-disclosure sidebar-map">
-      <summary><strong>{{ t('mapTitle') }}</strong></summary>
+      <summary><SidebarRowIcon :icon="MapIcon" /><strong>{{ t('mapTitle') }}</strong></summary>
       <div class="sidebar-disclosure-body">
         <button class="sidebar-map-open" @click="emit('open-map')">{{ t('mapOpenLarge') }}</button>
         <MapGraph :map="map" :current-scene="detail.scene" :show-header="false" @lore-click="emit('lore-click', $event)" />
@@ -90,7 +92,7 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     </details>
 
     <details class="panel sidebar-disclosure" :open="privateMessages.length > 0">
-      <summary><strong>{{ t('characterPerception') }}</strong><span>{{ privateMessages.length }}</span></summary>
+      <summary><SidebarRowIcon :icon="Eye" /><strong>{{ t('characterPerception') }}</strong><span>{{ privateMessages.length }}</span></summary>
       <div class="sidebar-disclosure-body">
       <div v-if="privateMessages.length" class="perceptions">
         <p
@@ -107,7 +109,7 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     <slot name="after-perception" />
 
     <details class="panel sidebar-disclosure">
-      <summary><strong>{{ t('statusInfo') }}</strong><span>{{ stateLabel(detail.state) }}</span></summary>
+      <summary><SidebarRowIcon :icon="Activity" /><strong>{{ t('statusInfo') }}</strong><span>{{ stateLabel(detail.state) }}</span></summary>
       <div class="sidebar-disclosure-body">
       <div class="chips"><span>{{ detail.solo_mode ? t('solo') : t('multiplayer') }}</span><span>{{ stateLabel(detail.state) }}</span></div>
       <details><summary>{{ t('coordination') }}</summary>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Backpack, Zap } from 'lucide-vue-next'
 import type { CharacterItem, CharacterSheet, CharacterSkill, Player, RuleAttribute, RuleMeta } from '@/api/types'
 import { attrDisplayName, getCurrencyAmount, getResourceValue, currencyLabel, type RuleAttr } from '@/utils/ruleSchema'
 import { formatCurrencyAmount } from '@/utils/currency'
 import { buildSpecialStats, primaryResourceList } from '@/utils/play'
 import { useLocale } from '@/composables/useLocale'
 import PortraitImage from '@/components/PortraitImage.vue'
+import SidebarRowIcon from '@/components/SidebarRowIcon.vue'
 import Modal from '@/components/ui/Modal.vue'
 import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
 import GeneratedImageThumbnail from '@/components/common/GeneratedImageThumbnail.vue'
@@ -221,13 +223,13 @@ function submitLevelUp(attrs: Record<string, number>) {
       <span v-for="a in attrs" :key="a.key"><small>{{ a.name }}</small> <strong>{{ a.value }}</strong></span>
     </div>
     <button v-if="showAdvancedCenter" type="button" class="character-center-trigger" @click="emit('open-character-center')">{{ t('advancedCharacterCenter') }}</button>
-    <details class="character-detail-block"><summary>{{ t('skills') }}</summary>
+    <details class="character-detail-block"><summary><SidebarRowIcon :icon="Zap" />{{ t('skills') }}</summary>
       <div class="chips">
         <span v-for="(s, i) in cs.skills || []" :key="'s' + i" :title="skillTitle(s) || undefined">{{ label(s) }}<template v-if="typeof s === 'object' && s.value !== undefined"> {{ s.value }}</template></span>
       </div>
       <button v-if="(cs.skills || []).length" type="button" class="item-view-all" @click="showSkillsModal = true">{{ t('viewAllDetails') }}</button>
     </details>
-    <details class="character-detail-block"><summary>{{ t('equipmentAndInventory') }}</summary>
+    <details class="character-detail-block"><summary><SidebarRowIcon :icon="Backpack" />{{ t('equipmentAndInventory') }}</summary>
       <div class="item-groups">
         <div v-if="equipment.length" class="item-group">
           <span class="item-label item-label-equipment">{{ t('equipment') }}</span>

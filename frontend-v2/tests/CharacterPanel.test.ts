@@ -34,6 +34,18 @@ describe('CharacterPanel portrait editing', () => {
     expect(readonly.find('button[title]').exists()).toBe(false)
   })
 
+  it('puts the same fixed-size decorative icon on the skills and equipment rows', () => {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(CharacterPanel, { global: { plugins: [i18n] }, props: { player, ruleMeta: { rule_id: 'freeform_fantasy' } } })
+    const rows = wrapper.findAll('.character-detail-block > summary')
+    expect(rows.map(row => row.text())).toEqual(['技能', '装备与背包'])
+    for (const row of rows) {
+      const icon = row.get('svg.sidebar-row-icon')
+      expect([icon.attributes('width'), icon.attributes('height'), icon.attributes('stroke-width'), icon.attributes('aria-hidden')]).toEqual(['16', '16', '1.5', 'true'])
+    }
+    wrapper.unmount()
+  })
+
   it('does not invent an HP bar when HP is absent and keeps other real projections', () => {
     i18n.global.locale.value = 'zh-CN'
     const wrapper = mount(CharacterPanel, {

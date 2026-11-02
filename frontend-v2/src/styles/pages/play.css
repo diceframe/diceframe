@@ -3368,6 +3368,7 @@ body.light .thinking-message {
   min-height: 38px;
   display: flex;
   align-items: center;
+  gap: 8px;
   list-style: none;
 }
 
