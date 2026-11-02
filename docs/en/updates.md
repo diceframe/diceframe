@@ -4,6 +4,18 @@
 
 This page explains how to update DiceFrame itself. Plugins are updated separately through the Plugin Store under **Manage → Plugins**.
 
+## Upgrading existing data
+
+Supported saves and Lorebook databases migrate automatically on load/startup. This integration preserves the modular main contracts; unknown or future variants fail closed. The current save schema is 47 and Lorebook schema is 12; beta.2 and older programs cannot read the upgraded saves. Managed Docker keeps version/data pairs and can restore the older pair; source and portable program rollback alone cannot restore migrated data. Back up the complete `data/`, including updater data snapshots, with the server stopped before upgrading.
+
+Legacy inline AI configuration is not automatically converted. Configure providers and role references in Settings. Some old player links require a fresh seat invitation. See [application updates](updates.md) for the complete upgrade and downgrade procedure.
+
+## AI configuration contract
+
+**Breaking AI configuration contract:** connections use only `ai_providers` and capability `*_provider_ref` fields; keys are stored as `ai_provider_key_<id>` in secret storage. Legacy inline endpoints, keys, API formats and `TRPG_LLM_*`, `TRPG_EMBEDDING_*`, `TRPG_TTS_*`, `TRPG_ASR_*`, `TRPG_IMAGEGEN_*` environment inputs are no longer activated. No automatic migration or provider creation occurs. Updates containing old fields return HTTP 400 `unsupported AI config fields`; add providers and assign roles manually in Settings.
+
+Main/fallback models, embedding, images and OpenAI-compatible/GPT-SoVITS speech require their corresponding provider references. Missing or unknown references leave remote capabilities unconfigured and never revive old credentials. Browser voices, edge-tts and disabled ASR need no reference; local providers may use an empty API key. Provider connection tests accept temporary credentials without falling back to old capability settings.
+
 ## Installation Methods
 
 | Installation | How to update |
@@ -17,6 +29,8 @@ This page explains how to update DiceFrame itself. Plugins are updated separatel
 Updating the application does not delete saves or settings. Backing up the complete `data/` folder before an upgrade is still recommended.
 
 ## Direct Docker upgrades and retained data
+
+Existing managed Docker images with a compatible Python/system runtime can apply this application update directly from Settings. The candidate migrates an independent game/content data copy; health-check failure lets the old launcher restart the previous program with its readable data. Runtime API remains 1. Actual Python or system-runtime changes still require a new image. See [application updates](updates.md) for data retention and manual rollback semantics.
 
 Existing runtime-1 managed Docker installations can apply this package from Settings without replacing their image, provided the Python ABI and system runtime are compatible. Ordinary application version numbers do not impose an image-upgrade barrier.
 
