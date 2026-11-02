@@ -11,6 +11,7 @@ from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
 from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
 
+from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     CombatIntentError,
     UNARMED_STRIKE_REF,
@@ -270,11 +271,14 @@ class CombatViewMixin:
             result.append(unarmed)
         return result
 
-    def _spell_statuses(self, actor, economy, trigger=None, *, is_current=True):
+    def _spell_statuses(self, instance, actor, economy, trigger=None, *, is_current=True):
         """Known spells remain visible even when no cast is currently legal."""
         if actor["kind"] not in {"player", "companion"}:
             return []
-        available = {row["spell_ref"] for row in self._available_spells(actor, economy, trigger)}
+        available = {
+            row["spell_ref"]
+            for row in self._available_spells(instance, actor, economy, trigger)
+        }
         statuses = []
         for ref in actor["spell_refs"]:
             spell = self.spells.get(ref)
@@ -397,7 +401,7 @@ class CombatViewMixin:
         )
 
     def _available_spells(
-        self, actor: dict[str, Any], economy: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], economy: dict[str, Any],
         trigger: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if actor["kind"] not in {"player", "companion"}:
@@ -444,6 +448,28 @@ class CombatViewMixin:
                     row["resist_choice"] = list(effect["resist_choice"])
                 if effect["mode"] == "triggered_damage":
                     row["trigger_target_id"] = trigger["target_id"]
+                if effect["mode"] == "spell_attack":
+                    # Lucky is a feat resource, so it never appears in the
+                    # actor's class-resource rows; ask the same authoritative
+                    # pool lookup the attack/death-save declarations use.
+                    row["lucky_advantage_available"] = self._window_pool_available(
+                        instance, str(actor["actor_id"]), LUCKY_RESOURCE,
+                    )
+                character = self._feature_character(actor)
+                max_slot = (
+                    int(self.features.feature_value(
+                        character, "overchannel", "max_slot_level", 5,
+                    ) or 0)
+                    if self.features.has_feature(character, "overchannel") else 0
+                )
+                eligible_slots = [
+                    level for level in available_slots if 1 <= level <= max_slot
+                ]
+                row["maximize_damage_available"] = bool(
+                    max_slot and effect.get("damage")
+                    and effect["mode"] in {"spell_attack", "saving_throw", "automatic_damage"}
+                    and eligible_slots
+                )
                 result.append(row)
         return result
 

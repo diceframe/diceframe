@@ -454,6 +454,36 @@ def test_maximize_damage_validation_matrix(cleric17, wizard13, wizard14, runtime
     assert not any(event.get("overchannel_cost") for event in events_of(result))
 
 
+def _available_spell_rows(engine, instance) -> dict[str, dict]:
+    action = next(
+        row for row in engine.available_intents(instance, "gm")
+        if row["type"] == "cast_spell"
+    )
+    return {row["spell_ref"]: row for row in action["spells"]}
+
+
+def test_available_spells_expose_overchannel_only_for_eligible_casts(
+    wizard14, wizard13, runtime,
+) -> None:
+    engine, instance = new_combat(runtime, wizard14)
+    rows = _available_spell_rows(engine, instance)
+    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is True
+    assert rows["spell:burning_hands"]["maximize_damage_available"] is True
+    # A non-damaging spell or a cantrip with no leveled slot is never eligible.
+    assert rows["spell:charm_person"]["maximize_damage_available"] is False
+    assert rows["spell:fire_bolt"]["maximize_damage_available"] is False
+
+    # A 6th-level slot can pay for the spell, but Overchannel stops at 5.
+    canonical(instance)["spellcasting"]["class"]["slots_current"] = {"6": 1}
+    rows = _available_spell_rows(engine, instance)
+    assert rows["spell:burning_hands"]["available_slot_levels"] == [6]
+    assert rows["spell:burning_hands"]["maximize_damage_available"] is False
+
+    engine, instance = new_combat(runtime, wizard13)
+    rows = _available_spell_rows(engine, instance)
+    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is False
+
+
 # --- T9: saving_throw damage face ------------------------------------------
 
 def test_overchannel_maximizes_saving_throw_damage(wizard14, runtime) -> None:

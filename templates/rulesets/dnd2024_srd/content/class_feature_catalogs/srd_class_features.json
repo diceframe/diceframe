@@ -15,6 +15,8 @@
     "step_of_the_wind_focus": "Step of the Wind (Focus)",
     "bonus_unarmed_strike": "Bonus Unarmed Strike",
     "focus_points": "Focus Points",
+    "lucky_points": "Lucky Points",
+    "bardic_inspiration": "Bardic Inspiration",
     "unarmed_strike": "Unarmed Strike",
     "action": "Action",
     "bonus_action": "Bonus Action",
@@ -30,6 +32,7 @@
     "survivor": "Survivor",
     "barbarian": "Barbarian",
     "rage": "Rage",
+    "rages": "Rage Uses",
     "rage_sustain": "Sustain Rage",
     "retaliation": "Retaliation",
     "rogue": "Rogue",
@@ -325,6 +328,7 @@
         {
           "id": "cutting_words",
           "minimum_level": 3,
+          "resource_id": "bardic_inspiration",
           "source_ref": "srd-5.2.1:p35:cutting-words",
           "summary": "When a creature you can see within 60 feet makes a damage roll or succeeds on an ability check or attack roll, use your Reaction and spend one Bardic Inspiration use to roll your Bardic Inspiration die and subtract it from the roll.",
           "parameters": {
@@ -366,6 +370,7 @@
         {
           "id": "dark_ones_own_luck",
           "minimum_level": 6,
+          "resource_id": "dark_ones_own_luck",
           "source_ref": "srd-5.2.1:p76:dark-ones-own-luck",
           "summary": "After you make an ability check or a saving throw and see the result but before it takes effect, spend one use to add 1d10 to the roll; once per roll; uses equal to Charisma modifier (min 1); regain all on a long rest.",
           "parameters": {

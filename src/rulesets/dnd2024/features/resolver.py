@@ -36,6 +36,7 @@ from .models import (
     FeatureView,
 )
 from .resources import (
+    ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
     resource_state,
@@ -432,7 +433,10 @@ class Dnd2024ClassFeatureResolver:
             return None
         class_id, level = state
         wanted = str(resource_id or "")
-        declaration = self.resources.declaration(class_id, wanted)
+        # 职业特性与起源专长共用 ``resources.class`` 存储；窗口资源（幸运点、
+        # 诗人激励、黑暗强运）正是通过这两条拥有路径被战斗投影消费的。特性未
+        # 显式声明 resource_id 时仍按职业声明兜底，保持旧角色投影不丢资源。
+        declaration = self._owned_resource_declaration(character, wanted)
         owner = next(
             (
                 definition for definition in self.catalog.class_features(class_id)
@@ -479,12 +483,50 @@ class Dnd2024ClassFeatureResolver:
         for definition in owned:
             if definition.resource_id and definition.resource_id not in resource_ids:
                 resource_ids.append(definition.resource_id)
+        # Origin-feat pools (Lucky's Luck Points) are owned through
+        # ``features.feat_refs`` rather than a class table, but they live in the
+        # same canonical ``resources.class`` store.  The actor projection is the
+        # public source for decision-window resource counts, so an owned feat
+        # pool must appear there exactly like a class pool does.
+        feat_refs = self._feat_refs(character)
+        for feat_id, declarations in self.resources.by_feat.items():
+            if f"feat:{feat_id}" not in feat_refs:
+                continue
+            for resource_id in declarations:
+                if resource_id not in resource_ids:
+                    resource_ids.append(resource_id)
         result: list[ResourceDefinition] = []
         for resource_id in resource_ids:
             resolved = self.class_resource_definition(character, resource_id)
             if resolved is not None:
                 result.append(resolved)
         return tuple(result)
+
+    @staticmethod
+    def _feat_refs(character: Mapping[str, Any] | None) -> set[str]:
+        features = character.get("features") if isinstance(character, Mapping) else None
+        features = features if isinstance(features, Mapping) else {}
+        return {str(ref) for ref in features.get("feat_refs") or []}
+
+    def _owned_resource_declaration(
+        self, character: Mapping[str, Any] | None, resource_id: str,
+    ) -> ClassResourceDeclaration | None:
+        """The class or owned-feat declaration that grants ``resource_id``."""
+
+        state = self.class_state(character)
+        if state is None:
+            return None
+        declaration = self.resources.declaration(state[0], resource_id)
+        if declaration is not None:
+            return declaration
+        feat_refs = self._feat_refs(character)
+        for feat_id, declarations in self.resources.by_feat.items():
+            if f"feat:{feat_id}" not in feat_refs:
+                continue
+            declaration = declarations.get(resource_id)
+            if declaration is not None:
+                return declaration
+        return None
 
     # ------------------------------------------------------------------
     # combat capabilities

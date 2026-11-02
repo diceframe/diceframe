@@ -55,6 +55,21 @@ describe('combat live bar', () => {
     expect(wrapper.emitted('openCombat')).toHaveLength(1)
   })
 
+  it('renders a legacy bless projection with the additive bonus exactly once', () => {
+    const next = gameplay()
+    next.recent_combat_events = [{
+      ...next.recent_combat_events[0],
+      event_id: 'legacy:0',
+      natural: 15, modifier: 5, check_bonus: 4, total: 24, target: 16, success: true,
+      check_bonus_rolls: [{ condition: 'blessed', die: 4, roll: 4 }],
+    }]
+    const wrapper = mountBar({ gameplay: next, actorId: 'ally' })
+
+    expect(wrapper.text()).toContain('哥布林攻击阿刃：d20 15 + 9 = 24 vs AC 16，命中')
+    expect(wrapper.text()).not.toContain('+ 13')
+    expect(wrapper.text()).not.toContain('+ 9 + 4')
+  })
+
   it('labels critical hits in the shared history text', async () => {
     const next = gameplay()
     next.recent_combat_events = [{

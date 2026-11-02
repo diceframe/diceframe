@@ -134,9 +134,9 @@ def test_default_paladin_spellbook_stays_visible_before_a_hit() -> None:
     )
     actor["spell_refs"] = ["spell:searing_smite"]
     assert (
-        engine._spell_statuses(actor, ruleset_runtime.state(instance)["combat"]["economy"])[0][
-            "blocked_reason"
-        ]
+        engine._spell_statuses(
+            instance, actor, ruleset_runtime.state(instance)["combat"]["economy"],
+        )[0]["blocked_reason"]
         == "not_automated"
     )
 

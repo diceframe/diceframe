@@ -67,6 +67,10 @@ const teleportDistance = ref<number | string>('')
 const nextEncounterOpen = ref(false)
 const manualEncounterOpen = ref(false)
 const movementDistance = ref(5)
+const declareAttackLuck = ref(false)
+const declareSpellLuck = ref(false)
+const declareMaximize = ref(false)
+const declareDeathSaveLuck = ref(false)
 const staged = ref<JsonObject | null>(null)
 const confirmCard = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
@@ -88,6 +92,15 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   move: '移动', feet: '尺', dash: '疾走', dodge: '闪避', disengage: '脱离接战',
   endTurn: '结束回合', endCombat: '结束战斗', deathSave: '死亡豁免', stabilize: '稳定伤者',
   confirm: '确认并交给服务器结算', cancel: '取消', resolve: '发动反应', decline: '放弃反应', counter: '反制法术',
+  hide: '躲藏', luckyAdvantage: '使用幸运优势', luckyHint: '消耗 1 点幸运，为这次检定掷两次 d20 并取高。',
+  maximizeDamage: '过载伤害最大化', maximizeHint: '消耗 1 个法术位，把这次法术的伤害骰直接取满。',
+  checkWindow: '检定结果窗口', damageWindow: '伤害结果窗口', windowSpend: '使用能力', windowDecline: '放弃',
+  windowRolls: '已掷骰面', windowTotal: '检定结果', windowDamage: '本次伤害', windowResource: '剩余资源', windowDie: '能力骰面',
+  windowLucky: '幸运 · 劣势骰', windowCuttingCheck: '语出惊人 · 攻击检定', windowCuttingDamage: '语出惊人 · 伤害', windowDool: '黑暗强运',
+  windowHintLucky: '消耗 1 点幸运，让这次攻击承受劣势并取较低的 d20。',
+  windowHintCuttingCheck: '消耗 1 次诗人激励，尝试把这次攻击检定降到命中线以下。',
+  windowHintCuttingDamage: '消耗 1 次诗人激励，尝试降低这次伤害。',
+  windowHintDool: '消耗 1 次黑暗强运，为这次失败的检定追加一枚骰子。',
   legalOnly: '这里只显示当前合法动作；若状态已经变化，服务器会拒绝过期请求并说明原因。',
   yourTurn: '轮到你行动', enemyTurn: 'AI GM 正在处理敌方回合', partyTurn: '队友回合', availableActions: '当前可用动作',
   companionTurn: 'AI 队友正在行动', explorationCast: '非战斗施法',
@@ -153,6 +166,15 @@ const copy = computed(() => locale.value.startsWith('zh') ? {
   move: 'Move', feet: 'ft', dash: 'Dash', dodge: 'Dodge', disengage: 'Disengage',
   endTurn: 'End Turn', endCombat: 'End Combat', deathSave: 'Death Save', stabilize: 'Stabilize',
   confirm: 'Confirm and let the server resolve', cancel: 'Cancel', resolve: 'Use Reaction', decline: 'Decline', counter: 'Counter Spell',
+  hide: 'Hide', luckyAdvantage: 'Spend Lucky for advantage', luckyHint: 'Spend 1 Lucky point to roll two d20s and keep the higher result.',
+  maximizeDamage: 'Overchannel maximize', maximizeHint: 'Spend a spell slot to treat every damage die of this spell as its maximum.',
+  checkWindow: 'Check result window', damageWindow: 'Damage result window', windowSpend: 'Use ability', windowDecline: 'Decline',
+  windowRolls: 'Rolled dice', windowTotal: 'Check result', windowDamage: 'Damage', windowResource: 'Resource left', windowDie: 'Ability die',
+  windowLucky: 'Lucky · disadvantage die', windowCuttingCheck: 'Cutting Words · attack check', windowCuttingDamage: 'Cutting Words · damage', windowDool: "Dark One's Own Luck",
+  windowHintLucky: 'Spend 1 Lucky point to impose disadvantage on this attack and use the lower d20.',
+  windowHintCuttingCheck: 'Spend 1 Bardic Inspiration to try to push this attack check below the hit line.',
+  windowHintCuttingDamage: 'Spend 1 Bardic Inspiration to try to reduce this damage.',
+  windowHintDool: "Spend 1 Dark One's Own Luck to add a die to this failed check.",
   legalOnly: 'Only currently legal actions are shown. The server rejects stale requests with a reason.',
   yourTurn: 'Your turn', enemyTurn: 'AI GM is resolving the enemy turn', partyTurn: 'Party turn', availableActions: 'Available actions',
   companionTurn: 'AI companion is acting', explorationCast: 'Cast a spell (exploration)',
@@ -550,6 +572,14 @@ function friendlyCombatError(cause: unknown): string {
   if (/already been spent|action is not available/i.test(message)) return '这个动作资源本回合已经用掉了。请选择仍可用的动作，或结束回合。'
   if (/state version|stale|expected_version/i.test(message)) return '战斗状态刚刚发生变化，界面已为你刷新。请按最新状态再试一次。'
   if (/resolve the melee hit spell decision first/i.test(message)) return '请先选择是否追加法术，结算这次命中后再继续行动。'
+  if (/resolve the pending check window first/i.test(message)) return '请先处理当前的检定或伤害窗口。'
+  if (/this check window is not available|pending decision or option is invalid/i.test(message)) return '这个决策窗口已经失效，请刷新后按最新状态重试。'
+  if (/this check window resource is already spent/i.test(message)) return '这次能力的资源已经消耗，请刷新后重试。'
+  if (/this check window feature is not owned/i.test(message)) return '当前角色没有这个能力。'
+  if (/the reaction is not available/i.test(message)) return '本回合的反应已经用掉了。'
+  if (/only the window owner can resolve this check window/i.test(message)) return '这个窗口只能由被指定的玩家结算。'
+  if (/lucky pool is empty/i.test(message)) return '幸运点已经用完，无法再声明幸运优势。'
+  if (/overchannel is required to maximize damage/i.test(message)) return '当前法术或角色没有伤害最大化资格。'
   if (/automatic combat turn exceeded the safety limit/i.test(message)) return '敌方自动回合未能正常结束，本次操作已安全回滚。请刷新战斗状态后重试。'
   return message
 }
@@ -634,6 +664,10 @@ function resetSelections(): void {
   capabilityTargetId.value = capabilityTargets.value[0]?.actor_id || ''
   chooseUsableWeapon()
   movementDistance.value = Math.min(5, Number(moveAction.value?.movement_remaining || 5))
+  declareAttackLuck.value = false
+  declareSpellLuck.value = false
+  declareMaximize.value = false
+  declareDeathSaveLuck.value = false
 }
 
 function clearGameScopedState(): void {
@@ -650,6 +684,10 @@ function clearGameScopedState(): void {
   selectedSpellTargetCount.value = 1
   selectedResistType.value = ''
   teleportDistance.value = ''
+  declareAttackLuck.value = false
+  declareSpellLuck.value = false
+  declareMaximize.value = false
+  declareDeathSaveLuck.value = false
   nextEncounterOpen.value = false
   manualEncounterOpen.value = false
   sandboxDeclared.value = false
@@ -935,6 +973,7 @@ function stageAttack(): void {
     type: 'attack', actor_id: attackAction.value.actor_id,
     target_id: selectedTargetId.value,
     ...(weapon.weapon_ref ? { weapon_ref: weapon.weapon_ref } : { attack_id: weapon.id }),
+    ...(declareAttackLuck.value ? { spend_luck: true } : {}),
   })
 }
 
@@ -951,7 +990,18 @@ function stageSpell(): void {
   else payload.target_id = ids[0]
   if (spell.resist_choice?.length) payload.resist_type = selectedResistType.value
   if (spell.mode === 'teleport') payload.teleport_distance = Number(teleportDistance.value)
+  if (declareSpellLuck.value) payload.spend_luck = true
+  if (declareMaximize.value) payload.maximize_damage = true
   stage(payload)
+}
+
+function stageDeathSave(): void {
+  const item = action('death_save')
+  if (!item) return
+  stage({
+    type: 'death_save', actor_id: item.actor_id,
+    ...(declareDeathSaveLuck.value ? { spend_luck: true } : {}),
+  })
 }
 
 function stageExplorationSpell(): void {
@@ -1038,6 +1088,61 @@ watch(reactionSpell, spell => {
   if (!spell.available_slot_levels.includes(reactionSlot.value)) reactionSlot.value = spell.available_slot_levels[0] ?? 0
 }, { immediate: true })
 
+const windowDecision = computed<JsonObject | null>(() => {
+  const decision = pendingDecision.value
+  const kind = String(decision?.kind || '')
+  return decision && (kind === 'check_window' || kind === 'damage_window')
+    ? decision as JsonObject
+    : null
+})
+const windowLabel = computed(() => {
+  if (String(windowDecision.value?.kind || '') === 'damage_window') {
+    return copy.value.damageWindow
+  }
+  return copy.value.checkWindow
+})
+const windowCode = computed(() => String(windowDecision.value?.window_code || ''))
+const windowAbility = computed(() => {
+  const code = windowCode.value
+  if (code === 'lucky_disadvantage') return copy.value.windowLucky
+  if (code === 'cutting_words_check') return copy.value.windowCuttingCheck
+  if (code === 'cutting_words_damage') return copy.value.windowCuttingDamage
+  if (code === 'dark_ones_own_luck') return copy.value.windowDool
+  return localizedTerm(code)
+})
+const windowHint = computed(() => {
+  const code = windowCode.value
+  if (code === 'lucky_disadvantage') return copy.value.windowHintLucky
+  if (code === 'cutting_words_check') return copy.value.windowHintCuttingCheck
+  if (code === 'cutting_words_damage') return copy.value.windowHintCuttingDamage
+  if (code === 'dark_ones_own_luck') return copy.value.windowHintDool
+  return ''
+})
+const windowOwner = computed(() => combat.value?.actors.find(
+  actor => actor.actor_id === String(windowDecision.value?.window_owner_id || ''),
+))
+const windowResource = computed(() => {
+  const rows = windowOwner.value?.class_resources
+  return Array.isArray(rows)
+    ? rows.find(row => row.id === String(windowDecision.value?.resource_id || '')) || null
+    : null
+})
+const windowCheck = computed(() => {
+  const check = windowDecision.value?.check
+  return check && typeof check === 'object' ? check as JsonObject : null
+})
+const windowDamage = computed(() => {
+  const damage = windowDecision.value?.damage_event
+  return damage && typeof damage === 'object' ? damage as JsonObject : null
+})
+const windowRolls = computed(() => {
+  const source = windowCheck.value?.rolls ?? windowDamage.value?.rolls
+  return Array.isArray(source) ? source : []
+})
+const windowDie = computed(() => Number(
+  windowDecision.value?.die_sides ?? windowDecision.value?.damage_sides ?? 0,
+))
+
 async function decide(decision: RulesetPendingDecision, option: string, extra: JsonObject = {}): Promise<void> {
   const gameKey = props.gameKey
   busy.value = true
@@ -1076,6 +1181,8 @@ watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
   syncSpellTargets()
+  declareSpellLuck.value = false
+  declareMaximize.value = false
 })
 watch(selectedSlot, () => {
   if (selectedSpellTargets.value.length > spellTargetLimit.value) {
@@ -1429,9 +1536,38 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </div>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
-          <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
+          <strong>{{ windowDecision ? `${windowLabel} · ${windowAbility}` : pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
           <p v-if="pendingDecision.kind === 'melee_hit_spell'">{{ spellText.hitHint }}</p>
-          <template v-if="pendingDecision.kind === 'hit_reaction_spell'">
+          <template v-if="windowDecision">
+            <p>{{ windowHint }}</p>
+            <dl class="window-facts">
+              <div v-if="windowRolls.length">
+                <dt>{{ copy.windowRolls }}</dt>
+                <dd>{{ windowRolls.join(' / ') }}</dd>
+              </div>
+              <div v-if="windowCheck">
+                <dt>{{ copy.windowTotal }}</dt>
+                <dd>{{ windowCheck.natural }} → {{ windowCheck.total }} vs {{ windowCheck.target }}</dd>
+              </div>
+              <div v-if="windowDamage">
+                <dt>{{ copy.windowDamage }}</dt>
+                <dd>{{ windowDamage.amount }}（{{ windowDamage.damage_type }}）</dd>
+              </div>
+              <div v-if="windowResource">
+                <dt>{{ copy.windowResource }}</dt>
+                <dd>{{ windowResource.name }} {{ windowResource.current }} / {{ windowResource.maximum }}</dd>
+              </div>
+              <div v-if="windowDie">
+                <dt>{{ copy.windowDie }}</dt>
+                <dd>d{{ windowDie }}</dd>
+              </div>
+            </dl>
+            <div>
+              <button v-if="pendingDecision.options.includes('spend')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'spend')">{{ copy.windowSpend }}</button>
+              <button v-if="pendingDecision.options.includes('decline')" :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ copy.windowDecline }}</button>
+            </div>
+          </template>
+          <template v-else-if="pendingDecision.kind === 'hit_reaction_spell'">
             <p>{{ spellText.hitReactionHint(targetName(String(pendingDecision.attacker_id || '')), Number(pendingDecision.attack_total), Number(pendingDecision.armor_class)) }}</p>
             <label v-if="reactionSpells.length > 1">{{ copy.spell }}
               <select v-model="reactionSpellRef">
@@ -1491,6 +1627,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
               {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
             </p>
+            <label v-if="attackAction.lucky_advantage_available" class="declare-toggle">
+              <input v-model="declareAttackLuck" type="checkbox" />
+              <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+            </label>
             <button :disabled="busy || !selectedWeapon || !selectedTargetId || !selectedWeaponRange?.usable" @click="stageAttack"><NIcon :component="FlashOutline" />{{ copy.attack }}</button>
           </section>
 
@@ -1563,6 +1703,14 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             <label v-if="selectedSpell?.mode === 'teleport'">{{ copy.teleportDistance }}
               <input v-model.number="teleportDistance" type="number" step="5" />
             </label>
+            <label v-if="selectedSpell?.lucky_advantage_available" class="declare-toggle">
+              <input v-model="declareSpellLuck" type="checkbox" />
+              <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+            </label>
+            <label v-if="selectedSpell?.maximize_damage_available" class="declare-toggle">
+              <input v-model="declareMaximize" type="checkbox" />
+              <span>{{ copy.maximizeDamage }}<small>{{ copy.maximizeHint }}</small></span>
+            </label>
             <button :disabled="busy || !selectedSpell || !spellTargetsValid" @click="stageSpell"><NIcon :component="SparklesOutline" />{{ copy.cast }}</button>
             </template>
             <SpellAvailability :spells="spellActor?.spells || []" />
@@ -1607,7 +1755,12 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             <button v-if="action('dash')" :disabled="busy" @click="stageSimple('dash')"><NIcon :component="FootstepsOutline" />{{ copy.dash }}</button>
             <button v-if="action('dodge')" :disabled="busy" @click="stageSimple('dodge')"><NIcon :component="ShieldOutline" />{{ copy.dodge }}</button>
             <button v-if="action('disengage')" :disabled="busy" @click="stageSimple('disengage')"><NIcon :component="FootstepsOutline" />{{ copy.disengage }}</button>
-            <button v-if="action('death_save')" :disabled="busy" @click="stageSimple('death_save')"><NIcon :component="SparklesOutline" />{{ copy.deathSave }}</button>
+            <button v-if="action('hide')" :disabled="busy" @click="stageSimple('hide')"><NIcon :component="FootstepsOutline" />{{ copy.hide }}</button>
+            <label v-if="action('death_save')?.lucky_advantage_available" class="declare-toggle">
+              <input v-model="declareDeathSaveLuck" type="checkbox" />
+              <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+            </label>
+            <button v-if="action('death_save')" :disabled="busy" @click="stageDeathSave"><NIcon :component="SparklesOutline" />{{ copy.deathSave }}</button>
             <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
             <button v-if="action('end_turn')" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
             <button v-if="action('combat.end')" class="danger" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
@@ -1757,8 +1910,16 @@ button, select, input { min-height: 44px; font: inherit; }
 .class-resource-strip small { color: #9ca6ae; font-size: 11px; }
 .class-resource-strip strong { font-size: 14px; }
 .end-turn-ready { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 8px 9px; border: 1px solid #b88b3e; border-radius: 8px; background: rgb(197 148 67 / 14%); color: #f2d28f; font-size: 12px; font-weight: 700; }
+.declare-toggle { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border: 1px solid var(--df-border-soft); border-radius: 8px; font-size: 12px; }
+.declare-toggle input { width: auto; margin-top: 2px; }
+.declare-toggle span { display: grid; gap: 2px; }
+.declare-toggle small { color: var(--df-text-muted); font-size: 10px; font-weight: 400; }
 .decision-card, .confirm-card { padding: 12px; border: 1px solid #c2974a; border-radius: 12px; background: #322716; }
 .decision-card div, .confirm-card div { display: flex; gap: 7px; flex-wrap: wrap; }
+.decision-card .window-facts { display: grid; gap: 4px; margin: 4px 0; }
+.decision-card .window-facts div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; justify-content: start; }
+.decision-card .window-facts dt { color: #d8c39a; font-size: 11px; }
+.decision-card .window-facts dd { margin: 0; font-size: 12px; }
 .confirm-card { position: sticky; bottom: 12px; z-index: 2; box-shadow: 0 12px 36px rgb(0 0 0 / 45%); }
 .confirm-card code { color: #efd195; }
 .combat-primary { border-color: #c59443; background: #a56f24; color: white; }

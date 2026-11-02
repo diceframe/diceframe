@@ -88,7 +88,7 @@ class CombatTriggeredSpellsMixin:
         choices = [
             row
             for row in self._available_spells(
-                actor, combat.get("economy", {}), decision
+                instance, actor, combat.get("economy", {}), decision
             )
             if row.get("mode") == "triggered_damage"
         ]
@@ -227,7 +227,7 @@ class CombatTriggeredSpellsMixin:
         spells = [
             row
             for row in self._available_spells(
-                actor, combat.get("economy", {}), decision
+                instance, actor, combat.get("economy", {}), decision
             )
             if row["mode"] == "triggered_damage"
         ]

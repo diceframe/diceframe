@@ -28,6 +28,7 @@ from .check_windows import (
     CHECK_WINDOW_DECISION,
     CombatCheckWindowsMixin,
     DAMAGE_WINDOW_DECISION,
+    LUCKY_RESOURCE,
 )
 from .primitives import (
     INTENT_TYPES,
@@ -221,7 +222,8 @@ class Dnd2024CombatEngine(
         if pending:
             if pending[0].get("kind") == HIT_SPELL_DECISION:
                 spells = self._available_spells(
-                    self._actor_view(instance, combat, current), combat.get("economy", {}), pending[0],
+                    instance, self._actor_view(instance, combat, current),
+                    combat.get("economy", {}), pending[0],
                 )
                 return [*communication, {"type": "decision.resolve", "expected_version": version,
                         "decisions": deepcopy(pending)}, *([{
@@ -243,6 +245,9 @@ class Dnd2024CombatEngine(
             return [*communication, {
                 "type": "death_save", "label": "Death saving throw",
                 "expected_version": version, "actor_id": current,
+                "lucky_advantage_available": self._window_pool_available(
+                    instance, current, LUCKY_RESOURCE,
+                ),
             }]
         economy = combat.get("economy", {})
         actions: list[dict[str, Any]] = []
@@ -255,6 +260,9 @@ class Dnd2024CombatEngine(
                     "type": "attack", "label": "Attack", "actor_id": current,
                     "expected_version": version, "weapons": weapons,
                     "targets": self._hostile_targets(instance, combat, current),
+                    "lucky_advantage_available": self._window_pool_available(
+                        instance, current, LUCKY_RESOURCE,
+                    ),
                 })
             actions.extend([
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
@@ -272,7 +280,9 @@ class Dnd2024CombatEngine(
                     "type": "stabilize", "label": "Stabilize", "actor_id": current,
                     "expected_version": version, "targets": adjacent_downed,
                 })
-        spells = self._available_spells(actor, economy, hit_spell_decision(combat, current))
+        spells = self._available_spells(
+            instance, actor, economy, hit_spell_decision(combat, current),
+        )
         if spells:
             actions.append({
                 "type": "cast_spell", "label": "Cast a spell", "actor_id": current,
@@ -886,7 +896,11 @@ class Dnd2024CombatEngine(
                     # 真实条目，enemy 视图没有职业资源，就是空列表）。这里绝不能
                     # 退回 ``{}``：同一个字段出现两种形状会让客户端把对象当数组用。
                     "class_resources": deepcopy(view.get("class_resources") or []),
-                    "spells": self._spell_statuses(view, combat.get("economy", {}), hit_spell_decision(combat, view["actor_id"]), is_current=view["actor_id"] == self._current_actor(combat)),
+                    "spells": self._spell_statuses(
+                        instance, view, combat.get("economy", {}),
+                        hit_spell_decision(combat, view["actor_id"]),
+                        is_current=view["actor_id"] == self._current_actor(combat),
+                    ),
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)

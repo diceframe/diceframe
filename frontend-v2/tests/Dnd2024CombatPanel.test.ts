@@ -1508,3 +1508,176 @@ describe('D&D 2024 combat panel class capabilities', () => {
     wrapper.unmount()
   })
 })
+
+async function mountPanel(data: unknown, actorId = 'gm') {
+  mocks.fetch.mockResolvedValue(data)
+  return mount(Dnd2024CombatPanel, {
+    props: { gameKey: 'web|combat|bot', actorId, isGm: actorId === 'gm' },
+  })
+}
+
+describe('D&D 2024 combat decisions and declarations', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mocks.locale = 'zh-CN'
+    i18n.global.locale.value = 'zh-CN'
+    mocks.fetch.mockReset().mockResolvedValue(response('none'))
+    mocks.submit.mockReset().mockResolvedValue(response('active'))
+    mocks.decide.mockReset().mockResolvedValue(response('active'))
+    mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
+  })
+
+  it('renders a check window and submits spend through the decision API', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.actors[0].class_resources = [
+      { id: 'lucky_points', name: '幸运', current: 1, maximum: 3 },
+    ]
+    const decision = {
+      decision_id: 'check-window:lucky_disadvantage:intent:player:gm', kind: 'check_window',
+      surface: 'attack', window_code: 'lucky_disadvantage', window_owner_id: 'player:gm',
+      assigned_to: 'gm', options: ['spend', 'decline'], resource_id: 'lucky_points',
+      die_sides: 6, check: { rolls: [15, 3], natural: 15, total: 20, target: 16, success: true },
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }]
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const card = wrapper.get('.decision-card')
+    expect(card.text()).toContain('检定结果窗口')
+    expect(card.text()).toContain('幸运 · 劣势骰')
+    expect(card.text()).toContain('15 / 3')
+    expect(card.text()).toContain('15 → 20 vs 16')
+    expect(card.text()).toContain('幸运 1 / 3')
+    expect(card.text()).toContain('d6')
+    await card.get('.combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(mocks.decide.mock.calls[0][1]).toBe(decision.decision_id)
+    expect(mocks.decide.mock.calls[0][2]).toMatchObject({ option: 'spend' })
+    wrapper.unmount()
+  })
+
+  it('renders a damage window with its held damage and submits decline', async () => {
+    const data = response('active') as any
+    data.gameplay.combat.actors[0].class_resources = [
+      { id: 'bardic_inspiration', name: '诗人激励', current: 2, maximum: 3 },
+    ]
+    const decision = {
+      decision_id: 'damage-window:cutting_words_damage:intent:player:gm', kind: 'damage_window',
+      surface: 'damage', window_code: 'cutting_words_damage', window_owner_id: 'player:gm',
+      assigned_to: 'gm', options: ['spend', 'decline'], resource_id: 'bardic_inspiration',
+      damage_sides: 8, damage_event: { amount: 12, damage_type: 'fire', rolls: [4, 5] },
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    data.available_actions = [{ type: 'decision.resolve', expected_version: 1, decisions: [decision] }]
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const card = wrapper.get('.decision-card')
+    expect(card.text()).toContain('伤害结果窗口')
+    expect(card.text()).toContain('语出惊人 · 伤害')
+    expect(card.text()).toContain('12')
+    expect(card.text()).toContain('诗人激励 2 / 3')
+    expect(card.text()).toContain('d8')
+    const decline = card.findAll('button').find(item => item.text() === '放弃')!
+    await decline.trigger('click')
+    await flushPromises()
+    expect(mocks.decide).toHaveBeenCalledOnce()
+    expect(mocks.decide.mock.calls[0][2]).toMatchObject({ option: 'decline' })
+    wrapper.unmount()
+  })
+
+  it('does not show a window to a player who does not own it', async () => {
+    const data = response('active') as any
+    const decision = {
+      decision_id: 'check-window:lucky_disadvantage:intent:player:other', kind: 'check_window',
+      window_code: 'lucky_disadvantage', assigned_to: 'other', options: ['spend', 'decline'],
+    }
+    data.gameplay.combat.pending_decisions = [decision]
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    expect(wrapper.find('.decision-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('使用能力')
+    wrapper.unmount()
+  })
+
+  it('declares Lucky advantage on an attack only when the server offers it', async () => {
+    const data = response('active') as any
+    data.available_actions[0].lucky_advantage_available = true
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const attack = wrapper.findAll('.action-card').find(card => card.find('h3').text().includes('攻击'))!
+    expect(attack.text()).toContain('使用幸运优势')
+    await attack.get('input[type=checkbox]').setValue(true)
+    await attack.findAll('button').at(-1)!.trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit).toHaveBeenCalledOnce()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'attack', spend_luck: true })
+    wrapper.unmount()
+  })
+
+  it('declares Lucky on a spell attack and Overchannel only when projected', async () => {
+    const data = response('active') as any
+    data.available_actions = [{
+      type: 'cast_spell', actor_id: 'player:gm', expected_version: 1,
+      spells: [{
+        spell_ref: 'spell:fire_bolt', name: '火焰箭', level: 3, casting_time: 'action',
+        mode: 'spell_attack', available_slot_levels: [3], target_count: 1,
+        lucky_advantage_available: true, maximize_damage_available: true,
+      }],
+      targets: data.gameplay.combat.actors.map((actor: any) => ({
+        actor_id: actor.actor_id, kind: actor.kind, name: actor.name,
+        hp: actor.hp, max_hp: actor.max_hp, position: actor.position,
+      })),
+    }]
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid=combat-spell-card]')
+    expect(card.text()).toContain('使用幸运优势')
+    expect(card.text()).toContain('过载伤害最大化')
+    const toggles = card.findAll('input[type=checkbox]')
+    await toggles[0].setValue(true)
+    await toggles[1].setValue(true)
+    await card.findAll('button').at(-1)!.trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit).toHaveBeenCalledOnce()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'cast_spell', spend_luck: true, maximize_damage: true,
+    })
+    wrapper.unmount()
+  })
+
+  it('declares Lucky on a death save and submits the ordinary Hide action', async () => {
+    const data = response('active') as any
+    data.available_actions = [
+      { type: 'death_save', actor_id: 'player:gm', expected_version: 1, lucky_advantage_available: true },
+      { type: 'hide', actor_id: 'player:gm', expected_version: 1 },
+    ]
+    // 提交后会以服务端响应重新渲染；响应必须继续提供 Hide，否则第二次操作
+    // 会在一个不再暴露该动作的旧响应上失配。
+    mocks.submit.mockResolvedValue(data)
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const compact = wrapper.get('.compact-actions')
+    await compact.get('input[type=checkbox]').setValue(true)
+    const deathSave = compact.findAll('button').find(item => item.text().includes('死亡豁免'))!
+    await deathSave.trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'death_save', spend_luck: true })
+
+    const hide = wrapper.findAll('button').find(item => item.text().includes('躲藏'))!
+    await hide.trigger('click')
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[1][1]).toMatchObject({ type: 'hide' })
+    wrapper.unmount()
+  })
+})

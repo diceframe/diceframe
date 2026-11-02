@@ -9,12 +9,16 @@ identical to the pre-window engine (asserted explicitly in the G1 tests).
 
 from __future__ import annotations
 
+import asyncio
+import json
 from copy import deepcopy
 
 import pytest
 
-from src.engine.modules import ruleset_runtime
+from src.engine.game_instance import GameInstance
+from src.engine.modules import round_safety, ruleset_runtime
 from src.engine.player_control import set_control
+from src.engine.round_snapshots import restore_players, snapshot_players
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.resting.engine import Dnd2024RestEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
@@ -337,6 +341,57 @@ def test_lucky_cancels_advantage_on_an_enemy_attack(runtime, sheets) -> None:
     assert check["success"] is True
 
 
+def test_lucky_cancellation_uses_the_new_die_even_when_it_is_higher(runtime, sheets) -> None:
+    """Advantage + Lucky's disadvantage cancel into a single-die rereoll.
+
+    The lucky d20 is the cancelled roll's replacement natural, not a third
+    "keep the lowest" candidate; using it must also recompute total and crit.
+    """
+
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[1, 20])
+    _grant_feat(runtime, instance)
+    _set_condition(instance, "gm", {"faerie_fire": {}})
+    _set_enemy_condition(instance, {"blessed": {"source": "test"}})
+    _enemy_attack(engine, instance, [15, 3, 4])
+    decision = _pending(instance)[0]
+    assert decision["check"]["advantage_mode"] == "advantage"
+    assert decision["check"]["natural"] == 15
+    assert decision["check"]["check_bonus"] == 4
+
+    rng = SequenceRng([18])
+    events = _resolve(engine, instance, decision, "spend", rng=rng)
+    check = _checked(events)
+    assert rng.values == []
+    assert check["advantage_mode"] == ""
+    assert check["advantage_sources"] == [
+        {"code": "faerie_fire", "mode": "advantage"},
+        {"code": "lucky", "mode": "disadvantage"},
+    ]
+    assert check["rolls"] == [15, 3, 18]
+    assert check["natural"] == 18
+    assert check["total"] == 26
+    assert check["critical"] is False
+    assert check["success"] is True
+    assert check["window_roll"] == 18
+    assert _pool(instance, "lucky_points")["current"] == 1
+    assert [event["type"] for event in events].count("dnd2024.class_resource.spent") == 1
+
+
+def test_lucky_cancellation_can_turn_the_new_die_into_the_critical(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[1, 20])
+    _grant_feat(runtime, instance)
+    _set_condition(instance, "gm", {"faerie_fire": {}})
+    _enemy_attack(engine, instance, [15, 3])
+    decision = _pending(instance)[0]
+
+    events = _resolve(engine, instance, decision, "spend", rng=SequenceRng([20]))
+    check = _checked(events)
+    assert check["natural"] == 20
+    assert check["total"] == 24
+    assert check["critical"] is True
+    assert check["success"] is True
+
+
 def test_an_attack_roll_that_is_already_at_disadvantage_offers_no_lucky_window(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], rolls=[1, 20])
     _grant_feat(runtime, instance)
@@ -506,6 +561,34 @@ def test_cutting_words_check_face_can_turn_a_hit_into_a_miss(runtime, sheets) ->
     assert _pending(instance) == []
     assert _pool(instance, "bardic_inspiration", "p2")["current"] == 1
     assert _state(instance)["combat"]["reactions"]["player:p2"] == 0
+
+
+def test_declining_the_cutting_words_check_face_keeps_the_hit(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    before = _hp(instance)
+    _enemy_attack(engine, instance, [10])
+    decision = _pending(instance)[0]
+    assert decision["check"]["total"] == 14
+    assert decision["check"]["success"] is True
+
+    events = _resolve(engine, instance, decision, "decline", by="p2", intent_id="decide-1")
+    cleared = next(
+        event for event in events if event["type"] == "dnd2024.decision.cleared"
+    )
+    assert cleared["option"] == "decline"
+    check = _checked(events)
+    assert check["total"] == 14
+    assert check["success"] is True
+    assert "check_penalty" not in check
+    assert "check_penalty_rolls" not in check
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 2
+    assert _state(instance)["combat"]["reactions"]["player:p2"] == 1
+
+    damage_decision = _pending(instance)[0]
+    assert damage_decision["kind"] == "damage_window"
+    _resolve(engine, instance, damage_decision, "decline", by="p2", intent_id="decide-2")
+    assert _hp(instance) == before - 3
+    assert _pending(instance) == []
 
 
 def test_the_bard_keeps_the_choice_even_when_the_cut_cannot_flip_the_hit(runtime, sheets) -> None:
@@ -718,6 +801,36 @@ def test_declining_the_concentration_window_ends_concentration(runtime, sheets) 
     assert _pool(instance, "dark_ones_own_luck")["current"] == 2
 
 
+def test_declining_the_death_save_window_keeps_the_failure(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
+    _zero_hp(instance)
+    _apply(engine, instance, {
+        "intent_id": "ds-1", "type": "death_save",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng([5]))
+    decision = _pending(instance)[0]
+    assert decision["window_code"] == "dark_ones_own_luck"
+
+    events = _resolve(engine, instance, decision, "decline")
+    cleared = next(
+        event for event in events if event["type"] == "dnd2024.decision.cleared"
+    )
+    assert cleared["option"] == "decline"
+    assert "dnd2024.class_resource.spent" not in [event["type"] for event in events]
+    check = _checked(events, "death_save")
+    assert check["natural"] == 5
+    assert check["total"] == 5
+    assert check["success"] is False
+    assert "window_bonus" not in check
+    resolved = next(
+        event for event in events if event["type"] == "dnd2024.death_save.resolved"
+    )
+    assert (resolved["successes"], resolved["failures"], resolved["roll"]) == (0, 1, 5)
+    assert _pool(instance, "dark_ones_own_luck")["current"] == 2
+    assert _pending(instance) == []
+
+
 def test_dark_ones_own_luck_is_once_per_roll(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
     _zero_hp(instance)
@@ -911,3 +1024,308 @@ def test_ai_dark_ones_own_luck_spends_when_the_d10_reaches_the_dc(runtime, sheet
     intent = engine.next_automatic_intent(instance)
     assert intent is not None
     assert intent["option"] == "decline"
+
+
+# --------------------------------------------------------------------------
+# D — declaration availability projection (R8)
+# --------------------------------------------------------------------------
+
+
+def _action(engine, instance, kind: str) -> dict:
+    return next(
+        row for row in engine.available_intents(instance, "gm")
+        if row["type"] == kind
+    )
+
+
+def _spell_rows(engine, instance) -> dict[str, dict]:
+    return {
+        row["spell_ref"]: row for row in _action(engine, instance, "cast_spell")["spells"]
+    }
+
+
+def test_lucky_declaration_is_projected_on_attack_and_death_save_actions(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[20, 1])
+    assert _action(engine, instance, "attack")["lucky_advantage_available"] is False
+    _grant_feat(runtime, instance)
+    assert _action(engine, instance, "attack")["lucky_advantage_available"] is True
+    _pool(instance, "lucky_points")["current"] = 0
+    assert _action(engine, instance, "attack")["lucky_advantage_available"] is False
+
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[20, 1])
+    _zero_hp(instance)
+    assert _action(engine, instance, "death_save")["lucky_advantage_available"] is False
+
+    engine, instance = _combat(runtime, sheets["monk"], rolls=[20, 1])
+    _grant_feat(runtime, instance)
+    _zero_hp(instance)
+    assert _action(engine, instance, "death_save")["lucky_advantage_available"] is True
+
+
+def test_lucky_declaration_is_projected_only_on_spell_attack_rows(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
+    rows = _spell_rows(engine, instance)
+    assert rows["spell:eldritch_blast"]["lucky_advantage_available"] is False
+    assert "lucky_advantage_available" not in rows["spell:charm_person"]
+
+    _grant_feat(runtime, instance)
+    rows = _spell_rows(engine, instance)
+    assert rows["spell:eldritch_blast"]["lucky_advantage_available"] is True
+    assert rows["spell:chill_touch"]["lucky_advantage_available"] is True
+    assert "lucky_advantage_available" not in rows["spell:charm_person"]
+
+    _pool(instance, "lucky_points")["current"] = 0
+    assert _spell_rows(engine, instance)[
+        "spell:eldritch_blast"
+    ]["lucky_advantage_available"] is False
+
+
+def test_declaring_lucky_without_a_pool_is_rejected_for_every_surface(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
+    cast = engine.validate_intent(instance, {
+        "intent_id": "cast-forged", "type": "cast_spell",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "spell_ref": "spell:chill_touch", "target_ids": ["enemy:goblin-1"],
+        "slot_level": 0, "spend_luck": True,
+    })
+    assert cast["ok"] is False
+    assert cast["error"] == "lucky pool is empty"
+
+    engine, instance = _combat(runtime, sheets["warlock"], rolls=[20, 1])
+    _zero_hp(instance)
+    save = engine.validate_intent(instance, {
+        "intent_id": "ds-forged", "type": "death_save",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "spend_luck": True,
+    })
+    assert save["ok"] is False
+    assert save["error"] == "lucky pool is empty"
+
+
+# --------------------------------------------------------------------------
+# P — persisted window lifecycle (R9)
+# --------------------------------------------------------------------------
+
+
+def _reloaded(instance):
+    """Round-trip the real persisted projection through plain JSON."""
+
+    return GameInstance.from_dict(json.loads(json.dumps(instance.to_dict())))
+
+
+@pytest.mark.parametrize("option", ["spend", "decline"])
+def test_a_pending_check_window_survives_a_save_load_and_settles_once(
+    runtime, sheets, option: str,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    _enemy_attack(engine, instance, [10])
+    decision = deepcopy(_pending(instance)[0])
+    assert decision["kind"] == "check_window"
+    assert decision["window_code"] == "cutting_words_check"
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 2
+    assert _state(instance)["combat"]["reactions"]["player:p2"] == 1
+
+    restored = _reloaded(instance)
+    assert _pending(restored) == [decision]
+    assert _pool(restored, "bardic_inspiration", "p2")["current"] == 2
+    assert _state(restored)["combat"]["reactions"]["player:p2"] == 1
+
+    rng = SequenceRng([6] if option == "spend" else [])
+    events = _resolve(engine, restored, _pending(restored)[0], option, by="p2", rng=rng)
+    assert rng.values == []
+    assert [event["type"] for event in events].count(
+        "dnd2024.class_resource.spent"
+    ) == (1 if option == "spend" else 0)
+    assert _pool(restored, "bardic_inspiration", "p2")["current"] == (
+        1 if option == "spend" else 2
+    )
+    assert _state(restored)["combat"]["reactions"]["player:p2"] == (
+        0 if option == "spend" else 1
+    )
+    if option == "decline":
+        # Declining the check face keeps the hit, so the damage-face window
+        # legitimately opens; settle that chain before calling the window done.
+        chained = _resolve(
+            engine, restored, _pending(restored)[0], "decline", by="p2",
+            intent_id="decide-damage",
+        )
+        assert "dnd2024.class_resource.spent" not in [
+            event["type"] for event in chained
+        ]
+        assert _pool(restored, "bardic_inspiration", "p2")["current"] == 2
+    assert _pending(restored) == []
+
+    replay = engine.validate_intent(restored, {
+        "intent_id": "decide-replay", "type": "decision.resolve",
+        "expected_version": _state(restored)["version"],
+        "submitted_by": "p2", "decision_id": decision["decision_id"],
+        "option": option,
+    })
+    assert replay["ok"] is False
+    assert replay["error"] == "pending decision or option is invalid"
+
+
+def test_a_pending_damage_window_keeps_its_follow_up_through_a_save_load(
+    runtime, sheets,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    _enemy_attack(engine, instance, [15])
+    _resolve(engine, instance, _pending(instance)[0], "decline", by="p2", intent_id="decide-1")
+    damage_decision = deepcopy(_pending(instance)[0])
+    assert damage_decision["kind"] == "damage_window"
+
+    follow_up = {
+        "decision_id": "melee-hit:follow-up",
+        "kind": "melee_hit_spell",
+        "actor_id": "player:gm",
+        "target_id": "enemy:goblin-1",
+        "assigned_to": "gm",
+        "options": ["decline"],
+        "damage_event": deepcopy(damage_decision["damage_event"]),
+        "critical": False,
+    }
+    _state(instance)["combat"]["pending_decisions"][0]["next_decision"] = deepcopy(follow_up)
+
+    restored = _reloaded(instance)
+    stored = _pending(restored)[0]
+    assert stored == {**damage_decision, "next_decision": follow_up}
+
+    # Only the decision owner receives the window payload; the other side of
+    # the table must not see the bard's choices or held damage.
+    assert not any(
+        row["type"] == "decision.resolve"
+        for row in engine.available_intents(restored, "gm")
+    )
+    owner_actions = [
+        row for row in engine.available_intents(restored, "p2")
+        if row["type"] == "decision.resolve"
+    ]
+    assert owner_actions[0]["decisions"] == _pending(restored)
+
+    events = _resolve(
+        engine, restored, stored, "decline", by="p2", intent_id="decide-2",
+    )
+    assert "dnd2024.class_resource.spent" not in [event["type"] for event in events]
+    assert "resource.changed" not in [event["type"] for event in events]
+    chained = _pending(restored)[0]
+    assert chained["kind"] == "melee_hit_spell"
+    assert chained["decision_id"] == follow_up["decision_id"]
+
+
+def test_reset_drops_a_pending_window_roll_traces_and_reaction_locks(
+    runtime, sheets,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    _enemy_attack(engine, instance, [10])
+    assert _pending(instance) != []
+    _state(instance)["combat"]["reactions"]["player:p2"] = 0
+    assert ruleset_runtime.event_ledger(instance) != []
+
+    asyncio.run(instance.reset())
+
+    assert "combat" not in _state(instance)
+    assert ruleset_runtime.event_ledger(instance) == []
+    assert round_safety.round_entity_snapshot(instance) == {}
+    assert round_safety.round_start_snapshot(instance) == {}
+
+    instance.players["gm"] = {
+        "character_name": "Monk", "character_sheet": deepcopy(sheets["monk"]),
+    }
+    instance.players["p2"] = {
+        "character_name": "Bard", "character_sheet": deepcopy(sheets["bard"]),
+    }
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-again", "type": "combat.start",
+        "expected_version": int(_state(instance).get("version", 0) or 0),
+        "submitted_by": "gm", "enemies": [goblin(position=5, hp=40)],
+    }, SequenceRng([1, 20]))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+
+    assert _pending(instance) == []
+    assert _state(instance)["combat"]["reactions"]["player:p2"] == 1
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 2
+
+
+def test_replaying_a_settled_window_intent_is_free(
+    runtime, sheets,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    _enemy_attack(engine, instance, [10])
+    decision = deepcopy(_pending(instance)[0])
+    expected_version = _state(instance)["version"]
+    rng = SequenceRng([6])
+    events = _resolve(
+        engine, instance, decision, "spend", by="p2", rng=rng,
+    )
+    assert rng.values == []
+    assert [event["type"] for event in events].count("dnd2024.class_resource.spent") == 1
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 1
+    assert _pending(instance) == []
+
+    # Re-submitting the exact same intent is a ledger replay: the prior batch
+    # is returned without rolling a window die, and applying it is a duplicate.
+    replay_intent = {
+        "intent_id": "decide-1", "type": "decision.resolve",
+        "expected_version": expected_version, "submitted_by": "p2",
+        "decision_id": decision["decision_id"], "option": "spend",
+    }
+    replay_rng = SequenceRng([6])
+    replay = engine.resolve_intent(instance, replay_intent, replay_rng)
+    assert replay["ok"] is True, replay
+    assert replay.get("replayed") is True
+    assert replay_rng.values == [6]
+    applied = engine.apply_batch(instance, replay["event_batch"])
+    assert applied["applied"] is False
+    assert applied["duplicate"] is True
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 1
+    assert _pending(instance) == []
+
+
+def test_a_round_entry_restore_drops_the_window_and_a_replay_spends_once(
+    runtime, sheets,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    entry = ruleset_runtime.round_entry_snapshot(instance)
+    players = snapshot_players(instance)
+
+    _enemy_attack(engine, instance, [10])
+    decision = deepcopy(_pending(instance)[0])
+    assert ruleset_runtime.restore_round_entry(instance, deepcopy(entry)) is True
+    restore_players(instance, deepcopy(players))
+
+    assert _pending(instance) == []
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 2
+    assert _state(instance)["combat"]["reactions"]["player:p2"] == 1
+    assert engine.validate_intent(instance, {
+        "intent_id": "decide-stale", "type": "decision.resolve",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "p2", "decision_id": decision["decision_id"],
+        "option": "decline",
+    })["ok"] is False
+
+    _enemy_attack(engine, instance, [10], intent_id="g1-replay")
+    replay_decision = _pending(instance)[0]
+    rng = SequenceRng([6])
+    events = _resolve(engine, instance, replay_decision, "spend", by="p2", rng=rng)
+    assert rng.values == []
+    assert [event["type"] for event in events].count("dnd2024.class_resource.spent") == 1
+    assert _pool(instance, "bardic_inspiration", "p2")["current"] == 1
+    assert _pending(instance) == []
+
+
+def test_a_legacy_save_without_pending_decisions_loads_and_still_opens_windows(
+    runtime, sheets,
+) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
+    payload = json.loads(json.dumps(instance.to_dict()))
+    combat = payload["modules"]["ruleset_runtime"]["state"]["combat"]
+    combat.pop("pending_decisions")
+    assert combat.get("pending_decisions") is None
+
+    restored = GameInstance.from_dict(payload)
+    assert _state(restored)["combat"].get("pending_decisions", []) == []
+
+    _enemy_attack(engine, restored, [10])
+    assert _pending(restored)[0]["kind"] == "check_window"
