@@ -36,8 +36,8 @@ function actionLabel(player: Player): string {
 }
 
 const localCopy = computed(() => locale.value === 'zh-CN'
-  ? { table: '桌面信息', party: '队伍', members: '队伍成员', recap: '规则提示', round: '回合', human: '玩家', ai: 'AI 队友', unclaimed: '待认领', generic: '通用规则', genericHint: '规则由当前游戏服务提供。' }
-  : { table: 'Table information', party: 'Party', members: 'Party members', recap: 'Rules recap', round: 'Round', human: 'Player', ai: 'AI companion', unclaimed: 'Unclaimed', generic: 'Generic rules', genericHint: 'Rules are provided by the current game service.' })
+  ? { table: '桌面信息', party: '队伍', members: '队伍成员', recap: '规则提示', inviteHelp: '邀请说明', round: '回合', human: '玩家', ai: 'AI 队友', unclaimed: '待认领', generic: '通用规则', genericHint: '规则由当前游戏服务提供。' }
+  : { table: 'Table information', party: 'Party', members: 'Party members', recap: 'Rules recap', inviteHelp: 'Invitation details', round: 'Round', human: 'Player', ai: 'AI companion', unclaimed: 'Unclaimed', generic: 'Generic rules', genericHint: 'Rules are provided by the current game service.' })
 
 function controlLabel(player: Player): string {
   if (player.control?.mode === 'ai') return localCopy.value.ai
@@ -80,7 +80,6 @@ function stateLabel(state?: string) {
         <h2>{{ localCopy.party }}</h2>
         <span class="party-rail__count">{{ players.length }}</span>
       </div>
-      <p class="party-rail__rule">{{ displayRuleName() }}<span v-if="ruleMeta?.rule_version"> · {{ ruleMeta.rule_version }}</span></p>
       <dl class="party-rail__facts">
         <div><dt>{{ localCopy.round }}</dt><dd>{{ detail.round_number || 0 }}</dd></div>
         <div><dt>{{ t('status') }}</dt><dd>{{ stateLabel(detail.state) }}</dd></div>
@@ -114,20 +113,26 @@ function stateLabel(state?: string) {
       <p v-else class="party-rail__empty">{{ t('none') }}</p>
       <div v-if="$slots.membersActions" class="party-rail__members-actions">
         <slot name="membersActions" />
-        <p class="party-rail__invite-hint">{{ t('inviteNewCharacterQrHint') }}</p>
+        <details>
+          <summary>{{ localCopy.inviteHelp }}</summary>
+          <p class="party-rail__invite-hint">{{ t('inviteNewCharacterQrHint') }}</p>
+        </details>
       </div>
     </section>
 
     <slot name="actions" />
 
-    <section class="party-rail__section party-rail__recap">
-      <div class="party-rail__section-head"><h3>{{ localCopy.recap }}</h3></div>
-      <p>{{ ruleMeta?.mechanics || ruleMeta?.dice_system || localCopy.genericHint }}</p>
-      <div v-if="ruleMeta?.attr_hint || ruleMeta?.skill_hint" class="party-rail__hints">
-        <span v-if="ruleMeta.attr_hint">{{ ruleMeta.attr_hint }}</span>
-        <span v-if="ruleMeta.skill_hint">{{ ruleMeta.skill_hint }}</span>
+    <details class="party-rail__section party-rail__recap">
+      <summary>{{ localCopy.recap }}</summary>
+      <div class="party-rail__recap-body">
+        <p class="party-rail__rule">{{ displayRuleName() }}<span v-if="ruleMeta?.rule_version"> · {{ ruleMeta.rule_version }}</span></p>
+        <p>{{ ruleMeta?.mechanics || ruleMeta?.dice_system || localCopy.genericHint }}</p>
+        <div v-if="ruleMeta?.attr_hint || ruleMeta?.skill_hint" class="party-rail__hints">
+          <span v-if="ruleMeta.attr_hint">{{ ruleMeta.attr_hint }}</span>
+          <span v-if="ruleMeta.skill_hint">{{ ruleMeta.skill_hint }}</span>
+        </div>
       </div>
-    </section>
+    </details>
   </aside>
 </template>
 
@@ -146,7 +151,7 @@ function stateLabel(state?: string) {
 .party-rail h2 { font-size: 18px; }
 .party-rail h3 { font-size: 13px; }
 .party-rail__count { display: grid; min-width: 24px; height: 24px; place-items: center; border-radius: 999px; background: var(--df-interactive); color: var(--df-on-accent); font-size: 12px; font-weight: 700; }
-.party-rail__rule { margin: 7px 0 0; color: var(--df-accent-strong); font-size: 12px; line-height: 1.45; }
+.party-rail__recap .party-rail__rule { color: var(--df-accent-strong); }
 .party-rail__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 12px 0 0; }
 .party-rail__facts div { min-width: 0; padding-top: 7px; border-top: 1px solid var(--df-border-soft); }
 .party-rail__facts dt { color: var(--df-text-muted); font-size: 10px; }
@@ -158,7 +163,7 @@ function stateLabel(state?: string) {
 .party-rail__members-actions :deep(.party-rail__access-actions) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .party-rail__members-actions :deep(.party-rail__access-actions button) { min-width: 0; padding-inline: 5px; font-size: 12px; }
 .party-rail__members-actions :deep(button) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 36px; border-color: color-mix(in srgb, var(--df-interactive) 72%, var(--df-border-soft)); background: color-mix(in srgb, var(--df-interactive) 15%, var(--df-surface-1)); color: var(--df-interactive-strong, var(--df-interactive)); }
-.party-rail__invite-hint { margin: 0; color: var(--df-text-muted); font-size: 11px; line-height: 1.45; }
+.party-rail__invite-hint { margin: 0 0 8px; color: var(--df-text-muted); font-size: 11px; line-height: 1.45; }
 .party-rail__member { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px; border: 1px solid color-mix(in srgb, var(--party-color, var(--df-border-soft)) 28%, transparent); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--party-color, var(--df-surface-2)) 7%, var(--df-surface-2)); }
 .party-rail__member .portrait-image { border-color: color-mix(in srgb, var(--party-color, var(--df-border-soft)) 72%, var(--df-border-soft)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--party-color, transparent) 16%, transparent); }
 .party-rail__member.is-self { border-color: color-mix(in srgb, var(--df-interactive) 52%, var(--df-border-soft)); }
@@ -172,6 +177,10 @@ function stateLabel(state?: string) {
 .party-rail__presence { width: 7px; height: 7px; border-radius: 50%; background: var(--party-color, var(--df-success-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--party-color, var(--df-success)) 18%, transparent); }
 .party-rail__member-trailing { display: grid; justify-items: center; align-content: center; gap: 6px; }
 .party-rail__empty, .party-rail__recap p { margin: 0; color: var(--df-text-muted); font-size: 12px; line-height: 1.55; }
-.party-rail__hints { display: grid; gap: 8px; margin-top: 9px; color: var(--df-text-secondary); font-size: 11px; }
+.party-rail__hints { display: grid; gap: 8px; color: var(--df-text-secondary); font-size: 11px; }
+.party-rail__section.party-rail__recap { padding-block: 0; }
+.party-rail summary { min-height: 44px; padding-block: 12px; color: var(--df-text-secondary); font-size: 13px; line-height: 20px; cursor: pointer; list-style-position: inside; }
+.party-rail summary:focus-visible { outline: 2px solid var(--df-interactive); outline-offset: 2px; }
+.party-rail__recap-body { display: grid; gap: 8px; padding-block: 12px; border-top: 1px solid var(--df-border-soft); }
 @media (max-width: 1200px) and (min-width: 801px) { .party-rail { padding-inline: 7px; } .party-rail__section { padding: 9px; } .party-rail__resources { display: none; } }
 </style>

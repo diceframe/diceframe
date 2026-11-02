@@ -240,7 +240,10 @@ onUnmounted(() => {
     <div class="composer-head">
       <div class="composer-title-row">
         <strong>{{ t('composerTitle') }}</strong>
-        <span v-if="hint" class="composer-hint">{{ hint }}</span>
+        <details v-if="hint" class="composer-guidance">
+          <summary>{{ locale === 'zh-CN' ? '行动说明' : 'Action details' }}</summary>
+          <p>{{ hint }}</p>
+        </details>
       </div>
       <div class="composer-tools">
         <button type="button" class="quick-actions-toggle" data-testid="quick-actions-toggle"
@@ -303,9 +306,13 @@ onUnmounted(() => {
 
 <style scoped>
 .composer .composer-head { align-items: center; }
-.composer .composer-title-row { flex: 1; align-items: center; }
+.composer .composer-title-row { flex: 1; flex-wrap: wrap; align-items: center; }
 .composer .composer-title-row > strong { flex-shrink: 0; white-space: nowrap; }
-.composer .composer-hint { white-space: nowrap; text-overflow: ellipsis; }
+.composer-guidance { min-width: 0; color: var(--df-text-muted); font-size: 13px; }
+.composer-guidance[open] { flex-basis: 100%; }
+.composer-guidance summary { min-height: 44px; padding: 12px 4px; line-height: 20px; cursor: pointer; list-style-position: inside; }
+.composer-guidance summary:focus-visible { outline: 2px solid var(--df-interactive); outline-offset: 2px; }
+.composer-guidance p { margin: 0 0 8px; line-height: 1.5; overflow-wrap: anywhere; }
 .composer-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .quick-actions-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 8px 12px; font-size: 13px; white-space: nowrap; color: var(--df-text-muted); border-color: var(--df-border-soft); background: var(--df-control-bg); }
 .composer { container: action-composer / inline-size; }
@@ -340,7 +347,6 @@ onUnmounted(() => {
 .quick-action-label { min-width: 0; overflow-wrap: anywhere; }
 .composer .quick-actions button:focus-visible { outline: 2px solid var(--df-interactive); outline-offset: 2px; }
 @container action-composer (max-width: 480px) {
-  .composer .composer-hint { display: none; }
   .composer .quick-actions:not(.is-generated) { gap: 4px; }
   .composer .quick-actions:not(.is-generated) button { flex: 1 1 0; justify-content: center; gap: 4px; padding-inline: 4px; font-size: 12px; }
   .composer .quick-actions.is-generated button { flex-basis: 100%; border-radius: var(--df-radius-md); }

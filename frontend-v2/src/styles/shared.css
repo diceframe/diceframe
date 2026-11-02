@@ -2279,11 +2279,8 @@ body.light .archive-stats article, body.light .archive-page .char-card {
 }
 
 .new-message {
-  position: absolute;
-  z-index: 6;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  align-self: center;
+  margin-block: 4px;
   min-height: 34px;
   padding: 0 16px;
   border-radius: 999px;
@@ -2444,7 +2441,6 @@ body.light .archive-stats article, body.light .archive-page .char-card {
 }
 
 .new-message:hover {
-  transform: translateX(-50%);
   filter: brightness(1.08);
 }
 

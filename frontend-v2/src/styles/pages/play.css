@@ -429,13 +429,16 @@
 
 .timeline-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(210,167,91,.26);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .timeline {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -545,17 +548,6 @@
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-}
-
-.composer-head .composer-hint {
-  display: inline;
-  margin: 0;
-  overflow: hidden;
-  color: var(--df-text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .quick-actions {
@@ -3233,6 +3225,7 @@ body.light .thinking-message {
 
 .play-page-immersive .message-copy p {
   margin-block: 5px;
+  font-size: 16px;
 }
 
 .play-page-immersive .message-copy .chat-gm {
@@ -3602,10 +3595,6 @@ body.light .thinking-message {
   .play-page-immersive .play-sidebar-drawer, .play-page-immersive .play-control-rail {
     transition: none;
   }
-}
-
-button.new-message:hover {
-  transform: translateX(-50%);
 }
 
 button.mobile-drawer-trigger:hover {

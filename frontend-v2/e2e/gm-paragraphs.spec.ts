@@ -31,6 +31,8 @@ test('long GM paragraphs retain their indent and long player text wraps', async 
   for (const paragraph of geometry) {
     expect(Math.abs(paragraph.firstLineInset - paragraph.expected)).toBeLessThanOrEqual(1)
   }
+  const sizes = await page.locator('.timeline .message-copy p').evaluateAll(elements => elements.map(element => getComputedStyle(element).fontSize))
+  expect(sizes).toEqual(['16px', '16px', '16px'])
   for (const message of await page.locator('.timeline .message').all()) {
     expect(await message.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
   }
