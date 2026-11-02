@@ -216,3 +216,71 @@ elif intent_type == "hide":
 ## 8. 执行报告模板
 
 执行完成后在本文件追加"执行报告"节：变更文件清单、测试矩阵逐项结果、偏差与遗留（DC 代理的最终实现、check.resolved 的 kind 命名、duration 值、hosted choices 断言更新范围）、迁移债确认（Fast Hands capability 待 1D 物品管线引入 utilize/sleight_of_hand 动作；被动察觉代理待敌人技能数据扩展后升级；掩护/视线的 DM 裁决语义属叙事层；48 子职后所有权须 subclass_ref 感知）。
+
+---
+
+## 9. 执行报告（2026-11-02）
+
+状态：已执行。工作区基线为 S-P12 合入后的 `d094940`。
+
+### 9.1 变更文件清单
+
+生产代码（6）：
+
+1. `src/rulesets/dnd2024/features/models.py`：`ACTION_KINDS` 追加 `"hide"`。
+2. `src/rulesets/dnd2024/combat/primitives.py`：`INTENT_TYPES` 追加 `"hide"`（偏差见 §9.3-1）。
+3. `src/rulesets/dnd2024/combat/resolution.py`：新增 `_hide_events`；`_class_capability_events` 的 `action.kind == "hide"` 分发。
+4. `src/rulesets/dnd2024/combat/engine.py`：intent 分发 `hide` 分支；`available_intents` 基础动作列表追加 Hide（偏差见 §9.3-2）。
+5. `src/rulesets/dnd2024/combat/hosted_choices.py`：恒定动作元组追加 `"hide"`。
+6. `src/rulesets/dnd2024/combat/validation.py`：失能拒绝集合与经济校验集合追加 `"hide"`。
+
+目录数据（3）：`content/class_feature_catalogs/srd_class_features.json`（rogue 追加 `cunning_action` / `fast_hands` 与 labels）、`locales/en/...`、`locales/zh-CN/...`（灵巧动作 / 快手）。
+
+测试（2）：新建 `tests/rulesets/test_dnd2024_cunning_action.py`（18 用例）；`tests/rulesets/test_dnd2024_class_features.py` 两处游荡者 owned 特性枚举追加 `cunning_action` / `fast_hands`（level 4/5 断言，白名单允许的最小更新）。
+
+### 9.2 测试矩阵逐项结果
+
+| # | 结果 | 落点 |
+|---|---|---|
+| 1 | ✅ | `test_catalog_declares_cunning_action_and_fast_hands_in_both_locales`（en / zh-CN labels、minimum_level、三 capability cost/actions、fast_hands 无 capabilities） |
+| 2 | ✅ | `test_hide_action_spends_the_action_and_applies_invisible`（action.spent resource=action；check 六件套 total=13+7；invisible + ends_on；economy action 0 / bonus 1） |
+| 3 | ✅ | `test_failed_hide_resolves_the_check_without_a_condition`（target 20、success False、零 condition） |
+| 4 | ✅ | `test_hide_dc_is_ten_plus_the_highest_living_enemy_wisdom`（+0/+3 → 13；全部敌人 hp=0 → 10） |
+| 5 | ✅ | `test_invisible_attacker_has_advantage_and_loses_invisibility`（attack advantage + invisible source；`condition.removed` 先于 `attack.spent`） |
+| 6 | ✅ | `test_invisible_caster_casting_a_spell_ends_hide_invisibility`（spell_cast 触发 `condition.removed`） |
+| 7 | ✅ | `test_enemy_attacks_the_invisible_hider_with_disadvantage`（target 侧 disadvantage、natural=8；攻击者条件不受影响） |
+| 8 | ✅ | `test_cunning_dash_spends_the_bonus_action_and_grants_movement`（bonus_action.spent + movement.granted=speed；action 不减） |
+| 9 | ✅ | `test_cunning_hide_spends_the_bonus_action_and_leaves_the_action_free` |
+| 10 | ✅ | `test_a_second_bonus_action_capability_is_rejected`（error 含 "bonus action has already been spent"） |
+| 11 | ✅ | `test_cunning_action_appears_at_level_two_only` |
+| 12 | ✅ | `test_fast_hands_is_owned_at_three_but_declares_no_capability`（3 级 thief 链：owned 但零 capability） |
+| 13 | ✅ | `test_an_incapacitated_actor_cannot_hide`（paralyzed → error 含 "incapacitated"） |
+| 14 | ✅ | `test_hiding_again_refreshes_the_single_invisible_condition`（两次 applied、单键、ends_on 保留） |
+| 15 | ✅ | `test_a_fighter_never_owns_cunning_capabilities`（18 级 fighter 无 `cunning_*`） |
+| 16 | ✅ | `test_hosted_choices_include_a_valid_hide_option`（AI 托管 GM：available_intents + hosted choices 均含 hide 且 validate 通过） |
+| 17 | ✅ | `test_hide_is_rejected_once_the_action_is_spent`（先攻击 → error 含 "action has already been spent"） |
+| D2 | ✅ | `test_untrained_armor_rolls_hide_with_disadvantage`（S-P12 迁移债 D2：两骰取低、`stealth_disadvantage` source、自然值 4、total 11） |
+
+验收命令结果：
+
+- `pytest tests/rulesets/test_dnd2024_cunning_action.py -q` → **18 passed**。
+- 六文件定向回归（class_features / combat / invisibility / monk_resources / rage / sneak_attack）→ **179 passed**。
+- `pytest tests/rulesets -q` 全量 → **976 passed**（S-P12 基线 958 + 18）。
+
+### 9.3 偏差与遗留
+
+1. **intent kind 白名单位置**：§3.7-1 写的是 `validation.py`，实际 `INTENT_TYPES` 定义在 `combat/primitives.py`，本次改在 primitives（validation 通过导入消费）。属任务书文件定位偏差，非白名单外新增语义。
+2. **`available_intents` 基础动作**：任务书未列 `combat/engine.py` 的玩家可见动作列表，但 hide 需作为真实可选动作出现，已追加 `{"type": "hide", "label": "Hide"}`，与 dash/dodge/disengage 同款。
+3. `check.resolved` 采用 `kind="hide"`、`ability="stealth"`，六件套与 `medicine` 先例一致；失败分支仅产生检定事件。
+4. 隐形 condition：`duration="combat"`（描述性，仅靠 `ends_on: ["attack_roll", "spell_cast"]` 终止）、`source_actor_id` 为自己、无 `concentration_owner`。
+5. D2 接线：`_hide_events` 读取 actor `armor_training.stealth_disadvantage`，经既有 `mode_from_sources` 归一，事件携带 `advantage_mode` / `advantage_sources`；无新优劣势机制。
+6. hosted choices 断言：既有 `test_ai_combat_choices.py` 只断言全部 validate 通过，无需枚举更新；`test_dnd2024_combat.py` 无恒定列表断言，未改动。
+7. 未新增敌人隐匿数据与敌人躲藏 AI；hide 对敌人保持 `skill_values` 为空、无加成。
+
+### 9.4 迁移债确认
+
+- **Fast Hands capability**：本切片只做所有权声明 + 标签；`utilize` / `sleight_of_hand` 两个 ACTION_KIND 与消费对象待 1D 物品管线引入。
+- **被动察觉代理**：`DC = 10 + max(存活敌人 wis 豁免调整值)` 是声明式数据代理；待敌人技能（察觉）数据扩展后升级。
+- **掩护 / 视线**：DM 裁决语义属叙事层，战斗引擎以检定为唯一入口。
+- **48 子职所有权**：`features_for` 仍按 (class_id, level) 并入子职特性，未读 `subclass_ref`；子职分区落地后须 subclass_ref 感知。
+- **S-P12 D2**：`armor_training.stealth_disadvantage` 的 hide 双骰消费已在本切片销账（测试 D2）。
