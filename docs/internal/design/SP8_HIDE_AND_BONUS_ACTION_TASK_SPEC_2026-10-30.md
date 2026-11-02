@@ -221,7 +221,7 @@ elif intent_type == "hide":
 
 ## 9. 执行报告（2026-11-02）
 
-状态：已执行。工作区基线为 S-P12 合入后的 `d094940`。
+状态：已执行并审核通过（2026-11-02，审核记录见 §10）。工作区基线为 S-P12 合入后的 `d094940`。
 
 ### 9.1 变更文件清单
 
@@ -284,3 +284,12 @@ elif intent_type == "hide":
 - **掩护 / 视线**：DM 裁决语义属叙事层，战斗引擎以检定为唯一入口。
 - **48 子职所有权**：`features_for` 仍按 (class_id, level) 并入子职特性，未读 `subclass_ref`；子职分区落地后须 subclass_ref 感知。
 - **S-P12 D2**：`armor_training.stealth_disadvantage` 的 hide 双骰消费已在本切片销账（测试 D2）。
+
+## 10. 审核记录（2026-11-02）
+
+- 验收复跑核实：审核端 Linux / Python 3.11 复跑 §5 两条命令——`test_dnd2024_cunning_action.py` 18 passed（矩阵 17/17 + D2）；六文件定向回归（class_features / combat / invisibility / monk_resources / rage / sneak_attack）179 passed；与 §9.2 一致。`tests/rulesets` 全量 976 passed（当前 HEAD `0867056`，= S-P12 基线 958 + 本切片 18）。§5 注「character_builder 上游既有失败不计」已过时——该夹具缺陷在 S-P12 轮修复后全量全绿，无豁免项。
+- 白名单合规：`git show a7201a0` 11 文件中 9 个在 §3 白名单内；§9.3 两项偏差核实成立——① `primitives.py` `INTENT_TYPES` 追加 hide（任务书 §3.7-1 误标 validation.py，实际定义在 primitives、validation 经导入消费，文件定位偏差非语义扩张）；② `engine.py` `available_intents` 追加 Hide 选项（任务书未列该列表，但 hide 须作为真实可选动作可见，与 dash/dodge/disengage 同款）。`test_dnd2024_class_features.py` 两处游荡者 owned 枚举追加恰为 §3.8 授权的最小更新（level 4/5 断言，无关断言零触碰）。
+- 语义复核（对照 §1.1 十条逐条）：hide 单一结算 `_hide_events`、成本差异只在路由层（动作路径经 engine 分发默认 spend_action、附赠路径 capability cost 已扣 action.spent 后 spend_action=False）；隐匿加值直读 `actor["skill_values"]` 不重算敏捷、不臆造熟练；DC = 10 + max(存活敌人 wis 豁免调整值)、无存活敌人恒 10（声明式数据代理，引擎内建不可配置）；成功复用 P1 `invisible`（`condition.applied` + `ends_on: attack_roll/spell_cast` + `duration: combat` + `source_actor_id` 自己），零新状态；失败仅检定事件无惩罚；无移动消耗、无掩护/视线系统；incapacitated 拒绝集合与经济校验集合均含 hide；cunning 三能力各独立 capability 走既有 bonus_action 池 + `dnd2024.action.spent` 通用落账；只路由 dash/disengage/hide（无 dodge）；重复躲藏 reducer 覆盖刷新单 condition（#14 锁定）。
+- 禁止事项核对（§6 八条）：src 零 `cunning_action` / `fast_hands` 字符串（grep 零命中，路由全由目录 cost + actions.kind 驱动）；fast_hands 目录声明无 capabilities、`parameters: {}`（§6.3）；无敌人隐匿数据与躲藏 AI；`_basic_action_events` 零改动（dodge/disengage/dash 语义原样）；无第二个隐形状态、无新优劣势机制（hide 双骰经既有 `mode_from_sources`）；DC 不可配置；未实现其它游荡者特性。
+- D2 销账交叉核对（对 S-P12 §8 债表 D2）：接线读 `actor["armor_training"]["stealth_disadvantage"]`（S-P12 交付的派生标记），双骰取低 + `advantage_mode` / `advantage_sources` 事件字段（runtime 白名单既有），`test_untrained_armor_rolls_hide_with_disadvantage` 锁定（[18,4] 取低 4、total 11）。D2 关闭。
+- 结论：S-P8 审核通过。
