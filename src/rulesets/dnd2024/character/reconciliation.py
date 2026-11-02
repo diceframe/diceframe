@@ -286,6 +286,45 @@ class Dnd2024CharacterStateReconciler:
     # reconciliation
     # ------------------------------------------------------------------
 
+    def _armor_rules(
+        self,
+        canonical: dict[str, Any],
+        item_refs: Sequence[str],
+        warnings: list[str],
+    ) -> tuple[dict[str, Any], int] | None:
+        """Derive both armor consequences from one set of canonical facts.
+
+        Shared by the live-equipment path and the canonical-only path so the AC
+        formula and the training formula can never drift apart.  Missing rule
+        inputs return ``None`` (fail closed): an absent proficiency list must
+        never be read as "trained in everything".
+        """
+
+        abilities = canonical.get("abilities")
+        if not isinstance(abilities, dict) or not {"str", "dex"}.issubset(abilities):
+            warnings.append(
+                "canonical abilities are unavailable; armor rules not re-derived"
+            )
+            return None
+        armor_category_refs = (
+            (canonical.get("proficiencies") or {}).get("armor_category_refs")
+        )
+        if not isinstance(armor_category_refs, list):
+            warnings.append(
+                "canonical armor proficiencies are unavailable; armor rules not re-derived"
+            )
+            return None
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        armor_training = derive_armor_training_state(
+            abilities, item_refs, armor_category_refs, self.bundle,
+        )
+        armor_class = derive_armor_class(
+            abilities, item_refs, self.bundle,
+            armor_category_refs=armor_category_refs, warnings=warnings,
+            unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
+        )
+        return armor_training, armor_class
+
     def reconcile(
         self, sheet: dict[str, Any], changed_domains: frozenset[str] = frozenset(),
     ) -> dict[str, Any] | None:
@@ -314,22 +353,13 @@ class Dnd2024CharacterStateReconciler:
         self._annotate_live_rows(inventory)
         item_refs = self._project_equipped_refs(equipment, warnings)
 
-        abilities = canonical.get("abilities")
-        if not isinstance(abilities, dict) or "dex" not in abilities:
-            warnings.append("canonical abilities are unavailable; armor class not re-derived")
+        rules = self._armor_rules(canonical, item_refs, warnings)
+        if rules is None:
+            for warning in warnings:
+                logger.warning("D&D2024 装备投影告警: %s", warning)
             return None
+        armor_training, armor_class = rules
         features = Dnd2024ClassFeatureResolver(self.bundle)
-        canonical_armor_category_refs = list(
-            (canonical.get("proficiencies") or {}).get("armor_category_refs") or []
-        )
-        armor_training = derive_armor_training_state(
-            abilities, item_refs, canonical_armor_category_refs, self.bundle,
-        )
-        armor_class = derive_armor_class(
-            abilities, item_refs, self.bundle,
-            armor_category_refs=canonical_armor_category_refs, warnings=warnings,
-            unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
-        )
 
         canonical_equipment = canonical.setdefault("equipment", {})
         derived = canonical.setdefault("derived", {})
@@ -383,5 +413,44 @@ class Dnd2024CharacterStateReconciler:
             "item_refs": item_refs,
             "armor_class": armor_class,
             "revision": revision,
+            "warnings": warnings,
+        }
+
+    def reconcile_canonical(
+        self, canonical: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Re-derive a record that has no live equipment layer.
+
+        Companions live entirely in ``ruleset_state.party.companions``;
+        ``ruleset_character.equipment.item_refs`` is the only equipment fact
+        available for them.  Using it is deterministic, while an absent live
+        list would otherwise project "wearing nothing" and erase the refs.
+
+        Only the canonical projection is written -- no sheet mirror, revision
+        or operation log exists on that record.  Missing abilities or armor
+        proficiencies leave it untouched (fail closed) instead of assuming
+        training.
+        """
+
+        item_refs = list((canonical.get("equipment") or {}).get("item_refs") or [])
+        warnings: list[str] = []
+        rules = self._armor_rules(canonical, item_refs, warnings)
+        for warning in warnings:
+            logger.warning("D&D2024 装备投影告警: %s", warning)
+        if rules is None:
+            return None
+        armor_training, armor_class = rules
+        derived = canonical.setdefault("derived", {})
+        if (
+            derived.get("armor_class") == armor_class
+            and derived.get("armor_training") == armor_training
+        ):
+            return None
+        derived["armor_class"] = armor_class
+        derived["armor_training"] = armor_training
+        return {
+            "item_refs": item_refs,
+            "armor_class": armor_class,
+            "armor_training": armor_training,
             "warnings": warnings,
         }

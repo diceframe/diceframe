@@ -9,6 +9,7 @@ instead of silently treating untrained armor as trained.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 
@@ -25,6 +26,8 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+
+from dnd2024_monk_common import SequenceRng
 
 
 LOCALE = "en"
@@ -353,3 +356,343 @@ def test_companion_projection_inherits_armor_training(runtime) -> None:
     assert view["speed"] == 20
     assert view["armor_training"]["untrained_armor_worn"] is True
     assert view["armor_training"]["speed_penalty"] == 10
+
+
+# --------------------------------------------------------------------------
+# 18. legacy saves repaired at the combat.start boundary (R5)
+#
+# A save written before the Armor Training slice has no ``derived.armor_training``
+# and keeps the old unconditional shield bonus.  The repair happens on the
+# production ``resolve_intent`` -> ``apply_event_batch`` chain, before the first
+# combat starts, so the party never depends on resting, levelling or re-equipping
+# to get the current rules.
+# --------------------------------------------------------------------------
+
+_LEGACY_ITEM_REFS = {
+    "Chain Mail": "item:chain_mail",
+    "Chain Shirt": "item:chain_shirt",
+    "Shield": "item:shield",
+}
+
+
+def _legacy_sheet(
+    runtime: Dnd2024Runtime, preset_id: str, names: list[str], old_armor_class: int,
+) -> dict:
+    """A pre-Armor-Training save: no training state and the old shield bonus."""
+
+    sheet = _sheet(runtime, preset_id)
+    canonical = sheet["ruleset_character"]
+    canonical["equipment"]["item_refs"] = [
+        _LEGACY_ITEM_REFS[name] for name in names
+    ]
+    canonical["derived"]["armor_class"] = old_armor_class
+    canonical["derived"].pop("armor_training", None)
+    sheet["equipment"] = [
+        {"name": name, "qty": 1, "category": "equipment"} for name in names
+    ]
+    sheet["armor_class"] = old_armor_class
+    return sheet
+
+
+def _loaded_instance(sheet: dict, *, companions: tuple[dict, ...] = ()) -> GameInstance:
+    """Persist and reload the aggregate, the real load path for an old save."""
+
+    instance = GameInstance(
+        game_key=("test", "dnd2024-legacy-armor", "bot"),
+        rule_id="dnd2024_srd", gm_uid="gm", language=LOCALE,
+    )
+    instance.players["gm"] = {
+        "character_name": "Legacy Hero", "character_sheet": deepcopy(sheet),
+    }
+    assert instance.bind_ruleset_runtime(sheet["ruleset_character"]["rule_binding"])
+    party = ruleset_runtime.state(instance).setdefault("party", {"companions": {}})
+    party.setdefault("companions", {})
+    for companion in companions:
+        party["companions"][companion["id"]] = deepcopy(companion)
+    return GameInstance.from_dict(json.loads(json.dumps(instance.to_dict())))
+
+
+def _goblin(enemy_id: str = "goblin-1") -> dict:
+    return {
+        "id": enemy_id, "name": enemy_id, "hp": 40, "armor_class": 12, "speed": 30,
+        "position": 5, "initiative_modifier": 2, "creature_type": "humanoid",
+        "abilities": {"str": 8, "dex": 14, "con": 10, "int": 10, "wis": 8, "cha": 8},
+        "saving_throws": {"dex": 2, "wis": -1, "con": 0},
+        "attacks": [{
+            "id": "scimitar", "name": "Scimitar", "attack_bonus": 4,
+            "damage": "1d6+2", "damage_type": "slashing", "range": 5,
+        }],
+    }
+
+
+def _start_through_runtime(
+    runtime: Dnd2024Runtime, instance: GameInstance, enemy_id: str = "goblin-1",
+) -> dict:
+    """Start combat the way the web layer does: runtime, not engine directly."""
+
+    state = ruleset_runtime.state(instance)
+    version = int(state.get("version", 0) or 0) if isinstance(state, dict) else 0
+    resolved = runtime.resolve_intent(instance, {
+        "intent_id": f"legacy-start-{version}", "type": "combat.start",
+        "expected_version": version, "submitted_by": "gm",
+        "enemies": [_goblin(enemy_id)],
+    }, SequenceRng([20, 1]))
+    assert resolved["ok"] is True, resolved
+    applied = runtime.apply_event_batch(instance, resolved["event_batch"])
+    assert applied["applied"] is True, applied
+    return ruleset_runtime.state(instance)["combat"]
+
+
+def _check_event(result: dict) -> dict:
+    return next(
+        event for event in result["event_batch"]["events"]
+        if event["type"] == "check.resolved"
+    )
+
+
+def _attack(runtime: Dnd2024Runtime, instance: GameInstance, rolls: list[int]) -> dict:
+    version = int(ruleset_runtime.state(instance)["version"])
+    result = runtime.resolve_intent(instance, {
+        "intent_id": "legacy-attack", "type": "attack", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "target_id": "enemy:goblin-1", "weapon_ref": "unarmed_strike",
+    }, SequenceRng(list(rolls)))
+    assert result["ok"] is True, result
+    return result
+
+
+def _cast(
+    runtime: Dnd2024Runtime, instance: GameInstance, spell_ref: str,
+    *, slot_level: int = 1, target_id: str = "enemy:goblin-1",
+) -> dict:
+    version = int(ruleset_runtime.state(instance)["version"])
+    return runtime.resolve_intent(instance, {
+        "intent_id": "legacy-cast", "type": "cast_spell",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": target_id,
+        "spell_ref": spell_ref, "slot_level": slot_level,
+    }, SequenceRng([1]))
+
+
+def _repeat_save(runtime: Dnd2024Runtime, instance: GameInstance) -> dict:
+    """End the current turn and inspect the actor's own repeat saving throw."""
+
+    sheet = instance.get_character_sheet("gm")
+    sheet["ruleset_character"].setdefault("conditions", {})["legacy_save"] = {
+        "save_repeat": {"ability": "dex", "dc": 14},
+        "source_actor_id": "companion:mira",
+    }
+    instance.set_character_sheet("gm", sheet)
+    version = int(ruleset_runtime.state(instance)["version"])
+    result = runtime.resolve_intent(instance, {
+        "intent_id": "legacy-end", "type": "end_turn", "expected_version": version,
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng([7, 5]))
+    assert result["ok"] is True, result
+    return next(
+        event for event in result["event_batch"]["events"]
+        if event["type"] == "check.resolved" and event["kind"] == "saving_throw"
+    )
+
+
+def test_legacy_untrained_armor_is_repaired_through_the_production_chain(runtime) -> None:
+    legacy = _legacy_sheet(runtime, "curious_arcanist", ["Chain Mail", "Shield"], 18)
+    assert "armor_training" not in legacy["ruleset_character"]["derived"]
+
+    instance = _loaded_instance(legacy)
+    combat = _start_through_runtime(runtime, instance)
+    sheet = instance.get_character_sheet("gm")
+    derived = sheet["ruleset_character"]["derived"]
+
+    # Old AC 18 (chain mail 16 + unconditional shield +2) becomes 16: the shield
+    # bonus is lost because the wizard has no shield training, while untrained
+    # armor still keeps its own AC.
+    assert derived["armor_class"] == 16
+    assert derived["armor_training"] == {
+        "untrained_armor_worn": True,
+        "speed_penalty": 10,
+        "stealth_disadvantage": True,
+    }
+    assert sheet["ruleset_character"]["equipment"]["item_refs"] == [
+        "item:chain_mail", "item:shield",
+    ]
+
+    view = Dnd2024CombatEngine(_bundle(runtime))._actor_view(
+        instance, combat, "player:gm",
+    )
+    assert view["armor_class"] == 16
+    assert view["speed"] == 20
+    assert view["armor_training"] == derived["armor_training"]
+
+    blocked = _cast(runtime, instance, "spell:magic_missile")
+    assert blocked == {
+        "ok": False, "code": "INVALID_INTENT",
+        "error": "armor you are not trained in blocks spellcasting",
+    }
+
+    attack = _attack(runtime, instance, [15, 3])
+    check = _check_event(attack)
+    assert check["advantage_mode"] == "disadvantage"
+    assert [source["code"] for source in check["advantage_sources"]] == ["untrained_armor"]
+    assert check["rolls"] == [15, 3]
+    runtime.apply_event_batch(instance, attack["event_batch"])
+
+    save = _repeat_save(runtime, instance)
+    assert save["advantage_mode"] == "disadvantage"
+    assert [source["code"] for source in save["advantage_sources"]] == ["untrained_armor"]
+    assert save["rolls"] == [7, 5]
+
+
+def test_legacy_trained_armor_keeps_its_armor_class_and_gates(runtime) -> None:
+    fighter = _legacy_sheet(runtime, "stalwart_guardian", ["Chain Mail", "Shield"], 18)
+    instance = _loaded_instance(fighter)
+    combat = _start_through_runtime(runtime, instance)
+    derived = instance.get_character_sheet("gm")["ruleset_character"]["derived"]
+
+    assert derived["armor_class"] == 18
+    assert derived["armor_training"] == {
+        "untrained_armor_worn": False,
+        "speed_penalty": 0,
+        "stealth_disadvantage": True,
+    }
+    view = Dnd2024CombatEngine(_bundle(runtime))._actor_view(
+        instance, combat, "player:gm",
+    )
+    assert view["armor_class"] == 18
+    assert view["speed"] == 30
+
+    check = _check_event(_attack(runtime, instance, [15]))
+    assert check["advantage_mode"] == ""
+    assert check["rolls"] == [15]
+
+    # A trained caster keeps casting: chain shirt (medium) + shield, old AC 14.
+    cleric = _legacy_sheet(runtime, "kindly_bulwark", ["Chain Shirt", "Shield"], 14)
+    caster = _loaded_instance(cleric)
+    _start_through_runtime(runtime, caster)
+    caster_derived = caster.get_character_sheet("gm")["ruleset_character"]["derived"]
+    assert caster_derived["armor_class"] == 14
+    assert caster_derived["armor_training"]["untrained_armor_worn"] is False
+
+    assert _cast(
+        runtime, caster, "spell:cure_wounds", target_id="player:gm",
+    )["ok"] is True
+
+
+def test_repeated_load_and_combat_start_do_not_append_state(runtime) -> None:
+    legacy = _legacy_sheet(runtime, "curious_arcanist", ["Chain Mail", "Shield"], 18)
+    instance = _loaded_instance(legacy)
+    _start_through_runtime(runtime, instance)
+    repaired = instance.get_character_sheet("gm")
+    revision = repaired["ruleset_revision"]
+    log = repaired["ruleset_operation_log"]
+    assert revision == 1
+    assert [entry["kind"] for entry in log] == ["character_reconcile"]
+
+    # Close the encounter, persist and reload: the repaired sheet is stable.
+    version = int(ruleset_runtime.state(instance)["version"])
+    ended = runtime.resolve_intent(instance, {
+        "intent_id": "legacy-combat-end", "type": "combat.end",
+        "expected_version": version, "submitted_by": "gm",
+    }, SequenceRng([]))
+    assert ended["ok"] is True, ended
+    runtime.apply_event_batch(instance, ended["event_batch"])
+
+    reloaded = GameInstance.from_dict(json.loads(json.dumps(instance.to_dict())))
+    before = reloaded.get_character_sheet("gm")
+    assert before["ruleset_revision"] == revision
+    assert before["ruleset_operation_log"] == log
+
+    _start_through_runtime(runtime, reloaded, enemy_id="goblin-2")
+    after = reloaded.get_character_sheet("gm")
+    assert after["ruleset_revision"] == revision
+    assert after["ruleset_operation_log"] == log
+
+    # Rest/advancement and live equipment use these two boundaries; neither may
+    # rewrite the already-correct record.
+    bundle = _bundle(runtime)
+    assert runtime.reconcile_character_state(
+        reloaded, "gm", frozenset({"equipment"}),
+    ) is None
+    projected = runtime._live_projection(
+        after, after["ruleset_character"], bundle,
+    )
+    assert projected["ruleset_revision"] == revision
+    assert projected["ruleset_operation_log"] == log
+    assert (
+        projected["ruleset_character"]["derived"]["armor_training"]
+        == after["ruleset_character"]["derived"]["armor_training"]
+    )
+
+
+def test_legacy_repair_keeps_the_content_version(runtime) -> None:
+    bundle = _bundle(runtime)
+    # The repair changes derived state only; no content shape moved, so the
+    # manifest must not be bumped merely to trigger a migration.
+    assert bundle.manifest.content_version == "srd-5.2.1+r5"
+
+    legacy = _legacy_sheet(runtime, "curious_arcanist", ["Chain Mail", "Shield"], 18)
+    binding = legacy["ruleset_character"]["rule_binding"]
+    assert binding["content_version"] == bundle.manifest.content_version
+
+    instance = _loaded_instance(legacy)
+    _start_through_runtime(runtime, instance)
+    repaired = instance.get_character_sheet("gm")["ruleset_character"]["rule_binding"]
+    assert repaired["content_version"] == bundle.manifest.content_version
+
+
+def _companion(
+    companion_id: str, *, abilities: bool = True, armor_proficiencies: bool = True,
+) -> dict:
+    canonical: dict = {
+        "resources": {"hp": 20, "max_hp": 20},
+        "conditions": {},
+        "derived": {
+            "armor_class": 18, "speed": 30, "initiative": 1,
+            "proficiency_bonus": 2, "saving_throws": {"str": -1, "dex": 1, "con": 1},
+        },
+        "equipment": {"item_refs": ["item:chain_mail", "item:shield"]},
+        "build": {"class_levels": [{"class_ref": "class:wizard", "level": 1}]},
+    }
+    if abilities:
+        canonical["abilities"] = _abilities(8, 12)
+    if armor_proficiencies:
+        canonical["proficiencies"] = {
+            "skill_values": {}, "weapon_category_refs": [], "armor_category_refs": [],
+        }
+    return {
+        "id": companion_id, "name": companion_id.title(),
+        "controller": "ai", "active": True, "ruleset_character": canonical,
+    }
+
+
+def test_legacy_companions_are_reconciled_or_left_untouched(runtime) -> None:
+    player = _legacy_sheet(runtime, "curious_arcanist", ["Chain Mail", "Shield"], 18)
+    instance = _loaded_instance(
+        player,
+        companions=(
+            _companion("mira"),
+            _companion("broken_abilities", abilities=False),
+            _companion("broken_proficiencies", armor_proficiencies=False),
+        ),
+    )
+    combat = _start_through_runtime(runtime, instance)
+    companions = ruleset_runtime.state(instance)["party"]["companions"]
+
+    mira = companions["mira"]["ruleset_character"]
+    assert mira["derived"]["armor_class"] == 16
+    assert mira["derived"]["armor_training"] == {
+        "untrained_armor_worn": True,
+        "speed_penalty": 10,
+        "stealth_disadvantage": True,
+    }
+    view = Dnd2024CombatEngine(_bundle(runtime))._actor_view(
+        instance, combat, "companion:mira",
+    )
+    assert view["speed"] == 20
+
+    # Missing canonical facts are never guessed into "trained" or "wearing
+    # nothing": the record is left exactly as the old save wrote it.
+    for companion_id in ("broken_abilities", "broken_proficiencies"):
+        broken = companions[companion_id]["ruleset_character"]
+        assert broken["derived"]["armor_class"] == 18
+        assert "armor_training" not in broken["derived"]

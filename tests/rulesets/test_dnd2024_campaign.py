@@ -470,6 +470,79 @@ def test_public_combat_feed_keeps_death_save_hp_and_combat_end_reason() -> None:
     assert events[1]["reason"] == "party_incapacitated"
 
 
+def test_legacy_bless_bonus_is_projected_once_as_check_bonus() -> None:
+    runtime, instance = _instance()
+    ruleset_runtime.replace_event_ledger(instance, [{
+        "batch_id": "start", "intent_type": "combat.start", "result_version": 1,
+        "events": [{"type": "dnd2024.combat.started", "round": 1}],
+    }, {
+        # The exact pre-1C shape: the Bless d4 is an integer ``bless_bonus``
+        # already folded into ``total``, with no roll trace.
+        "batch_id": "legacy-attack", "intent_type": "attack", "result_version": 2,
+        "events": [{
+            "type": "check.resolved", "kind": "attack", "actor_id": "enemy:goblin",
+            "target_id": "player:gm", "rolls": [15], "natural": 15, "modifier": 5,
+            "bless_bonus": 4, "total": 24, "target": 16, "success": True,
+        }],
+    }])
+    ruleset_runtime.state(instance)["combat"] = {
+        "enemies": {"goblin": {"name": "Goblin"}},
+    }
+
+    events = runtime.gameplay_view(instance, "gm", True)["recent_combat_events"]
+    event = next(item for item in events if item["type"] == "check.resolved")
+
+    assert event["check_bonus"] == 4
+    assert event["check_bonus_rolls"] == [
+        {"condition": "blessed", "die": 4, "roll": 4},
+    ]
+    assert "bless_bonus" not in event
+    # The stored total already contained the d4: adding it again would be 28.
+    assert event["total"] == event["natural"] + event["modifier"] + event["check_bonus"]
+    assert event["total"] == 24
+
+    # Only the projection is normalized; the persisted ledger keeps its shape.
+    stored = ruleset_runtime.event_ledger(instance)[1]["events"][0]
+    assert stored["bless_bonus"] == 4
+    assert "check_bonus" not in stored
+
+
+def test_current_check_bonus_and_zero_legacy_events_are_unchanged() -> None:
+    runtime, instance = _instance()
+    ruleset_runtime.replace_event_ledger(instance, [{
+        "batch_id": "start", "intent_type": "combat.start", "result_version": 1,
+        "events": [{"type": "dnd2024.combat.started", "round": 1}],
+    }, {
+        "batch_id": "checks", "intent_type": "attack", "result_version": 2,
+        "events": [{
+            "type": "check.resolved", "kind": "saving_throw", "actor_id": "enemy:goblin",
+            "target_id": "player:gm", "rolls": [10], "natural": 10, "modifier": 2,
+            "check_bonus": 3,
+            "check_bonus_rolls": [{"condition": "blessed", "die": 4, "roll": 3}],
+            "total": 15, "target": 14, "success": True,
+        }, {
+            "type": "check.resolved", "kind": "attack", "actor_id": "enemy:goblin",
+            "target_id": "player:gm", "rolls": [10], "natural": 10, "modifier": 2,
+            "bless_bonus": 0, "total": 12, "target": 13, "success": False,
+        }],
+    }])
+    ruleset_runtime.state(instance)["combat"] = {
+        "enemies": {"goblin": {"name": "Goblin"}},
+    }
+
+    events = runtime.gameplay_view(instance, "gm", True)["recent_combat_events"]
+    resolved = [item for item in events if item["type"] == "check.resolved"]
+
+    assert resolved[0]["check_bonus"] == 3
+    assert resolved[0]["check_bonus_rolls"] == [
+        {"condition": "blessed", "die": 4, "roll": 3},
+    ]
+    # A zero legacy bonus must not invent an empty bonus field or roll trace.
+    assert "check_bonus" not in resolved[1]
+    assert "check_bonus_rolls" not in resolved[1]
+    assert resolved[1]["total"] == 12
+
+
 def test_auto_mode_can_start_a_valid_free_play_catalog_encounter() -> None:
     runtime, instance = _instance()
     game_config.replace_solo_mode(instance, True)

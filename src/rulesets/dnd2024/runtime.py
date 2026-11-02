@@ -75,6 +75,33 @@ from src.rulesets.dnd2024 import adventure_validation  # noqa: F401  (MOD-01: æ³
 logger = logging.getLogger(__name__)
 
 
+def _normalize_legacy_check_bonus(event: dict[str, Any]) -> dict[str, Any]:
+    """Map pre-1C ``bless_bonus`` evidence onto the current public contract.
+
+    Baseline check events stored the single Bless d4 as an integer
+    ``bless_bonus`` and already folded it into ``total``.  Current consumers
+    read ``check_bonus`` / ``check_bonus_rolls``.  Normalizing here -- in the
+    presentation projection, not the persisted ledger -- keeps old saves
+    readable without rewriting history.  A zero or absent bonus is returned
+    unchanged, and an event that already carries the new fields wins.
+    """
+
+    if "check_bonus" in event or "bless_bonus" not in event:
+        return event
+    try:
+        bonus = int(event.get("bless_bonus") or 0)
+    except (TypeError, ValueError):
+        return event
+    if bonus <= 0:
+        return event
+    normalized = dict(event)
+    normalized["check_bonus"] = bonus
+    normalized["check_bonus_rolls"] = [
+        {"condition": "blessed", "die": 4, "roll": bonus},
+    ]
+    return normalized
+
+
 class Dnd2024Runtime:
     def scene_objective_context(self, instance: Any, *, viewer_is_gm: bool) -> dict[str, Any]:
         from src.engine.staged_transaction import fork_domain_state
@@ -993,6 +1020,12 @@ class Dnd2024Runtime:
         module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         locale = str(getattr(instance, "language", "") or "")
         bundle = self.load_bundle(locale)
+        if str(batch.get("intent_type") or "") == "combat.start":
+            # Saves written before the Armor Training slice carry no
+            # ``derived.armor_training`` and keep the old unconditional shield
+            # bonus.  Combat is where those facts first gate attacks, spells
+            # and Speed, so repair them once at that boundary.
+            self._reconcile_party_before_combat(instance, bundle)
         before_characters = {
             uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character"))
             for uid in getattr(instance, "players", {})
@@ -1161,7 +1194,9 @@ class Dnd2024Runtime:
                 if not isinstance(raw, dict) or str(raw.get("type") or "") not in meaningful:
                     continue
                 event = {
-                    key: deepcopy(value) for key, value in raw.items() if key in allowed_fields
+                    key: deepcopy(value)
+                    for key, value in _normalize_legacy_check_bonus(raw).items()
+                    if key in allowed_fields
                 }
                 if event.get("round") is not None:
                     current_round = int(event.get("round", 0) or 0)
@@ -1480,6 +1515,39 @@ class Dnd2024Runtime:
             merged, frozenset({"equipment", "inventory"}),
         )
         return merged
+
+    def _reconcile_party_before_combat(self, instance: Any, bundle: Any) -> None:
+        """Repair pre-Armor-Training party records before combat becomes active.
+
+        Idempotent: a current record derives the same values and is not
+        rewritten, so repeated load/combat.start never adds revisions or log
+        entries twice.  A player without a live equipment list is derived from
+        canonical refs instead: projecting an empty list would erase them.
+        """
+
+        reconciler = self._reconciler(bundle)
+        for uid in sorted(getattr(instance, "players", {}) or {}):
+            sheet = instance.get_character_sheet(uid)
+            if not isinstance(sheet, dict) or not isinstance(sheet.get("ruleset_character"), dict):
+                continue
+            if isinstance(sheet.get("equipment"), list):
+                changed = reconciler.reconcile(sheet, frozenset({"equipment"}))
+            else:
+                changed = reconciler.reconcile_canonical(sheet["ruleset_character"])
+            if changed is not None:
+                instance.set_character_sheet(uid, sheet)
+
+        state = ruleset_runtime.state(instance)
+        party = state.get("party") if isinstance(state, dict) else None
+        companions = party.get("companions") if isinstance(party, dict) else None
+        if not isinstance(companions, dict):
+            return
+        for companion in companions.values():
+            if not isinstance(companion, dict) or not companion.get("active", True):
+                continue
+            canonical = companion.get("ruleset_character")
+            if isinstance(canonical, dict):
+                reconciler.reconcile_canonical(canonical)
 
     def reconcile_character_state(
         self,
