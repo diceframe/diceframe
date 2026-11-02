@@ -598,6 +598,8 @@ class CombatResolutionMixin:
             target = self._actor_view(instance, combat, target_id)
             mode = str(effect["mode"])
             succeeded = False
+            # 光环免疫拦截要把来源写回本次豁免事件；非 saving_throw 路径为 None。
+            save_check_index: int | None = None
             if mode == "spell_attack":
                 from .check_modes import attack_mode
 
@@ -687,6 +689,7 @@ class CombatResolutionMixin:
                 )["auto_fail_saves"]
                 if auto_fail:
                     # 麻痹/昏迷等自动失败：不消耗任何骰，也不掷加值骰。
+                    save_check_index = len(events)
                     events.append({
                         "type": "check.resolved", "kind": "saving_throw",
                         "actor_id": target_id, "source_actor_id": actor_id,
@@ -723,6 +726,7 @@ class CombatResolutionMixin:
                         check_event["advantage_sources"] = [
                             {"code": "rage", "mode": "advantage"},
                         ]
+                    save_check_index = len(events)
                     events.append(check_event)
                 if effect.get("damage"):
                     damage_node = spell_formula_node(
@@ -883,7 +887,17 @@ class CombatResolutionMixin:
                 or (mode == "saving_throw" and not succeeded)
                 or mode in {"buff", "debuff"}
             )
-            if condition and condition_applies:
+            # 光环条件免疫：命中则根本不产生 condition.applied，并把首个
+            # 声明来源写回本次豁免事件（仅拦截时携带，事件类型不变）。
+            blocked_by_aura = ""
+            if condition and condition_applies and mode == "saving_throw":
+                blocked_by_aura = self._aura_immune_conditions(
+                    instance, combat, target,
+                ).get(condition, "")
+            if blocked_by_aura:
+                if save_check_index is not None:
+                    events[save_check_index]["blocked_by_aura"] = blocked_by_aura
+            elif condition and condition_applies:
                 applied = {
                     "type": "condition.applied", "target_id": target_id,
                     "condition": condition, "duration": str(effect.get("condition_duration") or ""),

@@ -20,6 +20,7 @@
     "bonus_action": "Bonus Action",
     "paladin": "Paladin",
     "paladins_smite": "Paladin’s Smite",
+    "aura_of_devotion": "Aura of Devotion",
     "fighter": "Fighter",
     "second_wind": "Second Wind",
     "weapon_mastery": "Weapon Mastery",
@@ -147,6 +148,16 @@
             "granted_spell_id": "divine_smite"
           },
           "resource_id": "paladins_smite"
+        },
+        {
+          "id": "aura_of_devotion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p56:aura-of-devotion",
+          "summary": "You and allies within your Aura (10 feet) have Immunity to the Charmed condition.",
+          "parameters": {
+            "aura_range": 10,
+            "aura_immune_conditions": ["charmed"]
+          }
         }
       ]
     },

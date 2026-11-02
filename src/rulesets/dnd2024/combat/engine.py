@@ -1162,6 +1162,70 @@ class Dnd2024CombatEngine(
     ) -> int:
         return abs(self._position(combat, mover) + distance - self._position(combat, target))
 
+    def _aura_immune_conditions(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+    ) -> dict[str, str]:
+        """Conditions the target is immune to through a friendly aura right now.
+
+        The declaration is the registry: every class feature whose catalog
+        parameters include ``aura_immune_conditions`` is a candidate, and a
+        holder projects its aura only while all of these hold:
+
+        * the holder is on the target's side (players and companions only roam
+          the roster, so enemies never project an aura);
+        * the feature is owned at the holder's current level;
+        * ``aura_range`` is a positive integer and ``aura_immune_conditions`` a
+          list of non-empty strings (otherwise the declaration fails closed);
+        * the 1D theater distance between holder and target is within range.
+
+        The paladin's own aura covers them too because distance 0 is within
+        range.  The return maps condition id to the *first* declaring feature
+        id in catalog order, which is what an interception reports as its
+        source.
+        """
+
+        target_side = str(target.get("side") or "")
+        target_id = str(target.get("actor_id") or "")
+        if not target_side or not target_id:
+            return {}
+        aura_features = [
+            feature_id
+            for feature_id, definition in self.features.catalog.features.items()
+            if "aura_immune_conditions" in definition.parameters
+        ]
+        immune: dict[str, str] = {}
+        for ally in self._all_targets(instance, combat):
+            if str(ally.get("side") or "") != target_side:
+                continue
+            holder_id = str(ally["actor_id"])
+            character = self._feature_character(
+                self._actor_view(instance, combat, holder_id),
+            )
+            for feature_id in aura_features:
+                if not self.features.has_feature(character, feature_id):
+                    continue
+                aura_range = self.features.feature_value(
+                    character, feature_id, "aura_range",
+                )
+                conditions = self.features.feature_value(
+                    character, feature_id, "aura_immune_conditions",
+                )
+                if (
+                    isinstance(aura_range, bool)
+                    or not isinstance(aura_range, int)
+                    or aura_range <= 0
+                ):
+                    continue
+                if not isinstance(conditions, list) or any(
+                    not isinstance(code, str) or not code for code in conditions
+                ):
+                    continue
+                if self._distance(combat, holder_id, target_id) > aura_range:
+                    continue
+                for condition_id in conditions:
+                    immune.setdefault(condition_id, feature_id)
+        return immune
+
     def _require_range(
         self, combat: dict[str, Any], actor_id: str, target_id: str, maximum: int,
     ) -> None:
