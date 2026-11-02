@@ -422,6 +422,14 @@ def test_maximize_damage_validation_matrix(cleric17, wizard13, wizard14, runtime
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"], maximize_damage=True,
     ) == "overchannel is required to maximize damage"
 
+    # Explicit false is a no-op, not a request that still requires Overchannel.
+    result = cast(
+        engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
+        maximize_damage=False, rolls=[1, 2, 3],
+    )
+    assert damage_to(result, "enemy:goblin-1")["amount"] == 9
+    assert not any(event.get("overchannel_cost") for event in events_of(result))
+
     engine, instance = new_combat(runtime, wizard14)
     grant(instance, "spell:cure_wounds", "spell:thunderwave")
     grant_cantrip(instance, "spell:fire_bolt")

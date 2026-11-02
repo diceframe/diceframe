@@ -556,9 +556,9 @@ class CombatValidationMixin:
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
         maximize = intent.get("maximize_damage")
-        if maximize is not None:
-            if not isinstance(maximize, bool):
-                raise CombatIntentError("maximize_damage must be a boolean")
+        if maximize is not None and not isinstance(maximize, bool):
+            raise CombatIntentError("maximize_damage must be a boolean")
+        if maximize:
             character = self._feature_character(actor)
             max_slot = int(self.features.feature_value(
                 character, "overchannel", "max_slot_level", 5,
