@@ -325,3 +325,57 @@ def test_zero_damage_never_offers_retaliation() -> None:
     engine, instance = _instance()
 
     assert _reaction_feature_choices(engine, instance, amount=0) == []
+
+
+def test_temp_hp_absorbing_the_hit_still_allows_retaliation() -> None:
+    engine, instance = _instance()
+    player = _player(instance)
+    player["resources"]["hp"] = 4
+    player["resources"]["temp_hp"] = 10
+    enemy_before = _enemy_hp(instance)
+
+    _hit_once(engine, instance, [15, 4])
+    events = _resolve(
+        engine, instance, rng=SequenceRng([15, 4]),
+        option="feature", feature_id="retaliation",
+    )
+
+    assert any(
+        event["type"] == "dnd2024.reaction.spent"
+        and event["reason"] == "retaliation"
+        for event in events
+    )
+    assert any(
+        event["type"] == "check.resolved" and event["kind"] == "attack"
+        for event in events
+    )
+    resources = _player(instance)["resources"]
+    assert resources["hp"] == 4
+    assert resources["temp_hp"] == 4
+    assert _enemy_hp(instance) < enemy_before
+    assert ruleset_runtime.state(instance)["combat"]["reactions"]["player:gm"] == 0
+
+
+def test_insufficient_temp_hp_still_prevents_the_counterattack() -> None:
+    engine, instance = _instance()
+    player = _player(instance)
+    player["resources"]["hp"] = 4
+    player["resources"]["temp_hp"] = 2
+
+    _hit_once(engine, instance, [15, 4])
+    events = _resolve(
+        engine, instance, rng=SequenceRng([15, 4]),
+        option="feature", feature_id="retaliation",
+    )
+
+    assert not any(
+        event["type"] == "dnd2024.reaction.spent" for event in events
+    )
+    assert not any(
+        event["type"] == "check.resolved" and event["kind"] == "attack"
+        for event in events
+    )
+    resources = _player(instance)["resources"]
+    assert resources["hp"] == 0
+    assert resources["temp_hp"] == 0
+    assert ruleset_runtime.state(instance)["combat"]["reactions"]["player:gm"] == 1

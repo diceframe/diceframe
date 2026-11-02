@@ -383,3 +383,10 @@ SP3 §8 登记的 `_reaction_feature_choices` 硬编码注册表化债务 **已�
 1. 本切片按 §3.6 零改动 `resolution.py` / `validation.py` / `reducer.py` / `check_windows.py` / 前端；D1/D2/D3/D5/D6 迁移债维持原登记。
 2. 反击武器仍为确定性取第一件射程 ≤5 的档案（D2）；玩家武器选择子决策归阶段二 UX 批次。
 3. 英文显示经 choice fallback 正确；中文 `catalog.label("retaliation")` 回退英文——locale overlay 为全量覆盖结构，若未来需要中文本地化，需在内容批次同时补 en/zh-CN 两个 overlay 文件（建议与批量填充一并处理，避免单点扩权）。
+
+### 8.7 审核修复（2026-11-02）
+
+- 审核发现 §3.2(e)#4 的存活预判未考虑临时生命值：伤害先扣除 `temp_hp`，剩余部分才进入 `hp`；原判断 `hp - amount <= 0` 会把"临时生命值吸收后仍存活"的情况误判为倒地，导致不反击且不消耗反应。
+- 修复：`_counterattack_events` 改为先算 `hp_loss = amount - min(temp_hp, amount)`，仅当 `hp - hp_loss <= 0` 时停止。与 P4 临时生命值的 reducer 语义一致。
+- 增补用例：`test_temp_hp_absorbing_the_hit_still_allows_retaliation`（4 HP + 10 temp 受 6 伤害，temp 余 4，仍反击）与 `test_insufficient_temp_hp_still_prevents_the_counterattack`（4 HP + 2 temp 受 6 伤害倒地，不反击、反应保留）。
+- 复跑：§5 定向 176 passed（1:12）；`tests/rulesets` 全量 906 passed（5:49，Linux/Python 3.11，审核端）。

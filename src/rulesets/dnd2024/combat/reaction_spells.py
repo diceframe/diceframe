@@ -378,9 +378,12 @@ class CombatReactionSpellsMixin:
         events.extend(self._enemy_defeated_feature_events(
             instance, combat, attacker_id, defender, amount,
         ))
-        if int(defender.get("hp", 0) or 0) - amount <= 0:
-            # 原始伤害把防守者打倒：倒在 0 HP 的防守者不能花反应反击，
-            # 反应预算保留，也不发生攻击。
+        hp = int(defender.get("hp", 0) or 0)
+        temp_hp = max(0, int(defender.get("temp_hp", 0) or 0))
+        hp_loss = max(0, amount - min(temp_hp, amount))
+        if hp - hp_loss <= 0:
+            # 伤害先扣除临时生命值；只有剩余伤害把防守者打到 0 HP 才倒地。
+            # 倒在 0 HP 的防守者不能花反应反击，反应预算保留，也不发生攻击。
             return events
         melee_attacks = [
             attack for attack in self._available_attacks(defender)
