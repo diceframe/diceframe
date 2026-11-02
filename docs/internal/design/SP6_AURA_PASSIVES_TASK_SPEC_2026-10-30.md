@@ -223,3 +223,99 @@ python -m pytest tests/rulesets -q
 | D4 | 光环的面板/feed 可视化（"你正处于哪些光环内"投影） | UI 批次（阶段二） |
 | D5 | 奉献之誓其余幽灵特性：oath_of_devotion_spells（常备法术表）、Sacred Weapon（攻击 +cha mod 至少 +1/光耀伤害选择/光照）、Smite of Protection（半身掩护） | 分别归法术表直填 / S-P10+光照 / cover 机制批次 |
 | D6 | 敌方光环能力（求值器当前只遍历 player/companion） | 敌方能力批次（阶段二） |
+| D7 | 光环持有者失能/死亡时是否抑制光环未建模：求值器只按参数 / 同侧 / 1D 距离判定，`dead` / `incapacitated` 持有者仍投影免疫。需回原书核对 Aura of Protection 的压制条款后再决定实现，本切片不猜测 | 条件 / 状态门控批次（先核对原文） |
+| D8 | 敌方施法路径缺失导致正向拦截无法走完整 `resolve_intent`：A1/A2/A3/A4/A6 直接调用 `_spell_events` 验证，A5/A8 走真实施法但目标是敌方负例；真正的"敌方 charm_person 打盟友"端到端需敌方 spell profile | 敌方能力批次（阶段二） |
+| D9 | 条件免疫拦截只接 `saving_throw` 分支；`spell_attack` / `automatic_damage` / `buff` / `debuff` 等其它 condition 产生模式仍绕过光环 | 条件免疫消费面扩展批次（随对应法术 / 特性首次需要时） |
+
+---
+
+## §9 S-P6 执行报告（2026-11-02）
+
+### 9.1 改动文件清单（对照 §3 白名单）
+
+| 文件 | 实际改动 | 偏差 |
+|---|---|---|
+| `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json` | paladin 段 `paladins_smite` 后追加 `aura_of_devotion`（`minimum_level: 7`、`source_ref`、`summary`、`parameters.aura_range: 10`、`parameters.aura_immune_conditions: ["charmed"]`）；无 `capabilities`、无 `resource_id`；labels 平铺区追加英文标签 | 无 |
+| `src/rulesets/dnd2024/combat/engine.py` | 新增 `_aura_immune_conditions(instance, combat, target)`：候选 = 目录中声明了 `aura_immune_conditions` 参数的全部特性（每次求值懒扫描，无硬编码 id）；遍历 `_all_targets` 中与目标同侧的 actor，校验 `has_feature`、`feature_value` 类型（`aura_range` 正 int 且排除 bool，`aura_immune_conditions` 非空字符串列表）、`_distance <= aura_range`，返回 `condition -> 首个目录序来源 feature id` 的并集 | 有：规格签名为 `set[str]`，实际返回 `dict[str, str]`（见 9.1 偏差 2）；签名为 `(combat, target)`，实际多加 `instance`（见偏差 3） |
+| `src/rulesets/dnd2024/combat/resolution.py` | saving_throw 分支记录本次豁免事件的索引（自动失败 L692 / 掷骰 L729）；在统一 `condition_applies` 构造点前调用求值器（L892-899），命中则不产生 `condition.applied`，并在该豁免事件追加 `blocked_by_aura`；仅 `mode == "saving_throw"` 接入 | 有：规格预期两个构造点（L630 / L645），P7/P8 合入后已是单一统一构造点（见偏差 1） |
+| `tests/rulesets/test_dnd2024_aura_devotion.py` | 新建 14 个用例（A1–A10，其中 A10 参数化 4 条），覆盖灵光内/外、本人、6 级、敌方、10/11 尺边界、repeat save、非免疫 condition、双持有人并集、参数 fail closed | A9 按 §4 允许降级为直调求值器；正向用例直调解析器（见偏差 4） |
+
+偏差与原因：
+
+1. **拦截点数量**：P7/P8 已合入，`_spell_events` 的所有失败初始施加路径收敛到单一 `condition_applies` 块（resolution.py L891 附近）；自动失败与掷骰路径都记录 `save_check_index`。`save_repeat` tick 本身从不重新 `condition.applied`，A7 用失败 tick 直接验证了这一结构事实，满足原意（初始施加与 tick 均不产生免疫 condition）。
+2. **求值器返回映射而非集合**：`blocked_by_aura` 需要来源 feature id，返回 `condition -> feature_id` 可在一次遍历中同时给出集合语义与来源；多来源时取目录序首个，规则稳定。直调求值器测试按映射断言。
+3. **求值器签名增加 `instance`**：同侧 roster 使用 `_all_targets(instance, combat)`（现有最贴近的 players/companions/enemies + side 遍历形状）；仅凭 combat 只能看到 initiative，不能保证覆盖全部 party actor。
+4. **正向用例直调 `_spell_events`**：本引擎无敌方 spell profile（`validation._validate_spell` 要求 caster 有法术列表 / 位），无法通过 `resolve_intent` 构造"敌方 charm_person 打盟友"。A1/A2/A3/A4/A6 直接调用 intent 路径同一个权威解析器 `_spell_events`，只跳过 validation；A5（敌方目标）与 A8（color_spray）仍走真实 `resolve_intent`。该测试缺口登记 D8，不把正向用例描述为敌方施法端到端。
+5. **候选集构建**：规格允许"目录加载期构建或等价懒扫描"；实现选择每次求值懒扫描 `catalog.features`，避免改 resolver（§3.4 零改动清单）且特性目录规模很小。无硬编码特性 id / condition 白名单。
+
+### 9.2 §4 矩阵逐用例结果
+
+| # | 用例（测试函数） | 结果 |
+|---|---|---|
+| A1 | `test_ally_inside_aura_is_immune_and_the_check_names_the_aura` | PASS：无 `condition.applied`；`check.resolved` 带 `blocked_by_aura: "aura_of_devotion"`；落账后无 charmed |
+| A2 | `test_ally_outside_aura_is_charmed_without_the_aura_field` | PASS：11 尺正常 applied charmed（`1_hour`），无 `blocked_by_aura` |
+| A3 | `test_the_paladin_is_immune_too` | PASS：目标为圣武士本人，同 A1 |
+| A4 | `test_level_six_paladin_has_no_aura` | PASS：6 级未授予光环，正常 applied |
+| A5 | `test_enemy_target_inside_range_is_not_immune` | PASS：真实 `resolve_intent`，敌方目标在灵光内仍被魅惑 |
+| A6 | `test_aura_boundary_is_exactly_ten_feet` | PASS：恰 10 尺免疫；11 尺不免疫 |
+| A7 | `test_repeat_save_failure_does_not_reapply_a_condition`；`test_sleep_is_not_immune_and_its_repeat_save_never_reapplies` | PASS：失败 tick 不产生 applied；sleep incapacitated 正常 applied，非免疫 condition 不受影响 |
+| A8 | `test_color_spray_blinded_is_not_blocked_by_the_aura` | PASS：真实 `resolve_intent`，blinded 正常 applied，无 `blocked_by_aura` |
+| A9 | `test_two_paladins_union_in_range` | PASS（§4 允许降级）：gm / 第二名圣武士交替在 10 尺内，求值器均返回 `{"charmed": "aura_of_devotion"}` |
+| A10 | `test_malformed_aura_declarations_yield_no_immunity`（4 条参数化） | PASS：`aura_range: 0` / `True`、`aura_immune_conditions` 非 list / 含非字符串 → 空映射、不抛错 |
+
+回归定位（§4.2）：
+
+- charm_person / color_spray 在既有 `tests/rulesets/` 中**没有专门用例**（仅作为测试夹具法术列表出现）；其 saving_throw 分支由本切片新文件覆盖。
+- sleep 回归：`tests/rulesets/test_dnd2024_combat.py::test_failed_save_applies_condition_but_successful_save_does_not`；`tests/rulesets/test_dnd2024_hold_person.py` 的 sleep / repeat-save 用例（原文 L370、L580、L592、L602）。
+- `test_dnd2024_hold_person.py` 全文件、`test_dnd2024_class_features.py`、`test_dnd2024_uncanny_dodge.py`、`test_dnd2024_origin_feat_spells.py`、`test_dnd2024_counterspell.py`、`test_dnd2024_dispel_magic.py` 全绿。
+
+### 9.3 §5 验收命令与结果（两次）
+
+执行侧（Linux / `/tmp/dfvenv` Python 3.11，命令与 §5 相同）：
+
+```powershell
+python -m pytest tests/rulesets/test_dnd2024_aura_devotion.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_origin_feat_spells.py tests/rulesets/test_dnd2024_hold_person.py -q
+# 109 passed in 44.93s
+
+python -m pytest tests/rulesets -q
+# 938 passed, 36 warnings in 376.82s (0:06:16)
+```
+
+审核侧复跑（Linux / Python 3.11）：
+
+```powershell
+python -m pytest tests/rulesets/test_dnd2024_aura_devotion.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_origin_feat_spells.py tests/rulesets/test_dnd2024_hold_person.py -q
+# 109 passed in 43.17s
+
+python -m pytest tests/rulesets -q
+# 938 passed, 36 warnings in 367.53s (0:06:07)
+```
+
+### 9.4 行号偏移复核（§2.2）
+
+开工时 `git status` 干净，P7/P8 已合入，HEAD 为 `6c9bb22`；§2.2 的在途 P7/P8 偏移已不再是现状。任务书预期的 `condition.applied` 两个构造点（HEAD L630 / L645）实际为单一统一构造点：
+
+- `resolution.py` L602：`save_check_index` 初始化；L692（自动失败）/ L729（掷骰）记录豁免事件索引；L892-899：光环拦截判定与 `blocked_by_aura` 写入，`condition.applied` 原构造点紧随其后；
+- `engine.py` L1165：`_aura_immune_conditions` 求值器；
+- `srd_class_features.json` L23：label；L153：`aura_of_devotion` 条目。
+
+未出现 §7 任一停止条件；`srd_class_features.json` 的 paladin 段为既有段扩展（本切片新增唯一 aura 条目），无其它会话双写。
+
+### 9.5 未尽事项与建议
+
+- D7：光环持有者 `dead` / `incapacitated` 时的光环抑制未建模。任务书 §3.2 只要求参数 / 同侧 / 距离；本切片未擅自加状态门控。建议下一个接触光环的切片先核对 Aura of Protection 原文，再决定压制实现。
+- D8：敌方施法端到端缺口见 9.1 偏差 4；敌方 spell profile 落地后，应把 A1/A2/A3/A4/A6 平移回 `resolve_intent` 正向路径。
+- D9：条件免疫消费面目前只覆盖 saving_throw；未来出现 spell_attack / automatic_damage 施加魅惑的法术时再扩展。
+- `blocked_by_aura` 多来源时取目录序首个来源；当前只有 `aura_of_devotion` 一个声明者，尚无可观察的多来源差异。
+- 性能：每次目标施加条件时扫描目录特性 + `_all_targets`，规模小且无缓存；若后续光环 / 队伍规模显著增长，可考虑在 resolver 加载期缓存候选 id（不改语义）。
+
+---
+
+## §10 S-P6 审核记录（2026-11-02）
+
+- 基线核对：功能提交 `8bcd7e5`，4 个文件与 §3 白名单全等；`check_modes.py` / `reducer.py` / `validation.py` / `view.py` / `reaction_spells.py` / `srd_subclasses.json` / `srd_classes.json` / `srd_combat_core.json` / `check_windows.py` / 前端均零 diff。`origin/backup/cfp` 仍为 `6c9bb22`，功能提交只在本地分支。
+- 定向复跑：109 passed（43.17s）；全量复跑：938 passed（367.53s），与执行侧一致（938 = S-P11 基线 924 + 本切片 14）。
+- 规则语义核对：光环范围 10 尺且含边界；圣武士本人（距离 0）受保护；仅同侧 player/companion 投影，敌方目标不受保护；`aura_immune_conditions` 仅 `charmed`，blinded / incapacitated 不受影响；参数非法 fail closed；无事件类型新增，reducer 零改动。
+- 代码边界核对：求值器无特性 id 硬编码；候选来自目录参数；`blocked_by_aura` 仅在拦截时出现；saving_throw 伤害仍正常落账（只跳过 condition 施加）。
+- 审核发现（3 项，均不阻塞、不改代码）：D7 持有者状态门控、D8 敌方施法端到端测试缺口、D9 条件免疫消费面仅 saving_throw。均已登记，未在审核轮修复。
+- 主计划同步：1C 汇总由 9/12 更新为 10/12；S-P6 行更新为"执行完成并审核通过"。下一片按推荐顺序为 S-P12（护甲受训门控），其后 S-P8（Hide 动作与附赠动作路由）。
