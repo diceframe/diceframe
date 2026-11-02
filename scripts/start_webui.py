@@ -6,6 +6,7 @@ less fragile than in cmd.exe batch syntax.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,26 @@ def run(cmd: list[str], cwd: Path) -> int:
     return subprocess.run(cmd, cwd=str(cwd)).returncode
 
 
+def frontend_dependencies_ready() -> bool:
+    """Return whether all package.json dependencies and build tools are installed."""
+    node_modules = FRONTEND_DIR / "node_modules"
+    bin_dir = node_modules / ".bin"
+    if not all(
+        any((bin_dir / name).is_file() for name in (tool, f"{tool}.cmd", f"{tool}.ps1"))
+        for tool in ("vue-tsc", "vite")
+    ):
+        return False
+    try:
+        package = json.loads((FRONTEND_DIR / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    dependencies = {
+        *package.get("dependencies", {}),
+        *package.get("devDependencies", {}),
+    }
+    return all((node_modules / name / "package.json").is_file() for name in dependencies)
+
+
 def ensure_frontend() -> int:
     if frontend_built():
         return 0
@@ -68,8 +89,8 @@ def ensure_frontend() -> int:
             flush=True,
         )
         return 1
-    if not (FRONTEND_DIR / "node_modules").exists():
-        code = run([npm, "ci"], FRONTEND_DIR)
+    if not frontend_dependencies_ready():
+        code = run([npm, "ci", "--include=dev"], FRONTEND_DIR)
         if code:
             return code
     return run([npm, "run", "build"], FRONTEND_DIR)

@@ -21,7 +21,10 @@ test('party operations directly create, postpone, reopen and resolve a real play
   const rail = await openParty(page)
   const actions = rail.getByTestId('party-actions')
   await expect(actions.getByRole('heading', { name: '队伍操作' })).toBeVisible()
-  expect(await actions.evaluate(element => element.nextElementSibling?.classList.contains('party-rail__recap'))).toBe(true)
+  expect(await actions.evaluate(element => {
+    const rules = element.parentElement!.querySelector('.party-rail__recap')
+    return Boolean(rules && (element.compareDocumentPosition(rules) & Node.DOCUMENT_POSITION_FOLLOWING))
+  })).toBe(true)
   await expect(rail.locator('.party-rail__action-state')).toHaveCount(2)
   await expect(actions.getByTestId('party-rest')).toHaveCount(0)
   await actions.getByTestId('manual-roll-create').click()

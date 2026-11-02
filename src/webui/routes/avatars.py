@@ -54,6 +54,30 @@ async def api_game_avatar_file(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+# ---- GAL P8：立绘资产（透明保留的全身像）------------------------------------
+
+
+async def api_standing_portrait_upload(request: web.Request) -> web.Response:
+    body = await request.json()
+    result = _get_api(request).save_standing_portrait_upload(
+        file_data=body.get("file_data", ""),
+        file_name=body.get("file_name", ""),
+    )
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
+async def api_standing_portrait_file(request: web.Request) -> web.StreamResponse:
+    path = _get_api(request).standing_portrait_file(request.match_info["asset_id"])
+    if path is None:
+        return web.json_response({"error": "立绘不存在"}, status=404)
+    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+async def api_standing_portrait_delete(request: web.Request) -> web.Response:
+    result = _get_api(request).delete_standing_portrait(request.match_info["asset_id"])
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
 def register_avatars(app: web.Application) -> None:
     app.router.add_get("/api/avatars", api_avatar_list)
     app.router.add_post("/api/avatars", api_avatar_upload)
@@ -61,3 +85,6 @@ def register_avatars(app: web.Application) -> None:
     app.router.add_delete("/api/avatars/{asset_id}", api_avatar_delete)
     app.router.add_post("/api/games/{game_key}/avatars", api_game_avatar_upload)
     app.router.add_get("/api/games/{game_key}/avatars/{asset_id}", api_game_avatar_file)
+    app.router.add_post("/api/standing-portraits", api_standing_portrait_upload)
+    app.router.add_get("/api/standing-portraits/{asset_id}", api_standing_portrait_file)
+    app.router.add_delete("/api/standing-portraits/{asset_id}", api_standing_portrait_delete)

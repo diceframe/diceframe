@@ -1,4 +1,4 @@
-"""Gal gameplay mode (ADR-0010, ADR-0012).
+"""Gal gameplay mode (ADR-0010, ADR-0013).
 
 Everything gal-specific lives in this package.  It may use the shared
 platform (engine core, content, LLM, memory, TTS) but not the tabletop
@@ -9,7 +9,7 @@ enforces both directions.
 from __future__ import annotations
 
 from src.gameplays.contracts import (
-    BOT_SURFACE_READ_ONLY, GameplayCreateRejection, GameplayCreateRequest, GameplayMode,
+    BOT_SURFACE_READ_ONLY, TURN_DRIVER_NARRATIVE_ROUND, GameplayCreateRejection, GameplayCreateRequest, GameplayMode,
 )
 
 GAL_RULE_ID = "gal_narrative"
@@ -27,9 +27,12 @@ def _validate_create(request: GameplayCreateRequest) -> GameplayCreateRejection 
     return None
 
 
+# Rounds still run on the tabletop pipeline (scene progression is selected by
+# ``progression_mode``); a dedicated gal driver would be bound from this package.
 GAL = GameplayMode(
     mode_id="gal",
     bot_surface=BOT_SURFACE_READ_ONLY,
     validate_create=_validate_create,
+    turn_driver=TURN_DRIVER_NARRATIVE_ROUND,
     progression_mode="scene",
 )

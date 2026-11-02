@@ -88,7 +88,11 @@ class ManualRollService:
         if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
         target=str(body.get("target_uid") or uid)
         if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":"无权投掷"}
-        if target in req["results"]: return {"ok":True,"result":req["results"][target],"idempotent":True}
+        if req.get("status") == "cancelled": return {"ok":False,"error":"请求已取消"}
+        if target in req["results"]:
+            # An earlier save may have failed after the result was recorded.
+            await self.d.save_instance(inst)
+            return {"ok":True,"result":req["results"][target],"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
         result=roll(req["formula"]); value={"formula":result.formula,"rolls":result.rolls,"modifier":result.modifier,"total":result.total,"natural":result.natural,"rolled_by":uid,"rolled_at":_now()}
@@ -114,6 +118,9 @@ class ManualRollService:
         if not inst or uid!=getattr(inst,"gm_uid",None): return {"ok":False,"error":"GM only"}
         req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
         if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":"请求不存在或已过期"}
+        # A fully rolled request is final: cancelling it would drop its results from the AI context.
+        if req.get("status") == "resolved": return {"ok":False,"error":"请求已完成，无法取消","request":req}
+        if req.get("status") == "cancelled": return {"ok":True,"request":req,"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
         req["status"]="cancelled"; req["cancel_reason"]=str(body.get("reason") or "")[:200]; session_stats.touch(inst); await self.d.save_instance(inst); return {"ok":True,"request":req}

@@ -4,7 +4,7 @@
 aiohttp>=3.9,<4
 cryptography>=43,<46
 edge-tts>=7.3.1,<8
-Pillow>=10,<13
+Pillow>=10,<14
 peewee>=4.5,<5
 pypdf>=6.19,<7
 pydantic-ai-slim==1.107.7

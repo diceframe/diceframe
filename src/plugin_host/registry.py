@@ -20,7 +20,7 @@ from .map_validation import (
 )
 from .support import plugin_type_descriptor
 
-_IMAGE_KINDS = frozenset({"portrait_asset", "scene_image_asset"}) | MAP_IMAGE_KINDS
+_IMAGE_KINDS = frozenset({"portrait_asset", "scene_image_asset", "standing_portrait"}) | MAP_IMAGE_KINDS
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _AUDIO_SUFFIXES = frozenset({".wav", ".mp3", ".ogg", ".opus", ".flac", ".m4a", ".aac"})
 _VOICE_ENGINES = frozenset({"openai-compatible", "gpt-sovits", "edge-tts"})
@@ -201,6 +201,7 @@ def _contribution_from_path(
         labels = {
             "portrait_asset": "头像",
             "scene_image_asset": "冒险头图",
+            "standing_portrait": "立绘",
             "map_icon": "地图图标",
             "map_scene": "地图底图",
         }

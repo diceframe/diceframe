@@ -4,6 +4,43 @@ English | [简体中文](../zh/content-and-play.md)
 
 This guide covers the content and play workflows in the current application. See [application updates](updates.md) before upgrading an existing installation.
 
+## Overview
+
+It brings the Web UI, character sheets, lorebooks, dice checks, state changes, campaign logs, and optional chat-bot play into one shared game state. Players describe what they want to do in natural language; DiceFrame passes those actions to a GM model, handles dice and state tags, then syncs the result back to the browser.
+
+![DiceFrame Web UI preview](../assets/diceframe-readme-hero.jpg)
+
+### What It Does
+
+- A Web UI organized around Overview, Play, Characters, Content, and Manage. Content contains Content library, World notes, Content packs, and Rules; Manage contains Memory, Logs, Plugins, and Settings. The world gallery, adventure workbench and script import open from the content library.
+- English and Simplified Chinese core UI and documentation; Japanese, German and Russian community translations with English fallback.
+- Solo and multiplayer play, with invite links, waiting states, away players, GM force-advance, SSE updates, and experimental WebRTC player direct connect through one-time link codes.
+- Layered resolution for D&D 5e-inspired Lite, custom d20, CoC 7e-inspired d100, and no-dice narrative rules, including rule-declared advantage/disadvantage, CoC bonus/penalty dice, HP, gold, items, XP, death, revival, and scene changes.
+- A compact content library for worlds, lorebooks and adventures; per-game book selection, source tracking and owner-private recovery history.
+- Adventure creation and local script/PDF/Foundry/Fantasy Grounds imports with validation; optional AI organization with progress, cancellation and token consent.
+- Reusable character cards, game-specific characters, AI-hosted seats, check policies and linked CoC Push; D&D 2024 spells and triggered Divine Smite within the declared automation boundary.
+- An owner-only DF Agent for documentation, drafts and reviewed, confirmed application operations.
+- Long-session summaries, with optional embedding-based memory recall.
+- AI-assisted world, rule, character, and lorebook generation.
+- Text-to-speech with a zero-setup system fallback, online or local OpenAI-compatible endpoints, and GPT-SoVITS. Existing service voice IDs and personal reference WAVs work directly; store voice presets are optional.
+- Application updates with side-by-side portable installs, health checks, rollback, and install-specific guidance.
+- Docker support for Linux deployment, with runtime data mounted under `data/`.
+
+## First Game
+
+1. Open the Web UI.
+2. Switch the app language to English if needed.
+3. Add an AI provider and assign the main model in Settings.
+4. Open **Overview → Create Adventure**, or start from a world or adventure in **Content → Content library**.
+5. Choose Game Language: English.
+6. Pick the English fantasy template, create or import characters, then enter Play.
+7. Submit actions in natural language.
+8. If an action triggers a check, the system adjudicates and rolls once automatically; the GM narration then resumes.
+
+For worlds, lorebooks, module imports, invitations, spells and the DF Agent, read [Content, characters and play](content-and-play.md).
+
+More player-facing help is in the [DiceFrame user guide](https://github.com/diceframe/diceframe-content/blob/main/docs/en/guide.md).
+
 ## Find the right workspace
 
 | Navigation | What opens there |
@@ -75,11 +112,11 @@ The text marker `@choice label -> scene_id` defines a graph connection. Several 
 
 **Character card library** stores reusable cards; **This game's characters** manages participants in the active game. Applying a card to a character that has already acted requires GM authority. The reusable card and a character's current game state serve different purposes.
 
-On the play page, use **Invite Player** beneath the party list. Share the actual invitation URL and let the player open it. Players do not need to extract or type `web|room|host` from a link. Invitations and seat credentials follow the server's access policy; a bare legacy player ID is not a credential. If an old link no longer authenticates, the GM should issue a new invitation.
+On the play page, use **Invite friends** beneath the party list. Share the actual invitation URL and let the player open it, or paste it into **Join friends** on the homepage. Players do not need to extract or type `web|room|host` from a link. The invitation dialog's **Multiplayer help** button opens the official guide. Invitations and seat credentials follow the server's access policy; a bare legacy player ID is not a credential. If an old link no longer authenticates, the GM should issue a new invitation.
 
 The GM can open **⋯ Member actions** on the right of each member card for control links, editing, away/return, AI control and removal. Available actions follow the member's current state. Kick appears after a divider in a danger color and requires confirmation; the host and current actor cannot be kicked. The workbench player list retains status and rest notices, while member management uses this menu.
 
-The menu's **Control link** resumes an existing character; **Invite Player** beneath the list is for new players. Reissuing an existing seat link requires confirmation; reopening a valid link in the same GM session reuses it without disconnecting its player. Players do not see these management controls.
+The menu's **Control link** resumes an existing character; **Invite friends** beneath the list is for new players. Reissuing an existing seat link requires confirmation; reopening a valid link in the same GM session reuses it without disconnecting its player. Players do not see these management controls.
 
 AI-hosted seats and companions use the same server action and rules boundaries as human players. Their policy belongs to the game and survives saving/loading; narration cannot independently grant private information or bypass resource costs.
 

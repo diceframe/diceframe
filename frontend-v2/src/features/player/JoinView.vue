@@ -699,7 +699,6 @@ async function create() {
   min-width: 0;
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--party-color, var(--df-border-soft)) 30%, var(--df-border-soft));
-  border-left: 3px solid var(--party-color, var(--df-border-soft));
   border-radius: var(--df-radius-sm);
   background: color-mix(in srgb, var(--df-surface-1) 75%, transparent);
 }

@@ -377,6 +377,28 @@ test('phone play keeps scene metadata compact and actions anchored to the viewpo
   expect(layout.composerBottom).toBeLessThanOrEqual(layout.viewportHeight + 1)
 })
 
+test('phone quick action controls provide 44px touch targets and remain keyboard operable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/#/play?game=web%7Ce2e-room%7Cweb_bot')
+  const suggestions = page.locator('.quick-actions')
+  await expect(suggestions).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+  for (const control of await page.locator('.quick-actions-toggle, .quick-actions button').all()) {
+    const bounds = await control.boundingBox()
+    expect(bounds!.width).toBeGreaterThanOrEqual(44)
+    expect(bounds!.height).toBeGreaterThanOrEqual(44)
+  }
+  const last = suggestions.getByRole('button').last()
+  const action = await last.innerText()
+  await last.click()
+  await expect(page.locator('.composer textarea')).toHaveValue(action)
+  await page.getByTestId('quick-actions-toggle').focus()
+  await page.keyboard.press('Enter')
+  await expect(suggestions).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect(suggestions).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+})
+
 test('phone play has no spacer bands around the game workspace', async ({ page }) => {
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)

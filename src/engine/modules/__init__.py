@@ -2,6 +2,7 @@
 
 from src.engine.modules import (  # noqa: F401
     adventure_runtime_state,
+    affection,
     check_reveals,
     checks,
     ai_seats,

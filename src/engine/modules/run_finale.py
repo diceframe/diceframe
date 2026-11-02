@@ -159,6 +159,9 @@ def fingerprint(instance: Any) -> str:
     raw['log'] = deepcopy(instance.log)  # Codec can bound inline history.
     raw['modules'].pop(MODULE_NAME, None)
     raw['modules'].pop('session_stats', None)  # AI usage accounting is allowed.
+    # GM-visible degradation events (e.g. a failed periodic save) are written
+    # without a run guard and describe the host, not the story.
+    raw['modules'].pop('health', None)
     # Room access is independent administrative state: staged publication keeps
     # its live credentials/settings, and GM credential rotation remains legal
     # while a finale is frozen.

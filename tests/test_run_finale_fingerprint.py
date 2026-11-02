@@ -168,3 +168,21 @@ async def test_finale_ai_draft_with_room_access_is_review_only():
     assert result["ok"]
     assert run_finale.view(instance)["archive"] is None
     assert run_finale.view(instance)["job"]["epilogue"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_health_event_during_preparation_does_not_invalidate_the_draft():
+    from src.engine.health import record_health_event
+
+    service, instance, _, _ = setup()
+    job = run_finale.prepare(instance)
+    # e.g. the 60 s periodic save failed once while the GM was drafting.
+    record_health_event(instance, "persistence", "SAVE_FAILED", "error", "Save failed")
+
+    result = await service.mutate("key", GM, "materials", {
+        "run_id": instance.run_id, "job_id": job["id"], "job_revision": 0,
+        "epilogue": "The end", "recap": "The whole run",
+    })
+
+    assert result["ok"], result
+    assert run_finale.view(instance)["job"]["revision"] == 1

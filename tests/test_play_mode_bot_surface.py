@@ -71,7 +71,7 @@ async def test_read_only_surface_binds_but_declares_surface():
 async def test_none_surface_refuses_binding(monkeypatch):
     inst = GameInstance(game_key=("web", "room", "bot"), gm_uid="gm")
     monkeypatch.setattr(gameplay_builtin, "DEFAULT_GAMEPLAYS", GameplayRegistry([
-        GameplayMode("free", BOT_SURFACE_NONE, lambda _request: None),
+        GameplayMode("free", BOT_SURFACE_NONE, lambda _request: None, "narrative_round"),
     ]))
     service = _service(inst)
     token = await _bind_token(service, "web|room|bot")

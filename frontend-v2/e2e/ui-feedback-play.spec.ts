@@ -2,9 +2,12 @@ import { expect, test } from './fixtures'
 
 const game = 'web|e2e-room|web_bot'
 
-test('ordinary play entry closes old GM state and preserves the character and illustrated story surfaces', async ({ page }, info) => {
+for (const mode of ['dark', 'light']) test(`ordinary play entry preserves the character and illustrated story surfaces without message rails in ${mode} mode`, async ({ page }, info) => {
   await page.setViewportSize(info.project.name === 'desktop' ? { width: 1366, height: 900 } : { width: 390, height: 844 })
-  await page.addInitScript(() => localStorage.setItem('play_rail_collapsed', '0'))
+  await page.addInitScript(mode => {
+    localStorage.setItem('play_rail_collapsed', '0')
+    localStorage.setItem('diceframe_mode_v2', mode)
+  }, mode)
   await page.goto(`/#/play?game=${encodeURIComponent(game)}`)
   await expect(page.getByTestId('timeline')).toBeVisible()
   const toggle = page.getByTestId('play-gm-toggle')
@@ -22,7 +25,10 @@ test('ordinary play entry closes old GM state and preserves the character and il
       chat: style('.play-main').backgroundImage,
       scene: style('.scene-strip').backgroundImage,
       sidebar: style('.game-sidebar').backgroundImage,
-      gmBorder: parseFloat(style('.message.gm').borderLeftWidth),
+      messageBorders: Array.from(document.querySelectorAll('.timeline .message')).map(element => {
+        const card = getComputedStyle(element)
+        return { left: card.borderLeft, right: card.borderRight, top: card.borderTop, bottom: card.borderBottom }
+      }),
       gmRadius: parseFloat(style('.message.gm').borderTopLeftRadius),
       sceneHeight: document.querySelector('.scene-strip')!.getBoundingClientRect().height,
       overflow: document.documentElement.scrollWidth - innerWidth,
@@ -32,7 +38,13 @@ test('ordinary play entry closes old GM state and preserves the character and il
   expect(restored.scene).toContain('url(')
   if (info.project.name === 'desktop') expect(restored.sidebar).toContain('url(')
   else expect(restored.sidebar).not.toContain('url(')
-  expect(restored.gmBorder).toBeGreaterThanOrEqual(3)
+  expect(restored.messageBorders.length).toBeGreaterThan(0)
+  for (const border of restored.messageBorders) {
+    expect(border.left).toBe(border.right)
+    expect(border.left).toBe(border.top)
+    expect(border.left).toBe(border.bottom)
+    expect(border.left.startsWith('1px solid')).toBe(true)
+  }
   expect(restored.gmRadius).toBeGreaterThanOrEqual(6)
   expect(restored.sceneHeight).toBeLessThanOrEqual(52)
   expect(restored.overflow).toBeLessThanOrEqual(1)

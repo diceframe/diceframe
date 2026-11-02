@@ -342,6 +342,20 @@ def update_custom_rule(
             combat_extension_from_template(template)
         except ValueError as exc:
             return {"ok": False, "error": f"combat 声明非法: {exc}"}
+    # 好感与冒险推进块同理：RuleSystem 构造时对坏块 fail fast，保存时不拦就会
+    # 让整个规则列表和使用这条规则的对局都打不开。
+    from src.rules.adventure_progression_config import parse_adventure_progression_config
+    from src.rules.affection_config import parse_affection_config
+
+    for block, parse in (
+        ("affection", parse_affection_config),
+        ("adventure_progression", parse_adventure_progression_config),
+    ):
+        if block in template:
+            try:
+                parse(template[block])
+            except ValueError as exc:
+                return {"ok": False, "error": f"{block} 声明非法: {exc}"}
 
     currency_error = _validate_currency_declaration(template)
     if currency_error:

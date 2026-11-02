@@ -28,7 +28,7 @@ _EXPORTS = {
     "parse_player_roll": (".dice", "parse_player_roll"),
     "roll": (".dice", "roll"),
     "GameInstance": (".game_instance", "GameInstance"),
-    "GameRegistry": (".game_instance", "GameRegistry"),
+    "GameRegistry": (".game_registry", "GameRegistry"),
     "GameState": (".game_instance", "GameState"),
 }
 

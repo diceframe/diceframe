@@ -68,9 +68,7 @@ def _ccv3_json() -> bytes:
     return json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
 
 
-def _ccv3_png() -> bytes:
-    """A real PNG carrying the card JSON in a ``chara`` tEXt chunk."""
-
+def _png_with_text_chunks(*chunks: tuple[bytes, bytes]) -> bytes:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return (
             struct.pack(">I", len(data)) + kind + data
@@ -78,8 +76,15 @@ def _ccv3_png() -> bytes:
         )
 
     ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-    text = b"chara\x00" + json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"tEXt", text) + chunk(b"IEND", b"")
+    body = b"".join(chunk(kind, data) for kind, data in chunks)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + body + chunk(b"IEND", b"")
+
+
+def _ccv3_png() -> bytes:
+    """A real SillyTavern-style PNG: base64(JSON) in a ``chara`` tEXt chunk."""
+
+    payload = base64.b64encode(json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8"))
+    return _png_with_text_chunks((b"tEXt", b"chara\x00" + payload))
 
 
 @pytest.fixture()
@@ -151,6 +156,53 @@ def test_ccv3_png_import_commits_card_and_embedded_book(tmp_path, store):
     assert result["card"]["character_name"] == "Aster"
     assert result["lorebook"]["entries"] == 2
     assert len(store.list_book_entries(result["lorebook"]["book_id"])) == 2
+
+
+def test_raw_json_png_chunk_still_imports(tmp_path, store):
+    """旧版直接写原始 JSON（未 base64）的 PNG 仍然兼容。"""
+
+    raw_json = json.dumps(_ccv3_payload(), ensure_ascii=False).encode("utf-8")
+    png = _png_with_text_chunks((b"tEXt", b"chara\x00" + raw_json))
+
+    result = _import(tmp_path, store, png, "aster.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "Aster"
+
+
+def test_ccv3_keyword_wins_over_chara_and_ztxt_is_supported(tmp_path, store):
+    """V3 的 ``ccv3`` 关键字优先于 ``chara``，压缩的 zTXt chunk 也能读。"""
+
+    v2 = {"spec": "chara_card_v2", "data": {"name": "OldName"}}
+    v3_b64 = base64.b64encode(json.dumps(_ccv3_payload()).encode("utf-8"))
+    png = _png_with_text_chunks(
+        (b"tEXt", b"chara\x00" + base64.b64encode(json.dumps(v2).encode("utf-8"))),
+        (b"zTXt", b"ccv3\x00\x00" + zlib.compress(v3_b64)),
+    )
+
+    result = _import(tmp_path, store, png, "aster.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "Aster"
+
+
+def test_oversized_ztxt_chunk_is_rejected_not_expanded(tmp_path, store):
+    """压缩炸弹：解压后超限的 zTXt 不能被展开，按“未找到”处理。"""
+
+    bomb = zlib.compress(b"A" * 60_000_000)
+    png = _png_with_text_chunks((b"zTXt", b"ccv3\x00\x00" + bomb))
+
+    result = _import(tmp_path, store, png, "bomb.png", world_id="w1")
+
+    assert result["ok"] is False
+    assert "未找到角色卡数据" in result["error"]
+
+
+def test_png_without_card_chunk_reports_missing(tmp_path, store):
+    result = _import(tmp_path, store, _png_with_text_chunks(), "empty.png", world_id="w1")
+
+    assert result["ok"] is False
+    assert "未找到角色卡数据" in result["error"]
 
 
 def test_include_character_book_false_imports_card_only(tmp_path, store):
@@ -350,3 +402,87 @@ async def test_import_route_accepts_a_string_false_for_the_checkbox(tmp_path, st
         body = await response.json()
         assert body["ok"] is True
         assert "lorebook" not in body, "字符串 'false' 必须仍然是 false"
+
+
+# ---- PNG 文本 chunk 加固 -------------------------------------------------
+
+
+def test_unrelated_compressed_text_is_never_expanded(tmp_path, store, monkeypatch):
+    """关键字不是角色卡的 zTXt/iTXt 不解压，不能借它们消耗 CPU。"""
+
+    from src.engine import character_utils
+
+    expanded: list[int] = []
+    real = character_utils._bounded_decompress
+
+    def spy(data, limit=character_utils._MAX_PNG_TEXT_BYTES):
+        out = real(data, limit)
+        expanded.append(len(out))
+        return out
+
+    monkeypatch.setattr(character_utils, "_bounded_decompress", spy)
+    junk = zlib.compress(b"A" * 1_000_000)
+    payload = base64.b64encode(json.dumps(_ccv3_payload()).encode("utf-8"))
+    png = _png_with_text_chunks(
+        *[(b"zTXt", b"comment\x00\x00" + junk) for _ in range(5)],
+        (b"iTXt", b"comment\x00\x01\x00\x00\x00" + junk),
+        (b"tEXt", b"chara\x00" + payload),
+    )
+
+    result = _import(tmp_path, store, png, "aster.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert expanded == []
+
+
+def test_decompression_stops_once_the_file_budget_is_spent(monkeypatch):
+    from src.engine import character_utils
+
+    monkeypatch.setattr(character_utils, "_MAX_PNG_TEXT_BYTES", 1000)
+    payload = base64.b64encode(json.dumps(_ccv3_payload()).encode("utf-8"))
+    garbage = zlib.compress(b"x" * 600)
+    png = _png_with_text_chunks(
+        (b"zTXt", b"ccv3\x00\x00" + garbage),  # 600 of 1000: not a card
+        (b"zTXt", b"ccv3\x00\x00" + garbage),  # would need 600 of the last 400
+        (b"tEXt", b"chara\x00" + payload),
+    )
+
+    assert character_utils._parse_tavern_png_document(png) is None
+
+
+def test_broken_ccv3_falls_back_to_a_valid_chara(tmp_path, store):
+    from src.engine.character_utils import parse_tavern_card
+
+    v2 = {"spec": "chara_card_v2", "data": {"name": "OldName"}}
+    png = _png_with_text_chunks(
+        (b"tEXt", b"ccv3\x00" + base64.b64encode(b'{"spec": "chara_card_v3", "data": null}')),
+        (b"tEXt", b"chara\x00" + base64.b64encode(json.dumps(v2).encode("utf-8"))),
+    )
+    path = tmp_path / "mixed.png"
+    path.write_bytes(png)
+
+    assert parse_tavern_card(path)["name"] == "OldName"
+    result = _import(tmp_path, store, png, "mixed.png", world_id="w1")
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "OldName"
+
+
+def test_raw_json_chunk_with_non_utf8_bytes_still_imports(tmp_path, store):
+    raw = json.dumps({"spec": "chara_card_v2", "data": {"name": "Aster", "description": "caf_"}}).encode("utf-8")
+    raw = raw.replace(b"caf_", b"caf\xe9")  # Latin-1, as tEXt allows
+    png = _png_with_text_chunks((b"tEXt", b"chara\x00" + raw))
+
+    result = _import(tmp_path, store, png, "latin1.png", world_id="w1")
+
+    assert result["ok"] is True
+    assert result["card"]["character_name"] == "Aster"
+
+
+def test_deeply_nested_json_is_reported_not_raised(tmp_path):
+    from src.engine.character_utils import parse_character_card_document, parse_tavern_card
+
+    path = tmp_path / "deep.json"
+    path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+
+    assert "error" in parse_tavern_card(path)
+    assert "error" in parse_character_card_document(path)

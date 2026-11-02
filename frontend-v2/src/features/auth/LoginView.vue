@@ -7,6 +7,7 @@ import type { AppConfig } from '@/api/types'
 import { useLocale, type Locale } from '@/composables/useLocale'
 import { LOCALE_STORAGE_KEY, UI_LOCALES, uiLocaleLabel } from '@/i18n'
 import BrandLogo from '@/components/BrandLogo.vue'
+import AccessPasswordHelp from './AccessPasswordHelp.vue'
 
 const route = useRoute()
 const { t, locale, setLocale } = useLocale()
@@ -126,12 +127,13 @@ onMounted(() => {
           <p v-if="serverError" class="error-banner">{{ serverError }}</p>
         </div>
         <form v-if="!standalone || (serverConnected && serverNeedsPassword)" @submit.prevent="submit">
-          <label>{{ t('accessPassword') }}<input v-model="token" type="password" autocomplete="current-password" :autofocus="!standalone" placeholder="Access token"></label>
+          <label>{{ t('accessPassword') }}<input v-model="token" type="password" autocomplete="current-password" :autofocus="!standalone" :placeholder="t('accessPasswordPlaceholder')"></label>
           <button class="primary submit" :disabled="busy || serverBusy"><span>{{ busy ? t('validating') : t('enter') }}</span></button>
         </form>
         <p v-if="error" class="error-banner">{{ error }}</p>
         <div class="login-help">
           <p class="hint muted">{{ t('firstPasswordHintBefore') }} <code>data/access_token.txt</code>{{ t('firstPasswordHintAfter') }}</p>
+          <AccessPasswordHelp />
           <details class="forgot-password">
             <summary>{{ t('forgotPassword') }}</summary>
             <p>{{ t('resetPasswordHintBefore') }} <code>data/reset_access_password.txt</code>{{ t('resetPasswordHintAfter') }}</p>

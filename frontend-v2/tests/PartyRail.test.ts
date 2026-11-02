@@ -44,6 +44,19 @@ describe('party rail', () => {
     wrapper.unmount()
   })
 
+  it('keeps rule identity and every rule hint reachable in a default-closed disclosure', () => {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(PartyRail, {
+      props: { detail: {} as GameDetail, players: [], ruleMeta: { rule_name: 'Test rules', rule_version: '1.2', mechanics: 'Resolved on the server', attr_hint: 'Attributes remain authoritative', skill_hint: 'Skills use the selected rules' } },
+      global: { plugins: [i18n], stubs: { PortraitImage: true } },
+    })
+    const rules = wrapper.get('details.party-rail__recap')
+    expect(rules.attributes('open')).toBeUndefined()
+    expect(rules.get('summary').text()).toBe('规则提示')
+    for (const text of ['Test rules', '1.2', 'Resolved on the server', 'Attributes remain authoritative', 'Skills use the selected rules']) expect(rules.text()).toContain(text)
+    wrapper.unmount()
+  })
+
   it('explains that a general invite creates a bound character while existing roles use a claim link', () => {
     i18n.global.locale.value = 'zh-CN'
     const wrapper = mount(PartyRail, {
@@ -51,6 +64,9 @@ describe('party rail', () => {
       slots: { membersActions: '<button>邀请玩家</button>' },
       global: { plugins: [i18n], stubs: { PortraitImage: true } },
     })
+    const invite = wrapper.get('.party-rail__members-actions details')
+    expect(invite.attributes('open')).toBeUndefined()
+    expect(invite.get('summary').text()).toBe('邀请说明')
     expect(wrapper.get('.party-rail__invite-hint').text()).toContain('自动绑定')
     expect(wrapper.get('.party-rail__invite-hint').text()).toContain('认领链接')
     wrapper.unmount()

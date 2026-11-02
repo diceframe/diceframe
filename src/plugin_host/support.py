@@ -47,6 +47,7 @@ _CONTENT_CONTRIBUTIONS = {
     "classes": "class",
     "portraits": "portrait_asset",
     "scene_images": "scene_image_asset",
+    "standing_portraits": "standing_portrait",
     "map_definitions": "map_definition",
     "map_locations": "map_location",
     "map_icons": "map_icon",

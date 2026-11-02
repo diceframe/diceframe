@@ -25,6 +25,7 @@
     "@vicons/ionicons5": "0.13.0",
     "@vitejs/plugin-vue": "6.0.7",
     "dompurify": "^3.4.13",
+    "driver.js": "^1.10.2",
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.9",
     "naive-ui": "2.44.1",
