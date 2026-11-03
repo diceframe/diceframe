@@ -647,11 +647,10 @@ details:not([open])>:not(summary) {
 
 .portrait-edit-button>span:last-child {
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 50%;
   bottom: 4px;
-  transform: none;
-  min-width: 0;
+  transform: translateX(-50%);
+  width: max-content;
   max-width: calc(100% - 8px);
   padding: 1px 5px;
   box-sizing: border-box;

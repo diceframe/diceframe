@@ -10,8 +10,11 @@ describe('overflow layout contracts', () => {
   it('keeps the portrait edit hint inside the portrait button', () => {
     const css = source('../src/styles/shared.css')
     const rule = css.match(/\.portrait-edit-button>span:last-child\s*\{([\s\S]*?)\n\}/)?.[1] || ''
+    expect(rule).toContain('left: 50%')
+    expect(rule).toContain('transform: translateX(-50%)')
     expect(rule).toContain('bottom: 4px')
-    expect(rule).toContain('right: 4px')
+    expect(rule).toContain('width: max-content')
+    expect(rule).not.toContain('min-width: max-content')
     expect(rule).toContain('max-width: calc(100% - 8px)')
     expect(rule).toContain('text-overflow: ellipsis')
   })
