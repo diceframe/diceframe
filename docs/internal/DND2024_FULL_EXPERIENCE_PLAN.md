@@ -180,6 +180,28 @@
 
 #### 1D：物品原语（2026-10-29 新增）
 
+##### 切片顺序（2026-11-03 定）
+
+原计划只列了原语与归属，没有执行顺序与切片边界。以下顺序即依赖顺序，**顺序本身是契约**，执行侧不得重排或合并：
+
+| 切片 | 内容 | 依赖 | 验收载体 | 主要风险 |
+|---|---|---|---|---|
+| **D1** 物品身份与装备闭环 | content-pack item → 规则集 `item_ref` 映射（不复制机械）；补 8 护甲 + 23 武器；`versatile` 词条与消费者（`reach` 用既有 `range` 表达；`loading`/`two_handed`/`ammunition` 见 D1/D3 迁移债，无消费者不落字段） | 1C 合入（`category`/`strength_minimum`/`stealth_disadvantage`/`mastery` 是数据底座） | "战利品入包 → 装备 → 攻击/AC 正确"端到端；若 #646 的引导创建 e2e 确为护甲缺字段所致，直接转为 D1 首条用例 | content-pack item 不得承载机械；映射必须经 rewards → proposal → grant → inventory 全链透传，不能只改 catalog 合同 |
+| **D2** 同调系统 | canonical `attunement.refs`；容量派生（基础 3 + 修正，非常量）；单一门控访问器供 AC/攻击加值/激活/被动消费；短休绑定流程；结束条件（主动/死亡/换绑）；旧档迁移；**同款多件以数量守卫拒绝，不做 slot map 改造** | D1 | 测试内构造的 `+1 链甲衫 fixture（requires_attunement）` + 3 件占位物品覆盖三件上限、第 4 件拒绝、未同调无加值、同调后生效、死亡失效、复活需重绑；不写生产 SRD 内容 | canonical 装备当前 `dict.fromkeys` 去重，同款多件不可表达（数量守卫兜底，slot map 登记为 D2-1 债）；`requires_attunement` 字段与消费者**必须同切片落地**（无消费者不落 schema） |
+| **D3** 充能 + 激活动作 | 新 `activate_item` intent（照 `hide` 先例，**不复用** engine `consumable` 空壳）；charges 状态与消耗；per-item `recharge`（`dawn` 显式映射长休，仓库无世界时钟）；药水与弹药/消耗品计数；卷轴、医疗包与反应激活记迁移债 | D2（未同调不可激活） | 只允许治疗/回充等既有骰式管线；动作经济消耗正确；无新增随机判定分支 | 新 intent 需同步 validation / resolution / reducer / 探索层；充能初始化、同 ref 多件守卫与弹药字段必须有明确合同 |
+| **D3b** 耗尽销毁 | 充能耗尽后的 d20 判定 + 事件记录 + 哨兵骰测试 | D3 | 未声明销毁时零 RNG；声明且恰好耗尽时恰好消费一次 d20 | 独立成片的理由：引入新的随机判定分支，避免与 D3 激活逻辑同 PR |
+| **D4** 随机宝物表 | 表定义（嵌套 `table_ref` + 深度上限 + 防环）；骰式 + 整数区间（不重叠、完整覆盖）+ 稳定选取；事件记录掷值与落点；归属探索/结算层，不进 `combat.INTENT_TYPES` | 无数据依赖，可与 D1–D3 并行 | 记录骰值的事件重放结果一致、零重掷；嵌套表可终止 | 仓库无 RNG 播种契约，复现只能依赖事件骰迹；与 Wild Magic 仅"表原语"同族，意图层不可共用 |
+
+顺序原则三条：
+
+1. **先数据后机械**：D1 只补身份与装备数据，不含任何需要同调门控的字段——否则违反"无消费者的 schema 字段不落"。
+2. **门控先于消费者**：D2 必须早于 D3。同调是 `+N`、charges、激活动作、被动效果的共同前置；先做 charges 会让其验收在 D2 落地后整体返工。
+3. **RNG 隔离**：D1–D2 零 RNG；D3 只允许既有骰式管线（治疗骰、回充骰），**新增随机判定分支**（D3b 销毁判定、D4 随机表）各自成片，不与激活逻辑同 PR。
+
+任务书（2026-11-03 写齐，锚点基线 `9c2ca59d`）：`design/D1_ITEM_IDENTITY_TASK_SPEC_2026-11-03.md`、`design/D2_ATTUNEMENT_TASK_SPEC_2026-11-03.md`、`design/D3_ITEM_ACTIVATION_TASK_SPEC_2026-11-03.md`、`design/D3B_CHARGE_DESTROY_TASK_SPEC_2026-11-03.md`、`design/D4_RANDOM_TREASURE_TABLE_TASK_SPEC_2026-11-03.md`。
+
+写任务书时核实到、并已反映进各切片的三处事实：① engine `ACTION_KINDS` 的 `consumable` 只有准入白名单与管理员下拉项，无 handler/validation/resolution，机械激活只能走 dnd2024 `INTENT_TYPES`；② 仓库无"黎明"/世界时钟日概念，`recharge.on: dawn` 显式映射长休完成；③ canonical 装备投影 `dict.fromkeys` 去重，同款多件不可表达，D2 以数量守卫兜底而非引入实例 ID。
+
 ##### 现状：三套并存的物品系统（均已核实到代码）
 
 | 系统 | 数据 | 作用 |
@@ -193,7 +215,7 @@
 ##### 客观清单（2026-10-29 逐表清点）
 
 - 武器 **38**（简易近战 10 + 简易远程 4 + 军用近战 18 + 军用远程 6）：仓库 **15/38**，缺 23（battleaxe、rapier、warhammer、各类弩/火器等）；
-- 护甲 **14**（轻 3 + 中 5 + 重 4 + 盾）：仓库 **6/14**（缺 padded/hide/scale/breastplate/half plate/ring/splint/plate）；
+- 护甲 **13**（轻 3 + 中 5 + 重 4 + 盾；2026-11-03 复核，纠正原“14”计数）：1C 基线仓库 **5/13**（4 件护甲 + shield；robe 是 clothing 不计入），缺 padded/hide/scale/breastplate/half plate/ring/splint/plate 共 8 件；
 - 魔法物品**约 348 条**（DMG2024 第 7 章，按 `<H6>` 条目计）：武器/护甲/药水/戒指/权杖/卷轴/法杖/魔杖/奇物 9 类，含稀有度/激活/诅咒/智能物品/神器体系；仓库为零；
 - 冒险装备/坐骑载具/服务/装备包（现有 6 个）待逐表清点后补齐。
 
@@ -206,7 +228,7 @@
 | 护甲受训门控/力量要求/隐匿劣势 | S-P12 |
 | 多币种 CP/SP/EP/GP/PP（现为单 GP） | 数据 + 投影 |
 | 弹药/医疗包消耗追踪 | 消耗品计数（Healer 专长战地医师同源） |
-| attunement（绑定 3 件上限）、charges 计数、激活动作 | 新原语；engine `ACTION_KINDS` 已有 `consumable` 是切入点 |
+| attunement（绑定 3 件上限）、charges 计数、激活动作 | 新原语；机械激活进 dnd2024 `INTENT_TYPES`，engine `ACTION_KINDS` 的 `consumable` 仅服务管理员叙事扩展、不是机械切入点 |
 | +N 武器/护甲效果注入 | S-P10 + 切片 5 伤害 rider 复用 |
 | 药水/卷轴 | 消耗品动作 + 效果原语；卷轴走施法路径 |
 | 随机宝物表（DMG 随机魔法物品/宝藏/宝石/艺术品/金属条/圣物/奥秘/武备/器具） | 随机表原语（与 Wild Magic 涌动同族） |
@@ -277,8 +299,8 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 1B | P7：counterspell（施法反应窗口：打断施法） | ✅ 2026-10-30 执行完成并审核通过（任务书 v1.1 + 执行报告；`cast_spell` 先探 `_counter_spell_window`——非 triggered_damage/reaction_defense、带 V/S/M 任一成分、60 尺内存活敌人 `counterspell_dc>0` 且有反应即挂起 GM 决策（`cast_intent` 服务端深拷贝；decline/豁免成功经 `_spell_events` 原样重放）；counter 消耗敌方反应 + 施法者 con 豁免（bless d4、`auto_fail_saves` 免掷骰），失败只耗动作/附赠动作、法术位与免费施放资源不消耗，收尾审计事件 `dnd2024.spell.countered`；`reducer.py` 白名单缺口由审核端裁决以 v1.1 §3.7 单行授权扩入——忽略集注册、纯审计零状态） |
 | 1B | P9：revivify（复活原语 + dead 目标校验反转） | ✅ 2026-10-30 执行完成并审核通过（任务书 v1.1 + 执行报告审核端代录；`revive` 模式只发 `character.revived`（hp=1）事件——状态语义由 GM 复活路径共用的既有 reducer 处理器承载，零 RNG、不发 `resource.changed`、不经 healing 管线；validation 盟友集合追加 + dead 检查模式分支反转（revive 要求 dead 且 player-only，其它有益模式对 dead 仍拒绝）+ hp≤0 豁免；复活家族路线经 v1.1 修正——revivify 是唯一战斗内成员，raise dead / reincarnate / resurrection / true resurrection 走探索层 `exploration.cast_spell` 各自立项，revive 事件原语全家族复用） |
 | 1B 补充 | R1：复活家族探索层入口（revivify 战斗外 + 家族空响止血） | ✅ 2026-10-30 执行完成并审核通过（任务书 v1.1 + 执行报告；源起 P9 后体验审查——场合 B 战斗外 revivify 硬拒绝、场合 C 家族法术叙事兜底扣位空响，用户裁定分界线：确定性结算机械化、事实裁定归 GM。`revive_effects.py` 语义表五法术唯一数据源 + `is_fully_implemented` 整体判定——未实现语义整法术显式拒绝、不扣位、可读消息，绝不静默降级；revivify 战斗外完整闭环（`spell.cast` → `character.revived`，探索层 `_reduce_event` 镜像 P9 四状态语义）；raise_dead/resurrection 待 SP10 D20 聚合与长休衰减、reincarnate 待角色重建、true_resurrection 唤名永久 GM 通道） |
-| 1C | 共用原语 S-P1–S-P12（子职 / 专长 / 装备） | 🔶 12 份任务书已写齐、待执行（2026-10-30 完成，代码事实基线 HEAD `4ef1d33d`；核心 12 子职与专长需求已提出，P10/P11/AoE 依赖仍按原阶段执行。S-P6/S-P11 部分锚点位于 P7/P8 在途改动偏移区，建议排在 P7/P8 合入后执行，勿打断法术原语推进；S-P9 承接 SP3 §8 登记的受击反应注册表化迁移债销账。任务书：`design/SP1_IMPROVED_CRITICAL_TASK_SPEC_2026-10-30.md`、`design/SP2_DIE_MANIPULATION_TASK_SPEC_2026-10-30.md`、`design/SP3_D20_CHECK_WINDOW_TASK_SPEC_2026-10-30.md`、`design/SP4_DARK_ONES_BLESSING_TASK_SPEC_2026-10-30.md`、`design/SP5_DRACONIC_RESILIENCE_TASK_SPEC_2026-10-30.md`、`design/SP6_AURA_PASSIVES_TASK_SPEC_2026-10-30.md`、`design/SP7_SURVIVOR_TASK_SPEC_2026-10-30.md`、`design/SP8_HIDE_AND_BONUS_ACTION_TASK_SPEC_2026-10-30.md`、`design/SP9_RETALIATION_TASK_SPEC_2026-10-30.md`、`design/SP10_CONDITIONAL_CHECK_BONUS_TASK_SPEC_2026-10-30.md`、`design/SP11_WEAPON_MASTERY_TASK_SPEC_2026-10-30.md`、`design/SP12_ARMOR_TRAINING_GATING_TASK_SPEC_2026-10-30.md`） |
-| 1D | 物品原语（attunement / charges / 激活动作 / 随机宝物表） | ⬜ 未开始（+N 效果骑 S-P10 与切片 5 rider；现状核查 2026-10-29 完成） |
+| 1C | 共用原语 S-P1–S-P12（子职 / 专长 / 装备） | 🔶 12/12 已实现、待合入（任务书 2026-10-30 写齐，代码事实基线 HEAD `4ef1d33d`；PR #646（`pr/1c`）评审中——Backend/Frontend 绿，browser smoke 单用例红（引导创建等待「角色已通过规则检查」超时，desktop+mobile 两投影）；合入后转 ✅；核心 12 子职与专长需求已提出，P10/P11/AoE 依赖仍按原阶段执行。S-P6/S-P11 部分锚点位于 P7/P8 在途改动偏移区，建议排在 P7/P8 合入后执行，勿打断法术原语推进；S-P9 承接 SP3 §8 登记的受击反应注册表化迁移债销账。任务书：`design/SP1_IMPROVED_CRITICAL_TASK_SPEC_2026-10-30.md`、`design/SP2_DIE_MANIPULATION_TASK_SPEC_2026-10-30.md`、`design/SP3_D20_CHECK_WINDOW_TASK_SPEC_2026-10-30.md`、`design/SP4_DARK_ONES_BLESSING_TASK_SPEC_2026-10-30.md`、`design/SP5_DRACONIC_RESILIENCE_TASK_SPEC_2026-10-30.md`、`design/SP6_AURA_PASSIVES_TASK_SPEC_2026-10-30.md`、`design/SP7_SURVIVOR_TASK_SPEC_2026-10-30.md`、`design/SP8_HIDE_AND_BONUS_ACTION_TASK_SPEC_2026-10-30.md`、`design/SP9_RETALIATION_TASK_SPEC_2026-10-30.md`、`design/SP10_CONDITIONAL_CHECK_BONUS_TASK_SPEC_2026-10-30.md`、`design/SP11_WEAPON_MASTERY_TASK_SPEC_2026-10-30.md`、`design/SP12_ARMOR_TRAINING_GATING_TASK_SPEC_2026-10-30.md`） |
+| 1D | 物品原语（attunement / charges / 激活动作 / 随机宝物表） | 🔶 切片顺序已定、任务书 5 份已写齐待执行（2026-11-03：D1 → D2 → D3 → D3b，D4 可并行；任务书见 §1D 切片顺序节末清单，锚点基线 `9c2ca59d`；D1 待 #646 合入后开工；+N 效果骑 S-P10 与切片 5 rider；现状核查 2026-10-29 完成） |
 | 二 | 职业特性批量填充（幽灵 id → catalog） | ⬜ 未开始 |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
 | 二 | 子职分区 S0–S3（核心 48 → 三书 → 其它官方 → 第三方） | ⬜ 未开始（S0 先做 12 个 SRD 代表子职；S3 以 source-aware 解耦为前提） |
