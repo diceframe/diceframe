@@ -232,6 +232,54 @@ def _checked(events: list[dict], kind: str = "attack") -> dict:
     return next(event for event in events if event.get("type") == "check.resolved" and event.get("kind") == kind)
 
 
+def test_public_window_projection_hides_enemy_settlement_from_non_gm(runtime, sheets) -> None:
+    engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[20, 1])
+    for uid in ("gm", "p2"):
+        state = _state(instance)
+        actor_id = state["combat"]["initiative"][state["combat"]["turn_index"]]
+        _apply(engine, instance, {
+            "intent_id": f"end-before-window-{uid}", "type": "end_turn",
+            "expected_version": state["version"], "submitted_by": uid,
+            "actor_id": actor_id,
+        }, SequenceRng([]))
+    _enemy_attack(engine, instance, [15, 4], target_id="player:gm")
+
+    gm_view = runtime.gameplay_view(instance, "gm", True)
+    player_view = runtime.gameplay_view(instance, "p2", False)
+    outsider_view = runtime.gameplay_view(instance, "spectator", False)
+    gm_decision = gm_view["combat"]["pending_decisions"][0]
+    player_decision = player_view["combat"]["pending_decisions"][0]
+
+    assert gm_decision["settlement"]["weapon"]["damage"] == "1d6+2"
+    assert player_decision["window_code"] == "cutting_words_check"
+    assert "settlement" not in player_decision
+    assert "weapon" not in player_decision
+    assert outsider_view["combat"]["pending_decisions"] == []
+
+    player_actions = runtime.available_intents(instance, "p2")
+    action_decision = next(
+        item for action in player_actions if action.get("type") == "decision.resolve"
+        for item in action.get("decisions", [])
+    )
+    assert "settlement" not in action_decision
+    assert "weapon" not in action_decision
+
+    raw_result = {
+        "combat": {"pending_decisions": [gm_decision]},
+        "pending_decision": gm_decision,
+        "event_batch": {"events": [{"type": "dnd2024.decision.pending", **gm_decision}]},
+    }
+    projected = runtime.project_intent_result(instance, raw_result, "p2", False)
+    assert "settlement" not in projected["combat"]["pending_decisions"][0]
+    assert "settlement" not in projected["pending_decision"]
+    assert all(
+        event["type"] != "dnd2024.decision.pending"
+        or "settlement" not in event
+        for event in projected["event_batch"]["events"]
+    )
+    assert raw_result["combat"]["pending_decisions"][0]["settlement"]["weapon"]["damage"] == "1d6+2"
+
+
 WINDOW_EVENTS = {
     "intent.submitted", "dnd2024.decision.pending", "dnd2024.decision.cleared",
 }
@@ -1201,7 +1249,11 @@ def test_a_pending_damage_window_keeps_its_follow_up_through_a_save_load(
         row for row in engine.available_intents(restored, "p2")
         if row["type"] == "decision.resolve"
     ]
-    assert owner_actions[0]["decisions"] == _pending(restored)
+    public_decision = owner_actions[0]["decisions"][0]
+    assert public_decision["decision_id"] == stored["decision_id"]
+    assert public_decision["damage_event"] == stored["damage_event"]
+    assert "settlement" not in public_decision
+    assert "next_decision" not in public_decision
 
     events = _resolve(
         engine, restored, stored, "decline", by="p2", intent_id="decide-2",

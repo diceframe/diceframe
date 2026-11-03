@@ -52,6 +52,7 @@ from .reaction_spells import (
     CombatReactionSpellsMixin,
     HIT_REACTION_DECISION,
 )
+from .visibility import public_pending_decisions
 
 
 @dataclass(slots=True)
@@ -145,6 +146,7 @@ class Dnd2024CombatEngine(
         combat = state["combat"]
         version = int(state["version"])
         gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        viewer_is_gm = actor_id == gm_uid
         if combat.get("status") != "active":
             actions: list[dict[str, Any]] = []
             request = state.get("encounter_request")
@@ -195,7 +197,10 @@ class Dnd2024CombatEngine(
         if reactions:
             return [*communication, {
                 "type": "decision.resolve", "label": "Reaction spell",
-                "expected_version": version, "decisions": deepcopy(reactions),
+                "expected_version": version,
+                "decisions": public_pending_decisions(
+                    reactions, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                ),
             }]
         if actor_id == gm_uid:
             # 反制/机会攻击等决策指派给 GM，可能出现在非自身回合（例如
@@ -208,7 +213,10 @@ class Dnd2024CombatEngine(
             if gm_pending:
                 return [*communication, {
                     "type": "decision.resolve", "label": "Resolve reaction",
-                    "expected_version": version, "decisions": deepcopy(gm_pending),
+                    "expected_version": version,
+                    "decisions": public_pending_decisions(
+                        gm_pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                    ),
                 }]
         if current.startswith("enemy:"):
             return communication
@@ -226,14 +234,19 @@ class Dnd2024CombatEngine(
                     combat.get("economy", {}), pending[0],
                 )
                 return [*communication, {"type": "decision.resolve", "expected_version": version,
-                        "decisions": deepcopy(pending)}, *([{
+                        "decisions": public_pending_decisions(
+                            pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                        )}, *([{
                             "type": "cast_spell", "actor_id": current, "expected_version": version,
                             "spells": [row for row in spells if row["mode"] == "triggered_damage"],
                             "targets": self._all_targets(instance, combat),
                         }] if any(row["mode"] == "triggered_damage" for row in spells) else [])]
             return [*communication, {
                 "type": "decision.resolve", "label": "Resolve reaction",
-                "expected_version": version, "decisions": deepcopy(pending),
+                "expected_version": version,
+                "decisions": public_pending_decisions(
+                    pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                ),
             }]
         actor = self._actor_view(instance, combat, current)
         if actor["hp"] <= 0 and actor["kind"] == "player":
@@ -878,7 +891,9 @@ class Dnd2024CombatEngine(
             "combat": deepcopy(ruleset_runtime.state(instance).get("combat") or {}),
         }
 
-    def gameplay_view(self, instance: Any) -> dict[str, Any]:
+    def gameplay_view(
+        self, instance: Any, viewer_id: str = "", viewer_is_gm: bool = True,
+    ) -> dict[str, Any]:
         state = self.initialize_state(instance)
         combat = state["combat"]
         actors: list[dict[str, Any]] = []
@@ -922,7 +937,10 @@ class Dnd2024CombatEngine(
                 "position_mode": str(combat.get("position_mode") or "theater"),
                 "economy": deepcopy(combat.get("economy") or {}),
                 "reactions": deepcopy(combat.get("reactions") or {}),
-                "pending_decisions": deepcopy(combat.get("pending_decisions") or []),
+                "pending_decisions": public_pending_decisions(
+                    combat.get("pending_decisions") or [],
+                    viewer_id=viewer_id, viewer_is_gm=viewer_is_gm,
+                ),
                 "encounter_instance_id": str(combat.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(combat.get("encounter_preset_id") or ""),
                 "origin_step_id": str(combat.get("origin_step_id") or ""),

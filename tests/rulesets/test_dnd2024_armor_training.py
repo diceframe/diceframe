@@ -26,6 +26,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.events import EventBatchError
 
 from dnd2024_monk_common import SequenceRng
 
@@ -622,6 +623,26 @@ def test_repeated_load_and_combat_start_do_not_append_state(runtime) -> None:
         projected["ruleset_character"]["derived"]["armor_training"]
         == after["ruleset_character"]["derived"]["armor_training"]
     )
+
+
+def test_stale_combat_start_does_not_publish_legacy_repair(runtime) -> None:
+    legacy = _legacy_sheet(runtime, "stalwart_guardian", ["Chain Mail", "Shield"], 18)
+    instance = _loaded_instance(legacy)
+    before_sheet = deepcopy(instance.get_character_sheet("gm"))
+
+    resolved = runtime.resolve_intent(instance, {
+        "intent_id": "stale-legacy-start", "type": "combat.start",
+        "expected_version": 0, "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([20, 1]))
+    assert resolved["ok"] is True, resolved
+
+    # Simulate another authoritative write landing between resolve and apply.
+    ruleset_runtime.state(instance)["version"] = 1
+    with pytest.raises(EventBatchError, match="state version conflict"):
+        runtime.apply_event_batch(instance, resolved["event_batch"])
+
+    assert instance.get_character_sheet("gm") == before_sheet
+    assert ruleset_runtime.state(instance)["combat"]["status"] == "none"
 
 
 def test_legacy_repair_keeps_the_content_version(runtime) -> None:

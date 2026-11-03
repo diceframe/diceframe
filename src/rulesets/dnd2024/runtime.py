@@ -24,6 +24,7 @@ from src.adventures.graph_v2 import (
 from src.engine import progression
 from src.engine.legacy_game_projection import project_legacy_game_context
 from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
+from src.engine.staged_transaction import fork_domain_state
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
 )
@@ -448,10 +449,11 @@ class Dnd2024Runtime:
     ) -> dict[str, Any]:
         """Strip monster stat blocks from intent/automation payloads for non-GMs."""
 
-        del instance, viewer_id
         if viewer_is_gm:
             return result
-        return combat_visibility.public_intent_result(result)
+        return combat_visibility.public_intent_result(
+            result, viewer_id=viewer_id, viewer_is_gm=False,
+        )
 
     def configure_live_advancement(
         self, instance: Any, mode: str, authority: str,
@@ -1011,19 +1013,28 @@ class Dnd2024Runtime:
     def apply_event_batch(
         self, instance: Any, batch: dict[str, Any],
     ) -> dict[str, Any]:
+        locale = str(getattr(instance, "language", "") or "")
+        bundle = self.load_bundle(locale)
+        if str(batch.get("intent_type") or "") == "combat.start":
+            # The legacy armor repair is part of the combat.start transaction.
+            # Stage it before resolving the combat batch so a stale or malformed
+            # batch cannot leave character revisions/log entries behind.
+            staged = fork_domain_state(instance)
+            self._reconcile_party_before_combat(staged, bundle)
+            result = self._apply_event_batch_in_place(staged, batch, locale)
+            if result.get("applied"):
+                instance.replace_persisted_state_from(staged)
+            return result
+        return self._apply_event_batch_in_place(instance, batch, locale)
 
+    def _apply_event_batch_in_place(
+        self, instance: Any, batch: dict[str, Any], locale: str,
+    ) -> dict[str, Any]:
+        """Apply one batch to an already selected aggregate transaction."""
 
         # Campaign steps write the scene after the batch commits; reject an
         # unsupported notes slot before any ruleset state changes.
         module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
-        locale = str(getattr(instance, "language", "") or "")
-        bundle = self.load_bundle(locale)
-        if str(batch.get("intent_type") or "") == "combat.start":
-            # Saves written before the Armor Training slice carry no
-            # ``derived.armor_training`` and keep the old unconditional shield
-            # bonus.  Combat is where those facts first gate attacks, spells
-            # and Speed, so repair them once at that boundary.
-            self._reconcile_party_before_combat(instance, bundle)
         before_characters = {
             uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character"))
             for uid in getattr(instance, "players", {})
@@ -1084,7 +1095,9 @@ class Dnd2024Runtime:
         )
         access = self._encounter_access(instance, campaign)
         combat_engine = self._combat_engine(instance, access, locale)
-        view = combat_engine.gameplay_view(instance)
+        view = combat_engine.gameplay_view(
+            instance, viewer_id=viewer_id, viewer_is_gm=viewer_is_gm,
+        )
         request = ruleset_runtime.state(instance).get("encounter_request")
         if isinstance(request, dict):
             projected_request = deepcopy(request)
