@@ -183,8 +183,10 @@ class CharacterValidationMixin:
             class_feat_choices = {}
         class_feat_choices = class_feat_choices or {}
         if "fighting_style" in set((class_entity or {}).get("level_1_feature_ids") or []):
-            # 建卡期战斗风格：该特性本身就是专长的先决条件，因此选择是必填的。
-            self._validate_fighting_style_choice(class_feat_choices, errors)
+            # 建卡期战斗风格可选：仅当客户端显式给出选择时才校验其合法性。
+            # 引导/专家建卡尚无该控件，缺失时保持特性为未选择状态，不阻断建卡。
+            if "fighting_style" in class_feat_choices:
+                self._validate_fighting_style_choice(class_feat_choices, errors)
         elif class_feat_choices:
             errors.append("class_feature_feat_choices is not available to this class")
 
@@ -266,16 +268,17 @@ class CharacterValidationMixin:
     def _validate_fighting_style_choice(
         self, choices: dict[str, Any], errors: list[str],
     ) -> None:
-        """One catalog-declared fighting style feat must back the level-1 feature.
+        """Validate a supplied level-1 fighting style feat choice.
 
         The advancement feat catalog is the only authority: a reference it does
         not declare, or one whose category / prerequisite does not match, is a
-        draft error rather than a silently inert choice.
+        draft error rather than a silently inert choice. Omitting the choice is
+        allowed; the level-1 feature then stays unselected.
         """
 
         ref = choices.get("fighting_style")
         if not isinstance(ref, str) or not ref:
-            errors.append("fighting_style requires a fighting style feat choice")
+            errors.append("fighting style feat choice must be a feat reference")
             return
         catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
         feats = catalog.get("feats") if isinstance(catalog, dict) else None

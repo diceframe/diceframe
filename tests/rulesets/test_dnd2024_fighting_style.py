@@ -360,18 +360,20 @@ def test_fighter_build_records_the_fighting_style_feat_choice() -> None:
 
 
 # --------------------------------------------------------------------------
-# #2 the choice is mandatory and must name a declared fighting style
+# #2 the choice is optional at build time but must be declared when supplied
 # --------------------------------------------------------------------------
 
 
-def test_fighting_style_choice_fails_closed() -> None:
+def test_missing_fighting_style_choice_stays_unselected() -> None:
     runtime = Dnd2024Runtime()
+    character = fighter_sheet(runtime, fighting_style=None)["ruleset_character"]
 
-    missing = fighter_draft(runtime)
-    missing.pop("class_feature_feat_choices")
-    assert "fighting_style requires a fighting style feat choice" in (
-        runtime.validate_character(None, missing)
-    )
+    assert character["build"]["class_feature_feat_choices"] == {}
+    assert ARCHERY not in character["features"]["feat_refs"]
+
+
+def test_supplied_fighting_style_choice_fails_closed() -> None:
+    runtime = Dnd2024Runtime()
 
     monk = monk_draft(runtime)
     monk["class_feature_feat_choices"] = {"fighting_style": ARCHERY}
