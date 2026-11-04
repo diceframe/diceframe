@@ -1013,6 +1013,9 @@ class Dnd2024Runtime:
     def apply_event_batch(
         self, instance: Any, batch: dict[str, Any],
     ) -> dict[str, Any]:
+        # Campaign steps write the scene after the batch commits; reject an
+        # unsupported notes slot before loading content or changing ruleset state.
+        module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         locale = str(getattr(instance, "language", "") or "")
         bundle = self.load_bundle(locale)
         if str(batch.get("intent_type") or "") == "combat.start":
@@ -1032,9 +1035,6 @@ class Dnd2024Runtime:
     ) -> dict[str, Any]:
         """Apply one batch to an already selected aggregate transaction."""
 
-        # Campaign steps write the scene after the batch commits; reject an
-        # unsupported notes slot before any ruleset state changes.
-        module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         before_characters = {
             uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character"))
             for uid in getattr(instance, "players", {})
