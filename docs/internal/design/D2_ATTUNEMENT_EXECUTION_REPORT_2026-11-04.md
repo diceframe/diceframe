@@ -1,13 +1,13 @@
 # 切片执行报告 D2：同调系统（Attunement）
 
 - 日期：2026-11-04
-- 分支：`feat/dnd2024-2d-attunement`，基线 `34cbb98f`（D1 实现 head = `pr/1c` `e5ed9f89` + D1）
+- 分支：`feat/dnd2024-2d-attunement`，基线 `34cbb98f`（D1 实现 head = `pr/1c` `e5ed9f89` + D1）；复审后通过 merge `3088963a` 同步 D1 新 head（含最新 `pr/1c`），修正提交 `77f7fd10`
 - 任务书：`D2_ATTUNEMENT_TASK_SPEC_2026-11-03.md`
-- 状态：实现与验收完成（T1–T18 全部有对应覆盖）
+- 状态：实现与验收完成（T1–T18 全部有对应覆盖）；复审修正见 §10
 
 ## 1. 基线与行号漂移
 
-任务书写明基线为“D1 合入后的 main”，实际 1C/D1 尚未合入：D2 分支按 D1 head `34cbb98f` 继续叠加（与 D1 相同策略，基于 `pr/1c` `e5ed9f89`）。合入顺序仍为 1C → D1 → D2，未改变 `pr/1c` 内容。
+任务书写明基线为“D1 合入后的 main”，实际 1C/D1 尚未合入：D2 分支按 D1 head `34cbb98f` 继续叠加（与 D1 相同策略，基于 `pr/1c` `e5ed9f89`）。复审时 `pr/1c` 已前进到 `9b2428e8`，D2 通过 merge `3088963a` 同步 D1 新 head（`733b5d05`），未 force push；合入顺序仍为 1C → D1 → D2。
 
 任务书锚点行号以 `9c2ca59d` 为参照，执行时按当前代码重读并重新定位：
 
@@ -48,7 +48,7 @@
 
 ## 3. 测试矩阵结果
 
-新增 `tests/rulesets/test_dnd2024_attunement.py`，18 个用例；合成 fixture 只在测试内构造，未写入 SRD bundle。
+新增 `tests/rulesets/test_dnd2024_attunement.py`，复审后 21 个用例；合成 fixture 只在测试内构造，未写入 SRD bundle。
 
 | # | 结果 | 覆盖 |
 |---|---|---|
@@ -58,18 +58,18 @@
 | T3b | ✅ | 旧档已有 5 件、容量仅 3：解绑 1 件仍成功（新增绑定才受容量约束），便于存量为失配档收敛 |
 | T4 | ✅ | 基础 3；特性 `attunement_slot_bonus=3` → 4 件可绑（容量 6）；`"3"` 非整数与 9（容量 12）均抛 `AttunementError` |
 | T5 | ✅ | 满 3 件同短休“解绑 A + 绑定 D”：原子完成，A 失效、D 生效，事件顺序 `unattune(swap)` → `attune` |
-| T6 | ✅ | 重复绑定同一 ref：拒绝且 canonical 不变（rejection 事件不触发 reconcile 写入） |
-| T7 | ✅ | 解绑未同调 / 未持有 / 非魔法物品：分别拒绝；产生 `attunement_rejected` 审计事件（见 §4.3） |
-| T8 | ✅ | 同款两件：绑定与解绑均拒绝，reason 含 copies |
+| T6 | ✅ | 重复绑定同一 ref：拒绝、canonical 不变、revision 不刷（复审新增断言） |
+| T7 | ✅ | 解绑未同调 / 未持有 / 非魔法物品：分别拒绝；非魔法物品与绑定同因“does not require”拒绝，产生 `attunement_rejected` 审计事件（见 §4.3） |
+| T8 | ✅ | 同款两件（两行或单行 `qty: 2`）：绑定与解绑均拒绝，reason 含 copies |
 | T9 | ✅ | `runtime.unattune_item`：立即失效、无需短休、reason=manual、AC 回落 |
 | T10 | ✅ | 活动战斗 `validate_rest_context` 抛“战斗进行中不能休息” |
 | T11 | ✅ | HP 0 角色短休抛 `RestError`，同调不发生 |
 | T12 | ✅ | 两条死亡路径（死亡豁免失败 / 0 HP 受伤）：refs 清空、每件一条 reason=death 事件、ledger 同步、AC 立即回落 |
 | T13 | ✅ | 复活后 `dead` 清除、同调保持空、AC 保持未同调值 |
-| T14 | ✅ | 无 `attunement` 段：空集 + warning + 不删装备 + 不自动同调；畸形 refs 同样规范化 |
-| T15 | ✅ | 同调不变时 reconcile 返回 None（无 revision/日志）；换绑后必须重算 |
+| T14 | ✅ | 无 `attunement` 段：空集 + warning + 不删装备 + 不自动同调；畸形 refs 同样规范化；非 dict 段在休息投影中降级为空集而不抛错（复审新增） |
+| T15 | ✅ | 同调不变时 reconcile 返回 None（无 revision/日志）；换绑后 canonical 与 `derived.attuned_refs` 同步重算（复审新增断言） |
 | T16 | ✅ | 同调与解绑全链路无 RNG；短休入口不接收也不消费随机数 |
-| T17 | ✅ | 长休保留同调，仅恢复生命骰；长休携带 attunement 拒绝 |
+| T17 | ✅ | 长休保留同调，仅恢复生命骰；长休携带 attunement（含空对象）拒绝，短休非对象拒绝 |
 | T18 | ✅ | 既有 rulesets 全量回归零断言改动通过 |
 
 ## 4. 白名单符合性与偏差裁决
@@ -120,13 +120,14 @@
 ## 6. 验证命令与结果
 
 ```bash
-python -m pytest -q tests/rulesets/test_dnd2024_attunement.py      # 18 passed
-python -m pytest -q tests/rulesets                                    # 1083 passed
+python -m pytest -q tests/rulesets/test_dnd2024_attunement.py      # 复审后 21 passed
+python -m pytest -q tests/rulesets -k "rest or reconciliation or armor or combat or equipment"  # 复审后 281 passed
+python -m pytest -q tests/rulesets                                    # 原执行：1083 passed
 python -m pytest -q tests/test_rest_activity.py tests/test_assistant_party_rest_integration.py  # 11 passed
 ruff check <changed files>                                        # All checks passed
 ```
 
-全仓：见 §7（完成后回填）。
+全仓：见 §7（完成后回填；复审修正后未复跑全量）。
 
 ## 7. 全仓回归
 
@@ -138,18 +139,33 @@ python -m pytest -q --cov=src
 
 相对 D1 基线（8176 passed / 7 skipped / 81.64%）：新增 18 个用例全通过，无既有断言改动；覆盖率 +0.02pp。
 
+> 以上为原执行提交 `a046e8c9` 的数据。复审修正 `77f7fd10` 后未复跑全量，已复跑聚焦 21 passed 与相关子集 281 passed；全量结论待 PR 前最终复跑。
+
 ## 8. 迁移债
 
 | # | 债务 | 归属建议 |
 |---|---|---|
-| D2-1 | canonical 装备去重、同款多件不可表达；同调按 ref 记录并以数量守卫兜底 | canonical 装备 set → slot map 独立切片 |
+| D2-1 | canonical 装备去重、同款多件不可表达；同调按 ref 记录，守卫按 `qty` 求和（单行 `qty: 2` 也拒绝） | canonical 装备 set → slot map 独立切片 |
 | D2-2 | `attunement_restriction`（施法者/职业/生物类型限定）未落 | 阶段二对应内容需要时连同消费者落地 |
 | D2-3 | 离开 100 尺 24 小时自动结束未落 | 战术层/世界时钟具备后 |
 | D2-4 | 诅咒物品的“无法主动结束同调”未落 | 诅咒物品独立切片 |
 | D2-5 | 激活与充能的同调门控未接线 | D3 必须消费 `attuned_refs` |
 | D2-6 | 物品只有单个 `ac_bonus`，魔法盾的“基础盾加值 + 魔法加值”无法拆分；当前按任务书字面整段门控 | 魔法盾内容进场前补 `base/magic` 拆分或独立字段 |
+| D2-7 | 主动解绑只有 `runtime.unattune_item`，无 webui route/服务入口；任务书裁剪了前端面板，真实玩家当前只能经短休换绑 | 交互切片补最小服务入口，或明确 runtime 为唯一入口 |
+| D2-8 | 物品定义被内容删除后，围绕该 ref 的同调只能拒绝解绑，容量无法释放 | 内容迁移/删除流程需要清理同调段 |
 
 ## 9. 未闭环 / 后续
 
 - PR 未创建：分支推送后补 PR body（本报告可整段引用）。
-- 1C/D1 尚未合入；D2 以堆叠分支交付，合入顺序不变。
+- 1C/D1 尚未合入；D2 以堆叠分支交付。复审时 D2 通过 merge `3088963a` 同步 D1 新 head（含最新 `pr/1c`），合入顺序仍为 1C → D1 → D2。
+
+## 10. 复审修正（2026-11-04，`77f7fd10`）
+
+1. **数量守卫（T8 缺陷）**：`owned_ref_counts` 原按“行”计数，单行 `qty: 2` 可绕过重复绑定守卫；现按 `qty` 求和，并新增单行两件的绑定/解绑拒绝用例。
+2. **投影唯一入口**：`runtime._live_projection` 原直接读取 `canonical["attunement"]["refs"]`；现改经 owning module 的 `attunement_state_for_projection`。非 dict 段降级为空集，不再在短休/长休投影时抛 `AttributeError`（新增休息投影用例）。
+3. **容量 0**：镜像容量不再被 `or 3` 吞掉；`derived.attunement_slots` 畸形值安全回退为 3。
+4. **长休携带空对象**：`attunement={}` 现在与任何非 None 载荷一样拒绝；短休非对象仍拒绝。
+5. **解绑文案**：未同调 / 未持有 / 非魔法物品分别给出准确 reason；新增非魔法物品解绑用例。
+6. **测试强化**：T6 增加 revision 不刷断言；T15 增加 `derived.attuned_refs` 重算断言。
+7. **验证**：聚焦 `test_dnd2024_attunement.py` **21 passed**；相关子集 **281 passed**；ruff 全绿；全量套件未在本次复审复跑。
+8. **债务更新**：D2-1 明确为按 `qty` 求和；新增 D2-7（解绑入口）与 D2-8（内容删除后的同调残留）。
