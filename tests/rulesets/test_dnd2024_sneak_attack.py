@@ -657,3 +657,35 @@ def test_an_opportunity_attack_uses_the_hardest_hitting_melee_weapon() -> None:
     }, rolls=[15, 6])
 
     assert _damage_to(events, "enemy:goblin-1")["rolls"] == [6]
+
+
+def test_opportunity_attack_ranking_includes_enemy_damage_modifier() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:dagger"])
+    combat = ruleset_runtime.state(instance)["combat"]
+    combat["enemies"]["goblin-1"]["attacks"] = [
+        {
+            "id": "weak-d8", "name": "Weak", "attack_bonus": 4,
+            "damage": "1d8", "damage_modifier": 0,
+            "damage_type": "slashing", "range": 5,
+        },
+        {
+            "id": "strong-d4", "name": "Strong", "attack_bonus": 4,
+            "damage": "1d4", "damage_modifier": 10,
+            "damage_type": "slashing", "range": 5,
+        },
+    ]
+
+    events = _apply(engine, instance, {
+        "intent_id": "move-player", "type": "move",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": -10,
+    })
+    pending = next(event for event in events if event["type"] == "dnd2024.decision.pending")
+
+    events = _apply(engine, instance, {
+        "intent_id": "opportunity-enemy-bonus", "type": "decision.resolve",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "decision_id": pending["decision_id"], "option": "resolve",
+    }, rolls=[15, 4])
+
+    assert _damage_to(events, "player:gm")["amount"] == 14

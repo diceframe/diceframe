@@ -64,17 +64,17 @@ def formula_node_from_dice_formula(formula: str) -> dict[str, Any]:
     return node
 
 
-def average_damage(formula: str) -> float:
-    """Expected value of a catalog damage formula; 0 when it cannot be read."""
+def average_damage(formula: str, *, flat_bonus: float = 0.0) -> float:
+    """Expected value of a catalog damage formula plus a flat modifier."""
 
     text = str(formula or "")
     if _FLAT_DAMAGE_RE.fullmatch(text):
-        return float(text)
+        return float(text) + flat_bonus
     match = DICE_RE.fullmatch(text)
     if match is None:
         return 0.0
     count, sides, bonus = int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
-    return count * (sides + 1) / 2 + bonus
+    return count * (sides + 1) / 2 + bonus + flat_bonus
 
 
 def double_dice_counts(node: Mapping[str, Any]) -> dict[str, Any]:

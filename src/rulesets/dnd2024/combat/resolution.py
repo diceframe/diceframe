@@ -61,6 +61,35 @@ class CombatResolutionMixin:
 
     __slots__ = ()
 
+    @staticmethod
+    def _opportunity_attack_average(actor: dict[str, Any], attack: dict[str, Any]) -> float:
+        """Estimate the actual damage profile used for a reaction attack."""
+
+        flat_bonus = int(attack.get("damage_modifier", 0) or 0)
+        if actor["kind"] in {"player", "companion"}:
+            is_ranged_weapon = bool(attack.get("ranged"))
+            ability = "dex" if is_ranged_weapon else "str"
+            abilities = actor["abilities"]
+            if attack.get("finesse"):
+                ability = max(
+                    ("str", "dex"),
+                    key=lambda key: ability_modifier(abilities[key]),
+                )
+            choices = [
+                str(key) for key in attack.get("ability_choice") or []
+                if str(key) in abilities
+            ]
+            if choices and not is_ranged_weapon:
+                ability = max(
+                    choices,
+                    key=lambda key: ability_modifier(abilities[key]),
+                )
+            flat_bonus += ability_modifier(abilities[ability])
+        return average_damage(
+            str(attack.get("damage") or ""),
+            flat_bonus=flat_bonus,
+        )
+
     def _start_combat_event(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         enemies: dict[str, dict[str, Any]] = {}
         initiatives: list[dict[str, Any]] = []
@@ -1799,7 +1828,9 @@ class CombatResolutionMixin:
                 ]
                 # 反应只有一次：用平均伤害最高的近战档案（稳定排序，同分保持原顺序），
                 # 而不是列表里的第一把（游荡者会拿匕首而不是短剑）。
-                melee_attacks.sort(key=lambda attack: -average_damage(str(attack.get("damage") or "")))
+                melee_attacks.sort(
+                    key=lambda attack: -self._opportunity_attack_average(threat, attack),
+                )
                 if melee_attacks:
                     if threat["kind"] == "enemy":
                         attack_intent["attack_id"] = str(melee_attacks[0]["id"])
