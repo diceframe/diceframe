@@ -259,6 +259,11 @@ function moduleCount(item: ModuleSummary): number {
 .hub-world-card .hub-card-content h3 { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hub-world-card .hub-card-content p { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hub-world-card .hub-card-actions { margin-top: auto; margin-inline: 0; margin-bottom: 0; gap: .4rem; }
+.lorebook-card { min-width: 0; overflow: hidden; }
+.lorebook-card > div:not(.hub-card-actions) { min-width: 0; }
+.lorebook-card h3 { display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.lorebook-card .library-book-worlds { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lorebook-card p { display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
 .library-unavailable small { display: block; margin-top: .25rem; color: var(--df-text-muted); font-size: .72rem; }
 .hub-empty { padding: 1rem; border: 1px dashed var(--df-border-soft); border-radius: 12px; color: var(--df-text-muted); }
 @media (max-width: 720px) { .hub-section-heading { align-items: start; flex-direction: column; } .hub-section-heading .content-button { align-self: stretch; justify-content: center; } }

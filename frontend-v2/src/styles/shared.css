@@ -648,16 +648,22 @@ details:not([open])>:not(summary) {
 .portrait-edit-button>span:last-child {
   position: absolute;
   left: 50%;
-  bottom: -5px;
+  bottom: 4px;
   transform: translateX(-50%);
-  min-width: max-content;
+  width: max-content;
+  max-width: calc(100% - 8px);
   padding: 1px 5px;
+  box-sizing: border-box;
   border-radius: 999px;
   background: rgba(12,14,14,.9);
   border: 1px solid rgba(242,207,131,.42);
   color: var(--df-accent-strong);
   font-size: 9px;
   line-height: 1.4;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   opacity: 0;
   transition: opacity .15s;
 }
