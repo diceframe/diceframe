@@ -92,6 +92,7 @@ async def fetch_text(
     *,
     force_refresh: bool = False,
     allow_cached: bool = True,
+    mirror_manager: Any | None = None,
 ) -> str:
     """Fetch a public content path, with optional cache bypass for legal originals."""
     key = _validate_path(path)
@@ -104,7 +105,11 @@ async def fetch_text(
 
     task = _INFLIGHT.get(key)
     if task is None:
-        task = asyncio.create_task(_fetch_remote(key))
+        task = asyncio.create_task(
+            _fetch_remote(key, mirror_manager=mirror_manager)
+            if mirror_manager is not None
+            else _fetch_remote(key)
+        )
         _INFLIGHT[key] = task
 
         def _cleanup(done: asyncio.Task[str]) -> None:
@@ -139,12 +144,14 @@ async def fetch_json(
     *,
     force_refresh: bool = False,
     allow_cached: bool = True,
+    mirror_manager: Any | None = None,
 ) -> dict[str, Any] | None:
     text = await fetch_text(
         cache_dir,
         path,
         force_refresh=force_refresh,
         allow_cached=allow_cached,
+        mirror_manager=mirror_manager,
     )
     if not text:
         return None
@@ -155,7 +162,23 @@ async def fetch_json(
     return value if isinstance(value, dict) else None
 
 
-async def _fetch_remote(path: str) -> str:
+async def _fetch_remote(path: str, *, mirror_manager: Any | None = None) -> str:
+    if mirror_manager is not None:
+        primary = os.getenv("DICEFRAME_CONTENT_BASE_URL", DEFAULT_BASE_URL).strip().rstrip("/")
+        if primary == DEFAULT_BASE_URL:
+            try:
+                result = await mirror_manager.fetch_github_url(
+                    f"{DEFAULT_BASE_URL}/{path}",
+                    binary=False,
+                    max_bytes=_MAX_BYTES,
+                    resolve=False,
+                )
+                if result.ok and isinstance(result.data, str) and result.data.strip():
+                    return result.data
+            except Exception:
+                # Mirror configuration is an availability aid; retain the
+                # existing direct-source and cache fallback when it fails.
+                pass
     timeout = aiohttp.ClientTimeout(total=_PER_SOURCE_TIMEOUT)
     headers = {"User-Agent": "DiceFrame content"}
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
@@ -187,8 +210,9 @@ async def _fetch_one(session: aiohttp.ClientSession, url: str) -> str:
 class PublicContentService:
     """Bounded public-content fetcher rooted at one optional disk cache."""
 
-    def __init__(self, cache_dir: Path | None = None) -> None:
+    def __init__(self, cache_dir: Path | None = None, *, mirror_manager: Any | None = None) -> None:
         self._cache_dir = cache_dir
+        self._mirror_manager = mirror_manager
 
     async def fetch_text(
         self,
@@ -202,6 +226,7 @@ class PublicContentService:
             path,
             force_refresh=force_refresh,
             allow_cached=allow_cached,
+            mirror_manager=self._mirror_manager,
         )
 
     async def fetch_json(
@@ -216,6 +241,7 @@ class PublicContentService:
             path,
             force_refresh=force_refresh,
             allow_cached=allow_cached,
+            mirror_manager=self._mirror_manager,
         )
 
     def disk_cache_age(self, path: str) -> float | None:

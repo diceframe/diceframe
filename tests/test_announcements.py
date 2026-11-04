@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +64,29 @@ async def test_online_success_returns_content_and_hash(tmp_path, monkeypatch):
     assert result["content"] == "# 你好\n公告"
     assert len(result["hash"]) == 16
     assert result["stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_public_content_uses_configured_github_mirrors(tmp_path):
+    calls = []
+
+    class MirrorManager:
+        async def fetch_github_url(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return SimpleNamespace(ok=True, data="mirrored content")
+
+    service = content_service.PublicContentService(
+        tmp_path,
+        mirror_manager=MirrorManager(),
+    )
+
+    result = await service.fetch_text("manifest.json", force_refresh=True, allow_cached=False)
+
+    assert result == "mirrored content"
+    assert calls == [(
+        "https://raw.githubusercontent.com/diceframe/diceframe-content/main/content/manifest.json",
+        {"binary": False, "max_bytes": content_service._MAX_BYTES, "resolve": False},
+    )]
 
 
 @pytest.mark.asyncio

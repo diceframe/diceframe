@@ -162,6 +162,7 @@ class WebAPI:
                  speech_service=None, asr_service=None, imagegen_service=None,
                  ruleset_registry: RulesetRuntimeRegistry | None = None,
                  content_cache_dir: Path | None = None,
+                 content_mirrors: Any | None = None,
                  config_state: dict | None = None,
                  save_config: Callable[[], None] | None = None,
                  assistant_agent_max_tokens: int = 4096,
@@ -399,7 +400,10 @@ class WebAPI:
             load_rule_for_game=self._load_rule_for_game,
             ruleset_registry=self._ruleset_registry,
         )
-        self._content = content.PublicContentService(content_cache_dir)
+        self._content = content.PublicContentService(
+            content_cache_dir,
+            mirror_manager=content_mirrors,
+        )
         self._legal = legal.LegalService(
             legal.LegalDependencies(
                 fetch_public_json=self.fetch_public_content_json,

@@ -258,6 +258,7 @@ class RuntimeComposition:
             imagegen_service=imagegen_service,
             ruleset_registry=getattr(subsystems, "ruleset_registry", None),
             content_cache_dir=self.paths.data_dir / "content-cache",
+            content_mirrors=getattr(plugin_host, "mirrors", None),
             config_state=self.state,
             save_config=self.save_config,
         )
