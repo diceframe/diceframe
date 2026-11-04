@@ -1,13 +1,13 @@
 # 切片执行报告 D2：同调系统（Attunement）
 
 - 日期：2026-11-04
-- 分支：`feat/dnd2024-2d-attunement`，基线 `34cbb98f`（D1 实现 head = `pr/1c` `e5ed9f89` + D1）；复审后通过 merge `3088963a` 同步 D1 新 head（含最新 `pr/1c`），修正提交 `77f7fd10`
+- 分支：`feat/dnd2024-2d-attunement`，基线 `34cbb98f`（D1 实现 head = `pr/1c` `e5ed9f89` + D1）；复审后通过 merge `3088963a` 同步 D1 新 head（含最新 `pr/1c`），修正提交 `77f7fd10`，再通过 merge `531a8539` 同步上游 main `81a56f16`
 - 任务书：`D2_ATTUNEMENT_TASK_SPEC_2026-11-03.md`
 - 状态：实现与验收完成（T1–T18 全部有对应覆盖）；复审修正见 §10
 
 ## 1. 基线与行号漂移
 
-任务书写明基线为“D1 合入后的 main”，实际 1C/D1 尚未合入：D2 分支按 D1 head `34cbb98f` 继续叠加（与 D1 相同策略，基于 `pr/1c` `e5ed9f89`）。复审时 `pr/1c` 已前进到 `9b2428e8`，D2 通过 merge `3088963a` 同步 D1 新 head（`733b5d05`），未 force push；合入顺序仍为 1C → D1 → D2。
+任务书写明基线为“D1 合入后的 main”，实际 1C/D1 尚未合入：D2 分支按 D1 head `34cbb98f` 继续叠加（与 D1 相同策略，基于 `pr/1c` `e5ed9f89`）。复审时 `pr/1c` 已前进到 `9b2428e8`，D2 通过 merge `3088963a` 同步 D1 新 head（`733b5d05`），未 force push。随后上游以 merge commit `1ba1a11f` 合并 PR #646（1C 进入 `diceframe/diceframe:main`），D2 再通过 merge `531a8539` 同步上游 main `81a56f16`（与 D1 的 merge `059a1f3b` 一并进入）；合入顺序为 1C（已完成）→ D1 → D2。
 
 任务书锚点行号以 `9c2ca59d` 为参照，执行时按当前代码重读并重新定位：
 
@@ -156,8 +156,8 @@ python -m pytest -q --cov=src
 
 ## 9. 未闭环 / 后续
 
-- PR 未创建：分支推送后补 PR body（本报告可整段引用）。
-- 1C/D1 尚未合入；D2 以堆叠分支交付。复审时 D2 通过 merge `3088963a` 同步 D1 新 head（含最新 `pr/1c`），合入顺序仍为 1C → D1 → D2。
+- PR 未创建：分支推送后补 PR body（本报告可整段引用）；PR 目标为 `diceframe/diceframe:main`。
+- 1C 已由上游 PR #646（merge `1ba1a11f`）合入 main；D1 尚未合入。D2 以堆叠分支交付，复审时已通过 merge `531a8539` 同步上游 main `81a56f16`，合入顺序为 1C（完成）→ D1 → D2。
 
 ## 10. 复审修正（2026-11-04，`77f7fd10`）
 
@@ -169,3 +169,4 @@ python -m pytest -q --cov=src
 6. **测试强化**：T6 增加 revision 不刷断言；T15 增加 `derived.attuned_refs` 重算断言。
 7. **验证**：聚焦 `test_dnd2024_attunement.py` **21 passed**；相关子集 **281 passed**；ruff 全绿；全量套件未在本次复审复跑。
 8. **债务更新**：D2-1 明确为按 `qty` 求和；新增 D2-7（解绑入口）与 D2-8（内容删除后的同调残留）。
+9. **上游基线同步**：上游以 merge commit `1ba1a11f` 合入 PR #646（head `9b2428e8`，未改写历史）；D2 通过 merge `531a8539` 同步上游 main `81a56f16`。合并后聚焦 **21 passed**、相关子集 **281 passed**；上游仅新增前端提交，未触碰本切片文件。

@@ -3,7 +3,7 @@
 - 对应任务书：`D1_ITEM_IDENTITY_TASK_SPEC_2026-11-03.md`
 - 执行日期：2026-11-04
 - 代码分支：`feat/dnd2024-1d-items`（叠加在 `pr/1c` 之上）
-- 提交：`e9ecb11b`（实现）、`34cbb98f`（验收补齐）、`ceb71ec6`（合并最新 `pr/1c`）、`733b5d05`（审核修正）
+- 提交：`e9ecb11b`（实现）、`34cbb98f`（验收补齐）、`ceb71ec6`（合并最新 `pr/1c`）、`733b5d05`（审核修正）、`059a1f3b`（合并上游 main）
 - 状态：**实现与验收完成**（2026-11-04；全量套件、T12 与 browser smoke 均已闭环，见 §7）；复审后追加数据修正与基线同步，见 §7.5
 
 ## 1. 基线与行号漂移
@@ -13,7 +13,8 @@
 | 任务书声明锚点基线 | `9c2ca59d` |
 | 实际执行基线（PR #646 head） | `e5ed9f89` |
 | 复审时同步基线（最新 `pr/1c`） | `9b2428e8`（merge `ceb71ec6`） |
-| 上游 main | `fae083bc`（已被 `pr/1c` 包含，无需 rebase） |
+| 1C 上游合并（PR #646） | `1ba1a11f`（merge commit；head `9b2428e8` 未改写） |
+| 复审后同步上游 main | `81a56f16`（merge `059a1f3b`，仅 3 个前端提交） |
 
 `e5ed9f89` 相对 `9c2ca59d` 只多一条提交（fighting style 构建期可选），未触碰 D1 白名单内任何文件，**锚点未漂移**。逐文件核对结果：
 
@@ -133,14 +134,15 @@ SRD 5.2.1 的 blowgun 伤害为固定 `1`，无法通过 `DICE_RE`，故 `combat
 1. **全仓测试已跑完**：`pytest -q --cov=src` → **8176 passed, 7 skipped**，总覆盖率 **81.64%**（阈值 60%），用时 30:38。`tests/rulesets` 单独复跑 1065 passed。原 §4 的 100 passed 缺口由本次全量结果关闭；`tests/rulesets/test_bundle_loader.py` 的物品期望值已随数据从 50 更新为 81（该断言此前是 D1 数据落地后唯一的全量红灯）。
 2. **T12 已补齐**：`test_two_handed_die_feeds_the_maximize_pipeline`（S-P2：单手 8 / 双手 10 / 重击后 20，空 RNG 证零消耗）与 `test_two_handed_attack_keeps_the_conditional_check_bonus`（S-P10：祝福 d4 = 3，伤害仍取双手 d10）。
 3. **browser smoke 已复跑**：`e2e/dnd2024-workspace.spec.ts` 在 desktop 与 mobile 两个 project 下各 **11 passed**，覆盖引导创建（原 #646 红灯用例）与 1C 的 Lucky spend、Cutting Words damage window 两个窗口用例。
-4. **PR 未创建**：`feat/dnd2024-1d-items` 已推送至 origin（`e9ecb11b..34cbb98f`），PR body 待补（本报告可整段引用）。
+4. **PR 未创建**：`feat/dnd2024-1d-items` 已推送至 origin（`34cbb98f..059a1f3b`），PR body 待补；PR 目标应为 `diceframe/diceframe:main`（1C 已在 base 中，diff 只显示 D1 自身，本报告可整段引用）。
 
 ## 7.5 复审修正（2026-11-04）
 
 1. **基线同步**：`origin/pr/1c` 已前进到 `9b2428e8`（新增两个 fix）。D1 以 merge 提交 `ceb71ec6` 合入最新 `pr/1c`，未 force push；合并后四文件 **102 passed**。
-2. **数据修正**：`spear` 的 weapon mastery 由 `sap` 改为 SRD 5.2.1 的 `topple`（既有数据错误，非本切片新增），同步更新 `MASTERY_BY_WEAPON`；四文件 **102 passed**。
-3. **玩家可达性**：`two_handed` 目前仅 GM 原始 intent / API 可达，见偏差 6 与 D1-6；核心机制、测试与数据未受影响。
-4. 本次复审未改动 D1 的其它实现；`pr/1c` 的 1C 测试在合并后保持绿。
+2. **1C 已被上游合并**：PR #646 于 2026-11-04 以上游 merge commit `1ba1a11f` 合入 `diceframe/diceframe:main`（head `9b2428e8` 未改写、无 squash/rebase、合并树与本分支一致）。D1 以 merge `059a1f3b` 同步上游 main `81a56f16`（新增 3 个前端提交）；合并后四文件 **102 passed**。
+3. **数据修正**：`spear` 的 weapon mastery 由 `sap` 改为 SRD 5.2.1 的 `topple`（既有数据错误，非本切片新增），同步更新 `MASTERY_BY_WEAPON`；四文件 **102 passed**。
+4. **玩家可达性**：`two_handed` 目前仅 GM 原始 intent / API 可达，见偏差 6 与 D1-6；核心机制、测试与数据未受影响。
+5. 本次复审未改动 D1 的其它实现；`pr/1c` 的 1C 测试在合并后保持绿。
 
 ## 8. 完成判据
 
