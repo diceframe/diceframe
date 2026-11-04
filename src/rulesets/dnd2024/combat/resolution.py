@@ -8,6 +8,7 @@ from typing import Any
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from .action_adapter import (
     attack_damage_node,
+    average_damage,
     double_dice_counts,
     formula_node_from_dice_formula,
     heal_ability_modifier_node,
@@ -1796,6 +1797,9 @@ class CombatResolutionMixin:
                     attack for attack in self._available_attacks(threat)
                     if int(attack.get("range") or 0) <= 5
                 ]
+                # 反应只有一次：用平均伤害最高的近战档案（稳定排序，同分保持原顺序），
+                # 而不是列表里的第一把（游荡者会拿匕首而不是短剑）。
+                melee_attacks.sort(key=lambda attack: -average_damage(str(attack.get("damage") or "")))
                 if melee_attacks:
                     if threat["kind"] == "enemy":
                         attack_intent["attack_id"] = str(melee_attacks[0]["id"])

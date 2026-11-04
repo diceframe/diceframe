@@ -64,6 +64,19 @@ def formula_node_from_dice_formula(formula: str) -> dict[str, Any]:
     return node
 
 
+def average_damage(formula: str) -> float:
+    """Expected value of a catalog damage formula; 0 when it cannot be read."""
+
+    text = str(formula or "")
+    if _FLAT_DAMAGE_RE.fullmatch(text):
+        return float(text)
+    match = DICE_RE.fullmatch(text)
+    if match is None:
+        return 0.0
+    count, sides, bonus = int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+    return count * (sides + 1) / 2 + bonus
+
+
 def double_dice_counts(node: Mapping[str, Any]) -> dict[str, Any]:
     """重击语义：把 AST 中每个骰节点的骰数翻倍（D&D 专属规则留在本层）。"""
 

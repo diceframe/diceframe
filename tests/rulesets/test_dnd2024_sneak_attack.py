@@ -636,3 +636,24 @@ def test_divine_smite_decline_and_cast_both_keep_sneak_attack_once(mode: str) ->
 
     assert [event["type"] for event in events].count("dnd2024.feature.used") == 1
     assert _feature_usage(instance)["player:gm"]["feature_ids"] == ["sneak_attack"]
+
+
+def test_an_opportunity_attack_uses_the_hardest_hitting_melee_weapon() -> None:
+    # Dagger (1d4) is listed first; the reaction should still swing the 1d6 shortsword.
+    runtime, engine, instance = _instance(equipment=["item:dagger", "item:shortsword"])
+    _end_turn(engine, instance, "player:gm")
+    events = _apply(engine, instance, {
+        "intent_id": "move-goblin", "type": "move",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "enemy:goblin-1", "distance": 10,
+    })
+    pending = next(event for event in events if event["type"] == "dnd2024.decision.pending")
+
+    # SequenceRng asserts the die size: a 6 is only legal on the shortsword's d6.
+    events = _apply(engine, instance, {
+        "intent_id": "opportunity-1", "type": "decision.resolve",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "decision_id": pending["decision_id"], "option": "resolve",
+    }, rolls=[15, 6])
+
+    assert _damage_to(events, "enemy:goblin-1")["rolls"] == [6]
