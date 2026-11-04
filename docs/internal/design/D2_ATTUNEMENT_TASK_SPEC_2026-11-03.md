@@ -4,7 +4,7 @@
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1D 切片顺序表 D2 ——"canonical `attunement` 段 + 容量派生 + 单一门控访问器 + 短休绑定流程 + 结束条件 + 旧档迁移"
 - 前置依赖：D1 合入（物品身份与装备数据已闭环）。本切片是 D3（充能/激活）与 +N 注入的共同前置，**不得与 D3 并行开工**。
 - 锚点基线：D1 合入后的 main；文中行号以 `9c2ca59d`（PR #646 head）为参照，执行侧必须重读核对漂移。
-- 状态：未开工
+- 状态：实现与验收完成（2026-11-04，`feat/dnd2024-2d-attunement`）；结果见 `D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`
 
 ## 1. 规则语义与原文出处
 
