@@ -132,8 +132,9 @@ onMounted(() => {
         </form>
         <p v-if="error" class="error-banner">{{ error }}</p>
         <div class="login-help">
-          <p class="hint muted">{{ t('firstPasswordHintBefore') }} <code>data/access_token.txt</code>{{ t('firstPasswordHintAfter') }}</p>
-          <AccessPasswordHelp />
+          <p class="hint muted login-password-hint">
+            {{ t('firstPasswordHintBefore') }} <code>data/access_token.txt</code>{{ t('firstPasswordHintAfter') }}<AccessPasswordHelp />
+          </p>
           <details class="forgot-password">
             <summary>{{ t('forgotPassword') }}</summary>
             <p>{{ t('resetPasswordHintBefore') }} <code>data/reset_access_password.txt</code>{{ t('resetPasswordHintAfter') }}</p>

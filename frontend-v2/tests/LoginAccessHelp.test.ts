@@ -1,7 +1,13 @@
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { i18n } from '../src/i18n'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { i18n, LOCALE_STORAGE_KEY } from '../src/i18n'
 import AccessPasswordHelp from '../src/features/auth/AccessPasswordHelp.vue'
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+}))
+
+import LoginView from '../src/features/auth/LoginView.vue'
 
 describe('AccessPasswordHelp', () => {
   beforeEach(() => {
@@ -30,6 +36,20 @@ describe('AccessPasswordHelp', () => {
     i18n.global.locale.value = 'en'
     const wrapper = mount(AccessPasswordHelp, { global: { plugins: [i18n] }, attachTo: document.body })
     expect(wrapper.get('[data-testid="access-help-open"]').text()).toBe('Where is the access password?')
+    wrapper.unmount()
+  })
+
+  it('keeps the access-password guide in the first-start hint instead of a separate row', () => {
+    vi.stubGlobal('__DF_STANDALONE__', false)
+    i18n.global.locale.value = 'zh-CN'
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-CN')
+    const wrapper = mount(LoginView, { global: { plugins: [i18n] }, attachTo: document.body })
+
+    const firstStartHint = wrapper.get('.login-password-hint')
+    const accessHelp = firstStartHint.get('[data-testid="access-help-open"]')
+    expect(getComputedStyle(accessHelp.element).display).not.toBe('block')
+    expect(wrapper.find('.login-help > [data-testid="access-help-open"]').exists()).toBe(false)
+
     wrapper.unmount()
   })
 })
