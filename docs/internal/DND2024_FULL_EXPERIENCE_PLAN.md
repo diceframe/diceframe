@@ -200,7 +200,7 @@
 
 任务书（2026-11-03 写齐，锚点基线 `9c2ca59d`）：`design/D1_ITEM_IDENTITY_TASK_SPEC_2026-11-03.md`、`design/D2_ATTUNEMENT_TASK_SPEC_2026-11-03.md`、`design/D3_ITEM_ACTIVATION_TASK_SPEC_2026-11-03.md`、`design/D3B_CHARGE_DESTROY_TASK_SPEC_2026-11-03.md`、`design/D4_RANDOM_TREASURE_TABLE_TASK_SPEC_2026-11-03.md`。
 
-D1 执行报告：`design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含白名单三处偏差裁决、全量测试与 browser smoke 结果）。D2 执行报告：`design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T18 结果、死亡/迁移/容量偏差裁决与 D2-1–D2-6 债务）。
+D1 执行报告：`design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含白名单三处偏差裁决、全量测试与 browser smoke 结果）。D2 执行报告：`design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T18 结果、死亡/迁移/容量偏差裁决与 D2-1–D2-8 债务）。D3 执行报告：`design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T20 结果、`dawn`→长休映射、数量扣减落点裁决与 D3-1–D3-12 债务）。
 
 写任务书时核实到、并已反映进各切片的三处事实：① engine `ACTION_KINDS` 的 `consumable` 只有准入白名单与管理员下拉项，无 handler/validation/resolution，机械激活只能走 dnd2024 `INTENT_TYPES`；② 仓库无"黎明"/世界时钟日概念，`recharge.on: dawn` 显式映射长休完成；③ canonical 装备投影 `dict.fromkeys` 去重，同款多件不可表达，D2 以数量守卫兜底而非引入实例 ID。
 
