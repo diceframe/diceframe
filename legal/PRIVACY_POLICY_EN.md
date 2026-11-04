@@ -73,3 +73,4 @@ Material changes to purposes, data types, or sharing will update the version and
 The person or organization controlling a DiceFrame device or server determines processing of local games, accounts, shared links, and server logs. For DiceFrame Hub at `api.diceframe.com`, the DiceFrame project maintainers are responsible for processing they actually operate. DiceFrame is an open-source collaboration and does not represent model providers, plugin authors, GitHub, Cloudflare, NapCat, or other platforms.
 
 Privacy or deletion requests may be raised through [GitHub Issues](https://github.com/diceframe/diceframe/issues). Do not include installation tokens, API keys, access passwords, private chats, or full saves in a public Issue; maintainers can provide a safer follow-up method when verification is needed.
+

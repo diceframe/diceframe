@@ -395,13 +395,14 @@ class MirrorManager:
                         if max_bytes and response.content_length and response.content_length > max_bytes:
                             last_error = f"下载内容超过限制：{max_bytes} bytes"
                             continue
-                        if binary and max_bytes:
+                        if max_bytes:
                             chunks = bytearray()
                             async for chunk in response.content.iter_chunked(64 * 1024):
                                 chunks.extend(chunk)
                                 if len(chunks) > max_bytes:
                                     raise ValueError(f"下载内容超过限制：{max_bytes} bytes")
-                            data: str | bytes = bytes(chunks)
+                            raw = bytes(chunks)
+                            data: str | bytes = raw if binary else raw.decode("utf-8")
                         else:
                             data = await response.read() if binary else await response.text()
                         return FetchResult(

@@ -166,6 +166,52 @@ def test_streaming_download_timeout_has_no_total_deadline():
     assert timeout.sock_read == 60
 
 
+@pytest.mark.asyncio
+async def test_text_fetch_enforces_max_bytes_for_chunked_responses(monkeypatch, tmp_path):
+    class FakeContent:
+        async def iter_chunked(self, _size):
+            yield b"1234"
+
+    class FakeResponse:
+        status = 200
+        content_length = None
+        content = FakeContent()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class FakeSession:
+        def __init__(self, *, timeout, headers):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def get(self, _url):
+            return FakeResponse()
+
+    monkeypatch.setattr("src.plugin_host.mirrors.aiohttp.ClientSession", FakeSession)
+    manager = MirrorManager(tmp_path / "mirrors.json", max_attempts=1)
+
+    result = await manager._fetch(
+        "https://example.com/content.txt",
+        {"id": "test", "name": "Test"},
+        1,
+        1,
+        binary=False,
+        max_bytes=3,
+    )
+
+    assert result.ok is False
+    assert "超过限制" in result.error
+
+
 def test_normalize_market_item_passes_through_latest_field():
     item = _market_item(latest={
         "version": "1.2.0",

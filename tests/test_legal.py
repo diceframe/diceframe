@@ -19,6 +19,33 @@ def test_bundled_legal_documents_are_complete(document_name, language):
     assert "DiceFrame" in legal._bundled_text(document_name, language)
 
 
+def test_bundled_privacy_hashes_match_the_published_content_manifest():
+    documents = legal.bundled_documents()
+
+    assert documents["privacy"]["languages"]["zh"]["sha256"] == (
+        "2abf7c72212c50e335380d78fedd7f1f82ef325a0dacd9378951aa9df7d31323"
+    )
+    assert documents["privacy"]["languages"]["en"]["sha256"] == (
+        "5163f983721737c6401abf033699b47ec96d6d07d1b26adf9c1efb017beb24ac"
+    )
+
+
+def test_same_legal_revision_with_different_hash_is_rejected():
+    state = {}
+    bundled = legal.bundled_documents()
+    acceptance = legal.acceptance_payload(bundled, "zh-CN")
+    documents = legal.bundled_documents()
+    documents["privacy"]["languages"]["zh"]["sha256"] = "0" * 64
+
+    with pytest.raises(ValueError, match="版本已更新"):
+        legal.record_acceptance(
+            state,
+            acceptance=acceptance,
+            documents=documents,
+            accepted_at="now",
+        )
+
+
 def test_legal_acceptance_is_date_versioned_and_hashed():
     state = {}
     documents = legal.bundled_documents()
