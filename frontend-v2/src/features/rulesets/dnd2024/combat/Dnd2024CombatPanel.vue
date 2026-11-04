@@ -71,6 +71,10 @@ const selectedSpellTargetCount = ref(1)
 const selectedResistType = ref('')
 const teleportDistance = ref<number | string>('')
 const movementDistance = ref(5)
+const declareAttackLuck = ref(false)
+const declareSpellLuck = ref(false)
+const declareMaximize = ref(false)
+const declareDeathSaveLuck = ref(false)
 const staged = ref<JsonObject | null>(null)
 const confirmCard = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
@@ -281,9 +285,10 @@ const visibleTileCount = computed(() => {
   return spell + (attackAction.value ? 1 : 0) + (explorationAction.value ? 1 : 0) + simpleActions.value.length
     + (capabilityActions.value.length || currentClassResources.value.length ? 1 : 0)
 })
-const simpleActions = computed(() => (['dash', 'dodge', 'disengage', 'death_save'] as const).filter(type => action(type)))
+const simpleActions = computed(() => (['dash', 'dodge', 'disengage', 'hide', 'death_save'] as const).filter(type => action(type)))
 const simpleLabel = (type: string) => ({
-  dash: copy.value.dash, dodge: copy.value.dodge, disengage: copy.value.disengage, death_save: copy.value.deathSave,
+  dash: copy.value.dash, dodge: copy.value.dodge, disengage: copy.value.disengage, hide: copy.value.hide,
+  death_save: copy.value.deathSave,
 }[type] || type)
 const battleTokenIds = computed(() => battleTokens.value.map(token => token.id))
 const targetCardLabels = computed(() => ({
@@ -577,6 +582,10 @@ function resetSelections(): void {
   if (!capabilityActions.value.some(item => item.capability_id === selectedCapabilityId.value)) {
     selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
   }
+  declareAttackLuck.value = false
+  declareSpellLuck.value = false
+  declareMaximize.value = false
+  declareDeathSaveLuck.value = false
 }
 
 // Back to a clean dock once an intent lands or the turn passes on.
@@ -606,6 +615,10 @@ function clearGameScopedState(): void {
   selectedResistType.value = ''
   teleportDistance.value = ''
   movementDistance.value = 5
+  declareAttackLuck.value = false
+  declareSpellLuck.value = false
+  declareMaximize.value = false
+  declareDeathSaveLuck.value = false
   staged.value = null
   returnFocus = null
 }
@@ -682,6 +695,7 @@ function stageAttack(): void {
     type: 'attack', actor_id: attackAction.value.actor_id,
     target_id: selectedTargetId.value,
     ...(weapon.weapon_ref ? { weapon_ref: weapon.weapon_ref } : { attack_id: weapon.id }),
+    ...(declareAttackLuck.value ? { spend_luck: true } : {}),
   })
 }
 
@@ -698,6 +712,8 @@ function stageSpell(): void {
   else payload.target_id = ids[0]
   if (spell.resist_choice?.length) payload.resist_type = selectedResistType.value
   if (spell.mode === 'teleport') payload.teleport_distance = Number(teleportDistance.value)
+  if (declareSpellLuck.value) payload.spend_luck = true
+  if (declareMaximize.value) payload.maximize_damage = true
   stage(payload)
 }
 
@@ -725,6 +741,15 @@ function stageSimple(type: string): void {
   const item = action(type)
   if (!item) return
   stage({ type, actor_id: item.actor_id })
+}
+
+function stageDeathSave(): void {
+  const item = action('death_save')
+  if (!item) return
+  stage({
+    type: 'death_save', actor_id: item.actor_id,
+    ...(declareDeathSaveLuck.value ? { spend_luck: true } : {}),
+  })
 }
 
 // 职业能力统一走 canonical intent：只提交 capability id 与目标，成本与结算
@@ -760,6 +785,60 @@ watch(reactionSpell, spell => {
   reactionSpellRef.value = spell.spell_ref
   if (!spell.available_slot_levels.includes(reactionSlot.value)) reactionSlot.value = spell.available_slot_levels[0] ?? 0
 }, { immediate: true })
+
+const windowDecision = computed<JsonObject | null>(() => {
+  const decision = pendingDecision.value
+  const kind = String(decision?.kind || '')
+  return decision && (kind === 'check_window' || kind === 'damage_window')
+    ? decision as JsonObject
+    : null
+})
+const windowLabel = computed(() => (
+  String(windowDecision.value?.kind || '') === 'damage_window'
+    ? copy.value.damageWindow
+    : copy.value.checkWindow
+))
+const windowCode = computed(() => String(windowDecision.value?.window_code || ''))
+const windowAbility = computed(() => {
+  const code = windowCode.value
+  if (code === 'lucky_disadvantage') return copy.value.windowLucky
+  if (code === 'cutting_words_check') return copy.value.windowCuttingCheck
+  if (code === 'cutting_words_damage') return copy.value.windowCuttingDamage
+  if (code === 'dark_ones_own_luck') return copy.value.windowDool
+  return localizedTerm(code)
+})
+const windowHint = computed(() => {
+  const code = windowCode.value
+  if (code === 'lucky_disadvantage') return copy.value.windowHintLucky
+  if (code === 'cutting_words_check') return copy.value.windowHintCuttingCheck
+  if (code === 'cutting_words_damage') return copy.value.windowHintCuttingDamage
+  if (code === 'dark_ones_own_luck') return copy.value.windowHintDool
+  return ''
+})
+const windowOwner = computed(() => combat.value?.actors.find(
+  actor => actor.actor_id === String(windowDecision.value?.window_owner_id || ''),
+))
+const windowResource = computed(() => {
+  const rows = windowOwner.value?.class_resources
+  return Array.isArray(rows)
+    ? rows.find(row => row.id === String(windowDecision.value?.resource_id || '')) || null
+    : null
+})
+const windowCheck = computed(() => {
+  const check = windowDecision.value?.check
+  return check && typeof check === 'object' ? check as JsonObject : null
+})
+const windowDamage = computed(() => {
+  const damage = windowDecision.value?.damage_event
+  return damage && typeof damage === 'object' ? damage as JsonObject : null
+})
+const windowRolls = computed(() => {
+  const source = windowCheck.value?.rolls ?? windowDamage.value?.rolls
+  return Array.isArray(source) ? source : []
+})
+const windowDie = computed(() => Number(
+  windowDecision.value?.die_sides ?? windowDecision.value?.damage_sides ?? 0,
+))
 
 async function decide(decision: RulesetPendingDecision, option: string, extra: JsonObject = {}): Promise<void> {
   const gameKey = props.gameKey
@@ -802,6 +881,8 @@ function describeEvent(event: JsonObject): string {
 watch(selectedSpellRef, () => {
   const spell = selectedSpell.value
   selectedSlot.value = spell?.available_slot_levels?.[0] ?? 0
+  declareSpellLuck.value = false
+  declareMaximize.value = false
   // Switching spells keeps the unit the player clicked when the new spell can reach it.
   const legal = targetsFor(spell)
   const kept = [inspectedId.value, ...selectedSpellTargets.value]
@@ -909,9 +990,38 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </section>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
-          <strong>{{ pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
+          <strong>{{ windowDecision ? `${windowLabel} · ${windowAbility}` : pendingDecision.kind === 'melee_hit_spell' ? spellText.hit : pendingDecision.kind === 'hit_reaction_spell' ? spellText.hitReaction : `${copy.reaction} · ${localizedTerm(pendingDecision.kind)}` }}</strong>
           <p v-if="pendingDecision.kind === 'melee_hit_spell'">{{ spellText.hitHint }}</p>
-          <template v-if="pendingDecision.kind === 'hit_reaction_spell'">
+          <template v-if="windowDecision">
+            <p>{{ windowHint }}</p>
+            <dl class="window-facts">
+              <div v-if="windowRolls.length">
+                <dt>{{ copy.windowRolls }}</dt>
+                <dd>{{ windowRolls.join(' / ') }}</dd>
+              </div>
+              <div v-if="windowCheck">
+                <dt>{{ copy.windowTotal }}</dt>
+                <dd>{{ windowCheck.natural }} → {{ windowCheck.total }} vs {{ windowCheck.target }}</dd>
+              </div>
+              <div v-if="windowDamage">
+                <dt>{{ copy.windowDamage }}</dt>
+                <dd>{{ windowDamage.amount }}（{{ windowDamage.damage_type }}）</dd>
+              </div>
+              <div v-if="windowResource">
+                <dt>{{ copy.windowResource }}</dt>
+                <dd>{{ windowResource.name }} {{ windowResource.current }} / {{ windowResource.maximum }}</dd>
+              </div>
+              <div v-if="windowDie">
+                <dt>{{ copy.windowDie }}</dt>
+                <dd>d{{ windowDie }}</dd>
+              </div>
+            </dl>
+            <div>
+              <button v-if="pendingDecision.options.includes('spend')" class="combat-primary" :disabled="busy" @click="decide(pendingDecision, 'spend')">{{ copy.windowSpend }}</button>
+              <button v-if="pendingDecision.options.includes('decline')" :disabled="busy" @click="decide(pendingDecision, 'decline')">{{ copy.windowDecline }}</button>
+            </div>
+          </template>
+          <template v-else-if="pendingDecision.kind === 'hit_reaction_spell'">
             <p>{{ spellText.hitReactionHint(targetName(String(pendingDecision.attacker_id || '')), Number(pendingDecision.attack_total), Number(pendingDecision.armor_class)) }}</p>
             <label v-if="reactionSpells.length > 1">{{ copy.spell }}
               <select v-model="reactionSpellRef">
@@ -969,6 +1079,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           <template #options>
             <p v-if="dockTab === 'reaction'" class="dock-hint">{{ copy.reactionHint }}</p>
             <p v-else-if="!dockMode" class="dock-hint">{{ visibleTileCount ? copy.chooseModeHint : copy.noActionInTab }}</p>
+            <label v-if="dockTab === 'action' && action('death_save')?.lucky_advantage_available" class="declare-toggle" data-testid="death-save-lucky">
+              <input v-model="declareDeathSaveLuck" type="checkbox" />
+              <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+            </label>
 
             <div v-if="dockMode === 'attack' && attackAction" class="mode-panel" data-mode="attack">
               <label>{{ copy.weapon }}
@@ -994,6 +1108,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 {{ copy.targetDistance }} {{ attackDistance }} {{ copy.feet }}。
                 {{ hasUsableWeapon ? copy.autoWeapon : copy.moveCloser }}
               </p>
+              <label v-if="attackAction.lucky_advantage_available" class="declare-toggle">
+                <input v-model="declareAttackLuck" type="checkbox" />
+                <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+              </label>
             </div>
 
             <div v-if="dockMode === 'spell'" class="mode-panel" data-mode="spell" data-testid="combat-spell-card">
@@ -1030,6 +1148,14 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 </label>
                 <label v-if="selectedSpell?.mode === 'teleport'">{{ copy.teleportDistance }}
                   <input v-model.number="teleportDistance" type="number" step="5" />
+                </label>
+                <label v-if="selectedSpell?.lucky_advantage_available" class="declare-toggle">
+                  <input v-model="declareSpellLuck" type="checkbox" />
+                  <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
+                </label>
+                <label v-if="selectedSpell?.maximize_damage_available" class="declare-toggle">
+                  <input v-model="declareMaximize" type="checkbox" />
+                  <span>{{ copy.maximizeDamage }}<small>{{ copy.maximizeHint }}</small></span>
                 </label>
               </template>
               <SpellAvailability :spells="spellActor?.spells || []" />
@@ -1107,7 +1233,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <ActionTile v-if="explorationAction" :label="copy.explorationCast" :active="dockMode === 'explore'" data-tile="explore" @click="openDockMode('explore')">
                 <template #icon><NIcon :component="SparklesOutline" /></template>
               </ActionTile>
-              <ActionTile v-for="type in simpleActions" :key="type" :label="simpleLabel(type)" :disabled="busy" @click="stageSimple(type)">
+              <ActionTile v-for="type in simpleActions" :key="type" :label="simpleLabel(type)" :disabled="busy" :data-tile="type" @click="type === 'death_save' ? stageDeathSave() : stageSimple(type)">
                 <template #icon><NIcon :component="type === 'dodge' ? ShieldOutline : type === 'death_save' ? SparklesOutline : FootstepsOutline" /></template>
               </ActionTile>
             </template>
@@ -1201,9 +1327,17 @@ button, select, input { min-height: 44px; font: inherit; }
 .class-resource-strip > span { display: grid; gap: 2px; padding: 6px 9px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; }
 .class-resource-strip small { color: #9ca6ae; font-size: 11px; }
 .class-resource-strip strong { font-size: 14px; }
+.declare-toggle { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border: 1px solid #4a5560; border-radius: 8px; font-size: 12px; }
+.declare-toggle input { width: auto; min-height: 0; margin-top: 2px; }
+.declare-toggle span { display: grid; gap: 2px; }
+.declare-toggle small { color: #9aa9b4; font-size: 10px; font-weight: 400; }
 .end-turn-ready { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 8px 9px; border: 1px solid #b88b3e; border-radius: 8px; background: rgb(197 148 67 / 14%); color: #f2d28f; font-size: 12px; font-weight: 700; }
 .decision-card, .confirm-card { padding: 12px; border: 1px solid #c2974a; border-radius: 12px; background: #322716; }
 .decision-card div, .confirm-card div { display: flex; gap: 7px; flex-wrap: wrap; }
+.decision-card .window-facts { display: grid; gap: 4px; margin: 4px 0; }
+.decision-card .window-facts div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; justify-content: start; }
+.decision-card .window-facts dt { color: #d8c39a; font-size: 11px; }
+.decision-card .window-facts dd { margin: 0; font-size: 12px; }
 .confirm-card { position: sticky; bottom: 12px; z-index: 2; box-shadow: 0 12px 36px rgb(0 0 0 / 45%); }
 .confirm-card code { color: #efd195; }
 .combat-primary { border-color: #c59443; background: #a56f24; color: white; }

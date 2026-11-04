@@ -64,11 +64,23 @@
 
 仍为 guided/reference：
 
-- 职业特性、物种特性和专长在战斗/探索中的完整执行（当前已支持下文列出的 Monk 与 Paladin 特性；其余未实现的职业、子职特性与专长仍为 guided）。
+- 职业特性、物种特性和专长在战斗/探索中的完整执行（当前已支持下文列出的 Monk、Paladin 与决策窗口/主动声明；其余未实现的职业、子职特性与专长仍为 guided）。
 - 未列入 31 种确定性效果目录的法术（如真知灼见、橡棍术、抗性术等需要额外机制的戏法），以及职业、物种、专长的完整游戏内效果。
 - 完整怪物图鉴、网格 VTT、擒抱/推撞等尚未建模的战斗动作。
 - 复活效果；普通治疗明确不能令死亡角色复活。
 - 任意自由文本冒险的自动规则解释，以及《灰沼失灯记》之外的完整长篇战役内容。
+
+## 战斗决策、主动声明与兼容
+
+- 决策窗口：服务端在攻击检定或伤害结算后产生 pending `check_window` / `damage_window`。战斗面板显示窗口种类、已掷骰面与检定结果或待结算伤害、剩余资源、能力骰面，并按服务端选项提供 **使用能力 / 放弃**。提交只发送 `decision.resolve`，客户端不掷骰、不扣资源；窗口仍只对 `assigned_to` 的拥有者显示。当前接线 Lucky 劣势、Cutting Words 攻击/伤害与 Dark One's Own Luck；Shield、Uncanny Dodge、Counterspell 的既有反应 UI 保持不变。
+- 主动声明：攻击、法术攻击与死亡豁免可声明 Lucky 优势；`cast_spell` 可声明 Overchannel 伤害最大化；普通 Hide 走 `action` 的躲藏路径，Cunning Action 的附赠动作躲藏仍是独立 capability。声明入口只在服务端投影显示当前 actor 可用时出现，伪造或过期意图仍由服务端拒绝。
+- 资源投影：actor 的 `class_resources` 同时包含职业资源与已拥有的起源专长资源池（例如幸运点、诗人激励、黑暗强运）。界面只消费该公开投影，不读取隐藏角色数据。
+
+## 旧数据与内容版本兼容
+
+- 旧角色 Armor Training：没有 `derived.armor_training` 的存档会在第一次 `combat.start` 前按唯一派生公式重算 AC、护甲训练、速度与施法/攻击/豁免门控；该修复幂等，重复加载或开战不会追加 revision 或操作日志，也不改写无关用户数据。
+- 历史战斗事件：旧事件中的 `bless_bonus` 只在公开投影边界归一化为 `check_bonus`，不改写持久化 ledger；旧事件本身不含骰迹，兼容层不会虚构 `check_bonus_rolls`，新事件继续使用 `check_bonus` 契约。
+- 内容版本保持 `srd-5.2.1+r5`：本次修复不新增持久化字段，也不改变 progression/rest/equipment 的一致性要求，因此不做 manifest 版本 bump。若后续内容版本改变角色派生契约，必须同时提供旧角色的升级或重算路径。
 
 ## M7 体验与性能验证
 

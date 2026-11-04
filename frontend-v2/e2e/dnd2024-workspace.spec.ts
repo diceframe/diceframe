@@ -1,7 +1,44 @@
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+import { PLAY_READY_TIMEOUT, seatTakeoverPath } from './support'
 
 const DND_GAME = 'web%7Ce2e-dnd2024%7Cweb_bot'
+
+interface CombatActorView {
+  actor_id: string
+  hp?: number
+  class_resources?: Array<{ id: string; name?: string; current: number; maximum: number }>
+}
+
+interface CombatWindowDecision {
+  assigned_to?: string
+  window_code?: string
+  damage_event?: { amount?: number }
+}
+
+interface CombatEventView {
+  type?: string
+  kind?: string
+  rolls?: number[]
+  natural?: number
+  total?: number
+  success?: boolean
+  delta?: number
+  amount?: number
+  resource?: string
+  target_id?: string
+}
+
+interface GameplayPayload {
+  available_actions: Array<{ type?: string }>
+  gameplay: {
+    combat: {
+      pending_decisions: CombatWindowDecision[]
+      actors: CombatActorView[]
+    }
+    recent_combat_events: CombatEventView[]
+  }
+}
 
 const PANEL_GEOMETRY = (panelSelector: string) => {
   const panel = document.querySelector<HTMLElement>(panelSelector)!
@@ -465,4 +502,181 @@ test('guided creation enforces proficiency limits and enters the saved game even
   expect(saved.characterStatus).toBe(200)
   expect(saved.detail.rule_id).toBe('dnd2024_srd')
   expect(saved.characters.players?.[0]?.character_name).toBe('新手验收者')
+})
+
+async function readGameplay(page: Page, gameKey: string): Promise<GameplayPayload> {
+  return page.evaluate(async (key: string): Promise<GameplayPayload> => {
+    const authorization = `Bearer ${localStorage.getItem('trpg_access_token') || ''}`
+    const response = await fetch(`/api/games/${encodeURIComponent(key)}/available-actions`, {
+      headers: { Authorization: authorization },
+    })
+    if (!response.ok) throw new Error(`available-actions failed: ${response.status}`)
+    return await response.json() as GameplayPayload
+  }, gameKey)
+}
+
+function actorOf(view: GameplayPayload, actorId: string): CombatActorView {
+  const actor = view.gameplay.combat.actors.find(item => item.actor_id === actorId)
+  if (!actor) throw new Error(`combat actor ${actorId} is missing from the projection`)
+  return actor
+}
+
+function hpOf(view: GameplayPayload, actorId: string): number {
+  const hp = actorOf(view, actorId).hp
+  if (typeof hp !== 'number') throw new Error(`combat actor ${actorId} has no hp`)
+  return hp
+}
+
+function resourceOf(view: GameplayPayload, actorId: string, resourceId: string) {
+  const row = actorOf(view, actorId).class_resources?.find(item => item.id === resourceId)
+  if (!row) throw new Error(`resource ${resourceId} is missing from ${actorId}`)
+  return row
+}
+
+async function openCombatPanel(page: Page) {
+  const panel = page.locator('.dnd-combat')
+  // 进行中的战斗会让 Play 页自动打开战斗工具；没有自动打开时走真实的工具按钮。
+  const opened = await panel.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false)
+  if (!opened) {
+    const trigger = page.locator('[data-testid="dnd5e-combat-tool"]:visible')
+    await expect(trigger).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+    await trigger.click()
+  }
+  await expect(panel).toBeVisible()
+  return panel
+}
+
+async function openDndCombat(page: Page, gameKey: string) {
+  await page.goto(`/#/play?game=${encodeURIComponent(gameKey)}`)
+  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+  return openCombatPanel(page)
+}
+
+function decisionResponse(page: Page) {
+  return page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname.includes('/decisions/')
+  ))
+}
+
+test('Lucky spend settles a real pending attack window and consumes one point', async ({ page }, info) => {
+  test.setTimeout(45_000)
+  const key = `web|e2e-dnd2024-lucky-${info.project.name}|web_bot`
+  const panel = await openDndCombat(page, key)
+  const card = panel.locator('.decision-card')
+  await expect(card).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+  await expect(card).toContainText('检定结果窗口')
+  await expect(card).toContainText('幸运 · 劣势骰')
+  await expect(card.locator('.window-facts')).toContainText('已掷骰面')
+  await expect(card.locator('.window-facts')).toContainText('15')
+  await expect(card.locator('.window-facts')).toContainText('19 vs 16')
+  await expect(card.locator('.window-facts')).toContainText('2 / 2')
+  await expect(card.locator('.window-facts')).toContainText('d20')
+  await expect(card.getByRole('button', { name: '使用能力', exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: '放弃', exact: true })).toBeVisible()
+  await expect(panel.locator('.available-actions')).toHaveCount(0)
+
+  const before = await readGameplay(page, key)
+  expect(before.available_actions.some(action => action.type === 'decision.resolve')).toBe(true)
+  const pending = before.gameplay.combat.pending_decisions
+  expect(pending).toHaveLength(1)
+  expect(pending[0].window_code).toBe('lucky_disadvantage')
+  expect(pending[0].assigned_to).toBe('e2e-gm')
+  const hpBefore = hpOf(before, 'player:e2e-gm')
+
+  const resolved = decisionResponse(page)
+  await card.getByRole('button', { name: '使用能力', exact: true }).click()
+  expect((await resolved).ok()).toBe(true)
+  await expect(panel.locator('.decision-card')).toHaveCount(0)
+
+  await expect.poll(async () => (
+    (await readGameplay(page, key)).gameplay.combat.pending_decisions.length
+  ), { timeout: 10_000 }).toBe(0)
+  const after = await readGameplay(page, key)
+  expect(after.available_actions.some(action => action.type === 'decision.resolve')).toBe(false)
+  expect(after.gameplay.combat.pending_decisions).toEqual([])
+  expect(resourceOf(after, 'player:e2e-gm', 'lucky_points').current).toBe(1)
+
+  const check = after.gameplay.recent_combat_events
+    .filter(event => event.type === 'check.resolved' && event.kind === 'attack').pop()
+  if (!check || !check.rolls) throw new Error('the settled attack check is missing')
+  expect(check.rolls).toHaveLength(2)
+  expect(check.rolls[0]).toBe(15)
+  expect(check.rolls[1]).toBeGreaterThanOrEqual(1)
+  expect(check.rolls[1]).toBeLessThanOrEqual(20)
+  expect(check.natural).toBe(Math.min(15, check.rolls[1]))
+  expect(check.total).toBe((check.natural ?? 0) + 4)
+  const hpAfter = hpOf(after, 'player:e2e-gm')
+  if (check.success) {
+    expect(hpAfter).toBeLessThan(hpBefore)
+  } else {
+    expect(hpAfter).toBe(hpBefore)
+  }
+})
+
+test('Cutting Words damage window stays with its owner and reduces the held damage', async ({ page, browser, request }, info) => {
+  test.setTimeout(75_000)
+  const key = `web|e2e-dnd2024-cutting-${info.project.name}|web_bot`
+  const panel = await openDndCombat(page, key)
+  // GM 只拿得到通讯动作：持有窗口的诗人不是当前行动者，也不是 GM 自己。
+  await expect(panel.locator('.decision-card')).toHaveCount(0)
+  const gmBefore = await readGameplay(page, key)
+  expect(gmBefore.available_actions.some(action => action.type === 'decision.resolve')).toBe(false)
+  expect(gmBefore.gameplay.combat.pending_decisions).toHaveLength(1)
+  expect(gmBefore.gameplay.combat.pending_decisions[0].window_code).toBe('cutting_words_damage')
+  expect(gmBefore.gameplay.combat.pending_decisions[0].assigned_to).toBe('e2e-player')
+  const heldDamage = gmBefore.gameplay.combat.pending_decisions[0].damage_event?.amount
+  if (typeof heldDamage !== 'number') throw new Error('the damage window holds no damage')
+  const hpBefore = hpOf(gmBefore, 'player:e2e-gm')
+
+  const context = await browser.newContext({
+    locale: 'zh-CN',
+    viewport: info.project.name === 'mobile' ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+  })
+  await context.addInitScript(() => {
+    if (!localStorage.getItem('diceframe_locale')) localStorage.setItem('diceframe_locale', 'zh-CN')
+  })
+  try {
+    const player = await context.newPage()
+    await player.goto(await seatTakeoverPath(request, key, 'e2e-player'))
+    await expect(player.getByTestId('timeline')).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+    const playerPanel = await openCombatPanel(player)
+    const card = playerPanel.locator('.decision-card')
+    await expect(card).toBeVisible({ timeout: PLAY_READY_TIMEOUT })
+    await expect(card).toContainText('伤害结果窗口')
+    await expect(card).toContainText('语出惊人 · 伤害')
+    await expect(card.locator('.window-facts')).toContainText('本次伤害')
+    await expect(card.locator('.window-facts')).toContainText(String(heldDamage))
+    await expect(card.locator('.window-facts')).toContainText('2 / 2')
+    await expect(card.locator('.window-facts')).toContainText('d6')
+    await expect(playerPanel.locator('.available-actions')).toHaveCount(0)
+
+    const resolved = decisionResponse(player)
+    await card.getByRole('button', { name: '使用能力', exact: true }).click()
+    expect((await resolved).ok()).toBe(true)
+    await expect(card).toHaveCount(0)
+
+    await expect.poll(async () => (
+      (await readGameplay(page, key)).gameplay.combat.pending_decisions.length
+    ), { timeout: 10_000 }).toBe(0)
+    const after = await readGameplay(page, key)
+    expect(after.available_actions.some(action => action.type === 'decision.resolve')).toBe(false)
+    expect(after.gameplay.combat.pending_decisions).toEqual([])
+    expect(resourceOf(after, 'player:e2e-player', 'bardic_inspiration').current).toBe(1)
+
+    const damageCheck = after.gameplay.recent_combat_events
+      .filter(event => event.type === 'check.resolved' && event.kind === 'damage_window').pop()
+    if (!damageCheck || !damageCheck.rolls) throw new Error('the damage window roll is missing')
+    expect(damageCheck.rolls).toHaveLength(1)
+    expect(damageCheck.rolls[0]).toBeGreaterThanOrEqual(1)
+    expect(damageCheck.rolls[0]).toBeLessThanOrEqual(6)
+    const penalty = Math.min(heldDamage, damageCheck.rolls[0])
+    const hpAfter = hpOf(after, 'player:e2e-gm')
+    expect(hpBefore - hpAfter).toBe(heldDamage - penalty)
+    const damageEvent = after.gameplay.recent_combat_events
+      .filter(event => event.type === 'resource.changed' && event.target_id === 'player:e2e-gm').pop()
+    expect(damageEvent?.delta).toBe(-(heldDamage - penalty))
+  } finally {
+    await context.close()
+  }
 })

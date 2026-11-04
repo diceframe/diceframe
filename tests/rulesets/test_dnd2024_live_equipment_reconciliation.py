@@ -65,6 +65,8 @@ def _draft(runtime: Dnd2024Runtime, class_ref: str = "class:fighter") -> dict:
         "background_equipment_package_ref": choices["background_equipment_packages"][0]["ref"],
         "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
     }
+    if "fighting_style" in (class_entity.get("level_1_feature_ids") or []):
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:defense"}
     if class_entity.get("recommended_spell_choices"):
         draft["class_spell_choices"] = class_entity["recommended_spell_choices"]
     choices = runtime.builder_choices(None, draft)
@@ -318,7 +320,7 @@ def test_unarmored_armor_class_follows_the_bundle_formula(runtime) -> None:
 
     dex = int(game.canonical["abilities"]["dex"])
     assert game.armor_class == derive_armor_class(
-        {"dex": dex}, [], runtime.load_bundle("en"),
+        {"dex": dex}, [], runtime.load_bundle("en"), armor_category_refs=[],
     )
 
 
@@ -594,6 +596,9 @@ def test_creation_and_reconciliation_share_one_armor_class_formula(runtime) -> N
 
     assert game.armor_class == derive_armor_class(
         game.canonical["abilities"], game.item_refs, bundle,
+        armor_category_refs=list(
+            game.canonical["proficiencies"]["armor_category_refs"]
+        ),
     )
 
 

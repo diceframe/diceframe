@@ -128,6 +128,7 @@ def test_a_hit_offers_uncanny_dodge_through_the_generic_reaction_decision() -> N
         "feature_id": "uncanny_dodge",
         "name": "Uncanny Dodge",
         "mode": "reaction_defense",
+        "effect_kind": "damage_multiplier",
         "damage_multiplier": 0.5,
     }]
     assert pending["damage_event"]["amount"] == 6

@@ -23,7 +23,13 @@ from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
-from .check_modes import condition_flags, effective_speed
+from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
+from .check_windows import (
+    CHECK_WINDOW_DECISION,
+    CombatCheckWindowsMixin,
+    DAMAGE_WINDOW_DECISION,
+    LUCKY_RESOURCE,
+)
 from .primitives import (
     INTENT_TYPES,
     RAGE_MAX_ROUNDS,
@@ -46,12 +52,13 @@ from .reaction_spells import (
     CombatReactionSpellsMixin,
     HIT_REACTION_DECISION,
 )
+from .visibility import public_pending_decisions
 
 
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
-    CombatReactionSpellsMixin,
+    CombatReactionSpellsMixin, CombatCheckWindowsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -139,6 +146,7 @@ class Dnd2024CombatEngine(
         combat = state["combat"]
         version = int(state["version"])
         gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        viewer_is_gm = actor_id == gm_uid
         if combat.get("status") != "active":
             actions: list[dict[str, Any]] = []
             request = state.get("encounter_request")
@@ -178,15 +186,21 @@ class Dnd2024CombatEngine(
             "expected_version": version,
         }] if actor_id in instance.players else []
         current = self._current_actor(combat)
-        # 被命中时的反应法术（护盾术）通常出现在敌人回合：防守方不必是当前行动者。
+        # 被命中时的反应法术（护盾术）与掷后检定窗口通常出现在敌人回合：
+        # 防守方/窗口主人不必是当前行动者。
         reactions = [
             item for item in combat.get("pending_decisions", [])
-            if item.get("kind") == HIT_REACTION_DECISION and item.get("assigned_to") == actor_id
+            if item.get("kind") in {
+                HIT_REACTION_DECISION, CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION,
+            } and item.get("assigned_to") == actor_id
         ]
         if reactions:
             return [*communication, {
                 "type": "decision.resolve", "label": "Reaction spell",
-                "expected_version": version, "decisions": deepcopy(reactions),
+                "expected_version": version,
+                "decisions": public_pending_decisions(
+                    reactions, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                ),
             }]
         if actor_id == gm_uid:
             # 反制/机会攻击等决策指派给 GM，可能出现在非自身回合（例如
@@ -199,7 +213,10 @@ class Dnd2024CombatEngine(
             if gm_pending:
                 return [*communication, {
                     "type": "decision.resolve", "label": "Resolve reaction",
-                    "expected_version": version, "decisions": deepcopy(gm_pending),
+                    "expected_version": version,
+                    "decisions": public_pending_decisions(
+                        gm_pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                    ),
                 }]
         if current.startswith("enemy:"):
             return communication
@@ -213,17 +230,23 @@ class Dnd2024CombatEngine(
         if pending:
             if pending[0].get("kind") == HIT_SPELL_DECISION:
                 spells = self._available_spells(
-                    self._actor_view(instance, combat, current), combat.get("economy", {}), pending[0],
+                    instance, self._actor_view(instance, combat, current),
+                    combat.get("economy", {}), pending[0],
                 )
                 return [*communication, {"type": "decision.resolve", "expected_version": version,
-                        "decisions": deepcopy(pending)}, *([{
+                        "decisions": public_pending_decisions(
+                            pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                        )}, *([{
                             "type": "cast_spell", "actor_id": current, "expected_version": version,
                             "spells": [row for row in spells if row["mode"] == "triggered_damage"],
                             "targets": self._all_targets(instance, combat),
                         }] if any(row["mode"] == "triggered_damage" for row in spells) else [])]
             return [*communication, {
                 "type": "decision.resolve", "label": "Resolve reaction",
-                "expected_version": version, "decisions": deepcopy(pending),
+                "expected_version": version,
+                "decisions": public_pending_decisions(
+                    pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
+                ),
             }]
         actor = self._actor_view(instance, combat, current)
         if actor["hp"] <= 0 and actor["kind"] == "player":
@@ -235,6 +258,9 @@ class Dnd2024CombatEngine(
             return [*communication, {
                 "type": "death_save", "label": "Death saving throw",
                 "expected_version": version, "actor_id": current,
+                "lucky_advantage_available": self._window_pool_available(
+                    instance, current, LUCKY_RESOURCE,
+                ),
             }]
         economy = combat.get("economy", {})
         actions: list[dict[str, Any]] = []
@@ -247,11 +273,15 @@ class Dnd2024CombatEngine(
                     "type": "attack", "label": "Attack", "actor_id": current,
                     "expected_version": version, "weapons": weapons,
                     "targets": self._hostile_targets(instance, combat, current),
+                    "lucky_advantage_available": self._window_pool_available(
+                        instance, current, LUCKY_RESOURCE,
+                    ),
                 })
             actions.extend([
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
                 {"type": "dodge", "label": "Dodge", "actor_id": current, "expected_version": version},
                 {"type": "disengage", "label": "Disengage", "actor_id": current, "expected_version": version},
+                {"type": "hide", "label": "Hide", "actor_id": current, "expected_version": version},
             ])
             adjacent_downed = [
                 target for target in self._all_targets(instance, combat)
@@ -263,7 +293,9 @@ class Dnd2024CombatEngine(
                     "type": "stabilize", "label": "Stabilize", "actor_id": current,
                     "expected_version": version, "targets": adjacent_downed,
                 })
-        spells = self._available_spells(actor, economy, hit_spell_decision(combat, current))
+        spells = self._available_spells(
+            instance, actor, economy, hit_spell_decision(combat, current),
+        )
         if spells:
             actions.append({
                 "type": "cast_spell", "label": "Cast a spell", "actor_id": current,
@@ -325,6 +357,12 @@ class Dnd2024CombatEngine(
                 return self._automatic_hit_spell(instance, combat, decision, version)
             if decision.get("kind") == HIT_REACTION_DECISION:
                 return self._automatic_hit_reaction(instance, combat, decision, version)
+            if decision.get("kind") == CHECK_WINDOW_DECISION:
+                # A window owned by a human seat yields no automatic intent:
+                # the server never spends a player's resource for them.
+                return self._automatic_check_window(instance, combat, decision, version)
+            if decision.get("kind") == DAMAGE_WINDOW_DECISION:
+                return self._automatic_damage_window(instance, combat, decision, version)
             if decision.get("kind") == COUNTER_SPELL_DECISION:
                 # 反制是 GM 的人类判断；但 GM 自己在队伍里有角色时（单人局里
                 # GM 就是施法者），由他替敌人决定等于施法者决定自己是否被反制。
@@ -691,6 +729,8 @@ class Dnd2024CombatEngine(
             events.extend(movement_events)
         elif intent_type in {"dash", "dodge", "disengage"}:
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
+        elif intent_type == "hide":
+            events.extend(self._hide_events(instance, combat, intent, rng))
         elif intent_type == "end_turn":
             events.extend(self._end_turn_events(instance, combat, rng))
         elif intent_type == "death_save":
@@ -851,7 +891,9 @@ class Dnd2024CombatEngine(
             "combat": deepcopy(ruleset_runtime.state(instance).get("combat") or {}),
         }
 
-    def gameplay_view(self, instance: Any) -> dict[str, Any]:
+    def gameplay_view(
+        self, instance: Any, viewer_id: str = "", viewer_is_gm: bool = True,
+    ) -> dict[str, Any]:
         state = self.initialize_state(instance)
         combat = state["combat"]
         actors: list[dict[str, Any]] = []
@@ -869,7 +911,11 @@ class Dnd2024CombatEngine(
                     # 真实条目，enemy 视图没有职业资源，就是空列表）。这里绝不能
                     # 退回 ``{}``：同一个字段出现两种形状会让客户端把对象当数组用。
                     "class_resources": deepcopy(view.get("class_resources") or []),
-                    "spells": self._spell_statuses(view, combat.get("economy", {}), hit_spell_decision(combat, view["actor_id"]), is_current=view["actor_id"] == self._current_actor(combat)),
+                    "spells": self._spell_statuses(
+                        instance, view, combat.get("economy", {}),
+                        hit_spell_decision(combat, view["actor_id"]),
+                        is_current=view["actor_id"] == self._current_actor(combat),
+                    ),
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)
@@ -891,7 +937,10 @@ class Dnd2024CombatEngine(
                 "position_mode": str(combat.get("position_mode") or "theater"),
                 "economy": deepcopy(combat.get("economy") or {}),
                 "reactions": deepcopy(combat.get("reactions") or {}),
-                "pending_decisions": deepcopy(combat.get("pending_decisions") or []),
+                "pending_decisions": public_pending_decisions(
+                    combat.get("pending_decisions") or [],
+                    viewer_id=viewer_id, viewer_is_gm=viewer_is_gm,
+                ),
                 "encounter_instance_id": str(combat.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(combat.get("encounter_preset_id") or ""),
                 "origin_step_id": str(combat.get("origin_step_id") or ""),
@@ -1108,25 +1157,26 @@ class Dnd2024CombatEngine(
                     break
         return events
 
-    @staticmethod
     def _concentration_events(
-        target: dict[str, Any], damage: int, rng: Any,
+        self, target: dict[str, Any], damage: int, rng: Any,
     ) -> list[dict[str, Any]]:
         if not target.get("concentration") or damage <= 0:
             return []
         dc = max(10, damage // 2)
         roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
-        # 专注维持是一次体质豁免，Bless 对豁免同样生效（1d4）。
-        bless_bonus = 0
-        if "blessed" in (target.get("conditions") or {}):
-            bless_bonus = int(rng.randint(1, 4))
-        success = roll + modifier + bless_bonus >= dc
+        # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
+        check_bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
+        )
+        check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+        total = roll + modifier + check_bonus
+        success = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [roll], "natural": roll, "modifier": modifier,
-            "bless_bonus": bless_bonus, "total": roll + modifier + bless_bonus,
-            "target": dc, "success": success,
+            "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+            "total": total, "target": dc, "success": success,
         }]
         if not success:
             events.append({
@@ -1146,6 +1196,70 @@ class Dnd2024CombatEngine(
         self, combat: dict[str, Any], mover: str, target: str, distance: int,
     ) -> int:
         return abs(self._position(combat, mover) + distance - self._position(combat, target))
+
+    def _aura_immune_conditions(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+    ) -> dict[str, str]:
+        """Conditions the target is immune to through a friendly aura right now.
+
+        The declaration is the registry: every class feature whose catalog
+        parameters include ``aura_immune_conditions`` is a candidate, and a
+        holder projects its aura only while all of these hold:
+
+        * the holder is on the target's side (players and companions only roam
+          the roster, so enemies never project an aura);
+        * the feature is owned at the holder's current level;
+        * ``aura_range`` is a positive integer and ``aura_immune_conditions`` a
+          list of non-empty strings (otherwise the declaration fails closed);
+        * the 1D theater distance between holder and target is within range.
+
+        The paladin's own aura covers them too because distance 0 is within
+        range.  The return maps condition id to the *first* declaring feature
+        id in catalog order, which is what an interception reports as its
+        source.
+        """
+
+        target_side = str(target.get("side") or "")
+        target_id = str(target.get("actor_id") or "")
+        if not target_side or not target_id:
+            return {}
+        aura_features = [
+            feature_id
+            for feature_id, definition in self.features.catalog.features.items()
+            if "aura_immune_conditions" in definition.parameters
+        ]
+        immune: dict[str, str] = {}
+        for ally in self._all_targets(instance, combat):
+            if str(ally.get("side") or "") != target_side:
+                continue
+            holder_id = str(ally["actor_id"])
+            character = self._feature_character(
+                self._actor_view(instance, combat, holder_id),
+            )
+            for feature_id in aura_features:
+                if not self.features.has_feature(character, feature_id):
+                    continue
+                aura_range = self.features.feature_value(
+                    character, feature_id, "aura_range",
+                )
+                conditions = self.features.feature_value(
+                    character, feature_id, "aura_immune_conditions",
+                )
+                if (
+                    isinstance(aura_range, bool)
+                    or not isinstance(aura_range, int)
+                    or aura_range <= 0
+                ):
+                    continue
+                if not isinstance(conditions, list) or any(
+                    not isinstance(code, str) or not code for code in conditions
+                ):
+                    continue
+                if self._distance(combat, holder_id, target_id) > aura_range:
+                    continue
+                for condition_id in conditions:
+                    immune.setdefault(condition_id, feature_id)
+        return immune
 
     def _require_range(
         self, combat: dict[str, Any], actor_id: str, target_id: str, maximum: int,
@@ -1215,7 +1329,17 @@ class Dnd2024CombatEngine(
         for target_id in all_actor_ids:
             target_conditions = self._conditions(snapshot, combat, target_id)
             for condition_id, value in list(target_conditions.items()):
-                if not isinstance(value, dict) or value.get("source_actor_id") != previous_actor_id:
+                if not isinstance(value, dict):
+                    continue
+                if (
+                    value.get("duration") == "attacker_next_turn_start"
+                    and value.get("source_actor_id") == actor_id
+                ):
+                    # "Until the start of your next turn": the source actor's
+                    # turn has just begun, so this instance expires now.
+                    target_conditions.pop(condition_id, None)
+                    continue
+                if value.get("source_actor_id") != previous_actor_id:
                     continue
                 duration = value.get("duration")
                 if duration == "caster_turn_end":

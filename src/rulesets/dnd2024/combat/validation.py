@@ -18,6 +18,11 @@ from .primitives import (
     canonical as _canonical,
 )
 from .check_modes import condition_flags
+from .check_windows import (
+    CHECK_WINDOW_DECISION,
+    DAMAGE_WINDOW_DECISION,
+    LUCKY_RESOURCE,
+)
 from .readiness import required_encounter_player_ids
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
@@ -215,6 +220,11 @@ class CombatValidationMixin:
             raise CombatIntentError("waiting for the defender's reaction spell decision")
         if any(row.get("kind") == COUNTER_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("resolve the counter spell decision first")
+        if any(
+            row.get("kind") in {CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION}
+            for row in combat.get("pending_decisions", [])
+        ) and intent_type not in {"decision.resolve", "combat.message"}:
+            raise CombatIntentError("resolve the pending check window first")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -236,6 +246,13 @@ class CombatValidationMixin:
             )
             if decision is None or intent.get("option") not in decision.get("options", []):
                 raise CombatIntentError("pending decision or option is invalid")
+            if decision.get("kind") in {CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION}:
+                # A post-roll window may belong to someone who is not the
+                # current actor, so ownership is exactly ``assigned_to``.
+                if submitted_by != str(decision.get("assigned_to") or gm_uid):
+                    raise CombatIntentError("only the window owner can resolve this check window")
+                self._validate_check_window(instance, combat, decision, intent)
+                return
             if decision.get("kind") in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}:
                 kind, raw_id = _actor_kind(str(decision.get("actor_id") or ""))
                 expected_owner = gm_uid if kind == "companion" or (kind == "player" and is_ai_controlled(instance, raw_id)) else decision.get("assigned_to")
@@ -282,18 +299,20 @@ class CombatValidationMixin:
             raise CombatIntentError("death saves are only available at 0 HP")
         if intent_type == "death_save" and "stable" in actor["conditions"]:
             raise CombatIntentError("a stable actor does not make death saves")
+        if intent_type == "death_save":
+            self._validate_lucky_spend(instance, intent, actor)
         # 失能族只禁"动作"（动作/附赠动作/反应），移动不是动作：纯 incapacitated
         # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
         flags = condition_flags(self.catalog.conditions, actor["conditions"])
         if flags["incapacitated"] and intent_type in {
             "attack", "cast_spell", "class_capability", "dash", "dodge",
-            "disengage", "stabilize",
+            "disengage", "hide", "stabilize",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
             raise CombatIntentError("an actor with speed zero cannot move")
         economy = combat.get("economy") or {}
-        if intent_type in {"attack", "dash", "dodge", "disengage", "stabilize"}:
+        if intent_type in {"attack", "dash", "dodge", "disengage", "hide", "stabilize"}:
             has_action = int(economy.get("action", 0) or 0) > 0 or int(
                 economy.get("surge_action", 0) or 0
             ) > 0
@@ -386,6 +405,26 @@ class CombatValidationMixin:
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
 
+    def _validate_lucky_spend(
+        self, instance: Any, intent: dict[str, Any], actor: dict[str, Any],
+    ) -> None:
+        """Declaring Lucky's advantage face requires an unspent point in hand.
+
+        Ownership of the pool *is* the feat requirement (the resource is only
+        synced for characters with ``feat:lucky``), so an absent pool is
+        rejected exactly like an empty one.
+        """
+
+        spend_luck = intent.get("spend_luck")
+        if spend_luck is None or spend_luck is False:
+            return
+        if spend_luck is not True:
+            raise CombatIntentError("spend_luck must be a boolean")
+        if not self._window_pool_available(
+            instance, str(actor["actor_id"]), LUCKY_RESOURCE,
+        ):
+            raise CombatIntentError("lucky pool is empty")
+
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
@@ -401,6 +440,7 @@ class CombatValidationMixin:
             # 一个 lookup 同时覆盖装备武器、徒手打击与敌人 attack profile：
             # 客户端无法声明角色并不真正拥有的攻击档案。
             raise CombatIntentError("attack profile is not available to the actor")
+        self._validate_lucky_spend(instance, intent, actor)
         distance = self._distance(combat, actor["actor_id"], target_id)
         normal_range = int(weapon.get("thrown_range") or weapon.get("range", 5))
         long_range = int(weapon.get("long_range") or normal_range)
@@ -415,6 +455,8 @@ class CombatValidationMixin:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
         if "rage" in actor["conditions"]:
             raise CombatIntentError("you cannot cast spells while raging")
+        if bool((actor.get("armor_training") or {}).get("untrained_armor_worn")):
+            raise CombatIntentError("armor you are not trained in blocks spellcasting")
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
@@ -429,6 +471,9 @@ class CombatValidationMixin:
             raise CombatIntentError("this spell requires a pending melee hit")
         if trigger is not None and effect["mode"] != "triggered_damage":
             raise CombatIntentError("resolve the melee hit spell decision first")
+        if intent.get("spend_luck") and effect["mode"] != "spell_attack":
+            raise CombatIntentError("spend_luck requires a spell attack roll")
+        self._validate_lucky_spend(instance, intent, actor)
         cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
         if int(economy.get(cost, 0) or 0) < 1:
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
@@ -512,6 +557,21 @@ class CombatValidationMixin:
                 raise CombatIntentError("spell resist_type choice is required")
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
+        maximize = intent.get("maximize_damage")
+        if maximize is not None and not isinstance(maximize, bool):
+            raise CombatIntentError("maximize_damage must be a boolean")
+        if maximize:
+            character = self._feature_character(actor)
+            max_slot = int(self.features.feature_value(
+                character, "overchannel", "max_slot_level", 5,
+            ) or 0)
+            if not self.features.has_feature(character, "overchannel") or max_slot < 1:
+                raise CombatIntentError("overchannel is required to maximize damage")
+            if effect["mode"] not in {"spell_attack", "saving_throw", "automatic_damage"} \
+                    or not effect.get("damage"):
+                raise CombatIntentError("this spell does not deal damage")
+            if not 1 <= int(slot_level) <= max_slot:
+                raise CombatIntentError("maximized casting requires a spell slot of level 1-5")
         if effect["mode"] == "teleport":
             distance = intent.get("teleport_distance")
             if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:

@@ -15,6 +15,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -35,6 +36,7 @@ from .models import (
     FeatureView,
 )
 from .resources import (
+    ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
     resource_state,
@@ -129,9 +131,19 @@ class Dnd2024ClassFeatureResolver:
         if state is None:
             return ()
         class_id, level = state
-        granted = self._granted_feature_ids(class_id, level)
+        granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
+            class_id, level,
+        )
         owned: list[ClassFeatureDefinition] = []
-        for feature_id in self.catalog.by_class.get(class_id, ()):
+        ordered = list(self.catalog.by_class.get(class_id, ()))
+        # Feature ids are canonical and global, while a class table may grant a
+        # feature declared under another class (Weapon Mastery is one such
+        # shared feature).  Ownership therefore follows the progression grant;
+        # the catalog only has to declare the id once.
+        for feature_id in sorted(granted):
+            if feature_id in self.catalog.features and feature_id not in ordered:
+                ordered.append(feature_id)
+        for feature_id in ordered:
             definition = self.catalog.features.get(feature_id)
             if definition is None or definition.minimum_level > level:
                 continue
@@ -206,6 +218,120 @@ class Dnd2024ClassFeatureResolver:
             return default
         return self._value(definition, character, key, default)
 
+    def min_feature_value(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+        default: Any = None,
+    ) -> Any:
+        """The smallest numeric value of one parameter across owned features.
+
+        Crit threshold and other "best value wins" primitives read through this
+        method, so a class never hardcodes a subclass feature id and two owned
+        declarations (19 and 18) resolve to the more generous 18 instead of
+        stacking.
+        """
+
+        name = str(key)
+        found: int | None = None
+        for definition in self.features_for(character):
+            value = definition.parameters.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            if found is None or value < found:
+                found = value
+        return default if found is None else found
+
+    def max_feature_value_source(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+        default: int = 0,
+    ) -> tuple[int, str]:
+        """The largest numeric value of one parameter and the declaration it came from.
+
+        Turn-start regeneration needs both the amount and the declaration that
+        supplied it (the paired ability lives in the same definition).  Multiple
+        owned declarations resolve to the single largest base instead of
+        stacking, mirroring ``min_feature_value`` for the most generous
+        threshold.
+        """
+
+        name = str(key)
+        found: int | None = None
+        source_id = ""
+        for definition in self.features_for(character):
+            value = definition.parameters.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            if found is None or value > found:
+                found = value
+                source_id = definition.id
+        if found is None:
+            return int(default), ""
+        return found, source_id
+
+    def unarmored_ac_bonus_abilities(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[str, ...]:
+        """Ability ids whose modifiers add to an unarmored base AC.
+
+        Each owned declaration names exactly one additional ability. Multiple
+        declarations are alternative candidates for the "one base AC at a
+        time" rule, so the armor class formula takes the best candidate instead
+        of summing ability modifiers.
+        """
+
+        abilities: list[str] = []
+        for definition in self.features_for(character):
+            ability = definition.parameters.get("unarmored_ac_ability_bonus")
+            if isinstance(ability, str) and ability and ability not in abilities:
+                abilities.append(ability)
+        return tuple(abilities)
+
+    def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
+        """The Hit Point maximum increase granted by owned features.
+
+        ``max_hp_bonus_first`` applies at the declaring minimum level and
+        ``max_hp_bonus_per_level_after`` once per later class level. Ownership
+        is already resolved by ``features_for``, so this only counts levels
+        after the grant and never retroactively pays for earlier ones.
+        """
+
+        state = self.class_state(character)
+        if state is None:
+            return 0
+        _, level = state
+        total = 0
+        for definition in self.features_for(character):
+            first = definition.parameters.get("max_hp_bonus_first", 0)
+            per_level = definition.parameters.get("max_hp_bonus_per_level_after", 0)
+            if isinstance(first, bool) or not isinstance(first, int):
+                continue
+            if isinstance(per_level, bool) or not isinstance(per_level, int):
+                continue
+            total += first + per_level * max(0, level - definition.minimum_level)
+        return total
+
+    def feature_flag_sources(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+    ) -> list[str]:
+        """Owned declaration ids whose boolean parameter ``key`` is truthy.
+
+        Advantage provenance is built straight from this list: the resolver
+        never names a feature, it only reports which declarations asked for the
+        flag.
+        """
+
+        name = str(key)
+        return [
+            definition.id
+            for definition in self.features_for(character)
+            if definition.parameters.get(name)
+        ]
+
     def feature_views(
         self, character: Mapping[str, Any] | None,
     ) -> tuple[FeatureView, ...]:
@@ -273,6 +399,7 @@ class Dnd2024ClassFeatureResolver:
             "martial_arts_weapon_refs": list(
                 self._benefitting_weapon_refs(character, active)
             ),
+            "ranged_attack_bonus": self._ranged_attack_bonus(character),
         }
 
     def projection_fields(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -306,7 +433,10 @@ class Dnd2024ClassFeatureResolver:
             return None
         class_id, level = state
         wanted = str(resource_id or "")
-        declaration = self.resources.declaration(class_id, wanted)
+        # 职业特性与起源专长共用 ``resources.class`` 存储；窗口资源（幸运点、
+        # 诗人激励、黑暗强运）正是通过这两条拥有路径被战斗投影消费的。特性未
+        # 显式声明 resource_id 时仍按职业声明兜底，保持旧角色投影不丢资源。
+        declaration = self._owned_resource_declaration(character, wanted)
         owner = next(
             (
                 definition for definition in self.catalog.class_features(class_id)
@@ -353,12 +483,50 @@ class Dnd2024ClassFeatureResolver:
         for definition in owned:
             if definition.resource_id and definition.resource_id not in resource_ids:
                 resource_ids.append(definition.resource_id)
+        # Origin-feat pools (Lucky's Luck Points) are owned through
+        # ``features.feat_refs`` rather than a class table, but they live in the
+        # same canonical ``resources.class`` store.  The actor projection is the
+        # public source for decision-window resource counts, so an owned feat
+        # pool must appear there exactly like a class pool does.
+        feat_refs = self._feat_refs(character)
+        for feat_id, declarations in self.resources.by_feat.items():
+            if f"feat:{feat_id}" not in feat_refs:
+                continue
+            for resource_id in declarations:
+                if resource_id not in resource_ids:
+                    resource_ids.append(resource_id)
         result: list[ResourceDefinition] = []
         for resource_id in resource_ids:
             resolved = self.class_resource_definition(character, resource_id)
             if resolved is not None:
                 result.append(resolved)
         return tuple(result)
+
+    @staticmethod
+    def _feat_refs(character: Mapping[str, Any] | None) -> set[str]:
+        features = character.get("features") if isinstance(character, Mapping) else None
+        features = features if isinstance(features, Mapping) else {}
+        return {str(ref) for ref in features.get("feat_refs") or []}
+
+    def _owned_resource_declaration(
+        self, character: Mapping[str, Any] | None, resource_id: str,
+    ) -> ClassResourceDeclaration | None:
+        """The class or owned-feat declaration that grants ``resource_id``."""
+
+        state = self.class_state(character)
+        if state is None:
+            return None
+        declaration = self.resources.declaration(state[0], resource_id)
+        if declaration is not None:
+            return declaration
+        feat_refs = self._feat_refs(character)
+        for feat_id, declarations in self.resources.by_feat.items():
+            if f"feat:{feat_id}" not in feat_refs:
+                continue
+            declaration = declarations.get(resource_id)
+            if declaration is not None:
+                return declaration
+        return None
 
     # ------------------------------------------------------------------
     # combat capabilities
@@ -416,6 +584,39 @@ class Dnd2024ClassFeatureResolver:
             if isinstance(die, str) and die:
                 return die
         return ""
+
+    def _ranged_attack_bonus(self, character: Mapping[str, Any] | None) -> int:
+        """Flat bonus this character's feats grant to ranged weapon attack rolls.
+
+        Feat parameters are aggregated here so combat never reads the
+        advancement feat catalog: the actor projection is the single boundary
+        that knows which feats the character owns. Whether an attack actually
+        uses a ranged weapon stays the combat engine's decision.
+        """
+
+        if not isinstance(character, Mapping):
+            return 0
+        features = character.get("features")
+        feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
+        if not isinstance(feat_refs, list):
+            return 0
+        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+        if not isinstance(feats, Mapping):
+            return 0
+        total = 0
+        for ref in feat_refs:
+            if not isinstance(ref, str):
+                continue
+            feat = feats.get(ref.removeprefix("feat:"))
+            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
+            bonus = (
+                parameters.get("ranged_attack_bonus")
+                if isinstance(parameters, Mapping) else None
+            )
+            if isinstance(bonus, int) and not isinstance(bonus, bool):
+                total += bonus
+        return total
 
     def unarmed_ability_choice(
         self, character: Mapping[str, Any] | None,
@@ -505,6 +706,27 @@ class Dnd2024ClassFeatureResolver:
             granted.update(str(feature_id) for feature_id in row)
         return frozenset(granted)
 
+    def _subclass_feature_ids(self, class_id: str, level: int) -> frozenset[str]:
+        """Subclass features granted up to ``level`` by the representative subclass.
+
+        Ownership is derived from ``(class_id, level)`` only: the SRD bundle
+        guarantees exactly one representative subclass per class, and the
+        advancement chain forces that subclass at the level it is introduced.
+        Consequently a directly built sheet without ``features.subclass_ref``
+        owns the same features as one advanced through the real path.
+        """
+
+        if self.progression is None:
+            return frozenset()
+        subclass = self.progression.subclasses.get(str(class_id))
+        if not subclass:
+            return frozenset()
+        granted: set[str] = set()
+        for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
+            if 1 <= int(raw_level) <= level:
+                granted.update(str(feature_id) for feature_id in feature_ids)
+        return frozenset(granted)
+
     def _track_value(
         self,
         character: Mapping[str, Any] | None,
@@ -543,7 +765,24 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"class feature {definition.id} references an unknown class table"
                 )
+            subclass = progression_catalog.subclasses.get(definition.class_id)
+            if subclass is not None:
+                for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
+                    # 声明等级与子职表授予等级漂移即拒绝：不允许"声明 3 级、
+                    # 实际 7 级才给"的静默错位。
+                    if definition.id in feature_ids and int(raw_level) != definition.minimum_level:
+                        raise ClassFeatureError(
+                            f"{definition.id}.minimum_level must match its subclass grant level"
+                        )
             for key, value in definition.parameters.items():
+                if key == "crit_threshold":
+                    if (
+                        isinstance(value, bool) or not isinstance(value, int)
+                        or not 2 <= value <= 19
+                    ):
+                        raise ClassFeatureError(
+                            f"{definition.id}.{key} must be an integer from 2 to 19"
+                        )
                 if key.endswith("_format"):
                     if (
                         not isinstance(value, str)
@@ -563,6 +802,10 @@ class Dnd2024ClassFeatureResolver:
                     raise ClassFeatureError(
                         f"{definition.id}.{key} names an unknown progression track: {value}"
                     )
+            self._validate_passive_parameters(definition)
+            self._validate_defeat_trigger_parameters(definition)
+            self._validate_defense_parameters(definition)
+            self._validate_overchannel_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -572,3 +815,145 @@ class Dnd2024ClassFeatureResolver:
                         f"{definition.id} references an undeclared class resource: "
                         f"{definition.resource_id}"
                     )
+
+    @staticmethod
+    def _validate_passive_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on passive primitives a consumer would otherwise misread.
+
+        A declared advantage flag must be exactly ``True``: a ``False``/truthy
+        lookalike would silently change death-save dice with no way to tell
+        intent from typo.  The regeneration pair must appear together so the
+        amount and its ability never drift apart.
+        """
+
+        parameters = definition.parameters
+        if "death_save_advantage" in parameters and (
+            parameters["death_save_advantage"] is not True
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.death_save_advantage must be true when declared"
+            )
+        threshold = parameters.get("death_save_crit_threshold")
+        if "death_save_crit_threshold" in parameters and (
+            isinstance(threshold, bool) or not isinstance(threshold, int)
+            or not 2 <= threshold <= 19
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 19"
+            )
+        base = parameters.get("turn_start_regen_base")
+        if "turn_start_regen_base" in parameters and (
+            isinstance(base, bool) or not isinstance(base, int) or base < 0
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.turn_start_regen_base must be a non-negative integer"
+            )
+        ability = parameters.get("turn_start_regen_ability")
+        if "turn_start_regen_ability" in parameters and (
+            not isinstance(ability, str) or ability not in ABILITY_IDS
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.turn_start_regen_ability must name an ability"
+            )
+        if (
+            "turn_start_regen_base" in parameters
+        ) != ("turn_start_regen_ability" in parameters):
+            raise ClassFeatureError(
+                f"{definition.id} must declare turn_start_regen_base and "
+                "turn_start_regen_ability as a pair"
+            )
+
+    @staticmethod
+    def _validate_defeat_trigger_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the defeat-trigger payload.
+
+        The payload is a closed set: the temp-HP ability code plus two optional
+        knobs (a class-level flag and a share radius).  A payload that declares
+        any of them without the ability would silently resolve to nothing, so it
+        is rejected at load time instead of becoming an inert feature.
+        """
+
+        parameters = definition.parameters
+        keys = (
+            "defeat_temp_hp_ability",
+            "defeat_temp_hp_add_class_level",
+            "defeat_share_range_ft",
+        )
+        if not any(key in parameters for key in keys):
+            return
+        ability = parameters.get("defeat_temp_hp_ability")
+        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_temp_hp_ability must name an ability"
+            )
+        flag = parameters.get("defeat_temp_hp_add_class_level")
+        if "defeat_temp_hp_add_class_level" in parameters and not isinstance(flag, bool):
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_temp_hp_add_class_level must be a boolean"
+            )
+        share = parameters.get("defeat_share_range_ft")
+        if "defeat_share_range_ft" in parameters and (
+            isinstance(share, bool) or not isinstance(share, int) or not 1 <= share <= 120
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
+            )
+
+    @staticmethod
+    def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the defense-calculation contract.
+
+        The unarmored AC bonus is one ability id, never a stacked expression;
+        the two Hit Point knobs are bounded non-negative integers so a typo
+        cannot silently become a huge or negative maximum.
+        """
+
+        parameters = definition.parameters
+        ability = parameters.get("unarmored_ac_ability_bonus")
+        if "unarmored_ac_ability_bonus" in parameters and (
+            not isinstance(ability, str) or ability not in ABILITY_IDS
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.unarmored_ac_ability_bonus must name an ability"
+            )
+        for key in ("max_hp_bonus_first", "max_hp_bonus_per_level_after"):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int)
+                or not 0 <= value <= 20
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be an integer from 0 to 20"
+                )
+
+    @staticmethod
+    def _validate_overchannel_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the maximize-damage contract.
+
+        A typo in the slot cap or the self-damage dice would silently change
+        how much a maximized cast costs, so each declared knob is range-checked
+        at load time.  Missing knobs are fine: consumers fall back to their
+        documented defaults.
+        """
+
+        parameters = definition.parameters
+        for key, low, high in (
+            ("max_slot_level", 1, 9),
+            ("cost_dice_per_slot", 1, 10),
+            ("cost_die_sides", 2, 20),
+        ):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int)
+                or not low <= value <= high
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be an integer from {low} to {high}"
+                )
+        damage_type = parameters.get("cost_damage_type")
+        if "cost_damage_type" in parameters and (
+            not isinstance(damage_type, str) or not damage_type
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.cost_damage_type must name a damage type"
+            )

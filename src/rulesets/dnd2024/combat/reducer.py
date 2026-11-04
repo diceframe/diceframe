@@ -20,7 +20,7 @@ _GRANTABLE_FLAGS = frozenset({"action_surge_used"})
 # 只在回合边界到期的条件时长；战斗结束时一并清除。
 _TURN_SCOPED_DURATIONS = frozenset({
     "actor_turn_start", "target_turn_start", "caster_turn_end",
-    "caster_next_turn_end", "after_next_attack",
+    "caster_next_turn_end", "after_next_attack", "attacker_next_turn_start",
 })
 
 
@@ -120,7 +120,8 @@ class CombatReducerMixin:
             combat["outcome"] = str(event.get("reason") or "ended")
             combat["economy"] = {}
             # 狂暴靠每回合攻击或附赠动作续期；按回合计时的效果也只在回合
-            # 边界到期。战斗结束后没有回合，它们随之结束，不能带进下一场战斗。
+            # 边界到期。战斗结束后没有回合，它们随之结束；``duration=combat``
+            # （如 Hide 的 Invisible）同样以本场战斗为界，不能带进下一场战斗。
             party = [*snapshot["characters"].values()]
             companions = (state.get("party") or {}).get("companions") or {}
             for companion in companions.values():
@@ -132,7 +133,10 @@ class CombatReducerMixin:
                 for condition_id in [
                     key for key, value in conditions.items()
                     if key == "rage" or (
-                        isinstance(value, dict) and value.get("duration") in _TURN_SCOPED_DURATIONS
+                        isinstance(value, dict) and (
+                            value.get("duration") in _TURN_SCOPED_DURATIONS
+                            or value.get("duration") == "combat"
+                        )
                     )
                 ]:
                     conditions.pop(condition_id, None)

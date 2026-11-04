@@ -29,7 +29,7 @@ def hosted_intent_choices(engine: Any, instance: Any, uid: str, *, limit: int = 
             options.append(candidate)
 
     # Always retain an explicit way to end the turn before expanding targets.
-    for kind in ("end_turn", "dodge", "disengage", "dash"):
+    for kind in ("end_turn", "dodge", "disengage", "dash", "hide"):
         add(kind)
     for action in engine.available_intents(instance, uid):
         kind = action["type"]

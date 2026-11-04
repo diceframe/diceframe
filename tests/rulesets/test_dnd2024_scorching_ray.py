@@ -381,9 +381,12 @@ def test_blessed_caster_adds_a_d4_to_each_beam() -> None:
     )
 
     checks = checks_of(result, "spell_attack")
-    assert [check["bless_bonus"] for check in checks] == [3, 4, 2]
+    assert [check["check_bonus"] for check in checks] == [3, 4, 2]
+    assert [
+        check["check_bonus_rolls"] for check in checks
+    ] == [[{"condition": "blessed", "die": 4, "roll": value}] for value in (3, 4, 2)]
     assert [check["total"] for check in checks] == [
-        check["natural"] + check["modifier"] + check["bless_bonus"] for check in checks
+        check["natural"] + check["modifier"] + check["check_bonus"] for check in checks
     ]
 
 
@@ -397,7 +400,7 @@ def test_bless_also_applies_to_the_concentration_save() -> None:
     )
     view["concentration"] = {"spell_ref": "spell:bless"}
     check = engine._concentration_events(view, 10, SequenceRng([12, 4]))[0]
-    assert check["bless_bonus"] == 4
+    assert check["check_bonus"] == 4
     assert check["total"] == 12 + check["modifier"] + 4
 
 

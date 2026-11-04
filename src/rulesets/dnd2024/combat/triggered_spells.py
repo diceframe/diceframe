@@ -88,7 +88,7 @@ class CombatTriggeredSpellsMixin:
         choices = [
             row
             for row in self._available_spells(
-                actor, combat.get("economy", {}), decision
+                instance, actor, combat.get("economy", {}), decision
             )
             if row.get("mode") == "triggered_damage"
         ]
@@ -161,6 +161,9 @@ class CombatTriggeredSpellsMixin:
             events.append(extra_damage)
             total += int(extra_damage["amount"])
         events.extend(self._concentration_events(target, total, rng))
+        events.extend(self._enemy_defeated_feature_events(
+            instance, combat, str(decision["actor_id"]), target, total,
+        ))
         if self._last_hostile_defeated(combat, target, total):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
@@ -224,7 +227,7 @@ class CombatTriggeredSpellsMixin:
         spells = [
             row
             for row in self._available_spells(
-                actor, combat.get("economy", {}), decision
+                instance, actor, combat.get("economy", {}), decision
             )
             if row["mode"] == "triggered_damage"
         ]

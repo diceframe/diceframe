@@ -177,6 +177,19 @@ class CharacterValidationMixin:
             errors=errors,
         )
 
+        class_feat_choices = draft.get("class_feature_feat_choices")
+        if class_feat_choices is not None and not isinstance(class_feat_choices, dict):
+            errors.append("class_feature_feat_choices must be an object")
+            class_feat_choices = {}
+        class_feat_choices = class_feat_choices or {}
+        if "fighting_style" in set((class_entity or {}).get("level_1_feature_ids") or []):
+            # 建卡期战斗风格可选：仅当客户端显式给出选择时才校验其合法性。
+            # 引导/专家建卡尚无该控件，缺失时保持特性为未选择状态，不阻断建卡。
+            if "fighting_style" in class_feat_choices:
+                self._validate_fighting_style_choice(class_feat_choices, errors)
+        elif class_feat_choices:
+            errors.append("class_feature_feat_choices is not available to this class")
+
         feat_choice_specs = self._feat_choice_specs(
             draft,
             class_entity=class_entity,
@@ -251,3 +264,28 @@ class CharacterValidationMixin:
             if speed <= 0:
                 errors.append("species speed must be positive")
         return list(dict.fromkeys(errors))
+
+    def _validate_fighting_style_choice(
+        self, choices: dict[str, Any], errors: list[str],
+    ) -> None:
+        """Validate a supplied level-1 fighting style feat choice.
+
+        The advancement feat catalog is the only authority: a reference it does
+        not declare, or one whose category / prerequisite does not match, is a
+        draft error rather than a silently inert choice. Omitting the choice is
+        allowed; the level-1 feature then stays unselected.
+        """
+
+        ref = choices.get("fighting_style")
+        if not isinstance(ref, str) or not ref:
+            errors.append("fighting style feat choice must be a feat reference")
+            return
+        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+        feats = catalog.get("feats") if isinstance(catalog, dict) else None
+        entry = (feats or {}).get(_ref_id(ref, "feat")) if isinstance(feats, dict) else None
+        if (
+            not isinstance(entry, dict)
+            or entry.get("category") != "fighting_style"
+            or entry.get("requires_feature") != "fighting_style"
+        ):
+            errors.append(f"fighting style feat choice is not an available fighting style: {ref}")

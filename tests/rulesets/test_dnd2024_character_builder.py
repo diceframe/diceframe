@@ -67,6 +67,7 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
     _write(root / "content" / "classes" / "fighter.json", _entity(
         "class", "fighter", hit_die=10,
         saving_throw_refs=["ability:str", "ability:con"],
+        armor_proficiencies=["heavy", "shield"],
         skill_choice={
             "count": 2,
             "allowed_refs": ["skill:athletics", "skill:perception", "skill:survival"],
@@ -86,7 +87,8 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
         "feat", "savage_attacker", automation_level="guided",
     ))
     _write(root / "content" / "items" / "chain_mail.json", _entity(
-        "item", "chain_mail", item_type="armor", ac_base=16, dex_cap=0,
+        "item", "chain_mail", item_type="armor", category="heavy",
+        ac_base=16, dex_cap=0,
     ))
     _write(root / "content" / "items" / "shield.json", _entity(
         "item", "shield", item_type="shield", ac_bonus=2,
@@ -253,6 +255,8 @@ def _real_bundle_draft(runtime: Dnd2024Runtime, class_ref: str, species_ref: str
         "background_equipment_package_ref": choices["background_equipment_packages"][0]["ref"],
         "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
     }
+    if "fighting_style" in (class_entity.get("level_1_feature_ids") or []):
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:defense"}
     if class_entity.get("recommended_spell_choices"):
         draft["class_spell_choices"] = class_entity["recommended_spell_choices"]
     choices = runtime.builder_choices(None, draft)

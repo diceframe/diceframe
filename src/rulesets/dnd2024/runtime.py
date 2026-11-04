@@ -24,6 +24,7 @@ from src.adventures.graph_v2 import (
 from src.engine import progression
 from src.engine.legacy_game_projection import project_legacy_game_context
 from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
+from src.engine.staged_transaction import fork_domain_state
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
 )
@@ -73,6 +74,31 @@ from src.rulesets.dnd2024 import adventure_validation  # noqa: F401  (MOD-01: æ³
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_legacy_check_bonus(event: dict[str, Any]) -> dict[str, Any]:
+    """Map pre-1C ``bless_bonus`` evidence onto the current public contract.
+
+    Baseline check events stored the single Bless d4 as an integer
+    ``bless_bonus`` and already folded it into ``total``, with no roll trace.
+    Current consumers read ``check_bonus``.  Normalizing here -- in the
+    presentation projection, not the persisted ledger -- keeps old saves
+    readable without rewriting history.  Only the already-known bonus is
+    mapped; the absent d4 trace is not fabricated.  A zero or absent bonus is
+    returned unchanged, and an event that already carries ``check_bonus`` wins.
+    """
+
+    if "check_bonus" in event or "bless_bonus" not in event:
+        return event
+    try:
+        bonus = int(event.get("bless_bonus") or 0)
+    except (TypeError, ValueError):
+        return event
+    if bonus <= 0:
+        return event
+    normalized = dict(event)
+    normalized["check_bonus"] = bonus
+    return normalized
 
 
 class Dnd2024Runtime:
@@ -423,10 +449,11 @@ class Dnd2024Runtime:
     ) -> dict[str, Any]:
         """Strip monster stat blocks from intent/automation payloads for non-GMs."""
 
-        del instance, viewer_id
         if viewer_is_gm:
             return result
-        return combat_visibility.public_intent_result(result)
+        return combat_visibility.public_intent_result(
+            result, viewer_id=viewer_id, viewer_is_gm=False,
+        )
 
     def configure_live_advancement(
         self, instance: Any, mode: str, authority: str,
@@ -986,13 +1013,28 @@ class Dnd2024Runtime:
     def apply_event_batch(
         self, instance: Any, batch: dict[str, Any],
     ) -> dict[str, Any]:
-
-
         # Campaign steps write the scene after the batch commits; reject an
-        # unsupported notes slot before any ruleset state changes.
+        # unsupported notes slot before loading content or changing ruleset state.
         module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
         locale = str(getattr(instance, "language", "") or "")
         bundle = self.load_bundle(locale)
+        if str(batch.get("intent_type") or "") == "combat.start":
+            # The legacy armor repair is part of the combat.start transaction.
+            # Stage it before resolving the combat batch so a stale or malformed
+            # batch cannot leave character revisions/log entries behind.
+            staged = fork_domain_state(instance)
+            self._reconcile_party_before_combat(staged, bundle)
+            result = self._apply_event_batch_in_place(staged, batch, locale)
+            if result.get("applied"):
+                instance.replace_persisted_state_from(staged)
+            return result
+        return self._apply_event_batch_in_place(instance, batch, locale)
+
+    def _apply_event_batch_in_place(
+        self, instance: Any, batch: dict[str, Any], locale: str,
+    ) -> dict[str, Any]:
+        """Apply one batch to an already selected aggregate transaction."""
+
         before_characters = {
             uid: deepcopy(instance.get_character_sheet(uid).get("ruleset_character"))
             for uid in getattr(instance, "players", {})
@@ -1053,7 +1095,9 @@ class Dnd2024Runtime:
         )
         access = self._encounter_access(instance, campaign)
         combat_engine = self._combat_engine(instance, access, locale)
-        view = combat_engine.gameplay_view(instance)
+        view = combat_engine.gameplay_view(
+            instance, viewer_id=viewer_id, viewer_is_gm=viewer_is_gm,
+        )
         request = ruleset_runtime.state(instance).get("encounter_request")
         if isinstance(request, dict):
             projected_request = deepcopy(request)
@@ -1124,7 +1168,8 @@ class Dnd2024Runtime:
             "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
             "total", "target", "success", "critical", "delta", "amount", "damage_type",
             "healing",
-            "rolls", "advantage_mode", "advantage_sources", "bless_bonus",
+            "rolls", "advantage_mode", "advantage_sources", "check_bonus",
+            "check_bonus_rolls",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
         }
@@ -1160,7 +1205,9 @@ class Dnd2024Runtime:
                 if not isinstance(raw, dict) or str(raw.get("type") or "") not in meaningful:
                     continue
                 event = {
-                    key: deepcopy(value) for key, value in raw.items() if key in allowed_fields
+                    key: deepcopy(value)
+                    for key, value in _normalize_legacy_check_bonus(raw).items()
+                    if key in allowed_fields
                 }
                 if event.get("round") is not None:
                     current_round = int(event.get("round", 0) or 0)
@@ -1479,6 +1526,39 @@ class Dnd2024Runtime:
             merged, frozenset({"equipment", "inventory"}),
         )
         return merged
+
+    def _reconcile_party_before_combat(self, instance: Any, bundle: Any) -> None:
+        """Repair pre-Armor-Training party records before combat becomes active.
+
+        Idempotent: a current record derives the same values and is not
+        rewritten, so repeated load/combat.start never adds revisions or log
+        entries twice.  A player without a live equipment list is derived from
+        canonical refs instead: projecting an empty list would erase them.
+        """
+
+        reconciler = self._reconciler(bundle)
+        for uid in sorted(getattr(instance, "players", {}) or {}):
+            sheet = instance.get_character_sheet(uid)
+            if not isinstance(sheet, dict) or not isinstance(sheet.get("ruleset_character"), dict):
+                continue
+            if isinstance(sheet.get("equipment"), list):
+                changed = reconciler.reconcile(sheet, frozenset({"equipment"}))
+            else:
+                changed = reconciler.reconcile_canonical(sheet["ruleset_character"])
+            if changed is not None:
+                instance.set_character_sheet(uid, sheet)
+
+        state = ruleset_runtime.state(instance)
+        party = state.get("party") if isinstance(state, dict) else None
+        companions = party.get("companions") if isinstance(party, dict) else None
+        if not isinstance(companions, dict):
+            return
+        for companion in companions.values():
+            if not isinstance(companion, dict) or not companion.get("active", True):
+                continue
+            canonical = companion.get("ruleset_character")
+            if isinstance(canonical, dict):
+                reconciler.reconcile_canonical(canonical)
 
     def reconcile_character_state(
         self,

@@ -1208,6 +1208,10 @@ export interface RulesetCombatSpell extends JsonObject {
   repeat_targets?: boolean
   resist_choice?: string[]
   trigger_target_id?: string
+  /** The server exposes this only when the spell attack can still spend a Lucky point. */
+  lucky_advantage_available?: boolean
+  /** The server exposes this only when Overchannel can legally maximize this casting. */
+  maximize_damage_available?: boolean
 }
 
 export interface RulesetCombatReactionFeature extends JsonObject {
@@ -1242,6 +1246,8 @@ export interface RulesetCombatAction extends JsonObject {
   feature_id?: string
   costs?: RulesetCapabilityCost[]
   requires_target?: boolean
+  /** Declared only for actions whose roll can still spend a Lucky point. */
+  lucky_advantage_available?: boolean
 }
 
 export interface RulesetEncounterPreset extends JsonObject {

@@ -351,6 +351,9 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species_choice_answers": deepcopy(build.get("species_choice_answers") or {}),
             "species_skill_refs": deepcopy(build.get("species_skill_refs") or []),
             "species_feat_refs": deepcopy(build.get("species_feat_refs") or []),
+            "class_feature_feat_choices": deepcopy(
+                build.get("class_feature_feat_choices") or {}
+            ),
             "feat_choice_answers": deepcopy(build.get("feat_choice_answers") or {}),
             "class_skill_refs": deepcopy(build.get("class_skill_refs") or []),
             "class_tool_refs": deepcopy(build.get("class_tool_refs") or []),

@@ -1,0 +1,12 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "feat",
+    "id": "lucky"
+  },
+  "fields": {
+    "name": "幸运",
+    "summary": "你拥有数量等同于熟练加值的幸运点。花费 1 点可让自己的一次 D20 检定获得优势，或让一次针对你的攻击检定承受劣势。完成长休时恢复全部已消耗的幸运点。"
+  }
+}

@@ -5,6 +5,9 @@
   "source_ref": "srd-5.2.1:p92:equipment",
   "automation_level": "deterministic",
   "item_type": "armor",
+  "category": "heavy",
+  "strength_minimum": 13,
+  "stealth_disadvantage": true,
   "ac_base": 16,
   "use_dex": false
 }

@@ -15,20 +15,42 @@
     "step_of_the_wind_focus": "Step of the Wind (Focus)",
     "bonus_unarmed_strike": "Bonus Unarmed Strike",
     "focus_points": "Focus Points",
+    "lucky_points": "Lucky Points",
+    "bardic_inspiration": "Bardic Inspiration",
     "unarmed_strike": "Unarmed Strike",
     "action": "Action",
     "bonus_action": "Bonus Action",
     "paladin": "Paladin",
     "paladins_smite": "Paladin’s Smite",
+    "aura_of_devotion": "Aura of Devotion",
     "fighter": "Fighter",
     "second_wind": "Second Wind",
+    "weapon_mastery": "Weapon Mastery",
     "action_surge": "Action Surge",
+    "improved_critical": "Improved Critical",
+    "superior_critical": "Superior Critical",
+    "survivor": "Survivor",
     "barbarian": "Barbarian",
     "rage": "Rage",
+    "rages": "Rage Uses",
     "rage_sustain": "Sustain Rage",
+    "retaliation": "Retaliation",
     "rogue": "Rogue",
     "sneak_attack": "Sneak Attack",
-    "uncanny_dodge": "Uncanny Dodge"
+    "cunning_action": "Cunning Action",
+    "fast_hands": "Fast Hands",
+    "uncanny_dodge": "Uncanny Dodge",
+    "warlock": "Warlock",
+    "dark_ones_blessing": "Dark One's Blessing",
+    "dark_ones_own_luck": "Dark One's Own Luck",
+    "bard": "Bard",
+    "cutting_words": "Cutting Words",
+    "sorcerer": "Sorcerer",
+    "draconic_resilience": "Draconic Resilience",
+    "cleric": "Cleric",
+    "supreme_healing": "Supreme Healing",
+    "wizard": "Wizard",
+    "overchannel": "Overchannel"
   },
   "classes": {
     "monk": {
@@ -131,6 +153,16 @@
             "granted_spell_id": "divine_smite"
           },
           "resource_id": "paladins_smite"
+        },
+        {
+          "id": "aura_of_devotion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p56:aura-of-devotion",
+          "summary": "You and allies within your Aura (10 feet) have Immunity to the Charmed condition.",
+          "parameters": {
+            "aura_range": 10,
+            "aura_immune_conditions": ["charmed"]
+          }
         }
       ]
     },
@@ -157,6 +189,12 @@
           ]
         },
         {
+          "id": "weapon_mastery",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:weapon-mastery",
+          "summary": "You can use the mastery properties of your weapons. (This slice approximates the chosen-weapons list with an 'equipped weapon' unlock; the count track is not yet consumed.)"
+        },
+        {
           "id": "action_surge",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p48:action-surge",
@@ -172,6 +210,32 @@
               "actions": [{"kind": "action_surge", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "improved_critical",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p49:improved-critical",
+          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 19 or 20.",
+          "parameters": {"crit_threshold": 19}
+        },
+        {
+          "id": "superior_critical",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p49:superior-critical",
+          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 18-20.",
+          "parameters": {"crit_threshold": 18}
+        },
+        {
+          "id": "survivor",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p49:survivor",
+          "summary": "You have Advantage on Death Saving Throws, treat a roll of 18-20 on one as a 20, and while Bloodied you regain 5 plus your Constitution modifier Hit Points at the start of each of your turns.",
+          "parameters": {
+            "death_save_advantage": true,
+            "death_save_crit_threshold": 18,
+            "turn_start_regen_base": 5,
+            "turn_start_regen_ability": "con"
+          }
         }
       ]
     },
@@ -203,6 +267,13 @@
               "actions": [{"kind": "rage_sustain", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "retaliation",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p30:retaliation",
+          "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
+          "parameters": {"counterattack_range": 5}
         }
       ]
     },
@@ -220,12 +291,119 @@
           }
         },
         {
+          "id": "cunning_action",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p63:cunning-action",
+          "summary": "You can take the Dash, Disengage, or Hide action as a Bonus Action.",
+          "capabilities": [
+            {"id": "cunning_dash", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "dash"}]},
+            {"id": "cunning_disengage", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "disengage"}]},
+            {"id": "cunning_hide", "cost": {"bonus_action": 1},
+             "requires_hostile_target": false, "actions": [{"kind": "hide"}]}
+          ]
+        },
+        {
+          "id": "fast_hands",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p64:fast-hands",
+          "summary": "You can use a Bonus Action to make a Sleight of Hand check or to take the Utilize action.",
+          "parameters": {}
+        },
+        {
           "id": "uncanny_dodge",
           "minimum_level": 5,
           "source_ref": "srd-5.2.1:p63:uncanny-dodge",
           "summary": "When an attacker that you can see hits you with an attack, you can use your Reaction to halve the attack's damage against you (rounded down).",
           "parameters": {
             "damage_multiplier": 0.5
+          }
+        }
+      ]
+    },
+    "bard": {
+      "source_ref": "srd-5.2.1:p31:bard-features",
+      "features": [
+        {
+          "id": "cutting_words",
+          "minimum_level": 3,
+          "resource_id": "bardic_inspiration",
+          "source_ref": "srd-5.2.1:p35:cutting-words",
+          "summary": "When a creature you can see within 60 feet makes a damage roll or succeeds on an ability check or attack roll, use your Reaction and spend one Bardic Inspiration use to roll your Bardic Inspiration die and subtract it from the roll.",
+          "parameters": {
+            "die_sides_track": "bardic_die"
+          }
+        }
+      ]
+    },
+    "sorcerer": {
+      "source_ref": "srd-5.2.1:p64:sorcerer-features",
+      "features": [
+        {
+          "id": "draconic_resilience",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p52:draconic-resilience",
+          "summary": "Your Hit Point maximum increases by 3, and it increases by 1 again whenever you gain a Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
+          "parameters": {
+            "unarmored_ac_ability_bonus": "cha",
+            "max_hp_bonus_first": 3,
+            "max_hp_bonus_per_level_after": 1
+          }
+        }
+      ]
+    },
+    "warlock": {
+      "source_ref": "srd-5.2.1:p70:warlock-features",
+      "features": [
+        {
+          "id": "dark_ones_blessing",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p58:dark-ones-blessing",
+          "summary": "When you reduce an enemy to 0 HP, or someone else reduces your enemy to 0 HP within 10 feet of you, you gain temporary hit points equal to your Charisma modifier plus your Warlock level (minimum 1).",
+          "parameters": {
+            "defeat_temp_hp_ability": "cha",
+            "defeat_temp_hp_add_class_level": true,
+            "defeat_share_range_ft": 10
+          }
+        },
+        {
+          "id": "dark_ones_own_luck",
+          "minimum_level": 6,
+          "resource_id": "dark_ones_own_luck",
+          "source_ref": "srd-5.2.1:p76:dark-ones-own-luck",
+          "summary": "After you make an ability check or a saving throw and see the result but before it takes effect, spend one use to add 1d10 to the roll; once per roll; uses equal to Charisma modifier (min 1); regain all on a long rest.",
+          "parameters": {
+            "die_sides": 10
+          }
+        }
+      ]
+    },
+    "cleric": {
+      "source_ref": "srd-5.2.1:p40:cleric-features",
+      "features": [
+        {
+          "id": "supreme_healing",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p40:supreme-healing",
+          "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
+          "parameters": {}
+        }
+      ]
+    },
+    "wizard": {
+      "source_ref": "srd-5.2.1:p82:wizard-features",
+      "features": [
+        {
+          "id": "overchannel",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p82:overchannel",
+          "summary": "When you cast a Wizard spell of level 1-5 that deals damage, you can maximize its damage. After the spell resolves, you immediately take 2d12 Necrotic damage per spell slot level, ignoring Resistance and Immunity.",
+          "parameters": {
+            "max_slot_level": 5,
+            "cost_dice_per_slot": 2,
+            "cost_die_sides": 12,
+            "cost_damage_type": "necrotic"
           }
         }
       ]

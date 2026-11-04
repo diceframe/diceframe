@@ -423,7 +423,8 @@ def test_high_level_source_failure_keeps_the_condition() -> None:
     assert check["ability"] == "int"
     assert check["target"] == 14
     assert check["modifier"] == modifier
-    assert check["bless_bonus"] == 0
+    assert check["check_bonus"] == 0
+    assert check["check_bonus_rolls"] == []
     assert check["rolls"] == [5]
     assert check["natural"] == 5
     assert check["total"] == 5 + modifier

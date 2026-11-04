@@ -206,7 +206,7 @@ def test_builtin_dnd2024_inventory_and_locale_presentation_are_complete() -> Non
         "class": 12,
         "species": 9,
         "background": 4,
-        "feat": 6,
+        "feat": 7,
         "equipment_package": 33,
         "item": 50,
         "tool": 32,

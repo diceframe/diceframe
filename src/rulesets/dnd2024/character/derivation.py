@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.binding import rule_binding
+from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 from .primitives import ABILITY_IDS, ability_modifier, proficiency_bonus, ref_id as _ref_id
+
+
+def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
+    """The minimal canonical shape ``features_for`` needs to resolve ownership."""
+
+    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
 
 
 def derive_armor_class(
@@ -16,7 +23,9 @@ def derive_armor_class(
     equipped_item_refs: Iterable[str],
     bundle: Any,
     *,
+    armor_category_refs: Collection[str],
     warnings: list[str] | None = None,
+    unarmored_ability_bonuses: Iterable[str] = (),
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -30,6 +39,13 @@ def derive_armor_class(
     resolve to the single best one instead of stacking their bases, only one
     shield bonus is ever applied, and an item the bundle does not define is
     skipped with a warning instead of guessing at a lookalike.
+
+    ``unarmored_ability_bonuses`` names the abilities that a feature may add to
+    an *unarmored* base AC.  "While you aren't wearing armor" is a hard
+    precondition: with any armor present the plain ``10 + Dexterity`` baseline
+    is used, so a feature formula never competes with the armor's own AC.  Each
+    named ability is an alternative candidate, and the best candidate wins --
+    ability modifiers are never summed.
     """
 
     dex_modifier = ability_modifier(int(abilities["dex"]))
@@ -60,6 +76,9 @@ def derive_armor_class(
                     warnings.append(f"extra armor ignored by armor class: {ref}")
                 best_armor = max(best_armor, candidate)
         elif item_type == "shield":
+            # 盾牌必须先受训，否则它不给护甲等级加值（Armor Training 条款）。
+            if "armor_category:shield" not in armor_category_refs:
+                continue
             bonus = int(item.get("ac_bonus", 0) or 0)
             if shield_bonus:
                 # 同理：两面盾不能 +2 +2。
@@ -67,7 +86,65 @@ def derive_armor_class(
                     warnings.append(f"extra shield ignored by armor class: {ref}")
                 continue
             shield_bonus = bonus
+    if best_armor is None:
+        for ability in unarmored_ability_bonuses:
+            unarmored = max(
+                unarmored,
+                10 + dex_modifier + ability_modifier(int(abilities[str(ability)])),
+            )
     return max(unarmored, best_armor if best_armor is not None else unarmored) + shield_bonus
+
+
+_ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
+
+
+def derive_armor_training_state(
+    abilities: Mapping[str, int],
+    equipped_item_refs: Iterable[str],
+    armor_category_refs: Collection[str],
+    bundle: Any,
+) -> dict[str, Any]:
+    """Armor-training consequences of the armor the character is wearing.
+
+    The 2024 rules gate three separate facts on worn armor: an untrained light,
+    medium, or heavy armor imposes disadvantage on Strength/Dexterity D20 tests
+    and blocks spellcasting; a worn armor whose Strength requirement the
+    character does not meet reduces Speed by 10 feet; and an armor with a
+    Stealth penalty imposes disadvantage on Dexterity (Stealth) checks.  The
+    numbers all come from the item definitions, never from a guessed category.
+
+    A missing or unknown ``category`` on an armor item is unusable directory
+    data: the function raises instead of silently treating the armor as trained.
+    Shields carry no category and never participate; an item the bundle does
+    not define is skipped the same way the armor-class formula skips it.
+    """
+
+    strength = int(abilities["str"])
+    untrained = False
+    speed_penalty = 0
+    stealth_disadvantage = False
+    for raw_ref in equipped_item_refs:
+        ref = str(raw_ref or "")
+        item = bundle.get("item", _ref_id(ref, "item"))
+        if item is None or item.get("item_type") != "armor":
+            continue
+        category = item.get("category")
+        if not isinstance(category, str) or category not in _ARMOR_CATEGORIES:
+            raise ValueError(
+                f"armor item {ref!r} has an invalid category: {category!r}"
+            )
+        if f"armor_category:{category}" not in armor_category_refs:
+            untrained = True
+        minimum = item.get("strength_minimum")
+        if minimum is not None and int(minimum) > strength:
+            speed_penalty = 10
+        if bool(item.get("stealth_disadvantage")):
+            stealth_disadvantage = True
+    return {
+        "untrained_armor_worn": untrained,
+        "speed_penalty": speed_penalty,
+        "stealth_disadvantage": stealth_disadvantage,
+    }
 
 
 class CharacterDerivationMixin:
@@ -97,7 +174,16 @@ class CharacterDerivationMixin:
 
         background_feat_refs = [str(background["feat_ref"])] if background.get("feat_ref") else []
         species_feat_refs = list(draft.get("species_feat_refs") or [])
-        feat_refs = list(dict.fromkeys([*background_feat_refs, *species_feat_refs]))
+        class_feature_feat_choices = deepcopy(draft.get("class_feature_feat_choices") or {})
+        class_feature_feat_refs = (
+            [str(class_feature_feat_choices["fighting_style"])]
+            if "fighting_style" in set(class_entity.get("level_1_feature_ids") or [])
+            and isinstance(class_feature_feat_choices.get("fighting_style"), str)
+            else []
+        )
+        feat_refs = list(dict.fromkeys([
+            *background_feat_refs, *species_feat_refs, *class_feature_feat_refs,
+        ]))
         feat_choice_answers = deepcopy(draft.get("feat_choice_answers") or {})
         skilled_refs = list(
             (feat_choice_answers.get("feat:skilled") or {}).get("proficiencies") or []
@@ -145,7 +231,22 @@ class CharacterDerivationMixin:
         for ref in item_refs:
             # 建卡阶段仍要求装备包里每个引用都真实存在（validation 已保证）。
             self._required_entity(ref, "item")
-        armor_class = derive_armor_class(abilities, item_refs, self.bundle)
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        feature_proxy = _feature_proxy(draft["class_ref"], level)
+        armor_category_refs = [
+            f"armor_category:{item}"
+            for item in class_entity.get("armor_proficiencies", [])
+        ]
+        armor_class = derive_armor_class(
+            abilities, item_refs, self.bundle,
+            armor_category_refs=armor_category_refs,
+            unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(
+                feature_proxy
+            ),
+        )
+        armor_training = derive_armor_training_state(
+            abilities, item_refs, armor_category_refs, self.bundle,
+        )
 
         hit_die = int(class_entity["hit_die"])
         con_modifier = ability_modifier(abilities["con"])
@@ -154,6 +255,7 @@ class CharacterDerivationMixin:
         max_hp = max(1, hit_die + con_modifier)
         max_hp += max(0, level - 1) * max(1, fixed_hp + con_modifier)
         max_hp += species_hp_bonus * level
+        max_hp += features.feature_max_hp_bonus(feature_proxy)
         passive_perception = 10 + ability_modifier(abilities["wis"])
         if "skill:perception" in skill_refs:
             passive_perception += prof
@@ -253,6 +355,7 @@ class CharacterDerivationMixin:
                 "species_choice_answers": deepcopy(draft.get("species_choice_answers") or {}),
                 "species_skill_refs": species_skills,
                 "species_feat_refs": species_feat_refs,
+                "class_feature_feat_choices": class_feature_feat_choices,
                 "feat_choice_answers": feat_choice_answers,
                 "class_tool_refs": list(draft.get("class_tool_refs") or []),
                 "language_refs": language_refs,
@@ -261,10 +364,7 @@ class CharacterDerivationMixin:
             "abilities": abilities,
             "proficiencies": {
                 "saving_throw_refs": save_refs,
-                "armor_category_refs": [
-                    f"armor_category:{item}"
-                    for item in class_entity.get("armor_proficiencies", [])
-                ],
+                "armor_category_refs": armor_category_refs,
                 "weapon_category_refs": [
                     f"weapon_category:{item}"
                     for item in class_entity.get("weapon_proficiencies", [])
@@ -295,6 +395,7 @@ class CharacterDerivationMixin:
                 "armor_class": armor_class,
                 "initiative": initiative,
                 "speed": int(species["speed"]),
+                "armor_training": armor_training,
                 "passive_perception": passive_perception,
                 "saving_throws": saving_throws,
             },

@@ -34,6 +34,14 @@ export function friendlyCombatError(cause: unknown, locale: string): string {
   if (/already been spent|action is not available/i.test(message)) return '这个动作资源本回合已经用掉了。请选择仍可用的动作，或结束回合。'
   if (/state version|stale|expected_version/i.test(message)) return '战斗状态刚刚发生变化，界面已为你刷新。请按最新状态再试一次。'
   if (/resolve the melee hit spell decision first/i.test(message)) return '请先选择是否追加法术，结算这次命中后再继续行动。'
+  if (/resolve the pending check window first/i.test(message)) return '请先处理当前的检定或伤害窗口。'
+  if (/this check window is not available|pending decision or option is invalid/i.test(message)) return '这个决策窗口已经失效，请刷新后按最新状态重试。'
+  if (/this check window resource is already spent/i.test(message)) return '这次能力的资源已经消耗，请刷新后重试。'
+  if (/this check window feature is not owned/i.test(message)) return '当前角色没有这个能力。'
+  if (/the reaction is not available/i.test(message)) return '本回合的反应已经用掉了。'
+  if (/only the window owner can resolve this check window/i.test(message)) return '这个窗口只能由被指定的玩家结算。'
+  if (/lucky pool is empty/i.test(message)) return '幸运点已经用完，无法再声明幸运优势。'
+  if (/overchannel is required to maximize damage/i.test(message)) return '当前法术或角色没有伤害最大化资格。'
   if (/automatic combat turn exceeded the safety limit/i.test(message)) return '敌方自动回合未能正常结束，本次操作已安全回滚。请刷新战斗状态后重试。'
   return message
 }

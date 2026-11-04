@@ -24,6 +24,10 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.webui.services.legal import bundled_documents
 from scripts.e2e_coc_fixture import E2E_COC_GAME_KEYS, write_coc_fixture
 from scripts.e2e_choice_fixture import E2E_CHOICE_GAME_KEYS, write_choice_fixtures
+from scripts.e2e_dnd_window_fixture import (
+    E2E_DND_WINDOW_GAME_KEYS,
+    write_window_fixtures,
+)
 from scripts.e2e_recovery_fixture import E2E_RECOVERY_GAME_KEYS, write_recovery_fixtures
 
 
@@ -55,7 +59,8 @@ E2E_PARTY_GAME_KEYS = tuple(
 # in the corresponding fixture module so completeness checks stay meaningful.
 E2E_GAME_KEYS = (
     E2E_GAME_KEY, E2E_DND_GAME_KEY, E2E_ADVENTURE_GAME_KEY, E2E_LORE_GAME_KEY,
-    *E2E_PARTY_GAME_KEYS, *E2E_CHOICE_GAME_KEYS, *E2E_COC_GAME_KEYS.values(), *E2E_RECOVERY_GAME_KEYS,
+    *E2E_PARTY_GAME_KEYS, *E2E_CHOICE_GAME_KEYS, *E2E_DND_WINDOW_GAME_KEYS,
+    *E2E_COC_GAME_KEYS.values(), *E2E_RECOVERY_GAME_KEYS,
 )
 
 E2E_MODULE_ID = "e2e-module"
@@ -363,6 +368,7 @@ def prepare_e2e_data(data_dir: Path) -> Path:
         raise RuntimeError("failed to bind D&D 2024 runtime in E2E fixture")
     _write_save(data_dir, dnd_instance)
     write_choice_fixtures(data_dir, dnd_instance, _write_save)
+    write_window_fixtures(data_dir, runtime, dnd_character, _write_save)
     # FIX-06：模组库的浏览器验收需要真实 content-pack 包（§8 的产品面）。
     _write_e2e_module(data_dir)
     # Lorebook Golden 的真实链路验收需要一个**真的 v4 老库**：服务器启动时会跑
