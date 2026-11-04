@@ -3,8 +3,8 @@
 - 对应任务书：`D1_ITEM_IDENTITY_TASK_SPEC_2026-11-03.md`
 - 执行日期：2026-11-04
 - 代码分支：`feat/dnd2024-1d-items`（叠加在 `pr/1c` 之上）
-- 提交：`e9ecb11b`
-- 状态：**实现完成，验收未闭环**（全量套件与 T12 部分断言见 §7）
+- 提交：`e9ecb11b`（实现）、`34cbb98f`（验收补齐）
+- 状态：**实现与验收完成**（2026-11-04；全量套件、T12 与 browser smoke 均已闭环，见 §7）
 
 ## 1. 基线与行号漂移
 
@@ -68,8 +68,11 @@ pytest -q tests/rulesets/test_dnd2024_item_identity.py \
           tests/rulesets/test_dnd2024_equipment_data.py \
           tests/rulesets/test_dnd2024_weapon_mastery.py \
           tests/rulesets/test_dnd2024_live_equipment_reconciliation.py
-→ 100 passed, 4 warnings in 23.91s
-（9 + 47 + 16 + 28）
+→ 102 passed in 11.10s
+（9 + 49 + 16 + 28；`34cbb98f` 后 equipment_data 增加 T12 两例）
+
+pytest -q tests/rulesets
+→ 1065 passed in 393.74s
 ```
 
 | # | 覆盖用例 | 结果 |
@@ -85,7 +88,7 @@ pytest -q tests/rulesets/test_dnd2024_item_identity.py \
 | T9 | `test_strength_requirement_reduces_speed_and_stealth_is_projected` | ✅ 力量不足 → 速度 −10；隐匿劣势投影正确 |
 | T10 | `test_two_handed_swaps_to_the_bigger_die` / `test_two_handed_is_rejected_when_the_other_hand_is_busy` | ✅ 单手 1d8、双手 1d10；持盾或副手有武器时拒绝 |
 | T11 | `test_impossible_two_handed_declarations_fail_closed` | ✅ 非两用武器携带、骰不再变大、非法骰式均装载失败 |
-| T12 | `test_two_handed_critical_doubles_the_swapped_dice` | ⚠️ **部分**：骰式切换 + 重击翻倍已断言（`rolls == [10,10]`）；骰最大化（S-P2）与 S-P10 加值管线未单独断言 |
+| T12 | `test_two_handed_critical_doubles_the_swapped_dice` / `test_two_handed_die_feeds_the_maximize_pipeline` / `test_two_handed_attack_keeps_the_conditional_check_bonus` | ✅ 骰式切换、重击翻倍（`[10,10]`）、S-P2 最大化（单手 8 / 双手 10 / 重击后双手 20）与 S-P10 祝福 d4 加值均断言 |
 | T13 | `test_every_new_record_has_a_display_only_locale` | ✅ 31 件 en/zh-CN 齐全且只含显示字段 |
 | T14 | `test_loot_to_equipment_to_combat_numbers_end_to_end` | ✅ 战利品入包 → 装备 → AC 18 / `armor_training.speed_penalty` 10 |
 | T15 | 既有 `test_dnd2024_live_equipment_reconciliation.py` 28 例 | ✅ 零断言改动通过 |
@@ -104,8 +107,8 @@ pytest -q tests/rulesets/test_dnd2024_item_identity.py \
 `equip_owned_item` 新增 `item_ref` 关键字参数后，`player_state_applier` 的调用点必须同步透传，否则装备操作仍然丢身份。
 裁决：**接受**，这是 §3.8 改动的必要连带。任务书白名单不完整。
 
-**偏差 4 — T12 只覆盖部分断言。**
-见 §7 未完成项 2。
+**偏差 4 — T12 初期只覆盖部分断言。**
+已由 `34cbb98f` 补齐 S-P2 骰最大化与 S-P10 条件加值断言，闭环；见 §7。
 
 ## 6. 迁移债（本切片产生，后续切片不得顺手处理）
 
@@ -117,13 +120,13 @@ pytest -q tests/rulesets/test_dnd2024_item_identity.py \
 | D1-4 | 多币种 CP/SP/EP/GP/PP 未落 | 独立货币切片 |
 | D1-5 | canonical 装备 `dict.fromkeys` 去重，同款多件塌成一件 | D2 同调的 set→slot map 决策 |
 
-## 7. 未完成项
+## 7. 验收补记（2026-11-04，`34cbb98f`）
 
-1. **全量 `pytest -q --cov=src` 未跑完**（任务书 §5 最后一条）。局部 100 passed 只覆盖 D1 自身与直接回归，不能证明 `tests/` 其余部分无连带影响。这是本切片唯一的硬性验收缺口。
-2. **T12 的骰最大化（S-P2）与 S-P10 加值断言未补**。
-3. **PR #646 的 `dnd2024-workspace.spec.ts:420` 未复跑**。若该 smoke 失败的根因确为护甲缺 `category`，D1 已补齐 12 件护甲的分类字段，需重跑确认。
-4. **PR 未创建**：分支尚未推送，PR body 待补（本报告可整段引用）。
+1. **全仓测试已跑完**：`pytest -q --cov=src` → **8176 passed, 7 skipped**，总覆盖率 **81.64%**（阈值 60%），用时 30:38。`tests/rulesets` 单独复跑 1065 passed。原 §4 的 100 passed 缺口由本次全量结果关闭；`tests/rulesets/test_bundle_loader.py` 的物品期望值已随数据从 50 更新为 81（该断言此前是 D1 数据落地后唯一的全量红灯）。
+2. **T12 已补齐**：`test_two_handed_die_feeds_the_maximize_pipeline`（S-P2：单手 8 / 双手 10 / 重击后 20，空 RNG 证零消耗）与 `test_two_handed_attack_keeps_the_conditional_check_bonus`（S-P10：祝福 d4 = 3，伤害仍取双手 d10）。
+3. **browser smoke 已复跑**：`e2e/dnd2024-workspace.spec.ts` 在 desktop 与 mobile 两个 project 下各 **11 passed**，覆盖引导创建（原 #646 红灯用例）与 1C 的 Lucky spend、Cutting Words damage window 两个窗口用例。
+4. **PR 未创建**：`feat/dnd2024-1d-items` 已推送至 origin（`e9ecb11b..34cbb98f`），PR body 待补（本报告可整段引用）。
 
 ## 8. 完成判据
 
-D1 转为「完成」需同时满足：全量套件绿 + T12 断言补齐 + e2e 复跑结论明确。三项之外的实现与数据均已交付。
+D1 转为「完成」需同时满足：全量套件绿 + T12 断言补齐 + e2e 复跑结论明确。三项均已在 `34cbb98f` 后满足，D1 验收闭环。D2–D4 仍按主计划顺序未开工。

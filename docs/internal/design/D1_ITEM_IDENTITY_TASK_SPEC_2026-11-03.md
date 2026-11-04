@@ -4,7 +4,7 @@
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1D 切片顺序表 D1 ——"content-pack item → 规则集 `item_ref` 映射；补 8 护甲 + 23 武器 + 词条字段"
 - 前置依赖：**必须在 1C（PR #646）合入、工作区干净后开工**。本切片直接延伸 S-P11/S-P12 落地的 `category`/`strength_minimum`/`stealth_disadvantage`/`mastery` 字段，基线早于 1C 会导致数据语义分叉。
 - 锚点基线：`9c2ca59d`（PR #646 head，已含 upstream `fae083bc`）。执行侧须重读工作区版本核对行号漂移。
-- 状态：未开工
+- 状态：实现与验收完成（2026-11-04，`feat/dnd2024-1d-items`）；验收结果见 `D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`
 
 ## 1. 规则语义与原文出处
 
