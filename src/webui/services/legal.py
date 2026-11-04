@@ -201,6 +201,44 @@ def acceptance_payload(documents: dict[str, Any], language: str) -> dict[str, di
     }
 
 
+def _accepted_hashes(
+    document_name: str,
+    expected: dict[str, Any],
+    language: str | None = None,
+) -> set[str]:
+    """Return hashes valid for one published legal revision.
+
+    The online content mirror and the bundled snapshot can differ in harmless
+    formatting (for example a trailing newline) while carrying the same
+    version/date.  Keep the compatibility allowance narrow: only the bundled
+    hash for the exact same revision is accepted; a version/date change still
+    requires a fresh confirmation.
+    """
+
+    languages = (language,) if language is not None else ("zh", "en")
+    hashes: set[str] = set()
+    expected_languages = expected.get("languages")
+    if isinstance(expected_languages, dict):
+        for selected_language in languages:
+            localized = expected_languages.get(selected_language)
+            if isinstance(localized, dict) and isinstance(localized.get("sha256"), str):
+                hashes.add(localized["sha256"])
+
+    bundled = bundled_documents().get(document_name)
+    if (
+        isinstance(bundled, dict)
+        and bundled.get("version") == expected.get("version")
+        and bundled.get("updated_at") == expected.get("updated_at")
+    ):
+        bundled_languages = bundled.get("languages")
+        if isinstance(bundled_languages, dict):
+            for selected_language in languages:
+                localized = bundled_languages.get(selected_language)
+                if isinstance(localized, dict) and isinstance(localized.get("sha256"), str):
+                    hashes.add(localized["sha256"])
+    return hashes
+
+
 def accepted(state: dict[str, Any], documents: dict[str, Any] | None = None) -> bool:
     expected = documents or bundled_documents()
     for name in _DOCUMENT_NAMES:
@@ -215,7 +253,7 @@ def accepted(state: dict[str, Any], documents: dict[str, Any] | None = None) -> 
         # record before document dates became the confirmation boundary.
         if state.get(f"legal_{name}_accepted_version") == entry["version"]:
             saved_hash = state.get(f"legal_{name}_accepted_hash")
-            allowed_hashes = {language["sha256"] for language in entry["languages"].values()}
+            allowed_hashes = _accepted_hashes(name, entry)
             if saved_hash in allowed_hashes:
                 continue
         return False
@@ -239,7 +277,7 @@ def record_acceptance(
         if (
             supplied.get("updated_at") != expected["updated_at"]
             or supplied.get("version") != expected["version"]
-            or supplied.get("sha256") != localized["sha256"]
+            or supplied.get("sha256") not in _accepted_hashes(name, expected, language)
         ):
             raise ValueError("法律文件版本已更新，请重新阅读后确认")
         state[f"legal_{name}_accepted_updated_at"] = expected["updated_at"]
