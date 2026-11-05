@@ -1687,8 +1687,6 @@ export const de = {
   pluginRestartHint: 'Starte das Plugin nach dem Ändern von Tokens oder Verbindungsparametern neu.',
   declarativePluginHint: 'Deklarative Plugins starten keine Hintergrundprozesse; gespeicherte Konfiguration wird sofort in das Plugin-Datenverzeichnis geschrieben.',
   pluginMarketplaceTab: 'Marktplatz',
-  pluginStoreTab: 'Plugin-Marktplatz',
-  contentStoreTab: 'Inhalts-Marktplatz',
   pluginToolsTab: 'Werkzeuge',
   pluginToolsTitle: 'Plugin-Werkzeuge',
   pluginToolsHelp: 'Werkzeug-Plugins werden nach Plugin gruppiert angezeigt: solche mit eigener Oberfläche zeigen eine Karte, andere Werkzeuge können unten manuell mit einem JSON-Argument aufgerufen werden (nur zu Testzwecken).',
