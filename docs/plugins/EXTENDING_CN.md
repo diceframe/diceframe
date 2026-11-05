@@ -16,7 +16,10 @@
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json
 python scripts/package_plugin.py path/to/plugin
+python scripts/validate_content_module.py dist/plugins/plugin-id-1.0.0.dfplugin --json
 ```
+
+最后一条按安装时同一套规则解压并校验打好的包（大小、路径、顶层目录名与插件 ID 一致），报告的 `package` 字段给出 sha256、版本，以及包里有没有 LICENSE 和 README。加 `--extract-to 目录` 会在校验通过后把模组目录复制出来。
 
 冒险仍使用 `content-pack` 分发，声明 `content_profile: "adventure-module"`、`content_delivery_mode: "catalog"` 和 `adventure_packages`。Catalog 模式拒绝 `entrypoint`，只登记供主动使用的数据，不启动程序或灌入所有游戏。缺省 delivery 字段的旧包保留既有行为；旧执行包仍按进程风险处理。深度验证器检查声明的冒险/目录与 runtime 要求，打包成功本身不代表游玩兼容。
 
