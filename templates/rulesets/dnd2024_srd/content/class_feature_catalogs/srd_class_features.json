@@ -27,6 +27,9 @@
     "second_wind": "Second Wind",
     "weapon_mastery": "Weapon Mastery",
     "action_surge": "Action Surge",
+    "extra_attack": "Extra Attack",
+    "two_extra_attacks": "Two Extra Attacks",
+    "three_extra_attacks": "Three Extra Attacks",
     "improved_critical": "Improved Critical",
     "superior_critical": "Superior Critical",
     "survivor": "Survivor",
@@ -212,11 +215,23 @@
           ]
         },
         {
+          "id": "extra_attack",
+          "minimum_level": 5,
+          "summary": "When you take the Attack action, you can attack twice instead of once. Extra Attack never stacks: a character that gains it from a second class uses the highest value, not the sum.",
+          "parameters": {"attacks_per_action": 2}
+        },
+        {
           "id": "improved_critical",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p49:improved-critical",
           "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 19 or 20.",
           "parameters": {"crit_threshold": 19}
+        },
+        {
+          "id": "two_extra_attacks",
+          "minimum_level": 11,
+          "summary": "When you take the Attack action, you can attack three times instead of once.",
+          "parameters": {"attacks_per_action": 3}
         },
         {
           "id": "superior_critical",
@@ -236,6 +251,12 @@
             "turn_start_regen_base": 5,
             "turn_start_regen_ability": "con"
           }
+        },
+        {
+          "id": "three_extra_attacks",
+          "minimum_level": 20,
+          "summary": "When you take the Attack action, you can attack four times instead of once.",
+          "parameters": {"attacks_per_action": 4}
         }
       ]
     },
