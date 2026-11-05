@@ -10,13 +10,31 @@ from typing import Any
 from src.engine.player_control import is_ai_controlled
 from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.attunement import (
+    attuned_refs,
+    item_requires_attunement,
+    owned_ref_counts,
+)
 from src.rulesets.dnd2024.character.builder import ability_modifier
-from src.rulesets.dnd2024.character.reconciliation import merge_live_character_projection
+from src.rulesets.dnd2024.character.reconciliation import (
+    Dnd2024CharacterStateReconciler,
+    merge_live_character_projection,
+)
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
 from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
+)
+from src.rulesets.dnd2024.items.activation import (
+    ItemActivationError,
+    validate_activation_declaration,
+    validate_consumable_declaration,
+)
+from src.rulesets.dnd2024.items.charges import (
+    ChargesError,
+    charges_of,
+    validate_charges_declaration,
 )
 from src.rulesets.dnd2024.play.contracts import EncounterAccess
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
@@ -55,6 +73,31 @@ from .reaction_spells import (
 from .visibility import public_pending_decisions
 
 
+def _death_attunement_events(
+    before_characters: dict[str, dict[str, Any]],
+    after_characters: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Unbinding audit events and the characters that just died."""
+
+    events: list[dict[str, Any]] = []
+    dead_uids: set[str] = set()
+    for uid, canonical in after_characters.items():
+        previous = before_characters.get(uid) or {}
+        newly_dead = (
+            "dead" in (canonical.get("conditions") or {})
+            and "dead" not in (previous.get("conditions") or {})
+        )
+        if not newly_dead:
+            continue
+        dead_uids.add(uid)
+        lost = sorted(attuned_refs(previous) - attuned_refs(canonical))
+        events.extend(
+            {"type": "unattune_item", "item_ref": ref, "reason": "death"}
+            for ref in lost
+        )
+    return events, dead_uids
+
+
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
@@ -68,12 +111,21 @@ class Dnd2024CombatEngine(
     # statblock；未注入时退化为纯内联（legacy 冒险包行为不变）。
     content_catalog: Any | None = None
     content_source: str = ""
+    # runtime.load_bundle 已在装载边界完成物品声明校验；引擎从那里拿到
+    # bundle 时跳过重复的全量校验，直接构造 catalog。
+    bundle_validated: bool = False
+    # 死亡重算需要所有 locale 的物品名称索引；由 runtime 注入加载器，
+    # 避免引擎自己猜测 bundle 目录。
+    locale_loader: Any | None = None
+    supported_locales: tuple[str, ...] = ()
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
     features: Dnd2024ClassFeatureResolver = field(init=False)
 
     def __post_init__(self) -> None:
-        self.catalog = Dnd2024CombatCatalog.from_bundle(self.bundle)
+        self.catalog = Dnd2024CombatCatalog.from_bundle(
+            self.bundle, validate_items=not self.bundle_validated,
+        )
         self.spells = Dnd2024SpellCatalog.from_bundle(self.bundle)
         self.features = Dnd2024ClassFeatureResolver(self.bundle)
 
@@ -302,6 +354,13 @@ class Dnd2024CombatEngine(
                 "expected_version": version, "spells": spells,
                 "targets": self._all_targets(instance, combat),
             })
+        items = self._available_item_activations(instance, combat, actor, economy)
+        if items:
+            actions.append({
+                "type": "activate_item", "label": "Use an item", "actor_id": current,
+                "expected_version": version, "items": items,
+                "targets": self._party_targets(instance, combat),
+            })
         # 职业特性提供的战斗能力（v1: Monk 的附赠徒手打击 / 疾风连击 /
         # 坚守防御 / 疾风步）。服务端只暴露当前真实可用的 capability，因此
         # 不会出现空的「附赠动作」入口；按钮自带成本与目标要求。
@@ -329,6 +388,73 @@ class Dnd2024CombatEngine(
                 "type": "combat.end", "label": "End combat", "expected_version": version,
             })
         return [*communication, *actions]
+
+    def _available_item_activations(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        economy: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Project carried items this actor may legally activate right now.
+
+        Only player seats expose a live backpack; companion item authority is
+        intentionally left at the D3-11 boundary.  Illegal declarations,
+        ownership, attunement, charge and duplicate problems are omitted
+        instead of being shown as submittable actions.
+        """
+
+        if actor["kind"] != "player":
+            return []
+        payload = self._activation_payload(instance, actor)
+        canonical = self._canonical_actor(instance, actor)
+        owned = owned_ref_counts(payload)
+        attuned = attuned_refs(canonical)
+        items: list[dict[str, Any]] = []
+        for item_ref, count in sorted(owned.items()):
+            if count < 1:
+                continue
+            item = self.bundle.get("item", item_ref.removeprefix("item:"))
+            if not isinstance(item, dict):
+                continue
+            try:
+                declaration = validate_activation_declaration(item)
+                validate_consumable_declaration(item)
+                maximum = validate_charges_declaration(item)
+            except (ItemActivationError, ChargesError):
+                continue
+            if declaration is None:
+                continue
+            cost = declaration["cost"]
+            if int(economy.get(cost, 0) or 0) < 1:
+                continue
+            if (
+                item_requires_attunement(self.bundle, item_ref)
+                and item_ref not in attuned
+            ):
+                continue
+            charge_cost = declaration.get("charge_cost")
+            if maximum is not None:
+                if charge_cost is None or count > 1:
+                    continue
+                current = charges_of(canonical, item_ref)
+                if current is None or current < int(charge_cost):
+                    continue
+            elif charge_cost is not None:
+                continue
+            items.append({
+                "item_ref": item_ref,
+                "name": str(item.get("name") or item_ref),
+                "cost": cost,
+                "target": declaration["target"],
+            })
+        return items
+
+    def _party_targets(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        # 0 HP 的倒地队友仍是合法治疗目标；只有 dead 才由校验层拒绝。
+        return [
+            target for target in self._all_targets(instance, combat)
+            if target.get("side") == "party" and not target.get("is_dead")
+        ]
 
     def next_automatic_intent(self, instance: Any) -> dict[str, Any] | None:
         """Choose one bounded server-owned automatic operation.
@@ -724,6 +850,8 @@ class Dnd2024CombatEngine(
                 events.append({"type": "dnd2024.decision.pending", **window})
             else:
                 events.extend(self._spell_events(instance, combat, intent, rng))
+        elif intent_type == "activate_item":
+            events.extend(self._activate_item_events(instance, combat, intent, rng))
         elif intent_type == "move":
             pending, movement_events = self._movement_events(instance, combat, intent)
             events.extend(movement_events)
@@ -869,25 +997,73 @@ class Dnd2024CombatEngine(
                 for uid in instance.players
             },
         }
+        # 死亡清理是 reducer 的副作用，不是客户端提交的事件；记录死亡前后的
+        # 绑定差异，把一次死亡对应的解绑事件补进权威 ledger 与返回批次。
+        before_characters = deepcopy(snapshot["characters"])
         updated, ledger, duplicate = apply_event_batch(
             snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
-        if not duplicate:
+        result_batch = deepcopy(batch)
+        if duplicate:
+            stored = next(
+                (item for item in ledger if str(item.get("batch_id") or "") == str(batch["batch_id"])),
+                None,
+            )
+            if isinstance(stored, dict):
+                result_batch = deepcopy(stored)
+        else:
+            derived, dead_uids = _death_attunement_events(
+                before_characters, updated["characters"],
+            )
+            if derived:
+                result_batch["events"] = [*result_batch["events"], *derived]
+                for entry in reversed(ledger):
+                    if str(entry.get("batch_id") or "") == str(batch["batch_id"]):
+                        entry["events"] = deepcopy(result_batch["events"])
+                        break
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            ruleset_runtime.replace_state(instance, ruleset_state)
+            from src.commands.state_items import take_from_inventory
+
+            updated_sheets: dict[str, dict[str, Any]] = {}
             for uid, canonical in updated["characters"].items():
                 existing = deepcopy(instance.get_character_sheet(uid))
                 projection = merge_live_character_projection(existing, self._project_character(canonical))
                 existing.update(projection)
-                instance.set_character_sheet(uid, existing)
+                if uid in dead_uids:
+                    # 死亡清空同调后 AC 必须立刻回落到未同调值，不能等下一次
+                    # 换装或休息才纠正。名字索引必须覆盖全部 locale，否则旧
+                    # 的非英文装备会在重算时丢失身份。
+                    locale_bundles = (
+                        [self.locale_loader(name) for name in self.supported_locales]
+                        if self.locale_loader is not None and self.supported_locales
+                        else []
+                    )
+                    Dnd2024CharacterStateReconciler(
+                        self.bundle, locale_bundles=locale_bundles,
+                    ).reconcile(existing, frozenset({"equipment"}))
+                for event in result_batch.get("events") or []:
+                    if (
+                        str(event.get("type") or "") == "dnd2024.item.consumed"
+                        and str(event.get("actor_id") or "") == f"player:{uid}"
+                    ):
+                        for _ in range(int(event.get("amount", 1) or 1)):
+                            taken = take_from_inventory(existing, "", str(event["item_ref"]))
+                            if taken is None:
+                                raise EventBatchError(
+                                    f"item is no longer carried: {event['item_ref']}"
+                                )
+                updated_sheets[uid] = existing
+            ruleset_runtime.replace_state(instance, ruleset_state)
+            for uid, sheet in updated_sheets.items():
+                instance.set_character_sheet(uid, sheet)
             ruleset_runtime.replace_event_ledger(instance, ledger)
         return {
             "ok": True,
             "applied": not duplicate,
             "duplicate": duplicate,
             "state_version": int(ruleset_runtime.state(instance).get("version", 0) or 0),
-            "event_batch": deepcopy(batch),
+            "event_batch": result_batch,
             "combat": deepcopy(ruleset_runtime.state(instance).get("combat") or {}),
         }
 
