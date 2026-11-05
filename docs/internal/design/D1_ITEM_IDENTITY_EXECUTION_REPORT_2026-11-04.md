@@ -49,7 +49,7 @@
 | `content/combat_catalogs/srd_combat_core.json` | 武器 15→38；7 件补 `damage_two_handed` | ✅ |
 | `combat/catalog.py` (+34) | `damage_two_handed` 骰式校验 + 双手骰必须严格大于单手骰；blowgun 固定伤害 `1` 走 `FLAT_DAMAGE_RE` | ✅ |
 | `combat/resolution.py` (+4) | 按 `two_handed` 选择 `damage_two_handed` 或 `damage` | ✅ |
-| `combat/validation.py` (+31) | `two_handed` 声明校验：武器须声明该词条，副手（含盾）必须空置 | ✅ |
+| `combat/validation.py` (+31) | `two_handed` 声明校验：武器须声明该词条，副手盾牌必须空置（初始版本要求「副手无任何武器」，review 后收窄为仅盾牌，见偏差 6） | ✅ |
 | `content/contracts.py` (+24) | 新增可选 `ruleset_item_ref`（`item:<id>` 格式），未知字段仍拒绝 | ✅ |
 | `content/rewards.py` (+8) | 奖励意图透传 `item_ref` | ✅ |
 | `webui/api.py` (+22) | `item_grant` 任务透传 `item_ref` | ✅ |
@@ -88,7 +88,7 @@ pytest -q tests/rulesets
 | T7 | `test_new_weapon_is_a_usable_catalog_entry` / `test_the_srd_weapon_table_is_complete` | ✅ 38 件逐件可装载，`damage` 合 `DICE_RE`（blowgun 固定值 `1` 例外），`mastery` 命中注册表 |
 | T8 | `test_new_armor_derives_the_srd_armor_class` / `test_armor_without_category_still_fails_closed` | ✅ 12 件 AC 正确；缺 `category` 派生期抛错 |
 | T9 | `test_strength_requirement_reduces_speed_and_stealth_is_projected` | ✅ 力量不足 → 速度 −10；隐匿劣势投影正确 |
-| T10 | `test_two_handed_swaps_to_the_bigger_die` / `test_two_handed_is_rejected_when_the_other_hand_is_busy` | ✅ 单手 1d8、双手 1d10；持盾或副手有武器时拒绝 |
+| T10 | `test_two_handed_swaps_to_the_bigger_die` / `test_two_handed_is_rejected_when_a_shield_occupies_the_other_hand` / `test_carrying_a_backup_weapon_does_not_block_two_handed` | ✅ 单手 1d8、双手 1d10；**只有盾牌**占用副手时拒绝，背包里另带武器不再阻断（review 修复后口径，见偏差 6） |
 | T11 | `test_impossible_two_handed_declarations_fail_closed` | ✅ 非两用武器携带、骰不再变大、非法骰式均装载失败 |
 | T12 | `test_two_handed_critical_doubles_the_swapped_dice` / `test_two_handed_die_feeds_the_maximize_pipeline` / `test_two_handed_attack_keeps_the_conditional_check_bonus` | ✅ 骰式切换、重击翻倍（`[10,10]`）、S-P2 最大化（单手 8 / 双手 10 / 重击后双手 20）与 S-P10 祝福 d4 加值均断言 |
 | T13 | `test_every_new_record_has_a_display_only_locale` | ✅ 31 件 en/zh-CN 齐全且只含显示字段 |
@@ -118,6 +118,9 @@ SRD 5.2.1 的 blowgun 伤害为固定 `1`，无法通过 `DICE_RE`，故 `combat
 **偏差 6 — `two_handed` 玩家侧入口未接线。**
 任务书 §3.5 只要求 `attack` intent 新增可选字段，已实现；但 hosted attack choice 只生成 `weapon_ref`，前端 `ruleset.intent` 字段白名单也不含 `two_handed`，因此真实玩家路径目前只能由 GM 原始 intent / API 触发。裁决：**接受为债务 D1-6**，不在本切片扩展前端交互。
 
+**偏差 7 — 副手判定口径与 review 建议不同（2026-11-04 修复）。**
+初版门控是「`equipment_refs` 里只要还有别的武器就拒绝」，review 指出角色普遍携带多把武器（如 `fighter_a` 自带 greatsword / flail / javelin），`two_handed=true` 几乎必然被拒。review 建议「只看当前持握的武器」，但 canonical 的 `equipment_refs` 是去重后的**已装备集合**、没有持握槽位，无法区分「带在身上」与「握在手里」。最终口径收窄为**只认盾牌**（盾必然手持是确定性事实），docstring 已明示「当前模型不会假装能区分携带与正在持握」。前端 `Dnd2024CombatPanel.vue` 双手开关与 `bridge.ts` 白名单按 review 要求补齐，托管路径仍未接线，故 D1-6 视为部分销账。
+
 ## 6. 迁移债（本切片产生，后续切片不得顺手处理）
 
 | # | 债务 | 归属 |
@@ -127,22 +130,29 @@ SRD 5.2.1 的 blowgun 伤害为固定 `1`，无法通过 `DICE_RE`，故 `combat
 | D1-3 | `two_handed` 装备门控未落（当前只校验副手空置，未覆盖「双手武器占用双手」的持久状态） | 独立装备门控切片 |
 | D1-4 | 多币种 CP/SP/EP/GP/PP 未落 | 独立货币切片 |
 | D1-5 | canonical 装备 `dict.fromkeys` 去重，同款多件塌成一件 | D2 同调的 set→slot map 决策 |
-| D1-6 | `two_handed` 玩家侧入口未接线（hosted choice / 前端字段白名单均不含该字段），仅 GM 原始 intent / API 可达 | 武器交互切片或前端意图白名单扩展 |
+| D1-6 | `two_handed` 玩家侧入口**部分销账**（review 修复已补前端双手开关 `Dnd2024CombatPanel.vue` 与 `bridge.ts` 白名单；剩余 hosted attack choice 仍只生成 `weapon_ref`） | 武器交互切片或前端意图白名单扩展 |
 
 ## 7. 验收补记（2026-11-04，`34cbb98f`）
 
 1. **全仓测试已跑完**：`pytest -q --cov=src` → **8176 passed, 7 skipped**，总覆盖率 **81.64%**（阈值 60%），用时 30:38。`tests/rulesets` 单独复跑 1065 passed。原 §4 的 100 passed 缺口由本次全量结果关闭；`tests/rulesets/test_bundle_loader.py` 的物品期望值已随数据从 50 更新为 81（该断言此前是 D1 数据落地后唯一的全量红灯）。
 2. **T12 已补齐**：`test_two_handed_die_feeds_the_maximize_pipeline`（S-P2：单手 8 / 双手 10 / 重击后 20，空 RNG 证零消耗）与 `test_two_handed_attack_keeps_the_conditional_check_bonus`（S-P10：祝福 d4 = 3，伤害仍取双手 d10）。
 3. **browser smoke 已复跑**：`e2e/dnd2024-workspace.spec.ts` 在 desktop 与 mobile 两个 project 下各 **11 passed**，覆盖引导创建（原 #646 红灯用例）与 1C 的 Lucky spend、Cutting Words damage window 两个窗口用例。
-4. **PR 未创建**：`feat/dnd2024-1d-items` 已推送至 origin（`34cbb98f..059a1f3b`），PR body 待补；PR 目标应为 `diceframe/diceframe:main`（1C 已在 base 中，diff 只显示 D1 自身，本报告可整段引用）。
+4. **PR 已创建（2026-11-05 补记）**：`feat/dnd2024-1d-items` 已推送至 origin（`34cbb98f..059a1f3b`），最终以 squash 单提交 `ef4a5923` 进入 `diceframe/diceframe#653`，目标 `diceframe/diceframe:main`。原计划「D1 单独成 PR」调整为 D1–D4 一次交付，评审成本更高但避免四次堆叠 rebase。
 
 ## 7.5 复审修正（2026-11-04）
 
 1. **基线同步**：`origin/pr/1c` 已前进到 `9b2428e8`（新增两个 fix）。D1 以 merge 提交 `ceb71ec6` 合入最新 `pr/1c`，未 force push；合并后四文件 **102 passed**。
 2. **1C 已被上游合并**：PR #646 于 2026-11-04 以上游 merge commit `1ba1a11f` 合入 `diceframe/diceframe:main`（head `9b2428e8` 未改写、无 squash/rebase、合并树与本分支一致）。D1 以 merge `059a1f3b` 同步上游 main `81a56f16`（新增 3 个前端提交）；合并后四文件 **102 passed**。
 3. **数据修正**：`spear` 的 weapon mastery 由 `sap` 改为 SRD 5.2.1 的 `topple`（既有数据错误，非本切片新增），同步更新 `MASTERY_BY_WEAPON`；四文件 **102 passed**。
-4. **玩家可达性**：`two_handed` 目前仅 GM 原始 intent / API 可达，见偏差 6 与 D1-6；核心机制、测试与数据未受影响。
+4. **玩家可达性**：`two_handed` 的玩家侧入口已在 review 修复中补齐前端双手开关与 P2P 白名单，`hosted` 托管路径仍未接线，见偏差 6 / 偏差 7 与 D1-6；核心机制、测试与数据未受影响。
 5. 本次复审未改动 D1 的其它实现；`pr/1c` 的 1C 测试在合并后保持绿。
+
+## 7.6 PR 评审修复（2026-11-05，随 #653 单提交 `ef4a5923`）
+
+1. **副手口径收窄**：初版「`equipment_refs` 里还有别的武器就拒绝」改为**只认盾牌**。理由见偏差 7：集合模型无法区分携带与持握，而盾必然手持。测试同步改名并拆成三条：`test_two_handed_is_rejected_when_a_shield_occupies_the_other_hand`、`test_a_shield_in_the_other_hand_blocks_two_handed`、`test_carrying_a_backup_weapon_does_not_block_two_handed`。
+2. **前端与协议**：`Dnd2024CombatPanel.vue` 新增 `declareTwoHanded` 开关与 `two_handed` 发送，`peer/game/bridge.ts` 白名单加入该字段（原白名单会静默丢弃）。
+3. **D1-6 部分销账**：前端路径已通，仅 `hosted_choices.py` 仍只生成 `weapon_ref`。
+4. `D1-1`（`loading` 词条）仍空置：本次评审未涉及多次攻击消费者，保留为 Extra Attack 切片回补。
 
 ## 8. 完成判据
 

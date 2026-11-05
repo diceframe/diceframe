@@ -155,12 +155,13 @@ python -m pytest -q --cov=src --timeout=120
 | D3-6 | 医疗包与 Healer 专长联动未落 | Healer 专长切片 |
 | D3-7 | 同 ref 多件充能状态不可区分，暂以数量守卫拒绝 | 实例 ID / slot map 切片 |
 | D3-8 | blowgun/sling/火器弹药内容未落，仍无弹药字段 | 对应装备内容需要时 |
-| D3-9 | 战斗与探索 `available_intents` 未列出物品激活动作；服务端可结算，但前端无入口 | 物品面板/动作区入口切片 |
+| D3-9 | ~~战斗与探索 `available_intents` 未列出物品激活动作；服务端可结算，但前端无入口~~ **已销账（2026-11-05，随 #653 `ef4a5923`）**：`combat/engine.py` 已下发 `activate_item`、`exploration/engine.py` 已下发 `exploration.activate_item`；前端 `Dnd2024CombatPanel.vue` 有 `itemAction` 选择器与发送路径（模板 `v-if="itemAction && itemChoices.length"`） | — |
 | D3-10 | 治疗药水未进入 SRD bundle：`SOURCE_MAP.md` 无魔法物品来源映射、`.rulebooks` 缺失，无法提供可核对 `source_ref`；当前仅测试 fixture | 魔法物品来源映射补齐后随内容切片落地 |
 | D3-11 | companion 远程攻击不校验/不扣弹药（companion 无 live 背包权威，保持 D3 前行为）；companion 消耗品激活因无背包数量实际不可达 | companion 装备/背包权威切片 |
 | D3-12 | `item_type: potion` 没有集中 enum 校验；当前仅由激活消费者按类型分支 | 物品 schema 集中校验切片 |
 
 ## 9. 未闭环 / 后续
 
-- PR 未创建：分支推送后补 PR body（本报告可整段引用）；PR 目标为 `diceframe/diceframe:main`。
-- D3b（耗尽销毁）与 D4（随机宝物表）任务书已就绪，按 1D 切片顺序继续；D3b 依赖本切片 `charges.current` 权威。
+- PR 已创建：`diceframe/diceframe#653`（head `feat/dnd2024-3d-item-activation`，squash 单提交 `ef4a5923`，目标 `diceframe/diceframe:main`）；当前 BLOCKED 于 `Backend tests` 30 分钟 timeout（跑到 8280/8294、0 失败），诊断见 PR 评论。
+- D4（随机宝物表）已在本分支落地：`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`，**执行报告尚未补**。
+- D3b（耗尽销毁）仍未开工，任务书已就绪；其白名单文件 `items/charges.py` 是本切片新增（main 上不存在），因此 D3b 只能 stack 在本分支之上开发，D3b 依赖本切片的 `charges.current` 权威。

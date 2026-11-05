@@ -156,8 +156,8 @@ python -m pytest -q --cov=src
 
 ## 9. 未闭环 / 后续
 
-- PR 未创建：分支推送后补 PR body（本报告可整段引用）；PR 目标为 `diceframe/diceframe:main`。
-- 1C 已由上游 PR #646（merge `1ba1a11f`）合入 main；D1 尚未合入。D2 以堆叠分支交付，复审时已通过 merge `531a8539` 同步上游 main `81a56f16`，合入顺序为 1C（完成）→ D1 → D2。
+- PR 已创建：`diceframe/diceframe#653`（与 D1/D3/D4 同一分支，squash 单提交 `ef4a5923`，目标 `diceframe/diceframe:main`）。
+- 1C 已由上游 PR #646（merge `1ba1a11f`）合入 main；D1/D2 随 #653 待合入。D2 以堆叠分支交付，复审时已通过 merge `531a8539` 同步上游 main `81a56f16`，合入顺序为 1C（完成）→ D1/D2/D3/D4（#653 一次合入）→ D3b。
 
 ## 10. 复审修正（2026-11-04，`77f7fd10`）
 
