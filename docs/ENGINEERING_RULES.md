@@ -570,6 +570,7 @@ Frontend **SHOULD NOT** 重复实现一套与 backend 不同的核心 mechanics 
 - 后端提示和 planner repair 文案 **MUST** 放在同 locale resource 的 `messages.json`，不得在业务模块内复制每种语言的文案 map；
 - 缺失或不完整的 locale 资源 **MUST** fail closed：可以降低识别召回，但不能猜价格、修改 canonical identity 或发放免费物品；
 - chargeable quote **MUST** carry verifiable source evidence when produced by semantic extraction; unverifiable evidence **MUST** downgrade to unpriced intent;
+- narrative reward **MUST** enter through the structured `REWARD` proposal path with canonical amount and retained evidence; compatibility `GOLD` input follows the same pending/receipt boundary, and unvalidated model fields **MUST NOT** unlock automatic settlement;
 - 翻译后的 display name **MUST NOT** 被当作 canonical identity、持久化 ID、币种 ID 或规则机制字段；
 - parser 的回退顺序和资源契约 **MUST** 在架构文档中保持可验证，不能依靠散落在业务代码中的语言关键词补丁。
 

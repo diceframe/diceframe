@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from src.engine import progression
 from src.engine.character_utils import apply_currency_delta
+from src.engine.currency.constants import MAX_ECONOMY_AMOUNT
 from src.engine.memory_outbox import (
     MAX_EXTERNAL_EFFECT_DELIVERIES,
     pending_memory_deliveries,
@@ -22,10 +23,6 @@ from src.engine.memory_outbox import (
 )
 from src.engine.modules import economy_state
 
-# Technical limit in canonical base units.  With V2 currency systems the base
-# unit can be a minor denomination (e.g. CoC dollars → cents), so this cap must
-# stay far above any real-world display amount instead of shrinking 100×.
-MAX_ECONOMY_AMOUNT = 10_000_000
 # transfer/fee/all_contributors 已随 schema 8 退役：PAY/TEAM_PAY 标签契约
 # 在 schema 6 停用后，它们没有任何存活创建路径（见 migrations.instance）。
 ECONOMY_KINDS = {"payment", "purchase", "reward"}
@@ -430,6 +427,18 @@ def is_auto_settleable_reward(
         return False
     if str(proposal.get("kind") or "") != "reward":
         return False
+    # Model-originated rewards must carry the exact structured/prose evidence
+    # that produced the proposal before the small-cash convenience path may
+    # settle them automatically. Manually queued rewards keep the historical
+    # behavior because their caller is already an authority boundary.
+    if str(proposal.get("source") or "") in {
+        "narrative_reward_tag", "legacy_gold_tag", "narrative_reward_extractor",
+        "narrative_structured",
+    } and (
+        proposal.get("evidence_validated") is not True
+        or not str(proposal.get("evidence") or "").strip()
+    ):
+        return False
     if proposal.get("contributors"):
         return False
     # 物品奖励不属于“小额现金”：即使结算逻辑今天只入账金币，也不能让
@@ -592,6 +601,8 @@ def queue_proposal(
     source_ref: str = "",
     approval_policy: str = "payer",
     rewards: list[dict[str, Any]] | None = None,
+    evidence: str = "",
+    evidence_validated: bool = False,
     visibility: str = "private",
 ) -> dict[str, Any]:
     """Queue one idempotent proposal; no balance is changed here."""
@@ -638,6 +649,8 @@ def queue_proposal(
         "uid": str(payer_uid or recipient_uid),  # legacy payment projection
         "amount": amount,
         "reason": str(reason or "经济提案")[:240],
+        "evidence": str(evidence or "")[:300],
+        "evidence_validated": bool(evidence_validated),
         "source": str(source),
         "source_ref": str(source_ref),
         "approval_policy": str(approval_policy),

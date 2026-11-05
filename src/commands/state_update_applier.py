@@ -297,9 +297,31 @@ class StateUpdateApplier:
         if reconciler is not None and changed_domains:
             self._reconcile_characters(instance, reconciler, changed_domains, snapshots)
 
-        for proposal_index, proposal in enumerate(update.get("economy_proposals", [])):
-            uid = str(proposal.get("uid") or "")
-            amount = int(proposal.get("amount", 0) or 0)
+        raw_proposals = update.get("economy_proposals", [])
+        proposals = raw_proposals if isinstance(raw_proposals, list) else []
+        if raw_proposals not in (None, []) and not isinstance(raw_proposals, list):
+            logger.warning("忽略格式无效的 economy_proposals: round=%d", progression_state.round_value(instance))
+        for proposal_index, proposal in enumerate(proposals):
+            if not isinstance(proposal, dict):
+                logger.warning("忽略格式无效的经济提案: round=%d", progression_state.round_value(instance))
+                continue
+            # New structured rewards use recipient_uid; uid remains a legacy
+            # projection. Normalize both before validation so a valid reward
+            # cannot disappear merely because the model omitted the alias.
+            uid = str(proposal.get("uid") or proposal.get("recipient_uid") or "").strip()
+            recipient_uid = str(proposal.get("recipient_uid") or uid).strip()
+            raw_amount = proposal.get("amount", 0)
+            if isinstance(raw_amount, bool):
+                logger.warning("忽略布尔经济金额: uid=%s round=%d", uid, progression_state.round_value(instance))
+                continue
+            if isinstance(raw_amount, float) and not raw_amount.is_integer():
+                logger.warning("忽略非整数经济金额: uid=%s amount=%r round=%d", uid, raw_amount, progression_state.round_value(instance))
+                continue
+            try:
+                amount = int(raw_amount or 0)
+            except (TypeError, ValueError):
+                logger.warning("忽略格式无效的经济金额: uid=%s amount=%r round=%d", uid, raw_amount, progression_state.round_value(instance))
+                continue
             kind = str(proposal.get("kind") or "")
             # Model output is never allowed to create a chargeable purchase or
             # payment.  The only legitimate path for an AI-sourced purchase is
@@ -313,10 +335,21 @@ class StateUpdateApplier:
                     kind, uid, progression_state.round_value(instance),
                 )
                 continue
-            if uid not in instance.players or kind != "reward":
+            if recipient_uid not in instance.players or kind != "reward":
+                if kind == "reward":
+                    logger.warning(
+                        "忽略奖励提案：收款角色不存在 uid=%s recipient=%s round=%d",
+                        uid, recipient_uid, progression_state.round_value(instance),
+                    )
                 continue
             reason = str(proposal.get("reason") or "经济提案")[:240]
-            source = str(proposal.get("source") or "narrative")
+            raw_source = str(proposal.get("source") or "")
+            evidence_validated = (
+                proposal.get("evidence_validated") is True
+                and raw_source in {"narrative_reward_tag", "legacy_gold_tag", "narrative_reward_extractor"}
+            )
+            source = raw_source if evidence_validated else "narrative_structured"
+            evidence = str(proposal.get("evidence") or "")[:300] if evidence_validated else ""
             rewards = [
                 {
                     "name": str(item.get("name") or item.get("item") or "").strip()[:120],
@@ -343,19 +376,30 @@ class StateUpdateApplier:
                     f"round:{instance.run_id}:{progression_state.round_value(instance)}:reward:"
                     f"{proposal_index}:{uid}:{amount}:{reason.casefold()}"
                 )
-            queued_proposals.append(queue_proposal(
-                instance,
-                kind=kind,
-                payer_uid="",
-                recipient_uid=str(proposal.get("recipient_uid") or uid),
-                amount=amount,
-                rewards=rewards,
-                reason=reason,
-                source=source,
-                source_ref=source_ref,
-                approval_policy="gm",
-                visibility="private",
-            ))
+            try:
+                queued_proposals.append(queue_proposal(
+                    instance,
+                    kind=kind,
+                    payer_uid="",
+                    recipient_uid=recipient_uid,
+                    amount=amount,
+                    rewards=rewards,
+                    reason=reason,
+                    source=source,
+                    source_ref=source_ref,
+                    approval_policy="gm",
+                    evidence=evidence,
+                    evidence_validated=evidence_validated,
+                    visibility="private",
+                ))
+            except (TypeError, ValueError) as exc:
+                # A malformed model proposal must not abort the whole round or
+                # leave a half-created pending record. Fail closed and continue
+                # with the rest of the narrative state.
+                logger.warning(
+                    "忽略无效奖励提案: uid=%s recipient=%s amount=%r error=%s",
+                    uid, recipient_uid, raw_amount, exc,
+                )
         return queued_proposals
 
     def _resolve_runtime(self, rule: RuleSystem | None) -> Any:

@@ -25,7 +25,8 @@ Nach der Erzählung `---` auf eine eigene Zeile setzen. Danach eine Statusaktual
 
 HP:player_id:delta             (Schaden negativ, Heilung positiv)
 STAT:player_id:resource_key:delta (nur regelspezifische Ressourcen, Schlüssel siehe Regelhinweise; z. B. KPI +10 -> STAT:web_user:kpi:10. STAT niemals für HP/Gold/Mana/Sanity/Glück verwenden – dafür die eigenen Tags nutzen. STAT ganz weglassen, wenn die Regel keine besonderen Ressourcen hat)
-GOLD:player_id:amount:reason   (schlägt eine Erzählbelohnung vor; positiver Betrag und ein neuer, expliziter Grund aus dieser Runde sind erforderlich. Niemals den aktuellen Kontostand, das Startkapital oder eine frühere Belohnung wiederholen.)
+REWARD:player_id:amount:reason (schlägt eine Erzählbelohnung vor; positiver kanonischer Betrag und ein neuer, expliziter Grund aus dieser Runde sind erforderlich. Dies ist das bevorzugte strukturierte Belohnungstag.)
+GOLD:player_id:amount:reason   (Legacy-Alias für REWARD; nur bei älteren Kompatibilitätshinweisen verwenden.)
 Käufe und Zahlungen nutzen keine PAY- oder TEAM_PAY-Tags. Eine Kaufäußerung
 eines Spielers wird nur als Anfrage erfasst. Der GM muss in der GM-Konsole
 eine explizite Bestellung mit Zahlendem, Betrag, Gegenstand/Gegenständen,

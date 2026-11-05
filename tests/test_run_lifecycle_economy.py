@@ -461,6 +461,67 @@ def test_structured_and_narrative_reward_do_not_duplicate() -> None:
     assert len(data["state_update"]["economy_proposals"]) == 1
 
 
+def test_same_amount_rewards_with_distinct_evidence_are_not_merged() -> None:
+    data = {"state_update": {"economy_proposals": []}}
+    added = merge_narrative_reward_candidates(data, [
+        {
+            "kind": "reward", "recipient_uid": "gm", "amount": 10,
+            "reason": "护送报酬", "evidence": "护送完成，支付10金币",
+        },
+        {
+            "kind": "reward", "recipient_uid": "gm", "amount": 10,
+            "reason": "归还报酬", "evidence": "归还信物，支付10金币",
+        },
+    ])
+    assert added == 2
+    assert len(data["state_update"]["economy_proposals"]) == 2
+
+
+def test_structured_reward_accepts_recipient_only_and_rejects_bad_amount(tmp_path) -> None:
+    applier = StateUpdateApplier(
+        tmp_path, None, load_world_template=lambda *_: {}, strict_economy=True,
+    )
+    instance = _instance()
+    update = {
+        "economy_proposals": [
+            {
+                "kind": "reward", "recipient_uid": "p2", "amount": 710,
+                "reason": "任务报酬", "source": "narrative_reward_tag",
+                "evidence": "REWARD:p2:710:伪造证据",
+            },
+            {"kind": "reward", "recipient_uid": "gm", "amount": "not-a-number", "reason": "坏数据"},
+        ],
+    }
+    queued = applier.apply_state_update(instance, update)
+    assert len(queued) == 1
+    assert queued[0]["recipient_uid"] == "p2"
+    assert queued[0]["amount"] == 710
+    assert queued[0]["source"] == "narrative_structured"
+    assert queued[0]["evidence"] == ""
+    assert queued[0]["evidence_validated"] is False
+    assert economy_state.state(instance)["proposals"] == queued
+
+
+def test_structured_reward_710_reaches_ledger_only_after_gm_confirmation(tmp_path) -> None:
+    from src.commands.tag_parser import parse_tag_state
+
+    applier = StateUpdateApplier(
+        tmp_path, None, load_world_template=lambda *_: {}, strict_economy=True,
+    )
+    instance = _instance()
+    parsed = parse_tag_state(
+        "任务结束。\n---\nREWARD:gm:710:完成过命任务",
+        "hp_based",
+    )
+    queued = applier.apply_state_update(instance, parsed["state_update"])
+    assert len(queued) == 1
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
+    settled = resolve_proposal(instance, queued[0]["id"], actor_uid="gm", accepted=True)
+    assert settled["ok"] is True
+    assert settled["committed"] is True
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 740
+
+
 def test_only_plain_personal_purchase_is_nonblocking() -> None:
     instance = _instance()
     purchase = queue_proposal(
@@ -659,6 +720,34 @@ def test_auto_settleable_reward_excludes_item_rewards() -> None:
     assert is_auto_settleable_reward(instance, plain, gold_cap=500) is True
     assert is_auto_settleable_reward(instance, with_items, gold_cap=500) is False
     assert is_auto_settleable_reward(instance, over_cap, gold_cap=500) is False
+
+
+def test_auto_settleable_model_reward_requires_evidence() -> None:
+    from src.engine.economy import is_auto_settleable_reward
+
+    instance = _instance()
+    without_evidence = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        approval_policy="gm",
+        source="narrative_structured",
+        source_ref="round:1:reward:p2:12:no-evidence",
+    )
+    with_evidence = queue_proposal(
+        instance,
+        kind="reward",
+        recipient_uid="p2",
+        amount=12,
+        approval_policy="gm",
+        source="narrative_reward_tag",
+        evidence="REWARD:p2:12:完成任务",
+        evidence_validated=True,
+        source_ref="round:1:reward:p2:12:evidence",
+    )
+    assert is_auto_settleable_reward(instance, without_evidence, gold_cap=500) is False
+    assert is_auto_settleable_reward(instance, with_evidence, gold_cap=500) is True
 
 
 def test_resolve_auto_reward_policy_precedence() -> None:

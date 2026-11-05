@@ -203,6 +203,8 @@ def infer_narrative_reward_candidates(
         "recipient_uid": uid,
         "amount": amount,
         "reason": reason,
+        "evidence": evidence_text[match.start():match.end()].strip()[:300],
+        "evidence_validated": True,
         "source": "narrative_reward_extractor",
     }]
 
@@ -238,13 +240,28 @@ def merge_narrative_reward_candidates(
             return None
         return ("reward", uid, amount)
 
-    existing = {key for proposal in proposals if (key := identity(proposal)) is not None}
+    existing = [proposal for proposal in proposals if identity(proposal) is not None]
     added = 0
     for candidate in candidates:
         key = identity(candidate)
-        if key is None or key in existing:
+        if key is None:
+            continue
+        candidate_evidence = str(candidate.get("evidence") or "").strip().casefold()
+        duplicate = False
+        for proposal in existing:
+            if identity(proposal) != key:
+                continue
+            proposal_evidence = str(proposal.get("evidence") or "").strip().casefold()
+            # If both sides carry evidence, only the same evidence is one
+            # reward. A missing evidence field is legacy structured output, so
+            # retain the old amount-based de-duplication for that compatibility
+            # case instead of crediting the same response twice.
+            if not candidate_evidence or not proposal_evidence or candidate_evidence == proposal_evidence:
+                duplicate = True
+                break
+        if duplicate:
             continue
         proposals.append(candidate)
-        existing.add(key)
+        existing.append(candidate)
         added += 1
     return added

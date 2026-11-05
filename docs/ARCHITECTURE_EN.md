@@ -6106,6 +6106,18 @@ Locale resources must not change canonical currencies, amount conversion, budget
 
 Quote intents also carry traceable `evidence`: a short verbatim excerpt from the player's action or GM narration. The server accepts it only when the excerpt is found in trusted save text; missing or mismatched evidence downgrades the quote to unpriced. The model may perform semantic understanding, while lexical resources remain compatibility fallback rather than order authority.
 
+### 53.2 Structured reward boundary
+
+Narrative rewards enter the shared proposal queue through the structured
+`REWARD:player_id:amount:reason` tag. `amount` is already expressed in the
+ruleset's canonical currency unit and the exact tag line is retained as
+`evidence`. `GOLD` is only a compatibility alias and never mutates a balance
+directly. The recipient, amount, evidence and idempotency checks run before GM
+approval or the configured small-cash policy can settle the same ledger
+transaction. Model rewards without evidence cannot use automatic small-cash
+settlement, and item rewards are delivered only after a committed receipt.
+Natural-language reward prose is not an independent balance authority.
+
 ---
 
 # 54. Real Boundary for a Historical Swipe

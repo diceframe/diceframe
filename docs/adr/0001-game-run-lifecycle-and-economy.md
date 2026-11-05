@@ -75,6 +75,14 @@ the first authoritative game-state save succeeds.
 - Reset/restart, migration, Bot, multiplayer, swipe, and recovery require
   behavior-level contract tests.
 - Old `GOLD` tags are compatibility input only and cannot directly deduct money.
+- New narrative rewards use the structured `REWARD:player_id:amount:reason` tag.
+  The amount is already in the ruleset's canonical currency unit and the exact
+  tag line is retained as proposal evidence. `GOLD` remains a compatibility
+  alias and follows the same pending-proposal path; neither tag mutates a
+  balance directly.
+- Model-originated rewards without retained evidence cannot use the automatic
+  small-cash settlement path. Malformed amounts, unknown recipients, duplicate
+  evidence, and item delivery without a committed receipt fail closed.
 - A model cannot advance transaction-dependent narrative state before a player
   decision, or continue from a rejected transaction on a later turn.
 - Multi-proposal model responses use a conservative all-or-nothing effect
