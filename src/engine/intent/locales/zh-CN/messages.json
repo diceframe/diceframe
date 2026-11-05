@@ -1,0 +1,7 @@
+{
+  "unbacked_payment_notice": "本次未扣款：需要由 GM 明确发起支付订单。",
+  "unbacked_purchase_notice": "支付尚未确认，本次购买的物品未发放。",
+  "unpriced_purchase_notice": "未建立购买订单：需要明确且可结算的币种报价。本次未扣款，也未发放物品。",
+  "pending_decision_notice": "结算待确认：关联结果尚未生效。",
+  "economy_repair_prompt": "经济报价补扫：只重新检查提供的玩家行动和最近 GM 叙事中的明确购买意图。必须返回一次 dice_checks 工具调用，checks=[]。只把玩家明确要买的商品放入 economy_actions。如果人类明确说出了金额和币种，原样填写；如果购买明确但没有价格，或币种无法表示，仍输出无价意图，使用 price_source=none 并省略 amount/unit。绝不推断价格、数量、币种、预算或目标。没有明确购买时返回空数组。"
+}

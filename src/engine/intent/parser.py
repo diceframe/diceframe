@@ -14,13 +14,85 @@ from src.engine.intent.lexicon import (
     currency_label_defaults,
     instance_language,
     intent_regex,
+    intent_patterns,
 )
 
 _PURCHASE_INTENT_ID = "purchase_intent"
+_PURCHASE_OFFER_ID = "purchase_offer"
+_PURCHASE_DECLINE_ID = "purchase_decline"
 
 
 def purchase_intent_pattern(language: str) -> re.Pattern[str]:
     return intent_regex(language, _PURCHASE_INTENT_ID)
+
+
+def purchase_offer_pattern(language: str) -> re.Pattern[str]:
+    """Return locale-backed price/offer cues for deterministic quote recovery."""
+
+    return intent_regex(language, _PURCHASE_OFFER_ID)
+
+
+def purchase_decline_pattern(language: str) -> re.Pattern[str]:
+    """Return locale-backed cues for an explicit no-purchase statement."""
+
+    return intent_regex(language, _PURCHASE_DECLINE_ID)
+
+
+def intent_terms(language: str, intent_id: str) -> tuple[str, ...]:
+    """Return locale-backed literal terms for parser cleanup helpers."""
+
+    return intent_patterns(language, intent_id)
+
+
+def purchase_balance_pattern(language: str) -> re.Pattern[str]:
+    """Match balance/status cues immediately before an amount."""
+
+    terms = intent_terms(language, "purchase_balance")
+    source = "|".join(re.escape(term) for term in terms)
+    return re.compile(rf"(?:{source})\s*$", re.IGNORECASE) if source else re.compile(r"(?!x)x")
+
+
+def purchase_target_prefix_pattern(language: str) -> re.Pattern[str]:
+    terms = intent_terms(language, "purchase_target_prefix")
+    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    return re.compile(rf"^(?:{source})\s*", re.IGNORECASE) if source else re.compile(r"(?!x)x")
+
+
+def purchase_target_connector_pattern(language: str) -> re.Pattern[str]:
+    terms = intent_terms(language, "purchase_target_connector")
+    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    return re.compile(rf"^(?:{source})\s*", re.IGNORECASE) if source else re.compile(r"(?!x)x")
+
+
+def purchase_target_suffix_pattern(language: str) -> re.Pattern[str]:
+    terms = intent_terms(language, "purchase_target_suffix")
+    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    return re.compile(rf"(?:{source})$", re.IGNORECASE) if source else re.compile(r"(?!x)x")
+
+
+def purchase_quantity_classifier_pattern(language: str) -> re.Pattern[str]:
+    terms = intent_terms(language, "purchase_quantity_classifier")
+    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    return re.compile(rf"(?:{source})\s*", re.IGNORECASE) if source else re.compile(r"(?!x)x")
+
+
+def purchase_generic_target_terms(language: str) -> tuple[str, ...]:
+    return intent_terms(language, "purchase_generic_target")
+
+
+def purchase_quantity_words(language: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for raw in intent_terms(language, "purchase_quantity_word"):
+        key, sep, value = str(raw).partition("=")
+        if not sep:
+            continue
+        try:
+            number = int(value)
+        except ValueError:
+            continue
+        if key.strip() and 1 <= number <= 8:
+            values[key.strip()] = number
+    return values
 
 
 def currency_labels(language: str, extra_labels: Iterable[str] | None = None) -> tuple[str, ...]:
@@ -66,8 +138,8 @@ def completed_payment_pattern(
 ) -> re.Pattern[str]:
     labels = "|".join(re.escape(label) for label in currency_labels(language, extra_labels))
     return re.compile(
-        rf"(?:掏出|拿出|数出|数了|递出|放下|交出|付出|支付了?|缴纳了?|付清|花费了?)\s*"
-        rf"(?:[一二三四五六七八九十百千万两\d]+)\s*(?:枚|个)?\s*(?:{labels})"
+        rf"(?:掏出|拿出|数出|数了|递出|放下|交出|付出|给(?:付|出)?了?|交(?:付|出)?了?|付(?:出)?了?|支付了?|缴纳了?|付清|花费了?)\s*"
+        rf"(?:定金|订金)?\s*(?:[一二三四五六七八九十百千万两\d]+)\s*(?:枚|个)?\s*(?:{labels})"
         rf"|(?:paid|spent|handed over|paid out)\s+"
         rf"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:{labels})",
         re.IGNORECASE,
@@ -126,6 +198,7 @@ def parse_purchase_intents(
 
     intents: list[PurchaseIntent] = []
     intent_pattern = purchase_intent_pattern(language)
+    decline_pattern = purchase_decline_pattern(language)
     for action in action_records:
         if not isinstance(action, dict):
             continue
@@ -144,6 +217,7 @@ def parse_purchase_intents(
         verb_sentences = [
             sentence for sentence in verb_sentences
             if not _INTENT_QUESTION_RE.search(sentence)
+            and not decline_pattern.search(sentence)
         ]
         if not verb_sentences:
             continue

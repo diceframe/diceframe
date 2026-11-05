@@ -12,6 +12,34 @@ English and Simplified Chinese are the officially maintained interface and docum
 
 Missing or unreviewed central UI translations fall back to English. Community catalogs can be paused without deleting locale IDs or changing saved games and mechanics. See the [translation policy](translations.md) for status, source review and contributor responsibilities.
 
+## Backend intent resources
+
+Natural-language recognition for purchases, price inquiries, declined purchases, free grants and deferred payment uses stable intent IDs. The resources live in `src/engine/intent/locales/<locale>/intents.json`. A new language adds a resource file declaring the stable keys currently used by the parser:
+
+```text
+purchase_intent
+purchase_decline
+purchase_offer
+free_purchase
+deferred_payment
+currency_labels
+purchase_target_prefix
+purchase_target_connector
+purchase_target_suffix
+purchase_quantity_classifier
+purchase_generic_target
+purchase_quantity_word
+purchase_balance
+```
+
+Resources describe language cues only. They must not change canonical currencies, amount conversion, budgets, permissions, transaction states or rules mechanics. The economy engine consumes stable intent IDs; translated display names are never canonical identity. When a locale resource is missing, parsing falls back locale → English → Simplified Chinese. Missing resources must never cause price guessing or free item delivery.
+
+Every new language must pass the intent-resource contract tests, UTF-8 validation and the relevant economy regressions. Adding a language should not modify `src/engine/economy.py` or settlement logic. If business code must change, add a stable intent ID or resource field first and document why the existing resource contract is insufficient.
+
+Economy boundary notices and the economy planner repair prompt live in `messages.json` beside the intent resource. The stable message keys are `unbacked_payment_notice`, `unbacked_purchase_notice`, `unpriced_purchase_notice`, `pending_decision_notice` and `economy_repair_prompt`. A new language must provide them; missing messages fall back locale → English → Simplified Chinese.
+
+Quote semantics do not treat translated keywords as authority. A structured quote may carry verbatim `evidence`; the server verifies that it came from trusted player action or GM narration, and downgrades unverifiable evidence to an unpriced intent without creating an order.
+
 ## Status and fallback
 
 `src/localization/registry.json` declares each language's `core`/`community` tier, `active`/`paused` status and consenting maintainers. Empty community maintainer lists mean volunteers are welcome; existing catalogs remain active as an accepted baseline. A maintainer is listed only with their consent. New community languages need a volunteer, fallback verification and an integration PR.

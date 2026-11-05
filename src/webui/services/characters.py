@@ -1322,6 +1322,15 @@ async def resolve_payment(
                     "state_update": deepcopy(effect_payload.get("state_update") or {}),
                 }
             try:
+                # Deferred narrative effects are allowed to apply item
+                # candidates only under the transaction receipt produced by
+                # resolve_proposal.  The callback shape remains compatible
+                # with legacy two-argument test/application adapters; the
+                # receipt travels on the staged aggregate and is never
+                # persisted.
+                staged._economy_authorized_receipt_id = str(
+                    (result.get("transaction") or {}).get("id") or ""
+                )
                 await dependencies.apply_economy_effects(
                     staged, effect_payload,
                 )
@@ -1336,6 +1345,8 @@ async def resolve_payment(
                     "code": "EFFECT_COMMIT_FAILED",
                     "error": "关联结果应用失败，本次结算未生效，请重试",
                 }
+            finally:
+                staged.__dict__.pop("_economy_authorized_receipt_id", None)
             if memory_delta and dependencies.apply_economy_memory is not None:
                 queue_memory_delivery(
                     staged,

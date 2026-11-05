@@ -1,0 +1,7 @@
+{
+  "unbacked_payment_notice": "Keine Zahlung erfolgt: Der GM muss einen ausdrücklichen Zahlungsauftrag ausstellen.",
+  "unbacked_purchase_notice": "Der Gegenstand wurde nicht übergeben, da die Zahlung noch nicht bestätigt ist.",
+  "unpriced_purchase_notice": "Es wurde kein Kaufauftrag erstellt: Der Preis muss eine ausdrückliche, abrechenbare Währung enthalten. Es wurde nichts abgebucht und kein Gegenstand gewährt.",
+  "pending_decision_notice": "Abrechnung ausstehend: Abhängige Ergebnisse sind noch nicht wirksam.",
+  "economy_repair_prompt": "Wirtschafts-Nachprüfung: Prüfe nur Spieleraktionen und die letzte GM-Erzählung auf klare Käufe. Rufe dice_checks einmal mit checks=[] auf. Verwende nur ausdrücklich genannte Preise und Währungen; rate niemals. Bei klarem Kauf ohne abrechenbaren Preis: price_source=none verwenden und amount/unit weglassen."
+}

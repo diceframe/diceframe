@@ -31,6 +31,7 @@ from src.commands.state_items import (
     split_item_quantity,
 )
 from src.commands.tag_parser import parse_tag_state
+from src.commands.economy_effects import unpriced_purchase_notice
 from src.engine.economy import (
     filter_unconfirmed_purchase_grants,
     has_pending_identical_purchase,
@@ -112,7 +113,7 @@ def test_normalize_economy_actions_keeps_unpriced_intents() -> None:
         {"type": "purchase", "player": "尤落", "target": "回复药水",
          "quantity": 5, "price_source": "none"},
         {"type": "purchase", "player": "p2", "target": "口粮",
-         "amount": 3, "price_source": "player_stated"},
+         "amount": 3, "unit": "unit", "price_source": "player_stated"},
         {"type": "purchase", "player": "p2", "target": "弓", "amount": 5},
     ])
     assert offers == [{
@@ -295,7 +296,7 @@ async def test_narrated_price_dialog_next_round_and_blocks_free_loot(web_api) ->
 
     stub.planner_economy = [{
         "type": "purchase", "player": uid, "target": "回复药水",
-        "quantity": 5, "amount": 10, "amount_scope": "unit",
+        "quantity": 5, "amount": 10, "unit": "unit", "amount_scope": "unit",
         "price_source": "gm_narrated",
     }]
     await instance.add_action(uid, "那就来五瓶")
@@ -352,6 +353,7 @@ async def test_unpriced_purchase_never_delivers_free_items(web_api) -> None:
     sheet = instance.get_character_sheet(uid)
     assert sheet["inventory"] == [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]
     assert sheet["gold"] == 5000
+    assert unpriced_purchase_notice("zh-CN") in instance.log[-1]["state_changes"]
     # 意图保持待拦截状态（仅本轮内存）：玩家下一轮再确认时 planner 可从
     # recent_narration 拾取口述价格并正常弹窗。
     assert instance.round_unpriced_purchase_intents == [
@@ -444,7 +446,7 @@ async def test_duplicate_offer_not_queued_while_first_pending(web_api) -> None:
     stub.buyer_uid = uid
     stub.planner_economy = [{
         "type": "purchase", "player": uid, "target": "治疗药水",
-        "quantity": 5, "amount": 10, "amount_scope": "unit",
+        "quantity": 5, "amount": 10, "unit": "unit", "amount_scope": "unit",
         "price_source": "gm_narrated",
     }]
     stub.narration = "店主擦着柜台，等你拿主意。"

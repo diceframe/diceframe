@@ -325,6 +325,24 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                     "wording such as '五瓶共150金币'. Default to 'total' when unclear."
                                 ),
                             },
+                            "max_total": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(\\.[0-9]+)?$",
+                                "description": (
+                                    "Optional player-stated maximum total in the same canonical unit. "
+                                    "Use it for conditions such as 'only buy if the total is at most 700'. "
+                                    "The server rejects any quote above this ceiling. Never infer a ceiling."
+                                ),
+                            },
+                            "deposit_amount": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(\\.[0-9]+)?$",
+                                "description": (
+                                    "Optional first payment when the human explicitly states a deposit or "
+                                    "installment schedule. It must be smaller than amount and use the same unit. "
+                                    "Never infer a deposit from context."
+                                ),
+                            },
                             "price_source": {
                                 "type": "string",
                                 "enum": ["player_stated", "gm_narrated", "none"],
@@ -340,6 +358,14 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                 "type": "string",
                                 "maxLength": 160,
                                 "description": "Short private note (context or uncertainty).",
+                            },
+                            "evidence": {
+                                "type": "string",
+                                "maxLength": 300,
+                                "description": (
+                                    "Exact short excerpt from the player's action or GM narration that supports "
+                                    "the target and stated price. Do not translate, summarize, or invent it."
+                                ),
                             },
                         },
                         "required": ["player", "type", "target"],

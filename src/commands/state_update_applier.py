@@ -31,7 +31,7 @@ from src.rulesets.contracts import (
     NarrativeHealthRuntime,
 )
 from src.engine.economy import queue_proposal
-from src.engine.modules import checks, progression_state
+from src.engine.modules import checks, economy_state, progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -84,6 +84,8 @@ class StateUpdateApplier:
         worlds_dir: Path | None,
         load_world_template: Callable[[str, str], dict],
         ruleset_registry: Any = None,
+        *,
+        strict_economy: bool = False,
     ):
         self._madness = MadnessTracker()
         self._players = PlayerStateApplier(self._madness)
@@ -94,6 +96,74 @@ class StateUpdateApplier:
         # 由 GameHandler 注入；不在这里 build_default_ruleset_registry()，避免第二份
         # registry lifecycle。未注入时 reconciliation 整体停用，行为与改造前一致。
         self._ruleset_registry = ruleset_registry
+        # The production GameHandler enables this boundary.  Direct callers
+        # that still exercise the legacy parser contract can opt out while
+        # they migrate to settlement receipts; no narrative round does so.
+        self._strict_economy = bool(strict_economy)
+
+    def _reject_unsettled_item_acquisitions(
+        self,
+        instance: GameInstance,
+        update: dict[str, Any],
+        *,
+        authorized_receipt_id: str = "",
+        allow_unsettled_item_grants: bool = False,
+    ) -> None:
+        """Keep model item grants out of live inventory without a receipt.
+
+        Narrative ``LOOT``/``item_gains`` are candidates, not authority.  A
+        committed purchase/reward calls the same applier with a private
+        settlement receipt; ordinary model rounds never receive that token.
+        Equip existing items remains valid, but the legacy ``legacy`` flag is
+        removed so an unknown weapon cannot be acquired by equipping it.
+        """
+
+        receipt_id = str(authorized_receipt_id or "")
+        if receipt_id and not any(
+            isinstance(transaction, dict)
+            and str(transaction.get("id") or "") == receipt_id
+            and str(transaction.get("run_id") or "") == str(instance.run_id)
+            and str(transaction.get("status") or "") == "committed"
+            and str(transaction.get("settlement_stage") or "final") == "final"
+            for transaction in economy_state.state(instance).get("transactions", [])
+        ):
+            logger.warning("忽略无效经济结算回执: %s", receipt_id)
+            receipt_id = ""
+        if not self._strict_economy or receipt_id or allow_unsettled_item_grants:
+            return
+        rejected = 0
+        if isinstance(update.get("loot"), list):
+            rejected += len(update["loot"])
+            update["loot"] = []
+        players = update.get("players")
+        if isinstance(players, dict):
+            for uid, player_update in players.items():
+                if not isinstance(player_update, dict):
+                    continue
+                for field in ("item_gains", "equip_gain", "weapon_change"):
+                    value = player_update.pop(field, None)
+                    if value:
+                        rejected += len(value) if isinstance(value, list) else 1
+                operations = player_update.get("equipment_ops")
+                if isinstance(operations, list):
+                    kept: list[dict[str, Any]] = []
+                    for operation in operations:
+                        if not isinstance(operation, dict):
+                            continue
+                        if str(operation.get("op") or "") == "equip":
+                            # Existing inventory is still authoritative; the
+                            # legacy acquisition switch is not.
+                            operation = dict(operation)
+                            operation.pop("legacy", None)
+                        kept.append(operation)
+                    player_update["equipment_ops"] = kept
+        if update.pop("free_grants", None):
+            rejected += 1
+        if rejected:
+            logger.warning(
+                "拒绝未结算模型物品效果: round=%d count=%d",
+                progression_state.round_value(instance), rejected,
+            )
 
     def _load_rule(self, instance: GameInstance) -> RuleSystem | None:
         try:
@@ -132,8 +202,19 @@ class StateUpdateApplier:
         instance: GameInstance,
         update: dict,
         allowed_player_uids: set | None = None,
+        *,
+        authorized_receipt_id: str = "",
+        allow_unsettled_item_grants: bool = False,
     ) -> list[dict[str, Any]]:
         """将 LLM 输出的 state_update 应用到游戏状态。"""
+        if not isinstance(update, dict):
+            return []
+        self._reject_unsettled_item_acquisitions(
+            instance,
+            update,
+            authorized_receipt_id=str(authorized_receipt_id or ""),
+            allow_unsettled_item_grants=allow_unsettled_item_grants,
+        )
         queued_proposals: list[dict[str, Any]] = []
         rule = self._load_rule(instance)
         # 先解析 runtime：没有 reconciliation 能力的规则（legacy / freeform）完全

@@ -11,11 +11,13 @@ from src.engine.modules import narrative_notes
 from src.engine.economy import (
     blocking_economy_proposals,
     cancel_proposals_for_player,
+    filter_unconfirmed_purchase_grants,
     has_blocking_economy_decision,
     is_nonblocking_personal_purchase,
     pending_memory_deliveries,
     pending_memory_reversals,
     pending_proposals,
+    purchase_grant_protection_snapshot,
     proposal_transition_allowed,
     queue_effect_group,
     queue_purchase_offer,
@@ -29,6 +31,8 @@ from src.engine.modules import economy_state, media, private_channels, session_s
 from src.commands.economy_effects import (
     guard_unbacked_payment_narration,
     defer_narrative_effects,
+    infer_narrative_reward_candidates,
+    merge_narrative_reward_candidates,
     pending_decision_notice,
 )
 from src.commands.round_processor import RoundNotProcessed
@@ -40,6 +44,7 @@ from src.llm.context_builder import build_context
 from src.memory.delta import MemoryStore
 from src.migrations.instance import CURRENT_INSTANCE_SCHEMA_VERSION, migrate_game_state_payload
 from src.webui.services import characters
+from src.rules.rule_system import RuleSystem
 
 from webapi_harness import web_api  # noqa: F401
 from src.engine.modules import checks as checks_module
@@ -181,6 +186,281 @@ def test_unconfirmed_purchase_grants_are_stripped() -> None:
     }}) == 0
 
 
+@pytest.mark.parametrize("accepted", [False, True])
+def test_purchase_items_stay_protected_after_in_flight_decline_or_rejection(accepted: bool) -> None:
+    """A narration started before settlement must not grant a failed purchase."""
+
+    instance = _instance()
+    amount = 50 if accepted else 5
+    proposal = queue_purchase_offer(
+        instance,
+        payer_uid="gm",
+        amount=amount,
+        items=["薄如蝉翼的皮下护甲"],
+        source="gm_manual",
+        source_ref=f"gm_manual:race:{accepted}",
+    )
+    protected = purchase_grant_protection_snapshot(instance)
+    if accepted:
+        instance.get_character_sheet("gm")["gold"] = 0
+        result = resolve_proposal(instance, proposal["id"], actor_uid="gm", accepted=True)
+        assert result["code"] == "INSUFFICIENT_FUNDS"
+    else:
+        result = resolve_proposal(instance, proposal["id"], actor_uid="gm", accepted=False)
+        assert result["ok"] is True
+
+    data = {"state_update": {
+        "loot": [{"player": "gm", "item": "薄如蝉翼的皮下护甲"}],
+    }}
+    assert filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        protected_purchase_items=protected,
+    ) == 1
+    assert data["state_update"]["loot"] == []
+
+
+def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path) -> None:
+    """Production round appliers must not let model item tags mutate inventory."""
+
+    instance = _instance()
+    applier = StateUpdateApplier(
+        tmp_path,
+        None,
+        load_world_template=lambda *_: {},
+        strict_economy=True,
+    )
+    update = {
+        "loot": [{"player": "gm", "item": "观察中的护甲"}],
+        "free_grants": [{"player": "gm", "item": "免费护符"}],
+        "players": {
+            "gm": {
+                "item_gains": [{"name": "试穿背心", "qty": 1}],
+                "equip_gain": "未付款装备",
+                "weapon_change": "未付款武器",
+                "equipment_ops": [{"op": "equip", "name": "不存在的装备", "legacy": True}],
+            },
+        },
+    }
+
+    applier.apply_state_update(instance, update)
+
+    sheet = instance.get_character_sheet("gm")
+    assert sheet.get("inventory", []) == []
+    assert sheet.get("equipment", []) == []
+    assert update["loot"] == []
+    assert "free_grants" not in update
+
+    authorized = {
+        "loot": [{"player": "gm", "item": "已结算护甲"}],
+        "players": {"gm": {"item_gains": [{"name": "已结算药水", "qty": 1}]}},
+    }
+    economy_state.state(instance)["transactions"].append({
+        "id": "tx_test_settlement", "run_id": instance.run_id, "status": "committed",
+    })
+    applier.apply_state_update(
+        instance,
+        authorized,
+        authorized_receipt_id="tx_test_settlement",
+    )
+    names = {
+        str(item.get("name") or "")
+        for item in instance.get_character_sheet("gm").get("inventory", [])
+        if isinstance(item, dict)
+    }
+    assert {"已结算护甲", "已结算药水"} <= names
+
+
+def test_purchase_deposit_only_charges_due_and_delivers_after_tail() -> None:
+    instance = _instance()
+    sheet = instance.get_character_sheet("gm")
+    sheet["gold"] = 1000
+    sheet["currency"]["amount"] = 1000
+    offer = queue_purchase_offer(
+        instance,
+        payer_uid="gm",
+        amount=900,
+        items=["分期护甲"],
+        initial_due=200,
+        remaining_due=700,
+        source="gm_manual",
+        source_ref="gm_manual:installment",
+    )
+
+    def grant(target: dict, reward: dict) -> None:
+        target.setdefault("inventory", []).append({"name": reward["name"], "qty": 1})
+
+    deposit = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=True, grant_reward=grant,
+    )
+    assert deposit["ok"] is True
+    assert deposit["committed"] is False
+    assert deposit["proposal"]["status"] == "pending"
+    assert deposit["proposal"]["payment_terms"]["stage"] == "deposit_paid"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 800
+    assert instance.get_character_sheet("gm").get("inventory", []) == []
+
+    tail = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=True, grant_reward=grant,
+    )
+    assert tail["ok"] is True
+    assert tail["committed"] is True
+    assert tail["proposal"]["status"] == "committed"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 100
+    assert instance.get_character_sheet("gm")["inventory"] == [{"name": "分期护甲", "qty": 1}]
+
+
+def test_purchase_tail_insufficient_funds_keeps_deposit_contract_retryable() -> None:
+    instance = _instance()
+    sheet = instance.get_character_sheet("gm")
+    sheet["gold"] = 1000
+    sheet["currency"]["amount"] = 1000
+    offer = queue_purchase_offer(
+        instance,
+        payer_uid="gm",
+        amount=900,
+        items=["尾款护甲"],
+        initial_due=200,
+        remaining_due=700,
+        source="gm_manual",
+        source_ref="gm_manual:tail-retry",
+    )
+
+    def grant(target: dict, reward: dict) -> None:
+        target.setdefault("inventory", []).append({"name": reward["name"], "qty": 1})
+
+    deposit = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=True, grant_reward=grant,
+    )
+    assert deposit["committed"] is False
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 800
+
+    declined = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=False, grant_reward=grant,
+    )
+    assert declined["ok"] is False
+    assert declined["code"] == "INSTALLMENT_ALREADY_STARTED"
+    assert declined["proposal"]["status"] == "pending"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 800
+
+    # The player cannot afford the tail yet.  Keep the contract pending and
+    # leave the already committed deposit untouched so a later retry is safe.
+    sheet = instance.get_character_sheet("gm")
+    sheet["currency"]["amount"] = 500
+    sheet["gold"] = 500
+    insufficient = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=True, grant_reward=grant,
+    )
+    assert insufficient["ok"] is False
+    assert insufficient["code"] == "INSUFFICIENT_FUNDS"
+    assert insufficient["proposal"]["status"] == "pending"
+    assert insufficient["proposal"]["payment_terms"]["stage"] == "deposit_paid"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 500
+    assert instance.get_character_sheet("gm").get("inventory", []) == []
+    assert len(economy_state.state(instance)["transactions"]) == 1
+
+    sheet = instance.get_character_sheet("gm")
+    sheet["currency"]["amount"] = 700
+    sheet["gold"] = 700
+    tail = resolve_proposal(
+        instance, offer["id"], actor_uid="gm", accepted=True, grant_reward=grant,
+    )
+    assert tail["ok"] is True
+    assert tail["committed"] is True
+    assert tail["proposal"]["status"] == "committed"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 0
+    assert instance.get_character_sheet("gm")["inventory"] == [{"name": "尾款护甲", "qty": 1}]
+    assert len(economy_state.state(instance)["transactions"]) == 2
+
+
+def test_malformed_installment_terms_fail_closed_without_charging() -> None:
+    instance = _instance()
+    sheet = instance.get_character_sheet("gm")
+    sheet["gold"] = 1000
+    sheet["currency"]["amount"] = 1000
+    offer = queue_purchase_offer(
+        instance,
+        payer_uid="gm",
+        amount=900,
+        items=["非法条款护甲"],
+        initial_due=200,
+        remaining_due=700,
+        source="gm_manual",
+        source_ref="gm_manual:invalid-terms",
+    )
+    offer["payment_terms"]["remaining_due"] = 800
+    result = resolve_proposal(instance, offer["id"], actor_uid="gm", accepted=True)
+    assert result == {
+        "ok": False,
+        "code": "INVALID_PAYMENT_TERMS",
+        "error": "支付条款总额不一致",
+    }
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 1000
+    assert economy_state.state(instance)["transactions"] == []
+
+
+def test_invalid_installment_terms_do_not_leave_orphaned_proposal() -> None:
+    instance = _instance()
+    with pytest.raises(ValueError, match="purchase installment totals are invalid"):
+        queue_purchase_offer(
+            instance,
+            payer_uid="gm",
+            amount=900,
+            items=["孤立条款护甲"],
+            initial_due=700,
+            remaining_due=300,
+            source="gm_manual",
+            source_ref="gm_manual:invalid-before-queue",
+        )
+    assert economy_state.state(instance)["proposals"] == []
+
+
+def test_explicit_narrative_reward_becomes_pending_candidate_without_crediting_balance() -> None:
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "我完成了过命任务"}]
+    rule = RuleSystem({
+        "rule_id": "reward_test", "name": "Reward Test", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    candidates = infer_narrative_reward_candidates(
+        instance, "委托人确认奖励710金币，结算完成。", rule,
+    )
+    assert len(candidates) == 1
+    assert candidates[0].get("kind") == "reward"
+    assert candidates[0].get("uid") == "gm"
+    assert candidates[0].get("amount") == 710
+    assert "奖励710金币" in candidates[0].get("reason", "")
+    assert candidates[0].get("source") == "narrative_reward_extractor"
+    assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
+
+
+def test_repeated_reward_evidence_is_one_candidate() -> None:
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": "委托人答应给你710金币"}]
+    rule = RuleSystem({
+        "rule_id": "reward_repeat_test", "name": "Reward Repeat Test", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    candidates = infer_narrative_reward_candidates(
+        instance, "委托人确认：给你710金币，任务结算完成。", rule,
+    )
+    assert len(candidates) == 1
+    assert candidates[0]["amount"] == 710
+
+
+def test_structured_and_narrative_reward_do_not_duplicate() -> None:
+    data = {"state_update": {"economy_proposals": [{
+        "kind": "reward", "uid": "gm", "amount": 710,
+        "reason": "模型已发出的奖励",
+    }]}}
+    added = merge_narrative_reward_candidates(data, [{
+        "kind": "reward", "recipient_uid": "gm", "amount": 710,
+        "source": "narrative_reward_extractor",
+    }])
+    assert added == 0
+    assert len(data["state_update"]["economy_proposals"]) == 1
+
+
 def test_only_plain_personal_purchase_is_nonblocking() -> None:
     instance = _instance()
     purchase = queue_proposal(
@@ -221,6 +501,24 @@ def test_narrated_payment_without_protocol_is_explicitly_not_charged() -> None:
     narration = "你从怀里掏出五枚金币，放在柜台上。"
     guarded = guard_unbacked_payment_narration(narration, {}, "zh-CN")
     assert narration in guarded
+    assert "本次未扣款" in guarded
+
+
+@pytest.mark.parametrize("narration", [
+    "你给了定金 700 信用点。",
+    "你交了定金 700 信用点。",
+])
+def test_deposit_narration_without_protocol_is_explicitly_not_charged(
+    narration: str,
+) -> None:
+    """中文“给/交定金”也必须触发未扣款提示，避免把叙事当成结算。"""
+
+    guarded = guard_unbacked_payment_narration(
+        narration,
+        {},
+        "zh-CN",
+        currency_labels=("信用点",),
+    )
     assert "本次未扣款" in guarded
 
 
@@ -1874,7 +2172,7 @@ async def test_in_flight_narration_keeps_output_when_pending_proposal_resolves(
         entered.set()
         await release.wait()
         return LLMResponse(
-            content="这条叙事已经过期。\n---\nSCENE:错误场景",
+            content="这条叙事已经过期。\n---\nSCENE:错误场景\nLOOT:%s:商人的旧报价" % uid,
             narration="这条叙事已经过期。",
             state_update=None,
             memory_delta=None,
@@ -1900,6 +2198,10 @@ async def test_in_flight_narration_keeps_output_when_pending_proposal_resolves(
     assert narration == "这条叙事已经过期。"
     assert private == {}
     assert any(entry.get("gm_response") == "这条叙事已经过期。" for entry in instance.log)
+    assert not any(
+        item.get("name") == "商人的旧报价"
+        for item in instance.get_character_sheet(uid).get("inventory", [])
+    )
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,19 @@ from src.engine.currency.validation import CurrencySystemError
 from src.engine.dice import d20_dc_cap
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
+from src.engine.intent.parser import (
+    parse_purchase_intents,
+    purchase_balance_pattern,
+    purchase_generic_target_terms,
+    purchase_intent_pattern,
+    purchase_quantity_classifier_pattern,
+    purchase_quantity_words,
+    purchase_offer_pattern,
+    purchase_target_connector_pattern,
+    purchase_target_prefix_pattern,
+    purchase_target_suffix_pattern,
+)
+from src.engine.intent.locale_messages import locale_message
 from src.engine.language import localized_text
 from src.engine.modules import economy_state, progression_state, ruleset_runtime
 from src.engine.modules.check_modes import apply_grant
@@ -61,388 +74,50 @@ _SKILL_USE_PREFIXES = ("使用", "运用", "尝试", "进行", "施展", "用", 
 _is_non_combat_declaration = is_non_combat_declaration
 
 
-def _prompt_text(language: str) -> str:
-    suffix = localized_text(
-        language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de", "ru": "ru"}
-    )
-    path = Path(__file__).resolve().parents[2] / "prompts" / f"check_planner_{suffix}.md"
-    return path.read_text(encoding="utf-8")
+def _has_possible_purchase_action(instance: GameInstance) -> bool:
+    """Return whether a player action warrants a targeted economy re-scan.
 
-
-def _skill_action_matches(effect_owner: str, action_text: str) -> bool:
-    """Deterministic match: the action text mentions this skill's name.
-
-    First version deliberately stays trivial (normalized containment); no
-    embeddings, no LLM retrieval, no alias inference.
+    This is only a routing heuristic. It never creates an offer or infers a
+    target/price; the follow-up tool call must still return an explicit,
+    server-normalized economy action.
     """
 
-    skill = re.sub(r"\s+", "", effect_owner).casefold()
-    action = re.sub(r"\s+", "", str(action_text or "")).casefold()
-    return bool(skill) and skill in action
+    return bool(parse_purchase_intents(
+        instance.action_queue,
+        instance.players,
+        str(getattr(instance, "language", "") or ""),
+    ))
 
 
-def _skill_rows(
-    sheet: dict[str, Any],
-    action_text: str = "",
-    selected_skill: str = "",
-    include_matching_effects: bool = False,
-) -> list[dict[str, Any]]:
-    """Project sheet skills for planning/display.
-
-    ``effect`` is descriptive metadata, never mechanical authority: it is only
-    attached when the caller asks for it AND the current action actually uses
-    that skill — either the action text mentions its name, or the player
-    explicitly selected it (``selected_skill``).  It never enters
-    roll/DC/damage resolution.
-    """
-    selected = str(selected_skill or "").strip().casefold()
-    rows: list[dict[str, Any]] = []
-    for item in sheet.get("skills", []) or []:
-        if isinstance(item, dict):
-            name = str(item.get("name") or "").strip()
-            if name:
-                try:
-                    value = int(item.get("value", 0) or 0)
-                except (TypeError, ValueError):
-                    value = 0
-                row = {"name": name, "value": value}
-                effect = str(item.get("effect") or "").strip()
-                # 明确选中（selected_skill）与文本命中同等视为「本轮使用该技能」。
-                matched = _skill_action_matches(name, action_text) or bool(
-                    selected and selected == name.casefold()
-                )
-                if effect and include_matching_effects and matched:
-                    row["effect"] = effect[:MAX_SKILL_EFFECT_CHARS]
-                rows.append(row)
-        elif str(item).strip():
-            rows.append({"name": str(item).strip(), "value": 0})
-    return rows
+def _economy_repair_prompt(language: str) -> str:
+    # Keep the retry prompt deliberately small. The tool schema already carries
+    # the full economy contract, and the context carries the ruleset units;
+    # re-sending the entire check-planner prompt would waste input tokens.
+    return locale_message(language, "economy_repair_prompt")
 
 
-def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
-    """最近的购买提案快照，让 planner 看到“什么已经买过/报过价”。
+def _economy_repair_context(instance: GameInstance, rule: RuleSystem | None) -> str:
+    """Build only the evidence needed by the economy retry pass."""
 
-    没有这份历史时，模型只能从 recent_narration 里看到上一轮的价格，
-    容易把“还有什么”这类浏览追问误判成新的购买意图，导致成交后
-    每回合重复弹窗（实际事故：round3 重复报价 round2 已成交的药水）。
-    """
-    rows: list[dict[str, Any]] = []
-    for proposal in reversed(economy_state.state(instance).get("proposals", [])):
-        if len(rows) >= 5:
-            break
-        if not isinstance(proposal, dict) or str(proposal.get("kind") or "") != "purchase":
-            continue
-        if str(proposal.get("status") or "") not in {"pending", "committed", "declined"}:
-            continue
-        rewards = proposal.get("rewards") or []
-        items = sorted({
-            str(reward.get("name") or "").strip()
-            for reward in rewards
-            if isinstance(reward, dict) and str(reward.get("name") or "").strip()
-        })
-        rows.append({
-            "round": proposal.get("round"),
-            "status": proposal.get("status"),
-            "payer_id": proposal.get("payer_uid"),
-            "items": items,
-            "quantity": len(rewards),
-            "amount": proposal.get("amount"),
-        })
-    rows.reverse()
-    return rows
-
-
-def _companion_roster(instance: GameInstance) -> dict[str, dict[str, Any]]:
-    """DND party companions（ruleset_state.party.companions）；其他规则集为空。
-
-    只返回活跃且有 canonical 角色卡的队友；generic planner 不感知规则集差异，
-    没有该状态时（CoC 等）自然为空。
-    """
-    state = ruleset_runtime.state(instance)
-    party = state.get("party") if isinstance(state, dict) else None
-    companions = party.get("companions") if isinstance(party, dict) else None
-    if not isinstance(companions, dict):
-        return {}
-    return {
-        companion_id: companion
-        for companion_id, companion in companions.items()
-        if isinstance(companion, dict) and companion.get("active", True)
-        and isinstance(companion.get("ruleset_character"), dict)
-    }
-
-
-def _companion_sheet(instance: GameInstance, companion_id: str) -> dict[str, Any]:
-    """companion canonical 角色卡；proficiencies.skill_values 合成 skills 列表。"""
-    companion = _companion_roster(instance).get(companion_id)
-    if not companion:
-        return {}
-    sheet = companion["ruleset_character"]
-    # DND canonical 用 abilities（3-18）；generic 检定读 attributes——缺失时镜像，
-    # 与玩家侧 webui 投影（attributes/skills 镜像进 character_sheet）语义一致。
-    merged = dict(sheet)
-    if not merged.get("attributes"):
-        merged["attributes"] = dict(sheet.get("abilities") or {})
-    if not merged.get("skills"):
-        skill_values = sheet.get("proficiencies", {}).get("skill_values") or {}
-        merged["skills"] = [
-            {"name": name, "value": value}
-            for name, value in sorted(skill_values.items())
-        ]
-    return merged
-
-
-def _match_actor(instance: GameInstance, value: object) -> tuple[str, str]:
-    """把模型输出解析为检定主体 (kind, id)。
-
-    支持显式前缀（player:<uid> / companion:<id>）、玩家 uid/名、队友 id/名。
-    精确匹配优先；歧义、不存在时返回 ("", "")，绝不从纯叙事 NPC 猜测。
-    """
-    query = str(value or "").strip()
-    if not query:
-        return "", ""
-    lowered = query.lower()
-    if lowered.startswith("player:"):
-        uid = query.removeprefix("player:").strip()
-        return ("player", uid) if uid in instance.players else ("", "")
-    if lowered.startswith("companion:"):
-        companion_id = query.removeprefix("companion:").strip()
-        return (
-            ("companion", companion_id)
-            if companion_id in _companion_roster(instance) else ("", "")
-        )
-    player_uid = _match_player(instance, query)
-    if player_uid:
-        return "player", player_uid
-    matches = [
-        companion_id
-        for companion_id, companion in _companion_roster(instance).items()
-        if query.casefold() in {
-            companion_id.casefold(),
-            str(companion.get("name") or "").strip().casefold(),
-        }
-    ]
-    if len(matches) == 1:
-        return "companion", matches[0]
-    return "", ""
-def _context_match_text(value: str) -> str:
-    return re.sub(r"\s+", "", value).casefold()
-
-
-def _positive_inventory_quantity(value: Any) -> int | None:
-    """接受可可靠解释的正整数数量，不把无效数量降级成无数量物品。"""
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        return None
-    try:
-        quantity = int(value)
-    except (ValueError, OverflowError):
-        return None
-    if isinstance(value, float) and value != quantity:
-        return None
-    return quantity if quantity > 0 else None
-
-
-def _action_mentions_name(action: str, name: object) -> bool:
-    """拉丁名称/ID 要求词边界；中文等名称允许紧邻中文叙述。"""
-    if not isinstance(name, str) or not name.strip():
-        return False
-    name = name.strip().casefold()
-    text = action.casefold()
-
-    def identifier_char(char: str) -> bool:
-        return (
-            char == "_" or char.isdigit()
-            or unicodedata.name(char, "").startswith("LATIN ")
-            or unicodedata.category(char).startswith("M")
-        )
-
-    pattern = r"\s*".join(re.escape(part) for part in name.split())
-    for match in re.finditer(pattern, text):
-        if identifier_char(name[0]) and match.start() and identifier_char(text[match.start() - 1]):
-            continue
-        if identifier_char(name[-1]) and match.end() < len(text) and identifier_char(text[match.end()]):
-            continue
-        return True
-    return False
-
-
-def _item_context(sheet: dict[str, Any], action: str, target: str) -> dict[str, Any]:
-    """只读压缩现有物品；partial 表示该清单不能提供物品不存在的证据。"""
-    texts = [_context_match_text(action), _context_match_text(target)]
-    candidates: list[tuple[int, dict[str, Any]]] = []
-    partial = False
-    for source_index, source in enumerate(("equipment", "key_items", "inventory")):
-        entries = sheet.get(source)
-        if not isinstance(entries, list):
-            partial = True
-            continue
-        for entry in entries:
-            row: dict[str, Any] = {"source": source}
-            if isinstance(entry, str) and entry.strip():
-                row["name"] = entry.strip()
-            elif isinstance(entry, dict):
-                for key in ("name", "item_ref", "type"):
-                    value = entry.get(key)
-                    if isinstance(value, str) and value.strip():
-                        row[key] = value.strip()
-                    elif key in entry:
-                        partial = True
-                quantity_key = "qty" if "qty" in entry else "quantity"
-                if quantity_key in entry:
-                    quantity = entry[quantity_key]
-                    if source == "inventory":
-                        quantity = _positive_inventory_quantity(quantity)
-                        if quantity is None:
-                            partial = True
-                            continue
-                        row["qty"] = quantity
-                    elif type(quantity) is int and quantity >= 0:
-                        row["qty"] = quantity
-                    else:
-                        partial = True
-            if not row.get("name") and not row.get("item_ref"):
-                partial = True
-                continue
-            matched = any(
-                _context_match_text(row[key]) in text
-                for key in ("name", "item_ref") if row.get(key)
-                for text in texts
-            )
-            if source == "inventory" and len(entries) > 20 and not matched:
-                partial = True
-                continue
-            candidates.append((0 if matched else source_index + 1, row))
-
-    result: dict[str, Any] = {"items": [], "partial": partial}
-    for _, row in sorted(candidates, key=lambda candidate: candidate[0]):
-        result["items"].append(row)
-        if len(result["items"]) > 20 or len(json.dumps(
-            result, ensure_ascii=False, separators=(",", ":"),
-        )) > 1500:
-            result["items"].pop()
-            result["partial"] = True
-    return result
-
-
-def _npc_context(
-    instance: GameInstance, uid: str, action: str, target: str,
-) -> dict[str, Any] | None:
-    """复用目标解析，只附带明确、无歧义 NPC 的身份和已记录关系。"""
-    reference = (
-        _match_opponent(instance, target)
-        if target.strip() else find_action_opponent(instance, uid, action)
-    )
-    if not reference.startswith("npc:"):
-        return None
-    npc_id = reference[4:]
-    npc = instance.npcs.get(npc_id)
-    if not isinstance(npc, dict):
-        return None
-
-    # 原解析器的精确名称分支可能返回首个同名对象；摘要不得据此消除歧义。
-    aliases = {
-        key: {
-            value.strip().casefold()
-            for value in (key, record.get("name"), record.get("character_name"))
-            if isinstance(value, str) and value.strip()
-        }
-        for key, record in instance.npcs.items() if isinstance(record, dict)
-    }
-    if target.strip():
-        query = target.strip().casefold()
-        matches = {key for key, names in aliases.items() if query in names}
-        if not matches and len(query) >= 2:
-            matches = {
-                key for key, names in aliases.items()
-                if any(query in name or name in query for name in names)
-            }
-    else:
-        # 同时提到其他玩家，也无法仅凭名字判断谁是受话者。
-        if any(
-            _action_mentions_name(action, name)
-            for player_id, player in instance.players.items() if player_id != uid
-            for name in (player_id, player.get("character_name"))
-        ):
-            return None
-        matches = {
-            key
-            for key, names in aliases.items()
-            if any(_action_mentions_name(action, name) for name in names)
-        }
-    if matches != {npc_id}:
-        return None
-
-    name = next((
-        value.strip() for value in (npc.get("name"), npc.get("character_name"), npc_id)
-        if isinstance(value, str) and value.strip()
-    ), npc_id)
-    result = {"reference": reference, "name": name}
-    relation = npc.get("relation")
-    if isinstance(relation, str) and relation.strip():
-        result["relation"] = relation
-    if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 400:
-        result.pop("relation", None)
-    if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 400:
-        return None
-    return result
-
-
-def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
-    players = []
-    for action in instance.action_queue:
-        uid = str(action.get("user_id") or "")
-        if uid not in instance.players:
-            continue
-        if not is_conscious(instance.get_character_sheet(uid)):
-            continue
-        sheet = instance.get_character_sheet(uid)
-        action_text = str(action.get("text") or "")[:1000]
-        target_text = str(action.get("target_text") or "")
-        selected_skill = str(action.get("selected_skill") or "")
-        players.append({
-            "player_id": uid,
-            "character_name": instance.players[uid].get("character_name") or uid,
-            "action": action_text,
-            "attributes": sheet.get("attributes", {}),
-            "skills": _skill_rows(
-                sheet, action_text, selected_skill,
-                include_matching_effects=True,
-            ),
-            "selected_attribute": str(action.get("selected_attribute") or ""),
-            "selected_skill": selected_skill,
-            "target_text": target_text,
-            "item_context": _item_context(sheet, action_text, target_text),
-        })
-        npc_context = _npc_context(instance, uid, action_text, target_text)
-        if npc_context is not None:
-            players[-1]["npc_context"] = npc_context
-    mechanic = rule.check_mechanic if rule else {
-        "dice": "d20",
-        "comparison": "roll_plus_modifier_gte_target",
-        "critical": {"success": 20, "failure": 1},
-    }
-    dice_system = str(rule.dice_system if rule else "d20").lower()
-    attributes = [
-        {"key": str(item.get("key") or ""), "name": str(item.get("name") or "")}
-        for item in (rule.attributes if rule else [])
-    ]
-    # 经济报价协议：模型只上报「十进制金额 + canonical 单位 id」，换算由服务端
-    # CurrencyCodec 完成；这里提供当前规则允许的全部货币单位。
     currency_spec = rule.currency_spec if rule else legacy_currency_spec("")
-    ruleset = {
-        "id": instance.rule_id,
-        "dice_system": dice_system,
-        "mechanic": mechanic,
-        "attributes": attributes,
-        # 没有规则集时也要与通用 d20 尺度一致（base_d20/dnd5e 都是 10/15/20/25）；
-        # prompt 要求档位以本表为准，这里再给一套 8/10/15 会让模型收到互相矛盾的数据。
-        "dc_table": rule.dc_table if rule else {
-            "easy": 10, "normal": 15, "hard": 20, "extreme": 25,
-        },
-        "target_policy": (
-            "server_uses_character_sheet_percentile"
-            if dice_system == "d100"
-            else "gm_supplies_situational_dc"
-        ),
+    payload = {
+        "players": [
+            {
+                "player_id": str(action.get("user_id") or ""),
+                "character_name": str(
+                    (instance.players.get(str(action.get("user_id") or "")) or {}).get("character_name")
+                    or action.get("user_id") or ""
+                ),
+                "action": str(action.get("text") or "")[:1000],
+            }
+            for action in instance.action_queue
+            if str(action.get("user_id") or "") in instance.players
+        ],
+        "recent_narration": [
+            sanitize_narration(str(entry.get("gm_response") or ""))[:1000]
+            for entry in instance.log[-2:]
+            if entry.get("gm_response")
+        ],
         "currency_units": [
             {
                 "id": unit.id,
@@ -452,48 +127,32 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
             }
             for unit in currency_spec.units
         ],
-        "currency_display_unit": currency_spec.display_unit,
-    }
-    if dice_system == "d20":
-        ruleset["max_check_dc"] = d20_dc_cap(rule)
-    payload = {
-        "round": progression_state.round_value(instance),
-        "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:500],
-        "recent_narration": [
-            sanitize_narration(str(entry.get("gm_response") or ""))[:1000]
-            for entry in instance.log[-2:]
-            if entry.get("gm_response")
-        ],
-        "difficulty": game_config.difficulty(instance),
-        "ruleset": ruleset,
-        "players": players,
-        # AI 队友作为可选检定主体：模型只负责选"谁执行/什么检定"，
-        # 数值仍由服务器角色卡决定。
-        "companions": [
-            {
-                "actor_ref": f"companion:{companion_id}",
-                "character_name": str(companion.get("name") or companion_id),
-                "attributes": _companion_sheet(instance, companion_id).get("attributes", {}),
-                "skills": _skill_rows(_companion_sheet(instance, companion_id)),
-            }
-            for companion_id, companion in sorted(_companion_roster(instance).items())
-        ],
         "recent_purchases": _recent_purchases(instance),
     }
-    # 权威世界真相（Issue #284）：只给模型 canonical 事实与取值，让它能用稳定的
-    # 地点 id 提出 world_requirements；玩家可见投影走 project_visible_state。
-    visible_world = project_visible_state(instance, viewer_is_gm=True)
-    if visible_world["facts"]:
-        payload["world_state"] = {
-            "revision": visible_world["revision"],
-            "clock": visible_world["clock"],
-            "facts": {
-                key: fact.get("value")
-                for key, fact in visible_world["facts"].items()
-            },
-        }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
+
+def _prompt_text(language: str) -> str:
+    suffix = localized_text(
+        language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de", "ru": "ru"}
+    )
+    path = Path(__file__).resolve().parents[2] / "prompts" / f"check_planner_{suffix}.md"
+    return path.read_text(encoding="utf-8")
+
+
+from src.commands.check_planner_context import (
+    _action_mentions_name,
+    _companion_roster,
+    _companion_sheet,
+    _context_match_text,
+    _item_context,
+    _match_actor,
+    _npc_context,
+    _planner_context,
+    _positive_inventory_quantity,
+    _recent_purchases,
+    _skill_rows,
+)
 
 def _match_player(instance: GameInstance, value: object) -> str:
     query = str(value or "").strip().casefold()
@@ -1029,135 +688,11 @@ def _apply_granted_advantage_modes(
     return planned
 
 
-def append_unpriced_purchase_intent(
-    unpriced: list[dict[str, Any]],
-    seen: set[tuple[str, str, int]],
-    *,
-    uid: str,
-    target: str,
-    quantity: int,
-) -> None:
-    """Record one deduplicated unpriced purchase intent (round memory only)."""
-
-    key = (uid, target.casefold(), quantity)
-    if key in seen:
-        return
-    seen.add(key)
-    unpriced.append({
-        "payer_uid": uid,
-        "target": target,
-        "quantity": quantity,
-    })
-
-
-def normalize_economy_actions(
-    instance: GameInstance,
-    raw_actions: list[Any],
-    rule: RuleSystem | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """校验模型经济报价并归一到付款人。
-
-    新货币协议：``amount`` 是十进制字符串、``unit`` 是规则货币的 canonical
-    unit id；服务端经 CurrencyCodec 转成 canonical base-unit 整数，模型绝不
-    自行换算。price_source=none 或缺价时安全跳过（没有人说出价格就不产生
-    扣款提案），有效的意图以 ``unpriced`` 形式返回，供本轮 LOOT 拦截使用；
-    它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
-    price_source 必须是明确的转述来源。单条无效不影响同批。
-
-    意图与报价分层：player/target/quantity 校验通过后购买意图即成立；
-    之后任何「报价不可结算」（unit 无法映射、金额无法 canonicalize、
-    amount_scope/price_source 非法、超出上限）都只降级为 unpriced intent
-    并记录 error——绝不因为价格解析失败让购买意图消失，否则 LOOT gate
-    会放行免费发放。fail closed：可以不收费，但不能免费交货。
-    """
-    currency_spec = rule.currency_spec if rule else legacy_currency_spec("")
-    offers: list[dict[str, Any]] = []
-    unpriced: list[dict[str, Any]] = []
-    errors: list[str] = []
-    seen_unpriced: set[tuple[str, str, int]] = set()
-
-    def downgrade_to_unpriced(index: int, reason: str) -> None:
-        errors.append(f"economy_actions[{index}] {reason}；已降级为 unpriced purchase intent")
-        append_unpriced_purchase_intent(
-            unpriced, seen_unpriced,
-            uid=uid, target=target, quantity=quantity,
-        )
-
-    for index, raw in enumerate(raw_actions[:8]):
-        if not isinstance(raw, dict):
-            errors.append(f"economy_actions[{index}] 不是 object")
-            continue
-        if str(raw.get("type") or "") != "purchase":
-            errors.append(f"economy_actions[{index}] type 仅支持 purchase")
-            continue
-        uid = _match_player(instance, raw.get("player"))
-        if not uid:
-            errors.append(f"economy_actions[{index}] player 不存在")
-            continue
-        target = str(raw.get("target") or "").strip()[:120]
-        if not target:
-            errors.append(f"economy_actions[{index}] target 为空")
-            continue
-        quantity = 1
-        if raw.get("quantity") is not None:
-            try:
-                quantity = int(raw.get("quantity") or 1)
-            except (TypeError, ValueError):
-                errors.append(f"economy_actions[{index}] quantity 无效")
-                continue
-        if not 1 <= quantity <= 8:
-            errors.append(f"economy_actions[{index}] quantity 超出范围")
-            continue
-        # —— 以上通过后购买意图已可靠成立；以下失败只降级，不丢弃 ——
-
-        price_source = str(raw.get("price_source") or "").strip()
-        if price_source != "none" and raw.get("amount") is None:
-            # 有目标但没有金额：与 price_source=none 同样处理为无价意图。
-            price_source = "none"
-        if price_source == "none":
-            append_unpriced_purchase_intent(
-                unpriced, seen_unpriced,
-                uid=uid, target=target, quantity=quantity,
-            )
-            continue
-        amount_scope = str(raw.get("amount_scope") or "total").strip()
-        if amount_scope not in {"unit", "total"}:
-            downgrade_to_unpriced(index, f"amount_scope={amount_scope!r} 无效")
-            continue
-        if price_source not in {"player_stated", "gm_narrated"}:
-            downgrade_to_unpriced(index, f"price_source={price_source!r} 无效")
-            continue
-        unit_input = str(raw.get("unit") or "").strip()
-        # 单位缺省时按展示单位理解（legacy 单单位规则两者一致）。
-        unit = currency_spec.unit(unit_input) if unit_input else currency_spec.display
-        if unit is None:
-            downgrade_to_unpriced(
-                index, f"unit={unit_input!r} 不在当前规则货币单位中",
-            )
-            continue
-        try:
-            amount = parse_currency_amount(raw.get("amount"), unit.id, currency_spec)
-        except CurrencySystemError as exc:
-            downgrade_to_unpriced(index, str(exc))
-            continue
-        if amount > MAX_ECONOMY_AMOUNT:
-            downgrade_to_unpriced(index, "amount 超出范围")
-            continue
-        total_amount = amount * quantity if amount_scope == "unit" else amount
-        if not 0 < total_amount <= MAX_ECONOMY_AMOUNT:
-            downgrade_to_unpriced(index, "total amount 超出范围")
-            continue
-        offers.append({
-            "payer_uid": uid,
-            # Downstream proposal settlement always receives the total charge.
-            "amount": total_amount,
-            "quantity": quantity,
-            "amount_scope": amount_scope,
-            "target": target,
-            "note": str(raw.get("note") or "").strip()[:160],
-        })
-    return offers, unpriced, errors
-
+from src.commands.economy_planner import (
+    append_unpriced_purchase_intent,
+    normalize_economy_actions,
+    _recover_purchase_intents_from_player_actions,
+)
 
 async def plan_round_checks(
     instance: GameInstance,
@@ -1165,7 +700,15 @@ async def plan_round_checks(
     llm_client: Any,
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, Any]]:
     """执行阶段 1；返回已校验的 (action, CheckRequest) 及调用元数据。"""
-    if rule and str(rule.dice_system).lower() == "none":
+    # Narrative/no-dice rules still need economy planning when a player is
+    # trying to buy something.  Keep the cheap no-model path for ordinary
+    # narration, but do not let ``dice_system=none`` disable the independent
+    # purchase protocol.
+    if (
+        rule
+        and str(rule.dice_system).lower() == "none"
+        and not _has_possible_purchase_action(instance)
+    ):
         return [], {
             "available": True,
             "native_tools": False,
@@ -1174,8 +717,20 @@ async def plan_round_checks(
             "errors": [],
             "skipped": "no_dice_rule",
         }
-    if not instance.action_queue or not llm_client or not hasattr(llm_client, "call_tools"):
+    if not instance.action_queue:
         return [], {"available": False, "errors": ["tool_call_unavailable"]}
+    if not llm_client or not hasattr(llm_client, "call_tools"):
+        recovered_offers: list[dict[str, Any]] = []
+        recovered_unpriced: list[dict[str, Any]] = []
+        _recover_purchase_intents_from_player_actions(
+            instance, rule, recovered_offers, recovered_unpriced,
+        )
+        return [], {
+            "available": False,
+            "errors": ["tool_call_unavailable"],
+            "economy_offers": recovered_offers,
+            "unpriced_purchase_intents": recovered_unpriced,
+        }
     response = await llm_client.call_tools(
         _prompt_text(instance.language),
         _planner_context(instance, rule),
@@ -1276,11 +831,77 @@ async def plan_round_checks(
     economy_offers, economy_intents_unpriced, economy_errors = normalize_economy_actions(
         instance, raw_economy_actions, rule,
     )
+    repair_tokens = 0
+    repair_calls = 0
+    repair_native_tools = False
+    # A model may correctly narrate/check the round but omit the optional
+    # economy field.  Give only likely purchase rounds one narrow second pass;
+    # this improves recall without making the server invent a price.  The
+    # second pass is still normalized by the same fail-closed validator.
+    if _has_possible_purchase_action(instance) and not economy_offers:
+        try:
+            repair_response = await llm_client.call_tools(
+                _economy_repair_prompt(instance.language),
+                _economy_repair_context(instance, rule),
+                tools=[DICE_CHECKS_TOOL],
+                max_tokens=2048,
+                temperature=0.0,
+            )
+            repair_calls = 1
+            repair_tokens = int(getattr(repair_response, "total_tokens", 0) or 0)
+            repair_native_tools = bool(getattr(repair_response, "native_tools", False))
+            repair_actions: list[Any] = []
+            for call in getattr(repair_response, "tool_calls", []) or []:
+                if str(call.get("name") or "") != DICE_CHECKS_TOOL_NAME:
+                    continue
+                arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+                candidate_actions = arguments.get("economy_actions")
+                if isinstance(candidate_actions, list):
+                    repair_actions.extend(candidate_actions)
+            if repair_actions:
+                raw_economy_actions.extend(repair_actions)
+                economy_offers, economy_intents_unpriced, repaired_errors = normalize_economy_actions(
+                    instance, raw_economy_actions, rule,
+                )
+                economy_errors.extend(repaired_errors)
+        except Exception as exc:
+            # Quote repair is a recall enhancement; a provider failure must
+            # never block ordinary check planning or narrative progression.
+            economy_errors.append(f"economy repair pass unavailable: {type(exc).__name__}")
+            logger.warning(
+                "经济报价补扫失败，保留首轮规划: game=%s round=%d",
+                instance.game_key, progression_state.round_value(instance), exc_info=True,
+            )
+    # The model passes are recall aids, not the authority.  A player action is
+    # still a trusted source for a purchase intent: recover an explicit quote
+    # or at least record an unpriced blocker so a missed model field can never
+    # become a silent free delivery.
+    _recover_purchase_intents_from_player_actions(
+        instance, rule, economy_offers, economy_intents_unpriced,
+    )
+    priced_keys = {
+        (
+            str(offer.get("payer_uid") or ""),
+            str(offer.get("target") or "").casefold(),
+            int(offer.get("quantity", 1) or 1),
+        )
+        for offer in economy_offers
+    }
+    economy_intents_unpriced[:] = [
+        intent for intent in economy_intents_unpriced
+        if (
+            str(intent.get("payer_uid") or ""),
+            str(intent.get("target") or "").casefold(),
+            int(intent.get("quantity", 1) or 1),
+        ) not in priced_keys
+    ]
+    total_tokens = int(getattr(response, "total_tokens", 0) or 0) + repair_tokens
     return planned, {
         "available": True,
-        "native_tools": response.native_tools,
+        "native_tools": bool(getattr(response, "native_tools", False)) or repair_native_tools,
         "provider": response.provider_used,
-        "total_tokens": response.total_tokens,
+        "total_tokens": total_tokens,
+        "calls": 1 + repair_calls,
         "errors": errors + economy_errors,
         "overreach": overreach_notes,
         # 结构化世界要求（模型提议）：由 server 侧 world_legality 与权威世界真相

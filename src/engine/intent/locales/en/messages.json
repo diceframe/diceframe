@@ -1,0 +1,7 @@
+{
+  "unbacked_payment_notice": "No payment was charged: the GM must issue an explicit payment order.",
+  "unbacked_purchase_notice": "The item was not granted because its payment is not confirmed yet.",
+  "unpriced_purchase_notice": "No purchase order was created: the price needs an explicit, settleable currency. No payment was charged and no item was granted.",
+  "pending_decision_notice": "Settlement pending: dependent results are not effective yet.",
+  "economy_repair_prompt": "Economy repair pass. Re-scan only the supplied player actions and recent GM narration for explicit purchase intents. Return one dice_checks tool call with checks=[] and economy_actions containing only purchases clearly requested by a player. If a price and currency were explicitly stated, report them exactly; if the purchase is clear but the price is absent or the currency cannot be represented, emit an unpriced intent with price_source=none and omit amount/unit. Never infer a price, quantity, unit, budget, or target. If there is no clear purchase, return an empty economy_actions array."
+}

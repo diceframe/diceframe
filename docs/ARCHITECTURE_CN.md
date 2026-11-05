@@ -6017,6 +6017,28 @@ narrative description of that mechanics result
 
 这说明 economy 和 inventory 的架构已经是联动 transaction boundary，而不是两个彼此独立的 tag parser。
 
+## 53.1 购买意图的语言资源边界
+
+购买相关自然语言识别不是经济 authority。`src/engine/intent/locales/<locale>/intents.json` 只把语言表达映射到稳定 intent ID；当前资源契约包括 `purchase_intent`、`purchase_decline`、`purchase_offer`、`free_purchase`、`deferred_payment`、`currency_labels`，以及目标清理、数量和余额语义所需的 `purchase_target_prefix`、`purchase_target_connector`、`purchase_target_suffix`、`purchase_quantity_classifier`、`purchase_generic_target`、`purchase_quantity_word`、`purchase_balance`。同目录的 `messages.json` 承载经济边界提示和补扫提示，业务代码不再维护每种语言的提示词副本。
+
+新增语言的正常路径是：
+
+```text
+新增 locale intent 资源（UTF-8）
+↓
+locale → English → 简体中文回退
+↓
+intent contract tests
+↓
+通用 parser
+↓
+同一套 canonical economy normalization / transaction settlement
+```
+
+语言资源不得修改 canonical 币种、金额换算、预算、权限、提案状态或物品发放规则；翻译后的名称也不得成为持久化 identity。缺失或不完整的语言资源只能降低识别召回，不能让服务端猜价格或发放免费物品。新增语言不应修改经济引擎；若新语义无法由资源表达，应先增加稳定 intent ID 或资源字段并更新资源契约测试。
+
+报价意图还必须携带可追溯的 `evidence`（玩家行动或 GM 叙事中的原文短片段）。服务端只接受能够在存档可信文本中找到的证据；证据缺失或不匹配时，报价降级为无价意图。自然语言理解可以由模型完成，关键词资源只属于兼容回退，不是创建订单的权威来源。
+
 ---
 
 # 54. 一条历史 Swipe 的实际边界
