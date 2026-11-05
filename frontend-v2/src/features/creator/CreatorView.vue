@@ -3,32 +3,54 @@ import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import { useLocale } from '@/composables/useLocale'
-import { creatorCopy, type CreatorCardId } from './copy'
+import { creatorCopy, type CreatorCardId, type CreatorPackageExportMode } from './copy'
 import ContentTextReviewDialog from '@/features/content-review/ContentTextReviewDialog.vue'
 import CreatorPackageExportDialog from './CreatorPackageExportDialog.vue'
 
 const { locale } = useLocale()
 const copy = computed(() => creatorCopy(locale.value))
 
-const storyCards: CreatorCardId[] = ['adventures']
-const foundationCards: CreatorCardId[] = ['worlds', 'lorebook', 'rules']
-const sourceCards: CreatorCardId[] = ['modules']
-const toolCards: CreatorCardId[] = ['textReview']
+type CreatorGroup = 'story' | 'foundation' | 'source' | 'tools' | 'packaging'
+const groups: Array<{ id: CreatorGroup; cards: CreatorCardId[] }> = [
+  { id: 'story', cards: ['adventures'] },
+  { id: 'foundation', cards: ['worlds', 'lorebook', 'rules'] },
+  { id: 'source', cards: ['modules'] },
+  { id: 'tools', cards: ['textReview'] },
+  { id: 'packaging', cards: ['exportAdventureModule', 'exportResourcePack', 'exportAdventureBundle'] },
+]
 const textReviewOpen = ref(false)
-const packageExportOpen = ref(false)
-const packageCards: CreatorCardId[] = ['package']
+const packageExportMode = ref<CreatorPackageExportMode | null>(null)
 
-const routeFor: Record<CreatorCardId, string> = {
+// Cards with a route are links; the rest open a dialog in place.
+// A single adventure is exported from its row in the adventure list, so
+// that card links there instead of duplicating the export action.
+const routeFor: Partial<Record<CreatorCardId, string>> = {
   adventures: 'adventures',
   worlds: 'worlds',
   lorebook: 'lorebook',
   rules: 'rules',
   modules: 'modules',
-  textReview: '', package: '',
+  exportAdventureBundle: 'adventures',
+}
+const exportModeFor: Partial<Record<CreatorCardId, CreatorPackageExportMode>> = {
+  exportAdventureModule: 'adventure',
+  exportResourcePack: 'resource',
 }
 
 const cardIndex: Record<CreatorCardId, string> = {
-  adventures: '01', worlds: '02', lorebook: '03', rules: '04', modules: '05', textReview: '06', package: '07',
+  adventures: '01', worlds: '02', lorebook: '03', rules: '04', modules: '05', textReview: '06',
+  exportAdventureModule: '07', exportResourcePack: '08', exportAdventureBundle: '09',
+}
+
+function groupTitle(group: CreatorGroup): string {
+  const value = copy.value
+  return { story: value.storyGroup, foundation: value.foundationGroup, source: value.sourceGroup, tools: value.toolGroup, packaging: value.packagingGroup }[group]
+}
+
+function openCard(id: CreatorCardId) {
+  if (id === 'textReview') textReviewOpen.value = true
+  const mode = exportModeFor[id]
+  if (mode) packageExportMode.value = mode
 }
 </script>
 
@@ -36,20 +58,19 @@ const cardIndex: Record<CreatorCardId, string> = {
   <section class="view creator-workshop" data-testid="creator-workshop">
     <ContentPageHeader kicker="CREATOR STUDIO" :title="copy.title" :description="copy.intro" />
 
-    <section v-for="(ids, group) in { story: storyCards, foundation: foundationCards, source: sourceCards, tools: toolCards, packaging: packageCards }" :key="group" class="creator-group">
+    <section v-for="group in groups" :key="group.id" class="creator-group">
       <header class="creator-group-heading">
-        <h2>{{ group === 'story' ? copy.storyGroup : group === 'foundation' ? copy.foundationGroup : group === 'source' ? copy.sourceGroup : group === 'tools' ? copy.toolGroup : copy.cards.package.title }}</h2>
+        <h2>{{ groupTitle(group.id) }}</h2>
       </header>
       <div class="creator-card-grid">
         <component
-          v-for="id in ids"
+          v-for="id in group.cards"
           :key="id"
-          :is="id === 'textReview' || id === 'package' ? 'button' : RouterLink"
+          :is="routeFor[id] ? RouterLink : 'button'"
           class="creator-card"
           :data-testid="`creator-card-${id}`"
-          v-bind="id === 'textReview' || id === 'package' ? {} : { to: { name: routeFor[id] } }"
-          type="button"
-          @click="id === 'textReview' ? (textReviewOpen = true) : id === 'package' ? (packageExportOpen = true) : undefined"
+          v-bind="routeFor[id] ? { to: { name: routeFor[id] } } : { type: 'button' }"
+          @click="routeFor[id] ? undefined : openCard(id)"
         >
           <span class="creator-card-index" aria-hidden="true">{{ cardIndex[id] }}</span>
           <span class="creator-card-copy">
@@ -61,7 +82,7 @@ const cardIndex: Record<CreatorCardId, string> = {
       </div>
     </section>
     <ContentTextReviewDialog v-if="textReviewOpen" @close="textReviewOpen = false" />
-    <CreatorPackageExportDialog v-if="packageExportOpen" @close="packageExportOpen = false" />
+    <CreatorPackageExportDialog v-if="packageExportMode" :mode="packageExportMode" @close="packageExportMode = null" />
   </section>
 </template>
 
