@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -43,6 +44,10 @@ from src.rulesets.builtin import (  # noqa: E402
     build_default_ruleset_registry,
     default_module_runtime_requirement,
 )
+
+# 内容语言标注：BCP-47 宽松校验（与导出侧 normalize_supported_locales 同一规则）。
+_LOCALE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+MAX_SUPPORTED_LOCALES = 12
 
 
 def _validation_dependencies() -> Any:
@@ -121,6 +126,39 @@ def _check_cover(plugin_dir: Path, manifest: dict[str, Any], report: dict[str, A
         report["warnings"].append(f"cover is {width}x{height}; 16:9 (e.g. 1280x720) fits the cards best")
 
 
+def _check_supported_locales(manifest: dict[str, Any], report: dict[str, Any]) -> None:
+    """内容语言是商店的筛选维度：声明了就要合法，没声明只提醒。
+
+    旧包没有这个字段也必须能装、能过校验——语言标注是为了被找到，
+    不是为了拦人。所以缺失/为空只给 warning，写错了才报 error。
+    """
+
+    raw = manifest.get("supported_locales")
+    if raw is None:
+        report["warnings"].append(
+            "no supported_locales declared; the store cannot show or filter this pack by language"
+        )
+        return
+    if not isinstance(raw, list):
+        report["ok"] = False
+        report["errors"].append("supported_locales must be a list of BCP-47 tags")
+        return
+    if not raw:
+        report["warnings"].append("supported_locales is empty; declare at least the pack's own language")
+        return
+    invalid = [str(item) for item in raw if not _LOCALE_TAG.match(str(item or "").strip().replace("_", "-").lower())]
+    if invalid:
+        report["ok"] = False
+        report["errors"].append(
+            "supported_locales has invalid tags: " + ", ".join(sorted(set(invalid)))
+        )
+        return
+    if len(raw) > MAX_SUPPORTED_LOCALES:
+        report["warnings"].append(
+            f"supported_locales lists {len(raw)} tags; keep it under {MAX_SUPPORTED_LOCALES}"
+        )
+
+
 def validate_module(plugin_dir: Path) -> dict[str, Any]:
     """Run every module-level validation; return a structured report."""
 
@@ -160,6 +198,7 @@ def validate_module(plugin_dir: Path) -> dict[str, Any]:
         return report
 
     _check_cover(plugin_dir, dict(runtime.manifest), report)
+    _check_supported_locales(dict(runtime.manifest), report)
 
     # 2/3) 深度校验走与安装/预览**完全同一套** rules（FIX-01 §3.3），
     #      不再在这里维护第二份 Adventure / catalog 校验逻辑。

@@ -5,6 +5,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -25,6 +26,37 @@ _COVER_MAGIC = {
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
 }
+
+# 内容语言 ≠ 引擎可运行语言：引擎只有 zh-CN/en/ja/de/ru 的语义支持，
+# 但内容可以用任何语言写。这里按 BCP-47 宽松校验，只用来给商店标注与筛选。
+_LOCALE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+MAX_SUPPORTED_LOCALES = 12
+
+
+def normalize_supported_locales(values: Any, default_locale: str = "") -> list[str]:
+    """把作者勾选/API 传入的语言整理成稳定的 BCP-47 标签列表。
+
+    非法项直接丢弃（而不是整包失败）：语言标注是给商店用的元数据，不该
+    拦住一个内容正确的包。全都非法或没传时回落到包自身的默认语言。
+    """
+    raw: list[Any] = []
+    if isinstance(values, (list, tuple, set)):
+        raw = list(values)
+    elif isinstance(values, str) and values.strip():
+        raw = [item for item in values.split(",") if item.strip()]
+    result: list[str] = []
+    for item in raw:
+        text = str(item or "").strip().replace("_", "-").lower()
+        if not text or not _LOCALE_TAG.match(text):
+            continue
+        parts = text.split("-")
+        canonical = "-".join([parts[0], *[part.upper() if len(part) == 2 else part for part in parts[1:]]])
+        if canonical not in result:
+            result.append(canonical)
+    if not result:
+        fallback = str(default_locale or "").strip().replace("_", "-") or "zh-CN"
+        result = [fallback]
+    return result[:MAX_SUPPORTED_LOCALES]
 
 @dataclass(frozen=True)
 class PluginExportMediaDependencies:
@@ -118,6 +150,7 @@ def export_content_pack(
     adventure_refs: list[dict[str, str]] | None = None,
     cover_data: str = "",
     cover_filename: str = "",
+    supported_locales: list[str] | None = None,
 ) -> dict[str, Any]:
     """把应用内的世界/角色卡/规则导出成一个内容包 .dfplugin。
 
@@ -387,6 +420,7 @@ def export_content_pack(
         default_locale=pack_locale,
         has_adventures=has_adventures,
         has_lorebooks=has_lorebooks,
+        supported_locales=supported_locales,
         adventure_directories=(
             sorted({path.split("/")[1] for path in files if path.startswith("adventures/") and len(path.split("/")) > 2})
             if has_adventures else []
@@ -424,6 +458,7 @@ def build_content_pack_manifest(
     has_adventures: bool = False,
     has_lorebooks: bool = False,
     adventure_directories: list[str] | None = None,
+    supported_locales: list[str] | None = None,
 ) -> dict[str, Any]:
     contributes: dict[str, list[str]] = {}
     if has_world:
@@ -466,6 +501,8 @@ def build_content_pack_manifest(
         "content_schema_version": 2,
         "locale_schema_version": 1,
         "default_locale": normalize_language(default_locale or "zh-CN"),
+        # 商店按这个字段标注与筛选内容语言；缺省等同于包内默认语言。
+        "supported_locales": normalize_supported_locales(supported_locales, default_locale),
         "id": plugin_id,
         "name": name,
         "version": version,

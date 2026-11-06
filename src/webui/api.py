@@ -1645,6 +1645,7 @@ class WebAPI:
         adventure_refs: list[dict[str, str]] | None = None,
         cover_data: str = "",
         cover_filename: str = "",
+        supported_locales: list[str] | None = None,
     ) -> dict[str, Any]:
         return plugins.export_content_pack(
             self._plugin_export_dependencies,
@@ -1653,6 +1654,7 @@ class WebAPI:
             include_map, map_background, map_icons, language,
             adventure_ids, lorebook_ids, adventure_refs,
             cover_data=cover_data, cover_filename=cover_filename,
+            supported_locales=supported_locales,
         )
 
     def package_content_map(
