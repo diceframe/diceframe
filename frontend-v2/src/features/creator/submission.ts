@@ -8,8 +8,8 @@ const SUBMISSION_TEMPLATE = 'add-plugin.yml'
 /**
  * 投稿页 URL：预填标题和插件 ID，仓库地址可选（作者建好仓库后再填）。
  *
- * 只走 `add-plugin.yml`（作者自建仓库）。托管表单 `add-content-pack.yml` 已经废弃：
- * 官方不代为托管内容包，风险必须留在作者那边。
+ * 之前指向的 `add-content-pack.yml` 在索引仓库里从未存在，标题前缀
+ * `[Content Pack]` 也不被机器人识别，点进去只有 404 和一个永远不会被处理的 issue。
  */
 export function contentPackSubmissionUrl(pluginId = '', repositoryUrl = ''): string {
   const query = new URLSearchParams({ template: SUBMISSION_TEMPLATE })

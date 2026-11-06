@@ -10,6 +10,7 @@ import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
 import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl } from './submission'
+import SubmissionWizard from './SubmissionWizard.vue'
 
 type Book = { id: string; name?: string; entry_count?: number }
 // `package` is the installable .dfplugin; `source` is the flat zip an author
@@ -56,7 +57,6 @@ const copy = computed(() => ({
   needIdName: t('creatorExportNeedIdName'), idInvalid: t('creatorExportIdInvalid'),
   resourceRequired: t('creatorExportResourceRequired'), adventureRequired: t('creatorExportAdventureRequired'),
   entries: t('creatorExportEntries'),
-  repoUrl: t('creatorExportRepoUrl'),
   media: t('creatorExportMedia'), mediaIntro: t('creatorExportMediaIntro'),
   portraits: t('includeContentPackPortraits'), portraitsHint: t('includeContentPackPortraitsHint'),
   sceneImages: t('includeContentPackSceneImages'), sceneImagesHint: t('includeContentPackSceneImagesHint'),
@@ -229,13 +229,11 @@ const exportedFile = computed(() => {
   return pack.source ? `${pack.id}-${pack.version}-src.zip` : `${pack.id}-${pack.version}.dfplugin`
 })
 
-// 作者建好仓库后把地址贴进来，投稿页就能把仓库字段一起预填。
-const repositoryUrl = ref('')
-const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id, repositoryUrl.value) : '')
+const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
 
 function submitToHub() {
   if (!exported.value) return
-  // 文件在导出那一步已经下过；索引仓库没有"上传包"的表单，这里不再多下一个 zip。
+  saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
   window.open(submissionUrl.value, '_blank', 'noopener')
 }
 
@@ -294,10 +292,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.sourceTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.sourceSteps" :key="step">{{ step }}</li></ol>
-        <label class="creator-package-repo-url"><span>{{ copy.repoUrl }}</span><input v-model="repositoryUrl" data-testid="creator-export-source-repository-url" placeholder="https://github.com/you/your-pack"></label>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-register-repository" @click="submitToHub">{{ copy.sourceRegister }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" class="primary" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="exported">
       <section class="creator-package-section" data-testid="creator-export-done">
@@ -306,10 +303,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.submitTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.submitSteps" :key="step">{{ step }}</li></ol>
-        <label class="creator-package-repo-url"><span>{{ copy.repoUrl }}</span><input v-model="repositoryUrl" data-testid="creator-export-repository-url" placeholder="https://github.com/you/your-pack"></label>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-submit-to-hub" @click="submitToHub">{{ copy.submit }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="!loading">
       <section class="creator-package-section"><h3>{{ copy.basic }}</h3><div class="creator-package-grid">
@@ -324,13 +320,25 @@ async function exportPack() {
       <section class="creator-package-section"><h3>{{ isAdventureModule ? copy.extras : copy.resources }}</h3><div class="creator-package-grid">
         <label><span>{{ copy.world }}</span><select v-model="selectedWorld"><option value="">—</option><option v-for="item in worlds" :key="worldId(item)" :value="worldId(item)">{{ item.name || item.world_name || item.id }}</option></select></label>
         <label><span>{{ copy.rule }}</span><select v-model="selectedRule"><option value="">—</option><option v-for="item in rules" :key="item.rule_id" :value="item.rule_id">{{ item.rule_name || item.rule_id }}</option></select></label>
-        <fieldset class="wide"><legend>{{ copy.books }}</legend><label v-for="item in books" :key="item.id" class="creator-package-check"><input v-model="selectedBooks" type="checkbox" :value="item.id"><span>{{ item.name || item.id }} <small v-if="item.entry_count !== undefined">{{ item.entry_count }} {{ copy.entries }}</small></span></label><small v-if="!books.length">{{ copy.empty }}</small></fieldset>
-        <fieldset class="wide" data-testid="creator-export-cards"><legend>{{ copy.cards }}</legend><label v-for="item in cardOptions" :key="item.id" class="creator-package-check"><input v-model="selectedCards" type="checkbox" :value="item.id"><span>{{ item.label }}</span></label><small v-if="!cardOptions.length">{{ copy.empty }}</small></fieldset>
+        <details class="wide creator-package-collapsible" data-testid="creator-export-books" open>
+          <summary><span>{{ copy.books }}</span><small>{{ selectedBooks.length }} / {{ books.length }}</small></summary>
+          <div class="creator-package-checklist">
+            <label v-for="item in books" :key="item.id" class="creator-package-check"><input v-model="selectedBooks" type="checkbox" :value="item.id"><span>{{ item.name || item.id }} <small v-if="item.entry_count !== undefined">{{ item.entry_count }} {{ copy.entries }}</small></span></label>
+            <small v-if="!books.length">{{ copy.empty }}</small>
+          </div>
+        </details>
+        <details class="wide creator-package-collapsible" data-testid="creator-export-cards" open>
+          <summary><span>{{ copy.cards }}</span><small>{{ selectedCards.length }} / {{ cardOptions.length }}</small></summary>
+          <div class="creator-package-checklist">
+            <label v-for="item in cardOptions" :key="item.id" class="creator-package-check"><input v-model="selectedCards" type="checkbox" :value="item.id"><span>{{ item.label }}</span></label>
+            <small v-if="!cardOptions.length">{{ copy.empty }}</small>
+          </div>
+        </details>
       </div></section>
       <section class="creator-package-section" data-testid="creator-export-media">
         <h3>{{ copy.media }}</h3>
         <p class="creator-package-hint">{{ copy.mediaIntro }}</p>
-        <div class="creator-package-options">
+        <div class="creator-package-media-grid">
           <div class="creator-package-cover" :class="{ 'has-image': coverPreview }" data-testid="creator-export-cover-block">
             <img v-if="coverPreview" :src="coverPreview" alt="" class="creator-package-cover-image">
             <div class="creator-package-cover-body">
@@ -341,15 +349,17 @@ async function exportPack() {
               </div>
             </div>
           </div>
-          <label class="creator-package-option"><input v-model="includePortraits" type="checkbox" data-testid="creator-export-include-portraits"><span><strong>{{ copy.portraits }}</strong><small>{{ copy.portraitsHint }}</small></span></label>
-          <div class="creator-package-option-group">
+          <div class="creator-package-media-card">
+            <label class="creator-package-option"><input v-model="includePortraits" type="checkbox" data-testid="creator-export-include-portraits"><span><strong>{{ copy.portraits }}</strong><small>{{ copy.portraitsHint }}</small></span></label>
+          </div>
+          <div class="creator-package-media-card">
             <label class="creator-package-option"><input v-model="includeSceneImages" type="checkbox" data-testid="creator-export-include-scene-images"><span><strong>{{ copy.sceneImages }}</strong><small>{{ copy.sceneImagesHint }}</small></span></label>
             <div v-if="includeSceneImages && (selectedWorld || selectedRule)" class="creator-package-files">
               <label v-if="selectedWorld" class="creator-package-file"><span>{{ copy.worldCover }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-world-cover" @change="worldCover = pickFile($event)"><small>{{ worldCover?.name || copy.worldCoverHint }}</small></label>
               <label v-if="selectedRule" class="creator-package-file"><span>{{ copy.ruleCover }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-rule-cover" @change="ruleCover = pickFile($event)"><small>{{ ruleCover?.name || copy.ruleCoverHint }}</small></label>
             </div>
           </div>
-          <div class="creator-package-option-group">
+          <div class="creator-package-media-card">
             <label class="creator-package-option" :class="{ disabled: !selectedWorld }"><input v-model="includeMap" type="checkbox" :disabled="!selectedWorld" data-testid="creator-export-include-map"><span><strong>{{ copy.map }}</strong><small>{{ selectedWorld ? copy.mapHint : copy.mapNeedsWorld }}</small></span></label>
             <div v-if="includeMap && selectedWorld" class="creator-package-files">
               <label class="creator-package-file"><span>{{ copy.mapBackground }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-map-background" @change="mapBackground = pickFile($event)"><small>{{ mapBackground?.name || copy.mapBackgroundHint }}</small></label>
@@ -392,12 +402,27 @@ async function exportPack() {
 </template>
 
 <style scoped>
-.creator-package-intro{margin:0;color:var(--df-text-secondary);line-height:1.5}.creator-package-section{display:grid;gap:.8rem;padding:.9rem 0;border-bottom:1px solid var(--df-border-soft)}.creator-package-section h3{margin:0;color:var(--df-accent-strong);font-size:.95rem}.creator-package-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.creator-package-grid label,.creator-package-grid fieldset{display:grid;gap:.35rem;min-width:0}.creator-package-grid .wide{grid-column:1/-1}.creator-package-grid input,.creator-package-grid select,.creator-package-grid textarea{box-sizing:border-box;width:100%;min-width:0;padding:.55rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}fieldset{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.65rem}.creator-package-check{display:flex!important;align-items:center;gap:.45rem}.creator-package-check input{width:auto}.creator-package-check small{color:var(--df-text-muted)}.creator-package-actions{display:flex;justify-content:flex-end;gap:.6rem;padding-top:1rem}.creator-package-repo-url{display:grid;gap:.35rem;margin-top:.6rem;min-width:0;font-size:.85rem}.creator-package-repo-url input{box-sizing:border-box;width:100%;min-width:0;padding:.5rem .6rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}
+.creator-package-intro{margin:0;color:var(--df-text-secondary);line-height:1.5}.creator-package-section{display:grid;gap:.8rem;padding:.9rem 0;border-bottom:1px solid var(--df-border-soft)}.creator-package-section h3{margin:0;color:var(--df-accent-strong);font-size:.95rem}.creator-package-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.creator-package-grid label,.creator-package-grid fieldset{display:grid;gap:.35rem;min-width:0}.creator-package-grid .wide{grid-column:1/-1}.creator-package-grid input,.creator-package-grid select,.creator-package-grid textarea{box-sizing:border-box;width:100%;min-width:0;padding:.55rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}fieldset{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.65rem}.creator-package-check{display:flex!important;align-items:center;gap:.45rem}.creator-package-check input{width:auto}.creator-package-check small{color:var(--df-text-muted)}.creator-package-actions{display:flex;justify-content:flex-end;gap:.6rem;padding-top:1rem}
 .creator-package-hint{margin:0;color:var(--df-text-muted);font-size:.85rem;line-height:1.5}
 .creator-package-options{display:grid;gap:.6rem}.creator-package-options.is-split{grid-template-columns:repeat(2,minmax(0,1fr))}
 .creator-package-option-group{display:grid;gap:.5rem}
 .creator-package-option{display:flex;align-items:flex-start;gap:.55rem;min-width:0;margin:0;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent);cursor:pointer}.creator-package-option input{flex:0 0 auto;margin:.2rem 0 0}.creator-package-option span{display:grid;gap:.2rem;min-width:0}.creator-package-option strong{font-size:.9rem}.creator-package-option small{color:var(--df-text-muted);line-height:1.45}.creator-package-option.disabled{opacity:.6;cursor:default}
 .creator-package-files{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;padding-left:1.6rem}
+/* 媒体区：封面整行，其余三项各占一格，文件选择器放进卡片内部，
+   不再用缩进表示从属关系。 */
+.creator-package-media-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:.6rem}
+.creator-package-media-card{display:grid;gap:.5rem;align-content:start;min-width:0;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
+.creator-package-media-card .creator-package-option{padding:0;border:0;background:none}
+.creator-package-media-card .creator-package-files{padding-left:1.6rem;grid-template-columns:repeat(2,minmax(0,1fr))}
+.creator-package-cover{grid-column:1/-1}
+/* 资料册 / 角色卡：默认可折叠，summary 上直接给已选数量。 */
+.creator-package-collapsible{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.55rem .7rem}
+.creator-package-collapsible>summary{display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem;list-style:none}
+.creator-package-collapsible>summary::-webkit-details-marker{display:none}
+.creator-package-collapsible>summary::after{content:'▾';margin-left:auto;color:var(--df-text-muted);transition:transform .15s ease}
+.creator-package-collapsible:not([open])>summary::after{transform:rotate(-90deg)}
+.creator-package-collapsible>summary small{color:var(--df-text-muted);font-size:.78rem;font-weight:400}
+.creator-package-checklist{display:grid;gap:.3rem;margin-top:.55rem;max-height:14rem;overflow:auto}
 .creator-package-cover{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem;align-items:start;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
 .creator-package-cover.has-image{grid-template-columns:10rem minmax(0,1fr)}
 .creator-package-cover-image{width:100%;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm)}
@@ -413,5 +438,5 @@ async function exportPack() {
 .creator-package-contents li span{flex:0 0 auto;min-width:4.5rem;color:var(--df-text-muted)}
 .creator-package-contents li strong{min-width:0;overflow-wrap:anywhere;font-weight:600}
 .creator-package-warnings{display:grid;gap:.35rem;margin:0;padding-left:1.1rem;color:var(--df-warning)}.creator-package-ready{margin:0;color:var(--df-text-secondary)}.creator-package-privacy{margin:0;color:var(--df-text-muted);font-size:.85rem}
-@media(max-width:620px){.creator-package-grid,.creator-package-preview,.creator-package-options.is-split,.creator-package-files{grid-template-columns:1fr}.creator-package-files{padding-left:0}}
+@media(max-width:620px){.creator-package-grid,.creator-package-preview,.creator-package-options.is-split,.creator-package-files,.creator-package-media-grid{grid-template-columns:1fr}.creator-package-files{padding-left:0}.creator-package-collapsible>summary small{margin-left:0}}
 </style>
