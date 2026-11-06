@@ -21,6 +21,9 @@ function respond(path: string) {
   if (path.startsWith('/adventures')) return { ok: true, adventures: [fixedAdventure] }
   if (path.startsWith('/lorebooks')) return { books: [{ id: 'handbook', name: '员工手册', entry_count: 3 }] }
   if (path.startsWith('/rules')) return { rules: [{ rule_id: 'office-rules', rule_name: '加班规则' }] }
+  if (path === '/character-cards') return { cards: [{ id: 'card-mira', character_name: '米拉' }, { card_id: 'no-id', character_name: '没有 id' }] }
+  if (path === '/scene-images') return { ok: true, scene_image: { kind: 'upload', id: 'cover-1' } }
+  if (path === '/map-backgrounds') return { ok: true, map_background: { kind: 'upload', id: 'bg-1' } }
   throw new Error(`unexpected ${path}`)
 }
 
@@ -30,6 +33,16 @@ async function render(mode: CreatorPackageExportMode) {
   await wrapper.get('input[placeholder]').setValue(mode === 'adventure' ? 'night-module' : 'office-resources')
   await wrapper.findAll('.creator-package-grid input')[1].setValue('测试包')
   return wrapper
+}
+
+async function chooseFiles(wrapper: Awaited<ReturnType<typeof render>>, testId: string, files: File[]) {
+  const input = wrapper.get(`[data-testid="${testId}"]`)
+  Object.defineProperty(input.element, 'files', { value: files, configurable: true })
+  await input.trigger('change')
+}
+
+function image(name: string): File {
+  return new File(['img'], name, { type: 'image/png' })
 }
 
 function exportBody(): Record<string, unknown> {
@@ -59,13 +72,17 @@ describe('CreatorPackageExportDialog', () => {
     expect(wrapper.find('[data-testid="creator-export-adventures"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
-    expect(wrapper.text()).toContain('至少选择一个世界、规则或资料册。')
+    expect(wrapper.text()).toContain('至少选择一个世界、规则、资料册或角色卡。')
     expect(mocks.apiBlob).not.toHaveBeenCalled()
 
     await wrapper.get('select').setValue('office')
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
-    expect(exportBody()).toMatchObject({ world_id: 'office', adventure_refs: [] })
+    // Image switches are sent explicitly with the backend's defaults.
+    expect(exportBody()).toMatchObject({
+      world_id: 'office', adventure_refs: [], card_ids: [], flat: false,
+      include_portraits: true, include_scene_images: true, include_map: true, map_icons: [],
+    })
     expect(downloads).toEqual(['office-resources-0.1.0.dfplugin'])
     expect(wrapper.get('[data-testid="creator-export-done"]').text()).toContain('已下载 office-resources-0.1.0.dfplugin')
     expect(wrapper.emitted('close')).toBeUndefined()
@@ -92,6 +109,96 @@ describe('CreatorPackageExportDialog', () => {
     expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
     expect(Object.fromEntries(url.searchParams)).toEqual({
       template: 'add-content-pack.yml', title: '[Content Pack] office-resources', plugin_id: 'office-resources',
+    })
+  })
+
+  it('exports character cards on their own and sends the image switches the author turned off', async () => {
+    const wrapper = await render('resource')
+    const cardChecks = wrapper.findAll('[data-testid="creator-export-cards"] input[type="checkbox"]')
+    // A card without `id` cannot be matched by the backend, so it is not offered.
+    expect(cardChecks).toHaveLength(1)
+    expect(wrapper.get('[data-testid="creator-export-cards"]').text()).toContain('米拉')
+    await cardChecks[0].setValue(true)
+
+    // Without a world there is no map to package.
+    expect(wrapper.get('[data-testid="creator-export-include-map"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="creator-export-media"]').text()).toContain('先选择一个世界')
+    await wrapper.get('[data-testid="creator-export-include-portraits"]').setValue(false)
+    await wrapper.get('[data-testid="creator-export-include-scene-images"]').setValue(false)
+
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await flushPromises()
+    expect(exportBody()).toMatchObject({
+      card_ids: ['card-mira'], world_id: '', include_portraits: false, include_scene_images: false, include_map: false,
+    })
+    expect(mocks.api.mock.calls.some(([path]) => path === '/scene-images' || path === '/map-backgrounds')).toBe(false)
+  })
+
+  it('uploads replacement covers and map images only for what will be packaged', async () => {
+    const wrapper = await render('resource')
+    expect(wrapper.find('[data-testid="creator-export-world-cover"]').exists()).toBe(false)
+    const [worldSelect, ruleSelect] = wrapper.findAll('select')
+    await worldSelect.setValue('office')
+    await ruleSelect.setValue('office-rules')
+    await chooseFiles(wrapper, 'creator-export-world-cover', [image('office.png')])
+    await chooseFiles(wrapper, 'creator-export-map-background', [image('floor.png')])
+    await chooseFiles(wrapper, 'creator-export-map-icons', [image('pantry.png'), image('server-room.png')])
+    expect(wrapper.get('[data-testid="creator-export-media"]').text()).toContain('已选择 2 个图标')
+
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    // Map icons are read with FileReader, which settles on a later task.
+    await vi.waitFor(() => expect(mocks.apiBlob).toHaveBeenCalled())
+    const body = exportBody()
+    expect(body).toMatchObject({
+      world_id: 'office', rule_id: 'office-rules', include_map: true,
+      world_scene_image: { kind: 'upload', id: 'cover-1' }, map_background: { kind: 'upload', id: 'bg-1' },
+    })
+    // No rule cover was chosen, so only the world cover is uploaded.
+    expect(body.rule_scene_image).toBeUndefined()
+    expect(mocks.api.mock.calls.filter(([path]) => path === '/scene-images')).toHaveLength(1)
+    expect((body.map_icons as Array<{ id: string; file_name: string }>).map(({ id, file_name }) => ({ id, file_name }))).toEqual([
+      { id: 'pantry', file_name: 'pantry.png' }, { id: 'server-room', file_name: 'server-room.png' },
+    ])
+  })
+
+  it('does not upload map images when the map switch is off', async () => {
+    const wrapper = await render('resource')
+    await wrapper.get('select').setValue('office')
+    await chooseFiles(wrapper, 'creator-export-map-background', [image('floor.png')])
+    await wrapper.get('[data-testid="creator-export-include-map"]').setValue(false)
+    expect(wrapper.find('[data-testid="creator-export-map-background"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await flushPromises()
+    expect(exportBody()).toMatchObject({ include_map: false, map_icons: [] })
+    expect(exportBody().map_background).toBeUndefined()
+    expect(mocks.api.mock.calls.some(([path]) => path === '/map-backgrounds')).toBe(false)
+  })
+
+  it('exports the flat repository source and points to the repository registration form', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = await render('resource')
+    await wrapper.get('select').setValue('office')
+    await wrapper.get('[data-testid="creator-export-format-source"]').setValue(true)
+    expect(wrapper.get('[data-testid="creator-export-submit"]').text()).toBe('导出资源包 .zip')
+
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await flushPromises()
+    expect(exportBody()).toMatchObject({ flat: true, world_id: 'office' })
+    expect(downloads).toEqual(['office-resources-0.1.0-src.zip'])
+    expect(wrapper.get('[data-testid="creator-export-done"]').text()).toContain('已下载 office-resources-0.1.0-src.zip')
+    // A source export is published from the author's own repository, not uploaded as a .zip.
+    expect(wrapper.find('[data-testid="creator-export-submit-to-hub"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('LICENSE')
+
+    await wrapper.get('[data-testid="creator-export-register-repository"]').trigger('click')
+    expect(downloads).toEqual(['office-resources-0.1.0-src.zip'])
+    const [href, target, features] = open.mock.calls[0] as [string, string, string]
+    expect([target, features]).toEqual(['_blank', 'noopener'])
+    const url = new URL(href)
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      template: 'add-plugin.yml', title: '[Plugin Submission] office-resources', plugin_id: 'office-resources',
     })
   })
 
@@ -125,15 +232,16 @@ describe('CreatorPackageExportDialog', () => {
       .toEqual(['「夜班」固定使用世界「深夜办公室」，但这次没有一并导出；安装方没有这个世界时无法开局。'])
 
     await wrapper.get('select').setValue('office')
+    await wrapper.get('[data-testid="creator-export-cards"] input[type="checkbox"]').setValue(true)
     expect(wrapper.find('[data-testid="creator-export-warning"]').exists()).toBe(false)
     const updated = wrapper.get('[data-testid="creator-export-preview"]').text()
     expect(updated).toContain('没有发现会阻碍开局的问题。')
-    expect(updated).toContain('世界 1')
+    expect(updated).toContain('世界 1 · 角色卡 1')
 
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
     expect(exportBody()).toMatchObject({
-      plugin_id: 'night-module', world_id: 'office',
+      plugin_id: 'night-module', world_id: 'office', card_ids: ['card-mira'],
       adventure_refs: [{ adventure_id: 'night-shift', source_kind: 'user', source_id: '' }],
     })
   })
