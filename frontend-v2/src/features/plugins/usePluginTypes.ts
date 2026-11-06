@@ -29,13 +29,8 @@ export function usePluginTypes() {
       .map(toFilter),
   )
 
-  // 市场 scope 专用：插件市场排除 content-pack；内容市场只留 content-pack。
-  // 用于插件页"插件市场 / 内容市场"两个选项卡的筛选条分离。
-  function pluginTypeFiltersFor(scope: 'plugins' | 'content'): { value: string; labelKey: MessageKey }[] {
-    return pluginTypeFilters.value.filter(f =>
-      scope === 'content' ? f.value === 'content-pack' : f.value !== 'content-pack',
-    )
-  }
+  // 插件市场的筛选条：content-pack 在模组库安装，市场里不提供这个类型。
+  const marketTypeFilters = computed(() => pluginTypeFilters.value.filter(f => f.value !== 'content-pack'))
 
   function pluginTypeLabel(type?: string): string {
     if (!type) return t('uncategorized')
@@ -45,5 +40,5 @@ export function usePluginTypes() {
     return translated !== key ? translated : type
   }
 
-  return { types, pluginTypeFilters, pluginTypeFiltersFor, pluginTypeLabel, loadTypes }
+  return { types, pluginTypeFilters, marketTypeFilters, pluginTypeLabel, loadTypes }
 }

@@ -46,6 +46,22 @@ describe('usePluginTypes', () => {
     ])
   })
 
+  it('leaves content-pack out of the plugin market filters', async () => {
+    mocks.listTypes.mockResolvedValue({
+      ok: true,
+      types: [
+        { id: 'tool', level: 'supported', filterable: true, filter_order: 2 },
+        { id: 'content-pack', level: 'supported', filterable: true, filter_order: 1 },
+        { id: 'theme', level: 'supported', filterable: true, filter_order: 3 },
+      ],
+    })
+    const { pluginTypeFilters, marketTypeFilters, loadTypes } = usePluginTypes()
+    await loadTypes()
+    // Installed-plugin filters still include content packs; the market does not.
+    expect(pluginTypeFilters.value.map(item => item.value)).toEqual(['content-pack', 'tool', 'theme'])
+    expect(marketTypeFilters.value.map(item => item.value)).toEqual(['tool', 'theme'])
+  })
+
   it('resolves type labels by i18n convention, falling back to raw id', () => {
     const { pluginTypeLabel } = usePluginTypes()
     expect(pluginTypeLabel('content-pack')).toBe('内容包')
