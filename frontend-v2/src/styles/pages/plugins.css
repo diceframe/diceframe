@@ -184,6 +184,10 @@ body.light .plugin-status.running {
   white-space: nowrap;
 }
 
+.plugin-workspace .content-store-moved a + a {
+  margin-left: 12px;
+}
+
 .plugin-workspace .type-filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -405,11 +409,11 @@ body.light .plugin-status.running {
 }
 
 .plugin-workspace.plugin-workspace .content-pack-toolbar {
-  grid-template-columns: minmax(220px, 1fr) max-content max-content max-content;
+  grid-template-columns: minmax(220px, 1fr) max-content max-content;
   align-items: center;
 }
 
-.plugin-workspace .content-pack-toolbar .n-button, .plugin-workspace .content-pack-toolbar .create-pack-btn {
+.plugin-workspace .content-pack-toolbar .n-button {
   grid-column: auto;
   min-width: max-content;
   margin-left: 0;

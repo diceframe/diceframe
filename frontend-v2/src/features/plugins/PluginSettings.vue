@@ -17,7 +17,6 @@ import { usePluginContent } from './usePluginContent'
 import { useInstalledPlugins } from './useInstalledPlugins'
 import { usePluginMarketplace } from './usePluginMarketplace'
 import { usePluginTools } from './usePluginTools'
-import { usePluginExport } from './usePluginExport'
 import { usePluginTypes } from './usePluginTypes'
 import { usePluginUninstallCleanup } from './usePluginUninstallCleanup'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
@@ -28,7 +27,6 @@ import ThemesTab from './tabs/ThemesTab.vue'
 import InstalledTab from './tabs/InstalledTab.vue'
 import MarketplaceTab from './tabs/MarketplaceTab.vue'
 import HubDetailModal from './modals/HubDetailModal.vue'
-import ExportPackModal from './modals/ExportPackModal.vue'
 
 const { t } = useLocale()
 const settingsStore = useSettingsStore()
@@ -66,34 +64,6 @@ const {
   tools, toolInputs, toolResults, toolsLoading,
   loadTools, setToolInput, invokeTool,
 } = usePluginTools(busy)
-const {
-  loading: authorLoading,
-  packId, packName, packVersion, packDescription,
-  selectedWorldId, selectedRuleId, selectedCardIds,
-  includePortraits, includeSceneImages, worldSceneImageFile, ruleSceneImageFile,
-  includeMap, mapBackgroundFile, mapIconFiles,
-  worldOptions: authorWorldOptions, ruleOptions: authorRuleOptions, cardOptions: authorCardOptions,
-  loadAuthorData, exportPack,
-} = usePluginExport(busy)
-function setExportSceneImage(kind: 'world' | 'rule', event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0] || null
-  if (kind === 'world') worldSceneImageFile.value = file
-  else ruleSceneImageFile.value = file
-}
-function setExportMapAsset(kind: 'background' | 'icons', event: Event) {
-  const files = Array.from((event.target as HTMLInputElement).files || [])
-  if (kind === 'background') mapBackgroundFile.value = files[0] || null
-  else mapIconFiles.value = files
-}
-const showExportModal = ref(false)
-let authorLoaded = false
-async function openExportModal() {
-  showExportModal.value = true
-  if (!authorLoaded) {
-    authorLoaded = true
-    await loadAuthorData()
-  }
-}
 const {
   contentByPlugin, contentGroupCount, contentLoading, contentTargetBookId, bookOptions,
   loadContentResources, loadLorebooks, contentTitle, contentSubtitle, importContent, importAllContent,
@@ -281,7 +251,7 @@ onMounted(async () => {
       />
     </NTabPane>
 
-    <NTabPane name="content" :tab="t('contentPacks')">
+    <NTabPane name="content" :tab="t('pluginContentImportTab')">
       <ContentTab
         :content-by-plugin="contentByPlugin"
         :content-group-count="contentGroupCount"
@@ -294,7 +264,6 @@ onMounted(async () => {
         :content-subtitle="contentSubtitle"
         :import-content="importContent"
         :import-all-content="importAllContent"
-        @open-export="openExportModal"
       />
     </NTabPane>
 
@@ -365,39 +334,6 @@ onMounted(async () => {
     :save-hub-rating="saveHubRating"
   />
 
-  <ExportPackModal
-    v-model:show="showExportModal"
-    :author-loading="authorLoading"
-    :pack-id="packId"
-    :pack-name="packName"
-    :pack-version="packVersion"
-    :pack-description="packDescription"
-    :selected-world-id="selectedWorldId"
-    :selected-rule-id="selectedRuleId"
-    :selected-card-ids="selectedCardIds"
-    :include-portraits="includePortraits"
-    :include-scene-images="includeSceneImages"
-    :include-map="includeMap"
-    :map-background-file="mapBackgroundFile"
-    :map-icon-files="mapIconFiles"
-    :author-world-options="authorWorldOptions"
-    :author-rule-options="authorRuleOptions"
-    :author-card-options="authorCardOptions"
-    :busy="busy"
-    :set-pack-id="(v: string) => packId = v"
-    :set-pack-name="(v: string) => packName = v"
-    :set-pack-version="(v: string) => packVersion = v"
-    :set-pack-description="(v: string) => packDescription = v"
-    :set-selected-world-id="(v: string | null) => selectedWorldId = v || ''"
-    :set-selected-rule-id="(v: string | null) => selectedRuleId = v || ''"
-    :set-selected-card-ids="(v: (string | number)[] | null) => selectedCardIds = (v || []) as string[]"
-    :set-include-portraits="(v: boolean) => includePortraits = v"
-    :set-include-scene-images="(v: boolean) => includeSceneImages = v"
-    :set-include-map="(v: boolean) => includeMap = v"
-    :set-export-scene-image="setExportSceneImage"
-    :set-export-map-asset="setExportMapAsset"
-    :export-pack="exportPack"
-  />
 </template>
 
 <style scoped>
