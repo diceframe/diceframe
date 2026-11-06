@@ -44,6 +44,9 @@ _MODULE_CONTENT_KINDS = (
     "npc", "item", "spell", "class", "character_template", "world_template",
 )
 _MARKETPLACE_CONTENT_PROFILES = frozenset({"adventure-module", "content-pack"})
+# 封面只从已安装包的目录里读盘，永远不出站：路径必须落在包内 assets/ 下，
+# 且只接受图片后缀。未声明或文件缺失时按「没有封面」处理，前端用占位。
+_MODULE_COVER_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg")
 _RULESET_FILTER_ALIASES = {
     # Generic module code matches the registry's stable short id, without
     # importing or hard-coding a concrete ruleset runtime identifier.
@@ -88,6 +91,35 @@ def _installed_content_packs(plugin_host: Any) -> list[Any]:
         ),
         key=lambda runtime: str(runtime.manifest.get("id") or ""),
     )
+
+
+def _module_cover(runtime: Any) -> str:
+    """已安装内容包的封面路径：只认包内 assets/ 下的图片，缺失就当没有。"""
+
+    manifest = getattr(runtime, "manifest", {}) or {}
+    relative = str(manifest.get("cover") or "").strip().replace("\\", "/").lstrip("/")
+    if not relative.startswith("assets/") or not relative.lower().endswith(_MODULE_COVER_SUFFIXES):
+        return ""
+    root = runtime.directory.resolve()
+    try:
+        target = (root / relative).resolve()
+    except OSError:
+        return ""
+    if not target.is_relative_to(root) or not target.is_file() or target.is_symlink():
+        return ""
+    return relative
+
+
+def module_cover_path(deps: ModuleDependencies, module_id: str) -> str:
+    """已安装内容包封面的绝对路径；未声明、越界或文件缺失都按不存在处理。"""
+
+    runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
+    if runtime is None or str(runtime.manifest.get("plugin_type") or "") != MODULE_PLUGIN_TYPE:
+        raise KeyError("MODULE_NOT_FOUND")
+    relative = _module_cover(runtime)
+    if not relative:
+        raise KeyError("MODULE_COVER_MISSING")
+    return str((runtime.directory.resolve() / relative).resolve())
 
 
 def _declared_contributions(runtime: Any) -> list[Any] | None:
@@ -182,6 +214,7 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
             "plugin_type": str(runtime.manifest.get("plugin_type") or ""),
             "content_profile": profile,
             "content_delivery_mode": content_delivery_mode(runtime.manifest),
+            "cover": _module_cover(runtime),
             "is_module": profile == "adventure-module",
             "status": str(runtime.status or ""),
             "adventure_count": adventure_count,

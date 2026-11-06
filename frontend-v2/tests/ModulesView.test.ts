@@ -463,4 +463,31 @@ describe('ModulesView', () => {
     expect(onlineSection.find('[data-testid="modules-online-filtered-empty"]').exists()).toBe(false)
     expect(onlineSection.text()).toContain('Other Module')
   })
+
+  it('paints a declared cover on installed cards only', async () => {
+    mocks.list.mockResolvedValue({
+      ok: true,
+      modules: [{
+        id: 'cover-pack', name: 'Cover Pack', version: '0.1.0',
+        content_profile: 'content-pack', content_delivery_mode: 'legacy_autoimport',
+        is_module: false, status: 'disabled', adventure_count: 0,
+        content_counts: {}, lorebook_count: 0, cover: 'assets/cover.webp',
+      }, {
+        id: 'plain-pack', name: 'Plain Pack', version: '1.0.0',
+        content_profile: 'content-pack', content_delivery_mode: 'legacy_autoimport',
+        is_module: false, status: 'disabled', adventure_count: 0,
+        content_counts: {}, lorebook_count: 0,
+      }],
+    })
+    const { wrapper } = await mountView()
+
+    const covered = wrapper.get('[data-testid="module-card-cover-pack"]')
+    expect(covered.classes()).toContain('has-cover')
+    expect(covered.attributes('style')).toContain('/modules/cover-pack/cover?v=0.1.0')
+    expect(covered.find('.module-card-art').exists()).toBe(true)
+
+    const plain = wrapper.get('[data-testid="module-card-plain-pack"]')
+    expect(plain.classes()).not.toContain('has-cover')
+    expect(plain.find('.module-card-art').exists()).toBe(false)
+  })
 })

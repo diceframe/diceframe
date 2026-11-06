@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { api, errorMessage } from '@/api/client'
+import { api, apiUrl, errorMessage } from '@/api/client'
 import {
   moduleApi,
   type ModuleMarketplaceItem,
@@ -161,6 +161,14 @@ function marketTrustLabel(level: string): string {
   if (level === 'official') return t('pluginTrustOfficial')
   if (level === 'verified') return t('pluginTrustVerified')
   return t('pluginTrustCommunity')
+}
+
+// 已安装包如果有封面，就用和存档卡相同的做法：整张图铺底 + 渐变压暗。
+// 图片来自本机包目录（/api/modules/{id}/cover），不涉及任何第三方地址。
+function moduleCoverStyle(module: ModuleSummary): Record<string, string> | undefined {
+  if (!module.cover) return undefined
+  const url = apiUrl(`/modules/${encodeURIComponent(module.id)}/cover?v=${encodeURIComponent(module.version)}`)
+  return { '--df-bg-cover-image': `url("${url.replace(/"/g, '%22')}")` }
 }
 
 // §8 Recovery：入口带过来的是**存档里的绑定身份**（adventure / version /
@@ -381,7 +389,16 @@ async function checkRecovery() {
           <p>{{ t('modulesEmpty') }}</p>
       </div>
       <div v-else class="modules-grid">
-        <RouterLink v-for="module in modules" :key="module.id" :to="{ name: 'module-detail', params: { moduleId: module.id } }" class="module-card">
+        <RouterLink
+          v-for="module in modules"
+          :key="module.id"
+          :to="{ name: 'module-detail', params: { moduleId: module.id } }"
+          class="module-card"
+          :class="{ 'has-cover': Boolean(module.cover) }"
+          :style="moduleCoverStyle(module)"
+          :data-testid="`module-card-${module.id}`"
+        >
+          <span v-if="module.cover" class="module-card-art" aria-hidden="true"></span>
           <div>
             <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
             <h3>{{ module.name }}</h3>
@@ -593,7 +610,12 @@ async function checkRecovery() {
 .module-recovery-ready { color: var(--df-success); }
 .module-recovery-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; }
 .module-recovery-resume { display: inline-flex; align-items: center; padding: .35rem .8rem; border-radius: .6rem; text-decoration: none; }
-.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; }
+.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; position: relative; isolation: isolate; overflow: hidden; }
+/* 封面：整卡铺底，底部渐变压暗保证文字可读（与存档卡同一套做法）。 */
+.module-card-art { position: absolute; z-index: 0; inset: 0; pointer-events: none; background-image: var(--df-bg-cover-image); background-position: center; background-size: cover; filter: saturate(.88) contrast(1.04); transform: scale(1.02); transition: filter .22s ease, transform .28s ease; }
+.module-card-art::after { position: absolute; inset: 0; content: ""; background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas) 24%, transparent) 0%, transparent 24%, color-mix(in srgb, var(--df-surface-1) 58%, transparent) 46%, color-mix(in srgb, var(--df-surface-1) 90%, transparent) 68%, var(--df-surface-1) 100%), linear-gradient(100deg, color-mix(in srgb, var(--df-canvas) 44%, transparent), transparent 64%); }
+.module-card > :not(.module-card-art) { position: relative; z-index: 1; }
+.module-card.has-cover:hover .module-card-art { filter: saturate(.96) contrast(1.06) brightness(1.05); transform: scale(1.05); }
 .module-card h3 { margin: 0; font-size: 1rem; }
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }

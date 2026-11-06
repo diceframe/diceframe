@@ -1158,6 +1158,11 @@ class WebAPI:
     def module_detail(self, module_id: str) -> dict[str, Any]:
         return modules.module_detail(self._module_dependencies, module_id)
 
+    def module_cover_file(self, module_id: str) -> str:
+        """已安装内容包的封面文件路径（只读本机，不出站）。"""
+
+        return modules.module_cover_path(self._module_dependencies, module_id)
+
     def module_resources(self, module_id: str) -> dict[str, Any]:
         return self.module_resources_service.list(module_id)
 
