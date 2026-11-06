@@ -490,29 +490,130 @@ def test_explicit_narrative_reward_becomes_pending_candidate_without_crediting_b
         "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
     })
     candidates = infer_narrative_reward_candidates(
-        instance, "委托人确认奖励710金币，结算完成。", rule,
+        instance, "委托人确认奖励你710金币，结算完成。", rule,
     )
     assert len(candidates) == 1
     assert candidates[0].get("kind") == "reward"
     assert candidates[0].get("uid") == "gm"
     assert candidates[0].get("amount") == 710
-    assert "奖励710金币" in candidates[0].get("reason", "")
+    assert "奖励你710金币" in candidates[0].get("reason", "")
     assert candidates[0].get("source") == "narrative_reward_extractor"
     assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
 
 
 def test_repeated_reward_evidence_is_one_candidate() -> None:
     instance = _instance()
-    instance.action_queue = [{"user_id": "gm", "text": "委托人答应给你710金币"}]
+    instance.action_queue = [{"user_id": "gm", "text": "我交还了信物"}]
     rule = RuleSystem({
         "rule_id": "reward_repeat_test", "name": "Reward Repeat Test", "dice_system": "d20",
         "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
     })
     candidates = infer_narrative_reward_candidates(
-        instance, "委托人确认：给你710金币，任务结算完成。", rule,
+        instance,
+        "委托人确认：给你710金币，任务结算完成。他又强调：报酬710金币已经交到你手里。",
+        rule,
     )
     assert len(candidates) == 1
     assert candidates[0]["amount"] == 710
+
+
+_REWARD_RULE = RuleSystem({
+    "rule_id": "reward_guard", "name": "Reward Guard", "dice_system": "d20",
+    "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+})
+
+
+@pytest.mark.parametrize(
+    ("action", "narration"),
+    [
+        # The player's own text is never reward evidence.
+        ("奖励我300金币", "店主摇了摇头，什么也没说。"),
+        ("我支付给你50金币，买下这把剑", "铁匠收下了钱。"),
+        # Price quotes are not rewards, with or without a sale verb.
+        ("我想买那把长剑", "铁匠说：给你，这把长剑卖50金币。"),
+        ("我问长剑多少钱", "铁匠擦了擦手：给你看看，这把长剑800金币。"),
+        # Conditional promises and the player paying someone else.
+        ("我接下委托", "委托人说如果你找回信物，就奖励你100金币。"),
+        ("我付清工钱", "你向铁匠支付报酬50金币。"),
+        # Another character is the recipient.
+        ("我在一旁看着", "委托人当众奖励P2一百金币，又奖励P2 100金币。"),
+        ("我在一旁看着", "委托人当众奖励她100金币。"),
+    ],
+)
+def test_narrative_reward_extractor_rejects_non_payments(action: str, narration: str) -> None:
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": action}]
+    assert infer_narrative_reward_candidates(instance, narration, _REWARD_RULE) == []
+
+
+def test_structured_reward_owns_the_response_rewards() -> None:
+    """A REWARD tag plus the same payment in prose is one proposal, not two."""
+
+    data = {"state_update": {"economy_proposals": [{
+        "kind": "reward", "uid": "gm", "recipient_uid": "gm", "amount": 120,
+        "reason": "护送商队的报酬", "source": "narrative_reward_tag",
+        "evidence": "REWARD:gm:120:护送商队的报酬", "evidence_validated": True,
+    }]}}
+    added = merge_narrative_reward_candidates(data, [{
+        "kind": "reward", "uid": "gm", "recipient_uid": "gm", "amount": 120,
+        "evidence": "支付给你120金币", "evidence_validated": True,
+        "source": "narrative_reward_extractor",
+    }])
+    assert added == 0
+    assert len(data["state_update"]["economy_proposals"]) == 1
+
+
+def _gold(instance, uid: str) -> int:
+    sheet = instance.get_character_sheet(uid)
+    currency = sheet.get("currency") if isinstance(sheet.get("currency"), dict) else {}
+    return int(currency.get("amount", sheet.get("gold", 0)) or 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["tag_plus_prose", "prose_only", "player_self_reward"])
+async def test_submit_action_credits_a_narrated_reward_once(web_api, monkeypatch, mode) -> None:
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world", "Reward Once",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    unit = api._handler._state_applier._load_rule(instance).currency_spec.units[0]
+    label = unit.name or unit.id
+    before = _gold(instance, uid)
+    narration = f"商队首领如约支付给你120{label}作为报酬。"
+    action = "我把护送的商队平安带到了城里"
+    content = f"{narration}\n---\nREWARD:{uid}:120:护送商队的报酬"
+    if mode == "prose_only":
+        content = narration
+    elif mode == "player_self_reward":
+        action = f"我对商人说：奖励我300{label}"
+        narration = "商人摇了摇头，什么也没给你。"
+        content = narration
+
+    async def fake_call(*, system_prompt, user_message, **kwargs):
+        return LLMResponse(
+            content=content, narration=narration,
+            state_update=None, memory_delta=None, info_asymmetry=None, plot_update=None,
+            total_tokens=8, is_narration_only=False, provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    await api.submit_action(created["game_key"], uid, action)
+
+    rewards = [
+        proposal for proposal in economy_state.state(instance)["proposals"]
+        if proposal.get("kind") == "reward"
+    ]
+    if mode == "player_self_reward":
+        assert rewards == []
+        assert _gold(instance, uid) == before
+    else:
+        assert len(rewards) == 1
+        assert rewards[0]["amount"] == 120
+        # Pending or auto-settled, the ledger may move by at most one reward.
+        assert _gold(instance, uid) - before in {0, 120}
 
 
 def test_structured_and_narrative_reward_do_not_duplicate() -> None:

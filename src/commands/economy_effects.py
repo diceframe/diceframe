@@ -127,19 +127,26 @@ def infer_narrative_reward_candidates(
 ) -> list[dict[str, Any]]:
     """Extract explicit narrative reward offers without changing balances.
 
-    This is deliberately narrow: only a single-player round, an explicit
-    reward/payment verb, an Arabic amount, and a declared currency unit are
-    accepted.  The result is still a GM-approved reward proposal; this helper
-    never mutates a character sheet and never treats a bare balance mention as
-    a reward.
+    This is a fallback for a GM response that narrated a payment but emitted
+    no ``REWARD`` tag, so it is deliberately narrow:
+
+    - only the GM's narration is evidence; the player's own action text is
+      never read, so a player cannot write themselves a reward;
+    - one acting player, and the paying sentence must address that player
+      (second person or their character name) and name no other player;
+    - an explicit reward/payment cue directly before an Arabic amount and a
+      declared currency unit;
+    - price quotes, per-item/each splits, conditional promises and the player
+      paying someone else are rejected.
+
+    The result is still a pending reward proposal; this helper never mutates a
+    character sheet and never treats a bare balance mention as a reward.
     """
 
     import re
 
     text = str(narration or "")
-    if not text and not instance.action_queue:
-        return []
-    if not instance.players:
+    if not text or not instance.players:
         return []
     actor_ids = [
         str(action.get("user_id") or "")
@@ -149,6 +156,12 @@ def infer_narrative_reward_candidates(
     if len(set(actor_ids)) != 1:
         return []
     uid = actor_ids[0]
+    actor_name = str(instance.players[uid].get("character_name") or "").strip()
+    other_names = {
+        str(player.get("character_name") or "").strip()
+        for other_uid, player in instance.players.items()
+        if other_uid != uid and isinstance(player, dict)
+    } - {"", actor_name}
     spec = getattr(rule, "currency_spec", None)
     if spec is None:
         return []
@@ -160,24 +173,43 @@ def infer_narrative_reward_candidates(
     if not labels:
         return []
     label_pattern = "|".join(re.escape(label) for label, _ in sorted(labels, key=lambda item: len(item[0]), reverse=True))
-    # Require a reward/settlement verb before the amount. This excludes
-    # balance/status narration such as “余额 710 金币”.
+    # Require a reward/payment cue right before the amount. This excludes
+    # balance/status narration such as “余额 710 金币”. A bare “给你” only
+    # counts when the amount follows it directly (“给你710金币”), because
+    # “给你看看……800金币” is a quote, not a payment.
     pattern = re.compile(
-        rf"(?:奖励|报酬|酬金|给你|支付给你|结算|reward|payment|pay you)"
-        rf"[^0-9０-９]{{0,32}}(?P<amount>[0-9]+)\s*(?P<label>{label_pattern})",
+        rf"(?:(?:奖励|报酬|酬金|酬劳|赏金|赏给你|支付给你|付给你|"
+        rf"rewards?|rewarded|bounty|pays you|paid you)[^0-9０-９]{{0,16}}|给你\s*)"
+        rf"(?P<amount>[0-9]+)\s*(?P<label>{label_pattern})",
         re.IGNORECASE,
     )
-    action_text = "\n".join(
-        str(action.get("text") or "")
-        for action in instance.action_queue
-        if str(action.get("user_id") or "") in instance.players
+    # A sentence with any of these is not a payment to the actor right now:
+    # a price quote or per-item split, a conditional/future promise, or the
+    # player character paying someone else.
+    not_a_payment = re.compile(
+        r"卖|售|价|多少钱|每|一共|总共|共计|收费|花费|要价|开价|"
+        r"如果|若是|只要|答应|承诺|将会|事成|你们|"
+        r"你[^，,；;：:]{0,8}?(?:支付|付了|付给|付清|交给|掏出|花了|花费)|"
+        r"\b(?:costs?|sells?|sold|price[sd]?|for sale|each|per|charges?|"
+        r"if|once|will|would|promises?|you all|you pay|you paid|you spend|you hand)\b",
+        re.IGNORECASE,
     )
-    evidence_text = f"{action_text}\n{text}".strip()
-    matches = list(pattern.finditer(evidence_text))
+    addressed = re.compile(
+        r"你|您|\byou\b" + (rf"|{re.escape(actor_name)}" if actor_name else ""),
+        re.IGNORECASE,
+    )
+    matches: list[tuple[Any, str]] = []
+    for sentence in re.split(r"[。！？!?\n]+|(?<=\.)\s+", text):
+        sentence = sentence.strip()
+        if not sentence or not_a_payment.search(sentence):
+            continue
+        if not addressed.search(sentence) or any(name in sentence for name in other_names):
+            continue
+        matches.extend((match, sentence) for match in pattern.finditer(sentence))
     if not matches:
         return []
-    parsed_matches: list[tuple[Any, str, Any]] = []
-    for match in matches:
+    parsed_matches: list[tuple[Any, str, Any, str]] = []
+    for match, sentence in matches:
         label = match.group("label")
         unit_id = next((unit for raw, unit in labels if raw.casefold() == label.casefold()), "")
         if not unit_id:
@@ -186,24 +218,23 @@ def infer_narrative_reward_candidates(
             amount = parse_currency_amount(match.group("amount"), unit_id, spec)
         except Exception:
             return []
-        parsed_matches.append((match, unit_id, amount))
-    # Player action and GM narration may repeat the same explicit reward.
-    # Repeated identical evidence is one candidate; conflicting amounts or
-    # units remain ambiguous and fail closed.
-    identities = {(int(amount), str(unit_id)) for _, unit_id, amount in parsed_matches}
+        parsed_matches.append((match, unit_id, amount, sentence))
+    # The narration may repeat the same explicit reward. Repeated identical
+    # evidence is one candidate; conflicting amounts or units remain
+    # ambiguous and fail closed.
+    identities = {(int(amount), str(unit_id)) for _, unit_id, amount, _ in parsed_matches}
     if len(identities) != 1:
         return []
-    match, unit_id, amount = parsed_matches[0]
+    match, unit_id, amount, sentence = parsed_matches[0]
     if amount <= 0:
         return []
-    reason = evidence_text[max(0, match.start() - 80): min(len(evidence_text), match.end() + 80)].strip()[:240]
     return [{
         "kind": "reward",
         "uid": uid,
         "recipient_uid": uid,
         "amount": amount,
-        "reason": reason,
-        "evidence": evidence_text[match.start():match.end()].strip()[:300],
+        "reason": sentence[:240],
+        "evidence": match.group(0).strip()[:300],
         "evidence_validated": True,
         "source": "narrative_reward_extractor",
     }]
@@ -213,11 +244,12 @@ def merge_narrative_reward_candidates(
     data: dict[str, Any],
     candidates: list[dict[str, Any]],
 ) -> int:
-    """Append inferred rewards once when the model already emitted the same proposal.
+    """Append prose reward candidates only when the response has no structured reward.
 
-    The narrative extractor and the structured model output can both describe
-    one reward in the same response.  They must share one proposal identity so
-    a later confirmation cannot credit the player twice.
+    The extractor is a fallback for a GM who narrated a payment without a
+    ``REWARD`` tag. When the model did emit a reward proposal, that channel
+    owns the response's rewards: its reason text rarely matches the prose
+    sentence, so trying to match the two would credit one payment twice.
     """
 
     state_update = data.setdefault("state_update", {})
@@ -227,6 +259,11 @@ def merge_narrative_reward_candidates(
     if not isinstance(proposals, list):
         proposals = []
         state_update["economy_proposals"] = proposals
+    if any(
+        isinstance(proposal, dict) and str(proposal.get("kind") or "") == "reward"
+        for proposal in proposals
+    ):
+        return 0
 
     def identity(proposal: Any) -> tuple[str, str, int] | None:
         if not isinstance(proposal, dict) or str(proposal.get("kind") or "") != "reward":
