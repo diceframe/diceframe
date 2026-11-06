@@ -9,7 +9,8 @@ import { useToast } from '@/composables/useToast'
 import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
-import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl, repositorySubmissionUrl } from './submission'
+import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl } from './submission'
+import SubmissionWizard from './SubmissionWizard.vue'
 
 type Book = { id: string; name?: string; entry_count?: number }
 // `package` is the installable .dfplugin; `source` is the flat zip an author
@@ -229,16 +230,11 @@ const exportedFile = computed(() => {
 })
 
 const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
-const registerUrl = computed(() => exported.value ? repositorySubmissionUrl(exported.value.id) : '')
 
 function submitToHub() {
   if (!exported.value) return
   saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
   window.open(submissionUrl.value, '_blank', 'noopener')
-}
-
-function openRegisterForm() {
-  if (registerUrl.value) window.open(registerUrl.value, '_blank', 'noopener')
 }
 
 async function exportPack() {
@@ -296,9 +292,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.sourceTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.sourceSteps" :key="step">{{ step }}</li></ol>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-register-repository" @click="openRegisterForm">{{ copy.sourceRegister }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" class="primary" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="exported">
       <section class="creator-package-section" data-testid="creator-export-done">
@@ -307,9 +303,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.submitTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.submitSteps" :key="step">{{ step }}</li></ol>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-submit-to-hub" @click="submitToHub">{{ copy.submit }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="!loading">
       <section class="creator-package-section"><h3>{{ copy.basic }}</h3><div class="creator-package-grid">
