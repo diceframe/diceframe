@@ -2754,9 +2754,9 @@
       "modulesSubmitGoCreator": "cd76dfc793520d7c",
       "modulesSubmitDirect": "dbe48e66f7a7b8d5",
       "contentPackSubmitTitle": "bbcab1e6bca548b1",
-      "contentPackSubmitStepExport": "83170d122d292d9a",
-      "contentPackSubmitStepForm": "f4281d07b963e7f3",
-      "contentPackSubmitStepReview": "02fd1c144fe91235",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "6ddb0b1d0df3872f",
       "creatorExportResourceTitle": "4078f4f466287485",
       "creatorExportResourceIntro": "fc5e04733e574e97",
       "creatorExportAdventureTitle": "16c2fe4139b32c6a",
@@ -2821,7 +2821,8 @@
       "creatorExportCoverHint": "d3dcece855ff45a8",
       "creatorExportCoverPick": "afdf1a951251ee6b",
       "creatorExportCoverClear": "0122992c691cf18e",
-      "creatorExportCoverInvalid": "82f1324a131a52a4"
+      "creatorExportCoverInvalid": "82f1324a131a52a4",
+      "creatorExportRepoUrl": "d4f7b8f6f0f2991d"
     },
     "de": {
       "modulesFilterProfile": "d2223afb7d6b100d",
@@ -2838,9 +2839,9 @@
       "modulesSubmitGoCreator": "cd76dfc793520d7c",
       "modulesSubmitDirect": "dbe48e66f7a7b8d5",
       "contentPackSubmitTitle": "bbcab1e6bca548b1",
-      "contentPackSubmitStepExport": "83170d122d292d9a",
-      "contentPackSubmitStepForm": "f4281d07b963e7f3",
-      "contentPackSubmitStepReview": "02fd1c144fe91235",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "6ddb0b1d0df3872f",
       "creatorExportResourceTitle": "4078f4f466287485",
       "creatorExportResourceIntro": "fc5e04733e574e97",
       "creatorExportAdventureTitle": "16c2fe4139b32c6a",
@@ -2905,7 +2906,8 @@
       "creatorExportCoverHint": "d3dcece855ff45a8",
       "creatorExportCoverPick": "afdf1a951251ee6b",
       "creatorExportCoverClear": "0122992c691cf18e",
-      "creatorExportCoverInvalid": "82f1324a131a52a4"
+      "creatorExportCoverInvalid": "82f1324a131a52a4",
+      "creatorExportRepoUrl": "d4f7b8f6f0f2991d"
     },
     "ru": {
       "modulesFilterProfile": "d2223afb7d6b100d",
@@ -2922,9 +2924,9 @@
       "modulesSubmitGoCreator": "cd76dfc793520d7c",
       "modulesSubmitDirect": "dbe48e66f7a7b8d5",
       "contentPackSubmitTitle": "bbcab1e6bca548b1",
-      "contentPackSubmitStepExport": "83170d122d292d9a",
-      "contentPackSubmitStepForm": "f4281d07b963e7f3",
-      "contentPackSubmitStepReview": "02fd1c144fe91235",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "6ddb0b1d0df3872f",
       "creatorExportResourceTitle": "4078f4f466287485",
       "creatorExportResourceIntro": "fc5e04733e574e97",
       "creatorExportAdventureTitle": "16c2fe4139b32c6a",
@@ -2989,7 +2991,8 @@
       "creatorExportCoverHint": "d3dcece855ff45a8",
       "creatorExportCoverPick": "afdf1a951251ee6b",
       "creatorExportCoverClear": "0122992c691cf18e",
-      "creatorExportCoverInvalid": "82f1324a131a52a4"
+      "creatorExportCoverInvalid": "82f1324a131a52a4",
+      "creatorExportRepoUrl": "d4f7b8f6f0f2991d"
     }
   }
 }

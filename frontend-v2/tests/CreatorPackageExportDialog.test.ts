@@ -94,7 +94,7 @@ describe('CreatorPackageExportDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('submits an exported pack as a .zip through the prefilled index issue form', async () => {
+  it('opens the index submission form with the ID prefilled, and no extra download', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     const wrapper = await render('resource')
     await wrapper.findAll('.creator-package-grid input')[2].setValue('1.2.0')
@@ -102,16 +102,21 @@ describe('CreatorPackageExportDialog', () => {
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
 
+    await wrapper.get('[data-testid="creator-export-repository-url"]').setValue('https://github.com/me/office-resources')
     await wrapper.get('[data-testid="creator-export-submit-to-hub"]').trigger('click')
 
-    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin', 'office-resources-1.2.0.zip'])
+    // 索引仓库没有"上传包"的表单，所以这里不再多下一个 zip
+    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin'])
     expect(open).toHaveBeenCalledTimes(1)
     const [href, target, features] = open.mock.calls[0] as [string, string, string]
     expect([target, features]).toEqual(['_blank', 'noopener'])
     const url = new URL(href)
     expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      template: 'add-content-pack.yml', title: '[Content Pack] office-resources', plugin_id: 'office-resources',
+      template: 'add-plugin.yml',
+      title: '[Plugin Submission] office-resources',
+      plugin_id: 'office-resources',
+      repository: 'https://github.com/me/office-resources',
     })
   })
 
