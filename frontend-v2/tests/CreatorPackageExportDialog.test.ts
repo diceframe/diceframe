@@ -298,6 +298,22 @@ describe('CreatorPackageExportDialog', () => {
     expect(wrapper.find('.creator-package-cover-image').exists()).toBe(false)
   })
 
+  it('keeps the books and cards pickers collapsible but open by default', async () => {
+    const wrapper = await render('resource')
+    const books = wrapper.get('[data-testid="creator-export-books"]')
+    const cards = wrapper.get('[data-testid="creator-export-cards"]')
+
+    // 默认展开，summary 上直接显示已选/总数
+    expect(books.attributes('open')).toBeDefined()
+    expect(cards.attributes('open')).toBeDefined()
+    expect(books.get('summary').text()).toContain('0 / 1')
+    expect(cards.get('summary').text()).toContain('0 / 1')
+
+    // 收起只是隐藏，复选框仍在 DOM 里（有已选项时不会丢）
+    expect(cards.find('input[type="checkbox"]').exists()).toBe(true)
+    expect(wrapper.findAll('.creator-package-media-card')).toHaveLength(3)
+  })
+
   it('previews what a resource pack will contain, without adventure-only rows', async () => {
     const wrapper = await render('resource')
     expect(wrapper.find('[data-testid="creator-export-preview"]').exists()).toBe(false)
