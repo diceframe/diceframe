@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { api, apiBlob, errorMessage } from '@/api/client'
 import { uploadMapBackground } from '@/api/mapBackgrounds'
 import { uploadSceneImage } from '@/api/sceneImages'
 import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
+import { useToast } from '@/composables/useToast'
 import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
@@ -18,6 +19,7 @@ const MAP_ICON_LIMIT = 128
 const props = defineProps<{ mode: CreatorPackageExportMode }>()
 const emit = defineEmits<{ close: [] }>()
 const { locale, t } = useLocale()
+const toast = useToast()
 const name = ref(''), packId = ref(''), version = ref('0.1.0'), description = ref('')
 const worlds = ref<WorldSummary[]>([]), adventures = ref<AdventureSummary[]>([]), books = ref<Book[]>([]), rules = ref<RuleSummary[]>([]), cards = ref<CharacterCard[]>([])
 const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<string[]>([]), selectedBooks = ref<string[]>([]), selectedCards = ref<string[]>([])
@@ -26,7 +28,20 @@ const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<
 const includePortraits = ref(true), includeSceneImages = ref(true), includeMap = ref(true)
 const worldCover = ref<File | null>(null), ruleCover = ref<File | null>(null), mapBackground = ref<File | null>(null), mapIcons = ref<File[]>([])
 const format = ref<ExportFormat>('package')
+const cover = ref<File | null>(null)
+const coverPreview = ref('')
 const busy = ref(false), loading = ref(true), error = ref('')
+const errorRef = ref<HTMLElement | null>(null)
+
+// 导出按钮在弹窗底部，错误横幅在顶部：只写 error 的话，用户点了「下一步」
+// 会觉得毫无反应。所以失败时同时弹 toast，并把弹窗滚回提示的位置。
+function fail(message: string) {
+  error.value = message
+  if (message) toast.error(message)
+  void nextTick(() => {
+    errorRef.value?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  })
+}
 const isAdventureModule = computed(() => props.mode === 'adventure')
 const exported = ref<{ blob: Blob; id: string; version: string; source: boolean } | null>(null)
 
@@ -52,6 +67,8 @@ const copy = computed(() => ({
   format: t('creatorExportFormat'),
   formatPackage: t('creatorExportFormatPackage'), formatPackageHint: t('creatorExportFormatPackageHint'),
   formatSource: t('creatorExportFormatSource'), formatSourceHint: t('creatorExportFormatSourceHint'),
+  cover: t('creatorExportCover'), coverHint: t('creatorExportCoverHint'),
+  coverPick: t('creatorExportCoverPick'), coverClear: t('creatorExportCoverClear'), coverInvalid: t('creatorExportCoverInvalid'),
   preview: t('creatorExportPreview'), previewCount: t('creatorExportPreviewCount'), previewRuntimes: t('creatorExportPreviewRuntimes'),
   previewPolicies: t('creatorExportPreviewPolicies'), previewResources: t('creatorExportPreviewResources'), none: t('creatorExportNone'),
   resourceSummary: (world: number, rule: number, book: number, card: number) => [
@@ -149,7 +166,7 @@ onMounted(async () => {
       api<{ cards?: CharacterCard[] }>('/character-cards'),
     ])
     worlds.value = w.worlds || []; adventures.value = a.adventures || []; books.value = b.books || []; rules.value = r.rules || []; cards.value = c.cards || []
-  } catch (cause) { error.value = errorMessage(cause) } finally { loading.value = false }
+  } catch (cause) { fail(errorMessage(cause)) } finally { loading.value = false }
 })
 
 function pickFile(event: Event): File | null {
@@ -159,6 +176,33 @@ function pickFile(event: Event): File | null {
 function pickFiles(event: Event): File[] {
   return Array.from((event.target as HTMLInputElement).files || [])
 }
+
+// 封面随包分发、安装后由本机接口读取；这里只挡类型和体积，尺寸交给校验器。
+const COVER_LIMIT_BYTES = 512 * 1024
+const COVER_TYPES = ['image/webp', 'image/png', 'image/jpeg']
+
+function setCoverPreview(file: File | null) {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+  coverPreview.value = file ? URL.createObjectURL(file) : ''
+}
+
+function onCoverPick(event: Event) {
+  const file = pickFile(event)
+  if (!file) return
+  if (!COVER_TYPES.includes(file.type) || file.size > COVER_LIMIT_BYTES) {
+    fail(copy.value.coverInvalid)
+    return
+  }
+  cover.value = file
+  setCoverPreview(file)
+}
+
+function clearCover() {
+  cover.value = null
+  setCoverPreview(null)
+}
+
+onUnmounted(() => setCoverPreview(null))
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob), anchor = document.createElement('a')
@@ -186,15 +230,15 @@ function openRegisterForm() {
 }
 
 async function exportPack() {
-  if (!packId.value.trim() || !name.value.trim()) { error.value = copy.value.needIdName; return }
-  if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { error.value = copy.value.idInvalid; return }
-  if (isAdventureModule.value && !selectedAdventures.value.length) { error.value = copy.value.adventureRequired; return }
+  if (!packId.value.trim() || !name.value.trim()) { fail(copy.value.needIdName); return }
+  if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { fail(copy.value.idInvalid); return }
+  if (isAdventureModule.value && !selectedAdventures.value.length) { fail(copy.value.adventureRequired); return }
   if (!isAdventureModule.value && !selectedWorld.value && !selectedRule.value && !selectedBooks.value.length && !selectedCards.value.length) {
-    error.value = copy.value.resourceRequired; return
+    fail(copy.value.resourceRequired); return
   }
   // The backend only packages a map together with a world.
   const withMap = includeMap.value && Boolean(selectedWorld.value)
-  if (withMap && mapIcons.value.length > MAP_ICON_LIMIT) { error.value = copy.value.mapIconLimit; return }
+  if (withMap && mapIcons.value.length > MAP_ICON_LIMIT) { fail(copy.value.mapIconLimit); return }
   busy.value = true; error.value = ''
   try {
     const source = format.value === 'source'
@@ -218,11 +262,13 @@ async function exportPack() {
       world_scene_image: worldSceneImage, rule_scene_image: ruleSceneImage,
       include_map: withMap, map_background: mapBackgroundRef, map_icons: mapIconUploads,
       flat: source, language: exportLanguage.value,
+      cover_data: cover.value ? await fileToBase64(cover.value) : '',
+      cover_filename: cover.value?.name || '',
     }) })
     const blob = await response.blob()
     exported.value = { blob, id: packId.value.trim(), version: version.value.trim() || '0.1.0', source }
     saveBlob(blob, exportedFile.value)
-  } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
+  } catch (cause) { fail(errorMessage(cause)) } finally { busy.value = false }
 }
 </script>
 
@@ -230,7 +276,7 @@ async function exportPack() {
   <Modal :title="isAdventureModule ? copy.adventureTitle : copy.resourceTitle" dialog-class="creator-package-dialog" @close="emit('close')">
     <p class="creator-package-intro">{{ isAdventureModule ? copy.adventureIntro : copy.resourceIntro }}</p>
     <p v-if="loading" role="status">{{ copy.loading }}</p>
-    <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
+    <p v-if="error" ref="errorRef" class="error-banner" role="alert">{{ error }}</p>
     <template v-if="exported?.source">
       <section class="creator-package-section" data-testid="creator-export-done">
         <h3>{{ copy.doneTitle }}</h3>
@@ -273,6 +319,16 @@ async function exportPack() {
         <h3>{{ copy.media }}</h3>
         <p class="creator-package-hint">{{ copy.mediaIntro }}</p>
         <div class="creator-package-options">
+          <div class="creator-package-cover" :class="{ 'has-image': coverPreview }" data-testid="creator-export-cover-block">
+            <img v-if="coverPreview" :src="coverPreview" alt="" class="creator-package-cover-image">
+            <div class="creator-package-cover-body">
+              <strong>{{ copy.cover }}</strong>
+              <div class="creator-package-cover-actions">
+                <label class="creator-package-file"><span>{{ copy.coverPick }}</span><input type="file" accept="image/webp,image/png,image/jpeg" data-testid="creator-export-cover" @change="onCoverPick"><small>{{ cover?.name || copy.coverHint }}</small></label>
+                <button v-if="cover" type="button" class="creator-package-cover-clear" data-testid="creator-export-cover-clear" @click="clearCover">{{ copy.coverClear }}</button>
+              </div>
+            </div>
+          </div>
           <label class="creator-package-option"><input v-model="includePortraits" type="checkbox" data-testid="creator-export-include-portraits"><span><strong>{{ copy.portraits }}</strong><small>{{ copy.portraitsHint }}</small></span></label>
           <div class="creator-package-option-group">
             <label class="creator-package-option"><input v-model="includeSceneImages" type="checkbox" data-testid="creator-export-include-scene-images"><span><strong>{{ copy.sceneImages }}</strong><small>{{ copy.sceneImagesHint }}</small></span></label>
@@ -323,6 +379,13 @@ async function exportPack() {
 .creator-package-option-group{display:grid;gap:.5rem}
 .creator-package-option{display:flex;align-items:flex-start;gap:.55rem;min-width:0;margin:0;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent);cursor:pointer}.creator-package-option input{flex:0 0 auto;margin:.2rem 0 0}.creator-package-option span{display:grid;gap:.2rem;min-width:0}.creator-package-option strong{font-size:.9rem}.creator-package-option small{color:var(--df-text-muted);line-height:1.45}.creator-package-option.disabled{opacity:.6;cursor:default}
 .creator-package-files{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;padding-left:1.6rem}
+.creator-package-cover{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem;align-items:start;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
+.creator-package-cover.has-image{grid-template-columns:10rem minmax(0,1fr)}
+.creator-package-cover-image{width:100%;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm)}
+.creator-package-cover-body{display:grid;gap:.4rem;min-width:0}
+.creator-package-cover-body strong{font-size:.9rem}
+.creator-package-cover-actions{display:flex;flex-wrap:wrap;align-items:end;gap:.5rem}
+.creator-package-cover-clear{align-self:end}
 .creator-package-file{display:grid;gap:.25rem;min-width:0;margin:0;padding:.55rem .65rem;border:1px dashed var(--df-border-soft);border-radius:var(--df-radius-sm);font-size:.85rem}.creator-package-file input{max-width:100%;color:var(--df-text-secondary);font-size:.78rem}.creator-package-file small{color:var(--df-text-muted);line-height:1.45;overflow-wrap:anywhere}
 .creator-package-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:0}.creator-package-preview div{display:grid;gap:.2rem;min-width:0}.creator-package-preview dt{color:var(--df-text-muted);font-size:.8rem}.creator-package-preview dd{margin:0;overflow-wrap:anywhere}
 .creator-package-steps{display:grid;gap:.45rem;margin:0;padding-left:1.2rem;color:var(--df-text-secondary);line-height:1.5}

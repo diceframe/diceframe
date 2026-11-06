@@ -1,6 +1,8 @@
 """Creator-owned content package export; legacy plugin API delegates here."""
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 from dataclasses import dataclass
@@ -13,6 +15,16 @@ from src.content_modules.projection import entries_for_world
 from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
+
+# 封面随包分发，只在客户端安装后由本机接口读取。导出侧只做字节级校验，
+# 不解码图片（导出接口不该替任意上传承担解码开销和解析器风险）。
+MAX_COVER_BYTES = 512 * 1024
+_COVER_MAGIC = {
+    ".webp": b"RIFF",
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+}
 
 @dataclass(frozen=True)
 class PluginExportMediaDependencies:
@@ -52,6 +64,37 @@ def _scene_image_references(
     return [single] if isinstance(single, dict) else []
 
 
+def _package_cover(files: dict[str, bytes], cover_data: str, cover_filename: str) -> str:
+    """把作者选的封面写进 ``assets/``，返回 manifest 里要写的相对路径。
+
+    只校验后缀白名单、体积上限和文件魔数，**不解码图片**；尺寸与可解码性
+    由 ``scripts/validate_content_module.py`` 在发布侧用 Pillow 复核。
+    """
+
+    if not cover_data:
+        return ""
+    payload = str(cover_data)
+    if payload.startswith("data:") and "," in payload:
+        payload = payload.split(",", 1)[1]
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("封面数据不是合法的 base64") from exc
+    if not data:
+        raise ValueError("封面数据为空")
+    if len(data) > MAX_COVER_BYTES:
+        raise ValueError(f"封面不能超过 {MAX_COVER_BYTES // 1024} KB")
+    suffix = Path(str(cover_filename or "")).suffix.lower()
+    magic = _COVER_MAGIC.get(suffix)
+    if magic is None:
+        raise ValueError("封面只支持 webp / png / jpg")
+    if not data.startswith(magic):
+        raise ValueError("封面文件的实际格式与扩展名不一致")
+    relative = f"assets/cover{suffix}"
+    files[relative] = data
+    return relative
+
+
 def export_content_pack(
     dependencies: PluginExportDependencies,
     plugin_id: str,
@@ -73,6 +116,8 @@ def export_content_pack(
     adventure_ids: list[str] | None = None,
     lorebook_ids: list[str] | None = None,
     adventure_refs: list[dict[str, str]] | None = None,
+    cover_data: str = "",
+    cover_filename: str = "",
 ) -> dict[str, Any]:
     """把应用内的世界/角色卡/规则导出成一个内容包 .dfplugin。
 
@@ -329,6 +374,10 @@ def export_content_pack(
 
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)
+    try:
+        cover_relative = _package_cover(files, cover_data, cover_filename)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     manifest = build_content_pack_manifest(
         plugin_id, name, version, description, has_world, has_rule, has_cards, has_portraits, has_scene_images,
         bool(map_package and map_package.has_definitions),
@@ -343,6 +392,9 @@ def export_content_pack(
             if has_adventures else []
         ),
     )
+    if cover_relative:
+        # 封面路径写进 manifest；安装后由本机接口读取（不经过任何第三方）。
+        manifest["cover"] = cover_relative
     files["plugin.json"] = json.dumps(manifest, ensure_ascii=False, indent=2)
     files["config.schema.json"] = json.dumps(_default_config_schema(name), ensure_ascii=False, indent=2)
     files["README.md"] = _default_readme(

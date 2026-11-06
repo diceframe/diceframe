@@ -786,6 +786,27 @@ async def test_export_content_pack_round_trips_through_install(tmp_path):
     assert "source" not in char_tmpl
     assert "plugin_content_id" not in char_tmpl
 
+    # 封面随包分发：写进 assets/ 并在 manifest 里声明；不认识的格式直接拒绝。
+    covered = export_content_pack(
+        _plugin_export_dependencies(api), "my-pack", "我的包", "1.0.0", "",
+        world_id="w1",
+        cover_data=base64.b64encode(b"RIFF0000WEBP").decode(),
+        cover_filename="art.webp",
+    )
+    assert covered["ok"] is True
+    covered_archive = zipfile.ZipFile(io.BytesIO(covered["payload"]))
+    assert "my-pack/assets/cover.webp" in covered_archive.namelist()
+    assert json.loads(covered_archive.read("my-pack/plugin.json"))["cover"] == "assets/cover.webp"
+
+    rejected = export_content_pack(
+        _plugin_export_dependencies(api), "my-pack", "我的包", "1.0.0", "",
+        world_id="w1",
+        cover_data=base64.b64encode(b"GIF89a").decode(),
+        cover_filename="art.gif",
+    )
+    assert rejected["ok"] is False
+    assert "封面" in rejected["error"]
+
     # 装回：install_from_zip 能装，启用后世界与角色卡可读
     await host.install_from_zip(result["payload"], overwrite=True)
     assert "my-pack" in host.plugins

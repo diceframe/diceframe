@@ -10,6 +10,9 @@ vi.mock('../src/api/client', async importOriginal => {
   return { ...actual, api: mocks.api, apiBlob: mocks.apiBlob }
 })
 
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() }))
+vi.mock('../src/composables/useToast', () => ({ useToast: () => toast }))
+
 const fixedAdventure = {
   adventure_id: 'night-shift', source_kind: 'user', source_id: '', version: '1.0.0', format: 'adventure-bundle',
   world_policy: 'fixed', recommended_world_id: 'office', required_runtime: { id: 'core:generic', minimum_version: 1 },
@@ -255,5 +258,43 @@ describe('CreatorPackageExportDialog', () => {
     await wrapper.get('[data-testid="creator-export-adventures"] input[type="checkbox"]').setValue(true)
     expect(wrapper.find('[data-testid="creator-export-warning"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="creator-export-preview"]').text()).toContain('没有发现会阻碍开局的问题。')
+  })
+
+  it('surfaces a rejected step as a toast, not just a banner above the fold', async () => {
+    const wrapper = await render('resource')
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+
+    expect(wrapper.get('.error-banner').text()).toContain('至少选择一个世界')
+    // 横幅在顶部、按钮在底部，所以同一个问题必须同时弹 toast。
+    expect(toast.error).toHaveBeenCalledWith('至少选择一个世界、规则、资料册或角色卡。')
+    expect(mocks.apiBlob).not.toHaveBeenCalled()
+  })
+
+  it('packages the chosen cover, previews it, and drops it again', async () => {
+    const wrapper = await render('resource')
+    await wrapper.get('select').setValue('office')
+    expect(wrapper.find('.creator-package-cover-image').exists()).toBe(false)
+
+    await chooseFiles(wrapper, 'creator-export-cover', [new File(['RIFF0000WEBP'], 'art.webp', { type: 'image/webp' })])
+    expect(wrapper.find('.creator-package-cover-image').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="creator-export-cover-block"]').text()).toContain('art.webp')
+
+    await wrapper.get('[data-testid="creator-export-cover-clear"]').trigger('click')
+    expect(wrapper.find('.creator-package-cover-image').exists()).toBe(false)
+
+    await chooseFiles(wrapper, 'creator-export-cover', [new File(['RIFF0000WEBP'], 'art.webp', { type: 'image/webp' })])
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await vi.waitFor(() => expect(mocks.apiBlob).toHaveBeenCalled())
+    const body = exportBody()
+    expect(body.cover_filename).toBe('art.webp')
+    expect(body.cover_data).toBe(btoa('RIFF0000WEBP'))
+  })
+
+  it('refuses a cover the backend would not accept and explains why', async () => {
+    const wrapper = await render('resource')
+    await chooseFiles(wrapper, 'creator-export-cover', [new File(['GIF89a'], 'art.gif', { type: 'image/gif' })])
+
+    expect(toast.error).toHaveBeenCalledWith('封面只支持 webp / png / jpg，且不超过 512 KB。')
+    expect(wrapper.find('.creator-package-cover-image').exists()).toBe(false)
   })
 })
