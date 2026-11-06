@@ -283,6 +283,8 @@ async def module_marketplace(
             # repository owner); the normalizer falls back to the manifest.
             "author": _author_label(item.get("author")),
             "license": str(item.get("license") or "").strip(),
+            # Hub catalog download / rating / like counters for the shared card.
+            "stats": dict(item["stats"]) if isinstance(item.get("stats"), dict) else {},
             "installed": bool(item.get("installed")),
             "installed_version": installed_version,
             "update_available": bool(

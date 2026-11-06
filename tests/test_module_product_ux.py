@@ -134,7 +134,7 @@ async def test_online_modules_list_only_supported_content_profiles(env) -> None:
 @pytest.mark.asyncio
 async def test_online_modules_carry_author_and_license_from_the_index(env) -> None:
     env.host.marketplace = _FakeMarketIndex([
-        _market_item("indexed", author="EOEOY", license="CC BY-NC 4.0"),
+        _market_item("indexed", author="EOEOY", license="CC BY-NC 4.0", stats={"downloads_total": 3, "likes": 1}),
         _market_item("manifest-author", author={"name": "Night Shift Studio", "url": "https://example.test"}),
         _market_item("anonymous"),
     ])
@@ -147,6 +147,9 @@ async def test_online_modules_carry_author_and_license_from_the_index(env) -> No
         "manifest-author": ("Night Shift Studio", ""),
         "anonymous": ("", ""),
     }
+    # Hub catalog stats ride along for the shared marketplace card.
+    stats = {item["id"]: item["stats"] for item in result["modules"]}
+    assert stats == {"indexed": {"downloads_total": 3, "likes": 1}, "manifest-author": {}, "anonymous": {}}
 
 
 @pytest.mark.asyncio

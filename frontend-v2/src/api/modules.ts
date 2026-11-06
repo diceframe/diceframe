@@ -90,6 +90,8 @@ export type ModuleMarketplaceItem = {
   // From the plugin index; empty when the index and manifest do not say.
   author: string
   license: string
+  // Hub catalog stats; empty when the listing came from the GitHub index.
+  stats?: { downloads_total?: number; rating_average?: number; likes?: number }
   installed: boolean
   installed_version: string
   update_available: boolean
@@ -102,6 +104,8 @@ export type ModuleMarketplaceItem = {
 export type ModuleMarketplaceResponse = {
   ok: boolean
   modules: ModuleMarketplaceItem[]
+  // Where the listing came from; `hub` enables Hub stats and the detail dialog.
+  source?: { hub?: boolean; mirror_name?: string; stale?: boolean }
   total?: number
   error_code?: string
   error?: string
