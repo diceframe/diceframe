@@ -1,6 +1,8 @@
 """Creator-owned content package export; legacy plugin API delegates here."""
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 from dataclasses import dataclass
@@ -13,6 +15,16 @@ from src.content_modules.projection import entries_for_world
 from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
+
+# 封面随包分发，只在客户端安装后由本机接口读取。导出侧只做字节级校验，
+# 不解码图片（导出接口不该替任意上传承担解码开销和解析器风险）。
+MAX_COVER_BYTES = 512 * 1024
+_COVER_MAGIC = {
+    ".webp": b"RIFF",
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+}
 
 @dataclass(frozen=True)
 class PluginExportMediaDependencies:
@@ -52,6 +64,37 @@ def _scene_image_references(
     return [single] if isinstance(single, dict) else []
 
 
+def _package_cover(files: dict[str, bytes], cover_data: str, cover_filename: str) -> str:
+    """把作者选的封面写进 ``assets/``，返回 manifest 里要写的相对路径。
+
+    只校验后缀白名单、体积上限和文件魔数，**不解码图片**；尺寸与可解码性
+    由 ``scripts/validate_content_module.py`` 在发布侧用 Pillow 复核。
+    """
+
+    if not cover_data:
+        return ""
+    payload = str(cover_data)
+    if payload.startswith("data:") and "," in payload:
+        payload = payload.split(",", 1)[1]
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("封面数据不是合法的 base64") from exc
+    if not data:
+        raise ValueError("封面数据为空")
+    if len(data) > MAX_COVER_BYTES:
+        raise ValueError(f"封面不能超过 {MAX_COVER_BYTES // 1024} KB")
+    suffix = Path(str(cover_filename or "")).suffix.lower()
+    magic = _COVER_MAGIC.get(suffix)
+    if magic is None:
+        raise ValueError("封面只支持 webp / png / jpg")
+    if not data.startswith(magic):
+        raise ValueError("封面文件的实际格式与扩展名不一致")
+    relative = f"assets/cover{suffix}"
+    files[relative] = data
+    return relative
+
+
 def export_content_pack(
     dependencies: PluginExportDependencies,
     plugin_id: str,
@@ -73,6 +116,8 @@ def export_content_pack(
     adventure_ids: list[str] | None = None,
     lorebook_ids: list[str] | None = None,
     adventure_refs: list[dict[str, str]] | None = None,
+    cover_data: str = "",
+    cover_filename: str = "",
 ) -> dict[str, Any]:
     """把应用内的世界/角色卡/规则导出成一个内容包 .dfplugin。
 
@@ -329,6 +374,10 @@ def export_content_pack(
 
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)
+    try:
+        cover_relative = _package_cover(files, cover_data, cover_filename)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     manifest = build_content_pack_manifest(
         plugin_id, name, version, description, has_world, has_rule, has_cards, has_portraits, has_scene_images,
         bool(map_package and map_package.has_definitions),
@@ -343,6 +392,9 @@ def export_content_pack(
             if has_adventures else []
         ),
     )
+    if cover_relative:
+        # 封面路径写进 manifest；安装后由本机接口读取（不经过任何第三方）。
+        manifest["cover"] = cover_relative
     files["plugin.json"] = json.dumps(manifest, ensure_ascii=False, indent=2)
     files["config.schema.json"] = json.dumps(_default_config_schema(name), ensure_ascii=False, indent=2)
     files["README.md"] = _default_readme(
@@ -471,39 +523,39 @@ def _default_readme(
             "content": "## 内容",
             "world": "- 世界模板（含世界书条目，启用后自动灌入）",
             "rule": "- 规则",
-            "cards": "- 角色模板（可在插件内容目录导入角色卡库）",
+            "cards": "- 角色模板（可在插件页「内容导入」里导入角色卡库）",
             "map": "- 场景地图（地点、地图定义及所选图标/底图）",
             "adventures": "- 冒险包（安装后从冒险工作台选择并开局）",
             "lorebooks": "- 资料册（可在创建游戏时逐册选择）",
             "usage": "## 用法",
-            "step1": "1. 设置页 -> 插件 -> 导入本 .dfplugin",
-            "step2": "2. 打开本内容包的开关",
+            "step1": "1. 打开「内容包」页，在「本地导入」里选择本 .dfplugin 并安装",
+            "step2": "2. 在本内容包的详情里启用它",
             "step3": "3. 创建游戏时选择本世界与规则",
         },
         "en": {
             "content": "## Contents",
             "world": "- World template (with lorebook entries, auto-imported when enabled)",
             "rule": "- Rule",
-            "cards": "- Character templates (importable from the plugin content catalog)",
+            "cards": "- Character templates (importable from Plugins → Content import)",
             "map": "- Scene map (locations, map definitions, icons/backgrounds)",
             "adventures": "- Adventure packages (select one in the adventure workbench after installation)",
             "lorebooks": "- Lorebooks (choose them per game during game creation)",
             "usage": "## Usage",
-            "step1": "1. Open Settings → Plugins and import this .dfplugin",
-            "step2": "2. Enable this content pack",
+            "step1": "1. Open Content packages and install this .dfplugin from Local import",
+            "step2": "2. Enable this content pack from its details",
             "step3": "3. Pick this world and rule when creating a game",
         },
         "ja": {
             "content": "## 内容",
             "world": "- ワールドテンプレート（ロアブックエントリを含み、有効化時に自動で取り込みます）",
             "rule": "- ルール",
-            "cards": "- キャラクターテンプレート（プラグインコンテンツからインポート可能）",
+            "cards": "- キャラクターテンプレート（プラグイン画面からインポート可能）",
             "map": "- シーンマップ（地点・マップ定義・選択したアイコン/背景）",
             "adventures": "- 冒険パッケージ（インストール後に冒険ワークベンチで選択）",
             "lorebooks": "- ロアブック（ゲーム作成時に冊ごとに選択）",
             "usage": "## 使い方",
-            "step1": "1. 設定 → プラグイン から本 .dfplugin をインポート",
-            "step2": "2. 本コンテンツパックを有効化",
+            "step1": "1. 「コンテンツパック」ページの「ローカルインポート」で本 .dfplugin をインストール",
+            "step2": "2. 詳細画面で本コンテンツパックを有効化",
             "step3": "3. ゲーム作成時に本ワールドとルールを選択",
         },
     }[lang_key]

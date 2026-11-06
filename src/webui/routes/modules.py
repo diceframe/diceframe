@@ -37,6 +37,17 @@ async def api_module_lorebooks(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
 
+async def api_module_cover(request: web.Request) -> web.StreamResponse:
+    """已安装内容包的封面：只从包目录读文件，绝不代抓第三方地址。"""
+
+    try:
+        path = _get_api(request).module_cover_file(request.match_info["module_id"])
+    except KeyError as exc:
+        raise web.HTTPNotFound(text=str(exc)) from exc
+    # URL 带版本号，版本不变图就不变，所以可以让浏览器长期缓存。
+    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 async def api_module_content(request: web.Request) -> web.Response:
     result = _get_api(request).module_content(
         request.match_info["module_id"],
@@ -190,6 +201,7 @@ def register_modules(app: web.Application) -> None:
     app.router.add_post("/api/modules/{module_id}/install", api_module_marketplace_install)
     app.router.add_get("/api/modules/{module_id}/adventures", api_module_adventures)
     app.router.add_get("/api/modules/{module_id}/lorebooks", api_module_lorebooks)
+    app.router.add_get("/api/modules/{module_id}/cover", api_module_cover)
     app.router.add_get("/api/modules/{module_id}/content/{kind}/{key}", api_module_content)
     app.router.add_get("/api/modules/{module_id}/compatibility", api_module_compatibility)
     app.router.add_get("/api/modules/{module_id}/usages", api_module_usages)
