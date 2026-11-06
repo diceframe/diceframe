@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   compatibility: vi.fn(),
   usages: vi.fn(),
   update: vi.fn(),
+  marketplace: vi.fn(),
   disable: vi.fn(),
   enable: vi.fn(),
   uninstall: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../src/api/modules', async importOriginal => {
       compatibility: mocks.compatibility,
       usages: mocks.usages,
       update: mocks.update,
+      marketplace: mocks.marketplace,
       disable: mocks.disable,
       enable: mocks.enable,
       uninstall: mocks.uninstall,
@@ -86,6 +88,10 @@ async function mountView() {
   return { wrapper, router }
 }
 
+function onlineUpdate(overrides: Record<string, unknown> = {}) {
+  return { ok: true, modules: [{ id: 'castle-module', latest_version: '1.1.0', update_available: true, ...overrides }] }
+}
+
 function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
   const button = wrapper.findAll('button').find(candidate => candidate.text() === text)
   if (!button) throw new Error(`未找到按钮：${text}`)
@@ -101,6 +107,7 @@ describe('ModuleDetailView', () => {
     mocks.usages.mockResolvedValue({ ok: true, module_id: 'castle-module', usages: [], total_games: 0 })
     mocks.confirm.mockResolvedValue(true)
     mocks.update.mockResolvedValue({ ok: true })
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [] })
     mocks.disable.mockResolvedValue({ ok: true })
     mocks.uninstall.mockResolvedValue({ ok: true })
   })
@@ -205,14 +212,64 @@ describe('ModuleDetailView', () => {
       bound_games: bound,
       actions: { update: guard(false, bound), disable: guard(false, bound), uninstall: guard(false, bound) },
     }))
+    mocks.marketplace.mockResolvedValue(onlineUpdate())
 
     const { wrapper } = await mountView()
 
     expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此内容包')
-    expect(buttonByText(wrapper, '更新').attributes('disabled')).toBeDefined()
+    expect(buttonByText(wrapper, '更新到 1.1.0').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '卸载').attributes('disabled')).toBeDefined()
     expect(mocks.uninstall).not.toHaveBeenCalled()
+  })
+
+  it('offers update only when the online catalog has a newer version', async () => {
+    // Imported from a file / not listed online: nothing to update from.
+    const { wrapper } = await mountView()
+    expect(mocks.marketplace).toHaveBeenCalledWith('castle-module')
+    expect(wrapper.findAll('button').some(button => button.text().startsWith('更新'))).toBe(false)
+
+    mocks.marketplace.mockResolvedValue(onlineUpdate({ update_available: false, latest_version: '1.0.0' }))
+    const current = await mountView()
+    expect(current.wrapper.findAll('button').some(button => button.text().startsWith('更新'))).toBe(false)
+
+    // A substring match on the keyword must not borrow another pack's update.
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [{ id: 'castle-module-extra', latest_version: '2.0.0', update_available: true }] })
+    const other = await mountView()
+    expect(other.wrapper.findAll('button').some(button => button.text().startsWith('更新'))).toBe(false)
+  })
+
+  it('updates to the newer catalog version and reloads the page', async () => {
+    mocks.marketplace.mockResolvedValue(onlineUpdate())
+    const { wrapper } = await mountView()
+    mocks.detail.mockClear()
+
+    await buttonByText(wrapper, '更新到 1.1.0').trigger('click')
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledWith('castle-module')
+    expect(wrapper.get('[role="status"]').text()).toBe('操作已完成。')
+    expect(mocks.detail).toHaveBeenCalled()
+  })
+
+  it('says so when the installed release is already current', async () => {
+    mocks.marketplace.mockResolvedValue(onlineUpdate())
+    mocks.update.mockResolvedValue({ ok: true, up_to_date: true })
+    const { wrapper } = await mountView()
+
+    await buttonByText(wrapper, '更新到 1.1.0').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[role="status"]').text()).toBe('已经是最新版本。')
+  })
+
+  it('stays usable when the online catalog cannot be reached', async () => {
+    mocks.marketplace.mockRejectedValue(new Error('offline'))
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('.error-text').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text().startsWith('更新'))).toBe(false)
+    expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeUndefined()
   })
 
   it('runs guarded actions only after confirmation and refreshes the guard', async () => {
