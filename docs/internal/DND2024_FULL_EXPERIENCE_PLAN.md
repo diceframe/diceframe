@@ -5,17 +5,25 @@
 
 ## 目标
 
-以当前 D&D 2024 SRD 规则集为基础，补齐三块能力，使 DiceFrame 能支撑接近完整规则书深度的网团体验：
+以当前 D&D 2024 SRD 规则集为基础，补齐三块能力，使 DiceFrame 能支撑 **SRD 5.2.1 范围内完整、可验证的网团体验**：
 
-1. **内容层**：12 职业特性从"幽灵 id"变为可显示、可结算的完整目录；
+1. **内容层**：12 职业及其 SRD 子职、专长、法术与物品，从"幽灵 id"或纯元数据变为可显示、可结算的完整目录；
 2. **效果原语层**：战斗引擎具备 buff / 触发 / 条件伤害 / 动作经济扩展的通用原语；
 3. **战术地图层**：从 1D 剧场模式升级为 2D 战场（token、格子/坐标、后续迷雾）。
+
+## 内容范围（2026-11-06 调整）
+
+- **第二阶段及之后的规则内容仅包括 SRD 5.2.1（2024）中以 CC-BY 4.0 发布、允许署名重分发的条目。**阶段一已经完成的代码与历史核查记录不因此回滚，但其中出现的 PHB/DMG 全量、经典三书、其余官方内容和第三方内容数量，不再构成后续交付目标。
+- 不再规划 S1–S3、F1–F3、I1–I3，不补非 SRD 子职、专长、魔法物品，也不做 2014 版向后兼容或第三方内容包接入。SRD 未收录的条目一律记为**范围外**，不以"技术债"或"待填内容"计入完成率。
+- 后续规则事实以官方 SRD 5.2.1 文本及其 CC-BY 结构化数据为核对源；`.rulebooks` 只可作为历史研究材料，不得作为新增内容来源。5etools 及其他许可不明的数据不进入管线。
+- source-aware 外部内容接入不再是第二阶段目标或任何 SRD 批次的前置条件。若日后仅为内部代码组织而重构目录，必须另立纯架构任务，不扩大内容范围。
+- 阶段三的地图、token、同步与 AI GM 仍是规则中立的引擎能力；其规则验收载体和后续 AoE/zone 内容同样只取 SRD 条目。
 
 ## 现状核查结论（2026-10-28，均已核实到代码）
 
 ### A. 内容层（2026-10-28 二次核查，量化）
 
-规则事实核查源：`.rulebooks/dnd5r/`（CHM 解包 + UTF-8 转码，git 本地隔离，见"核查工具"节）。
+历史规则事实核查源：`.rulebooks/dnd5r/`（CHM 解包 + UTF-8 转码，git 本地隔离，见"核查工具"节）。自 2026-11-06 范围调整后，第二阶段及之后只使用官方 SRD 5.2.1 文本与明确 CC-BY 4.0 的结构化数据作为新增内容核查源。
 
 | 内容类型 | 仓库现状 | 数量缺口 | 备注 |
 |---|---|---|---|
@@ -27,6 +35,8 @@
 | 种族 | `species/` 9 个 | 1 个（Aasimar） | 基本齐 |
 | 物品 | 三套系统并存：规则集 item bundle 50 文件（身份/AC 字段）+ 战斗目录武器档案 15 条（战斗参数）+ content-pack 叙事 item（source-aware）；AC 公式与装备资格已闭环 | 武器 15/38、护甲 6/14；武器词条 versatile/reach/loading/two-handed/ammunition 未建模；精通词条与护甲受训门控未建模；弹药/医疗包无消耗追踪、货币仅单 GP | 魔法物品为零：DMG2024 约 348 条（9 类），attunement/charges/激活/随机宝物表全缺 |
 | 怪物 / NPC / 遭遇 | content-pack 可扩展（4 种 kind，source-aware） | — | 架构正确 |
+
+> 本表是 2026-10-28 的全规则书差距快照，保留用于解释阶段一为什么引入这些原语。表中的 PHB/DMG 总数和"另计"缺口均不是第二阶段及之后的交付承诺；后续只取其中经 SRD 5.2.1 清单确认的子集。
 
 关键架构事实（不变）：content-pack 可扩展类型仅 `monster / npc_statblock / item / encounter_profile`——此处 `item` 是**叙事库存物品**（背包/奖励/提案），与规则集 `item` bundle 是两套系统；spells / progression / class_feature / subclass / feat / advancement_feat / 规则集 `item`（含战斗武器档案耦合）均为硬编码 `srd_*` bundle，外部内容无法注入。魔法物品因这条缝无法用 content-pack 表达机械效果。
 
@@ -68,7 +78,7 @@
   - `foundryvtt/dnd5e` 系统：代码 MIT（可研究/带声明并入），Active Effects 的 change 行模型（`key + mode + value` + duration）是效果实例的建模范本；
   - `foundryvtt/pf2e`：Rule Elements 的谓词 DSL 与触发分类学是触发注册表的参考；
   - open5e / dnd5eapi.co：SRD 5.2 结构化数据，CC-BY-4.0，可带署名重分发，与 AGPL 代码分层共存；
-  - 5etools 数据处于灰色地带，不作为默认分发来源；
+  - 5etools 数据许可边界不清，不作为后续任何内容的数据来源；
   - FVTT 核心 canvas 闭源，无代码可参考；PlanarAlly（开源自托管 VTT）是战术层架构参考。
 
 ## 实施计划
@@ -146,13 +156,11 @@
 
 已被推迟的大件仍按原依赖处理：属性检定 rider（Remarkable Athlete / Supreme Sneak / Peerless Skill）归 P10；Dragon Companion 归 P11 召唤；Sculpt Spells 盟友排除归阶段三后的 AoE 几何。Thief's Reflexes（首轮双回合）是独立先攻/额外回合大件，显式标为暂缓，不用假实现冒充完整支持。
 
-##### 三书及后续扩展新增的原语需求
+##### SRD 后续内容新增的原语需求
 
-- **随机表**：Wild Magic 涌动。注意狂野术法已属核心 48，因此该原语在 S0 后段就需要，不推迟到三书批次；
-- **骰池资源 + 效果菜单**：Battle Master 战技、Psi Warrior；优先复用切片 1/2 的资源、切片 5 的条件 rider 与 capability 选项，重点设计声明 schema，不另造结算引擎；
-- **伤害吸收反应**：Spirit Shield、Song of Defense；复用切片 3 决策窗口，将 Uncanny Dodge 的乘法修正扩展为固定值/骰式减法；
-- **装备运行时生成/形态切换**：Soulknife 心灵刃、Armorer 模式；这是真正的新原语，必须明确装备 canonical identity、持续期与回收，不用投影假装备；
-- 传送/换位（暗影武僧等）优先复用 P6 位移原语。
+- **随机表**：Wild Magic 涌动属于 SRD 子职内容，该原语在 S0 内完成，可复用 D4 的表定义与稳定选取，但不得复用 GM 滚宝物表的意图或事件；
+- 其余原语只由 SRD 清单中的具体条目反向驱动，逐条附来源、消费者和行为测试，不为假想的内容扩展提前建设；
+- Battle Master、Psi Warrior、Spirit Shield、Song of Defense、Soulknife、Armorer、暗影武僧等非 SRD 条目及其专属机制，不再进入后续原语排期。
 
 ##### 专长侧需求与验证载体（2026-10-29 核查）
 
@@ -165,7 +173,7 @@
 - **Alert** 的 `initiative_proficiency` 字段没有任何运行时消费者，先攻熟练与先攻互换均未实现；
 - **Savage Attacker** 没有机制字段；advancement 的 13 条也只有选择/门控数据，箭术、防御、巨武器、双武器 4 个战斗风格全部零效果。
 
-专长不另建原语计划，直接作为 1B/1C 的消费者与端到端验证载体：
+专长不另建原语计划，直接作为 1B/1C 的消费者与端到端验证载体。下表保留阶段一的机制分析；**第二阶段只实现经 SRD 5.2.1 清单确认的交集，表中其余专长不再自动进入 F0 或后续批次**：
 
 | 专长/机制 | 复用或新增原语 |
 |---|---|
@@ -237,36 +245,33 @@ D1 执行报告：`design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`（实
 
 ##### 架构边界
 
-魔法物品效果必须是规则集侧能力（capabilities/parameters），不是 content-pack 叙事条目——避免第三套系统继续堆叠；规则集 `item` 的 source-aware 解耦（阶段二第 5 项）是第三方魔法物品接入前提。导入管线与 I0–I3 批次统一归阶段二第 4 节。
+魔法物品效果必须是规则集侧能力（capabilities/parameters），不是 content-pack 叙事条目——避免第三套系统继续堆叠。后续只导入 SRD 5.2.1 的魔法物品与随机表内容，统一归阶段二 I0；DMG 非 SRD 表、其余官方内容和第三方内容不在计划内，也不再要求为此进行 source-aware 解耦。
 
-### 阶段二：内容批量填充（A 层）
+### 阶段二：SRD 内容批量填充（A 层）
 
-1. 以切片 1–5 沉淀的 schema 为模板，把 12 职业的幽灵 id 逐个补进 `class_feature_catalog`（name / summary / parameters / capabilities）；
-2. **法术填充走生成器管线**（原型已验证：`scripts/rulesets/import_dnd5eapi_spell_effects.py`，快照与产物在 git 排除的 `.imports/`）：
-   - 四层：获取（dnd5eapi 2014+2024 快照，CC-BY 署名）→ 映射（2014 骨架 + 2024 补充，fail-closed）→ 核对（`.rulebooks` 2024 原文骰式 + 语义关键词三层防线）→ 分批验收（contracts + 装载测试全过、行为测试抽样、按桶分批提交）；
-   - **原型实证（2026-10-29，直填桶 46 条）**：auto=0 / review=13 / manual=33——没有一条可不经人眼入库；机器的真实产出是"13 条带完整草稿的快速人工确认（补 condition/rider 字段）+ 33 条带精确原因的人工处理"（其中 16 条 P 原语等待、5 条 P2 tick/区域硬阻断）；
-   - 三层防线缺一不可（原型过程实证）：无数值核对 → 2014 数值污染（cure-wounds 1d8 vs 2d8）；无语义扫描 → "数值正确的错误模式"（初版 18 条假 auto，如 hunter_s_mark 附伤被误判直伤）；无锚点检查 → API 2024 字段残缺误判（mind_spike 无 dc 字段实为 Wis 豁免）；
-   - 2014→2024 差异坑实录：acid_arrow 新增回合结束延迟伤害（P2）、harm 改为降生命值上限、shining_smite 改名+施法时机改命中后、规则书保留人名前缀（Melf's）而 SRD 5.2.1 canonical id 去除（别名表处理）；
-   - 语义关键词是启发式：降级方向永远保守正确，但原因标签可能不准（如光照半径误标"区域语义"），人工复核以规则书原文为准；
-3. 数据源：open5e / dnd5eapi 的 CC-BY SRD 5.2 JSON，映射到 canonical ref 时逐条过 `contracts.py` 校验；
-4. **内容分区与批次总表**（各内容域统一按"核心 → 经典三书 → 其它官方 → 第三方"推进；第三方批次均以第 5 项 source-aware 解耦为前提，随时可作为暂停点）：
+1. 以切片 1–5 沉淀的 schema 为模板，把 12 职业的 SRD 幽灵 id 逐个补进 `class_feature_catalog`（name / summary / parameters / capabilities）；
+2. **法术填充走生成器辅助、人工核对的管线**（原型：`scripts/rulesets/import_dnd5eapi_spell_effects.py`）：
+   - 四层：获取（仅 SRD 5.2.1 / CC-BY 4.0 快照）→ 映射（仅 2024 规则语义，fail-closed）→ 核对（官方 SRD 文本的骰式与语义）→ 分批验收（contracts + 装载测试全过、行为测试抽样、按桶分批提交）；
+   - 不再使用 2014 数据作为生成骨架，也不为 2014→2024 差异建立兼容层；原型阶段有关 2014 污染、auto=0 / review=13 / manual=33 的记录仅作为风险证据保留，不能代替当前 SRD 清单与原文核对；
+   - 语义关键词只用于分流和降级，不能代替人工规则复核；无数值、语义或来源锚点时不得自动入库；
+3. 数据源：官方 SRD 5.2.1 文本，以及 open5e / dnd5eapi 中可明确追溯到该 SRD、采用 CC-BY 4.0 的结构化数据。映射到 canonical ref 时逐条过 `contracts.py` 校验，并保存来源与署名信息；
+4. **SRD 内容批次总表**（每批先冻结精确 ID 清单，清单外一律不做）：
 
    | 内容域 | 批次 | 范围与数据处理 |
    |---|---|---|
-   | 职业特性 | 直填 | 12 职业幽灵 id 按切片 1–5 schema 逐个补齐（第 1 项） |
-   | 法术 | 直填 + 管线 | 生成器管线分批（第 2 项）；56 条几何依赖归阶段三后 |
-   | 子职 | S0–S3 | S0：核心 48，先做 12 个 SRD 代表子职（CC-BY 可分发），再补 36（`.rulebooks` 录入）；S1：三书剩余子职（PHB2024 已重做收编的不做 2014 版，其余按 2024 向后兼容规则标注版本语义）；S2：其它官方按需分批；S3：第三方 |
-   | 专长 | F0–F3 | F0：核心 76，先用 CC-BY 源客观核对 SRD 5.2.1 清单（约 24 条，以实际清单为准）直填，其余约 52 条 `.rulebooks` 录入；F1：三书（去除已收编条目）；F2：其它官方按需；F3：第三方 |
-   | 装备 | 直填 + I0–I3 | 38 武器 + 14 护甲全在 SRD 5.2.1，复用生成器管线提前直填；魔法物品 I0：SRD 子集（CC-BY 核对）；I1：DMG 全量约 348，高频优先（治疗药水、+1 武器、卷轴先行）；I2：其它官方（含 2014 同位物品）；I3：第三方 |
+   | 职业特性 | 直填 | 12 职业在 SRD 5.2.1 中的特性按切片 1–5 schema 逐个补齐（第 1 项） |
+   | 法术 | 直填 + 管线 | 仅 `srd_spells.json` 对应的 SRD 清单；56 条几何依赖归阶段三后，战斗外叙事条目不冒充机械闭环 |
+   | 子职 | S0 | 仅 12 个 SRD 代表子职及其特性；不补 PHB 其余 36 个子职，不设 S1–S3 |
+   | 专长 | F0 | 先以官方 SRD 5.2.1 文本核对精确清单，再直填并补行为测试；不补 PHB 其余专长，不设 F1–F3 |
+   | 装备与魔法物品 | 非魔法直填 + I0 | 非魔法装备沿用 SRD 清单；I0 仅含 SRD 魔法物品与 SRD 随机表，不导入 DMG 其余约 348 条，不设 I1–I3 |
 
-   统一纪律：填充必须先补效果声明与运行时消费者，不能把"可选、可展示"计为"已支持"；Alert 这类已有字段但无消费者的条目必须配行为测试。许可硬边界：SRD 5.2.1 只覆盖各内容域的代表子集，个人本地分叉可参考 `.rulebooks` 录入其它内容；若回馈上游或公开分发，只能纳入有明确许可的数据，不把 5etools 或本地规则书文本当默认分发源，CC-BY 直填与手录内容不得混标。
-
-5. 架构解耦（独立 PR，勿与数据填充混合）：把 spells / progression / class_feature / subclass_catalog / feat / advancement_feat_catalog / 规则集 item 从硬编码 `srd_*` 改为 source-aware 目录，参照 `content/catalog.py` 已有模式与 `ContentRefChain`；第三方子职、专长与魔法物品批次以此为先决条件；
-6. 仓库内明确 `LICENSE`（AGPL 代码）与内容署名（CC-BY）的分层边界。
+   统一纪律：填充必须先补效果声明与运行时消费者，不能把"可选、可展示"计为"已支持"；Alert 这类已有字段但无消费者的条目必须配行为测试。每个批次必须有精确 ID 清单、官方 SRD 出处、中英文目录、玩家入口、运行时消费者与行为测试；缺任一项就保持未完成。CC-BY 结构化草稿与人工整理结果必须统一经过 SRD 原文核验，不混入非 SRD 手录内容。
+5. **不再安排外部内容 source-aware 解耦。**现有硬编码 `srd_*` 与 SRD-only 范围一致；只有具体 SRD 实现被架构问题阻塞时，才可另立最小重构任务，且不得顺带引入外部内容包、2014 兼容或第三方接入；
+6. 维护仓库内 `LICENSE`（AGPL 代码）与 SRD 内容署名（CC-BY 4.0）的分层边界；新增批次必须同步来源与 attribution。
 
 ### 阶段三：战术地图层（C 层）
 
-选定路线：**最小 2D 升级（路线 C）**，增量演进而非一步到位。
+选定路线：**最小 2D 升级（路线 C）**，增量演进而非一步到位。地图与同步机制保持规则中立，但本阶段及阶段三后的法术、怪物、遭遇与其他规则验收内容仍只取 SRD 5.2.1；不借地图建设重新引入非 SRD 内容批次。
 
 ```text
 positions: {actor: int}   →   positions: {actor: [x, y]}     # theater 数轴 → 2D 坐标
@@ -305,18 +310,18 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 1D | 物品原语（attunement / charges / 激活动作 / 随机宝物表） | ✅ D1 实现与验收完成（2026-11-04：`feat/dnd2024-1d-items` `e9ecb11b` + `34cbb98f`，基于 `pr/1c` `e5ed9f89`；装备 38 武器 / 12 护甲 + 盾全齐，物品 50→81；全仓 8176 passed / 7 skipped、覆盖率 81.64%，browser smoke desktop+mobile 各 11 passed，T12 全覆盖，见 `design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`。D2 实现与验收完成（`feat/dnd2024-2d-attunement`，基于 D1 head；18 个测试用例，见 `design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`），D3 实现完成并出执行报告（`items/activation.py` + `items/charges.py`，见 `design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`）、D4 代码与测试完成但缺执行报告（`treasure/tables.py` + `test_dnd2024_treasure_tables.py`），D3、D4 均在 PR #653 分支 `ef4a5923` 上、尚未合入；D3b 未开工——其白名单文件 `items/charges.py` 是 #653 新增文件（main 上不存在），只能 stack 在 #653 之上开发；切片顺序 2026-11-03 定：D1 → D2 → D3 → D3b，D4 可并行；+N 效果骑 S-P10 与切片 5 rider；现状核查 2026-10-29 完成） |
 | 二 | 职业特性批量填充（幽灵 id → catalog） | ⬜ 未开始 |
 | 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
-| 二 | 子职分区 S0–S3（核心 48 → 三书 → 其它官方 → 第三方） | ⬜ 未开始（S0 先做 12 个 SRD 代表子职；S3 以 source-aware 解耦为前提） |
-| 二 | 专长分区 F0–F3（核心 76 → 三书 → 其它官方 → 第三方） | ⬜ 未开始（现状形式覆盖 17、闭环 2；F0 先核对 SRD CC-BY 清单） |
+| 二 | 子职 S0（仅 12 个 SRD 代表子职及特性） | ⬜ 未开始（非 SRD 子职为范围外，不设 S1–S3） |
+| 二 | 专长 F0（仅 SRD 5.2.1 清单） | ⬜ 未开始（先冻结官方 SRD 精确清单；非 SRD 专长为范围外，不设 F1–F3） |
 | 二 | 非魔法装备直填（23 武器 + 8 护甲 + 词条字段，SRD CC-BY 管线） | ✅ 已完成（2026-11-04，D1：武器 15→38、护甲 12 + 盾全齐、物品 50→81，各带 en / zh-CN locale；代码与数据在 PR #653 分支，待合入） |
-| 二 | 魔法物品分区 I0–I3（DMG 全量约 348，高频优先） | ⬜ 未开始 |
-| 二 | spells / progression / class_feature / subclass_catalog / feat / advancement_feat_catalog / 规则集 item source-aware 解耦 | ⬜ 未开始 |
-| 二 | 许可分层声明（AGPL 代码 / CC-BY 内容） | ⬜ 未开始 |
+| 二 | 魔法物品 I0（仅 SRD 物品与随机表） | ⬜ 未开始（DMG 非 SRD 内容为范围外，不设 I1–I3） |
+| 二 | 外部内容 source-aware 解耦 | ⛔ 移出计划（SRD-only 不需要；不为第三方内容预设架构任务） |
+| 二 | 许可分层声明（AGPL 代码 / SRD CC-BY 4.0 内容） | ⬜ 未开始 |
 | 三 | positions 升级 2D + token 渲染层 | ⬜ 未开始 |
 | 三 | 拖拽 → move intent 交互 | ⬜ 未开始 |
 | 三 | 迷雾 / 墙 / 光照（远期） | ⬜ 未开始 |
 | 三后 | 几何 AoE / zone 管线（56 条法术依赖，见矩阵） | ⬜ 未开始（zone 按"位置区间"抽象可与 1D 共用） |
 
-状态图例：⬜ 未开始 / 🔶 进行中 / ✅ 已完成（完成后附 PR 或 commit 链接）。
+状态图例：⬜ 未开始 / 🔶 进行中 / ✅ 已完成（完成后附 PR 或 commit 链接）/ ⛔ 范围外或已移出计划。
 
 ### 切片 1 审核记录（2026-10-28）
 
