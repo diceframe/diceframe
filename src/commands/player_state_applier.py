@@ -273,6 +273,8 @@ class PlayerStateApplier:
                         custom_damage=custom_damage if isinstance(custom_damage, int) else None,
                         legacy_gain=bool(op.get("legacy")),
                         rule=rule,
+                        # 同名多件时用身份取件；未声明时保持旧的按名匹配。
+                        item_ref=str(op.get("item_ref") or ""),
                     )
                 if changed:
                     domains.update(("equipment", "inventory"))

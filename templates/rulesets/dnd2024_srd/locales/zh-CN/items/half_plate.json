@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "half_plate"
+  },
+  "fields": {
+    "name": "半身板甲"
+  }
+}

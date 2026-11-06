@@ -9,6 +9,24 @@ from typing import Any
 from src.engine.player_control import is_ai_controlled
 from src.rulesets.dnd2024.content.contracts import CREATURE_TYPES
 
+from ..character.attunement import (
+    AttunementError,
+    attuned_refs,
+    canonical_item_ref,
+    inventory_ref_counts,
+    item_requires_attunement,
+    owned_ref_counts,
+)
+from ..items.activation import (
+    ItemActivationError,
+    validate_activation_declaration,
+    validate_consumable_declaration,
+)
+from ..items.charges import (
+    ChargesError,
+    charges_of,
+    validate_charges_declaration,
+)
 from .primitives import (
     DICE_RE,
     INTENT_TYPES,
@@ -305,7 +323,7 @@ class CombatValidationMixin:
         # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
         flags = condition_flags(self.catalog.conditions, actor["conditions"])
         if flags["incapacitated"] and intent_type in {
-            "attack", "cast_spell", "class_capability", "dash", "dodge",
+            "attack", "cast_spell", "activate_item", "class_capability", "dash", "dodge",
             "disengage", "hide", "stabilize",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
@@ -335,6 +353,8 @@ class CombatValidationMixin:
             self._validate_class_capability(instance, combat, intent, actor, economy)
         if intent_type == "cast_spell":
             self._validate_spell(instance, combat, intent, actor, economy)
+        if intent_type == "activate_item":
+            self._validate_item_activation(instance, combat, intent, actor, economy)
         if intent_type == "stabilize":
             target = self._actor_view(instance, combat, str(intent.get("target_id") or ""))
             if target["kind"] != "player" or target["hp"] > 0:
@@ -405,6 +425,33 @@ class CombatValidationMixin:
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
 
+    def _validate_two_handed(
+        self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],
+    ) -> None:
+        """两用武器双手持用的声明校验。
+
+        ``equipment_refs`` 是携带清单而不是持握槽位：角色可以随身带备用
+        武器而不握在另一只手上，因此只有盾牌（明确占据一只手）能确定阻挡
+        双手持用。真正的副手槽位判定仍属于后续 slot map 改造；当前模型不会
+        假装能区分"携带"与"正在持握"。
+        """
+
+        declared = intent.get("two_handed")
+        if declared is None or declared is False:
+            return
+        if declared is not True:
+            raise CombatIntentError("two_handed must be a boolean")
+        if actor["kind"] not in {"player", "companion"}:
+            # 敌方 stat block 没有两用概念，其攻击档也不声明该字段。
+            raise CombatIntentError("two_handed is not available to this actor")
+        if not weapon.get("damage_two_handed"):
+            raise CombatIntentError("this weapon has no two-handed damage")
+        for ref in actor.get("equipment_refs") or []:
+            ref_id = str(ref).removeprefix("item:")
+            item = self.bundle.get("item", ref_id) or {}
+            if item.get("item_type") == "shield":
+                raise CombatIntentError("a shield in the other hand blocks two-handed use")
+
     def _validate_lucky_spend(
         self, instance: Any, intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
@@ -440,12 +487,122 @@ class CombatValidationMixin:
             # 一个 lookup 同时覆盖装备武器、徒手打击与敌人 attack profile：
             # 客户端无法声明角色并不真正拥有的攻击档案。
             raise CombatIntentError("attack profile is not available to the actor")
+        self._validate_ammunition(instance, actor, weapon)
+        self._validate_two_handed(actor, intent, weapon)
         self._validate_lucky_spend(instance, intent, actor)
         distance = self._distance(combat, actor["actor_id"], target_id)
         normal_range = int(weapon.get("thrown_range") or weapon.get("range", 5))
         long_range = int(weapon.get("long_range") or normal_range)
         if distance > long_range:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
+
+    def _canonical_actor(self, instance: Any, actor: dict[str, Any]) -> dict[str, Any]:
+        if actor["kind"] == "player":
+            return _canonical(instance.get_character_sheet(actor["id"]))
+        if actor["kind"] == "companion":
+            return self._companion(instance, actor["id"]).get("ruleset_character") or {}
+        raise CombatIntentError("item activation is not available to this actor")
+
+    def _activation_payload(self, instance: Any, actor: dict[str, Any]) -> Any:
+        if actor["kind"] == "player":
+            return instance.get_character_sheet(actor["id"])
+        return self._companion(instance, actor["id"])
+
+    def _validate_ammunition(
+        self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],
+    ) -> None:
+        """A ranged profile that declares ammunition needs a carried copy.
+
+        Companions have no live backpack in this slice; their ranged attacks
+        keep the pre-D3 behaviour instead of inventing an inventory authority.
+        """
+
+        raw = weapon.get("ammunition_item_ref")
+        if not raw or actor["kind"] != "player":
+            return
+        try:
+            item_ref = canonical_item_ref(raw)
+        except AttunementError as exc:
+            raise CombatIntentError(str(exc)) from None
+        payload = instance.get_character_sheet(actor["id"])
+        if inventory_ref_counts(payload).get(item_ref, 0) < 1:
+            raise CombatIntentError("no ammunition for this attack")
+
+    def _validate_item_activation(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], economy: dict[str, Any],
+    ) -> None:
+        if actor["kind"] not in {"player", "companion"}:
+            raise CombatIntentError("item activation is not available to this actor")
+        try:
+            item_ref = canonical_item_ref(intent.get("item_ref"))
+        except AttunementError as exc:
+            raise CombatIntentError(str(exc)) from None
+        item = self.bundle.get("item", item_ref.removeprefix("item:"))
+        if not isinstance(item, dict):
+            raise CombatIntentError("item is not defined in the active bundle")
+        try:
+            declaration = validate_activation_declaration(item)
+            maximum = validate_charges_declaration(item)
+            consumable = validate_consumable_declaration(item)
+        except (ItemActivationError, ChargesError) as exc:
+            raise CombatIntentError(str(exc)) from None
+        if declaration is None:
+            raise CombatIntentError("item cannot be activated")
+        if consumable and actor["kind"] == "companion":
+            # companion 还没有权威背包与原子扣件路径：在动作成本、充能和
+            # consumed 事件之前拒绝，避免把 quantity 消耗留在玩家事件链之外。
+            raise CombatIntentError(
+                "companion consumable activation requires an authoritative backpack"
+            )
+        cost = declaration["cost"]
+        if int(economy.get(cost, 0) or 0) < 1:
+            raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
+        canonical = self._canonical_actor(instance, actor)
+        payload = self._activation_payload(instance, actor)
+        # Consumables are removed from the live inventory when the batch is
+        # applied.  Equipment rows and canonical equipment refs are not a
+        # backpack take path, so a consumable must prove an inventory copy here
+        # instead of passing validation and failing after the roll.
+        counted = inventory_ref_counts(payload) if consumable else owned_ref_counts(payload)
+        owned = counted.get(item_ref, 0)
+        if owned < 1:
+            raise CombatIntentError("item is not carried")
+        if item_requires_attunement(self.bundle, item_ref) and item_ref not in attuned_refs(canonical):
+            raise CombatIntentError("item requires attunement")
+        charge_cost = declaration.get("charge_cost")
+        if maximum is not None:
+            if charge_cost is None:
+                raise CombatIntentError("charged item activation requires charge_cost")
+            if owned > 1:
+                raise CombatIntentError("cannot activate a charged item carried in multiple copies")
+            current = charges_of(canonical, item_ref)
+            if current is None:
+                raise CombatIntentError("item charges are not initialized")
+            if current < int(charge_cost):
+                raise CombatIntentError("not enough charges")
+        elif charge_cost is not None:
+            raise CombatIntentError("item has no charges")
+        if consumable and owned < 1:
+            raise CombatIntentError("item is not carried")
+        target_id = str(intent.get("target_id") or actor["actor_id"])
+        if declaration["target"] == "self" and target_id != actor["actor_id"]:
+            raise CombatIntentError("this item can only target its user")
+        target = self._actor_view(instance, combat, target_id)
+        if target["kind"] not in {"player", "companion"}:
+            raise CombatIntentError("item targets a party member or the user")
+        if str(target.get("side") or "") != str(actor.get("side") or ""):
+            raise CombatIntentError("item targets a party member or the user")
+        if "dead" in (target.get("conditions") or {}):
+            raise CombatIntentError("item cannot target a dead actor")
+        # Using an item on an ally is a touch-range action: the user must be
+        # within 5 feet.  Self-use has no separate distance check.
+        if target_id != actor["actor_id"]:
+            distance = self._distance(combat, actor["actor_id"], target_id)
+            if distance > 5:
+                raise CombatIntentError(
+                    f"ally is out of item range ({distance} > 5 feet)"
+                )
 
     def _validate_spell(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

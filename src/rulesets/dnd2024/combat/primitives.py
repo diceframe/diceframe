@@ -14,7 +14,7 @@ UNARMED_STRIKE_REF = "unarmed_strike"
 RAGE_MAX_ROUNDS = 100
 INTENT_TYPES = frozenset({
     "encounter.ready", "encounter.unready", "combat.start", "combat.end", "combat.message",
-    "attack", "cast_spell", "move", "dash", "dodge", "disengage", "hide", "end_turn",
+    "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",
     "death_save", "stabilize", "decision.resolve",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。

@@ -517,6 +517,10 @@ def test_ranged_hit_on_a_paralyzed_target_is_not_critical() -> None:
     _runtime, engine, instance = new_combat(
         equipment=["item:shortbow"], enemies=[enemy(position=30)],
     )
+    # D3 起弹药是攻击的机械前置：携带消耗即消耗一支箭。
+    instance.get_character_sheet("gm")["inventory"] = [
+        {"name": "item:arrows", "item_ref": "item:arrows", "type": "gear", "qty": 1},
+    ]
     add_enemy_condition(instance, "paralyzed", {"source": "test"})
 
     result = attack(

@@ -6,6 +6,13 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from ..character.attunement import AttunementError, canonical_item_ref
+from ..items.activation import (
+    ItemActivationError,
+    build_item_healing_event,
+    validate_activation_declaration,
+)
+from ..items.charges import ChargesError, validate_charges_declaration
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -89,6 +96,74 @@ class CombatResolutionMixin:
             str(attack.get("damage") or ""),
             flat_bonus=flat_bonus,
         )
+
+    def _activate_item_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Activation: pay the declared cost/charge/copy, then heal the target."""
+
+        actor_id = str(intent["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        try:
+            item_ref = canonical_item_ref(intent.get("item_ref"))
+        except AttunementError as exc:  # pragma: no cover - validation guards this
+            raise CombatIntentError(str(exc)) from None
+        item = self.bundle.get("item", item_ref.removeprefix("item:"))
+        if not isinstance(item, dict):  # pragma: no cover - validation guards this
+            raise CombatIntentError("item is not defined in the active bundle")
+        try:
+            declaration = validate_activation_declaration(item)
+            maximum = validate_charges_declaration(item)
+        except (ItemActivationError, ChargesError) as exc:  # pragma: no cover
+            raise CombatIntentError(str(exc)) from None
+        if declaration is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("item cannot be activated")
+        target_id = str(intent.get("target_id") or actor_id)
+        target = actor if target_id == actor_id else self._actor_view(
+            instance, combat, target_id,
+        )
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.action.spent",
+            "actor_id": actor_id,
+            "resource": declaration["cost"],
+            "amount": 1,
+        }]
+        charge_cost = declaration.get("charge_cost")
+        if maximum is not None and charge_cost is not None:
+            events.append({
+                "type": "dnd2024.item.charge_spent",
+                "actor_id": actor_id,
+                "item_ref": item_ref,
+                "amount": int(charge_cost),
+            })
+        if bool(item.get("consumable")):
+            events.append({
+                "type": "dnd2024.item.consumed",
+                "actor_id": actor_id,
+                "item_ref": item_ref,
+                "amount": 1,
+            })
+        node = formula_node_from_dice_formula(declaration["effect"]["healing"])
+        healing, rolls = roll_damage_node(node, rng)
+        healing = max(1, healing)
+        blocked = "cannot_regain_hp" in (target.get("conditions") or {})
+        events.append(build_item_healing_event(
+            item_ref=item_ref,
+            target_id=target_id,
+            rolls=rolls,
+            healing=healing,
+            hp_before=int(target.get("hp", 0) or 0),
+            hp_max=int(target.get("max_hp", 0) or 0),
+            blocked_by="cannot_regain_hp" if blocked else None,
+        ))
+        events.append({
+            "type": "dnd2024.item.activated",
+            "actor_id": actor_id,
+            "item_ref": item_ref,
+            "target_id": target_id,
+            "cost": declaration["cost"],
+        })
+        return events
 
     def _start_combat_event(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         enemies: dict[str, dict[str, Any]] = {}
@@ -284,6 +359,10 @@ class CombatResolutionMixin:
                 # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
                 attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
             damage_formula = str(weapon["damage"])
+            if intent.get("two_handed"):
+                # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
+                # damage_two_handed 的武器才允许声明该意图。
+                damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
             damage_type = str(weapon["damage_type"])
             long_range = int(weapon.get("long_range") or weapon.get("thrown_range") or weapon["range"])
             normal_range = int(weapon.get("thrown_range") or weapon["range"])
@@ -347,6 +426,14 @@ class CombatResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(combat, actor)] if spend_attack_action else []),
         ]
+        ammo_ref = weapon.get("ammunition_item_ref")
+        if ammo_ref and actor["kind"] == "player":
+            events.append({
+                "type": "dnd2024.item.consumed",
+                "actor_id": actor_id,
+                "item_ref": str(ammo_ref),
+                "amount": 1,
+            })
         if spend_luck:
             events.append({
                 "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
