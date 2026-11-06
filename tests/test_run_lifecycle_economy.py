@@ -377,6 +377,110 @@ def test_purchase_deposit_only_charges_due_and_delivers_after_tail() -> None:
     assert instance.get_character_sheet("gm")["inventory"] == [{"name": "分期护甲", "qty": 1}]
 
 
+def _installment_offer(instance: GameInstance) -> dict:
+    sheet = instance.get_character_sheet("p2")
+    sheet["gold"] = 1000
+    sheet["currency"]["amount"] = 1000
+    instance.round_number = 4
+    return queue_purchase_offer(
+        instance, payer_uid="p2", amount=900, items=["分期护甲"],
+        initial_due=200, remaining_due=700,
+        source="gm_manual", source_ref="gm_manual:installment-rollback",
+    )
+
+
+def _grant_item(target: dict, reward: dict) -> None:
+    target.setdefault("inventory", []).append({"name": reward["name"], "qty": 1})
+
+
+def test_rollback_of_deposit_round_charges_the_deposit_again() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, snapshot)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 1000
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_pending"
+
+    again = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert again["ok"] is True
+    assert again["committed"] is False
+    assert again["outcome"]["amount"] == 200
+    assert instance.get_character_sheet("p2").get("inventory", []) == []
+
+
+def test_rollback_across_deposit_and_tail_reopens_at_the_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    instance.round_number = 6
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert offer["status"] == "committed"
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, snapshot)
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_pending"
+    again = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert again["committed"] is False
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+
+def test_rollback_of_tail_round_keeps_the_surviving_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    instance.round_number = 6
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+
+    reverse_round_economy(instance, 6)
+    restore_players(instance, snapshot)
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_paid"
+    tail = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert tail["committed"] is True
+    assert tail["outcome"]["amount"] == 700
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 100
+
+
+def test_cancelling_a_deposit_paid_contract_refunds_the_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+    cancel_proposals_for_player(instance, "p2")
+
+    assert offer["status"] == "cancelled"
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 1000
+    refund = next(
+        tx for tx in economy_state.state(instance)["transactions"]
+        if tx["id"] == offer["refund_transaction_id"]
+    )
+    assert refund["kind"] == "refund"
+    assert refund["entries"][0]["delta"] == 200
+
+
 def test_purchase_tail_insufficient_funds_keeps_deposit_contract_retryable() -> None:
     instance = _instance()
     sheet = instance.get_character_sheet("gm")
