@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { NCollapse, NCollapseItem, NButton, NIcon, NSelect, NSpin } from 'naive-ui'
-import { CreateOutline, RefreshOutline } from '@vicons/ionicons5'
+import { RefreshOutline } from '@vicons/ionicons5'
+import { RouterLink } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
 import type { CharacterPortrait, PluginContentResource } from '@/api/types'
 import PortraitImage from '@/components/PortraitImage.vue'
@@ -21,7 +22,7 @@ defineProps<{
   importContent: (kind: string, item: PluginContentResource) => Promise<void> | void
   importAllContent: (pluginId: string) => Promise<void> | void
 }>()
-const emit = defineEmits<{ 'update:contentTargetBookId': [value: string]; 'open-export': [] }>()
+const emit = defineEmits<{ 'update:contentTargetBookId': [value: string] }>()
 
 const { t } = useLocale()
 
@@ -47,12 +48,13 @@ function contentPortrait(item: PluginContentResource): CharacterPortrait | undef
       <template #icon><NIcon :component="RefreshOutline" /></template>
       {{ t('refresh') }}
     </NButton>
-    <NButton type="primary" @click="emit('open-export')" class="create-pack-btn">
-      <template #icon><NIcon :component="CreateOutline" /></template>
-      {{ t('createContentPack') }}
-    </NButton>
   </section>
   <p class="muted content-auto-import-hint">{{ t('contentAutoImportHint') }}</p>
+  <p class="muted content-store-moved" data-testid="plugin-content-import-boundary">
+    {{ t('pluginContentImportBoundary') }}
+    <RouterLink :to="{ name: 'creator' }">{{ t('pluginContentOpenCreator') }} <span aria-hidden="true">→</span></RouterLink>
+    <RouterLink :to="{ name: 'modules' }">{{ t('contentStoreMovedAction') }} <span aria-hidden="true">→</span></RouterLink>
+  </p>
   <NSpin :show="contentLoading">
     <p v-if="!contentByPlugin.length" class="muted">{{ t('noPluginsAvailable') }}</p>
     <NCollapse v-else class="content-collapse">
