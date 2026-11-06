@@ -220,8 +220,8 @@ def test_purchase_items_stay_protected_after_in_flight_decline_or_rejection(acce
     assert data["state_update"]["loot"] == []
 
 
-def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path) -> None:
-    """Production round appliers must not let model item tags mutate inventory."""
+def test_strict_settlement_effects_require_settlement_receipt(tmp_path) -> None:
+    """Deferred effect groups cannot deliver items without a committed receipt."""
 
     instance = _instance()
     applier = StateUpdateApplier(
@@ -243,7 +243,7 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         },
     }
 
-    applier.apply_state_update(instance, update)
+    applier.apply_state_update(instance, update, settlement_effects=True)
 
     sheet = instance.get_character_sheet("gm")
     assert sheet.get("inventory", []) == []
@@ -262,6 +262,7 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         instance,
         authorized,
         authorized_receipt_id="tx_test_settlement",
+        settlement_effects=True,
     )
     names = {
         str(item.get("name") or "")
@@ -269,6 +270,72 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         if isinstance(item, dict)
     }
     assert {"已结算护甲", "已结算药水"} <= names
+
+
+def test_strict_economy_keeps_ordinary_narrative_loot(tmp_path) -> None:
+    """A round with no pending economy decision is not a settlement.
+
+    Production enables strict economy; ordinary LOOT / item_gains must still
+    reach the inventory, while the ephemeral FREE_GRANT marker never persists.
+    """
+
+    instance = _instance()
+    applier = StateUpdateApplier(
+        tmp_path, None, load_world_template=lambda *_: {}, strict_economy=True,
+    )
+    update = {
+        "loot": [{"player": "gm", "item": "治疗药水"}],
+        "free_grants": [{"player": "gm", "item": "治疗药水"}],
+        "players": {"gm": {"item_gains": [{"name": "火把", "qty": 1}]}},
+    }
+
+    applier.apply_state_update(instance, update)
+
+    names = {
+        str(item.get("name") or "")
+        for item in instance.get_character_sheet("gm").get("inventory", [])
+        if isinstance(item, dict)
+    }
+    assert {"治疗药水", "火把"} <= names
+    assert "free_grants" not in update
+
+
+@pytest.mark.asyncio
+async def test_production_round_delivers_plain_loot_and_key_items(web_api, monkeypatch) -> None:
+    """The real GameHandler round must not swallow LOOT / KEY_ITEM."""
+
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world", "Loot Round",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    await instance.activate()
+    await instance.start_round()
+    await instance.add_action(uid, "我打开地上的旧宝箱")
+    assert await instance.try_advance() is True
+    instance.complete_round_check_preparation()
+    narration = "你掀开箱盖，里面躺着一瓶治疗药水和一把古老的铜钥匙。"
+
+    async def fake_call(*, system_prompt, user_message, **kwargs):
+        return LLMResponse(
+            content=f"{narration}\n---\nLOOT:{uid}:治疗药水\nKEY_ITEM:{uid}:古老铜钥匙",
+            narration=narration,
+            state_update=None, memory_delta=None, info_asymmetry=None, plot_update=None,
+            total_tokens=8, is_narration_only=False, provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    await api._handler.process_round(instance)
+
+    sheet = instance.get_character_sheet(uid)
+    names = {str(i.get("name")) for i in sheet.get("inventory", []) if isinstance(i, dict)}
+    key_items = {
+        str(i.get("name") if isinstance(i, dict) else i) for i in sheet.get("key_items", [])
+    }
+    assert "治疗药水" in names
+    assert "古老铜钥匙" in key_items | names
 
 
 def test_purchase_deposit_only_charges_due_and_delivers_after_tail() -> None:

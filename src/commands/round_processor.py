@@ -1725,6 +1725,7 @@ class RoundProcessor:
                 authorized_receipt_id=str(
                     getattr(instance, "_economy_authorized_receipt_id", "") or ""
                 ),
+                settlement_effects=True,
             )
             instance.set_state_update_recap(state_update)
         response = SimpleNamespace(
