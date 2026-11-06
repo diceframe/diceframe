@@ -1019,8 +1019,13 @@ class Dnd2024Runtime:
 
     def apply_narrative_hp_delta(self, instance: Any, user_id: str, delta: int) -> int:
         from .narrative_health import settle_narrative_hp
+        bundle = self.load_bundle(str(instance.language or "en"))
+        # 叙事伤害会走到同一个 apply_batch，致死时也要重算角色状态。少了语言包
+        # 索引，非英文装备行在该路径上解析不出身份，会被移出 canonical 并落盘。
         engine = Dnd2024CombatEngine(
-            self.load_bundle(str(instance.language or "en")), bundle_validated=True,
+            bundle, bundle_validated=True,
+            locale_loader=self.load_bundle,
+            supported_locales=tuple(bundle.manifest.supported_locales),
         )
         return settle_narrative_hp(engine, instance, user_id, delta)
 
