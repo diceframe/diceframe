@@ -38,14 +38,18 @@ function exportBody(): Record<string, unknown> {
   return JSON.parse(init.body) as Record<string, unknown>
 }
 
+let downloads: string[] = []
+
 beforeEach(() => {
+  downloads = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push(this.download) })
   i18n.global.locale.value = 'zh-CN'
   mocks.api.mockImplementation(async (path: string) => respond(path))
   mocks.apiBlob.mockResolvedValue({ blob: async () => new Blob(['pack']) })
   URL.createObjectURL = vi.fn(() => 'blob:pack')
   URL.revokeObjectURL = vi.fn()
 })
-afterEach(() => { vi.clearAllMocks() })
+afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
 
 describe('CreatorPackageExportDialog', () => {
   it('exports a resource pack without listing or sending adventures', async () => {
@@ -62,7 +66,33 @@ describe('CreatorPackageExportDialog', () => {
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
     expect(exportBody()).toMatchObject({ world_id: 'office', adventure_refs: [] })
+    expect(downloads).toEqual(['office-resources-0.1.0.dfplugin'])
+    expect(wrapper.get('[data-testid="creator-export-done"]').text()).toContain('已下载 office-resources-0.1.0.dfplugin')
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    await wrapper.get('.creator-package-actions button:not(.primary)').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('submits an exported pack as a .zip through the prefilled index issue form', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = await render('resource')
+    await wrapper.findAll('.creator-package-grid input')[2].setValue('1.2.0')
+    await wrapper.get('select').setValue('office')
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="creator-export-submit-to-hub"]').trigger('click')
+
+    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin', 'office-resources-1.2.0.zip'])
+    expect(open).toHaveBeenCalledTimes(1)
+    const [href, target, features] = open.mock.calls[0] as [string, string, string]
+    expect([target, features]).toEqual(['_blank', 'noopener'])
+    const url = new URL(href)
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      template: 'add-content-pack.yml', title: '[Content Pack] office-resources', plugin_id: 'office-resources',
+    })
   })
 
   it('requires at least one adventure for an adventure module', async () => {

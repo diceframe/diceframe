@@ -15,6 +15,10 @@ const worlds = ref<WorldSummary[]>([]), adventures = ref<AdventureSummary[]>([])
 const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<string[]>([]), selectedBooks = ref<string[]>([])
 const busy = ref(false), loading = ref(true), error = ref('')
 const isAdventureModule = computed(() => props.mode === 'adventure')
+// Content packs without their own repository are submitted through an issue
+// form on the plugin index; the package is attached to it as a .zip.
+const SUBMISSION_REPOSITORY = 'https://github.com/diceframe/diceframe-plugins'
+const exported = ref<{ blob: Blob; id: string; version: string } | null>(null)
 
 const copy = computed(() => String(locale.value).startsWith('zh') ? {
   resourceTitle: '导出资源包', resourceIntro: '只打包世界、规则和资料册，不含冒险。导出的是数据包，安装后需要在内容来源里启用。',
@@ -30,6 +34,14 @@ const copy = computed(() => String(locale.value).startsWith('zh') ? {
   fixedWorldMissing: (title: string, world: string) => `「${title}」固定使用世界「${world}」，但这次没有一并导出；安装方没有这个世界时无法开局。`,
   ready: '没有发现会阻碍开局的问题。',
   privacy: '冒险会完整打包，包括只有 GM 能看到的剧情和秘密，分享前请确认。',
+  doneTitle: '已导出', doneText: (file: string) => `已下载 ${file}。可以直接发给别人导入，也可以投稿到 DiceFrame 插件中心，让大家在「在线内容包」里装到它。`,
+  submitTitle: '投稿到插件中心',
+  submitSteps: [
+    '点「投稿」会再下载一份 .zip（GitHub 不接受 .dfplugin 后缀），并在浏览器里打开已经填好包 ID 的投稿页面。',
+    '在投稿页面填写作者署名、选择许可证，把 .zip 拖进「插件包」一栏后提交。需要 GitHub 账号；没有账号可以把包交给维护者代投稿。',
+    '自动检查通过、维护者批准后，DiceFrame 会代为托管并发布，在线内容包里就能安装了。',
+  ],
+  submit: '投稿', done: '完成',
 } : {
   resourceTitle: 'Export a resource pack', resourceIntro: 'Bundle worlds, rulesets, and lorebooks without adventures. The export is data-only; enable it after installation in Content sources.',
   adventureTitle: 'Export an adventure module', adventureIntro: 'Choose one or more adventures, optionally with a world, ruleset, and lorebooks. Adventures keep their native rules and story files. The export is data-only; enable it after installation in Content sources.',
@@ -44,6 +56,14 @@ const copy = computed(() => String(locale.value).startsWith('zh') ? {
   fixedWorldMissing: (title: string, world: string) => `"${title}" uses the fixed world "${world}", which is not included; it cannot start on an instance that lacks that world.`,
   ready: 'No issues found that would block starting these adventures.',
   privacy: 'Adventures are exported in full, including GM-only story and secrets. Check before sharing.',
+  doneTitle: 'Exported', doneText: (file: string) => `Downloaded ${file}. Send it to others to import, or submit it to the DiceFrame plugin hub so anyone can install it from Online content packs.`,
+  submitTitle: 'Submit to the plugin hub',
+  submitSteps: [
+    'Submit downloads the package again as a .zip (GitHub does not accept the .dfplugin extension) and opens the submission page with the package ID filled in.',
+    'On that page, enter the author credit, choose a license, drag the .zip into the Package field, and submit. This needs a GitHub account; without one, ask a maintainer to submit it for you.',
+    'Once the automated check passes and a maintainer approves it, DiceFrame hosts and publishes the pack so it can be installed from Online content packs.',
+  ],
+  submit: 'Submit', done: 'Done',
 })
 
 function adventureSelectionValue(item: AdventureSummary): string {
@@ -116,6 +136,29 @@ onMounted(async () => {
   } catch (cause) { error.value = errorMessage(cause) } finally { loading.value = false }
 })
 
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob), anchor = document.createElement('a')
+  anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url)
+}
+
+const exportedFile = computed(() => exported.value ? `${exported.value.id}-${exported.value.version}.dfplugin` : '')
+
+const submissionUrl = computed(() => {
+  if (!exported.value) return ''
+  const query = new URLSearchParams({
+    template: 'add-content-pack.yml',
+    title: `[Content Pack] ${exported.value.id}`,
+    plugin_id: exported.value.id,
+  })
+  return `${SUBMISSION_REPOSITORY}/issues/new?${query.toString()}`
+})
+
+function submitToHub() {
+  if (!exported.value) return
+  saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
+  window.open(submissionUrl.value, '_blank', 'noopener')
+}
+
 async function exportPack() {
   if (!packId.value.trim() || !name.value.trim()) { error.value = copy.value.needIdName; return }
   if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(packId.value.trim())) { error.value = copy.value.idInvalid; return }
@@ -131,9 +174,9 @@ async function exportPack() {
       adventure_refs: isAdventureModule.value ? selectedAdventureRefs() : [],
       lorebook_ids: selectedBooks.value, language: copy.value.locale,
     }) })
-    const blob = await response.blob(), url = URL.createObjectURL(blob), anchor = document.createElement('a')
-    anchor.href = url; anchor.download = `${packId.value.trim()}-${version.value.trim() || '0.1.0'}.dfplugin`; anchor.click(); URL.revokeObjectURL(url)
-    emit('close')
+    const blob = await response.blob()
+    exported.value = { blob, id: packId.value.trim(), version: version.value.trim() || '0.1.0' }
+    saveBlob(blob, exportedFile.value)
   } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
 }
 </script>
@@ -143,7 +186,18 @@ async function exportPack() {
     <p class="creator-package-intro">{{ isAdventureModule ? copy.adventureIntro : copy.resourceIntro }}</p>
     <p v-if="loading" role="status">{{ copy.loading }}</p>
     <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
-    <template v-if="!loading">
+    <template v-if="exported">
+      <section class="creator-package-section" data-testid="creator-export-done">
+        <h3>{{ copy.doneTitle }}</h3>
+        <p class="creator-package-intro">{{ copy.doneText(exportedFile) }}</p>
+      </section>
+      <section class="creator-package-section">
+        <h3>{{ copy.submitTitle }}</h3>
+        <ol class="creator-package-steps"><li v-for="step in copy.submitSteps" :key="step">{{ step }}</li></ol>
+      </section>
+      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-submit-to-hub" @click="submitToHub">{{ copy.submit }}</button></footer>
+    </template>
+    <template v-else-if="!loading">
       <section class="creator-package-section"><h3>{{ copy.basic }}</h3><div class="creator-package-grid">
         <label><span>{{ copy.id }}</span><input v-model="packId" :placeholder="isAdventureModule ? 'my-adventure-module' : 'my-resource-pack'"></label>
         <label><span>{{ copy.name }}</span><input v-model="name"></label>
@@ -180,6 +234,7 @@ async function exportPack() {
 <style scoped>
 .creator-package-intro{margin:0;color:var(--df-text-secondary);line-height:1.5}.creator-package-section{display:grid;gap:.8rem;padding:.9rem 0;border-bottom:1px solid var(--df-border-soft)}.creator-package-section h3{margin:0;color:var(--df-accent-strong);font-size:.95rem}.creator-package-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.creator-package-grid label,.creator-package-grid fieldset{display:grid;gap:.35rem;min-width:0}.creator-package-grid .wide{grid-column:1/-1}.creator-package-grid input,.creator-package-grid select,.creator-package-grid textarea{box-sizing:border-box;width:100%;min-width:0;padding:.55rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}fieldset{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.65rem}.creator-package-check{display:flex!important;align-items:center;gap:.45rem}.creator-package-check input{width:auto}.creator-package-check small{color:var(--df-text-muted)}.creator-package-actions{display:flex;justify-content:flex-end;gap:.6rem;padding-top:1rem}
 .creator-package-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:0}.creator-package-preview div{display:grid;gap:.2rem;min-width:0}.creator-package-preview dt{color:var(--df-text-muted);font-size:.8rem}.creator-package-preview dd{margin:0;overflow-wrap:anywhere}
+.creator-package-steps{display:grid;gap:.45rem;margin:0;padding-left:1.2rem;color:var(--df-text-secondary);line-height:1.5}
 .creator-package-warnings{display:grid;gap:.35rem;margin:0;padding-left:1.1rem;color:var(--df-warning)}.creator-package-ready{margin:0;color:var(--df-text-secondary)}.creator-package-privacy{margin:0;color:var(--df-text-muted);font-size:.85rem}
 @media(max-width:620px){.creator-package-grid,.creator-package-preview{grid-template-columns:1fr}}
 </style>
