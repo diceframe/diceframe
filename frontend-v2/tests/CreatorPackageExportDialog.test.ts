@@ -104,14 +104,14 @@ describe('CreatorPackageExportDialog', () => {
 
     await wrapper.get('[data-testid="creator-export-submit-to-hub"]').trigger('click')
 
-    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin', 'office-resources-1.2.0.zip'])
+    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin'])
     expect(open).toHaveBeenCalledTimes(1)
     const [href, target, features] = open.mock.calls[0] as [string, string, string]
     expect([target, features]).toEqual(['_blank', 'noopener'])
     const url = new URL(href)
     expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      template: 'add-content-pack.yml', title: '[Content Pack] office-resources', plugin_id: 'office-resources',
+      template: 'add-plugin.yml', title: '[Plugin Submission] office-resources', plugin_id: 'office-resources',
     })
   })
 
