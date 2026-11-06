@@ -115,8 +115,32 @@ describe('CreatorPackageExportDialog', () => {
     })
   })
 
-  it('exports character cards on their own and sends the image switches the author turned off', async () => {
+  it('declares the content languages, defaulting to the UI language', async () => {
     const wrapper = await render('resource')
+    const languages = wrapper.get('[data-testid="creator-export-languages"]')
+    const boxes = languages.findAll('input[type="checkbox"]')
+    expect(boxes).toHaveLength(5)
+    // 默认勾上当前界面语言（测试环境是 zh-CN），别的语言默认不勾
+    expect((boxes[0].element as HTMLInputElement).checked).toBe(true)
+    expect((boxes[1].element as HTMLInputElement).checked).toBe(false)
+
+    await boxes[1].setValue(true)
+    await wrapper.findAll('[data-testid="creator-export-books"] input[type="checkbox"]')[0].setValue(true)
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    await flushPromises()
+    expect(exportBody()).toMatchObject({ supported_locales: ['zh-CN', 'en'] })
+  })
+
+  it('never lets the declared languages fall back to an empty list', async () => {
+    const wrapper = await render('resource')
+    const boxes = wrapper.get('[data-testid="creator-export-languages"]').findAll('input[type="checkbox"]')
+    await boxes[0].setValue(false)
+    await flushPromises()
+    // 空数组在商店里等于「未标注」，所以取消最后一个勾选要回弹
+    expect((boxes[0].element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('exports character cards on their own and sends the image switches the author turned off', async () => {    const wrapper = await render('resource')
     const cardChecks = wrapper.findAll('[data-testid="creator-export-cards"] input[type="checkbox"]')
     // A card without `id` cannot be matched by the backend, so it is not offered.
     expect(cardChecks).toHaveLength(1)

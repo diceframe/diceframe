@@ -100,6 +100,8 @@ export const de = {
   creatorExportIdInvalid: 'Die Paket-ID darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten.',
   creatorExportResourceRequired: 'Wähle mindestens eine Welt, ein Regelsystem, ein Lorebuch oder eine Charakterkarte.',
   creatorExportAdventureRequired: 'Wähle mindestens ein Abenteuer.',
+  creatorExportLanguages: 'Inhaltssprachen',
+  creatorExportLanguagesHint: 'Lege fest, in welchen Sprachen die Welten, Regelwerke oder Abenteuer dieses Pakets lesbar sind. Der Store zeigt ein Sprachabzeichen und filtert danach; ohne Auswahl gilt der Inhalt als nicht deklariert.',
   creatorExportEntries: 'Einträge',
   creatorExportPreview: 'Exportvorschau',
   creatorExportPreviewCount: 'Abenteuer',

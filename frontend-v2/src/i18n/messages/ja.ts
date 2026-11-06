@@ -100,6 +100,8 @@ export const ja = {
   creatorExportIdInvalid: 'パッケージ ID は小文字英数とハイフンのみ使用できます。',
   creatorExportResourceRequired: '世界・ルール・ロアブック・キャラクターカードのいずれかを選んでください。',
   creatorExportAdventureRequired: '冒険を 1 つ以上選んでください。',
+  creatorExportLanguages: 'コンテンツの言語',
+  creatorExportLanguagesHint: 'このパッケージ内の世界・資料集・モジュールを読める言語を宣言します。ストアでは言語バッジの表示と絞り込みに使われ、未選択の場合は「未宣言」になります。',
   creatorExportEntries: '件',
   creatorExportPreview: '書き出しプレビュー',
   creatorExportPreviewCount: '冒険数',

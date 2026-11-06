@@ -160,6 +160,8 @@ export const en = {
   creatorExportIdInvalid: 'Package ID must use lowercase letters, numbers, and hyphens.',
   creatorExportResourceRequired: 'Choose at least one world, ruleset, lorebook, or character card.',
   creatorExportAdventureRequired: 'Choose at least one adventure.',
+  creatorExportLanguages: 'Content languages',
+  creatorExportLanguagesHint: 'Declare which languages the worlds, lorebooks or adventures in this package can be read in. The store shows a badge and filters on it; ticking none means "not declared".',
   creatorExportEntries: 'entries',
   creatorExportPreview: 'Export preview',
   creatorExportPreviewCount: 'Adventures',

@@ -160,6 +160,8 @@ export const zhCN = {
   creatorExportIdInvalid: '包 ID 只能使用小写字母、数字和连字符。',
   creatorExportResourceRequired: '至少选择一个世界、规则、资料册或角色卡。',
   creatorExportAdventureRequired: '至少选择一个冒险。',
+  creatorExportLanguages: '内容语言',
+  creatorExportLanguagesHint: '声明这个包里的世界、资料册或模组能用哪些语言阅读。商店按它显示语言徽章并支持按语言筛选；一个都不勾等于没声明。',
   creatorExportEntries: '条目',
   creatorExportPreview: '导出预览',
   creatorExportPreviewCount: '冒险数量',

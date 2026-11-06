@@ -30,6 +30,22 @@ const worldCover = ref<File | null>(null), ruleCover = ref<File | null>(null), m
 const format = ref<ExportFormat>('package')
 const cover = ref<File | null>(null)
 const coverPreview = ref('')
+
+// 内容语言：默认当前界面语言，可勾成多语言。它不是 UI 翻译，而是"这个包能被读懂
+// 的语言"，商店会拿它做徽章和筛选；空数组等于没声明，所以至少保留一个。
+const LOCALE_TAGS = ['zh-CN', 'en', 'ja', 'de', 'ru'] as const
+const LOCALE_LABELS: Record<string, string> = { 'zh-CN': '中文', en: 'English', ja: '日本語', de: 'Deutsch', ru: 'Русский' }
+const supportedLocales = ref<string[]>([LOCALE_TAGS.includes(locale.value as (typeof LOCALE_TAGS)[number]) ? locale.value : 'zh-CN'])
+function toggleLocale(tag: string, event: Event) {
+  const next = supportedLocales.value.includes(tag)
+    ? supportedLocales.value.filter(item => item !== tag)
+    : [...supportedLocales.value, tag]
+  supportedLocales.value = next.length ? next : [tag]
+  // 取消最后一个勾选时状态回弹成同一份数组，Vue 不会重写 checked，浏览器里
+  // 那个框就会停在未勾选的样子。这里按最终状态手动同步一次。
+  const input = event.target as HTMLInputElement | null
+  if (input) input.checked = supportedLocales.value.includes(tag)
+}
 const busy = ref(false), loading = ref(true), error = ref('')
 const errorRef = ref<HTMLElement | null>(null)
 
@@ -56,6 +72,7 @@ const copy = computed(() => ({
   needIdName: t('creatorExportNeedIdName'), idInvalid: t('creatorExportIdInvalid'),
   resourceRequired: t('creatorExportResourceRequired'), adventureRequired: t('creatorExportAdventureRequired'),
   entries: t('creatorExportEntries'),
+  languages: t('creatorExportLanguages'), languagesHint: t('creatorExportLanguagesHint'),
   media: t('creatorExportMedia'), mediaIntro: t('creatorExportMediaIntro'),
   portraits: t('includeContentPackPortraits'), portraitsHint: t('includeContentPackPortraitsHint'),
   sceneImages: t('includeContentPackSceneImages'), sceneImagesHint: t('includeContentPackSceneImagesHint'),
@@ -274,6 +291,7 @@ async function exportPack() {
       world_scene_image: worldSceneImage, rule_scene_image: ruleSceneImage,
       include_map: withMap, map_background: mapBackgroundRef, map_icons: mapIconUploads,
       flat: source, language: exportLanguage.value,
+      supported_locales: supportedLocales.value,
       cover_data: cover.value ? await fileToBase64(cover.value) : '',
       cover_filename: cover.value?.name || '',
     }) })
@@ -324,6 +342,15 @@ async function exportPack() {
       <section class="creator-package-section"><h3>{{ isAdventureModule ? copy.extras : copy.resources }}</h3><div class="creator-package-grid">
         <label><span>{{ copy.world }}</span><select v-model="selectedWorld"><option value="">—</option><option v-for="item in worlds" :key="worldId(item)" :value="worldId(item)">{{ item.name || item.world_name || item.id }}</option></select></label>
         <label><span>{{ copy.rule }}</span><select v-model="selectedRule"><option value="">—</option><option v-for="item in rules" :key="item.rule_id" :value="item.rule_id">{{ item.rule_name || item.rule_id }}</option></select></label>
+        <fieldset class="wide" data-testid="creator-export-languages"><legend>{{ copy.languages }}</legend>
+          <div class="creator-package-locales">
+            <label v-for="tag in LOCALE_TAGS" :key="tag" class="creator-package-check">
+              <input type="checkbox" :checked="supportedLocales.includes(tag)" @change="toggleLocale(tag, $event)">
+              <span>{{ LOCALE_LABELS[tag] }} <small>{{ tag }}</small></span>
+            </label>
+          </div>
+          <small class="creator-package-hint">{{ copy.languagesHint }}</small>
+        </fieldset>
         <details class="wide creator-package-collapsible" data-testid="creator-export-books" open>
           <summary><span>{{ copy.books }}</span><small>{{ selectedBooks.length }} / {{ books.length }}</small></summary>
           <div class="creator-package-checklist">
@@ -427,6 +454,9 @@ async function exportPack() {
 .creator-package-collapsible:not([open])>summary::after{transform:rotate(-90deg)}
 .creator-package-collapsible>summary small{color:var(--df-text-muted);font-size:.78rem;font-weight:400}
 .creator-package-checklist{display:grid;gap:.3rem;margin-top:.55rem;max-height:14rem;overflow:auto}
+.creator-package-locales{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));gap:.35rem}
+.creator-package-locales .creator-package-check{align-items:baseline}
+.creator-package-locales small{color:var(--df-text-muted);font-size:.72rem}
 .creator-package-cover{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem;align-items:start;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
 .creator-package-cover.has-image{grid-template-columns:10rem minmax(0,1fr)}
 .creator-package-cover-image{width:100%;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm)}
