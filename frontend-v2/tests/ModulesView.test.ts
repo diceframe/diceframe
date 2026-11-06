@@ -218,7 +218,7 @@ describe('ModulesView', () => {
     expect([direct.attributes('target'), direct.attributes('rel')]).toEqual(['_blank', 'noopener'])
     const url = new URL(direct.attributes('href') || '')
     expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
-    expect(Object.fromEntries(url.searchParams)).toEqual({ template: 'add-content-pack.yml' })
+    expect(Object.fromEntries(url.searchParams)).toEqual({ template: 'add-plugin.yml', title: '[Plugin Submission]' })
   })
 
   it('points authors from an empty online shelf to the Workshop', async () => {
