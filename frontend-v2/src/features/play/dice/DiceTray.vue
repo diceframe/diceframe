@@ -101,7 +101,7 @@ function dieLabel(face: { value: number; sides: number; taken: boolean }, index:
 .dice-tray-has-taken .tray-die:not(.tray-die-taken) .tray-die-body { opacity: .5; filter: saturate(.45) brightness(.85); }
 .tray-die-number { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; font: 700 27px var(--df-font-title); color: color-mix(in srgb, var(--df-text) 90%, white); text-shadow: 0 -1px 0 color-mix(in srgb, var(--df-canvas) 75%, transparent), 0 1px 0 color-mix(in srgb, white 16%, transparent); }
 .tray-die > small { width: 100%; text-align: center; color: var(--df-text-muted); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
-.tray-die-cube .tray-die-number { top: 37px; left: 13%; width: 40%; font-size: 22px; }
+.tray-die-cube .tray-die-number { top: 23px; font-size: 26px; }
 .tray-die-caption { text-align: center; color: var(--df-accent-strong); font-size: 10px; line-height: 18px; }
 .tray-seal { display: grid; place-items: center; color: var(--df-text-secondary); }
 .tray-seal span { font-size: 46px; line-height: 1; }
@@ -130,6 +130,6 @@ function dieLabel(face: { value: number; sides: number; taken: boolean }, index:
   100% { opacity: .55; transform: scale(1); }
 }
 @keyframes impact-ring { 0% { opacity: .8; transform: scale(.4); } 100% { opacity: 0; transform: scale(3.2); } }
-@media(max-width: 520px) { .dice-tray { gap: 10px; min-height: 116px; padding: 10px; } .tray-die { width: 64px; grid-template-rows: 64px minmax(18px, auto) 18px; } .tray-die-body { height: 64px; } .tray-die svg { width: 58px; height: 64px; } .tray-die-number { top: 17px; font-size: 22px; } .tray-die-cube .tray-die-number { top: 32px; } .tray-die-shadow { top: 50px; width: 46px; margin-left: -23px; } .tray-die-impact { top: 46px; } .dice-tray-sealed { min-height: 80px; } }
+@media(max-width: 520px) { .dice-tray { gap: 10px; min-height: 116px; padding: 10px; } .tray-die { width: 64px; grid-template-rows: 64px minmax(18px, auto) 18px; } .tray-die-body { height: 64px; } .tray-die svg { width: 58px; height: 64px; } .tray-die-number { top: 17px; font-size: 22px; } .tray-die-cube .tray-die-number { top: 19px; } .tray-die-shadow { top: 50px; width: 46px; margin-left: -23px; } .tray-die-impact { top: 46px; } .dice-tray-sealed { min-height: 80px; } }
 @media(prefers-reduced-motion: reduce) { .dice-tray-rolling .tray-seal, .dice-tray-reveal .tray-die-body, .dice-tray-reveal .tray-die-shadow, .dice-tray-reveal .tray-die-impact { animation: none; } }
 </style>
