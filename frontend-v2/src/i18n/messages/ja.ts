@@ -110,7 +110,7 @@ export const ja = {
   creatorExportRepoUrl: 'リポジトリ URL（作成後に任意で入力）',
   contentPackSubmitStepExport: 'ワークショップでアドベンチャーモジュールまたはリソースパックを書き出し、案内に従ってご自身の GitHub リポジトリに配置します。既に .dfplugin がある場合は、解凍した内容をリポジトリ直下に置けます。',
   contentPackSubmitStepForm: '公開 GitHub リポジトリの直下に plugin.json、README、LICENSE、config.schema.json を置き、正式な Release（下書き・プレリリース以外）を公開してください。ソースとバージョンはご自身が管理します。',
-  contentPackSubmitStepReview: '下の「投稿」からプラグイン ID とリポジトリ URL を入力します。自動チェックとメンテナーの /approve を経て公開インデックスに登録され、オンライン一覧からインストールできるようになります。更新は新しい Release を出すだけで、再投稿は不要です。',
+  contentPackSubmitStepReview: 'このページの「直接投稿」からプラグイン ID とリポジトリ URL を入力します。自動チェックとメンテナーの /approve を経て公開インデックスに登録され、オンライン一覧からインストールできるようになります。更新は新しい Release を出すだけで、再投稿は不要です。',
   creatorExportResourceTitle: 'リソースパックを書き出す',
   creatorExportResourceIntro: '冒険を含めず、世界・ルール・ロアブック・キャラクターカードをまとめます。データのみの書き出しで、インストール後に「コンテンツパック」ページで有効化します。',
   creatorExportAdventureTitle: '冒険モジュールを書き出す',

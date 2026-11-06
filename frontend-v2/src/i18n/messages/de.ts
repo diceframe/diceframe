@@ -110,7 +110,7 @@ export const de = {
   creatorExportRepoUrl: 'Repository-URL (optional, sobald das Repository existiert)',
   contentPackSubmitStepExport: 'Exportiere im Workshop ein Abenteuermodul oder Ressourcenpaket und lege es anschließend wie angegeben in deinem eigenen GitHub-Repository ab. Ein vorhandenes .dfplugin kannst du entpackt als Repository-Wurzel verwenden.',
   contentPackSubmitStepForm: 'Lege plugin.json, README, LICENSE und config.schema.json im Wurzelverzeichnis eines öffentlichen GitHub-Repositories ab und veröffentliche ein reguläres Release (kein Entwurf, keine Vorabversion). Quelle und Versionen bleiben bei dir.',
-  contentPackSubmitStepReview: 'Klicke unten auf „Einreichen“ und trage Plugin-ID und Repository-URL ein. Nach bestandener Prüfung und /approve durch das Team wird das Paket in den öffentlichen Index aufgenommen und ist im Online-Regal installierbar. Updates brauchen nur ein neues Release, keine erneute Einreichung.',
+  contentPackSubmitStepReview: 'Klicke auf dieser Seite auf „Direkt einreichen“ und trage Plugin-ID und Repository-URL ein. Nach bestandener Prüfung und /approve durch das Team wird das Paket in den öffentlichen Index aufgenommen und ist im Online-Regal installierbar. Updates brauchen nur ein neues Release, keine erneute Einreichung.',
   creatorExportResourceTitle: 'Ressourcenpaket exportieren',
   creatorExportResourceIntro: 'Bündelt Welten, Regelsysteme, Lorebücher und Charakterkarten ohne Abenteuer. Der Export enthält nur Daten; nach der Installation auf der Seite „Inhaltspakete“ aktivieren.',
   creatorExportAdventureTitle: 'Abenteuermodul exportieren',

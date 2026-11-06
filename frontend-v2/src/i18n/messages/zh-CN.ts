@@ -148,7 +148,7 @@ export const zhCN = {
   creatorExportRepoUrl: '仓库地址（建好仓库再填，可选）',
   contentPackSubmitStepExport: '在创作工坊导出冒险模组或资源包，然后按提示放到你自己的 GitHub 仓库。手上已有 .dfplugin 的话，解压后的内容也可以直接作为仓库根目录。',
   contentPackSubmitStepForm: '在你自己的公开 GitHub 仓库根目录放 plugin.json、README、LICENSE 和 config.schema.json，并发布一个正式 Release（非草稿、非预发布）。插件源码和版本始终由你维护。',
-  contentPackSubmitStepReview: '点下面的「投稿」填插件 ID 与仓库地址。自动检查通过、维护者 /approve 后登记进公开索引，在线内容包里即可安装；之后更新只需发新 Release，不用再次投稿。',
+  contentPackSubmitStepReview: '在本页点「直接投稿」填插件 ID 与仓库地址。自动检查通过、维护者 /approve 后登记进公开索引，在线内容包里即可安装；之后更新只需发新 Release，不用再次投稿。',
   creatorExportResourceTitle: '导出资源包',
   creatorExportResourceIntro: '只打包世界、规则、资料册和角色卡，不含冒险。导出的是数据包，安装后到内容包页启用。',
   creatorExportAdventureTitle: '导出冒险模组',

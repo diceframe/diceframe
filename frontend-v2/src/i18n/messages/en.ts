@@ -148,7 +148,7 @@ export const en = {
   creatorExportRepoUrl: 'Repository URL (fill in once the repo exists, optional)',
   contentPackSubmitStepExport: 'Export an adventure module or resource pack in the Workshop, then follow the prompt to put it in your own GitHub repository. If you already have a .dfplugin, the unzipped contents can serve as the repository root.',
   contentPackSubmitStepForm: 'Put plugin.json, README, LICENSE and config.schema.json at the root of a public GitHub repository of your own, then publish a regular (non-draft, non-prerelease) Release. The source and its versions stay yours.',
-  contentPackSubmitStepReview: 'Choose Submit below and fill in the plugin ID and repository URL. After the automated check passes and a maintainer runs /approve, the pack is listed in the public index and installable from the online shelf. Later updates only need a new Release, no resubmission.',
+  contentPackSubmitStepReview: 'Choose Submit on this page and fill in the plugin ID and repository URL. After the automated check passes and a maintainer runs /approve, the pack is listed in the public index and installable from the online shelf. Later updates only need a new Release, no resubmission.',
   creatorExportResourceTitle: 'Export a resource pack',
   creatorExportResourceIntro: 'Bundle worlds, rulesets, lorebooks, and character cards without adventures. The export is data-only; enable it on the Content packages page after installation.',
   creatorExportAdventureTitle: 'Export an adventure module',
