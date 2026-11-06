@@ -1,16 +1,24 @@
-// Content packs without their own repository are submitted through an issue
-// form on the plugin index; the package is attached to it as a .zip.
-export const CONTENT_PACK_SUBMISSION_REPOSITORY = 'https://github.com/diceframe/diceframe-plugins'
+// 投稿走插件索引仓库的 Issue 表单，作者自己维护源码仓库、官方只存指针。
+// 没有"上传包"的表单，也没有官方代托管这一步。
+export const SUBMISSION_REPOSITORY = 'https://github.com/diceframe/diceframe-plugins'
+// 索引仓库的机器人只认这个标题前缀（scripts/submission.cjs）。
+const SUBMISSION_TITLE_PREFIX = '[Plugin Submission]'
+const SUBMISSION_TEMPLATE = 'add-plugin.yml'
 
-/** Issue form URL for a content pack submission; the ID is prefilled when known. */
-export function contentPackSubmissionUrl(pluginId = ''): string {
-  const query = new URLSearchParams({ template: 'add-content-pack.yml' })
+/**
+ * 投稿页 URL：预填标题和插件 ID，仓库地址可选（作者建好仓库后再填）。
+ *
+ * 之前指向的 `add-content-pack.yml` 在索引仓库里从未存在，标题前缀
+ * `[Content Pack]` 也不被机器人识别，点进去只有 404 和一个永远不会被处理的 issue。
+ */
+export function contentPackSubmissionUrl(pluginId = '', repositoryUrl = ''): string {
+  const query = new URLSearchParams({ template: SUBMISSION_TEMPLATE })
   const id = pluginId.trim()
-  if (id) {
-    query.set('title', `[Content Pack] ${id}`)
-    query.set('plugin_id', id)
-  }
-  return `${CONTENT_PACK_SUBMISSION_REPOSITORY}/issues/new?${query.toString()}`
+  query.set('title', id ? `${SUBMISSION_TITLE_PREFIX} ${id}` : SUBMISSION_TITLE_PREFIX)
+  if (id) query.set('plugin_id', id)
+  const repository = repositoryUrl.trim()
+  if (repository) query.set('repository', repository)
+  return `${SUBMISSION_REPOSITORY}/issues/new?${query.toString()}`
 }
 
 // Same rule as the plugin host and the index (`_ID_RE` / `PLUGIN_ID_RE`).

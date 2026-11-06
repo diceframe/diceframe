@@ -2771,7 +2771,10 @@
       "modulesFilterTrust": "561292aaf36524cf",
       "modulesFilteredEmpty": "ea59e0ce4a8cc501",
       "modulesFilterReset": "e253299d8c90f409",
-      "modulesLanguagesUndeclared": "880654cda96314a4"
+      "modulesLanguagesUndeclared": "880654cda96314a4",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "8980b1f3ea653a8a"
     },
     "de": {
       "modulesFilterProfile": "d2223afb7d6b100d",
@@ -2781,7 +2784,10 @@
       "modulesFilterTrust": "561292aaf36524cf",
       "modulesFilteredEmpty": "ea59e0ce4a8cc501",
       "modulesFilterReset": "e253299d8c90f409",
-      "modulesLanguagesUndeclared": "880654cda96314a4"
+      "modulesLanguagesUndeclared": "880654cda96314a4",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "8980b1f3ea653a8a"
     },
     "ru": {
       "modulesFilterProfile": "d2223afb7d6b100d",
@@ -2791,7 +2797,10 @@
       "modulesFilterTrust": "561292aaf36524cf",
       "modulesFilteredEmpty": "ea59e0ce4a8cc501",
       "modulesFilterReset": "e253299d8c90f409",
-      "modulesLanguagesUndeclared": "880654cda96314a4"
+      "modulesLanguagesUndeclared": "880654cda96314a4",
+      "contentPackSubmitStepExport": "e3892cf287c851a0",
+      "contentPackSubmitStepForm": "cb8fe87aa35ffc57",
+      "contentPackSubmitStepReview": "8980b1f3ea653a8a"
     }
   }
 }
