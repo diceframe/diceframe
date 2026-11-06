@@ -16,7 +16,10 @@ Every plugin starts with `plugin.json`. `schema_version`, `id`, `name`, `version
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json
 python scripts/package_plugin.py path/to/plugin
+python scripts/validate_content_module.py dist/plugins/plugin-id-1.0.0.dfplugin --json
 ```
+
+The last command unpacks the built package with the same rules as an install (size, paths, top-level directory matching the plugin ID) and validates it. The report's `package` field gives the sha256, the version, and whether the package has a LICENSE and a README. `--extract-to DIR` copies the module directory out once validation passes.
 
 Adventure content stays a `content-pack`: declare `content_profile: "adventure-module"`, `content_delivery_mode: "catalog"` and `adventure_packages`. Catalog mode rejects `entrypoint`; it registers data for deliberate use rather than starting a program or importing into every game. A legacy pack with no delivery fields retains its existing behavior and, if executable, its process risk. The deep validator checks declared adventures/catalogues and runtime requirements; packaging alone does not prove gameplay compatibility.
 
