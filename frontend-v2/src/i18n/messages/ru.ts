@@ -44,6 +44,7 @@ export const ru = {
   modulesFilterLicense: 'Лицензия',
   modulesFilterTrust: 'Уровень доверия',
   modulesFilteredEmpty: 'Нет пакетов содержимого, подходящих под фильтры.',
+  modulesLanguagesUndeclared: 'Не указан',
   modulesFilterReset: 'Сбросить фильтры',
   modulesPreview: 'Предпросмотр последствий установки',
   modulesInstall: 'Установить модуль',

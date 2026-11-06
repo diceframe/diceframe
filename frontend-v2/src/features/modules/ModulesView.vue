@@ -71,7 +71,13 @@ function uniqueFilterValues(values: Array<string | undefined>): string[] {
   const unique = new Set(values.map(value => String(value || '').trim()).filter(Boolean))
   return [...unique].sort((a, b) => a.localeCompare(b))
 }
-const marketLanguageOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.languages || [])))
+const UNLABELLED_LANGUAGE = '__unlabelled__'
+const marketLanguageOptions = computed(() => {
+  const options = uniqueFilterValues(market.value.flatMap(item => item.languages || []))
+  // 老包没有 supported_locales：给一个显式的「未标注」，不拿内容去猜语言。
+  if (market.value.some(item => !(item.languages || []).length)) options.push(UNLABELLED_LANGUAGE)
+  return options
+})
 const marketTagOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.tags || [])))
 const marketLicenseOptions = computed(() => uniqueFilterValues(market.value.map(item => item.license)))
 const marketTrustOptions = computed(() => uniqueFilterValues(market.value.map(item => item.trust_level)))
@@ -84,7 +90,10 @@ const marketFiltersActive = computed(() => (
 ))
 const filteredMarket = computed(() => market.value.filter(item => (
   (marketProfile.value === 'all' || item.content_profile === marketProfile.value)
-  && (marketLanguage.value === 'all' || (item.languages || []).includes(marketLanguage.value))
+  && (marketLanguage.value === 'all'
+    || (marketLanguage.value === UNLABELLED_LANGUAGE
+      ? !(item.languages || []).length
+      : (item.languages || []).includes(marketLanguage.value)))
   && (marketTag.value === 'all' || (item.tags || []).includes(marketTag.value))
   && (marketLicense.value === 'all' || item.license === marketLicense.value)
   && (marketTrust.value === 'all' || item.trust_level === marketTrust.value)
@@ -467,7 +476,7 @@ async function checkRecovery() {
             <span>{{ t('modulesFilterLanguage') }}</span>
             <select v-model="marketLanguage">
               <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ languageLabel(language) }}</option>
+              <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ language === UNLABELLED_LANGUAGE ? t('modulesLanguagesUndeclared') : languageLabel(language) }}</option>
             </select>
           </label>
           <label v-if="marketTagOptions.length" class="module-market-filter">
@@ -518,6 +527,7 @@ async function checkRecovery() {
           </template>
           <template #tags>
             <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
+            <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
           </template>
           <template #footer>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>

@@ -76,6 +76,7 @@ export const zhCN = {
   modulesFilterLicense: '许可证',
   modulesFilterTrust: '信任级别',
   modulesFilteredEmpty: '没有符合筛选条件的内容包。',
+  modulesLanguagesUndeclared: '未标注',
   modulesFilterReset: '清除筛选',
   modulesPreview: '预览安装影响',
   modulesInstall: '安装内容包',

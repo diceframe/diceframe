@@ -72,6 +72,7 @@ export const ja = {
   modulesFilterLicense: 'ライセンス',
   modulesFilterTrust: '信頼レベル',
   modulesFilteredEmpty: '条件に合うコンテンツパックはありません。',
+  modulesLanguagesUndeclared: '未宣言',
   modulesFilterReset: 'フィルターを解除',
   modulesPreview: 'インストールの影響をプレビュー',
   modulesInstall: 'モジュールをインストール',

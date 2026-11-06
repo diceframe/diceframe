@@ -76,6 +76,7 @@ export const en = {
   modulesFilterLicense: 'License',
   modulesFilterTrust: 'Trust level',
   modulesFilteredEmpty: 'No content packages match these filters.',
+  modulesLanguagesUndeclared: 'Not declared',
   modulesFilterReset: 'Clear filters',
   modulesPreview: 'Preview installation impact',
   modulesInstall: 'Install module',

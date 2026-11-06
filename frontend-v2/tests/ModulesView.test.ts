@@ -464,6 +464,23 @@ describe('ModulesView', () => {
     expect(onlineSection.text()).toContain('Other Module')
   })
 
+  it('labels packs that never declared a language instead of guessing one', async () => {
+    mocks.marketplace.mockResolvedValue({
+      ok: true,
+      modules: [{ ...online.modules[0], id: 'no-language', name: 'Undeclared Pack', languages: [] }],
+    })
+    const { wrapper } = await mountView()
+    const card = wrapper.get('[data-testid="modules-market-no-language"]')
+    expect(card.text()).toContain('未标注')
+
+    const languageFilter = wrapper.findAll('[data-testid="modules-market-filters"] select')
+      .find(select => select.text().includes('未标注'))
+    expect(languageFilter).toBeTruthy()
+    await languageFilter!.setValue('__unlabelled__')
+
+    expect(wrapper.find('[data-testid="modules-market-no-language"]').exists()).toBe(true)
+  })
+
   it('paints a declared cover on installed cards only', async () => {
     mocks.list.mockResolvedValue({
       ok: true,

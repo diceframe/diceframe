@@ -72,6 +72,7 @@ export const de = {
   modulesFilterLicense: 'Lizenz',
   modulesFilterTrust: 'Vertrauensstufe',
   modulesFilteredEmpty: 'Keine Inhaltspakete passen zu diesen Filtern.',
+  modulesLanguagesUndeclared: 'Nicht angegeben',
   modulesFilterReset: 'Filter zurücksetzen',
   modulesPreview: 'Installationsfolgen prüfen',
   modulesInstall: 'Modul installieren',
