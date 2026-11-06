@@ -828,6 +828,16 @@ async def plan_round_checks(
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
     planned = _apply_granted_advantage_modes(instance, rule, planned)
+    if rule and str(rule.dice_system).lower() == "none":
+        # A no-dice rule only consults the planner for the purchase protocol.
+        # Whatever checks the model proposed would otherwise be built as d20
+        # rolls; keep the round identical to the no_dice_rule skip apart from
+        # its economy result.
+        planned = []
+        errors = []
+        overreach_notes = []
+        world_requirements = []
+        world_time_advance = None
     economy_offers, economy_intents_unpriced, economy_errors = normalize_economy_actions(
         instance, raw_economy_actions, rule,
     )

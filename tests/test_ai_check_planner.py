@@ -677,6 +677,28 @@ async def test_offline_recovery_never_guesses_a_price(language, action, log, cur
 
 
 @pytest.mark.asyncio
+async def test_no_dice_purchase_round_plans_economy_without_checks() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买一把长剑"}]
+    rule = RuleSystem({
+        "rule_id": "no_dice_purchase", "name": "No Dice Purchase", "dice_system": "none",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    client = _client_returning({
+        "checks": [{"player": "p1", "attribute": "str", "target": 12}],
+        "world_time_advance": {"minutes": 30},
+        "economy_actions": [{
+            "player": "p1", "type": "purchase", "target": "长剑",
+            "price_source": "none",
+        }],
+    })
+    planned, metadata = await plan_round_checks(instance, rule, client)
+    assert planned == []
+    assert metadata["world_time_advance"] is None
+    assert [intent["target"] for intent in metadata["unpriced_purchase_intents"]] == ["长剑"]
+
+
+@pytest.mark.asyncio
 async def test_offline_quantity_purchase_still_blocks_free_delivery() -> None:
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我买3瓶药水"}]
