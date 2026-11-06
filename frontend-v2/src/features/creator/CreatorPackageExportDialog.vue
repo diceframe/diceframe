@@ -9,7 +9,7 @@ import { useToast } from '@/composables/useToast'
 import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
-import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl } from './submission'
+import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl, repositorySubmissionUrl } from './submission'
 
 type Book = { id: string; name?: string; entry_count?: number }
 // `package` is the installable .dfplugin; `source` is the flat zip an author
@@ -56,7 +56,6 @@ const copy = computed(() => ({
   needIdName: t('creatorExportNeedIdName'), idInvalid: t('creatorExportIdInvalid'),
   resourceRequired: t('creatorExportResourceRequired'), adventureRequired: t('creatorExportAdventureRequired'),
   entries: t('creatorExportEntries'),
-  repoUrl: t('creatorExportRepoUrl'),
   media: t('creatorExportMedia'), mediaIntro: t('creatorExportMediaIntro'),
   portraits: t('includeContentPackPortraits'), portraitsHint: t('includeContentPackPortraitsHint'),
   sceneImages: t('includeContentPackSceneImages'), sceneImagesHint: t('includeContentPackSceneImagesHint'),
@@ -229,14 +228,17 @@ const exportedFile = computed(() => {
   return pack.source ? `${pack.id}-${pack.version}-src.zip` : `${pack.id}-${pack.version}.dfplugin`
 })
 
-// 作者建好仓库后把地址贴进来，投稿页就能把仓库字段一起预填。
-const repositoryUrl = ref('')
-const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id, repositoryUrl.value) : '')
+const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
+const registerUrl = computed(() => exported.value ? repositorySubmissionUrl(exported.value.id) : '')
 
 function submitToHub() {
   if (!exported.value) return
-  // 文件在导出那一步已经下过；索引仓库没有"上传包"的表单，这里不再多下一个 zip。
+  saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
   window.open(submissionUrl.value, '_blank', 'noopener')
+}
+
+function openRegisterForm() {
+  if (registerUrl.value) window.open(registerUrl.value, '_blank', 'noopener')
 }
 
 async function exportPack() {
@@ -295,9 +297,8 @@ async function exportPack() {
       <section class="creator-package-section">
         <h3>{{ copy.sourceTitle }}</h3>
         <ol class="creator-package-steps"><li v-for="step in copy.sourceSteps" :key="step">{{ step }}</li></ol>
-        <label class="creator-package-repo-url"><span>{{ copy.repoUrl }}</span><input v-model="repositoryUrl" data-testid="creator-export-source-repository-url" placeholder="https://github.com/you/your-pack"></label>
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-register-repository" @click="submitToHub">{{ copy.sourceRegister }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-register-repository" @click="openRegisterForm">{{ copy.sourceRegister }}</button></footer>
     </template>
     <template v-else-if="exported">
       <section class="creator-package-section" data-testid="creator-export-done">
@@ -307,7 +308,6 @@ async function exportPack() {
       <section class="creator-package-section">
         <h3>{{ copy.submitTitle }}</h3>
         <ol class="creator-package-steps"><li v-for="step in copy.submitSteps" :key="step">{{ step }}</li></ol>
-        <label class="creator-package-repo-url"><span>{{ copy.repoUrl }}</span><input v-model="repositoryUrl" data-testid="creator-export-repository-url" placeholder="https://github.com/you/your-pack"></label>
       </section>
       <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-submit-to-hub" @click="submitToHub">{{ copy.submit }}</button></footer>
     </template>
@@ -392,7 +392,7 @@ async function exportPack() {
 </template>
 
 <style scoped>
-.creator-package-intro{margin:0;color:var(--df-text-secondary);line-height:1.5}.creator-package-section{display:grid;gap:.8rem;padding:.9rem 0;border-bottom:1px solid var(--df-border-soft)}.creator-package-section h3{margin:0;color:var(--df-accent-strong);font-size:.95rem}.creator-package-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.creator-package-grid label,.creator-package-grid fieldset{display:grid;gap:.35rem;min-width:0}.creator-package-grid .wide{grid-column:1/-1}.creator-package-grid input,.creator-package-grid select,.creator-package-grid textarea{box-sizing:border-box;width:100%;min-width:0;padding:.55rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}fieldset{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.65rem}.creator-package-check{display:flex!important;align-items:center;gap:.45rem}.creator-package-check input{width:auto}.creator-package-check small{color:var(--df-text-muted)}.creator-package-actions{display:flex;justify-content:flex-end;gap:.6rem;padding-top:1rem}.creator-package-repo-url{display:grid;gap:.35rem;margin-top:.6rem;min-width:0;font-size:.85rem}.creator-package-repo-url input{box-sizing:border-box;width:100%;min-width:0;padding:.5rem .6rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}
+.creator-package-intro{margin:0;color:var(--df-text-secondary);line-height:1.5}.creator-package-section{display:grid;gap:.8rem;padding:.9rem 0;border-bottom:1px solid var(--df-border-soft)}.creator-package-section h3{margin:0;color:var(--df-accent-strong);font-size:.95rem}.creator-package-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.creator-package-grid label,.creator-package-grid fieldset{display:grid;gap:.35rem;min-width:0}.creator-package-grid .wide{grid-column:1/-1}.creator-package-grid input,.creator-package-grid select,.creator-package-grid textarea{box-sizing:border-box;width:100%;min-width:0;padding:.55rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:var(--df-control-bg);color:var(--df-text)}fieldset{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.65rem}.creator-package-check{display:flex!important;align-items:center;gap:.45rem}.creator-package-check input{width:auto}.creator-package-check small{color:var(--df-text-muted)}.creator-package-actions{display:flex;justify-content:flex-end;gap:.6rem;padding-top:1rem}
 .creator-package-hint{margin:0;color:var(--df-text-muted);font-size:.85rem;line-height:1.5}
 .creator-package-options{display:grid;gap:.6rem}.creator-package-options.is-split{grid-template-columns:repeat(2,minmax(0,1fr))}
 .creator-package-option-group{display:grid;gap:.5rem}
