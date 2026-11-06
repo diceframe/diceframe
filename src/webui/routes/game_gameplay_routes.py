@@ -414,6 +414,7 @@ async def api_payment_resolve(request: web.Request) -> web.Response:
             "STALE_RUN",
             "EFFECT_COMMIT_FAILED",
             "INSUFFICIENT_FUNDS",
+            "INSTALLMENT_ALREADY_STARTED",
             "REWRITE_IN_PROGRESS",
         }
         else 400

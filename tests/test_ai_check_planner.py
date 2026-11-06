@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.engine.modules import narrative_notes
-from src.commands.check_planner import _planner_context, normalize_check_specs, plan_round_checks
+from src.commands.check_planner import _planner_context, normalize_check_specs, normalize_economy_actions, plan_round_checks
 from src.engine.checks import resolve_check_request
 from src.engine.game_instance import GameInstance
 from src.engine.modules import economy_state
@@ -359,6 +359,7 @@ async def test_plan_round_checks_uses_single_batched_tool_call() -> None:
         "native_tools": True,
         "provider": "fake",
         "total_tokens": 37,
+        "calls": 1,
         "errors": [],
         "overreach": [],
         "world_requirements": [],
@@ -382,6 +383,29 @@ async def test_no_dice_ruleset_skips_model_call() -> None:
     assert planned == []
     assert metadata["skipped"] == "no_dice_rule"
     assert metadata["total_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_no_dice_ruleset_still_plans_explicit_purchase() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买护甲，价格是34金币"}]
+    rule = RuleSystem.load(Path("templates/rules/tavern_free.json"))
+
+    class PurchaseClient:
+        async def call_tools(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                tool_calls=[{"name": "dice_checks", "arguments": {"checks": [], "economy_actions": [{
+                    "player": "p1", "type": "purchase", "target": "护甲",
+                    "amount": "34", "price_source": "player_stated",
+                }]}}],
+                total_tokens=2,
+                provider_used="fake",
+                native_tools=True,
+            )
+
+    planned, metadata = await plan_round_checks(instance, rule, PurchaseClient())
+    assert planned == []
+    assert metadata["economy_offers"][0]["amount"] == 34
 
 
 def test_rule_exposes_derived_check_mechanic() -> None:
@@ -473,11 +497,11 @@ async def test_plan_round_checks_normalizes_economy_offers() -> None:
         _client_returning({"checks": [], "economy_actions": [
             {
                 "player": "阿岚", "type": "purchase", "target": "长剑",
-                "amount": 50, "price_source": "gm_narrated", "note": "矮人摊主报价",
+                "amount": 50, "unit": "unit", "price_source": "gm_narrated", "note": "矮人摊主报价",
             },
             {
                 "player": "p2", "type": "purchase", "target": "口粮",
-                "amount": 3, "price_source": "player_stated",
+                "amount": 3, "unit": "unit", "price_source": "player_stated",
             },
         ]}),
     )
@@ -490,6 +514,147 @@ async def test_plan_round_checks_normalizes_economy_offers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_missing_economy_action_gets_targeted_repair_pass() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我决定买护甲，价格是34金币"}]
+
+    class _RepairClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tools(self, *_args, **_kwargs):
+            self.calls += 1
+            actions = [] if self.calls == 1 else [{
+                "player": "p1", "type": "purchase", "target": "护甲",
+                "amount": "34", "price_source": "player_stated",
+            }]
+            return SimpleNamespace(
+                tool_calls=[{"name": "dice_checks", "arguments": {
+                    "checks": [], "economy_actions": actions,
+                }}],
+                total_tokens=3,
+                provider_used="fake",
+                native_tools=True,
+            )
+
+    client = _RepairClient()
+    planned, metadata = await plan_round_checks(instance, make_rule(), client)
+    assert planned == []
+    assert client.calls == 2
+    assert metadata["calls"] == 2
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 34, "quantity": 1,
+        "amount_scope": "total", "target": "护甲",
+        "note": "",
+    }]
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_repair_pass_preserves_unpriced_purchase_when_no_explicit_price() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我想买护甲"}]
+
+    class _RepairClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tools(self, *_args, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                tool_calls=[{"name": "dice_checks", "arguments": {
+                    "checks": [],
+                    "economy_actions": [] if self.calls == 1 else [{
+                        "player": "p1", "type": "purchase", "target": "护甲",
+                        "price_source": "none",
+                    }],
+                }}],
+                total_tokens=1,
+                provider_used="fake",
+                native_tools=True,
+            )
+
+    client = _RepairClient()
+    _, metadata = await plan_round_checks(instance, make_rule(), client)
+    assert client.calls == 2
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "护甲", "quantity": 1},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_missing_planner_client_still_records_player_purchase_intent() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我想买一把长剑"}]
+    _, metadata = await plan_round_checks(instance, make_rule(), None)
+    assert metadata["available"] is False
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "长剑", "quantity": 1},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_no_purchase_statement_is_not_an_intent() -> None:
+    instance = make_instance()
+    instance.action_queue = [{
+        "user_id": "p1",
+        "text": "我先询问古董护符的价格，暂时不购买。",
+    }]
+    _, metadata = await plan_round_checks(instance, make_rule(), None)
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_currently_not_buying_statement_is_not_an_intent() -> None:
+    instance = make_instance()
+    instance.action_queue = [{
+        "user_id": "p1",
+        "text": "我询问铁匠铺的护甲价格，但现在不购买。",
+    }]
+    _, metadata = await plan_round_checks(instance, make_rule(), None)
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_missing_planner_client_recovers_explicit_player_quote() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我决定买护甲，价格是34金币"}]
+    rule = RuleSystem({
+        "rule_id": "no_planner_quote", "name": "No Planner Quote", "dice_system": "none",
+        "attributes": [], "currency": "金币",
+    })
+    _, metadata = await plan_round_checks(instance, rule, None)
+    assert metadata["available"] is False
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 34, "quantity": 1,
+        "amount_scope": "total", "target": "护甲",
+        "note": "player action quote recovered server-side",
+    }]
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_missing_planner_actions_recover_price_from_recent_gm_narration() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我想买护甲"}]
+    instance.log.append({"round": 1, "gm_response": "柜台上的护甲售价34金币。"})
+    rule = RuleSystem({
+        "rule_id": "gm_quote_recovery", "name": "GM Quote Recovery", "dice_system": "none",
+        "attributes": [], "currency": "金币",
+    })
+    _, metadata = await plan_round_checks(instance, rule, None)
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 34, "quantity": 1,
+        "amount_scope": "total", "target": "护甲",
+        "note": "GM narration quote recovered server-side",
+    }]
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
 async def test_economy_offer_multiplies_unit_price_by_explicit_quantity() -> None:
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我要5瓶治疗药水"}]
@@ -498,7 +663,7 @@ async def test_economy_offer_multiplies_unit_price_by_explicit_quantity() -> Non
         _client_returning({"checks": [], "economy_actions": [
             {
                 "player": "p1", "type": "purchase", "target": "治疗药水",
-                "amount": 30, "quantity": 5, "amount_scope": "unit",
+                "amount": 30, "unit": "unit", "quantity": 5, "amount_scope": "unit",
                 "price_source": "gm_narrated",
             },
         ]}),
@@ -508,6 +673,88 @@ async def test_economy_offer_multiplies_unit_price_by_explicit_quantity() -> Non
     assert metadata["economy_offers"] == [{
         "payer_uid": "p1", "amount": 150, "quantity": 5,
         "amount_scope": "unit", "target": "治疗药水", "note": "",
+    }]
+
+
+def test_economy_offer_without_unit_fails_closed() -> None:
+    instance = make_instance()
+    offers, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "34", "price_source": "gm_narrated",
+    }])
+    assert offers == []
+    assert unpriced == [{"payer_uid": "p1", "target": "护甲", "quantity": 1}]
+    assert errors == ["economy_actions[0] unit 缺失；已降级为 unpriced purchase intent"]
+
+
+def test_economy_offer_recovers_explicit_unit_from_player_text() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我决定买护甲，价格是34金币"}]
+    rule = RuleSystem({
+        "rule_id": "test", "name": "Test", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}],
+        "currency": "金币",
+    })
+    offers, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "34", "price_source": "player_stated",
+    }], rule)
+    assert offers and offers[0]["amount"] == 34
+    assert unpriced == []
+    assert errors == []
+
+
+def test_quote_evidence_must_match_player_text() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我决定买护甲，价格是34金币"}]
+    rule = RuleSystem({
+        "rule_id": "evidence", "name": "Evidence", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    offers, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "34", "unit": "unit", "price_source": "player_stated",
+        "evidence": "买护甲，价格是34金币",
+    }], rule)
+    assert offers[0]["evidence"] == "买护甲，价格是34金币"
+    assert unpriced == []
+    assert errors == []
+
+    rejected, blocked, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "34", "unit": "unit", "price_source": "player_stated",
+        "evidence": "玩家说了700金币",
+    }], rule)
+    assert rejected == []
+    assert blocked == [{"payer_uid": "p1", "target": "护甲", "quantity": 1}]
+    assert "evidence 与可信文本不匹配" in errors[0]
+
+
+def test_economy_offer_above_player_budget_fails_closed() -> None:
+    instance = make_instance()
+    offers, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "750", "unit": "unit", "max_total": "700",
+        "price_source": "gm_narrated",
+    }])
+    assert offers == []
+    assert unpriced == [{"payer_uid": "p1", "target": "护甲", "quantity": 1}]
+    assert errors == ["economy_actions[0] 报价超过玩家预算上限；已降级为 unpriced purchase intent"]
+
+
+def test_economy_offer_preserves_explicit_deposit_terms() -> None:
+    instance = make_instance()
+    offers, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "护甲",
+        "amount": "900", "unit": "unit", "deposit_amount": "200",
+        "price_source": "gm_narrated",
+    }])
+    assert unpriced == []
+    assert errors == []
+    assert offers == [{
+        "payer_uid": "p1", "amount": 900, "quantity": 1,
+        "amount_scope": "total", "target": "护甲", "note": "",
+        "initial_due": 200, "remaining_due": 700,
     }]
 
 
@@ -525,6 +772,94 @@ async def test_economy_offer_without_stated_price_is_safely_skipped() -> None:
     # none / 缺 amount → 跳过且不报错；有 amount 却没有 price_source → 拒绝。
     assert metadata["economy_offers"] == []
     assert metadata["errors"] == ["economy_actions[2] price_source='' 无效；已降级为 unpriced purchase intent"]
+
+
+@pytest.mark.asyncio
+async def test_missing_model_economy_actions_recover_explicit_player_quote() -> None:
+    """两次 planner 都漏字段时，明确的玩家报价仍能形成订单。"""
+
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买护甲，34金币"}]
+    rule = RuleSystem({
+        "rule_id": "quote_recovery", "name": "Quote Recovery", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+
+    class _OmittingClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tools(self, *_args, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                tool_calls=[{"name": "dice_checks", "arguments": {"checks": []}}],
+                total_tokens=1,
+                provider_used="fake",
+                native_tools=True,
+            )
+
+    client = _OmittingClient()
+    _planned, metadata = await plan_round_checks(instance, rule, client)
+    assert client.calls == 2
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 34, "quantity": 1,
+        "amount_scope": "total", "target": "护甲",
+        "note": "player action quote recovered server-side",
+    }]
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_missing_model_economy_actions_keep_unpriced_purchase_blocker() -> None:
+    """模型两次都漏报价时，明确购买意图不能静默消失或免费交货。"""
+
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买护甲"}]
+    client = _client_returning({"checks": []})
+    _planned, metadata = await plan_round_checks(instance, make_rule(), client)
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [{
+        "payer_uid": "p1", "target": "护甲", "quantity": 1,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_explicit_player_quote_overrides_model_unpriced_fallback() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买护甲，34金币"}]
+    rule = RuleSystem({
+        "rule_id": "unpriced_override", "name": "Unpriced Override", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    client = _client_returning({"checks": [], "economy_actions": [{
+        "player": "p1", "type": "purchase", "target": "护甲",
+        "amount": "34", "unit": "silver", "price_source": "player_stated",
+    }]})
+    _, metadata = await plan_round_checks(instance, rule, client)
+    assert metadata["economy_offers"] == [{
+        "payer_uid": "p1", "amount": 34, "quantity": 1,
+        "amount_scope": "total", "target": "护甲",
+        "note": "player action quote recovered server-side",
+    }]
+    assert metadata["unpriced_purchase_intents"] == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_player_balance_is_not_mistaken_for_purchase_price() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我有34金币，买护甲"}]
+    _planned, metadata = await plan_round_checks(
+        instance,
+        RuleSystem({
+            "rule_id": "quote_balance", "name": "Quote Balance", "dice_system": "d20",
+            "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+        }),
+        _client_returning({"checks": []}),
+    )
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [{
+        "payer_uid": "p1", "target": "护甲", "quantity": 1,
+    }]
 
 
 @pytest.mark.asyncio

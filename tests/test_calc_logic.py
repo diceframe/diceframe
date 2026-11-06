@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from src.commands.tag_handlers import LIMITS_BY_COMBAT_MODEL, parse_player_tag
 from src.commands.tag_parser import _new_result, parse_tag_state
 
@@ -49,6 +51,36 @@ def test_gold_positive_reward_requires_explicit_reason():
     assert proposal["approval_policy"] == "gm"
 
 
+@pytest.mark.parametrize("combat_model", ["lethal_narrative", "narrative", "hp_based"])
+def test_reward_amount_uses_economy_cap_not_combat_gold_delta_cap(combat_model):
+    """合法的大额任务奖励不能被旧的单次金币变更上限静默吞掉。"""
+
+    proposals = _economy(_parse(
+        [("REWARD", f"{UID}:710:过命任务报酬")], combat_model,
+    ))
+    assert [(item["amount"], item["reason"]) for item in proposals] == [
+        (710, "过命任务报酬"),
+    ]
+
+
+def test_reward_protocol_records_exact_structured_evidence():
+    proposal = _economy(_parse([("REWARD", f"{UID}:710:过命任务报酬")]))[0]
+    assert proposal["evidence"] == f"REWARD:{UID}:710:过命任务报酬"
+    assert proposal["evidence_validated"] is True
+
+
+def test_parse_tag_state_reward_is_structured_and_canonical():
+    result = parse_tag_state(
+        "任务结束。\n---\nREWARD:尤洛:710:完成过命任务",
+        "hp_based",
+    )
+    proposal = _economy(result)[0]
+    assert proposal["recipient_uid"] == UID
+    assert proposal["amount"] == 710
+    assert proposal["source"] == "narrative_reward_tag"
+    assert proposal["evidence_validated"] is True
+
+
 
 
 
@@ -77,7 +109,8 @@ def test_pay_no_longer_sets_pay_tagged():
 
 # ===== 边界：超限忽略 =====
 def test_gold_over_max_ignored():
-    assert "gold_change" not in _pu(_parse([("GOLD", f"{UID}:99999")]))
+    assert "gold_change" not in _pu(_parse([("GOLD", f"{UID}:10000001:超出经济金额上限")]))
+    assert _economy(_parse([("GOLD", f"{UID}:10000001:超出经济金额上限")])) == []
 
 
 def test_pay_over_loss_ignored():

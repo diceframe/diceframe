@@ -12,6 +12,34 @@ DiceFrame 官方维护**英语和简体中文**界面及文档。集中式界面
 
 集中式界面缺失或尚未核对新版英文的译文会回退英文；社区语言可以暂停，同时保留语言 ID、存档和机制。维护状态及贡献流程见[翻译维护](translations.md)。
 
+## 后端意图资源
+
+购买、询价、拒绝购买、免费领取和延期付款等自然语言识别使用稳定的 intent ID，资源位于 `src/engine/intent/locales/<locale>/intents.json`。新增语言应新增资源文件，至少声明当前实现需要的稳定键：
+
+```text
+purchase_intent
+purchase_decline
+purchase_offer
+free_purchase
+deferred_payment
+currency_labels
+purchase_target_prefix
+purchase_target_connector
+purchase_target_suffix
+purchase_quantity_classifier
+purchase_generic_target
+purchase_quantity_word
+purchase_balance
+```
+
+资源只描述语言触发模式；它不能改变 canonical 币种、金额换算、预算、权限、交易状态或规则机制。经济引擎只消费稳定 intent ID，不得把翻译后的 display name 当作 identity。缺失语言资源时，解析器按 locale → 英语 → 简体中文回退；缺失资源不得让系统猜测价格或放行免费物品。
+
+每个新增语言必须通过 intent 资源契约测试、UTF-8 校验和相关经济回归测试。新增语言不应修改 `src/engine/economy.py` 或交易结算逻辑；如果必须改业务代码，说明资源契约没有覆盖新的语言语义，应先补稳定 intent ID 或资源字段。
+
+经济边界提示和经济 planner 补扫提示位于同目录的 `messages.json`，稳定键包括 `unbacked_payment_notice`、`unbacked_purchase_notice`、`unpriced_purchase_notice`、`pending_decision_notice` 和 `economy_repair_prompt`。新增语言必须同时提供这些消息资源；缺失资源按 locale → 英语 → 简体中文回退。
+
+报价语义不依赖翻译后的关键词作为权威。结构化报价可携带 `evidence` 原文证据，服务端校验证据是否来自可信玩家行动或 GM 叙事；无法验证时只保留无价意图，不创建订单。
+
 ## 状态与回退
 
 `src/localization/registry.json` 登记语言层级 `core` / `community`、状态 `active` / `paused` 及本人同意登记的维护者。社区维护者列表为空表示欢迎志愿者接手，现有目录暂作为已接受基线继续启用。新增社区语言需要志愿维护者、回退验证和接入 PR。

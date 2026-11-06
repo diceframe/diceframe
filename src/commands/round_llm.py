@@ -637,6 +637,18 @@ async def call_llm_with_tag_retry(
                 if json_data:
                     logger.info("标签无结果，JSON 回退成功 (round=%d)", progression_state.round_value(instance))
                     data["state_update"] = json_data.get("state_update", {})
+                    # ``evidence_validated`` is an internal marker produced by
+                    # the tag parser. JSON fallback is model-authored input, so
+                    # never let it mint the marker and unlock auto rewards.
+                    fallback_proposals = (
+                        data["state_update"].get("economy_proposals")
+                        if isinstance(data["state_update"], dict)
+                        else None
+                    )
+                    if isinstance(fallback_proposals, list):
+                        for proposal in fallback_proposals:
+                            if isinstance(proposal, dict):
+                                proposal.pop("evidence_validated", None)
                     data["memory_delta"] = json_data.get("memory_delta", {})
                     data["info_asymmetry"] = json_data.get("info_asymmetry", {})
                     data["plot_update"] = json_data.get("plot_update", {})

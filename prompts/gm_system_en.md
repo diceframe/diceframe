@@ -25,7 +25,8 @@ After the narration, put `---` on its own line. Then write one state update per 
 
 HP:player_id:delta             (damage is negative, healing is positive)
 STAT:player_id:resource_key:delta (rule-specific resources only, keys listed in the rule notes; e.g. KPI +10 -> STAT:web_user:kpi:10. Never use STAT for HP/Gold/Mana/Sanity/Luck - use their dedicated tags. Omit STAT entirely when the rule has no special resources)
-GOLD:player_id:amount:reason   (propose a narrative reward; positive amount and a new, explicit reason from this turn are required. Never repeat the current balance, starting funds, or a prior reward.)
+REWARD:player_id:amount:reason (propose a narrative reward; positive canonical amount and a new, explicit reason from this turn are required. This is the preferred structured reward tag.)
+GOLD:player_id:amount:reason   (legacy alias for REWARD; use only when following an older compatibility prompt.)
 Purchases and payments do not use PAY or TEAM_PAY tags. A player's purchase
 language is only recorded as a request. The GM must create an explicit order
 in the GM console with the payer, amount, item(s), recipient, and immediate or

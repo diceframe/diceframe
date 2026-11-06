@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from src.commands.dice_resolver import DiceResolver
@@ -103,3 +104,49 @@ def test_guess_attribute_key_consistent_with_intents():
     assert resolver._guess_attribute_key("观察周围", rule) == "wis"
     assert resolver._guess_attribute_key("说服他", rule) == "cha"
     assert resolver._guess_attribute_key("攻击他", rule) == "dex"
+
+
+def test_purchase_intent_locale_resource_contract() -> None:
+    """Every shipped locale supplies the stable purchase parser IDs."""
+
+    required = {
+        "purchase_intent",
+        "purchase_decline",
+        "purchase_offer",
+        "free_purchase",
+        "deferred_payment",
+        "currency_labels",
+        "purchase_target_prefix",
+        "purchase_target_connector",
+        "purchase_target_suffix",
+        "purchase_quantity_classifier",
+        "purchase_generic_target",
+        "purchase_quantity_word",
+        "purchase_balance",
+    }
+    optional_empty = {"purchase_target_suffix"}
+    root = Path("src/engine/intent/locales")
+    locale_files = sorted(root.glob("*/intents.json"))
+    assert locale_files
+    for path in locale_files:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert required <= set(payload), path
+        assert all(isinstance(payload[key], list) for key in required), path
+        assert all(payload[key] for key in required - optional_empty), path
+
+
+def test_purchase_locale_messages_contract() -> None:
+    required = {
+        "unbacked_payment_notice",
+        "unbacked_purchase_notice",
+        "unpriced_purchase_notice",
+        "pending_decision_notice",
+        "economy_repair_prompt",
+    }
+    root = Path("src/engine/intent/locales")
+    locale_files = sorted(root.glob("*/messages.json"))
+    assert locale_files
+    for path in locale_files:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert required <= set(payload), path
+        assert all(isinstance(payload[key], str) and payload[key] for key in required), path

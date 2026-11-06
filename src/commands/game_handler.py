@@ -110,6 +110,7 @@ class GameHandler:
         self._state_applier = StateUpdateApplier(
             self.rules_dir, self.worlds_dir, self._load_world_template,
             ruleset_registry=self.ruleset_registry,
+            strict_economy=True,
         )
         self._progression = ProgressionResolver(self.rules_dir, self.worlds_dir)
         self._round_processor = RoundProcessor(
@@ -376,7 +377,12 @@ class GameHandler:
         # The applier can write the scene after other state; reject an
         # unsupported notes slot before any of it changes.
         module_hooks.preflight(instance, module_hooks.NARRATIVE_VIEW)
-        self._state_applier.apply_state_update(instance, update)
+        # This private compatibility seam is still used by legacy callers
+        # that submit an already-authorized state update.  New narrative
+        # rounds use the strict path owned by RoundProcessor/GameLifecycle.
+        self._state_applier.apply_state_update(
+            instance, update, allow_unsettled_item_grants=True,
+        )
 
     def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:
         """Expose the narrative pipeline's item category table to injected services."""

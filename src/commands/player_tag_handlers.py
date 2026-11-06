@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 
 from src.engine.dice import roll as dice_roll
+from src.engine.currency.constants import MAX_ECONOMY_AMOUNT
 
 logger = logging.getLogger("trpg")
 PlayerTagHandler = Callable[[str, dict, dict], None]
@@ -42,26 +43,35 @@ def _hp(value: str, result: dict, _limits: dict) -> None:
             _set_int_change(result, uid, "hp_change", parsed)
 
 
-def _gold(value: str, result: dict, limits: dict) -> None:
+def _reward(value: str, result: dict, _limits: dict, *, tag: str = "REWARD", source: str = "narrative_reward_tag") -> None:
     if split := _split(value):
         uid, change = split
         raw_amount, separator, reason = change.partition(":")
-        parsed = _parse_int(raw_amount.strip(), tag="GOLD", uid=uid)
+        parsed = _parse_int(raw_amount.strip(), tag=tag, uid=uid)
         if parsed is None:
             return
-        if parsed > 0 and parsed <= limits["gold_max"] and separator and reason.strip():
+        if parsed > 0 and parsed <= MAX_ECONOMY_AMOUNT and separator and reason.strip():
             # Narrative rewards are untrusted model output. They need an explicit
             # human-readable cause and GM approval before changing the balance.
             result.setdefault("state_update", {}).setdefault("economy_proposals", []).append({
                 "kind": "reward",
                 "uid": uid,
+                "recipient_uid": uid,
                 "amount": parsed,
                 "reason": reason.strip()[:240],
                 "approval_policy": "gm",
-                "source": "legacy_gold_tag",
+                "source": source,
+                "evidence": f"{tag}:{uid}:{parsed}:{reason.strip()[:240]}",
+                "evidence_validated": True,
             })
         else:
-            logger.warning("GOLD 奖励缺少正数金额或明确原因，已忽略: %s = %s", uid, change)
+            logger.warning("%s 奖励缺少正数金额或明确原因，已忽略: %s = %s", tag, uid, change)
+
+
+def _gold(value: str, result: dict, limits: dict) -> None:
+    """Legacy compatibility alias for the structured REWARD protocol."""
+
+    _reward(value, result, limits, tag="GOLD", source="legacy_gold_tag")
 
 
 def _string_update(value: str, result: dict, field: str, message: str) -> None:
@@ -243,6 +253,7 @@ def _stat(value: str, result: dict, _limits: dict) -> None:
 
 PLAYER_TAG_HANDLERS: dict[str, PlayerTagHandler] = {
     "HP": _hp,
+    "REWARD": _reward,
     "GOLD": _gold,
     "USE": _use,
     "EQUIP": _equip,

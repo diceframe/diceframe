@@ -1,0 +1,7 @@
+{
+  "unbacked_payment_notice": "支払いは実行されていません。GM が明示的な支払い注文を発行してください。",
+  "unbacked_purchase_notice": "支払いが確認されていないため、購入品は付与されませんでした。",
+  "unpriced_purchase_notice": "購入注文は作成されませんでした。明示的で決済可能な通貨の価格が必要です。支払いも商品付与もありません。",
+  "pending_decision_notice": "決済確認待ち：関連結果はまだ発効していません。",
+  "economy_repair_prompt": "経済見積もり再確認：提示されたプレイヤー行動と直近の GM 描写だけを再確認し、明確な購入意図だけを報告してください。dice_checks を一度呼び、checks=[] にしてください。明示された金額と通貨だけを使い、価格や通貨を推測しないでください。価格がない場合は price_source=none として amount/unit を省略してください。"
+}

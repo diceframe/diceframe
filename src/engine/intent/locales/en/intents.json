@@ -7,6 +7,23 @@
     "paid",
     "spend"
   ],
+  "purchase_decline": [
+    "do not buy",
+    "don't buy",
+    "not buying",
+    "won't buy",
+    "not purchasing",
+    "just asking",
+    "only asking",
+    "no purchase"
+  ],
+  "purchase_target_prefix": ["i", "i'd", "i'll", "i will", "i want", "i decide", "want to", "to"],
+  "purchase_target_connector": ["again", "then", "also"],
+  "purchase_target_suffix": [],
+  "purchase_quantity_classifier": ["item", "items", "bottle", "bottles", "piece", "pieces"],
+  "purchase_generic_target": ["this", "that", "it"],
+  "purchase_quantity_word": ["one=1", "two=2", "three=3", "four=4", "five=5", "six=6", "seven=7", "eight=8"],
+  "purchase_balance": ["balance", "have", "own", "left", "budget", "maximum", "max"],
   "purchase_confirm": [
     "deal",
     "accept",
@@ -21,7 +38,10 @@
   "purchase_offer": [
     "cost",
     "price",
-    "charge"
+    "charge",
+    "budget",
+    "maximum",
+    "max"
   ],
   "free_purchase": [
     "free",
