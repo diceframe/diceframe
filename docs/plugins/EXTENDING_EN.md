@@ -11,7 +11,8 @@ Every plugin starts with `plugin.json`. `schema_version`, `id`, `name`, `version
 3. Keep canonical IDs separate from display names. Locales translate display fields and never change identity or mechanics.
 4. Declare rule currency through `currency_system` (`schema_version: 2`): `base_unit` is what the canonical integer counts (its rate must be 1), `display_unit` is the default display unit, and unit rates are positive integers. Loading/installing validates through `RuleBundleLoader` -> `validate_currency_system` and fails closed on bad declarations; rules carrying only a `currency` label keep legacy rate=1 semantics and are never reinterpreted by name. See `plugins/examples/starter-content-v2/content/rules/moonlight.json` for an example.
 5. Follow `plugins/examples/starter-content-v2/` and test content validation, locale fallback, and duplicate-ID rejection.
-6. Validate and package with:
+6. The repository (flat) export ships its own `LICENSE` plus a manifest `license` field (CC BY-NC 4.0 by default): the index requires a license file at the repository root, and authors can replace that file to use another license.
+7. Validate and package with:
 
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json
