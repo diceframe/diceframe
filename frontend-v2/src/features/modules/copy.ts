@@ -22,7 +22,7 @@ type ModuleCopy = {
 const copies: Record<Locale, ModuleCopy> = {
   'zh-CN': {
     contentProfile: '内容配置',
-    adventureLabel: '冒险内容包', resourceLabel: '资源包', playableAdventures: '可玩冒险', resourcePack: '资源包',
+    adventureLabel: '冒险模组', resourceLabel: '资源包', playableAdventures: '可玩冒险', resourcePack: '资源包',
     noFixedStory: '不含固定剧情；查看资料并创建自己的内容副本。', resourceContributions: '包含资料',
     resourceBrowse: '包内资料 · 不含固定剧情 · 查看资料',
     packLabel: '内容包', inventoryUnknown: '内容清单暂不可读；请检查包状态后重试。', installedAdventures: '已安装冒险', disabledAdventures: '已禁用，启用后在详情中选择冒险。',
@@ -31,7 +31,7 @@ const copies: Record<Locale, ModuleCopy> = {
   },
   en: {
     contentProfile: 'Content profile',
-    adventureLabel: 'Adventure content pack', resourceLabel: 'Content pack', playableAdventures: 'Playable adventures', resourcePack: 'Content pack',
+    adventureLabel: 'Adventure module', resourceLabel: 'Resource pack', playableAdventures: 'Playable adventures', resourcePack: 'Resource pack',
     noFixedStory: 'No fixed story included. Browse resources and create your own copies.', resourceContributions: 'Included content',
     resourceBrowse: 'Pack content · No fixed story · Browse resources',
     packLabel: 'Content pack', inventoryUnknown: 'Content inventory is unreadable. Check the package status and retry.', installedAdventures: 'Installed adventures', disabledAdventures: 'Disabled. Enable the pack to choose an adventure in its details.',

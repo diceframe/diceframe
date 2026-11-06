@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
 import type { AdventureSummary, AdventuresResponse, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
+import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl } from './submission'
 
 type Book = { id: string; name?: string; entry_count?: number }
 const props = defineProps<{ mode: CreatorPackageExportMode }>()
@@ -15,56 +16,36 @@ const worlds = ref<WorldSummary[]>([]), adventures = ref<AdventureSummary[]>([])
 const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<string[]>([]), selectedBooks = ref<string[]>([])
 const busy = ref(false), loading = ref(true), error = ref('')
 const isAdventureModule = computed(() => props.mode === 'adventure')
-// Content packs without their own repository are submitted through an issue
-// form on the plugin index; the package is attached to it as a .zip.
-const SUBMISSION_REPOSITORY = 'https://github.com/diceframe/diceframe-plugins'
 const exported = ref<{ blob: Blob; id: string; version: string } | null>(null)
 
-const copy = computed(() => String(locale.value).startsWith('zh') ? {
-  resourceTitle: '导出资源包', resourceIntro: '只打包世界、规则和资料册，不含冒险。导出的是数据包，安装后需要在内容来源里启用。',
-  adventureTitle: '导出冒险模组', adventureIntro: '选择一个或多个冒险，可以附带世界、规则和资料册。冒险会保留原生规则和剧情文件。导出的是数据包，安装后需要在内容来源里启用。',
-  basic: '包信息', id: '包 ID', name: '名称', version: '版本', description: '说明',
-  resources: '选择资源', extras: '配套资源（可选）', world: '世界', rule: '规则', adventures: '冒险（至少选一个）', books: '资料册（可多选）',
-  resourceExport: '导出资源包', adventureExport: '导出冒险模组', close: '取消', loading: '正在读取可导出的内容…', empty: '没有可导出的内容',
-  needIdName: '请填写包 ID 和名称。', idInvalid: '包 ID 只能使用小写字母、数字、连字符或下划线。',
-  resourceRequired: '至少选择一个世界、规则或资料册。', adventureRequired: '至少选择一个冒险。',
-  locale: 'zh-CN', entries: '条目',
-  preview: '导出预览', previewCount: '冒险数量', previewRuntimes: '规则运行时', previewPolicies: '世界策略', previewResources: '配套资源', none: '无',
-  resourceSummary: (world: number, rule: number, book: number) => [world && `世界 ${world}`, rule && `规则 ${rule}`, book && `资料册 ${book}`].filter(Boolean).join(' · '),
-  fixedWorldMissing: (title: string, world: string) => `「${title}」固定使用世界「${world}」，但这次没有一并导出；安装方没有这个世界时无法开局。`,
-  ready: '没有发现会阻碍开局的问题。',
-  privacy: '冒险会完整打包，包括只有 GM 能看到的剧情和秘密，分享前请确认。',
-  doneTitle: '已导出', doneText: (file: string) => `已下载 ${file}。可以直接发给别人导入，也可以投稿到 DiceFrame 插件中心，让大家在「在线内容包」里装到它。`,
-  submitTitle: '投稿到插件中心',
-  submitSteps: [
-    '点「投稿」会再下载一份 .zip（GitHub 不接受 .dfplugin 后缀），并在浏览器里打开已经填好包 ID 的投稿页面。',
-    '在投稿页面填写作者署名、选择许可证，把 .zip 拖进「插件包」一栏后提交。需要 GitHub 账号；没有账号可以把包交给维护者代投稿。',
-    '自动检查通过、维护者批准后，DiceFrame 会代为托管并发布，在线内容包里就能安装了。',
-  ],
-  submit: '投稿', done: '完成',
-} : {
-  resourceTitle: 'Export a resource pack', resourceIntro: 'Bundle worlds, rulesets, and lorebooks without adventures. The export is data-only; enable it after installation in Content sources.',
-  adventureTitle: 'Export an adventure module', adventureIntro: 'Choose one or more adventures, optionally with a world, ruleset, and lorebooks. Adventures keep their native rules and story files. The export is data-only; enable it after installation in Content sources.',
-  basic: 'Package details', id: 'Package ID', name: 'Name', version: 'Version', description: 'Description',
-  resources: 'Choose resources', extras: 'Bundled resources (optional)', world: 'World', rule: 'Ruleset', adventures: 'Adventures (choose at least one)', books: 'Lorebooks',
-  resourceExport: 'Export resource pack', adventureExport: 'Export adventure module', close: 'Cancel', loading: 'Loading exportable content…', empty: 'Nothing to export yet',
-  needIdName: 'Enter a package ID and name.', idInvalid: 'Package ID must use lowercase letters, numbers, hyphens, or underscores.',
-  resourceRequired: 'Choose at least one world, ruleset, or lorebook.', adventureRequired: 'Choose at least one adventure.',
-  locale: 'en', entries: 'entries',
-  preview: 'Export preview', previewCount: 'Adventures', previewRuntimes: 'Rules runtime', previewPolicies: 'World policy', previewResources: 'Bundled resources', none: 'None',
-  resourceSummary: (world: number, rule: number, book: number) => [world && `${world} world`, rule && `${rule} ruleset`, book && `${book} lorebook${book === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
-  fixedWorldMissing: (title: string, world: string) => `"${title}" uses the fixed world "${world}", which is not included; it cannot start on an instance that lacks that world.`,
-  ready: 'No issues found that would block starting these adventures.',
-  privacy: 'Adventures are exported in full, including GM-only story and secrets. Check before sharing.',
-  doneTitle: 'Exported', doneText: (file: string) => `Downloaded ${file}. Send it to others to import, or submit it to the DiceFrame plugin hub so anyone can install it from Online content packs.`,
-  submitTitle: 'Submit to the plugin hub',
-  submitSteps: [
-    'Submit downloads the package again as a .zip (GitHub does not accept the .dfplugin extension) and opens the submission page with the package ID filled in.',
-    'On that page, enter the author credit, choose a license, drag the .zip into the Package field, and submit. This needs a GitHub account; without one, ask a maintainer to submit it for you.',
-    'Once the automated check passes and a maintainer approves it, DiceFrame hosts and publishes the pack so it can be installed from Online content packs.',
-  ],
-  submit: 'Submit', done: 'Done',
-})
+const copy = computed(() => ({
+  resourceTitle: t('creatorExportResourceTitle'), resourceIntro: t('creatorExportResourceIntro'),
+  adventureTitle: t('creatorExportAdventureTitle'), adventureIntro: t('creatorExportAdventureIntro'),
+  basic: t('creatorExportBasic'), id: t('creatorExportId'), name: t('creatorExportName'), version: t('creatorExportVersion'), description: t('creatorExportDescription'),
+  resources: t('creatorExportResources'), extras: t('creatorExportExtras'), world: t('creatorExportWorld'), rule: t('creatorExportRule'),
+  adventures: t('creatorExportAdventures'), books: t('creatorExportBooks'),
+  resourceExport: t('creatorExportResourceAction'), adventureExport: t('creatorExportAdventureAction'), close: t('cancel'),
+  loading: t('creatorExportLoading'), empty: t('creatorExportEmpty'),
+  needIdName: t('creatorExportNeedIdName'), idInvalid: t('creatorExportIdInvalid'),
+  resourceRequired: t('creatorExportResourceRequired'), adventureRequired: t('creatorExportAdventureRequired'),
+  entries: t('creatorExportEntries'),
+  preview: t('creatorExportPreview'), previewCount: t('creatorExportPreviewCount'), previewRuntimes: t('creatorExportPreviewRuntimes'),
+  previewPolicies: t('creatorExportPreviewPolicies'), previewResources: t('creatorExportPreviewResources'), none: t('creatorExportNone'),
+  resourceSummary: (world: number, rule: number, book: number) => [
+    world && t('creatorExportSummaryWorld', { count: world }),
+    rule && t('creatorExportSummaryRule', { count: rule }),
+    book && t('creatorExportSummaryBook', { count: book }),
+  ].filter(Boolean).join(' · '),
+  fixedWorldMissing: (title: string, world: string) => t('creatorExportFixedWorldMissing', { title, world }),
+  ready: t('creatorExportReady'), privacy: t('creatorExportPrivacy'),
+  doneTitle: t('creatorExportDoneTitle'), doneText: (file: string) => t('creatorExportDoneText', { file }),
+  submitTitle: t('contentPackSubmitTitle'),
+  submitSteps: [t('creatorExportSubmitStepDownload'), t('contentPackSubmitStepForm'), t('contentPackSubmitStepReview')],
+  submit: t('creatorExportSubmit'), done: t('creatorExportDone'),
+}))
+// The export language only picks the generated README and default locale;
+// keep the existing zh/en split so other UI locales do not change packages.
+const exportLanguage = computed(() => String(locale.value).startsWith('zh') ? 'zh-CN' : 'en')
 
 function adventureSelectionValue(item: AdventureSummary): string {
   return JSON.stringify([item.source_kind || (item.custom ? 'user' : 'builtin'), item.source_id || '', item.adventure_id])
@@ -143,15 +124,7 @@ function saveBlob(blob: Blob, filename: string) {
 
 const exportedFile = computed(() => exported.value ? `${exported.value.id}-${exported.value.version}.dfplugin` : '')
 
-const submissionUrl = computed(() => {
-  if (!exported.value) return ''
-  const query = new URLSearchParams({
-    template: 'add-content-pack.yml',
-    title: `[Content Pack] ${exported.value.id}`,
-    plugin_id: exported.value.id,
-  })
-  return `${SUBMISSION_REPOSITORY}/issues/new?${query.toString()}`
-})
+const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
 
 function submitToHub() {
   if (!exported.value) return
@@ -161,7 +134,7 @@ function submitToHub() {
 
 async function exportPack() {
   if (!packId.value.trim() || !name.value.trim()) { error.value = copy.value.needIdName; return }
-  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(packId.value.trim())) { error.value = copy.value.idInvalid; return }
+  if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { error.value = copy.value.idInvalid; return }
   if (isAdventureModule.value && !selectedAdventures.value.length) { error.value = copy.value.adventureRequired; return }
   if (!isAdventureModule.value && !selectedWorld.value && !selectedRule.value && !selectedBooks.value.length) { error.value = copy.value.resourceRequired; return }
   busy.value = true; error.value = ''
@@ -172,7 +145,7 @@ async function exportPack() {
       // Only the adventure-module export sends adventures; the backend marks
       // a pack as adventure-module exactly when it contains adventures.
       adventure_refs: isAdventureModule.value ? selectedAdventureRefs() : [],
-      lorebook_ids: selectedBooks.value, language: copy.value.locale,
+      lorebook_ids: selectedBooks.value, language: exportLanguage.value,
     }) })
     const blob = await response.blob()
     exported.value = { blob, id: packId.value.trim(), version: version.value.trim() || '0.1.0' }

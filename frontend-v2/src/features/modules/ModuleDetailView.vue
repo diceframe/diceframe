@@ -78,12 +78,12 @@ type ModuleIdentityCopy = {
 const identityCopies: Record<Locale, ModuleIdentityCopy> = {
   'zh-CN': {
     title: '来源与复制说明', description: '选择包内冒险开局，或查看资料并创建可编辑的内容副本。',
-    identityLabel: '内容来源', identityHint: '包名称、ID 和版本帮助你认出来源；需要分享或排查问题时，可以据此准确说明使用的是哪一份内容。',
+    identityLabel: '内容包身份', identityHint: '包名称、ID 和版本帮助你认出来源；需要分享或排查问题时，可以据此准确说明使用的是哪一份内容。',
     packageLabel: '复制方式', packageHint: '可复制的资料会在资源列表提供“创建副本”；规则、地图等由所属系统管理的资料会保持只读。',
   },
   en: {
     title: 'Source and copy notes', description: 'See where this content came from and which resources you can copy into your library to edit.',
-    identityLabel: 'Content source', identityHint: 'The package name, ID, and version help you recognize the source and describe exactly which content you are using when sharing or troubleshooting.',
+    identityLabel: 'Package identity', identityHint: 'The package name, ID, and version help you recognize the source and describe exactly which content you are using when sharing or troubleshooting.',
     packageLabel: 'Copy options', packageHint: 'Resources you can edit offer a “Create copy” action in the resource list. Rules and maps managed by their ruleset remain read-only.',
   },
   ja: {

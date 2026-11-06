@@ -183,7 +183,7 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此模组')
+    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此内容包')
     expect(buttonByText(wrapper, '更新').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '卸载').attributes('disabled')).toBeDefined()
@@ -226,7 +226,7 @@ describe('ModuleDetailView', () => {
     mocks.detail.mockResolvedValue(detailPayload({ status: 'disabled' }))
     const { wrapper } = await mountView()
     expect(buttonByText(wrapper, '用此冒险创建游戏').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('启用模组并解决兼容性问题后再创建游戏')
+    expect(wrapper.text()).toContain('启用内容包并解决兼容性问题后再创建游戏')
   })
 
   it('shows compatibility blockers before technical details and keeps resource copy browsing mounted', async () => {
@@ -256,8 +256,8 @@ describe('ModuleDetailView', () => {
     await buttonByText(wrapper, '禁用').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('该模组正在被存档使用')
-    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此模组')
+    expect(wrapper.text()).toContain('该内容包正在被存档使用')
+    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此内容包')
     expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeDefined()
   })
 })

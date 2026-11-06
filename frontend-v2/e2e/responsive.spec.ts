@@ -67,7 +67,7 @@ test('phone module recovery stays contained and exposes local import', async ({ 
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/modules?adventure=core%3Acastle&version=1.0.0')
-  await expect(page.getByRole('heading', { name: '内容来源管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '内容包管理', exact: true })).toBeVisible()
   await expect(page.getByText('恢复本局冒险')).toBeVisible()
   await expect(page.locator('.module-import input[type="file"]')).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -136,7 +136,7 @@ test('module recovery validates the saved digest before offering resume', async 
   // 同 id 不同 package：即使包可用也不得"恢复"，绝不自动绑定。
   await page.goto(adventureRecoveryUrl('sha256:0000000000000000000000000000000000000000000000000000000000000000'))
   await expect(page.getByTestId('modules-recovery-blocked')).toBeVisible()
-  await expect(page.getByText('当前可用的模组内容与存档指纹不一致，不会自动绑定。')).toBeVisible()
+  await expect(page.getByText('当前可用的内容与存档指纹不一致，不会自动绑定。')).toBeVisible()
   await expect(page.getByRole('link', { name: '返回本局' })).toHaveCount(0)
 })
 

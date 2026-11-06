@@ -12,6 +12,8 @@ import { useLocale } from '@/composables/useLocale'
 import type { MessageKey } from '@/i18n'
 import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
+import Modal from '@/components/ui/Modal.vue'
+import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { moduleCategory, moduleCopy } from './copy'
 
 type RecoveryAdventure = {
@@ -44,6 +46,8 @@ const marketRuleset = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
 const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; message: string } | null>(null)
+const submitGuideOpen = ref(false)
+const directSubmissionUrl = contentPackSubmissionUrl()
 const error = ref('')
 const loading = ref(false)
 const importFile = ref<File | null>(null)
@@ -162,16 +166,16 @@ async function importModule() {
 
 async function installFromMarketplace(item: ModuleMarketplaceItem) {
   installBusy.value = item.id
-  installFeedback.value = { id: item.id, kind: 'busy', message: String(locale.value).startsWith('zh') ? '正在安装…' : 'Installing…' }
+  installFeedback.value = { id: item.id, kind: 'busy', message: t('modulesInstallingOnline') }
   error.value = ''
   try {
     const result = await moduleApi.installFromMarketplace(item.id, item.installed)
-    if (!result.ok) throw new Error(result.error || result.error_code || (String(locale.value).startsWith('zh') ? '安装没有完成' : 'Installation was not completed'))
-    installFeedback.value = { id: item.id, kind: 'success', message: String(locale.value).startsWith('zh') ? '已安装，正在刷新列表' : 'Installed; refreshing list' }
+    if (!result.ok) throw new Error(result.error || result.error_code || t('modulesInstallIncomplete'))
+    installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshing') }
     await load()
     await loadMarketplace()
     await checkRecovery()
-    installFeedback.value = { id: item.id, kind: 'success', message: String(locale.value).startsWith('zh') ? '已安装，列表已刷新' : 'Installed; list refreshed' }
+    installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshed') }
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
     installFeedback.value = { id: item.id, kind: 'error', message: errorMessage(cause) }
@@ -235,7 +239,7 @@ async function checkRecovery() {
         <RouterLink class="content-button modules-return-link" :to="{ name: 'library' }">{{ library.backLibrary }}</RouterLink>
       </template>
     </ContentPageHeader>
-    <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ String(locale).startsWith('zh') ? '这里管理可安装的内容来源；冒险包在冒险工作台编辑，插件页只处理运行时插件。' : 'Manage installable content sources here. Edit adventure packages in the Adventure workbench; use Plugins for runtime plugins.' }}</p>
+    <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ t('modulesBoundaryNote') }}</p>
 
     <section v-if="recoveryAdventure" class="module-recovery" role="status" data-testid="modules-recovery">
       <strong>{{ t('modulesRecoveryTitle') }}</strong>
@@ -309,7 +313,10 @@ async function checkRecovery() {
     </section>
 
     <section id="modules-online" class="modules-section" data-testid="modules-online">
-      <h2>{{ t('modulesSectionOnline') }}</h2>
+      <div class="section-title-row">
+        <h2>{{ t('modulesSectionOnline') }}</h2>
+        <button type="button" class="module-submit-guide-link" data-testid="modules-submit-guide-open" @click="submitGuideOpen = true">{{ t('modulesSubmitGuideLink') }}</button>
+      </div>
       <div class="module-market-search">
         <input v-model="marketKeyword" type="search" :placeholder="t('modulesOnlineSearchPlaceholder')" :aria-label="t('modulesOnlineSearch')" @keyup.enter="loadMarketplace">
         <label class="module-market-filter">
@@ -325,7 +332,11 @@ async function checkRecovery() {
       </div>
       <p v-if="marketBusy" class="muted">{{ t('modulesLoading') }}</p>
       <p v-else-if="marketError" class="error-text">{{ marketError }}</p>
-      <p v-else-if="!market.length" class="muted">{{ t('modulesOnlineEmpty') }}</p>
+      <div v-else-if="!market.length" class="empty-state" data-testid="modules-online-empty">
+        <p class="muted">{{ t('modulesOnlineEmpty') }}</p>
+        <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
+        <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
+      </div>
       <div v-else class="modules-grid">
         <article v-for="item in market" :key="item.id" class="module-card" :data-testid="`modules-market-${item.id}`">
           <div>
@@ -348,20 +359,35 @@ async function checkRecovery() {
               :disabled="!item.installable || installBusy === item.id"
               :aria-busy="installBusy === item.id"
               @click="installFromMarketplace(item)"
-            >{{ installBusy === item.id ? (String(locale).startsWith('zh') ? '正在安装…' : 'Installing…') : t('modulesInstallOnline') }}</button>
+            >{{ installBusy === item.id ? t('modulesInstallingOnline') : t('modulesInstallOnline') }}</button>
             <button
               v-else-if="item.update_available"
               type="button"
               :disabled="installBusy === item.id"
               :aria-busy="installBusy === item.id"
               @click="installFromMarketplace(item)"
-            >{{ installBusy === item.id ? (String(locale).startsWith('zh') ? '正在更新…' : 'Updating…') : t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
+            >{{ installBusy === item.id ? t('modulesUpdatingOnline') : t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
             <span v-else class="module-installed-badge">{{ t('modulesInstalledBadge') }}</span>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
           </div>
         </article>
       </div>
     </section>
+
+    <Modal v-if="submitGuideOpen" :title="t('contentPackSubmitTitle')" dialog-class="module-submit-guide" close-test-id="modules-submit-guide-close" @close="submitGuideOpen = false">
+      <div data-testid="modules-submit-guide">
+        <p class="muted">{{ t('modulesSubmitGuideIntro') }}</p>
+        <ol class="module-submit-steps">
+          <li>{{ t('contentPackSubmitStepExport') }}</li>
+          <li>{{ t('contentPackSubmitStepForm') }}</li>
+          <li>{{ t('contentPackSubmitStepReview') }}</li>
+        </ol>
+        <footer class="module-submit-actions">
+          <RouterLink :to="{ name: 'creator' }" class="module-submit-action" data-testid="modules-submit-go-creator" @click="submitGuideOpen = false">{{ t('modulesSubmitGoCreator') }}</RouterLink>
+          <a :href="directSubmissionUrl" class="module-submit-action is-primary" target="_blank" rel="noopener" data-testid="modules-submit-direct">{{ t('modulesSubmitDirect') }}</a>
+        </footer>
+      </div>
+    </Modal>
   </section>
 </template>
 
@@ -376,6 +402,13 @@ async function checkRecovery() {
 .module-empty-links { margin: .3rem 0 0; }
 .modules-section { display: grid; gap: .9rem; margin-top: 2rem; }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.module-submit-guide-link { padding: 0; border: 0; background: none; color: var(--df-interactive-strong); font-size: .85rem; font-weight: 700; cursor: pointer; }
+.module-submit-guide-link:hover, .module-submit-guide-link:focus-visible { text-decoration: underline; }
+.module-submit-steps { display: grid; gap: .45rem; margin: .8rem 0 0; padding-left: 1.2rem; color: var(--df-text-secondary); line-height: 1.5; }
+.module-submit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; padding-top: 1rem; }
+.module-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); font-weight: 700; text-decoration: none; }
+.module-submit-action.is-primary { border-color: color-mix(in srgb, var(--df-accent) 50%, var(--df-border-soft)); color: var(--df-accent-strong); background: color-mix(in srgb, var(--df-accent) 12%, var(--df-surface-1)); }
+.empty-state .module-submit-action { justify-self: start; }
 .modules-section h2 { margin: 0; font-size: 1.05rem; }
 .module-import, .module-market-search { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-2); }
 .module-market-filter { display: inline-flex; align-items: center; gap: .45rem; color: var(--df-text-muted); font-size: .85rem; }
