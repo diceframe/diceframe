@@ -1,7 +1,8 @@
 # D&D 2024 完整网团体验施工计划
 
 > 维护者内部文档，不是对外契约，不得从玩家文档、网站或 `diceframe-content` 链接。
-> 基线核查：`main@03c6da6` / v3.0.3（2026-10-28）。
+> 初始核查：`main@03c6da6` / v3.0.3（2026-10-28）。
+> 当前代码基线：本地 `integration/dnd2024-srd`（2026-11-06 建立；上游 `main@0df53a52` + 未合并的 DND2024 PR）。
 
 ## 目标
 
@@ -73,13 +74,34 @@
 
 ### 上游与许可
 
-- 上游 `diceframe/diceframe`：AGPL-3.0，v3.0.3（2026-10-26），双人主力（EOEOY + Guan612 占 98% 提交），PR 已到 #603，迭代极快；允许大型重构但要求显式处理 contract。
+- 上游 `diceframe/diceframe`：AGPL-3.0，v3.0.5（`0df53a52`，2026-11-04），双人主力（EOEOY + Guan612 占 98% 提交），迭代极快；允许大型重构但要求显式处理 contract。
 - 外部参考边界：
   - `foundryvtt/dnd5e` 系统：代码 MIT（可研究/带声明并入），Active Effects 的 change 行模型（`key + mode + value` + duration）是效果实例的建模范本；
   - `foundryvtt/pf2e`：Rule Elements 的谓词 DSL 与触发分类学是触发注册表的参考；
   - open5e / dnd5eapi.co：SRD 5.2 结构化数据，CC-BY-4.0，可带署名重分发，与 AGPL 代码分层共存；
   - 5etools 数据许可边界不清，不作为后续任何内容的数据来源；
   - FVTT 核心 canvas 闭源，无代码可参考；PlanarAlly（开源自托管 VTT）是战术层架构参考。
+
+### 当前集成基线（2026-11-06）
+
+本地 `integration/dnd2024-srd` 从 #653 头提交 `e7b7080f` 建立，代码合并至 `d0a2fef5`，包含：
+
+- #653（`ef4a5923` + `e7b7080f`）：D1/D2/D3/D4 物品原语与全部 SRD 非魔法装备；
+- fork #4：叙事致死重算保留本地化物品身份、坏充能不再拖垮整次休息；
+- fork #5：背包取件与计数使用同一 ref 口径、按名发放不再无限增行；
+- fork #6：D3b 充能耗尽销毁判定；
+- #656：Extra Attack 改为读职业表，不再按职业类名硬编码；
+- 文档线：2026-11-06 的 SRD-only 范围调整与各切片执行报告。
+
+上游状态（2026-11-06 核查）：
+
+| PR | 状态 | 说明 |
+|---|---|---|
+| #653 | OPEN，三项 CI 全绿 | Backend 32m28s、Browser smoke 6m17s、Frontend 2m45s；等待维护者合并 |
+| #656 | OPEN，Backend 取消 | Backend job 在 30m17s 被取消（`conclusion=cancelled`，不是测试断言失败）；已在集成分支本地回归 |
+| fork #4/#5/#6 | OPEN，stacked | base 为 #653 头分支，只提供可点 diff，不在 fork 合并；#653 进入 `main` 后转上游 PR |
+
+集成分支用于让阶段二、回归和文档共享同一代码事实，**不改变上游 PR 的合并状态**。阶段二新分支应从该基线拉出，不再分别依赖在途 PR。
 
 ## 实施计划
 
@@ -208,7 +230,7 @@
 
 任务书（2026-11-03 写齐，锚点基线 `9c2ca59d`）：`design/D1_ITEM_IDENTITY_TASK_SPEC_2026-11-03.md`、`design/D2_ATTUNEMENT_TASK_SPEC_2026-11-03.md`、`design/D3_ITEM_ACTIVATION_TASK_SPEC_2026-11-03.md`、`design/D3B_CHARGE_DESTROY_TASK_SPEC_2026-11-03.md`、`design/D4_RANDOM_TREASURE_TABLE_TASK_SPEC_2026-11-03.md`。
 
-D1 执行报告：`design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含白名单三处偏差裁决、全量测试与 browser smoke 结果）。D2 执行报告：`design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T18 结果、死亡/迁移/容量偏差裁决与 D2-1–D2-8 债务）。D3 执行报告：`design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T20 结果、`dawn`→长休映射、数量扣减落点裁决与 D3-1–D3-12 债务）。D4 代码与测试已落地（`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`），**执行报告待补**。D1–D4 全部位于 PR #653（squash 单提交 `ef4a5923`），当前 BLOCKED 于 Backend tests 30 分钟 timeout（8280/8294、0 失败）；D3b 尚未开工，且只能 stack 在 #653 之上（`items/charges.py` 为 #653 新增文件）。
+D1 执行报告：`design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含白名单三处偏差裁决、全量测试与 browser smoke 结果）。D2 执行报告：`design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T18 结果、死亡/迁移/容量偏差裁决与 D2-1–D2-8 债务）。D3 执行报告：`design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`（实现与验收完成；含 T1–T20 结果、`dawn`→长休映射、数量扣减落点裁决与 D3-1–D3-12 债务）。D4 代码与测试已落地（`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`），**执行报告仍待补**。D3b 已完成（`items/charges.py` 的销毁声明与判定、两项事件、战斗/探索接入、18 条测试），报告见 `design/D3B_CHARGE_DESTROY_EXECUTION_REPORT_2026-11-06.md`；作为 fork #6 合入集成分支。D1–D4 位于 PR #653（squash `ef4a5923`，复审修复 `e7b7080f`），#653 的三项 CI 已于 2026-11-06 全绿（Backend 32m28s），等待维护者合并；D3b 因依赖 #653 新增文件而保持 stacked，不回流该 PR。
 
 写任务书时核实到、并已反映进各切片的三处事实：① engine `ACTION_KINDS` 的 `consumable` 只有准入白名单与管理员下拉项，无 handler/validation/resolution，机械激活只能走 dnd2024 `INTENT_TYPES`；② 仓库无"黎明"/世界时钟日概念，`recharge.on: dawn` 显式映射长休完成；③ canonical 装备投影 `dict.fromkeys` 去重，同款多件不可表达，D2 以数量守卫兜底而非引入实例 ID。
 
@@ -307,12 +329,13 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 1B | P9：revivify（复活原语 + dead 目标校验反转） | ✅ 2026-10-30 执行完成并审核通过（任务书 v1.1 + 执行报告审核端代录；`revive` 模式只发 `character.revived`（hp=1）事件——状态语义由 GM 复活路径共用的既有 reducer 处理器承载，零 RNG、不发 `resource.changed`、不经 healing 管线；validation 盟友集合追加 + dead 检查模式分支反转（revive 要求 dead 且 player-only，其它有益模式对 dead 仍拒绝）+ hp≤0 豁免；复活家族路线经 v1.1 修正——revivify 是唯一战斗内成员，raise dead / reincarnate / resurrection / true resurrection 走探索层 `exploration.cast_spell` 各自立项，revive 事件原语全家族复用） |
 | 1B 补充 | R1：复活家族探索层入口（revivify 战斗外 + 家族空响止血） | ✅ 2026-10-30 执行完成并审核通过（任务书 v1.1 + 执行报告；源起 P9 后体验审查——场合 B 战斗外 revivify 硬拒绝、场合 C 家族法术叙事兜底扣位空响，用户裁定分界线：确定性结算机械化、事实裁定归 GM。`revive_effects.py` 语义表五法术唯一数据源 + `is_fully_implemented` 整体判定——未实现语义整法术显式拒绝、不扣位、可读消息，绝不静默降级；revivify 战斗外完整闭环（`spell.cast` → `character.revived`，探索层 `_reduce_event` 镜像 P9 四状态语义）；raise_dead/resurrection 待 SP10 D20 聚合与长休衰减、reincarnate 待角色重建、true_resurrection 唤名永久 GM 通道） |
 | 1C | 共用原语 S-P1–S-P12（子职 / 专长 / 装备） | ✅ 12/12 已实现并合入（任务书 2026-10-30 写齐，代码事实基线 HEAD `4ef1d33d`；PR #646（`pr/1c`）已于 2026-11-04 合入上游 `main`，merge `1ba1a11f`——Backend/Frontend/browser smoke 三检查全绿（`e5ed9f89` 将战斗风格建卡选择改为可选，修复引导创建超时的 smoke 回归）；合入后上游追加两个补丁：`7d48f79c`（决策投影保护 / 分阶段护甲修复，新增 `visibility.py`）与 `9b2428e8`（加载 bundle 前预检事件批次）；核心 12 子职与专长需求已提出，P10/P11/AoE 依赖仍按原阶段执行。S-P6/S-P11 部分锚点位于 P7/P8 在途改动偏移区，建议排在 P7/P8 合入后执行，勿打断法术原语推进；S-P9 承接 SP3 §8 登记的受击反应注册表化迁移债销账。任务书：`design/SP1_IMPROVED_CRITICAL_TASK_SPEC_2026-10-30.md`、`design/SP2_DIE_MANIPULATION_TASK_SPEC_2026-10-30.md`、`design/SP3_D20_CHECK_WINDOW_TASK_SPEC_2026-10-30.md`、`design/SP4_DARK_ONES_BLESSING_TASK_SPEC_2026-10-30.md`、`design/SP5_DRACONIC_RESILIENCE_TASK_SPEC_2026-10-30.md`、`design/SP6_AURA_PASSIVES_TASK_SPEC_2026-10-30.md`、`design/SP7_SURVIVOR_TASK_SPEC_2026-10-30.md`、`design/SP8_HIDE_AND_BONUS_ACTION_TASK_SPEC_2026-10-30.md`、`design/SP9_RETALIATION_TASK_SPEC_2026-10-30.md`、`design/SP10_CONDITIONAL_CHECK_BONUS_TASK_SPEC_2026-10-30.md`、`design/SP11_WEAPON_MASTERY_TASK_SPEC_2026-10-30.md`、`design/SP12_ARMOR_TRAINING_GATING_TASK_SPEC_2026-10-30.md`） |
-| 1D | 物品原语（attunement / charges / 激活动作 / 随机宝物表） | ✅ D1 实现与验收完成（2026-11-04：`feat/dnd2024-1d-items` `e9ecb11b` + `34cbb98f`，基于 `pr/1c` `e5ed9f89`；装备 38 武器 / 12 护甲 + 盾全齐，物品 50→81；全仓 8176 passed / 7 skipped、覆盖率 81.64%，browser smoke desktop+mobile 各 11 passed，T12 全覆盖，见 `design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`。D2 实现与验收完成（`feat/dnd2024-2d-attunement`，基于 D1 head；18 个测试用例，见 `design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`），D3 实现完成并出执行报告（`items/activation.py` + `items/charges.py`，见 `design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`）、D4 代码与测试完成但缺执行报告（`treasure/tables.py` + `test_dnd2024_treasure_tables.py`），D3、D4 均在 PR #653 分支 `ef4a5923` 上、尚未合入；D3b 未开工——其白名单文件 `items/charges.py` 是 #653 新增文件（main 上不存在），只能 stack 在 #653 之上开发；切片顺序 2026-11-03 定：D1 → D2 → D3 → D3b，D4 可并行；+N 效果骑 S-P10 与切片 5 rider；现状核查 2026-10-29 完成） |
-| 二 | 职业特性批量填充（幽灵 id → catalog） | ⬜ 未开始 |
-| 二 | 法术批量填充管线（原型已验证，review 13 + manual 33 待处理） | 🔄 原型完成（`scripts/rulesets/import_dnd5eapi_spell_effects.py`） |
+| 1D | 物品原语（attunement / charges / 激活动作 / 随机宝物表） | ✅ D1 实现与验收完成（2026-11-04：`feat/dnd2024-1d-items` `e9ecb11b` + `34cbb98f`，基于 `pr/1c` `e5ed9f89`；装备 38 武器 / 12 护甲 + 盾全齐，物品 50→81；全仓 8176 passed / 7 skipped、覆盖率 81.64%，browser smoke desktop+mobile 各 11 passed，T12 全覆盖，见 `design/D1_ITEM_IDENTITY_EXECUTION_REPORT_2026-11-04.md`。D2 实现与验收完成（`feat/dnd2024-2d-attunement`，基于 D1 head；18 个测试用例，见 `design/D2_ATTUNEMENT_EXECUTION_REPORT_2026-11-04.md`），D3 实现完成并出执行报告（`items/activation.py` + `items/charges.py`，见 `design/D3_ITEM_ACTIVATION_EXECUTION_REPORT_2026-11-04.md`）、D4 代码与测试完成但执行报告仍待补（`treasure/tables.py` + `test_dnd2024_treasure_tables.py`）；D3、D4 位于 PR #653 分支 `ef4a5923`，三项 CI 已全绿、等待合并；D3b 已完成并出报告，作为 fork #6 合入集成分支（`items/charges.py` 依赖 #653，不回流 #653）；切片顺序 2026-11-03 定：D1 → D2 → D3 → D3b，D4 可并行；+N 效果骑 S-P10 与切片 5 rider；现状核查 2026-10-29 完成） |
+| 集成 | 本地集成分支 `integration/dnd2024-srd`（#653 + #4/#5/#6 + #656 + 文档线） | 🔶 代码合并至 `d0a2fef5`，聚焦测试通过，全量回归与文档同步中；上游 PR 仍各自待合并 |
+| 二 | 职业特性批量填充（幽灵 id → catalog） | 🔄 首个试点完成：`#656` 将 Extra Attack 改为读职业表，补齐 fighter 5/11/20 的三个特性；12 职业全量仍未开始 |
+| 二 | 法术批量填充管线 | 🔶 原型完成但基线过时（2014/2024 混合快照）；按 SRD-only 精确清单重跑后才能确定批次，不沿用旧 review 13 + manual 33 计数 |
 | 二 | 子职 S0（仅 12 个 SRD 代表子职及特性） | ⬜ 未开始（非 SRD 子职为范围外，不设 S1–S3） |
 | 二 | 专长 F0（仅 SRD 5.2.1 清单） | ⬜ 未开始（先冻结官方 SRD 精确清单；非 SRD 专长为范围外，不设 F1–F3） |
-| 二 | 非魔法装备直填（23 武器 + 8 护甲 + 词条字段，SRD CC-BY 管线） | ✅ 已完成（2026-11-04，D1：武器 15→38、护甲 12 + 盾全齐、物品 50→81，各带 en / zh-CN locale；代码与数据在 PR #653 分支，待合入） |
+| 二 | 非魔法装备直填（23 武器 + 8 护甲 + 词条字段，SRD CC-BY 管线） | ✅ 已完成（2026-11-04，D1：武器 15→38、护甲 12 + 盾全齐、物品 50→81，各带 en / zh-CN locale；代码与数据在 PR #653，CI 已全绿、待合入；已进入集成分支） |
 | 二 | 魔法物品 I0（仅 SRD 物品与随机表） | ⬜ 未开始（DMG 非 SRD 内容为范围外，不设 I1–I3） |
 | 二 | 外部内容 source-aware 解耦 | ⛔ 移出计划（SRD-only 不需要；不为第三方内容预设架构任务） |
 | 二 | 许可分层声明（AGPL 代码 / SRD CC-BY 4.0 内容） | ⬜ 未开始 |
@@ -381,7 +404,7 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 - 架构质量：condition → 攻击模式注册表是目录数据（`side`/`mode`/`negated_by`/`consume_on`，逐字段 fail closed），`check_modes` 不再硬编码来源清单，`gm_grant`/`long_range` 按任务书保持代码路径；`ends_on` 只由服务端从目录效果拷贝进 `condition.applied` 载荷，客户端不可声明；`upcast_target_count` 是通用升环计数（bless 行为不变）；`_spell_end_trigger_events` 统一四个调用点（武器攻击 / 施法 / Shield 反应 / Divine Smite）且读预结算视图，`damage_dealt` 按任务书保留为数据位无独立调用点。
 - 切片 3 教训闭环：施法走既有 cast 界面（`target_ids` 多目标校验已有）、优劣势自动进 check 投影，前端零改动成立。
 - 教训（对后续切片的要求）：**凡改动事件列表结构（插入/重排），必须 grep 所有按位置消费该列表的代码**——本次交叉正是"位置耦合"被两批独立改动同时命中，单侧分支的测试无法暴露；后续切片在整合分支上融合后必须重跑受影响套件而非沿用 WIP 分支的测试结论。
-- 遗留提醒（不阻塞本切片）：①整合分支主计划 1B 行引用的 `SPELL_GAP_MATRIX.md` 与 `scripts/rulesets/import_dnd5eapi_spell_effects.py` 来自原始线 `d134f4be`，尚未搬运到本分支，引用悬空；②`53b715e1` 的 Uncanny Dodge"必须看见攻击者"检查未考虑防御者持 `see_invisibility` 的抵消（RAW 下持识破隐形者可对隐形攻击者反应），归后续感官切片统一处理。
+- 遗留提醒（不阻塞本切片）：①整合分支主计划 1B 行引用的 `SPELL_GAP_MATRIX.md` 与 `scripts/rulesets/import_dnd5eapi_spell_effects.py` 来自原始线 `d134f4be`，当时尚未搬运到本分支，引用悬空——**2026-11-06 集成分支已包含这两个文件，悬空关闭**；②`53b715e1` 的 Uncanny Dodge"必须看见攻击者"检查未考虑防御者持 `see_invisibility` 的抵消（RAW 下持识破隐形者可对隐形攻击者反应），归后续感官切片统一处理。
 
 ### P5 审核记录（2026-10-29）
 

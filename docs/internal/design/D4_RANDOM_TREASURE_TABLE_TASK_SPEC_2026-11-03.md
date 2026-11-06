@@ -4,7 +4,7 @@
 - 主计划条目：`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md` §1D 切片顺序表 D4 ——"表定义（嵌套 + 防环）；稳定选取；事件记录掷值与落点；归属探索/结算层"
 - 前置依赖：无数据依赖，可与 D1–D3 并行；但**建议排在 D3 之后提交**，避免两条在途 PR 同时改 `exploration/engine.py`。
 - 锚点基线：`9c2ca59d`（PR #646 head）；若与 D3 并行，执行侧必须重读 exploration 引擎漂移。
-- 状态：未开工
+- 状态：实现与测试已完成（`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`，随 PR #653 与集成分支）；**执行报告仍待补**。
 
 ## 1. 规则语义与原文出处
 

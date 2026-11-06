@@ -162,6 +162,6 @@ python -m pytest -q --cov=src --timeout=120
 
 ## 9. 未闭环 / 后续
 
-- PR 已创建：`diceframe/diceframe#653`（head `feat/dnd2024-3d-item-activation`，squash 单提交 `ef4a5923`，目标 `diceframe/diceframe:main`）；当前 BLOCKED 于 `Backend tests` 30 分钟 timeout（跑到 8280/8294、0 失败），诊断见 PR 评论。
-- D4（随机宝物表）已在本分支落地：`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`，**执行报告尚未补**。
-- D3b（耗尽销毁）仍未开工，任务书已就绪；其白名单文件 `items/charges.py` 是本切片新增（main 上不存在），因此 D3b 只能 stack 在本分支之上开发，D3b 依赖本切片的 `charges.current` 权威。
+- PR 已创建：`diceframe/diceframe#653`（head `feat/dnd2024-3d-item-activation`，squash 单提交 `ef4a5923`，目标 `diceframe/diceframe:main`）。**后续（2026-11-06）：三项 CI 已全绿（Backend 32m28s、Browser smoke 6m17s、Frontend 2m45s），等待维护者合并。**
+- D4（随机宝物表）已在本分支落地：`treasure/tables.py` + `tests/rulesets/test_dnd2024_treasure_tables.py`；**执行报告仍待补**。
+- D3b（耗尽销毁）已完成：`items/charges.py` 落地声明校验与判定，fork #6 合入本地集成分支 `integration/dnd2024-srd`；报告见 `D3B_CHARGE_DESTROY_EXECUTION_REPORT_2026-11-06.md`。其白名单文件依赖本切片的 `charges.current` 权威，因此仍 stacked 在 #653 之上、不回流该 PR。
