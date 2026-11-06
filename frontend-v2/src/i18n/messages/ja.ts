@@ -81,7 +81,6 @@ export const ja = {
   modulesStatus: '状態',
   modulesContentDelivery: 'コンテンツ配信',
   modulesActions: '操作',
-  modulesActionUpdate: '更新',
   modulesActionEnable: '有効化',
   modulesActionDisable: '無効化',
   modulesActionUninstall: 'アンインストール',

@@ -81,7 +81,6 @@ export const de = {
   modulesStatus: 'Status',
   modulesContentDelivery: 'Inhaltsbereitstellung',
   modulesActions: 'Aktionen',
-  modulesActionUpdate: 'Aktualisieren',
   modulesActionEnable: 'Aktivieren',
   modulesActionDisable: 'Deaktivieren',
   modulesActionUninstall: 'Deinstallieren',

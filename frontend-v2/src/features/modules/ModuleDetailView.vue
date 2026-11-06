@@ -8,6 +8,7 @@ import {
   type ModuleCompatibilityResponse,
   type ModuleDetail,
   type ModuleUsageResponse,
+  type ModuleMarketplaceItem,
 } from '@/api/modules'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
@@ -45,13 +46,18 @@ type ModuleAction = 'update' | 'disable' | 'enable' | 'uninstall'
 // Keep the management controls in one declarative list.  The old template
 // duplicated the guard/disabled wiring for each button, which made the
 // enabled and disabled states drift as new actions were added.
+// The online catalog entry for this pack, if any. Update is offered only when
+// the catalog has a newer version: packs imported from a file, or not listed
+// online, have nothing to update from.
+const onlineEntry = ref<ModuleMarketplaceItem | null>(null)
+
 const actionButtons = computed(() => [
-  {
+  ...(onlineEntry.value?.update_available ? [{
     action: 'update' as ModuleAction,
-    label: t('modulesActionUpdate'),
+    label: t('modulesActionUpdateTo', { version: onlineEntry.value.latest_version }),
     guard: 'update',
     variant: 'secondary',
-  },
+  }] : []),
   {
     action: (isDisabled.value ? 'enable' : 'disable') as ModuleAction,
     label: t(isDisabled.value ? 'modulesActionEnable' : 'modulesActionDisable'),
@@ -139,6 +145,19 @@ async function load() {
   } catch (cause: unknown) {
     if (current === loadSequence) error.value = errorMessage(cause)
   }
+  void loadOnlineEntry(id, current)
+}
+
+// Best effort: an unreachable catalog only hides the update action.
+async function loadOnlineEntry(id: string, sequence: number) {
+  onlineEntry.value = null
+  try {
+    const result = await moduleApi.marketplace(id)
+    if (sequence !== loadSequence || !result.ok) return
+    onlineEntry.value = (result.modules || []).find(item => item.id === id) || null
+  } catch {
+    // Keep the page usable offline.
+  }
 }
 
 onMounted(load)
@@ -168,7 +187,8 @@ async function run(action: ModuleAction) {
   error.value = ''
   status.value = ''
   try {
-    if (action === 'update') await moduleApi.update(moduleId.value)
+    let upToDate = false
+    if (action === 'update') upToDate = Boolean((await moduleApi.update(moduleId.value)).up_to_date)
     else if (action === 'disable') await moduleApi.disable(moduleId.value)
     else if (action === 'enable') await moduleApi.enable(moduleId.value)
     else {
@@ -177,7 +197,7 @@ async function run(action: ModuleAction) {
       await router.push({ name: 'modules' })
       return
     }
-    status.value = t('modulesActionDone')
+    status.value = t(upToDate ? 'modulesAlreadyLatest' : 'modulesActionDone')
     await load()
   } catch (cause: unknown) {
     error.value = errorMessage(cause)

@@ -124,7 +124,8 @@ export const moduleApi = {
   ),
   // 生命周期复用既有插件宿主 API（模块 = data-only content-pack），
   // 破坏性 action 的 bound-save guard 由服务端统一强制。
-  update: (moduleId: string) => api<{ ok: boolean }>(
+  // `up_to_date`: the host found the installed release already current.
+  update: (moduleId: string) => api<{ ok: boolean; up_to_date?: boolean; version?: string }>(
     `/plugins/${encodeURIComponent(moduleId)}/update`, { method: 'POST' },
   ),
   disable: (moduleId: string) => api<{ ok: boolean }>(

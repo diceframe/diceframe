@@ -1501,9 +1501,13 @@ class WebAPI:
 
     async def update_marketplace_plugin(self, plugin_id: str) -> dict[str, Any]:
         modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "update")
-        return await plugins.update_marketplace_plugin(
-            self._plugin_host_dependencies, plugin_id,
+        result = await plugins.update_marketplace_plugin(
+            self._plugin_lifecycle_dependencies, plugin_id,
         )
+        if result.get("ok"):
+            # 与市场安装 / 覆盖安装一致：新版本的内容和冒险立刻可解析。
+            self.refresh_content_sources()
+        return result
 
     async def uninstall_plugin(self, plugin_id: str, delete_data: bool = False) -> dict[str, Any]:
         modules.assert_module_action_allowed(self._module_dependencies, plugin_id, "uninstall")

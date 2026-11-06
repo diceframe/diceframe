@@ -89,6 +89,10 @@ test('module library separates installed, local import, and online modules', asy
 test('module detail renders metadata and server-guarded actions', async ({ page }) => {
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
+  // Update is offered only when the online catalog lists a newer version.
+  await page.route('**/api/modules/marketplace*', route => route.fulfill({ json: { ok: true, modules: [
+    { id: 'e2e-module', latest_version: '9.9.9', update_available: true },
+  ] } }))
   await page.goto('/#/modules/e2e-module')
   await page.getByTestId('module-metadata').locator('summary').click()
   await expect(page.getByTestId('module-metadata').getByText('e2e-module')).toBeVisible()
@@ -97,7 +101,7 @@ test('module detail renders metadata and server-guarded actions', async ({ page 
   // 该模组没有被任何存档绑定 → 服务端 guard 判定受保护操作都可用；按钮文案则由
   // 服务端的模块状态决定（发现但未启用的包显示"启用"）。
   const actions = page.getByTestId('module-actions')
-  await expect(actions.getByRole('button', { name: '更新' })).toBeEnabled()
+  await expect(actions.getByRole('button', { name: '更新到 9.9.9' })).toBeEnabled()
   await expect(actions.getByRole('button', { name: '启用' })).toBeEnabled()
   await expect(actions.getByRole('button', { name: '卸载' })).toBeEnabled()
   await expect(page.getByTestId('module-action-blocked')).toHaveCount(0)
