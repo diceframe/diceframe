@@ -116,7 +116,9 @@ export function usePluginMarketplace(
     const type = typeFilter.value
     const keyword = marketKeyword.value.trim().toLowerCase()
     const items = marketplace.value.filter(item => {
-      // content-pack 只在模组库（/modules 在线内容包）展示与安装，插件市场不重复列出。
+      // content-pack 只在「在线内容包」（/modules）展示与安装，插件市场不重复列出。
+      // 注意：后端市场接口仍然会返回 content-pack 条目——Hub catalog 是共享索引，
+      // 服务端不按货架过滤；这条分流是展示层的约定，别误以为后端已经隔离。
       if (item.plugin_type === 'content-pack') return false
       if (type && item.plugin_type !== type) return false
       if (!keyword) return true

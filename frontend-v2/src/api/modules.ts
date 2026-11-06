@@ -14,6 +14,8 @@ export type ModuleSummary = {
   content_counts: Record<string, number> | null
   inventory_status?: 'available' | 'disabled' | 'unknown'
   lorebook_count: number
+  // 已安装包声明的封面（包内相对路径，如 assets/cover.webp）；空表示没有。
+  cover?: string
 }
 
 export type ModulesResponse = {
