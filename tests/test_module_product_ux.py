@@ -132,6 +132,24 @@ async def test_online_modules_list_only_supported_content_profiles(env) -> None:
 
 
 @pytest.mark.asyncio
+async def test_online_modules_carry_author_and_license_from_the_index(env) -> None:
+    env.host.marketplace = _FakeMarketIndex([
+        _market_item("indexed", author="EOEOY", license="CC BY-NC 4.0"),
+        _market_item("manifest-author", author={"name": "Night Shift Studio", "url": "https://example.test"}),
+        _market_item("anonymous"),
+    ])
+
+    result = await env.api.list_module_marketplace()
+
+    credits = {item["id"]: (item["author"], item["license"]) for item in result["modules"]}
+    assert credits == {
+        "indexed": ("EOEOY", "CC BY-NC 4.0"),
+        "manifest-author": ("Night Shift Studio", ""),
+        "anonymous": ("", ""),
+    }
+
+
+@pytest.mark.asyncio
 async def test_online_modules_filter_by_ruleset_and_profile(env) -> None:
     env.host.marketplace = _FakeMarketIndex([
         _market_item("dnd-module", ruleset_targets=["core:dnd2024"]),

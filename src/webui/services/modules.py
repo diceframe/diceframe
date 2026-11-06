@@ -279,6 +279,10 @@ async def module_marketplace(
             "repository_url": str(item.get("repository_url") or ""),
             "release_url": str(item.get("release_url") or ""),
             "stars": int(item.get("stars") or 0),
+            # Index entries may carry author/license (author defaults to the
+            # repository owner); the normalizer falls back to the manifest.
+            "author": _author_label(item.get("author")),
+            "license": str(item.get("license") or "").strip(),
             "installed": bool(item.get("installed")),
             "installed_version": installed_version,
             "update_available": bool(
@@ -297,6 +301,19 @@ async def module_marketplace(
         "total": len(modules),
         "source": listing.get("source") or {},
     }
+
+
+def _author_label(value: Any) -> str:
+    """Index entries carry a string; a manifest may carry ``{name, url}``."""
+
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("name", "login", "id"):
+            label = value.get(key)
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+    return ""
 
 
 def _market_search_text(item: dict[str, Any]) -> str:
