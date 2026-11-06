@@ -52,15 +52,29 @@ def purchase_balance_pattern(language: str) -> re.Pattern[str]:
     return re.compile(rf"(?:{source})\s*$", re.IGNORECASE) if source else re.compile(r"(?!x)x")
 
 
+_CJK_TAIL = re.compile(r"[぀-ヿ㐀-鿿豈-﫿]$")
+
+
+def _leading_terms_source(terms: Iterable[str]) -> str:
+    """Alternation of leading words; space-delimited words must end at a boundary.
+
+    Without the boundary the English prefix ``i`` strips the first letter of
+    “iron armor”.  CJK terms have no word boundary to require.
+    """
+
+    return "|".join(
+        re.escape(term) + ("" if _CJK_TAIL.search(term) else r"\b")
+        for term in sorted(terms, key=len, reverse=True)
+    )
+
+
 def purchase_target_prefix_pattern(language: str) -> re.Pattern[str]:
-    terms = intent_terms(language, "purchase_target_prefix")
-    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    source = _leading_terms_source(intent_terms(language, "purchase_target_prefix"))
     return re.compile(rf"^(?:{source})\s*", re.IGNORECASE) if source else re.compile(r"(?!x)x")
 
 
 def purchase_target_connector_pattern(language: str) -> re.Pattern[str]:
-    terms = intent_terms(language, "purchase_target_connector")
-    source = "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True))
+    source = _leading_terms_source(intent_terms(language, "purchase_target_connector"))
     return re.compile(rf"^(?:{source})\s*", re.IGNORECASE) if source else re.compile(r"(?!x)x")
 
 

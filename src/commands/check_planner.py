@@ -873,9 +873,9 @@ async def plan_round_checks(
                 instance.game_key, progression_state.round_value(instance), exc_info=True,
             )
     # The model passes are recall aids, not the authority.  A player action is
-    # still a trusted source for a purchase intent: recover an explicit quote
-    # or at least record an unpriced blocker so a missed model field can never
-    # become a silent free delivery.
+    # still a trusted source for a purchase intent: record an unpriced blocker
+    # so a missed model field can never become a silent free delivery.  The
+    # server never prices it from the text (ADR 0002).
     _recover_purchase_intents_from_player_actions(
         instance, rule, economy_offers, economy_intents_unpriced,
     )

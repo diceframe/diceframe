@@ -124,6 +124,12 @@ evidence is downgraded to the existing in-memory unpriced intent; it never
 causes a guessed charge. Locale resources remain parser compatibility data and
 user-facing message data, not economic authority.
 
+When the planner is unavailable or omits `economy_actions`, the server's
+deterministic backstop reads the player's action only to record unpriced
+intents. It never turns a currency mention into an offer: per-item prices
+("每瓶5金币") and thousands separators ("1,500") made such reads charge the
+wrong total.
+
 ## Compatibility
 
 This is an intentional breaking change for the single-user preview build.
