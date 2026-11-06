@@ -574,3 +574,28 @@ def unequip_item(character_sheet: dict, item_name: str) -> bool:
     equipment.remove(entry)
     return_equipment_to_inventory(character_sheet, entry)
     return True
+
+
+def remove_destroyed_item(character_sheet: dict, item_ref: str) -> bool:
+    """Drop every live backpack/equipment row that carries ``item_ref``.
+
+    Returns whether anything was removed.  Replaying the same batch removes
+    nothing and must not fail, so this never raises on a missing row.
+    """
+
+    target = str(item_ref or "")
+    if not target:
+        return False
+    removed = False
+    for key in ("inventory", "equipment"):
+        rows = character_sheet.get(key)
+        if not isinstance(rows, list):
+            continue
+        kept = [
+            row for row in rows
+            if str((row or {}).get("item_ref") or "") != target
+        ]
+        if len(kept) != len(rows):
+            character_sheet[key] = kept
+            removed = True
+    return removed

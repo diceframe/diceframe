@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 CHARGES_KEYS = frozenset({"max"})
 RECHARGE_KEYS = frozenset({"on", "amount"})
 RECHARGE_TRIGGERS = frozenset({"dawn", "short_rest", "none"})
+DESTROY_KEYS = frozenset({"die", "threshold"})
 _RECHARGE_TRIGGER_TO_REST = {"dawn": "long", "short_rest": "short"}
 
 
@@ -93,6 +94,83 @@ def item_charges_max(item: Mapping[str, Any]) -> int | None:
     """Declared maximum charges, or ``None`` when the item has none."""
 
     return validate_charges_declaration(item)
+
+
+def validate_destroy_declaration(item: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Validate ``item.destroy_on_empty`` and return ``{"die", "threshold"}``.
+
+    The die is fixed at ``1d20`` so the roll is always auditable against a
+    single event shape; only the "at or below this roll the item is
+    destroyed" threshold is content-configurable.
+    """
+
+    if not isinstance(item, Mapping):
+        raise ChargesError("item must be an object")
+    if "destroy_on_empty" not in item:
+        return None
+    declaration = item["destroy_on_empty"]
+    if not isinstance(declaration, Mapping):
+        raise ChargesError("destroy_on_empty must be an object")
+    unknown = sorted(set(declaration) - DESTROY_KEYS)
+    if unknown:
+        raise ChargesError(f"unknown destroy_on_empty field: {unknown[0]}")
+    die = declaration.get("die", "1d20")
+    if die != "1d20":
+        raise ChargesError("destroy_on_empty.die must be 1d20")
+    threshold = declaration.get("threshold", 1)
+    if isinstance(threshold, bool) or not isinstance(threshold, int):
+        raise ChargesError("destroy_on_empty.threshold must be an integer")
+    if not 1 <= threshold <= 20:
+        raise ChargesError("destroy_on_empty.threshold must be between 1 and 20")
+    return {"die": "1d20", "threshold": threshold}
+
+
+def should_check_destroy(item: Mapping[str, Any], remaining_charges: int | None) -> bool:
+    """True only when a declared item is exactly emptied by this activation."""
+
+    if remaining_charges is None:
+        return False
+    return validate_destroy_declaration(item) is not None and remaining_charges == 0
+
+
+def destroy_check_events(
+    item: Mapping[str, Any],
+    *,
+    actor_id: str,
+    item_ref: str,
+    remaining_charges: int | None,
+    rng: Any,
+) -> list[dict[str, Any]]:
+    """Roll the destroy check once when this activation emptied the item.
+
+    Returns ``[]`` without consuming any random number when the item declares
+    no ``destroy_on_empty`` or still has charges left — the sentinel-die
+    contract: an item that cannot be destroyed must not shift the RNG.
+    """
+
+    if not should_check_destroy(item, remaining_charges):
+        return []
+    declaration = validate_destroy_declaration(item)
+    if declaration is None:  # pragma: no cover - guarded by should_check_destroy
+        return []
+    threshold = int(declaration["threshold"])
+    roll = int(rng.randint(1, 20))
+    destroyed = roll <= threshold
+    events: list[dict[str, Any]] = [{
+        "type": "dnd2024.item.destroy_check",
+        "actor_id": actor_id,
+        "item_ref": item_ref,
+        "roll": roll,
+        "threshold": threshold,
+        "destroyed": destroyed,
+    }]
+    if destroyed:
+        events.append({
+            "type": "dnd2024.item.destroyed",
+            "actor_id": actor_id,
+            "item_ref": item_ref,
+        })
+    return events
 
 
 def charges_of(canonical: Mapping[str, Any], item_ref: str) -> int | None:

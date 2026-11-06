@@ -24,6 +24,10 @@ _ITEM_EVENT_FIELDS = {
     "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
     "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
     "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.destroy_check": frozenset({
+        "type", "actor_id", "item_ref", "roll", "threshold", "destroyed",
+    }),
+    "dnd2024.item.destroyed": frozenset({"type", "actor_id", "item_ref"}),
 }
 
 
@@ -184,6 +188,38 @@ class CombatReducerMixin:
             unknown = sorted(set(event) - _ITEM_EVENT_FIELDS[event_type])
             if unknown:
                 raise EventBatchError(f"unknown {event_type} field: {unknown[0]}")
+            if event_type == "dnd2024.item.destroyed":
+                kind, raw_id = _actor_kind(str(event["actor_id"]))
+                if kind not in {"player", "companion"}:
+                    raise EventBatchError("only player/companion items can be destroyed")
+                character = (
+                    snapshot["characters"][raw_id]
+                    if kind == "player"
+                    else self._companion_character(snapshot, raw_id)
+                )
+                try:
+                    destroyed_ref = canonical_item_ref(event["item_ref"])
+                except AttunementError as exc:
+                    raise EventBatchError(str(exc)) from None
+                # 只按 ref 移除：同名但身份不同的另一件物品不受影响。
+                equipment = character.get("equipment")
+                if isinstance(equipment, dict):
+                    refs = equipment.get("item_refs")
+                    if isinstance(refs, list):
+                        equipment["item_refs"] = [
+                            ref for ref in refs if ref != destroyed_ref
+                        ]
+                    item_state = equipment.get("item_state")
+                    if isinstance(item_state, dict):
+                        item_state.pop(destroyed_ref, None)
+                attunement = character.get("attunement")
+                if isinstance(attunement, dict):
+                    bound = attunement.get("refs")
+                    if isinstance(bound, list):
+                        attunement["refs"] = [
+                            ref for ref in bound if ref != destroyed_ref
+                        ]
+                return
             if event_type != "dnd2024.item.charge_spent":
                 # 数量扣减由 apply_batch 通过 live backpack 权威接口落账；
                 # reduced canonical 只记录事件事实。

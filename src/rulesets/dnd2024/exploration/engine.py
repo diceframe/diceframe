@@ -42,6 +42,7 @@ from src.rulesets.dnd2024.items.activation import (
 from src.rulesets.dnd2024.items.charges import (
     ChargesError,
     charges_of,
+    destroy_check_events,
     spend_charges,
     validate_charges_declaration,
 )
@@ -730,6 +731,18 @@ class Dnd2024ExplorationEngine:
             "item_ref": item_ref, "target_id": actor_id,
             "cost": declaration["cost"],
         })
+        # 与战斗内同一语义、同一事件形状：效果结算完毕后才判定销毁。
+        if charge_cost is not None:
+            current = charges_of(self._canonical_of(instance, actor_id), item_ref)
+            if current is not None:
+                remaining = current - int(charge_cost)
+                events.extend(destroy_check_events(
+                    item,
+                    actor_id=actor_id,
+                    item_ref=item_ref,
+                    remaining_charges=remaining if remaining >= 0 else None,
+                    rng=rng,
+                ))
         return events
 
     def _actor_view(self, instance: Any, actor_id: str) -> dict[str, Any]:
@@ -767,7 +780,10 @@ class Dnd2024ExplorationEngine:
         if not duplicate:
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            from src.commands.state_items import take_from_inventory
+            from src.commands.state_items import (
+                remove_destroyed_item,
+                take_from_inventory,
+            )
 
             updated_sheets: dict[str, dict[str, Any]] = {}
             for uid, canonical in updated["characters"].items():
@@ -786,6 +802,11 @@ class Dnd2024ExplorationEngine:
                                 raise EventBatchError(
                                     f"item is no longer carried: {event['item_ref']}"
                                 )
+                    elif (
+                        str(event.get("type") or "") == "dnd2024.item.destroyed"
+                        and str(event.get("actor_id") or "") == f"player:{uid}"
+                    ):
+                        remove_destroyed_item(sheet, str(event["item_ref"]))
                 updated_sheets[uid] = sheet
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, sheet in updated_sheets.items():

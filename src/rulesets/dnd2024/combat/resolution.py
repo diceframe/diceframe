@@ -12,7 +12,12 @@ from ..items.activation import (
     build_item_healing_event,
     validate_activation_declaration,
 )
-from ..items.charges import ChargesError, validate_charges_declaration
+from ..items.charges import (
+    ChargesError,
+    charges_of,
+    destroy_check_events,
+    validate_charges_declaration,
+)
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -163,7 +168,43 @@ class CombatResolutionMixin:
             "target_id": target_id,
             "cost": declaration["cost"],
         })
+        # 销毁判定永远排在全部效果之后：先结算的治疗不得被销毁回滚。
+        events.extend(self._destroy_check_events(
+            instance, actor_id, item_ref, item, charge_cost=charge_cost, rng=rng,
+        ))
         return events
+
+    def _destroy_check_events(
+        self,
+        instance: Any,
+        actor_id: str,
+        item_ref: str,
+        item: dict[str, Any],
+        *,
+        charge_cost: Any,
+        rng: Any,
+    ) -> list[dict[str, Any]]:
+        if charge_cost is None:
+            return []
+        current = charges_of(self._canonical_for_actor(instance, actor_id), item_ref)
+        if current is None:
+            return []
+        remaining = current - int(charge_cost)
+        return destroy_check_events(
+            item,
+            actor_id=actor_id,
+            item_ref=item_ref,
+            remaining_charges=remaining if remaining >= 0 else None,
+            rng=rng,
+        )
+
+    def _canonical_for_actor(self, instance: Any, actor_id: str) -> dict[str, Any]:
+        kind, raw_id = _actor_kind(actor_id)
+        if kind == "player":
+            return _canonical(instance.get_character_sheet(raw_id))
+        if kind == "companion":
+            return self._companion(instance, raw_id).get("ruleset_character") or {}
+        return {}
 
     def _start_combat_event(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         enemies: dict[str, dict[str, Any]] = {}
