@@ -64,6 +64,29 @@ def _install_item(runtime: Dnd2024Runtime, item_id: str, *, ac_bonus: int = 1) -
     return f"item:{item_id}"
 
 
+def _install_magic_shield(
+    runtime: Dnd2024Runtime, item_id: str, *, ac_bonus: int = 3,
+) -> str:
+    """A magic shield in the legacy single-field form: no ``ac_base``.
+
+    ``ac_bonus`` therefore mixes the ordinary shield bonus with the magic one,
+    which is exactly the shape that must still respect the attunement gate.
+    """
+
+    runtime.load_bundle("en").entities["item"][item_id] = {
+        "schema_version": 1,
+        "kind": "item",
+        "id": item_id,
+        "name": item_id.replace("_", " ").title(),
+        "source_ref": f"test:item:{item_id}",
+        "automation_level": "deterministic",
+        "item_type": "shield",
+        "ac_bonus": ac_bonus,
+        "requires_attunement": True,
+    }
+    return f"item:{item_id}"
+
+
 def _set_equipment(sheet: dict, equipped: list[str], carried: list[str] = ()) -> None:
     sheet["equipment"] = [
         {"name": ref, "item_ref": ref, "type": "armor", "slot": "body", "qty": 1}
@@ -124,6 +147,32 @@ def test_normal_shield_keeps_its_bonus_while_attunement_gates_only_magic_bonus()
     sheet["ruleset_character"]["attunement"] = {"refs": [ref]}
     _reconciler(runtime).reconcile(sheet, frozenset({"equipment"}))
     assert sheet["armor_class"] == 18  # +1 magic armor bonus
+
+
+def test_magic_shield_without_ac_base_still_obeys_the_attunement_gate() -> None:
+    """A single-field magic shield must not hand out its bonus while unbound.
+
+    ``ac_bonus`` alone cannot be split into base and magic parts, so an unbound
+    one may only count as an ordinary shield (+2); otherwise the gate would be
+    decorative for every shield that declares attunement.
+    """
+
+    runtime, sheet = _runtime()
+    armor_ref = _install_item(runtime, "chain_shirt_attunement")
+    shield_ref = _install_magic_shield(runtime, "spellguard_shield", ac_bonus=3)
+    _set_equipment(sheet, [armor_ref])
+    sheet["equipment"].append({
+        "name": "Spellguard Shield", "item_ref": shield_ref, "type": "shield",
+        "slot": "hand", "qty": 1,
+    })
+
+    _reconciler(runtime).reconcile(sheet, frozenset({"equipment"}))
+    assert sheet["armor_class"] == 17  # 13 + DEX 2 + ordinary shield 2
+    assert shield_ref in sheet["ruleset_character"]["derived"]["attunement_pending"]
+
+    sheet["ruleset_character"]["attunement"] = {"refs": [shield_ref]}
+    _reconciler(runtime).reconcile(sheet, frozenset({"equipment"}))
+    assert sheet["armor_class"] == 18  # +3 magic shield bonus once bound
 
 
 def test_short_rest_binds_the_item_and_rest_projection_recomputes_armor_class() -> None:

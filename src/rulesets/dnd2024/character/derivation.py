@@ -29,6 +29,12 @@ def _bound_refs(refs: Collection[str]) -> set[str]:
     return {_item_key(ref) for ref in refs}
 
 
+# 普通盾牌的基础护甲等级加值（SRD 5.2.1: Shield, +2 AC）。只在内容用单字段
+# ``ac_bonus`` 且声明了需同调、未同调时，用来兜底「这件盾牌最多只能当普通盾
+# 用」。有 ``ac_base`` 声明的内容永远走显式基础值，不受这里影响。
+PLAIN_SHIELD_AC_BONUS = 2
+
+
 def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
     """The minimal canonical shape ``features_for`` needs to resolve ownership."""
 
@@ -58,6 +64,10 @@ def derive_armor_class(
     shield bonus is ever applied, and an item the bundle does not define is
     skipped with a warning instead of guessing at a lookalike.
 
+    Attunement gates the magic component only: an attunable item keeps its
+    ordinary contribution while unbound, so a legacy single-field shield
+    declaration cannot smuggle its magic bonus past the gate.
+
     ``unarmored_ability_bonuses`` names the abilities that a feature may add to
     an *unarmored* base AC.  "While you aren't wearing armor" is a hard
     precondition: with any armor present the plain ``10 + Dexterity`` baseline
@@ -79,7 +89,8 @@ def derive_armor_class(
                 warnings.append(f"unknown item reference ignored by armor class: {ref}")
             continue
         magic_bonus = int(item.get("ac_bonus", 0) or 0)
-        if _requires_attunement(item) and _item_key(ref) not in bound:
+        pending_attunement = _requires_attunement(item) and _item_key(ref) not in bound
+        if pending_attunement:
             # 未同调的魔法物品只是普通同类物品：保留基础属性，不给魔法加值。
             magic_bonus = 0
         item_type = item.get("item_type")
@@ -107,6 +118,10 @@ def derive_armor_class(
             # ``ac_base`` 的旧条目把 ``ac_bonus`` 当作完整的基础盾牌加值。
             if "ac_base" in item:
                 bonus = int(item.get("ac_base", 0) or 0) + magic_bonus
+            elif pending_attunement:
+                # 单字段声明 + 需同调 = 这个 ``ac_bonus`` 里含魔法加值。
+                # 未同调时整份拿走等于让同调限制对盾牌失效，只能按普通盾牌算。
+                bonus = min(int(item.get("ac_bonus", 0) or 0), PLAIN_SHIELD_AC_BONUS)
             else:
                 bonus = int(item.get("ac_bonus", 0) or 0)
             if shield_bonus:
