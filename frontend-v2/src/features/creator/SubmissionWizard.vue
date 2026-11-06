@@ -52,11 +52,16 @@ async function copy(text: string) {
   }
 }
 
+// .dfplugin 其实是 zip 改了后缀，直接右键解压会被系统拒绝，得先改名或用 7-Zip。
+const isDfplugin = computed(() => props.fileName.toLowerCase().endsWith('.dfplugin'))
+
 const steps = computed(() => [
   {
     id: 'prepare',
     title: t('submitWizardStepFile'),
-    hint: t('submitWizardStepFileHint', { file: props.fileName }),
+    hint: isDfplugin.value
+      ? t('submitWizardStepFileHintDfplugin', { file: props.fileName })
+      : t('submitWizardStepFileHint', { file: props.fileName }),
     action: null as { label: string; href: string } | null,
     ready: true,
   },
