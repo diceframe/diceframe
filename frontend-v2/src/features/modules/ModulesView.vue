@@ -5,6 +5,7 @@ import { api, errorMessage } from '@/api/client'
 import {
   moduleApi,
   type ModuleMarketplaceItem,
+  type ModuleMarketplaceResponse,
   type ModulePreviewResponse,
   type ModuleSummary,
 } from '@/api/modules'
@@ -13,6 +14,13 @@ import { SUPPORTED_LOCALES, type Locale, type MessageKey } from '@/i18n'
 import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Modal from '@/components/ui/Modal.vue'
+import DOMPurify from 'dompurify'
+import { NTag } from 'naive-ui'
+import { CubeOutline } from '@vicons/ionicons5'
+import type { PluginMarketplaceItem } from '@/api/types'
+import MarketplaceCard from '@/features/plugins/MarketplaceCard.vue'
+import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
+import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
 import { moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
@@ -46,6 +54,7 @@ const marketKeyword = ref('')
 const marketRuleset = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
+const marketSource = ref<ModuleMarketplaceResponse['source'] | null>(null)
 const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; message: string } | null>(null)
 const submitGuideOpen = ref(false)
 const directSubmissionUrl = contentPackSubmissionUrl()
@@ -66,19 +75,44 @@ function inventorySummary(module: ModuleSummary): string {
   return count == null ? copy.value.resourceBrowse : copy.value.resourceSummary(count)
 }
 
-// Credits come from the plugin index (author defaults to the repository owner).
-function marketCredits(item: ModuleMarketplaceItem): string {
-  return [
-    item.author && `${t('author')}: ${item.author}`,
-    item.license && `${t('hubLicenseLabel')}: ${item.license}`,
-  ].filter(Boolean).join(' · ')
+// The online shelf is the plugin marketplace narrowed to content packs, so
+// it uses the same card and Hub detail dialog as the plugin marketplace.
+function marketCardItem(item: ModuleMarketplaceItem): PluginMarketplaceItem {
+  return { ...item, version: item.latest_version || item.version, plugin_type: 'content-pack', latest: { version: item.latest_version } }
 }
 
-function trustLabel(level: string): string {
-  if (level === 'official') return t('pluginTrustOfficial')
-  if (level === 'verified') return t('pluginTrustVerified')
-  return t('pluginTrustCommunity')
+function openUrl(url?: string) {
+  if (url) window.open(url, '_blank', 'noopener')
 }
+
+const hubBusy = ref('')
+const {
+  hubDetail, hubReadmeHtml, hubDetailOpen, hubDetailLoading, hubReadmeLoading, hubRating, hubRatingSummary,
+  openHubDetail, toggleHubLike, saveHubRating,
+} = useHubDetail(hubBusy)
+const detailItem = ref<ModuleMarketplaceItem | null>(null)
+const safeHubReadmeHtml = computed(() => DOMPurify.sanitize(hubReadmeHtml.value))
+// The dialog shows the install spinner for `market:<id>`, like the plugin page.
+const detailBusy = computed(() => hubBusy.value || (installBusy.value ? `market:${installBusy.value}` : ''))
+
+function openMarketDetail(item: ModuleMarketplaceItem) {
+  detailItem.value = item
+  void openHubDetail(marketCardItem(item))
+}
+
+function installDetailItem() {
+  if (detailItem.value) void installFromMarketplace(detailItem.value)
+}
+
+// After an install the shelf reloads; keep the open dialog on the fresh entry.
+watch(market, items => {
+  const fresh = detailItem.value && items.find(item => item.id === detailItem.value?.id)
+  if (!fresh) return
+  detailItem.value = fresh
+  if (hubDetail.value?.id === fresh.id) {
+    hubDetail.value = { ...hubDetail.value, installed: fresh.installed, installed_version: fresh.installed_version, installable: fresh.installable }
+  }
+})
 
 // Index languages are locale codes; unknown codes are shown as-is.
 function languageLabel(language: string): string {
@@ -122,6 +156,7 @@ async function loadMarketplace() {
       return
     }
     market.value = result.modules || []
+    marketSource.value = result.source || null
   } catch (cause: unknown) {
     market.value = []
     marketError.value = errorMessage(cause)
@@ -357,50 +392,54 @@ async function checkRecovery() {
         <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
         <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
       </div>
-      <div v-else class="modules-grid">
-        <article v-for="item in market" :key="item.id" class="module-card" :data-testid="`modules-market-${item.id}`">
-          <div>
-            <p class="eyebrow">{{ moduleCategoryLabel(item, copy) }}</p>
-            <h3>{{ item.name || item.id }}</h3>
-            <p class="muted">{{ t('modulesVersion', { version: item.latest_version || item.version }) }}</p>
-            <p v-if="marketCredits(item)" class="muted module-market-credits" data-testid="modules-market-credits">{{ marketCredits(item) }}</p>
-            <p v-if="item.description" class="muted">{{ item.description }}</p>
-            <p class="muted">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
-            <ul class="module-market-badges" data-testid="modules-market-badges">
-              <li :class="`is-trust-${item.trust_level || 'community'}`">{{ trustLabel(item.trust_level) }}</li>
-              <li v-if="item.stars" :title="t('pluginStars', { count: item.stars })">★ {{ item.stars }}</li>
-              <li v-for="language in item.languages" :key="language">{{ languageLabel(language) }}</li>
-            </ul>
-            <p v-if="item.update_available" class="muted">{{ t('modulesUpdateAvailable') }}</p>
-            <p v-if="item.verification_error" class="error-text">{{ item.verification_error }}</p>
-            <p v-else-if="item.needs_core_update" class="error-text" data-testid="modules-market-core-update">{{ t('pluginNeedsCoreUpdate', { version: item.min_app_version }) }}</p>
-          </div>
-          <dl>
-            <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ item.adventure_count }}</dd></div>
-            <div><dt>{{ t('modulesRuntimeTargets') }}</dt><dd>{{ item.ruleset_targets.join(' · ') || '—' }}</dd></div>
-          </dl>
-          <div class="module-market-actions">
-            <button
-              v-if="!item.installed"
-              type="button"
-              :disabled="!item.installable || installBusy === item.id"
-              :aria-busy="installBusy === item.id"
-              @click="installFromMarketplace(item)"
-            >{{ installBusy === item.id ? t('modulesInstallingOnline') : t('modulesInstallOnline') }}</button>
-            <button
-              v-else-if="item.update_available"
-              type="button"
-              :disabled="installBusy === item.id"
-              :aria-busy="installBusy === item.id"
-              @click="installFromMarketplace(item)"
-            >{{ installBusy === item.id ? t('modulesUpdatingOnline') : t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
-            <span v-else class="module-installed-badge">{{ t('modulesInstalledBadge') }}</span>
-            <a v-if="item.repository_url" :href="item.repository_url" class="module-market-repo" target="_blank" rel="noopener noreferrer">{{ t('openRepository') }}</a>
+      <div v-else class="module-market-grid">
+        <MarketplaceCard
+          v-for="item in market"
+          :key="item.id"
+          :item="marketCardItem(item)"
+          :icon="CubeOutline"
+          :type-label="moduleCategoryLabel(item, copy)"
+          :show-hub-stats="Boolean(marketSource?.hub)"
+          :has-newer-version="item.update_available"
+          :installing="installBusy === item.id"
+          :data-testid="`modules-market-${item.id}`"
+          @install="installFromMarketplace(item)"
+          @open-url="openUrl"
+          @detail="openMarketDetail(item)"
+        >
+          <template #summary>
+            <p class="muted module-market-summary">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
+            <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.join(' · ') }}</p>
+          </template>
+          <template #tags>
+            <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
+          </template>
+          <template #footer>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
-          </div>
-        </article>
+          </template>
+        </MarketplaceCard>
       </div>
     </section>
+
+    <HubDetailModal
+      v-model:show="hubDetailOpen"
+      :title="t('modulesDetailTitle')"
+      :description-title="t('modulesDetailDescription')"
+      :hub-detail="hubDetail"
+      :hub-detail-loading="hubDetailLoading"
+      :hub-readme-loading="hubReadmeLoading"
+      :hub-rating="hubRating"
+      :hub-rating-summary="hubRatingSummary"
+      :busy="detailBusy"
+      :safe-hub-readme-html="safeHubReadmeHtml"
+      :plugin-type-icon="() => CubeOutline"
+      :plugin-type-label="() => (detailItem ? moduleCategoryLabel(detailItem, copy) : copy.packLabel)"
+      :market-item-has-newer-version="() => Boolean(detailItem?.update_available)"
+      :install-market-plugin="installDetailItem"
+      :open-url="openUrl"
+      :toggle-hub-like="toggleHubLike"
+      :save-hub-rating="saveHubRating"
+    />
 
     <Modal v-if="submitGuideOpen" :title="t('contentPackSubmitTitle')" dialog-class="module-submit-guide" close-test-id="modules-submit-guide-close" @close="submitGuideOpen = false">
       <div data-testid="modules-submit-guide">
@@ -421,6 +460,11 @@ async function checkRecovery() {
 
 <style scoped>
 .modules-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+/* Same grid as the plugin marketplace, which these cards come from. */
+.module-market-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 13px; align-items: stretch; }
+.module-market-summary { margin: 5px 0 0; }
+@media (max-width: 1120px) { .module-market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .module-market-grid { grid-template-columns: minmax(0, 1fr); } }
 .modules-heading { position: relative; display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; isolation: isolate; padding: 24px 0 20px; border-bottom: 1px solid color-mix(in srgb, var(--df-accent) 22%, var(--df-border-soft)); }
 .modules-heading::before { position: absolute; z-index: -1; inset: 0 0 0 30%; content: ''; background: linear-gradient(90deg, var(--df-canvas), transparent 72%), var(--df-bg-atmosphere-image) center / cover; mask-image: linear-gradient(90deg, transparent, black 42%, transparent); opacity: .2; pointer-events: none; }
 .modules-heading .eyebrow { margin: 0; color: var(--df-interactive-strong); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
@@ -455,12 +499,6 @@ async function checkRecovery() {
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
-.module-market-credits { overflow-wrap: anywhere; }
-.module-market-badges { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0 0; padding: 0; list-style: none; }
-.module-market-badges li { padding: .15rem .55rem; border: 1px solid var(--df-border-soft); border-radius: 999px; color: var(--df-text-secondary); background: var(--df-surface-2); font-size: .76rem; font-weight: 700; }
-.module-market-badges .is-trust-official { border-color: color-mix(in srgb, var(--df-success) 50%, var(--df-border-soft)); color: var(--df-success); }
-.module-market-badges .is-trust-verified { border-color: color-mix(in srgb, var(--df-interactive) 50%, var(--df-border-soft)); color: var(--df-interactive-strong); }
-.module-market-repo { color: var(--df-interactive-strong); font-size: .85rem; font-weight: 700; }
 .module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
 .module-market-actions button { width: 100%; }
 .module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }

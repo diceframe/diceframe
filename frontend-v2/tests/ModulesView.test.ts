@@ -12,11 +12,33 @@ const mocks = vi.hoisted(() => ({
   previewImport: vi.fn(),
   importModule: vi.fn(),
   installFromMarketplace: vi.fn(),
+  hubDetail: vi.fn(),
+  hubReadme: vi.fn(),
+  hubRatings: vi.fn(),
+  setHubRating: vi.fn(),
 }))
 
 vi.mock('../src/api/client', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/api/client')>()
   return { ...actual, api: mocks.api }
+})
+
+vi.mock('../src/composables/useToast', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
+}))
+
+vi.mock('../src/api/plugins', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/api/plugins')>()
+  return {
+    ...actual,
+    pluginApi: {
+      ...actual.pluginApi,
+      hubDetail: mocks.hubDetail,
+      hubReadme: mocks.hubReadme,
+      hubRatings: mocks.hubRatings,
+      setHubRating: mocks.setHubRating,
+    },
+  }
 })
 
 vi.mock('../src/api/modules', async importOriginal => {
@@ -119,7 +141,7 @@ describe('ModulesView', () => {
     expect(localSection.find('input[type="file"]').exists()).toBe(true)
     expect(onlineSection.text()).toContain('Other Module')
     expect(onlineSection.text()).toContain('包含 2 个冒险')
-    expect(onlineSection.text()).toContain('更新到 1.2.0')
+    expect(onlineSection.text()).toContain('新版本 1.2.0')
     expect(wrapper.find('a[href="#modules-installed"]').exists()).toBe(false)
     expect(wrapper.find('a[href="#modules-local-import"]').exists()).toBe(false)
     expect(wrapper.find('a[href="#modules-online"]').exists()).toBe(false)
@@ -150,14 +172,16 @@ describe('ModulesView', () => {
     const { wrapper } = await mountView()
 
     const fresh = wrapper.get('[data-testid="modules-market-other-module"]')
-    const install = fresh.findAll('button').find(button => button.text() === '从市场安装')
+    const install = fresh.findAll('button').find(button => button.text() === '安装')
     expect(install).toBeDefined()
     await install!.trigger('click')
     await flushPromises()
     await vi.waitFor(() => expect(fresh.get('[role="status"]').text()).toMatch(/已安装，(正在刷新列表|列表已刷新)/))
 
     expect(mocks.installFromMarketplace).toHaveBeenCalledWith('other-module', false)
-    expect(wrapper.get('[data-testid="modules-market-castle-module"]').text()).toContain('更新到 1.2.0')
+    const update = wrapper.get('[data-testid="modules-market-castle-module"]')
+    expect(update.text()).toContain('新版本 1.2.0')
+    expect(update.findAll('button').map(button => button.text())).toContain('更新')
   })
 
   it('shows the marketplace error when the install endpoint returns a failed result', async () => {
@@ -165,7 +189,7 @@ describe('ModulesView', () => {
     const { wrapper } = await mountView()
 
     const fresh = wrapper.get('[data-testid="modules-market-other-module"]')
-    await fresh.findAll('button').find(button => button.text() === '从市场安装')!.trigger('click')
+    await fresh.findAll('button').find(button => button.text() === '安装')!.trigger('click')
     await flushPromises()
 
     expect(fresh.get('[role="status"]').text()).toContain('签名校验失败')
@@ -230,11 +254,12 @@ describe('ModulesView', () => {
     expect(installedCard.get('.eyebrow').text()).toBe('资源包')
     expect(installedCard.text()).toContain('包含 1 个冒险')
     const onlineCard = wrapper.get('[data-testid="modules-market-office-night"]')
-    expect(onlineCard.get('.eyebrow').text()).toBe('资源包')
+    expect(onlineCard.get('.tag-row .n-tag').text()).toBe('资源包')
     expect(onlineCard.text()).toContain('包含 1 个冒险')
   })
 
-  it('shows index credits, trust, stars, languages and repository without empty placeholders', async () => {
+  it('renders online packs with the plugin marketplace card', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     mocks.marketplace.mockResolvedValue({ ok: true, modules: [
       {
         ...online.modules[0], author: 'EOEOY', license: 'CC BY-NC 4.0', trust_level: 'verified', stars: 12,
@@ -245,17 +270,51 @@ describe('ModulesView', () => {
     const { wrapper } = await mountView()
 
     const credited = wrapper.get('[data-testid="modules-market-other-module"]')
-    expect(credited.get('[data-testid="modules-market-credits"]').text()).toBe('作者: EOEOY · 许可证: CC BY-NC 4.0')
-    expect(credited.findAll('[data-testid="modules-market-badges"] li').map(item => item.text()))
-      .toEqual(['已验证作者', '★ 12', '简体中文', 'English', 'fr'])
-    const repository = credited.get('a[target="_blank"]')
-    expect(repository.attributes('href')).toBe('https://github.com/diceframe/module-other-module')
-    expect(repository.attributes('rel')).toBe('noopener noreferrer')
+    expect(credited.classes()).toContain('market-card')
+    expect(credited.get('.market-author').text()).toBe('作者: EOEOY')
+    expect(credited.findAll('.tag-row .n-tag').map(tag => tag.text()))
+      .toEqual(['冒险模组', '已验证作者', 'adventure', '简体中文', 'English', 'fr'])
+    expect(credited.get('.stars-tag').text()).toBe('12')
+    expect(credited.text()).toContain('包含 2 个冒险')
+    await credited.findAll('button').find(button => button.text() === '打开仓库')!.trigger('click')
+    expect(open).toHaveBeenCalledWith('https://github.com/diceframe/module-other-module', '_blank', 'noopener')
 
     const bare = wrapper.get('[data-testid="modules-market-castle-module"]')
-    expect(bare.find('[data-testid="modules-market-credits"]').exists()).toBe(false)
-    expect(bare.find('a[target="_blank"]').exists()).toBe(false)
-    expect(bare.findAll('[data-testid="modules-market-badges"] li').map(item => item.text())).toEqual(['官方', '★ 3', '简体中文'])
+    expect(bare.find('.market-author').exists()).toBe(false)
+    expect(bare.findAll('button').find(button => button.text() === '打开仓库')!.attributes('disabled')).toBeDefined()
+    // Without the Hub catalog there are no Hub stats and no detail dialog.
+    expect(bare.find('.hub-card-stats').exists()).toBe(false)
+    expect(bare.findAll('button').some(button => button.text() === '查看详情')).toBe(false)
+  })
+
+  it('opens the Hub detail dialog with README while keeping the local install state', async () => {
+    mocks.marketplace.mockResolvedValue({ ...online, source: { hub: true } })
+    mocks.hubDetail.mockResolvedValue({ ok: true, id: 'castle-module', name: 'Castle Module', version: '1.2.0', plugin_type: 'content-pack', stats: { downloads_total: 7 } })
+    mocks.hubReadme.mockResolvedValue({ ok: true, html: '<h1>Castle README</h1>' })
+    mocks.hubRatings.mockResolvedValue({ average: 4.5, count: 2, distribution: { 5: 1, 4: 1 } })
+    const { wrapper } = await mountView()
+
+    const card = wrapper.get('[data-testid="modules-market-castle-module"]')
+    expect(card.get('.hub-card-stats').text()).toContain('下载')
+    await card.findAll('button').find(button => button.text() === '查看详情')!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.hubDetail).toHaveBeenCalledWith('castle-module', expect.anything())
+    expect(mocks.hubReadme).toHaveBeenCalledWith('castle-module', expect.anything())
+    // Teleport is stubbed, so the dialog renders inside the view.
+    const dialog = wrapper.get('.hub-detail-modal')
+    expect(dialog.text()).toContain('内容包详情')
+    expect(dialog.text()).toContain('Castle README')
+    // The Hub payload has no local install state; the dialog keeps the shelf's
+    // (installed 1.0.0, 1.2.0 available), so it offers an update, not an install.
+    const action = dialog.get('.hub-detail-hero .n-button')
+    expect(action.text()).toBe('更新')
+
+    // Ratings use the same Hub endpoint as plugins.
+    mocks.setHubRating.mockResolvedValue({ ok: true })
+    await dialog.findAll('.n-rate__item')[3].trigger('click')
+    await flushPromises()
+    expect(mocks.setHubRating).toHaveBeenCalledWith('castle-module', 4)
   })
 
   it('says why a pack that needs a newer DiceFrame cannot be installed', async () => {
@@ -264,8 +323,8 @@ describe('ModulesView', () => {
     }] })
     const { wrapper } = await mountView()
     const card = wrapper.get('[data-testid="modules-market-other-module"]')
-    expect(card.get('[data-testid="modules-market-core-update"]').text()).toBe('需升级 DiceFrame 至 3.1.0 及以上')
-    expect(card.get('.module-market-actions button').attributes('disabled')).toBeDefined()
+    expect(card.get('.market-warning').text()).toBe('需升级 DiceFrame 至 3.1.0 及以上')
+    expect(card.findAll('button').find(button => button.text() === '安装')!.attributes('disabled')).toBeDefined()
   })
 
   it('keeps a disabled installed adventure classified by its readable inventory', async () => {
