@@ -260,9 +260,14 @@ def cancel_proposals_for_player(
         }
         if uid not in participant_uids:
             continue
+        refunded = _refund_installment_deposit(
+            instance, proposal, actor_uid="system", now=now,
+        )
         set_proposal_status(proposal, "cancelled")
         proposal["resolved_at"] = now
         proposal["resolution_code"] = resolution_code
+        if refunded is not None:
+            proposal["refund_transaction_id"] = refunded["id"]
         proposal_id = str(proposal.get("id") or "")
         affected_ids.add(proposal_id)
         _record_outcome(
@@ -1200,6 +1205,90 @@ def resolve_proposal(
     }
 
 
+def _committed_deposits(instance: Any, proposal_id: str) -> list[dict[str, Any]]:
+    return [
+        transaction
+        for transaction in economy_state.state(instance).get("transactions", [])
+        if isinstance(transaction, dict)
+        and str(transaction.get("proposal_id") or "") == proposal_id
+        and transaction.get("status") == "committed"
+        and transaction.get("settlement_stage") == "deposit"
+    ]
+
+
+def _resync_installment_stage(instance: Any, proposal: dict[str, Any]) -> None:
+    """Re-derive an installment's stage from its surviving deposit."""
+
+    terms = proposal.get("payment_terms")
+    if not isinstance(terms, dict) or str(terms.get("stage") or "full") == "full":
+        return
+    if _committed_deposits(instance, str(proposal.get("id") or "")):
+        terms["stage"] = "deposit_paid"
+        proposal["settlement_stage"] = "deposit_paid"
+        return
+    terms["stage"] = "deposit_pending"
+    proposal.pop("settlement_stage", None)
+    if proposal.get("resolution_code") in {"DEPOSIT_COMMITTED", "INSUFFICIENT_FUNDS_TAIL"}:
+        proposal.pop("resolution_code", None)
+
+
+def _refund_installment_deposit(
+    instance: Any,
+    proposal: dict[str, Any],
+    *,
+    actor_uid: str,
+    now: str,
+) -> dict[str, Any] | None:
+    """Return a paid deposit when its contract is cancelled before the tail.
+
+    The refund is a compensating ledger transaction, so a later whole-round
+    rollback reverses it like any other settlement.
+    """
+
+    terms = proposal.get("payment_terms")
+    if not isinstance(terms, dict) or terms.get("stage") != "deposit_paid":
+        return None
+    proposal_id = str(proposal.get("id") or "")
+    payer_uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
+    account = f"character:{payer_uid}"
+    paid = sum(
+        -int(entry.get("delta", 0) or 0)
+        for transaction in _committed_deposits(instance, proposal_id)
+        for entry in transaction.get("entries", [])
+        if isinstance(entry, dict)
+        and str(entry.get("account") or "") == account
+        and int(entry.get("delta", 0) or 0) < 0
+    )
+    if paid <= 0:
+        return None
+    entries: list[dict[str, Any]] = []
+    if payer_uid in instance.players:
+        payer = instance.get_character_sheet(payer_uid)
+        currency = payer.get("currency") if isinstance(payer.get("currency"), dict) else {}
+        before = int(currency.get("amount", payer.get("gold", 0)) or 0)
+        after = apply_currency_delta(payer, paid)
+        instance.set_character_sheet(payer_uid, payer)
+        entries.append({"account": account, "delta": paid, "before": before, "after": after})
+    entries.append({"account": "system:world", "delta": -paid, "before": None, "after": None})
+    transaction = {
+        "id": f"tx_{uuid4().hex}",
+        "run_id": instance.run_id,
+        "proposal_id": proposal_id,
+        "kind": "refund",
+        "source": proposal.get("source", ""),
+        "source_ref": proposal.get("source_ref", ""),
+        "reason": proposal.get("reason", ""),
+        "actor_uid": actor_uid,
+        "entries": entries,
+        "status": "committed",
+        "settlement_stage": "refund",
+        "round": era_key(instance),
+        "committed_at": now,
+    }
+    economy_state.state(instance).setdefault("transactions", []).append(transaction)
+    return transaction
+
+
 def reverse_round_economy(instance: Any, round_number: int) -> None:
     """Withdraw every economic effect at or after ``round_number``.
 
@@ -1239,7 +1328,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         str(transaction.get("proposal_id") or "")
         for transaction in settlement_transactions
     }
-    affected_ids = origin_ids | settlement_ids
     now = datetime.now(timezone.utc).isoformat()
 
     # Invalidate proposals whose narrative origin was erased, then reverse
@@ -1258,13 +1346,12 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         if source_ref:
             economy_state.state(instance).get("idempotency_records", {}).pop(source_ref, None)
 
-    for transaction in transactions:
-        if (
-            transaction.get("status") == "committed"
-            and str(transaction.get("proposal_id") or "") in affected_ids
-        ):
-            transaction["status"] = "reversed"
-            transaction["reversed_at"] = now
+    # Reverse exactly the era's settlements.  An installment can own several
+    # transactions; a deposit committed before the era survives a rollback
+    # of its tail, just as the restored snapshot still shows it paid.
+    for transaction in settlement_transactions:
+        transaction["status"] = "reversed"
+        transaction["reversed_at"] = now
 
     # A settlement-era rollback keeps an earlier valid offer actionable. Do
     # not resurrect proposals whose origin round is itself being erased.
@@ -1276,6 +1363,10 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             set_proposal_status(proposal, "pending")
             proposal.pop("resolved_at", None)
             proposal.pop("resolution_code", None)
+        # The installment stage is derived from the ledger: a reopened or
+        # still-pending contract whose deposit was just reversed must charge
+        # the deposit again instead of delivering after only the tail.
+        _resync_installment_stage(instance, proposal)
     for group in economy_state.state(instance).get("effect_groups", []):
         if int(group.get("round", -1) or -1) >= rollback_round:
             group["status"] = "superseded"

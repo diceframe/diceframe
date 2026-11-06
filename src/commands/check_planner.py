@@ -828,6 +828,16 @@ async def plan_round_checks(
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
     planned = _apply_granted_advantage_modes(instance, rule, planned)
+    if rule and str(rule.dice_system).lower() == "none":
+        # A no-dice rule only consults the planner for the purchase protocol.
+        # Whatever checks the model proposed would otherwise be built as d20
+        # rolls; keep the round identical to the no_dice_rule skip apart from
+        # its economy result.
+        planned = []
+        errors = []
+        overreach_notes = []
+        world_requirements = []
+        world_time_advance = None
     economy_offers, economy_intents_unpriced, economy_errors = normalize_economy_actions(
         instance, raw_economy_actions, rule,
     )
@@ -873,9 +883,9 @@ async def plan_round_checks(
                 instance.game_key, progression_state.round_value(instance), exc_info=True,
             )
     # The model passes are recall aids, not the authority.  A player action is
-    # still a trusted source for a purchase intent: recover an explicit quote
-    # or at least record an unpriced blocker so a missed model field can never
-    # become a silent free delivery.
+    # still a trusted source for a purchase intent: record an unpriced blocker
+    # so a missed model field can never become a silent free delivery.  The
+    # server never prices it from the text (ADR 0002).
     _recover_purchase_intents_from_player_actions(
         instance, rule, economy_offers, economy_intents_unpriced,
     )

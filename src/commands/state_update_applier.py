@@ -96,9 +96,10 @@ class StateUpdateApplier:
         # 由 GameHandler 注入；不在这里 build_default_ruleset_registry()，避免第二份
         # registry lifecycle。未注入时 reconciliation 整体停用，行为与改造前一致。
         self._ruleset_registry = ruleset_registry
-        # The production GameHandler enables this boundary.  Direct callers
-        # that still exercise the legacy parser contract can opt out while
-        # they migrate to settlement receipts; no narrative round does so.
+        # The production GameHandler enables this boundary for settlement-
+        # dependent effect groups.  Ordinary narrative rounds are not gated
+        # here: their purchase items are already stripped by
+        # ``filter_unconfirmed_purchase_grants`` before this applier runs.
         self._strict_economy = bool(strict_economy)
 
     def _reject_unsettled_item_acquisitions(
@@ -108,16 +109,24 @@ class StateUpdateApplier:
         *,
         authorized_receipt_id: str = "",
         allow_unsettled_item_grants: bool = False,
+        settlement_effects: bool = False,
     ) -> None:
-        """Keep model item grants out of live inventory without a receipt.
+        """Keep deferred item grants out of inventory without a valid receipt.
 
-        Narrative ``LOOT``/``item_gains`` are candidates, not authority.  A
-        committed purchase/reward calls the same applier with a private
-        settlement receipt; ordinary model rounds never receive that token.
-        Equip existing items remains valid, but the legacy ``legacy`` flag is
-        removed so an unknown weapon cannot be acquired by equipping it.
+        Only effect groups that were deferred behind an economy decision
+        (``settlement_effects=True``) need a receipt: their items are part of
+        the transaction and must not land unless that transaction committed.
+        Ordinary ``LOOT``/``KEY_ITEM``/``item_gains`` in a round without a
+        pending decision are the GM's narration and apply as before; items
+        owned by a pending or same-round unpriced purchase were already
+        removed by ``filter_unconfirmed_purchase_grants``.
         """
 
+        # FREE_GRANT is an ephemeral gate marker; it never persists, whatever
+        # path applies the update.
+        update.pop("free_grants", None)
+        if not self._strict_economy or not settlement_effects or allow_unsettled_item_grants:
+            return
         receipt_id = str(authorized_receipt_id or "")
         if receipt_id and not any(
             isinstance(transaction, dict)
@@ -129,7 +138,7 @@ class StateUpdateApplier:
         ):
             logger.warning("忽略无效经济结算回执: %s", receipt_id)
             receipt_id = ""
-        if not self._strict_economy or receipt_id or allow_unsettled_item_grants:
+        if receipt_id:
             return
         rejected = 0
         if isinstance(update.get("loot"), list):
@@ -157,8 +166,6 @@ class StateUpdateApplier:
                             operation.pop("legacy", None)
                         kept.append(operation)
                     player_update["equipment_ops"] = kept
-        if update.pop("free_grants", None):
-            rejected += 1
         if rejected:
             logger.warning(
                 "拒绝未结算模型物品效果: round=%d count=%d",
@@ -205,8 +212,14 @@ class StateUpdateApplier:
         *,
         authorized_receipt_id: str = "",
         allow_unsettled_item_grants: bool = False,
+        settlement_effects: bool = False,
     ) -> list[dict[str, Any]]:
-        """将 LLM 输出的 state_update 应用到游戏状态。"""
+        """将 LLM 输出的 state_update 应用到游戏状态。
+
+        ``settlement_effects`` marks a deferred effect group being applied after
+        its economy decision; under strict economy its item grants need the
+        committed ``authorized_receipt_id``.
+        """
         if not isinstance(update, dict):
             return []
         self._reject_unsettled_item_acquisitions(
@@ -214,6 +227,7 @@ class StateUpdateApplier:
             update,
             authorized_receipt_id=str(authorized_receipt_id or ""),
             allow_unsettled_item_grants=allow_unsettled_item_grants,
+            settlement_effects=settlement_effects,
         )
         queued_proposals: list[dict[str, Any]] = []
         rule = self._load_rule(instance)

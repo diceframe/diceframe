@@ -312,13 +312,25 @@ def normalize_economy_actions(
     return offers, unpriced, errors
 
 
-def _clean_deterministic_purchase_target(context: str, language: str = "") -> tuple[str, int]:
-    """Clean the parser's item hint without inventing an item identity."""
+def _clean_deterministic_purchase_target(
+    context: str,
+    language: str = "",
+    *,
+    after_verb: bool = False,
+) -> tuple[str, int]:
+    """Clean the parser's item hint without inventing an item identity.
+
+    ``after_verb`` marks text that already starts right after the purchase
+    verb.  Subject/connector words (“我要”“再”“还”) belong before the verb,
+    so stripping them there would only cut the item's own first character:
+    “再生药水” → “生药水”, “还魂丹” → “魂丹”.
+    """
 
     target = re.sub(r"\s+", " ", str(context or "")).strip()
     if not target:
         return "", 1
-    target = purchase_target_prefix_pattern(language or "zh-CN").sub("", target, count=1)
+    if not after_verb:
+        target = purchase_target_prefix_pattern(language or "zh-CN").sub("", target, count=1)
     target = re.split(
         purchase_offer_pattern(language or "zh-CN").pattern,
         target,
@@ -339,11 +351,10 @@ def _clean_deterministic_purchase_target(context: str, language: str = "") -> tu
     # the purchase verb.  Strip balance/connector residue left by phrases such
     # as “我有34金币再买护甲”, without treating that balance as a quote.
     target = purchase_balance_pattern(language or "zh-CN").sub("", target, count=1)
-    target = purchase_target_connector_pattern(language or "zh-CN").sub("", target, count=1)
+    if not after_verb:
+        target = purchase_target_connector_pattern(language or "zh-CN").sub("", target, count=1)
     target = re.sub(r"^[\s，,。.、：:；;\-]+|[\s，,。.、：:；;\-]+$", "", target)
     target = purchase_target_suffix_pattern(language or "zh-CN").sub("", target)
-    if re.fullmatch(r"\d+(?:\.\d+)?\s*[\w\u3400-\u9fff]+", target):
-        return "", 1
     quantity = 1
     classifier = purchase_quantity_classifier_pattern(language or "zh-CN")
     numeric = re.match(rf"^(?P<qty>[0-9]+)\s*{classifier.pattern}", target, flags=re.IGNORECASE)
@@ -360,6 +371,10 @@ def _clean_deterministic_purchase_target(context: str, language: str = "") -> tu
             quantity = quantity_words[chinese.group("qty")]
             target = target[chinese.end():]
     target = re.sub(r"\s+", " ", target).strip()
+    # A bare amount+label (“34金币”) is money, not an item.  Checked after the
+    # quantity prefix is consumed so “3瓶药水” still yields 药水 ×3.
+    if re.fullmatch(r"\d+(?:\.\d+)?\s*[\w㐀-鿿]+", target):
+        return "", 1
     generic_targets = {
         str(value).casefold()
         for value in purchase_generic_target_terms(language or "zh-CN")
@@ -383,132 +398,7 @@ def _purchase_target_from_action(action_text: str, language: str) -> tuple[str, 
             tails.append(sentence[matches[-1].end():])
     if not tails:
         return "", 1
-    return _clean_deterministic_purchase_target(tails[-1], language)
-
-
-def _explicit_player_purchase_quote(
-    intent: Any,
-    rule: RuleSystem | None,
-    language: str = "",
-) -> tuple[str, str] | None:
-    """Return one explicit ``(amount, unit_id)`` from the player's action.
-
-    This is deliberately narrower than the model planner.  It only recovers
-    a quote when the same purchase sentence contains exactly one numeric
-    amount and declared currency label.  Balance/budget statements are not
-    treated as prices, and multiple amounts remain ambiguous.
-    """
-
-    if rule is None or not getattr(rule, "currency_spec", None):
-        return None
-    text = str(getattr(intent, "action_text", "") or "")
-    spec = rule.currency_spec
-    labels: list[tuple[str, str]] = []
-    for unit in spec.units:
-        for label in (unit.id, unit.name, unit.symbol):
-            if str(label or "").strip():
-                labels.append((str(label).strip(), unit.id))
-    if not labels:
-        return None
-    label_pattern = "|".join(
-        re.escape(label)
-        for label, _unit in sorted(labels, key=lambda item: len(item[0]), reverse=True)
-    )
-    amount_pattern = re.compile(
-        rf"(?P<amount>\d+(?:\.\d+)?)\s*(?:枚|个)?\s*(?P<label>{label_pattern})",
-        re.IGNORECASE,
-    )
-    purchase_pattern = purchase_intent_pattern(language or "zh-CN")
-    candidates: list[tuple[str, str]] = []
-    for sentence in re.split(r"[。！？.!?\n]+", text):
-        if not purchase_pattern.search(sentence):
-            continue
-        matches = list(amount_pattern.finditer(sentence))
-        for match in matches:
-            prefix = sentence[:match.start()]
-            # “我有34金币再买护甲” describes a balance, not a quote.
-            if purchase_balance_pattern(language or "zh-CN").search(prefix):
-                continue
-            raw_label = match.group("label")
-            unit_id = next(
-                (unit for label, unit in labels if label.casefold() == raw_label.casefold()),
-                "",
-            )
-            if not unit_id:
-                continue
-            try:
-                parse_currency_amount(match.group("amount"), unit_id, spec)
-            except CurrencySystemError:
-                continue
-            candidates.append((match.group("amount"), unit_id))
-    if len(set(candidates)) != 1:
-        return None
-    return candidates[0]
-
-
-def _explicit_gm_purchase_quote(
-    instance: GameInstance,
-    target: str,
-    rule: RuleSystem | None,
-    language: str = "",
-) -> tuple[str, str] | None:
-    """Recover one price explicitly narrated alongside the requested item.
-
-    This is intentionally stricter than general narration parsing: the target
-    and exactly one currency amount must occur in the same sentence, and the
-    sentence must contain a price cue. Balance/status sentences are excluded.
-    """
-
-    if rule is None or not getattr(rule, "currency_spec", None):
-        return None
-    spec = rule.currency_spec
-    labels: list[tuple[str, str]] = []
-    for unit in spec.units:
-        for label in (unit.id, unit.name, unit.symbol):
-            if str(label or "").strip():
-                labels.append((str(label).strip(), unit.id))
-    if not labels or not target:
-        return None
-    label_pattern = "|".join(
-        re.escape(label)
-        for label, _unit in sorted(labels, key=lambda item: len(item[0]), reverse=True)
-    )
-    amount_pattern = re.compile(
-        rf"(?P<amount>\d+(?:\.\d+)?)\s*(?:枚|个)?\s*(?P<label>{label_pattern})",
-        re.IGNORECASE,
-    )
-    price_cue = re.compile(
-        rf"(?:{purchase_offer_pattern(language or 'zh-CN').pattern}|一共|每(?:个|件|瓶|把|份)?|"
-        r"要价|报价|fee|for|each|sell)",
-        re.IGNORECASE,
-    )
-    target_key = str(target).casefold()
-    candidates: list[tuple[str, str]] = []
-    for entry in list(getattr(instance, "log", None) or [])[-2:]:
-        narration = sanitize_narration(str(entry.get("gm_response") or ""))
-        for sentence in re.split(r"[。！？.!?\n]+", narration):
-            if target_key not in sentence.casefold() or not price_cue.search(sentence):
-                continue
-            matches = list(amount_pattern.finditer(sentence))
-            if len(matches) != 1:
-                continue
-            match = matches[0]
-            prefix = sentence[:match.start()]
-            if purchase_balance_pattern(language or "zh-CN").search(prefix):
-                continue
-            raw_label = match.group("label")
-            unit_id = next(
-                (unit for label, unit in labels if label.casefold() == raw_label.casefold()),
-                "",
-            )
-            if not unit_id:
-                continue
-            try:
-                parse_currency_amount(match.group("amount"), unit_id, spec)
-            except CurrencySystemError:
-                continue
-            candidates.append((match.group("amount"), unit_id))
-    return candidates[0] if len(set(candidates)) == 1 and candidates else None
+    return _clean_deterministic_purchase_target(tails[-1], language, after_verb=True)
 
 
 def _recover_purchase_intents_from_player_actions(
@@ -519,9 +409,12 @@ def _recover_purchase_intents_from_player_actions(
 ) -> None:
     """Backstop a missing model economy field with deterministic player intent.
 
-    This never invents a target or amount.  A clear item/action without an
-    explicit price becomes an unpriced blocker; an explicit amount+unit is
-    normalized through the same validator as model output.
+    This only records unpriced blockers, so a purchase the model failed to
+    report can never become a silent free delivery.  It never creates a
+    chargeable offer: prices come from the planner reporting what a human
+    stated (ADR 0002), not from keyword/regex reads of currency mentions,
+    which misread per-item prices (“每瓶5金币”) and thousands separators
+    (“1,500”).  The GM can always price the order with the manual composer.
     """
 
     extra_labels = [
@@ -567,73 +460,23 @@ def _recover_purchase_intents_from_player_actions(
         if str(intent.actor_uid) in priced_actors:
             continue
         key = (str(intent.actor_uid), target.casefold(), quantity)
-        existing_unpriced = any(
-            (
-                str(item.get("payer_uid") or ""),
-                str(item.get("target") or "").casefold(),
-                int(item.get("quantity", 1) or 1),
-            ) == key
+        if key in known:
+            continue
+        # A model/repair pass may already have preserved this actor's
+        # unpriced intent. Keep that target rather than append a noisier
+        # parser hint.
+        if any(
+            str(item.get("payer_uid") or "") == str(intent.actor_uid)
             for item in unpriced
             if isinstance(item, dict)
-        )
-        if key in known and not existing_unpriced:
+        ):
             continue
-        quote = _explicit_player_purchase_quote(
-            intent, rule, str(getattr(instance, "language", "") or ""),
-        )
-        quote_source = "player_stated"
-        if quote is None:
-            quote = _explicit_gm_purchase_quote(
-                instance,
-                target,
-                rule,
-                str(getattr(instance, "language", "") or ""),
-            )
-            quote_source = "gm_narrated"
-        if quote is None:
-            # A model/repair pass may already have preserved this actor's
-            # unpriced intent. Keep that target rather than append a noisier
-            # parser hint; only a newly recovered explicit quote supersedes it.
-            if any(
-                str(item.get("payer_uid") or "") == str(intent.actor_uid)
-                for item in unpriced
-                if isinstance(item, dict)
-            ):
-                continue
-            unpriced.append({
-                "payer_uid": str(intent.actor_uid),
-                "target": target,
-                "quantity": quantity,
-            })
-            known.add(key)
-            continue
-        amount, unit_id = quote
-        recovered_offers, recovered_unpriced, _errors = normalize_economy_actions(
-            instance,
-            [{
-                "type": "purchase",
-                "player": str(intent.actor_uid),
-                "target": target,
-                "quantity": quantity,
-                "amount": amount,
-                "unit": unit_id,
-                "amount_scope": "total",
-                "price_source": quote_source,
-                "note": (
-                    "player action quote recovered server-side"
-                    if quote_source == "player_stated"
-                    else "GM narration quote recovered server-side"
-                ),
-            }],
-            rule,
-        )
-        if recovered_offers:
-            offers.extend(recovered_offers)
-            known.add(key)
-            priced_actors.add(str(intent.actor_uid))
-        elif recovered_unpriced:
-            unpriced.extend(recovered_unpriced)
-            known.add(key)
+        unpriced.append({
+            "payer_uid": str(intent.actor_uid),
+            "target": target,
+            "quantity": quantity,
+        })
+        known.add(key)
     priced_keys = {
         (
             str(item.get("payer_uid") or ""),

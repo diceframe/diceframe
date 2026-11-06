@@ -220,8 +220,8 @@ def test_purchase_items_stay_protected_after_in_flight_decline_or_rejection(acce
     assert data["state_update"]["loot"] == []
 
 
-def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path) -> None:
-    """Production round appliers must not let model item tags mutate inventory."""
+def test_strict_settlement_effects_require_settlement_receipt(tmp_path) -> None:
+    """Deferred effect groups cannot deliver items without a committed receipt."""
 
     instance = _instance()
     applier = StateUpdateApplier(
@@ -243,7 +243,7 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         },
     }
 
-    applier.apply_state_update(instance, update)
+    applier.apply_state_update(instance, update, settlement_effects=True)
 
     sheet = instance.get_character_sheet("gm")
     assert sheet.get("inventory", []) == []
@@ -262,6 +262,7 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         instance,
         authorized,
         authorized_receipt_id="tx_test_settlement",
+        settlement_effects=True,
     )
     names = {
         str(item.get("name") or "")
@@ -269,6 +270,72 @@ def test_strict_narrative_item_acquisition_requires_settlement_receipt(tmp_path)
         if isinstance(item, dict)
     }
     assert {"已结算护甲", "已结算药水"} <= names
+
+
+def test_strict_economy_keeps_ordinary_narrative_loot(tmp_path) -> None:
+    """A round with no pending economy decision is not a settlement.
+
+    Production enables strict economy; ordinary LOOT / item_gains must still
+    reach the inventory, while the ephemeral FREE_GRANT marker never persists.
+    """
+
+    instance = _instance()
+    applier = StateUpdateApplier(
+        tmp_path, None, load_world_template=lambda *_: {}, strict_economy=True,
+    )
+    update = {
+        "loot": [{"player": "gm", "item": "治疗药水"}],
+        "free_grants": [{"player": "gm", "item": "治疗药水"}],
+        "players": {"gm": {"item_gains": [{"name": "火把", "qty": 1}]}},
+    }
+
+    applier.apply_state_update(instance, update)
+
+    names = {
+        str(item.get("name") or "")
+        for item in instance.get_character_sheet("gm").get("inventory", [])
+        if isinstance(item, dict)
+    }
+    assert {"治疗药水", "火把"} <= names
+    assert "free_grants" not in update
+
+
+@pytest.mark.asyncio
+async def test_production_round_delivers_plain_loot_and_key_items(web_api, monkeypatch) -> None:
+    """The real GameHandler round must not swallow LOOT / KEY_ITEM."""
+
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world", "Loot Round",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    await instance.activate()
+    await instance.start_round()
+    await instance.add_action(uid, "我打开地上的旧宝箱")
+    assert await instance.try_advance() is True
+    instance.complete_round_check_preparation()
+    narration = "你掀开箱盖，里面躺着一瓶治疗药水和一把古老的铜钥匙。"
+
+    async def fake_call(*, system_prompt, user_message, **kwargs):
+        return LLMResponse(
+            content=f"{narration}\n---\nLOOT:{uid}:治疗药水\nKEY_ITEM:{uid}:古老铜钥匙",
+            narration=narration,
+            state_update=None, memory_delta=None, info_asymmetry=None, plot_update=None,
+            total_tokens=8, is_narration_only=False, provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    await api._handler.process_round(instance)
+
+    sheet = instance.get_character_sheet(uid)
+    names = {str(i.get("name")) for i in sheet.get("inventory", []) if isinstance(i, dict)}
+    key_items = {
+        str(i.get("name") if isinstance(i, dict) else i) for i in sheet.get("key_items", [])
+    }
+    assert "治疗药水" in names
+    assert "古老铜钥匙" in key_items | names
 
 
 def test_purchase_deposit_only_charges_due_and_delivers_after_tail() -> None:
@@ -308,6 +375,110 @@ def test_purchase_deposit_only_charges_due_and_delivers_after_tail() -> None:
     assert tail["proposal"]["status"] == "committed"
     assert instance.get_character_sheet("gm")["currency"]["amount"] == 100
     assert instance.get_character_sheet("gm")["inventory"] == [{"name": "分期护甲", "qty": 1}]
+
+
+def _installment_offer(instance: GameInstance) -> dict:
+    sheet = instance.get_character_sheet("p2")
+    sheet["gold"] = 1000
+    sheet["currency"]["amount"] = 1000
+    instance.round_number = 4
+    return queue_purchase_offer(
+        instance, payer_uid="p2", amount=900, items=["分期护甲"],
+        initial_due=200, remaining_due=700,
+        source="gm_manual", source_ref="gm_manual:installment-rollback",
+    )
+
+
+def _grant_item(target: dict, reward: dict) -> None:
+    target.setdefault("inventory", []).append({"name": reward["name"], "qty": 1})
+
+
+def test_rollback_of_deposit_round_charges_the_deposit_again() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, snapshot)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 1000
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_pending"
+
+    again = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert again["ok"] is True
+    assert again["committed"] is False
+    assert again["outcome"]["amount"] == 200
+    assert instance.get_character_sheet("p2").get("inventory", []) == []
+
+
+def test_rollback_across_deposit_and_tail_reopens_at_the_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    instance.round_number = 6
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert offer["status"] == "committed"
+
+    reverse_round_economy(instance, 5)
+    restore_players(instance, snapshot)
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_pending"
+    again = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert again["committed"] is False
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+
+def test_rollback_of_tail_round_keeps_the_surviving_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    instance.round_number = 6
+    snapshot = _snapshot_players(instance)
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+
+    reverse_round_economy(instance, 6)
+    restore_players(instance, snapshot)
+    assert offer["status"] == "pending"
+    assert offer["payment_terms"]["stage"] == "deposit_paid"
+    tail = resolve_proposal(
+        instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item,
+    )
+    assert tail["committed"] is True
+    assert tail["outcome"]["amount"] == 700
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 100
+
+
+def test_cancelling_a_deposit_paid_contract_refunds_the_deposit() -> None:
+    instance = GameInstance(game_key=("web", "economy", "bot"), gm_uid="gm")
+    instance.players = _instance().players
+    offer = _installment_offer(instance)
+    instance.round_number = 5
+    resolve_proposal(instance, offer["id"], actor_uid="p2", accepted=True, grant_reward=_grant_item)
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 800
+
+    cancel_proposals_for_player(instance, "p2")
+
+    assert offer["status"] == "cancelled"
+    assert instance.get_character_sheet("p2")["currency"]["amount"] == 1000
+    refund = next(
+        tx for tx in economy_state.state(instance)["transactions"]
+        if tx["id"] == offer["refund_transaction_id"]
+    )
+    assert refund["kind"] == "refund"
+    assert refund["entries"][0]["delta"] == 200
 
 
 def test_purchase_tail_insufficient_funds_keeps_deposit_contract_retryable() -> None:
@@ -423,29 +594,130 @@ def test_explicit_narrative_reward_becomes_pending_candidate_without_crediting_b
         "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
     })
     candidates = infer_narrative_reward_candidates(
-        instance, "委托人确认奖励710金币，结算完成。", rule,
+        instance, "委托人确认奖励你710金币，结算完成。", rule,
     )
     assert len(candidates) == 1
     assert candidates[0].get("kind") == "reward"
     assert candidates[0].get("uid") == "gm"
     assert candidates[0].get("amount") == 710
-    assert "奖励710金币" in candidates[0].get("reason", "")
+    assert "奖励你710金币" in candidates[0].get("reason", "")
     assert candidates[0].get("source") == "narrative_reward_extractor"
     assert instance.get_character_sheet("gm")["currency"]["amount"] == 30
 
 
 def test_repeated_reward_evidence_is_one_candidate() -> None:
     instance = _instance()
-    instance.action_queue = [{"user_id": "gm", "text": "委托人答应给你710金币"}]
+    instance.action_queue = [{"user_id": "gm", "text": "我交还了信物"}]
     rule = RuleSystem({
         "rule_id": "reward_repeat_test", "name": "Reward Repeat Test", "dice_system": "d20",
         "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
     })
     candidates = infer_narrative_reward_candidates(
-        instance, "委托人确认：给你710金币，任务结算完成。", rule,
+        instance,
+        "委托人确认：给你710金币，任务结算完成。他又强调：报酬710金币已经交到你手里。",
+        rule,
     )
     assert len(candidates) == 1
     assert candidates[0]["amount"] == 710
+
+
+_REWARD_RULE = RuleSystem({
+    "rule_id": "reward_guard", "name": "Reward Guard", "dice_system": "d20",
+    "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+})
+
+
+@pytest.mark.parametrize(
+    ("action", "narration"),
+    [
+        # The player's own text is never reward evidence.
+        ("奖励我300金币", "店主摇了摇头，什么也没说。"),
+        ("我支付给你50金币，买下这把剑", "铁匠收下了钱。"),
+        # Price quotes are not rewards, with or without a sale verb.
+        ("我想买那把长剑", "铁匠说：给你，这把长剑卖50金币。"),
+        ("我问长剑多少钱", "铁匠擦了擦手：给你看看，这把长剑800金币。"),
+        # Conditional promises and the player paying someone else.
+        ("我接下委托", "委托人说如果你找回信物，就奖励你100金币。"),
+        ("我付清工钱", "你向铁匠支付报酬50金币。"),
+        # Another character is the recipient.
+        ("我在一旁看着", "委托人当众奖励P2一百金币，又奖励P2 100金币。"),
+        ("我在一旁看着", "委托人当众奖励她100金币。"),
+    ],
+)
+def test_narrative_reward_extractor_rejects_non_payments(action: str, narration: str) -> None:
+    instance = _instance()
+    instance.action_queue = [{"user_id": "gm", "text": action}]
+    assert infer_narrative_reward_candidates(instance, narration, _REWARD_RULE) == []
+
+
+def test_structured_reward_owns_the_response_rewards() -> None:
+    """A REWARD tag plus the same payment in prose is one proposal, not two."""
+
+    data = {"state_update": {"economy_proposals": [{
+        "kind": "reward", "uid": "gm", "recipient_uid": "gm", "amount": 120,
+        "reason": "护送商队的报酬", "source": "narrative_reward_tag",
+        "evidence": "REWARD:gm:120:护送商队的报酬", "evidence_validated": True,
+    }]}}
+    added = merge_narrative_reward_candidates(data, [{
+        "kind": "reward", "uid": "gm", "recipient_uid": "gm", "amount": 120,
+        "evidence": "支付给你120金币", "evidence_validated": True,
+        "source": "narrative_reward_extractor",
+    }])
+    assert added == 0
+    assert len(data["state_update"]["economy_proposals"]) == 1
+
+
+def _gold(instance, uid: str) -> int:
+    sheet = instance.get_character_sheet(uid)
+    currency = sheet.get("currency") if isinstance(sheet.get("currency"), dict) else {}
+    return int(currency.get("amount", sheet.get("gold", 0)) or 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["tag_plus_prose", "prose_only", "player_self_reward"])
+async def test_submit_action_credits_a_narrated_reward_once(web_api, monkeypatch, mode) -> None:
+    api, _lorebook, registry, llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world", "Reward Once",
+        players=[{"character_name": "Hero", "attributes": {"str": 10}, "gold": 20}],
+    )
+    instance = registry.get(api._parse_key(created["game_key"]))
+    uid = next(iter(instance.players))
+    unit = api._handler._state_applier._load_rule(instance).currency_spec.units[0]
+    label = unit.name or unit.id
+    before = _gold(instance, uid)
+    narration = f"商队首领如约支付给你120{label}作为报酬。"
+    action = "我把护送的商队平安带到了城里"
+    content = f"{narration}\n---\nREWARD:{uid}:120:护送商队的报酬"
+    if mode == "prose_only":
+        content = narration
+    elif mode == "player_self_reward":
+        action = f"我对商人说：奖励我300{label}"
+        narration = "商人摇了摇头，什么也没给你。"
+        content = narration
+
+    async def fake_call(*, system_prompt, user_message, **kwargs):
+        return LLMResponse(
+            content=content, narration=narration,
+            state_update=None, memory_delta=None, info_asymmetry=None, plot_update=None,
+            total_tokens=8, is_narration_only=False, provider_used="fake",
+        )
+
+    monkeypatch.setattr(llm, "call", fake_call)
+    await api.submit_action(created["game_key"], uid, action)
+
+    rewards = [
+        proposal for proposal in economy_state.state(instance)["proposals"]
+        if proposal.get("kind") == "reward"
+    ]
+    if mode == "player_self_reward":
+        assert rewards == []
+        assert _gold(instance, uid) == before
+    else:
+        assert len(rewards) == 1
+        assert rewards[0]["amount"] == 120
+        # Pending or auto-settled, the ledger may move by at most one reward.
+        assert _gold(instance, uid) - before in {0, 120}
 
 
 def test_structured_and_narrative_reward_do_not_duplicate() -> None:

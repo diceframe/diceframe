@@ -619,7 +619,9 @@ async def test_currently_not_buying_statement_is_not_an_intent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_planner_client_recovers_explicit_player_quote() -> None:
+async def test_missing_planner_client_keeps_player_quote_unpriced() -> None:
+    """Without the planner the server records a blocker, never a regex price (ADR 0002)."""
+
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我决定买护甲，价格是34金币"}]
     rule = RuleSystem({
@@ -628,16 +630,14 @@ async def test_missing_planner_client_recovers_explicit_player_quote() -> None:
     })
     _, metadata = await plan_round_checks(instance, rule, None)
     assert metadata["available"] is False
-    assert metadata["economy_offers"] == [{
-        "payer_uid": "p1", "amount": 34, "quantity": 1,
-        "amount_scope": "total", "target": "护甲",
-        "note": "player action quote recovered server-side",
-    }]
-    assert metadata["unpriced_purchase_intents"] == []
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "护甲", "quantity": 1},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_missing_planner_actions_recover_price_from_recent_gm_narration() -> None:
+async def test_missing_planner_does_not_price_from_recent_gm_narration() -> None:
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我想买护甲"}]
     instance.log.append({"round": 1, "gm_response": "柜台上的护甲售价34金币。"})
@@ -646,12 +646,84 @@ async def test_missing_planner_actions_recover_price_from_recent_gm_narration() 
         "attributes": [], "currency": "金币",
     })
     _, metadata = await plan_round_checks(instance, rule, None)
-    assert metadata["economy_offers"] == [{
-        "payer_uid": "p1", "amount": 34, "quantity": 1,
-        "amount_scope": "total", "target": "护甲",
-        "note": "GM narration quote recovered server-side",
-    }]
-    assert metadata["unpriced_purchase_intents"] == []
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "护甲", "quantity": 1},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "action", "log", "currency"),
+    [
+        ("zh-CN", "我买3瓶药水，每瓶5金币", "", "金币"),
+        ("zh-CN", "我买3瓶药水", "药剂师说：药水每瓶5金币。", "金币"),
+        ("en", "I buy the warhorse for 1,500 gold", "", "gold"),
+    ],
+)
+async def test_offline_recovery_never_guesses_a_price(language, action, log, currency) -> None:
+    instance = make_instance()
+    instance.language = language
+    instance.action_queue = [{"user_id": "p1", "text": action}]
+    if log:
+        instance.log.append({"round": 1, "gm_response": log})
+    rule = RuleSystem({
+        "rule_id": "no_guess", "name": "No Guess", "dice_system": "d20",
+        "attributes": [{"key": "str", "name": "Strength"}], "currency": currency,
+    })
+    _, metadata = await plan_round_checks(instance, rule, None)
+    assert metadata["economy_offers"] == []
+    assert len(metadata["unpriced_purchase_intents"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_dice_purchase_round_plans_economy_without_checks() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买一把长剑"}]
+    rule = RuleSystem({
+        "rule_id": "no_dice_purchase", "name": "No Dice Purchase", "dice_system": "none",
+        "attributes": [{"key": "str", "name": "力量"}], "currency": "金币",
+    })
+    client = _client_returning({
+        "checks": [{"player": "p1", "attribute": "str", "target": 12}],
+        "world_time_advance": {"minutes": 30},
+        "economy_actions": [{
+            "player": "p1", "type": "purchase", "target": "长剑",
+            "price_source": "none",
+        }],
+    })
+    planned, metadata = await plan_round_checks(instance, rule, client)
+    assert planned == []
+    assert metadata["world_time_advance"] is None
+    assert [intent["target"] for intent in metadata["unpriced_purchase_intents"]] == ["长剑"]
+
+
+@pytest.mark.asyncio
+async def test_offline_quantity_purchase_still_blocks_free_delivery() -> None:
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买3瓶药水"}]
+    _, metadata = await plan_round_checks(instance, make_rule(), None)
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "药水", "quantity": 3},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("language", "action", "target"),
+    [
+        ("zh-CN", "我买再生药水，30金币", "再生药水"),
+        ("zh-CN", "我买还魂丹", "还魂丹"),
+        ("zh-CN", "我买要塞地图", "要塞地图"),
+        ("zh-CN", "我买去疤膏", "去疤膏"),
+        ("zh-CN", "我有34金币再买护甲", "护甲"),
+        ("en", "I buy iron armor", "iron armor"),
+        ("en", "I buy itching powder", "itching powder"),
+    ],
+)
+def test_purchase_target_keeps_the_items_first_character(language, action, target) -> None:
+    from src.commands.economy_planner import _purchase_target_from_action
+
+    assert _purchase_target_from_action(action, language) == (target, 1)
 
 
 @pytest.mark.asyncio
@@ -775,8 +847,8 @@ async def test_economy_offer_without_stated_price_is_safely_skipped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_model_economy_actions_recover_explicit_player_quote() -> None:
-    """两次 planner 都漏字段时，明确的玩家报价仍能形成订单。"""
+async def test_missing_model_economy_actions_keep_player_quote_as_blocker() -> None:
+    """两次 planner 都漏字段时，服务端只记无价拦截，不用正则猜价（ADR 0002）。"""
 
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我买护甲，34金币"}]
@@ -801,12 +873,10 @@ async def test_missing_model_economy_actions_recover_explicit_player_quote() -> 
     client = _OmittingClient()
     _planned, metadata = await plan_round_checks(instance, rule, client)
     assert client.calls == 2
-    assert metadata["economy_offers"] == [{
-        "payer_uid": "p1", "amount": 34, "quantity": 1,
-        "amount_scope": "total", "target": "护甲",
-        "note": "player action quote recovered server-side",
+    assert metadata["economy_offers"] == []
+    assert metadata["unpriced_purchase_intents"] == [{
+        "payer_uid": "p1", "target": "护甲", "quantity": 1,
     }]
-    assert metadata["unpriced_purchase_intents"] == []
 
 
 @pytest.mark.asyncio
@@ -824,7 +894,9 @@ async def test_missing_model_economy_actions_keep_unpriced_purchase_blocker() ->
 
 
 @pytest.mark.asyncio
-async def test_explicit_player_quote_overrides_model_unpriced_fallback() -> None:
+async def test_rejected_model_quote_stays_unpriced() -> None:
+    """A model quote with an unknown unit is downgraded, not re-priced by regex."""
+
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "我买护甲，34金币"}]
     rule = RuleSystem({
@@ -836,12 +908,8 @@ async def test_explicit_player_quote_overrides_model_unpriced_fallback() -> None
         "amount": "34", "unit": "silver", "price_source": "player_stated",
     }]})
     _, metadata = await plan_round_checks(instance, rule, client)
-    assert metadata["economy_offers"] == [{
-        "payer_uid": "p1", "amount": 34, "quantity": 1,
-        "amount_scope": "total", "target": "护甲",
-        "note": "player action quote recovered server-side",
-    }]
-    assert metadata["unpriced_purchase_intents"] == []
+    assert metadata["economy_offers"] == []
+    assert [intent["target"] for intent in metadata["unpriced_purchase_intents"]] == ["护甲"]
 
 
 @pytest.mark.asyncio
