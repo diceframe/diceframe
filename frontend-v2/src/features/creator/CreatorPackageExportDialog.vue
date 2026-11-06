@@ -135,8 +135,8 @@ const chosenAdventures = computed(() => {
 // The preview only restates what the adventure summaries already declare.
 // It never guesses whether the installing instance has a world; a fixed
 // world that is not exported is reported as a risk, not as a failure.
-// The listing's `compatibility` is not used: without a chosen ruleset and
-// world it is always "incompatible", so it says nothing about the export.
+// 两个模式共用的导出预览：先给汇总，再把「具体打包了哪些东西」列出来。
+// 资源包以前完全没有预览，只能靠心里记着自己勾了什么。
 const preview = computed(() => {
   const items = chosenAdventures.value
   const runtimes = [...new Set(items.flatMap(item => item.required_runtime?.id
@@ -151,7 +151,19 @@ const preview = computed(() => {
     }
     return found
   })
-  return { count: items.length, runtimes, policies, resources, warnings }
+  const nameList = (names: string[], total: number) => {
+    const shown = names.slice(0, 3).join('、')
+    return total > 3 ? `${shown} +${total - 3}` : shown
+  }
+  const bookNames = books.value.filter(book => selectedBooks.value.includes(book.id)).map(book => book.name || book.id)
+  const cardNames = cardOptions.value.filter(card => selectedCards.value.includes(card.id)).map(card => card.label)
+  const contents = [
+    selectedWorld.value && { label: copy.value.world, value: worldName(selectedWorld.value) },
+    selectedRule.value && { label: copy.value.rule, value: rules.value.find(item => item.rule_id === selectedRule.value)?.rule_name || selectedRule.value },
+    bookNames.length > 0 && { label: copy.value.books, value: nameList(bookNames, bookNames.length) },
+    cardNames.length > 0 && { label: copy.value.cards, value: nameList(cardNames, cardNames.length) },
+  ].filter(Boolean) as Array<{ label: string; value: string }>
+  return { count: items.length, runtimes, policies, resources, warnings, contents, hasContents: contents.length > 0 || items.length > 0 }
 })
 
 onMounted(async () => {
@@ -353,19 +365,26 @@ async function exportPack() {
           <label class="creator-package-option"><input v-model="format" type="radio" name="creator-export-format" value="source" data-testid="creator-export-format-source"><span><strong>{{ copy.formatSource }}</strong><small>{{ copy.formatSourceHint }}</small></span></label>
         </div>
       </section>
-      <section v-if="isAdventureModule && preview.count" class="creator-package-section" data-testid="creator-export-preview">
+      <section v-if="preview.hasContents" class="creator-package-section" data-testid="creator-export-preview">
         <h3>{{ copy.preview }}</h3>
         <dl class="creator-package-preview">
-          <div><dt>{{ copy.previewCount }}</dt><dd>{{ preview.count }}</dd></div>
-          <div><dt>{{ copy.previewRuntimes }}</dt><dd>{{ preview.runtimes.join('、') || copy.none }}</dd></div>
-          <div><dt>{{ copy.previewPolicies }}</dt><dd>{{ preview.policies.join('、') }}</dd></div>
+          <template v-if="isAdventureModule">
+            <div><dt>{{ copy.previewCount }}</dt><dd>{{ preview.count }}</dd></div>
+            <div><dt>{{ copy.previewRuntimes }}</dt><dd>{{ preview.runtimes.join('、') || copy.none }}</dd></div>
+            <div><dt>{{ copy.previewPolicies }}</dt><dd>{{ preview.policies.join('、') }}</dd></div>
+          </template>
           <div><dt>{{ copy.previewResources }}</dt><dd>{{ preview.resources || copy.none }}</dd></div>
         </dl>
-        <ul v-if="preview.warnings.length" class="creator-package-warnings">
-          <li v-for="warning in preview.warnings" :key="warning" data-testid="creator-export-warning">{{ warning }}</li>
+        <ul v-if="preview.contents.length" class="creator-package-contents" data-testid="creator-export-contents">
+          <li v-for="item in preview.contents" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></li>
         </ul>
-        <p v-else class="creator-package-ready">{{ copy.ready }}</p>
-        <p class="creator-package-privacy">{{ copy.privacy }}</p>
+        <template v-if="isAdventureModule">
+          <ul v-if="preview.warnings.length" class="creator-package-warnings">
+            <li v-for="warning in preview.warnings" :key="warning" data-testid="creator-export-warning">{{ warning }}</li>
+          </ul>
+          <p v-else class="creator-package-ready">{{ copy.ready }}</p>
+          <p class="creator-package-privacy">{{ copy.privacy }}</p>
+        </template>
       </section>
       <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.close }}</button><button type="button" class="primary" data-testid="creator-export-submit" :disabled="busy" @click="exportPack">{{ busy ? '…' : `${isAdventureModule ? copy.adventureExport : copy.resourceExport} ${format === 'source' ? '.zip' : '.dfplugin'}` }}</button></footer>
     </template>
@@ -389,6 +408,10 @@ async function exportPack() {
 .creator-package-file{display:grid;gap:.25rem;min-width:0;margin:0;padding:.55rem .65rem;border:1px dashed var(--df-border-soft);border-radius:var(--df-radius-sm);font-size:.85rem}.creator-package-file input{max-width:100%;color:var(--df-text-secondary);font-size:.78rem}.creator-package-file small{color:var(--df-text-muted);line-height:1.45;overflow-wrap:anywhere}
 .creator-package-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:0}.creator-package-preview div{display:grid;gap:.2rem;min-width:0}.creator-package-preview dt{color:var(--df-text-muted);font-size:.8rem}.creator-package-preview dd{margin:0;overflow-wrap:anywhere}
 .creator-package-steps{display:grid;gap:.45rem;margin:0;padding-left:1.2rem;color:var(--df-text-secondary);line-height:1.5}
+.creator-package-contents{display:grid;gap:.3rem;margin:0;padding:0;list-style:none}
+.creator-package-contents li{display:flex;gap:.5rem;align-items:baseline;font-size:.85rem;color:var(--df-text-secondary)}
+.creator-package-contents li span{flex:0 0 auto;min-width:4.5rem;color:var(--df-text-muted)}
+.creator-package-contents li strong{min-width:0;overflow-wrap:anywhere;font-weight:600}
 .creator-package-warnings{display:grid;gap:.35rem;margin:0;padding-left:1.1rem;color:var(--df-warning)}.creator-package-ready{margin:0;color:var(--df-text-secondary)}.creator-package-privacy{margin:0;color:var(--df-text-muted);font-size:.85rem}
 @media(max-width:620px){.creator-package-grid,.creator-package-preview,.creator-package-options.is-split,.creator-package-files{grid-template-columns:1fr}.creator-package-files{padding-left:0}}
 </style>

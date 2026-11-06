@@ -297,4 +297,21 @@ describe('CreatorPackageExportDialog', () => {
     expect(toast.error).toHaveBeenCalledWith('封面只支持 webp / png / jpg，且不超过 512 KB。')
     expect(wrapper.find('.creator-package-cover-image').exists()).toBe(false)
   })
+
+  it('previews what a resource pack will contain, without adventure-only rows', async () => {
+    const wrapper = await render('resource')
+    expect(wrapper.find('[data-testid="creator-export-preview"]').exists()).toBe(false)
+
+    await wrapper.get('select').setValue('office')
+    await wrapper.get('[data-testid="creator-export-cards"] input[type="checkbox"]').setValue(true)
+
+    const preview = wrapper.get('[data-testid="creator-export-preview"]')
+    expect(preview.text()).toContain('导出预览')
+    // 资源包没有冒险，所以运行时 / 世界策略 / GM 隐私提示都不应出现。
+    expect(preview.text()).not.toContain('规则运行时')
+    expect(preview.text()).not.toContain('GM')
+    const contents = wrapper.get('[data-testid="creator-export-contents"]').text()
+    expect(contents).toContain('深夜办公室')
+    expect(contents).toContain('米拉')
+  })
 })
