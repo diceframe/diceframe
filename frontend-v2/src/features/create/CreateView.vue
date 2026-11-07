@@ -218,6 +218,26 @@ const recommendedWorldInstalled = computed(() => Boolean(
   adventureRecommendedWorld.value
   && worlds.value.some(item => worldIdOf(item) === adventureRecommendedWorld.value),
 ))
+// 模组自带世界：catalog 模组不一定提供世界模板（大衮声明了 pacific_shoal，包里
+// 却没有这个世界）。这时不能借用世界模板下拉框里的任意一项——那会把别人世界的
+// 资料册整本带进本局（"选了世界模板，还多了个克苏鲁恐怖"）。改为按模组生成这一
+// 局的世界：设定来自冒险包自带的 world_seed，资料册只有模组自己声明的那一本。
+const moduleWorldId = computed(() => {
+  const adventure = selectedAdventure.value
+  if (!adventure || playMode.value !== 'adventure') return ''
+  const raw = `module_${adventure.source_id || 'pack'}_${adventure.adventure_id}`
+  return raw.replace(/[\\/:*?"<>|]+/g, '_')
+})
+const moduleWorldApplies = computed(() => Boolean(
+  // 世界列表还没到之前不下结论：否则会先判定"推荐世界没装"，闪一下又变回来。
+  catalogueReady.value
+  && moduleWorldId.value
+  && selectedAdventure.value?.world_policy !== 'fixed'
+  && !recommendedWorldInstalled.value,
+))
+const moduleWorldName = computed(() => selectedAdventure.value?.name || '')
+// 本局真正提交/预览的世界：模组自带世界优先，其余仍走世界模板。
+const effectiveWorldId = computed(() => moduleWorldApplies.value ? moduleWorldId.value : world.value)
 const adventureIssueGuide = computed(() => {
   const adventure = selectedAdventure.value
   const reasons = new Set(adventure?.incompatibility_reasons || [])
@@ -247,7 +267,11 @@ function applyAdventureRecommendedWorld(): void {
 function applyAdventureCompatibleRule(): void {
   if (adventureCompatibleRule.value) selectRule(adventureCompatibleRule.value.rule_id)
 }
-const activeWorldTemplate = computed(() => worlds.value.find(item => worldIdOf(item) === world.value))
+// 模组自带世界时，`world` 里那个模板世界并不参与本局：场景图、推荐规则都
+// 不能再从它身上取，否则大衮的局会用奇幻世界的封面。
+const activeWorldTemplate = computed(() => (
+  moduleWorldApplies.value ? undefined : worlds.value.find(item => worldIdOf(item) === world.value)
+))
 const defaultSceneImagePool = computed<SceneImageRef[]>(() => {
   if (mode.value === 'template' && activeWorldTemplate.value) {
     const worldPool = sceneImageCandidates(activeWorldTemplate.value.scene_image, activeWorldTemplate.value.scene_images, false)
@@ -261,7 +285,7 @@ const defaultSceneImagePool = computed<SceneImageRef[]>(() => {
 const defaultSceneImageRef = computed<SceneImageRef | undefined>(() => pickSceneImageReference(
   defaultSceneImagePool.value[0],
   defaultSceneImagePool.value.slice(1),
-  `${sceneImageSelectionSeed.value}:${world.value}:${activeRule.value}`,
+  `${sceneImageSelectionSeed.value}:${effectiveWorldId.value}:${activeRule.value}`,
 ))
 const selectedSceneImageUrl = computed(() => customSceneImageUrl.value || defaultSceneImageUrl.value || ruleSceneUrl(activeRule.value))
 const availableWorlds = computed(() => worlds.value)
@@ -328,26 +352,6 @@ const loreSourceSummary = computed(() => {
   }
   return copy.builtin
 })
-// 模组自带世界：catalog 模组不一定提供世界模板（大衮声明了 pacific_shoal，包里
-// 却没有这个世界）。这时不能借用世界模板下拉框里的任意一项——那会把别人世界的
-// 资料册整本带进本局（"选了世界模板，还多了个克苏鲁恐怖"）。改为按模组生成这一
-// 局的世界：设定来自冒险包自带的 world_seed，资料册只有模组自己声明的那一本。
-const moduleWorldId = computed(() => {
-  const adventure = selectedAdventure.value
-  if (!adventure || playMode.value !== 'adventure') return ''
-  const raw = `module_${adventure.source_id || 'pack'}_${adventure.adventure_id}`
-  return raw.replace(/[\\/:*?"<>|]+/g, '_')
-})
-const moduleWorldApplies = computed(() => Boolean(
-  // 世界列表还没到之前不下结论：否则会先判定"推荐世界没装"，闪一下又变回来。
-  catalogueReady.value
-  && moduleWorldId.value
-  && selectedAdventure.value?.world_policy !== 'fixed'
-  && !recommendedWorldInstalled.value,
-))
-const moduleWorldName = computed(() => selectedAdventure.value?.name || '')
-// 本局真正提交/预览的世界：模组自带世界优先，其余仍走世界模板。
-const effectiveWorldId = computed(() => moduleWorldApplies.value ? moduleWorldId.value : world.value)
 const lorePreviewWorldId = computed(() => mode.value === 'template' ? effectiveWorldId.value : '')
 watch([lorePreviewWorldId, loreChoice], () => {
   if (!restoringDraft.value) selectedBookIds.value = undefined
