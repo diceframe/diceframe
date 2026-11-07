@@ -9,14 +9,8 @@
   overflow: hidden;
 }
 
-/* 工具面板的标题只是重复导航（Tab 已经写着战役/战斗），不必占一整行：
-   视觉隐藏，role=dialog 的 aria-labelledby 仍然指向它。 */
-.dialog.dnd-toolbox-dialog > header {
-  justify-content: flex-end;
-  min-height: 34px;
-  padding-block: 4px;
-}
-
+/* 工具面板的标题只是重复导航（Tab 已经写着战役/战斗），视觉隐藏：
+   role=dialog 的 aria-labelledby 仍然指向它。 */
 .dialog.dnd-toolbox-dialog > header h2 {
   position: absolute;
   width: 1px;
@@ -24,6 +18,35 @@
   overflow: hidden;
   white-space: nowrap;
   clip-path: inset(50%);
+}
+
+/* 标题收起后 header 只剩关闭按钮，不该再单独占一行：
+   把 header 绝对定位到窗口右上角，面板内容直接顶到顶部。 */
+.dialog.dnd-toolbox-dialog {
+  position: relative;
+  padding-top: 12px;
+}
+
+.dialog.dnd-toolbox-dialog > header {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  pointer-events: none;
+}
+
+.dialog.dnd-toolbox-dialog > header .modal-x {
+  pointer-events: auto;
+}
+
+/* 给右上角的关闭按钮留位，标签栏最后一项不会被压住。 */
+.dialog.dnd-toolbox-dialog .dnd-toolbox-tabs {
+  margin-top: 0;
+  padding-right: 40px;
 }
 
 .dnd-toolbox-tabs {
