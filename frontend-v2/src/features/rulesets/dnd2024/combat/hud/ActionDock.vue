@@ -87,7 +87,7 @@ function onTabKey(event: KeyboardEvent, index: number): void {
 .dock-options { display: grid; gap: 8px; min-width: 0; }
 .dock-options:empty { display: none; }
 .dock-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-.dock-summary { display: grid; align-content: stretch; gap: 8px; min-width: 0; }
+.dock-summary { display: grid; grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; gap: 8px; min-width: 0; }
 @media (max-width: 960px) {
   .action-dock { grid-template-columns: minmax(0, 1fr); }
   .dock-identity { grid-template-columns: auto 1fr; justify-items: start; column-gap: 10px; text-align: left; }
