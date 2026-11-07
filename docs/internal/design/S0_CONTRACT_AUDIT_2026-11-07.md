@@ -4,6 +4,7 @@
 |---|---|
 | 审计日期 | 2026-11-07 |
 | 审计对象 | `feat/dnd2024-derived-defense-speed@340b003f`（含 S0-A/A2、S0-B、S0-C，以及 D1–D4 修复；文档分支 `docs/dnd2024-s0-specs@5146c291`） |
+| 基线变更 | 2026-11-07 22:44 该链已 rebase 到 `main@10a6ab23`（含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨），链头现为 `73d11263`。唯一冲突是 `features/resolver.py` 的拥有过滤叠加，**不影响本报告任何结论**。新提交 id 与验证数字见 `S0_TASK_INDEX_2026-11-07.md` §9 |
 | 被审任务书 | `S0D1_SUPREME_HEALING`(v2)、`S0D2_OVERCHANNEL`(v1)、`S0D3_CUTTING_WORDS_CHECK_WINDOW`(v2)、`S0E1_DEFEAT_TRIGGER_DARK_ONES_BLESSING`(v1)、`S0E2_PALADIN_AURAS`(v1)、`S0E3_SURVIVOR`(v1)，均为 2026-11-07 版 |
 | 规则基准 | `SRD_CC_v5.2.1.pdf`，SHA-256 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87` |
 | 审计方式 | 只读。读 canonical JSON、读消费点代码、跑既有聚焦测试。未改任何产品代码、未改任何既有测试 |
@@ -450,4 +451,4 @@ grep -rn 'aura_bonus' src/     # → 空
 grep -rn '"usage"' src/rulesets/dnd2024/character/ src/rulesets/dnd2024/features/   # → 空
 ```
 
-行号均为 `340b003f` 时快照，只作定位参考，不作契约。
+行号均为 `340b003f` 时快照，只作定位参考，不作契约。该链已 rebase 到 `main@10a6ab23`，行号已有偏移——复查请按符号名定位，不要按这里的行号。

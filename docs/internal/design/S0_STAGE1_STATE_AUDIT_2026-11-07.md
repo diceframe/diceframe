@@ -4,6 +4,7 @@
 |---|---|
 | 审计日期 | 2026-11-07 |
 | 审计对象 | `feat/dnd2024-s0c-draconic-resilience@d9873aad`（含 S0-A/A2、S0-B、S0-C 与 S0-B 夹具修正 `2499e95b`） |
+| 基线变更 | 2026-11-07 22:44 该链已 rebase 到 `main@10a6ab23`，本报告的分支头均已失效：S0-A → `7a28b25a`、S0-B → `1304beb7`、S0-C → `f6d3d8bb`。审计结论不受影响，详见 `S0_TASK_INDEX_2026-11-07.md` §9 |
 | 冻结标尺 | `S0F37_COVERAGE_AUDIT_TASK_SPEC_2026-11-07.md` §3.1：140 职业行为行 + 58 子职行 = 198 |
 | 规则基准 | `SRD_CC_v5.2.1.pdf`，SHA-256 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87` |
 | 审计方式 | 只读：读 canonical JSON + 在真实运行时上取 `features_for` / `resource_definitions` / `combat_capabilities` / `derive_armor_class`；未改任何产品代码 |

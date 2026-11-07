@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@c1b865e7`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@2499e95b`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@d9873aad`）；S0-D1 至 S0-E3 已完成契约审计（见 §8），四份需改规则或补整块机制；其余 43 份待执行 |
+| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D1 至 S0-E3 已完成契约审计（见 §8），四份需改规则或补整块机制；其余 43 份待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -182,7 +182,7 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 ## 8. A 类六份任务书的契约审计（2026-11-07）
 
-完整报告：`S0_CONTRACT_AUDIT_2026-11-07.md`。审计对象 `feat/dnd2024-derived-defense-speed@340b003f`，只读核对，聚焦测试 134 passed。
+完整报告：`S0_CONTRACT_AUDIT_2026-11-07.md`。审计对象 `feat/dnd2024-derived-defense-speed@340b003f`，只读核对，聚焦测试 134 passed。（该 commit 是 rebase 前的链头，现行链头为 `73d11263`；审计结论与内容不受 rebase 影响，见 §9。）
 
 **一句话结论：六份载体全都有落点，没有一份需要从零实现；但六份里只有 D1 和 D3 的行为可以直接沿用，其余四份各自需要改规则或补整块机制。**
 
@@ -207,3 +207,48 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 **未覆盖**：`srd-5.2.1:p58` vs `p76`（E1-4）因本工作树无 SRD PDF 未复核，需在修复时用原文定稿；D5 元数据漂移不重复；全量 `tests/rulesets` 未复跑（沿用 D1–D4 提交时的 1341 passed / 11 failed 基线）。
 
+## 9. 基线对齐：S0 链 rebase 到 `main@10a6ab23`（2026-11-07）
+
+**动机**：原四个 S0 分支的 merge-base 都是 `8948bc3a`，而上游 main 已前进 37 个提交到 `10a6ab23`（release 3.1.0）。`8948bc3a` 含 D1–D4 物品原语（`ef4a5923`），但不含 D3b（`#687`/`#689`）与 `#688` 拥有过滤。S0 将来推上游前必须建立在含这些改动的基点上。
+
+**结果**：七个提交线性 rebase 到 `10a6ab23`，四个分支指针同步移动。
+
+| 分支 | 新头 | 旧头 |
+|---|---|---|
+| `feat/dnd2024-s0a-subclass-critical-upstream` | `7a28b25a` | `c1b865e7` |
+| `feat/dnd2024-s0b-feature-choices` | `1304beb7` | `2499e95b` |
+| `feat/dnd2024-s0c-draconic-resilience` | `f6d3d8bb` | `d9873aad` |
+| `feat/dnd2024-derived-defense-speed` | `73d11263` | `340b003f` |
+
+**冲突面**：只有一个文件——`features/resolver.py`，其余 30 个文件自动合并。
+
+冲突性质是**叠加而非二选一**：
+
+- `#688`（`aca01a34`，已合入 main）把拥有过滤抽成单一入口 `_owned_feature_definitions(class_id, level)`，让 `features_for` 与 `attacks_per_action` 共用；
+- S0-A1（`0ee1cff6`）把授予键改成 owner 感知的 `_granted_feature_keys(class_id, level, character)`，并删除了 `#688` 引用的 `_granted_feature_ids` / `_subclass_feature_ids`。
+
+解法：保留 `#688` 的单一入口结构，把它的 granted 计算换成 `_granted_feature_keys`，并给 `_owned_feature_definitions` 补 `character` 参数透传。
+
+**第二处冲突（S0-A 校验 vs `#688` 测试）**：S0-A 的 `_validate_owner_grant` 要求 `minimum_level` 精确等于首次授予等级，而 `#688` 新增的 `test_a_grant_below_the_declared_minimum_level_grants_no_attack` 明确要求容忍第三方 bundle 的等级漂移（注释原话："A third-party bundle can do exactly this, so the sheet and the attack count must agree instead of drifting apart"）。同时 S0-B 的 `test_a_declared_level_must_match_the_subclass_grant` 又要求子职声明必须精确匹配。
+
+裁决：**按 owner 类型分强度校验**。
+
+- 子职声明（`subclass:*`）仍要求 `minimum_level` 等于子职表首次授予等级 —— 子职表是它唯一授予源，等级漂移会静默移动解锁点；
+- 类声明（`class:*`）只要求"有授予"，允许等级漂移 —— `features_for` 的 `minimum_level > level` 过滤已能正确处理，硬抛错会把一处美观问题升级成整个 bundle 拒绝加载。
+
+该修正已 squash 进 S0-A1（`00d5987d`），两个原本对立的测试现在共存。
+
+**验证**：
+
+| 项 | 结果 |
+|---|---|
+| 全量 `tests/rulesets` | **1366 passed / 11 failed**（同步 18m13s） |
+| 11 条失败 | 全部在 `test_dnd2024_character_builder.py`，根因 `unresolved reference 'ability:con'`（Windows 保留设备名 `CON` 使 `content/abilities/con.json` 无法落盘），与 rebase 前基线 11 条一致，**零新增** |
+| 用例总数变化 | 1341 → 1366（+25，来自 `#692` CoC 轨等上游新增） |
+| S0-A 单点可用性 | 在第 3 个提交上单跑 `test_dnd2024_extra_attack.py` → **46 passed**，证明校验修正已随第一个提交落地 |
+| 对立测试共存 | `test_dnd2024_extra_attack.py` + `test_dnd2024_feature_choices.py` → **99 passed** |
+| 树一致性 | squash 前后文件树 diff 为 0 行 |
+
+**备份**：`prealign-s0a`、`prealign-s0b`、`prealign-s0c`、`prealign-dds` 四个 tag 指向 rebase 前各头，可完整回滚。
+
+**未做**：S0-B / S0-C / 链头三个分支未各自单跑全量（仅链头跑全量 + S0-A 单点跑聚焦）；四份需改规则的任务书尚未开工。
