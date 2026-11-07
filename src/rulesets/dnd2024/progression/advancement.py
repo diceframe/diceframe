@@ -571,14 +571,13 @@ class Dnd2024AdvancementEngine:
             if selected_subclass_ref == expected_subclass_ref
             else current_subclass_ref
         )
-        feature_hp_gain = (
-            features.feature_max_hp_bonus(
-                _feature_state(class_ref, target_level, next_subclass_ref)
-            )
-            - features.feature_max_hp_bonus(
-                _feature_state(class_ref, current_level, current_subclass_ref)
-            )
+        feature_hp_before = features.feature_max_hp_bonus(
+            _feature_state(class_ref, current_level, current_subclass_ref)
         )
+        feature_hp_after = features.feature_max_hp_bonus(
+            _feature_state(class_ref, target_level, next_subclass_ref)
+        )
+        feature_hp_gain = feature_hp_after - feature_hp_before
         hp_gain = new_level_hp + retrospective_con_hp + feature_hp_gain
 
         subclass_feature_ids = self._subclass_features(
@@ -633,6 +632,11 @@ class Dnd2024AdvancementEngine:
                     "base": hp_base,
                     "constitution_modifier": new_con,
                     "retrospective_constitution": retrospective_con_hp,
+                    # 特性生命上限加成分三段记：升级前的累计、升级后的累计、本次
+                    # 只加多少。审计靠它区分「+3 首次发放」与「每级 +1」。
+                    "feature_bonus_before": feature_hp_before,
+                    "feature_bonus_after": feature_hp_after,
+                    "feature_bonus_gain": feature_hp_gain,
                     "gain": hp_gain,
                 },
             },
