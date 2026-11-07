@@ -165,6 +165,51 @@ class Dnd2024ClassFeatureResolver:
             return False
         return any(item.id == wanted for item in self.features_for(character))
 
+    def attacks_per_action(self, character: Mapping[str, Any] | None) -> int:
+        """How many attacks one Attack action grants, per the class tables.
+
+        Extra Attack is a declared class feature, not a class-name switch: the
+        progression table decides *which* class grants which feature id and at
+        which level, and the feature catalog declares the number.  RAW never
+        stacks the feature, so every class row is evaluated on its own and the
+        highest value wins -- a Fighter 5 / Barbarian 5 makes two attacks, not
+        three.  Unlike ``class_state`` this reads every class row, because
+        multiclass characters are exactly the case where the old
+        "first class wins" guess went wrong.
+        """
+
+        if not self.available or self.progression is None:
+            return 1
+        if not isinstance(character, Mapping):
+            return 1
+        build = character.get("build")
+        if not isinstance(build, Mapping):
+            return 1
+        rows = build.get("class_levels")
+        if not isinstance(rows, list):
+            return 1
+        best = 1
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            class_id = str(row.get("class_ref") or "").removeprefix("class:")
+            level = row.get("level")
+            if not class_id or isinstance(level, bool) or not isinstance(level, int):
+                continue
+            if not 1 <= level <= 20:
+                continue
+            granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
+                class_id, level,
+            )
+            for feature_id in granted:
+                definition = self.catalog.features.get(feature_id)
+                if definition is None:
+                    continue
+                value = definition.parameters.get("attacks_per_action")
+                if isinstance(value, int) and not isinstance(value, bool):
+                    best = max(best, value)
+        return best
+
     def feature_is_active(
         self, character: Mapping[str, Any] | None, definition: ClassFeatureDefinition,
     ) -> bool:
@@ -782,6 +827,16 @@ class Dnd2024ClassFeatureResolver:
                     ):
                         raise ClassFeatureError(
                             f"{definition.id}.{key} must be an integer from 2 to 19"
+                        )
+                if key == "attacks_per_action":
+                    # 声明值直接决定 Attack 动作能吃几次攻击；2 是 Extra Attack
+                    # 的下限，8 远高于任何官方职业的上限，超出区间一定写错了。
+                    if (
+                        isinstance(value, bool) or not isinstance(value, int)
+                        or not 2 <= value <= 8
+                    ):
+                        raise ClassFeatureError(
+                            f"{definition.id}.{key} must be an integer from 2 to 8"
                         )
                 if key.endswith("_format"):
                     if (
