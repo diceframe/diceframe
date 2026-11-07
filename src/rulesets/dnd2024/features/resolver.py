@@ -198,6 +198,22 @@ class Dnd2024ClassFeatureResolver:
         *,
         owner: str | None = None,
     ) -> bool:
+        """Whether the character owns ``feature_id``, optionally one declaration.
+
+        ``owner`` narrows the question to a *declaration owner*, never to the
+        class that granted it.  It exists for ids declared twice with different
+        owners -- ``cutting_words`` belongs to both College of Lore and College
+        of Valor -- where "the character has the Bard's Cutting Words" is not
+        the same question as "the character has the Lore one".
+
+        A shared declaration keeps its single owner, so the answer for a second
+        class is deliberately False on the owner check while still True without
+        it: a Monk 5 owns Extra Attack, and that declaration is filed under
+        ``class:fighter`` because Extra Attack is declared once, with one
+        number, for every class that grants it.  Callers asking "does this
+        class grant X" must read the class table, not this method.
+        """
+
         wanted = str(feature_id or "")
         if not wanted:
             return False
@@ -818,27 +834,7 @@ class Dnd2024ClassFeatureResolver:
                             key = self._key_for_grant(str(local_id), subclass_ref)
                             if key is not None:
                                 granted.add(key)
-        elif not self._has_subclass_state(character):
-            # 旧角色/旧存档可能完全没有 features 段。此时只保留那些尚未迁移
-            # 为显式子职 owner 的历史声明，避免旧档静默失去已有特性；一旦
-            # 角色拥有 subclass_ref 字段（哪怕是空值或错误值），就严格按选择
-            # 授予，绝不回退到代表子职。Champion 的两个声明已显式迁移，因此
-            # 不在这条兼容路径内。
-            subclass = self.progression.subclasses.get(str(class_id))
-            if subclass is not None:
-                owner = f"class:{class_id}"
-                for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
-                    if 1 <= int(raw_level) <= level:
-                        for local_id in feature_ids:
-                            key = (owner, str(local_id))
-                            if key in self._feature_index:
-                                granted.add(key)
         return frozenset(granted)
-
-    @staticmethod
-    def _has_subclass_state(character: Mapping[str, Any] | None) -> bool:
-        features = character.get("features") if isinstance(character, Mapping) else None
-        return isinstance(features, Mapping) and "subclass_ref" in features
 
     def _key_for_grant(
         self, local_id: str, preferred_owner: str,
@@ -847,7 +843,14 @@ class Dnd2024ClassFeatureResolver:
 
         Prefer the grant's own owner.  A uniquely declared shared feature (for
         example Extra Attack granted to several classes) keeps that shared
-        declaration's owner rather than inventing a second definition.
+        declaration's owner rather than inventing a second definition: the
+        number is one rule, and duplicating the declaration would let one class
+        silently carry a different ``attacks_per_action`` from another.
+
+        The consequence is visible but intentional -- a Monk's Extra Attack
+        reports ``owner == "class:fighter"`` -- which is why
+        :meth:`has_feature` documents its ``owner`` argument as a declaration
+        owner, not as the granting class.
         """
 
         preferred = (preferred_owner, local_id)

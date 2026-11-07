@@ -30,10 +30,19 @@ def _class_id(class_ref: str) -> str:
     return value[len(prefix):] if value.startswith(prefix) else ""
 
 
-def _feature_state(class_ref: str, level: int) -> dict[str, Any]:
+def _feature_state(
+    class_ref: str, level: int, subclass_ref: str = "",
+) -> dict[str, Any]:
     """The minimal canonical shape the class feature boundary reads."""
 
-    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
+    state: dict[str, Any] = {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+    }
+    if subclass_ref:
+        # 子职特性只按真实选择授予：升级增量必须带上"升级前/升级后"的选择，
+        # 否则在选出子职的那一级会漏掉它的生命值上限加成。
+        state["features"] = {"subclass_ref": subclass_ref}
+    return state
 
 
 def _slot_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
@@ -259,9 +268,19 @@ class Dnd2024AdvancementEngine:
         # 防御类特性的生命值上限加成只按等级增量发放：2→3 得 +3，之后每级 +1。
         # 用与建卡相同的 resolver 公式，不回溯 from_level 之前的等级。
         features = Dnd2024ClassFeatureResolver(self.bundle)
+        current_subclass_ref = str(feature_state.get("subclass_ref") or "")
+        next_subclass_ref = (
+            selected_subclass_ref
+            if selected_subclass_ref == expected_subclass_ref
+            else current_subclass_ref
+        )
         feature_hp_gain = (
-            features.feature_max_hp_bonus(_feature_state(class_ref, target_level))
-            - features.feature_max_hp_bonus(_feature_state(class_ref, current_level))
+            features.feature_max_hp_bonus(
+                _feature_state(class_ref, target_level, next_subclass_ref)
+            )
+            - features.feature_max_hp_bonus(
+                _feature_state(class_ref, current_level, current_subclass_ref)
+            )
         )
         hp_gain = new_level_hp + retrospective_con_hp + feature_hp_gain
 

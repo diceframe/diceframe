@@ -42,11 +42,19 @@ def _resolver(locale: str = "en") -> tuple[Dnd2024Runtime, Dnd2024ClassFeatureRe
     return runtime, Dnd2024ClassFeatureResolver(runtime.load_bundle(locale))
 
 
-def _character(level: int, class_ref: str = "class:monk", **extra) -> dict:
-    return {
+def _character(
+    level: int, class_ref: str = "class:monk", *, subclass_ref: str | None = None,
+    **extra,
+) -> dict:
+    character: dict = {
         "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
-        **extra,
     }
+    if subclass_ref:
+        # 子职特性只在角色真实选择了子职时授予，所以这些角色代理显式带上
+        # 选择，而不是依赖"每个职业只有一个 SRD 子职"的隐式回退。
+        character["features"] = {"subclass_ref": subclass_ref}
+    character.update(extra)
+    return character
 
 
 def _with_focus(current: int, maximum: int, level: int = 2) -> dict:
@@ -481,7 +489,9 @@ def test_second_wind_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -
 
 
 def _barbarian(level: int, **extra) -> dict:
-    return _character(level, "class:barbarian", **extra)
+    return _character(
+        level, "class:barbarian", subclass_ref="subclass:path_of_the_berserker", **extra,
+    )
 
 
 def test_barbarian_rage_declaration_and_capabilities_load() -> None:
@@ -567,7 +577,7 @@ def test_rage_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -> None:
 
 
 def _rogue(level: int, **extra) -> dict:
-    return _character(level, "class:rogue", **extra)
+    return _character(level, "class:rogue", subclass_ref="subclass:thief", **extra)
 
 
 def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
@@ -659,3 +669,75 @@ def test_retaliation_is_not_owned_below_level_ten() -> None:
         feature.id for feature in resolver.features_for(character)
     ]
     assert resolver.declared_capability(character, "retaliation") is None
+
+
+# --- subclass ownership: every declared subclass feature is choice-gated ---
+
+
+_SUBCLASS_DECLARATIONS = [
+    ("class:paladin", 7, "aura_of_devotion", "subclass:oath_of_devotion"),
+    ("class:fighter", 3, "improved_critical", "subclass:champion"),
+    ("class:fighter", 15, "superior_critical", "subclass:champion"),
+    ("class:fighter", 18, "survivor", "subclass:champion"),
+    ("class:barbarian", 10, "retaliation", "subclass:path_of_the_berserker"),
+    ("class:rogue", 3, "fast_hands", "subclass:thief"),
+    ("class:bard", 3, "cutting_words", "subclass:college_of_lore"),
+    ("class:sorcerer", 3, "draconic_resilience", "subclass:draconic_sorcery"),
+    ("class:warlock", 3, "dark_ones_blessing", "subclass:fiend_patron"),
+    ("class:warlock", 6, "dark_ones_own_luck", "subclass:fiend_patron"),
+    ("class:cleric", 17, "supreme_healing", "subclass:life_domain"),
+    ("class:wizard", 14, "overchannel", "subclass:evoker"),
+]
+
+
+@pytest.mark.parametrize("class_ref,level,feature_id,subclass_ref", _SUBCLASS_DECLARATIONS)
+def test_every_subclass_feature_requires_an_explicit_selection(
+    class_ref: str, level: int, feature_id: str, subclass_ref: str,
+) -> None:
+    """Owning a class level never hands out a subclass benefit on its own.
+
+    The bundle ships exactly one representative subclass per class, so a level
+    based fallback would look harmless and still be wrong: the character has
+    not chosen anything yet.
+    """
+
+    _runtime, resolver = _resolver()
+
+    assert resolver.has_feature(_character(level, class_ref), feature_id) is False
+    assert resolver.has_feature(
+        _character(level, class_ref, subclass_ref=""), feature_id,
+    ) is False
+    assert resolver.has_feature(
+        _character(level, class_ref, subclass_ref=subclass_ref), feature_id,
+    ) is True
+
+
+def test_a_shared_declaration_keeps_one_owner_while_every_granting_class_owns_it() -> None:
+    """Extra Attack is declared once, so ``owner`` never names the granting class.
+
+    The distinction matters because ``has_feature(owner=...)`` separates two
+    same-named declarations (Cutting Words across two Bard colleges); it never
+    asks which class handed a feature out.  Copying the declaration per class
+    would look tidier and would let one class carry a different
+    ``attacks_per_action`` from another, which RAW never allows.
+    """
+
+    _runtime, resolver = _resolver()
+    monk = _character(5, "class:monk")
+    fighter = _character(5, "class:fighter")
+
+    # Ownership follows the grant: both classes own it and both attack twice.
+    assert resolver.has_feature(monk, "extra_attack") is True
+    assert resolver.has_feature(fighter, "extra_attack") is True
+    assert resolver.attacks_per_action(monk) == 2
+    assert resolver.attacks_per_action(fighter) == 2
+
+    # Identity stays owner-scoped: the single declaration is filed under the
+    # Fighter, so the Monk does not own a *Monk-owned* Extra Attack.
+    owners = [view.owner for view in resolver.feature_views(monk) if view.id == "extra_attack"]
+    assert owners == ["class:fighter"]
+    assert resolver.has_feature(monk, "extra_attack", owner="class:monk") is False
+    assert resolver.has_feature(monk, "extra_attack", owner="class:fighter") is True
+
+    # A class the table never grants it to owns nothing at all.
+    assert resolver.has_feature(_character(5, "class:rogue"), "extra_attack") is False
