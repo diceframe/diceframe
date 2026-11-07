@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   importModule: vi.fn(),
   installFromMarketplace: vi.fn(),
   setRunning: vi.fn(),
+  update: vi.fn(),
   hubDetail: vi.fn(),
   hubReadme: vi.fn(),
   hubRatings: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock('../src/api/modules', async importOriginal => {
       previewImport: mocks.previewImport,
       import: mocks.importModule,
       installFromMarketplace: mocks.installFromMarketplace,
+      update: mocks.update,
     },
   }
 })
@@ -611,5 +613,26 @@ describe('ModulesView', () => {
     const plain = wrapper.get('[data-testid="module-card-plain-pack"]')
     expect(plain.classes()).not.toContain('has-cover')
     expect(plain.find('.module-card-art').exists()).toBe(false)
+  })
+
+  it('flags installed packs that have a newer store version and updates in place', async () => {
+    mocks.update.mockResolvedValue({ ok: true, up_to_date: false, version: '1.2.0' })
+    const { wrapper, router } = await mountView()
+
+    // 已安装 + 市场有更新版本 ⇒ 卡片上有「有更新」和就地更新按钮。
+    const row = wrapper.get('[data-testid="module-update-castle-module"]')
+    expect(row.text()).toContain('有更新')
+    // 市场里没有更新版本的已安装包不显示提示。
+    expect(wrapper.find('[data-testid="module-update-dormant-module"]').exists()).toBe(false)
+
+    await row.get('button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledWith('castle-module')
+    // 卡片本身是 RouterLink：就地更新不能顺手把用户带进详情页。
+    expect(router.currentRoute.value.name).toBe('modules')
+    // 更新后必须重读已安装列表与市场索引，版本号才会刷新。
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(mocks.marketplace).toHaveBeenCalledTimes(2)
   })
 })
