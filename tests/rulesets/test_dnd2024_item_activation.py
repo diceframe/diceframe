@@ -733,6 +733,47 @@ def test_corrupt_charge_state_is_isolated_and_audited(
     assert corrupt["after"] == 3
 
 
+def test_unusable_charge_state_is_skipped_without_failing_the_rest() -> None:
+    """坏值只影响这一件：整次休息照常结束，跳过本身也要可审计。"""
+
+    runtime, sheet = _runtime_sheet()
+    _install_item(runtime, _wand(recharge={"on": "dawn", "amount": 1}))
+    _install_item(runtime, _wand(
+        recharge={"on": "dawn", "amount": 1}, item_id="wand_bad_value",
+    ))
+    _install_item(runtime, _wand(
+        recharge={"on": "dawn", "amount": 1}, item_id="wand_bad_state",
+    ))
+    _carry(sheet, {WAND: 1, "item:wand_bad_value": 1, "item:wand_bad_state": 1})
+    _equip(sheet, [WAND, "item:wand_bad_value", "item:wand_bad_state"])
+    _reconcile(runtime, sheet)
+    state = sheet["ruleset_character"]["equipment"]["item_state"]
+    state[WAND]["charges"]["current"] = 0
+    state["item:wand_bad_value"]["charges"]["current"] = "3"
+    state["item:wand_bad_state"]["charges"] = ["broken"]
+
+    long = runtime.complete_rest(None, sheet, "long", {})
+
+    state = long["character"]["ruleset_character"]["equipment"]["item_state"]
+    assert state[WAND]["charges"]["current"] == 1
+    # 坏值既不被猜成合法值，也不被静默丢弃。
+    assert state["item:wand_bad_value"]["charges"]["current"] == "3"
+    assert state["item:wand_bad_state"]["charges"] == ["broken"]
+    skipped = {
+        event["item_ref"]: event["reason"]
+        for event in long["events"]
+        if event["type"] == "recharge_item.skipped"
+    }
+    assert skipped == {
+        "item:wand_bad_value": "invalid_current",
+        "item:wand_bad_state": "charges_not_initialized",
+    }
+    assert [
+        event for event in long["events"]
+        if event["type"] == "recharge_item" and event["item_ref"] == WAND
+    ]
+
+
 def test_short_rest_recharges_dice_amount(monkeypatch: pytest.MonkeyPatch) -> None:
     import src.rulesets.dnd2024.items.charges as charges_module
 

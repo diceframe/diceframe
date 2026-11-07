@@ -170,6 +170,8 @@ def recharge_for_rest(
     """Recharge held items whose declaration matches this rest.
 
     Returns audit events and mutates only ``charges.current`` in canonical state.
+    One item's unusable state is contained to that item: the rest still finishes
+    and the skip shows up as a ``recharge_item.skipped`` event.
     """
 
     if rest not in {"short", "long"}:
@@ -180,6 +182,7 @@ def recharge_for_rest(
         return []
     held = set(held_refs)
     plans: list[tuple[str, dict[str, Any], int, int, list[int]]] = []
+    skipped: list[dict[str, Any]] = []
     for item_ref in sorted(item_state):
         if item_ref not in held:
             continue
@@ -199,11 +202,21 @@ def recharge_for_rest(
         state = item_state[item_ref]
         charges = state.get("charges") if isinstance(state, dict) else None
         if not isinstance(charges, dict):
-            raise ChargesError(f"{item_ref} charges are not initialized")
+            # 单件状态损坏不能拖垮整次休息：跳过这件并留下可审计记录。
+            logger.warning(
+                "D&D2024 charge state is not an object for %s; skipped recharge", item_ref,
+            )
+            skipped.append({"item_ref": item_ref, "reason": "charges_not_initialized"})
+            continue
         current = charges.get("current")
         if isinstance(current, bool) or not isinstance(current, int) or current < 0:
             # Corrupt legacy value for this one item: skip it without failing
-            # the rest of the rest.  No value is invented or truncated.
+            # the rest of the rest.  No value is invented or truncated, but the
+            # skip is recorded so the bad value is not invisible.
+            logger.warning(
+                "D&D2024 charge state rejected for %s: current=%r", item_ref, current,
+            )
+            skipped.append({"item_ref": item_ref, "reason": "invalid_current"})
             continue
         before = current
         if current > maximum:
@@ -236,4 +249,6 @@ def recharge_for_rest(
             "after": after,
             "rolls": rolls,
         })
+    for entry in skipped:
+        events.append({"type": "recharge_item.skipped", **entry})
     return events
