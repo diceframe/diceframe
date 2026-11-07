@@ -29,7 +29,7 @@ Champion 子职特性声明
 
 同时沉淀两个后续所有职业/子职都复用的基础能力：
 
-1. **owner-scoped 特性身份**：内部以 `(owner_ref, local_id)` 区分特性；`owner_ref` 为 `class:<class_id>` 或 `subclass:<subclass_id>`。跨职业同名特性不得互相覆盖。
+1. **owner-scoped 特性身份**：内部以 `(owner, local_id)` 区分特性；`owner` 为 `class:<class_id>` 或 `subclass:<subclass_id>`。跨职业同名特性不得互相覆盖。
 2. **选择感知的子职授予**：只有角色持久化的 `features.subclass_ref` 与当前职业匹配时，才授予该子职在角色等级及以下的特性。
 
 完成不等于“JSON 有条目”。必须同时满足：目录校验、升级后所有权、直接构造的 canonical 角色、战斗 actor 投影、实际攻击结算、英文/中文投影均通过测试。
@@ -83,7 +83,7 @@ Champion 子职特性声明
 ```json
 {
   "id": "improved_critical",
-  "owner_ref": "subclass:champion",
+  "owner": "subclass:champion",
   "minimum_level": 3,
   "source_ref": "srd-5.2.1:p49:improved-critical",
   "summary": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
@@ -94,7 +94,7 @@ Champion 子职特性声明
 ```json
 {
   "id": "superior_critical",
-  "owner_ref": "subclass:champion",
+  "owner": "subclass:champion",
   "minimum_level": 15,
   "source_ref": "srd-5.2.1:p49:superior-critical",
   "summary": "Your attack rolls with weapons and Unarmed Strikes can now score a Critical Hit on a roll of 18-20 on the d20.",
@@ -104,16 +104,16 @@ Champion 子职特性声明
 
 标签：英文 `Improved Critical` / `Superior Critical`；中文 `精通重击` / `高效重击`。canonical 内容与中英文 locale 的 labels 同步更新。
 
-既有职业特性可省略 `owner_ref`，其缺省值必须是 `class:<当前 classes 键>`。新写的子职特性必须显式声明 `owner_ref`。
+既有职业特性可省略 `owner`，其缺省值必须是 `class:<当前 classes 键>`。新写的子职特性必须显式声明 `owner`。
 
 ### 4.2 catalog 身份与校验
 
 在 `features/models.py` 中落实以下内部契约：
 
-1. `ClassFeatureDefinition` 增加不可变 `owner_ref`；保留 `id` 作为 local id，并增加返回 `(owner_ref, id)` 的只读 `key` 属性或等价内部表达。
-2. catalog 内部索引改用 `(owner_ref, id)`，不得再以全局短 id 作为唯一键。`by_class` 可以改存 key；`class_features()` 的返回值仍是定义对象。
-3. `option_of` 继续表示 Monk’s Focus 这类附属能力，不表示玩家选项。父特性必须与子特性具有相同 `owner_ref`，并按 `(owner_ref, option_of)` 查找。
-4. `owner_ref` 缺省为当前职业；显式值只能是 `class:<当前职业>` 或 `subclass:<子职 id>`。在 Resolver 的跨目录校验中确认该子职确实属于当前职业。
+1. `ClassFeatureDefinition` 增加不可变 `owner`；保留 `id` 作为 local id，并增加返回 `(owner, id)` 的只读 `key` 属性或等价内部表达。
+2. catalog 内部索引改用 `(owner, id)`，不得再以全局短 id 作为唯一键。`by_class` 可以改存 key；`class_features()` 的返回值仍是定义对象。
+3. `option_of` 继续表示 Monk’s Focus 这类附属能力，不表示玩家选项。父特性必须与子特性具有相同 `owner`，并按 `(owner, option_of)` 查找。
+4. `owner` 缺省为当前职业；显式值只能是 `class:<当前职业>` 或 `subclass:<子职 id>`。在 Resolver 的跨目录校验中确认该子职确实属于当前职业。
 5. 非 `option_of` 特性必须能在对应职业表或对应子职表找到。`minimum_level` 必须等于该 owner 首次授予等级；后续重复授予等级不得低于 `minimum_level`。
 6. `crit_threshold` 若出现，必须是非 bool 的 `int` 且 `2 <= value <= 19`；非法值在目录加载时抛 `ClassFeatureError`。
 7. 不修改持久化的历史 grant id，不引入新的存档版本，不做存量存档重写。
@@ -127,9 +127,9 @@ Champion 子职特性声明
 3. 缺失、空值、类型错误或属于其他职业的 `subclass_ref` 不得触发代表子职回退；只得到职业特性。
 4. `features_for()` 按 owner-scoped key 判断直接授予；`option_of` 附属特性仅在其父 key 已拥有时加入。保留 `minimum_level` 与既有目录顺序。
 5. `class_feature_grants` 继续只作历史/审计记录，本切片不让它成为客户端可提交的所有权来源。
-6. `has_feature()` 与 `feature_value()` 保持既有调用兼容，并增加可选关键字 `owner_ref`；提供时同时匹配 owner，不提供时维持短 id 查询。
+6. `has_feature()` 与 `feature_value()` 保持既有调用兼容，并增加可选关键字 `owner`；提供时同时匹配 owner，不提供时维持短 id 查询。
 7. 新增 `min_feature_value(character, key, default)`：只扫描**当前已拥有且 active** 的特性，收集非 bool 的 int/float 参数并取最小值；无合法值返回 default。它不特判 Champion。
-8. `FeatureView` 增加 `owner_ref` 并写入 `to_dict()`，让上层能区分同名特性；既有字段保持不变。
+8. `FeatureView` 增加 `owner` 并写入 `to_dict()`，让上层能区分同名特性；既有字段保持不变。
 
 ### 4.4 战斗 actor 传递子职选择
 
@@ -170,7 +170,7 @@ critical = natural >= crit_threshold
 6. `src/rulesets/dnd2024/combat/view.py`
 7. `src/rulesets/dnd2024/combat/resolution.py`
 8. 新建 `tests/rulesets/test_dnd2024_improved_critical.py`
-9. `tests/rulesets/test_dnd2024_class_features.py`：仅允许为 owner_ref 投影、内部 key 或新增 Champion 所有权更新断言
+9. `tests/rulesets/test_dnd2024_class_features.py`：仅允许为 owner 投影、内部 key 或新增 Champion 所有权更新断言
 10. `tests/rulesets/test_dnd2024_progression.py`：仅允许为“升级后 Resolver 真正拥有子职特性”追加断言
 11. 本任务书：只允许追加 §10 执行报告
 
@@ -190,7 +190,7 @@ critical = natural >= crit_threshold
 ### 6.2 所有权与兼容
 
 7. 2 级 `subclass:champion` 战士无 Improved Critical；3 级有；14 级无 Superior Critical；15 级有。
-8. 通过既有 `apply_next_level` 从 1 级升至 3 级并选择 Champion 后，Resolver 与 `feature_views()` 均包含 Improved Critical，且 `owner_ref == subclass:champion`。
+8. 通过既有 `apply_next_level` 从 1 级升至 3 级并选择 Champion 后，Resolver 与 `feature_views()` 均包含 Improved Critical，且 `owner == subclass:champion`。
 9. 3 级战士缺少 `features.subclass_ref` 时没有 Champion 特性；这是旧存档/不完整角色的安全回退，不自动补选。
 10. `subclass_ref` 为其他职业子职、空串或错误类型时没有 Champion 特性，且不崩溃。
 11. 3 级游荡者/法师即使伪造 `subclass:champion` 也不能获得 Champion 特性。
@@ -220,7 +220,7 @@ critical = natural >= crit_threshold
 2. 子职选择不再存于 `features.subclass_ref`，或升级链允许多个 SRD 子职且没有明确选择契约。
 3. 武器、徒手、借机攻击不再共享同一个暴击判定消费点，需要复制实现才能覆盖。
 4. 既有 `option_of` 已承担玩家选项语义；本任务不负责同时重做选项系统。
-5. 新增 `owner_ref` 到 `FeatureView` 被现有 API/前端严格 schema 拒绝，且需要白名单外修改才能兼容。
+5. 新增 `owner` 到 `FeatureView` 被现有 API/前端严格 schema 拒绝，且需要白名单外修改才能兼容。
 6. 为通过本任务必须修改通用引擎、前端、manifest 或其他职业内容。
 7. 既有失败集发生变化但无法证明与基线环境有关；不要把既有 `character_builder` 的 11 条环境失败“顺手修掉”。
 
@@ -278,7 +278,7 @@ critical = natural >= crit_threshold
   - `tests/rulesets/test_dnd2024_progression.py`
   - `src/rulesets/bundle.py`（白名单外，见设计偏差）
 - 设计偏差及理由：
-  1. **白名单外修改 `bundle.py`。** 通用 bundle 校验把所有 `*_ref` 都当作实体引用；`subclass:champion` 不是 bundle 实体（子职嵌在 class catalog 内），因此加载直接失败。只在引用校验中跳过 `owner_ref`，其格式与归属仍由 class feature catalog 严格校验。若必须保持零白名单外变更，只能把内容字段改名为非 `_ref` 字段，或先引入独立 subclass 实体。
+  1. **白名单外修改 `bundle.py`。** 通用 bundle 校验把所有 `*_ref` 都当作实体引用；`subclass:champion` 不是 bundle 实体（子职嵌在 class catalog 内），因此加载直接失败。只在引用校验中跳过 `owner`，其格式与归属仍由 class feature catalog 严格校验。若必须保持零白名单外变更，只能把内容字段改名为非 `_ref` 字段，或先引入独立 subclass 实体。
   2. **旧角色兼容路径。** 对完全没有 `features` 段的旧角色，保留尚未迁移为显式子职 owner 的历史子职声明；一旦存在 `subclass_ref` 字段（包括空串、错误类型、其他职业），立即严格按选择授予。Champion 两个声明已显式 owner-scoped，因此不受该路径影响。这与 §4.3.3 的“缺失也不得回退”存在偏差，是为了不让既有 3 条旧角色测试与 Survivor 等先行合入内容静默失效；后续应把所有历史子职声明迁移为显式 owner 后删除该路径。
   3. 英文/中文 labels 在基线中已经是 `Improved Critical` / `Superior Critical`、`精通重击` / `高效重击`，无需重复改动。
 - §6 测试矩阵：
@@ -289,7 +289,7 @@ critical = natural >= crit_threshold
   5. 通过：`crit_threshold` 为 1、20、字符串、布尔均拒绝。
   6. 通过：Monk’s Focus 三个 `option_of` 仍与父特性同 owner 授予。
   7. 通过：2 级无 Improved、3 级有；14 级无 Superior、15 级有。
-  8. 通过：真实升级到 3 级并选择 Champion 后 Resolver 与 `feature_views()` 均带 `owner_ref=subclass:champion`。
+  8. 通过：真实升级到 3 级并选择 Champion 后 Resolver 与 `feature_views()` 均带 `owner=subclass:champion`。
   9. 通过：3 级战士缺少 `features.subclass_ref` 时无 Champion 特性。
   10. 通过：其他职业子职、空串、错误类型均无 Champion 且不崩溃。
   11. 通过：3 级 rogue/wizard 伪造 `subclass:champion` 仍无 Champion 特性。
@@ -315,11 +315,23 @@ critical = natural >= crit_threshold
   - 全量 `tests/rulesets` 运行到 57% 时被工具时限终止；期间只出现既有的 11 条 `test_dnd2024_character_builder.py` 失败，失败原因仍是 `ability:con` 未解析与 HTTP 404，与本次改动无关，未“顺手修掉”。
 - ruff：`ruff check` 全部通过；`ruff format --check` 对 5 个目标文件仍报 would reformat，基线 `35653f81` 同样如此，因此没有为通过检查而重排整文件。
 - 既有失败与基线对比：`test_dnd2024_character_builder.py` 的 11 条既有失败保持不变；未新增失败。
-- 存档/API 兼容说明：没有新增存档版本、没有重写历史 grant；`FeatureView.to_dict()` 仅新增 `owner_ref` 字段。完全没有 `features` 段的旧档继续保留历史子职声明；存在 `subclass_ref` 的角色严格按选择授予。
+- 存档/API 兼容说明：没有新增存档版本、没有重写历史 grant；`FeatureView.to_dict()` 仅新增 `owner` 字段。完全没有 `features` 段的旧档继续保留历史子职声明；存在 `subclass_ref` 的角色严格按选择授予。
 - 未解决问题：
   1. `bundle.py` 是白名单外必要变更，需评审是否接受或改走独立 subclass 实体方案。
   2. 历史子职声明尚未全部迁移为显式 owner，旧角色兼容路径仍需在后续任务删除。
   3. `ruff format --check` 仍是基线遗留红。
   4. 全量测试受工具时限限制未完整跑完。
 - 最终 git status 与 changed-file 白名单核对：工作树干净；共 8 个变更文件，其中 7 个在白名单内，`src/rulesets/bundle.py` 为白名单外必要偏差。
+
+## 二审修订（2026-11-07，提交 `8a24cb0f`）
+
+评审结论：功能达成，但字段命名与通用 loader 冲突这一项按“改字段”而不是“放宽校验”处理。
+
+- `ClassFeatureDefinition.owner_ref` 改名为 `owner`；`FeatureView.owner_ref` 与 `to_dict()` 的键同步改名；`has_feature()`、`feature_value()` 的可选关键字参数由 `owner_ref` 改成 `owner`。
+- 内容字段改为 `"owner": "subclass:champion"`，语义、取值格式（`class:<class_id>` / `subclass:<subclass_id>`）不变。
+- 理由：`bundle.py` 的通用校验把所有 `*_ref` 视为实体引用，而 `subclass:champion` 不是独立 bundle 实体。改名后通用校验无需任何例外。
+- `src/rulesets/bundle.py` 已回退到基线 `35653f81` 的版本。**因此上面执行报告里“`bundle.py` 是白名单外必要偏差”一条作废：最终变更文件不含 `bundle.py`，白名单外变更为零。**
+- 复测：聚焦＋模型（`test_dnd2024_improved_critical.py`、`test_dnd2024_class_features.py`、`test_dnd2024_progression.py`）108 passed；所有权影响面 18 个测试文件 442 passed。
+- 仍未解决、留待 S0-A2 的两项不变：10 条子职声明未迁移、旧角色兼容路径未删除。
+
 

@@ -64,7 +64,7 @@ SRD p49、p78：
 
 1. Bard `expertise`：2 级选两项已有技能熟练，9 级再选两项；Rogue `expertise`：1 级选两项，6 级再选两项；Ranger `expertise`：9 级选两项。后续选择必须排除已有 Expertise 的技能。
 2. Wizard `scholar`：2 级仅从 Arcana、History、Investigation、Medicine、Nature、Religion 中选一项，且必须已有熟练。
-3. 每个选择保存于 S0-B 的 `(owner_ref, feature_id, choice_id)` 槽；多选数量、去重和 granted level 由服务器验证。Bard/Ranger/Rogue 同名 `expertise` 不得跨 owner 串槽。
+3. 每个选择保存于 S0-B 的 `(owner, feature_id, choice_id)` 槽；多选数量、去重和 granted level 由服务器验证。Bard/Ranger/Rogue 同名 `expertise` 不得跨 owner 串槽。
 4. Expertise 以独立来源集合持久化或由 canonical choices 确定性重建；重复来源不得令 PB 变成三倍，也不得把未熟练技能变为合法选择。
 5. 装备、等级或属性变化后重算派生值；历史角色加载/升级后以同一规则重建，不保留互相矛盾的静态副本。
 

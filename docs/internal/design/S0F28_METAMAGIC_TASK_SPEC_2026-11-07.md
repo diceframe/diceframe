@@ -74,7 +74,7 @@ Counterspell 的触发条件，SRD p120：
 
 ### 4.1 授予、选项与资源
 
-1. 四个主特性分别使用 `owner_ref=class:sorcerer`、1/2/7/20 级和 `srd-5.2.1:p65–66` 对应 source_ref；十选项使用稳定的 owner-scoped option ref，不得全局短 id 冲突。
+1. 四个主特性分别使用 `owner=class:sorcerer`、1/2/7/20 级和 `srd-5.2.1:p65–66` 对应 source_ref；十选项使用稳定的 owner-scoped option ref，不得全局短 id 冲突。
 2. `innate_sorcery` 声明两次使用、Long Rest 全恢复、Bonus Action 和一分钟状态。激活后 Sorcerer 法术 DC +1、Sorcerer 法术攻击优势；非 Sorcerer 来源法术不受影响。
 3. Metamagic 在 2 级选两个，10、17 级各再选两个；同一角色不可重复知道同一选项。每获得一个 Sorcerer 等级可替换恰好一个已知选项，也可不换；新选项必须尚未知道。
 4. preview、apply、逐级升级、高等级历史重建、en/zh-CN 投影必须一致。替换只改选项所有权，不撤销已经发生的历史施法。

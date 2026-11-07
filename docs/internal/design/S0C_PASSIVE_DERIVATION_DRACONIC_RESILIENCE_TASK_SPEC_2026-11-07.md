@@ -66,7 +66,7 @@ Sorcerer 实际选择 subclass:draconic_sorcery
 | S0-B 后 AC 推导接受 `feat_refs`，升级 `_update_derived()` 会重算 AC | 同上 |
 | 建卡最大 HP 使用 hit die、CON、等级和 species HP bonus | `character/derivation.py` |
 | 升级 HP 使用 `new_level_hp + retrospective_con_hp`，再更新 max/current HP | `progression/advancement.py` |
-| `feature_views()` 已支持被动特性和 owner_ref 投影 | `features/resolver.py` |
+| `feature_views()` 已支持被动特性和 owner 投影 | `features/resolver.py` |
 | class feature catalog 当前没有 Sorcerer 条目 | `content/class_feature_catalogs/srd_class_features.json` |
 | 战斗玩家 AC 读取角色推导结果，不需要战斗层新增公式 | `combat/view.py` |
 
@@ -81,7 +81,7 @@ Sorcerer 实际选择 subclass:draconic_sorcery
 ```json
 {
   "id": "draconic_resilience",
-  "owner_ref": "subclass:draconic_sorcery",
+  "owner": "subclass:draconic_sorcery",
   "minimum_level": 3,
   "source_ref": "srd-5.2.1:p69:draconic-resilience",
   "summary": "Your Hit Point maximum increases by 3, and it increases by 1 whenever you gain another Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
@@ -110,7 +110,7 @@ first + per_level_after × max(0, owner_class_level - minimum_level)
 
 本切片只有 Draconic Resilience 一个消费者，但实现不得写死 feature id。
 5. 两个 API 都必须尊重实际 `features.subclass_ref`。不得构造只含 build 的代理来推断 3 级角色的子职；用于目标等级的代理必须同时带目标 `subclass_ref`。
-6. `FeatureView.values` 沿用既有标量参数投影；owner_ref、source_ref 和 labels 正常出现，无 choice 字段。
+6. `FeatureView.values` 沿用既有标量参数投影；owner、source_ref 和 labels 正常出现，无 choice 字段。
 
 ### 4.3 无甲 AC 共享消费点
 

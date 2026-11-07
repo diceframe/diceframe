@@ -79,7 +79,7 @@ Bard，SRD p33：
 
 ### 4.4 状态与事件
 
-1. 使用状态以 `(owner_ref, feature_id, scope)` 为身份；普通长休锁定和 `remaining_long_rests` 必须能区分，不能用一个布尔值丢失 2d4 信息。
+1. 使用状态以 `(owner, feature_id, scope)` 为身份；普通长休锁定和 `remaining_long_rests` 必须能区分，不能用一个布尔值丢失 2d4 信息。
 2. 所有扣用、恢复、倒计时和 2d4 骰迹均产生稳定事件；reducer 机械应用，不在 reducer 重新计算法术资格或 RNG。
 3. 战斗与探索入口共享 canonical 准备法术、使用计数和位置/目标规则；公开投影不得暴露无权限的角色内部信息。
 

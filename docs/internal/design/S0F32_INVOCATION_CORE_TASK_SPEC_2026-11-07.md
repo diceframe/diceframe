@@ -60,7 +60,7 @@ Invocation 主干，SRD p70–71：
 
 ### 4.1 Invocation 所有权、数量与替换
 
-1. 主特性 `eldritch_invocations` 使用 `class:warlock`、1 级和 p70 source_ref；每个选择保存 `(owner_ref, feature_id, choice_id, invocation_ref, object_ref?)`，重复选项还有独立槽位。
+1. 主特性 `eldritch_invocations` 使用 `class:warlock`、1 级和 p70 source_ref；每个选择保存 `(owner, feature_id, choice_id, invocation_ref, object_ref?)`，重复选项还有独立槽位。
 2. 当前数量严格来自 Warlock Invocations track；升级只要求补足新增槽位。未拥有、超数量、未知 ref、错误 owner、重复普通选项均拒绝。
 3. 每获得一个 Warlock 等级可替换一个现有 Invocation，也可不换；新选项必须在替换后的角色状态上满足等级、已知戏法、专长和 Invocation 前置。
 4. 替换前计算仍拥有选项的依赖闭包：若被替换者是任一保留选项的直接/传递前置，拒绝。不得靠固定名单遗漏 F33–F35 的 Pact/Thirsting Blade 依赖。

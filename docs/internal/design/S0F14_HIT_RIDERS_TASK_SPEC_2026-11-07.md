@@ -64,7 +64,7 @@ SRD p43：
 
 1. 增加八项声明、正确 owner/等级/source_ref/双语 locale；`improved_*` 读取 S0-B 已保存的同一选项，不开放第二个独立选项。
 2. 可选 rider 必须在命中后、相应伤害最终提交前通过服务端 pending choice 或等价决策；decline 不支付可选 Focus/每回合预算，也不阻塞基础伤害。
-3. 额外伤害事件记录基础攻击、feature_id、owner_ref、类型、骰和每回合使用；抗性只由 S0-F7 对最终各伤害实例应用一次。
+3. 额外伤害事件记录基础攻击、feature_id、owner、类型、骰和每回合使用；抗性只由 S0-F7 对最终各伤害实例应用一次。
 4. 攻击 rider 的伤害骰属于该次攻击时，暴击按既有攻击伤害规则 doubling；法术 Potent 的固定属性加值不变成骰、不因暴击翻倍。
 5. 同一命中可合法共存的不同 rider 不因共用 feature.used 键互相误删；同一 rider 的每回合限制则必须在窗口创建与最终 resolve 重验。
 

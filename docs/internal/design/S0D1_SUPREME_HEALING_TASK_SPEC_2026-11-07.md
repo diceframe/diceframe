@@ -58,7 +58,7 @@ Cleric 实际选择 subclass:life_domain
 | 事实 | 位置 |
 |---|---|
 | 子职表在 Cleric 17 级授予 `supreme_healing`，子职 id 为 `life_domain` | `content/subclass_catalogs/srd_subclasses.json` |
-| S0-A 后子职特性经 `features.subclass_ref` 和 owner-scoped key 授予；`has_feature()` 支持可选 `owner_ref` | `features/models.py`、`features/resolver.py` |
+| S0-A 后子职特性经 `features.subclass_ref` 和 owner-scoped key 授予；`has_feature()` 支持可选 `owner` | `features/models.py`、`features/resolver.py` |
 | class feature catalog 当前没有 Cleric 条目 | `content/class_feature_catalogs/srd_class_features.json` |
 | `double_dice_counts()` 已提供深拷贝并递归遍历公式 AST 的同族先例 | `combat/action_adapter.py` |
 | `roll_damage_node()` 通过通用求值器消费 AST，并按骰顺序返回骰迹 | `combat/action_adapter.py` |
@@ -79,7 +79,7 @@ Cleric 实际选择 subclass:life_domain
 ```json
 {
   "id": "supreme_healing",
-  "owner_ref": "subclass:life_domain",
+  "owner": "subclass:life_domain",
   "minimum_level": 17,
   "source_ref": "srd-5.2.1:p40:supreme-healing",
   "summary": "When you would roll dice to restore Hit Points to a creature with a spell or Channel Divinity, use the highest number possible for each die instead of rolling.",
@@ -119,7 +119,7 @@ def maximize_dice_nodes(node: Mapping[str, Any]) -> dict[str, Any]:
 maximized = self.features.has_feature(
     self._feature_character(actor),
     "supreme_healing",
-    owner_ref="subclass:life_domain",
+    owner="subclass:life_domain",
 )
 if maximized:
     healing_node = maximize_dice_nodes(healing_node)
@@ -159,7 +159,7 @@ if maximized:
 ### 6.1 内容、所有权与 AST
 
 1. canonical/en/zh-CN 三份 catalog 均可加载；Supreme Healing 的 owner、17 级门槛、source_ref 与中英文标签正确。
-2. 16 级 Life Cleric 无该特性；经真实升级至 17 级后，`has_feature(..., owner_ref="subclass:life_domain")` 为 True，feature view 带正确 owner_ref。
+2. 16 级 Life Cleric 无该特性；经真实升级至 17 级后，`has_feature(..., owner="subclass:life_domain")` 为 True，feature view 带正确 owner。
 3. 未选择子职的 17 级 Cleric、其他子职代理、非 Cleric 伪造 `subclass:life_domain` 均不获得该特性。
 4. `2d8 → constant 16`、`3d4+2 → 14`，常量与加法结构正确，输入树未改变。
 5. `add/subtract/multiply/min/max` 中嵌套骰节点全部最大化，固定节点不被放大；非法骰式 fail closed。

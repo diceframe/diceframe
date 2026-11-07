@@ -65,7 +65,7 @@ Wizard 实际选择 subclass:evoker
 | 事实 | 位置 |
 |---|---|
 | 子职表在 Wizard 14 级授予 `overchannel`，子职 id 为 `evoker` | `content/subclass_catalogs/srd_subclasses.json` |
-| S0-A 后子职特性经 `features.subclass_ref` 和 owner-scoped key 授予；`has_feature()` 支持可选 `owner_ref` | `features/models.py`、`features/resolver.py` |
+| S0-A 后子职特性经 `features.subclass_ref` 和 owner-scoped key 授予；`has_feature()` 支持可选 `owner` | `features/models.py`、`features/resolver.py` |
 | S0-D1 提供 `maximize_dice_nodes()`，可把 AST 骰节点变为最大值常量并保留固定分量 | `combat/action_adapter.py` |
 | 法术目录的每行同时具有 `level`、`school`、`class_refs`；列表归属与学派是独立字段 | `spells/catalog.py`、`content/spell_catalogs/srd_spells.json` |
 | 当前可结算的 Wizard 1–5 环伤害法术是 `burning_hands`、`chromatic_orb`、`magic_missile`、`scorching_ray`、`thunderwave`；恰好都属于 evocation，但这不是规则门槛 | 上述两个 catalog |
@@ -88,7 +88,7 @@ Wizard 实际选择 subclass:evoker
 ```json
 {
   "id": "overchannel",
-  "owner_ref": "subclass:evoker",
+  "owner": "subclass:evoker",
   "minimum_level": 14,
   "source_ref": "srd-5.2.1:p82:overchannel",
   "summary": "When you cast a Wizard spell with a level 1–5 spell slot that deals damage, you can maximize its damage. Later uses before a Long Rest deal escalating Necrotic damage to you.",
@@ -117,7 +117,7 @@ canonical 角色使用以下结构；未使用过的角色可以完全省略 `us
     "subclass_ref": "subclass:evoker",
     "usage": [
       {
-        "owner_ref": "subclass:evoker",
+        "owner": "subclass:evoker",
         "feature_id": "overchannel",
         "scope": "long_rest",
         "count": 2
@@ -129,19 +129,19 @@ canonical 角色使用以下结构；未使用过的角色可以完全省略 `us
 
 行为契约：
 
-1. 身份是 `(owner_ref, feature_id, scope)`，不得只用全局短 `feature_id`。本切片只接受 `scope == "long_rest"`。
+1. 身份是 `(owner, feature_id, scope)`，不得只用全局短 `feature_id`。本切片只接受 `scope == "long_rest"`。
 2. 缺失记录表示 `count == 0`。`count` 必须是非 bool 的非负整数；重复身份、错误类型、负数、未知 scope 均 fail closed，不得静默归零。
-3. 提供只读 `feature_usage_count(character, owner_ref, feature_id, scope)` 供 validation/resolution 使用；不要通过扫描升级历史推导使用次数。
+3. 提供只读 `feature_usage_count(character, owner, feature_id, scope)` 供 validation/resolution 使用；不要通过扫描升级历史推导使用次数。
 4. reducer 的应用辅助按事件中的 `before_count` 校验当前计数，再写入 `after_count == before_count + 1`；不匹配抛既有 `EventBatchError`，避免乱序批次重复消费。
 5. 不在建卡时为所有特性预建零值记录，不增加 manifest/content_version，不做存量迁移。旧存档缺失字段自然表示零。
 6. `complete_short_rest()` 对 `features.usage` 完全不变。`complete_long_rest()` 对所有合法 `scope == "long_rest"` 记录清零；可删除零值记录以保持存档精简，但事件与后续读取必须等价于零。
-7. 长休每实际清零一条记录，追加稳定事件：`type: "reset_feature_usage"`、`owner_ref`、`feature_id`、`scope`、`before`、`after: 0`。没有非零记录时不制造事件。短休不得发出该事件。
+7. 长休每实际清零一条记录，追加稳定事件：`type: "reset_feature_usage"`、`owner`、`feature_id`、`scope`、`before`、`after: 0`。没有非零记录时不制造事件。短休不得发出该事件。
 
 ### 4.3 战斗 actor 投影
 
 在 `combat/view.py` 基于 S0-A 最小扩展：
 
-1. `_player_view()` 从 canonical `character.features.usage` 提取内部 `feature_usage` 列表，每项只含 `owner_ref`、`feature_id`、`scope`、`count`；缺失时使用空列表。
+1. `_player_view()` 从 canonical `character.features.usage` 提取内部 `feature_usage` 列表，每项只含 `owner`、`feature_id`、`scope`、`count`；缺失时使用空列表。
 2. `_feature_character()` 返回的 `features` 同时包含 S0-A 的 `subclass_ref` 和本切片的 `usage` 深拷贝。
 3. 不把客户端 intent 中的计数、法术参数或自伤公式带入 canonical，也不把整份 grant/advancement 历史复制进 actor。
 4. companion 与 player 复用同一投影；enemy 不具备该特性，不新增 enemy 使用入口。
@@ -179,7 +179,7 @@ canonical 角色使用以下结构；未使用过的角色可以完全省略 `us
 {
   "type": "dnd2024.feature_usage.changed",
   "actor_id": "player:<uid>",
-  "owner_ref": "subclass:evoker",
+  "owner": "subclass:evoker",
   "feature_id": "overchannel",
   "scope": "long_rest",
   "spell_ref": "spell:<id>",
@@ -235,7 +235,7 @@ canonical 角色使用以下结构；未使用过的角色可以完全省略 `us
 ### 6.1 内容、所有权与资格
 
 1. canonical/en/zh-CN 三份 catalog 均可加载；Overchannel 的 owner、14 级门槛、source_ref、参数与中英文标签正确。
-2. 13 级 Evoker Wizard 无该特性；经真实升级至 14 级后，`has_feature(..., owner_ref="subclass:evoker")` 为 True，feature view 带正确 owner_ref。
+2. 13 级 Evoker Wizard 无该特性；经真实升级至 14 级后，`has_feature(..., owner="subclass:evoker")` 为 True，feature view 带正确 owner。
 3. 未选择子职的 14 级 Wizard、其他子职代理、非 Wizard 伪造 `subclass:evoker` 均不获得该特性。
 4. 真实 14 级 Evoker 对 Wizard 列表 1 环伤害法术可声明；省略/false 无需特性且行为与基线一致；非 bool 标志被拒绝。
 5. 无特性角色、非 Wizard 列表法术、无伤害法术、戏法、免费施法 slot 0、6 环槽及以上均不能声明；五环法术用六环槽同样拒绝。

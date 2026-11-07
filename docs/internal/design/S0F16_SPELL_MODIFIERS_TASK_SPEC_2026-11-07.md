@@ -57,7 +57,7 @@ SRD p70，Draconic 6 级：
 
 1. 增加四项 canonical declaration、owner/等级/source_ref/双语 locale；真实 Evoker/Draconic 子职分别授予。
 2. 判定顺序固定为：实际施法者与特性 → spell level/cantrip → 实际法术职业来源 → school → 当前伤害类型 → 目标/伤害 roll 实例。
-3. 所有修饰在事件中记录 feature_id、owner_ref、spell_ref、属性加值和被修改的 roll；客户端不得提交加值、学派、抗性或豁免结果。
+3. 所有修饰在事件中记录 feature_id、owner、spell_ref、属性加值和被修改的 roll；客户端不得提交加值、学派、抗性或豁免结果。
 4. “one damage roll”以实际伤害掷骰实例为边界，不是每个目标、每束射线或每个伤害事件自动各加一次；多目标共享骰时也不得复制属性加值。
 
 ### 4.2 Potent Cantrip

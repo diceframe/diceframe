@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 切片编号 | S0-F37（最终审计；独立新任务） |
-| 验收载体 | 动态生成 198 行 `(owner_ref, local_id)` 矩阵、专项选项矩阵、全链路证据与机器报告 |
+| 验收载体 | 动态生成 198 行 `(owner, local_id)` 矩阵、专项选项矩阵、全链路证据与机器报告 |
 | 规则基准 | 官方 SRD 5.2.1，职业与子职 p28–82；专项 Monk p50–51、Rogue p63、Warlock p70–74、Sorcerer p65–67 |
 | 官方文件 | `SRD_CC_v5.2.1.pdf`；SHA256 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87` |
 | 代码基线 | `integration/dnd2024-srd@35653f81`；实际执行必须从全部前置完成后的集成提交开工 |
@@ -108,10 +108,10 @@ SRD p72–74 的 Invocation 选项共 28 项，SRD p66–67 的 Metamagic 选项
 
 1. 职业行：遍历 12 职业 20 级 `features_by_level`，以 `(class:<class_id>, feature_id)` 去重；排除且仅排除 §3.1 四族结构项，生成 140 行。
 2. 子职行：遍历 12 子职的 `feature_ids_by_level`，生成 `(subclass:<subclass_id>, feature_id)`；同一子职同一 local id 重复出现时去重并另外记录所有授予等级，基线必须为 58 行。
-3. 每行至少含：`owner_ref`、`local_id`、`class_ref`、`subclass_ref?`、`grant_levels`、`source_ref`、`status`、`implementation`、`behavior_tests`、`guided_reason?`、`guided_negative_tests?`。
+3. 每行至少含：`owner`、`local_id`、`class_ref`、`subclass_ref?`、`grant_levels`、`source_ref`、`status`、`implementation`、`behavior_tests`、`guided_reason?`、`guided_negative_tests?`。
 4. `implementation` 是数组，每项含真实 `path` 与 `symbol`；脚本用文件存在性和 Python AST/JSON 路径验证，不接受只写模块名或虚构 `complete.py`。
 5. `behavior_tests` 是真实 pytest nodeid 数组。deterministic 行至少一个直接覆盖该 owner/local 行为的已Passed测试；共享测试必须通过参数化 id 或明确用例证明覆盖该行，不能用 `test_all_features()` 空泛代替。
-6. 行排序固定为 owner_ref、local_id；重复身份、同一 local id 跨 owner 错配、缺失 source_ref/授予等级均失败。输出 198 行及 140/58 分类计数。
+6. 行排序固定为 owner、local_id；重复身份、同一 local id 跨 owner 错配、缺失 source_ref/授予等级均失败。输出 198 行及 140/58 分类计数。
 7. 实现/测试证据映射可以按 owner/local 声明在机器可读 evidence 文件中，但 **status 不得由该文件手填为 complete**；脚本必须根据实现存在和 JUnit 通过现场计算。
 
 ### 4.3 guided 白名单不是完成白名单
@@ -139,7 +139,7 @@ SRD p72–74 的 Invocation 选项共 28 项，SRD p66–67 的 Metamagic 选项
 2. `subclass_feature` 是结构占位，不伪装成独立规则效果；其证据必须指向真实子职授予和历史，而非虚构 canonical 特性。
 3. ASI/Epic Boon 验证实际专长得主、属性上限、重复等级、choices 与历史；子职选择验证 3 级真实所有权和 owner 隔离。
 4. 重复获得的 Extra Attack、Expertise、Weapon Mastery、Improvement 类特性必须验证“再次获得/升级替换/不叠加”规则，不能只看 20 级终值。
-5. builder 直建高等级、逐级 advance、history 重建三条路径必须产出相同 `(owner_ref,local_id)`、选择、资源和推导值。
+5. builder 直建高等级、逐级 advance、history 重建三条路径必须产出相同 `(owner,local_id)`、选择、资源和推导值。
 
 ### 4.6 跨职业隔离与全链路审计
 

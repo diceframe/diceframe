@@ -73,7 +73,7 @@ SRD 5.2.1 p166，Summon Dragon/Draconic Spirit：
 
 ### 4.1 统一召唤记录、事件与 turn slot
 
-1. 三特性按真实职业/子职和等级授予；`faithful_steed`、`dragon_companion` 各注册一个 F5 `(owner_ref,feature_id,free_slot_id)` 免费槽，固定环阶 2/5、一次、Long Rest recharge。不得另建平行普通资源或共享免费 bool；Wild Companion 不建免费池。
+1. 三特性按真实职业/子职和等级授予；`faithful_steed`、`dragon_companion` 各注册一个 F5 `(owner,feature_id,free_slot_id)` 免费槽，固定环阶 2/5、一次、Long Rest recharge。不得另建平行普通资源或共享免费 bool；Wild Companion 不建免费池。
 2. 每次召唤生成 `dnd2024.companion.summoned`，内容包含唯一 companion id、`summon_kind`、`source_spell_ref`、`source_feature_id`、caster/owner、`slot_level`、真实 stat block ref、creature type、位置和持续/专注元数据。
 3. reducer 在 `party.companions` 创建带 `ruleset_character` 的 active 记录；移除统一用 `dnd2024.companion.dismissed(reason)`，处理 0 HP、法术结束、长休、替换、暂时/永久收起和物品掉落，不能仅把 active 标志交给客户端。
 4. 战斗中创建须原子插入 turn slot 和位置，战斗外创建须在下一次 combat.start 采用同一规则；存档/加载、重放和战斗结束不复制或意外复活。

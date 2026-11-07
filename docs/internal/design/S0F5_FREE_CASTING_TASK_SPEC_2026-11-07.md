@@ -59,7 +59,7 @@ SRD p79：
 
 ### 4.1 统一免费施法记录
 
-1. 每个槽以 `(owner_ref, feature_id, free_slot_id)` 为身份，保存 `spell_ref`、`spell_level`、`uses_remaining`、`recharge`；Spell Mastery 两个无限槽不伪造有限次数。
+1. 每个槽以 `(owner, feature_id, free_slot_id)` 为身份，保存 `spell_ref`、`spell_level`、`uses_remaining`、`recharge`；Spell Mastery 两个无限槽不伪造有限次数。
 2. 可用性由真实角色特性、当前选择、法术自动化状态和目标共同决定；伪造 slot id、spell_ref 或免费环阶均拒绝。
 3. 只有实际施法通过验证并进入结算才消费有限次数；非法目标、成分/时间不满足或 `not_automated` 拒绝时不扣。法术随后攻击未中或目标豁免成功仍属于已施放，不退款。
 4. 同一施法只能使用一个免费来源；不得同时扣普通槽和免费次数，也不得用 Signature/Mystic 重复免除同一成本。

@@ -75,7 +75,7 @@ SRD p35、p33：
 
 ### 5.1 来源化授予与容量
 
-1. 每项授予记录 `(owner_ref, feature_id, spell_ref, granted_level, choice_id/terrain)`；有效 prepared 视图由普通准备与所有有效授予聚合，不靠无来源的平面字符串猜测归属。
+1. 每项授予记录 `(owner, feature_id, spell_ref, granted_level, choice_id/terrain)`；有效 prepared 视图由普通准备与所有有效授予聚合，不靠无来源的平面字符串猜测归属。
 2. 五组表按当前职业等级累积，低等级/错误子职不授予；常驻授予不占普通准备容量，并按各自职业通用规则视为该职业法术。
 3. 同一法术由普通准备或两个来源同时提供时保留独立来源；撤销一个来源不得删除其他来源仍提供的可用性。
 4. Land 的 3 级条目含 cantrips 时也必须真实授予，不能因字段叫 prepared 而遗漏 Fire Bolt、Ray of Frost、Shocking Grasp、Acid Splash。

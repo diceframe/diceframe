@@ -53,7 +53,7 @@ Bardic Inspiration die 使用既有 `bardic_die` 成长轨道：1–4 级 d6、5
 | `resource_state()` 能读取 actor 投影中的 canonical class resource | `features/resources.py`、`combat/view.py` |
 | Bardic Inspiration 池与 Bard 骰面轨道已经存在 | `content/rest_catalogs/srd_recovery.json`、`content/progression_catalogs/srd_classes.json` |
 | 子职表已在 College of Lore 3 级列出 `cutting_words`，但特性定义尚不存在 | `content/subclass_catalogs/srd_subclasses.json`、特性 catalog |
-| S0-A 后 `has_feature()` / `feature_value()` 支持可选 `owner_ref`，战斗 actor 能看到实际 `subclass_ref` | S0-A 契约及其执行结果 |
+| S0-A 后 `has_feature()` / `feature_value()` 支持可选 `owner`，战斗 actor 能看到实际 `subclass_ref` | S0-A 契约及其执行结果 |
 
 ## 4. 实现契约
 
@@ -64,7 +64,7 @@ Bardic Inspiration die 使用既有 `bardic_die` 成长轨道：1–4 级 d6、5
 ```json
 {
   "id": "cutting_words",
-  "owner_ref": "subclass:college_of_lore",
+  "owner": "subclass:college_of_lore",
   "minimum_level": 3,
   "source_ref": "srd-5.2.1:p35:cutting-words",
   "summary": "When a creature you can see within 60 feet succeeds on an attack roll, take a Reaction and expend one Bardic Inspiration use to roll your Bardic Inspiration die and subtract it from the attack total.",
@@ -108,7 +108,7 @@ Bardic Inspiration die 使用既有 `bardic_die` 成长轨道：1–4 级 d6、5
   "assigned_to": "<human uid or GM uid>",
   "options": ["spend", "decline"],
   "feature_id": "cutting_words",
-  "owner_ref": "subclass:college_of_lore",
+  "owner": "subclass:college_of_lore",
   "resource_id": "bardic_inspiration",
   "die_sides": 6,
   "check": {"...": "服务器生成的原始或当前攻击 check 深拷贝"},
@@ -156,7 +156,7 @@ spend：
   "target_id": "<target>",
   "source_actor_id": "<reactor>",
   "feature_id": "cutting_words",
-  "owner_ref": "subclass:college_of_lore",
+  "owner": "subclass:college_of_lore",
   "rolls": ["<inspiration die>"],
   "natural": "<unchanged natural>",
   "modifier": "<negative inspiration die>",
@@ -222,7 +222,7 @@ spend：
 2. 3 级 Bard 未选择/缺失 `subclass_ref` 时没有该特性，不开窗。
 3. 3 级 Bard 选择其他职业子职、其他 Bard 子职占位或伪造 owner 时不能获得该特性。
 4. 非 Bard 即使写入 `subclass:college_of_lore` 也不能获得该特性。
-5. 英文/中文投影名称正确，内部 `owner_ref`、resource id 和 trigger 不本地化。
+5. 英文/中文投影名称正确，内部 `owner`、resource id 和 trigger 不本地化。
 6. `die_sides_track` 分别读出 d6/d8/d10/d12；非法 track、range、resource 或 trigger 在目录加载时 fail closed。
 7. 既有职业特性与资源 catalog 校验保持通过。
 

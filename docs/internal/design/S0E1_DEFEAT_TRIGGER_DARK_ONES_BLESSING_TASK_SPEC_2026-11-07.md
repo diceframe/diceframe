@@ -71,7 +71,7 @@ SRD 5.2.1 p76，Fiend Patron：
 ```json
 {
   "id": "dark_ones_blessing",
-  "owner_ref": "subclass:fiend_patron",
+  "owner": "subclass:fiend_patron",
   "minimum_level": 3,
   "source_ref": "srd-5.2.1:p76:dark-ones-blessing",
   "summary": "When you reduce an enemy to 0 Hit Points, gain Temporary Hit Points equal to your Charisma modifier plus your Warlock level (minimum of 1).",
@@ -142,7 +142,7 @@ def _enemy_zero_hp_feature_events(
   "amount": 6,
   "rolls": [],
   "feature_id": "dark_ones_blessing",
-  "owner_ref": "subclass:fiend_patron",
+  "owner": "subclass:fiend_patron",
   "ability": "cha",
   "ability_modifier": 3,
   "class_ref": "class:warlock",
@@ -153,7 +153,7 @@ def _enemy_zero_hp_feature_events(
 1. 示例仅说明 3 级、魅力调整值 +3 的结果；字段数值必须由服务器计算，测试不得把它当固定常量。
 2. `target_id` 与 `source_actor_id` 在本特性中相同；保留两者是为审计伤害来源和受益者，不能据此实现队友共享。
 3. `delta/amount` 表示本次授予值；既有 temp HP reducer 按 `amount` keep-max，不能把 `delta` 当成必然实际增加值。
-4. `owner_ref` 必须来自实际定义，不能由客户端输入或根据名称猜测。
+4. `owner` 必须来自实际定义，不能由客户端输入或根据名称猜测。
 5. 事件顺序为：最终 HP 伤害 → 既有专注事件 → 本特性 temp HP → 既有 victory（若该路径本来会产生 victory）。不得在伤害事件之前发放。
 6. 不在 reducer 内实现触发，不给 reducer 增加特性目录依赖；重放只机械应用已生成事件。
 
@@ -210,7 +210,7 @@ def _enemy_zero_hp_feature_events(
 1. Fiend Patron 3 级 Warlock 拥有 `(subclass:fiend_patron, dark_ones_blessing)`；2 级没有。
 2. 3 级 Warlock 缺失 `subclass_ref` 或选择其他子职时没有该特性，击杀不触发。
 3. 非 Warlock 即使伪造 `subclass:fiend_patron` 也不能获得该特性；owner 与 class 归属不能被短 id 绕过。
-4. 英文/中文标签正确；`source_ref` 恰为 p76，内部 trigger、owner_ref 和 class_ref 不本地化。
+4. 英文/中文标签正确；`source_ref` 恰为 p76，内部 trigger、owner 和 class_ref 不本地化。
 5. 参数缺项、未知 trigger、非法 ability/class_ref、bool/浮点/字符串 minimum、minimum < 1 均在目录加载时 fail closed。
 6. 既有职业、子职、progression 与 resource catalog 校验保持通过，未添加共享半径或资源成本。
 

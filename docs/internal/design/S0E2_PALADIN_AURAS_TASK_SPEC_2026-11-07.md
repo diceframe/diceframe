@@ -80,12 +80,12 @@
 
 ### 4.1 特性声明
 
-在 canonical Paladin 特性段增加以下三个定义；`owner_ref` 使用 S0-A 的身份模型：
+在 canonical Paladin 特性段增加以下三个定义；`owner` 使用 S0-A 的身份模型：
 
 ```json
 {
   "id": "aura_of_protection",
-  "owner_ref": "class:paladin",
+  "owner": "class:paladin",
   "minimum_level": 6,
   "source_ref": "srd-5.2.1:p55:aura-of-protection",
   "summary": "While not Incapacitated, you and allies within 10 feet gain a saving-throw bonus equal to your Charisma modifier (minimum +1); only one such aura benefits a creature at a time.",
@@ -100,7 +100,7 @@
 ```json
 {
   "id": "aura_expansion",
-  "owner_ref": "class:paladin",
+  "owner": "class:paladin",
   "minimum_level": 18,
   "source_ref": "srd-5.2.1:p55:aura-expansion",
   "summary": "Your Aura of Protection is now a 30-foot Emanation.",
@@ -114,7 +114,7 @@
 ```json
 {
   "id": "aura_of_devotion",
-  "owner_ref": "subclass:oath_of_devotion",
+  "owner": "subclass:oath_of_devotion",
   "minimum_level": 7,
   "source_ref": "srd-5.2.1:p56:aura-of-devotion",
   "summary": "You and allies in your Aura of Protection have Immunity to Charmed; an existing Charmed condition has no effect while there.",
@@ -126,7 +126,7 @@
 ```
 
 1. 三个特性都必须由真实 progression/subclass 授予；`minimum_level` 与表一致。Aura Expansion 不是把基础特性改为第二份 30 尺光环，而是覆盖同一光环的范围。
-2. 英文/中文 locale 同步：Aura of Protection／守护灵光，Aura Expansion／灵光扩展，Aura of Devotion／奉献灵光。canonical id、owner_ref、参数键和 condition id 不本地化。
+2. 英文/中文 locale 同步：Aura of Protection／守护灵光，Aura Expansion／灵光扩展，Aura of Devotion／奉献灵光。canonical id、owner、参数键和 condition id 不本地化。
 3. 不修改 progression、subclass、condition、spell、resource 或 rest catalog；不为 Aura of Devotion 复制一个独立半径。
 4. `aura_source_feature_id` 和 `aura_expands_feature_id` 是目录关系声明，不是引擎按特性名写死的分支。
 
@@ -163,7 +163,7 @@ def _aura_condition_immunity_source(
 2. 基础光环候选来自实际拥有且声明 `aura_range_ft + aura_save_bonus_*` 的定义；持有者 `condition_flags(...)[\"incapacitated\"]` 为真时跳过其基础光环及所有依附扩展。
 3. 有效范围取该持有者对同一基础特性的合法 `aura_range_override_ft`；没有覆盖时用基础值。范围不是全局最大值，而是每个持有者分别计算。
 4. 受益者必须为基础光环持有者本人或同队盟友，且当前距离 `<= range`。同一持有者的多个扩展不复制基础豁免加值。
-5. `_saving_throw_aura_bonus` 返回 `{bonus, sources}`：`bonus` 无覆盖时为 0；有覆盖时只取最高值，`sources` 仅包含被选中的一个来源。来源至少含 `feature_id`、`owner_ref`、`source_actor_id`、`range`、`ability`、`ability_modifier`。
+5. `_saving_throw_aura_bonus` 返回 `{bonus, sources}`：`bonus` 无覆盖时为 0；有覆盖时只取最高值，`sources` 仅包含被选中的一个来源。来源至少含 `feature_id`、`owner`、`source_actor_id`、`range`、`ability`、`ability_modifier`。
 6. `_aura_condition_immunity_source` 独立遍历每个有效基础光环的依附扩展；目标位于任一 Aura of Devotion 内即免疫。多个来源按稳定顺序取首个作审计，不把多个免疫写成多段结算。
 7. 两个辅助均不掷骰、不创建事件、不写 canonical 状态；不得出现 `paladin`、`aura_of_protection`、`aura_of_devotion` 字面特性分支，身份只作为目录数据透传。
 
@@ -180,7 +180,7 @@ def _aura_condition_immunity_source(
 
 1. 在 spell effect 的 `condition.applied` 统一构造点、append 之前调用免疫辅助；只拦截事件目标当前免疫的 condition。
 2. 被拦截时不发该 `condition.applied`，也不因其触发“失能打断专注”等后续效果；Charmed 当前虽非失能，这一顺序仍必须通用正确。
-3. 在同一效果对应的 `check.resolved` 上添加：`blocked_condition: \"charmed\"`、`blocked_by_aura: {feature_id, owner_ref, source_actor_id}`。如果某路径没有 check event，则新增一条既有类型 `dnd2024.combat.message` 只作可见审计；本切片的 charm_person 验收路径必须有 check event。
+3. 在同一效果对应的 `check.resolved` 上添加：`blocked_condition: \"charmed\"`、`blocked_by_aura: {feature_id, owner, source_actor_id}`。如果某路径没有 check event，则新增一条既有类型 `dnd2024.combat.message` 只作可见审计；本切片的 charm_person 验收路径必须有 check event。
 4. 豁免成功/失败、伤害、其他 condition、专注结束和 RNG 顺序保持原样。Charm Person 豁免失败但被免疫时仍是失败豁免。
 5. 对已有 Charmed 的移动/传送不发 remove、不写 suppression metadata；通过移动前后对免疫辅助和原始 condition 的联合断言验证“在外有效、在内无效、条件未删”。
 6. 当前没有 Charmed 机械 flags，不新增虚假的 `suppressed_by_aura` 永久状态。若执行时发现基线已给 Charmed 增加机械消费者，停止并报告，由集成裁决是否需先建立统一有效条件投影。
@@ -218,8 +218,8 @@ def _aura_condition_immunity_source(
 
 1. Paladin 5 级无 Aura of Protection；6 级有；17 级范围 10；18 级范围 30。
 2. Devotion Paladin 6 级无 Aura of Devotion，7 级有；非 Devotion 或缺失 subclass_ref 时没有。
-3. 非 Paladin 伪造短 id 或其他子职不能获得这些特性；三个 owner_ref 与等级正确。
-4. 英文/中文标签、source_ref 正确；参数键、owner_ref、condition id 不本地化。
+3. 非 Paladin 伪造短 id 或其他子职不能获得这些特性；三个 owner 与等级正确。
+4. 英文/中文标签、source_ref 正确；参数键、owner、condition id 不本地化。
 5. 非法范围、bonus minimum、ability、缺失成对字段均 fail closed。
 6. 空/重复/非字符串/未知 immunity，缺失或自引用 source、扩展环、目标不是基础光环均 fail closed。
 
@@ -273,7 +273,7 @@ def _aura_condition_immunity_source(
 
 ### 7.2 停止条件
 
-1. S0-A/S0-E1 未合入，或真实子职授予、owner_ref、actor 投影与契约不符。
+1. S0-A/S0-E1 未合入，或真实子职授予、owner、actor 投影与契约不符。
 2. 当前基线已出现同名特性或另一光环实现，存在并行施工冲突。
 3. Charmed 已有机械消费或项目已引入 suppression 状态，§2 的“保留原条件且无机械 flags”前提失效。
 4. 存在本任务列出的四类 saving throw 之外的实际 saving throw 结算点，接入需白名单外文件。

@@ -76,7 +76,7 @@ SRD 5.2.1 p49，Champion：
 ```json
 {
   "id": "survivor",
-  "owner_ref": "subclass:champion",
+  "owner": "subclass:champion",
   "minimum_level": 18,
   "source_ref": "srd-5.2.1:p49:survivor",
   "summary": "You have Advantage on Death Saving Throws and treat 18-20 as a 20; at the start of each of your turns, if Bloodied and at 1+ HP, regain 5 plus your Constitution modifier HP.",
@@ -100,7 +100,7 @@ SRD 5.2.1 p49，Champion：
 2. `death_save_crit_threshold` 必须是非 bool 的 `int` 且 `2 <= value <= 20`；本特性为 18。
 3. `turn_start_regen_base` 必须是非 bool 的 `int >= 1`；`turn_start_regen_ability` 必须是六属性 canonical id，二者成对出现。
 4. 在 Resolver 增加或复用 S0-A 的数值聚合：阈值取所有实际拥有声明中的最小值，缺省 20；优势来源按 `features_for()` 稳定顺序返回定义身份，不因多个来源增加骰数。
-5. 回合再生按实际拥有的每个定义逐项求值；同一 `(owner_ref, local_id)` 不重复。不同特性若未来声明同组参数，各自产生独立事件，不擅自取最大值或相加成一个无来源数值。
+5. 回合再生按实际拥有的每个定义逐项求值；同一 `(owner, local_id)` 不重复。不同特性若未来声明同组参数，各自产生独立事件，不擅自取最大值或相加成一个无来源数值。
 6. 校验和查询不改 S0-A 的授予算法，不接受客户端提交参数，不改 `content_version`。
 
 ### 4.3 统一 turn-start 再生辅助
@@ -130,7 +130,7 @@ def _turn_start_regen_events(
   "healing": true,
   "rolls": [],
   "feature_id": "survivor",
-  "owner_ref": "subclass:champion",
+  "owner": "subclass:champion",
   "trigger": "turn_start",
   "base": 5,
   "ability": "con",
@@ -162,14 +162,14 @@ def _turn_start_regen_events(
 3. `modifier=0`、`bless_bonus=0` 保持 S0-E2 契约；`aura_bonus` 为共享辅助结果，`total = natural + aura_bonus`。`aura_sources` 原样透传。
 4. 分支严格按 §2.8；`dnd2024.death_save.resolved.roll` 继续记录天然选中值，不改为 total。既有 successes/failures/stable/dead/hp 字段含义不变。
 5. `check.resolved(kind="death_save")` 增加或保留：`advantage_mode`、`advantage_sources`、`death_save_crit_threshold`、`aura_bonus`、`aura_sources`、`modifier`、`bless_bonus`、`total`。
-6. 优势来源项至少含 `code=feature_id`、`owner_ref`、`mode="advantage"`；多个来源只用于 provenance。无优势时不输出虚假第二骰或 advantage mode。
+6. 优势来源项至少含 `code=feature_id`、`owner`、`mode="advantage"`；多个来源只用于 provenance。无优势时不输出虚假第二骰或 advantage mode。
 7. 天然 18–20 恢复后仍按既有逻辑不调用 `_end_turn_events`；未恢复且未死亡时保留既有自动推进。不得在恢复后再触发一次 Heroic Rally，因为当前死亡豁免结算不是新回合开始。
 8. `_save_repeat_events`、普通法术豁免、Medicine、攻击和 initiative 不读取这些 Survivor 参数。
 
 ### 4.6 reducer、存档与可观察性
 
 1. 复用既有 `resource.changed(hp)` 与 `dnd2024.death_save.resolved` reducer；不新增事件类型、canonical 状态字段或 reducer 特性依赖。
-2. 在 combat feed 字段白名单加入 `death_save_crit_threshold`；regen 的 `feature_id`、`owner_ref`、`trigger`、`base`、`ability`、`ability_modifier` 若 feed 当前不显示，可只保留在权威事件账本，不得为显示而扩大敏感角色数据投影。
+2. 在 combat feed 字段白名单加入 `death_save_crit_threshold`；regen 的 `feature_id`、`owner`、`trigger`、`base`、`ability`、`ability_modifier` 若 feed 当前不显示，可只保留在权威事件账本，不得为显示而扩大敏感角色数据投影。
 3. 存档/加载后再次回合开始按当前特性、HP、Con 和条件重新计算；不把 amount 缓存到角色 sheet。
 4. 重放只机械应用已生成事件，首回合与后续回合结果一致；不得重掷死亡豁免或再生。
 
@@ -214,7 +214,7 @@ def _turn_start_regen_events(
 14. 每回合只触发一次；同一回合重复 available_intents、feed 投影或存档读取不生成额外再生。
 15. 17 级 Champion、其他职业和无特性 companion 在相同 HP 状态下均不触发。
 16. 胜利/团灭没有新回合时不产生再生；他人回合开始不触发 Champion 的再生。
-17. 事件不含骰、rolls 为空、RNG 零消耗，不支付任何经济或资源；owner_ref、base、ability 审计完整。
+17. 事件不含骰、rolls 为空、RNG 零消耗，不支付任何经济或资源；owner、base、ability 审计完整。
 
 ### 6.3 回合时序与持久化
 
@@ -225,7 +225,7 @@ def _turn_start_regen_events(
 
 ### 6.4 Defy Death
 
-22. 18 级 Champion 死亡豁免掷两骰取高，advantage_sources 含 survivor 及正确 owner_ref；17 级仍单骰。
+22. 18 级 Champion 死亡豁免掷两骰取高，advantage_sources 含 survivor 及正确 owner；17 级仍单骰。
 23. 多个优势来源仍只掷两骰；rolls 顺序与 SequenceRng 一致，不消耗第三骰。
 24. 选择天然 18、19、20 均恢复 1 HP，成功/失败清零，death_save.resolved.roll 保留天然值，threshold=18 可观察。
 25. 选择天然 17 时不触发“视同 20”；按 total 与 10 比较记普通成功或失败。
@@ -252,7 +252,7 @@ def _turn_start_regen_events(
 
 ### 7.2 停止条件
 
-1. S0-A/S0-E2 未合入，或实际接口、owner_ref、事件字段与本契约不一致。
+1. S0-A/S0-E2 未合入，或实际接口、owner、事件字段与本契约不一致。
 2. combat.start 的事件返回类型已被其他切片重构，或首行动者 view 无法在 RNG 不变的前提下用于再生。
 3. 回合开始条件到期发生在 reducer 且无法在事件构造侧得到一致的到期后视图，需要改 reducer 才能修复。
 4. 死亡豁免下游要求 `death_save.resolved.roll` 必须是 total，或其现有字段语义与 SRD 分支冲突。

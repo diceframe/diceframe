@@ -10,7 +10,7 @@
 2. **前置依赖**：S0-A《子职授予主干 + Champion 暴击阈值》必须已经完成并合入 `integration/dnd2024-srd`。从 S0-A 执行报告读取最终提交，以该提交新建干净工作树和分支 `feat/dnd2024-s0b-feature-choices`。不要猜提交号，不要直接使用已有 `df-int` 工作树。
 3. 本任务只实现“新获得一个带选项的特性时，要求并持久化一个合法选择”，用 Champion 7 级 Additional Fighting Style 选择 Defense 验收。不是补齐战斗风格，不是重做建卡，不是设计通用规则 DSL。
 4. 不使用 `.rulebooks`、open5e 或 2014 数据作为规则依据；下方引用的官方 SRD 5.2.1 原文即本任务规则依据。
-5. S0-A 已建立的 `(owner_ref, local_id)` 特性身份是本任务的硬前置。选项必须绑定完整 owner，不得退回全局短 id。
+5. S0-A 已建立的 `(owner, local_id)` 特性身份是本任务的硬前置。选项必须绑定完整 owner，不得退回全局短 id。
 
 ---
 
@@ -32,7 +32,7 @@ Champion 6→7 级
 同时沉淀后续特性选项复用的最小主干：
 
 1. **声明与选择分离**：catalog 声明某特性的选项类别；角色只持久化 canonical ref，不持久化本地化名称。
-2. **owner-scoped 选项身份**：`(owner_ref, feature_id, choice_id)` 唯一确定一个选项槽。
+2. **owner-scoped 选项身份**：`(owner, feature_id, choice_id)` 唯一确定一个选项槽。
 3. **服务器校验后授予**：只有当前等级真实获得的特性才能提交对应选择；不能借 `feature_choices` 或 `feat_refs` 输入凭空获得专长。
 4. **选项与效果分离**：Fighting Style 的选择管线不负责写 Defense 公式；Defense 的 AC 效果由既有唯一 AC 推导函数消费。
 
@@ -93,7 +93,7 @@ Defense，印刷页 88：
 ```json
 {
   "id": "additional_fighting_style",
-  "owner_ref": "subclass:champion",
+  "owner": "subclass:champion",
   "minimum_level": 7,
   "source_ref": "srd-5.2.1:p49:additional-fighting-style",
   "summary": "You gain another Fighting Style feat of your choice.",
@@ -115,7 +115,7 @@ Defense，印刷页 88：
 2. 本切片只支持 `kind: advancement_feat` 和 `count: 1`。未知 kind、其他 count、缺 category、未知 category、重复 choice id 均 fail closed。
 3. `enabled_option_refs` 是本切片的显式可执行白名单：必须是非空、无重复的 canonical ref 数组，且每个 ref 都属于声明 category；本任务只能包含 `feat:defense`。未列入的目录选项仍用于 UI 投影，但不可提交。
 4. `option_of` 语义完全不变，不得用它表示 Fighting Style 选择。
-5. 选项身份是 `(owner_ref, feature_id, choice.id)`；不得只用 `feature_id` 或 `choice_id` 作为全局键。
+5. 选项身份是 `(owner, feature_id, choice.id)`；不得只用 `feature_id` 或 `choice_id` 作为全局键。
 6. catalog 加载和 Resolver 跨目录校验须确认 `additional_fighting_style` 的首次授予等级确为 Champion 7 级，并确认声明的 feat category 存在。
 
 ### 4.2 提交与持久化形状
@@ -126,7 +126,7 @@ Defense，印刷页 88：
 {
   "feature_choices": [
     {
-      "owner_ref": "subclass:champion",
+      "owner": "subclass:champion",
       "feature_id": "additional_fighting_style",
       "choice_id": "fighting_style_feat",
       "selected_refs": ["feat:defense"]
@@ -142,7 +142,7 @@ Defense，印刷页 88：
    - `id`: `feature_choice:subclass:champion:additional_fighting_style:fighting_style_feat`
    - `kind`: `feature_choice`
    - `required`: `true`
-   - `owner_ref` / `feature_id` / `choice_id`: 上述 canonical 值
+   - `owner` / `feature_id` / `choice_id`: 上述 canonical 值
    - `count`: 1
    - `options`: 复用成长专项目录的 Fighting Style 选项投影，保留 `value`、`name`、`source_ref`、`available`、`unavailable_reasons`；不在 `enabled_option_refs` 中的选项必须 `available: false`，且 `unavailable_reasons` 含 `effect_not_implemented`
 3. 未提交、提交空数组、选择多个、选择未登记专长、选择不可用专长、owner/feature/choice 不匹配，都使 `preview["ok"] == false` 并给出稳定错误；apply 抛既有 `ProgressionCatalogError`。
@@ -157,7 +157,7 @@ apply 成功后写入两处 canonical 状态：
   "feat_refs": ["feat:defense"],
   "feature_choices": [
     {
-      "owner_ref": "subclass:champion",
+      "owner": "subclass:champion",
       "feature_id": "additional_fighting_style",
       "choice_id": "fighting_style_feat",
       "selected_refs": ["feat:defense"],
@@ -178,7 +178,7 @@ apply 成功后写入两处 canonical 状态：
 在 `features/models.py` / `features/resolver.py` 中：
 
 1. 为选项声明增加不可变类型或在 `ClassFeatureDefinition` 中增加等价的只读 `choice` 表达。
-2. Resolver 只把与当前已拥有特性的完整 `(owner_ref, feature_id, choice_id)` 匹配、且引用属于声明 category 的记录投影为有效选择。
+2. Resolver 只把与当前已拥有特性的完整 `(owner, feature_id, choice_id)` 匹配、且引用属于声明 category 的记录投影为有效选择。
 3. 缺失、重复、错误 owner、错误 choice、错误类型或未知 ref 的记录不崩溃、不显示为有效选择、不授予额外特性。
 4. `FeatureView` 增加可选 `selection`。对声明了 choice 的特性，投影形状为：
 
@@ -250,7 +250,7 @@ apply 成功后写入两处 canonical 状态：
 6. 未选 Champion 的 6 级战士升 7 级时不产生 Additional Fighting Style requirement；伪造该 feature choice 被拒绝。
 7. Champion 6→7 preview 产生且只产生一个本切片 feature choice requirement，包含四个 Fighting Style 选项及中英文名称。
 8. 缺省 choices、`feature_choices: []`、缺 `selected_refs`、选择两个专长均 `ok == false`。
-9. owner_ref 改为 `class:fighter`、feature_id 改为其他特性、choice_id 错误、提交未知槽均拒绝。
+9. owner 改为 `class:fighter`、feature_id 改为其他特性、choice_id 错误、提交未知槽均拒绝。
 10. 选择 `feat:grappler`、不存在的 `feat:unknown`、非字符串 ref、重复 ref 均拒绝。
 11. 角色已拥有 `feat:defense` 时，该选项带 `already_owned` 且不可用；提交它被拒绝。
 12. 5→6 或 7→8 时提交 Additional Fighting Style 选择被拒绝；已保存选择不会在后续等级要求重交。
