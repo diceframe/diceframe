@@ -335,3 +335,16 @@ critical = natural >= crit_threshold
 - 仍未解决、留待 S0-A2 的两项不变：10 条子职声明未迁移、旧角色兼容路径未删除。
 
 
+## S0-A2 子职 owner 全量迁移（2026-11-07，提交 `71fb9085`）
+
+这是审核结论第 3 步，不新增功能，只把 S0-A 的主干补完整。
+
+- 内容：10 条仍是 `class:` owner 的子职声明（`aura_of_devotion`、`survivor`、`retaliation`、`fast_hands`、`cutting_words`、`draconic_resilience`、`dark_ones_blessing`、`dark_ones_own_luck`、`supreme_healing`、`overchannel`）补上真实 `owner`。现在 12 条子职声明全部 owner-scoped，`class:` owner 只剩真正的职业特性。
+- 删除 `_granted_feature_keys()` 的旧角色回退分支与 `_has_subclass_state()`。缺失 `features`、空 `subclass_ref`、其他职业子职一律不授予子职特性，不再存在"空值比缺失更严格"的分层。
+- 修正两处仍用 `(class_ref, level)` 代理读取特性的派生点：
+  - `progression/advancement.py::_feature_state()` 增加 `subclass_ref` 参数，升级增量按"升级前/升级后"的选择分别计算；3 级选出子职的那一级不再漏发 Draconic Resilience 的 +3 生命上限。
+  - `character/derivation.py::_feature_proxy()` 接受 `features`，level > 1 的 draft 不会静默丢失子职特性。
+- 修复 `combat/engine.py` 的光环免疫扫描：原来遍历 `catalog.features.items()`，一旦出现同名双 owner，键是 `(owner, id)` 元组，`has_feature` 会永久 miss；改为遍历 `features_by_key.values()` 并按 `owner` 查询。
+- 测试夹具显式带上子职选择：`test_dnd2024_class_features.py`、`test_dnd2024_survivor.py`、`test_dnd2024_feat_resources.py`、`test_dnd2024_draconic_resilience.py`。`test_ownership_is_derived_without_features_subclass_ref`（断言的是已废止的 v1 设计）改写为 `test_ownership_requires_an_explicit_subclass_selection`。
+- 新增 `test_every_subclass_feature_requires_an_explicit_selection`：对 12 条子职声明逐条断言，无 `features`、空 `subclass_ref` 均不授予，正确选择才授予。
+- 回归：受影响 11 文件 290 passed；升级/战斗/休息综合 23 文件 536 passed；`ruff check` 通过；`ruff format --check` 对 derivation/advancement/engine 仍报 would reformat，`35653f81` 基线同样如此。
