@@ -72,6 +72,8 @@ export const ru = {
   creatorExportIdInvalid: 'ID пакета может содержать только строчные латинские буквы, цифры и дефисы.',
   creatorExportResourceRequired: 'Выберите хотя бы мир, свод правил, книгу знаний или карточку персонажа.',
   creatorExportAdventureRequired: 'Выберите хотя бы одно приключение.',
+  creatorExportLanguages: 'Языки контента',
+  creatorExportLanguagesHint: 'Укажите, на каких языках можно читать миры, книги и модули в этом пакете. Магазин покажет языковой бейдж и позволит фильтровать по нему; если ничего не выбрано, язык считается не указанным.',
   creatorExportEntries: 'записей',
   creatorExportPreview: 'Предпросмотр экспорта',
   creatorExportPreviewCount: 'Приключения',
