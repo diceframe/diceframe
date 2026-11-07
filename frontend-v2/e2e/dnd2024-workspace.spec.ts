@@ -204,7 +204,7 @@ test('professional toolbox remains contained at phone, tablet, and desktop width
     expect(geometry.workspaceBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1)
     expect(geometry.minControlHeight).toBeGreaterThanOrEqual(28)
     expect(geometry.minCheckboxTargetHeight).toBeGreaterThanOrEqual(43)
-    await page.locator('.dnd-toolbox-dialog .modal-x').click()
+    await page.getByTestId('dnd-toolbox-close').click()
     await expect(page.locator('.dnd-toolbox-dialog')).toHaveCount(0)
   }
 })
@@ -242,7 +242,7 @@ test('professional toolbox keeps long tool panels scrollable inside the dialog',
     await expectToolPanelReachable(page, '.campaign-panel', `campaign @ ${viewport.width}x${viewport.height}`)
     await expect(page.locator('.campaign-panel')).toBeVisible()
 
-    await page.locator('.dnd-toolbox-dialog .modal-x').click()
+    await page.getByTestId('dnd-toolbox-close').click()
     await expect(page.locator('.dnd-toolbox-dialog')).toHaveCount(0)
   }
 })

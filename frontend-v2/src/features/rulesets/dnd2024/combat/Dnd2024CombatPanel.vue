@@ -16,6 +16,7 @@ import {
 } from '@/features/rulesets/dnd2024/api'
 import type {
   CharacterClassResource,
+  CharacterPortrait,
   JsonObject,
   RulesetCombatAction,
   RulesetCombatReactionFeature,
@@ -25,6 +26,7 @@ import type {
   RulesetGameplayResponse,
   RulesetPendingDecision,
 } from '@/api/types'
+import { api } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import ActionDock, { type DockTab } from './hud/ActionDock.vue'
@@ -268,10 +270,78 @@ function chooseTrackPosition(position: number): void {
   selectDockTab('move')
 }
 
+// 本局角色列表：NPC 用 npc_id / name，玩家用 user_id；头像都来自角色卡，
+// 战斗本身不另造美术。取不到就继续用首字母色块。
+// 注意：/characters 只把 NPC 名单返回给 GM，玩家端拿不到 npcs，
+// 所以玩家看到的敌人仍是首字母块；要让玩家也看到，需要服务端在战斗数据里带头像。
+interface GameCharactersResponse {
+  players?: Array<{
+    user_id: string
+    character_name?: string
+    character_sheet?: { portrait?: CharacterPortrait | null } | null
+  }>
+  npcs?: Array<{
+    npc_id?: string
+    id?: string
+    card_id?: string
+    name?: string
+    character_name?: string
+    portrait?: CharacterPortrait | null
+  }>
+}
+const combatPortraits = ref<Record<string, CharacterPortrait | null>>({})
+const portraitLoadedFor = ref('')
+
+function portraitLookupKey(actorId: string, name: string): string[] {
+  const keys = [actorId]
+  const bare = actorId.includes(':') ? actorId.split(':').slice(1).join(':') : actorId
+  if (bare && bare !== actorId) keys.push(`enemy:${bare}`)
+  if (name) keys.push(`name:${name.trim().toLowerCase()}`)
+  return keys
+}
+
+function portraitForActor(actor: RulesetCombatTarget): CharacterPortrait | null {
+  for (const key of portraitLookupKey(actor.actor_id, actor.name)) {
+    const hit = combatPortraits.value[key]
+    if (hit?.kind) return hit
+  }
+  return null
+}
+
+async function loadCombatPortraits(): Promise<void> {
+  const gameKey = props.gameKey
+  if (!gameKey || portraitLoadedFor.value === gameKey) return
+  portraitLoadedFor.value = gameKey
+  try {
+    const response = await api<GameCharactersResponse>(`/games/${encodeURIComponent(gameKey)}/characters`)
+    if (props.gameKey !== gameKey) return
+    const map: Record<string, CharacterPortrait | null> = {}
+    for (const player of response.players || []) {
+      const portrait = player.character_sheet?.portrait
+      if (!portrait?.kind) continue
+      map[`player:${player.user_id}`] = portrait
+      if (player.character_name) map[`name:${player.character_name.trim().toLowerCase()}`] = portrait
+    }
+    for (const npc of response.npcs || []) {
+      const portrait = npc.portrait
+      if (!portrait?.kind) continue
+      const id = String(npc.npc_id || npc.id || npc.card_id || '')
+      if (id) map[`enemy:${id}`] = portrait
+      const npcName = String(npc.character_name || npc.name || '').trim()
+      if (npcName) map[`name:${npcName.toLowerCase()}`] = portrait
+    }
+    combatPortraits.value = map
+  } catch {
+    // 头像只是装饰：拉不到就保持首字母块，并允许下次重试。
+    portraitLoadedFor.value = ''
+  }
+}
+
 const battleTokens = computed(() => buildBattleTokens(
   combat.value?.actors || [],
   String(combat.value?.current_actor_id || ''),
   props.actorId,
+  portraitForActor,
 ))
 const battlefieldLabels = computed<BattlefieldLabels>(() => ({
   hp: copy.value.hp,
@@ -675,6 +745,8 @@ watch(
 
 function clearGameScopedState(): void {
   clearFeedback()
+  combatPortraits.value = {}
+  portraitLoadedFor.value = ''
   data.value = null
   busy.value = false
   error.value = ''
@@ -1063,11 +1135,15 @@ watch(() => props.gameKey, (next, previous) => {
   if (next === previous) return
   loadSequence += 1
   clearGameScopedState()
-  if (next) void load()
+  if (next) {
+    void load()
+    void loadCombatPortraits()
+  }
 })
 watch(() => props.refreshKey, () => void load(true))
 onMounted(() => {
   void load()
+  void loadCombatPortraits()
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'hidden') void load(true)
   }, 30000)
@@ -1422,12 +1498,17 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               </label>
             </div>
 
-            <div v-if="dockMode === 'move' && moveAction" class="mode-panel" data-mode="move">
+            <div v-if="dockMode === 'move' && moveAction" class="mode-panel move-panel" data-mode="move">
               <p class="dock-hint">{{ copy.moveHint }}</p>
-              <label>{{ copy.move }}
-                <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
-                <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
-              </label>
+              <div class="move-row">
+                <label>{{ copy.move }}
+                  <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
+                </label>
+                <button type="button" class="move-submit" :disabled="!canStageDock" @click="stageDock()">
+                  <NIcon :component="FootstepsOutline" />{{ copy.move }}
+                </button>
+              </div>
+              <small class="move-range">± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
             </div>
           </template>
 
@@ -1457,23 +1538,24 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 <template #icon><NIcon :component="type === 'dodge' ? ShieldOutline : type === 'death_save' ? SparklesOutline : FootstepsOutline" /></template>
               </ActionTile>
             </template>
-            <ActionTile v-if="dockTab === 'move' && moveAction" :label="copy.move" :hint="`${moveAction.movement_remaining} ${copy.feet}`" :active="dockMode === 'move'" data-tile="move" @click="openDockMode('move')">
-              <template #icon><NIcon :component="FootstepsOutline" /></template>
-            </ActionTile>
           </template>
 
           <template #summary>
-            <div v-if="dockMode" class="dock-target">
+            <div v-if="dockMode" class="dock-detail">
               <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
               <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
               <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
             </div>
-            <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
-              <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
-            </button>
-            <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
-            <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
-            <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+            <div class="dock-actions">
+              <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
+                <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
+              </button>
+              <div class="dock-finish">
+                <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
+                <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
+                <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+              </div>
+            </div>
           </template>
         </ActionDock>
         <template v-else>
@@ -1527,10 +1609,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
 .capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
-.dock-target { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
-.dock-target span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
-.dock-target small { color: #9aa9b4; }
-.dock-target b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.dock-detail { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.dock-detail span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.dock-detail small { color: #9aa9b4; }
+.dock-detail b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .dock-confirm, .dock-end { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; border-radius: 12px; font-weight: 700; cursor: pointer; }
 .dock-confirm { border: 1px solid #e4b75e; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; box-shadow: 0 0 14px rgb(228 183 94 / 25%); }
 .dock-confirm:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; box-shadow: none; cursor: not-allowed; }
@@ -1551,6 +1633,17 @@ button, select, input { min-height: 44px; font: inherit; }
 .declare-toggle input { width: auto; min-height: 0; margin-top: 2px; }
 .declare-toggle span { display: grid; gap: 2px; }
 .declare-toggle small { color: #9aa9b4; font-size: 10px; font-weight: 400; }
+/* 右侧栏：目标信息占固定高度，确认按钮紧跟其后，结束类按钮固定在底部，
+   这样切换动作/附赠/移动/反应页签时按钮不会上下跳。 */
+.dock-actions { display: grid; gap: 8px; margin-top: auto; align-self: end; }
+.dock-actions .dock-confirm { margin: 0; }
+.dock-finish { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(120 150 175 / 22%); }
+.move-panel .move-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.move-panel .move-row label { margin: 0; min-width: 0; }
+.move-panel .move-row input { min-height: 38px; }
+.move-range { color: #9aa9b4; font-size: 11px; }
+.move-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-height: 38px; margin: 0; padding: 0 16px; border: 1px solid #e4b75e; border-radius: 10px; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; font-size: 13px; font-weight: 600; cursor: pointer; }
+.move-submit:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; cursor: not-allowed; }
 .end-turn-ready { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 8px 9px; border: 1px solid #b88b3e; border-radius: 8px; background: rgb(197 148 67 / 14%); color: #f2d28f; font-size: 12px; font-weight: 700; }
 .decision-card, .confirm-card { padding: 12px; border: 1px solid #c2974a; border-radius: 12px; background: #322716; }
 .decision-card div, .confirm-card div { display: flex; gap: 7px; flex-wrap: wrap; }

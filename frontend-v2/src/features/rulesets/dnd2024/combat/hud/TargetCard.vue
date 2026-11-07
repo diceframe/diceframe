@@ -28,7 +28,7 @@ defineProps<{
     <p v-if="!token" class="target-empty">{{ labels.empty }}</p>
     <template v-else>
       <header>
-        <BattleAvatar :name="token.name" :side="token.side" :size="54" />
+        <BattleAvatar :name="token.name" :side="token.side" :size="54" :portrait="token.portrait" />
         <div>
           <strong>{{ token.name }}</strong>
           <small>{{ token.side === 'enemy' ? labels.sideEnemy : labels.sideAlly }}</small>

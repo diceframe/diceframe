@@ -33,7 +33,7 @@ const struck = computed(() => (props.floaters || []).some(
     :data-actor-id="token.id"
   >
     <span v-if="token.isCurrent" class="token-marker" aria-hidden="true" />
-    <BattleAvatar :name="token.name" :side="token.side" :size="46" />
+    <BattleAvatar :name="token.name" :side="token.side" :size="46" :portrait="token.portrait" />
     <div class="token-plate">
       <strong class="token-name">{{ token.name }}</strong>
       <div

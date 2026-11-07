@@ -26,7 +26,7 @@ defineProps<{
         :class="[token.side, { current: token.isCurrent, defeated: token.isDefeated, dying: token.isDying }]"
         :aria-current="token.isCurrent ? 'step' : undefined"
       >
-        <BattleAvatar :name="token.name" :side="token.side" :size="token.isCurrent ? 46 : 36" />
+        <BattleAvatar :name="token.name" :side="token.side" :size="token.isCurrent ? 46 : 36" :portrait="token.portrait" />
         <strong>{{ token.name }}</strong>
       </li>
     </ol>

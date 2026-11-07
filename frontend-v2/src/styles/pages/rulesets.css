@@ -9,6 +9,71 @@
   overflow: hidden;
 }
 
+/* 工具面板的标题只是重复导航（Tab 已经写着战役/战斗），整条 header 收成
+   读屏可见的 sr-only：role=dialog 的 aria-labelledby 仍然指向它，视觉上不再占行。
+   ✕ 由 .dnd-toolbox-bar 里的按钮承担，Modal 自带的那个隐藏。 */
+.dialog.dnd-toolbox-dialog > header {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.dialog.dnd-toolbox-dialog > header .modal-x {
+  display: none;
+}
+
+.dialog.dnd-toolbox-dialog {
+  padding-top: 12px;
+}
+
+/* 标签 + 关闭按钮同一行。 */
+.dnd-toolbox-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 7px;
+  margin: 0 0 10px;
+}
+
+.dnd-toolbox-bar .dnd-toolbox-tabs {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+}
+
+.dnd-toolbox-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  border: 1px solid var(--df-border-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--df-surface-1) 90%, transparent);
+  color: var(--df-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dnd-toolbox-close:hover {
+  border-color: color-mix(in srgb, var(--df-danger-strong, #9f3d35) 45%, var(--df-border-soft));
+  color: var(--df-danger-strong, #9f3d35);
+  background: color-mix(in srgb, var(--df-danger-strong, #9f3d35) 12%, transparent);
+}
+
+.dnd-toolbox-close:focus-visible {
+  outline: 2px solid var(--df-interactive);
+  outline-offset: 2px;
+}
+
 .dnd-toolbox-tabs {
   display: flex;
   flex: 0 0 auto;

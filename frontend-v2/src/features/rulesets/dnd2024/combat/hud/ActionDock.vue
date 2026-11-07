@@ -37,7 +37,7 @@ function onTabKey(event: KeyboardEvent, index: number): void {
 <template>
   <section class="action-dock available-actions" :aria-label="dockLabel">
     <div v-if="own" class="dock-identity">
-      <BattleAvatar :name="own.name" :side="own.side" :size="58" />
+      <BattleAvatar :name="own.name" :side="own.side" :size="58" :portrait="own.portrait" />
       <strong>{{ own.name }}</strong>
       <span class="dock-hp">{{ hpLabel }} {{ own.hp }}/{{ own.maxHp }}</span>
       <div class="dock-hp-bar"><i :style="{ width: `${own.hpRatio * 100}%` }" /></div>
@@ -87,7 +87,7 @@ function onTabKey(event: KeyboardEvent, index: number): void {
 .dock-options { display: grid; gap: 8px; min-width: 0; }
 .dock-options:empty { display: none; }
 .dock-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-.dock-summary { display: grid; align-content: stretch; gap: 8px; min-width: 0; }
+.dock-summary { display: grid; grid-template-rows: minmax(0, 1fr) auto; align-content: stretch; gap: 8px; min-width: 0; }
 @media (max-width: 960px) {
   .action-dock { grid-template-columns: minmax(0, 1fr); }
   .dock-identity { grid-template-columns: auto 1fr; justify-items: start; column-gap: 10px; text-align: left; }
