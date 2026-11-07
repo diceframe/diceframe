@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from .contracts import (
     PluginSupportView,
     PluginTypeDescriptor,
     PluginTypeListView,
 )
+
+logger = logging.getLogger(__name__)
 
 # 运行方式
 PROCESS_MODE_STATIC = "static"                # 无进程：内容包/主题
@@ -227,6 +232,84 @@ def content_delivery_mode(manifest: dict) -> str:
     return mode if mode in CONTENT_DELIVERY_MODES else "legacy_autoimport"
 
 
+COMPATIBLE_RULESETS_FIELD = "compatible_rulesets"
+MAX_COMPATIBLE_RULESETS = 6
+# 只收敛已知别名，不猜未知系统：未知 ID 保持原样（自定义规则也允许贴标签）。
+# 注意：不收敛 ``dnd`` / ``dnd5e`` —— 5e(2014) 与 5e(2024) 的兼容性未经证明，
+# 自动映射等于替作者做出兼容声明；要贴 dnd2024 标签请显式书写。
+_RULESET_LABEL_ALIASES = {
+    "coc": "coc7",
+    "coc7e": "coc7",
+}
+
+
+def normalize_ruleset_label(value: Any) -> str:
+    """Canonical, display-facing ruleset id (``core:coc7`` / ``coc`` → ``coc7``)."""
+
+    text = str(value or "").strip().casefold()
+    if text.startswith("core:"):
+        text = text[len("core:"):]
+    return _RULESET_LABEL_ALIASES.get(text, text)
+
+
+def parse_compatible_rulesets(manifest: dict) -> list[str]:
+    """Validate the optional ruleset-attribution labels; no runtime check.
+
+    Unlike ``requires.rulesets`` this is **metadata**: it says which rule system the
+    content is written for, not which runtime must be installed. A CoC pack can
+    therefore declare ``["coc7"]`` even though ``core:coc7`` is not registered yet.
+    """
+
+    manifest = manifest or {}
+    raw = manifest.get(COMPATIBLE_RULESETS_FIELD)
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 必须是数组")
+    if len(raw) > MAX_COMPATIBLE_RULESETS:
+        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 最多 {MAX_COMPATIBLE_RULESETS} 条")
+    labels: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 条目必须是字符串")
+        label = normalize_ruleset_label(entry)
+        if not label:
+            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 不允许空字符串")
+        if label not in labels:
+            labels.append(label)
+    if labels and manifest.get("system_agnostic") is True:
+        raise ValueError(
+            "system_agnostic: true 与 compatible_rulesets 互斥：通用包不应限定具体规则"
+        )
+    return labels
+
+
+def marketplace_ruleset_labels(raw: Any) -> list[str]:
+    """Tolerant read of untrusted ``compatible_rulesets`` for catalogue display.
+
+    ``parse_compatible_rulesets`` 是安装/发布链路的严格校验（fail closed，抛错）；
+    市场索引读取的是**远端不可信数据**，单个坏 manifest 不能拖垮整个目录，也
+    不能让星号解包把字符串拆成逐字符伪标签。因此这里只接受「字符串列表」，
+    非法条目跳过并告警，非法字段整体降级为空列表——坏包最多丢失规则标签，
+    仍然正常展示。
+    """
+
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        logger.warning("市场索引 compatible_rulesets 不是数组，已忽略: %r", raw)
+        return []
+    labels: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            logger.warning("市场索引 compatible_rulesets 含非字符串条目，已跳过: %r", entry)
+            continue
+        label = normalize_ruleset_label(entry)
+        if label and label not in labels:
+            labels.append(label)
+    return labels[:MAX_COMPATIBLE_RULESETS]
+
+
 def validate_content_module_profile(manifest: dict) -> None:
     """Validate the content module profile fields; fail closed on bad combos.
 
@@ -250,6 +333,7 @@ def validate_content_module_profile(manifest: dict) -> None:
         )
     if content_delivery_mode(manifest) == "catalog" and manifest.get("entrypoint") is not None:
         raise ValueError("catalog 纯内容包不得声明 entrypoint；程序能力应使用执行插件类型")
+    parse_compatible_rulesets(manifest)
 
 
 def is_adventure_module(manifest: dict) -> bool:
