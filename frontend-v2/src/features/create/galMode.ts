@@ -32,6 +32,31 @@ export function galLinkageForRule(
   return null
 }
 
+/**
+ * 以「生效规则」为准的联动：不管规则是从哪条路径来的（模板下拉、AI 基础规则、
+ * AI 生成结果、世界来源切换、冒险兼容规则、深链启动），只要 effective rule 与
+ * play_mode/solo 的组合不满足 GAL 契约，就在这里统一拉回合法状态；返回 null
+ * 表示已经是合法组合。
+ *
+ * 与 galLinkageForRule 的差异：那里以「上一次规则」为参照，只在 GAL⇄非 GAL
+ * *切换* 时生效；这里只看当前生效规则——非 GAL 规则 + play_mode=gal 任何
+ * 时候都是非法组合（例如模板选了 GAL 后切到 AI 来源），必须降级为 free。
+ * play_mode=adventure 不受影响：冒险模式的规则切换不应间接取消冒险。
+ */
+export function galLinkageForActiveRule(
+  activeRule: string,
+  state: GalRuleState,
+): GalRuleState | null {
+  if (activeRule === GAL_RULE_ID) {
+    if (state.playMode === 'gal' && state.solo) return null
+    return { playMode: 'gal', solo: true }
+  }
+  if (state.playMode === 'gal') {
+    return { playMode: 'free', solo: state.solo }
+  }
+  return null
+}
+
 /** 用户从 GAL 切换到自由/模组时，回退到哪条非 GAL 规则。 */
 export function nonGalFallbackRule(candidates: Array<string | undefined | null>): string {
   const hit = candidates

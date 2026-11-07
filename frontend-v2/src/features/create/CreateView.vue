@@ -155,8 +155,8 @@ const showAdventurePackages = computed(() => (
   mode.value === 'template'
   && (supportsAdventurePackages.value || availableModuleAdventures.value.length > 0)
 ))
-const adventureSelection = useAdventureSelection({ rule: activeRule, world, language: gameLanguage, mode, supported: supportsAdventurePackages, setRule: id => { rule.value = id } })
-import { GAL_RULE_ID, galCreateIsConsistent, galLinkageForRule, nonGalFallbackRule } from './galMode'
+const adventureSelection = useAdventureSelection({ rule: activeRule, world, language: gameLanguage, mode, supported: supportsAdventurePackages, setRule: id => selectRule(id) })
+import { GAL_RULE_ID, galCreateIsConsistent, galLinkageForActiveRule, galLinkageForRule, nonGalFallbackRule } from './galMode'
 
 const { moduleId, playMode, selectedKey: adventureChoice, selectedAdventure, availableModuleAdventures, selectPlayMode, initializeLaunch, issue: adventureIssue } = adventureSelection
 // 用户最后一次选的非 GAL 规则：从 GAL 切回自由/模组时用它还原，而不是硬写默认值。
@@ -191,6 +191,21 @@ function choosePlayMode(next: 'free' | 'adventure'): void {
   selectPlayMode(next)
 }
 
+// 兜底联动：activeRule 是「生效规则」的唯一事实来源。世界来源切换（模板/自定义/
+// AI）、AI 基础规则 v-model、AI 生成结果到达、初始默认规则等路径不经过 selectRule，
+// 这里统一把 play_mode/solo 拉回 GAL 契约允许的组合，非法组合在创建前就已修正，
+// 而不是等提交守卫抛错。restoringDraft 期间由草稿恢复逻辑自行负责一致性。
+watch(activeRule, () => {
+  if (restoringDraft.value) return
+  const linked = galLinkageForActiveRule(activeRule.value, {
+    playMode: playMode.value as 'free' | 'adventure' | 'gal',
+    solo: solo.value,
+  })
+  if (!linked) return
+  if (linked.playMode !== playMode.value) selectPlayMode(linked.playMode)
+  solo.value = linked.solo
+})
+
 const adventureCompatibleRule = computed(() => {
   const adventure = selectedAdventure.value
   return adventure ? rules.value.find(rule => adventureMatchesRule(adventure, rule)) || null : null
@@ -224,7 +239,7 @@ function applyAdventureRecommendedWorld(): void {
   if (adventureRecommendedWorld.value && worlds.value.some(item => worldIdOf(item) === adventureRecommendedWorld.value)) world.value = adventureRecommendedWorld.value
 }
 function applyAdventureCompatibleRule(): void {
-  if (adventureCompatibleRule.value) rule.value = adventureCompatibleRule.value.rule_id
+  if (adventureCompatibleRule.value) selectRule(adventureCompatibleRule.value.rule_id)
 }
 const activeWorldTemplate = computed(() => worlds.value.find(item => worldIdOf(item) === world.value))
 const defaultSceneImagePool = computed<SceneImageRef[]>(() => {
@@ -584,9 +599,11 @@ onMounted(async () => {
       world.value = preselectedWorld
     }
     const worldDefaultRule = String(activeWorldTemplate.value?.default_rule || '')
-    rule.value = rules.value.some(item => item.rule_id === worldDefaultRule)
+    // 统一走 selectRule：世界默认规则是 GAL 时，play_mode/solo 在这里就同步成
+    // 合法组合，不再依赖兜底 watcher 才联动。
+    selectRule(rules.value.some(item => item.rule_id === worldDefaultRule)
       ? worldDefaultRule
-      : (rules.value[0]?.rule_id || '')
+      : (rules.value[0]?.rule_id || ''))
     aiRule.value = rule.value
     // World/rule refs in this handoff are UI defaults; creation validates them again.
     // Establish the normal first-seat shape before restoring a draft. This keeps
@@ -993,7 +1010,7 @@ async function create() {
 
         <section v-else-if="step === 2" class="create-step-card create-game-settings-stage">
           <div class="create-config-surface">
-            <label :class="{ wide: seed.trim() }"><span>{{ t('gameMode') }}</span><select v-model.number="solo"><option :value="true">{{ t('solo') }}</option><option :value="false">{{ t('multiplayer') }}</option></select></label>
+            <label :class="{ wide: seed.trim() }"><span>{{ t('gameMode') }}</span><select v-model.number="solo"><option :value="true">{{ t('solo') }}</option><option :value="false" :disabled="activeRule === GAL_RULE_ID">{{ t('multiplayer') }}</option></select></label>
             <template v-if="!seed.trim()">
               <label><span>{{ t('difficulty') }}</span><select v-model="difficulty"><option :value="DIFFICULTY_EASY">{{ t('easy') }}</option><option :value="DIFFICULTY_NORMAL">{{ t('normal') }}</option><option :value="DIFFICULTY_HARDCORE">{{ t('hardcore') }}</option></select></label>
             </template>

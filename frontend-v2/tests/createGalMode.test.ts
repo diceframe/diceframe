@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   GAL_RULE_ID,
   galCreateIsConsistent,
+  galLinkageForActiveRule,
   galLinkageForRule,
   nonGalFallbackRule,
 } from '../src/features/create/galMode'
@@ -35,5 +36,33 @@ describe('GAL rule ⇄ play mode linkage', () => {
     expect(galCreateIsConsistent(GAL_RULE_ID, 'gal', false)).toBe(false)
     expect(galCreateIsConsistent('dnd2024_srd', 'gal', true)).toBe(false)
     expect(galCreateIsConsistent('dnd2024_srd', 'adventure', false)).toBe(true)
+  })
+})
+
+describe('GAL active-rule correction (source-agnostic)', () => {
+  it('forces gal+solo whenever the effective rule is the GAL rule', () => {
+    expect(galLinkageForActiveRule(GAL_RULE_ID, { playMode: 'free', solo: false })).toEqual({
+      playMode: 'gal', solo: true,
+    })
+    expect(galLinkageForActiveRule(GAL_RULE_ID, { playMode: 'adventure', solo: true })).toEqual({
+      playMode: 'gal', solo: true,
+    })
+    expect(galLinkageForActiveRule(GAL_RULE_ID, { playMode: 'gal', solo: true })).toBeNull()
+  })
+
+  it('demotes an illegal gal play mode when the effective rule is not GAL', () => {
+    // 模板来源选了 GAL 后切到 AI/自定义来源：生效规则已不是 GAL，gal 必须降级
+    expect(galLinkageForActiveRule('dnd2024_srd', { playMode: 'gal', solo: true })).toEqual({
+      playMode: 'free', solo: true,
+    })
+    expect(galLinkageForActiveRule('', { playMode: 'gal', solo: false })).toEqual({
+      playMode: 'free', solo: false,
+    })
+  })
+
+  it('keeps adventure mode untouched for non-GAL rules', () => {
+    // 冒险模式的规则切换不应间接取消冒险
+    expect(galLinkageForActiveRule('coc7e', { playMode: 'adventure', solo: false })).toBeNull()
+    expect(galLinkageForActiveRule('dnd2024_srd', { playMode: 'free', solo: true })).toBeNull()
   })
 })
