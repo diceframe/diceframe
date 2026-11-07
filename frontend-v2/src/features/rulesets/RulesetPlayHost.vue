@@ -36,7 +36,7 @@ const emit = defineEmits<{
   navigate: [target: RulesetPlayTool]
   'open-map': []
 }>()
-const { locale } = useLocale()
+const { locale, t } = useLocale()
 const extension = computed(() => resolveRulesetPlayExtension(props.runtimeId))
 const copy = computed(() => extension.value?.copy(String(locale.value)) || {
   menu: 'Ruleset tools', campaign: 'Campaign', combat: 'Combat', title: 'Ruleset tools',
@@ -45,19 +45,30 @@ const copy = computed(() => extension.value?.copy(String(locale.value)) || {
 
 <template>
   <Modal :title="copy.title" dialog-class="dnd-toolbox-dialog" @close="emit('close')">
+    <!-- 关闭按钮和工具标签同一行：标题行收起后不要再多占一条。 -->
+    <div class="dnd-toolbox-bar">
+      <nav v-if="extension" class="dnd-toolbox-tabs" :aria-label="copy.menu">
+        <button
+          v-if="hasCampaign && extension.campaign"
+          :class="{ active: activeTool === 'campaign' }"
+          @click="emit('navigate', 'campaign')"
+        >{{ copy.campaign }}</button>
+        <button
+          v-if="hasCombat && extension.combat"
+          :class="{ active: activeTool === 'combat' }"
+          @click="emit('navigate', 'combat')"
+        >{{ copy.combat }}</button>
+      </nav>
+      <button
+        type="button"
+        class="dnd-toolbox-close"
+        data-testid="dnd-toolbox-close"
+        :aria-label="t('close')"
+        :title="t('close')"
+        @click="emit('close')"
+      >✕</button>
+    </div>
     <div v-if="extension" class="ruleset-play-host">
-    <nav class="dnd-toolbox-tabs" :aria-label="copy.menu">
-      <button
-        v-if="hasCampaign && extension.campaign"
-        :class="{ active: activeTool === 'campaign' }"
-        @click="emit('navigate', 'campaign')"
-      >{{ copy.campaign }}</button>
-      <button
-        v-if="hasCombat && extension.combat"
-        :class="{ active: activeTool === 'combat' }"
-        @click="emit('navigate', 'combat')"
-      >{{ copy.combat }}</button>
-    </nav>
     <component
       :is="extension.campaign"
       v-if="activeTool === 'campaign' && hasCampaign && extension.campaign"
