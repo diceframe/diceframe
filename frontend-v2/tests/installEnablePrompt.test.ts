@@ -68,4 +68,16 @@ describe('promptEnableAfterInstall', () => {
     await expect(promptEnableAfterInstall({ id: '', name: 'x' })).resolves.toBe(false)
     expect(dialogs).toHaveLength(0)
   })
+
+  it('reports a failed start instead of claiming the artifact is enabled', async () => {
+    // 宿主内部捕获启动异常时 HTTP 仍是 200：只能看 detail 的 enabled/status。
+    vi.mocked(pluginApi.setRunning).mockResolvedValueOnce(
+      { ok: true, enabled: false, status: 'failed' } as never,
+    )
+    const pending = promptEnableAfterInstall({ id: 'coc-pack', name: 'CoC Pack', enabled: false })
+    dialogs[0]!.onPositiveClick?.()
+
+    await expect(pending).resolves.toBe(false)
+    expect(messages.length).toBe(1)
+  })
 })

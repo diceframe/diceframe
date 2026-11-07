@@ -48,10 +48,17 @@ export async function promptEnableAfterInstall(artifact: InstalledArtifact): Pro
   }
   const ok = await confirm().catch(() => false)
   if (!ok) return false
+  let started: { enabled?: boolean; status?: string } | undefined
   try {
-    await pluginApi.setRunning(id, true)
+    started = await pluginApi.setRunning(id, true) as { enabled?: boolean; status?: string } | undefined
   } catch (error: unknown) {
     notify('error', errorMessage(error))
+    return false
+  }
+  // 宿主对进程型插件的启动失败是「内部捕获 + status=failed」，HTTP 仍是 200：
+  // 只看 Promise 成功会把失败的启用报成已启用（review P2）。
+  if (started && (started.enabled === false || started.status === 'failed')) {
+    notify('error', message('enableAfterInstallFailed', { name }))
     return false
   }
   notify('success', message('pluginNamedEnabled', { name }))

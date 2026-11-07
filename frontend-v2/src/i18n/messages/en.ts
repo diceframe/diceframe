@@ -1766,6 +1766,7 @@ export const en = {
   confirmEnableAfterInstall: '{name} is installed but disabled by default. Its adventures, books, and features only show up once it is enabled. You can also enable it later from its own page.',
   enableAfterInstallPositive: 'Enable now',
   enableAfterInstallLater: 'Maybe later',
+  enableAfterInstallFailed: '{name} could not be enabled — retry from its own page.',
   pluginEnabled: 'Enable plugin',
   selectPluginZip: 'Choose a .dfplugin file',
   pluginZipInstalled: 'Plugin installed',

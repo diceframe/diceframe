@@ -1766,6 +1766,7 @@ export const zhCN = {
   confirmEnableAfterInstall: '{name} 已安装，但默认是禁用状态。启用后它声明的冒险、资料和功能才会出现在游戏里；也可以稍后到对应页面手动启用。',
   enableAfterInstallPositive: '现在启用',
   enableAfterInstallLater: '稍后再说',
+  enableAfterInstallFailed: '{name} 没有启用成功，可以去它的页面手动重试。',
   pluginEnabled: '启用插件',
   selectPluginZip: '请选择 .dfplugin 插件文件',
   pluginZipInstalled: '插件已安装',
