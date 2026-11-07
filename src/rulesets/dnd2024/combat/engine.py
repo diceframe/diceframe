@@ -1282,20 +1282,15 @@ class Dnd2024CombatEngine(
             "attacks_remaining": 0, "disengaged": False,
         }
 
-    @staticmethod
-    def _attacks_per_action(actor: dict[str, Any]) -> int:
-        # Companion 复用玩家职业 Extra Attack 语义（canonical build 相同）。
+    def _attacks_per_action(self, actor: dict[str, Any]) -> int:
+        # Extra Attack 由职业表决定：progression 表说哪个职业在几级授予哪个
+        # feature id，catalog 声明该 feature 的 attacks_per_action。多职业按
+        # RAW 不叠加、取最大值，见 ``ClassFeatureResolver.attacks_per_action``。
+        # Companion 复用玩家职业 Extra Attack 语义（canonical build 相同）；
+        # 敌人没有职业等级，恒为 1。
         if actor["kind"] not in {"player", "companion"}:
             return 1
-        class_levels = actor.get("build", {}).get("class_levels") or []
-        row = class_levels[0] if class_levels else {}
-        class_ref = str(row.get("class_ref") or "")
-        level = int(row.get("level", 1) or 1)
-        if class_ref == "class:fighter":
-            return 4 if level >= 20 else 3 if level >= 11 else 2 if level >= 5 else 1
-        return 2 if level >= 5 and class_ref in {
-            "class:barbarian", "class:monk", "class:paladin", "class:ranger",
-        } else 1
+        return self.features.attacks_per_action(actor)
 
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any],
