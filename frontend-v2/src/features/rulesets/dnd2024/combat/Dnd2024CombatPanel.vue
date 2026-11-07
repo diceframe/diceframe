@@ -16,6 +16,8 @@ import {
 } from '@/features/rulesets/dnd2024/api'
 import type {
   CharacterClassResource,
+  CharacterListResponse,
+  CharacterPortrait,
   JsonObject,
   RulesetCombatAction,
   RulesetCombatReactionFeature,
@@ -25,6 +27,7 @@ import type {
   RulesetGameplayResponse,
   RulesetPendingDecision,
 } from '@/api/types'
+import { api } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import ActionDock, { type DockTab } from './hud/ActionDock.vue'
@@ -268,10 +271,90 @@ function chooseTrackPosition(position: number): void {
   selectDockTab('move')
 }
 
+// 战斗本身不带美术：玩家/NPC 的头像在角色卡上，这里按 actor_id 取一份映射，
+// 取不到就继续用首字母色块（不影响战斗）。
+// 本局角色列表：NPC 用 npc_id / name，玩家用 user_id；都来自角色卡，不额外造数据。
+interface GameCharactersResponse {
+  players?: Array<{ user_id: string; character_name?: string; character_sheet?: { portrait?: CharacterPortrait | null } | null }>
+  npcs?: Array<{
+    npc_id?: string
+    id?: string
+    card_id?: string
+    name?: string
+    character_name?: string
+    portrait?: CharacterPortrait | null
+  }>
+}
+// 本局角色列表：NPC 用 npc_id / name，玩家用 user_id；头像都来自角色卡，
+// 战斗本身不另造美术。取不到就继续用首字母色块。
+interface GameCharactersResponse {
+  players?: Array<{
+    user_id: string
+    character_name?: string
+    character_sheet?: { portrait?: CharacterPortrait | null } | null
+  }>
+  npcs?: Array<{
+    npc_id?: string
+    id?: string
+    card_id?: string
+    name?: string
+    character_name?: string
+    portrait?: CharacterPortrait | null
+  }>
+}
+const combatPortraits = ref<Record<string, CharacterPortrait | null>>({})
+const portraitLoadedFor = ref('')
+
+function portraitLookupKey(actorId: string, name: string): string[] {
+  const keys = [actorId]
+  const bare = actorId.includes(':') ? actorId.split(':').slice(1).join(':') : actorId
+  if (bare && bare !== actorId) keys.push(`enemy:${bare}`)
+  if (name) keys.push(`name:${name.trim().toLowerCase()}`)
+  return keys
+}
+
+function portraitForActor(actor: RulesetCombatTarget): CharacterPortrait | null {
+  for (const key of portraitLookupKey(actor.actor_id, actor.name)) {
+    const hit = combatPortraits.value[key]
+    if (hit?.kind) return hit
+  }
+  return null
+}
+
+async function loadCombatPortraits(): Promise<void> {
+  const gameKey = props.gameKey
+  if (!gameKey || portraitLoadedFor.value === gameKey) return
+  portraitLoadedFor.value = gameKey
+  try {
+    const response = await api<GameCharactersResponse>(`/games/${encodeURIComponent(gameKey)}/characters`)
+    if (props.gameKey !== gameKey) return
+    const map: Record<string, CharacterPortrait | null> = {}
+    for (const player of response.players || []) {
+      const portrait = player.character_sheet?.portrait
+      if (!portrait?.kind) continue
+      map[`player:${player.user_id}`] = portrait
+      if (player.character_name) map[`name:${player.character_name.trim().toLowerCase()}`] = portrait
+    }
+    for (const npc of response.npcs || []) {
+      const portrait = npc.portrait
+      if (!portrait?.kind) continue
+      const id = String(npc.npc_id || npc.id || npc.card_id || '')
+      if (id) map[`enemy:${id}`] = portrait
+      const npcName = String(npc.character_name || npc.name || '').trim()
+      if (npcName) map[`name:${npcName.toLowerCase()}`] = portrait
+    }
+    combatPortraits.value = map
+  } catch {
+    // 头像只是装饰：拉不到就保持首字母块，并允许下次重试。
+    portraitLoadedFor.value = ''
+  }
+}
+
 const battleTokens = computed(() => buildBattleTokens(
   combat.value?.actors || [],
   String(combat.value?.current_actor_id || ''),
   props.actorId,
+  portraitForActor,
 ))
 const battlefieldLabels = computed<BattlefieldLabels>(() => ({
   hp: copy.value.hp,
@@ -675,6 +758,8 @@ watch(
 
 function clearGameScopedState(): void {
   clearFeedback()
+  combatPortraits.value = {}
+  portraitLoadedFor.value = ''
   data.value = null
   busy.value = false
   error.value = ''
@@ -1068,6 +1153,7 @@ watch(() => props.gameKey, (next, previous) => {
 watch(() => props.refreshKey, () => void load(true))
 onMounted(() => {
   void load()
+  void loadCombatPortraits()
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'hidden') void load(true)
   }, 30000)

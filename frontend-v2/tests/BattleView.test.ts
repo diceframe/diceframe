@@ -72,4 +72,18 @@ describe('combat HUD battle view', () => {
     expect(slots.get('enemy:c')!.lane).toBe(1 + 1) // neighbours of both rows
     expect(slots.get('enemy:d')!.lane).toBe(0)
   })
+
+  it('attaches the portrait a caller resolves for the actor', () => {
+    const portrait = { kind: 'upload', id: 'npc-face' } as never
+    const tokens = buildBattleTokens(
+      [actor('player:gm', 0), actor('enemy:goblin-1', 5)],
+      'player:gm',
+      'gm',
+      candidate => (candidate.actor_id === 'enemy:goblin-1' ? portrait : null),
+    )
+    expect(tokens[0].portrait).toBeNull()
+    expect(tokens[1].portrait).toBe(portrait)
+    // 没有解析函数时保持 null，HUD 继续用首字母块
+    expect(buildBattleTokens([actor('enemy:goblin-1', 5)], '', 'gm')[0].portrait).toBeNull()
+  })
 })

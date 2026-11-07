@@ -37,7 +37,7 @@ function onTabKey(event: KeyboardEvent, index: number): void {
 <template>
   <section class="action-dock available-actions" :aria-label="dockLabel">
     <div v-if="own" class="dock-identity">
-      <BattleAvatar :name="own.name" :side="own.side" :size="58" />
+      <BattleAvatar :name="own.name" :side="own.side" :size="58" :portrait="own.portrait" />
       <strong>{{ own.name }}</strong>
       <span class="dock-hp">{{ hpLabel }} {{ own.hp }}/{{ own.maxHp }}</span>
       <div class="dock-hp-bar"><i :style="{ width: `${own.hpRatio * 100}%` }" /></div>

@@ -1,4 +1,4 @@
-import type { RulesetCombatTarget } from '@/api/types'
+import type { CharacterPortrait, RulesetCombatTarget } from '@/api/types'
 
 /**
  * Presentation model for the combat HUD.
@@ -30,6 +30,8 @@ export interface BattleToken {
   /** A party member at 0 HP who is still making death saves (or is stable). */
   isDying: boolean
   isOwn: boolean
+  /** 角色卡上的头像；战斗本身不带美术，缺省时 HUD 用首字母块。 */
+  portrait?: CharacterPortrait | null
 }
 
 /** Which layout component draws a given server `position_mode`. */
@@ -50,6 +52,7 @@ export function buildBattleTokens(
   actors: RulesetCombatTarget[],
   currentActorId: string,
   ownActorId: string,
+  portraitFor?: (actor: RulesetCombatTarget) => CharacterPortrait | null,
 ): BattleToken[] {
   return actors.map((actor) => {
     const maxHp = Math.max(1, Number(actor.max_hp) || 1)
@@ -70,6 +73,7 @@ export function buildBattleTokens(
       isDefeated: dead || (hp <= 0 && !down),
       isDying: down,
       isOwn: actor.actor_id === `player:${ownActorId}`,
+      portrait: portraitFor ? portraitFor(actor) : null,
     }
   })
 }

@@ -122,6 +122,7 @@ function cellLabel(x: number): string {
               :name="current.name"
               :side="current.side"
               :size="26"
+              :portrait="current.portrait"
             />
             <span v-else>{{ x % 10 === 0 || canReach(x) ? x : '' }}</span>
           </button>
