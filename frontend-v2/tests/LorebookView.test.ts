@@ -1095,6 +1095,48 @@ describe('LorebookView perspective inspector', () => {
     expect(viewerButtons).toEqual(['GM 全知', '全队', '莱拉', '布兰'])
   })
 
+  it('re-points the book when switching worlds even if the old book lingers in the list', async () => {
+    // 回归：灰沼对局进行中浏览其它世界时，对局 runtime 书（world:w1）会以
+    // game scope 混进新世界的书单，旧的当前书因此留在列表里没有被切走——
+    // 条目列表停在旧书，可见性投影却按新世界算，徽章整列消失。
+    mocks.route.query = { world: 'w1' }
+    mocks.api.mockImplementation(async (path: string) => {
+      const p = String(path)
+      if (p.includes('/preview')) return previewFor(p)
+      if (p.includes('/characters')) return characters
+      if (p.includes('/games')) return games
+      if (p.startsWith('/lorebooks?')) {
+        const query = new URLSearchParams(p.split('?')[1])
+        const world = query.get('world_id') || ''
+        const books = [{ id: `world:${world}`, name: `${world} 主册`, primary: true, scope: 'world', entry_count: 3 }]
+        // 模拟对局书泄漏进每个世界的书单（旧服务端行为）。
+        if (world === 'w2') books.push({ id: 'world:w1', name: '灰沼边境', primary: false, scope: 'game', entry_count: 3 })
+        return { books }
+      }
+      if (p.endsWith('/entries')) return lorebook
+      if (p.includes('/worlds')) return { worlds: [
+        { id: 'w1', name: '灰沼边境', language: 'zh-CN', entry_count: 3 },
+        { id: 'w2', name: '第二世界', language: 'zh-CN', entry_count: 3 },
+      ] }
+      throw new Error(`unexpected path ${p}`)
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('.lore-context-select').setValue('w2')
+    await flushPromises()
+    await flushPromises()
+
+    const entryCalls = mocks.api.mock.calls.map(call => String(call[0])).filter(p => p.endsWith('/entries'))
+    expect(entryCalls[entryCalls.length - 1]).toBe('/lorebooks/world%3Aw2/entries')
+    // 条目与投影重新对上号：可见性徽章恢复显示。
+    const badges = wrapper.findAll('.lore-visibility-badge').map(b => b.text())
+    expect(badges).toContain('全队已知')
+    expect(badges).toContain('GM 秘密')
+    wrapper.unmount()
+  })
+
   it('switches the viewer with canonical ids and game context', async () => {
     const wrapper = mountView()
     await flushPromises()

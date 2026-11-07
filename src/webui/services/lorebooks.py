@@ -88,10 +88,26 @@ def list_lorebooks(
     if include_all:
         scoped_books = deps.lorebook.list_lorebooks()
     else:
+        game_books = _game_scoped_lorebooks(deps, game_key) if game_key else []
+        if world_id and game_books:
+            # 浏览某个世界时，绑定在其它世界上的对局书不属于这个书单：
+            # 否则 A 局的 runtime 书会混进 B 世界的列表，条目视图和视角
+            # 投影从此指向两个世界（列表停在 A 书、可见性按 B 世界算）。
+            # 没有 world binding 的对局/角色书保持可见——它们不属于任何
+            # 世界，仍是「当前游戏 / 角色」scope 的一部分。
+            def _belongs_to_world(book: dict[str, Any]) -> bool:
+                worlds = {
+                    str(binding.get("scope_id") or "")
+                    for binding in bindings_by_book.get(str(book.get("id") or ""), [])
+                    if str(binding.get("scope_kind") or "") == "world"
+                }
+                return not worlds or world_id in worlds
+
+            game_books = [book for book in game_books if _belongs_to_world(book)]
         scoped_books = [
             *(deps.lorebook.list_lorebooks(scope_kind="world", scope_id=world_id) if world_id else []),
             *deps.lorebook.list_lorebooks(scope_kind="global", scope_id=""),
-            *(_game_scoped_lorebooks(deps, game_key) if game_key else []),
+            *game_books,
         ]
     # 完全没有 binding 的 Book 也必须可见：否则「新建世界书」和「暂不绑定」导入
     # 都会产出一本谁也管不到的隐形书，用户再也无法给它加绑定。

@@ -379,6 +379,10 @@ watch(currentWorldId, async () => {
   if (showEditWorld.value && editWorldId.value && editWorldId.value !== currentWorldId.value) closeEditWorld()
   if (!currentWorldId.value) return
   const selectedWorldId = currentWorldId.value
+  // 换世界时书必须跟着世界走：旧世界的书（哪怕是作为对局书混在新世界
+  // 书单里）不能继续当当前书，否则条目列表停在旧书、可见性按新世界投影，
+  // 两边 id 对不上，可见性徽章会整列消失。
+  if (activeBookId.value && activeBookId.value !== `world:${selectedWorldId}`) activeBookId.value = ''
   await loadLorebooks(selectedWorldId)
   if (currentWorldId.value !== selectedWorldId) return
   await loadLore(selectedWorldId)
