@@ -224,6 +224,18 @@ export interface CheckResult {
   threshold?: number
   hard_threshold?: number
   extreme_threshold?: number
+  /** 规则要求的成功等级（CoC 难度档位）；缺省为常规。 */
+  difficulty?: 'regular' | 'hard' | 'extreme' | string
+  required_threshold?: number
+  /** 未达到所需档位或输掉对抗时，骰面本身的成功等级。 */
+  achieved_verdict?: string
+  opposed?: {
+    opponent_skill?: string
+    opponent_threshold?: number
+    opponent_roll?: number
+    opponent_verdict?: string
+    outcome?: 'win' | 'lose' | 'tie' | string
+  }
   verdict?: string
   luck_spend_available?: boolean
   luck_cost?: number | null
@@ -914,9 +926,14 @@ export interface RuleMeta {
   max_skills?: number
   skill_mode?: string
   skill_point_total?: number
+  /** 按属性计算技能点预算的公式（如 CoC：edu * 4 + int * 2）；缺省用 skill_point_total。 */
+  skill_point_formula?: string
   max_skill_value?: number
   skill_point_spend_mode?: string
   skill_base_values?: Record<string, number>
+  /** 当前语言下每个已知技能名的基础值；formula 表示由属性派生（如闪避 = dex // 2）。 */
+  skill_base_lookup?: Record<string, { base: number; formula?: string }>
+  custom_skill_base?: number
   skill_pools?: Record<string, string[]>
   skill_pool?: SkillSpec[]
   skills?: SkillSpec[]

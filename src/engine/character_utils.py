@@ -7,6 +7,7 @@ import binascii
 import json
 import logging
 import random
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -24,8 +25,26 @@ logger = logging.getLogger("trpg")
 
 
 def roll_special_stat_value(max_val: int) -> int:
-    """随机生成特殊属性初始值（CoC 理智值等），d3*5 取小。"""
-    return min(random.randint(3, 18) * 5, max_val)
+    """随机生成特殊属性初始值（CoC 幸运等）：3d6×5，不超过上限。
+
+    旧实现是 randint(3, 18)×5 的均匀分布；3d6 是钟形分布，平均值更集中。
+    """
+    return min(sum(random.randint(1, 6) for _ in range(3)) * 5, max_val)
+
+
+_ATTRIBUTE_ROLL_RE = re.compile(r"^\(?(\d{1,2})d(\d{1,3})(?:\+(\d{1,3}))?\)?(?:\*(\d{1,2}))?$")
+
+
+def roll_attribute_formula(formula: str) -> int | None:
+    """按规则声明的属性掷骰式掷值，如 ``3d6*5``、``(2d6+6)*5``；格式不符返回 None。"""
+    match = _ATTRIBUTE_ROLL_RE.match(str(formula or "").replace(" ", "").lower())
+    if not match:
+        return None
+    count, sides = int(match.group(1)), int(match.group(2))
+    if not 1 <= count <= 20 or not 2 <= sides <= 100:
+        return None
+    total = sum(random.randint(1, sides) for _ in range(count)) + int(match.group(3) or 0)
+    return total * int(match.group(4) or 1)
 
 
 def initial_special_stat_value(stat: dict, attributes: dict) -> int:
@@ -467,7 +486,23 @@ def roll_attributes(
     hi: int = 16,
     specs: list[dict] | None = None,
 ) -> dict[str, int]:
-    """随机生成一组属性值，总和尽可能接近 total，并尊重每个属性的上下限。"""
+    """随机生成一组属性值，总和尽可能接近 total，并尊重每个属性的上下限。
+
+    规则为每个属性都声明了掷骰式（如 CoC 7e 的 3d6×5）时按掷骰式生成，
+    不再凑总和：这是规则书的随机建卡方式。
+    """
+    if specs and all(a.get("roll") for a in specs if a.get("key")):
+        rolled: dict[str, int] = {}
+        for spec in specs:
+            if not spec.get("key"):
+                continue
+            value = roll_attribute_formula(str(spec.get("roll")))
+            if value is None:
+                break
+            low, high = int(spec.get("min", value)), int(spec.get("max", value))
+            rolled[str(spec["key"])] = max(low, min(high, value))
+        else:
+            return rolled
     if specs:
         keys = [str(a.get("key")) for a in specs if a.get("key")]
         lows = [int(a.get("min", lo)) for a in specs if a.get("key")]

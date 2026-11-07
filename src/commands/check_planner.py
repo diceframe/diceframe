@@ -27,6 +27,7 @@ from src.engine.character_utils import is_conscious
 from src.engine.currency import legacy_currency_spec, parse_currency_amount
 from src.engine.currency.validation import CurrencySystemError
 from src.engine.dice import d20_dc_cap
+from src.engine.dice_rules_coc import normalize_difficulty
 from src.engine.economy import MAX_ECONOMY_AMOUNT
 from src.engine.game_instance import GameInstance
 from src.engine.intent.parser import (
@@ -132,6 +133,23 @@ def _economy_repair_context(instance: GameInstance, rule: RuleSystem | None) -> 
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+def _planner_system_prompt(instance: GameInstance, rule: RuleSystem | None) -> str:
+    """通用裁定 prompt + 当前规则声明的裁定要点（如 CoC 的何时掷骰、选哪个技能）。"""
+    language = instance.language
+    prompt = _prompt_text(language)
+    appendix = rule.get_check_planner_appendix(language).strip() if rule else ""
+    if appendix:
+        heading = localized_text(language, {
+            "en": "## Adjudication notes for the current rules",
+            "zh-CN": "## 当前规则的裁定要点",
+            "ja": "## 現在のルールの裁定要点",
+            "de": "## Entscheidungshinweise für die aktuellen Regeln",
+            "ru": "## Особенности судейства по текущим правилам",
+        })
+        prompt = "\n\n".join((prompt.rstrip(), f"{heading}\n{appendix}"))
+    return prompt
+
+
 def _prompt_text(language: str) -> str:
     suffix = localized_text(
         language, {"en": "en", "zh-CN": "zh", "ja": "ja", "de": "de", "ru": "ru"}
@@ -150,6 +168,7 @@ from src.commands.check_planner_context import (
     _npc_context,
     _planner_context,
     _positive_inventory_quantity,
+    _recent_checks,
     _recent_purchases,
     _skill_rows,
 )
@@ -214,6 +233,28 @@ def _attribute_key(rule: RuleSystem | None, value: object) -> str:
     return ""
 
 
+def _stat_check_key(rule: RuleSystem | None, value: object) -> str:
+    """规则声明可直接检定的特殊资源（如 CoC 幸运）：按 key 或显示名匹配。"""
+    query = str(value or "").strip().casefold()
+    if not query or rule is None:
+        return ""
+    for stat in rule.percentile_stat_checks:
+        if query in {stat["key"].casefold(), stat["name"].casefold()}:
+            return stat["key"]
+    return ""
+
+
+def _stat_target(sheet: dict[str, Any], key: str) -> int:
+    resources = sheet.get("resources") if isinstance(sheet.get("resources"), dict) else {}
+    resource = resources.get(key) if isinstance(resources.get(key), dict) else {}
+    raw = sheet.get(key, resource.get("current", 0))
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return max(1, min(99, value))
+
+
 def _skill_name(sheet: dict[str, Any], value: object) -> str:
     query = str(value or "").strip().casefold()
     if not query:
@@ -246,10 +287,15 @@ def _label(
     skill: str,
     kind: str,
 ) -> str:
+    if kind == "idea":
+        return localized_text(instance.language, {
+            "en": "Idea Roll", "zh-CN": "灵感检定", "ja": "アイデア判定", "de": "Ideenwurf",
+        })
     subject = skill or attribute
     if rule and not skill:
+        names = [*rule.attributes, *rule.percentile_stat_checks]
         subject = next(
-            (str(item.get("name") or attribute) for item in rule.attributes if item.get("key") == attribute),
+            (str(item.get("name") or attribute) for item in names if item.get("key") == attribute),
             attribute,
         )
     en_suffix = {"save": "Save", "attack": "Attack"}.get(kind, "Check")
@@ -317,6 +363,28 @@ def normalize_check_specs(
         attribute = _attribute_key(rule, attribute_input)
         skill = _skill_name(sheet, skill_input)
         repaired = False
+        is_idea = bool(
+            str(raw.get("kind") or "") == "idea" and rule is not None and rule.idea_roll_attribute
+        )
+        stat_key = ""
+        if is_idea and rule is not None:
+            # 灵感检定固定用规则声明的属性（CoC 为智力），不接受模型另选技能。
+            attribute, skill, skill_input = rule.idea_roll_attribute, "", ""
+        elif not attribute and not skill:
+            stat_key = _stat_check_key(rule, attribute_input) or _stat_check_key(rule, skill_input)
+            if stat_key:
+                attribute, skill_input = stat_key, ""
+        untrained_base: int | None = None
+        if (
+            skill_input and not skill and not stat_key and not is_idea and dice_system == "d100"
+            and rule is not None and rule.skill_point_spend_mode == "above_base"
+        ):
+            # CoC：卡上没有的技能也能按规则基础值检定（没学过不等于不能尝试），
+            # 不再退回成别的技能或属性检定。
+            known = rule.known_skill_name(skill_input)
+            if known:
+                skill = known
+                untrained_base = rule.skill_base_value_for(known, sheet.get("attributes"))
 
         # Smaller models commonly put a skill name in `attribute` (especially for
         # percentile rules), or swap the two fields. Exact cross-field matches are
@@ -346,7 +414,7 @@ def normalize_check_specs(
                 repaired = True
 
         sheet_attributes = sheet.get("attributes") if isinstance(sheet.get("attributes"), dict) else {}
-        if attribute and attribute not in sheet_attributes:
+        if attribute and attribute not in sheet_attributes and not stat_key:
             attribute = ""
         if skill_input and not skill:
             errors.append(f"checks[{index}] skill={skill_input!r} 不在角色卡中")
@@ -357,7 +425,12 @@ def normalize_check_specs(
                     f"checks[{index}] attribute={attribute_input!r} 既不是当前属性也不是角色技能"
                 )
                 continue
-            target = _d100_target(sheet, attribute, skill)
+            if untrained_base is not None:
+                target = max(1, min(99, untrained_base))
+            elif stat_key:
+                target = _stat_target(sheet, stat_key)
+            else:
+                target = _d100_target(sheet, attribute, skill)
         else:
             if not attribute:
                 errors.append(f"checks[{index}] attribute={attribute_input!r} 不在当前规则或角色卡中")
@@ -371,6 +444,10 @@ def normalize_check_specs(
             # 防止后期情境报出 25–30 的失控 DC 导致“只有自然 20 才成功”。
             target = max(1, min(d20_dc_cap(rule), target))
         modifier = max(-20, min(20, int(raw.get("modifier", 0) or 0)))
+        modifier_disabled = bool(rule is not None and not rule.situational_modifier_allowed and modifier)
+        if modifier_disabled:
+            # CoC 7e 不用数值修正：情境只走奖励骰/惩罚骰，难度只走 difficulty。
+            modifier = 0
         advantage = str(raw.get("advantage") or "normal")
         advantage_mode = (
             advantage
@@ -396,8 +473,16 @@ def normalize_check_specs(
             target = channels.target
         modifier = channels.modifier
         advantage_mode = channels.advantage_mode
-        kind = str(raw.get("kind") or "check")
-        if kind not in {"check", "save", "attack"}:
+        planner_notes = list(channels.notes)
+        if modifier_disabled:
+            planner_notes.append("modifier_disabled_by_rule")
+        difficulty = (
+            normalize_difficulty(raw.get("difficulty"))
+            if rule is not None and rule.percentile_difficulty_levels
+            else ""
+        )
+        kind = "idea" if is_idea else str(raw.get("kind") or "check")
+        if kind not in {"check", "save", "attack", "idea"} or (kind == "idea" and not is_idea):
             kind = "check"
         opponent_raw = str(raw.get("opponent") or "").strip()
         opponent = _match_opponent(instance, opponent_raw) if opponent_raw else ""
@@ -446,10 +531,16 @@ def normalize_check_specs(
             "dc_reason": (channels.dc_reason[:160] or None),
             "advantage_reason": (channels.advantage_reason[:160] or None),
             "modifier_reason": (channels.modifier_reason[:160] or None),
-            "planner_notes": list(channels.notes),
+            "planner_notes": planner_notes,
             "planner_dropped": dict(channels.dropped),
             "kind": kind,
             "opponent": opponent,
+            **({"difficulty": difficulty} if difficulty else {}),
+            **({"untrained_skill_value": max(1, min(99, untrained_base))} if untrained_base is not None else {}),
+            **(
+                {"opponent_skill": str(raw.get("opponent_skill") or "").strip()[:40]}
+                if opponent and str(raw.get("opponent_skill") or "").strip() else {}
+            ),
             "assist": assistants,
             "planner_source": "llm_tool_repaired" if repaired else "llm_tool",
         }
@@ -540,6 +631,26 @@ def _safety_net_action_confirmed(
     return False
 
 
+SAFETY_NET_REPEAT_ROUNDS = 2
+
+
+def _recently_checked(instance: GameInstance, uid: str, request: dict[str, Any]) -> bool:
+    """同一玩家在最近几轮是否已为同一技能或属性结算过检定。"""
+    key = str(request.get("skill") or request.get("attribute") or "").strip().casefold()
+    if not key:
+        return False
+    for entry in instance.log[-SAFETY_NET_REPEAT_ROUNDS:]:
+        if not isinstance(entry, dict):
+            continue
+        for check in entry.get("check_results") or []:
+            if not isinstance(check, dict) or str(check.get("actor_uid") or "") != uid:
+                continue
+            checked = str(check.get("skill") or check.get("attribute_key") or "").strip().casefold()
+            if checked == key:
+                return True
+    return False
+
+
 def _merge_safety_net_checks(
     instance: GameInstance,
     rule: RuleSystem | None,
@@ -601,6 +712,14 @@ def _merge_safety_net_checks(
             or safety_intent
             or concealed_or_hazardous
         ):
+            continue
+        if (
+            not explicit_selection
+            and not safety_intent
+            and _recently_checked(instance, uid, request)
+        ):
+            # 只因提到技能名或「隐藏/危险」等词才补的检定，若同一玩家刚为同一项
+            # 检定过，多半是换个说法重试：交给模型按 recent_checks 判断，不强补。
             continue
         request["planner_source"] = "deterministic_safety_net"
         planned.append((action, request))
@@ -732,7 +851,7 @@ async def plan_round_checks(
             "unpriced_purchase_intents": recovered_unpriced,
         }
     response = await llm_client.call_tools(
-        _prompt_text(instance.language),
+        _planner_system_prompt(instance, rule),
         _planner_context(instance, rule),
         tools=[DICE_CHECKS_TOOL],
         max_tokens=4096,

@@ -108,11 +108,89 @@ export function suggestedAttributes(attrs: RuleAttr[], totalPoints?: number): Re
   return result
 }
 
-export function skillPointCost(skill: { name?: string; value?: string | number }, ruleMeta?: RuleMeta | null): number {
+type AttrValues = Record<string, number | string | undefined>
+
+/**
+ * 计算规则里的简单属性公式（与服务端 _safe_eval 的子集一致）：整数、属性名、
+ * + - * / //、括号。无法解析时返回 null，调用方回退到静态数值。
+ */
+export function evalRuleFormula(formula: string | undefined, attrs: AttrValues): number | null {
+  if (!formula) return null
+  const tokens = formula.match(/\d+|[A-Za-z_][A-Za-z0-9_]*|\/\/|[-+*/()]/g)
+  if (!tokens || tokens.join('') !== formula.replace(/\s+/g, '')) return null
+  let pos = 0
+  const peek = () => tokens[pos]
+  const next = () => tokens[pos++]
+  function primary(): number {
+    const token = next()
+    if (token === undefined) throw new Error('eof')
+    if (token === '(') {
+      const value = expression()
+      if (next() !== ')') throw new Error('paren')
+      return value
+    }
+    if (token === '-') return -primary()
+    if (/^\d+$/.test(token)) return Number(token)
+    if (/^[A-Za-z_]/.test(token)) {
+      const raw = Number.parseInt(String(attrs[token] ?? ''), 10)
+      if (Number.isNaN(raw)) throw new Error('attr')
+      return raw
+    }
+    throw new Error('token')
+  }
+  function term(): number {
+    let value = primary()
+    while (peek() === '*' || peek() === '/' || peek() === '//') {
+      const op = next()
+      const right = primary()
+      if (op === '*') value *= right
+      else if (right === 0) throw new Error('div')
+      else value = op === '//' ? Math.floor(value / right) : value / right
+    }
+    return value
+  }
+  function expression(): number {
+    let value = term()
+    while (peek() === '+' || peek() === '-') {
+      const op = next()
+      const right = term()
+      value = op === '+' ? value + right : value - right
+    }
+    return value
+  }
+  try {
+    const value = expression()
+    return pos === tokens.length && Number.isFinite(value) ? Math.trunc(value) : null
+  } catch {
+    return null
+  }
+}
+
+/** 技能基础值：优先当前语言的查找表（含属性派生），再回退旧的规范名表与自定义技能缺省。 */
+export function skillBaseValue(name: string | undefined, ruleMeta?: RuleMeta | null, attrs?: AttrValues): number {
+  const key = String(name || '').trim()
+  const entry = ruleMeta?.skill_base_lookup?.[key]
+    ?? Object.entries(ruleMeta?.skill_base_lookup || {}).find(([known]) => known.toLowerCase() === key.toLowerCase())?.[1]
+  if (entry) {
+    const derived = attrs ? evalRuleFormula(entry.formula, attrs) : null
+    return derived !== null ? Math.max(0, Math.min(99, derived)) : Number(entry.base) || 0
+  }
+  const legacy = ruleMeta?.skill_base_values?.[key]
+  if (legacy !== undefined) return Number(legacy) || 0
+  return Number(ruleMeta?.custom_skill_base ?? 0) || 0
+}
+
+/** 技能点预算：规则声明公式时随属性变化（CoC 职业点 + 兴趣点），否则是固定总额。 */
+export function skillPointBudget(ruleMeta?: RuleMeta | null, attrs?: AttrValues): number {
+  const derived = attrs ? evalRuleFormula(ruleMeta?.skill_point_formula, attrs) : null
+  if (derived !== null) return Math.max(0, derived)
+  return Number(ruleMeta?.skill_point_total || 0) || 0
+}
+
+export function skillPointCost(skill: { name?: string; value?: string | number }, ruleMeta?: RuleMeta | null, attrs?: AttrValues): number {
   const value = Number(skill.value ?? 0) || 0
   if (ruleMeta?.skill_point_spend_mode === 'above_base') {
-    const base = Number(ruleMeta.skill_base_values?.[String(skill.name || '')] ?? 0) || 0
-    return Math.max(0, value - base)
+    return Math.max(0, value - skillBaseValue(skill.name, ruleMeta, attrs))
   }
   return value
 }

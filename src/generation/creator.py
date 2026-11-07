@@ -1181,11 +1181,27 @@ async def generate_character(llm_client, prompt: str, game_key: str = "",
     attrs = data.get("attributes", {})
     for k in attr_keys:
         attrs.setdefault(k, 10)
+    # 每项属性的上下限以规则为准（CoC 是百分制 15–90），没有规则时才用 3–18。
+    bounds = {
+        str(spec.get("key")): (int(spec.get("min", 3)), int(spec.get("max", 18)))
+        for spec in (rule.attributes if rule else [])
+        if spec.get("key")
+    }
+
+    def _bounded(key: str, value: float) -> int:
+        low, high = bounds.get(key, (3, 18))
+        return max(low, min(high, round(value)))
+
+    for k in attr_keys:
+        try:
+            attrs[k] = _bounded(k, float(attrs.get(k, 10)))
+        except (TypeError, ValueError):
+            attrs[k] = bounds.get(k, (10, 10))[0]
     total = sum(attrs.get(k, 10) for k in attr_keys)
     if total > attr_total:
         scale = attr_total / total
         for k in attr_keys:
-            attrs[k] = max(3, min(18, round(attrs[k] * scale)))
+            attrs[k] = _bounded(k, attrs[k] * scale)
     data["attributes"] = attrs
 
     if rule:

@@ -91,7 +91,12 @@ const statusLabel = computed(() => ({
 })[status.value])
 const math = computed(() => {
   const check = props.check
-  if (typeof check.threshold === 'number') return `${check.dice || 'd100'}=${check.roll} / ${check.threshold}`
+  if (typeof check.threshold === 'number') {
+    const own = `${check.dice || 'd100'}=${check.roll} / ${check.threshold}`
+    const opposed = check.opposed
+    if (!opposed || typeof opposed.opponent_roll !== 'number') return own
+    return `${own} · ${check.opponent_name || t('checkOpponent')} ${opposed.opponent_skill || ''} d100=${opposed.opponent_roll} / ${opposed.opponent_threshold ?? ''}`
+  }
   const modifier = Number(check.modifier || 0)
   const modifierText = modifier ? ` ${modifier > 0 ? '+' : '-'} ${Math.abs(modifier)}` : ''
   const total = typeof check.total === 'number' ? ` = ${check.total}` : ''
@@ -180,6 +185,13 @@ onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.c
         <span v-if="typeof check.hard_threshold === 'number'">
           {{ t('checkSuccessLevels', { normal: check.threshold ?? 0, hard: check.hard_threshold ?? 0, extreme: check.extreme_threshold ?? 0 }) }}
         </span>
+        <span v-if="check.difficulty === 'hard' || check.difficulty === 'extreme'">
+          {{ t(check.difficulty === 'hard' ? 'checkRequiredHard' : 'checkRequiredExtreme', { max: check.required_threshold ?? 0 }) }}
+        </span>
+        <span v-if="check.opposed?.opponent_verdict">
+          {{ t('checkOpposedDetail', { name: check.opponent_name || t('checkOpponent'), verdict: check.opposed.opponent_verdict }) }}
+        </span>
+        <span v-if="check.achieved_verdict">{{ t('checkAchievedVerdict', { verdict: check.achieved_verdict }) }}</span>
         <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
         <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
         <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>

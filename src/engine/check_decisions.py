@@ -10,7 +10,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-from src.engine.dice_rules_coc import check_d100_bonus, coc_success_level, project_percentile_dice
+from src.engine.dice_rules_coc import (
+    apply_required_level,
+    check_d100_bonus,
+    coc_success_level,
+    normalize_difficulty,
+    project_percentile_dice,
+)
 from src.engine.game_state import GameState
 from src.engine.modules import checks, session_stats
 from src.engine import module_hooks
@@ -52,6 +58,8 @@ def prepare(inst: Any, rule: Any) -> None:
             or rule.advantage_mechanic.get("type") != "coc_bonus_penalty"):
         return
     checks.require_writable(inst)
+    # 规则声明大失败不可孤注一掷时（CoC 7e 通行做法），只给普通失败提供推骰。
+    pushable_verdicts = {"失败"} if rule.pushed_roll_excludes_fumble else {"失败", "大失败"}
     for check in checks.last_checks(inst):
         if check.get("push") is not None:
             _state(check)
@@ -64,7 +72,7 @@ def prepare(inst: Any, rule: Any) -> None:
                 or check.get("kind") != "check" or not ordinary
                 or check.get("opponent") or legacy_combat.combat_state(inst) != "none"
                 or check.get("dice") != "d100" or check.get("dice_mechanic") != "coc_bonus_penalty"
-                or check.get("verdict") not in {"失败", "大失败"}
+                or check.get("verdict") not in pushable_verdicts
                 or check.get("luck_decision") in {"spent", "declined"}):
             continue
         check["push"] = {"schema_version": 1, "revision": 0, "status": "pending",
@@ -166,6 +174,13 @@ def change(inst: Any, check_id: str, uid: str, operation: str, *, run_id: str,
             if type(value) is not int or not 1 <= value <= 100 or mode:
                 raise ValueError("invalid injected percentile roll")
             rolls, verdict = [value], coc_success_level(value, threshold)
+        achieved = verdict
+        if check.get("difficulty"):
+            # 推骰沿用原检定的难度要求：困难检定推骰后也必须达到困难成功。
+            verdict = apply_required_level(verdict, normalize_difficulty(check.get("difficulty")))
+        check.pop("achieved_verdict", None)
+        if verdict != achieved:
+            check["achieved_verdict"] = achieved
         push.update(status="resolved", original=original, failed=verdict in {"失败", "大失败"})
         check.update(roll=value, rolls=rolls, verdict=verdict, percentile_dice=project_percentile_dice(rolls, value, mode),
                      is_critical=verdict == "大成功", is_fumble=verdict == "大失败", luck_cost=None)

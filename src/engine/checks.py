@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.engine.constants import COMBAT_ATTACK_KEYWORDS
-from src.engine.character_utils import armor_ac_components, armor_value
+from src.engine.character_utils import armor_ac_components, armor_value, get_resource
 from src.engine.dice import (
     check_d100_bonus,
     coc_success_level,
@@ -21,6 +21,13 @@ from src.engine.dice import (
     d20_dc_cap,
     d20_verdict,
     roll,
+)
+from src.engine.dice_rules_coc import (
+    apply_required_level,
+    check_coc,
+    normalize_difficulty,
+    opposed_outcome,
+    required_threshold,
 )
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
@@ -541,6 +548,85 @@ def _opponent_details(instance: GameInstance, opponent_ref: str) -> tuple[str, d
     return "", {}
 
 
+def _stat_or_attribute_label(rule: RuleSystem | None, key: str) -> str:
+    for stat in rule.percentile_stat_checks if rule else []:
+        if stat["key"] == key:
+            return stat["name"]
+    return _attribute_label(rule, key)
+
+
+def _declares_legacy_attribute_scale(state: dict[str, Any]) -> bool:
+    """旧存档的 d20 属性（3–18）必须由数据显式声明，不能按数值大小猜。
+
+    百分制规则下的合法属性也可以是 15 或 20；过去用 ``value > 20`` 判断旧卡，
+    会把对手的 15 放大成 75、20 放大成 100（再 clamp 到 99），直接改变对抗结算。
+    旧卡请在角色卡/NPC 状态里写 ``attribute_scale: "d20"``（或 ``legacy_attributes: true``）。
+    """
+
+    scale = str(state.get("attribute_scale") or "").strip().casefold()
+    return scale in {"d20", "legacy"} or state.get("legacy_attributes") is True
+
+
+def _percentile_value(state: dict[str, Any], key: str) -> int | None:
+    """在对手角色卡/NPC 状态里找同名技能或属性的百分制数值；找不到返回 None。"""
+    wanted = str(key or "").strip().casefold()
+    if not wanted:
+        return None
+    for row in state.get("skills") or []:
+        if isinstance(row, dict) and str(row.get("name") or "").strip().casefold() == wanted:
+            try:
+                return max(1, min(99, int(row.get("value") or 0)))
+            except (TypeError, ValueError):
+                return None
+    attributes = state.get("attributes") if isinstance(state.get("attributes"), dict) else {}
+    for attr_key, raw in attributes.items():
+        if str(attr_key).strip().casefold() == wanted and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            value = int(raw)
+            # 只有显式标记为旧 d20 卡时才换算；否则按百分制原值使用。
+            if _declares_legacy_attribute_scale(state):
+                value *= 5
+            return max(1, min(99, value))
+    return None
+
+
+def _percentile_opposed(
+    request: dict[str, Any],
+    rule: RuleSystem | None,
+    opponent_state: dict[str, Any],
+    actor_key: str,
+    actor_threshold: int,
+    actor_verdict: str,
+) -> dict[str, Any] | None:
+    """CoC 7e 对抗检定：对手有可用数值时双方都掷骰，按成功等级比较。
+
+    对手骰值缓存在 request 上，重试同一请求不会偷偷重掷。对手没有数值时
+    返回 None，由调用方按普通检定（含 difficulty）结算。
+    """
+    if rule is None or not rule.percentile_opposed_rolls:
+        return None
+    opponent_key = str(request.get("opponent_skill") or "").strip()
+    opponent_value = _percentile_value(opponent_state, opponent_key) if opponent_key else None
+    if opponent_value is None:
+        opponent_key = actor_key
+        opponent_value = _percentile_value(opponent_state, actor_key)
+    if opponent_value is None:
+        return None
+    cached_roll = request.get("opponent_roll")
+    if isinstance(cached_roll, int) and 1 <= cached_roll <= 100:
+        opponent_roll = cached_roll
+    else:
+        opponent_roll = check_coc(opponent_value)[0].natural
+        request["opponent_roll"] = opponent_roll
+    opponent_verdict = coc_success_level(opponent_roll, opponent_value)
+    return {
+        "opponent_skill": opponent_key,
+        "opponent_threshold": opponent_value,
+        "opponent_roll": opponent_roll,
+        "opponent_verdict": opponent_verdict,
+        "outcome": opposed_outcome(actor_verdict, actor_threshold, opponent_verdict, opponent_value),
+    }
+
+
 def _attack_target_dc(rule: RuleSystem | None, target: dict[str, Any]) -> int | None:
     """Derive an attack target from server-owned state when the rule declares it."""
     if rule is None:
@@ -662,7 +748,16 @@ def resolve_check_request(
         actor_name = str(instance.players.get(uid, {}).get("character_name") or uid)
     attributes = character_sheet.get("attributes") if isinstance(character_sheet.get("attributes"), dict) else {}
     requested_skill = str(request.get("skill") or action.get("selected_skill") or "")
-    matched_skill = _resolve_skill(character_sheet, requested_skill, text)
+    untrained_value = request.get("untrained_skill_value")
+    has_requested_row = any(
+        (row := _skill_row(item)) and row["name"] == requested_skill
+        for item in (character_sheet.get("skills") or [])
+    )
+    if type(untrained_value) is int and requested_skill and not has_requested_row:
+        # 规划器按规则基础值提出的「没学过的技能」检定（数值来自服务端规则，不是模型）。
+        matched_skill: dict[str, Any] | None = {"name": requested_skill, "value": max(1, min(99, untrained_value))}
+    else:
+        matched_skill = _resolve_skill(character_sheet, requested_skill, text)
     skill_name = str(matched_skill.get("name") or "") if matched_skill else ""
     opponent_ref = str(request.get("opponent") or "")
     opponent_name, opponent_state = _opponent_details(instance, opponent_ref)
@@ -701,20 +796,54 @@ def resolve_check_request(
 
             common["dice_mechanic"] = "coc_bonus_penalty"
             common["percentile_dice"] = project_percentile_dice(rolls, roll_value, advantage_mode)
+        stat_keys = {stat["key"] for stat in rule.percentile_stat_checks} if rule else set()
+        stat_check = False
         if matched_skill:
             threshold = int(matched_skill.get("value", 20) or 20)
             attribute_key = ""
         else:
             attribute_key = str(request.get("attribute") or action.get("selected_attribute") or "int")
-            raw_value = int(attributes.get(attribute_key, 10) or 10)
-            # CoC 新卡属性本身是百分制；兼容旧卡 3-18 属性并自动换算为百分制。
-            threshold = raw_value if raw_value > 20 else raw_value * 5
+            if attribute_key in stat_keys:
+                # 规则声明可直接检定的资源（CoC 幸运检定）：阈值是角色卡上的当前值。
+                stat_check = True
+                resource = get_resource(character_sheet, attribute_key) or {}
+                threshold = int(character_sheet.get(attribute_key, resource.get("current", 0)) or 0)
+            else:
+                raw_value = int(attributes.get(attribute_key, 10) or 10)
+                # CoC 新卡属性本身是百分制；兼容旧卡 3-18 属性并自动换算为百分制。
+                threshold = raw_value if raw_value > 20 else raw_value * 5
         threshold = max(1, min(99, threshold + _bounded_modifier(request.get("circumstance_modifier"))))
-        verdict = coc_success_level(roll_value, threshold)
+        achieved = coc_success_level(roll_value, threshold)
+        verdict = achieved
+        needed = threshold
+        opposed = (
+            _percentile_opposed(request, rule, opponent_state, skill_name or attribute_key, threshold, achieved)
+            if opponent_name and common["kind"] != "attack" else None
+        )
+        difficulty = normalize_difficulty(request.get("difficulty")) if request.get("difficulty") else ""
+        if opposed is not None:
+            # 对抗检定双方都按常规难度掷骰，比较成功等级；difficulty 不再叠加。
+            difficulty = ""
+            if opposed["outcome"] != "win" and achieved != "大失败":
+                verdict = "失败"
+        elif difficulty:
+            verdict = apply_required_level(achieved, difficulty)
+            needed = max(1, required_threshold(threshold, difficulty))
         luck = int(character_sheet.get("luck", 0) or 0)
-        luck_cost = roll_value - threshold if verdict == "失败" else 0
+        # 幸运只能把差一点的失败补到所需档位；对抗检定不开放花幸运。
+        # 幸运检定本身不能再花幸运（7e）。
+        luck_cost = roll_value - needed if verdict == "失败" and opposed is None and not stat_check else 0
+        if difficulty:
+            common["difficulty"] = difficulty
+            common["required_threshold"] = needed
+            if verdict != achieved:
+                common["achieved_verdict"] = achieved
+        if opposed is not None:
+            common["opposed"] = opposed
+            if verdict != achieved:
+                common["achieved_verdict"] = achieved
         common.update({
-            "label": common["label"] or f"{skill_name or _attribute_label(rule, attribute_key)}检定",
+            "label": common["label"] or f"{skill_name or _stat_or_attribute_label(rule, attribute_key)}检定",
             "attribute": _attribute_label(rule, attribute_key) if attribute_key else None,
             "attribute_key": attribute_key,
             "threshold": threshold,

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 
-from src.engine.dice import check_d100, roll as dice_roll
+from src.engine.dice_rules_coc import parse_sanity_loss, resolve_sanity_check
 from src.engine.character_utils import (
     apply_bounded_stat_delta,
     apply_hp_delta,
@@ -77,9 +77,20 @@ class PlayerStateApplier:
             # 多人局权威白名单：状态变更只允许作用于本轮行动者/参战者，
             # 挡住“玩家诱导 GM 修改他人状态”；None 表示不限制（单人局/离线路径）。
             if allowed_player_uids is not None and uid not in allowed_player_uids:
-                logger.warning(
-                    "多人局状态标签目标越权，已丢弃: uid=%s round=%d", uid, progression_state.round_value(instance),
-                )
+                # fail closed：白名单只包含本轮行动者/参战者。过去对 san_check_loss
+                # 额外放行 instance.alive_players，但「活着」不等于「在场目睹」——
+                # GM 输出（或被玩家诱导的模型）可以借此替不在场的人掷 SAN。
+                # 在拿到可信的在场/目击状态之前，越权目标一律丢弃，包括 SAN；
+                # 旁观者 SAN 建模是独立任务，不在这里用宽松条件凑。
+                if pud.get("san_check_loss"):
+                    logger.warning(
+                        "多人局理智检定目标不在本轮参与者内，已按 fail closed 丢弃: uid=%s round=%d",
+                        uid, progression_state.round_value(instance),
+                    )
+                else:
+                    logger.warning(
+                        "多人局状态标签目标越权，已丢弃: uid=%s round=%d", uid, progression_state.round_value(instance),
+                    )
                 continue
             cs = instance.get_character_sheet(uid)
             hp_before = int(cs.get("hp", 0) or 0)
@@ -124,26 +135,34 @@ class PlayerStateApplier:
                 )
                 logger.info("理智值变化: %s %+d -> %d", uid, int(san_change), cs["sanity"])
                 self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])
-            # 理智检定
+            # 理智检定：服务端掷 d100 对当前理智值，按成功等级结算损失。
             san_check_loss = pud.get("san_check_loss")
+            # 死亡角色不再掷 SAN：白名单只证明「本轮参与者」，不证明「还活着」。
+            if san_check_loss and not instance.is_alive(uid):
+                logger.warning("已死亡角色不接受理智检定，已丢弃: uid=%s", uid)
+                san_check_loss = None
             if san_check_loss and accepts_narrative_delta(cs, "sanity", -1):
                 current_san = cs.get("sanity", (get_resource(cs, "sanity") or {}).get("current", 50)
                                      if recovery_policy is not None else 50)
-                san_res, san_verdict = check_d100(current_san)
                 try:
-                    loss_dice = dice_roll(san_check_loss)
-                    full_loss = abs(loss_dice.total)
-                except Exception:
-                    full_loss = 6
-                actual_loss = (full_loss + 1) // 2 if san_verdict in ("成功", "大成功") else full_loss
-                prev = cs.get("sanity", current_san if recovery_policy is not None else 99)
-                apply_bounded_stat_delta(
-                    cs, "sanity", -actual_loss,
-                    default_current=current_san, max_key="max_sanity", default_max=99,
-                )
-                logger.info("理智检定: %s d100=%d ≤ san=%d? %s, 损失=%d",
-                            uid, san_res.natural, current_san, san_verdict, actual_loss)
-                self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])
+                    loss_spec = parse_sanity_loss(san_check_loss)
+                except ValueError:
+                    # 不再静默按 6 点结算：写法无法识别就不结算，并公开说明。
+                    logger.warning("理智检定损失写法无法识别，未结算: %s %r", uid, san_check_loss)
+                    # 原文只进日志：GM 可能把怪物名之类的秘密写进了标签，不能原样公开。
+                    pud["san_check_result"] = {"invalid": True}
+                else:
+                    outcome = resolve_sanity_check(int(current_san), loss_spec)
+                    prev = cs.get("sanity", current_san if recovery_policy is not None else 99)
+                    apply_bounded_stat_delta(
+                        cs, "sanity", -outcome["loss"],
+                        default_current=current_san, max_key="max_sanity", default_max=99,
+                    )
+                    logger.info("理智检定: %s d100=%d / san=%d %s, 损失=%d (%s)",
+                                uid, outcome["roll"], outcome["threshold"], outcome["verdict"],
+                                outcome["loss"], outcome["loss_spec"])
+                    pud["san_check_result"] = outcome
+                    self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])
             # 幸运值变化
             luck_change = pud.get("luck_change")
             if isinstance(luck_change, (int, float)) and accepts_narrative_delta(cs, "luck", luck_change):

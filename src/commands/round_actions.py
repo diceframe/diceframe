@@ -101,6 +101,26 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
         roll_value = check.get("roll")
         if dice == "d100":
             math_text = f"d100={roll_value} vs {check.get('threshold')}"
+            difficulty = str(check.get("difficulty") or "")
+            if difficulty in {"hard", "extreme"}:
+                math_text += localized_text(instance.language, {
+                    "en": f" (needs a {difficulty} success: ≤{check.get('required_threshold')})",
+                    "zh-CN": f"（需要{'困难' if difficulty == 'hard' else '极难'}成功：≤{check.get('required_threshold')}）",
+                    "ja": f"（{'ハード' if difficulty == 'hard' else 'イクストリーム'}成功が必要：≤{check.get('required_threshold')}）",
+                })
+            opposed = check.get("opposed") if isinstance(check.get("opposed"), dict) else None
+            if opposed:
+                math_text += localized_text(instance.language, {
+                    "en": (f"; opposed by {check.get('opponent_name')} {opposed.get('opponent_skill')} "
+                           f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')} "
+                           f"({opposed.get('opponent_verdict')})"),
+                    "zh-CN": (f"；对抗 {check.get('opponent_name')} 的{opposed.get('opponent_skill')} "
+                              f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')}"
+                              f"（{opposed.get('opponent_verdict')}）"),
+                    "ja": (f"；対抗 {check.get('opponent_name')} の{opposed.get('opponent_skill')} "
+                           f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')}"
+                           f"（{opposed.get('opponent_verdict')}）"),
+                })
         else:
             modifier = int(check.get("modifier", 0) or 0)
             total = check.get("total")

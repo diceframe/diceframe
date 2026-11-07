@@ -9,7 +9,7 @@ import ItemEditor from './ItemEditor.vue'
 import PortraitPicker from './PortraitPicker.vue'
 import {
   identitySchema, identityLabel, attrDisplayName, currencyLabel,
-  isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, localizedField,
+  isAutoHpRule, calcAutoHp, setIdentityUpdate, suggestedAttributes, skillPointCost, skillPointBudget, localizedField,
   type IdentityField, type RuleAttr,
 } from '@/utils/ruleSchema'
 import type { CurrencySystem } from '@/utils/currency'
@@ -71,9 +71,9 @@ const inventory = ref<CharacterItem[]>([])
 const pool = computed(() => props.skillPool || [])
 const skillHint = computed(() => localizedField<string>(props.ruleMeta, 'skill_hint') || '')
 const maxSkills = computed(() => Number(props.ruleMeta?.max_skills || 0))
-const skillPointTotal = computed(() => Number(props.ruleMeta?.skill_point_total || 0))
+const skillPointTotal = computed(() => skillPointBudget(props.ruleMeta, attrs.value))
 const maxSkillValue = computed(() => Number(props.ruleMeta?.max_skill_value || 0))
-const skillSpent = computed(() => skills.value.reduce((sum, skill) => sum + skillPointCost(skill, props.ruleMeta), 0))
+const skillSpent = computed(() => skills.value.reduce((sum, skill) => sum + skillPointCost(skill, props.ruleMeta, attrs.value), 0))
 const skillOverLimit = computed(() =>
   Boolean((maxSkills.value && skills.value.filter(s => s.name?.trim()).length > maxSkills.value)
     || (skillPointTotal.value && skillSpent.value > skillPointTotal.value)
@@ -257,7 +257,7 @@ function finish() {
       <div class="attr-sliders">
         <div v-for="a in ruleAttrs" :key="a.key" class="attr-row">
           <span class="attr-name">{{ attrDisplayName(a) }}</span>
-          <input type="range" :min="a.min" :max="a.max * 2" v-model.number="attrs[a.key]">
+          <input type="range" :min="a.min" :max="a.max" v-model.number="attrs[a.key]">
           <input type="number" class="attr-val" :min="a.min" v-model.number="attrs[a.key]">
         </div>
       </div>

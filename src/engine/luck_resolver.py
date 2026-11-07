@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.engine.character_utils import apply_resource_delta, get_resource
+from src.engine.dice_rules_coc import REQUIRED_LEVEL_VERDICT
 from src.engine.game_instance import GameInstance, GameState
 from src.engine import progression
 from src.engine import module_hooks
@@ -66,7 +67,8 @@ async def resolve_luck_decision(
             if str(target.get("dice") or "").lower() != "d100" or str(target.get("verdict") or "") != "失败":
                 return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不能消耗幸运"}
             roll_value = int(target.get("roll", 0) or 0)
-            threshold = int(target.get("threshold", 0) or 0)
+            # 规则要求困难/极难成功时，幸运要补到所需档位的上限，而不是技能值。
+            threshold = int(target.get("required_threshold") or target.get("threshold", 0) or 0)
             cost = roll_value - threshold
             if cost <= 0:
                 return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不需要消耗幸运"}
@@ -81,14 +83,18 @@ async def resolve_luck_decision(
                 }
             remaining = apply_resource_delta(character_sheet, "luck", -cost, rule)
             target["original_verdict"] = target.get("verdict")
-            target["verdict"] = "成功"
+            target["verdict"] = REQUIRED_LEVEL_VERDICT.get(str(target.get("difficulty") or ""), "成功")
+            if target["verdict"] == "普通成功":
+                target["verdict"] = "成功"
             target["luck_spent"] = cost
             target["luck_remaining"] = remaining
             if actor_uid == owner_uid and owner_uid in instance.players:
                 # The seat spent its own luck: it is in play (see seat_activity).
                 module_hooks.run(module_hooks.SEAT_ACTED, instance, owner_uid, module_hooks.SEAT_SOURCE_LUCK)
 
-        check_decisions.close(target)
+        if spend:
+            # 花了幸运就不能再孤注一掷；拒绝花幸运时仍可以选择孤注一掷。
+            check_decisions.close(target)
         target["luck_decision"] = desired
         target["luck_spend_available"] = False
         target["luck_resolved_at"] = datetime.now(timezone.utc).isoformat()

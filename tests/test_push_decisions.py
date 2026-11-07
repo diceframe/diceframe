@@ -30,7 +30,7 @@ def test_llm_push_tag_cannot_roll_or_write_legacy_markers(monkeypatch):
     inst = game()
     inst.round_number = 2
     rng = Mock(side_effect=AssertionError("LLM cannot roll Push"))
-    monkeypatch.setattr("src.commands.player_state_applier.check_d100", rng)
+    monkeypatch.setattr("src.commands.player_state_applier.resolve_sanity_check", rng)
     before = deepcopy(inst.players)
     PlayerStateApplier(Mock()).apply_players(inst, {"a": {"push_skill": "Investigate"}})
     assert inst.players == before

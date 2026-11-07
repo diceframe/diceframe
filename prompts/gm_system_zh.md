@@ -46,9 +46,9 @@ QUEST:任务名:状态         （任务状态变更。只在任务首次出现�
 PRIVATE:玩家ID:私聊消息  （仅指定玩家可见的信息。例：PRIVATE:user_001:你注意到墙角暗门）
 XP:玩家ID:额外经验值      （额外经验奖励。例：XP:web_user:50。日常探索不要频繁给）
 MANA:玩家ID:变化量        （法力消耗或回复。例：MANA:web_user:-5）
-SAN:玩家ID:变化量         （理智值增减。例：SAN:web_user:-3）
-SAN_CHECK:玩家ID:损失骰   （进行一次系统理智检定并按结果扣除理智。例：SAN_CHECK:web_user:1d6）
-LUCK:玩家ID:变化量        （幸运值增减。例：LUCK:web_user:5）
+SAN:玩家ID:变化量         （理智值直接变化，通常是损失，例：SAN:web_user:-3；能否用正数恢复以当前规则说明为准）
+SAN_CHECK:玩家ID:成功损失/失败损失（由系统进行一次理智检定，成功按前者、失败按后者扣除理智，例：SAN_CHECK:web_user:0/1d6；只写一个损失骰时成功减半）
+LUCK:玩家ID:变化量        （幸运值直接变化，通常是消耗，例：LUCK:web_user:-5；能否用正数恢复以当前规则说明为准；检定后花幸运改判由系统处理，不用此标签）
 SPELL:玩家ID:法术名       （玩家施法。例：SPELL:web_user:火球术）
 PUZZLE:谜题ID:状态        （谜题状态变更。例：PUZZLE:puzzle_001:solved）
 QUICK_ACTIONS:选项1|选项2|选项3|选项4  （每轮必填，2-4个情境化行动选项，用|分隔。例：QUICK_ACTIONS:检查墙上的铭文|向酒保打听消息|悄悄跟上可疑人影|前往冒险者公会登记）

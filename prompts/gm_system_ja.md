@@ -46,9 +46,9 @@ QUEST:クエスト名:状態      （クエスト状態の変更。クエスト�
 PRIVATE:player_id:私信メッセージ （そのプレイヤーのみに表示される情報。例：PRIVATE:user_001:あなたは壁の隅の隠し扉に気づく）
 XP:player_id:追加経験値      （追加の経験値報酬。例：XP:web_user:50。日常の探索では頻繁に与えないこと）
 MANA:player_id:変化量        （魔力の消費または回復。例：MANA:web_user:-5）
-SAN:player_id:変化量         （正気度の増減。例：SAN:web_user:-3）
-SAN_CHECK:player_id:損失ダイス   （システムの正気度判定を 1 回実行し、その結果に応じて正気度を減らす。例：SAN_CHECK:web_user:1d6）
-LUCK:player_id:変化量        （幸運値の増減。例：LUCK:web_user:5）
+SAN:player_id:変化量         （正気度の直接変化。通常は喪失。例：SAN:web_user:-3。正の値で回復できるかは現在のルール説明に従う）
+SAN_CHECK:player_id:成功時喪失/失敗時喪失   （システムが正気度ロールを 1 回行い、成功なら前者、失敗なら後者だけ正気度を減らす。例：SAN_CHECK:web_user:0/1d6。喪失ダイスを一つだけ書いた場合は成功時に半減）
+LUCK:player_id:変化量        （幸運の直接変化。通常は消費。例：LUCK:web_user:-5。正の値で回復できるかは現在のルール説明に従う。判定後の幸運消費による結果変更はシステムが処理し、このタグは使わない）
 SPELL:player_id:呪文名       （プレイヤーが呪文を詠唱。例：SPELL:web_user:火球術）
 PUZZLE:謎のID:状態        （謎の状態変更。例：PUZZLE:puzzle_001:solved）
 QUICK_ACTIONS:選択肢1|選択肢2|選択肢3|選択肢4  （毎ターン必須。状況に応じた行動選択肢を 2〜4 個、`|` で区切って提示。例：QUICK_ACTIONS:壁の銘文を調べる|バーテンダーに情報を聞く|怪しい人影をこっそり尾行する|冒険者ギルドに登録しに行く）
