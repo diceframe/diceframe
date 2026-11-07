@@ -130,7 +130,21 @@ class Dnd2024ClassFeatureResolver:
         state = self.class_state(character)
         if state is None:
             return ()
-        class_id, level = state
+        return self._owned_feature_definitions(*state)
+
+    def _owned_feature_definitions(
+        self, class_id: str, level: int,
+    ) -> tuple[ClassFeatureDefinition, ...]:
+        """The features one class row owns at ``level``, in catalog order.
+
+        ``features_for`` and ``attacks_per_action`` both read ownership through
+        this one filter.  Keeping two copies was harmless only while the shipped
+        tables happened to agree: a grant made below a feature's
+        ``minimum_level``, or an option feature whose parent is not granted,
+        read as "not owned" on the character sheet while the attack count still
+        took the raw grant set.
+        """
+
         granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
             class_id, level,
         )
@@ -198,13 +212,7 @@ class Dnd2024ClassFeatureResolver:
                 continue
             if not 1 <= level <= 20:
                 continue
-            granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
-                class_id, level,
-            )
-            for feature_id in granted:
-                definition = self.catalog.features.get(feature_id)
-                if definition is None:
-                    continue
+            for definition in self._owned_feature_definitions(class_id, level):
                 value = definition.parameters.get("attacks_per_action")
                 if isinstance(value, int) and not isinstance(value, bool):
                     best = max(best, value)
