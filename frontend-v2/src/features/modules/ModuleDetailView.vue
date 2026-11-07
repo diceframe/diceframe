@@ -13,14 +13,29 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import ModuleResourceBrowser from './resources/ModuleResourceBrowser.vue'
-import { contentKindLabel, moduleCategory, moduleCopy } from './copy'
+import { contentKindLabel, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 import { libraryCopy } from '@/features/library/copy'
-import type { Locale } from '@/i18n'
+import type { Locale, MessageKey } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
 const { t, locale } = useLocale()
 const copy = computed(() => moduleCopy(locale.value))
+
+// Readable labels for host enums; the raw value stays next to them in the
+// technical section for troubleshooting. Unknown values are shown as-is.
+const statusKeys: Record<string, MessageKey> = {
+  running: 'modulesStatusRunning', disabled: 'modulesDisabledBadge', failed: 'modulesStatusFailed', stopping: 'modulesStatusStopping',
+}
+const deliveryKeys: Record<string, MessageKey> = {
+  catalog: 'modulesDeliveryCatalog', legacy_autoimport: 'modulesDeliveryLegacy',
+}
+function statusLabel(status: string): string {
+  return statusKeys[status] ? t(statusKeys[status]) : status
+}
+function deliveryLabel(mode: string): string {
+  return deliveryKeys[mode] ? t(deliveryKeys[mode]) : mode
+}
 const library = computed(() => libraryCopy(locale.value))
 const { confirm } = useConfirm()
 const moduleId = computed(() => String(route.params.moduleId || ''))
@@ -223,7 +238,7 @@ async function run(action: ModuleAction) {
         <dl class="module-quick-facts">
           <div><dt>{{ identity.identityLabel }}</dt><dd>{{ module.id }}</dd></div>
           <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
-          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ module.content_profile }}</dd></div>
+          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ moduleCategoryLabel(module, copy) }}</dd></div>
         </dl>
         <div class="module-identity-notes">
           <p><strong>{{ identity.identityLabel }}</strong>{{ identity.identityHint }}</p>
@@ -259,12 +274,12 @@ async function run(action: ModuleAction) {
         <div class="module-section-heading">
           <div>
             <p class="eyebrow">{{ copy.packLabel }}</p>
-            <h2>{{ module.adventures.length ? (canLaunch ? copy.playableAdventures : copy.installedAdventures) : moduleCategory(module) === 'resource' ? copy.resourcePack : copy.packLabel }}</h2>
+            <h2>{{ module.adventures.length ? (canLaunch ? copy.playableAdventures : copy.installedAdventures) : moduleInventory(module) === 'resources' ? copy.resourcePack : copy.packLabel }}</h2>
           </div>
           <span class="module-section-count">{{ module.adventures.length }}</span>
         </div>
         <p v-if="module.inventory_status === 'unknown'" class="muted" role="status">{{ copy.inventoryUnknown }}</p>
-        <p v-else-if="!module.adventures.length && moduleCategory(module) === 'resource'" class="muted">{{ copy.noFixedStory }}</p>
+        <p v-else-if="!module.adventures.length && moduleInventory(module) === 'resources'" class="muted">{{ copy.noFixedStory }}</p>
         <p v-if="isDisabled && module.adventures.length" class="muted">{{ copy.disabledAdventures }}</p>
         <ul v-if="module.adventures.length" class="module-adventure-list"><li v-for="adventure in module.adventures" :key="adventure.adventure_id" class="module-adventure-card">
           <div class="module-adventure-copy"><strong>{{ adventure.name || adventure.adventure_id }}</strong><small>{{ adventure.adventure_id }} · {{ adventure.version }}</small><p v-if="adventure.summary">{{ adventure.summary }}</p></div>
@@ -294,10 +309,10 @@ async function run(action: ModuleAction) {
         <summary>{{ t('modulesMetadata') }}</summary>
         <dl class="module-facts">
           <div><dt>{{ t('modulesModuleId') }}</dt><dd>{{ module.id }}</dd></div>
-          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ module.content_profile }}</dd></div>
+          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ moduleCategoryLabel(module, copy) }} <code>{{ module.content_profile }}</code></dd></div>
           <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
-          <div><dt>{{ t('modulesStatus') }}</dt><dd>{{ module.status }}</dd></div>
-          <div><dt>{{ t('modulesContentDelivery') }}</dt><dd>{{ module.content_delivery_mode }}</dd></div>
+          <div><dt>{{ t('modulesStatus') }}</dt><dd>{{ statusLabel(module.status) }} <code>{{ module.status }}</code></dd></div>
+          <div><dt>{{ t('modulesContentDelivery') }}</dt><dd>{{ deliveryLabel(module.content_delivery_mode) }} <code>{{ module.content_delivery_mode }}</code></dd></div>
         </dl>
       </details>
 

@@ -122,9 +122,12 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('castle-module')
-    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('adventure-module')
-    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('catalog')
+    const metadata = wrapper.get('[data-testid="module-metadata"]').text()
+    expect(metadata).toContain('castle-module')
+    // Readable labels first, raw host values kept for troubleshooting.
+    expect(metadata).toContain('冒险模组 adventure-module')
+    expect(metadata).toContain('已启用 running')
+    expect(metadata).toContain('开局时按需取用，启用时不导入 catalog')
     expect(wrapper.get('[data-testid="module-compatibility"]').text()).toContain('兼容')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
     expect(wrapper.get('[data-testid="module-content"]').text()).toContain('NPC · 1')
@@ -145,6 +148,28 @@ describe('ModuleDetailView', () => {
     expect(wrapper.text()).toContain('不含固定剧情')
     expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('content-pack')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).not.toContain('用此冒险创建游戏')
+  })
+
+  it('keeps a content pack with adventures labelled by its profile', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({ content_profile: 'content-pack', content_delivery_mode: 'legacy_autoimport' }))
+
+    const { wrapper } = await mountView()
+
+    expect(wrapper.get('.module-quick-facts').text()).toContain('资源包')
+    expect(wrapper.get('.module-quick-facts').text()).not.toContain('content-pack')
+    expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
+    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('启用时自动导入包里的内容 legacy_autoimport')
+  })
+
+  it('shows unknown host values as they are', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({ content_profile: 'theme-module', status: 'paused', content_delivery_mode: 'streamed' }))
+
+    const { wrapper } = await mountView()
+
+    expect(wrapper.get('.module-quick-facts').text()).toContain('内容包')
+    const metadata = wrapper.get('[data-testid="module-metadata"]').text()
+    expect(metadata).toContain('paused paused')
+    expect(metadata).toContain('streamed streamed')
   })
 
   it('shows installed adventures in a disabled package without promising playability', async () => {

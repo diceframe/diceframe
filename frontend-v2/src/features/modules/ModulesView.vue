@@ -9,12 +9,13 @@ import {
   type ModuleSummary,
 } from '@/api/modules'
 import { useLocale } from '@/composables/useLocale'
-import type { MessageKey } from '@/i18n'
+import { SUPPORTED_LOCALES, type Locale, type MessageKey } from '@/i18n'
 import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
-import { moduleCategory, moduleCopy } from './copy'
+import { localeLabel } from '@/utils/contentLanguage'
+import { moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -58,11 +59,30 @@ const recoveryBusy = ref(false)
 const totalContent = (module: ModuleSummary) => module.content_counts == null ? null : Object.values(module.content_counts)
   .reduce((total, count) => total + count, 0)
 function inventorySummary(module: ModuleSummary): string {
-  const category = moduleCategory(module)
-  if (category === 'unknown') return copy.value.inventoryUnknown
-  if (category === 'adventure') return copy.value.adventureSummary(module.adventure_count || 0)
+  const inventory = moduleInventory(module)
+  if (inventory === 'unknown') return copy.value.inventoryUnknown
+  if (inventory === 'adventures') return copy.value.adventureSummary(module.adventure_count || 0)
   const count = totalContent(module)
   return count == null ? copy.value.resourceBrowse : copy.value.resourceSummary(count)
+}
+
+// Credits come from the plugin index (author defaults to the repository owner).
+function marketCredits(item: ModuleMarketplaceItem): string {
+  return [
+    item.author && `${t('author')}: ${item.author}`,
+    item.license && `${t('hubLicenseLabel')}: ${item.license}`,
+  ].filter(Boolean).join(' · ')
+}
+
+function trustLabel(level: string): string {
+  if (level === 'official') return t('pluginTrustOfficial')
+  if (level === 'verified') return t('pluginTrustVerified')
+  return t('pluginTrustCommunity')
+}
+
+// Index languages are locale codes; unknown codes are shown as-is.
+function languageLabel(language: string): string {
+  return (SUPPORTED_LOCALES as readonly string[]).includes(language) ? localeLabel(language as Locale) : language
 }
 
 // §8 Recovery：入口带过来的是**存档里的绑定身份**（adventure / version /
@@ -284,12 +304,12 @@ async function checkRecovery() {
       <div v-else class="modules-grid">
         <RouterLink v-for="module in modules" :key="module.id" :to="{ name: 'module-detail', params: { moduleId: module.id } }" class="module-card">
           <div>
-            <p class="eyebrow">{{ moduleCategory(module) === 'adventure' ? copy.adventureLabel : moduleCategory(module) === 'resource' ? copy.resourceLabel : copy.packLabel }}</p>
+            <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="module.status === 'disabled'" class="muted">{{ t('modulesDisabledBadge') }}</p>
             <p class="muted">{{ inventorySummary(module) }}</p>
-            <p v-if="module.status === 'disabled' && moduleCategory(module) === 'adventure'" class="muted">{{ copy.disabledAdventures }}</p>
+            <p v-if="module.status === 'disabled' && moduleInventory(module) === 'adventures'" class="muted">{{ copy.disabledAdventures }}</p>
           </div>
           <dl>
             <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ module.adventure_count ?? '—' }}</dd></div>
@@ -340,13 +360,20 @@ async function checkRecovery() {
       <div v-else class="modules-grid">
         <article v-for="item in market" :key="item.id" class="module-card" :data-testid="`modules-market-${item.id}`">
           <div>
-            <p class="eyebrow">{{ item.content_profile === 'adventure-module' ? copy.adventureLabel : copy.resourceLabel }}</p>
+            <p class="eyebrow">{{ moduleCategoryLabel(item, copy) }}</p>
             <h3>{{ item.name || item.id }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: item.latest_version || item.version }) }}</p>
+            <p v-if="marketCredits(item)" class="muted module-market-credits" data-testid="modules-market-credits">{{ marketCredits(item) }}</p>
             <p v-if="item.description" class="muted">{{ item.description }}</p>
             <p class="muted">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
+            <ul class="module-market-badges" data-testid="modules-market-badges">
+              <li :class="`is-trust-${item.trust_level || 'community'}`">{{ trustLabel(item.trust_level) }}</li>
+              <li v-if="item.stars" :title="t('pluginStars', { count: item.stars })">★ {{ item.stars }}</li>
+              <li v-for="language in item.languages" :key="language">{{ languageLabel(language) }}</li>
+            </ul>
             <p v-if="item.update_available" class="muted">{{ t('modulesUpdateAvailable') }}</p>
             <p v-if="item.verification_error" class="error-text">{{ item.verification_error }}</p>
+            <p v-else-if="item.needs_core_update" class="error-text" data-testid="modules-market-core-update">{{ t('pluginNeedsCoreUpdate', { version: item.min_app_version }) }}</p>
           </div>
           <dl>
             <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ item.adventure_count }}</dd></div>
@@ -368,6 +395,7 @@ async function checkRecovery() {
               @click="installFromMarketplace(item)"
             >{{ installBusy === item.id ? t('modulesUpdatingOnline') : t('modulesUpdateOnline', { version: item.latest_version }) }}</button>
             <span v-else class="module-installed-badge">{{ t('modulesInstalledBadge') }}</span>
+            <a v-if="item.repository_url" :href="item.repository_url" class="module-market-repo" target="_blank" rel="noopener noreferrer">{{ t('openRepository') }}</a>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
           </div>
         </article>
@@ -427,6 +455,12 @@ async function checkRecovery() {
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
+.module-market-credits { overflow-wrap: anywhere; }
+.module-market-badges { display: flex; flex-wrap: wrap; gap: .4rem; margin: .65rem 0 0; padding: 0; list-style: none; }
+.module-market-badges li { padding: .15rem .55rem; border: 1px solid var(--df-border-soft); border-radius: 999px; color: var(--df-text-secondary); background: var(--df-surface-2); font-size: .76rem; font-weight: 700; }
+.module-market-badges .is-trust-official { border-color: color-mix(in srgb, var(--df-success) 50%, var(--df-border-soft)); color: var(--df-success); }
+.module-market-badges .is-trust-verified { border-color: color-mix(in srgb, var(--df-interactive) 50%, var(--df-border-soft)); color: var(--df-interactive-strong); }
+.module-market-repo { color: var(--df-interactive-strong); font-size: .85rem; font-weight: 700; }
 .module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
 .module-market-actions button { width: 100%; }
 .module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }
