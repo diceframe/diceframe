@@ -14,7 +14,8 @@ import AdventureLaunchSummary from '@/features/library/AdventureLaunchSummary.vu
 import WorldLorebookSummary from '@/features/create/WorldLorebookSummary.vue'
 import { resolveLoreManageTarget } from '@/features/create/loreManageTarget'
 import LorebookSourcePicker from '@/features/create/LorebookSourcePicker.vue'
-import type { CreationLorebook } from '@/features/create/creationLorebooks'
+import type { CreationLorebook, CreationLorebookRow } from '@/features/create/creationLorebooks'
+import { worldBooksHaveContent } from '@/features/create/creationLorebooks'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import PortraitImage from '@/components/PortraitImage.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
@@ -118,7 +119,7 @@ const aiPrompt = ref(''), aiRule = ref('')
 const aiAutoRule = ref(false), aiGeneratedRule = ref<GeneratedRuleResponse | null>(null)
 const loreChoice = ref('__builtin__')
 const selectedBookIds = ref<string[] | undefined>(undefined)
-const availableLorebooks = ref<CreationLorebook[]>([])
+const availableLorebooks = ref<CreationLorebookRow[]>([])
 const booksLoaded = ref(false)
 const modules = ref<ModuleSummary[]>([])
 const seed = ref(''), busy = ref(false), error = ref('')
@@ -329,14 +330,14 @@ watch([lorePreviewWorldId, loreChoice], () => {
   booksLoaded.value = false
 })
 // 模块声明的资料册候选（issue #700）：catalog 模组不启用即灌注，但开局
-// 应能一键带上它的书。候选来自模块详情接口；binding 只是候选投影所需的
-// 展示元数据，真正落地的是 POST /games/create 的 book_bindings ref，
-// 服务端在创建事务里按需物化。
+// 应能一键带上它的书。候选来自模块详情接口；`catalog: true` 是它的真实
+// 身份——还在包里，没进书库，勾选后由创建事务物化。不要给它伪造 world
+// binding 混进"世界资料"里：那会让人以为它是这个世界的一本书。
 const moduleLorebookRows = ref<CreationLorebook[]>([])
 const moduleBookCandidates = computed<CreationLorebook[]>(() => moduleLorebookRows.value.map(book => ({
   ...book,
+  module: true,
   ref: book.ref ?? { source_kind: 'module', source_id: moduleId.value, kind: 'lorebook' as const, id: book.id, digest: '' },
-  bindings: [{ scope_kind: 'world', scope_id: lorePreviewWorldId.value, enabled: 1 }],
 })))
 watch(moduleId, async id => {
   moduleLorebookRows.value = []
@@ -346,11 +347,15 @@ watch(moduleId, async id => {
     if (result.ok && Array.isArray(result.lorebooks)) moduleLorebookRows.value = result.lorebooks
   } catch { /* 模块资料册候选加载失败不阻断创建流程 */ }
 }, { immediate: true })
+// 世界自己的资料册里有没有内容：世界主册是自动建的空书，内容常常全在包里。
+// 没确认之前（booksLoaded=false）不下结论，避免链接在加载中被改写。
+const worldLoreHasContent = computed(() => booksLoaded.value ? worldBooksHaveContent(availableLorebooks.value) : undefined)
 const loreManageTarget = computed(() => resolveLoreManageTarget({
   source: loreChoice.value,
   worldId: lorePreviewWorldId.value,
   editableWorldIds: loreWorlds.value.map(worldIdOf),
   moduleId: moduleId.value,
+  worldHasContent: worldLoreHasContent.value,
 }))
 const loreManageHref = computed(() => {
   const target = loreManageTarget.value

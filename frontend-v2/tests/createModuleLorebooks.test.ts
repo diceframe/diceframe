@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   route: { query: {} as Record<string, string> },
   router: { push: vi.fn(), resolve: vi.fn(() => ({ href: '/adventures' })) },
   apiCalls: [] as Array<{ path: string; init?: RequestInit }>,
+  books: [] as unknown[],
+  worlds: [] as unknown[],
 }))
 
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => mocks.router }))
@@ -38,8 +40,8 @@ vi.mock('../src/api/client', () => ({ api: vi.fn(async (path: string, init?: Req
       ruleset_runtime: { id: 'core:freeform', version: 1, capabilities: { adventure_formats: ['diceframe:adventure-graph-v2'] } },
     },
   ] }
-  if (path === '/worlds') return { worlds: [] }
-  if (path.startsWith('/lorebooks?')) return { books: [] }
+  if (path === '/worlds') return { worlds: mocks.worlds }
+  if (path.startsWith('/lorebooks?')) return { books: mocks.books }
   if (path === '/character-cards') return { cards: [] }
   if (path.startsWith('/adventures')) return { ok: true, adventures: [
     {
@@ -81,6 +83,8 @@ describe('CreateView module lorebook landing (issue #700)', () => {
     mocks.router.push.mockReset()
     mocks.route.query = {}
     mocks.apiCalls.length = 0
+    mocks.books = []
+    mocks.worlds = []
   })
 
   async function mountWithModuleAdventure() {
@@ -136,8 +140,33 @@ describe('CreateView module lorebook landing (issue #700)', () => {
     wrapper.unmount()
   })
 
-  it('carries the pack into free play for resource-only packs (module_id without adventure_id)', async () => {
-    i18n.global.locale.value = 'zh-CN'
+  it('separates the empty world main book from the pack book that holds the entries', async () => {
+    // 灰砧镇：世界主册自动创建、0 条；18 条全在包内资料册里。
+    mocks.books = [{
+      id: 'world:greymoor', name: '灰沼基础资料', enabled: true, entry_count: 0, source_kind: 'world',
+      bindings: [{ scope_kind: 'world', scope_id: 'greymoor', role: 'primary' }],
+    }]
+    mocks.worlds = [{ id: 'greymoor', name: '灰沼' }]
+    const { wrapper, vm } = await mountWithModuleAdventure()
+
+    const rows = wrapper.findAll('details.create-lorebook-summary ul li')
+    expect(rows).toHaveLength(2)
+    // 空白主册是容器：有说明、没有勾选框，也不计入"已选"。
+    expect(rows[0]!.text()).toContain('暂无条目')
+    expect(rows[0]!.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(rows[1]!.text()).toContain('内容包')
+    expect(rows[1]!.text()).toContain('27 条')
+    expect(wrapper.findAll('details.create-lorebook-summary ul li input[type="checkbox"]')).toHaveLength(1)
+    expect(wrapper.get('details.create-lorebook-summary summary').text()).toContain('已选 1 册')
+
+    // 世界自己能编辑，但它一本书的内容都没有：链接指向真正有内容的包页，
+    // 而不是一个空编辑器。主册仍随世界带入，binding 语义不变。
+    expect(vm.loreManageTarget).toEqual({ kind: 'module', moduleId: MODULE_ID })
+    expect(vm.selectedBookIds).toEqual(['world:greymoor', BOOK_ID])
+    wrapper.unmount()
+  })
+
+  it('carries the pack into free play for resource-only packs (module_id without adventure_id)', async () => {    i18n.global.locale.value = 'zh-CN'
     mocks.route.query = { module_id: MODULE_ID }
     const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
     await flushPromises()

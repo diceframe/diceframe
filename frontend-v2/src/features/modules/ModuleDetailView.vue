@@ -347,9 +347,20 @@ async function run(action: ModuleAction) {
         <h2>{{ t('modulesLorebooks') }}</h2>
         <p v-if="!(module.lorebooks || []).length" class="muted">{{ t('modulesNoLorebooks') }}</p>
         <template v-else>
-          <ul>
-            <li v-for="book in (module.lorebooks || [])" :key="book.id">{{ book.name }} · {{ book.language }}</li>
+          <ul class="module-lorebook-list">
+            <li v-for="book in (module.lorebooks || [])" :key="book.id">
+              <span>
+                <b>{{ book.name }}</b>
+                <small>
+                  {{ book.language }}<template v-if="typeof book.entry_count === 'number'"> · {{ t('modulesLorebookEntries', { count: book.entry_count }) }}</template>
+                </small>
+              </span>
+              <span class="module-lorebook-origin" :data-catalog="book.catalog === true">
+                {{ book.catalog ? t('modulesLorebookInPack') : t('modulesLorebookInLibrary') }}
+              </span>
+            </li>
           </ul>
+          <p v-if="(module.lorebooks || []).some(book => book.catalog)" class="muted">{{ t('modulesLorebookPackHint') }}</p>
           <button
             v-if="!module.adventures.length"
             type="button"
@@ -414,6 +425,12 @@ async function run(action: ModuleAction) {
 .module-content-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
 .module-content-list li span { color: var(--df-text-muted); }
 .module-content-list li strong { color: var(--df-interactive-strong); }
+.module-lorebook-list { display: grid; gap: .5rem; list-style: none; margin: .6rem 0; padding: 0; }
+.module-lorebook-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
+.module-lorebook-list b { display: block; font-size: .9rem; }
+.module-lorebook-list small { display: block; color: var(--df-text-muted); font-size: .78rem; }
+.module-lorebook-origin { color: var(--df-text-muted); font-size: .78rem; white-space: nowrap; }
+.module-lorebook-origin[data-catalog='true'] { color: var(--df-interactive-strong); }
 .module-technical { padding: 0; overflow: hidden; }
 .module-technical summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; padding: .7rem 1.25rem; font-weight: 700; list-style-position: inside; }
 .module-technical[open] summary { border-bottom: 1px solid var(--df-border-soft); }

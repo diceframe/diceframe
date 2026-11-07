@@ -39,7 +39,7 @@ export type ModuleActionGuard = {
 export type ModuleDetail = ModuleSummary & {
   content: Record<string, Array<{ key: string; title: string; description: string }>>
   adventures: Array<{ adventure_id: string; version: string; format: string; directory_id: string; name?: string; summary?: string }>
-  lorebooks: Array<{ id: string; name: string; description: string; language: string; enabled: boolean; source_kind: string; source_id: string }>
+  lorebooks: Array<{ id: string; name: string; description: string; language: string; enabled: boolean; source_kind: string; source_id: string; catalog?: boolean; entry_count?: number | null }>
   bound_games?: ModuleBoundGame[]
   actions?: Record<string, ModuleActionGuard>
 }

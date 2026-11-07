@@ -314,7 +314,9 @@ def test_module_lorebooks_dedupe_materialized_book_against_catalog_row(host, sto
     assert len(rows) == 1
     assert rows[0]["id"] == book_id
     assert rows[0]["name"] == "玩家改名后的档案"
-    assert "catalog" not in rows[0]
+    # 已落地 = 一本普通的、可编辑的书；catalog 行表示"还在包里"。
+    assert rows[0]["catalog"] is False
+    assert rows[0]["entry_count"] == 2
 
 
 pytest_plugins = ["tests.webapi_harness"]
@@ -357,6 +359,11 @@ async def test_create_game_materializes_declared_module_book_on_demand(web_api, 
     refs = instance.modules["content_binding"]["book_refs"]
     assert refs and refs[0]["source_kind"] == "module" and refs[0]["id"] == book_id
     assert lorebook.list_bindings(scope_kind="game", scope_id=result["game_key"])
+    # 落地之后它必须能在资料册页找到：这正是玩家抱怨"18 条不知道去哪了"
+    # 的那个缺口——书只有在书库里，才谈得上可查、可编辑。而且不依赖"当前
+    # 对局"：离开对局、从资料册页进来也要能看到。
+    listing = api.list_lorebooks("template_world", "")
+    assert book_id in {str(row.get("id") or "") for row in listing["books"]}
 
 
 @pytest.mark.asyncio

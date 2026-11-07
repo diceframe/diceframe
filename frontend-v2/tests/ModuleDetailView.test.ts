@@ -304,6 +304,24 @@ describe('ModuleDetailView', () => {
     expect(router.currentRoute.value.query).toEqual({ module_id: 'castle-module', adventure_id: 'plugin:castle-quest' })
   })
 
+  it('shows how many entries each book holds and whether it is in the library yet', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({
+      adventure_count: 0, adventures: [], content_profile: 'content-pack',
+      lorebooks: [
+        { id: 'module_book_castle_archive', name: 'Castle Archive', description: '', language: 'zh-CN', enabled: true, source_kind: 'module', source_id: 'castle-module', catalog: true, entry_count: 18 },
+        { id: 'module_book_castle_notes', name: 'Castle Notes', description: '', language: 'zh-CN', enabled: true, source_kind: 'module', source_id: 'castle-module', catalog: false, entry_count: 0 },
+      ],
+    }))
+    const { wrapper } = await mountView()
+    const section = wrapper.get('[data-testid="module-lorebooks"]')
+
+    // 只给书名的话，18 条那本和空主册在页面上无从分辨。
+    expect(section.text()).toContain('18 条')
+    expect(section.text()).toContain('包内只读')
+    expect(section.text()).toContain('已在资料册中')
+    expect(section.text()).toContain('不随安装写入你的书库')
+  })
+
   it('offers a pack-wide launch for resource packs that declare lorebooks', async () => {
     const lorebooks = [{
       id: 'module_book_castle_archive', name: 'Castle Archive', description: '', language: 'zh-CN',

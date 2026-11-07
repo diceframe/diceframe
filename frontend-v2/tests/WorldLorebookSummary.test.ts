@@ -65,6 +65,33 @@ describe('WorldLorebookSummary', () => {
     expect(wrapper.get('footer .create-lorebook-readonly').text()).toContain('只读')
     wrapper.unmount()
   })
+  it('shows an empty world main book as context and the pack book as the only real choice', async () => {
+    mocks.api.mockResolvedValue({ books: [{
+      id: 'world:ashfell', name: '灰砧镇：余烬厅', enabled: true, entry_count: 0, source_kind: 'world',
+      bindings: [{ scope_kind: 'world', scope_id: 'ashfell', role: 'primary' }],
+    }] })
+    const wrapper = mount(WorldLorebookSummary, {
+      props: {
+        worldId: 'ashfell', source: '__builtin__', manageHref: '#/modules/dnd-embervault', manageKind: 'module',
+        modelValue: ['world:ashfell', 'module_book_embervault_notes'],
+        extraBooks: [{
+          id: 'module_book_embervault_notes', name: '余烬厅底牌', enabled: true, module: true, catalog: true, entry_count: 18,
+          ref: { source_kind: 'module', source_id: 'dnd-embervault', kind: 'lorebook', id: 'module_book_embervault_notes' },
+        }],
+      },
+      global: { plugins: [i18n] },
+    })
+    await flushPromises()
+    // 空白主册是容器不是资料：没有勾选框，也不计入"已选"。
+    expect(wrapper.findAll('input[type=checkbox]')).toHaveLength(1)
+    expect(wrapper.get('summary').text()).toContain('已选 1 册')
+    expect(wrapper.text()).toContain('暂无条目')
+    expect(wrapper.text()).toContain('随世界带入')
+    expect(wrapper.text()).toContain('内容包')
+    expect(wrapper.text()).toContain('18 条')
+    expect(wrapper.text()).toContain('开局时加入书库')
+    wrapper.unmount()
+  })
   it('preserves an explicit empty selection across retry', async () => {
     mocks.api.mockResolvedValue(harborBooks)
     const wrapper = mount(WorldLorebookSummary, { props: { ...props, modelValue: [] }, global: { plugins: [i18n] } })
