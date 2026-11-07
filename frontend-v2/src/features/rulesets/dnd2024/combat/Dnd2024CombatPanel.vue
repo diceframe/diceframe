@@ -16,7 +16,6 @@ import {
 } from '@/features/rulesets/dnd2024/api'
 import type {
   CharacterClassResource,
-  CharacterListResponse,
   CharacterPortrait,
   JsonObject,
   RulesetCombatAction,
@@ -271,22 +270,10 @@ function chooseTrackPosition(position: number): void {
   selectDockTab('move')
 }
 
-// 战斗本身不带美术：玩家/NPC 的头像在角色卡上，这里按 actor_id 取一份映射，
-// 取不到就继续用首字母色块（不影响战斗）。
-// 本局角色列表：NPC 用 npc_id / name，玩家用 user_id；都来自角色卡，不额外造数据。
-interface GameCharactersResponse {
-  players?: Array<{ user_id: string; character_name?: string; character_sheet?: { portrait?: CharacterPortrait | null } | null }>
-  npcs?: Array<{
-    npc_id?: string
-    id?: string
-    card_id?: string
-    name?: string
-    character_name?: string
-    portrait?: CharacterPortrait | null
-  }>
-}
 // 本局角色列表：NPC 用 npc_id / name，玩家用 user_id；头像都来自角色卡，
 // 战斗本身不另造美术。取不到就继续用首字母色块。
+// 注意：/characters 只把 NPC 名单返回给 GM，玩家端拿不到 npcs，
+// 所以玩家看到的敌人仍是首字母块；要让玩家也看到，需要服务端在战斗数据里带头像。
 interface GameCharactersResponse {
   players?: Array<{
     user_id: string
@@ -1148,7 +1135,10 @@ watch(() => props.gameKey, (next, previous) => {
   if (next === previous) return
   loadSequence += 1
   clearGameScopedState()
-  if (next) void load()
+  if (next) {
+    void load()
+    void loadCombatPortraits()
+  }
 })
 watch(() => props.refreshKey, () => void load(true))
 onMounted(() => {
@@ -1552,18 +1542,18 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 
           <template #summary>
             <div v-if="dockMode" class="dock-detail">
-                <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
-                <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
-                <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
+              <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
+              <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
+              <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
             </div>
             <div class="dock-actions">
               <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
-              <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
-            </button>
+                <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
+              </button>
               <div class="dock-finish">
-              <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
-              <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
-              <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+                <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
+                <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
+                <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
               </div>
             </div>
           </template>

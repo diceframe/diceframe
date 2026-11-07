@@ -5,8 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '../src/i18n'
 
 const mocks = vi.hoisted(() => ({
-  fetch: vi.fn(), submit: vi.fn(), decide: vi.fn(), plan: vi.fn(),
+  fetch: vi.fn(), submit: vi.fn(), decide: vi.fn(), plan: vi.fn(), api: vi.fn(),
   locale: 'en',
+}))
+
+// 头像映射走通用的 /games/{key}/characters；默认拉不到，面板继续用首字母块。
+vi.mock('../src/api/client', async importOriginal => ({
+  ...(await importOriginal<typeof import('../src/api/client')>()),
+  api: mocks.api,
 }))
 
 vi.mock('../src/features/rulesets/dnd2024/api', () => ({
@@ -162,6 +168,7 @@ describe('D&D 2024 combat panel', () => {
     mocks.submit.mockReset().mockResolvedValue(response('active'))
     mocks.decide.mockReset().mockResolvedValue(response('active'))
     mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
+    mocks.api.mockReset().mockRejectedValue(new Error('offline'))
   })
 
   it('shows the GM treasure table entry and renders the server roll result', async () => {
@@ -736,6 +743,31 @@ describe('D&D 2024 combat panel', () => {
     ])
     expect(wrapper.text()).not.toContain('Goblin')
     expect(wrapper.text()).toContain('No combat is active')
+    wrapper.unmount()
+  })
+
+  it('loads the new game portraits again after switching games', async () => {
+    const goblinFace = { kind: 'upload', id: 'goblin-face' }
+    mocks.fetch.mockResolvedValue(response('active'))
+    mocks.api.mockImplementation(async (path: string) => (
+      path.includes('fresh')
+        ? { players: [], npcs: [{ npc_id: 'goblin-1', name: 'Goblin', portrait: goblinFace }] }
+        : { players: [], npcs: [] }
+    ))
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|old|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    await wrapper.setProps({ gameKey: 'web|fresh|bot' })
+    await flushPromises()
+
+    expect(mocks.api.mock.calls.map(call => call[0])).toEqual([
+      `/games/${encodeURIComponent('web|old|bot')}/characters`,
+      `/games/${encodeURIComponent('web|fresh|bot')}/characters`,
+    ])
+    const goblin = wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]')
+    expect(goblin.findComponent({ name: 'PortraitImage' }).props('portrait')).toEqual(goblinFace)
     wrapper.unmount()
   })
 
@@ -1781,6 +1813,7 @@ describe('D&D 2024 combat panel class capabilities', () => {
     mocks.submit.mockReset().mockResolvedValue(response('active'))
     mocks.decide.mockReset().mockResolvedValue(response('active'))
     mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
+    mocks.api.mockReset().mockRejectedValue(new Error('offline'))
   })
 
   it('renders the server-provided capabilities with their costs and the projected Focus', async () => {
@@ -1959,6 +1992,7 @@ describe('D&D 2024 combat decisions and declarations', () => {
     mocks.submit.mockReset().mockResolvedValue(response('active'))
     mocks.decide.mockReset().mockResolvedValue(response('active'))
     mocks.plan.mockReset().mockResolvedValue({ ok: false, error: 'unavailable' })
+    mocks.api.mockReset().mockRejectedValue(new Error('offline'))
   })
 
   it('renders a check window and submits spend through the decision API', async () => {

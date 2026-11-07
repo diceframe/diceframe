@@ -102,12 +102,12 @@ const copy = computed(() => extension.value?.copy(String(locale.value)) || {
 </template>
 
 <style scoped>
-/* 标签栏固定高度，当前工具面板占满剩余空间并自己滚动（minmax(0,…) 才能让
-   overflow:auto 生效；否则自动行会被内容撑开，滚动条永远不出现）。 */
+/* 标签栏已移到外面的 .dnd-toolbox-bar；这里只剩当前工具面板，占满剩余空间
+   并自己滚动（minmax(0,…) 才能让 overflow:auto 生效；否则自动行会被内容撑开，
+   滚动条永远不出现）。 */
 .ruleset-play-host {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }

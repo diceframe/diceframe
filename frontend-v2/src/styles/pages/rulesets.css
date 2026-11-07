@@ -75,11 +75,6 @@
 }
 
 .dnd-toolbox-tabs {
-  margin-top: 0;
-  padding-right: 40px;
-}
-
-.dnd-toolbox-tabs {
   display: flex;
   flex: 0 0 auto;
   gap: 7px;
