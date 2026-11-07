@@ -639,6 +639,13 @@ onMounted(async () => {
       ? []
       : [{ character_name: gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer', DEFAULT_ADVENTURER_DE), background: '', identity: {}, attributes: {}, skills: [] }]
     await adventureSelection.initializeLaunch(route.query, rules.value, worlds.value)
+    // 资源包（无固定剧情）也带 module_id 深链：没有 adventure_id 时开局走自由
+    // 模式，但本局仍应能选到这个包声明的资料册。已有冒险的深链由
+    // initializeLaunch 自己设置，这里只在两者不一致时补位（避免清掉已选冒险）。
+    const launchModuleId = typeof route.query.module_id === 'string' ? route.query.module_id.trim() : ''
+    if (launchModuleId && adventureSelection.moduleId.value !== launchModuleId) {
+      adventureSelection.moduleId.value = launchModuleId
+    }
     if (savedDraft) {
       restoreDraft(savedDraft)
       await nextTick()

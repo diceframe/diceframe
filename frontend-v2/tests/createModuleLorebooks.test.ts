@@ -136,8 +136,21 @@ describe('CreateView module lorebook landing (issue #700)', () => {
     wrapper.unmount()
   })
 
-  it('clears module book candidates when the module source is left', async () => {
-    const { wrapper, vm } = await mountWithModuleAdventure()
+  it('carries the pack into free play for resource-only packs (module_id without adventure_id)', async () => {
+    i18n.global.locale.value = 'zh-CN'
+    mocks.route.query = { module_id: MODULE_ID }
+    const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.moduleId).toBe(MODULE_ID)
+    expect(vm.playMode).toBe('free')
+    expect(vm.moduleLorebookRows.length).toBe(1)
+    expect(vm.selectedBookIds).toContain(BOOK_ID)
+    wrapper.unmount()
+  })
+
+  it('clears module book candidates when the module source is left', async () => {    const { wrapper, vm } = await mountWithModuleAdventure()
     expect(vm.moduleLorebookRows.length).toBe(1)
 
     vm.moduleId = ''
