@@ -76,6 +76,10 @@ def _quick_character(preset_id: str = "stalwart_guardian") -> tuple[Dnd2024Runti
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(item for item in choices["quick_presets"] if item["id"] == preset_id)
     draft = {**preset["draft"], "locale": "en", "name": "Level Tester"}
+    if preset_id == "stalwart_guardian":
+        # 1 级 Fighting Style 取 Archery：预设原本占用 Defense，本切片又只
+        # 实现 Defense 的效果，7 级会出现"已拥有且无其它可选"的死局。
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:archery"}
     return runtime, runtime.finalize_character(None, draft)["ruleset_character"]
 
 
@@ -237,6 +241,14 @@ def test_epic_boon_opens_the_level_twenty_path() -> None:
                 "epic_boon_ref": "feat:boon_of_truesight",
                 "ability_score_increases": {"wis": 1},
             })
+        if target_level == 7:
+            # 冠军 7 级多了一个必答的特性选项槽；不回答就无法升级。
+            choices["feature_choices"] = [{
+                "owner": "subclass:champion",
+                "feature_id": "additional_fighting_style",
+                "choice_id": "fighting_style_feat",
+                "selected_refs": ["feat:defense"],
+            }]
         current = engine.apply_next_level(current, choices)
 
     assert current["build"]["level"] == 20

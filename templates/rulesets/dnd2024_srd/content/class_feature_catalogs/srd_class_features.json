@@ -230,6 +230,20 @@
           "parameters": {"crit_threshold": 19}
         },
         {
+          "id": "additional_fighting_style",
+          "owner": "subclass:champion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p49:additional-fighting-style",
+          "summary": "You gain another Fighting Style feat of your choice.",
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1,
+            "enabled_options": ["feat:defense"]
+          }
+        },
+        {
           "id": "two_extra_attacks",
           "minimum_level": 11,
           "summary": "When you take the Attack action, you can attack three times instead of once.",

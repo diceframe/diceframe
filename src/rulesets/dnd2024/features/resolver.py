@@ -60,6 +60,9 @@ class Dnd2024ClassFeatureResolver:
         # canonical 装备元数据是惰性构建的：它只在真的有 feature 声明了装备前提
         # 时才被读取，避免每次角色投影都白拷一份物品目录。
         self._equipment: Dnd2024EquipmentCatalog | None = None
+        # 成长专长的 kind -> category 映射同样惰性：只有声明了 choice 的特性
+        # 才需要它，普通特性投影不该为此读一遍专项目录。
+        self._feat_categories: dict[str, str] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -443,6 +446,78 @@ class Dnd2024ClassFeatureResolver:
             if definition.parameters.get(name)
         ]
 
+    def feature_selection(
+        self,
+        character: Mapping[str, Any] | None,
+        definition: ClassFeatureDefinition,
+    ) -> dict[str, Any] | None:
+        """The committed selection of one declared choice, or ``None``.
+
+        Only a record matching the full ``(owner, feature_id, choice_id)``
+        identity and carrying refs of the declared category is projected.  A
+        duplicate record for the same slot is ambiguous, so it resolves to an
+        empty selection rather than letting the last write win.  Nothing here
+        grants a feature: ownership still comes only from the class and
+        subclass grant tables, never from a submitted choice.
+        """
+
+        choice = definition.choice
+        if choice is None:
+            return None
+        matches = [
+            record
+            for record in self._feature_choice_records(character)
+            if record.get("owner") == definition.owner
+            and record.get("feature_id") == definition.id
+            and record.get("choice_id") == choice.id
+        ]
+        selected: list[str] = []
+        if len(matches) == 1:
+            raw_refs = matches[0].get("selected_refs")
+            categories = self._advancement_feat_categories()
+            if isinstance(raw_refs, list):
+                for ref in raw_refs:
+                    if not isinstance(ref, str):
+                        continue
+                    if categories.get(ref.removeprefix("feat:")) != choice.category:
+                        continue
+                    if ref not in selected:
+                        selected.append(ref)
+        return {"choice_id": choice.id, "selected_refs": selected}
+
+    @staticmethod
+    def _feature_choice_records(
+        character: Mapping[str, Any] | None,
+    ) -> list[Mapping[str, Any]]:
+        """Every structurally valid persisted choice record, in stored order."""
+
+        if not isinstance(character, Mapping):
+            return []
+        features = character.get("features")
+        if not isinstance(features, Mapping):
+            return []
+        raw = features.get("feature_choices")
+        if not isinstance(raw, list):
+            return []
+        return [record for record in raw if isinstance(record, Mapping)]
+
+    def _advancement_feat_categories(self) -> dict[str, str]:
+        """The advancement feat catalog's id -> category map, read once."""
+
+        if self._feat_categories is None:
+            catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+            feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+            self._feat_categories = (
+                {
+                    str(feat_id): str(feat.get("category") or "")
+                    for feat_id, feat in feats.items()
+                    if isinstance(feat, Mapping)
+                }
+                if isinstance(feats, Mapping)
+                else {}
+            )
+        return self._feat_categories
+
     def feature_views(
         self, character: Mapping[str, Any] | None,
     ) -> tuple[FeatureView, ...]:
@@ -479,6 +554,7 @@ class Dnd2024ClassFeatureResolver:
                 minimum_level=definition.minimum_level,
                 values=values,
                 active=active,
+                selection=self.feature_selection(character, definition),
             ))
         return tuple(views)
 

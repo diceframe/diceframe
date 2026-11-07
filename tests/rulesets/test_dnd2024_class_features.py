@@ -677,6 +677,7 @@ def test_retaliation_is_not_owned_below_level_ten() -> None:
 _SUBCLASS_DECLARATIONS = [
     ("class:paladin", 7, "aura_of_devotion", "subclass:oath_of_devotion"),
     ("class:fighter", 3, "improved_critical", "subclass:champion"),
+    ("class:fighter", 7, "additional_fighting_style", "subclass:champion"),
     ("class:fighter", 15, "superior_critical", "subclass:champion"),
     ("class:fighter", 18, "survivor", "subclass:champion"),
     ("class:barbarian", 10, "retaliation", "subclass:path_of_the_berserker"),

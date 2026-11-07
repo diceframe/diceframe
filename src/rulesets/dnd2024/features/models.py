@@ -34,6 +34,8 @@ ACTION_COST_KINDS = ("bonus_action", "action")
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
 WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
 EQUIPMENT_REQUIREMENT_KEYS = frozenset({"unarmored", "no_shield", "weapon_kinds"})
+# 本切片只支持成长专长选择；未知 kind 必须加载期拒绝，不能静默当成无选项特性。
+FEATURE_CHOICE_KINDS = frozenset({"advancement_feat"})
 
 
 class ClassFeatureError(ValueError):
@@ -148,6 +150,118 @@ class FeatureCapability:
 
 
 @dataclass(frozen=True, slots=True)
+class FeatureChoice:
+    """A player choice one class feature requires at the level it is gained.
+
+    Identity is ``(owner, feature_id, choice.id)``: the same choice id may
+    legitimately hang off two features, so neither part alone is a key.
+
+    ``enabled_options`` is an executability whitelist, not a UI filter.
+    Every other option in the category is still projected, but marked
+    unavailable with ``effect_not_implemented`` and rejected on commit --
+    a selection that grants nothing must never look finished.
+    """
+
+    id: str
+    kind: str
+    category: str
+    count: int
+    enabled_options: tuple[str, ...]
+
+
+def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
+    """Validate a declared player choice, failing closed on unknown shapes."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ClassFeatureError(f"{feature_id}.choice must be an object")
+    choice_id = _require_id(raw.get("id"), f"{feature_id}.choice.id")
+    kind = str(raw.get("kind") or "")
+    if kind not in FEATURE_CHOICE_KINDS:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.kind is not a supported choice kind: {kind!r}"
+        )
+    category = _require_id(raw.get("category"), f"{feature_id}.choice.category")
+    count = raw.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or count != 1:
+        raise ClassFeatureError(f"{feature_id}.choice.count must be 1")
+    raw_refs = raw.get("enabled_options")
+    if not isinstance(raw_refs, list) or not raw_refs:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.enabled_options must be a non-empty array"
+        )
+    refs: list[str] = []
+    seen: set[str] = set()
+    for raw_ref in raw_refs:
+        if not isinstance(raw_ref, str) or not raw_ref.startswith("feat:"):
+            raise ClassFeatureError(
+                f"{feature_id}.choice.enabled_options must hold feat refs"
+            )
+        ref = f"feat:{_require_id(raw_ref[5:], f'{feature_id}.choice.enabled_options')}"
+        if ref in seen:
+            raise ClassFeatureError(
+                f"{feature_id}.choice.enabled_options repeats {ref}"
+            )
+        seen.add(ref)
+        refs.append(ref)
+    return FeatureChoice(
+        id=choice_id,
+        kind=kind,
+        category=category,
+        count=count,
+        enabled_options=tuple(refs),
+    )
+
+
+def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
+    """Every declared advancement feat's id and category, for cross-catalog checks."""
+
+    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+    if not isinstance(feats, Mapping):
+        return {}
+    return {
+        str(feat_id): str(feat.get("category") or "")
+        for feat_id, feat in feats.items()
+        if isinstance(feat, Mapping)
+    }
+
+
+def _validate_feature_choices(
+    features: list[ClassFeatureDefinition], bundle: LoadedRulesetBundle,
+) -> None:
+    """Cross-check every declared choice against the advancement feat catalog.
+
+    A choice naming a category nothing declares, or whitelisting a ref that is
+    missing or belongs to another category, would offer a slot the runtime can
+    never satisfy.  All three fail at load instead of on the player's turn.
+    """
+
+    categories = _advancement_feat_categories(bundle)
+    known = set(categories.values())
+    for definition in features:
+        choice = definition.choice
+        if choice is None:
+            continue
+        if choice.category not in known:
+            raise ClassFeatureError(
+                f"{definition.id}.choice.category is not a declared feat category: "
+                f"{choice.category}"
+            )
+        for ref in choice.enabled_options:
+            category = categories.get(ref[5:])
+            if category is None:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice references an undeclared advancement feat: {ref}"
+                )
+            if category != choice.category:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice option {ref} is not a {choice.category} feat"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class ClassFeatureDefinition:
     """One declared class feature."""
 
@@ -162,6 +276,7 @@ class ClassFeatureDefinition:
     capabilities: tuple[FeatureCapability, ...]
     owner: str
     equipment_requirement: EquipmentRequirement | None = None
+    choice: FeatureChoice | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -352,6 +467,7 @@ class Dnd2024ClassFeatureCatalog:
                 )
             if definition.option_of == definition.id:
                 raise ClassFeatureError(f"{definition.id} cannot be its own option")
+        _validate_feature_choices(features, bundle)
         return cls(
             source_ref=_require_text(raw.get("source_ref"), "class feature catalog source_ref"),
             labels=labels,
@@ -420,6 +536,7 @@ class Dnd2024ClassFeatureCatalog:
             equipment_requirement=_parse_equipment_requirement(
                 feature_id, raw.get("equipment_requirement"),
             ),
+            choice=_parse_feature_choice(feature_id, raw.get("choice")),
         )
 
     @classmethod
@@ -523,9 +640,11 @@ class FeatureView:
     owner: str = ""
     values: Mapping[str, Any] = field(default_factory=dict)
     active: bool = True
+    # 只有声明了 choice 的特性才带 selection；其余特性不得凭空多出字段。
+    selection: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "id": self.id,
             "owner": self.owner,
             "name": self.name,
@@ -535,6 +654,9 @@ class FeatureView:
             "values": dict(self.values),
             "active": self.active,
         }
+        if self.selection is not None:
+            payload["selection"] = dict(self.selection)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
