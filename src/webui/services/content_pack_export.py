@@ -410,7 +410,13 @@ def export_content_pack(
         for book_id in lorebook_ids:
             book = dict(books[book_id])
             book["entries"] = dependencies.lorebook.list_book_entries(book_id)
-            book_path = safe_id_part(book_id)
+            # 本机 canonical book id（world:greymoor / book:xxxx）不能原样进包：
+            # Content V2 校验器要求资源 id 是规范 canonical id，带冒号的
+            # 本机身份会被拒收（导出的包装不回去）。世界/规则/卡牌都走
+            # _export_resource_id 重写，资料册此前是唯一漏掉的一类。
+            external_id = _export_resource_id(book_id, "lorebook")
+            book["id"] = external_id
+            book_path = external_id
             existing = next((path for path in files if path == f"content/lorebooks/{book_path}.json"), None)
             if existing is not None:
                 return {"ok": False, "error": f"资料册文件名冲突：{book_path}，请分别导出"}

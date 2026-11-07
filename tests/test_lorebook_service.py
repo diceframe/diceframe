@@ -152,6 +152,37 @@ def test_explicit_catalogue_scope_includes_books_bound_outside_current_world(
     assert {row["id"] for row in rows} >= {"book:world", "book:game"}
 
 
+def test_world_book_list_does_not_leak_other_worlds_game_books(store: LorebookStore) -> None:
+    """Browsing world A with an active game on world B must not list B's runtime books.
+
+    Otherwise the workspace keeps the stale B book selected while visibility
+    projections follow world A — the entry list and the badges stop matching.
+    """
+    deps = _deps(store)
+    store.create_world("world-2", "World Two")
+    store.create_lorebook({"id": "world:world-1", "name": "Primary One"})
+    store.create_lorebook({"id": "world:world-2", "name": "Primary Two"})
+    store.create_lorebook({"id": "book:game-world-2", "name": "Runtime of world-2"})
+    store.create_lorebook({"id": "book:game-world-1", "name": "Runtime of world-1"})
+    store.create_lorebook({"id": "book:game-agnostic", "name": "Game book without a world"})
+    store.bind_lorebook({"id": "b:primary-1", "book_id": "world:world-1", "scope_kind": "world", "scope_id": "world-1", "role": "primary"})
+    store.bind_lorebook({"id": "b:primary-2", "book_id": "world:world-2", "scope_kind": "world", "scope_id": "world-2", "role": "primary"})
+    store.bind_lorebook({"id": "b:game-2", "book_id": "book:game-world-2", "scope_kind": "game", "scope_id": "game-1"})
+    store.bind_lorebook({"id": "b:world-2-runtime", "book_id": "book:game-world-2", "scope_kind": "world", "scope_id": "world-2"})
+    store.bind_lorebook({"id": "b:game-1", "book_id": "book:game-world-1", "scope_kind": "game", "scope_id": "game-1"})
+    store.bind_lorebook({"id": "b:world-1-runtime", "book_id": "book:game-world-1", "scope_kind": "world", "scope_id": "world-1"})
+    store.bind_lorebook({"id": "b:agnostic", "book_id": "book:game-agnostic", "scope_kind": "game", "scope_id": "game-1"})
+
+    rows = lorebooks.list_lorebooks(deps, world_id="world-1", game_key="game-1")["books"]
+    ids = {row["id"] for row in rows}
+    assert "book:game-world-2" not in ids  # 别的世界的对局书不出现
+    assert {"world:world-1", "book:game-world-1", "book:game-agnostic"} <= ids
+
+    # 不带 world 浏览（游戏 scope）时仍然完整可见。
+    game_rows = lorebooks.list_lorebooks(deps, game_key="game-1")["books"]
+    assert "book:game-world-2" in {row["id"] for row in game_rows}
+
+
 @pytest.mark.asyncio
 async def test_missing_retriever_keeps_original_activation_error(store: LorebookStore) -> None:
     api = _api(store)

@@ -7,6 +7,12 @@
  * "world unavailable" error. A pack world's books therefore cannot be edited
  * in place; the closest real target is the pack page, where the declared
  * resources can be inspected and forked.
+ *
+ * A library world can still be the wrong target: every world is created with
+ * an empty primary book, so a world whose content all lives in a pack ("灰砧镇"
+ * ships no starter book, the pack ships an 18-entry book instead) would send
+ * the reader to an empty editor. When the world's own books are empty and a
+ * pack started this launch, the pack page is the honest answer.
  */
 export type LoreManageTarget =
   | { kind: 'world'; worldId: string }
@@ -22,14 +28,19 @@ export function resolveLoreManageTarget(input: {
   editableWorldIds: readonly string[]
   /** The content pack that started this launch, when there is one. */
   moduleId?: string
+  /** Whether the world's own books hold any entries; `undefined` = not known yet. */
+  worldHasContent?: boolean
 }): LoreManageTarget {
   const source = String(input.source || '')
   const worldId = source.startsWith('copy:')
     ? source.slice('copy:'.length)
     : source === '__builtin__' ? String(input.worldId || '') : ''
   if (!worldId) return { kind: 'none' }
-  if (input.editableWorldIds.includes(worldId)) return { kind: 'world', worldId }
   const moduleId = String(input.moduleId || '').trim()
+  if (input.editableWorldIds.includes(worldId)) {
+    if (input.worldHasContent === false && moduleId) return { kind: 'module', moduleId }
+    return { kind: 'world', worldId }
+  }
   if (moduleId) return { kind: 'module', moduleId }
   return { kind: 'none' }
 }

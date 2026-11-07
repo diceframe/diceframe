@@ -30,7 +30,7 @@ from src.plugin_host.support import (
     content_delivery_mode,
     content_profile,
 )
-from src.lorebook.module_books import module_book_id
+from src.lorebook.module_books import module_book_display_name, module_book_id
 from src.adventures import AdventureBundleLoader
 from src.plugin_host.registry import ContributionRegistry
 from src.version import version_below
@@ -172,15 +172,33 @@ def _inventory_projection(runtime: Any, adventure_registry: Any) -> tuple[int | 
     return adventure_count, counts, status
 
 
+def _book_entry_count(store: Any, book_id: str) -> int | None:
+    """条目数只是展示信息：读不到就说不知道，不要让整页失败。"""
+
+    lister = getattr(store, "list_book_entries", None)
+    if not callable(lister):
+        return None
+    try:
+        return len(lister(str(book_id)) or [])
+    except Exception:  # noqa: BLE001 - a count is never worth failing the page
+        return None
+
+
 def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str, Any]]:
     """Return canonical Lorebook sources explicitly owned by one module.
 
-    两类来源合并（issue #700）：
+    两类来源合并（issue #700），**用 ``catalog`` 明确区分**，前端据此决定
+    能不能编辑、能不能在资料册页打开：
     - 用户书库里已物化的 module 书（legacy_autoimport 启用即落地、catalog
-      模组开局按需物化都会产生），带 ``source_kind=module`` 标记；
-    - 该模块**声明**的 lorebook 资源（catalog 只读数据）。物化与声明用同一
+      模组开局按需物化都会产生），带 ``source_kind=module`` 标记，``catalog``
+      为 false —— 它就是一本普通的、可编辑的书；
+    - 该模块**声明**的 lorebook 资源（只读数据，未落地）。物化与声明用同一
       deterministic book id 对齐去重，所以每本书只出现一行；catalog 行带
-      ``catalog: true`` 与结构化 ``ref``，创建页据此把它作为开局候选。
+      ``catalog: true`` 与结构化 ``ref``，创建页据此把它作为开局候选，
+      开局勾选时由服务端按声明物化。
+
+    两种行都带 ``entry_count``：模块页要能回答"包里那本 18 条的书在哪"，
+    只给书名不给条数的话，用户看到的是一本和空世界主册无从分辨的册子。
     """
 
     store = getattr(deps, "lorebook_store", None)
@@ -200,6 +218,8 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
             "enabled": bool(book.get("enabled", True)),
             "source_kind": "module",
             "source_id": str(module_id),
+            "catalog": False,
+            "entry_count": _book_entry_count(store, str(book.get("id") or "")),
         }
         for book in books
         if str(book.get("source_kind") or "") == "module"
@@ -228,7 +248,11 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
         seen_ids.add(book_id)
         rows.append({
             "id": book_id,
-            "name": str(resource.get("name") or external_id),
+            # 包内文件可能没写 name：catalog 兜底成文件名，直接显示就成了
+            # "dagon-gm-guide"。这里与物化共用同一套可读名字兜底。
+            "name": module_book_display_name(resource) or external_id,
+            # 读取条目正文用的声明 key（文件名），与上面的 canonical book id 不同。
+            "key": external_id,
             "description": str(resource.get("description") or ""),
             "language": str(resource.get("language") or "zh-CN"),
             "enabled": True,

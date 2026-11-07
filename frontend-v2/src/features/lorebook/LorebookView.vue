@@ -379,6 +379,10 @@ watch(currentWorldId, async () => {
   if (showEditWorld.value && editWorldId.value && editWorldId.value !== currentWorldId.value) closeEditWorld()
   if (!currentWorldId.value) return
   const selectedWorldId = currentWorldId.value
+  // 换世界时书必须跟着世界走：旧世界的书（哪怕是作为对局书混在新世界
+  // 书单里）不能继续当当前书，否则条目列表停在旧书、可见性按新世界投影，
+  // 两边 id 对不上，可见性徽章会整列消失。
+  if (activeBookId.value && activeBookId.value !== `world:${selectedWorldId}`) activeBookId.value = ''
   await loadLorebooks(selectedWorldId)
   if (currentWorldId.value !== selectedWorldId) return
   await loadLore(selectedWorldId)
@@ -1107,6 +1111,19 @@ function bookOptionLabel(book: LorebookCard): string {
   return `${book.name} · ${bookScopeLabel(book)} · ${count}${disabled}`
 }
 
+/**
+ * 世界下拉里显示的是「这个世界总共多少资料」，不是某一本书的条目数。
+ * 世界只有主册时两个数字必然相等，所以单书不写本数（避免看起来重复）；
+ * 多书时才点出「N 本」，否则玩家会把它当成主册的条目数。
+ */
+function worldOptionLabel(world: WorldSummary): string {
+  const entries = t('entriesCount', { count: world.entry_count || 0 })
+  const books = Number(world.book_count || 0)
+  return books > 1
+    ? `${worldNameOf(world)} · ${t('booksCount', { count: books })} · ${entries}`
+    : `${worldNameOf(world)} · ${entries}`
+}
+
 /** 菜单项点击后先收起菜单，再执行既有 handler；参数由调用处的 closure 显式绑定。 */
 function runBookMenu(event: Event, action: () => void | Promise<void>) {
   (event.currentTarget as HTMLElement | null)?.closest('details')?.removeAttribute('open')
@@ -1327,7 +1344,7 @@ async function removeBinding(bindingId: string) {
         <div class="lore-context-controls">
         <select :value="currentWorldId" class="lore-context-select" :aria-label="copy.worldLabel" @change="changeWorldSelection">
           <option value="" disabled>{{ currentBook ? copy.independentContext : t('chooseWorldEllipsis') }}</option>
-          <option v-for="w in languageWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldNameOf(w) }} ({{ t('entriesCount', { count: w.entry_count || 0 }) }})</option>
+          <option v-for="w in languageWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldOptionLabel(w) }}</option>
         </select>
         <details class="lore-menu">
           <summary class="lore-menu-trigger" data-testid="world-actions">{{ copy.manageWorld }}</summary>

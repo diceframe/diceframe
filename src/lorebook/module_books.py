@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from src.lorebook.importer import commit_lorebook_import, draft_lorebook_import
@@ -60,6 +61,41 @@ def declared_module_book_id(plugin_id: str, resource: dict[str, Any]) -> str:
         # 没写 id 的书用名字兜底，与 materialize 时的 draft 归一化保持同一来源。
         external_id = str(draft_lorebook_import(payload).name or "book")
     return module_book_id(plugin_id, external_id)
+
+
+#: 缩写按惯用大写渲染，其余单词首字母大写。
+_NAME_TOKEN_CASE = {
+    "gm": "GM",
+    "npc": "NPC",
+    "pc": "PC",
+    "dnd": "DnD",
+    "coc": "CoC",
+    "ai": "AI",
+    "ui": "UI",
+    "api": "API",
+    "tts": "TTS",
+    "asr": "ASR",
+}
+
+
+def module_book_display_name(resource: dict[str, Any]) -> str:
+    """One declared Book's readable name, even when the pack forgot to name it.
+
+    有些包把 ``content/lorebooks/<file>.json`` 写成只有 entries、没有 ``name``
+    （大衮的 ``dagon-gm-guide`` 就是这样）。catalog 会把文件名当书名兜底，于是
+    创建页显示 ``dagon-gm-guide``、物化出来的书叫默认的 "Legacy Lorebook"——
+    同一个包文件在三个地方三个名字。名字兜底集中在这里，catalog 行与物化共用。
+    """
+
+    external_id = str(resource.get("id") or "").strip()
+    name = str(resource.get("name") or "").strip()
+    if name and name != external_id:
+        return name
+    words = [word for word in re.split(r"[-_.\s]+", external_id) if word]
+    return " ".join(
+        _NAME_TOKEN_CASE.get(word.lower(), word[:1].upper() + word[1:])
+        for word in words
+    )
 
 
 def entry_fingerprint(entry: dict[str, Any] | None) -> str:
@@ -121,6 +157,11 @@ def materialize_module_book(
         if key not in _CATALOG_METADATA_KEYS
     }
     draft = draft_lorebook_import(payload)
+    # 包里没写 name 时 adapter 会落到 "Legacy Lorebook"；书库里那本书的名字
+    # 必须和创建页/包页看到的一致，否则玩家认不出它是同一本。
+    display_name = module_book_display_name(payload)
+    if display_name and display_name != str(payload.get("name") or "").strip():
+        draft.name = display_name
     # 声明来源是 module:plugin_id——identity、uninstall 反查、模块页归属
     # 三者同源，不落在 adapter 的 device 缺省上。
     draft.source = {"source_kind": "module", "source_id": str(plugin_id)}

@@ -27,6 +27,29 @@ describe('resolveLoreManageTarget', () => {
       .toEqual({ kind: 'none' })
   })
 
+  it('sends an empty library world to the pack that actually holds its content', () => {
+    // 每个世界都有一本自动创建的空主册；内容全在包里时，世界页只能给一个
+    // 空编辑器，真正的 18 条在包内资料册里。
+    expect(resolveLoreManageTarget({
+      source: '__builtin__', worldId: 'harbor', editableWorldIds: library,
+      moduleId: 'dnd-embervault', worldHasContent: false,
+    })).toEqual({ kind: 'module', moduleId: 'dnd-embervault' })
+  })
+
+  it('keeps the library world when its own books hold entries', () => {
+    expect(resolveLoreManageTarget({
+      source: '__builtin__', worldId: 'harbor', editableWorldIds: library,
+      moduleId: 'dnd-embervault', worldHasContent: true,
+    })).toEqual({ kind: 'world', worldId: 'harbor' })
+  })
+
+  it('keeps the library world while the book list is still loading', () => {
+    expect(resolveLoreManageTarget({
+      source: '__builtin__', worldId: 'harbor', editableWorldIds: library,
+      moduleId: 'dnd-embervault', worldHasContent: undefined,
+    })).toEqual({ kind: 'world', worldId: 'harbor' })
+  })
+
   it('has no target for a blank world or an empty selection', () => {
     expect(resolveLoreManageTarget({ source: '__blank__', worldId: 'harbor', editableWorldIds: library, moduleId: 'pack' }))
       .toEqual({ kind: 'none' })

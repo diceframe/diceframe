@@ -490,6 +490,9 @@ def materialize_module_book_binding(
     catalog 交付模式不启用即灌注；玩家在开局显式勾选模块资料册时，创建事务
     把该书按声明物化到用户书库后再校验。物化只认声明来源（module/plugin），
     其余来源（world/user/...）不猜、不建。
+
+    这里只负责"书进书库"；书落到哪个世界的归属（world 域 binding）由创建
+    事务在世界书落地后补，避免物化时世界还不存在、书变成隐形书。
     """
 
     if str(source_kind or "").strip() not in {"module", "plugin"}:

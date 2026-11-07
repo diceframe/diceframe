@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { errorMessage } from '@/api/client'
+import { api, errorMessage } from '@/api/client'
 import {
   moduleApi,
   type ModuleActionGuard,
@@ -53,6 +53,33 @@ const guardFor = (action: string): ModuleActionGuard => (
   module.value?.actions?.[action] || { allowed: true, reason: '', games: [] }
 )
 const boundGames = computed(() => module.value?.bound_games || [])
+
+// 包内资料册的条目只在包里（catalog 交付不启用即灌注）。「查看包内资料」如果
+// 只列书名，玩家永远读不到那 12 条——这里就地读声明内容的只读正文。
+type ModuleBookEntry = { id?: string; name?: string; content?: string; type?: string; tier?: string; unreliable?: boolean }
+const openLorebook = ref('')
+const lorebookEntries = ref<Record<string, ModuleBookEntry[]>>({})
+const lorebookEntryErrors = ref<Record<string, boolean>>({})
+const lorebookEntryBusy = ref('')
+async function toggleLorebook(book: { id: string; key?: string }): Promise<void> {
+  if (!book.key) return
+  if (openLorebook.value === book.id) { openLorebook.value = ''; return }
+  openLorebook.value = book.id
+  if (lorebookEntries.value[book.id]) return
+  lorebookEntryBusy.value = book.id
+  try {
+    const result = await api<{ ok: boolean; content?: { entries?: ModuleBookEntry[] } }>(
+      `/modules/${encodeURIComponent(moduleId.value)}/content/lorebook/${encodeURIComponent(book.key)}`,
+    )
+    if (!result.ok || !Array.isArray(result.content?.entries)) throw new Error('entries unavailable')
+    lorebookEntries.value = { ...lorebookEntries.value, [book.id]: result.content!.entries! }
+    lorebookEntryErrors.value = { ...lorebookEntryErrors.value, [book.id]: false }
+  } catch {
+    lorebookEntryErrors.value = { ...lorebookEntryErrors.value, [book.id]: true }
+  } finally {
+    lorebookEntryBusy.value = ''
+  }
+}
 const isDisabled = computed(() => module.value?.status === 'disabled')
 const canLaunch = computed(() => !isDisabled.value && module.value?.inventory_status !== 'unknown' && compatibility.value?.ok === true && !compatibility.value.blockers?.length)
 
@@ -347,9 +374,42 @@ async function run(action: ModuleAction) {
         <h2>{{ t('modulesLorebooks') }}</h2>
         <p v-if="!(module.lorebooks || []).length" class="muted">{{ t('modulesNoLorebooks') }}</p>
         <template v-else>
-          <ul>
-            <li v-for="book in (module.lorebooks || [])" :key="book.id">{{ book.name }} · {{ book.language }}</li>
+          <ul class="module-lorebook-list">
+            <li v-for="book in (module.lorebooks || [])" :key="book.id" class="module-lorebook-item">
+              <div class="module-lorebook-row">
+                <span>
+                  <b>{{ book.name }}</b>
+                  <small>
+                    {{ book.language }}<template v-if="typeof book.entry_count === 'number'"> · {{ t('modulesLorebookEntries', { count: book.entry_count }) }}</template>
+                  </small>
+                </span>
+                <span class="module-lorebook-actions">
+                  <button
+                    v-if="book.catalog && book.key"
+                    type="button"
+                    class="module-lorebook-open"
+                    :aria-expanded="openLorebook === book.id"
+                    @click="toggleLorebook(book)"
+                  >{{ openLorebook === book.id ? t('modulesLorebookClose') : t('modulesLorebookOpen') }}</button>
+                  <span class="module-lorebook-origin" :data-catalog="book.catalog === true">
+                    {{ book.catalog ? t('modulesLorebookInPack') : t('modulesLorebookInLibrary') }}
+                  </span>
+                </span>
+              </div>
+              <div v-if="openLorebook === book.id" class="module-lorebook-entries" data-testid="module-lorebook-entries">
+                <p v-if="lorebookEntryBusy === book.id" class="muted">{{ t('modulesLorebookEntriesLoading') }}</p>
+                <p v-else-if="lorebookEntryErrors[book.id]" class="muted">{{ t('modulesLorebookEntriesFailed') }}</p>
+                <template v-else>
+                  <article v-for="(entry, index) in (lorebookEntries[book.id] || [])" :key="entry.id || index">
+                    <b>{{ entry.name || entry.id }}</b>
+                    <p>{{ entry.content }}</p>
+                  </article>
+                  <p class="muted">{{ t('modulesLorebookReadonlyNote') }}</p>
+                </template>
+              </div>
+            </li>
           </ul>
+          <p v-if="(module.lorebooks || []).some(book => book.catalog)" class="muted">{{ t('modulesLorebookPackHint') }}</p>
           <button
             v-if="!module.adventures.length"
             type="button"
@@ -414,6 +474,18 @@ async function run(action: ModuleAction) {
 .module-content-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
 .module-content-list li span { color: var(--df-text-muted); }
 .module-content-list li strong { color: var(--df-interactive-strong); }
+.module-lorebook-list { display: grid; gap: .5rem; list-style: none; margin: .6rem 0; padding: 0; }
+.module-lorebook-list li { display: grid; gap: .5rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
+.module-lorebook-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.module-lorebook-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: flex-end; }
+.module-lorebook-open { padding: .2rem .55rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-control-bg); color: var(--df-interactive-strong); font-size: .76rem; cursor: pointer; }
+.module-lorebook-entries { display: grid; gap: .55rem; padding-top: .5rem; border-top: 1px dashed var(--df-border-soft); }
+.module-lorebook-entries article { display: grid; gap: .2rem; }
+.module-lorebook-entries article p { margin: 0; color: var(--df-text-secondary); font-size: .8rem; line-height: 1.7; white-space: pre-wrap; }
+.module-lorebook-list b { display: block; font-size: .9rem; }
+.module-lorebook-list small { display: block; color: var(--df-text-muted); font-size: .78rem; }
+.module-lorebook-origin { color: var(--df-text-muted); font-size: .78rem; white-space: nowrap; }
+.module-lorebook-origin[data-catalog='true'] { color: var(--df-interactive-strong); }
 .module-technical { padding: 0; overflow: hidden; }
 .module-technical summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; padding: .7rem 1.25rem; font-weight: 700; list-style-position: inside; }
 .module-technical[open] summary { border-bottom: 1px solid var(--df-border-soft); }

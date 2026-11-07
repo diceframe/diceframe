@@ -314,7 +314,56 @@ def test_module_lorebooks_dedupe_materialized_book_against_catalog_row(host, sto
     assert len(rows) == 1
     assert rows[0]["id"] == book_id
     assert rows[0]["name"] == "玩家改名后的档案"
-    assert "catalog" not in rows[0]
+    # 已落地 = 一本普通的、可编辑的书；catalog 行表示"还在包里"。
+    assert rows[0]["catalog"] is False
+    assert rows[0]["entry_count"] == 2
+
+
+def _write_nameless_pack(plugins_dir: Path) -> PluginHost:
+    """A pack book with entries but no ``name`` (like coc-dagon's GM guide)."""
+
+    write_plugin(
+        plugins_dir, PLUGIN_ID, plugin_type="content-pack", entrypoint=False,
+        manifest_extra={
+            "content_delivery_mode": "catalog",
+            "contributes": {"lorebooks": ["content/lorebooks/*.json"]},
+        },
+    )
+    books_dir = plugins_dir / PLUGIN_ID / "content" / "lorebooks"
+    books_dir.mkdir(parents=True)
+    (books_dir / "dagon-gm-guide.json").write_text(json.dumps({
+        "entries": [
+            {"id": "guide-frame", "name": "守秘人框架", "content": "这不是调查怪物，是调查记录。"},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    data_dir = plugins_dir.parent / "data"
+    (data_dir / PLUGIN_ID).mkdir(parents=True, exist_ok=True)
+    (data_dir / PLUGIN_ID / "config.json").write_text(
+        json.dumps({"enabled": True}), encoding="utf-8",
+    )
+    return PluginHost(plugins_dir, data_dir)
+
+
+def test_nameless_declared_book_keeps_one_readable_name_before_and_after_materializing(tmp_path):
+    # 包里没写 name 时，catalog 会拿文件名兜底（"dagon-gm-guide"），物化时
+    # adapter 又会兜到 "Legacy Lorebook"——同一个文件三个名字。两处必须同名。
+    plugins_dir = tmp_path / "plugins"
+    nameless = _write_nameless_pack(plugins_dir)
+    nameless.discover()
+    lorebook = LorebookStore(tmp_path / "lorebook.db")
+    lorebook.open()
+    try:
+        rows = module_service._module_lorebooks(_module_dependencies(nameless, lorebook), PLUGIN_ID)
+        assert [row["name"] for row in rows] == ["Dagon GM Guide"]
+        # 声明 key 仍要暴露：包页据此读取只读条目正文。
+        assert rows[0]["key"] == "dagon-gm-guide"
+        assert rows[0]["entry_count"] == 1
+
+        plugin_service._autoimport_plugin_content(_content_dependencies(nameless, lorebook), PLUGIN_ID)
+        book = lorebook.get_lorebook(module_book_id(PLUGIN_ID, "dagon-gm-guide"))
+        assert book["name"] == "Dagon GM Guide"
+    finally:
+        lorebook.close()
 
 
 pytest_plugins = ["tests.webapi_harness"]
@@ -357,6 +406,130 @@ async def test_create_game_materializes_declared_module_book_on_demand(web_api, 
     refs = instance.modules["content_binding"]["book_refs"]
     assert refs and refs[0]["source_kind"] == "module" and refs[0]["id"] == book_id
     assert lorebook.list_bindings(scope_kind="game", scope_id=result["game_key"])
+    # 落地之后它必须能在资料册页找到：这正是玩家抱怨"18 条不知道去哪了"
+    # 的那个缺口——书只有在书库里，才谈得上可查、可编辑。而且不依赖"当前
+    # 对局"：离开对局、从资料册页进来也要能看到。
+    listing = api.list_lorebooks("template_world", "")
+    assert book_id in {str(row.get("id") or "") for row in listing["books"]}
+
+
+@pytest.mark.asyncio
+async def test_create_game_in_module_supplied_world_keeps_module_book_visible(web_api, tmp_path):
+    """模组没有世界模板时按模组建世界：书必须落在这个世界里，且查得到（大衮）。"""
+    api, lorebook, _registry, _llm, _worlds_dir = web_api
+    plugins_dir = tmp_path / "plugins"
+    plugin_host = _write_nameless_pack(plugins_dir)
+    plugin_host.discover()
+    dependencies = _content_dependencies(plugin_host, lorebook)
+    lifecycle_deps = api._game_lifecycle._dependencies
+    object.__setattr__(
+        lifecycle_deps, "materialize_module_book",
+        lambda source_kind, source_id, book_id: plugin_service.materialize_module_book_binding(
+            dependencies, source_kind, source_id, book_id,
+        ),
+    )
+
+    world_id = "module_lore-pack_dagon-1"
+    book_id = module_book_id(PLUGIN_ID, "dagon-gm-guide")
+    result = await api.create_game(
+        world_id,
+        game_name="大衮：深潮之下",
+        custom_world=True,
+        book_bindings=[{
+            "ref": {
+                "source_kind": "module", "source_id": PLUGIN_ID,
+                "kind": "lorebook", "id": book_id, "digest": "",
+            },
+        }],
+        players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
+    )
+
+    assert result["ok"] is True, result
+    assert lorebook.get_world(world_id) is not None
+    assert lorebook.get_lorebook(book_id)["name"] == "Dagon GM Guide"
+    assert any(
+        str(binding.get("book_id") or "") == book_id
+        for binding in lorebook.list_bindings(scope_kind="world", scope_id=world_id)
+    )
+    listing = api.list_lorebooks(world_id, "")
+    assert book_id in {str(row.get("id") or "") for row in listing["books"]}
+
+
+@pytest.mark.asyncio
+async def test_module_book_selected_by_one_game_does_not_activate_for_another(web_api, tmp_path):
+    """A 局勾选的模块书不得自动激活进同一世界的 B 局（PR #705 review）。
+
+    world 域 binding 只负责「在世界里可见」（资料册页、条目数、book_count），
+    必须保持停用；运行时激活只来自开局显式勾选创建的 game 域 binding。
+    同一冒险重复开局共享同一个模组世界，这正是泄漏最容易被踩中的场景。
+    """
+    api, lorebook, _registry, _llm, _worlds_dir = web_api
+    plugins_dir = tmp_path / "plugins"
+    plugin_host = _write_nameless_pack(plugins_dir)
+    plugin_host.discover()
+    dependencies = _content_dependencies(plugin_host, lorebook)
+    lifecycle_deps = api._game_lifecycle._dependencies
+    object.__setattr__(
+        lifecycle_deps, "materialize_module_book",
+        lambda source_kind, source_id, book_id: plugin_service.materialize_module_book_binding(
+            dependencies, source_kind, source_id, book_id,
+        ),
+    )
+
+    world_id = "module_lore-pack_dagon-1"
+    book_id = module_book_id(PLUGIN_ID, "dagon-gm-guide")
+    book_ref = {
+        "ref": {
+            "source_kind": "module", "source_id": PLUGIN_ID,
+            "kind": "lorebook", "id": book_id, "digest": "",
+        },
+    }
+    players = [{"character_name": "艾琳", "attributes": {"str": 10}}]
+
+    # A 局：勾选模块书开局。B 局：同一冒险同一世界再开一局，不勾任何书。
+    first = await api.create_game(
+        world_id, game_name="大衮 A", custom_world=True,
+        book_bindings=[book_ref], players=players,
+    )
+    assert first["ok"] is True, first
+    second = await api.create_game(
+        world_id, game_name="大衮 B", custom_world=True, players=players,
+    )
+    assert second["ok"] is True, second
+
+    # 1) world 域 binding 存在且保持停用：可见，但不随世界激活。
+    world_bindings = [
+        binding for binding in lorebook.list_bindings(scope_kind="world", scope_id=world_id)
+        if binding.get("book_id") == book_id
+    ]
+    assert world_bindings, "模块书必须留在世界里可查（资料册页可见性）"
+    assert not world_bindings[0].get("enabled", True), (
+        "world 域 binding 必须保持停用，否则同一世界的每一局都会自动继承"
+    )
+
+    # 2) 运行时解析：A 局激活，B 局（以及任何后续对局）不激活。
+    from src.lorebook.resolver import resolve_active_books
+
+    game_scopes = sorted(
+        str(binding.get("scope_id") or "")
+        for binding in lorebook.list_bindings(scope_kind="game")
+        if binding.get("book_id") == book_id
+    )
+    assert len(game_scopes) == 1, "只有显式勾选它的那一局应持有 game 域 binding"
+    a_refs = resolve_active_books(
+        SimpleNamespace(world_id=world_id, game_id=game_scopes[0], game_key=""),
+        store=lorebook,
+    )
+    b_refs = resolve_active_books(
+        SimpleNamespace(world_id=world_id, game_id="web|another-game|bot", game_key=""),
+        store=lorebook,
+    )
+    assert book_id in {ref.book_id for ref in a_refs}
+    assert book_id not in {ref.book_id for ref in b_refs}
+
+    # 3) 世界管理页（世界书单）仍然看得到这本书。
+    listing = api.list_lorebooks(world_id, "")
+    assert book_id in {str(row.get("id") or "") for row in listing["books"]}
 
 
 @pytest.mark.asyncio

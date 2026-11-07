@@ -323,6 +323,8 @@ async def test_module_lorebooks_only_lists_canonical_books_owned_by_module(env) 
     lorebooks = env.api.module_lorebooks(MODULE_ID)
 
     assert listed[MODULE_ID]["lorebook_count"] == 1
+    # catalog 行会携带 catalog/entry_count：物化后的书 catalog=False，
+    # entry_count 是这本书的实际条数（此处为空书 0）。
     assert detail["lorebooks"] == [{
         "id": "module-book",
         "name": "Module Book",
@@ -331,6 +333,8 @@ async def test_module_lorebooks_only_lists_canonical_books_owned_by_module(env) 
         "enabled": True,
         "source_kind": "module",
         "source_id": MODULE_ID,
+        "catalog": False,
+        "entry_count": 0,
     }]
     assert lorebooks == {
         "ok": True,

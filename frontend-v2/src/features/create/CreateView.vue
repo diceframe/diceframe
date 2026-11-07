@@ -14,7 +14,8 @@ import AdventureLaunchSummary from '@/features/library/AdventureLaunchSummary.vu
 import WorldLorebookSummary from '@/features/create/WorldLorebookSummary.vue'
 import { resolveLoreManageTarget } from '@/features/create/loreManageTarget'
 import LorebookSourcePicker from '@/features/create/LorebookSourcePicker.vue'
-import type { CreationLorebook } from '@/features/create/creationLorebooks'
+import type { CreationLorebook, CreationLorebookRow } from '@/features/create/creationLorebooks'
+import { worldBooksHaveContent } from '@/features/create/creationLorebooks'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
 import PortraitImage from '@/components/PortraitImage.vue'
 import AdventureSceneImagePicker from '@/components/common/AdventureSceneImagePicker.vue'
@@ -118,7 +119,7 @@ const aiPrompt = ref(''), aiRule = ref('')
 const aiAutoRule = ref(false), aiGeneratedRule = ref<GeneratedRuleResponse | null>(null)
 const loreChoice = ref('__builtin__')
 const selectedBookIds = ref<string[] | undefined>(undefined)
-const availableLorebooks = ref<CreationLorebook[]>([])
+const availableLorebooks = ref<CreationLorebookRow[]>([])
 const booksLoaded = ref(false)
 const modules = ref<ModuleSummary[]>([])
 const seed = ref(''), busy = ref(false), error = ref('')
@@ -213,6 +214,30 @@ const adventureCompatibleRule = computed(() => {
 })
 const adventureRecommendedWorld = computed(() => selectedAdventure.value?.recommended_world_id || '')
 const adventureWorldRequired = computed(() => selectedAdventure.value?.world_policy === 'fixed')
+const recommendedWorldInstalled = computed(() => Boolean(
+  adventureRecommendedWorld.value
+  && worlds.value.some(item => worldIdOf(item) === adventureRecommendedWorld.value),
+))
+// 模组自带世界：catalog 模组不一定提供世界模板（大衮声明了 pacific_shoal，包里
+// 却没有这个世界）。这时不能借用世界模板下拉框里的任意一项——那会把别人世界的
+// 资料册整本带进本局（"选了世界模板，还多了个克苏鲁恐怖"）。改为按模组生成这一
+// 局的世界：设定来自冒险包自带的 world_seed，资料册只有模组自己声明的那一本。
+const moduleWorldId = computed(() => {
+  const adventure = selectedAdventure.value
+  if (!adventure || playMode.value !== 'adventure') return ''
+  const raw = `module_${adventure.source_id || 'pack'}_${adventure.adventure_id}`
+  return raw.replace(/[\\/:*?"<>|]+/g, '_')
+})
+const moduleWorldApplies = computed(() => Boolean(
+  // 世界列表还没到之前不下结论：否则会先判定"推荐世界没装"，闪一下又变回来。
+  catalogueReady.value
+  && moduleWorldId.value
+  && selectedAdventure.value?.world_policy !== 'fixed'
+  && !recommendedWorldInstalled.value,
+))
+const moduleWorldName = computed(() => selectedAdventure.value?.name || '')
+// 本局真正提交/预览的世界：模组自带世界优先，其余仍走世界模板。
+const effectiveWorldId = computed(() => moduleWorldApplies.value ? moduleWorldId.value : world.value)
 const adventureIssueGuide = computed(() => {
   const adventure = selectedAdventure.value
   const reasons = new Set(adventure?.incompatibility_reasons || [])
@@ -242,7 +267,11 @@ function applyAdventureRecommendedWorld(): void {
 function applyAdventureCompatibleRule(): void {
   if (adventureCompatibleRule.value) selectRule(adventureCompatibleRule.value.rule_id)
 }
-const activeWorldTemplate = computed(() => worlds.value.find(item => worldIdOf(item) === world.value))
+// 模组自带世界时，`world` 里那个模板世界并不参与本局：场景图、推荐规则都
+// 不能再从它身上取，否则大衮的局会用奇幻世界的封面。
+const activeWorldTemplate = computed(() => (
+  moduleWorldApplies.value ? undefined : worlds.value.find(item => worldIdOf(item) === world.value)
+))
 const defaultSceneImagePool = computed<SceneImageRef[]>(() => {
   if (mode.value === 'template' && activeWorldTemplate.value) {
     const worldPool = sceneImageCandidates(activeWorldTemplate.value.scene_image, activeWorldTemplate.value.scene_images, false)
@@ -256,7 +285,7 @@ const defaultSceneImagePool = computed<SceneImageRef[]>(() => {
 const defaultSceneImageRef = computed<SceneImageRef | undefined>(() => pickSceneImageReference(
   defaultSceneImagePool.value[0],
   defaultSceneImagePool.value.slice(1),
-  `${sceneImageSelectionSeed.value}:${world.value}:${activeRule.value}`,
+  `${sceneImageSelectionSeed.value}:${effectiveWorldId.value}:${activeRule.value}`,
 ))
 const selectedSceneImageUrl = computed(() => customSceneImageUrl.value || defaultSceneImageUrl.value || ruleSceneUrl(activeRule.value))
 const availableWorlds = computed(() => worlds.value)
@@ -300,7 +329,7 @@ const confirmationName = computed(() => {
 })
 const confirmationWorld = computed(() => {
   if (seed.value.trim()) return t('restoreBySeed')
-  if (mode.value === 'template') return selectedTemplateWorldName.value || world.value
+  if (mode.value === 'template') return moduleWorldApplies.value ? moduleWorldName.value : (selectedTemplateWorldName.value || world.value)
   if (mode.value === 'custom') return customName.value.trim() || t('modeCustom')
   return t('modeAi')
 })
@@ -323,20 +352,20 @@ const loreSourceSummary = computed(() => {
   }
   return copy.builtin
 })
-const lorePreviewWorldId = computed(() => mode.value === 'template' ? world.value : '')
+const lorePreviewWorldId = computed(() => mode.value === 'template' ? effectiveWorldId.value : '')
 watch([lorePreviewWorldId, loreChoice], () => {
   if (!restoringDraft.value) selectedBookIds.value = undefined
   booksLoaded.value = false
 })
 // 模块声明的资料册候选（issue #700）：catalog 模组不启用即灌注，但开局
-// 应能一键带上它的书。候选来自模块详情接口；binding 只是候选投影所需的
-// 展示元数据，真正落地的是 POST /games/create 的 book_bindings ref，
-// 服务端在创建事务里按需物化。
+// 应能一键带上它的书。候选来自模块详情接口；`catalog: true` 是它的真实
+// 身份——还在包里，没进书库，勾选后由创建事务物化。不要给它伪造 world
+// binding 混进"世界资料"里：那会让人以为它是这个世界的一本书。
 const moduleLorebookRows = ref<CreationLorebook[]>([])
 const moduleBookCandidates = computed<CreationLorebook[]>(() => moduleLorebookRows.value.map(book => ({
   ...book,
+  module: true,
   ref: book.ref ?? { source_kind: 'module', source_id: moduleId.value, kind: 'lorebook' as const, id: book.id, digest: '' },
-  bindings: [{ scope_kind: 'world', scope_id: lorePreviewWorldId.value, enabled: 1 }],
 })))
 watch(moduleId, async id => {
   moduleLorebookRows.value = []
@@ -346,11 +375,15 @@ watch(moduleId, async id => {
     if (result.ok && Array.isArray(result.lorebooks)) moduleLorebookRows.value = result.lorebooks
   } catch { /* 模块资料册候选加载失败不阻断创建流程 */ }
 }, { immediate: true })
+// 世界自己的资料册里有没有内容：世界主册是自动建的空书，内容常常全在包里。
+// 没确认之前（booksLoaded=false）不下结论，避免链接在加载中被改写。
+const worldLoreHasContent = computed(() => booksLoaded.value ? worldBooksHaveContent(availableLorebooks.value) : undefined)
 const loreManageTarget = computed(() => resolveLoreManageTarget({
   source: loreChoice.value,
   worldId: lorePreviewWorldId.value,
   editableWorldIds: loreWorlds.value.map(worldIdOf),
   moduleId: moduleId.value,
+  worldHasContent: worldLoreHasContent.value,
 }))
 const loreManageHref = computed(() => {
   const target = loreManageTarget.value
@@ -896,8 +929,17 @@ async function create() {
     const payload: Record<string, unknown> = applyStoryMode({ solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, play_mode: playMode.value, ...adventureSelection.bindingPayload.value, description: description.value, room_password: openRoom.value ? '' : (roomPassword.value.trim() || null), players, language: gameLanguage.value, scene_image: selectedSceneImage, map_background: selectedMapBackground, narrative_perspective: narrativePerspective.value, gm_style_override: gmStyleFollowWorld.value ? null : { ...gmStyle.value }, advancement_mode: supportsAdvancementPolicy.value ? advancementMode.value : 'milestone', advancement_authority: supportsAdvancementPolicy.value ? advancementAuthority.value : 'ai_gm' }, storyMode.value)
     let worldId = ''
     if (mode.value === 'template') {
-      worldId = world.value; payload.world_id = worldId
-      payload.game_name = name.value || worldNameOf(worlds.value.find(w => worldIdOf(w) === world.value) || {}) || gameDefault(DEFAULT_NEW_ADVENTURE_ZH, 'New Adventure', DEFAULT_NEW_ADVENTURE_DE)
+      worldId = effectiveWorldId.value; payload.world_id = worldId
+      payload.game_name = name.value || (moduleWorldApplies.value ? moduleWorldName.value : '') || worldNameOf(worlds.value.find(w => worldIdOf(w) === world.value) || {}) || gameDefault(DEFAULT_NEW_ADVENTURE_ZH, 'New Adventure', DEFAULT_NEW_ADVENTURE_DE)
+      if (moduleWorldApplies.value) {
+        // 模组没有世界模板：让服务端按这一局建立世界（custom_world 走的就是
+        // 「建世界 + 建同名模板」这条既有路径），设定用冒险包自己的摘要。
+        payload.custom_world = true
+        payload.world_name = moduleWorldName.value || payload.game_name
+        if (!String(description.value || '').trim() && selectedAdventure.value?.summary) {
+          payload.description = selectedAdventure.value.summary
+        }
+      }
     } else if (mode.value === 'custom') {
       worldId = 'custom_' + Date.now(); payload.world_id = worldId
       payload.world_name = customName.value.trim() || gameDefault(DEFAULT_MY_ADVENTURE_ZH, 'My Adventure', DEFAULT_MY_ADVENTURE_DE); payload.custom_world = true; payload.description = customDesc.value
@@ -1002,7 +1044,12 @@ async function create() {
             </div>
             <div class="create-config-surface">
               <template v-if="mode === 'template'">
-                <label><span>{{ t('worldTemplate') }}</span><select v-model="world"><option v-for="w in availableWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldOptionLabel(w) }}</option></select></label>
+                <label v-if="moduleWorldApplies" class="wide create-module-world" data-testid="create-module-world">
+                  <span>{{ t('worldTemplate') }}</span>
+                  <b>{{ moduleWorldName }}</b>
+                  <small>{{ gameDefault('这个内容包没有世界模板：开局会用模组自带的背景建立这一局的世界，资料册只带模组声明的那一本。', 'This content pack ships no world template: the world for this game is built from the module itself, with only the books the pack declares.', 'Dieses Inhaltspaket enthält keine Weltvorlage: Die Welt entsteht aus dem Modul selbst, mit nur den Büchern, die das Paket deklariert.') }}</small>
+                </label>
+                <label v-else><span>{{ t('worldTemplate') }}</span><select v-model="world"><option v-for="w in availableWorlds" :key="worldIdOf(w)" :value="worldIdOf(w)">{{ worldOptionLabel(w) }}</option></select></label>
                 <label><span>{{ t('adventureName') }}</span><input v-model="name" :placeholder="t('useWorldName')"></label>
 
               </template>

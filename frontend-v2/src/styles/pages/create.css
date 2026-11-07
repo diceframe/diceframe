@@ -363,6 +363,28 @@
   background: color-mix(in srgb, var(--df-surface-1) 52%, transparent);
 }
 
+/* 模组自带世界：没有模板可选，显示这一局世界的名字与来源。 */
+.create-module-world {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-sm);
+  background: var(--df-control-bg);
+}
+
+.create-module-world b {
+  color: var(--df-text-primary);
+  font-size: .95rem;
+}
+
+.create-module-world small {
+  color: var(--df-text-muted);
+  font-size: .78rem;
+  line-height: 1.6;
+}
+
 .create-check {
   display: flex !important;
   align-items: center;
