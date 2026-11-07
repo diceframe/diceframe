@@ -569,7 +569,10 @@ test('Lucky spend settles a real pending attack window and consumes one point', 
   await expect(card).toContainText('幸运 · 劣势骰')
   await expect(card.locator('.window-facts')).toContainText('已掷骰面')
   await expect(card.locator('.window-facts')).toContainText('15')
-  await expect(card.locator('.window-facts')).toContainText('19 vs 16')
+  // 链甲 16 + Defense 1：stalwart_guardian 在 1 级把 fighting_style 选成
+  // feat:defense，S0-B 让这条 +1 真正进入唯一的护甲等级公式。曲线前后
+  // 同一个角色的 derived.armor_class 是 16 → 17，攻击总值不变。
+  await expect(card.locator('.window-facts')).toContainText('19 vs 17')
   await expect(card.locator('.window-facts')).toContainText('2 / 2')
   await expect(card.locator('.window-facts')).toContainText('d20')
   await expect(card.getByRole('button', { name: '使用能力', exact: true })).toBeVisible()
