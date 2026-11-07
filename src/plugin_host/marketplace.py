@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 from typing import Any
@@ -21,8 +22,14 @@ from .mirrors import (
 )
 from .package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from .policy import effective_plugin_permissions, plugin_risk_level
-from .support import normalize_ruleset_label, plugin_type_support
+from .support import (
+    marketplace_ruleset_labels,
+    normalize_ruleset_label,
+    plugin_type_support,
+)
 from src.version import needs_core_update
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MarketplaceSource:
@@ -48,13 +55,7 @@ class PluginMarketplace:
         if self.hub_client is not None:
             hub_listing = await self.hub_client.catalog()
             if hub_listing.get("ok"):
-                plugins = [
-                    item
-                    for item in (
-                        _normalize_market_item(item) for item in hub_listing.get("items", [])
-                    )
-                    if item is not None
-                ]
+                plugins = _normalize_market_items(hub_listing.get("items", []))
                 return {
                     "ok": True,
                     "plugins": plugins,
@@ -75,7 +76,7 @@ class PluginMarketplace:
             return {"ok": False, "error": f"插件市场 JSON 无效：{exc}", "plugins": [], "source": fetched.to_dict()}
         if not isinstance(raw_items, list):
             return {"ok": False, "error": "插件市场 JSON 必须是数组", "plugins": [], "source": fetched.to_dict()}
-        plugins = [item for item in (_normalize_market_item(item) for item in raw_items) if item is not None]
+        plugins = _normalize_market_items(raw_items)
         source = fetched.to_dict()
         source.pop("data", None)
         return {"ok": True, "plugins": plugins, "total": len(plugins), "source": source}
@@ -214,12 +215,39 @@ def _marketplace_ruleset_targets(manifest: dict[str, Any]) -> list[str]:
     labels: list[str] = []
     for value in (
         *_declared_rulesets(manifest),
-        *(manifest.get("compatible_rulesets") or []),
+        # 远端 manifest 不可信：恶意/损坏的 compatible_rulesets（整数、字符串、
+        # 列表含 dict）不能在归一化时抛错，也不能拆成逐字符伪标签。
+        *marketplace_ruleset_labels(manifest.get("compatible_rulesets")),
     ):
         label = normalize_ruleset_label(value)
         if label and label not in labels:
             labels.append(label)
     return labels
+
+
+def _normalize_market_items(raw_items: list[Any]) -> list[dict[str, Any]]:
+    """Normalize a remote catalogue list, isolating broken entries.
+
+    索引是远端不可信数据：单个坏条目归一化时抛异常，绝不能让整个市场目录
+    返回失败（ok=false）。坏条目丢弃并告警，好包照常展示。
+    """
+
+    plugins: list[dict[str, Any]] = []
+    for item in raw_items:
+        try:
+            normalized = _normalize_market_item(item)
+        except Exception:  # noqa: BLE001 - 隔离不可信索引数据的任何形状错误
+            broken_id = ""
+            if isinstance(item, dict):
+                manifest = item.get("manifest")
+                broken_id = str(
+                    manifest.get("id") if isinstance(manifest, dict) else ""
+                ) or str(item.get("id") or "")
+            logger.warning("市场索引条目归一化失败，已丢弃: id=%r", broken_id or "<unknown>")
+            continue
+        if normalized is not None:
+            plugins.append(normalized)
+    return plugins
 
 
 def _declared_rulesets(manifest: dict[str, Any]) -> list[str]:
@@ -313,6 +341,7 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
     elif update_policy in {"approval-required", "blocked"}:
         installable = False
         verification_error = verification_error or "该版本需要重新审核"
+    ruleset_targets = _marketplace_ruleset_targets(manifest)
     return {
         "id": plugin_id,
         "name": name,
@@ -337,10 +366,10 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         # 规则目标 / 冒险数 / 自动化等级 / 语言供模块库过滤与卡片展示。
         "content_profile": str(manifest.get("content_profile") or "content-pack"),
         "content_delivery_mode": str(manifest.get("content_delivery_mode") or "legacy_autoimport"),
-        "ruleset_targets": _marketplace_ruleset_targets(manifest),
+        "ruleset_targets": ruleset_targets,
         # 「没声明」和「声明了别的」是两件事：前者是通用/未标注，后者才是不兼容。
         # 目录筛选需要这个区分，否则未声明的包会被当成不匹配而被静默丢掉。
-        "ruleset_declared": bool(_marketplace_ruleset_targets(manifest)),
+        "ruleset_declared": bool(ruleset_targets),
         "system_agnostic": manifest.get("system_agnostic") is True,
         "adventure_count": (
             len(manifest.get("adventure_packages") or [])
