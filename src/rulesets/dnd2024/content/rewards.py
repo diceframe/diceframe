@@ -69,7 +69,7 @@ def reward_intent_from_ref(
     category = str(record.get("category") or "")
     if category not in ITEM_CATEGORIES:
         raise RewardIntentError(f"reward item category is invalid: {category!r}")
-    return {
+    intent = {
         "kind": "item_grant",
         "ref": {"source": ref.source, "kind": ref.kind, "id": ref.id},
         "recipient_uid": str(recipient_uid or ""),
@@ -80,6 +80,12 @@ def reward_intent_from_ref(
         # classify_item 的关键词启发式不应覆盖它。
         "category_authoritative": True,
     }
+    # content-pack 物品到规则集物品的身份映射：只透传身份，不复制机械。
+    # 未声明映射的奖励保持原样，旧内容的行为不变。
+    ruleset_item_ref = str(record.get("ruleset_item_ref") or "")
+    if ruleset_item_ref:
+        intent["item_ref"] = ruleset_item_ref
+    return intent
 
 
 def reward_intents_from_outcome(

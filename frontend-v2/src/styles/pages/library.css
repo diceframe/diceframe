@@ -353,8 +353,10 @@
 
 .content-library .library-heading h1 {
   margin: 0;
-  font-size: clamp(1.75rem, 3vw, 2rem);
-  letter-spacing: -.04em;
+  /* 与其它页面保持一致：其它页的 h1 走浏览器默认 2em（16px 基准 = 32px），
+     这里原来用 clamp(28px, 3vw, 32px) + 负字距，在常见窗口宽度下会小 4px 且更紧。 */
+  font-size: 2rem;
+  letter-spacing: 0;
 }
 
 .content-library .library-heading p {
@@ -745,5 +747,9 @@
     margin-bottom: 16px !important;
     padding-top: 10px !important;
     padding-bottom: 14px !important;
+  }
+  /* 窄屏再收一档，避免两行标题把首屏挤满 */
+  .content-library .library-heading h1 {
+    font-size: 1.6rem;
   }
 }

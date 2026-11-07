@@ -208,7 +208,7 @@ def test_builtin_dnd2024_inventory_and_locale_presentation_are_complete() -> Non
         "background": 4,
         "feat": 7,
         "equipment_package": 33,
-        "item": 50,
+        "item": 82,
         "tool": 32,
         "quick_character_preset": 6,
     }

@@ -950,6 +950,44 @@ def test_export_content_pack_flat_has_plugin_json_at_root(tmp_path):
     assert not any(n.startswith("my-pack/") for n in names), names
 
 
+def test_export_content_pack_flat_ships_a_license(tmp_path):
+    """仓库格式（flat）自带 LICENSE 与 manifest.license；安装包（.dfplugin）不带。"""
+    import zipfile
+    from src.webui.services.plugins import export_content_pack
+
+    plugins_dir = tmp_path / "plugins"
+    data_dir = tmp_path / "data"
+    host = PluginHost(plugins_dir, data_dir)
+
+    class _Lore:
+        world = {"id": "w1", "name": "W", "description": "d", "language": "zh-CN"}
+        def get_world(self, wid): return self.world if wid == "w1" else None
+        def list_entries(self, wid): return []
+
+    class _Api(ContentMapApiFacade):
+        def __init__(self): self._plugins = host; self._lore = _Lore(); self._rules_dir = tmp_path
+        def list_character_cards(self): return {"cards": []}
+
+    api = _Api()
+    flat = export_content_pack(
+        _plugin_export_dependencies(api), "license-pack", "许可测试包", "1.0.0", "desc",
+        world_id="w1", flat=True,
+    )
+    assert flat["ok"] is True
+    archive = zipfile.ZipFile(io.BytesIO(flat["payload"]))
+    names = archive.namelist()
+    assert "LICENSE" in names
+    assert "Creative Commons" in archive.read("LICENSE").decode("utf-8")
+    assert json.loads(archive.read("plugin.json"))["license"] == "CC-BY-NC-4.0"
+
+    package = export_content_pack(
+        _plugin_export_dependencies(api), "license-pack-2", "许可测试包 2", "1.0.0", "desc",
+        world_id="w1", flat=False,
+    )
+    package_names = zipfile.ZipFile(io.BytesIO(package["payload"])).namelist()
+    assert not any(name.endswith("/LICENSE") or name == "LICENSE" for name in package_names)
+
+
 def test_export_content_pack_includes_selected_adventure_and_lorebook(tmp_path):
     """Creator exports keep native adventure files and per-game lorebook data."""
     from types import SimpleNamespace

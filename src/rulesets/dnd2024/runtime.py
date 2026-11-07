@@ -32,6 +32,7 @@ from src.rulesets.bundle import LoadedRulesetBundle, RulesetBundleLoader
 from src.rulesets.contracts import RulesetCapabilities
 import src.rulesets.dnd2024.advancement_access as advancement_access
 from src.rulesets.dnd2024.binding import rule_binding
+from src.rulesets.dnd2024.character.attunement import attunement_state_for_projection
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
@@ -125,6 +126,9 @@ class Dnd2024Runtime:
 
     runtime_id = "core:dnd2024"
     runtime_version = 1
+    # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
+    # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement 参数。
+    rest_option_names = frozenset({"attunement"})
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
         character_builder="professional",
@@ -424,6 +428,11 @@ class Dnd2024Runtime:
             raise ValueError(
                 f"bundle runtime {bundle.manifest.runtime_id} does not match {self.runtime_id}"
             )
+        from .items.activation import validate_item_declarations
+        from .treasure import validate_treasure_tables
+
+        validate_item_declarations(bundle)
+        validate_treasure_tables(bundle)
         self._bundle_cache[cache_key] = bundle
         return bundle
 
@@ -514,7 +523,9 @@ class Dnd2024Runtime:
         )
 
     def _exploration_engine(self, locale: str = "") -> Dnd2024ExplorationEngine:
-        return Dnd2024ExplorationEngine(self.load_bundle(locale), locale=locale)
+        return Dnd2024ExplorationEngine(
+            self.load_bundle(locale), locale=locale, bundle_validated=True,
+        )
 
     def _combat_engine(
         self,
@@ -544,14 +555,19 @@ class Dnd2024Runtime:
             if adventure is not None
             else ""
         )
+        bundle = self.load_bundle(locale)
         if access is None:
             return Dnd2024CombatEngine(
-                self.load_bundle(locale), encounter_catalog=catalog,
+                bundle, encounter_catalog=catalog,
                 content_catalog=content_catalog, content_source=content_source,
+                bundle_validated=True, locale_loader=self.load_bundle,
+                supported_locales=tuple(bundle.manifest.supported_locales),
             )
         return Dnd2024CombatEngine(
-            self.load_bundle(locale), access, catalog,
+            bundle, access, catalog,
             content_catalog=content_catalog, content_source=content_source,
+            bundle_validated=True, locale_loader=self.load_bundle,
+            supported_locales=tuple(bundle.manifest.supported_locales),
         )
 
     def _encounter_access(
@@ -827,22 +843,57 @@ class Dnd2024Runtime:
     def complete_rest(
         self, rule: Any, character: dict[str, Any], rest: str,
         hit_die_rolls: dict[str, list[int]] | None = None,
+        attunement: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
         locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
         bundle = self.load_bundle(locale)
+        if attunement is not None and not isinstance(attunement, dict):
+            # 同调 payload 是明确的窄契约：非对象直接拒绝，不做猜测式解构。
+            raise ValueError("attunement must be an object")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
-            result = engine.complete_short_rest(character, hit_die_rolls)
+            result = engine.complete_short_rest(
+                character, hit_die_rolls, attunement=attunement,
+            )
         elif rest == "long":
             if hit_die_rolls:
                 raise ValueError("hit_die_rolls are only valid for a short rest")
+            if attunement is not None:
+                raise ValueError("attunement changes are only valid during a short rest")
             result = engine.complete_long_rest(character)
         else:
             raise ValueError("rest must be short or long")
         result["character"] = self._live_projection(character, result["character"], bundle)
         return result
+
+    def validate_rest_options(
+        self, instance: Any, actor_id: str, rest: str,
+        options: dict[str, Any] | None,
+    ) -> None:
+        """Early, non-mutating validation of capability-rest payloads.
+
+        The generic rest service only forwards options the runtime declares, so
+        this stays a D&D capability rather than a branch in the generic path.
+        """
+
+        if not isinstance(options, dict) or "attunement" not in options:
+            return
+        if rest != "short":
+            raise ValueError("attunement changes are only valid during a short rest")
+        uid = str(actor_id).removeprefix("player:")
+        if uid not in instance.players:
+            return
+        character = instance.get_character_sheet(uid)
+        canonical = character.get("ruleset_character")
+        if not isinstance(canonical, dict):
+            raise ValueError("character is missing ruleset_character")
+        locale = str(canonical.get("locale") or "")
+        bundle = self.load_bundle(locale)
+        Dnd2024RestEngine(bundle).validate_attunement(
+            canonical, character, options["attunement"],
+        )
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
@@ -968,7 +1019,9 @@ class Dnd2024Runtime:
 
     def apply_narrative_hp_delta(self, instance: Any, user_id: str, delta: int) -> int:
         from .narrative_health import settle_narrative_hp
-        engine = Dnd2024CombatEngine(self.load_bundle(str(instance.language or "en")))
+        engine = Dnd2024CombatEngine(
+            self.load_bundle(str(instance.language or "en")), bundle_validated=True,
+        )
         return settle_narrative_hp(engine, instance, user_id, delta)
 
     @staticmethod
@@ -1162,7 +1215,7 @@ class Dnd2024Runtime:
             "dnd2024.position.changed", "dnd2024.spell.cast",
             "check.resolved", "resource.changed", "condition.applied",
             "condition.removed", "dnd2024.death_save.resolved",
-            "dnd2024.character.revived",
+            "dnd2024.character.revived", "attune_item", "unattune_item",
         }
         allowed_fields = {
             "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
@@ -1172,6 +1225,7 @@ class Dnd2024Runtime:
             "check_bonus_rolls",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
+            "item_ref",
         }
         combat = (
             ruleset_runtime.state(instance).get("combat")
@@ -1509,10 +1563,25 @@ class Dnd2024Runtime:
         path, where the packages legitimately are the source of truth.
         """
 
+        derived = canonical.get("derived")
+        derived = derived if isinstance(derived, Mapping) else {}
+        raw_slots = derived.get("attunement_slots", 3)
+        try:
+            capacity = int(raw_slots) if raw_slots is not None else 3
+        except (TypeError, ValueError):
+            capacity = 3
+        # 同调镜像必须随投影一起前进，否则重复投影会因缺段而多记一次 reconcile。
+        # refs 一律走 owning module 的唯一读取入口，畸形段降级为空集而不是抛错。
+        attunement = attunement_state_for_projection(canonical, capacity)
+        pending = derived.get("attunement_pending")
+        attunement["pending"] = (
+            sorted(str(ref) for ref in pending) if isinstance(pending, list) else []
+        )
         projected = {
             **Dnd2024CharacterBuilder(bundle).project_legacy(canonical),
             "rule_binding": deepcopy(canonical["rule_binding"]),
             "ruleset_character": canonical,
+            "attunement": attunement,
         }
         merged = merge_live_character_projection(current, projected)
         # 带上既有的 revision / operation log，让随后的 reconcile 是在真实历史上

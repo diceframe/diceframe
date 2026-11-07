@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.attunement import validate_item_declaration
 
 from .models import EquipmentRequirement
 
@@ -73,6 +74,9 @@ class Dnd2024EquipmentCatalog:
     def from_bundle(cls, bundle: LoadedRulesetBundle) -> Dnd2024EquipmentCatalog:
         item_types: dict[str, str] = {}
         for item in bundle.list("item"):
+            # 同调声明是物品 schema 的一部分；非 bool 必须在这里就炸掉，
+            # 而不是被下游当作 truthy 使用。
+            validate_item_declaration(item)
             item_id = str(item.get("id") or "")
             if item_id:
                 item_types[item_id] = str(item.get("item_type") or "")

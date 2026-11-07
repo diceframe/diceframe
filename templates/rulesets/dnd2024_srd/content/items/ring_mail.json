@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "ring_mail",
+  "source_ref": "srd-5.2.1:p92:equipment",
+  "automation_level": "deterministic",
+  "item_type": "armor",
+  "category": "heavy",
+  "stealth_disadvantage": true,
+  "ac_base": 14,
+  "use_dex": false
+}

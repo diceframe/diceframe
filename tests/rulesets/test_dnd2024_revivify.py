@@ -13,6 +13,7 @@ from copy import deepcopy
 import pytest
 
 from src.engine.modules import ruleset_runtime
+from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.combat.catalog import (
     CombatCatalogError,
     Dnd2024CombatCatalog,
