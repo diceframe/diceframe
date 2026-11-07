@@ -167,6 +167,43 @@ describe('ModulesView', () => {
     expect(wrapper.get('[data-testid="modules-installed"]').text()).toContain('Castle Module')
   })
 
+  it('derives the ruleset filter from the catalogue and never hides undeclared packs', async () => {
+    const base = online.modules[0]!
+    const withRuleset = (id: string, targets: string[], extra: Record<string, unknown> = {}) => ({
+      ...base, id, name: id, ruleset_targets: targets, ...extra,
+    })
+    mocks.marketplace.mockResolvedValue({
+      ok: true,
+      modules: [
+        withRuleset('coc-pack', ['core:coc7'], { ruleset_declared: true }),
+        withRuleset('dnd-pack', ['core:dnd2024'], { ruleset_declared: true }),
+        withRuleset('undeclared-pack', [], { ruleset_declared: false }),
+        withRuleset('generic-pack', ['core:coc7'], { ruleset_declared: true, system_agnostic: true }),
+      ],
+    })
+    const { wrapper } = await mountView()
+
+    // 下拉不再是写死的三项：选项来自真实声明过的规则 + 「未标注」
+    const options = wrapper.findAll('.module-market-search select option').map(option => option.text())
+    expect(options).toContain('CoC')
+    expect(options).toContain('D&D 2024')
+    expect(options).toContain('规则未标注')
+
+    // 选 CoC：声明 CoC 的、通用包、未标注的都留下；只排除明确声明别的规则的
+    const select = wrapper.get('.module-market-search select')
+    await select.setValue('coc7')
+    expect(wrapper.find('[data-testid="modules-market-coc-pack"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="modules-market-generic-pack"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="modules-market-undeclared-pack"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="modules-market-dnd-pack"]').exists()).toBe(false)
+
+    // 只看未标注：把「没声明规则」单独一档，不用猜它属于哪套规则
+    await select.setValue('__undeclared__')
+    expect(wrapper.find('[data-testid="modules-market-undeclared-pack"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="modules-market-coc-pack"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('marks installed online modules and installs missing ones from the marketplace', async () => {
     mocks.installFromMarketplace.mockResolvedValue({ ok: true })
     const { wrapper } = await mountView()

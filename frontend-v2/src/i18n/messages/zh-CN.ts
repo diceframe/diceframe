@@ -118,6 +118,8 @@ export const zhCN = {
   modulesOnlineUnavailable: '暂时无法读取在线内容包：{error}',
   modulesInstalledBadge: '已安装',
   modulesRuntimeTargets: '规则目标',
+  modulesRulesetUndeclared: '规则未标注',
+  modulesRulesetAgnostic: '通用',
   modulesRecoveryDigest: '存档内容指纹',
   modulesRecoverySource: '存档来源',
   modulesRecoveryModule: '需要的内容包',

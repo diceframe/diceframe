@@ -288,7 +288,18 @@ async def module_marketplace(
             continue
         targets = [str(target) for target in (item.get("ruleset_targets") or [])]
         target_ids = {target.rsplit(":", 1)[-1].lower() for target in targets}
-        if ruleset_filter and ruleset_filter not in targets and ruleset_filter not in target_ids:
+        # 只有「明确声明了别的规则」才不匹配。未声明（全网现存内容包的常态）与
+        # 声明为通用（system_agnostic）的包都要保留，交给 UI 打「规则未标注」徽章，
+        # 否则用户一选规则就看不到任何东西。
+        declared = bool(targets)
+        agnostic = item.get("system_agnostic") is True
+        if (
+            ruleset_filter
+            and declared
+            and not agnostic
+            and ruleset_filter not in targets
+            and ruleset_filter not in target_ids
+        ):
             continue
         if needle and needle not in _market_search_text(item):
             continue
@@ -305,6 +316,8 @@ async def module_marketplace(
             "content_delivery_mode": str(item.get("content_delivery_mode") or ""),
             "adventure_count": int(item.get("adventure_count") or 0),
             "ruleset_targets": targets,
+            "ruleset_declared": declared,
+            "system_agnostic": agnostic,
             "languages": list(item.get("languages") or []),
             "tags": list(item.get("tags") or []),
             "trust_level": str(item.get("trust_level") or ""),

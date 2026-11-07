@@ -52,6 +52,10 @@ const market = ref<ModuleMarketplaceItem[]>([])
 const marketError = ref('')
 const marketKeyword = ref('')
 const marketRuleset = ref('all')
+// 规则下拉的选项从数据推导（不再写死 D&D/CoC/Freeform）：服务端按规则收窄后
+// 列表会变小，所以把见过的规则值累计下来，选项不会越筛越少。
+const UNLABELLED_RULESET = '__undeclared__'
+const marketRulesetSeen = ref<string[]>([])
 const marketProfile = ref('all')
 const marketLanguage = ref('all')
 const marketTag = ref('all')
@@ -78,18 +82,40 @@ const marketLanguageOptions = computed(() => {
   if (market.value.some(item => !(item.languages || []).length)) options.push(UNLABELLED_LANGUAGE)
   return options
 })
+function shortRuleset(target: string): string {
+  const value = String(target || '').trim()
+  return value.includes(':') ? value.split(':').slice(1).join(':') : value
+}
+// 老索引没有 ruleset_declared：按 target 列表是否为空推断，语义与新字段一致。
+function itemHasDeclaredRuleset(item: ModuleMarketplaceItem): boolean {
+  return item.ruleset_declared ?? (item.ruleset_targets || []).length > 0
+}
+function rulesetLabel(ruleset: string): string {
+  if (ruleset === 'coc7') return 'CoC'
+  if (ruleset === 'dnd2024') return 'D&D 2024'
+  return ruleset
+}
+const marketRulesetOptions = computed(() => [...marketRulesetSeen.value].sort((a, b) => a.localeCompare(b)))
+const marketHasUndeclaredRuleset = computed(() => market.value.some(item => !itemHasDeclaredRuleset(item)))
 const marketTagOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.tags || [])))
 const marketLicenseOptions = computed(() => uniqueFilterValues(market.value.map(item => item.license)))
 const marketTrustOptions = computed(() => uniqueFilterValues(market.value.map(item => item.trust_level)))
 const marketFiltersActive = computed(() => (
-  marketProfile.value !== 'all'
+  marketRuleset.value !== 'all'
+  || marketProfile.value !== 'all'
   || marketLanguage.value !== 'all'
   || marketTag.value !== 'all'
   || marketLicense.value !== 'all'
   || marketTrust.value !== 'all'
 ))
 const filteredMarket = computed(() => market.value.filter(item => (
-  (marketProfile.value === 'all' || item.content_profile === marketProfile.value)
+  (marketRuleset.value === 'all'
+    || (marketRuleset.value === UNLABELLED_RULESET
+      ? !itemHasDeclaredRuleset(item)
+      : item.system_agnostic
+        || !itemHasDeclaredRuleset(item)
+        || (item.ruleset_targets || []).some(target => shortRuleset(target) === marketRuleset.value)))
+  && (marketProfile.value === 'all' || item.content_profile === marketProfile.value)
   && (marketLanguage.value === 'all'
     || (marketLanguage.value === UNLABELLED_LANGUAGE
       ? !(item.languages || []).length
@@ -99,6 +125,7 @@ const filteredMarket = computed(() => market.value.filter(item => (
   && (marketTrust.value === 'all' || item.trust_level === marketTrust.value)
 )))
 function resetMarketFilters() {
+  marketRuleset.value = 'all'
   marketProfile.value = 'all'
   marketLanguage.value = 'all'
   marketTag.value = 'all'
@@ -210,7 +237,8 @@ async function loadMarketplace() {
   marketBusy.value = true
   marketError.value = ''
   try {
-    const result = await moduleApi.marketplace(marketKeyword.value, marketRuleset.value)
+    const rulesetQuery = marketRuleset.value === UNLABELLED_RULESET ? 'all' : marketRuleset.value
+    const result = await moduleApi.marketplace(marketKeyword.value, rulesetQuery)
     if (!result.ok) {
       market.value = []
       marketError.value = result.error || t('modulesOnlineUnavailable', { error: result.error_code || '' })
@@ -218,6 +246,14 @@ async function loadMarketplace() {
     }
     market.value = result.modules || []
     marketSource.value = result.source || null
+    const seen = new Set(marketRulesetSeen.value)
+    for (const item of market.value) {
+      for (const target of item.ruleset_targets || []) {
+        const short = shortRuleset(target)
+        if (short) seen.add(short)
+      }
+    }
+    marketRulesetSeen.value = [...seen]
   } catch (cause: unknown) {
     market.value = []
     marketError.value = errorMessage(cause)
@@ -448,9 +484,8 @@ async function checkRecovery() {
           <span>{{ t('modulesOnlineFilter') }}</span>
           <select v-model="marketRuleset" :aria-label="t('modulesOnlineFilter')" @change="loadMarketplace">
             <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-            <option value="dnd2024">D&amp;D 2024</option>
-            <option value="coc">CoC</option>
-            <option value="freeform">Freeform</option>
+            <option v-for="ruleset in marketRulesetOptions" :key="ruleset" :value="ruleset">{{ rulesetLabel(ruleset) }}</option>
+            <option v-if="marketHasUndeclaredRuleset" :value="UNLABELLED_RULESET">{{ t('modulesRulesetUndeclared') }}</option>
           </select>
         </label>
         <button type="button" :disabled="marketBusy" @click="loadMarketplace">{{ t('modulesOnlineSearch') }}</button>
@@ -523,11 +558,13 @@ async function checkRecovery() {
         >
           <template #summary>
             <p class="muted module-market-summary">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
-            <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.join(' · ') }}</p>
+            <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.map(shortRuleset).join(' · ') }}</p>
           </template>
           <template #tags>
             <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
             <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
+            <NTag v-if="item.system_agnostic" size="small">{{ t('modulesRulesetAgnostic') }}</NTag>
+            <NTag v-else-if="!itemHasDeclaredRuleset(item)" size="small" class="module-language-undeclared">{{ t('modulesRulesetUndeclared') }}</NTag>
           </template>
           <template #footer>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>

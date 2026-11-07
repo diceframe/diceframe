@@ -161,10 +161,29 @@ async def test_online_modules_filter_by_ruleset_and_profile(env) -> None:
     ])
 
     dnd = await env.api.list_module_marketplace(ruleset="dnd2024")
-    assert [item["id"] for item in dnd["modules"]] == ["dnd-module"]
+    # 未声明规则的包不是「不匹配」：现存内容包普遍没有 requires.rulesets，
+    # 把它们过滤掉会让用户以为商店是空的。UI 另外打「规则未标注」徽章。
+    assert [item["id"] for item in dnd["modules"]] == ["dnd-module", "unscoped-content"]
+    by_id = {item["id"]: item for item in dnd["modules"]}
+    assert by_id["dnd-module"]["ruleset_declared"] is True
+    assert by_id["unscoped-content"]["ruleset_declared"] is False
 
     coc = await env.api.list_module_marketplace(ruleset="coc")
-    assert [item["id"] for item in coc["modules"]] == ["coc-module"]
+    assert [item["id"] for item in coc["modules"]] == ["coc-module", "unscoped-content"]
+
+
+@pytest.mark.asyncio
+async def test_online_modules_keep_system_agnostic_packs_under_every_ruleset(env) -> None:
+    env.host.marketplace = _FakeMarketIndex([
+        _market_item("dnd-module", ruleset_targets=["core:dnd2024"]),
+        _market_item("coc-module", ruleset_targets=["core:coc7"]),
+        _market_item("generic-pack", system_agnostic=True, ruleset_targets=["core:coc7"]),
+    ])
+
+    dnd = await env.api.list_module_marketplace(ruleset="dnd2024")
+    # 声明为通用的包在任何规则下都该出现，哪怕它顺带列了某个 runtime。
+    assert [item["id"] for item in dnd["modules"]] == ["dnd-module", "generic-pack"]
+    assert dnd["modules"][1]["system_agnostic"] is True
 
 
 @pytest.mark.asyncio

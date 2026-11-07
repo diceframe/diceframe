@@ -118,6 +118,8 @@ export const en = {
   modulesOnlineUnavailable: 'Cannot read online content packages right now: {error}',
   modulesInstalledBadge: 'Installed',
   modulesRuntimeTargets: 'Rulesets',
+  modulesRulesetUndeclared: 'Ruleset not declared',
+  modulesRulesetAgnostic: 'System-agnostic',
   modulesRecoveryDigest: 'Saved content digest',
   modulesRecoverySource: 'Saved source',
   modulesRecoveryModule: 'Required module',
