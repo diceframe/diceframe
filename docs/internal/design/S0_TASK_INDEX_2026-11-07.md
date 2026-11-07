@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@c1b865e7`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@2499e95b`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@d9873aad`）；其余 43 份待执行 |
+| 状态 | S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@c1b865e7`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@2499e95b`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@d9873aad`）；S0-D1 至 S0-E3 已完成契约审计（见 §8），四份需改规则或补整块机制；其余 43 份待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -84,12 +84,12 @@ S0-A 子职授予主干
 | S0-A | 子职授予主干＋暴击阈值 | Champion 3/15 级 Improved / Superior Critical | `S0A_SUBCLASS_GRANT_IMPROVED_CRITICAL_TASK_SPEC_2026-11-07.md` | 23 | 已实现，待评审 |
 | S0-B | 特性选项主干 | Champion 7 级 Additional Fighting Style → Defense | `S0B_FEATURE_CHOICES_TASK_SPEC_2026-11-07.md` | 26 | 已实现，待评审 |
 | S0-C | 被动角色推导 | Draconic Sorcery 3 级 Draconic Resilience | `S0C_PASSIVE_DERIVATION_DRACONIC_RESILIENCE_TASK_SPEC_2026-11-07.md` | 22 | 已实现，待评审 |
-| S0-D1 | 骰面最大化 | Life Domain 17 级 Supreme Healing | `S0D1_SUPREME_HEALING_TASK_SPEC_2026-11-07.md` | 18 | 待执行 |
-| S0-D2 | 递增使用计数 | Evoker 14 级 Overchannel | `S0D2_OVERCHANNEL_TASK_SPEC_2026-11-07.md` | 28 | 待执行 |
-| S0-D3 | D20 掷后反应窗口 | College of Lore 3 级 Cutting Words 攻击检定面 | `S0D3_CUTTING_WORDS_CHECK_WINDOW_TASK_SPEC_2026-11-07.md` | 30 | 待执行 |
-| S0-E1 | 敌人归零触发＋临时 HP | Fiend Patron 3 级 Dark One's Blessing | `S0E1_DEFEAT_TRIGGER_DARK_ONES_BLESSING_TASK_SPEC_2026-11-07.md` | 30 | 待执行 |
-| S0-E2 | 光环、豁免加值与条件免疫 | Paladin 6/18 级 Aura of Protection / Expansion；Devotion 7 级 Aura of Devotion | `S0E2_PALADIN_AURAS_TASK_SPEC_2026-11-07.md` | 33 | 待执行 |
-| S0-E3 | 首回合/回合再生与死亡豁免 | Champion 18 级 Survivor | `S0E3_SURVIVOR_TASK_SPEC_2026-11-07.md` | 33 | 待执行 |
+| S0-D1 | 骰面最大化 | Life Domain 17 级 Supreme Healing | `S0D1_SUPREME_HEALING_TASK_SPEC_2026-11-07.md` | 18 | 契约审计完成：行为达标（16/18）；1 处偏离（查询缺 owner），3 条无证据。见 §8 |
+| S0-D2 | 递增使用计数 | Evoker 14 级 Overchannel | `S0D2_OVERCHANNEL_TASK_SPEC_2026-11-07.md` | 28 | 契约审计完成：**规则冲突**——每次施法都自伤，无"长休后首次免费"；`features.usage` 整套缺失。见 §8 |
+| S0-D3 | D20 掷后反应窗口 | College of Lore 3 级 Cutting Words 攻击检定面 | `S0D3_CUTTING_WORDS_CHECK_WINDOW_TASK_SPEC_2026-11-07.md` | 30 | 契约审计完成：行为 30/30 通过；3 处契约形状偏离（owner / range_ft / trigger）；范围已扩张到 Lucky 与伤害面。见 §8 |
+| S0-E1 | 敌人归零触发＋临时 HP | Fiend Patron 3 级 Dark One's Blessing | `S0E1_DEFEAT_TRIGGER_DARK_ONES_BLESSING_TASK_SPEC_2026-11-07.md` | 30 | 契约审计完成：**含一条 SRD 没有的规则**（队友击杀 10 尺共享），且被测试固化。见 §8 |
+| S0-E2 | 光环、豁免加值与条件免疫 | Paladin 6/18 级 Aura of Protection / Expansion；Devotion 7 级 Aura of Devotion | `S0E2_PALADIN_AURAS_TASK_SPEC_2026-11-07.md` | 33 | 契约审计完成：**Aura of Protection / Expansion 无任何定义**，四个豁免消费面全空（约 19/33 缺失）。见 §8 |
+| S0-E3 | 首回合/回合再生与死亡豁免 | Champion 18 级 Survivor | `S0E3_SURVIVOR_TASK_SPEC_2026-11-07.md` | 33 | 契约审计完成：**首回合不触发被测试固化为断言**（契约 §1.5 明确推翻该裁剪）。见 §8 |
 | S0-F1 | D20 技能、专精与下限 | Expertise、Jack of All Trades、Reliable Talent、Remarkable Athlete、Scholar | `S0F1_D20_SKILLS_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
 | S0-F2 | 激励骰实例与掷后修正 | Bardic Inspiration、Font/Superior Inspiration、Peerless Skill、Cutting Words | `S0F2_BARDIC_INSPIRATION_TASK_SPEC_2026-11-07.md` | 25 | 待执行 |
 | S0-F3 | 失败 D20 后窗口 | Tactical Mind、Dark One's Own Luck、Countercharm、Indomitable、Disciplined Survivor、Stroke of Luck | `S0F3_FAILED_D20_WINDOWS_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
@@ -179,3 +179,31 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 - `character_builder` 的 11 条长期红灯已定位为 Windows 保留设备名 `CON`（夹具写入 `con.json`），与规则实现无关。
 
 **执行顺序调整**：S0-D1 至 S0-E3 的载体（`supreme_healing`、`overchannel`、`cutting_words`、`dark_ones_blessing`、`aura_of_devotion`、`survivor`）在上游已有定义与测试，应沿用 S0-C 的方式先做契约审计再定改动；S0-F9 因涉及错误数值，优先级上调到 D 系列之前。
+
+## 8. A 类六份任务书的契约审计（2026-11-07）
+
+完整报告：`S0_CONTRACT_AUDIT_2026-11-07.md`。审计对象 `feat/dnd2024-derived-defense-speed@340b003f`，只读核对，聚焦测试 134 passed。
+
+**一句话结论：六份载体全都有落点，没有一份需要从零实现；但六份里只有 D1 和 D3 的行为可以直接沿用，其余四份各自需要改规则或补整块机制。**
+
+| 契约 | 行为落地 | 关键缺口 | 判定 |
+|---|---|---|---|
+| S0-D1 | 完整 | 查询缺 owner（§4.3.2）；矩阵 3/13/14 无测试 | 补 1 处 + 3 条证据 |
+| S0-D3 | 完整（超范围） | owner / `range_ft` / `trigger` 三处声明形状；已实现 Lucky 与伤害面 | 补声明，改索引口径 |
+| S0-E3 | 完整 | Heroic Rally **首回合不触发**，被 `test_combat_start_does_not_regenerate` 固化 | 改规则 + 改测试 |
+| S0-E1 | 完整 | **10 尺共享他杀**（`defeat_share_range_ft`）不属于 SRD p76；事件审计字段缺 8 项 | 删规则 + 改测试 |
+| S0-D2 | 核心模型冲突 | 每次施法都自伤，无首次免费；`features.usage` 长休计数整套不存在 | 重做计数与自伤 |
+| S0-E2 | 1/3 | **`aura_of_protection` / `aura_expansion` 在特性目录里无定义**；四个豁免面无 `aura_bonus` | 新做 2/3 |
+
+必须优先修的五项（按是否产生错误数值排序）：
+
+1. **E2-1/E2-2**：Paladin 6/18 级光环豁免加值完全不存在（progression 有名字、locale 有标签、feature catalog 无条目 → `features_for()` 永远拿不到）。
+2. **E1-1**：队友在 10 尺内击杀时 Fiend Warlock 白拿 temp HP。契约 §1.4 与 SRD p76 都只有"你亲手归零"。
+3. **D2-1**：Overchannel 每次施法都自伤。契约 §执行侧须知 4 明确废止"每次 2d12/环"这个模型。
+4. **E3-1**：Heroic Rally 首回合不触发。契约 §1.5 原话是"本任务明确推翻"。
+5. **D2-2**：`features.usage` 长休作用域计数缺失。注意 `combat.feature_usage` 是"每回合一次"账本，同名异义，**不能复用**。
+
+**审计口径提醒**：本次判定以契约为准、代码为事实。代码里"有测试通过"不等于"符合契约"——E1-1 与 E3-1 两条恰恰是测试断言的正是契约废止的行为。后续修复不得为了让既有测试继续绿而保留错误规则。
+
+**未覆盖**：`srd-5.2.1:p58` vs `p76`（E1-4）因本工作树无 SRD PDF 未复核，需在修复时用原文定稿；D5 元数据漂移不重复；全量 `tests/rulesets` 未复跑（沿用 D1–D4 提交时的 1341 passed / 11 failed 基线）。
+
