@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "bolts"
+  },
+  "fields": {
+    "name": "弩矢"
+  }
+}

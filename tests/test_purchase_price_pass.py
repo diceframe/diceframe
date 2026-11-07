@@ -94,6 +94,36 @@ def test_append_inventory_item_merges_by_name_and_adopts_effect() -> None:
     assert len(sheet3["inventory"]) == 2
 
 
+def test_append_inventory_item_merges_across_one_sided_item_ref() -> None:
+    # 无身份的同名授予并入已有 canonical 行，并保留该行身份。
+    ref_row = [{"name": "治疗药水", "qty": 1, "item_ref": "item:potion_of_healing"}]
+    append_inventory_item({"inventory": ref_row}, "治疗药水", qty=2)
+    assert ref_row == [{
+        "name": "治疗药水", "qty": 3, "item_ref": "item:potion_of_healing",
+    }]
+    # 有身份的授予并入已有的无身份同名旧行，并补齐身份。
+    anonymous = [{"name": "治疗药水", "qty": 1}]
+    append_inventory_item(
+        {"inventory": anonymous}, "治疗药水", qty=1,
+        item_ref="item:potion_of_healing",
+    )
+    assert anonymous == [{
+        "name": "治疗药水", "qty": 2, "item_ref": "item:potion_of_healing",
+    }]
+    # 两边身份不同：绝不合并；多候选身份存在歧义时也不猜。
+    distinct = [{"name": "治疗药水", "qty": 1, "item_ref": "item:potion_a"}]
+    append_inventory_item(
+        {"inventory": distinct}, "治疗药水", qty=1, item_ref="item:potion_b",
+    )
+    assert len(distinct) == 2
+    ambiguous = [
+        {"name": "治疗药水", "qty": 1},
+        {"name": "治疗药水", "qty": 1, "item_ref": "item:potion_a"},
+    ]
+    append_inventory_item({"inventory": ambiguous}, "治疗药水", qty=1)
+    assert len(ambiguous) == 3
+
+
 def test_grant_classified_item_qty_stacks_into_existing_row() -> None:
     sheet: dict = {"inventory": [{"name": "回复药水", "qty": 2, "effect": "恢复10点HP"}]}
     grant_classified_item(sheet, "回复药水", classify_item("回复药水", {}), qty=5)

@@ -174,34 +174,14 @@ body.light .plugin-status.running {
   justify-content: flex-end;
 }
 
-.plugin-workspace .mode-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: min(100%, 560px);
-  margin: 14px auto 16px;
-  gap: 8px;
-  padding: 5px;
-  border: 1px solid var(--df-border-soft);
-  border-radius: var(--df-radius-md);
-  background: color-mix(in srgb, var(--df-control-bg) 78%, transparent);
+.plugin-workspace .content-store-moved {
+  margin: 12px 0 10px;
 }
 
-.plugin-workspace .mode-tabs button {
-  min-height: 44px;
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: calc(var(--df-radius-md) - 2px);
-  color: var(--df-text-muted);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.plugin-workspace .mode-tabs button:hover, .plugin-workspace .mode-tabs button.active {
-  border-color: color-mix(in srgb, var(--df-interactive) 34%, var(--df-border-soft));
+.plugin-workspace .content-store-moved a {
   color: var(--df-interactive-strong);
-  background: color-mix(in srgb, var(--df-interactive) 13%, var(--df-surface-2));
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .plugin-workspace .type-filter-row {

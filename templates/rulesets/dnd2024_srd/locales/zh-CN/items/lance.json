@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "lance"
+  },
+  "fields": {
+    "name": "骑枪"
+  }
+}

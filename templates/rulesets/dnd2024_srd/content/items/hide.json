@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "hide",
+  "source_ref": "srd-5.2.1:p92:equipment",
+  "automation_level": "deterministic",
+  "item_type": "armor",
+  "category": "medium",
+  "ac_base": 12,
+  "use_dex": true,
+  "dex_cap": 2
+}

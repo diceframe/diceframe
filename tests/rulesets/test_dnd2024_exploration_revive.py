@@ -101,7 +101,10 @@ def caster_of(instance) -> dict:
 
 
 def spell_intents(engine, instance) -> list[dict]:
-    return engine.available_intents(instance, "player:gm")
+    return [
+        action for action in engine.available_intents(instance, "player:gm")
+        if action["type"] == "exploration.cast_spell"
+    ]
 
 
 def event_types(resolved: dict) -> list[str]:

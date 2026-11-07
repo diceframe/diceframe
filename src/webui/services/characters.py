@@ -1256,6 +1256,24 @@ async def update_npc_voice(
         return {"ok": True, "voice_profile": npc.get("voice_profile")}
 
 
+def grant_reward_to_sheet(sheet: dict[str, Any], reward: dict[str, Any]) -> None:
+    """Write one settled reward onto a character sheet.
+
+    ``item_ref`` 是**不透明身份 metadata**：本层不解释 D&D 规则，只保证它
+    随奖励一起落到背包行，让规则集侧能按身份取件（缺失时行为与旧版一致）。
+    """
+
+    item_name = str(reward.get("name") or "").strip()
+    if not item_name:
+        return
+    grant_classified_item(
+        sheet,
+        item_name,
+        str(reward.get("category") or ""),
+        item_ref=str(reward.get("item_ref") or ""),
+    )
+
+
 async def resolve_payment(
     dependencies: CharacterDependencies,
     game_key: str,
@@ -1271,9 +1289,7 @@ async def resolve_payment(
     actor_uid = str(session_uid or "")
 
     def grant_reward(sheet: dict[str, Any], reward: dict[str, Any]) -> None:
-        item_name = str(reward.get("name") or "").strip()
-        if item_name:
-            grant_classified_item(sheet, item_name, str(reward.get("category") or ""))
+        grant_reward_to_sheet(sheet, reward)
 
     scene_image_payload: dict[str, Any] | None = None
     async with inst.authoritative_write() as write_entered, inst._lock:

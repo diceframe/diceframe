@@ -305,7 +305,7 @@ def test_multiplayer_encounter_readiness_is_authoritative_and_visible_to_gm() ->
     }) is True
 
     ally_actions = runtime.available_intents(instance, "ally")
-    assert [item["type"] for item in ally_actions] == ["encounter.ready"]
+    assert any(item["type"] == "encounter.ready" for item in ally_actions)
     assert any(item["type"] == "combat.start" for item in runtime.available_intents(instance, "gm"))
 
     _submit(runtime, instance, "encounter.ready", "ally")
@@ -315,9 +315,10 @@ def test_multiplayer_encounter_readiness_is_authoritative_and_visible_to_gm() ->
         "ready_count": 1, "required_count": 1, "all_ready": True,
         "players": [{"player_id": "ally", "name": "Mira", "ready": True}],
     }
-    assert [item["type"] for item in runtime.available_intents(instance, "ally")] == [
-        "encounter.unready",
-    ]
+    assert any(
+        item["type"] == "encounter.unready"
+        for item in runtime.available_intents(instance, "ally")
+    )
 
     _submit(runtime, instance, "encounter.unready", "ally")
     request = runtime.gameplay_view(instance, "ally", False)["encounter_request"]

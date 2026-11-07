@@ -19,6 +19,14 @@ describe('overflow layout contracts', () => {
     expect(rule).toContain('text-overflow: ellipsis')
   })
 
+  it('does not re-position the portrait hint from the play character panel', () => {
+    // CharacterPanel 曾自带一份 span 定位（inset: auto 2px 2px）：它会覆盖 shared.css 的
+    // left:50%，却留下 translateX(-50%)，提示于是被挤到头像左外侧。
+    const component = source('../src/components/CharacterPanel.vue')
+    expect(component).not.toMatch(/\.portrait-edit-button\s+span\s*\{/)
+    expect(component).not.toMatch(/\.portrait-edit-button\s*>\s*span:last-child\s*\{/)
+  })
+
   it('clamps long lorebook card text before it can stretch the card out of view', () => {
     const sourceText = source('../src/features/library/ContentLibraryView.vue')
     expect(sourceText).toMatch(/\.lorebook-card\s*\{[^}]*overflow: hidden/)

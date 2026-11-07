@@ -1753,15 +1753,23 @@ class WebAPI:
         重放/中止后同一身份会走 ``_existing_by_source`` 的既有语义。
         """
 
-        named = [
-            {
-                "name": str(intent.get("name") or ""),
+        named = []
+        for intent in intents or []:
+            if str(intent.get("kind") or "") != "item_grant":
+                continue
+            name = str(intent.get("name") or "")
+            if not name.strip():
+                continue
+            reward = {
+                "name": name,
                 "category": str(intent.get("category") or ""),
             }
-            for intent in intents or []
-            if str(intent.get("kind") or "") == "item_grant"
-            and str(intent.get("name") or "").strip()
-        ]
+            # 身份映射是不透明的 metadata：通用 webui 层不解释 D&D 规则，
+            # 只保证它随奖励一起到达 grant_reward（缺失时保持旧形状）。
+            item_ref = str(intent.get("item_ref") or "")
+            if item_ref:
+                reward["item_ref"] = item_ref
+            named.append(reward)
         if not named:
             return []
         recipient_uid = str((intents or [{}])[0].get("recipient_uid") or "")

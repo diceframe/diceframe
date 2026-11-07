@@ -523,6 +523,10 @@ def test_a_true_ranged_weapon_never_gets_the_melee_ability_choice() -> None:
 
     runtime = Dnd2024Runtime()
     sheet = with_equipment(runtime, _strong_monk_sheet(runtime), "item:longbow")
+    # D3 起远程攻击要求携带对应弹药。
+    sheet["inventory"] = [
+        {"name": "item:arrows", "item_ref": "item:arrows", "type": "gear", "qty": 1},
+    ]
     engine, instance = monk_instance(runtime, sheet)
     start_combat(engine, instance, position=15)
 
