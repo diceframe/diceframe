@@ -58,6 +58,15 @@ export type ModuleUsageResponse = {
   total_games?: number
 }
 export type ModulePreviewResponse = { ok: boolean; blockers: string[]; warnings: string[] }
+/** 安装响应携带宿主的 public_detail 事实：新装默认禁用，`enabled` 决定是否提示启用。 */
+export type ModuleInstallResponse = {
+  ok: boolean
+  id?: string
+  name?: string
+  enabled?: boolean
+  error?: string
+  error_code?: string
+}
 export type ExternalModulePreviewResponse = {
   ok: boolean
   adapter?: string
@@ -123,7 +132,7 @@ export const moduleApi = {
   compatibility: (moduleId: string) => api<ModuleCompatibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/compatibility`),
   usages: (moduleId: string) => api<ModuleUsageResponse>(`/modules/${encodeURIComponent(moduleId)}/usages`),
   previewImport: (body: FormData) => api<ModulePreviewResponse>('/modules/import/preview', { method: 'POST', body }),
-  import: (body: FormData) => api<{ ok: boolean; id?: string }>('/modules/import', { method: 'POST', body }),
+  import: (body: FormData) => api<ModuleInstallResponse>('/modules/import', { method: 'POST', body }),
   marketplace: (keyword = '', ruleset = 'all') => {
     const query = new URLSearchParams({
       ...(keyword ? { keyword } : {}),
@@ -131,7 +140,7 @@ export const moduleApi = {
     }).toString()
     return api<ModuleMarketplaceResponse>(`/modules/marketplace${query ? `?${query}` : ''}`)
   },
-  installFromMarketplace: (moduleId: string, overwrite = false) => api<{ ok: boolean; id?: string; error?: string; error_code?: string }>(
+  installFromMarketplace: (moduleId: string, overwrite = false) => api<ModuleInstallResponse>(
     `/modules/${encodeURIComponent(moduleId)}/install`,
     { method: 'POST', body: JSON.stringify({ overwrite }) },
   ),

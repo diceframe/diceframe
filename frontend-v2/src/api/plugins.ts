@@ -25,6 +25,18 @@ export type PluginTypeInfo = {
   filter_order: number
 }
 
+/**
+ * 安装响应 = 宿主 public_detail。新装默认 `enabled: false`（插件与内容包一致），
+ * 前端据此决定安装完成后是否提示启用。
+ */
+export type PluginInstallResponse = {
+  ok: boolean
+  id?: string
+  name?: string
+  enabled?: boolean
+  error?: string
+}
+
 const pluginPath = (pluginId: string, suffix = '') =>
   `/plugins/${encodeURIComponent(pluginId)}${suffix}`
 
@@ -113,10 +125,10 @@ export const pluginApi = {
     api<{ deleted?: number; bytes_deleted?: number }>(pluginPath(pluginId, '/card-cache/clear'), { method: 'POST' }),
   setRunning: (pluginId: string, running: boolean) =>
     api(pluginPath(pluginId, running ? '/start' : '/stop'), { method: 'POST' }),
-  install: (body: FormData) => api('/plugins/install', { method: 'POST', body }),
+  install: (body: FormData) => api<PluginInstallResponse>('/plugins/install', { method: 'POST', body }),
   rescan: () => api('/plugins/rescan', { method: 'POST' }),
   installMarketplace: (pluginId: string, overwrite: boolean) =>
-    api('/plugins/marketplace/install', {
+    api<PluginInstallResponse>('/plugins/marketplace/install', {
       method: 'POST',
       body: JSON.stringify({ plugin_id: pluginId, overwrite }),
     }),
