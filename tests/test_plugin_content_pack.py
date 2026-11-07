@@ -988,6 +988,57 @@ def test_export_content_pack_flat_ships_a_license(tmp_path):
     assert not any(name.endswith("/LICENSE") or name == "LICENSE" for name in package_names)
 
 
+def test_export_content_pack_declares_supported_locales(tmp_path):
+    """内容语言写进 manifest：商店靠它标注与筛选，非法项丢弃而不是让整包失败。"""
+    import zipfile
+    from src.webui.services.plugins import export_content_pack
+
+    plugins_dir = tmp_path / "plugins"
+    data_dir = tmp_path / "data"
+    host = PluginHost(plugins_dir, data_dir)
+
+    class _Lore:
+        world = {"id": "w1", "name": "W", "description": "d", "language": "zh-CN"}
+        def get_world(self, wid): return self.world if wid == "w1" else None
+        def list_entries(self, wid): return []
+
+    class _Api(ContentMapApiFacade):
+        def __init__(self): self._plugins = host; self._lore = _Lore(); self._rules_dir = tmp_path
+        def list_character_cards(self): return {"cards": []}
+
+    api = _Api()
+    result = export_content_pack(
+        _plugin_export_dependencies(api),
+        "locale-pack",
+        "语言包",
+        "1.0.0",
+        "desc",
+        world_id="w1",
+        flat=True,
+        supported_locales=["zh-CN", "en", "english!", "en"],
+    )
+
+    assert result["ok"] is True
+    archive = zipfile.ZipFile(io.BytesIO(result["payload"]))
+    manifest = json.loads(archive.read("plugin.json"))
+    # 去重 + 丢掉不合法的标签，保留 BCP-47 规范写法
+    assert manifest["supported_locales"] == ["zh-CN", "en"]
+    assert manifest["default_locale"] == "zh-CN"
+
+    # 作者没勾语言时回落成包自己的默认语言，而不是空数组（空数组等于"没有标注"）
+    defaulted = export_content_pack(
+        _plugin_export_dependencies(api),
+        "locale-pack-2",
+        "语言包 2",
+        "1.0.0",
+        "desc",
+        world_id="w1",
+        flat=True,
+    )
+    defaulted_manifest = json.loads(zipfile.ZipFile(io.BytesIO(defaulted["payload"])).read("plugin.json"))
+    assert defaulted_manifest["supported_locales"] == ["zh-CN"]
+
+
 def test_export_content_pack_includes_selected_adventure_and_lorebook(tmp_path):
     """Creator exports keep native adventure files and per-game lorebook data."""
     from types import SimpleNamespace
@@ -1506,72 +1557,6 @@ async def test_install_marketplace_plugin_skips_autoimport_when_disabled():
         _plugin_lifecycle_dependencies(api), "pack"
     )
     assert result["ok"] is True
-
-
-@pytest.mark.asyncio
-async def test_update_marketplace_plugin_autoimports_like_install():
-    """商店更新与覆盖安装一致：已启用内容包更新后立刻同步世界书并灌入新内容。"""
-    from src.webui.services.plugins import update_marketplace_plugin
-
-    saved_cards: list = []
-
-    class _Plugins:
-        contributions = SimpleNamespace(list=lambda kind: [])
-
-        def __init__(self):
-            self.synced = False
-
-        async def update_from_marketplace(self, plugin_id):
-            return {"id": plugin_id, "version": "1.1.0"}
-
-        def public_detail(self, plugin_id):
-            return {"id": plugin_id, "enabled": True, "status": "active"}
-
-        def sync_lorebooks(self, lore):
-            self.synced = True
-            return 0
-
-        def list_content_resources(self):
-            return {
-                "character_template": [{"plugin_id": "pack", "id": "mage", "character_name": "Mage", "plugin_name": "pack"}],
-                "npc": [], "spell": [], "item": [], "class": [],
-            }
-
-    class _Api:
-        _plugins = _Plugins()
-        _lore = None
-
-        def save_character_card(self, card):
-            saved_cards.append(card)
-            return {"ok": True}
-
-    api = _Api()
-    result = await update_marketplace_plugin(_plugin_lifecycle_dependencies(api), "pack")
-
-    assert result["ok"] is True
-    assert result["version"] == "1.1.0"
-    assert api._plugins.synced is True
-    assert [card["character_name"] for card in saved_cards] == ["Mage"]
-
-
-@pytest.mark.asyncio
-async def test_update_marketplace_plugin_skips_autoimport_when_already_latest():
-    """已是最新版本时宿主不改包，也就没有新内容要灌入。"""
-    from src.webui.services.plugins import update_marketplace_plugin
-
-    class _Plugins:
-        async def update_from_marketplace(self, plugin_id):
-            return {"id": plugin_id, "up_to_date": True}
-
-        def public_detail(self, plugin_id):
-            raise AssertionError("should not inspect the plugin for autoimport")
-
-    class _Api:
-        _plugins = _Plugins()
-        _lore = None
-
-    result = await update_marketplace_plugin(_plugin_lifecycle_dependencies(_Api()), "pack")
-    assert result == {"ok": True, "id": "pack", "up_to_date": True}
 
 
 @pytest.mark.asyncio

@@ -198,3 +198,23 @@ def test_cli_validates_a_package_file(tmp_path: Path, monkeypatch, capsys) -> No
 
     assert main() == 0
     assert json.loads(capsys.readouterr().out)["package"]["plugin_id"] == "homebrew-module"
+
+
+def test_missing_supported_locales_only_warns(tmp_path: Path) -> None:
+    """旧包没有语言标注也必须过校验——语言是为了被找到，不是为了拦人。"""
+
+    report = validate_module(_make_module(tmp_path))
+    assert report["ok"] is True
+    assert any("supported_locales" in warning for warning in report["warnings"])
+
+
+def test_invalid_supported_locales_fails_the_report(tmp_path: Path) -> None:
+    plugin_dir = _make_module(tmp_path)
+    manifest = plugin_dir / "plugin.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["supported_locales"] = ["zh-CN", "english!"]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    report = validate_module(plugin_dir)
+    assert report["ok"] is False
+    assert any("supported_locales" in error for error in report["errors"])
