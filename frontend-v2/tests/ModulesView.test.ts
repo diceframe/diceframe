@@ -3,6 +3,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { i18n } from '../src/i18n'
+import { registerNaiveApis } from '../src/composables/useNaiveBridge'
 import ModulesView from '../src/features/modules/ModulesView.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   previewImport: vi.fn(),
   importModule: vi.fn(),
   installFromMarketplace: vi.fn(),
+  setRunning: vi.fn(),
   hubDetail: vi.fn(),
   hubReadme: vi.fn(),
   hubRatings: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('../src/api/plugins', async importOriginal => {
     ...actual,
     pluginApi: {
       ...actual.pluginApi,
+      setRunning: mocks.setRunning,
       hubDetail: mocks.hubDetail,
       hubReadme: mocks.hubReadme,
       hubRatings: mocks.hubRatings,
@@ -265,8 +268,29 @@ describe('ModulesView', () => {
     expect(update.findAll('button').map(button => button.text())).toContain('更新')
   })
 
-  it('shows the marketplace error when the install endpoint returns a failed result', async () => {
-    mocks.installFromMarketplace.mockResolvedValue({ ok: false, error: '签名校验失败' })
+  it('offers to enable a freshly installed pack and starts it on confirm', async () => {
+    mocks.installFromMarketplace.mockResolvedValue({ ok: true, id: 'other-module', name: 'Other Module', enabled: false })
+    mocks.setRunning.mockResolvedValue({ ok: true })
+    const dialogs: Array<{ positiveText?: string; onPositiveClick?: () => void }> = []
+    registerNaiveApis(
+      { success: () => {}, error: () => {}, info: () => {}, warning: () => {} } as never,
+      { info: (config: never) => dialogs.push(config), warning: (config: never) => dialogs.push(config), error: (config: never) => dialogs.push(config), success: (config: never) => dialogs.push(config) } as never,
+    )
+    const { wrapper } = await mountView()
+
+    const fresh = wrapper.get('[data-testid="modules-market-other-module"]')
+    await fresh.findAll('button').find(button => button.text() === '安装')!.trigger('click')
+    await vi.waitFor(() => expect(dialogs).toHaveLength(1))
+    expect(dialogs[0]!.positiveText).toBe('现在启用')
+
+    dialogs[0]!.onPositiveClick?.()
+    await flushPromises()
+
+    expect(mocks.setRunning).toHaveBeenCalledWith('other-module', true)
+    wrapper.unmount()
+  })
+
+  it('shows the marketplace error when the install endpoint returns a failed result', async () => {    mocks.installFromMarketplace.mockResolvedValue({ ok: false, error: '签名校验失败' })
     const { wrapper } = await mountView()
 
     const fresh = wrapper.get('[data-testid="modules-market-other-module"]')

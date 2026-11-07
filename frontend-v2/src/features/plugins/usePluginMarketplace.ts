@@ -4,6 +4,7 @@ import { pluginApi } from '@/api/plugins'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
+import { promptEnableAfterInstall } from './installEnable'
 import { useHubDetail } from './useHubDetail'
 import type {
   PluginInfo,
@@ -228,8 +229,16 @@ export function usePluginMarketplace(
     }
     busy.value = `market:${item.id}`
     try {
-      await pluginApi.installMarketplace(item.id, Boolean(item.installed))
+      const installed = await pluginApi.installMarketplace(item.id, Boolean(item.installed))
       toast.success(t(item.installed ? 'pluginNamedUpdated' : 'pluginNamedInstalled', { name: item.name }))
+      // 新装默认禁用，装完立刻问一次是否启用；更新沿用用户原来的开关状态。
+      if (!item.installed) {
+        await promptEnableAfterInstall({
+          id: installed?.id || item.id,
+          name: installed?.name || item.name,
+          enabled: installed?.enabled,
+        })
+      }
       await refreshSurfaces()
     } catch (error: unknown) {
       toast.error(errorMessage(error))

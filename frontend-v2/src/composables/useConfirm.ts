@@ -1,7 +1,7 @@
 import { h, type VNodeChild } from 'vue'
 import type { DialogOptions } from 'naive-ui'
+import { i18n, type MessageKey } from '@/i18n'
 import { getDialog } from './useNaiveBridge'
-import { useLocale } from './useLocale'
 
 export interface ConfirmOptions {
   title?: string
@@ -15,7 +15,9 @@ export interface ConfirmOptions {
 
 export function useConfirm() {
   const api = getDialog()
-  const { t } = useLocale()
+  // 全局 composer：确认框也能在组件 setup 之外触发（例如安装完成后的全局
+  // 「是否启用」询问），不依赖调用方处于某个组件的上下文。
+  const t = (key: MessageKey, params?: Record<string, string | number>) => i18n.global.t(key, params || {})
   function confirm(opts: ConfirmOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const danger = opts.type === 'error'

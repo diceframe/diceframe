@@ -871,6 +871,11 @@ class PluginHost:
         if not self._has_entrypoint(runtime.manifest):
             self._register_contributions(plugin_id, runtime)
             runtime.status, runtime.error = "active", ""
+            # 声明型插件没有进程，"启动"就是"启用"：必须持久化，否则主程序重启后
+            # 又回到 disabled，内容包/模块每次开机都要用户重新点一次启用。
+            if not runtime.config.get("enabled"):
+                runtime.config["enabled"] = True
+                self._save_config(plugin_id, runtime)
             return
         runtime.status, runtime.error = "starting", ""
         env = self._build_process_env(plugin_id, runtime)
