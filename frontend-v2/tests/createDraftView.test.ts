@@ -25,7 +25,10 @@ vi.mock('../src/api/mapBackgrounds', () => ({ mapBackgroundSelection: vi.fn(() =
 vi.mock('../src/api/client', () => ({ api: vi.fn(async (path: string) => {
   mocks.apiPaths.push(path)
   if (path.startsWith('/world-templates')) return { templates: [{ world_id: 'greymoor', world_name: '灰沼', default_rule: 'dnd2024_srd' }] }
-  if (path.startsWith('/rules?')) return { rules: [{ rule_id: 'dnd2024_srd', rule_name: 'D&D', ruleset_runtime: { id: 'core:dnd2024', version: 1, capabilities: { character_builder: 'professional', adventure_formats: ['diceframe:adventure-graph-v2'] } } }] }
+  if (path.startsWith('/rules?')) return { rules: [
+    { rule_id: 'dnd2024_srd', rule_name: 'D&D', ruleset_runtime: { id: 'core:dnd2024', version: 1, capabilities: { character_builder: 'professional', adventure_formats: ['diceframe:adventure-graph-v2'] } } },
+    { rule_id: 'gal_narrative', rule_name: 'GAL Narrative Preview' },
+  ] }
   if (path === '/worlds') return { worlds: [] }
   if (path.startsWith('/lorebooks?')) return { books: [
     { id: 'world:greymoor', name: '灰沼基础资料', enabled: true, entry_count: 4, bindings: [{ scope_kind: 'world', scope_id: 'greymoor', role: 'primary' }] },
@@ -49,6 +52,24 @@ describe('CreateView draft restoration', () => {
     setCreateDraftSession(null)
     mocks.router.push.mockReset()
     mocks.route.query = { return_to: 'library', adventure_id: 'core:story', module_id: 'core' }
+  })
+
+  it('keeps GAL in the rule selector without a separate experimental checkbox', async () => {
+    mocks.route.query = {}
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const ruleSettings = wrapper.get('details.create-rule-settings')
+    expect(ruleSettings.find('input[type=checkbox]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('GAL 预览（实验性）')
+    expect(wrapper.text()).not.toContain('尚无好感度、路线与结局')
+    const ruleSelect = ruleSettings.get('select')
+    expect(ruleSelect.find('option[value="gal_narrative"]').exists()).toBe(true)
+    await ruleSelect.setValue('gal_narrative')
+    await flushPromises()
+    expect(ruleSettings.get('summary').text()).toContain('GAL Narrative Preview')
+    expect((ruleSelect.element as HTMLSelectElement).value).toBe('gal_narrative')
+    wrapper.unmount()
   })
 
   it('defaults to compact rule and book summaries while keeping their choices available', async () => {

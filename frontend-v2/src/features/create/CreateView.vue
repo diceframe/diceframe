@@ -145,16 +145,6 @@ const stepTitleKeys = ['stepWorld', 'stepGameSettings', 'stepCharacters', 'stepC
 const stepProgress = computed(() => createStepProgress(step.value))
 const activeRule = computed(() => mode.value === 'ai' ? (aiGeneratedRule.value?.rule_id || aiRule.value) : rule.value)
 const activeRuleSummary = computed(() => rules.value.find(item => item.rule_id === activeRule.value))
-const galRuleAvailable = computed(() => rules.value.some(item => item.rule_id === 'gal_narrative'))
-const galPreview = computed<boolean>({
-  get: () => playMode.value === 'gal',
-  set(on: boolean) {
-    selectPlayMode(on ? 'gal' : 'free')
-    if (!on) return
-    solo.value = true
-    if (galRuleAvailable.value) rule.value = 'gal_narrative'
-  },
-})
 const usesProfessionalBuilder = computed(() => (
   activeRuleSummary.value?.ruleset_runtime?.capabilities.character_builder === 'professional'
 ))
@@ -921,11 +911,6 @@ async function create() {
                 <summary class="create-setup-summary"><span>{{ t('rule') }}</span><strong>{{ ruleNameOf(activeRuleSummary || { rule_id: activeRule }) }}</strong><span class="create-setup-adjust">{{ gameDefault('调整', 'Adjust', 'Anpassen', '変更', 'Изменить') }} <span aria-hidden="true">⌄</span></span></summary>
                 <div class="create-rule-settings-body">
                 <label><span>{{ t('rule') }}</span><select v-model="rule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ ruleNameOf(r) }}</option></select></label>
-                <label v-if="galRuleAvailable" class="wide create-check create-gal-preview">
-                  <input type="checkbox" v-model="galPreview">
-                  <span>{{ gameDefault('GAL 预览（实验性）', 'GAL preview (experimental)', 'GAL-Vorschau (experimentell)') }}</span>
-                  <small>{{ gameDefault('单机视觉小说式对话：无骰子无属性，使用现有聊天界面游玩。实验功能，尚无好感度、路线与结局。', 'Solo visual-novel style play: no dice or stats, played in the existing chat UI. Experimental; no affection, routes or endings yet.', 'Solo-Visual-Novel-Dialog: ohne Würfel und Werte, in der bestehenden Chat-Oberfläche. Experimentell; noch ohne Zuneigung, Routen oder Enden.') }}</small>
-                </label>
                 <details v-if="recommendedRulesList.length" open class="create-recommended-rules">
                   <summary>{{ t('recommendedRules') }}</summary>
                   <div class="rec-grid">
