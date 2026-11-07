@@ -9,7 +9,30 @@ from typing import Any
 from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
+from .attunement import AttunementError as _AttunementError
+from .attunement import attunement_capacity as _attunement_capacity
+from .attunement import canonical_item_ref as _canonical_item_ref
+from .attunement import requires_attunement as _requires_attunement
 from .primitives import ABILITY_IDS, ability_modifier, proficiency_bonus, ref_id as _ref_id
+
+
+def _item_key(ref: Any) -> str:
+    """Canonical item id, tolerating the legacy bare-id form."""
+
+    try:
+        return _canonical_item_ref(ref).removeprefix("item:")
+    except _AttunementError:
+        return _ref_id(str(ref or ""), "item")
+
+
+def _bound_refs(refs: Collection[str]) -> set[str]:
+    return {_item_key(ref) for ref in refs}
+
+
+# 普通盾牌的基础护甲等级加值（SRD 5.2.1: Shield, +2 AC）。只在内容用单字段
+# ``ac_bonus`` 且声明了需同调、未同调时，用来兜底「这件盾牌最多只能当普通盾
+# 用」。有 ``ac_base`` 声明的内容永远走显式基础值，不受这里影响。
+PLAIN_SHIELD_AC_BONUS = 2
 
 
 def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
@@ -26,6 +49,7 @@ def derive_armor_class(
     armor_category_refs: Collection[str],
     warnings: list[str] | None = None,
     unarmored_ability_bonuses: Iterable[str] = (),
+    attuned_refs: Collection[str] = (),
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -40,6 +64,10 @@ def derive_armor_class(
     shield bonus is ever applied, and an item the bundle does not define is
     skipped with a warning instead of guessing at a lookalike.
 
+    Attunement gates the magic component only: an attunable item keeps its
+    ordinary contribution while unbound, so a legacy single-field shield
+    declaration cannot smuggle its magic bonus past the gate.
+
     ``unarmored_ability_bonuses`` names the abilities that a feature may add to
     an *unarmored* base AC.  "While you aren't wearing armor" is a hard
     precondition: with any armor present the plain ``10 + Dexterity`` baseline
@@ -52,6 +80,7 @@ def derive_armor_class(
     unarmored = 10 + dex_modifier
     best_armor: int | None = None
     shield_bonus = 0
+    bound = _bound_refs(attuned_refs)
     for raw_ref in equipped_item_refs:
         ref = str(raw_ref or "")
         item = bundle.get("item", _ref_id(ref, "item"))
@@ -59,6 +88,11 @@ def derive_armor_class(
             if warnings is not None:
                 warnings.append(f"unknown item reference ignored by armor class: {ref}")
             continue
+        magic_bonus = int(item.get("ac_bonus", 0) or 0)
+        pending_attunement = _requires_attunement(item) and _item_key(ref) not in bound
+        if pending_attunement:
+            # 未同调的魔法物品只是普通同类物品：保留基础属性，不给魔法加值。
+            magic_bonus = 0
         item_type = item.get("item_type")
         if item_type == "armor":
             dex_bonus = 0
@@ -67,7 +101,7 @@ def derive_armor_class(
                 dex_cap = item.get("dex_cap")
                 if dex_cap is not None:
                     dex_bonus = min(dex_bonus, int(dex_cap))
-            candidate = int(item.get("ac_base", 10)) + dex_bonus
+            candidate = int(item.get("ac_base", 10)) + dex_bonus + magic_bonus
             if best_armor is None:
                 best_armor = candidate
             else:
@@ -79,7 +113,17 @@ def derive_armor_class(
             # 盾牌必须先受训，否则它不给护甲等级加值（Armor Training 条款）。
             if "armor_category:shield" not in armor_category_refs:
                 continue
-            bonus = int(item.get("ac_bonus", 0) or 0)
+            # 未同调只去掉魔法加值，基础盾牌加值仍然有效。内容可以用
+            # ``ac_base`` 明确声明基础值、``ac_bonus`` 声明魔法加值；没有
+            # ``ac_base`` 的旧条目把 ``ac_bonus`` 当作完整的基础盾牌加值。
+            if "ac_base" in item:
+                bonus = int(item.get("ac_base", 0) or 0) + magic_bonus
+            elif pending_attunement:
+                # 单字段声明 + 需同调 = 这个 ``ac_bonus`` 里含魔法加值。
+                # 未同调时整份拿走等于让同调限制对盾牌失效，只能按普通盾牌算。
+                bonus = min(int(item.get("ac_bonus", 0) or 0), PLAIN_SHIELD_AC_BONUS)
+            else:
+                bonus = int(item.get("ac_bonus", 0) or 0)
             if shield_bonus:
                 # 同理：两面盾不能 +2 +2。
                 if warnings is not None:
@@ -384,6 +428,8 @@ class CharacterDerivationMixin:
                 "item_grants": item_grants,
                 "coins_gp": sum(int(item.get("coins_gp", 0) or 0) for item in selected_packages),
             },
+            # 新角色从未同调过任何物品；容量是派生值（基础 3 + 特性加槽）。
+            "attunement": {"refs": []},
             "features": {
                 "feat_refs": feat_refs,
                 "feat_choice_answers": feat_choice_answers,
@@ -398,6 +444,8 @@ class CharacterDerivationMixin:
                 "armor_training": armor_training,
                 "passive_perception": passive_perception,
                 "saving_throws": saving_throws,
+                "attunement_slots": _attunement_capacity(feature_proxy, features),
+                "attuned_refs": [],
             },
             "sources": {
                 "class_ref": draft["class_ref"],

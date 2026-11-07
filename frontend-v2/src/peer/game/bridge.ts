@@ -104,12 +104,15 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
   'ruleset.actions': [],
   'ruleset.intent': [
     'intent_id', 'type', 'expected_version', 'actor_id', 'target_id', 'target_ids',
-    'weapon_ref', 'attack_id', 'spell_ref', 'slot_level', 'damage_type', 'distance',
-    'resist_type', 'teleport_distance',
+    'weapon_ref', 'attack_id', 'spell_ref', 'item_ref', 'slot_level', 'damage_type',
+    'two_handed',
+    'distance', 'resist_type', 'teleport_distance',
     'decision_id', 'option', 'response', 'comment', 'choice_id', 'enabled', 'text',
     'agreement', 'kind', 'visibility', 'entity_id', 'title', 'summary',
     'proposal_id', 'mode', 'adventure_id',
     'encounter_preset_id', 'encounter_instance_id', 'enemies',
+    // 探索宝物表只传 canonical table_ref；掷骰、区间和结果仍由服务端结算。
+    'table_ref',
     // 职业特性提供的战斗能力只提交 capability id 与目标；成本与结算仍由
     // 服务端 capability 声明决定，P2P 与 Web 走同一条权威链。
     'capability_id',
@@ -129,6 +132,8 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
   'character.profile': ['character_name', 'portrait', 'profile'],
   'character.rest': [
     'rest', 'hit_dice', 'confirm_elapsed_time', 'expected_revision', 'operation_id',
+    // 同调选择属于角色自己的短休/长休声明；容量与引用合法性仍由服务端校验。
+    'attunement',
   ],
   'character.advancement.preview': ['choices'],
   'character.advancement.apply': ['choices', 'expected_revision', 'operation_id'],

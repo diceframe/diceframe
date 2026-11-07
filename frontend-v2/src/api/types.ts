@@ -1187,6 +1187,7 @@ export interface RulesetCombatWeapon extends JsonObject {
   weapon_ref?: string
   attack_id?: string
   damage: string
+  damage_two_handed?: string
   damage_type?: string
   range?: number
   thrown_range?: number
@@ -1235,6 +1236,10 @@ export interface RulesetCombatAction extends JsonObject {
   expected_version: number
   weapons?: RulesetCombatWeapon[]
   spells?: RulesetCombatSpell[]
+  /** Server-projected items this actor may legally activate right now. */
+  items?: RulesetActivatableItem[]
+  /** GM-only random treasure tables; the server rolls, the client only picks a ref. */
+  tables?: RulesetTreasureTable[]
   targets?: RulesetCombatTarget[]
   decisions?: RulesetPendingDecision[]
   movement_remaining?: number
@@ -1248,6 +1253,26 @@ export interface RulesetCombatAction extends JsonObject {
   requires_target?: boolean
   /** Declared only for actions whose roll can still spend a Lucky point. */
   lucky_advantage_available?: boolean
+}
+
+export interface RulesetActivatableItem {
+  item_ref: string
+  name: string
+  cost: string
+  target: string
+}
+
+export interface RulesetTreasureTable {
+  table_ref: string
+  name: string
+}
+
+/** Server-projected treasure roll result; refs stay canonical identities. */
+export interface RulesetTreasureResult extends JsonObject {
+  table_ref?: string
+  items?: Array<{ item_ref: string; qty: number; label?: string }>
+  coins_gp?: number
+  coins?: { amount: number; unit: string }
 }
 
 export interface RulesetEncounterPreset extends JsonObject {

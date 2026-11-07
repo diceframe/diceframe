@@ -20,9 +20,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
+from .attunement import attuned_refs, attunement_capacity, owned_ref_counts
+from .attunement import attunement_state_for_projection, pending_attunement_refs
 from .derivation import derive_armor_class, derive_armor_training_state
 from .primitives import ref_id as _ref_id
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.items.charges import initialize_item_state
 
 logger = logging.getLogger("trpg")
 
@@ -291,7 +294,7 @@ class Dnd2024CharacterStateReconciler:
         canonical: dict[str, Any],
         item_refs: Sequence[str],
         warnings: list[str],
-    ) -> tuple[dict[str, Any], int] | None:
+    ) -> dict[str, Any] | None:
         """Derive both armor consequences from one set of canonical facts.
 
         Shared by the live-equipment path and the canonical-only path so the AC
@@ -315,6 +318,7 @@ class Dnd2024CharacterStateReconciler:
             )
             return None
         features = Dnd2024ClassFeatureResolver(self.bundle)
+        bound = sorted(attuned_refs(canonical))
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
         )
@@ -322,8 +326,17 @@ class Dnd2024CharacterStateReconciler:
             abilities, item_refs, self.bundle,
             armor_category_refs=armor_category_refs, warnings=warnings,
             unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
+            attuned_refs=bound,
         )
-        return armor_training, armor_class
+        return {
+            "armor_training": armor_training,
+            "armor_class": armor_class,
+            "attunement_slots": attunement_capacity(canonical, features),
+            "attuned_refs": bound,
+            "attunement_pending": pending_attunement_refs(
+                item_refs, self.bundle, bound,
+            ),
+        }
 
     def reconcile(
         self, sheet: dict[str, Any], changed_domains: frozenset[str] = frozenset(),
@@ -358,32 +371,68 @@ class Dnd2024CharacterStateReconciler:
             for warning in warnings:
                 logger.warning("D&D2024 装备投影告警: %s", warning)
             return None
-        armor_training, armor_class = rules
+        armor_training = rules["armor_training"]
+        armor_class = rules["armor_class"]
+        attuned = rules["attuned_refs"]
+        slots = rules["attunement_slots"]
+        pending = rules["attunement_pending"]
+        # 旧档没有同调段：按空集处理，并在一次投影内补写规范化结构。
+        migrated = "attunement" not in canonical
+        if migrated:
+            warnings.append(
+                "canonical attunement state is missing; initialised empty"
+            )
         features = Dnd2024ClassFeatureResolver(self.bundle)
 
         canonical_equipment = canonical.setdefault("equipment", {})
         derived = canonical.setdefault("derived", {})
+        previous_item_state = deepcopy(canonical_equipment.get("item_state"))
+        # 零数量只是历史行，不属于持有；只有聚合数量大于 0 的才参与初始化。
+        held_refs = {
+            ref for ref, count in owned_ref_counts(sheet).items() if count > 0
+        }
+        initialize_item_state(canonical, self.bundle, held_refs)
         previous_refs = list(canonical_equipment.get("item_refs") or [])
         previous_ac = derived.get("armor_class")
         previous_training = derived.get("armor_training")
+        previous_attuned = list(derived.get("attuned_refs") or [])
+        previous_slots = derived.get("attunement_slots")
+        previous_pending = list(derived.get("attunement_pending") or [])
         mirror_ac = sheet.get("armor_class")
+        mirror_attunement = sheet.get("attunement")
+        projected_attunement = {
+            **attunement_state_for_projection(canonical, slots),
+            "pending": pending,
+        }
 
         for warning in warnings:
             logger.warning("D&D2024 装备投影告警: %s", warning)
 
         if (
-            previous_refs == item_refs
+            not migrated
+            and canonical.get("attunement") == {"refs": attuned}
+            and previous_refs == item_refs
             and previous_ac == armor_class
             and mirror_ac == armor_class
             and previous_training == armor_training
+            and previous_attuned == attuned
+            and previous_slots == slots
+            and previous_pending == pending
+            and mirror_attunement == projected_attunement
+            and canonical_equipment.get("item_state") == previous_item_state
         ):
             return None
 
         canonical_equipment["item_refs"] = item_refs
+        canonical["attunement"] = {"refs": attuned}
         derived["armor_class"] = armor_class
         # 受训状态可以独立于 AC 变化（皮甲换链甲衫 AC 相同但门控不同），
         # 因此幂等短路必须比较训练段。
         derived["armor_training"] = armor_training
+        derived["attuned_refs"] = attuned
+        derived["attunement_slots"] = slots
+        derived["attunement_pending"] = pending
+        sheet["attunement"] = projected_attunement
         # 装备是职业特性生效前提的一部分（武艺要求未穿甲、未持盾、只持 Monk
         # Weapon）。canonical 装备刚变过，用户可见的职业特性/资源投影必须跟着
         # 变，否则界面会继续展示已经不再生效的武艺骰。
@@ -433,24 +482,48 @@ class Dnd2024CharacterStateReconciler:
         """
 
         item_refs = list((canonical.get("equipment") or {}).get("item_refs") or [])
+        equipment = canonical.setdefault("equipment", {})
+        previous_item_state = deepcopy(equipment.get("item_state"))
+        initialize_item_state(canonical, self.bundle, item_refs)
         warnings: list[str] = []
         rules = self._armor_rules(canonical, item_refs, warnings)
         for warning in warnings:
             logger.warning("D&D2024 装备投影告警: %s", warning)
         if rules is None:
             return None
-        armor_training, armor_class = rules
+        armor_training = rules["armor_training"]
+        armor_class = rules["armor_class"]
+        attuned = rules["attuned_refs"]
+        slots = rules["attunement_slots"]
+        pending = rules["attunement_pending"]
+        migrated = "attunement" not in canonical
+        if migrated:
+            warnings.append(
+                "canonical attunement state is missing; initialised empty"
+            )
         derived = canonical.setdefault("derived", {})
         if (
-            derived.get("armor_class") == armor_class
+            not migrated
+            and canonical.get("attunement") == {"refs": attuned}
+            and derived.get("armor_class") == armor_class
             and derived.get("armor_training") == armor_training
+            and derived.get("attuned_refs") == attuned
+            and derived.get("attunement_slots") == slots
+            and derived.get("attunement_pending") == pending
+            and equipment.get("item_state") == previous_item_state
         ):
             return None
+        canonical["attunement"] = {"refs": attuned}
         derived["armor_class"] = armor_class
         derived["armor_training"] = armor_training
+        derived["attuned_refs"] = attuned
+        derived["attunement_slots"] = slots
+        derived["attunement_pending"] = pending
         return {
             "item_refs": item_refs,
             "armor_class": armor_class,
             "armor_training": armor_training,
+            "attunement_slots": slots,
+            "attunement_pending": pending,
             "warnings": warnings,
         }

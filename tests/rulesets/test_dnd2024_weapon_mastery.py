@@ -45,6 +45,31 @@ MASTERY_BY_WEAPON = {
     "shortsword": "vex",
     "sickle": "nick",
     "spear": "sap",
+    # D1：SRD 5.2.1 武器表补齐后新增的 23 件。表保持"每把武器必须声明
+    # 一个精通属性"的既有语义，只是覆盖范围扩到完整武器表。
+    "battleaxe": "topple",
+    "blowgun": "vex",
+    "club": "slow",
+    "crossbow_hand": "vex",
+    "crossbow_heavy": "push",
+    "crossbow_light": "slow",
+    "dart": "vex",
+    "glaive": "graze",
+    "greatclub": "push",
+    "halberd": "cleave",
+    "lance": "topple",
+    "light_hammer": "nick",
+    "maul": "topple",
+    "morningstar": "sap",
+    "musket": "slow",
+    "pike": "push",
+    "pistol": "vex",
+    "rapier": "vex",
+    "sling": "slow",
+    "trident": "topple",
+    "war_pick": "sap",
+    "warhammer": "push",
+    "whip": "slow",
 }
 
 _WEAPON_CLASSES = (
@@ -379,6 +404,40 @@ def test_vex_grants_advantage_against_the_target_and_is_consumed() -> None:
     assert "next_attack_advantage" not in _canonical_conditions(
         instance, "enemy:goblin-1",
     )
+
+
+def test_spear_applies_sap_instead_of_the_unimplemented_topple() -> None:
+    """B1：长矛精通是 Sap；若仍写成 Topple，这里不会有 Sap 效果。"""
+
+    _runtime, engine, instance = _instance(equipment=["item:spear"])
+
+    events = _attack(engine, instance, weapon="item:spear", rolls=[15, 4])
+
+    assert _check(events)["success"] is True
+    assert _damage_to(events, "enemy:goblin-1")["amount"] > 0
+    applied = _applied(events, "next_attack_disadvantage")
+    assert applied["target_id"] == "enemy:goblin-1"
+    assert applied["duration"] == "after_next_attack"
+    assert [
+        event["condition"] for event in events
+        if event["type"] == "condition.applied"
+    ] == ["next_attack_disadvantage"]
+
+
+def test_available_attack_projection_uses_the_corrected_heavy_crossbow_damage() -> None:
+    """B1：可用攻击投影直接来自 canonical 武器档案，不能残留 1d12。"""
+
+    _runtime, engine, instance = _instance(equipment=["item:crossbow_heavy"])
+
+    actions = engine.available_intents(instance, instance.gm_uid)
+    attack = next(action for action in actions if action["type"] == "attack")
+    profile = next(
+        weapon for weapon in attack["weapons"]
+        if weapon["weapon_ref"] == "item:crossbow_heavy"
+    )
+    assert profile["damage"] == "1d10"
+    assert profile["damage_type"] == "piercing"
+    assert profile["mastery"] == "push"
 
 
 def test_vex_does_not_apply_when_the_hit_deals_no_damage() -> None:

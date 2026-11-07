@@ -61,12 +61,39 @@ def resolve(
             "code": "RULESET_REST_UNAVAILABLE",
             "error": "该规则尚未提供专业休息结算",
         }
-    result = method(rule, character, rest, hit_die_rolls)
+    result = method(
+        rule, character, rest, hit_die_rolls,
+        **_rest_options(runtime, parsed),
+    )
     return {"ok": True, "rule_id": rule.rule_id, **result}
 
 
 def _failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return {"ok": False, "code": code, "error": message, **extra}
+
+
+def _rest_option_names(runtime: Any) -> frozenset[str]:
+    """The ruleset-owned rest option contract; absent means "no extras"."""
+
+    declared = getattr(runtime, "rest_option_names", ())
+    if not isinstance(declared, (frozenset, set, tuple, list)):
+        return frozenset()
+    return frozenset(str(name) for name in declared)
+
+
+def _rest_options(runtime: Any, parsed: dict[str, Any]) -> dict[str, Any]:
+    """Forward only options the runtime explicitly declares.
+
+    D&D's ``attunement`` is not a generic rest field: a ruleset that does not
+    declare it never receives the kwarg, so the generic service stays free of
+    ruleset-specific parameters.
+    """
+
+    return {
+        name: parsed[name]
+        for name in _rest_option_names(runtime)
+        if name in parsed
+    }
 
 
 async def submit_live(
@@ -262,7 +289,10 @@ async def _resolve_live_authority(
         hit_die_rolls = _server_hit_die_rolls(
             character, parsed.get("hit_dice") if rest == "short" else None,
         )
-        result = method(rule, character, rest, hit_die_rolls)
+        result = method(
+            rule, character, rest, hit_die_rolls,
+            **_rest_options(runtime, parsed),
+        )
     except (TypeError, ValueError) as exc:
         return _failure("INVALID_REST", str(exc))
     updated = deepcopy(character)
@@ -343,6 +373,14 @@ async def _resolve_live_party_authority(
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
+    # 只有 runtime 显式声明的 option 才会进入队伍进度和结算请求。
+    rest_options = deepcopy(_rest_options(runtime, parsed))
+    options_validator = getattr(runtime, "validate_rest_options", None)
+    if callable(options_validator):
+        try:
+            options_validator(instance, user_id, rest, rest_options)
+        except ValueError as exc:
+            return _failure("REST_NOT_AVAILABLE", str(exc))
     if module_hooks.combat_view(instance)["combat_active"] or module_hooks.combat_view(instance)["combat_state"] == "active":
         return _failure("REST_NOT_AVAILABLE", "战斗进行中不能休息；请先结束战斗")
 
@@ -411,6 +449,7 @@ async def _resolve_live_party_authority(
             "operation_id": operation_id,
             "expected_revision": expected_revision,
             "hit_dice": hit_dice,
+            **rest_options,
             "submitted_at": datetime.now(timezone.utc).isoformat(),
         }
         if not required.issubset(participants):
@@ -431,6 +470,7 @@ async def _resolve_live_party_authority(
             result = await resolve_live(dependencies, game_key, uid, {
                 "rest": rest,
                 "hit_dice": item.get("hit_dice", {}),
+                **_rest_options(runtime, item),
                 "confirm_elapsed_time": True,
                 "expected_revision": item.get("expected_revision"),
                 "operation_id": item.get("operation_id"),

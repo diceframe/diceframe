@@ -180,11 +180,15 @@ def validate_item_record(record: Any) -> dict[str, Any]:
 
     v1 只承载身份 / 类别 / 描述；装备与数量的 mechanics 归 character/economy
     侧（母方案 §189：不能同一 item 数量两边 authoritative）。
+
+    ``ruleset_item_ref`` 是本切片唯一新增的字段：它把 content-pack 物品**映射**
+    到规则集物品身份，本身不携带任何机械。存在性不在这里校验（contracts 层
+    没有 bundle 上下文），由消费侧 fail closed。
     """
 
     if not isinstance(record, dict):
         raise CatalogContractError("item record must be an object")
-    allowed = {"item_id", "name", "source_ref", "category", "description"}
+    allowed = {"item_id", "name", "source_ref", "category", "description", "ruleset_item_ref"}
     extra = sorted(set(record) - allowed)
     if extra:
         raise CatalogContractError(f"item record has unknown field: {extra[0]!r}")
@@ -194,13 +198,29 @@ def validate_item_record(record: Any) -> dict[str, Any]:
     category = record.get("category")
     if category not in ITEM_CATEGORIES:
         raise CatalogContractError(f"item category is invalid: {category!r}")
-    return {
+    ruleset_item_ref = record.get("ruleset_item_ref")
+    if ruleset_item_ref is not None:
+        ruleset_item_ref = _required_text(
+            ruleset_item_ref, "ruleset_item_ref", maximum=70,
+        )
+        match = re.fullmatch(r"item:([a-z0-9][a-z0-9_.-]{0,63})", ruleset_item_ref)
+        if match is None:
+            raise CatalogContractError(
+                f"ruleset_item_ref is invalid: {ruleset_item_ref!r}"
+            )
+    else:
+        ruleset_item_ref = ""
+    validated = {
         "item_id": item_id,
         "name": _required_text(record.get("name"), "item name"),
         "source_ref": _optional_source_ref(record.get("source_ref"), "item source_ref"),
         "category": category,
         "description": str(record.get("description") or ""),
     }
+    if ruleset_item_ref:
+        # 未声明时不落键：既有记录形状不变，旧内容与旧断言零影响。
+        validated["ruleset_item_ref"] = ruleset_item_ref
+    return validated
 
 
 def validate_encounter_profile(record: Any) -> dict[str, Any]:

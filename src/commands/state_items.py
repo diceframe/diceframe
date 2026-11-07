@@ -105,29 +105,73 @@ def append_inventory_item(
     quality: str = "common",
     category: str = "",
     qty: int = 1,
+    item_ref: str = "",
 ) -> None:
     qty = max(1, int(qty or 1))
+    item_ref = str(item_ref or "")
     inventory = character_sheet.setdefault("inventory", [])
     # 同名同类的行优先精确匹配（name+effect+category），其次放宽 effect：
     # 角色卡初始行常带 effect 文案而 loot/购买授予不带，recap 的公开视图
     # （item_counts）本来就按名字聚合，入库不应因 effect 差异拆出碎片行。
-    for item in inventory:
+    #
+    # 身份（item_ref）参与合并键：同名但规则身份不同的两件物品不能合并，
+    # 带身份的新奖励也不能被同名的旧无身份行吸收 —— 否则规则效果会串到
+    # 另一件物品上。数量仍由本层（character/economy authority）维护。
+    exact_matches = [
+        item for item in inventory
+        if item.get("name") == item_name and item.get("category", "") == category
+    ]
+    if item_ref:
+        for item in exact_matches:
+            if (
+                str(item.get("item_ref") or "") == item_ref
+                and item.get("effect", "") == effect
+            ):
+                item["qty"] = int(item.get("qty", 1)) + qty
+                return
+    elif len(exact_matches) == 1 and exact_matches[0].get("effect", "") == effect:
+        exact_matches[0]["qty"] = int(exact_matches[0].get("qty", 1)) + qty
+        return
+    candidates = [
+        item for item in inventory
         if (
             item.get("name") == item_name
-            and item.get("effect", "") == effect
             and item.get("category", "") == category
-        ):
-            item["qty"] = int(item.get("qty", 1)) + qty
-            return
-    for item in inventory:
-        if item.get("name") == item_name and item.get("category", "") == category:
-            if not item.get("effect") and effect:
-                item["effect"] = effect
-            item["qty"] = int(item.get("qty", 1)) + qty
-            return
+            and (
+                not item_ref
+                or not str(item.get("item_ref") or "")
+                or str(item.get("item_ref") or "") == item_ref
+            )
+        )
+    ]
+    # A one-sided ref is not a conflict: loot/purchase grants may omit
+    # identity, and the existing row's canonical ref must win.  Two different
+    # refs never merge, and multiple candidate identities stay ambiguous.
+    target = None
+    if item_ref:
+        exact = [
+            item for item in candidates
+            if str(item.get("item_ref") or "") == item_ref
+        ]
+        if exact:
+            target = exact[0]
+        else:
+            anonymous = [item for item in candidates if not item.get("item_ref")]
+            target = anonymous[0] if len(anonymous) == 1 else None
+    elif len(candidates) == 1:
+        target = candidates[0]
+    if target is not None:
+        if not target.get("effect") and effect:
+            target["effect"] = effect
+        if item_ref and not target.get("item_ref"):
+            target["item_ref"] = item_ref
+        target["qty"] = int(target.get("qty", 1)) + qty
+        return
     new_item = {"name": item_name, "qty": qty, "effect": effect, "quality": quality}
     if category:
         new_item["category"] = category
+    if item_ref:
+        new_item["item_ref"] = item_ref
     inventory.append(new_item)
 
 
@@ -137,6 +181,7 @@ def add_owned_equipment_to_inventory(
     *,
     quality: str = "common",
     qty: int = 1,
+    item_ref: str = "",
 ) -> None:
     """Record an equipment item as owned but not currently equipped.
 
@@ -151,6 +196,7 @@ def add_owned_equipment_to_inventory(
         quality=quality,
         category="equipment",
         qty=qty,
+        item_ref=item_ref,
     )
 
 
@@ -179,17 +225,21 @@ def grant_classified_item(
     item_name: str,
     category: str = "",
     qty: int = 1,
+    item_ref: str = "",
 ) -> None:
     """Grant one already-classified item to a character sheet."""
     item_name = str(item_name or "").strip()
     if not item_name:
         return
+    item_ref = str(item_ref or "")
     if category == "equipment":
         # Obtaining equipment is not the same action as equipping it.  Keep
         # the item owned in the backpack; only an explicit WEAPON/equip action
         # may move it into an active slot.  This prevents a new loot/purchase
         # from silently replacing the weapon currently in hand.
-        add_owned_equipment_to_inventory(character_sheet, item_name, qty=qty)
+        add_owned_equipment_to_inventory(
+            character_sheet, item_name, qty=qty, item_ref=item_ref,
+        )
     elif category in ("key_item", "quest", "clue", "credential", "artifact"):
         append_key_item(character_sheet, item_name, category=category)
     elif category == "cyberware":
@@ -197,9 +247,13 @@ def grant_classified_item(
         if not any(item.get("name") == item_name for item in cyberware):
             cyberware.append({"name": item_name, "effect": ""})
     elif category == "pills":
-        append_inventory_item(character_sheet, item_name, category="丹药", qty=qty)
+        append_inventory_item(
+            character_sheet, item_name, category="丹药", qty=qty, item_ref=item_ref,
+        )
     else:
-        append_inventory_item(character_sheet, item_name, qty=qty)
+        append_inventory_item(
+            character_sheet, item_name, qty=qty, item_ref=item_ref,
+        )
 
 
 def canonical_equipment_entry(item_name: str, rule=None) -> dict | None:
@@ -274,37 +328,55 @@ def canonical_equipment_entry(item_name: str, rule=None) -> dict | None:
 
 
 def _find_inventory_row(
-    inventory: list, item_name: str,
+    inventory: list, item_name: str, item_ref: str = "",
 ) -> tuple[int | None, dict | None]:
-    """按 canonical item_key 优先、名称其次找一行 qty>0 的库存。"""
+    """按 canonical item_key 优先、名称其次找一行 qty>0 的库存。
+
+    声明了 ``item_ref`` 时只按身份取件：同名但不同身份的两行必须能被区分，
+    否则装备会取到另一件物品。没有身份时保留按名匹配（旧档兼容），但同名
+    多行且身份不同 = 无法唯一定位，一律 fail closed 而不是取第一行。
+    """
 
     from src.engine.constants import canonical_item_key
 
+    wanted_ref = str(item_ref or "")
+    if wanted_ref:
+        for index, row in enumerate(inventory):
+            if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
+                continue
+            if str(row.get("item_ref") or "") == wanted_ref:
+                return index, row
+        return None, None
+
     wanted_key = canonical_item_key(item_name) or ""
     wanted_name = str(item_name or "").strip().casefold()
-    fallback: tuple[int, dict] | None = None
+    matches: list[tuple[int, dict]] = []
     for index, row in enumerate(inventory):
         if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
             continue
         row_key = str(row.get("item_key") or "")
         if wanted_key and row_key and row_key == wanted_key:
             return index, row
-        if (
-            fallback is None
-            and str(row.get("name") or "").strip().casefold() == wanted_name
-        ):
-            fallback = (index, row)
-    return fallback if fallback is not None else (None, None)
+        if str(row.get("name") or "").strip().casefold() == wanted_name:
+            matches.append((index, row))
+    if len(matches) > 1 and len({str(row.get("item_ref") or "") for _, row in matches}) > 1:
+        logger.warning(
+            "背包存在同名但身份不同的多行，无法唯一定位，拒绝取件: %s", item_name,
+        )
+        return None, None
+    return matches[0] if matches else (None, None)
 
 
-def take_from_inventory(character_sheet: dict, item_name: str) -> dict | None:
+def take_from_inventory(
+    character_sheet: dict, item_name: str, item_ref: str = "",
+) -> dict | None:
     """从背包取走 1 件物品，返回携带完整 metadata 的条目副本。
 
     qty 永远不会变成负数；数量减到 0 时移除该行。找不到返回 None。
     """
 
     inventory = character_sheet.setdefault("inventory", [])
-    index, row = _find_inventory_row(inventory, item_name)
+    index, row = _find_inventory_row(inventory, item_name, item_ref)
     if index is None or row is None:
         return None
     entry = copy.deepcopy(row)
@@ -324,10 +396,12 @@ def return_equipment_to_inventory(character_sheet: dict, entry: dict) -> None:
     inventory = character_sheet.setdefault("inventory", [])
     entry = copy.deepcopy(entry)
     entry["qty"] = 1
+    entry_ref = str(entry.get("item_ref") or "")
     for row in inventory:
         if (
             isinstance(row, dict)
             and str(row.get("name") or "").strip().casefold() == name.casefold()
+            and str(row.get("item_ref") or "") == entry_ref
         ):
             row["qty"] = int(row.get("qty", 0) or 0) + 1
             for key, value in entry.items():
@@ -426,6 +500,7 @@ def equip_owned_item(
     custom_damage: int | None = None,
     legacy_gain: bool = False,
     rule=None,
+    item_ref: str = "",
 ) -> bool:
     """装备一件背包里的物品：inventory -1，目标槽旧装备返回背包。
 
@@ -439,7 +514,7 @@ def equip_owned_item(
     name = str(item_name or "").strip()
     if not name:
         return False
-    entry = take_from_inventory(character_sheet, name)
+    entry = take_from_inventory(character_sheet, name, item_ref)
     if entry is None:
         if not legacy_gain:
             logger.warning("忽略装备未拥有物品: %s", name)

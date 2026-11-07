@@ -219,3 +219,82 @@ def test_binding_helpers_read_matching_binding_without_repair(context):
     assert ruleset_runtime.bound_runtime_id(context.instance) == RUNTIME_ID
     ruleset_runtime.require_binding(context.instance, RUNTIME_ID)
     assert live_state(context.instance) == before
+
+
+# N2: the generic rest service only forwards runtime-declared options.
+class _PlainRestRuntime:
+    """A ruleset whose rest implementation does not know D&D attunement."""
+
+    def complete_rest(self, rule, character, rest, hit_die_rolls):
+        return {"character": {"rest": rest}, "rest": rest, "events": []}
+
+
+class _DeclaringRestRuntime:
+    rest_option_names = frozenset({"attunement"})
+
+    def __init__(self) -> None:
+        self.received = None
+
+    def complete_rest(self, rule, character, rest, hit_die_rolls, *, attunement=None):
+        self.received = attunement
+        return {"character": {"rest": rest}, "rest": rest, "events": []}
+
+
+def _resolve_rest(runtime, body):
+    dependencies = SimpleNamespace(
+        load_rule_by_id=lambda rule_id, language="": SimpleNamespace(
+            rule_id=rule_id, template=RUNTIME_ID,
+        ),
+        ruleset_registry=SimpleNamespace(resolve=lambda template: runtime),
+    )
+    return ruleset_rest.resolve(dependencies, "binding", body)
+
+
+def test_generic_rest_does_not_forward_attunement_to_other_rulesets() -> None:
+    result = _resolve_rest(
+        _PlainRestRuntime(),
+        {
+            "character": {"ruleset_character": {}}, "rest": "short",
+            "hit_die_rolls": {}, "attunement": {"attune": "item:ring"},
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["rest"] == "short"
+
+
+def test_declared_rulesets_still_receive_their_rest_option() -> None:
+    runtime = _DeclaringRestRuntime()
+    result = _resolve_rest(
+        runtime,
+        {
+            "character": {"ruleset_character": {}}, "rest": "short",
+            "hit_die_rolls": {}, "attunement": {"attune": "item:ring"},
+        },
+    )
+
+    assert result["ok"] is True
+    assert runtime.received == {"attune": "item:ring"}
+
+
+@pytest.mark.parametrize("rest", ["short", "long"], ids=["short-rest", "long-rest"])
+@pytest.mark.asyncio
+async def test_party_rest_rejects_bad_attunement_before_joining(context, rest):
+    before = deepcopy(live_state(context.instance))
+
+    result = await ruleset_rest.resolve_live_party(context.rest, "game", "hero", {
+        "rest": rest, "confirm_elapsed_time": True,
+        "expected_revision": 0, "operation_id": "early-attunement",
+        "attunement": {"attune": "item:not_in_content"},
+    })
+
+    assert result["ok"] is False
+    assert result["code"] == "REST_NOT_AVAILABLE"
+    assert live_state(context.instance) == before
+    assert ruleset_runtime.state(context.instance).get("rest_session") is None
+
+
+def test_the_dnd2024_runtime_declares_the_attunement_option() -> None:
+    assert build_default_ruleset_registry().get(RUNTIME_ID).rest_option_names == frozenset(
+        {"attunement"}
+    )
