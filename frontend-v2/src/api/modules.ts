@@ -82,6 +82,10 @@ export type ModuleMarketplaceItem = {
   content_delivery_mode: string
   adventure_count: number
   ruleset_targets: string[]
+  /** 清单里到底有没有声明 require.rulesets；false = 规则未标注（不是不兼容）。 */
+  ruleset_declared?: boolean
+  /** 包自己声明与规则无关（system_agnostic: true）。 */
+  system_agnostic?: boolean
   languages: string[]
   tags: string[]
   trust_level: string

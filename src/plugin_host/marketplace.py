@@ -203,6 +203,22 @@ class PluginMarketplace:
         return {"ok": False, "error": f"插件市场中找不到：{plugin_id}"}
 
 
+def _declared_rulesets(manifest: dict[str, Any]) -> list[str]:
+    """Ruleset runtime ids a manifest explicitly targets (``requires.rulesets``)."""
+
+    requires = manifest.get("requires")
+    if not isinstance(requires, dict):
+        return []
+    rulesets = requires.get("rulesets")
+    if not isinstance(rulesets, list):
+        return []
+    return [
+        str(requirement.get("id") or "")
+        for requirement in rulesets
+        if isinstance(requirement, dict) and requirement.get("id")
+    ]
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -302,14 +318,11 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         # 规则目标 / 冒险数 / 自动化等级 / 语言供模块库过滤与卡片展示。
         "content_profile": str(manifest.get("content_profile") or "content-pack"),
         "content_delivery_mode": str(manifest.get("content_delivery_mode") or "legacy_autoimport"),
-        "ruleset_targets": [
-            str(requirement.get("id") or "")
-            for requirement in (
-                (manifest.get("requires") or {}).get("rulesets") or []
-                if isinstance(manifest.get("requires") or {}, dict) else []
-            )
-            if isinstance(requirement, dict) and requirement.get("id")
-        ],
+        "ruleset_targets": _declared_rulesets(manifest),
+        # 「没声明」和「声明了别的」是两件事：前者是通用/未标注，后者才是不兼容。
+        # 目录筛选需要这个区分，否则未声明的包会被当成不匹配而被静默丢掉。
+        "ruleset_declared": bool(_declared_rulesets(manifest)),
+        "system_agnostic": manifest.get("system_agnostic") is True,
         "adventure_count": (
             len(manifest.get("adventure_packages") or [])
             if isinstance(manifest.get("adventure_packages"), list) else 0
