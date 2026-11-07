@@ -1080,6 +1080,64 @@ def test_export_content_pack_includes_selected_adventure_and_lorebook(tmp_path):
         assert book["entries"][0]["id"] == "entry-1"
 
 
+def test_exported_lorebook_with_canonical_id_installs_back(tmp_path):
+    """本机 canonical book id（带冒号）不能原样进包：V2 校验器会拒收整个包。
+
+    回归：导出独立资料册时 id 必须重写成合法 canonical id（与文件名一致），
+    否则作者导出的 .dfplugin 在安装时直接报「Content V2 插件资源 ID 非法」。
+    """
+    from types import SimpleNamespace
+    from src.webui.services.plugins import export_content_pack, install_plugin
+
+    class _Lore:
+        def list_lorebooks(self):
+            return [{"id": "world:greymoor", "name": "灰沼边境", "source_kind": "world", "source_id": "greymoor"}]
+        def list_book_entries(self, book_id):
+            return [{"id": "loc_old_shrine", "book_id": book_id, "name": "旧祠", "content": "text"}]
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    deps = plugin_service.PluginExportDependencies(
+        plugin_host=host,
+        lorebook=_Lore(),
+        rules_dir=tmp_path,
+        list_character_cards=lambda: {"cards": []},
+        media=plugin_service.PluginExportMediaDependencies(
+            package_scene_image=lambda *_args: None,
+            package_content_map=lambda *_args, **_kwargs: None,
+            avatar_file=lambda _asset: None,
+            generated_image_file=lambda _asset: None,
+            plugin_asset_path=lambda *_args: tmp_path / "missing",
+        ),
+    )
+    result = export_content_pack(
+        deps, "greymoor-pack", "Greymoor pack", "1.0.0", "desc",
+        lorebook_ids=["world:greymoor"],
+    )
+    assert result["ok"] is True
+    with zipfile.ZipFile(io.BytesIO(result["payload"])) as archive:
+        names = set(archive.namelist())
+        assert "greymoor-pack/content/lorebooks/world_greymoor.json" in names
+        book = json.loads(archive.read("greymoor-pack/content/lorebooks/world_greymoor.json"))
+        assert book["id"] == "world_greymoor"
+        assert book["entries"][0]["id"] == "loc_old_shrine"
+
+    # 安装回环：当前 V2 校验器必须接受这个包。
+    installed_dir = tmp_path / "install-plugins"
+    lifecycle = SimpleNamespace(plugin_host=PluginHost(installed_dir, tmp_path / "install-data"))
+    installed = asyncio.run(install_plugin(lifecycle, result["payload"]))
+    assert installed.get("ok") is True, installed
+    fresh = PluginHost(installed_dir, tmp_path / "install-data")
+    fresh.discover()
+    # 新装内容包默认未启用；启用后（无 entrypoint 即 active）贡献才会注册。
+    asyncio.run(fresh.start("greymoor-pack", require_enabled=False))
+    resources = fresh.list_content_resources("lorebook").get("lorebook", [])
+    assert any(
+        str(resource.get("plugin_id") or "") == "greymoor-pack"
+        and str(resource.get("id") or "") == "world_greymoor"
+        for resource in resources
+    )
+
+
 def test_export_content_pack_requires_and_honors_adventure_source_refs(tmp_path):
     """Same adventure IDs from different sources must never be silently mixed."""
     from types import SimpleNamespace
