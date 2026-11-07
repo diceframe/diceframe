@@ -11,7 +11,8 @@
 3. canonical ID 与显示名分离；Locale 只翻译展示字段，不改 identity 和 mechanics。
 4. 规则货币结构用 `currency_system`（`schema_version: 2`）声明：`base_unit` 是 canonical 整数的计数单位（rate 必须为 1），`display_unit` 是默认展示单位，units 的 rate 为正整数。加载/安装时经 `RuleBundleLoader` → `validate_currency_system` 校验，非法声明直接失败；只有 `currency` 名称的旧规则按 legacy rate=1 兼容，不按名称猜单位。示例见 `plugins/examples/starter-content-v2/content/rules/moonlight.json`。
 5. 参考 `plugins/examples/starter-content-v2/`，并为内容校验、locale fallback 和重复 ID 行为添加测试。
-6. 打包前运行：
+6. 仓库格式（flat）导出会自动附带 `LICENSE` 与 manifest 的 `license` 字段（默认 CC BY-NC 4.0）：索引的自动检查要求仓库根目录存在许可证，作者替换该文件即可换成别的许可。
+7. 打包前运行：
 
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json
