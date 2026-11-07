@@ -359,9 +359,20 @@ def creation_bounds_violation(rule: Any, character_sheet: dict[str, Any]) -> dic
     单技能上限、装备品质都必须在这里按同一套规则再校验一次，否则绕过前端直接调
     API 就能把超预算角色带进局内。只对显式声明 ``character_creation.clamp_to_rule_bounds``
     的规则生效，避免把 CoC 的限制推广到 D&D / Freeform。
+
+    中性/旧式部分角色卡（属性缺失或只有个别属性）不在此校验：``validate_character``
+    把缺失属性当 0，会把中性冒险入场、旧卡迁移这类合法形态误判为非法——它们继续
+    走既有的 clamp/normalize 兜底（与修复前行为一致）。只要角色卡带齐了规则声明的
+    全部属性，就视为正式建卡结果，执行全量校验。
     """
 
     if rule is None:
+        return None
+    # 只有「带齐规则声明的全部属性」的卡才视为正式建卡结果；属性缺失/为空/部分
+    # （中性冒险入场、旧卡迁移）一律走既有 clamp/normalize 兜底，不在此校验。
+    attributes = character_sheet.get("attributes")
+    declared_keys = [str(spec.get("key") or "") for spec in rule.attributes if spec.get("key")]
+    if not isinstance(attributes, dict) or any(key not in attributes for key in declared_keys):
         return None
     violations = rule.validate_character(character_sheet)
     if not violations:

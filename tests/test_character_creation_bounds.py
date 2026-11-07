@@ -65,3 +65,32 @@ def test_nonsense_values_do_not_crash_the_boundary(skill_value: int) -> None:
     result = creation_bounds_violation(rule, sheet([{"name": "侦查", "value": skill_value}]))
     # 值本身是否合法由规则决定；这里只要求不抛异常、返回结构化结果
     assert result is None or result["error_code"] == "CHARACTER_SHEET_INVALID"
+
+
+def test_neutral_partial_attribute_sheets_keep_the_legacy_path() -> None:
+    """中性冒险/旧卡入场可以只带部分属性（服务端 clamp 兜底）。
+
+    validate_character 把缺失属性当 0，若不豁免会把合法形态误判为非法
+    （CI 上 freeform_coc 中性冒险入场曾因此被拒：体质 0 不在 [15,90]）。
+    """
+    rule = coc_rule()
+    declared = {str(spec.get("key") or "") for spec in rule.attributes if spec.get("key")}
+    assert len(declared) > 1
+    partial = {"str": 10} if "str" in declared else {next(iter(declared)): 10}
+    assert creation_bounds_violation(rule, {"attributes": partial, "skills": []}) is None
+    assert creation_bounds_violation(rule, {"attributes": {}, "skills": []}) is None
+
+
+def test_complete_attribute_sheet_is_still_validated() -> None:
+    # 带齐全部规则属性 = 正式建卡结果：超预算技能照样拒绝，豁免不放走绕过
+    rule = coc_rule()
+    budget_buster = sheet([
+        {"name": "侦查", "value": rule.max_skill_value},
+        {"name": "图书馆使用", "value": rule.max_skill_value},
+        {"name": "聆听", "value": rule.max_skill_value},
+        {"name": "潜行", "value": rule.max_skill_value},
+        {"name": "闪避", "value": rule.max_skill_value},
+    ])
+    rejection = creation_bounds_violation(rule, budget_buster)
+    assert rejection is not None
+    assert "技能点" in rejection["error"]
