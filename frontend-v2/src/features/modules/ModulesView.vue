@@ -64,6 +64,7 @@ const marketLicense = ref('all')
 const marketTrust = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
+const updateBusy = ref('')
 const marketSource = ref<ModuleMarketplaceResponse['source'] | null>(null)
 const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; message: string } | null>(null)
 const submitGuideOpen = ref(false)
@@ -236,6 +237,42 @@ const recoveryModuleId = computed(() => (
   recoverySourceKind.value === 'plugin' ? recoverySourceId.value : ''
 ))
 
+// 已安装 + 商店有更新版本：与插件页的「有更新」提示同源，数据来自同一份市场索引
+// （update_available 由服务端用 installed_version 与 latest_version 比较得出）。
+// 索引只在**未筛选**的响应上重建：用户搜关键词/切规则时列表会收窄，不能让
+// 「有更新」提示跟着搜索结果消失或闪回。
+const updatableModules = ref(new Map<string, ModuleMarketplaceItem>())
+
+function rebuildUpdatableIndex(items: ModuleMarketplaceItem[]) {
+  const next = new Map<string, ModuleMarketplaceItem>()
+  for (const item of items) {
+    if (item.update_available && item.installed) next.set(item.id, item)
+  }
+  updatableModules.value = next
+}
+
+async function updateModule(module: ModuleSummary) {
+  if (updateBusy.value) return
+  updateBusy.value = module.id
+  error.value = ''
+  try {
+    const result = await moduleApi.update(module.id)
+    if (!result.ok) throw new Error(t('modulesUpdateFailed'))
+    // 更新会重新灌入包内容（用户改过的资料册由服务端按数据所有权保留），
+    // 所以列表、市场索引与恢复判定都要重读一次。
+    const next = new Map(updatableModules.value)
+    next.delete(module.id)
+    updatableModules.value = next
+    await load()
+    await loadMarketplace()
+    await checkRecovery()
+  } catch (cause: unknown) {
+    error.value = errorMessage(cause)
+  } finally {
+    updateBusy.value = ''
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -267,6 +304,9 @@ async function loadMarketplace() {
     }
     market.value = result.modules || []
     marketSource.value = result.source || null
+    if (!marketKeyword.value.trim() && marketRuleset.value === 'all') {
+      rebuildUpdatableIndex(market.value)
+    }
     const seen = new Set(marketRulesetSeen.value)
     for (const item of market.value) {
       for (const target of item.ruleset_targets || []) {
@@ -479,6 +519,12 @@ async function checkRecovery() {
             <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
+            <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
+              <span class="module-update-badge">{{ t('modulesUpdateAvailable') }}</span>
+              <button type="button" class="module-update-action" :disabled="updateBusy === module.id" @click.prevent.stop="updateModule(module)">
+                {{ t('modulesUpdateAction') }}
+              </button>
+            </p>
             <p v-if="module.status === 'disabled'" class="muted">{{ t('modulesDisabledBadge') }}</p>
             <p class="muted">{{ inventorySummary(module) }}</p>
             <p v-if="module.status === 'disabled' && moduleInventory(module) === 'adventures'" class="muted">{{ copy.disabledAdventures }}</p>
@@ -698,6 +744,11 @@ async function checkRecovery() {
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
+.module-update { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0; }
+.module-update-badge { display: inline-flex; align-items: center; padding: .1rem .5rem; border-radius: 999px; background: color-mix(in srgb, var(--df-warning) 16%, transparent); color: var(--df-warning); font-size: .78rem; font-weight: 700; }
+.module-update-action { padding: .1rem .6rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: 999px; background: transparent; color: var(--df-warning); font-size: .78rem; font-weight: 700; cursor: pointer; }
+.module-update-action:hover { background: color-mix(in srgb, var(--df-warning) 12%, transparent); }
+.module-update-action:disabled { opacity: .6; cursor: progress; }
 .module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
 .module-market-actions button { width: 100%; }
 .module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }
