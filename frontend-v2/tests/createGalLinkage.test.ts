@@ -2,7 +2,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CreateView from '../src/features/create/CreateView.vue'
 import { i18n } from '../src/i18n'
-import { clearAllCreateDraftsForTests, setCreateDraftSession } from '../src/features/create/createDraft'
+import {
+  clearAllCreateDraftsForTests,
+  loadCreateDraft,
+  saveCreateDraft,
+  setCreateDraftSession,
+} from '../src/features/create/createDraft'
 
 const mocks = vi.hoisted(() => ({
   route: { query: {} as Record<string, string> },
@@ -140,5 +145,157 @@ describe('CreateView GAL source-switch consistency', () => {
     expect(vm.activeRule).toBe('generated:custom')
     expect(vm.playMode).toBe('free')
     wrapper.unmount()
+  })
+})
+
+describe('CreateView GAL draft-restore convergence (review round 2 P2)', () => {
+  afterEach(() => {
+    clearAllCreateDraftsForTests()
+    setCreateDraftSession(null)
+    mocks.router.push.mockReset()
+    mocks.route.query = {}
+    mocks.apiCalls.length = 0
+  })
+
+  /** 挂载并真实保存一份草稿，返回草稿 source 供手工改写成「旧版错误草稿」。 */
+  async function mountAndCaptureDraftSource() {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const source = JSON.parse(JSON.stringify(vm.draftSource))
+    return { wrapper, vm, source }
+  }
+
+  async function remountWithDraft() {
+    const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    return { wrapper, vm: wrapper.vm as any }
+  }
+
+  it('restores a template-GAL→AI draft with the effective rule: legal free play and POST payload', async () => {
+    // 复现路径：模板选 GAL → 切到 AI 来源（play_mode 已被联动降级 free）→ 保存草稿。
+    // 旧逻辑按 snapshot.rule===GAL 强制 play_mode=gal，但生效规则是 aiRule（非 GAL）。
+    const { wrapper, vm } = await mountAndCaptureDraftSource()
+    await wrapper.get('details.create-rule-settings select').setValue('gal_narrative')
+    await flushPromises()
+    await wrapper.findAll('.create-world-source .create-mode-cards button')[2].trigger('click')
+    vm.aiPrompt = 'AI 世界草稿'
+    await flushPromises()
+    expect(vm.playMode).toBe('free')
+    wrapper.unmount()
+    await flushPromises() // 让 draft watch 完成保存
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    // 修复点：按生效规则校准，而不是隐藏的 snapshot.rule
+    expect(restored.mode).toBe('ai')
+    expect(restored.activeRule).toBe('freeform_srd')
+    expect(restored.playMode).toBe('free')
+    expect(restored.solo).toBe(true)
+
+    // 恢复后直接创建：真实 /games/create body 必须是非 GAL + play_mode=free
+    restored.step = 4
+    restored.characters = [{ character_name: '旅人', identity: {}, attributes: {}, skills: [] }]
+    await restored.create()
+    await flushPromises()
+    const body = postedBody('/games/create')
+    expect(body).not.toBeNull()
+    expect(body?.play_mode).toBe('free')
+    expect(body?.rule_id).toBe('freeform_srd')
+    second.unmount()
+  })
+
+  it('converges an old corrupt draft where aiRule is GAL but play_mode stayed free', async () => {
+    const { wrapper, source } = await mountAndCaptureDraftSource()
+    wrapper.unmount()
+    await flushPromises()
+    const snapshot = loadCreateDraft(source)!
+    snapshot.mode = 'ai'
+    snapshot.rule = 'freeform_srd'
+    snapshot.aiRule = 'gal_narrative'
+    snapshot.aiGeneratedRule = null
+    snapshot.playMode = 'free'
+    snapshot.solo = false
+    saveCreateDraft(source, snapshot)
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    // 反向组合：生效规则是 GAL（aiRule），恢复后必须强制 gal + solo
+    expect(restored.activeRule).toBe('gal_narrative')
+    expect(restored.playMode).toBe('gal')
+    expect(restored.solo).toBe(true)
+    second.unmount()
+  })
+
+  it('demotes an illegal gal play_mode when the draft carries an AI-generated rule', async () => {
+    const { wrapper, source } = await mountAndCaptureDraftSource()
+    wrapper.unmount()
+    await flushPromises()
+    const snapshot = loadCreateDraft(source)!
+    snapshot.mode = 'ai'
+    snapshot.rule = 'freeform_srd'
+    snapshot.aiRule = 'freeform_srd'
+    snapshot.aiGeneratedRule = { rule_id: 'generated:custom', rule_name: '自定义', ruleset_runtime: { id: 'custom', version: 1, capabilities: {} } } as any
+    snapshot.playMode = 'gal'
+    snapshot.solo = true
+    saveCreateDraft(source, snapshot)
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    // AI 自动生成新规则落地后生效规则变化：非法 gal play_mode 降级为 free
+    expect(restored.activeRule).toBe('generated:custom')
+    expect(restored.playMode).toBe('free')
+    second.unmount()
+  })
+
+  it('keeps a legal template GAL draft as gal+solo after restore', async () => {
+    const { wrapper, source } = await mountAndCaptureDraftSource()
+    wrapper.unmount()
+    await flushPromises()
+    const snapshot = loadCreateDraft(source)!
+    snapshot.mode = 'template'
+    snapshot.rule = 'gal_narrative'
+    snapshot.playMode = 'gal'
+    snapshot.solo = true
+    saveCreateDraft(source, snapshot)
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    expect(restored.activeRule).toBe('gal_narrative')
+    expect(restored.playMode).toBe('gal')
+    expect(restored.solo).toBe(true)
+    second.unmount()
+  })
+
+  it('upgrades an old template draft with rule=GAL but play_mode=free to the legal combo', async () => {
+    const { wrapper, source } = await mountAndCaptureDraftSource()
+    wrapper.unmount()
+    await flushPromises()
+    const snapshot = loadCreateDraft(source)!
+    snapshot.mode = 'template'
+    snapshot.rule = 'gal_narrative'
+    snapshot.playMode = 'free'
+    saveCreateDraft(source, snapshot)
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    expect(restored.activeRule).toBe('gal_narrative')
+    expect(restored.playMode).toBe('gal')
+    expect(restored.solo).toBe(true)
+    second.unmount()
+  })
+
+  it('does not cancel a legal adventure binding while restoring', async () => {
+    const { wrapper, source } = await mountAndCaptureDraftSource()
+    wrapper.unmount()
+    await flushPromises()
+    const snapshot = loadCreateDraft(source)!
+    snapshot.mode = 'template'
+    snapshot.rule = 'freeform_srd'
+    snapshot.playMode = 'adventure'
+    snapshot.adventureChoice = '["plugin","core","core:story"]'
+    saveCreateDraft(source, snapshot)
+
+    const { wrapper: second, vm: restored } = await remountWithDraft()
+    // 非 GAL 规则 + adventure：收敛逻辑不得把冒险绑定改成 free/gal
+    expect(restored.playMode).toBe('adventure')
+    expect(restored.activeRule).toBe('freeform_srd')
+    second.unmount()
   })
 })

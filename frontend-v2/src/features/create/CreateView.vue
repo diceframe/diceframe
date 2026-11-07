@@ -419,12 +419,21 @@ function restoreDraft(snapshot: CreateDraftSnapshot): void {
   sceneImageFile.value = snapshot.sceneImageFile || null
   mapBackgroundFile.value = snapshot.mapBackgroundFile || null
   if (snapshot.sceneImageSelectionSeed) sceneImageSelectionSeed.value = snapshot.sceneImageSelectionSeed
-  // 旧草稿可能是「GAL 规则 + 自由模式」这种被服务端拒绝的组合：恢复时按契约纠正。
-  if (snapshot.rule === GAL_RULE_ID) {
-    playMode.value = 'gal'
-    solo.value = true
-  } else if (snapshot.playMode === 'gal') {
-    playMode.value = 'free'
+  // 旧草稿可能是「GAL 规则 + 自由模式」这种被服务端拒绝的组合。注意 template 的
+  // rule 只是隐藏字段：AI 来源的生效规则是 aiGeneratedRule/aiRule，冒险来源有自己的
+  // 绑定。所以不能只看 snapshot.rule——恢复事务结束时按**生效规则 activeRule** 统一
+  // 校准 play_mode/solo。restoringDraft 期间 activeRule watcher 会被跳过且不会重放，
+  // 这里必须显式收敛，而不是依赖 watcher 恰好触发。
+  const activeRuleNow = mode.value === 'ai'
+    ? (aiGeneratedRule.value?.rule_id || aiRule.value)
+    : rule.value
+  const restored = galLinkageForActiveRule(activeRuleNow, {
+    playMode: playMode.value as 'free' | 'adventure' | 'gal',
+    solo: solo.value,
+  })
+  if (restored) {
+    if (restored.playMode !== playMode.value) selectPlayMode(restored.playMode)
+    solo.value = restored.solo
   }
   if (snapshot.rule && snapshot.rule !== GAL_RULE_ID) lastNonGalRule.value = snapshot.rule
 }
