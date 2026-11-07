@@ -4,6 +4,7 @@ import { pluginApi } from '@/api/plugins'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
+import { promptEnableAfterInstall } from './installEnable'
 import type { PluginField, PluginInfo } from '@/api/types'
 
 export function useInstalledPlugins(
@@ -192,10 +193,16 @@ export function useInstalledPlugins(
       const body = new FormData()
       body.append('file', installFile.value)
       body.append('overwrite', overwriteInstall.value ? 'true' : 'false')
-      await pluginApi.install(body)
+      const installed = await pluginApi.install(body)
       toast.success(t('pluginZipInstalled'))
       installFile.value = null
       overwriteInstall.value = false
+      // 新装默认禁用；覆盖安装时宿主会把原本开着的插件重新拉起，此时不再打扰。
+      await promptEnableAfterInstall({
+        id: installed?.id || '',
+        name: installed?.name,
+        enabled: installed?.enabled,
+      })
       await refreshSurfaces()
     } catch (error: unknown) {
       toast.error(errorMessage(error))

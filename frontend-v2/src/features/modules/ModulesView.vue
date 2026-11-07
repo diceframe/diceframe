@@ -20,6 +20,7 @@ import { CubeOutline } from '@vicons/ionicons5'
 import type { PluginMarketplaceItem } from '@/api/types'
 import MarketplaceCard from '@/features/plugins/MarketplaceCard.vue'
 import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
+import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
@@ -325,7 +326,11 @@ async function importModule() {
   importBusy.value = true
   error.value = ''
   try {
-    await moduleApi.import(importForm())
+    const result = await moduleApi.import(importForm())
+    if (result.ok) {
+      // 本地导入同样是禁用状态，装完立刻问一次是否启用。
+      await promptEnableAfterInstall({ id: result.id || '', name: result.name, enabled: result.enabled })
+    }
     importFile.value = null
     preview.value = null
     await load()
@@ -345,6 +350,11 @@ async function installFromMarketplace(item: ModuleMarketplaceItem) {
     const result = await moduleApi.installFromMarketplace(item.id, item.installed)
     if (!result.ok) throw new Error(result.error || result.error_code || t('modulesInstallIncomplete'))
     installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshing') }
+    // 新装的内容包在宿主里是禁用状态：不启用既没有冒险来源也没有资料册。
+    // 询问走全局 dialog，装完立刻离开本页也不会漏掉。
+    if (!item.installed) {
+      await promptEnableAfterInstall({ id: result.id || item.id, name: result.name || item.name, enabled: result.enabled })
+    }
     await load()
     await loadMarketplace()
     await checkRecovery()
