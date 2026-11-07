@@ -57,6 +57,7 @@ function exportBody(): Record<string, unknown> {
 let downloads: string[] = []
 
 beforeEach(() => {
+  localStorage.clear()
   downloads = []
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push(this.download) })
   i18n.global.locale.value = 'zh-CN'
@@ -94,25 +95,36 @@ describe('CreatorPackageExportDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('submits an exported pack as a .zip through the prefilled index issue form', async () => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+  it('guides the author through publishing to their own repository', async () => {
     const wrapper = await render('resource')
     await wrapper.findAll('.creator-package-grid input')[2].setValue('1.2.0')
     await wrapper.get('select').setValue('office')
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
 
-    await wrapper.get('[data-testid="creator-export-submit-to-hub"]').trigger('click')
+    // 没填仓库地址之前，上传 / Release / 投稿三步是锁住的
+    expect(wrapper.get('[data-testid="submission-wizard-step-upload"]').classes()).toContain('is-locked')
+    expect(wrapper.find('[data-testid="submission-wizard-step-submit"] a').exists()).toBe(false)
 
-    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin', 'office-resources-1.2.0.zip'])
-    expect(open).toHaveBeenCalledTimes(1)
-    const [href, target, features] = open.mock.calls[0] as [string, string, string]
-    expect([target, features]).toEqual(['_blank', 'noopener'])
-    const url = new URL(href)
+    await wrapper.get('[data-testid="submission-wizard-repo-input"]').setValue('https://github.com/me/office-resources')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="submission-wizard-step-upload"] a').attributes('href'))
+      .toBe('https://github.com/me/office-resources/upload/main')
+    expect(wrapper.get('[data-testid="submission-wizard-step-release"] a').attributes('href'))
+      .toBe('https://github.com/me/office-resources/releases/new?tag=v1.2.0')
+
+    const submit = wrapper.get('[data-testid="submission-wizard-step-submit"] a').attributes('href') || ''
+    const url = new URL(submit)
     expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      template: 'add-content-pack.yml', title: '[Content Pack] office-resources', plugin_id: 'office-resources',
+      template: 'add-plugin.yml',
+      title: '[Plugin Submission] office-resources',
+      plugin_id: 'office-resources',
+      repository: 'https://github.com/me/office-resources',
     })
+    // 向导自己不再额外下载 zip：文件在导出时已经拿过
+    expect(downloads).toEqual(['office-resources-1.2.0.dfplugin'])
   })
 
   it('declares the content languages, defaulting to the UI language', async () => {
@@ -202,31 +214,20 @@ describe('CreatorPackageExportDialog', () => {
     expect(mocks.api.mock.calls.some(([path]) => path === '/map-backgrounds')).toBe(false)
   })
 
-  it('exports the flat repository source and points to the repository registration form', async () => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+  it('exports the flat repository source and hands it to the submission wizard', async () => {
     const wrapper = await render('resource')
     await wrapper.get('select').setValue('office')
     await wrapper.get('[data-testid="creator-export-format-source"]').setValue(true)
-    expect(wrapper.get('[data-testid="creator-export-submit"]').text()).toBe('导出资源包 .zip')
 
     await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
     await flushPromises()
     expect(exportBody()).toMatchObject({ flat: true, world_id: 'office' })
     expect(downloads).toEqual(['office-resources-0.1.0-src.zip'])
-    expect(wrapper.get('[data-testid="creator-export-done"]').text()).toContain('已下载 office-resources-0.1.0-src.zip')
-    // A source export is published from the author's own repository, not uploaded as a .zip.
-    expect(wrapper.find('[data-testid="creator-export-submit-to-hub"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('LICENSE')
 
-    await wrapper.get('[data-testid="creator-export-register-repository"]').trigger('click')
-    expect(downloads).toEqual(['office-resources-0.1.0-src.zip'])
-    const [href, target, features] = open.mock.calls[0] as [string, string, string]
-    expect([target, features]).toEqual(['_blank', 'noopener'])
-    const url = new URL(href)
-    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      template: 'add-plugin.yml', title: '[Plugin Submission] office-resources', plugin_id: 'office-resources',
-    })
+    // 源码包走作者自己的仓库：没有「上传 zip」的按钮，而是同一个发布向导
+    expect(wrapper.find('[data-testid="creator-export-submit-to-hub"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="submission-wizard"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="submission-wizard-step-prepare"]').text()).toContain('LICENSE')
   })
 
   it('rejects package IDs the plugin host would refuse before exporting', async () => {
