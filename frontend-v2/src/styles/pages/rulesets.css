@@ -9,6 +9,23 @@
   overflow: hidden;
 }
 
+/* 工具面板的标题只是重复导航（Tab 已经写着战役/战斗），不必占一整行：
+   视觉隐藏，role=dialog 的 aria-labelledby 仍然指向它。 */
+.dialog.dnd-toolbox-dialog > header {
+  justify-content: flex-end;
+  min-height: 34px;
+  padding-block: 4px;
+}
+
+.dialog.dnd-toolbox-dialog > header h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 .dnd-toolbox-tabs {
   display: flex;
   flex: 0 0 auto;

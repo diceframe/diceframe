@@ -1513,12 +1513,12 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <div class="move-row">
                 <label>{{ copy.move }}
                   <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
-                  <small>± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
                 </label>
                 <button type="button" class="move-submit" :disabled="!canStageDock" @click="stageDock()">
                   <NIcon :component="FootstepsOutline" />{{ copy.move }}
                 </button>
               </div>
+              <small class="move-range">± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
             </div>
           </template>
 
@@ -1551,20 +1551,20 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
           </template>
 
           <template #summary>
-            <div class="dock-target" :class="{ 'is-empty': !dockMode }">
-              <template v-if="dockMode">
+            <div v-if="dockMode" class="dock-detail">
                 <span v-if="dockNeedsTarget"><small>{{ copy.target }}</small><b>{{ dockTargetToken?.name || copy.noTarget }}</b></span>
                 <span v-if="dockCost"><small>{{ copy.consumes }}</small><b>{{ dockCost }}</b></span>
                 <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
-              </template>
             </div>
-            <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
+            <div class="dock-actions">
+              <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
               <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
             </button>
-            <div class="dock-finish">
+              <div class="dock-finish">
               <p v-if="action('end_turn')" class="end-turn-ready" role="status"><NIcon :component="PlayForwardOutline" />{{ copy.canEndTurn }}</p>
               <button v-if="action('end_turn')" type="button" class="dock-end" :disabled="busy" @click="stageSimple('end_turn')"><NIcon :component="PlayForwardOutline" />{{ copy.endTurn }}</button>
               <button v-if="action('combat.end')" type="button" class="danger dock-end" :disabled="busy" @click="stageSimple('combat.end')"><NIcon :component="ShieldOutline" />{{ copy.endCombat }}</button>
+              </div>
             </div>
           </template>
         </ActionDock>
@@ -1619,10 +1619,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
 .capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
-.dock-target { display: grid; gap: 5px; min-height: 64px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
-.dock-target span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
-.dock-target small { color: #9aa9b4; }
-.dock-target b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.dock-detail { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid rgb(120 150 175 / 28%); border-radius: 12px; background: rgb(9 15 22 / 70%); }
+.dock-detail span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.dock-detail small { color: #9aa9b4; }
+.dock-detail b { overflow: hidden; color: #ffe5a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .dock-confirm, .dock-end { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 46px; border-radius: 12px; font-weight: 700; cursor: pointer; }
 .dock-confirm { border: 1px solid #e4b75e; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; box-shadow: 0 0 14px rgb(228 183 94 / 25%); }
 .dock-confirm:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; box-shadow: none; cursor: not-allowed; }
@@ -1645,11 +1645,14 @@ button, select, input { min-height: 44px; font: inherit; }
 .declare-toggle small { color: #9aa9b4; font-size: 10px; font-weight: 400; }
 /* 右侧栏：目标信息占固定高度，确认按钮紧跟其后，结束类按钮固定在底部，
    这样切换动作/附赠/移动/反应页签时按钮不会上下跳。 */
-.dock-target.is-empty { border-style: dashed; opacity: .55; }
-.dock-finish { display: grid; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid rgb(120 150 175 / 22%); align-self: end; }
+.dock-actions { display: grid; gap: 8px; margin-top: auto; align-self: end; }
+.dock-actions .dock-confirm { margin: 0; }
+.dock-finish { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(120 150 175 / 22%); }
 .move-panel .move-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
-.move-panel .move-row label { min-width: 0; }
-.move-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 16px; border: 1px solid #e4b75e; border-radius: 10px; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; font-size: 13px; font-weight: 600; cursor: pointer; }
+.move-panel .move-row label { margin: 0; min-width: 0; }
+.move-panel .move-row input { min-height: 38px; }
+.move-range { color: #9aa9b4; font-size: 11px; }
+.move-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-height: 38px; margin: 0; padding: 0 16px; border: 1px solid #e4b75e; border-radius: 10px; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; font-size: 13px; font-weight: 600; cursor: pointer; }
 .move-submit:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; cursor: not-allowed; }
 .end-turn-ready { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 8px 9px; border: 1px solid #b88b3e; border-radius: 8px; background: rgb(197 148 67 / 14%); color: #f2d28f; font-size: 12px; font-weight: 700; }
 .decision-card, .confirm-card { padding: 12px; border: 1px solid #c2974a; border-radius: 12px; background: #322716; }

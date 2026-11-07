@@ -1182,6 +1182,26 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  it('keeps the move submit inside the distance row', async () => {
+    mocks.fetch.mockResolvedValueOnce(response('active'))
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+    await wrapper.get('#dock-tab-move').trigger('click')
+
+    const movePanel = wrapper.get('.mode-panel[data-mode="move"]')
+    // 提交按钮和距离输入框在同一行，不再额外占一块磁贴
+    expect(movePanel.find('.move-row .move-submit').exists()).toBe(true)
+    expect(wrapper.find('[data-tile="move"]').exists()).toBe(false)
+
+    // 确认行动与结束类按钮同处一个固定块，切页签时不会互相顶走
+    const actions = wrapper.get('.dock-actions')
+    expect(actions.find('.dock-confirm').exists()).toBe(true)
+    expect(actions.find('.dock-finish').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('aims the attack when a unit on the battlefield is clicked', async () => {
     const twoFoes = response('active') as any
     twoFoes.gameplay.combat.actors.push(
@@ -1218,7 +1238,7 @@ describe('D&D 2024 combat panel', () => {
 
     expect(wrapper.get('.battle-token[data-actor-id="enemy:goblin-1"]').classes()).toContain('targeted')
     expect(wrapper.get('.battle-token[data-actor-id="player:gm"]').classes()).not.toContain('targeted')
-    expect(wrapper.get('.dock-target').text()).toContain('Goblin')
+    expect(wrapper.get('.dock-detail').text()).toContain('Goblin')
     // The side card follows the click, and lists statuses with the locale's separator.
     expect(wrapper.get('.target-card').text()).toContain('Guardian')
     expect(wrapper.get('.target-card').text()).toContain('Dodging, Blessed')
