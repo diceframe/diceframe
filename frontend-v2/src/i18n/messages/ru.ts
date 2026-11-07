@@ -53,7 +53,6 @@ export const ru = {
   modulesStatus: 'Статус',
   modulesContentDelivery: 'Доставка контента',
   modulesActions: 'Действия',
-  modulesActionUpdate: 'Обновить',
   modulesActionEnable: 'Включить',
   modulesActionDisable: 'Выключить',
   modulesActionUninstall: 'Удалить',

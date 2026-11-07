@@ -444,13 +444,18 @@ async def install_marketplace_plugin(
     return {"ok": True, **result}
 
 async def update_marketplace_plugin(
-    dependencies: PluginHostDependencies,
+    dependencies: PluginLifecycleDependencies,
     plugin_id: str,
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
         return {"ok": False, "error": "插件宿主未启用"}
-    return {"ok": True, **await host.update_from_marketplace(plugin_id)}
+    detail = await host.update_from_marketplace(plugin_id)
+    # Same follow-up as a marketplace (over)install: an enabled legacy content
+    # pack gets the new version's content right away, not after a restart.
+    if not detail.get("up_to_date"):
+        _maybe_autoimport_after_install(dependencies, plugin_id)
+    return {"ok": True, **detail}
 
 # 卸载清理域注册表：新增清理域时实现 handler 并在此注册，再在类型 descriptor 的
 # cleanup 列表声明。content_data 是 lorebook+worlds+cards 的耦合清理（必须先抓
