@@ -675,7 +675,9 @@ test('Cutting Words damage window stays with its owner and reduces the held dama
     expect(hpBefore - hpAfter).toBe(heldDamage - penalty)
     const damageEvent = after.gameplay.recent_combat_events
       .filter(event => event.type === 'resource.changed' && event.target_id === 'player:e2e-gm').pop()
-    expect(damageEvent?.delta).toBe(-(heldDamage - penalty))
+    // penalty - heldDamage, not -(heldDamage - penalty): when the roll cancels
+    // all of the damage the latter is -0, which toBe (Object.is) rejects.
+    expect(damageEvent?.delta).toBe(penalty - heldDamage)
   } finally {
     await context.close()
   }

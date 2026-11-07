@@ -354,16 +354,9 @@ function submitLevelUp(attrs: Record<string, number>) {
   color: var(--df-text);
   cursor: pointer;
 }
-.portrait-edit-button span {
-  position: absolute;
-  inset: auto 2px 2px;
-  padding: 2px 3px;
-  border-radius: 4px;
-  background: rgb(0 0 0 / 65%);
-  color: #fff;
-  font-size: 9px;
-  line-height: 1.15;
-}
+/* 悬浮提示的定位交给 styles/shared.css 的 .portrait-edit-button>span:last-child：
+   那里用 left:50% + translateX(-50%) 居中，并且只在 hover/focus 时显示。
+   这里再写一份 inset/背景会覆盖掉居中规则，把文字挤到头像外面。 */
 .portrait-edit-button:hover { border-color: var(--df-accent); }
 .character-title { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; min-width: 0; }
 .character-title h3 { flex: 1 1 100%; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.12rem; }
