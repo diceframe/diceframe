@@ -42,6 +42,29 @@ describe('WorldLorebookSummary', () => {
     expect(wrapper.text()).toContain('港口人物')
     wrapper.unmount()
   })
+  it('links a package world to the pack page instead of a dead world route', async () => {
+    mocks.api.mockResolvedValue(harborBooks)
+    const wrapper = mount(WorldLorebookSummary, {
+      props: { ...props, worldId: 'frost_pass', manageHref: '#/modules/dnd-frostwhisper', manageKind: 'module' },
+      global: { plugins: [i18n] },
+    })
+    await flushPromises()
+    const link = wrapper.get('footer a')
+    expect(link.attributes('href')).toBe('#/modules/dnd-frostwhisper')
+    expect(link.text()).toContain('查看包内资料')
+    wrapper.unmount()
+  })
+  it('explains that a source-only world cannot be edited in place', async () => {
+    mocks.api.mockResolvedValue({ books: [] })
+    const wrapper = mount(WorldLorebookSummary, {
+      props: { ...props, worldId: 'frost_pass', manageHref: '', manageKind: 'none' },
+      global: { plugins: [i18n] },
+    })
+    await flushPromises()
+    expect(wrapper.find('footer a').exists()).toBe(false)
+    expect(wrapper.get('footer .create-lorebook-readonly').text()).toContain('只读')
+    wrapper.unmount()
+  })
   it('preserves an explicit empty selection across retry', async () => {
     mocks.api.mockResolvedValue(harborBooks)
     const wrapper = mount(WorldLorebookSummary, { props: { ...props, modelValue: [] }, global: { plugins: [i18n] } })

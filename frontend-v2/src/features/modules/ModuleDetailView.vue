@@ -131,6 +131,13 @@ function launch(adventureId: string) {
   void router.push({ name: 'create', query: { module_id: moduleId.value, adventure_id: adventureId } })
 }
 
+// 资源包没有固定剧情，但仍声明了资料册/规则等资源：用同一个 module_id 深链
+// 把包带到创建页，创建页据此把它的资料册作为本局候选，开局仍走自由模式。
+function launchWithPack() {
+  if (!canLaunch.value) return
+  void router.push({ name: 'create', query: { module_id: moduleId.value } })
+}
+
 let loadSequence = 0
 async function loadDetail() {
   const id = moduleId.value
@@ -339,9 +346,19 @@ async function run(action: ModuleAction) {
       <section class="module-detail-section" data-testid="module-lorebooks">
         <h2>{{ t('modulesLorebooks') }}</h2>
         <p v-if="!(module.lorebooks || []).length" class="muted">{{ t('modulesNoLorebooks') }}</p>
-        <ul v-else>
-          <li v-for="book in (module.lorebooks || [])" :key="book.id">{{ book.name }} · {{ book.language }}</li>
-        </ul>
+        <template v-else>
+          <ul>
+            <li v-for="book in (module.lorebooks || [])" :key="book.id">{{ book.name }} · {{ book.language }}</li>
+          </ul>
+          <button
+            v-if="!module.adventures.length"
+            type="button"
+            class="content-button content-button-primary module-lorebook-launch"
+            :disabled="!canLaunch || busy !== ''"
+            @click="launchWithPack"
+          >{{ t('moduleLorebookLaunch') }}</button>
+          <p v-if="!module.adventures.length && !canLaunch" class="muted">{{ t('moduleAdventureLaunchBlocked') }}</p>
+        </template>
       </section>
 
       <details class="module-detail-section module-technical" data-testid="module-usage">
@@ -392,6 +409,7 @@ async function run(action: ModuleAction) {
 .module-adventure-copy small { display: block; margin-top: .25rem; overflow-wrap: anywhere; color: var(--df-text-muted); }
 .module-adventure-copy p { margin: .45rem 0 0; color: var(--df-text-muted); font-size: .86rem; line-height: 1.5; }
 .module-adventure-card .content-button { min-width: 11rem; }
+.module-lorebook-launch { margin-top: 1rem; }
 .module-content-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .6rem; list-style: none; margin: 1rem 0 0; padding: 0; }
 .module-content-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
 .module-content-list li span { color: var(--df-text-muted); }

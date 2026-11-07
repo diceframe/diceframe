@@ -4,16 +4,24 @@ import { api } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import { projectCreationLorebooks, type CreationLorebook } from './creationLorebooks'
 
-const props = defineProps<{ worldId: string; source: string; manageHref: string; modelValue?: string[] }>()
+const props = withDefaults(defineProps<{
+  worldId: string
+  source: string
+  manageHref: string
+  /** `world` opens the library world; `module` opens the pack's resources; `none` explains why editing is closed. */
+  manageKind?: 'world' | 'module' | 'none'
+  modelValue?: string[]
+  extraBooks?: CreationLorebook[]
+}>(), { manageKind: 'world' })
 const emit = defineEmits<{ 'update:modelValue': [value: string[]]; 'update:books': [value: CreationLorebook[]]; ready: [value: boolean] }>()
 const { locale } = useLocale()
 const copy = computed(() => {
   const all = {
-    'zh-CN': { title: '本局使用的资料来源', loading: '正在读取资料册…', unavailable: '暂时无法确认资料册，请重试。', retry: '重试', manage: '编辑这个世界的资料册', empty: '目前没有匹配的已保存资料册。', primary: '主册', world: '当前世界', global: '全局共用', reference: '引用资料', active: '本局会使用', inactive: '本局不使用', entries: '条', inherit: '沿用当前世界的资料册；勾选或取消只影响本局。', blank: '将创建空白的独立世界；下方仍可选择共用资料。', referenced: '将创建独立世界，只读取来源世界的资料册；条目不会复制。', limitation: '上方可勾选本局真正要使用的资料册，不会改动原世界。', shared: '编辑来源资料册会影响同样引用它的其他游戏。' },
-    en: { title: 'Books used by this game', loading: 'Loading books…', unavailable: 'Books could not be confirmed. Please retry.', retry: 'Retry', manage: 'Manage the source world’s books', empty: 'No matching saved books yet.', primary: 'Primary', world: 'World', global: 'Global', reference: 'Primary reference', active: 'Will use', inactive: 'Inactive', entries: 'entries', inherit: 'Enabled books are selected by default; global books still follow their scope.', blank: 'The new world has a blank primary book; enabled global books still apply.', referenced: 'Create an independent world and reference selected books from the source; entries are not copied.', limitation: 'Enabled books are selected by default; you can choose a subset for this game.', shared: 'Changes to source books affect other games that reference them.' },
-    de: { title: 'Bücher für dieses Spiel', loading: 'Bücher werden geladen…', unavailable: 'Bücher konnten nicht bestätigt werden.', retry: 'Erneut versuchen', manage: 'Bücher der Quellwelt verwalten', empty: 'Keine passenden gespeicherten Bücher.', primary: 'Hauptbuch', world: 'Welt', global: 'Global', reference: 'Hauptbuch-Verweis', active: 'Wird verwendet', inactive: 'Inaktiv', entries: 'Einträge', inherit: 'Aktivierte Bücher werden standardmäßig ausgewählt; globale Bücher folgen ihrem Geltungsbereich.', blank: 'Die neue Welt hat ein leeres Hauptbuch; globale Bücher gelten weiterhin.', referenced: 'Eine eigene Welt wird erstellt, die auf ausgewählte Bücher der Quelle verweist; Einträge werden nicht kopiert.', limitation: 'Aktivierte Bücher sind vorausgewählt; du kannst für dieses Spiel eine Auswahl treffen.', shared: 'Änderungen an Quellbüchern betreffen andere Spiele, die darauf verweisen.' },
-    ja: { title: 'このゲームで使う資料集', loading: '資料集を読み込み中…', unavailable: '資料集を確認できません。', retry: '再試行', manage: '参照元の世界の資料集を管理', empty: '一致する保存済み資料集はありません。', primary: 'メイン', world: '世界', global: '全体', reference: 'メイン参照', active: '使用', inactive: '無効', entries: '項目', inherit: '有効な資料集を初期選択し、全体資料集は範囲に従います。', blank: '新しい世界には空白のメイン資料集があり、全体の資料集も使用されます。', referenced: '独立した世界を作り、参照元から選んだ資料集を参照します。項目はコピーされません。', limitation: '有効な資料集が初期選択され、このゲーム用に絞り込めます。', shared: '参照元の変更は、同じ資料集を参照する他のゲームにも影響します。' },
-    ru: { title: 'Книги для этой игры', loading: 'Загрузка книг…', unavailable: 'Не удалось подтвердить книги.', retry: 'Повторить', manage: 'Книги исходного мира', empty: 'Подходящих сохранённых книг нет.', primary: 'Основная', world: 'Мир', global: 'Глобальная', reference: 'Ссылка на основную', active: 'Используется', inactive: 'Неактивна', entries: 'записей', inherit: 'Активные книги выбраны по умолчанию, глобальные книги следуют области действия.', blank: 'Новый мир имеет пустую основную книгу; глобальные книги всё ещё используются.', referenced: 'Создаётся отдельный мир со ссылками на выбранные книги источника; записи не копируются.', limitation: 'Активные книги выбраны заранее; для этой игры можно оставить только нужные.', shared: 'Изменения исходных книг затрагивают другие игры, ссылающиеся на них.' },
+    'zh-CN': { title: '本局使用的资料来源', loading: '正在读取资料册…', unavailable: '暂时无法确认资料册，请重试。', retry: '重试', manage: '编辑这个世界的资料册', empty: '目前没有匹配的已保存资料册。', primary: '主册', world: '当前世界', global: '全局共用', reference: '引用资料', active: '本局会使用', inactive: '本局不使用', entries: '条', inherit: '沿用当前世界的资料册；勾选或取消只影响本局。', blank: '将创建空白的独立世界；下方仍可选择共用资料。', referenced: '将创建独立世界，只读取来源世界的资料册；条目不会复制。', limitation: '上方可勾选本局真正要使用的资料册，不会改动原世界。', shared: '编辑来源资料册会影响同样引用它的其他游戏。', managePack: '查看包内资料', readonlySource: '这个世界来自内容包或内置模板，资料册随来源只读；可在内容包页查看或创建用户副本。' },
+    en: { title: 'Books used by this game', loading: 'Loading books…', unavailable: 'Books could not be confirmed. Please retry.', retry: 'Retry', manage: 'Manage the source world’s books', empty: 'No matching saved books yet.', primary: 'Primary', world: 'World', global: 'Global', reference: 'Primary reference', active: 'Will use', inactive: 'Inactive', entries: 'entries', inherit: 'Enabled books are selected by default; global books still follow their scope.', blank: 'The new world has a blank primary book; enabled global books still apply.', referenced: 'Create an independent world and reference selected books from the source; entries are not copied.', limitation: 'Enabled books are selected by default; you can choose a subset for this game.', shared: 'Changes to source books affect other games that reference them.', managePack: 'Open the pack’s resources', readonlySource: 'This world comes from a content pack or built-in template, so its books are read-only at the source. Inspect them on the pack page or create a user copy.' },
+    de: { title: 'Bücher für dieses Spiel', loading: 'Bücher werden geladen…', unavailable: 'Bücher konnten nicht bestätigt werden.', retry: 'Erneut versuchen', manage: 'Bücher der Quellwelt verwalten', empty: 'Keine passenden gespeicherten Bücher.', primary: 'Hauptbuch', world: 'Welt', global: 'Global', reference: 'Hauptbuch-Verweis', active: 'Wird verwendet', inactive: 'Inaktiv', entries: 'Einträge', inherit: 'Aktivierte Bücher werden standardmäßig ausgewählt; globale Bücher folgen ihrem Geltungsbereich.', blank: 'Die neue Welt hat ein leeres Hauptbuch; globale Bücher gelten weiterhin.', referenced: 'Eine eigene Welt wird erstellt, die auf ausgewählte Bücher der Quelle verweist; Einträge werden nicht kopiert.', limitation: 'Aktivierte Bücher sind vorausgewählt; du kannst für dieses Spiel eine Auswahl treffen.', shared: 'Änderungen an Quellbüchern betreffen andere Spiele, die darauf verweisen.', managePack: 'Paketressourcen öffnen', readonlySource: 'Diese Welt stammt aus einem Inhaltspaket oder einer integrierten Vorlage; ihre Bücher sind an der Quelle schreibgeschützt. Sieh sie auf der Paketseite ein oder erstelle eine eigene Kopie.' },
+    ja: { title: 'このゲームで使う資料集', loading: '資料集を読み込み中…', unavailable: '資料集を確認できません。', retry: '再試行', manage: '参照元の世界の資料集を管理', empty: '一致する保存済み資料集はありません。', primary: 'メイン', world: '世界', global: '全体', reference: 'メイン参照', active: '使用', inactive: '無効', entries: '項目', inherit: '有効な資料集を初期選択し、全体資料集は範囲に従います。', blank: '新しい世界には空白のメイン資料集があり、全体の資料集も使用されます。', referenced: '独立した世界を作り、参照元から選んだ資料集を参照します。項目はコピーされません。', limitation: '有効な資料集が初期選択され、このゲーム用に絞り込めます。', shared: '参照元の変更は、同じ資料集を参照する他のゲームにも影響します。', managePack: 'パック内の資料を見る', readonlySource: 'この世界はコンテンツパックまたは組み込みテンプレートのため、資料集は参照元では読み取り専用です。パックのページで確認するか、ユーザー用の複製を作成してください。' },
+    ru: { title: 'Книги для этой игры', loading: 'Загрузка книг…', unavailable: 'Не удалось подтвердить книги.', retry: 'Повторить', manage: 'Книги исходного мира', empty: 'Подходящих сохранённых книг нет.', primary: 'Основная', world: 'Мир', global: 'Глобальная', reference: 'Ссылка на основную', active: 'Используется', inactive: 'Неактивна', entries: 'записей', inherit: 'Активные книги выбраны по умолчанию, глобальные книги следуют области действия.', blank: 'Новый мир имеет пустую основную книгу; глобальные книги всё ещё используются.', referenced: 'Создаётся отдельный мир со ссылками на выбранные книги источника; записи не копируются.', limitation: 'Активные книги выбраны заранее; для этой игры можно оставить только нужные.', shared: 'Изменения исходных книг затрагивают другие игры, ссылающиеся на них.', managePack: 'Ресурсы пакета', readonlySource: 'Этот мир поставляется контент-пакетом или встроенным шаблоном, поэтому его книги доступны только для чтения. Откройте их на странице пакета или создайте пользовательскую копию.' },
   }
   return all[locale.value as keyof typeof all] || all.en
 })
@@ -27,8 +35,11 @@ const explainer = computed(() => ({
 const books = ref<CreationLorebook[]>([])
 const loading = ref(false)
 const failed = ref(false)
+// Module-declared books (issue #700): catalog candidates supplied by the page.
+// They merge with saved books for both display and the emitted selection model.
+const mergedBooks = computed(() => [...books.value, ...(props.extraBooks || [])])
 const sourceWorld = computed(() => props.source.startsWith('copy:') ? props.source.slice(5) : props.source === '__builtin__' ? props.worldId : '')
-const rows = computed(() => projectCreationLorebooks(books.value, props.worldId, props.source))
+const rows = computed(() => projectCreationLorebooks(mergedBooks.value, props.worldId, props.source))
 const hint = computed(() => props.source === '__blank__' ? copy.value.blank : props.source.startsWith('copy:') ? copy.value.referenced : copy.value.inherit)
 const selectionSummary = computed(() => {
   if (loading.value) return copy.value.loading
@@ -60,11 +71,8 @@ async function load() {
     if (!Array.isArray(response.books)) throw new Error('Invalid book list')
     if (request === epoch) {
       books.value = response.books
-      const projected = projectCreationLorebooks(response.books, props.worldId, props.source)
-      emit('update:books', projected)
-      const activeIds = new Set(projected.filter(book => book.active).map(book => book.id))
-      const prior = props.modelValue?.filter(id => activeIds.has(id))
-      emit('update:modelValue', prior !== undefined ? prior : [...activeIds])
+      lastAutoSelection = null
+      publishSelection()
       emit('ready', true)
     }
   } catch {
@@ -73,6 +81,25 @@ async function load() {
     if (request === epoch) loading.value = false
   }
 }
+// 最近一次「自动默认选择」的快照：modelValue 与它一致说明用户没有动过，
+// 后到的候选（例如模块声明的资料册）仍可并入默认选择；一旦用户勾选/取消
+// 过（或恢复草稿），modelValue 必然偏离快照，按用户选择对待。
+let lastAutoSelection: string[] | null = null
+function sameSelection(a: string[] | undefined, b: string[] | null): boolean {
+  if (!a || b === null || a.length !== b.length) return false
+  return a.every((id, index) => id === b[index])
+}
+function publishSelection() {
+  const projected = projectCreationLorebooks(mergedBooks.value, props.worldId, props.source)
+  emit('update:books', projected)
+  const activeIds = projected.filter(book => book.active).map(book => book.id)
+  const prior = props.modelValue
+  const isAuto = prior === undefined || sameSelection(prior, lastAutoSelection)
+  const next = isAuto ? activeIds : (prior || []).filter(id => activeIds.includes(id))
+  lastAutoSelection = isAuto ? [...next] : null
+  emit('update:modelValue', next)
+}
+watch(() => props.extraBooks, () => { if (epoch && !loading.value) publishSelection() })
 function toggleBook(bookId: string, event: Event) {
   const checked = (event.target as HTMLInputElement | null)?.checked === true
   const next = new Set(props.modelValue || [])
@@ -102,7 +129,7 @@ onScopeDispose(() => { ++epoch })
       </li>
     </ul>
     <p v-else-if="!loading && !failed">{{ copy.empty }}</p>
-    <footer><small>{{ explainer }}</small><a v-if="sourceWorld && manageHref" :href="manageHref">{{ copy.manage }} ↗</a></footer>
+    <footer><small>{{ explainer }}</small><a v-if="sourceWorld && manageHref && manageKind !== 'none'" :href="manageHref">{{ manageKind === 'module' ? copy.managePack : copy.manage }} ↗</a><span v-else-if="sourceWorld && manageKind === 'none'" class="create-lorebook-readonly">{{ copy.readonlySource }}</span></footer>
     </div>
   </details>
   <div v-if="failed" class="create-lorebook-error" role="alert">{{ copy.unavailable }} <button type="button" @click="load">{{ copy.retry }}</button></div>
@@ -114,6 +141,7 @@ onScopeDispose(() => { ++epoch })
 .create-lorebook-body{padding:0 14px 14px}
 footer{display:flex;justify-content:space-between;align-items:center;gap:8px 16px;flex-wrap:wrap;margin-top:12px}
 footer a{font-size:12px;color:var(--df-interactive-strong)}
+footer .create-lorebook-readonly{max-width:52%;color:var(--df-text-muted);font-size:11px;line-height:1.6}
 p{margin:8px 0;color:var(--df-text-secondary);font-size:12px}.create-lorebook-explainer{color:var(--df-accent-strong);font-weight:600}
 ul{list-style:none;margin:10px 0;padding:0;display:grid;gap:7px}
 li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--df-border-soft)}

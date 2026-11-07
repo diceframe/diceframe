@@ -61,6 +61,7 @@ export const zhCN = {
   modulesAdventures: '冒险',
   modulesLorebooks: '资料册',
   modulesNoLorebooks: '此内容包没有绑定 canonical 资料册。',
+  moduleLorebookLaunch: '用这个包开新冒险',
   modulesContentCount: '内容',
   modulesBack: '返回内容包',
   modulesNotFound: '未找到该内容包。',
