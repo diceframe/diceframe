@@ -252,3 +252,60 @@ def test_fighter_one_spends_the_single_attack() -> None:
 
     economy = ruleset_runtime.state(instance)["combat"]["economy"]
     assert economy["action"] == 0 and economy["attacks_remaining"] == 0
+
+
+# ---- the sheet and the attack count share one ownership filter --------------
+
+
+def _with_entities(runtime: Dnd2024Runtime, mutate):
+    """Return the real bundle with an arbitrary entities edit applied."""
+
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    mutate(entities)
+    return replace(bundle, entities=entities)
+
+
+def _grant_at_level_one(entities: dict, feature_id: str) -> None:
+    entities["progression_catalog"]["srd_classes"]["classes"]["fighter"][
+        "features_by_level"
+    ][0].append(feature_id)
+
+
+def test_a_grant_below_the_declared_minimum_level_grants_no_attack() -> None:
+    runtime = Dnd2024Runtime()
+
+    resolver = Dnd2024ClassFeatureResolver(
+        _with_entities(
+            runtime,
+            lambda entities: _grant_at_level_one(entities, "extra_attack"),
+        )
+    )
+
+    # The Fighter table now hands the id out at level 1, but the catalog still
+    # says the feature starts at 5.  A third-party bundle can do exactly this,
+    # so the sheet and the attack count must agree instead of drifting apart.
+    character = _character(("class:fighter", 1))
+    assert resolver.has_feature(character, "extra_attack") is False
+    assert resolver.attacks_per_action(character) == 1
+    assert resolver.attacks_per_action(_character(("class:fighter", 5))) == 2
+
+
+def test_an_option_feature_never_contributes_an_attack_count() -> None:
+    runtime = Dnd2024Runtime()
+
+    def make_option(entities: dict) -> None:
+        feature = _feature(
+            entities["class_feature_catalog"]["srd_class_features"], "extra_attack",
+        )
+        feature["minimum_level"] = 1
+        # Action Surge arrives at level 2, so at level 1 the parent is not
+        # granted and the option is not owned.
+        feature["option_of"] = "action_surge"
+        _grant_at_level_one(entities, "extra_attack")
+
+    resolver = Dnd2024ClassFeatureResolver(_with_entities(runtime, make_option))
+
+    character = _character(("class:fighter", 1))
+    assert resolver.has_feature(character, "extra_attack") is False
+    assert resolver.attacks_per_action(character) == 1
