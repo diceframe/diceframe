@@ -166,3 +166,16 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 6. 英文与中文、升级、存档兼容、reducer 重放和回滚均有测试；
 7. 最终按 12 职业＋12 子职动态审计 140 个职业行为特性＋58 个子职特性＝198 行，并另审 48 个通用成长/结构条目；
 8. Monk's Focus 3 项、Eldritch Invocations 28 项、Metamagic 10 项、Cunning Strike 6 项分别形成专项矩阵，不重复计入 198，也不能由父特性一行掩盖子项缺口。
+
+## 7. 第一阶段状态审计（2026-11-07）
+
+在执行 S0-D1 之前先做了一次前置审计，结论见 `S0_STAGE1_STATE_AUDIT_2026-11-07.md`。要点：
+
+- 198 行结构（140 + 58）与 §6 第 7 条的冻结口径**完全一致**，内容无漂移；
+- 但只有 26 行（13.1%）有机械定义，157 行仅有排期名；`druid`、`ranger` 在 `srd_class_features.json` 中没有任何 bucket；
+- 两项直接算错：`unarmored_defense` 未接线（野蛮人 AC 12 应为 15、武僧 13 应为 15），移动速度只取种族值（`fast_movement`/`unarmored_movement`/`roving` 无消费点），两者都落在 **S0-F9**；
+- 11 个职业资源池声明并写入存档，但因投影只枚举 `feature.resource_id` 而无法出现在角色卡与战斗面（含 cleric/paladin 的 `channel_divinity`、druid 的 `wild_shape`、paladin 的 `lay_on_hands`、sorcerer 的 `sorcery_points`）；
+- 163/198 行没有 en/zh 标签；
+- `character_builder` 的 11 条长期红灯已定位为 Windows 保留设备名 `CON`（夹具写入 `con.json`），与规则实现无关。
+
+**执行顺序调整**：S0-D1 至 S0-E3 的载体（`supreme_healing`、`overchannel`、`cutting_words`、`dark_ones_blessing`、`aura_of_devotion`、`survivor`）在上游已有定义与测试，应沿用 S0-C 的方式先做契约审计再定改动；S0-F9 因涉及错误数值，优先级上调到 D 系列之前。
