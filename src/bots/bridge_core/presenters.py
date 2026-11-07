@@ -232,7 +232,7 @@ def map_lines(data: dict[str, Any], language: str = "zh-CN") -> list[str]:
     if not locations:
         base = [localized_text(language, {
             "en": "No map data yet. Add locations to the lorebook or continue the story.",
-            "zh-CN": "暂无地图数据；可以先在世界书补地点，或继续推进剧情。",
+            "zh-CN": "暂无地图数据；可以先在资料册补地点，或继续推进剧情。",
             "ja": "まだマップデータがありません。ワールドブックに地点を追加するか、物語を進めてください。",
             "de": "Noch keine Kartendaten. Füge Orte im Lorebook hinzu oder setze die Geschichte fort.",
         })]

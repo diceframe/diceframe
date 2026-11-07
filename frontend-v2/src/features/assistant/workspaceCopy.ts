@@ -1,6 +1,6 @@
 const ROUTES_ZH: Record<string, string> = {
   overview: '总览', create: '创作', play: '游戏', characters: '角色', library: '内容库', creator: '创作台', map: '地图',
-  lorebook: '世界书', worlds: '世界', adventures: '冒险', modules: '模组', memory: '记忆', logs: '日志', rules: '规则',
+  lorebook: '资料册', worlds: '世界', adventures: '冒险', modules: '模组', memory: '记忆', logs: '日志', rules: '规则',
   settings: '设置', plugins: '插件',
 }
 const ROUTES_EN: Record<string, string> = {

@@ -709,7 +709,7 @@ function policyLabel(policy: string) {
               </div>
               <button type="button" class="link-button danger-text" @click="removeEncounter(encounter.id)">{{ String(locale).startsWith('zh') ? '删除遭遇' : 'Delete encounter' }}</button>
             </header>
-            <textarea v-model="encounter.description" rows="2" :placeholder="String(locale).startsWith('zh') ? '遭遇说明（不会替代世界书）' : 'Encounter description (does not replace the worldbook)'"></textarea>
+            <textarea v-model="encounter.description" rows="2" :placeholder="String(locale).startsWith('zh') ? '遭遇说明（不会替代资料册）' : 'Encounter description (does not replace the lorebook)'"></textarea>
             <div class="adventure-enemy-list">
             <article v-for="(enemy, enemyIndex) in encounter.enemies" :key="enemy.id" class="adventure-enemy-card">
               <header class="adventure-enemy-head"><strong>{{ String(locale).startsWith('zh') ? `怪物 ${enemyIndex + 1}` : `Monster ${enemyIndex + 1}` }}</strong><button type="button" class="link-button danger-text" @click="removeEnemy(encounter, enemy.id)">{{ String(locale).startsWith('zh') ? '删除怪物' : 'Delete monster' }}</button></header>
