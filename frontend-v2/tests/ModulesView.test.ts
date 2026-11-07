@@ -253,6 +253,32 @@ describe('ModulesView', () => {
     wrapper.unmount()
   })
 
+  it('sorts the online shelf by downloads and by likes', async () => {
+    const base = online.modules[0]!
+    mocks.marketplace.mockResolvedValue({
+      ok: true,
+      modules: [
+        { ...base, id: 'quiet-pack', name: 'Quiet Pack', stats: { downloads_total: 10, likes: 30 } },
+        { ...base, id: 'busy-pack', name: 'Busy Pack', stats: { downloads_total: 500, likes: 5 } },
+        { ...base, id: 'liked-pack', name: 'Liked Pack', stats: { downloads_total: 100, likes: 90 } },
+      ],
+    })
+    const { wrapper } = await mountView()
+    const order = () => wrapper.findAll('.module-market-grid [data-testid^="modules-market-"]')
+      .map(node => node.attributes('data-testid'))
+
+    // 默认保留市场给的顺序（推荐）。
+    expect(order()).toEqual(['modules-market-quiet-pack', 'modules-market-busy-pack', 'modules-market-liked-pack'])
+
+    const sort = wrapper.get('[data-testid="modules-market-sort"]')
+    await sort.setValue('downloads')
+    expect(order()).toEqual(['modules-market-busy-pack', 'modules-market-liked-pack', 'modules-market-quiet-pack'])
+
+    await sort.setValue('likes')
+    expect(order()).toEqual(['modules-market-liked-pack', 'modules-market-quiet-pack', 'modules-market-busy-pack'])
+    wrapper.unmount()
+  })
+
   it('marks installed online modules and installs missing ones from the marketplace', async () => {
     mocks.installFromMarketplace.mockResolvedValue({ ok: true })
     const { wrapper } = await mountView()

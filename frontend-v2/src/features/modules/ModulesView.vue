@@ -122,6 +122,21 @@ const marketFiltersActive = computed(() => (
   || marketLicense.value !== 'all'
   || marketTrust.value !== 'all'
 ))
+// 在线货架的排序。市场索引只保证这些计数存在，顺序由索引自己决定；玩家找
+// 内容包时最先想按"装的人最多 / 点赞最多"看，所以在客户端排，不加接口参数。
+type MarketSort = 'recommended' | 'downloads' | 'likes' | 'rating' | 'name'
+const marketSort = ref<MarketSort>('recommended')
+const marketSortOptions: Array<{ value: MarketSort; key: 'modulesSortRecommended' | 'modulesSortDownloads' | 'modulesSortLikes' | 'modulesSortRating' | 'modulesSortName' }> = [
+  { value: 'recommended', key: 'modulesSortRecommended' },
+  { value: 'downloads', key: 'modulesSortDownloads' },
+  { value: 'likes', key: 'modulesSortLikes' },
+  { value: 'rating', key: 'modulesSortRating' },
+  { value: 'name', key: 'modulesSortName' },
+]
+function marketStat(item: ModuleMarketplaceItem, key: 'downloads_total' | 'likes' | 'rating_average'): number {
+  const value = item.stats?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
 const filteredMarket = computed(() => market.value.filter(item => (
   (marketRuleset.value === 'all'
     || (marketRuleset.value === UNLABELLED_RULESET
@@ -138,6 +153,29 @@ const filteredMarket = computed(() => market.value.filter(item => (
   && (marketLicense.value === 'all' || item.license === marketLicense.value)
   && (marketTrust.value === 'all' || item.trust_level === marketTrust.value)
 )))
+const sortedMarket = computed(() => {
+  if (marketSort.value === 'recommended') return filteredMarket.value
+  const rows = [...filteredMarket.value]
+  const byName = (a: ModuleMarketplaceItem, b: ModuleMarketplaceItem) => a.name.localeCompare(b.name, locale.value)
+  rows.sort((a, b) => {
+    if (marketSort.value === 'downloads') {
+      return marketStat(b, 'downloads_total') - marketStat(a, 'downloads_total') || byName(a, b)
+    }
+    if (marketSort.value === 'likes') {
+      // 点赞并列时用下载量兜底：都不动的话顺序会随索引抖动。
+      return marketStat(b, 'likes') - marketStat(a, 'likes')
+        || marketStat(b, 'downloads_total') - marketStat(a, 'downloads_total')
+        || byName(a, b)
+    }
+    if (marketSort.value === 'rating') {
+      return marketStat(b, 'rating_average') - marketStat(a, 'rating_average')
+        || marketStat(b, 'downloads_total') - marketStat(a, 'downloads_total')
+        || byName(a, b)
+    }
+    return byName(a, b)
+  })
+  return rows
+})
 function resetMarketFilters(): void {
   // 规则是服务端过滤的：只改本地值不会把被排除的包取回来，必须重新请求。
   const rulesetChanged = marketRuleset.value !== 'all'
@@ -147,6 +185,7 @@ function resetMarketFilters(): void {
   marketTag.value = 'all'
   marketLicense.value = 'all'
   marketTrust.value = 'all'
+  marketSort.value = 'recommended'
   if (rulesetChanged) void loadMarketplace()
 }
 const loading = ref(false)
@@ -612,6 +651,13 @@ async function checkRecovery() {
               <option v-for="level in marketTrustOptions" :key="level" :value="level">{{ marketTrustLabel(level) }}</option>
             </select>
           </label>
+          <!-- 排序放在筛选项之后：先收窄范围，再决定用什么顺序看。 -->
+          <label class="module-market-filter">
+            <span>{{ t('modulesSortLabel') }}</span>
+            <select v-model="marketSort" data-testid="modules-market-sort" :aria-label="t('modulesSortLabel')">
+              <option v-for="option in marketSortOptions" :key="option.value" :value="option.value">{{ t(option.key) }}</option>
+            </select>
+          </label>
           <button v-if="marketFiltersActive" type="button" class="module-filter-reset" data-testid="modules-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
         </div>
         <div v-if="!filteredMarket.length" class="empty-state" data-testid="modules-online-filtered-empty">
@@ -620,7 +666,7 @@ async function checkRecovery() {
         </div>
         <div v-else class="module-market-grid">
         <MarketplaceCard
-          v-for="item in filteredMarket"
+          v-for="item in sortedMarket"
           :key="item.id"
           :item="marketCardItem(item)"
           :icon="CubeOutline"
