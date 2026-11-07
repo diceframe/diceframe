@@ -117,6 +117,39 @@ def _materialize_module_book_binding(
         return False
 
 
+def _bind_module_book_to_world(store: Any, book_id: str, world_id: str) -> str:
+    """让开局带进来的模块书出现在这一局的世界的资料册列表里。
+
+    资料册列表按 world / global / 当前对局 三个域过滤，**有 binding 但不属于
+    任何一个可见域的书是隐形的**。模块书开局时只挂 game 域，于是玩家从资料册
+    页进来（没有"当前对局"）就再也找不到那本书。补一条 world 域 runtime
+    binding，让它留在世界里可查；已经有 world/global 归属的不动——那是用户
+    自己的选择，不是我们要替他决定的。
+    """
+
+    book_id = str(book_id or "")
+    world_id = str(world_id or "")
+    if not book_id or not world_id:
+        return ""
+    lister = getattr(store, "list_bindings", None)
+    for binding in (lister() if callable(lister) else []) or []:
+        if str(binding.get("book_id") or "") != book_id:
+            continue
+        if str(binding.get("scope_kind") or "") in {"world", "global"}:
+            return ""
+    binding_id = f"bind:{book_id}:world:{world_id}"
+    store.bind_lorebook({
+        "id": binding_id,
+        "book_id": book_id,
+        "scope_kind": "world",
+        "scope_id": world_id,
+        "role": "runtime",
+        "enabled": True,
+        "order": 110,
+    })
+    return binding_id
+
+
 async def create_game(
     dependencies: GameLifecycleDependencies,
     world_id: str,
@@ -213,6 +246,7 @@ async def create_game(
             if store is None or not hasattr(store, "get_lorebook") or not store.get_lorebook(book_id):
                 # catalog 交付模块的资料册不在书库里（绝不启用即灌注）；
                 # 玩家开局显式勾选时按声明**按需**物化（issue #700）。
+                # world 域归属在世界书落地之后补（见下方 _bind_module_book_to_world）。
                 if not _materialize_module_book_binding(dependencies, binding["ref"]):
                     return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
                 if not store.get_lorebook(book_id):
@@ -502,6 +536,11 @@ async def create_game(
                     "order": item["order"],
                 })
                 transaction.track_binding(binding_id)
+                if ref.source_kind in {"module", "plugin"}:
+                    # 世界书此时已落地：把包里的书挂到这个世界，资料册页才查得到。
+                    world_binding_id = _bind_module_book_to_world(store, book_id, world_id)
+                    if world_binding_id:
+                        transaction.track_binding(world_binding_id)
                 content_binding.add_book_ref(instance, {
                     "source_kind": ref.source_kind,
                     "source_id": ref.source_id,
