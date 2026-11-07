@@ -44,7 +44,7 @@ test('library has usable dark/light surfaces and preserves all content tools on 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `width=${width}`).toBeLessThanOrEqual(1)
   }
   await page.setViewportSize(viewport)
-  await page.getByRole('link', { name: '管理来源', exact: true }).click()
+  await page.getByRole('link', { name: '管理内容包', exact: true }).click()
   await expect(page.getByRole('heading', { name: '内容包', exact: true })).toBeVisible()
   for (const id of ['modules-installed', 'modules-local-import', 'modules-online']) await expect(page.getByTestId(id)).toBeVisible()
   await page.getByRole('link', { name: '返回内容库', exact: true }).click()

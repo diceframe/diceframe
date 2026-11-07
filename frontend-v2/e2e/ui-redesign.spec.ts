@@ -120,7 +120,7 @@ test.describe('UI redesign browser acceptance', () => {
     // The shared seed intentionally leaves this package disabled. Its real API
     // projection still exposes the declared adventure inventory, while launch
     // remains unavailable until the package is enabled.
-    await expect(module).toContainText('冒险内容包')
+    await expect(module).toContainText('冒险模组')
     await expect(module).toContainText('包含 1 个冒险')
     await expect(module).toContainText('已禁用，启用后')
     // Marketplace readiness may wait for the fake Hub's bounded network timeout;

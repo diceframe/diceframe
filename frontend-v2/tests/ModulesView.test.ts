@@ -79,11 +79,12 @@ async function mountView(query: Record<string, string> = {}) {
       { path: '/library', name: 'library', component: emptyView },
       { path: '/modules/:moduleId', name: 'module-detail', component: emptyView },
       { path: '/play', name: 'play', component: emptyView },
+      { path: '/creator', name: 'creator', component: emptyView },
     ],
   })
   await router.push({ name: 'modules', query })
   await router.isReady()
-  const wrapper = mount(ModulesView, { global: { plugins: [i18n, router] } })
+  const wrapper = mount(ModulesView, { global: { plugins: [i18n, router], stubs: { Teleport: true } } })
   await flushPromises()
   return { wrapper, router }
 }
@@ -112,7 +113,7 @@ describe('ModulesView', () => {
     // 禁用中的模组仍然列在"已安装"里（否则无法再启用）。
     expect(installedSection.text()).toContain('Dormant Module')
     expect(installedSection.text()).toContain('已禁用')
-    expect(installedSection.text()).toContain('冒险内容包')
+    expect(installedSection.text()).toContain('冒险模组')
     expect(installedSection.text()).toContain('资源包')
     expect(installedSection.text()).toContain('不含固定剧情')
     expect(localSection.find('input[type="file"]').exists()).toBe(true)
@@ -180,6 +181,30 @@ describe('ModulesView', () => {
     expect(wrapper.get('[data-testid="modules-online"]').text()).toContain('mirror down')
   })
 
+  it('explains how packs get listed with a Workshop exit and a direct submission exit', async () => {
+    const { wrapper } = await mountView()
+    expect(wrapper.find('[data-testid="modules-submit-guide"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="modules-submit-guide-open"]').trigger('click')
+    const guide = wrapper.get('[data-testid="modules-submit-guide"]')
+    expect(guide.findAll('li')).toHaveLength(3)
+    expect(guide.text()).toContain('在创作工坊导出冒险模组或资源包')
+    expect(guide.get('[data-testid="modules-submit-go-creator"]').attributes('href')).toBe('/creator')
+    const direct = guide.get('[data-testid="modules-submit-direct"]')
+    expect([direct.attributes('target'), direct.attributes('rel')]).toEqual(['_blank', 'noopener'])
+    const url = new URL(direct.attributes('href') || '')
+    expect(`${url.origin}${url.pathname}`).toBe('https://github.com/diceframe/diceframe-plugins/issues/new')
+    expect(Object.fromEntries(url.searchParams)).toEqual({ template: 'add-content-pack.yml' })
+  })
+
+  it('points authors from an empty online shelf to the Workshop', async () => {
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [] })
+    const { wrapper } = await mountView()
+    const empty = wrapper.get('[data-testid="modules-online-empty"]')
+    expect(empty.text()).toContain('暂时没有在线内容包')
+    expect(empty.get('a').attributes('href')).toBe('/creator')
+  })
+
   it('does not invent a resource count that the online catalog does not provide', async () => {
     mocks.marketplace.mockResolvedValue({ ok: true, modules: [{ ...online.modules[0], adventure_count: 0 }] })
     const { wrapper } = await mountView()
@@ -192,7 +217,7 @@ describe('ModulesView', () => {
     mocks.list.mockResolvedValue({ ok: true, modules: [{ ...installed.modules[0], status: 'disabled', inventory_status: 'disabled' }] })
     const { wrapper } = await mountView()
     const section = wrapper.get('[data-testid="modules-installed"]')
-    expect(section.text()).toContain('冒险内容包')
+    expect(section.text()).toContain('冒险模组')
     expect(section.text()).toContain('启用后')
     expect(section.text()).not.toContain('不含固定剧情')
   })
@@ -226,7 +251,7 @@ describe('ModulesView', () => {
     // 同 id、不同 package：服务端可用也不允许"恢复"，绝不自动绑定。
     const recovery = wrapper.get('[data-testid="modules-recovery"]')
     expect(wrapper.find('[data-testid="modules-recovery-blocked"]').exists()).toBe(true)
-    expect(recovery.text()).toContain('当前可用的模组内容与存档指纹不一致')
+    expect(recovery.text()).toContain('当前可用的内容与存档指纹不一致')
     expect(wrapper.find('[data-testid="modules-recovery-ready"]').exists()).toBe(false)
     expect(wrapper.findAll('a').some(link => link.text() === '返回本局')).toBe(false)
   })
@@ -267,7 +292,7 @@ describe('ModulesView', () => {
     })
 
     expect(wrapper.get('[data-testid="modules-recovery"]').text())
-      .toContain('未安装包含该冒险的模组')
+      .toContain('未安装包含该冒险的内容包')
   })
 
   it('re-validates when the recovery identity changes without a remount', async () => {

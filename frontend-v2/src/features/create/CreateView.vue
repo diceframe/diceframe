@@ -185,8 +185,8 @@ const adventureIssueGuide = computed(() => {
   }
   if (reasons.has('world_mismatch') || (adventureWorldRequired.value && adventureRecommendedWorld.value && !worlds.value.some(item => worldIdOf(item) === adventureRecommendedWorld.value))) {
     return gameDefault(
-      `这个冒险包要求世界“${adventure?.recommended_world_id || '指定世界'}”。请使用推荐世界；如果这个世界尚未安装，请先到内容来源启用它。`,
-      `This adventure package requires the world “${adventure?.recommended_world_id || 'the specified world'}”. Use the recommended world; if it is not installed, enable it in Content sources first.`,
+      `这个冒险包要求世界“${adventure?.recommended_world_id || '指定世界'}”。请使用推荐世界；如果这个世界尚未安装，请先到内容包页启用它。`,
+      `This adventure package requires the world “${adventure?.recommended_world_id || 'the specified world'}”. Use the recommended world; if it is not installed, enable it on the Content packages page first.`,
       `Dieses Abenteuerpaket benötigt die Welt „${adventure?.recommended_world_id || 'die angegebene Welt'}“. Verwende die empfohlene Welt oder aktiviere sie zuerst unter Inhaltsquellen.`,
     )
   }
