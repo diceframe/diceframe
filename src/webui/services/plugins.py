@@ -1,7 +1,6 @@
 """Manifest 插件查询、配置和生命周期。"""
 from __future__ import annotations
 import base64
-import hashlib
 import json
 import logging
 import time
@@ -15,7 +14,13 @@ from src.content_modules.refs import CONTENT_KIND_REGISTRY, ContentRefError
 from src.content_modules.receipts import ImportReceipt, ImportReceiptStore
 from src.content_modules.projection import entries_for_world
 from src.engine.language import normalize_language
-from src.lorebook.module_books import declared_module_book_resource, materialize_module_book
+from src.lorebook.module_books import (
+    book_fingerprint,
+    declared_module_book_id,
+    declared_module_book_resource,
+    entry_fingerprint,
+    materialize_module_book,
+)
 from src.plugin_host.content import safe_id_part
 from src.plugin_host.support import (
     content_delivery_mode,
@@ -85,48 +90,58 @@ def _import_receipts(dependencies: PluginContentDependencies) -> ImportReceiptSt
     return ImportReceiptStore(root) if root else None
 
 
-# Bookkeeping columns that change without anyone editing the entry content.
-_ENTRY_FINGERPRINT_IGNORED = frozenset({
-    "id", "world_id", "book_id", "source_plugin", "created_at", "updated_at",
-})
-
-
 def _entry_fingerprint(entry: dict[str, Any] | None) -> str:
     """Digest of an entry's user-editable content, as the canonical store returns it."""
-    if not entry:
-        return ""
-    content = {k: v for k, v in entry.items() if k not in _ENTRY_FINGERPRINT_IGNORED}
-    text = json.dumps(content, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    return entry_fingerprint(entry)
 
 
 def _book_fingerprint(lorebook: Any, book_id: str) -> str:
     """Digest of a module Book's user-editable state (book fields + entries).
 
-    卸载时与 receipt 里的包写入指纹比对：不一致说明用户改过这本书（改书名
-    或改任何条目都算），按 detach 语义保留。
+    卸载与重导入都拿它和 receipt 里的包写入指纹比对：任何用户可见字段变化
+    （书名、检索设置、条目的关键词 / 可见性 / 匹配策略…）都算改过。指纹实现
+    与物化逻辑同处 ``module_books``，避免两处字段清单漂移。
     """
 
-    if lorebook is None:
-        return ""
+    return book_fingerprint(lorebook, book_id)
+
+
+def _plugin_receipt(
+    dependencies: PluginContentDependencies, plugin_id: str,
+) -> ImportReceipt | None:
+    """This plugin's import receipt, or None when it never recorded anything."""
+
+    receipts = _import_receipts(dependencies)
+    if receipts is None:
+        return None
+    return receipts.load(str(plugin_id), source_kind=PLUGIN_RECEIPT_SOURCE_KIND)
+
+
+def _module_book_has_user_edits(
+    dependencies: PluginContentDependencies, plugin_id: str, book_id: str,
+) -> bool:
+    """Whether an already materialized module Book must not be rewritten.
+
+    三种状态：
+
+    - 书不存在 → 不是用户改动，调用方可以建；
+    - 有 receipt 基线 → 与当前指纹比对，不一致即用户改过；
+    - 完全没有基线（receipt 里没有这本书）→ 无法证明内容是包写的（旧版本
+      安装、人工复制、catalog 早期按需物化），按用户数据对待，不覆盖。
+    """
+
+    lorebook = dependencies.store.lorebook
     get_book = getattr(lorebook, "get_lorebook", None)
-    book = get_book(str(book_id)) if callable(get_book) else None
-    if not isinstance(book, dict):
-        return ""
-    list_entries = getattr(lorebook, "list_book_entries", None)
-    rows = list_entries(str(book_id)) if callable(list_entries) else []
-    basis = {
-        "name": book.get("name"),
-        "description": book.get("description"),
-        "enabled": book.get("enabled"),
-        "entries": [
-            [row.get("id"), row.get("name"), row.get("content"), row.get("enabled")]
-            for row in rows or []
-            if isinstance(row, dict)
-        ],
-    }
-    text = json.dumps(basis, ensure_ascii=False, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if lorebook is None or not callable(get_book):
+        return False
+    if get_book(str(book_id)) is None:
+        return False
+    receipt = _plugin_receipt(dependencies, plugin_id)
+    imported = receipt.fingerprint("lorebook_book", str(book_id)) if receipt else ""
+    if not imported:
+        return True
+    return imported != _book_fingerprint(lorebook, str(book_id))
 
 
 def _record_import_receipt(
@@ -386,23 +401,31 @@ def _cleanup_plugin_books(
     get_book = getattr(lorebook, "get_lorebook", None)
     if not callable(get_book):
         return
-    if receipt is not None:
-        book_ids = {
-            str(item.get("id") or "")
-            for item in receipt.created_objects
-            if str(item.get("type") or "") == "lorebook_book"
-            and ("lorebook_book", str(item.get("id") or "")) not in detached
-        }
-    else:
+    if receipt is None:
+        # 没有 receipt 就没有「包写入基线」：既不能证明书里的内容都是包写的，
+        # 也不能证明用户没改过。整本删除有吃掉玩家数据的风险，一律保留。
         lister = getattr(lorebook, "list_lorebooks", None)
         if not callable(lister):
             return
-        book_ids = {
+        kept = sorted(
             str(book.get("id") or "")
             for book in (lister() or [])
             if str(book.get("source_kind") or "") == "module"
             and str(book.get("source_id") or "") == str(plugin_id)
-        }
+        )
+        if kept:
+            logger.info(
+                "插件 %s 没有导入 receipt，%d 本 module 资料册按用户数据保留",
+                plugin_id, len(kept),
+            )
+            result["books_kept"].extend(kept)
+        return
+    book_ids = {
+        str(item.get("id") or "")
+        for item in receipt.created_objects
+        if str(item.get("type") or "") == "lorebook_book"
+        and ("lorebook_book", str(item.get("id") or "")) not in detached
+    }
     for book_id in sorted(filter(None, book_ids)):
         book = get_book(book_id)
         if not isinstance(book, dict):
@@ -410,11 +433,10 @@ def _cleanup_plugin_books(
         # Receipt 是记账不是权威：现场书不再是 module:plugin_id 的就不动。
         if str(book.get("source_kind") or "") != "module" or str(book.get("source_id") or "") != str(plugin_id):
             continue
-        imported = receipt.fingerprint("lorebook_book", book_id) if receipt is not None else ""
+        imported = receipt.fingerprint("lorebook_book", book_id)
         if imported and imported != _book_fingerprint(lorebook, book_id):
-            # 用户改过这本书（改名或改任何条目都算）：detach 并保留。
-            if receipt is not None:
-                receipt.detach("lorebook_book", book_id)
+            # 用户改过这本书（含只改关键词/可见性/检索设置）：detach 并保留。
+            receipt.detach("lorebook_book", book_id)
             result["books_kept"].append(book_id)
             continue
         if _book_bound_to_running_game(lorebook, book_id):
@@ -445,6 +467,14 @@ def _autoimport_plugin_book(
     lorebook = dependencies.store.lorebook
     if lorebook is None or not callable(getattr(lorebook, "create_lorebook", None)):
         return
+    book_id = declared_module_book_id(plugin_id, resource)
+    if _module_book_has_user_edits(dependencies, plugin_id, book_id):
+        # 启用 / 更新 / 重启都会重放 autoimport：书里已有用户内容时宁可保留，
+        # 不能用包里的旧条目覆盖（P1：重复导入不得静默吃掉玩家修改）。
+        logger.info(
+            "内容包 %s 的资料册 %s 已被用户修改，跳过重新导入", plugin_id, book_id,
+        )
+        return
     book_id = materialize_module_book(lorebook, plugin_id, resource, target_world=target_world)
     _record_import_receipt(dependencies, plugin_id, "lorebook_book", book_id)
 
@@ -468,10 +498,16 @@ def materialize_module_book_binding(
     lorebook = dependencies.store.lorebook
     if not host or lorebook is None:
         return False
+    get_book = getattr(lorebook, "get_lorebook", None)
+    if callable(get_book) and get_book(str(book_id)) is not None:
+        # 书已经在用户库里（可能被玩家改过）：开局只认它，不重写内容。
+        return True
     resource = declared_module_book_resource(host, str(source_id), str(book_id))
     if not resource:
         return False
     materialize_module_book(lorebook, str(source_id), resource)
+    # 按需物化的书同样登记 receipt：卸载时才有「包写入基线」判断用户是否改过。
+    _record_import_receipt(dependencies, str(source_id), "lorebook_book", str(book_id))
     return True
 
 

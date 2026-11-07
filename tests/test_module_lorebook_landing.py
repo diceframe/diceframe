@@ -183,6 +183,108 @@ def test_uninstall_keeps_module_book_user_edited(host, store):
     assert store.list_book_entries(book_id)
 
 
+def test_autoimport_does_not_overwrite_user_edited_entry(host, store):
+    """P1-A：启用/更新会重放 autoimport，包里的旧正文不得盖掉玩家改写。"""
+
+    dependencies = _content_dependencies(host, store)
+    plugin_service._autoimport_plugin_content(dependencies, PLUGIN_ID)
+    book_id = module_book_id(PLUGIN_ID, BOOK_KEY)
+    entry = store.list_book_entries(book_id)[0]
+    store.update_book_entry(book_id, entry["id"], {"content": "玩家补写的港口线索残页。"})
+
+    plugin_service._autoimport_plugin_content(dependencies, PLUGIN_ID)
+
+    current = store.get_entry(entry["id"])
+    assert current is not None
+    assert current["content"] == "玩家补写的港口线索残页。"
+    assert store.get_lorebook(book_id) is not None
+
+
+def test_autoimport_still_refreshes_untouched_book(host, store, tmp_path):
+    """反向保证：玩家没改过时，包更新后的新内容仍然照常写进来（不是冻结）。"""
+
+    dependencies = _content_dependencies(host, store)
+    plugin_service._autoimport_plugin_content(dependencies, PLUGIN_ID)
+    book_id = module_book_id(PLUGIN_ID, BOOK_KEY)
+
+    book_path = tmp_path / "plugins" / PLUGIN_ID / "content" / "lorebooks" / f"{BOOK_KEY}.json"
+    package = json.loads(book_path.read_text(encoding="utf-8"))
+    package["entries"][0]["content"] = "包更新后的正文。"
+    book_path.write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
+
+    plugin_service._autoimport_plugin_content(dependencies, PLUGIN_ID)
+
+    assert any(
+        entry["content"] == "包更新后的正文。"
+        for entry in store.list_book_entries(book_id)
+    )
+
+
+def test_uninstall_keeps_book_when_only_keywords_changed(host, store):
+    """P1-B：只改关键词/匹配设置也是用户数据，不能按「没改过」整本删除。"""
+
+    dependencies = _content_dependencies(host, store)
+    plugin_service._autoimport_plugin_content(dependencies, PLUGIN_ID)
+    book_id = module_book_id(PLUGIN_ID, BOOK_KEY)
+    entry = store.list_book_entries(book_id)[0]
+    store.update_book_entry(book_id, entry["id"], {"keywords": ["玩家自己加的关键词"]})
+
+    result = plugin_service.cleanup_plugin_lorebook(dependencies, PLUGIN_ID)
+
+    assert result["books_kept"] == [book_id]
+    assert result["books_removed"] == 0
+    assert store.get_lorebook(book_id) is not None
+    assert store.get_entry(entry["id"])["keywords"] == ["玩家自己加的关键词"]
+
+
+def test_ondemand_materialization_records_receipt_so_uninstall_cleans_up(host, store):
+    """P1-B：catalog 按需物化也要登记 receipt，未改过的书仍能随卸载清理。"""
+
+    dependencies = _content_dependencies(host, store)
+    book_id = module_book_id(PLUGIN_ID, BOOK_KEY)
+
+    assert plugin_service.materialize_module_book_binding(
+        dependencies, "module", PLUGIN_ID, book_id,
+    ) is True
+    assert store.get_lorebook(book_id) is not None
+
+    result = plugin_service.cleanup_plugin_lorebook(dependencies, PLUGIN_ID)
+
+    assert result["books_removed"] == 1
+    assert store.get_lorebook(book_id) is None
+
+
+def test_ondemand_materialization_keeps_user_edited_book_on_uninstall(host, store):
+    dependencies = _content_dependencies(host, store)
+    book_id = module_book_id(PLUGIN_ID, BOOK_KEY)
+    plugin_service.materialize_module_book_binding(dependencies, "module", PLUGIN_ID, book_id)
+    entry = store.list_book_entries(book_id)[0]
+    store.update_book_entry(book_id, entry["id"], {"keywords": ["开局后补的线索"]})
+
+    result = plugin_service.cleanup_plugin_lorebook(dependencies, PLUGIN_ID)
+
+    assert result["books_kept"] == [book_id]
+    assert result["books_removed"] == 0
+    assert store.get_lorebook(book_id) is not None
+
+
+def test_uninstall_keeps_module_book_without_receipt(host, store):
+    """没有 receipt 就没有包写入基线：不能整本删除可能属于用户的资料。"""
+
+    dependencies = _content_dependencies(host, store)
+    book_id = "module_book_legacy_archive"
+    store.create_lorebook({
+        "id": book_id, "name": "旧版导入的书", "description": "",
+        "language": "zh", "source_kind": "module", "source_id": PLUGIN_ID,
+    })
+
+    result = plugin_service.cleanup_plugin_lorebook(dependencies, PLUGIN_ID)
+
+    assert result["books_kept"] == [book_id]
+    assert result["books_removed"] == 0
+    assert store.get_lorebook(book_id) is not None
+
+
 def test_module_lorebooks_list_declared_resource_for_catalog_modules(host, store):
     # catalog 模式：不启用即灌注，但详情页的资料册区块要能看到声明。
     dependencies = _module_dependencies(host, store)
