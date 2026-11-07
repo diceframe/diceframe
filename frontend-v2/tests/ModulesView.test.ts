@@ -167,6 +167,50 @@ describe('ModulesView', () => {
     expect(wrapper.get('[data-testid="modules-installed"]').text()).toContain('Castle Module')
   })
 
+  it('keeps the core ruleset entries even when no pack declares one', async () => {
+    const base = online.modules[0]!
+    mocks.marketplace.mockResolvedValue({
+      ok: true,
+      modules: [
+        { ...base, id: 'a-pack', name: 'a-pack', ruleset_targets: [], ruleset_declared: false },
+        { ...base, id: 'b-pack', name: 'b-pack', ruleset_targets: [], ruleset_declared: false },
+      ],
+    })
+    const { wrapper } = await mountView()
+
+    const options = wrapper.findAll('.module-market-search select option').map(option => option.text())
+    // 线上内容包全部未声明时，CoC / D&D / Freeform 入口不能消失（否则用户没法筛）
+    expect(options).toContain('CoC')
+    expect(options).toContain('D&D 2024')
+    expect(options).toContain('Freeform')
+    expect(options).toContain('规则未标注')
+    wrapper.unmount()
+  })
+
+  it('refetches the full catalogue when the ruleset filter is reset', async () => {
+    const base = online.modules[0]!
+    const dndPack = { ...base, id: 'dnd-pack', name: 'dnd-pack', ruleset_targets: ['core:dnd2024'], ruleset_declared: true }
+    const cocPack = { ...base, id: 'coc-pack', name: 'coc-pack', ruleset_targets: ['core:coc7'], ruleset_declared: true }
+    // 服务端按规则收窄：选 coc7 只回 CoC 包，选 all 回全部。
+    mocks.marketplace.mockImplementation(async (_keyword: string, ruleset: string) => ({
+      ok: true,
+      modules: ruleset === 'coc7' ? [cocPack] : [dndPack, cocPack],
+    }))
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('[data-testid="modules-market-dnd-pack"]').exists()).toBe(true)
+    await wrapper.get('.module-market-search select').setValue('coc7')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="modules-market-dnd-pack"]').exists()).toBe(false)
+
+    // 重置必须重新请求 all，否则被服务端排除的包不会回来
+    await wrapper.get('[data-testid="modules-filter-reset"]').trigger('click')
+    await flushPromises()
+    expect(mocks.marketplace).toHaveBeenLastCalledWith('', 'all')
+    expect(wrapper.find('[data-testid="modules-market-dnd-pack"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('derives the ruleset filter from the catalogue and never hides undeclared packs', async () => {
     const base = online.modules[0]!
     const withRuleset = (id: string, targets: string[], extra: Record<string, unknown> = {}) => ({

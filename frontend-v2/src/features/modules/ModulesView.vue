@@ -93,9 +93,21 @@ function itemHasDeclaredRuleset(item: ModuleMarketplaceItem): boolean {
 function rulesetLabel(ruleset: string): string {
   if (ruleset === 'coc7') return 'CoC'
   if (ruleset === 'dnd2024') return 'D&D 2024'
+  if (ruleset === 'freeform') return 'Freeform'
   return ruleset
 }
-const marketRulesetOptions = computed(() => [...marketRulesetSeen.value].sort((a, b) => a.localeCompare(b)))
+// 兜底项：即使所有内容包都还没声明规则，规则筛选入口也不能消失。
+// 顺序固定（与后端 alias 表一致：coc → coc7），其余声明值动态追加在后。
+const CORE_RULESET_OPTIONS = ['dnd2024', 'coc7', 'freeform'] as const
+const marketRulesetOptions = computed(() => {
+  const seen = new Set<string>(CORE_RULESET_OPTIONS)
+  for (const value of marketRulesetSeen.value) seen.add(value)
+  const core = CORE_RULESET_OPTIONS.filter(value => seen.has(value))
+  const extra = [...seen]
+    .filter(value => !(CORE_RULESET_OPTIONS as readonly string[]).includes(value))
+    .sort((a, b) => a.localeCompare(b))
+  return [...core, ...extra]
+})
 const marketHasUndeclaredRuleset = computed(() => market.value.some(item => !itemHasDeclaredRuleset(item)))
 const marketTagOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.tags || [])))
 const marketLicenseOptions = computed(() => uniqueFilterValues(market.value.map(item => item.license)))
@@ -124,13 +136,16 @@ const filteredMarket = computed(() => market.value.filter(item => (
   && (marketLicense.value === 'all' || item.license === marketLicense.value)
   && (marketTrust.value === 'all' || item.trust_level === marketTrust.value)
 )))
-function resetMarketFilters() {
+function resetMarketFilters(): void {
+  // 规则是服务端过滤的：只改本地值不会把被排除的包取回来，必须重新请求。
+  const rulesetChanged = marketRuleset.value !== 'all'
   marketRuleset.value = 'all'
   marketProfile.value = 'all'
   marketLanguage.value = 'all'
   marketTag.value = 'all'
   marketLicense.value = 'all'
   marketTrust.value = 'all'
+  if (rulesetChanged) void loadMarketplace()
 }
 const loading = ref(false)
 const importFile = ref<File | null>(null)
@@ -233,12 +248,17 @@ async function load() {
   }
 }
 
+let marketRequestSeq = 0
+
 async function loadMarketplace() {
+  const sequence = ++marketRequestSeq
   marketBusy.value = true
   marketError.value = ''
   try {
     const rulesetQuery = marketRuleset.value === UNLABELLED_RULESET ? 'all' : marketRuleset.value
     const result = await moduleApi.marketplace(marketKeyword.value, rulesetQuery)
+    // 快速切换规则/重复点击时，旧响应不得覆盖新筛选结果。
+    if (sequence !== marketRequestSeq) return
     if (!result.ok) {
       market.value = []
       marketError.value = result.error || t('modulesOnlineUnavailable', { error: result.error_code || '' })
@@ -255,10 +275,11 @@ async function loadMarketplace() {
     }
     marketRulesetSeen.value = [...seen]
   } catch (cause: unknown) {
+    if (sequence !== marketRequestSeq) return
     market.value = []
     marketError.value = errorMessage(cause)
   } finally {
-    marketBusy.value = false
+    if (sequence === marketRequestSeq) marketBusy.value = false
   }
 }
 
