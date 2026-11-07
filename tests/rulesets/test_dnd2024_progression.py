@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.progression import (
     Dnd2024AdvancementEngine,
     Dnd2024ProgressionCatalog,
@@ -108,6 +109,10 @@ def test_advancement_requires_subclass_and_ability_score_choices() -> None:
     assert {"improved_critical", "remarkable_athlete"}.issubset(
         {item["id"] for item in level_three["features"]["class_feature_grants"]}
     )
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
+    assert resolver.has_feature(
+        level_three, "improved_critical", owner_ref="subclass:champion",
+    ) is True
 
     missing_asi = engine.preview_next_level(level_three)
     assert missing_asi["ok"] is False

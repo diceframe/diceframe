@@ -230,7 +230,12 @@ class RulesetBundleLoader:
             for source_id, entity in by_id.items():
                 for node in _walk(entity):
                     for key, raw in node.items():
-                        if key == "source_ref":
+                        if key in {"source_ref", "owner_ref"}:
+                            # ``owner_ref`` is a class-feature ownership
+                            # discriminator (class:/subclass:), validated by
+                            # the feature catalog; subclasses are nested under
+                            # their class catalog rather than standalone
+                            # bundle entities.
                             continue
                         refs: list[Any] = []
                         if key.endswith("_ref"):

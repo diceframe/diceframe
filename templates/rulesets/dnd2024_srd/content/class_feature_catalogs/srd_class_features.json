@@ -222,9 +222,10 @@
         },
         {
           "id": "improved_critical",
+          "owner_ref": "subclass:champion",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p49:improved-critical",
-          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 19 or 20.",
+          "summary": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
           "parameters": {"crit_threshold": 19}
         },
         {
@@ -235,9 +236,10 @@
         },
         {
           "id": "superior_critical",
+          "owner_ref": "subclass:champion",
           "minimum_level": 15,
           "source_ref": "srd-5.2.1:p49:superior-critical",
-          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 18-20.",
+          "summary": "Your attack rolls with weapons and Unarmed Strikes can now score a Critical Hit on a roll of 18-20 on the d20.",
           "parameters": {"crit_threshold": 18}
         },
         {
