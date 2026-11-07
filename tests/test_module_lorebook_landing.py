@@ -319,6 +319,53 @@ def test_module_lorebooks_dedupe_materialized_book_against_catalog_row(host, sto
     assert rows[0]["entry_count"] == 2
 
 
+def _write_nameless_pack(plugins_dir: Path) -> PluginHost:
+    """A pack book with entries but no ``name`` (like coc-dagon's GM guide)."""
+
+    write_plugin(
+        plugins_dir, PLUGIN_ID, plugin_type="content-pack", entrypoint=False,
+        manifest_extra={
+            "content_delivery_mode": "catalog",
+            "contributes": {"lorebooks": ["content/lorebooks/*.json"]},
+        },
+    )
+    books_dir = plugins_dir / PLUGIN_ID / "content" / "lorebooks"
+    books_dir.mkdir(parents=True)
+    (books_dir / "dagon-gm-guide.json").write_text(json.dumps({
+        "entries": [
+            {"id": "guide-frame", "name": "守秘人框架", "content": "这不是调查怪物，是调查记录。"},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    data_dir = plugins_dir.parent / "data"
+    (data_dir / PLUGIN_ID).mkdir(parents=True, exist_ok=True)
+    (data_dir / PLUGIN_ID / "config.json").write_text(
+        json.dumps({"enabled": True}), encoding="utf-8",
+    )
+    return PluginHost(plugins_dir, data_dir)
+
+
+def test_nameless_declared_book_keeps_one_readable_name_before_and_after_materializing(tmp_path):
+    # 包里没写 name 时，catalog 会拿文件名兜底（"dagon-gm-guide"），物化时
+    # adapter 又会兜到 "Legacy Lorebook"——同一个文件三个名字。两处必须同名。
+    plugins_dir = tmp_path / "plugins"
+    nameless = _write_nameless_pack(plugins_dir)
+    nameless.discover()
+    lorebook = LorebookStore(tmp_path / "lorebook.db")
+    lorebook.open()
+    try:
+        rows = module_service._module_lorebooks(_module_dependencies(nameless, lorebook), PLUGIN_ID)
+        assert [row["name"] for row in rows] == ["Dagon GM Guide"]
+        # 声明 key 仍要暴露：包页据此读取只读条目正文。
+        assert rows[0]["key"] == "dagon-gm-guide"
+        assert rows[0]["entry_count"] == 1
+
+        plugin_service._autoimport_plugin_content(_content_dependencies(nameless, lorebook), PLUGIN_ID)
+        book = lorebook.get_lorebook(module_book_id(PLUGIN_ID, "dagon-gm-guide"))
+        assert book["name"] == "Dagon GM Guide"
+    finally:
+        lorebook.close()
+
+
 pytest_plugins = ["tests.webapi_harness"]
 
 
@@ -363,6 +410,48 @@ async def test_create_game_materializes_declared_module_book_on_demand(web_api, 
     # 的那个缺口——书只有在书库里，才谈得上可查、可编辑。而且不依赖"当前
     # 对局"：离开对局、从资料册页进来也要能看到。
     listing = api.list_lorebooks("template_world", "")
+    assert book_id in {str(row.get("id") or "") for row in listing["books"]}
+
+
+@pytest.mark.asyncio
+async def test_create_game_in_module_supplied_world_keeps_module_book_visible(web_api, tmp_path):
+    """模组没有世界模板时按模组建世界：书必须落在这个世界里，且查得到（大衮）。"""
+    api, lorebook, _registry, _llm, _worlds_dir = web_api
+    plugins_dir = tmp_path / "plugins"
+    plugin_host = _write_nameless_pack(plugins_dir)
+    plugin_host.discover()
+    dependencies = _content_dependencies(plugin_host, lorebook)
+    lifecycle_deps = api._game_lifecycle._dependencies
+    object.__setattr__(
+        lifecycle_deps, "materialize_module_book",
+        lambda source_kind, source_id, book_id: plugin_service.materialize_module_book_binding(
+            dependencies, source_kind, source_id, book_id,
+        ),
+    )
+
+    world_id = "module_lore-pack_dagon-1"
+    book_id = module_book_id(PLUGIN_ID, "dagon-gm-guide")
+    result = await api.create_game(
+        world_id,
+        game_name="大衮：深潮之下",
+        custom_world=True,
+        book_bindings=[{
+            "ref": {
+                "source_kind": "module", "source_id": PLUGIN_ID,
+                "kind": "lorebook", "id": book_id, "digest": "",
+            },
+        }],
+        players=[{"character_name": "艾琳", "attributes": {"str": 10}}],
+    )
+
+    assert result["ok"] is True, result
+    assert lorebook.get_world(world_id) is not None
+    assert lorebook.get_lorebook(book_id)["name"] == "Dagon GM Guide"
+    assert any(
+        str(binding.get("book_id") or "") == book_id
+        for binding in lorebook.list_bindings(scope_kind="world", scope_id=world_id)
+    )
+    listing = api.list_lorebooks(world_id, "")
     assert book_id in {str(row.get("id") or "") for row in listing["books"]}
 
 

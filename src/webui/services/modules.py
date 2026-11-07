@@ -30,7 +30,7 @@ from src.plugin_host.support import (
     content_delivery_mode,
     content_profile,
 )
-from src.lorebook.module_books import module_book_id
+from src.lorebook.module_books import module_book_display_name, module_book_id
 from src.adventures import AdventureBundleLoader
 from src.plugin_host.registry import ContributionRegistry
 from src.version import version_below
@@ -248,7 +248,11 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
         seen_ids.add(book_id)
         rows.append({
             "id": book_id,
-            "name": str(resource.get("name") or external_id),
+            # 包内文件可能没写 name：catalog 兜底成文件名，直接显示就成了
+            # "dagon-gm-guide"。这里与物化共用同一套可读名字兜底。
+            "name": module_book_display_name(resource) or external_id,
+            # 读取条目正文用的声明 key（文件名），与上面的 canonical book id 不同。
+            "key": external_id,
             "description": str(resource.get("description") or ""),
             "language": str(resource.get("language") or "zh-CN"),
             "enabled": True,

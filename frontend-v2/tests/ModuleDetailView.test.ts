@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   enable: vi.fn(),
   uninstall: vi.fn(),
   confirm: vi.fn(),
+  packContent: vi.fn(),
 }))
 
 vi.mock('../src/api/modules', async importOriginal => {
@@ -34,6 +35,11 @@ vi.mock('../src/api/modules', async importOriginal => {
       uninstall: mocks.uninstall,
     },
   }
+})
+
+vi.mock('../src/api/client', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/api/client')>()
+  return { ...actual, api: (path: string, init?: RequestInit) => mocks.packContent(path, init) }
 })
 
 vi.mock('../src/composables/useConfirm', () => ({
@@ -110,6 +116,7 @@ describe('ModuleDetailView', () => {
     mocks.marketplace.mockResolvedValue({ ok: true, modules: [] })
     mocks.disable.mockResolvedValue({ ok: true })
     mocks.uninstall.mockResolvedValue({ ok: true })
+    mocks.packContent.mockResolvedValue({ ok: false })
   })
 
   it('shows metadata, compatibility, adventures, content counts, and usage saves', async () => {
@@ -320,6 +327,32 @@ describe('ModuleDetailView', () => {
     expect(section.text()).toContain('包内只读')
     expect(section.text()).toContain('已在资料册中')
     expect(section.text()).toContain('不随安装写入你的书库')
+  })
+
+  it('reads pack-only entries in place so the book is not just a name', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({
+      adventure_count: 0, adventures: [], content_profile: 'content-pack',
+      lorebooks: [{
+        id: 'module_book_castle_archive', name: 'Dagon GM Guide', description: '', language: 'zh-CN',
+        enabled: true, source_kind: 'module', source_id: 'castle-module', catalog: true, entry_count: 1,
+        key: 'dagon-gm-guide',
+      }],
+    }))
+    mocks.packContent.mockResolvedValue({
+      ok: true,
+      content: { entries: [{ id: 'guide-frame', name: '守秘人框架', content: '这不是调查怪物，是调查记录。' }] },
+    })
+    const { wrapper } = await mountView()
+
+    await buttonByText(wrapper, '查看条目').trigger('click')
+    await flushPromises()
+
+    // 包内条目按声明 key 读取，和 canonical book id 不是一回事。
+    expect(mocks.packContent).toHaveBeenCalledWith('/modules/castle-module/content/lorebook/dagon-gm-guide', undefined)
+    const entries = wrapper.get('[data-testid="module-lorebook-entries"]')
+    expect(entries.text()).toContain('守秘人框架')
+    expect(entries.text()).toContain('这不是调查怪物')
+    expect(entries.text()).toContain('包内条目只读')
   })
 
   it('offers a pack-wide launch for resource packs that declare lorebooks', async () => {
