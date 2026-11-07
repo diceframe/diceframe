@@ -29,6 +29,7 @@ from src.commands.state_items import (
     classify_item,
     grant_classified_item,
     split_item_quantity,
+    take_from_inventory,
 )
 from src.commands.tag_parser import parse_tag_state
 from src.commands.economy_effects import unpriced_purchase_notice
@@ -116,12 +117,44 @@ def test_append_inventory_item_merges_across_one_sided_item_ref() -> None:
         {"inventory": distinct}, "治疗药水", qty=1, item_ref="item:potion_b",
     )
     assert len(distinct) == 2
+    # 无身份行 + 有身份行并存时，按名授予并入唯一的无身份行，而不是每次
+    # 追加一行 —— 否则重复发放会让存档无上限膨胀（#653 review 残留项）。
     ambiguous = [
         {"name": "治疗药水", "qty": 1},
         {"name": "治疗药水", "qty": 1, "item_ref": "item:potion_a"},
     ]
     append_inventory_item({"inventory": ambiguous}, "治疗药水", qty=1)
-    assert len(ambiguous) == 3
+    assert ambiguous == [
+        {"name": "治疗药水", "qty": 2},
+        {"name": "治疗药水", "qty": 1, "item_ref": "item:potion_a"},
+    ]
+    # 多个无身份行仍然是歧义：不猜，照旧追加。
+    multi_anonymous = [
+        {"name": "治疗药水", "qty": 1},
+        {"name": "治疗药水", "qty": 1},
+    ]
+    append_inventory_item({"inventory": multi_anonymous}, "治疗药水", qty=1)
+    assert len(multi_anonymous) == 3
+
+
+def test_take_from_inventory_matches_the_ref_that_counts_see() -> None:
+    # inventory_ref_counts 把只带 item_key 的匿名行计成 item:<item_key>；
+    # 取件必须认同一个口径，否则校验通过、掷骰通过、apply 阶段才失败。
+    sheet: dict = {"inventory": [
+        {"name": "Potion of Healing", "item_key": "potion_of_healing", "qty": 1},
+    ]}
+    entry = take_from_inventory(sheet, "", "item:potion_of_healing")
+    assert entry is not None and entry["item_key"] == "potion_of_healing"
+    assert sheet["inventory"] == []
+    # 显式身份不同的行绝不被匿名回退误取。
+    sheet2: dict = {"inventory": [
+        {"name": "Potion", "qty": 1, "item_ref": "item:potion_b"},
+        {"name": "Potion", "qty": 1, "item_key": "potion_of_healing"},
+    ]}
+    entry2 = take_from_inventory(sheet2, "", "item:potion_of_healing")
+    assert entry2 is not None and entry2.get("item_key") == "potion_of_healing"
+    assert len(sheet2["inventory"]) == 1
+    assert sheet2["inventory"][0]["item_ref"] == "item:potion_b"
 
 
 def test_grant_classified_item_qty_stacks_into_existing_row() -> None:

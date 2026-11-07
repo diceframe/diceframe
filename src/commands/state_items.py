@@ -160,6 +160,15 @@ def append_inventory_item(
             target = anonymous[0] if len(anonymous) == 1 else None
     elif len(candidates) == 1:
         target = candidates[0]
+    else:
+        # An identity-less grant next to a row that already carries a ref:
+        # merging into the one anonymous row keeps the sheet from growing a
+        # new identity-less row on every repeat grant.  Several anonymous
+        # rows stay ambiguous and append, as before.
+        anonymous = [
+            item for item in candidates if not str(item.get("item_ref") or "")
+        ]
+        target = anonymous[0] if len(anonymous) == 1 else None
     if target is not None:
         if not target.get("effect") and effect:
             target["effect"] = effect
@@ -345,6 +354,19 @@ def _find_inventory_row(
             if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
                 continue
             if str(row.get("item_ref") or "") == wanted_ref:
+                return index, row
+        # ``inventory_ref_counts`` derives ``item:<item_key>`` for anonymous
+        # rows, so validation counts a row this function could not find and
+        # the take only failed later at apply time.  Derive the same ref here
+        # for anonymous rows; rows carrying a different explicit ref are
+        # never touched, so identity isolation is preserved.
+        for index, row in enumerate(inventory):
+            if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
+                continue
+            if row.get("item_ref"):
+                continue
+            row_item_key = str(row.get("item_key") or "").strip()
+            if row_item_key and f"item:{row_item_key}" == wanted_ref:
                 return index, row
         return None, None
 
