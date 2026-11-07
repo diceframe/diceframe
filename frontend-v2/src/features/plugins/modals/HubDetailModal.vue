@@ -7,6 +7,9 @@ import type { HubRatingSummary, PluginMarketplaceItem } from '@/api/types'
 
 defineProps<{
   show: boolean
+  // The online content packages shelf reuses this dialog with its own wording.
+  title?: string
+  descriptionTitle?: string
   hubDetail: PluginMarketplaceItem | null
   hubDetailLoading: boolean
   hubReadmeLoading: boolean
@@ -42,7 +45,7 @@ function authorLabel(author: unknown): string {
     :show="show"
     preset="card"
     class="hub-detail-modal"
-    :title="t('hubPluginDetails')"
+    :title="title || t('hubPluginDetails')"
     @update:show="(value: boolean) => emit('update:show', value)"
   >
     <NSpin :show="hubDetailLoading">
@@ -125,7 +128,7 @@ function authorLabel(author: unknown): string {
             <NAlert v-if="hubDetail.security?.install_allowed === false" type="error" :title="t('hubInstallBlocked')">
               {{ (hubDetail.security.blocking_reasons || []).join(t('listSeparator')) }}
             </NAlert>
-            <h3>{{ t('hubPluginDescription') }}</h3>
+            <h3>{{ descriptionTitle || t('hubPluginDescription') }}</h3>
             <section v-if="safeHubReadmeHtml" class="hub-readme safe-markdown" v-html="safeHubReadmeHtml" />
             <NSpin v-else-if="hubReadmeLoading" size="small" />
             <p v-else-if="!hubDetailLoading" class="muted">{{ t('hubReadmeUnavailable') }}</p>
