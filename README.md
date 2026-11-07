@@ -9,7 +9,7 @@
 
 DiceFrame is a free, open-source, self-hostable **AI tabletop RPG engine** with an AI game master (AI GM), supporting **D&D / CoC / custom rules** with a **multiplayer Web UI**. Bring your own model: DeepSeek, SiliconFlow, OpenAI, Ollama, or any OpenAI-compatible API.
 
-中文：DiceFrame（骰框）是免费开源、可自己部署的 **AI 跑团（TRPG）引擎**，由 AI 担任 GM / KP，支持 D&D / CoC / 自定义规则与多人 WebUI，可接入 DeepSeek 等大模型。[简体中文说明](README_zh-CN.md)
+中文：DiceFrame（骰框）是免费开源、可自己部署的 **AI 跑团（TRPG）引擎**，由 AI 担任 GM / KP，支持 D&D / CoC / 自定义规则与多人 WebUI，自备模型 API 即可使用。[简体中文说明](README_zh-CN.md)
 
 ![A play round: type an action, reveal an automatic dice check, and receive the GM reply](docs/assets/diceframe-play-round.gif)
 *Real Web UI; demonstration game with scripted check results and GM replies.*
