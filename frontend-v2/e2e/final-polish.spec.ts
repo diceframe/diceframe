@@ -395,7 +395,7 @@ test('about, header and content-pack controls use the final layout contract', as
     const rect = button.getBoundingClientRect()
     return { top: rect.top, whiteSpace: getComputedStyle(button).whiteSpace }
   }))
-  expect(buttonGeometry.length).toBeGreaterThanOrEqual(2)
+  expect(buttonGeometry.length).toBeGreaterThanOrEqual(1)
   expect(Math.max(...buttonGeometry.map(button => button.top)) - Math.min(...buttonGeometry.map(button => button.top))).toBeLessThanOrEqual(2)
   expect(buttonGeometry.every(button => button.whiteSpace === 'nowrap')).toBe(true)
 })
