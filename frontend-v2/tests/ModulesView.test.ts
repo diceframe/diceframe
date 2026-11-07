@@ -213,6 +213,61 @@ describe('ModulesView', () => {
     expect(card.text()).not.toContain('包含 0 项资料')
   })
 
+  it('labels a content pack that carries adventures by its profile in both lists', async () => {
+    // A plain content pack may ship adventures (office-night 1.3.0); the label
+    // follows content_profile and the adventures are reported separately.
+    mocks.list.mockResolvedValue({ ok: true, modules: [{
+      ...installed.modules[1], id: 'office-night', name: 'Office Night', status: 'running',
+      content_delivery_mode: 'legacy_autoimport', adventure_count: 1, content_counts: { world: 1 },
+    }] })
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [{
+      ...online.modules[0], id: 'office-night', name: 'Office Night', content_profile: 'content-pack',
+      content_delivery_mode: 'legacy_autoimport', adventure_count: 1,
+    }] })
+    const { wrapper } = await mountView()
+
+    const installedCard = wrapper.get('[data-testid="modules-installed"] .module-card')
+    expect(installedCard.get('.eyebrow').text()).toBe('资源包')
+    expect(installedCard.text()).toContain('包含 1 个冒险')
+    const onlineCard = wrapper.get('[data-testid="modules-market-office-night"]')
+    expect(onlineCard.get('.eyebrow').text()).toBe('资源包')
+    expect(onlineCard.text()).toContain('包含 1 个冒险')
+  })
+
+  it('shows index credits, trust, stars, languages and repository without empty placeholders', async () => {
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [
+      {
+        ...online.modules[0], author: 'EOEOY', license: 'CC BY-NC 4.0', trust_level: 'verified', stars: 12,
+        languages: ['zh-CN', 'en', 'fr'], repository_url: 'https://github.com/diceframe/module-other-module',
+      },
+      { ...online.modules[1], author: '', license: '' },
+    ] })
+    const { wrapper } = await mountView()
+
+    const credited = wrapper.get('[data-testid="modules-market-other-module"]')
+    expect(credited.get('[data-testid="modules-market-credits"]').text()).toBe('作者: EOEOY · 许可证: CC BY-NC 4.0')
+    expect(credited.findAll('[data-testid="modules-market-badges"] li').map(item => item.text()))
+      .toEqual(['已验证作者', '★ 12', '简体中文', 'English', 'fr'])
+    const repository = credited.get('a[target="_blank"]')
+    expect(repository.attributes('href')).toBe('https://github.com/diceframe/module-other-module')
+    expect(repository.attributes('rel')).toBe('noopener noreferrer')
+
+    const bare = wrapper.get('[data-testid="modules-market-castle-module"]')
+    expect(bare.find('[data-testid="modules-market-credits"]').exists()).toBe(false)
+    expect(bare.find('a[target="_blank"]').exists()).toBe(false)
+    expect(bare.findAll('[data-testid="modules-market-badges"] li').map(item => item.text())).toEqual(['官方', '★ 3', '简体中文'])
+  })
+
+  it('says why a pack that needs a newer DiceFrame cannot be installed', async () => {
+    mocks.marketplace.mockResolvedValue({ ok: true, modules: [{
+      ...online.modules[0], installable: false, needs_core_update: true, min_app_version: '3.1.0',
+    }] })
+    const { wrapper } = await mountView()
+    const card = wrapper.get('[data-testid="modules-market-other-module"]')
+    expect(card.get('[data-testid="modules-market-core-update"]').text()).toBe('需升级 DiceFrame 至 3.1.0 及以上')
+    expect(card.get('.module-market-actions button').attributes('disabled')).toBeDefined()
+  })
+
   it('keeps a disabled installed adventure classified by its readable inventory', async () => {
     mocks.list.mockResolvedValue({ ok: true, modules: [{ ...installed.modules[0], status: 'disabled', inventory_status: 'disabled' }] })
     const { wrapper } = await mountView()

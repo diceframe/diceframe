@@ -71,11 +71,36 @@ export function moduleCopy(locale: Locale): ModuleCopy {
   return copies[locale] || copies.en
 }
 
-export function moduleCategory(value: { adventure_count?: number | null; adventures?: unknown[]; inventory_status?: string }): ModuleCategory {
+/**
+ * The category label follows the declared `content_profile`, which is the
+ * install contract (an adventure module must use catalog delivery). Whether a
+ * pack carries adventures is reported separately by `moduleInventory`: a plain
+ * content pack may ship adventures too, and that must not relabel it.
+ */
+export function moduleCategory(value: { content_profile?: string | null }): ModuleCategory {
+  if (value.content_profile === 'adventure-module') return 'adventure'
+  if (value.content_profile === 'content-pack') return 'resource'
+  return 'unknown'
+}
+
+export function moduleCategoryLabel(value: { content_profile?: string | null }, copy: ModuleCopy): string {
+  const category = moduleCategory(value)
+  if (category === 'adventure') return copy.adventureLabel
+  if (category === 'resource') return copy.resourceLabel
+  return copy.packLabel
+}
+
+export type ModuleInventory = 'adventures' | 'resources' | 'unknown'
+
+/**
+ * What the installed pack actually contains. Disabled packs still count their
+ * declared adventures; an unreadable inventory is `unknown`, never "empty".
+ */
+export function moduleInventory(value: { adventure_count?: number | null; adventures?: unknown[]; inventory_status?: string }): ModuleInventory {
   if (value.inventory_status === 'unknown') return 'unknown'
   const adventures = Array.isArray(value.adventures) ? value.adventures.length : 0
-  if (Number(value.adventure_count) > 0 || adventures > 0) return 'adventure'
-  return value.adventure_count == null ? 'unknown' : 'resource'
+  if (Number(value.adventure_count) > 0 || adventures > 0) return 'adventures'
+  return value.adventure_count == null ? 'unknown' : 'resources'
 }
 
 const contentKindLabels: Record<string, Record<Locale, string>> = {

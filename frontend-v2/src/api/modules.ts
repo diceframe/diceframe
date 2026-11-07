@@ -87,6 +87,9 @@ export type ModuleMarketplaceItem = {
   repository_url: string
   release_url: string
   stars: number
+  // From the plugin index; empty when the index and manifest do not say.
+  author: string
+  license: string
   installed: boolean
   installed_version: string
   update_available: boolean
