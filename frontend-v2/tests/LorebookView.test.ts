@@ -721,6 +721,34 @@ describe('LorebookView perspective inspector', () => {
     wrapper.unmount()
   })
 
+  it('labels the world option as a total and names the book count only when there are several', async () => {
+    mocks.route.query = {}
+    mocks.api.mockImplementation(async (path: string) => {
+      const p = String(path)
+      if (p.includes('/preview')) return previewFor(p)
+      if (p.includes('/characters')) return characters
+      if (p.includes('/games')) return games
+      if (p.startsWith('/lorebooks?')) return { books: [] }
+      if (p.includes('/lorebooks/world%3A')) return { entries: [] }
+      if (p.includes('/lorebook/')) return lorebook
+      if (p.includes('/worlds')) return { worlds: [
+        { id: 'w1', name: '测试世界', language: 'zh-CN', entry_count: 3, book_count: 1 },
+        { id: 'w2', name: '多书世界', language: 'zh-CN', entry_count: 11, book_count: 2 },
+      ] }
+      throw new Error(`unexpected path ${p}`)
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await flushPromises()
+
+    const labels = wrapper.findAll('.lore-context-select option').map(option => option.text())
+    // 单书世界的两个数字必然相等，不写本数以免看起来像重复。
+    expect(labels).toContain('测试世界 · 3 条')
+    // 多书世界点明本数，读得出「11 条」是合计而不是主册自己的。
+    expect(labels).toContain('多书世界 · 2 本 · 11 条')
+    wrapper.unmount()
+  })
+
   it('syncs a language-filter choice to a canonical translated world and keeps it after remount', async () => {
     mocks.route.query = { world: 'w1' }
     mocks.router.replace.mockImplementation(({ query }: { query: Record<string, unknown> }) => { mocks.route.query = query })

@@ -952,6 +952,7 @@ export const en = {
   currentWorldBinding: 'Current binding: {id}. Switching refreshes story highlights, map, and lorebook context.',
   notBound: 'Not bound',
   entriesCount: '{count} entries',
+  booksCount: '{count} books',
   noWorldCandidates: 'No available worlds or lorebooks.',
   editRoomPassword: 'Edit Room Password',
   setRoomPassword: 'Set Room Password',

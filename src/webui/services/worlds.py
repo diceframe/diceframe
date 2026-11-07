@@ -188,8 +188,36 @@ def _ensure_user_world_template(
     return path
 
 
+def _world_book_counts(lorebook: Any) -> dict[str, int]:
+    """Count the distinct Books each World owns, in the same scope as ``entry_count``.
+
+    ``entry_count`` 是 world 域绑定书的条目并集，所以「几本」也必须只数
+    world 域绑定，否则「2 本 · 11 条」两个数字会互相对不上（game 域里
+    那些按对局挂的引用不该算成世界的书）。
+    """
+
+    lister = getattr(lorebook, "list_bindings", None)
+    if not callable(lister):
+        return {}
+    try:
+        bindings = lister() or []
+    except Exception:  # noqa: BLE001 - a broken index must not hide the world list
+        logger.warning("统计世界资料册数量失败，已跳过", exc_info=True)
+        return {}
+    owned: dict[str, set[str]] = {}
+    for binding in bindings:
+        if not isinstance(binding, dict) or str(binding.get("scope_kind") or "") != "world":
+            continue
+        world_id = str(binding.get("scope_id") or "")
+        book_id = str(binding.get("book_id") or "")
+        if world_id and book_id:
+            owned.setdefault(world_id, set()).add(book_id)
+    return {world_id: len(book_ids) for world_id, book_ids in owned.items()}
+
+
 def list_worlds(dependencies: WorldDependencies) -> dict[str, Any]:
     worlds = dependencies.lorebook.list_worlds()
+    book_counts = _world_book_counts(dependencies.lorebook)
     for w in worlds:
         entries = (
             dependencies.content_projection.for_world_authoring(w["id"])
@@ -197,6 +225,8 @@ def list_worlds(dependencies: WorldDependencies) -> dict[str, Any]:
             else entries_for_world(dependencies.lorebook, w["id"])
         )
         w["entry_count"] = len(entries)
+        # 每个世界都有一本主册，即使它没有 binding 记录（投影会回退到主册）。
+        w["book_count"] = book_counts.get(str(w.get("id") or ""), 0) or 1
         w["gm_style"] = _read_user_template_gm_style(
             dependencies, str(w.get("id") or ""),
         )

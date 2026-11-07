@@ -1701,6 +1701,8 @@ export interface WorldSummary {
   world_name?: string
   description?: string
   entry_count?: number
+  /** 这个世界的 world 域资料册本数，与 entry_count 同口径（主册 + 额外书）。 */
+  book_count?: number
   language?: string
   scene_image?: SceneImageRef
   /** Optional pool of content-provided defaults; scene_image remains the legacy primary. */

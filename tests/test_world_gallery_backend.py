@@ -686,3 +686,44 @@ def test_compose_gm_prompt_without_world_data_is_unchanged(tmp_path) -> None:
 
     assert "BASE_GM_PROMPT" in prompt
     assert "GM 叙事风格" not in prompt
+
+
+class BoundLoreStore(FakeLoreStore):
+    """假书库：额外暴露 binding，用于世界列表的「几本」统计。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bindings: list[dict] = []
+
+    def list_bindings(self, *, scope_kind: str | None = None, scope_id: str | None = None) -> list[dict]:
+        return [
+            binding for binding in self.bindings
+            if (scope_kind is None or binding["scope_kind"] == scope_kind)
+            and (scope_id is None or binding["scope_id"] == scope_id)
+        ]
+
+
+def test_list_worlds_reports_how_many_books_each_world_owns(tmp_path) -> None:
+    """世界的「几本」必须与 entry_count 同口径：只数 world 域，game 域引用不算。"""
+
+    store = BoundLoreStore()
+    store.create_world("two_books", "两本书的世界")
+    store.create_world("one_book", "一本书的世界")
+    store.create_world("no_binding", "还没有书的世界")
+    store.bindings = [
+        {"book_id": "world:two_books", "scope_kind": "world", "scope_id": "two_books"},
+        {"book_id": "book:extra", "scope_kind": "world", "scope_id": "two_books"},
+        {"book_id": "world:one_book", "scope_kind": "world", "scope_id": "one_book"},
+        # 按对局挂的 runtime 引用属于那一局，不是世界自己的书。
+        {"book_id": "book:runtime", "scope_kind": "game", "scope_id": "web|x|bot"},
+    ]
+
+    rows = {
+        row["id"]: row
+        for row in worlds_service.list_worlds(make_api_with_lorebook(tmp_path, store))["worlds"]
+    }
+
+    assert rows["two_books"]["book_count"] == 2
+    assert rows["one_book"]["book_count"] == 1
+    # 投影在没有任何 world binding 时回退主册，所以「1 本」仍是真话。
+    assert rows["no_binding"]["book_count"] == 1

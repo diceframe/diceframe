@@ -952,6 +952,7 @@ export const zhCN = {
   currentWorldBinding: '当前绑定：{id}。切换后会刷新剧情高亮、地图和资料册上下文。',
   notBound: '未关联',
   entriesCount: '{count} 条',
+  booksCount: '{count} 本',
   noWorldCandidates: '没有可用的世界或资料册。',
   editRoomPassword: '修改房间密码',
   setRoomPassword: '设置房间密码',
