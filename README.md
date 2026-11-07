@@ -7,7 +7,9 @@
 
 ![DiceFrame Web UI preview](docs/assets/diceframe-readme-hero.jpg)
 
-DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC / custom rules** with a **multiplayer Web UI**.
+DiceFrame is a free, open-source, self-hostable **AI tabletop RPG engine** with an AI game master (AI GM), supporting **D&D / CoC / custom rules** with a **multiplayer Web UI**. Bring your own model: DeepSeek, SiliconFlow, OpenAI, Ollama, or any OpenAI-compatible API.
+
+中文：DiceFrame（骰框）是免费开源、可自己部署的 **AI 跑团（TRPG）引擎**，由 AI 担任 GM / KP，支持 D&D / CoC / 自定义规则与多人 WebUI，可接入 DeepSeek 等大模型。[简体中文说明](README_zh-CN.md)
 
 ![A play round: type an action, reveal an automatic dice check, and receive the GM reply](docs/assets/diceframe-play-round.gif)
 *Real Web UI; demonstration game with scripted check results and GM replies.*
@@ -27,7 +29,7 @@ DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC /
 <summary>Windows portable</summary>
 
 Download `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`.
-Add a provider under **Manage → Settings → Model API**, then assign the main model under **Model Routing**. [Installation details](docs/en/install.md#windows-portable) · [First game](docs/en/content-and-play.md#first-game)
+Add a provider under **Manage → Settings → Model API** (the help button there walks through DeepSeek as an example), then assign the main model under **Model Routing**. [Installation details](docs/en/install.md#windows-portable) · [First game](docs/en/content-and-play.md#first-game)
 
 </details>
 <details>
