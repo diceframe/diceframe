@@ -15,14 +15,36 @@ from typing import Any
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.attunement import (
+    AttunementError,
+    attuned_refs,
+    canonical_item_ref,
+    inventory_ref_counts,
+    item_requires_attunement,
+)
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.action_adapter import (
+    formula_node_from_dice_formula,
     heal_ability_modifier_node,
     roll_damage_node,
     spell_formula_node,
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.combat.check_modes import condition_flags
+from src.rulesets.dnd2024.combat.primitives import CombatIntentError, roll
+from src.rulesets.dnd2024.items.activation import (
+    POTION_ITEM_TYPE,
+    ItemActivationError,
+    build_item_healing_event,
+    validate_activation_declaration,
+    validate_consumable_declaration,
+)
+from src.rulesets.dnd2024.items.charges import (
+    ChargesError,
+    charges_of,
+    spend_charges,
+    validate_charges_declaration,
+)
 from src.rulesets.dnd2024.exploration.revive_effects import (
     UNSUPPORTED_MESSAGE,
     is_fully_implemented,
@@ -30,13 +52,37 @@ from src.rulesets.dnd2024.exploration.revive_effects import (
     revive_events,
 )
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
+from src.rulesets.dnd2024.treasure import (
+    Dnd2024TreasureCatalog,
+    TreasureTableError,
+    canonical_table_ref,
+)
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
-EXPLORATION_INTENT_TYPES = frozenset({"exploration.cast_spell"})
+EXPLORATION_INTENT_TYPES = frozenset({
+    "exploration.cast_spell", "exploration.activate_item", "exploration.roll_treasure",
+})
+
+_ITEM_EVENT_FIELDS = {
+    "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
+    "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+}
 
 # 探索态没有敌方 actor；伤害/豁免/法术攻击模式的确定性结算需要敌对目标，
 # 第一阶段不支持——已知但非确定的法术走 narrative 分支（§32）。
 _SUPPORTED_EFFECT_MODES = frozenset({"healing", "buff"})
+
+
+def _canonical_actor_id(value: Any) -> str:
+    """Event/ledger identity is always ``player:<uid>``.
+
+    The gameplay response boundary hands intents a bare uid; emitting that in
+    events would make the reducer's ``player:<uid>`` consumption match fail.
+    """
+
+    raw = str(value or "")
+    return raw if raw.startswith("player:") else f"player:{raw}"
 
 
 class ExplorationIntentError(ValueError):
@@ -47,12 +93,17 @@ class ExplorationIntentError(ValueError):
 class Dnd2024ExplorationEngine:
     bundle: LoadedRulesetBundle
     locale: str = ""
+    bundle_validated: bool = False
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
+    treasure: Dnd2024TreasureCatalog = field(init=False)
 
     def __post_init__(self) -> None:
-        self.catalog = Dnd2024CombatCatalog.from_bundle(self.bundle)
+        self.catalog = Dnd2024CombatCatalog.from_bundle(
+            self.bundle, validate_items=not self.bundle_validated,
+        )
         self.spells = Dnd2024SpellCatalog.from_bundle(self.bundle)
+        self.treasure = Dnd2024TreasureCatalog.from_bundle(self.bundle)
 
     # ------------------------------------------------------------------
     # state helpers
@@ -141,12 +192,26 @@ class Dnd2024ExplorationEngine:
         state = self._state(instance)
         if state["combat"].get("status") == "active":
             return []
-        if not actor_id.startswith("player:") or actor_id.removeprefix("player:") not in instance.players:
-            return []
         uid = actor_id.removeprefix("player:")
-        canonical = self._canonical_of(instance, actor_id)
+        actions: list[dict[str, Any]] = []
+        gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        # The gameplay response boundary passes a bare uid, while older callers
+        # use the actor form.  Accept both here; never widen the intent's own
+        # actor_id contract.
+        if gm_uid and uid == gm_uid:
+            tables = self.treasure.list_tables()
+            if tables:
+                actions.append({
+                    "type": "exploration.roll_treasure",
+                    "label": "Roll a treasure table",
+                    "expected_version": int(state.get("version", 0) or 0),
+                    "actor_id": actor_id, "tables": tables,
+                })
+        if not uid or uid not in instance.players:
+            return actions
+        canonical = self._canonical_of(instance, f"player:{uid}")
         if not self._casting_eligible(canonical):
-            return []
+            return actions
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         spells = []
@@ -170,14 +235,67 @@ class Dnd2024ExplorationEngine:
                 "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
                 "casting_time": spell["casting_time"], "available_slot_levels": available_slots,
             })
-        if not spells:
-            return []
-        return [{
-            "type": "exploration.cast_spell", "label": "Cast a spell",
-            "expected_version": int(state.get("version", 0) or 0),
-            "actor_id": actor_id, "spells": spells,
-            "targets": self._party_targets(instance),
-        }]
+        if spells:
+            actions.append({
+                "type": "exploration.cast_spell", "label": "Cast a spell",
+                "expected_version": int(state.get("version", 0) or 0),
+                "actor_id": actor_id, "spells": spells,
+                "targets": self._party_targets(instance),
+            })
+        items = self._available_activation_items(instance, actor_id, canonical)
+        if items:
+            actions.append({
+                "type": "exploration.activate_item", "label": "Use an item",
+                "expected_version": int(state.get("version", 0) or 0),
+                "actor_id": actor_id, "items": items,
+            })
+        return actions
+
+    def _available_activation_items(
+        self, instance: Any, actor_id: str, canonical: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Project legally activatable held potions for the existing action dock."""
+
+        payload = instance.get_character_sheet(actor_id.removeprefix("player:"))
+        owned = inventory_ref_counts(payload)
+        attuned = attuned_refs(canonical)
+        items: list[dict[str, Any]] = []
+        for item_ref, count in sorted(owned.items()):
+            if count < 1:
+                continue
+            item = self.bundle.get("item", item_ref.removeprefix("item:"))
+            if not isinstance(item, dict):
+                continue
+            try:
+                declaration = validate_activation_declaration(item)
+                validate_consumable_declaration(item)
+                maximum = validate_charges_declaration(item)
+            except (ItemActivationError, ChargesError):
+                continue
+            if declaration is None:
+                continue
+            if str(item.get("item_type") or "") != POTION_ITEM_TYPE:
+                continue
+            if declaration["target"] != "self":
+                continue
+            if item_requires_attunement(self.bundle, item_ref) and item_ref not in attuned:
+                continue
+            charge_cost = declaration.get("charge_cost")
+            if maximum is not None:
+                if charge_cost is None or count > 1:
+                    continue
+                current = charges_of(canonical, item_ref)
+                if current is None or current < int(charge_cost):
+                    continue
+            elif charge_cost is not None:
+                continue
+            items.append({
+                "item_ref": item_ref,
+                "name": str(item.get("name") or item_ref),
+                "cost": declaration["cost"],
+                "target": declaration["target"],
+            })
+        return items
 
     def validate_intent(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -200,18 +318,30 @@ class Dnd2024ExplorationEngine:
                 f"state version conflict: expected {expected}, current {state.get('version')}"
             )
         if state["combat"].get("status") == "active":
-            raise ExplorationIntentError("exploration casting requires no active combat")
+            action = (
+                "treasure rolling"
+                if intent.get("type") == "exploration.roll_treasure"
+                else "exploration casting"
+            )
+            raise ExplorationIntentError(f"{action} requires no active combat")
+        if str(intent.get("type") or "") == "exploration.roll_treasure":
+            self._validate_roll_treasure(instance, intent)
+            return
         actor_id = str(intent.get("actor_id") or "")
         uid = actor_id.removeprefix("player:")
-        if not actor_id.startswith("player:") or uid not in instance.players:
+        if not uid or uid not in instance.players:
             raise ExplorationIntentError("exploration casting is player-only in this phase")
         if str(intent.get("submitted_by") or "") != uid:
             raise ExplorationIntentError("a player can only cast for their own character")
+        actor_id = f"player:{uid}"
         canonical = self._canonical_of(instance, actor_id)
         if not self._casting_eligible(canonical):
             raise ExplorationIntentError(
                 "the spellcaster cannot cast while dead, at 0 HP, or incapacitated"
             )
+        if str(intent.get("type") or "") == "exploration.activate_item":
+            self._validate_activate_item(instance, intent, actor_id, uid, canonical)
+            return
         spell_ref = str(intent.get("spell_ref") or "")
         spell = self.spells.get(spell_ref)
         if spell is None:
@@ -272,6 +402,132 @@ class Dnd2024ExplorationEngine:
             if effect.get("target_scope") == "self" and targets != [actor_id]:
                 raise ExplorationIntentError("this spell can only target the caster")
 
+    def _validate_roll_treasure(self, instance: Any, intent: dict[str, Any]) -> None:
+        """Rolling a treasure table is a GM settlement action, never a combat intent."""
+
+        gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        if not gm_uid or str(intent.get("submitted_by") or "") != gm_uid:
+            raise ExplorationIntentError("only the game master can roll a treasure table")
+        try:
+            table_ref = canonical_table_ref(intent.get("table_ref"))
+        except TreasureTableError as exc:
+            raise ExplorationIntentError(str(exc)) from None
+        if self.treasure.get(table_ref) is None:
+            raise ExplorationIntentError(f"treasure table is not defined: {table_ref}")
+
+    def _project_treasure_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """N4: add server-projected display labels without changing identity.
+
+        ``item_ref`` stays the canonical identity; ``label`` is the localized
+        display name when the bundle provides one, and is simply omitted
+        otherwise. Currency gains a structured ``amount``/``unit`` pair so the
+        client never parses a display string into a rules identity.
+        """
+
+        projected = deepcopy(result)
+        items = projected.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    item_ref = canonical_item_ref(item.get("item_ref"))
+                except AttunementError:
+                    continue
+                definition = self.bundle.get("item", item_ref.removeprefix("item:"))
+                label = definition.get("name") if isinstance(definition, dict) else None
+                if isinstance(label, str) and label.strip():
+                    item["label"] = label
+        coins = projected.get("coins_gp")
+        if isinstance(coins, int) and not isinstance(coins, bool):
+            projected["coins"] = {"amount": coins, "unit": "gp"}
+        return projected
+
+    def _roll_treasure(
+        self, table_ref: str, rng: Any,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Roll one die per nested table and return the auditable path + final result."""
+
+        path: list[dict[str, Any]] = []
+        current = canonical_table_ref(table_ref)
+        seen: set[str] = set()
+        for _ in range(8):
+            if current in seen:
+                raise ExplorationIntentError(f"treasure table nesting cycle: {current}")
+            seen.add(current)
+            table = self.treasure.get(current)
+            if table is None:  # pragma: no cover - validation guards this
+                raise ExplorationIntentError(f"treasure table is not defined: {current}")
+            try:
+                # 复用通用单骰原语：宝藏表只允许单骰、无修正，装载时已校验；
+                # 这里不新增修正骰，也不改变骰位或嵌套顺序。
+                value, _rolls = roll(table.roll, rng)
+            except CombatIntentError as exc:  # pragma: no cover - load validation guards this
+                raise ExplorationIntentError(str(exc)) from None
+            entry = table.entry_for(value)
+            path.append({
+                "table_ref": current, "roll": value,
+                "from": entry.from_value, "to": entry.to_value,
+            })
+            result = entry.result
+            nested = result.get("table_ref")
+            if not nested:
+                return path, deepcopy(result)
+            current = canonical_table_ref(nested)
+        raise ExplorationIntentError("treasure table nesting exceeds 8 levels")
+
+    def _validate_activate_item(
+        self, instance: Any, intent: dict[str, Any], actor_id: str, uid: str,
+        canonical: dict[str, Any],
+    ) -> None:
+        """Out of combat only self-targeted healing potions are mechanical."""
+
+        try:
+            item_ref = canonical_item_ref(intent.get("item_ref"))
+        except AttunementError as exc:
+            raise ExplorationIntentError(str(exc)) from None
+        item = self.bundle.get("item", item_ref.removeprefix("item:"))
+        if not isinstance(item, dict):
+            raise ExplorationIntentError("item is not defined in the active bundle")
+        try:
+            declaration = validate_activation_declaration(item)
+            validate_consumable_declaration(item)
+            maximum = validate_charges_declaration(item)
+        except (ItemActivationError, ChargesError) as exc:
+            raise ExplorationIntentError(str(exc)) from None
+        if declaration is None:
+            raise ExplorationIntentError("item cannot be activated")
+        if str(item.get("item_type") or "") != POTION_ITEM_TYPE:
+            raise ExplorationIntentError("exploration item use is limited to healing potions")
+        if declaration["target"] != "self":
+            raise ExplorationIntentError("exploration item use can only target the user")
+        target_uid = str(intent.get("target_id") or actor_id).removeprefix("player:")
+        if target_uid != uid:
+            raise ExplorationIntentError("exploration item use can only target the user")
+        payload = instance.get_character_sheet(uid)
+        # Consumables are taken from the backpack by apply, so only inventory
+        # rows are an authoritative consumable stop; equipment refs are not.
+        owned = inventory_ref_counts(payload).get(item_ref, 0)
+        if owned < 1:
+            raise ExplorationIntentError("item is not carried")
+        if item_requires_attunement(self.bundle, item_ref) and item_ref not in attuned_refs(canonical):
+            raise ExplorationIntentError("item requires attunement")
+        charge_cost = declaration.get("charge_cost")
+        if maximum is not None:
+            if charge_cost is None:
+                raise ExplorationIntentError("charged item activation requires charge_cost")
+            if owned > 1:
+                raise ExplorationIntentError(
+                    "cannot activate a charged item carried in multiple copies"
+                )
+            current = charges_of(canonical, item_ref)
+            if current is None:
+                raise ExplorationIntentError("item charges are not initialized")
+            if current < int(charge_cost):
+                raise ExplorationIntentError("not enough charges")
+        elif charge_cost is not None:
+            raise ExplorationIntentError("item has no charges")
+
     def resolve_intent(
         self, instance: Any, intent: dict[str, Any], rng: Any,
     ) -> dict[str, Any]:
@@ -279,7 +535,44 @@ class Dnd2024ExplorationEngine:
             self._validate(instance, intent)
         except ExplorationIntentError as exc:
             return {"ok": False, "code": "INVALID_INTENT", "error": str(exc)}
-        actor_id = str(intent["actor_id"])
+        if str(intent.get("type") or "") == "exploration.roll_treasure":
+            expected = int(intent["expected_version"])
+            intent_id = str(intent.get("intent_id") or "")
+            gm_actor = f"player:{str(getattr(instance, 'gm_uid', '') or '')}"
+            events: list[dict[str, Any]] = [{
+                "type": "intent.submitted", "intent_type": "exploration.roll_treasure",
+                "actor_id": gm_actor,
+                "submitted_by": str(intent.get("submitted_by") or ""),
+            }]
+            path, result = self._roll_treasure(
+                canonical_table_ref(intent.get("table_ref")), rng,
+            )
+            events.append({
+                "type": "dnd2024.treasure.rolled",
+                "table_ref": canonical_table_ref(intent.get("table_ref")),
+                "path": path, "result": self._project_treasure_result(result),
+            })
+            return {
+                "ok": True, "events": events,
+                "event_batch": self._batch(
+                    intent_id, expected, events, "exploration.roll_treasure",
+                ),
+            }
+        actor_id = _canonical_actor_id(intent["actor_id"])
+        if str(intent.get("type") or "") == "exploration.activate_item":
+            expected = int(intent["expected_version"])
+            intent_id = str(intent.get("intent_id") or "")
+            events = [{
+                "type": "intent.submitted", "intent_type": "exploration.activate_item",
+                "actor_id": actor_id, "submitted_by": str(intent.get("submitted_by") or ""),
+            }]
+            events.extend(self._activate_item_events(instance, intent, rng))
+            return {
+                "ok": True, "events": events,
+                "event_batch": self._batch(
+                    intent_id, expected, events, "exploration.activate_item",
+                ),
+            }
         spell_ref = str(intent["spell_ref"])
         spell = self.spells.get(spell_ref)
         if spell is None:  # pragma: no cover - validation guards this
@@ -376,18 +669,68 @@ class Dnd2024ExplorationEngine:
         return {"ok": True, "events": events, "event_batch": batch}
 
     @staticmethod
-    def _batch(intent_id: str, expected: int, events: list[dict[str, Any]]) -> dict[str, Any]:
+    def _batch(
+        intent_id: str, expected: int, events: list[dict[str, Any]],
+        intent_type: str = "exploration.cast_spell",
+    ) -> dict[str, Any]:
         return {
             "batch_id": stable_batch_id(
                 {"intent_id": intent_id, "expected_version": expected}, expected,
             ),
             "intent_id": intent_id,
-            "intent_type": "exploration.cast_spell",
+            "intent_type": intent_type,
             "expected_version": expected,
             "result_version": expected + 1,
             "events": events,
             "source_ref": "srd-5.2.1:p24-p27:playing-the-game",
         }
+
+    def _activate_item_events(
+        self, instance: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        actor_id = _canonical_actor_id(intent["actor_id"])
+        item_ref = canonical_item_ref(intent.get("item_ref"))
+        item = self.bundle.get("item", item_ref.removeprefix("item:"))
+        declaration = validate_activation_declaration(item)
+        if declaration is None:  # pragma: no cover - validation guards this
+            raise ExplorationIntentError("item cannot be activated")
+        maximum = validate_charges_declaration(item)
+        events: list[dict[str, Any]] = []
+        charge_cost = declaration.get("charge_cost")
+        if maximum is not None and charge_cost is not None:
+            events.append({
+                "type": "dnd2024.item.charge_spent", "actor_id": actor_id,
+                "item_ref": item_ref, "amount": int(charge_cost),
+            })
+        if validate_consumable_declaration(item):
+            events.append({
+                "type": "dnd2024.item.consumed", "actor_id": actor_id,
+                "item_ref": item_ref, "amount": 1,
+            })
+        node = formula_node_from_dice_formula(declaration["effect"]["healing"])
+        healing, rolls = roll_damage_node(node, rng)
+        healing = max(1, healing)
+        canonical = self._canonical_of(instance, actor_id)
+        resources = canonical.get("resources", {})
+        before = int(resources.get("hp", 0) or 0)
+        maximum_hp = int(resources.get("max_hp", 0) or 0)
+        conditions = canonical.get("conditions") or {}
+        blocked = "cannot_regain_hp" in conditions
+        events.append(build_item_healing_event(
+            item_ref=item_ref,
+            target_id=actor_id,
+            rolls=rolls,
+            healing=healing,
+            hp_before=before,
+            hp_max=maximum_hp,
+            blocked_by="cannot_regain_hp" if blocked else None,
+        ))
+        events.append({
+            "type": "dnd2024.item.activated", "actor_id": actor_id,
+            "item_ref": item_ref, "target_id": actor_id,
+            "cost": declaration["cost"],
+        })
+        return events
 
     def _actor_view(self, instance: Any, actor_id: str) -> dict[str, Any]:
         """探索态施法者的最小施法视图（spell_formula_node 需要的形状）。"""
@@ -424,12 +767,28 @@ class Dnd2024ExplorationEngine:
         if not duplicate:
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            ruleset_runtime.replace_state(instance, ruleset_state)
+            from src.commands.state_items import take_from_inventory
+
+            updated_sheets: dict[str, dict[str, Any]] = {}
             for uid, canonical in updated["characters"].items():
                 if uid not in instance.players:
                     continue
                 sheet = deepcopy(instance.get_character_sheet(uid))
                 sheet["ruleset_character"] = deepcopy(canonical)
+                for event in batch.get("events") or []:
+                    if (
+                        str(event.get("type") or "") == "dnd2024.item.consumed"
+                        and str(event.get("actor_id") or "") == f"player:{uid}"
+                    ):
+                        for _ in range(int(event.get("amount", 1) or 1)):
+                            taken = take_from_inventory(sheet, "", str(event["item_ref"]))
+                            if taken is None:
+                                raise EventBatchError(
+                                    f"item is no longer carried: {event['item_ref']}"
+                                )
+                updated_sheets[uid] = sheet
+            ruleset_runtime.replace_state(instance, ruleset_state)
+            for uid, sheet in updated_sheets.items():
                 instance.set_character_sheet(uid, sheet)
             ruleset_runtime.replace_event_ledger(instance, ledger)
         return {
@@ -494,6 +853,96 @@ class Dnd2024ExplorationEngine:
                 canonical = self._companion_canonical(snapshot, raw_id)
             canonical["spellcasting"]["class"]["concentration"] = None
             self._remove_concentration_conditions(snapshot, str(event["actor_id"]))
+            return
+        if event_type == "dnd2024.treasure.rolled":
+            # Audit-only: the rolled result must still go through the reward
+            # proposal / GM gate, so this reducer never writes inventory or coins.
+            unknown = sorted(set(event) - {"type", "table_ref", "path", "result"})
+            if unknown:
+                raise EventBatchError(f"unknown dnd2024.treasure.rolled field: {unknown[0]}")
+            path = event.get("path")
+            if not isinstance(path, list) or not path:
+                raise EventBatchError("treasure roll path must be a non-empty array")
+            if len(path) > 8:
+                raise EventBatchError("treasure roll path exceeds 8 levels")
+            for layer in path:
+                if not isinstance(layer, dict) or set(layer) != {
+                    "table_ref", "roll", "from", "to",
+                }:
+                    raise EventBatchError("treasure roll path layer is invalid")
+                try:
+                    table_ref = canonical_table_ref(layer["table_ref"])
+                except TreasureTableError as exc:
+                    raise EventBatchError(str(exc)) from None
+                if self.treasure.get(table_ref) is None:
+                    raise EventBatchError(f"treasure table is not defined: {table_ref}")
+                for key in ("roll", "from", "to"):
+                    if isinstance(layer[key], bool) or not isinstance(layer[key], int):
+                        raise EventBatchError("treasure roll path integers are invalid")
+                if not 1 <= layer["from"] <= layer["to"]:
+                    raise EventBatchError("treasure roll path interval is invalid")
+            result = event.get("result")
+            if (
+                not isinstance(result, dict) or len(result) == 0
+                or set(result) - {"table_ref", "items", "coins_gp", "coins"}
+            ):
+                raise EventBatchError("treasure roll result shape is invalid")
+            if "coins" in result:
+                coins = result["coins"]
+                if (
+                    not isinstance(coins, dict)
+                    or set(coins) != {"amount", "unit"}
+                    or isinstance(coins["amount"], bool)
+                    or not isinstance(coins["amount"], int)
+                    or coins["amount"] < 0
+                    or not isinstance(coins["unit"], str)
+                    or not coins["unit"]
+                ):
+                    raise EventBatchError("treasure roll coins shape is invalid")
+                if coins["amount"] != result.get("coins_gp"):
+                    raise EventBatchError("treasure roll coins disagree with coins_gp")
+            items = result.get("items")
+            if items is not None:
+                if not isinstance(items, list):
+                    raise EventBatchError("treasure roll items shape is invalid")
+                for item in items:
+                    if (
+                        not isinstance(item, dict)
+                        or set(item) - {"item_ref", "qty", "label"}
+                        or isinstance(item.get("qty"), bool)
+                        or not isinstance(item.get("qty"), int)
+                        or "label" in item and not isinstance(item["label"], str)
+                    ):
+                        raise EventBatchError("treasure roll item shape is invalid")
+            return
+        if event_type in _ITEM_EVENT_FIELDS:
+            unknown = sorted(set(event) - _ITEM_EVENT_FIELDS[event_type])
+            if unknown:
+                raise EventBatchError(f"unknown {event_type} field: {unknown[0]}")
+            if event_type != "dnd2024.item.charge_spent":
+                # 数量扣减由 apply_batch 通过 live backpack 权威接口落账。
+                return
+            kind, raw_id = str(event["actor_id"]).split(":", 1)
+            if kind != "player":
+                raise EventBatchError("exploration item use is player-only")
+            canonical = snapshot["characters"][raw_id]
+            try:
+                item_ref = canonical_item_ref(event["item_ref"])
+                item = self.bundle.get("item", item_ref.removeprefix("item:"))
+                maximum = validate_charges_declaration(item)
+            except (AttunementError, ChargesError) as exc:
+                raise EventBatchError(str(exc)) from None
+            if maximum is None:
+                raise EventBatchError("item has no charges")
+            state = (canonical.get("equipment") or {}).get("item_state")
+            charges = state.get(item_ref) if isinstance(state, dict) else None
+            entry = charges.get("charges") if isinstance(charges, dict) else None
+            current = entry.get("current") if isinstance(entry, dict) else None
+            try:
+                new_current = spend_charges(current, event["amount"], maximum)
+            except ChargesError as exc:
+                raise EventBatchError(str(exc)) from None
+            entry["current"] = new_current
             return
         if event_type == "resource.changed":
             self._apply_hp_change(snapshot, event)

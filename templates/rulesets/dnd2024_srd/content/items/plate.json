@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "plate",
+  "source_ref": "srd-5.2.1:p92:equipment",
+  "automation_level": "deterministic",
+  "item_type": "armor",
+  "category": "heavy",
+  "strength_minimum": 15,
+  "stealth_disadvantage": true,
+  "ac_base": 18,
+  "use_dex": false
+}

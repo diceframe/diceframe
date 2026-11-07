@@ -156,6 +156,14 @@ jobs:
           name: diceframe-docker-update-linux-amd64
           path: dist
 
+      - name: Verify release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_title="# DiceFrame ${GITHUB_REF_NAME}"
+          test -s RELEASE_NOTES.md
+          test "$(head -n 1 RELEASE_NOTES.md)" = "$expected_title"
+
       - name: Verify release assets
         shell: bash
         run: |
@@ -178,10 +186,33 @@ jobs:
           python ../scripts/validate_docker_update.py "$docker_zip" --version "${GITHUB_REF_NAME#v}"
           sha256sum "$source_zip" "$portable_zip" "$docker_zip" > SHA256SUMS
 
+      - name: Check whether the GitHub Release already exists
+        id: release-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          set +e
+          response="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" 2>&1)"
+          status=$?
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          elif grep -qE '^HTTP/[0-9.]+ 404 ' <<<"$response"; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          else
+            printf '%s\n' "$response" >&2
+            exit "$status"
+          fi
+
       - name: Create GitHub Release
+        if: steps.release-state.outputs.exists != 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           body_path: RELEASE_NOTES.md
+          generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
 

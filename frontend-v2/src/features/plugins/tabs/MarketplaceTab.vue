@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { NButton, NIcon, NInput, NPagination, NSelect, NSpin, NTag } from 'naive-ui'
+import { RouterLink } from 'vue-router'
 import { CloudDownloadOutline, RefreshOutline, Star } from '@vicons/ionicons5'
 import { useLocale } from '@/composables/useLocale'
 import type { PluginMarketplaceItem } from '@/api/types'
@@ -14,7 +15,6 @@ defineProps<{
   totalPages: number
   page: number
   typeFilter: string
-  scope: 'plugins' | 'content'
   pluginTypeFilters: { value: string; labelKey: string }[]
   sortOptions: { label: string; value: string }[]
   busy: string
@@ -31,7 +31,6 @@ const emit = defineEmits<{
   'update:marketKeyword': [value: string]
   'update:sortMode': [value: string]
   'update:typeFilter': [value: string]
-  'update:scope': [value: string]
 }>()
 
 const { t } = useLocale()
@@ -46,11 +45,11 @@ const { t } = useLocale()
       {{ t('refresh') }}
     </NButton>
   </section>
-  <div class="mode-tabs">
-    <button type="button" :class="{ active: scope === 'plugins' }" @click="emit('update:scope', 'plugins')">{{ t('pluginStoreTab') }}</button>
-    <button type="button" :class="{ active: scope === 'content' }" @click="emit('update:scope', 'content')">{{ t('contentStoreTab') }}</button>
-  </div>
-  <div v-if="scope === 'plugins'" class="type-filter-row">
+  <p class="muted content-store-moved" data-testid="plugin-market-content-hint">
+    {{ t('contentStoreMovedHint') }}
+    <RouterLink :to="{ name: 'modules' }">{{ t('contentStoreMovedAction') }} <span aria-hidden="true">→</span></RouterLink>
+  </p>
+  <div class="type-filter-row">
     <NButton size="tiny" :type="typeFilter === '' ? 'primary' : 'default'" @click="emit('update:typeFilter', '')">{{ t('pluginFilterAll') }}</NButton>
     <NButton v-for="opt in pluginTypeFilters" :key="opt.value" size="tiny" :type="typeFilter === opt.value ? 'primary' : 'default'" @click="emit('update:typeFilter', opt.value)">{{ t(opt.labelKey as never) }}</NButton>
   </div>

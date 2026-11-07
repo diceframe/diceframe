@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "dart"
+  },
+  "fields": {
+    "name": "飞镖"
+  }
+}

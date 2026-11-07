@@ -9,10 +9,25 @@ from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
 
+from ..items.activation import validate_item_declarations
+
 
 DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
 # 固定伤害（例如徒手打击的 1 点基础伤害）：没有骰子，因此重击不翻倍。
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
+_DICE_PARTS_RE = re.compile(r"^([1-9]\d*)d(4|6|8|10|12|20)(?:\+([1-9]\d*))?$")
+
+
+def _dice_average(formula: str) -> float:
+    """Expected value of one dice formula, used only for data-shape checks."""
+
+    match = _DICE_PARTS_RE.fullmatch(formula)
+    if match is None:
+        return 0.0
+    count, sides, bonus = match.groups()
+    return int(count) * (int(sides) + 1) / 2 + int(bonus or 0)
+
+
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
     "stabilize", "reaction_defense", "temp_hp", "teleport", "dispel", "revive",
@@ -45,7 +60,9 @@ class Dnd2024CombatCatalog:
     labels: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_bundle(cls, bundle: LoadedRulesetBundle) -> Dnd2024CombatCatalog:
+    def from_bundle(
+        cls, bundle: LoadedRulesetBundle, *, validate_items: bool = True,
+    ) -> Dnd2024CombatCatalog:
         raw = bundle.get("combat_catalog", "srd_combat_core")
         if raw is None:
             raise CombatCatalogError("D&D 2024 combat catalog is missing")
@@ -53,14 +70,55 @@ class Dnd2024CombatCatalog:
         effects = raw.get("spell_effects")
         if not isinstance(weapons, dict) or not isinstance(effects, dict):
             raise CombatCatalogError("combat weapons and spell effects must be objects")
-        item_ids = {str(item["id"]) for item in bundle.list("item")}
+        items = {
+            str(item["id"]): item for item in bundle.list("item") if isinstance(item, dict)
+        }
+        if validate_items:
+            try:
+                validate_item_declarations(bundle)
+            except ValueError as exc:
+                raise CombatCatalogError(str(exc)) from None
         for weapon_id, weapon in weapons.items():
-            if weapon_id not in item_ids or not isinstance(weapon, dict):
+            if weapon_id not in items or not isinstance(weapon, dict):
                 raise CombatCatalogError(f"combat weapon is not a bundled item: {weapon_id}")
-            if not DICE_RE.fullmatch(str(weapon.get("damage") or "")):
+            damage = str(weapon.get("damage") or "")
+            if not (DICE_RE.fullmatch(damage) or FLAT_DAMAGE_RE.fullmatch(damage)):
+                # SRD 的吹箭筒只造成固定 1 点伤害；固定伤害与徒手打击同源，
+                # 走同一套"没有骰子、重击不翻倍"的结算，不是特例分支。
                 raise CombatCatalogError(f"combat weapon damage is invalid: {weapon_id}")
             if not 5 <= int(weapon.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat weapon range is invalid: {weapon_id}")
+            if "damage_two_handed" in weapon:
+                two_handed = weapon["damage_two_handed"]
+                if not isinstance(two_handed, str) or not DICE_RE.fullmatch(two_handed):
+                    raise CombatCatalogError(
+                        f"combat weapon two-handed damage is invalid: {weapon_id}"
+                    )
+                # 两用是"换取更大骰子"的声明：固定伤害或远程武器携带该字段，
+                # 以及双手骰并不优于单手骰，都是数据错误而不是可选写法。
+                if DICE_RE.fullmatch(damage) is None or bool(weapon.get("ranged")):
+                    raise CombatCatalogError(
+                        f"weapon cannot declare two-handed damage: {weapon_id}"
+                    )
+                if _dice_average(two_handed) <= _dice_average(damage):
+                    raise CombatCatalogError(
+                        f"two-handed damage does not exceed one-handed: {weapon_id}"
+                    )
+            if "ammunition_item_ref" in weapon:
+                ammo_ref = weapon["ammunition_item_ref"]
+                if not isinstance(ammo_ref, str) or not ammo_ref.startswith("item:"):
+                    raise CombatCatalogError(
+                        f"combat weapon ammunition ref is invalid: {weapon_id}"
+                    )
+                if not bool(weapon.get("ranged")):
+                    raise CombatCatalogError(
+                        f"only ranged weapons consume ammunition: {weapon_id}"
+                    )
+                ammo = items.get(ammo_ref.removeprefix("item:"))
+                if not isinstance(ammo, dict) or ammo.get("item_type") != "ammunition":
+                    raise CombatCatalogError(
+                        f"combat weapon ammunition is not a bundled ammunition item: {weapon_id}"
+                    )
         spell_catalog = bundle.get("spell_catalog", "srd_spells") or {}
         spell_ids = {
             str(item.get("id") or "") for item in spell_catalog.get("spells", [])

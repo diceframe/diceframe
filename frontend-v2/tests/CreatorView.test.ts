@@ -21,11 +21,22 @@ describe('CreatorView', () => {
     i18n.global.locale.value = 'zh-CN'
     const { wrapper } = await render()
     expect(wrapper.get('h1').text()).toBe('创作工坊')
-    expect(wrapper.findAll('[data-testid^="creator-card-"]')).toHaveLength(7)
+    expect(wrapper.findAll('[data-testid^="creator-card-"]')).toHaveLength(9)
     expect(wrapper.get('[data-testid="creator-card-adventures"]').attributes('href')).toBe('/adventures')
     expect(wrapper.get('[data-testid="creator-card-worlds"]').attributes('href')).toBe('/worlds')
     expect(wrapper.get('[data-testid="creator-card-textReview"]').element.tagName).toBe('BUTTON')
     expect(wrapper.text()).not.toMatch(/Profile|profile|玩法模板/i)
+  })
+
+  it('splits packaging into adventure module, resource pack, and single adventure exits', async () => {
+    i18n.global.locale.value = 'zh-CN'
+    const { wrapper } = await render()
+    expect(wrapper.text()).toContain('打包与分享')
+    expect(wrapper.get('[data-testid="creator-card-exportAdventureModule"]').element.tagName).toBe('BUTTON')
+    expect(wrapper.get('[data-testid="creator-card-exportResourcePack"]').element.tagName).toBe('BUTTON')
+    // A single adventure is exported from its row in the adventure list.
+    expect(wrapper.get('[data-testid="creator-card-exportAdventureBundle"]').attributes('href')).toBe('/adventures')
+    expect(wrapper.find('[data-testid="creator-card-package"]').exists()).toBe(false)
   })
 
   it('keeps all five supported locales populated', async () => {
@@ -35,7 +46,7 @@ describe('CreatorView', () => {
       i18n.global.locale.value = locale
       const { wrapper } = await render()
       expect(wrapper.get('h1').text()).toBe(title)
-      expect(wrapper.findAll('[data-testid^="creator-card-"]')).toHaveLength(7)
+      expect(wrapper.findAll('[data-testid^="creator-card-"]')).toHaveLength(9)
       wrapper.unmount()
     }
   })

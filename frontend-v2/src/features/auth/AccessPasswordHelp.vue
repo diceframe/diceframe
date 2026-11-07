@@ -59,8 +59,8 @@ const show = ref(false)
 
 <style scoped>
 .access-help-open {
-  display: block;
-  margin: 12px 0 0;
+  display: inline-flex;
+  margin: 0 0 0 8px;
   padding: 0;
   font-size: 13px;
   color: var(--df-interactive-strong);
@@ -68,6 +68,7 @@ const show = ref(false)
   border: 0;
   text-decoration: underline;
   text-underline-offset: 3px;
+  vertical-align: baseline;
   cursor: pointer;
 }
 .access-help-open:hover { color: var(--df-interactive); }

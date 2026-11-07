@@ -1687,8 +1687,6 @@ export const ja = {
   pluginRestartHint: 'トークン / 接続パラメータを変更した場合、プラグインを再起動しないと反映されません。',
   declarativePluginHint: '宣言型プラグインはバックグラウンドプロセスを起動しません。設定を保存するとすぐにプラグインデータディレクトリに記録されます。',
   pluginMarketplaceTab: 'マーケット',
-  pluginStoreTab: 'プラグインマーケット',
-  contentStoreTab: 'コンテンツマーケット',
   pluginToolsTab: 'ツール',
   pluginToolsTitle: 'プラグインツール',
   pluginToolsHelp: 'ツールプラグインはプラグインごとに表示されます。専用の操作画面を提供するものはカード表示、その他のツールは下部で JSON パラメータを指定して手動呼び出しできます（テスト用のみ）。',

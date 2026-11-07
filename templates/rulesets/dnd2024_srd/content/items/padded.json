@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "padded",
+  "source_ref": "srd-5.2.1:p92:equipment",
+  "automation_level": "deterministic",
+  "item_type": "armor",
+  "category": "light",
+  "stealth_disadvantage": true,
+  "ac_base": 11,
+  "use_dex": true
+}

@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "item",
+    "id": "crossbow_light"
+  },
+  "fields": {
+    "name": "轻弩"
+  }
+}

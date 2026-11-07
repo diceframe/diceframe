@@ -293,7 +293,7 @@ describe('peer host game bridge', () => {
     await bridge.handle('p_abcdefghijk', 'ruleset.intent', {
       intent_id: 'intent-1', type: 'attack', expected_version: 2,
       actor_id: 'player:someone-else', target_id: 'enemy:goblin',
-      weapon_ref: 'item:longsword', submitted_by: 'forged', damage: 9999,
+      weapon_ref: 'item:longsword', two_handed: true, submitted_by: 'forged', damage: 9999,
     })
 
     const createBody = JSON.parse(String(calls[1].init?.body))
@@ -318,7 +318,7 @@ describe('peer host game bridge', () => {
     expect(intentBody).toEqual({
       intent_id: 'intent-1', type: 'attack', expected_version: 2,
       actor_id: 'player:someone-else', target_id: 'enemy:goblin',
-      weapon_ref: 'item:longsword',
+      weapon_ref: 'item:longsword', two_handed: true,
     })
     expect(changed).toHaveBeenCalledTimes(4)
   })
@@ -423,6 +423,21 @@ describe('peer host game bridge', () => {
       target_ids: ['enemy:goblin', 'enemy:goblin-2'], slot_level: 2,
       resist_type: 'fire', teleport_distance: 30,
     })
+
+    // 物品激活只允许客户端提交 canonical item_ref；HP、充能和数量仍由服务端结算。
+    await bridge.handle('p_abcdefghijk', 'ruleset.intent', {
+      intent_id: 'intent-item-1', type: 'activate_item', expected_version: 5,
+      actor_id: 'player:someone', item_ref: 'item:wand_of_healing',
+      hp: 1, healing: 9999, charges: { current: 3 }, quantity: 0, consumable: true,
+    })
+    const itemCall = calls[calls.length - 1]
+    expect(itemCall.path).toBe(
+      '/games/web%7Cgame%7Chost/intents?user=player_123&share=1&delegate=1',
+    )
+    expect(JSON.parse(String(itemCall.init?.body))).toEqual({
+      intent_id: 'intent-item-1', type: 'activate_item', expected_version: 5,
+      actor_id: 'player:someone', item_ref: 'item:wand_of_healing',
+    })
   })
 
   it('forwards the canonical professional character for authoritative host validation', async () => {
@@ -504,6 +519,41 @@ describe('peer host game bridge', () => {
       rest: 'short', hit_dice: { d10: 1 }, expected_revision: 3, operation_id: 'rest-1',
     })
     expect(changed).toHaveBeenCalledTimes(2)
+  })
+
+  it('forwards reviewed table_ref and attunement while stripping server-owned fields', async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = []
+    const executor: PeerLocalApiExecutor = async (path, init) => {
+      calls.push({ path, init })
+      if (path === '/games/web%7Cgame%7Chost') {
+        return { game_key: 'web|game|host', player_access_open: true }
+      }
+      return { ok: true }
+    }
+    const bridge = new PeerHostGameBridge(
+      'web|game|host', executor, () => undefined, {}, { p_abcdefghijk: 'player_bound' },
+    )
+
+    await bridge.handle('p_abcdefghijk', 'ruleset.intent', {
+      intent_id: 'treasure-1', type: 'exploration.roll_treasure', expected_version: 4,
+      table_ref: 'treasure_table:test_gemstones', actor_id: 'player:forged',
+      submitted_by: 'forged', result: { coins_gp: 99 }, roll: 6, amount: 999,
+    })
+    expect(JSON.parse(String(calls.at(-1)?.init?.body))).toEqual({
+      intent_id: 'treasure-1', type: 'exploration.roll_treasure',
+      expected_version: 4, table_ref: 'treasure_table:test_gemstones',
+      actor_id: 'player:forged',
+    })
+
+    await bridge.handle('p_abcdefghijk', 'character.rest', {
+      rest: 'long', expected_revision: 5, operation_id: 'rest-2',
+      attunement: { attach: ['item:ring_of_protection'], detach: [] },
+      uid: 'forged', coins_gp: 999,
+    })
+    expect(JSON.parse(String(calls.at(-1)?.init?.body))).toEqual({
+      rest: 'long', expected_revision: 5, operation_id: 'rest-2',
+      attunement: { attach: ['item:ring_of_protection'], detach: [] },
+    })
   })
 
   it('relays only profile fields and level-up attributes for a guest sheet update', async () => {
