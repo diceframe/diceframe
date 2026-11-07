@@ -74,6 +74,9 @@ class GameLifecycleDependencies:
     # Optional pool used when a newly-created custom world should keep the
     # ruleset's varied default covers for future saves.
     list_default_scene_images: Callable[[str, str], list[dict[str, str]]] | None = None
+    # issue #700：开局勾选 catalog 模块声明的资料册时按需物化。
+    # None 表示组合根未接线（未启用插件宿主等），此时 module ref 按原样拒绝。
+    materialize_module_book: Callable[[str, str, str], bool] | None = None
     get_game_defaults: Callable[[], dict[str, Any]] = lambda: {}
 
 

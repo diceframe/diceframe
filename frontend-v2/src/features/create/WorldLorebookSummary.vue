@@ -4,7 +4,7 @@ import { api } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import { projectCreationLorebooks, type CreationLorebook } from './creationLorebooks'
 
-const props = defineProps<{ worldId: string; source: string; manageHref: string; modelValue?: string[] }>()
+const props = defineProps<{ worldId: string; source: string; manageHref: string; modelValue?: string[]; extraBooks?: CreationLorebook[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string[]]; 'update:books': [value: CreationLorebook[]]; ready: [value: boolean] }>()
 const { locale } = useLocale()
 const copy = computed(() => {
@@ -27,8 +27,11 @@ const explainer = computed(() => ({
 const books = ref<CreationLorebook[]>([])
 const loading = ref(false)
 const failed = ref(false)
+// Module-declared books (issue #700): catalog candidates supplied by the page.
+// They merge with saved books for both display and the emitted selection model.
+const mergedBooks = computed(() => [...books.value, ...(props.extraBooks || [])])
 const sourceWorld = computed(() => props.source.startsWith('copy:') ? props.source.slice(5) : props.source === '__builtin__' ? props.worldId : '')
-const rows = computed(() => projectCreationLorebooks(books.value, props.worldId, props.source))
+const rows = computed(() => projectCreationLorebooks(mergedBooks.value, props.worldId, props.source))
 const hint = computed(() => props.source === '__blank__' ? copy.value.blank : props.source.startsWith('copy:') ? copy.value.referenced : copy.value.inherit)
 const selectionSummary = computed(() => {
   if (loading.value) return copy.value.loading
@@ -60,11 +63,8 @@ async function load() {
     if (!Array.isArray(response.books)) throw new Error('Invalid book list')
     if (request === epoch) {
       books.value = response.books
-      const projected = projectCreationLorebooks(response.books, props.worldId, props.source)
-      emit('update:books', projected)
-      const activeIds = new Set(projected.filter(book => book.active).map(book => book.id))
-      const prior = props.modelValue?.filter(id => activeIds.has(id))
-      emit('update:modelValue', prior !== undefined ? prior : [...activeIds])
+      lastAutoSelection = null
+      publishSelection()
       emit('ready', true)
     }
   } catch {
@@ -73,6 +73,25 @@ async function load() {
     if (request === epoch) loading.value = false
   }
 }
+// 最近一次「自动默认选择」的快照：modelValue 与它一致说明用户没有动过，
+// 后到的候选（例如模块声明的资料册）仍可并入默认选择；一旦用户勾选/取消
+// 过（或恢复草稿），modelValue 必然偏离快照，按用户选择对待。
+let lastAutoSelection: string[] | null = null
+function sameSelection(a: string[] | undefined, b: string[] | null): boolean {
+  if (!a || b === null || a.length !== b.length) return false
+  return a.every((id, index) => id === b[index])
+}
+function publishSelection() {
+  const projected = projectCreationLorebooks(mergedBooks.value, props.worldId, props.source)
+  emit('update:books', projected)
+  const activeIds = projected.filter(book => book.active).map(book => book.id)
+  const prior = props.modelValue
+  const isAuto = prior === undefined || sameSelection(prior, lastAutoSelection)
+  const next = isAuto ? activeIds : (prior || []).filter(id => activeIds.includes(id))
+  lastAutoSelection = isAuto ? [...next] : null
+  emit('update:modelValue', next)
+}
+watch(() => props.extraBooks, () => { if (epoch && !loading.value) publishSelection() })
 function toggleBook(bookId: string, event: Event) {
   const checked = (event.target as HTMLInputElement | null)?.checked === true
   const next = new Set(props.modelValue || [])

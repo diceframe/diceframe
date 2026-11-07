@@ -327,6 +327,24 @@ watch([lorePreviewWorldId, loreChoice], () => {
   if (!restoringDraft.value) selectedBookIds.value = undefined
   booksLoaded.value = false
 })
+// 模块声明的资料册候选（issue #700）：catalog 模组不启用即灌注，但开局
+// 应能一键带上它的书。候选来自模块详情接口；binding 只是候选投影所需的
+// 展示元数据，真正落地的是 POST /games/create 的 book_bindings ref，
+// 服务端在创建事务里按需物化。
+const moduleLorebookRows = ref<CreationLorebook[]>([])
+const moduleBookCandidates = computed<CreationLorebook[]>(() => moduleLorebookRows.value.map(book => ({
+  ...book,
+  ref: book.ref ?? { source_kind: 'module', source_id: moduleId.value, kind: 'lorebook' as const, id: book.id, digest: '' },
+  bindings: [{ scope_kind: 'world', scope_id: lorePreviewWorldId.value, enabled: 1 }],
+})))
+watch(moduleId, async id => {
+  moduleLorebookRows.value = []
+  if (!id || mode.value !== 'template') return
+  try {
+    const result = await api<{ ok: boolean; lorebooks?: CreationLorebook[] }>(`/modules/${encodeURIComponent(id)}/lorebooks`)
+    if (result.ok && Array.isArray(result.lorebooks)) moduleLorebookRows.value = result.lorebooks
+  } catch { /* 模块资料册候选加载失败不阻断创建流程 */ }
+}, { immediate: true })
 const loreManageHref = computed(() => {
   const source = loreChoice.value.startsWith('copy:') ? loreChoice.value.slice(5) : loreChoice.value === '__builtin__' ? lorePreviewWorldId.value : ''
   return source ? router.resolve({ name: 'lorebook', query: { world: source } }).href : ''
@@ -999,7 +1017,7 @@ async function create() {
                 </details>
                 </div>
               </details>
-              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" @ready="booksLoaded = $event">
+              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" :extra-books="moduleBookCandidates" @ready="booksLoaded = $event">
                 <template #source-settings>
                   <LorebookSourcePicker v-model="loreChoice" :worlds="availableLoreWorlds.map(w => ({ id: worldIdOf(w), name: worldNameOf(w), language: worldLanguageLabel(w) }))" />
                 </template>

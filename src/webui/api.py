@@ -957,6 +957,13 @@ class WebAPI:
                     self._turn_dependencies,
                     "|".join(instance.game_key),
                 ),
+                # issue #700：开局勾选 catalog 模块声明书时按需物化（组合根接线）。
+                materialize_module_book=lambda source_kind, source_id, book_id: plugins.materialize_module_book_binding(
+                    self._plugin_content_dependencies,
+                    source_kind,
+                    source_id,
+                    book_id,
+                ),
             )
         )
         if self._plugins and self._handler and hasattr(self._handler, "set_plugin_host"):

@@ -99,6 +99,24 @@ def delete_game(
     }
 
 
+def _materialize_module_book_binding(
+    dependencies: Any,
+    ref: ContentRef,
+) -> bool:
+    """按需物化 module/plugin 来源的声明书（组合根未接线时是 no-op）。"""
+
+    if ref.source_kind not in {"module", "plugin"}:
+        return False
+    materializer = getattr(dependencies, "materialize_module_book", None)
+    if not callable(materializer):
+        return False
+    try:
+        return bool(materializer(ref.source_kind, ref.source_id, ref.id))
+    except Exception:
+        logger.warning("开局按需物化模块资料册失败: %s", ref.canonical(), exc_info=True)
+        return False
+
+
 async def create_game(
     dependencies: GameLifecycleDependencies,
     world_id: str,
@@ -193,7 +211,12 @@ async def create_game(
         for binding in normalized_book_bindings:
             book_id = binding["ref"].id
             if store is None or not hasattr(store, "get_lorebook") or not store.get_lorebook(book_id):
-                return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
+                # catalog 交付模块的资料册不在书库里（绝不启用即灌注）；
+                # 玩家开局显式勾选时按声明**按需**物化（issue #700）。
+                if not _materialize_module_book_binding(dependencies, binding["ref"]):
+                    return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
+                if not store.get_lorebook(book_id):
+                    return {"ok": False, "error_code": "BOOK_NOT_FOUND", "error": book_id}
         if normalized_book_bindings and not lorebook_world_id:
             first_ref = normalized_book_bindings[0]["ref"]
             if first_ref.source_kind == "world":
