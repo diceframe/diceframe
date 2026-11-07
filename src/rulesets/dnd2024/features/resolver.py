@@ -408,6 +408,33 @@ class Dnd2024ClassFeatureResolver:
                 abilities.append(ability)
         return tuple(abilities)
 
+    def speed_bonus(self, character: Mapping[str, Any] | None) -> int:
+        """The flat Speed increase the currently active features grant.
+
+        Each source contributes additively and exactly once; a level-scaled
+        bonus reads the class progression table through the ``_track``
+        convention instead of copying the numbers here.  Only active
+        declarations count, so Fast Movement drops out under Heavy armor and
+        Unarmored Movement drops out under armor or a Shield.  The derived Speed
+        total is assembled by ``derive_speed`` -- this method never writes a
+        rule number into the character.
+        """
+
+        total = 0
+        for definition in self.active_features_for(character):
+            fixed = definition.parameters.get("speed_bonus_ft")
+            if isinstance(fixed, int) and not isinstance(fixed, bool):
+                total += fixed
+            track = definition.parameters.get("speed_bonus_track")
+            if isinstance(track, str) and track:
+                scaled = self.feature_value(
+                    character, definition.id, "speed_bonus", 0,
+                    owner=definition.owner,
+                )
+                if isinstance(scaled, int) and not isinstance(scaled, bool):
+                    total += scaled
+        return total
+
     def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
         """The Hit Point maximum increase granted by owned features.
 
@@ -663,7 +690,7 @@ class Dnd2024ClassFeatureResolver:
     def resource_definitions(
         self, character: Mapping[str, Any] | None,
     ) -> tuple[ResourceDefinition, ...]:
-        """Every class resource declared by the features the character owns."""
+        """Every class resource the character owns a declaration for."""
 
         return self._resource_definitions(self.features_for(character), character)
 
@@ -676,6 +703,17 @@ class Dnd2024ClassFeatureResolver:
         for definition in owned:
             if definition.resource_id and definition.resource_id not in resource_ids:
                 resource_ids.append(definition.resource_id)
+        # A pool the class table declares is owned through the class record, not
+        # through a named feature.  Enumerating only ``feature.resource_id`` left
+        # every such pool (Channel Divinity, Wild Shape, Lay On Hands, Sorcery
+        # Points, ...) written into the store but invisible on the sheet and in
+        # the combat window.  ``class_resource_definition`` still applies the
+        # declared ``minimum_level``, so a low-level character resolves nothing.
+        state = self.class_state(character)
+        if state is not None:
+            for resource_id in self.resources.by_class.get(state[0], {}):
+                if resource_id not in resource_ids:
+                    resource_ids.append(resource_id)
         # Origin-feat pools (Lucky's Luck Points) are owned through
         # ``features.feat_refs`` rather than a class table, but they live in the
         # same canonical ``resources.class`` store.  The actor projection is the
@@ -1044,6 +1082,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_passive_parameters(definition)
             self._validate_defeat_trigger_parameters(definition)
             self._validate_defense_parameters(definition)
+            self._validate_speed_parameters(definition)
             self._validate_overchannel_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
@@ -1200,6 +1239,25 @@ class Dnd2024ClassFeatureResolver:
         ):
             raise ClassFeatureError(
                 f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
+            )
+
+    @staticmethod
+    def _validate_speed_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the Speed-bonus contract.
+
+        A flat Speed bonus is a small positive number of feet; a negative or
+        absurd value would silently rewrite every derived Speed in the game.
+        The level-scaled form is validated by the generic ``_track`` rule.
+        """
+
+        parameters = definition.parameters
+        value = parameters.get("speed_bonus_ft")
+        if "speed_bonus_ft" in parameters and (
+            isinstance(value, bool) or not isinstance(value, int)
+            or not 1 <= value <= 120
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.speed_bonus_ft must be an integer from 1 to 120"
             )
 
     @staticmethod

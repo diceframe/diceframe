@@ -22,7 +22,7 @@ from typing import Any
 
 from .attunement import attuned_refs, attunement_capacity, owned_ref_counts
 from .attunement import attunement_state_for_projection, pending_attunement_refs
-from .derivation import derive_armor_class, derive_armor_training_state
+from .derivation import derive_armor_class, derive_armor_training_state, derive_speed
 from .primitives import ref_id as _ref_id
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.items.charges import initialize_item_state
@@ -84,8 +84,54 @@ def merge_live_character_projection(
     return merged
 
 
+def _base_speed(canonical: Mapping[str, Any], bundle: Any) -> int:
+    """The species Speed the derived value starts from, or 0 when unknown.
+
+    A legacy sheet may lack ``sources.species_ref``; reporting 0 lets the caller
+    keep the stored value instead of rewriting it to a guessed one.
+    """
+
+    species_ref = str(
+        (canonical.get("sources") or {}).get("species_ref") or ""
+    ).removeprefix("species:")
+    if not species_ref:
+        return 0
+    species = bundle.get("species", species_ref) or {}
+    value = species.get("speed")
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def _normalized(text: Any) -> str:
     return str(text or "").strip().casefold()
+
+
+def _resolve_base_speed(
+    canonical: Mapping[str, Any],
+    derived: Mapping[str, Any],
+    bundle: Any,
+) -> int:
+    """The Speed a derived value is recomputed from, or 0 when unknowable.
+
+    ``_base_speed`` answers 0 for a legacy sheet that lost
+    ``sources.species_ref``.  Leaving Speed alone is right for a sheet with no
+    armour penalty to apply, but wrong the moment ``armor_training`` reports
+    one: the sheet then claims "-10 ft" while still showing the unpenalised
+    number, and combat used to hide that by subtracting the penalty a second
+    time on top of the already-net ``derived.speed``.
+
+    When the species is unknown the stored value is the only remaining
+    candidate, and it is the honest one: before the penalty moved into
+    ``derive_speed`` that field held the species value, so recomputing from it
+    applies the penalty exactly once.
+    """
+
+    base = _base_speed(canonical, bundle)
+    if base > 0:
+        return base
+    stored = derived.get("speed")
+    if isinstance(stored, int) and not isinstance(stored, bool):
+        return stored
+    return 0
 
 
 def build_item_identity_index(bundles: Iterable[Any]) -> dict[str, str]:
@@ -379,6 +425,20 @@ class Dnd2024CharacterStateReconciler:
         attuned = rules["attuned_refs"]
         slots = rules["attunement_slots"]
         pending = rules["attunement_pending"]
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        derived = canonical.setdefault("derived", {})
+        # 速度与 AC 同源：换甲、持盾、力量不足都走同一入口重算。species 未知
+        # 的旧档从已存的速度重算：既不改写成 0，也不让护甲惩罚落空。
+        base_speed = _resolve_base_speed(canonical, derived, self.bundle)
+        speed = (
+            derive_speed(
+                base_speed,
+                feature_bonus=features.speed_bonus(canonical),
+                armor_training=armor_training,
+            )
+            if base_speed > 0
+            else None
+        )
         # 旧档没有同调段：按空集处理，并在一次投影内补写规范化结构。
         migrated = "attunement" not in canonical
         if migrated:
@@ -388,7 +448,6 @@ class Dnd2024CharacterStateReconciler:
         features = Dnd2024ClassFeatureResolver(self.bundle)
 
         canonical_equipment = canonical.setdefault("equipment", {})
-        derived = canonical.setdefault("derived", {})
         previous_item_state = deepcopy(canonical_equipment.get("item_state"))
         # 零数量只是历史行，不属于持有；只有聚合数量大于 0 的才参与初始化。
         held_refs = {
@@ -398,6 +457,7 @@ class Dnd2024CharacterStateReconciler:
         previous_refs = list(canonical_equipment.get("item_refs") or [])
         previous_ac = derived.get("armor_class")
         previous_training = derived.get("armor_training")
+        previous_speed = derived.get("speed")
         previous_attuned = list(derived.get("attuned_refs") or [])
         previous_slots = derived.get("attunement_slots")
         previous_pending = list(derived.get("attunement_pending") or [])
@@ -418,6 +478,7 @@ class Dnd2024CharacterStateReconciler:
             and previous_ac == armor_class
             and mirror_ac == armor_class
             and previous_training == armor_training
+            and (speed is None or previous_speed == speed)
             and previous_attuned == attuned
             and previous_slots == slots
             and previous_pending == pending
@@ -432,6 +493,9 @@ class Dnd2024CharacterStateReconciler:
         # 受训状态可以独立于 AC 变化（皮甲换链甲衫 AC 相同但门控不同），
         # 因此幂等短路必须比较训练段。
         derived["armor_training"] = armor_training
+        if speed is not None:
+            # 速度没有 legacy mirror：canonical ``derived.speed`` 是唯一权威。
+            derived["speed"] = speed
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending
@@ -499,17 +563,29 @@ class Dnd2024CharacterStateReconciler:
         attuned = rules["attuned_refs"]
         slots = rules["attunement_slots"]
         pending = rules["attunement_pending"]
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        derived = canonical.setdefault("derived", {})
+        base_speed = _resolve_base_speed(canonical, derived, self.bundle)
+        speed = (
+            derive_speed(
+                base_speed,
+                feature_bonus=features.speed_bonus(canonical),
+                armor_training=armor_training,
+            )
+            if base_speed > 0
+            else None
+        )
         migrated = "attunement" not in canonical
         if migrated:
             warnings.append(
                 "canonical attunement state is missing; initialised empty"
             )
-        derived = canonical.setdefault("derived", {})
         if (
             not migrated
             and canonical.get("attunement") == {"refs": attuned}
             and derived.get("armor_class") == armor_class
             and derived.get("armor_training") == armor_training
+            and (speed is None or derived.get("speed") == speed)
             and derived.get("attuned_refs") == attuned
             and derived.get("attunement_slots") == slots
             and derived.get("attunement_pending") == pending
@@ -519,6 +595,8 @@ class Dnd2024CharacterStateReconciler:
         canonical["attunement"] = {"refs": attuned}
         derived["armor_class"] = armor_class
         derived["armor_training"] = armor_training
+        if speed is not None:
+            derived["speed"] = speed
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending

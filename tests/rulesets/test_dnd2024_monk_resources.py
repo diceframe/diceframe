@@ -267,7 +267,11 @@ def test_focus_heads_the_projected_class_resource_list() -> None:
     sheet = monk_sheet(runtime, level=2)
 
     assert [(item["id"], item["name"], item["current"], item["maximum"]) for item in
-            sheet["class_resources"]] == [("focus_points", "Focus Points", 2, 2)]
+            sheet["class_resources"]] == [
+        ("focus_points", "Focus Points", 2, 2),
+        # Monk 2 级同时声明了一次/长休的 Uncanny Metabolism 池。
+        ("uncanny_metabolism", "Uncanny Metabolism", 1, 1),
+    ]
     # 1 级还没有专注点：投影里不出现 0/0 的空资源。
     assert monk_sheet(runtime, level=1)["class_resources"] == []
 
@@ -306,11 +310,13 @@ def test_localized_focus_label_reaches_the_projection() -> None:
     feature_ids = [feature["id"] for feature in sheet["class_features"]]
 
     assert feature_ids == [
-        "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
-        "step_of_the_wind",
+        "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
+        "flurry_of_blows", "patient_defense", "step_of_the_wind",
     ]
     assert sheet["class_resources"][0]["name"] == "专注点"
-    martial_arts = sheet["class_features"][0]
+    martial_arts = next(
+        feature for feature in sheet["class_features"] if feature["id"] == "martial_arts"
+    )
     assert martial_arts["name"] == "武艺"
     assert martial_arts["values"]["unarmed_damage_die"] == "1d6"
 

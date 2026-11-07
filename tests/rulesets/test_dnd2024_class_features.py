@@ -23,8 +23,8 @@ from dnd2024_monk_common import advance, monk_sheet
 
 
 MONK_FEATURES_AT_TWO = (
-    "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
-    "step_of_the_wind",
+    "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
+    "flurry_of_blows", "patient_defense", "step_of_the_wind",
 )
 MONK_FEATURE_IDS = frozenset({"martial_arts", *MONK_FEATURES_AT_TWO})
 MONK_CAPABILITY_IDS = frozenset({
@@ -72,13 +72,19 @@ def _mutated_bundle(runtime: Dnd2024Runtime, mutate) -> object:
     return replace(bundle, entities=entities)
 
 
-def test_monk_level_one_owns_martial_arts_only() -> None:
+def test_monk_level_one_owns_the_unarmored_formula_and_martial_arts() -> None:
     _runtime, resolver = _resolver()
 
     assert [feature.id for feature in resolver.features_for(_character(1))] == [
+        "unarmored_defense",
         "martial_arts",
     ]
+    assert resolver.has_feature(_character(1), "unarmored_defense") is True
     assert resolver.has_feature(_character(1), "martial_arts") is True
+    # Unarmored Movement is a level 2 benefit, so the level 1 Speed is the
+    # species value with no feature bonus yet.
+    assert resolver.has_feature(_character(1), "unarmored_movement") is False
+    assert resolver.speed_bonus(_character(1)) == 0
     assert resolver.has_feature(_character(1), "monks_focus") is False
     assert resolver.has_feature(_character(1), "flurry_of_blows") is False
     assert resolver.class_resource_definition(_character(1), "focus_points") is None
@@ -167,11 +173,15 @@ def test_feature_labels_follow_the_bundle_locale() -> None:
     _runtime_zh, chinese = _resolver("zh-CN")
 
     assert english.feature_value(_character(2), "monks_focus", "missing", None) is None
-    assert [view.name for view in english.feature_views(_character(2))][:2] == [
-        "Martial Arts", "Monk's Focus",
-    ]
+    names = {view.id: view.name for view in english.feature_views(_character(2))}
+    assert names["unarmored_defense"] == "Unarmored Defense"
+    assert names["unarmored_movement"] == "Unarmored Movement"
+    assert names["martial_arts"] == "Martial Arts"
+    assert names["monks_focus"] == "Monk's Focus"
     labels = {view.id: view.name for view in chinese.feature_views(_character(2))}
     assert labels == {
+        "unarmored_defense": "无甲防御",
+        "unarmored_movement": "无甲移动",
         "martial_arts": "武艺",
         "monks_focus": "武僧专注",
         "flurry_of_blows": "疾风连击",
@@ -274,36 +284,49 @@ def test_bundle_without_the_feature_catalog_degrades_to_no_features() -> None:
     assert resolver.combat_capabilities(_with_focus(2, 2), {"bonus_action": 1}) == ()
 
 
+def _monk_feature(catalog: dict, feature_id: str) -> dict:
+    """One monk declaration by id -- never a positional index.
+
+    The monk table grows as features are declared, so a mutation must name the
+    declaration it corrupts instead of assuming where it sits.
+    """
+
+    return next(
+        row for row in catalog["classes"]["monk"]["features"]
+        if row["id"] == feature_id
+    )
+
+
 def _drop_actions(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["capabilities"][0]["actions"] = [
+    _monk_feature(catalog, "martial_arts")["capabilities"][0]["actions"] = [
         {"kind": "teleport"},
     ]
 
 
 def _bad_track(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_track"] = (
-        "not_a_track"
-    )
+    _monk_feature(catalog, "martial_arts")["parameters"][
+        "unarmed_damage_die_track"
+    ] = "not_a_track"
 
 
 def _bad_format(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_format"] = (
-        "{die}{die}"
-    )
+    _monk_feature(catalog, "martial_arts")["parameters"][
+        "unarmed_damage_die_format"
+    ] = "{die}{die}"
 
 
 def _orphan_option(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][2]["option_of"] = "not_declared"
+    _monk_feature(catalog, "flurry_of_blows")["option_of"] = "not_declared"
 
 
 def _undeclared_resource(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][1]["resource_id"] = "not_a_resource"
+    _monk_feature(catalog, "monks_focus")["resource_id"] = "not_a_resource"
 
 
 def _bad_cost_amount(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][2]["capabilities"][0]["cost"]["resources"][0][
-        "amount"
-    ] = 0
+    _monk_feature(catalog, "flurry_of_blows")["capabilities"][0]["cost"][
+        "resources"
+    ][0]["amount"] = 0
 
 
 def _bad_once_per_turn(catalog: dict) -> None:
@@ -501,7 +524,7 @@ def test_barbarian_rage_declaration_and_capabilities_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "rage", "weapon_mastery",
+        "unarmored_defense", "rage", "weapon_mastery",
     ]
     enter = resolver.declared_capability(character, "rage")
     sustain = resolver.declared_capability(character, "rage_sustain")

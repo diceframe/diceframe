@@ -37,12 +37,18 @@ PLAIN_SHIELD_AC_BONUS = 2
 
 def _feature_proxy(
     class_ref: str, level: int, feature_state: Mapping[str, Any] | None = None,
+    equipped_refs: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The minimal canonical shape ``features_for`` needs to resolve ownership.
 
     Subclass features are owned only through a persisted selection, so the
     proxy carries ``subclass_ref`` when the caller has one.  A draft built at
     level 1 has none and correctly owns no subclass feature.
+
+    ``equipped_refs`` carries the character's canonical equipment so that an
+    ``equipment_requirement`` is answered against what is actually worn.  Without
+    it every equipment-gated benefit reads as satisfied at creation time, and a
+    Monk holding a Shield would keep the unarmored formula the SRD denies.
     """
 
     proxy: dict[str, Any] = {
@@ -52,6 +58,9 @@ def _feature_proxy(
         subclass_ref = feature_state.get("subclass_ref")
         if isinstance(subclass_ref, str) and subclass_ref:
             proxy["features"] = {"subclass_ref": subclass_ref}
+    refs = [str(ref) for ref in equipped_refs if str(ref)]
+    if refs:
+        proxy["equipment"] = {"item_refs": refs}
     return proxy
 
 
@@ -199,8 +208,35 @@ def derive_armor_class(
     return base + shield_bonus
 
 
-_ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
+def derive_speed(
+    base_speed: int,
+    *,
+    feature_bonus: int = 0,
+    armor_training: Mapping[str, Any] | None = None,
+) -> int:
+    """The one and only derived Speed formula.
 
+    Character creation, advancement, and live equipment reconciliation all call
+    this, so the rule exists exactly once.  ``base_speed`` is the species value;
+    ``feature_bonus`` is the sum the feature resolver reports for *active*
+    declarations only, so an equipment-gated bonus is already gone when its
+    precondition fails.  ``armor_training`` contributes the "-10 feet" a worn
+    armor imposes when the wearer's Strength is below its requirement.
+
+    Speed never goes negative, and no rule number lives here: both the bonus and
+    the penalty arrive from their own declarations.
+    """
+
+    penalty = 0
+    if isinstance(armor_training, Mapping):
+        raw = armor_training.get("speed_penalty", 0)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            penalty = raw
+    bonus = feature_bonus if isinstance(feature_bonus, int) else 0
+    return max(0, int(base_speed) + bonus - penalty)
+
+
+_ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
 
 def derive_armor_training_state(
     abilities: Mapping[str, int],
@@ -337,7 +373,7 @@ class CharacterDerivationMixin:
             self._required_entity(ref, "item")
         features = Dnd2024ClassFeatureResolver(self.bundle)
         feature_proxy = _feature_proxy(
-            draft["class_ref"], level, draft.get("features"),
+            draft["class_ref"], level, draft.get("features"), item_refs,
         )
         armor_category_refs = [
             f"armor_category:{item}"
@@ -506,7 +542,11 @@ class CharacterDerivationMixin:
                 "proficiency_bonus": prof,
                 "armor_class": armor_class,
                 "initiative": initiative,
-                "speed": int(species["speed"]),
+                "speed": derive_speed(
+                    int(species["speed"]),
+                    feature_bonus=features.speed_bonus(feature_proxy),
+                    armor_training=armor_training,
+                ),
                 "armor_training": armor_training,
                 "passive_perception": passive_perception,
                 "saving_throws": saving_throws,
