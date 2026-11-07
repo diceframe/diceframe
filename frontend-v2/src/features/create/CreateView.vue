@@ -156,7 +156,41 @@ const showAdventurePackages = computed(() => (
   && (supportsAdventurePackages.value || availableModuleAdventures.value.length > 0)
 ))
 const adventureSelection = useAdventureSelection({ rule: activeRule, world, language: gameLanguage, mode, supported: supportsAdventurePackages, setRule: id => { rule.value = id } })
+import { GAL_RULE_ID, galCreateIsConsistent, galLinkageForRule, nonGalFallbackRule } from './galMode'
+
 const { moduleId, playMode, selectedKey: adventureChoice, selectedAdventure, availableModuleAdventures, selectPlayMode, initializeLaunch, issue: adventureIssue } = adventureSelection
+// 用户最后一次选的非 GAL 规则：从 GAL 切回自由/模组时用它还原，而不是硬写默认值。
+const lastNonGalRule = ref('')
+
+function ruleFromEvent(event: Event): string {
+  return (event.target as HTMLSelectElement).value
+}
+
+/** 统一入口：所有会改 rule 的地方都走这里，保证 play_mode/solo 与 GAL 契约同步。 */
+function selectRule(nextRule: string): void {
+  const previousRule = rule.value
+  if (nextRule && nextRule !== GAL_RULE_ID) lastNonGalRule.value = nextRule
+  rule.value = nextRule
+  const linked = galLinkageForRule(previousRule, nextRule, {
+    playMode: playMode.value as 'free' | 'adventure' | 'gal',
+    solo: solo.value,
+  })
+  if (!linked) return
+  if (linked.playMode !== playMode.value) selectPlayMode(linked.playMode)
+  solo.value = linked.solo
+}
+
+/** 玩法模式按钮：GAL 规则下点自由/模组意味着离开 GAL，先把规则还原成合法值。 */
+function choosePlayMode(next: 'free' | 'adventure'): void {
+  if (rule.value === GAL_RULE_ID) {
+    const worldDefault = String(
+      worlds.value.find(item => worldIdOf(item) === world.value)?.default_rule || '',
+    )
+    selectRule(nonGalFallbackRule([lastNonGalRule.value, worldDefault]))
+  }
+  selectPlayMode(next)
+}
+
 const adventureCompatibleRule = computed(() => {
   const adventure = selectedAdventure.value
   return adventure ? rules.value.find(rule => adventureMatchesRule(adventure, rule)) || null : null
@@ -370,6 +404,14 @@ function restoreDraft(snapshot: CreateDraftSnapshot): void {
   sceneImageFile.value = snapshot.sceneImageFile || null
   mapBackgroundFile.value = snapshot.mapBackgroundFile || null
   if (snapshot.sceneImageSelectionSeed) sceneImageSelectionSeed.value = snapshot.sceneImageSelectionSeed
+  // 旧草稿可能是「GAL 规则 + 自由模式」这种被服务端拒绝的组合：恢复时按契约纠正。
+  if (snapshot.rule === GAL_RULE_ID) {
+    playMode.value = 'gal'
+    solo.value = true
+  } else if (snapshot.playMode === 'gal') {
+    playMode.value = 'free'
+  }
+  if (snapshot.rule && snapshot.rule !== GAL_RULE_ID) lastNonGalRule.value = snapshot.rule
 }
 
 watch(draftSnapshot, snapshot => {
@@ -495,7 +537,7 @@ watch(world, (worldId) => {
   if (restoringDraft.value) return
   if (mode.value !== 'template' || !worldId) return
   const defaultRule = String(worlds.value.find(item => worldIdOf(item) === worldId)?.default_rule || '')
-  if (defaultRule && rules.value.some(item => item.rule_id === defaultRule)) rule.value = defaultRule
+  if (defaultRule && rules.value.some(item => item.rule_id === defaultRule)) selectRule(defaultRule)
 })
 watch([gameLanguage, loreWorlds], () => {
   if (restoringDraft.value) return
@@ -784,6 +826,13 @@ async function create() {
       ? await uploadMapBackground(mapBackgroundFile.value)
       : mapBackgroundSelection(mapBackgroundChoice.value)
     if (playMode.value === 'adventure' && !adventureSelection.ready.value) throw new Error(t(adventureIssue.value || 'adventureLaunchIncompatible'))
+    if (!galCreateIsConsistent(activeRule.value, playMode.value, solo.value)) {
+      throw new Error(gameDefault(
+        'GAL 玩法需要 gal_narrative 规则且为单人局，请重新选择规则或玩法模式。',
+        'GAL play needs the gal_narrative rule and a solo game. Pick the rule or play mode again.',
+        'GAL braucht die Regel gal_narrative und ein Solospiel. Bitte Regel oder Spielmodus erneut wählen.',
+      ))
+    }
     const payload: Record<string, unknown> = applyStoryMode({ solo: solo.value, difficulty: difficulty.value, rule_id: activeRule.value, play_mode: playMode.value, ...adventureSelection.bindingPayload.value, description: description.value, room_password: openRoom.value ? '' : (roomPassword.value.trim() || null), players, language: gameLanguage.value, scene_image: selectedSceneImage, map_background: selectedMapBackground, narrative_perspective: narrativePerspective.value, gm_style_override: gmStyleFollowWorld.value ? null : { ...gmStyle.value }, advancement_mode: supportsAdvancementPolicy.value ? advancementMode.value : 'milestone', advancement_authority: supportsAdvancementPolicy.value ? advancementAuthority.value : 'ai_gm' }, storyMode.value)
     let worldId = ''
     if (mode.value === 'template') {
@@ -857,11 +906,11 @@ async function create() {
             <section v-if="showAdventurePackages" class="create-play-mode">
                   <span class="create-field-title">{{ gameDefault('玩法模式', 'Play mode', 'Spielmodus', '遊び方', 'Режим игры') }}</span>
                   <div class="narrative-perspective-cards">
-                    <button type="button" :class="{ active: playMode === 'free' }" :aria-pressed="playMode === 'free'" @click="selectPlayMode('free')">
+                    <button type="button" :class="{ active: playMode === 'free' }" :aria-pressed="playMode === 'free'" @click="choosePlayMode('free')">
                       <strong>{{ gameDefault('自由冒险', 'Free adventure', 'Freies Abenteuer', '自由な冒険', 'Свободное приключение') }}</strong>
                       <small>{{ gameDefault('选择世界，由 GM 自由推进故事。', 'Choose a world and let the GM guide the story.', 'Wähle eine Welt; der GM führt die Geschichte.', '世界を選び、GM が物語を進めます。', 'Выберите мир; мастер ведёт историю.') }}</small>
                     </button>
-                    <button type="button" :class="{ active: playMode === 'adventure' }" :aria-pressed="playMode === 'adventure'" @click="selectPlayMode('adventure')">
+                    <button type="button" :class="{ active: playMode === 'adventure' }" :aria-pressed="playMode === 'adventure'" @click="choosePlayMode('adventure')">
                       <strong>{{ gameDefault('模组冒险', 'Adventure module', 'Abenteuermodul', '冒険モジュール', 'Модуль приключения') }}</strong>
                       <small>{{ gameDefault('选择模组，按预设剧情与场景游玩。', 'Choose a module with prepared scenes and story.', 'Wähle ein Modul mit vorbereiteten Szenen.', 'モジュールの物語と場面に沿って遊びます。', 'Играйте по подготовленным сценам модуля.') }}</small>
                     </button>
@@ -910,11 +959,11 @@ async function create() {
               <details v-if="mode !== 'ai'" class="wide create-rule-settings">
                 <summary class="create-setup-summary"><span>{{ t('rule') }}</span><strong>{{ ruleNameOf(activeRuleSummary || { rule_id: activeRule }) }}</strong><span class="create-setup-adjust">{{ gameDefault('调整', 'Adjust', 'Anpassen', '変更', 'Изменить') }} <span aria-hidden="true">⌄</span></span></summary>
                 <div class="create-rule-settings-body">
-                <label><span>{{ t('rule') }}</span><select v-model="rule"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ ruleNameOf(r) }}</option></select></label>
+                <label><span>{{ t('rule') }}</span><select :value="rule" @change="selectRule(ruleFromEvent($event))"><option v-for="r in rules" :key="r.rule_id" :value="r.rule_id">{{ ruleNameOf(r) }}</option></select></label>
                 <details v-if="recommendedRulesList.length" open class="create-recommended-rules">
                   <summary>{{ t('recommendedRules') }}</summary>
                   <div class="rec-grid">
-                    <button v-for="r in recommendedRulesList" :key="r.rule_id" type="button" :class="['rec-card', { active: rule === r.rule_id }]" @click="rule = r.rule_id">
+                    <button v-for="r in recommendedRulesList" :key="r.rule_id" type="button" :class="['rec-card', { active: rule === r.rule_id }]" @click="selectRule(r.rule_id)">
                       <strong>{{ ruleNameOf(r) }}</strong>
                       <span class="recommendation-badges"><small :class="{ professional: isProfessionalRule(r) }">{{ recommendationBadge(r) }}</small><small v-if="isDndAdvancedRule(r)" class="beta-badge">{{ gameDefault('测试版', 'Beta', 'Beta') }}</small></span>
                       <p>{{ ruleDescriptionOf(r) }}</p>
@@ -1116,7 +1165,7 @@ async function create() {
           <div class="adventure-issue-actions">
             <button v-if="adventureCompatibleRule" type="button" @click="applyAdventureCompatibleRule">{{ gameDefault('使用兼容规则', 'Use compatible rules', 'Kompatible Regeln verwenden') }}</button>
             <button v-if="adventureRecommendedWorld" type="button" @click="applyAdventureRecommendedWorld">{{ gameDefault('使用推荐世界', 'Use recommended world', 'Empfohlene Welt verwenden') }}</button>
-            <button type="button" @click="selectPlayMode('free')">{{ gameDefault('放弃冒险包，继续自由对局', 'Leave package and continue free play', 'Paket verlassen und frei spielen') }}</button>
+            <button type="button" @click="choosePlayMode('free')">{{ gameDefault('放弃冒险包，继续自由对局', 'Leave package and continue free play', 'Paket verlassen und frei spielen') }}</button>
             <a class="create-manage-adventures" :href="adventureManagerHref" target="_blank" rel="noopener">{{ gameDefault('打开冒险工作台检查来源', 'Open the adventure workbench to check the source', 'Öffne die Abenteuerwerkstatt und prüfe die Quelle') }}</a>
           </div>
         </div>
