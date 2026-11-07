@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical@c1b865e7`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@2f86f39d`）；其余 44 份待执行 |
+| 状态 | S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@c1b865e7`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@2499e95b`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@d9873aad`）；其余 43 份待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -83,7 +83,7 @@ S0-A 子职授予主干
 |---|---|---|---|---|---|
 | S0-A | 子职授予主干＋暴击阈值 | Champion 3/15 级 Improved / Superior Critical | `S0A_SUBCLASS_GRANT_IMPROVED_CRITICAL_TASK_SPEC_2026-11-07.md` | 23 | 已实现，待评审 |
 | S0-B | 特性选项主干 | Champion 7 级 Additional Fighting Style → Defense | `S0B_FEATURE_CHOICES_TASK_SPEC_2026-11-07.md` | 26 | 已实现，待评审 |
-| S0-C | 被动角色推导 | Draconic Sorcery 3 级 Draconic Resilience | `S0C_PASSIVE_DERIVATION_DRACONIC_RESILIENCE_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
+| S0-C | 被动角色推导 | Draconic Sorcery 3 级 Draconic Resilience | `S0C_PASSIVE_DERIVATION_DRACONIC_RESILIENCE_TASK_SPEC_2026-11-07.md` | 22 | 已实现，待评审 |
 | S0-D1 | 骰面最大化 | Life Domain 17 级 Supreme Healing | `S0D1_SUPREME_HEALING_TASK_SPEC_2026-11-07.md` | 18 | 待执行 |
 | S0-D2 | 递增使用计数 | Evoker 14 级 Overchannel | `S0D2_OVERCHANNEL_TASK_SPEC_2026-11-07.md` | 28 | 待执行 |
 | S0-D3 | D20 掷后反应窗口 | College of Lore 3 级 Cutting Words 攻击检定面 | `S0D3_CUTTING_WORDS_CHECK_WINDOW_TASK_SPEC_2026-11-07.md` | 30 | 待执行 |

@@ -252,3 +252,139 @@ first + per_level_after × max(0, owner_class_level - minimum_level)
 - 未解决问题（没有则写“无”）：
 - 最终 git status 与 changed-file 白名单核对：
 ```
+
+---
+
+## 执行报告（2026-11-07）
+
+### 前置、基线与提交
+
+- S0-A 前置提交：`c1b865e7`（`feat/dnd2024-s0a-subclass-critical-upstream`，含 A2 迁移）。
+- S0-B 前置提交：`2499e95b`（`feat/dnd2024-s0b-feature-choices`；本切片开工时为 `2f86f39d`，见"设计偏差 2"）。
+- 本任务基线 / 分支 / 最终提交：`2499e95b` → `feat/dnd2024-s0c-draconic-resilience` → `d9873aad`。
+
+### 必须先记录的事实：本切片已在 2026-10-31 落入上游
+
+`git log -S unarmored_ac_bonus_abilities` 显示上游在 **2026-10-31** 已有提交 `fe74b864 feat(dnd2024): add unarmored AC and max HP bonus for Draconic Resilience`，`origin/main@8948bc3a` 已包含：
+
+- `classes.sorcerer` 声明与 `draconic_resilience` 参数；
+- `resolver.unarmored_ac_bonus_abilities()` / `feature_max_hp_bonus()`；
+- `derive_armor_class()` 的 `unarmored_ability_bonuses` 候选、`derive_max_hp` 与升级增量接线；
+- `tests/rulesets/test_dnd2024_draconic_resilience.py`（13 例 / 19 passed）。
+
+因此 §3 的基线判断"class feature catalog 当前没有 Sorcerer 条目"**已过期**。本切片没有从零重写，而是逐条对照 §4 契约做差异审计，修复不符项并补齐 §6 的 22 项载体。§7 停止条件第 1 条（前置未合入）不成立；结构边界（`features.subclass_ref`、`derive_armor_class()` 唯一权威、升级 HP 只有一处增量）与 §3 描述一致，未触发停止条件。
+
+### 实际变更文件（4 个）
+
+1. `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json`（白名单 1）
+   - `source_ref` 由 v1 的 `srd-5.2.1:p52:draconic-resilience` 改为 `srd-5.2.1:p69:draconic-resilience`；
+   - `summary` 对齐 SRD 原文措辞（"…by 1 whenever you gain another Sorcerer level"）。
+2. `src/rulesets/dnd2024/features/resolver.py`（白名单 5）
+   - `unarmored_ac_bonus_abilities()` 由 `features_for()` 改为 `active_features_for()`。
+3. `src/rulesets/dnd2024/progression/advancement.py`（白名单 8）
+   - 拆分出 `feature_hp_before` / `feature_hp_after`，`diff.hp` 增加 `feature_bonus_before` / `feature_bonus_after` / `feature_bonus_gain`。
+4. `tests/rulesets/test_dnd2024_draconic_resilience.py`（白名单 9）
+   - 19 → 43 例，覆盖 §6 全部 22 项。
+
+未改 `/` `models.py` `/` `derivation.py` `/` `reconciliation.py`：审计后确认这三处已满足 §4.2、§4.3、§4.4 的既有契约（唯一公式、候选取最大、穿甲硬前提、盾牌独立相加、建卡与协调同一入口），不需要改动。
+
+### 设计偏差及理由
+
+1. **白名单 9 的"新建"实为"扩充"。** 该测试文件上游已存在；本次在其上追加 24 例，不新建同名文件。
+2. **另在 S0-B 分支提交 `2499e95b`，修改本切片白名单外的两个测试文件。** `tests/rulesets/test_dnd2024_armor_training.py` 与 `tests/rulesets/test_dnd2024_equipment_data.py` 从 S0-B 起失败（`assert 19 == 18`），在 `origin/main@8948bc3a` 上通过，可判定是 S0-B 的 Defense 接线漏检。原因是 `stalwart_guardian` 预设 1 级选 `feat:defense`，链甲 16 + 受训盾 2 + Defense 1 = 19、板甲 18 + 1 = 19。修法是更正两处过期期望值并写明来源，不放宽断言、不改预设内容。该提交不属于 S0-C，单独存在于 S0-B 分支，S0-C 已 rebase 到它之上。
+3. **`unarmored_ac_bonus_abilities()` 改扫 active 而非 owned。** §4.2 第 3 条要求"只扫描当前实际拥有且符合既有活性规则的特性"。上游实现扫的是 owned。当前唯一消费者 Draconic Resilience 没有 `equipment_requirement`，active 恒等于 owned，因此**数值行为不变**；改动只为让契约在后续 Unarmored Defense 类声明上成立。
+4. **`source_ref` 与 `summary` 属内容变更，但不动 `content_version`。** `content_version` 是 manifest 静态值 `srd-5.2.1+r5`，不由内容哈希推导；§8 明确不改变它，本次未改。
+
+### §6 测试矩阵逐项载体（1–22）
+
+| # | 载体 | 结果 |
+|---|---|---|
+| 1 | `test_declaration_pins_the_srd_page_owner_and_both_labels`：owner/minimum_level/p69、en+zh 的 feature 与 class label、`FeatureView.values` 三个参数、无 `selection` 字段 | 通过 |
+| 2 | `test_catalog_rejects_invalid_defense_parameters`（8 参数：非属性名、-1、字符串、布尔、浮点、21、per_level 21、per_level 字符串） | 通过 |
+| 3 | `test_an_unselected_or_foreign_subclass_owns_nothing`（无 features、`{}`、空 ref、异职 `subclass:champion`）+ 既有 `test_subclass_grant_owns_the_feature_at_level_three`（2 级伪造子职） | 通过 |
+| 4 | 同上：3 级 Sorcerer 选 Draconic 拥有；3 级 Wizard / 伪造 owner 不拥有 | 通过 |
+| 5 | `test_boundary_apis_degrade_to_nothing_without_a_class`（None、`{}`、空 build、空 class_levels、level 0、空 class_ref、双职业） | 通过 |
+| 6 | `test_hp_bonus_is_three_then_one_per_extra_level`（1/2/3/4/5/20 → 0/0/3/4/5/20）+ 既有 1 级无加成 | 通过 |
+| 7 | `test_each_level_up_reports_the_feature_hp_components` 2→3：`0/3/3`，`gain - feature_gain == base + con + retro` | 通过 |
+| 8 | 同例 3→4：`3/4/1`；4→5：`4/5/1` | 通过 |
+| 9 | `test_the_existing_hp_components_are_not_disturbed`：CON ASI 时 base 4、con 2、retro 3、feature 1、总 10 | 通过 |
+| 10 | `test_current_hit_points_grow_by_the_same_gain_only_once`：受伤卡 5 + gain，满血卡等于新 max_hp，无二次治疗 | 通过 |
+| 11 | `test_history_replay_rebuilds_the_same_hp_and_armor_class`：`normalize_character_submission` 重建 5 级 = 32 HP / AC 15，特性仍拥有，`feature_max_hp_bonus == 5`，history 的 feature 增量序列 `[0,3,1,1]` | 通过 |
+| 12 | `test_an_invalid_subclass_choice_fails_before_any_hit_point_change`：缺失选择与伪造子职均 `ok=False`，`apply_advancement` 抛 `ProgressionCatalogError`，`resources` 不变 | 通过 |
+| 13 | 既有 `test_level_three_sorcerer_derives_unarmored_ac_and_hp_bonus`（15）与 `test_level_one_and_two_have_no_draconic_benefit`（12） | 通过 |
+| 14 | 既有 `test_negative_ability_modifier_falls_back_to_the_baseline`（CHA 负 → 12，与普通无甲逐值相等） | 通过 |
+| 15 | `test_worn_armor_replaces_the_draconic_candidate`：Hide 14（**低于** 15，证明未与 Draconic 取最大）、Chain Mail 16 | 通过 |
+| 16 | `test_a_trained_shield_stacks_on_the_draconic_base`：受训盾 17（15+2，只持盾仍无甲）、未受训盾 15 | 通过 |
+| 17 | `test_armor_in_the_pack_leaves_the_unarmored_formula_in_force`：背包 15 → 穿上 13 → 卸下 15 | 通过 |
+| 18 | `test_every_reconciliation_keeps_both_armor_class_fields_equal`：`[15, 13, 13, 15]` 四态连续协调，canonical `derived.armor_class` 与 legacy `armor_class` 每态相等 | 通过 |
+| 19 | `test_the_asi_level_recomputes_armor_class_immediately`：3 级 AC 15，CHA ASI 后 4 级立即 16，无需换装 | 通过 |
+| 20 | `test_defense_and_draconic_never_combine_into_a_second_formula`：未穿甲 15（Defense +0）、穿皮甲 14（11+Dex2+1，Draconic 候选退出） | 通过 |
+| 21 | `test_armored_containment_and_dex_caps_still_hold`：链甲衫 DEX cap → 15、无甲 18、皮甲+板甲取 18 并写 `extra armor` 警告；同文件既有魔法盾/同调由回归集覆盖 | 通过 |
+| 22 | 既有 `test_combat_view_reads_the_derived_armor_class`（actor AC == derived） | 通过 |
+
+### 聚焦测试
+
+```text
+python -m pytest tests/rulesets/test_dnd2024_draconic_resilience.py -q
+→ 43 passed, 2 warnings
+```
+
+### 回归测试
+
+```text
+任务书 §9 的 10 个文件
+→ 314 passed, 4 warnings（221.92s）
+
+宽面 tests/rulesets（全量 1314）
+→ 1303 passed, 11 failed（1280.78s）
+```
+
+11 条失败全部是 `test_dnd2024_character_builder.py`，与 `origin/main@8948bc3a` 的既有失败集逐条一致（此前核定为环境问题），本次未新增失败。
+
+### ruff
+
+- `ruff check`：`All checks passed!`
+- `ruff format --check`：6 文件 would reformat（含本次未改动的 `derivation.py`、`reconciliation.py`、`models.py`），与 S0-B 记录一致，仓库未把 format 作为门禁，未强制重排。
+
+### 升级 HP 各分量与历史重建核对
+
+| 升级 | base | con_mod | retro_con | feature_gain | 总 gain |
+|---|---|---|---|---|---|
+| 2→3 | 4 | 1 | 0 | 3 | 8 |
+| 3→4 | 4 | 1 | 0 | 1 | 6 |
+| 4→5 | 4 | 1 | 0 | 1 | 6 |
+| 3→4（CON +2） | 4 | 2 | 3 | 1 | 10 |
+
+5 级链条累计：`_base_max_hp(5) = 27`（7 + 4 × 5）+ 特性 5 = 32。历史重放（篡改 max_hp=9999、AC=99 后重建）回到 32 / 15，逐级 feature 增量为 `[0,3,1,1]`。
+
+### AC 在建卡 / 升级 / ASI / 换装各入口的核对
+
+| 入口 | 结果 |
+|---|---|
+| 建卡 1、2 级 | 12（10 + Dex 2） |
+| 3 级升级当次 | 15（10 + Dex 2 + Cha 3），同一 apply 内 `_update_derived` 已生效 |
+| 4 级 CHA ASI | 16（Cha 18） |
+| 穿 Hide / Chain Mail | 14 / 16，均来自护甲公式 |
+| 受训盾 / 未受训盾 | 17 / 15 |
+| 护甲在背包 | 15 |
+| 穿甲 + Defense | 14（11 + Dex 2 + 1） |
+
+### 存档 / API 兼容说明
+
+- `diff.hp` 只新增三个字段，既有 `method/base/constitution_modifier/retrospective_constitution/gain` 未变；仓库内无该结构的 schema 或前端消费者（已全局检索 `retrospective_constitution`）。
+- `source_ref` / `summary` 变更不影响 `content_version`（manifest 静态值），不影响存档版本。
+- 未做存量角色补偿迁移；`test_legacy_sheet_is_not_retroactively_repaired` 继续断言旧卡不被回溯改写。
+
+### 未解决问题
+
+无功能性遗留。仅记录清理事项：宽面回归的临时目录 `.ptmp-s0c-wide2/` 因批量删除保护未能自动移除，需手动清理。
+
+### 最终 git status 与 changed-file 白名单核对
+
+工作树干净（仅 `.ptmp-s0c-wide2/`、`.workbuddy/` 未跟踪）。
+
+白名单内（4 个）：1、5、8、9。
+
+白名单外（0 个）：本切片的 `d9873aad` 未修改任何白名单外文件。白名单外改动只存在于 S0-B 分支的独立提交 `2499e95b`（见设计偏差 2）。
+
+未修改前端、战斗代码、builder draft/validation、manifest、`content_version`、法术选择器、其他职业/子职数据。
