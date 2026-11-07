@@ -394,6 +394,36 @@ async def test_legacy_content_pack_enable_still_autoimports(env) -> None:
     assert [card["character_name"] for card in cards if card.get("source_plugin") == MODULE_ID] == ["Hero"]
 
 
+@pytest.mark.asyncio
+async def test_legacy_content_pack_update_imports_new_content_and_refreshes_sources(env, monkeypatch) -> None:
+    """详情页 / 插件页的「更新」与在线卡片的覆盖安装一致：新版本内容立刻可用。"""
+
+    await env.api.import_module(_zip_payload(_module_files(
+        profile="content-pack", delivery="legacy_autoimport", adventure=False,
+    )))
+    await env.api.update_plugin_config(MODULE_ID, {"enabled": True})
+
+    newer = _module_files(profile="content-pack", delivery="legacy_autoimport", adventure=False)
+    manifest = json.loads(newer["plugin.json"].decode("utf-8"))
+    manifest["version"] = "1.1.0"
+    newer["plugin.json"] = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+    newer["content/characters/mage.json"] = json.dumps({
+        "id": "mage", "character_name": "Mage", "description": "新版本角色",
+    }, ensure_ascii=False).encode("utf-8")
+    env.host.marketplace = _FakeMarketplace(_zip_payload(newer), MODULE_ID, version="1.1.0")
+    refreshed: list[bool] = []
+    refresh = env.api.refresh_content_sources
+    monkeypatch.setattr(env.api, "refresh_content_sources", lambda: (refreshed.append(True), refresh())[1])
+
+    result = await env.api.update_marketplace_plugin(MODULE_ID)
+
+    assert result["ok"] is True
+    assert env.host.plugins[MODULE_ID].manifest["version"] == "1.1.0"
+    cards = env.api.list_character_cards()["cards"]
+    assert sorted(card["character_name"] for card in cards if card.get("source_plugin") == MODULE_ID) == ["Hero", "Mage"]
+    assert refreshed == [True]
+
+
 # ---- §3.5 / §3.6 / §3.7 bound-save protection ------------------------------
 
 

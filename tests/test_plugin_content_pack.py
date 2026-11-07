@@ -1488,6 +1488,72 @@ async def test_install_marketplace_plugin_skips_autoimport_when_disabled():
 
 
 @pytest.mark.asyncio
+async def test_update_marketplace_plugin_autoimports_like_install():
+    """商店更新与覆盖安装一致：已启用内容包更新后立刻同步世界书并灌入新内容。"""
+    from src.webui.services.plugins import update_marketplace_plugin
+
+    saved_cards: list = []
+
+    class _Plugins:
+        contributions = SimpleNamespace(list=lambda kind: [])
+
+        def __init__(self):
+            self.synced = False
+
+        async def update_from_marketplace(self, plugin_id):
+            return {"id": plugin_id, "version": "1.1.0"}
+
+        def public_detail(self, plugin_id):
+            return {"id": plugin_id, "enabled": True, "status": "active"}
+
+        def sync_lorebooks(self, lore):
+            self.synced = True
+            return 0
+
+        def list_content_resources(self):
+            return {
+                "character_template": [{"plugin_id": "pack", "id": "mage", "character_name": "Mage", "plugin_name": "pack"}],
+                "npc": [], "spell": [], "item": [], "class": [],
+            }
+
+    class _Api:
+        _plugins = _Plugins()
+        _lore = None
+
+        def save_character_card(self, card):
+            saved_cards.append(card)
+            return {"ok": True}
+
+    api = _Api()
+    result = await update_marketplace_plugin(_plugin_lifecycle_dependencies(api), "pack")
+
+    assert result["ok"] is True
+    assert result["version"] == "1.1.0"
+    assert api._plugins.synced is True
+    assert [card["character_name"] for card in saved_cards] == ["Mage"]
+
+
+@pytest.mark.asyncio
+async def test_update_marketplace_plugin_skips_autoimport_when_already_latest():
+    """已是最新版本时宿主不改包，也就没有新内容要灌入。"""
+    from src.webui.services.plugins import update_marketplace_plugin
+
+    class _Plugins:
+        async def update_from_marketplace(self, plugin_id):
+            return {"id": plugin_id, "up_to_date": True}
+
+        def public_detail(self, plugin_id):
+            raise AssertionError("should not inspect the plugin for autoimport")
+
+    class _Api:
+        _plugins = _Plugins()
+        _lore = None
+
+    result = await update_marketplace_plugin(_plugin_lifecycle_dependencies(_Api()), "pack")
+    assert result == {"ok": True, "id": "pack", "up_to_date": True}
+
+
+@pytest.mark.asyncio
 async def test_static_plugin_registers_contributions_only_when_enabled(tmp_path):
     plugins = tmp_path / "plugins"
     write_plugin(
