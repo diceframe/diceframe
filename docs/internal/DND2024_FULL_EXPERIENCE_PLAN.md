@@ -44,7 +44,7 @@
 #### 核查工具（本节为执行侧共同资源）
 
 - `.rulebooks/dnd5r/`：社区 5r 规则书 CHM 解包（4877 文件，已 UTF-8），含玩家手册2024 / 城主指南2024 / 怪物图鉴2025 / 2014 全套 / 扩展书 / 第三方。已加入 `.git/info/exclude`，不进 git。
-- 用法：任务书的每条规则语义必须附"规则原文出处"（`.rulebooks` 路径 + 行号），执行侧可自行 grep 核对——**引用而非记忆**。示例见 `design/SECOND_WIND_TASK_SPEC_2026-10-28.md` §1。
+- 用法：**阶段一历史任务书**的规则语义使用 `.rulebooks` 路径 + 行号；**第二阶段及之后的 SRD 任务书**一律引用官方 SRD 5.2.1 PDF 的页码与英文原文，执行侧用 `scripts/srd_extract_baseline.py` 校验版本后核对——**引用而非记忆**。示例见 `design/SECOND_WIND_TASK_SPEC_2026-10-28.md` §1 与 `design/S0A_SUBCLASS_GRANT_IMPROVED_CRITICAL_TASK_SPEC_2026-11-07.md` §2。
 
 ### B. 效果原语层
 
@@ -78,9 +78,19 @@
 - 外部参考边界：
   - `foundryvtt/dnd5e` 系统：代码 MIT（可研究/带声明并入），Active Effects 的 change 行模型（`key + mode + value` + duration）是效果实例的建模范本；
   - `foundryvtt/pf2e`：Rule Elements 的谓词 DSL 与触发分类学是触发注册表的参考；
-  - open5e / dnd5eapi.co：SRD 5.2 结构化数据，CC-BY-4.0，可带署名重分发，与 AGPL 代码分层共存；
+  - open5e v2（`api.open5e.com/v2`，`srd-2024` 文档）：SRD 5.2.1 结构化数据，CC-BY-4.0，可带署名重分发，与 AGPL 代码分层共存；实测 spells 339 / feats 17 / species 9 / backgrounds 4 / magicitems 760（变体展开，SRD 条目实为 253）；
+  - **`dnd5eapi.co` 不含 2024 数据**（`/api/spells` 返回 319 条，全部为 SRD 5.1），不得作为 SRD 5.2.1 的数据源；
   - 5etools 数据许可边界不清，不作为后续任何内容的数据来源；
   - FVTT 核心 canvas 闭源，无代码可参考；PlanarAlly（开源自托管 VTT）是战术层架构参考。
+
+### SRD 基准（2026-11-06 冻结）
+
+- 基准文件：官方 `SRD_CC_v5.2.1.pdf`，364 页，6,031,375 字节，SHA-256 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87`；发布 2025-05-01，许可 CC-BY-4.0。
+- 条目清单：`docs/internal/design/SRD_CONTENT_INVENTORY_2026-11-06.md`（12 职业 / 12 子职 / 17 专长 / 253 魔法物品，逐条带页码）。**清单外条目一律不做。**
+- 来源与可用性核对：`docs/internal/design/SRD_SOURCE_AUDIT_2026-11-06.md`（各渠道可达性、许可、口径差、项目覆盖率）。
+- 复核脚本：`scripts/srd_extract_baseline.py`（校验 SHA-256 与页数后输出书签、魔法物品、专长三份清单，仅依赖 pypdf）。
+- 合规待办：官方无中文版，`locales/zh-CN` 为自行翻译改编，`legal/ATTRIBUTION.md` 需补「changes were made」声明。
+- `manifest.json` 的 `content_version: srd-5.2.1+r5` 中 `+r5` 为项目自有修订号，**不可直接改成 `srd-5.2.1`**：该字段写入游戏绑定并在 `advancement.py:329` 做一致性校验，改动需配套绑定迁移。
 
 ### 当前集成基线（2026-11-06）
 
@@ -333,7 +343,7 @@ MapBackground（已有）      +   token 渲染层（前端新增）
 | 集成 | 本地集成分支 `integration/dnd2024-srd`（#653 + #4/#5/#6 + #656 + 文档线） | 🔶 代码合并至 `d0a2fef5`；聚焦 10 文件 **272 passed**，`tests/rulesets` 全量 **1220 passed / 11 failed**（11 条均为既存 `test_dnd2024_character_builder.py` 本地环境失败），ruff clean；上游 PR 仍各自待合并 |
 | 二 | 职业特性批量填充（幽灵 id → catalog） | 🔄 首个试点完成：`#656` 将 Extra Attack 改为读职业表，补齐 fighter 5/11/20 的三个特性；12 职业全量仍未开始 |
 | 二 | 法术批量填充管线 | 🔶 原型完成但基线过时（2014/2024 混合快照）；按 SRD-only 精确清单重跑后才能确定批次，不沿用旧 review 13 + manual 33 计数 |
-| 二 | 子职 S0（仅 12 个 SRD 代表子职及特性） | ⬜ 未开始（非 SRD 子职为范围外，不设 S1–S3） |
+| 二 | 子职 S0（仅 12 个 SRD 代表子职及特性） | 🔄 执行契约编写中：已写 S0-A 子职授予、S0-B 特性选项、S0-C 被动推导、S0-D1 骰面最大化、S0-D2 Overchannel、S0-D3 D20 掷后窗口，共 6 份；代码未开始。唯一执行入口与依赖顺序见 `design/S0_TASK_INDEX_2026-11-07.md`；旧 `SP1`–`SP12` 是阶段一历史任务书，不得当作 S0 待办。非 SRD 子职为范围外，不设 S1–S3 |
 | 二 | 专长 F0（仅 SRD 5.2.1 清单） | ⬜ 未开始（先冻结官方 SRD 精确清单；非 SRD 专长为范围外，不设 F1–F3） |
 | 二 | 非魔法装备直填（23 武器 + 8 护甲 + 词条字段，SRD CC-BY 管线） | ✅ 已完成（2026-11-04，D1：武器 15→38、护甲 12 + 盾全齐、物品 50→81，各带 en / zh-CN locale；代码与数据在 PR #653，CI 已全绿、待合入；已进入集成分支） |
 | 二 | 魔法物品 I0（仅 SRD 物品与随机表） | ⬜ 未开始（DMG 非 SRD 内容为范围外，不设 I1–I3） |
