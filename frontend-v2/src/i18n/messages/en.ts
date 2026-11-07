@@ -61,6 +61,7 @@ export const en = {
   modulesAdventures: 'Adventures',
   modulesLorebooks: 'Lorebooks',
   modulesNoLorebooks: 'This module has no canonical lorebooks bound.',
+  moduleLorebookLaunch: 'Start a new adventure with this pack',
   modulesContentCount: 'Content',
   modulesBack: 'Back to content packages',
   modulesNotFound: 'This module was not found.',

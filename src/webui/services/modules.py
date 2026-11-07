@@ -30,6 +30,7 @@ from src.plugin_host.support import (
     content_delivery_mode,
     content_profile,
 )
+from src.lorebook.module_books import module_book_id
 from src.adventures import AdventureBundleLoader
 from src.plugin_host.registry import ContributionRegistry
 from src.version import version_below
@@ -172,17 +173,25 @@ def _inventory_projection(runtime: Any, adventure_registry: Any) -> tuple[int | 
 
 
 def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str, Any]]:
-    """Return canonical Lorebook sources explicitly owned by one module."""
+    """Return canonical Lorebook sources explicitly owned by one module.
+
+    两类来源合并（issue #700）：
+    - 用户书库里已物化的 module 书（legacy_autoimport 启用即落地、catalog
+      模组开局按需物化都会产生），带 ``source_kind=module`` 标记；
+    - 该模块**声明**的 lorebook 资源（catalog 只读数据）。物化与声明用同一
+      deterministic book id 对齐去重，所以每本书只出现一行；catalog 行带
+      ``catalog: true`` 与结构化 ``ref``，创建页据此把它作为开局候选。
+    """
 
     store = getattr(deps, "lorebook_store", None)
     lister = getattr(store, "list_lorebooks", None)
-    if not callable(lister):
-        return []
-    try:
-        books = lister() or []
-    except Exception:  # noqa: BLE001 - an optional source must not hide the catalog
-        return []
-    return [
+    books: list[dict[str, Any]] = []
+    if callable(lister):
+        try:
+            books = lister() or []
+        except Exception:  # noqa: BLE001 - an optional source must not hide the catalog
+            books = []
+    rows = [
         {
             "id": str(book.get("id") or ""),
             "name": str(book.get("name") or book.get("id") or ""),
@@ -196,6 +205,46 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
         if str(book.get("source_kind") or "") == "module"
         and str(book.get("source_id") or "") == str(module_id)
     ]
+    host = getattr(deps, "plugin_host", None)
+    resources_lister = getattr(host, "list_content_resources", None)
+    if not callable(resources_lister):
+        return rows
+    try:
+        resources = (resources_lister("lorebook") or {}).get("lorebook", [])
+    except Exception:  # noqa: BLE001 - declared resources must not break the page
+        return rows
+    seen_ids = {row["id"] for row in rows}
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        if str(resource.get("plugin_id") or "") != str(module_id):
+            continue
+        external_id = str(resource.get("id") or "")
+        book_id = module_book_id(str(module_id), external_id)
+        if not book_id or book_id in seen_ids:
+            # 已物化的书走上一段的真实行（含 enabled 状态），catalog 行不再重复。
+            continue
+        entries = resource.get("entries")
+        seen_ids.add(book_id)
+        rows.append({
+            "id": book_id,
+            "name": str(resource.get("name") or external_id),
+            "description": str(resource.get("description") or ""),
+            "language": str(resource.get("language") or "zh-CN"),
+            "enabled": True,
+            "source_kind": "module",
+            "source_id": str(module_id),
+            "catalog": True,
+            "entry_count": len(entries) if isinstance(entries, list) else None,
+            "ref": {
+                "source_kind": "module",
+                "source_id": str(module_id),
+                "kind": "lorebook",
+                "id": book_id,
+                "digest": "",
+            },
+        })
+    return rows
 
 
 def list_modules(deps: ModuleDependencies) -> dict[str, Any]:

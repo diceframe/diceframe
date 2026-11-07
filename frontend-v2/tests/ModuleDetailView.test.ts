@@ -304,8 +304,39 @@ describe('ModuleDetailView', () => {
     expect(router.currentRoute.value.query).toEqual({ module_id: 'castle-module', adventure_id: 'plugin:castle-quest' })
   })
 
-  it('blocks adventure launch for disabled or incompatible modules', async () => {
-    mocks.detail.mockResolvedValue(detailPayload({ status: 'disabled' }))
+  it('offers a pack-wide launch for resource packs that declare lorebooks', async () => {
+    const lorebooks = [{
+      id: 'module_book_castle_archive', name: 'Castle Archive', description: '', language: 'zh-CN',
+      enabled: true, source_kind: 'module', source_id: 'castle-module',
+    }]
+    mocks.detail.mockResolvedValue(detailPayload({
+      adventure_count: 0, adventures: [], content_profile: 'content-pack', lorebooks,
+    }))
+    const { wrapper, router } = await mountView()
+
+    expect(wrapper.get('[data-testid="module-lorebooks"]').text()).toContain('Castle Archive')
+    await buttonByText(wrapper, '用这个包开新冒险').trigger('click')
+    await flushPromises()
+
+    // 资源包没有固定剧情：深链只带包身份，创建页据此把它的资料册作为候选。
+    expect(router.currentRoute.value.name).toBe('create')
+    expect(router.currentRoute.value.query).toEqual({ module_id: 'castle-module' })
+  })
+
+  it('blocks the pack-wide launch while the pack is disabled', async () => {
+    mocks.detail.mockResolvedValue(detailPayload({
+      status: 'disabled', adventure_count: 0, adventures: [], content_profile: 'content-pack',
+      lorebooks: [{
+        id: 'module_book_castle_archive', name: 'Castle Archive', description: '', language: 'zh-CN',
+        enabled: true, source_kind: 'module', source_id: 'castle-module',
+      }],
+    }))
+    const { wrapper } = await mountView()
+
+    expect(buttonByText(wrapper, '用这个包开新冒险').attributes('disabled')).toBeDefined()
+  })
+
+  it('blocks adventure launch for disabled or incompatible modules', async () => {    mocks.detail.mockResolvedValue(detailPayload({ status: 'disabled' }))
     const { wrapper } = await mountView()
     expect(buttonByText(wrapper, '用此冒险创建游戏').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('启用内容包并解决兼容性问题后再创建游戏')

@@ -12,6 +12,7 @@ import { i18n, SUPPORTED_LOCALES, localeChain, normalizeLocale } from '@/i18n'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import AdventureLaunchSummary from '@/features/library/AdventureLaunchSummary.vue'
 import WorldLorebookSummary from '@/features/create/WorldLorebookSummary.vue'
+import { resolveLoreManageTarget } from '@/features/create/loreManageTarget'
 import LorebookSourcePicker from '@/features/create/LorebookSourcePicker.vue'
 import type { CreationLorebook } from '@/features/create/creationLorebooks'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
@@ -327,9 +328,35 @@ watch([lorePreviewWorldId, loreChoice], () => {
   if (!restoringDraft.value) selectedBookIds.value = undefined
   booksLoaded.value = false
 })
+// 模块声明的资料册候选（issue #700）：catalog 模组不启用即灌注，但开局
+// 应能一键带上它的书。候选来自模块详情接口；binding 只是候选投影所需的
+// 展示元数据，真正落地的是 POST /games/create 的 book_bindings ref，
+// 服务端在创建事务里按需物化。
+const moduleLorebookRows = ref<CreationLorebook[]>([])
+const moduleBookCandidates = computed<CreationLorebook[]>(() => moduleLorebookRows.value.map(book => ({
+  ...book,
+  ref: book.ref ?? { source_kind: 'module', source_id: moduleId.value, kind: 'lorebook' as const, id: book.id, digest: '' },
+  bindings: [{ scope_kind: 'world', scope_id: lorePreviewWorldId.value, enabled: 1 }],
+})))
+watch(moduleId, async id => {
+  moduleLorebookRows.value = []
+  if (!id || mode.value !== 'template') return
+  try {
+    const result = await api<{ ok: boolean; lorebooks?: CreationLorebook[] }>(`/modules/${encodeURIComponent(id)}/lorebooks`)
+    if (result.ok && Array.isArray(result.lorebooks)) moduleLorebookRows.value = result.lorebooks
+  } catch { /* 模块资料册候选加载失败不阻断创建流程 */ }
+}, { immediate: true })
+const loreManageTarget = computed(() => resolveLoreManageTarget({
+  source: loreChoice.value,
+  worldId: lorePreviewWorldId.value,
+  editableWorldIds: loreWorlds.value.map(worldIdOf),
+  moduleId: moduleId.value,
+}))
 const loreManageHref = computed(() => {
-  const source = loreChoice.value.startsWith('copy:') ? loreChoice.value.slice(5) : loreChoice.value === '__builtin__' ? lorePreviewWorldId.value : ''
-  return source ? router.resolve({ name: 'lorebook', query: { world: source } }).href : ''
+  const target = loreManageTarget.value
+  if (target.kind === 'world') return router.resolve({ name: 'lorebook', query: { world: target.worldId } }).href
+  if (target.kind === 'module') return router.resolve({ name: 'module-detail', params: { moduleId: target.moduleId } }).href
+  return ''
 })
 const apiReady = computed(() => isLlmConfigReady(settings.config))
 const showApiSetupHint = computed(() => settingsChecked.value && !settings.error && !apiReady.value)
@@ -621,6 +648,13 @@ onMounted(async () => {
       ? []
       : [{ character_name: gameDefault(DEFAULT_ADVENTURER_ZH, 'Adventurer', DEFAULT_ADVENTURER_DE), background: '', identity: {}, attributes: {}, skills: [] }]
     await adventureSelection.initializeLaunch(route.query, rules.value, worlds.value)
+    // 资源包（无固定剧情）也带 module_id 深链：没有 adventure_id 时开局走自由
+    // 模式，但本局仍应能选到这个包声明的资料册。已有冒险的深链由
+    // initializeLaunch 自己设置，这里只在两者不一致时补位（避免清掉已选冒险）。
+    const launchModuleId = typeof route.query.module_id === 'string' ? route.query.module_id.trim() : ''
+    if (launchModuleId && adventureSelection.moduleId.value !== launchModuleId) {
+      adventureSelection.moduleId.value = launchModuleId
+    }
     if (savedDraft) {
       restoreDraft(savedDraft)
       await nextTick()
@@ -999,7 +1033,7 @@ async function create() {
                 </details>
                 </div>
               </details>
-              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" @ready="booksLoaded = $event">
+              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" :manage-kind="loreManageTarget.kind" :extra-books="moduleBookCandidates" @ready="booksLoaded = $event">
                 <template #source-settings>
                   <LorebookSourcePicker v-model="loreChoice" :worlds="availableLoreWorlds.map(w => ({ id: worldIdOf(w), name: worldNameOf(w), language: worldLanguageLabel(w) }))" />
                 </template>
