@@ -504,6 +504,31 @@ def test_localized_names_all_resolve_to_one_canonical_item(runtime, display_name
     assert reconciler._resolve_item_id({"name": display_name}) == "chain_mail"
 
 
+def test_narrative_death_recompute_keeps_a_localized_item_identity(runtime) -> None:
+    """叙事伤害致死也走 apply_batch 的死亡重算，必须带全部语言的名称索引。"""
+
+    game = _Game(runtime)
+    assert game.instance.bind_ruleset_runtime(
+        game.sheet["ruleset_character"]["rule_binding"],
+    )
+    game.strip()
+    game.sheet["equipment"].append(
+        {"name": "锁子甲", "type": "armor", "slot": "body", "qty": 1},
+    )
+    assert "item:chain_mail" not in (
+        (game.canonical.get("equipment") or {}).get("item_refs") or []
+    )
+
+    # 归零只到昏迷，之后每次受击才累计死亡豁免；要打到 dead 才会触发重算。
+    for _ in range(4):
+        runtime.apply_narrative_hp_delta(game.instance, "p1", -999)
+
+    row = next(item for item in game.sheet["equipment"] if item["name"] == "锁子甲")
+    assert "dead" in (game.canonical.get("conditions") or {})
+    assert row.get("item_ref") == "item:chain_mail"
+    assert "item:chain_mail" in game.canonical["equipment"]["item_refs"]
+
+
 def test_reconciliation_writes_canonical_identity_back_to_live_rows(runtime) -> None:
     """§42：解析成功后补齐 canonical ref，之后不再依赖本地化名称。"""
 
