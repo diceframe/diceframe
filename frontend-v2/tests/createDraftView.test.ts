@@ -99,6 +99,19 @@ describe('CreateView draft restoration', () => {
     wrapper.unmount()
   })
 
+  it('sends a package world to its pack page instead of a world the library cannot open', async () => {
+    // 内容包世界（如 frost_pass）只在 /world-templates 里，`/worlds` 没有它；
+    // 「编辑这个世界的资料册」跳 ?world= 会落到「世界不存在或当前不可用」。
+    mocks.route.query = { adventure_id: 'core:story', module_id: 'core' }
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })
+    await flushPromises()
+    const footer = wrapper.get('details.create-lorebook-summary footer')
+    expect(footer.text()).toContain('查看包内资料')
+    expect(footer.text()).not.toContain('编辑这个世界的资料册')
+    wrapper.unmount()
+  })
+
   it('keeps STEP labels and the current mode, rule and party size in the side rail', async () => {
     i18n.global.locale.value = 'zh-CN'
     const wrapper = mount(CreateView, { global: { plugins: [i18n], stubs } })

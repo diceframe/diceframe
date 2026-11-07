@@ -12,6 +12,7 @@ import { i18n, SUPPORTED_LOCALES, localeChain, normalizeLocale } from '@/i18n'
 import CharacterWizard from '@/components/admin/CharacterWizard.vue'
 import AdventureLaunchSummary from '@/features/library/AdventureLaunchSummary.vue'
 import WorldLorebookSummary from '@/features/create/WorldLorebookSummary.vue'
+import { resolveLoreManageTarget } from '@/features/create/loreManageTarget'
 import LorebookSourcePicker from '@/features/create/LorebookSourcePicker.vue'
 import type { CreationLorebook } from '@/features/create/creationLorebooks'
 import CharacterCardPicker from '@/components/admin/CharacterCardPicker.vue'
@@ -345,9 +346,17 @@ watch(moduleId, async id => {
     if (result.ok && Array.isArray(result.lorebooks)) moduleLorebookRows.value = result.lorebooks
   } catch { /* 模块资料册候选加载失败不阻断创建流程 */ }
 }, { immediate: true })
+const loreManageTarget = computed(() => resolveLoreManageTarget({
+  source: loreChoice.value,
+  worldId: lorePreviewWorldId.value,
+  editableWorldIds: loreWorlds.value.map(worldIdOf),
+  moduleId: moduleId.value,
+}))
 const loreManageHref = computed(() => {
-  const source = loreChoice.value.startsWith('copy:') ? loreChoice.value.slice(5) : loreChoice.value === '__builtin__' ? lorePreviewWorldId.value : ''
-  return source ? router.resolve({ name: 'lorebook', query: { world: source } }).href : ''
+  const target = loreManageTarget.value
+  if (target.kind === 'world') return router.resolve({ name: 'lorebook', query: { world: target.worldId } }).href
+  if (target.kind === 'module') return router.resolve({ name: 'module-detail', params: { moduleId: target.moduleId } }).href
+  return ''
 })
 const apiReady = computed(() => isLlmConfigReady(settings.config))
 const showApiSetupHint = computed(() => settingsChecked.value && !settings.error && !apiReady.value)
@@ -1024,7 +1033,7 @@ async function create() {
                 </details>
                 </div>
               </details>
-              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" :extra-books="moduleBookCandidates" @ready="booksLoaded = $event">
+              <WorldLorebookSummary v-model="selectedBookIds" v-model:books="availableLorebooks" class="wide" :world-id="lorePreviewWorldId" :source="loreChoice" :manage-href="loreManageHref" :manage-kind="loreManageTarget.kind" :extra-books="moduleBookCandidates" @ready="booksLoaded = $event">
                 <template #source-settings>
                   <LorebookSourcePicker v-model="loreChoice" :worlds="availableLoreWorlds.map(w => ({ id: worldIdOf(w), name: worldNameOf(w), language: worldLanguageLabel(w) }))" />
                 </template>
