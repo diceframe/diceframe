@@ -103,6 +103,46 @@ def _recent_purchases(instance: GameInstance) -> list[dict[str, Any]]:
     return rows
 
 
+RECENT_CHECK_ROUNDS = 4
+MAX_RECENT_CHECKS = 8
+
+
+def _recent_checks(instance: GameInstance) -> list[dict[str, Any]]:
+    """近几轮已结算的检定：让规划器认出「换个说法再试一次」的同一次尝试。
+
+    只给模型做判断用的最小字段；行动原文只截一段，且已是玩家本人在本局提交过的内容。
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in instance.log[-RECENT_CHECK_ROUNDS:]:
+        if not isinstance(entry, dict):
+            continue
+        actions = {
+            str(action.get("user_id") or ""): str(action.get("text") or "")
+            for action in entry.get("actions") or []
+            if isinstance(action, dict)
+        }
+        for check in entry.get("check_results") or []:
+            if not isinstance(check, dict):
+                continue
+            uid = str(check.get("actor_uid") or "")
+            row: dict[str, Any] = {
+                "round": entry.get("round"),
+                "player": uid,
+                "check": str(check.get("skill") or check.get("attribute_key") or "")[:40],
+                "verdict": str(check.get("verdict") or ""),
+            }
+            action_text = sanitize_narration(actions.get(uid, "")).strip()
+            if action_text:
+                row["action"] = action_text[:120]
+            push = check.get("push")
+            if isinstance(push, dict) and push.get("status") == "resolved":
+                row["pushed"] = True
+            if check.get("luck_decision") == "spent":
+                row["luck_spent"] = True
+            rows.append(row)
+    return rows[-MAX_RECENT_CHECKS:]
+
+
 def _companion_roster(instance: GameInstance) -> dict[str, dict[str, Any]]:
     """DND party companions（ruleset_state.party.companions）；其他规则集为空。
 
@@ -407,6 +447,17 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     }
     if dice_system == "d20":
         ruleset["max_check_dc"] = d20_dc_cap(rule)
+    else:
+        if rule is not None and rule.percentile_difficulty_levels:
+            ruleset["difficulty_levels"] = True
+        if rule is not None and not rule.situational_modifier_allowed:
+            ruleset["situational_modifier"] = False
+        if rule is not None and rule.percentile_stat_checks:
+            ruleset["stat_checks"] = rule.percentile_stat_checks
+        if rule is not None and rule.idea_roll_attribute:
+            ruleset["idea_roll"] = True
+        # d100 的阈值来自角色卡，d20 的 DC 档位对它毫无意义，只会误导模型去填 target。
+        ruleset.pop("dc_table", None)
     payload = {
         "round": progression_state.round_value(instance),
         "scene": str(module_hooks.narrative_view(instance)["scene"] or "")[:500],
@@ -430,6 +481,7 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
             for companion_id, companion in sorted(_companion_roster(instance).items())
         ],
         "recent_purchases": _recent_purchases(instance),
+        "recent_checks": _recent_checks(instance),
     }
     # 权威世界真相（Issue #284）：只给模型 canonical 事实与取值，让它能用稳定的
     # 地点 id 提出 world_requirements；玩家可见投影走 project_visible_state。

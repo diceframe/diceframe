@@ -11,6 +11,19 @@ if TYPE_CHECKING:
     from src.engine.game_instance import GameInstance
 
 
+def _uses_percentile_attributes(attributes: Any) -> bool:
+    """CoC 类百分制属性（15–90）不适用 d20 的 (值-10)//2 修正。
+
+    d20 角色属性最高 30；只要有一项超过 30 就按百分制处理。
+    """
+    if not isinstance(attributes, dict):
+        return False
+    return any(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and value > 30
+        for value in attributes.values()
+    )
+
+
 def project_legacy_character_sheet(character_sheet: dict[str, Any]) -> CharacterSheetView:
     """Preserve the pre-runtime character view used by legacy prompts."""
     attributes = character_sheet.get("attributes", {})
@@ -27,7 +40,6 @@ def project_legacy_character_sheet(character_sheet: dict[str, Any]) -> Character
         "xp": character_sheet.get("xp", 0),
         "gold": character_sheet.get("gold", 0),
         "attributes": attributes,
-        "_modifiers": {key: (value - 10) // 2 for key, value in attributes.items()},
         "equipment": equipment,
         "_armor": sum(
             item.get("armor", 1)
@@ -39,6 +51,16 @@ def project_legacy_character_sheet(character_sheet: dict[str, Any]) -> Character
         "inventory": character_sheet.get("inventory", []),
         "key_items": character_sheet.get("key_items", []),
     }
+    if not _uses_percentile_attributes(attributes):
+        sheet["_modifiers"] = {key: (value - 10) // 2 for key, value in attributes.items()}
+    madness = character_sheet.get("madness")
+    if isinstance(madness, dict) and madness.get("type"):
+        # 疯狂状态此前只存在角色卡里，GM 看不到，也就不会体现在叙事中。
+        sheet["_madness"] = {
+            "type": madness.get("type"),
+            "remaining_rounds": madness.get("remaining_rounds", 0),
+            "symptom": madness.get("symptom", ""),
+        }
     if character_sheet.get("background"):
         sheet["background"] = character_sheet["background"]
     if character_sheet.get("deceased"):

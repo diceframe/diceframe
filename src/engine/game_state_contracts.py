@@ -65,6 +65,7 @@ CharacterSheetView = TypedDict(
         "_modifiers": dict[str, int],
         "_armor": int,
         "_special_stats": dict[str, int],
+        "_madness": dict[str, Any],
     },
     total=False,
 )

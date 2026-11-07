@@ -46,7 +46,8 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                 "type": "string",
                                 "description": (
                                     "Exact canonical attribute key from the supplied ruleset. Required for d20; "
-                                    "optional for a d100 skill check. Never put a skill name here."
+                                    "optional for a d100 skill check. Never put a skill name here. A key listed in "
+                                    "ruleset.stat_checks (such as luck) may be used for a percentile check of that stat."
                                 ),
                             },
                             "skill": {
@@ -114,11 +115,32 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                             },
                             "kind": {
                                 "type": "string",
-                                "enum": ["check", "save", "attack"],
+                                "enum": ["check", "save", "attack", "idea"],
+                                "description": (
+                                    "idea is only valid when ruleset.idea_roll is true: an Idea roll for a stuck "
+                                    "investigator; the server picks the attribute."
+                                ),
                             },
                             "opponent": {
                                 "type": "string",
                                 "description": "Optional player/NPC opponent reference for a contested check.",
+                            },
+                            "difficulty": {
+                                "type": "string",
+                                "enum": ["regular", "hard", "extreme"],
+                                "description": (
+                                    "Only when ruleset.difficulty_levels is true (percentile rules): the success "
+                                    "level the task requires. regular = at or under the full value, hard = half, "
+                                    "extreme = one fifth. Judge the task or the opposition, never the actor's own "
+                                    "skill; default regular."
+                                ),
+                            },
+                            "opponent_skill": {
+                                "type": "string",
+                                "description": (
+                                    "Only for a percentile opposed check: the opponent's skill or attribute that "
+                                    "resists this action (e.g. Listen against Stealth). Omit to use the same one."
+                                ),
                             },
                             "assist": {
                                 "type": "array",

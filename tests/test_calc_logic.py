@@ -226,15 +226,16 @@ def test_swipe_rollback_restores_resources():
 def test_san_check_critical_success_halves_loss(monkeypatch):
     from types import SimpleNamespace
     from src.commands import player_state_applier as psa
+    from src.engine import dice_rules_coc
     from src.commands.madness_tracker import MadnessTracker
     from src.engine.dice import DiceResult
     from src.engine.game_instance import GameInstance
 
     monkeypatch.setattr(
-        psa, "check_d100",
+        dice_rules_coc, "check_coc",
         lambda threshold: (DiceResult(formula="d100", rolls=[3], modifier=0, total=3, natural=3), "大成功"),
     )
-    monkeypatch.setattr(psa, "dice_roll", lambda formula: SimpleNamespace(total=6))
+    monkeypatch.setattr(dice_rules_coc, "roll", lambda formula: SimpleNamespace(total=6, rolls=[6]))
 
     inst = GameInstance(("web", "san_crit", "bot"))
     inst.players["p1"] = {"character_name": "调查员", "character_sheet": {"sanity": 50, "max_sanity": 99}}
@@ -247,15 +248,16 @@ def test_san_check_critical_success_halves_loss(monkeypatch):
 def test_san_check_failure_takes_full_loss(monkeypatch):
     from types import SimpleNamespace
     from src.commands import player_state_applier as psa
+    from src.engine import dice_rules_coc
     from src.commands.madness_tracker import MadnessTracker
     from src.engine.dice import DiceResult
     from src.engine.game_instance import GameInstance
 
     monkeypatch.setattr(
-        psa, "check_d100",
+        dice_rules_coc, "check_coc",
         lambda threshold: (DiceResult(formula="d100", rolls=[60], modifier=0, total=60, natural=60), "失败"),
     )
-    monkeypatch.setattr(psa, "dice_roll", lambda formula: SimpleNamespace(total=6))
+    monkeypatch.setattr(dice_rules_coc, "roll", lambda formula: SimpleNamespace(total=6, rolls=[6]))
 
     inst = GameInstance(("web", "san_fail", "bot"))
     inst.players["p1"] = {"character_name": "调查员", "character_sheet": {"sanity": 50, "max_sanity": 99}}

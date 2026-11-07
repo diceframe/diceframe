@@ -8,6 +8,7 @@ import logging
 import operator
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from src.engine.currency import (
     CurrencySpec,
@@ -159,7 +160,7 @@ class RuleSystem:
         import copy
         import json
         value = copy.deepcopy(self.template)
-        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "difficulty_instructions", "currency", "active_locale", "default_locale", "locale_schema_version"):
+        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "check_planner_appendix", "difficulty_instructions", "currency", "active_locale", "default_locale", "locale_schema_version"):
             value.pop(field, None)
         for item in value.get("attributes", []):
             if isinstance(item, dict):
@@ -396,6 +397,49 @@ class RuleSystem:
             "comparison": "roll_plus_modifier_gte_target",
             "critical": {"success": 20, "failure": 1},
         }
+
+    @property
+    def percentile_difficulty_levels(self) -> bool:
+        """d100 规则是否声明「所需成功等级」（常规/困难/极难）。"""
+        return self.dice_system == "d100" and self.check_mechanic.get("difficulty_levels") is True
+
+    @property
+    def situational_modifier_allowed(self) -> bool:
+        """规则是否接受规划器给出的数值情境修正；CoC 7e 只用奖励骰/惩罚骰。"""
+        return self.check_mechanic.get("situational_modifier", True) is not False
+
+    @property
+    def percentile_opposed_rolls(self) -> bool:
+        """d100 对抗检定是否双方都掷骰、按成功等级比较。"""
+        return self.dice_system == "d100" and self.check_mechanic.get("opposed") == "success_level"
+
+    @property
+    def pushed_roll_excludes_fumble(self) -> bool:
+        return bool(self.template.get("pushed_roll_excludes_fumble"))
+
+    @property
+    def percentile_stat_checks(self) -> list[dict[str, str]]:
+        """可以像属性一样直接检定的特殊资源（如 CoC 幸运），只限 d100 且必须是已声明的资源。"""
+        if self.dice_system != "d100":
+            return []
+        declared = self.check_mechanic.get("stat_checks")
+        if not isinstance(declared, list):
+            return []
+        wanted = {str(key) for key in declared}
+        return [
+            {"key": str(stat.get("key")), "name": str(stat.get("name") or stat.get("key"))}
+            for stat in self.special_stats
+            if isinstance(stat, dict) and str(stat.get("key") or "") in wanted
+        ]
+
+    @property
+    def idea_roll_attribute(self) -> str:
+        """灵感检定使用的属性 key；规则未声明时为空串。"""
+        declared = self.check_mechanic.get("idea_roll")
+        if not isinstance(declared, dict):
+            return ""
+        attribute = str(declared.get("attribute") or "")
+        return attribute if attribute in self.attribute_keys else ""
 
     @property
     def advantage_mechanic(self) -> dict:
@@ -749,6 +793,10 @@ class RuleSystem:
     def get_gm_prompt_appendix(self, language: str = DEFAULT_LANGUAGE) -> str:
         return str(localized_field(self.template, "gm_prompt_appendix", language) or "")
 
+    def get_check_planner_appendix(self, language: str = DEFAULT_LANGUAGE) -> str:
+        """规则专属的检定裁定要点，只追加给检定规划器（不进 GM 叙事 prompt）。"""
+        return str(localized_field(self.template, "check_planner_appendix", language) or "")
+
     # 有专属标签/结算通道的资源不进 STAT 通道
     _STAT_EXCLUSIVE_KEYS = {"sanity", "luck", "mana"}
 
@@ -837,11 +885,12 @@ class RuleSystem:
             if self.max_skill_value and value > self.max_skill_value:
                 errors.append(f"技能 {name} {value}/{self.max_skill_value}，超出单技能上限")
             if self.skill_point_spend_mode == "above_base":
-                skill_spent += max(0, value - self._skill_base_value(name))
+                skill_spent += max(0, value - self.skill_base_value_for(name, attrs))
             else:
                 skill_spent += value
-        if self.skill_point_total and skill_spent > self.skill_point_total:
-            errors.append(f"技能点 {skill_spent}/{self.skill_point_total}，超出上限")
+        budget = self.skill_point_budget(attrs)
+        if budget and skill_spent > budget:
+            errors.append(f"技能点 {skill_spent}/{budget}，超出上限")
 
         # 装备品质
         for eq in character_sheet.get("equipment", []):
@@ -860,17 +909,93 @@ class RuleSystem:
         自定义技能按房规兜底 5，防 above_base 模式下凭空全算超基导致超模建卡（P2-E）。"""
         if name in self.skill_base_values:
             return int(self.skill_base_values[name])
-        skills = self.template.get("skills") or {}
-        canonical_names = self.template.get("canonical_skill_names") or {}
-        for identity, definition in skills.items():
-            display_name = definition.get("name") if isinstance(definition, dict) else ""
-            if name not in {str(identity), str(display_name)}:
-                continue
-            canonical_name = str(canonical_names.get(identity) or display_name or identity)
-            if canonical_name in self.skill_base_values:
-                return int(self.skill_base_values[canonical_name])
+        canonical_name = self._canonical_skill_name(name)
+        if canonical_name in self.skill_base_values:
+            return int(self.skill_base_values[canonical_name])
         in_pool = any(name in pool for pool in self.skill_pools.values())
         return 5 if not in_pool else 0
+
+    def _canonical_skill_name(self, name: str) -> str:
+        """把技能 id 或当前语言的显示名映射到 skill_base_values 使用的规范名。"""
+        if name in self.skill_base_values:
+            return name
+        skills = self.template.get("skills") or {}
+        canonical_names = self.template.get("canonical_skill_names") or {}
+        if not isinstance(skills, dict):
+            return name
+        for identity, definition in skills.items():
+            display_name = definition.get("name") if isinstance(definition, dict) else ""
+            if name in {str(identity), str(display_name)}:
+                return str(canonical_names.get(identity) or display_name or identity)
+        return name
+
+    @property
+    def derived_skill_bases(self) -> dict[str, str]:
+        """由属性派生的技能基础值公式（如 CoC 闪避 = 敏捷/2、母语 = 教育），按规范名索引。"""
+        raw = self.template.get("derived_skill_bases")
+        return {str(key): str(value) for key, value in raw.items()} if isinstance(raw, dict) else {}
+
+    @property
+    def skill_point_formula(self) -> str:
+        return str(self.template.get("skill_point_formula") or "")
+
+    @staticmethod
+    def _numeric_attributes(attributes: dict | None) -> dict[str, int]:
+        if not isinstance(attributes, dict):
+            return {}
+        return {
+            str(key): int(value)
+            for key, value in attributes.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
+
+    def skill_base_value_for(self, name: str, attributes: dict | None = None) -> int:
+        """角色实际的技能基础值：有派生公式且给了属性时按属性计算，否则用静态基础值。"""
+        formula = self.derived_skill_bases.get(self._canonical_skill_name(name))
+        values = self._numeric_attributes(attributes)
+        if formula and values:
+            try:
+                return max(0, min(99, int(_safe_eval(formula, values))))
+            except (ValueError, TypeError, ZeroDivisionError, KeyError):
+                logger.warning("派生技能基础值公式无法计算: %s=%s", name, formula)
+        return self._skill_base_value(name)
+
+    def skill_point_budget(self, attributes: dict | None = None) -> int:
+        """技能点预算：规则声明公式（CoC 职业点+兴趣点）时按属性计算，否则用固定总额。"""
+        values = self._numeric_attributes(attributes)
+        if self.skill_point_formula and values:
+            try:
+                return max(0, int(_safe_eval(self.skill_point_formula, values)))
+            except (ValueError, TypeError, ZeroDivisionError, KeyError):
+                logger.warning("技能点公式无法计算: %s", self.skill_point_formula)
+        return int(self.skill_point_total or 0)
+
+    def known_skill_name(self, name: str) -> str:
+        """规则认识的技能名（id、规范名或当前语言显示名，忽略大小写）；不认识返回空串。"""
+        query = str(name or "").strip().casefold()
+        if not query:
+            return ""
+        return next((known for known in self.skill_base_lookup() if known.casefold() == query), "")
+
+    def skill_base_lookup(self) -> dict[str, dict[str, Any]]:
+        """前端建卡用：当前语言下每个已知技能名（含 id 与规范名）的基础值或派生公式。"""
+        names: set[str] = set(self.skill_base_values)
+        skills = self.template.get("skills") or {}
+        if isinstance(skills, dict):
+            for identity, definition in skills.items():
+                names.add(str(identity))
+                if isinstance(definition, dict) and definition.get("name"):
+                    names.add(str(definition["name"]))
+        for pool in self.skill_pools.values():
+            names.update(str(item) for item in pool)
+        lookup: dict[str, dict[str, Any]] = {}
+        for name in sorted(names):
+            entry: dict[str, Any] = {"base": self._skill_base_value(name)}
+            formula = self.derived_skill_bases.get(self._canonical_skill_name(name))
+            if formula:
+                entry["formula"] = formula
+            lookup[name] = entry
+        return lookup
 
 
     @classmethod

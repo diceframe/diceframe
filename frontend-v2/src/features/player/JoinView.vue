@@ -6,7 +6,7 @@ import type { CharacterCard, CharacterCardsResponse, CharacterListResponse, Char
 import { rememberCurrentGame } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { ROOM_TOKEN_REJECTED_EVENT, SEAT_TOKEN_HEADER, readRoomToken, readSeatToken, storeRoomToken, storeSeatToken } from '@/utils/seatToken'
-import { attrDisplayName, suggestedAttributes, skillPointCost } from '@/utils/ruleSchema'
+import { attrDisplayName, suggestedAttributes, skillPointBudget, skillPointCost } from '@/utils/ruleSchema'
 import { useLocale, type Locale } from '@/composables/useLocale'
 import { UI_LOCALES, uiLocaleLabel } from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
@@ -103,10 +103,10 @@ const attrLimit = computed(() => attrTotal.value || Number(ruleMeta.value.attrib
 const attrRemaining = computed(() => Math.max(attrLimit.value, attrSum.value) - attrSum.value)
 const attrOverLimit = computed(() => Boolean(attrLimit.value && attrSum.value > attrLimit.value))
 const maxSkills = computed(() => Number(ruleMeta.value.max_skills || 0))
-const skillPointTotal = computed(() => Number(ruleMeta.value.skill_point_total || 0))
+const skillPointTotal = computed(() => skillPointBudget(ruleMeta.value, form.value.attributes || {}))
 const maxSkillValue = computed(() => Number(ruleMeta.value.max_skill_value || 0))
 const filledSkills = computed(() => form.value.skills.filter(s => s.name.trim()))
-const skillSpent = computed(() => filledSkills.value.reduce((sum, skill) => sum + skillPointCost(skill, ruleMeta.value), 0))
+const skillSpent = computed(() => filledSkills.value.reduce((sum, skill) => sum + skillPointCost(skill, ruleMeta.value, form.value.attributes || {}), 0))
 const skillOverLimit = computed(() =>
   Boolean((maxSkills.value && filledSkills.value.length > maxSkills.value)
     || (skillPointTotal.value && skillSpent.value > skillPointTotal.value)

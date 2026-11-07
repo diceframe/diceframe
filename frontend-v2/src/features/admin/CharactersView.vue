@@ -996,7 +996,7 @@ async function onWizardSubmit(c: CharacterSheet) {
         </div>
       </div>
       <label>{{ t('skills') }}</label>
-      <SkillEditor v-model="edit.skills" :pool="skillPool" :meta="ruleMeta" />
+      <SkillEditor v-model="edit.skills" :pool="skillPool" :meta="ruleMeta" :attributes="edit.attributes" />
       <label>{{ t('backgroundStory') }}<textarea rows="3" v-model="edit.background"></textarea></label>
       <ItemEditor v-model:equipment="edit.equipment" v-model:inventory="edit.inventory" :damage-dice-enabled="damageDiceEnabled" />
       <label>{{ t('keyItemsLineHelp') }}<textarea rows="3" v-model="edit.keyText"></textarea></label>

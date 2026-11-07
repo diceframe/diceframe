@@ -102,6 +102,41 @@ def quest_status_label(status: str, language: str = "zh-CN") -> str:
     }))
 
 
+_SANITY_VERDICT_LABELS = {
+    "en": {
+        "大成功": "critical success", "极难成功": "extreme success", "困难成功": "hard success",
+        "普通成功": "regular success", "失败": "failure", "大失败": "fumble",
+    },
+    "ja": {
+        "大成功": "クリティカル", "极难成功": "イクストリーム成功", "困难成功": "ハード成功",
+        "普通成功": "レギュラー成功", "失败": "失敗", "大失败": "ファンブル",
+    },
+}
+
+
+def sanity_check_message(language: str, name: str, outcome: dict) -> str:
+    """公开一次理智检定的骰值、阈值、等级与损失；GM 下一轮从历史里读到它来写反应。"""
+    spec = str(outcome.get("loss_spec") or "")
+    if outcome.get("invalid"):
+        return localized_text(language, {
+            "en": f"[Sanity Check] {name}: the loss notation is not recognized; not resolved",
+            "zh-CN": f"【理智检定】{name}：损失写法无法识别，未结算",
+            "ja": f"【正気度ロール】{name}：喪失の表記を認識できないため、処理しませんでした",
+        })
+    verdict = str(outcome.get("verdict") or "")
+    roll_value = int(outcome.get("roll") or 0)
+    threshold = int(outcome.get("threshold") or 0)
+    loss = int(outcome.get("loss") or 0)
+    labels = _SANITY_VERDICT_LABELS.get(normalize_language(language), {})
+    return localized_text(language, {
+        "en": f"[Sanity Check] {name}: d100={roll_value} vs SAN {threshold} → "
+              f"{_SANITY_VERDICT_LABELS['en'].get(verdict, verdict)}, lost {loss} ({spec})",
+        "zh-CN": f"【理智检定】{name}：d100={roll_value} / 理智 {threshold} → {verdict}，损失 {loss}（{spec}）",
+        "ja": f"【正気度ロール】{name}：d100={roll_value} / 正気度 {threshold} → "
+              f"{labels.get(verdict, verdict)}、喪失 {loss}（{spec}）",
+    })
+
+
 def build_state_change_messages(instance: GameInstance, before: dict[str, dict], data: dict) -> list[str]:
     """生成玩家可见的状态变动摘要，避免 HP/物品/任务变化只藏在处理日志里。"""
     messages: list[str] = []
@@ -125,6 +160,9 @@ def build_state_change_messages(instance: GameInstance, before: dict[str, dict],
         name = old.get("name") or player.get("character_name") or cs.get("character_name") or uid
         parts: list[str] = []
         player_update = players_update.get(uid, {})
+        sanity_outcome = player_update.get("san_check_result") if isinstance(player_update, dict) else None
+        if isinstance(sanity_outcome, dict):
+            messages.append(sanity_check_message(language, name, sanity_outcome))
 
         for key, label in numeric_fields:
             old_value = old.get(key)

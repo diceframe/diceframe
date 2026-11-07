@@ -347,18 +347,62 @@ _ATTR_NAME_ZH = {
 }
 
 
-def _normalize_skills(skills: list, rule=None) -> list[dict]:
-    """规范化技能列表：字符串转为含数值的对象格式，并保留可选 effect 说明。"""
+def _creation_bounds_enabled(rule) -> bool:
+    policy = rule.template.get("character_creation") if rule else None
+    return isinstance(policy, dict) and policy.get("clamp_to_rule_bounds") is True
+
+
+def _clamp_attributes(rule, attributes: Any) -> dict:
+    """入场时把属性压回规则声明的上下限：客户端不能自报超出范围的属性。"""
+    result = dict(attributes) if isinstance(attributes, dict) else {}
+    for spec in rule.attributes:
+        key = str(spec.get("key") or "")
+        if not key or key not in result:
+            continue
+        try:
+            value = int(result[key])
+        except (TypeError, ValueError):
+            value = int(spec.get("min", 0) or 0)
+        low, high = spec.get("min"), spec.get("max")
+        if isinstance(low, int):
+            value = max(low, value)
+        if isinstance(high, int):
+            value = min(high, value)
+        result[key] = value
+    return result
+
+
+def _normalize_skills(skills: list, rule=None, *, attributes: Any = None, clamp: bool = False) -> list[dict]:
+    """规范化技能列表：字符串转为含数值的对象格式，并保留可选 effect 说明。
+
+    「超出基础值才计点」的规则（CoC）缺省数值取该角色的技能基础值（含闪避、
+    母语等由属性派生的基础值）；其它规则保持旧的缺省 20。``clamp`` 为真时
+    单项技能不超过规则的上限。
+    """
     base_values: dict[str, int] = rule.skill_base_values if rule else {}
+    above_base = bool(rule and rule.skill_point_spend_mode == "above_base")
+    cap = int(rule.max_skill_value or 0) if (rule and clamp) else 0
+
+    def default_value(name: str) -> int:
+        return rule.skill_base_value_for(name, attributes) if above_base else base_values.get(name, 20)
+
+    def bounded(value: Any) -> Any:
+        if not cap:
+            return value
+        try:
+            return max(0, min(cap, int(value)))
+        except (TypeError, ValueError):
+            return 0
+
     result: list[dict] = []
     for s in skills:
         if isinstance(s, str):
-            result.append({"name": s, "value": base_values.get(s, 20)})
+            result.append({"name": s, "value": bounded(default_value(s))})
         elif isinstance(s, dict):
             name = s.get("name", "")
             row: dict = {
                 "name": name,
-                "value": s.get("value", base_values.get(name, 20)),
+                "value": bounded(s.get("value", default_value(name))),
             }
             effect = str(s.get("effect") or "").strip()
             if effect:
@@ -453,6 +497,9 @@ def _character_schema_for_rule(rule) -> dict[str, Any]:
         "skill_hint": rule.skill_hint,
         "max_skills": rule.max_skills,
         "skill_point_total": rule.skill_point_total,
+        "skill_point_formula": rule.skill_point_formula,
+        "skill_base_lookup": rule.skill_base_lookup(),
+        "custom_skill_base": 5,
         "max_skill_value": rule.max_skill_value,
         "skill_point_spend_mode": rule.skill_point_spend_mode,
         "skill_pools": rule.skill_pools,
@@ -1746,12 +1793,16 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         except Exception:
             logger.exception("生成默认角色卡失败: %s", name)
     attrs = character.get("attributes", {})
+    clamp_to_rule = _creation_bounds_enabled(rule)
+    if clamp_to_rule:
+        attrs = _clamp_attributes(rule, attrs)
     rule_attrs = _get_rule_attrs_for_game(dependencies, inst)
     total_points = sum(int(attrs.get(r["key"], 10)) for r in rule_attrs) if rule_attrs else 60
     default_weapons = [{"name": "徒手", "type": "weapon", "damage": 2, "slot": "main_hand", "quality": "common"}]
     hp = character.get("hp")
     max_hp = character.get("max_hp")
-    if hp is None or max_hp is None:
+    # 声明了入场边界的规则（CoC 的 HP 由体质与体型派生）不接受客户端自报 HP。
+    if hp is None or max_hp is None or clamp_to_rule:
         hp = (
             rule.calculate_hp(attrs, character.get("class", ""))
             if rule
@@ -1781,7 +1832,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         "equipment": character.get("equipment") or starter_equip or default_weapons,
         "inventory": character.get("inventory") or starter_inv,
         "key_items": character.get("key_items", []),
-        "skills": _normalize_skills(character.get("skills", []), rule),
+        "skills": _normalize_skills(character.get("skills", []), rule, attributes=attrs, clamp=clamp_to_rule),
         "background": character.get("background", ""),
         "deceased": False,
         "gold": character.get("gold", 30),

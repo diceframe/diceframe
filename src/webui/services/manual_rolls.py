@@ -107,7 +107,9 @@ class ManualRollService:
         if all(u in req["results"] for u in req["target_uids"]):
             if req.get("purpose") == "contest":
                 totals = {u: int(item.get("total", 0)) for u, item in req["results"].items()}
-                best = max(totals.values()) if totals else 0
+                # 百分制（at_most）规则低者为佳；d20 式（at_least）高者为佳。
+                pick = min if str(req.get("comparison") or "at_least") == "at_most" else max
+                best = pick(totals.values()) if totals else 0
                 winners = {u for u, total in totals.items() if total == best}
                 for target_uid, item in req["results"].items():
                     item["verdict"] = "winner" if target_uid in winners else "loss"
