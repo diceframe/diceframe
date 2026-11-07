@@ -14,6 +14,24 @@ from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
 
+# 仓库格式（flat）导出必须自带 LICENSE：索引的自动检查会拒收没有许可证的仓库。
+# 默认给同人内容最常用的 CC BY-NC 4.0；作者替换这个文件即可换许可。
+DEFAULT_LICENSE_ID = "CC-BY-NC-4.0"
+DEFAULT_LICENSE_URL = "https://creativecommons.org/licenses/by-nc/4.0/"
+
+
+def _default_license_text(name: str) -> str:
+    return (
+        f"{name}\n\n"
+        "Copyright (c) 2026 <你的名字>\n\n"
+        "本内容包采用 Creative Commons Attribution-NonCommercial 4.0 International\n"
+        "（CC BY-NC 4.0）许可：允许转载、改编，必须署名，不得用于商业用途。\n\n"
+        "This work is licensed under the Creative Commons\n"
+        "Attribution-NonCommercial 4.0 International License.\n"
+        f"To view a copy of this license, visit {DEFAULT_LICENSE_URL}\n\n"
+        "（换用别的许可请整体替换本文件；索引只要求仓库里存在 LICENSE 或 LICENSE.md。）\n"
+    )
+
 @dataclass(frozen=True)
 class PluginExportMediaDependencies:
     package_scene_image: Callable[
@@ -343,6 +361,11 @@ def export_content_pack(
             if has_adventures else []
         ),
     )
+    if flat:
+        # 仓库格式（推到 GitHub 当源码仓库）必须带 LICENSE：索引的自动检查会拒收
+        # 没有许可证的仓库。默认给一份可替换的同人常用许可，作者改文件即可换掉。
+        manifest["license"] = DEFAULT_LICENSE_ID
+        files["LICENSE"] = _default_license_text(name)
     files["plugin.json"] = json.dumps(manifest, ensure_ascii=False, indent=2)
     files["config.schema.json"] = json.dumps(_default_config_schema(name), ensure_ascii=False, indent=2)
     files["README.md"] = _default_readme(
