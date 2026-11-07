@@ -125,6 +125,12 @@ def _bind_module_book_to_world(store: Any, book_id: str, world_id: str) -> str:
     页进来（没有"当前对局"）就再也找不到那本书。补一条 world 域 runtime
     binding，让它留在世界里可查；已经有 world/global 归属的不动——那是用户
     自己的选择，不是我们要替他决定的。
+
+    这条 world binding 必须保持 **enabled=False**：world 域的启用 binding 会被
+    同一世界的**每一局**解析为活动书，A 局勾选的模块资料册不能悄悄自动进入
+    B 局。激活只属于开局时显式勾选创建的那条 game 域 binding；世界管理页的
+    可见性（列表、条目数、book_count）都不看 binding 的 enabled，不受影响。
+    用户之后在资料册页手动启用这条 binding，才是「并入世界」的明确意愿。
     """
 
     book_id = str(book_id or "")
@@ -144,7 +150,7 @@ def _bind_module_book_to_world(store: Any, book_id: str, world_id: str) -> str:
         "scope_kind": "world",
         "scope_id": world_id,
         "role": "runtime",
-        "enabled": True,
+        "enabled": False,
         "order": 110,
     })
     return binding_id
