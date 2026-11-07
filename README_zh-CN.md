@@ -27,7 +27,7 @@ DiceFrame（骰框）是一个免费开源、可以自己部署的 **AI 跑团�
 <summary>Windows 便携版</summary>
 
 从 [Releases](https://github.com/diceframe/diceframe/releases/latest) 下载 `DiceFrame-vX.Y.Z-windows-portable.zip`，解压后运行 `DiceFrame.exe`。
-在“**管理 → 设置 → 模型接口**”添加服务商（页面里的帮助按钮以 DeepSeek 为例一步步演示），再到“**模型配置**”选择主模型。[安装详情](docs/zh/install.md#windows-便携版) · [第一局](docs/zh/content-and-play.md#第一局怎么玩)
+在“**管理 → 设置 → 模型接口**”添加服务商，再到“**模型配置**”选择主模型。[安装详情](docs/zh/install.md#windows-便携版) · [第一局](docs/zh/content-and-play.md#第一局怎么玩)
 
 </details>
 <details>

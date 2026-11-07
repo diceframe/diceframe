@@ -29,7 +29,7 @@ DiceFrame is a free, open-source, self-hostable **AI tabletop RPG engine** with 
 <summary>Windows portable</summary>
 
 Download `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`.
-Add a provider under **Manage → Settings → Model API** (the help button there walks through DeepSeek as an example), then assign the main model under **Model Routing**. [Installation details](docs/en/install.md#windows-portable) · [First game](docs/en/content-and-play.md#first-game)
+Add a provider under **Manage → Settings → Model API**, then assign the main model under **Model Routing**. [Installation details](docs/en/install.md#windows-portable) · [First game](docs/en/content-and-play.md#first-game)
 
 </details>
 <details>
