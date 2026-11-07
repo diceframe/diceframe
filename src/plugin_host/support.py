@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .contracts import (
     PluginSupportView,
     PluginTypeDescriptor,
@@ -227,6 +229,58 @@ def content_delivery_mode(manifest: dict) -> str:
     return mode if mode in CONTENT_DELIVERY_MODES else "legacy_autoimport"
 
 
+COMPATIBLE_RULESETS_FIELD = "compatible_rulesets"
+MAX_COMPATIBLE_RULESETS = 6
+# 只收敛已知别名，不猜未知系统：未知 ID 保持原样（自定义规则也允许贴标签）。
+_RULESET_LABEL_ALIASES = {
+    "coc": "coc7",
+    "coc7e": "coc7",
+    "dnd": "dnd2024",
+    "dnd5e": "dnd2024",
+}
+
+
+def normalize_ruleset_label(value: Any) -> str:
+    """Canonical, display-facing ruleset id (``core:coc7`` / ``coc`` → ``coc7``)."""
+
+    text = str(value or "").strip().casefold()
+    if text.startswith("core:"):
+        text = text[len("core:"):]
+    return _RULESET_LABEL_ALIASES.get(text, text)
+
+
+def parse_compatible_rulesets(manifest: dict) -> list[str]:
+    """Validate the optional ruleset-attribution labels; no runtime check.
+
+    Unlike ``requires.rulesets`` this is **metadata**: it says which rule system the
+    content is written for, not which runtime must be installed. A CoC pack can
+    therefore declare ``["coc7"]`` even though ``core:coc7`` is not registered yet.
+    """
+
+    manifest = manifest or {}
+    raw = manifest.get(COMPATIBLE_RULESETS_FIELD)
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 必须是数组")
+    if len(raw) > MAX_COMPATIBLE_RULESETS:
+        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 最多 {MAX_COMPATIBLE_RULESETS} 条")
+    labels: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str):
+            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 条目必须是字符串")
+        label = normalize_ruleset_label(entry)
+        if not label:
+            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 不允许空字符串")
+        if label not in labels:
+            labels.append(label)
+    if labels and manifest.get("system_agnostic") is True:
+        raise ValueError(
+            "system_agnostic: true 与 compatible_rulesets 互斥：通用包不应限定具体规则"
+        )
+    return labels
+
+
 def validate_content_module_profile(manifest: dict) -> None:
     """Validate the content module profile fields; fail closed on bad combos.
 
@@ -250,6 +304,7 @@ def validate_content_module_profile(manifest: dict) -> None:
         )
     if content_delivery_mode(manifest) == "catalog" and manifest.get("entrypoint") is not None:
         raise ValueError("catalog 纯内容包不得声明 entrypoint；程序能力应使用执行插件类型")
+    parse_compatible_rulesets(manifest)
 
 
 def is_adventure_module(manifest: dict) -> bool:

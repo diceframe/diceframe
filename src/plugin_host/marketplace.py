@@ -21,7 +21,7 @@ from .mirrors import (
 )
 from .package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from .policy import effective_plugin_permissions, plugin_risk_level
-from .support import plugin_type_support
+from .support import normalize_ruleset_label, plugin_type_support
 from src.version import needs_core_update
 
 @dataclass(frozen=True)
@@ -203,6 +203,25 @@ class PluginMarketplace:
         return {"ok": False, "error": f"插件市场中找不到：{plugin_id}"}
 
 
+def _marketplace_ruleset_targets(manifest: dict[str, Any]) -> list[str]:
+    """Ruleset ids the catalogue may filter on: runtime deps ∪ attribution labels.
+
+    ``requires.rulesets`` is a hard runtime dependency; ``compatible_rulesets`` is
+    display metadata for packs written for systems whose runtime is not registered
+    (CoC and others). Filtering must see both, deduped and order-stable.
+    """
+
+    labels: list[str] = []
+    for value in (
+        *_declared_rulesets(manifest),
+        *(manifest.get("compatible_rulesets") or []),
+    ):
+        label = normalize_ruleset_label(value)
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
 def _declared_rulesets(manifest: dict[str, Any]) -> list[str]:
     """Ruleset runtime ids a manifest explicitly targets (``requires.rulesets``)."""
 
@@ -318,10 +337,10 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         # 规则目标 / 冒险数 / 自动化等级 / 语言供模块库过滤与卡片展示。
         "content_profile": str(manifest.get("content_profile") or "content-pack"),
         "content_delivery_mode": str(manifest.get("content_delivery_mode") or "legacy_autoimport"),
-        "ruleset_targets": _declared_rulesets(manifest),
+        "ruleset_targets": _marketplace_ruleset_targets(manifest),
         # 「没声明」和「声明了别的」是两件事：前者是通用/未标注，后者才是不兼容。
         # 目录筛选需要这个区分，否则未声明的包会被当成不匹配而被静默丢掉。
-        "ruleset_declared": bool(_declared_rulesets(manifest)),
+        "ruleset_declared": bool(_marketplace_ruleset_targets(manifest)),
         "system_agnostic": manifest.get("system_agnostic") is True,
         "adventure_count": (
             len(manifest.get("adventure_packages") or [])

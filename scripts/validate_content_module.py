@@ -219,6 +219,12 @@ def validate_module(plugin_dir: Path) -> dict[str, Any]:
         for item in validation.catalogs
     ]
     report["warnings"].extend(validation.warnings)
+    # 规则硬依赖（requires.rulesets）与规则归属标签（compatible_rulesets）分开报告：
+    # 前者决定能否安装，后者只影响市场筛选，别让作者把两者混为一谈。
+    from src.plugin_host.support import parse_compatible_rulesets
+
+    report["ruleset_requires"] = [dict(item) for item in validation.requires]
+    report["ruleset_labels"] = parse_compatible_rulesets(dict(runtime.manifest))
 
     if runtime.adventure_packages_root is None:
         report["warnings"].append("no adventure_packages declared")

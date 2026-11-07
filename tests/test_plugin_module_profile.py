@@ -137,7 +137,7 @@ def test_marketplace_item_carries_module_metadata() -> None:
     normalized = _normalize_market_item(item)
     assert normalized["content_profile"] == "adventure-module"
     assert normalized["content_delivery_mode"] == "catalog"
-    assert normalized["ruleset_targets"] == ["core:dnd2024"]
+    assert normalized["ruleset_targets"] == ["dnd2024"]  # canonical short id（#694）
     assert normalized["adventure_count"] == 2
     assert normalized["automation_level"] == "guided"
     assert normalized["languages"] == ["zh-CN", "en"]
