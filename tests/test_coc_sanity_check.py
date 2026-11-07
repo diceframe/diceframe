@@ -159,8 +159,13 @@ def test_unknown_notation_is_not_resolved_as_six(monkeypatch):
     assert messages == ["【理智检定】调查员p1：损失写法无法识别，未结算"]
 
 
-def test_bystander_takes_only_the_sanity_check(monkeypatch):
-    """多人局：没行动的在场者也会目睹恐怖，但除理智检定外的标签照旧拦下。"""
+def test_bystander_cannot_take_san_or_hp_without_authoritative_presence(monkeypatch):
+    """多人局：不在本轮参与者白名单里的旁观者，即使 GM 输出 SAN 标签也不改状态。
+
+    「活着」不等于「在场目睹」。过去靠 instance.alive_players 放行 SAN，GM 输出
+    （或被诱导的模型）可以替不在场的人掷 SAN；现在 fail closed，越权目标整条丢弃。
+    """
+
     _fix_d100(monkeypatch, 80, "失败")
     _fix_loss_roll(monkeypatch, 4)
     inst = _instance("actor", "bystander")
@@ -169,13 +174,36 @@ def test_bystander_takes_only_the_sanity_check(monkeypatch):
         "bystander": {"san_check_loss": "0/1d6", "hp_change": -5},
     }
     PlayerStateApplier(MadnessTracker()).apply_players(inst, update, allowed_player_uids={"actor"})
+
+    # 行动者照常结算
+    assert inst.get_character_sheet("actor")["sanity"] < 50
+    # 旁观者既不掉 SAN 也不掉 HP，标签连解析都不该发生
     bystander = inst.get_character_sheet("bystander")
-    assert bystander["sanity"] == 46
+    assert bystander["sanity"] == 50
     assert bystander["hp"] == 10
-    assert update["bystander"] == {
-        "san_check_loss": "0/1d6",
-        "san_check_result": update["bystander"]["san_check_result"],
+    assert update["bystander"] == {"san_check_loss": "0/1d6", "hp_change": -5}
+
+
+def test_dead_or_unknown_targets_never_resolve_a_san_check(monkeypatch):
+    """已死亡 / 不存在的 UID 即使出现在标签里也不会被结算。"""
+
+    _fix_d100(monkeypatch, 80, "失败")
+    _fix_loss_roll(monkeypatch, 6)
+    inst = _instance("actor", "dead")
+    inst.players["dead"]["character_sheet"]["deceased"] = True
+    update = {
+        "actor": {"san_check_loss": "0/1d6"},
+        "dead": {"san_check_loss": "0/1d6"},
+        "ghost": {"san_check_loss": "0/1d6"},
     }
+    PlayerStateApplier(MadnessTracker()).apply_players(
+        inst, update, allowed_player_uids={"actor", "dead", "ghost"},
+    )
+
+    assert inst.get_character_sheet("dead")["sanity"] == 50
+    assert "ghost" not in inst.players
+    # 行动者仍然只结算自己的那次
+    assert inst.get_character_sheet("actor")["sanity"] < 50
 
 
 def test_bystander_without_sanity_check_is_still_rejected():

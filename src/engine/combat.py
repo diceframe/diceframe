@@ -172,6 +172,24 @@ def apply_damage(target: dict[str, Any], damage: int) -> tuple[int, int]:
     return before, after
 
 
+def attribute_damage_modifier(attr_value: int, rule: Any | None = None) -> int:
+    """Return the attribute bonus added to weapon damage.
+
+    Percentile rules (CoC 7e: ``dice_system == "d100"``) must not use the d20
+    ``(attr - 10) // 2`` bonus: a CoC STR of 70 would add +30 and the
+    ``lethal_narrative`` model doubles it to +60 on top of weapon damage. Until a
+    rule declares its own damage-bonus contract (``attribute_damage_bonus``), such
+    rules get no attribute bonus; weapon dice/values still apply.
+    """
+
+    value = int(attr_value)
+    if rule is not None and str(getattr(rule, "dice_system", "")) == "d100":
+        declared = getattr(rule, "template", {}).get("attribute_damage_bonus")
+        if not isinstance(declared, dict) or declared.get("enabled") is not True:
+            return 0
+    return (value - 10) // 2
+
+
 def resolve_attack(
     attacker_name: str,
     target: dict,
@@ -232,7 +250,7 @@ def resolve_attack(
     )
     target_armor = armor_value(target)
     before = int(target.get("hp", 0) or 0)
-    attr_modifier = (int(attr_value) - 10) // 2
+    attr_modifier = attribute_damage_modifier(attr_value, rule)
 
     if not check_result:
         return AttackResult(

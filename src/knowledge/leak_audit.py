@@ -10,10 +10,12 @@ Leak rule
 Text is split into tokens: every CJK / kana character is one token, every
 Latin word or number is one token. A *run* is ``run_size`` consecutive tokens.
 A protected entry counts as leaked into a narration when at least
-``min_runs`` distinct runs of that entry appear in the narration **and** none
-of those runs also appears in the allowed corpus (public lore, character
-sheets, earlier public narration). Shared vocabulary such as a street name
-that also appears in public lore therefore does not count as a leak.
+``min_runs`` **non-overlapping** runs of that entry appear in the narration
+**and** none of those runs also appears in the allowed corpus (public lore,
+character sheets, earlier public narration). Shared vocabulary such as a
+street name that also appears in public lore therefore does not count as a
+leak. Runs must not overlap: seven identical tokens with ``run_size=6`` are
+one span of evidence, not two independent ones.
 """
 
 from __future__ import annotations
@@ -67,19 +69,71 @@ def find_protected_leaks(
     min_runs: int = DEFAULT_MIN_RUNS,
 ) -> list[LeakFinding]:
     """Return protected entries whose own wording shows up in ``public_text``."""
-    public_runs = token_runs(public_text, run_size)
-    if not public_runs:
+    public_tokens = tokenize(public_text)
+    if len(public_tokens) < run_size:
         return []
     allowed_runs: set[tuple[str, ...]] = set()
     for text in allowed_texts:
         allowed_runs |= token_runs(text, run_size)
     findings: list[LeakFinding] = []
     for item in protected:
-        shared = (token_runs(item.text, run_size) & public_runs) - allowed_runs
-        if len(shared) >= min_runs:
-            evidence = sorted("".join(run) if _is_cjk_run(run) else " ".join(run) for run in shared)
-            findings.append(LeakFinding(item.source_id, len(shared), evidence[:MAX_EVIDENCE_RUNS]))
+        spans = non_overlapping_runs(
+            public_tokens, tokenize(item.text), run_size, allowed_runs,
+        )
+        # 一个连续片段内部的多个窗口是同一段文字，不算独立证据；但片段本身够长
+        # （≥ min_runs 个 run_size）仍然是整段抄写，按长度折算证据数。
+        evidence_count = sum(max(1, len(span) // run_size) for span in spans)
+        if evidence_count >= min_runs:
+            evidence = sorted("".join(span) if _is_cjk_run(span) else " ".join(span) for span in spans)
+            findings.append(LeakFinding(item.source_id, evidence_count, evidence[:MAX_EVIDENCE_RUNS]))
     return sorted(findings, key=lambda finding: (-finding.runs, finding.source_id))
+
+
+def non_overlapping_runs(
+    public_tokens: list[str],
+    protected_tokens: list[str],
+    run_size: int = DEFAULT_RUN_SIZE,
+    allowed_runs: set[tuple[str, ...]] | None = None,
+) -> list[tuple[str, ...]]:
+    """Collect one entry per maximal matched span of ``public_tokens``.
+
+    Overlapping windows are not independent evidence: seven identical tokens with
+    ``run_size=6`` are a single stretch, not two. For each hit we extend the match to
+    the longest contiguous slice that also appears in the protected text, count that as
+    one span, and continue after it. Allowed runs are skipped so public vocabulary
+    neither counts nor blocks the next span.
+    """
+
+    if run_size <= 0 or len(protected_tokens) < run_size:
+        return []
+    allowed = allowed_runs or set()
+    protected_index: dict[tuple[str, ...], list[int]] = {}
+    for index in range(len(protected_tokens) - run_size + 1):
+        window = tuple(protected_tokens[index:index + run_size])
+        protected_index.setdefault(window, []).append(index)
+
+    spans: list[tuple[str, ...]] = []
+    index = 0
+    while index + run_size <= len(public_tokens):
+        window = tuple(public_tokens[index:index + run_size])
+        starts = protected_index.get(window)
+        if not starts or window in allowed:
+            index += 1
+            continue
+        # 从每个候选起点向后延伸，取能覆盖 public 的最长连续片段
+        best = run_size
+        for start in starts:
+            length = run_size
+            while (
+                index + length < len(public_tokens)
+                and start + length < len(protected_tokens)
+                and public_tokens[index + length] == protected_tokens[start + length]
+            ):
+                length += 1
+            best = max(best, length)
+        spans.append(tuple(public_tokens[index:index + best]))
+        index += best
+    return spans
 
 
 def _is_cjk_run(run: tuple[str, ...]) -> bool:

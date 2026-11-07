@@ -82,3 +82,37 @@ def test_script_reads_a_save_and_a_lorebook(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["summary"]["leak_rounds"] == [{"round": 1, "sources": ["secret-1"]}]
     assert report["protected_entries"] == 1
+
+def test_overlapping_windows_are_one_span_not_two() -> None:
+    """7 个相同词元在 run_size=6 下产生两个重叠窗口，只能算一段证据。"""
+
+    repeated = "甲" * 7
+    protected = [ProtectedText("gm-note", repeated)]
+    assert find_protected_leaks(repeated, protected, run_size=6, min_runs=2) == []
+
+
+def test_a_long_contiguous_overlap_still_counts_as_a_leak() -> None:
+    """一整段长文被照抄（>1 个 run_size）仍要报，不是把功能一刀切掉。"""
+
+    phrase = "祭坛下方有一条通往地下的暗门"
+    protected = [ProtectedText("gm-note", phrase)]
+    findings = find_protected_leaks(phrase, protected, run_size=6, min_runs=2)
+    assert [finding.source_id for finding in findings] == ["gm-note"]
+    assert findings[0].runs >= 2
+
+
+def test_two_separated_matches_report_two_spans() -> None:
+    phrase = "祭坛下方有一条通往地下的暗门"
+    narration = f"{phrase}。冒险者四处打量，什么也没发现。{phrase}。"
+    protected = [ProtectedText("gm-note", phrase)]
+    findings = find_protected_leaks(narration, protected, run_size=6, min_runs=2)
+    assert len(findings) == 1
+    assert findings[0].runs >= 4
+
+
+def test_allowed_text_does_not_count_as_evidence_even_when_repeated() -> None:
+    phrase = "祭坛下方有一条通往地下的暗门"
+    narration = f"{phrase}。{phrase}。"
+    protected = [ProtectedText("gm-note", phrase)]
+    findings = find_protected_leaks(narration, protected, allowed_texts=[phrase], run_size=6, min_runs=2)
+    assert findings == []

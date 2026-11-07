@@ -352,6 +352,27 @@ def _creation_bounds_enabled(rule) -> bool:
     return isinstance(policy, dict) and policy.get("clamp_to_rule_bounds") is True
 
 
+def creation_bounds_violation(rule: Any, character_sheet: dict[str, Any]) -> dict[str, Any] | None:
+    """规则声明了服务端建卡边界时，返回拒绝响应；通过则返回 None。
+
+    属性 clamp 只是第一道：技能点预算（含 CoC 的 above_base 公式）、技能条数、
+    单技能上限、装备品质都必须在这里按同一套规则再校验一次，否则绕过前端直接调
+    API 就能把超预算角色带进局内。只对显式声明 ``character_creation.clamp_to_rule_bounds``
+    的规则生效，避免把 CoC 的限制推广到 D&D / Freeform。
+    """
+
+    if rule is None:
+        return None
+    violations = rule.validate_character(character_sheet)
+    if not violations:
+        return None
+    return {
+        "ok": False,
+        "error_code": "CHARACTER_SHEET_INVALID",
+        "error": "角色卡不符合当前规则：" + "；".join(str(item) for item in violations[:3]),
+    }
+
+
 def _clamp_attributes(rule, attributes: Any) -> dict:
     """入场时把属性压回规则声明的上下限：客户端不能自报超出范围的属性。"""
     result = dict(attributes) if isinstance(attributes, dict) else {}
@@ -1855,6 +1876,13 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     except Exception as exc:
         logger.exception("初始化特殊属性失败: %s", exc)
     normalize_character_sheet(cs, rule)
+    # 规则显式声明了服务端建卡边界（CoC 7e 的 character_creation.clamp_to_rule_bounds）时，
+    # 属性 clamp 只是第一道；技能点预算、技能条数、单技能上限也必须在这里按同一套规则
+    # 校验，否则绕过前端直接调 API 就能把超预算角色带进局内。
+    if clamp_to_rule:
+        rejection = creation_bounds_violation(rule, cs)
+        if rejection is not None:
+            return rejection
     player = {
         "character_name": character.get("character_name") or character.get("name") or "冒险者",
         "character_sheet": cs,

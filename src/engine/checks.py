@@ -555,6 +555,18 @@ def _stat_or_attribute_label(rule: RuleSystem | None, key: str) -> str:
     return _attribute_label(rule, key)
 
 
+def _declares_legacy_attribute_scale(state: dict[str, Any]) -> bool:
+    """旧存档的 d20 属性（3–18）必须由数据显式声明，不能按数值大小猜。
+
+    百分制规则下的合法属性也可以是 15 或 20；过去用 ``value > 20`` 判断旧卡，
+    会把对手的 15 放大成 75、20 放大成 100（再 clamp 到 99），直接改变对抗结算。
+    旧卡请在角色卡/NPC 状态里写 ``attribute_scale: "d20"``（或 ``legacy_attributes: true``）。
+    """
+
+    scale = str(state.get("attribute_scale") or "").strip().casefold()
+    return scale in {"d20", "legacy"} or state.get("legacy_attributes") is True
+
+
 def _percentile_value(state: dict[str, Any], key: str) -> int | None:
     """在对手角色卡/NPC 状态里找同名技能或属性的百分制数值；找不到返回 None。"""
     wanted = str(key or "").strip().casefold()
@@ -570,7 +582,10 @@ def _percentile_value(state: dict[str, Any], key: str) -> int | None:
     for attr_key, raw in attributes.items():
         if str(attr_key).strip().casefold() == wanted and isinstance(raw, (int, float)) and not isinstance(raw, bool):
             value = int(raw)
-            return max(1, min(99, value if value > 20 else value * 5))
+            # 只有显式标记为旧 d20 卡时才换算；否则按百分制原值使用。
+            if _declares_legacy_attribute_scale(state):
+                value *= 5
+            return max(1, min(99, value))
     return None
 
 
