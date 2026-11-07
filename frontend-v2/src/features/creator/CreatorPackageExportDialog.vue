@@ -9,7 +9,7 @@ import { useToast } from '@/composables/useToast'
 import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
-import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl } from './submission'
+import { CONTENT_PACK_ID_PATTERN } from './submission'
 import SubmissionWizard from './SubmissionWizard.vue'
 
 type Book = { id: string; name?: string; entry_count?: number }
@@ -99,12 +99,9 @@ const copy = computed(() => ({
   ready: t('creatorExportReady'), privacy: t('creatorExportPrivacy'),
   doneTitle: t('creatorExportDoneTitle'), doneText: (file: string) => t('creatorExportDoneText', { file }),
   submitTitle: t('contentPackSubmitTitle'),
-  submitSteps: [t('creatorExportSubmitStepDownload'), t('contentPackSubmitStepForm'), t('contentPackSubmitStepReview')],
-  submit: t('creatorExportSubmit'), done: t('creatorExportDone'),
+  done: t('creatorExportDone'),
   sourceDoneText: (file: string) => t('creatorExportSourceDoneText', { file }),
   sourceTitle: t('creatorExportSourceTitle'),
-  sourceSteps: [t('creatorExportSourceStepRepo'), t('creatorExportSourceStepRelease'), t('creatorExportSourceStepRegister')],
-  sourceRegister: t('creatorExportSourceRegister'),
 }))
 // The export language only picks the generated README and default locale;
 // keep the existing zh/en split so other UI locales do not change packages.
@@ -245,14 +242,6 @@ const exportedFile = computed(() => {
   if (!pack) return ''
   return pack.source ? `${pack.id}-${pack.version}-src.zip` : `${pack.id}-${pack.version}.dfplugin`
 })
-
-const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
-
-function submitToHub() {
-  if (!exported.value) return
-  saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
-  window.open(submissionUrl.value, '_blank', 'noopener')
-}
 
 async function exportPack() {
   if (!packId.value.trim() || !name.value.trim()) { fail(copy.value.needIdName); return }
