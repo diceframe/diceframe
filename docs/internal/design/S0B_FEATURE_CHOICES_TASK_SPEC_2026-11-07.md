@@ -330,3 +330,132 @@ apply 成功后写入两处 canonical 状态：
 - 未解决问题（没有则写“无”）：
 - 最终 git status 与 changed-file 白名单核对：
 ```
+
+---
+
+## 执行报告（2026-11-07）
+
+- **S0-A 前置提交**：`c1b865e7`（S0-A 三个提交已重建到上游 `main@8948bc3a`）
+- **本任务基线**：`c1b865e7`
+- **分支**：`feat/dnd2024-s0b-feature-choices`
+- **最终提交**：`2f86f39d`
+- **实际变更文件**：19 个（18 改 + 1 新建）
+
+### 设计偏差及理由
+
+1. **`effects` 改名 `passive_effects`。** `src/rulesets/bundle.py::_validate_effects` 已把 `effects` 定义为通用 effect operation 列表（要求 `op` 字段），规则包加载期直接拒绝 `{"kind": ...}` 形状。改为 `passive_effects` 后语义不变，且不占用通用层的字段。
+2. **`enabled_option_refs` 改名 `enabled_options`。** 同一个 loader 把所有 `*_ref` / `*_refs` 键当成 bundle 实体引用；`feat:defense` 不是独立实体（成长专长只存在于专项目录内），加载即报 `unresolved reference`。与 S0-A 处理 `owner_ref` 的方式一致：改字段名，而不是在通用校验里开特例。
+3. **建卡路径也传 `feat_refs`。** 任务书 §4.4.7 要求建卡"只通过默认参数保持现状"，但 1 级 Fighter 本来就能选 Fighting Style，且 `stalwart_guardian` 预设就选了 Defense。若建卡不计入、live 协调计入，同一张卡会出现两个 AC，正好违反 §6.4 的"一套公式"。三处消费点（建卡 / live 协调 / 升级）现在都走 `derive_armor_class(feat_refs=...)`。
+4. **6 个白名单外测试文件**（见下方白名单核对）。新增的是**必答**选项槽，加上 Defense 真正生效，凡是用 `stalwart_guardian`（1 级已占用 Defense）升到 7 级以上的夹具都会撞上"已拥有且无其它可选"的死局，1 级未选 Defense 的夹具 AC 则整体 +1。改的都是夹具的 1 级 Fighting Style 选择或必答项，没有删改任何既有断言。
+
+### 已知边界（本切片不解，后续切片解）
+
+1 级已选 Defense 的冠军在 7 级**无法升级**：Defense 不可重复选，其余三个 Fighting Style 的效果未实现因而不可提交。这是"不造假完成"的直接后果，等 S0-F8 实现全部战斗风格后自然解除。执行报告把它记为显式边界，而不是放宽校验换绿。
+
+### §6 测试矩阵（1–26 逐项）
+
+| # | 结果 | 载体 |
+|---|---|---|
+| 1 | 通过 | `test_additional_fighting_style_is_declared_for_champion`：owner/等级/中英 label/子职授予表一致 |
+| 2 | 通过 | `test_the_choice_slot_parses_without_touching_option_of`：id/kind/category/count 与 Monk 的 `option_of` 互不干扰 |
+| 3 | 通过 | `test_invalid_choice_declarations_fail_closed`（9 例参数化：未知 kind、count≠1、缺/未知 category、非法 id、空/重复/跨 category/未声明 ref） |
+| 4 | 通过 | `test_a_declared_level_must_match_the_subclass_grant` + `test_a_foreign_owner_never_grants_the_feature` |
+| 5 | 通过 | `test_only_defense_declares_the_armor_class_effect` |
+| 6 | 通过 | `test_a_fighter_without_champion_gets_no_choice_requirement`：无 requirement，伪造记录被拒 |
+| 7 | 通过 | `test_champion_level_seven_preview_offers_four_fighting_styles`：单个槽位、四选项、中英名称 |
+| 8 | 通过 | `test_incomplete_feature_choices_are_rejected`（omitted / 空数组 / 缺 selected_refs / 合法单选）+ `test_selecting_two_styles_at_once_is_rejected` |
+| 9 | 通过 | `test_wrong_slot_identifiers_are_rejected`（owner / feature_id / choice_id / 未知槽） |
+| 10 | 通过 | `test_ineligible_refs_are_rejected`（跨 category、未声明、裸 id、非字符串） |
+| 11 | 通过 | `test_an_owned_fighting_style_is_unavailable_not_reselectable`：`already_owned` + 提交被拒 |
+| 12 | 通过 | `test_the_slot_is_only_required_at_the_granting_level`：5→6、7→8 均拒绝 |
+| 13 | 通过 | `test_preview_does_not_mutate_its_inputs` |
+| 14 | 通过 | `test_applying_the_choice_grants_defense_and_records_the_selection` |
+| 15 | 通过 | `test_applying_without_the_choice_raises_and_changes_nothing` |
+| 16 | 通过 | `test_unimplemented_fighting_styles_cannot_be_selected`（3 例）+ `test_a_later_level_never_grants_defense_twice` |
+| 17 | 通过 | `test_rebuilding_from_history_reproduces_the_same_selection`：走 `normalize_character_submission` 重放 |
+| 18 | 通过 | `test_a_forged_record_never_becomes_an_effective_selection`（错误 owner / 异职子职 / 未知 ref / 未知 choice） |
+| 19 | 通过 | `test_the_existing_champion_features_still_resolve`：Improved Critical、`crit_threshold`、资源、capabilities |
+| 20 | 通过 | `test_defense_adds_nothing_without_worn_armor`：无甲与仅持盾 |
+| 21 | 通过 | `test_defense_adds_exactly_one_armor_class_with_worn_armor`（light / medium / heavy） |
+| 22 | 通过 | `test_armor_in_the_backpack_does_not_count`：买→穿→脱 |
+| 23 | 通过 | `test_live_reconciliation_keeps_defense_across_swaps`：cap 与 mirror 三轮一致 |
+| 24 | 通过 | `test_duplicate_defense_and_extra_armor_do_not_stack`：重复 ref、两件护甲告警行为不变 |
+| 25 | 通过 | `test_the_armor_class_formula_is_unchanged_without_the_feat`：DEX cap + 盾牌 + 无被动加值 |
+| 26 | 通过 | `test_the_same_level_up_updates_armor_class`：同一次 `apply_next_level` 内 AC +1 |
+
+### 聚焦测试
+
+```bash
+/e/Github/diceframe/.venv/Scripts/python.exe -m pytest tests/rulesets/test_dnd2024_feature_choices.py -q --basetemp=.ptmp-s0b-focused
+```
+
+`53 passed`（26 项矩阵，含 9+3+3+4 参数化展开），0 failed / 0 error。
+
+### 回归测试
+
+```bash
+/e/Github/diceframe/.venv/Scripts/python.exe -m pytest tests/rulesets/test_dnd2024_improved_critical.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_progression.py tests/rulesets/test_dnd2024_live_equipment_reconciliation.py tests/rulesets/test_dnd2024_combat.py tests/rulesets/test_dnd2024_unarmed_strike.py tests/rulesets/test_dnd2024_rage.py tests/rulesets/test_dnd2024_advancement_access.py -q --basetemp=.ptmp-s0b-regression
+```
+
+`234 passed`，0 failed / 0 error。
+
+更宽的相关面（26 个规则测试文件，含 survivor / attunement / action_surge / resting / feat_resources / weapon_mastery 等）：
+
+`621 passed`，0 failed / 0 error。
+
+### ruff
+
+- `ruff check`（全部改动源码与测试）：`All checks passed!`
+- `ruff format --check`：6 个文件 `would reformat`。基线 `8948bc3a` 上同 5 个源码文件同样报 `would reformat`，说明仓库未把 ruff format 当门禁；新测试文件沿用同一风格。
+
+### 既有失败与基线对比
+
+`tests/rulesets/test_dnd2024_character_builder.py`：本次 `11 failed / 28 passed`，在 `origin/main@8948bc3a` 上同样 `11 failed / 28 passed`，失败集完全一致，属于既有环境失败，未新增、未顺手修。
+
+### 存档 / API 兼容说明
+
+- 不新增存档版本，不迁移旧档。
+- `features.feature_choices` 是新字段；缺失时 Resolver 投影为空选择，不报错。
+- `FeatureView.to_dict()` 只对声明了 `choice` 的特性新增 `selection`，其余特性字段形状不变。
+- `derive_armor_class()` 新增的 `feat_refs` 是可选关键字，默认空，既有调用行为不变。
+- progression history 仍保存原始 choices 与 diff；重建走 `apply_next_level` 重放同一校验。
+
+### 未实现选项的明确清单
+
+`feat:archery`、`feat:great_weapon_fighting`、`feat:two_weapon_fighting`：出现在 requirement 的 options 中，`available: false`，`unavailable_reasons` 含 `effect_not_implemented`，提交被拒。
+
+### 未解决问题
+
+1. 1 级已选 Defense 的冠军 7 级无解（见"已知边界"）。
+2. 1 级 Fighter 的 Fighting Style 建卡选项仍沿用既有 `class_feature_feat_choices`，未纳入本任务的 `feature_choices` 通道；两套入口并存是既有事实，本任务未合并。
+
+### 最终 git status 与 changed-file 白名单核对
+
+工作树干净，19 个变更文件。
+
+白名单内（13 个）：
+
+1. `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json`
+2. `templates/rulesets/dnd2024_srd/locales/en/class_feature_catalogs/srd_class_features.json`
+3. `templates/rulesets/dnd2024_srd/locales/zh-CN/class_feature_catalogs/srd_class_features.json`
+4. `templates/rulesets/dnd2024_srd/content/advancement_feat_catalogs/srd_advancement_feats.json`
+5. `src/rulesets/dnd2024/features/models.py`
+6. `src/rulesets/dnd2024/features/resolver.py`
+7. `src/rulesets/dnd2024/progression/advancement.py`
+8. `src/rulesets/dnd2024/character/derivation.py`
+9. `src/rulesets/dnd2024/character/reconciliation.py`
+10. `tests/rulesets/test_dnd2024_feature_choices.py`（新建）
+11. `tests/rulesets/test_dnd2024_progression.py`
+12. `tests/rulesets/test_dnd2024_class_features.py`
+13. `tests/rulesets/test_dnd2024_live_equipment_reconciliation.py`（另改了 `_draft` / `_Game` 的 1 级风格默认值）
+
+白名单外（6 个，理由见"设计偏差"第 4 条）：
+
+14. `tests/rulesets/dnd2024_monk_common.py`：`advancement_choices` 需要能回答 `feature_choice` 槽位，否则任何经过 7 级的高等级夹具都无法构造
+15. `tests/rulesets/test_dnd2024_improved_critical.py`：`_fighter_sheet` 的 1 级风格参数化，默认 Archery
+16. `tests/rulesets/test_dnd2024_survivor.py`：`_preset_draft` 仅对战士预设覆盖为 Archery
+17. `tests/rulesets/test_dnd2024_attunement.py`：两处夹具同上
+18. `tests/rulesets/test_dnd2024_action_surge.py`：高等级战士夹具同上
+19. `tests/rulesets/test_dnd2024_character_builder.py`：建卡夹具同上，保持 `armor_class == 18` 的既有基线断言
+
+未修改前端、通用引擎、builder draft/schema、manifest、`content_version`、其他职业/子职数据、`.workbuddy/`。
