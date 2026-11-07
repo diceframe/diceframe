@@ -36,7 +36,7 @@ def validate_item_declarations(bundle: Any) -> None:
     """
 
     from .charges import ChargesError, validate_charges_declaration
-    from .charges import validate_recharge_declaration
+    from .charges import validate_destroy_declaration, validate_recharge_declaration
 
     for item in bundle.list("item"):
         if not isinstance(item, Mapping):
@@ -48,6 +48,10 @@ def validate_item_declarations(bundle: Any) -> None:
         recharge = validate_recharge_declaration(item)
         if recharge is not None and recharge["on"] != "none" and maximum is None:
             raise ChargesError(f"item {item_id} declares recharge without charges")
+        # 销毁判定只在「激活恰好耗尽充能」时触发：没有充能的声明永远不会生效，
+        # 写错的声明也必须在加载时拒绝，而不是等到激活时才抛出。
+        if validate_destroy_declaration(item) is not None and maximum is None:
+            raise ChargesError(f"item {item_id} declares destroy_on_empty without charges")
         if activation is not None and maximum is None and activation["charge_cost"] is not None:
             raise ChargesError(f"item {item_id} declares activation charge_cost without charges")
         if activation is not None and maximum is not None and activation["charge_cost"] is None:

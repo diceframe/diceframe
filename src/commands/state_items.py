@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from typing import Iterable
+from typing import Any, Iterable
 
 logger = logging.getLogger("trpg")
 
@@ -336,6 +336,30 @@ def canonical_equipment_entry(item_name: str, rule=None) -> dict | None:
     return entry
 
 
+def _anonymous_row_ref(row: Any) -> str:
+    """The ``item:<item_key>`` ref an identity-less row is counted under.
+
+    Rows that carry an explicit ``item_ref`` return ``""``: their own ref is
+    authoritative and is never replaced by a derived one.
+    """
+
+    if not isinstance(row, dict) or row.get("item_ref"):
+        return ""
+    item_key = str(row.get("item_key") or "").strip()
+    return f"item:{item_key}" if item_key else ""
+
+
+def _row_carries_ref(row: Any, item_ref: str) -> bool:
+    """Whether a live row is the item ``item_ref`` names (explicit or derived)."""
+
+    if not isinstance(row, dict) or not item_ref:
+        return False
+    explicit = str(row.get("item_ref") or "")
+    if explicit:
+        return explicit == item_ref
+    return _anonymous_row_ref(row) == item_ref
+
+
 def _find_inventory_row(
     inventory: list, item_name: str, item_ref: str = "",
 ) -> tuple[int | None, dict | None]:
@@ -363,10 +387,8 @@ def _find_inventory_row(
         for index, row in enumerate(inventory):
             if not isinstance(row, dict) or int(row.get("qty", 0) or 0) <= 0:
                 continue
-            if row.get("item_ref"):
-                continue
-            row_item_key = str(row.get("item_key") or "").strip()
-            if row_item_key and f"item:{row_item_key}" == wanted_ref:
+            derived = _anonymous_row_ref(row)
+            if derived and derived == wanted_ref:
                 return index, row
         return None, None
 
@@ -596,3 +618,30 @@ def unequip_item(character_sheet: dict, item_name: str) -> bool:
     equipment.remove(entry)
     return_equipment_to_inventory(character_sheet, entry)
     return True
+
+
+def remove_destroyed_item(character_sheet: dict, item_ref: str) -> bool:
+    """Drop every live backpack/equipment row that carries ``item_ref``.
+
+    A row without an explicit ref carries the ``item:<item_key>`` ref the
+    counts derive for it (see ``_find_inventory_row``); leaving such a row
+    behind would let reconciliation write the destroyed ref back.  Rows with
+    a different explicit ref are never touched.
+
+    Returns whether anything was removed.  Replaying the same batch removes
+    nothing and must not fail, so this never raises on a missing row.
+    """
+
+    target = str(item_ref or "")
+    if not target:
+        return False
+    removed = False
+    for key in ("inventory", "equipment"):
+        rows = character_sheet.get(key)
+        if not isinstance(rows, list):
+            continue
+        kept = [row for row in rows if not _row_carries_ref(row, target)]
+        if len(kept) != len(rows):
+            character_sheet[key] = kept
+            removed = True
+    return removed

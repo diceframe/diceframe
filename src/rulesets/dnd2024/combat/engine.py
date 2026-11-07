@@ -1023,7 +1023,10 @@ class Dnd2024CombatEngine(
                         break
             ruleset_state = updated["ruleset_state"]
             ruleset_state["version"] = updated["version"]
-            from src.commands.state_items import take_from_inventory
+            from src.commands.state_items import (
+                remove_destroyed_item,
+                take_from_inventory,
+            )
 
             updated_sheets: dict[str, dict[str, Any]] = {}
             for uid, canonical in updated["characters"].items():
@@ -1053,6 +1056,13 @@ class Dnd2024CombatEngine(
                                 raise EventBatchError(
                                     f"item is no longer carried: {event['item_ref']}"
                                 )
+                    elif (
+                        str(event.get("type") or "") == "dnd2024.item.destroyed"
+                        and str(event.get("actor_id") or "") == f"player:{uid}"
+                    ):
+                        # canonical 已按 ref 摘除，live 背包/装备行必须同步清理，
+                        # 否则下一次 reconcile 会把行重新写回 canonical。
+                        remove_destroyed_item(existing, str(event["item_ref"]))
                 updated_sheets[uid] = existing
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, sheet in updated_sheets.items():
