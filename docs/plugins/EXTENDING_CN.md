@@ -11,8 +11,10 @@
 3. canonical ID 与显示名分离；Locale 只翻译展示字段，不改 identity 和 mechanics。
 4. 规则货币结构用 `currency_system`（`schema_version: 2`）声明：`base_unit` 是 canonical 整数的计数单位（rate 必须为 1），`display_unit` 是默认展示单位，units 的 rate 为正整数。加载/安装时经 `RuleBundleLoader` → `validate_currency_system` 校验，非法声明直接失败；只有 `currency` 名称的旧规则按 legacy rate=1 兼容，不按名称猜单位。示例见 `plugins/examples/starter-content-v2/content/rules/moonlight.json`。
 5. 参考 `plugins/examples/starter-content-v2/`，并为内容校验、locale fallback 和重复 ID 行为添加测试。
-6. 仓库格式（flat）导出会自动附带 `LICENSE` 与 manifest 的 `license` 字段（默认 CC BY-NC 4.0）：索引的自动检查要求仓库根目录存在许可证，作者替换该文件即可换成别的许可。
-7. 打包前运行：
+6. 封面（可选）：manifest 写 `cover: "assets/cover.webp"`，只接受包内 `assets/` 下的 webp/png/jpg，不超过 512 KB、短边 ≥ 360；校验器会用 Pillow 检查可解码性与尺寸。封面随包分发，安装后由本机接口读取，不涉及任何第三方地址。
+7. 仓库格式（flat）导出会自动附带 `LICENSE` 与 manifest 的 `license` 字段（默认 CC BY-NC 4.0）：索引的自动检查要求仓库根目录存在许可证，作者替换该文件即可换成别的许可。
+8. 内容语言（可选但建议）：manifest 写 `supported_locales: ["zh-CN", "en"]`，用 BCP-47 标签声明这个包里的世界/资料册/模组能用哪些语言阅读。商店按它展示语言徽章并支持按语言筛选；不写时商店只能显示「未标注」，也不会去猜。它和 `default_locale` 不同：`default_locale` 是包内主文本语言，`supported_locales` 是这个包**能被读懂**的语言集合。引擎自身只在 zh-CN/en/ja/de/ru 上做语义解析，但内容可以用任何语言编写。
+9. 打包前运行：
 
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json

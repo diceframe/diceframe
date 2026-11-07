@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { api, errorMessage } from '@/api/client'
+import { api, apiUrl, errorMessage } from '@/api/client'
 import {
   moduleApi,
   type ModuleMarketplaceItem,
@@ -52,6 +52,11 @@ const market = ref<ModuleMarketplaceItem[]>([])
 const marketError = ref('')
 const marketKeyword = ref('')
 const marketRuleset = ref('all')
+const marketProfile = ref('all')
+const marketLanguage = ref('all')
+const marketTag = ref('all')
+const marketLicense = ref('all')
+const marketTrust = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
 const marketSource = ref<ModuleMarketplaceResponse['source'] | null>(null)
@@ -59,6 +64,47 @@ const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; me
 const submitGuideOpen = ref(false)
 const directSubmissionUrl = contentPackSubmissionUrl()
 const error = ref('')
+
+// 在线列表的筛选全部在客户端完成：服务端只按关键字和规则目标收窄，
+// 语言 / 标签 / 许可证 / 信任级别本来就在市场投影里，不需要新接口。
+function uniqueFilterValues(values: Array<string | undefined>): string[] {
+  const unique = new Set(values.map(value => String(value || '').trim()).filter(Boolean))
+  return [...unique].sort((a, b) => a.localeCompare(b))
+}
+const UNLABELLED_LANGUAGE = '__unlabelled__'
+const marketLanguageOptions = computed(() => {
+  const options = uniqueFilterValues(market.value.flatMap(item => item.languages || []))
+  // 老包没有 supported_locales：给一个显式的「未标注」，不拿内容去猜语言。
+  if (market.value.some(item => !(item.languages || []).length)) options.push(UNLABELLED_LANGUAGE)
+  return options
+})
+const marketTagOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.tags || [])))
+const marketLicenseOptions = computed(() => uniqueFilterValues(market.value.map(item => item.license)))
+const marketTrustOptions = computed(() => uniqueFilterValues(market.value.map(item => item.trust_level)))
+const marketFiltersActive = computed(() => (
+  marketProfile.value !== 'all'
+  || marketLanguage.value !== 'all'
+  || marketTag.value !== 'all'
+  || marketLicense.value !== 'all'
+  || marketTrust.value !== 'all'
+))
+const filteredMarket = computed(() => market.value.filter(item => (
+  (marketProfile.value === 'all' || item.content_profile === marketProfile.value)
+  && (marketLanguage.value === 'all'
+    || (marketLanguage.value === UNLABELLED_LANGUAGE
+      ? !(item.languages || []).length
+      : (item.languages || []).includes(marketLanguage.value)))
+  && (marketTag.value === 'all' || (item.tags || []).includes(marketTag.value))
+  && (marketLicense.value === 'all' || item.license === marketLicense.value)
+  && (marketTrust.value === 'all' || item.trust_level === marketTrust.value)
+)))
+function resetMarketFilters() {
+  marketProfile.value = 'all'
+  marketLanguage.value = 'all'
+  marketTag.value = 'all'
+  marketLicense.value = 'all'
+  marketTrust.value = 'all'
+}
 const loading = ref(false)
 const importFile = ref<File | null>(null)
 const preview = ref<ModulePreviewResponse | null>(null)
@@ -117,6 +163,21 @@ watch(market, items => {
 // Index languages are locale codes; unknown codes are shown as-is.
 function languageLabel(language: string): string {
   return (SUPPORTED_LOCALES as readonly string[]).includes(language) ? localeLabel(language as Locale) : language
+}
+
+// 信任级别只用来给筛选项起名字；卡片上的展示归 MarketplaceCard。
+function marketTrustLabel(level: string): string {
+  if (level === 'official') return t('pluginTrustOfficial')
+  if (level === 'verified') return t('pluginTrustVerified')
+  return t('pluginTrustCommunity')
+}
+
+// 已安装包如果有封面，就用和存档卡相同的做法：整张图铺底 + 渐变压暗。
+// 图片来自本机包目录（/api/modules/{id}/cover），不涉及任何第三方地址。
+function moduleCoverStyle(module: ModuleSummary): Record<string, string> | undefined {
+  if (!module.cover) return undefined
+  const url = apiUrl(`/modules/${encodeURIComponent(module.id)}/cover?v=${encodeURIComponent(module.version)}`)
+  return { '--df-bg-cover-image': `url("${url.replace(/"/g, '%22')}")` }
 }
 
 // §8 Recovery：入口带过来的是**存档里的绑定身份**（adventure / version /
@@ -337,7 +398,16 @@ async function checkRecovery() {
           <p>{{ t('modulesEmpty') }}</p>
       </div>
       <div v-else class="modules-grid">
-        <RouterLink v-for="module in modules" :key="module.id" :to="{ name: 'module-detail', params: { moduleId: module.id } }" class="module-card">
+        <RouterLink
+          v-for="module in modules"
+          :key="module.id"
+          :to="{ name: 'module-detail', params: { moduleId: module.id } }"
+          class="module-card"
+          :class="{ 'has-cover': Boolean(module.cover) }"
+          :style="moduleCoverStyle(module)"
+          :data-testid="`module-card-${module.id}`"
+        >
+          <span v-if="module.cover" class="module-card-art" aria-hidden="true"></span>
           <div>
             <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
             <h3>{{ module.name }}</h3>
@@ -357,13 +427,13 @@ async function checkRecovery() {
     <section id="modules-local-import" class="modules-section" data-testid="modules-local-import">
       <h2>{{ t('modulesSectionLocal') }}</h2>
       <div class="module-import" :aria-label="t('modulesImport')">
-        <label>{{ t('modulesImport') }} <input type="file" accept=".dfplugin" @change="selectImportFile"></label>
+        <label class="module-import-file">{{ t('modulesImport') }} <input type="file" accept=".dfplugin" @change="selectImportFile"></label>
         <button type="button" :disabled="!importFile || importBusy" @click="previewImport">{{ t('modulesPreview') }}</button>
-        <template v-if="preview">
-          <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.join(', ') }}</p>
-          <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
-          <button type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
-        </template>
+        <button v-if="preview" type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
+      </div>
+      <div v-if="preview && (preview.blockers.length || preview.warnings.length)" class="module-import-preview" data-testid="module-import-preview">
+        <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.join(', ') }}</p>
+        <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
       </div>
     </section>
 
@@ -392,9 +462,53 @@ async function checkRecovery() {
         <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
         <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
       </div>
-      <div v-else class="module-market-grid">
+      <template v-else>
+        <div class="module-market-filters" data-testid="modules-market-filters">
+          <label class="module-market-filter">
+            <span>{{ t('modulesFilterProfile') }}</span>
+            <select v-model="marketProfile">
+              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+              <option value="adventure-module">{{ copy.adventureLabel }}</option>
+              <option value="content-pack">{{ copy.resourceLabel }}</option>
+            </select>
+          </label>
+          <label v-if="marketLanguageOptions.length" class="module-market-filter">
+            <span>{{ t('modulesFilterLanguage') }}</span>
+            <select v-model="marketLanguage">
+              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+              <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ language === UNLABELLED_LANGUAGE ? t('modulesLanguagesUndeclared') : languageLabel(language) }}</option>
+            </select>
+          </label>
+          <label v-if="marketTagOptions.length" class="module-market-filter">
+            <span>{{ t('modulesFilterTag') }}</span>
+            <select v-model="marketTag">
+              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+              <option v-for="tag in marketTagOptions" :key="tag" :value="tag">{{ tag }}</option>
+            </select>
+          </label>
+          <label v-if="marketLicenseOptions.length" class="module-market-filter">
+            <span>{{ t('modulesFilterLicense') }}</span>
+            <select v-model="marketLicense">
+              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+              <option v-for="license in marketLicenseOptions" :key="license" :value="license">{{ license }}</option>
+            </select>
+          </label>
+          <label v-if="marketTrustOptions.length" class="module-market-filter">
+            <span>{{ t('modulesFilterTrust') }}</span>
+            <select v-model="marketTrust">
+              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+              <option v-for="level in marketTrustOptions" :key="level" :value="level">{{ marketTrustLabel(level) }}</option>
+            </select>
+          </label>
+          <button v-if="marketFiltersActive" type="button" class="module-filter-reset" data-testid="modules-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
+        </div>
+        <div v-if="!filteredMarket.length" class="empty-state" data-testid="modules-online-filtered-empty">
+          <p class="muted">{{ t('modulesFilteredEmpty') }}</p>
+          <button type="button" class="module-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
+        </div>
+        <div v-else class="module-market-grid">
         <MarketplaceCard
-          v-for="item in market"
+          v-for="item in filteredMarket"
           :key="item.id"
           :item="marketCardItem(item)"
           :icon="CubeOutline"
@@ -413,12 +527,14 @@ async function checkRecovery() {
           </template>
           <template #tags>
             <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
+            <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
           </template>
           <template #footer>
             <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
           </template>
         </MarketplaceCard>
-      </div>
+        </div>
+      </template>
     </section>
 
     <HubDetailModal
@@ -484,8 +600,18 @@ async function checkRecovery() {
 .modules-section h2 { margin: 0; font-size: 1.05rem; }
 .module-import, .module-market-search { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-2); }
 .module-market-filter { display: inline-flex; align-items: center; gap: .45rem; color: var(--df-text-muted); font-size: .85rem; }
+.module-market-filter span { white-space: nowrap; }
 .module-market-filter select { min-height: 34px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); }
 .module-market-search input { flex: 1 1 12rem; min-width: 0; }
+/* 导入行只放「选文件 + 预览 + 安装」三件控件；预览结果单独成块，
+   否则结果段落会变成同一行里的 flex item，把按钮挤歪。 */
+.module-import-file { display: inline-flex; flex: 0 0 auto; flex-wrap: nowrap; align-items: center; gap: .55rem; min-width: 0; min-height: 36px; color: var(--df-text-muted); font-size: .85rem; white-space: nowrap; }
+.module-import-file input[type="file"] { flex: 0 1 22rem; min-width: 8rem; max-width: 22rem; }
+.module-import button { min-height: 36px; }
+.module-import-preview { display: grid; gap: .35rem; margin: 0; padding: .7rem .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.module-import-preview p { margin: 0; }
+.module-market-filters { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem .9rem; padding: .75rem .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.module-filter-reset { align-self: center; }
 .module-recovery { margin: 1rem 0; padding: 1rem; border: 1px solid color-mix(in srgb, var(--df-accent) 30%, var(--df-border-soft)); border-left: 3px solid var(--df-accent); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
 .module-recovery p { margin: .4rem 0 0; }
 .module-recovery-facts { display: grid; gap: .25rem; margin: .6rem 0 0; }
@@ -494,7 +620,12 @@ async function checkRecovery() {
 .module-recovery-ready { color: var(--df-success); }
 .module-recovery-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; }
 .module-recovery-resume { display: inline-flex; align-items: center; padding: .35rem .8rem; border-radius: .6rem; text-decoration: none; }
-.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; }
+.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; position: relative; isolation: isolate; overflow: hidden; }
+/* 封面：整卡铺底，底部渐变压暗保证文字可读（与存档卡同一套做法）。 */
+.module-card-art { position: absolute; z-index: 0; inset: 0; pointer-events: none; background-image: var(--df-bg-cover-image); background-position: center; background-size: cover; filter: saturate(.88) contrast(1.04); transform: scale(1.02); transition: filter .22s ease, transform .28s ease; }
+.module-card-art::after { position: absolute; inset: 0; content: ""; background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas) 24%, transparent) 0%, transparent 24%, color-mix(in srgb, var(--df-surface-1) 58%, transparent) 46%, color-mix(in srgb, var(--df-surface-1) 90%, transparent) 68%, var(--df-surface-1) 100%), linear-gradient(100deg, color-mix(in srgb, var(--df-canvas) 44%, transparent), transparent 64%); }
+.module-card > :not(.module-card-art) { position: relative; z-index: 1; }
+.module-card.has-cover:hover .module-card-art { filter: saturate(.96) contrast(1.06) brightness(1.05); transform: scale(1.05); }
 .module-card h3 { margin: 0; font-size: 1rem; }
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
@@ -510,6 +641,9 @@ async function checkRecovery() {
   .modules-return-link { width: 100%; min-height: 44px; justify-content: center; }
   .module-import, .module-market-search { align-items: stretch; flex-direction: column; }
   .module-import label, .module-import button, .module-market-search button { width: 100%; }
+  .module-import-file { flex-direction: column; align-items: flex-start; gap: .3rem; }
+  /* 竖排后 flex-basis 会变成高度，必须显式取消，否则文件框会被拉成一整屏。 */
+  .module-import-file input[type="file"] { flex: none; }
   .module-import input[type="file"] { display: block; width: 100%; margin-top: .45rem; }
   .module-market-search input { flex: 0 0 auto; width: 100%; min-height: 36px; }
   .modules-grid { grid-template-columns: 1fr; }

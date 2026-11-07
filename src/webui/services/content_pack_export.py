@@ -1,8 +1,11 @@
 """Creator-owned content package export; legacy plugin API delegates here."""
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -14,6 +17,15 @@ from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
 
+# 封面随包分发，只在客户端安装后由本机接口读取。导出侧只做字节级校验，
+# 不解码图片（导出接口不该替任意上传承担解码开销和解析器风险）。
+MAX_COVER_BYTES = 512 * 1024
+_COVER_MAGIC = {
+    ".webp": b"RIFF",
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+}
 # 仓库格式（flat）导出必须自带 LICENSE：索引的自动检查会拒收没有许可证的仓库。
 # 默认给同人内容最常用的 CC BY-NC 4.0；作者替换这个文件即可换许可。
 DEFAULT_LICENSE_ID = "CC-BY-NC-4.0"
@@ -31,6 +43,37 @@ def _default_license_text(name: str) -> str:
         f"To view a copy of this license, visit {DEFAULT_LICENSE_URL}\n\n"
         "（换用别的许可请整体替换本文件；索引只要求仓库里存在 LICENSE 或 LICENSE.md。）\n"
     )
+
+# 内容语言 ≠ 引擎可运行语言：引擎只有 zh-CN/en/ja/de/ru 的语义支持，
+# 但内容可以用任何语言写。这里按 BCP-47 宽松校验，只用来给商店标注与筛选。
+_LOCALE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+MAX_SUPPORTED_LOCALES = 12
+
+
+def normalize_supported_locales(values: Any, default_locale: str = "") -> list[str]:
+    """把作者勾选/API 传入的语言整理成稳定的 BCP-47 标签列表。
+
+    非法项直接丢弃（而不是整包失败）：语言标注是给商店用的元数据，不该
+    拦住一个内容正确的包。全都非法或没传时回落到包自身的默认语言。
+    """
+    raw: list[Any] = []
+    if isinstance(values, (list, tuple, set)):
+        raw = list(values)
+    elif isinstance(values, str) and values.strip():
+        raw = [item for item in values.split(",") if item.strip()]
+    result: list[str] = []
+    for item in raw:
+        text = str(item or "").strip().replace("_", "-").lower()
+        if not text or not _LOCALE_TAG.match(text):
+            continue
+        parts = text.split("-")
+        canonical = "-".join([parts[0], *[part.upper() if len(part) == 2 else part for part in parts[1:]]])
+        if canonical not in result:
+            result.append(canonical)
+    if not result:
+        fallback = str(default_locale or "").strip().replace("_", "-") or "zh-CN"
+        result = [fallback]
+    return result[:MAX_SUPPORTED_LOCALES]
 
 @dataclass(frozen=True)
 class PluginExportMediaDependencies:
@@ -70,6 +113,37 @@ def _scene_image_references(
     return [single] if isinstance(single, dict) else []
 
 
+def _package_cover(files: dict[str, bytes], cover_data: str, cover_filename: str) -> str:
+    """把作者选的封面写进 ``assets/``，返回 manifest 里要写的相对路径。
+
+    只校验后缀白名单、体积上限和文件魔数，**不解码图片**；尺寸与可解码性
+    由 ``scripts/validate_content_module.py`` 在发布侧用 Pillow 复核。
+    """
+
+    if not cover_data:
+        return ""
+    payload = str(cover_data)
+    if payload.startswith("data:") and "," in payload:
+        payload = payload.split(",", 1)[1]
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("封面数据不是合法的 base64") from exc
+    if not data:
+        raise ValueError("封面数据为空")
+    if len(data) > MAX_COVER_BYTES:
+        raise ValueError(f"封面不能超过 {MAX_COVER_BYTES // 1024} KB")
+    suffix = Path(str(cover_filename or "")).suffix.lower()
+    magic = _COVER_MAGIC.get(suffix)
+    if magic is None:
+        raise ValueError("封面只支持 webp / png / jpg")
+    if not data.startswith(magic):
+        raise ValueError("封面文件的实际格式与扩展名不一致")
+    relative = f"assets/cover{suffix}"
+    files[relative] = data
+    return relative
+
+
 def export_content_pack(
     dependencies: PluginExportDependencies,
     plugin_id: str,
@@ -91,6 +165,9 @@ def export_content_pack(
     adventure_ids: list[str] | None = None,
     lorebook_ids: list[str] | None = None,
     adventure_refs: list[dict[str, str]] | None = None,
+    cover_data: str = "",
+    cover_filename: str = "",
+    supported_locales: list[str] | None = None,
 ) -> dict[str, Any]:
     """把应用内的世界/角色卡/规则导出成一个内容包 .dfplugin。
 
@@ -347,6 +424,10 @@ def export_content_pack(
 
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)
+    try:
+        cover_relative = _package_cover(files, cover_data, cover_filename)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     manifest = build_content_pack_manifest(
         plugin_id, name, version, description, has_world, has_rule, has_cards, has_portraits, has_scene_images,
         bool(map_package and map_package.has_definitions),
@@ -356,11 +437,15 @@ def export_content_pack(
         default_locale=pack_locale,
         has_adventures=has_adventures,
         has_lorebooks=has_lorebooks,
+        supported_locales=supported_locales,
         adventure_directories=(
             sorted({path.split("/")[1] for path in files if path.startswith("adventures/") and len(path.split("/")) > 2})
             if has_adventures else []
         ),
     )
+    if cover_relative:
+        # 封面路径写进 manifest；安装后由本机接口读取（不经过任何第三方）。
+        manifest["cover"] = cover_relative
     if flat:
         # 仓库格式（推到 GitHub 当源码仓库）必须带 LICENSE：索引的自动检查会拒收
         # 没有许可证的仓库。默认给一份可替换的同人常用许可，作者改文件即可换掉。
@@ -395,6 +480,7 @@ def build_content_pack_manifest(
     has_adventures: bool = False,
     has_lorebooks: bool = False,
     adventure_directories: list[str] | None = None,
+    supported_locales: list[str] | None = None,
 ) -> dict[str, Any]:
     contributes: dict[str, list[str]] = {}
     if has_world:
@@ -437,6 +523,8 @@ def build_content_pack_manifest(
         "content_schema_version": 2,
         "locale_schema_version": 1,
         "default_locale": normalize_language(default_locale or "zh-CN"),
+        # 商店按这个字段标注与筛选内容语言；缺省等同于包内默认语言。
+        "supported_locales": normalize_supported_locales(supported_locales, default_locale),
         "id": plugin_id,
         "name": name,
         "version": version,

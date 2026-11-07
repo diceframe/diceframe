@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -43,6 +44,10 @@ from src.rulesets.builtin import (  # noqa: E402
     build_default_ruleset_registry,
     default_module_runtime_requirement,
 )
+
+# 内容语言标注：BCP-47 宽松校验（与导出侧 normalize_supported_locales 同一规则）。
+_LOCALE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+MAX_SUPPORTED_LOCALES = 12
 
 
 def _validation_dependencies() -> Any:
@@ -67,6 +72,91 @@ def _report_blockers(blockers: tuple[str, ...]) -> list[str]:
         else:
             errors.append(blocker)
     return errors
+
+
+MAX_COVER_BYTES = 512 * 1024
+_COVER_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg")
+
+
+def _check_cover(plugin_dir: Path, manifest: dict[str, Any], report: dict[str, Any]) -> None:
+    """封面可选；声明了就必须是包内 assets/ 下的图片，并满足体积与尺寸。
+
+    发布侧用 Pillow 解码，导出接口只做字节校验——这里才是能承担解码的地方。
+    """
+
+    raw = manifest.get("cover")
+    if raw is None:
+        return
+    relative = str(raw or "").strip().replace("\\", "/")
+    if not relative.startswith("assets/") or Path(relative).suffix.lower() not in _COVER_SUFFIXES:
+        report["ok"] = False
+        report["errors"].append("cover must point to assets/<name>.webp|png|jpg")
+        return
+    root = plugin_dir.resolve()
+    target = (root / relative).resolve()
+    if root not in target.parents:
+        report["ok"] = False
+        report["errors"].append("cover path escapes the package")
+        return
+    if not target.is_file() or target.is_symlink():
+        report["ok"] = False
+        report["errors"].append(f"cover file is missing: {relative}")
+        return
+    size = target.stat().st_size
+    if size > MAX_COVER_BYTES:
+        report["ok"] = False
+        report["errors"].append(f"cover is {size} bytes; keep it under {MAX_COVER_BYTES}")
+        return
+    try:
+        from PIL import Image
+
+        with Image.open(target) as image:
+            width, height = image.size
+    except Exception as exc:  # noqa: BLE001 - unreadable image is a validation result
+        report["ok"] = False
+        report["errors"].append(f"cover is not a readable image: {exc}")
+        return
+    if width > 4096 or height > 4096 or min(width, height) < 360:
+        report["ok"] = False
+        report["errors"].append(
+            f"cover is {width}x{height}; expected at least 360px on the short side and at most 4096px"
+        )
+        return
+    if abs(width / height - 16 / 9) > 0.06:
+        report["warnings"].append(f"cover is {width}x{height}; 16:9 (e.g. 1280x720) fits the cards best")
+
+
+def _check_supported_locales(manifest: dict[str, Any], report: dict[str, Any]) -> None:
+    """内容语言是商店的筛选维度：声明了就要合法，没声明只提醒。
+
+    旧包没有这个字段也必须能装、能过校验——语言标注是为了被找到，
+    不是为了拦人。所以缺失/为空只给 warning，写错了才报 error。
+    """
+
+    raw = manifest.get("supported_locales")
+    if raw is None:
+        report["warnings"].append(
+            "no supported_locales declared; the store cannot show or filter this pack by language"
+        )
+        return
+    if not isinstance(raw, list):
+        report["ok"] = False
+        report["errors"].append("supported_locales must be a list of BCP-47 tags")
+        return
+    if not raw:
+        report["warnings"].append("supported_locales is empty; declare at least the pack's own language")
+        return
+    invalid = [str(item) for item in raw if not _LOCALE_TAG.match(str(item or "").strip().replace("_", "-").lower())]
+    if invalid:
+        report["ok"] = False
+        report["errors"].append(
+            "supported_locales has invalid tags: " + ", ".join(sorted(set(invalid)))
+        )
+        return
+    if len(raw) > MAX_SUPPORTED_LOCALES:
+        report["warnings"].append(
+            f"supported_locales lists {len(raw)} tags; keep it under {MAX_SUPPORTED_LOCALES}"
+        )
 
 
 def validate_module(plugin_dir: Path) -> dict[str, Any]:
@@ -106,6 +196,9 @@ def validate_module(plugin_dir: Path) -> dict[str, Any]:
         report["ok"] = False
         errors.append(f"manifest validation failed: {exc}")
         return report
+
+    _check_cover(plugin_dir, dict(runtime.manifest), report)
+    _check_supported_locales(dict(runtime.manifest), report)
 
     # 2/3) 深度校验走与安装/预览**完全同一套** rules（FIX-01 §3.3），
     #      不再在这里维护第二份 Adventure / catalog 校验逻辑。

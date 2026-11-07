@@ -11,8 +11,10 @@ Every plugin starts with `plugin.json`. `schema_version`, `id`, `name`, `version
 3. Keep canonical IDs separate from display names. Locales translate display fields and never change identity or mechanics.
 4. Declare rule currency through `currency_system` (`schema_version: 2`): `base_unit` is what the canonical integer counts (its rate must be 1), `display_unit` is the default display unit, and unit rates are positive integers. Loading/installing validates through `RuleBundleLoader` -> `validate_currency_system` and fails closed on bad declarations; rules carrying only a `currency` label keep legacy rate=1 semantics and are never reinterpreted by name. See `plugins/examples/starter-content-v2/content/rules/moonlight.json` for an example.
 5. Follow `plugins/examples/starter-content-v2/` and test content validation, locale fallback, and duplicate-ID rejection.
-6. The repository (flat) export ships its own `LICENSE` plus a manifest `license` field (CC BY-NC 4.0 by default): the index requires a license file at the repository root, and authors can replace that file to use another license.
-7. Validate and package with:
+6. Cover (optional): declare `cover: "assets/cover.webp"` in the manifest. Only webp/png/jpg under the package's own `assets/` are accepted, up to 512 KB with the short side at least 360px; the validator uses Pillow to check decodability and dimensions. The cover ships inside the package and is served from the local install afterwards, so no third-party URL is involved.
+7. The repository (flat) export ships its own `LICENSE` plus a manifest `license` field (CC BY-NC 4.0 by default): the index requires a license file at the repository root, and authors can replace that file to use another license.
+8. Content languages (optional but recommended): declare `supported_locales: ["zh-CN", "en"]` with BCP-47 tags to say which languages the worlds, lorebooks and adventures in this package can actually be read in. The store shows a language badge and filters on it; without the field the store shows "not declared" instead of guessing. This is not the same as `default_locale`: `default_locale` is the primary language of the bundled text, `supported_locales` is the set of languages a reader can use. The engine only parses semantics for zh-CN/en/ja/de/ru, but content itself may be written in any language.
+9. Validate and package with:
 
 ```bash
 python scripts/validate_content_module.py path/to/plugin --json

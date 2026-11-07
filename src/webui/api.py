@@ -1158,6 +1158,11 @@ class WebAPI:
     def module_detail(self, module_id: str) -> dict[str, Any]:
         return modules.module_detail(self._module_dependencies, module_id)
 
+    def module_cover_file(self, module_id: str) -> str:
+        """已安装内容包的封面文件路径（只读本机，不出站）。"""
+
+        return modules.module_cover_path(self._module_dependencies, module_id)
+
     def module_resources(self, module_id: str) -> dict[str, Any]:
         return self.module_resources_service.list(module_id)
 
@@ -1642,6 +1647,9 @@ class WebAPI:
         adventure_ids: list[str] | None = None,
         lorebook_ids: list[str] | None = None,
         adventure_refs: list[dict[str, str]] | None = None,
+        cover_data: str = "",
+        cover_filename: str = "",
+        supported_locales: list[str] | None = None,
     ) -> dict[str, Any]:
         return plugins.export_content_pack(
             self._plugin_export_dependencies,
@@ -1649,6 +1657,8 @@ class WebAPI:
             include_portraits, include_scene_images, world_scene_image, rule_scene_image,
             include_map, map_background, map_icons, language,
             adventure_ids, lorebook_ids, adventure_refs,
+            cover_data=cover_data, cover_filename=cover_filename,
+            supported_locales=supported_locales,
         )
 
     def package_content_map(

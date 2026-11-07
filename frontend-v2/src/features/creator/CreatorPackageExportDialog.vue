@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { api, apiBlob, errorMessage } from '@/api/client'
 import { uploadMapBackground } from '@/api/mapBackgrounds'
 import { uploadSceneImage } from '@/api/sceneImages'
 import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
+import { useToast } from '@/composables/useToast'
 import { fileToBase64 } from '@/utils/characterImport'
 import type { AdventureSummary, AdventuresResponse, CharacterCard, RuleSummary, RulesResponse, WorldListResponse, WorldSummary } from '@/api/types'
 import type { CreatorPackageExportMode } from './copy'
-import { CONTENT_PACK_ID_PATTERN, contentPackSubmissionUrl, repositorySubmissionUrl } from './submission'
+import { CONTENT_PACK_ID_PATTERN } from './submission'
+import SubmissionWizard from './SubmissionWizard.vue'
 
 type Book = { id: string; name?: string; entry_count?: number }
 // `package` is the installable .dfplugin; `source` is the flat zip an author
@@ -18,6 +20,7 @@ const MAP_ICON_LIMIT = 128
 const props = defineProps<{ mode: CreatorPackageExportMode }>()
 const emit = defineEmits<{ close: [] }>()
 const { locale, t } = useLocale()
+const toast = useToast()
 const name = ref(''), packId = ref(''), version = ref('0.1.0'), description = ref('')
 const worlds = ref<WorldSummary[]>([]), adventures = ref<AdventureSummary[]>([]), books = ref<Book[]>([]), rules = ref<RuleSummary[]>([]), cards = ref<CharacterCard[]>([])
 const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<string[]>([]), selectedBooks = ref<string[]>([]), selectedCards = ref<string[]>([])
@@ -26,7 +29,36 @@ const selectedWorld = ref(''), selectedRule = ref(''), selectedAdventures = ref<
 const includePortraits = ref(true), includeSceneImages = ref(true), includeMap = ref(true)
 const worldCover = ref<File | null>(null), ruleCover = ref<File | null>(null), mapBackground = ref<File | null>(null), mapIcons = ref<File[]>([])
 const format = ref<ExportFormat>('package')
+const cover = ref<File | null>(null)
+const coverPreview = ref('')
+
+// 内容语言：默认当前界面语言，可勾成多语言。它不是 UI 翻译，而是"这个包能被读懂
+// 的语言"，商店会拿它做徽章和筛选；空数组等于没声明，所以至少保留一个。
+const LOCALE_TAGS = ['zh-CN', 'en', 'ja', 'de', 'ru'] as const
+const LOCALE_LABELS: Record<string, string> = { 'zh-CN': '中文', en: 'English', ja: '日本語', de: 'Deutsch', ru: 'Русский' }
+const supportedLocales = ref<string[]>([LOCALE_TAGS.includes(locale.value as (typeof LOCALE_TAGS)[number]) ? locale.value : 'zh-CN'])
+function toggleLocale(tag: string, event: Event) {
+  const next = supportedLocales.value.includes(tag)
+    ? supportedLocales.value.filter(item => item !== tag)
+    : [...supportedLocales.value, tag]
+  supportedLocales.value = next.length ? next : [tag]
+  // 取消最后一个勾选时状态回弹成同一份数组，Vue 不会重写 checked，浏览器里
+  // 那个框就会停在未勾选的样子。这里按最终状态手动同步一次。
+  const input = event.target as HTMLInputElement | null
+  if (input) input.checked = supportedLocales.value.includes(tag)
+}
 const busy = ref(false), loading = ref(true), error = ref('')
+const errorRef = ref<HTMLElement | null>(null)
+
+// 导出按钮在弹窗底部，错误横幅在顶部：只写 error 的话，用户点了「下一步」
+// 会觉得毫无反应。所以失败时同时弹 toast，并把弹窗滚回提示的位置。
+function fail(message: string) {
+  error.value = message
+  if (message) toast.error(message)
+  void nextTick(() => {
+    errorRef.value?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  })
+}
 const isAdventureModule = computed(() => props.mode === 'adventure')
 const exported = ref<{ blob: Blob; id: string; version: string; source: boolean } | null>(null)
 
@@ -41,6 +73,7 @@ const copy = computed(() => ({
   needIdName: t('creatorExportNeedIdName'), idInvalid: t('creatorExportIdInvalid'),
   resourceRequired: t('creatorExportResourceRequired'), adventureRequired: t('creatorExportAdventureRequired'),
   entries: t('creatorExportEntries'),
+  languages: t('creatorExportLanguages'), languagesHint: t('creatorExportLanguagesHint'),
   media: t('creatorExportMedia'), mediaIntro: t('creatorExportMediaIntro'),
   portraits: t('includeContentPackPortraits'), portraitsHint: t('includeContentPackPortraitsHint'),
   sceneImages: t('includeContentPackSceneImages'), sceneImagesHint: t('includeContentPackSceneImagesHint'),
@@ -52,6 +85,8 @@ const copy = computed(() => ({
   format: t('creatorExportFormat'),
   formatPackage: t('creatorExportFormatPackage'), formatPackageHint: t('creatorExportFormatPackageHint'),
   formatSource: t('creatorExportFormatSource'), formatSourceHint: t('creatorExportFormatSourceHint'),
+  cover: t('creatorExportCover'), coverHint: t('creatorExportCoverHint'),
+  coverPick: t('creatorExportCoverPick'), coverClear: t('creatorExportCoverClear'), coverInvalid: t('creatorExportCoverInvalid'),
   preview: t('creatorExportPreview'), previewCount: t('creatorExportPreviewCount'), previewRuntimes: t('creatorExportPreviewRuntimes'),
   previewPolicies: t('creatorExportPreviewPolicies'), previewResources: t('creatorExportPreviewResources'), none: t('creatorExportNone'),
   resourceSummary: (world: number, rule: number, book: number, card: number) => [
@@ -64,12 +99,9 @@ const copy = computed(() => ({
   ready: t('creatorExportReady'), privacy: t('creatorExportPrivacy'),
   doneTitle: t('creatorExportDoneTitle'), doneText: (file: string) => t('creatorExportDoneText', { file }),
   submitTitle: t('contentPackSubmitTitle'),
-  submitSteps: [t('creatorExportSubmitStepDownload'), t('contentPackSubmitStepForm'), t('contentPackSubmitStepReview')],
-  submit: t('creatorExportSubmit'), done: t('creatorExportDone'),
+  done: t('creatorExportDone'),
   sourceDoneText: (file: string) => t('creatorExportSourceDoneText', { file }),
   sourceTitle: t('creatorExportSourceTitle'),
-  sourceSteps: [t('creatorExportSourceStepRepo'), t('creatorExportSourceStepRelease'), t('creatorExportSourceStepRegister')],
-  sourceRegister: t('creatorExportSourceRegister'),
 }))
 // The export language only picks the generated README and default locale;
 // keep the existing zh/en split so other UI locales do not change packages.
@@ -118,8 +150,8 @@ const chosenAdventures = computed(() => {
 // The preview only restates what the adventure summaries already declare.
 // It never guesses whether the installing instance has a world; a fixed
 // world that is not exported is reported as a risk, not as a failure.
-// The listing's `compatibility` is not used: without a chosen ruleset and
-// world it is always "incompatible", so it says nothing about the export.
+// 两个模式共用的导出预览：先给汇总，再把「具体打包了哪些东西」列出来。
+// 资源包以前完全没有预览，只能靠心里记着自己勾了什么。
 const preview = computed(() => {
   const items = chosenAdventures.value
   const runtimes = [...new Set(items.flatMap(item => item.required_runtime?.id
@@ -134,7 +166,19 @@ const preview = computed(() => {
     }
     return found
   })
-  return { count: items.length, runtimes, policies, resources, warnings }
+  const nameList = (names: string[], total: number) => {
+    const shown = names.slice(0, 3).join('、')
+    return total > 3 ? `${shown} +${total - 3}` : shown
+  }
+  const bookNames = books.value.filter(book => selectedBooks.value.includes(book.id)).map(book => book.name || book.id)
+  const cardNames = cardOptions.value.filter(card => selectedCards.value.includes(card.id)).map(card => card.label)
+  const contents = [
+    selectedWorld.value && { label: copy.value.world, value: worldName(selectedWorld.value) },
+    selectedRule.value && { label: copy.value.rule, value: rules.value.find(item => item.rule_id === selectedRule.value)?.rule_name || selectedRule.value },
+    bookNames.length > 0 && { label: copy.value.books, value: nameList(bookNames, bookNames.length) },
+    cardNames.length > 0 && { label: copy.value.cards, value: nameList(cardNames, cardNames.length) },
+  ].filter(Boolean) as Array<{ label: string; value: string }>
+  return { count: items.length, runtimes, policies, resources, warnings, contents, hasContents: contents.length > 0 || items.length > 0 }
 })
 
 onMounted(async () => {
@@ -149,7 +193,7 @@ onMounted(async () => {
       api<{ cards?: CharacterCard[] }>('/character-cards'),
     ])
     worlds.value = w.worlds || []; adventures.value = a.adventures || []; books.value = b.books || []; rules.value = r.rules || []; cards.value = c.cards || []
-  } catch (cause) { error.value = errorMessage(cause) } finally { loading.value = false }
+  } catch (cause) { fail(errorMessage(cause)) } finally { loading.value = false }
 })
 
 function pickFile(event: Event): File | null {
@@ -159,6 +203,33 @@ function pickFile(event: Event): File | null {
 function pickFiles(event: Event): File[] {
   return Array.from((event.target as HTMLInputElement).files || [])
 }
+
+// 封面随包分发、安装后由本机接口读取；这里只挡类型和体积，尺寸交给校验器。
+const COVER_LIMIT_BYTES = 512 * 1024
+const COVER_TYPES = ['image/webp', 'image/png', 'image/jpeg']
+
+function setCoverPreview(file: File | null) {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+  coverPreview.value = file ? URL.createObjectURL(file) : ''
+}
+
+function onCoverPick(event: Event) {
+  const file = pickFile(event)
+  if (!file) return
+  if (!COVER_TYPES.includes(file.type) || file.size > COVER_LIMIT_BYTES) {
+    fail(copy.value.coverInvalid)
+    return
+  }
+  cover.value = file
+  setCoverPreview(file)
+}
+
+function clearCover() {
+  cover.value = null
+  setCoverPreview(null)
+}
+
+onUnmounted(() => setCoverPreview(null))
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob), anchor = document.createElement('a')
@@ -172,29 +243,16 @@ const exportedFile = computed(() => {
   return pack.source ? `${pack.id}-${pack.version}-src.zip` : `${pack.id}-${pack.version}.dfplugin`
 })
 
-const submissionUrl = computed(() => exported.value ? contentPackSubmissionUrl(exported.value.id) : '')
-const registerUrl = computed(() => exported.value ? repositorySubmissionUrl(exported.value.id) : '')
-
-function submitToHub() {
-  if (!exported.value) return
-  saveBlob(exported.value.blob, `${exported.value.id}-${exported.value.version}.zip`)
-  window.open(submissionUrl.value, '_blank', 'noopener')
-}
-
-function openRegisterForm() {
-  if (registerUrl.value) window.open(registerUrl.value, '_blank', 'noopener')
-}
-
 async function exportPack() {
-  if (!packId.value.trim() || !name.value.trim()) { error.value = copy.value.needIdName; return }
-  if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { error.value = copy.value.idInvalid; return }
-  if (isAdventureModule.value && !selectedAdventures.value.length) { error.value = copy.value.adventureRequired; return }
+  if (!packId.value.trim() || !name.value.trim()) { fail(copy.value.needIdName); return }
+  if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { fail(copy.value.idInvalid); return }
+  if (isAdventureModule.value && !selectedAdventures.value.length) { fail(copy.value.adventureRequired); return }
   if (!isAdventureModule.value && !selectedWorld.value && !selectedRule.value && !selectedBooks.value.length && !selectedCards.value.length) {
-    error.value = copy.value.resourceRequired; return
+    fail(copy.value.resourceRequired); return
   }
   // The backend only packages a map together with a world.
   const withMap = includeMap.value && Boolean(selectedWorld.value)
-  if (withMap && mapIcons.value.length > MAP_ICON_LIMIT) { error.value = copy.value.mapIconLimit; return }
+  if (withMap && mapIcons.value.length > MAP_ICON_LIMIT) { fail(copy.value.mapIconLimit); return }
   busy.value = true; error.value = ''
   try {
     const source = format.value === 'source'
@@ -218,11 +276,14 @@ async function exportPack() {
       world_scene_image: worldSceneImage, rule_scene_image: ruleSceneImage,
       include_map: withMap, map_background: mapBackgroundRef, map_icons: mapIconUploads,
       flat: source, language: exportLanguage.value,
+      supported_locales: supportedLocales.value,
+      cover_data: cover.value ? await fileToBase64(cover.value) : '',
+      cover_filename: cover.value?.name || '',
     }) })
     const blob = await response.blob()
     exported.value = { blob, id: packId.value.trim(), version: version.value.trim() || '0.1.0', source }
     saveBlob(blob, exportedFile.value)
-  } catch (cause) { error.value = errorMessage(cause) } finally { busy.value = false }
+  } catch (cause) { fail(errorMessage(cause)) } finally { busy.value = false }
 }
 </script>
 
@@ -230,7 +291,7 @@ async function exportPack() {
   <Modal :title="isAdventureModule ? copy.adventureTitle : copy.resourceTitle" dialog-class="creator-package-dialog" @close="emit('close')">
     <p class="creator-package-intro">{{ isAdventureModule ? copy.adventureIntro : copy.resourceIntro }}</p>
     <p v-if="loading" role="status">{{ copy.loading }}</p>
-    <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
+    <p v-if="error" ref="errorRef" class="error-banner" role="alert">{{ error }}</p>
     <template v-if="exported?.source">
       <section class="creator-package-section" data-testid="creator-export-done">
         <h3>{{ copy.doneTitle }}</h3>
@@ -238,9 +299,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.sourceTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.sourceSteps" :key="step">{{ step }}</li></ol>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-register-repository" @click="openRegisterForm">{{ copy.sourceRegister }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" class="primary" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="exported">
       <section class="creator-package-section" data-testid="creator-export-done">
@@ -249,9 +310,9 @@ async function exportPack() {
       </section>
       <section class="creator-package-section">
         <h3>{{ copy.submitTitle }}</h3>
-        <ol class="creator-package-steps"><li v-for="step in copy.submitSteps" :key="step">{{ step }}</li></ol>
+        <SubmissionWizard :plugin-id="exported.id" :version="exported.version" :file-name="exportedFile" />
       </section>
-      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button><button type="button" class="primary" data-testid="creator-export-submit-to-hub" @click="submitToHub">{{ copy.submit }}</button></footer>
+      <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.done }}</button></footer>
     </template>
     <template v-else-if="!loading">
       <section class="creator-package-section"><h3>{{ copy.basic }}</h3><div class="creator-package-grid">
@@ -266,22 +327,55 @@ async function exportPack() {
       <section class="creator-package-section"><h3>{{ isAdventureModule ? copy.extras : copy.resources }}</h3><div class="creator-package-grid">
         <label><span>{{ copy.world }}</span><select v-model="selectedWorld"><option value="">—</option><option v-for="item in worlds" :key="worldId(item)" :value="worldId(item)">{{ item.name || item.world_name || item.id }}</option></select></label>
         <label><span>{{ copy.rule }}</span><select v-model="selectedRule"><option value="">—</option><option v-for="item in rules" :key="item.rule_id" :value="item.rule_id">{{ item.rule_name || item.rule_id }}</option></select></label>
-        <fieldset class="wide"><legend>{{ copy.books }}</legend><label v-for="item in books" :key="item.id" class="creator-package-check"><input v-model="selectedBooks" type="checkbox" :value="item.id"><span>{{ item.name || item.id }} <small v-if="item.entry_count !== undefined">{{ item.entry_count }} {{ copy.entries }}</small></span></label><small v-if="!books.length">{{ copy.empty }}</small></fieldset>
-        <fieldset class="wide" data-testid="creator-export-cards"><legend>{{ copy.cards }}</legend><label v-for="item in cardOptions" :key="item.id" class="creator-package-check"><input v-model="selectedCards" type="checkbox" :value="item.id"><span>{{ item.label }}</span></label><small v-if="!cardOptions.length">{{ copy.empty }}</small></fieldset>
+        <fieldset class="wide" data-testid="creator-export-languages"><legend>{{ copy.languages }}</legend>
+          <div class="creator-package-locales">
+            <label v-for="tag in LOCALE_TAGS" :key="tag" class="creator-package-check">
+              <input type="checkbox" :checked="supportedLocales.includes(tag)" @change="toggleLocale(tag, $event)">
+              <span>{{ LOCALE_LABELS[tag] }} <small>{{ tag }}</small></span>
+            </label>
+          </div>
+          <small class="creator-package-hint">{{ copy.languagesHint }}</small>
+        </fieldset>
+        <details class="wide creator-package-collapsible" data-testid="creator-export-books" open>
+          <summary><span>{{ copy.books }}</span><small>{{ selectedBooks.length }} / {{ books.length }}</small></summary>
+          <div class="creator-package-checklist">
+            <label v-for="item in books" :key="item.id" class="creator-package-check"><input v-model="selectedBooks" type="checkbox" :value="item.id"><span>{{ item.name || item.id }} <small v-if="item.entry_count !== undefined">{{ item.entry_count }} {{ copy.entries }}</small></span></label>
+            <small v-if="!books.length">{{ copy.empty }}</small>
+          </div>
+        </details>
+        <details class="wide creator-package-collapsible" data-testid="creator-export-cards" open>
+          <summary><span>{{ copy.cards }}</span><small>{{ selectedCards.length }} / {{ cardOptions.length }}</small></summary>
+          <div class="creator-package-checklist">
+            <label v-for="item in cardOptions" :key="item.id" class="creator-package-check"><input v-model="selectedCards" type="checkbox" :value="item.id"><span>{{ item.label }}</span></label>
+            <small v-if="!cardOptions.length">{{ copy.empty }}</small>
+          </div>
+        </details>
       </div></section>
       <section class="creator-package-section" data-testid="creator-export-media">
         <h3>{{ copy.media }}</h3>
         <p class="creator-package-hint">{{ copy.mediaIntro }}</p>
-        <div class="creator-package-options">
-          <label class="creator-package-option"><input v-model="includePortraits" type="checkbox" data-testid="creator-export-include-portraits"><span><strong>{{ copy.portraits }}</strong><small>{{ copy.portraitsHint }}</small></span></label>
-          <div class="creator-package-option-group">
+        <div class="creator-package-media-grid">
+          <div class="creator-package-cover" :class="{ 'has-image': coverPreview }" data-testid="creator-export-cover-block">
+            <img v-if="coverPreview" :src="coverPreview" alt="" class="creator-package-cover-image">
+            <div class="creator-package-cover-body">
+              <strong>{{ copy.cover }}</strong>
+              <div class="creator-package-cover-actions">
+                <label class="creator-package-file"><span>{{ copy.coverPick }}</span><input type="file" accept="image/webp,image/png,image/jpeg" data-testid="creator-export-cover" @change="onCoverPick"><small>{{ cover?.name || copy.coverHint }}</small></label>
+                <button v-if="cover" type="button" class="creator-package-cover-clear" data-testid="creator-export-cover-clear" @click="clearCover">{{ copy.coverClear }}</button>
+              </div>
+            </div>
+          </div>
+          <div class="creator-package-media-card">
+            <label class="creator-package-option"><input v-model="includePortraits" type="checkbox" data-testid="creator-export-include-portraits"><span><strong>{{ copy.portraits }}</strong><small>{{ copy.portraitsHint }}</small></span></label>
+          </div>
+          <div class="creator-package-media-card">
             <label class="creator-package-option"><input v-model="includeSceneImages" type="checkbox" data-testid="creator-export-include-scene-images"><span><strong>{{ copy.sceneImages }}</strong><small>{{ copy.sceneImagesHint }}</small></span></label>
             <div v-if="includeSceneImages && (selectedWorld || selectedRule)" class="creator-package-files">
               <label v-if="selectedWorld" class="creator-package-file"><span>{{ copy.worldCover }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-world-cover" @change="worldCover = pickFile($event)"><small>{{ worldCover?.name || copy.worldCoverHint }}</small></label>
               <label v-if="selectedRule" class="creator-package-file"><span>{{ copy.ruleCover }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-rule-cover" @change="ruleCover = pickFile($event)"><small>{{ ruleCover?.name || copy.ruleCoverHint }}</small></label>
             </div>
           </div>
-          <div class="creator-package-option-group">
+          <div class="creator-package-media-card">
             <label class="creator-package-option" :class="{ disabled: !selectedWorld }"><input v-model="includeMap" type="checkbox" :disabled="!selectedWorld" data-testid="creator-export-include-map"><span><strong>{{ copy.map }}</strong><small>{{ selectedWorld ? copy.mapHint : copy.mapNeedsWorld }}</small></span></label>
             <div v-if="includeMap && selectedWorld" class="creator-package-files">
               <label class="creator-package-file"><span>{{ copy.mapBackground }}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-testid="creator-export-map-background" @change="mapBackground = pickFile($event)"><small>{{ mapBackground?.name || copy.mapBackgroundHint }}</small></label>
@@ -297,19 +391,26 @@ async function exportPack() {
           <label class="creator-package-option"><input v-model="format" type="radio" name="creator-export-format" value="source" data-testid="creator-export-format-source"><span><strong>{{ copy.formatSource }}</strong><small>{{ copy.formatSourceHint }}</small></span></label>
         </div>
       </section>
-      <section v-if="isAdventureModule && preview.count" class="creator-package-section" data-testid="creator-export-preview">
+      <section v-if="preview.hasContents" class="creator-package-section" data-testid="creator-export-preview">
         <h3>{{ copy.preview }}</h3>
         <dl class="creator-package-preview">
-          <div><dt>{{ copy.previewCount }}</dt><dd>{{ preview.count }}</dd></div>
-          <div><dt>{{ copy.previewRuntimes }}</dt><dd>{{ preview.runtimes.join('、') || copy.none }}</dd></div>
-          <div><dt>{{ copy.previewPolicies }}</dt><dd>{{ preview.policies.join('、') }}</dd></div>
+          <template v-if="isAdventureModule">
+            <div><dt>{{ copy.previewCount }}</dt><dd>{{ preview.count }}</dd></div>
+            <div><dt>{{ copy.previewRuntimes }}</dt><dd>{{ preview.runtimes.join('、') || copy.none }}</dd></div>
+            <div><dt>{{ copy.previewPolicies }}</dt><dd>{{ preview.policies.join('、') }}</dd></div>
+          </template>
           <div><dt>{{ copy.previewResources }}</dt><dd>{{ preview.resources || copy.none }}</dd></div>
         </dl>
-        <ul v-if="preview.warnings.length" class="creator-package-warnings">
-          <li v-for="warning in preview.warnings" :key="warning" data-testid="creator-export-warning">{{ warning }}</li>
+        <ul v-if="preview.contents.length" class="creator-package-contents" data-testid="creator-export-contents">
+          <li v-for="item in preview.contents" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></li>
         </ul>
-        <p v-else class="creator-package-ready">{{ copy.ready }}</p>
-        <p class="creator-package-privacy">{{ copy.privacy }}</p>
+        <template v-if="isAdventureModule">
+          <ul v-if="preview.warnings.length" class="creator-package-warnings">
+            <li v-for="warning in preview.warnings" :key="warning" data-testid="creator-export-warning">{{ warning }}</li>
+          </ul>
+          <p v-else class="creator-package-ready">{{ copy.ready }}</p>
+          <p class="creator-package-privacy">{{ copy.privacy }}</p>
+        </template>
       </section>
       <footer class="creator-package-actions"><button type="button" @click="emit('close')">{{ copy.close }}</button><button type="button" class="primary" data-testid="creator-export-submit" :disabled="busy" @click="exportPack">{{ busy ? '…' : `${isAdventureModule ? copy.adventureExport : copy.resourceExport} ${format === 'source' ? '.zip' : '.dfplugin'}` }}</button></footer>
     </template>
@@ -323,9 +424,38 @@ async function exportPack() {
 .creator-package-option-group{display:grid;gap:.5rem}
 .creator-package-option{display:flex;align-items:flex-start;gap:.55rem;min-width:0;margin:0;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent);cursor:pointer}.creator-package-option input{flex:0 0 auto;margin:.2rem 0 0}.creator-package-option span{display:grid;gap:.2rem;min-width:0}.creator-package-option strong{font-size:.9rem}.creator-package-option small{color:var(--df-text-muted);line-height:1.45}.creator-package-option.disabled{opacity:.6;cursor:default}
 .creator-package-files{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;padding-left:1.6rem}
+/* 媒体区：封面整行，其余三项各占一格，文件选择器放进卡片内部，
+   不再用缩进表示从属关系。 */
+.creator-package-media-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:.6rem}
+.creator-package-media-card{display:grid;gap:.5rem;align-content:start;min-width:0;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
+.creator-package-media-card .creator-package-option{padding:0;border:0;background:none}
+.creator-package-media-card .creator-package-files{padding-left:1.6rem;grid-template-columns:repeat(2,minmax(0,1fr))}
+.creator-package-cover{grid-column:1/-1}
+/* 资料册 / 角色卡：默认可折叠，summary 上直接给已选数量。 */
+.creator-package-collapsible{border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);padding:.55rem .7rem}
+.creator-package-collapsible>summary{display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.9rem;list-style:none}
+.creator-package-collapsible>summary::-webkit-details-marker{display:none}
+.creator-package-collapsible>summary::after{content:'▾';margin-left:auto;color:var(--df-text-muted);transition:transform .15s ease}
+.creator-package-collapsible:not([open])>summary::after{transform:rotate(-90deg)}
+.creator-package-collapsible>summary small{color:var(--df-text-muted);font-size:.78rem;font-weight:400}
+.creator-package-checklist{display:grid;gap:.3rem;margin-top:.55rem;max-height:14rem;overflow:auto}
+.creator-package-locales{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));gap:.35rem}
+.creator-package-locales .creator-package-check{align-items:baseline}
+.creator-package-locales small{color:var(--df-text-muted);font-size:.72rem}
+.creator-package-cover{display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem;align-items:start;padding:.6rem .7rem;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm);background:color-mix(in srgb,var(--df-control-bg) 68%,transparent)}
+.creator-package-cover.has-image{grid-template-columns:10rem minmax(0,1fr)}
+.creator-package-cover-image{width:100%;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--df-border-soft);border-radius:var(--df-radius-sm)}
+.creator-package-cover-body{display:grid;gap:.4rem;min-width:0}
+.creator-package-cover-body strong{font-size:.9rem}
+.creator-package-cover-actions{display:flex;flex-wrap:wrap;align-items:end;gap:.5rem}
+.creator-package-cover-clear{align-self:end}
 .creator-package-file{display:grid;gap:.25rem;min-width:0;margin:0;padding:.55rem .65rem;border:1px dashed var(--df-border-soft);border-radius:var(--df-radius-sm);font-size:.85rem}.creator-package-file input{max-width:100%;color:var(--df-text-secondary);font-size:.78rem}.creator-package-file small{color:var(--df-text-muted);line-height:1.45;overflow-wrap:anywhere}
 .creator-package-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:0}.creator-package-preview div{display:grid;gap:.2rem;min-width:0}.creator-package-preview dt{color:var(--df-text-muted);font-size:.8rem}.creator-package-preview dd{margin:0;overflow-wrap:anywhere}
 .creator-package-steps{display:grid;gap:.45rem;margin:0;padding-left:1.2rem;color:var(--df-text-secondary);line-height:1.5}
+.creator-package-contents{display:grid;gap:.3rem;margin:0;padding:0;list-style:none}
+.creator-package-contents li{display:flex;gap:.5rem;align-items:baseline;font-size:.85rem;color:var(--df-text-secondary)}
+.creator-package-contents li span{flex:0 0 auto;min-width:4.5rem;color:var(--df-text-muted)}
+.creator-package-contents li strong{min-width:0;overflow-wrap:anywhere;font-weight:600}
 .creator-package-warnings{display:grid;gap:.35rem;margin:0;padding-left:1.1rem;color:var(--df-warning)}.creator-package-ready{margin:0;color:var(--df-text-secondary)}.creator-package-privacy{margin:0;color:var(--df-text-muted);font-size:.85rem}
-@media(max-width:620px){.creator-package-grid,.creator-package-preview,.creator-package-options.is-split,.creator-package-files{grid-template-columns:1fr}.creator-package-files{padding-left:0}}
+@media(max-width:620px){.creator-package-grid,.creator-package-preview,.creator-package-options.is-split,.creator-package-files,.creator-package-media-grid{grid-template-columns:1fr}.creator-package-files{padding-left:0}.creator-package-collapsible>summary small{margin-left:0}}
 </style>
