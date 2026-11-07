@@ -111,7 +111,7 @@ def test_advancement_requires_subclass_and_ability_score_choices() -> None:
     )
     resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
     assert resolver.has_feature(
-        level_three, "improved_critical", owner_ref="subclass:champion",
+        level_three, "improved_critical", owner="subclass:champion",
     ) is True
 
     missing_asi = engine.preview_next_level(level_three)

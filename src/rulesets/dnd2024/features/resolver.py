@@ -183,7 +183,7 @@ class Dnd2024ClassFeatureResolver:
             if definition.option_of:
                 # 选项特性（例如 Monk's Focus 的三个用法）只有在同一个 owner
                 # 下授予它的父特性已经被拥有时才算拥有。
-                parent_key = (definition.owner_ref, definition.option_of)
+                parent_key = (definition.owner, definition.option_of)
                 if parent_key not in granted:
                     continue
             elif key not in granted:
@@ -196,14 +196,15 @@ class Dnd2024ClassFeatureResolver:
         character: Mapping[str, Any] | None,
         feature_id: str,
         *,
-        owner_ref: str | None = None,
+        owner: str | None = None,
     ) -> bool:
         wanted = str(feature_id or "")
         if not wanted:
             return False
-        owner = str(owner_ref) if owner_ref is not None else None
+        wanted_owner = str(owner) if owner is not None else None
         return any(
-            item.id == wanted and (owner is None or item.owner_ref == owner)
+            item.id == wanted
+            and (wanted_owner is None or item.owner == wanted_owner)
             for item in self.features_for(character)
         )
 
@@ -283,7 +284,7 @@ class Dnd2024ClassFeatureResolver:
         key: str,
         default: Any = None,
         *,
-        owner_ref: str | None = None,
+        owner: str | None = None,
     ) -> Any:
         """One scalar/table parameter of an owned feature.
 
@@ -294,16 +295,17 @@ class Dnd2024ClassFeatureResolver:
         printable form (``1d{die}``); it is a single placeholder, never an
         expression.
 
-        When ``owner_ref`` is supplied, only the declaration with that owner is
+        When ``owner`` is supplied, only the declaration with that owner is
         considered; omitting it preserves the historical short-id lookup.
         """
 
         wanted = str(feature_id)
-        owner = str(owner_ref) if owner_ref is not None else None
+        wanted_owner = str(owner) if owner is not None else None
         definition = next(
             (
                 item for item in self.features_for(character)
-                if item.id == wanted and (owner is None or item.owner_ref == owner)
+                if item.id == wanted
+                and (wanted_owner is None or item.owner == wanted_owner)
             ),
             None,
         )
@@ -454,7 +456,7 @@ class Dnd2024ClassFeatureResolver:
                         values[key] = deepcopy(raw)
             views.append(FeatureView(
                 id=definition.id,
-                owner_ref=definition.owner_ref,
+                owner=definition.owner,
                 name=self.catalog.label(definition.id, _humanize(definition.id)),
                 summary=definition.summary,
                 source_ref=definition.source_ref,
@@ -1012,15 +1014,15 @@ class Dnd2024ClassFeatureResolver:
                 for level, feature_ids in subclass["feature_ids_by_level"].items()
                 if definition.id in feature_ids
             ]
-        if definition.owner_ref.startswith("subclass:"):
-            subclass_id = definition.owner_ref.removeprefix("subclass:")
+        if definition.owner.startswith("subclass:"):
+            subclass_id = definition.owner.removeprefix("subclass:")
             if subclass is None or str(subclass.get("id") or "") != subclass_id:
                 raise ClassFeatureError(
-                    f"{definition.id}.owner_ref is not a subclass of {class_id}"
+                    f"{definition.id}.owner is not a subclass of {class_id}"
                 )
             if not subclass_levels:
                 raise ClassFeatureError(
-                    f"{definition.id} has no grant in {definition.owner_ref}"
+                    f"{definition.id} has no grant in {definition.owner}"
                 )
             if definition.minimum_level != min(subclass_levels):
                 raise ClassFeatureError(

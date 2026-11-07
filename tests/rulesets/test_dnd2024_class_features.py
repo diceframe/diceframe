@@ -184,8 +184,8 @@ def test_feature_views_expose_scalar_parameters_only() -> None:
         "unarmed_ability_choice": ["str", "dex"],
     }
     assert martial_arts.minimum_level == 1
-    assert martial_arts.owner_ref == "class:monk"
-    assert martial_arts.to_dict()["owner_ref"] == "class:monk"
+    assert martial_arts.owner == "class:monk"
+    assert martial_arts.to_dict()["owner"] == "class:monk"
     assert martial_arts.source_ref.startswith("srd-5.2.1:")
 
 

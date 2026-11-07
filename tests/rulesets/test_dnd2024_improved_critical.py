@@ -102,8 +102,8 @@ def test_champion_declarations_have_owner_keys_and_both_locales() -> None:
         improved = catalog.features_by_key[("subclass:champion", "improved_critical")]
         superior = catalog.features_by_key[("subclass:champion", "superior_critical")]
 
-        assert improved.owner_ref == "subclass:champion"
-        assert superior.owner_ref == "subclass:champion"
+        assert improved.owner == "subclass:champion"
+        assert superior.owner == "subclass:champion"
         assert (improved.id, improved.minimum_level) == ("improved_critical", 3)
         assert (superior.id, superior.minimum_level) == ("superior_critical", 15)
         assert catalog.label("improved_critical") == label
@@ -153,8 +153,8 @@ def test_same_local_id_can_coexist_under_two_owners() -> None:
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("owner_ref", "subclass:evoker"),
-        ("owner_ref", "champion"),
+        ("owner", "subclass:evoker"),
+        ("owner", "champion"),
         ("id", "phantom_critical"),
     ],
 )
@@ -216,9 +216,9 @@ def test_monk_focus_options_still_require_and_share_the_parent_owner() -> None:
         "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
         "step_of_the_wind",
     ]
-    assert {feature.owner_ref for feature in owned} == {"class:monk"}
+    assert {feature.owner for feature in owned} == {"class:monk"}
     assert resolver.has_feature(
-        character, "flurry_of_blows", owner_ref="class:monk",
+        character, "flurry_of_blows", owner="class:monk",
     ) is True
 
 
@@ -246,14 +246,14 @@ def test_advancement_to_three_exposes_improved_critical_with_its_owner() -> None
 
     assert character["features"]["subclass_ref"] == "subclass:champion"
     assert resolver.has_feature(
-        character, "improved_critical", owner_ref="subclass:champion",
+        character, "improved_critical", owner="subclass:champion",
     ) is True
     view = next(
         item for item in resolver.feature_views(character)
         if item.id == "improved_critical"
     )
-    assert view.owner_ref == "subclass:champion"
-    assert view.to_dict()["owner_ref"] == "subclass:champion"
+    assert view.owner == "subclass:champion"
+    assert view.to_dict()["owner"] == "subclass:champion"
 
 
 # --- 9. missing subclass state never falls back to Champion --------------

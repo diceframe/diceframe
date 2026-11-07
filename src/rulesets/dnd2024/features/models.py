@@ -54,7 +54,7 @@ def _require_text(value: Any, field_name: str) -> str:
     return text
 
 
-def _require_owner_ref(value: Any, field_name: str, class_id: str) -> str:
+def _require_owner(value: Any, field_name: str, class_id: str) -> str:
     """Validate an owner reference, defaulting an omitted class owner.
 
     A feature declared in ``classes.<id>.features`` without an explicit owner
@@ -160,14 +160,14 @@ class ClassFeatureDefinition:
     resource_id: str
     option_of: str
     capabilities: tuple[FeatureCapability, ...]
-    owner_ref: str
+    owner: str
     equipment_requirement: EquipmentRequirement | None = None
 
     @property
     def key(self) -> tuple[str, str]:
-        """The feature's owner-scoped identity: ``(owner_ref, local_id)``."""
+        """The feature's owner-scoped identity: ``(owner, local_id)``."""
 
-        return (self.owner_ref, self.id)
+        return (self.owner, self.id)
 
 
 def _parse_equipment_requirement(
@@ -216,7 +216,7 @@ def _parse_equipment_requirement(
 class FeatureCatalogIndex(Mapping[Any, ClassFeatureDefinition]):
     """Owner-scoped feature index with a narrow legacy lookup path.
 
-    The authoritative key is ``(owner_ref, local_id)`` so two classes may
+    The authoritative key is ``(owner, local_id)`` so two classes may
     declare the same local id without overwriting each other.  A bare local id
     remains readable while it identifies exactly one declaration; that keeps
     existing presentation code and tests working without making short ids the
@@ -344,7 +344,7 @@ class Dnd2024ClassFeatureCatalog:
         for definition in features:
             if not definition.option_of:
                 continue
-            parent_key = (definition.owner_ref, definition.option_of)
+            parent_key = (definition.owner, definition.option_of)
             if parent_key not in by_key:
                 raise ClassFeatureError(
                     f"{definition.id}.option_of references an undeclared feature "
@@ -366,8 +366,8 @@ class Dnd2024ClassFeatureCatalog:
         if not isinstance(raw, dict):
             raise ClassFeatureError(f"classes.{class_id} contains an invalid feature")
         feature_id = _require_id(raw.get("id"), f"classes.{class_id} feature id")
-        owner_ref = _require_owner_ref(
-            raw.get("owner_ref"), f"{feature_id}.owner_ref", class_id,
+        owner = _require_owner(
+            raw.get("owner"), f"{feature_id}.owner", class_id,
         )
         minimum_level = _require_positive_int(
             raw.get("minimum_level", 1), f"{feature_id}.minimum_level",
@@ -416,7 +416,7 @@ class Dnd2024ClassFeatureCatalog:
             resource_id=resource_id,
             option_of=option_of,
             capabilities=tuple(capabilities),
-            owner_ref=owner_ref,
+            owner=owner,
             equipment_requirement=_parse_equipment_requirement(
                 feature_id, raw.get("equipment_requirement"),
             ),
@@ -520,14 +520,14 @@ class FeatureView:
     summary: str
     source_ref: str
     minimum_level: int
-    owner_ref: str = ""
+    owner: str = ""
     values: Mapping[str, Any] = field(default_factory=dict)
     active: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "owner_ref": self.owner_ref,
+            "owner": self.owner,
             "name": self.name,
             "summary": self.summary,
             "source_ref": self.source_ref,
