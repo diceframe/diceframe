@@ -15,6 +15,21 @@
     "mieten",
     "bestellen"
   ],
+  "purchase_decline": [
+    "nicht kaufen",
+    "kaufe nicht",
+    "will nicht kaufen",
+    "nur fragen",
+    "nur erkundigen",
+    "kein kauf"
+  ],
+  "purchase_target_prefix": ["ich", "ich möchte", "ich will", "ich nehme", "zu"],
+  "purchase_target_connector": ["wieder", "dann", "auch"],
+  "purchase_target_suffix": [],
+  "purchase_quantity_classifier": ["stück", "stücke", "flasche", "flaschen"],
+  "purchase_generic_target": ["dieses", "das", "es"],
+  "purchase_quantity_word": ["eins=1", "zwei=2", "drei=3", "vier=4", "fünf=5", "sechs=6", "sieben=7", "acht=8"],
+  "purchase_balance": ["guthaben", "habe", "besitze", "übrig", "budget", "maximal", "höchstgrenze"],
   "purchase_confirm": [
     "abgemacht",
     "akzeptieren",
@@ -31,7 +46,10 @@
     "kostet",
     "preis",
     "gebühr",
-    "kosten"
+    "kosten",
+    "budget",
+    "maximal",
+    "höchstgrenze"
   ],
   "free_purchase": [
     "kostenlos",

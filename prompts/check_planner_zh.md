@@ -91,6 +91,10 @@ d100 技能检定只需填写已有 `skill`；属性检定填写已有 `attribut
 `price_source` 只允许三种取值：`player_stated`（玩家自己说出了价格数字）、`gm_narrated`（GM 在本轮叙事中说明了价格）、`none`（还没有任何人说出价格）。只在 `player_stated` / `gm_narrated` 时才填 `amount`，且金额必须是本轮文本中人类原话说出的数字；绝不根据语境、物品稀有度或现实常识推断、估算或编造价格。没有可结算价格时使用 `none` 并省略 `amount`。该购买意图会在本轮阻止对应商品通过模型物品授予免费发放。如果后续轮次的 recent_narration 中出现了合法、明确的价格，正常 planner 可在后续轮次形成支付提案。
 
 `amount` 必须是十进制字符串（如 "0.25"、"12.50"、"25"）；`unit` 必须使用 `ruleset.currency_units` 中列出的 canonical unit id（如 "dollar"、"cent"、"unit"），与人类原话所用的单位一致。不要自行换算单位、也不要换算成最小单位，服务端会统一转换为 canonical 金额。
+填写 `amount` 时必须同时填写 `evidence`：从玩家行动或 GM 叙事中原样摘录支持商品、金额和币种的短片段，不得翻译、概括或编造。服务端会校验证据来源；证据缺失或不匹配时报价会降级为无价意图。
+
+如果玩家明确给出预算上限（如“总价不超过700”），必须输出同一 canonical unit 下的 `max_total`；服务端会拒绝超过该上限的报价。不要从余额、物品稀有度或语境猜测预算。
+如果人类明确说“定金/首付款 X、总价 Y”，必须把 X 输出为同一单位下的 `deposit_amount`；不要把总价当作首付款。没有明确分期时省略该字段。
 
 如果玩家明确表达了购买意图，但价格单位无法对应 `ruleset.currency_units` 中的任何 canonical unit id：仍然必须输出该 economy_action 的 player/type/target/quantity，并省略 `amount` 与 `unit`、将 `price_source` 设为 "none"。不要为了满足 unit 字段而猜测、换算或发明货币单位；服务端会将其视为无价购买意图，在该轮内拦截该商品的免费发放。绝不要因为价格无法表示而整个丢弃购买意图。
 

@@ -114,6 +114,22 @@ The fail-safe direction is unchanged: no stated price means no charge and no
 free item delivery — the cost of retiring the pass is at most a one-round
 delay of the payment dialog.
 
+## Amendment (2026-11-05): semantic quote evidence
+
+The planner's structured `economy_actions` may include an `evidence` excerpt
+for a priced quote. The excerpt is a short verbatim span from the player's
+action or recent GM narration. The server verifies the excerpt against trusted
+instance text before creating a chargeable offer. Missing or mismatched
+evidence is downgraded to the existing in-memory unpriced intent; it never
+causes a guessed charge. Locale resources remain parser compatibility data and
+user-facing message data, not economic authority.
+
+When the planner is unavailable or omits `economy_actions`, the server's
+deterministic backstop reads the player's action only to record unpriced
+intents. It never turns a currency mention into an offer: per-item prices
+("每瓶5金币") and thousands separators ("1,500") made such reads charge the
+wrong total.
+
 ## Compatibility
 
 This is an intentional breaking change for the single-user preview build.

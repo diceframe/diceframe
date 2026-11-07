@@ -560,6 +560,22 @@ Frontend **SHOULD NOT** 重复实现一套与 backend 不同的核心 mechanics 
 
 同时不要通过删除测试来掩盖 regression。
 
+### 15.2 Locale and intent resource contracts
+
+自然语言 intent 识别必须把语言表达与业务 authority 分开：
+
+- 语言触发模式 **MUST** 放在 `src/engine/intent/locales/<locale>/intents.json` 等资源中，使用稳定 intent ID；
+- 新增语言 **MUST NOT** 为了购买、报价或结算逻辑新增业务分支；应先增加资源键或稳定 intent ID；
+- locale 资源 **MUST** 使用 UTF-8，并通过资源结构、回退链和行为回归测试；
+- 后端提示和 planner repair 文案 **MUST** 放在同 locale resource 的 `messages.json`，不得在业务模块内复制每种语言的文案 map；
+- 缺失或不完整的 locale 资源 **MUST** fail closed：可以降低识别召回，但不能猜价格、修改 canonical identity 或发放免费物品；
+- chargeable quote **MUST** carry verifiable source evidence when produced by semantic extraction; unverifiable evidence **MUST** downgrade to unpriced intent;
+- narrative reward **MUST** enter through the structured `REWARD` proposal path with canonical amount and retained evidence; compatibility `GOLD` input follows the same pending/receipt boundary, and unvalidated model fields **MUST NOT** unlock automatic settlement;
+- 翻译后的 display name **MUST NOT** 被当作 canonical identity、持久化 ID、币种 ID 或规则机制字段；
+- parser 的回退顺序和资源契约 **MUST** 在架构文档中保持可验证，不能依靠散落在业务代码中的语言关键词补丁。
+
+新增语言的最小验收范围包括：intent resource contract、UTF-8 校验、对应语言的购买/拒绝购买/询价样例，以及经济交易的 fail-closed 回归。
+
 ---
 
 ## 16. PR 大小：保护完整性，不限制行数

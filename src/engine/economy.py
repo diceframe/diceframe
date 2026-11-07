@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from src.engine import progression
 from src.engine.character_utils import apply_currency_delta
+from src.engine.currency.constants import MAX_ECONOMY_AMOUNT
 from src.engine.memory_outbox import (
     MAX_EXTERNAL_EFFECT_DELIVERIES,
     pending_memory_deliveries,
@@ -22,10 +23,6 @@ from src.engine.memory_outbox import (
 )
 from src.engine.modules import economy_state
 
-# Technical limit in canonical base units.  With V2 currency systems the base
-# unit can be a minor denomination (e.g. CoC dollars → cents), so this cap must
-# stay far above any real-world display amount instead of shrinking 100×.
-MAX_ECONOMY_AMOUNT = 10_000_000
 # transfer/fee/all_contributors 已随 schema 8 退役：PAY/TEAM_PAY 标签契约
 # 在 schema 6 停用后，它们没有任何存活创建路径（见 migrations.instance）。
 ECONOMY_KINDS = {"payment", "purchase", "reward"}
@@ -263,9 +260,14 @@ def cancel_proposals_for_player(
         }
         if uid not in participant_uids:
             continue
+        refunded = _refund_installment_deposit(
+            instance, proposal, actor_uid="system", now=now,
+        )
         set_proposal_status(proposal, "cancelled")
         proposal["resolved_at"] = now
         proposal["resolution_code"] = resolution_code
+        if refunded is not None:
+            proposal["refund_transaction_id"] = refunded["id"]
         proposal_id = str(proposal.get("id") or "")
         affected_ids.add(proposal_id)
         _record_outcome(
@@ -430,6 +432,18 @@ def is_auto_settleable_reward(
         return False
     if str(proposal.get("kind") or "") != "reward":
         return False
+    # Model-originated rewards must carry the exact structured/prose evidence
+    # that produced the proposal before the small-cash convenience path may
+    # settle them automatically. Manually queued rewards keep the historical
+    # behavior because their caller is already an authority boundary.
+    if str(proposal.get("source") or "") in {
+        "narrative_reward_tag", "legacy_gold_tag", "narrative_reward_extractor",
+        "narrative_structured",
+    } and (
+        proposal.get("evidence_validated") is not True
+        or not str(proposal.get("evidence") or "").strip()
+    ):
+        return False
     if proposal.get("contributors"):
         return False
     # 物品奖励不属于“小额现金”：即使结算逻辑今天只入账金币，也不能让
@@ -592,6 +606,8 @@ def queue_proposal(
     source_ref: str = "",
     approval_policy: str = "payer",
     rewards: list[dict[str, Any]] | None = None,
+    evidence: str = "",
+    evidence_validated: bool = False,
     visibility: str = "private",
 ) -> dict[str, Any]:
     """Queue one idempotent proposal; no balance is changed here."""
@@ -638,6 +654,8 @@ def queue_proposal(
         "uid": str(payer_uid or recipient_uid),  # legacy payment projection
         "amount": amount,
         "reason": str(reason or "经济提案")[:240],
+        "evidence": str(evidence or "")[:300],
+        "evidence_validated": bool(evidence_validated),
         "source": str(source),
         "source_ref": str(source_ref),
         "approval_policy": str(approval_policy),
@@ -698,6 +716,9 @@ def queue_purchase_offer(
     reason: str = "",
     source: str = "table_offer",
     source_ref: str = "",
+    initial_due: int | None = None,
+    remaining_due: int | None = None,
+    quote_evidence: str = "",
 ) -> dict[str, Any]:
     """Create one pending purchase charge that only the payer may confirm.
 
@@ -711,7 +732,19 @@ def queue_purchase_offer(
     rewards = normalized_reward_entries(items, {})
     if not rewards:
         raise ValueError("purchase offer requires at least one item")
-    return queue_proposal(
+    payment_terms: dict[str, Any] | None = None
+    if initial_due is not None or remaining_due is not None:
+        first = int(initial_due if initial_due is not None else amount)
+        rest = int(remaining_due if remaining_due is not None else int(amount) - first)
+        if first <= 0 or rest < 0 or first + rest != int(amount):
+            raise ValueError("purchase installment totals are invalid")
+        payment_terms = {
+            "total_amount": int(amount),
+            "initial_due": first,
+            "remaining_due": rest,
+            "stage": "deposit_pending" if rest else "full",
+        }
+    proposal = queue_proposal(
         instance,
         kind="purchase",
         amount=amount,
@@ -728,6 +761,40 @@ def queue_purchase_offer(
         # queue_proposal(..., visibility="private") explicitly.
         visibility="party",
     )
+    if payment_terms is not None:
+        proposal["payment_terms"] = payment_terms
+    if str(quote_evidence or "").strip():
+        proposal["quote_evidence"] = str(quote_evidence).strip()[:300]
+    return proposal
+
+
+def purchase_grant_protection_snapshot(instance: Any) -> dict[str, set[str]]:
+    """Capture pending chargeable item grants before narrative generation.
+
+    The narrative may finish after a payer declines an offer or an accepted
+    offer is rejected for insufficient funds.  The live proposal status is no
+    longer ``pending`` in either case, but the response was generated while
+    the charge still owned its item.  Returning a detached payer-to-item map
+    lets the caller preserve that ownership through the response commit.
+    """
+
+    protected: dict[str, set[str]] = {}
+    for proposal in economy_state.state(instance).get("proposals", []):
+        if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+            continue
+        if str(proposal.get("kind") or "") not in PAYER_ECONOMY_KINDS:
+            continue
+        uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        if not uid:
+            continue
+        for reward in proposal.get("rewards") or []:
+            name = (
+                str(reward.get("name") or "").strip().casefold()
+                if isinstance(reward, dict) else str(reward).strip().casefold()
+            )
+            if name:
+                protected.setdefault(uid, set()).add(name)
+    return protected
 
 
 def filter_unconfirmed_purchase_grants(
@@ -735,12 +802,16 @@ def filter_unconfirmed_purchase_grants(
     data: dict[str, Any],
     *,
     unpriced_purchase_intents: list[dict[str, Any]] | None = None,
+    protected_purchase_items: dict[str, set[str]] | None = None,
 ) -> int:
     """Strip model grants for items that are part of an unconfirmed charge.
 
     A pending chargeable proposal owns its reward items until the payer
     confirms.  Model-emitted grants whose names match a pending purchase
     proposal's rewards are removed so the item cannot bypass the payment.
+    ``protected_purchase_items`` preserves the same ownership for proposals
+    that were pending when narrative generation started but were declined or
+    rejected before the response was applied.
     Same-round unpriced purchase intents (in-memory round state only, never
     persisted) are matched the same way: a purchase whose price nobody has
     stated yet must not be delivered through a narrative LOOT tag either.
@@ -750,7 +821,10 @@ def filter_unconfirmed_purchase_grants(
     narrative pipeline.
 
     Three authority layers: pending chargeable proposals always block (a
-    FREE_GRANT can never bypass a real offer); unpriced purchase intents
+    FREE_GRANT can never bypass a real offer); a caller may also pass the
+    proposal items captured when narrative generation began, so a
+    resolution-only decline/rejection cannot reopen the grant path;
+    unpriced purchase intents
     block unless the same round carries an explicit FREE_GRANT marker
     (GM narrated the item as genuinely free/gifted/rewarded) for the same
     player and item.  The marker channel ``state_update.free_grants`` is
@@ -773,20 +847,18 @@ def filter_unconfirmed_purchase_grants(
 
     # 第一层：待确认扣款提案（payment/purchase）。FREE_GRANT 无权绕过——
     # 否则物品先免费发放、付款人之后仍可能确认扣款，形成双重状态错误。
-    pending_purchase_items: dict[str, set[str]] = {}
-    for proposal in economy_state.state(instance).get("proposals", []):
-        if not isinstance(proposal, dict) or proposal.get("status") != "pending":
+    pending_purchase_items = purchase_grant_protection_snapshot(instance)
+    # A response may have started while these proposals were pending, then
+    # observed a decline/rejection before its state update is applied.  Keep
+    # the detached start-of-generation ownership as an additional block.
+    for uid, names in (protected_purchase_items or {}).items():
+        normalized_uid = str(uid or "")
+        if not normalized_uid:
             continue
-        if str(proposal.get("kind") or "") not in PAYER_ECONOMY_KINDS:
-            continue
-        uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
-        for reward in proposal.get("rewards") or []:
-            name = (
-                str(reward.get("name") or "").strip().casefold()
-                if isinstance(reward, dict) else str(reward).strip().casefold()
-            )
-            if uid and name:
-                pending_purchase_items.setdefault(uid, set()).add(name)
+        for name in names or ():
+            normalized_name = str(name or "").strip().casefold()
+            if normalized_name:
+                pending_purchase_items.setdefault(normalized_uid, set()).add(normalized_name)
     # 第二层：无价购买意图（价格未知/无法 canonicalize）。默认拦截；
     # 本轮 GM 明确免费（FREE_GRANT）才放行。unknown price != free。
     unpriced_purchase_items: dict[str, set[str]] = {}
@@ -937,6 +1009,15 @@ def resolve_proposal(
         return {"ok": False, "code": "FORBIDDEN", "error": "无权处理这项经济提案"}
 
     now = datetime.now(timezone.utc).isoformat()
+    terms = proposal.get("payment_terms") if isinstance(proposal.get("payment_terms"), dict) else None
+    settlement_stage = str((terms or {}).get("stage") or "full")
+    if not accepted and settlement_stage == "deposit_paid":
+        return {
+            "ok": False,
+            "code": "INSTALLMENT_ALREADY_STARTED",
+            "error": "定金已结算，当前不能直接拒绝；请处理尾款，或由 GM 回滚本轮交易",
+            "proposal": deepcopy(proposal),
+        }
     if not accepted:
         set_proposal_status(
             proposal,
@@ -959,9 +1040,43 @@ def resolve_proposal(
         }
 
     amount = int(proposal.get("amount", 0) or 0)
+    charge_amount = amount
+    partial_settlement = False
+    if terms and kind in {"payment", "purchase"}:
+        # Installment terms are persisted data.  Do not trust a partially
+        # written/legacy payload just because its current stage happens to be
+        # recognizable: an inconsistent total could charge one amount while
+        # recording another and would make the tail impossible to reconcile.
+        try:
+            terms_total = int(terms.get("total_amount"))
+            terms_initial = int(terms.get("initial_due"))
+            terms_remaining = int(terms.get("remaining_due"))
+        except (TypeError, ValueError):
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款金额无效"}
+        if (
+            terms_total != amount
+            or terms_initial <= 0
+            or terms_remaining < 0
+            or terms_initial + terms_remaining != amount
+        ):
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款总额不一致"}
+        if settlement_stage == "deposit_pending":
+            if terms_remaining <= 0:
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "定金条款缺少尾款"}
+            charge_amount = terms_initial
+            partial_settlement = True
+        elif settlement_stage == "deposit_paid":
+            if terms_remaining <= 0:
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "尾款金额无效"}
+            charge_amount = terms_remaining
+        elif settlement_stage == "full":
+            if terms_initial != amount or terms_remaining != 0:
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "全额支付条款不一致"}
+        else:
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款阶段无效"}
     # FIX-08：零金额只在 ``reward``（纯物品奖励）下合法；付款/购买永远需要正金额。
     minimum = 0 if kind == "reward" else 1
-    if amount < minimum or amount > MAX_ECONOMY_AMOUNT:
+    if charge_amount < minimum or charge_amount > MAX_ECONOMY_AMOUNT or amount > MAX_ECONOMY_AMOUNT:
         return {"ok": False, "code": "INVALID_AMOUNT", "error": "经济金额无效"}
     entries: list[dict[str, Any]] = []
     reward_snapshots: list[dict[str, Any]] = []
@@ -974,7 +1089,19 @@ def resolve_proposal(
         payer = instance.get_character_sheet(payer_uid)
         currency = payer.get("currency") if isinstance(payer.get("currency"), dict) else {}
         current = int(currency.get("amount", payer.get("gold", 0)) or 0)
-        if current < amount:
+        if current < charge_amount:
+            # A paid deposit is already a committed transaction.  A failed
+            # tail payment must remain retryable so the player can add funds;
+            # marking the whole proposal rejected would discard its effect
+            # group while leaving the deposit charged with no contract state.
+            if terms and settlement_stage == "deposit_paid":
+                proposal["resolution_code"] = "INSUFFICIENT_FUNDS_TAIL"
+                return {
+                    "ok": False,
+                    "code": "INSUFFICIENT_FUNDS",
+                    "error": f"尾款余额不足：需要 {charge_amount}，当前 {current}",
+                    "proposal": deepcopy(proposal),
+                }
             set_proposal_status(proposal, "rejected")
             proposal["resolved_at"] = now
             proposal["resolution_code"] = "INSUFFICIENT_FUNDS"
@@ -985,21 +1112,21 @@ def resolve_proposal(
             return {
                 "ok": False,
                 "code": "INSUFFICIENT_FUNDS",
-                "error": f"余额不足：需要 {amount}，当前 {current}",
+                "error": f"余额不足：需要 {charge_amount}，当前 {current}",
                 "proposal": deepcopy(proposal),
                 "outcome": deepcopy(outcome),
             }
         before = current
-        after = apply_currency_delta(payer, -amount)
+        after = apply_currency_delta(payer, -charge_amount)
         instance.set_character_sheet(payer_uid, payer)
-        entries.append({"account": f"character:{payer_uid}", "delta": -amount, "before": before, "after": after})
+        entries.append({"account": f"character:{payer_uid}", "delta": -charge_amount, "before": before, "after": after})
         entries.append({
             "account": "system:world",
-            "delta": amount,
+            "delta": charge_amount,
             "before": None,
             "after": None,
         })
-        if rewards and grant_reward:
+        if rewards and grant_reward and not partial_settlement:
             _grant_rewards_with_snapshot(
                 instance, recipient_uid, rewards, grant_reward, reward_snapshots,
             )
@@ -1036,8 +1163,13 @@ def resolve_proposal(
     else:
         return {"ok": False, "code": "UNSUPPORTED_KIND", "error": "不支持的经济提案类型"}
 
-    set_proposal_status(proposal, "committed")
-    proposal["resolved_at"] = now
+    if partial_settlement:
+        terms["stage"] = "deposit_paid"
+        proposal["settlement_stage"] = "deposit_paid"
+        proposal["resolution_code"] = "DEPOSIT_COMMITTED"
+    else:
+        set_proposal_status(proposal, "committed")
+        proposal["resolved_at"] = now
     transaction = {
         "id": f"tx_{uuid4().hex}",
         "run_id": instance.run_id,
@@ -1049,6 +1181,7 @@ def resolve_proposal(
         "actor_uid": actor_uid,
         "entries": entries,
         "status": "committed",
+        "settlement_stage": "deposit" if partial_settlement else "final",
         "round": era_key(instance),
         "committed_at": now,
     }
@@ -1058,15 +1191,102 @@ def resolve_proposal(
     outcome = _record_outcome(
         instance, proposal, status="committed", actor_uid=actor_uid,
     )
-    effect_group = _settle_effect_group(instance, proposal)
+    outcome["amount"] = charge_amount
+    outcome["total_amount"] = amount
+    effect_group = None if partial_settlement else _settle_effect_group(instance, proposal)
     return {
         "ok": True,
         "accepted": True,
+        "committed": not partial_settlement,
         "proposal": deepcopy(proposal),
         "transaction": deepcopy(transaction),
         "outcome": deepcopy(outcome),
         "effect_group": effect_group,
     }
+
+
+def _committed_deposits(instance: Any, proposal_id: str) -> list[dict[str, Any]]:
+    return [
+        transaction
+        for transaction in economy_state.state(instance).get("transactions", [])
+        if isinstance(transaction, dict)
+        and str(transaction.get("proposal_id") or "") == proposal_id
+        and transaction.get("status") == "committed"
+        and transaction.get("settlement_stage") == "deposit"
+    ]
+
+
+def _resync_installment_stage(instance: Any, proposal: dict[str, Any]) -> None:
+    """Re-derive an installment's stage from its surviving deposit."""
+
+    terms = proposal.get("payment_terms")
+    if not isinstance(terms, dict) or str(terms.get("stage") or "full") == "full":
+        return
+    if _committed_deposits(instance, str(proposal.get("id") or "")):
+        terms["stage"] = "deposit_paid"
+        proposal["settlement_stage"] = "deposit_paid"
+        return
+    terms["stage"] = "deposit_pending"
+    proposal.pop("settlement_stage", None)
+    if proposal.get("resolution_code") in {"DEPOSIT_COMMITTED", "INSUFFICIENT_FUNDS_TAIL"}:
+        proposal.pop("resolution_code", None)
+
+
+def _refund_installment_deposit(
+    instance: Any,
+    proposal: dict[str, Any],
+    *,
+    actor_uid: str,
+    now: str,
+) -> dict[str, Any] | None:
+    """Return a paid deposit when its contract is cancelled before the tail.
+
+    The refund is a compensating ledger transaction, so a later whole-round
+    rollback reverses it like any other settlement.
+    """
+
+    terms = proposal.get("payment_terms")
+    if not isinstance(terms, dict) or terms.get("stage") != "deposit_paid":
+        return None
+    proposal_id = str(proposal.get("id") or "")
+    payer_uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
+    account = f"character:{payer_uid}"
+    paid = sum(
+        -int(entry.get("delta", 0) or 0)
+        for transaction in _committed_deposits(instance, proposal_id)
+        for entry in transaction.get("entries", [])
+        if isinstance(entry, dict)
+        and str(entry.get("account") or "") == account
+        and int(entry.get("delta", 0) or 0) < 0
+    )
+    if paid <= 0:
+        return None
+    entries: list[dict[str, Any]] = []
+    if payer_uid in instance.players:
+        payer = instance.get_character_sheet(payer_uid)
+        currency = payer.get("currency") if isinstance(payer.get("currency"), dict) else {}
+        before = int(currency.get("amount", payer.get("gold", 0)) or 0)
+        after = apply_currency_delta(payer, paid)
+        instance.set_character_sheet(payer_uid, payer)
+        entries.append({"account": account, "delta": paid, "before": before, "after": after})
+    entries.append({"account": "system:world", "delta": -paid, "before": None, "after": None})
+    transaction = {
+        "id": f"tx_{uuid4().hex}",
+        "run_id": instance.run_id,
+        "proposal_id": proposal_id,
+        "kind": "refund",
+        "source": proposal.get("source", ""),
+        "source_ref": proposal.get("source_ref", ""),
+        "reason": proposal.get("reason", ""),
+        "actor_uid": actor_uid,
+        "entries": entries,
+        "status": "committed",
+        "settlement_stage": "refund",
+        "round": era_key(instance),
+        "committed_at": now,
+    }
+    economy_state.state(instance).setdefault("transactions", []).append(transaction)
+    return transaction
 
 
 def reverse_round_economy(instance: Any, round_number: int) -> None:
@@ -1108,7 +1328,6 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         str(transaction.get("proposal_id") or "")
         for transaction in settlement_transactions
     }
-    affected_ids = origin_ids | settlement_ids
     now = datetime.now(timezone.utc).isoformat()
 
     # Invalidate proposals whose narrative origin was erased, then reverse
@@ -1127,13 +1346,12 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
         if source_ref:
             economy_state.state(instance).get("idempotency_records", {}).pop(source_ref, None)
 
-    for transaction in transactions:
-        if (
-            transaction.get("status") == "committed"
-            and str(transaction.get("proposal_id") or "") in affected_ids
-        ):
-            transaction["status"] = "reversed"
-            transaction["reversed_at"] = now
+    # Reverse exactly the era's settlements.  An installment can own several
+    # transactions; a deposit committed before the era survives a rollback
+    # of its tail, just as the restored snapshot still shows it paid.
+    for transaction in settlement_transactions:
+        transaction["status"] = "reversed"
+        transaction["reversed_at"] = now
 
     # A settlement-era rollback keeps an earlier valid offer actionable. Do
     # not resurrect proposals whose origin round is itself being erased.
@@ -1145,6 +1363,10 @@ def reverse_round_economy(instance: Any, round_number: int) -> None:
             set_proposal_status(proposal, "pending")
             proposal.pop("resolved_at", None)
             proposal.pop("resolution_code", None)
+        # The installment stage is derived from the ledger: a reopened or
+        # still-pending contract whose deposit was just reversed must charge
+        # the deposit again instead of delivering after only the tail.
+        _resync_installment_stage(instance, proposal)
     for group in economy_state.state(instance).get("effect_groups", []):
         if int(group.get("round", -1) or -1) >= rollback_round:
             group["status"] = "superseded"

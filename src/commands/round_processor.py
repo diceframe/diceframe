@@ -17,10 +17,13 @@ from typing import Any
 
 from src.commands.economy_effects import (
     defer_narrative_effects,
+    infer_narrative_reward_candidates,
+    merge_narrative_reward_candidates,
     has_economy_proposal,
     pending_decision_notice,
     currency_labels_for_rule,
     unbacked_purchase_notice,
+    unpriced_purchase_notice,
     unbacked_payment_notice,
     should_warn_unbacked_payment,
 )
@@ -39,6 +42,7 @@ from src.commands.check_planner import plan_round_checks
 from src.engine.economy import (
     economy_changes_are_resolutions_only,
     economy_fingerprint,
+    purchase_grant_protection_snapshot,
     queue_purchase_offer,
 )
 from src.commands.death_save_tracker import resolve_round_death_saves
@@ -467,10 +471,22 @@ class RoundProcessor:
                         items=[str(offer["target"])] * quantity,
                         reason=str(offer.get("note") or ""),
                         source="table_offer",
+                        initial_due=(
+                            int(offer["initial_due"])
+                            if offer.get("initial_due") is not None else None
+                        ),
+                        remaining_due=(
+                            int(offer["remaining_due"])
+                            if offer.get("remaining_due") is not None else None
+                        ),
+                        quote_evidence=str(offer.get("evidence") or ""),
                         source_ref=(
                             f"ai:{instance.run_id}:{progression_state.round_value(instance)}:"
                             f"{offer['payer_uid']}:{offer['target']}:{quantity}:"
-                            f"{offer.get('amount_scope') or 'total'}:{offer['amount']}"
+                            f"{offer.get('amount_scope') or 'total'}:{offer['amount']}:"
+                            f"{offer.get('max_total') if offer.get('max_total') is not None else ''}:"
+                            f"{offer.get('initial_due') if offer.get('initial_due') is not None else ''}:"
+                            f"{offer.get('evidence') or ''}"
                         ),
                     )
                 except Exception:
@@ -484,7 +500,13 @@ class RoundProcessor:
             )
             if not metadata.get("available"):
                 logger.warning("模型工具不可用，进入离线检定兼容路径: %s", instance.game_key)
-                return self.prepare_round_checks(instance)
+                # The offline checker resets round-check state. Preserve the
+                # economy-only blocker recovered above so an unavailable
+                # planner cannot reopen the same-round free-grant path.
+                recovered_unpriced = list(instance.round_unpriced_purchase_intents)
+                prepared = self.prepare_round_checks(instance)
+                instance.round_unpriced_purchase_intents = recovered_unpriced
+                return prepared
             deferred_actions = {
                 id(instance.action_queue[index]) for index in deferred_indexes
             }
@@ -495,7 +517,10 @@ class RoundProcessor:
             for action, request in planned:
                 action["check_request"] = request
             if not metadata.get("skipped"):
-                instance.record_llm_usage(int(metadata.get("total_tokens", 0) or 0), calls=1)
+                instance.record_llm_usage(
+                    int(metadata.get("total_tokens", 0) or 0),
+                    calls=max(1, int(metadata.get("calls", 1) or 1)),
+                )
             errors = metadata.get("errors") or []
             if errors:
                 logger.warning("部分 AI 检定参数被拒绝: %s", "; ".join(str(item) for item in errors))
@@ -573,13 +598,19 @@ class RoundProcessor:
             if not planning_target_is_current():
                 instance.reset_round_checks()
                 return []
-            return self.prepare_round_checks(instance)
+            recovered_unpriced = list(instance.round_unpriced_purchase_intents)
+            prepared = self.prepare_round_checks(instance)
+            instance.round_unpriced_purchase_intents = recovered_unpriced
+            return prepared
         except Exception:
             logger.exception("AI 检定规划失败，进入离线检定兼容路径: %s", instance.game_key)
             if not planning_target_is_current():
                 instance.reset_round_checks()
                 return []
-            return self.prepare_round_checks(instance)
+            recovered_unpriced = list(instance.round_unpriced_purchase_intents)
+            prepared = self.prepare_round_checks(instance)
+            instance.round_unpriced_purchase_intents = recovered_unpriced
+            return prepared
         for check in checks.last_checks(instance):
             if not check.get("check_id"):
                 check["check_id"] = uuid.uuid4().hex
@@ -1324,6 +1355,7 @@ class RoundProcessor:
         # confirmations of this snapshot may resolve while the LLM streams,
         # but proposals created afterwards must invalidate the response.
         expected_economy_fingerprint = economy_fingerprint(instance)
+        protected_purchase_items = purchase_grant_protection_snapshot(instance)
         # 只保留最近一轮的短期展示状态，避免旧提示或战斗结果常驻。
         instance.begin_round_processing()
         pending_combat_event_ids = combat_narrative.pending_event_ids(instance)
@@ -1483,6 +1515,10 @@ class RoundProcessor:
             currency_labels=currency_labels,
         ):
             system_changes.append(unbacked_payment_notice(instance.language))
+        inferred_rewards = infer_narrative_reward_candidates(instance, response.narration, rule)
+        if inferred_rewards:
+            merge_narrative_reward_candidates(data, inferred_rewards)
+            response.state_update = data.get("state_update")
         # Purchase authority is explicit GM order + payer confirmation. Never
         # infer a price or create a chargeable proposal from narration text.
         # Unpriced purchase intents from planning stay memory-only and feed
@@ -1492,11 +1528,41 @@ class RoundProcessor:
         # the planner next round via recent_narration, or the GM can issue
         # the offer immediately through the manual purchase composer.
         unpriced_purchase_intents = list(instance.round_unpriced_purchase_intents)
+        free_grant_markers = [
+            marker for marker in (data.get("state_update", {}).get("free_grants", [])
+                                  if isinstance(data.get("state_update"), dict) else [])
+            if isinstance(marker, dict)
+        ]
+
+        def _unpriced_without_explicit_free_grant(intent: dict[str, Any]) -> bool:
+            uid = str(intent.get("payer_uid") or "").strip()
+            target = str(intent.get("target") or "").strip().casefold()
+            if not uid or not target:
+                return False
+            return not any(
+                str(marker.get("player") or "").strip() == uid
+                and (
+                    target in str(marker.get("item") or "").strip().casefold()
+                    or str(marker.get("item") or "").strip().casefold() in target
+                )
+                for marker in free_grant_markers
+            )
+
         dropped_purchase_items = filter_unconfirmed_purchase_grants(
             instance, data,
             unpriced_purchase_intents=unpriced_purchase_intents,
+            protected_purchase_items=protected_purchase_items,
         )
-        if dropped_purchase_items:
+        if any(
+            _unpriced_without_explicit_free_grant(intent)
+            for intent in unpriced_purchase_intents
+            if isinstance(intent, dict)
+        ):
+            # The planner recognized a purchase intent but could not form a
+            # canonical, chargeable offer. Make the fail-closed decision
+            # visible so the player knows how to obtain a real order.
+            system_changes.append(unpriced_purchase_notice(instance.language))
+        elif dropped_purchase_items:
             system_changes.append(unbacked_purchase_notice(instance.language))
         economy_pending = has_economy_proposal(data)
         deferred_effects = defer_narrative_effects(
@@ -1656,6 +1722,10 @@ class RoundProcessor:
                 instance,
                 state_update,
                 allowed_player_uids=allowed_uids,
+                authorized_receipt_id=str(
+                    getattr(instance, "_economy_authorized_receipt_id", "") or ""
+                ),
+                settlement_effects=True,
             )
             instance.set_state_update_recap(state_update)
         response = SimpleNamespace(

@@ -1,8 +1,9 @@
 """Intent 语言资源加载器：稳定 ID → 触发模式。
 
 语言资源（locales/<lang>/intents.json）描述"怎么识别"，逻辑只认稳定 ID
-（purchase_intent / purchase_confirm / purchase_offer / free_purchase /
-deferred_payment / currency_labels），永不使用文本本身作为判断依据。
+（purchase_intent / purchase_confirm / purchase_decline / purchase_offer /
+free_purchase / deferred_payment / currency_labels，以及 purchase_target_*、
+purchase_quantity_*、purchase_generic_target、purchase_balance），永不使用文本本身作为判断依据。
 
 加载采用 union 语义：游戏语言资源 + en + zh-CN 基准全部生效——多语言
 混写（中文局里说 buy / 日文局里夹汉字）与单一大正则时代行为一致，同时

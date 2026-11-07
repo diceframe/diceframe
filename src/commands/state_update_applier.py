@@ -31,7 +31,7 @@ from src.rulesets.contracts import (
     NarrativeHealthRuntime,
 )
 from src.engine.economy import queue_proposal
-from src.engine.modules import checks, progression_state
+from src.engine.modules import checks, economy_state, progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -84,6 +84,8 @@ class StateUpdateApplier:
         worlds_dir: Path | None,
         load_world_template: Callable[[str, str], dict],
         ruleset_registry: Any = None,
+        *,
+        strict_economy: bool = False,
     ):
         self._madness = MadnessTracker()
         self._players = PlayerStateApplier(self._madness)
@@ -94,6 +96,81 @@ class StateUpdateApplier:
         # 由 GameHandler 注入；不在这里 build_default_ruleset_registry()，避免第二份
         # registry lifecycle。未注入时 reconciliation 整体停用，行为与改造前一致。
         self._ruleset_registry = ruleset_registry
+        # The production GameHandler enables this boundary for settlement-
+        # dependent effect groups.  Ordinary narrative rounds are not gated
+        # here: their purchase items are already stripped by
+        # ``filter_unconfirmed_purchase_grants`` before this applier runs.
+        self._strict_economy = bool(strict_economy)
+
+    def _reject_unsettled_item_acquisitions(
+        self,
+        instance: GameInstance,
+        update: dict[str, Any],
+        *,
+        authorized_receipt_id: str = "",
+        allow_unsettled_item_grants: bool = False,
+        settlement_effects: bool = False,
+    ) -> None:
+        """Keep deferred item grants out of inventory without a valid receipt.
+
+        Only effect groups that were deferred behind an economy decision
+        (``settlement_effects=True``) need a receipt: their items are part of
+        the transaction and must not land unless that transaction committed.
+        Ordinary ``LOOT``/``KEY_ITEM``/``item_gains`` in a round without a
+        pending decision are the GM's narration and apply as before; items
+        owned by a pending or same-round unpriced purchase were already
+        removed by ``filter_unconfirmed_purchase_grants``.
+        """
+
+        # FREE_GRANT is an ephemeral gate marker; it never persists, whatever
+        # path applies the update.
+        update.pop("free_grants", None)
+        if not self._strict_economy or not settlement_effects or allow_unsettled_item_grants:
+            return
+        receipt_id = str(authorized_receipt_id or "")
+        if receipt_id and not any(
+            isinstance(transaction, dict)
+            and str(transaction.get("id") or "") == receipt_id
+            and str(transaction.get("run_id") or "") == str(instance.run_id)
+            and str(transaction.get("status") or "") == "committed"
+            and str(transaction.get("settlement_stage") or "final") == "final"
+            for transaction in economy_state.state(instance).get("transactions", [])
+        ):
+            logger.warning("忽略无效经济结算回执: %s", receipt_id)
+            receipt_id = ""
+        if receipt_id:
+            return
+        rejected = 0
+        if isinstance(update.get("loot"), list):
+            rejected += len(update["loot"])
+            update["loot"] = []
+        players = update.get("players")
+        if isinstance(players, dict):
+            for uid, player_update in players.items():
+                if not isinstance(player_update, dict):
+                    continue
+                for field in ("item_gains", "equip_gain", "weapon_change"):
+                    value = player_update.pop(field, None)
+                    if value:
+                        rejected += len(value) if isinstance(value, list) else 1
+                operations = player_update.get("equipment_ops")
+                if isinstance(operations, list):
+                    kept: list[dict[str, Any]] = []
+                    for operation in operations:
+                        if not isinstance(operation, dict):
+                            continue
+                        if str(operation.get("op") or "") == "equip":
+                            # Existing inventory is still authoritative; the
+                            # legacy acquisition switch is not.
+                            operation = dict(operation)
+                            operation.pop("legacy", None)
+                        kept.append(operation)
+                    player_update["equipment_ops"] = kept
+        if rejected:
+            logger.warning(
+                "拒绝未结算模型物品效果: round=%d count=%d",
+                progression_state.round_value(instance), rejected,
+            )
 
     def _load_rule(self, instance: GameInstance) -> RuleSystem | None:
         try:
@@ -132,8 +209,26 @@ class StateUpdateApplier:
         instance: GameInstance,
         update: dict,
         allowed_player_uids: set | None = None,
+        *,
+        authorized_receipt_id: str = "",
+        allow_unsettled_item_grants: bool = False,
+        settlement_effects: bool = False,
     ) -> list[dict[str, Any]]:
-        """将 LLM 输出的 state_update 应用到游戏状态。"""
+        """将 LLM 输出的 state_update 应用到游戏状态。
+
+        ``settlement_effects`` marks a deferred effect group being applied after
+        its economy decision; under strict economy its item grants need the
+        committed ``authorized_receipt_id``.
+        """
+        if not isinstance(update, dict):
+            return []
+        self._reject_unsettled_item_acquisitions(
+            instance,
+            update,
+            authorized_receipt_id=str(authorized_receipt_id or ""),
+            allow_unsettled_item_grants=allow_unsettled_item_grants,
+            settlement_effects=settlement_effects,
+        )
         queued_proposals: list[dict[str, Any]] = []
         rule = self._load_rule(instance)
         # 先解析 runtime：没有 reconciliation 能力的规则（legacy / freeform）完全
@@ -216,9 +311,31 @@ class StateUpdateApplier:
         if reconciler is not None and changed_domains:
             self._reconcile_characters(instance, reconciler, changed_domains, snapshots)
 
-        for proposal_index, proposal in enumerate(update.get("economy_proposals", [])):
-            uid = str(proposal.get("uid") or "")
-            amount = int(proposal.get("amount", 0) or 0)
+        raw_proposals = update.get("economy_proposals", [])
+        proposals = raw_proposals if isinstance(raw_proposals, list) else []
+        if raw_proposals not in (None, []) and not isinstance(raw_proposals, list):
+            logger.warning("忽略格式无效的 economy_proposals: round=%d", progression_state.round_value(instance))
+        for proposal_index, proposal in enumerate(proposals):
+            if not isinstance(proposal, dict):
+                logger.warning("忽略格式无效的经济提案: round=%d", progression_state.round_value(instance))
+                continue
+            # New structured rewards use recipient_uid; uid remains a legacy
+            # projection. Normalize both before validation so a valid reward
+            # cannot disappear merely because the model omitted the alias.
+            uid = str(proposal.get("uid") or proposal.get("recipient_uid") or "").strip()
+            recipient_uid = str(proposal.get("recipient_uid") or uid).strip()
+            raw_amount = proposal.get("amount", 0)
+            if isinstance(raw_amount, bool):
+                logger.warning("忽略布尔经济金额: uid=%s round=%d", uid, progression_state.round_value(instance))
+                continue
+            if isinstance(raw_amount, float) and not raw_amount.is_integer():
+                logger.warning("忽略非整数经济金额: uid=%s amount=%r round=%d", uid, raw_amount, progression_state.round_value(instance))
+                continue
+            try:
+                amount = int(raw_amount or 0)
+            except (TypeError, ValueError):
+                logger.warning("忽略格式无效的经济金额: uid=%s amount=%r round=%d", uid, raw_amount, progression_state.round_value(instance))
+                continue
             kind = str(proposal.get("kind") or "")
             # Model output is never allowed to create a chargeable purchase or
             # payment.  The only legitimate path for an AI-sourced purchase is
@@ -232,10 +349,21 @@ class StateUpdateApplier:
                     kind, uid, progression_state.round_value(instance),
                 )
                 continue
-            if uid not in instance.players or kind != "reward":
+            if recipient_uid not in instance.players or kind != "reward":
+                if kind == "reward":
+                    logger.warning(
+                        "忽略奖励提案：收款角色不存在 uid=%s recipient=%s round=%d",
+                        uid, recipient_uid, progression_state.round_value(instance),
+                    )
                 continue
             reason = str(proposal.get("reason") or "经济提案")[:240]
-            source = str(proposal.get("source") or "narrative")
+            raw_source = str(proposal.get("source") or "")
+            evidence_validated = (
+                proposal.get("evidence_validated") is True
+                and raw_source in {"narrative_reward_tag", "legacy_gold_tag", "narrative_reward_extractor"}
+            )
+            source = raw_source if evidence_validated else "narrative_structured"
+            evidence = str(proposal.get("evidence") or "")[:300] if evidence_validated else ""
             rewards = [
                 {
                     "name": str(item.get("name") or item.get("item") or "").strip()[:120],
@@ -262,19 +390,30 @@ class StateUpdateApplier:
                     f"round:{instance.run_id}:{progression_state.round_value(instance)}:reward:"
                     f"{proposal_index}:{uid}:{amount}:{reason.casefold()}"
                 )
-            queued_proposals.append(queue_proposal(
-                instance,
-                kind=kind,
-                payer_uid="",
-                recipient_uid=str(proposal.get("recipient_uid") or uid),
-                amount=amount,
-                rewards=rewards,
-                reason=reason,
-                source=source,
-                source_ref=source_ref,
-                approval_policy="gm",
-                visibility="private",
-            ))
+            try:
+                queued_proposals.append(queue_proposal(
+                    instance,
+                    kind=kind,
+                    payer_uid="",
+                    recipient_uid=recipient_uid,
+                    amount=amount,
+                    rewards=rewards,
+                    reason=reason,
+                    source=source,
+                    source_ref=source_ref,
+                    approval_policy="gm",
+                    evidence=evidence,
+                    evidence_validated=evidence_validated,
+                    visibility="private",
+                ))
+            except (TypeError, ValueError) as exc:
+                # A malformed model proposal must not abort the whole round or
+                # leave a half-created pending record. Fail closed and continue
+                # with the rest of the narrative state.
+                logger.warning(
+                    "忽略无效奖励提案: uid=%s recipient=%s amount=%r error=%s",
+                    uid, recipient_uid, raw_amount, exc,
+                )
         return queued_proposals
 
     def _resolve_runtime(self, rule: RuleSystem | None) -> Any:

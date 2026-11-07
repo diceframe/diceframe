@@ -6084,6 +6084,40 @@ not the other way around, where LLM narration defines mechanics.
 
 This shows that economy and inventory now participate in a linked transaction boundary rather than acting as two independent tag parsers.
 
+## 53.1 Locale boundary for purchase intents
+
+Natural-language purchase recognition is not the economy authority. `src/engine/intent/locales/<locale>/intents.json` maps language expressions to stable intent IDs; the current resource contract includes `purchase_intent`, `purchase_decline`, `purchase_offer`, `free_purchase`, `deferred_payment`, `currency_labels`, plus `purchase_target_prefix`, `purchase_target_connector`, `purchase_target_suffix`, `purchase_quantity_classifier`, `purchase_generic_target`, `purchase_quantity_word`, and `purchase_balance` for target cleanup, quantity and balance semantics. The sibling `messages.json` carries economy boundary notices and the repair prompt, so business code does not keep per-language message copies.
+
+The normal path for a new language is:
+
+```text
+add a UTF-8 locale intent resource
+↓
+locale → English → Simplified Chinese fallback
+↓
+intent contract tests
+↓
+shared parser
+↓
+the same canonical economy normalization / transaction settlement
+```
+
+Locale resources must not change canonical currencies, amount conversion, budgets, permissions, proposal states or item-grant rules; translated display names are never persisted identity. Missing or incomplete resources may reduce recognition recall, but must never make the server guess a price or grant an item for free. Adding a language should not modify the economy engine. If a new semantic cannot be represented, add a stable intent ID or resource field first and update the resource contract tests.
+
+Quote intents also carry traceable `evidence`: a short verbatim excerpt from the player's action or GM narration. The server accepts it only when the excerpt is found in trusted save text; missing or mismatched evidence downgrades the quote to unpriced. The model may perform semantic understanding, while lexical resources remain compatibility fallback rather than order authority.
+
+### 53.2 Structured reward boundary
+
+Narrative rewards enter the shared proposal queue through the structured
+`REWARD:player_id:amount:reason` tag. `amount` is already expressed in the
+ruleset's canonical currency unit and the exact tag line is retained as
+`evidence`. `GOLD` is only a compatibility alias and never mutates a balance
+directly. The recipient, amount, evidence and idempotency checks run before GM
+approval or the configured small-cash policy can settle the same ledger
+transaction. Model rewards without evidence cannot use automatic small-cash
+settlement, and item rewards are delivered only after a committed receipt.
+Natural-language reward prose is not an independent balance authority.
+
 ---
 
 # 54. Real Boundary for a Historical Swipe
