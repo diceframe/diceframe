@@ -95,6 +95,15 @@ describe('CreatorPackageExportDialog', () => {
     })
   })
 
+  it('rejects package IDs the plugin host would refuse before exporting', async () => {
+    const wrapper = await render('resource')
+    await wrapper.get('input[placeholder]').setValue('office_resources')
+    await wrapper.get('select').setValue('office')
+    await wrapper.get('[data-testid="creator-export-submit"]').trigger('click')
+    expect(wrapper.text()).toContain('包 ID 只能使用小写字母、数字和连字符。')
+    expect(mocks.apiBlob).not.toHaveBeenCalled()
+  })
+
   it('requires at least one adventure for an adventure module', async () => {
     const wrapper = await render('adventure')
     await wrapper.get('select').setValue('office')

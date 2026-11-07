@@ -21,14 +21,14 @@ export type CreatorCopy = {
 
 const values: Record<Locale, CreatorCopy> = {
   'zh-CN': {
-    kicker: '创作工具', title: '创作工坊', intro: '从已有工具开始制作冒险、世界、资料册、规则和内容来源。',
-    storyGroup: '故事创作', foundationGroup: '世界与规则', sourceGroup: '内容来源', toolGroup: '文本工具', packagingGroup: '打包与分享',
+    kicker: '创作工具', title: '创作工坊', intro: '从已有工具开始制作冒险、世界、资料册、规则和内容包。',
+    storyGroup: '故事创作', foundationGroup: '世界与规则', sourceGroup: '内容包', toolGroup: '文本工具', packagingGroup: '打包与分享',
     cards: {
       adventures: { title: '我的冒险编辑', description: '新建、导入、复制并编辑冒险包，审核后发布或直接开局。', action: '打开冒险创作' },
       worlds: { title: '世界制作', description: '管理世界、世界资料和与冒险开局相关的世界选择。', action: '打开世界' },
       lorebook: { title: '资料册', description: '编辑世界资料册、条目、绑定范围并导入已有资料。', action: '打开资料册' },
       rules: { title: '规则编辑', description: '查看和维护可用规则配置，保持规则结算由规则系统负责。', action: '打开规则' },
-      modules: { title: '内容来源', description: '安装、导入、更新内容包，并查看包资源和来源身份。', action: '管理内容来源' },
+      modules: { title: '内容包', description: '安装、导入、更新内容包，并查看包资源和来源身份。', action: '管理内容包' },
       textReview: { title: '文本整理与分配', description: '按标题拆分普通文本，逐段选择保存到世界、资料册、角色模板或冒险。', action: '打开文本工具' },
       exportAdventureModule: { title: '导出冒险模组', description: '把一个或多个冒险，连同配套的世界、规则和资料册打成 .dfplugin，安装后可以直接选择其中的冒险开局。', action: '导出冒险模组' },
       exportResourcePack: { title: '导出资源包', description: '只打包世界、规则和资料册这类可复用资源，不含冒险，适合给别人当素材。', action: '导出资源包' },
@@ -36,14 +36,14 @@ const values: Record<Locale, CreatorCopy> = {
     },
   },
   en: {
-    kicker: 'CREATION TOOLS', title: 'Creator workshop', intro: 'Use the existing tools to make adventures, worlds, lorebooks, rules, and content sources.',
-    storyGroup: 'Story creation', foundationGroup: 'Worlds and rules', sourceGroup: 'Content sources', toolGroup: 'Text tools', packagingGroup: 'Package and share',
+    kicker: 'CREATION TOOLS', title: 'Creator workshop', intro: 'Use the existing tools to make adventures, worlds, lorebooks, rules, and content packages.',
+    storyGroup: 'Story creation', foundationGroup: 'Worlds and rules', sourceGroup: 'Content packages', toolGroup: 'Text tools', packagingGroup: 'Package and share',
     cards: {
       adventures: { title: 'My adventure editor', description: 'Create, import, copy, edit, review, publish, export, or start an adventure package.', action: 'Open adventure creation' },
       worlds: { title: 'World building', description: 'Manage worlds, world knowledge, and the world context used when an adventure starts.', action: 'Open worlds' },
       lorebook: { title: 'Lorebooks', description: 'Edit lorebooks and entries, manage bindings, and import existing reference material.', action: 'Open lorebooks' },
       rules: { title: 'Rules editor', description: 'View and maintain available rules configurations while the rules runtime owns resolution.', action: 'Open rules' },
-      modules: { title: 'Content sources', description: 'Install, import, and update content packages, then inspect their resources and source identity.', action: 'Manage content sources' },
+      modules: { title: 'Content packages', description: 'Install, import, and update content packages, then inspect their resources and source identity.', action: 'Manage content packages' },
       textReview: { title: 'Distribute text', description: 'Split ordinary text by headings and choose whether each fragment becomes a world, lorebook, character template, or adventure.', action: 'Open text tool' },
       exportAdventureModule: { title: 'Export an adventure module', description: 'Bundle one or more adventures with their world, ruleset, and lorebooks as a .dfplugin; after installation its adventures can be started directly.', action: 'Export adventure module' },
       exportResourcePack: { title: 'Export a resource pack', description: 'Bundle reusable worlds, rulesets, and lorebooks without adventures, for others to build on.', action: 'Export resource pack' },
