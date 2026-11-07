@@ -11,12 +11,14 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from src.commands.state_items import remove_destroyed_item
 from src.engine.game_instance import GameInstance
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
 )
 from src.rulesets.dnd2024.exploration.engine import Dnd2024ExplorationEngine
+from src.rulesets.dnd2024.items.activation import validate_item_declarations
 from src.rulesets.dnd2024.items.charges import (
     ChargesError,
     destroy_check_events,
@@ -182,6 +184,61 @@ def test_destroy_declaration_defaults_and_bounds() -> None:
 def test_destroy_declaration_fails_closed(declaration) -> None:
     with pytest.raises(ChargesError):
         validate_destroy_declaration({"destroy_on_empty": declaration})
+
+
+class _ItemBundle:
+    def __init__(self, *items: dict) -> None:
+        self._items = list(items)
+
+    def list(self, kind: str) -> list[dict]:
+        return list(self._items) if kind == "item" else []
+
+
+def test_bundle_load_rejects_a_bad_or_chargeless_destroy_declaration() -> None:
+    """写错的声明、以及没有充能却声明销毁，都在加载边界拒绝。"""
+
+    validate_item_declarations(_ItemBundle(_wand(destroy={"die": "1d20", "threshold": 3})))
+    with pytest.raises(ChargesError, match="die must be 1d20"):
+        validate_item_declarations(_ItemBundle(_wand(destroy={"die": "1d6"})))
+    chargeless = _wand(destroy={"die": "1d20", "threshold": 1})
+    del chargeless["charges"]
+    chargeless["activation"]["charge_cost"] = None
+    with pytest.raises(ChargesError, match="destroy_on_empty without charges"):
+        validate_item_declarations(_ItemBundle(chargeless))
+
+
+def test_a_bad_destroy_declaration_is_rejected_before_any_roll() -> None:
+    """绕过加载校验的坏声明也只能得到可读的拒绝，不能在结算中途抛出。"""
+
+    wand = _wand(charges=3, destroy={"die": "1d20", "threshold": 1})
+    engine, instance, _sheet = _combat(items=[wand], carry={WAND: 1})
+    wand["destroy_on_empty"] = {"die": "1d6"}
+
+    rng = StrictRng([])
+    result = _activate(engine, instance, WAND, rng)
+
+    assert result["ok"] is False
+    assert result["code"] == "INVALID_INTENT"
+    assert "1d20" in result["error"]
+    assert rng.consumed == []
+
+
+def test_destroyed_cleanup_takes_the_anonymous_row_the_counts_derive() -> None:
+    """没有显式 ref 的行按 item:<item_key> 计数，销毁时也要一起删掉。"""
+
+    sheet = {
+        "inventory": [
+            {"name": "Wand", "item_key": "wand_of_destruction", "qty": 1},
+            {"name": "Wand", "item_key": "wand_of_destruction", "item_ref": TWIN, "qty": 1},
+        ],
+        "equipment": [{"name": "Wand", "item_key": "wand_of_destruction", "qty": 1}],
+    }
+
+    assert remove_destroyed_item(sheet, WAND) is True
+    # 显式 ref 不同的同名行是另一件物品，不受影响。
+    assert [row.get("item_ref") for row in sheet["inventory"]] == [TWIN]
+    assert sheet["equipment"] == []
+    assert remove_destroyed_item(sheet, WAND) is False
 
 
 def test_should_check_only_when_exactly_emptied() -> None:

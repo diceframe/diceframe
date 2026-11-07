@@ -1,9 +1,8 @@
 # 切片 D3b 执行报告：充能耗尽销毁（Destroy on Empty）
 
-- 任务书：`design/D3B_CHARGE_DESTROY_TASK_SPEC_2026-11-03.md`
-- 基线 commit：`e7b7080f`（PR #653 复审修复后的头；`ef4a5923` + 盾牌同调门控修复）
-- 分支：`feat/dnd2024-3b-charge-destroy`（stacked 在 #653 之上）
-- 状态：实现与测试完成
+- 任务书：`D3B_CHARGE_DESTROY_TASK_SPEC_2026-11-03.md`（作者本地施工资料，未入库；下文 §3/§7 引用的章节号均指该任务书）
+- 开发基线：`e7b7080f`（PR #653 复审修复后的头）；上游 PR #687 已 rebase 到合并 #653 之后的 `main`
+- 状态：实现与测试完成；集成时补了加载校验与匿名行清理，见 §8
 
 ## 1. 落地内容
 
@@ -90,3 +89,10 @@ ruff check <改动文件>                                                     # 
 | D3b-2 | 非充能物品的耐久/破损未落 | 不排期，等内容需要 |
 | D3b-3 | 官方内容目前无任何 `charges` 声明，端到端只能靠测试 fixture | 随 I0–I3 魔法物品分区解除 |
 | D3b-4 | 探索层激活仅允许药水类，因此带充能药水才能走探索路径 | D3 既有裁剪，非本切片引入 |
+| D3b-5 | 前端与叙述还不展示 `destroy_check` / `destroyed`，玩家只看到物品消失 | 随物品 UI 切片 |
+
+## 8. 集成复审补丁（上游 #687 → 集成 PR）
+
+- **声明校验接到加载边界**：原实现只在 `destroy_check_events` 里校验，写错的 `destroy_on_empty` 会让每次激活（不只最后一发）在 `resolve_intent` 中途抛出 `ChargesError`。现在 `validate_item_declarations` 在加载时拒绝坏声明和「没有 `charges` 却声明销毁」；战斗与探索的激活意图校验也各补一道，绕过加载校验的坏声明只得到 `INVALID_INTENT`，不消耗随机数。
+- **匿名行一起清理**：`remove_destroyed_item` 原先只认显式 `item_ref`。#686 合并后取件按 `item:<item_key>` 认匿名行，销毁也改为同一口径（共用 `_anonymous_row_ref`），否则留下的匿名行会在 reconcile 时把已销毁的 ref 写回。
+- 新增测试：`test_bundle_load_rejects_a_bad_or_chargeless_destroy_declaration`、`test_a_bad_destroy_declaration_is_rejected_before_any_roll`、`test_destroyed_cleanup_takes_the_anonymous_row_the_counts_derive`（均在补丁前失败）。

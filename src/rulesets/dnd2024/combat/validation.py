@@ -26,6 +26,7 @@ from ..items.charges import (
     ChargesError,
     charges_of,
     validate_charges_declaration,
+    validate_destroy_declaration,
 )
 from .primitives import (
     DICE_RE,
@@ -545,6 +546,9 @@ class CombatValidationMixin:
             declaration = validate_activation_declaration(item)
             maximum = validate_charges_declaration(item)
             consumable = validate_consumable_declaration(item)
+            # 销毁判定在全部效果之后才掷骰；声明有误要在这里拒绝，
+            # 不能等结算到一半才抛出。
+            validate_destroy_declaration(item)
         except (ItemActivationError, ChargesError) as exc:
             raise CombatIntentError(str(exc)) from None
         if declaration is None:

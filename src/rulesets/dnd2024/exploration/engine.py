@@ -45,6 +45,7 @@ from src.rulesets.dnd2024.items.charges import (
     destroy_check_events,
     spend_charges,
     validate_charges_declaration,
+    validate_destroy_declaration,
 )
 from src.rulesets.dnd2024.exploration.revive_effects import (
     UNSUPPORTED_MESSAGE,
@@ -494,6 +495,7 @@ class Dnd2024ExplorationEngine:
             declaration = validate_activation_declaration(item)
             validate_consumable_declaration(item)
             maximum = validate_charges_declaration(item)
+            validate_destroy_declaration(item)
         except (ItemActivationError, ChargesError) as exc:
             raise ExplorationIntentError(str(exc)) from None
         if declaration is None:
