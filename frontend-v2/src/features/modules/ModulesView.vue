@@ -560,7 +560,7 @@ async function checkRecovery() {
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
               <span class="module-update-badge">{{ t('modulesUpdateAvailable') }}</span>
-              <button type="button" class="module-update-action" :disabled="updateBusy === module.id" @click.prevent.stop="updateModule(module)">
+              <button type="button" class="module-update-action" :disabled="updateBusy !== ''" @click.prevent.stop="updateModule(module)">
                 {{ t('modulesUpdateAction') }}
               </button>
             </p>
