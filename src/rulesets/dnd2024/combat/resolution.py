@@ -703,7 +703,7 @@ class CombatResolutionMixin:
 
         events = list(self._submit_hit_damage(damage_event))
         events.extend(self._concentration_with_dool(instance, combat, target, damage, rng))
-        events.extend(self._enemy_defeated_feature_events(
+        events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, damage,
         ))
         if self._last_hostile_defeated(combat, target, damage):
@@ -846,14 +846,19 @@ class CombatResolutionMixin:
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
                     events.extend(self._concentration_events(instance, combat, target, damage, rng))
-                    prior_dealt = dealt.get(target_id, 0)
-                    dealt[target_id] = prior_dealt + damage
-                    events.extend(self._enemy_defeated_feature_events(
-                        instance, combat, actor_id, target, dealt[target_id],
-                        prior_damage=prior_dealt,
-                    ))
-                    if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                    dealt[target_id] = dealt.get(target_id, 0) + damage
+                    total_dealt = dealt[target_id]
+                    if (
+                        target["kind"] == "enemy"
+                        and target["hp"] - total_dealt <= 0
+                        and target_id not in defeated_targets
+                    ):
+                        # 只有首次跨过 0 HP 的那一束触发；同批次后续射线照旧
+                        # 产生伤害事件，但不再授予第二次临时 HP。
                         defeated_targets.add(target_id)
+                        events.extend(self._enemy_zero_hp_feature_events(
+                            instance, combat, actor_id, target, total_dealt,
+                        ))
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
                 )
@@ -951,14 +956,17 @@ class CombatResolutionMixin:
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
                         events.extend(self._concentration_events(instance, combat, target, damage, rng))
-                        prior_dealt = dealt.get(target_id, 0)
-                        dealt[target_id] = prior_dealt + damage
-                        events.extend(self._enemy_defeated_feature_events(
-                            instance, combat, actor_id, target, dealt[target_id],
-                            prior_damage=prior_dealt,
-                        ))
-                        if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                        dealt[target_id] = dealt.get(target_id, 0) + damage
+                        total_dealt = dealt[target_id]
+                        if (
+                            target["kind"] == "enemy"
+                            and target["hp"] - total_dealt <= 0
+                            and target_id not in defeated_targets
+                        ):
                             defeated_targets.add(target_id)
+                            events.extend(self._enemy_zero_hp_feature_events(
+                                instance, combat, actor_id, target, total_dealt,
+                            ))
             elif mode == "automatic_damage":
                 damage_node = spell_formula_node(
                     str(effect["damage"]), effect.get("upcast_damage"),
@@ -979,14 +987,17 @@ class CombatResolutionMixin:
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
                 events.extend(self._concentration_events(instance, combat, target, damage, rng))
-                prior_dealt = dealt.get(target_id, 0)
-                dealt[target_id] = prior_dealt + damage
-                events.extend(self._enemy_defeated_feature_events(
-                    instance, combat, actor_id, target, dealt[target_id],
-                    prior_damage=prior_dealt,
-                ))
-                if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                dealt[target_id] = dealt.get(target_id, 0) + damage
+                total_dealt = dealt[target_id]
+                if (
+                    target["kind"] == "enemy"
+                    and target["hp"] - total_dealt <= 0
+                    and target_id not in defeated_targets
+                ):
                     defeated_targets.add(target_id)
+                    events.extend(self._enemy_zero_hp_feature_events(
+                        instance, combat, actor_id, target, total_dealt,
+                    ))
                 succeeded = True
             elif mode == "healing":
                 healing_node = spell_formula_node(
@@ -1266,77 +1277,76 @@ class CombatResolutionMixin:
                 })
         return events
 
-    def _enemy_defeated_feature_events(
-        self, instance: Any, combat: dict[str, Any], attacker_id: str,
-        target: dict[str, Any], damage: int, prior_damage: int = 0,
+    def _enemy_zero_hp_feature_events(
+        self, instance: Any, combat: dict[str, Any], source_actor_id: str,
+        target: dict[str, Any], damage_taken: int,
     ) -> list[dict[str, Any]]:
-        """Temp-HP grants from owned features that trigger on a defeated enemy.
+        """Temp-HP grants owned by the creature that reduced this enemy to 0 HP.
 
-        Called at every damage landing point with the *final* damage (after
-        resistance, saves and riders), so the trigger agrees with the existing
-        defeat check.  In multi-hit spell batches (extra rays/beams onto the
-        same target) callers pass the per-target damage accumulated for this
-        cast plus the prior accumulated damage, matching the batch defeat check
-        that also uses the accumulated total.  Only the settlement that first
-        crosses the threshold triggers, so repeated beams on one target cannot
-        grant the same feature twice.  Features opt in through the closed
-        parameter set ``defeat_temp_hp_ability`` /
-        ``defeat_temp_hp_add_class_level`` / ``defeat_share_range_ft``; the
-        engine never branches on a feature name.
+        Called at every final damage landing point with the damage that
+        settlement actually delivered -- after resistance, saves and riders --
+        so the trigger agrees with the existing defeat check.  Only the
+        source's own features are resolved: another party member never
+        benefits, no matter how close it stands, because the rule rewards the
+        creature that did the reducing.
 
-        Path a: the holder is the attacker (no range limit).  Path b: someone
-        else defeated the enemy while the holder is within the declared share
-        radius.  One event per holder and settlement, keep-max handled by the
-        reducer.
+        Features opt in through the closed ``trigger`` / ``temp_hp_ability`` /
+        ``temp_hp_class_ref`` / ``temp_hp_minimum`` payload; the engine never
+        branches on a feature, class or subclass name.
         """
 
         if target.get("kind") != "enemy":
             return []
-        hp = int(target.get("hp", 0) or 0)
-        dealt = int(damage)
-        prior = int(prior_damage)
-        # Only the settlement that first crosses the defeat threshold triggers.
-        # A target already defeated by an earlier ray of the same batch keeps
-        # taking its damage events but grants no second defeat feature.
-        if hp <= 0 or hp - prior <= 0 or hp - dealt > 0:
+        dealt = int(damage_taken)
+        hp_before = int(target.get("hp", 0) or 0)
+        # A target already at 0 HP was defeated earlier and cannot be farmed;
+        # damage that does not reach 0 is not a defeat at all.
+        if dealt <= 0 or hp_before <= 0 or hp_before - dealt > 0:
             return []
-        target_id = str(target["actor_id"])
+        kind, _raw = _actor_kind(source_actor_id)
+        if kind not in {"player", "companion"}:
+            return []
+        view = self._actor_view(instance, combat, source_actor_id)
+        character = self._feature_character(view)
+        state = self.features.class_state(character)
+        if state is None:
+            # 没有职业的同伴残表不拥有任何职业特性。
+            return []
         events: list[dict[str, Any]] = []
-        for raw_actor_id in combat.get("initiative") or []:
-            actor_id = str(raw_actor_id)
-            kind, _raw = _actor_kind(actor_id)
-            if kind not in {"player", "companion"}:
+        for definition in self.features.features_for(character):
+            parameters = definition.parameters
+            if parameters.get("trigger") != "enemy_reduced_to_zero_hp":
                 continue
-            view = self._actor_view(instance, combat, actor_id)
-            character = self._feature_character(view)
-            state = self.features.class_state(character)
-            if state is None:
-                # 同伴残表没有职业，按"不拥有任何职业特性"处理。
+            ability = parameters.get("temp_hp_ability")
+            class_ref = parameters.get("temp_hp_class_ref")
+            minimum = parameters.get("temp_hp_minimum")
+            if not isinstance(ability, str) or not isinstance(class_ref, str):
                 continue
-            for definition in self.features.features_for(character):
-                ability = definition.parameters.get("defeat_temp_hp_ability")
-                if not isinstance(ability, str) or not ability:
-                    continue
-                share = definition.parameters.get("defeat_share_range_ft")
-                eligible = actor_id == attacker_id
-                if not eligible and isinstance(share, int) and not isinstance(share, bool):
-                    eligible = self._distance(combat, actor_id, target_id) <= share
-                if not eligible:
-                    continue
-                modifier = ability_modifier(
-                    int((view.get("abilities") or {}).get(ability, 10) or 10)
+            if isinstance(minimum, bool) or not isinstance(minimum, int):
+                continue
+            class_id = class_ref.removeprefix("class:")
+            if not class_id:
+                continue
+            if state[0] != class_id:
+                # 授予生效却拿不到对应职业等级，说明目录与成长表已经不一致：
+                # 任何"凑一个等级"的回退都会算错数值，必须显式失败。
+                raise CombatIntentError(
+                    f"{definition.id}.temp_hp_class_ref is {class_ref} but the "
+                    f"owning character's class is {state[0]}"
                 )
-                level = (
-                    state[1]
-                    if definition.parameters.get("defeat_temp_hp_add_class_level") is True
-                    else 0
-                )
-                events.append({
-                    "type": "resource.changed", "resource": "temp_hp",
-                    "target_id": actor_id, "amount": max(1, modifier + level),
-                    "feature_id": definition.id,
-                })
-                break
+            modifier = ability_modifier(
+                int((view.get("abilities") or {}).get(ability, 10) or 10)
+            )
+            amount = max(minimum, modifier + state[1])
+            events.append({
+                "type": "resource.changed", "resource": "temp_hp",
+                "target_id": source_actor_id, "source_actor_id": source_actor_id,
+                "defeated_actor_id": str(target["actor_id"]),
+                "delta": amount, "amount": amount, "rolls": [],
+                "feature_id": definition.id, "owner": definition.owner,
+                "ability": ability, "ability_modifier": modifier,
+                "class_ref": class_ref, "class_level": state[1],
+            })
         return events
 
     @staticmethod

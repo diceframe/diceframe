@@ -47,6 +47,24 @@ def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
 
 
+# The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
+# only supported event; the other three describe the temp-HP formula.  Keeping
+# the names in one place means the loader and the combat helper can never
+# disagree about which keys exist.
+_DEFEAT_TRIGGER_KEYS = (
+    "trigger", "temp_hp_ability", "temp_hp_class_ref", "temp_hp_minimum",
+)
+_DEFEAT_TRIGGERS = frozenset({"enemy_reduced_to_zero_hp"})
+# Parameters the previous implementation accepted.  A declaration that still
+# carries them describes a rule SRD 5.2.1 does not have, so loading fails
+# instead of quietly ignoring the extra keys.
+_RETIRED_DEFEAT_KEYS = (
+    "defeat_temp_hp_ability",
+    "defeat_temp_hp_add_class_level",
+    "defeat_share_range_ft",
+)
+
+
 class Dnd2024ClassFeatureResolver:
     """Resolve class features, class resources, and combat capabilities."""
 
@@ -1206,40 +1224,71 @@ class Dnd2024ClassFeatureResolver:
                 "turn_start_regen_ability as a pair"
             )
 
-    @staticmethod
-    def _validate_defeat_trigger_parameters(definition: ClassFeatureDefinition) -> None:
+    def _validate_defeat_trigger_parameters(self, definition: ClassFeatureDefinition) -> None:
         """Fail closed on the defeat-trigger payload.
 
-        The payload is a closed set: the temp-HP ability code plus two optional
-        knobs (a class-level flag and a share radius).  A payload that declares
-        any of them without the ability would silently resolve to nothing, so it
-        is rejected at load time instead of becoming an inert feature.
+        The payload is one closed four-key set: what triggers it, which ability
+        feeds the formula, which class level the formula adds, and the floor.
+        Declaring a subset would leave the formula with either no ability or no
+        level, which resolves to a silently wrong or inert feature -- so a
+        partial set is rejected at load time rather than at settlement.
+
+        The set carries no distance, share, resource, cooldown or visibility
+        knob, because the rule it encodes has none: only the source's own kill
+        triggers it.
         """
 
         parameters = definition.parameters
-        keys = (
-            "defeat_temp_hp_ability",
-            "defeat_temp_hp_add_class_level",
-            "defeat_share_range_ft",
-        )
-        if not any(key in parameters for key in keys):
+        retired = [key for key in _RETIRED_DEFEAT_KEYS if key in parameters]
+        if retired:
+            # 旧载荷带着“他人击杀 10 尺共享”与“加职业等级”开关。它们不是
+            # SRD 5.2.1 的 Dark One's Blessing，静默忽略等于把已删除的规则
+            # 留在目录里，因此这里显式拒绝。
+            raise ClassFeatureError(
+                f"{definition.id} declares the retired parameter {retired[0]}"
+            )
+        keys = _DEFEAT_TRIGGER_KEYS
+        # Only claim a ``trigger`` key this payload actually owns.  Another
+        # slice may declare its own trigger name on a different feature, and
+        # rejecting it here would couple two unrelated payloads.
+        formula_keys = [key for key in keys if key != "trigger" and key in parameters]
+        if not formula_keys and parameters.get("trigger") not in _DEFEAT_TRIGGERS:
             return
-        ability = parameters.get("defeat_temp_hp_ability")
+        missing = [key for key in keys if key not in parameters]
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} must declare {' / '.join(keys)} together; "
+                f"missing {' / '.join(missing)}"
+            )
+        trigger = parameters.get("trigger")
+        if trigger not in _DEFEAT_TRIGGERS:
+            raise ClassFeatureError(
+                f"{definition.id}.trigger must be one of {sorted(_DEFEAT_TRIGGERS)}"
+            )
+        ability = parameters.get("temp_hp_ability")
         if not isinstance(ability, str) or ability not in ABILITY_IDS:
             raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_ability must name an ability"
+                f"{definition.id}.temp_hp_ability must name an ability"
             )
-        flag = parameters.get("defeat_temp_hp_add_class_level")
-        if "defeat_temp_hp_add_class_level" in parameters and not isinstance(flag, bool):
+        class_ref = parameters.get("temp_hp_class_ref")
+        if not isinstance(class_ref, str) or not class_ref.startswith("class:"):
             raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_add_class_level must be a boolean"
+                f"{definition.id}.temp_hp_class_ref must be a class:<id> reference"
             )
-        share = parameters.get("defeat_share_range_ft")
-        if "defeat_share_range_ft" in parameters and (
-            isinstance(share, bool) or not isinstance(share, int) or not 1 <= share <= 120
+        class_id = class_ref.removeprefix("class:")
+        progression = self.progression
+        if (
+            not class_id
+            or progression is None
+            or class_id not in progression.classes
         ):
             raise ClassFeatureError(
-                f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
+                f"{definition.id}.temp_hp_class_ref names an unknown class table"
+            )
+        minimum = parameters.get("temp_hp_minimum")
+        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_minimum must be an integer of at least 1"
             )
 
     @staticmethod

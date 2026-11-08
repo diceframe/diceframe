@@ -624,12 +624,13 @@
           "id": "dark_ones_blessing",
           "owner": "subclass:fiend_patron",
           "minimum_level": 3,
-          "source_ref": "srd-5.2.1:p58:dark-ones-blessing",
-          "summary": "When you reduce an enemy to 0 HP, or someone else reduces your enemy to 0 HP within 10 feet of you, you gain temporary hit points equal to your Charisma modifier plus your Warlock level (minimum 1).",
+          "source_ref": "srd-5.2.1:p76:dark-ones-blessing",
+          "summary": "When you reduce an enemy to 0 Hit Points, you gain Temporary Hit Points equal to your Charisma modifier plus your Warlock level (minimum of 1).",
           "parameters": {
-            "defeat_temp_hp_ability": "cha",
-            "defeat_temp_hp_add_class_level": true,
-            "defeat_share_range_ft": 10
+            "trigger": "enemy_reduced_to_zero_hp",
+            "temp_hp_ability": "cha",
+            "temp_hp_class_ref": "class:warlock",
+            "temp_hp_minimum": 1
           }
         },
         {

@@ -298,7 +298,7 @@ class CombatReactionSpellsMixin:
             events.extend(self._submit_hit_damage(damage_event))
             defender = self._actor_view(instance, combat, defender_id)
             events.extend(self._concentration_events(instance, combat, defender, amount, rng))
-            events.extend(self._enemy_defeated_feature_events(
+            events.extend(self._enemy_zero_hp_feature_events(
                 instance, combat, str(decision["attacker_id"]), defender, amount,
             ))
             return events
@@ -351,7 +351,7 @@ class CombatReactionSpellsMixin:
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._concentration_events(instance, combat, defender, int(damage_event["amount"]), rng))
-        events.extend(self._enemy_defeated_feature_events(
+        events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, str(decision["attacker_id"]), defender,
             int(damage_event["amount"]),
         ))
@@ -379,7 +379,7 @@ class CombatReactionSpellsMixin:
         defender = self._actor_view(instance, combat, defender_id)
         concentration_events = self._concentration_events(instance, combat, defender, amount, rng)
         events.extend(concentration_events)
-        events.extend(self._enemy_defeated_feature_events(
+        events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, defender, amount,
         ))
         hp = int(defender.get("hp", 0) or 0)
