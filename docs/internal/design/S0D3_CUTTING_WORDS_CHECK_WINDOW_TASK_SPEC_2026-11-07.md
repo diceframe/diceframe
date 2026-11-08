@@ -318,3 +318,137 @@ git status --short
 - 非目标确认：§7 七项均未越界
 - 遗留问题：<没有则写“无”；伤害面与属性检定面仍属明确后续范围>
 ```
+
+---
+
+## S0-D3 执行报告（2026-11-08）
+
+- **基线**：`25afa0d7`（`feat/dnd2024-s0f9-movement` 链头；S0-A 的子职授予、owner-scoped 查询与战斗 actor 子职投影均已在链内）
+- **分支 / HEAD**：`feat/dnd2024-s0d3-cutting-words` / `09bf43a5`（实现）+ `fa254b1f`（AI 断言）
+- **改动文件**（与 §5 白名单对照）：
+  1. `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json` — 声明补 `parameters.trigger` / `parameters.range_ft`（白名单 1）
+  2. `src/rulesets/dnd2024/features/models.py` — 新增 `CHECK_WINDOW_TRIGGERS` 与 `range_ft` / `trigger` 的加载期校验（白名单 4）
+  3. `src/rulesets/dnd2024/combat/check_windows.py` — 射程改读声明、多反应者串行、decision id 带 reactor、升级重击不再必中（白名单 5）
+  4. `src/rulesets/dnd2024/combat/resolution.py` — `check.resolved` 增 `critical_upgrade` 标记（白名单 6）
+  5. `tests/rulesets/test_dnd2024_cutting_words.py` — 新建 38 条（白名单 9）
+  - **未改**：白名单 2/3（locale 已含 `Cutting Words` / `语出惊人`，无需改动）、7（`validation.py`）、8（`engine.py`）——窗口的 pending/validate/finish 链路已由 S-P3 建好，本轮只补缺口，未重写。
+- **官方依据**：SRD 5.2.1 p35 College of Lore；`source_ref = srd-5.2.1:p35:cutting-words`
+
+### 特性身份与所有权
+
+声明留在 `classes.bard` 段，身份显式为 `owner: subclass:college_of_lore`、`minimum_level: 3`、`resource_id: bardic_inspiration`。`features_for()` 按 `features.subclass_ref` 授予，因此：
+
+- 3 级 Lore Bard 拥有；2 级没有；
+- `subclass_ref` 缺失、被改成 `subclass:college_of_valor` 或伪造 `subclass:cutting_words` 均不授予；
+- 非 Bard 即使写入 `subclass:college_of_lore` 也不授予（授予键来自该职业自己的子职表）。
+
+骰面走既有 `bardic_die` 轨道，不复制等级表：4 级 d6、5 级 d8、10 级 d10、15 级 d12，逐级实测。
+
+### 窗口与 continuation
+
+- 开窗点在原始攻击 `check.resolved` 之前：有候选就只发 `decision.pending`，**不掷伤害、不产生 HP/胜利事件**；原始 check 的骰迹只存在于 pending 的 `check` 深拷贝里。
+- 候选按 actor id 稳定排序。第一位 decline 后进入下一位；第一位 spend 且仍命中时进入下一位；一旦改为 miss，剩余候选全部丢弃。
+- `decision_id` 改为 `check-window:<window_code>:<intent_id>:<reactor_actor_id>`：原实现用 attacker 作尾段，两位诗人会产生同一个 id，第二位被当成第一位的重放。
+- 同一诗人不能在同一次攻击的检定面用两次；但 decline 过的诗人仍可在伤害面使用（decline 不花资源，这是两个独立时机）。
+
+### 命中后复用
+
+finisher 没有重放 `_attack_events`：攻击动作成本、`attack_roll` 提前终止、Rage 延长、条件消费都只发生一次；命中后统一走既有 `_hit_settlement_events`（伤害 AST、Sneak Attack、抗性、Divine Smite、Shield、Uncanny Dodge、专注、胜利）。命中后窗口读到的是**扣减后**的 `total`。
+
+### 事件与资源
+
+- decline：只发 `dnd2024.decision.cleared`，不扣 Reaction、不扣资源、不掷骰。
+- spend：`decision.cleared` → `dnd2024.class_resource.spent(bardic_inspiration, 1)` → `dnd2024.reaction.spent(reason="reaction_feature")` → `check.resolved`（带 `check_penalty` / `check_penalty_rolls` / `window` 审计字段）。
+- reducer 未改：`check.resolved` 仍只作审计事件，没有新增 canonical 状态。
+
+### RNG（四条路径）
+
+| 路径 | 实测 |
+|---|---|
+| 无候选 | 与改动前事件序列一致：`attack.spent` → `check.resolved` → `resource.changed` |
+| 开窗 decline | 不新增随机数；伤害段的骰子与无窗基线一致（对同一 roll 比较最终 HP 相同） |
+| spend 后仍命中 | 先掷 1 枚诗人骰，再掷伤害；`check.resolved.total` 为扣减值 |
+| spend 后 miss | 诗人骰之后立即停止——事件序列只有 cleared / 两个 spent / check.resolved，没有伤害事件 |
+
+### §6 测试矩阵（逐项）
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 | 通过 | `test_a_level_three_lore_bard_owns_cutting_words` |
+| 2 | 通过 | `test_a_bard_without_a_subclass_ref_does_not_own_cutting_words` |
+| 3 | 通过 | `test_a_foreign_or_invented_subclass_ref_does_not_grant_cutting_words` |
+| 4 | 通过 | `test_a_non_bard_cannot_claim_the_lore_owner` |
+| 5 | 通过 | `test_the_two_locales_name_the_feature_but_keep_the_identity`（identity 不随语言变化） |
+| 6 | 通过 | `test_the_inspiration_die_track_reads_d6_d8_d10_d12`；非法 track/range/resource/trigger 由 `test_a_malformed_declaration_fails_closed_at_load`（6 组参数）覆盖加载期拒绝 |
+| 7 | 通过 | `test_the_existing_catalogs_still_load` + `test_dnd2024_class_features.py` 全绿 |
+| 8 | 通过 | `test_a_hit_opens_one_check_window_for_the_bard`（options 恰为 spend/decline，`actor_id` 是诗人） |
+| 9 | 通过 | `test_the_window_precedes_damage_and_keeps_the_original_dice`（pending 时无 `resource.changed`，HP 不变） |
+| 10 | 通过 | `test_a_miss_or_a_natural_one_opens_no_window`（普通 miss 与天然 1） |
+| 11 | 通过 | `test_no_window_without_a_pool_reaction_hp_or_awareness`（资源 0 / Reaction 0 / 失能 / Blinded / HP 0） |
+| 12 | 通过 | `test_an_invisible_attacker_cannot_be_seen` + `test_the_range_is_measured_to_the_attacker_as_declared`（60 尺开、61 尺不开） |
+| 13 | 通过 | `test_the_trigger_distance_ignores_who_takes_the_hit`（诗人在 50 尺外、受击者在 0 尺仍开窗） |
+| 14 | 通过 | `test_only_the_assigned_actor_resolves_and_other_intents_wait`（他人 resolve 被拒；attack/end_turn 被拒；`combat.message` 可用） |
+| 15 | 通过 | `test_client_supplied_numbers_cannot_change_the_result`（伪造 total/damage/rolls/die_sides/attack_context 全部无效） |
+| 16 | 通过 | `test_a_spend_that_became_illegal_is_rejected_not_treated_as_decline`（资源清零后 spend 被拒，pending 保留，Reaction 未扣） |
+| 17 | 通过 | `test_decline_costs_nothing_and_reproduces_the_straight_through_damage`（与无窗基线最终 HP 相同） |
+| 18 | 通过 | `test_spend_turns_a_hit_into_a_miss_and_stops_before_damage`（扣 Reaction 1 + 灵感 1，只掷一次 1d6） |
+| 19 | 通过 | 同上：15 → 11 < AC 15，无伤害、无 HP 变化、无命中后窗口 |
+| 20 | 通过 | `test_a_cut_that_still_hits_rolls_damage_on_the_reduced_total`（19 → 17 仍命中，伤害按 17 结算） |
+| 21 | 通过 | `test_the_cut_leaves_natural_dice_modifier_and_bless_untouched` |
+| 22 | 通过 | `test_a_natural_twenty_stays_critical_and_hits_after_the_cut`（天然 20 扣减后仍 critical+命中）+ `test_automation_declines_a_window_it_cannot_improve`（AI 对重击 decline） |
+| 23 | 通过 | `test_a_five_foot_crit_upgrade_needs_the_attack_to_still_hit`（paralyzed 5 尺内升级重击：改为 miss 后无伤害且 `critical` 一并撤销；decline 时伤害骰翻倍） |
+| 24 | 通过 | `test_one_bard_gets_one_face_and_the_reaction_comes_back_next_round` |
+| 25 | 通过 | `test_two_bards_are_offered_in_order_and_the_decline_passes_on`（第二位是新的 decision id） |
+| 26 | 通过 | `test_a_second_bard_can_still_cut_a_hit_the_first_left_alone` + `test_a_cut_that_becomes_a_miss_cancels_every_remaining_bard` |
+| 27 | 通过 | `test_automation_spends_only_when_the_largest_die_can_flip` + `test_a_human_bard_never_gets_an_automatic_resolve` |
+| 28 | 通过 | `test_a_replayed_window_intent_does_not_spend_twice`（重放不再扣费） |
+| 29 | 通过 | `test_a_windowless_attack_keeps_the_baseline_dice` + `test_dnd2024_uncanny_dodge` / `counterspell` / `combat` / `check_windows` 回归全绿 |
+| 30 | 通过 | 四条路径见上节 RNG 表，分别由 `test_a_windowless_attack_keeps_the_baseline_dice`、`test_decline_costs_nothing_and_reproduces_the_straight_through_damage`、`test_a_cut_that_still_hits_rolls_damage_on_the_reduced_total`、`test_spend_turns_a_hit_into_a_miss_and_stops_before_damage` 固定 |
+
+### 与 §4 契约的形状偏差（不静默）
+
+1. **`resource_id` 留在特性顶层，未移入 `parameters`**。§4.1 的示例把它放在 `parameters` 内，但顶层 `resource_id` 是既有机制且被 `resolver.feature_value` / 资源池登记 / `granted_spell` 消费；搬进 `parameters` 会绕开那三条校验链，属于为形状牺牲语义。§4.1.4 要的"固定资源 id"已由目录声明满足。
+2. **`CHECK_WINDOW_DECISION` 仍是 `"check_window"`，未改成 `"d20_check_window"`**。改名会同时影响 `engine.py` / `validation.py` / `resolution.py` 三处已 import 的常量与前端 `Dnd2024CombatPanel.vue` 的一处字面量比较。前端不在 §5 白名单内，按 §5「需要任何其他文件时停止并报告」，本切片不改，交裁决。
+3. **`decision_id` 比 §4.3 多了 `window_code` 段**。同一诗人可能先后参与同一次攻击的两个面（检定面与伤害面），两段的 owner 相同；只按 `intent + reactor` 构造会让第二段覆盖第一段。
+4. **`trigger` 的闭集只在声明了 `range_ft` 时生效**。全局闭集会让既有契约失败：`test_dnd2024_dark_ones_blessing.py::test_a_foreign_trigger_key_is_not_claimed_by_this_payload` 明确要求 `trigger` 键在非 defeat payload 的特性上不被本表解释。两个键互为前提（有射程的窗口特性才需要触发事件），因此校验绑定在 `range_ft` 上。
+
+### 聚焦测试
+
+```
+python -m pytest tests/rulesets/test_dnd2024_cutting_words.py -q --basetemp=.ptmp-d3
+38 passed
+
+python -m pytest tests/rulesets/test_dnd2024_check_windows.py tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_resting.py -q
+127 passed
+
+python -m pytest tests/rulesets/test_dnd2024_combat.py tests/rulesets/test_dnd2024_uncanny_dodge.py tests/rulesets/test_dnd2024_counterspell.py tests/rulesets/test_dnd2024_check_windows.py -q
+113 passed
+
+python -m pytest tests/rulesets/test_dnd2024_dark_ones_blessing.py tests/rulesets/test_dnd2024_cutting_words.py tests/rulesets/test_dnd2024_improved_critical.py -q
+121 passed
+```
+
+### rulesets 全量
+
+```
+python -m pytest tests/rulesets -q --basetemp=.ptmp-final
+1563 passed, 11 failed
+```
+
+11 条 `test_dnd2024_character_builder.py` 失败为基线既有环境问题（`unresolved reference 'ability:con'`，Windows 保留设备名 `CON`），与 F9/D2 记录的同一失败集同源，本轮零新增。
+
+### ruff / format / diff
+
+- `ruff check`（check_windows / resolution / validation / engine / models / 新测试）：通过。
+- `ruff format --check`：新测试文件已格式化并通过；`check_windows.py` 与 `models.py` 在**基线提交上**就未通过 `ruff format`（已用 stash 对照确认），本轮未顺手格式化，以免把无关重排混进切片。
+- `git diff --check`：通过。
+
+### 非目标确认
+
+§7 七项均未越界：未实现属性检定面；未做 Bardic Inspiration 的授予/持骰/加骰；未新增 Lucky/Dark One's Own Luck（二者仍在同一模块内，属既有 S-P3 范围，本切片未改动其语义）；未做死亡豁免/专注豁免窗口；未新增 enemy 职业框架；未改前端；未重构 Shield/Uncanny Dodge 注册表与 rest/resource/reducer。
+
+### 遗留问题
+
+1. 上面第 2 条：`d20_check_window` 改名涉及一行前端，需裁决后再动。
+2. 伤害面（`cutting_words_damage`）与属性检定面：前者在 S-P3 已实现并有既有测试，后者仍是明确后续范围，本报告不声称 Cutting Words 整体完成。
+3. `trigger` 与 `range_ft` 的耦合校验若将来出现"有 trigger 无射程"的窗口特性，需要重新设计，当前闭集按契约 §4.1 只认识 `attack_roll_success`。
