@@ -304,10 +304,16 @@ def _settle_all(engine, instance, *, tag: str = "settle") -> list[dict]:
         if not pending:
             return collected
         decision = pending[0]
-        collected.extend(_resolve(
-            engine, instance, decision, "decline",
-            by=decision["assigned_to"] or "gm", intent_id=f"{tag}-{step}",
-        ))
+        collected.extend(
+            _resolve(
+                engine,
+                instance,
+                decision,
+                "decline",
+                by=decision["assigned_to"] or "gm",
+                intent_id=f"{tag}-{step}",
+            )
+        )
     raise AssertionError("the attack never settled")
 
 
@@ -865,7 +871,30 @@ def test_a_natural_twenty_stays_critical_and_hits_after_the_cut(
     assert check["total"] == 18
 
 
-def test_a_five_foot_crit_upgrade_needs_the_attack_to_still_hit(runtime, sheets) -> None:
+def test_automation_declines_a_window_it_cannot_improve(runtime, sheets) -> None:
+    """A critical is not worth a Bardic Inspiration die, and neither is a hit
+    the largest die cannot flip."""
+
+    from src.engine.player_control import set_control
+
+    # A natural twenty: the cut cannot take the critical away.
+    engine, instance = _three(runtime, sheets)
+    set_control(instance, "gm", "ai")
+    _enemy_attack(engine, instance, [20])
+    decision = _pending(instance)[0]
+    assert decision["check"]["critical"] is True
+    assert engine.next_automatic_intent(instance)["option"] == "decline"
+
+    # A hit the largest die cannot flip: 22 - 6 still reaches AC 15.
+    engine, instance = _three(runtime, sheets)
+    set_control(instance, "gm", "ai")
+    _enemy_attack(engine, instance, [18])
+    assert engine.next_automatic_intent(instance)["option"] == "decline"
+
+
+def test_a_five_foot_crit_upgrade_needs_the_attack_to_still_hit(
+    runtime, sheets
+) -> None:
     """The 5-foot upgrade is a hit rider, not a d20 fact.
 
     ``paralyzed`` grants the attacker advantage and upgrades any hit within 5
@@ -882,7 +911,9 @@ def test_a_five_foot_crit_upgrade_needs_the_attack_to_still_hit(runtime, sheets)
     assert decision["settlement"]["crit_on_hit"] is True
     before_hp = int(_canonical(instance, "p3")["resources"]["hp"])
 
-    events = _resolve(engine, instance, decision, "spend", by="gm", rng=SequenceRng([6]))
+    events = _resolve(
+        engine, instance, decision, "spend", by="gm", rng=SequenceRng([6])
+    )
     check = _checked(events)
     assert check["success"] is False
     assert check["critical"] is False
@@ -898,7 +929,9 @@ def test_a_five_foot_crit_upgrade_needs_the_attack_to_still_hit(runtime, sheets)
     before_hp = int(_canonical(instance, "p3")["resources"]["hp"])
     events = _resolve(engine, instance, _pending(instance)[0], "decline", by="gm")
     events += _settle_all(engine, instance, tag="crit")
-    critical_hit = next(event for event in events if event["type"] == "resource.changed")
+    critical_hit = next(
+        event for event in events if event["type"] == "resource.changed"
+    )
     assert critical_hit["critical"] is True
 
     engine, instance = _three(runtime, sheets)
