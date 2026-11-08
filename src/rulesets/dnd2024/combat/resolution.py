@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
 from ..character.attunement import AttunementError, canonical_item_ref
 from ..items.activation import (
     ItemActivationError,
@@ -1315,7 +1316,7 @@ class CombatResolutionMixin:
         events: list[dict[str, Any]] = []
         for definition in self.features.features_for(character):
             parameters = definition.parameters
-            if parameters.get("trigger") != "enemy_reduced_to_zero_hp":
+            if parameters.get("trigger") != ENEMY_REDUCED_TO_ZERO_HP:
                 continue
             ability = parameters.get("temp_hp_ability")
             class_ref = parameters.get("temp_hp_class_ref")

@@ -54,7 +54,11 @@ def _humanize(feature_id: str) -> str:
 _DEFEAT_TRIGGER_KEYS = (
     "trigger", "temp_hp_ability", "temp_hp_class_ref", "temp_hp_minimum",
 )
-_DEFEAT_TRIGGERS = frozenset({"enemy_reduced_to_zero_hp"})
+# The one trigger this slice understands.  It is exported because the combat
+# settlement reads the same name: a loader that accepts a trigger the engine
+# never fires would ship a silently inert feature.
+ENEMY_REDUCED_TO_ZERO_HP = "enemy_reduced_to_zero_hp"
+_DEFEAT_TRIGGERS = frozenset({ENEMY_REDUCED_TO_ZERO_HP})
 # Parameters the previous implementation accepted.  A declaration that still
 # carries them describes a rule SRD 5.2.1 does not have, so loading fails
 # instead of quietly ignoring the extra keys.
