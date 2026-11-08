@@ -403,14 +403,24 @@ def test_maximize_dice_nodes_transforms_only_dice() -> None:
 
 def test_supreme_healing_maximizes_cure_wounds_without_rng(cleric17, runtime) -> None:
     engine, instance = new_combat(runtime, cleric17)
+    max_hp = int(canonical(instance)["resources"]["max_hp"])
+    amount = 16 + heal_modifier(instance)
+    set_hp(instance, 50)
     result, rng = cast_result(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
     assert result["ok"], result
     assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert int(canonical(instance)["resources"]["hp"]) == 50 + amount
     assert rng.values == [99], "maximized dice must not consume RNG"
     healed = healing_to(result, "player:gm")
-    assert healed["amount"] == 16 + heal_modifier(instance)
+    assert healed["amount"] == amount
     assert healed["rolls"] == []
     assert healed["maximized"] is True
+
+    # The event keeps the full amount; the cap is the reducer's job.
+    set_hp(instance, max_hp)
+    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
+    assert healing_to(result, "player:gm")["amount"] == amount
+    assert int(canonical(instance)["resources"]["hp"]) == max_hp
 
 
 # --- T5: Supreme Healing scales with the slot ------------------------------
@@ -426,6 +436,13 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
     assert healed["rolls"] == []
     assert healed["maximized"] is True
 
+    result = cast(engine, instance, "spell:healing_word", 1, ["player:gm"], rolls=[99])
+    healed = healing_to(result, "player:gm")
+    # 2d4 base, maximized to 8.
+    assert healed["amount"] == 8 + modifier
+    assert healed["rolls"] == []
+    assert healed["maximized"] is True
+
     result = cast(engine, instance, "spell:healing_word", 2, ["player:gm"], rolls=[99])
     healed = healing_to(result, "player:gm")
     # 2d4 base + 2d4 per extra slot level → 4d4, all maximized.
@@ -438,11 +455,14 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
 
 def test_cure_wounds_below_seventeen_still_rolls(cleric16, runtime) -> None:
     engine, instance = new_combat(runtime, cleric16)
-    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5])
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5],
+    )
     healed = healing_to(result, "player:gm")
     assert healed["rolls"] == [4, 5]
     assert healed["amount"] == 9 + heal_modifier(instance)
     assert "maximized" not in healed
+    assert rng.values == [], "an unmaximized heal must consume its dice"
 
 
 # --- T7: temporary HP is not healing ---------------------------------------
