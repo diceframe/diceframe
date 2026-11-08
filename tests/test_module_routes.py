@@ -10,10 +10,17 @@ from src.webui.routes.modules import register_modules
 
 
 class FakeAPI:
+    def __init__(self) -> None:
+        # 记录路由传进来的视角判定（issue #708）。
+        self.detail_views: list[bool] = []
+        self.lorebook_views: list[bool] = []
+        self.content_views: list[bool] = []
+
     def list_modules(self) -> dict[str, object]:
         return {"ok": True, "modules": [{"id": "castle-module"}]}
 
-    def module_detail(self, module_id: str) -> dict[str, object]:
+    def module_detail(self, module_id: str, *, viewer_is_gm: bool = True) -> dict[str, object]:
+        self.detail_views.append(viewer_is_gm)
         if module_id == "castle-module":
             return {"ok": True, "module": {"id": module_id}}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
@@ -23,14 +30,17 @@ class FakeAPI:
             return {"ok": True, "module_id": module_id, "adventures": [{"adventure_id": "castle"}]}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
 
-    def module_lorebooks(self, module_id: str) -> dict[str, object]:
+    def module_lorebooks(self, module_id: str, *, viewer_is_gm: bool = True) -> dict[str, object]:
+        self.lorebook_views.append(viewer_is_gm)
         if module_id == "castle-module":
             return {"ok": True, "module_id": module_id, "lorebooks": [{"id": "castle-book"}]}
         return {"ok": False, "error_code": "MODULE_NOT_FOUND"}
 
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",
+        *, viewer_is_gm: bool = True,
     ) -> dict[str, object]:
+        self.content_views.append(viewer_is_gm)
         if (module_id, kind, key, language) == ("castle-module", "npc", "keeper", "zh-CN"):
             return {"ok": True, "content": {"id": "keeper"}}
         return {"ok": False, "error_code": "CONTENT_NOT_FOUND"}
@@ -112,7 +122,11 @@ async def test_module_lorebooks_route_has_a_dedicated_read_model() -> None:
 
 @pytest.mark.asyncio
 async def test_module_content_route_preserves_module_and_language_scope() -> None:
-    async with TestClient(TestServer(_app())) as client:
+    api = FakeAPI()
+    app = web.Application()
+    app["api"] = api
+    register_modules(app)
+    async with TestClient(TestServer(app)) as client:
         response = await client.get(
             "/api/modules/castle-module/content/npc/keeper?language=zh-CN",
         )
@@ -121,6 +135,35 @@ async def test_module_content_route_preserves_module_and_language_scope() -> Non
 
         missing = await client.get("/api/modules/castle-module/content/npc/missing")
         assert missing.status == 404
+
+    # 无访问密码 + 无 share 标记 ⇒ 主机视角（GM）；404 探测也走同一判定。
+    assert api.content_views == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_module_read_routes_treat_share_marked_requests_as_player_view() -> None:
+    """issue #708：带 share 身份（?user= / 席位令牌）的请求按玩家视角。"""
+
+    api = FakeAPI()
+    app = web.Application()
+    app["api"] = api
+    register_modules(app)
+    async with TestClient(TestServer(app)) as client:
+        plain = await client.get("/api/modules/castle-module/content/npc/keeper?language=zh-CN")
+        assert plain.status == 200
+        shared = await client.get("/api/modules/castle-module/content/npc/keeper?language=zh-CN&user=seat-1")
+        assert shared.status == 200
+        seated = await client.get(
+            "/api/modules/castle-module/content/npc/keeper?language=zh-CN",
+            headers={"X-Seat-Token": "seat-token"},
+        )
+        assert seated.status == 200
+        await client.get("/api/modules/castle-module/lorebooks?user=seat-1")
+        await client.get("/api/modules/castle-module?user=seat-1")
+
+    assert api.content_views == [True, False, False]
+    assert api.lorebook_views == [False]
+    assert api.detail_views == [False]
 
 
 @pytest.mark.asyncio

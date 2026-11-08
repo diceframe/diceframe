@@ -59,6 +59,8 @@ const boundGames = computed(() => module.value?.bound_games || [])
 type ModuleBookEntry = { id?: string; name?: string; content?: string; type?: string; tier?: string; unreliable?: boolean }
 const openLorebook = ref('')
 const lorebookEntries = ref<Record<string, ModuleBookEntry[]>>({})
+// issue #708：玩家视角下服务端只返回公开条目；隐藏数来自服务端，用于提示。
+const lorebookHidden = ref<Record<string, number>>({})
 const lorebookEntryErrors = ref<Record<string, boolean>>({})
 const lorebookEntryBusy = ref('')
 async function toggleLorebook(book: { id: string; key?: string }): Promise<void> {
@@ -68,11 +70,12 @@ async function toggleLorebook(book: { id: string; key?: string }): Promise<void>
   if (lorebookEntries.value[book.id]) return
   lorebookEntryBusy.value = book.id
   try {
-    const result = await api<{ ok: boolean; content?: { entries?: ModuleBookEntry[] } }>(
+    const result = await api<{ ok: boolean; content?: { entries?: ModuleBookEntry[]; hidden_entries?: number } }>(
       `/modules/${encodeURIComponent(moduleId.value)}/content/lorebook/${encodeURIComponent(book.key)}`,
     )
     if (!result.ok || !Array.isArray(result.content?.entries)) throw new Error('entries unavailable')
     lorebookEntries.value = { ...lorebookEntries.value, [book.id]: result.content!.entries! }
+    lorebookHidden.value = { ...lorebookHidden.value, [book.id]: Number(result.content?.hidden_entries || 0) }
     lorebookEntryErrors.value = { ...lorebookEntryErrors.value, [book.id]: false }
   } catch {
     lorebookEntryErrors.value = { ...lorebookEntryErrors.value, [book.id]: true }
@@ -404,6 +407,7 @@ async function run(action: ModuleAction) {
                     <b>{{ entry.name || entry.id }}</b>
                     <p>{{ entry.content }}</p>
                   </article>
+                  <p v-if="lorebookHidden[book.id]" class="muted">{{ t('modulesLorebookHiddenNote', { count: lorebookHidden[book.id] }) }}</p>
                   <p class="muted">{{ t('modulesLorebookReadonlyNote') }}</p>
                 </template>
               </div>
