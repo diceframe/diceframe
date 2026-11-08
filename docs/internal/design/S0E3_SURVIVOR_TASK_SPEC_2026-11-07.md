@@ -294,3 +294,145 @@ git diff --check
 - RNG 与 reducer 重放证据：
 - 与契约的偏差及原因：
 - 未决事项（不得把非目标列为已实现）：
+
+---
+
+## 10. 执行报告（2026-11-08）
+
+- **实际基线**：`5283f77d`（`feat/dnd2024-s0d1-supreme-healing` 链头，stack 在 D3 `fa254b1f` → F9 `25afa0d7` 上；S0-A 与 S0-E2 均已在链内，`_saving_throw_aura_bonus()` 与 `test_dnd2024_paladin_auras.py` 均存在）
+- **分支 / 提交**：`feat/dnd2024-s0e3-survivor` / `36b4af29`（实现）+ `c1fef294`（补矩阵证据）+ `9e48c6cd`（回退 `roll` 语义并留注释）
+- **改动文件**：`combat/resolution.py`、`combat/engine.py`、`features/resolver.py`、`runtime.py`、`tests/rulesets/test_dnd2024_survivor.py`
+- **契约写作时的事实**：Survivor 的声明、`_turn_start_regen_events()` 与 Defy Death 的 18–20 分支在基线已存在。本切片不是从零实现，而是把实现收敛到契约，并推翻旧的"首回合不触发"裁剪。
+
+### 特性授予与声明校验
+
+声明本来就符合 §4.1（`owner: subclass:champion`、`minimum_level: 18`、`source_ref: srd-5.2.1:p49:survivor`、四个参数），中英标签（Survivor / 百折不挠）也已就位，本轮未改内容文件。校验改了两处越界：
+
+1. `death_save_crit_threshold` 原接受 `2..19`，契约要求 `2..20`——20 表示"无特殊分支"，是合法声明。
+2. `turn_start_regen_base` 原接受 `0`，契约要求 `>= 1`。"不治疗"必须由 `base + 负调整值` 得到，不能靠声明 0 得到。
+
+### 首回合和后续回合接入
+
+`_start_combat_event()` 的返回从 `dict` 改为 `list[dict]`：第一项仍是原 `dnd2024.combat.started`（字段逐一未变），其后拼接 `_turn_start_regen_events(first)`。`engine.py` 的 `combat.start` 分支由 `events.append(...)` 改为 `events.extend(...)`。先攻排序、首行动者选择、初始 economy、位置与 RNG 顺序均未改。
+
+后续回合不变：`_end_turn_events()` 仍是 `repeat save → turn.advanced → 新行动者再生`。
+
+事件批次的第一项是 `intent.submitted`（审计包装），`dnd2024.combat.started` 排在其后，再生再排在 started 之后；测试按索引关系断言，不依赖绝对位置。
+
+### turn-start 到期条件处理
+
+`_turn_start_regen_events()` 原来直接读 `actor["conditions"]`，而 reducer 的 `_expire_conditions()` 会在同一批次应用 `turn.advanced` 时清掉 `duration ∈ {actor_turn_start, target_turn_start}` 的条件。两处读的是不同时点，导致"本回合开始到期"的 `cannot_regain_hp` 多阻断一轮。
+
+修法在事件构造侧：判断阻断前先剔除这两个 duration 的条件，得到契约 §4.3.6 要求的"到期后有效条件视图"。**未改 reducer**，也未新增状态。
+
+### 死亡豁免优势、阈值与 Aura 合成
+
+- `advantage_sources` 现在每项含 `code` / `owner` / `mode`：新增 `feature_flag_source_rows()` 返回 `{code, owner}`，`_death_save_events()` 拼 `mode`。Lucky 仍只有 `code`，因为它是专长（`content/feats/lucky.json`），没有 class feature owner——与既有攻击掷骰的 provenance 形状一致。
+- `check.resolved(kind="death_save")` 的阈值键由 `crit_threshold` 改为 `death_save_crit_threshold`。`crit_threshold` 在同一事件形状里已表示攻击重击范围（`check_windows.py` 的重算路径），同名两义会误导消费方。
+- `dnd2024.death_save.resolved.roll` **保留 `total`，未按 §4.5.4 改为天然值**——见"与契约的偏差"第 6 条。核对过 reducer 与前端都不读该字段，所以这是纯粹的契约不一致，不是运行时错误。
+- Aura 合成保持不变：`_saving_throw_aura_bonus()` 的 `bonus` 只进 `total`，不进 `natural`；18–20 与天然 1 的分支都按天然面值判定。
+- feed 白名单加入 `death_save_crit_threshold`（§4.6.2），其余 regen 审计字段（`feature_id` / `owner` / `trigger` / `base` / `ability` / `ability_modifier`）**没有**加入白名单——它们留在权威事件账本里，不扩大公共投影。
+
+### 改动文件对照白名单
+
+| 白名单项 | 是否改动 | 说明 |
+|---|---|---|
+| 1–3 内容与 locale | 否 | 声明与标签在基线已符合 §4.1，改动会使本切片变成"重写已正确的数据" |
+| 4 `features/resolver.py` | 是 | 两处校验边界 + 新增 `feature_flag_source_rows()`（§4.2） |
+| 5 `combat/resolution.py` | 是 | 首回合、regen 逐项与审计字段、到期视图、death-save 三项 |
+| 6 `combat/engine.py` | 是 | 仅 `combat.start` 的 append → extend |
+| 7 `runtime.py` | 是 | 仅 feed 白名单一个字段 |
+| 8 新建 survivor 测试 | 改而非新建 | 该文件在 S-P7 已存在并固化了"首回合不触发"；本切片改写其中 1 条、新增 12 条 |
+| 9 本任务书 | 是 | 本节 |
+
+未改 reducer、view、check_modes、reaction_spells、triggered_spells、validation、features/models、前端、progression/subclass/combat/spell/resource/rest catalog。
+
+### 测试 1–33 逐项结果
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 | 通过 | `test_level_eighteen_fighter_owns_survivor`（18 True / 17 False）、`test_ownership_requires_an_explicit_subclass_selection`（无 `subclass_ref` False，写入后 True）、`test_other_classes_never_own_survivor_and_roll_one_die`（rogue / wizard 18 级 False） |
+| 2 | 通过 | `test_the_declaration_keeps_its_identity_in_both_locales`（两 locale 的 owner / 等级 / source_ref / 四个参数 + 标签存在）。"builder 直建与逐级 advance 一致"未单独设测：18 级只有 advance 一条真实路径，preset 直建固定 1 级，无法在不造假的前提下对照 |
+| 3 | 通过 | `test_catalog_rejects_a_non_true_death_save_advantage`（False / 1 / "true"） |
+| 4 | 通过 | `test_catalog_rejects_an_invalid_death_save_threshold`（1 / 21 / "18" / True）+ `test_catalog_accepts_a_threshold_of_twenty`（20 合法） |
+| 5 | 通过 | `test_catalog_rejects_an_invalid_regeneration_base`（-1 / 0 / True / "5"）、`..._ability`（"xyz" / 3）、`test_catalog_requires_the_regeneration_pair_together`（缺一） |
+| 6 | 通过 | `test_two_declarations_take_the_lowest_threshold_and_keep_both_sources`：两条声明 → 阈值取 17、两枚骰（不是三枚）、两条 provenance 按 catalog 顺序 |
+| 7 | 通过 | `test_combat_start_regenerates_for_a_bloodied_first_actor`：HP = `max_hp // 2`，`combat.started` 后立即一条再生 |
+| 8 | 通过 | `test_combat_start_does_not_regenerate_for_another_first_actor`：敌人先攻时开场批次只有 started；轮到 Champion 的 `turn.advanced` 后触发一次 |
+| 9 | 通过 | `test_regeneration_skips_above_bloodied_and_full_hp`（`max_hp//2 + 1` / 满血）、`test_regeneration_never_ticks_on_a_downed_actor`（0 HP / dead / stable） |
+| 10 | 通过 | `test_regeneration_amount_uses_the_constitution_modifier`（Con 4 → mod -3 → 5-3 = 2）、`test_a_non_positive_amount_produces_no_event`（base 1 + mod -3 → -2，无事件、不扣 HP、不掷骰） |
+| 11 | 通过 | `test_regeneration_is_clamped_to_max_hp_by_the_reducer`（`amount > 剩余`，apply 后停在 max） |
+| 12 | 通过 | `test_cannot_regain_hp_blocks_the_regeneration`（delta / amount 0、`blocked_by`、来源字段仍在） |
+| 13 | 通过 | `test_a_condition_that_expires_at_turn_start_does_not_block_twice`（`duration: actor_turn_start` 的 `cannot_regain_hp` 不阻断，apply 后条件已被 reducer 清掉） |
+| 14 | 部分 | "每回合一次"由 `test_bloodied_fighter_regenerates_at_turn_start` 与重放测试覆盖；"重复 `available_intents` / feed 投影 / 存档读取不生成额外再生"没有专门断言——该辅助只在 `_end_turn_events()` 与 `_start_combat_event()` 两处被调用，只读路径不产生事件 |
+| 15 | 部分 | 17 级 Champion（`test_level_seventeen_fighter_keeps_a_single_die_and_normal_success` 的战斗侧）与其他职业（`test_other_classes...`）已覆盖；"无特性 companion"未单独构造，走的是同一 `active_features_for()` 空集分支 |
+| 16 | 部分 | "他人回合开始不触发 Champion 再生"由 `test_combat_start_does_not_regenerate_for_another_first_actor` 覆盖；胜利/团灭分支由 `_end_turn_events()` 的提前 return + `test_dnd2024_combat.py` 回归覆盖，未专门构造 |
+| 17 | 通过 | `test_combat_start_regenerates_for_a_bloodied_first_actor`：`rolls == []`、`trigger`/`base`/`ability`/`ability_modifier`/`owner` 全在、economy 的动作与反应计数不变 |
+| 18 | 通过 | `test_repeat_save_precedes_turn_advance_and_regeneration`（事件顺序 repeat save → advanced → regen） |
+| 19 | 通过 | 同上两条首回合测试：started 字段不变、排在最前、其后才是 regen；回归 295 passed 说明先攻与经济未漂移 |
+| 20 | 部分 | `test_a_replayed_start_batch_does_not_regenerate_twice`（重放 `applied is False`、HP 不变）；"存档加载后继续回合不重复上一回合再生"未构造，该行为依赖 canonical 里没有缓存的 amount（事件账本重放即机械应用） |
+| 21 | 通过 | `test_a_natural_eighteen_does_not_also_rally`（恢复 1 HP，但同批没有再生事件） |
+| 22 | 通过 | `test_death_save_has_advantage_and_provenance`（两骰、`advantage_mode`、带 owner 的来源、阈值 18）；17 级单骰见 #15 |
+| 23 | 通过 | `test_two_declarations_take_the_lowest_threshold_and_keep_both_sources`：`len(rolls) == 2`，两来源只用于 provenance |
+| 24 | 部分 | `test_threshold_eighteen_to_twenty_treats_as_a_twenty`（18 / 19 / 20 都恢复 1 HP 且计数清零）与 `threshold=18` 的可见性通过。**"`death_save.resolved.roll` 保留天然值"未达成**：见偏差第 6 条 |
+| 25 | 通过 | `test_advantage_and_the_aura_are_separate_entries_on_one_save`：天然 17 + aura 1 = total 18，`hp == 0`、一次普通成功 |
+| 26 | 通过 | `test_advantage_keeps_natural_one_and_takes_the_highest`（[1,1]、[1,15]）+ `test_advantage_takes_the_eighteen_and_restores_a_hit_point`（[1,18]） |
+| 27 | 通过 | 同上 aura 测试的第三段：无 aura 时天然 9 → total 9 → 失败；有 aura +1 → total 10 → 普通成功且 `hp == 0` |
+| 28 | 通过 | aura 测试第一段（天然 17 不被提升为阈值分支）；`test_advantage_keeps_natural_one_and_takes_the_highest` 的 [1,1]（天然 1 仍两次失败）；`test_threshold_eighteen_to_twenty_treats_as_a_twenty`（天然 20 始终专属恢复） |
+| 29 | 通过 | 同一条 aura 测试断言 `natural` / `aura_bonus` / `aura_sources` / `death_save_crit_threshold` / `total` 分项共存，`total == natural + aura_bonus`（`modifier` 与 `bless_bonus` 保持 0） |
+| 30 | 部分 | 18–20 恢复后不自动推进由 `_death_save_outcome_events()` 的 `hp` 早退保证，`test_a_natural_eighteen_does_not_also_rally` 与既有 stable/dead 测试覆盖结果；"未自动推进"本身未单独断言 turn 是否前进 |
+| 31 | 通过（回归侧） | `test_dnd2024_paladin_auras.py` / `test_dnd2024_combat.py` / `test_dnd2024_hold_person.py` / `test_dnd2024_rage.py` 全绿；`_death_save_events()` 之外没有任何入口读 Survivor 参数（`_save_repeat_events`、普通豁免、Medicine、initiative 均未改） |
+| 32 | 部分 | aura 合成与重放分开覆盖（#22 与 #20），没有一条"aura + 死亡豁免 + apply/replay + save/load"的端到端测试 |
+| 33 | 通过 | 回归 295 passed；全量见下节 |
+
+14 条"部分"里有 5 条属于同一类：契约要求的行为由既有代码路径保证（早退、只读、无缓存），但本切片没有为它们单独设测。没有一条是"实现了但行为相反"。
+
+### 聚焦 / 回归 / 全量 / ruff / diff 输出
+
+全量的 11 条失败全部是 `test_dnd2024_character_builder.py` 的 `ability:con`（Windows 保留设备名 `CON`）环境失败，与 D1/D3/F9 同一失败集，本轮零新增。D1 的全量是 1567 passed（11 failed），本轮多出的 10 条是本切片新增的 survivor 测试。
+
+```
+python -m pytest tests/rulesets/test_dnd2024_survivor.py -q --basetemp=.ptmp-e3count
+46 passed
+
+python -m pytest tests/rulesets/test_dnd2024_paladin_auras.py tests/rulesets/test_dnd2024_class_features.py \
+  tests/rulesets/test_dnd2024_improved_critical.py tests/rulesets/test_dnd2024_dark_ones_blessing.py \
+  tests/rulesets/test_dnd2024_combat.py tests/rulesets/test_dnd2024_hold_person.py \
+  tests/rulesets/test_dnd2024_rage.py -q --basetemp=.ptmp-s0e3r3
+295 passed
+
+python -m pytest tests/rulesets -q --basetemp=.ptmp-e3full-02
+1577 passed, 11 failed
+
+ruff check（resolver / resolution / engine / runtime / survivor 测试）
+All checks passed!
+
+git diff --check
+通过（exit 0）
+```
+
+`ruff format --check` 在这 5 个文件上**基线就是红的**（stash 对照确认），与 D1/D3 一致，本轮不做全文件重排。
+
+### RNG 与 reducer 重放证据
+
+- 再生不掷骰：首回合与后续回合两条测试都用恰好足够的 `SequenceRng`（先攻用掉即止），再生若多抽一次会抛 `StopIteration`。
+- 死亡豁免的骰数只由优势决定：单骰（17 级）与双骰（18 级）各有用例；两个优势来源仍是两枚（#23）。
+- 重放：`apply_batch` 第二次接收同一批次返回 `applied is False`，HP 与条件不变。
+- reducer 零改动：`git diff` 不含 `reducer.py`；新增字段（`death_save_crit_threshold`、regen 的 provenance）都是审计键，落账仍按 `delta` / `amount` / `hp` / `successes` / `failures`。
+
+### 与契约的偏差及原因
+
+1. **Lucky 的 provenance 没有 owner**（§4.5.6 要求每项含 owner）。Lucky 是专长而非 class feature，没有 class owner；伪造 `feat:lucky` 会引入目录里不存在的新身份。保持与既有攻击掷骰 provenance 相同形状。
+2. **`advantage_sources` 的 `owner` 是新字段**（基线只有 `code` / `mode`）。若前端或其他切片依赖严格的项形状，需要同步；本切片未找到消费方。
+3. **内容文件（白名单 1–3）未改**，因为声明与标签已符合 §4.1。任务书的"增加声明"是按"尚不存在"写的，事实不成立。
+4. **测试文件是改写而非新建**（白名单第 8 项），理由同上：该文件已存在并固化了旧裁剪。
+5. **`max_feature_value_source()` 现在没有调用方**。它原本只服务再生；逐项求值后不再需要。留着是为避免删掉可能被其他分支引用的公开方法，但它"取最大 base"的语义与 §4.2.5 相反，后续应删除或改名。
+6. **`death_save.resolved.roll` 仍是 `total`，违反 §4.5.4。** 契约明确要求天然选中值，而 `test_dnd2024_check_windows.py::test_dark_ones_own_luck_adds_a_d10_to_a_failed_death_save` 断言 `(successes, failures, roll) == (1, 0, 13)`，其中 13 是 5 + 窗口 d10 的 8。这个测试在 §5 白名单之外，而任务书要求"需要任何其他文件时停止并报告"。已回退到 total，并在调用点留了注释。两种修法：把那一行断言改为 5（符合契约），或维持现状并修订契约 §4.5.4。**需要裁决。**
+
+### 未决事项
+
+1. **`death_save.resolved.roll` 的语义待裁决**（偏差第 6 条）：契约要天然值，既有测试要 total，两者不能同时成立。
+2. 上表 14 条"部分"中的 5 条结构性缺口（#14 #15 #16 #20 #30 #32）没有专门测试。若后续要给"存档加载"或"胜利回合"加保障，需要新的夹具。
+2. `_turn_start_regen_events()` 的到期过滤只处理 `actor_turn_start` / `target_turn_start` 两种 duration。若将来出现"在回合开始到期的 `cannot_regain_hp`"用别的 duration 表达，这里要同步；目前 catalog 里唯一的 `cannot_regain_hp`（chill touch）是 `caster_next_turn_end`，不受影响。
+3. `check.resolved(kind="death_save")` 的阈值键改名后，任何外部消费者若按 `crit_threshold` 读死亡豁免都需要更新。仓库内无此消费者，前端也未读。
+4. 非目标未动：Remarkable Athlete、Heroic Warrior、Additional Fighting Style、Superior Critical、其他职业 capstone、Bless×死亡豁免缺口、通用优势/劣势重构、前端。
