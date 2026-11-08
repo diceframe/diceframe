@@ -38,6 +38,16 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 )
 # 本切片只支持成长专长选择；未知 kind 必须加载期拒绝，不能静默当成无选项特性。
 FEATURE_CHOICE_KINDS = frozenset({"advancement_feat"})
+# 特性参数的射程键统一以英尺计。``range_ft`` 是"该特性对目标生效的射程"，
+# 与前缀式 ``aura_range_ft``/``defeat_share_range_ft`` 并列：后者是"一个特性有
+# 多条射程"时才需要的消歧前缀，单条射程用裸键即可。
+#
+# 一个特性同时声明 ``range_ft`` 和 ``trigger``，就是一张"掷后窗口"声明：
+# 某个事件发生了，且目标在射程内，窗口才打开。两个键互为前提，所以
+# ``trigger`` 的闭集只在声明了 ``range_ft`` 时校验——其他机制（例如
+# Dark One's Blessing 的 defeat payload）有各自的 trigger 词汇，由各自的
+# 消费方校验，不能被这张表的闭集误伤。
+CHECK_WINDOW_TRIGGERS = frozenset({"attack_roll_success"})
 
 
 class ClassFeatureError(ValueError):
@@ -514,6 +524,20 @@ class Dnd2024ClassFeatureCatalog:
             raise ClassFeatureError(
                 f"{feature_id}.crit_threshold must be an integer from 2 to 19"
             )
+        range_ft = parameters.get("range_ft")
+        if "range_ft" in parameters:
+            if (
+                isinstance(range_ft, bool) or not isinstance(range_ft, int)
+                or range_ft <= 0
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.range_ft must be a positive integer"
+                )
+            if parameters.get("trigger") not in CHECK_WINDOW_TRIGGERS:
+                raise ClassFeatureError(
+                    f"{feature_id}.trigger must be one of "
+                    f"{sorted(CHECK_WINDOW_TRIGGERS)} when range_ft is declared"
+                )
         resource_id = str(raw.get("resource_id") or "")
         if resource_id:
             resource_id = _require_id(resource_id, f"{feature_id}.resource_id")

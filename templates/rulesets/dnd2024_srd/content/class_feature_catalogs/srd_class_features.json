@@ -624,7 +624,9 @@
           "source_ref": "srd-5.2.1:p35:cutting-words",
           "summary": "When a creature you can see within 60 feet makes a damage roll or succeeds on an ability check or attack roll, use your Reaction and spend one Bardic Inspiration use to roll your Bardic Inspiration die and subtract it from the roll.",
           "parameters": {
-            "die_sides_track": "bardic_die"
+            "trigger": "attack_roll_success",
+            "die_sides_track": "bardic_die",
+            "range_ft": 60
           }
         }
       ]

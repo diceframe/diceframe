@@ -498,6 +498,11 @@ class CombatResolutionMixin:
         if crit_threshold != 20:
             # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
             check_event["crit_threshold"] = crit_threshold
+        if crit_on_hit:
+            # 这是"命中之后"才升级的重击，不是 d20 本身掷出的重击。标记出来，
+            # 掷后窗口才知道扣减总数可以把它退回普通命中甚至失手；不标记的话
+            # ``critical`` 会被当成必中，Cutting Words 就永远改不成 miss。
+            check_event["critical_upgrade"] = True
         rage_sustain = bool(
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
