@@ -328,3 +328,73 @@ canonical 角色使用以下结构；未使用过的角色可以完全省略 `us
 - 未解决问题（没有则写“无”）：
 - 最终 git status 与 changed-file 白名单核对：
 ```
+
+---
+
+## 执行报告（2026-11-08）
+
+- **前置提交**：S0-A `7a28b25a`（子职授予）、S0-D1（骰节点最大化）均已在本链上；本任务基线 `d0db4810`（`feat/dnd2024-s0e1-dark-ones-blessing` 链头，含 E2/E1），分支 `feat/dnd2024-s0d2-overchannel`。
+- **实际变更文件**：
+  - `templates/rulesets/dnd2024_srd/content/class_feature_catalogs/srd_class_features.json`
+  - `src/rulesets/dnd2024/features/resources.py`
+  - `src/rulesets/dnd2024/features/resolver.py`（白名单外，见偏差 1）
+  - `src/rulesets/dnd2024/combat/view.py`
+  - `src/rulesets/dnd2024/combat/validation.py`
+  - `src/rulesets/dnd2024/combat/resolution.py`
+  - `src/rulesets/dnd2024/combat/reducer.py`
+  - `src/rulesets/dnd2024/resting/engine.py`
+  - `frontend-v2/src/api/types.ts`、`frontend-v2/src/features/rulesets/dnd2024/combat/{Dnd2024CombatPanel.vue,combatCopy.ts,combatSupport.ts}`、`frontend-v2/tests/Dnd2024CombatPanel.test.ts`（白名单外，见偏差 2）
+  - `tests/rulesets/test_dnd2024_overchannel.py`（新建，27 条）
+  - `tests/rulesets/test_dnd2024_die_manipulation.py`（重写 Overchannel 段，见偏差 3）
+  - `tests/rulesets/test_dnd2024_resting.py`（追加 1 条）
+- **设计偏差及理由**：
+  1. **参数改名强制带动 `features/resolver.py`**。§4.1 把参数键改成 `maximum_slot_level / usage_scope / self_damage_die / initial_self_damage_dice`，而 `_validate_overchannel_parameters` 在同一处按旧键做 fail-closed 校验；不改会出现"目录声明新键、校验只认旧键"的静默失配。§4.6 白名单与 §4.1 参数契约自相矛盾，此处按参数契约执行。
+  2. **intent 字段改名强制带动前端**。用户裁定把 `maximize_damage` 改名为 `overchannel`，但发送方在 `Dnd2024CombatPanel.vue:871`、可用性字段在 `types.ts`，均不在 §4.6 白名单内。改名而不动前端会让功能整条断链，故前后端同批改名（`overchannel_available`）。
+  3. **重写 `test_dnd2024_die_manipulation.py` 的 8 条断言**。这 8 条钉的正是本任务书明令废止的"每次 2d12/环"模型（如 `overchannel_cost(result)["amount"] == 11` 断言首次施法即自伤）。§4.6 只允许新建文件与 resting 追加，但契约废止的行为不能靠留旧断言保住；按 §8 审计口径"绿不等于对"改写，并在每条注释里写清新口径。
+  4. **中文标签保留"超限导能"**。§4.1 写作"超限引导"，代码、locale、既有测试三处一致为"超限导能"，用户裁定以代码为准；本文 §4.1 的"超限引导"字样作废。
+  5. **自伤骰数按 SRD 原文递增式而非 `N × slot_level` 字面式**。实现为 `(initial_self_damage_dice + (use_index - 2)) × slot_level`；在声明值 2 下与 §2.10 的 `N × slot_level` 完全等价，但它同时使用了 `initial_self_damage_dice` 这个声明参数，避免参数成为死键。
+  6. **自伤事件保留 `overchannel_cost: True`**。§4.5.6 要求 `overchannel / ignore_resistance / ignore_immunity`，三者已加；额外保留 `overchannel_cost` 只为在批次里无歧义定位自伤事件（敌方伤害事件也带 `overchannel`）。该字段被公共 feed 白名单过滤，不外泄。
+  7. **`necrotic` 成为 `src` 字面量**。§4.1 的参数闭集删掉了 `cost_damage_type`，SRD 固定为黯蚀，故按 §4.5.6 在事件里写字面量。
+- **§6 测试矩阵（逐项）**：
+  1. 通过（三份目录同源加载，owner/等级/source_ref/四键参数/中英标签全部断言）。
+  2. 通过（13 级无、14 级 evoker 有；`owner="subclass:abjurer"` 为假）。
+  3. **部分**：错 owner 与 13 级已覆盖；"未选子职的 14 级 Wizard / 非 Wizard 伪造 `subclass:evoker`"未单独构造（构造需绕过建卡，属 §7.2 停止条件）。
+  4. 通过（省略 / `false` / 非 bool 三态）。
+  5. **部分**：非法师列表、无伤害、戏法、6 环槽均通过；"五环法术用六环槽"不可达——当前自动化内容里没有 5 环法师伤害法术（`spell_effects` 内 4 环以上法师伤害法术为空）。
+  6. 通过（真实数据替代合成元数据）：`guiding_bolt`（塑能但仅牧师）被拒证明学派不是门槛；`false_life`（法师列表、黯蚀）走到"无伤害"分支证明非塑能法师法术没有被学派误杀。合成用例未采用，理由见该测试 docstring。
+  7. 通过（15 点、`rolls == []`、计数 0→1、无自伤）。
+  8. 通过（2 环槽 `4d4+4 = 20`）。
+  9. 通过（失败 18 / 成功 9，先最大化后减半）。
+  10. 通过（三道射线 24/12/12，一次施法一条使用事件）。
+  11. 通过（命中 24 + 自伤；未命中仍计数、无自伤）。
+  12. 通过（首道自然 20 → 4d6 → 24；另两道 12；仍只记一次使用）。
+  13. 通过（真实骰迹、无 `overchannel` 键、计数不变）。
+  14. 通过（首次免费时哨兵 d12 未被消费）。
+  15. 通过（1/2/3/4 次 → 0/2/3/4 枚 d12，`before/after/use_index` 连续）。
+  16. 通过（第二次二环槽 4d12；第三次五环槽 15d12）。
+  17. 通过（目标为施法者、`necrotic`、`usage < cost < victory`）。
+  18. 通过（黯蚀抗性不减伤、`resisted` 不出现；临时 HP 先吸收 10 点，余 14 扣 HP）。
+  19. 通过（自伤 36 点打空 1 HP → `unconscious` + 死亡豁免起点；专注检定 target = max(10, 自伤//2)）。
+  20. 通过（豁免减半照常计数；未命中照常计数）。
+  21. 通过（同 batch 二次 apply 由 ledger 去重，HP/计数不变；计数守卫另见 22）。
+  22. 通过（陈旧 `before_count`、负数/bool/未知 scope、重复身份全部 fail closed，合法计数不被覆盖）。
+  23. 通过（反制成功：无 cast、无计数、无自伤；反制失败：原 intent 保留 `overchannel`，最大化 + 计数 + 自伤照常）。
+  24. 通过（短休不清零；长休清零并各发一条 `reset_feature_usage`；下一次重新免费）。
+  25. **部分**：短休/长休已覆盖；战斗结束不清零在 17 的场景里隐含成立但未单独断言；升级与中英文 bundle 切换未构造（无 canonical 写入路径，风险低）。
+  26. **部分**：治疗、临时 HP 两条已覆盖；武器伤害与 Second Wind 未单独断言。
+  27. 通过（公共 feed 不含新事件类型，黯蚀自伤仍以既有 `resource.changed` 字段展示，`overchannel` 不外泄）。
+  28. 通过（11 个既有文件 + 新文件共 261 passed；E1/E2 三文件 118 passed）。全量 `tests/rulesets` 未复跑。
+- **聚焦测试**：`pytest tests/rulesets/test_dnd2024_overchannel.py tests/rulesets/test_dnd2024_resting.py tests/rulesets/test_dnd2024_die_manipulation.py` → 50 passed。
+- **回归测试**：`pytest test_dnd2024_{improved_critical,die_manipulation,class_features,progression,combat,spells,scorching_ray,counterspell,false_life,overchannel,resting}.py` → 261 passed / 0 failed；`test_dnd2024_{paladin_auras,dark_ones_blessing,aura_devotion}.py` → 118 passed。
+- **ruff**：`ruff check` 全部通过。`ruff format --check` 在本仓库基线即为"would reformat"（未改动的 `combat/engine.py`、`runtime.py` 同样如此），故不作为门禁；本任务未引入新的格式偏移。
+- **既有失败与基线对比**：无新增失败。
+- **三种伤害模式、重击/豁免/抗性与固定分量核对**：`automatic_damage`（`3d4+3` → 15，固定 +3 保留）、`saving_throw`（`3d6` → 18；成功减半 → 9）、`spell_attack`（`3d8` → 24；自然 20 先翻倍为 6d6/6d8 再最大化 → 24/48）。顺序恒为 重击翻倍 → 最大化 → 求值 → 减半 → 抗性。
+- **首次免费、递增自伤、实际槽位与 RNG 顺序核对**：第 1 次 0 骰；第 N 次（N≥2）`(2 + N - 2) × slot_level` 枚 d12；实测 2 环槽第 2 次 4 枚、5 环槽第 3 次 15 枚；首次免费时哨兵骰未被消费；自伤 RNG 严格排在法术骰之后、胜利判定之前。
+- **Counterspell、事件 apply/reducer 重放与长短休核对**：见 23/21/24；reducer 以 `before_count` 对齐，`after = before + 1` 强制成立。
+- **排除面、存档与公共 API/feed 兼容**：`features.usage` 为新增可选字段，缺失即零，无迁移、无 `content_version` 变更；`combat.feature_usage`（每回合一次账本）与本字段同名异义，未合并。前端 intent/可用性字段改名是 breaking change，需与前端同批发布。
+- **未解决问题**：
+  1. §6.1.5 "五环法术用六环槽"因缺少自动化 5 环法师伤害法术不可达，待内容补齐后回填。
+  2. §6.3.25 的升级/语言切换面未单独断言。
+  3. §6.4.26 的武器伤害与 Second Wind 面未单独断言。
+  4. 前端未执行（本工作树无 `node_modules`）：`Dnd2024CombatPanel.test.ts` 的字段改名已同步但未跑 vitest；`typecheck` 同。
+- **最终 git status 与白名单核对**：见下一节的 changed-file 清单；白名单外的 3 处（resolver、frontend、旧测试文件）均已在"设计偏差"里逐条说明，无其它任务残留。
