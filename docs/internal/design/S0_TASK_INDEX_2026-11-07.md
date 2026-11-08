@@ -88,7 +88,7 @@ S0-A 子职授予主干
 | S0-D2 | 递增使用计数 | Evoker 14 级 Overchannel | `S0D2_OVERCHANNEL_TASK_SPEC_2026-11-07.md` | 28 | 契约审计完成：**规则冲突**——每次施法都自伤，无"长休后首次免费"；`features.usage` 整套缺失。见 §8 |
 | S0-D3 | D20 掷后反应窗口 | College of Lore 3 级 Cutting Words 攻击检定面 | `S0D3_CUTTING_WORDS_CHECK_WINDOW_TASK_SPEC_2026-11-07.md` | 30 | 契约审计完成：行为 30/30 通过；3 处契约形状偏离（owner / range_ft / trigger）；范围已扩张到 Lucky 与伤害面。见 §8 |
 | S0-E1 | 敌人归零触发＋临时 HP | Fiend Patron 3 级 Dark One's Blessing | `S0E1_DEFEAT_TRIGGER_DARK_ONES_BLESSING_TASK_SPEC_2026-11-07.md` | 30 | 契约审计完成：**含一条 SRD 没有的规则**（队友击杀 10 尺共享），且被测试固化。见 §8 |
-| S0-E2 | 光环、豁免加值与条件免疫 | Paladin 6/18 级 Aura of Protection / Expansion；Devotion 7 级 Aura of Devotion | `S0E2_PALADIN_AURAS_TASK_SPEC_2026-11-07.md` | 33 | 契约审计完成：**Aura of Protection / Expansion 无任何定义**，四个豁免消费面全空（约 19/33 缺失）。见 §8 |
+| S0-E2 | 光环、豁免加值与条件免疫 | Paladin 6/18 级 Aura of Protection / Expansion；Devotion 7 级 Aura of Devotion | `S0E2_PALADIN_AURAS_TASK_SPEC_2026-11-07.md` | 33 | 已实现，待评审（`feat/dnd2024-s0e2-paladin-auras@9098bb00`）。原契约审计缺口 19/33 已补齐；执行报告的 3 项白名单外改动、测试 17/18/21/29 的取舍见该文件 §10 |
 | S0-E3 | 首回合/回合再生与死亡豁免 | Champion 18 级 Survivor | `S0E3_SURVIVOR_TASK_SPEC_2026-11-07.md` | 33 | 契约审计完成：**首回合不触发被测试固化为断言**（契约 §1.5 明确推翻该裁剪）。见 §8 |
 | S0-F1 | D20 技能、专精与下限 | Expertise、Jack of All Trades、Reliable Talent、Remarkable Athlete、Scholar | `S0F1_D20_SKILLS_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
 | S0-F2 | 激励骰实例与掷后修正 | Bardic Inspiration、Font/Superior Inspiration、Peerless Skill、Cutting Words | `S0F2_BARDIC_INSPIRATION_TASK_SPEC_2026-11-07.md` | 25 | 待执行 |

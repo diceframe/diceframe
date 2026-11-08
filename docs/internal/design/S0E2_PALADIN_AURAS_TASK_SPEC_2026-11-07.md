@@ -316,3 +316,98 @@ git diff --check
 - 聚焦 / 回归 / 全量 / ruff / diff 输出：
 - 与契约的偏差及原因：
 - 未决事项（不得把非目标列为已实现）：
+
+## 执行报告（2026-11-08）
+
+- 实际基线 / 分支 / 提交：基线 `73d11263`（S0 链在 `main@10a6ab23` 上对齐后的链头）/ 分支 `feat/dnd2024-s0e2-paladin-auras` / 提交 `9098bb00`。上游未推送（阶段 2 约定：S0 系列只留本地）。
+
+- 特性授予与 owner-scoped 身份复核：
+  - `aura_of_protection` — `class:paladin`，`minimum_level` 6，`{aura_range_ft: 10, aura_save_bonus_ability: "cha", aura_save_bonus_minimum: 1}`
+  - `aura_expansion` — `class:paladin`，18，`{aura_expands_feature_id: "aura_of_protection", aura_range_override_ft: 30}`
+  - `aura_of_devotion` — `subclass:oath_of_devotion`，7，`{aura_source_feature_id: "aura_of_protection", aura_condition_immunities: ["charmed"]}`
+  - 三条在 `features_by_key[(owner, id)]` 下各自唯一，短 id 无法跨 owner 冒领；locale 两个文件的三个标签（en `Aura of Protection`/`Aura Expansion`/`Aura of Devotion`，zh-CN `守护灵光`/`灵光扩展`/`奉献灵光`）本来齐备，本次未改 locale。
+  - 校验在加载边界一次做完：范围与覆盖必须是正整数（拒绝 `bool`），ability 与 minimum 成对且 ability 属于 `ABILITY_IDS`，免疫表必须非空/去重/只含 `charmed`，`aura_source_feature_id` 与 `aura_expands_feature_id` 必须指向另一条真正声明了 `aura_range_ft` 的条目且不得自引用。15 种畸形声明全部 fail closed。
+
+- 光环求值器位置、遍历顺序与 tie-break：
+  - `combat/engine.py::_projected_auras` → `_saving_throw_aura_bonus` → `_aura_condition_immunity_source`，三者都不掷骰、不创建事件、不写 canonical 状态，也不出现 `paladin` / 特性 id 的字面分支。
+  - `_projected_auras` 只扫 `side == "party"` 的持有者；`condition_flags(...)["incapacitated"]` 为真的持有者连同其依附扩展整条剔除；`range_ft` 折入该持有者自己的 `aura_range_override_ft`（没有覆盖时用基础值），因此 18 级不会把 30 尺借给 6 级队友。
+  - 多光环：只取最高加值，绝不相加；同值按 `(initiative.index, actor_id)` 稳定选源；`sources` 只含被选中的一个来源，含 `feature_id`/`owner`/`source_actor_id`/`range`/`ability`/`ability_modifier`。
+  - 受益者必须 `side == "party"`：除了"敌人不产生职业光环"之外还有第二道阵营过滤，敌人站在 10 尺几何范围内同样拿不到加值与免疫。
+
+- saving throw 接入点逐项说明：
+  1. 法术豁免（`resolution.py::_spell_events` 的 `saving_throw` 分支）：`total = d20 + modifier + check_bonus + aura_bonus`；`modifier` 保持角色原豁免值，Bless 的 d4 仍单独记在 `check_bonus`；自动失败分支保持 `rolls=[]`、`total=0`、`aura_bonus=0`、`aura_sources=[]`。
+  2. 回合末重复豁免（`_save_repeat_events`）：按本次结算时的位置与失能状态求值，DC 与豁免属性用施放时冻结的快照；成功仍只移除本条条件，不结束施法者专注。
+  3. 死亡豁免（`_death_save_events`）：新增 `modifier: 0`、`bless_bonus: 0`、`aura_bonus`、`aura_sources`、`total`；天然 1 与天然 20 的专属分支仍优先于普通成功比较（天然 9 + 光环 +1 = 10 可普通成功）。
+  4. 受伤专注豁免（`_concentration_events(instance, combat, target, damage, rng)`）全部 10 个调用点：
+     - `check_windows.py:278`（DOOL 伤害窗口收尾）
+     - `reaction_spells.py:300`、`:353`（Shield / Uncanny Dodge 减伤后的最终伤害）、`:380`（反击）
+     - `triggered_spells.py:163`（触发法术命中收尾）
+     - `resolution.py:589`（Graze 未命中定值伤害）、`:848`、`:953`、`:981`（法术伤害的三个分支）、`:1183`（Overchannel 自伤）
+  5. ability check 一律不接入：Counterspell 的施法属性检定、先攻、攻击检定、技能检定都不调用该辅助。
+  - RNG 顺序：光环是固定加值，任何路径都不额外取骰；自动失败路径仍是零随机数；法术豁免里 Bless 仍只多一枚 d4。
+
+- Charmed 拦截及已有条件保留方式：在统一构造 `condition.applied` 之前查询 `_aura_condition_immunity_source`；命中则不追加该事件，并在同一 `check.resolved` 上写 `blocked_condition: "charmed"` 与 `blocked_by_aura: {feature_id, owner, source_actor_id}`。已有 Charmed 一律不删：不发 `condition.removed`、不写任何 suppression 元数据，进出光环只改变免疫查询结果（条件外侧有效、内侧无效、移出后重新有效）。
+
+- 改动文件对照白名单：
+  - 白名单内且已改（8 个）：`templates/.../content/class_feature_catalogs/srd_class_features.json`、`src/rulesets/dnd2024/features/resolver.py`、`combat/engine.py`、`combat/resolution.py`、`combat/reaction_spells.py`、`combat/triggered_spells.py`、`runtime.py`、新建 `tests/rulesets/test_dnd2024_paladin_auras.py`。
+  - 白名单内但未改：两个 locale `class_feature_catalogs` 文件——三个标签已存在，无需改动。
+  - **白名单外 3 项，需集成裁决**：
+    1. `src/rulesets/dnd2024/combat/check_windows.py`（1 行）——§4.4.4 明确要求"更新全部调用点"，而该调用点所在文件未列入 §5；不改则 DOOL 伤害窗口在运行时直接 `TypeError`。
+    2. `tests/rulesets/test_dnd2024_aura_devotion.py`（8 条改写）——SP6 时代断言固化的是 §4.5 已废止的契约（`_aura_immune_conditions` + 自有 `aura_range` + 字符串 `blocked_by_aura`），不改写本切片会留下 8 条红；改写方式见下节偏差第 5 条。
+    3. `tests/rulesets/test_dnd2024_scorching_ray.py`（1 行）——该测试以旧签名直接调用私有 `_concentration_events(view, 10, rng)`，补齐 `instance`/`combat` 两个实参，断言未变。
+  - 未越界的部分：reducer、view、check_modes、validation、features/models、前端、progression/subclass/combat/spell/resource/rest catalog 一律未动；`content_version` 未迁移。
+
+- 测试 1–33 逐项结果（新文件 `test_dnd2024_paladin_auras.py`，52 条用例）：
+  1. `test_aura_of_protection_arrives_at_level_six` —— 5 级无、6 级有、17 级 10 尺、18 级 30 尺。
+  2. `test_aura_of_devotion_arrives_at_subclass_level_seven` —— 6 级无、7 级有。
+  3. `test_the_three_declarations_keep_their_owner_and_level` —— 三条 owner/等级/参数逐字段核对。
+  4. `test_labels_are_localized_but_identity_is_not` —— 两语言标签齐备，id 不本地化。
+  5–6. `test_malformed_aura_declarations_fail_closed`（15 组参数）—— 范围 0/`True`/缺失、ability 非法、minimum 缺失/0、免疫空/重复/非字符串/未支持、source 缺失/指向非基础光环、扩展环缺失/自引用，全部 `ClassFeatureError`。
+  7. `test_the_bonus_is_the_charisma_modifier_and_stays_separate` —— `modifier` 不含光环、`aura_bonus` 独立、`total` 正确。
+  8. `test_an_ally_is_covered_at_ten_feet_and_dropped_at_eleven` —— 10/11 与 18 级的 30/31 边界。
+  9. `test_negative_and_zero_charisma_fall_back_to_plus_one`（3 组）—— `max(1, mod)`。
+  10. `test_enemies_and_absent_auras_grant_nothing` —— 敌人放进 10 尺几何范围内仍为 0；无 Paladin、5 级、光环外同为 0。
+  11. `test_an_incapacitated_holder_projects_no_aura_at_all`（4 组）+ `test_a_second_paladin_keeps_its_aura_when_the_first_is_down`。
+  12. `test_two_auras_never_stack_and_the_higher_one_wins` —— 取最高、不相加，移出较高者后回落到另一者。
+  13. `test_equal_bonuses_pick_a_stable_source` —— 同值按先攻再按 id，重复求值一致。
+  14. `test_expansion_widens_only_its_own_holder` —— 只扩大拥有者，不产生第二份加值。
+  15. `test_bless_and_the_aura_are_reported_separately` —— 一枚 d4 与固定加值分项记录。
+  16. `test_a_repeat_save_reads_the_aura_where_the_target_stands` —— 结算时位置决定光环，DC/ability 用快照，成功仍移除条件。
+  17–18. `test_a_concentration_save_counts_the_aura_exactly_once` —— 真实武器链路与"合并后伤害"两路各一次且仅一次，22 点合并伤害 DC 11。
+  19. `test_a_death_save_can_pass_on_the_aura_alone` + `test_a_natural_one_still_fails_twice_and_a_natural_twenty_still_heals`。
+  20. `test_an_auto_failed_save_rolls_nothing_and_gains_nothing` —— `rolls=[]`、`auto_failed`、零加值。
+  21. `test_ability_checks_never_carry_the_aura` —— 攻击检定无光环字段；6 级与 5 级在同一骰序下先攻顺序完全一致；敌方永不受益。
+  22. `test_a_bare_sheet_keeps_its_numbers_when_no_aura_covers_it` —— 字段仍在、数值全零。
+  23. `test_a_charmed_ally_inside_the_aura_never_gets_the_condition` —— 豁免仍失败，条件不落。
+  24. `test_outside_the_aura_the_condition_lands_normally` —— 11 尺正常落账；18 级 30 内拦截、31 外落账。
+  25. `test_the_devotion_paladin_is_immune_too` + `test_a_level_six_devotion_paladin_does_not_yet_immunize`。
+  26. `test_an_incapacitated_holder_also_loses_the_immunity`。
+  27. `test_only_charmed_is_intercepted` —— Hold Person 仍照常麻痹。
+  28. `test_an_existing_charmed_is_kept_not_removed_when_entering_the_aura` —— 无 removed、无 suppression，进出光环只改变查询结果。
+  29. `test_an_interception_ends_no_concentration_and_clears_no_other_charmed` —— 无 `concentration.ended`、无 `condition.removed`、无假 suppression；他人的 Charmed 不受影响。
+  30. `test_two_devotion_auras_yield_one_interception_with_one_source` —— 一次拦截一条来源。
+  31. `test_replaying_an_aura_batch_changes_nothing` —— 法术/专注/死亡三条批次的 HP、conditions、concentration、death saves 在重放后逐字段不变，第二次落账 `duplicate`。
+  32. `test_the_feed_shows_the_aura_and_leaks_nothing_else` —— feed 带 `aura_bonus`/`aura_sources`/`blocked_condition`/`blocked_by_aura`，不含 sheet 类字段；位置改回 11 尺后同一份持久化状态立刻给出 0。
+  33. 既有回归见下节九文件清单，252 passed。
+
+- 聚焦 / 回归 / 全量 / ruff / diff 输出：
+  - 聚焦：`test_dnd2024_paladin_auras.py` + `test_dnd2024_aura_devotion.py` → **66 passed**（52 + 14）。
+  - 回归（契约 §8 九文件：class_features、dark_ones_blessing、improved_critical、combat、hold_person、rage、uncanny_dodge、smite、counterspell）→ **252 passed**。
+  - 全量 `tests/rulesets` → **1418 passed / 11 failed**（收集 1429 条）。失败仍**全部**落在 `test_dnd2024_character_builder.py`（见下条），`F` 的位置集中在收集序 119–157，与本切片无关。对齐前的同机基线为 1366 passed / 11 failed，本切片净增 52 条新用例且失败集合逐条不变。
+  - 已知失败的 HEAD 对照：11 条全在 `test_dnd2024_character_builder.py`，根因 `unresolved reference 'ability:con'`（Windows 保留设备名使 `con.json` 无法落盘），在 S0 链基线 `73d11263` 上同样失败、失败集合完全相同，属契约 §8 豁免范围。
+  - ruff（改动的 9 个源文件 + 两个测试文件）→ `All checks passed!`；`git diff --check` → clean。ruff 在本轮抓到我批量改调用点时漏给 `_miss_mastery_events` 补 `instance` 形参（F821），已修复并以 `test_dnd2024_weapon_mastery.py`（18 passed）复验 Graze 分支。
+
+- 与契约的偏差及原因：
+  1. **测试 29 改了判据**：SRD 5.2.1 的 Charm Person 没有 `concentration`（`condition_duration: 1_hour`），"拦截不提前结束施法者专注"无法以正向断言表达，否则等于伪造。契约条目 29 的三项可观察性质改写为"无 `concentration.ended`、无他人 `condition.removed`、无反造 suppression 事件"。同时引擎未实现敌方施法，跨阵营的 charmed 拦截没有真实入口，只能走 resolver 直调（旧文件 `direct_cast` 的既有做法）。
+  2. **测试 17/18 的变体取舍**：Shield、Uncanny Dodge、Divine Smite 都是"先把伤害改完再进 `_concentration_events`"的来源变体，本切片不构造 Rogue、也不建护盾防御者角色，因此改为"真实武器命中链路 + 直接以合并后伤害调用同一收口"的双路断言，覆盖真正被改动的性质——一次且仅一次、DC 看合并值。
+  3. **测试 21 的范围**：Medicine 与 Counterspell 未逐个搭建；以攻击检定无光环字段、6 级与 5 级同骰序先攻顺序一致、敌方永不受益三条共同证明光环不外溢到 ability check。
+  4. **测试 10 顺带加强**：原写法在位置未设置时也能通过，现把敌人放到光环几何范围内再断言 0，排除假通过。
+  5. **旧 SP6 测试的改写映射**：`blocked_by_aura` 由字符串改为三字段对象（3 条）；`_aura_immune_conditions` 改为 `_aura_condition_immunity_source` 并按"哪个持有者供源"重述并集性质，另补一条"两边都不在范围内则为 None"（1 条）；4 组畸形声明由"运行时静默不免疫"改为"加载边界直接拒绝"（`_validate_aura_parameters` 直接调用，键名换成 `aura_range_ft`/`aura_condition_immunities`，旧键已不存在）。每条改写都在 docstring 写明"旧断言固化的是 §4.5 废止的自有半径行为"。
+  6. **`_miss_mastery_events` 增参**：§4.4.4 只提到给 `_concentration_events` 增参，实际还需给它的 Graze 调用方补 `instance` 形参（同一白名单文件内）。
+
+- 未决事项（不得把非目标列为已实现）：
+  - Aura of Courage、Holy Nimbus、Smite of Protection、Sacred Weapon、Abjure Foes 及 Paladin 其余特性未做。
+  - 敌方施法（跨阵营 Charmed 拦截的真实入口）仍不存在，测试 29 只能以 resolver 直调覆盖；这也是 SP6 以来一贯的边界。
+  - 多光环"由玩家自选"未实现：当前固定取最高值 + 稳定 tie-break，RAW 允许选择更有利者。
+  - Charmed 仍无机械 flags，"在光环内条件无效"只在结算入口拦截新条件，没有统一的有效条件投影；若将来给 Charmed 增加机械消费者，需先建该投影（契约 §4.5.6 的停止条件）。
+  - 战斗 UI 的"当前受益光环列表"未做（非目标），仅 feed 审计字段可见。
