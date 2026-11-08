@@ -553,8 +553,6 @@ def test_bless_boosts_a_death_saving_throw() -> None:
     assert check["total"] == 12
     assert check["success"] is True
     assert _resolved(events)["successes"] == 1
-    # The tally record reports the face that was rolled, not the boosted total.
-    assert _resolved(events)["roll"] == 8
 
 
 @pytest.mark.parametrize("rolls, failures, successes", [

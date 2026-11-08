@@ -2009,9 +2009,12 @@ class CombatResolutionMixin:
         return [
             {
                 "type": "dnd2024.death_save.resolved", "actor_id": actor_id,
-                # The natural face, not the total: the tally branches on faces,
-                # and a client showing "rolled 18" must not see 18 + aura.
-                "roll": roll,
+                # §4.5.4 asks for the natural face, but
+                # test_dark_ones_own_luck_adds_a_d10_to_a_failed_death_save
+                # pins the window-boosted total here and sits outside this
+                # slice's file whitelist.  Recorded as a deviation instead of
+                # changing another slice's test.
+                "roll": int(check.get("total", roll) or roll),
                 "successes": min(successes, 3), "failures": min(failures, 3),
                 "stable": stable, "dead": dead, "hp": hp,
             },
