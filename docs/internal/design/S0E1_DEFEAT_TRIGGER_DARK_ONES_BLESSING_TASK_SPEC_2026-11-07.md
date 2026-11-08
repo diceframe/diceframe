@@ -309,3 +309,112 @@ git status --short
 - 非目标确认：§7 七项均未越界
 - 遗留问题：<没有则写“无”；其余 Fiend 特性仍属后续范围>
 ```
+
+## 执行报告（2026-11-08）
+
+- 实际基线 / 分支 / 提交：S0-A 链头 `73d11263`；实际施工点 `feat/dnd2024-s0e2-paladin-auras@4db71cbd`（E2 尚未合入，本切片 stack 在其上，两者共用同一 S0-A 基线）；分支 `feat/dnd2024-s0e1-dark-ones-blessing`，提交 `e291791c`（切片本体）+ `8f3182fd`（RNG 断言从"两次相同"收紧为"各两枚"）+ `d0db4810`（trigger 常量由加载器与结算共享）。上游未推送（S0 系列只留本地）。
+
+- 改动文件对照白名单（§5 九项）：
+  1. `content/class_feature_catalogs/srd_class_features.json` — 改 1 条声明（载荷四键、`source_ref` 改 p76、摘要改回官方措辞）。
+  2. `locales/en/...`、3. `locales/zh-CN/...` — **未改**：两个标签（`Dark One's Blessing` / `黑暗赐福`）本来就在，且本切片没有新增 id。
+  4. `features/resolver.py` — 只替换 `_validate_defeat_trigger_parameters` 与其三个模块级常量（四键名、trigger 名、退役键），未动授予逻辑。
+  5. `combat/resolution.py` — 触发辅助重写 + 三个法术伤害分支改去重口径。
+  6. `combat/reaction_spells.py`、7. `combat/triggered_spells.py` — 仅调用点改名（辅助签名少了 `prior_damage`）。
+  8. `tests/rulesets/test_dnd2024_dark_ones_blessing.py` — 重写，48 条。
+  9. 本任务书 — 只追加本节。
+  - 白名单外：无。`reducer.py` / `engine.py` / `view.py` / `features/models.py` / runtime / 前端 / 其余目录均未触碰。
+
+- 官方依据：SRD 5.2.1 p76（Fiend Patron，Level 3 Dark One's Blessing）。`source_ref` 实际写入 `srd-5.2.1:p76:dark-ones-blessing`（原为 `p58`，属错的页号）。
+
+- 特性身份与所有权：
+  - 声明仍在 `warlock` 内容段下，但 `owner = subclass:fiend_patron`、`minimum_level = 3`；`features_by_key[(subclass:fiend_patron, dark_ones_blessing)]` 唯一，短 id 无法跨 owner 冒领。
+  - 三条边界实测：3 级术士拥有、2 级没有；把 `features.subclass_ref` 清空或改成 `subclass:great_old_one` 后失去该特性且击杀不触发；盗贼伪造 `subclass:fiend_patron` 仍不拥有（`_selected_subclass_ref` 只认本职业自己的子职 ref，盗贼的 ref 与术士子职表不等）。
+  - locale 未改，标签随声明 id 命中。
+
+- 参数校验（fail-closed，全部在目录加载期）：
+  - 合法集合就是四键：`trigger` = `enemy_reduced_to_zero_hp`、`temp_hp_ability` ∈ 六属性、`temp_hp_class_ref` = 存在的 `class:<id>`（查 progression 表）、`temp_hp_minimum` 为非 bool 的 `int >= 1`。
+  - 缺任一键 → 拒绝（"凑不到公式"的特性会静默算错，故不接受部分声明）。
+  - 未知 trigger、非法 ability、无 `class:` 前缀、指向不存在的职业表、`minimum` 为 `0` / `True` / `1.0` → 全部拒绝，共 13 组参数化证据。
+  - **已退役键**（`defeat_temp_hp_ability` / `defeat_temp_hp_add_class_level` / `defeat_share_range_ft`）被显式拒绝，而不是当未知字段忽略——忽略等于让"10 尺共享"以死字段形式回到目录里。
+  - `trigger` 只在取值属于本载荷、或已声明 `temp_hp_*` 时被认领；别的特性声明自己的 `trigger` 名不受影响（有专门用例锁定，避免与后续切片的 trigger 语义互相绑死）。
+
+- 共享触发辅助：
+  - `combat/resolution.py::_enemy_zero_hp_feature_events(instance, combat, source_actor_id, target, damage_taken)`。
+  - 五个前置守卫：目标必须 `kind == "enemy"`；本次结算伤害 `> 0`；目标结算前 `hp > 0`；`hp - damage_taken <= 0`；来源必须是 `player` / `companion`。
+  - **只解析来源自己的特性**：不再遍历 `combat["initiative"]`，因此没有"旁观者在 10 尺内也拿"这条路径，也没有任何距离/可见性判定。
+  - 公式 `amount = max(temp_hp_minimum, ability_modifier(当前 abilities[ability]) + class_level)`；等级来自 `class_state()`，且必须与 `temp_hp_class_ref` 的职业一致，否则抛 `CombatIntentError`（不静默改用总角色等级）。
+  - 不掷骰、不改 canonical、不直接写 HP/temp HP；只构造事件，由既有 reducer 落账。辅助内没有 `dark_ones_blessing` / `fiend_patron` / `warlock` 字面分支。
+
+- 七个最终伤害接入点（全部保留，伤害口径与去重方式）：
+  1. 普通攻击直接提交 `resolution.py::_resolve_committed_hit` — 最终 `damage`（已含抗性/重击/骑乘）。
+  2. 法术攻击 `_spell_events` 的 `spell_attack` — 该目标的 `dealt[target_id]` 累计值。
+  3. 豁免伤害 `saving_throw` — 豁免减半与抗性之后的同一累计值。
+  4. 自动伤害 `automatic_damage` — 同一累计值。
+  5. Uncanny Dodge 最终提交 `reaction_spells.py::_finish_hit_reaction` — `decision["attacker_id"]` 与减半后的 `amount`。
+  6. Shield 未改判/放弃后的最终提交（同函数末尾）— `decision["attacker_id"]` 与最终 `damage_event["amount"]`。
+  7. Divine Smite 收尾 `triggered_spells.py::_finish_hit_spell` — `decision["actor_id"]` 与基础伤害 + rider 的 `total`。
+  - pending 创建点一律不调用辅助；`dnd2024.decision.pending` 事件之后才可能出现在同一批次的伤害事件里。
+
+- 多目标 / 多射线：
+  - 去重边界改为批次自己的 `defeated_targets`：只有当 `hp - dealt <= 0` 且该 id 尚未在集合里时才把 id 加入并调用辅助。集合本来就服务于胜利判定，语义不变。
+  - 同一目标多束：第 1 束未归零不触发，跨过 0 HP 的那一束触发一次，后续束照旧产生伤害事件但不二次授予（2 束 / 3 束参数化）。
+  - 两个目标同一批次各自归零：两条审计事件，temp HP 仍由 reducer keep-max，不累加。
+
+- 事件与临时 HP：
+  - `resource.changed(resource="temp_hp")`，字段：`target_id`、`source_actor_id`、`defeated_actor_id`、`delta`、`amount`、`rolls: []`、`feature_id`、`owner`、`ability`、`ability_modifier`、`class_ref`、`class_level`。
+  - 顺序：最终 HP 伤害 → 既有专注事件 → 本特性 temp HP → 既有 victory。
+  - reducer 侧未改：`max(旧值, amount)` 即 keep-max（低值/等值保留，高值替换）；伤害先扣 temp HP 再扣 HP；temp HP 不写 `unconscious` / `stable` / `death_saves`，也不恢复意识。
+
+- RNG：`CountingRng` 对同一场景（1 HP 哥布林 + 匕首）分别在"有该特性"（3 级 Fiend 术士）与"无该特性"（盗贼）下计数，两次抽取数相同；各 decline / 未触发路径均不额外取骰。
+
+- §6 测试矩阵 1–30 逐项（文件 `tests/rulesets/test_dnd2024_dark_ones_blessing.py`，48 条）：
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 | 通过 | `test_feature_is_owned_from_level_three`（3 级有、2 级无） |
+| 2 | 通过 | `test_without_the_subclass_choice_the_kill_grants_nothing`（清空 / 改子职各跑一次真实击杀） |
+| 3 | 通过 | `test_another_class_cannot_forge_the_subclass_ref`（盗贼伪造 owner，既有 Resolver 断言也有真实击杀） |
+| 4 | 通过 | `test_labels_and_source_ref_match_the_srd`（en / zh-CN 标签 + p76 `source_ref`；trigger / owner / class_ref 保持不本地化） |
+| 5 | 通过 | `test_the_trigger_payload_is_one_closed_four_key_set`（13 组：缺键 4、未知 trigger、非法 ability、无前缀、不存在的职业表、minimum 0/True/1.0、两种退役键） |
+| 6 | 通过 | `test_the_declared_payload_is_exactly_the_four_keys` + `test_a_foreign_trigger_key_is_not_claimed_by_this_payload`；既有 catalog 校验由全套测试回归 |
+| 7 | 通过 | `test_holder_kill_grants_temp_hp_with_complete_audit_fields`（12 个审计字段逐个断言，amount = 魅调 +2 + 3 级 = 5） |
+| 8 | 通过 | `test_a_non_lethal_hit_grants_nothing` / `test_a_miss_grants_nothing` / `test_a_condition_only_spell_grants_nothing`（Color Spray 只施加 Blinded，0 HP 伤害） |
+| 9 | 通过 | `test_negative_charisma_still_grants_one`（CHA 6 → -2 + 3 → 保底 1） |
+| 10 | 通过 | `test_the_amount_follows_the_current_level_and_charisma`（真实升级到 4 级，`class_level=4`，amount 用结算时属性计算） |
+| 11 | 通过 | `test_a_teammates_kill_grants_nothing_at_any_distance`（队友击杀，5 尺与 60 尺各一次，均无事件） |
+| 12 | 通过 | `test_a_ranged_kill_needs_no_distance`（60 尺灼热射线击杀照常授予） |
+| 13 | 通过 | `test_defeated_enemy_cannot_be_farmed`（攻击已归零目标被 validation 拒绝，无第二次授予） |
+| 14 | 通过 | `test_a_player_brought_to_zero_grants_nothing`（敌方把队友打到 0，无事件）+ `test_ordinary_combat_emits_no_temp_hp`（无特性来源击杀） |
+| 15 | 通过 | `test_two_spell_beams_each_kill_once_and_keep_max`（scorching ray，施法者为来源） |
+| 16 | 通过 | `test_saving_throw_kill_grants_temp_hp`（豁免成功减半后仍归零）+ `test_a_halved_save_that_stops_short_of_zero_grants_nothing`（原始骰面足够、结算后不足） |
+| 17 | 通过 | `test_automatic_damage_kill_grants_temp_hp` + `test_automatic_damage_that_does_not_zero_grants_nothing`（magic missile，40 HP 目标） |
+| 18 | 通过 | `test_repeated_beams_on_one_defeated_target_grant_once`（2/3 束）+ `test_a_later_beam_that_first_crosses_the_threshold_grants_once` |
+| 19 | 通过 | 同 15（两目标两事件，temp HP 仍为 5 而非 10） |
+| 20 | 通过 | `test_an_opportunity_attack_kill_grants_once`（敌方移动触发借机攻击，窗口打开时无事件，结算后恰好 1 条） |
+| 21 | **未实现（不可达）** | 见「遗留问题」第 1 条：Shield / Uncanny Dodge 的最终提交点要求"防御者是敌人"才能触发本特性。接线在 `reaction_spells.py:301/354/382`；"pending 创建时不得提前触发"由 20 的窗口断言与 7 的前置守卫覆盖。 |
+| 22 | **未实现（不可达）** | 同理：Divine Smite 需要 Paladin，单职业 Fiend 术士不可能同时是 Paladin。接线在 `triggered_spells.py:164`，取的是基础伤害 + rider 的 `total`。 |
+| 23 | **未实现（不可达）** | 同 22（decline 与 cast 共用 `_finish_hit_spell` 同一收尾，不存在重复触发点）。 |
+| 24 | 通过 | `test_existing_temp_hp_is_kept_when_the_grant_is_lower_or_equal`（既有 8 与 5 两种，事件仍记本次 amount） |
+| 25 | 通过 | `test_a_higher_grant_replaces_the_old_temp_hp` |
+| 26 | 通过 | `test_temp_hp_absorbs_damage_before_hp` |
+| 27 | 通过 | `test_a_dying_source_only_gains_temp_hp`（0 HP 无法行动，故直调辅助后走 `apply_batch`；hp 仍为 0、`unconscious` 与 `death_saves` 不变） |
+| 28 | 通过 | `test_temp_hp_event_precedes_victory`（伤害 < temp HP < victory，victory 只 1 条，结束后不回滚） |
+| 29 | 通过 | `test_a_replayed_batch_grants_nothing_twice`（同批次二次应用 `duplicate=True` / `applied=False`，temp HP、HP、敌人 HP 全不变） |
+| 30 | 通过 | `test_the_trigger_consumes_no_dice`（有/无特性抽取数相同）+ 契约 §8 回归清单全绿 |
+
+- 聚焦测试：`python -m pytest tests/rulesets/test_dnd2024_dark_ones_blessing.py -q` → **48 passed**。
+
+- 契约 §8 命令行（11 个文件一起）：**290 passed**（183.76s，`EXIT=0`）。
+
+- rulesets 全量：`python -m pytest tests/rulesets -q` → **1451 passed / 11 failed（收集 1462 条，无 skip）**。11 条失败逐条映射后**全部**落在 `test_dnd2024_character_builder.py`（`test_derives_first_level_fighter_deterministically`、`test_finalize_adds_legacy_projection…`、`test_normalize_submission_rederives…`、5 条 `test_rejects_illegal_character_choices`、`test_builder_choices_are_constrained…`、`test_stateless_builder_service…`、`test_builder_http_contract…`），与 E2 基线是同一组，根因仍是 `unresolved reference 'ability:con'`（Windows 保留设备名使 `con.json` 无法落盘）。本切片把用例总数从 1433 提到 1462（E1 文件 19 → 48）。注：该次运行的 `pytest` 汇总行在退出时被 `[safe-delete]` 钩子吞掉，`passed/failed` 数目由 1462 条收集清单与进度行逐字计数（1451 `.` + 11 `F`）得出，退出码为 1（= 有失败），与失败清单自洽。
+
+- ruff / format / diff：`ruff check`（5 个改动文件）**All checks passed**；`git diff --check` **clean**；`ruff format --check` 在**未改动**的文件（`combat/engine.py`、`combat/view.py`、`combat/reducer.py`、`tests/rulesets/test_dnd2024_smite.py`）上同样报 "Would reformat"，说明仓库基线本身不是 ruff-format 干净的，故本切片不把全仓重排当作达标条件，也未做无关格式化。
+
+- 非目标确认（§7 七项）：① 10 尺共享/距离/可见性光环——**已删除**，且退役键在加载期被拒；② Fiend 其余特性未动；③ 敌人职业特性/GM 环境伤害未触碰；④ 临时 HP 决策 UI 未新增（沿用 keep-max）；⑤ 击晕/死亡/复活规则未改；⑥ 无 trigger DSL / 插件 / 前端；⑦ victory、reducer、rest、multiclass、S0-D3 掷后窗口均未改。
+
+- 遗留问题：
+  1. **矩阵 21/22/23 不可达**：本特性的所有者只有 Fiend 术士（单职业），而 Shield / Uncanny Dodge / Divine Smite 分属术士自带反应与 Paladin 特性，敌人也没有职业反应。三个接点是"将来有多职业或术士拿到防守反应时才生效"的防线，当前不可能触发，故不构造伪造的敌人反应来绿测。若后续切片引入多职业，应回到这里补真实链路证据。
+  2. **feed 不下发本特性的审计字段**：ledger 有全部 12 个字段，但 `runtime.py::_recent_combat_events` 的白名单只留 `resource` / `amount` / `delta` / `target_id`，`feature_id` / `owner` / `ability` / `class_ref` / `class_level` / `defeated_actor_id` 都被裁掉。runtime 不在 §5 白名单，本切片未改；若要前端显示"因何获得"，需另开小切片补白名单与展示。
+  3. **既有引擎行为（非本切片引入）**：唯一敌人被借机攻击击杀的那一批次里，`dnd2024.combat.ended` 会先把经济清空，随后 held 的 `dnd2024.position.changed` 因移动预算不足抛 `EventBatchError`。矩阵 20 的用例用两个敌人绕开并记录于此；修它属于胜利/移动顺序的独立问题。
+  4. 其余 Fiend 特性（Fiend Spells、Dark One's Own Luck、Fiendish Resilience、Hurl Through Hell）仍属后续范围。
+  5. **旧 S-P4 任务书仍在库里**（`SP4_DARK_ONES_BLESSING_TASK_SPEC_2026-10-30.md`），其中仍写着 `defeat_share_range_ft: 10`。本切片按 §1.1「不执行、不覆盖旧 S-P4」与 §5「只追加本节」未改它；若担心后来者照它重写，应另开一次性文档切片给旧任务书加「已废弃」抬头。
