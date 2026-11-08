@@ -219,7 +219,8 @@
     "wild_shape": "Wild Shape",
     "wizard_subclass": "Wizard Subclass",
     "words_of_creation": "Words of Creation",
-    "additional_fighting_style": "Additional Fighting Style"
+    "additional_fighting_style": "Additional Fighting Style",
+    "ranger": "Ranger"
   },
   "classes": {
     "monk": {
@@ -574,6 +575,17 @@
           "parameters": {}
         },
         {
+          "id": "second_story_work",
+          "owner": "subclass:thief",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p64:second-story-work",
+          "summary": "You gain a Climb Speed equal to your Speed. You can also determine your jump distance using your Dexterity rather than your Strength.",
+          "parameters": {
+            "climb_speed_from_speed": true,
+            "jump_ability": "dex"
+          }
+        },
+        {
           "id": "uncanny_dodge",
           "minimum_level": 5,
           "source_ref": "srd-5.2.1:p63:uncanny-dodge",
@@ -581,6 +593,23 @@
           "parameters": {
             "damage_multiplier": 0.5
           }
+        }
+      ]
+    },
+    "ranger": {
+      "source_ref": "srd-5.2.1:p59:ranger-features",
+      "features": [
+        {
+          "id": "roving",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p59:roving",
+          "summary": "Your Speed increases by 10 feet while you aren't wearing Heavy armor. You also have a Climb Speed and a Swim Speed equal to your Speed.",
+          "parameters": {
+            "speed_bonus_ft": 10,
+            "climb_speed_from_speed": true,
+            "swim_speed_from_speed": true
+          },
+          "equipment_requirement": {"no_heavy_armor": true}
         }
       ]
     },
