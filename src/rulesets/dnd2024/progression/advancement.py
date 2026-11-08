@@ -13,6 +13,7 @@ from src.rulesets.dnd2024.character.derivation import (
     derive_armor_class,
     derive_armor_training_state,
     derive_movement_profile,
+    derive_skill_check,
     derive_speed,
 )
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -768,11 +769,14 @@ class Dnd2024AdvancementEngine:
         choice_records = preview["diff"].get("feature_choices") or []
         if choice_records:
             # 选项槽与专长所有权分开保存：前者记录玩家选了什么、哪一级选的，
-            # 后者才是既有专长前提与被动效果读取的所有权来源。
+            # 后者才是既有专长前提与被动效果读取的所有权来源。技能选择只写
+            # 槽，不写 feat_refs——否则 "skill:stealth" 会被当成一个专长。
             features.setdefault("feature_choices", []).extend(deepcopy(choice_records))
             owned_refs = features.setdefault("feat_refs", [])
             for record in choice_records:
                 for ref in record["selected_refs"]:
+                    if not str(ref).startswith("feat:"):
+                        continue
                     if ref not in owned_refs:
                         owned_refs.append(ref)
         grants = features.setdefault("class_feature_grants", [])
@@ -1228,8 +1232,36 @@ class Dnd2024AdvancementEngine:
             })
 
         matched: set[int] = set()
+        expertise = {
+            row["skill_ref"] for row in resolver.expertise_skills(character)
+        }
+        proficient = {
+            str(ref) for ref in (character.get("proficiencies") or {}).get("skill_refs") or []
+        }
         for definition in declared:
             choice = definition.choice
+            if choice is not None and choice.kind == "skill_proficiency":
+                options = self._skill_options(choice, proficient, expertise)
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "required": True,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                chosen = self._plan_skill_choice(
+                    definition, choice, options, submitted, matched, errors,
+                    target_level=target_level, proficient=proficient,
+                    expertise=expertise,
+                )
+                records.extend(chosen)
+                expertise.update(
+                    str(ref) for record in chosen for ref in record["selected_refs"]
+                )
+                continue
             enabled = set(choice.enabled_options)
             projected: list[dict[str, Any]] = []
             for option in self._feat_options(
@@ -1323,6 +1355,120 @@ class Dnd2024AdvancementEngine:
                     "feature gained at this level"
                 )
         return requirements, records, errors
+
+    def _skill_options(
+        self,
+        choice: Any,
+        proficient: set[str],
+        expertise: set[str],
+    ) -> list[dict[str, Any]]:
+        """Every skill in this choice's pool, with why one is not pickable.
+
+        The pool is the declaration's own whitelist when it names one (Scholar
+        names six) and the whole skill catalog otherwise (Expertise).  Options
+        are never filtered out: "you are not proficient in it" and "you already
+        have Expertise in it" have to stay visible, or the player cannot tell a
+        missing option from a rejected one.
+        """
+
+        allowed = set(choice.enabled_options)
+        options: list[dict[str, Any]] = []
+        for skill in self.bundle.list("skill"):
+            ref = f"skill:{skill['id']}"
+            if allowed and ref not in allowed:
+                continue
+            reasons: list[str] = []
+            if choice.requires_proficiency and ref not in proficient:
+                reasons.append("not_proficient")
+            if choice.exclude_expertise and ref in expertise:
+                reasons.append("already_expertise")
+            options.append({
+                "value": ref,
+                "name": str(skill.get("name") or skill["id"]),
+                "source_ref": str(skill.get("source_ref") or ""),
+                "available": not reasons,
+                "unavailable_reasons": reasons,
+            })
+        return options
+
+    def _plan_skill_choice(
+        self,
+        definition: Any,
+        choice: Any,
+        options: list[dict[str, Any]],
+        submitted: list[dict[str, Any]],
+        matched: set[int],
+        errors: list[str],
+        *,
+        target_level: int,
+        proficient: set[str],
+        expertise: set[str],
+    ) -> list[dict[str, Any]]:
+        """Validate one skill slot and return the record it commits."""
+
+        slot = [
+            index for index, record in enumerate(submitted)
+            if record["owner"] == definition.owner
+            and record["feature_id"] == definition.id
+            and record["choice_id"] == choice.id
+        ]
+        if not slot:
+            errors.append(
+                f"feature choice {definition.id} requires a selection at this level"
+            )
+            return []
+        if len(slot) > 1:
+            errors.append(
+                f"feature choice {definition.id} was submitted more than once"
+            )
+            matched.update(slot)
+            return []
+        matched.add(slot[0])
+        raw_refs = submitted[slot[0]]["selected_refs"]
+        if not isinstance(raw_refs, list) or not all(
+            isinstance(ref, str) for ref in raw_refs
+        ):
+            errors.append(f"feature choice {definition.id} selected_refs must be strings")
+            return []
+        if len(raw_refs) != choice.count:
+            errors.append(
+                f"feature choice {definition.id} must select exactly {choice.count} option"
+                + ("" if choice.count == 1 else "s")
+            )
+            return []
+        if len(set(raw_refs)) != len(raw_refs):
+            errors.append(f"feature choice {definition.id} selected_refs repeats an option")
+            return []
+        by_value = {option["value"]: option for option in options}
+        for ref in raw_refs:
+            option = by_value.get(ref)
+            if option is None:
+                errors.append(f"{ref} is not a declared option of {definition.id}")
+                continue
+            if option["unavailable_reasons"]:
+                errors.append(f"{ref} is not available: {', '.join(option['unavailable_reasons'])}")
+                continue
+            if choice.requires_proficiency and ref not in proficient:
+                errors.append(f"{ref} is not a skill proficiency of this character")
+                continue
+            if choice.exclude_expertise and ref in expertise:
+                errors.append(f"{ref} already has Expertise")
+                continue
+            expertise.add(ref)
+        if len([ref for ref in raw_refs if ref in by_value]) != choice.count:
+            return []
+        if any(
+            option["unavailable_reasons"] for option in
+            (by_value[ref] for ref in raw_refs if ref in by_value)
+        ):
+            return []
+        return [{
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "choice_id": choice.id,
+            "selected_refs": list(raw_refs),
+            "granted_level": target_level,
+        }]
 
     def _feat_options(
         self,
@@ -1457,11 +1603,22 @@ class Dnd2024AdvancementEngine:
             for ability in ABILITY_IDS
         }
         skill_values: dict[str, int] = {}
+        # 技能加值只有一个聚合入口：升级、建卡与 live 重算都走它。Expertise
+        # 与半熟练若在这里另写一套，同一张卡在升级前后会出现两种加值。
+        expertise = {
+            row["skill_ref"] for row in self._feature_resolver.expertise_skills(character)
+        }
+        half_proficiency = self._feature_resolver.half_proficiency_bonus(character)
         for skill in self.bundle.list("skill"):
             ability = str(skill.get("ability_ref") or "").removeprefix("ability:")
-            skill_values[str(skill["id"])] = ability_modifier(abilities[ability]) + (
-                proficiency if f"skill:{skill['id']}" in skill_refs else 0
-            )
+            ref = f"skill:{skill['id']}"
+            skill_values[str(skill["id"])] = derive_skill_check(
+                int(abilities[ability]),
+                proficiency_bonus=proficiency,
+                proficient=ref in skill_refs,
+                expertise=ref in expertise,
+                half_proficiency=half_proficiency,
+            )["total"]
         perception = skill_values.get("perception", ability_modifier(abilities["wis"]))
         derived = character.setdefault("derived", {})
         derived.update({

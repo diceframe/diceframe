@@ -48,6 +48,7 @@ from .primitives import (
 from .check_modes import (
     condition_check_bonus_rolls,
     condition_flags,
+    effective_speed,
     mode_from_sources,
 )
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
@@ -223,21 +224,19 @@ class CombatResolutionMixin:
         for uid in sorted(instance.players):
             canonical = _canonical(instance.get_character_sheet(uid))
             actor_id = _player_actor(uid)
-            roll = int(rng.randint(1, 20))
             modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
             initiatives.append({
-                "actor_id": actor_id, "roll": roll, "modifier": modifier,
-                "total": roll + modifier, "kind": "player",
+                "actor_id": actor_id, "modifier": modifier, "kind": "player",
+                **self._initiative_roll(canonical, modifier, rng),
             })
             positions[actor_id] = int(intent.get("player_positions", {}).get(uid, 0) or 0)
         for companion_id in sorted(companions):
             canonical = companions[companion_id].get("ruleset_character") or {}
             actor_id = _companion_actor(companion_id)
-            roll = int(rng.randint(1, 20))
             modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
             initiatives.append({
-                "actor_id": actor_id, "roll": roll, "modifier": modifier,
-                "total": roll + modifier, "kind": "companion",
+                "actor_id": actor_id, "modifier": modifier, "kind": "companion",
+                **self._initiative_roll(canonical, modifier, rng),
             })
             # Companion 缺省与队伍同一起始位置，不引入复杂布阵。
             positions[actor_id] = int(intent.get("player_positions", {}).get(companion_id, 0) or 0)
@@ -280,6 +279,69 @@ class CombatResolutionMixin:
             "mode": str(intent.get("mode") or "sandbox"),
             "adventure_binding": deepcopy(intent.get("adventure_binding")),
         }, *self._turn_start_regen_events(first)]
+
+    def _initiative_roll(
+        self, character: dict[str, Any], modifier: int, rng: Any,
+    ) -> dict[str, Any]:
+        """One Initiative roll, with every declared Advantage source recorded.
+
+        Initiative is a Dexterity ability check, so Advantage applies exactly as
+        it does to any other d20 test: two dice and keep the higher.  Multiple
+        sources never add dice -- ``mode_from_sources`` collapses them into one
+        mode and the event lists every source, so "Remarkable Athlete and
+        Invisible" is still two d20s, not three.
+
+        Advantage on Initiative is read from two places, and both are
+        declarations rather than code: a class feature's
+        ``initiative_advantage`` flag, and a condition's ``initiative_advantage``
+        entry in the combat catalog (the Invisible condition grants it).
+        """
+
+        sources: list[dict[str, Any]] = [
+            {**row, "mode": "advantage"}
+            for row in self.features.initiative_advantage_sources(character)
+        ]
+        conditions = character.get("conditions")
+        conditions = conditions if isinstance(conditions, dict) else {}
+        for condition_id, entry in (self.catalog.conditions or {}).items():
+            if condition_id not in conditions:
+                continue
+            if entry.get("initiative_advantage") is True:
+                sources.append({"code": condition_id, "mode": "advantage"})
+        mode = mode_from_sources(sources)
+        rolls = [int(rng.randint(1, 20))]
+        if mode:
+            rolls.append(int(rng.randint(1, 20)))
+        natural = rolls[0]
+        if mode == "advantage":
+            natural = max(rolls)
+        elif mode == "disadvantage":
+            natural = min(rolls)
+        payload: dict[str, Any] = {
+            "roll": natural, "total": natural + int(modifier),
+        }
+        if mode:
+            payload["rolls"] = rolls
+            payload["advantage_mode"] = mode
+            payload["advantage_sources"] = sources
+        return payload
+
+    def _skill_check_floor(
+        self, actor: dict[str, Any], skill_id: str,
+    ) -> tuple[int, list[dict[str, str]]]:
+        """The d20 floor for one skill check, gated on real proficiency.
+
+        Reliable Talent applies only to a check that "uses one of your skill or
+        tool proficiencies".  The gate is read from the actor's ``skill_refs``,
+        not from the derived number: ``+2`` cannot say whether it came from
+        proficiency or from the ability modifier, and a floor on an untrained
+        skill would silently turn every rogue into a specialist.
+        """
+
+        refs = {str(ref) for ref in actor.get("skill_refs") or []}
+        if f"skill:{skill_id}" not in refs:
+            return 0, []
+        return self.features.ability_check_floor(self._feature_character(actor))
 
     @staticmethod
     def _spell_end_trigger_events(
@@ -711,6 +773,48 @@ class CombatResolutionMixin:
             instance, combat, actor_id, target, damage_event, damage, rng,
         )
 
+    def _critical_hit_move_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+    ) -> list[dict[str, Any]]:
+        """Grant the half-Speed move a critical hit pays for.
+
+        The allowance is a *budget in feet*, not a free teleport: the player
+        still has to submit a ``move`` intent, and the existing movement
+        validation caps it at the remaining pool.  Granting movement into the
+        pool keeps one movement authority; the ``critical_hit`` reason is what
+        lets the move suppress Opportunity Attacks for exactly this allowance.
+
+        Only the current actor can use it: the movement economy belongs to
+        whoever's turn it is, so granting to anyone else would silently hand
+        the pool to a different creature.  A critical scored on someone else's
+        turn (an Opportunity Attack) therefore grants nothing -- recorded as a
+        deviation rather than paid out to the wrong actor.
+        """
+
+        order = [str(item) for item in combat.get("initiative") or []]
+        index = combat.get("turn_index", -1)
+        if not (0 <= index < len(order) and order[index] == actor_id):
+            return []
+        actor = self._actor_view(instance, combat, actor_id)
+        grant = self.features.critical_hit_move(self._feature_character(actor))
+        if grant is None:
+            return []
+        # "half your Speed" 读的是条件生效后的当前 Speed，与回合开始预算
+        # （``_fresh_economy``）和 Dash 用的是同一个入口：被速度归零的条件
+        # （例如麻痹）压住的单位拿不到游丝一样的额度，Speed 0 就是 0。
+        speed = max(0, int(actor.get("speed", 0) or 0))
+        speed = effective_speed(
+            self.catalog.conditions, actor.get("conditions") or {}, speed,
+        )
+        budget = speed // int(grant["divisor"])
+        if budget <= 0:
+            return []
+        return [{
+            "type": "dnd2024.movement.granted", "actor_id": actor_id,
+            "amount": budget, "reason": "critical_hit",
+            "source_feature": grant["code"], "source_owner": grant["owner"],
+        }]
+
     def _resolve_committed_hit(
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
         target: dict[str, Any], damage_event: dict[str, Any], damage: int, rng: Any,
@@ -718,6 +822,10 @@ class CombatResolutionMixin:
         """Submit a final hit's damage and run its trailing consequences."""
 
         events = list(self._submit_hit_damage(damage_event))
+        if damage_event.get("critical"):
+            events.extend(
+                self._critical_hit_move_events(instance, combat, attacker_id)
+            )
         events.extend(self._concentration_with_dool(instance, combat, target, damage, rng))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, damage,
@@ -1290,7 +1398,11 @@ class CombatResolutionMixin:
             adjacent_hostiles.append(target)
         actor = self._actor_view(instance, combat, actor_id)
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
-        if adjacent_hostiles and not disengaged:
+        # Remarkable Athlete 的暴击后移动：这份额度自身免借机攻击，且只免
+        # 这一次移动——阈值是额度（英尺），不是"永久免疫"。
+        crit_budget = int(economy.get("crit_move", 0) or 0)
+        covered_by_crit = bool(crit_budget) and abs(distance) <= crit_budget
+        if adjacent_hostiles and not disengaged and not covered_by_crit:
             decision = {
                 "decision_id": f"decision:{intent['intent_id']}",
                 "kind": "opportunity_attack",
@@ -1303,6 +1415,7 @@ class CombatResolutionMixin:
         return None, [{
             "type": "dnd2024.position.changed", "actor_id": actor_id,
             "distance": distance, "movement_cost": abs(distance), "forced": False,
+            **({"crit_move": True} if covered_by_crit else {}),
         }]
 
     @staticmethod
@@ -1570,13 +1683,22 @@ class CombatResolutionMixin:
         second = int(rng.randint(1, 20)) if mode == "disadvantage" else None
         rolls = [first] if second is None else [first, second]
         natural = min(rolls) if mode == "disadvantage" else first
-        total = natural + stealth
+        # 下限在加值之前、在掷后窗口之前作用：被替换的是 d20 面值本身，
+        # 所以它必须发生在 total 计算之前，并且不能再掷一次骰。
+        floor, floor_sources = self._skill_check_floor(actor, "stealth")
+        effective = max(natural, floor) if floor else natural
+        total = effective + stealth
         success = total >= dc
         event: dict[str, Any] = {
             "type": "check.resolved", "kind": "hide", "actor_id": actor_id,
-            "ability": "stealth", "rolls": rolls, "natural": natural,
+            "ability": "stealth", "rolls": rolls, "natural": effective,
             "modifier": stealth, "total": total, "target": dc, "success": success,
         }
+        if floor:
+            event["raw_d20"] = natural
+            event["effective_d20"] = effective
+            event["d20_floor"] = floor
+            event["d20_floor_sources"] = floor_sources
         if mode:
             event["advantage_mode"] = mode
             event["advantage_sources"] = sources
@@ -2028,16 +2150,24 @@ class CombatResolutionMixin:
         target_id = str(intent["target_id"])
         roll = int(rng.randint(1, 20))
         medicine = int(actor["skill_values"].get("medicine", 0) or 0)
-        success = roll + medicine >= 10
+        floor, floor_sources = self._skill_check_floor(actor, "medicine")
+        effective = max(roll, floor) if floor else roll
+        success = effective + medicine >= 10
+        check: dict[str, Any] = {
+            "type": "check.resolved", "kind": "medicine", "actor_id": actor["actor_id"],
+            "target_id": target_id, "rolls": [roll], "natural": effective,
+            "modifier": medicine, "total": effective + medicine, "target": 10,
+            "success": success,
+        }
+        if floor:
+            check["raw_d20"] = roll
+            check["effective_d20"] = effective
+            check["d20_floor"] = floor
+            check["d20_floor_sources"] = floor_sources
         events = [{
             "type": "dnd2024.action.spent", "actor_id": actor["actor_id"],
             "resource": self._spend_action_resource(combat), "amount": 1,
-        }, {
-            "type": "check.resolved", "kind": "medicine", "actor_id": actor["actor_id"],
-            "target_id": target_id, "rolls": [roll], "natural": roll,
-            "modifier": medicine, "total": roll + medicine, "target": 10,
-            "success": success,
-        }]
+        }, check]
         if success:
             events.append({
                 "type": "condition.applied", "target_id": target_id,

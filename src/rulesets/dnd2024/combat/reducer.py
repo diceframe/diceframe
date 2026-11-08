@@ -365,9 +365,13 @@ class CombatReducerMixin:
                 economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             return
         if event_type == "dnd2024.movement.granted":
-            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + int(
-                event["amount"]
-            )
+            amount = int(event["amount"])
+            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
+            if str(event.get("reason") or "") == "critical_hit":
+                # 暴击后移动单独记账：它既进池（玩家仍要提交 move），又带着
+                # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
+                # 不会延续到后续任何移动。
+                combat["economy"]["crit_move"] = amount
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
@@ -380,6 +384,10 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
+            if event.get("crit_move"):
+                # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
+                # 常规规则判定借机攻击。
+                combat["economy"]["crit_move"] = 0
             return
         if event_type == "resource.changed":
             if str(event.get("resource") or "hp") == "temp_hp":

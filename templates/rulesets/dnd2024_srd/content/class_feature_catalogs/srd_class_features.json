@@ -220,7 +220,12 @@
     "wizard_subclass": "Wizard Subclass",
     "words_of_creation": "Words of Creation",
     "additional_fighting_style": "Additional Fighting Style",
-    "ranger": "Ranger"
+    "ranger": "Ranger",
+    "expertise": "Expertise",
+    "jack_of_all_trades": "Jack of All Trades",
+    "reliable_talent": "Reliable Talent",
+    "scholar": "Scholar",
+    "remarkable_athlete": "Remarkable Athlete"
   },
   "classes": {
     "monk": {
@@ -436,6 +441,18 @@
           "parameters": {"crit_threshold": 19}
         },
         {
+          "id": "remarkable_athlete",
+          "owner": "subclass:champion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p49:remarkable-athlete",
+          "summary": "You have Advantage on Initiative rolls and Strength (Athletics) checks. In addition, immediately after you score a Critical Hit, you can move up to half your Speed without provoking Opportunity Attacks.",
+          "parameters": {
+            "initiative_advantage": true,
+            "skill_advantage_refs": ["skill:athletics"],
+            "critical_hit_move_speed_divisor": 2
+          }
+        },
+        {
           "id": "additional_fighting_style",
           "owner": "subclass:champion",
           "minimum_level": 7,
@@ -543,6 +560,21 @@
       "source_ref": "srd-5.2.1:p61:rogue-features",
       "features": [
         {
+          "id": "expertise",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p62:rogue-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills. At Rogue level 6, choose two more.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
           "id": "sneak_attack",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p61:sneak-attack",
@@ -593,12 +625,36 @@
           "parameters": {
             "damage_multiplier": 0.5
           }
+        },
+        {
+          "id": "reliable_talent",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p63:reliable-talent",
+          "summary": "Whenever you make an ability check that uses one of your skill or tool proficiencies, you can treat a d20 roll of 9 or lower as a 10.",
+          "parameters": {
+            "ability_check_floor": 10
+          }
         }
       ]
     },
     "ranger": {
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
+        {
+          "id": "expertise",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p59:ranger-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
         {
           "id": "roving",
           "minimum_level": 6,
@@ -616,6 +672,30 @@
     "bard": {
       "source_ref": "srd-5.2.1:p31:bard-features",
       "features": [
+        {
+          "id": "jack_of_all_trades",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p32:jack-of-all-trades",
+          "summary": "You can add half your Proficiency Bonus (round down) to any ability check you make that uses a skill proficiency you lack and that doesn't otherwise use your Proficiency Bonus.",
+          "parameters": {
+            "half_proficiency_bonus": true
+          }
+        },
+        {
+          "id": "expertise",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p32:bard-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills. At Bard level 9, choose two more.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
         {
           "id": "cutting_words",
           "owner": "subclass:college_of_lore",
@@ -693,6 +773,29 @@
     "wizard": {
       "source_ref": "srd-5.2.1:p82:wizard-features",
       "features": [
+        {
+          "id": "scholar",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p78:scholar",
+          "summary": "Choose one of the following skills in which you have proficiency: Arcana, History, Investigation, Medicine, Nature, or Religion. You have Expertise in the chosen skill.",
+          "choice": {
+            "id": "scholar_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 1,
+            "requires_proficiency": true,
+            "exclude_expertise": true,
+            "enabled_options": [
+              "skill:arcana",
+              "skill:history",
+              "skill:investigation",
+              "skill:medicine",
+              "skill:nature",
+              "skill:religion"
+            ]
+          }
+        },
         {
           "id": "overchannel",
           "owner": "subclass:evoker",

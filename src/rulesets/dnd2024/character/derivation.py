@@ -38,6 +38,7 @@ PLAIN_SHIELD_AC_BONUS = 2
 def _feature_proxy(
     class_ref: str, level: int, feature_state: Mapping[str, Any] | None = None,
     equipped_refs: Iterable[str] = (),
+    feature_choices: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """The minimal canonical shape ``features_for`` needs to resolve ownership.
 
@@ -49,6 +50,11 @@ def _feature_proxy(
     ``equipment_requirement`` is answered against what is actually worn.  Without
     it every equipment-gated benefit reads as satisfied at creation time, and a
     Monk holding a Shield would keep the unarmored formula the SRD denies.
+
+    ``feature_choices`` carries the committed ``(owner, feature_id, choice_id)``
+    slots.  Expertise lives only in those slots, so a proxy without them would
+    read every skill as an ordinary proficiency even though the sheet records
+    the selection.
     """
 
     proxy: dict[str, Any] = {
@@ -58,6 +64,9 @@ def _feature_proxy(
         subclass_ref = feature_state.get("subclass_ref")
         if isinstance(subclass_ref, str) and subclass_ref:
             proxy["features"] = {"subclass_ref": subclass_ref}
+    choices = [dict(record) for record in feature_choices]
+    if choices:
+        proxy.setdefault("features", {})["feature_choices"] = choices
     refs = [str(ref) for ref in equipped_refs if str(ref)]
     if refs:
         proxy["equipment"] = {"item_refs": refs}
@@ -236,7 +245,198 @@ def derive_speed(
     return max(0, int(base_speed) + bonus - penalty)
 
 
+_SKILL_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
+
+
+def plan_skill_choices(
+    raw_choices: Any,
+    features: Dnd2024ClassFeatureResolver,
+    proxy: Mapping[str, Any],
+    skill_refs: Collection[str],
+    *,
+    level: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Validate the skill selections a draft commits at character creation.
+
+    Only a feature the character actually owns *at this level* may hold a slot,
+    so a submitted record can neither invent an owner nor pre-fill a future
+    level.  Expertise is the only skill choice granted at level 1 today (Rogue),
+    but nothing here names that class: the declaration decides.
+
+    Every rule the level-up path enforces is enforced again, because a draft is
+    an untrusted submission: the exact count, uniqueness inside the slot, the
+    declaration's own whitelist, "you must already be proficient", and "you
+    can't take Expertise in the same skill twice".  Slots are processed in
+    catalog order so the second slot sees what the first one took.
+    """
+
+    errors: list[str] = []
+    if raw_choices is None:
+        raw_choices = []
+    if not isinstance(raw_choices, list):
+        return [], ["feature_choices must be an array"]
+    submitted: list[dict[str, Any]] = []
+    for raw in raw_choices:
+        if not isinstance(raw, Mapping):
+            errors.append("each feature choice must be an object")
+            continue
+        unknown = sorted(set(raw) - _SKILL_CHOICE_KEYS)
+        if unknown:
+            errors.append(f"feature choice has an unknown field: {unknown[0]}")
+            continue
+        submitted.append({
+            "owner": str(raw.get("owner") or ""),
+            "feature_id": str(raw.get("feature_id") or ""),
+            "choice_id": str(raw.get("choice_id") or ""),
+            "selected_refs": raw.get("selected_refs"),
+        })
+
+    slots = [
+        definition for definition in features.features_for(dict(proxy))
+        if definition.choice is not None
+        and definition.choice.kind == "skill_proficiency"
+    ]
+    known_skills = {
+        str(entity.get("id")) for entity in features.bundle.list("skill")
+    }
+    matched: set[int] = set()
+    records: list[dict[str, Any]] = []
+    taken: dict[str, str] = {}
+    proficient = {str(ref) for ref in skill_refs}
+    for definition in slots:
+        choice = definition.choice
+        if choice is None:  # pragma: no cover - filtered above
+            continue
+        slot = [
+            index for index, record in enumerate(submitted)
+            if record["owner"] == definition.owner
+            and record["feature_id"] == definition.id
+            and record["choice_id"] == choice.id
+        ]
+        if len(slot) > 1:
+            errors.append(f"feature choice {definition.id} was submitted more than once")
+            matched.update(slot)
+            continue
+        if not slot:
+            # 建卡阶段把未作答视为"还没选"，而不是整张卡非法：建卡界面会先
+            # 投影这个槽（``builder_choices.skill_choices``）再让玩家作答，
+            # 而历史存档与既有测试夹具里本来就没有这个字段。代价是不发放
+            # Expertise——这是缺口，不是静默通过；升级路径仍然要求作答。
+            continue
+        matched.add(slot[0])
+        raw_refs = submitted[slot[0]]["selected_refs"]
+        if not isinstance(raw_refs, list) or not all(
+            isinstance(ref, str) for ref in raw_refs
+        ):
+            errors.append(f"feature choice {definition.id} selected_refs must be strings")
+            continue
+        if len(raw_refs) != choice.count:
+            errors.append(
+                f"feature choice {definition.id} must select exactly {choice.count} option"
+                + ("" if choice.count == 1 else "s")
+            )
+            continue
+        if len(set(raw_refs)) != len(raw_refs):
+            errors.append(f"feature choice {definition.id} selected_refs repeats an option")
+            continue
+        allowed = set(choice.enabled_options)
+        slot_refs: list[str] = []
+        for ref in raw_refs:
+            if allowed and ref not in allowed:
+                errors.append(f"{ref} is not a declared option of {definition.id}")
+                continue
+            skill_id = str(ref).removeprefix("skill:")
+            if not ref.startswith("skill:") or skill_id not in known_skills:
+                errors.append(f"{ref} is not a declared skill")
+                continue
+            if choice.requires_proficiency and ref not in proficient:
+                errors.append(f"{ref} is not a skill proficiency of this character")
+                continue
+            if choice.exclude_expertise and skill_id in taken:
+                errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
+                continue
+            if choice.grants == "expertise":
+                taken[skill_id] = definition.id
+            slot_refs.append(ref)
+        if len(slot_refs) != choice.count:
+            continue
+        records.append({
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "choice_id": choice.id,
+            "selected_refs": slot_refs,
+            "granted_level": int(level),
+        })
+    for index, record in enumerate(submitted):
+        if index in matched:
+            continue
+        errors.append(
+            "feature choice references a slot this character does not have: "
+            f"{record['owner']}/{record['feature_id']}/{record['choice_id']}"
+        )
+    return records, errors
+
+
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
+
+
+def derive_skill_check(
+    ability_score: int,
+    *,
+    proficiency_bonus: int,
+    proficient: bool,
+    expertise: bool = False,
+    half_proficiency: bool = False,
+    pb_used_elsewhere: bool = False,
+) -> dict[str, Any]:
+    """The one and only ability-check bonus formula for a skill.
+
+    Character creation, advancement, and live re-derivation all call this, so
+    the rule exists exactly once.  The 2024 SRD states three separate
+    contributions and never stacks them:
+
+    * no proficiency -> ``0``;
+    * proficiency -> ``+PB``;
+    * Expertise -> ``+2 x PB``, because "your Proficiency Bonus is doubled for
+      that check" is a *replacement* of the ordinary contribution, not an
+      additional PB (doubling twice would make a third source silently triple
+      it);
+    * Jack of All Trades -> ``floor(PB / 2)``, and only "for a skill proficiency
+      you lack" that "doesn't otherwise use your Proficiency Bonus".  It never
+      rides on top of proficiency or Expertise, and ``pb_used_elsewhere``
+      carries the second half of that condition for the check that is actually
+      being resolved.
+
+    Expertise without proficiency contributes nothing: every selection path
+    rejects that combination, so reaching it here means the sheet is corrupt and
+    paying out a doubled bonus would reward the corruption.
+    """
+
+    bonus = int(proficiency_bonus)
+    modifier = ability_modifier(int(ability_score))
+    components: list[dict[str, Any]] = [{"code": "ability", "amount": modifier}]
+    contribution = 0
+    applied_half = False
+    if proficient and expertise:
+        contribution = 2 * bonus
+        components.append({"code": "expertise", "amount": contribution})
+    elif proficient:
+        contribution = bonus
+        components.append({"code": "proficiency", "amount": contribution})
+    elif half_proficiency and not pb_used_elsewhere:
+        contribution = bonus // 2
+        applied_half = True
+        components.append({"code": "half_proficiency", "amount": contribution})
+    return {
+        "ability_modifier": modifier,
+        "proficiency_bonus": bonus,
+        "proficient": bool(proficient),
+        "expertise": bool(proficient and expertise),
+        "half_proficiency": applied_half,
+        "contribution": contribution,
+        "total": modifier + contribution,
+        "components": components,
+    }
 
 
 def derive_jump_distances(
@@ -392,14 +592,46 @@ class CharacterDerivationMixin:
         skill_refs = list(dict.fromkeys([
             *background_skills, *class_skills, *species_skills, *skilled_skill_refs,
         ]))
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        # A level-1 build can already own a skill choice (Rogue Expertise), so the
+        # slot has to be validated before any skill value is derived: honouring an
+        # unvalidated slot would pay out a doubled bonus for a selection the
+        # level-up path would have rejected.
+        feature_choices, choice_errors = plan_skill_choices(
+            draft.get("feature_choices"),
+            features,
+            _feature_proxy(draft["class_ref"], level, draft.get("features")),
+            skill_refs,
+            level=level,
+        )
+        if choice_errors:
+            raise ValueError("; ".join(choice_errors))
+        expertise = {
+            row["skill_ref"] for row in features.expertise_skills(
+                _feature_proxy(
+                    draft["class_ref"], level, draft.get("features"),
+                    feature_choices=feature_choices,
+                )
+            )
+        }
+        half_proficiency = features.half_proficiency_bonus(
+            _feature_proxy(
+                draft["class_ref"], level, draft.get("features"),
+                feature_choices=feature_choices,
+            )
+        )
         skill_values: dict[str, int] = {}
         all_skills = self.bundle.list("skill")
         for skill in all_skills:
             ref = f"skill:{skill['id']}"
             ability_id = _ref_id(str(skill["ability_ref"]), "ability")
-            skill_values[str(skill["id"])] = (
-                ability_modifier(abilities[ability_id]) + (prof if ref in skill_refs else 0)
-            )
+            skill_values[str(skill["id"])] = derive_skill_check(
+                int(abilities[ability_id]),
+                proficiency_bonus=prof,
+                proficient=ref in skill_refs,
+                expertise=ref in expertise,
+                half_proficiency=half_proficiency,
+            )["total"]
 
         save_refs = list(class_entity.get("saving_throw_refs") or [])
         saving_throws = {
@@ -429,6 +661,7 @@ class CharacterDerivationMixin:
         features = Dnd2024ClassFeatureResolver(self.bundle)
         feature_proxy = _feature_proxy(
             draft["class_ref"], level, draft.get("features"), item_refs,
+            feature_choices,
         )
         armor_category_refs = [
             f"armor_category:{item}"
@@ -462,9 +695,9 @@ class CharacterDerivationMixin:
         max_hp += max(0, level - 1) * max(1, fixed_hp + con_modifier)
         max_hp += species_hp_bonus * level
         max_hp += features.feature_max_hp_bonus(feature_proxy)
-        passive_perception = 10 + ability_modifier(abilities["wis"])
-        if "skill:perception" in skill_refs:
-            passive_perception += prof
+        # 被动察觉就是 10 + 该技能检定的加值，因此直接复用聚合结果：Expertise
+        # 与半熟练若在这里被漏掉，角色卡上会出现两套感知。
+        passive_perception = 10 + int(skill_values.get("perception", 0) or 0)
 
         initiative = ability_modifier(abilities["dex"])
         if "feat:alert" in feat_refs:
@@ -595,6 +828,9 @@ class CharacterDerivationMixin:
             "features": {
                 "feat_refs": feat_refs,
                 "feat_choice_answers": feat_choice_answers,
+                # 技能选择与成长专长选择同住一个槽表：两者都是 (owner,
+                # feature_id, choice_id) 三元组，分成两套账会让重建时只回放一半。
+                "feature_choices": feature_choices,
                 "species_traits": deepcopy(species.get("traits") or []),
             },
             "spellcasting": {"magic_initiate": magic_initiate},
