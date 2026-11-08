@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { CheckResult } from '@/api/types'
-import { api } from '@/api/client'
+import { api, errorMessage } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import { pushCopy } from './copy'
 import { gamePreferencesCopy } from '@/features/game-preferences/copy'
@@ -45,7 +45,7 @@ async function send(operation: string) {
     draft.value = ''; if (operation === 'offer') adjustingRisk.value = false
     emit('refresh')
   } catch (err) {
-    if (captured === epoch) error.value = err instanceof Error ? err.message : c.value.error
+    if (captured === epoch) error.value = errorMessage(err)
   } finally { if (captured === epoch) busy.value = false }
 }
 </script>

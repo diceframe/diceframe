@@ -50,6 +50,10 @@ ERROR_CODE_MAP: dict[str, str] = {
     "当前是房主预览模式，请先开启允许代操作": "preview_mode_forbidden",
     "本局玩家入口已关闭": "player_access_closed",
     "请至少保留一个角色，无法删除最后一个": "cannot_delete_last_character",
+    # 孤注一掷
+    "只能由该检定的行动者本人处理孤注一掷，主持人只能告知风险或拒绝申请": "push_forbidden",
+    "孤注一掷请求格式无效": "push_invalid_request",
+    "检定选择已变化，请刷新后重试": "push_invalid_or_stale",
     # 角色
     "角色不存在": "character_not_found",
     "玩家不存在": "player_not_found",
