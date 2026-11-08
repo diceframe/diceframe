@@ -4,7 +4,10 @@ import { i18n } from '../src/i18n'
 import PushDecisionPanel from '../src/features/play/check-decisions/PushDecisionPanel.vue'
 
 const mocked = vi.hoisted(() => ({ api: vi.fn() }))
-vi.mock('../src/api/client', () => ({ api: mocked.api }))
+vi.mock('../src/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../src/api/client')>('../src/api/client')
+  return { api: mocked.api, errorMessage: actual.errorMessage }
+})
 const push = { schema_version: 1, revision: 2, status: 'pending' as const, run_id: 'run', round: 3, reason: '', consequence: '' }
 const check = { check_id: 'check', actor_uid: 'a', roll: 60, push }
 const render = (isGm = false, actorId = 'a') => mount(PushDecisionPanel, {
@@ -117,4 +120,16 @@ it('discards a draft when a missing push projection is replaced by a new run', a
   await wrapper.setProps({ check: { ...check, push: undefined } })
   await wrapper.setProps({ check: { ...check, push: { ...push, run_id: 'run-2', status: 'requested', reason: 'New approach' } } })
   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+})
+
+it('shows a localized refusal instead of a bare status line', async () => {
+  const { ApiError } = await vi.importActual<typeof import('../src/api/client')>('../src/api/client')
+  i18n.global.locale.value = 'zh-CN'
+  mocked.api.mockRejectedValue(new ApiError('HTTP 403', 403, 'push_forbidden'))
+  const wrapper = render()
+  await wrapper.get('textarea').setValue('换个办法')
+  await wrapper.get('[data-testid="push-request"]').trigger('click'); await flushPromises()
+  const alert = wrapper.get('[role="alert"]').text()
+  expect(alert).toBe(i18n.global.t('apiErrors.push_forbidden'))
+  expect(alert).not.toContain('HTTP 403')
 })

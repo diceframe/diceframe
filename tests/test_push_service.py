@@ -39,6 +39,47 @@ async def test_permissions_stale_and_client_dice_rejected_before_save():
 
 
 @pytest.mark.asyncio
+async def test_owner_authenticated_seat_still_decides_its_own_push():
+    """The host's own browser plays a seat: reads resolve as GM, Push must not.
+
+    Regression for a table whose owner credential is in the same browser that
+    plays the check's seat: deriving the acting identity from the viewer turned
+    ``request``/``offer``/``confirm`` into a Keeper adjudication, so every click
+    answered 403 and the round sat in judgment until the stuck-run recovery.
+    """
+    inst, service, _ = setup()
+    host = Viewer("gm", "a")
+    result = await service.update("g", "c1", host, "request", body(inst, reason="use the lamp"))
+    assert result["ok"] and not result["ready_to_resolve"]
+    result = await service.update("g", "c1", host, "offer", body(inst, consequence="the guard hears you"))
+    assert result["ok"] and not result["ready_to_resolve"]
+    result = await service.update("g", "c1", host, "confirm", body(inst))
+    assert result["ok"] and result["ready_to_resolve"]
+
+
+@pytest.mark.asyncio
+async def test_keeper_authority_never_decides_for_a_seat():
+    inst, service, save = setup()
+    before = deepcopy(inst.to_dict())
+    # The Keeper owns neither consent nor rejection of a player's Push …
+    for viewer in (Viewer("gm"), Viewer("gm", "b")):
+        denied = await service.update("g", "c1", viewer, "decline", body(inst))
+        assert not denied["ok"] and denied["code"] == "PUSH_FORBIDDEN"
+    assert inst.to_dict() == before
+    save.assert_not_called()
+
+
+def test_refusals_carry_a_message_and_a_localizable_code():
+    from src.webui.errors import ERROR_CODE_MAP
+    from src.webui.services.check_decisions import refusal
+
+    for code in ("PUSH_FORBIDDEN", "PUSH_INVALID_REQUEST", "PUSH_INVALID_OR_STALE", "PREVIEW_READ_ONLY"):
+        payload = refusal(code)
+        assert payload["code"] == code and payload["error"]
+        assert ERROR_CODE_MAP[payload["error"]]
+
+
+@pytest.mark.asyncio
 async def test_save_failure_restores_whole_state_and_does_not_cancel_timer():
     inst, service, save = setup(AsyncMock(side_effect=OSError("disk full")))
     from unittest.mock import Mock
