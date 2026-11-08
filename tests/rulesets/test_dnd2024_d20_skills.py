@@ -322,10 +322,6 @@ def _combat(
     return engine, instance
 
 
-def _started(events: list[dict]) -> dict:
-    return next(e for e in events if e.get("type") == "dnd2024.combat.started")
-
-
 def _check(events: list[dict], kind: str) -> dict:
     return next(
         event for event in events
