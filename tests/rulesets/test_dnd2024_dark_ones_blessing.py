@@ -874,4 +874,5 @@ def test_the_trigger_consumes_no_dice() -> None:
         assert resolved["ok"], resolved
         draws.append(rng.draws)
 
-    assert draws[0] == draws[1]
+    # 一次攻击检定 + 一次伤害骰：两个职业都必须只取这两枚。
+    assert draws == [2, 2]
