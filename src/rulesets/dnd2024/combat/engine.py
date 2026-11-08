@@ -1387,18 +1387,22 @@ class Dnd2024CombatEngine(
     def _projected_auras(
         self, instance: Any, combat: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Every base aura a conscious party member projects right now.
+        """Every base aura a living, conscious party member projects right now.
 
         One row per (holder, base aura).  ``range_ft`` already folds in that
         holder's own Aura Expansion, so a level-18 paladin widens only their own
         aura and a level-6 ally beside them keeps 10 feet -- the expansion is a
         property of who owns it, never a global maximum.
 
-        A holder carrying any condition that implies Incapacitated drops out
-        before its aura is considered: the whole emanation is inactive, not
-        merely the holder's own share of it.  Enemies never project a class
-        aura, which is why the roster scan starts from ``side == "party"``
-        rather than from every combatant.
+        The emanation is off as a whole whenever the holder cannot sustain it:
+        any condition that implies Incapacitated disables it, and so does being
+        at 0 HP or carrying the ``dead`` condition.  That second half cannot be
+        left to the condition registry alone -- ``dead`` is not a catalog
+        condition yet, and the reducer removes ``unconscious`` the moment it
+        marks a creature dead, so a corpse would otherwise keep radiating a
+        bonus to its allies.  Enemies never project a class aura, which is why
+        the roster scan starts from ``side == "party"`` rather than from every
+        combatant.
         """
 
         rows: list[dict[str, Any]] = []
@@ -1407,10 +1411,13 @@ class Dnd2024CombatEngine(
                 continue
             holder_id = str(ally["actor_id"])
             actor = self._actor_view(instance, combat, holder_id)
-            flags = condition_flags(
-                self.catalog.conditions, actor.get("conditions") or {},
-            )
-            if flags.get("incapacitated"):
+            conditions = actor.get("conditions") or {}
+            flags = condition_flags(self.catalog.conditions, conditions)
+            if (
+                flags.get("incapacitated")
+                or "dead" in conditions
+                or int(actor.get("hp", 1)) <= 0
+            ):
                 continue
             character = self._feature_character(actor)
             owned = self.features.active_features_for(character)
@@ -1512,6 +1519,11 @@ class Dnd2024CombatEngine(
         emanation, which is exactly why the old free-standing ``aura_range``
         declaration is gone.
 
+        The catalog is consulted first: if no declaration lists ``condition_id``
+        anywhere, nothing can intercept it and projecting the auras would be
+        wasted work.  That early exit is what makes it affordable to ask this
+        question on every condition-applying path rather than only on saves.
+
         The first qualifying source in catalog order is reported.  Two Devotion
         paladins therefore produce one interception with one stable source
         rather than two stacked settlements.
@@ -1520,6 +1532,14 @@ class Dnd2024CombatEngine(
         wanted = str(condition_id or "")
         target_id = str(target.get("actor_id") or "")
         if not wanted or not target_id or str(target.get("side") or "") != "party":
+            return None
+        declared = {
+            code
+            for definition in self.features.catalog.features_by_key.values()
+            for code in (definition.parameters.get("aura_condition_immunities") or [])
+            if isinstance(code, str)
+        }
+        if wanted not in declared:
             return None
         for row in self._projected_auras(instance, combat):
             if self._distance(combat, row["holder_id"], target_id) > row["range_ft"]:

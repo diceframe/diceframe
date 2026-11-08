@@ -441,6 +441,35 @@ def _resolver_for(runtime: Dnd2024Runtime, feature_id: str, mutate):
     return Dnd2024ClassFeatureResolver(bundle), None
 
 
+def test_an_expansion_cycle_is_rejected_at_load() -> None:
+    """6 (continued). A→B→A makes "the effective range" order-dependent.
+
+    Two declarations can only form a cycle if both carry a range of their own,
+    so this pins the walk rather than the single-hop check: ``aura_expansion``
+    is given a range and the pair is made to expand each other.
+    """
+
+    from src.rulesets.dnd2024.features.models import ClassFeatureError
+    from src.rulesets.dnd2024.features.resolver import Dnd2024ClassFeatureResolver
+
+    runtime = Dnd2024Runtime()
+    bundle = _mutated_bundle(
+        runtime.load_bundle("en"), "aura_expansion",
+        lambda item: item["parameters"].update({"aura_range_ft": 10}),
+    )
+    raw = bundle.entities["class_feature_catalog"]["srd_class_features"]
+    protection = next(
+        item for item in raw["classes"]["paladin"]["features"]
+        if item["id"] == "aura_of_protection"
+    )
+    protection["parameters"].update({
+        "aura_expands_feature_id": "aura_expansion",
+        "aura_range_override_ft": 30,
+    })
+    with pytest.raises(ClassFeatureError):
+        Dnd2024ClassFeatureResolver(bundle)
+
+
 # --------------------------------------------------------------------------
 # 6.2 Aura of Protection numbers and range
 # --------------------------------------------------------------------------
@@ -556,6 +585,33 @@ def test_a_second_paladin_keeps_its_aura_when_the_first_is_down() -> None:
     assert [row["source_actor_id"] for row in source] == ["player:p2"]
 
 
+def test_a_dead_holder_stops_projecting_immediately() -> None:
+    """11 (continued). Death is not just another condition on the list.
+
+    The reducer removes ``unconscious`` the moment it marks a creature dead,
+    and ``dead`` is not a catalog condition, so the incapacitated flag alone
+    would let a corpse keep radiating.  0 HP has to switch the emanation off on
+    its own, and the death has to come from real death saves, not a hand-set
+    flag.
+    """
+
+    _, engine, instance = new_combat(paladin_level=6, allies={"wiz": "wizard"})
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    assert aura_of(engine, instance, "player:wiz")["bonus"] == 1
+
+    down(engine, instance)
+    assert "unconscious" in _canonical_of(instance, "gm")["conditions"]
+    assert aura_of(engine, instance, "player:wiz")["bonus"] == 0
+
+    # 两个天然 1 就是四次失败：reducer 写 dead，并摘掉 unconscious。
+    for _ in range(2):
+        _death_save(engine, instance, rolls=[1])
+    canonical = _canonical_of(instance, "gm")
+    assert "dead" in canonical["conditions"]
+    assert "unconscious" not in canonical["conditions"]
+    assert aura_of(engine, instance, "player:wiz")["bonus"] == 0
+
+
 def test_two_auras_never_stack_and_the_higher_one_wins() -> None:
     """12. Highest bonus only; leaving that holder falls back to the other."""
 
@@ -628,18 +684,39 @@ def _canonical_of(instance, uid: str) -> dict:
     return instance.players[uid]["character_sheet"]["ruleset_character"]
 
 
-def down(instance, actor_id: str = "player:gm") -> None:
-    """Drop one player to 0 HP so the death-save intent is legal."""
+def down(engine, instance, actor_id: str = "player:gm") -> None:
+    """Drop one player to 0 HP the way the reducer does.
+
+    Writing ``hp = 0`` straight onto the sheet would invent a state the engine
+    never produces: ``resource.changed`` pairs 0 HP with ``unconscious``
+    ("zero_hp"), and a creature at 0 HP is Unconscious or dead.  That pairing is
+    exactly what switches its own aura off, so a bare HP write would test a
+    corpse-free world that cannot happen in play.
+    """
 
     _, uid = actor_id.split(":", 1)
-    _canonical_of(instance, uid)["resources"]["hp"] = 0
+    hp = int(_canonical_of(instance, uid)["resources"]["hp"])
+    apply_events(engine, instance, [{
+        "type": "resource.changed", "target_id": actor_id,
+        "resource": "hp", "delta": -max(hp, 1),
+    }])
+
+
+def give_turn(instance, actor_id: str) -> None:
+    """Hand the turn to one actor so an off-turn intent is legal."""
+
+    combat = combat_state(instance)
+    combat["turn_index"] = combat["initiative"].index(actor_id)
 
 
 def _death_save(engine, instance, actor_id: str = "player:gm", rolls=()) -> list[dict]:
+    # 死亡豁免只在本人回合可提交；把回合交给该角色，避免测试偷偷依赖先攻顺序。
+    give_turn(instance, actor_id)
+    version = int(ruleset_runtime.state(instance)["version"])
     intent = {
-        "intent_id": "death-save-1", "type": "death_save", "actor_id": actor_id,
-        "expected_version": ruleset_runtime.state(instance)["version"],
-        "submitted_by": "gm",
+        "intent_id": f"death-save-{version}", "type": "death_save",
+        "actor_id": actor_id, "expected_version": version,
+        "submitted_by": actor_id.split(":", 1)[1],
     }
     resolved = engine.resolve_intent(instance, intent, SequenceRng(list(rolls)))
     assert resolved["ok"] is True, resolved
@@ -647,14 +724,24 @@ def _death_save(engine, instance, actor_id: str = "player:gm", rolls=()) -> list
     return resolved["event_batch"]["events"]
 
 
-def test_a_death_save_can_pass_on_the_aura_alone() -> None:
-    """19. natural 9 plus a +1 aura is an ordinary success at DC 10."""
+def test_a_dying_ally_can_pass_on_the_aura_alone() -> None:
+    """19. natural 9 plus a +1 aura is an ordinary success at DC 10.
+
+    The roll belongs to the dying *ally*, not to the paladin: a creature at
+    0 HP is Unconscious, so the paladin's own emanation is switched off, and
+    only a living holder can lend a bonus to that save.  Benefiting from an
+    aura needs no consciousness, which is why the 0 HP target keeps the +1.
+    """
 
     low = {"str": 15, "dex": 14, "con": 13, "int": 12, "wis": 10, "cha": 8}
-    _, engine, instance = new_combat(paladin_level=6, paladin_abilities=low)
-    assert aura_of(engine, instance, "player:gm")["bonus"] == 1
-    down(instance)
-    events = _death_save(engine, instance, rolls=[9])
+    _, engine, instance = new_combat(
+        paladin_level=6, paladin_abilities=low, allies={"wiz": "wizard"},
+    )
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    assert aura_of(engine, instance, "player:wiz")["bonus"] == 1
+
+    down(engine, instance, "player:wiz")
+    events = _death_save(engine, instance, "player:wiz", rolls=[9])
     check = check_in(events, "death_save")
     assert check["natural"] == 9
     assert check["aura_bonus"] == 1
@@ -667,19 +754,58 @@ def test_a_natural_one_still_fails_twice_and_a_natural_twenty_still_heals() -> N
     """19 (continued). The dedicated faces outrank the ordinary comparison."""
 
     low = {"str": 15, "dex": 14, "con": 13, "int": 12, "wis": 10, "cha": 8}
-    _, engine, instance = new_combat(paladin_level=6, paladin_abilities=low)
-    down(instance)
-    events = _death_save(engine, instance, rolls=[1])
+    _, engine, instance = new_combat(
+        paladin_level=6, paladin_abilities=low, allies={"wiz": "wizard"},
+    )
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    down(engine, instance, "player:wiz")
+    events = _death_save(engine, instance, "player:wiz", rolls=[1])
     check = check_in(events, "death_save")
+    # 天然 1 仍是两次失败——光环加值不能把 1 变成普通成功。
     assert check["total"] == 2
     assert check["success"] is False
+    resolved = next(
+        event for event in events if event["type"] == "dnd2024.death_save.resolved"
+    )
+    assert resolved["failures"] == 2
+    assert resolved["successes"] == 0
 
-    _, engine2, instance2 = new_combat(paladin_level=6, paladin_abilities=low)
-    down(instance2)
-    events2 = _death_save(engine2, instance2, rolls=[20])
+    _, engine2, instance2 = new_combat(
+        paladin_level=6, paladin_abilities=low, allies={"wiz": "wizard"},
+    )
+    place(instance2, **{"player:gm": 0, "player:wiz": 5})
+    down(engine2, instance2, "player:wiz")
+    events2 = _death_save(engine2, instance2, "player:wiz", rolls=[20])
     check2 = check_in(events2, "death_save")
     assert check2["natural"] == 20
     assert check2["success"] is True
+    healed = next(
+        event for event in events2 if event["type"] == "dnd2024.death_save.resolved"
+    )
+    assert healed["hp"] == 1
+
+
+def test_bless_counts_on_a_death_save_and_says_so() -> None:
+    """19 (continued). A death save is still a saving throw, Bless included.
+
+    The task book sketched ``bless_bonus: 0`` for this surface.  Dropping a
+    bonus the baseline already applied is §7.1's non-goal, so the field
+    reports what actually happened instead of what the sketch assumed: the
+    conditional d4 stays in the total and is named separately.
+    """
+
+    _, engine, instance = new_combat(paladin_level=6, allies={"wiz": "wizard"})
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    put_condition(engine, instance, "player:wiz", "blessed")
+    down(engine, instance, "player:wiz")
+    # 骰序：死亡豁免的 d20，然后才是 Bless 的一枚 d4。
+    events = _death_save(engine, instance, "player:wiz", rolls=[9, 4])
+    check = check_in(events, "death_save")
+    assert check["natural"] == 9
+    assert check["check_bonus"] == 4
+    assert check["bless_bonus"] == 4
+    assert check["aura_bonus"] == 1
+    assert check["total"] == 14
 
 
 def test_an_auto_failed_save_rolls_nothing_and_gains_nothing() -> None:
@@ -831,6 +957,39 @@ def test_only_charmed_is_intercepted() -> None:
         if event["type"] == "condition.applied" and event.get("condition") == "paralyzed"
     ]
     assert len(applied) == 1
+
+
+def test_a_condition_that_needs_no_save_is_still_intercepted(monkeypatch) -> None:
+    """27 (continued). Immunity does not depend on there being a save at all.
+
+    ``condition.applied`` is built in one place shared by buff, debuff,
+    automatic damage and spell attacks, so the interception cannot sit behind
+    ``mode == "saving_throw"``.  No shipped effect needs that today -- Charmed
+    only arrives through Charm Person -- so the shape is pinned by re-pointing
+    an existing buff at ``charmed`` and giving it a real cast.
+    """
+
+    _, engine, instance = new_combat(paladin_level=7, allies={"wiz": "wizard"})
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    effect = engine.catalog.spell_effects["bless"]
+    monkeypatch.setitem(
+        engine.catalog.spell_effects, "bless", {**effect, "condition": "charmed"},
+    )
+    events = events_of(real_cast(engine, instance, "gm", "spell:bless", "player:wiz"))
+    assert not any(
+        event["type"] == "condition.applied" and event.get("condition") == "charmed"
+        for event in events
+    )
+    # 这条路径没有 check event 可挂，条件被吞掉就必须留一条可见审计。
+    message = next(
+        event for event in events if event["type"] == "dnd2024.combat.message"
+    )
+    assert message["blocked_condition"] == "charmed"
+    assert message["blocked_by_aura"] == {
+        "feature_id": "aura_of_devotion",
+        "owner": "subclass:oath_of_devotion",
+        "source_actor_id": "player:gm",
+    }
 
 
 def test_an_existing_charmed_is_kept_not_removed_when_entering_the_aura() -> None:
@@ -1148,20 +1307,24 @@ def test_replaying_an_aura_batch_changes_nothing() -> None:
     )["aura_bonus"] > 0
     _replay_is_a_no_op(engine, instance, batch, "gm")
 
-    # 死亡豁免：天然 9 加 +1 光环刚好 10 的普通成功。
+    # 死亡豁免：濒死队友天然 9 加 +1 光环刚好 10 的普通成功。
     low = {"str": 15, "dex": 14, "con": 13, "int": 12, "wis": 10, "cha": 8}
-    _, engine, instance = new_combat(paladin_level=6, paladin_abilities=low)
-    down(instance)
+    _, engine, instance = new_combat(
+        paladin_level=6, paladin_abilities=low, allies={"wiz": "wizard"},
+    )
+    place(instance, **{"player:gm": 0, "player:wiz": 5})
+    down(engine, instance, "player:wiz")
+    give_turn(instance, "player:wiz")
     resolved = engine.resolve_intent(instance, {
         "intent_id": "death-save-replay", "type": "death_save",
-        "actor_id": "player:gm", "submitted_by": "gm",
+        "actor_id": "player:wiz", "submitted_by": "wiz",
         "expected_version": ruleset_runtime.state(instance)["version"],
     }, SequenceRng([9]))
     assert resolved["ok"] is True, resolved
     batch = resolved["event_batch"]
     assert check_in(batch["events"], "death_save")["aura_bonus"] == 1
     assert engine.apply_batch(instance, batch)["applied"] is True
-    _replay_is_a_no_op(engine, instance, batch, "gm")
+    _replay_is_a_no_op(engine, instance, batch, "wiz")
 
 
 def test_the_feed_shows_the_aura_and_leaks_nothing_else() -> None:

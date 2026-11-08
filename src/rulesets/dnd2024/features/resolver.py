@@ -1371,6 +1371,21 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.aura_expands_feature_id must name another base aura"
                 )
+            # 扩展链必须收敛：A 覆盖 B、B 又覆盖 A 时，"有效范围"取决于从哪
+            # 条开始折叠，任何确定性说法都是假的，因此整条链拒绝加载。
+            seen = {definition.id}
+            cursor = expanded.id
+            while cursor:
+                if cursor in seen:
+                    raise ClassFeatureError(
+                        f"{definition.id}.aura_expands_feature_id forms a cycle"
+                    )
+                seen.add(cursor)
+                following = _base_aura(cursor)
+                if following is None:
+                    break
+                next_id = following.parameters.get("aura_expands_feature_id")
+                cursor = next_id if isinstance(next_id, str) and next_id else ""
 
     @staticmethod
     def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:

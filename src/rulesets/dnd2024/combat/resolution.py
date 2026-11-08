@@ -1091,10 +1091,10 @@ class CombatResolutionMixin:
                 or mode in {"buff", "debuff"}
             )
             # 光环条件免疫：命中则根本不产生 condition.applied，并把拦截来源
-            # 写回本次豁免事件（仅拦截时携带，事件类型不变）。豁免本身仍然
-            # 是失败——被免疫的是条件的落地，不是掷骰结果。
+            # 写回本次豁免事件（没有 check event 时改用一条 message 留痕）。
+            # 豁免本身仍然是失败——被免疫的是条件的落地，不是掷骰结果。
             blocked_by_aura: dict[str, str] | None = None
-            if condition and condition_applies and mode == "saving_throw":
+            if condition and condition_applies:
                 blocked_by_aura = self._aura_condition_immunity_source(
                     instance, combat, target, condition,
                 )
@@ -1102,6 +1102,17 @@ class CombatResolutionMixin:
                 if save_check_index is not None:
                     events[save_check_index]["blocked_condition"] = condition
                     events[save_check_index]["blocked_by_aura"] = blocked_by_aura
+                else:
+                    # 免疫不依赖豁免：buff/debuff/自动伤害同样经过这里。这些
+                    # 路径没有 check event 可挂，但被吞掉的条件必须留痕，否则
+                    # 只能靠怀疑；用既有 message 类型，不新增事件类型。
+                    events.append({
+                        "type": "dnd2024.combat.message", "target_id": target_id,
+                        "text": f"{condition} has no effect inside an aura",
+                        "condition": condition,
+                        "blocked_condition": condition,
+                        "blocked_by_aura": blocked_by_aura,
+                    })
             elif condition and condition_applies:
                 applied = {
                     "type": "condition.applied", "target_id": target_id,
