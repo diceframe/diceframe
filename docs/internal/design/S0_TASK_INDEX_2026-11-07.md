@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D1 至 S0-E3 已完成契约审计（见 §8），四份需改规则或补整块机制；其余 43 份待执行 |
+| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录。剩余 40 份：D1 补丁、D3、E3 三份已审计待改，F1–F37 中除 F9 外 36 份待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -98,7 +98,7 @@ S0-A 子职授予主干
 | S0-F6 | 休息恢复预算与转换 | Arcane/Natural Recovery、Sorcerous Restoration、Magical Cunning、Eldritch Master、Font of Magic | `S0F6_REST_RESOURCE_CONVERSION_TASK_SPEC_2026-11-07.md` | 25 | 待执行 |
 | S0-F7 | 武器精通与八词条 | 五职业 Weapon Mastery、Tactical Master；Cleave/Graze/Nick/Push/Sap/Slow/Topple/Vex | `S0F7_WEAPON_MASTERY_TASK_SPEC_2026-11-07.md` | 28 | 待执行 |
 | S0-F8 | 战斗风格与戏法选项 | Fighter/Paladin/Ranger Fighting Style；六种风格及 Blessed/Druidic Warrior | `S0F8_FIGHTING_STYLES_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
-| S0-F9 | 无甲防御与特殊移动 | Unarmored Defense/Movement、Fast Movement、Roving、Second-Story Work、Acrobatic Movement | `S0F9_DERIVED_DEFENSE_MOVEMENT_TASK_SPEC_2026-11-07.md` | 26 | 待执行 |
+| S0-F9 | 无甲防御与特殊移动 | Unarmored Defense/Movement、Fast Movement、Roving、Second-Story Work、Acrobatic Movement | `S0F9_DERIVED_DEFENSE_MOVEMENT_TASK_SPEC_2026-11-07.md` | 26+46 | **部分交付**（`feat/dnd2024-s0f9-movement`）。矩阵 2–11 早在 `feat/dnd2024-derived-defense-speed@73d11263` 已实现（38 条）；本轮补 `roving` / `second_story_work` 声明、`derived.climb_speed`/`swim_speed`、跳跃距离权威（46 条）。矩阵 19–24 按 §7 停止条件 2 记录为不可自动化：combat 是 `position_mode: theater` 的一维距离模型，没有地形/垂直面/液面/支撑事实。详见该文件 §9 |
 | S0-F10 | Bonus Action 路由与移动效果 | Instinctive Pounce、Tactical Shift、Cunning Action、Steady Aim、Fast Hands、Fleet Step、Heightened Focus | `S0F10_ACTION_ROUTING_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
 | S0-F11 | 受击与伤害反应 | Retaliation、Deflect Attacks、Deflect Energy、Slow Fall | `S0F11_DAMAGE_REACTIONS_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
 | S0-F12 | 豁免减伤、抗性与归零存活 | Danger Sense、Monk/Rogue Evasion、Fiendish Resilience、Relentless Rage | `S0F12_SAVE_DAMAGE_SURVIVAL_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
@@ -173,12 +173,14 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 - 198 行结构（140 + 58）与 §6 第 7 条的冻结口径**完全一致**，内容无漂移；
 - 但只有 26 行（13.1%）有机械定义，157 行仅有排期名；`druid`、`ranger` 在 `srd_class_features.json` 中没有任何 bucket；
+  - **2026-11-08 复核**：现为 35 行（17.7%）有机械定义（A/B/C/D2/E1/E2 与 F9 的落地）；`ranger` 已随 S0-F9 建 bucket（仅 `roving`），`druid` 仍无 bucket；
 - 两项直接算错：`unarmored_defense` 未接线（野蛮人 AC 12 应为 15、武僧 13 应为 15），移动速度只取种族值（`fast_movement`/`unarmored_movement`/`roving` 无消费点），两者都落在 **S0-F9**；
+  - **2026-11-08 复核：该条已失效**。S0-C 把 AC 候选与速度加值做成通用参数（`unarmored_ac_ability_bonus` / `speed_bonus_ft` / `speed_bonus_track`），`feat/dnd2024-derived-defense-speed@73d11263` 已接线并有 38 条测试；按特性 id 做字面搜索会误判为"无消费点"。真正缺的是 Roving / Second-Story Work 与跳跃，已由 `feat/dnd2024-s0f9-movement` 补齐；
 - 11 个职业资源池声明并写入存档，但因投影只枚举 `feature.resource_id` 而无法出现在角色卡与战斗面（含 cleric/paladin 的 `channel_divinity`、druid 的 `wild_shape`、paladin 的 `lay_on_hands`、sorcerer 的 `sorcery_points`）；
 - 163/198 行没有 en/zh 标签；
 - `character_builder` 的 11 条长期红灯已定位为 Windows 保留设备名 `CON`（夹具写入 `con.json`），与规则实现无关。
 
-**执行顺序调整**：S0-D1 至 S0-E3 的载体（`supreme_healing`、`overchannel`、`cutting_words`、`dark_ones_blessing`、`aura_of_devotion`、`survivor`）在上游已有定义与测试，应沿用 S0-C 的方式先做契约审计再定改动；S0-F9 因涉及错误数值，优先级上调到 D 系列之前。
+**执行顺序调整**：S0-D1 至 S0-E3 的载体（`supreme_healing`、`overchannel`、`cutting_words`、`dark_ones_blessing`、`aura_of_devotion`、`survivor`）在上游已有定义与测试，应沿用 S0-C 的方式先做契约审计再定改动；S0-F9 因涉及错误数值，优先级上调到 D 系列之前。（2026-11-08：错误数值部分已在 `feat/dnd2024-derived-defense-speed` 修完，该优先级理由随之失效；剩余环境面受停止条件约束。）
 
 ## 8. A 类六份任务书的契约审计（2026-11-07）
 

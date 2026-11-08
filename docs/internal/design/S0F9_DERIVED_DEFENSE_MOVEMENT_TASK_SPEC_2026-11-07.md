@@ -166,3 +166,92 @@ git diff --check
 - 测试 1–26 / 聚焦 / 回归 / 全量 / ruff / diff：
 - 存档、重建、重放与 RNG 证据：
 - 偏差、停止原因与未决事项：
+
+---
+
+## 9. 执行报告（2026-11-08）
+
+### 9.1 基线、分支与一条必须先更正的前置结论
+
+- **前置**：`feat/dnd2024-s0d2-overchannel@f775ae4f`（stack 在 E2/E1 之上），新分支 `feat/dnd2024-s0f9-movement`。
+- **更正**：索引 §7 与本任务开工前的复核都写着「`unarmored_defense` 未接线（野蛮人 AC 12 应为 15、武僧 13 应为 15），移动速度只取种族值」。**该结论已失效**。
+  - S0-C 把无甲 AC 与速度加值做成了通用参数（`unarmored_ac_ability_bonus`、`speed_bonus_ft`、`speed_bonus_track`），解析入口是 `Dnd2024ClassFeatureResolver.unarmored_ac_bonus_abilities()` 与 `speed_bonus()`，**不按特性 id 命名**；`feat/dnd2024-derived-defense-speed@73d11263` 已把它们接进 `derive_armor_class` / `derive_speed`，`tests/rulesets/test_dnd2024_derived_defense_speed.py` 38 条覆盖矩阵 2–11（含野蛮人 15 / 持盾 17 / 三种护甲失效、武僧 15 / 持盾与穿甲失效、Fast Movement 非 Heavy +10、Unarmored Movement 2/6/10/14/18 级 +10/+15/+20/+25/+30、建卡/升级/协调三路一致）。
+  - 用 `grep unarmored_defense src/` 得 0 命中是**方法错误**：机制是参数驱动的，id 本来就不会出现在源码里。本轮不再重复实现，只补真正缺的部分。
+- **本切片不宣称**：矩阵 2–11 的既有能力不是本轮交付物。
+
+### 9.2 实际变更
+
+| 面 | 文件 | 内容 |
+|---|---|---|
+| 目录 | `content/class_feature_catalogs/srd_class_features.json` | 新增 `classes.ranger` bucket（仅 `roving`，6 级）；`rogue` bucket 新增 `subclass:thief.second_story_work`（3 级） |
+| 标签 | 同上（content `labels`）、`locales/{en,zh-CN}/...` | 补 `ranger`；修正两处误译：`roving` 游荡→**游走**、`second_story_work` 二楼作业→**飞檐走壁** |
+| 特性解析 | `features/resolver.py` | 新增 `movement_modes()`（读 *owned* 声明）与 `jump_ability()`（默认 `str`）；新增 `_validate_movement_parameters()` fail-closed 校验 |
+| 派生 | `character/derivation.py` | 新增 `derive_jump_distances()`、`derive_movement_profile()`；建卡路径写入 `climb_speed`/`swim_speed`/五个跳跃字段 |
+| 升级 | `progression/advancement.py` | 升级当次重算移动档案（否则 Ranger 6 拿到 Roving 后要等下一次换装才生效） |
+| 协调 | `character/reconciliation.py` | `reconcile()` 与 `reconcile_canonical()` 同源写入，并把新字段纳入幂等短路比较 |
+| 测试 | `tests/rulesets/test_dnd2024_derived_defense_movement.py`（新建，46 条） | 矩阵 1、12–16、18、25 的部分 + fail-closed + 停止条件断言 |
+| 测试 | `tests/rulesets/test_dnd2024_class_features.py` | 两条 rogue 特性名单断言随新增声明更新（现在多一项 `second_story_work`） |
+
+### 9.3 关键设计：一条声明、两个门
+
+Roving 在 SRD p59 的两个半句有不同前提：
+
+> Your Speed increases by 10 feet **while you aren't wearing Heavy armor**. You **also** have a Climb Speed and a Swim Speed equal to your Speed.
+
+Speed +10 受 Heavy 门控；Climb/Swim 不受。所以同一份声明要分两路读：
+
+- `speed_bonus()` 读 `active_features_for()` —— Heavy 装备使声明失效，+10 消失（既有行为，未改）；
+- `movement_modes()` 读 `features_for()` —— 只问"有没有这份声明"，Heavy 不影响。
+
+如果两处都用同一个入口，要么 Heavy 下错误删掉两个速度，要么 Heavy 下错误保留 +10。测试 `test_heavy_armor_drops_the_bonus_but_keeps_both_speeds` 把这条不对称钉死。
+
+Second-Story Work 是**替换**不是追加：`derive_jump_distances(abilities, ability="dex")` 换掉被读的分数，Strength 不再参与。测试用 Str 20 / Dex 8 与 Str 20 两例证明两者不相加。
+
+### 9.4 矩阵逐项
+
+| 编号 | 结果 |
+|---|---|
+| 1 | **通过**：`roving`（class:ranger，6 级，非 Heavy，无 `no_shield`）、`second_story_work`（subclass:thief，3 级，`equipment_requirement` 为 `None`）；Ranger 5 / Thief 2 / Assassin 3 / Monk 20 均不授予 |
+| 2–11 | **既有**：由 `test_dnd2024_derived_defense_speed.py` 覆盖，本轮未改（38 条绿） |
+| 12 | **通过**：Ranger 6 得 climb/swim = Speed；Heavy 下 +10 归零而 climb/swim 保留；Light 与 Shield 都不影响 |
+| 13 | **通过**：Thief 3 只给 climb，不给 swim；两个来源同时声明同一模式时结果仍是 1×Speed（`test_a_second_source_of_the_same_mode_does_not_double_it`） |
+| 14 | **部分**：Long Jump = Dexterity score、助跑/立定一半、向下取整已实现；「每跳 1 尺消耗 1 尺 movement」沿用既有 `move` 路径，未新增跳跃 intent |
+| 15 | **部分**：High Jump = `3 + modifier`（下限 0）、立定一半已实现；**触及高度 `1.5 × 身高` 未实现**——canonical 没有身高事实，凭空写一个 reach 就是造字段 |
+| 16 | **通过**：非 Thief 仍读 Strength；Dex 是替换而非追加（20/8 两例互斥验证） |
+| 17 | **未实现**：助跑 10 尺的"紧接跳跃前步行移动"需要逐步移动轨迹，当前 `economy` 只有累计已用移动 |
+| 18 | **部分继承**：超过剩余移动的位移由既有 `move` 校验拒绝（`validation.py`：`movement exceeds the remaining speed`），负距离/零距离同样拒绝；但"非法路径"与跳跃专属规则不存在 |
+| 19–24 | **停止条件 2**，见 9.5 |
+| 25 | **部分**：建卡/升级/协调三路同源 + 幂等短路 + 未知种族不覆盖已验证；中英文 bundle 切换未单独断言 |
+| 26 | **通过**：见 9.6 |
+
+### 9.5 停止条件 2：Acrobatic Movement 与地形类
+
+`combat.position_mode` 是 `"theater"`，`positions[actor_id]` 只是一个整数，`_distance()` 就是 `abs(a - b)`。没有地形、没有垂直面、没有液面、没有支撑/坠落事实。因此：
+
+- 矩阵 19、20（Difficult Terrain 落地 DC10、High Jump 不得误加该检定）无法执行；
+- 矩阵 21–24（Acrobatic Movement 的表面、回合、免坠落作用域）无法执行。
+
+**没有声明 `acrobatic_movement`**。索引 §6.5 要求无法自动结算的规则显式标记且不得开放假入口；在没有任何表面事实的前提下声明它，只能得到一个永远回答"可以"却无法裁决的按钮。测试 `test_acrobatic_movement_is_not_declared_as_a_mechanical_benefit` 与 `test_the_combat_state_has_no_terrain_or_support_fact` 把这两条钉成可执行的负证据，而不是只写在文档里。
+
+**回填前提**：需要先有最小世界模型（地形格 / 垂直面 / 液面 / 支撑），且能与 `move` 共用同一事务；届时 19–24 一次性补齐。
+
+### 9.6 验收
+
+- 聚焦：`pytest tests/rulesets/test_dnd2024_derived_defense_movement.py` → **46 passed**
+- 定向回归：`test_dnd2024_derived_defense_speed.py` / `monk_equipment` / `advancement_access` → **78 passed**；`class_features` / `progression` / `feature_choices` / `monk_resources` → 首轮 2 failed（均为 rogue 特性名单断言）+ 154 passed，更新断言后 `class_features` **71 passed**
+- `ruff check src/rulesets/dnd2024/{character,progression,features,combat} tests/rulesets/test_dnd2024_derived_defense_movement.py` → **All checks passed**
+- 全量：见 9.7
+- 存档与兼容：`derived.climb_speed` / `swim_speed` / `jump_*` 是新增可选字段，缺失按"没有该速度"处理，无迁移、无 `content_version` 变更
+- 白名单：改动全部落在 §5 第二、三条（`derivation.py`、`advancement.py`、`resolver.py`、`reconciliation.py` 属 `character/` 与 `progression/`）与第一条（目录 + 两套 locale）；测试文件为 §5 第四条允许的新建文件
+
+### 9.7 全量回归
+
+`pytest tests/rulesets -q` → **1525 passed / 11 failed**（23m07s）。11 条全部是 `test_dnd2024_character_builder.py`，根因仍是 Windows 保留设备名 `CON`（夹具写 `con.json`），与 D2 提交时的 11 条基线**完全一致，零新增**。
+
+
+### 9.8 偏差与白名单
+
+1. **`character/reconciliation.py` 不在 §5 白名单内**。§5 第 2 条列了 `character/derivation.py`，没有列同目录的 `reconciliation.py`，但 live 换装走的是 `reconcile()` / `reconcile_canonical()`：不改这一处，穿上重甲后 `derived.speed` 会变而 `derived.climb_speed` 仍是旧值，等于留下一个只在换装后才出现的错误数值。按"派生值只有一个入口"执行，并在此记录为白名单外改动。改动仅限：新增 `movement` 计算、纳入幂等短路比较、写入 `derived`，不放宽任何既有校验。
+2. **两处中文标签修正**（`roving` 游荡→游走、`second_story_work` 二楼作业→飞檐走壁）。译名不影响机制，但"二楼作业"对 Second-Story Work（飞檐走壁）是明显误译，且本切片正是要把它变成可见特性，故一并修正。
+3. **未新增跳跃 intent**。矩阵 14/15 的"每跳 1 尺扣 1 尺 movement"没有独立的跳跃动作，跳跃距离以派生值发布，实际位移仍走既有 `move`（预算校验已在）。新增跳跃语义会改 combat 的 intent 契约并波及前端，超出本切片。
+4. **未声明 `acrobatic_movement`**，理由见 9.5；这是停止条件，不是遗漏。
