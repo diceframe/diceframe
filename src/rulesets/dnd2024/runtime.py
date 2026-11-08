@@ -1287,6 +1287,7 @@ class Dnd2024Runtime:
             "total", "target", "success", "critical", "delta", "amount", "damage_type",
             "healing",
             "rolls", "advantage_mode", "advantage_sources", "check_bonus",
+            "death_save_crit_threshold",
             "check_bonus_rolls",
             "aura_bonus", "aura_sources", "blocked_condition", "blocked_by_aura",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",

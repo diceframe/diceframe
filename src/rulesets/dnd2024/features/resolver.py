@@ -538,6 +538,26 @@ class Dnd2024ClassFeatureResolver:
             if definition.parameters.get(name)
         ]
 
+    def feature_flag_source_rows(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+    ) -> list[dict[str, str]]:
+        """Owned declaration identities whose boolean parameter ``key`` is truthy.
+
+        Same order and same ownership as :meth:`feature_flag_sources`, but each
+        row carries the ``owner`` as well: provenance that only names a local id
+        cannot tell two subclasses' identically-named features apart, and the
+        reported source list is the only record a client sees.
+        """
+
+        name = str(key)
+        return [
+            {"code": definition.id, "owner": definition.owner}
+            for definition in self.features_for(character)
+            if definition.parameters.get(name)
+        ]
+
     def feature_selection(
         self,
         character: Mapping[str, Any] | None,
@@ -1240,17 +1260,17 @@ class Dnd2024ClassFeatureResolver:
         threshold = parameters.get("death_save_crit_threshold")
         if "death_save_crit_threshold" in parameters and (
             isinstance(threshold, bool) or not isinstance(threshold, int)
-            or not 2 <= threshold <= 19
+            or not 2 <= threshold <= 20
         ):
             raise ClassFeatureError(
-                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 19"
+                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 20"
             )
         base = parameters.get("turn_start_regen_base")
         if "turn_start_regen_base" in parameters and (
-            isinstance(base, bool) or not isinstance(base, int) or base < 0
+            isinstance(base, bool) or not isinstance(base, int) or base < 1
         ):
             raise ClassFeatureError(
-                f"{definition.id}.turn_start_regen_base must be a non-negative integer"
+                f"{definition.id}.turn_start_regen_base must be a positive integer"
             )
         ability = parameters.get("turn_start_regen_ability")
         if "turn_start_regen_ability" in parameters and (
