@@ -65,7 +65,10 @@ jobs:
             -r requirements-portable.lock
 
       - name: Run backend tests
-        run: python -m pytest -q --cov=src --cov-report=term-missing --cov-report=xml
+        # 按测试文件分发给 runner 的所有核心：整套约 550 个文件、上万条用例，
+        # 串行会吃掉 45 分钟预算的大部分。--dist loadfile 让同一文件的用例
+        # 始终落在同一个 worker，模块内 fixture 与共享状态语义与串行一致。
+        run: python -m pytest -q -n auto --dist loadfile --cov=src --cov-report=term-missing --cov-report=xml
 
   frontend:
     name: Frontend checks

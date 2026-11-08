@@ -3,5 +3,6 @@
 pytest>=8,<10
 pytest-asyncio>=0.24,<2
 pytest-cov>=6,<8
+pytest-xdist>=3.6,<4
 ruff>=0.12,<1
 mypy>=1.15,<2

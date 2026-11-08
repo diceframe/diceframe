@@ -63,10 +63,12 @@ PR 模板中的风险勾选用于提醒 reviewer 关注 API、存档、权限、
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m pytest -q --cov=src --cov-report=term-missing
+python -m pytest -q -n auto --dist loadfile --cov=src --cov-report=term-missing
 ```
 
-只运行一组测试时可以指定文件或关键字：
+`-n auto --dist loadfile` 让 `pytest-xdist` 按测试文件分发给本机所有核心（整套约 550 个文件、上万条用例，串行要几十分钟）；同一个测试文件始终落在同一个 worker 上，所以模块内的 fixture 与共享状态语义与串行一致。
+
+只运行一组测试时可以指定文件或关键字（短跑不必加 `-n`）：
 
 ```bash
 python -m pytest -q tests/integration/test_permissions.py
