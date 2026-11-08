@@ -237,3 +237,118 @@ if maximized:
 - 未解决问题（没有则写“无”）：
 - 最终 git status 与 changed-file 白名单核对：
 ```
+
+---
+
+## 执行报告（2026-11-08）
+
+- **基线**：`fa254b1f`（`feat/dnd2024-s0d3-cutting-words` 链头，stack 在 F9 `25afa0d7` 上；S0-A 的子职授予与 owner-scoped `has_feature()` 均已在链内）
+- **分支 / HEAD**：`feat/dnd2024-s0d1-supreme-healing` / `3a326e38`（实现）+ `5283f77d`（补矩阵证据）
+- **实际变更文件**：
+  1. `src/rulesets/dnd2024/combat/resolution.py` — 治疗分支的 `has_feature` 补 `owner="subclass:life_domain"`（唯一行为改动）
+  2. `tests/rulesets/test_dnd2024_die_manipulation.py` — 新增 4 条 `maximized` / 所有权测试，并在既有 3 条测试内补断言
+- **§4.1–§4.3 是否已实现**：是。本任务书 v2 的计划工作在 S-P2 已落地（`maximize_dice_nodes`、`supreme_healing` 声明、`maximized` 事件字段、17 级 Life Cleric 端到端）。本轮执行的是 §8 审计指出的唯一缺陷（查询缺 owner）与缺失的矩阵证据，不是重新实现整块能力。
+
+### 设计偏差及理由
+
+1. **`has_feature` 查询按参数各占一行**，与 §4.3.1 片段的单行形式不同。语义一致，仅为行宽。ruff 不为该文件做 format 判定（见下）。
+2. **白名单第 6 项写“新建 `test_dnd2024_die_manipulation.py`”，实际是修改**。该文件在 S-P2 建立、D2 重写 8 条废止断言，已是 Supreme Healing 与 Overchannel 的共同载体；另起新文件会让同一套 cleric/wizard 夹具重复两份。改动仍只落在该文件内，未新增白名单外文件。
+3. **矩阵 16 没有新增测试**。“伤害/武器/职业能力路径没有新增最大化调用”是否定事实，无法用正向断言表达；证据是：`resolution.py` 的 diff 只有 `mode == "healing"` 分支的 4 行，且 `test_dnd2024_false_life.py` / `test_dnd2024_combat.py` / `test_dnd2024_improved_critical.py` 全绿。
+
+### §6 测试矩阵（逐项）
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 | 通过 | `test_catalog_declares_cleric_and_wizard_features`：两种 locale 各自构造 catalog，断言 `class_id=cleric`、`owner=subclass:life_domain`、`minimum_level=17`、`source_ref=srd-5.2.1:p40:supreme-healing`、`parameters=={}`、英文 `Supreme Healing` 与中文 `极效治疗`。canonical 侧加载由 `test_dnd2024_class_features.py` 覆盖 |
+| 2 | 通过 | `test_feature_ownership_follows_levels`：16 级 False、17 级 True（均经真实 `advance()` 升级），并断言 feature view 恰有一条 `("subclass:life_domain", 17)`，16 级 view 为空 |
+| 3 | 通过 | `test_supreme_healing_is_owner_scoped`：无 `subclass_ref`、`subclass:college_of_lore`、wizard14 伪造 `subclass:life_domain` 三种均 False |
+| 4 | 通过 | `test_maximize_dice_nodes_transforms_only_dice`：`2d8 → 16`、`3d4+2 → 14`，且 `deepcopy` 快照证明输入树未被修改 |
+| 5 | 通过 | 同上：`add/multiply` 嵌套、`subtract/min/max` 各自递归；固定节点不放大；`2d`、`0d6`、非 dict 三种非法输入均抛 `CombatIntentError`（不静默变 0） |
+| 6 | 通过 | 同上：`double_dice_counts(2d8)` 后最大化得 `32`；`roll_damage_node({"op":"constant","value":16}, SequenceRng([])) == (16, [])` |
+| 7 | 通过 | `test_supreme_healing_maximizes_cure_wounds_without_rng`：HP 50 → 69（`16 + WIS 调整`），事件 `maximized is True`、`rolls == []`；满血场景事件金额不变而 apply 后停在 `max_hp` |
+| 8 | 通过 | `test_supreme_healing_maximizes_upcast_dice`：3 环 `cure_wounds` = 6d8 → 48 + 调整值，无额外掷骰 |
+| 9 | 通过 | 同上：1 环 `healing_word` = 2d4 → 8 + 调整值；2 环 = 4d4 → 16 + 调整值 |
+| 10 | 通过 | 上述三条均传 `rolls=[99]` 单元素 `SequenceRng` 并断言 `rng.values == [99]`（一次都没抽）；升环与基础走同一节点，零消耗结论一致 |
+| 11 | 通过 | `test_cure_wounds_below_seventeen_still_rolls`：16 级返回真实骰迹 `[4, 5]`、金额 `9 + 调整值`、事件无 `maximized`、`rng.values == []`（证明它确实消耗了骰子） |
+| 12 | 通过 | `test_a_seventeen_level_cleric_without_the_owner_does_not_maximize`：删掉 `subclass_ref` 的 17 级 Cleric 治疗仍 `rolls == [4, 5]`、无 `maximized`、RNG 被消耗 |
+| 13 | 通过 | `test_cannot_regain_hp_blocks_the_maximized_heal`：`delta == 0`、`amount == 0`、`blocked_by == cannot_regain_hp`，同时 `rolls == []`、`maximized is True`、`rng.values == [99]`，apply 后 HP 仍 10 |
+| 14 | 通过 | `test_the_maximized_heal_replays_without_a_second_payout`：首次 apply 后 HP 与 `slots_current` 记录；对同一 batch 再 apply 得 `applied is False`、HP 与法术位不变，带 `maximized` 键不触发 reducer 报错 |
+| 15 | 通过 | `test_supreme_healing_does_not_touch_temp_hp`：`false_life` 仍走 `temp_hp` 分支，`rolls == [2, 3]`、无 `maximized` |
+| 16 | 通过（负证据） | 见设计偏差 3：diff 范围 + `test_dnd2024_false_life.py` / `test_dnd2024_combat.py` / `test_dnd2024_improved_critical.py` 全绿 |
+| 17 | 通过 | `test_dnd2024_combat.py`（死亡校验、法术位、目标数量、动作经济）与 `test_dnd2024_counterspell.py`、`test_dnd2024_resting.py` 全绿；`runtime.py::_recent_combat_events` 的 feed 白名单未改动 |
+| 18 | 通过 | 回归 198 passed（见下）；未修改任何既有断言的期望值，只新增断言 |
+
+### 聚焦测试
+
+```
+python -m pytest tests/rulesets/test_dnd2024_die_manipulation.py -q --basetemp=.ptmp-s0d1d
+20 passed
+```
+
+（原 16 条 + 新增 4 条：`test_supreme_healing_is_owner_scoped`、`test_a_seventeen_level_cleric_without_the_owner_does_not_maximize`、`test_cannot_regain_hp_blocks_the_maximized_heal`、`test_the_maximized_heal_replays_without_a_second_payout`。）
+
+### 回归测试
+
+```
+python -m pytest tests/rulesets/test_dnd2024_improved_critical.py \
+  tests/rulesets/test_dnd2024_class_features.py tests/rulesets/test_dnd2024_progression.py \
+  tests/rulesets/test_dnd2024_combat.py tests/rulesets/test_dnd2024_counterspell.py \
+  tests/rulesets/test_dnd2024_false_life.py tests/rulesets/test_dnd2024_resting.py -q
+198 passed
+```
+
+### rulesets 全量
+
+```
+python -m pytest tests/rulesets -q --basetemp=.ptmp-d1full-02
+1567 passed, 11 failed
+```
+
+11 条 `test_dnd2024_character_builder.py` 失败为基线既有环境问题（`ability:con`，Windows 保留设备名 `CON`），与 D2/D3/F9 同一失败集，本轮零新增。
+
+### ruff
+
+- `ruff check`（action_adapter / resolution / 测试）：`All checks passed!`
+- `ruff format --check`：`action_adapter.py`、`resolution.py`、`test_dnd2024_die_manipulation.py` 三个文件**在基线提交上就未通过**（已用 stash 对照确认 `resolution.py` 与测试文件；`action_adapter.py` 本轮零改动）。与 D3 一致，不顺手格式化，避免把无关重排混进切片。
+- `git diff --check`：通过。
+
+### 基础/升环治疗数值与固定分量核对
+
+| 场景 | 骰式 | 最大化后 | 固定分量 | 事件金额 |
+|---|---|---|---|---|
+| `cure_wounds` 1 环 | 2d8 | 16 | WIS 调整（17 级为 +3） | 19 |
+| `cure_wounds` 3 环 | 6d8 | 48 | WIS 调整 | 51 |
+| `healing_word` 1 环 | 2d4 | 8 | WIS 调整 | 11 |
+| `healing_word` 2 环 | 4d4 | 16 | WIS 调整 | 19 |
+
+固定加值来自 `heal_ability_modifier_node()`，在最大化**之前**挂进 AST，因此不被放大——`test_supreme_healing_maximizes_upcast_dice` 用同一角色跨三个槽阶验证。
+
+### RNG 零消耗、事件 apply/reducer 重放核对
+
+- 零消耗：`cast_result(..., rolls=[99])` 后 `rng.values == [99]`，四条最大化路径（1 环 / 升环 / 1 环 `healing_word` / 阻断目标）均如此。
+- 对照：同法术在 16 级或无 owner 的 17 级上 `rng.values == []`，证明哨兵不是恒不消耗的空实现。
+- 重放：`apply_batch` 再次接收同一 batch 返回 `applied is False`；HP 与 `slots_current` 不变；`maximized` 只是审计键，reducer 仍按 `delta/amount/healing` 落账，未改 reducer。
+- 上限：事件金额不裁剪，`apply_batch` 后 HP 停在 `max_hp`，符合 §4.3.5「`max(1, healing)` 与既有上限行为保持原样」。
+
+### 排除面与公共 API/feed 兼容
+
+- `temp_hp`（`false_life`）、伤害分支、`_class_capability_events` 均未被本 diff 触碰。
+- `runtime.py::_recent_combat_events` 的字段白名单未改，新增的 `maximized` 键只存在于权威事件，不进入公共 feed 投影。
+- 未新增 intent 参数、capability、资源池或前端开关；`validation.py` / `reducer.py` / `features/*.py` 零改动。
+
+### 未解决问题
+
+1. **矩阵 16 依赖负证据**，没有正向断言。若将来想知道“某条路径是否意外调用了最大化”，当前测试无法回答；需要等出现第二条治疗入口时再补结构化证据。
+2. `has_feature` 的 owner 过滤能力由 `features/resolver.py` 提供（S0-A），本切片只是第一个消费方；若后续有更多 owner-scoped 查询，应审计是否都带了 `owner`（`sneak_attack`、`weapon_mastery` 目前仍按短 id 查询，属 class 级特性，不在本任务范围）。
+3. `ruff format` 的三个文件仍是红的（基线问题），未在本切片处理。
+
+### 最终 git status 与白名单核对
+
+```
+git status --short            # 空（.workbuddy 与测试临时目录除外）
+git diff --stat fa254b1f..HEAD
+ src/rulesets/dnd2024/combat/resolution.py       |   7 +-
+ tests/rulesets/test_dnd2024_die_manipulation.py | 160 ++++++++++++++++++++-
+```
+
+改动文件 2 个，均落在 §4.4 白名单内（第 5 项 `resolution.py`、第 6 项测试文件）。未改 `features/models.py`、`features/resolver.py`、`combat/validation.py`、`combat/reducer.py`、`runtime.py`、通用公式引擎、前端、rest、manifest 或其他法术/职业内容。

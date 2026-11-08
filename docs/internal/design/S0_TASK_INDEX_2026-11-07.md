@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`，stack 在 F9 链头 `25afa0d7` 上）。剩余 39 份：D1 补丁、E3 两份已审计待改，F1–F37 中除 F9 外 36 份待执行 |
+| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）；S0-D1 已实现（`feat/dnd2024-s0d1-supreme-healing@5283f77d`，stack 在 D3 链头上）。剩余 38 份：E3 一份已审计待改，F1–F37 中除 F9 外 36 份待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -84,7 +84,7 @@ S0-A 子职授予主干
 | S0-A | 子职授予主干＋暴击阈值 | Champion 3/15 级 Improved / Superior Critical | `S0A_SUBCLASS_GRANT_IMPROVED_CRITICAL_TASK_SPEC_2026-11-07.md` | 23 | 已实现，待评审 |
 | S0-B | 特性选项主干 | Champion 7 级 Additional Fighting Style → Defense | `S0B_FEATURE_CHOICES_TASK_SPEC_2026-11-07.md` | 26 | 已实现，待评审 |
 | S0-C | 被动角色推导 | Draconic Sorcery 3 级 Draconic Resilience | `S0C_PASSIVE_DERIVATION_DRACONIC_RESILIENCE_TASK_SPEC_2026-11-07.md` | 22 | 已实现，待评审 |
-| S0-D1 | 骰面最大化 | Life Domain 17 级 Supreme Healing | `S0D1_SUPREME_HEALING_TASK_SPEC_2026-11-07.md` | 18 | 契约审计完成：行为达标（16/18）；1 处偏离（查询缺 owner），3 条无证据。见 §8 |
+| S0-D1 | 骰面最大化 | Life Domain 17 级 Supreme Healing | `S0D1_SUPREME_HEALING_TASK_SPEC_2026-11-07.md` | 18 | **已实现**（`feat/dnd2024-s0d1-supreme-healing@5283f77d`）。治疗分支的 `has_feature` 补 `owner="subclass:life_domain"`；补齐矩阵 3/12/13/14 与 1/2/4/5/6/7/9/11 的缺失断言。矩阵 18/18 有证据。见该文件 §10 |
 | S0-D2 | 递增使用计数 | Evoker 14 级 Overchannel | `S0D2_OVERCHANNEL_TASK_SPEC_2026-11-07.md` | 27 | 已实现，待评审（`feat/dnd2024-s0d2-overchannel`，stack 在 E1 分支 `d0db4810` 上）。首次免费 + `use_index × 环阶` 递增自伤、Wizard 列表门控、`features.usage` 长休计数与 `reset_feature_usage` 全部落地；intent/字段改名 `overchannel` 并同步前端。矩阵 25/26 部分覆盖、矩阵 5 的"5 环法术用 6 环槽"因无自动化 5 环法师伤害法术不可达，均记录在该文件 §10 |
 | S0-D3 | D20 掷后反应窗口 | College of Lore 3 级 Cutting Words 攻击检定面 | `S0D3_CUTTING_WORDS_CHECK_WINDOW_TASK_SPEC_2026-11-07.md` | 30 | **已实现**（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）。声明补 `parameters.trigger`/`range_ft` 并在加载期 fail closed；射程不再硬编码 60；多诗人按 actor id 串行、decision id 带 reactor；5 尺内升级重击不再被当成必中（`critical_upgrade`）。新增 38 条，矩阵 30/30 通过。两处形状偏差（`resource_id` 位置、`check_window` 未改 `d20_check_window`）与理由见该文件 §10 |
 | S0-E1 | 敌人归零触发＋临时 HP | Fiend Patron 3 级 Dark One's Blessing | `S0E1_DEFEAT_TRIGGER_DARK_ONES_BLESSING_TASK_SPEC_2026-11-07.md` | 30 | 已实现，待评审（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`，stack 在 E2 分支上）。删掉 SRD 没有的 10 尺共享他杀（旧 `defeat_*` 键在加载期拒绝），载荷收敛为四键闭集，事件审计字段由 4 项补到 12 项；矩阵 21/22/23 因单职业不可达，按「已接线、未可达」记录在该文件 §10 |
@@ -190,7 +190,7 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 | 契约 | 行为落地 | 关键缺口 | 判定 |
 |---|---|---|---|
-| S0-D1 | 完整 | 查询缺 owner（§4.3.2）；矩阵 3/13/14 无测试 | 补 1 处 + 3 条证据 |
+| S0-D1 | 完整 | 查询缺 owner（§4.3.2）；矩阵 3/13/14 无测试 | **已修复**：见 §10 执行报告 |
 | S0-D3 | 完整（超范围） | owner / `range_ft` / `trigger` 三处声明形状；已实现 Lucky 与伤害面 | **已修复**：见 §10 执行报告 |
 | S0-E3 | 完整 | Heroic Rally **首回合不触发**，被 `test_combat_start_does_not_regenerate` 固化 | 改规则 + 改测试 |
 | S0-E1 | 完整 | **10 尺共享他杀**（`defeat_share_range_ft`）不属于 SRD p76；事件审计字段缺 8 项 | 删规则 + 改测试 |
