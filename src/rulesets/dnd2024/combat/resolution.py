@@ -1029,8 +1029,13 @@ class CombatResolutionMixin:
                 )
                 if effect.get("add_spell_ability"):
                     healing_node = heal_ability_modifier_node(healing_node, actor)
+                # Owner-scoped on purpose: the short id alone would let any
+                # future class that declares a same-named feature turn this
+                # heal into a maximized one.
                 maximized = self.features.has_feature(
-                    self._feature_character(actor), "supreme_healing",
+                    self._feature_character(actor),
+                    "supreme_healing",
+                    owner="subclass:life_domain",
                 )
                 if maximized:
                     healing_node = maximize_dice_nodes(healing_node)
