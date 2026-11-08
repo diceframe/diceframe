@@ -36,6 +36,7 @@ from .models import (
     FeatureView,
 )
 from .resources import (
+    FEATURE_USAGE_SCOPES,
     ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
@@ -1471,17 +1472,17 @@ class Dnd2024ClassFeatureResolver:
     def _validate_overchannel_parameters(definition: ClassFeatureDefinition) -> None:
         """Fail closed on the maximize-damage contract.
 
-        A typo in the slot cap or the self-damage dice would silently change
-        how much a maximized cast costs, so each declared knob is range-checked
-        at load time.  Missing knobs are fine: consumers fall back to their
-        documented defaults.
+        A typo in the slot cap, the self-damage die or the base cost would
+        silently change how much a maximized cast costs, so each declared knob
+        is range-checked at load time.  Missing knobs are fine: consumers fall
+        back to their documented defaults.
         """
 
         parameters = definition.parameters
         for key, low, high in (
-            ("max_slot_level", 1, 9),
-            ("cost_dice_per_slot", 1, 10),
-            ("cost_die_sides", 2, 20),
+            ("maximum_slot_level", 1, 9),
+            ("self_damage_die", 2, 20),
+            ("initial_self_damage_dice", 1, 10),
         ):
             value = parameters.get(key)
             if key in parameters and (
@@ -1491,10 +1492,9 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.{key} must be an integer from {low} to {high}"
                 )
-        damage_type = parameters.get("cost_damage_type")
-        if "cost_damage_type" in parameters and (
-            not isinstance(damage_type, str) or not damage_type
-        ):
+        scope = parameters.get("usage_scope")
+        if "usage_scope" in parameters and scope not in FEATURE_USAGE_SCOPES:
             raise ClassFeatureError(
-                f"{definition.id}.cost_damage_type must name a damage type"
+                f"{definition.id}.usage_scope must be one of "
+                f"{sorted(FEATURE_USAGE_SCOPES)}"
             )

@@ -7,6 +7,12 @@ from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
+from src.rulesets.dnd2024.features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    USAGE_SCOPE_LONG_REST,
+    feature_usage_count,
+)
 from ..character.attunement import AttunementError, canonical_item_ref
 from ..items.activation import (
     ItemActivationError,
@@ -714,7 +720,7 @@ class CombatResolutionMixin:
     def _maybe_overchannel(self, intent: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
         """门控已由 _validate_spell 完成（fail closed）；此处只做变换。"""
 
-        if not intent.get("maximize_damage"):
+        if not intent.get("overchannel"):
             return node
         return maximize_dice_nodes(node)
 
@@ -732,6 +738,8 @@ class CombatResolutionMixin:
         if effect["mode"] == "triggered_damage":
             return self._triggered_spell_events(instance, combat, intent, rng)
         slot_level = int(intent.get("slot_level", spell["level"]) or 0)
+        # 一次施法只有一个启用状态：所有目标、所有射线共享它。
+        overchannel = bool(intent.get("overchannel"))
         target_ids = intent.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [intent.get("target_id")]
@@ -755,10 +763,13 @@ class CombatResolutionMixin:
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
             })
-        events.append({
+        cast_event = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
-        })
+        }
+        if overchannel:
+            cast_event["overchannel"] = True
+        events.append(cast_event)
         # Lucky's advantage face declares one extra source for the first
         # spell attack roll of this cast; validation proves the pool.
         spend_luck = bool(intent.get("spend_luck")) and str(effect["mode"]) == "spell_attack"
@@ -842,6 +853,8 @@ class CombatResolutionMixin:
                         "damage_type": damage_type,
                         "critical": critical, "rolls": rolls,
                     }
+                    if overchannel:
+                        damage_event["overchannel"] = True
                     if resistance:
                         damage_event["resisted"] = True
                         damage_event["resistance"] = resistance
@@ -952,6 +965,8 @@ class CombatResolutionMixin:
                             "damage_type": damage_type,
                             "critical": False, "rolls": rolls,
                         }
+                        if overchannel:
+                            damage_event["overchannel"] = True
                         if resistance:
                             damage_event["resisted"] = True
                             damage_event["resistance"] = resistance
@@ -983,6 +998,8 @@ class CombatResolutionMixin:
                     "damage_type": damage_type,
                     "critical": False, "rolls": rolls,
                 }
+                if overchannel:
+                    damage_event["overchannel"] = True
                 if resistance:
                     damage_event["resisted"] = True
                     damage_event["resistance"] = resistance
@@ -1176,6 +1193,52 @@ class CombatResolutionMixin:
                     "type": "dnd2024.position.changed", "actor_id": target_id,
                     "distance": direction * int(effect["push"]), "forced": True,
                 })
+        # 使用计数与自伤都落在法术效果之后、胜利判定之前：计数是这次施法的
+        # 一部分，自伤是"施法后立即"的代价，二者都不该被战斗结束顺序吞掉。
+        if overchannel:
+            character = self._feature_character(actor)
+            before = feature_usage_count(
+                character, OVERCHANNEL_OWNER, OVERCHANNEL_FEATURE_ID,
+                USAGE_SCOPE_LONG_REST,
+            )
+            use_index = before + 1
+            events.append({
+                "type": "dnd2024.feature_usage.changed",
+                "actor_id": actor_id,
+                "owner": OVERCHANNEL_OWNER,
+                "feature_id": OVERCHANNEL_FEATURE_ID,
+                "scope": USAGE_SCOPE_LONG_REST,
+                "spell_ref": spell_ref,
+                "slot_level": slot_level,
+                "before_count": before,
+                "after_count": use_index,
+                "use_index": use_index,
+            })
+            if use_index >= 2:
+                # 第 N 次（N ≥ 2）：每环阶掷 N 个 d12 黯蚀。声明式基数 2 加上
+                # "每再用一次 +1d12"，与 SRD 原文的递增表述一一对应。
+                base = int(self.features.feature_value(
+                    character, OVERCHANNEL_FEATURE_ID, "initial_self_damage_dice", 2,
+                    owner=OVERCHANNEL_OWNER,
+                ) or 0)
+                sides = int(self.features.feature_value(
+                    character, OVERCHANNEL_FEATURE_ID, "self_damage_die", 12,
+                    owner=OVERCHANNEL_OWNER,
+                ) or 0)
+                per_level = base + (use_index - 2)
+                cost_node = formula_node_from_dice_formula(
+                    f"{per_level * slot_level}d{sides}"
+                )
+                cost, cost_rolls = roll_damage_node(cost_node, rng)
+                # 无视抗性与免疫：不走 _resist_damage；临时 HP 仍由 reducer 先吸收。
+                events.append({
+                    "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+                    "delta": -cost, "amount": cost, "damage_type": "necrotic",
+                    "overchannel": True, "overchannel_cost": True,
+                    "ignore_resistance": True, "ignore_immunity": True,
+                    "rolls": cost_rolls,
+                })
+                events.extend(self._concentration_events(instance, combat, actor, cost, rng))
         living_enemy_ids = {
             _enemy_actor(enemy_id)
             for enemy_id, enemy in combat.get("enemies", {}).items()
@@ -1183,27 +1246,6 @@ class CombatResolutionMixin:
         }
         if living_enemy_ids and living_enemy_ids.issubset(defeated_targets):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
-        if intent.get("maximize_damage"):
-            # 超限导能自伤：整道施法结算与胜利判定之后一次性落账（RNG 末位），
-            # 无视抗性与免疫，因此不经 _resist_damage。
-            character = self._feature_character(actor)
-            per_slot = int(self.features.feature_value(
-                character, "overchannel", "cost_dice_per_slot", 2,
-            ) or 0)
-            sides = int(self.features.feature_value(
-                character, "overchannel", "cost_die_sides", 12,
-            ) or 0)
-            damage_type = str(self.features.feature_value(
-                character, "overchannel", "cost_damage_type", "necrotic",
-            ) or "")
-            cost_node = formula_node_from_dice_formula(f"{per_slot * slot_level}d{sides}")
-            cost, cost_rolls = roll_damage_node(cost_node, rng)
-            events.append({
-                "type": "resource.changed", "resource": "hp", "target_id": actor_id,
-                "delta": -cost, "amount": cost, "damage_type": damage_type,
-                "overchannel_cost": True, "rolls": cost_rolls,
-            })
-            events.extend(self._concentration_events(instance, combat, actor, cost, rng))
         return events
 
     def _movement_events(

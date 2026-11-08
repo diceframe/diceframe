@@ -15,6 +15,11 @@ from ..items.charges import (
     spend_charges,
     validate_charges_declaration,
 )
+from src.rulesets.dnd2024.features.models import ClassFeatureError
+from src.rulesets.dnd2024.features.resources import (
+    feature_usage_count,
+    set_feature_usage_count,
+)
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_feat_free_cast
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
@@ -298,6 +303,31 @@ class CombatReducerMixin:
             if feature_id in feature_ids:
                 raise EventBatchError(f"feature is already used this turn: {feature_id}")
             feature_ids.append(feature_id)
+            return
+        if event_type == "dnd2024.feature_usage.changed":
+            # 长休作用域计数器：before_count 是批次生成时的权威快照，不匹配
+            # 说明批次过期或重复消费，宁可炸掉也不覆盖合法计数。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion feature usage is canonical")
+            character = self._canonical_of(snapshot, kind, raw_id)
+            owner = str(event["owner"])
+            feature_id = str(event["feature_id"])
+            scope = str(event["scope"])
+            before = int(event["before_count"])
+            after = int(event["after_count"])
+            try:
+                current = feature_usage_count(character, owner, feature_id, scope)
+                if current != before:
+                    raise EventBatchError(
+                        f"feature usage for {owner}.{feature_id} moved: "
+                        f"expected {before}, found {current}"
+                    )
+                if after != current + 1:
+                    raise EventBatchError("feature usage must advance by exactly one")
+                set_feature_usage_count(character, owner, feature_id, scope, after)
+            except ClassFeatureError as exc:
+                raise EventBatchError(str(exc)) from exc
             return
         if event_type == "dnd2024.class_resource.spent":
             # 职业资源永远写在既有的 canonical resources.class 结构里，

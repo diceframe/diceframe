@@ -22,6 +22,7 @@ from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureCatalog,
     Dnd2024ClassFeatureResolver,
 )
+from src.rulesets.dnd2024.features.resources import set_feature_usage_count
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -161,6 +162,18 @@ def canonical(instance, uid: str = "gm") -> dict:
     return instance.get_character_sheet(uid)["ruleset_character"]
 
 
+def prime_overchannel(instance, count: int = 1, uid: str = "gm") -> None:
+    """Make the next cast the (count + 1)-th Overchannel of this long rest.
+
+    Priming writes the same canonical ledger the reducer writes; ownership,
+    spells, slots and the feature declaration all still come from real data.
+    """
+
+    set_feature_usage_count(
+        canonical(instance, uid), "subclass:evoker", "overchannel", "long_rest", count,
+    )
+
+
 def set_turn(engine, instance, actor_id: str) -> None:
     combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index(actor_id)
@@ -271,10 +284,10 @@ def test_catalog_declares_cleric_and_wizard_features() -> None:
         assert overchannel.class_id == "wizard"
         assert overchannel.minimum_level == 14
         assert dict(overchannel.parameters) == {
-            "max_slot_level": 5,
-            "cost_dice_per_slot": 2,
-            "cost_die_sides": 12,
-            "cost_damage_type": "necrotic",
+            "maximum_slot_level": 5,
+            "usage_scope": "long_rest",
+            "self_damage_die": 12,
+            "initial_self_damage_dice": 2,
         }
 
     english = Dnd2024ClassFeatureCatalog.from_bundle(runtime.load_bundle("en"))
@@ -410,41 +423,46 @@ def test_supreme_healing_does_not_touch_temp_hp(cleric17, runtime) -> None:
 
 # --- T8: intent validation fails closed ------------------------------------
 
-def test_maximize_damage_validation_matrix(cleric17, wizard13, wizard14, runtime) -> None:
+def test_overchannel_validation_matrix(cleric17, wizard13, wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, cleric17)
     assert reject(
-        engine, instance, "spell:cure_wounds", 1, ["player:gm"], maximize_damage=True,
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], overchannel=True,
     ) == "overchannel is required to maximize damage"
 
     engine, instance = new_combat(runtime, wizard13)
     grant(instance, "spell:magic_missile")
     assert reject(
-        engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"], overchannel=True,
     ) == "overchannel is required to maximize damage"
 
     # Explicit false is a no-op, not a request that still requires Overchannel.
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        maximize_damage=False, rolls=[1, 2, 3],
+        overchannel=False, rolls=[1, 2, 3],
     )
     assert damage_to(result, "enemy:goblin-1")["amount"] == 9
     assert not any(event.get("overchannel_cost") for event in events_of(result))
 
     engine, instance = new_combat(runtime, wizard14)
-    grant(instance, "spell:cure_wounds", "spell:thunderwave")
+    grant(instance, "spell:cure_wounds", "spell:false_life", "spell:thunderwave")
     grant_cantrip(instance, "spell:fire_bolt")
+    # 名单归属先于伤害判定：治疗法术不在法师列表上。
     assert reject(
-        engine, instance, "spell:cure_wounds", 1, ["player:gm"], maximize_damage=True,
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], overchannel=True,
+    ) == "overchannel only applies to Wizard spells"
+    # 假死术在法师列表上（黯蚀学派），但没有伤害效果。
+    assert reject(
+        engine, instance, "spell:false_life", 1, ["player:gm"], overchannel=True,
     ) == "this spell does not deal damage"
     assert reject(
-        engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"], overchannel=True,
     ) == "maximized casting requires a spell slot of level 1-5"
     assert reject(
-        engine, instance, "spell:thunderwave", 6, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:thunderwave", 6, ["enemy:goblin-1"], overchannel=True,
     ) == "maximized casting requires a spell slot of level 1-5"
     assert reject(
-        engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], maximize_damage="yes",
-    ) == "maximize_damage must be a boolean"
+        engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], overchannel="yes",
+    ) == "overchannel must be a boolean"
 
     # No intent parameter → the same spell still casts normally, with real dice.
     result = cast(engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], rolls=[1, 3, 4])
@@ -467,21 +485,21 @@ def test_available_spells_expose_overchannel_only_for_eligible_casts(
 ) -> None:
     engine, instance = new_combat(runtime, wizard14)
     rows = _available_spell_rows(engine, instance)
-    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is True
-    assert rows["spell:burning_hands"]["maximize_damage_available"] is True
+    assert rows["spell:chromatic_orb"]["overchannel_available"] is True
+    assert rows["spell:burning_hands"]["overchannel_available"] is True
     # A non-damaging spell or a cantrip with no leveled slot is never eligible.
-    assert rows["spell:charm_person"]["maximize_damage_available"] is False
-    assert rows["spell:fire_bolt"]["maximize_damage_available"] is False
+    assert rows["spell:charm_person"]["overchannel_available"] is False
+    assert rows["spell:fire_bolt"]["overchannel_available"] is False
 
     # A 6th-level slot can pay for the spell, but Overchannel stops at 5.
     canonical(instance)["spellcasting"]["class"]["slots_current"] = {"6": 1}
     rows = _available_spell_rows(engine, instance)
     assert rows["spell:burning_hands"]["available_slot_levels"] == [6]
-    assert rows["spell:burning_hands"]["maximize_damage_available"] is False
+    assert rows["spell:burning_hands"]["overchannel_available"] is False
 
     engine, instance = new_combat(runtime, wizard13)
     rows = _available_spell_rows(engine, instance)
-    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is False
+    assert rows["spell:chromatic_orb"]["overchannel_available"] is False
 
 
 # --- T9: saving_throw damage face ------------------------------------------
@@ -492,23 +510,24 @@ def test_overchannel_maximizes_saving_throw_damage(wizard14, runtime) -> None:
 
     result = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[1, 5, 6], maximize_damage=True,
+        rolls=[1, 5, 6], overchannel=True,
     )
     damage = damage_to(result, "enemy:goblin-1")
     assert damage["amount"] == 16, "2d8 maximized = 16 on a failed save"
     assert damage["rolls"] == []
     assert damage["damage_type"] == "thunder"
-    assert overchannel_cost(result)["amount"] == 11
+    assert not any(event.get("overchannel_cost") for event in events_of(result))
 
-    engine, instance = new_combat(runtime, wizard14)
-    grant(instance, "spell:thunderwave")
-    result = cast(
+    # 同一天第二次使用：每环阶 2d12 黯蚀。
+    prime_overchannel(instance)
+    second = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[20, 5, 6], maximize_damage=True,
+        rolls=[20, 5, 6], overchannel=True,
     )
-    damage = damage_to(result, "enemy:goblin-1")
+    damage = damage_to(second, "enemy:goblin-1")
     assert damage["amount"] == 8, "maximize first, then halve on a successful save"
     assert damage["rolls"] == []
+    assert overchannel_cost(second)["amount"] == 11
 
 
 # --- T10: automatic_damage face --------------------------------------------
@@ -522,16 +541,18 @@ def test_overchannel_maximizes_automatic_damage(wizard14, runtime) -> None:
 
     first = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[1, 2], maximize_damage=True,
+        rolls=[1, 2], overchannel=True,
     )
     assert damage_to(first, "enemy:goblin-1")["amount"] == 15  # 3d4+3 maximized
     assert damage_to(first, "enemy:goblin-1")["rolls"] == []
+    assert not any(event.get("overchannel_cost") for event in events_of(first))
 
     second = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-2"],
-        rolls=[3, 4], maximize_damage=True,
+        rolls=[3, 4], overchannel=True,
     )
     assert damage_to(second, "enemy:goblin-2")["amount"] == 15
+    assert overchannel_cost(second)["amount"] == 7  # 第二次：2d12
     enemies_state = ruleset_runtime.state(instance)["combat"]["enemies"]
     assert enemies_state["goblin-1"]["hp"] == 25
     assert enemies_state["goblin-2"]["hp"] == 25
@@ -542,10 +563,12 @@ def test_overchannel_maximizes_automatic_damage(wizard14, runtime) -> None:
 def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=100)])
     grant(instance, "spell:scorching_ray")
+    # 第二次使用才有自伤；首环阶代价固定为 2d12/环。
+    prime_overchannel(instance)
     # Scorching Ray is a level 2 spell; a level 2 slot still yields three rays.
     result = cast(
         engine, instance, "spell:scorching_ray", 2, ["enemy:goblin-1"] * 3,
-        rolls=[20, 10, 10, 5, 6, 7, 8], maximize_damage=True,
+        rolls=[20, 10, 10, 5, 6, 7, 8], overchannel=True,
     )
     amounts = [
         event["amount"] for event in events_of(result)
@@ -558,6 +581,7 @@ def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -
     for event in events_of(result):
         if event["type"] == "resource.changed" and event.get("target_id") == "enemy:goblin-1":
             assert event["rolls"] == []
+            assert event["overchannel"] is True
         if event["type"] == "check.resolved":
             assert "maximized" not in event
     checks = [
@@ -568,15 +592,16 @@ def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -
     assert overchannel_cost(result)["amount"] == 26  # 2d12 per slot level × 2
 
 
-# --- T12: self damage lands after the whole cast and victory ----------------
+# --- T12: the cost belongs to the cast, before victory ---------------------
 
-def test_overchannel_cost_lands_after_victory(wizard14, runtime) -> None:
+def test_overchannel_cost_lands_before_victory(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=10)])
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     before = int(canonical(instance)["resources"]["hp"])
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[3, 4], maximize_damage=True,
+        rolls=[3, 4], overchannel=True,
     )
     events = events_of(result)
     victory_index = next(
@@ -585,7 +610,7 @@ def test_overchannel_cost_lands_after_victory(wizard14, runtime) -> None:
     cost_index = next(
         index for index, event in enumerate(events) if event.get("overchannel_cost")
     )
-    assert victory_index < cost_index, "victory resolves before the self-damage cost"
+    assert cost_index < victory_index, "the self damage is part of the cast, not an epilogue"
     cost = overchannel_cost(result)
     assert cost["amount"] == 7
     assert cost["delta"] == -7
@@ -602,9 +627,10 @@ def test_overchannel_cost_ignores_resistance(wizard14, runtime) -> None:
         "source": "test", "resist_damage_types": ["necrotic"],
     }
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[6, 6], maximize_damage=True,
+        rolls=[6, 6], overchannel=True,
     )
     cost = overchannel_cost(result)
     assert cost["amount"] == 12
@@ -620,9 +646,10 @@ def test_overchannel_cost_triggers_concentration_check(wizard14, runtime) -> Non
     cast(engine, instance, "spell:stoneskin", 4, ["player:gm"])
     assert canonical(instance)["spellcasting"]["class"]["concentration"] is not None
 
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[10, 6, 5, 10], maximize_damage=True,
+        rolls=[10, 6, 5, 10], overchannel=True,
     )
     events = events_of(result)
     cost_index = next(
@@ -645,9 +672,10 @@ def test_overchannel_cost_can_drop_the_caster(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=100)])
     set_hp(instance, 1)
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[12, 12], maximize_damage=True,
+        rolls=[12, 12], overchannel=True,
     )
     cost = overchannel_cost(result)
     assert cost["amount"] == 24

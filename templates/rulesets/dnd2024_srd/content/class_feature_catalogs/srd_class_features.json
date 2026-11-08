@@ -667,12 +667,12 @@
           "owner": "subclass:evoker",
           "minimum_level": 14,
           "source_ref": "srd-5.2.1:p82:overchannel",
-          "summary": "When you cast a Wizard spell of level 1-5 that deals damage, you can maximize its damage. After the spell resolves, you immediately take 2d12 Necrotic damage per spell slot level, ignoring Resistance and Immunity.",
+          "summary": "When you cast a Wizard spell with a level 1-5 spell slot that deals damage, you can maximize its damage. The first use before a Long Rest costs nothing; each later use deals escalating Necrotic damage to you right after the cast, ignoring Resistance and Immunity.",
           "parameters": {
-            "max_slot_level": 5,
-            "cost_dice_per_slot": 2,
-            "cost_die_sides": 12,
-            "cost_damage_type": "necrotic"
+            "maximum_slot_level": 5,
+            "usage_scope": "long_rest",
+            "self_damage_die": 12,
+            "initial_self_damage_dice": 2
           }
         }
       ]
