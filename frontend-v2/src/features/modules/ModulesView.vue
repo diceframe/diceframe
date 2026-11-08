@@ -559,9 +559,8 @@ async function checkRecovery() {
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
-              <span class="module-update-badge">{{ t('modulesUpdateAvailable') }}</span>
-              <button type="button" class="module-update-action" :disabled="updateBusy === module.id" @click.prevent.stop="updateModule(module)">
-                {{ t('modulesUpdateAction') }}
+              <button type="button" class="module-update-action" :disabled="updateBusy !== ''" @click.prevent.stop="updateModule(module)">
+                {{ t('modulesUpdateCta') }}
               </button>
             </p>
             <p v-if="module.status === 'disabled'" class="muted">{{ t('modulesDisabledBadge') }}</p>
@@ -791,7 +790,6 @@ async function checkRecovery() {
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
 .module-update { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0; }
-.module-update-badge { display: inline-flex; align-items: center; padding: .1rem .5rem; border-radius: 999px; background: color-mix(in srgb, var(--df-warning) 16%, transparent); color: var(--df-warning); font-size: .78rem; font-weight: 700; }
 .module-update-action { padding: .1rem .6rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: 999px; background: transparent; color: var(--df-warning); font-size: .78rem; font-weight: 700; cursor: pointer; }
 .module-update-action:hover { background: color-mix(in srgb, var(--df-warning) 12%, transparent); }
 .module-update-action:disabled { opacity: .6; cursor: progress; }

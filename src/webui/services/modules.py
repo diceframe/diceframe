@@ -26,6 +26,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from src.knowledge.visibility import entry_visible_to_viewer
 from src.plugin_host.support import (
     content_delivery_mode,
     content_profile,
@@ -172,19 +173,25 @@ def _inventory_projection(runtime: Any, adventure_registry: Any) -> tuple[int | 
     return adventure_count, counts, status
 
 
-def _book_entry_count(store: Any, book_id: str) -> int | None:
+def _book_entry_count(store: Any, book_id: str, *, viewer_is_gm: bool = True) -> int | None:
     """条目数只是展示信息：读不到就说不知道，不要让整页失败。"""
 
     lister = getattr(store, "list_book_entries", None)
     if not callable(lister):
         return None
     try:
-        return len(lister(str(book_id)) or [])
+        entries = lister(str(book_id)) or []
     except Exception:  # noqa: BLE001 - a count is never worth failing the page
         return None
+    if not viewer_is_gm:
+        # issue #708：计数与正文同一视角谓词，避免「12 条」与玩家可见数不一致。
+        entries = [entry for entry in entries if entry_visible_to_viewer(entry, "party")]
+    return len(entries)
 
 
-def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str, Any]]:
+def _module_lorebooks(
+    deps: ModuleDependencies, module_id: str, *, viewer_is_gm: bool = True,
+) -> list[dict[str, Any]]:
     """Return canonical Lorebook sources explicitly owned by one module.
 
     两类来源合并（issue #700），**用 ``catalog`` 明确区分**，前端据此决定
@@ -219,7 +226,7 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
             "source_kind": "module",
             "source_id": str(module_id),
             "catalog": False,
-            "entry_count": _book_entry_count(store, str(book.get("id") or "")),
+            "entry_count": _book_entry_count(store, str(book.get("id") or ""), viewer_is_gm=viewer_is_gm),
         }
         for book in books
         if str(book.get("source_kind") or "") == "module"
@@ -246,6 +253,9 @@ def _module_lorebooks(deps: ModuleDependencies, module_id: str) -> list[dict[str
             continue
         entries = resource.get("entries")
         seen_ids.add(book_id)
+        if isinstance(entries, list) and not viewer_is_gm:
+            # issue #708：目录行计数与就地展开正文用同一 fail-closed 谓词。
+            entries = [entry for entry in entries if entry_visible_to_viewer(entry, "party")]
         rows.append({
             "id": book_id,
             # 包内文件可能没写 name：catalog 兜底成文件名，直接显示就成了
@@ -444,7 +454,7 @@ def _market_search_text(item: dict[str, Any]) -> str:
     return " ".join(parts).lower()
 
 
-def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
+def module_detail(deps: ModuleDependencies, module_id: str, *, viewer_is_gm: bool = True) -> dict[str, Any]:
     """单个模组详情：概览 + 内容分组计数 + 冒险清单 + 使用存档/按钮 guard。"""
 
     runtime = getattr(deps.plugin_host, "plugins", {}).get(str(module_id or ""))
@@ -466,7 +476,7 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
             "description": item.description,
         })
     adventures = _module_adventure_rows(deps, module_id)
-    lorebooks = _module_lorebooks(deps, module_id)
+    lorebooks = _module_lorebooks(deps, module_id, viewer_is_gm=viewer_is_gm)
     return {
         "ok": True,
         "module": {
@@ -488,10 +498,12 @@ def module_detail(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
     }
 
 
-def module_lorebooks(deps: ModuleDependencies, module_id: str) -> dict[str, Any]:
+def module_lorebooks(
+    deps: ModuleDependencies, module_id: str, *, viewer_is_gm: bool = True,
+) -> dict[str, Any]:
     """List canonical Lorebook sources owned by an installed module."""
 
-    detail = module_detail(deps, module_id)
+    detail = module_detail(deps, module_id, viewer_is_gm=viewer_is_gm)
     if not detail.get("ok"):
         return detail
     return {
@@ -517,8 +529,15 @@ def module_adventures(deps: ModuleDependencies, module_id: str) -> dict[str, Any
 
 def module_content(
     deps: ModuleDependencies, module_id: str, kind: str, key: str, *, language: str = "",
+    viewer_is_gm: bool = True,
 ) -> dict[str, Any]:
-    """内容库只读详情；委托 PluginContentCatalog（不新建存储）。"""
+    """内容库只读详情；委托 PluginContentCatalog（不新建存储）。
+
+    issue #708：包文件是直读的，展示层必须自己补上视角过滤。非 GM 视角
+    （玩家座位 / share 请求）只返回公开条目——与引擎运行时同一个
+    fail-closed 谓词（``entry_visible_to_viewer``），空 ``visible_to`` 的
+    守秘人条目连标题都不出。GM 视角不做裁剪。
+    """
 
     catalog = getattr(deps.plugin_host, "content", None)
     if catalog is None:
@@ -526,6 +545,16 @@ def module_content(
     resource = catalog.get_content_resource(kind, key, plugin_id=str(module_id or ""), language=language)
     if resource is None:
         return {"ok": False, "error_code": "CONTENT_NOT_FOUND"}
+    if str(kind or "") == "lorebook" and not viewer_is_gm:
+        entries = resource.get("entries")
+        if isinstance(entries, list):
+            visible = [entry for entry in entries if entry_visible_to_viewer(entry, "party")]
+            resource = {
+                **resource,
+                "entries": visible,
+                "total_entries": len(entries),
+                "hidden_entries": len(entries) - len(visible),
+            }
     return {"ok": True, "content": resource}
 
 

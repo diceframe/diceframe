@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -189,3 +190,68 @@ def test_module_content_delegates_to_catalog(env) -> None:
     assert missing == {"ok": False, "error_code": "CONTENT_NOT_FOUND"}
     # 未知 kind 同样安全返回。
     assert modules_service.module_content(deps, "castle-module", "dragon", "x")["ok"] is False
+
+
+# issue #708：包内容读取必须按请求者视角过滤（fail-closed）。
+
+_VISIBILITY_ENTRIES = [
+    {"id": "pub", "name": "公开", "visible_to": ["*"]},
+    {"id": "secret", "name": "守秘", "visible_to": []},
+    {"id": "alice", "name": "指定角色", "visible_to": ["alice"]},
+]
+
+
+class _StubCatalog:
+    def get_content_resource(self, kind: str, key: str, *, plugin_id: str = "", language: str = ""):
+        return {"id": key, "entries": [dict(entry) for entry in _VISIBILITY_ENTRIES]}
+
+
+class _StubHost:
+    content = _StubCatalog()
+
+
+def test_module_content_filters_entries_for_player_view() -> None:
+    deps = SimpleNamespace(plugin_host=_StubHost())
+    player = modules_service.module_content(deps, "m", "lorebook", "guide", viewer_is_gm=False)
+    assert [entry["id"] for entry in player["content"]["entries"]] == ["pub"]
+    assert player["content"]["total_entries"] == 3
+    assert player["content"]["hidden_entries"] == 2
+
+    gm = modules_service.module_content(deps, "m", "lorebook", "guide")
+    assert len(gm["content"]["entries"]) == 3
+    assert "hidden_entries" not in gm["content"]
+
+    # 非 lorebook kind 的资源不做条目裁剪（形状不同）。
+    npc = modules_service.module_content(deps, "m", "npc", "x", viewer_is_gm=False)
+    assert len(npc["content"]["entries"]) == 3
+
+
+class _StubLorebookStore:
+    def list_lorebooks(self) -> list[dict]:
+        return []
+
+    def list_book_entries(self, book_id: str) -> list[dict]:
+        return [dict(entry) for entry in _VISIBILITY_ENTRIES]
+
+
+class _StubResourcesHost:
+    def list_content_resources(self, kind: str) -> dict[str, list[dict]]:
+        if kind == "lorebook":
+            return {"lorebook": [{
+                "plugin_id": "castle-module", "id": "guide", "entries": _VISIBILITY_ENTRIES,
+            }]}
+        return {}
+
+
+def test_module_lorebook_entry_counts_follow_viewer() -> None:
+    deps = SimpleNamespace(lorebook_store=_StubLorebookStore(), plugin_host=_StubResourcesHost())
+
+    gm_rows = modules_service._module_lorebooks(deps, "castle-module")
+    assert gm_rows[0]["entry_count"] == 3
+
+    player_rows = modules_service._module_lorebooks(deps, "castle-module", viewer_is_gm=False)
+    assert player_rows[0]["entry_count"] == 1
+
+    # 已物化的书走 store 计数，同一视角谓词。
+    assert modules_service._book_entry_count(_StubLorebookStore(), "b") == 3
+    assert modules_service._book_entry_count(_StubLorebookStore(), "b", viewer_is_gm=False) == 1

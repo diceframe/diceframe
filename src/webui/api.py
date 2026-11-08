@@ -1162,8 +1162,8 @@ class WebAPI:
             self._module_dependencies, keyword=keyword, ruleset=ruleset,
         )
 
-    def module_detail(self, module_id: str) -> dict[str, Any]:
-        return modules.module_detail(self._module_dependencies, module_id)
+    def module_detail(self, module_id: str, *, viewer_is_gm: bool = True) -> dict[str, Any]:
+        return modules.module_detail(self._module_dependencies, module_id, viewer_is_gm=viewer_is_gm)
 
     def module_cover_file(self, module_id: str) -> str:
         """已安装内容包的封面文件路径（只读本机，不出站）。"""
@@ -1191,14 +1191,16 @@ class WebAPI:
     def module_adventures(self, module_id: str) -> dict[str, Any]:
         return modules.module_adventures(self._module_dependencies, module_id)
 
-    def module_lorebooks(self, module_id: str) -> dict[str, Any]:
-        return modules.module_lorebooks(self._module_dependencies, module_id)
+    def module_lorebooks(self, module_id: str, *, viewer_is_gm: bool = True) -> dict[str, Any]:
+        return modules.module_lorebooks(self._module_dependencies, module_id, viewer_is_gm=viewer_is_gm)
 
     def module_content(
         self, module_id: str, kind: str, key: str, language: str = "",
+        *, viewer_is_gm: bool = True,
     ) -> dict[str, Any]:
         return modules.module_content(
             self._module_dependencies, module_id, kind, key, language=language,
+            viewer_is_gm=viewer_is_gm,
         )
 
     def module_compatibility(self, module_id: str) -> dict[str, Any]:
