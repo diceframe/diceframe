@@ -267,6 +267,23 @@ def test_catalog_rejects_a_non_true_death_save_advantage(value) -> None:
         Dnd2024ClassFeatureResolver(_bundle_with(runtime, mutate))
 
 
+def test_the_declaration_keeps_its_identity_in_both_locales() -> None:
+    runtime = Dnd2024Runtime()
+    for locale, label in (("en", "Survivor"), ("zh-CN", "百折不挠")):
+        catalog = Dnd2024ClassFeatureResolver(runtime.load_bundle(locale)).catalog
+        definition = catalog.features["survivor"]
+        assert definition.owner == "subclass:champion"
+        assert definition.minimum_level == 18
+        assert definition.source_ref == "srd-5.2.1:p49:survivor"
+        assert dict(definition.parameters) == {
+            "death_save_advantage": True,
+            "death_save_crit_threshold": 18,
+            "turn_start_regen_base": 5,
+            "turn_start_regen_ability": "con",
+        }
+        assert label
+
+
 # --- #5 / #6 ownership ---------------------------------------------------
 
 
@@ -699,6 +716,20 @@ def test_two_declarations_take_the_lowest_threshold_and_keep_both_sources() -> N
     assert _resolved(events)["hp"] == 1
 
 
+def test_advantage_takes_the_eighteen_and_restores_a_hit_point() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _sheet(runtime, 18)
+    engine, instance = _combat(runtime, sheet)
+    _at_zero(engine, instance)
+
+    events = _death_save(engine, instance, rolls=[1, 18])
+
+    check = _check(events)
+    assert check["natural"] == 18
+    assert _resolved(events)["hp"] == 1
+    assert int(_canonical(instance)["resources"]["hp"]) == 1
+
+
 # --- #20 replay ----------------------------------------------------------
 
 
@@ -780,6 +811,17 @@ def test_advantage_and_the_aura_are_separate_entries_on_one_save() -> None:
     assert check["success"] is True
     assert _resolved(events)["hp"] == 0
     assert _resolved(events)["successes"] == 1
+
+    # Without the aura the same bare 9 stays a failure: the bonus, not the
+    # face, is what crossed 10.
+    engine, instance = _combat(runtime, _sheet(runtime, 18))
+    _at_zero(engine, instance)
+    events = _death_save(engine, instance, rolls=[9, 2])
+    check = _check(events)
+    assert check["aura_bonus"] == 0
+    assert check["total"] == 9
+    assert check["success"] is False
+    assert _resolved(events)["failures"] == 2
 
 
 # --- #21 a natural 18 wakes you up without rallying ----------------------
