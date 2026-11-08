@@ -160,7 +160,7 @@ class CombatTriggeredSpellsMixin:
         if extra_damage:
             events.append(extra_damage)
             total += int(extra_damage["amount"])
-        events.extend(self._concentration_events(target, total, rng))
+        events.extend(self._concentration_events(instance, combat, target, total, rng))
         events.extend(self._enemy_defeated_feature_events(
             instance, combat, str(decision["actor_id"]), target, total,
         ))

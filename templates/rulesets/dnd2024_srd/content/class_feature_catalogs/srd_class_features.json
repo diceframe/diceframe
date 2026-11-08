@@ -340,14 +340,37 @@
           "resource_id": "paladins_smite"
         },
         {
+          "id": "aura_of_protection",
+          "owner": "class:paladin",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p55:aura-of-protection",
+          "summary": "While not Incapacitated, you and allies within 10 feet gain a saving-throw bonus equal to your Charisma modifier (minimum +1); only one such aura benefits a creature at a time.",
+          "parameters": {
+            "aura_range_ft": 10,
+            "aura_save_bonus_ability": "cha",
+            "aura_save_bonus_minimum": 1
+          }
+        },
+        {
           "id": "aura_of_devotion",
           "owner": "subclass:oath_of_devotion",
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p56:aura-of-devotion",
-          "summary": "You and allies within your Aura (10 feet) have Immunity to the Charmed condition.",
+          "summary": "You and allies in your Aura of Protection have Immunity to Charmed; an existing Charmed condition has no effect while there.",
           "parameters": {
-            "aura_range": 10,
-            "aura_immune_conditions": ["charmed"]
+            "aura_source_feature_id": "aura_of_protection",
+            "aura_condition_immunities": ["charmed"]
+          }
+        },
+        {
+          "id": "aura_expansion",
+          "owner": "class:paladin",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p55:aura-expansion",
+          "summary": "Your Aura of Protection is now a 30-foot Emanation.",
+          "parameters": {
+            "aura_expands_feature_id": "aura_of_protection",
+            "aura_range_override_ft": 30
           }
         }
       ]

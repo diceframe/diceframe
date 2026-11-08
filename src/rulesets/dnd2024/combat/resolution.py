@@ -530,7 +530,7 @@ class CombatResolutionMixin:
             ))
         else:
             events.extend(self._miss_mastery_events(
-                combat, actor, target, weapon, modifier, damage_type, rng,
+                instance, combat, actor, target, weapon, modifier, damage_type, rng,
             ))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
@@ -558,8 +558,9 @@ class CombatResolutionMixin:
         return effect
 
     def _miss_mastery_events(
-        self, combat: dict[str, Any], actor: dict[str, Any], target: dict[str, Any],
-        weapon: dict[str, Any], modifier: int, damage_type: str, rng: Any,
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], weapon: dict[str, Any], modifier: int,
+        damage_type: str, rng: Any,
     ) -> list[dict[str, Any]]:
         """Graze: fixed damage on a miss, with no damage dice.
 
@@ -585,7 +586,7 @@ class CombatResolutionMixin:
             event["resisted"] = True
             event["resistance"] = resistance
         events: list[dict[str, Any]] = [event]
-        events.extend(self._concentration_events(target, damage, rng))
+        events.extend(self._concentration_events(instance, combat, target, damage, rng))
         if self._last_hostile_defeated(combat, target, damage):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
@@ -844,7 +845,7 @@ class CombatResolutionMixin:
                         damage_event["resisted"] = True
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
-                    events.extend(self._concentration_events(target, damage, rng))
+                    events.extend(self._concentration_events(instance, combat, target, damage, rng))
                     prior_dealt = dealt.get(target_id, 0)
                     dealt[target_id] = prior_dealt + damage
                     events.extend(self._enemy_defeated_feature_events(
@@ -875,6 +876,7 @@ class CombatResolutionMixin:
                         "actor_id": target_id, "source_actor_id": actor_id,
                         "ability": save_ability, "rolls": [], "natural": 0,
                         "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                        "aura_bonus": 0, "aura_sources": [],
                         "total": 0,
                         "target": actor["spell_save_dc"], "success": False,
                         "auto_failed": True,
@@ -905,7 +907,10 @@ class CombatResolutionMixin:
                         self.catalog.conditions, target["conditions"], "saving_throw", rng,
                     )
                     check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-                    total = roll + modifier + check_bonus
+                    # 光环加值单独成项：modifier 仍是角色本来的豁免值，Bless
+                    # 仍只占 check_bonus，三者不互相吞并，事件可逐项对账。
+                    aura = self._saving_throw_aura_bonus(instance, combat, target)
+                    total = roll + modifier + check_bonus + int(aura["bonus"])
                     succeeded = total >= int(actor["spell_save_dc"])
                     check_event = {
                         "type": "check.resolved", "kind": "saving_throw", "actor_id": target_id,
@@ -913,6 +918,7 @@ class CombatResolutionMixin:
                         "rolls": [value for value in (first, second) if value is not None],
                         "natural": roll, "modifier": modifier,
                         "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                        "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
                         "total": total,
                         "target": actor["spell_save_dc"], "success": succeeded,
                     }
@@ -944,7 +950,7 @@ class CombatResolutionMixin:
                             damage_event["resisted"] = True
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
-                        events.extend(self._concentration_events(target, damage, rng))
+                        events.extend(self._concentration_events(instance, combat, target, damage, rng))
                         prior_dealt = dealt.get(target_id, 0)
                         dealt[target_id] = prior_dealt + damage
                         events.extend(self._enemy_defeated_feature_events(
@@ -972,7 +978,7 @@ class CombatResolutionMixin:
                     damage_event["resisted"] = True
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
-                events.extend(self._concentration_events(target, damage, rng))
+                events.extend(self._concentration_events(instance, combat, target, damage, rng))
                 prior_dealt = dealt.get(target_id, 0)
                 dealt[target_id] = prior_dealt + damage
                 events.extend(self._enemy_defeated_feature_events(
@@ -1084,15 +1090,17 @@ class CombatResolutionMixin:
                 or (mode == "saving_throw" and not succeeded)
                 or mode in {"buff", "debuff"}
             )
-            # 光环条件免疫：命中则根本不产生 condition.applied，并把首个
-            # 声明来源写回本次豁免事件（仅拦截时携带，事件类型不变）。
-            blocked_by_aura = ""
+            # 光环条件免疫：命中则根本不产生 condition.applied，并把拦截来源
+            # 写回本次豁免事件（仅拦截时携带，事件类型不变）。豁免本身仍然
+            # 是失败——被免疫的是条件的落地，不是掷骰结果。
+            blocked_by_aura: dict[str, str] | None = None
             if condition and condition_applies and mode == "saving_throw":
-                blocked_by_aura = self._aura_immune_conditions(
-                    instance, combat, target,
-                ).get(condition, "")
+                blocked_by_aura = self._aura_condition_immunity_source(
+                    instance, combat, target, condition,
+                )
             if blocked_by_aura:
                 if save_check_index is not None:
+                    events[save_check_index]["blocked_condition"] = condition
                     events[save_check_index]["blocked_by_aura"] = blocked_by_aura
             elif condition and condition_applies:
                 applied = {
@@ -1172,7 +1180,7 @@ class CombatResolutionMixin:
                 "delta": -cost, "amount": cost, "damage_type": damage_type,
                 "overchannel_cost": True, "rolls": cost_rolls,
             })
-            events.extend(self._concentration_events(actor, cost, rng))
+            events.extend(self._concentration_events(instance, combat, actor, cost, rng))
         return events
 
     def _movement_events(
@@ -1653,6 +1661,7 @@ class CombatResolutionMixin:
                     "source_actor_id": str(meta.get("source_actor_id") or ""),
                     "ability": ability, "rolls": [], "natural": 0,
                     "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                    "aura_bonus": 0, "aura_sources": [],
                     "total": 0,
                     "target": dc, "success": False, "auto_failed": True,
                     "repeat_save": True,
@@ -1680,7 +1689,10 @@ class CombatResolutionMixin:
                 self.catalog.conditions, actor["conditions"], "saving_throw", rng,
             )
             check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-            total = roll + modifier + check_bonus
+            # 光环按本次回合末结算时的位置与失能状态求值，不用施放时快照；
+            # 快照里只有 DC 和豁免属性，这两项不随移动变化。
+            aura = self._saving_throw_aura_bonus(instance, combat, actor)
+            total = roll + modifier + check_bonus + int(aura["bonus"])
             success = total >= dc
             check_event = {
                 "type": "check.resolved", "kind": "saving_throw",
@@ -1690,6 +1702,7 @@ class CombatResolutionMixin:
                 "rolls": [value for value in (first, second) if value is not None],
                 "natural": roll, "modifier": modifier,
                 "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
                 "total": total, "target": dc, "success": success,
                 "repeat_save": True,
             }
@@ -1817,12 +1830,19 @@ class CombatResolutionMixin:
             self.catalog.conditions, actor["conditions"], "saving_throw", rng,
         )
         check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-        total = roll + check_bonus
+        # Aura of Protection covers death saves too.  The bonus is itemised
+        # rather than folded into ``modifier`` so the event still shows a bare
+        # d20 plus separately-attributable sources.
+        aura = self._saving_throw_aura_bonus(instance, combat, actor)
+        total = roll + check_bonus + int(aura["bonus"])
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
-            "natural": roll, "check_bonus": check_bonus,
-            "check_bonus_rolls": check_bonus_rolls, "total": total,
+            "natural": roll, "modifier": 0,
+            "check_bonus": check_bonus,
+            "check_bonus_rolls": check_bonus_rolls, "bless_bonus": check_bonus,
+            "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
+            "total": total,
             "target": 10, "success": total >= 10,
         }
         if advantage_sources:

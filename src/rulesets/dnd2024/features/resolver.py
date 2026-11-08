@@ -1041,6 +1041,7 @@ class Dnd2024ClassFeatureResolver:
                     f"class feature {definition.id} references an unknown class table"
                 )
             self._validate_owner_grant(definition, progression_catalog)
+            self._validate_aura_parameters(definition)
             for key, value in definition.parameters.items():
                 if key == "crit_threshold":
                     if (
@@ -1259,6 +1260,117 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id}.speed_bonus_ft must be an integer from 1 to 120"
             )
+
+    def _validate_aura_parameters(self, definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the aura declaration contract.
+
+        An aura is three separate declarations that only mean something
+        together: the base aura owns the range and the saving-throw bonus, an
+        expansion names a base aura and overrides its range, and a condition
+        immunity names the base aura it rides on.  Nothing here names Paladin
+        -- the relation is catalog data, so the shape is reusable -- and a
+        dangling or self-referential relation is rejected at load because the
+        consumer would otherwise project no aura at all and say nothing.
+        """
+
+        parameters = definition.parameters
+        # 同一 id 可能同时存在于 class 与 subclass 两个 owner 下，按 id 收集后
+        # 只认真的声明了范围的那一条，避免拿错 owner 的同名条目。
+        index = self.catalog.features_by_key
+
+        def _base_aura(feature_id: Any) -> ClassFeatureDefinition | None:
+            if not isinstance(feature_id, str) or not feature_id:
+                return None
+            for candidate in index.values():
+                if candidate.id == feature_id and "aura_range_ft" in candidate.parameters:
+                    return candidate
+            return None
+
+        for key in ("aura_range_ft", "aura_range_override_ft"):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a positive integer"
+                )
+
+        has_ability = "aura_save_bonus_ability" in parameters
+        has_minimum = "aura_save_bonus_minimum" in parameters
+        if has_ability != has_minimum:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_save_bonus_ability and "
+                f"aura_save_bonus_minimum together"
+            )
+        if has_ability:
+            ability = parameters["aura_save_bonus_ability"]
+            if not isinstance(ability, str) or ability not in ABILITY_IDS:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_ability must name an ability"
+                )
+            minimum = parameters["aura_save_bonus_minimum"]
+            if (
+                isinstance(minimum, bool) or not isinstance(minimum, int)
+                or minimum < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_minimum must be an integer "
+                    f"of at least 1"
+                )
+
+        # 豁免加值必须挂在一个有范围的基础光环上，否则它永远不会生效。
+        bonus_declared = has_ability or "aura_save_bonus_minimum" in parameters
+        if bonus_declared and "aura_range_ft" not in parameters:
+            raise ClassFeatureError(
+                f"{definition.id} declares a saving-throw bonus without aura_range_ft"
+            )
+
+        has_immunities = "aura_condition_immunities" in parameters
+        has_source = "aura_source_feature_id" in parameters
+        if has_immunities != has_source:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_source_feature_id and "
+                f"aura_condition_immunities together"
+            )
+        if has_immunities:
+            immunities = parameters["aura_condition_immunities"]
+            if not isinstance(immunities, list) or not immunities:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must be a non-empty list"
+                )
+            if any(not isinstance(code, str) or not code for code in immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must hold condition ids"
+                )
+            if len(set(immunities)) != len(immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities repeats a condition"
+                )
+            unsupported = sorted(code for code in immunities if code != "charmed")
+            if unsupported:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities does not support "
+                    f"{', '.join(unsupported)} yet"
+                )
+            source = _base_aura(parameters["aura_source_feature_id"])
+            if source is None:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_source_feature_id must name a base aura"
+                )
+
+        has_override = "aura_range_override_ft" in parameters
+        has_expands = "aura_expands_feature_id" in parameters
+        if has_override != has_expands:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_expands_feature_id and "
+                f"aura_range_override_ft together"
+            )
+        if has_expands:
+            expanded = _base_aura(parameters["aura_expands_feature_id"])
+            if expanded is None or expanded.id == definition.id:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_expands_feature_id must name another base aura"
+                )
 
     @staticmethod
     def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:

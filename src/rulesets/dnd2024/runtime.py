@@ -1288,6 +1288,7 @@ class Dnd2024Runtime:
             "healing",
             "rolls", "advantage_mode", "advantage_sources", "check_bonus",
             "check_bonus_rolls",
+            "aura_bonus", "aura_sources", "blocked_condition", "blocked_by_aura",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
             "item_ref",
