@@ -157,6 +157,10 @@ class CombatViewMixin:
             }
             for row in (*feature_projection["spell_grants"], *feat_spell_grants(character))
         ]
+        # 免费施法槽是独立资源，不是"这个法术免费"的布尔值：每槽自报
+        # 固定环阶、recharge、剩余次数与所选法术，结算时按 (slot, level)
+        # 匹配一个来源。
+        free_cast_slots = self.features.free_cast_slots(character)
         return {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
@@ -188,6 +192,9 @@ class CombatViewMixin:
                 *list(class_magic.get("cantrip_refs") or []),
                 *list(class_magic.get("prepared_spell_refs") or []),
                 *[row["spell_ref"] for row in spell_grants],
+                # 秘奥法术不占普通准备（11 级邪术师根本没有 6 环准备位），
+                # 但必须能施放，所以它的 ref 也只从这里进候选集。
+                *[row["spell_ref"] for row in free_cast_slots if row["spell_ref"]],
             ])),
             "class_spell_refs": list(dict.fromkeys([
                 *list(class_magic.get("cantrip_refs") or []),
@@ -195,6 +202,7 @@ class CombatViewMixin:
             ])),
             "slots": deepcopy(class_magic.get("slots_current") or {}),
             "spell_grants": deepcopy(spell_grants),
+            "free_cast_slots": deepcopy(free_cast_slots),
             "spell_attack_bonus": int(
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
@@ -469,7 +477,9 @@ class CombatViewMixin:
                 int(level) for level, count in actor["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
-            if spell["level"] > 0 and free_cast_resource(actor, ref):
+            if spell["level"] > 0 and free_cast_resource(
+                actor, ref, int(spell["level"]),
+            ):
                 available_slots.insert(0, 0)
             available_slots.sort()
             if available_slots:

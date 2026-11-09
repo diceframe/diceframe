@@ -84,6 +84,56 @@ def _terrain_grant_row(value: Any) -> tuple[str, int, str] | None:
     return parts[0], level, f"spell:{parts[3]}"
 
 
+# Free-cast slot encoding.  A feature parameter may only hold scalars, so the
+# six facts that define one slot travel as a single flat row rather than as a
+# nested object: ``"<slot_id>:<level>:<recharge>:<uses>:<spell_ref>"``.
+#
+# ``unlimited`` is a real recharge value, not "no recharge": Spell Mastery never
+# runs out, and a record that stored a finite count for it would be a lie.
+_FREE_CAST_RECHARGES = frozenset({"long_rest", "short_rest", "unlimited"})
+# A choice slot writes ``-`` where a fixed slot writes its spell, so the row
+# keeps five fields either way.
+_FREE_CAST_CHOICE = "-"
+# Where a choice slot may pick from.  ``class_list`` reads the declared lists,
+# ``spellbook`` reads the character's own spellbook, ``fixed`` needs no pick.
+FREE_CAST_SOURCES = frozenset({"fixed", "class_list", "spellbook"})
+
+
+def _free_cast_slot(value: Any) -> dict[str, Any] | None:
+    """Parse one free-cast slot row.
+
+    ``uses`` of ``0`` means the slot never runs out, and a ``spell_ref`` of
+    ``-`` means the player chooses the spell (the alternative is a feature that
+    names its own spell, like Contact Patron).  The last field is split off with
+    ``maxsplit`` because a spell ref itself contains a colon.
+    """
+
+    parts = str(value or "").split(":", 4)
+    if len(parts) != 5:
+        return None
+    slot_id, raw_level, recharge, raw_uses, raw_spell = parts
+    if not slot_id or recharge not in _FREE_CAST_RECHARGES:
+        return None
+    try:
+        spell_level = int(raw_level)
+        uses = int(raw_uses)
+    except ValueError:
+        return None
+    if spell_level < 1 or uses < 0:
+        return None
+    spell_ref = str(raw_spell or "")
+    if spell_ref != _FREE_CAST_CHOICE:
+        if not spell_ref.startswith("spell:") or len(spell_ref) <= len("spell:"):
+            return None
+    return {
+        "slot_id": slot_id,
+        "spell_level": spell_level,
+        "recharge": recharge,
+        "uses": uses,
+        "spell_ref": "" if spell_ref == _FREE_CAST_CHOICE else spell_ref,
+    }
+
+
 # The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
 # only supported event; the other three describe the temp-HP formula.  Keeping
 # the names in one place means the loader and the combat helper can never
@@ -452,6 +502,132 @@ class Dnd2024ClassFeatureResolver:
                 return definition
         return None
 
+    # ------------------------------------------------------------------
+    # free-cast slots
+    # ------------------------------------------------------------------
+
+    def free_cast_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted free-cast slot records, keyed by slot id.
+
+        A record holds only what the player owns: the chosen spell and how many
+        uses are left.  Level, recharge and the use maximum stay in the
+        declaration, so a content fix is never shadowed by stale sheet data.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("free_cast_slots")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def free_cast_slots(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Every free-cast slot the character owns, merged with its record.
+
+        The identity of a slot is ``(owner, feature_id, slot_id)`` and it is
+        never flattened into a single "can cast for free" flag: each row keeps
+        its own spell, level, recharge and remaining uses, because Contact
+        Patron, the four Mystic Arcana, Spell Mastery and Signature Spells are
+        six independent pools with six different recharge rules.
+
+        An absent record means "not spent yet" for a slot whose spell the
+        feature itself names, and "not chosen yet" for one the player picks.
+        """
+
+        stored = self.free_cast_choices(character)
+        return self._free_cast_rows(self.features_for(character), character, stored)
+
+    def _free_cast_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+        stored: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Free-cast rows for an already-resolved ownership list."""
+
+        records = self.free_cast_choices(character) if stored is None else stored
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            raw_slots = parameters.get("free_cast_slots") or ()
+            if not raw_slots:
+                continue
+            source = str(parameters.get("free_cast_source") or "fixed")
+            for raw in raw_slots:
+                parsed = _free_cast_slot(raw)
+                if parsed is None:
+                    continue
+                rows.append(self._free_cast_row(
+                    definition, parsed, records.get(parsed["slot_id"]), source,
+                ))
+        return rows
+
+    def _free_cast_row(
+        self,
+        definition: ClassFeatureDefinition,
+        parsed: Mapping[str, Any],
+        record: Mapping[str, Any] | None,
+        source: str,
+    ) -> dict[str, Any]:
+        parameters = definition.parameters
+        uses = int(parsed["uses"])
+        fixed = str(parsed["spell_ref"] or "")
+        spell_ref = fixed
+        uses_remaining: int | None = None if uses == 0 else uses
+        valid = True
+        if record is not None:
+            # A record that disagrees with the declaration about the slot's
+            # level or recharge is not a slot any more; ignoring the mismatch
+            # would let a tampered sheet cast a level 2 spell out of a level 6
+            # arcanum by relabelling it.
+            stored_level = record.get("spell_level")
+            stored_recharge = record.get("recharge")
+            if (
+                (stored_level is not None and int(stored_level) != int(parsed["spell_level"]))
+                or (stored_recharge is not None and str(stored_recharge) != str(parsed["recharge"]))
+            ):
+                valid = False
+            chosen = record.get("spell_ref")
+            if not fixed and isinstance(chosen, str) and chosen:
+                spell_ref = chosen
+            if uses and isinstance(record.get("uses_remaining"), int):
+                uses_remaining = max(0, int(record["uses_remaining"]))
+        lists = [str(ref) for ref in parameters.get("free_cast_lists") or ()]
+        return {
+            "id": f"free_cast:{definition.owner}:{definition.id}:{parsed['slot_id']}",
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "slot_id": str(parsed["slot_id"]),
+            "spell_level": int(parsed["spell_level"]),
+            "recharge": str(parsed["recharge"]),
+            "uses_max": uses,
+            "spell_ref": spell_ref,
+            "selected": bool(spell_ref),
+            "uses_remaining": uses_remaining,
+            "valid": valid,
+            "source": "fixed" if fixed else source,
+            "spell_lists": lists,
+            "casting_time": str(parameters.get("free_cast_casting_time") or ""),
+            "save_auto_succeed": bool(parameters.get("free_cast_save_auto")),
+            "replacement": int(parameters.get("free_cast_replacement") or 0),
+            "replacement_group": str(
+                parameters.get("free_cast_replacement_group") or definition.id
+            ),
+            "rest_replace": int(parameters.get("free_cast_rest_replace") or 0),
+        }
+
     def spell_grant_rows(
         self, character: Mapping[str, Any] | None,
     ) -> list[dict[str, Any]]:
@@ -517,6 +693,21 @@ class Dnd2024ClassFeatureResolver:
                     rows.append(self._grant_row(
                         definition, ref, granted_level, ability,
                         choice_id=definition.id,
+                    ))
+            if bool(parameters.get("free_cast_prepares")):
+                # Spell Mastery, Signature Spells and Contact Patron all say
+                # "you always have them prepared"; the free cast is a separate
+                # fact about the same spell, so it comes through as one more
+                # source on the prepared view rather than as its own entry.
+                for free in self._free_cast_rows(
+                    (definition,), character, self.free_cast_choices(character),
+                ):
+                    if not free["spell_ref"] or not free["valid"]:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, free["spell_ref"],
+                        int(definition.minimum_level), ability,
+                        choice_id=free["slot_id"],
                     ))
         return rows
 

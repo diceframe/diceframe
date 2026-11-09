@@ -697,7 +697,7 @@ class CombatValidationMixin:
                 raise CombatIntentError("a cantrip does not use a spell slot")
         else:
             if slot_level == 0:
-                if free_cast_resource(actor, spell_ref) is None:
+                if free_cast_resource(actor, spell_ref, int(spell["level"])) is None:
                     raise CombatIntentError("the free spell cast is not available")
             elif economy.get("slot_spell_cast"):
                 raise CombatIntentError("only one spell slot can be expended on a turn")

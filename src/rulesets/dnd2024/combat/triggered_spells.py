@@ -35,7 +35,38 @@ def hit_spell_decision(combat: dict[str, Any], actor_id: str) -> dict[str, Any] 
     )
 
 
-def free_cast_resource(actor: dict[str, Any], spell_ref: str) -> dict[str, Any] | None:
+def free_cast_resource(
+    actor: dict[str, Any], spell_ref: str, spell_level: int | None = None,
+) -> dict[str, Any] | None:
+    """The single free source this cast may draw on, or ``None``.
+
+    One cast spends exactly one source, so this returns at most one row and the
+    caller never has to arbitrate.  An unlimited slot wins over every finite
+    source: Spell Mastery never runs out, and burning a Magic Initiate use (or
+    a Mystic Arcanum, or a Signature use) on a spell the character could cast
+    for free forever would be a silent, unrecoverable loss.
+
+    ``spell_level`` is the level the cast actually uses.  Free casting never
+    upcasts -- a level 6 arcanum is cast at level 6 -- so a slot only matches
+    when its fixed level equals the spell's own.
+    """
+
+    slots = [
+        row for row in actor.get("free_cast_slots", []) or []
+        if row.get("valid", True)
+        and row.get("spell_ref") == spell_ref
+        and (spell_level is None or int(row.get("spell_level", 0) or 0) == int(spell_level))
+    ]
+    unlimited = next(
+        (row for row in slots if row.get("recharge") == "unlimited"), None,
+    )
+    if unlimited is not None:
+        return {
+            "kind": "free_slot",
+            "free_slot_id": unlimited["slot_id"],
+            "spell_level": int(unlimited["spell_level"]),
+            "unlimited": True,
+        }
     # 职业特性免费施放挂在 class resource 上；起源专长（魔法学徒）的
     # 每长休一次免费施放挂在该专长条目上。两者都可能授予同一法术。
     grants = [
@@ -44,6 +75,19 @@ def free_cast_resource(actor: dict[str, Any], spell_ref: str) -> dict[str, Any] 
     feat_grant = next((row for row in grants if row.get("free_cast_available")), None)
     if feat_grant is not None:
         return {"kind": "feat", "feat_ref": feat_grant["feat_ref"]}
+    limited = next(
+        (
+            row for row in slots
+            if row.get("uses_remaining") is None or int(row["uses_remaining"]) > 0
+        ),
+        None,
+    )
+    if limited is not None:
+        return {
+            "kind": "free_slot",
+            "free_slot_id": limited["slot_id"],
+            "spell_level": int(limited["spell_level"]),
+        }
     grant = next((row for row in grants if row.get("resource_id")), None)
     if grant is None:
         return None
@@ -117,7 +161,9 @@ class CombatTriggeredSpellsMixin:
                     }
                 )
             else:
-                resource = free_cast_resource(actor, f"spell:{spell['id']}")
+                resource = free_cast_resource(
+                    actor, f"spell:{spell['id']}", int(spell["level"]),
+                )
                 if resource is None:
                     raise CombatIntentError("the free spell cast is not available")
                 if resource.get("kind") == "feat":
@@ -128,6 +174,21 @@ class CombatTriggeredSpellsMixin:
                             "feat_ref": resource["feat_ref"],
                         }
                     )
+                    return events
+                if resource.get("kind") == "free_slot":
+                    if not resource.get("unlimited"):
+                        # Spell Mastery never runs out, so there is no counter to
+                        # spend: emitting an event for it would need a number the
+                        # slot deliberately does not carry.
+                        events.append(
+                            {
+                                "type": "dnd2024.free_cast.spent",
+                                "actor_id": actor["actor_id"],
+                                "free_slot_id": resource["free_slot_id"],
+                                "spell_ref": f"spell:{spell['id']}",
+                                "spell_level": int(resource["spell_level"]),
+                            }
+                        )
                     return events
                 events.append(
                     {

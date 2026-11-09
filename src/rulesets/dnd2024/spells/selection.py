@@ -43,6 +43,18 @@ def _class_magic(character: Mapping[str, Any] | None) -> dict[str, Any]:
     return block if isinstance(block, dict) else {}
 
 
+def _casting_segment(value: Any) -> str:
+    """The cast-mode a spell is used with, stripped of ritual and riders.
+
+    "Action or Ritual" casts with an action; "1 minute or Ritual" does not;
+    "Bonus Action, which you take ..." is still a Bonus Action.  Spell Mastery
+    asks for a casting time of an action, so it needs this normalised form
+    rather than the raw catalog string.
+    """
+
+    return str(value or "").split(",")[0].split(" or ")[0].strip()
+
+
 @dataclass(slots=True)
 class Dnd2024SpellSelection:
     bundle: LoadedRulesetBundle
@@ -92,6 +104,7 @@ class Dnd2024SpellSelection:
             "cantrips": [spell for spell in spells if spell["level"] == 0],
             "leveled_spells": [spell for spell in spells if spell["level"] > 0],
             "grant_slots": self.grant_slots(level, character),
+            "free_cast_slots": self.free_cast_slots(level, character),
         }
 
     def prepared_list_expansion(
@@ -154,6 +167,57 @@ class Dnd2024SpellSelection:
                 "options": self._spells_for_lists(lists, maximum),
             })
         return slots
+
+    def free_cast_slots(
+        self, level: int, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Free-cast slots the character owns at ``level``, with their options.
+
+        Every row is one independent pool: Contact Patron, each of the four
+        Mystic Arcana, the two Spell Mastery slots and the two Signature slots
+        differ in level, recharge and remaining uses, so nothing here is
+        collapsed into a shared "free casting" flag.
+        """
+
+        slots: list[dict[str, Any]] = []
+        if not isinstance(character, Mapping):
+            return slots
+        for row in self.features.free_cast_slots(character):
+            if row["source"] != "fixed":
+                row["options"] = self._free_cast_options(row, character)
+            else:
+                row["options"] = []
+            slots.append(row)
+        return slots
+
+    def _free_cast_options(
+        self, row: Mapping[str, Any], character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """The spells one slot may legally hold, in catalog order."""
+
+        level = int(row["spell_level"])
+        if row["source"] == "spellbook":
+            block = _class_magic(character)
+            known = [
+                str(ref) for ref in block.get("spellbook_refs") or ()
+                if isinstance(ref, str)
+            ]
+            spells = [
+                spell for spell in (self.catalog.get(ref) for ref in known)
+                if spell is not None
+            ]
+        else:
+            spells = self._spells_for_lists(list(row["spell_lists"]), level)
+        wanted = str(row.get("casting_time") or "")
+        return [
+            {"ref": spell["ref"], "name": spell["name"], "level": int(spell["level"])}
+            for spell in spells
+            if int(spell["level"]) == level
+            and (
+                not wanted
+                or _casting_segment(spell["casting_time"]) == wanted
+            )
+        ]
 
     def validate(
         self,
@@ -223,11 +287,16 @@ class Dnd2024SpellSelection:
             choices.get("spell_grants"), character, requirements,
         )
         errors.extend(grant_errors)
+        free_cast, free_errors = self._validate_free_cast(
+            choices.get("free_cast"), character, requirements, spellbook,
+        )
+        errors.extend(free_errors)
         return {
             "cantrip_refs": cantrips,
             "prepared_spell_refs": prepared,
             "spellbook_refs": spellbook,
             "spell_grant_choices": grants,
+            "free_cast_slots": free_cast,
         }, errors
 
     def preparation_options(self, character: Mapping[str, Any]) -> dict[str, Any]:
@@ -429,6 +498,7 @@ class Dnd2024SpellSelection:
         class_entity = self.bundle.get("class", _class_id(class_ref)) or {}
         spell_ability = str(class_entity.get("spellcasting_ability") or "")
         grant_choices = parsed.pop("spell_grant_choices", {})
+        free_cast = parsed.pop("free_cast_slots", {})
         result.setdefault("build", {})["class_spell_choices"] = deepcopy(parsed)
         block = {
             "class_ref": class_ref,
@@ -448,6 +518,10 @@ class Dnd2024SpellSelection:
             # 地形选择由长休写入；这里只合并本次提交的槽位，不能把 Land
             # 的既有地形顺手清成"未选"。
             block["spell_grant_choices"] = merged
+        if free_cast:
+            # 免费施法槽的"已消耗"计数与所选法术是同一份记录：重提交时
+            # 不重算次数，替换法术也不刷新，见 `_free_cast_record`。
+            block["free_cast_slots"] = deepcopy(free_cast)
         result.setdefault("spellcasting", {})["class"] = block
         abilities = result.get("abilities") or {}
         proficiency = int(result.get("derived", {}).get("proficiency_bonus", 2) or 2)
@@ -684,6 +758,219 @@ class Dnd2024SpellSelection:
                 "granted_level": int(slot.get("granted_level") or requirements["level"]),
             }
         return parsed, errors
+
+    def _validate_free_cast(
+        self,
+        raw_slots: Any,
+        character: Mapping[str, Any] | None,
+        requirements: Mapping[str, Any],
+        spellbook: list[str],
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """Validate the spells held in the character's free-cast slots.
+
+        A slot the character owns but has not filled yet is not an error: the
+        same rule the grant slots follow, because a client that only wants to
+        submit ordinary preparation must never be blocked by a high-level
+        feature it has no UI for.  What *is* an error is a slot that does not
+        exist, a spell of the wrong level, a spell from outside the declared
+        source, and a replacement beyond what the feature allows.
+        """
+
+        slots = {
+            row["slot_id"]: row
+            for row in self.free_cast_slots(int(requirements["level"]), character)
+        }
+        errors: list[str] = []
+        previous = self.features.free_cast_choices(character)
+        # 只保留当前仍拥有的槽位：降级或换职后遗留的记录不能继续生效。
+        records: dict[str, dict[str, Any]] = {
+            slot_id: deepcopy(record)
+            for slot_id, record in previous.items()
+            if slot_id in slots and str(record.get("spell_ref") or "")
+        }
+        if raw_slots is not None:
+            if not isinstance(raw_slots, Mapping):
+                return {}, ["free_cast must be an object keyed by slot id"]
+            replaced: dict[str, int] = {}
+            for key, value in raw_slots.items():
+                slot_id = str(key)
+                slot = slots.get(slot_id)
+                if slot is None:
+                    errors.append(
+                        f"free cast slot {slot_id} is not a slot this character owns"
+                    )
+                    continue
+                ref = value.get("spell") if isinstance(value, Mapping) else value
+                if not isinstance(ref, str) or not ref:
+                    errors.append(f"free cast slot {slot_id} must name one spell")
+                    continue
+                if slot["source"] == "fixed":
+                    if ref != slot["spell_ref"]:
+                        errors.append(f"free cast slot {slot_id} is not a player choice")
+                    continue
+                problem = self._free_cast_ref_error(slot, ref, spellbook)
+                if problem:
+                    errors.append(problem)
+                    continue
+                held = str((records.get(slot_id) or {}).get("spell_ref") or "")
+                if held and held != ref:
+                    group = str(slot["replacement_group"])
+                    replaced[group] = replaced.get(group, 0) + 1
+                    if replaced[group] > int(slot["replacement"]):
+                        errors.append(
+                            f"free cast {group} can replace at most "
+                            f"{slot['replacement']} of its spells per level"
+                        )
+                        continue
+                records[slot_id] = self._free_cast_record(
+                    slot, ref, records.get(slot_id),
+                )
+        errors.extend(self._free_cast_duplicate_errors(slots, records))
+        return records, errors
+
+    def _free_cast_ref_error(
+        self,
+        slot: Mapping[str, Any],
+        ref: str,
+        spellbook: list[str],
+    ) -> str:
+        """Why ``ref`` may not fill ``slot``; empty when it may."""
+
+        slot_id = slot["slot_id"]
+        spell = self.catalog.get(ref)
+        if spell is None:
+            return f"free cast slot {slot_id} contains unknown spell {ref}"
+        if int(spell["level"]) != int(slot["spell_level"]):
+            return f"{ref} is not a level {slot['spell_level']} spell"
+        wanted = str(slot.get("casting_time") or "")
+        if wanted and _casting_segment(spell["casting_time"]) != wanted:
+            return f"{ref} cannot be held: its casting time must be {wanted}"
+        if slot["source"] == "spellbook" and ref not in spellbook:
+            return f"{ref} is not in your spellbook"
+        if slot["source"] == "class_list":
+            allowed = set(slot["spell_lists"])
+            if not set(spell["class_refs"]) & allowed:
+                return f"{ref} is not on a list {slot_id} may choose from"
+        return ""
+
+    @staticmethod
+    def _free_cast_record(
+        slot: Mapping[str, Any], ref: str, previous: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """The record to persist for one slot.
+
+        Replacing the spell never refreshes the uses: an arcanum swapped at
+        level-up is still the one that was already cast today.
+        """
+
+        record = {
+            "spell_ref": ref,
+            "spell_level": int(slot["spell_level"]),
+            "recharge": str(slot["recharge"]),
+        }
+        uses = int(slot["uses_max"])
+        if uses:
+            kept = (previous or {}).get("uses_remaining")
+            record["uses_remaining"] = (
+                int(kept) if isinstance(kept, int) and not isinstance(kept, bool)
+                else uses
+            )
+        return record
+
+    @staticmethod
+    def _free_cast_duplicate_errors(
+        slots: Mapping[str, Mapping[str, Any]],
+        records: Mapping[str, Mapping[str, Any]],
+    ) -> list[str]:
+        """Signature Spells are two *different* spells, not the same one twice."""
+
+        seen: dict[tuple[str, str], str] = {}
+        errors: list[str] = []
+        for slot_id, record in records.items():
+            slot = slots.get(slot_id)
+            if slot is None:
+                continue
+            ref = str(record.get("spell_ref") or "")
+            if not ref:
+                continue
+            key = (str(slot["feature_id"]), ref)
+            first = seen.get(key)
+            if first is not None:
+                errors.append(f"{ref} cannot fill both {first} and {slot_id}")
+                continue
+            seen[key] = slot_id
+        return errors
+
+    def rebind_free_cast(
+        self, character: Mapping[str, Any] | None, changes: Any,
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """Re-choose free-cast slots outside level-up: the Long Rest study.
+
+        Spell Mastery is the only declaration that allows this today, and it
+        allows exactly one replacement per Long Rest -- never two, never on a
+        Short Rest, never automatically.  Signature Spells declares
+        ``free_cast_rest_replace == 0``, so the same call refuses it, which is
+        how "the book prints no replacement rule" becomes enforced rather than
+        merely undocumented.
+        """
+
+        block = _class_magic(character)
+        build = (character or {}).get("build")
+        rows = build.get("class_levels") if isinstance(build, Mapping) else None
+        level = int((rows[0] if isinstance(rows, list) and rows else {}).get("level", 0) or 0)
+        slots = {
+            row["slot_id"]: row for row in self.free_cast_slots(level, character)
+        }
+        previous = self.features.free_cast_choices(character)
+        records: dict[str, dict[str, Any]] = {
+            slot_id: deepcopy(record)
+            for slot_id, record in previous.items()
+            if slot_id in slots and str(record.get("spell_ref") or "")
+        }
+        if not isinstance(changes, Mapping):
+            return {}, ["free cast changes must be an object keyed by slot id"]
+        errors: list[str] = []
+        requested: dict[str, Any] = {}
+        for key, value in changes.items():
+            slot_id = str(key)
+            slot = slots.get(slot_id)
+            if slot is None:
+                errors.append(
+                    f"free cast slot {slot_id} is not a slot this character owns"
+                )
+                continue
+            if int(slot["rest_replace"]) < 1:
+                errors.append(
+                    f"free cast slot {slot_id} cannot be re-chosen during a rest"
+                )
+                continue
+            requested[slot_id] = value
+        if errors:
+            return {}, errors
+        if requested:
+            budget = min(int(slots[slot_id]["rest_replace"]) for slot_id in requested)
+            if len(requested) > budget:
+                return {}, [
+                    f"at most {budget} free cast spells can be re-chosen during a rest"
+                ]
+        spellbook = [str(ref) for ref in block.get("spellbook_refs") or ()]
+        for slot_id, value in requested.items():
+            slot = slots[slot_id]
+            ref = value.get("spell") if isinstance(value, Mapping) else value
+            if not isinstance(ref, str) or not ref:
+                errors.append(f"free cast slot {slot_id} must name one spell")
+                continue
+            problem = self._free_cast_ref_error(slot, ref, spellbook)
+            if problem:
+                errors.append(problem)
+                continue
+            records[slot_id] = self._free_cast_record(
+                slot, ref, records.get(slot_id),
+            )
+        if errors:
+            return {}, errors
+        errors.extend(self._free_cast_duplicate_errors(slots, records))
+        return records, errors
 
     def _listable(
         self, class_ref: str, requirements: Mapping[str, Any],

@@ -525,6 +525,26 @@ class CombatReducerMixin:
             except ValueError as exc:
                 raise EventBatchError(str(exc)) from exc
             return
+        if event_type == "dnd2024.free_cast.spent":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion free casts are canonical")
+            character = self._canonical_of(snapshot, kind, raw_id)
+            block = (character.get("spellcasting") or {}).get("class")
+            stored = block.get("free_cast_slots") if isinstance(block, dict) else None
+            slot_id = str(event["free_slot_id"])
+            record = stored.get(slot_id) if isinstance(stored, dict) else None
+            if not isinstance(record, dict):
+                raise EventBatchError(f"free cast slot is not initialized: {slot_id}")
+            if str(record.get("spell_ref") or "") != str(event.get("spell_ref") or ""):
+                raise EventBatchError(f"free cast slot holds another spell: {slot_id}")
+            remaining = record.get("uses_remaining")
+            if not isinstance(remaining, int) or isinstance(remaining, bool):
+                raise EventBatchError(f"free cast slot is not spent-limited: {slot_id}")
+            if remaining < 1:
+                raise EventBatchError(f"free cast slot is already spent: {slot_id}")
+            record["uses_remaining"] = remaining - 1
+            return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind in {"player", "companion"}:

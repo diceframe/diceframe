@@ -603,11 +603,20 @@ class Dnd2024AdvancementEngine:
                 slot for slot in spell_selection.grant_slots(target_level, spell_state)
                 if not slot["selected_refs"]
             ]
+            # 免费施法槽同样"拥有但未选"时要把整块标成 required：11 级的
+            # 秘奥与 18 级的法术精通都必须在这一级做出选择，但它们未提交
+            # 时不算非法（见 `_validate_free_cast`）。
+            open_free = [
+                slot
+                for slot in spell_selection.free_cast_slots(target_level, spell_state)
+                if slot["source"] != "fixed" and not slot["selected"]
+            ]
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
                 or spellbook_growth > 0
                 or bool(open_slots)
+                or bool(open_free)
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
@@ -634,6 +643,7 @@ class Dnd2024AdvancementEngine:
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
                     "grant_slots": spell_options["grant_slots"],
+                    "free_cast_slots": spell_options["free_cast_slots"],
                 })
                 spell_choices, spell_errors = spell_selection.validate(
                     class_ref, target_level, raw_spell_choices,
@@ -1626,6 +1636,16 @@ class Dnd2024AdvancementEngine:
             merged = deepcopy(previous.get("spell_grant_choices") or {})
             merged.update(deepcopy(grant_choices))
             next_magic["spell_grant_choices"] = merged
+        free_cast = preview["diff"].get("class_spell_choices", {}).get(
+            "free_cast_slots"
+        )
+        if isinstance(free_cast, dict) and free_cast:
+            # 免费施法槽的记录同时装着"选了哪个法术"和"还剩几次"：这里的
+            # 合并只覆盖本次提交的槽位，替换 arcanum 不会顺手把已消耗的
+            # 次数刷回满值（`_free_cast_record` 保留原计数）。
+            merged_free = deepcopy(previous.get("free_cast_slots") or {})
+            merged_free.update(deepcopy(free_cast))
+            next_magic["free_cast_slots"] = merged_free
         spellcasting["class"] = next_magic
 
     def _update_derived(self, character: dict[str, Any]) -> None:

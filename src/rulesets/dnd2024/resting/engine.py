@@ -180,7 +180,12 @@ class Dnd2024RestEngine:
     def complete_short_rest(
         self, payload: dict[str, Any], hit_die_rolls: dict[str, list[int]] | None = None,
         attunement: dict[str, Any] | None = None,
+        free_cast: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if free_cast:
+            # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
+            # 而是用错了入口，直接拒绝比静默忽略更安全。
+            raise RestError("free cast slots can only be re-chosen during a long rest")
         character = self.sync_resources(payload)
         self._require_conscious(character, "Short Rest")
         events: list[dict[str, Any]] = []
@@ -216,6 +221,7 @@ class Dnd2024RestEngine:
                 })
         self._recover_class_resources(character, "short", events)
         self._recover_spell_slots(character, "short", events)
+        self._recover_free_cast_slots(character, "short", events)
         events.extend(self._apply_attunement(character, payload, attunement))
         events.extend(self._recharge_items(character, payload, "short"))
         return {
@@ -229,6 +235,7 @@ class Dnd2024RestEngine:
     def complete_long_rest(
         self, payload: dict[str, Any], land_terrain: str | None = None,
         prepared_spells: dict[str, list[str]] | None = None,
+        free_cast: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
@@ -237,6 +244,12 @@ class Dnd2024RestEngine:
         terrain_plan = self._plan_land_terrain(
             character, land_terrain if land_terrain is not None
             else payload.get("land_terrain"),
+        )
+        # Spell Mastery 的"研究法术书"同理：先校验再落账，一项非法替换
+        # 不能让长休留下已经恢复的 HP 与槽位。
+        free_cast_plan = self._plan_free_cast_rebind(
+            character, free_cast if free_cast is not None
+            else payload.get("free_cast"),
         )
         events: list[dict[str, Any]] = []
         resources = character["resources"]
@@ -262,6 +275,10 @@ class Dnd2024RestEngine:
         resources["ability_score_reductions"] = {}
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
+        # 重新研究先落账，再按 recharge 补满：长休结束时被换上的法术槽也是满的，
+        # 顺序反了就会把"研究完睡一觉"算成"睡完又花掉一次"。
+        events.extend(self._apply_free_cast_rebind(character, free_cast_plan))
+        self._recover_free_cast_slots(character, "long", events)
         events.extend(self._apply_land_terrain(character, terrain_plan))
         if prepared_spells:
             events.extend(self._apply_prepared_spells(character, prepared_spells))
@@ -546,6 +563,84 @@ class Dnd2024RestEngine:
             return
         probe = deepcopy(character)
         self._plan_land_terrain(probe, terrain)
+
+    # ------------------------------------------------------------------
+    # free-cast slots
+    # ------------------------------------------------------------------
+
+    def _plan_free_cast_rebind(
+        self, character: dict[str, Any], requested: Any,
+    ) -> dict[str, dict[str, Any]]:
+        """Validate a Long Rest spell study without mutating the character."""
+
+        if requested in (None, {}):
+            return {}
+        selection = Dnd2024SpellSelection(self.bundle)
+        records, errors = selection.rebind_free_cast(character, requested)
+        if errors:
+            raise RestError("; ".join(errors))
+        return records
+
+    @staticmethod
+    def _apply_free_cast_rebind(
+        character: dict[str, Any], plan: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not plan:
+            return []
+        block = character.setdefault("spellcasting", {}).setdefault("class", {})
+        stored = block.setdefault("free_cast_slots", {})
+        events: list[dict[str, Any]] = []
+        for slot_id, record in plan.items():
+            before = stored.get(slot_id)
+            before_ref = str((before or {}).get("spell_ref") or "")
+            stored[slot_id] = deepcopy(record)
+            events.append({
+                "type": "rebind_free_cast",
+                "slot_id": slot_id,
+                "before": before_ref,
+                "after": str(record.get("spell_ref") or ""),
+            })
+        return events
+
+    def _recover_free_cast_slots(
+        self, character: dict[str, Any], rest: str, events: list[dict[str, Any]],
+    ) -> None:
+        """Refill the free-cast slots this rest covers.
+
+        Four Mystic Arcana refill on a Long Rest only, the two Signature slots
+        on either rest, and Spell Mastery never (its slots are unlimited and
+        carry no counter at all).  A slot that has not been used keeps no
+        record, so there is nothing to write back.
+        """
+
+        bounds = {
+            "long_rest": {"long"},
+            "short_rest": {"short", "long"},
+            "unlimited": set(),
+        }
+        block = character.get("spellcasting")
+        block = block.get("class") if isinstance(block, dict) else None
+        stored = block.get("free_cast_slots") if isinstance(block, dict) else None
+        if not isinstance(stored, dict):
+            return
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        for row in resolver.free_cast_slots(character):
+            if rest not in bounds.get(str(row["recharge"]), set()):
+                continue
+            record = stored.get(row["slot_id"])
+            if not isinstance(record, dict):
+                continue
+            maximum = int(row["uses_max"])
+            before = record.get("uses_remaining")
+            if before == maximum:
+                continue
+            record["uses_remaining"] = maximum
+            events.append({
+                "type": "restore_free_cast",
+                "slot_id": str(row["slot_id"]),
+                "before": before,
+                "after": maximum,
+            })
 
     def _class_state(self, character: dict[str, Any]) -> tuple[str, str, int]:
         build = character.get("build")
