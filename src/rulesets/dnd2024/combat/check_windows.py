@@ -761,6 +761,7 @@ class CombatCheckWindowsMixin:
     def _failed_attack_window_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
         check: dict[str, Any], settlement: dict[str, Any],
+        *, exclude: tuple[str, ...] = (),
     ) -> dict[str, Any] | None:
         """The first holder-side window on a failed attack roll, or ``None``.
 
@@ -768,9 +769,18 @@ class CombatCheckWindowsMixin:
         Peerless Skill expenditure both add a die to the missed d20 after the
         fact.  The hit-face windows stay in ``remaining_windows`` -- a die
         that turns the miss into a hit re-derives them against the new total.
+
+        A creator can legitimately hold more than one of these faces (a Lore
+        Bard holding someone else's die also owns Peerless Skill), so the whole
+        ordered candidate list is recorded in the settlement: each settlement
+        offers one face, and the next one is offered only after this one is
+        declined or spent without flipping the roll.
         """
 
-        codes = self._failed_attack_windows(instance, combat, attacker, check)
+        codes = [
+            code for code in self._failed_attack_windows(instance, combat, attacker, check)
+            if code not in exclude
+        ]
         if not codes:
             return None
         code = codes[0]
@@ -782,6 +792,9 @@ class CombatCheckWindowsMixin:
             die_sides = self._peerless_die_sides(attacker)
         if die_sides == 0:
             return None
+        settlement["failed_offered"] = [
+            *(str(item) for item in settlement.get("failed_offered") or ()), code,
+        ]
         settlement["remaining_windows"] = ["lucky_disadvantage", "cutting_words_check"]
         # The straight-through miss emits the weapon's miss mastery (Graze);
         # declining or spending without flipping the result must land in the
@@ -1154,6 +1167,16 @@ class CombatCheckWindowsMixin:
             )
             if next_window is not None:
                 events.append({"type": "dnd2024.decision.pending", **next_window})
+                return events
+        if not check.get("success") and settlement.get("miss_face"):
+            # Still a miss: the remaining holder-side faces get their own
+            # window, in registry order, each with a fresh decision.
+            follow_up = self._failed_attack_window_offer(
+                instance, combat, actor, check, settlement,
+                exclude=tuple(str(item) for item in settlement.get("failed_offered") or ()),
+            )
+            if follow_up is not None:
+                events.append({"type": "dnd2024.decision.pending", **follow_up})
                 return events
         if check.get("success"):
             events.extend(self._hit_settlement_events(
