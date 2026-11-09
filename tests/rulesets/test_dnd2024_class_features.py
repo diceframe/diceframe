@@ -435,7 +435,7 @@ def test_fighter_action_surge_declaration_and_capability_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery", "action_surge",
+        "second_wind", "weapon_mastery", "action_surge", "tactical_mind",
     ]
     capability = resolver.declared_capability(character, "action_surge")
 
