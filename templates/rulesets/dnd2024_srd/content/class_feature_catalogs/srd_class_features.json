@@ -330,6 +330,20 @@
               "actions": [{"kind": "dash"}, {"kind": "disengage"}]
             }
           ]
+        },
+        {
+          "id": "disciplined_survivor",
+          "minimum_level": 14,
+          "resource_id": "focus_points",
+          "source_ref": "srd-5.2.1:p52:disciplined-survivor",
+          "summary": "You gain proficiency in all saving throws. In addition, when you fail a saving throw, you can expend 1 Focus Point to reroll it, and you must use the new roll.",
+          "parameters": {
+            "saving_throw_proficiency": "all",
+            "reroll": true,
+            "trigger": "save_failure",
+            "reroll_cost_resource": "focus_points",
+            "reroll_cost": 1
+          }
         }
       ]
     },
@@ -427,6 +441,18 @@
           ]
         },
         {
+          "id": "tactical_mind",
+          "minimum_level": 2,
+          "resource_id": "second_wind",
+          "source_ref": "srd-5.2.1:p48:tactical-mind",
+          "summary": "When you fail an ability check, you can expend a use of Second Wind to roll 1d10 and add the number rolled to the ability check, rather than regaining Hit Points. If the check still fails, this use of Second Wind isn't expended.",
+          "parameters": {
+            "die_sides": 10,
+            "trigger": "own_check_failure",
+            "refund_on_failure": true
+          }
+        },
+        {
           "id": "extra_attack",
           "minimum_level": 5,
           "summary": "When you take the Attack action, you can attack twice instead of once. Extra Attack never stacks: a character that gains it from a second class uses the highest value, not the sum.",
@@ -491,6 +517,18 @@
             "death_save_crit_threshold": 18,
             "turn_start_regen_base": 5,
             "turn_start_regen_ability": "con"
+          }
+        },
+        {
+          "id": "indomitable",
+          "minimum_level": 9,
+          "resource_id": "indomitable",
+          "source_ref": "srd-5.2.1:p48:indomitable",
+          "summary": "When you fail a saving throw, you can reroll it with a bonus equal to your Fighter level, and you must use the new roll. You have two uses at level 13 and three at level 17, and you regain all uses on a Long Rest.",
+          "parameters": {
+            "reroll": true,
+            "trigger": "save_failure",
+            "reroll_bonus_from_class_level": true
           }
         },
         {
@@ -634,6 +672,17 @@
           "parameters": {
             "ability_check_floor": 10
           }
+        },
+        {
+          "id": "stroke_of_luck",
+          "minimum_level": 20,
+          "resource_id": "stroke_of_luck",
+          "source_ref": "srd-5.2.1:p63:stroke-of-luck",
+          "summary": "When you fail a D20 Test, you can turn the roll into a 20. Once you use this feature, you can't use it again until you finish a Short or Long Rest.",
+          "parameters": {
+            "replace_natural_with": 20,
+            "trigger": "own_check_failure"
+          }
         }
       ]
     },
@@ -765,6 +814,19 @@
           "summary": "When you roll Initiative, you regain expended uses of Bardic Inspiration until you have two if you have fewer than that.",
           "parameters": {
             "initiative_refill": 2
+          }
+        },
+        {
+          "id": "countercharm",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p33:countercharm",
+          "summary": "If you or a creature within 30 feet of you fails a saving throw against an effect that applies the Charmed or Frightened condition, you can take a Reaction to cause the save to be rerolled, and the new roll has Advantage.",
+          "parameters": {
+            "range_ft": 30,
+            "trigger": "save_failure",
+            "reroll": true,
+            "reroll_mode": "advantage",
+            "applies_conditions": ["charmed", "frightened"]
           }
         }
       ]

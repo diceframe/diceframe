@@ -634,11 +634,6 @@ class CharacterDerivationMixin:
             )["total"]
 
         save_refs = list(class_entity.get("saving_throw_refs") or [])
-        saving_throws = {
-            ability_id: ability_modifier(abilities[ability_id])
-            + (prof if f"ability:{ability_id}" in save_refs else 0)
-            for ability_id in ABILITY_IDS
-        }
         selected_packages = [package, *([background_package] if background_package else [])]
         item_refs = list(dict.fromkeys(
             ref
@@ -663,6 +658,15 @@ class CharacterDerivationMixin:
             draft["class_ref"], level, draft.get("features"), item_refs,
             feature_choices,
         )
+        # 全豁免熟练（Disciplined Survivor）由声明决定，不是第二张熟练表：
+        # 与职业自带的两个豁免 ref 合并成一个集合，加值仍只按 PB 计一次。
+        if features.saving_throw_proficiency_all(feature_proxy):
+            save_refs = sorted({*save_refs, *(f"ability:{item}" for item in ABILITY_IDS)})
+        saving_throws = {
+            ability_id: ability_modifier(abilities[ability_id])
+            + (prof if f"ability:{ability_id}" in save_refs else 0)
+            for ability_id in ABILITY_IDS
+        }
         armor_category_refs = [
             f"armor_category:{item}"
             for item in class_entity.get("armor_proficiencies", [])

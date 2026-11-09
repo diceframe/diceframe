@@ -53,7 +53,9 @@ SKILL_CHOICE_GRANTS = frozenset({"expertise"})
 # ``trigger`` 的闭集只在声明了 ``range_ft`` 时校验——其他机制（例如
 # Dark One's Blessing 的 defeat payload）有各自的 trigger 词汇，由各自的
 # 消费方校验，不能被这张表的闭集误伤。
-CHECK_WINDOW_TRIGGERS = frozenset({"attack_roll_success", "grant", "own_check_failure"})
+CHECK_WINDOW_TRIGGERS = frozenset({
+    "attack_roll_success", "grant", "own_check_failure", "save_failure",
+})
 
 
 class ClassFeatureError(ValueError):

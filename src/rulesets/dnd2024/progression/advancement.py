@@ -1596,6 +1596,11 @@ class Dnd2024AdvancementEngine:
         abilities = character["abilities"]
         proficiencies = character["proficiencies"]
         saving_refs = set(proficiencies.get("saving_throw_refs") or [])
+        if self._feature_resolver.saving_throw_proficiency_all(character):
+            # 全豁免熟练是升级时重建的派生事实：写回 ref 集合让同一张卡在
+            # 升级前后只走同一个加值公式，集合语义顺带保证了不重复叠加。
+            saving_refs |= {f"ability:{ability}" for ability in ABILITY_IDS}
+            proficiencies["saving_throw_refs"] = sorted(saving_refs)
         skill_refs = set(proficiencies.get("skill_refs") or [])
         saving_throws = {
             ability: ability_modifier(abilities[ability])

@@ -357,6 +357,22 @@ class Dnd2024ClassFeatureResolver:
             return default
         return self._value(definition, character, key, default)
 
+    def saving_throw_proficiency_all(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether an owned feature grants proficiency in every saving throw.
+
+        Disciplined Survivor is the only declaration today.  The contract is
+        the declaration itself (``parameters.saving_throw_proficiency ==
+        "all"``), so a second feature that grants the same thing needs no new
+        code and no character-sheet branch.
+        """
+
+        return any(
+            str(definition.parameters.get("saving_throw_proficiency") or "") == "all"
+            for definition in self.features_for(character)
+        )
+
     def min_feature_value(
         self,
         character: Mapping[str, Any] | None,
