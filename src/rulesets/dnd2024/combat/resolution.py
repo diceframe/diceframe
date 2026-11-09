@@ -51,6 +51,7 @@ from .check_modes import (
     effective_speed,
     mode_from_sources,
 )
+from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
@@ -266,6 +267,24 @@ class CombatResolutionMixin:
         initiatives.sort(key=lambda row: (-int(row["total"]), row["kind"] != "player", row["actor_id"]))
         order = [row["actor_id"] for row in initiatives]
         first = self._actor_view_from_data(instance, enemies, order[0], companions)
+        # Superior Inspiration hooks the real Initiative roll, not a static
+        # character value: every bard that rolled here tops up to two uses.
+        refills: list[dict[str, Any]] = []
+        for uid in sorted(instance.players):
+            canonical = _canonical(instance.get_character_sheet(uid))
+            if not self.features.has_feature(canonical, "superior_inspiration"):
+                continue
+            target = self.features.feature_value(
+                canonical, "superior_inspiration", "initiative_refill", 0,
+            )
+            if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
+                continue
+            refills.append({
+                "type": "dnd2024.class_resource.refilled",
+                "actor_id": _player_actor(uid),
+                "resource_id": "bardic_inspiration",
+                "target": target,
+            })
         # 战斗开始的第一回合也是"自己的回合开始"：首行动者与后续回合共用
         # 同一个 turn-start 辅助，不能因为批次里没有 turn.advanced 就跳过。
         return [{
@@ -278,7 +297,7 @@ class CombatResolutionMixin:
             "origin_step_id": str(intent.get("origin_step_id") or ""),
             "mode": str(intent.get("mode") or "sandbox"),
             "adventure_binding": deepcopy(intent.get("adventure_binding")),
-        }, *self._turn_start_regen_events(first)]
+        }, *refills, *self._turn_start_regen_events(first)]
 
     def _initiative_roll(
         self, character: dict[str, Any], modifier: int, rng: Any,
@@ -1845,9 +1864,50 @@ class CombatResolutionMixin:
                 })
             elif action.kind == "bardic_grant":
                 events.extend(self._bardic_grant_events(instance, combat, intent, rng))
+            elif action.kind == "inspiration_slot_exchange":
+                events.extend(self._font_slot_exchange_events(instance, actor, intent))
             else:  # pragma: no cover - catalog validation guards this
                 raise CombatIntentError("unsupported class capability action")
         return events
+
+    def _font_slot_exchange_events(
+        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Spend one real spell slot to regain one Bardic Inspiration use.
+
+        "No action required" means no economy is spent and the exchange does
+        not count as casting a spell, so the slot event carries ``exchange``
+        and the reducer leaves ``slot_spell_cast`` alone.  Both halves land in
+        one batch: the slot only leaves if the use actually comes back, and
+        the use can never exceed the Charisma-derived maximum.
+        """
+
+        actor_id = str(actor["actor_id"])
+        character = self._canonical_actor_character(instance, actor_id)
+        pool = dict(resource_state(character, "bardic_inspiration"))
+        if not pool:
+            raise CombatIntentError("Bardic Inspiration is not initialized")
+        maximum = int(pool.get("maximum", 0) or 0)
+        current = int(pool.get("current", 0) or 0)
+        if current >= maximum:
+            raise CombatIntentError("no expended Bardic Inspiration use to regain")
+        slots = dict((character.get("spellcasting") or {}).get("class", {}).get("slots_current") or {})
+        slot_level = intent.get("slot_level")
+        if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
+            raise CombatIntentError("a spell slot level is required")
+        if int(slots.get(str(slot_level), 0) or 0) < 1:
+            raise CombatIntentError("the spell slot is already spent")
+        return [
+            {
+                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                "slot_level": slot_level, "exchange": True,
+            },
+            {
+                "type": "dnd2024.class_resource.refunded", "actor_id": actor_id,
+                "resource_id": "bardic_inspiration", "amount": 1,
+                "reason": "font_of_inspiration",
+            },
+        ]
 
     def _bardic_grant_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,

@@ -408,6 +408,26 @@ class CombatReducerMixin:
             amount = int(event.get("amount", 1) or 1)
             state["current"] = min(int(state.get("maximum", 0) or 0), int(state.get("current", 0) or 0) + amount)
             return
+        if event_type == "dnd2024.class_resource.refilled":
+            # Superior Inspiration: "regain expended uses until you have two".
+            # The target is a floor, not a gift: never raise above the
+            # catalogue maximum (a +1 Charisma bard still caps at one use).
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            class_state = character.setdefault("resources", {}).setdefault("class", {})
+            state = class_state.get(str(event["resource_id"]))
+            if not isinstance(state, dict):
+                raise EventBatchError("class resource is not initialized")
+            maximum = int(state.get("maximum", 0) or 0)
+            target = min(int(event["target"]), maximum)
+            state["current"] = max(int(state.get("current", 0) or 0), target)
+            return
         if event_type == "dnd2024.attack.spent":
             economy = combat["economy"]
             if int(economy.get("attacks_remaining", 0) or 0) > 0:
@@ -490,7 +510,9 @@ class CombatReducerMixin:
             if int(slots.get(level, 0) or 0) < 1:
                 raise EventBatchError("spell slot is already spent")
             slots[level] -= 1
-            combat["economy"]["slot_spell_cast"] = True
+            if not event.get("exchange"):
+                # Font 的"槽换次数"不是施法：不占用本回合的施法标记。
+                combat["economy"]["slot_spell_cast"] = True
             return
         if event_type == "dnd2024.feat_spell.free_cast_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))

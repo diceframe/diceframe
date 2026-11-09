@@ -27,7 +27,7 @@ _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
 # v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
 ACTION_KINDS = frozenset({
     "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
-    "rage_sustain", "action_surge", "bardic_grant",
+    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的

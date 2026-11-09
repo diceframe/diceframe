@@ -23,6 +23,7 @@ from ..features.resources import (
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
     feature_usage_count,
+    resource_state,
 )
 from ..items.activation import (
     ItemActivationError,
@@ -437,6 +438,20 @@ class CombatValidationMixin:
             )
             if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("Bardic Inspiration targets a living ally")
+        elif any(action.kind == "inspiration_slot_exchange" for action in capability.actions):
+            # Font 的槽换次数：必须有已消耗次数、且该法术位仍然可用。
+            character = self._canonical_actor(instance, actor)
+            pool = dict(resource_state(character, "bardic_inspiration"))
+            if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
+                raise CombatIntentError("no expended Bardic Inspiration use to regain")
+            slot_level = intent.get("slot_level")
+            if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
+                raise CombatIntentError("a spell slot level is required")
+            slots = dict(
+                ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
+            )
+            if int(slots.get(str(slot_level), 0) or 0) < 1:
+                raise CombatIntentError("the spell slot is already spent")
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),

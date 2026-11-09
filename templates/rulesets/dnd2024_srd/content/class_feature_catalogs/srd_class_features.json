@@ -699,7 +699,15 @@
           "summary": "You now regain all your expended uses of Bardic Inspiration when you finish a Short or Long Rest. In addition, you can expend a spell slot (no action required) to regain one expended use of Bardic Inspiration.",
           "parameters": {
             "slot_exchange_per_level": 1
-          }
+          },
+          "capabilities": [
+            {
+              "id": "font_slot_exchange",
+              "cost": {},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "inspiration_slot_exchange", "count": 1}]
+            }
+          ]
         },
         {
           "id": "jack_of_all_trades",
