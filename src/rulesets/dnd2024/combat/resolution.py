@@ -579,6 +579,7 @@ class CombatResolutionMixin:
             "natural": natural, "modifier": attack_bonus,
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "total": total, "target": target_ac, "success": hit, "critical": critical,
+            "roll_id": self._roll_id(events, "attack", actor_id),
         }
         if crit_threshold != 20:
             # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
@@ -1723,6 +1724,7 @@ class CombatResolutionMixin:
             "type": "check.resolved", "kind": "hide", "actor_id": actor_id,
             "ability": "stealth", "rolls": rolls, "natural": effective,
             "modifier": stealth, "total": total, "target": dc, "success": success,
+            "roll_id": self._roll_id(events, "hide", actor_id),
         }
         if floor:
             event["raw_d20"] = natural
@@ -1966,8 +1968,110 @@ class CombatResolutionMixin:
             "source_feature": "bardic_inspiration",
         }]
 
+    def _repeat_save_rows(
+        self, actor: dict[str, Any],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """The conditions that repeat a save at the end of this actor's turn."""
+
+        rows: list[tuple[str, dict[str, Any]]] = []
+        for condition_id, meta in (actor.get("conditions") or {}).items():
+            if not isinstance(meta, dict):
+                continue
+            repeat = meta.get("save_repeat")
+            if not isinstance(repeat, dict):
+                continue
+            if not str(repeat.get("ability") or "") or int(repeat.get("dc", 0) or 0) <= 0:
+                continue
+            rows.append((str(condition_id), deepcopy(meta)))
+        return rows
+
+    def _repeat_save_check(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        actor_id: str, meta: dict[str, Any], events: list[dict[str, Any]], rng: Any,
+    ) -> dict[str, Any]:
+        """Roll one repeated save, without deciding what it does."""
+
+        repeat = meta.get("save_repeat") or {}
+        ability = str(repeat.get("ability") or "")
+        dc = int(repeat.get("dc", 0) or 0)
+        modifier = int(actor["saving_throws"].get(ability, 0) or 0)
+        auto_fail = ability in condition_flags(
+            self.catalog.conditions, actor["conditions"],
+        )["auto_fail_saves"]
+        if auto_fail:
+            return {
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": actor_id,
+                "source_actor_id": str(meta.get("source_actor_id") or ""),
+                "ability": ability, "rolls": [], "natural": 0,
+                "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                "aura_bonus": 0, "aura_sources": [],
+                "total": 0,
+                "target": dc, "success": False, "auto_failed": True,
+                "repeat_save": True,
+                "roll_id": self._roll_id(events, "saving_throw", actor_id),
+            }
+        rage_advantage = "rage" in actor["conditions"] and ability == "str"
+        untrained_disadvantage = bool(
+            (actor.get("armor_training") or {}).get("untrained_armor_worn")
+        ) and ability in {"str", "dex"}
+        save_sources: list[dict[str, Any]] = []
+        if rage_advantage:
+            save_sources.append({"code": "rage", "mode": "advantage"})
+        if untrained_disadvantage:
+            save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+        save_mode = mode_from_sources(save_sources)
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if save_mode else None
+        if save_mode == "advantage":
+            roll = max(first, second)
+        elif save_mode == "disadvantage":
+            roll = min(first, second)
+        else:
+            roll = first
+        check_bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, actor["conditions"], "saving_throw", rng,
+        )
+        check_bonus = sum(row["roll"] for row in check_bonus_rolls)
+        # 光环按本次回合末结算时的位置与失能状态求值，不用施放时快照；
+        # 快照里只有 DC 和豁免属性，这两项不随移动变化。
+        aura = self._saving_throw_aura_bonus(instance, combat, actor)
+        total = roll + modifier + check_bonus + int(aura["bonus"])
+        check_event = {
+            "type": "check.resolved", "kind": "saving_throw",
+            "actor_id": actor_id,
+            "source_actor_id": str(meta.get("source_actor_id") or ""),
+            "ability": ability,
+            "rolls": [value for value in (first, second) if value is not None],
+            "natural": roll, "modifier": modifier,
+            "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+            "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
+            "total": total, "target": dc, "success": total >= dc,
+            "repeat_save": True,
+            "roll_id": self._roll_id(events, "saving_throw", actor_id),
+        }
+        if save_sources:
+            check_event["advantage_mode"] = save_mode
+            check_event["advantage_sources"] = save_sources
+        return check_event
+
+    @staticmethod
+    def _roll_id(
+        events: list[dict[str, Any]], kind: str, actor_id: str,
+    ) -> str:
+        """A stable id for one d20 roll inside this batch.
+
+        The sequence is the number of checks already resolved in the batch, so
+        the same replay produces the same id without any clock, counter in the
+        state, or client input.  A reroll derives ``<old>-r1`` from it.
+        """
+
+        seq = sum(1 for event in events if event.get("type") == "check.resolved")
+        return f"{kind}:{actor_id}:{seq}"
+
     def _save_repeat_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str, rng: Any,
+        *, pending: list[tuple[str, dict[str, Any]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Repeat a condition's save at the end of the target's own turn.
 
@@ -1975,81 +2079,34 @@ class CombatResolutionMixin:
         participate: the ability and DC were frozen when the spell landed. A
         success removes just this target's condition; it never ends the caster's
         concentration, so other targets of an upcast spell keep theirs.
+
+        A window pauses this loop rather than the whole turn: the rows it has
+        not reached yet travel in the settlement, and the window finisher
+        resumes from exactly there.
         """
 
         actor = self._actor_view(instance, combat, actor_id)
+        rows = list(pending) if pending is not None else self._repeat_save_rows(actor)
         events: list[dict[str, Any]] = []
-        for condition_id, meta in (actor.get("conditions") or {}).items():
-            if not isinstance(meta, dict):
-                continue
-            repeat = meta.get("save_repeat")
-            if not isinstance(repeat, dict):
-                continue
-            ability = str(repeat.get("ability") or "")
-            dc = int(repeat.get("dc", 0) or 0)
-            if not ability or dc <= 0:
-                continue
-            modifier = int(actor["saving_throws"].get(ability, 0) or 0)
-            auto_fail = ability in condition_flags(
-                self.catalog.conditions, actor["conditions"],
-            )["auto_fail_saves"]
-            if auto_fail:
-                events.append({
-                    "type": "check.resolved", "kind": "saving_throw",
-                    "actor_id": actor_id,
-                    "source_actor_id": str(meta.get("source_actor_id") or ""),
-                    "ability": ability, "rolls": [], "natural": 0,
-                    "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
-                    "aura_bonus": 0, "aura_sources": [],
-                    "total": 0,
-                    "target": dc, "success": False, "auto_failed": True,
-                    "repeat_save": True,
-                })
-                continue
-            rage_advantage = "rage" in actor["conditions"] and ability == "str"
-            untrained_disadvantage = bool(
-                (actor.get("armor_training") or {}).get("untrained_armor_worn")
-            ) and ability in {"str", "dex"}
-            save_sources: list[dict[str, Any]] = []
-            if rage_advantage:
-                save_sources.append({"code": "rage", "mode": "advantage"})
-            if untrained_disadvantage:
-                save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
-            save_mode = mode_from_sources(save_sources)
-            first = int(rng.randint(1, 20))
-            second = int(rng.randint(1, 20)) if save_mode else None
-            if save_mode == "advantage":
-                roll = max(first, second)
-            elif save_mode == "disadvantage":
-                roll = min(first, second)
-            else:
-                roll = first
-            check_bonus_rolls = condition_check_bonus_rolls(
-                self.catalog.conditions, actor["conditions"], "saving_throw", rng,
+        while rows:
+            condition_id, meta = rows.pop(0)
+            check = self._repeat_save_check(
+                instance, combat, actor, actor_id, meta, events, rng,
             )
-            check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-            # 光环按本次回合末结算时的位置与失能状态求值，不用施放时快照；
-            # 快照里只有 DC 和豁免属性，这两项不随移动变化。
-            aura = self._saving_throw_aura_bonus(instance, combat, actor)
-            total = roll + modifier + check_bonus + int(aura["bonus"])
-            success = total >= dc
-            check_event = {
-                "type": "check.resolved", "kind": "saving_throw",
-                "actor_id": actor_id,
-                "source_actor_id": str(meta.get("source_actor_id") or ""),
-                "ability": ability,
-                "rolls": [value for value in (first, second) if value is not None],
-                "natural": roll, "modifier": modifier,
-                "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
-                "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
-                "total": total, "target": dc, "success": success,
-                "repeat_save": True,
-            }
-            if save_sources:
-                check_event["advantage_mode"] = save_mode
-                check_event["advantage_sources"] = save_sources
-            events.append(check_event)
-            if success:
+            window = self._save_window_offer(
+                instance, combat, actor, check,
+                {
+                    "surface": "repeat_save", "condition": condition_id,
+                    "remaining": [list(row) for row in rows],
+                },
+                "save", source=str(meta.get("source_actor_id") or actor_id),
+                target_id=actor_id,
+            )
+            if window is not None:
+                events.append({"type": "dnd2024.decision.pending", **window})
+                return events
+            events.append(check)
+            if check["success"]:
                 events.append({
                     "type": "condition.removed", "target_id": actor_id,
                     "condition": condition_id, "reason": "save_repeat",
@@ -2211,6 +2268,7 @@ class CombatResolutionMixin:
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total,
             "target": 10, "success": total >= 10,
+            "roll_id": f"death_save:{actor_id}:1",
         }
         if advantage_sources:
             check_event["advantage_mode"] = "advantage"

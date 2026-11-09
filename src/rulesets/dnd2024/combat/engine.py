@@ -1365,6 +1365,7 @@ class Dnd2024CombatEngine(
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,
+            "roll_id": f"concentration:{target['actor_id']}:1",
         }]
         if not success:
             events.append({

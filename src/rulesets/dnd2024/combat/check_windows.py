@@ -68,6 +68,13 @@ class WindowEntry:
     # instance, not a class-resource pool.  ``resource_id`` stays empty and
     # every pool read is replaced by the instance predicate.
     uses_instance: bool = False
+    # Reroll entry: the cost buys a brand-new d20 (Countercharm, Indomitable,
+    # Disciplined Survivor) instead of a bonus die added to the old total.
+    # The settled check is replaced by the new roll, never merged with it.
+    rerolls: bool = False
+    # Natural-face entry: the cost rewrites the d20 itself (Stroke of Luck),
+    # so no die is rolled and every downstream rule sees a natural 20.
+    replaces_natural: bool = False
 
 
 # The only registry of window codes. Adding a consumer means adding an entry
@@ -116,6 +123,49 @@ WINDOW_REGISTRY: dict[str, WindowEntry] = {
         code="cutting_words_ability", surface="ability_check",
         resource_id=BARDIC_RESOURCE, feature_id="cutting_words",
         uses_reaction=True,
+    ),
+    # S0-F3: failed-D20 windows.  ``tactical_mind`` spends a Second Wind use
+    # and gives it back when the check still fails; ``stroke_of_luck``
+    # rewrites the d20 face instead of adding to it.
+    "tactical_mind": WindowEntry(
+        code="tactical_mind", surface="ability_check",
+        resource_id="second_wind", feature_id="tactical_mind",
+        uses_reaction=False,
+    ),
+    "dark_ones_own_luck_check": WindowEntry(
+        code="dark_ones_own_luck_check", surface="ability_check",
+        resource_id=DOOL_RESOURCE, feature_id="dark_ones_own_luck",
+        uses_reaction=False,
+    ),
+    "stroke_of_luck_attack": WindowEntry(
+        code="stroke_of_luck_attack", surface="attack",
+        resource_id="stroke_of_luck", feature_id="stroke_of_luck",
+        uses_reaction=False, replaces_natural=True,
+    ),
+    "stroke_of_luck_check": WindowEntry(
+        code="stroke_of_luck_check", surface="ability_check",
+        resource_id="stroke_of_luck", feature_id="stroke_of_luck",
+        uses_reaction=False, replaces_natural=True,
+    ),
+    "stroke_of_luck_save": WindowEntry(
+        code="stroke_of_luck_save", surface="save",
+        resource_id="stroke_of_luck", feature_id="stroke_of_luck",
+        uses_reaction=False, replaces_natural=True,
+    ),
+    "countercharm": WindowEntry(
+        code="countercharm", surface="save",
+        resource_id="", feature_id="countercharm",
+        uses_reaction=True, rerolls=True,
+    ),
+    "indomitable": WindowEntry(
+        code="indomitable", surface="save",
+        resource_id="indomitable", feature_id="indomitable",
+        uses_reaction=False, rerolls=True,
+    ),
+    "disciplined_survivor": WindowEntry(
+        code="disciplined_survivor", surface="save",
+        resource_id="focus_points", feature_id="disciplined_survivor",
+        uses_reaction=False, rerolls=True,
     ),
 }
 
@@ -370,6 +420,14 @@ class CombatCheckWindowsMixin:
             if self._peerless_die_sides(attacker) == 0:
                 return ""
             return roller_id
+        if code == "stroke_of_luck_attack":
+            # "Turn the roll into a 20" removes a natural 1 as well, so this
+            # face is the one rescue that a nat-1 miss does not close.
+            if check.get("success"):
+                return ""
+            if attacker.get("side") != "party":
+                return ""
+            return self._own_pool_owner(instance, attacker, code)
         return ""
 
     def _peerless_die_sides(self, actor: dict[str, Any]) -> int:
@@ -387,7 +445,9 @@ class CombatCheckWindowsMixin:
         """Holder-side codes for a failed attack roll, in registry order."""
 
         return [
-            code for code in ("bardic_inspiration", "peerless_skill")
+            code for code in (
+                "bardic_inspiration", "peerless_skill", "stroke_of_luck_attack",
+            )
             if self._attack_check_candidate(instance, combat, code, attacker, attacker, check)
         ]
 
@@ -469,26 +529,47 @@ class CombatCheckWindowsMixin:
                 instance, combat, roller_id, exclude_bards,
             )
             return bards[0] if bards else ""
+        if code == "dark_ones_own_luck_check":
+            # The die is legal on either polarity: the wording is "after you
+            # make an ability check and see the result", not "on a failure".
+            return self._dool_owner(instance, roller)
+        if code in {"tactical_mind", "stroke_of_luck_check"}:
+            if check.get("success"):
+                return ""
+            if roller.get("side") != "party":
+                return ""
+            return self._own_pool_owner(instance, roller, code)
         return ""
 
-    def _ability_check_window_offer(
+    def _ability_window_codes(
         self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
         check: dict[str, Any], settlement: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """The first window on an ability check, or ``None``.
+    ) -> list[str]:
+        """Ordered ability-check faces for this result.
 
-        Both polarities exist on this surface: a failed check can be rescued
-        by the roller's own die (Bardic Inspiration or Peerless Skill), and a
-        successful one can be cut by a Lore bard's Cutting Words.
+        A failed check walks the roller's own cheap rescues first (Tactical
+        Mind refunds itself when the check still fails, the held die costs the
+        holder, Peerless costs the bard), then Dark One's Own Luck's die, and
+        Stroke of Luck last because it is the only one that guarantees the
+        result.  A successful check only has the two faces that can still
+        change it: Cutting Words and the after-the-roll Dark Luck die.
         """
 
-        roller_id = str(roller["actor_id"])
         if check.get("success"):
-            codes = ["cutting_words_ability"]
-        else:
-            codes = ["bardic_inspiration_check", "peerless_skill_check"]
+            return ["cutting_words_ability", "dark_ones_own_luck_check"]
+        return [
+            "tactical_mind", "bardic_inspiration_check", "peerless_skill_check",
+            "dark_ones_own_luck_check", "stroke_of_luck_check",
+        ]
+
+    def _open_ability_window(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+        codes: list[str], source: str, target_id: str,
+    ) -> dict[str, Any] | None:
+        roller_id = str(roller["actor_id"])
         for index, code in enumerate(codes):
-            exclude = tuple(str(item) for item in settlement.get("exclude_bards") or [])
+            exclude = tuple(str(item) for item in settlement.get("exclude_bards") or ())
             owner_id = self._ability_check_candidate(
                 instance, combat, code, roller_id, check, exclude,
             )
@@ -500,22 +581,40 @@ class CombatCheckWindowsMixin:
             elif code == "peerless_skill_check":
                 die_sides = self._peerless_die_sides(roller)
             else:
-                die_sides = self._window_die_sides(
-                    self._actor_view(instance, combat, owner_id), "cutting_words_check",
+                owner = self._actor_view(instance, combat, owner_id)
+                die_sides = (
+                    0 if WINDOW_REGISTRY[code].replaces_natural
+                    else self._window_die_sides(owner, code)
                 )
-            if die_sides == 0:
+            if die_sides == 0 and not WINDOW_REGISTRY[code].replaces_natural:
                 continue
             remaining = codes[index + 1:]
             settlement["remaining_windows"] = list(remaining)
             return self._build_check_window(
                 instance, code=code, surface="ability_check", owner_id=owner_id,
-                check=check, settlement=settlement,
-                source=str(settlement.get("intent_id") or ""),
+                check=check, settlement=settlement, source=source,
                 roller_id=roller_id, attacker_id=roller_id,
-                target_id=str(settlement.get("target_id") or ""),
-                remaining_windows=remaining, die_sides=die_sides,
+                target_id=target_id, remaining_windows=remaining, die_sides=die_sides,
             )
         return None
+
+    def _ability_check_window_offer(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The first window on an ability check, or ``None``.
+
+        Both polarities exist on this surface: a failed check can be rescued
+        by the roller's own die, and a successful one can be cut by a Lore
+        bard's Cutting Words.  Dark One's Own Luck applies to either.
+        """
+
+        codes = self._ability_window_codes(instance, combat, roller, check, settlement)
+        return self._open_ability_window(
+            instance, combat, roller, check, settlement, codes,
+            str(settlement.get("intent_id") or ""),
+            str(settlement.get("target_id") or ""),
+        )
 
     def _next_ability_window(
         self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
@@ -529,45 +628,17 @@ class CombatCheckWindowsMixin:
         if not codes:
             # A rescued check succeeds: the cut face becomes available; a cut
             # check that now fails: the roller's own die becomes available.
-            codes = ["cutting_words_ability"] if check.get("success") else [
-                "bardic_inspiration_check", "peerless_skill_check",
-            ]
-        for code in codes:
-            exclude = tuple(str(item) for item in settlement.get("exclude_bards") or [])
-            owner_id = self._ability_check_candidate(
-                instance, combat, code, roller_id, check, exclude,
+            codes = self._ability_window_codes(
+                instance, combat, roller, check, settlement,
             )
-            if not owner_id:
-                continue
-            if code == "bardic_inspiration_check":
-                held = self._active_bardic_instance(instance, combat, owner_id)
-                die_sides = int(held["die_sides"]) if held else 0
-            elif code == "peerless_skill_check":
-                die_sides = self._peerless_die_sides(roller)
-            else:
-                die_sides = self._window_die_sides(
-                    self._actor_view(instance, combat, owner_id), "cutting_words_check",
-                )
-            if die_sides == 0:
-                continue
-            remaining = codes[codes.index(code) + 1:]
-            settlement["remaining_windows"] = list(remaining)
-            return self._build_check_window(
-                instance, code=code, surface="ability_check", owner_id=owner_id,
-                check=check, settlement=settlement,
-                source=str(decision.get("source") or ""),
-                roller_id=roller_id, attacker_id=roller_id,
-                target_id=str(decision.get("target_id") or ""),
-                remaining_windows=remaining, die_sides=die_sides,
-            )
-        return None
+        return self._open_ability_window(
+            instance, combat, roller, check, settlement, codes,
+            str(decision.get("source") or ""),
+            str(decision.get("target_id") or ""),
+        )
 
-    def _dool_owner(
-        self, instance: Any, actor: dict[str, Any], *, failed: bool,
-    ) -> str:
+    def _dool_owner(self, instance: Any, actor: dict[str, Any]) -> str:
         actor_id = str(actor["actor_id"])
-        if not failed:
-            return ""
         if actor.get("kind") not in {"player", "companion"}:
             return ""
         if not self.features.has_feature(
@@ -580,57 +651,238 @@ class CombatCheckWindowsMixin:
             return ""
         return actor_id
 
-    def _death_save_check_window(
-        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
-        check: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Open Dark One's Own Luck on a failed death save, or ``None``.
+    # ------------------------------------------------------- failed-D20 faces
 
-        Natural 1 already costs two failures regardless of the total, and a
-        natural 20 is not part of the failing band, so neither opens a window.
+    def _declared(self, actor: dict[str, Any], feature_id: str, key: str, default: Any) -> Any:
+        return self.features.feature_value(
+            self._feature_character(actor), feature_id, key, default,
+        )
+
+    @staticmethod
+    def _class_level(character: dict[str, Any] | None) -> int:
+        build = (character or {}).get("build") or {}
+        levels = build.get("class_levels")
+        if isinstance(levels, list) and levels:
+            return sum(
+                int(row.get("level", 0) or 0)
+                for row in levels if isinstance(row, dict)
+            )
+        return int(build.get("level", 0) or 0)
+
+    def _own_pool_owner(
+        self, instance: Any, actor: dict[str, Any], code: str,
+    ) -> str:
+        """The roller as a window owner when the declared pool can still pay."""
+
+        entry = WINDOW_REGISTRY[code]
+        if actor.get("kind") not in {"player", "companion"}:
+            return ""
+        if not self.features.has_feature(
+            self._feature_character(actor), entry.feature_id,
+        ):
+            return ""
+        if entry.resource_id and not self._window_pool_available(
+            instance, str(actor["actor_id"]), entry.resource_id,
+        ):
+            return ""
+        return str(actor["actor_id"])
+
+    def _countercharm_bard(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        settlement: dict[str, Any],
+    ) -> str:
+        """A Bard 7 who can still react to this charmed/frightened failure.
+
+        2024 Countercharm has no sight clause, so the only positional fact is
+        the 30-foot reach.  The effect qualifies when the condition the save is
+        against is one the Bard's own declaration names, and the declaration
+        owns the reach as well.
         """
 
-        roll = int(check.get("natural", 0) or 0)
-        total = int(check.get("total", roll) or roll)
-        if roll == 1 or total >= 10:
+        condition = str(settlement.get("condition") or "")
+        if not condition:
+            return ""
+        roller_id = str(roller["actor_id"])
+        order = {str(item) for item in combat.get("initiative", [])}
+        candidates = sorted(
+            [_player_actor(uid) for uid in instance.players]
+            + [f"companion:{cid}" for cid in self._active_companions(instance)]
+        )
+        for actor_id in candidates:
+            if actor_id not in order:
+                continue
+            bard = self._actor_view(instance, combat, actor_id)
+            if bard.get("side") != "party" or int(bard.get("hp", 0) or 0) <= 0:
+                continue
+            character = self._feature_character(bard)
+            if not self.features.has_feature(character, "countercharm"):
+                continue
+            applies = [
+                str(item) for item in (
+                    self._declared(bard, "countercharm", "applies_conditions", []) or []
+                )
+            ]
+            if condition not in applies:
+                continue
+            reach = self._declared(bard, "countercharm", "range_ft", 0)
+            if isinstance(reach, bool) or not isinstance(reach, int) or reach <= 0:
+                continue
+            if self._distance(combat, actor_id, roller_id) > reach:
+                continue
+            if not self._reaction_eligible(combat, bard):
+                continue
+            return actor_id
+        return ""
+
+    def _save_window_candidates(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+        *, allow_success_face: bool,
+    ) -> list[tuple[str, str]]:
+        """Ordered ``(code, owner)`` pairs for one saving throw.
+
+        Order is the policy: a guaranteed rewrite first (Stroke of Luck), then
+        the rerolls the roller pays for, then Dark One's Own Luck's die, and
+        last the ally's Reaction.  Every entry costs its own resource, so the
+        order never hides a cheaper option -- it only fixes which one is asked
+        first, which is what makes a replay reproducible.
+
+        A death save is the one surface that does not take the reroll faces:
+        its tally branches on the face alone and the death-save contract keeps
+        one settled result per turn (the deviation S0-E3 recorded).  A second
+        face would make that record ambiguous, so only the faces that do not
+        replay the roll are offered -- Stroke of Luck rewrites the d20 and
+        Dark One's Own Luck adds a die to the roll already made.
+        """
+
+        if roller.get("side") != "party":
+            return []
+        if roller.get("kind") not in {"player", "companion"}:
+            return []
+        failed = not check.get("success")
+        surface = str(settlement.get("surface") or "")
+        reroll_faces = (
+            ("stroke_of_luck_save",)
+            if surface == "death_save"
+            else ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
+        )
+        pairs: list[tuple[str, str]] = []
+        if failed:
+            for code in reroll_faces:
+                owner_id = self._own_pool_owner(instance, roller, code)
+                if owner_id:
+                    pairs.append((code, owner_id))
+            # A natural 1 on a death save is two failures no matter the total,
+            # so a die can never help it.  Stroke of Luck rewrites the face and
+            # therefore still can, which is why only Dark Luck is skipped.
+            skip_dool = (
+                str(settlement.get("surface") or "") == "death_save"
+                and int(check.get("natural", 0) or 0) == 1
+            )
+            owner_id = "" if skip_dool else self._dool_owner(instance, roller)
+            if owner_id:
+                pairs.append(("dark_ones_own_luck", owner_id))
+            bard = self._countercharm_bard(instance, combat, roller, settlement)
+            if bard:
+                pairs.append(("countercharm", bard))
+        elif allow_success_face:
+            # "after seeing the roll but before any of the roll's effects
+            # occur" is not a failure-only wording; the die is offered on a
+            # success too, where it can only widen the margin.
+            owner_id = self._dool_owner(instance, roller)
+            if owner_id:
+                pairs.append(("dark_ones_own_luck", owner_id))
+        return pairs
+
+    def _save_window_offer(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any], surface: str,
+        *, source: str, target_id: str = "", allow_success_face: bool = True,
+    ) -> dict[str, Any] | None:
+        """The next legal window on this saving throw, or ``None``."""
+
+        offered = tuple(str(item) for item in settlement.get("offered") or ())
+        pairs = [
+            (code, owner_id)
+            for code, owner_id in self._save_window_candidates(
+                instance, combat, roller, check, settlement,
+                allow_success_face=allow_success_face,
+            )
+            if code not in offered
+        ]
+        if not pairs:
             return None
-        owner_id = self._dool_owner(instance, actor, failed=True)
-        if not owner_id:
-            return None
-        return self._build_check_window(
-            instance, code="dark_ones_own_luck", surface="death_save",
-            owner_id=owner_id, check=check, settlement={},
-            source=str(actor["actor_id"]), roller_id=str(actor["actor_id"]),
-            attacker_id="", target_id="", remaining_windows=[],
-            die_sides=self._window_die_sides(actor, "dark_ones_own_luck"),
+        code, owner_id = pairs[0]
+        entry = WINDOW_REGISTRY[code]
+        owner = self._actor_view(instance, combat, owner_id)
+        settlement["offered"] = [*offered, code]
+        die_sides = (
+            0 if entry.replaces_natural else self._window_die_sides(owner, code)
+        )
+        window = self._build_check_window(
+            instance, code=code, surface=surface, owner_id=owner_id, check=check,
+            settlement=settlement, source=source, roller_id=str(roller["actor_id"]),
+            attacker_id="", target_id=target_id, remaining_windows=[],
+            die_sides=die_sides,
+        )
+        if entry.rerolls:
+            window["reroll_mode"] = str(
+                self._declared(owner, entry.feature_id, "reroll_mode", "") or ""
+            )
+            window["reroll_bonus"] = self._reroll_bonus(owner, entry.feature_id)
+        return window
+
+    def _reroll_bonus(self, actor: dict[str, Any], feature_id: str) -> int:
+        """The flat bonus a reroll feature adds, read from its declaration."""
+
+        if not self._declared(actor, feature_id, "reroll_bonus_from_class_level", False):
+            return 0
+        return self._class_level(self._feature_character(actor))
+
+    def _death_save_check_window(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """The first window on a failing death save, or ``None``.
+
+        A decisive save (natural 20, or a total of 10+) opens nothing, and a
+        natural 1 cannot be rescued by a die -- it costs two failures whatever
+        the total.  Stroke of Luck still applies to either, because it rewrites
+        the face instead of adding to the total.  Reroll faces stay closed
+        here; see ``_save_window_candidates`` for why.
+        """
+
+        payload = dict(settlement or {})
+        payload.setdefault("surface", "death_save")
+        return self._save_window_offer(
+            instance, combat, actor, check, payload, "death_save",
+            source=str(actor["actor_id"]), allow_success_face=False,
         )
 
     def _concentration_with_dool(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
-        damage: int, rng: Any,
+        damage: int, rng: Any, settlement: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Concentration save events, pausing before the failure lands.
 
         ``_concentration_events`` is untouched: this wrapper only replaces the
-        failure tail when Dark One's Own Luck can still change it. A
-        successful save (or no DOOL owner) is returned byte-for-byte.
+        failure tail when a window can still change it.  A successful save (or
+        no eligible owner) is returned byte-for-byte.
         """
 
         events = self._concentration_events(instance, combat, target, damage, rng)
         if not events or events[0].get("success"):
             return events
-        owner_id = self._dool_owner(instance, target, failed=True)
-        if not owner_id:
-            return events
-        check = deepcopy(events[0])
-        window = self._build_check_window(
-            instance, code="dark_ones_own_luck", surface="concentration",
-            owner_id=owner_id, check=check, settlement={"damage": int(damage)},
-            source=str(target["actor_id"]), roller_id=str(target["actor_id"]),
-            attacker_id="", target_id=str(target["actor_id"]),
-            remaining_windows=[],
-            die_sides=self._window_die_sides(target, "dark_ones_own_luck"),
+        payload = dict(settlement or {})
+        payload["surface"] = "concentration"
+        payload["damage"] = int(damage)
+        window = self._save_window_offer(
+            instance, combat, target, deepcopy(events[0]), payload,
+            "concentration", source=str(target["actor_id"]),
+            target_id=str(target["actor_id"]), allow_success_face=False,
         )
+        if window is None:
+            return events
         return [{"type": "dnd2024.decision.pending", **window}]
 
     # -------------------------------------------------------------- offer shape
@@ -788,9 +1040,11 @@ class CombatCheckWindowsMixin:
         if code == "bardic_inspiration":
             held = self._active_bardic_instance(instance, combat, owner_id)
             die_sides = int(held["die_sides"]) if held else 0
+        elif code == "stroke_of_luck_attack":
+            die_sides = 0
         else:
             die_sides = self._peerless_die_sides(attacker)
-        if die_sides == 0:
+        if die_sides == 0 and not WINDOW_REGISTRY[code].replaces_natural:
             return None
         settlement["failed_offered"] = [
             *(str(item) for item in settlement.get("failed_offered") or ()), code,
@@ -876,7 +1130,9 @@ class CombatCheckWindowsMixin:
             if self._active_bardic_instance(instance, combat, owner_id) is None:
                 raise CombatIntentError("no Bardic Inspiration die is held")
             return
-        if not self._window_pool_available(instance, owner_id, entry.resource_id):
+        if entry.resource_id and not self._window_pool_available(
+            instance, owner_id, entry.resource_id,
+        ):
             raise CombatIntentError("this check window resource is already spent")
         if entry.feature_id and not self.features.has_feature(
             self._feature_character(owner), entry.feature_id,
@@ -909,18 +1165,25 @@ class CombatCheckWindowsMixin:
                     "holder_id": decision["window_owner_id"],
                     "reason": "rolled",
                 })
-            else:
+            elif entry.resource_id:
                 events.append({
                     "type": "dnd2024.class_resource.spent", "actor_id": decision["window_owner_id"],
                     "resource_id": entry.resource_id,
                 })
-                if entry.uses_reaction:
-                    events.append({
-                        "type": "dnd2024.reaction.spent", "actor_id": decision["window_owner_id"],
-                        "reason": "reaction_feature",
-                    })
-            die = int(rng.randint(1, int(decision["die_sides"])))
-            check = self._spend_check_window(decision, check, die)
+            if entry.uses_reaction:
+                # Countercharm is the only window that costs a Reaction and no
+                # pool at all, so the two costs are independent.
+                events.append({
+                    "type": "dnd2024.reaction.spent", "actor_id": decision["window_owner_id"],
+                    "reason": "reaction_feature",
+                })
+            if entry.replaces_natural:
+                check = self._replace_natural(instance, combat, decision, check)
+            elif entry.rerolls:
+                check = self._reroll_check(decision, check, rng)
+            else:
+                die = int(rng.randint(1, int(decision["die_sides"])))
+                check = self._spend_check_window(decision, check, die)
         surface = str(decision.get("surface") or "")
         if surface == "attack":
             return self._finish_attack_check_window(
@@ -928,10 +1191,16 @@ class CombatCheckWindowsMixin:
             )
         if surface == "death_save":
             return self._finish_death_save_window(
-                instance, combat, decision, check, events, rng,
+                instance, combat, decision, check, spent, events, rng,
             )
         if surface == "concentration":
-            return self._finish_concentration_window(decision, check, events)
+            return self._finish_concentration_window(
+                instance, combat, decision, check, spent, events, rng,
+            )
+        if surface == "save":
+            return self._finish_repeat_save_window(
+                instance, combat, decision, check, spent, events, rng,
+            )
         if surface == "ability_check":
             return self._finish_ability_check_window(
                 instance, combat, decision, check, spent, events, rng,
@@ -952,12 +1221,23 @@ class CombatCheckWindowsMixin:
         settlement = deepcopy(decision.get("settlement") or {})
         code = str(decision["window_code"])
         events.append(check)
-        if spent and code.startswith("peerless_skill") and not check.get("success"):
+        if spent and not check.get("success") and code in {
+            "peerless_skill_check", "tactical_mind",
+        }:
+            # Both features give the use back when the roll still fails:
+            # Peerless Skill says so outright, and Tactical Mind buys the d10
+            # with a Second Wind use that is only spent on a rescue.
+            resource = (
+                BARDIC_RESOURCE if code == "peerless_skill_check" else "second_wind"
+            )
             events.append({
                 "type": "dnd2024.class_resource.refunded",
                 "actor_id": str(decision["window_owner_id"]),
-                "resource_id": BARDIC_RESOURCE,
-                "reason": "peerless_failure",
+                "resource_id": resource,
+                "reason": (
+                    "peerless_failure" if code == "peerless_skill_check"
+                    else "tactical_mind_failure"
+                ),
             })
         exclude = tuple(str(item) for item in settlement.get("exclude_bards") or ())
         if spent and code == "cutting_words_ability":
@@ -986,6 +1266,114 @@ class CombatCheckWindowsMixin:
                 "ends_on": ["attack_roll", "spell_cast"],
             })
         return events
+
+    def _check_total(self, check: dict[str, Any], natural: int) -> int:
+        """The total a check would have with ``natural`` as its d20 face.
+
+        Every component stays separate so the audit trail can still be read
+        piece by piece: modifier, per-check bonus dice, aura, a window's bonus
+        die and a window's penalty each remain their own field.
+        """
+
+        return (
+            int(natural)
+            + int(check.get("modifier", 0) or 0)
+            + int(check.get("check_bonus", 0) or 0)
+            + int(check.get("aura_bonus", 0) or 0)
+            + int(check.get("window_bonus", 0) or 0)
+            - int(check.get("check_penalty", 0) or 0)
+            + int(check.get("reroll_bonus", 0) or 0)
+        )
+
+    def _replace_natural(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        check: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Rewrite the d20 face (Stroke of Luck) and re-judge every effect.
+
+        No die is rolled and no RNG is consumed: the rule says "turn the roll
+        into a 20", so the natural face and everything derived from it -- a
+        hit, a critical, a save, an ability check -- move together.
+        """
+
+        code = str(decision["window_code"])
+        entry = WINDOW_REGISTRY[code]
+        owner = self._actor_view(instance, combat, str(decision["window_owner_id"]))
+        natural = self._declared(owner, entry.feature_id, "replace_natural_with", 20)
+        if isinstance(natural, bool) or not isinstance(natural, int) or not 2 <= natural <= 20:
+            natural = 20
+        check.update({
+            "window": code,
+            "window_resource": entry.resource_id,
+            "window_roll": None,
+            "window_bonus": 0,
+            "window_bonus_rolls": [],
+            "natural": natural,
+            "total": self._check_total(check, natural),
+        })
+        if str(check.get("kind") or "") == "attack":
+            check["critical"] = natural >= int(check.get("crit_threshold", 20) or 20)
+            check.pop("critical_upgrade", None)
+            check["success"] = self._attack_check_success(check)
+        else:
+            check["success"] = int(check["total"]) >= int(check["target"])
+        return check
+
+    def _reroll_check(
+        self, decision: dict[str, Any], check: dict[str, Any], rng: Any,
+    ) -> dict[str, Any]:
+        """Roll a brand-new d20 and force the new result.
+
+        The previous total is kept on the event (``rerolled_*``) instead of
+        being merged into the new one: "you must use the new roll" means the
+        old result stops existing as a result, not that the two are added.
+        """
+
+        code = str(decision["window_code"])
+        entry = WINDOW_REGISTRY[code]
+        mode = str(decision.get("reroll_mode") or "")
+        rolls = [int(rng.randint(1, 20))]
+        if mode in {"advantage", "disadvantage"}:
+            rolls.append(int(rng.randint(1, 20)))
+        if mode == "advantage":
+            natural = max(rolls)
+        elif mode == "disadvantage":
+            natural = min(rolls)
+        else:
+            natural = rolls[0]
+        keep = {
+            key: deepcopy(check[key]) for key in (
+                "type", "kind", "actor_id", "source_actor_id", "ability",
+                "modifier", "check_bonus", "check_bonus_rolls", "aura_bonus",
+                "aura_sources", "target", "repeat_save",
+            ) if key in check
+        }
+        rerolled = {
+            **keep,
+            "rolls": rolls,
+            "natural": natural,
+            "window": code,
+            "window_resource": entry.resource_id,
+            "window_roll": None,
+            "window_bonus": 0,
+            "window_bonus_rolls": [],
+            "reroll_mode": mode,
+            "reroll_bonus": int(decision.get("reroll_bonus", 0) or 0),
+            "rerolled_from": check.get("roll_id"),
+            "roll_id": f"{check.get('roll_id') or 'roll'}-r1",
+            "rerolled_rolls": list(check.get("rolls") or []),
+            "rerolled_natural": check.get("natural"),
+            "rerolled_total": check.get("total"),
+        }
+        if mode:
+            rerolled["advantage_mode"] = mode
+            rerolled["advantage_sources"] = [
+                *list(check.get("advantage_sources") or []),
+                {"code": code, "mode": mode},
+            ]
+        rerolled["total"] = self._check_total(rerolled, natural)
+        rerolled["success"] = int(rerolled["total"]) >= int(rerolled["target"])
+        return rerolled
 
     def _spend_check_window(
         self, decision: dict[str, Any], check: dict[str, Any], die: int,
@@ -1064,7 +1452,10 @@ class CombatCheckWindowsMixin:
             })
             check["success"] = self._attack_check_success(check)
             return check
-        if code in {"bardic_inspiration_check", "peerless_skill_check"}:
+        if code in {
+            "bardic_inspiration_check", "peerless_skill_check",
+            "tactical_mind", "dark_ones_own_luck_check",
+        }:
             total = int(check["total"]) + die
             check.update({
                 **window,
@@ -1206,25 +1597,89 @@ class CombatCheckWindowsMixin:
 
     def _finish_death_save_window(
         self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
-        check: dict[str, Any], events: list[dict[str, Any]], rng: Any,
+        check: dict[str, Any], spent: bool, events: list[dict[str, Any]], rng: Any,
     ) -> list[dict[str, Any]]:
         actor_id = str(decision["actor_id"])
         actor = self._actor_view(instance, combat, actor_id)
+        settlement = deepcopy(decision.get("settlement") or {})
+        settlement.setdefault("surface", "death_save")
+        follow_up = self._save_window_offer(
+            instance, combat, actor, check, settlement, "death_save",
+            source=str(decision.get("source") or actor_id),
+            allow_success_face=False,
+        )
+        if follow_up is not None:
+            # A declined or failed face leaves the save unresolved until every
+            # legal face has had its turn: landing the failure first would
+            # count it twice.
+            events.append({"type": "dnd2024.decision.pending", **follow_up})
+            return events
         events.append(check)
         events.extend(self._death_save_outcome_events(instance, combat, actor, check, rng))
         return events
 
     def _finish_concentration_window(
-        self, decision: dict[str, Any], check: dict[str, Any],
-        events: list[dict[str, Any]],
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        check: dict[str, Any], spent: bool, events: list[dict[str, Any]], rng: Any,
     ) -> list[dict[str, Any]]:
+        actor_id = str(decision["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        settlement = deepcopy(decision.get("settlement") or {})
+        settlement.setdefault("surface", "concentration")
+        follow_up = self._save_window_offer(
+            instance, combat, actor, check, settlement, "concentration",
+            source=str(decision.get("source") or actor_id),
+            target_id=str(decision.get("target_id") or actor_id),
+            allow_success_face=False,
+        )
+        if follow_up is not None:
+            events.append({"type": "dnd2024.decision.pending", **follow_up})
+            return events
         events.append(check)
         if not check.get("success"):
             events.append({
                 "type": "dnd2024.concentration.ended",
-                "actor_id": str(decision["actor_id"]),
+                "actor_id": actor_id,
                 "reason": "failed_concentration_save",
             })
+        return events
+
+    def _finish_repeat_save_window(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        check: dict[str, Any], spent: bool, events: list[dict[str, Any]], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Land a repeated saving throw, then continue the remaining ones.
+
+        ``_save_repeat_events`` pauses mid-loop when a window opens; the row it
+        had not reached yet travels in the settlement so this finisher can pick
+        the same loop up at exactly that point.
+        """
+
+        actor_id = str(decision["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        settlement = deepcopy(decision.get("settlement") or {})
+        follow_up = self._save_window_offer(
+            instance, combat, actor, check, settlement, "save",
+            source=str(decision.get("source") or actor_id),
+            target_id=str(decision.get("target_id") or ""),
+        )
+        if follow_up is not None:
+            events.append({"type": "dnd2024.decision.pending", **follow_up})
+            return events
+        events.append(check)
+        condition_id = str(settlement.get("condition") or "")
+        if check.get("success") and condition_id:
+            events.append({
+                "type": "condition.removed", "target_id": actor_id,
+                "condition": condition_id, "reason": "save_repeat",
+            })
+        remaining = [tuple(row) for row in settlement.get("remaining") or []]
+        if remaining:
+            events.extend(
+                self._repeat_save_events(
+                    instance, combat, actor_id, rng, pending=remaining,
+                )
+            )
         return events
 
     def _finish_damage_window(
@@ -1294,6 +1749,9 @@ class CombatCheckWindowsMixin:
             return None
         check = decision.get("check") or {}
         code = str(decision.get("window_code") or "")
+        target = int(check.get("target", 0) or 0)
+        die = int(decision.get("die_sides", 0) or 0)
+        failed = not check.get("success")
         option = "decline"
         if code == "lucky_disadvantage" and check.get("success"):
             margin = int(check["total"]) - int(check["target"])
@@ -1303,34 +1761,47 @@ class CombatCheckWindowsMixin:
         elif code == "cutting_words_check" and check.get("success"):
             option = (
                 "spend" if not check.get("critical")
-                and int(check["total"]) - int(decision["die_sides"]) < int(check["target"])
+                and int(check["total"]) - die < int(check["target"])
                 else "decline"
             )
-        elif code in {"bardic_inspiration", "peerless_skill"} and not check.get("success"):
-            option = (
-                "spend"
-                if int(check["total"]) + int(decision["die_sides"]) >= int(check["target"])
-                else "decline"
-            )
-        elif code in {"bardic_inspiration_check", "peerless_skill_check"} and not check.get("success"):
-            option = (
-                "spend"
-                if int(check["total"]) + int(decision["die_sides"]) >= int(check["target"])
-                else "decline"
-            )
+        elif code in {
+            "bardic_inspiration", "peerless_skill",
+            "bardic_inspiration_check", "peerless_skill_check", "tactical_mind",
+        } and failed:
+            option = "spend" if int(check["total"]) + die >= target else "decline"
         elif code == "cutting_words_ability" and check.get("success"):
             option = (
                 "spend"
-                if int(check["total"]) - int(decision["die_sides"]) < int(check["target"])
+                if int(check["total"]) - die < int(check["target"])
                 else "decline"
             )
-        elif code == "dark_ones_own_luck" and not check.get("success"):
+        elif code in {"dark_ones_own_luck", "dark_ones_own_luck_check"} and failed:
             surface = str(decision.get("surface") or "")
-            current = int(check["total"]) if surface == "concentration" else int(check["natural"])
-            option = (
-                "spend" if current + int(decision["die_sides"]) >= int(check["target"])
-                else "decline"
+            current = (
+                int(check["total"])
+                if surface not in {"death_save"} else int(check["natural"])
             )
+            option = "spend" if current + die >= target else "decline"
+        elif code in {"stroke_of_luck_check", "stroke_of_luck_save"} and failed:
+            # A natural 20 hits unless the remaining modifiers are so negative
+            # that even that cannot reach the DC.
+            best = 20 + int(check.get("modifier", 0) or 0) + int(
+                check.get("check_bonus", 0) or 0
+            ) + int(check.get("aura_bonus", 0) or 0)
+            option = "spend" if best >= target else "decline"
+        elif code == "stroke_of_luck_attack" and failed:
+            option = "spend"
+        elif code in {"countercharm", "indomitable", "disciplined_survivor"} and failed:
+            # A reroll is worth it only when the best possible d20 can reach
+            # the DC; the previous total is irrelevant because it is discarded.
+            best = (
+                20
+                + int(check.get("modifier", 0) or 0)
+                + int(check.get("check_bonus", 0) or 0)
+                + int(check.get("aura_bonus", 0) or 0)
+                + int(decision.get("reroll_bonus", 0) or 0)
+            )
+            option = "spend" if best >= target else "decline"
         return self._window_resolve_intent(instance, decision, version, option)
 
     def _automatic_damage_window(
