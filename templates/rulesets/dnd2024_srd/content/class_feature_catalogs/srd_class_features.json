@@ -673,6 +673,35 @@
       "source_ref": "srd-5.2.1:p31:bard-features",
       "features": [
         {
+          "id": "bardic_inspiration",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p31:bardic-inspiration",
+          "summary": "As a Bonus Action, you can inspire another creature within 60 feet of yourself who can see or hear you. That creature gains one of your Bardic Inspiration dice. Once within the next hour when the creature fails a D20 Test, it can roll the die and add the number rolled to the d20. A creature can have only one Bardic Inspiration die at a time.",
+          "parameters": {
+            "trigger": "grant",
+            "die_sides_track": "bardic_die",
+            "range_ft": 60
+          },
+          "resource_id": "bardic_inspiration",
+          "capabilities": [
+            {
+              "id": "bardic_inspiration",
+              "cost": {"bonus_action": 1, "resources": [{"id": "bardic_inspiration", "amount": 1}]},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "bardic_grant", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "font_of_inspiration",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p32:font-of-inspiration",
+          "summary": "You now regain all your expended uses of Bardic Inspiration when you finish a Short or Long Rest. In addition, you can expend a spell slot (no action required) to regain one expended use of Bardic Inspiration.",
+          "parameters": {
+            "slot_exchange_per_level": 1
+          }
+        },
+        {
           "id": "jack_of_all_trades",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p32:jack-of-all-trades",
@@ -707,6 +736,27 @@
             "trigger": "attack_roll_success",
             "die_sides_track": "bardic_die",
             "range_ft": 60
+          }
+        },
+        {
+          "id": "peerless_skill",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p35:peerless-skill",
+          "summary": "When you make an ability check or attack roll and fail, you can expend one use of Bardic Inspiration; roll the Bardic Inspiration die and add the number rolled to the d20, potentially turning the failure into a success. On a failure, the Bardic Inspiration isn't expended.",
+          "parameters": {
+            "own_check_failure": true,
+            "die_sides_track": "bardic_die"
+          },
+          "resource_id": "bardic_inspiration"
+        },
+        {
+          "id": "superior_inspiration",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p33:superior-inspiration",
+          "summary": "When you roll Initiative, you regain expended uses of Bardic Inspiration until you have two if you have fewer than that.",
+          "parameters": {
+            "initiative_refill": 2
           }
         }
       ]
