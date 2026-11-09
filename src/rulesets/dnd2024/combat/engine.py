@@ -1133,6 +1133,7 @@ class Dnd2024CombatEngine(
                 "origin_step_id": str(combat.get("origin_step_id") or ""),
                 "mode": str(combat.get("mode") or ""),
                 "adventure_binding": deepcopy(combat.get("adventure_binding")),
+                "bardic_instances": self._active_bardic_view(instance, combat),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),

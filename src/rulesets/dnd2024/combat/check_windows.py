@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.engine.world.contracts import clock_minutes
 from src.rulesets.dnd2024.features.resources import resource_state
 
 from .check_modes import mode_from_sources
@@ -63,6 +64,10 @@ class WindowEntry:
     resource_id: str
     feature_id: str
     uses_reaction: bool
+    # Holder-window entry: the cost is a held Bardic Inspiration die
+    # instance, not a class-resource pool.  ``resource_id`` stays empty and
+    # every pool read is replaced by the instance predicate.
+    uses_instance: bool = False
 
 
 # The only registry of window codes. Adding a consumer means adding an entry
@@ -87,6 +92,16 @@ WINDOW_REGISTRY: dict[str, WindowEntry] = {
         resource_id=BARDIC_RESOURCE, feature_id="cutting_words",
         uses_reaction=True,
     ),
+    "bardic_inspiration": WindowEntry(
+        code="bardic_inspiration", surface="attack_check",
+        resource_id="", feature_id="bardic_inspiration",
+        uses_reaction=False, uses_instance=True,
+    ),
+    "peerless_skill": WindowEntry(
+        code="peerless_skill", surface="attack_check",
+        resource_id=BARDIC_RESOURCE, feature_id="peerless_skill",
+        uses_reaction=False,
+    ),
 }
 
 
@@ -94,6 +109,78 @@ class CombatCheckWindowsMixin:
     """Offer, validate, and finish post-roll check/damage windows."""
 
     __slots__ = ()
+
+    # ------------------------------------------------------ bardic instances
+
+    def _logical_minutes(self, instance: Any) -> int:
+        """The authoritative world clock as absolute logical minutes.
+
+        One Bardic Inspiration hour lives on this clock: the authoritative
+        flow owns it, there is no wall time and no background timer, so the
+        same save resolves to the same minutes every time.
+        """
+
+        try:
+            holder = getattr(instance, "world_state", None)
+            raw = holder.get("clock") if isinstance(holder, dict) else None
+            minutes = clock_minutes(raw)
+            # 与 world 读取投影的降级一致：缺失或损坏的时钟读作第 1 天 00:00，
+            # 而不是把这一桌卡在一场永远过不完的战斗里。
+            return 0 if minutes is None else int(minutes)
+        except Exception as error:  # pragma: no cover - clock is always present
+            raise CombatIntentError("the world clock is unavailable") from error
+
+    def _bardic_instances(self, combat: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            item for item in combat.get("bardic_instances") or []
+            if isinstance(item, dict)
+        ]
+
+    def _active_bardic_instance(
+        self, instance: Any, combat: dict[str, Any], holder_id: str,
+    ) -> dict[str, Any] | None:
+        """The holder's unexpired, unconsumed die, or ``None``.
+
+        The same predicate hides the instance in every read path: "exactly at
+        expiry or past it" is dead, only ``now < expires_at_minute`` lives.
+        """
+
+        now = self._logical_minutes(instance)
+        for item in self._bardic_instances(combat):
+            if str(item.get("holder_id") or "") != holder_id:
+                continue
+            if str(item.get("status") or "") != "active":
+                continue
+            if now < int(item.get("expires_at_minute", 0) or 0):
+                return item
+        return None
+
+    def _bardic_die_sides(self, actor: dict[str, Any]) -> int:
+        """The grantor's current Bardic die, or 0 when it cannot be granted."""
+
+        sides = self.features.feature_value(
+            self._feature_character(actor), "bardic_inspiration", "die_sides", 0,
+        )
+        if isinstance(sides, bool) or not isinstance(sides, int) or not 2 <= sides <= 100:
+            return 0
+        return sides
+
+    def _active_bardic_view(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """The projection the gameplay view shows: only live die instances.
+
+        The read predicate is the same one the windows use, so an expired
+        die disappears from the view at the same authority boundary where it
+        becomes unusable.
+        """
+
+        now = self._logical_minutes(instance)
+        return [
+            deepcopy(item) for item in self._bardic_instances(combat)
+            if str(item.get("status") or "") == "active"
+            and now < int(item.get("expires_at_minute", 0) or 0)
+        ]
 
     # ------------------------------------------------------------------ pools
 
@@ -235,7 +322,59 @@ class CombatCheckWindowsMixin:
                 return ""
             bards = self._cutting_words_bards(instance, combat, attacker, exclude_bards)
             return bards[0] if bards else ""
+        if code == "bardic_inspiration":
+            # The holder's own failed attack roll.  A natural 1 stays a miss
+            # no matter what is added to it, so it never opens a window.
+            if check.get("success"):
+                return ""
+            if int(check.get("natural", 0) or 0) == 1:
+                return ""
+            holder_id = str(attacker["actor_id"])
+            if attacker.get("side") != "party" or attacker.get("kind") not in {"player", "companion"}:
+                return ""
+            held = self._active_bardic_instance(instance, combat, holder_id)
+            if held is None:
+                return ""
+            return holder_id
+        if code == "peerless_skill":
+            # The bard's own failed attack roll, paid from the Bard's own
+            # Bardic Inspiration pool -- no held die required.
+            if check.get("success"):
+                return ""
+            if int(check.get("natural", 0) or 0) == 1:
+                return ""
+            roller_id = str(attacker["actor_id"])
+            if attacker.get("side") != "party" or attacker.get("kind") not in {"player", "companion"}:
+                return ""
+            if not self.features.has_feature(
+                self._feature_character(attacker), "peerless_skill",
+            ):
+                return ""
+            if not self._window_pool_available(instance, roller_id, BARDIC_RESOURCE):
+                return ""
+            if self._peerless_die_sides(attacker) == 0:
+                return ""
+            return roller_id
         return ""
+
+    def _peerless_die_sides(self, actor: dict[str, Any]) -> int:
+        sides = self.features.feature_value(
+            self._feature_character(actor), "peerless_skill", "die_sides", 0,
+        )
+        if isinstance(sides, bool) or not isinstance(sides, int) or not 2 <= sides <= 100:
+            return 0
+        return sides
+
+    def _failed_attack_windows(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        check: dict[str, Any],
+    ) -> list[str]:
+        """Holder-side codes for a failed attack roll, in registry order."""
+
+        return [
+            code for code in ("bardic_inspiration", "peerless_skill")
+            if self._attack_check_candidate(instance, combat, code, attacker, attacker, check)
+        ]
 
     def _dool_owner(
         self, instance: Any, actor: dict[str, Any], *, failed: bool,
@@ -433,6 +572,46 @@ class CombatCheckWindowsMixin:
             ),
         )
 
+    def _failed_attack_window_offer(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The first holder-side window on a failed attack roll, or ``None``.
+
+        The roller himself is the owner: a held Bardic Inspiration die or the
+        Peerless Skill expenditure both add a die to the missed d20 after the
+        fact.  The hit-face windows stay in ``remaining_windows`` -- a die
+        that turns the miss into a hit re-derives them against the new total.
+        """
+
+        codes = self._failed_attack_windows(instance, combat, attacker, check)
+        if not codes:
+            return None
+        code = codes[0]
+        owner_id = str(attacker["actor_id"])
+        if code == "bardic_inspiration":
+            held = self._active_bardic_instance(instance, combat, owner_id)
+            die_sides = int(held["die_sides"]) if held else 0
+        else:
+            die_sides = self._peerless_die_sides(attacker)
+        if die_sides == 0:
+            return None
+        settlement["remaining_windows"] = ["lucky_disadvantage", "cutting_words_check"]
+        # The straight-through miss emits the weapon's miss mastery (Graze);
+        # declining or spending without flipping the result must land in the
+        # same place, so the finisher has to know this window came from the
+        # miss face.
+        settlement["miss_face"] = True
+        return self._build_check_window(
+            instance, code=code, surface="attack", owner_id=owner_id, check=check,
+            settlement=settlement,
+            source=str(settlement["intent"].get("intent_id") or ""),
+            roller_id=owner_id, attacker_id=owner_id,
+            target_id=str(settlement.get("target_id") or ""),
+            remaining_windows=list(settlement["remaining_windows"]),
+            die_sides=die_sides,
+        )
+
     def _damage_window_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
         defender: dict[str, Any], damage_event: dict[str, Any],
@@ -494,6 +673,10 @@ class CombatCheckWindowsMixin:
             raise CombatIntentError("this check window is not available")
         owner_id = str(decision.get("window_owner_id") or "")
         owner = self._actor_view(instance, combat, owner_id)
+        if entry.uses_instance:
+            if self._active_bardic_instance(instance, combat, owner_id) is None:
+                raise CombatIntentError("no Bardic Inspiration die is held")
+            return
         if not self._window_pool_available(instance, owner_id, entry.resource_id):
             raise CombatIntentError("this check window resource is already spent")
         if entry.feature_id and not self.features.has_feature(
@@ -517,15 +700,26 @@ class CombatCheckWindowsMixin:
         check = deepcopy(decision["check"])
         spent = intent["option"] == "spend"
         if spent:
-            events.append({
-                "type": "dnd2024.class_resource.spent", "actor_id": decision["window_owner_id"],
-                "resource_id": entry.resource_id,
-            })
-            if entry.uses_reaction:
+            if entry.uses_instance:
+                # The holder spends the held die itself, not a resource pool:
+                # the instance is consumed because it was rolled, whatever the
+                # new result turns out to be.
                 events.append({
-                    "type": "dnd2024.reaction.spent", "actor_id": decision["window_owner_id"],
-                    "reason": "reaction_feature",
+                    "type": "dnd2024.bardic.consumed",
+                    "actor_id": decision["window_owner_id"],
+                    "holder_id": decision["window_owner_id"],
+                    "reason": "rolled",
                 })
+            else:
+                events.append({
+                    "type": "dnd2024.class_resource.spent", "actor_id": decision["window_owner_id"],
+                    "resource_id": entry.resource_id,
+                })
+                if entry.uses_reaction:
+                    events.append({
+                        "type": "dnd2024.reaction.spent", "actor_id": decision["window_owner_id"],
+                        "reason": "reaction_feature",
+                    })
             die = int(rng.randint(1, int(decision["die_sides"])))
             check = self._spend_check_window(decision, check, die)
         surface = str(decision.get("surface") or "")
@@ -605,6 +799,19 @@ class CombatCheckWindowsMixin:
                 "success": total >= int(check["target"]),
             })
             return check
+        if code in {"bardic_inspiration", "peerless_skill"}:
+            # Add the die to the failed d20 total and re-judge.  A natural 1
+            # never opened the window on the attack face, so no special case
+            # is needed here.
+            total = int(check["total"]) + die
+            check.update({
+                **window,
+                "window_bonus": die,
+                "window_bonus_rolls": [die],
+                "total": total,
+            })
+            check["success"] = self._attack_check_success(check)
+            return check
         raise CombatIntentError("this check window code is not supported")  # pragma: no cover
 
     @staticmethod
@@ -634,6 +841,19 @@ class CombatCheckWindowsMixin:
         actor = self._actor_view(instance, combat, actor_id)
         target = self._actor_view(instance, combat, target_id)
         events.append(check)
+        if (
+            spent and str(decision["window_code"]) == "peerless_skill"
+            and not check.get("success")
+        ):
+            # Peerless Skill: "On a failure, the Bardic Inspiration isn't
+            # expended."  The die was rolled and recorded, but the use comes
+            # back in the same batch -- never spent-and-forgotten.
+            events.append({
+                "type": "dnd2024.class_resource.refunded",
+                "actor_id": str(decision["window_owner_id"]),
+                "resource_id": BARDIC_RESOURCE,
+                "reason": "peerless_failure",
+            })
         if settlement.get("rage_sustain"):
             events.append({
                 "type": "dnd2024.condition.sustained", "target_id": actor_id,
@@ -688,6 +908,16 @@ class CombatCheckWindowsMixin:
                 crit_on_hit=bool(settlement.get("crit_on_hit")),
                 exclude_bards=exclude_bards,
                 spent_reactions=spent_reactions,
+            ))
+        elif settlement.get("miss_face"):
+            # The straight-through miss of this attack would have applied the
+            # weapon's miss mastery; a declined or failed window changes
+            # nothing about that.
+            events.extend(self._miss_mastery_events(
+                instance, combat, actor, target,
+                deepcopy(settlement.get("weapon") or {}),
+                int(settlement.get("modifier", 0) or 0),
+                str(settlement.get("damage_type") or ""), rng,
             ))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
@@ -792,6 +1022,12 @@ class CombatCheckWindowsMixin:
             option = (
                 "spend" if not check.get("critical")
                 and int(check["total"]) - int(decision["die_sides"]) < int(check["target"])
+                else "decline"
+            )
+        elif code in {"bardic_inspiration", "peerless_skill"} and not check.get("success"):
+            option = (
+                "spend"
+                if int(check["total"]) + int(decision["die_sides"]) >= int(check["target"])
                 else "decline"
             )
         elif code == "dark_ones_own_luck" and not check.get("success"):

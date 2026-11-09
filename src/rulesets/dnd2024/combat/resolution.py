@@ -573,15 +573,15 @@ class CombatResolutionMixin:
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
         )
+        settlement = {
+            "actor_id": actor_id, "target_id": target_id,
+            "weapon": deepcopy(weapon), "ability": ability, "modifier": modifier,
+            "damage_formula": damage_formula, "damage_type": damage_type,
+            "crit_on_hit": crit_on_hit, "rage_sustain": rage_sustain,
+            "exclude_bards": [], "spent_reactions": [],
+            "remaining_windows": [], "intent": deepcopy(intent),
+        }
         if hit:
-            settlement = {
-                "actor_id": actor_id, "target_id": target_id,
-                "weapon": deepcopy(weapon), "ability": ability, "modifier": modifier,
-                "damage_formula": damage_formula, "damage_type": damage_type,
-                "crit_on_hit": crit_on_hit, "rage_sustain": rage_sustain,
-                "exclude_bards": [], "spent_reactions": [],
-                "remaining_windows": [], "intent": deepcopy(intent),
-            }
             window = self._attack_check_window_offer(
                 instance, combat, actor, target, check_event, settlement,
             )
@@ -589,6 +589,17 @@ class CombatResolutionMixin:
                 # The check has been rolled but nothing has landed: no damage
                 # die is rolled and no resolution event is emitted until the
                 # window owner decides.
+                events.append({"type": "dnd2024.decision.pending", **window})
+                return events
+        elif actor.get("side") == "party":
+            # A failed attack roll opens the holder-side windows: the
+            # attacker's own Bardic Inspiration die or Peerless Skill can
+            # still turn the miss around, and the hit-face windows re-derive
+            # from the settlement if the die flips it.
+            window = self._failed_attack_window_offer(
+                instance, combat, actor, check_event, settlement,
+            )
+            if window is not None:
                 events.append({"type": "dnd2024.decision.pending", **window})
                 return events
         events.append(check_event)
@@ -1823,9 +1834,68 @@ class CombatResolutionMixin:
                     "grants": {"surge_action": 1},
                     "flags": {"action_surge_used": True},
                 })
+            elif action.kind == "bardic_grant":
+                events.extend(self._bardic_grant_events(instance, combat, intent, rng))
             else:  # pragma: no cover - catalog validation guards this
                 raise CombatIntentError("unsupported class capability action")
         return events
+
+    def _bardic_grant_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Grant one Bardic Inspiration die to a party creature.
+
+        RAW re-checks at settle time what validation already checked: another
+        creature within 60 feet that can see or hear the bard, not already
+        holding an unexpired die.  The die face is fixed at grant time from
+        the bard's progression track, and the hour lives on the authoritative
+        world clock — no wall time, no background timer.  The die *instance*
+        (not a second resource table) is the state of record; the use was
+        already spent by the capability cost, so this handler only validates
+        and records.
+        """
+
+        actor_id = str(intent["actor_id"])
+        holder_id = str(intent.get("target_id") or "")
+        if not holder_id:
+            raise CombatIntentError("a Bardic Inspiration grant needs a target")
+        if holder_id == actor_id:
+            raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
+        bard = self._actor_view(instance, combat, actor_id)
+        holder = self._actor_view(instance, combat, holder_id)
+        if holder.get("side") != bard.get("side"):
+            raise CombatIntentError("Bardic Inspiration targets a creature on your side")
+        if int(holder.get("hp", 0) or 0) <= 0:
+            raise CombatIntentError("Bardic Inspiration targets a living creature")
+        die_sides = self._bardic_die_sides(bard)
+        if die_sides == 0:
+            raise CombatIntentError("no Bardic Inspiration die is available at this level")
+        range_ft = self.features.feature_value(
+            self._feature_character(bard), "bardic_inspiration", "range_ft", 0,
+        )
+        if not isinstance(range_ft, int) or range_ft <= 0:
+            raise CombatIntentError("no Bardic Inspiration range is declared")
+        if self._distance(combat, actor_id, holder_id) > range_ft:
+            raise CombatIntentError("the target is out of Bardic Inspiration range")
+        # "can see or hear you": with the condition vocabulary the engine has,
+        # the only pair that cuts both channels is an invisible bard seen by a
+        # blinded holder; deafened is not modeled, so it never blocks.
+        bard_conditions = bard.get("conditions") or {}
+        holder_conditions = holder.get("conditions") or {}
+        if "invisible" in bard_conditions and "blinded" in holder_conditions:
+            raise CombatIntentError("the target can neither see nor hear you")
+        if self._active_bardic_instance(instance, combat, holder_id) is not None:
+            raise CombatIntentError("the target already holds a Bardic Inspiration die")
+        granted_at = self._logical_minutes(instance)
+        return [{
+            "type": "dnd2024.bardic.granted", "actor_id": actor_id,
+            "holder_id": holder_id,
+            "die_instance_id": f"bardic:{intent.get('intent_id', '')}:{holder_id}",
+            "die_sides": die_sides,
+            "granted_at_minute": granted_at,
+            "expires_at_minute": granted_at + 60,
+            "source_feature": "bardic_inspiration",
+        }]
 
     def _save_repeat_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str, rng: Any,

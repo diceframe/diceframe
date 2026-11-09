@@ -419,6 +419,9 @@ class CombatValidationMixin:
         has_unarmed_strike = any(
             action.kind == "unarmed_strike" for action in capability.actions
         )
+        has_bardic_grant = any(
+            action.kind == "bardic_grant" for action in capability.actions
+        )
         if has_unarmed_strike:
             # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
             # 攻击档案决定，Combat 不自己算命中/伤害。
@@ -426,6 +429,14 @@ class CombatValidationMixin:
                 "target_id": str(intent.get("target_id") or ""),
                 "weapon_ref": UNARMED_STRIKE_REF,
             }, actor)
+        elif has_bardic_grant:
+            # 授予目标是友方活体：可见/听觉、射程与单骰限制由 resolution 在
+            # 结算时用同一组事实重验；这里挡住伪造目标与明显非法提交。
+            target = self._actor_view(
+                instance, combat, str(intent.get("target_id") or ""),
+            )
+            if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
+                raise CombatIntentError("Bardic Inspiration targets a living ally")
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
