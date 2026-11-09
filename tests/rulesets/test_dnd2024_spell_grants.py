@@ -438,7 +438,13 @@ def test_matrix_5_fiend_table_reuses_the_canonical_spells(
     runtime: Dnd2024Runtime,
 ) -> None:
     nine = _canonical(_sheet(runtime, "class:warlock", 9))
-    assert _grant_refs(nine) == [ref for refs in FIEND.values() for ref in refs]
+    # Warlock 9 also carries Contact Patron's Contact Other Plane (S0-F5), so
+    # the Fiend table is compared on its own rows instead of on the union.
+    fiend = [
+        row["spell_ref"] for row in _grant_rows(nine)
+        if row["owner"] == "subclass:fiend_patron"
+    ]
+    assert fiend == [ref for refs in FIEND.values() for ref in refs]
     refs = _grant_refs(nine)
     assert refs.count("spell:command") == 1
     catalog = Dnd2024SpellSelection(runtime.load_bundle(LOCALE)).catalog
