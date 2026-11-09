@@ -1713,6 +1713,15 @@ class CombatResolutionMixin:
         if mode:
             event["advantage_mode"] = mode
             event["advantage_sources"] = sources
+        window = self._ability_check_window_offer(
+            instance, combat, actor, event,
+            {"kind": "hide", "intent_id": str(intent.get("intent_id") or "")},
+        )
+        if window is not None:
+            # The check is on the table; the invisible condition (or the
+            # bardic die) waits for the window owner.
+            events.append({"type": "dnd2024.decision.pending", **window})
+            return events
         events.append(event)
         if success:
             events.append({

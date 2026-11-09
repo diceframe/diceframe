@@ -102,6 +102,21 @@ WINDOW_REGISTRY: dict[str, WindowEntry] = {
         resource_id=BARDIC_RESOURCE, feature_id="peerless_skill",
         uses_reaction=False,
     ),
+    "bardic_inspiration_check": WindowEntry(
+        code="bardic_inspiration_check", surface="ability_check",
+        resource_id="", feature_id="bardic_inspiration",
+        uses_reaction=False, uses_instance=True,
+    ),
+    "peerless_skill_check": WindowEntry(
+        code="peerless_skill_check", surface="ability_check",
+        resource_id=BARDIC_RESOURCE, feature_id="peerless_skill",
+        uses_reaction=False,
+    ),
+    "cutting_words_ability": WindowEntry(
+        code="cutting_words_ability", surface="ability_check",
+        resource_id=BARDIC_RESOURCE, feature_id="cutting_words",
+        uses_reaction=True,
+    ),
 }
 
 
@@ -375,6 +390,177 @@ class CombatCheckWindowsMixin:
             code for code in ("bardic_inspiration", "peerless_skill")
             if self._attack_check_candidate(instance, combat, code, attacker, attacker, check)
         ]
+
+    # ------------------------------------------------- ability-check surfaces
+
+    def _cutting_words_ability_bards(
+        self, instance: Any, combat: dict[str, Any], roller_id: str,
+        exclude: tuple[str, ...] = (),
+    ) -> list[str]:
+        """Party bards that can see ``roller_id`` and still react.
+
+        The 2024 text says "a creature that you can see", with no side
+        requirement and no hearing/Charmed clause, so this face accepts any
+        roller -- unlike the attack face, which only reacts to hostile rolls.
+        """
+
+        roller = self._actor_view(instance, combat, roller_id)
+        if "invisible" in (roller.get("conditions") or {}):
+            return []
+        order = [str(item) for item in combat.get("initiative", [])]
+        candidates = sorted(
+            [_player_actor(uid) for uid in instance.players]
+            + [f"companion:{cid}" for cid in self._active_companions(instance)]
+        )
+        bards: list[str] = []
+        for actor_id in candidates:
+            if actor_id == roller_id or actor_id in exclude or actor_id not in order:
+                continue
+            actor = self._actor_view(instance, combat, actor_id)
+            if actor.get("side") != "party" or int(actor.get("hp", 0) or 0) <= 0:
+                continue
+            if "blinded" in (actor.get("conditions") or {}):
+                continue
+            if not self._reaction_eligible(combat, actor):
+                continue
+            if not self.features.has_feature(
+                self._feature_character(actor), "cutting_words",
+            ):
+                continue
+            if not self._window_pool_available(instance, actor_id, BARDIC_RESOURCE):
+                continue
+            if self._window_die_sides(actor, "cutting_words_check") == 0:
+                continue
+            range_ft = self._cutting_words_range(actor)
+            if range_ft == 0:
+                continue
+            if self._distance(combat, actor_id, roller_id) > range_ft:
+                continue
+            bards.append(actor_id)
+        return bards
+
+    def _ability_check_candidate(
+        self, instance: Any, combat: dict[str, Any], code: str, roller_id: str,
+        check: dict[str, Any], exclude_bards: tuple[str, ...] = (),
+    ) -> str:
+        roller = self._actor_view(instance, combat, roller_id)
+        if code in {"bardic_inspiration_check", "peerless_skill_check"}:
+            if check.get("success"):
+                return ""
+            if roller.get("side") != "party" or roller.get("kind") not in {"player", "companion"}:
+                return ""
+            if code == "bardic_inspiration_check":
+                if self._active_bardic_instance(instance, combat, roller_id) is None:
+                    return ""
+                return roller_id
+            if not self.features.has_feature(
+                self._feature_character(roller), "peerless_skill",
+            ):
+                return ""
+            if not self._window_pool_available(instance, roller_id, BARDIC_RESOURCE):
+                return ""
+            if self._peerless_die_sides(roller) == 0:
+                return ""
+            return roller_id
+        if code == "cutting_words_ability":
+            if not check.get("success"):
+                return ""
+            bards = self._cutting_words_ability_bards(
+                instance, combat, roller_id, exclude_bards,
+            )
+            return bards[0] if bards else ""
+        return ""
+
+    def _ability_check_window_offer(
+        self, instance: Any, combat: dict[str, Any], roller: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The first window on an ability check, or ``None``.
+
+        Both polarities exist on this surface: a failed check can be rescued
+        by the roller's own die (Bardic Inspiration or Peerless Skill), and a
+        successful one can be cut by a Lore bard's Cutting Words.
+        """
+
+        roller_id = str(roller["actor_id"])
+        if check.get("success"):
+            codes = ["cutting_words_ability"]
+        else:
+            codes = ["bardic_inspiration_check", "peerless_skill_check"]
+        for index, code in enumerate(codes):
+            exclude = tuple(str(item) for item in settlement.get("exclude_bards") or [])
+            owner_id = self._ability_check_candidate(
+                instance, combat, code, roller_id, check, exclude,
+            )
+            if not owner_id:
+                continue
+            if code == "bardic_inspiration_check":
+                held = self._active_bardic_instance(instance, combat, owner_id)
+                die_sides = int(held["die_sides"]) if held else 0
+            elif code == "peerless_skill_check":
+                die_sides = self._peerless_die_sides(roller)
+            else:
+                die_sides = self._window_die_sides(
+                    self._actor_view(instance, combat, owner_id), "cutting_words_check",
+                )
+            if die_sides == 0:
+                continue
+            remaining = codes[index + 1:]
+            settlement["remaining_windows"] = list(remaining)
+            return self._build_check_window(
+                instance, code=code, surface="ability_check", owner_id=owner_id,
+                check=check, settlement=settlement,
+                source=str(settlement.get("intent_id") or ""),
+                roller_id=roller_id, attacker_id=roller_id,
+                target_id=str(settlement.get("target_id") or ""),
+                remaining_windows=remaining, die_sides=die_sides,
+            )
+        return None
+
+    def _next_ability_window(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        check: dict[str, Any], settlement: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Re-derive the ability-check chain against the new result."""
+
+        roller_id = str(decision["actor_id"])
+        roller = self._actor_view(instance, combat, roller_id)
+        codes = [str(item) for item in decision.get("remaining_windows") or []]
+        if not codes:
+            # A rescued check succeeds: the cut face becomes available; a cut
+            # check that now fails: the roller's own die becomes available.
+            codes = ["cutting_words_ability"] if check.get("success") else [
+                "bardic_inspiration_check", "peerless_skill_check",
+            ]
+        for code in codes:
+            exclude = tuple(str(item) for item in settlement.get("exclude_bards") or [])
+            owner_id = self._ability_check_candidate(
+                instance, combat, code, roller_id, check, exclude,
+            )
+            if not owner_id:
+                continue
+            if code == "bardic_inspiration_check":
+                held = self._active_bardic_instance(instance, combat, owner_id)
+                die_sides = int(held["die_sides"]) if held else 0
+            elif code == "peerless_skill_check":
+                die_sides = self._peerless_die_sides(roller)
+            else:
+                die_sides = self._window_die_sides(
+                    self._actor_view(instance, combat, owner_id), "cutting_words_check",
+                )
+            if die_sides == 0:
+                continue
+            remaining = codes[codes.index(code) + 1:]
+            settlement["remaining_windows"] = list(remaining)
+            return self._build_check_window(
+                instance, code=code, surface="ability_check", owner_id=owner_id,
+                check=check, settlement=settlement,
+                source=str(decision.get("source") or ""),
+                roller_id=roller_id, attacker_id=roller_id,
+                target_id=str(decision.get("target_id") or ""),
+                remaining_windows=remaining, die_sides=die_sides,
+            )
+        return None
 
     def _dool_owner(
         self, instance: Any, actor: dict[str, Any], *, failed: bool,
@@ -733,7 +919,60 @@ class CombatCheckWindowsMixin:
             )
         if surface == "concentration":
             return self._finish_concentration_window(decision, check, events)
+        if surface == "ability_check":
+            return self._finish_ability_check_window(
+                instance, combat, decision, check, spent, events, rng,
+            )
         raise CombatIntentError("this check window surface is not supported")  # pragma: no cover
+
+    def _finish_ability_check_window(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        check: dict[str, Any], spent: bool, events: list[dict[str, Any]], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Land an ability check after its window, then continue the chain.
+
+        The consequence of a hide check is the ``invisible`` condition; the
+        straight-through path applies it on success only, so every windowed
+        path has to land in exactly that place.
+        """
+
+        settlement = deepcopy(decision.get("settlement") or {})
+        code = str(decision["window_code"])
+        events.append(check)
+        if spent and code.startswith("peerless_skill") and not check.get("success"):
+            events.append({
+                "type": "dnd2024.class_resource.refunded",
+                "actor_id": str(decision["window_owner_id"]),
+                "resource_id": BARDIC_RESOURCE,
+                "reason": "peerless_failure",
+            })
+        exclude = tuple(str(item) for item in settlement.get("exclude_bards") or ())
+        if spent and code == "cutting_words_ability":
+            exclude = (*exclude, str(decision["window_owner_id"]))
+            settlement["exclude_bards"] = list(exclude)
+        elif not spent and code == "cutting_words_ability" and check.get("success"):
+            declined = tuple(
+                str(item) for item in settlement.get("check_declined_bards") or ()
+            )
+            settlement["check_declined_bards"] = list(
+                (*declined, str(decision["window_owner_id"]))
+            )
+        settlement["exclude_bards"] = list({
+            *exclude,
+            *(str(item) for item in settlement.get("check_declined_bards") or ()),
+        })
+        next_window = self._next_ability_window(instance, combat, decision, check, settlement)
+        if next_window is not None:
+            events.append({"type": "dnd2024.decision.pending", **next_window})
+            return events
+        if check.get("success") and str(settlement.get("kind") or "") == "hide":
+            events.append({
+                "type": "condition.applied", "target_id": str(decision["actor_id"]),
+                "condition": "invisible", "duration": "combat",
+                "source_actor_id": str(decision["actor_id"]),
+                "ends_on": ["attack_roll", "spell_cast"],
+            })
+        return events
 
     def _spend_check_window(
         self, decision: dict[str, Any], check: dict[str, Any], die: int,
@@ -811,6 +1050,26 @@ class CombatCheckWindowsMixin:
                 "total": total,
             })
             check["success"] = self._attack_check_success(check)
+            return check
+        if code in {"bardic_inspiration_check", "peerless_skill_check"}:
+            total = int(check["total"]) + die
+            check.update({
+                **window,
+                "window_bonus": die,
+                "window_bonus_rolls": [die],
+                "total": total,
+                "success": total >= int(check["target"]),
+            })
+            return check
+        if code == "cutting_words_ability":
+            total = int(check["total"]) - die
+            check.update({
+                **window,
+                "total": total,
+                "check_penalty": die,
+                "check_penalty_rolls": [die],
+                "success": total >= int(check["target"]),
+            })
             return check
         raise CombatIntentError("this check window code is not supported")  # pragma: no cover
 
@@ -1028,6 +1287,18 @@ class CombatCheckWindowsMixin:
             option = (
                 "spend"
                 if int(check["total"]) + int(decision["die_sides"]) >= int(check["target"])
+                else "decline"
+            )
+        elif code in {"bardic_inspiration_check", "peerless_skill_check"} and not check.get("success"):
+            option = (
+                "spend"
+                if int(check["total"]) + int(decision["die_sides"]) >= int(check["target"])
+                else "decline"
+            )
+        elif code == "cutting_words_ability" and check.get("success"):
+            option = (
+                "spend"
+                if int(check["total"]) - int(decision["die_sides"]) < int(check["target"])
                 else "decline"
             )
         elif code == "dark_ones_own_luck" and not check.get("success"):
