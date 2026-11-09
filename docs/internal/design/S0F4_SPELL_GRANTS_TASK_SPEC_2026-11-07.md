@@ -167,3 +167,120 @@ git diff --check
 - 测试 1–24 / 聚焦 / 回归 / 全量 / ruff / diff：
 - 存档、重建与重放证据：
 - 偏差、停止原因与未决事项：
+
+## 11. 执行报告（2026-11-09）
+
+- **实际基线**：`b86eec6a`（`feat/dnd2024-s0f3-failed-d20-windows` 链头）；祖先基线 `integration/dnd2024-srd@35653f81`
+- **分支 / 提交**：`feat/dnd2024-s0f4-spell-grants`（stack 在 F3 链头上，不覆盖旧 SP）
+  1. `4735c726` 七条授予声明（五组表 + Land 四地形 + 两个 Bard 选择特性）
+  2. `2c6c7b39` 授予行 / 常驻准备视图 / 跨列表来源 / Land 长休事务 / 升级接线 / 自动化状态
+  3. `4d979003` 31 条矩阵测试（24 项 + Land 两处四地形参数化）
+- **改动文件**：`templates/.../content/class_feature_catalogs/srd_class_features.json`（+148，七条声明与表数据）、`src/rulesets/dnd2024/features/resolver.py`（`spell_grant_rows()` 与 `spell_grant_choices()`，`actor_projection` 合入常驻授予）、`src/rulesets/dnd2024/spells/selection.py`（常驻视图、容量豁免、列表扩张、授予槽校验、`automation_status()`）、`src/rulesets/dnd2024/resting/engine.py`（Land 地形事务）、`src/rulesets/dnd2024/progression/advancement.py`（按升级后等级解析归属、写回授予选择）、`src/rulesets/dnd2024/combat/view.py`（授予行与 `automation_status`）、新建 `tests/rulesets/test_dnd2024_spell_grants.py`（31 条）
+
+审计结论先行：七项特性在基线里**只有 locale 标签和子职目录里的 id，没有任何声明**，因此既没有表数据也没有窗口；`spell_grants` 这条投影管线已经存在（Paladin 的 `granted_spell_id` 与 Magic Initiate 专长），本切片**复用**它而不是另建一条。战斗侧的两个边界也已经在了：`_available_spells` 跳过无效果法术，`_validate_spell` 在效果缺失时直接拒绝。所以本轮做的是"补声明 + 补来源与容量 + 补长休事务 + 把自动化状态挂到授予行上"，没有改任何法术效果。
+
+### 五组表与 Land 四地形
+
+七个声明全部按"当前职业等级累积"的语义写：每行是 `granted_level <= 当前等级` 才生效，低于最低等级、没有选出该子职、或子职属于别的职业时一行都不授予（矩阵 1）。表的编码是扁平字符串 `"<level>:spell:<id>"`（Land 是 `"<terrain>:<level>:spell:<id>"`），原因是特性 `parameters` 在 `features/models.py` 里只接受标量与其列表（`_require_scalar`），而该文件不在本切片白名单内。解析失败的行被丢弃而不是抛错——目录笔误不该让整场战斗崩掉，真实防线是矩阵 2–6 的逐项断言。
+
+Draconic 的 p70 表逐项核对过：`alter_self`、`chromatic_orb`、`command`、Dragon's Breath 四项在 3 级同行，其中 Dragon's Breath 在官方目录里的 canonical id 是 **`dragon_s_breath`**（2 环，Sorcerer/Wizard，locale 已是 "Dragon's Breath"），所以**没有新增法术条目**，也没有为了对齐表而伪造一条空 effect。其余四组同样全部命中既有 canonical id：Life 10 条、Oath 10 条（3/5/9/13/17，**没有 7 级节点**）、Draconic 10 条、Fiend 10 条，Land 四地形各 6 条、合计 24 条。
+
+### 授予的来源、聚合与撤销
+
+`Dnd2024ClassFeatureResolver.spell_grant_rows()` 是唯一产出授予的地方，每行带 `owner`、`feature_id`、`spell_ref`、`granted_level`、`terrain`、`choice_id`、`spell_ability`。`spell_ability` 取**授予者所属职业**的 `spellcasting_ability`，不是法术被印在哪个列表上的属性：Land Druid 的 Fire Bolt 是 Sorcerer/Wizard 法术，但它按 Wisdom 结算（矩阵 9 用 Wis 15 / Int 8 的夹具把两个加值区分开）。
+
+`Dnd2024SpellSelection.prepared_view()` 把普通准备与全部授予聚合成"每个法术一条有效项"，来源并列保留。普通准备与常驻授予同时提供一个法术时仍然只有一条，撤销常驻来源后普通来源还在（矩阵 10、13）。容量拆成四个字段：`prepared`（职业表的数量）、`prepared_used`（普通准备实际用了几格）、`granted`（常驻授予的去重条数）、`cantrip`/`cantrip_used`；常驻授予既不计入 `prepared_used`，也不扩大 `prepared`（矩阵 7、8）。
+
+### Land 的四地形与长休事务
+
+地形选择落在 `spellcasting.class.spell_grant_choices.circle_of_the_land_spells.terrain`。长休先算"计划"再落账：`_plan_land_terrain()` 只做校验（非法地形直接 `RestError`，此时 HP、槽位、资源一个都没动），`_apply_land_terrain()` 在资源恢复之后才写回并产事件。切换是**替换**而不是叠加：同一槽位改一个字符串，旧地形那套表下一读就不再生效，因此不会残留旧戏法（矩阵 11）。只撤本特性的地形槽，不碰普通 Druid 准备、也不碰别的子职授予（矩阵 13）。
+
+同一地形再选一次是合法且幂等的选择（`changed: false`）；不提交选择时**保持原地形**且不产事件；从没选过又没提交时，产一个显式的 `spell_grant_terrain_missing`，授予为空而不是替玩家挑一种（矩阵 12）。
+
+### Magical Discoveries 与 Magical Secrets
+
+Magical Discoveries 是"两个常驻选择"：`spell_choice_count: 2`、`spell_choice_replacement: 1`、`spell_choice_lists` 指向 Cleric/Druid/Wizard 三个列表。校验逐条拦住：数量、重复、非法 id、列表外（Hex 是 Warlock 的）、当前没有槽的环阶（Bard 6 的 `polymorph` 是 4 环）、以及"每次 Bard 升级最多换掉其中一项"（矩阵 15、16）。槽位不重提交时保留原样，不被当成"清空"。
+
+Magical Secrets 只做一件事：`prepared_list_expansion` 把 Bard/Cleric/Druid/Wizard 四个列表并入**普通准备**的候选项。它不增加 `prepared_spell_count`（Bard 9→10 只按表加 1），不把旧法术变成常驻，也不给戏法开新列表（戏法不是 prepared spells，第一版漏了这条，矩阵 17 把戏法选项钉住）。选中的四列表法术仍是 `class_list` 来源，按 Bard 的 Charisma 结算（矩阵 17、18）。
+
+### `not_automated` 与 fail closed
+
+`automation_status` 只由"这个法术在 `spell_effects` 里真的有可结算效果"派生，两处同源：战斗的 actor 投影（`spell_grants[].automation_status`）与角色表投影（`prepared_view()` 的每一条）。Life 3 级里 `bless`／`cure_wounds` 是 `automated`，`aid`／`lesser_restoration` 是 `not_automated`（矩阵 19）。施放 `aid` 在校验阶段就被拒绝，槽位、资源、版本号一个都没动，也不产生任何事件（矩阵 20）；而被授予的 `fire_bolt`（Land—arid 的戏法，早就有 `spell_attack` 效果）照常结算，本切片没有碰它的效果（矩阵 21）。
+
+### 存档、重建与重放
+
+授予是**读时重算**的：等级、子职、地形三者都在规范状态里，`spell_grant_rows()` 每次从它们重新展开表。因此 JSON 往返后行逐条相同、同一状态连续两次投影完全相同、把等级字段抬高一级后地形授予仍然成立、走真实升级路径（Druid 9→10）时 `spell_grant_choices` 被保留而不是重建（矩阵 22）。`configure()` 只合并本次提交的授予槽，不会把已经选好的地形写成"未选"（同一矩阵）。
+
+### 白名单文件对照
+
+| 白名单条目 | 实际改动 |
+|---|---|
+| 1. `class_feature_catalogs/srd_class_features.json` 及 locale | 只改内容文件；七条特性的 locale 标签基线已有（en／zh-CN 各一条），未新增标签，未改 `srd_spells.json` |
+| 2. `spells/selection.py`、`progression/advancement.py`、`features/resolver.py` | 三个文件均有改动，见上 |
+| 3. `resting/engine.py`（仅 Land 长休选择事务） | 只加 `_plan_land_terrain()`／`_apply_land_terrain()` 与 `complete_long_rest()` 的一个可选参数 |
+| 4. `combat/view.py`、`validation.py`（仅自动化投影与 fail closed） | 只改 `view.py` 的授予行投影；`validation.py` 未改（既有 `_validate_spell` 已经 fail closed） |
+| 5. 新建 `tests/rulesets/test_dnd2024_spell_grants.py` | 31 条 |
+
+未新增法术效果、未改 `combat_catalogs`、未改 `features/models.py`、未改 `runtime.py`、未改任何白名单外的职业文件。
+
+### 第一版回归：未回答的授予槽挡住了整条升级路径
+
+第一版把 `_validate_grants()` 写成"拥有槽位却没选 = 错误"，第一次全量于是报了 **17 failed / 1659 passed / 62 errors**。按文件归因：`test_dnd2024_failed_d20_windows.py` 43 ERROR、`test_dnd2024_bardic_inspiration.py` 19 ERROR + 4 FAILED、`test_dnd2024_d20_skills.py` 1 FAILED、`test_dnd2024_cutting_words.py` 1 FAILED（剩下 11 FAILED 是 `test_dnd2024_character_builder.py` 的 F2 已知基线）。报错信息统一是 `spell grant magical_discoveries requires 2 spells`——所有经过 Bard 6 级的旧夹具都被一个新特性挡住了。
+
+先按 F3 的教训怀疑过一次环境假象，但**单跑同一批 id 完整复现了 62 个 ERROR**，所以是真回归，不是并发假象（这次也确实没有并发跑两份全量）。修法是把两条边界分开：
+
+- **"还没选"不是"提交了非法内容"**。槽位继续以 `selected_refs: []` 出现在 `grant_slots()`，升级预览里 `class_spell_choices.required` 仍为 `true`、`grant_slots` 仍列出 `count`，客户端照旧被告知"这里有两项要选"；但只提交 `cantrip_refs`/`prepared_spell_refs` 的调用方不会被判错，也不会被凭空授予任何法术。
+- **"提交了却不完整"仍然硬失败**。`{"magical_discoveries": ["spell:shield"]}` 依旧得到 `must contain exactly 2 spells`，数量、重复、列表外、无槽环阶、替换上限的校验一条没松。
+
+修复后单跑这四份文件是 68 + 90 passed。新增 `test_matrix_24_an_unanswered_grant_slot_never_blocks_a_level_up` 把这两条边界都钉住（不回答可升级、槽位照实开放、`spell_grant_choices` 不被写脏、授予零行）；原来的 `test_matrix_24_a_bard_without_magical_secrets_keeps_the_bard_list` 改名为 `test_matrix_17b_*`——它验的是第 17 条后半段（9 级 Bard 仍只限 Bard 列表），挂了第 24 条的名字属于误标。
+
+### 矩阵 1–24 证据表
+
+| # | 测试函数 | 钉住的事实 |
+|---|---|---|
+| 1 | `test_matrix_1_tables_grant_only_to_their_own_subclass_at_level` | 五组只在自身上级等级授予；低一级、错子职、跨 owner 零行 |
+| 2 | `test_matrix_2_life_domain_rows_and_level_nine_accumulation` | Life 3/5/7/9 逐项，9 级累积 10 条 |
+| 3 | `test_matrix_3_oath_rows_have_no_seventh_level_node` | Oath 3/5/9/13/17，没有 7 级节点，13/17 不被漏掉 |
+| 4 | `test_matrix_4_draconic_uses_the_page_seventy_table` | Draconic p70 表，3 级同行四项（含 `dragon_s_breath`） |
+| 5 | `test_matrix_5_fiend_table_reuses_the_canonical_spells` | Fiend 3/5/7/9，`command` 复用既有 canonical 条目 |
+| 6 | `test_matrix_6_land_tables_match_each_terrain`（×4 地形） | 四地形 3/5/7/9 逐项，9 级累积本地形全部 |
+| 7 | `test_matrix_7_land_cantrips_are_granted_and_cost_no_capacity`（×4 地形） | 四地形 3 级戏法真实授予且不占 cantrip/prepared 容量 |
+| 8 | `test_matrix_8_grants_never_consume_prepared_capacity` | `prepared`/`prepared_used` 与无授予的同级角色相同，`granted` 单列 |
+| 9 | `test_matrix_9_grants_cast_with_the_granting_class_ability` | Wis 15 / Int 8 夹具下按授予者职业（Wis）结算 |
+| 10 | `test_matrix_10_one_effective_entry_per_spell_and_sources_stay_separate` | 双来源只出一条有效项，`sources` 并列，撤销隔离 |
+| 11 | `test_matrix_11_each_terrain_switch_revokes_the_previous_list` | 逐地形切换撤销旧授予，不累积四套、不留旧戏法 |
+| 12 | `test_matrix_12_keeping_the_terrain_is_idempotent_and_missing_never_switches` | 同地形幂等、不提交不切换、从未选过时授予为空 |
+| 13 | `test_matrix_13_a_second_source_survives_the_terrain_switch` | 旧地方法术另有来源时切地形只移除 Land 那一路 |
+| 14 | `test_matrix_14_an_illegal_terrain_leaves_the_whole_rest_untouched` | 非法地形整休报错且 HP/槽位/资源全未动，无半套授予 |
+| 15 | `test_matrix_15_magical_discoveries_is_exactly_two_always_prepared_picks` | Lore 6 恰两项、三列表任意组合、`granted_level` 6、不占容量 |
+| 16 | `test_matrix_16_magical_discoveries_level_and_replacement_limits` | 拒 4 环（Bard 6 无槽）、拒列表外、每级最多替换 1 项、不重提交保留 |
+| 17 | `test_matrix_17_magical_secrets_widens_lists_without_widening_capacity` + `test_matrix_17b_*` | 10 级四列表扩张、`prepared` 只按表 +1、戏法不开列表、9 级仍限 Bard |
+| 18 | `test_matrix_18_secrets_are_ordinary_bard_spells_not_always_prepared` | 选中项是 `class_list` 来源而非 `class_feature`，不套常驻语义 |
+| 19 | `test_matrix_19_grants_report_automation_from_the_real_effects` | 战斗投影与角色表投影同源，`aid`/`lesser_restoration` 为 `not_automated` |
+| 20 | `test_matrix_20_an_unautomated_grant_cannot_be_cast_and_costs_nothing` | 施放被拒，槽位/资源/版本不变，无事件 |
+| 21 | `test_matrix_21_a_granted_automated_spell_still_resolves` | 已有 `spell_attack` 效果的授予法术照常结算（`dnd2024.spell.cast`） |
+| 22 | `test_matrix_22_rebuild_and_round_trip_keep_sources_and_terrain` | JSON 往返、连续投影、抬高等级、真实升级路径均保留来源与地形 |
+| 23 | `test_matrix_23_illegal_grant_choices_are_rejected_without_state_change` | 伪造 `granted_level`、未知槽、列表外、超额替换均拒绝且状态不变 |
+| 24 | `test_matrix_24_an_unanswered_grant_slot_never_blocks_a_level_up` + 套件级全量 | 未回答的槽不挡升级；既有 spell/advancement/resting/combat 测试无回归 |
+
+### 验收数字（§9 五条命令）
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_spell_grants.py -q` | **31 passed**（51 s） |
+| `pytest … spells … resting … advancement_access … class_features … dark_ones_blessing … smite -q` | **154 passed**（120 s） |
+| `pytest tests/rulesets -q` | **11 failed / 1728 passed**（33:22） |
+| `ruff check src/rulesets/dnd2024/{spells,progression,features,resting,combat} tests/rulesets/test_dnd2024_spell_grants.py` | All checks passed |
+| `git diff --check` | 干净（只有一处 LF→CRLF 提示） |
+
+全量的 11 条失败**逐条等于 F3 链头上的基线**，全部在 `test_dnd2024_character_builder.py`（建卡派生与 HTTP 契约，F2 起就存在、与本切片无关）；通过数 1697 → 1728 正好是本切片新增的 31 条，**净引入 0 失败、0 错误**。
+
+### 偏差、停止原因与未决事项
+
+1. **两个玩家选择没走 `features.feature_choices`**。`FEATURE_CHOICE_KINDS` 是加载期闭集（`advancement_feat` / `skill_proficiency`），声明一个 `spell_grant` 槽必须改 `features/models.py`，而它不在白名单。因此 Land 地形与 Magical Discoveries 的选中项存在 `spellcasting.class.spell_grant_choices`，由 `spells/selection.py` 校验 owner、数量、来源列表、环阶与替换上限。代价：S0-B 那套 owner-scoped 记录校验**不覆盖**这两个槽；收益是不必为一个容器破坏加载期的闭集。若后续要统一，应加一个新的 choice kind，并把两个校验函数合并——那是一次独立的、有明确迁移面的切片。
+2. **缺省地形不报错，只显式报告**。契约 5.2.1 要求"每次长休必须记录一个选择"，但 `runtime.complete_rest()` 在基线上不转发任何长休选项（短休只有 `attunement` 一条通道），而 `runtime.py` 不在白名单。硬性报错会让**每一个** Land Druid 的长休都失败，因此实现为：不静默替换、授予为空、产 `spell_grant_terrain_missing` 事件。要让客户端真正提交地形，需要后续切片在 `runtime.complete_rest()` 上加一条 `land_terrain` 通道（一行转发 + 一层选项校验），本切片已把 `complete_long_rest(payload, land_terrain=...)` 的入口留好，也接受 `payload["land_terrain"]`。
+3. **表数据编码为扁平字符串**。见上：`parameters` 只收标量列表。可读性不如嵌套 JSON，但换来"零个白名单外文件"。
+4. **`selection.py` 读 `combat_catalog.spell_effects`** 来判断 `automation_status`。这是与战斗执行同一张表（不是第二份真相），代价是法术选择层依赖战斗目录的存在；bundle 没有该目录时一律判 `not_automated`（保守方向）。
+5. **Magical Secrets 的"仅新准备"按能力而不是按差分实现**。SRD 第二句明确允许"替换时也可以来自这四个列表"，所以"重选"与"替换"在数据上是同一件事：拥有该特性后，任何普通准备项都可以来自四列表。没有额外追踪"哪一项是升级时新加的"，那需要跨等级的差量状态，而契约 17 只要求"不增加容量、只在容量增加的新准备及普通替换中开放"。
+6. **死亡豁免与 F3 的交互未变**。本切片不碰 d20 窗口，`test_dnd2024_failed_d20_windows.py` 全绿；F3 记录的"死亡豁免不开放重掷面"缺口仍然存在，与本切片无关。
+7. **"待选"是合法状态，不是错误**。Magical Discoveries 的两项在 6 级必须选，但"还没选"与"提交了错误内容"被分开处理：前者只让槽位保持开放（`grant_slots` 里 `selected_refs: []`，`class_spell_choices.required: true`），后者才硬失败。代价是一个 6 级 Lore Bard 可以在没有这两项的情况下存在，直到客户端补答；收益是任何只提交普通准备的调用方、以及本切片之前的所有升级路径都不被新特性挡住——这正是矩阵 24 的要求，也是第一版 62 个 ERROR 换来的结论。若后续要收紧成"升级时必须回答"，需要同时给全部升级夹具与客户端补上这一项，那是一次有明确迁移面的独立改动。
