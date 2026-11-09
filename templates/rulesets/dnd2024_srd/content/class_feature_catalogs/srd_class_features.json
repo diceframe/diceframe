@@ -960,6 +960,94 @@
           "parameters": {
             "die_sides": 10
           }
+        },
+        {
+          "id": "contact_patron",
+          "owner": "class:warlock",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p72:contact-patron",
+          "summary": "You always have Contact Other Plane prepared. Once per Long Rest you can cast it without expending a spell slot, and you automatically succeed on that spell's saving throw.",
+          "parameters": {
+            "always_prepared": [
+              "9:spell:contact_other_plane"
+            ],
+            "free_cast_slots": [
+              "contact_patron:5:long_rest:1:spell:contact_other_plane"
+            ],
+            "free_cast_save_auto": true
+          }
+        },
+        {
+          "id": "mystic_arcanum_6",
+          "owner": "class:warlock",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 6 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_6:6:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_7",
+          "owner": "class:warlock",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 7 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_7:7:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_8",
+          "owner": "class:warlock",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 8 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_8:8:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_9",
+          "owner": "class:warlock",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 9 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_9:9:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
         }
       ]
     },
@@ -1075,6 +1163,38 @@
             "usage_scope": "long_rest",
             "self_damage_die": 12,
             "initial_self_damage_dice": 2
+          }
+        },
+        {
+          "id": "spell_mastery",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p79:spell-mastery",
+          "summary": "Choose a level 1 and a level 2 spell in your spellbook that have a casting time of an action. You always have them prepared and can cast them at their lowest level without expending a spell slot. Each Long Rest you can study your spellbook and replace one of them with another eligible spell of the same level.",
+          "parameters": {
+            "free_cast_slots": [
+              "spell_mastery_1:1:unlimited:0:-",
+              "spell_mastery_2:2:unlimited:0:-"
+            ],
+            "free_cast_source": "spellbook",
+            "free_cast_casting_time": "Action",
+            "free_cast_prepares": true,
+            "free_cast_replacement": 0,
+            "free_cast_rest_replace": 1
+          }
+        },
+        {
+          "id": "signature_spells",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p79:signature-spells",
+          "summary": "Choose two level 3 spells in your spellbook as your signature spells. You always have them prepared and can cast each once at level 3 without expending a spell slot, regaining both uses when you finish a Short or Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "signature_1:3:short_rest:1:-",
+              "signature_2:3:short_rest:1:-"
+            ],
+            "free_cast_source": "spellbook",
+            "free_cast_prepares": true,
+            "free_cast_replacement": 0
           }
         }
       ]
