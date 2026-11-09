@@ -227,10 +227,17 @@ class Dnd2024RestEngine:
         }
 
     def complete_long_rest(
-        self, payload: dict[str, Any], prepared_spells: dict[str, list[str]] | None = None,
+        self, payload: dict[str, Any], land_terrain: str | None = None,
+        prepared_spells: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
+        # Land 地形选择先算成一份计划再落账：校验通过之前不动任何状态，
+        # 因此一次非法地形不会留下"半套"休息结果。
+        terrain_plan = self._plan_land_terrain(
+            character, land_terrain if land_terrain is not None
+            else payload.get("land_terrain"),
+        )
         events: list[dict[str, Any]] = []
         resources = character["resources"]
         previous_hp = int(resources.get("hp", 0) or 0)
@@ -255,6 +262,7 @@ class Dnd2024RestEngine:
         resources["ability_score_reductions"] = {}
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
+        events.extend(self._apply_land_terrain(character, terrain_plan))
         if prepared_spells:
             events.extend(self._apply_prepared_spells(character, prepared_spells))
         # 长休作用域的特性使用计数只在这里清零：短休、战斗结束、回合结束、
@@ -376,6 +384,90 @@ class Dnd2024RestEngine:
         if "cantrip_refs" in change:
             block["cantrip_refs"] = list(change["cantrip_refs"])
         return [{"type": "prepared_spells_changed", "before": before, "after": after}]
+    # ------------------------------------------------------------------
+    # Circle of the Land terrain
+    # ------------------------------------------------------------------
+
+    def _plan_land_terrain(
+        self, character: dict[str, Any], requested: Any,
+    ) -> dict[str, Any] | None:
+        """Validate the land terrain this Long Rest commits, without mutating.
+
+        The choice belongs to the rest, not to creation: a Land Druid picks a
+        terrain every Long Rest, and picking the same one again is a legal,
+        idempotent choice.  This returns the plan so an invalid terrain fails
+        before any Hit Point, slot, or resource has been touched.
+        """
+
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        definition = resolver.spell_grant_terrain_feature(character)
+        text = str(requested or "")
+        if definition is None:
+            if text:
+                raise RestError("this character has no land terrain to choose")
+            return None
+        options = [
+            str(item) for item in definition.parameters.get("terrain_options") or ()
+        ]
+        stored = str(
+            (resolver.spell_grant_choices(character).get(definition.id) or {}).get(
+                "terrain"
+            ) or ""
+        )
+        if text and text not in options:
+            raise RestError(f"land terrain must be one of {', '.join(options)}")
+        return {
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "options": options,
+            "before": stored,
+            "after": text,
+        }
+
+    def _apply_land_terrain(
+        self, character: dict[str, Any], plan: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Commit the planned terrain.
+
+        Switching replaces the old terrain on the same feature slot, so the
+        previous land's spells disappear with the source that granted them
+        while every other source -- ordinary Druid preparation, another
+        subclass's grant -- is left alone.  Omitting the choice never invents
+        one: a character that already chose keeps the terrain (and is told
+        nothing changed), and one that never chose gets an explicit missing
+        event instead of a silent default.
+        """
+
+        if plan is None:
+            return []
+        before, after = plan["before"], plan["after"]
+        if not after:
+            if before:
+                return []
+            return [{
+                "type": "spell_grant_terrain_missing",
+                "owner": plan["owner"],
+                "feature_id": plan["feature_id"],
+                "options": list(plan["options"]),
+            }]
+        spellcasting = character.setdefault("spellcasting", {})
+        block = spellcasting.get("class")
+        if not isinstance(block, dict):
+            block = {}
+            spellcasting["class"] = block
+        choices = block.setdefault("spell_grant_choices", {})
+        entry = choices.get(plan["feature_id"])
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        entry["terrain"] = after
+        choices[plan["feature_id"]] = entry
+        return [{
+            "type": "spell_grant_terrain",
+            "owner": plan["owner"],
+            "feature_id": plan["feature_id"],
+            "before": before,
+            "after": after,
+            "changed": before != after,
+        }]
 
     def _recharge_items(
         self, character: dict[str, Any], payload: dict[str, Any], rest: str,

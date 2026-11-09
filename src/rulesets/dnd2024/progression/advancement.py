@@ -564,7 +564,26 @@ class Dnd2024AdvancementEngine:
             current_cantrips = list(before_spell.get("cantrip_refs") or [])
             current_prepared = list(before_spell.get("prepared_spell_refs") or [])
             current_spellbook = list(before_spell.get("spellbook_refs") or [])
-            target_requirements = spell_selection.requirements(class_ref, target_level)
+            # 施法选择按"升级后"的角色状态解析特性归属：Bard 9→10 的那一级
+            # Magical Secrets 才算拥有，用升级前的 9 级读会永远看不到四列表。
+            spell_state = deepcopy(character)
+            spell_state["build"] = {
+                **(character.get("build") or {}),
+                "class_levels": [{"class_ref": class_ref, "level": target_level}],
+            }
+            spell_feature_state = spell_state.get("features")
+            spell_feature_state = (
+                spell_feature_state if isinstance(spell_feature_state, dict) else {}
+            )
+            spell_feature_state["subclass_ref"] = (
+                selected_subclass_ref
+                if selected_subclass_ref == expected_subclass_ref
+                else str(spell_feature_state.get("subclass_ref") or "")
+            )
+            spell_state["features"] = spell_feature_state
+            target_requirements = spell_selection.requirements(
+                class_ref, target_level, spell_state,
+            )
             previous_lists = {
                 "cantrip_refs": current_cantrips,
                 "prepared_spell_refs": current_prepared,
@@ -580,14 +599,21 @@ class Dnd2024AdvancementEngine:
                 if policy is not None and policy.source == "spellbook"
                 else 0
             )
+            open_slots = [
+                slot for slot in spell_selection.grant_slots(target_level, spell_state)
+                if not slot["selected_refs"]
+            ]
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
                 or spellbook_growth > 0
+                or bool(open_slots)
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
-                spell_options = spell_selection.options(class_ref, target_level)
+                spell_options = spell_selection.options(
+                    class_ref, target_level, spell_state,
+                )
                 requirements.append({
                     "id": "class_spell_choices",
                     "kind": "spell_selection",
@@ -607,10 +633,12 @@ class Dnd2024AdvancementEngine:
                     "spellbook_additions": spellbook_growth,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
+                    "grant_slots": spell_options["grant_slots"],
                 })
                 spell_choices, spell_errors = spell_selection.validate(
                     class_ref, target_level, raw_spell_choices,
                     previous=previous_lists,
+                    character=spell_state,
                 )
                 errors.extend(spell_errors)
             else:
@@ -1563,7 +1591,7 @@ class Dnd2024AdvancementEngine:
             for level, maximum in slot_max.items()
         }
         tracks = snapshot["tracks"]
-        spellcasting["class"] = {
+        next_magic = {
             **deepcopy(previous),
             "class_ref": preview["class_ref"],
             "ability": class_entity.get("spellcasting_ability"),
@@ -1589,6 +1617,16 @@ class Dnd2024AdvancementEngine:
             ),
             "concentration": previous.get("concentration"),
         }
+        grant_choices = preview["diff"].get("class_spell_choices", {}).get(
+            "spell_grant_choices"
+        )
+        if isinstance(grant_choices, dict) and grant_choices:
+            # 授予槽位与地形选择都是玩家选择：升级只合并本次提交的槽位，
+            # 不能把 Land 已经选好的地形写丢。
+            merged = deepcopy(previous.get("spell_grant_choices") or {})
+            merged.update(deepcopy(grant_choices))
+            next_magic["spell_grant_choices"] = merged
+        spellcasting["class"] = next_magic
 
     def _update_derived(self, character: dict[str, Any]) -> None:
         level = int(character["build"]["level"])

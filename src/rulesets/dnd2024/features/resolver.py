@@ -48,6 +48,42 @@ def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
 
 
+def _grant_row(value: Any) -> tuple[int, str] | None:
+    """Parse one ``"<level>:spell:<id>"`` always-prepared table row.
+
+    The table lives in the declaration rather than in code, and the encoding is
+    flat because a feature parameter may only hold scalars.  A row that does not
+    parse is a catalog defect, not a grant: it is dropped so the loader's
+    scalar check stays the only thing that can reject a declaration.
+    """
+
+    parts = str(value or "").split(":")
+    if len(parts) != 3 or parts[1] != "spell" or not parts[2]:
+        return None
+    try:
+        level = int(parts[0])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return level, f"spell:{parts[2]}"
+
+
+def _terrain_grant_row(value: Any) -> tuple[str, int, str] | None:
+    """Parse one ``"<terrain>:<level>:spell:<id>"`` land table row."""
+
+    parts = str(value or "").split(":")
+    if len(parts) != 4 or not parts[0] or parts[2] != "spell" or not parts[3]:
+        return None
+    try:
+        level = int(parts[1])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return parts[0], level, f"spell:{parts[3]}"
+
+
 # The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
 # only supported event; the other three describe the temp-HP formula.  Keeping
 # the names in one place means the loader and the combat helper can never
@@ -372,6 +408,138 @@ class Dnd2024ClassFeatureResolver:
             str(definition.parameters.get("saving_throw_proficiency") or "") == "all"
             for definition in self.features_for(character)
         )
+
+    # ------------------------------------------------------------------
+    # always-prepared spell grants
+    # ------------------------------------------------------------------
+
+    def spell_grant_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted per-feature spell-grant choices.
+
+        Two declarations need one: Circle of the Land picks a terrain each Long
+        Rest, and Magical Discoveries learns two spells at Bard 6.  Both are
+        player choices, so they live on the sheet; the *grants* are re-derived
+        from them on every read and never stored beside them, which is what
+        keeps a downgrade, a rebuild or a replay from carrying a stale terrain.
+        A malformed record is ignored here -- the entry point that writes one
+        validates it, and the read path must not invent a grant either.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("spell_grant_choices")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def spell_grant_terrain_feature(
+        self, character: Mapping[str, Any] | None,
+    ) -> ClassFeatureDefinition | None:
+        """The owned declaration that makes the character choose a land terrain."""
+
+        for definition in self.features_for(character):
+            if definition.parameters.get("terrain_options"):
+                return definition
+        return None
+
+    def spell_grant_rows(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Always-prepared spells the character owns, one row per source.
+
+        Provenance is the point of this projection: a row names the ``owner``
+        and ``feature_id`` that grants the spell, the level at which the grant
+        started, and the terrain or choice slot it came from.  Two sources that
+        hand out the same spell stay two rows, so revoking one can never delete
+        a spell the other still provides.
+        """
+
+        return self._spell_grant_rows(self.features_for(character), character)
+
+    def _spell_grant_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Grant rows for an already-resolved ownership list.
+
+        ``actor_projection`` passes the list it just resolved so the combat
+        boundary resolves ownership once; every other caller uses
+        :meth:`spell_grant_rows`, which is why both read the same tables.
+        """
+
+        state = self.class_state(character)
+        if state is None:
+            return []
+        class_id, level = state
+        class_entity = self.bundle.get("class", class_id) or {}
+        ability = str(class_entity.get("spellcasting_ability") or "")
+        choices = self.spell_grant_choices(character)
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            for raw in parameters.get("always_prepared") or ():
+                parsed = _grant_row(raw)
+                if parsed is None or parsed[0] > level:
+                    continue
+                rows.append(
+                    self._grant_row(definition, parsed[1], parsed[0], ability)
+                )
+            terrain = str((choices.get(definition.id) or {}).get("terrain") or "")
+            for raw in parameters.get("always_prepared_terrain") or ():
+                terrain_row = _terrain_grant_row(raw)
+                if (
+                    terrain_row is None
+                    or terrain_row[1] > level
+                    or terrain_row[0] != terrain
+                ):
+                    continue
+                rows.append(self._grant_row(
+                    definition, terrain_row[2], terrain_row[1], ability,
+                    terrain=terrain,
+                ))
+            slot = choices.get(definition.id) or {}
+            if int(parameters.get("spell_choice_count") or 0):
+                granted_level = int(slot.get("granted_level") or definition.minimum_level)
+                for ref in slot.get("spells") or ():
+                    if not isinstance(ref, str) or not ref:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, ref, granted_level, ability,
+                        choice_id=definition.id,
+                    ))
+        return rows
+
+    @staticmethod
+    def _grant_row(
+        definition: ClassFeatureDefinition,
+        spell_ref: str,
+        granted_level: int,
+        ability: str,
+        *,
+        terrain: str = "",
+        choice_id: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "spell_ref": str(spell_ref),
+            "granted_level": int(granted_level),
+            "terrain": str(terrain),
+            "choice_id": str(choice_id),
+            "source": "class_feature",
+            "spell_ability": ability,
+        }
 
     def min_feature_value(
         self,
@@ -874,8 +1042,18 @@ class Dnd2024ClassFeatureResolver:
         )
         return {
             "spell_grants": [
-                {"spell_ref": f"spell:{definition.parameters['granted_spell_id']}", "resource_id": definition.resource_id}
-                for definition in active if definition.parameters.get("granted_spell_id")
+                # 常驻授予（子职法术表、Land 地形、Magical Discoveries）与
+                # "免费施放" 授予是两种东西：前者只说明"已准备"，不带资源，
+                # 后者挂一个职业资源池。两者同列但都不许对方冒充自己。
+                *self._spell_grant_rows(owned, character),
+                *[
+                    {
+                        "spell_ref": f"spell:{definition.parameters['granted_spell_id']}",
+                        "resource_id": definition.resource_id,
+                    }
+                    for definition in active
+                    if definition.parameters.get("granted_spell_id")
+                ],
             ],
             "class_resources": [
                 definition.to_dict()

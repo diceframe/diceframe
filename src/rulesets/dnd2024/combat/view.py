@@ -141,8 +141,21 @@ class CombatViewMixin:
         feature_projection = self.features.actor_projection(character)
         # 起源专长（魔法学徒）授予的戏法/1 环法术与职业特性授予并列：
         # 各自带施法属性、攻击加值与 DC，结算时按法术来源取值。
+        #
+        # 常驻授予还要带 `automation_status`：它只由"这个法术真的有可结算
+        # 效果"派生，不手写。目录里存在一条法术不等于能施放，客户端也必须
+        # 能从同一个字段看出来。
         spell_grants = [
-            *feature_projection["spell_grants"], *feat_spell_grants(character),
+            {
+                **row,
+                "automation_status": (
+                    "automated"
+                    if str(row.get("spell_ref", "")).removeprefix("spell:")
+                    in self.catalog.spell_effects
+                    else "not_automated"
+                ),
+            }
+            for row in (*feature_projection["spell_grants"], *feat_spell_grants(character))
         ]
         return {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
