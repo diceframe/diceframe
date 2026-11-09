@@ -430,7 +430,11 @@ def test_removing_a_seat_leaves_no_orphan_control() -> None:
 
 
 def test_ghost_player_cleanup_removes_its_control_too() -> None:
-    """加载时清理幽灵玩家，不应留下指向已删除席位的控制记录。"""
+    """加载时清理幽灵玩家，不应留下指向已删除席位的控制记录。
+
+    空壳席位 = 日志窗口没提到、没有席位凭据、没有行动记录、没有角色；
+    有角色的席位不再算幽灵（见 test_ghost_player_cleanup.py）。
+    """
 
     payload = {
         "instance_schema_version": 14,
