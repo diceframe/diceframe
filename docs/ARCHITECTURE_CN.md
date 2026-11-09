@@ -667,6 +667,8 @@ frontend-v2/src/
 - 不把按钮是否显示当成权限检查；
 - UI capability gating 只是体验层，服务端仍需重新校验。
 
+游玩状态同步由 `composables/useGame.ts` 管理。由于 [Cloudflare Quick Tunnels 不支持 SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)，`.trycloudflare.com` 玩家页每 2 秒通过原有 API 获取当前局快照，已有刷新未完成时跳过。本机和自定义域名沿用 SSE；P2P 优先使用原有订阅。轮询复用既有权限过滤、入口关闭处理和连接清理。
+
 首页“加入好友”由 `features/peer/FriendJoinPanel.vue` 提供，`joinInvitation.ts` 在本地识别普通邀请链接与 `DFP2-` 直连码，不探测远端或消费凭据。普通链接保留原站点、部署路径、后端参数与席位凭据，经玩家明确点击后打开；直连码交给现有 P2P 流程，连接前仍需隐私同意。Hub 的入口开关只控制实验性直连，不隐藏普通链接加入。游玩邀请弹窗提供独立的官方联机文档链接，不携带游戏或邀请凭据。
 
 全局样式通过 `frontend-v2/src/styles/index.css` 单一入口加载：共享基础与控件归
