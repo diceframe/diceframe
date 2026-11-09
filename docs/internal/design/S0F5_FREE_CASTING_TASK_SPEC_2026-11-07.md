@@ -143,15 +143,112 @@ python -m ruff check src/rulesets/dnd2024/spells src/rulesets/dnd2024/combat src
 git diff --check
 ```
 
-## 9. 执行报告模板（执行侧填写）
+## 9. 执行报告
 
-- 实际基线 / 分支 / 提交：
-- Contact Patron 自动成功与 `not_automated` 边界：
-- 四个 Mystic 独立槽及同环替换：
-- Spell Mastery action/spellbook/长休限制：
-- Signature 独立短长休次数：
-- 免槽不免其他规则及原子扣账：
-- 白名单文件对照：
-- 测试 1–25 / 聚焦 / 回归 / 全量 / ruff / diff：
-- 存档、重建与重放证据：
-- 偏差、停止原因与未决事项：
+### 9.1 基线、分支与提交
+
+- 实际基线：`feat/dnd2024-s0f4-spell-grants@745baaee`（F4 链头，含 2026-11-09 的两项后续裁定）。任务书写的祖先基线 `integration/dnd2024-srd@35653f81` 是 F4 之前的共同祖先。
+- 分支：`feat/dnd2024-s0f5-free-casting`，stack 在 F4 之上，不改动 F4 的提交。
+- 提交：
+  1. `5aa3bf88` 七条免费施法声明
+  2. `330457e3` 免费槽的校验、投影、扣账、recharge 与长休研究
+  3. `910733c0` 25 条矩阵测试
+
+### 9.2 七条声明与扁平编码
+
+| 特性 | owner | 起始等级 | 槽 | 环阶 | recharge | 次数 | 来源 |
+|---|---|---|---|---|---|---|---|
+| `contact_patron` | `class:warlock` | 9 | `contact_patron` | 5 | `long_rest` | 1 | 固定法术 |
+| `mystic_arcanum_6` | `class:warlock` | 11 | `mystic_arcanum_6` | 6 | `long_rest` | 1 | 邪术师列表 |
+| `mystic_arcanum_7` | `class:warlock` | 13 | `mystic_arcanum_7` | 7 | `long_rest` | 1 | 邪术师列表 |
+| `mystic_arcanum_8` | `class:warlock` | 15 | `mystic_arcanum_8` | 8 | `long_rest` | 1 | 邪术师列表 |
+| `mystic_arcanum_9` | `class:warlock` | 17 | `mystic_arcanum_9` | 9 | `long_rest` | 1 | 邪术师列表 |
+| `spell_mastery` | `class:wizard` | 18 | `spell_mastery_1` / `_2` | 1 / 2 | `unlimited` | ∞ | 自己的法术书 |
+| `signature_spells` | `class:wizard` | 20 | `signature_1` / `_2` | 3 / 3 | `short_rest` | 1 | 自己的法术书 |
+
+职业进度表里早就写着 `contact_patron`（9 级）与 `mystic_arcanum_6/7/8/9`（11/13/15/17 级）四个独立 id，`spell_mastery`（18）与 `signature_spells`（20）。因此秘奥按**四个特性**声明，每特性一格，"四格独立"是结构而不是约定。
+
+一个槽是一个字符串：`"<slot_id>:<环阶>:<recharge>:<次数>:<法术>"`，`-` 表示由玩家选，`0` 次表示无限。扁平编码不是审美选择：`features/models.py::_require_scalar` 只接受标量与标量列表，嵌套对象会被加载器拒绝，而该文件不在白名单。
+
+### 9.3 Contact Patron 与 `not_automated` 边界
+
+- 9 级常驻 `spell:contact_other_plane`，走 S0-F4 的 `always_prepared` 通道，来源聚合成一条 `class_feature` 行，**不占普通准备容量**（矩阵 3）。
+- 免费槽 `contact_patron` 是固定法术槽：`spell_ref` 与环阶由声明给定，客户端只能确认不能改写（提交别的法术得到 `is not a player choice`）。
+- `contact_other_plane` 在 `spell_catalogs` 里存在，但 `combat_catalogs/srd_combat_core.json` 的 `spell_effects` 里**没有条目**，因此 `automation_status == not_automated`。施法请求在 `_validate_spell` 的第一道门就被拒（`spell is not deterministically automated yet`），**不产生事件、不扣次数、不升级版本号**（矩阵 5）。
+- `free_cast_save_auto: true` 声明在特性上并投影到槽位记录（`save_auto_succeed`），但**没有任何消费方**：这条法术没有执行器，本切片不伪造它的豁免，也不生成"已联系宗主"的空结果。矩阵 4 因此验的是"自动成功只属于这条授予、不挂在法术或普通槽上"，而不是自动成功本身。这是任务书 §4.2.2 明写的边界。
+
+### 9.4 四个 Mystic 的独立性与同环替换
+
+- 每格 `(owner, feature_id, slot_id)` 三元组独立，记录里带 `spell_ref / spell_level / recharge / uses_remaining`；**记录与声明不一致**（被改过环阶或 recharge）时该槽 `valid: false`，既不参与施法也不被当成"已选"（矩阵 2）。
+- 免费槽只按**法术自身环阶**匹配：`free_cast_resource(actor, spell_ref, spell_level)` 要求 `slot.spell_level == spell.level`，所以不存在"免费上调"；邪术师最高只有 5 环契约槽，6 环法术只有免费这一条路（矩阵 8）。
+- 每次获得邪术师等级最多替换**一个**已有秘奥：`free_cast_replacement: 1` 且四格共享 `free_cast_replacement_group: "mystic_arcanum"`，跨组按组计数，一次提交换两格直接拒绝（矩阵 9）。
+- 替换不刷新次数：`_free_cast_record` 保留原 `uses_remaining`；新解锁的另一格按自身规则初始化（矩阵 10）。
+- 长休恢复四格、短休一格都不恢复（矩阵 7）。
+
+因为 6–9 环**没有任何法术有自动化效果**（目录只到 4 环），秘奥的扣减无法经由真实施法到达。矩阵 7 因此提交与真实施法完全相同的那一条 reducer 事件 `dnd2024.free_cast.spent` 来扣账，再验"同一格花第二次被 reducer 拒绝""另外三格不受影响""长休补满、短休不动"。扣账走的是生产代码，不是测试里手改计数。
+
+### 9.5 Spell Mastery 的 action / spellbook / 长休限制
+
+- 两项分别锁 1 环与 2 环（`spell_mastery_1` / `_2`），`free_cast_casting_time: "Action"`。判定用 `_casting_segment()` 归一化施法时间：`"Action or Ritual"` 算 Action，`"1 minute or Ritual"`、`"Bonus Action, ..."`、`"Reaction, ..."` 都不算（矩阵 11、12）。
+- 来源是**自己的法术书**：`_free_cast_ref_error` 对 `source == spellbook` 的槽比对 `spellbook_refs`，不在书里的法术被拒（矩阵 12）。目录里没有"仅 Ritual"的施法时间取值，所以"仪式"这一条用 `1 minute or Ritual` 的 `alarm` 覆盖。
+- 无限次：记录里**没有** `uses_remaining` 字段（`uses: 0`），`_spell_cost_events` 对无限槽**不生成** `free_cast.spent` 事件——没有计数可扣，就不该发事件。三次连续免费施法后 1 环槽仍是 4/4（矩阵 13）。
+- 以更高环施放走普通槽：`slot_level=2` 生成 `dnd2024.spell.slot_spent`，不碰免费槽（矩阵 14）。
+- 长休研究：`complete_long_rest(payload, free_cast=...)` 先校验再落账，一次最多换一项（`free_cast_rest_replace: 1`），短休给这个参数直接 `RestError`（矩阵 15）。落账顺序是"先换、再按 recharge 补满"，否则会把"研究完睡一觉"算成"睡完又花掉一次"。
+
+### 9.6 Signature 的独立短长休次数
+
+- 两项必须不同（`_free_cast_duplicate_errors` 按 `feature_id` 分组去重），必须 3 环，必须来自法术书（矩阵 16）。
+- 两项都常驻准备、不占容量，各 1 次、`short_rest`：一次 `dispel_magic` 只扣 `signature_1`，`signature_2` 仍满（矩阵 17）。
+- 以 4 环施放扣普通槽、不扣免费次数（矩阵 18）。
+- 官方本段没有升级换选规则，本切片也不提供：`free_cast_replacement: 0` + `free_cast_rest_replace: 0`，两条通道都拒绝（矩阵 19）。
+
+### 9.7 免槽不免其他规则与原子扣账
+
+- 免费施法只跳过 `spell.slot_spent`。动作经济、组件与目标、专注、施法攻击/豁免全部照旧：动作已花掉时免费施法仍被拒（矩阵 20）。
+- 扣账与施法同事务：成本事件在 `_spell_cost_events` 一处生成，进入结算才落账，因此被拒的请求不扣次数；进入结算后即使目标没有可解效果也不退款（矩阵 21）。
+- 一次施法只用一个来源：`free_cast_resource` 返回单行，成本事件只发一条。顺序是 **无限槽 > 专长 > 有限槽 > 职业资源**：法术精通永远不会耗尽，让一次长休一次的专长或一次长休一次的秘奥去顶替它，是不可恢复的浪费（矩阵 22）。
+- 常驻来源被替换只撤销自己的来源：`spell_mastery_1` 从 `magic_missile` 换成 `burning_hands` 后，`magic_missile` 在准备视图里退回只剩 `class_list` 一条来源（矩阵 23）。
+
+### 9.8 白名单文件对照
+
+| 任务书 §5 | 实际 |
+|---|---|
+| 1 `srd_class_features.json`、`srd_recovery.json` 及 locale | 只改 `srd_class_features.json`（+7 特性）。`srd_recovery.json` **未改**：免费槽的 recharge 由特性声明自带，不进 `class_resources`，否则一个"无限次"会被塞进有限次数的资源表。locale 七条标签基线已有，未改。 |
+| 2 `spells/selection.py`、`progression/advancement.py`、`features/resolver.py` | 三个都改。 |
+| 3 `combat/triggered_spells.py`、`view.py`、`validation.py`、`resolution.py`、`reducer.py` | 改了四个；`resolution.py` **未改**——免费施放没有独立结算分支，成本只在 `_spell_cost_events` 一处产生，多一个分支就多一处可以忘记扣账的地方。 |
+| 4 `resting/engine.py` | 改：`_recover_free_cast_slots`、`_plan_free_cast_rebind` / `_apply_free_cast_rebind`、短休拒收 `free_cast`。 |
+| 5 新建 `test_dnd2024_free_casting.py` | 新建，25 条。 |
+| 6 不新增法术效果 | 未新增任何 `spell_effects` 条目，`contact_other_plane` 等仍是空 effect。 |
+
+白名单外改了**一处测试**：`tests/rulesets/test_dnd2024_spell_grants.py::test_matrix_5_fiend_table_reuses_the_canonical_spells`。该断言原本比较"邪术师 9 级全部授予 == 邪魔表"，而 9 级现在确实多一条 Contact Other Plane（SRD 如此）。改为只比较 `owner == subclass:fiend_patron` 的行，断言强度不变——它验的本来就是邪魔表本身是否逐项正确。
+
+`runtime.py` **未改**，因此长休研究目前只能在引擎入口触发（见 9.11 未决 1）。
+
+### 9.9 验收
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_free_casting.py -q` | **25 passed** |
+| `pytest tests/rulesets/test_dnd2024_spells.py tests/rulesets/test_dnd2024_resting.py tests/rulesets/test_dnd2024_spell_remediation.py -q` | 见下行（合并跑的九文件） |
+| 施法/休息九文件定向回归（含 spell_grants、advancement_access、origin_feat_spells、smite、dispel_magic、class_features） | **184 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1756 passed**（1669.64s）。11 条与 F2 已知基线同名同数，全在 `test_dnd2024_character_builder.py`；通过数 = 基线 1731 + 本切片 25，**净引入 0 失败** |
+| `ruff check`（spells/combat/resting/progression/features + 新测试） | All checks passed |
+| `git diff --check` | 干净 |
+
+### 9.10 存档、重建与重放
+
+- 存档往返：`json.loads(json.dumps(sheet))` 后四个槽的 `spell_ref / spell_level / recharge / uses_remaining` 逐字段相同（矩阵 24）。
+- 升级重建：19 级升 20 级时只提交两项签名，`spell_mastery_*` 的既有选择原样保留（`_update_spellcasting` 合并而不覆盖，矩阵 24）。
+- 重放：授予与槽位都不缓存在派生结构里——`grant rows` 每次从声明与记录重算，`free_cast_slots` 只有"玩家选了什么 / 还剩几次"两个可变字段，因此一次重放不会带出第二条来源。
+- 休息：recharge 只改 `uses_remaining`，不碰 `spell_ref`；长休研究的落账在恢复之后，研究过的槽也是满的。
+
+### 9.11 偏差、停止原因与未决事项
+
+1. **长休研究没有运行时转发**。`runtime.complete_rest()` 不转发 `free_cast`，而 `runtime.py` 不在白名单（§5.6 的停止条件 4）。引擎入口 `complete_long_rest(payload, free_cast=...)` 与 `payload["free_cast"]` 都已留好，接上只需要在 runtime 加一条选项通道——与 F4 当时 `land_terrain` 的缺口完全同型，那次由用户裁定后补齐。**未决**。
+2. **Contact Patron 的自动成功无消费方**。见 9.3。不伪造豁免、不生成空结果。
+3. **秘奥四格只能靠事件扣账**。6–9 环没有自动化法术，这是任务书 §7 停止条件 2 允许的边界（不是绕过 `not_automated`）。等后续法术效果切片补上 6–9 环后，`free_cast.spent` 会自动成为真实施法的沉没成本，无需改本切片的代码。
+4. **`srd_recovery.json` 未改**。免费槽的 recharge 写在特性里；把它塞进 `class_resources` 会让"无限次"变成一张有上限的资源表，反而破坏 §4.1.1 的"不伪造有限次数"。
+5. **`-` 与 `0` 两个扁平哨兵**。`free_cast_slots` 的一行是 `<slot>:<环阶>:<recharge>:<次数>:<法术>`，`-` = 玩家选、`0` = 无限次。原因同 §9.2：`_require_scalar` 不接受嵌套对象，而 `features/models.py` 不在白名单。解析失败的行直接丢弃，不猜测。
+6. **不可"仅仪式"样本**。目录里没有只有 Ritual 一种施法时间的法术，矩阵 12 的仪式一条用 `1 minute or Ritual` 的 `alarm` 覆盖；判定逻辑本身按"首个施法模式必须恰为 Action"实现，与样本无关。
+7. **白名单外改一行测试**。见 9.8 末尾。
+8. **无限槽优先于专长免费施放**。这是一条刻意的排序（§9.7），不是继承来的行为：基线里专长优先于职业资源，而无限槽若排在专长后面，`Magic Initiate` 的一次长休一次会被法术精通白白吃掉。
