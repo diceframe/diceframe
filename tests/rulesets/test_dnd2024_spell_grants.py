@@ -1087,3 +1087,41 @@ def test_matrix_24_an_unanswered_grant_slot_never_blocks_a_level_up(
     # 没有凭空授予，也没有留下半套选择。
     assert "spell_grant_choices" not in level_six["spellcasting"]["class"]
     assert _grant_rows(level_six) == []
+
+
+def test_matrix_25_the_runtime_forwards_the_long_rest_terrain(
+    runtime: Dnd2024Runtime,
+) -> None:
+    """后续切片：客户端真的能提交地形了。
+
+    本切片之前引擎已经接受 ``land_terrain``，但 ``runtime.complete_rest()``
+    把它丢掉了（``runtime.py`` 当时不在白名单），所以每一次客户端驱动的长休
+    都只会产 ``spell_grant_terrain_missing``。通道就是 runtime 自己声明的
+    ``rest_option_names``，授予规则一个字没改。
+    """
+
+    sheet = _sheet(runtime, "class:druid", 3)
+    assert _grant_rows(_canonical(sheet)) == []
+    assert "land_terrain" in runtime.rest_option_names
+
+    result = runtime.complete_rest(None, deepcopy(sheet), "long", land_terrain="polar")
+    rested = result["character"]["ruleset_character"]
+    stored = rested["spellcasting"]["class"]["spell_grant_choices"][
+        "circle_of_the_land_spells"
+    ]["terrain"]
+    assert stored == "polar"
+    assert {row["terrain"] for row in _grant_rows(rested)} == {"polar"}
+    assert [event["type"] for event in result["events"]].count(
+        "spell_grant_terrain"
+    ) == 1
+
+    # 短休不接受地形；非法地形整休报错，且连传进去的那份状态都没动。
+    with pytest.raises(ValueError):
+        runtime.complete_rest(None, deepcopy(sheet), "short", land_terrain="polar")
+    probe = deepcopy(sheet)
+    snapshot = deepcopy(probe)
+    with pytest.raises(RestError):
+        runtime.complete_rest(None, probe, "long", land_terrain="swamp")
+    assert probe == snapshot
+    with pytest.raises(ValueError):
+        runtime.complete_rest(None, deepcopy(sheet), "long", land_terrain=7)

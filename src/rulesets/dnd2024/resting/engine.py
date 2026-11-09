@@ -531,6 +531,22 @@ class Dnd2024RestEngine:
         if rejected:
             raise RestError(str(rejected[0].get("reason") or "attunement rejected"))
 
+    def validate_land_terrain(
+        self, character: dict[str, Any], terrain: Any,
+    ) -> None:
+        """Validate a Long Rest land choice without touching live state.
+
+        Same reason as ``validate_attunement``: a party rest is opened only
+        after every participant's payload is known to be usable, so a typo in
+        the terrain must fail before the session starts rather than halfway
+        through the resolution loop.
+        """
+
+        if terrain is None:
+            return
+        probe = deepcopy(character)
+        self._plan_land_terrain(probe, terrain)
+
     def _class_state(self, character: dict[str, Any]) -> tuple[str, str, int]:
         build = character.get("build")
         rows = build.get("class_levels") if isinstance(build, dict) else None
