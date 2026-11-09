@@ -443,9 +443,9 @@ def test_ghost_player_cleanup_removes_its_control_too() -> None:
                 "character_sheet": {"hp": 10},
                 "control": {"mode": "ai", "revision": 4},
             },
+            # 空席位：没有角色、没有任何行动痕迹（有角色的席位不会被当成幽灵）。
             "ghost": {
-                "user_id": "ghost", "character_name": "幽灵",
-                "character_sheet": {"hp": 1},
+                "user_id": "ghost",
                 "control": {"mode": "ai", "revision": 1},
             },
         },

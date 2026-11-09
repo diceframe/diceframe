@@ -369,6 +369,18 @@ def copy_seat_credentials(target: Any, source: Any) -> None:
 # ---- export / import ---------------------------------------------------------
 
 
+def payload_seat_credential_uids(payload: Any) -> set[str]:
+    """Seats that hold a share credential in a raw save payload.
+
+    Read-only and schema-tolerant: seat credentials exist from slot v2 on and
+    keep the same shape; any slot without a readable map yields no seats.
+    """
+    modules = payload.get("modules") if isinstance(payload, dict) else None
+    slot = modules.get(MODULE_NAME) if isinstance(modules, dict) else None
+    credentials = slot.get("seat_credentials") if isinstance(slot, dict) else None
+    return {uid for uid in credentials if isinstance(uid, str) and uid} if isinstance(credentials, dict) else set()
+
+
 def payload_has_plaintext_credentials(payload: Any) -> bool:
     """Whether a raw save still holds a plaintext room password or room token.
 

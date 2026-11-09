@@ -1273,11 +1273,74 @@ def _referenced_player_ids(log: list[Any]) -> set[str]:
     return referenced
 
 
+def _queued_player_ids(payload: Mapping[str, Any]) -> set[str]:
+    queued: set[str] = set()
+    for name in ("action_queue", "pending_actions"):
+        actions = payload.get(name)
+        for action in actions if isinstance(actions, list) else []:
+            uid = action.get("user_id") if isinstance(action, dict) else None
+            if isinstance(uid, str) and uid:
+                queued.add(uid)
+    return queued
+
+
+def _listed_player_ids(payload: Mapping[str, Any], name: str) -> set[str]:
+    values = payload.get(name)
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    return {uid for uid in values if isinstance(uid, str) and uid}
+
+
+def _holds_character(player: Any) -> bool:
+    # A record of an unknown shape is not proof of an empty seat.
+    if not isinstance(player, dict):
+        return True
+    return bool(player.get("character_name")) or bool(player.get("character_sheet"))
+
+
+def _ghost_player_ids(payload: Mapping[str, Any], players: Mapping[str, Any]) -> list[str]:
+    """Seats with no trace of a player anywhere in the save.
+
+    The persisted log is only the last 100 entries, every round entry
+    snapshots the seats present when it was written, and rules-aware
+    automation entries name only their submitter. Absence from that window
+    therefore also describes a real seat that joined after the last round,
+    or one that stayed idle while automation filled the window. Deleting
+    such a seat on load drops its character and turns every later request
+    of its player into an outsider request. A seat is a ghost only when the
+    log window, the durable acted-seat record, the ready/away sets, the
+    action queues, the seat credentials and its own record (no character)
+    all agree; any unreadable evidence keeps every seat.
+    """
+    log = payload.get("log")
+    referenced = _referenced_player_ids(log if isinstance(log, list) else [])
+    if not referenced:
+        return []
+    acted = seat_activity.payload_acted_seats(payload)
+    if acted is None:
+        return []
+    live = (
+        referenced
+        | acted
+        | _listed_player_ids(payload, "ready_players")
+        | _listed_player_ids(payload, "away_players")
+        | _queued_player_ids(payload)
+        | room_access.payload_seat_credential_uids(payload)
+    )
+    return sorted(
+        uid for uid, player in players.items()
+        if uid not in live and not _holds_character(player)
+    )
+
+
 def normalize_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Return a normalized copy of a persisted game-state payload.
 
-    Ghost-player cleanup intentionally requires historical evidence. Waiting
-    rooms and unplayed multiplayer sessions therefore keep every participant.
+    Ghost-player cleanup fails closed: it needs historical evidence that the
+    run was played, and then removes only seats that nothing in the save ties
+    to a player (see ``_ghost_player_ids``). Waiting rooms, unplayed
+    multiplayer sessions and seats that joined after the last round therefore
+    keep every participant.
     """
     payload = migrate_game_state_payload(data)
     from src.migrations.run_story import preserves_frozen_roster
@@ -1287,31 +1350,14 @@ def normalize_game_state_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     log = payload.get("log")
     if not isinstance(players, dict) or len(players) <= 1 or not isinstance(log, list) or not log:
         return payload
-    referenced = _referenced_player_ids(log)
-    if not referenced:
-        return payload
-    ghost_ids = sorted(uid for uid in players if uid not in referenced)
+    ghost_ids = _ghost_player_ids(payload, players)
     if not ghost_ids:
         return payload
+    # A ghost is by definition absent from ready/away and the action queues,
+    # so its seat record is the only thing to drop.
     payload["players"] = {
         uid: player for uid, player in players.items() if uid not in ghost_ids
     }
-    payload["ready_players"] = [
-        uid for uid in payload.get("ready_players", []) if uid not in ghost_ids
-    ]
-    payload["away_players"] = [
-        uid for uid in payload.get("away_players", []) if uid not in ghost_ids
-    ]
-    payload["action_queue"] = [
-        action
-        for action in payload.get("action_queue", [])
-        if action.get("user_id") not in ghost_ids
-    ]
-    payload["pending_actions"] = [
-        action
-        for action in payload.get("pending_actions", [])
-        if action.get("user_id") not in ghost_ids
-    ]
     logger.warning(
         "加载存档时移除幽灵玩家: game_key=%s, players=%s",
         tuple(payload.get("game_key") or ()),
