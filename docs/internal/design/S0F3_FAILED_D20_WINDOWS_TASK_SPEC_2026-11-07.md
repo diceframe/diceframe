@@ -287,9 +287,11 @@ Stroke 不请求 RNG：`_replace_natural` 把天然面改成 20 后重算 `_chec
 ### 偏差、停止原因与未决事项
 
 1. **死亡豁免不开放重掷面（功能缺口，待裁决）**。Indomitable、Disciplined Survivor、Countercharm 在**死亡豁免**上不开口；死亡豁免仍保留 Stroke of Luck（改面）与 Dark One's Own Luck（加骰）两个不改写掷骰的面。原因不是规则语义，而是既有测试：`test_dnd2024_survivor.py` 的两条用例把死亡豁免钉成"同一批次立即结算"，而该文件在本切片白名单之外；E3 已经因同一类冲突把 `death_save.resolved.roll` 记成偏差（该文件 §10 第 6 条）。本轮按同一先例处理——保持既有测试语义、把缺口写进报告，而不是改别人的测试。放开后需要改的正是那两条：`test_advantage_keeps_natural_one_and_takes_the_highest[rolls0-3-0]`、`test_advantage_and_the_aura_are_separate_entries_on_one_save`（改成先取 pending 决策再断言结算）。
+
+   **2026-11-09 关闭**：用户裁定放开，落地在 `feat/dnd2024-s0f4-spell-grants` 的后续提交（见 `S0F4_SPELL_GRANTS_TASK_SPEC_2026-11-07.md` §12.2）。要改的正是上面点名的两条——新增 `_decline_window()` 助手，改为逐个拒绝窗口后再断言结算，断言内容一字未改。另外 `_reroll_check()` 的 `keep` 补上了 `death_save_crit_threshold`，否则重掷会丢掉 18–20 视为 20 的阈值。加骰面（Dark One's Own Luck 在 natural 1 上）仍然排除。
 2. **白名单外改了 1 行测试**。`test_dnd2024_class_features.py::test_fighter_action_surge_declaration_and_capability_load` 断言战士 2 级特性清单，加入 `tactical_mind`。SRD 把该特性授予 Fighter 2，不加上这一行就只能不实现特性，属不可避免；按 F1 的 `5efb0194`（test-only 对齐）先例处理，只改这一条断言，未改任何行为断言。
 3. **重掷窗口的 `die_sides` 是 0**。`die_sides` 的语义是"本次窗口掷的加值骰面"，重掷不掷加值骰，所以是 0；掷什么由 `reroll_mode`（`""` 表示单骰，`"advantage"` 表示两骰取高）表达。改面（Stroke）出于同一理由也是 0（`replaces_natural` 且 `window_roll: null`）。客户端不应当把 0 读成"窗口不可用"。
 4. **重复豁免的续算只覆盖回合末入口**。`_save_repeat_events` 已能在窗口处暂停并续跑，但法术豁免（`_spell_effect_events` 里"逐目标豁免 → 伤害 → 附加条件"的内联循环）与专注豁免仍是各自的入口。F2 遗留的"豁免面要抽约 300 行"本轮只落在 `repeat_save` 这一处，法术豁免面仍未接通（与 F2 的裁决一致）。
 5. **`offered` 是单次 settlement 内的字段**。跨批次靠 `decision.settlement` 携带；伪造或过期的 settlement 会先被 `_validate_check_window` 按 `decision_id` 与版本拒绝，不会因为"面码没见过"而重新开口（矩阵 22）。
 6. **AI 梯子对改面/重掷的估值是上界**。`stroke_of_luck_*` 用 `20 + modifier + check_bonus + aura_bonus >= DC` 判"改了能不能到"，重掷用同样口径并加 `reroll_bonus`；优势重掷没有按 2d20 取高的分布估值（当作能出 20）。这只影响 AI 要不要花资源，不影响玩家路径，也不影响任何结算结果。
-7. **未决**：死亡豁免的重掷面（偏差 1）需要一次独立裁决；`Tactical Master`、Perfect Focus 等相邻高阶特性仍属非目标。
+7. ~~**未决**：死亡豁免的重掷面（偏差 1）需要一次独立裁决~~（2026-11-09 已裁决放开并落地，见偏差 1 的关闭说明）；`Tactical Master`、Perfect Focus 等相邻高阶特性仍属非目标。

@@ -278,9 +278,49 @@ Magical Secrets 只做一件事：`prepared_list_expansion` 把 Bard/Cleric/Drui
 ### 偏差、停止原因与未决事项
 
 1. **两个玩家选择没走 `features.feature_choices`**。`FEATURE_CHOICE_KINDS` 是加载期闭集（`advancement_feat` / `skill_proficiency`），声明一个 `spell_grant` 槽必须改 `features/models.py`，而它不在白名单。因此 Land 地形与 Magical Discoveries 的选中项存在 `spellcasting.class.spell_grant_choices`，由 `spells/selection.py` 校验 owner、数量、来源列表、环阶与替换上限。代价：S0-B 那套 owner-scoped 记录校验**不覆盖**这两个槽；收益是不必为一个容器破坏加载期的闭集。若后续要统一，应加一个新的 choice kind，并把两个校验函数合并——那是一次独立的、有明确迁移面的切片。
-2. **缺省地形不报错，只显式报告**。契约 5.2.1 要求"每次长休必须记录一个选择"，但 `runtime.complete_rest()` 在基线上不转发任何长休选项（短休只有 `attunement` 一条通道），而 `runtime.py` 不在白名单。硬性报错会让**每一个** Land Druid 的长休都失败，因此实现为：不静默替换、授予为空、产 `spell_grant_terrain_missing` 事件。要让客户端真正提交地形，需要后续切片在 `runtime.complete_rest()` 上加一条 `land_terrain` 通道（一行转发 + 一层选项校验），本切片已把 `complete_long_rest(payload, land_terrain=...)` 的入口留好，也接受 `payload["land_terrain"]`。
+2. **缺省地形不报错，只显式报告**（已由 §12.1 关闭：运行时开始转发 `land_terrain`）。契约 5.2.1 要求"每次长休必须记录一个选择"，但 `runtime.complete_rest()` 在基线上不转发任何长休选项（短休只有 `attunement` 一条通道），而 `runtime.py` 不在白名单。硬性报错会让**每一个** Land Druid 的长休都失败，因此实现为：不静默替换、授予为空、产 `spell_grant_terrain_missing` 事件。要让客户端真正提交地形，需要后续切片在 `runtime.complete_rest()` 上加一条 `land_terrain` 通道（一行转发 + 一层选项校验），本切片已把 `complete_long_rest(payload, land_terrain=...)` 的入口留好，也接受 `payload["land_terrain"]`。
 3. **表数据编码为扁平字符串**。见上：`parameters` 只收标量列表。可读性不如嵌套 JSON，但换来"零个白名单外文件"。
 4. **`selection.py` 读 `combat_catalog.spell_effects`** 来判断 `automation_status`。这是与战斗执行同一张表（不是第二份真相），代价是法术选择层依赖战斗目录的存在；bundle 没有该目录时一律判 `not_automated`（保守方向）。
 5. **Magical Secrets 的"仅新准备"按能力而不是按差分实现**。SRD 第二句明确允许"替换时也可以来自这四个列表"，所以"重选"与"替换"在数据上是同一件事：拥有该特性后，任何普通准备项都可以来自四列表。没有额外追踪"哪一项是升级时新加的"，那需要跨等级的差量状态，而契约 17 只要求"不增加容量、只在容量增加的新准备及普通替换中开放"。
-6. **死亡豁免与 F3 的交互未变**。本切片不碰 d20 窗口，`test_dnd2024_failed_d20_windows.py` 全绿；F3 记录的"死亡豁免不开放重掷面"缺口仍然存在，与本切片无关。
+6. **死亡豁免与 F3 的交互未变**（已由 §12.2 关闭：重掷面放开）。本切片不碰 d20 窗口，`test_dnd2024_failed_d20_windows.py` 全绿；F3 记录的"死亡豁免不开放重掷面"缺口当时仍然存在，与本切片无关。
 7. **"待选"是合法状态，不是错误**。Magical Discoveries 的两项在 6 级必须选，但"还没选"与"提交了错误内容"被分开处理：前者只让槽位保持开放（`grant_slots` 里 `selected_refs: []`，`class_spell_choices.required: true`），后者才硬失败。代价是一个 6 级 Lore Bard 可以在没有这两项的情况下存在，直到客户端补答；收益是任何只提交普通准备的调用方、以及本切片之前的所有升级路径都不被新特性挡住——这正是矩阵 24 的要求，也是第一版 62 个 ERROR 换来的结论。若后续要收紧成"升级时必须回答"，需要同时给全部升级夹具与客户端补上这一项，那是一次有明确迁移面的独立改动。
+
+## 12. 后续裁定（2026-11-09）
+
+F4 交付时留了两项待裁决，用户当日裁定**两个都放开**。两项都在 `feat/dnd2024-s0f4-spell-grants` 上以独立提交落地，不改 F4 的三条提交。
+
+### 12.1 Land 地形：运行时真正转发 `land_terrain`
+
+- 通道就是 runtime 自己声明的白名单：`rest_option_names` 从 `{"attunement"}` 扩到 `{"attunement", "land_terrain"}`。
+- `complete_rest()` 新增 `land_terrain: str | None = None`，只接受长休（短休给地形直接 `ValueError`），字符串以外一律拒绝，长休路径把它转给 `complete_long_rest(character, land_terrain=...)`。
+- `validate_rest_options()` 增加地形分支：转发给新增的 `Dnd2024RestEngine.validate_land_terrain()`，在**队伍休息开局前**做非变更校验。非法地形因此会在会话开始前失败，而不是结算循环跑到一半。
+- 通用休息服务 `src/webui/services/ruleset_rest.py` **一行没改**：`_rest_options()` 本来就只转发 runtime 声明的字段，`attunement` 与 `land_terrain` 走同一条路。这也说明当初"白名单外"的判断是准确的——需要动的只有 `runtime.py` 这个声明点。
+- 矩阵 25 钉住四件事：`complete_rest(..., "long", land_terrain="polar")` 写入地形、授予切到 polar、`spell_grant_terrain` 事件恰好一条；短休 + 地形 `ValueError`；非法地形 `RestError` 且**传入的那份状态逐字节未变**；非字符串 `ValueError`。
+- 偏差 2 由此关闭：`spell_grant_terrain_missing` 现在只在客户端确实没提交地形时出现。
+
+### 12.2 死亡豁免：重掷面全面放开
+
+- `_save_window_candidates()` 不再按 `surface == "death_save"` 裁剪候选：Stroke of Luck、Indomitable、Disciplined Survivor 在死亡豁免上与其它豁免同权。理由写进了代码注释——重掷是"换一颗新骰并强制采用"，旧的天然面不复存在，所以 natural 1 的两重失败只对**被换掉的那颗骰**生效。
+- **加骰面仍然排除**：Dark One's Own Luck 在 natural 1 上继续不开放（加值救不了两重失败）。这一条没变，`skip_dool` 原样保留。
+- `_reroll_check()` 的 `keep` 增加 `death_save_crit_threshold`：重掷只换骰面、不换判定规则。否则"18–20 视为 20"这类阈值会在重掷后丢失，被当成普通成功。
+- 代价：`test_dnd2024_survivor.py` 两条测试原先假定"失败的死亡豁免立即结算"，现在会先开一个 Indomitable 窗。新增 `_decline_window()` 助手，两条测试改为"逐个拒绝窗口后读结算"，**断言内容一字未改**（失败数、成功数、hp、骰面、光环加值全部照旧）。这是裁定带来的一次夹具调整，不是行为回退：Champion 18 本来就拥有 Indomitable。
+- 新覆盖两条：`test_indomitable_rerolls_a_failed_death_save_and_lands_once`（重掷成功、旧面留在 `rerolled_natural`、计数只落一次、资源扣 1、hp 仍为 0）与 `test_a_death_save_reroll_discards_the_natural_one`（natural 1 被重掷成 12 后按一次成功计数，而不是两重失败）。
+- 偏差 6 由此关闭，F3 §10 记录的"死亡豁免不开放重掷面"缺口在本切片收口。
+
+### 12.3 验收
+
+| 命令 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_spell_grants.py -q` | **32 passed**（矩阵 25 加入后） |
+| `pytest tests/rulesets/test_dnd2024_failed_d20_windows.py tests/rulesets/test_dnd2024_survivor.py -q` | **91 passed**（F3 43→45，survivor 46 条内容不变） |
+| `pytest tests/test_assistant_party_rest_integration.py tests/test_rest_activity.py tests/test_ruleset_binding_fail_closed.py tests/test_ruleset_runtime_module.py tests/test_ruleset_runtime_transaction_preflight.py -q` | **193 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1731 passed / 0 errors**（25:43） |
+| `ruff check`（见 §9 目录 + 本轮改的三个测试文件） | All checks passed |
+| `git diff --check` | 干净 |
+
+全量的 11 条失败仍是 `test_dnd2024_character_builder.py` 的那 11 条基线；通过数 1728 → 1731 正好是本轮新增的 3 条，**净引入 0**。
+
+提交（均在 `feat/dnd2024-s0f4-spell-grants`，stack 在 `4d979003` 之上）：
+
+1. `b640debf` 运行时转发长休地形（`rest_option_names`、`complete_rest()`、`validate_land_terrain()`、矩阵 25、绑定测试改为同时断言两个选项）
+2. `745baaee` 死亡豁免放开重掷面（`_save_window_candidates()`、`death_save_crit_threshold` 随重掷保留、F3 两条新测试、survivor 的两条夹具改为先拒窗口）
