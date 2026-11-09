@@ -34,6 +34,21 @@ describe('GmToolbar',()=>{
     expect(busy.emitted('force-advance')).toHaveLength(1)
   })
 
+  it('names force advance "continue as failure" while a check choice is open',async()=>{
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper=mount(GmToolbar,{global:{plugins:[i18n]},props:{
+      detail:{game_key:'web|room|bot',round_number:4,state:'active_judgment',
+        pending_push_decisions:[{check_id:'c1',actor_uid:'p1'}]},
+      players:[],
+      isGm:true,
+    }})
+    const button=wrapper.findAll('button').find(item => item.text().includes('按失败继续'))
+    expect(button, '待决的孤注一掷 / 幸运应给 GM 一个看得懂的逃生入口').toBeTruthy()
+    expect(button!.attributes('title')).toContain('保留原检定结果')
+    await button!.trigger('click')
+    expect(wrapper.emitted('force-advance')).toHaveLength(1)
+  })
+
   it('emits one recap request and exposes its busy state',async()=>{
     i18n.global.locale.value = 'en'
     const wrapper=mount(GmToolbar,{global:{plugins:[i18n]},props:{

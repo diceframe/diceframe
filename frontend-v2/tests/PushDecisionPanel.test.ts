@@ -133,3 +133,29 @@ it('shows a localized refusal instead of a bare status line', async () => {
   expect(alert).toBe(i18n.global.t('apiErrors.push_forbidden'))
   expect(alert).not.toContain('HTTP 403')
 })
+
+it.each([
+  ['push_timeout', '等待超时，已按原检定结果继续。'],
+  ['luck_timeout', '等待超时，已按原检定结果继续。'],
+  ['gm_forced_advance', 'GM 已按失败继续，沿用原检定结果。'],
+  ['push_disabled_by_gm', 'GM 已关闭孤注一掷，本次沿用原检定结果。'],
+])('explains a %s closure instead of showing its code', (reason, text) => {
+  i18n.global.locale.value = 'zh-CN'
+  const wrapper = mount(PushDecisionPanel, { global: { plugins: [i18n] }, props: {
+    gameKey: 'web|room|bot', check: { ...check, push: { ...push, status: 'declined', decision_reason: reason } }, actorId: 'a', readonly: false,
+  } })
+  expect(wrapper.get('[data-testid="push-decision-reason"]').text()).toBe(text)
+  expect(wrapper.text()).not.toContain(reason)
+})
+
+it('keeps the Keeper rejection in its own words and falls back to English for community locales', () => {
+  i18n.global.locale.value = 'ja'
+  const rejected = mount(PushDecisionPanel, { global: { plugins: [i18n] }, props: {
+    gameKey: 'web|room|bot', check: { ...check, push: { ...push, status: 'rejected', decision_reason: '灯は消えている' } }, actorId: 'a', readonly: false,
+  } })
+  expect(rejected.get('[data-testid="push-decision-reason"]').text()).toBe('灯は消えている')
+  const timedOut = mount(PushDecisionPanel, { global: { plugins: [i18n] }, props: {
+    gameKey: 'web|room|bot', check: { ...check, push: { ...push, status: 'declined', decision_reason: 'push_timeout' } }, actorId: 'a', readonly: false,
+  } })
+  expect(timedOut.get('[data-testid="push-decision-reason"]').text()).toBe('Timed out. The original check result stands.')
+})

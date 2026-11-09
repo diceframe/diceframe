@@ -710,12 +710,23 @@ class RoundProcessor:
             logger.exception("回滚失败回合状态异常: game=%s", instance.game_key)
             return False
 
-    def _schedule_luck_timeouts(self, instance: GameInstance) -> None:
-        """为每条 pending 幸运检定挂独立超时；到点只 decline 该条，全清则重新推进回合。
+    def schedule_decision_timeouts(self, instance: GameInstance) -> None:
+        """Arm the timeout of every open post-check choice (Luck and Push).
 
-        每玩家每轮只有一条主检定，故 per-check 即 per-player。已在计时的不重复挂。
+        Public entry for the service layer, which pauses a round for these
+        choices without calling ``process_round``.
+        """
+        self._schedule_luck_timeouts(instance)
+
+    def _schedule_luck_timeouts(self, instance: GameInstance) -> None:
+        """为每条待决的检定选择挂独立超时；到点只按失败关闭该条，全清则重新推进回合。
+
+        幸运待选的检定挂幸运超时（同时关闭它的孤注一掷）；只剩孤注一掷待决的
+        检定挂 Push 超时。两者共用 ``_luck_timers`` 与取消路径：任何一次手动
+        决定都会取消该条计时，仍待决时由服务层重新挂上，所以 Push 每一步
+        （申请 → 告知风险 → 确认）都有完整的等待时长。已在计时的不重复挂。
         默认实时单人局为 60 秒，多人局自动放宽到 180 秒；显式配置仍优先，
-        luck_timeout_seconds=0 时禁用（异步局可设 0 让幸运选择无限等待）。
+        luck_timeout_seconds=0 时禁用（异步局可设 0 让检定选择无限等待）。
         """
         effective_timeout = getattr(instance, "effective_luck_timeout_seconds", None)
         timeout = int(
@@ -724,30 +735,42 @@ class RoundProcessor:
         )
         if timeout <= 0:
             return
-        for check in instance.pending_luck_checks():
-            check_id = str(check.get("check_id") or "")
+        from src.engine import check_decisions
+
+        luck_ids = [str(check.get("check_id") or "") for check in instance.pending_luck_checks()]
+        push_ids = [
+            str(check.get("check_id") or "") for check in check_decisions.pending(instance)
+        ]
+        for check_id, push in [(cid, False) for cid in luck_ids] + [
+            (cid, True) for cid in push_ids if cid not in luck_ids
+        ]:
             if not check_id:
                 continue
             existing = instance._luck_timers.get(check_id)
             if existing and not existing.done():
                 continue
-            task = asyncio.create_task(self._luck_timeout(instance.game_key, check_id, timeout))
+            task = asyncio.create_task(
+                self._luck_timeout(instance.game_key, check_id, timeout, push=push)
+            )
             instance._luck_timers[check_id] = task
 
-    async def _luck_timeout(self, game_key, check_id: str, timeout: int) -> None:
-        """单条幸运检定的超时回调：到点按失败继续，若是最后一条则重新生成叙事。"""
+    async def _luck_timeout(self, game_key, check_id: str, timeout: int, *, push: bool = False) -> None:
+        """单条检定选择的超时回调：到点按失败继续，若是最后一条则重新生成叙事。"""
         unsupported_progression = False
         try:
             await asyncio.sleep(timeout)
             instance = self.registry.get(game_key)
             if not instance:
                 return
-            result = await instance.system_decline_luck(check_id)
+            result = await (
+                instance.system_decline_push(check_id) if push
+                else instance.system_decline_luck(check_id)
+            )
             if not result.get("ok"):
                 return  # 玩家已手动决定，或检定已过期
             await self.registry.save(instance)
             if result.get("declined_all") and instance.state == GameState.ACTIVE_JUDGMENT:
-                logger.info("幸运超时全部决定，继续生成叙事: %s", game_key)
+                logger.info("检定选择超时全部决定，继续生成叙事: %s", game_key)
                 try:
                     await self.process_round(instance)
                 except RoundNotProcessed as exc:
@@ -770,7 +793,11 @@ class RoundProcessor:
         finally:
             inst = self.registry.get(game_key)
             if inst is not None and not unsupported_progression:
-                inst._luck_timers.pop(check_id, None)
+                # A decision may have re-armed this check while the callback ran;
+                # never drop a newer live timer.
+                current = inst._luck_timers.get(check_id)
+                if current is None or current is asyncio.current_task() or current.done():
+                    inst._luck_timers.pop(check_id, None)
 
     async def _summarize_background(self, instance: GameInstance, gm_prompt: Any, round_number: int) -> None:
         """后台执行摘要压缩，不阻塞回合返回。

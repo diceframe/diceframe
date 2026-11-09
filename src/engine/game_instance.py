@@ -972,8 +972,12 @@ class GameInstance:
         """幸运超时定时器触发：按失败继续单条幸运检定（逻辑见 luck_resolver）。"""
         return await luck_resolver.system_decline_luck(self, check_id)
 
+    async def system_decline_push(self, check_id: str) -> dict:
+        """Push 超时定时器触发：按原结果关闭单条孤注一掷（逻辑见 luck_resolver）。"""
+        return await luck_resolver.system_decline_push(self, check_id)
+
     def _cancel_luck_timer(self, check_id: str) -> None:
-        """取消并移除某条检定的幸运超时定时器（逻辑见 luck_resolver）。"""
+        """取消并移除某条检定的选择超时定时器（幸运与孤注一掷共用；逻辑见 luck_resolver）。"""
         luck_resolver._cancel_luck_timer(self, check_id)
 
     def all_alive_ready(self) -> bool:

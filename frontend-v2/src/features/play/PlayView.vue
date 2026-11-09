@@ -391,6 +391,9 @@ const pendingCheckDecisions = computed(() => pendingPostChecks(game.detail.value
 const revealChecks = computed(() => game.detail.value?.round_check_results || pendingCheckDecisions.value)
 const serverJudging = computed(() => game.detail.value?.state === 'active_judgment' && !pendingCheckDecisions.value.length)
 const roundJudgmentStuck = computed(() => game.detail.value?.state === 'active_judgment')
+// While Luck/Push choices are open, the same GM override closes them with the
+// original results (backend: advance force=True) — say so instead of "stuck".
+const continueAsFailure = computed(() => roundJudgmentStuck.value && pendingCheckDecisions.value.length > 0)
 const showGmThinking = computed(() => gmThinking.value || serverJudging.value)
 const runReadOnly = computed(() => game.detail.value?.state === 'ended' || ['preparing', 'ended'].includes(game.detail.value?.run_lifecycle?.status || ''))
 const sceneTitle = computed(() => game.detail.value?.scene || t('unknownScene'))
@@ -640,10 +643,11 @@ async function command(path: string, body: JsonObject = {}) {
 }
 
 async function onForceAdvance() {
+  const failure = continueAsFailure.value
   const accepted = await confirm({
-    title: t('gmForceAdvanceConfirmTitle'),
-    content: t('gmForceAdvanceConfirm'),
-    positiveText: t('gmForceAdvance'),
+    title: t(failure ? 'gmContinueAsFailureConfirmTitle' : 'gmForceAdvanceConfirmTitle'),
+    content: t(failure ? 'gmContinueAsFailureConfirm' : 'gmForceAdvanceConfirm'),
+    positiveText: t(failure ? 'gmContinueAsFailure' : 'gmForceAdvance'),
     type: 'warning',
   })
   if (!accepted) return
@@ -1813,8 +1817,8 @@ function onPlayKeydown(event: KeyboardEvent) {
                 data-testid="gm-force-advance"
                 :disabled="gmThinking"
                 @click="onForceAdvance"
-              ><NIcon :component="PlayForwardOutline" size="14" /> {{ t('gmForceAdvance') }}</button>
-              <p class="muted">{{ t('gmForceAdvanceHint') }}</p>
+              ><NIcon :component="PlayForwardOutline" size="14" /> {{ t(continueAsFailure ? 'gmContinueAsFailure' : 'gmForceAdvance') }}</button>
+              <p class="muted">{{ t(continueAsFailure ? 'gmContinueAsFailureHint' : 'gmForceAdvanceHint') }}</p>
             </section>
           </template>
           <template #party>

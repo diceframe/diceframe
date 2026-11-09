@@ -19,11 +19,14 @@ import GameSessionPreferences from '@/features/play/preferences/GameSessionPrefe
 import GameDefaultActions from '@/features/play/preferences/GameDefaultActions.vue'
 import RunStoryPanel from '@/features/play/run-story/RunStoryPanel.vue'
 import RunFinalePanel from '@/features/play/run-story/RunFinalePanel.vue'
+import { pendingPostChecks } from '@/features/play/check-decisions/projection'
 
 const props = defineProps<{ detail: GameDetail; players: Player[]; isGm: boolean; recapBusy?: boolean; manualImageEnabled?: boolean; manualImageBusy?: boolean; pendingCount?: number; needsAttention?: boolean; gameKey?: string; log?: LogEntry[]; ruleId?: string }>()
 // 强制推进 = 中止在飞生成并重新处理本回合；只有本轮真的在判定/生成时才有意义
 // （平时点它等同于「推进」，所以平时禁用，避免两个按钮行为重复）。
 const forceAdvanceAvailable = computed(() => props.detail?.state === 'active_judgment')
+// 判定阶段仍有未处理的幸运 / 孤注一掷：同一个强制推进会按原结果关闭它们。
+const continueAsFailure = computed(() => forceAdvanceAvailable.value && pendingPostChecks(props.detail).length > 0)
 const emit = defineEmits<{
   advance: []
   'force-advance': []
@@ -151,9 +154,9 @@ function awardXp(userId: string) {
           <button
             type="button"
             :disabled="!forceAdvanceAvailable"
-            :title="t('gmForceAdvanceHint')"
+            :title="t(continueAsFailure ? 'gmContinueAsFailureHint' : 'gmForceAdvanceHint')"
             @click="emit('force-advance')"
-          ><NIcon :component="StopCircleOutline" size="14" /> {{ t('gmForceAdvance') }}</button>
+          ><NIcon :component="StopCircleOutline" size="14" /> {{ t(continueAsFailure ? 'gmContinueAsFailure' : 'gmForceAdvance') }}</button>
           <button @click="emit('rollback')"><NIcon :component="ArrowUndoOutline" size="14" /> {{ t('rollback') }}</button>
           <button @click="emit('payment')"><NIcon :component="CashOutline" size="14" /> {{ t('createPaymentProposal') }}</button>
           <button :disabled="recapBusy" @click="emit('recap')"><NIcon :component="ReaderOutline" size="14" /> {{ recapBusy ? t('storyRecapGenerating') : t('storyRecapGenerate') }}</button>

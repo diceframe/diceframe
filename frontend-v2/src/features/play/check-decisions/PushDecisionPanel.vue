@@ -14,6 +14,14 @@ const supported = computed(() => push.value?.schema_version === 1)
 const owner = computed(() => !!props.actorId && props.actorId === props.check.actor_uid)
 const actionable = computed(() => supported.value && !props.readonly && !!props.gameKey)
 const ownerOfferedConflict = computed(() => owner.value && !!props.isGm && push.value?.status === 'offered')
+// System closures carry a stable code; a Keeper rejection carries the Keeper's own words.
+const decisionReason = computed(() => {
+  const reason = push.value?.decision_reason || ''
+  if (reason === 'push_disabled_by_gm') return gamePreferencesCopy(locale.value).pushDisabled
+  if (reason === 'gm_forced_advance') return c.value.forcedAdvance
+  if (reason === 'push_timeout' || reason === 'luck_timeout') return c.value.timedOut
+  return reason
+})
 const draft = ref(''), busy = ref(false), error = ref('')
 const adjustingRisk = ref(false)
 let epoch = 0
@@ -59,7 +67,7 @@ async function send(operation: string) {
       <p v-else>{{ c[push.status] }}</p>
       <p v-if="push.reason">{{ c.reason }}: {{ push.reason }}</p>
       <p v-if="push.consequence"><strong>{{ c.risk }}:</strong> {{ push.consequence }}</p>
-      <p v-if="push.decision_reason">{{ push.decision_reason === 'push_disabled_by_gm' ? gamePreferencesCopy(locale).pushDisabled : push.decision_reason }}</p>
+      <p v-if="decisionReason" data-testid="push-decision-reason">{{ decisionReason }}</p>
       <p v-if="push.original">{{ push.original.roll }} → {{ check.roll }}</p>
       <p v-if="push.failed">{{ c.failed }}</p>
       <template v-if="actionable">

@@ -729,3 +729,46 @@ async def test_advance_stuck_recovery_with_unprepared_check_model_rolls_back() -
     assert instance.state == GameState.ACTIVE_ACTION
     assert instance.aborts == 1
     assert instance.action_queue == [{"user_id": "gm", "text": "行动"}]
+
+
+@pytest.mark.asyncio
+async def test_pausing_for_check_choices_arms_their_timeouts() -> None:
+    """#714：服务层暂停等检定选择时不经过 process_round，必须显式挂超时。"""
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    api = FakeApi(instance)
+    api._handler.luck_after_prepare = [{"check_id": "luck-1"}]
+    armed: list[object] = []
+    dependencies = replace(api.dependencies, schedule_decision_timeouts=armed.append)
+
+    pending = await submit_action(dependencies, "game", "gm", "调查石门")
+    assert pending["payload"]["phase"] == "luck"
+    assert armed == [instance]
+
+    # 一次选择（例如 Push 申请）之后仍有待决：重新计时，而不是留着已取消的计时器。
+    api.luck_result = {"ok": True, "ready_to_resolve": False}
+    waiting = await resolve_luck_and_continue(dependencies, "game", "luck-1", "gm", False)
+    assert waiting["payload"]["advanced"] is False
+    assert armed == [instance, instance]
+
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.action_queue = [{"user_id": "gm", "text": "行动"}]
+    blocked = await advance_round(dependencies, "game", "gm")
+    assert blocked["status"] == 409
+    assert armed == [instance, instance, instance]
+
+
+@pytest.mark.asyncio
+async def test_timeout_scheduling_failure_does_not_fail_the_pause() -> None:
+    instance = FakeInstance()
+    instance.try_advance_result = True
+    api = FakeApi(instance)
+    api._handler.luck_after_prepare = [{"check_id": "luck-1"}]
+
+    def broken(_instance) -> None:
+        raise RuntimeError("timer backend unavailable")
+
+    dependencies = replace(api.dependencies, schedule_decision_timeouts=broken)
+    pending = await submit_action(dependencies, "game", "gm", "调查石门")
+    assert pending["status"] == 200
+    assert pending["payload"]["phase"] == "luck"

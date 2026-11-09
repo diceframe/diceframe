@@ -169,6 +169,26 @@ async def system_decline_luck(instance: GameInstance, check_id: str) -> dict:
         return {"ok": True, "check_result": dict(target), "declined_all": declined_all}
 
 
+async def system_decline_push(instance: GameInstance, check_id: str) -> dict:
+    """Push 超时定时器触发：按原结果关闭一条无人处理的孤注一掷（系统发起）。
+
+    幸运仍待选择的检定由幸运超时一并关闭，这里返回 PUSH_NOT_PENDING 不处理。
+    返回 declined_all=True 表示已没有待决选择，调用方应重新推进回合。
+    """
+    async with instance._lock:
+        progression.require_writable(instance)
+        session_stats.require_writable(instance)
+        if not check_decisions.close_timed_out(instance, check_id):
+            return {"ok": False, "code": "PUSH_NOT_PENDING", "error": "该检定没有等待处理的孤注一掷"}
+        target = next(
+            (c for c in checks.last_checks(instance) if str(c.get("check_id") or "") == check_id),
+            None,
+        )
+        session_stats.touch(instance)
+        declined_all = not check_decisions.pending_any(instance)
+        return {"ok": True, "check_result": dict(target or {}), "declined_all": declined_all}
+
+
 def _cancel_luck_timer(instance: GameInstance, check_id: str) -> None:
     """取消并移除某条检定的幸运超时定时器（若已挂）。手动决议先于超时到达时调用。"""
     task = instance._luck_timers.pop(check_id, None)

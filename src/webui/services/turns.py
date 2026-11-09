@@ -120,6 +120,9 @@ class TurnDependencies:
     resolve_luck_decision: Callable[..., Awaitable[dict[str, Any]]]
     decline_pending_luck: Callable[..., Awaitable[dict[str, Any]]]
     drain_economy_outbox: Callable[[Any], Awaitable[bool]] | None = None
+    # 回合因检定选择（幸运 / 孤注一掷）暂停时挂超时（RoundProcessor 的计时器）。
+    # 服务层在这些暂停点不调用 process_round，所以必须显式挂上。
+    schedule_decision_timeouts: Callable[[Any], None] | None = None
     # 奖励自动结算：settings(instance) 返回 (enabled, gold_cap)；resolve_reward 复用
     # 标准支付确认服务（交易流水 + 效果组提交 + 存档），只是免掉 GM 点击。
     # 策略按局解析：本局覆盖 → 规则模板默认 → 服务器全局配置。
@@ -224,6 +227,21 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
             "error": "故事已经抵达结局，不能再提交行动",
         }, 409)
     return _result({"ok": False, "error_code": code, "error": code}, 409)
+
+
+def _arm_decision_timeouts(dependencies: TurnDependencies, instance: "GameInstance") -> None:
+    """The round pauses for post-check choices: start their timeouts.
+
+    Timers are runtime coordination only; failing to arm one must not turn a
+    saved pause into an error response (the GM can still continue as failure).
+    """
+    schedule = dependencies.schedule_decision_timeouts
+    if schedule is None:
+        return
+    try:
+        schedule(instance)
+    except Exception:
+        logger.exception("检定选择超时调度失败: game=%s", getattr(instance, "game_key", ""))
 
 
 def _pending_luck_payload(
@@ -803,6 +821,7 @@ async def _advance_progression(
         return _gate_rejection(instance, viewer_uid, RUN_CHANGED)
     if check_decisions.pending_any(instance):
         await dependencies.save_instance(instance)
+        _arm_decision_timeouts(dependencies, instance)
         return _result(_pending_luck_payload(instance, roll=roll_payload))
     try:
         narration, _ = await _process_round(
@@ -1142,6 +1161,10 @@ async def continue_after_decision(
     if decision.get("round_already_resolved"):
         return _result({**decision, "phase": "done", "advanced": True})
     if not decision.get("ready_to_resolve"):
+        # A decision restarts its own timeout; re-arm whatever is still open.
+        waiting = dependencies.get_instance(dependencies.parse_game_key(game_key))
+        if waiting is not None:
+            _arm_decision_timeouts(dependencies, waiting)
         return _result({**decision, "advanced": False})
 
     instance = dependencies.get_instance(
@@ -1225,6 +1248,7 @@ async def advance_round(
             return _check_model_config_result(instance)
         pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
+            _arm_decision_timeouts(dependencies, instance)
             return _result(_pending_luck_payload(instance), 409)
         advanced_declined_luck: list[dict[str, Any]] = []
         if pending_luck:
@@ -1284,6 +1308,7 @@ async def advance_round(
         pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
             await dependencies.save_instance(instance)
+            _arm_decision_timeouts(dependencies, instance)
             return _result(_pending_luck_payload(instance))
         declined_luck: list[dict[str, Any]] = []
         if pending_luck:

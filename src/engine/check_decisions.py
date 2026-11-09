@@ -114,6 +114,26 @@ def close_disabled(inst: Any) -> list[str]:
     return closed
 
 
+def close_timed_out(inst: Any, check_id: str) -> bool:
+    """Accept the original result of one unanswered Push; never re-roll.
+
+    A check whose Luck choice is still open is left to the Luck timeout, which
+    closes its Push together with the Luck decision.
+    """
+    checks.require_writable(inst)
+    validate_all(inst)
+    if inst.state != GameState.ACTIVE_JUDGMENT or not checks.round_checks_prepared(inst):
+        return False
+    check = next((c for c in checks.last_checks(inst) if c.get("check_id") == check_id), None)
+    push = _state(check) if check is not None else None
+    if (push is None or push["status"] not in OPEN or not _in_scope(inst, push)
+            or check.get("luck_decision") == "pending"):
+        return False
+    close(check, reason="push_timeout")
+    _sync(inst)
+    return True
+
+
 def _sync(inst: Any) -> None:
     if checks.last_check(inst):
         target = next((c for c in checks.last_checks(inst) if c.get("check_id") == checks.last_check(inst).get("check_id")), None)
