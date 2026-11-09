@@ -163,3 +163,109 @@ git diff --check
 - 白名单文件对照：
 - 测试 1–25 / 聚焦 / 回归 / 全量 / ruff / diff：
 - 偏差、停止原因与未决事项：
+
+## 10. 执行报告（2026-11-09）
+
+- **实际基线**：`5efb0194`（`feat/dnd2024-s0f1-d20-skills` 链头；S0-B 的选择槽、D3 的掷后窗口主干、F1 的 `derive_skill_check()` 均在链内）
+- **分支 / 提交**：`feat/dnd2024-s0f2-bardic-inspiration`
+  1. `36c2ac0a` 声明：`bardic_inspiration`(1)、`font_of_inspiration`(5)、`peerless_skill`(14)、`superior_inspiration`(18)；`CHECK_WINDOW_TRIGGERS` 扩为 `{attack_roll_success, grant, own_check_failure}`，`ACTION_KINDS` 增 `bardic_grant`／`inspiration_slot_exchange`
+  2. `6f53dcb7` 授予、实例与失手窗口
+  3. `fc779f06` 属性检定面（Hide）
+  4. `5530d64c` Font 的槽换次数与 Superior 的先攻补足
+  5. `ebd6166c` 授予的校验前置、失败面排队、25 条矩阵测试
+- **改动文件**：`combat/check_windows.py`、`combat/resolution.py`、`combat/validation.py`、`combat/reducer.py`、`combat/engine.py`、`features/models.py`、`content/class_feature_catalogs/srd_class_features.json`、新建 `tests/rulesets/test_dnd2024_bardic_inspiration.py`
+
+### 实例是 combat 状态，不是第二张资源表
+
+`combat["bardic_instances"]` 只有一份，字段 `die_instance_id`／`holder_id`／`source_actor_id`／`die_sides`／`granted_at_minute`／`expires_at_minute`／`status`。三类账目因此天然分开：Bard 的**可授予次数**仍是 `resources.class.bardic_inspiration`（`class_resource.spent`／`refunded`），目标的**持有**是实例（`bardic.consumed` 把状态改成 `rolled`），Peerless／Cutting Words 直接吃 Bard 自己的次数。没有任何一处用"实例是否存在"去推断次数，也没有用次数去掩盖实例。
+
+`dnd2024.bardic.granted` 由 reducer 写库时做两件事：顺手清掉已过期实例，以及重复持有 fail closed（同一持有者出现第二条 `active` 记录即拒绝整批）。`gameplay_view` 用与窗口同一个谓词（`now < expires_at_minute` 且 `status == "active"`）投影，所以过期的骰在视图里和可用性上同一刻消失，不需要后台任务。
+
+### 一小时只认权威世界时钟
+
+`_logical_minutes()` = `clock_to_minutes(world_clock(instance.world_state))`，`granted_at_minute` 由 resolution 算好写进事件，reducer 不读时钟——重放同一批次得到同一分钟。矩阵 6 用 `advance_world_time(instance, 59)` 与再 +1 分钟钉住边界：59 分钟仍有窗口，够 60 分钟当次即无窗口。测试全程没有 `sleep`、没有系统时间。
+
+### 失败面：一次掷骰只重判一次，但可以排多个面
+
+失手后 `_failed_attack_windows()` 按固定顺序返回 `bardic_inspiration` → `peerless_skill`。**这轮修掉了它只取 `codes[0]` 的缺陷**：一个 Lore 14 的诗人如果手里还攥着别人给的骰，他同时拥有两个合法失败面，原来取消第一个就把第二个静默丢了。现在 settlement 记录 `failed_offered`，收尾时若重判仍是失败就打开下一个面（矩阵 22）。
+
+代价与取舍：同一枚 d20 上两个面依次结算意味着可能掷两颗骰加同一个总值。这是"每次失败都可以用一次特性"的直接结果（两处措辞都是 "when the creature fails a D20 Test"），且每个面各扣各的资源，没有重复消费同一份成本。事件层面每个面各自一批，各自的 `check.resolved` 保留当时的总值与该面骰迹。
+
+`settlement["miss_face"] = True` 让未翻盘的所有路径（取消、掷了还失败）复刻直通失手的 Graze 专精伤害；这条是补齐"窗口路径与直通路径必须落在同一处"的一致性缺口。
+
+### Font / Superior
+
+Font 的槽换次数是 `action.kind = "inspiration_slot_exchange"`，`cost: {}`（无动作），走 `class_resource.refunded` + `dnd2024.spell.slot_spent{exchange: true}`。`exchange: true` 让 reducer 不置 `slot_spell_cast`——换次数不是施法，否则同一回合会被"已施法"卡住。前置校验要求"确有已消耗次数"且"该环法术位仍可用"，两步在同一批次里原子生效；重复提交的第二条被"no expended"挡下，不产生部分扣账（矩阵 11）。
+
+Superior 挂在 `_start_combat_event` 的真实先攻之后：`refilled{target: 2}`，reducer 取 `max(current, min(2, maximum))`。18 级 Bard 的 Cha 上限是 2，所以"满额时不溢出"与"0/1 补到 2"用同一行代码表达（矩阵 12）。
+
+### Peerless 的退款在同批次
+
+修正后仍失败 → 同一批次追加 `class_resource.refunded{reason: "peerless_failure"}`，顺序是 `check.resolved` → `refunded`，不存在的中间态是"扣了没退"。骰已真实掷出并留在 `check.resolved` 的 `window_roll`／`window_bonus_rolls` 里，所以"掷了但没花"是可审计的，不是"没掷"。
+
+### Cutting Words 三个面各归其位
+
+攻击面沿用 D3 的 `cutting_words_check` 未改；伤害面 `cutting_words_damage` 是 D3 既有实现，抗性前减骰与最低 0 由 `test_dnd2024_check_windows.py::test_cutting_words_damage_face_reduces_committed_damage` 继续固定。本切片新增的是**属性检定成功面** `cutting_words_ability`：`surface = ability_check`，`uses_reaction = True`，只在实际 `check.resolved` 之后开口，减骰后重判。hide 的 `invisible` 只在重判成功时落，失败则不落——与直通路径一致（矩阵 17）。
+
+### 校验期拒绝 vs 结算期重验
+
+原来的 `_bardic_grant_events` 对"自授／超距／看不见听不到／已持有"一律 `raise CombatIntentError`。`resolve_intent` 只在 `validate_intent` 外面有 `try`，所以这些错误会**穿透成异常**而不是 `{"ok": False}`，与 `_validate_attack` 既有的"声明式前置校验 + 结算重验"模式不一致。本轮把四项事实的判定移到 `_validate_class_capability`，resolution 侧保留同样的判断作为纵深防御。合并后 `test_grant_rejects_self_out_of_range_and_unseen_targets` 用两张桌分别验证"射程"与"看不见听不到"（同一张桌上 70 尺必然先撞射程）。
+
+### 矩阵 1–25 对照
+
+| 编号 | 证据 | 备注 |
+|---|---|---|
+| 1 | `test_die_face_follows_the_bard_progression[4 档]`、`test_wrong_class_cannot_grant` | d6/d8/d10/d12，次数 = max(1, Cha) = 2 |
+| 2 | `test_grant_spends_bonus_action_and_one_use` | 附赠动作 1→0、次数 2→1、实例 1 条 |
+| 3 | `test_grant_rejects_self_out_of_range_and_unseen_targets` | 自授／70 尺／隐身+目盲，均不产生实例 |
+| 4 | `test_second_grant_to_one_holder_is_rejected_and_others_keep_their_own` | 换回合再授 → "already holds"，次数不变 |
+| 5 | `test_instance_survives_a_save_round_trip_and_level_up_keeps_the_face` | JSON 往返逐字段相等，骰面是快照 |
+| 6 | `test_expiry_is_exactly_one_hour_of_logical_minutes` | 59 有窗口、60 无窗口 |
+| 7–8 | `test_held_die_turns_a_miss_into_a_hit_and_is_consumed`、`test_held_die_is_consumed_even_when_the_roll_still_fails` | 掷后 `status = rolled`，两条路径都消费 |
+| 9 | `test_a_hit_never_offers_the_holder_die`、`test_declining_keeps_the_die_and_matches_the_straight_through_miss` | 命中不开口；取消不消费 |
+| 10 | `test_short_rest_only_restores_from_level_five` | 走 `srd_recovery.json` 的 `short_all_from_level: 5` |
+| 11 | `test_font_exchanges_one_slot_for_one_use` | 槽 -1、次数 +1、未置 `slot_spell_cast` |
+| 12 | `test_superior_refills_to_two_on_the_real_initiative_roll` | 0→2；满额不变 |
+| 13 | `test_peerless_only_answers_the_bards_own_failed_roll` | 他人失手不开 Peerless 窗口 |
+| 14 | `test_peerless_consumes_on_success_and_refunds_on_failure` | 仍失败整批退款、成功只扣一次 |
+| 15 | `test_peerless_needs_no_held_die_and_never_touches_instances` | 别人的实例保持 `active` |
+| 16 | `test_dnd2024_cutting_words.py`（D3 全套 30+ 条） | 攻击面未改，回归通过 |
+| 17 | `test_cutting_words_can_cut_a_successful_hide`、`test_a_cut_that_still_succeeds_still_spends` | 转失败不落 invisible；仍成功也扣 Reaction 与次数 |
+| 18–19 | `test_dnd2024_check_windows.py` 的 damage face 用例 | 固定伤害不开口、抗性前减骰、最低 0 |
+| 20 | 同 16/17 | 2024 只保留可见与距离；无听觉/Charmed 限制 |
+| 21 | `test_unknown_decisions_fail_closed_and_a_replay_never_spends_twice` | 伪造 decision 被拒，状态不变 |
+| 22 | `test_a_held_die_is_offered_before_the_holder_own_pool` | 手持骰先、Peerless 后，取消不串味 |
+| 23 | `test_a_long_rest_refills_the_pool_without_touching_the_live_die` | 长休补次数，实例记录不动；8 小时逻辑时间才让它消失 |
+| 24 | 同 21 + 5 | 同 `intent_id` 同 `expected_version` 回放返回原批次，`apply_batch` 判重 |
+| 25 | 全量 `tests/rulesets` | 净引入 0（见验收段） |
+
+### 白名单对照（§5）
+
+| 白名单项 | 是否改动 | 说明 |
+|---|---|---|
+| 1 类特性目录 + en/zh-CN locale | 是 | 4 条新声明；标签键 `bardic_inspiration`／`font_of_inspiration`／`peerless_skill`／`superior_inspiration` 早已在 locale 中存在，未新增 |
+| 2 `features/models.py` | 是 | 只扩两个闭集（`CHECK_WINDOW_TRIGGERS`、`ACTION_KINDS`） |
+| 3 `combat/*` | 是 | `check_windows.py` 主力、`resolution.py` 事件、`validation.py` 前置、`reducer.py` 四类事件、`engine.py` 视图一行 |
+| 4 `resting/engine.py`、`progression/advancement.py` | **否** | 短休语义已由 `srd_recovery.json` 的 `short_all_from_level` 表达，无需改代码 |
+| 5 新建测试 | 是 | `test_dnd2024_bardic_inspiration.py`（25 条）；未改 `test_dnd2024_cutting_words.py` |
+| 6 不碰通用引擎 | 遵守 | `world_state.py`／`world_events.py` 零改动，只调用 `clock_to_minutes`／`world_clock`／`advance_world_time` |
+
+### 验收结果
+
+| 命令 | 结果 |
+|---|---|
+| `pytest test_dnd2024_bardic_inspiration.py test_dnd2024_cutting_words.py test_dnd2024_check_windows.py -q` | **112 passed** |
+| `pytest test_dnd2024_resting.py test_dnd2024_spells.py -q` | **13 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1654 passed** |
+| `ruff check …`（白名单五项） | All checks passed |
+| `git diff --check` | 无输出 |
+
+全量失败清单与 F1 收尾记录的基线**逐条相同**（全部在 `test_dnd2024_character_builder.py`，`unresolved reference 'ability:con' in background:soldier` 一族），F2 净引入 **0**；通过数从 1629 增至 1654，正好是本切片的 25 条。
+
+### 偏差、停止原因与未决事项
+
+1. **豁免面未实现（已裁决的偏差）**。持有者在**法术豁免**失败后加骰重判属于同一特性的另一个面，但 `_spell_effect_events` 把"逐目标豁免 → 伤害 → 附加条件"内联在同一个循环里，要暂停等窗口就得把循环尾部（约 300 行）抽成可续算函数。本轮按裁决只交付主体，豁免面作为独立跟进切片，先做单目标。
+2. **`deafened` 未建模**。工作可见/听觉判定用"隐身施予者 + 目盲承受者"这一对表达"既看不见也听不到"，因为状态词表里没有 `deafened` 的任何听觉语义。这只让判定偏保守（少拒绝），不会误放行已建模的条件。
+3. **叠面时 `window_bonus_rolls` 只留最后一面**。第二个面重判时 `check["total"]` 累加正确，但 `window_bonus`／`window_bonus_rolls` 被覆盖为当前面的骰。每个面的 `check.resolved` 各在自己的批次里留痕，所以审计不受影响；如果以后要做单事件回放展示，需要改成累加并区分"本面骰"与"累计加值"。
+4. **"升级不回写旧实例骰面"没有独立断言**。构造上不可变：`die_sides` 是授予时写进事件的快照，`_active_bardic_instance()` 读记录而不读 track。矩阵 5 用存档往返与快照字段固定了这一点，但没走一次真实 `apply_advancement`。
+5. **`_failed_attack_window_offer` 的 `exclude` 是写入 settlement 的字符串列表**，不是集合；顺序信息用来保证"按注册表顺序给面"，重复项由调用方保证不出现（每次 offer 前先取差集）。
