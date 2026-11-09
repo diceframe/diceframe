@@ -761,11 +761,11 @@ class CombatCheckWindowsMixin:
             return []
         failed = not check.get("success")
         surface = str(settlement.get("surface") or "")
-        reroll_faces = (
-            ("stroke_of_luck_save",)
-            if surface == "death_save"
-            else ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
-        )
+        # 死亡豁免与其它豁免同一套重掷面：重掷是"换一颗新骰并强制采用"，
+        # 旧的天然面不复存在，所以 natural 1 的两重失败只对被换掉的那颗骰
+        # 生效，重掷后面临的是新骰。真正不能被骰子救的只有"在原骰上加值"
+        # 这一类（见下方 skip_dool）。
+        reroll_faces = ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
         pairs: list[tuple[str, str]] = []
         if failed:
             for code in reroll_faces:
@@ -773,8 +773,9 @@ class CombatCheckWindowsMixin:
                 if owner_id:
                     pairs.append((code, owner_id))
             # A natural 1 on a death save is two failures no matter the total,
-            # so a die can never help it.  Stroke of Luck rewrites the face and
-            # therefore still can, which is why only Dark Luck is skipped.
+            # so adding a die can never help it.  Faces that *replace* the roll
+            # (Stroke of Luck, and now the rerolls above) still can, which is
+            # why only Dark One's Own Luck is skipped here.
             skip_dool = (
                 str(settlement.get("surface") or "") == "death_save"
                 and int(check.get("natural", 0) or 0) == 1
@@ -845,11 +846,12 @@ class CombatCheckWindowsMixin:
     ) -> dict[str, Any] | None:
         """The first window on a failing death save, or ``None``.
 
-        A decisive save (natural 20, or a total of 10+) opens nothing, and a
-        natural 1 cannot be rescued by a die -- it costs two failures whatever
-        the total.  Stroke of Luck still applies to either, because it rewrites
-        the face instead of adding to the total.  Reroll faces stay closed
-        here; see ``_save_window_candidates`` for why.
+        A decisive save (natural 20, or a total of 10+) opens nothing.  Every
+        legal face is available here, including the rerolls: a reroll discards
+        the old die, so a failed death save can be rerolled into a success and
+        a natural 1 stops being two failures once its face is gone.  Only
+        *adding* a die is skipped on a natural 1 -- see
+        ``_save_window_candidates``.
         """
 
         payload = dict(settlement or {})
@@ -1346,6 +1348,10 @@ class CombatCheckWindowsMixin:
                 "type", "kind", "actor_id", "source_actor_id", "ability",
                 "modifier", "check_bonus", "check_bonus_rolls", "aura_bonus",
                 "aura_sources", "target", "repeat_save",
+                # 重掷只换骰面，不换这条豁免的判定规则：死亡豁免的暴击阈值
+                # 来自特性（Disciplined Survivor 之类），丢了就会把 18+ 的
+                # 成功当成普通成功。
+                "death_save_crit_threshold",
             ) if key in check
         }
         rerolled = {
