@@ -351,6 +351,27 @@
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
         {
+          "id": "oath_of_devotion_spells",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p56:oath-of-devotion-spells",
+          "summary": "When you reach a Paladin level specified in the Oath of Devotion Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:protection_from_evil_and_good",
+              "3:spell:shield_of_faith",
+              "5:spell:aid",
+              "5:spell:zone_of_truth",
+              "9:spell:beacon_of_hope",
+              "9:spell:dispel_magic",
+              "13:spell:freedom_of_movement",
+              "13:spell:guardian_of_faith",
+              "17:spell:commune",
+              "17:spell:flame_strike"
+            ]
+          }
+        },
+        {
           "id": "paladins_smite",
           "minimum_level": 2,
           "summary": "Divine Smite is always prepared; one free cast per Long Rest.",
@@ -796,6 +817,29 @@
           }
         },
         {
+          "id": "magical_discoveries",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p35:magical-discoveries",
+          "summary": "You learn two spells of your choice from the Cleric, Druid, or Wizard spell list. A chosen spell must be a cantrip or a spell for which you have spell slots. You always have them prepared and they don't count against your Prepared Spells number; whenever you gain a Bard level, you can replace one of them.",
+          "parameters": {
+            "spell_choice_count": 2,
+            "spell_choice_replacement": 1,
+            "spell_choice_lists": ["class:cleric", "class:druid", "class:wizard"]
+          }
+        },
+        {
+          "id": "magical_secrets",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p33:magical-secrets",
+          "summary": "Whenever you reach a Bard level and the Prepared Spells number increases, you can choose any of your new prepared spells from the Bard, Cleric, Druid, and Wizard lists; those spells count as Bard spells. Whenever you replace a prepared spell, it can come from those lists too. This never changes how many spells you can prepare.",
+          "parameters": {
+            "prepared_list_expansion": [
+              "class:bard", "class:cleric", "class:druid", "class:wizard"
+            ]
+          }
+        },
+        {
           "id": "peerless_skill",
           "owner": "subclass:college_of_lore",
           "minimum_level": 14,
@@ -835,6 +879,27 @@
       "source_ref": "srd-5.2.1:p64:sorcerer-features",
       "features": [
         {
+          "id": "draconic_spells",
+          "owner": "subclass:draconic_sorcery",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p70:draconic-spells",
+          "summary": "When you reach a Sorcerer level specified in the Draconic Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:alter_self",
+              "3:spell:chromatic_orb",
+              "3:spell:command",
+              "3:spell:dragon_s_breath",
+              "5:spell:fear",
+              "5:spell:fly",
+              "7:spell:arcane_eye",
+              "7:spell:charm_monster",
+              "9:spell:legend_lore",
+              "9:spell:summon_dragon"
+            ]
+          }
+        },
+        {
           "id": "draconic_resilience",
           "owner": "subclass:draconic_sorcery",
           "minimum_level": 3,
@@ -851,6 +916,27 @@
     "warlock": {
       "source_ref": "srd-5.2.1:p70:warlock-features",
       "features": [
+        {
+          "id": "fiend_spells",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p76:fiend-spells",
+          "summary": "When you reach a Warlock level specified in the Fiend Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:burning_hands",
+              "3:spell:command",
+              "3:spell:scorching_ray",
+              "3:spell:suggestion",
+              "5:spell:fireball",
+              "5:spell:stinking_cloud",
+              "7:spell:fire_shield",
+              "7:spell:wall_of_fire",
+              "9:spell:geas",
+              "9:spell:insect_plague"
+            ]
+          }
+        },
         {
           "id": "dark_ones_blessing",
           "owner": "subclass:fiend_patron",
@@ -881,12 +967,74 @@
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
         {
+          "id": "life_domain_spells",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:life-domain-spells",
+          "summary": "When you reach a Cleric level specified in the Life Domain Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:aid",
+              "3:spell:bless",
+              "3:spell:cure_wounds",
+              "3:spell:lesser_restoration",
+              "5:spell:mass_healing_word",
+              "5:spell:revivify",
+              "7:spell:aura_of_life",
+              "7:spell:death_ward",
+              "9:spell:greater_restoration",
+              "9:spell:mass_cure_wounds"
+            ]
+          }
+        },
+        {
           "id": "supreme_healing",
           "owner": "subclass:life_domain",
           "minimum_level": 17,
           "source_ref": "srd-5.2.1:p40:supreme-healing",
           "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
           "parameters": {}
+        }
+      ]
+    },
+    "druid": {
+      "source_ref": "srd-5.2.1:p46:druid-features",
+      "features": [
+        {
+          "id": "circle_of_the_land_spells",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p46:circle-of-the-land-spells",
+          "summary": "Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical; you have the spells listed for your Druid level and lower prepared. The choice replaces the previous land's list rather than adding to it.",
+          "parameters": {
+            "terrain_options": ["arid", "polar", "temperate", "tropical"],
+            "always_prepared_terrain": [
+              "arid:3:spell:blur",
+              "arid:3:spell:burning_hands",
+              "arid:3:spell:fire_bolt",
+              "arid:5:spell:fireball",
+              "arid:7:spell:blight",
+              "arid:9:spell:wall_of_stone",
+              "polar:3:spell:fog_cloud",
+              "polar:3:spell:hold_person",
+              "polar:3:spell:ray_of_frost",
+              "polar:5:spell:sleet_storm",
+              "polar:7:spell:ice_storm",
+              "polar:9:spell:cone_of_cold",
+              "temperate:3:spell:misty_step",
+              "temperate:3:spell:shocking_grasp",
+              "temperate:3:spell:sleep",
+              "temperate:5:spell:lightning_bolt",
+              "temperate:7:spell:freedom_of_movement",
+              "temperate:9:spell:tree_stride",
+              "tropical:3:spell:acid_splash",
+              "tropical:3:spell:ray_of_sickness",
+              "tropical:3:spell:web",
+              "tropical:5:spell:stinking_cloud",
+              "tropical:7:spell:polymorph",
+              "tropical:9:spell:insect_plague"
+            ]
+          }
         }
       ]
     },
