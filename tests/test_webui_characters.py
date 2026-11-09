@@ -760,6 +760,44 @@ async def test_update_character_allows_values_outside_template_suggestion(web_ap
     assert sheet["max_hp"] == 88
 
 
+@pytest.mark.asyncio
+async def test_character_edit_preserves_marked_skill_identity_and_rejects_ambiguous_changes(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    created = await api.create_game("template_world", "growth", players=[{"character_name": "Alice"}])
+    uid = created['players'][0]['user_id']
+    instance = registry.get(api._parse_key(created['game_key']))
+    sheet = instance.get_character_sheet(uid)
+    sheet['skills'] = [{'name': 'Spot Hidden', 'value': 40, 'id': 'spot_hidden'},
+                       {'name': 'Forbidden', 'value': 5, 'id': 'forbidden', 'improvable': False}]
+    instance.modules['skill_growth'] = {'schema_version': 1, 'receipts': {}, 'pending': [
+        {'actor_uid': uid, 'skill_id': 'spot_hidden', 'label': 'Spot Hidden', 'check_id': 'c1', 'round': 1}]}
+    api.list_characters(created['game_key'], viewer_is_gm=True)
+    assert sheet['skills'][0]['id'] == 'spot_hidden'
+
+    valid = [{'name': 'Spot Hidden', 'value': 45, 'id': 'spot_hidden'},
+             {'name': 'Forbidden', 'value': 6, 'id': 'forbidden', 'improvable': True}]
+    assert (await api.update_character(created['game_key'], uid, {'skills': valid}, gm_authority=True))['ok']
+    assert sheet['skills'] == [{'name': 'Spot Hidden', 'value': 45, 'id': 'spot_hidden'},
+                               {'name': 'Forbidden', 'value': 6, 'id': 'forbidden', 'improvable': False}]
+    for rows in ([{'name': 'Spot Hidden', 'value': 45}],
+                 [{'name': 'Other', 'value': 45, 'id': 'spot_hidden'}],
+                 [valid[0], valid[0]],
+                 [{'name': 'Spot Hidden', 'value': 45, 'id': 'invented'}]):
+        before = deepcopy(sheet)
+        result = await api.update_character(created['game_key'], uid,
+                                            {'character_name': 'Changed', 'skills': rows}, gm_authority=True)
+        assert not result['ok']
+        assert sheet == before and instance.players[uid]['character_name'] == 'Alice'
+    from unittest.mock import patch
+    from src.engine.modules import skill_growth
+    rule = SimpleNamespace(growth_system='skill_improvement', template={'skill_improvement': {
+        'version': 1, 'success': 'above_skill_or_96', 'gain': 'd10', 'cap': 99}})
+    with patch('src.engine.dice_rng.roll_die', side_effect=[98, 6]):
+        receipt = skill_growth.settle(instance, rule, 'once', expected_run=instance.run_id)
+    assert receipt['changes'][0]['before'] == 45
+    assert receipt['changes'][0]['after'] == 51
+
+
 def test_validate_character_rejects_invalid_class():
     """职业校验：自定义职业放行（仅 warning），合法/空职业无错误。"""
     from pathlib import Path

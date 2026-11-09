@@ -44,7 +44,7 @@ from src.engine.memory_outbox import (
 )
 from src.engine.game_instance import GameInstance
 from src.engine import module_hooks
-from src.engine.modules import progression_state, room_access, ruleset_runtime
+from src.engine.modules import progression_state, room_access, ruleset_runtime, skill_growth
 from src.engine.player_control import claim_seat, is_human_controlled
 from src.content_modules.projection import ContentProjectionService, entries_for_world
 from src.commands.economy_effects import pending_decision_notice
@@ -837,8 +837,12 @@ async def adopt_library_card(
             return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
         if player_side_after_acting:
             return adopt_requires_gm_failure()
+        card = deepcopy(card)
+        for skill in card.get('skills') or []:
+            if isinstance(skill, dict):
+                skill.pop('id', None)
         return await _update_character_authority(
-            dependencies, instance, user_id, deepcopy(card), gm_authority=True,
+            dependencies, instance, user_id, card, gm_authority=True,
         )
 
 
@@ -891,6 +895,23 @@ async def _update_character_authority(
         )
         if denied:
             return field_requires_gm_failure(denied)
+    if "skills" in updates:
+        if not isinstance(updates["skills"], list):
+            return {"ok": False, "error": "Skills must be a list"}
+        old_skills = inst.get_character_sheet(user_id).get("skills", [])
+        accepted = set()
+        for row in updates["skills"]:
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            sid = row['id']
+            matches = [s for s in old_skills if isinstance(s, dict) and s.get('id') == sid]
+            if (not isinstance(sid, str) or len(matches) != 1 or sid in accepted
+                    or matches[0].get('name') != row.get('name')):
+                return {"ok": False, "error": "Skill identity changed or is ambiguous; reload the character and retry"}
+            accepted.add(sid)
+        pending = {mark['skill_id'] for mark in skill_growth.view(inst)['pending'] if mark['actor_uid'] == user_id}
+        if not pending.issubset(accepted):
+            return {"ok": False, "error": "A marked skill cannot be removed or renamed before settlement"}
     character_name = str(updates.pop("character_name", "")).strip()
     if character_name:
         inst.set_player_name(user_id, character_name)
@@ -986,6 +1007,12 @@ async def _update_character_authority(
     # 规范化技能格式
     if "skills" in updates:
         cs["skills"] = _normalize_skills(updates.get("skills", []), rule)
+        for source, row in zip((s for s in updates['skills'] if isinstance(s, (str, dict))), cs['skills']):
+            if isinstance(source, dict) and isinstance(source.get('id'), str) and source['id'] in accepted:
+                original = next(s for s in old_skills if isinstance(s, dict) and s.get('id') == source['id'])
+                row['id'] = original['id']
+                if 'improvable' in original:
+                    row['improvable'] = original['improvable']
     # 属性变化后可按规则补算 HP；若用户明确手填 HP，则尊重手填值。
     new_attrs = updates.get("attributes")
     if isinstance(new_attrs, dict) and not explicit_hp_update:

@@ -124,7 +124,7 @@ function skillDetail(s: string | CharacterSkill): string {
   const effect = String(s.effect || '').trim()
   if (effect) parts.push(t('skillEffectLine', { effect }))
   for (const [key, value] of Object.entries(s)) {
-    if (key === 'name' || key === 'value' || key === 'type' || key === 'key' || key === 'effect') continue
+    if (key === 'name' || key === 'value' || key === 'type' || key === 'key' || key === 'effect' || key === 'id' || key === 'improvable') continue
     if (value === undefined || value === null || value === '') continue
     parts.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`)
   }
