@@ -417,4 +417,63 @@ describe('ProfessionalCharacterCenter', () => {
     expect(body.free_cast).toEqual({ spell_mastery_1: 'spell:burning_hands' })
     expect(body.hit_dice).toEqual({})
   })
+
+  const awaitingPartyRest = {
+    active: true,
+    status: 'awaiting_approval',
+    rest: 'long',
+    ready_count: 2,
+    active_count: 2,
+    participants: [
+      { user_id: 'player/1', character_name: 'Arden', status: 'submitted' },
+      { user_id: 'player/2', character_name: 'Bree', status: 'submitted' },
+    ],
+    duration_minutes: 480,
+  }
+
+  function mountAwaiting(isGm: boolean) {
+    mocks.api.mockImplementation(() => Promise.resolve({ ok: true, rest_session: awaitingPartyRest }))
+    return mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+        restSession: awaitingPartyRest, isGm,
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+  }
+
+  it('tells a player the party is waiting for the GM instead of resolving', async () => {
+    const wrapper = mountAwaiting(false)
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.party-rest-status').text()).toContain('等待 DM 裁决')
+    expect(wrapper.get('.rest-center > button').text()).toContain('等待 DM 裁决')
+    // 玩家没有裁决权：连按钮都不呈现，而不是呈现一个点了会 403 的按钮。
+    expect(wrapper.find('[data-testid="rest-approve"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="rest-reject"]').exists()).toBe(false)
+    // 面板仍会按会话把休息类型锁到长休并读一次选项（既有行为），
+    // 但绝不能出现裁决请求。
+    expect(mocks.api.mock.calls.some(([path]) => String(path).endsWith('/rest/decide'))).toBe(false)
+  })
+
+  it('lets the GM approve a waiting rest and reports the elapsed time', async () => {
+    const wrapper = mountAwaiting(true)
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.rest-decision').text()).toContain('8 小时')
+    await wrapper.get('[data-testid="rest-approve"]').trigger('click')
+    await flushPromises()
+
+    const decide = mocks.api.mock.calls.find(([path]) => String(path).endsWith('/rest/decide'))
+    expect(decide).toBeTruthy()
+    expect(String(decide![0])).toBe('/games/web%7Croom%7Cbot/rest/decide')
+    const body = JSON.parse(decide![1].body)
+    expect(body.approve).toBe(true)
+    expect(body.operation_id).toBeTruthy()
+    expect(wrapper.emitted('rest-pending')).toHaveLength(1)
+  })
 })
