@@ -16,6 +16,7 @@ import type {
 } from '@/api/types'
 import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import {
+  decideLiveRest,
   fetchLiveCharacterRestOptions,
   fetchLiveCharacterSpellOptions,
   resolveLiveCharacterRest,
@@ -32,7 +33,9 @@ const props = withDefaults(defineProps<{
   cardId?: string
   restSession?: RestSessionStatus | null
   initialFocus?: 'rest'
-}>(), { language: 'zh-CN', gameKey: '', userId: '', cardId: '' })
+  /** GM 才能裁决队伍休息；缺省按玩家处理，绝不自行提权。 */
+  isGm?: boolean
+}>(), { language: 'zh-CN', gameKey: '', userId: '', cardId: '', isGm: false })
 const emit = defineEmits<{
   saved: [character: CharacterSheet, reason?: 'profile' | 'rest']
   'rest-pending': []
@@ -202,6 +205,33 @@ function toggleCantrip(ref: string): void {
     || spellDraft.cantrips.length
   if (spellDraft.cantrips.length >= capacity) return
   spellDraft.cantrips.push(ref)
+}
+
+// 队伍休息在全员申报后停在 awaiting_approval：游戏时间由 DM 的裁决推进，
+// 玩家侧只显示「等待」，GM 侧才出现确认/拒绝。
+const restAwaitingDecision = computed(() => props.restSession?.status === 'awaiting_approval')
+const restDecisionBusy = ref(false)
+const restDurationLabel = computed(() => {
+  const minutes = Number(props.restSession?.duration_minutes || 0)
+  if (!minutes) return ''
+  return minutes % 60 === 0
+    ? text(`${minutes / 60} 小时`, `${minutes / 60} h`)
+    : text(`${minutes} 分钟`, `${minutes} min`)
+})
+async function decideRest(approve: boolean): Promise<void> {
+  if (props.target !== 'game' || !props.gameKey || restDecisionBusy.value) return
+  restDecisionBusy.value = true
+  failure.value = ''
+  try {
+    const response = await decideLiveRest(props.gameKey, approve, operationId('rest-decision'))
+    if (!response.ok) throw new Error(response.error || text('裁决失败', 'Could not record the decision'))
+    restOptionsLoaded.value = false
+    emit('rest-pending')
+  } catch (cause: unknown) {
+    failure.value = errorMessage(cause)
+  } finally {
+    restDecisionBusy.value = false
+  }
 }
 
 // 长休的两类声明都来自服务端：地形选项与法术研究候选由规则运行时算好后下发，
@@ -619,9 +649,16 @@ async function completeRest(): Promise<void> {
       </template>
       <section v-if="target === 'game'" ref="restCenter" class="rest-center">
         <div><h3>{{ text('需要恢复？在这里完成休息', 'Need to recover? Complete a rest here') }}</h3><p>{{ text('你只选择休息类型和要花几颗生命骰；实际骰点、生命值、法术位和职业资源都由服务端计算。', 'Choose the rest type and how many Hit Dice to spend. The server rolls and updates HP, spell slots, and class resources.') }}</p></div>
-        <div v-if="restSession?.active || restSession?.status === 'completed'" class="party-rest-status" role="status">
-          <strong>{{ restSession.status === 'completed' ? text('队伍休息已完成', 'Party rest completed') : text(`队伍${restSession.rest === 'short' ? '短休' : '长休'}准备：${restSession.ready_count}/${restSession.active_count}`, `Party ${restSession.rest === 'short' ? 'short' : 'long'} rest: ${restSession.ready_count}/${restSession.active_count} ready`) }}</strong>
+        <div v-if="restSession?.active || restSession?.status === 'completed' || restSession?.status === 'rejected'" class="party-rest-status" role="status">
+          <strong>{{ restSession.status === 'completed' ? text('队伍休息已完成', 'Party rest completed') : restSession.status === 'rejected' ? text('DM 拒绝了这次休息', 'The GM rejected this rest') : restSession.status === 'awaiting_approval' ? text('全员已提交，等待 DM 裁决', 'Everyone is ready; waiting for the GM') : text(`队伍${restSession.rest === 'short' ? '短休' : '长休'}准备：${restSession.ready_count}/${restSession.active_count}`, `Party ${restSession.rest === 'short' ? 'short' : 'long'} rest: ${restSession.ready_count}/${restSession.active_count} ready`) }}</strong>
           <span v-for="row in restSession.participants" :key="row.user_id" :class="row.status">{{ row.character_name }} · {{ row.status === 'submitted' ? text('已准备', 'Ready') : text('等待', 'Waiting') }}</span>
+        </div>
+        <div v-if="isGm && restAwaitingDecision" class="rest-decision" role="group" aria-label="rest decision">
+          <p class="rest-options-help">{{ text(`批准后游戏时间将推进${restDurationLabel || '规则声明的时长'}；拒绝则角色与时序都不变。`, `Approving advances game time by ${restDurationLabel || 'the ruleset duration'}; rejecting leaves characters and the clock untouched.`) }}</p>
+          <div class="rest-decision-actions">
+            <button type="button" class="primary" data-testid="rest-approve" :disabled="restDecisionBusy" @click="decideRest(true)">{{ text('确认休息', 'Approve rest') }}</button>
+            <button type="button" data-testid="rest-reject" :disabled="restDecisionBusy" @click="decideRest(false)">{{ text('拒绝', 'Reject') }}</button>
+          </div>
         </div>
         <div class="rest-types">
           <label class="rest-type-option" :class="{ selected: restType === 'short' }"><input v-model="restType" type="radio" value="short" :disabled="restSession?.active"> <span><b>{{ text('短休', 'Short Rest') }}</b><small>{{ text('花生命骰回血，并恢复部分职业资源', 'Spend Hit Dice and recover some class resources') }}</small></span></label>
@@ -684,7 +721,7 @@ async function completeRest(): Promise<void> {
         <div class="rest-actions">
           <label class="rest-confirm"><input v-model="restConfirmed" type="checkbox"><span>{{ text('我确认游戏内时间会随本次休息推进', 'I understand that in-game time advances during this rest') }}</span></label>
         </div>
-        <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
+        <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : restAwaitingDecision ? text('已提交，等待 DM 裁决', 'Submitted; waiting for the GM') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
       </section>
       </div>
 
@@ -729,7 +766,7 @@ async function completeRest(): Promise<void> {
 .class-feature-card p { margin: 0; color: var(--df-text-muted); line-height: 1.5; }
 .class-resource-section .spell-slot-card strong { color: var(--df-accent-strong); }
 .resource-section { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--df-border-soft); border-radius: 12px; background: color-mix(in srgb, var(--df-surface-1) 92%, var(--df-accent) 4%); }.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }.section-heading h3 { margin: 0; }.section-heading span { color: var(--df-text-muted); font-size: 12px; }.spell-slot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }.spell-slot-card { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--df-border-soft); border-radius: 9px; background: color-mix(in srgb, var(--df-control-bg) 72%, transparent); }.spell-slot-card small { color: var(--df-text-muted); }.spell-slot-card strong { font-size: 20px; }.spell-slot-card strong span { color: var(--df-text-muted); font-size: 14px; font-weight: 400; }.slot-meter { height: 4px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--df-text) 12%, transparent); }.slot-meter i { display: block; height: 100%; border-radius: inherit; background: var(--df-accent); }.empty-resource { margin: 0; color: var(--df-text-muted); }
-.rest-center { display: grid; gap: 10px; margin-top: 8px; padding: 13px; border: 1px solid color-mix(in srgb, var(--df-accent) 58%, var(--df-border-soft)); border-radius: 12px; background: color-mix(in srgb, var(--df-accent) 8%, transparent); }.rest-center h3, .rest-center p { margin: 0; }.rest-center p { color: var(--df-text-muted); }.rest-types { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); justify-content: start; gap: 8px; }.rest-type-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; min-height: 52px; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--df-border-soft); border-radius: 8px; cursor: pointer; transition: border-color .16s ease, background-color .16s ease; }.rest-type-option:hover { border-color: var(--df-accent); }.rest-type-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 12%, transparent); }.rest-type-option input[type="radio"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; accent-color: var(--df-accent); cursor: pointer; }.rest-type-option span { display: grid; gap: 1px; min-width: 0; text-align: left; }.rest-type-option b { line-height: 1.35; }.rest-type-option small { color: var(--df-text-muted); line-height: 1.35; }.party-rest-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--df-accent) 45%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.party-rest-status strong { flex-basis: 100%; }.party-rest-status span { color: var(--df-text-muted); font-size: 12px; }.party-rest-status span.submitted { color: var(--df-accent-strong); }.hit-dice-grid { display: flex; flex-wrap: wrap; gap: 9px; }.hit-dice-grid label { display: grid; gap: 5px; }.hit-dice-grid input { width: 92px; max-width: 100%; }.server-roll-note { font-size: 12px; }.rest-actions { display: block; padding-top: 4px; }.rest-submit { justify-self: end; }.rest-confirm { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 9px; min-width: 0; }.rest-confirm input { width: 18px; height: 18px; margin: 1px 0 0; }.rest-confirm span { line-height: 1.45; }.rest-options-help { font-size: 12px; }.rest-options-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--df-danger) 16%, transparent); color: var(--df-danger-strong); font-size: 12px; }.rest-terrain, .rest-study { display: grid; gap: 7px; margin: 0; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: 8px; }.rest-terrain legend, .rest-study legend { padding: 0 5px; color: var(--df-text-muted); font-size: 12px; }.rest-terrain-option { display: flex; align-items: center; gap: 7px; padding: 5px 7px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }.rest-terrain-option:hover { border-color: var(--df-accent); }.rest-terrain-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.rest-terrain-option input { accent-color: var(--df-accent); cursor: pointer; }.rest-study-row { display: grid; grid-template-columns: minmax(0, 130px) minmax(0, 1fr); align-items: center; gap: 9px; }.rest-study-row span { color: var(--df-text-muted); font-size: 12px; }.rest-study-row select { min-width: 0; width: 100%; max-width: 320px; }
+.rest-center { display: grid; gap: 10px; margin-top: 8px; padding: 13px; border: 1px solid color-mix(in srgb, var(--df-accent) 58%, var(--df-border-soft)); border-radius: 12px; background: color-mix(in srgb, var(--df-accent) 8%, transparent); }.rest-center h3, .rest-center p { margin: 0; }.rest-center p { color: var(--df-text-muted); }.rest-types { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); justify-content: start; gap: 8px; }.rest-type-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; min-height: 52px; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--df-border-soft); border-radius: 8px; cursor: pointer; transition: border-color .16s ease, background-color .16s ease; }.rest-type-option:hover { border-color: var(--df-accent); }.rest-type-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 12%, transparent); }.rest-type-option input[type="radio"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; accent-color: var(--df-accent); cursor: pointer; }.rest-type-option span { display: grid; gap: 1px; min-width: 0; text-align: left; }.rest-type-option b { line-height: 1.35; }.rest-type-option small { color: var(--df-text-muted); line-height: 1.35; }.party-rest-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--df-accent) 45%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.party-rest-status strong { flex-basis: 100%; }.party-rest-status span { color: var(--df-text-muted); font-size: 12px; }.party-rest-status span.submitted { color: var(--df-accent-strong); }.hit-dice-grid { display: flex; flex-wrap: wrap; gap: 9px; }.hit-dice-grid label { display: grid; gap: 5px; }.hit-dice-grid input { width: 92px; max-width: 100%; }.server-roll-note { font-size: 12px; }.rest-actions { display: block; padding-top: 4px; }.rest-submit { justify-self: end; }.rest-confirm { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 9px; min-width: 0; }.rest-confirm input { width: 18px; height: 18px; margin: 1px 0 0; }.rest-confirm span { line-height: 1.45; }.rest-options-help { font-size: 12px; }.rest-options-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--df-danger) 16%, transparent); color: var(--df-danger-strong); font-size: 12px; }.rest-terrain, .rest-study { display: grid; gap: 7px; margin: 0; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: 8px; }.rest-terrain legend, .rest-study legend { padding: 0 5px; color: var(--df-text-muted); font-size: 12px; }.rest-terrain-option { display: flex; align-items: center; gap: 7px; padding: 5px 7px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }.rest-terrain-option:hover { border-color: var(--df-accent); }.rest-terrain-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.rest-terrain-option input { accent-color: var(--df-accent); cursor: pointer; }.rest-study-row { display: grid; grid-template-columns: minmax(0, 130px) minmax(0, 1fr); align-items: center; gap: 9px; }.rest-study-row span { color: var(--df-text-muted); font-size: 12px; }.rest-study-row select { min-width: 0; width: 100%; max-width: 320px; }.rest-decision { display: grid; gap: 8px; padding: 9px 10px; border: 1px dashed color-mix(in srgb, var(--df-accent) 55%, transparent); border-radius: 8px; }.rest-decision-actions { display: flex; flex-wrap: wrap; gap: 8px; }.rest-decision-actions button { min-height: 32px; }
 .center-error { margin: 12px 0 0; padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--df-danger) 16%, transparent); color: var(--df-danger-strong); }.professional-character-center footer { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin: 0; padding: 12px 2px 2px; border-top: 1px solid var(--df-border-soft); background: var(--df-surface-1); }
 .rest-preparation { display: grid; gap: 9px; padding: 10px; border: 1px solid var(--df-border-soft); border-radius: 10px; background: color-mix(in srgb, var(--df-control-bg) 72%, transparent); }.spell-pick-group { display: grid; gap: 6px; }.spell-pick-group h4 { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 13px; }.spell-pick-group h4 small { color: var(--df-text-muted); font-weight: 400; }.spell-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; }.spell-chip { padding: 5px 10px; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text); font-size: 12px; cursor: pointer; }.spell-chip:hover { border-color: var(--df-accent); }.spell-chip.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 18%, transparent); color: var(--df-accent-strong); }.spell-undo { justify-self: start; padding: 5px 10px; font-size: 12px; }
 @media (max-width: 720px) { .professional-character-center { width: 100%; gap: 9px; }.center-hero p { display: none; }.center-hero h2 { font-size: 22px; }.center-tabs { grid-template-columns: 1fr 1fr; }.center-scroll-region { padding-right: 3px; }.vital-grid { grid-template-columns: 1fr 1fr; }.ability-grid { grid-template-columns: repeat(3, 1fr); }.profile-grid, .read-only-panel dl { grid-template-columns: 1fr; }.profile-grid .profile-wide { grid-column: auto; }.rest-submit { width: 100%; }.professional-character-center footer button { min-height: 40px; } }

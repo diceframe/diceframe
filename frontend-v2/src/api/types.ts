@@ -296,13 +296,30 @@ export interface RestSessionParticipant {
 
 export interface RestSessionStatus {
   active: boolean
-  status: 'idle' | 'collecting' | 'resolving' | 'completed' | 'error' | string
+  status: 'idle' | 'collecting' | 'awaiting_approval' | 'resolving' | 'completed' | 'rejected' | 'error' | string
   rest: 'short' | 'long' | null | string
   ready_count: number
   active_count: number
   participants: RestSessionParticipant[]
-  resolved_at?: string
+  /** Logical game clock ({day, minute}), never a wall-clock timestamp. */
+  started_clock?: { day: number, minute: number } | null
+  awaiting_since_clock?: { day: number, minute: number } | null
+  resolved_clock?: { day: number, minute: number } | null
+  /** Minutes this rest consumes, as declared by the ruleset. */
+  duration_minutes?: number | null
+  decided?: boolean
   error?: string
+}
+
+/** A GM verdict on a party rest that is waiting for approval. */
+export interface RestDecisionResponse {
+  ok: boolean
+  duplicate?: boolean
+  rejected?: boolean
+  duration_minutes?: number
+  rest_session?: RestSessionStatus
+  error?: string
+  code?: string
 }
 
 /** One spell a free-cast slot may legally hold, as computed by the server. */

@@ -11,6 +11,7 @@ import type {
   RulesetProgressionResponse,
   RulesetRestResponse,
   RulesetRestOptionsResponse,
+  RestDecisionResponse,
   RulesetGameplayResponse,
   RulesetTemporaryEncounterResponse,
   SpellPreparationOptionsResponse,
@@ -247,6 +248,18 @@ export function resolveLiveCharacterRest(
   return api<RulesetRestResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest`,
     { method: 'POST', body: JSON.stringify(body) },
+  )
+}
+
+/** GM verdict on a party rest; approval is where game time actually moves. */
+export function decideLiveRest(
+  gameKey: string,
+  approve: boolean,
+  operationId: string,
+): Promise<RestDecisionResponse> {
+  return api<RestDecisionResponse>(
+    `/games/${encodeURIComponent(gameKey)}/rest/decide`,
+    { method: 'POST', body: JSON.stringify({ approve, operation_id: operationId }) },
   )
 }
 
