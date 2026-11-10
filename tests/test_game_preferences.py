@@ -105,6 +105,56 @@ async def test_disabling_closes_only_unfinished_push_without_rerolling(phase):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('operation,uid,extra', [
+    ('request', 'a', {'reason': 'Use a lamp'}),
+    ('offer', 'gm', {'consequence': 'Noise'}),
+    ('reject', 'gm', {'reason': 'Not here'}),
+    ('decline', 'a', {}),
+    ('confirm', 'a', {}),
+])
+async def test_disabled_table_refuses_every_later_push_operation(operation, uid, extra):
+    """#714：关掉开关这条逃生路径不能被一次迟到的 Push 请求重新打开。"""
+    from src.webui.services.check_decisions import CheckDecisionDependencies, CheckDecisionService
+    inst, rule = prepared_game()
+    svc, _ = service_for(inst, rule)
+    assert (await svc.update('key', Viewer('gm', 'gm'), {'push_enabled': False}))['ok']
+    after_disable = deepcopy(inst.to_dict())
+    push = checks.last_checks(inst)[0]['push']
+    scope = {'run_id': inst.run_id, 'round_number': inst.round_number, 'expected_revision': push['revision']}
+
+    with pytest.raises(ValueError, match='Push is disabled'):
+        check_decisions.change(inst, 'c1', uid, operation, **scope, **extra)
+    save = AsyncMock()
+    service = CheckDecisionService(CheckDecisionDependencies(lambda _key: inst, save))
+    viewer = Viewer('gm', 'gm') if uid == 'gm' else Viewer('seat', 'a')
+    refused = await service.update('key', 'c1', viewer, operation, {**scope, **extra})
+
+    assert refused['ok'] is False and refused['code'] == 'PUSH_INVALID_OR_STALE'
+    save.assert_not_called()
+    assert inst.to_dict() == after_disable
+
+
+@pytest.mark.asyncio
+async def test_disabling_clears_the_waiting_push_and_offers_no_new_one():
+    inst, rule = prepared_game()
+    checks.last_checks(inst)[0].update(luck_decision='declined', luck_spend_available=False)
+    svc, _ = service_for(inst, rule)
+
+    response = await svc.update('key', Viewer('gm', 'gm'), {'push_enabled': False})
+
+    # The response the client renders: nothing left to decide, the round may resume.
+    assert response['closed_push_decisions'] == ['c1']
+    assert response['pending_push_decisions'] == []
+    assert response['phase'] == 'ready' and response['ready_to_resolve'] is True
+    # A later failed check of the same judgment is not offered Push while disabled.
+    fresh = {k: v for k, v in deepcopy(checks.last_checks(inst)[0]).items() if k != 'push'}
+    checks.replace_last_checks(inst, [*checks.last_checks(inst), {**fresh, 'check_id': 'c2'}])
+    check_decisions.prepare(inst, rule)
+    assert 'push' not in checks.last_checks(inst)[1]
+    assert not check_decisions.pending(inst)
+
+
+@pytest.mark.asyncio
 async def test_preference_write_is_gm_only_and_rollback_safe():
     inst, rule = prepared_game()
     before = deepcopy(inst.to_dict())
