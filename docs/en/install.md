@@ -10,6 +10,8 @@ Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](http
 
 Windows portable builds can check for and apply updates from the Version Update section under **Manage → Settings → About**.
 
+`DiceFrame.exe` opens DiceFrame in its own window using the Microsoft Edge WebView2 runtime that ships with Windows 11 and nearly all Windows 10 installations. Once the window is open the console closes and launcher messages go to `logs/launcher.log`; on first launch the initial access password is filled in for you. Closing the window stops DiceFrame. Without WebView2 the launcher falls back to your default browser and keeps the console; run `DiceFrame.exe --browser` to always use the browser. Other players still join through links in a browser or the mobile app.
+
 ## From Source
 
 Requirements:

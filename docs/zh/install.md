@@ -14,6 +14,8 @@
 
 Windows 便携版可以在“管理 → 设置 → 关于”的版本更新区检查并应用更新。
 
+`DiceFrame.exe` 会把 DiceFrame 开在自己的窗口里（使用系统自带的 Microsoft Edge WebView2；Windows 11 和绝大多数 Windows 10 已经装好）。窗口打开后控制台会自动关闭，启动器日志写入 `logs/launcher.log`；第一次启动会自动带上首次访问密码，不用手动输入。关闭这个窗口就会停止 DiceFrame。系统缺少 WebView2 时会退回到默认浏览器并保留控制台；想一直用浏览器，可以用 `DiceFrame.exe --browser` 启动。其他玩家照常用浏览器或移动端通过链接加入。
+
 ## Docker 运行
 
 已安装 Docker 的用户可以直接拉取镜像：

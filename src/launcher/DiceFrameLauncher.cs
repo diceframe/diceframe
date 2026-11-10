@@ -46,6 +46,13 @@ internal static partial class DiceFrameLauncher
     private static int Main(string[] args)
     {
         Console.Title = "DiceFrame";
+        foreach (string arg in args)
+        {
+            if (string.Equals(arg, "--browser", StringComparison.OrdinalIgnoreCase))
+            {
+                preferBrowser = true;
+            }
+        }
 
         string installRoot = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(
             Path.DirectorySeparatorChar,
@@ -64,6 +71,7 @@ internal static partial class DiceFrameLauncher
 
         string port = ResolvePort(Path.Combine(dataDir, "config.json"));
         launcherDataDir = dataDir;
+        launcherLogsDir = logsDir;
         launcherPort = port;
         InitLocalHttpClient();
         string url = ResolveServerEndpoint().Url;
@@ -149,10 +157,22 @@ internal static partial class DiceFrameLauncher
     )
     {
         bool browserOpened = false;
+        if (!preferBrowser)
+        {
+            // 先把应用窗口开起来显示「正在启动」，服务就绪后再加载页面；窗口一开就与控制台
+            // 脱离，控制台窗口随之关闭。覆盖升级时用候选版本带的 WebView2 程序集。
+            string uiPayloadDir = switchToAdoptedPayload
+                ? AdoptedCandidateDirectory(restartSignal)
+                : activeDir;
+            if (StartAppWindow(uiPayloadDir))
+            {
+                DetachConsole(logsDir);
+            }
+        }
         if (switchToAdoptedPayload)
         {
             // 覆盖升级：新版本已搬进 versions/，直接按更新流程切过去（失败回滚到覆盖前的
-            // 版本），不先把旧版本启动起来再切。候选通过健康检查就打开浏览器，观察期照常进行。
+            // 版本），不先把旧版本启动起来再切。候选通过健康检查就打开界面，观察期照常进行。
             activeDir = HandleUpdate(
                 installRoot,
                 dataDir,
@@ -161,13 +181,18 @@ internal static partial class DiceFrameLauncher
                 restartSignal,
                 activeDir,
                 url,
-                delegate
+                delegate(string candidateDir)
                 {
-                    OpenBrowser(ResolveServerEndpoint().Url);
+                    OpenUi(ResolveServerEndpoint().Url, candidateDir);
                     browserOpened = true;
                 }
             );
             url = ResolveServerEndpoint().Url;
+        }
+        if (shuttingDown)
+        {
+            // 启动过程中关掉了应用窗口。
+            return 0;
         }
 
         if (serverProcess == null || serverProcess.HasExited)
@@ -186,10 +211,14 @@ internal static partial class DiceFrameLauncher
         {
             if (!browserOpened)
             {
-                OpenBrowser(url);
+                OpenUi(url, activeDir);
             }
             Console.WriteLine("DiceFrame is running. Close this window to stop it.");
             Console.WriteLine();
+        }
+        else if (shuttingDown)
+        {
+            return 0;
         }
         else if (serverProcess.HasExited)
         {
@@ -245,7 +274,7 @@ internal static partial class DiceFrameLauncher
         string restartSignal,
         string previousDir,
         string url,
-        Action candidateReady = null
+        Action<string> candidateReady = null
     )
     {
         // 注意：这里不能提前 suppress——更新信号读取或候选校验失败时会 early
@@ -324,7 +353,7 @@ internal static partial class DiceFrameLauncher
             {
                 if (candidateReady != null)
                 {
-                    candidateReady();
+                    candidateReady(candidateDir);
                 }
                 if (!PassesProbation(
                     candidateProcess,
@@ -427,6 +456,9 @@ internal static partial class DiceFrameLauncher
         info.Arguments = Quote(serverScript);
         info.WorkingDirectory = installRoot;
         info.UseShellExecute = false;
+        // 启动器已与控制台脱离（应用窗口模式）时，python.exe 不能再自己弹一个控制台窗口；
+        // 它的日志照常写进 logs/。
+        info.CreateNoWindow = consoleDetached;
         info.EnvironmentVariables["TRPG_DATA_DIR"] = dataDir;
         info.EnvironmentVariables["TRPG_INSTALL_ROOT"] = installRoot;
         info.EnvironmentVariables["TRPG_ACTIVE_VERSION_DIR"] = activeDir;
@@ -1358,6 +1390,11 @@ internal static partial class DiceFrameLauncher
     {
         Console.WriteLine(message);
         Console.WriteLine();
+        if (consoleDetached)
+        {
+            NotifyUser(message);
+            return 1;
+        }
         // 重定向（CI / 自动化 / 被其它程序拉起）时不能等待按键：Console.ReadKey
         // 在没有真实控制台时会抛 InvalidOperationException，把可读的失败变成崩溃。
         if (!Console.IsInputRedirected && !Console.IsOutputRedirected)
@@ -1674,6 +1711,14 @@ internal static partial class DiceFrameLauncher
             Console.WriteLine();
         }
         Console.WriteLine("反馈问题时请将 logs 文件夹打包发送。");
+        if (consoleDetached)
+        {
+            NotifyUser(
+                "DiceFrame 后端异常退出。\n\n错误代码：" + formatted + "\n类型：" + classification
+                    + "\n\n反馈问题时请将 logs 文件夹打包发送：\n" + logsDir
+            );
+            return;
+        }
         WaitForExitAcknowledgement();
     }
 

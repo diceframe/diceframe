@@ -245,6 +245,19 @@ def build_windows_launcher(package_dir: Path) -> None:
         package_dir / "DiceFrame.exe",
         BUILD_ROOT / "DiceFrame.ico",
     )
+    stage_webview2(build_launcher.ensure_webview2_sdk(), package_dir / "app")
+
+
+def stage_webview2(sdk_dir: Path, app_dir: Path) -> None:
+    """Ship the WebView2 SDK with the version payload (app/launcher/webview2/).
+
+    启动器只是一个 exe，应用内更新只替换它本身；把 SDK 放进 app/，旧版更新器、新版更新器
+    和覆盖升级都会整体搬运它，每个版本都带着与自己启动器匹配的 SDK。
+    """
+    target = app_dir / "launcher" / "webview2"
+    target.mkdir(parents=True, exist_ok=True)
+    for name in build_launcher.WEBVIEW2_SDK_FILES.values():
+        shutil.copy2(sdk_dir / name, target / name)
 
 
 def validate_zip(output_zip: Path) -> None:
@@ -265,6 +278,10 @@ def validate_zip(output_zip: Path) -> None:
         "/python/python.exe",
         "/app/web_server.py",
         "/app/static-v2/index.html",
+        "/app/launcher/webview2/Microsoft.Web.WebView2.Core.dll",
+        "/app/launcher/webview2/Microsoft.Web.WebView2.WinForms.dll",
+        "/app/launcher/webview2/WebView2Loader.dll",
+        "/app/launcher/webview2/LICENSE.txt",
     ]
     for suffix in required:
         if not any(name.endswith(suffix) for name in names):
