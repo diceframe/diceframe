@@ -272,3 +272,62 @@ git diff --check
 | `pytest tests/rulesets -q` | **11 failed / 1816 passed / 0 errors**（24:38），11 条仍为 `character_builder` 基线，通过数 1803→1816 = +13（引擎 +7、权威路径 +6），净引入 0 |
 | `ruff check`（改动文件） | All checks passed |
 | `git diff --check` | 干净 |
+
+## 12. F6c 执行记录（2026-11-10）
+
+**分支**：`feat/dnd2024-s0f6c-font-of-magic`，stack 在 `feat/dnd2024-s0f6b-magical-cunning-rite@cf6abb2f` 之上。
+
+### 12.1 契约
+
+内容侧（`srd_class_features.json`，术士 2 级新增 `font_of_magic`）：
+
+```json
+"parameters": {"created_slot_costs": [[1,2,2],[2,3,3],[3,5,5],[4,6,7],[5,7,9]]},
+"capabilities": [
+  {"id": "font_slot_to_points", "cost": {}, "actions": [{"kind": "font_slot_to_points"}]},
+  {"id": "font_create_slot", "cost": {"bonus_action": 1}, "actions": [{"kind": "font_create_slot"}]}
+]
+```
+
+- 两个方向是**两条能力声明**，不是一个 kind 加一个 intent 字段：`cost` 决定要不要附赠动作，"不用动作"与"要附赠动作"本来就该由声明回答，而不是由结算代码分支判。
+- 五行表进内容（`created_slot_costs` = 环阶/点数/最低职业等级），代码只有校验器：`parse_created_slot_costs()` 对重复行、非整数、超 5 环一律整体拒绝——半张表被静默丢弃比没有表更糟。
+- 等级下限按**授予该特性的职业等级**（`declaring_class_level()` 按 `build.class_levels` 里 `class:<feature.class_id>` 那一行取），不是角色总等级；兼职时两者不是一回事。为此 `resolver.feature_definition(id)` 新增：`features_by_key` 是 `(owner, id)` 复合键，只知道 id 的调用方需要一个按 id 找定义的入口。
+
+规则侧（新建 `src/rulesets/dnd2024/spells/font_of_magic.py`）：纯函数，`_plan` 只读、`_apply` 才动状态。
+
+- `font_slots(character)`：临时槽按**环阶计数**存 `spellcasting.class.font_slots`（`{"3": 1}`），与普通槽表并列而不是并入。读时清洗（非 1–5 环、非正数一律丢弃），所以手改存档也造不出 6 环临时槽。
+- `slot_to_points_plan` / `create_slot_plan`：前者拒绝"已消耗槽"和"会超过点数上限"，后者拒绝表外环阶、等级不足、点数不足。**都不做截断**：点满了换槽是整笔拒绝，静默截断等于用一个真实法术位换回少于其价值的东西。
+- `apply_slot_to_points` / `apply_create_slot`：只发事件、只改传进来的 canonical 映射；事件里带 `source: font_of_magic`、环阶、点数余额。
+- `clear_font_slots`：长休时删除（不是合并）临时槽，返回被删掉的计数。
+
+战斗侧：
+
+- 能力校验两条新分支（`_validate_class_capability`）：`font_slot_to_points` 走 `slot_to_points_plan`，`font_create_slot` 走 `create_slot_plan`。两者都在任何事件产生之前完成，因此"点数不够/等级不够/上限会溢出"都是结构化拒绝，不会留下半个转换。
+- 结算（`_font_of_magic_events`）：重算同一份计划再应用——校验与结算读同一张权威卡，结算期再拒一次是伪造 intent 的最后一道门。
+- **临时槽优先消耗**：`_spell_cost_events` 在 `slot_level > 0` 时先看该环阶有没有临时槽，有就发 `dnd2024.spell.font_slot_spent`，否则发原来的 `slot_spent`。一笔施法永远只发一个扣槽事件，所以"同一法术不会同时扣临时槽和普通槽"是结构性成立，不是靠测试挑出来的。选它的理由是两者都在长休重置：先花临时槽不损失任何可选性。
+- reducer：`font_slot_spent` 扣到 0 就删键（不留 0，否则会被读成"还有一个空槽"），并置 `slot_spell_cast`；`font_slot_created` 校验 1–5 环后加一。伪造的批次在 reducer 层就死掉。
+
+探索侧（`exploration/engine.py`）：投影、校验、结算、reducer 四处同步。附赠动作是战斗经济的事实，但"临时槽是真槽"不是——出战斗后它照样能付一次施法。
+
+长休（`resting/engine.py`）：在恢复职业资源与普通槽**之前**调用 `clear_font_slots`，事件 `discard_font_slots` 带被删计数。顺序反了会让"长休后槽位总数"在一瞬间把临时槽算成普通槽。已清空时返回空字典，所以连续两次长休不产生事件（幂等）。
+
+升级（`progression/advancement.py`）：无需改动——`next_magic` 是 `{**deepcopy(previous), ...}`，临时槽随旧块整体保留；点数上限由 `sync_resources` 按新等级重算。
+
+### 12.2 偏差与未决
+
+1. **白名单外新增一个源文件** `spells/font_of_magic.py`（§5 只允许新建测试）。理由：两个方向的算术要同时被休息、战斗、探索、升级四处调用，塞进任何一处都会让另外三处 import 一个语义不相干的模块。风险已由"纯函数 + 无状态"限制住。
+2. **出战斗造不了槽**：`font_create_slot` 是战斗能力，探索态没有职业能力入口（`EXPLORATION_INTENT_TYPES` 只有三条）。这与 Bard 的 Font of Inspiration 现状一致；补一个探索态入口是独立切片，不塞进本段。
+3. **前端未接线**：`available_intents` 与投影已就绪，角色面板还没有画"换点/造槽"的入口。与 F6a、F6b 同一处理。
+4. **多职业仍受限**：等级下限按授予特性的职业算，但 `_class_state()` 的单职业硬限制没动，休息面仍不接受兼职卡。
+5. 矩阵 22（重复 intent / 版本冲突无部分写入）由既有的 `apply_event_batch` 原子性覆盖，未新增专门用例；矩阵 23 的"升级后按新值重算"同样由 `sync_resources` 既有用例覆盖。
+
+### 12.3 F6c 验收
+
+| 项 | 结果 |
+|---|---|
+| `test_dnd2024_rest_resource_conversion.py` | **32 passed**（23 → +9） |
+| 新增 `test_dnd2024_font_of_magic.py` | **13 passed** |
+| 相邻 8 套件定向回归 | **144 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1838 passed**，11 条仍为 `character_builder` 基线，1816→1838 = +22，净引入 0 |
+| `ruff check`（改动文件） | All checks passed |
+| `git diff --check` | 干净 |
