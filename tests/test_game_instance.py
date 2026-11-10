@@ -472,21 +472,22 @@ class TestGameInstance:
         assert round_presentation.quick_actions(restored) == ["调查脚印", "询问守卫"]
 
     async def test_from_dict_prunes_unreferenced_ghost_players(self):
+        """只有存档里找不到任何玩家痕迹的空席位才算幽灵。"""
         data = {
+            "instance_schema_version": 41,
             "game_key": ["web", "jp_isekai", "bot"],
             "state": "active_action",
             "players": {
                 "web_user": {"character_name": "艾琳", "character_sheet": {"deceased": False}},
-                "ghost_user": {"character_name": "幽灵玩家", "character_sheet": {"deceased": False}},
+                "ghost_user": {"character_name": "", "character_sheet": {}},
             },
-            "ready_players": ["web_user", "ghost_user"],
-            "action_queue": [{"user_id": "ghost_user", "text": "不该保留"}],
-            "pending_actions": [{"user_id": "ghost_user", "text": "也不该保留"}],
+            "ready_players": ["web_user"],
             "log": [{
                 "round": 39,
                 "actions": [{"user_id": "web_user", "text": "继续训练"}],
                 "pre_state_snapshot": {"web_user": {"hp": 46}},
             }],
+            "modules": {"seat_activity": {"schema_version": 1, "acted_seats": ["web_user"]}},
         }
 
         original = deepcopy(data)
@@ -495,8 +496,97 @@ class TestGameInstance:
         assert data == original
         assert set(restored.players) == {"web_user"}
         assert restored.ready_players == {"web_user"}
-        assert restored.action_queue == []
-        assert restored.pending_actions == []
+
+    @pytest.mark.parametrize("evidence", [
+        "character", "ready", "away", "queued", "pending", "acted", "seat_credential",
+    ])
+    async def test_from_dict_keeps_unreferenced_seat_with_any_player_evidence(self, evidence):
+        """不在最近 100 条日志里 ≠ 幽灵：任何一条玩家痕迹都保留席位（fail closed）。"""
+        newcomer: dict = {"character_name": "", "character_sheet": {}}
+        data = {
+            "instance_schema_version": 41,
+            "game_key": ["web", "late_join", "bot"],
+            "state": "active_action",
+            "players": {
+                "web_user": {"character_name": "艾琳", "character_sheet": {"deceased": False}},
+                "newcomer": newcomer,
+            },
+            "log": [{
+                "round": 39,
+                "actions": [{"user_id": "web_user", "text": "继续训练"}],
+                "pre_state_snapshot": {"web_user": {"hp": 46}},
+            }],
+            "modules": {"seat_activity": {"schema_version": 1, "acted_seats": ["web_user"]}},
+        }
+        if evidence == "character":
+            newcomer.update(character_name="后来者", character_sheet={"hp": 10, "deceased": False})
+        elif evidence == "ready":
+            data["ready_players"] = ["newcomer"]
+        elif evidence == "away":
+            data["away_players"] = ["newcomer"]
+        elif evidence == "queued":
+            data["action_queue"] = [{"user_id": "newcomer", "text": "我也来"}]
+        elif evidence == "pending":
+            data["pending_actions"] = [{"user_id": "newcomer", "text": "等我掷骰"}]
+        elif evidence == "acted":
+            data["modules"]["seat_activity"]["acted_seats"].append("newcomer")
+        else:
+            data["modules"]["room_access"] = {
+                "schema_version": 3,
+                "seat_credentials": {"newcomer": {"hash": "x", "epoch": 1}},
+            }
+
+        restored = GameInstance.from_dict(data)
+
+        assert set(restored.players) == {"web_user", "newcomer"}
+
+    async def test_from_dict_keeps_seats_when_acted_record_is_unreadable(self):
+        data = {
+            "instance_schema_version": 41,
+            "game_key": ["web", "future_slot", "bot"],
+            "state": "active_action",
+            "players": {
+                "web_user": {"character_name": "艾琳", "character_sheet": {}},
+                "empty_seat": {},
+            },
+            "log": [{"round": 3, "actions": [{"user_id": "web_user", "text": "前进"}]}],
+            "modules": {"seat_activity": {"schema_version": 99, "acted_seats": []}},
+        }
+
+        restored = GameInstance.from_dict(data)
+
+        assert set(restored.players) == {"web_user", "empty_seat"}
+
+    async def test_seat_outside_a_full_automation_log_window_survives_reload(self):
+        """规则自动化条目只记提交者：旁观者刷出 100 条窗口后仍是真实席位。"""
+        inst = GameInstance(game_key=("web", "long_combat", "bot"))
+        inst.put_player("fighter", {"character_name": "战士", "character_sheet": {"hp": 12}})
+        inst.put_player("watcher", {"character_name": "旁观者", "character_sheet": {"hp": 9}})
+        inst.round_number = 1
+        inst.log.append({"round": 1, "actions": [{"user_id": "watcher", "text": "进门"}],
+                         "pre_state_snapshot": {"fighter": {}, "watcher": {}}})
+        for index in range(150):
+            inst.append_log_entry({
+                "round": 2 + index,
+                "actions": [{"user_id": "fighter", "text": "攻击", "source": "ruleset_authority"}],
+            })
+
+        restored = GameInstance.from_dict(inst.to_dict())
+
+        assert set(restored.players) == {"fighter", "watcher"}
+
+    async def test_seat_joined_after_last_round_survives_live_clone(self):
+        """swipe / 经济结算等在线路径用 from_dict(to_dict()) 复制对局，不能丢新加入席位。"""
+        inst = GameInstance(game_key=("web", "late_join_clone", "bot"))
+        inst.put_player("veteran", {"character_name": "老手", "character_sheet": {"hp": 12}})
+        inst.round_number = 4
+        inst.log.append({"round": 4, "actions": [{"user_id": "veteran", "text": "前进"}],
+                         "pre_state_snapshot": {"veteran": {"hp": 12}}})
+        inst.put_player("player_820110518521", {"character_name": "新人", "character_sheet": {"hp": 10}})
+
+        clone = GameInstance.from_dict(inst.to_dict())
+
+        assert set(clone.players) == {"veteran", "player_820110518521"}
 
     async def test_from_dict_keeps_waiting_players_without_log(self):
         data = {

@@ -17,8 +17,8 @@ def _projection(instance: Any) -> dict:
 def fork_domain_state(instance: Any) -> Any:
     """Copy a live aggregate without load-time normalization or shared locks.
 
-    Loading a save intentionally removes ghost players and bounds history; it
-    cannot be used to clone a currently running table with newly joined seats.
+    Loading a save bounds history and may remove ghost seats; it is not a
+    faithful clone of a currently running table.
     The existing aggregate publication contract preserves domain objects while
     leaving runtime coordination attached to a fresh aggregate.
     """

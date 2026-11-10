@@ -96,6 +96,25 @@ def has_acted(instance: Any, user_id: str) -> bool:
     return str(user_id or "") in seats
 
 
+def payload_acted_seats(payload: Mapping[str, Any]) -> set[str] | None:
+    """Acted seats recorded in a raw save payload; ``None`` when unreadable.
+
+    A missing slot reads as "no seat acted" (its fresh default). A slot of an
+    unknown schema or a damaged list is not evidence of anything, so callers
+    that delete data on its absence must treat ``None`` as "cannot tell".
+    """
+    modules = payload.get("modules")
+    slot = modules.get(MODULE_NAME) if isinstance(modules, dict) else None
+    if slot is None:
+        return set()
+    if not isinstance(slot, dict) or slot.get("schema_version") != SCHEMA_VERSION:
+        return None
+    seats = slot.get("acted_seats")
+    if not isinstance(seats, list):
+        return None
+    return {seat for seat in seats if isinstance(seat, str) and seat}
+
+
 def mark_acted(instance: Any, user_id: str) -> None:
     """Record that a seat of this run acted (callers check it is a seat)."""
     seats = get_module_state(instance, MODULE_NAME)["acted_seats"]
