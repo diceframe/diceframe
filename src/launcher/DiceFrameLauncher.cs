@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.Win32;
 
-internal static class DiceFrameLauncher
+internal static partial class DiceFrameLauncher
 {
     private const string DefaultPort = "18000";
     private const int ReadyTimeoutSeconds = 60;
@@ -68,6 +68,14 @@ internal static class DiceFrameLauncher
         InitLocalHttpClient();
         string url = ResolveServerEndpoint().Url;
         string activeDir = ResolveActiveDirectory(installRoot, currentPointer);
+        // 必须在 MigrateLegacyPortablePayload 之前：否则覆盖进根目录的新版本会被当成旧布局删掉。
+        bool adoptedOverwrite = AdoptOverwrittenPayload(
+            installRoot,
+            updaterDir,
+            currentPointer,
+            restartSignal,
+            activeDir
+        );
         MigrateLegacyPortablePayload(
             installRoot,
             currentPointer,
@@ -108,7 +116,8 @@ internal static class DiceFrameLauncher
                 restartSignal,
                 currentPointer,
                 url,
-                activeDir
+                activeDir,
+                adoptedOverwrite
             );
         }
         finally
@@ -135,21 +144,50 @@ internal static class DiceFrameLauncher
         string restartSignal,
         string currentPointer,
         string url,
-        string activeDir
+        string activeDir,
+        bool switchToAdoptedPayload
     )
     {
-        try
+        bool browserOpened = false;
+        if (switchToAdoptedPayload)
         {
-            serverProcess = StartServer(installRoot, activeDir, dataDir);
+            // 覆盖升级：新版本已搬进 versions/，直接按更新流程切过去（失败回滚到覆盖前的
+            // 版本），不先把旧版本启动起来再切。候选通过健康检查就打开浏览器，观察期照常进行。
+            activeDir = HandleUpdate(
+                installRoot,
+                dataDir,
+                updaterDir,
+                currentPointer,
+                restartSignal,
+                activeDir,
+                url,
+                delegate
+                {
+                    OpenBrowser(ResolveServerEndpoint().Url);
+                    browserOpened = true;
+                }
+            );
+            url = ResolveServerEndpoint().Url;
         }
-        catch (Exception ex)
+
+        if (serverProcess == null || serverProcess.HasExited)
         {
-            return Fail("DiceFrame failed to start: " + ex.Message);
+            try
+            {
+                serverProcess = StartServer(installRoot, activeDir, dataDir);
+            }
+            catch (Exception ex)
+            {
+                return Fail("DiceFrame failed to start: " + ex.Message);
+            }
         }
 
         if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
         {
-            OpenBrowser(url);
+            if (!browserOpened)
+            {
+                OpenBrowser(url);
+            }
             Console.WriteLine("DiceFrame is running. Close this window to stop it.");
             Console.WriteLine();
         }
@@ -206,7 +244,8 @@ internal static class DiceFrameLauncher
         string currentPointer,
         string restartSignal,
         string previousDir,
-        string url
+        string url,
+        Action candidateReady = null
     )
     {
         // 注意：这里不能提前 suppress——更新信号读取或候选校验失败时会 early
@@ -281,14 +320,21 @@ internal static class DiceFrameLauncher
                     ? "候选版本在健康检查前退出"
                     : "候选版本健康检查超时或版本不匹配";
             }
-            else if (!PassesProbation(
-                candidateProcess,
-                url,
-                version,
-                probationSeconds
-            ))
+            else
             {
-                failure = "候选版本在观察期内退出或失去响应";
+                if (candidateReady != null)
+                {
+                    candidateReady();
+                }
+                if (!PassesProbation(
+                    candidateProcess,
+                    url,
+                    version,
+                    probationSeconds
+                ))
+                {
+                    failure = "候选版本在观察期内退出或失去响应";
+                }
             }
         }
         catch (Exception ex)

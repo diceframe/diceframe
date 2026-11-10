@@ -13,7 +13,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "src" / "launcher" / "DiceFrameLauncher.cs"
+SOURCE_DIR = ROOT / "src" / "launcher"
+# 启动器是一个 partial class，按职责拆在 src/launcher/*.cs 里，一起编译。
+SOURCE = SOURCE_DIR / "DiceFrameLauncher.cs"
 ICON_SOURCE = ROOT / "frontend-v2" / "public" / "favicon.svg"
 CANDIDATE_CSC = [
     Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"),
@@ -176,6 +178,10 @@ def write_ico(target: Path) -> None:
     target.write_bytes(struct.pack("<HHH", 0, 1, len(images)) + b"".join(entries) + b"".join(payloads))
 
 
+def launcher_sources() -> list[str]:
+    return [str(path) for path in sorted(SOURCE_DIR.glob("*.cs"))]
+
+
 def build_launcher(output: Path, icon: Path) -> None:
     if not SOURCE.exists():
         raise RuntimeError(f"Cannot find launcher source: {SOURCE}")
@@ -196,7 +202,7 @@ def build_launcher(output: Path, icon: Path) -> None:
             "/r:System.Net.Http.WebRequest.dll",
             f"/win32icon:{icon}",
             f"/out:{output}",
-            str(SOURCE),
+            *launcher_sources(),
         ],
         ROOT,
     )
