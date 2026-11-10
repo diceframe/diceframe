@@ -6,7 +6,7 @@
 
 ### 安装与更新（新增）
 
-- **Windows 安装包**：新增 `DiceFrame-v3.2.0-beta.1-windows-setup.exe`，按当前用户安装到 `%LOCALAPPDATA%\Programs\DiceFrame`，不需要管理员权限。安装内容与便携版是同一套文件。
+- **Windows 安装包**：新增 `DiceFrame-v3.2.0-beta.1-windows-setup.exe`，按当前用户安装，不需要管理员权限。
 - **启动器独立窗口**：双击 `DiceFrame.exe` 后在独立应用窗口打开，不再占用一个新浏览器标签；关掉窗口即结束进程。
 - **便携版覆盖升级**：新版便携包可以直接解压覆盖到旧目录完成升级，不必先清空旧版本。
 - **长路径修复**：更新器解压便携版更新时不再受 Windows `MAX_PATH` 限制，此前深层路径（Python 依赖）会解压失败。
@@ -39,7 +39,7 @@
 
 ### Installing and updating (new)
 
-- **Windows installer**: new `DiceFrame-v3.2.0-beta.1-windows-setup.exe` installs per user into `%LOCALAPPDATA%\Programs\DiceFrame` without administrator rights. It ships exactly the same files as the portable build.
+- **Windows installer**: new `DiceFrame-v3.2.0-beta.1-windows-setup.exe` installs per user and needs no administrator rights.
 - **Launcher window**: double-clicking `DiceFrame.exe` now opens a dedicated application window instead of a new browser tab; closing the window stops the process.
 - **Portable over-install upgrade**: a new portable archive can be unpacked straight over the old directory, no need to wipe the previous install first.
 - **Long paths fixed**: the updater no longer hits the Windows `MAX_PATH` limit when extracting portable updates — deep dependency paths used to fail.
