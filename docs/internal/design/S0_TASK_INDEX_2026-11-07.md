@@ -254,3 +254,72 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 **备份**：`prealign-s0a`、`prealign-s0b`、`prealign-s0c`、`prealign-dds` 四个 tag 指向 rebase 前各头，可完整回滚。
 
 **未做**：S0-B / S0-C / 链头三个分支未各自单跑全量（仅链头跑全量 + S0-A 单点跑聚焦）；四份需改规则的任务书尚未开工。
+
+## 10. 跨切片缺口：休息与仪式施法（2026-11-10）
+
+这一节不属于任何单个 F 切片，但在 S0-F4（Land 地形）、S0-F5（法术研究）、S0-F6（休息恢复预算）之间反复出现，统一记在这里，避免每次重新发现。
+
+### 10.1 休息的机械边界
+
+- **没有游戏内时钟**。全仓没有 `in_game_time` / `day_count`：`confirm_elapsed_time` 只是客户端确认，服务端不推进任何时间，也**不限制长休频次**——玩家可以连续长休刷资源，"每 24 小时一次"目前只存在于桌面口头约定。
+- **没有中断模型**。休息与战斗只有单向互斥：`ruleset_rest.py` 提交时检查"战斗中不能休息"，但 `combat.start` **完全不看** `rest_session`。GM 在 `collecting` 阶段开战会让 session 挂起（已提交者停在 `submitted`，未提交者被拒）；若期间角色 `ruleset_revision` 变化，最终结算会撞 `STALE_CHARACTER_REVISION` 并整队回滚。**这是状态漏洞，不是缺功能。**
+- **单职业硬限制**。`resting/engine.py::_class_state()` 在 `class_levels` 长度不等于 1 时抛 `rest recovery currently requires one class`，多职业角色无法休息。
+- **没有休息前预览**。客户端拿不到"这一觉会恢复什么"，只能按下去再看事件。
+
+### 10.2 仪式施法完全缺失
+
+`ritual` 在代码里出现两次，都不是实现：`spells/catalog.py` 只校验它是 bool，`spells/selection.py::_casting_segment()` 把它**剥掉**（`"1 minute or Ritual"` → `"1 minute"`）。没有"不消耗法术位、多花 10 分钟"的路径。直接后果：
+
+- `alarm`（1 环）、`tiny_hut`（3 环）都是 `1 minute or Ritual`，`prayer_of_healing`（2 环，10 分钟，短休用）也是休息场景常用法术，三者都没有 `spell_effects` 条目，`combat/validation.py::_validate_spell` 第一道门即拒；
+- S0-F5 §9.11 偏差 6 的"目录里没有仅仪式样本"由此而来——不是样本缺失，是机制缺失；
+- 长休前的"准备行动"（放警戒、造小屋）因此没有任何机械表达。
+
+### 10.3 前端可达性
+
+服务端已经能算、但 UI 送不进去的字段有两个：`land_terrain`（S0-F4 地形）与 `free_cast`（S0-F5 法术研究）。`character.rest` 的 P2P 字段白名单只有 `attunement`，`resolveLiveCharacterRest()` 也只发 `rest/hit_dice/confirm_elapsed_time/expected_revision/operation_id`。
+
+**已解决**（见 §11）：两项都通了，读侧新增 `GET /api/games/{key}/character/{uid}/rest/options`。
+
+### 10.4 建议顺序
+
+1. **中断语义**：`combat.start` 遇到 `collecting` 的 session 就标记中断并清空参与者。改动最小，修的是漏洞。
+2. **休息面板接线**：地形与研究，纯通道，不涉规则判断。
+3. **仪式施法机制**：`alarm` / `tiny_hut` / `prayer_of_healing` 的前置，同时消掉 F5 的偏差 6。
+4. **游戏时钟**：`in_game_time` 是"24 小时一次""仪式多花 10 分钟""守夜轮班"的共同前置，属于产品决策而非技术债。
+
+## 11. 休息面板接线（2026-11-10）
+
+不是 S0-F 任务书，是 §10.3 的直接修补：把服务端已经算好的两类长休选择交给 UI，并把 `free_cast` 的写入通道补齐。
+
+**分支**：`feat/dnd2024-rest-panel-wiring`，stack 在 `feat/dnd2024-s0f5-free-casting@910733c0` 之上。
+**提交**：`5e565c21` 服务端投影与 `free_cast` 通道 → `cb831508` 前端面板 → `a2ec04d1` 测试 → `c5e4a4f1` 独立负债修复（见 11.4）。
+
+### 11.1 服务端
+
+- `resting/engine.py::rest_options(character)`：只读投影，返回 `land_terrain`（owner / feature_id / current / options / required）与 `free_cast`（只列 `rest_replace > 0` 的槽，带当前法术、候选、预算与 `valid`）。不建会话、不改 revision，重复调用无副作用。
+- `spells/selection.py::rest_free_cast_rows(character)`：槽位归 spells 模块、地形归 features 模块，引擎只做组装，避免两边各维护一份"哪些槽能在长休换"。
+- `runtime.py`：`rest_option_names` 增加 `free_cast`；`complete_rest` 增加同名关键字并转发给 `complete_long_rest`；短休收到它直接 `ValueError`；`validate_rest_options` 增加分支，用 `engine.validate_free_cast()`（deepcopy 探针）在**开局时**就拒绝非法研究——队伍休息中途失败会整队回滚，所以必须前置。
+- 新增只读路由 `GET /api/games/{key}/character/{uid}/rest/options`（`Api.ruleset_rest_options` → `ruleset_rest.read_options()`），不加写锁、不碰 revision、不建休息会话。
+- 顺带修掉一处事件噪音：`_apply_free_cast_rebind` 过去会给"计划里带上但没有改动"的槽也发 `rebind_free_cast`（`before == after`），现在只给真正换掉的那一格发。
+
+### 11.2 前端
+
+- `resolveLiveCharacterRest()` 增加可选第七参 `{ landTerrain, freeCast }`；**空值不发字段**——空白地形不等于"不选地形"，空研究表也不该进入 rebind 路径。
+- `bridge.ts` 的 `character.rest` 白名单补 `land_terrain` / `free_cast`，P2P 与 HTTP 两条路径同构。
+- `ProfessionalCharacterCenter.vue`：**切到长休时才**拉选项（打开面板零请求、短休零请求）；地形预填当前值；研究是"先选要换的一格，再选新法术"的单选，预算取自服务端的 `rest_replace`；当前研究项不进候选；读不到选项时降级为旧行为并把原因显示出来，**不阻断休息**。
+
+### 11.3 验收
+
+| 项 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_rest_options.py` | **15 passed** |
+| 休息/施法/队伍休息定向回归（7 个文件） | **167 passed** |
+| `pytest tests/rulesets -q`（全量） | **11 failed / 1771 passed / 0 errors**（23:48）；11 条与 F2–F5 基线逐条同名（全在 `test_dnd2024_character_builder.py`），通过数 1756→1771 = +15，净引入 0 |
+| `frontend-v2` `npm test` | **221 files / 1587 tests passed** |
+| `vue-tsc -b` 与 `eslint`（改动文件） | 通过 |
+| `ruff check` 与 `git diff --check` | 通过 |
+
+### 11.4 期间发现的两笔债
+
+1. **F5 矩阵 7 的 `_spend()` 从未真正运行过**。上一轮我在全量已经启动之后才补上这段代码，全量跑的是旧文件，于是"25 passed"掩盖了一个非法批次（缺 `batch_id`、缺版本）。本次改为 `stable_batch_id` + `expected_version/result_version` 的合法批次，并把"同一格再花一次"改成断言 `EventBatchError("already spent")`——reducer 是抛错回滚，不是返回 `applied: False`。
+2. **S0-D2 的 Overchannel 文案断言已失效**。`f775ae4f` 把文案改成"超限导能：伤害最大化"，同一提交的测试仍断言"过载伤害最大化"，前端套件因此长期有一条红的。已单独提交对齐，不并入本切片的功能提交。
