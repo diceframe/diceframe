@@ -79,6 +79,7 @@ from src.webui.routes.game_character_routes import (
     api_live_character_rest,
     api_live_character_spells,
     api_live_character_rest_options,
+    api_game_rest_decide,
     api_char_delete,
     api_npc_portrait_update,
     api_npc_standing_portrait_update,
@@ -269,6 +270,11 @@ def register_games(app: web.Application) -> None:
     app.router.add_get(
         "/api/games/{game_key}/character/{user_id}/rest/options",
         api_live_character_rest_options,
+    )
+    # 队伍级裁决：全员申报后由 DM 决定是否结算，游戏时间只在这里推进。
+    app.router.add_post(
+        "/api/games/{game_key}/rest/decide",
+        api_game_rest_decide,
     )
     app.router.add_route(
         "DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete

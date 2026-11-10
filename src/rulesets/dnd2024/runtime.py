@@ -935,6 +935,19 @@ class Dnd2024Runtime:
         result["character"] = self._live_projection(character, result["character"], bundle)
         return result
 
+    # SRD 5.2.1 Resting 给的是下界（Short Rest 至少 1 小时、Long Rest 至少 8 小时）。
+    # 这里只声明下界对应的分钟数：世界时钟推进由通用休息服务按这个值执行，
+    # 「这一夜过了十小时」这类裁量交给 DM 在裁决时另行推进，不写进规则数据。
+    REST_DURATION_MINUTES = {"short": 60, "long": 480}
+
+    def rest_duration_minutes(self, rest: str) -> int:
+        """Logical minutes this rest consumes; the only source for clock advance."""
+
+        minutes = self.REST_DURATION_MINUTES.get(rest)
+        if minutes is None:
+            raise ValueError("rest must be short or long")
+        return minutes
+
     def rest_options(self, rule: Any, character: dict[str, Any]) -> dict[str, Any]:
         """What a Long Rest requires or may change for one character.
 

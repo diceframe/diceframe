@@ -320,6 +320,39 @@ async def api_live_character_rest_options(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
+async def api_game_rest_decide(request: web.Request) -> web.Response:
+    """DM verdict on a party rest that is waiting for approval.
+
+    Approval is the only place a rest moves game time, so this is a GM-gated
+    party-level action: it takes no character id and settles every participant
+    in one authoritative write.
+    """
+
+    gk = request.match_info["game_key"]
+    _inst, denied = _gm_only_inst(request, gk)
+    if denied is not None:
+        return denied
+    payload = await request.json()
+    api = _get_api(request)
+    result = await api.ruleset_rest_decide(
+        gk, str(request.get("user_id", "") or ""), True, payload,
+    )
+    await _broadcast_ruleset_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = (
+        200
+        if result.get("ok")
+        else 404
+        if code == "GAME_NOT_FOUND"
+        else 403
+        if code == "REST_DECISION_FORBIDDEN"
+        else 409
+        if code in {"REST_NOT_AWAITING_APPROVAL", "REWRITE_IN_PROGRESS", "STALE_RUN"}
+        else 422
+    )
+    return web.json_response(result, status=status)
+
+
 async def api_char_delete(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:

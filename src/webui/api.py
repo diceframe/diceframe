@@ -399,6 +399,11 @@ class WebAPI:
             save_instance=self._reg.save,
             load_rule_for_game=self._load_rule_for_game,
             ruleset_registry=self._ruleset_registry,
+            # 休息推进游戏时间后 Adventure 的 gate 与进程到期条件要重新求值；
+            # 属性在调用时才解析，与 resource_recovery 的组装方式一致。
+            advance_adventure_world=lambda instance: adventure_runtime.advance_adventure_world(
+                self._adventure_runtime_dependencies, instance,
+            ),
         )
         self._content = content.PublicContentService(
             content_cache_dir,
@@ -1052,6 +1057,7 @@ class WebAPI:
                 instance.game_key, uid, gm, body),
             run_story=self.run_story, recovery=self.resource_recovery,
             rest=self.ruleset_rest_submit_live,
+            rest_decide=self.ruleset_rest_decide,
             room_preferences=self.game_preferences, set_room_preferences=self.update_game_preferences,
             available_ruleset_actions=self.ruleset_available_actions,
             submit_ruleset_intent=self.ruleset_submit_intent,
@@ -3207,6 +3213,14 @@ class WebAPI:
         """Read-only long-rest options for one character (terrain and study)."""
         return ruleset_rest.read_options(
             self._live_ruleset_rest_dependencies, game_key, user_id,
+        )
+
+    async def ruleset_rest_decide(
+        self, game_key: str, user_id: str, is_gm: bool, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """DM verdict on a party rest that is waiting for approval."""
+        return await ruleset_rest.decide_live(
+            self._live_ruleset_rest_dependencies, game_key, user_id, is_gm, body,
         )
 
     async def ruleset_rest_resolve_live_party(
