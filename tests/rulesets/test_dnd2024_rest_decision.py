@@ -16,6 +16,8 @@ from src.webui.services.assistant_gameplay_tools import (
     gameplay_tools,
 )
 from tests.rulesets.test_dnd2024_character_lifecycle import professional_context  # noqa: F401
+from tests.rulesets.test_dnd2024_free_casting import _wizard
+from tests.rulesets.test_dnd2024_spell_grants import _druid as _land_druid
 
 KEY = "web|character-lifecycle|web_bot"
 
@@ -44,6 +46,43 @@ def _submit_body(rest: str, operation: str, revision: int = 0) -> dict:
         "expected_revision": revision,
         "operation_id": operation,
     }
+
+
+def _sheet_with(base: dict, ruleset_character: dict, name: str) -> dict:
+    """Keep the bound sheet, swap in another class's ruleset character."""
+
+    sheet = deepcopy(base)
+    sheet["character_name"] = name
+    sheet["ruleset_character"] = deepcopy(ruleset_character)
+    sheet["ruleset_character"]["identity"]["name"] = name
+    # 两点生命值只为过「可参加休息」的门槛，不参与这里的断言。
+    sheet["hp"] = 1
+    sheet["ruleset_character"]["resources"]["hp"] = 1
+    return sheet
+
+
+def _two_class_party(context):
+    """A party where each seat declares a different kind of long-rest choice."""
+
+    api, instance, base = context
+    runtime = api._runtime
+    druid = _sheet_with(base, _land_druid(runtime), "Land Druid")
+    wizard = _sheet_with(base, _wizard(runtime, 18), "Study Wizard")
+    instance.players["gm"] = {"character_name": "Land Druid", "character_sheet": druid}
+    instance.players["ally"] = {"character_name": "Study Wizard", "character_sheet": wizard}
+    game_config.replace_solo_mode(instance, False)
+    return api, instance
+
+
+def _terrain_of(sheet: dict) -> str:
+    choices = sheet["ruleset_character"]["spellcasting"]["class"].get("spell_grant_choices")
+    entry = (choices or {}).get("circle_of_the_land_spells")
+    return str((entry or {}).get("terrain") or "")
+
+
+def _study_of(sheet: dict, slot_id: str) -> str:
+    slots = sheet["ruleset_character"]["spellcasting"]["class"]["free_cast_slots"]
+    return str(slots[slot_id]["spell_ref"])
 
 
 async def _both_submit(api, instance, rest: str, *, tag: str) -> dict:
@@ -357,3 +396,66 @@ async def test_the_ai_gm_can_approve_but_only_with_gm_authority(
     assert result["ok"] is True
     assert result["rest_session"]["status"] == "completed"
     assert _clock(instance) == before_clock + 60
+
+
+@pytest.mark.asyncio
+async def test_the_verdict_still_commits_the_terrain_and_the_study(
+    professional_context,  # noqa: F811
+) -> None:
+    """矩阵 18：裁决只是多了一道门，地形与研究仍走各自的原路径。
+
+    这两个声明分属不同席位、不同机制：德鲁伊换地形会重算法术授予，
+    法师换研究只动一个法术槽。二者都必须熬过「申报 → 等待 → 批准」，
+    而不是因为在中间态停留过就丢掉。
+    """
+
+    api, instance = _two_class_party(professional_context)
+    terrain_before = _terrain_of(instance.get_character_sheet("gm"))
+    study_before = _study_of(instance.get_character_sheet("ally"), "spell_mastery_1")
+    before_clock = _clock(instance)
+
+    # 候选只从服务端投影里取：面板能画出来的，就必须能通过裁决落账。
+    options = WebAPI.ruleset_rest_options(api, KEY, "ally")["rest_options"]
+    slot = next(row for row in options["free_cast"] if row["slot_id"] == "spell_mastery_1")
+    assert slot["spell_ref"] == study_before
+    replacement = next(option["ref"] for option in slot["options"] if option["ref"] != study_before)
+
+    await WebAPI.ruleset_rest_submit_live(api, KEY, "gm", {
+        **_submit_body("long", "choice-gm"), "land_terrain": "arid",
+    })
+    waiting = await WebAPI.ruleset_rest_submit_live(api, KEY, "ally", {
+        **_submit_body("long", "choice-ally"),
+        "free_cast": {"spell_mastery_1": replacement},
+    })
+
+    assert waiting["rest_session"]["status"] == "awaiting_approval"
+    # 申报本身不落账：等待期间角色卡仍是旧的。
+    assert _terrain_of(instance.get_character_sheet("gm")) == terrain_before
+    assert _study_of(instance.get_character_sheet("ally"), "spell_mastery_1") == study_before
+
+    result = await WebAPI.ruleset_rest_decide(
+        api, KEY, "gm", True, {"approve": True, "operation_id": "decision-choice"},
+    )
+
+    assert result["ok"] is True and result["resolved"] is True
+    assert _terrain_of(instance.get_character_sheet("gm")) == "arid"
+    assert _study_of(instance.get_character_sheet("ally"), "spell_mastery_1") == replacement
+    assert _clock(instance) == before_clock + 480
+
+    events = {row["user_id"]: row["events"] for row in result["party_results"]}
+    terrain_events = [event for event in events["gm"] if event["type"] == "spell_grant_terrain"]
+    assert terrain_events == [{
+        **terrain_events[0],
+        "owner": "subclass:circle_of_the_land",
+        "feature_id": "circle_of_the_land_spells",
+        "before": terrain_before,
+        "after": "arid",
+        "changed": True,
+    }]
+    rebind = [event for event in events["ally"] if event["type"] == "rebind_free_cast"]
+    assert rebind == [{
+        **rebind[0],
+        "slot_id": "spell_mastery_1",
+        "before": study_before,
+        "after": replacement,
+    }]
