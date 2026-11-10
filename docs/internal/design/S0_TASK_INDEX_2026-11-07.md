@@ -261,8 +261,9 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 ### 10.1 休息的机械边界
 
-- **没有游戏内时钟**。全仓没有 `in_game_time` / `day_count`：`confirm_elapsed_time` 只是客户端确认，服务端不推进任何时间，也**不限制长休频次**——玩家可以连续长休刷资源，"每 24 小时一次"目前只存在于桌面口头约定。
-- **没有中断模型**。休息与战斗只有单向互斥：`ruleset_rest.py` 提交时检查"战斗中不能休息"，但 `combat.start` **完全不看** `rest_session`。GM 在 `collecting` 阶段开战会让 session 挂起（已提交者停在 `submitted`，未提交者被拒）；若期间角色 `ruleset_revision` 变化，最终结算会撞 `STALE_CHARACTER_REVISION` 并整队回滚。**这是状态漏洞，不是缺功能。**
+- **时钟一直存在，休息没有接上**（2026-11-10 更正）。权威逻辑时钟在 `GameInstance.world_state["clock"] = {"day", "minute"}`（`world_state.py::fresh_world_state`，从第 1 天 00:00 起），唯一写入口 `world_events.py::advance_world_time`：单次上限 1440 分钟、确定性排序、幂等（`pending → applied/failed`）、随整轮回滚，并顺带结算到期事件与进程。**推进它的只有两处**——回合元数据里的 planner `world_time_advance`，以及 CoC 恢复链的 GM 批准。DND 长休/短休一次都没调用过它，`confirm_elapsed_time` 只是客户端确认。本节初版写作"全仓没有游戏内时钟"，那是只搜了 `in_game_time` 字面量的结论，错的。
+- **长休频次不设限**。有钟之后这可以机械执行（记「上次长休时刻」并与当前钟比），但尚未做——"每 24 小时一次"目前仍只是桌面口头约定。
+- **没有中断模型**。休息与战斗只有单向互斥：`ruleset_rest.py` 提交时检查"战斗中不能休息"，但 `combat.start` **完全不看** `rest_session`。GM 在 `collecting` 阶段开战会让 session 挂起（已提交者停在 `submitted`，未提交者被拒）；若期间角色 `ruleset_revision` 变化，最终结算会撞 `STALE_CHARACTER_REVISION` 并整队回滚。**这是状态漏洞，不是缺功能。**（§12 的 DM 裁决给了它一个用户可见的出口：拒绝即终止态，不悬挂；但 `combat.start` 仍未清 `rest_session`。）
 - **单职业硬限制**。`resting/engine.py::_class_state()` 在 `class_levels` 长度不等于 1 时抛 `rest recovery currently requires one class`，多职业角色无法休息。
 - **没有休息前预览**。客户端拿不到"这一觉会恢复什么"，只能按下去再看事件。
 
@@ -280,12 +281,13 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 **已解决**（见 §11）：两项都通了，读侧新增 `GET /api/games/{key}/character/{uid}/rest/options`。
 
-### 10.4 建议顺序
+### 10.4 建议顺序（2026-11-10 按实际交付重排）
 
-1. **中断语义**：`combat.start` 遇到 `collecting` 的 session 就标记中断并清空参与者。改动最小，修的是漏洞。
-2. **休息面板接线**：地形与研究，纯通道，不涉规则判断。
-3. **仪式施法机制**：`alarm` / `tiny_hut` / `prayer_of_healing` 的前置，同时消掉 F5 的偏差 6。
-4. **游戏时钟**：`in_game_time` 是"24 小时一次""仪式多花 10 分钟""守夜轮班"的共同前置，属于产品决策而非技术债。
+1. ~~**休息面板接线**~~ → 已交付（§11）。
+2. ~~**游戏时钟接入**~~ → 已交付（§12）：不走「休息结算即推时钟」，而是复用 recovery 的「申请 → DM 批准」范式，批准那一刻推进。顺序上仍成立的判断是：**时钟必须先于频次限制**，因为频次限制要拿「上次长休时刻」和当前钟比。
+3. **中断语义**：`combat.start` 遇到 `collecting` / `awaiting_approval` 的 session 就标记中断并清空参与者。改动最小，修的是漏洞，至今未做。
+4. **长休频次限制**（24 小时一次）：需要「上次长休时刻」的独立记录，且要给 DM 留覆盖口（SRD 允许判定「这不算新的冒险日」）。
+5. **仪式施法机制**：`alarm` / `tiny_hut` / `prayer_of_healing` 的前置，同时消掉 F5 的偏差 6。时钟到位后，「仪式多花 10 分钟」才有地方记。
 
 ## 11. 休息面板接线（2026-11-10）
 
@@ -323,3 +325,71 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 
 1. **F5 矩阵 7 的 `_spend()` 从未真正运行过**。上一轮我在全量已经启动之后才补上这段代码，全量跑的是旧文件，于是"25 passed"掩盖了一个非法批次（缺 `batch_id`、缺版本）。本次改为 `stable_batch_id` + `expected_version/result_version` 的合法批次，并把"同一格再花一次"改成断言 `EventBatchError("already spent")`——reducer 是抛错回滚，不是返回 `applied: False`。
 2. **S0-D2 的 Overchannel 文案断言已失效**。`f775ae4f` 把文案改成"超限导能：伤害最大化"，同一提交的测试仍断言"过载伤害最大化"，前端套件因此长期有一条红的。已单独提交对齐，不并入本切片的功能提交。
+
+## 12. 休息的 DM 裁决与逻辑时间（2026-11-10）
+
+任务书：`S0_REST_DECISION_TASK_SPEC_2026-11-10.md`。这是 §10.1 的第二条（时钟）与 §10.4 的第 2 项，采用「复用 recovery 的申请 → 批准范式」而非「休息结算即推时钟」。
+
+**分支**：`feat/dnd2024-rest-decision`，stack 在 `feat/dnd2024-rest-panel-wiring@c5e4a4f1` 之上。
+**提交**：`ab7c4425` AI GM 工具 → `8f136cc7` 服务端裁决与时钟 → `2c743a5e` 前端 → `dbb6edd8` 测试。
+
+### 12.1 状态机
+
+```text
+idle ──首个提交──> collecting
+collecting ──集齐 required──> awaiting_approval      (party)
+collecting ──solo 提交──> resolving                  (solo，等价于自己批准)
+awaiting_approval ──DM approve──> resolving ──> completed
+awaiting_approval ──DM reject──> rejected
+resolving ──任一角色失败──> error
+```
+
+`awaiting_approval` 是唯一新增的中间态；`rejected` 是终止态，下一次提交可直接重开。`rejected` 不修改任何角色卡、不推进时钟。
+
+### 12.2 时钟只在一个地方动
+
+`runtime.rest_duration_minutes(rest)` 是时长的**唯一来源**（DND2024：短休 60、长休 480，取 SRD 下界）。声明缺失的规则集按 0 处理、照常结算；返回值非法时 `REST_DURATION_INVALID` fail closed，角色与时钟都不动。
+
+推进发生在批准之后、`completed` 之前，同一个 `authoritative_write` 与 `_lock` 内：分段（`MAX_ADVANCE_MINUTES = 1440`）→ `advance_adventure_world(instance)` 重估 Adventure gate 与进程 due_at → `queue_world_memory(...)` 让 AI GM 知道时间流逝 → `source_round` 挂回合号。任一步失败，`before_players` 与 `world_state` 快照一起回滚，会话置 `error`。
+
+### 12.3 逻辑时间取代墙钟
+
+会话与参与者不再写 `datetime.now()`：
+
+| 旧字段 | 新字段 |
+|---|---|
+| `started_at`（ISO 字符串） | `started_tick`（绝对逻辑分钟） |
+| `submitted_at` | `submitted_tick` |
+| `resolved_at` | `resolved_tick` + 投影 `resolved_clock` |
+
+旧存档里的字符串字段不迁移、不解析，读到即忽略；`public_rest_session` 对缺失字段沉默降级。`rest_activity.py` 的会话身份从 `started_at` 改为 `started_tick` 参与哈希。**理由**：同一存档在不同时刻、不同机器打开必须描述同一次休息，墙钟不满足这一点。
+
+### 12.4 权限与幂等
+
+- `POST /api/games/{key}/rest/decide`，body `{approve, operation_id}`；`_gm_only_inst` 前置拦截，非 GM 403。
+- 幂等**先于**状态检查：同一 `operation_id` 重放时会话早已离开 `awaiting_approval`，若先判状态会把一次成功的裁决报成失败（实测踩到，已按此顺序修正）。
+- `awaiting_approval` 期间参与者可再次提交以修改自己的申报，会话清空 `decision` 重新等待。
+
+### 12.5 AI GM 不能死锁
+
+新增工具 `decide_party_rest`（`mutation=True`、`automatic=False`、`effect="external"`，guard 走 `gm_instance`）。没有它，AI 席位当局的 AI GM 局会让队伍休息永久停在 `awaiting_approval`。
+
+### 12.6 验收
+
+| 项 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_rest_decision.py` | **15 passed** |
+| 休息/生命周期/队伍/活动/绑定定向回归（12 个文件） | **259 passed**（对齐后） |
+| `pytest tests/rulesets -q`（规范切片套件全量） | **11 failed / 1786 passed / 0 errors**（23:57）；11 条仍是 `character_builder` 基线，通过数 1771→1786 = +15，净引入 0 |
+| `frontend-v2` `npm test` | **221 files / 1589 tests passed** |
+| `vue-tsc -b`、`eslint`、`ruff check`、`git diff --check` | 通过 |
+
+**关于 `pytest tests`（非切片套件全量）**：本环境跑出 `18 failed / 7035 passed / 2094 errors`，但把报错文件单独跑是 **133 passed**，逐条不可复现——这是批量运行的环境噪声（并发跑尤其明显），不作为验收依据。切片验收仍以 `tests/rulesets` 为准，另有受影响的 `tests/*` 定向回归。
+
+### 12.7 偏差与未决
+
+1. **`combat.start` 仍不看清 `rest_session`**（§10.1 第三条状态漏洞未修）。本切片给了它一个用户可见的出口（拒绝即终止态，不悬挂），但 DM 在 `collecting` 阶段开战仍会让会话挂起。
+2. **长休频次限制未做**：有钟之后可机械执行，但需要「上次长休时刻」的独立记录，且要给 DM 留覆盖口。
+3. **长休的"至少"留白未建模**：规则时长取下界，DM 想表达「这一夜过了十小时」目前只能另行推进时钟，没有把这次休息与那段额外时间关联起来。
+4. **单人模式不走批准**：solo 下玩家即 GM，提交即结算并推进时间。这是刻意不做成立即点击的空按钮，与「队伍需要一个裁决人」的立场一致。
+5. **前端未加新的 locale 键**：等待/裁决文案走面板内联 `text(cn, en)`，避免为两个键改动五份语言文件；`PartyActions` 的队伍进度行因此仍只显示「3/3 准备就绪」。
