@@ -1,50 +1,75 @@
-# DiceFrame v3.1.2
+# DiceFrame v3.2.0-beta.1
+
+> 这是 3.2.0 的**预览版（beta）**。默认的稳定频道不会收到它；请在「设置 → 预览版更新」里开启后才会检测到本版本。重要存档建议先备份。
 
 ## 中文
 
-### 孤注一掷（修复）
+### 安装与更新（新增）
 
-- 修正了部分情况下「申请孤注一掷 / 接受失败 / 接受风险并重掷」无法提交的问题；这些选择现在会按当前席位的身份正常生效，主持人告知风险与拒绝申请的行为不变。
-- 相关提示也更清楚了：不再是裸的状态码，会给出具体原因并按界面语言显示（zh-CN / en；社区语言暂回退英文）。
+- **Windows 安装包**：新增 `DiceFrame-v3.2.0-beta.1-windows-setup.exe`，按当前用户安装到 `%LOCALAPPDATA%\Programs\DiceFrame`，不需要管理员权限。安装内容与便携版是同一套文件。
+- **启动器独立窗口**：双击 `DiceFrame.exe` 后在独立应用窗口打开，不再占用一个新浏览器标签；关掉窗口即结束进程。
+- **便携版覆盖升级**：新版便携包可以直接解压覆盖到旧目录完成升级，不必先清空旧版本。
+- **长路径修复**：更新器解压便携版更新时不再受 Windows `MAX_PATH` 限制，此前深层路径（Python 依赖）会解压失败。
 
-### 资料册与内容包（修复）
+### 多人 / 联机（修复）
 
-- 内容包详情页此前直接读取包内文件，绕过了可见性判定，玩家能读到守秘人专属条目的正文。现在按观看者视角过滤：玩家只看到自己可见的条目，条目计数与被隐藏的条数也如实告知。
-- 视角判定：房主凭据优先；配置了访问密码时，非房主一律按玩家视角处理（fail closed）；未配置访问密码时普通请求仍按房主处理，带 `user=` 或席位凭据的请求按玩家处理。
+- 通过 Cloudflare Quick Tunnel 联机时，多人状态轮询恢复正常，客户端不再停在过期状态。
 
-### 界面（修复）
+### 模型接入（修复）
 
-- 内容包列表在更新进行中会禁用**所有**更新按钮。此前只有正在更新的那个按钮变灰，点另一个包看起来像没反应。
+- 自定义 `base_url` 本身已带版本段（如 `/v1`）时，生图 / TTS / ASR 端点拼接不再重复或错位。
+
+### 跑团流程（修复）
+
+- **GM 席位**：创建游戏时不再生成「未认领」的空 GM 席位；GM 可以重新收回自己的席位。
+- **GM 私密感知**：私密感知内容在 GM 回合上下文中保留，不再丢失。
+- **角色编辑**：已标记的技能身份在编辑角色后保持原样。
+- **孤注一掷**：无人应答的 Push 超时后结束等待，并明确告诉 GM 如何关闭该功能，不再无限挂起。
+- **存档席位**：日志窗口之外但有真实痕迹的席位（有角色、已准备、队列里有动作）不再被当成幽灵席位清理。
 
 ### 升级说明
 
-- 本版本不新增存档 schema 迁移。
-- de/ja/ru 界面下本版新增文案暂时回退英文。
+- 本版本不新增存档 schema 迁移，从 3.1.2 直接升级即可。
+- beta 频道只影响「是否检测到预览版」；切回稳定频道不会自动降级，需要「恢复上一个版本」。
+- beta 的 Docker 镜像只打 `3.2.0-beta.1` 标签，不会更新 `latest`。
 
 ## English
 
-### Push the roll (fix)
+> This is the **preview (beta)** build of 3.2.0. The default stable channel will not see it; enable "Preview updates" in Settings to be offered this version. Back up important saves first.
 
-- Fixed a case where "Request Push", "Accept failure" and "Accept risk and re-roll" could not be submitted; those choices now take effect under the current seat's identity, while offering the risk and rejecting a request stay Keeper-only.
-- The related messages are clearer too: a refusal states a reason and follows the UI language instead of showing a bare status code (zh-CN / en; community locales fall back to English for now).
+### Installing and updating (new)
 
-### Lorebooks and content packs (fix)
+- **Windows installer**: new `DiceFrame-v3.2.0-beta.1-windows-setup.exe` installs per user into `%LOCALAPPDATA%\Programs\DiceFrame` without administrator rights. It ships exactly the same files as the portable build.
+- **Launcher window**: double-clicking `DiceFrame.exe` now opens a dedicated application window instead of a new browser tab; closing the window stops the process.
+- **Portable over-install upgrade**: a new portable archive can be unpacked straight over the old directory, no need to wipe the previous install first.
+- **Long paths fixed**: the updater no longer hits the Windows `MAX_PATH` limit when extracting portable updates — deep dependency paths used to fail.
 
-- The module detail page read pack files directly and bypassed the visibility check, so players could read keeper-only entry bodies. It now filters by viewer perspective: players see only the entries visible to them, and the entry count plus the number of hidden entries match that view.
-- Perspective rules: owner credentials win; with an access password configured, non-owners are fail-closed player views; without one, plain requests stay GM while requests marked as a share (`user=` or a seat token) are player views.
+### Multiplayer (fix)
 
-### Interface (fix)
+- Multiplayer state polling works again behind Cloudflare Quick Tunnels; clients no longer sit on a stale state.
 
-- The pack list now disables **every** update button while an update runs. Previously only the running button was greyed out, so clicking another pack looked dead.
+### Model endpoints (fix)
+
+- When a custom `base_url` already carries a version segment (e.g. `/v1`), image / TTS / ASR endpoint URLs are no longer duplicated or mis-joined.
+
+### At the table (fix)
+
+- **GM seat**: creating a game no longer leaves an unclaimed empty GM seat, and the GM can take their seat back.
+- **Private perceptions**: keeper-only perceptions stay in the GM turn context instead of being dropped.
+- **Character edits**: marked skill identities survive a character edit.
+- **Push the roll**: an unanswered Push now times out instead of hanging forever, and tells the GM how to turn the feature off.
+- **Seats in saves**: a seat outside the retained log window but with real evidence (a character, a ready mark, a queued action) is no longer purged as a ghost.
 
 ### Upgrade notes
 
-- This release adds no save-schema migration.
-- New UI strings fall back to English under de/ja/ru for now.
+- No save-schema migration in this release; 3.1.2 upgrades directly.
+- The beta channel only changes whether preview builds are detected. Switching back to stable does not downgrade automatically; use "Restore previous version".
+- Beta Docker images are tagged `3.2.0-beta.1` only and do not move `latest`.
 
 ## Downloads
 
-- **普通 Windows 用户 / Windows portable users**: `DiceFrame-v3.1.2-windows-portable.zip`
-- **源码运行用户 / Source-run users**: `DiceFrame-v3.1.2-windows.zip`
-- **托管 Docker 更新 / Managed Docker update**: `DiceFrame-v3.1.2-docker-update-linux-amd64.zip`
-- Release 同时提供以上压缩包及 `SHA256SUMS` 校验文件。
+- **Windows 安装版 / Windows installer**: `DiceFrame-v3.2.0-beta.1-windows-setup.exe`
+- **Windows 便携版 / Windows portable**: `DiceFrame-v3.2.0-beta.1-windows-portable.zip`
+- **源码运行 / Source-run**: `DiceFrame-v3.2.0-beta.1-windows.zip`
+- **托管 Docker 更新 / Managed Docker update**: `DiceFrame-v3.2.0-beta.1-docker-update-linux-amd64.zip`
+- Release 同时提供以上文件的 `SHA256SUMS` 校验。
