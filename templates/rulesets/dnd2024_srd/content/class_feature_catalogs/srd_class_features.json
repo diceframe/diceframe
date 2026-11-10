@@ -969,6 +969,14 @@
           }
         },
         {
+          "id": "magical_cunning",
+          "owner": "class:warlock",
+          "minimum_level": 2,
+          "resource_id": "magical_cunning",
+          "source_ref": "srd-5.2.1:p72:magical-cunning",
+          "summary": "Once per Long Rest you can perform an esoteric rite for 1 minute. At the end of it, you regain expended Pact Magic spell slots, up to half your maximum (round up)."
+        },
+        {
           "id": "contact_patron",
           "owner": "class:warlock",
           "minimum_level": 9,
@@ -1055,6 +1063,13 @@
             "free_cast_replacement": 1,
             "free_cast_replacement_group": "mystic_arcanum"
           }
+        },
+        {
+          "id": "eldritch_master",
+          "owner": "class:warlock",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p72:eldritch-master",
+          "summary": "When you use your Magical Cunning feature, you regain all your expended Pact Magic spell slots instead of half of them."
         }
       ]
     },

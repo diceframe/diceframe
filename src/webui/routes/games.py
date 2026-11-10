@@ -79,6 +79,8 @@ from src.webui.routes.game_character_routes import (
     api_live_character_rest,
     api_live_character_spells,
     api_live_character_rest_options,
+    api_live_character_ritual,
+    api_live_character_ritual_options,
     api_game_rest_decide,
     api_char_delete,
     api_npc_portrait_update,
@@ -275,6 +277,15 @@ def register_games(app: web.Application) -> None:
     app.router.add_post(
         "/api/games/{game_key}/rest/decide",
         api_game_rest_decide,
+    )
+    # 限时仪式（Magical Cunning）：仪式自己的一分钟在同一次权威写里推进。
+    app.router.add_post(
+        "/api/games/{game_key}/character/{user_id}/ritual",
+        api_live_character_ritual,
+    )
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/ritual/options",
+        api_live_character_ritual_options,
     )
     app.router.add_route(
         "DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete

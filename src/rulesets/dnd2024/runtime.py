@@ -953,6 +953,36 @@ class Dnd2024Runtime:
             raise ValueError("rest must be short or long")
         return minutes
 
+    def complete_ritual(
+        self, rule: Any, character: dict[str, Any], resource_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Finish a timed ritual (Magical Cunning) on this character.
+
+        Returns the minutes the rite took along with the restored slots: the
+        caller must move the world clock by that much in the same authoritative
+        write, which is what makes the 1 minute real instead of decorative.
+        """
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        if resource_id is not None and not isinstance(resource_id, str):
+            raise ValueError("resource_id must be a string")
+        result = Dnd2024RestEngine(bundle).complete_ritual(character, resource_id)
+        result["character"] = self._live_projection(character, result["character"], bundle)
+        return result
+
+    def ritual_options(self, rule: Any, character: dict[str, Any]) -> list[dict[str, Any]]:
+        """Read-only description of the rituals this character could perform."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        payload = canonical if isinstance(canonical, dict) else character
+        locale = str(payload.get("locale") or "") if isinstance(payload, dict) else ""
+        bundle = self.load_bundle(locale)
+        return Dnd2024RestEngine(bundle).ritual_options(payload)
+
     def rest_options(self, rule: Any, character: dict[str, Any]) -> dict[str, Any]:
         """What a Long Rest requires or may change for one character.
 

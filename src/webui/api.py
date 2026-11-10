@@ -58,6 +58,7 @@ from src.commands.hosted_combat import HostedCombatScheduler
 from src.commands import adventure_effects
 from src.commands.scene_transition import SceneTransitionNarrator
 from src.webui.services import ruleset_characters
+from src.webui.services import ruleset_ritual
 from src.webui.services import character_card_import
 from src.webui.services import content_sync
 from src.lorebook.sync import LorebookSyncExporter, LorebookSyncImporter
@@ -401,6 +402,16 @@ class WebAPI:
             ruleset_registry=self._ruleset_registry,
             # 休息推进游戏时间后 Adventure 的 gate 与进程到期条件要重新求值；
             # 属性在调用时才解析，与 resource_recovery 的组装方式一致。
+            advance_adventure_world=lambda instance: adventure_runtime.advance_adventure_world(
+                self._adventure_runtime_dependencies, instance,
+            ),
+        )
+        self._live_ruleset_ritual_dependencies = ruleset_ritual.LiveRulesetRitualDependencies(
+            get_instance=self._reg.get,
+            parse_game_key=_parse_game_key,
+            save_instance=self._reg.save,
+            load_rule_for_game=self._load_rule_for_game,
+            ruleset_registry=self._ruleset_registry,
             advance_adventure_world=lambda instance: adventure_runtime.advance_adventure_world(
                 self._adventure_runtime_dependencies, instance,
             ),
@@ -3213,6 +3224,22 @@ class WebAPI:
         """Read-only long-rest options for one character (terrain and study)."""
         return ruleset_rest.read_options(
             self._live_ruleset_rest_dependencies, game_key, user_id,
+        )
+
+    async def ruleset_ritual_resolve_live(
+        self, game_key: str, user_id: str, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Perform a timed ritual; the rite's own minutes move the clock."""
+        return await ruleset_ritual.resolve_live(
+            self._live_ruleset_ritual_dependencies, game_key, user_id, body,
+        )
+
+    def ruleset_ritual_options(
+        self, game_key: str, user_id: str,
+    ) -> dict[str, Any]:
+        """Read-only list of rituals this character could perform right now."""
+        return ruleset_ritual.read_options(
+            self._live_ruleset_ritual_dependencies, game_key, user_id,
         )
 
     async def ruleset_rest_decide(
