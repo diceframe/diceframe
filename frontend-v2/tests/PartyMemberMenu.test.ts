@@ -34,6 +34,29 @@ describe('party member menu', () => {
     wrapper.unmount()
   })
 
+  it('lets the GM take over their own seat when it was created unclaimed', () => {
+    // 旧版建房页可能把 GM 席位建成「等待认领」：GM 席位拿不到分享链接、没人能认领，
+    // 所以菜单直接给 GM「由我操作」，而不是「邀请认领」。
+    const own = { user_id: 'seat-a', character_name: 'Ann', control: { mode: 'unclaimed' } } as Player
+    const wrapper = mountMenu({ player: own })
+    const options = wrapper.getComponent(NDropdown).props('options')!
+    const takeOver = options.find(option => option.key === 'control-human')
+    expect(takeOver?.label).toBe('由我操作')
+    expect(options[0].label).toBe('操作链接')
+    expect(wrapper.get('button').attributes('aria-label')).not.toBe('邀请认领此角色')
+    wrapper.getComponent(NDropdown).vm.$emit('select', 'control-human')
+    expect(wrapper.emitted('set-control')).toEqual([['seat-a', 'human']])
+    wrapper.unmount()
+  })
+
+  it('does not hand an unclaimed player seat to a human without a claim', () => {
+    // 普通席位仍然只能通过操作链接认领；GM 不能把它直接设成「真人」空占着。
+    const wrapper = mountMenu({ player: { ...player, control: { mode: 'unclaimed' } } })
+    expect(keys(wrapper)).not.toContain('control-human')
+    expect(keys(wrapper)).toContain('control-ai')
+    wrapper.unmount()
+  })
+
   it('keeps the normal control-link label for a human-controlled character', () => {
     const wrapper = mountMenu({ player: { ...player, control: { mode: 'human' } } })
     const link = wrapper.getComponent(NDropdown).props('options')![0]

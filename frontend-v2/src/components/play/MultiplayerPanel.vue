@@ -19,6 +19,8 @@ const restSession = computed(() => props.detail.rest_session)
 const myRestStatus = computed(() => restSession.value?.participants.find(row => row.user_id === props.currentUserId)?.status || '')
 const currentPlayer = computed(() => props.players.find(player => player.user_id === props.currentUserId))
 const currentPlayerUnclaimed = computed(() => currentPlayer.value?.control?.mode === 'unclaimed')
+/** GM 自己的席位没人能认领：提示 GM 直接在成员菜单接手，而不是去找 GM 要链接。 */
+const currentIsGmSeat = computed(() => !!props.currentUserId && props.currentUserId === props.detail.gm_uid)
 function hasActed(p: Player) { return actedSet.value.has(p.user_id) }
 function needsDice(p: Player) { return Boolean(actionByUser.value.get(p.user_id)?.dice_pending) }
 function isAway(p: Player) { return awaySet.value.has(p.user_id) }
@@ -45,7 +47,10 @@ function isHosting(p: Player) { return Boolean(props.hostingUid) && p.user_id ==
 <template>
   <section class="multiplayer panel">
     <h2>{{ t('playerList') }}（{{ players.length }}）</h2>
-    <p v-if="currentPlayerUnclaimed" class="multiplayer-unclaimed-help" role="note">
+    <p v-if="currentPlayerUnclaimed && currentIsGmSeat" class="multiplayer-unclaimed-help" role="note">
+      <span>{{ t('claimOwnSeatHint') }}</span>
+    </p>
+    <p v-else-if="currentPlayerUnclaimed" class="multiplayer-unclaimed-help" role="note">
       <strong>{{ t('claimUnclaimedTitle') }}</strong>
       <span>{{ t('claimUnclaimedHint') }}</span>
     </p>

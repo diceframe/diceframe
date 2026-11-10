@@ -440,7 +440,10 @@ function controlLabel(mode: string): string {
 function controlOf(index: number): CardControlMode {
   return cardControlAt(cardControl.value, index)
 }
-/** 单个循环按钮：点一下换下一个控制方式（玩家 → AI 托管 → 等待认领 → 玩家）。 */
+/**
+ * 单个循环按钮：点一下换下一个控制方式（玩家 → AI 托管 → 等待认领 → 玩家）。
+ * 第一张是 GM 自己的席位，没人能认领，只在玩家 ↔ AI 托管之间切换。
+ */
 function cycleControl(index: number) {
   cardControl.value = cycleCardControl(cardControl.value, index)
 }

@@ -25,7 +25,10 @@ const { locale, t } = useLocale()
 const open = ref(false)
 const memberName = computed(() => props.player.character_name || props.player.user_id)
 const label = computed(() => `${locale.value === 'zh-CN' ? '成员操作' : 'Member actions'} · ${memberName.value}`)
-const linkLabel = computed(() => props.player.control?.mode === 'unclaimed' ? t('inviteClaim') : t('operationLink'))
+/** GM 自己的席位绑定房主、拿不到分享链接，没有人能来认领它。 */
+const isGmSeat = computed(() => !!props.gmUid && props.player.user_id === props.gmUid)
+const awaitsClaim = computed(() => props.player.control?.mode === 'unclaimed' && !isGmSeat.value)
+const linkLabel = computed(() => awaitsClaim.value ? t('inviteClaim') : t('operationLink'))
 const icon = (component: Component) => () => h(NIcon, { size: 16 }, { default: () => h(component) })
 const option = (key: string, text: string, component: Component): DropdownOption => ({ key, label: text, icon: icon(component), props: { role: 'menuitem' } })
 const options = computed<DropdownOption[]>(() => {
@@ -34,7 +37,11 @@ const options = computed<DropdownOption[]>(() => {
   if (uid !== props.currentUserId) result.push(option('away', t(props.away ? 'back' : 'away'), props.away ? PlayCircleOutline : PauseCircleOutline))
   if (props.player.control?.mode === 'ai') {
     if (!props.player.control.temporary) result.push(option('control-human', t('controlStopAi'), PersonOutline))
-  } else result.push(option('control-ai', t('controlSetAi'), SparklesOutline))
+  } else {
+    // 旧版建房页可能把 GM 席位建成「等待认领」：没人能认领它，GM 直接由自己接手。
+    if (isGmSeat.value && props.player.control?.mode === 'unclaimed') result.push(option('control-human', t('controlClaimOwnSeat'), PersonOutline))
+    result.push(option('control-ai', t('controlSetAi'), SparklesOutline))
+  }
   if (props.memberCount > 1 && uid !== props.currentUserId && uid !== props.gmUid) {
     result.push({ key: 'danger-divider', type: 'divider' }, {
       ...option('kick', t('kick'), CloseCircleOutline),
@@ -61,7 +68,7 @@ function select(key: string | number) {
 
 <template>
   <NDropdown v-if="isGm" v-model:show="open" trigger="click" placement="bottom-end" size="large" :options="options" :menu-props="() => ({ role: 'menu', 'aria-label': label })" @select="select">
-    <button class="party-member-menu" data-testid="party-member-menu" :data-player-id="player.user_id" type="button" :title="player.control?.mode === 'unclaimed' ? t('inviteClaim') : label" :aria-label="player.control?.mode === 'unclaimed' ? t('inviteClaim') : label" aria-haspopup="menu" :aria-expanded="open" :disabled="busy" :aria-busy="busy" @keydown.down.prevent="open = true" @keydown.esc.prevent="open = false">
+    <button class="party-member-menu" data-testid="party-member-menu" :data-player-id="player.user_id" type="button" :title="awaitsClaim ? t('inviteClaim') : label" :aria-label="awaitsClaim ? t('inviteClaim') : label" aria-haspopup="menu" :aria-expanded="open" :disabled="busy" :aria-busy="busy" @keydown.down.prevent="open = true" @keydown.esc.prevent="open = false">
       <NIcon :component="EllipsisHorizontal" size="18" />
     </button>
   </NDropdown>

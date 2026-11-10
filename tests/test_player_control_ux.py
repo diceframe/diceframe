@@ -203,6 +203,58 @@ async def test_creation_fails_closed_on_an_unknown_control_mode(web_api) -> None
     assert created.get("error_code") == "INVALID_PLAYER_CONTROL"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first_card_control, room_default",
+    [("unclaimed", ""), ("", "unclaimed")],
+    ids=["explicit", "room-default"],
+)
+async def test_creation_refuses_an_unclaimed_gm_seat(
+    web_api, first_card_control: str, room_default: str,
+) -> None:
+    """第一张卡就是 GM 席位：没有人能认领它，建成 unclaimed 只会让房主自己也无法行动。
+
+    建房页删掉第一张卡后，原来的第二张会带着「等待认领」顶上来；这一步必须在开房前
+    就失败，而不是留下一个提交行动永远被 PLAYER_UNCLAIMED 拒绝的对局。
+    """
+
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    games_before = [game["game_key"] for game in api.list_games()["games"]]
+    characters = [dict(c) for c in CHARACTERS]
+    if first_card_control:
+        characters[0]["control"] = first_card_control
+
+    created = await api.create_game(
+        "template_world", "模板世界", players=characters,
+        unclaimed_control_default=room_default,
+    )
+
+    assert created.get("ok") is False
+    assert created.get("error_code") == "GM_SEAT_UNCLAIMED"
+    # 不留下半成品存档。
+    assert [game["game_key"] for game in api.list_games()["games"]] == games_before
+
+
+@pytest.mark.asyncio
+async def test_other_seats_may_still_wait_for_a_claim(web_api) -> None:
+    """只有 GM 席位受限：其余席位照常可以建成「等待认领」，GM 席位也可以交给 AI。"""
+
+    api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
+    characters = [dict(c) for c in CHARACTERS]
+    characters[0]["control"] = "ai"
+
+    created = await api.create_game(
+        "template_world", "模板世界", players=characters,
+        unclaimed_control_default="unclaimed",
+    )
+
+    assert created.get("ok") is True, created
+    instance = api.get_game_instance(created["game_key"])
+    assert [control_mode(instance, uid) for uid in _uids(instance)] == [
+        "ai", "unclaimed", "unclaimed",
+    ]
+
+
 # ---- 2. 房间设置 away_control_policy ----------------------------------------
 
 

@@ -9,7 +9,9 @@ from typing import Any
 from src.content_modules.refs import ContentRefError
 from src.engine.modules import content_binding, room_access
 from src.engine.player_control import (
+    CONTROL_MODES,
     DEFAULT_CONTROL_MODE,
+    GM_SEAT_CONTROL_MODES,
     PlayerControlError,
     get_control,
     set_control,
@@ -264,6 +266,20 @@ async def create_players(
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Create the party as one compensated phase and bind its first GM seat."""
 
+    first = players[0] if players and isinstance(players[0], dict) else None
+    gm_seat_control = (
+        _requested_control(first, unclaimed_control_default) if first is not None else ""
+    )
+    if gm_seat_control in CONTROL_MODES and gm_seat_control not in GM_SEAT_CONTROL_MODES:
+        # 第一张卡就是 GM 席位：它绑定房主会话、永远拿不到分享凭证，没有人能认领。
+        # 建成「等待认领」只会得到一个连房主都提交不了行动的死席位，所以在创建任何
+        # 角色之前就拒绝，而不是悄悄改成别的控制方式。
+        transaction.rollback()
+        return [], {
+            "ok": False,
+            "error_code": "GM_SEAT_UNCLAIMED",
+            "error": "第一个角色是房主（GM）自己的席位，不能设为「等待认领」，请改为玩家或 AI 托管。",
+        }
     created_players: list[dict[str, Any]] = []
     public_key = _GAME_KEY_SEP.join(transaction.game_key)
     for index, character in enumerate(players):

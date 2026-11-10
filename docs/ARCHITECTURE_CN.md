@@ -1679,6 +1679,8 @@ player:<uid>
 
 是否进入具体权威战斗由战斗参与者规则决定，而不是 control record 自己偷偷加 actor。
 
+GM 席位（创建时的第一个角色）不能是 `unclaimed`：它绑定房主会话、从不签发分享凭证，没有人能认领它。创建阶段若第一个角色解析为 `unclaimed`（逐卡选择或房间默认），服务端以 `GM_SEAT_UNCLAIMED` 拒绝整次创建；GM 席位只允许 `human` 或 `ai`（`GM_SEAT_CONTROL_MODES`）。
+
 ---
 
 ## 12A.5 控制变更安全边界

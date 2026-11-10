@@ -116,6 +116,24 @@ describe('MultiplayerPanel unclaimed-seat guidance', () => {
     expect(hint.text()).toContain('通用邀请链接用于创建新角色')
   })
 
+  it('points the GM at the member menu when their own seat is unclaimed', () => {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(MultiplayerPanel, {
+      global: { plugins: [i18n] },
+      props: {
+        players: [{ user_id: 'gm-1', character_name: '菲伦', control: { mode: 'unclaimed' } }],
+        detail: { game_key: 'web|room|bot', solo_mode: false, gm_uid: 'gm-1' },
+        currentUserId: 'gm-1',
+      },
+    })
+
+    const hint = wrapper.get('.multiplayer-unclaimed-help')
+    expect(hint.text()).toContain('GM 席位')
+    expect(hint.text()).toContain('由我操作')
+    // 不再让 GM 去「找 GM 要操作链接」。
+    expect(hint.text()).not.toContain('通用邀请链接用于创建新角色')
+  })
+
   it('does not show claim guidance for a human-controlled seat', () => {
     const wrapper = mount(MultiplayerPanel, {
       global: { plugins: [i18n] },
