@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import math
 import shutil
 import struct
 import subprocess
 import sys
+import urllib.request
+import zipfile
 import zlib
 from pathlib import Path
 
@@ -21,6 +25,22 @@ CANDIDATE_CSC = [
     Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"),
     Path(r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"),
 ]
+# 应用窗口用的 WebView2 SDK（BSD-3-Clause）。固定版本与 SHA-256；编译时引用，打包时随载荷
+# 放进 app/launcher/webview2/（见 AppWindow.cs 与 build_portable.stage_webview2）。
+WEBVIEW2_SDK_VERSION = "1.0.4314.35"
+WEBVIEW2_SDK_SHA256 = "90778deb1b77e36292828b4b5833c9255c27533f40e0ddd55891ae718944edc4"
+WEBVIEW2_SDK_URL = (
+    "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/"
+    f"{WEBVIEW2_SDK_VERSION}/microsoft.web.webview2.{WEBVIEW2_SDK_VERSION}.nupkg"
+)
+WEBVIEW2_CACHE_DIR = ROOT / "dist" / "_launcher" / "webview2"
+# nupkg 内路径 → 解出的文件名。启动器只用 WinForms 控件（net462）与 x64 原生加载器。
+WEBVIEW2_SDK_FILES = {
+    "lib/net462/Microsoft.Web.WebView2.Core.dll": "Microsoft.Web.WebView2.Core.dll",
+    "lib/net462/Microsoft.Web.WebView2.WinForms.dll": "Microsoft.Web.WebView2.WinForms.dll",
+    "runtimes/win-x64/native/WebView2Loader.dll": "WebView2Loader.dll",
+    "LICENSE.txt": "LICENSE.txt",
+}
 
 
 def find_csc() -> Path:
@@ -182,6 +202,65 @@ def launcher_sources() -> list[str]:
     return [str(path) for path in sorted(SOURCE_DIR.glob("*.cs"))]
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def ensure_webview2_sdk(cache_dir: Path = WEBVIEW2_CACHE_DIR) -> Path:
+    """Download (once) and unpack the pinned WebView2 SDK; return the directory of its files."""
+    sdk_dir = cache_dir / WEBVIEW2_SDK_VERSION
+    if all((sdk_dir / name).is_file() for name in WEBVIEW2_SDK_FILES.values()):
+        return sdk_dir
+    package = cache_dir / f"microsoft.web.webview2.{WEBVIEW2_SDK_VERSION}.nupkg"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    if not package.is_file():
+        print(f"Downloading {WEBVIEW2_SDK_URL}", flush=True)
+        temporary = package.with_suffix(".download")
+        try:
+            urllib.request.urlretrieve(WEBVIEW2_SDK_URL, temporary)
+            temporary.replace(package)
+        finally:
+            temporary.unlink(missing_ok=True)
+    actual = _sha256(package)
+    if not hmac.compare_digest(actual, WEBVIEW2_SDK_SHA256):
+        package.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"WebView2 SDK SHA-256 mismatch: expected {WEBVIEW2_SDK_SHA256}, got {actual}"
+        )
+    sdk_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(package) as nupkg:
+        for member, name in WEBVIEW2_SDK_FILES.items():
+            (sdk_dir / name).write_bytes(nupkg.read(member))
+    return sdk_dir
+
+
+def csc_command(output: Path, sdk_dir: Path, icon: Path | None = None) -> list[str]:
+    command = [
+        str(find_csc()),
+        "/nologo",
+        "/optimize+",
+        "/target:exe",
+        "/platform:x64",
+        # WebRequestHandler.ServerCertificateValidationCallback 需要显式引用。
+        "/r:System.Net.Http.dll",
+        "/r:System.Net.Http.WebRequest.dll",
+        # 应用窗口（AppWindow.cs）：WinForms 宿主 + WebView2 控件。
+        "/r:System.Windows.Forms.dll",
+        "/r:System.Drawing.dll",
+        f"/r:{sdk_dir / 'Microsoft.Web.WebView2.Core.dll'}",
+        f"/r:{sdk_dir / 'Microsoft.Web.WebView2.WinForms.dll'}",
+    ]
+    if icon is not None:
+        command.append(f"/win32icon:{icon}")
+    command.append(f"/out:{output}")
+    command.extend(launcher_sources())
+    return command
+
+
 def build_launcher(output: Path, icon: Path) -> None:
     if not SOURCE.exists():
         raise RuntimeError(f"Cannot find launcher source: {SOURCE}")
@@ -189,23 +268,7 @@ def build_launcher(output: Path, icon: Path) -> None:
         raise RuntimeError(f"Cannot find icon source: {ICON_SOURCE}")
     write_ico(icon)
     output.parent.mkdir(parents=True, exist_ok=True)
-    csc = find_csc()
-    run(
-        [
-            str(csc),
-            "/nologo",
-            "/optimize+",
-            "/target:exe",
-            "/platform:x64",
-            # WebRequestHandler.ServerCertificateValidationCallback 需要显式引用。
-            "/r:System.Net.Http.dll",
-            "/r:System.Net.Http.WebRequest.dll",
-            f"/win32icon:{icon}",
-            f"/out:{output}",
-            *launcher_sources(),
-        ],
-        ROOT,
-    )
+    run(csc_command(output, ensure_webview2_sdk(), icon), ROOT)
 
 
 def parse_args() -> argparse.Namespace:

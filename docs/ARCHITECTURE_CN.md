@@ -5315,6 +5315,8 @@ Managed Docker
 
 覆盖升级同样由 launcher 负责（`src/launcher/OverwriteUpgrade.cs`）。用户把新包解压覆盖到安装目录时，新版本落在根目录 `app/`、`python/`，而 `current.json` 仍指向 `versions/` 里的旧版本。启动时若根目录载荷的 `app/src/version.py` 版本严格新于当前版本，launcher 把它搬进 `versions/v<版本>/`、暂存同一个启动器、写入与应用内更新相同的 restart signal，再走同一套 health / probation / commit；失败回滚到覆盖前的版本。该步骤必须先于旧布局清理执行，否则覆盖进来的载荷会被当成旧布局删除。根目录版本不比当前新、版本读不出、或安装从未使用 `versions/` 时不做任何事。
 
+房主本机界面由 launcher 的应用窗口承载（`src/launcher/AppWindow.cs`，WinForms + WebView2）。WebView2 SDK 程序集不内置在 exe 里，而是随版本载荷放在 `app/launcher/webview2/`：launcher 自更新只替换 exe，而旧版更新器、新版更新器和覆盖升级都整体搬运 `app/`，所以每个版本都带着与自己 launcher 匹配的 SDK；使用前复制到 `data/_launcher/webview2/` 再加载，避免锁住 `versions/` 里的文件。窗口就绪后 launcher 用 `FreeConsole` 与控制台脱离（隐藏窗口在 Windows Terminal 下做不到），之后的输出写入 `logs/launcher.log`，`python.exe` 以无窗口方式启动，失败改用对话框提示。`data/access_token.txt` 存在时（只在首次密码未被修改前存在，服务端启动时会删除与当前密码不一致的旧文件），在页面脚本运行前把它写入前端保存登录凭据的 `localStorage` 键 `trpg_access_token`，仅限本机 origin。缺 SDK、缺 WebView2 运行时或初始化失败时保留控制台并退回默认浏览器；`--browser` 强制浏览器。关闭窗口等同于停止服务。
+
 当 `current.json` 同时存在可验证的 `relative_dir` 与 `previous_relative_dir` 时，应用可以写入带 `operation=rollback` 的 restart signal，请求 launcher 将上一版本作为候选执行同一套 health / probation / commit 流程。成功后交换当前与上一版本指针并继续保留两套 payload；应用不直接修改指针，也不删除 `data/`。
 
 ---
