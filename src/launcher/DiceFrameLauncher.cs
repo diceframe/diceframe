@@ -38,8 +38,8 @@ internal static partial class DiceFrameLauncher
     // 本机 DiceFrame endpoint 解析结果：数据目录 + 端口 → scheme 与自签指纹。
     private static string launcherDataDir = "";
     private static string launcherPort = DefaultPort;
-    // 仅对 Launcher → 本机 DiceFrame 生效的证书指纹固定；绝不做全局校验关闭。
-    private static string expectedCertFingerprint = "";
+    // 证书校验一律按 data/certs/self-signed/fingerprint.txt 的当前内容判定，
+    // 只对 Launcher → 本机 DiceFrame 生效；绝不做全局校验关闭。
     private static HttpClient localHttpClient;
 
     [STAThread]
@@ -880,43 +880,13 @@ internal static partial class DiceFrameLauncher
     /// </summary>
     private static ServerEndpoint ResolveServerEndpoint()
     {
-        string url = "http://127.0.0.1:" + launcherPort;
-        string fingerprint = "";
-        try
-        {
-            string configPath = Path.Combine(launcherDataDir, "config.json");
-            if (File.Exists(configPath))
-            {
-                string text = File.ReadAllText(configPath);
-                bool selfSigned = Regex
-                    .Match(text, "\"tls_mode\"\\s*:\\s*\"self_signed\"")
-                    .Success;
-                if (selfSigned)
-                {
-                    string fingerprintPath = Path.Combine(
-                        launcherDataDir,
-                        "certs",
-                        "self-signed",
-                        "fingerprint.txt"
-                    );
-                    if (File.Exists(fingerprintPath))
-                    {
-                        string recorded = File.ReadAllText(fingerprintPath).Trim();
-                        if (recorded.Length > 0)
-                        {
-                            url = "https://127.0.0.1:" + launcherPort;
-                            fingerprint = recorded;
-                        }
-                    }
-                    // 指纹文件缺失（例如服务端回退 HTTP）时保持 http：
-                    // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
-                }
-            }
-        }
-        catch
-        {
-        }
-        expectedCertFingerprint = fingerprint;
+        string fingerprint = ReadRecordedFingerprint();
+        // 指纹文件缺失（例如服务端回退 HTTP、或配置尚未写入）时保持 http：
+        // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
+        string url =
+            fingerprint.Length > 0
+                ? "https://127.0.0.1:" + launcherPort
+                : "http://127.0.0.1:" + launcherPort;
         return new ServerEndpoint { Url = url, Fingerprint = fingerprint };
     }
 
@@ -940,6 +910,41 @@ internal static partial class DiceFrameLauncher
         localHttpClient.Timeout = TimeSpan.FromSeconds(2);
     }
 
+    // 读取本地记录的自签指纹。每次按当前磁盘记录判定，而不是缓存启动时的结果：
+    // 用户可以在运行中开启/重签 HTTPS，服务端 os.execv 原地重启后启动器并不会重新
+    // 解析 endpoint；若沿用启动时的空指纹，应用窗口会被证书错误挡住。
+    // 仍然只信任本地记录（fail-closed）：读不到、或模式不是 self_signed，一律返回空。
+    private static string ReadRecordedFingerprint()
+    {
+        try
+        {
+            string configPath = Path.Combine(launcherDataDir, "config.json");
+            if (!File.Exists(configPath))
+            {
+                return "";
+            }
+            if (!Regex.IsMatch(File.ReadAllText(configPath), "\"tls_mode\"\\s*:\\s*\"self_signed\""))
+            {
+                return "";
+            }
+            string fingerprintPath = Path.Combine(
+                launcherDataDir,
+                "certs",
+                "self-signed",
+                "fingerprint.txt"
+            );
+            if (!File.Exists(fingerprintPath))
+            {
+                return "";
+            }
+            return File.ReadAllText(fingerprintPath).Trim();
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     private static bool ValidateLocalCertificate(
         X509Certificate certificate,
         SslPolicyErrors errors
@@ -950,14 +955,27 @@ internal static partial class DiceFrameLauncher
             // 系统信任链验证通过（未来的 Let's Encrypt 证书走这里）。
             return true;
         }
+        if (certificate == null)
+        {
+            return false;
+        }
         // 自签证书：只有指纹与本地记录完全一致时才信任。
-        string expected = expectedCertFingerprint;
-        if (expected.Length == 0 || certificate == null)
+        string expected = ReadRecordedFingerprint();
+        if (expected.Length == 0)
         {
             return false;
         }
         string normalized = expected.Replace(":", "").Replace("-", "").ToUpperInvariant();
-        return Sha256Hex(certificate.GetRawCertData()) == normalized;
+        byte[] raw;
+        try
+        {
+            raw = certificate.GetRawCertData();
+        }
+        catch
+        {
+            return false;
+        }
+        return Sha256Hex(raw) == normalized;
     }
 
     private static string Sha256Hex(byte[] data)

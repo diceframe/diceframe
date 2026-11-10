@@ -278,10 +278,27 @@ internal static partial class DiceFrameLauncher
         )
         {
             // 与启动器自己的本机请求同一规则：只信任指纹与本地记录一致的自签证书。
-            bool pinned = ValidateLocalCertificate(
-                args.ServerCertificate.ToX509Certificate2(),
-                SslPolicyErrors.RemoteCertificateChainErrors
-            );
+            // 事件处理器里抛异常会让导航直接失败，所以这里逐层兜住并记日志。
+            bool pinned = false;
+            try
+            {
+                pinned = ValidateLocalCertificate(
+                    args.ServerCertificate == null
+                        ? null
+                        : args.ServerCertificate.ToX509Certificate2(),
+                    SslPolicyErrors.RemoteCertificateChainErrors
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Could not check the local certificate: " + ex.Message);
+            }
+            if (!pinned)
+            {
+                Console.WriteLine(
+                    "Refused a certificate for " + args.RequestUri + " (" + args.ErrorStatus + ")."
+                );
+            }
             args.Action = pinned
                 ? CoreWebView2ServerCertificateErrorAction.AlwaysAllow
                 : CoreWebView2ServerCertificateErrorAction.Cancel;
@@ -317,9 +334,12 @@ internal static partial class DiceFrameLauncher
         {
             return;
         }
-        string origin = new Uri(url).GetLeftPart(UriPartial.Authority);
+        // 启用/关闭 HTTPS 会让页面在 http 与 https 之间跳转，而两者的 localStorage 不共用；
+        // 按 host:port 匹配，跳转后仍然写得到密码（窗口只承载本机地址，外链交给浏览器）。
+        Uri uri = new Uri(url);
+        string hostPort = uri.Host + ":" + uri.Port;
         await core.AddScriptToExecuteOnDocumentCreatedAsync(
-            "(function(){try{if(location.origin!==\"" + JsonEscape(origin) + "\")return;"
+            "(function(){try{if(location.host!==\"" + JsonEscape(hostPort) + "\")return;"
                 + "localStorage.setItem(\"" + FrontendAccessTokenKey + "\",\""
                 + JsonEscape(token) + "\");}catch(e){}})();"
         );

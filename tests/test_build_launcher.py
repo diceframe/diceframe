@@ -101,3 +101,53 @@ def test_overwrite_upgrade_version_rules(tmp_path):
     assert payload["compare"] == [1, -1, 0, 1, 1, 1, 1, 1, 0, 0]
     # 槽位命名与应用内更新器 _safe_version_dir 一致，拒绝路径穿越。
     assert payload["slots"] == ["v3.1.3", "v3.2.0-beta.1", "", ""]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_rechecks_the_self_signed_fingerprint_after_a_live_switch(tmp_path):
+    """运行中开启 HTTPS 时，服务端 os.execv 重启，启动器不会重新解析 endpoint。
+
+    证书指纹必须按当前磁盘记录判定，而不是启动时的缓存：否则应用窗口会被自签证书
+    拦在错误页。这里同时锁住 fail-closed：模式不是 self_signed 或记录缺失都不信任。
+    """
+    exe = tmp_path / "DiceFrame.exe"
+    _compile_launcher(exe)
+    data = tmp_path / "data"
+    certs = data / "certs" / "self-signed"
+    certs.mkdir(parents=True)
+    fingerprint = ":".join(["AB"] * 32)
+    (certs / "fingerprint.txt").write_text(fingerprint, encoding="utf-8")
+    (data / "config.json").write_text('{"tls_mode": "off"}', encoding="utf-8")
+
+    script = (
+        "$t = [Reflection.Assembly]::LoadFile($env:LAUNCHER_EXE).GetType('DiceFrameLauncher');"
+        "$f = [Reflection.BindingFlags]'NonPublic,Static';"
+        "$t.GetField('launcherDataDir', $f).SetValue($null, $env:DATA_DIR);"
+        "$read = $t.GetMethod('ReadRecordedFingerprint', $f);"
+        "$val = $t.GetMethod('ValidateLocalCertificate', $f);"
+        "$out = @{ off = [string]$read.Invoke($null, @()) };"
+        "Set-Content -LiteralPath (Join-Path $env:DATA_DIR 'config.json')"
+        " -Value '{\"tls_mode\": \"self_signed\"}' -NoNewline;"
+        "$out.live = [string]$read.Invoke($null, @());"
+        "Remove-Item -LiteralPath (Join-Path $env:DATA_DIR 'certs/self-signed/fingerprint.txt');"
+        "$out.missing = [string]$read.Invoke($null, @());"
+        "$out.null_cert = [bool]$val.Invoke($null, @($null,"
+        " [System.Net.Security.SslPolicyErrors]::RemoteCertificateChainErrors));"
+        "$out | ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        env={**os.environ, "LAUNCHER_EXE": str(exe), "DATA_DIR": str(data)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+
+    # HTTP 模式下即便文件还在也不信任。
+    assert payload["off"] == ""
+    # 同一个进程内切到 self_signed（服务端重启，启动器不重启）后立刻读到指纹。
+    assert payload["live"] == fingerprint
+    # 记录被删后回到 fail-closed。
+    assert payload["missing"] == ""
+    assert payload["null_cert"] is False
