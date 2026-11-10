@@ -73,11 +73,22 @@ jobs:
       - name: Build portable zip
         run: python scripts/build_portable.py
 
+      - name: Ensure NSIS
+        shell: pwsh
+        run: |
+          $known = @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "$env:ProgramFiles\NSIS\makensis.exe")
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not ($known | Where-Object { Test-Path $_ })) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Build Windows installer
+        run: python scripts/build_installer.py
+
       - name: Generate SHA-256 sidecar
         shell: bash
         run: |
           cd dist
-          for f in *.zip; do sha256sum "$f" > "$f.sha256"; done
+          for f in *.zip *-windows-setup.exe; do sha256sum "$f" > "$f.sha256"; done
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -87,6 +98,8 @@ jobs:
           path: |
             dist/*portable*.zip
             dist/*portable*.sha256
+            dist/*-windows-setup.exe
+            dist/*-windows-setup.exe.sha256
 
   docker-update:
     runs-on: ubuntu-latest
@@ -170,6 +183,7 @@ jobs:
           set -euo pipefail
           source_zip="DiceFrame-${GITHUB_REF_NAME}-windows.zip"
           portable_zip="DiceFrame-${GITHUB_REF_NAME}-windows-portable.zip"
+          setup_exe="DiceFrame-${GITHUB_REF_NAME}-windows-setup.exe"
           docker_zip="DiceFrame-${GITHUB_REF_NAME}-docker-update-linux-amd64.zip"
           cd dist
           for file in \
@@ -177,14 +191,16 @@ jobs:
             "$source_zip.sha256" \
             "$portable_zip" \
             "$portable_zip.sha256" \
+            "$setup_exe" \
+            "$setup_exe.sha256" \
             "$docker_zip" \
             "$docker_zip.sha256"
           do
             test -s "$file"
           done
-          sha256sum --check "$source_zip.sha256" "$portable_zip.sha256" "$docker_zip.sha256"
+          sha256sum --check "$source_zip.sha256" "$portable_zip.sha256" "$setup_exe.sha256" "$docker_zip.sha256"
           python ../scripts/validate_docker_update.py "$docker_zip" --version "${GITHUB_REF_NAME#v}"
-          sha256sum "$source_zip" "$portable_zip" "$docker_zip" > SHA256SUMS
+          sha256sum "$source_zip" "$portable_zip" "$setup_exe" "$docker_zip" > SHA256SUMS
 
       - name: Check whether the GitHub Release already exists
         id: release-state
@@ -223,6 +239,9 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          gh release upload "$tag" \
+            "dist/DiceFrame-${tag}-windows-setup.exe" \
+            --clobber
           gh release upload "$tag" \
             "dist/DiceFrame-${tag}-windows-portable.zip" \
             --clobber

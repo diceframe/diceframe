@@ -26,7 +26,7 @@ DiceFrame 是一个可以自己部署的 **AI 跑团引擎**，支持 **D&D / Co
 <details>
 <summary>Windows 便携版</summary>
 
-从 [Releases](https://github.com/diceframe/diceframe/releases/latest) 下载 `DiceFrame-vX.Y.Z-windows-portable.zip`，解压后运行 `DiceFrame.exe`。
+从 [Releases](https://github.com/diceframe/diceframe/releases/latest) 下载安装版 `DiceFrame-vX.Y.Z-windows-setup.exe`（不需要管理员权限），或便携版 `DiceFrame-vX.Y.Z-windows-portable.zip`（解压后运行 `DiceFrame.exe`）。
 在“**管理 → 设置 → 模型接口**”添加服务商，再到“**模型配置**”选择主模型。[安装详情](docs/zh/install.md#windows-便携版) · [第一局](docs/zh/content-and-play.md#第一局怎么玩)
 
 </details>

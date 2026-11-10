@@ -10,6 +10,8 @@ Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](http
 
 Windows portable builds can check for and apply updates from the Version Update section under **Manage → Settings → About**.
 
+You can also download the installer, `DiceFrame-vX.Y.Z-windows-setup.exe`. It installs for the current user into `%LOCALAPPDATA%\Programs\DiceFrame` without administrator rights, creates Start menu and desktop shortcuts, and can be removed from **Settings → Apps** (saves and settings are kept by default). On a fresh install it looks for an existing portable copy on the desktop and in Downloads and Documents, and can copy that copy's `data` folder; the portable copy is left untouched. The installed and portable versions are the same program and update the same way; running a newer setup over the installation upgrades it too. The installer is not code-signed, so Windows may show "Windows protected your PC" the first time; choose **More info → Run anyway**.
+
 `DiceFrame.exe` opens DiceFrame in its own window using the Microsoft Edge WebView2 runtime that ships with Windows 11 and nearly all Windows 10 installations. Once the window is open the console closes and launcher messages go to `logs/launcher.log`; on first launch the initial access password is filled in for you. Closing the window stops DiceFrame. Without WebView2 the launcher falls back to your default browser and keeps the console; run `DiceFrame.exe --browser` to always use the browser. Other players still join through links in a browser or the mobile app.
 
 ## From Source

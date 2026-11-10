@@ -21,6 +21,7 @@ Main/fallback models, embedding, images and OpenAI-compatible/GPT-SoVITS speech 
 | Installation | How to update |
 |---|---|
 | Windows portable | Check, download, and apply updates from Settings |
+| Windows installer | Same as portable; running a newer setup over the installation also upgrades it |
 | Extracted source release | Apply the update from Settings, then restart manually |
 | Git checkout | Run `git pull` after receiving a new-version notification |
 | Managed Docker / NAS | Download, apply, and automatically roll back from Settings |

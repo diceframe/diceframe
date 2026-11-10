@@ -14,6 +14,8 @@
 
 Windows 便携版可以在“管理 → 设置 → 关于”的版本更新区检查并应用更新。
 
+也可以下载安装版 `DiceFrame-vX.Y.Z-windows-setup.exe`：按当前用户安装到 `%LOCALAPPDATA%\Programs\DiceFrame`，不需要管理员权限，会创建开始菜单和桌面快捷方式，可以在“设置 → 应用”里卸载（卸载时默认保留存档和设置）。全新安装时，安装程序会在桌面、下载和文档里查找现有便携版，并可以把它的 `data` 复制过来；原来的便携版不会被改动。安装版与便携版是同一套程序，更新方式相同，以后直接运行新版安装程序覆盖安装也能升级。安装程序没有代码签名，首次运行时 Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”即可。
+
 `DiceFrame.exe` 会把 DiceFrame 开在自己的窗口里（使用系统自带的 Microsoft Edge WebView2；Windows 11 和绝大多数 Windows 10 已经装好）。窗口打开后控制台会自动关闭，启动器日志写入 `logs/launcher.log`；第一次启动会自动带上首次访问密码，不用手动输入。关闭这个窗口就会停止 DiceFrame。系统缺少 WebView2 时会退回到默认浏览器并保留控制台；想一直用浏览器，可以用 `DiceFrame.exe --browser` 启动。其他玩家照常用浏览器或移动端通过链接加入。
 
 ## Docker 运行
