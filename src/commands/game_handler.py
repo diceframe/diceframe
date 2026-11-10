@@ -337,6 +337,10 @@ class GameHandler:
         """由模型工具规划并结算本轮检定。"""
         return await self._round_processor.prepare_round_checks_ai(instance)
 
+    def schedule_decision_timeouts(self, instance: GameInstance) -> None:
+        """为等待中的检定选择（幸运 / 孤注一掷）挂超时；服务层暂停回合时调用。"""
+        self._round_processor.schedule_decision_timeouts(instance)
+
     async def fill_ai_player_actions(
         self, instance: GameInstance, *,
         requires_structured_intent: StructuredIntentRequirement = False,

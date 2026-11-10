@@ -765,6 +765,7 @@ class WebAPI:
             roll_for_game=self.roll_for_game,
             save_instance=self._reg.save,
             process_round=getattr(self._handler, "process_round", None),
+            schedule_decision_timeouts=getattr(self._handler, "schedule_decision_timeouts", None),
             resolve_luck_decision=self.resolve_luck_decision,
             decline_pending_luck=self.decline_pending_luck,
             drain_economy_outbox=self._drain_economy_outbox,
