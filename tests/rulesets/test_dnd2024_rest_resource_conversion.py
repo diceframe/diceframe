@@ -26,6 +26,14 @@ import pytest
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.resting.engine import Dnd2024RestEngine, RestError
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.dnd2024.spells.font_of_magic import (
+    FontOfMagicError,
+    apply_create_slot,
+    apply_slot_to_points,
+    create_slot_plan,
+    parse_created_slot_costs,
+    slot_to_points_plan,
+)
 
 from test_dnd2024_free_casting import _sheet as _wizard_sheet
 from test_dnd2024_spell_grants import _sheet as _class_sheet
@@ -519,3 +527,175 @@ def test_the_runtime_carries_the_rite_on_the_same_sheet(
     assert result["minutes"] == 1
     # 面板拿到的仍是整张卡，和休息的提交结果同形。
     assert "ruleset_character" in result["character"]
+
+
+# --------------------------------------------------------------------------
+# matrix 14-17: Font of Magic, both directions
+# --------------------------------------------------------------------------
+
+
+def _set_points(sheet: dict, points: int) -> dict:
+    out = deepcopy(sheet)
+    _canonical(out)["resources"]["class"]["sorcery_points"]["current"] = points
+    return out
+
+
+def _font_slots(payload: dict) -> dict[str, int]:
+    return dict(_canonical(payload)["spellcasting"]["class"].get("font_slots") or {})
+
+
+def _costs(resolver: Dnd2024ClassFeatureResolver) -> tuple[tuple[int, int, int], ...]:
+    return parse_created_slot_costs(
+        resolver.feature_definition("font_of_magic").parameters["created_slot_costs"]
+    )
+
+
+def test_matrix_14_a_slot_becomes_points_equal_to_its_level(
+    runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _sorcerer(runtime, 11)
+    # 1、5、6 环各换一次，点数按环阶而不是按槽的"价值"给。
+    for level, gained in ((1, 1), (5, 5), (6, 6)):
+        base = _set_points(sheet, 0)
+        # 只有一个该环槽时不必先花掉它——把它花掉就没得换了。
+        spent = base if _slots(base)[str(level)] == 1 else _spend_slots(base, {level: 1})
+        plan = slot_to_points_plan(spent, level)
+        assert plan["points"] == gained
+        character = _canonical(deepcopy(spent))
+        events = apply_slot_to_points(character, plan)
+        assert _slots(character)[str(level)] == _slots(spent)[str(level)] - 1
+        assert _points(character) == gained
+        assert [event["type"] for event in events] == [
+            "dnd2024.spell.slot_spent", "dnd2024.class_resource.refunded",
+        ]
+        # 槽换点不用动作，也不占用本回合的施法位。
+        assert events[0]["exchange"] is True
+        assert events[1]["amount"] == gained
+
+
+def test_matrix_15_a_conversion_that_overflows_the_pool_is_refused_whole(
+    runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _sorcerer(runtime, 11)  # 11 点上限，此刻是满的
+
+    with pytest.raises(FontOfMagicError, match="exceed"):
+        slot_to_points_plan(sheet, 1)
+    # 拒绝发生在计划阶段：源槽与点数都没有动。
+    assert _slots(sheet)["1"] == 4
+    assert _points(sheet) == 11
+
+
+def test_matrix_15_a_legal_conversion_moves_both_halves_together(
+    runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _set_points(_spend_slots(_sorcerer(runtime, 9), {2: 1}), 4)
+
+    plan = slot_to_points_plan(sheet, 2)
+    character = _canonical(deepcopy(sheet))
+    apply_slot_to_points(character, plan)
+
+    assert _slots(character)["2"] == _slots(sheet)["2"] - 1
+    assert _points(character) == 6
+
+
+def test_matrix_16_the_five_rows_and_their_minimum_levels(
+    runtime: Dnd2024Runtime, resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    assert _costs(resolver) == (
+        (1, 2, 2), (2, 3, 3), (3, 5, 5), (4, 6, 7), (5, 7, 9),
+    )
+    sheet = _sorcerer(runtime, 9)
+    for level, (points, minimum) in {
+        1: (2, 2), 2: (3, 3), 3: (5, 5), 4: (6, 7), 5: (7, 9),
+    }.items():
+        plan = create_slot_plan(_set_points(sheet, 9), level, _costs(resolver), 9)
+        assert (plan["points"], plan["before"], plan["after"]) == (points, 9, 9 - points)
+
+
+def test_matrix_16_an_illegal_level_or_a_short_purse_creates_nothing(
+    runtime: Dnd2024Runtime, resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    sheet = _sorcerer(runtime, 9)
+    costs = _costs(resolver)
+
+    # 6 环以上造不出来：表里根本没有这一行。
+    with pytest.raises(FontOfMagicError, match="cannot create"):
+        create_slot_plan(_set_points(sheet, 9), 6, costs, 9)
+    # 等级下限是"授予该特性的职业等级"，不是总等级。
+    with pytest.raises(FontOfMagicError, match="requires level 7"):
+        create_slot_plan(_set_points(sheet, 9), 4, costs, 5)
+    # 点不够就是不够，不做部分扣款。
+    with pytest.raises(FontOfMagicError, match="not enough"):
+        create_slot_plan(_set_points(sheet, 4), 3, costs, 9)
+
+
+def test_matrix_16_creating_a_slot_spends_points_and_records_its_source(
+    runtime: Dnd2024Runtime, resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    sheet = _set_points(_sorcerer(runtime, 9), 9)
+
+    plan = create_slot_plan(sheet, 5, _costs(resolver), 9)
+    character = _canonical(deepcopy(sheet))
+    events = apply_create_slot(character, plan)
+
+    assert _points(character) == 2
+    assert _font_slots(character) == {"5": 1}
+    # 临时槽不在普通槽表里：普通槽一个都没多。
+    assert _slots(character) == _slots(sheet)
+    assert events[0]["type"] == "dnd2024.class_resource.spent"
+    assert events[0]["amount"] == 7
+    assert events[1] == {
+        "type": "dnd2024.spell.font_slot_created",
+        "slot_level": 5,
+        "source": "font_of_magic",
+        "points": 7,
+    }
+
+
+def test_matrix_17_the_bonus_action_belongs_to_the_capability_not_to_the_rules(
+    runtime: Dnd2024Runtime, resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    """``apply_create_slot`` must not spend an action a second time."""
+
+    sheet = _set_points(_sorcerer(runtime, 9), 9)
+    character = _canonical(deepcopy(sheet))
+
+    events = apply_create_slot(
+        character, create_slot_plan(sheet, 1, _costs(resolver), 9),
+    )
+
+    assert not [event for event in events if event["type"] == "dnd2024.action.spent"]
+
+
+def test_matrix_20_a_long_rest_discards_the_created_slots(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    sheet = _spend_points(_spend_slots(_sorcerer(runtime, 9), {1: 2}), 4)
+    created = _canonical(deepcopy(sheet))
+    apply_create_slot(created, create_slot_plan(sheet, 1, _costs(resolver), 9))
+    assert _font_slots(created) == {"1": 1}
+
+    result = engine.complete_long_rest(created)
+
+    # 临时槽消失，普通槽与点数照原规则回满。
+    assert _font_slots(result["character"]) == {}
+    assert _slots(result["character"]) == _slots(_sorcerer(runtime, 9))
+    assert _points(result["character"]) == 9
+    discarded = [
+        event for event in result["events"] if event["type"] == "discard_font_slots"
+    ]
+    assert discarded and discarded[0]["slots"] == {"1": 1}
+
+
+def test_matrix_21_a_second_long_rest_is_idempotent(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    once = engine.complete_long_rest(_sorcerer(runtime, 9))
+    twice = engine.complete_long_rest(once["character"])
+
+    assert not [
+        event for event in twice["events"] if event["type"] == "discard_font_slots"
+    ]
+    assert _font_slots(twice["character"]) == {}
+    assert _slots(twice["character"]) == _slots(once["character"])
