@@ -18,6 +18,7 @@ from src.engine.modules import checks, economy_state, progression_state
 from src.engine.visibility_rules import manual_roll_visible_to
 from src.knowledge.visibility import entry_visible_to_viewer
 from src.llm.parser import sanitize_narration
+from src.llm.private_perceptions import format_gm_private_perceptions
 from src.llm.world_prompt import format_world_state_block
 
 logger = logging.getLogger("trpg")
@@ -242,6 +243,7 @@ def _shrink_to_window(parts: list[str], sec_idx: dict[str, int], max_total: int)
         ("manual_rolls", False),
         ("authoritative_events", False),
         ("lorebook", False),
+        ("private_perceptions", False),
         ("scene_objectives", False),
         ("state", False),
     ):
@@ -251,7 +253,8 @@ def _shrink_to_window(parts: list[str], sec_idx: dict[str, int], max_total: int)
         overflow = _context_total_len(parts) - max_total
         if overflow <= 0:
             break
-        parts[idx] = _shrink_section(parts[idx], overflow, drop_oldest)
+        # Keep the privacy policy and observation records together when shrinking.
+        parts[idx] = "" if key == "private_perceptions" else _shrink_section(parts[idx], overflow, drop_oldest)
 
 
 # ---------- 权威手动投掷结果（server-recorded manual rolls）----------
@@ -851,6 +854,14 @@ async def build_context(
                 sec_idx["memory"] = len(parts) - 1
         except Exception:
             logger.warning("长期记忆召回失败，已降级为无记忆上下文", exc_info=True)
+
+    private_perceptions = format_gm_private_perceptions(
+        instance, instance.log if history_override is None else history_override,
+        language, max_chars=min(3000, max_total // 20),
+    )
+    if private_perceptions:
+        parts.append(private_perceptions)
+        sec_idx["private_perceptions"] = len(parts) - 1
 
     # 5. 计算剩余预算 → 对话历史
     used_chars = reserved_system_chars + sum(len(p) for p in parts)
