@@ -156,3 +156,58 @@ git diff --check
 - 白名单文件对照：
 - 测试 1–25 / 聚焦 / 回归 / 全量 / ruff / diff：
 - 偏差、停止原因与未决事项：
+
+## 10. 执行记录（2026-11-10，分三段交付）
+
+本任务书 25 条矩阵横跨三种互不相同的机制，一次性落地会把三类状态变更混在一条提交链里。因此按机制拆成三段，每段独立分支与独立验收：
+
+| 段 | 范围 | 矩阵 | 状态 |
+|---|---|---|---|
+| **F6a** | 短休恢复预算（Arcane / Natural / Sorcerous Restoration） | 1–5、8、9、22、23 | **已实现**（`feat/dnd2024-s0f6a-rest-recovery-budget`） |
+| F6b | Magical Cunning 的 1 分钟权威仪式 + Eldritch Master | 10–13 | 待执行 |
+| F6c | Font of Magic 双向转换与临时槽 | 14–21 | 待执行 |
+
+矩阵 6/7（Natural 的免费施法面）**刻意留在 b 段之前**：它要的是「从某个特性的授予里选一个 1 环以上法术」这种新的 `free_cast_source`，与 F5 的 `{fixed, class_list, spellbook}` 三档不兼容，属于新形状，不是本段能顺带做完的。
+
+### 10.1 已定点核实的代码事实（覆盖任务书 §3）
+
+- **六项特性在本切片之前没有任何特性定义**：`srd_class_features.json` 只有标签与进阶表条目，`arcane_recovery` / `magical_cunning` 仅在 `rest_catalogs/srd_recovery.json` 里作为一个「每长休重置」的计数值存在，没有预算算法；`natural_recovery` / `sorcerous_restoration` / `eldritch_master` / `font_of_magic` 连计数值都没有。任务书 §3 第 2 行「已有 rest resource 声明」只对前两项成立。
+- 槽模型是 `spellcasting.class.slots_current` / `slots_max`，键为字符串化的环阶；Pact 走 `slot_profile == "pact"`，键是 Pact 环阶（5 级 warlock 为 `{"3": 2}`）。
+- 资源池在 `resources.class.<id>`，最大值由 `resting/engine.py::sync_resources` 按 `rest_catalog.class_resources[class]` 生成，`_recover_specs` 负责休息时恢复。
+- 短休入口是 `complete_short_rest`，长休是 `complete_long_rest`；两者都先 `sync_resources` 再落账。
+
+### 10.2 契约
+
+恢复目录新增两个键，都只由声明驱动，代码里没有按职业 id 分支：
+
+```json
+{"id": "natural_recovery", "minimum_level": 6, "maximum_fixed": 1,
+ "short": "none", "long": "all",
+ "requires_subclass": "subclass:circle_of_the_land",
+ "short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}}
+```
+
+- `requires_subclass`：休息表是按**职业**键入的，说不出「只有某个子职」。没有这道闸，月德鲁伊 6 级会拿到一个永远花不掉的自然恢复计数。`sync_resources` 按 `features.subclass_ref` 判定，不满足即删池。
+- `short_recovery.mode`：`spell_slots`（合计环阶预算）或 `points`（点数预算）；`budget`：`half_level_round_up` / `half_level_round_down`。
+- 提交载荷：`recovery = {<resource_id>: {"slots": {"<环阶>": n}}} | {"points": n}`，短休专用（长休给 `recovery` 直接 `ValueError`）。
+- 事件三型：`recover_spell_slots`（含 `budget`、`slots`、`before`/`after`）、`recover_class_points`、`spend_resource_use`。
+- 只读投影：`rest_options()` 新增 `short_recovery` 行，与提交路径读同一份声明；投影对无单职业的角色降级为 `[]`，不抛错。
+- `rest_option_names` 扩到 `{attunement, land_terrain, free_cast, recovery}`，因此通用休息服务会把 `recovery` 转发到运行时。
+
+### 10.3 偏差与未决
+
+1. **矩阵 5 的数字本身是错的**。原文是 "half your Druid level (round up)"，7 级应为 4，不是任务书写的「等级 6/7 均预算 3」。按原文实现，测试钉住 6→3、7→4。
+2. **矩阵 4 的「缺少真实 spellbook 不提供研究恢复」未建模**。SRD 的 Arcane Recovery 只要求「已消耗的槽」，没有把法术书列为前置；法术书缺失的法师本来也没有可准备的法术，但槽位仍然存在。不额外加一道原文没有的门。
+3. **零恢复不伪扣使用**：`{"slots": {}}` 或 `{"points": 0}` 视为无操作，不产生事件、不消耗当天的一次。
+4. **Natural Recovery 的免费施法面未做**（矩阵 6/7），理由见本节开头。
+5. **前端未接线**：投影已经交出 `short_recovery`，但休息面板还没有画这个选择器。与 §11 的接线经验一致——本段只到通道与投影，UI 是下一步。
+6. **多职业仍不可休息**：`_class_state()` 的单职业硬限制未变（索引 §10.1 第三条）。
+
+### 10.4 F6a 验收
+
+| 项 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_rest_resource_conversion.py` | **16 passed** |
+| 相关定向回归（10 文件） | **219 passed / 1 failed**，唯一失败是投影断言未含 `short_recovery`，对齐后全绿 |
+| `pytest tests/rulesets -q` | **11 failed / 1803 passed / 0 errors**，11 条为 `character_builder` 基线，通过数 1787→1803 = +16，净引入 0 |
+| `ruff check` / `git diff --check` | 通过 |

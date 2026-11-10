@@ -393,3 +393,45 @@ resolving ──任一角色失败──> error
 3. **长休的"至少"留白未建模**：规则时长取下界，DM 想表达「这一夜过了十小时」目前只能另行推进时钟，没有把这次休息与那段额外时间关联起来。
 4. **单人模式不走批准**：solo 下玩家即 GM，提交即结算并推进时间。这是刻意不做成立即点击的空按钮，与「队伍需要一个裁决人」的立场一致。
 5. **前端未加新的 locale 键**：等待/裁决文案走面板内联 `text(cn, en)`，避免为两个键改动五份语言文件；`PartyActions` 的队伍进度行因此仍只显示「3/3 准备就绪」。
+
+## 13. S0-F6a：短休恢复预算（2026-11-10）
+
+F6 的 25 条矩阵横跨三种机制，按机制拆三段执行（见该任务书 §10）。本段只做**短休预算**：Arcane Recovery / Natural Recovery / Sorcerous Restoration。
+
+**分支**：`feat/dnd2024-s0f6a-rest-recovery-budget`，stack 在 `feat/dnd2024-rest-decision@fc1907e0` 之上。
+**提交**：`93c5e78a` 内容与引擎 → `99d430b4` 测试 → `2d06ce89` 下标测试对齐。
+
+### 13.1 之前的状态
+
+六项特性**一条特性定义都没有**：`srd_class_features.json` 只有标签与进阶表条目；`arcane_recovery` / `magical_cunning` 在恢复目录里只是「每长休重置」的计数；`natural_recovery` / `sorcerous_restoration` / `eldritch_master` / `font_of_magic` 连计数都没有。任务书 §3 说「已有 rest resource 声明」只对前两项成立。
+
+### 13.2 做法
+
+预算口径写进恢复目录，代码里没有按职业分支：
+
+```json
+"short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}
+```
+
+- `mode` = `spell_slots`（合计环阶）或 `points`（点数）；`budget` = 上取整 / 下取整。
+- `requires_subclass`：休息表按职业键入，说不出「只有某个子职」。没有这道闸，月德鲁伊 6 级会拿到永不可用的自然恢复计数。`sync_resources` 按 `features.subclass_ref` 判定，不满足即删池。
+- 载荷 `recovery = {<id>: {"slots": {"3": 1}} | {"points": 2}}`，短休专用；`rest_option_names` 扩到四项，通用休息服务因此会自动转发（四段链的 ①②③④ 全通，未改 web/frontend）。
+- 事件三型：`recover_spell_slots` / `recover_class_points` / `spend_resource_use`；零恢复视为无操作，不消耗当天的一次。
+
+### 13.3 偏差
+
+1. **任务书矩阵 5 的数字本身有误**：「等级 6/7 均预算 3」与它引用的原文（round up）矛盾，7 级应为 4。按原文实现。
+2. 矩阵 4 的「缺少真实 spellbook 不提供恢复」未建模——原文只要求已消耗的槽，不额外加门。
+3. Natural Recovery 的免费施法面（矩阵 6/7）不在本段：它需要一种新的 `free_cast_source`（从授予列表里选），F5 的三档 `{fixed, class_list, spellbook}` 表达不了。
+4. 前端未接线：投影已交出 `short_recovery`，面板还没画选择器。
+
+### 13.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_rest_resource_conversion.py` | **16 passed** |
+| 相关定向回归（resting / class_features / free_casting / spell_grants / rest_options / rest_decision / lifecycle / advancement / feat_resources 共 10 文件） | **219 passed / 1 failed**——唯一失败是投影断言写死了两个空字段，按新契约补 `short_recovery: []` 后该集合全绿 |
+| `pytest tests/rulesets -q`（规范切片套件全量） | **11 failed / 1803 passed / 0 errors**（18:53）；11 条仍为 `character_builder` 基线，通过数 1787→1803 = +16，净引入 0 |
+| `ruff check` / `git diff --check` | 通过 |
+
+**期间踩到的一处下标脆弱性**：`test_dnd2024_draconic_resilience.py` 的 `_mutated()` 按下标改 `sorcerer.features[0]`。插在它前面的 `sorcerous_restoration` 没有 `parameters` 块，于是 8 条参数化用例从「断言被拒」变成 `KeyError`。改成按 id 取。这类按下标读内容表的写法在切片不断插入新特性时必然失效，已是第二次（前一次是 F4 的授予槽）。
