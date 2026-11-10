@@ -101,7 +101,7 @@ def test_a_character_without_rest_choices_gets_empty_fields(
 ) -> None:
     sheet = runtime.finalize_character(None, _fighter_draft(runtime))
     assert engine.rest_options(sheet["ruleset_character"]) == {
-        "land_terrain": None, "free_cast": [],
+        "land_terrain": None, "free_cast": [], "short_recovery": [],
     }
 
 

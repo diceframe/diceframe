@@ -879,6 +879,13 @@
       "source_ref": "srd-5.2.1:p64:sorcerer-features",
       "features": [
         {
+          "id": "sorcerous_restoration",
+          "minimum_level": 5,
+          "resource_id": "sorcerous_restoration",
+          "source_ref": "srd-5.2.1:p66:sorcerous-restoration",
+          "summary": "Once per Long Rest, when you finish a Short Rest, regain expended Sorcery Points, up to a number equal to half your Sorcerer level (round down)."
+        },
+        {
           "id": "draconic_spells",
           "owner": "subclass:draconic_sorcery",
           "minimum_level": 3,
@@ -1089,6 +1096,14 @@
       "source_ref": "srd-5.2.1:p46:druid-features",
       "features": [
         {
+          "id": "natural_recovery",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 6,
+          "resource_id": "natural_recovery",
+          "source_ref": "srd-5.2.1:p46:natural-recovery",
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher."
+        },
+        {
           "id": "circle_of_the_land_spells",
           "owner": "subclass:circle_of_the_land",
           "minimum_level": 3,
@@ -1129,6 +1144,13 @@
     "wizard": {
       "source_ref": "srd-5.2.1:p82:wizard-features",
       "features": [
+        {
+          "id": "arcane_recovery",
+          "minimum_level": 1,
+          "resource_id": "arcane_recovery",
+          "source_ref": "srd-5.2.1:p78:arcane-recovery",
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Wizard level (round up); none of them may be level 6 or higher."
+        },
         {
           "id": "scholar",
           "minimum_level": 2,

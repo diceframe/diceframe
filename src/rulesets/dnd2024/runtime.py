@@ -128,11 +128,11 @@ class Dnd2024Runtime:
     runtime_version = 1
     # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
     # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement / prepared_spells /
-    # land_terrain / free_cast 参数。land_terrain 是 Circle of the Land 每次长休
-    # 必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast 是
-    # Spell Mastery 在长休研究法术书时换掉的那一项。
+    # land_terrain / free_cast / recovery 参数。land_terrain 是 Circle of the Land
+    # 每次长休必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast
+    # 是 Spell Mastery 在长休研究法术书时换掉的那一项；recovery 是短休的恢复预算。
     rest_option_names = frozenset(
-        {"attunement", "prepared_spells", "land_terrain", "free_cast"}
+        {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery"}
     )
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
@@ -893,6 +893,7 @@ class Dnd2024Runtime:
         prepared_spells: dict[str, Any] | None = None,
         land_terrain: str | None = None,
         free_cast: dict[str, Any] | None = None,
+        recovery: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -905,6 +906,8 @@ class Dnd2024Runtime:
             raise ValueError("land_terrain must be a string")
         if free_cast is not None and not isinstance(free_cast, dict):
             raise ValueError("free_cast must be an object keyed by slot id")
+        if recovery is not None and not isinstance(recovery, dict):
+            raise ValueError("recovery must be an object keyed by feature id")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
             if prepared_spells is not None:
@@ -914,13 +917,15 @@ class Dnd2024Runtime:
             if free_cast is not None:
                 raise ValueError("free_cast is only valid for a long rest")
             result = engine.complete_short_rest(
-                character, hit_die_rolls, attunement=attunement,
+                character, hit_die_rolls, attunement=attunement, recovery=recovery,
             )
         elif rest == "long":
             if hit_die_rolls:
                 raise ValueError("hit_die_rolls are only valid for a short rest")
             if attunement is not None:
                 raise ValueError("attunement changes are only valid during a short rest")
+            if recovery is not None:
+                raise ValueError("recovery is only valid for a short rest")
             change = (
                 engine.parse_prepared_spells(character, prepared_spells)
                 if prepared_spells is not None
@@ -985,6 +990,8 @@ class Dnd2024Runtime:
             raise ValueError("land_terrain is only valid for a long rest")
         if "free_cast" in options and rest != "long":
             raise ValueError("free_cast is only valid for a long rest")
+        if "recovery" in options and rest != "short":
+            raise ValueError("recovery is only valid for a short rest")
         checked = self.rest_option_names & set(options)
         if not checked:
             return
@@ -1009,6 +1016,8 @@ class Dnd2024Runtime:
             engine.validate_land_terrain(canonical, options["land_terrain"])
         if "free_cast" in checked:
             engine.validate_free_cast(canonical, options["free_cast"])
+        if "recovery" in checked:
+            engine.validate_short_recovery(canonical, options["recovery"])
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
