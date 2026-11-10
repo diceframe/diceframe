@@ -173,6 +173,7 @@ function toSkillList(input: CharacterSheet['skills']): CharacterSkill[] {
   return (input || []).map(s => {
     if (typeof s === 'string') return { name: s, value: 20 }
     const row: CharacterSkill = { name: s.name || '', value: s.value || 20 }
+    if (s.id) row.id = s.id
     const effect = String(s.effect || '').trim()
     if (effect) row.effect = effect
     return row
@@ -185,6 +186,7 @@ function toSkillPayload(skills: CharacterSkill[]): CharacterSkill[] {
     .filter(s => s.name?.trim())
     .map(s => {
       const row: CharacterSkill = { name: s.name.trim(), value: Number(s.value) || 0 }
+      if (s.id) row.id = s.id
       const effect = String(s.effect || '').trim().slice(0, 500)
       if (effect) row.effect = effect
       return row

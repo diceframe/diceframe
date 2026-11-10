@@ -30,6 +30,9 @@ def _skill_row(skill: Any) -> dict[str, Any] | None:
         "name": skill.get("name", ""),
         "value": skill.get("value", 20),
     }
+    for key in ("id", "improvable"):
+        if key in skill:
+            row[key] = skill[key]
     effect = str(skill.get("effect") or "").strip()
     if effect:
         row["effect"] = effect[:MAX_SKILL_EFFECT_CHARS]

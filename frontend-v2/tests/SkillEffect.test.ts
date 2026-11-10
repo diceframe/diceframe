@@ -86,7 +86,7 @@ describe('CharacterPanel effect display', () => {
         hp: 10,
         max_hp: 10,
         attributes: {},
-        skills: [{ name: '侦查', value: 80 }],
+        skills: [{ name: '侦查', value: 80, id: 'spot_hidden', improvable: false }],
       },
     }
     const wrapper = mount(CharacterPanel, {

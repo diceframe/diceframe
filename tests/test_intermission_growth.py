@@ -38,6 +38,19 @@ def test_real_success_marks_without_rolling_or_growing_until_intermission():
     assert skill_growth.view(restored)['pending'] == []
 
 
+def test_character_normalization_keeps_marked_identity_for_settlement():
+    from src.compat.characters import normalize_character_sheet
+
+    inst, rule, check = fixture()
+    skill_growth.mark_checks(inst, rule, [check])
+    marked_id = skill_growth.view(inst)['pending'][0]['skill_id']
+    normalize_character_sheet(inst.get_character_sheet('alice'))
+    assert inst.get_character_sheet('alice')['skills'][0]['id'] == marked_id
+    with patch('src.engine.dice_rng.roll_die', side_effect=[98, 6]):
+        receipt = skill_growth.settle(inst, rule, 'once', expected_run=inst.run_id)
+    assert receipt['changes'][0]['after'] == 46
+
+
 @pytest.mark.parametrize('change', [
     {'roll': 80}, {'skill': ''}, {'dice': 'd20'}, {'luck_decision': 'spent'},
     {'attribute_key': 'int'}, {'actor_uid': 'invented'},

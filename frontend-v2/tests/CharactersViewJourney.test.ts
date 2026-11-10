@@ -202,6 +202,25 @@ describe('CharactersView collection journey', () => {
     expect(body.equipment[0]).toEqual(expect.objectContaining({ damage_dice: '2d6+1', damage_type: 'slashing', item_key: 'longsword' }))
   })
 
+  it('retains the server skill identity through the character editor', async () => {
+    mocks.route.query = { game: 'growth-game', edit_user: 'u1' }
+    mocks.api.mockImplementation(async (path: string) => {
+      if (path === '/character-cards') return { cards: [] }
+      if (path === '/rules') return { rules: [{ rule_id: 'core', name: 'Core' }] }
+      if (path.endsWith('/characters')) return {
+        players: [{ user_id: 'u1', character_name: 'Alice', character_sheet: {
+          level: 1, hp: 10, max_hp: 10, attributes: {}, skills: [{ id: 'spot_hidden', name: '侦查', value: 60 }],
+        } }], npcs: [], rule_meta: { rule_id: 'core' }, rule_attrs: [],
+      }
+      return { ok: true }
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('[role="dialog"] button').find(button => button.text().includes('保存'))!.trigger('click')
+    const saveCall = mocks.api.mock.calls.find(([path]) => String(path).includes('/character/'))
+    expect(JSON.parse(String(saveCall?.[1]?.body)).skills).toEqual([{ id: 'spot_hidden', name: '侦查', value: 60 }])
+  })
+
   it('keeps the character editor open when the save route reports a domain error', async () => {
     mocks.route.query = { game: 'save-error-game', edit_user: 'u1' }
     mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
