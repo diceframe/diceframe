@@ -26,7 +26,7 @@ DiceFrame is a self-hostable **AI tabletop RPG engine** supporting **D&D / CoC /
 <details>
 <summary>Windows portable</summary>
 
-Download `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`.
+Download the installer `DiceFrame-vX.Y.Z-windows-setup.exe` (no administrator rights needed) or the portable `DiceFrame-vX.Y.Z-windows-portable.zip` (extract it and run `DiceFrame.exe`) from [Releases](https://github.com/diceframe/diceframe/releases/latest).
 Add a provider under **Manage → Settings → Model API**, then assign the main model under **Model Routing**. [Installation details](docs/en/install.md#windows-portable) · [First game](docs/en/content-and-play.md#first-game)
 
 </details>
