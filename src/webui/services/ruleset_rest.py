@@ -230,6 +230,51 @@ def _server_hit_die_rolls(character: dict[str, Any], requested: Any) -> dict[str
     return rolls
 
 
+def read_options(
+    dependencies: LiveRulesetRestDependencies,
+    game_key: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Describe what a long rest requires or may change, without starting one.
+
+    Read-only by contract: no lock, no revision bump, no rest session.  The
+    panel uses this to draw its terrain and study pickers, so it must never be
+    able to change the sheet even if the client calls it repeatedly.
+    """
+
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if instance is None:
+        return _failure("GAME_NOT_FOUND", "游戏不存在")
+    if user_id not in instance.players:
+        return _failure("CHARACTER_NOT_FOUND", "角色不存在")
+    rule = dependencies.load_rule_for_game(instance)
+    if rule is None:
+        return _failure("RULE_NOT_FOUND", "当前游戏规则不存在")
+    try:
+        runtime = dependencies.ruleset_registry.resolve(rule.template)
+    except (AttributeError, TypeError, ValueError) as exc:
+        return _failure("RULESET_RUNTIME_UNAVAILABLE", str(exc))
+    method = getattr(runtime, "rest_options", None)
+    if not callable(method):
+        # A ruleset that models no rest choices is not an error: the panel
+        # simply draws nothing extra.
+        return {
+            "ok": True,
+            "rest_options": {"land_terrain": None, "free_cast": []},
+            "rest_session": public_rest_session(instance),
+        }
+    character = instance.get_character_sheet(user_id)
+    try:
+        options = method(rule, character)
+    except ValueError as exc:
+        return _failure("REST_OPTIONS_UNAVAILABLE", str(exc))
+    return {
+        "ok": True,
+        "rest_options": options,
+        "rest_session": public_rest_session(instance),
+    }
+
+
 async def resolve_live(
     dependencies: LiveRulesetRestDependencies,
     game_key: str,

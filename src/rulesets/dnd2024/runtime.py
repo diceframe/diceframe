@@ -128,9 +128,12 @@ class Dnd2024Runtime:
     runtime_version = 1
     # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
     # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement / prepared_spells /
-    # land_terrain 参数。land_terrain 是 Circle of the Land 每次长休必须记录的
-    # 选择；prepared_spells 是长休时可以发生的一次准备替换。
-    rest_option_names = frozenset({"attunement", "prepared_spells", "land_terrain"})
+    # land_terrain / free_cast 参数。land_terrain 是 Circle of the Land 每次长休
+    # 必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast 是
+    # Spell Mastery 在长休研究法术书时换掉的那一项。
+    rest_option_names = frozenset(
+        {"attunement", "prepared_spells", "land_terrain", "free_cast"}
+    )
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
         character_builder="professional",
@@ -889,6 +892,7 @@ class Dnd2024Runtime:
         attunement: dict[str, Any] | None = None,
         prepared_spells: dict[str, Any] | None = None,
         land_terrain: str | None = None,
+        free_cast: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -899,12 +903,16 @@ class Dnd2024Runtime:
             raise ValueError("attunement must be an object")
         if land_terrain is not None and not isinstance(land_terrain, str):
             raise ValueError("land_terrain must be a string")
+        if free_cast is not None and not isinstance(free_cast, dict):
+            raise ValueError("free_cast must be an object keyed by slot id")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
             if prepared_spells is not None:
                 raise ValueError("prepared spells can only be changed on a long rest")
             if land_terrain is not None:
                 raise ValueError("land_terrain is only valid for a long rest")
+            if free_cast is not None:
+                raise ValueError("free_cast is only valid for a long rest")
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement,
             )
@@ -920,11 +928,28 @@ class Dnd2024Runtime:
             )
             result = engine.complete_long_rest(
                 character, land_terrain=land_terrain, prepared_spells=change,
+                free_cast=free_cast,
             )
         else:
             raise ValueError("rest must be short or long")
         result["character"] = self._live_projection(character, result["character"], bundle)
         return result
+
+    def rest_options(self, rule: Any, character: dict[str, Any]) -> dict[str, Any]:
+        """What a Long Rest requires or may change for one character.
+
+        Read-only by contract: it neither mutates the sheet nor opens a rest
+        session.  The client uses it to draw the terrain and study pickers, so
+        the option lists it renders and the checks the engine commits from are
+        the same tables.
+        """
+
+        del rule
+        canonical = character.get("ruleset_character")
+        payload = canonical if isinstance(canonical, dict) else character
+        locale = str(payload.get("locale") or "") if isinstance(payload, dict) else ""
+        bundle = self.load_bundle(locale)
+        return Dnd2024RestEngine(bundle).rest_options(payload)
 
     def validate_rest_options(
         self, instance: Any, actor_id: str, rest: str,
@@ -945,6 +970,8 @@ class Dnd2024Runtime:
             raise ValueError("prepared spells can only be changed on a long rest")
         if "land_terrain" in options and rest != "long":
             raise ValueError("land_terrain is only valid for a long rest")
+        if "free_cast" in options and rest != "long":
+            raise ValueError("free_cast is only valid for a long rest")
         checked = self.rest_option_names & set(options)
         if not checked:
             return
@@ -967,6 +994,8 @@ class Dnd2024Runtime:
             engine.parse_prepared_spells(canonical, options["prepared_spells"])
         if "land_terrain" in checked:
             engine.validate_land_terrain(canonical, options["land_terrain"])
+        if "free_cast" in checked:
+            engine.validate_free_cast(canonical, options["free_cast"])
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:

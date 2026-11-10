@@ -78,6 +78,7 @@ from src.webui.routes.game_character_routes import (
     api_live_advancement_control,
     api_live_character_rest,
     api_live_character_spells,
+    api_live_character_rest_options,
     api_char_delete,
     api_npc_portrait_update,
     api_npc_standing_portrait_update,
@@ -263,6 +264,11 @@ def register_games(app: web.Application) -> None:
     app.router.add_get(
         "/api/games/{game_key}/character/{user_id}/spells",
         api_live_character_spells,
+    )
+    # 只读：交出长休要求/允许的选择（地形、法术研究），不开启休息会话。
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/rest/options",
+        api_live_character_rest_options,
     )
     app.router.add_route(
         "DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete

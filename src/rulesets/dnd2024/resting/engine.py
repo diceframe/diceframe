@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import AttunementError
@@ -401,6 +401,45 @@ class Dnd2024RestEngine:
         if "cantrip_refs" in change:
             block["cantrip_refs"] = list(change["cantrip_refs"])
         return [{"type": "prepared_spells_changed", "before": before, "after": after}]
+
+    def rest_options(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Read-only description of what a Long Rest requires or may change.
+
+        The rest panel renders from this table instead of guessing: the terrain
+        options are the same ``terrain_options`` the commit path validates, and
+        the study rows come from the same slot table the rebind planner reads.
+        A character with neither gets two empty fields rather than an error, so
+        a fighter's rest panel simply shows nothing extra.
+
+        This is a Long-Rest projection by construction: a Short Rest takes no
+        terrain and no study, and the Short Rest entry point rejects both.
+        """
+
+        payload: dict[str, Any] = character if isinstance(character, Mapping) else {}
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        definition = resolver.spell_grant_terrain_feature(payload)
+        terrain: dict[str, Any] | None = None
+        if definition is not None:
+            options = [
+                str(item) for item in definition.parameters.get("terrain_options") or ()
+            ]
+            stored = str(
+                (resolver.spell_grant_choices(payload).get(definition.id) or {}).get(
+                    "terrain"
+                ) or ""
+            )
+            terrain = {
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "current": stored,
+                "options": options,
+                "required": True,
+            }
+        return {
+            "land_terrain": terrain,
+            "free_cast": Dnd2024SpellSelection(self.bundle).rest_free_cast_rows(payload),
+        }
+
     # ------------------------------------------------------------------
     # Circle of the Land terrain
     # ------------------------------------------------------------------
@@ -568,6 +607,21 @@ class Dnd2024RestEngine:
     # free-cast slots
     # ------------------------------------------------------------------
 
+    def validate_free_cast(
+        self, character: dict[str, Any], changes: Any,
+    ) -> None:
+        """Validate a Long Rest study without touching live state.
+
+        Kept symmetric with ``validate_land_terrain``: an illegal study must
+        fail when the rest is *opened*, because a party rest that dies halfway
+        through its resolution loop rolls every participant back.
+        """
+
+        if changes in (None, {}):
+            return
+        probe = deepcopy(character)
+        self._plan_free_cast_rebind(probe, changes)
+
     def _plan_free_cast_rebind(
         self, character: dict[str, Any], requested: Any,
     ) -> dict[str, dict[str, Any]]:
@@ -593,12 +647,17 @@ class Dnd2024RestEngine:
         for slot_id, record in plan.items():
             before = stored.get(slot_id)
             before_ref = str((before or {}).get("spell_ref") or "")
+            after_ref = str(record.get("spell_ref") or "")
+            # 计划里带着所有已研究的槽，只有真正换了的那一格才值得记一条事件：
+            # 提交一格却回放出两条"某法术换成它自己"，读日志的人会被误导。
             stored[slot_id] = deepcopy(record)
+            if before_ref == after_ref:
+                continue
             events.append({
                 "type": "rebind_free_cast",
                 "slot_id": slot_id,
                 "before": before_ref,
-                "after": str(record.get("spell_ref") or ""),
+                "after": after_ref,
             })
         return events
 

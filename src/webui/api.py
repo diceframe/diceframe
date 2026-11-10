@@ -3201,6 +3201,14 @@ class WebAPI:
             self._live_ruleset_rest_dependencies, game_key, user_id, body,
         )
 
+    def ruleset_rest_options(
+        self, game_key: str, user_id: str,
+    ) -> dict[str, Any]:
+        """Read-only long-rest options for one character (terrain and study)."""
+        return ruleset_rest.read_options(
+            self._live_ruleset_rest_dependencies, game_key, user_id,
+        )
+
     async def ruleset_rest_resolve_live_party(
         self, game_key: str, user_id: str, body: dict[str, Any],
     ) -> dict[str, Any]:
