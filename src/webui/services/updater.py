@@ -185,6 +185,44 @@ def _path_within(path: Path, parent: Path) -> bool:
         return False
 
 
+def _extended_length_path(text: str) -> str:
+    """把 Windows 绝对路径改写成扩展长度形式（``\\\\?\\`` 前缀）。
+
+    便携版常被解压在多层嵌套目录里，系统又默认没开 LongPathsEnabled：普通路径
+    超过 260 字符（MAX_PATH）就打不开，更新包里最深的文件会让解压直接失败
+    （FileNotFoundError），哪怕最终装进 ``versions/`` 的路径并不超长——解压临时
+    目录比最终位置深得多。扩展长度路径不受这个限制。
+
+    扩展长度路径不再做 ``.``/``..``、正斜杠等规范化，调用方必须传已规范化的
+    绝对路径（见 :func:`_io_path`）。
+    """
+    if text.startswith("\\\\?\\"):
+        return text
+    if text.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + text[2:]
+    return "\\\\?\\" + text
+
+
+def _io_path(path: Path) -> Path:
+    """更新包解压、搬移、清理时实际交给文件系统的路径。
+
+    Windows 上换成扩展长度形式；其它平台原样返回。只用于 I/O 调用本身——越界
+    检查等路径比较仍用普通路径，免得前缀形式与普通形式互相比不上。
+    """
+    if os.name != "nt":
+        return path
+    return Path(_extended_length_path(os.path.abspath(path)))
+
+
+def _rmtree(path: Path, *, ignore_errors: bool = False) -> None:
+    shutil.rmtree(_io_path(path), ignore_errors=ignore_errors)
+
+
+def _move(source: Path, target: Path) -> None:
+    # 跨卷（数据目录单独放在别的盘）时 shutil.move 会退回复制 + 删除，同样要走长路径。
+    shutil.move(str(_io_path(source)), str(_io_path(target)))
+
+
 def _archive_member_path(name: str) -> PurePosixPath:
     normalized = name.replace("\\", "/")
     path = PurePosixPath(normalized)
@@ -228,11 +266,12 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
             target = (destination / Path(*relative.parts)).resolve()
             if not _path_within(target, root):
                 raise ValueError(f"更新包路径越界：{member.filename}")
+            io_target = _io_path(target)
             if member.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
+                io_target.mkdir(parents=True, exist_ok=True)
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with package.open(member) as source, target.open("wb") as output:
+            io_target.parent.mkdir(parents=True, exist_ok=True)
+            with package.open(member) as source, io_target.open("wb") as output:
                 shutil.copyfileobj(source, output)
 
     extracted_root = destination / next(iter(top_levels))
@@ -876,7 +915,7 @@ class UpdaterService:
                         and _path_within(resolved, updater_dir)
                         and backup.is_dir()
                     ):
-                        shutil.rmtree(backup)
+                        _rmtree(backup)
                 except OSError:
                     logger.warning(
                         "未能删除旧的源码更新备份：%s", backup, exc_info=True
@@ -900,7 +939,7 @@ class UpdaterService:
         extract_dir = self._dir / ("extract-" + _safe_version_dir(version))
         candidate_temp: Path | None = None
         if extract_dir.exists():
-            shutil.rmtree(extract_dir)
+            _rmtree(extract_dir)
         extract_dir.mkdir(parents=True)
         try:
             package_root = safe_extract_archive(archive, extract_dir)
@@ -916,14 +955,14 @@ class UpdaterService:
             if version_dir.exists():
                 if current_pointer and version_dir.resolve() == current_pointer:
                     raise ValueError("不能覆盖当前正在使用的版本目录")
-                shutil.rmtree(version_dir)
+                _rmtree(version_dir)
 
             candidate_temp = versions_dir / (version_dir.name + ".installing")
             if candidate_temp.exists():
-                shutil.rmtree(candidate_temp)
+                _rmtree(candidate_temp)
             candidate_temp.mkdir()
-            shutil.move(str(package_root / "app"), str(candidate_temp / "app"))
-            shutil.move(str(package_root / "python"), str(candidate_temp / "python"))
+            _move(package_root / "app", candidate_temp / "app")
+            _move(package_root / "python", candidate_temp / "python")
             os.replace(candidate_temp, version_dir)
 
             launcher_staged = self._dir / (
@@ -932,8 +971,8 @@ class UpdaterService:
             shutil.copy2(package_root / "DiceFrame.exe", launcher_staged)
         finally:
             if candidate_temp is not None and candidate_temp.exists():
-                shutil.rmtree(candidate_temp, ignore_errors=True)
-            shutil.rmtree(extract_dir, ignore_errors=True)
+                _rmtree(candidate_temp, ignore_errors=True)
+            _rmtree(extract_dir, ignore_errors=True)
 
         # 迁移旧 plugins/ 里的用户插件：同时覆盖 versions 布局的 active 版本
         # 与根目录旧布局（1.9.5 及更早的便携版），旧布局用户插件在根 app/ 下。
@@ -974,7 +1013,7 @@ class UpdaterService:
     def _apply_source_update(self, archive: Path, version: str) -> Path:
         extract_dir = self._dir / ("extract-" + _safe_version_dir(version))
         if extract_dir.exists():
-            shutil.rmtree(extract_dir)
+            _rmtree(extract_dir)
         extract_dir.mkdir(parents=True)
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -1008,12 +1047,12 @@ class UpdaterService:
                 target = self._root / source.name
                 if target.exists():
                     backup_target = backup_dir / source.name
-                    shutil.move(str(target), str(backup_target))
+                    _move(target, backup_target)
                     moved_old.append((backup_target, target))
 
             for source in entries:
                 target = self._root / source.name
-                shutil.move(str(source), str(target))
+                _move(source, target)
                 installed_new.append(target)
             return backup_dir
         except Exception as original:
@@ -1021,7 +1060,7 @@ class UpdaterService:
             for target in reversed(installed_new):
                 try:
                     if target.is_dir():
-                        shutil.rmtree(target)
+                        _rmtree(target)
                     elif target.exists():
                         target.unlink()
                 except Exception as exc:
@@ -1029,7 +1068,7 @@ class UpdaterService:
             for backup, target in reversed(moved_old):
                 try:
                     if backup.exists():
-                        shutil.move(str(backup), str(target))
+                        _move(backup, target)
                 except Exception as exc:
                     rollback_errors.append(f"恢复旧文件 {target.name} 失败：{exc}")
             if backup_dir.exists() and not any(backup_dir.iterdir()):
@@ -1045,4 +1084,4 @@ class UpdaterService:
                 ) from original
             raise
         finally:
-            shutil.rmtree(extract_dir, ignore_errors=True)
+            _rmtree(extract_dir, ignore_errors=True)

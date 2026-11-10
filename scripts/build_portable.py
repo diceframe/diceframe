@@ -206,6 +206,10 @@ def cleanup_runtime(runtime_dir: Path) -> None:
         removable_patterns = (
             "*/tests",
             "*/test",
+            # 给编码助手看的技能文档（如 pydantic_ai/.agents/skills/…），运行时不读。
+            # 它们是包里路径最深的文件：嵌套解压的安装目录下，旧版应用内更新解压到
+            # data/_updater/extract-*/… 时会超过 Windows 260 字符而失败。
+            "*/.agents",
             "pip",
             "pip-*.dist-info",
             "setuptools",

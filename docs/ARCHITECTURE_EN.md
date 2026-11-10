@@ -5387,6 +5387,8 @@ The running application itself must not pretend to perform the launcher's atomic
 
 When `current.json` contains both verifiable `relative_dir` and `previous_relative_dir` values, the application may write a restart signal with `operation=rollback`. The launcher then runs the previous payload through the same health, probation, and commit flow. A successful switch exchanges the current and previous pointers while retaining both payloads; the application does not edit the pointer or delete `data/`.
 
+While preparing a candidate, the application first extracts the package into `data/_updater/extract-<version>/<package top-level dir>/`, which is much deeper than the final `versions/<version>/`. Windows ships with LongPathsEnabled off and portable builds are often unpacked into nested folders, so the deepest file can exceed 260 characters (MAX_PATH) and fail extraction even when its final path would fit. Portable and source updates therefore extract, move and clean up through extended-length paths (`\\?\` prefix) via `updater._io_path`; containment checks still compare plain paths. At build time `build_portable.cleanup_runtime` strips `*/.agents` coding-assistant skill docs from site-packages (never read at runtime, yet the deepest files in the package), so installs still running an older updater can extract new packages too.
+
 ---
 
 ## 42.3 Managed Docker
