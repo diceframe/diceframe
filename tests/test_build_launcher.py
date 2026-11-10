@@ -70,6 +70,7 @@ def _compile_launcher(output: Path) -> None:
 # 探针必须与真实启动器同样方式编译，反射调用启动器的私有入口。
 _PROBE_SOURCE = r"""
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Reflection;
@@ -101,6 +102,15 @@ internal static class Probe
                     null, new object[] { args[2], args[3], args[4] });
                 Console.WriteLine("proxy=" + Environment.GetEnvironmentVariable("https_proxy"));
                 Console.WriteLine("kept=" + (Environment.GetEnvironmentVariable("PATH") != null));
+                // 归一化后 .NET 环境字典必须能构建，且大小写重复组只剩一个键。
+                var psi = new ProcessStartInfo();
+                psi.UseShellExecute = false;
+                int dupes = 0;
+                foreach (string key in psi.EnvironmentVariables.Keys)
+                {
+                    if (string.Equals(key, "https_proxy", StringComparison.OrdinalIgnoreCase)) dupes++;
+                }
+                Console.WriteLine("dupes=" + dupes);
             }
             return 0;
         }
@@ -369,7 +379,9 @@ def test_launcher_normalizes_duplicate_environment_variables_before_spawning_bac
     data_dir = tmp_path / "data"
     data_dir.mkdir()
 
-    # 精确构造一组大小写重复；首值排在最前，结果可被稳定断言。
+    # 精确构造一组大小写重复。Windows 环境块的实际顺序由 OS 决定（CI runner 与
+    # 开发机可能不同），不能假定哪个变体排在前面；归一化保留其中任一值都正确，
+    # 要保证的是重复组只剩一个键、且其它变量不丢。
     env = {k: v for k, v in os.environ.items() if k.lower() != "https_proxy"}
     env["HTTPS_PROXY"] = "http://127.0.0.1:9"
     env["https_proxy"] = "http://127.0.0.1:10"
@@ -386,6 +398,8 @@ def test_launcher_normalizes_duplicate_environment_variables_before_spawning_bac
     )
     payload = dict(line.split("=", 1) for line in result.stdout.splitlines())
 
-    # 归一化按首值保留重复组；大小写无关的其它变量不受影响。
-    assert payload["proxy"] == "http://127.0.0.1:9"
+    # 归一化后 .NET 环境字典可以安全构建，重复组只剩一个键、只保留其中一个值。
+    assert payload["dupes"] == "1"
+    assert payload["proxy"] in {"http://127.0.0.1:9", "http://127.0.0.1:10"}
+    # 大小写无关的其它变量不受影响。
     assert payload["kept"] == "True"
