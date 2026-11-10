@@ -54,6 +54,7 @@ from src.rulesets.dnd2024.exploration.revive_effects import (
     revive_events,
 )
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
+from src.rulesets.dnd2024.spells.font_of_magic import font_slots
 from src.rulesets.dnd2024.treasure import (
     Dnd2024TreasureCatalog,
     TreasureTableError,
@@ -231,6 +232,12 @@ class Dnd2024ExplorationEngine:
                 ]
                 if int(spell["level"]) > 0 else [0]
             )
+            if int(spell["level"]) > 0:
+                # Font of Magic 造的临时槽在普通槽表之外，但施法时是真槽。
+                for level, count in font_slots(canonical).items():
+                    if int(count) > 0 and int(level) >= int(spell["level"]):
+                        available_slots.append(int(level))
+                available_slots = sorted(set(available_slots))
             if int(spell["level"]) > 0 and not available_slots:
                 continue
             spells.append({
@@ -362,7 +369,8 @@ class Dnd2024ExplorationEngine:
         else:
             if slot_level < spell["level"]:
                 raise ExplorationIntentError("slot_level is lower than the spell level")
-            if int(slots.get(str(slot_level), 0) or 0) < 1:
+            if int(slots.get(str(slot_level), 0) or 0) < 1 \
+                    and int(font_slots(canonical).get(str(slot_level), 0) or 0) < 1:
                 raise ExplorationIntentError("the selected spell slot is not available")
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
         target_values = intent.get("target_ids")
@@ -592,10 +600,19 @@ class Dnd2024ExplorationEngine:
         expected = int(intent["expected_version"])
         intent_id = str(intent.get("intent_id") or "")
         if spell["level"] > 0:
-            events.append({
-                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
-                "slot_level": slot_level, "amount": 1,
-            })
+            canonical = self._canonical_of(instance, actor_id)
+            if int(font_slots(canonical).get(str(slot_level), 0) or 0) > 0:
+                # 临时槽优先，且一笔施法只扣一处——与战斗内的选择同一条规则。
+                events.append({
+                    "type": "dnd2024.spell.font_slot_spent", "actor_id": actor_id,
+                    "slot_level": slot_level, "amount": 1,
+                    "source": "font_of_magic",
+                })
+            else:
+                events.append({
+                    "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                    "slot_level": slot_level, "amount": 1,
+                })
         if effect is not None and effect.get("concentration"):
             actor_canonical = self._canonical_of(instance, actor_id)
             class_magic = actor_canonical.get("spellcasting", {}).get("class") or {}
@@ -853,6 +870,24 @@ class Dnd2024ExplorationEngine:
             if int(slots.get(level, 0) or 0) < 1:
                 raise EventBatchError("spell slot is already spent")
             slots[level] -= 1
+            return
+        if event_type == "dnd2024.spell.font_slot_spent":
+            kind, raw_id = str(event["actor_id"]).split(":", 1)
+            if kind != "player":
+                raise EventBatchError("exploration casting is player-only")
+            stored = snapshot["characters"][raw_id]["spellcasting"]["class"].get(
+                "font_slots"
+            )
+            if not isinstance(stored, dict):
+                raise EventBatchError("font slots are not initialized")
+            level = str(event["slot_level"])
+            remaining = stored.get(level)
+            if not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 1:
+                raise EventBatchError("temporary spell slot is already spent")
+            if remaining == 1:
+                stored.pop(level)
+            else:
+                stored[level] = remaining - 1
             return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = str(event["actor_id"]).split(":", 1)

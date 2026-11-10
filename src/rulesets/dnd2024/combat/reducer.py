@@ -21,6 +21,7 @@ from src.rulesets.dnd2024.features.resources import (
     set_feature_usage_count,
 )
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_feat_free_cast
+from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
 
@@ -513,6 +514,53 @@ class CombatReducerMixin:
             if not event.get("exchange"):
                 # Font 的"槽换次数"不是施法：不占用本回合的施法标记。
                 combat["economy"]["slot_spell_cast"] = True
+            return
+        if event_type == "dnd2024.spell.font_slot_spent":
+            # 临时槽是普通槽表之外的一栏，所以它有自己的事件：一个槽位
+            # 事件只能扣一处，否则同一笔施法会同时吃临时槽和普通槽。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion spell slots are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            block = character["spellcasting"]["class"]
+            stored = block.get("font_slots")
+            if not isinstance(stored, dict):
+                raise EventBatchError("font slots are not initialized")
+            level = str(event["slot_level"])
+            remaining = stored.get(level)
+            if not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 1:
+                raise EventBatchError("temporary spell slot is already spent")
+            if remaining == 1:
+                # 用完即删：留下的 0 会被读成"还有一个空槽"，也再没人需要它。
+                stored.pop(level)
+            else:
+                stored[level] = remaining - 1
+            combat["economy"]["slot_spell_cast"] = True
+            return
+        if event_type == "dnd2024.spell.font_slot_created":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion spell slots are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            block = character["spellcasting"]["class"]
+            level = int(event["slot_level"])
+            if not 1 <= level <= MAX_CREATED_SLOT_LEVEL:
+                # 伪造的高环临时槽在这里就死掉，不等它去骗过施法校验。
+                raise EventBatchError("temporary spell slot level is illegal")
+            stored = block.get("font_slots")
+            if not isinstance(stored, dict):
+                stored = {}
+                block["font_slots"] = stored
+            key = str(level)
+            stored[key] = int(stored.get(key, 0) or 0) + 1
             return
         if event_type == "dnd2024.feat_spell.free_cast_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))

@@ -36,6 +36,13 @@ from ..items.charges import (
     validate_charges_declaration,
     validate_destroy_declaration,
 )
+from ..spells.font_of_magic import (
+    FontOfMagicError,
+    create_slot_plan,
+    declaring_class_level,
+    parse_created_slot_costs,
+    slot_to_points_plan,
+)
 from .primitives import (
     DICE_RE,
     INTENT_TYPES,
@@ -470,6 +477,34 @@ class CombatValidationMixin:
             )
             if int(slots.get(str(slot_level), 0) or 0) < 1:
                 raise CombatIntentError("the spell slot is already spent")
+        elif any(action.kind == "font_slot_to_points" for action in capability.actions):
+            # 槽换点没有动作成本，所以"能不能换"全在这里判：源槽必须是真槽、
+            # 目标点数不能超过上限（超了整笔拒绝，不静默截断）。
+            try:
+                slot_to_points_plan(
+                    self._canonical_actor(instance, actor),
+                    intent.get("slot_level"),
+                )
+            except FontOfMagicError as exc:
+                raise CombatIntentError(str(exc)) from exc
+        elif any(action.kind == "font_create_slot" for action in capability.actions):
+            # 点换槽的五行走内容表；等级下限按"授予该特性的职业等级"算，
+            # 不是角色总等级——兼职时两者不是一回事。
+            character = self._canonical_actor(instance, actor)
+            definition = self.features.feature_definition(capability.feature_id)
+            class_id = str(getattr(definition, "class_id", "") or "")
+            try:
+                costs = parse_created_slot_costs(
+                    self.features.feature_value(
+                        character, capability.feature_id, "created_slot_costs", (),
+                    )
+                )
+                create_slot_plan(
+                    character, intent.get("slot_level"), costs,
+                    declaring_class_level(character, class_id),
+                )
+            except FontOfMagicError as exc:
+                raise CombatIntentError(str(exc)) from exc
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
@@ -703,7 +738,8 @@ class CombatValidationMixin:
                 raise CombatIntentError("only one spell slot can be expended on a turn")
             if slot_level != 0 and slot_level < spell["level"]:
                 raise CombatIntentError("slot_level is lower than the spell level")
-            if slot_level != 0 and int(actor["slots"].get(str(slot_level), 0) or 0) < 1:
+            if slot_level != 0 and int(actor["slots"].get(str(slot_level), 0) or 0) < 1 \
+                    and int((actor.get("font_slots") or {}).get(str(slot_level), 0) or 0) < 1:
                 raise CombatIntentError("the selected spell slot is not available")
         raw_targets = intent.get("target_ids")
         target_values = raw_targets if isinstance(raw_targets, list) else [intent.get("target_id")]

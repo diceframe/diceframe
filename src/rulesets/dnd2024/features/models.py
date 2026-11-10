@@ -28,6 +28,9 @@ _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
 ACTION_KINDS = frozenset({
     "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
     "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
+    # Font of Magic 的两个方向是两条独立动作：槽换点不要动作、点换槽要附赠
+    # 动作，合成一个 kind 就只能靠 intent 里的字段猜哪一半被声明了。
+    "font_slot_to_points", "font_create_slot",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的

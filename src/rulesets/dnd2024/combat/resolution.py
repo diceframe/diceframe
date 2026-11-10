@@ -25,6 +25,15 @@ from ..items.charges import (
     destroy_check_events,
     validate_charges_declaration,
 )
+from ..spells.font_of_magic import (
+    FontOfMagicError,
+    apply_create_slot,
+    apply_slot_to_points,
+    create_slot_plan,
+    declaring_class_level,
+    parse_created_slot_costs,
+    slot_to_points_plan,
+)
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -1868,8 +1877,48 @@ class CombatResolutionMixin:
                 events.extend(self._bardic_grant_events(instance, combat, intent, rng))
             elif action.kind == "inspiration_slot_exchange":
                 events.extend(self._font_slot_exchange_events(instance, actor, intent))
+            elif action.kind in {"font_slot_to_points", "font_create_slot"}:
+                events.extend(self._font_of_magic_events(
+                    instance, actor, intent, action.kind, capability.feature_id,
+                ))
             else:  # pragma: no cover - catalog validation guards this
                 raise CombatIntentError("unsupported class capability action")
+        return events
+
+    def _font_of_magic_events(
+        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        kind: str, feature_id: str,
+    ) -> list[dict[str, Any]]:
+        """Sorcery Points <-> spell slots, both directions in one batch.
+
+        The plans are recomputed here rather than trusted from validation: the
+        two stages read the same authoritative sheet, and a settle-time refusal
+        is what keeps a forged intent from moving points it never owned.  Only
+        the *events* survive -- the reducer is the writer, so a copy of the
+        sheet is enough to derive the balances the log records.
+        """
+
+        actor_id = str(actor["actor_id"])
+        character = deepcopy(self._canonical_actor_character(instance, actor_id))
+        try:
+            if kind == "font_slot_to_points":
+                plan = slot_to_points_plan(character, intent.get("slot_level"))
+                events = apply_slot_to_points(character, plan)
+            else:
+                owner = self.features.feature_definition(str(feature_id))
+                class_id = str(getattr(owner, "class_id", "") or "")
+                costs = parse_created_slot_costs(self.features.feature_value(
+                    character, feature_id, "created_slot_costs", (),
+                ))
+                plan = create_slot_plan(
+                    character, intent.get("slot_level"), costs,
+                    declaring_class_level(character, class_id),
+                )
+                events = apply_create_slot(character, plan)
+        except FontOfMagicError as exc:
+            raise CombatIntentError(str(exc)) from exc
+        for event in events:
+            event["actor_id"] = actor_id
         return events
 
     def _font_slot_exchange_events(

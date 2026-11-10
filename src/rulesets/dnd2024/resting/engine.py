@@ -16,6 +16,7 @@ from src.rulesets.dnd2024.features.resources import reset_feature_usage
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
+from src.rulesets.dnd2024.spells.font_of_magic import clear_font_slots
 from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -367,6 +368,14 @@ class Dnd2024RestEngine:
                 "after": conditions["exhaustion"],
             })
         resources["ability_score_reductions"] = {}
+        # 造的临时槽先作废，再按普通规则恢复：顺序反过来，"长休后槽位
+        # 总数"就会在一瞬间把临时槽算成普通槽。
+        removed_font_slots = clear_font_slots(character)
+        if removed_font_slots:
+            events.append({
+                "type": "discard_font_slots",
+                "slots": removed_font_slots,
+            })
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
         # 重新研究先落账，再按 recharge 补满：长休结束时被换上的法术槽也是满的，

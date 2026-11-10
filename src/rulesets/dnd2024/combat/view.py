@@ -15,6 +15,7 @@ from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_SPELL_CLASS,
 )
 from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
+from src.rulesets.dnd2024.spells.font_of_magic import font_slots as _font_slots
 
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
@@ -201,6 +202,9 @@ class CombatViewMixin:
                 *list(class_magic.get("prepared_spell_refs") or []),
             ])),
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            # Font of Magic 造的临时槽：单独一栏，绝不并进普通槽表，否则
+            # "最多 5 环"和"长休消失"这两件事就没地方可查了。
+            "font_slots": _font_slots(character),
             "spell_grants": deepcopy(spell_grants),
             "free_cast_slots": deepcopy(free_cast_slots),
             "spell_attack_bonus": int(
@@ -477,11 +481,17 @@ class CombatViewMixin:
                 int(level) for level, count in actor["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
+            if spell["level"] > 0 and not economy.get("slot_spell_cast"):
+                # 临时槽在普通槽表之外，但施法时它是真槽：不并进来，玩家就
+                # 看得到"我造了个槽"却选不了它。
+                for level, count in (actor.get("font_slots") or {}).items():
+                    if int(count) > 0 and int(level) >= int(spell["level"]):
+                        available_slots.append(int(level))
             if spell["level"] > 0 and free_cast_resource(
                 actor, ref, int(spell["level"]),
             ):
                 available_slots.insert(0, 0)
-            available_slots.sort()
+            available_slots = sorted(set(available_slots))
             if available_slots:
                 # 目标声明随法术一起投影：前端只消费服务端语义，不再按
                 # spell mode 硬编码"盟友/敌人"。

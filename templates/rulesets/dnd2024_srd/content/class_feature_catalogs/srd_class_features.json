@@ -879,6 +879,36 @@
       "source_ref": "srd-5.2.1:p64:sorcerer-features",
       "features": [
         {
+          "id": "font_of_magic",
+          "minimum_level": 2,
+          "resource_id": "sorcery_points",
+          "source_ref": "srd-5.2.1:p66:font-of-magic",
+          "summary": "You can expend a spell slot to gain Sorcery Points equal to its level (no action required), or spend Sorcery Points as a Bonus Action to create one temporary spell slot of level 1 to 5. A created slot vanishes when you finish a Long Rest.",
+          "parameters": {
+            "created_slot_costs": [
+              [1, 2, 2],
+              [2, 3, 3],
+              [3, 5, 5],
+              [4, 6, 7],
+              [5, 7, 9]
+            ]
+          },
+          "capabilities": [
+            {
+              "id": "font_slot_to_points",
+              "cost": {},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "font_slot_to_points", "count": 1}]
+            },
+            {
+              "id": "font_create_slot",
+              "cost": {"bonus_action": 1},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "font_create_slot", "count": 1}]
+            }
+          ]
+        },
+        {
           "id": "sorcerous_restoration",
           "minimum_level": 5,
           "resource_id": "sorcerous_restoration",

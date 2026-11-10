@@ -152,14 +152,29 @@ class CombatTriggeredSpellsMixin:
         ] if spend_action else []
         if int(spell["level"]) > 0:
             if slot_level > 0:
-                events.append(
-                    {
-                        "type": "dnd2024.spell.slot_spent",
-                        "actor_id": actor["actor_id"],
-                        "slot_level": slot_level,
-                        "amount": 1,
-                    }
-                )
+                # Font of Magic 造的临时槽是 **真槽**：同一环阶两者都在时先花
+                # 临时槽（两者都在长休重置，先花它不损失任何可选性），并且
+                # 一笔施法只发一个扣槽事件——永远不会同时扣两边。
+                font = actor.get("font_slots") or {}
+                if int(font.get(str(slot_level), 0) or 0) > 0:
+                    events.append(
+                        {
+                            "type": "dnd2024.spell.font_slot_spent",
+                            "actor_id": actor["actor_id"],
+                            "slot_level": slot_level,
+                            "amount": 1,
+                            "source": "font_of_magic",
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "type": "dnd2024.spell.slot_spent",
+                            "actor_id": actor["actor_id"],
+                            "slot_level": slot_level,
+                            "amount": 1,
+                        }
+                    )
             else:
                 resource = free_cast_resource(
                     actor, f"spell:{spell['id']}", int(spell["level"]),
