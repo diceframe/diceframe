@@ -14,6 +14,8 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
+from src.openai_endpoints import openai_endpoint_url
+
 from .contracts import SpeechRequest, VoiceProfile
 
 
@@ -183,15 +185,7 @@ async def _read_limited(response: aiohttp.ClientResponse) -> bytes:
 
 
 def _openai_speech_url(base_url: str) -> str:
-    parsed = urlparse(base_url.strip())
-    path = parsed.path.rstrip("/")
-    if path.endswith("/audio/speech"):
-        target = path
-    elif path.endswith("/v1"):
-        target = path + "/audio/speech"
-    else:
-        target = path + "/v1/audio/speech"
-    return urlunparse(parsed._replace(path=target))
+    return openai_endpoint_url(base_url, "audio/speech")
 
 
 def _endpoint_url(base_url: str, endpoint: str) -> str:

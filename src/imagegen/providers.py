@@ -12,6 +12,8 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
+from src.openai_endpoints import openai_endpoint_url
+
 from .contracts import ImageReference
 
 
@@ -388,27 +390,11 @@ def create_image_provider(
 
 
 def _openai_image_url(base_url: str) -> str:
-    parsed = urlparse(str(base_url or "").strip())
-    path = parsed.path.rstrip("/")
-    if path.endswith("/images/generations"):
-        target = path
-    elif path.endswith("/v1"):
-        target = path + "/images/generations"
-    else:
-        target = path + "/v1/images/generations"
-    return urlunparse(parsed._replace(path=target))
+    return openai_endpoint_url(base_url, "images/generations")
 
 
 def _openai_image_edit_url(base_url: str) -> str:
-    parsed = urlparse(str(base_url or "").strip())
-    path = parsed.path.rstrip("/")
-    if path.endswith("/images/edits"):
-        target = path
-    elif path.endswith("/v1"):
-        target = path + "/images/edits"
-    else:
-        target = path + "/v1/images/edits"
-    return urlunparse(parsed._replace(path=target))
+    return openai_endpoint_url(base_url, "images/edits")
 
 
 def _minimax_image_url(base_url: str) -> str:

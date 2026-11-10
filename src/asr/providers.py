@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from urllib.parse import urlparse, urlunparse
 
 import aiohttp
+
+from src.openai_endpoints import openai_endpoint_url
 
 from .contracts import TranscriptionRequest
 
@@ -99,15 +100,7 @@ def normalize_content_type(value: str) -> str:
 
 
 def _openai_transcription_url(base_url: str) -> str:
-    parsed = urlparse(base_url.strip())
-    path = parsed.path.rstrip("/")
-    if path.endswith("/audio/transcriptions"):
-        target = path
-    elif path.endswith("/v1"):
-        target = path + "/audio/transcriptions"
-    else:
-        target = path + "/v1/audio/transcriptions"
-    return urlunparse(parsed._replace(path=target))
+    return openai_endpoint_url(base_url, "audio/transcriptions")
 
 
 async def _read_limited(response: aiohttp.ClientResponse) -> bytes:
