@@ -385,3 +385,137 @@ def test_the_runtime_carries_recovery_on_a_short_rest_only(
         runtime.complete_rest(None, _wizard(runtime, 5), "long", recovery={})
     with pytest.raises(ValueError, match="recovery must be an object"):
         runtime.complete_rest(None, _wizard(runtime, 5), "short", recovery=[("a", 1)])
+
+
+# --------------------------------------------------------------------------
+# matrix 10-13: Magical Cunning, the 1-minute rite
+# --------------------------------------------------------------------------
+
+
+def _warlock(runtime: Dnd2024Runtime, level: int) -> dict:
+    return _class_sheet(runtime, "class:warlock", level)
+
+
+def _pact(payload: dict) -> tuple[str, int, int]:
+    """``(slot level key, maximum, current)`` for a Pact Magic caster."""
+
+    class_magic = _canonical(payload)["spellcasting"]["class"]
+    assert class_magic["slot_profile"] == "pact"
+    (key, maximum), = class_magic["slots_max"].items()
+    return str(key), int(maximum), int(class_magic["slots_current"][str(key)])
+
+
+def _spend_pact(payload: dict, count: int) -> dict:
+    out = deepcopy(payload)
+    key, _maximum, current = _pact(out)
+    _canonical(out)["spellcasting"]["class"]["slots_current"][key] = current - count
+    return out
+
+
+def test_matrix_10_the_rite_reports_the_minute_it_spends(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _spend_pact(_warlock(runtime, 5), 2)
+
+    result = engine.complete_ritual(sheet)
+
+    assert result["minutes"] == 1
+    assert result["ritual"] == "magical_cunning"
+    # 恢复与扣次数是这一笔的两半，顺序固定：先给槽，再花掉今天的一次。
+    assert [event["type"] for event in result["events"]] == [
+        "recover_pact_slots", "spend_resource_use",
+    ]
+    assert result["events"][0]["minutes"] == 1
+
+
+def test_matrix_10_a_rite_with_nothing_to_regain_is_refused(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    full = _warlock(runtime, 5)
+
+    with pytest.raises(RestError, match="no expended Pact Magic slots"):
+        engine.complete_ritual(full)
+    # 被拒的仪式不花掉次数：每日一次的机会不能这样被烧掉。
+    assert _uses(full, "magical_cunning") == 1
+
+
+def test_matrix_11_the_ceiling_is_half_the_maximum_slots_rounded_up(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    expected = {2: (2, 1), 11: (3, 2), 17: (4, 2)}
+    for level, (maximum, regain) in expected.items():
+        sheet = _spend_pact(_warlock(runtime, level), maximum)
+        row = engine.ritual_options(sheet)[0]
+        assert (row["maximum"], row["regain"]) == (maximum, regain), level
+        result = engine.complete_ritual(sheet)
+        key, _maximum, current = _pact(result["character"])
+        assert current == regain
+        assert result["events"][0]["slots"] == {key: regain}
+
+    # 一槽的情形只在公式里出现（Magical Cunning 从 2 级起，2 级已有 2 槽）。
+    assert Dnd2024RestEngine._ritual_regain(
+        {"budget": "half_max_round_up"}, 1, 0, False,
+    ) == 1
+
+
+def test_matrix_12_the_rite_is_once_per_long_rest(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _spend_pact(_warlock(runtime, 11), 3)
+
+    once = engine.complete_ritual(sheet)
+    assert _uses(once["character"], "magical_cunning") == 0
+
+    with pytest.raises(RestError, match="until the next long rest"):
+        engine.complete_ritual(_spend_pact(once["character"], 1))
+
+    # 长休把这一天的一次还回来，仪式因此可以再来一遍（长休也已补满槽位）。
+    slept = engine.complete_long_rest(_spend_pact(once["character"], 1))
+    assert _uses(slept["character"], "magical_cunning") == 1
+    assert engine.complete_ritual(_spend_pact(slept["character"], 2))["minutes"] == 1
+
+
+def test_matrix_12_a_sheet_with_a_second_slot_row_is_refused(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+) -> None:
+    """Pact Magic keeps exactly one slot row; anything else is not guessed at."""
+
+    sheet = _spend_pact(_warlock(runtime, 5), 2)
+    sheet["ruleset_character"]["spellcasting"]["class"]["slots_max"]["1"] = 1
+
+    assert engine.ritual_options(sheet) == []
+    with pytest.raises(RestError, match="requires Pact Magic spell slots"):
+        engine.complete_ritual(sheet)
+
+
+def test_matrix_13_eldritch_master_replaces_the_ceiling(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    assert resolver.has_feature(_canonical(_warlock(runtime, 20)), "eldritch_master")
+    assert not resolver.has_feature(_canonical(_warlock(runtime, 19)), "eldritch_master")
+
+    sheet = _spend_pact(_warlock(runtime, 20), 4)
+    row = engine.ritual_options(sheet)[0]
+    assert row["full_budget"] is True and row["regain"] == 4
+
+    result = engine.complete_ritual(sheet)
+    assert _pact(result["character"])[2] == 4
+    # 满额恢复仍然是同一次使用，不是额外再来一次。
+    assert _uses(result["character"], "magical_cunning") == 0
+    assert [event["type"] for event in result["events"]].count("spend_resource_use") == 1
+
+
+def test_the_runtime_carries_the_rite_on_the_same_sheet(
+    runtime: Dnd2024Runtime,
+) -> None:
+    sheet = _spend_pact(_warlock(runtime, 5), 2)
+
+    rows = runtime.ritual_options(None, sheet)
+    assert [row["resource_id"] for row in rows] == ["magical_cunning"]
+
+    result = runtime.complete_ritual(None, sheet)
+    assert _pact(result["character"])[2] == 1
+    assert result["minutes"] == 1
+    # 面板拿到的仍是整张卡，和休息的提交结果同形。
+    assert "ruleset_character" in result["character"]

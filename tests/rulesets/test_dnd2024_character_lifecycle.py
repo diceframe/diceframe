@@ -26,6 +26,7 @@ from src.webui.services import (
     ruleset_advancement,
     ruleset_characters,
     ruleset_rest,
+    ruleset_ritual,
 )
 from src.webui.services._common import _parse_game_key
 from src.engine.modules import ruleset_runtime
@@ -44,6 +45,15 @@ class _Api:
         })
         self._live_ruleset_rest_dependencies = (
             ruleset_rest.LiveRulesetRestDependencies(
+                get_instance=self._reg.get,
+                parse_game_key=_parse_game_key,
+                save_instance=self._reg.save,
+                load_rule_for_game=self._load_rule_for_game,
+                ruleset_registry=self._ruleset_registry,
+            )
+        )
+        self._live_ruleset_ritual_dependencies = (
+            ruleset_ritual.LiveRulesetRitualDependencies(
                 get_instance=self._reg.get,
                 parse_game_key=_parse_game_key,
                 save_instance=self._reg.save,
@@ -156,6 +166,16 @@ class _Api:
     def save_character_card(self, character: dict):
         return character_cards.save_character_card(
             self._character_card_dependencies, character,
+        )
+
+    async def ruleset_ritual_resolve_live(self, game_key: str, user_id: str, body):
+        return await ruleset_ritual.resolve_live(
+            self._live_ruleset_ritual_dependencies, game_key, user_id, body,
+        )
+
+    def ruleset_ritual_options(self, game_key: str, user_id: str):
+        return ruleset_ritual.read_options(
+            self._live_ruleset_ritual_dependencies, game_key, user_id,
         )
 
     async def ruleset_rest_resolve_live(self, game_key: str, user_id: str, body):
