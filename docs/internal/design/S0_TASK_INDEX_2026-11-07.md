@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）；S0-D1 已实现（`feat/dnd2024-s0d1-supreme-healing@5283f77d`，stack 在 D3 链头上）；S0-E3 已实现（`feat/dnd2024-s0e3-survivor@c1fef294`，stack 在 D1 链头上）；S0-F1 已实现（`feat/dnd2024-s0f1-d20-skills@5efb0194`，stack 在 E3 链头上；`5efb0194` 为旧测试对齐的 test-only 补提交）；S0-F2 已实现（`feat/dnd2024-s0f2-bardic-inspiration@ebd6166c`，stack 在 F1 链头上）；S0-F3 已实现（`feat/dnd2024-s0f3-failed-d20-windows@b86eec6a`，stack 在 F2 链头上）；S0-F4 已实现（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）；S0-F5 已实现（`feat/dnd2024-s0f5-free-casting@910733c0`，stack 在 F4 链头上）；休息面板接线已交付（`feat/dnd2024-rest-panel-wiring@c5e4a4f1`，stack 在 F5 链头上，地形与研究两类长休声明可由 UI 提交，见 §11）；休息的 DM 裁决与逻辑时间推进已交付（`feat/dnd2024-rest-decision@dbb6edd8`，stack 在面板接线之上，见 §12）。A 类六份（D1–D3、E1–E3）至此全部交付；F 类已交付 F1、F2、F3、F4、F5、F6a、F9。F6 按机制拆三段，**F6a（短休恢复预算）已交付**（`feat/dnd2024-s0f6a-rest-recovery-budget`，stack 在 `fc1907e0` 之上，见 §13）；F6b（Magical Cunning 仪式）、F6c（Font of Magic）待执行。剩余 30 份：F6b、F6c、F7、F8、F10–F37 待执行 |
+| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）；S0-D1 已实现（`feat/dnd2024-s0d1-supreme-healing@5283f77d`，stack 在 D3 链头上）；S0-E3 已实现（`feat/dnd2024-s0e3-survivor@c1fef294`，stack 在 D1 链头上）；S0-F1 已实现（`feat/dnd2024-s0f1-d20-skills@5efb0194`，stack 在 E3 链头上；`5efb0194` 为旧测试对齐的 test-only 补提交）；S0-F2 已实现（`feat/dnd2024-s0f2-bardic-inspiration@ebd6166c`，stack 在 F1 链头上）；S0-F3 已实现（`feat/dnd2024-s0f3-failed-d20-windows@b86eec6a`，stack 在 F2 链头上）；S0-F4 已实现（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）；S0-F5 已实现（`feat/dnd2024-s0f5-free-casting@910733c0`，stack 在 F4 链头上）；休息面板接线已交付（`feat/dnd2024-rest-panel-wiring@c5e4a4f1`，stack 在 F5 链头上，地形与研究两类长休声明可由 UI 提交，见 §11）；休息的 DM 裁决与逻辑时间推进已交付（`feat/dnd2024-rest-decision@dbb6edd8`，stack 在面板接线之上，见 §12）。A 类六份（D1–D3、E1–E3）至此全部交付；F 类已交付 F1、F2、F3、F4、F5、F6a、F6b、F9。F6 按机制拆三段：**F6a（短休恢复预算）已交付**（`feat/dnd2024-s0f6a-rest-recovery-budget`，stack 在 `fc1907e0` 之上，见 §13）；**F6b（Magical Cunning 1 分钟仪式）已交付**（`feat/dnd2024-s0f6b-magical-cunning-rite`，stack 在 `2d06ce89` 之上，见 §14）；F6c（Font of Magic）待执行。剩余 29 份：F6c、F7、F8、F10–F37 待执行 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -95,7 +95,7 @@ S0-A 子职授予主干
 | S0-F3 | 失败 D20 后窗口 | Tactical Mind、Dark One's Own Luck、Countercharm、Indomitable、Disciplined Survivor、Stroke of Luck | `S0F3_FAILED_D20_WINDOWS_TASK_SPEC_2026-11-07.md` | 24 | **已实现**（`feat/dnd2024-s0f3-failed-d20-windows@b86eec6a`，stack 在 F2 链头上）。窗口注册表加两个正交标志而不加第二条管线：`rerolls`（成本买一颗全新 d20 并强制采用，旧结果作废但留在 `rerolled_*`）与 `replaces_natural`（改天然面、不掷骰），加骰/重掷/改面三种形状同一入口分派。每颗 d20 有稳定 `roll_id`（批次内序号，重掷派生 `-r1`，不读时钟）。一个 d20 上的多个合法面用 `settlement.offered` 排队逐个开口（Stroke → Indomitable/Disciplined → Dark Luck → Countercharm），取消不丢后续面；回合末重复豁免改为可暂停续算。全豁免熟练走声明 `saving_throw_proficiency: "all"`，建卡与升级共用一张 `saving_throw_refs`。全量净引入 0（11 failed 与基线逐条相同，通过数 1654→1697）。**死亡豁免不开放重掷面**已由 2026-11-09 的裁定放开（Stroke/Indomitable/Disciplined 在死亡豁免上与其它豁免同权，加骰面仍排除；见 F4 §12.2）、白名单外改 1 行测试，见该文件 §10 |
 | S0-F4 | 来源化法术授予 | 五组子职法术、Circle Spells、Magical Discoveries、Magical Secrets | `S0F4_SPELL_GRANTS_TASK_SPEC_2026-11-07.md` | 24 | **已实现**（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）。七项特性在基线只有 locale 标签与子职目录 id，本切片补声明而不新建管线：`spell_grant_rows()` 每源一行（`owner`/`feature_id`/`spell_ref`/`granted_level`/`terrain`/`spell_ability`），`prepared_view()` 每法术一条有效项并并列 `sources`，容量拆成 `prepared`/`prepared_used`/`granted`/`cantrip` 四个字段，常驻授予不占容量且按授予者职业结算。Land 四地形走长休事务（先校验后落账，非法地形整休不动；切换是替换不是叠加；同地形幂等；缺省不切换但产 `spell_grant_terrain_missing`）。Magical Secrets 只做 `prepared_list_expansion`（不扩容量、不给戏法开列表），Magical Discoveries 恰两项且每级最多换一项。`automation_status` 由 `spell_effects` 真实存在派生，`not_automated` 施放 fail closed。全量净引入 0（11 failed 与基线逐条相同，通过数 1697→1728 = +31 条新测试）。**第一版回归**：把"未回答的授予槽"当非法提交，曾致 62 ERROR / 6 FAILED（全部是 Bard 6 级以上旧夹具），已改为"待选 ≠ 非法"并把边界钉进矩阵 24；两个玩家选择槽未走 `features.feature_choices`（加载期闭集）见该文件 §11；**同日两项裁定已落地**（§12）：`runtime.complete_rest()` 开始转发 `land_terrain`（`rest_option_names` 扩到 `{attunement, land_terrain}`，队伍休息开局前非变更校验），死亡豁免放开重掷面并保留 `death_save_crit_threshold` |
 | S0-F5 | 独立免费施法资源 | Contact Patron、Mystic Arcanum 6/7/8/9、Spell Mastery、Signature Spells | `S0F5_FREE_CASTING_TASK_SPEC_2026-11-07.md` | 25 | 已实现 |
-| S0-F6 | 休息恢复预算与转换 | Arcane/Natural Recovery、Sorcerous Restoration、Magical Cunning、Eldritch Master、Font of Magic | `S0F6_REST_RESOURCE_CONVERSION_TASK_SPEC_2026-11-07.md` | 25 | **部分交付**：F6a 短休恢复预算已实现（`feat/dnd2024-s0f6a-rest-recovery-budget`），矩阵 1–5、8、9、22、23 有证据；F6b（仪式）与 F6c（Font）待执行。拆分理由、契约与偏差见该文件 §10 |
+| S0-F6 | 休息恢复预算与转换 | Arcane/Natural Recovery、Sorcerous Restoration、Magical Cunning、Eldritch Master、Font of Magic | `S0F6_REST_RESOURCE_CONVERSION_TASK_SPEC_2026-11-07.md` | 25 | **部分交付**：F6a 短休恢复预算（矩阵 1–5、8、9、22、23，§10）与 F6b Magical Cunning 1 分钟仪式（矩阵 10–13，§11）已实现；F6c（Font of Magic，矩阵 14–21）待执行 |
 | S0-F7 | 武器精通与八词条 | 五职业 Weapon Mastery、Tactical Master；Cleave/Graze/Nick/Push/Sap/Slow/Topple/Vex | `S0F7_WEAPON_MASTERY_TASK_SPEC_2026-11-07.md` | 28 | 待执行 |
 | S0-F8 | 战斗风格与戏法选项 | Fighter/Paladin/Ranger Fighting Style；六种风格及 Blessed/Druidic Warrior | `S0F8_FIGHTING_STYLES_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
 | S0-F9 | 无甲防御与特殊移动 | Unarmored Defense/Movement、Fast Movement、Roving、Second-Story Work、Acrobatic Movement | `S0F9_DERIVED_DEFENSE_MOVEMENT_TASK_SPEC_2026-11-07.md` | 26+46 | **部分交付**（`feat/dnd2024-s0f9-movement`）。矩阵 2–11 早在 `feat/dnd2024-derived-defense-speed@73d11263` 已实现（38 条）；本轮补 `roving` / `second_story_work` 声明、`derived.climb_speed`/`swim_speed`、跳跃距离权威（46 条）。矩阵 19–24 按 §7 停止条件 2 记录为不可自动化：combat 是 `position_mode: theater` 的一维距离模型，没有地形/垂直面/液面/支撑事实。详见该文件 §9 |
@@ -435,3 +435,47 @@ F6 的 25 条矩阵横跨三种机制，按机制拆三段执行（见该任务�
 | `ruff check` / `git diff --check` | 通过 |
 
 **期间踩到的一处下标脆弱性**：`test_dnd2024_draconic_resilience.py` 的 `_mutated()` 按下标改 `sorcerer.features[0]`。插在它前面的 `sorcerous_restoration` 没有 `parameters` 块，于是 8 条参数化用例从「断言被拒」变成 `KeyError`。改成按 id 取。这类按下标读内容表的写法在切片不断插入新特性时必然失效，已是第二次（前一次是 F4 的授予槽）。
+
+## 14. S0-F6b：Magical Cunning 的 1 分钟权威仪式（2026-11-10）
+
+F6 的第二段（任务书 §11）。范围是矩阵 10–13：一个要花真实 1 分钟的仪式，以及它在 20 级被 Eldritch Master 改成满额的那一次。
+
+**分支**：`feat/dnd2024-s0f6b-magical-cunning-rite`，stack 在 `feat/dnd2024-s0f6a-rest-recovery-budget@2d06ce89` 之上。
+
+### 14.1 之前的状态
+
+`magical_cunning` 只是恢复目录里一个「每长休重置」的计数，没有任何仪式语义；`eldritch_master` 连计数都没有。逻辑时钟 `world_state.clock` 与 `advance_world_time` 早就存在，但**休息之外没有第二个消费者**——DND 的 1 分钟仪式从来没有真正推进过时间。
+
+### 14.2 做法：同事务，而不是挂起态
+
+仪式在**一次权威写**里完成四件事：校验 → 恢复 Pact 槽 → 扣掉当天的一次 → 推进 1 分钟。任一失败整笔回滚。
+
+为什么不建挂起态：SRD 只写「1 分钟结束时恢复」，没有任何中断/专注/被打断即失败的条文。挂起态会顺手引入一套原文没有的中断规则；而同事务在可观测层面等价——提交那一刻，1 分钟确实已经流逝。
+
+内容侧只加一条声明：
+
+```json
+"ritual": {"minutes": 1, "mode": "pact_slots",
+           "budget": "half_max_round_up", "full_feature": "eldritch_master"}
+```
+
+- `half_max_round_up` 是**槽个数**的一半上取整，和短休那档 `half_level_round_up`（按等级合计环阶）名字刻意区分。
+- `full_feature` 让 Eldritch Master 只**替换同一次使用**的上限，不新增次数；判定走 `resolver.has_feature`，不按职业等级分支。
+
+### 14.3 顺带修掉的重复
+
+时钟推进的四件套（推进、Adventure gate 重估、World Memory 排队、`source_round`）原本只长在休息服务里。仪式成为第二个消费者，于是抽成 `services/world_time.py::advance_game_time()`，休息改为调用它——行为不变，但下一个消费者出现时不会再各抄一份。
+
+### 14.4 偏差
+
+1. 「开始时」不可观测（同事务的直接后果），矩阵 10 改写为「提交时 1 分钟已流逝 + 时钟被拒则整笔回滚」。
+2. 没有任何已消耗槽的仪式**直接拒绝**：空转会静默烧掉每日一次。
+3. 未做仪式窗口（L2 挂起式），理由见 §14.2；前端也未接线。
+
+### 14.5 验收
+
+| 项 | 结果 |
+|---|---|
+| 引擎套件 `test_dnd2024_rest_resource_conversion.py` | **23 passed**（16 → +7） |
+| 新增 `test_dnd2024_ritual_authority.py` | **6 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1816 passed**，11 条为 `character_builder` 基线，1803→1816 = +13，净引入 0 |

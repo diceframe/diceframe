@@ -164,7 +164,7 @@ git diff --check
 | 段 | 范围 | 矩阵 | 状态 |
 |---|---|---|---|
 | **F6a** | 短休恢复预算（Arcane / Natural / Sorcerous Restoration） | 1–5、8、9、22、23 | **已实现**（`feat/dnd2024-s0f6a-rest-recovery-budget`） |
-| F6b | Magical Cunning 的 1 分钟权威仪式 + Eldritch Master | 10–13 | 待执行 |
+| **F6b** | Magical Cunning 的 1 分钟权威仪式 + Eldritch Master | 10–13 | **已实现**（`feat/dnd2024-s0f6b-magical-cunning-rite`） |
 | F6c | Font of Magic 双向转换与临时槽 | 14–21 | 待执行 |
 
 矩阵 6/7（Natural 的免费施法面）**刻意留在 b 段之前**：它要的是「从某个特性的授予里选一个 1 环以上法术」这种新的 `free_cast_source`，与 F5 的 `{fixed, class_list, spellbook}` 三档不兼容，属于新形状，不是本段能顺带做完的。
@@ -211,3 +211,64 @@ git diff --check
 | 相关定向回归（10 文件） | **219 passed / 1 failed**，唯一失败是投影断言未含 `short_recovery`，对齐后全绿 |
 | `pytest tests/rulesets -q` | **11 failed / 1803 passed / 0 errors**，11 条为 `character_builder` 基线，通过数 1787→1803 = +16，净引入 0 |
 | `ruff check` / `git diff --check` | 通过 |
+
+## 11. F6b 执行记录（2026-11-10）
+
+**分支**：`feat/dnd2024-s0f6b-magical-cunning-rite`，stack 在 `feat/dnd2024-s0f6a-rest-recovery-budget@2d06ce89` 之上。
+
+### 11.1 「同事务推进」是怎么定的
+
+任务书 §4.2 要求 Magical Cunning「启动一个持续 1 个逻辑分钟的权威仪式，完成时才落账」，同时 §7 的非目标里写着「不实现通用仪式中断规则」。两条合起来留下一个岔口：
+
+- **(a) 同事务**：一次权威写里推进 1 分钟 + 恢复 + 扣次数，失败整笔回滚。代价是「启动」不可观测。
+- **(b) 两段式**：先 `start` 记 `started_tick`，等后续时钟推进再收尾。代价是悬空状态：AI GM 席位局没有人在线点收尾就会永久挂着。
+
+**取 (a)**。理由：SRD 原文只说「1 分钟结束时恢复」，没有写任何中断、专注或「被别人打断则失败」的规则；自造一个挂起态等于自造规则，而 (a) 在可观测层面等价——事务提交那一刻，1 分钟确实已经流逝。
+
+### 11.2 契约
+
+内容侧（`rest_catalogs/srd_recovery.json`）：
+
+```json
+{"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1,
+ "short": "none", "long": "all",
+ "ritual": {"minutes": 1, "mode": "pact_slots",
+            "budget": "half_max_round_up", "full_feature": "eldritch_master"}}
+```
+
+- `ritual` 是**独立于 `short_recovery` 的一档**：短休是「休息结束时顺带恢复」，仪式是「先花掉时间，再恢复」。两者共用同一个资源池与「每长休一次」的计数语义。
+- `budget = half_max_round_up` 是**槽个数**的一半向上取整（`ceil(max/2)`），不是环阶预算——这一条与 Arcane/Natural 的 `half_level_round_up` 形状相近但含义不同：前者按最大槽数，后者按职业等级合计环阶。名字刻意取得不同，避免复用错。
+- `full_feature`：Eldritch Master **不新增一次使用**，而是把同一次 Magical Cunning 的上限换成「全部已消耗」。因此升级声明挂在**仪式**上，按特性 id 判定（`resolver.has_feature`），不按职业等级分支——这是本切片第三次用「声明驱动而非 class id 分支」。
+- 特性侧（`srd_class_features.json`）新增 `magical_cunning`（Warlock 2，`resource_id` 指向同池）与 `eldritch_master`（Warlock 20）。locale 标签早已存在，未改语言文件。
+
+引擎侧（`resting/engine.py`）：
+
+- `ritual_options(character)`：只读投影，给出 `resource_id` / `minutes` / `uses_left` / `slot_level` / `maximum` / `expended` / `regain` / `full_budget`。无单职业、非 Pact 施法者、或槽表不止一行时降级为 `[]`，不抛错。
+- `complete_ritual(payload, resource_id)`：先 `_plan_ritual` 把「是不是你的仪式、次数、Pact 槽模型、能恢复几个」全部算清楚，再动状态；事件两型 `recover_pact_slots`（含 `minutes`、`full_budget`、`slots`、`before`/`after`）与 `spend_resource_use`。
+- `_pact_slots()` 只认 `slot_profile == "pact"` 且槽表**恰好一行**的卡；多行说明这张卡不是 Pact Magic 的形状，宁可拒绝也不猜。
+
+服务侧（`src/webui/services/ruleset_ritual.py`，新增）：
+
+- `POST /api/games/{game_key}/character/{user_id}/ritual`：`authoritative_write` → 绑定校验 → 战斗闸 → 幂等（`ruleset_operation_log` 里 `kind == "ritual"`）→ 版本校验 → 引擎 → `set_character_sheet` → `advance_game_time(minutes)` → `save`。任一环节失败，角色与 `world_state` 一起回滚。
+- `GET .../ritual/options`：只读，不建会话、不碰卡。
+- 需要 `confirm_elapsed_time: true`：时间会推进这件事不能静默发生。
+- **时钟推进抽成共享实现** `src/webui/services/world_time.py::advance_game_time()`：推进 → Adventure gate 重估 → World Memory 排队 → `source_round`，四件套一处实现。休息的 `_advance_rest_time` 改为调用它，行为不变，只是第二个消费者出现时不会再各写一份。
+
+### 11.3 偏差与未决
+
+1. **「开始时」不可观测**：同事务的直接后果。矩阵 10 因此改写为「事务提交时 1 分钟确实已流逝」，并以「时钟被拒则整笔回滚」钉住原子性。
+2. **没有任何已消耗槽的仪式直接拒绝**，而不是「无损空转」。§4.1.5 的「零恢复不伪扣使用」在休息里是静默跳过（一觉照睡），但仪式的**全部意义**就是换回槽；空转会静默烧掉每日一次，所以这里选择报错。
+3. **未做通用仪式窗口**：矩阵 10 的另一种读法是「DM 确认无人有事再推进」，那需要挂起态 + 收口补差额，属于独立切片（见索引 §14 的 L2）。本段只交付 L1。
+4. **未给 AI GM 工具**：同事务路径没有等待态，不存在 §12 那种「AI 席位局永久等待」的死锁面，因此不需要 `decide_*` 工具。
+5. **前端未接线**：投影与两个端点已就绪，角色面板还没有画入口。与 F6a 同一处理。
+6. 多职业仍不可举行仪式：`_class_state()` 的单职业硬限制未变。
+
+### 11.4 F6b 验收
+
+| 项 | 结果 |
+|---|---|
+| `pytest tests/rulesets/test_dnd2024_rest_resource_conversion.py` | **23 passed**（F6a 16 → +7） |
+| `pytest tests/rulesets/test_dnd2024_ritual_authority.py`（新增） | **6 passed** |
+| `pytest tests/rulesets -q` | **11 failed / 1816 passed / 0 errors**（24:38），11 条仍为 `character_builder` 基线，通过数 1803→1816 = +13（引擎 +7、权威路径 +6），净引入 0 |
+| `ruff check`（改动文件） | All checks passed |
+| `git diff --check` | 干净 |
