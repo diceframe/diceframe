@@ -10,6 +10,7 @@ import type {
   RulesetPendingChoicesResponse,
   RulesetProgressionResponse,
   RulesetRestResponse,
+  RulesetRestOptionsResponse,
   RulesetGameplayResponse,
   RulesetTemporaryEncounterResponse,
   SpellPreparationOptionsResponse,
@@ -215,6 +216,10 @@ export interface RestPreparationChange {
 export interface RestSubmissionOptions {
   /** Long-rest preparation change; omitted entirely when nothing changed. */
   preparedSpells?: RestPreparationChange
+  /** Circle of the Land terrain committed by this long rest. */
+  landTerrain?: string
+  /** slot_id -> spell ref; the server accepts at most `rest_replace` entries. */
+  freeCast?: Record<string, string>
 }
 
 export function resolveLiveCharacterRest(
@@ -235,9 +240,22 @@ export function resolveLiveCharacterRest(
   }
   // 空改动会被服务端拒（"would not change anything"），所以只在确有改动时附带。
   if (options?.preparedSpells) body.prepared_spells = options.preparedSpells
+  // 空值同样不发：空地形不等于"没选"，空研究表仍会开启重绑定路径。
+  if (options?.landTerrain) body.land_terrain = options.landTerrain
+  const freeCast = options?.freeCast || {}
+  if (Object.keys(freeCast).length) body.free_cast = freeCast
   return api<RulesetRestResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest`,
     { method: 'POST', body: JSON.stringify(body) },
+  )
+}
+
+export function fetchLiveCharacterRestOptions(
+  gameKey: string,
+  userId: string,
+): Promise<RulesetRestOptionsResponse> {
+  return api<RulesetRestOptionsResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest/options`,
   )
 }
 

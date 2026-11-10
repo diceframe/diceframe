@@ -7,12 +7,16 @@ import type {
   CharacterPortrait,
   CharacterSheet,
   JsonObject,
+  RestFreeCastSlot,
+  RestOptions,
   RestSessionStatus,
+  RestSpellOption,
   RulesetSpellOption,
   SpellPreparationOptions,
 } from '@/api/types'
 import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import {
+  fetchLiveCharacterRestOptions,
   fetchLiveCharacterSpellOptions,
   resolveLiveCharacterRest,
   type RestSubmissionOptions,
@@ -200,6 +204,54 @@ function toggleCantrip(ref: string): void {
   spellDraft.cantrips.push(ref)
 }
 
+// 长休的两类声明都来自服务端：地形选项与法术研究候选由规则运行时算好后下发，
+// 前端只负责画出来与回填，不维护第二份合法表。
+const restOptions = ref<RestOptions | null>(null)
+const restOptionsFailure = ref('')
+const restOptionsLoaded = ref(false)
+const restTerrain = ref('')
+const restStudySlot = ref('')
+const restStudySpell = ref('')
+const restTerrainOptions = computed(() => restOptions.value?.land_terrain?.options || [])
+const restStudyRows = computed<RestFreeCastSlot[]>(() => restOptions.value?.free_cast || [])
+const restStudyRow = computed<RestFreeCastSlot | null>(() => (
+  restStudyRows.value.find(row => row.slot_id === restStudySlot.value) || null
+))
+// 当前研究的那一项不算"候选"：把它自己再选一遍是合法的空操作，但没有意义。
+const restStudySpellOptions = computed<RestSpellOption[]>(() => (
+  (restStudyRow.value?.options || []).filter(option => option.ref !== restStudyRow.value?.spell_ref)
+))
+const restChoicesReady = computed(() => {
+  // 读不到选项时不要拦住休息：让服务端按既有语义处理（地形缺失会产事件）。
+  if (restType.value !== 'long' || !restOptions.value) return true
+  if (restOptions.value.land_terrain?.required && !restTerrain.value) return false
+  return !restStudySlot.value || Boolean(restStudySpell.value)
+})
+watch(restStudySlot, () => { restStudySpell.value = '' })
+async function loadRestOptions(): Promise<void> {
+  if (props.target !== 'game' || !props.gameKey || !props.userId) return
+  restOptionsFailure.value = ''
+  try {
+    const response = await fetchLiveCharacterRestOptions(props.gameKey, props.userId)
+    if (!response.ok) {
+      throw new Error(response.error || text('读取休息选项失败', 'Failed to read rest options'))
+    }
+    restOptions.value = response.rest_options || { land_terrain: null, free_cast: [] }
+    restOptionsLoaded.value = true
+    restTerrain.value = restOptions.value.land_terrain?.current || ''
+    restStudySlot.value = ''
+    restStudySpell.value = ''
+  } catch (cause: unknown) {
+    // 选项读不到不等于不能休息：降级为旧行为，并把原因显示在面板上。
+    restOptions.value = null
+    restOptionsFailure.value = errorMessage(cause)
+  }
+}
+// 只在真正要长休时才问服务端：短休没有任何声明，打开面板也不该产生请求。
+watch(restType, value => {
+  if (value === 'long' && !restOptionsLoaded.value) void loadRestOptions()
+}, { immediate: true })
+
 // 职业能力与职业资源完全来自服务端投影：前端不判断职业等级、不算武艺骰、
 // 不算资源上限，只渲染 name / current / maximum。
 const classFeatures = computed<CharacterClassFeature[]>(() => (
@@ -380,6 +432,7 @@ function operationId(prefix: string): string {
 
 async function completeRest(): Promise<void> {
   if (props.target !== 'game' || !props.gameKey || !props.userId || !restConfirmed.value) return
+  if (!restChoicesReady.value) return
   busy.value = true
   failure.value = ''
   try {
@@ -389,13 +442,30 @@ async function completeRest(): Promise<void> {
         Math.max(0, Math.min(available, Number(restHitDice[die] || 0))),
       ]),
     )
-    // 没有改动就整块不发：服务端会拒绝「换了个寂寞」的提交。
-    const options: RestSubmissionOptions | null = preparedChanged.value
+    // 没有改动就整块不发：服务端会拒绝「换了个寂寞」的提交。长休的声明只在
+    // 长休提交，短休一个字都不带——服务端对错配的入口是硬拒绝，与其靠它拦，
+    // 不如从源头不发。
+    const longRest = restType.value === 'long'
+    const freeCast: Record<string, string> = {}
+    if (longRest && restStudySlot.value && restStudySpell.value) {
+      freeCast[restStudySlot.value] = restStudySpell.value
+    }
+    const options: RestSubmissionOptions | null = (
+      preparedChanged.value || longRest
+    )
       ? {
-          preparedSpells: {
-            prepared_spell_refs: [...spellDraft.prepared],
-            ...(canChangeCantrips.value ? { cantrip_refs: [...spellDraft.cantrips] } : {}),
-          },
+          ...(preparedChanged.value
+            ? {
+                preparedSpells: {
+                  prepared_spell_refs: [...spellDraft.prepared],
+                  ...(canChangeCantrips.value
+                    ? { cantrip_refs: [...spellDraft.cantrips] }
+                    : {}),
+                },
+              }
+            : {}),
+          landTerrain: longRest ? restTerrain.value || undefined : undefined,
+          freeCast: longRest ? freeCast : undefined,
         }
       : null
     const response = await resolveLiveCharacterRest(
@@ -415,6 +485,9 @@ async function completeRest(): Promise<void> {
     emit('saved', response.character as CharacterSheet, 'rest')
     // 结算后旧候选已经过期；重拉一次，草稿跟着新的准备列表重置。
     void loadSpellOptions()
+    // 休息之后"当前研究"可能已经变了，重新问一次；下一次长休仍要拿到新的候选。
+    restOptionsLoaded.value = false
+    if (restType.value === 'long') void loadRestOptions()
   } catch (cause: unknown) {
     failure.value = errorMessage(cause)
   } finally {
@@ -579,10 +652,39 @@ async function completeRest(): Promise<void> {
           </div>
           <button type="button" class="spell-undo" :disabled="!preparedChanged" @click="resetSpellDraft">{{ text('撤销法术改动', 'Undo spell changes') }}</button>
         </section>
+        <p v-if="restType === 'long' && restOptionsFailure" class="rest-options-error" role="alert">{{ restOptionsFailure }}</p>
+        <fieldset v-if="restType === 'long' && restTerrainOptions.length" class="rest-terrain">
+          <legend>{{ text('选择地形', 'Land terrain') }}</legend>
+          <p class="rest-options-help">{{ text('Circle of the Land 每次长休都要确认地形；确认同一个地形不产生变化。', 'Circle of the Land confirms a terrain on every long rest; repeating the same one changes nothing.') }}</p>
+          <label v-for="option in restTerrainOptions" :key="option" class="rest-terrain-option" :class="{ selected: restTerrain === option }">
+            <input v-model="restTerrain" type="radio" :value="option"> {{ option }}
+          </label>
+        </fieldset>
+        <fieldset v-if="restType === 'long' && restStudyRows.length" class="rest-study">
+          <legend>{{ text('研究法术书（可选）', 'Study the spellbook (optional)') }}</legend>
+          <p class="rest-options-help">{{ text('每次长休最多替换一项已研究的法术；不选则两格都保持不变。', 'At most one studied spell may be replaced per long rest; leave it alone to keep both.') }}</p>
+          <label class="rest-study-row">
+            <span>{{ text('要替换的一格', 'Slot to replace') }}</span>
+            <select v-model="restStudySlot">
+              <option value="">{{ text('不替换', 'No change') }}</option>
+              <option v-for="row in restStudyRows" :key="row.slot_id" :value="row.slot_id">
+                {{ row.spell_name || row.slot_id }} · {{ text(`${row.spell_level} 环`, `level ${row.spell_level}`) }}
+              </option>
+            </select>
+          </label>
+          <label v-if="restStudySlot" class="rest-study-row">
+            <span>{{ text('替换为', 'Replace with') }}</span>
+            <select v-model="restStudySpell" :disabled="!restStudySpellOptions.length">
+              <option value="">{{ restStudySpellOptions.length ? text('请选择法术', 'Choose a spell') : text('没有合法候选', 'No legal spell') }}</option>
+              <option v-for="spell in restStudySpellOptions" :key="spell.ref" :value="spell.ref">{{ spell.name }}</option>
+            </select>
+          </label>
+          <p v-if="restStudySlot && !restStudySpellOptions.length" class="rest-options-help">{{ text('法术书里没有另一项同环阶、施法时间为动作的法术。', 'No other spell of the same level with an Action casting time is in the spellbook.') }}</p>
+        </fieldset>
         <div class="rest-actions">
           <label class="rest-confirm"><input v-model="restConfirmed" type="checkbox"><span>{{ text('我确认游戏内时间会随本次休息推进', 'I understand that in-game time advances during this rest') }}</span></label>
         </div>
-        <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
+        <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
       </section>
       </div>
 
@@ -627,7 +729,7 @@ async function completeRest(): Promise<void> {
 .class-feature-card p { margin: 0; color: var(--df-text-muted); line-height: 1.5; }
 .class-resource-section .spell-slot-card strong { color: var(--df-accent-strong); }
 .resource-section { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--df-border-soft); border-radius: 12px; background: color-mix(in srgb, var(--df-surface-1) 92%, var(--df-accent) 4%); }.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }.section-heading h3 { margin: 0; }.section-heading span { color: var(--df-text-muted); font-size: 12px; }.spell-slot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }.spell-slot-card { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--df-border-soft); border-radius: 9px; background: color-mix(in srgb, var(--df-control-bg) 72%, transparent); }.spell-slot-card small { color: var(--df-text-muted); }.spell-slot-card strong { font-size: 20px; }.spell-slot-card strong span { color: var(--df-text-muted); font-size: 14px; font-weight: 400; }.slot-meter { height: 4px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--df-text) 12%, transparent); }.slot-meter i { display: block; height: 100%; border-radius: inherit; background: var(--df-accent); }.empty-resource { margin: 0; color: var(--df-text-muted); }
-.rest-center { display: grid; gap: 10px; margin-top: 8px; padding: 13px; border: 1px solid color-mix(in srgb, var(--df-accent) 58%, var(--df-border-soft)); border-radius: 12px; background: color-mix(in srgb, var(--df-accent) 8%, transparent); }.rest-center h3, .rest-center p { margin: 0; }.rest-center p { color: var(--df-text-muted); }.rest-types { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); justify-content: start; gap: 8px; }.rest-type-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; min-height: 52px; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--df-border-soft); border-radius: 8px; cursor: pointer; transition: border-color .16s ease, background-color .16s ease; }.rest-type-option:hover { border-color: var(--df-accent); }.rest-type-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 12%, transparent); }.rest-type-option input[type="radio"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; accent-color: var(--df-accent); cursor: pointer; }.rest-type-option span { display: grid; gap: 1px; min-width: 0; text-align: left; }.rest-type-option b { line-height: 1.35; }.rest-type-option small { color: var(--df-text-muted); line-height: 1.35; }.party-rest-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--df-accent) 45%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.party-rest-status strong { flex-basis: 100%; }.party-rest-status span { color: var(--df-text-muted); font-size: 12px; }.party-rest-status span.submitted { color: var(--df-accent-strong); }.hit-dice-grid { display: flex; flex-wrap: wrap; gap: 9px; }.hit-dice-grid label { display: grid; gap: 5px; }.hit-dice-grid input { width: 92px; max-width: 100%; }.server-roll-note { font-size: 12px; }.rest-actions { display: block; padding-top: 4px; }.rest-submit { justify-self: end; }.rest-confirm { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 9px; min-width: 0; }.rest-confirm input { width: 18px; height: 18px; margin: 1px 0 0; }.rest-confirm span { line-height: 1.45; }
+.rest-center { display: grid; gap: 10px; margin-top: 8px; padding: 13px; border: 1px solid color-mix(in srgb, var(--df-accent) 58%, var(--df-border-soft)); border-radius: 12px; background: color-mix(in srgb, var(--df-accent) 8%, transparent); }.rest-center h3, .rest-center p { margin: 0; }.rest-center p { color: var(--df-text-muted); }.rest-types { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); justify-content: start; gap: 8px; }.rest-type-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; min-height: 52px; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--df-border-soft); border-radius: 8px; cursor: pointer; transition: border-color .16s ease, background-color .16s ease; }.rest-type-option:hover { border-color: var(--df-accent); }.rest-type-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 12%, transparent); }.rest-type-option input[type="radio"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; accent-color: var(--df-accent); cursor: pointer; }.rest-type-option span { display: grid; gap: 1px; min-width: 0; text-align: left; }.rest-type-option b { line-height: 1.35; }.rest-type-option small { color: var(--df-text-muted); line-height: 1.35; }.party-rest-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--df-accent) 45%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.party-rest-status strong { flex-basis: 100%; }.party-rest-status span { color: var(--df-text-muted); font-size: 12px; }.party-rest-status span.submitted { color: var(--df-accent-strong); }.hit-dice-grid { display: flex; flex-wrap: wrap; gap: 9px; }.hit-dice-grid label { display: grid; gap: 5px; }.hit-dice-grid input { width: 92px; max-width: 100%; }.server-roll-note { font-size: 12px; }.rest-actions { display: block; padding-top: 4px; }.rest-submit { justify-self: end; }.rest-confirm { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 9px; min-width: 0; }.rest-confirm input { width: 18px; height: 18px; margin: 1px 0 0; }.rest-confirm span { line-height: 1.45; }.rest-options-help { font-size: 12px; }.rest-options-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--df-danger) 16%, transparent); color: var(--df-danger-strong); font-size: 12px; }.rest-terrain, .rest-study { display: grid; gap: 7px; margin: 0; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: 8px; }.rest-terrain legend, .rest-study legend { padding: 0 5px; color: var(--df-text-muted); font-size: 12px; }.rest-terrain-option { display: flex; align-items: center; gap: 7px; padding: 5px 7px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }.rest-terrain-option:hover { border-color: var(--df-accent); }.rest-terrain-option.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 10%, transparent); }.rest-terrain-option input { accent-color: var(--df-accent); cursor: pointer; }.rest-study-row { display: grid; grid-template-columns: minmax(0, 130px) minmax(0, 1fr); align-items: center; gap: 9px; }.rest-study-row span { color: var(--df-text-muted); font-size: 12px; }.rest-study-row select { min-width: 0; width: 100%; max-width: 320px; }
 .center-error { margin: 12px 0 0; padding: 10px; border-radius: 8px; background: color-mix(in srgb, var(--df-danger) 16%, transparent); color: var(--df-danger-strong); }.professional-character-center footer { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin: 0; padding: 12px 2px 2px; border-top: 1px solid var(--df-border-soft); background: var(--df-surface-1); }
 .rest-preparation { display: grid; gap: 9px; padding: 10px; border: 1px solid var(--df-border-soft); border-radius: 10px; background: color-mix(in srgb, var(--df-control-bg) 72%, transparent); }.spell-pick-group { display: grid; gap: 6px; }.spell-pick-group h4 { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 13px; }.spell-pick-group h4 small { color: var(--df-text-muted); font-weight: 400; }.spell-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; }.spell-chip { padding: 5px 10px; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text); font-size: 12px; cursor: pointer; }.spell-chip:hover { border-color: var(--df-accent); }.spell-chip.selected { border-color: var(--df-accent); background: color-mix(in srgb, var(--df-accent) 18%, transparent); color: var(--df-accent-strong); }.spell-undo { justify-self: start; padding: 5px 10px; font-size: 12px; }
 @media (max-width: 720px) { .professional-character-center { width: 100%; gap: 9px; }.center-hero p { display: none; }.center-hero h2 { font-size: 22px; }.center-tabs { grid-template-columns: 1fr 1fr; }.center-scroll-region { padding-right: 3px; }.vital-grid { grid-template-columns: 1fr 1fr; }.ability-grid { grid-template-columns: repeat(3, 1fr); }.profile-grid, .read-only-panel dl { grid-template-columns: 1fr; }.profile-grid .profile-wide { grid-column: auto; }.rest-submit { width: 100%; }.professional-character-center footer button { min-height: 40px; } }
