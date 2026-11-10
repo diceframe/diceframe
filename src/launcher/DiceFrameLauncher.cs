@@ -195,19 +195,43 @@ internal static partial class DiceFrameLauncher
             return 0;
         }
 
+        // 端口上可能已经有一个 DiceFrame 在服务：上次切换 HTTPS 时服务端
+        // execv 换了 PID、用户重复双击、或上一个启动器被强制结束时留下的
+        // 孤儿后端。此时再 spawn 一个后端必然 10048 失败并报"异常退出"，
+        // 窗口就永远卡在启动画面——直接接管已有实例。
+        bool attachedToExisting = false;
         if (serverProcess == null || serverProcess.HasExited)
         {
-            try
+            string running = ProbeRunningInstance(url);
+            if (running != null)
             {
-                serverProcess = StartServer(installRoot, activeDir, dataDir);
+                attachedToExisting = true;
+                url = running;
             }
-            catch (Exception ex)
+            else
             {
-                return Fail("DiceFrame failed to start: " + ex.Message);
+                try
+                {
+                    serverProcess = StartServer(installRoot, activeDir, dataDir);
+                }
+                catch (Exception ex)
+                {
+                    return Fail("DiceFrame failed to start: " + ex.Message);
+                }
             }
         }
 
-        if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
+        if (attachedToExisting)
+        {
+            Console.WriteLine("DiceFrame is already running at " + url + "，本次启动接管该实例。");
+            if (!browserOpened)
+            {
+                OpenUi(url, activeDir);
+                browserOpened = true;
+            }
+            Console.WriteLine();
+        }
+        else if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
         {
             if (!browserOpened)
             {
@@ -222,14 +246,32 @@ internal static partial class DiceFrameLauncher
         }
         else if (serverProcess.HasExited)
         {
+            // 服务端为了生效新配置（切换 HTTPS、更新）会 os.execv 原地重启，
+            // Windows 上这会换 PID，原句柄随之中断——那不是崩溃。留一小段时间
+            // 等新进程起来并接上它，接不上才按异常退出取证。
+            string restarted = WaitForLiveServer(url, TimeSpan.FromSeconds(15));
+            if (restarted != null)
+            {
+                attachedToExisting = true;
+                url = restarted;
+                if (!browserOpened)
+                {
+                    OpenUi(url, activeDir);
+                    browserOpened = true;
+                }
+                Console.WriteLine("DiceFrame restarted itself; reattached to " + url + ".");
+            }
             // 启动阶段就异常退出（例如 python.exe native crash）同样要留取证：
             // 这类退出不是用户主动关闭，也不属于更新切换。
-            if (!suppressCrashReport)
+            else if (!suppressCrashReport)
             {
                 HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
                 return serverProcess.ExitCode;
             }
-            return Fail("DiceFrame exited before the Web UI became ready.");
+            else
+            {
+                return Fail("DiceFrame exited before the Web UI became ready.");
+            }
         }
         else
         {
@@ -253,7 +295,9 @@ internal static partial class DiceFrameLauncher
                 );
             }
 
-            if (serverProcess == null || serverProcess.HasExited)
+            // 接管已有实例时没有子进程句柄可等：窗口活多久就是多久，
+            // 关窗口只退出启动器，不杀那个不属于本进程的实例。
+            if (!attachedToExisting && (serverProcess == null || serverProcess.HasExited))
             {
                 if (serverProcess != null && !suppressCrashReport)
                 {
@@ -835,6 +879,67 @@ internal static partial class DiceFrameLauncher
                 int statusCode = (int)response.StatusCode;
                 return statusCode >= 200 && statusCode < 500;
             }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 端口上是否已经有一个可用的本机 DiceFrame。HTTP 与 HTTPS 都试：
+    /// 切换连接模式后启动器缓存的 scheme 可能已经过期。
+    /// 返回可以直接打开的 base url；都没有则返回 null。
+    /// </summary>
+    private static string ProbeRunningInstance(string url)
+    {
+        string[] candidates = new string[]
+        {
+            url,
+            "https://127.0.0.1:" + launcherPort,
+            "http://127.0.0.1:" + launcherPort,
+        };
+        foreach (string candidate in candidates)
+        {
+            if (string.IsNullOrEmpty(candidate))
+            {
+                continue;
+            }
+            if (IsDiceFrameServer(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    // 服务端自重启（execv 换 PID）后新监听器要过几秒才 accept，
+    // 这段时间轮询，别把它当崩溃。
+    private static string WaitForLiveServer(string url, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            string running = ProbeRunningInstance(url);
+            if (running != null)
+            {
+                return running;
+            }
+            Thread.Sleep(500);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 判断这个地址后面确实是 DiceFrame：读匿名可达的 /api/config，
+    /// 看公开版本元数据字段。自签 HTTPS 走同一套指纹固定校验。
+    /// </summary>
+    private static bool IsDiceFrameServer(string baseUrl)
+    {
+        try
+        {
+            string body = HttpGet(baseUrl + "/api/config");
+            return body.IndexOf("\"server_version\"", StringComparison.Ordinal) >= 0;
         }
         catch
         {

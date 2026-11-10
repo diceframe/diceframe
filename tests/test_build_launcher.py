@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import zipfile
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -151,3 +153,68 @@ def test_launcher_rechecks_the_self_signed_fingerprint_after_a_live_switch(tmp_p
     # 记录被删后回到 fail-closed。
     assert payload["missing"] == ""
     assert payload["null_cert"] is False
+
+
+def _serve_config(body: bytes) -> tuple[HTTPServer, int]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler 约定的方法名
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, server.server_address[1]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_recognizes_an_already_running_instance(tmp_path):
+    """端口上已有 DiceFrame 时启动器要接管它，而不是再 spawn 一个必然 10048 的后端。
+
+    事故现场：切换 HTTPS 后服务端 os.execv 换了 PID，上一个启动器退出时留下了
+    仍在监听 18000 的孤儿后端；之后每次双击都在 bind 上失败，窗口卡在启动画面。
+    """
+    feature = _serve_config(b'{"server_version": "9.9.9", "min_client_version": "0.6.0"}')
+    other = _serve_config(b'{"hello": "world"}')
+    exe = tmp_path / "DiceFrame.exe"
+    try:
+        _compile_launcher(exe)
+        script = (
+            "$t = [Reflection.Assembly]::LoadFile($env:LAUNCHER_EXE).GetType('DiceFrameLauncher');"
+            "$f = [Reflection.BindingFlags]'NonPublic,Static';"
+            "$t.GetMethod('InitLocalHttpClient', $f).Invoke($null, @()) | Out-Null;"
+            "$probe = $t.GetMethod('IsDiceFrameServer', $f);"
+            "@{"
+            " diceframe = [bool]$probe.Invoke($null, @($env:UP));"
+            " other = [bool]$probe.Invoke($null, @($env:OTHER));"
+            " dead = [bool]$probe.Invoke($null, @('http://127.0.0.1:1'))"
+            "} | ConvertTo-Json -Compress"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            env={
+                **os.environ,
+                "LAUNCHER_EXE": str(exe),
+                "UP": f"http://127.0.0.1:{feature[1]}",
+                "OTHER": f"http://127.0.0.1:{other[1]}",
+            },
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        feature[0].shutdown()
+        other[0].shutdown()
+
+    payload = json.loads(result.stdout)
+    # 公开配置里的 server_version 是 DiceFrame 的特征：据此复用已有实例。
+    assert payload["diceframe"] is True
+    # 别的服务占着端口时绝不能当成自己的实例接管。
+    assert payload["other"] is False
+    # 没人监听就是没人监听。
+    assert payload["dead"] is False
