@@ -5385,6 +5385,8 @@ The Windows launcher controls the switch to a candidate version.
 
 The running application itself must not pretend to perform the launcher's atomic version switch.
 
+Overwrite upgrades are also owned by the launcher (`src/launcher/OverwriteUpgrade.cs`). When a user unpacks a new archive over the installation, the new payload lands in the root-level `app/` and `python/` while `current.json` still points to the old payload under `versions/`. If, at startup, the root payload's `app/src/version.py` version is strictly newer than the current one, the launcher moves it into `versions/v<version>/`, stages the same launcher, writes the same restart signal as an in-app update, and runs the same health / probation / commit flow; failure rolls back to the version that was running before the overwrite. This step must run before legacy-layout cleanup, otherwise the overwritten payload would be deleted as legacy files. Nothing happens when the root version is not newer, cannot be read, or the installation has never used `versions/`.
+
 When `current.json` contains both verifiable `relative_dir` and `previous_relative_dir` values, the application may write a restart signal with `operation=rollback`. The launcher then runs the previous payload through the same health, probation, and commit flow. A successful switch exchanges the current and previous pointers while retaining both payloads; the application does not edit the pointer or delete `data/`.
 
 ---

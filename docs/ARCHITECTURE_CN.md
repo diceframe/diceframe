@@ -5313,6 +5313,8 @@ Managed Docker
 
 应用本身不能在运行中假装完成 launcher 的原子版本切换。
 
+覆盖升级同样由 launcher 负责（`src/launcher/OverwriteUpgrade.cs`）。用户把新包解压覆盖到安装目录时，新版本落在根目录 `app/`、`python/`，而 `current.json` 仍指向 `versions/` 里的旧版本。启动时若根目录载荷的 `app/src/version.py` 版本严格新于当前版本，launcher 把它搬进 `versions/v<版本>/`、暂存同一个启动器、写入与应用内更新相同的 restart signal，再走同一套 health / probation / commit；失败回滚到覆盖前的版本。该步骤必须先于旧布局清理执行，否则覆盖进来的载荷会被当成旧布局删除。根目录版本不比当前新、版本读不出、或安装从未使用 `versions/` 时不做任何事。
+
 当 `current.json` 同时存在可验证的 `relative_dir` 与 `previous_relative_dir` 时，应用可以写入带 `operation=rollback` 的 restart signal，请求 launcher 将上一版本作为候选执行同一套 health / probation / commit 流程。成功后交换当前与上一版本指针并继续保留两套 payload；应用不直接修改指针，也不删除 `data/`。
 
 ---
