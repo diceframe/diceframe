@@ -1,4 +1,5 @@
 import hashlib
+import zipfile
 
 import pytest
 
@@ -61,3 +62,26 @@ def test_cleanup_runtime_drops_agent_skill_docs_but_keeps_package_code(tmp_path)
     assert not (site_packages / "pydantic_ai" / ".agents").exists()
     assert module.is_file()
     assert griffe_agents.is_file()
+
+
+def test_validate_zip_rejects_paths_too_deep_for_older_updaters(tmp_path):
+    archive = tmp_path / "portable.zip"
+    deep = build_portable.PACKAGE_DIR_NAME + "/" + "x" * build_portable.MAX_ARCHIVE_PATH
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr(deep, "")
+
+    with pytest.raises(RuntimeError, match="too long for older in-app updaters"):
+        build_portable.validate_zip(archive)
+
+
+def test_archive_path_budget_fits_a_nested_downloads_install():
+    # 已安装的旧版本用自带更新器解压新包：<安装目录>\data\_updater\extract-v<版本>\<zip 内路径>。
+    # 最常见的安装方式是在「下载」里右键「全部解压」，得到两层同名目录（约 100 字符）；
+    # zip 内路径守住 MAX_ARCHIVE_PATH，这种安装就能直接在应用内升级。
+    install_root = (
+        r"C:\Users\Administrator\Downloads"
+        r"\DiceFrame-v3.1.2-windows-portable\DiceFrame-v3.1.2-windows-portable"
+    )
+    old_updater_prefix = r"\data\_updater\extract-v3.10.10" + "\\"
+    assert len(install_root) + len(old_updater_prefix) + build_portable.MAX_ARCHIVE_PATH <= 259
+    assert len(build_portable.PACKAGE_DIR_NAME) <= len("DiceFrame")

@@ -30,6 +30,16 @@ DEFAULT_PYTHON_SHA256 = "009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400
 PIP_BOOTSTRAP_URL = "https://files.pythonhosted.org/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl"
 PIP_BOOTSTRAP_SHA256 = "382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab"
 PORTABLE_REQUIREMENTS = ROOT / "requirements-portable.lock"
+# zip 内的顶层目录名。已安装的旧版本用自带的更新器把包解压到
+# <安装目录>/data/_updater/extract-v<版本>/<顶层目录>/…，Windows 默认 260 字符上限，
+# 顶层目录每短一个字符，旧版本能直接在应用内升级的安装目录就能长一个字符。
+# 旧更新器（2.0.0 起）只要求恰好一个顶层目录、不认名字；更新器按 zip 文件名挑包，
+# 文件名仍带版本号（见 main 里的 package_name）。
+PACKAGE_DIR_NAME = "DiceFrame"
+# zip 内最长成员路径（含顶层目录）的上限。旧更新器解压时还要在前面加上
+# "<安装目录>\data\_updater\extract-v<版本>\"；120 让常见的「下载目录里右键全部解压」
+# 嵌套安装（约 100 字符）也能在 260 以内。超了就让打包失败，免得新依赖悄悄带进深路径。
+MAX_ARCHIVE_PATH = 120
 
 FORBIDDEN_PATTERNS = [
     re.compile(r"(^|/)data/"),
@@ -244,6 +254,12 @@ def validate_zip(output_zip: Path) -> None:
     bad = [name for name in names if any(pattern.search(name.replace("\\", "/")) for pattern in FORBIDDEN_PATTERNS)]
     if bad:
         raise RuntimeError("Portable zip contains forbidden paths:\n" + "\n".join(bad[:20]))
+    longest = max(names, key=len, default="")
+    if len(longest) > MAX_ARCHIVE_PATH:
+        raise RuntimeError(
+            f"Portable zip path is too long for older in-app updaters "
+            f"({len(longest)} > {MAX_ARCHIVE_PATH}): {longest}"
+        )
     required = [
         "/DiceFrame.exe",
         "/python/python.exe",
@@ -313,7 +329,7 @@ def main() -> int:
 
     version = args.version.lstrip("v")
     package_name = f"DiceFrame-v{version}-windows-portable"
-    package_dir = BUILD_ROOT / package_name
+    package_dir = BUILD_ROOT / PACKAGE_DIR_NAME
     app_dir = package_dir / "app"
     runtime_dir = package_dir / "python"
     output_zip = args.output_dir.resolve() / f"{package_name}.zip"
