@@ -59,6 +59,11 @@ DEFAULT_CONTROL_MODE = "human"
 # temporary=true 表示「真人暂离、AI 临时托管」，恢复目标只能是真人或未认领。
 RESUME_MODES = ("human", "unclaimed")
 
+# GM 席位（开局时的第一张卡）始终属于房主自己：它绑定房主会话、从不签发分享凭证，
+# 没有任何人能「认领」它。``unclaimed`` 在这里只会得到一个连房主都提交不了行动的
+# 死席位，所以 GM 席位只能是真人或 AI 托管。
+GM_SEAT_CONTROL_MODES = ("human", "ai")
+
 # 房间级「暂离语义」。旧存档没有这个设置，唯一不猜测的答案是旧版本行为：
 # 暂离只改在场状态，绝不把角色交给 AI。
 AWAY_CONTROL_POLICIES = ("pause", "ai_takeover")
@@ -465,6 +470,7 @@ __all__ = [
     "CONTROL_MODES",
     "DEFAULT_AWAY_CONTROL_POLICY",
     "DEFAULT_CONTROL_MODE",
+    "GM_SEAT_CONTROL_MODES",
     "MAX_CONTROL_REVISION",
     "PlayerControlError",
     "RESUME_MODES",

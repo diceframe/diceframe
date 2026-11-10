@@ -26,10 +26,27 @@ export function defaultCardControl(index: number): CardControlMode {
   return index === 0 ? 'human' : 'unclaimed'
 }
 
-/** 把一个（可能来自旧状态或用户输入的）值收敛为合法的控制方式。 */
+/**
+ * 第一张卡就是 GM 席位：它绑定房主自己、永远拿不到分享链接，没有人能认领它。
+ * 「等待认领」在这里只会建出一个连房主都提交不了行动的席位（服务端会拒绝创建），
+ * 所以第一张只能是玩家或 AI 托管。
+ */
+export const GM_SEAT_CONTROL_MODES: readonly CardControlMode[] = ['human', 'ai']
+
+/** 某个位置允许的控制方式：第一张（GM 席位）不能等待认领，其余三态都可以。 */
+export function cardControlModesAt(index: number): readonly CardControlMode[] {
+  return index === 0 ? GM_SEAT_CONTROL_MODES : CARD_CONTROL_MODES
+}
+
+/**
+ * 把一个（可能来自旧状态或用户输入的）值收敛为该位置合法的控制方式。
+ *
+ * 删掉第一张角色后，原来第二张的「等待认领」会顶到 GM 席位上；这里按位置收敛，
+ * 它会变回默认的「玩家」，而不是带着一个房主无法使用的状态进入本局。
+ */
 export function normalizeCardControl(value: unknown, index: number): CardControlMode {
   const text = String(value ?? '')
-  return (CARD_CONTROL_MODES as readonly string[]).includes(text)
+  return (cardControlModesAt(index) as readonly string[]).includes(text)
     ? (text as CardControlMode)
     : defaultCardControl(index)
 }
@@ -70,9 +87,10 @@ export function cardControlAt(current: readonly unknown[], index: number): CardC
 /**
  * 三态循环按钮：返回把某张卡切到**下一个**控制方式后的新数组。
  *
- * 顺序就是契约顺序 human → ai → unclaimed → human，循环长度取自
- * {@link CARD_CONTROL_MODES}，以后契约变化不需要改这里的魔法数。先归一化再取下一个，
- * 因此坏数据被点到时也会先落回合法模式而不是被跳过。越界 index 不写入。
+ * 顺序就是契约顺序 human → ai → unclaimed → human；第一张（GM 席位）只在
+ * human ↔ ai 之间切换（{@link cardControlModesAt}）。循环长度取自该位置允许的模式，
+ * 以后契约变化不需要改这里的魔法数。先归一化再取下一个，因此坏数据被点到时也会先
+ * 落回合法模式而不是被跳过。越界 index 不写入。
  */
 export function cycleCardControl(
   current: readonly unknown[],
@@ -80,8 +98,9 @@ export function cycleCardControl(
 ): CardControlMode[] {
   const next = syncCardControls(current.length, current)
   if (index < 0 || index >= next.length) return next
-  const position = CARD_CONTROL_MODES.indexOf(next[index])
-  next[index] = CARD_CONTROL_MODES[(position + 1) % CARD_CONTROL_MODES.length]
+  const modes = cardControlModesAt(index)
+  const position = modes.indexOf(next[index])
+  next[index] = modes[(position + 1) % modes.length]
   return next
 }
 
@@ -93,7 +112,8 @@ export function cycleCardControl(
  * B 会拿到 human，而不是它原本的 ai。所以两者必须一起删。
  *
  * 越界 index 返回归一化后的原数组（不抛错、不误删）。归一化顺带把非法值收敛成合法
- * 模式，避免把坏值带进创建 payload。
+ * 模式，避免把坏值带进创建 payload；删掉第一张后顶上来的角色如果是「等待认领」，
+ * 也会按 GM 席位收敛成「玩家」。
  */
 export function removeCardControl(
   current: readonly unknown[],
@@ -102,5 +122,6 @@ export function removeCardControl(
   const next = syncCardControls(current.length, current)
   if (index < 0 || index >= next.length) return next
   next.splice(index, 1)
-  return next
+  // 删除后各张卡的位置变了，按新位置再收敛一次（只影响顶到第一张的那张卡）。
+  return syncCardControls(next.length, next)
 }

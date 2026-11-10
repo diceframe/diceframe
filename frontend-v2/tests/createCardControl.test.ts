@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CARD_CONTROL_MODES,
   cardControlAt,
+  cardControlModesAt,
   cardControlPayload,
   cycleCardControl,
   defaultCardControl,
@@ -46,10 +47,21 @@ describe('create-game per-card control', () => {
     expect(normalizeCardControl('', 0)).toBe('human')
     expect(normalizeCardControl('script', 2)).toBe('unclaimed')
     expect(normalizeCardControl(undefined, 0)).toBe('human')
-    // 三个契约值都原样通过。
+    // 三个契约值在普通席位上都原样通过。
     expect(normalizeCardControl('human', 1)).toBe('human')
     expect(normalizeCardControl('ai', 1)).toBe('ai')
-    expect(normalizeCardControl('unclaimed', 0)).toBe('unclaimed')
+    expect(normalizeCardControl('unclaimed', 1)).toBe('unclaimed')
+  })
+
+  it('Case D2 — the first card is the GM seat and can never wait for a claim', () => {
+    // GM 席位绑定房主自己、拿不到分享链接：「等待认领」会让房主自己也无法行动，
+    // 服务端会拒绝创建，所以第一张只允许玩家或 AI 托管。
+    expect([...cardControlModesAt(0)]).toEqual(['human', 'ai'])
+    expect([...cardControlModesAt(1)]).toEqual(['human', 'ai', 'unclaimed'])
+    expect(normalizeCardControl('unclaimed', 0)).toBe('human')
+    expect(normalizeCardControl('ai', 0)).toBe('ai')
+    expect(cardControlAt(['unclaimed', 'unclaimed'], 0)).toBe('human')
+    expect(cardControlPayload(2, ['unclaimed', 'unclaimed'])).toEqual(['human', 'unclaimed'])
   })
 
   it('Case E — produces the payload control values for all three modes', () => {
@@ -73,6 +85,13 @@ describe('deleting a character keeps control aligned', () => {
     expect(removeCardControl(['human', 'ai', 'unclaimed'], 0)).toEqual(['ai', 'unclaimed'])
   })
 
+  it('deleting the first character never leaves an unclaimed GM seat', () => {
+    // A human / B unclaimed → 删 A → B 成为 GM 席位：等待认领没人能认领，收敛成玩家；
+    // 后面的席位不受影响。
+    expect(removeCardControl(['human', 'unclaimed'], 0)).toEqual(['human'])
+    expect(removeCardControl(['human', 'unclaimed', 'unclaimed'], 0)).toEqual(['human', 'unclaimed'])
+  })
+
   it('deleting a middle character keeps its neighbours intact', () => {
     // A human / B ai / C unclaimed → 删 B → A 仍是 human、C 仍是 unclaimed
     expect(removeCardControl(['human', 'ai', 'unclaimed'], 1)).toEqual(['human', 'unclaimed'])
@@ -88,7 +107,9 @@ describe('deleting a character keeps control aligned', () => {
   })
 
   it('converges junk values while removing, so bad data cannot reach the payload', () => {
-    expect(removeCardControl(['human', 'script', 'ai'], 0)).toEqual(['unclaimed', 'ai'])
+    // 'script' 先按原位置收敛成 unclaimed；删掉第一张后它顶到 GM 席位，再收敛成 human。
+    expect(removeCardControl(['human', 'script', 'ai'], 0)).toEqual(['human', 'ai'])
+    expect(removeCardControl(['human', 'ai', 'script'], 0)).toEqual(['ai', 'unclaimed'])
   })
 })
 
@@ -100,9 +121,16 @@ describe('deleting a character keeps control aligned', () => {
  */
 describe('cycling a card control from the single button', () => {
   it('walks the contract order human → ai → unclaimed and wraps around', () => {
+    expect(cycleCardControl(['human', 'human'], 1)).toEqual(['human', 'ai'])
+    expect(cycleCardControl(['human', 'ai'], 1)).toEqual(['human', 'unclaimed'])
+    expect(cycleCardControl(['human', 'unclaimed'], 1)).toEqual(['human', 'human'])
+  })
+
+  it('cycles the GM seat between human and ai only', () => {
     expect(cycleCardControl(['human'], 0)).toEqual(['ai'])
-    expect(cycleCardControl(['ai'], 0)).toEqual(['unclaimed'])
-    expect(cycleCardControl(['unclaimed'], 0)).toEqual(['human'])
+    expect(cycleCardControl(['ai'], 0)).toEqual(['human'])
+    // 旧草稿里残留的 unclaimed 先按 GM 席位收敛成 human，再切到下一个。
+    expect(cycleCardControl(['unclaimed'], 0)).toEqual(['ai'])
   })
 
   it('cycles only the clicked card and leaves its neighbours alone', () => {

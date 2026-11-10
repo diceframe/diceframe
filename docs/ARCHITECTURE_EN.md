@@ -1694,6 +1694,8 @@ automatically generate exploration actions
 
 Whether it participates in a specific authoritative combat is decided by combat-participant rules, not because the control record silently adds an actor.
 
+The GM seat (the first character at creation) can never be `unclaimed`: it is bound to the owner's session and never issues a share credential, so nobody can claim it. If the first character resolves to `unclaimed` at creation (per-card choice or room default), the server rejects the whole creation with `GM_SEAT_UNCLAIMED`; the GM seat only accepts `human` or `ai` (`GM_SEAT_CONTROL_MODES`).
+
 ---
 
 ## 12A.5 Safe Boundary for Control Changes
