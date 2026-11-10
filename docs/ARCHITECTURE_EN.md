@@ -675,6 +675,8 @@ Frontend rules:
 - Do not treat whether a button is visible as authorization;
 - UI capability gating is an experience layer only; the server must validate again.
 
+Play-state synchronization is owned by `composables/useGame.ts`. Because [Cloudflare Quick Tunnels do not support SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations), `.trycloudflare.com` player pages fetch the current game snapshot through the existing APIs every two seconds, skipping ticks while a refresh is in flight. Local and custom-domain pages retain SSE; P2P subscriptions take precedence. Polling reuses the existing permission filtering, closed-entrance handling and connection cleanup.
+
 The homepage's “Join friends” entry is owned by `features/peer/FriendJoinPanel.vue`. `joinInvitation.ts` classifies regular invitation URLs and `DFP2-` direct-connect codes locally without probing remote hosts or consuming credentials. Regular URLs retain their original origin, deployment path, backend parameter and seat credential and open only after an explicit click. Direct codes enter the existing P2P flow with its connection consent intact. The Hub entry switch gates experimental direct connect only; ordinary invitation joining remains available. The play invitation dialog links to official multiplayer documentation without attaching game or invitation credentials.
 
 Global styles load through the single `frontend-v2/src/styles/index.css` entry.

@@ -257,6 +257,13 @@ export function useGame(){
       pollTimer=window.setInterval(() => void refresh(true),30000)
       return
     }
+    // shortcut: Quick Tunnels lack SSE; poll until the endpoint supports streaming.
+    if (window.location.hostname.endsWith('.trycloudflare.com')) {
+      pollTimer = window.setInterval(() => {
+        if (!activeRefreshes) void refresh(true)
+      }, 2000)
+      return
+    }
     try{
       const next=await gameEventSource(gameKey, eventCursor)
       if(version!==connectVersion || gameKey!==currentGame.value){next.close();return}
