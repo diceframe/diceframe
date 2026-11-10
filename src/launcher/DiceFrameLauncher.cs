@@ -495,6 +495,9 @@ internal static partial class DiceFrameLauncher
             throw new FileNotFoundException("Cannot find DiceFrame server", serverScript);
         }
 
+        // 必须在首次访问 ProcessStartInfo.EnvironmentVariables 之前完成：
+        // 原始环境块里的大小写重复键会让 .NET Framework 在这里直接抛异常。
+        NormalizeProcessEnvironment();
         ProcessStartInfo info = new ProcessStartInfo();
         info.FileName = python;
         info.Arguments = Quote(serverScript);
@@ -997,6 +1000,11 @@ internal static partial class DiceFrameLauncher
 
     private static void InitLocalHttpClient()
     {
+        // csc 直接生成的 exe 没有目标框架 app.config；在本机 .NET Framework 上
+        // ServicePointManager 仍可能默认只有 Ssl3/Tls，而后端最低接受 TLS 1.2。
+        // 必须在首次本机 HTTPS 请求前显式启用 TLS 1.2，否则证书回调还没执行，
+        // 握手就已经被服务端关闭，窗口会一直停在 Starting。
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         WebRequestHandler handler = new WebRequestHandler();
         // 只影响本机 DiceFrame 请求的 handler；更新、GitHub 等其它流量不走它。
         handler.ServerCertificateValidationCallback = delegate(

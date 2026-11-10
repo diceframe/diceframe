@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import ssl
 import subprocess
 import threading
 import zipfile
@@ -13,12 +15,14 @@ from pathlib import Path
 import pytest
 
 from scripts import build_launcher, build_portable
+from src.web_transport.certificates.self_signed import SelfSignedCertificateProvider
+from src.web_transport.certificates.storage import CertificateStore
 
 
 def test_launcher_build_compiles_every_partial_source():
     # 启动器是 partial class，按职责拆在多个文件里；漏编任何一个都会在 csc 阶段才炸。
     names = {Path(source).name for source in build_launcher.launcher_sources()}
-    assert {"DiceFrameLauncher.cs", "OverwriteUpgrade.cs", "AppWindow.cs"} <= names
+    assert {"DiceFrameLauncher.cs", "OverwriteUpgrade.cs", "AppWindow.cs", "ProcessEnvironment.cs"} <= names
 
 
 def test_webview2_sdk_rejects_a_tampered_package(tmp_path):
@@ -56,6 +60,73 @@ def _compile_launcher(output: Path) -> None:
         pytest.skip(f"WebView2 SDK unavailable: {exc}")
     subprocess.run(
         build_launcher.csc_command(output, sdk),
+        check=True,
+        capture_output=True,
+    )
+
+
+# 两个事故都只在"裸 .NET"进程里复现：csc 直接产物没有 app.config，也不同于
+# PowerShell 宿主（后者自带 4.8 运行时默认，TLS 默认已含 1.2、环境字典也重建过）。
+# 探针必须与真实启动器同样方式编译，反射调用启动器的私有入口。
+_PROBE_SOURCE = r"""
+using System;
+using System.IO;
+using System.Net;
+using System.Reflection;
+
+internal static class Probe
+{
+    private static int Main(string[] args)
+    {
+        try
+        {
+            Type type = Assembly.LoadFile(Path.GetFullPath(args[0])).GetType("DiceFrameLauncher");
+            BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+            if (args[1] == "tls")
+            {
+                Console.WriteLine("default=" + ServicePointManager.SecurityProtocol);
+                type.GetField("launcherDataDir", flags).SetValue(null, args[2]);
+                type.GetMethod("InitLocalHttpClient", flags).Invoke(null, null);
+                MethodInfo probe = type.GetMethod("IsDiceFrameServer", flags);
+                Console.WriteLine("pinned=" + probe.Invoke(null, new object[] { args[3] }));
+                Console.WriteLine("dead=" + probe.Invoke(null, new object[] { "https://127.0.0.1:1" }));
+            }
+            else
+            {
+                // 走启动器真实的后端启动路径：归一化必须发生在 StartServer 里第一次
+                // 访问 EnvironmentVariables 之前，否则 .NET 在 UseShellExecute=false
+                // 下复制环境块时抛 ArgumentException，后端进程根本创建不出来。
+                type.GetField("consoleDetached", flags).SetValue(null, true);
+                type.GetMethod("StartServer", flags).Invoke(
+                    null, new object[] { args[2], args[3], args[4] });
+                Console.WriteLine("proxy=" + Environment.GetEnvironmentVariable("https_proxy"));
+                Console.WriteLine("kept=" + (Environment.GetEnvironmentVariable("PATH") != null));
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Exception baseEx = ex.GetBaseException();
+            Console.Error.WriteLine(baseEx.GetType().FullName + ": " + baseEx.Message);
+            return 1;
+        }
+    }
+}
+"""
+
+
+def _compile_probe(output: Path, source: Path) -> None:
+    subprocess.run(
+        [
+            str(build_launcher.find_csc()),
+            "/nologo",
+            "/optimize+",
+            "/target:exe",
+            "/platform:x64",
+            "/r:System.dll",
+            f"/out:{output}",
+            str(source),
+        ],
         check=True,
         capture_output=True,
     )
@@ -155,7 +226,7 @@ def test_launcher_rechecks_the_self_signed_fingerprint_after_a_live_switch(tmp_p
     assert payload["null_cert"] is False
 
 
-def _serve_config(body: bytes) -> tuple[HTTPServer, int]:
+def _serve_config(body: bytes, tls: ssl.SSLContext | None = None) -> tuple[HTTPServer, int]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler 约定的方法名
             self.send_response(200)
@@ -168,6 +239,8 @@ def _serve_config(body: bytes) -> tuple[HTTPServer, int]:
             pass
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
+    if tls is not None:
+        server.socket = tls.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
 
@@ -218,3 +291,101 @@ def test_launcher_recognizes_an_already_running_instance(tmp_path):
     assert payload["other"] is False
     # 没人监听就是没人监听。
     assert payload["dead"] is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_http_client_speaks_tls12_to_the_local_self_signed_server(tmp_path):
+    """事故：csc 产物没有目标框架 app.config，.NET Framework 上 ServicePointManager
+    默认只有 Ssl3/Tls，而后端最低接受 TLS 1.2。握手在证书回调执行之前就被服务端
+    拒绝，窗口永远停在 Starting。InitLocalHttpClient 必须先显式启用 TLS 1.2，
+    并按磁盘指纹记录信任自签证书。
+    """
+    exe = tmp_path / "DiceFrame.exe"
+    _compile_launcher(exe)
+
+    # 用生产证书管道生成证书和指纹文件，路径与格式与后端运行时写入的完全一致。
+    data = tmp_path / "data"
+    cert = SelfSignedCertificateProvider(CertificateStore(data)).prepare()
+    (data / "config.json").write_text('{"tls_mode": "self_signed"}', encoding="utf-8")
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # 与后端一致：拒绝 TLS 1.0/1.1，只有 1.2 起步的握手能成功。
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert.cert_path, cert.key_path)
+    live = _serve_config(b'{"server_version": "3.2.0"}', tls=context)
+
+    # 探针必须和真实启动器一样是裸 csc 产物：PowerShell 宿主的运行时默认
+    # 已含 TLS 1.2，用它复现不了这次事故。
+    probe_source = tmp_path / "probe.cs"
+    probe_source.write_text(_PROBE_SOURCE, encoding="utf-8")
+    probe_exe = tmp_path / "probe.exe"
+    _compile_probe(probe_exe, probe_source)
+    try:
+        result = subprocess.run(
+            [str(probe_exe), str(exe), "tls", str(data), f"https://127.0.0.1:{live[1]}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+    finally:
+        live[0].shutdown()
+
+    payload = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    # 修复前：默认 Ssl3/Tls 连 TLS 1.2-only 服务都握手失败，pinned=False。
+    assert payload["pinned"] == "True"
+    assert payload["dead"] == "False"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_normalizes_duplicate_environment_variables_before_spawning_backend(tmp_path):
+    """事故：Windows 环境块允许同时存在 HTTPS_PROXY / https_proxy，但 .NET
+    Framework 在 UseShellExecute=false 下首次访问 ProcessStartInfo.
+    EnvironmentVariables 时会把整块复制进大小写不敏感字典并抛
+    ArgumentException，后端进程根本创建不出来。StartServer 必须先按首值
+    归一化重复组，且不能动其它变量。
+    """
+    exe = tmp_path / "DiceFrame.exe"
+    _compile_launcher(exe)
+
+    probe_source = tmp_path / "probe.cs"
+    probe_source.write_text(_PROBE_SOURCE, encoding="utf-8")
+    probe_exe = tmp_path / "probe.exe"
+    _compile_probe(probe_exe, probe_source)
+
+    # 搭出 StartServer 要求的最小安装布局；"python" 用 where.exe 冒充：
+    # 启动即退出，测试只关心它能不能被创建出来。
+    install_root = tmp_path / "install"
+    active_dir = install_root / "versions" / "v0.0.0-test"
+    python_dir = active_dir / "python"
+    app_dir = active_dir / "app"
+    python_dir.mkdir(parents=True)
+    app_dir.mkdir()
+    shutil.copyfile(
+        Path(os.environ["SystemRoot"]) / "System32" / "where.exe",
+        python_dir / "python.exe",
+    )
+    (app_dir / "web_server.py").write_text("", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    # 精确构造一组大小写重复；首值排在最前，结果可被稳定断言。
+    env = {k: v for k, v in os.environ.items() if k.lower() != "https_proxy"}
+    env["HTTPS_PROXY"] = "http://127.0.0.1:9"
+    env["https_proxy"] = "http://127.0.0.1:10"
+
+    # check=True 顺带锁住事故本身：修复前 StartServer 在 EnvironmentVariables
+    # 上抛 ArgumentException，探针退出码非零，后端进程创建不出来。
+    result = subprocess.run(
+        [str(probe_exe), str(exe), "env", str(install_root), str(active_dir), str(data_dir)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    payload = dict(line.split("=", 1) for line in result.stdout.splitlines())
+
+    # 归一化按首值保留重复组；大小写无关的其它变量不受影响。
+    assert payload["proxy"] == "http://127.0.0.1:9"
+    assert payload["kept"] == "True"
