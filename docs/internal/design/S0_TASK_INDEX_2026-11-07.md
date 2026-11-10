@@ -331,7 +331,7 @@ S0 不以“198 个授予身份都有 JSON”为完成。至少满足：
 任务书：`S0_REST_DECISION_TASK_SPEC_2026-11-10.md`。这是 §10.1 的第二条（时钟）与 §10.4 的第 2 项，采用「复用 recovery 的申请 → 批准范式」而非「休息结算即推时钟」。
 
 **分支**：`feat/dnd2024-rest-decision`，stack 在 `feat/dnd2024-rest-panel-wiring@c5e4a4f1` 之上。
-**提交**：`ab7c4425` AI GM 工具 → `8f136cc7` 服务端裁决与时钟 → `2c743a5e` 前端 → `dbb6edd8` 测试。
+**提交**：`ab7c4425` AI GM 工具 → `8f136cc7` 服务端裁决与时钟 → `2c743a5e` 前端 → `dbb6edd8` 测试 → `fc1907e0` 矩阵 18。
 
 ### 12.1 状态机
 
@@ -378,9 +378,9 @@ resolving ──任一角色失败──> error
 
 | 项 | 结果 |
 |---|---|
-| `pytest tests/rulesets/test_dnd2024_rest_decision.py` | **15 passed** |
+| `pytest tests/rulesets/test_dnd2024_rest_decision.py` | **16 passed**（矩阵 18 于 `fc1907e0` 补齐） |
 | 休息/生命周期/队伍/活动/绑定定向回归（12 个文件） | **259 passed**（对齐后） |
-| `pytest tests/rulesets -q`（规范切片套件全量） | **11 failed / 1786 passed / 0 errors**（23:57）；11 条仍是 `character_builder` 基线，通过数 1771→1786 = +15，净引入 0 |
+| `pytest tests/rulesets -q`（规范切片套件全量） | **11 failed / 1787 passed / 0 errors**（13:27）；11 条仍是 `character_builder` 基线，通过数 1771→1787 = +16，净引入 0 |
 | `frontend-v2` `npm test` | **221 files / 1589 tests passed** |
 | `vue-tsc -b`、`eslint`、`ruff check`、`git diff --check` | 通过 |
 

@@ -211,11 +211,13 @@ cd frontend-v2 && npx vue-tsc -b && npx eslint src tests && npm test
 
 ### 9.1 基线、分支与提交
 
-分支 `feat/dnd2024-rest-decision`，stack 在 `feat/dnd2024-rest-panel-wiring@c5e4a4f1`。提交链：`ab7c4425` AI GM 工具 → `8f136cc7` 服务端裁决与时钟 → `2c743a5e` 前端 → `dbb6edd8` 测试。索引记录见 `S0_TASK_INDEX_2026-11-07.md` §12。
+分支 `feat/dnd2024-rest-decision`，stack 在 `feat/dnd2024-rest-panel-wiring@c5e4a4f1`。提交链：`ab7c4425` AI GM 工具 → `8f136cc7` 服务端裁决与时钟 → `2c743a5e` 前端 → `dbb6edd8` 测试 → `fc1907e0` 矩阵 18。索引记录见 `S0_TASK_INDEX_2026-11-07.md` §12。
 
 ### 9.2 矩阵结果
 
-矩阵 1–17 全部有对应测试（`test_dnd2024_rest_decision.py`，15 条，其中矩阵 9 的跨天与矩阵 7 的重复裁决各占一条）；矩阵 18（地形/研究与裁决共存）未单独立测试，理由是该路径在 `_settle_party` 里与既有的 `_rest_options(runtime, item)` 完全一致，已由 §11 的 `test_dnd2024_rest_options.py` 覆盖，重复造夹具没有新增证据。前端矩阵 19–20 已补。
+矩阵 1–18 全部有对应测试（`test_dnd2024_rest_decision.py`，16 条，其中矩阵 9 的跨天与矩阵 7 的重复裁决各占一条）。前端矩阵 19–20 已补。
+
+**矩阵 18 曾以「已由 §11 覆盖」为由跳过，后补（`fc1907e0`）**：那次判断错在把证据降级——`test_dnd2024_rest_options.py` 验的是引擎与 `read_options`，验不到「申报 → 等待 → 批准」这条中间态上字段是否还在。补齐的做法是一个两职业队伍：德鲁伊席申报 `land_terrain`、法师席申报 `free_cast`，断言等待期间双方角色卡都没落账、批准后地形与研究各自按原路径写入并各自发出 `spell_grant_terrain` / `rebind_free_cast`。变异验证过：把 `_rest_options` 的 `free_cast` 转发摘掉，这条测试立刻红（研究停在 `spell_mastery_1` 的旧法术）。
 
 ### 9.3 与任务书的偏差
 
@@ -223,14 +225,15 @@ cd frontend-v2 && npx vue-tsc -b && npx eslint src tests && npm test
 2. **`duration_minutes` 提前到申报齐时算好并写进会话**（任务书只要求裁决时算），因为 DM 界面与 AI GM 预览都要显示「批准会推进多久」，不能让客户端自己推算。
 3. **重复裁决的检查提前到状态检查之前**，理由见索引 §12.4。
 4. **AI GM 工具的实际签名**是 `decide_party_rest(game_key, run_id, approve)`（任务书写的是 `decide_party_rest`，字段未定），preview 的分钟数取自会话里的 `duration_minutes`。
+5. **矩阵 18 首轮跳过、后补齐**（`fc1907e0`）：跳过时的理由（「§11 已覆盖」）站不住，理由与验证方式见 §9.2。
 
 ### 9.4 验收
 
 | 项 | 结果 |
 |---|---|
-| `pytest tests/rulesets/test_dnd2024_rest_decision.py` | **15 passed** |
+| `pytest tests/rulesets/test_dnd2024_rest_decision.py` | **16 passed** |
 | 12 个受影响的 `tests/*` 与 `tests/rulesets/*` 定向回归 | **259 passed** |
-| `pytest tests/rulesets -q` | **11 failed / 1786 passed / 0 errors**，11 条为 `character_builder` 基线，净引入 0 |
+| `pytest tests/rulesets -q` | **11 failed / 1787 passed / 0 errors**，11 条为 `character_builder` 基线，净引入 0 |
 | 前端 `npm test` / `vue-tsc -b` / `eslint` | **221 files / 1589 tests passed** / 通过 / 通过 |
 | `ruff check` / `git diff --check` | 通过 |
 
