@@ -29,6 +29,7 @@ from src.tts import SpeechService
 from src.asr import AsrService
 from src.imagegen import ImageGenerationService
 from src.webui.api import WebAPI
+from src.webui.services.launcher_promotion import promote_pending_launcher
 from src.webui.composition import (
     RuntimeComposition,
     RuntimeFactories,
@@ -69,6 +70,10 @@ RUNTIME_PATHS = RuntimePaths.from_root(ROOT, os.environ)
 CONFIG_STORE = ConfigStore(RUNTIME_PATHS, os.environ, logger=logger)
 DATA_DIR = RUNTIME_PATHS.data_dir
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+# 更新候选进程由旧启动器启动：趁它还在就把包里的新启动器提升到安装根目录，
+# 这样即使旧启动器的 HTTPS 健康检查失败回滚，下次启动也已经是修复版。
+# 非便携版（没有 TRPG_INSTALL_ROOT）与无更新信号时是纯 no-op。
+promote_pending_launcher(DATA_DIR, os.environ.get("TRPG_INSTALL_ROOT", ""), log=logger)
 CONFIG_FILE = RUNTIME_PATHS.config_file
 SECRETS_FILE = RUNTIME_PATHS.secrets_file
 ACCESS_TOKEN_FILE = RUNTIME_PATHS.access_token_file
