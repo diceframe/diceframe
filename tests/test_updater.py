@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -153,6 +154,85 @@ def test_safe_extract_rejects_path_traversal(tmp_path):
     with pytest.raises(ValueError, match="不安全路径"):
         updater.safe_extract_archive(archive, tmp_path / "extract")
     assert not (tmp_path / "outside.txt").exists()
+
+
+
+# ---------- Windows 长路径（嵌套安装目录下解压超过 MAX_PATH） ----------
+
+def test_extended_length_path_prefixes_drive_and_unc_paths_once():
+    assert updater._extended_length_path(r"E:\dnd\DiceFrame\data") == r"\\?\E:\dnd\DiceFrame\data"
+    assert (
+        updater._extended_length_path(r"\\nas\share\DiceFrame")
+        == r"\\?\UNC\nas\share\DiceFrame"
+    )
+    already = r"\\?\E:\dnd\DiceFrame"
+    assert updater._extended_length_path(already) == already
+
+
+def test_io_path_is_identity_off_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(updater.os, "name", "posix")
+    assert updater._io_path(tmp_path / "x") == tmp_path / "x"
+
+
+def test_portable_apply_routes_extract_move_and_cleanup_through_long_paths(
+    tmp_path, monkeypatch
+):
+    # 群友日志：嵌套安装目录 + data/_updater/extract-*/<顶层目录>/… 让最深的文件超过
+    # 260 字符，旧代码直接 open() 就 FileNotFoundError。所有落盘、搬移、清理都得走
+    # _io_path（Windows 上换成 \\?\ 前缀），这里记录每次经过的路径来钉住这条契约。
+    seen: list[Path] = []
+
+    def recording_io_path(path: Path) -> Path:
+        seen.append(Path(path))
+        return path
+
+    monkeypatch.setattr(updater, "_io_path", recording_io_path)
+    install_root = tmp_path / "DiceFrame"
+    data_dir = install_root / "data"
+    updater_dir = data_dir / "_updater"
+    updater_dir.mkdir(parents=True)
+    archive = updater_dir / "portable.zip"
+    _write_portable_archive(archive)
+    deep = "python/Lib/site-packages/pydantic_ai/.agents/skills/ref.md"
+    with zipfile.ZipFile(archive, "a") as package:
+        package.writestr(f"DiceFrame-v1.7.0-windows-portable/{deep}", "docs")
+    monkeypatch.setenv("TRPG_INSTALL_ROOT", str(install_root))
+
+    svc = updater.UpdaterService(
+        _dependencies(data_dir, install_root / "app", SimpleNamespace())
+    )
+    svc._prepare_portable_update(archive, "1.7.0")
+
+    extract_dir = updater_dir / "extract-v1.7.0"
+    top = extract_dir / "DiceFrame-v1.7.0-windows-portable"
+    candidate = install_root / "versions" / "v1.7.0"
+    resolved = {path.resolve() for path in seen}
+    assert (top / Path(deep)).resolve() in resolved
+    assert (top / "python").resolve() in resolved
+    assert (candidate.with_name("v1.7.0.installing") / "python").resolve() in resolved
+    assert extract_dir.resolve() in resolved
+    assert (candidate / Path(deep)).is_file()
+    assert not extract_dir.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="MAX_PATH 只在 Windows 上存在")
+def test_safe_extract_writes_and_cleans_paths_beyond_max_path(tmp_path):
+    # 真实走一遍 \\?\ 路径：嵌套目录让成员落盘路径超过 260 字符。
+    nested = tmp_path / ("d" * 60) / ("e" * 60)
+    nested.mkdir(parents=True)
+    member = "DiceFrame/" + "/".join(["f" * 40] * 3) + "/ORCHESTRATION-AND-INTEGRATIONS.md"
+    archive = tmp_path / "deep.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr(member, "docs")
+    destination = nested / "extract"
+    assert len(str(destination / member)) > 260
+
+    root = updater.safe_extract_archive(archive, destination)
+
+    written = updater._io_path(root / member.split("/", 1)[1])
+    assert written.read_text(encoding="utf-8") == "docs"
+    updater._rmtree(destination)
+    assert not destination.exists()
 
 
 # ---------- UpdaterService 状态机 ----------
