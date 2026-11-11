@@ -79,16 +79,16 @@ class RecoveryService:
             # Gate schema validation may itself fail; keep it inside this guard.
             async with instance.authoritative_write() as entered, instance._lock:
                 if self.deps.get_instance(key) is not instance or body['run_id'] != instance.run_id:
-                    raise RecoveryError('STALE_RUN', t("resource_recovery.run_changed_refresh"))
+                    raise RecoveryError('STALE_RUN', t("webui.services.resource_recovery.run_changed_refresh"))
                 if not entered:
-                    raise RecoveryError('READ_ONLY', t("resource_recovery.run_read_only"))
+                    raise RecoveryError('READ_ONLY', t("webui.services.resource_recovery.run_read_only"))
                 if viewer.is_seat and viewer.uid not in instance.players:
                     raise RecoveryError('MEMBER_REQUIRED', 'Game membership required')
                 recovery.require_writable(instance)
                 rule = self.deps.load_rule(instance)
                 selected = policy(rule)
                 if selected is None or not managed_resources(rule):
-                    raise RecoveryError('UNSUPPORTED_RULE', t("resource_recovery.no_recovery_policy"))
+                    raise RecoveryError('UNSUPPORTED_RULE', t("webui.services.resource_recovery.no_recovery_policy"))
                 operation = body['operation_id']
                 fingerprint = {name: deepcopy(value) for name, value in body.items() if name != 'expected_revision'}
                 previous = recovery.command(instance, operation)
@@ -98,7 +98,7 @@ class RecoveryService:
                         raise RecoveryError('OPERATION_ID_REUSED', 'Operation ID already used with another command')
                     return self._result(key, viewer, previous, duplicate=True)
                 if body['expected_revision'] != recovery.view(instance)['revision']:
-                    raise RecoveryError('STALE_REVISION', t("resource_recovery.recovery_changed_refresh"))
+                    raise RecoveryError('STALE_REVISION', t("webui.services.resource_recovery.recovery_changed_refresh"))
                 problems = blockers(instance)
                 if problems:
                     raise RecoveryError('RECOVERY_BLOCKED', '; '.join(problems))
@@ -113,7 +113,7 @@ class RecoveryService:
                     transaction.rollback(instance)
                     if isinstance(exc, Exception):
                         logger.exception('Recovery persistence failed: %s', action)
-                        raise RecoveryError('SAVE_FAILED', t("resource_recovery.save_failed_state_retained")) from exc
+                        raise RecoveryError('SAVE_FAILED', t("webui.services.resource_recovery.save_failed_state_retained")) from exc
                     raise
                 return self._result(key, viewer, record, duplicate=False)
         except asyncio.CancelledError:
@@ -124,7 +124,7 @@ class RecoveryService:
             return _error('RECOVERY_REJECTED', str(exc))
         except Exception:
             logger.exception('Recovery transaction failed: %s', action)
-            return _error('SAVE_FAILED', t("resource_recovery.save_failed_state_retained"))
+            return _error('SAVE_FAILED', t("webui.services.resource_recovery.save_failed_state_retained"))
 
     @staticmethod
     def _validate_body(action: str, body: Any) -> None:
@@ -153,7 +153,7 @@ class RecoveryService:
         if action == 'request':
             uid = body.get('actor_uid', viewer.uid)
             if not viewer.is_gm and uid != viewer.uid:
-                raise RecoveryError('NOT_SOURCE_OWNER', t("resource_recovery.request_own_character_only"))
+                raise RecoveryError('NOT_SOURCE_OWNER', t("webui.services.resource_recovery.request_own_character_only"))
             uid = self._require_actor(instance, uid)
             kind = body.get('kind')
             if not isinstance(kind, str) or kind not in {'overnight', 'therapy'}:
@@ -217,7 +217,7 @@ class RecoveryService:
         if source is None or source['run_id'] != instance.run_id:
             raise ValueError('Recovery source is missing or belongs to another run')
         if not viewer.is_gm and source['actor_uid'] != viewer.uid:
-            raise RecoveryError('NOT_SOURCE_OWNER', t("resource_recovery.claim_own_recovery_only"))
+            raise RecoveryError('NOT_SOURCE_OWNER', t("webui.services.resource_recovery.claim_own_recovery_only"))
         if action == 'reject':
             if source['status'] != 'pending':
                 raise ValueError('Only pending requests can be rejected')

@@ -14,19 +14,19 @@ from src.localization.messages import t
 async def _builder_body(request: web.Request) -> dict | web.Response:
     if request.content_length and request.content_length > MAX_BUILDER_DRAFT_BYTES:
         return web.json_response(
-            {"ok": False, "code": "REQUEST_TOO_LARGE", "error": t("routes_rules.draft_too_large")},
+            {"ok": False, "code": "REQUEST_TOO_LARGE", "error": t("webui.routes.rules.draft_too_large")},
             status=413,
         )
     try:
         body = await request.json()
     except (ValueError, json.JSONDecodeError):
         return web.json_response(
-            {"ok": False, "code": "INVALID_JSON", "error": t("routes_rules.body_must_be_json_object")},
+            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.rules.body_must_be_json_object")},
             status=400,
         )
     if not isinstance(body, dict):
         return web.json_response(
-            {"ok": False, "code": "INVALID_DRAFT", "error": t("routes_rules.draft_not_object")},
+            {"ok": False, "code": "INVALID_DRAFT", "error": t("webui.routes.rules.draft_not_object")},
             status=400,
         )
     return body

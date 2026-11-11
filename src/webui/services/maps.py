@@ -152,7 +152,7 @@ async def update_map_background(
         )
         definition = select_plugin_map(assets.get("maps", []), normalized.get("map_id", ""))
         if not definition or not public_map_definition(definition, assets).get("background"):
-            return {"ok": False, "error": t("maps.content_pack_background_unavailable")}
+            return {"ok": False, "error": t("webui.services.maps.content_pack_background_unavailable")}
     instance.set_map_background(normalized)
     await dependencies.save_instance(instance)
     return {

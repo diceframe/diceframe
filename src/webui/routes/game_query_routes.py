@@ -121,7 +121,7 @@ async def api_log(request: web.Request) -> web.Response:
         per_page = max(1, min(200, int(request.query.get("per_page", "50"))))
     except (TypeError, ValueError):
         return web.json_response(
-            {"ok": False, "error": t("routes_game_query_routes.paging_must_be_integer")}, status=400
+            {"ok": False, "error": t("webui.routes.game_query_routes.paging_must_be_integer")}, status=400
         )
     api = _get_api(request)
     game_key = request.match_info["game_key"]

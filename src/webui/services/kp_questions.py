@@ -55,40 +55,40 @@ async def ask(
         return _result({
             "ok": False,
             "code": "GAME_NOT_FOUND",
-            "error": t("kp_questions.game_missing_refresh"),
+            "error": t("webui.services.kp_questions.game_missing_refresh"),
         }, 404)
     if actor_uid not in instance.players:
         return _result({
             "ok": False,
             "code": "PLAYER_NOT_IN_GAME",
-            "error": t("kp_questions.claim_character_first"),
+            "error": t("webui.services.kp_questions.claim_character_first"),
         }, 403)
     question = str(question or "").strip()
     if not question:
         return _result({
             "ok": False,
             "code": "EMPTY_QUESTION",
-            "error": t("kp_questions.question_required"),
+            "error": t("webui.services.kp_questions.question_required"),
         }, 400)
     if visibility not in {"private", "party"}:
         return _result({
             "ok": False,
             "code": "INVALID_VISIBILITY",
-            "error": t("kp_questions.visibility_invalid"),
+            "error": t("webui.services.kp_questions.visibility_invalid"),
         }, 400)
     answerer = dependencies.answer_question
     if answerer is None:
         return _result({
             "ok": False,
             "code": "LLM_NOT_CONFIGURED",
-            "error": t("kp_questions.kp_model_unconfigured"),
+            "error": t("webui.services.kp_questions.kp_model_unconfigured"),
         }, 503)
 
     if instance._process_lock.locked():
         return _result({
             "ok": False,
             "code": "GAME_PROCESSING",
-            "error": t("kp_questions.game_advancing"),
+            "error": t("webui.services.kp_questions.game_advancing"),
         }, 409)
 
     # Capture one coherent, immutable view while holding the per-game lock.
@@ -105,7 +105,7 @@ async def ask(
         return _result({
             "ok": False,
             "code": "LLM_REQUEST_FAILED",
-            "error": t("kp_questions.kp_unavailable"),
+            "error": t("webui.services.kp_questions.kp_unavailable"),
         }, 502)
 
     answer = str((generated or {}).get("answer") or "").strip()
@@ -113,13 +113,13 @@ async def ask(
         return _result({
             "ok": False,
             "code": "EMPTY_ANSWER",
-            "error": t("kp_questions.kp_empty_answer"),
+            "error": t("webui.services.kp_questions.kp_empty_answer"),
         }, 502)
     if dependencies.registry.get(parsed_key) is not instance:
         return _result({
             "ok": False,
             "code": "GAME_CHANGED",
-            "error": t("kp_questions.game_replaced_during_question"),
+            "error": t("webui.services.kp_questions.game_replaced_during_question"),
         }, 409)
     exchange: dict[str, Any] | None = None
     if visibility == "party":
@@ -142,7 +142,7 @@ async def ask(
                     return _result({
                         "ok": False,
                         "code": "RUN_READ_ONLY",
-                        "error": t("kp_questions.run_read_only"),
+                        "error": t("webui.services.kp_questions.run_read_only"),
                     }, 409)
                 instance.append_table_talk(exchange)
                 try:
@@ -155,7 +155,7 @@ async def ask(
             return _result({
                 "ok": False,
                 "code": "TABLE_TALK_SAVE_FAILED",
-                "error": t("kp_questions.public_answer_save_failed"),
+                "error": t("webui.services.kp_questions.public_answer_save_failed"),
             }, 500)
 
     return _result({

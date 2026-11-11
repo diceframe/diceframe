@@ -33,7 +33,7 @@ async def _read_save_upload(
         if part.name not in {"file", "save"}:
             continue
         if found:
-            raise ValueError(t("routes_game_package_routes.single_save_file_only"))
+            raise ValueError(t("webui.routes.game_package_routes.single_save_file_only"))
         found = True
         while True:
             chunk = await part.read_chunk()
@@ -83,7 +83,7 @@ async def api_import_game(request: web.Request) -> web.Response:
     api = _get_api(request)
     if request.content_type != "multipart/form-data":
         return web.json_response(
-            {"ok": False, "error": t("routes_game_package_routes.multipart_required")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.multipart_required")}, status=400
         )
     if request.content_length and request.content_length > MAX_SAVE_PACKAGE_BYTES:
         return web.json_response(
@@ -104,7 +104,7 @@ async def api_import_game(request: web.Request) -> web.Response:
     except Exception as exc:
         logger.exception("导入存档失败")
         return web.json_response(
-            {"ok": False, "error": t("routes_game_package_routes.import_failed", exc=exc)}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.import_failed", exc=exc)}, status=400
         )
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
@@ -123,21 +123,21 @@ async def api_batch_delete_games(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         return web.json_response(
-            {"ok": False, "error": t("routes_game_package_routes.body_not_json")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.body_not_json")}, status=400
         )
     keys = body.get("game_keys")
     if not isinstance(keys, list) or not keys:
         return web.json_response(
-            {"ok": False, "error": t("routes_game_package_routes.game_keys_required")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.game_keys_required")}, status=400
         )
     if len(keys) > 100:
-        return web.json_response({"ok": False, "error": t("routes_game_package_routes.batch_limit")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.game_package_routes.batch_limit")}, status=400)
 
     deleted: list[str] = []
     failed: list[dict] = []
     for raw in keys:
         if not isinstance(raw, str) or not raw:
-            failed.append({"key": str(raw), "error": t("routes_game_package_routes.key_type_invalid")})
+            failed.append({"key": str(raw), "error": t("webui.routes.game_package_routes.key_type_invalid")})
             continue
         access = api.saved_game_access(raw)
         if not access.get("exists"):
@@ -148,7 +148,7 @@ async def api_batch_delete_games(request: web.Request) -> web.Response:
             failed.append({"key": raw, "error": "存档缺少 GM 身份，拒绝删除"})
             continue
         if not _can_delete_save(request, session_uid, gm_uid):
-            failed.append({"key": raw, "error": t("routes_game_package_routes.delete_gm_only")})
+            failed.append({"key": raw, "error": t("webui.routes.game_package_routes.delete_gm_only")})
             continue
         result = api.delete_game(raw)
         if result.get("ok"):

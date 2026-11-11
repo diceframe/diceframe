@@ -20,7 +20,7 @@ async def api_scene_image_upload(request: web.Request) -> web.Response:
 async def api_scene_image_file(request: web.Request) -> web.StreamResponse:
     path = _get_api(request).scene_image_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": t("routes_scene_images.cover_missing")}, status=404)
+        return web.json_response({"error": t("webui.routes.scene_images.cover_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 

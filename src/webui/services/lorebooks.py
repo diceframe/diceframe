@@ -466,7 +466,7 @@ def commit_lorebook_import(
         return {"ok": False, "code": "IMPORT_UNRESOLVED_REFERENCES", "error": "Import has unresolved content references"}
     if plan_digest:
         if str(current.get("plan_digest") or "") != str(plan_digest):
-            return {"ok": False, "code": "IMPORT_PLAN_STALE", "error": t("lorebooks.import_preview_expired")}
+            return {"ok": False, "code": "IMPORT_PLAN_STALE", "error": t("webui.services.lorebooks.import_preview_expired")}
     operations = (current.get("commit_plan") or {}).get("operations") or []
     matched = [row for row in operations if isinstance(row, dict) and row.get("existing_ref")]
     if matched and duplicate_policy == "skip":

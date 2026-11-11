@@ -149,7 +149,7 @@ def adopt_requires_gm_failure() -> dict[str, Any]:
     return {
         "ok": False,
         "error_code": ADOPT_REQUIRES_GM,
-        "error": t("webui_character_sheet_authority.adopt_requires_gm"),
+        "error": t("webui.character_sheet_authority.adopt_requires_gm"),
     }
 
 
@@ -157,5 +157,5 @@ def delete_requires_gm_failure() -> dict[str, Any]:
     return {
         "ok": False,
         "error_code": DELETE_REQUIRES_GM,
-        "error": t("webui_character_sheet_authority.delete_requires_gm"),
+        "error": t("webui.character_sheet_authority.delete_requires_gm"),
     }

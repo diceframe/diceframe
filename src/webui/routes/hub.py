@@ -45,13 +45,13 @@ async def api_hub_preferences(request: web.Request) -> web.Response:
 async def api_hub_preferences_update(request: web.Request) -> web.Response:
     data = await request.json()
     if not isinstance(data.get("telemetry_enabled"), bool):
-        return web.json_response({"ok": False, "error": t("routes_hub.telemetry_enabled_not_boolean")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.hub.telemetry_enabled_not_boolean")}, status=400)
     legal_acceptance = data.get("legal_acceptance")
     if legal_acceptance is not None and not isinstance(legal_acceptance, dict):
-        return web.json_response({"ok": False, "error": t("routes_hub.legal_acceptance_not_object")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.hub.legal_acceptance_not_object")}, status=400)
     language = data.get("lang", "zh-CN")
     if not isinstance(language, str):
-        return web.json_response({"ok": False, "error": t("routes_hub.lang_not_string")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.hub.lang_not_string")}, status=400)
     try:
         result = await _get_api(request).update_hub_preferences(
             data["telemetry_enabled"],
@@ -77,13 +77,13 @@ async def api_hub_rendezvous_room_create(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except (ValueError, TypeError):
-        return web.json_response({"ok": False, "error": t("routes_hub.body_not_json")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.hub.body_not_json")}, status=400)
     peer_count = body.get("peer_count") if isinstance(body, dict) else None
     # 服务端兜底上限：与游戏侧 max_players 默认值对齐，防止信令房间
     # 批准了游戏侧必然拒绝的人数（第 7+ 人信令成功但进游戏必失败）。
     if isinstance(peer_count, bool) or not isinstance(peer_count, int) or not 2 <= peer_count <= 6:
         return web.json_response(
-            {"ok": False, "error": t("routes_hub.peer_count_range")},
+            {"ok": False, "error": t("webui.routes.hub.peer_count_range")},
             status=400,
         )
     try:
@@ -94,7 +94,7 @@ async def api_hub_rendezvous_room_create(request: web.Request) -> web.Response:
         return web.json_response(
             {
                 "ok": False,
-                "error": t("routes_hub.hub_unreachable"),
+                "error": t("webui.routes.hub.hub_unreachable"),
                 "error_code": "hub_connection_unavailable",
             },
             status=502,
@@ -141,7 +141,7 @@ async def api_hub_plugin_readme(request: web.Request) -> web.Response:
         return web.Response(status=499)
     except asyncio.TimeoutError:
         return web.json_response(
-            {"ok": False, "html": "", "markdown": "", "error": t("routes_hub.readme_timeout")},
+            {"ok": False, "html": "", "markdown": "", "error": t("webui.routes.hub.readme_timeout")},
             status=504,
         )
     except Exception as exc:
@@ -188,9 +188,9 @@ async def api_hub_plugin_rating(request: web.Request) -> web.Response:
             stars = data.get("stars")
             tags = data.get("tags", [])
             if not isinstance(stars, int) or isinstance(stars, bool) or not 1 <= stars <= 5:
-                return web.json_response({"ok": False, "error": t("routes_hub.stars_range")}, status=400)
+                return web.json_response({"ok": False, "error": t("webui.routes.hub.stars_range")}, status=400)
             if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
-                return web.json_response({"ok": False, "error": t("routes_hub.tags_not_string_array")}, status=400)
+                return web.json_response({"ok": False, "error": t("webui.routes.hub.tags_not_string_array")}, status=400)
             result = await _get_api(request).set_hub_plugin_rating(
                 request.match_info["plugin_id"], stars, tags
             )

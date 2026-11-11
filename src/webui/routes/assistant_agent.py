@@ -75,7 +75,7 @@ async def api_agent_run(request):
         await emit("error", {"code": getattr(exc, "code", "AGENT_REJECTED"), "error": str(exc)})
     except Exception:
         logger.exception("DF Agent run failed")
-        await emit("error", {"code": "AGENT_FAILED", "error": t("routes_assistant_agent.agent_run_failed") if language.startswith("zh") else "DF Agent failed. Please try again."})
+        await emit("error", {"code": "AGENT_FAILED", "error": t("webui.routes.assistant_agent.agent_run_failed") if language.startswith("zh") else "DF Agent failed. Please try again."})
     return response
 
 

@@ -54,7 +54,7 @@ async def api_security_transport_prepare(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": t("routes_security.body_must_be_json_object")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.security.body_must_be_json_object")}, status=400)
     result = await _get_service(request).prepare(
         str(body.get("mode") or ""), body.get("acme")
     )
@@ -73,7 +73,7 @@ async def api_security_transport_activate(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": t("routes_security.body_must_be_json_object")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.security.body_must_be_json_object")}, status=400)
     result = _get_service(request).activate(str(body.get("token") or ""))
     if not result.get("ok"):
         return web.json_response(result, status=400)

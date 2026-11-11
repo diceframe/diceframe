@@ -30,46 +30,46 @@ def validate_map_background_selection(
     if not selection:
         return {"kind": "auto"}
     if not isinstance(selection, dict):
-        raise ValueError(t("map_backgrounds.selection_not_object"))
+        raise ValueError(t("webui.services.map_backgrounds.selection_not_object"))
     kind = str(selection.get("kind") or "").strip()
     if kind in {"auto", "none"}:
         return {"kind": kind}
     if kind == "builtin":
         asset_id = str(selection.get("id") or "").strip()
         if builtin_map_preset_by_asset(asset_id) is None:
-            raise ValueError(t("map_backgrounds.unknown_builtin"))
+            raise ValueError(t("webui.services.map_backgrounds.unknown_builtin"))
         return {"kind": "builtin", "id": asset_id}
     if kind == "upload":
         asset_id = str(selection.get("asset_id") or "").strip()
         if map_background_file(backgrounds_dir, asset_id) is None:
-            raise ValueError(t("map_backgrounds.uploaded_missing"))
+            raise ValueError(t("webui.services.map_backgrounds.uploaded_missing"))
         return {"kind": "upload", "asset_id": asset_id}
     if kind == "generated":
         asset_id = str(selection.get("asset_id") or "").strip()
         if generated_image_file(asset_id) is None:
-            raise ValueError(t("map_backgrounds.generated_missing"))
+            raise ValueError(t("webui.services.map_backgrounds.generated_missing"))
         return {"kind": "generated", "asset_id": asset_id}
     if kind == "plugin":
         map_id = str(selection.get("map_id") or "").strip()
         if not map_id or len(map_id) > 256 or not map_id.startswith("plugin:"):
-            raise ValueError(t("map_backgrounds.content_pack_reference_invalid"))
+            raise ValueError(t("webui.services.map_backgrounds.content_pack_reference_invalid"))
         return {"kind": "plugin", "map_id": map_id}
-    raise ValueError(t("map_backgrounds.unsupported_selection"))
+    raise ValueError(t("webui.services.map_backgrounds.unsupported_selection"))
 
 
 def save_map_background_upload(
     backgrounds_dir: Path, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": t("map_backgrounds.file_missing")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_missing")}
     if len(file_data) > (MAX_MAP_BACKGROUND_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": t("map_backgrounds.file_too_large")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": t("map_backgrounds.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_data_invalid")}
     if not raw or len(raw) > MAX_MAP_BACKGROUND_BYTES:
-        return {"ok": False, "error": t("map_backgrounds.file_too_large")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
     try:
         payload = _normalized_map_background(raw)
     except ValueError as exc:
@@ -117,12 +117,12 @@ def _normalized_map_background(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                raise ValueError(t("map_backgrounds.unsupported_format"))
+                raise ValueError(t("webui.services.map_backgrounds.unsupported_format"))
             width, height = source.size
             if width < 320 or height < 180:
-                raise ValueError(t("map_backgrounds.too_small"))
+                raise ValueError(t("webui.services.map_backgrounds.too_small"))
             if width > 8192 or height > 8192 or width * height > MAX_MAP_BACKGROUND_PIXELS:
-                raise ValueError(t("map_backgrounds.dimensions_too_large"))
+                raise ValueError(t("webui.services.map_backgrounds.dimensions_too_large"))
             image = ImageOps.exif_transpose(source).convert("RGB")
             if max(image.size) > MAX_MAP_BACKGROUND_EDGE:
                 image.thumbnail(
@@ -135,7 +135,7 @@ def _normalized_map_background(raw: bytes) -> bytes:
     except ValueError:
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError(t("map_backgrounds.unreadable")) from exc
+        raise ValueError(t("webui.services.map_backgrounds.unreadable")) from exc
 
 
 class MapBackgroundService:

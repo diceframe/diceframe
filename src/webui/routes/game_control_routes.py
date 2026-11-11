@@ -28,12 +28,12 @@ async def api_claim_gm_session(request: web.Request) -> web.Response:
     inst = api.get_game_instance(request.match_info["game_key"])
     if not inst or not inst.gm_uid:
         return web.json_response(
-            {"ok": False, "error": t("routes_game_control_routes.no_recoverable_host")}, status=404
+            {"ok": False, "error": t("webui.routes.game_control_routes.no_recoverable_host")}, status=404
         )
     token = request.get("session_token", "")
     manager = request.app.get("session_manager")
     if not token or not manager:
-        return web.json_response({"ok": False, "error": t("routes_game_control_routes.browser_session_unavailable")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.game_control_routes.browser_session_unavailable")}, status=400)
     manager.rebind(token, inst.gm_uid)
     return web.json_response({"ok": True, "user_id": inst.gm_uid})
 
@@ -150,7 +150,7 @@ async def api_set_gm_style(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict):
         return web.json_response(
-            {"ok": False, "error": t("routes_game_control_routes.gm_style_invalid")}, status=400,
+            {"ok": False, "error": t("webui.routes.game_control_routes.gm_style_invalid")}, status=400,
         )
     result = await api.set_gm_style(gk, body.get("gm_style"))
     return web.json_response(result, status=200 if result.get("ok") else 400)

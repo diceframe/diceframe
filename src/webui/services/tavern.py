@@ -36,7 +36,7 @@ async def import_tavern_card(dependencies: TavernImportDependencies, file_path: 
 
     if file_data:
         if len(file_data) > 40_000_000:
-            return {"ok": False, "error": t("tavern.file_too_large")}
+            return {"ok": False, "error": t("webui.services.tavern.file_too_large")}
         raw_bytes = base64.b64decode(file_data)
         safe_name = Path(file_name).name or "card.png"
         tmp_path = Path(tempfile.gettempdir()) / f"trpg_import_{safe_name}"
@@ -47,9 +47,9 @@ async def import_tavern_card(dependencies: TavernImportDependencies, file_path: 
         except OSError:
             pass
     elif file_path:
-        return {"ok": False, "error": t("tavern.file_path_disabled")}
+        return {"ok": False, "error": t("webui.services.tavern.file_path_disabled")}
     else:
-        return {"ok": False, "error": t("tavern.file_missing")}
+        return {"ok": False, "error": t("webui.services.tavern.file_missing")}
 
     if "error" in card:
         return {"ok": False, "error": card["error"]}

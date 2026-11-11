@@ -14,18 +14,18 @@ _MAX_TOTAL_CHARS = 24_000
 
 def _validated_messages(body: object) -> tuple[list[dict[str, str]], str]:
     if not isinstance(body, dict):
-        raise ValueError(t("routes_assistant.body_must_be_json_object"))
+        raise ValueError(t("webui.routes.assistant.body_must_be_json_object"))
     raw_messages = body.get("messages")
     if not isinstance(raw_messages, list) or not 1 <= len(raw_messages) <= _MAX_MESSAGES:
-        raise ValueError(t("routes_assistant.messages_count"))
+        raise ValueError(t("webui.routes.assistant.messages_count"))
     messages: list[dict[str, str]] = []
     total = 0
     for item in raw_messages:
         if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
-            raise ValueError(t("routes_assistant.message_role_invalid"))
+            raise ValueError(t("webui.routes.assistant.message_role_invalid"))
         content = item.get("content")
         if not isinstance(content, str) or len(content) > _MAX_MESSAGE_CHARS:
-            raise ValueError(t("routes_assistant.message_content_invalid"))
+            raise ValueError(t("webui.routes.assistant.message_content_invalid"))
         # Older frontends could append an empty assistant placeholder to the
         # request. Ignore empty history entries so a stale browser cache does
         # not make the assistant unusable after the client-side fix ships.
@@ -34,9 +34,9 @@ def _validated_messages(body: object) -> tuple[list[dict[str, str]], str]:
         total += len(content)
         messages.append({"role": str(item["role"]), "content": content})
     if total > _MAX_TOTAL_CHARS:
-        raise ValueError(t("routes_assistant.history_too_long"))
+        raise ValueError(t("webui.routes.assistant.history_too_long"))
     if not messages or messages[-1]["role"] != "user":
-        raise ValueError(t("routes_assistant.last_message_must_be_user"))
+        raise ValueError(t("webui.routes.assistant.last_message_must_be_user"))
     norm_lang = normalize_language(body.get("language"))
     language = norm_lang if norm_lang in ("en", "de") else "zh-CN"
     return messages, language
@@ -44,7 +44,7 @@ def _validated_messages(body: object) -> tuple[list[dict[str, str]], str]:
 
 async def api_assistant_chat(request: web.Request) -> web.StreamResponse:
     if not request.get("owner_authenticated"):
-        return web.json_response({"error": t("routes_assistant.unauthorized")}, status=401)
+        return web.json_response({"error": t("webui.routes.assistant.unauthorized")}, status=401)
     try:
         body = await request.json()
         messages, language = _validated_messages(body)

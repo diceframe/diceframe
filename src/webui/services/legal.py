@@ -176,7 +176,7 @@ async def document(
             allow_cached=False,
         )
     if not text or hashlib.sha256(text.encode("utf-8")).hexdigest() != localized["sha256"]:
-        raise LegalContentUnavailable(t("legal.source_verification_failed"))
+        raise LegalContentUnavailable(t("webui.services.legal.source_verification_failed"))
     return {
         "ok": True,
         "document": document_name,
@@ -233,7 +233,7 @@ def record_acceptance(
     for name in _DOCUMENT_NAMES:
         supplied = acceptance.get(name) if isinstance(acceptance, dict) else None
         if not isinstance(supplied, dict):
-            raise ValueError(t("legal.version_updated_reaccept"))
+            raise ValueError(t("webui.services.legal.version_updated_reaccept"))
         language = _language(str(supplied.get("language") or ""))
         expected = documents[name]
         localized = expected["languages"][language]
@@ -242,7 +242,7 @@ def record_acceptance(
             or supplied.get("version") != expected["version"]
             or supplied.get("sha256") != localized["sha256"]
         ):
-            raise ValueError(t("legal.version_updated_reaccept"))
+            raise ValueError(t("webui.services.legal.version_updated_reaccept"))
         state[f"legal_{name}_accepted_updated_at"] = expected["updated_at"]
         state[f"legal_{name}_accepted_version"] = expected["version"]
         state[f"legal_{name}_accepted_hash"] = localized["sha256"]

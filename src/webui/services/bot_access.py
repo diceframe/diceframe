@@ -41,10 +41,10 @@ async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, b
         return {"ok": False, "error": "游戏不存在"}
     expected = str(room_access.bot_bind_token(inst) or "")
     if not expected or not secrets.compare_digest(expected, str(bind_token or "")):
-        return {"ok": False, "error": t("bot_access.bind_token_invalid")}
+        return {"ok": False, "error": t("webui.services.bot_access.bind_token_invalid")}
     surface = adventure_runtime_state.effective_bot_surface(inst)
     if surface == gameplay_contracts.BOT_SURFACE_NONE:
-        return {"ok": False, "error": t("bot_access.play_mode_no_group_binding")}
+        return {"ok": False, "error": t("webui.services.bot_access.play_mode_no_group_binding")}
     result = {
         "ok": True,
         "game_key": game_key,

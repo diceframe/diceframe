@@ -103,7 +103,7 @@ class ConfigController:
         body = await request.json()
         if not isinstance(body, dict):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.body_not_object")},
+                {"ok": False, "error": t("webui.config_controller.body_not_object")},
                 status=400,
             )
         reload_lock = request.app.get("_config_reload_lock")
@@ -143,7 +143,7 @@ class ConfigController:
             try:
                 payload = json.loads(response.body.decode("utf-8"))
             except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise RuntimeError(t("webui_config_controller.config_update_invalid_response")) from exc
+                raise RuntimeError(t("webui.config_controller.config_update_invalid_response")) from exc
             if response.status >= 400 or not payload.get("ok"):
                 raise ValueError(str(payload.get("error") or "配置更新失败"))
             return payload
@@ -160,7 +160,7 @@ class ConfigController:
             try:
                 payload = json.loads(response.body.decode("utf-8"))
             except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise RuntimeError(t("webui_config_controller.config_update_invalid_response")) from exc
+                raise RuntimeError(t("webui.config_controller.config_update_invalid_response")) from exc
             if response.status >= 400 or not payload.get("ok"):
                 raise ValueError(str(payload.get("error") or "配置更新失败"))
             return payload
@@ -186,7 +186,7 @@ class ConfigController:
                 {
                     "ok": False,
                     "error": (
-                        t("webui_config_controller.cors_origins_managed_by_env")
+                        t("webui.config_controller.cors_origins_managed_by_env")
                     ),
                 },
                 status=409,
@@ -246,7 +246,7 @@ class ConfigController:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": t("webui_config_controller.runtime_reload_failed", exc=exc),
+                    "error": t("webui.config_controller.runtime_reload_failed", exc=exc),
                 },
                 status=500,
             )
@@ -268,7 +268,7 @@ class ConfigController:
             )
             self.logger.exception("保存候选配置失败")
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.config_save_failed", exc=exc)},
+                {"ok": False, "error": t("webui.config_controller.config_save_failed", exc=exc)},
                 status=500,
             )
 
@@ -394,7 +394,7 @@ class ConfigController:
         action = str(body.get("action") or "reveal").strip().lower()
         if action not in {"reveal", "regenerate"}:
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.bot_token_action_unsupported")},
+                {"ok": False, "error": t("webui.config_controller.bot_token_action_unsupported")},
                 status=400,
             )
         regenerated = action == "regenerate"
@@ -404,7 +404,7 @@ class ConfigController:
                     {
                         "ok": False,
                         "error": (
-                            t("webui_config_controller.bot_token_managed_by_env")
+                            t("webui.config_controller.bot_token_managed_by_env")
                         ),
                     },
                     status=409,
@@ -458,13 +458,13 @@ class ConfigController:
             api_format = normalize_api_format(body.get("api_format"))
         if not self.is_safe_external_url(base_url):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.base_url_param_invalid")},
+                {"ok": False, "error": t("webui.config_controller.base_url_param_invalid")},
                 status=400,
             )
         proxy_url = self.proxy_from_test_body(body)
         if proxy_url and not is_supported_proxy_url(proxy_url):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.proxy_scheme_unsupported")},
+                {"ok": False, "error": t("webui.config_controller.proxy_scheme_unsupported")},
                 status=400,
             )
         result = await _get_api(request).test_connection(
@@ -494,7 +494,7 @@ class ConfigController:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": t("webui_config_controller.base_url_param_invalid"),
+                    "error": t("webui.config_controller.base_url_param_invalid"),
                     "models": [],
                 },
                 status=400,
@@ -504,7 +504,7 @@ class ConfigController:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": t("webui_config_controller.proxy_scheme_unsupported"),
+                    "error": t("webui.config_controller.proxy_scheme_unsupported"),
                     "models": [],
                 },
                 status=400,
@@ -543,12 +543,12 @@ class ConfigController:
         model = clean_text_value(body.get("model")) or "nomic-embed-text"
         if not self.is_safe_external_url(base_url):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.base_url_invalid")}
+                {"ok": False, "error": t("webui.config_controller.base_url_invalid")}
             )
         proxy_url = self.proxy_from_test_body(body)
         if proxy_url and not is_supported_proxy_url(proxy_url):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.proxy_scheme_unsupported")},
+                {"ok": False, "error": t("webui.config_controller.proxy_scheme_unsupported")},
                 status=400,
             )
         client = EmbeddingClient(
@@ -573,7 +573,7 @@ class ConfigController:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": t("webui_config_controller.embedding_api_unexpected"),
+                    "error": t("webui.config_controller.embedding_api_unexpected"),
                     "elapsed": elapsed,
                 }
             )
@@ -590,19 +590,19 @@ class ConfigController:
         proxy = effective_proxy_url(enabled, proxy_url)
         if enabled and not proxy:
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.proxy_enabled_without_address")},
+                {"ok": False, "error": t("webui.config_controller.proxy_enabled_without_address")},
                 status=400,
             )
         if proxy and not is_supported_proxy_url(proxy):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.proxy_scheme_unsupported")},
+                {"ok": False, "error": t("webui.config_controller.proxy_scheme_unsupported")},
                 status=400,
             )
         provider = resolve_provider(state, state.get("llm_provider_ref", ""))
         url = str(provider["base_url"] if provider else "").strip().rstrip("/")
         if not self.is_safe_external_url(url):
             return web.json_response(
-                {"ok": False, "error": t("webui_config_controller.model_endpoint_required")},
+                {"ok": False, "error": t("webui.config_controller.model_endpoint_required")},
                 status=400,
             )
         start = time.time()
@@ -639,7 +639,7 @@ class ConfigController:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": t("webui_config_controller.connection_error_see_logs"),
+                    "error": t("webui.config_controller.connection_error_see_logs"),
                     "elapsed": round(time.time() - start, 2),
                     "proxy": mask_proxy_url(proxy),
                 }

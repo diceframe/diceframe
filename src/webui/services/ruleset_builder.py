@@ -44,14 +44,14 @@ def _context(
         return None, None, draft, {
             "ok": False,
             "code": "RULE_NOT_FOUND",
-            "error": t("ruleset_builder.rule_missing", rule_id=rule_id),
+            "error": t("webui.services.ruleset_builder.rule_missing", rule_id=rule_id),
         }
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     if runtime.capabilities.character_builder != "professional":
         return rule, runtime, draft, {
             "ok": False,
             "code": "RULESET_BUILDER_UNAVAILABLE",
-            "error": t("ruleset_builder.uses_generic_creation"),
+            "error": t("webui.services.ruleset_builder.uses_generic_creation"),
         }
     return rule, runtime, draft, None
 
@@ -63,7 +63,7 @@ def experience(
 ) -> dict[str, Any]:
     rule = dependencies.load_rule(rule_id, language)
     if rule is None:
-        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("ruleset_builder.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_builder.rule_missing", rule_id=rule_id)}
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     return {
         "ok": True,

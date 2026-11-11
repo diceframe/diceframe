@@ -31,7 +31,7 @@ async def api_update_download(request: web.Request) -> web.Response:
     kind = (request.query.get("kind") or "source").strip().lower()
     if kind not in {"source", "portable", "docker"}:
         return web.json_response(
-            {"ok": False, "error": t("routes_updater.kind_invalid")},
+            {"ok": False, "error": t("webui.routes.updater.kind_invalid")},
             status=400,
         )
     result = await request.app["updater"].download_update(kind)
@@ -74,7 +74,7 @@ async def api_application_restart(request: web.Request) -> web.Response:
     control = request.app["runtime_control"]
     if control["restart_requested"]:
         return web.json_response(
-            {"ok": False, "error": t("routes_updater.already_restarting")},
+            {"ok": False, "error": t("webui.routes.updater.already_restarting")},
             status=409,
         )
     control["restart_requested"] = True

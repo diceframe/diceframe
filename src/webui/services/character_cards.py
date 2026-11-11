@@ -117,17 +117,17 @@ def authoring_recovery_snapshot(dependencies: CharacterCardDependencies, identit
     # a recovery snapshot must refuse ambiguous source state rather than
     # journal a write that could silently discard an unrelated duplicate.
     if len(dedupe_cards(cards)) != len(cards):
-        raise ValueError(translate("character_cards.duplicate_cards_unsafe_recovery"))
+        raise ValueError(translate("webui.services.character_cards.duplicate_cards_unsafe_recovery"))
     card = next((row for row in cards if row.get("id") == card_id), None)
     if not isinstance(card, dict):
-        raise ValueError(translate("character_cards.card_missing"))
+        raise ValueError(translate("webui.services.character_cards.card_missing"))
     if dependencies.is_ruleset_card is not None and dependencies.is_ruleset_card(card):
-        raise ValueError(translate("character_cards.professional_card_no_narrative_recovery"))
+        raise ValueError(translate("webui.services.character_cards.professional_card_no_narrative_recovery"))
     try:
         stat = dependencies.cards_path.stat()
         content_digest = hashlib.sha256(dependencies.cards_path.read_bytes()).hexdigest()
     except OSError as exc:
-        raise ValueError(translate("character_cards.library_read_failed")) from exc
+        raise ValueError(translate("webui.services.character_cards.library_read_failed")) from exc
     fields = {key: copy.deepcopy(card.get(key, "")) for key in ("character_name", "background", "race", "class")}
     return {
         "target_name": str(fields["character_name"]),
@@ -426,7 +426,7 @@ def update_character_card(
             return {
                 "ok": False,
                 "error_code": "RULESET_CHARACTER_OPERATION_REQUIRED",
-                "error": translate("character_cards.professional_card_no_legacy_edit"),
+                "error": translate("webui.services.character_cards.professional_card_no_legacy_edit"),
             }
         updated = {**old}
         for key in (
@@ -451,7 +451,7 @@ def update_character_card(
         cards[idx] = updated
         _write_cards(dependencies, cards)
         return {"ok": True, "card": updated}
-    return {"ok": False, "error": translate("character_cards.card_missing_with_id", card_id=card_id)}
+    return {"ok": False, "error": translate("webui.services.character_cards.card_missing_with_id", card_id=card_id)}
 
 
 @_locked
@@ -462,7 +462,7 @@ def delete_character_card(
     cards = dedupe_cards(_read_cards(dependencies))
     kept = [c for c in cards if c.get("id") != card_id]
     if len(kept) == len(cards):
-        return {"ok": False, "error": translate("character_cards.card_missing_with_id", card_id=card_id)}
+        return {"ok": False, "error": translate("webui.services.character_cards.card_missing_with_id", card_id=card_id)}
     _write_cards(dependencies, kept)
     return {"ok": True, "card_id": card_id}
 
@@ -597,12 +597,12 @@ def _import_tavern_as_npc(
     名字+tags 做 keywords 触发出场；内嵌 character_book 拆成同世界 other 条目。
     """
     if not world_id:
-        return {"ok": False, "error": translate("character_cards.npc_import_needs_world")}
+        return {"ok": False, "error": translate("webui.services.character_cards.npc_import_needs_world")}
     lorebook = dependencies.lorebook
     if not lorebook:
-        return {"ok": False, "error": translate("character_cards.lorebook_library_disabled")}
+        return {"ok": False, "error": translate("webui.services.character_cards.lorebook_library_disabled")}
     if not lorebook.get_world(world_id):
-        return {"ok": False, "error": translate("character_cards.target_world_missing")}
+        return {"ok": False, "error": translate("webui.services.character_cards.target_world_missing")}
     name = str(tavern.get("name") or "未命名").strip()
     safe_name = name.replace(" ", "_") or "npc"
     entry_id = f"{world_id}_tavern_{safe_name}"
@@ -689,7 +689,7 @@ async def import_character_card(
     character_uid: str = "",
 ) -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": translate("character_cards.file_data_missing")}
+        return {"ok": False, "error": translate("webui.services.character_cards.file_data_missing")}
     raw_bytes = base64.b64decode(file_data)
     safe_name = Path(file_name).name or "card.json"
 
@@ -700,7 +700,7 @@ async def import_character_card(
         as_json = None
     if as_json is not None and _is_diceframe_card(as_json):
         if target == "npc":
-            return {"ok": False, "error": translate("character_cards.diceframe_card_not_npc")}
+            return {"ok": False, "error": translate("webui.services.character_cards.diceframe_card_not_npc")}
         card = dict(as_json)
         card.setdefault("character_name", card.get("character_name") or card.get("name") or "未命名")
         saved = save_character_card(dependencies, card)
@@ -785,11 +785,11 @@ def export_character_cards(
     """
     card_ids = [str(c).strip() for c in card_ids if str(c).strip()] if isinstance(card_ids, list) else []
     if not card_ids:
-        return {"ok": False, "error": translate("character_cards.select_cards_to_export")}
+        return {"ok": False, "error": translate("webui.services.character_cards.select_cards_to_export")}
     cards = _read_cards(dependencies)
     selected = [c for c in cards if str(c.get("id") or "") in set(card_ids)]
     if not selected:
-        return {"ok": False, "error": translate("character_cards.selected_cards_missing")}
+        return {"ok": False, "error": translate("webui.services.character_cards.selected_cards_missing")}
 
     # 仅去掉运行期插件来源标记；source（人类可读来源）和 raw_sillytavern（酒馆原始数据）
     # 是业务字段，保留以保证导出→导入无损往返（否则酒馆卡丢 raw_sillytavern 后无法还原）。

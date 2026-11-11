@@ -39,7 +39,7 @@ SELF_GATED = frozenset({
 
 def read_only_response(instance) -> web.Response:
     return web.json_response({'ok': False, 'error_code': 'RUN_ENDED' if instance.state == GameState.ENDED else 'RUN_READ_ONLY',
-                              'error': t("webui_run_write_admission.run_read_only")}, status=409)
+                              'error': t("webui.run_write_admission.run_read_only")}, status=409)
 
 
 @web.middleware

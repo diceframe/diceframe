@@ -20,7 +20,7 @@ async def api_avatar_upload(request: web.Request) -> web.Response:
 async def api_avatar_file(request: web.Request) -> web.StreamResponse:
     path = _get_api(request).avatar_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": t("routes_avatars.avatar_missing")}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.avatar_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -51,7 +51,7 @@ async def api_game_avatar_file(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "游戏不存在"}, status=404)
     path = api.avatar_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": t("routes_avatars.avatar_missing")}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.avatar_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -70,7 +70,7 @@ async def api_standing_portrait_upload(request: web.Request) -> web.Response:
 async def api_standing_portrait_file(request: web.Request) -> web.StreamResponse:
     path = _get_api(request).standing_portrait_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": t("routes_avatars.standing_portrait_missing")}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.standing_portrait_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 

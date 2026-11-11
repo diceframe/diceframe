@@ -182,7 +182,7 @@ def economy_decision_pending_payload(
     return {
         "ok": False,
         "error_code": "ECONOMY_DECISION_PENDING",
-        "error": t("turns.economy_proposal_pending"),
+        "error": t("webui.services.turns.economy_proposal_pending"),
         "pending_count": (
             len(unresolved)
             or len(pending_effect_groups(instance))
@@ -208,7 +208,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
         return _result({
             "ok": False,
             "error_code": code,
-            "error": t("turns.authoritative_combat_active"),
+            "error": t("webui.services.turns.authoritative_combat_active"),
         }, 409)
     if code == ACTOR_DECEASED:
         return _result({"error": "角色已死亡，无法提交行动", "error_code": code}, 403)
@@ -216,7 +216,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
         return _result(economy_decision_pending_payload(instance, actor_uid), 409)
     if code == RUN_CHANGED:
         return _result({
-            "ok": False, "error_code": "STALE_RUN", "error": t("turns.game_restarted_refresh_and_retry"),
+            "ok": False, "error_code": "STALE_RUN", "error": t("webui.services.turns.game_restarted_refresh_and_retry"),
         }, 409)
     if code == ROUND_PROCESSING:
         return _result({
@@ -225,7 +225,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
     if code == ADVENTURE_ENDED:
         return _result({
             "ok": False, "error_code": code, "phase": "ended",
-            "error": t("turns.story_ended"),
+            "error": t("webui.services.turns.story_ended"),
         }, 409)
     return _result({"ok": False, "error_code": code, "error": code}, 409)
 
@@ -254,7 +254,7 @@ def _pending_luck_payload(
         "ok": True,
         "phase": "luck",
         "advanced": False,
-        "message": t("turns.check_choice_pending"),
+        "message": t("webui.services.turns.check_choice_pending"),
         "check_result": checks.last_check(instance),
         "check_results": list(checks.last_checks(instance)),
         "pending_luck_decisions": instance.pending_luck_checks(),
@@ -1007,7 +1007,7 @@ async def submit_action(
             return _result({
                 "ok": False,
                 "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("turns.rewriting_wait_before_action"),
+                "error": t("webui.services.turns.rewriting_wait_before_action"),
             }, 409)
         progression.require_writable(instance)
         session_stats.require_writable(instance)
@@ -1031,7 +1031,7 @@ async def submit_action(
         if game_config.solo_mode(instance):
             action_count = sum(1 for action in instance.action_queue if action.get("user_id") == actor_uid)
             if action_count >= MAX_ACTIONS_PER_TURN:
-                return _result({"error": t("turns.action_limit_reached", max_actions_per_turn=MAX_ACTIONS_PER_TURN)}, 400)
+                return _result({"error": t("webui.services.turns.action_limit_reached", max_actions_per_turn=MAX_ACTIONS_PER_TURN)}, 400)
         elif (
             existing_action
             and int(existing_action.get("revision_count", 1) or 1) >= 3
@@ -1089,7 +1089,7 @@ async def submit_action(
                 return _result({
                     "ok": False,
                     "error_code": "REWRITE_IN_PROGRESS",
-                    "error": t("turns.rewriting_wait_before_action"),
+                    "error": t("webui.services.turns.rewriting_wait_before_action"),
                 }, 409)
             # Purchase requests are recorded together with the action. Persisting
             # here keeps a request recoverable even when another player has not yet
@@ -1214,7 +1214,7 @@ async def advance_round(
     if not instance:
         return _result({"error": "not found"}, 404)
     if actor_uid != instance.gm_uid:
-        return _result({"ok": False, "error": t("turns.advance_gm_only")}, 403)
+        return _result({"ok": False, "error": t("webui.services.turns.advance_gm_only")}, 403)
     progression.require_writable(instance)
     session_stats.require_writable(instance)
     checks.require_writable(instance)

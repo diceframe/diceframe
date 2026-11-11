@@ -41,18 +41,18 @@ def provider_unavailable(error: LLMToolCallError, language: str) -> AgentProvide
     zh = language.startswith("zh")
     if 402 in error.status_codes:
         return AgentProviderUnavailable("MODEL_BALANCE_INSUFFICIENT",
-            t("assistant_agent_framework.provider_insufficient_balance") if zh else
+            t("webui.services.assistant_agent_framework.provider_insufficient_balance") if zh else
             "The model provider reported insufficient balance (402). Check the provider or choose an available model in Settings.")
     if error.status_codes & {401, 403}:
         return AgentProviderUnavailable("MODEL_ACCESS_DENIED",
-            t("assistant_agent_framework.provider_access_denied") if zh else
+            t("webui.services.assistant_agent_framework.provider_access_denied") if zh else
             "The model provider denied access. Check provider credentials and model permissions in Settings.")
     if 429 in error.status_codes:
         return AgentProviderUnavailable("MODEL_RATE_LIMITED",
-            t("assistant_agent_framework.provider_rate_limited") if zh else
+            t("webui.services.assistant_agent_framework.provider_rate_limited") if zh else
             "The model provider is limiting requests (429). Retry later or choose another model in Settings.")
     return AgentProviderUnavailable("MODEL_UNAVAILABLE",
-        t("assistant_agent_framework.provider_temporarily_unavailable") if zh else
+        t("webui.services.assistant_agent_framework.provider_temporarily_unavailable") if zh else
         "The model provider is unavailable. Check the network or provider settings and retry.")
 
 
@@ -80,7 +80,7 @@ class DiceFrameModel(Model):
         return "diceframe"
 
     async def request(self, messages, model_settings, model_request_parameters):
-        await self.emit("status", {"message": t("assistant_agent_framework.planning_next_step") if self.language.startswith("zh") else "Planning the next step…"})
+        await self.emit("status", {"message": t("webui.services.assistant_agent_framework.planning_next_step") if self.language.startswith("zh") else "Planning the next step…"})
         parameters = model_request_parameters
         definitions = [*parameters.output_tools, *parameters.function_tools]
         schemas = [{"type": "function", "function": {

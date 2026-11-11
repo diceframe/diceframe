@@ -81,10 +81,10 @@ def _valid_public_url(url: str) -> str:
     """校验并归一化公网 URL：必须 https、合法主机名、长度受限。"""
     text = str(url or "").strip().rstrip("/")
     if len(text) > 253:
-        raise ValueError(t("tunnel.url_too_long"))
+        raise ValueError(t("webui.services.tunnel.url_too_long"))
     parsed = urllib.parse.urlparse(text)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise ValueError(t("tunnel.url_not_https"))
+        raise ValueError(t("webui.services.tunnel.url_not_https"))
     return text
 
 
@@ -130,7 +130,7 @@ def publish_tunnel_url(
             state["publisher_plugin_id"] = ""
             state["url"] = ""
         else:
-            raise ValueError(t("tunnel.already_published", current_publisher=current_publisher))
+            raise ValueError(t("webui.services.tunnel.already_published", current_publisher=current_publisher))
     if "prev_url" not in state:
         state["prev_url"] = str(
             dependencies.config_state().get("public_base_url") or ""
@@ -151,7 +151,7 @@ def publish_tunnel_url(
         try:
             _commit_public_base_url(dependencies, previous_public_url)
         except Exception as rollback_error:
-            raise RuntimeError(t("tunnel.publish_state_and_rollback_failed")) from rollback_error
+            raise RuntimeError(t("webui.services.tunnel.publish_state_and_rollback_failed")) from rollback_error
         raise
     logger.info("隧道已发布: plugin=%s url=%s", plugin_id, normalized)
     return {"ok": True, "public_base_url": normalized}
@@ -177,7 +177,7 @@ def release_tunnel_url(
         try:
             _commit_public_base_url(dependencies, previous_public_url)
         except Exception as rollback_error:
-            raise RuntimeError(t("tunnel.release_state_and_rollback_failed")) from rollback_error
+            raise RuntimeError(t("webui.services.tunnel.release_state_and_rollback_failed")) from rollback_error
         raise
     logger.info("隧道已释放: plugin=%s", plugin_id)
     return {"ok": True, "released": True, "restored": prev}

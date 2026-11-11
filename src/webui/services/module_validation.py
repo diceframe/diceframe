@@ -117,16 +117,16 @@ def parse_requires(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     if requires is None:
         return []
     if not isinstance(requires, dict):
-        raise ValueError(t("module_validation.requires_not_object"))
+        raise ValueError(t("webui.services.module_validation.requires_not_object"))
     rulesets = requires.get("rulesets")
     if rulesets is None:
         return []
     if not isinstance(rulesets, list):
-        raise ValueError(t("module_validation.requires_rulesets_not_array"))
+        raise ValueError(t("webui.services.module_validation.requires_rulesets_not_array"))
     parsed: list[dict[str, Any]] = []
     for entry in rulesets:
         if not isinstance(entry, dict):
-            raise ValueError(t("module_validation.requires_ruleset_entry_not_object"))
+            raise ValueError(t("webui.services.module_validation.requires_ruleset_entry_not_object"))
         extra = sorted(set(entry) - {"id", "minimum_version"})
         if extra:
             raise ValueError(f"requires.rulesets entry has unknown field: {extra[0]!r}")

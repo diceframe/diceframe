@@ -39,12 +39,12 @@ class StorytellingService:
             return {
                 "ok": False,
                 "error_code": "UNSUPPORTED_STORYTELLING_SCHEMA",
-                "error": t("storytelling.settings_version_unsupported"),
+                "error": t("webui.services.storytelling.settings_version_unsupported"),
             }
         return {
             "ok": False,
             "error_code": "SAVE_FAILED",
-            "error": t("storytelling.settings_save_failed"),
+            "error": t("webui.services.storytelling.settings_save_failed"),
         }
 
     async def set_mode(self, game_key: str, value: Any) -> dict[str, Any]:
@@ -55,14 +55,14 @@ class StorytellingService:
             return {
                 "ok": False,
                 "error_code": "INVALID_STORY_MODE",
-                "error": t("storytelling.mode_invalid"),
+                "error": t("webui.services.storytelling.mode_invalid"),
             }
         async with instance.authoritative_write() as entered, instance._lock:
             if not entered:
                 return {
                     "ok": False,
                     "error_code": "REWRITE_IN_PROGRESS",
-                    "error": t("storytelling.rewriting_wait_and_retry"),
+                    "error": t("webui.services.storytelling.rewriting_wait_and_retry"),
                 }
             if (
                 instance.state == GameState.ACTIVE_JUDGMENT
@@ -71,7 +71,7 @@ class StorytellingService:
                 return {
                     "ok": False,
                     "error_code": "STORY_MODE_LOCKED",
-                    "error": t("storytelling.round_generating"),
+                    "error": t("webui.services.storytelling.round_generating"),
                 }
             try:
                 storytelling.require_writable(instance)
@@ -117,13 +117,13 @@ class StorytellingService:
             return {"ok": False, "error_code": "GAME_NOT_FOUND", "error": "游戏不存在"}
         speaker_key = str(speaker_id or "")
         if storytelling.SPEAKER_ID_RE.fullmatch(speaker_key) is None:
-            return {"ok": False, "error_code": "INVALID_SPEAKER_ID", "error": t("storytelling.speaker_id_invalid")}
+            return {"ok": False, "error_code": "INVALID_SPEAKER_ID", "error": t("webui.services.storytelling.speaker_id_invalid")}
         async with instance.authoritative_write() as entered, instance._lock:
             if not entered:
                 return {
                     "ok": False,
                     "error_code": "REWRITE_IN_PROGRESS",
-                    "error": t("storytelling.rewriting_wait_and_retry"),
+                    "error": t("webui.services.storytelling.rewriting_wait_and_retry"),
                 }
             try:
                 storytelling.require_writable(instance)
@@ -131,7 +131,7 @@ class StorytellingService:
                     return {
                         "ok": False,
                         "error_code": "UNKNOWN_SPEAKER",
-                        "error": t("storytelling.speaker_missing"),
+                        "error": t("webui.services.storytelling.speaker_missing"),
                     }
                 try:
                     normalized = self._dependencies.validate_portrait(value)
@@ -169,10 +169,10 @@ class StorytellingService:
                 or not source.startswith("g_") or source == target
                 or storytelling.SPEAKER_ID_RE.fullmatch(source) is None
                 or storytelling.SPEAKER_ID_RE.fullmatch(target) is None):
-            return {"ok": False, "error_code": "INVALID_SPEAKER_MERGE", "error": t("storytelling.merge_temporary_only")}
+            return {"ok": False, "error_code": "INVALID_SPEAKER_MERGE", "error": t("webui.services.storytelling.merge_temporary_only")}
         async with instance.authoritative_write() as entered, instance._lock:
             if not entered or instance.state == GameState.ACTIVE_JUDGMENT or instance.round_processing_in_flight():
-                return {"ok": False, "error_code": "STORY_MODE_LOCKED", "error": t("storytelling.busy_retry_later")}
+                return {"ok": False, "error_code": "STORY_MODE_LOCKED", "error": t("webui.services.storytelling.busy_retry_later")}
             try:
                 storytelling.require_writable(instance)
                 roster = self.list_speakers(game_key)
@@ -180,9 +180,9 @@ class StorytellingService:
                     return roster
                 people = {item["id"]: item for item in roster["speakers"]}
                 if source not in people or target not in people:
-                    return {"ok": False, "error_code": "UNKNOWN_SPEAKER", "error": t("storytelling.speakers_changed")}
+                    return {"ok": False, "error_code": "UNKNOWN_SPEAKER", "error": t("webui.services.storytelling.speakers_changed")}
                 if people[source]["name"] != people[target]["name"]:
-                    return {"ok": False, "error_code": "INVALID_SPEAKER_MERGE", "error": t("storytelling.different_public_identities")}
+                    return {"ok": False, "error_code": "INVALID_SPEAKER_MERGE", "error": t("webui.services.storytelling.different_public_identities")}
                 overrides = storytelling.portrait_overrides(instance)
                 portrait = overrides.get(target, overrides.get(source, people[target].get("portrait") or people[source].get("portrait")))
                 before = storytelling.snapshot(instance)
@@ -234,7 +234,7 @@ class StorytellingService:
             return {
                 "ok": False,
                 "error_code": "UNSUPPORTED_STORYTELLING_SCHEMA",
-                "error": t("storytelling.settings_version_unsupported"),
+                "error": t("webui.services.storytelling.settings_version_unsupported"),
             }
         speakers = [roster[speaker_id] for speaker_id in order]
         return {"ok": True, "speakers": speakers, "total": len(speakers)}

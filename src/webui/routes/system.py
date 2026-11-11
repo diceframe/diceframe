@@ -58,12 +58,12 @@ async def api_network_addresses(request: web.Request) -> web.Response:
         request.get("owner_authenticated", False)
     )
     if not owner_allowed:
-        return web.json_response({"ok": False, "error": t("routes_system.admin_session_required")}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.system.admin_session_required")}, status=403)
     transport = request.app.get("web_transport")
     endpoint = getattr(transport, "endpoint", None)
     if endpoint is None:
         return web.json_response(
-            {"ok": False, "error": t("routes_system.transport_not_ready")},
+            {"ok": False, "error": t("webui.routes.system.transport_not_ready")},
             status=503,
         )
     addresses = [

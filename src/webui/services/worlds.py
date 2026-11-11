@@ -66,18 +66,18 @@ def authoring_recovery_snapshot(dependencies: WorldDependencies, identity: str) 
     definition = get_world_definition(dependencies, world_id)
     world = definition.get("world") if isinstance(definition, dict) else None
     if definition.get("ok") is not True or not isinstance(world, dict) or world.get("source") != "user" or world.get("editable") is not True:
-        raise ValueError(t("worlds.builtin_world_read_only"))
+        raise ValueError(t("webui.services.worlds.builtin_world_read_only"))
     path = _template_path(dependencies.worlds_dir, world_id, require_canonical=True) if dependencies.worlds_dir else None
     if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
-        raise ValueError(t("worlds.template_ownership_unproven"))
+        raise ValueError(t("webui.services.worlds.template_ownership_unproven"))
     try:
         stat = path.stat()
         content_digest = hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError as exc:
-        raise ValueError(t("worlds.template_read_failed")) from exc
+        raise ValueError(t("webui.services.worlds.template_read_failed")) from exc
     lore = dependencies.lorebook.get_world(world_id)
     if not isinstance(lore, dict):
-        raise ValueError(t("worlds.metadata_missing"))
+        raise ValueError(t("webui.services.worlds.metadata_missing"))
     fields = {
         "name": str(world.get("world_name") or ""),
         "description": str(world.get("description") or ""),
@@ -254,14 +254,14 @@ def create_world(
     world_setting: str | None = None, starter_scene: str | None = None,
 ) -> dict[str, Any]:
     if not isinstance(name, str):
-        return {"ok": False, "error": t("worlds.name_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.name_not_text")}
     name = name.strip()
     if not name:
-        return {"ok": False, "error": t("worlds.name_empty")}
+        return {"ok": False, "error": t("webui.services.worlds.name_empty")}
     if not isinstance(description, str):
-        return {"ok": False, "error": t("worlds.description_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.description_not_text")}
     if not isinstance(language, str):
-        return {"ok": False, "error": t("worlds.language_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.language_not_text")}
     if error := _narrative_error(world_setting, starter_scene):
         return {"ok": False, "error": error}
     world_id = _new_user_world_id(dependencies, name)
@@ -283,40 +283,40 @@ def update_world(
 ) -> dict[str, Any]:
     """Update the metadata of a user-owned world without replacing its entries."""
     if not isinstance(world_id, str):
-        return {"ok": False, "error": t("worlds.world_id_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.world_id_invalid")}
     world_id = str(world_id or "").strip()
     if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id):
-        return {"ok": False, "error": t("worlds.world_id_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.world_id_invalid")}
     world = dependencies.lorebook.get_world(world_id)
     if not world:
         return {"ok": False, "error": "世界不存在"}
     if not isinstance(name, str):
-        return {"ok": False, "error": t("worlds.name_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.name_not_text")}
     name = name.strip()
     if not name:
-        return {"ok": False, "error": t("worlds.name_empty")}
+        return {"ok": False, "error": t("webui.services.worlds.name_empty")}
     if not isinstance(description, str):
-        return {"ok": False, "error": t("worlds.description_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.description_not_text")}
     if not isinstance(language, str):
-        return {"ok": False, "error": t("worlds.language_not_text")}
+        return {"ok": False, "error": t("webui.services.worlds.language_not_text")}
     if error := _narrative_error(world_setting, starter_scene):
         return {"ok": False, "error": error}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
-        return {"ok": False, "error": t("worlds.template_dir_unconfigured")}
+        return {"ok": False, "error": t("webui.services.worlds.template_dir_unconfigured")}
     try:
         path = _ensure_user_world_template(dependencies, world_id)
     except OSError:
         logger.exception("物化自建世界模板失败: %s", world_id)
-        return {"ok": False, "error": t("worlds.template_create_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_create_failed")}
     if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
-        return {"ok": False, "error": t("worlds.builtin_world_clone_first")}
+        return {"ok": False, "error": t("webui.services.worlds.builtin_world_clone_first")}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"ok": False, "error": t("worlds.template_read_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_read_failed")}
     if not isinstance(data, dict):
-        return {"ok": False, "error": t("worlds.template_format_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.template_format_invalid")}
     original_data = copy.deepcopy(data)
     description = description.strip()
     language = normalize_language(language or str(world.get("language") or DEFAULT_LANGUAGE))
@@ -329,7 +329,7 @@ def update_world(
     data["language"] = language
     update_metadata = getattr(dependencies.lorebook, "update_world_metadata", None)
     if not callable(update_metadata):
-        return {"ok": False, "error": t("worlds.storage_read_only")}
+        return {"ok": False, "error": t("webui.services.worlds.storage_read_only")}
     original_world = copy.deepcopy(world)
     try:
         _write_json_atomic(path, data)
@@ -352,7 +352,7 @@ def update_world(
         except Exception:
             logger.exception("回滚世界元数据失败: %s", world_id)
         logger.exception("保存世界模板失败: %s", world_id)
-        return {"ok": False, "error": t("worlds.template_save_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_save_failed")}
     return {"ok": True, "world_id": world_id, "name": name, "description": description, "language": language}
 
 
@@ -391,11 +391,11 @@ def create_imported_world(dependencies: WorldDependencies, world_id: str, name: 
                 _write_json_atomic(dependencies.worlds_dir / f"{world_id}.json", template)
         if _ensure_user_world_template(dependencies, world_id) is None:
             dependencies.lorebook.delete_world(world_id)
-            return {"ok": False, "error": t("worlds.custom_template_create_failed")}
+            return {"ok": False, "error": t("webui.services.worlds.custom_template_create_failed")}
     except OSError:
         dependencies.lorebook.delete_world(world_id)
         logger.exception("创建自建世界模板失败: %s", world_id)
-        return {"ok": False, "error": t("worlds.custom_template_create_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.custom_template_create_failed")}
     return {"ok": True, "world_id": world_id, "name": name, "language": language}
 
 
@@ -472,15 +472,15 @@ def clone_world_from_template(
     """
     template_id = str(template_id or "").strip()
     if not template_id:
-        return {"ok": False, "error": t("worlds.clone_source_missing")}
+        return {"ok": False, "error": t("webui.services.worlds.clone_source_missing")}
     if not _WORLD_TEMPLATE_ID_RE.fullmatch(template_id):
-        return {"ok": False, "error": t("worlds.template_id_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.template_id_invalid")}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
-        return {"ok": False, "error": t("worlds.template_dir_unconfigured")}
+        return {"ok": False, "error": t("webui.services.worlds.template_dir_unconfigured")}
     source = _load_clone_source(dependencies, template_id)
     if source is None:
-        return {"ok": False, "error": t("worlds.template_missing")}
+        return {"ok": False, "error": t("webui.services.worlds.template_missing")}
     language = normalize_language(str(source.get("language") or ""))
     new_name = (name or "").strip()
     if not new_name:
@@ -501,7 +501,7 @@ def clone_world_from_template(
     template["language"] = language
     path = _template_path(worlds_dir, world_id)
     if path is None:
-        return {"ok": False, "error": t("worlds.generated_template_id_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.generated_template_id_invalid")}
     _write_json_atomic(path, template)
     ensure_world_from_template(dependencies.lorebook, world_id, template)
     logger.info("已克隆世界模板: %s -> %s", template_id, world_id)
@@ -516,26 +516,26 @@ def update_world_gm_style(
     """保存世界级 GM 风格。仅用户模板可改；内置/插件世界提示先克隆。"""
     world_id = str(world_id or "").strip()
     if not world_id:
-        return {"ok": False, "error": t("worlds.world_id_missing")}
+        return {"ok": False, "error": t("webui.services.worlds.world_id_missing")}
     if dependencies.lorebook.get_world(world_id) is None:
         return {"ok": False, "error": "世界不存在"}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
-        return {"ok": False, "error": t("worlds.template_dir_unconfigured")}
+        return {"ok": False, "error": t("webui.services.worlds.template_dir_unconfigured")}
     try:
         path = _ensure_user_world_template(dependencies, world_id)
     except OSError:
         logger.exception("物化自建世界模板失败: %s", world_id)
-        return {"ok": False, "error": t("worlds.template_create_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_create_failed")}
     if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
-        return {"ok": False, "error": t("worlds.builtin_world_clone_first")}
+        return {"ok": False, "error": t("webui.services.worlds.builtin_world_clone_first")}
     normalized = normalize_gm_style(raw)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"ok": False, "error": t("worlds.template_read_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_read_failed")}
     if not isinstance(data, dict):
-        return {"ok": False, "error": t("worlds.template_format_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.template_format_invalid")}
     data["gm_style"] = normalized
     _write_json_atomic(path, data)
     return {"ok": True, "gm_style": normalized}
@@ -558,34 +558,34 @@ def set_user_world_scene_image(
     """
     world_id = str(world_id or "").strip()
     if not world_id:
-        return {"ok": False, "error": t("worlds.world_id_missing")}
+        return {"ok": False, "error": t("webui.services.worlds.world_id_missing")}
     if dependencies.lorebook.get_world(world_id) is None:
         return {"ok": False, "error": "世界不存在"}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
-        return {"ok": False, "error": t("worlds.template_dir_unconfigured")}
+        return {"ok": False, "error": t("webui.services.worlds.template_dir_unconfigured")}
     try:
         path = _ensure_user_world_template(dependencies, world_id)
     except OSError:
         logger.exception("物化自建世界模板失败: %s", world_id)
-        return {"ok": False, "error": t("worlds.template_create_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_create_failed")}
     if path is None or not path.is_file() or not is_user_template_file(path, "worlds"):
-        return {"ok": False, "error": t("worlds.builtin_world_clone_first")}
+        return {"ok": False, "error": t("webui.services.worlds.builtin_world_clone_first")}
     if not isinstance(scene_image, dict):
-        return {"ok": False, "error": t("worlds.cover_reference_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.cover_reference_invalid")}
     kind = str(scene_image.get("kind") or "")
     if kind not in _USER_SCENE_IMAGE_KINDS:
-        return {"ok": False, "error": t("worlds.cover_reference_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.cover_reference_invalid")}
     if kind in {"upload", "generated"} and not str(scene_image.get("asset_id") or "").strip():
-        return {"ok": False, "error": t("worlds.cover_reference_missing_asset_id")}
+        return {"ok": False, "error": t("webui.services.worlds.cover_reference_missing_asset_id")}
     if kind == "builtin" and not str(scene_image.get("id") or "").strip():
-        return {"ok": False, "error": t("worlds.cover_reference_missing_id")}
+        return {"ok": False, "error": t("webui.services.worlds.cover_reference_missing_id")}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"ok": False, "error": t("worlds.template_read_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.template_read_failed")}
     if not isinstance(data, dict):
-        return {"ok": False, "error": t("worlds.template_format_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.template_format_invalid")}
     data["scene_image"] = scene_image
     # An explicit user choice pins the world cover; remove an automatically
     # generated pool so future saves do not silently override that choice.
@@ -662,7 +662,7 @@ def get_world_definition(
     """
     world_id = str(world_id or "").strip()
     if not _WORLD_TEMPLATE_ID_RE.fullmatch(world_id):
-        return {"ok": False, "error": t("worlds.world_id_invalid")}
+        return {"ok": False, "error": t("webui.services.worlds.world_id_invalid")}
     requested_language = normalize_language(language) if language else ""
     worlds_dir = dependencies.worlds_dir
     data: dict[str, Any] | None = None
@@ -671,14 +671,14 @@ def get_world_definition(
     if worlds_dir:
         path = _template_path(worlds_dir, world_id, require_canonical=True)
         if path is None:
-            return {"ok": False, "error": t("worlds.world_id_invalid")}
+            return {"ok": False, "error": t("webui.services.worlds.world_id_invalid")}
         if path.is_file():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                return {"ok": False, "error": t("worlds.template_read_failed")}
+                return {"ok": False, "error": t("webui.services.worlds.template_read_failed")}
             if not isinstance(raw, dict):
-                return {"ok": False, "error": t("worlds.template_format_invalid")}
+                return {"ok": False, "error": t("webui.services.worlds.template_format_invalid")}
             if is_user_template_file(path, "worlds"):
                 data = raw
                 source = "user"
@@ -702,7 +702,7 @@ def get_world_definition(
                 ) or {}
             except Exception:
                 logger.warning("插件世界模板读取失败: %s", item.path, exc_info=True)
-                return {"ok": False, "error": t("worlds.template_read_failed")}
+                return {"ok": False, "error": t("webui.services.worlds.template_read_failed")}
             if isinstance(candidate, dict) and candidate:
                 data = candidate
                 source = "plugin"
@@ -773,7 +773,7 @@ def save_entry(
     # 不让 KeyError 漏成 500（UI 导入的 body 可能完全不带 id 键）。
     prepared, error = _prepare_entry(dependencies, entry, existing_ids=None)
     if error or prepared is None:
-        return {"ok": False, "error": error or t("worlds.entry_invalid")}
+        return {"ok": False, "error": error or t("webui.services.worlds.entry_invalid")}
     dependencies.lorebook.add_entry(prepared)
     rebuild_lorebook_index(dependencies, prepared["world_id"])
     _sync_user_template_lorebook(dependencies, prepared["world_id"])
@@ -801,9 +801,9 @@ def import_entries(
     if dependencies.lorebook.get_world(world_id) is None:
         return {"ok": False, "error": "世界不存在"}
     if not isinstance(entries, list) or not entries:
-        return {"ok": False, "error": t("worlds.entries_required")}
+        return {"ok": False, "error": t("webui.services.worlds.entries_required")}
     if len(entries) > MAX_LOREBOOK_IMPORT_ENTRIES:
-        return {"ok": False, "error": t("worlds.import_too_many", max_lorebook_import_entries=MAX_LOREBOOK_IMPORT_ENTRIES)}
+        return {"ok": False, "error": t("webui.services.worlds.import_too_many", max_lorebook_import_entries=MAX_LOREBOOK_IMPORT_ENTRIES)}
     existing_ids = {
         str(e.get("id")) for e in entries_for_world(dependencies.lorebook, world_id)
     }
@@ -811,12 +811,12 @@ def import_entries(
     failures: list[dict[str, Any]] = []
     for index, raw in enumerate(entries):
         if not isinstance(raw, dict):
-            failures.append({"index": index, "error": t("worlds.entry_not_object")})
+            failures.append({"index": index, "error": t("webui.services.worlds.entry_not_object")})
             continue
         if len(str(raw.get("content", ""))) > MAX_LOREBOOK_CHARS:
             failures.append({
                 "index": index,
-                "error": t("worlds.entry_too_long", max_lorebook_chars=MAX_LOREBOOK_CHARS),
+                "error": t("webui.services.worlds.entry_too_long", max_lorebook_chars=MAX_LOREBOOK_CHARS),
             })
             continue
         # world_id 来自路径参数：批量端点替客户端统一盖章，避免逐条重复。
@@ -829,7 +829,7 @@ def import_entries(
             dependencies, candidate, existing_ids=existing_ids,
         )
         if error or prepared is None:
-            failures.append({"index": index, "error": error or t("worlds.entry_invalid")})
+            failures.append({"index": index, "error": error or t("webui.services.worlds.entry_invalid")})
             continue
         dependencies.lorebook.add_entry(prepared)
         # 冲突集 = 库内既有 id + 本批已导入 id，防止同批后续条目复用。
@@ -931,12 +931,12 @@ async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: s
                                     game_key: str = "") -> dict[str, Any]:
     prompt = (prompt or "").strip()
     if not prompt:
-        return {"ok": False, "error": t("worlds.generation_prompt_required")}
+        return {"ok": False, "error": t("webui.services.worlds.generation_prompt_required")}
     if not dependencies.llm_client:
-        return {"ok": False, "error": t("worlds.ai_unconfigured")}
+        return {"ok": False, "error": t("webui.services.worlds.ai_unconfigured")}
     world = dependencies.lorebook.get_world(world_id)
     if not world:
-        return {"ok": False, "error": t("worlds.lorebook_missing")}
+        return {"ok": False, "error": t("webui.services.worlds.lorebook_missing")}
     language = normalize_language(language or world.get("language", DEFAULT_LANGUAGE))
 
     target_book_id = str(book_id or dependencies.lorebook.primary_world_book_id(world_id))
@@ -987,7 +987,7 @@ async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: s
         language=language,
     )
     if not raw_entries:
-        return {"ok": False, "error": t("worlds.ai_response_parse_failed")}
+        return {"ok": False, "error": t("webui.services.worlds.ai_response_parse_failed")}
 
     existing_ids = {e.get("id", "") for e in existing_entries}
     saved = []
@@ -1003,7 +1003,7 @@ async def generate_lorebook_entries(dependencies: WorldDependencies, world_id: s
             dependencies.lorebook.add_entry(entry)
         saved.append(entry)
     if not saved:
-        return {"ok": False, "error": t("worlds.no_entries_generated")}
+        return {"ok": False, "error": t("webui.services.worlds.no_entries_generated")}
     rebuild_lorebook_index(dependencies, world_id)
     return {"ok": True, "entries": saved, "count": len(saved)}
 
@@ -1151,7 +1151,7 @@ def list_world_templates(
                 templates.append(_world_template_summary(data, f.stem))
                 seen.add(str(world_id))
             except Exception as exc:
-                raise ValueError(t("worlds.template_read_failed_detail", file=f, exc=exc)) from exc
+                raise ValueError(t("webui.services.worlds.template_read_failed_detail", file=f, exc=exc)) from exc
     for item in _plugin_world_templates(dependencies, language):
         if str(item.get("world_id") or "") not in seen:
             templates.append(item)
@@ -1263,5 +1263,5 @@ def _plugin_world_templates(
             summary["readonly"] = True
             result.append(summary)
         except Exception as exc:
-            raise ValueError(t("worlds.plugin_template_read_failed", path=item.path, exc=exc)) from exc
+            raise ValueError(t("webui.services.worlds.plugin_template_read_failed", path=item.path, exc=exc)) from exc
     return result

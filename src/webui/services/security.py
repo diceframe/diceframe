@@ -109,10 +109,10 @@ class SecurityTransportService:
                 return {"ok": False, "error": f"不支持的连接模式：{mode or '(空)'}"}
         if mode == TLS_MODE_OFF:
             # 关闭不生成候选证书，直接走 disable 事务。
-            return {"ok": False, "error": translate("security.use_disable_action")}
+            return {"ok": False, "error": translate("webui.services.security.use_disable_action")}
         env_mode = str(os.environ.get("TRPG_TLS_MODE") or "").strip().lower()
         if env_mode and env_mode != mode:
-            return {"ok": False, "error": translate("security.tls_mode_managed_by_env")}
+            return {"ok": False, "error": translate("webui.services.security.tls_mode_managed_by_env")}
 
         if mode == TLS_MODE_LETS_ENCRYPT:
             return await self._prepare_lets_encrypt(acme_raw)
@@ -123,7 +123,7 @@ class SecurityTransportService:
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ssl_context.load_cert_chain(str(prepared.cert_path), str(prepared.key_path))
         except (CertificateError, ssl.SSLError, OSError, ValueError) as exc:
-            return {"ok": False, "error": translate("security.local_certificate_verification_failed", exc=exc)}
+            return {"ok": False, "error": translate("webui.services.security.local_certificate_verification_failed", exc=exc)}
 
         token = secrets_module.token_urlsafe(24)
         self._preparations[token] = {
@@ -150,13 +150,13 @@ class SecurityTransportService:
             return {"ok": False, "error": error}
         env_mode = str(os.environ.get("TRPG_TLS_MODE") or "").strip().lower()
         if env_mode and env_mode != TLS_MODE_LETS_ENCRYPT:
-            return {"ok": False, "error": translate("security.tls_mode_managed_by_env")}
+            return {"ok": False, "error": translate("webui.services.security.tls_mode_managed_by_env")}
         settings = candidate.acme
         request = self._acme_request(candidate)
         try:
             result = await self._acme_provider.issue(request)
         except (AcmeError, CertificateError, aiohttp.ClientError, OSError, ValueError) as exc:
-            return {"ok": False, "error": translate("security.lets_encrypt_request_failed", exc=exc)}
+            return {"ok": False, "error": translate("webui.services.security.lets_encrypt_request_failed", exc=exc)}
 
         token = secrets_module.token_urlsafe(24)
         self._preparations[token] = {
@@ -235,10 +235,10 @@ class SecurityTransportService:
         token = str(token or "").strip()
         preparation = self._preparations.get(token)
         if not preparation:
-            return {"ok": False, "error": translate("security.prepare_token_invalid")}
+            return {"ok": False, "error": translate("webui.services.security.prepare_token_invalid")}
         if time.time() > preparation["expires_at"]:
             self._preparations.pop(token, None)
-            return {"ok": False, "error": translate("security.prepare_token_expired")}
+            return {"ok": False, "error": translate("webui.services.security.prepare_token_expired")}
 
         mode = preparation["mode"]
         candidate = parse_web_transport(preparation.get("config") or {})
@@ -255,9 +255,9 @@ class SecurityTransportService:
             else:
                 prepared = self._self_signed_provider.prepare()
         except (CertificateError, ssl.SSLError, OSError, ValueError) as exc:
-            return {"ok": False, "error": translate("security.certificate_verification_failed", exc=exc)}
+            return {"ok": False, "error": translate("webui.services.security.certificate_verification_failed", exc=exc)}
         if prepared.metadata.fingerprint_sha256 != preparation["fingerprint"]:
-            return {"ok": False, "error": translate("security.certificate_changed")}
+            return {"ok": False, "error": translate("webui.services.security.certificate_changed")}
 
         # 一次性令牌：无论后续成败都销毁，防止重试重复执行。
         self._preparations.pop(token, None)
@@ -284,7 +284,7 @@ class SecurityTransportService:
         try:
             prepared = self._self_signed_provider.regenerate()
         except (CertificateError, OSError, ValueError) as exc:
-            return {"ok": False, "error": translate("security.regenerate_failed", exc=exc)}
+            return {"ok": False, "error": translate("webui.services.security.regenerate_failed", exc=exc)}
         current_mode = self.current_config().tls_mode
         return {
             "ok": True,

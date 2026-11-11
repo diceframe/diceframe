@@ -35,22 +35,22 @@ def _normalized_standing_portrait(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "WEBP"}:
-                raise ValueError(t("standing_portraits.unsupported_format"))
+                raise ValueError(t("webui.services.standing_portraits.unsupported_format"))
             width, height = source.size
             if width < MIN_WIDTH or height < MIN_HEIGHT:
-                raise ValueError(t("standing_portraits.too_small", min_width=MIN_WIDTH, min_height=MIN_HEIGHT))
+                raise ValueError(t("webui.services.standing_portraits.too_small", min_width=MIN_WIDTH, min_height=MIN_HEIGHT))
             if width > MAX_WIDTH or height > MAX_HEIGHT or width * height > MAX_IMAGE_PIXELS:
-                raise ValueError(t("standing_portraits.dimensions_too_large"))
+                raise ValueError(t("webui.services.standing_portraits.dimensions_too_large"))
             image = ImageOps.exif_transpose(source)
             # 透明是立绘的核心属性：保留 alpha（RGBA），不做方形裁切或缩放。
             image = image.convert("RGBA")
             output = io.BytesIO()
             image.save(output, format="WEBP", quality=90, method=6)
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError(t("standing_portraits.unreadable")) from exc
+        raise ValueError(t("webui.services.standing_portraits.unreadable")) from exc
     payload = output.getvalue()
     if len(payload) > MAX_UPLOAD_BYTES:
-        raise ValueError(t("standing_portraits.encoded_too_large"))
+        raise ValueError(t("webui.services.standing_portraits.encoded_too_large"))
     return payload
 
 
@@ -58,17 +58,17 @@ def save_standing_portrait_upload(
     portraits_dir: Path | None, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not isinstance(file_data, str) or not isinstance(file_name, str):
-        return {"ok": False, "error": t("standing_portraits.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid")}
     if not file_data:
-        return {"ok": False, "error": t("standing_portraits.file_missing")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_missing")}
     if len(file_data) > (MAX_UPLOAD_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": t("standing_portraits.file_too_large")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large")}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (TypeError, ValueError, binascii.Error):
-        return {"ok": False, "error": t("standing_portraits.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid")}
     if not raw or len(raw) > MAX_UPLOAD_BYTES:
-        return {"ok": False, "error": t("standing_portraits.file_too_large")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large")}
     try:
         payload = _normalized_standing_portrait(raw)
     except ValueError as exc:
@@ -108,13 +108,13 @@ def validate_standing_portrait_ref(
     if reference is None or reference == {}:
         return None
     if not isinstance(reference, dict):
-        raise ValueError(t("standing_portraits.data_invalid"))
+        raise ValueError(t("webui.services.standing_portraits.data_invalid"))
     kind = str(reference.get("kind") or "")
     if kind != "upload":
-        raise ValueError(t("standing_portraits.type_invalid"))
+        raise ValueError(t("webui.services.standing_portraits.type_invalid"))
     asset_id = str(reference.get("asset_id") or "")
     if not asset_id or file_lookup(asset_id) is None:
-        raise ValueError(t("standing_portraits.uploaded_missing"))
+        raise ValueError(t("webui.services.standing_portraits.uploaded_missing"))
     return {"kind": "upload", "asset_id": asset_id}
 
 
@@ -141,14 +141,14 @@ class StandingPortraitService:
 
     def delete(self, asset_id: str) -> dict[str, Any]:
         if not ASSET_ID_RE.fullmatch(str(asset_id or "")):
-            return {"ok": False, "error": t("standing_portraits.id_invalid")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.id_invalid")}
         path = self._portraits_dir / f"{asset_id}.webp"
         if not path.is_file():
-            return {"ok": False, "error": t("standing_portraits.missing")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.missing")}
         if self._is_referenced is not None and self._is_referenced(asset_id):
-            return {"ok": False, "error": t("standing_portraits.still_referenced")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.still_referenced")}
         try:
             path.unlink()
         except OSError:
-            return {"ok": False, "error": t("standing_portraits.delete_failed")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.delete_failed")}
         return {"ok": True}

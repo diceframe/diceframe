@@ -67,7 +67,7 @@ def package_content_map(
     world_id = str(world.get("id") or world.get("world_id") or "").strip()
     world_name = str(world.get("name") or world.get("world_name") or world_id).strip()
     if not world_id:
-        raise ValueError(t("content_pack_maps.world_id_missing"))
+        raise ValueError(t("webui.services.content_pack_maps.world_id_missing"))
 
     location_entries = [
         entry for entry in entries
@@ -157,10 +157,10 @@ def _package_background(
         return ""
     source = dependencies.resolve_background_file(selection)
     if source is None or not source.is_file():
-        raise ValueError(t("content_pack_maps.background_unreadable"))
+        raise ValueError(t("webui.services.content_pack_maps.background_unreadable"))
     payload = source.read_bytes()
     if not payload:
-        raise ValueError(t("content_pack_maps.background_empty"))
+        raise ValueError(t("webui.services.content_pack_maps.background_empty"))
     files[f"maps/backgrounds/{map_id}.webp"] = payload
     return map_id
 
@@ -170,20 +170,20 @@ def _package_icons(
     files: dict[str, str | bytes],
 ) -> tuple[dict[str, bytes], dict[str, str]]:
     if len(uploads) > MAX_MAP_ICON_UPLOADS:
-        raise ValueError(t("content_pack_maps.too_many_icons", max_map_icon_uploads=MAX_MAP_ICON_UPLOADS))
+        raise ValueError(t("webui.services.content_pack_maps.too_many_icons", max_map_icon_uploads=MAX_MAP_ICON_UPLOADS))
     total_bytes = 0
     packaged: dict[str, bytes] = {}
     aliases: dict[str, str] = {}
     used_ids: set[str] = set()
     for index, upload in enumerate(uploads, start=1):
         if not isinstance(upload, dict):
-            raise ValueError(t("content_pack_maps.icon_data_format_invalid"))
+            raise ValueError(t("webui.services.content_pack_maps.icon_data_format_invalid"))
         file_name = Path(str(upload.get("file_name") or "")).name
         source_id = str(upload.get("id") or Path(file_name).stem or f"icon-{index}").strip()
         raw = _decode_icon(str(upload.get("file_data") or ""))
         total_bytes += len(raw)
         if total_bytes > MAX_TOTAL_MAP_ICON_BYTES:
-            raise ValueError(t("content_pack_maps.icons_total_too_large"))
+            raise ValueError(t("webui.services.content_pack_maps.icons_total_too_large"))
         payload = _normalized_icon(raw)
         icon_id = _unique_icon_id(source_id, used_ids)
         packaged[icon_id] = payload
@@ -196,13 +196,13 @@ def _package_icons(
 
 def _decode_icon(file_data: str) -> bytes:
     if not file_data or len(file_data) > (MAX_MAP_ICON_BYTES * 4 // 3) + 32:
-        raise ValueError(t("content_pack_maps.icon_too_large"))
+        raise ValueError(t("webui.services.content_pack_maps.icon_too_large"))
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise ValueError(t("content_pack_maps.icon_file_data_invalid")) from exc
+        raise ValueError(t("webui.services.content_pack_maps.icon_file_data_invalid")) from exc
     if not raw or len(raw) > MAX_MAP_ICON_BYTES:
-        raise ValueError(t("content_pack_maps.icon_too_large"))
+        raise ValueError(t("webui.services.content_pack_maps.icon_too_large"))
     return raw
 
 
@@ -210,12 +210,12 @@ def _normalized_icon(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                raise ValueError(t("content_pack_maps.icon_format"))
+                raise ValueError(t("webui.services.content_pack_maps.icon_format"))
             width, height = source.size
             if width < 16 or height < 16:
-                raise ValueError(t("content_pack_maps.icon_too_small"))
+                raise ValueError(t("webui.services.content_pack_maps.icon_too_small"))
             if width > 4096 or height > 4096 or width * height > MAX_MAP_ICON_PIXELS:
-                raise ValueError(t("content_pack_maps.icon_dimensions_too_large"))
+                raise ValueError(t("webui.services.content_pack_maps.icon_dimensions_too_large"))
             image = ImageOps.exif_transpose(source).convert("RGBA")
             image.thumbnail((MAX_MAP_ICON_EDGE, MAX_MAP_ICON_EDGE), Image.Resampling.LANCZOS)
             output = io.BytesIO()
@@ -224,7 +224,7 @@ def _normalized_icon(raw: bytes) -> bytes:
     except ValueError:
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError(t("content_pack_maps.icon_unreadable")) from exc
+        raise ValueError(t("webui.services.content_pack_maps.icon_unreadable")) from exc
 
 
 def _matching_icon(location: dict[str, Any], aliases: dict[str, str]) -> str:

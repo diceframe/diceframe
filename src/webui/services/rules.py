@@ -177,7 +177,7 @@ def list_rules(
                 else []
             )
         except (OSError, ValueError, TypeError) as exc:
-            raise ValueError(t("rules.rule_content_or_runtime_invalid", rule_id=rule_id, exc=exc)) from exc
+            raise ValueError(t("webui.services.rules.rule_content_or_runtime_invalid", rule_id=rule_id, exc=exc)) from exc
     seen = {str(rule.get("rule_id") or "") for rule in rules}
     for item in _plugin_rule_items(dependencies, language):
         rule_id = str(item.get("rule_id") or "")
@@ -197,20 +197,20 @@ def save_custom_rule(
     description = (data.get("description") or "").strip()
 
     if not source_rule_id:
-        return {"ok": False, "error": t("rules.source_rule_required")}
+        return {"ok": False, "error": t("webui.services.rules.source_rule_required")}
     if not rule_id:
-        return {"ok": False, "error": t("rules.rule_id_required")}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_required")}
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": t("rules.rule_id_charset")}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_charset")}
     if not rule_name:
-        return {"ok": False, "error": t("rules.rule_name_required")}
+        return {"ok": False, "error": t("webui.services.rules.rule_name_required")}
 
     source_path = _resolve_rule_path(dependencies, source_rule_id)
     target_path = dependencies.rules_dir / f"{rule_id}.json"
     if not source_path or not source_path.exists():
-        return {"ok": False, "error": t("rules.source_rule_missing", source_rule_id=source_rule_id)}
+        return {"ok": False, "error": t("webui.services.rules.source_rule_missing", source_rule_id=source_rule_id)}
     if target_path.exists():
-        return {"ok": False, "error": t("rules.rule_id_exists", rule_id=rule_id)}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_exists", rule_id=rule_id)}
 
     template = json.loads(source_path.read_text(encoding="utf-8"))
     template["rule_id"] = rule_id
@@ -247,10 +247,10 @@ def get_rule_template(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": t("rules.rule_id_invalid")}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     rule_path = _resolve_rule_path(dependencies, rule_id)
     if not rule_path or not rule_path.exists():
-        return {"ok": False, "error": t("rules.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
     template = json.loads(rule_path.read_text(encoding="utf-8"))
     if language and int(template.get("rule_schema_version", 1) or 1) >= 2:
         rule = RuleSystem(
@@ -300,22 +300,22 @@ def update_custom_rule(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": t("rules.rule_id_invalid")}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     if not isinstance(template, dict):
-        return {"ok": False, "error": t("rules.rule_not_object")}
+        return {"ok": False, "error": t("webui.services.rules.rule_not_object")}
     rule_path = RuleSystem.path_for(dependencies.rules_dir, rule_id)
     if not rule_path.exists():
-        return {"ok": False, "error": t("rules.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
 
     old_template = json.loads(rule_path.read_text(encoding="utf-8"))
     if not old_template.get("custom"):
-        return {"ok": False, "error": t("rules.builtin_not_editable")}
+        return {"ok": False, "error": t("webui.services.rules.builtin_not_editable")}
 
     rule_name = (template.get("rule_name") or "").strip()
     if not rule_name:
-        return {"ok": False, "error": t("rules.rule_name_empty")}
+        return {"ok": False, "error": t("webui.services.rules.rule_name_empty")}
     if not isinstance(template.get("attributes", []), list):
-        return {"ok": False, "error": t("rules.attributes_not_array")}
+        return {"ok": False, "error": t("webui.services.rules.attributes_not_array")}
     if diagnostics := validate_special_stats(template):
         return {
             "ok": False, "code": "INVALID_RULE_TEMPLATE", "diagnostics": diagnostics,
@@ -324,15 +324,15 @@ def update_custom_rule(
     dice_system = str(template.get("dice_system") or "d20").lower()
     if dice_system not in SUPPORTED_DICE_SYSTEMS:
         supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
-        return {"ok": False, "error": t("rules.dice_system_unsupported", supported=supported)}
+        return {"ok": False, "error": t("webui.services.rules.dice_system_unsupported", supported=supported)}
     template["dice_system"] = dice_system
     if dice_system == "d20":
         try:
             max_check_dc = int(template.get("max_check_dc", 20))
         except (TypeError, ValueError):
-            return {"ok": False, "error": t("rules.max_check_dc_range")}
+            return {"ok": False, "error": t("webui.services.rules.max_check_dc_range")}
         if not 1 <= max_check_dc <= 40:
-            return {"ok": False, "error": t("rules.max_check_dc_range")}
+            return {"ok": False, "error": t("webui.services.rules.max_check_dc_range")}
         template["max_check_dc"] = max_check_dc
 
     if "combat" in template:
@@ -342,7 +342,7 @@ def update_custom_rule(
         try:
             combat_extension_from_template(template)
         except ValueError as exc:
-            return {"ok": False, "error": t("rules.combat_declaration_invalid", exc=exc)}
+            return {"ok": False, "error": t("webui.services.rules.combat_declaration_invalid", exc=exc)}
     # 好感与冒险推进块同理：RuleSystem 构造时对坏块 fail fast，保存时不拦就会
     # 让整个规则列表和使用这条规则的对局都打不开。
     from src.rules.adventure_progression_config import parse_adventure_progression_config
@@ -356,7 +356,7 @@ def update_custom_rule(
             try:
                 parse(template[block])
             except ValueError as exc:
-                return {"ok": False, "error": t("rules.block_declaration_invalid", block=block, exc=exc)}
+                return {"ok": False, "error": t("webui.services.rules.block_declaration_invalid", block=block, exc=exc)}
 
     currency_error = _validate_currency_declaration(template)
     if currency_error:
@@ -370,7 +370,7 @@ def update_custom_rule(
             return {
                 "ok": False,
                 "error": (
-                    t("rules.currency_base_unit_changed")
+                    t("webui.services.rules.currency_base_unit_changed")
                 ),
             }
 
@@ -397,13 +397,13 @@ def delete_custom_rule(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": t("rules.rule_id_invalid")}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     rule_path = RuleSystem.path_for(dependencies.rules_dir, rule_id)
     if not rule_path.exists():
-        return {"ok": False, "error": t("rules.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
     template = json.loads(rule_path.read_text(encoding="utf-8"))
     if not template.get("custom"):
-        return {"ok": False, "error": t("rules.builtin_not_deletable")}
+        return {"ok": False, "error": t("webui.services.rules.builtin_not_deletable")}
     rule_path.unlink()
     logger.info("自定义规则已删除: %s", rule_id)
     return {"ok": True, "rule_id": rule_id}
@@ -482,5 +482,5 @@ def _plugin_rule_items(
                 ),
             })
         except Exception as exc:
-            raise ValueError(t("rules.plugin_template_read_failed", path=item.path, exc=exc)) from exc
+            raise ValueError(t("webui.services.rules.plugin_template_read_failed", path=item.path, exc=exc)) from exc
     return result

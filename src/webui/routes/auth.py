@@ -28,7 +28,7 @@ async def api_login(request: web.Request) -> web.Response:
             logger.exception("登录记录写入失败")
     if not success:
         return web.json_response(
-            {"ok": False, "error": t("routes_auth.wrong_password")},
+            {"ok": False, "error": t("webui.routes.auth.wrong_password")},
             status=401,
             headers={"Cache-Control": "no-store"},
         )

@@ -42,15 +42,15 @@ async def apply(
 ) -> dict[str, Any]:
     stage = str(stage or "").strip()
     if stage not in BRIDGE_EXTENSION_STAGES:
-        return {"ok": False, "error": t("bot_extensions.unsupported_stage", stage=stage)}
+        return {"ok": False, "error": t("webui.services.bot_extensions.unsupported_stage", stage=stage)}
     if not isinstance(payload, dict):
-        return {"ok": False, "error": t("bot_extensions.payload_not_object")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_object")}
     try:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     except (TypeError, ValueError):
-        return {"ok": False, "error": t("bot_extensions.payload_not_json")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_json")}
     if len(encoded) > MAX_BRIDGE_PAYLOAD_BYTES:
-        return {"ok": False, "error": t("bot_extensions.payload_too_large")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_too_large")}
     host = dependencies.plugin_host
     if not host:
         return {
@@ -118,13 +118,13 @@ def _materialize_cards(
 def bridge_card_path(dependencies: BotExtensionDependencies, name: str) -> Path:
     """解析卡片渲染输出文件路径；非法或不存在时抛异常。"""
     if not _BRIDGE_CARD_NAME_RE.match(str(name or "")):
-        raise ValueError(t("bot_extensions.card_file_name_invalid"))
+        raise ValueError(t("webui.services.bot_extensions.card_file_name_invalid"))
     root = bridge_card_dir(dependencies)
     target = (root / str(name)).resolve()
     if root not in target.parents:
-        raise ValueError(t("bot_extensions.card_file_path_invalid"))
+        raise ValueError(t("webui.services.bot_extensions.card_file_path_invalid"))
     if not target.is_file():
-        raise KeyError(t("bot_extensions.card_file_missing"))
+        raise KeyError(t("webui.services.bot_extensions.card_file_missing"))
     return target
 
 

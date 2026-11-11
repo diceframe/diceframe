@@ -114,11 +114,11 @@ def _file_sha256(path: Path) -> str:
 def verify_sha256(path: Path, expected: str) -> None:
     normalized = (expected or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", normalized):
-        raise ValueError(t("updater.sha256_format_invalid", name=path.name))
+        raise ValueError(t("webui.services.updater.sha256_format_invalid", name=path.name))
     actual = _file_sha256(path)
     if not hmac.compare_digest(actual, normalized):
         raise ValueError(
-            t("updater.sha256_mismatch", name=path.name, expected=normalized[:8], actual=actual[:8])
+            t("webui.services.updater.sha256_mismatch", name=path.name, expected=normalized[:8], actual=actual[:8])
         )
 
 
@@ -158,7 +158,7 @@ def parse_sha256_file(content: str, filename: str) -> str:
         match = _SHA256_RE.search(line.strip())
         if match:
             return match.group(0)
-    raise ValueError(t("updater.sha256_parse_failed", filename=filename))
+    raise ValueError(t("webui.services.updater.sha256_parse_failed", filename=filename))
 
 
 def parse_sha256_manifest(content: str, filename: str) -> str:
@@ -171,10 +171,10 @@ def parse_sha256_manifest(content: str, filename: str) -> str:
             continue
         digest = parts[0].lower()
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise ValueError(t("updater.manifest_sha256_invalid", filename=filename))
+            raise ValueError(t("webui.services.updater.manifest_sha256_invalid", filename=filename))
         matches.append(digest)
     if len(matches) != 1:
-        raise ValueError(t("updater.manifest_single_record", filename=filename))
+        raise ValueError(t("webui.services.updater.manifest_single_record", filename=filename))
     return matches[0]
 
 
@@ -233,7 +233,7 @@ def _archive_member_path(name: str) -> PurePosixPath:
         or re.match(r"^[A-Za-z]:", normalized)
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
-        raise ValueError(t("updater.archive_unsafe_path", name=name))
+        raise ValueError(t("webui.services.updater.archive_unsafe_path", name=name))
     return path
 
 
@@ -243,7 +243,7 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
     with zipfile.ZipFile(archive) as package:
         members = package.infolist()
         if not members or len(members) > MAX_ARCHIVE_MEMBERS:
-            raise ValueError(t("updater.archive_empty_or_too_many"))
+            raise ValueError(t("webui.services.updater.archive_empty_or_too_many"))
 
         total_size = 0
         top_levels: set[str] = set()
@@ -252,21 +252,21 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
             path = _archive_member_path(member.filename)
             mode = member.external_attr >> 16
             if stat.S_ISLNK(mode):
-                raise ValueError(t("updater.archive_symlink", filename=member.filename))
+                raise ValueError(t("webui.services.updater.archive_symlink", filename=member.filename))
             total_size += member.file_size
             if total_size > MAX_EXTRACTED_BYTES:
-                raise ValueError(t("updater.archive_too_large"))
+                raise ValueError(t("webui.services.updater.archive_too_large"))
             top_levels.add(path.parts[0])
             checked.append((member, path))
 
         if len(top_levels) != 1:
-            raise ValueError(t("updater.archive_single_root"))
+            raise ValueError(t("webui.services.updater.archive_single_root"))
 
         root = destination.resolve()
         for member, relative in checked:
             target = (destination / Path(*relative.parts)).resolve()
             if not _path_within(target, root):
-                raise ValueError(t("updater.archive_path_outside", filename=member.filename))
+                raise ValueError(t("webui.services.updater.archive_path_outside", filename=member.filename))
             io_target = _io_path(target)
             if member.is_dir():
                 io_target.mkdir(parents=True, exist_ok=True)
@@ -277,7 +277,7 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
 
     extracted_root = destination / next(iter(top_levels))
     if not extracted_root.is_dir():
-        raise ValueError(t("updater.archive_root_invalid"))
+        raise ValueError(t("webui.services.updater.archive_root_invalid"))
     return extracted_root
 
 
@@ -294,7 +294,7 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def _safe_version_dir(version: str) -> str:
     normalized = version.strip().lstrip("vV")
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}", normalized):
-        raise ValueError(t("updater.version_format_invalid", version=version))
+        raise ValueError(t("webui.services.updater.version_format_invalid", version=version))
     return "v" + normalized
 
 
@@ -306,13 +306,13 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
         if not runtime_text:
             return {
                 "supported": False, "mode": "docker", "reason": "runtime",
-                "hint": t("updater.docker_base_image_outdated"),
+                "hint": t("webui.services.updater.docker_base_image_outdated"),
             }
         runtime_root = Path(runtime_text)
         if not runtime_root.is_dir() or not os.access(runtime_root, os.W_OK):
             return {
                 "supported": False, "mode": "docker", "reason": "readonly",
-                "hint": t("updater.docker_managed_dir_not_writable"),
+                "hint": t("webui.services.updater.docker_managed_dir_not_writable"),
             }
         return {"supported": True, "mode": "docker", "reason": "", "hint": ""}
     if Path("/.dockerenv").exists() or os.getenv("TRPG_DATA_DIR") == "/app/data":
@@ -321,7 +321,7 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
             "mode": "docker",
             "reason": "docker",
             "hint": (
-                t("updater.docker_manual_update")
+                t("webui.services.updater.docker_manual_update")
             ),
         }
 
@@ -333,7 +333,7 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
                 "supported": False,
                 "mode": "portable",
                 "reason": "readonly",
-                "hint": t("updater.portable_dir_not_writable"),
+                "hint": t("webui.services.updater.portable_dir_not_writable"),
             }
         return {"supported": True, "mode": "portable", "reason": "", "hint": ""}
 
@@ -342,14 +342,14 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
             "supported": False,
             "mode": "development",
             "reason": "development",
-            "hint": t("updater.git_checkout_manual"),
+            "hint": t("webui.services.updater.git_checkout_manual"),
         }
     if not os.access(root, os.W_OK):
         return {
             "supported": False,
             "mode": "source",
             "reason": "readonly",
-            "hint": t("updater.install_dir_not_writable"),
+            "hint": t("webui.services.updater.install_dir_not_writable"),
         }
     return {"supported": True, "mode": "source", "reason": "", "hint": ""}
 
@@ -511,7 +511,7 @@ class UpdaterService:
                 "available": False,
                 "mode": mode,
                 "target_version": "",
-                "reason": t("updater.no_launcher_previous_version"),
+                "reason": t("webui.services.updater.no_launcher_previous_version"),
             }
         target = self._rollback_target()
         if target is None:
@@ -519,7 +519,7 @@ class UpdaterService:
                 "available": False,
                 "mode": mode,
                 "target_version": "",
-                "reason": t("updater.no_previous_copy"),
+                "reason": t("webui.services.updater.no_previous_copy"),
             }
         return {
             "available": True,
@@ -531,7 +531,7 @@ class UpdaterService:
 
     async def rollback_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": t("updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
         target = self._rollback_target()
         if target is None:
             return {"ok": False, "error": self.get_rollback_status()["reason"]}
@@ -546,7 +546,7 @@ class UpdaterService:
             try:
                 await asyncio.to_thread(prepare_rollback_access, target_data)
             except (OSError, ValueError) as exc:
-                return {"ok": False, "error": t("updater.rollback_data_failed", exc=exc)}
+                return {"ok": False, "error": t("webui.services.updater.rollback_data_failed", exc=exc)}
         signal: dict[str, Any] = {
             "schema": 1,
             "operation": "rollback",
@@ -565,14 +565,14 @@ class UpdaterService:
             install_root = Path(os.getenv("TRPG_INSTALL_ROOT", "")).resolve()
             launcher = install_root / "DiceFrame.exe"
             if not launcher.is_file():
-                return {"ok": False, "error": t("updater.portable_launcher_missing")}
+                return {"ok": False, "error": t("webui.services.updater.portable_launcher_missing")}
             staged_launcher = self._dir / (
                 _ROLLBACK_LAUNCHER_PREFIX + _safe_version_dir(version) + ".exe"
             )
             try:
                 shutil.copy2(launcher, staged_launcher)
             except OSError as exc:
-                return {"ok": False, "error": t("updater.rollback_launcher_failed", exc=exc)}
+                return {"ok": False, "error": t("webui.services.updater.rollback_launcher_failed", exc=exc)}
             signal["launcher_path"] = str(staged_launcher)
 
         self._state.update(
@@ -595,22 +595,22 @@ class UpdaterService:
 
     async def download_update(self, kind: str) -> dict[str, Any]:
         if self._mirrors is None:
-            return {"ok": False, "error": t("updater.mirror_unavailable")}
+            return {"ok": False, "error": t("webui.services.updater.mirror_unavailable")}
         if kind not in _ASSET_PATTERNS:
-            return {"ok": False, "error": t("updater.package_kind_unknown", kind=kind)}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_unknown", kind=kind)}
         if self.is_busy():
-            return {"ok": False, "error": t("updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):
             return {
                 "ok": False,
-                "error": support.get("hint") or t("updater.auto_update_unsupported"),
+                "error": support.get("hint") or t("webui.services.updater.auto_update_unsupported"),
             }
         mode = str(support.get("mode", ""))
         if kind != mode:
             return {"ok": False, "error": t(
-                "updater.portable_package_required" if mode == "portable" else "updater.source_package_required"
+                "webui.services.updater.portable_package_required" if mode == "portable" else "webui.services.updater.source_package_required"
             )}
 
         check = await self._check_updates()
@@ -618,19 +618,19 @@ class UpdaterService:
             return {"ok": False, "error": check.get("error", "版本检查失败")}
         latest = check.get("latest") or {}
         if not latest:
-            return {"ok": False, "error": t("updater.latest_not_found"), "no_release": True}
+            return {"ok": False, "error": t("webui.services.updater.latest_not_found"), "no_release": True}
         version = str(latest.get("version", ""))
         selection = select_asset(latest, kind, version)
         if not selection:
-            return {"ok": False, "error": t("updater.package_kind_not_found", kind=kind)}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_not_found", kind=kind)}
 
         asset, sha_asset = selection
         if kind == "docker":
             if not sha_asset:
-                return {"ok": False, "error": t("updater.docker_checksums_missing")}
+                return {"ok": False, "error": t("webui.services.updater.docker_checksums_missing")}
             size = int(asset.get("size", 0) or 0)
             if size <= 0 or size > MAX_APP_UPDATE_BYTES:
-                return {"ok": False, "error": t("updater.docker_package_size_invalid")}
+                return {"ok": False, "error": t("webui.services.updater.docker_package_size_invalid")}
         self._task = asyncio.create_task(
             self._run_download(asset, sha_asset, version, kind)
         )
@@ -679,10 +679,10 @@ class UpdaterService:
                     )
                 else:
                     if kind == "docker":
-                        raise ValueError(t("updater.docker_checksums_download_failed"))
+                        raise ValueError(t("webui.services.updater.docker_checksums_download_failed"))
                     logger.warning("SHA-256 校验文件下载失败，跳过校验：%s", sha_result.error)
             elif kind == "docker":
-                raise ValueError(t("updater.docker_checksums_required"))
+                raise ValueError(t("webui.services.updater.docker_checksums_required"))
 
             def on_progress(downloaded: int, total: int) -> None:
                 self._state["downloaded_bytes"] = downloaded
@@ -730,23 +730,23 @@ class UpdaterService:
 
     async def apply_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": t("updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
         if self._state.get("state") != "staged":
-            return {"ok": False, "error": t("updater.no_downloaded_package")}
+            return {"ok": False, "error": t("webui.services.updater.no_downloaded_package")}
 
         archive = Path(str(self._state.get("path", "")))
         if not archive.is_file() or not _path_within(archive, self._dir):
-            return {"ok": False, "error": t("updater.downloaded_package_missing")}
+            return {"ok": False, "error": t("webui.services.updater.downloaded_package_missing")}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):
-            return {"ok": False, "error": support.get("hint") or t("updater.auto_update_unsupported")}
+            return {"ok": False, "error": support.get("hint") or t("webui.services.updater.auto_update_unsupported")}
 
         kind = str(self._state.get("kind", ""))
         mode = str(support.get("mode", ""))
         if kind != mode:
             return {"ok": False, "error": t(
-                "updater.portable_package_required" if mode == "portable" else "updater.source_package_required"
+                "webui.services.updater.portable_package_required" if mode == "portable" else "webui.services.updater.source_package_required"
             )}
 
         version = str(self._state.get("version", ""))
@@ -818,26 +818,26 @@ class UpdaterService:
     def _prepare_docker_update(self, archive: Path, version: str) -> dict[str, Any]:
         runtime_text = os.getenv("TRPG_DOCKER_RUNTIME_ROOT", "").strip()
         if not runtime_text:
-            raise ValueError(t("updater.docker_managed_dir_missing"))
+            raise ValueError(t("webui.services.updater.docker_managed_dir_missing"))
         runtime_root = Path(runtime_text).resolve()
         if runtime_root != self._dir.resolve():
-            raise ValueError(t("updater.docker_managed_dir_mismatch"))
+            raise ValueError(t("webui.services.updater.docker_managed_dir_mismatch"))
         versions_dir = runtime_root / "docker-versions"
         versions_dir.mkdir(parents=True, exist_ok=True)
         version_dir = versions_dir / _safe_version_dir(version)
         if not _path_within(version_dir, versions_dir):
-            raise ValueError(t("updater.docker_candidate_dir_outside"))
+            raise ValueError(t("webui.services.updater.docker_candidate_dir_outside"))
 
         current = self._read_docker_current_dir(runtime_root)
         if current and current == version_dir.resolve():
-            raise ValueError(t("updater.cannot_overwrite_running_docker"))
+            raise ValueError(t("webui.services.updater.cannot_overwrite_running_docker"))
         active_text = os.getenv("TRPG_ACTIVE_VERSION_DIR", "").strip()
         if active_text:
             active = Path(active_text).resolve()
             if not _path_within(active, versions_dir):
-                raise ValueError(t("updater.docker_active_dir_outside"))
+                raise ValueError(t("webui.services.updater.docker_active_dir_outside"))
             if active == version_dir.resolve():
-                raise ValueError(t("updater.cannot_overwrite_running_docker"))
+                raise ValueError(t("webui.services.updater.cannot_overwrite_running_docker"))
         extract_dir = runtime_root / ("extract-" + _safe_version_dir(version))
         installing = versions_dir / (version_dir.name + ".installing")
         shutil.rmtree(extract_dir, ignore_errors=True)
@@ -861,7 +861,7 @@ class UpdaterService:
                     runtime_api=DOCKER_RUNTIME_API,
                 )
                 if existing_manifest != manifest:
-                    raise ValueError(t("updater.docker_candidate_conflict"))
+                    raise ValueError(t("webui.services.updater.docker_candidate_conflict"))
                 manifest = existing_manifest
             else:
                 os.replace(package_root, installing)
@@ -929,13 +929,13 @@ class UpdaterService:
     ) -> dict[str, Any]:
         install_root_text = os.getenv("TRPG_INSTALL_ROOT", "").strip()
         if not install_root_text:
-            raise ValueError(t("updater.portable_root_missing"))
+            raise ValueError(t("webui.services.updater.portable_root_missing"))
         install_root = Path(install_root_text).resolve()
         versions_dir = install_root / "versions"
         versions_dir.mkdir(parents=True, exist_ok=True)
         version_dir = versions_dir / _safe_version_dir(version)
         if not _path_within(version_dir, versions_dir):
-            raise ValueError(t("updater.candidate_dir_outside"))
+            raise ValueError(t("webui.services.updater.candidate_dir_outside"))
 
         extract_dir = self._dir / ("extract-" + _safe_version_dir(version))
         candidate_temp: Path | None = None
@@ -950,12 +950,12 @@ class UpdaterService:
                 package_root / "DiceFrame.exe",
             )
             if not all(path.is_file() for path in required):
-                raise ValueError(t("updater.portable_package_invalid"))
+                raise ValueError(t("webui.services.updater.portable_package_invalid"))
 
             current_pointer = self._read_current_version_dir(install_root)
             if version_dir.exists():
                 if current_pointer and version_dir.resolve() == current_pointer:
-                    raise ValueError(t("updater.cannot_overwrite_active_version"))
+                    raise ValueError(t("webui.services.updater.cannot_overwrite_active_version"))
                 _rmtree(version_dir)
 
             candidate_temp = versions_dir / (version_dir.name + ".installing")
@@ -1028,7 +1028,7 @@ class UpdaterService:
                 and (package_root / "src").is_dir()
                 and (package_root / "static-v2" / "index.html").is_file()
             ):
-                raise ValueError(t("updater.source_package_invalid"))
+                raise ValueError(t("webui.services.updater.source_package_invalid"))
 
             _migrate_user_plugin_packages(
                 self._root / "plugins",
@@ -1041,7 +1041,7 @@ class UpdaterService:
                 if entry.name not in _PROTECTED_SOURCE_ENTRIES
             ]
             if not entries:
-                raise ValueError(t("updater.source_package_empty"))
+                raise ValueError(t("webui.services.updater.source_package_empty"))
 
             backup_dir.mkdir(parents=True)
             for source in entries:
@@ -1081,7 +1081,7 @@ class UpdaterService:
                 ) from original
             if moved_old or installed_new:
                 raise UpdateRolledBackError(
-                    t("updater.source_update_rolled_back", original=original)
+                    t("webui.services.updater.source_update_rolled_back", original=original)
                 ) from original
             raise
         finally:

@@ -155,7 +155,7 @@ class RunStoryService:
                 return {'ok': False, 'error': str(exc)}
             except Exception:
                 logger.exception('Run story transaction failed: %s', action)
-                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': t("run_story.save_failed_run_retained")}
+                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': t("webui.services.run_story.save_failed_run_retained")}
         return self.get(key, viewer)
 
     async def _carry(self, key: str, instance: Any, body: dict) -> dict:

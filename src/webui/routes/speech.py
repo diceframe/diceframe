@@ -74,9 +74,9 @@ async def _save_profile(request: web.Request, profile_id: str) -> web.Response:
     try:
         body = await request.json()
     except (ValueError, TypeError):
-        return web.json_response({"ok": False, "error": t("routes_speech.body_must_be_json")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.body_must_be_json")}, status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": t("routes_speech.profile_not_object")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.profile_not_object")}, status=400)
     try:
         result = _get_api(request).save_personal_speech_profile(
             profile_id,
@@ -94,9 +94,9 @@ async def _save_profile(request: web.Request, profile_id: str) -> web.Response:
 def _require_tts_admin(request: web.Request) -> web.Response | None:
     query = getattr(request, "query", {})
     if query.get("user") or query.get("share"):
-        return web.json_response({"ok": False, "error": t("routes_speech.profiles_not_on_share_page")}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.profiles_not_on_share_page")}, status=403)
     if request.get(ACCESS_PASSWORD_CONFIGURED_KEY, False) and not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": t("routes_speech.profiles_admin_only")}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.profiles_admin_only")}, status=403)
     return None
 
 
@@ -110,16 +110,16 @@ async def _synthesize(request: web.Request, game_key: str = "") -> web.Response:
     try:
         body = await request.json()
     except (ValueError, TypeError):
-        return web.json_response({"ok": False, "error": t("routes_speech.body_must_be_json")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.body_must_be_json")}, status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": t("routes_speech.body_must_be_json_object")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.body_must_be_json_object")}, status=400)
     text = str(body.get("text") or "")
     voice = str(body.get("voice") or "")
     language = str(body.get("language") or "zh-CN")
     try:
         speed = float(body.get("speed") or 1.0)
     except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": t("routes_speech.speed_not_number")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.speech.speed_not_number")}, status=400)
     api = _get_api(request)
     try:
         if game_key:

@@ -2789,10 +2789,10 @@ class WebAPI:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": t("webui_api.rewriting_wait_and_retry"),
+                    "error": t("webui.api.rewriting_wait_and_retry"),
                 }
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui_api.game_restarted_refresh_and_retry")}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.api.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.scheduler_advance(instance, rule)
@@ -2814,10 +2814,10 @@ class WebAPI:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": t("webui_api.rewriting_wait_and_retry"),
+                    "error": t("webui.api.rewriting_wait_and_retry"),
                 }
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui_api.game_restarted_refresh_and_retry")}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.api.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.resolve_combat_action(

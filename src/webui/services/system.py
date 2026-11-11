@@ -100,7 +100,7 @@ async def check_updates(
     if not repo or "/" not in repo:
         return {
             "ok": False,
-            "error": t("system.update_repo_invalid"),
+            "error": t("webui.services.system.update_repo_invalid"),
             "current_version": __version__,
             "repository": repo,
             "update_available": False,
@@ -191,18 +191,18 @@ async def _fetch_release(repo: str, include_prerelease: bool, proxy_url: str = "
         async with session.get(endpoint, **request_kwargs) as resp:
             data = await resp.json(content_type=None)
             if resp.status == 404:
-                raise NoReleaseError(t("system.no_public_release"))
+                raise NoReleaseError(t("webui.services.system.no_public_release"))
             if resp.status >= 400:
                 message = data.get("message") if isinstance(data, dict) else await resp.text()
-                raise RuntimeError(t("system.github_http_error", status=resp.status, message=message))
+                raise RuntimeError(t("webui.services.system.github_http_error", status=resp.status, message=message))
             if not include_prerelease:
                 return data
             if not isinstance(data, list):
-                raise RuntimeError(t("system.release_format_invalid"))
+                raise RuntimeError(t("webui.services.system.release_format_invalid"))
             for release in data:
                 if isinstance(release, dict) and not release.get("draft"):
                     return release
-    raise RuntimeError(t("system.no_release_available"))
+    raise RuntimeError(t("webui.services.system.no_release_available"))
 
 
 async def _fetch_release_with_mirrors(
@@ -234,17 +234,17 @@ async def _parse_release_payload(payload: str, include_prerelease: bool) -> dict
 
     data = json.loads(payload)
     if isinstance(data, dict) and data.get("message") == "Not Found":
-        raise NoReleaseError(t("system.no_public_release"))
+        raise NoReleaseError(t("webui.services.system.no_public_release"))
     if not include_prerelease:
         if not isinstance(data, dict):
-            raise RuntimeError(t("system.release_format_invalid"))
+            raise RuntimeError(t("webui.services.system.release_format_invalid"))
         return data
     if not isinstance(data, list):
-        raise RuntimeError(t("system.release_format_invalid"))
+        raise RuntimeError(t("webui.services.system.release_format_invalid"))
     for release in data:
         if isinstance(release, dict) and not release.get("draft"):
             return release
-    raise RuntimeError(t("system.no_release_available"))
+    raise RuntimeError(t("webui.services.system.no_release_available"))
 
 
 def _install_hint(repo: str) -> dict[str, str]:

@@ -56,7 +56,7 @@ class ContentRecoveryService:
         if (not isinstance(identities, list) or not 1 <= len(identities) <= maximum
                 or any(not isinstance(value, str) or not value.strip() or len(value) > 200 for value in identities)
                 or len(set(identities)) != len(identities)):
-            raise ValueError(t("content_recovery.select_explicit_entries"))
+            raise ValueError(t("webui.services.content_recovery.select_explicit_entries"))
         return identities
 
     def _snapshot(self, book_id: str, entry_ids: list[str] | None = None, *, whole=False) -> dict | None:
@@ -68,35 +68,35 @@ class ContentRecoveryService:
     def _book(self, book_id: str) -> dict:
         snapshot = self._snapshot(book_id)
         if snapshot is None:
-            raise ValueError(t("content_recovery.book_missing_or_trashed"))
+            raise ValueError(t("webui.services.content_recovery.book_missing_or_trashed"))
         return snapshot
 
     def _authored(self, snapshot: dict, *, whole=False) -> None:
         book, bindings = snapshot['book'], snapshot['bindings']
         primary = [row for row in bindings if row.get('role') == 'primary']
         if whole and primary:
-            raise ValueError(t("content_recovery.main_book_not_trashable_by_agent"))
+            raise ValueError(t("webui.services.content_recovery.main_book_not_trashable_by_agent"))
         kind = str(book.get('source_kind') or '')
         if primary:
             for binding in primary:
                 if binding.get('scope_kind') != 'world':
-                    raise ValueError(t("content_recovery.source_editability_unproven"))
+                    raise ValueError(t("webui.services.content_recovery.source_editability_unproven"))
                 definition = self.deps.world_definition(binding['scope_id'])
                 source = definition.get('world') or {}
                 if source.get('source') != 'user' or source.get('editable') is not True:
-                    raise ValueError(t("content_recovery.builtin_or_plugin_copy_first"))
+                    raise ValueError(t("webui.services.content_recovery.builtin_or_plugin_copy_first"))
         elif kind not in {'native', 'user', 'device'}:
-            raise ValueError(t("content_recovery.protected_source_copy_first"))
+            raise ValueError(t("webui.services.content_recovery.protected_source_copy_first"))
 
     def _targets(self, book_id: str, entry_ids: list[str], *, protect=True) -> dict:
         identities = self._ids(entry_ids)
         snapshot = self._snapshot(book_id, identities)
         if snapshot is None or {row['id'] for row in snapshot['entries']} != set(identities):
-            raise ValueError(t("content_recovery.entry_not_in_book"))
+            raise ValueError(t("webui.services.content_recovery.entry_not_in_book"))
         if protect:
             self._authored(snapshot)
             if any(row.get('source_plugin') for row in snapshot['entries']):
-                raise ValueError(t("content_recovery.plugin_entry_copy_first"))
+                raise ValueError(t("webui.services.content_recovery.plugin_entry_copy_first"))
         return snapshot
 
     def _affected_games(self, snapshot: dict) -> list[str]:
@@ -118,7 +118,7 @@ class ContentRecoveryService:
 
     def _unreferenced(self, snapshot: dict) -> None:
         if self._affected_games(snapshot) or any(row['scope_kind'] in {'game', 'character'} for row in snapshot['bindings']):
-            raise ValueError(t("content_recovery.book_still_referenced"))
+            raise ValueError(t("webui.services.content_recovery.book_still_referenced"))
 
     def _no_entry_links(self, entry_ids: list[str]) -> None:
         targets = set(entry_ids)
@@ -126,18 +126,18 @@ class ContentRecoveryService:
             for entry in self.store.list_book_entries(book['id']):
                 links = entry.get('connected_to') or []
                 if entry['id'] not in targets and isinstance(links, list) and targets.intersection(links):
-                    raise ValueError(t("content_recovery.entry_still_referenced"))
+                    raise ValueError(t("webui.services.content_recovery.entry_still_referenced"))
 
     def preview(self, kind: str, book_id: str, entry_ids: list[str] | None = None) -> dict:
         if kind == 'archive_book':
             snapshot = self._snapshot(book_id, whole=True)
-            if snapshot is None: raise ValueError(t("content_recovery.book_missing"))
+            if snapshot is None: raise ValueError(t("webui.services.content_recovery.book_missing"))
             self._authored(snapshot, whole=True)
             if any(row.get('source_plugin') for row in snapshot['entries']):
-                raise ValueError(t("content_recovery.plugin_entry_copy_first"))
+                raise ValueError(t("webui.services.content_recovery.plugin_entry_copy_first"))
             self._unreferenced(snapshot)
             if len(snapshot['entries']) > 10:
-                raise ValueError(t("content_recovery.book_operation_too_many_entries"))
+                raise ValueError(t("webui.services.content_recovery.book_operation_too_many_entries"))
             self._no_entry_links([row['id'] for row in snapshot['entries']])
         elif entry_ids:
             snapshot = self._targets(book_id, entry_ids)
@@ -160,7 +160,7 @@ class ContentRecoveryService:
     @staticmethod
     def _bounded(payload: dict) -> None:
         if len(json.dumps(payload, ensure_ascii=False).encode()) > _MAX_SNAPSHOT_BYTES:
-            raise ValueError(t("content_recovery.snapshot_too_large_split"))
+            raise ValueError(t("webui.services.content_recovery.snapshot_too_large_split"))
 
     def _mutate(self, owner: str, kind: str, book_id: str, entry_ids: list[str] | None, action: Callable, *, fields=None, protect=True, visibility_only=False) -> dict:
         owner_key = self._owner(owner)
@@ -186,7 +186,7 @@ class ContentRecoveryService:
                 # Reserve its space before committing a supposedly reversible batch.
                 self._bounded({**payload, 'recovered_after': before})
             if not self.store.update_lorebook_operation(operation_id, owner_key, {'status': 'applied', 'payload': payload}):
-                raise ValueError(t("content_recovery.recovery_record_save_failed"))
+                raise ValueError(t("webui.services.content_recovery.recovery_record_save_failed"))
         return {'ok': True, 'operation_id': operation_id, 'reversible': True, **(result or {}),
                 'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
 
@@ -210,7 +210,7 @@ class ContentRecoveryService:
         def apply():
             if (expected_entries_digest is not None
                     and _digest(self.store.list_book_entries(book_id)) != expected_entries_digest):
-                raise ValueError(t("content_recovery.book_entries_changed"))
+                raise ValueError(t("webui.services.content_recovery.book_entries_changed"))
             if _visibility_only:
                 existing = {row['id'] for row in self.store.list_book_entries(book_id)}
                 if any(row['id'] not in existing for row in rows):
@@ -229,9 +229,9 @@ class ContentRecoveryService:
         self._owner(owner)
         current = self.store.list_book_entries(book_id)
         if _digest(current) != expected_entries_digest:
-            raise ValueError(t("content_recovery.book_entries_changed"))
+            raise ValueError(t("webui.services.content_recovery.book_entries_changed"))
         if len(current) > 1000:
-            raise ValueError(t("content_recovery.book_visibility_too_many_entries"))
+            raise ValueError(t("webui.services.content_recovery.book_visibility_too_many_entries"))
         existing = {str(row.get('id')): row for row in current}
         if (not isinstance(rows, list) or len(rows) > 1000
                 or any(not isinstance(row, dict) or set(row) != {'id', 'visible_to'}
@@ -240,7 +240,7 @@ class ContentRecoveryService:
                        or any(not isinstance(value, str) or not value.strip() for value in row['visible_to'])
                        for row in rows)
                 or len({row['id'] for row in rows}) != len(rows)):
-            raise ValueError(t("content_recovery.visibility_existing_entries_only"))
+            raise ValueError(t("webui.services.content_recovery.visibility_existing_entries_only"))
         changed = [row for row in rows if existing[row['id']].get('visible_to') != row['visible_to']]
         book = self._book(book_id)
         return {'target_name': book['book'].get('name', book_id), 'book_id': book_id,
@@ -260,21 +260,21 @@ class ContentRecoveryService:
         transaction, while each batch retains its own recovery journal record.
         """
         if not isinstance(rows, list) or len(rows) > 1000:
-            raise ValueError(t("content_recovery.book_visibility_too_many_entries"))
+            raise ValueError(t("webui.services.content_recovery.book_visibility_too_many_entries"))
         if not isinstance(expected_entries_digest, str) or not expected_entries_digest:
-            raise ValueError(t("content_recovery.book_summary_required"))
+            raise ValueError(t("webui.services.content_recovery.book_summary_required"))
         if operation_id is not None and (
                 not isinstance(operation_id, str) or not _OPERATION_ID_RE.fullmatch(operation_id)):
             raise ValueError('visibility operation identity must be a stable 32-hex string')
         for row in rows:
             if not isinstance(row, dict) or set(row) != {'id', 'visible_to'}:
-                raise ValueError(t("content_recovery.book_visibility_fields"))
+                raise ValueError(t("webui.services.content_recovery.book_visibility_fields"))
             if not isinstance(row['id'], str) or not row['id'].strip() or not isinstance(row['visible_to'], list):
-                raise ValueError(t("content_recovery.book_visibility_entry_format"))
+                raise ValueError(t("webui.services.content_recovery.book_visibility_entry_format"))
             if any(not isinstance(value, str) or not value.strip() for value in row['visible_to']):
-                raise ValueError(t("content_recovery.visible_to_not_string_list"))
+                raise ValueError(t("webui.services.content_recovery.visible_to_not_string_list"))
         if len({row['id'] for row in rows}) != len(rows):
-            raise ValueError(t("content_recovery.book_visibility_duplicate_entries"))
+            raise ValueError(t("webui.services.content_recovery.book_visibility_duplicate_entries"))
 
         owner_key = self._owner(owner)
         request_digest = _digest({
@@ -302,11 +302,11 @@ class ContentRecoveryService:
             current = self.store.list_book_entries(book_id)
             current_digest = _digest(current)
             if current_digest != expected_entries_digest:
-                raise ValueError(t("content_recovery.book_entries_changed"))
+                raise ValueError(t("webui.services.content_recovery.book_entries_changed"))
             existing = {str(row.get('id')): row for row in current}
             unknown = [row['id'] for row in rows if row['id'] not in existing]
             if unknown:
-                raise ValueError(t("content_recovery.visibility_existing_entries_only"))
+                raise ValueError(t("webui.services.content_recovery.visibility_existing_entries_only"))
             changed = [row for row in rows if existing[row['id']].get('visible_to') != row['visible_to']]
             if not changed:
                 result = {'ok': True, 'operation_ids': [], 'changed_count': 0, 'batch_count': 0,
@@ -325,12 +325,12 @@ class ContentRecoveryService:
                                 'request_digest': request_digest, 'book_id': book_id,
                                 'result': result,
                             }}):
-                        raise ValueError(t("content_recovery.visibility_receipt_save_failed"))
+                        raise ValueError(t("webui.services.content_recovery.visibility_receipt_save_failed"))
                 return result
             # Recheck immediately before writing; the transaction lock makes
             # this the authoritative fence for all following batches.
             if _digest(self.store.list_book_entries(book_id)) != expected_entries_digest:
-                raise ValueError(t("content_recovery.book_entries_changed"))
+                raise ValueError(t("webui.services.content_recovery.book_entries_changed"))
             if operation_id is not None:
                 self.store.record_lorebook_operation({
                     'id': operation_id, 'owner': owner_key, 'kind': _VISIBILITY_GROUP_KIND,
@@ -356,7 +356,7 @@ class ContentRecoveryService:
                             'request_digest': request_digest, 'book_id': book_id,
                             'result': result,
                         }}):
-                    raise ValueError(t("content_recovery.visibility_receipt_save_failed"))
+                    raise ValueError(t("webui.services.content_recovery.visibility_receipt_save_failed"))
         return result
 
     def read_book_visibility_receipt(self, owner: str, operation_id: str) -> dict | None:
@@ -407,16 +407,16 @@ class ContentRecoveryService:
             raise ValueError('Invalid content operation identity')
         operation = self.store.get_lorebook_operation(operation_id, self._owner(owner))
         if operation is None or operation['status'] != 'applied':
-            raise ValueError(t("content_recovery.record_missing_or_handled"))
+            raise ValueError(t("webui.services.content_recovery.record_missing_or_handled"))
         return operation
 
     def recovery_preview(self, owner: str, operation_id: str, *, restore=False) -> dict:
         operation = self._operation(owner, operation_id)
         if operation['kind'] in {'world_fields', 'card_fields'}:
-            if restore or self.metadata is None: raise ValueError(t("content_recovery.use_undo_for_narrative"))
+            if restore or self.metadata is None: raise ValueError(t("webui.services.content_recovery.use_undo_for_narrative"))
             return self.metadata.recovery_preview(owner, operation_id)
         archived = operation['kind'] in {'archive_entries', 'archive_book'}
-        if restore != archived: raise ValueError(t("content_recovery.choose_matching_operation"))
+        if restore != archived: raise ValueError(t("webui.services.content_recovery.choose_matching_operation"))
         payload = operation['payload']
         current = self._snapshot(payload['book_id'], payload['entry_ids'], whole=operation['kind'] == 'archive_book')
         if operation['kind'] == 'write_entries' and payload.get('visibility_only'):
@@ -434,7 +434,7 @@ class ContentRecoveryService:
         else:
             current_check, after_check = current, payload['after']
         if current_check != after_check:
-            raise ValueError(t("content_recovery.content_or_references_changed"))
+            raise ValueError(t("webui.services.content_recovery.content_or_references_changed"))
         if operation['kind'] == 'write_entries':
             existed = {row['id'] for row in payload['before']['entries']}
             self._no_entry_links([identity for identity in payload['entry_ids'] if identity not in existed])
@@ -444,7 +444,7 @@ class ContentRecoveryService:
     def recovery_guard(self, owner: str, operation_id: str, *, restore=False) -> str:
         operation = self._operation(owner, operation_id)
         if operation['kind'] in {'world_fields', 'card_fields'}:
-            if restore or self.metadata is None: raise ValueError(t("content_recovery.use_undo_for_narrative"))
+            if restore or self.metadata is None: raise ValueError(t("webui.services.content_recovery.use_undo_for_narrative"))
             return self.metadata.recovery_guard(owner, operation_id)
         preview = self.recovery_preview(owner, operation_id, restore=restore)
         return _digest({'preview': preview, 'operation': self._operation(owner, operation_id)})
@@ -488,12 +488,12 @@ class ContentRecoveryService:
             self._bounded(payload)
             if not self.store.update_lorebook_operation(operation_id, self._owner(owner),
                 {'status': 'restored' if restore else 'undone', 'payload': payload}):
-                raise ValueError(t("content_recovery.recovery_result_save_failed"))
+                raise ValueError(t("webui.services.content_recovery.recovery_result_save_failed"))
         return {'ok': True, 'operation_id': operation_id, 'navigation': {'route': 'lorebook', 'query': {'book': book_id}}}
 
     def undo(self, owner: str, operation_id: str) -> dict:
         if self._operation(owner, operation_id)['kind'] in {'world_fields', 'card_fields'}:
-            if self.metadata is None: raise ValueError(t("content_recovery.narrative_recovery_unavailable"))
+            if self.metadata is None: raise ValueError(t("webui.services.content_recovery.narrative_recovery_unavailable"))
             return self.metadata.undo(owner, operation_id)
         return self._recover(owner, operation_id)
 

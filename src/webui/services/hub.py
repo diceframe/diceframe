@@ -35,7 +35,7 @@ class HubDependencies:
 def _client(dependencies: HubDependencies):
     client = dependencies.client
     if client is None:
-        raise RuntimeError(t("hub.hub_disabled"))
+        raise RuntimeError(t("webui.services.hub.hub_disabled"))
     return client
 
 
@@ -70,7 +70,7 @@ async def update_preferences(
         dependencies.legal_accepted(state, documents)
         or legal_acceptance is not None
     ):
-        raise ValueError(t("hub.privacy_policy_required"))
+        raise ValueError(t("webui.services.hub.privacy_policy_required"))
     previous = {
         "hub_telemetry_enabled": state.get("hub_telemetry_enabled", False),
         "hub_telemetry_choice_made": state.get("hub_telemetry_choice_made", False),
@@ -187,7 +187,7 @@ async def plugin_readme(dependencies: HubDependencies, plugin_id: str) -> dict[s
         "ok": False,
         "html": "",
         "markdown": "",
-        "error": hub_error or t("hub.readme_unavailable"),
+        "error": hub_error or t("webui.services.hub.readme_unavailable"),
         "source": {"hub": False, "github": False, "cached": False, "stale": False, "error": hub_error},
     }
 

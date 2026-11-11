@@ -23,7 +23,7 @@ async def api_create_game(request: web.Request) -> web.Response:
     body = await request.json()
     if len(str(body.get("description", ""))) > MAX_SEED_CHARS:
         return web.json_response(
-            {"error": t("routes_game_lifecycle_routes.world_description_too_long", max_seed_chars=MAX_SEED_CHARS)}, status=400
+            {"error": t("webui.routes.game_lifecycle_routes.world_description_too_long", max_seed_chars=MAX_SEED_CHARS)}, status=400
         )
     # 前端 difficulty 下拉给的是中文值（轻松/标准/硬核），与规则模板的
     # difficulty_instructions 键一致；旧代码硬编码 "standard" 会命中不到任何

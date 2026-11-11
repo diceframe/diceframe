@@ -129,7 +129,7 @@ class PairingService:
             return (
                 {
                     "ok": False,
-                    "error": t("webui_pairing.code_invalid_or_expired"),
+                    "error": t("webui.pairing.code_invalid_or_expired"),
                     "error_code": "PAIRING_CODE_INVALID",
                 },
                 401,

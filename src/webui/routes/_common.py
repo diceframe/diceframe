@@ -34,4 +34,4 @@ def require_content_owner(request: web.Request) -> web.Response | None:
 def _require_confirmed_request(request: web.Request) -> web.Response | None:
     if str(request.headers.get("X-TRPG-Confirm", "")).lower() in {"true", "yes", "1"}:
         return None
-    return web.json_response({"ok": False, "error": t("routes__common.confirm_header_missing")}, status=403)
+    return web.json_response({"ok": False, "error": t("webui.routes._common.confirm_header_missing")}, status=403)

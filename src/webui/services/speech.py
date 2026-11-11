@@ -144,9 +144,9 @@ async def synthesize(
     if inst is None:
         raise KeyError("游戏不存在")
     if not user_id or not (owner or user_id == inst.gm_uid or user_id in inst.players):
-        raise PermissionError(t("speech.identity_not_in_game"))
+        raise PermissionError(t("webui.services.speech.identity_not_in_game"))
     if not _is_public_game_text(inst, text):
-        raise PermissionError(t("speech.public_timeline_only"))
+        raise PermissionError(t("webui.services.speech.public_timeline_only"))
     return await dependencies.backend.synthesize(
         SpeechRequest(text=text, voice=voice, language=language, speed=speed),
         _voice_profiles(dependencies),

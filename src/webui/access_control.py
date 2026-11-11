@@ -85,7 +85,7 @@ class WebAccessControl:
             )
             if not ticket:
                 return web.json_response(
-                    {"ok": False, "error": t("webui_access_control.sse_ticket_invalid")},
+                    {"ok": False, "error": t("webui.access_control.sse_ticket_invalid")},
                     status=401,
                 )
             request["user_id"] = ticket.user_id
@@ -154,7 +154,7 @@ class WebAccessControl:
                 )
             if not owner_authenticated and self.share_uid_is_gm_seat(request, share_uid):
                 return web.json_response(
-                    {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui_access_control.gm_seat_requires_host_login")},
+                    {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui.access_control.gm_seat_requires_host_login")},
                     status=403,
                 )
             viewer_uid = request.get("user_id", "")
@@ -196,13 +196,13 @@ class WebAccessControl:
                         )
                     if self.share_uid_is_gm_seat(request, share_uid):
                         return web.json_response(
-                            {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui_access_control.gm_seat_requires_host_login")},
+                            {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui.access_control.gm_seat_requires_host_login")},
                             status=403,
                         )
                     request["user_id"] = share_uid
                     return await handler(request)
                 return web.json_response(
-                    {"ok": False, "error": t("webui_access_control.unauthorized")},
+                    {"ok": False, "error": t("webui.access_control.unauthorized")},
                     status=401,
                 )
         return await handler(request)
@@ -222,7 +222,7 @@ class WebAccessControl:
         )
         if not global_authenticated and not plugin_identity:
             return web.json_response(
-                {"ok": False, "error": t("webui_access_control.bot_unauthorized")},
+                {"ok": False, "error": t("webui.access_control.bot_unauthorized")},
                 status=401,
             )
         request["bot_authenticated"] = True
@@ -284,7 +284,7 @@ class WebAccessControl:
                 {
                     "ok": False,
                     "error_code": "BOT_SURFACE_UNSUPPORTED",
-                    "error": t("webui_access_control.bot_permission_surface_invalid"),
+                    "error": t("webui.access_control.bot_permission_surface_invalid"),
                 },
                 status=403,
             )
@@ -294,7 +294,7 @@ class WebAccessControl:
                 {
                     "ok": False,
                     "error_code": "BOT_SURFACE_DISABLED",
-                    "error": t("webui_access_control.play_mode_no_bot"),
+                    "error": t("webui.access_control.play_mode_no_bot"),
                 },
                 status=403,
             )
@@ -305,7 +305,7 @@ class WebAccessControl:
                     {
                         "ok": False,
                         "error_code": "BOT_READ_ONLY",
-                        "error": t("webui_access_control.bot_binding_read_only"),
+                        "error": t("webui.access_control.bot_binding_read_only"),
                     },
                     status=403,
                 )
@@ -335,10 +335,10 @@ class WebAccessControl:
         if grant.paired_device_id:
             devices = app.get(DEVICE_TOKENS_KEY)
             if devices is None or not devices.has(grant.paired_device_id):
-                return {"error_code": "PAIRED_DEVICE_REVOKED", "error": t("webui_access_control.device_pairing_revoked")}
+                return {"error_code": "PAIRED_DEVICE_REVOKED", "error": t("webui.access_control.device_pairing_revoked")}
             return None
         if self.access_password_marker() != grant.access_password_hash:
-            return {"error_code": "ACCESS_PASSWORD_CHANGED", "error": t("webui_access_control.access_password_changed")}
+            return {"error_code": "ACCESS_PASSWORD_CHANGED", "error": t("webui.access_control.access_password_changed")}
         return None
 
     def bot_revocation(self, app: web.Application, grant: BotGrant) -> dict | None:
@@ -360,8 +360,8 @@ class WebAccessControl:
                 grant.plugin_id, grant.token_digest,
             ):
                 return None
-            return {"error_code": "PLUGIN_TOKEN_REVOKED", "error": t("webui_access_control.plugin_token_revoked")}
-        return {"error_code": "BOT_TOKEN_REVOKED", "error": t("webui_access_control.bot_token_rotated")}
+            return {"error_code": "PLUGIN_TOKEN_REVOKED", "error": t("webui.access_control.plugin_token_revoked")}
+        return {"error_code": "BOT_TOKEN_REVOKED", "error": t("webui.access_control.bot_token_rotated")}
 
     @staticmethod
     def is_public_ruleset_builder_request(request: web.Request) -> bool:
@@ -454,7 +454,7 @@ class WebAccessControl:
             )
             if not token_uid and not owner_authenticated and access_password_configured:
                 return "", web.json_response(
-                    {"ok": False, "error_code": "SEAT_TOKEN_INVALID", "error": t("webui_access_control.seat_credential_invalid")},
+                    {"ok": False, "error_code": "SEAT_TOKEN_INVALID", "error": t("webui.access_control.seat_credential_invalid")},
                     status=401,
                 )
         query_uid = str(request.query.get("user") or "").strip()
@@ -475,7 +475,7 @@ class WebAccessControl:
                 return "", None
             return session_uid, None
         return "", web.json_response(
-            {"ok": False, "error_code": "SEAT_TOKEN_REQUIRED", "error": t("webui_access_control.seat_credential_required")},
+            {"ok": False, "error_code": "SEAT_TOKEN_REQUIRED", "error": t("webui.access_control.seat_credential_required")},
             status=401,
         )
 

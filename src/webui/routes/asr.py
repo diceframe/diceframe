@@ -31,9 +31,9 @@ async def api_assistant_transcription(request: web.Request) -> web.Response:
 def _require_asr_admin(request: web.Request) -> web.Response | None:
     query = getattr(request, "query", {})
     if query.get("user") or query.get("share"):
-        return web.json_response({"ok": False, "error": t("routes_asr.asr_test_not_on_share_page")}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.asr.asr_test_not_on_share_page")}, status=403)
     if request.get(ACCESS_PASSWORD_CONFIGURED_KEY, False) and not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": t("routes_asr.asr_test_admin_only")}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.asr.asr_test_admin_only")}, status=403)
     return None
 
 
