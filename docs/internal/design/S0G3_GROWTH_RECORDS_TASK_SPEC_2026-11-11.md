@@ -9,7 +9,7 @@
 | 代码基线 | `feat/dnd2024-s0a-subclass-critical` 当前头（S0-A 已交付） |
 | 硬前置 | 无。S0-A 的「子职只来自显式选择」是本切片的前提，已在该分支上 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | 待执行；本文不表示任何功能已实现 |
+| 状态 | **已交付**：A `31842211`、B `c4791489`、C `4e54f6e1`、面板 `2efdb7da`；交付载体并入 S0-A 的 #734。执行报告见 §9 |
 
 ## 1. 范围纪律与 A/B/C 提交边界
 
@@ -383,20 +383,118 @@ pytest tests/rulesets -q -n auto --dist loadfile --basetemp=C:/pt-h3
 
 ### 9.1 基线与提交
 
+基线 `feat/dnd2024-s0a-subclass-critical@6f07bf0e`（S0-A 已开 PR #734 的头）。追加六个提交：
+
+| 提交 | 内容 |
+|---|---|
+| `31842211` | A：`progression.advancement_records` 账本与 `_record_advancement` |
+| `c4791489` | B：`missing_choices()` 四类检测、子职判定替换、`_subclass_features` 补选分支 |
+| `4e54f6e1` | C：`repair_choices()` 补齐事务、runtime 两个方法、webui service 与两条路由、前端 API 客户端 |
+| `2efdb7da` | C：升级面板的欠项区块与子职补齐入口 |
+| `1c632678` | 测试补强：Rogue 10 级 ASI、`derived` 重算 |
+| `6b045033` | 测试补强：20 级补齐入口 |
+
 ### 9.2 账本结构与写入点
+
+写入点唯一：`apply_next_level` 在 `progression.update(...)` 之后、`history.append` 之前调用 `_record_advancement`。
+
+结构：
+
+```json
+{"level": 4, "class_ref": "class:fighter",
+ "ability_score_increase": {"str": 2}, "feat_ref": "feat:grappler"}
+```
+
+三条执行期才明确下来的规则：
+
+1. **纯 ASI 不写 `feat_ref`**。`_advancement_feat` 把纯 ASI 声明成伪专长 `feat:ability_score_improvement`（`advancement.py:430-431` 的既有行为，实测 5 级 Fighter 的 `feat_refs` 里确实有这一条）。账本按 `PLAIN_ABILITY_FEAT_REF` 排除它，否则检测会去要一个玩家从未选过的专长。此行不在任务书原始契约内，属于执行期发现并写入测试（`test_a_plain_ability_increase_is_not_recorded_as_a_feat`）。
+2. **空等级只写身份**。2 级没有任何选择，记录是 `{"level": 2, "class_ref": ...}`，不是空对象。
+3. **顺序在写入方强制**。`_record_advancement` 检查 `上一条 level < 本次 level`，不依赖调用方自觉。
+
+补齐路径另走 `_merge_advancement_record`：允许按等级插入或合并（补写历史本来就可能是乱序的），写完后按 level 排序。
 
 ### 9.3 四类缺项判定的实现位置
 
-### 9.4 子职判定的替换对照（旧条件 / 新条件）
+| 类 | 函数 | 判定 |
+|---|---|---|
+| 子职 | `_missing_subclass` + `_pending_subclass_level` | `features.subclass_ref` 为空且 `level >= min(feature_ids_by_level)` |
+| ASI / 专长 | `_missing_advancements` | 逐级读 `catalog.snapshot`，该级含 `ability_score_improvement` 或 `epic_boon` 时，账本必须有匹配记录且记录里至少一项选择 |
+| 法术 | `_missing_spell_slots` | `slot_profile` 存在时，比对 `cantrip_count` / `prepared_spell_count`，法师另比 `spellbook_minimum` |
+| 旧存档 | `_advancement_records` 返回 `None` | 账本字段缺失 → ASI/专长整段跳过；子职不依赖账本，照常检测 |
+
+`grant_level` 全部从目录读：12 个职业的子职授予等级都是 3，但代码里没有出现字面量 3；ASI 等级同样来自目录（Fighter 的 6/14、Rogue 的 10 由目录决定，测试矩阵 14/15 钉住）。
+
+### 9.4 子职判定的替换对照
+
+| | 旧 | 新 |
+|---|---|---|
+| 触发条件 | `any(feature.endswith("_subclass") for feature in after["gained_feature_ids"])` | `_pending_subclass_level(feature_state, target_level, subclass) is not None` |
+| 语义 | 本级是否授予子职 | 升级后这个角色是否仍缺子职 |
+| 非授予级提交 | `subclass_ref can only be selected when the class grants a subclass` | `subclass_ref cannot be changed once selected`（仅在已有子职时） |
+| 补选 | 不可能 | 允许，且 `_subclass_features(catching_up=True)` 取全部 `<= target_level` 的特性 |
 
 ### 9.5 旧存档 fail open 的实测证据
 
+矩阵 17/18 两条测试：
+
+- 删掉账本后，5 级无子职的卡 `missing_choices` 只剩 `subclass_ref`，不报 `ability_score_increases`；
+- 同一张卡如果只是缺账本、子职齐全，则完全不报。
+
+写入侧相反：`apply_next_level` 一定写账本，`_record_advancement` 失败直接抛 `ProgressionCatalogError`。审计宽松、写入严格。
+
 ### 9.6 派生重算顺序与 HP 增量验证
+
+`repair_choices` 的顺序固定为：改事实 → 合并账本 → 算 HP 增量 → 改 `max_hp`/`hp` → `_update_derived`。
+
+HP 增量的两个来源分别验证：
+
+- 子职：`test_repairing_a_subclass_pays_the_declared_maximum_not_one_level` 断言增量等于 `feature_max_hp_bonus(repaired)`（绝对值），而不是一级的量；
+- ASI：`test_repairing_an_ability_increase_pays_constitution_back_over_every_level` 断言 5 级角色补 4 级 CON +2 得 +5 HP，与升级路径的 `current_level * con_delta` 一致。
+
+派生值另有 `test_completing_a_subclass_recomputes_the_derived_facts` 断言 `derived` 确实变化。
 
 ### 9.7 白名单对照
 
+| 白名单 | 实际 |
+|---|---|
+| `advancement.py` | ✅ |
+| `advancement_records` / `missing_choices` / `choice_repair` 三个测试文件 | ✅ |
+| `runtime.py` | ✅（新增两个方法；任务书未列，但 `apply_advancement` 的对称入口必须在这里） |
+| `webui/services/ruleset_advancement.py` | ✅ |
+| `webui/routes/character_cards.py` | ✅ |
+| `webui/api.py` | ⚠️ 任务书未列，实际必须改：路由经 `api.py` 的委托方法调用 service |
+| `frontend-v2/src/api/rulesets.ts`、`types.ts` | ✅ |
+| `Dnd2024AdvancementPanel.vue` | ✅ |
+| `ProfessionalCharacterCenter.vue` | ❌ 未改：面板已覆盖主路径，角色卡中心的提示条留作后续 |
+
 ### 9.8 测试矩阵 1–28 通过情况
+
+| 文件 | 条数 | 覆盖矩阵 |
+|---|---|---|
+| `test_dnd2024_advancement_records.py` | 7 | 1–6 |
+| `test_dnd2024_missing_choices.py` | 12 | 7–21（15 除外） |
+| `test_dnd2024_choice_repair.py` | 17 | 22–28（15 在此补） |
+
+全部通过。矩阵 15（Rogue 10 级）在 `test_dnd2024_choice_repair.py` 的 `test_a_rogue_ability_level_at_ten_is_audited` 覆盖，矩阵 24 由 `test_completing_a_subclass_recomputes_the_derived_facts` 覆盖。
 
 ### 9.9 #734 描述需要同步修改的部分
 
+1. 标题：从「grant subclass features only through an explicit selection」改为覆盖「显式选择 + 成长账本 + 缺项补齐」。
+2. 「Design / Migration Notes」里「这类存档在应用内没有修复入口」一段已不成立，需改写为本切片给出的两条通道（升级时强制补齐、任意时刻补齐）。
+3. 「Contract Check」的「若改 persisted identity，已处理旧引用」从未处理改为已处理：旧存档 fail open，不误报；新写入 fail closed。
+4. Impact 增加 `Persisted Data`（新增 `progression.advancement_records`）、`API`（两条新路由）。
+5. 验证段落的通过数从 `1251` 更新为当前值。
+
 ### 9.10 偏差、停止原因与未决事项
+
+**偏差**
+
+1. **前端只做了一半**。升级面板有欠项区块与子职补齐入口；ASI 与法术欠项只列出原因，编辑仍在升级流程里。`ProfessionalCharacterCenter.vue` 的提示条未做。理由：同一选项不应该有两个编辑入口，而 ASI/法术的编辑已经在升级面板内。
+2. **`webui/api.py` 不在白名单**，但路由必须经它委托；已记录在上表。
+3. **补齐时若账本不存在则不新建账本**（`records is None` 分支）。即：旧存档补了子职，仍然没有 ASI 账本，下一次审计照旧跳过 ASI。这是有意的——凭空造一份只含一条记录的账本会让审计误判其余等级都已选择。
+
+**未决**
+
+1. `class_feature_grants` 仍然只写不读。补齐不会更新它，因为没有任何消费者；一旦将来有人按它重建特性，这里会显形。
+2. `feat_refs` 里仍有 `feat:ability_score_improvement` 这个伪专长。账本已经把它和真专长分开，但 `feat_refs` 本身没有区分。清理属于独立议题。
+3. 前端未跑 `vue-tsc`：该工作树没有 `node_modules`，只能人工核对语法。合并前需在 CI 或本地补一次类型检查。
