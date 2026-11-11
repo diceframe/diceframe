@@ -14,6 +14,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 import aiohttp
+from src.localization.messages import t
 
 
 DEFAULT_MARKETPLACE_OWNER = "diceframe"
@@ -130,7 +131,7 @@ class MirrorManager:
     def add(self, data: dict[str, Any]) -> dict[str, Any]:
         mirror_id = _clean_id(data.get("id"))
         if any(mirror.get("id") == mirror_id for mirror in self.mirrors):
-            raise ValueError(f"镜像源 ID 已存在：{mirror_id}")
+            raise ValueError(t("plugin_host_mirrors.mirror_id_exists", mirror_id=mirror_id))
         mirror = self._normalize(data, default_priority=self._next_priority())
         self.mirrors.append(mirror)
         self._save()
@@ -146,7 +147,7 @@ class MirrorManager:
                 self.mirrors[index] = self._normalize(updated, default_priority=int(mirror.get("priority", 999)))
                 self._save()
                 return dict(self.mirrors[index])
-        raise KeyError(f"镜像源不存在：{mirror_id}")
+        raise KeyError(t("plugin_host_mirrors.mirror_missing", mirror_id=mirror_id))
 
     def delete(self, mirror_id: str) -> dict[str, Any]:
         for index, mirror in enumerate(self.mirrors):
@@ -154,7 +155,7 @@ class MirrorManager:
                 removed = self.mirrors.pop(index)
                 self._save()
                 return {"id": mirror_id, "deleted": True, "name": removed.get("name", mirror_id)}
-        raise KeyError(f"镜像源不存在：{mirror_id}")
+        raise KeyError(t("plugin_host_mirrors.mirror_missing", mirror_id=mirror_id))
 
     async def test(self, mirror_id: str = "") -> dict[str, Any]:
         if mirror_id:
@@ -163,7 +164,7 @@ class MirrorManager:
         else:
             mirrors = self.enabled()
         if not mirrors:
-            raise ValueError("没有启用的镜像源")
+            raise ValueError(t("plugin_host_mirrors.no_enabled_mirror"))
         results = []
         for index, mirror in enumerate(mirrors, 1):
             url = self.raw_url(
@@ -364,7 +365,7 @@ class MirrorManager:
         for mirror in self.mirrors:
             if mirror.get("id") == mirror_id:
                 return dict(mirror)
-        raise KeyError(f"镜像源不存在：{mirror_id}")
+        raise KeyError(t("plugin_host_mirrors.mirror_missing", mirror_id=mirror_id))
 
     async def _fetch(
         self,
@@ -400,7 +401,7 @@ class MirrorManager:
                             async for chunk in response.content.iter_chunked(64 * 1024):
                                 chunks.extend(chunk)
                                 if len(chunks) > max_bytes:
-                                    raise ValueError(f"下载内容超过限制：{max_bytes} bytes")
+                                    raise ValueError(t("plugin_host_mirrors.download_too_large", max_bytes=max_bytes))
                             raw = bytes(chunks)
                             data: str | bytes = raw if binary else raw.decode("utf-8")
                         else:
@@ -472,7 +473,7 @@ class MirrorManager:
                                 fh.write(chunk)
                                 downloaded += len(chunk)
                                 if max_bytes and downloaded > max_bytes:
-                                    raise ValueError(f"下载内容超过限制：{max_bytes} bytes")
+                                    raise ValueError(t("plugin_host_mirrors.download_too_large", max_bytes=max_bytes))
                                 if on_progress:
                                     progress_result = on_progress(downloaded, total)
                                     if inspect.isawaitable(progress_result):
@@ -511,7 +512,7 @@ def github_archive_url(repository_url: str, branch: str) -> str:
     owner, repo = parse_github_repository(repository_url)
     clean_branch = (branch or "main").strip().strip("/")
     if not clean_branch or ".." in clean_branch:
-        raise ValueError("分支名称非法")
+        raise ValueError(t("plugin_host_mirrors.branch_invalid"))
     return f"https://github.com/{owner}/{repo}/archive/refs/heads/{clean_branch}.zip"
 
 
@@ -519,54 +520,54 @@ def github_commit_archive_url(repository_url: str, commit_sha: str) -> str:
     owner, repo = parse_github_repository(repository_url)
     normalized_sha = str(commit_sha or "").strip().lower()
     if len(normalized_sha) != 40 or any(ch not in "0123456789abcdef" for ch in normalized_sha):
-        raise ValueError("Git commit SHA 必须是 40 位十六进制字符串")
+        raise ValueError(t("plugin_host_mirrors.commit_sha_invalid"))
     return f"https://github.com/{owner}/{repo}/archive/{normalized_sha}.zip"
 
 
 def parse_github_repository(repository_url: str) -> tuple[str, str]:
     parsed = urlparse(validate_public_http_url(repository_url))
     if (parsed.hostname or "").lower() != "github.com":
-        raise ValueError("目前只支持 GitHub 插件仓库")
+        raise ValueError(t("plugin_host_mirrors.github_only"))
     parts = [part for part in parsed.path.strip("/").split("/") if part]
     if len(parts) < 2:
-        raise ValueError("GitHub 仓库 URL 必须包含 owner/repo")
+        raise ValueError(t("plugin_host_mirrors.repo_url_missing_owner_repo"))
     owner = parts[0]
     repo = parts[1][:-4] if parts[1].endswith(".git") else parts[1]
     if not owner or not repo:
-        raise ValueError("GitHub 仓库 URL 无效")
+        raise ValueError(t("plugin_host_mirrors.repo_url_invalid"))
     return owner, repo
 
 
 def validate_public_http_url(url: str, *, resolve: bool = True) -> str:
     normalized = str(url or "").strip()
     if not normalized:
-        raise ValueError("URL 不能为空")
+        raise ValueError(t("plugin_host_mirrors.url_empty"))
     parsed = urlparse(normalized)
     if parsed.scheme.lower() not in {"http", "https"}:
-        raise ValueError("URL 只允许 http/https")
+        raise ValueError(t("plugin_host_mirrors.url_scheme"))
     if not parsed.hostname or not parsed.netloc:
-        raise ValueError("URL 缺少主机名")
+        raise ValueError(t("plugin_host_mirrors.url_host_missing"))
     if parsed.username or parsed.password:
-        raise ValueError("URL 不允许内嵌认证信息")
+        raise ValueError(t("plugin_host_mirrors.url_credentials"))
     if parsed.fragment:
-        raise ValueError("URL 不允许包含片段")
+        raise ValueError(t("plugin_host_mirrors.url_fragment"))
     hostname = parsed.hostname.lower()
     if hostname in {"localhost", "localhost.localdomain"}:
-        raise ValueError("URL 不允许访问本地主机")
+        raise ValueError(t("plugin_host_mirrors.url_localhost"))
     if resolve:
         try:
             addresses = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
         except socket.gaierror as exc:
-            raise ValueError(f"URL 主机无法解析：{hostname}") from exc
+            raise ValueError(t("plugin_host_mirrors.url_host_unresolved", hostname=hostname)) from exc
         for item in addresses:
             ip = ipaddress.ip_address(item[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
-                raise ValueError(f"URL 不允许访问非公网地址：{ip}")
+                raise ValueError(t("plugin_host_mirrors.url_non_public", ip=ip))
     return normalized
 
 
 def _clean_id(value: Any) -> str:
     mirror_id = str(value or "").strip().lower()
     if not mirror_id or not all(ch.isalnum() or ch in "-_" for ch in mirror_id):
-        raise ValueError("镜像源 ID 只能包含小写字母、数字、-、_")
+        raise ValueError(t("plugin_host_mirrors.mirror_id_charset"))
     return mirror_id

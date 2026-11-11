@@ -19,6 +19,7 @@ from .map_validation import (
     validate_map_references,
 )
 from .support import plugin_type_descriptor
+from src.localization.messages import t
 
 _IMAGE_KINDS = frozenset({"portrait_asset", "scene_image_asset", "standing_portrait"}) | MAP_IMAGE_KINDS
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
@@ -103,7 +104,7 @@ class ContributionRegistry:
         if contributes is None:
             return []
         if not isinstance(contributes, dict):
-            raise ValueError("contributes 必须是对象")
+            raise ValueError(t("plugin_host_registry.contributes_not_object"))
 
         plugin_id = str(manifest.get("id") or "")
         self.clear_plugin(plugin_id)
@@ -112,7 +113,7 @@ class ContributionRegistry:
             for field, value in contributes.items():
                 kind = mapping.get(str(field))
                 if not kind:
-                    raise ValueError(f"{plugin_type} 不支持 contributes.{field}")
+                    raise ValueError(t("plugin_host_registry.contribution_unsupported", plugin_type=plugin_type, field=field))
                 for path in _expand_contribution_paths(plugin_dir, value):
                     item = _contribution_from_path(manifest, plugin_dir, kind, path)
                     self._add(item)
@@ -144,18 +145,18 @@ class ContributionRegistry:
     def _add(self, item: PluginContribution) -> None:
         ref = item.ref
         if ref in self._by_ref:
-            raise ValueError(f"插件资源 ID 重复：{ref}")
+            raise ValueError(t("plugin_host_registry.resource_ref_duplicate", ref=ref))
         self._by_ref[ref] = item
         lookup_key = f"{item.plugin_id}:{item.key}" if item.kind in _NAMESPACED_KINDS else item.key
         existing = self._by_kind_key.get((item.kind, lookup_key))
         if existing:
             if item.kind in {"rule", "world_template"} and existing.plugin_id != item.plugin_id:
-                raise ValueError(f"插件 {item.kind} plain ID 冲突：{item.key}")
+                raise ValueError(t("plugin_host_registry.plain_id_conflict", kind=item.kind, resource_id=item.key))
             if item.kind in _NAMESPACED_KINDS:
-                raise ValueError(f"插件内资源 ID 重复：{item.kind} {item.key}")
+                raise ValueError(t("plugin_host_registry.resource_id_duplicate_in_plugin", kind=item.kind, resource_id=item.key))
             if existing.plugin_id != item.plugin_id and item.content_schema_version < 2:
                 raise ValueError(
-                    f"插件资源冲突：{item.kind} {item.key} 已由 {existing.plugin_id} 提供"
+                    t("plugin_host_registry.resource_conflict", kind=item.kind, resource_id=item.key, plugin_id=existing.plugin_id)
                 )
             if existing.plugin_id != item.plugin_id:
                 self._ambiguous.add((item.kind, item.key))
@@ -171,7 +172,7 @@ def validate_contributes(manifest: PluginManifest, plugin_dir: Path) -> None:
 def _expand_contribution_paths(plugin_dir: Path, value: Any) -> list[Path]:
     patterns = value if isinstance(value, list) else [value]
     if not all(isinstance(pattern, str) and pattern.strip() for pattern in patterns):
-        raise ValueError("contributes 路径必须是非空字符串或字符串数组")
+        raise ValueError(t("plugin_host_registry.contributes_path_type"))
     paths: list[Path] = []
     for pattern in patterns:
         normalized = pattern.strip().replace("\\", "/")
@@ -188,7 +189,7 @@ def _expand_contribution_paths(plugin_dir: Path, value: Any) -> list[Path]:
 def _validate_pattern(pattern: str) -> None:
     candidate = Path(pattern)
     if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-        raise ValueError("contributes 路径不能是绝对路径或包含 ..")
+        raise ValueError(t("plugin_host_registry.contributes_path_unsafe"))
 
 
 def _contribution_from_path(
@@ -199,15 +200,15 @@ def _contribution_from_path(
 ) -> PluginContribution:
     if kind in _IMAGE_KINDS and path.suffix.lower() not in _IMAGE_SUFFIXES:
         labels = {
-            "portrait_asset": "头像",
-            "scene_image_asset": "冒险头图",
-            "standing_portrait": "立绘",
-            "map_icon": "地图图标",
-            "map_scene": "地图底图",
+            "portrait_asset": t("plugin_host_registry.label_portrait_asset"),
+            "scene_image_asset": t("plugin_host_registry.label_scene_image_asset"),
+            "standing_portrait": t("plugin_host_registry.label_standing_portrait"),
+            "map_icon": t("plugin_host_registry.label_map_icon"),
+            "map_scene": t("plugin_host_registry.label_map_scene"),
         }
-        raise ValueError(f"{labels[kind]}仅支持 PNG、JPEG 或 WebP：{path.relative_to(plugin_dir)}")
+        raise ValueError(t("plugin_host_registry.image_format_unsupported", label=labels[kind], path=path.relative_to(plugin_dir)))
     if kind == "voice_asset" and path.suffix.lower() not in _AUDIO_SUFFIXES:
-        raise ValueError(f"语音素材格式不受支持：{path.relative_to(plugin_dir)}")
+        raise ValueError(t("plugin_host_registry.voice_asset_format_unsupported", path=path.relative_to(plugin_dir)))
     if kind in {"map_icon", "map_scene"}:
         validate_map_image(kind, path, path.relative_to(plugin_dir))
     key = path.stem
@@ -219,9 +220,9 @@ def _contribution_from_path(
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise ValueError(f"插件资源 JSON 无效：{path.relative_to(plugin_dir)}") from exc
+            raise ValueError(t("plugin_host_registry.resource_json_invalid", path=path.relative_to(plugin_dir))) from exc
         if not isinstance(data, dict):
-            raise ValueError(f"插件资源必须是 JSON 对象：{path.relative_to(plugin_dir)}")
+            raise ValueError(t("plugin_host_registry.resource_not_object", path=path.relative_to(plugin_dir)))
         if kind == "rule":
             key = str(data.get("rule_id") or path.stem)
             title = str(data.get("rule_name") or key)
@@ -243,7 +244,7 @@ def _contribution_from_path(
             _validate_voice_profile(data, path.relative_to(plugin_dir))
         description = str(data.get("description") or "")
     if not key.strip():
-        raise ValueError(f"插件资源 ID 不能为空：{path.relative_to(plugin_dir)}")
+        raise ValueError(t("plugin_host_registry.resource_id_empty", path=path.relative_to(plugin_dir)))
     content_schema_version = int(manifest.get("content_schema_version", 1) or 1)
     normalized_key = key.strip()
     if content_schema_version >= 2 and kind in _V2_CANONICAL_KINDS:
@@ -251,11 +252,11 @@ def _contribution_from_path(
             canonical = canonical_id(normalized_key)
         except ValueError as exc:
             raise ValueError(
-                f"Content V2 插件资源 ID 非法：{normalized_key!r}（{path.relative_to(plugin_dir)}）"
+                t("plugin_host_registry.resource_id_invalid", normalized_key=repr(normalized_key), path=path.relative_to(plugin_dir))
             ) from exc
         if canonical != normalized_key:
             raise ValueError(
-                f"Content V2 插件资源 ID 必须是规范形式 {canonical!r}，不能使用 {normalized_key!r}"
+                t("plugin_host_registry.resource_id_not_canonical", canonical=repr(canonical), normalized_key=repr(normalized_key))
             )
     return PluginContribution(
         plugin_id=str(manifest.get("id") or ""),
@@ -276,31 +277,31 @@ def _ensure_inside(root: Path, target: Path) -> None:
     root = root.resolve()
     target = target.resolve()
     if target != root and root not in target.parents:
-        raise ValueError("contributes 路径越界")
+        raise ValueError(t("plugin_host_registry.contributes_path_outside"))
 
 
 def _validate_voice_profile(data: dict[str, Any], relative_path: Path) -> None:
     if data.get("schema_version") != 1:
-        raise ValueError(f"音色预设 schema_version 必须为 1：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_schema_version_invalid", relative_path=relative_path))
     voice_id = str(data.get("id") or "").strip()
     if not voice_id or len(voice_id) > 96:
-        raise ValueError(f"音色预设 ID 不能为空且不能超过 96 字符：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_id_invalid", relative_path=relative_path))
     if not str(data.get("name") or "").strip():
-        raise ValueError(f"音色预设名称不能为空：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_name_empty", relative_path=relative_path))
     engine = str(data.get("engine") or "").strip()
     if engine not in _VOICE_ENGINES:
-        raise ValueError(f"音色预设 engine 不受支持：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_engine_unsupported", relative_path=relative_path))
     if not str(data.get("license") or "").strip():
-        raise ValueError(f"音色预设必须声明 license：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_license_required", relative_path=relative_path))
     if data.get("consent") is not True:
-        raise ValueError(f"音色预设必须声明 consent=true，确认拥有音色与参考音频授权：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_consent_required", relative_path=relative_path))
     if engine in {"openai-compatible", "edge-tts"} and not str(data.get("voice_id") or "").strip():
-        raise ValueError(f"音色预设必须声明 voice_id：{relative_path}")
+        raise ValueError(t("plugin_host_registry.voice_voice_id_required", relative_path=relative_path))
     if engine == "gpt-sovits":
         if not str(data.get("reference_audio") or "").strip():
-            raise ValueError(f"GPT-SoVITS 音色预设必须声明 reference_audio：{relative_path}")
+            raise ValueError(t("plugin_host_registry.voice_reference_audio_required", relative_path=relative_path))
         if not str(data.get("prompt_text") or "").strip():
-            raise ValueError(f"GPT-SoVITS 音色预设必须声明参考音频 transcript（prompt_text）：{relative_path}")
+            raise ValueError(t("plugin_host_registry.voice_transcript_required", relative_path=relative_path))
 
 
 def _validate_voice_references(items: list[PluginContribution], plugin_dir: Path) -> None:
@@ -322,6 +323,6 @@ def _validate_voice_references(items: list[PluginContribution], plugin_dir: Path
             _ensure_inside(plugin_dir, target)
             asset = declared_assets.get((item.plugin_id, raw))
             if asset is None or asset.path != target:
-                raise ValueError(f"音色预设 {field} 必须在 contributes.voice_assets 中声明：{raw}")
+                raise ValueError(t("plugin_host_registry.voice_reference_undeclared", field=field, raw=raw))
             if field == "reference_audio" and target.suffix.lower() != ".wav":
-                raise ValueError(f"GPT-SoVITS 参考音频必须为 WAV：{raw}")
+                raise ValueError(t("plugin_host_registry.reference_audio_not_wav", raw=raw))

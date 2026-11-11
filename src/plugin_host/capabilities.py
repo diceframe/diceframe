@@ -15,6 +15,7 @@ from .descriptors import (
 )
 from .models import PluginRuntime
 from .runtime_protocol import PluginProtocolError
+from src.localization.messages import t
 
 
 RuntimeCapabilityInitializer = Callable[[PluginRuntime, object], None]
@@ -50,7 +51,7 @@ def initialize_runtime_capabilities(
 ) -> None:
     initializer = RUNTIME_CAPABILITY_INITIALIZERS.get(plugin_type)
     if initializer is None:
-        raise PluginProtocolError(f"插件类型没有运行时能力初始化器：{plugin_type}")
+        raise PluginProtocolError(t("plugin_host_capabilities.no_capability_initializer", plugin_type=plugin_type))
     initializer(runtime, initialized)
 
 

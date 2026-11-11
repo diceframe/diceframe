@@ -1,0 +1,16 @@
+# src/plugin_host/content.py 返回给请求方的提示。
+"en":
+  asset_missing: "The plugin asset does not exist"
+  asset_not_public: "The plugin asset is not declared as an accessible contribution"
+  asset_path_outside: "The plugin asset path is outside the plugin directory"
+  content_resource_not_object: "The plugin content resource must be a JSON object: %{path}"
+  content_resource_read_failed: "Reading the plugin content resource failed: %{path}: %{exc}"
+  content_v2_location: "V2 plugin content must be located under content/<kind>/"
+  locale_empty: "The plugin locale must not be empty"
+  locale_fields_not_object: "Plugin locale fields must be an object"
+  locale_not_object: "The plugin locale must be a JSON object: %{overlay_path}"
+  locale_read_failed: "Reading the plugin locale failed: %{overlay_path}: %{exc}"
+  locale_schema_version: "The plugin locale_schema_version must be 1"
+  locale_target_mismatch: "The plugin locale target does not match the resource"
+  locale_unknown_fields: "The plugin locale contains unknown top-level fields: %{fields}"
+  world_template_not_object: "The plugin world template must be a JSON object: %{path}"
