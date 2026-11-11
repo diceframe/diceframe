@@ -8,12 +8,14 @@ from typing import Any
 from src.engine import module_hooks
 from src.engine.language import localized_text
 from src.llm.parser import sanitize_narration
+from src.memory.recall import extract_ngrams
 
 
 def format_gm_private_perceptions(
     instance: Any, history: list[dict], language: str, *, max_chars: int,
+    actions: list[dict] | None = None,
 ) -> str:
-    """Project complete recent records without changing private logs or inventories."""
+    """Prioritize action-matched observations, then fill the GM budget by recency."""
     private = module_hooks.read_value(instance, module_hooks.PRIVATE_LOG)
     players = getattr(instance, "players", {})
     if not private or not isinstance(players, dict) or max_chars <= 0:
@@ -25,21 +27,46 @@ def format_gm_private_perceptions(
         and type(entry.get("round")) is int and entry["round"] >= 0
         and isinstance(entry.get("gm_response"), str) and entry["gm_response"].strip()
     }
+    queries: dict[str, set[str]] = {}
+    for action in actions or []:
+        if not isinstance(action, dict):
+            continue
+        uid, text = action.get("user_id"), action.get("text")
+        if isinstance(uid, str) and uid in players and isinstance(text, str):
+            queries.setdefault(uid, set()).update(extract_ngrams(text.casefold()))
     records = []
+    matches = []
     for uid, player in players.items():
         messages = private.get(uid, [])
         if not isinstance(player, dict) or not isinstance(messages, list):
             continue
-        for message in messages[-8:]:
+        terms = queries.get(uid)
+        window = messages if terms else messages[-8:]
+        candidates = []
+        for index, message in enumerate(window):
             if not isinstance(message, dict) or type(message.get("round")) is not int:
                 continue
             if message["round"] not in rounds or not isinstance(message.get("text"), str):
                 continue
             text = sanitize_narration(message["text"]).strip()
-            if text:
-                records.append({"round": message["round"], "actor_uid": uid,
-                                "character": str(player.get("character_name") or "")[:100], "text": text})
-    if not records:
+            if not text or len(text) > max_chars:
+                continue
+            record = {"round": message["round"], "actor_uid": uid,
+                      "character": str(player.get("character_name") or "")[:100], "text": text}
+            if index >= len(window) - 8:
+                records.append(record)
+            if terms:
+                score = len(terms & extract_ngrams(text.casefold()))
+                if score >= 2:
+                    candidates.append((score, record))
+        if candidates:
+            latest = max(candidates, key=lambda item: (item[0], item[1]["round"]))
+            matches.append(latest)
+            candidates.remove(latest)
+            if candidates:
+                # Keep the original observation alongside a later equally relevant reference.
+                matches.append(max(candidates, key=lambda item: (item[0], -item[1]["round"])))
+    if not records and not matches:
         return ""
     header = localized_text(language, {
         "en": (
@@ -57,8 +84,14 @@ def format_gm_private_perceptions(
         ),
     })
     selected: list[dict] = []
-    for record in sorted(reversed(records), key=lambda row: row["round"], reverse=True):
+    ranked = [row for _, row in sorted(matches, key=lambda item: item[0], reverse=True)]
+    ranked.extend(sorted(reversed(records), key=lambda row: row["round"], reverse=True))
+    for record in ranked:
+        if record in selected:
+            continue
         candidate = [*selected, record]
         if len(header) + 1 + len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
             selected.append(record)
-    return header + "\n" + json.dumps(list(reversed(selected)), ensure_ascii=False) if selected else ""
+    selected.reverse()
+    selected.sort(key=lambda row: row["round"])
+    return header + "\n" + json.dumps(selected, ensure_ascii=False) if selected else ""

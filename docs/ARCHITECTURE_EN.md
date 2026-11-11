@@ -2311,7 +2311,9 @@ The context builder must not import D&D itself and calculate D&D state.
 Player-facing GM/KP Q&A is separate from the full GM context.
 
 Normal GM turns use `src/llm/private_perceptions.py` to recall recent character perceptions,
-attributed by actor ID and round. This applies to every world and ruleset without an Adventure
+attributed by actor ID and round. A character's action can also recall older, matching observations
+from that character's private log. Regenerating a round uses its saved actions.
+This applies to every world and ruleset without an Adventure
 binding and supplies past observations without changing inventories or world state. The block
 uses at most 5% of the context window, capped at 3000 characters. Records are selected whole;
 final context shrinking removes the entire block rather than separating records from its policy.

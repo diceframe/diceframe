@@ -337,6 +337,7 @@ class PromptComposer:
         world_legality_text: str = "",
         world_events_text: str = "",
         authoritative_events_text: str = "",
+        perception_actions: list[dict] | None = None,
     ) -> str:
         """调用 context_builder 生成本轮 user context。"""
         state_view = None
@@ -352,6 +353,7 @@ class PromptComposer:
             provider_name=provider_name,
             lorebook_budget=world_data.get("lorebook_token_budget", 0) if world_data else 0,
             history_override=history_override,
+            perception_actions=perception_actions,
             directives_text=directives_text,
             overreach_text=overreach_text,
             world_state_text=world_state_text,
