@@ -19,11 +19,8 @@ def _authorized(request: web.Request, instance, target_uid: str) -> bool:
 
 def _rule_for(api, instance):
     """按存档自身规则加载 RuleSystem；失败返回 None（服务层退化为不校验职业名）。"""
-    loader = getattr(api, "_load_rule_for_game", None)
-    if not callable(loader):
-        return None
     try:
-        return loader(instance)
+        return api.rule_for_game(instance)
     except Exception:
         return None
 
