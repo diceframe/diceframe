@@ -35,6 +35,7 @@ from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
 from src.webui.routes.generation import register_generation
 from src.webui.routes.hub import register_hub
+from src.webui.routes.launcher import LAUNCHER_DATA_DIR_KEY, register_launcher
 from src.webui.routes.legal import register_legal
 from src.webui.routes.lorebooks import register_lorebooks
 from src.webui.routes.maps import register_maps
@@ -118,8 +119,11 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application["runtime_control"] = {
         "boot_id": secrets.token_hex(8),
         "restart_requested": False,
+        # 便携版启动器经握手要求停止（更新切换前）：清理之后不再 execv。
+        "stop_requested": False,
         "restart_task": None,
     }
+    application[LAUNCHER_DATA_DIR_KEY] = Path(host_data)
     application["web_transport"] = dependencies.transport
     application["security_transport"] = SecurityTransportService(
         dependencies.config_state,
@@ -150,6 +154,7 @@ def register_routes(
     register_tunnel(application)
     register_system(application)
     register_updater(application)
+    register_launcher(application)
     register_speech(application)
     register_asr(application)
     register_generated_images(application)
