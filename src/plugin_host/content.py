@@ -112,7 +112,7 @@ class PluginContentCatalog:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            raise ValueError(t("plugin_host_content.world_template_not_object", path=path))
+            raise ValueError(t("plugin_host.content.world_template_not_object", path=path))
         item = self.registry.find("world_template", world_id)
         if item:
             data = self.expose_scene_image(data, item.plugin_id)
@@ -191,7 +191,7 @@ class PluginContentCatalog:
             try:
                 data = json.loads(item.path.read_text(encoding="utf-8"))
                 if not isinstance(data, dict):
-                    raise ValueError(t("plugin_host_content.content_resource_not_object", path=item.path))
+                    raise ValueError(t("plugin_host.content.content_resource_not_object", path=item.path))
                 if data.get("schema_version") != THEME_SCHEMA_VERSION:
                     self.logger.warning(
                         "Ignoring unsupported plugin theme schema version: %s",
@@ -322,11 +322,11 @@ class PluginContentCatalog:
         target = (root / normalized).resolve()
         self._ensure_inside(root, target)
         if not target.exists() or not target.is_file() or target.is_symlink():
-            raise KeyError(t("plugin_host_content.asset_missing"))
+            raise KeyError(t("plugin_host.content.asset_missing"))
         for item in self.registry.list():
             if item.plugin_id == plugin_id and item.path == target:
                 return target
-        raise KeyError(t("plugin_host_content.asset_not_public"))
+        raise KeyError(t("plugin_host.content.asset_not_public"))
 
     @staticmethod
     def _sanitize_theme_tokens(data: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -426,7 +426,7 @@ class PluginContentCatalog:
                 self._expose_packaged_portrait(data, item.plugin_id)
                 result.append(data)
             except (OSError, TypeError, json.JSONDecodeError) as exc:
-                raise ValueError(t("plugin_host_content.content_resource_read_failed", path=item.path, exc=exc)) from exc
+                raise ValueError(t("plugin_host.content.content_resource_read_failed", path=item.path, exc=exc)) from exc
         return result
 
     def _materialize_locale(
@@ -441,7 +441,7 @@ class PluginContentCatalog:
             return data
         relative = Path(item.relative_path)
         if len(relative.parts) < 3 or relative.parts[0] != "content":
-            raise ValueError(t("plugin_host_content.content_v2_location"))
+            raise ValueError(t("plugin_host.content.content_v2_location"))
         plugin_root = item.path.parents[2]
         locale_root = plugin_root / "locales"
         if not locale_root.exists():
@@ -453,9 +453,9 @@ class PluginContentCatalog:
                 try:
                     loaded = json.loads(overlay_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError, TypeError) as exc:
-                    raise ValueError(t("plugin_host_content.locale_read_failed", overlay_path=overlay_path, exc=exc)) from exc
+                    raise ValueError(t("plugin_host.content.locale_read_failed", overlay_path=overlay_path, exc=exc)) from exc
                 if not isinstance(loaded, dict):
-                    raise ValueError(t("plugin_host_content.locale_not_object", overlay_path=overlay_path))
+                    raise ValueError(t("plugin_host.content.locale_not_object", overlay_path=overlay_path))
                 locales[candidate.name] = loaded
         if not locales:
             return data
@@ -469,23 +469,23 @@ class PluginContentCatalog:
             allowed_top.add("starter_lorebook")
         unknown = set(overlay) - allowed_top
         if unknown:
-            raise ValueError(t("plugin_host_content.locale_unknown_fields", fields=sorted(unknown)))
+            raise ValueError(t("plugin_host.content.locale_unknown_fields", fields=sorted(unknown)))
         if overlay.get("locale_schema_version") != 1:
-            raise ValueError(t("plugin_host_content.locale_schema_version"))
+            raise ValueError(t("plugin_host.content.locale_schema_version"))
         if not str(overlay.get("locale") or "").strip():
-            raise ValueError(t("plugin_host_content.locale_empty"))
+            raise ValueError(t("plugin_host.content.locale_empty"))
         target = overlay.get("target")
         target_kind = str(target.get("kind") or "") if isinstance(target, dict) else ""
         valid_target_kinds = {kind}
         if kind == "world_template":
             valid_target_kinds.add("world")
         if target_kind not in valid_target_kinds or str(target.get("id") or "") != str(data.get("id") or item.key):
-            raise ValueError(t("plugin_host_content.locale_target_mismatch"))
+            raise ValueError(t("plugin_host.content.locale_target_mismatch"))
         if kind == "rule":
             return materialize_rule(data, overlay)
         fields = overlay.get("fields")
         if not isinstance(fields, dict):
-            raise ValueError(t("plugin_host_content.locale_fields_not_object"))
+            raise ValueError(t("plugin_host.content.locale_fields_not_object"))
         if kind == "world_template":
             return materialize_world(data, overlay)
         else:
@@ -565,4 +565,4 @@ class PluginContentCatalog:
         try:
             target.relative_to(root)
         except ValueError as exc:
-            raise ValueError(t("plugin_host_content.asset_path_outside")) from exc
+            raise ValueError(t("plugin_host.content.asset_path_outside")) from exc

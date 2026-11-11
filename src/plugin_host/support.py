@@ -266,21 +266,21 @@ def parse_compatible_rulesets(manifest: dict) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ValueError(translate("plugin_host_support.compatible_rulesets_not_array", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
+        raise ValueError(translate("plugin_host.support.compatible_rulesets_not_array", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
     if len(raw) > MAX_COMPATIBLE_RULESETS:
-        raise ValueError(translate("plugin_host_support.compatible_rulesets_too_many", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD, max_compatible_rulesets=MAX_COMPATIBLE_RULESETS))
+        raise ValueError(translate("plugin_host.support.compatible_rulesets_too_many", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD, max_compatible_rulesets=MAX_COMPATIBLE_RULESETS))
     labels: list[str] = []
     for entry in raw:
         if not isinstance(entry, str):
-            raise ValueError(translate("plugin_host_support.compatible_rulesets_entry_not_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
+            raise ValueError(translate("plugin_host.support.compatible_rulesets_entry_not_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
         label = normalize_ruleset_label(entry)
         if not label:
-            raise ValueError(translate("plugin_host_support.compatible_rulesets_empty_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
+            raise ValueError(translate("plugin_host.support.compatible_rulesets_empty_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
         if label not in labels:
             labels.append(label)
     if labels and manifest.get("system_agnostic") is True:
         raise ValueError(
-            translate("plugin_host_support.system_agnostic_conflict")
+            translate("plugin_host.support.system_agnostic_conflict")
         )
     return labels
 
@@ -323,16 +323,16 @@ def validate_content_module_profile(manifest: dict) -> None:
     manifest = manifest or {}
     raw_profile = manifest.get("content_profile")
     if raw_profile is not None and str(raw_profile).strip() not in CONTENT_PROFILES:
-        raise ValueError(translate("plugin_host_support.content_profile_unsupported", raw_profile=repr(raw_profile)))
+        raise ValueError(translate("plugin_host.support.content_profile_unsupported", raw_profile=repr(raw_profile)))
     raw_mode = manifest.get("content_delivery_mode")
     if raw_mode is not None and str(raw_mode).strip() not in CONTENT_DELIVERY_MODES:
-        raise ValueError(translate("plugin_host_support.delivery_mode_unsupported", raw_mode=repr(raw_mode)))
+        raise ValueError(translate("plugin_host.support.delivery_mode_unsupported", raw_mode=repr(raw_mode)))
     if content_profile(manifest) == "adventure-module" and content_delivery_mode(manifest) != "catalog":
         raise ValueError(
-            translate("plugin_host_support.adventure_module_catalog_only")
+            translate("plugin_host.support.adventure_module_catalog_only")
         )
     if content_delivery_mode(manifest) == "catalog" and manifest.get("entrypoint") is not None:
-        raise ValueError(translate("plugin_host_support.catalog_no_entrypoint"))
+        raise ValueError(translate("plugin_host.support.catalog_no_entrypoint"))
     parse_compatible_rulesets(manifest)
 
 

@@ -51,7 +51,7 @@ def initialize_runtime_capabilities(
 ) -> None:
     initializer = RUNTIME_CAPABILITY_INITIALIZERS.get(plugin_type)
     if initializer is None:
-        raise PluginProtocolError(t("plugin_host_capabilities.no_capability_initializer", plugin_type=plugin_type))
+        raise PluginProtocolError(t("plugin_host.capabilities.no_capability_initializer", plugin_type=plugin_type))
     initializer(runtime, initialized)
 
 

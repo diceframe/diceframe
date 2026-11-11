@@ -70,13 +70,13 @@ class PluginMarketplace:
             self.source.file_path,
         )
         if not fetched.ok or not isinstance(fetched.data, str):
-            return {"ok": False, "error": fetched.error or t("plugin_host_marketplace.index_read_failed"), "plugins": [], "source": fetched.to_dict()}
+            return {"ok": False, "error": fetched.error or t("plugin_host.marketplace.index_read_failed"), "plugins": [], "source": fetched.to_dict()}
         try:
             raw_items = json.loads(fetched.data)
         except json.JSONDecodeError as exc:
-            return {"ok": False, "error": t("plugin_host_marketplace.index_invalid", exc=exc), "plugins": [], "source": fetched.to_dict()}
+            return {"ok": False, "error": t("plugin_host.marketplace.index_invalid", exc=exc), "plugins": [], "source": fetched.to_dict()}
         if not isinstance(raw_items, list):
-            return {"ok": False, "error": t("plugin_host_marketplace.index_not_array"), "plugins": [], "source": fetched.to_dict()}
+            return {"ok": False, "error": t("plugin_host.marketplace.index_not_array"), "plugins": [], "source": fetched.to_dict()}
         plugins = _normalize_market_items(raw_items)
         source = fetched.to_dict()
         source.pop("data", None)
@@ -90,52 +90,52 @@ class PluginMarketplace:
             official_first=True,
         )
         if not release_result.ok or not isinstance(release_result.data, str):
-            raise ValueError(release_result.error or t("plugin_host_marketplace.latest_release_unreadable"))
+            raise ValueError(release_result.error or t("plugin_host.marketplace.latest_release_unreadable"))
         try:
             release = json.loads(release_result.data)
         except json.JSONDecodeError as exc:
-            raise ValueError(t("plugin_host_marketplace.release_response_invalid", exc=exc)) from exc
+            raise ValueError(t("plugin_host.marketplace.release_response_invalid", exc=exc)) from exc
         tag = str(release.get("tag_name") or "").strip()
         if not tag or release.get("draft") or release.get("prerelease"):
-            raise ValueError(t("plugin_host_marketplace.no_installable_release"))
+            raise ValueError(t("plugin_host.marketplace.no_installable_release"))
 
         commit_result = await self.mirrors.fetch_github_api(
             f"/repos/{quote(owner)}/{quote(repo)}/commits/{quote(tag, safe='')}",
             official_first=True,
         )
         if not commit_result.ok or not isinstance(commit_result.data, str):
-            raise ValueError(commit_result.error or t("plugin_host_marketplace.release_commit_unresolved"))
+            raise ValueError(commit_result.error or t("plugin_host.marketplace.release_commit_unresolved"))
         try:
             commit_sha = str(json.loads(commit_result.data).get("sha") or "").lower()
         except json.JSONDecodeError as exc:
-            raise ValueError(t("plugin_host_marketplace.commit_response_invalid", exc=exc)) from exc
+            raise ValueError(t("plugin_host.marketplace.commit_response_invalid", exc=exc)) from exc
         archive_url = github_commit_archive_url(repository_url, commit_sha)
 
         manifest_result = await self.mirrors.fetch_raw(owner, repo, commit_sha, "plugin.json")
         if not manifest_result.ok or not isinstance(manifest_result.data, str):
-            raise ValueError(manifest_result.error or t("plugin_host_marketplace.release_manifest_missing"))
+            raise ValueError(manifest_result.error or t("plugin_host.marketplace.release_manifest_missing"))
         try:
             manifest = json.loads(manifest_result.data)
         except json.JSONDecodeError as exc:
-            raise ValueError(t("plugin_host_marketplace.release_manifest_invalid", exc=exc)) from exc
+            raise ValueError(t("plugin_host.marketplace.release_manifest_invalid", exc=exc)) from exc
         if not isinstance(manifest, dict):
-            raise ValueError(t("plugin_host_marketplace.release_manifest_not_object"))
+            raise ValueError(t("plugin_host.marketplace.release_manifest_not_object"))
         if str(manifest.get("id") or "") != str(item.get("id") or ""):
-            raise ValueError(t("plugin_host_marketplace.release_id_index_mismatch"))
+            raise ValueError(t("plugin_host.marketplace.release_id_index_mismatch"))
         version = str(manifest.get("version") or "").strip()
         if not version:
-            raise ValueError(t("plugin_host_marketplace.release_manifest_no_version"))
+            raise ValueError(t("plugin_host.marketplace.release_manifest_no_version"))
 
         config_path = str(manifest.get("config_schema") or "config.schema.json").strip()
         config_result = await self.mirrors.fetch_raw(owner, repo, commit_sha, config_path)
         if not config_result.ok or not isinstance(config_result.data, str):
-            raise ValueError(config_result.error or t("plugin_host_marketplace.release_schema_missing", config_path=config_path))
+            raise ValueError(config_result.error or t("plugin_host.marketplace.release_schema_missing", config_path=config_path))
         try:
             schema = json.loads(config_result.data)
         except json.JSONDecodeError as exc:
-            raise ValueError(t("plugin_host_marketplace.release_schema_invalid", exc=exc)) from exc
+            raise ValueError(t("plugin_host.marketplace.release_schema_invalid", exc=exc)) from exc
         if not isinstance(schema, dict):
-            raise ValueError(t("plugin_host_marketplace.release_schema_not_object"))
+            raise ValueError(t("plugin_host.marketplace.release_schema_not_object"))
 
         permissions = effective_plugin_permissions(manifest, schema)
         approved_permissions = _string_list(item.get("approved_permissions"))
@@ -144,7 +144,7 @@ class PluginMarketplace:
         approved_risk = str(item.get("risk_level") or "").strip()
         if added_permissions or (approved_risk and approved_risk != risk_level):
             details = "、".join(added_permissions) if added_permissions else f"{approved_risk} → {risk_level}"
-            raise ValueError(t("plugin_host_marketplace.release_needs_review", details=details))
+            raise ValueError(t("plugin_host.marketplace.release_needs_review", details=details))
         update_policy = "automatic" if risk_level == "declarative" else "notify"
         resolved = dict(item)
         resolved.update({
@@ -171,7 +171,7 @@ class PluginMarketplace:
             if indexed_item["id"] != normalized_id:
                 continue
             if indexed_item.get("distribution") == "bundled":
-                return {"ok": False, "error": t("plugin_host_marketplace.bundled_plugin"), "plugin": indexed_item}
+                return {"ok": False, "error": t("plugin_host.marketplace.bundled_plugin"), "plugin": indexed_item}
             try:
                 item = await self.resolve_release(indexed_item)
             except ValueError as exc:
@@ -191,7 +191,7 @@ class PluginMarketplace:
                 max_bytes=MAX_PLUGIN_PACKAGE_BYTES,
             )
             if not fetched.ok or not isinstance(fetched.data, bytes):
-                return {"ok": False, "error": fetched.error or t("plugin_host_marketplace.snapshot_download_failed"), "plugin": item, "source": fetched.to_dict()}
+                return {"ok": False, "error": fetched.error or t("plugin_host.marketplace.snapshot_download_failed"), "plugin": item, "source": fetched.to_dict()}
             source = fetched.to_dict()
             source.pop("data", None)
             return {
@@ -202,7 +202,7 @@ class PluginMarketplace:
                 "hub_event_id": event_id,
                 "artifact_hash": hashlib.sha256(fetched.data).hexdigest(),
             }
-        return {"ok": False, "error": t("plugin_host_marketplace.plugin_not_in_index", plugin_id=plugin_id)}
+        return {"ok": False, "error": t("plugin_host.marketplace.plugin_not_in_index", plugin_id=plugin_id)}
 
 
 def _marketplace_ruleset_targets(manifest: dict[str, Any]) -> list[str]:

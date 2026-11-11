@@ -104,7 +104,7 @@ class ContributionRegistry:
         if contributes is None:
             return []
         if not isinstance(contributes, dict):
-            raise ValueError(t("plugin_host_registry.contributes_not_object"))
+            raise ValueError(t("plugin_host.registry.contributes_not_object"))
 
         plugin_id = str(manifest.get("id") or "")
         self.clear_plugin(plugin_id)
@@ -113,7 +113,7 @@ class ContributionRegistry:
             for field, value in contributes.items():
                 kind = mapping.get(str(field))
                 if not kind:
-                    raise ValueError(t("plugin_host_registry.contribution_unsupported", plugin_type=plugin_type, field=field))
+                    raise ValueError(t("plugin_host.registry.contribution_unsupported", plugin_type=plugin_type, field=field))
                 for path in _expand_contribution_paths(plugin_dir, value):
                     item = _contribution_from_path(manifest, plugin_dir, kind, path)
                     self._add(item)
@@ -145,18 +145,18 @@ class ContributionRegistry:
     def _add(self, item: PluginContribution) -> None:
         ref = item.ref
         if ref in self._by_ref:
-            raise ValueError(t("plugin_host_registry.resource_ref_duplicate", ref=ref))
+            raise ValueError(t("plugin_host.registry.resource_ref_duplicate", ref=ref))
         self._by_ref[ref] = item
         lookup_key = f"{item.plugin_id}:{item.key}" if item.kind in _NAMESPACED_KINDS else item.key
         existing = self._by_kind_key.get((item.kind, lookup_key))
         if existing:
             if item.kind in {"rule", "world_template"} and existing.plugin_id != item.plugin_id:
-                raise ValueError(t("plugin_host_registry.plain_id_conflict", kind=item.kind, resource_id=item.key))
+                raise ValueError(t("plugin_host.registry.plain_id_conflict", kind=item.kind, resource_id=item.key))
             if item.kind in _NAMESPACED_KINDS:
-                raise ValueError(t("plugin_host_registry.resource_id_duplicate_in_plugin", kind=item.kind, resource_id=item.key))
+                raise ValueError(t("plugin_host.registry.resource_id_duplicate_in_plugin", kind=item.kind, resource_id=item.key))
             if existing.plugin_id != item.plugin_id and item.content_schema_version < 2:
                 raise ValueError(
-                    t("plugin_host_registry.resource_conflict", kind=item.kind, resource_id=item.key, plugin_id=existing.plugin_id)
+                    t("plugin_host.registry.resource_conflict", kind=item.kind, resource_id=item.key, plugin_id=existing.plugin_id)
                 )
             if existing.plugin_id != item.plugin_id:
                 self._ambiguous.add((item.kind, item.key))
@@ -172,7 +172,7 @@ def validate_contributes(manifest: PluginManifest, plugin_dir: Path) -> None:
 def _expand_contribution_paths(plugin_dir: Path, value: Any) -> list[Path]:
     patterns = value if isinstance(value, list) else [value]
     if not all(isinstance(pattern, str) and pattern.strip() for pattern in patterns):
-        raise ValueError(t("plugin_host_registry.contributes_path_type"))
+        raise ValueError(t("plugin_host.registry.contributes_path_type"))
     paths: list[Path] = []
     for pattern in patterns:
         normalized = pattern.strip().replace("\\", "/")
@@ -189,7 +189,7 @@ def _expand_contribution_paths(plugin_dir: Path, value: Any) -> list[Path]:
 def _validate_pattern(pattern: str) -> None:
     candidate = Path(pattern)
     if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-        raise ValueError(t("plugin_host_registry.contributes_path_unsafe"))
+        raise ValueError(t("plugin_host.registry.contributes_path_unsafe"))
 
 
 def _contribution_from_path(
@@ -200,15 +200,15 @@ def _contribution_from_path(
 ) -> PluginContribution:
     if kind in _IMAGE_KINDS and path.suffix.lower() not in _IMAGE_SUFFIXES:
         labels = {
-            "portrait_asset": t("plugin_host_registry.label_portrait_asset"),
-            "scene_image_asset": t("plugin_host_registry.label_scene_image_asset"),
-            "standing_portrait": t("plugin_host_registry.label_standing_portrait"),
-            "map_icon": t("plugin_host_registry.label_map_icon"),
-            "map_scene": t("plugin_host_registry.label_map_scene"),
+            "portrait_asset": t("plugin_host.registry.label_portrait_asset"),
+            "scene_image_asset": t("plugin_host.registry.label_scene_image_asset"),
+            "standing_portrait": t("plugin_host.registry.label_standing_portrait"),
+            "map_icon": t("plugin_host.registry.label_map_icon"),
+            "map_scene": t("plugin_host.registry.label_map_scene"),
         }
-        raise ValueError(t("plugin_host_registry.image_format_unsupported", label=labels[kind], path=path.relative_to(plugin_dir)))
+        raise ValueError(t("plugin_host.registry.image_format_unsupported", label=labels[kind], path=path.relative_to(plugin_dir)))
     if kind == "voice_asset" and path.suffix.lower() not in _AUDIO_SUFFIXES:
-        raise ValueError(t("plugin_host_registry.voice_asset_format_unsupported", path=path.relative_to(plugin_dir)))
+        raise ValueError(t("plugin_host.registry.voice_asset_format_unsupported", path=path.relative_to(plugin_dir)))
     if kind in {"map_icon", "map_scene"}:
         validate_map_image(kind, path, path.relative_to(plugin_dir))
     key = path.stem
@@ -220,9 +220,9 @@ def _contribution_from_path(
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise ValueError(t("plugin_host_registry.resource_json_invalid", path=path.relative_to(plugin_dir))) from exc
+            raise ValueError(t("plugin_host.registry.resource_json_invalid", path=path.relative_to(plugin_dir))) from exc
         if not isinstance(data, dict):
-            raise ValueError(t("plugin_host_registry.resource_not_object", path=path.relative_to(plugin_dir)))
+            raise ValueError(t("plugin_host.registry.resource_not_object", path=path.relative_to(plugin_dir)))
         if kind == "rule":
             key = str(data.get("rule_id") or path.stem)
             title = str(data.get("rule_name") or key)
@@ -244,7 +244,7 @@ def _contribution_from_path(
             _validate_voice_profile(data, path.relative_to(plugin_dir))
         description = str(data.get("description") or "")
     if not key.strip():
-        raise ValueError(t("plugin_host_registry.resource_id_empty", path=path.relative_to(plugin_dir)))
+        raise ValueError(t("plugin_host.registry.resource_id_empty", path=path.relative_to(plugin_dir)))
     content_schema_version = int(manifest.get("content_schema_version", 1) or 1)
     normalized_key = key.strip()
     if content_schema_version >= 2 and kind in _V2_CANONICAL_KINDS:
@@ -252,11 +252,11 @@ def _contribution_from_path(
             canonical = canonical_id(normalized_key)
         except ValueError as exc:
             raise ValueError(
-                t("plugin_host_registry.resource_id_invalid", normalized_key=repr(normalized_key), path=path.relative_to(plugin_dir))
+                t("plugin_host.registry.resource_id_invalid", normalized_key=repr(normalized_key), path=path.relative_to(plugin_dir))
             ) from exc
         if canonical != normalized_key:
             raise ValueError(
-                t("plugin_host_registry.resource_id_not_canonical", canonical=repr(canonical), normalized_key=repr(normalized_key))
+                t("plugin_host.registry.resource_id_not_canonical", canonical=repr(canonical), normalized_key=repr(normalized_key))
             )
     return PluginContribution(
         plugin_id=str(manifest.get("id") or ""),
@@ -277,31 +277,31 @@ def _ensure_inside(root: Path, target: Path) -> None:
     root = root.resolve()
     target = target.resolve()
     if target != root and root not in target.parents:
-        raise ValueError(t("plugin_host_registry.contributes_path_outside"))
+        raise ValueError(t("plugin_host.registry.contributes_path_outside"))
 
 
 def _validate_voice_profile(data: dict[str, Any], relative_path: Path) -> None:
     if data.get("schema_version") != 1:
-        raise ValueError(t("plugin_host_registry.voice_schema_version_invalid", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_schema_version_invalid", relative_path=relative_path))
     voice_id = str(data.get("id") or "").strip()
     if not voice_id or len(voice_id) > 96:
-        raise ValueError(t("plugin_host_registry.voice_id_invalid", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_id_invalid", relative_path=relative_path))
     if not str(data.get("name") or "").strip():
-        raise ValueError(t("plugin_host_registry.voice_name_empty", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_name_empty", relative_path=relative_path))
     engine = str(data.get("engine") or "").strip()
     if engine not in _VOICE_ENGINES:
-        raise ValueError(t("plugin_host_registry.voice_engine_unsupported", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_engine_unsupported", relative_path=relative_path))
     if not str(data.get("license") or "").strip():
-        raise ValueError(t("plugin_host_registry.voice_license_required", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_license_required", relative_path=relative_path))
     if data.get("consent") is not True:
-        raise ValueError(t("plugin_host_registry.voice_consent_required", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_consent_required", relative_path=relative_path))
     if engine in {"openai-compatible", "edge-tts"} and not str(data.get("voice_id") or "").strip():
-        raise ValueError(t("plugin_host_registry.voice_voice_id_required", relative_path=relative_path))
+        raise ValueError(t("plugin_host.registry.voice_voice_id_required", relative_path=relative_path))
     if engine == "gpt-sovits":
         if not str(data.get("reference_audio") or "").strip():
-            raise ValueError(t("plugin_host_registry.voice_reference_audio_required", relative_path=relative_path))
+            raise ValueError(t("plugin_host.registry.voice_reference_audio_required", relative_path=relative_path))
         if not str(data.get("prompt_text") or "").strip():
-            raise ValueError(t("plugin_host_registry.voice_transcript_required", relative_path=relative_path))
+            raise ValueError(t("plugin_host.registry.voice_transcript_required", relative_path=relative_path))
 
 
 def _validate_voice_references(items: list[PluginContribution], plugin_dir: Path) -> None:
@@ -323,6 +323,6 @@ def _validate_voice_references(items: list[PluginContribution], plugin_dir: Path
             _ensure_inside(plugin_dir, target)
             asset = declared_assets.get((item.plugin_id, raw))
             if asset is None or asset.path != target:
-                raise ValueError(t("plugin_host_registry.voice_reference_undeclared", field=field, raw=raw))
+                raise ValueError(t("plugin_host.registry.voice_reference_undeclared", field=field, raw=raw))
             if field == "reference_audio" and target.suffix.lower() != ".wav":
-                raise ValueError(t("plugin_host_registry.reference_audio_not_wav", raw=raw))
+                raise ValueError(t("plugin_host.registry.reference_audio_not_wav", raw=raw))
