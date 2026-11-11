@@ -450,3 +450,27 @@ def test_completing_a_subclass_recomputes_the_derived_facts() -> None:
     repaired = engine.repair_choices(five, {"subclass_ref": DRACONIC})
 
     assert repaired["derived"] != before
+
+
+def test_a_level_twenty_character_can_still_be_completed() -> None:
+    """矩阵 28：补齐不经过升级事务，所以 20 级也有入口。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    four = _advance_to(engine, _fighter(runtime), 4)
+
+    forged = deepcopy(four)
+    forged["features"].pop("subclass_ref", None)
+    forged["build"]["level"] = 20
+    forged["build"]["class_levels"][0]["level"] = 20
+    forged["progression"]["level"] = 20
+    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        {"level": level, "class_ref": "class:fighter"} for level in range(2, 21)
+    ]
+    with pytest.raises(ProgressionCatalogError):
+        engine.preview_next_level(forged)
+
+    repaired = engine.repair_choices(forged, {"subclass_ref": CHAMPION})
+
+    assert repaired["build"]["level"] == 20
+    assert repaired["features"]["subclass_ref"] == CHAMPION
