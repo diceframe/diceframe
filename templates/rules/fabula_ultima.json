@@ -1,0 +1,1496 @@
+{
+  "rule_schema_version": 2,
+  "rule_id": "fabula_ultima",
+  "rule_name": "FU 兼容规则",
+  "rule_version": "1.0",
+  "default_locale": "zh-CN",
+  "locale_schema_version": 1,
+  "description": "兼容 Fabula Ultima（最终物语）的 JRPG 风格奇幻规则：两枚属性骰相加对抗 7/10/13/16 四档难度，双同点爆击，伤害读高值。非官方出品、含房规，需配合官方核心规则书使用。",
+  "dice_system": "fu",
+  "check_mechanic": {
+    "dice": "2d_attributes",
+    "comparison": "sum_gte_target",
+    "critical": {
+      "doubles_min": 6,
+      "fumble": "double_one"
+    },
+    "high_roll_damage": true,
+    "attack_pair": [
+      "dex",
+      "mig"
+    ],
+    "attack_target": {
+      "type": "die_size",
+      "attribute": "dex",
+      "include_armor": true,
+      "min": 1,
+      "max": 40
+    }
+  },
+  "max_check_dc": 20,
+  "dc_table": {
+    "easy": 7,
+    "normal": 10,
+    "hard": 13,
+    "extreme": 16
+  },
+  "difficulty_dc_modifiers": {
+    "轻松": -2,
+    "标准": 0,
+    "硬核": 2
+  },
+  "attributes": [
+    {
+      "key": "dex",
+      "name": "敏捷",
+      "min": 6,
+      "max": 12
+    },
+    {
+      "key": "ins",
+      "name": "洞察",
+      "min": 6,
+      "max": 12
+    },
+    {
+      "key": "mig",
+      "name": "力量",
+      "min": 6,
+      "max": 12
+    },
+    {
+      "key": "wlp",
+      "name": "意志",
+      "min": 6,
+      "max": 12
+    }
+  ],
+  "attribute_dice_array": [
+    10,
+    8,
+    8,
+    6
+  ],
+  "attribute_points": 32,
+  "attr_hint": "属性是骰面：d6 差、d8 普通、d10 好、d12 上限。建卡时把 d10、d8、d8、d6 各分配到一项属性上（共 32）。",
+  "special_stats": [
+    {
+      "key": "mp",
+      "name": "精神值",
+      "max": 60,
+      "max_formula": "wlp * 5",
+      "description": "施法资源；上限 = 意志骰面 × 5，随属性提升而增加。"
+    },
+    {
+      "key": "ip",
+      "name": "物资点",
+      "max": 6,
+      "initial": 6,
+      "description": "现场制作消耗品：治疗剂 3、圣灵水 3、万能药 2。"
+    },
+    {
+      "key": "fabula",
+      "name": "物语点",
+      "max": 10,
+      "initial": 3,
+      "description": "重掷骰子、援用羁绊、加入叙事元素。"
+    }
+  ],
+  "hp_formula": "mig * 5 + 20",
+  "combat_model": "hp_based",
+  "damage_mechanic": {
+    "high_roll": true,
+    "armor_reduces_damage": false,
+    "degree_affects_damage": false,
+    "critical_damage": "none",
+    "minimum_damage": 1
+  },
+  "armor_model": "sum",
+  "growth_system": "xp_level",
+  "skill_mode": "narrative",
+  "max_skills": 5,
+  "skill_point_total": 5,
+  "max_skill_value": 5,
+  "skill_hint": "5 级角色共 5 个技能等级：从两个所选职业的 5+5 个技能里选，每项 1-5 级。技能提供叙事权限，不直接加检定。",
+  "class_levels_total": 5,
+  "starting_currency": 500,
+  "starting_equipment": false,
+  "start_level": 5,
+  "level_up": {
+    "attribute_points": 0,
+    "skill_points": 1,
+    "class_levels": 1,
+    "hp": 0
+  },
+  "attribute_milestones": [
+    20,
+    40
+  ],
+  "currency": "泽尼特",
+  "valid_qualities": [
+    "common",
+    "uncommon",
+    "rare",
+    "legendary"
+  ],
+  "item_categories": {
+    "equipment": [
+      "钢匕首",
+      "巨剑",
+      "重矛",
+      "手枪",
+      "短弓",
+      "铁指虎",
+      "战斧",
+      "武士刀",
+      "长剑",
+      "细剑",
+      "法杖",
+      "魔典",
+      "轻矛",
+      "阔剑",
+      "十字弩",
+      "手里剑",
+      "铁锤",
+      "镰刀",
+      "三叉戟",
+      "喷火器",
+      "机枪",
+      "步枪",
+      "无甲",
+      "丝质衬衫",
+      "旅行装束",
+      "武道服",
+      "贤者之袍",
+      "板甲衣",
+      "青铜板甲",
+      "符文板甲",
+      "钢制板甲",
+      "青铜盾牌",
+      "符文盾牌",
+      "双盾"
+    ],
+    "consumable": [
+      "治疗剂",
+      "圣灵水",
+      "万能药",
+      "魔法帐篷"
+    ],
+    "misc": [
+      "钥匙",
+      "地图",
+      "绳索",
+      "火把",
+      "干粮",
+      "笔记本"
+    ]
+  },
+  "classes": [
+    {
+      "id": "arcanist",
+      "name": "奥灵使",
+      "description": "与奥灵缔结契约，借用其领域之力。",
+      "starter_equipment": [
+        "法杖",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "chimerist",
+      "name": "拟兽使",
+      "description": "吞食魔物的本质，化用它们的法术。",
+      "starter_equipment": [
+        "钢匕首",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "darkblade",
+      "name": "暗刃骑士",
+      "description": "以自身鲜血喂养暗影的剑士。",
+      "starter_equipment": [
+        "巨剑",
+        "符文板甲"
+      ]
+    },
+    {
+      "id": "elementalist",
+      "name": "元素使",
+      "description": "驱使风雷火冰土的攻性术者。",
+      "starter_equipment": [
+        "法杖",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "entropist",
+      "name": "熵术士",
+      "description": "操纵时间、运气与衰败的术者。",
+      "starter_equipment": [
+        "魔典",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "fury",
+      "name": "狂怒斗士",
+      "description": "以愤怒换取力量的前线猛士。",
+      "starter_equipment": [
+        "战斧",
+        "板甲衣"
+      ]
+    },
+    {
+      "id": "guardian",
+      "name": "守护者",
+      "description": "用盾牌与身体替同伴挡下伤害。",
+      "starter_equipment": [
+        "青铜剑",
+        "青铜盾牌",
+        "板甲衣"
+      ]
+    },
+    {
+      "id": "loremaster",
+      "name": "博学家",
+      "description": "以知识与洞察破解谜题与弱点。",
+      "starter_equipment": [
+        "魔典",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "orator",
+      "name": "游说家",
+      "description": "用言语鼓舞盟友、动摇敌人。",
+      "starter_equipment": [
+        "细剑",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "rogue",
+      "name": "浪客",
+      "description": "以敏捷与机巧取走想要之物。",
+      "starter_equipment": [
+        "钢匕首",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "sharpshooter",
+      "name": "神射手",
+      "description": "以远程火力控制战场。",
+      "starter_equipment": [
+        "短弓",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "spiritist",
+      "name": "御魂使",
+      "description": "治愈、守护与安抚灵魂的术者。",
+      "starter_equipment": [
+        "法杖",
+        "丝质衬衫"
+      ]
+    },
+    {
+      "id": "tinkerer",
+      "name": "造物使",
+      "description": "用魔导科技造出临时武器与药剂。",
+      "starter_equipment": [
+        "手枪",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "wayfarer",
+      "name": "旅人",
+      "description": "见多识广、随身带着一切所需。",
+      "starter_equipment": [
+        "短弓",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "weaponmaster",
+      "name": "武器大师",
+      "description": "精通各类武器与战技的近战专家。",
+      "starter_equipment": [
+        "巨剑",
+        "板甲衣"
+      ]
+    },
+    {
+      "id": "symbolist",
+      "name": "徽记使",
+      "description": "在人与物身上铭刻符印。",
+      "starter_equipment": [
+        "法杖",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "chanter",
+      "name": "咏唱师",
+      "description": "以歌声与共鸣撼动战场。",
+      "starter_equipment": [
+        "法杖",
+        "丝质衬衫"
+      ]
+    },
+    {
+      "id": "dancer",
+      "name": "舞者",
+      "description": "以舞步引导灵力流动。",
+      "starter_equipment": [
+        "细剑",
+        "丝质衬衫"
+      ]
+    },
+    {
+      "id": "commander",
+      "name": "指挥官",
+      "description": "以号令调度全队的战术家。",
+      "starter_equipment": [
+        "长剑",
+        "青铜盾牌",
+        "板甲衣"
+      ]
+    },
+    {
+      "id": "mutant",
+      "name": "变种人",
+      "description": "以野兽基因重塑肉体。",
+      "starter_equipment": [
+        "铁指虎",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "pilot",
+      "name": "机师",
+      "description": "驾驶载具、改装装甲的技术兵。",
+      "starter_equipment": [
+        "手枪",
+        "板甲衣"
+      ]
+    },
+    {
+      "id": "esper",
+      "name": "念力师",
+      "description": "以心灵异能干涉灵魂网络。",
+      "starter_equipment": [
+        "法杖",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "gourmet",
+      "name": "美食家",
+      "description": "用料理与刀叉同时喂养和杀敌。",
+      "starter_equipment": [
+        "钢匕首",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "invoker",
+      "name": "唤灵师",
+      "description": "召唤元素之灵并与之共鸣。",
+      "starter_equipment": [
+        "法杖",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "merchant",
+      "name": "商人",
+      "description": "以贸易网络与议价能力取胜。",
+      "starter_equipment": [
+        "手枪",
+        "旅行装束"
+      ]
+    },
+    {
+      "id": "floralist",
+      "name": "园艺师",
+      "description": "培育魔法植物作为战力。",
+      "starter_equipment": [
+        "法杖",
+        "丝质衬衫"
+      ]
+    },
+    {
+      "id": "necromancer",
+      "name": "死灵法师",
+      "description": "以悼亡点驱使亡者。",
+      "starter_equipment": [
+        "魔典",
+        "旅行装束"
+      ]
+    }
+  ],
+  "items": {
+    "钢匕首": {
+      "name": "钢匕首",
+      "type": "weapon",
+      "damage": 4,
+      "price": 100
+    },
+    "巨剑": {
+      "name": "巨剑",
+      "type": "weapon",
+      "damage": 10,
+      "price": 300
+    },
+    "重矛": {
+      "name": "重矛",
+      "type": "weapon",
+      "damage": 12,
+      "price": 250
+    },
+    "手枪": {
+      "name": "手枪",
+      "type": "weapon",
+      "damage": 8,
+      "price": 250
+    },
+    "短弓": {
+      "name": "短弓",
+      "type": "weapon",
+      "damage": 5,
+      "price": 200
+    },
+    "铁指虎": {
+      "name": "铁指虎",
+      "type": "weapon",
+      "damage": 3,
+      "price": 80
+    },
+    "战斧": {
+      "name": "战斧",
+      "type": "weapon",
+      "damage": 9,
+      "price": 280
+    },
+    "武士刀": {
+      "name": "武士刀",
+      "type": "weapon",
+      "damage": 8,
+      "price": 300
+    },
+    "长剑": {
+      "name": "长剑",
+      "type": "weapon",
+      "damage": 7,
+      "price": 200
+    },
+    "细剑": {
+      "name": "细剑",
+      "type": "weapon",
+      "damage": 6,
+      "price": 220
+    },
+    "法杖": {
+      "name": "法杖",
+      "type": "weapon",
+      "damage": 6,
+      "price": 200
+    },
+    "魔典": {
+      "name": "魔典",
+      "type": "weapon",
+      "damage": 6,
+      "price": 250
+    },
+    "轻矛": {
+      "name": "轻矛",
+      "type": "weapon",
+      "damage": 7,
+      "price": 150
+    },
+    "阔剑": {
+      "name": "阔剑",
+      "type": "weapon",
+      "damage": 8,
+      "price": 260
+    },
+    "十字弩": {
+      "name": "十字弩",
+      "type": "weapon",
+      "damage": 7,
+      "price": 220
+    },
+    "手里剑": {
+      "name": "手里剑",
+      "type": "weapon",
+      "damage": 5,
+      "price": 60
+    },
+    "铁锤": {
+      "name": "铁锤",
+      "type": "weapon",
+      "damage": 9,
+      "price": 180
+    },
+    "镰刀": {
+      "name": "镰刀",
+      "type": "weapon",
+      "damage": 7,
+      "price": 200
+    },
+    "三叉戟": {
+      "name": "三叉戟",
+      "type": "weapon",
+      "damage": 9,
+      "price": 240
+    },
+    "喷火器": {
+      "name": "喷火器",
+      "type": "weapon",
+      "damage": 8,
+      "price": 400
+    },
+    "机枪": {
+      "name": "机枪",
+      "type": "weapon",
+      "damage": 7,
+      "price": 450
+    },
+    "步枪": {
+      "name": "步枪",
+      "type": "weapon",
+      "damage": 9,
+      "price": 400
+    },
+    "无甲": {
+      "name": "无甲",
+      "type": "armor",
+      "armor": 0,
+      "price": 0
+    },
+    "丝质衬衫": {
+      "name": "丝质衬衫",
+      "type": "armor",
+      "armor": 1,
+      "price": 30
+    },
+    "旅行装束": {
+      "name": "旅行装束",
+      "type": "armor",
+      "armor": 1,
+      "price": 50
+    },
+    "武道服": {
+      "name": "武道服",
+      "type": "armor",
+      "armor": 1,
+      "price": 60
+    },
+    "贤者之袍": {
+      "name": "贤者之袍",
+      "type": "armor",
+      "armor": 1,
+      "price": 120
+    },
+    "板甲衣": {
+      "name": "板甲衣",
+      "type": "armor",
+      "armor": 3,
+      "price": 200
+    },
+    "青铜板甲": {
+      "name": "青铜板甲",
+      "type": "armor",
+      "armor": 4,
+      "price": 300
+    },
+    "符文板甲": {
+      "name": "符文板甲",
+      "type": "armor",
+      "armor": 5,
+      "price": 500
+    },
+    "钢制板甲": {
+      "name": "钢制板甲",
+      "type": "armor",
+      "armor": 6,
+      "price": 700
+    },
+    "青铜盾牌": {
+      "name": "青铜盾牌",
+      "type": "shield",
+      "armor": 2,
+      "price": 100
+    },
+    "符文盾牌": {
+      "name": "符文盾牌",
+      "type": "shield",
+      "armor": 2,
+      "price": 150
+    },
+    "双盾": {
+      "name": "双盾",
+      "type": "shield",
+      "armor": 3,
+      "price": 220
+    }
+  },
+  "skills": {
+    "arcanist_1": {
+      "name": "奥灵回响"
+    },
+    "arcanist_2": {
+      "name": "奥灵疗愈"
+    },
+    "arcanist_3": {
+      "name": "契约与召唤"
+    },
+    "arcanist_4": {
+      "name": "险境召唤"
+    },
+    "arcanist_5": {
+      "name": "奥灵系仪式"
+    },
+    "chimerist_1": {
+      "name": "摄能为食"
+    },
+    "chimerist_2": {
+      "name": "野性之语"
+    },
+    "chimerist_3": {
+      "name": "同源之毒"
+    },
+    "chimerist_4": {
+      "name": "拟兽系仪式"
+    },
+    "chimerist_5": {
+      "name": "形意咒法"
+    },
+    "darkblade_1": {
+      "name": "痛楚"
+    },
+    "darkblade_2": {
+      "name": "身负黑血"
+    },
+    "darkblade_3": {
+      "name": "黑暗之心"
+    },
+    "darkblade_4": {
+      "name": "苦痛教训"
+    },
+    "darkblade_5": {
+      "name": "暗影击"
+    },
+    "elementalist_1": {
+      "name": "天灾骤降"
+    },
+    "elementalist_2": {
+      "name": "元素魔法"
+    },
+    "elementalist_3": {
+      "name": "魔法炮击"
+    },
+    "elementalist_4": {
+      "name": "元素系仪式"
+    },
+    "elementalist_5": {
+      "name": "以械引咒"
+    },
+    "entropist_1": {
+      "name": "灵智回流"
+    },
+    "entropist_2": {
+      "name": "熵系魔法"
+    },
+    "entropist_3": {
+      "name": "幸运七"
+    },
+    "entropist_4": {
+      "name": "熵系仪式"
+    },
+    "entropist_5": {
+      "name": "窃取时间"
+    },
+    "fury_1": {
+      "name": "肾上腺素"
+    },
+    "fury_2": {
+      "name": "狂怒"
+    },
+    "fury_3": {
+      "name": "不屈意志"
+    },
+    "fury_4": {
+      "name": "挑衅"
+    },
+    "fury_5": {
+      "name": "死战不退"
+    },
+    "guardian_1": {
+      "name": "保镖"
+    },
+    "guardian_2": {
+      "name": "防御精通"
+    },
+    "guardian_3": {
+      "name": "双盾战士"
+    },
+    "guardian_4": {
+      "name": "铁壁"
+    },
+    "guardian_5": {
+      "name": "挺身守护"
+    },
+    "loremaster_1": {
+      "name": "灵光洞见"
+    },
+    "loremaster_2": {
+      "name": "集中心智"
+    },
+    "loremaster_3": {
+      "name": "知识就是力量"
+    },
+    "loremaster_4": {
+      "name": "快速评估"
+    },
+    "loremaster_5": {
+      "name": "记忆训练"
+    },
+    "orator_1": {
+      "name": "谴责"
+    },
+    "orator_2": {
+      "name": "鼓舞"
+    },
+    "orator_3": {
+      "name": "予以信任"
+    },
+    "orator_4": {
+      "name": "巧舌如簧"
+    },
+    "orator_5": {
+      "name": "意外盟友"
+    },
+    "rogue_1": {
+      "name": "阴狠手段"
+    },
+    "rogue_2": {
+      "name": "闪避"
+    },
+    "rogue_3": {
+      "name": "疾速身法"
+    },
+    "rogue_4": {
+      "name": "后会有期"
+    },
+    "rogue_5": {
+      "name": "窃取灵魂"
+    },
+    "sharpshooter_1": {
+      "name": "弹幕射击"
+    },
+    "sharpshooter_2": {
+      "name": "干涉火力"
+    },
+    "sharpshooter_3": {
+      "name": "鹰眼"
+    },
+    "sharpshooter_4": {
+      "name": "远程武器精通"
+    },
+    "sharpshooter_5": {
+      "name": "威慑射击"
+    },
+    "spiritist_1": {
+      "name": "治愈之力"
+    },
+    "spiritist_2": {
+      "name": "御魂系仪式"
+    },
+    "spiritist_3": {
+      "name": "灵魂魔法"
+    },
+    "spiritist_4": {
+      "name": "法术支援"
+    },
+    "spiritist_5": {
+      "name": "生命秘法"
+    },
+    "tinkerer_1": {
+      "name": "应急用品"
+    },
+    "tinkerer_2": {
+      "name": "便携装置"
+    },
+    "tinkerer_3": {
+      "name": "药剂雨"
+    },
+    "tinkerer_4": {
+      "name": "秘密配方"
+    },
+    "tinkerer_5": {
+      "name": "先见之明"
+    },
+    "wayfarer_1": {
+      "name": "忠诚伙伴"
+    },
+    "wayfarer_2": {
+      "name": "充足补给"
+    },
+    "wayfarer_3": {
+      "name": "酒馆攀谈"
+    },
+    "wayfarer_4": {
+      "name": "宝物猎人"
+    },
+    "wayfarer_5": {
+      "name": "见多识广"
+    },
+    "weaponmaster_1": {
+      "name": "利刃风暴"
+    },
+    "weaponmaster_2": {
+      "name": "碎骨"
+    },
+    "weaponmaster_3": {
+      "name": "破防打击"
+    },
+    "weaponmaster_4": {
+      "name": "反击"
+    },
+    "weaponmaster_5": {
+      "name": "近战武器精通"
+    },
+    "symbolist_1": {
+      "name": "魔法符印"
+    },
+    "symbolist_2": {
+      "name": "幻境"
+    },
+    "symbolist_3": {
+      "name": "个人风格"
+    },
+    "symbolist_4": {
+      "name": "符印联结"
+    },
+    "symbolist_5": {
+      "name": "符印术"
+    },
+    "chanter_1": {
+      "name": "魔法咏唱"
+    },
+    "chanter_2": {
+      "name": "谐振"
+    },
+    "chanter_3": {
+      "name": "塞壬之歌"
+    },
+    "chanter_4": {
+      "name": "音波屏障"
+    },
+    "chanter_5": {
+      "name": "颤音"
+    },
+    "dancer_1": {
+      "name": "舞蹈"
+    },
+    "dancer_2": {
+      "name": "随我起舞"
+    },
+    "dancer_3": {
+      "name": "狂乱舞步"
+    },
+    "dancer_4": {
+      "name": "快速换装"
+    },
+    "dancer_5": {
+      "name": "战争舞者"
+    },
+    "commander_1": {
+      "name": "主教敕令"
+    },
+    "commander_2": {
+      "name": "骑士冲锋"
+    },
+    "commander_3": {
+      "name": "长车陷阵"
+    },
+    "commander_4": {
+      "name": "王车易位"
+    },
+    "commander_5": {
+      "name": "后翼弃兵"
+    },
+    "mutant_1": {
+      "name": "肢端变异"
+    },
+    "mutant_2": {
+      "name": "生质吞噬"
+    },
+    "mutant_3": {
+      "name": "蜕皮"
+    },
+    "mutant_4": {
+      "name": "基因融合"
+    },
+    "mutant_5": {
+      "name": "野兽变异"
+    },
+    "pilot_1": {
+      "name": "压缩科技"
+    },
+    "pilot_2": {
+      "name": "灵活配置"
+    },
+    "pilot_3": {
+      "name": "引擎之心"
+    },
+    "pilot_4": {
+      "name": "个人载具"
+    },
+    "pilot_5": {
+      "name": "强劲握力"
+    },
+    "esper_1": {
+      "name": "认知焦点"
+    },
+    "esper_2": {
+      "name": "超级认知"
+    },
+    "esper_3": {
+      "name": "领航员"
+    },
+    "esper_4": {
+      "name": "念力天赋"
+    },
+    "esper_5": {
+      "name": "念动力"
+    },
+    "gourmet_1": {
+      "name": "烹饪"
+    },
+    "gourmet_2": {
+      "name": "刀叉功夫"
+    },
+    "gourmet_3": {
+      "name": "爱心制作"
+    },
+    "gourmet_4": {
+      "name": "盐与胡椒"
+    },
+    "gourmet_5": {
+      "name": "旅行厨师"
+    },
+    "invoker_1": {
+      "name": "元素调和"
+    },
+    "invoker_2": {
+      "name": "祈唤"
+    },
+    "invoker_3": {
+      "name": "连锁祈唤"
+    },
+    "invoker_4": {
+      "name": "涟漪"
+    },
+    "invoker_5": {
+      "name": "源泉扩展"
+    },
+    "merchant_1": {
+      "name": "保质期"
+    },
+    "merchant_2": {
+      "name": "我听说过！"
+    },
+    "merchant_3": {
+      "name": "私藏货品"
+    },
+    "merchant_4": {
+      "name": "真正宝藏"
+    },
+    "merchant_5": {
+      "name": "贸易之风"
+    },
+    "floralist_1": {
+      "name": "战斗园艺"
+    },
+    "floralist_2": {
+      "name": "植生术"
+    },
+    "floralist_3": {
+      "name": "嫁接"
+    },
+    "floralist_4": {
+      "name": "生命之树"
+    },
+    "floralist_5": {
+      "name": "青翠之势"
+    },
+    "necromancer_1": {
+      "name": "超越死亡领域"
+    },
+    "necromancer_2": {
+      "name": "墓穴之子"
+    },
+    "necromancer_3": {
+      "name": "恐惧为钥"
+    },
+    "necromancer_4": {
+      "name": "丧钟为谁而鸣"
+    },
+    "necromancer_5": {
+      "name": "梦魇圆舞曲"
+    }
+  },
+  "skill_pools": {
+    "arcanist": [
+      "arcanist_1",
+      "arcanist_2",
+      "arcanist_3",
+      "arcanist_4",
+      "arcanist_5"
+    ],
+    "chimerist": [
+      "chimerist_1",
+      "chimerist_2",
+      "chimerist_3",
+      "chimerist_4",
+      "chimerist_5"
+    ],
+    "darkblade": [
+      "darkblade_1",
+      "darkblade_2",
+      "darkblade_3",
+      "darkblade_4",
+      "darkblade_5"
+    ],
+    "elementalist": [
+      "elementalist_1",
+      "elementalist_2",
+      "elementalist_3",
+      "elementalist_4",
+      "elementalist_5"
+    ],
+    "entropist": [
+      "entropist_1",
+      "entropist_2",
+      "entropist_3",
+      "entropist_4",
+      "entropist_5"
+    ],
+    "fury": [
+      "fury_1",
+      "fury_2",
+      "fury_3",
+      "fury_4",
+      "fury_5"
+    ],
+    "guardian": [
+      "guardian_1",
+      "guardian_2",
+      "guardian_3",
+      "guardian_4",
+      "guardian_5"
+    ],
+    "loremaster": [
+      "loremaster_1",
+      "loremaster_2",
+      "loremaster_3",
+      "loremaster_4",
+      "loremaster_5"
+    ],
+    "orator": [
+      "orator_1",
+      "orator_2",
+      "orator_3",
+      "orator_4",
+      "orator_5"
+    ],
+    "rogue": [
+      "rogue_1",
+      "rogue_2",
+      "rogue_3",
+      "rogue_4",
+      "rogue_5"
+    ],
+    "sharpshooter": [
+      "sharpshooter_1",
+      "sharpshooter_2",
+      "sharpshooter_3",
+      "sharpshooter_4",
+      "sharpshooter_5"
+    ],
+    "spiritist": [
+      "spiritist_1",
+      "spiritist_2",
+      "spiritist_3",
+      "spiritist_4",
+      "spiritist_5"
+    ],
+    "tinkerer": [
+      "tinkerer_1",
+      "tinkerer_2",
+      "tinkerer_3",
+      "tinkerer_4",
+      "tinkerer_5"
+    ],
+    "wayfarer": [
+      "wayfarer_1",
+      "wayfarer_2",
+      "wayfarer_3",
+      "wayfarer_4",
+      "wayfarer_5"
+    ],
+    "weaponmaster": [
+      "weaponmaster_1",
+      "weaponmaster_2",
+      "weaponmaster_3",
+      "weaponmaster_4",
+      "weaponmaster_5"
+    ],
+    "symbolist": [
+      "symbolist_1",
+      "symbolist_2",
+      "symbolist_3",
+      "symbolist_4",
+      "symbolist_5"
+    ],
+    "chanter": [
+      "chanter_1",
+      "chanter_2",
+      "chanter_3",
+      "chanter_4",
+      "chanter_5"
+    ],
+    "dancer": [
+      "dancer_1",
+      "dancer_2",
+      "dancer_3",
+      "dancer_4",
+      "dancer_5"
+    ],
+    "commander": [
+      "commander_1",
+      "commander_2",
+      "commander_3",
+      "commander_4",
+      "commander_5"
+    ],
+    "mutant": [
+      "mutant_1",
+      "mutant_2",
+      "mutant_3",
+      "mutant_4",
+      "mutant_5"
+    ],
+    "pilot": [
+      "pilot_1",
+      "pilot_2",
+      "pilot_3",
+      "pilot_4",
+      "pilot_5"
+    ],
+    "esper": [
+      "esper_1",
+      "esper_2",
+      "esper_3",
+      "esper_4",
+      "esper_5"
+    ],
+    "gourmet": [
+      "gourmet_1",
+      "gourmet_2",
+      "gourmet_3",
+      "gourmet_4",
+      "gourmet_5"
+    ],
+    "invoker": [
+      "invoker_1",
+      "invoker_2",
+      "invoker_3",
+      "invoker_4",
+      "invoker_5"
+    ],
+    "merchant": [
+      "merchant_1",
+      "merchant_2",
+      "merchant_3",
+      "merchant_4",
+      "merchant_5"
+    ],
+    "floralist": [
+      "floralist_1",
+      "floralist_2",
+      "floralist_3",
+      "floralist_4",
+      "floralist_5"
+    ],
+    "necromancer": [
+      "necromancer_1",
+      "necromancer_2",
+      "necromancer_3",
+      "necromancer_4",
+      "necromancer_5"
+    ]
+  },
+  "intents": {
+    "defaults": {
+      "applies_to_dice_systems": [
+        "fu"
+      ],
+      "zh_match": "substring",
+      "en_match": "word",
+      "case_sensitive": false,
+      "prefer_longest": true
+    },
+    "combat": {
+      "aliases": {
+        "zh-CN": [
+          "攻击",
+          "砍",
+          "刺",
+          "射击",
+          "开火",
+          "挥剑",
+          "劈"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "dex",
+      "priority": 10
+    },
+    "investigate": {
+      "aliases": {
+        "zh-CN": [
+          "调查",
+          "查看",
+          "检查",
+          "寻找线索",
+          "翻找",
+          "搜查",
+          "观察"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "ins",
+      "priority": 20
+    },
+    "persuade": {
+      "aliases": {
+        "zh-CN": [
+          "说服",
+          "劝说",
+          "交涉",
+          "谈判",
+          "游说",
+          "安抚"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "ins",
+      "priority": 30
+    },
+    "intimidate": {
+      "aliases": {
+        "zh-CN": [
+          "威吓",
+          "恐吓",
+          "威胁",
+          "震慑"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "wlp",
+      "priority": 35
+    },
+    "sneak": {
+      "aliases": {
+        "zh-CN": [
+          "潜行",
+          "悄悄",
+          "躲藏",
+          "隐匿",
+          "偷"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "dex",
+      "priority": 40
+    },
+    "study": {
+      "aliases": {
+        "zh-CN": [
+          "研究",
+          "查阅",
+          "分析",
+          "推演",
+          "回忆"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "ins",
+      "priority": 50
+    },
+    "craft": {
+      "aliases": {
+        "zh-CN": [
+          "制作",
+          "修理",
+          "改装",
+          "造",
+          "调配"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "ins",
+      "priority": 60
+    },
+    "endure": {
+      "aliases": {
+        "zh-CN": [
+          "忍耐",
+          "硬撑",
+          "抵抗",
+          "扛住"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "mig",
+      "priority": 70
+    },
+    "travel": {
+      "aliases": {
+        "zh-CN": [
+          "赶路",
+          "追踪",
+          "露营",
+          "跋涉",
+          "探路"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "ins",
+      "priority": 80
+    },
+    "generic": {
+      "aliases": {
+        "zh-CN": [
+          "尝试",
+          "试试",
+          "检定",
+          "掷骰"
+        ]
+      },
+      "skill_candidates": {},
+      "default_attribute": "dex",
+      "priority": 90
+    }
+  },
+  "runtime": {
+    "id": "fabula_ultima",
+    "minimum_version": 1
+  },
+  "damage_types": [
+    "physical",
+    "lightning",
+    "wind",
+    "ice",
+    "fire",
+    "earth",
+    "poison",
+    "light",
+    "dark"
+  ],
+  "conditions": {
+    "slow": {
+      "name": "迟缓",
+      "attributes": [
+        "dex"
+      ]
+    },
+    "shaken": {
+      "name": "动摇",
+      "attributes": [
+        "wlp"
+      ]
+    },
+    "weak": {
+      "name": "虚弱",
+      "attributes": [
+        "mig"
+      ]
+    },
+    "dazed": {
+      "name": "眩晕",
+      "attributes": [
+        "ins"
+      ]
+    },
+    "enraged": {
+      "name": "激怒",
+      "attributes": [
+        "dex",
+        "ins"
+      ]
+    },
+    "poisoned": {
+      "name": "中毒",
+      "attributes": [
+        "mig",
+        "wlp"
+      ]
+    }
+  },
+  "villain_tiers": {
+    "minor": 5,
+    "major": 10,
+    "ultimate": 15
+  },
+  "conflict": {
+    "initiative_attributes": [
+      "dex",
+      "ins"
+    ],
+    "objective_clocks": {
+      "minor": 4,
+      "major": 6,
+      "ultimate": 10
+    },
+    "per_session": 2
+  },
+  "world_truths_schema": {
+    "mysteries": 1,
+    "threats": 1
+  },
+  "gm_prompt_appendix": "这是《最终物语 Fabula Ultima》规则（JRPG 风格奇幻）。\n\n【检定语义】每次检定固定掷两枚骰子并相加：两枚骰子来自角色的两项属性（敏捷 DEX / 洞察 INS / 力量 MIG / 意志 WLP），属性值的含义是骰面（d6=差、d8=普通、d10=好、d12=上限）。d6+d8+修正 ≥ DL 即成功。DL 只有四档：7 简单、10 普通、13 困难、16 极难。情境修正通常只有 ±2。\n【大成功/大失败】两枚骰子点数相同且 ≥6 = 大成功：自动成功，并获得一个\"机会\"（优势+4、施加异常状态、发现线索、填/擦命刻 2 格、情节转折、扫描弱点、揭秘动机等）。两枚都是 1 = 大失败：自动失败，玩家获得 1 点物语点。大成功不额外加伤害。\n【伤害】命中后伤害 = 本次检定两枚骰子中的\"高值\" + 武器/法术加值。伤害类型九种：物理、风、雷、暗、土、火、冰、光、毒。弱点使损失翻倍，抵抗使损失减半，两者互相抵消。物防 = 敏捷骰面 + 护甲；魔防 = 洞察骰面。攻击目标物防，攻击法术目标魔防。\n【异常状态】状态不加减值，而是把对应属性的骰面降一级（最低 d6，可叠加）：眩晕↓洞察、动摇↓意志、迟缓↓敏捷、虚弱↓力量、中毒↓力量+意志、激怒↓敏捷+洞察。\n【资源】HP 归零时角色昏迷出局，玩家获得 2 点物语点；HP ≤ 最大值一半即处于\"危机\"。MP 用于施法。物资点用于现场制作消耗品（治疗剂 3 点回 50HP、圣灵水 3 点回 50MP、万能药 2 点解状态），不可囤积。物语点可花 1 点援用\"特质\"重掷一到两枚骰、援用\"羁绊\"把羁绊强度加进检定，或加入一个叙事元素；不可用于填/擦命刻。\n【叙事口径】每名角色有身份、主题、故乡三个特质，以及最多六段羁绊（钦佩/自卑、忠诚/猜忌、喜爱/憎恨三组对立情感，羁绊强度 1-3）。用命刻（4/6/8/10/12 格）表示长期目标或威胁，检定结算值每超过 DL 3 点，命刻多填一格。\n【职业与技能】角色等级从 5 级开始，每级给 1 点技能等级，投入 15 个核心职业或扩展职业的技能上；某职业投入 10 级即\"精通\"，可再选一个英雄技能。本规则已收录 27 个职业，每个职业 5 个技能，技能只提供叙事权限与效果，不直接加减检定。\n【叙事资源协议】用 CLOCK 标签记录命刻（例：CLOCK:阻止祭坛仪式:3/6:威胁），用 BOND 标签记录羁绊（例：BOND:艾拉>老铁匠:钦佩、忠诚）。服务端会把【命刻】【羁绊】写进你每轮的上下文；只在首次出现或数值变化时输出，不要每轮重复。命刻填满即视为该目标达成或该威胁发生，必须据此更新叙事。\n【何时不需要检定】常识、无压力、无代价、失败也无后果的行动直接成功，不掷骰；玩家描述合理且不与已确立事实冲突时，允许它发生。检定只用于结果不确定、失败有代价的关键行动。不要为了\"有戏剧性\"而给每个动作都加检定。\n【难度校准】四档锚点：7=受过一点训练就能做（推开冻住的木门、跟明显脚印）；10=有能力的普通人（攀上结冰的矮墙、酒馆里打听消息、包扎轻伤）；13=专家或天才（解开机关锁、在暴风雪里追踪两天前的痕迹、识破老练骗子的谎）；16=该领域最顶尖（徒手拆解运转中的季钟）。默认按 10 判断；用 13 及以上必须在 dc_reason 里回答\"为什么一个受过训练的普通人做不到\"。\n【难度与处境分离】任务本身的客观难度决定 DL；角色的处境（寒冷、黑暗、受伤、被追）只进情境修正（通常 ±2），不得折算进 DL。同一事实只能进一条渠道。\n【概率自检】定档后自问：一个 d8+d8 的普通受训者有多大机会？参考：DL7≈77%、DL10≈44%、DL13≈16%、DL16≈2%。若你认为\"普通人也有三四成机会\"，就不能定 13。\n【失败不空转】DL13 及以上失败时，给出\"部分成功 + 代价\"（掉血、丢物、惊动敌人、命刻 +1），不要把行动描述成什么都没发生。\n【开放检定】同属性可以掷两次（调查是洞察+洞察，研究是洞察+洞察）；属性组合必须由行动语义决定，不要为了凑加值随意换属性。\n【物语点】玩家在行动里声明\"花费 1 点物语点\"后：援用特质→允许其立即重掷一次并采用新结果；援用羁绊→把羁绊强度加到本次检定结果上；加入叙事元素→按玩家描述改动场景（机制影响由你裁定）。结算后用 STAT:玩家ID:fabula:-1 扣点；物语点为 0 时不得允许。\n【机会】大成功时**不要替玩家选**：先叙述行动结果，再把机会表列给玩家、问他选哪一项（若玩家本轮已声明「我选机会：X」，直接结算 X）。机会表：优势+4、施加状态、建立羁绊、失言、亲睐、线索、丢失、进展（命刻±2格）、情节转折、扫描、揭秘。若大成功来自 **AI 控制的队友**，由你代选一项，并在叙事里明确写出所选项目与它带来的效果，不要含糊成「某种好处」。**若选的是「优势」，必须同时输出 BONUS:玩家ID:4**（服务端会在下一次检定自动加值并消耗）；其它选项不需要 BONUS 标签。大失败时由你选一项施加，并写进叙事。\n【道具消耗】玩家使用、喝下、倒出或消耗背包物品后，必须输出 USE:玩家ID:背包里的准确物品名（与背包条目完全一致，例如 USE:web_user:灯油半碗）。不发 USE，背包数量不会减少；名字对不上也扣不掉。\n【主线与场景】每 5~8 轮必须推进主线或收束当前场景：更新 QUEST 的 progress，或让场景目标达成/失败；禁止在同一地点无限追加微动作。新增障碍前先问\"它是否推进了已有目标\"，不推进就不要开。\n【冒险节点】状态视图里的 `fabula_ultima.adventure.active` 是当前冒险节点（含 `id`/`name`/`type`/`description`）。当**当前节点的目标已经明确达成**时，在状态标签区额外输出一行：\n`ADVENTURE_COMPLETE:{\"format_version\":1,\"node_id\":\"<active 里的节点 id>\",\"reason\":\"<一句话说明怎么达成的>\",\"evidence_rounds\":[<当前轮次>]}`\n这只是给玩家的**建议**，不会自动推进；玩家确认后才完成节点。目标没达成时不要输出。\n【命刻上限】同时最多 3 个未完成命刻；只用于跨场景的长期威胁或目标；同一场景内的障碍不要新开命刻，用检定结果或状态表达。命刻填满必须产生可见后果并关闭这条线。\n【新名词】任何新出现的人物、组织、器物、现象，在首次出现的那一轮必须给出可理解的解释或可验证的线索；不要用\"你不知道那是什么\"代替解释。\n【反谜语】解释只能用玩家已经见过的具体东西，不能用一个新概念解释另一个新概念。\n- 反例（失败）：\"契是两头各应一声才算完，应者不可入关。\"——听众没有得到任何可行动信息。\n- 正例（合格）：\"墙里那东西要你在这块铁片上刻个名字；刻了，你今晚就过不了关。\"\n同一个谜题最多纠缠 3 轮：要么揭晓答案，要么换场景，要么明说失败代价；禁止用\"你还不懂\"拖轮次。\n【开局】第一幕固定为补给/商店场景：列出 6~8 件可买物品（含价格，参照附录价目），让玩家用初始资金选购；在此之前不发放装备或战利品。\n【升级】角色从 5 级开始；每升一级获得 1 个职业等级与 1 点技能点，职业等级投到已有职业（10 级精通），技能点用于提升已有技能。属性骰不随等级提升（仅 20/40 级各 +1 档）。\n【失败的写法】失败必须写成\"付出了什么代价 + 你因此知道了什么\"（掉血、丢物、惊动某人、线索变模糊），禁止\"失败 → 威胁升级 → 再检定\"的连锁。同一场景连续失败两次后，下一次同类尝试应给部分成功或明确的新线索，而不是更深的险情。\n【开场节奏】前两轮让玩家做选择、交谈、观察，不强制检定；看物件、问消息、赶路这类日常行动优先用叙事给出信息。威胁可以出现，但要给玩家反应空间。\n【购买与装备】玩家购买武器/护甲成功后，必须用 WEAPON / EQUIP 标签（新获得的先 WEAPON_GAIN / EQUIP 再 EQUIP_ITEM），不要只发 LOOT——否则物品会留在背包里、装备栏仍是空的，战斗时等于徒手。\n【禁止】不要描述系统未声明的能力（法术位、专长、职业技能的具体数值加成）。不要替玩家决定掷骰结果、重掷或改判；服务端已经给出固定骰值。GM 只负责把已结算的结果讲成故事。\n【装备与购买】建卡只发 500 泽尼特，不自动发装备；玩家想买什么，由你按下列基准定价并检查余额：\n钢匕首 100、长剑 200、巨剑 300、重矛 250、短弓 200、手枪 250、法杖 200、魔典 250；\n旅行装束 50、板甲衣 200、青铜板甲 300、符文板甲 500；青铜盾牌 100、符文盾牌 150；\n治疗剂 50、圣灵水 50、万能药 30、魔法帐篷 100。\n职业的免费增益只决定\"能装备什么类别\"，不直接赠送物品。定价时以同档物品为参照，上下浮动不超过 50%，并在叙事里说明为什么贵或便宜。稀有物品另行议价。",
+  "check_planner_appendix": "### fu（Fabula Ultima）：两项属性\n\n**`opponent` 只填动作实际指向的对象**：只有当行动明确攻击/对抗/施压某个具名玩家或 NPC 时才填；对话里喊话、提醒、呼喊名字不算目标。目标是“残躯”“怪物”这类没有具名玩家/NPC 的敌人，或场景物时，`opponent` 留空，按难度给 `target`。误填会让服务端把该玩家的物防当成 DL。\n当 `ruleset.dice_system` 为 `fu` 时，每次检定固定是**两个属性相加**：必须同时填写 `attribute` 与 `attribute_b`，两者都取自 `ruleset.attributes` 的 key，且不能相同（除非是\"开放检定\"，例如调查用洞察+洞察，此时两项相同是合法的）。\n\n- 近战攻击多为「敏捷 + 力量」；远程/枪械多为「敏捷 + 洞察」；攻击法术多为「洞察 + 意志」；调查/研究多为「洞察 + 洞察」；说服/威吓多为「洞察 + 意志」或「意志 + 意志」。\n- 必须填写情境 `target`（DL），档位取 `ruleset.dc_table`：7 简单 / 10 普通 / 13 困难 / 16 极难。DL 是**四档**，不要使用 d20 的 10/15/20/25 尺度。\n- 不要填写 `advantage`：FU 没有优势/劣势骰，情境影响请走 `modifier`（通常 ±2）。\n- `skill` 可以留空；FU 的职业技能不是检定分类，只在叙事层面生效。\n\n**先判断\"要不要掷\"**：常识、无压力、无代价、失败也没有后果、或者可以反复尝试的行为，直接不生成检定（返回空数组）。只给结果不确定、失败有代价的关键行动掷骰。开场前两轮尤其克制：观察、询问、赶路这类日常行动用叙事给信息即可。\n\n**DL 怎么定**：默认 **10**（有能力的普通人）。7 是受过一点训练就能做；13 是**专家或天才**才做得到；16 是领域顶尖。使用 13 及以上时，`dc_reason` 必须回答\"为什么一个受过训练的普通人做不到\"。寒冷、黑暗、受伤、装备不足只算情境修正（±2），不要折算进 DL——同一件事不要既抬 DL 又给负修正。\n\n**失败的含义**：失败是\"代价 + 新信息\"，不是\"威胁升级\"。不要把一次失败写成\"它更凶了、你再来一次\"，那会变成连续检定。\n\n**机会加成（pending_bonus）**：角色数据里的 `pending_bonus` 是上一轮大成功留下的机会加成，服务端会在结算时**自动加进总结果**，你不要再把它写进 `modifier`。如果最近叙事明确写了某角色获得机会加值（如\"下一次检定 +4\"），但该角色 `pending_bonus` 为 0，则把该加值写进 `modifier` 并在 `modifier_reason` 里注明\"上轮机会加值\"。\n\n**判定口径**\n\n只在结果不确定且失败有代价时才检定；常识、无压力、无代价、可反复尝试的动作直接成功，不要掷骰。\n默认 DL 10。7=受过一点训练就能做（看清单个物件、跟明显脚印、熟人帮个小忙）；10=有能力的普通人（攀结冰矮墙、酒馆打听消息、包扎轻伤）；13=专家或天才（解机关锁、追踪两天前的痕迹、识破老练骗子的谎）；16=领域顶尖（拆运转中的季钟）。\n用 13 及以上，必须在 dc_reason 里回答\"为什么受过训练的普通人做不到\"。寒冷、黑暗、受伤、装备不足只进情境修正（±2），不计入 DL。\n开场前两轮不要强制检定；观察、询问、赶路这类日常行动用叙事给信息即可。失败要给代价 + 新信息，不要写成\"失败导致威胁升级再检定\"的连锁。",
+  "narration_policy": "【本轮叙事契约·每轮必守】\n1. 让玩家知道：谁在场、他要什么、障碍是什么、失败会失去什么。本轮至少给一个具体可做的动作（做 X 会得到 Y / 不做会失去 Z），不要只给\"答/不答\"这种二选一。\n2. 每轮最多出现一个新名词，且只用玩家已经见过的具体事物解释它。解释里如果又冒出新名词，就算失败——改用具体动作、物件或后果来写。\n3. NPC 每两轮至少做一件推动剧情的事（拿出东西、提出交易、带路、动手），不能连续两轮只解释谜语。\n4. 同一个谜题最多 3 轮：给出答案、转入新场景、或明确失败代价。禁止无限追问。\n5. 写完自检：如果玩家只看这一轮，他知道下一步能做什么吗？答不上就重写。",
+  "skill_reference": "【职业技能速查·摘要，细节以《核心规则书》为准】\n奥灵使：奥灵回响（融合时触发奥灵的回响效果）｜奥灵疗愈（遣散奥灵时回复自身资源）｜契约与召唤（缔约并召唤奥灵融合）｜险境召唤（危机中即时召唤奥灵）｜奥灵系仪式（可施展奥灵学派仪式）\n拟兽使：摄能为食（吞食残骸回复资源）｜野性之语（与野兽魔物交谈）｜同源之毒（习得魔物的毒系法术）｜拟兽系仪式（可施展拟兽学派仪式）｜形意咒法（学习并施展魔物法术）\n暗刃骑士：痛楚（以自身痛苦换取攻击强化）｜身负黑血（耗HP强化暗属性攻击）｜黑暗之心（危机中缔结憎恨羁绊）｜苦痛教训（受伤后获得反击加值）｜暗影击（耗HP发动附暗伤的攻击）\n元素使：天灾骤降（回合末降下元素灾祸）｜元素魔法（习得元素系攻击法术）｜魔法炮击（法术伤害随检定提升）｜元素系仪式（可施展元素学派仪式）｜以械引咒（用武器公式代替施法检定）\n熵术士：灵智回流（受法术影响时回复MP）｜熵系魔法（习得熵系法术）｜幸运七（掷出7时触发额外效果）｜熵系仪式（可施展熵学派仪式）｜窃取时间（夺取目标的行动或资源）\n狂怒斗士：肾上腺素（危机中攻击造成额外伤害）｜狂怒（以状态换取连击与暴击）｜不屈意志（抵抗精神类影响）｜挑衅（强制敌人攻击自己）｜死战不退（HP归零时仍坚持战斗）\n守护者：保镖（防御时掩护盟友并减伤）｜防御精通（防御行动获得额外减伤）｜双盾战士（双盾并用提升物防）｜铁壁（提升最大HP与物防）｜挺身守护（代替他人承受攻击）\n博学家：灵光洞见（检定后提问并获得真相）｜集中心智（提升MP上限与回复）｜知识就是力量（用洞察替代属性检定）｜快速评估（观察敌人获知其数据）｜记忆训练（回忆知识换取线索）\n游说家：谴责（令敌人动摇并削弱士气）｜鼓舞（回复盟友并提升属性骰）｜予以信任（令盟友获得重掷或加值）｜巧舌如簧（社交检定获得加值）｜意外盟友（把中立NPC拉入己方）\n浪客：阴狠手段（攻击附带异常状态）｜闪避（提升物防与躲避能力）｜疾速身法（先攻与行动顺序优势）｜后会有期（安全脱离战斗）｜窃取灵魂（偷取目标MP或物品）\n神射手：弹幕射击（一次攻击多个目标）｜干涉火力（抵消来袭的远程攻击）｜鹰眼（远程攻击无视掩护）｜远程武器精通（远程命中与伤害加值）｜威慑射击（放弃伤害改为施加状态）\n御魂使：治愈之力（习得治愈法术）｜御魂系仪式（可施展御魂学派仪式）｜灵魂魔法（习得灵魂系法术）｜法术支援（施法时援助盟友）｜生命秘法（以HP施法强化治疗）\n造物使：应急用品（危机中额外使用物资）｜便携装置（制造临时装置）｜药剂雨（消耗品可作用于多人）｜秘密配方（制作强化消耗品）｜先见之明（降低工程成本并加速）\n旅人：忠诚伙伴（获得5级伙伴NPC）｜充足补给（提升物资点上限）｜酒馆攀谈（休息时向GM提问）｜宝物猎人（发现额外战利品）｜见多识广（知识类检定获得加值）\n武器大师：利刃风暴（近战攻击多个目标）｜碎骨（放弃伤害改为施加状态）｜破防打击（攻击无视抵抗）｜反击（被攻击后立即反击）｜近战武器精通（近战命中与伤害加值）\n徽记使：魔法符印（习得符印并附加于目标）｜幻境（制造幻象干扰敌人）｜个人风格（符印个性化强化）｜符印联结（多个符印联动生效）｜符印术（令符印扩散至多目标）\n咏唱师：魔法咏唱（习得咏唱法术）｜谐振（与盟友法术产生共鸣）｜塞壬之歌（魅惑并削弱敌人）｜音波屏障（声波减伤护盾）｜颤音（持续音波伤害）\n舞者：舞蹈（习得舞步）｜随我起舞（令盟友共享舞步）｜狂乱舞步（舞步效果强化）｜快速换装（无动作更换装备）｜战争舞者（舞步中发动攻击）\n指挥官：主教敕令（号令强化盟友）｜骑士冲锋（冲锋突进攻击）｜长车陷阵（阵型推进压制）｜王车易位（与盟友交换位置）｜后翼弃兵（牺牲换取战术优势）\n变种人：肢端变异（肢体变异为武器）｜生质吞噬（吞噬生物回复自身）｜蜕皮（解除状态并回复）｜基因融合（组合多种变异）｜野兽变异（变形为兽形战斗）\n机师：压缩科技（随时收纳载具）｜灵活配置（切换载具模块）｜引擎之心（载具性能强化）｜个人载具（获得专属载具）｜强劲握力（载具武器强化）\n念力师：认知焦点（标记敌人并获得加值）｜超级认知（强化认知焦点效果）｜领航员（心灵感应与传送仪式）｜念力天赋（习得心灵天赋）｜念动力（念力攻击与移动）\n美食家：烹饪（制作食物提供增益）｜刀叉功夫（餐具当作武器）｜爱心制作（食物效果强化）｜盐与胡椒（调味附加额外效果）｜旅行厨师（旅途恢复与补给）\n唤灵师：元素调和（元素抗性与强化）｜祈唤（召唤元素之灵）｜连锁祈唤（连续召唤多个灵）｜涟漪（祈唤效果扩散）｜源泉扩展（扩大祈唤影响范围）\n商人：保质期（消耗品不会损坏）｜我听说过！（知识检定换取情报）｜私藏货品（获得稀有货物）｜真正宝藏（提升战利品价值）｜贸易之风（获取贸易点）\n园艺师：战斗园艺（令植物参战）｜植生术（培育魔法植物）｜嫁接（组合植物特性）｜生命之树（治疗并强化盟友）｜青翠之势（植物范围效果）\n死灵法师：超越死亡领域（获得悼亡点）｜墓穴之子（驱使亡灵仆从）｜恐惧为钥（利用恐惧状态）｜丧钟为谁而鸣（死亡触发效果）｜梦魇圆舞曲（范围恐惧伤害）",
+  "difficulty_instructions": {
+    "轻松": "敌人骰面偏小、DL 多为 7，失败只带来小麻烦；物语点充裕。",
+    "标准": "按 FU 基准：普通任务 DL 10，专家任务 DL 13，失败有代价但可挽回。",
+    "硬核": "DL 上调一档、敌人骰面更大，失败会带来不可逆的资源与羁绊损失。"
+  },
+  "ui_schema": {
+    "primary_resources": [
+      "hp"
+    ],
+    "secondary_resources": [
+      "mp",
+      "ip",
+      "fabula"
+    ],
+    "identity_labels": {
+      "origin": "故乡",
+      "archetype": "职业",
+      "background": "身份"
+    },
+    "show_level": true,
+    "show_xp": true,
+    "currency_label": "泽尼特",
+    "equipment_label": "装备"
+  }
+}

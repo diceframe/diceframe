@@ -5605,6 +5605,12 @@ bundle/content
 在 generic d20 里加 if new_rule
 ```
 
+规则使用 d20 / d100 之外的骰制时，不在通用检定管线里加分支，而是由规则包向
+`src/engine/check_mechanics.py` 的骰制注册表反向注册一个 `CheckMechanic`
+（建请求、掷骰、校验、结算、给 GM 的结果文本）。内建的 d20 / d100 不经过该表，
+也不能被注册实现覆盖；未注册的骰制在规则模板加载时 fail closed。
+`src/rulesets/fabula_ultima` 是第一个使用该接缝的规则包（`dice_system = "fu"`）。
+
 ---
 
 ## 49.2 新增通用战斗 primitive
@@ -5767,7 +5773,12 @@ inventory
 ```text
 core:legacy
 core:dnd2024
+fabula_ultima
 ```
+
+`fabula_ultima` 是兼容 Fabula Ultima 的第一方规则包（社区贡献并入，含房规，
+见 `docs/rulesets/fabula_ultima/README_CN.md`）。它继承 legacy adapter 的建卡与叙事路径，
+冲突、GM 工具与购物轮走自己的权威意图；runtime id 沿用贡献分支的写法以保持既有存档可读。
 
 这是一种有意的 compatibility architecture。
 

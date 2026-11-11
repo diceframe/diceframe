@@ -46,9 +46,13 @@ const characterCenterComponents = new Map<string, Component>()
 
 // 规则专属的局内面板：侧栏面板挂在通用侧栏的 after-character 插槽，时间线面板挂在
 // ruleset-log 插槽；clockControls 表示该规则向 GM 开放命刻编辑。
-const sidebarLoaders: Record<string, { load: ComponentLoader; clockControls: boolean }> = {}
+const sidebarLoaders: Record<string, { load: ComponentLoader; clockControls: boolean }> = {
+  fabula_ultima: { load: () => import('./fabula_ultima/FuSidebarPanel.vue'), clockControls: true },
+}
 const sidebarComponents = new Map<string, Component>()
-const timelineLoaders: Record<string, ComponentLoader> = {}
+const timelineLoaders: Record<string, ComponentLoader> = {
+  fabula_ultima: () => import('./fabula_ultima/FuCombatLog.vue'),
+}
 const timelineComponents = new Map<string, Component>()
 
 function cachedComponent(
