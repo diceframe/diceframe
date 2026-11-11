@@ -497,7 +497,7 @@ HP 增量的两个来源分别验证：
 
 1. `class_feature_grants` 仍然只写不读。补齐不会更新它，因为没有任何消费者；一旦将来有人按它重建特性，这里会显形。
 2. `feat_refs` 里仍有 `feat:ability_score_improvement` 这个伪专长。账本已经把它和真专长分开，但 `feat_refs` 本身没有区分。清理属于独立议题。
-3. 前端未跑 `vue-tsc`：该工作树没有 `node_modules`，只能人工核对语法。合并前需在 CI 或本地补一次类型检查。
+3. ~~前端未跑 `vue-tsc`~~：已在 CI 补验。run 43046760662 的 `Frontend checks` job 跑完 `Typecheck` / `Lint` / `Run frontend tests` / `Build frontend`，四步全 success。该项消除。
 
 ### 9.11 CI 门禁补验：两个只在门禁上才现形的缺陷
 
@@ -508,9 +508,20 @@ HP 增量的两个来源分别验证：
 
 **本机全量结果**：最终一轮 `19 failed / 8746 passed / 3 errors`。失败集合为 11 条 `test_dnd2024_character_builder.py`（`ability:con in background:soldier`）、6 条 `test_docker_launcher.py` + 1 条 `test_docker_data_generation.py`（临时目录路径语义）、3 个 `test_docker_runtime_v1_upgrade.py` error、1 条 `test_updater.py::test_safe_extract_writes_and_cleans_paths_beyond_max_path`（Windows 长路径，取决于 `--basetemp` 绝对路径长度，因此某一轮会"多出一条"）。逐条在 base 提交 `6f07bf0e` 上复现，均为 Windows 本地环境问题，Linux CI 不复现。**本切片没有新增后端失败。**
 
-**CI 侧的阻塞不是测试失败**：`Backend tests` 连续三次（run 43035975979 / 43041798115 / 43043239120）都停在 `Install CJK font for bot card rendering`。该步用 `apt-get update && apt-get install` 单行执行，runner 侧 DNS 解析 `azure.archive.ubuntu.com` 整段失败，apt 退出 100，ruff/mypy/pytest 全部被跳过。
+**CI 侧的阻塞不是测试失败**：`Backend tests` 连续四次（run 43035975979 / 43041798115 / 43043239120 / 43046760662）都停在 `Install CJK font for bot card rendering`，`Lint with ruff` / `Type check with mypy` / `Run backend tests` 全部 skipped，一次都没执行。
 
-判定依据：该步骤自 2026-11-09（`09a53523`）起未改动，本切片对 `.github/` 零改动；成功与失败的 runner 镜像完全相同（`ubuntu-24.04` / `20261101.360`）；11:23 那次 `Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease`，整步 10 秒完成，14:10 起三次全部 `Temporary failure resolving`，且镜像列表 `Fetched 1467 kB in 3min 20s`。**结论：上游 runner 的出网/DNS 问题，不在本切片修复范围。**（加固思路备忘：该步是覆盖率增强而非正确性门禁，可改为重试后降级为 skip，留作上游恢复后另行提议。）
+判定依据，按证据强度排列：
+
+1. **同一次 `apt-get update` 内冷暖分明**（run 43046760662，job 130612797265，15:17:30 起）：`Get:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]`、`Get:7 ... Packages [760 kB]`、`Get:8/9` 均在 15:17:30 内下载完成；同一进程内 `Ign:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease`（15:17:50）、`Ign:2 https://archive.ubuntu.com/ubuntu noble InRelease`（15:19:30）全部解析失败，随后转为 `Temporary failure resolving`。runner 出网正常，失效的只是 Ubuntu 归档这两个主机的 DNS。
+2. **四台不同 VM、四个不同地域**：失败分别在 `centralus`（14:10）、`westcentralus`（14:47）、`centralus`（14:55）、`eastus3`（15:17），Worker ID 各不相同；成功的是 `eastus`（00:06，本分支自身）与 `westus3`（11:23，main push）。不是单台坏机器，也不是单一地域。
+3. **镜像与步骤文本都没变**：成功与失败均为 `ubuntu-24.04` / `20261101.360.1`（Build Date 2026-10-28）；`Install CJK font` 步骤逐字相同；本切片对 `.github/` 零改动。
+4. **实际执行的根本不是本分支的 `ci.yml`**：`pull_request` 事件取 base 分支的 workflow 文件。证据是 run 43046760662 里存在 `Launcher tests (Windows)` 这个 job，而本分支的 `ci.yml` 里没有它（该 job 由 main 的 `bb69296d` 加入）。也就是说，即便本分支改了 `ci.yml`，也不会影响这次失败。
+
+**一处需要记住的判断失误**：先前用 `git diff origin/main...HEAD -- .github/` 得出「与 main 一致」。三点语法只比到 merge-base，看不见 main 之后的提交；`bb69296d` 正是那之后给 main 加了 `launcher-windows` job。要判断「跑的是不是同一个文件」，必须两点比较或逐文件 `diff`。
+
+**「上游」的边界**：GitHub 状态页在 2026-11-11 该时间窗内没有任何 Actions / 网络事件（最近一次是 11-10 的 Git Operations），所以这不是被平台承认的事件；它是 runner 侧对 Ubuntu 归档域名的解析失效——不可控、不在本切片、也不该由这里修。**结论：不在本切片修复范围。**（加固思路备忘：该步是覆盖率增强而非正确性门禁，可改为重试后降级为 skip，留作上游恢复后另行提议。）
+
+**门禁补验（用 CI 精确版本）**：从失败日志里读出 CI 实际安装的版本（`ruff 0.17.4` / `mypy 1.20.2` / `pytest 9.2.0`），本地按同版本复核：`ruff check src/` → `All checks passed!`；`mypy` → `Success: no issues found in 102 source files`；`pytest 9.2.0` 与本机一致。因此 ruff / mypy 两道门禁的结论不再依赖版本推测，只有 `Run backend tests` 一步在 CI 上仍是空白。
 
 ### 9.12 补齐入口的两次收紧（`d5281818`）
 
