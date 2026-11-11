@@ -78,6 +78,40 @@ def reserve_entropy(instance: Any) -> None:
         instance.modules[MODULE_NAME] = state
 
 
+def _canonical_skill_ids(rule: Any, name: Any) -> list[str]:
+    """Rule-declared identities a skill label may stand for, in declaration order."""
+    definitions = rule.template.get('skills') or {}
+    canonical_names = rule.template.get('canonical_skill_names') or {}
+    aliases = rule.template['skill_improvement'].get('identity_aliases') or {}
+    return list(dict.fromkeys(
+        [sid for sid, definition in definitions.items() if isinstance(definition, dict)
+         and name in {sid, definition.get('name'), canonical_names.get(sid)}]
+        + [sid for sid, names in aliases.items() if isinstance(names, list) and name in names]))
+
+
+def _restore_marked_identities(rule: Any, sheet: dict, marks: list[dict]) -> None:
+    """Re-attach pending marks to rows whose stored identity was dropped.
+
+    Character normalization before 3.2.0 rewrote skill rows as name/value/effect,
+    so saves can hold a pending mark whose row no longer carries ``id``. Rebind
+    only an id-less row that unambiguously names the marked skill, either by the
+    label recorded with the mark or by the rule's single canonical identity.
+    Anything else stays unbound and settlement keeps refusing it.
+    """
+    skills = sheet.get('skills')
+    if not isinstance(skills, list):
+        return
+    for mark in marks:
+        sid = mark['skill_id']
+        if any(isinstance(s, dict) and s.get('id') == sid for s in skills):
+            continue
+        label = mark.get('label')
+        rows = [s for s in skills if isinstance(s, dict) and not s.get('id')
+                and ((label and s.get('name') == label) or _canonical_skill_ids(rule, s.get('name')) == [sid])]
+        if len(rows) == 1:
+            rows[0]['id'] = sid
+
+
 def mark_checks(instance: Any, rule: Any, checks: list[dict]) -> None:
     if not supported(rule):
         return
@@ -97,6 +131,9 @@ def mark_checks(instance: Any, rule: Any, checks: list[dict]) -> None:
                 or value > threshold or check.get('is_fumble')):
             continue
         sheet = instance.get_character_sheet(uid)
+        # A row that lost its identity must get the pending mark's id back, not
+        # a freshly minted one that would orphan the earlier mark.
+        _restore_marked_identities(rule, sheet, [p for p in slot['pending'] if p['actor_uid'] == uid])
         skills = sheet.get('skills', [])
         matches = [s for s in skills if s.get('name') == check['skill']]
         if len(matches) != 1:
@@ -107,13 +144,7 @@ def mark_checks(instance: Any, rule: Any, checks: list[dict]) -> None:
         # Mint an identity once at the authoritative sheet boundary. Localized
         # names remain labels and never become persisted growth identities.
         if not skill.get('id'):
-            definitions = rule.template.get('skills') or {}
-            canonical_names = rule.template.get('canonical_skill_names') or {}
-            aliases = rule.template['skill_improvement'].get('identity_aliases') or {}
-            candidates = list(dict.fromkeys(
-                [sid for sid, definition in definitions.items() if isinstance(definition, dict)
-                 and skill['name'] in {sid, definition.get('name'), canonical_names.get(sid)}]
-                + [sid for sid, names in aliases.items() if isinstance(names, list) and skill['name'] in names]))
+            candidates = _canonical_skill_ids(rule, skill['name'])
             if len(candidates) > 1:
                 continue
             sid = candidates[0] if candidates else f'skill_{uuid4().hex}'
@@ -138,15 +169,21 @@ def settle(instance: Any, rule: Any, receipt_id: str, *, expected_run: str) -> d
     if not supported(rule):
         raise ValueError('this rule does not declare supported intermission skill improvement')
     targets = []
+    staged: dict[str, dict] = {}
     # Validate every target before consuming any RNG or changing any sheet.
     for mark in state['pending']:
         uid = mark['actor_uid']
         if uid not in instance.players:
             raise ValueError('a marked character left; resolve its mark before settlement')
-        sheet = deepcopy(instance.get_character_sheet(uid))
+        if uid not in staged:
+            # Identity repair happens on the staged copy, so a refused
+            # settlement leaves the live sheet untouched.
+            staged[uid] = deepcopy(instance.get_character_sheet(uid))
+            _restore_marked_identities(rule, staged[uid], [m for m in state['pending'] if m['actor_uid'] == uid])
+        sheet = staged[uid]
         found = [s for s in sheet.get('skills', []) if s.get('id') == mark['skill_id']]
         if len(found) != 1 or type(found[0].get('value')) is not int:
-            raise ValueError('marked skill no longer has an unambiguous identity/value')
+            raise ValueError(f"marked skill no longer has an unambiguous identity/value: {mark.get('label') or mark['skill_id']}")
         if found[0].get('improvable') is False or mark['skill_id'] in rule.template['skill_improvement'].get('excluded_skill_ids', []):
             raise ValueError('marked skill is no longer eligible under the current rule policy')
         targets.append((mark, sheet, found[0]))
