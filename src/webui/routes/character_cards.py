@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from aiohttp import web
 
 from src.webui.routes._common import _get_api, _require_confirmed_request
