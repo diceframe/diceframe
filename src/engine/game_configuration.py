@@ -79,21 +79,21 @@ def configure_session(
     if luck_timeout_seconds is not None:
         luck_timeout_seconds = int(luck_timeout_seconds)
         if not 0 <= luck_timeout_seconds <= 3600:
-            raise ValueError(t("engine_game_configuration.luck_timeout_range"))
+            raise ValueError(t("engine.game_configuration.luck_timeout_range"))
     if dice_reveal_mode is not None and dice_reveal_mode not in {"auto", "click"}:
-        raise ValueError(t("engine_game_configuration.dice_reveal_invalid"))
+        raise ValueError(t("engine.game_configuration.dice_reveal_invalid"))
     if economy_reward_policy is not None:
         from src.engine.economy import normalize_reward_policy
 
         economy_state.require_writable(instance)
         if not isinstance(economy_reward_policy, dict):
-            raise ValueError(t("engine_game_configuration.reward_policy_invalid"))
+            raise ValueError(t("engine.game_configuration.reward_policy_invalid"))
         if not str(economy_reward_policy.get("mode") or "").strip():
             economy_reward_policy = {}
         else:
             normalized = normalize_reward_policy(economy_reward_policy)
             if not normalized:
-                raise ValueError(t("engine_game_configuration.reward_policy_fields_invalid"))
+                raise ValueError(t("engine.game_configuration.reward_policy_fields_invalid"))
             economy_reward_policy = normalized
 
     if solo_mode is not None:

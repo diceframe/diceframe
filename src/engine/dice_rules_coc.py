@@ -58,9 +58,9 @@ def check_d100_bonus(threshold: int, bonus_dice: int = 0, penalty_dice: int = 0)
     penalty_dice: 惩罚骰数量（掷多个十位骰，取最终结果更高者）
     """
     if bonus_dice < 0 or penalty_dice < 0:
-        raise ValueError(t("engine_dice_rules_coc.bonus_penalty_negative"))
+        raise ValueError(t("engine.dice_rules_coc.bonus_penalty_negative"))
     if bonus_dice > MAX_DICE_COUNT or penalty_dice > MAX_DICE_COUNT:
-        raise ValueError(t("engine_dice_rules_coc.bonus_penalty_too_many", max_dice_count=MAX_DICE_COUNT))
+        raise ValueError(t("engine.dice_rules_coc.bonus_penalty_too_many", max_dice_count=MAX_DICE_COUNT))
     if bonus_dice and penalty_dice:
         cancel_count = min(bonus_dice, penalty_dice)
         bonus_dice -= cancel_count
@@ -118,7 +118,7 @@ def _sanity_loss_term(term: str) -> str:
     if re.fullmatch(r"\d{1,3}", term):
         value = int(term)
         if value > MAX_SANITY_FIXED_LOSS:
-            raise ValueError(t("engine_dice_rules_coc.sanity_loss_out_of_range", term=term))
+            raise ValueError(t("engine.dice_rules_coc.sanity_loss_out_of_range", term=term))
         return str(value)
     return parse_dice_formula(term)[0]
 
@@ -127,11 +127,11 @@ def parse_sanity_loss(raw: Any) -> SanityLoss:
     """解析理智损失写法；无法识别时抛 ValueError，且不消耗任何随机数。"""
     text = str(raw or "").strip().lower().replace(" ", "").replace("／", "/")
     if not text:
-        raise ValueError(t("engine_dice_rules_coc.sanity_loss_empty"))
+        raise ValueError(t("engine.dice_rules_coc.sanity_loss_empty"))
     if "/" in text:
         success, failure = text.split("/", 1)
         if not success or not failure or "/" in failure:
-            raise ValueError(t("engine_dice_rules_coc.sanity_loss_invalid", raw=raw))
+            raise ValueError(t("engine.dice_rules_coc.sanity_loss_invalid", raw=raw))
         return SanityLoss(_sanity_loss_term(success), _sanity_loss_term(failure), True)
     term = _sanity_loss_term(text)
     return SanityLoss(term, term, False)

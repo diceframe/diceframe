@@ -21,14 +21,14 @@ _MAX_FORMAT_DECIMALS = 8
 
 def _as_decimal_text(value: str | int) -> str:
     if isinstance(value, bool):
-        raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value)))
+        raise CurrencySystemError(t("engine.currency.codec.amount_invalid", amount=repr(value)))
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
         text = value.strip()
         if text and _DECIMAL_RE.fullmatch(text):
             return text
-    raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value)))
+    raise CurrencySystemError(t("engine.currency.codec.amount_invalid", amount=repr(value)))
 
 
 def parse_currency_amount(
@@ -44,22 +44,22 @@ def parse_currency_amount(
     """
 
     if not isinstance(spec, CurrencySpec):
-        raise CurrencySystemError(t("engine_currency_codec.currency_system_missing"))
+        raise CurrencySystemError(t("engine.currency.codec.currency_system_missing"))
     unit = spec.unit(str(unit_id or "").strip())
     if unit is None:
-        raise CurrencySystemError(t("engine_currency_codec.unknown_unit", unit_id=repr(unit_id)))
+        raise CurrencySystemError(t("engine.currency.codec.unknown_unit", unit_id=repr(unit_id)))
     text = _as_decimal_text(value)
     try:
         canonical = Decimal(text) * unit.rate
     except (InvalidOperation, ValueError):
-        raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value))) from None
+        raise CurrencySystemError(t("engine.currency.codec.amount_invalid", amount=repr(value))) from None
     if canonical != canonical.to_integral_value():
         raise CurrencySystemError(
-            t("engine_currency_codec.amount_not_exact", text=text, unit=unit.name, base_unit=spec.base.name),
+            t("engine.currency.codec.amount_not_exact", text=text, unit=unit.name, base_unit=spec.base.name),
         )
     canonical_int = int(canonical)
     if canonical_int <= 0:
-        raise CurrencySystemError(t("engine_currency_codec.amount_not_positive"))
+        raise CurrencySystemError(t("engine.currency.codec.amount_not_positive"))
     return canonical_int
 
 
@@ -87,7 +87,7 @@ def format_currency_amount(amount: int, spec: CurrencySpec) -> str:
     """
 
     if isinstance(amount, bool) or not isinstance(amount, int):
-        raise CurrencySystemError(t("engine_currency_codec.canonical_amount_not_integer", amount=repr(amount)))
+        raise CurrencySystemError(t("engine.currency.codec.canonical_amount_not_integer", amount=repr(amount)))
     sign = "-" if amount < 0 else ""
     value = abs(int(amount))
     display = spec.display

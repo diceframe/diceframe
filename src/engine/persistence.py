@@ -434,9 +434,9 @@ async def import_save_zip(
             raw_names = [info.filename for info in infos]
             names = set(raw_names)
             if len(raw_names) != len(names):
-                return {"ok": False, "error": t("engine_persistence.archive_duplicate_files")}
+                return {"ok": False, "error": t("engine.persistence.archive_duplicate_files")}
             if "state.json" not in names:
-                return {"ok": False, "error": t("engine_persistence.archive_missing_state")}
+                return {"ok": False, "error": t("engine.persistence.archive_missing_state")}
             # 先信任 ZIP 中央目录做资源预检，再解压成内存，防止高压缩比存档耗尽内存。
             limits = {
                 "state.json": game_instance.MAX_SAVE_STATE_BYTES,
@@ -447,32 +447,32 @@ async def import_save_zip(
             unpacked_size = 0
             for info in infos:
                 if info.flag_bits & 0x1:
-                    return {"ok": False, "error": t("engine_persistence.archive_encrypted")}
+                    return {"ok": False, "error": t("engine.persistence.archive_encrypted")}
                 limit = limits.get(info.filename, 0)
                 if info.file_size > limit:
-                    return {"ok": False, "error": t("engine_persistence.member_too_large", filename=info.filename)}
+                    return {"ok": False, "error": t("engine.persistence.member_too_large", filename=info.filename)}
                 unpacked_size += info.file_size
             if unpacked_size > game_instance.MAX_SAVE_UNPACKED_BYTES:
-                return {"ok": False, "error": t("engine_persistence.archive_too_large")}
+                return {"ok": False, "error": t("engine.persistence.archive_too_large")}
             state_data = zf.read("state.json")
             try:
                 state_json = json.loads(state_data.decode("utf-8-sig"))
             except (UnicodeDecodeError, json.JSONDecodeError):
-                return {"ok": False, "error": t("engine_persistence.state_not_json")}
+                return {"ok": False, "error": t("engine.persistence.state_not_json")}
             if not isinstance(state_json, dict) or "game_key" not in state_json:
-                return {"ok": False, "error": t("engine_persistence.state_missing_game_key")}
+                return {"ok": False, "error": t("engine.persistence.state_missing_game_key")}
             # 仅接受顶层已知文件，防止解压路径穿越/任意写入
             allowed = {"state.json", "chatlog.jsonl", "scene-image.asset", "map-background.asset"}
             if any(name for name in names if name not in allowed or "/" in name or "\\" in name or ".." in name):
-                return {"ok": False, "error": t("engine_persistence.archive_invalid_files")}
+                return {"ok": False, "error": t("engine.persistence.archive_invalid_files")}
             chatlog_data = zf.read("chatlog.jsonl") if "chatlog.jsonl" in names else b""
             scene_image_data = zf.read("scene-image.asset") if "scene-image.asset" in names else b""
             map_background_data = zf.read("map-background.asset") if "map-background.asset" in names else b""
     except zipfile.BadZipFile:
-        return {"ok": False, "error": t("engine_persistence.archive_not_zip")}
+        return {"ok": False, "error": t("engine.persistence.archive_not_zip")}
     except Exception as exc:
         logger.exception("导入存档解析失败")
-        return {"ok": False, "error": t("engine_persistence.archive_parse_failed", exc=exc)}
+        return {"ok": False, "error": t("engine.persistence.archive_parse_failed", exc=exc)}
 
     try:
         container = media.payload_container(state_json)
@@ -481,9 +481,9 @@ async def import_save_zip(
     scene_reference = container.get("scene_image")
     if isinstance(scene_reference, dict) and scene_reference.get("kind") == "save_asset":
         if scene_reference.get("path") != "scene-image.asset" or not scene_image_data:
-            return {"ok": False, "error": t("engine_persistence.archive_missing_cover")}
+            return {"ok": False, "error": t("engine.persistence.archive_missing_cover")}
         if scene_image_importer is None:
-            return {"ok": False, "error": t("engine_persistence.cover_import_unsupported")}
+            return {"ok": False, "error": t("engine.persistence.cover_import_unsupported")}
         imported = scene_image_importer(scene_image_data)
         if not imported.get("ok") or not imported.get("scene_image"):
             return {"ok": False, "error": str(imported.get("error") or "冒险头图导入失败")}
@@ -492,9 +492,9 @@ async def import_save_zip(
     map_reference = container.get("map_background")
     if isinstance(map_reference, dict) and map_reference.get("kind") == "save_asset":
         if map_reference.get("path") != "map-background.asset" or not map_background_data:
-            return {"ok": False, "error": t("engine_persistence.archive_missing_map_background")}
+            return {"ok": False, "error": t("engine.persistence.archive_missing_map_background")}
         if map_background_importer is None:
-            return {"ok": False, "error": t("engine_persistence.map_background_import_unsupported")}
+            return {"ok": False, "error": t("engine.persistence.map_background_import_unsupported")}
         imported = map_background_importer(map_background_data)
         if not imported.get("ok") or not imported.get("map_background"):
             return {"ok": False, "error": str(imported.get("error") or "地图背景导入失败")}

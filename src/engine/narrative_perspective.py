@@ -30,7 +30,7 @@ def validate_narrative_perspective(value: Any) -> str:
 
     normalized = str(value or NARRATIVE_PERSPECTIVE_AUTO).strip().casefold()
     if normalized not in NARRATIVE_PERSPECTIVES:
-        raise ValueError(t("engine_narrative_perspective.perspective_invalid"))
+        raise ValueError(t("engine.narrative_perspective.perspective_invalid"))
     return normalized
 
 
