@@ -82,7 +82,7 @@
 ### 4.2 攻击动作武器账本（提交 A）
 
 1. `dnd2024.attack.spent` 事件新增 `weapon_ref`（G1 的规范形，含实例），用于「本回合 Attack action 用过哪把武器」。
-2. reducer 维护 `combat.attack_ledger`，结构 `{actor_id: {"round", "turn_index", "weapon_refs": [...]}}`，按 `round` + `turn_index` 不匹配即重置——与 `feature_usage` 同一模式，不新造第二套回合语义。
+2. reducer 维护 `combat.attack_ledger`，结构 `{actor_id: {"round", "turn_index", "weapon_refs": [...]}}`，按 `round` + `turn_index` 不匹配即重置——与 `feature_usage` 同一模式，不新造第二套回合语义。列表按攻击发生的先后追加，因此**末项就是本回合最近一次 Attack action 攻击所用的武器**，即 §4.3 的比对基准；列表本身只用于重放与可观测投影，不参与「不同」判定。
 3. 该账本由事件派生，因此重放得到相同结果；不得读时钟或客户端提交。
 4. 借机攻击（支付已换成 `reaction.spent`）**不写入**该账本：它不是 Attack action。
 
@@ -91,16 +91,21 @@
 | 来源 | 前提 | 支付 | 本切片引入 |
 |---|---|---|---|
 | 普通攻击 | 无 | `attacks_remaining` → `action`（不变） | — |
-| `light` | ① 本回合 Attack action 用过一把 Light 武器；② 本次武器是**不同实例**且也是 Light；③ 本次武器已装备 | 扣 `bonus_action` 1 点 | A |
+| `light` | ① 账本末项是 Light 武器（见补充约束 2）；② 本次武器与末项是**不同实例**且也是 Light；③ 本次武器已装备 | 扣 `bonus_action` 1 点 | A |
 | `nick` | 同 `light` 的 ①②③，**外加**本次武器的 mastery 为 `nick` 且 `_mastery_available` 为真 | **不扣** `bonus_action`，**不动** `attacks_remaining` | B |
-| `dual_wielder` | ① 本回合 Attack action 用过一把 Light 武器；② 本次武器是不同实例、是**近战**武器、且**不带 `two_handed`**；③ 拥有 `feat:dual_wielder` | 扣 `bonus_action` 1 点 | C |
+| `dual_wielder` | ① 账本末项是 Light 武器；② 本次武器与末项是不同实例、是**近战**武器、且**不带 `two_handed`**；③ 拥有 `feat:dual_wielder` | 扣 `bonus_action` 1 点 | C |
 
 补充约束：
 
 1. 「不同实例」按 G1 的 `instance_id` 判定；缺实例时按 G1 的兼容规则（唯一匹配才成立）降级，不得猜。
-2. 三种来源都**不消耗** `attacks_remaining`，也**不增加** `attacks_per_action`。
-3. `bonus_action` 不足时拒绝并指出是 Bonus Action 不足，而不是「攻击次数不足」。
-4. 未装备的武器（只背在背包里）不能作为首击或额外攻击的武器。
+2. **「不同」的比对基准是账本末项**，即本回合 Attack action 中**最近一次**攻击所用的武器，**不是**「本回合用过的全部武器」。原文 `a different Light weapon` 是相对于「你攻击时所用的那把」，不是相对于一个集合。
+   - 该读法在多击角色上才产生分歧，且必须按此读法：`attacks_per_action ≥ 2` 的角色先用 shortsword 再用 dagger，额外攻击**仍可用 shortsword**（因为它不同于最近一次攻击所用的 dagger）。若按集合判定，这类角色永远无武器可选，等于把双持从多击职业里整个删掉，与规则意图矛盾。
+   - 单次攻击的角色（本切片多数用例）两种读法结果相同，因此该条不影响矩阵 1–11，只固定矩阵 30、31。
+   - 准入条件 ① 同样按末项判：先 dagger 再 longsword 时末项不是 Light 武器，故不成立。若按「本回合任一击是 Light 就成立」，会推出「额外攻击须不同于一把非 Light 武器」这种无意义的结论。
+3. **手别不是状态**。玩家第一回合用左手武器攻击、第二回合换成右手，两回合各自成立：账本按 `round` + `turn_index` 重置，实现不得从上一回合的 `weapon_refs` 推导任何「这只手本回合已用过」之类的持久结论。
+4. 三种来源都**不消耗** `attacks_remaining`，也**不增加** `attacks_per_action`。
+5. `bonus_action` 不足时拒绝并指出是 Bonus Action 不足，而不是「攻击次数不足」。
+6. 未装备的武器（只背在背包里）不能作为首击或额外攻击的武器。
 
 ### 4.4 每回合一次（提交 A）
 
@@ -144,7 +149,7 @@
 ### 4.8 与其他机制的边界
 
 1. **Extra Attack**：`attacks_per_action` 不变。19 级 Fighter 的 `attacks_remaining` 逻辑不受影响。
-2. **Cleave（F7）**：Cleave 的第二击不是 Light 额外攻击，**不消耗** §4.4 的额度，也不写攻击动作账本以外的状态。
+2. **Cleave（F7）**：Cleave 的第二击不是 Light 额外攻击，**不消耗** §4.4 的额度。它用的是触发它的**同一把**武器，因此即使写入账本也不改变末项，§4.3 的比对基准不受影响；实现上允许写入，但不得因此改变额外攻击的准入结果。
 3. **Tactical Master（F7）**：见 §4.6.3。
 4. **盾牌 / 双手武器**：额外攻击的武器必须是已装备的一件单手武器（G1 保证 `Two-Handed` 武器占满两手，因此不可能存在「双手武器 + 另一把」）。若状态被外部破坏成该形态，校验拒绝而不是取其一。
 5. **徒手打击**：`unarmed_strike` 没有 `light`、也没有实例，不能作为 Light 额外攻击的任一武器；Dual Wielder 也不放宽这一点（原文要求 Melee **weapon**）。
@@ -196,11 +201,14 @@
 27. Cleave 的第二击不消耗 Light 每回合额度：先 Cleave 再声明 `light` 仍成立。
 28. Extra Attack：19 级 Fighter 的双持 Light 额外攻击不改变 `attacks_remaining` 的初始值。
 29. 攻击动作账本按 `round` + `turn_index` 重置；上一回合用过的武器不再满足首击条件。
-30. 同一意图同时声明两种来源被拒，不取其一。
-31. 视图 `extra_attack.allowed` 与实际准入一致；被拒来源在 `blocked` 里有可读原因。
-32. A 提交后矩阵 1–11、27–31 通过；B 提交后 12–17 通过；C 提交后 18–26 通过。
-33. 既有武器精通、Tactical Master、战斗、方向、装备测试无回归。（矩阵 9 只断言默认值，TWF 分支留给 S0-F8。）
-34. 存档/加载与重放后：每回合额度、攻击动作账本、动作经济三项与重放前一致。
+30. **左右手互换的两回合**：回合 1 用 shortsword 首击、dagger 做 `light` 额外攻击；回合 2 用 dagger 首击、shortsword 做 `light` 额外攻击。两回合都成立，且额度互相独立（每回合各扣 1 点 `bonus_action`、各用 1 次 `light_extra_attack` 额度），任何一方都不因为「上一回合用过」而被拒。
+31. Extra Attack ≥ 2 的多击：本回合先用 shortsword 再用 dagger，额外攻击用 **shortsword** 成立——比对基准是账本末项，不是「本回合用过的集合」（矩阵 30、31 固定 §4.3 补充约束 2、3）。
+32. 回合 2 尚未进行 Attack action 时直接声明 `light` 被拒：读账本必须做 `round` + `turn_index` 比较，不得读到回合 1 的残留而误放行。
+33. 同一意图同时声明两种来源被拒，不取其一。
+34. 视图 `extra_attack.allowed` 与实际准入一致；被拒来源在 `blocked` 里有可读原因。
+35. A 提交后矩阵 1–11、27–34 通过（矩阵 30–32 属 A 提交的账本语义，31 需要 5 级 Fighter 夹具，一并验收）；B 提交后 12–17 通过；C 提交后 18–26 通过。
+36. 既有武器精通、Tactical Master、战斗、方向、装备测试无回归。（矩阵 9 只断言默认值，TWF 分支留给 S0-F8。）
+37. 存档/加载与重放后：每回合额度、攻击动作账本、动作经济三项与重放前一致。
 
 ## 7. 非目标与停止条件
 
