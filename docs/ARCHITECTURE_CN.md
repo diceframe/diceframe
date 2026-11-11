@@ -6442,7 +6442,7 @@ AI 席位和检定授权的离席/重开清理由所属模块注册生命周期 
 
 `src/localization/registry.json` 负责维护层级和状态：英语、简体中文为核心，日语、德语和俄语为社区目录。暂停后持久化语言 ID 仍用于游戏与内容；界面选择器排除暂停目录，已有界面偏好显示英文。对局叙事语言、canonical identity 和机制不变。
 
-后端文案的统一入口是 `src/localization/messages.py` 的 `t("命名空间.键", 语言)`（python-i18n），文案放在 `src/localization/locales/<命名空间>.<语言>.yml`，占位符写成 `%{name}`，只要求 zh-CN 与 en，回退链为 目标语言 → en → zh-CN。语言有两个来源：返回给请求方的接口提示不传语言，取 `src/webui/request_language.py` 从标准 `Accept-Language` 协商出的语言（前端把它显式设为界面语言；没带头或没有受支持语言时保持中文原文）；写进存档、时间线或发给模型的对局内容显式传对局语言。`src/webui/errors.py` 的错误出口对已登记错误码按协商语言替换 `error` 文案，并保留 `error_code`。存量文案按模块逐步迁入，未迁移的保持原文。
+后端文案的统一入口是 `src/localization/messages.py` 的 `t("命名空间.键", 语言)`（python-i18n），文案放在 `src/localization/locales/` 下，目录与源码一一对应：`src/webui/services/x.py` 的文案在 `locales/webui/services/x.<语言>.yml`，命名空间是 `webui.services.x`；占位符写成 `%{name}`，只要求 zh-CN 与 en，回退链为 目标语言 → en → zh-CN。语言有两个来源：返回给请求方的接口提示不传语言，取 `src/webui/request_language.py` 从标准 `Accept-Language` 协商出的语言（前端把它显式设为界面语言；没带头或没有受支持语言时保持中文原文）；写进存档、时间线或发给模型的对局内容显式传对局语言。`src/webui/errors.py` 的错误出口对已登记错误码按协商语言替换 `error` 文案，并保留 `error_code`。存量文案按模块逐步迁入，未迁移的保持原文。
 
 `frontend-v2/src/i18n/policy.ts` 按审核过的英文来源指纹筛选社区译文，递归覆盖 API 错误；缺失、新增和过时键通过 Vue I18n 回退英文。英文改动不重新生成接受基线，志愿者通过 `locales:review` 逐键登记审核。`locales:check` 阻止核心键不齐，社区缺口仅报告，不阻塞功能发布。共享后端文案/字段 helper 与 typed content overlay 遵守暂停状态；集中目录外的功能内及后端文本不自动检测来源过时。见[翻译维护](zh/translations.md)。
 

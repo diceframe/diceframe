@@ -5,7 +5,7 @@
 - 本模块维护「高频错误文案 → error_code」映射表，由 error_code_middleware
   在响应出口统一补 error_code 字段，前端按 locale 映射展示；
 - 请求的 Accept-Language 首选语言不是中文时，已登记错误码的 error 文案
-  同时换成 src/localization/locales/errors.<语言>.yml 里的译文，没有内置
+  同时换成 src/localization/locales/webui/errors.<语言>.yml 里的译文，没有内置
   错误码表的客户端（移动端、机器人、第三方）也能拿到对应语言；
 - 未收录的错误不补码，前端回退显示 error 原文，保证任何错误都能正常显示。
 """
@@ -104,7 +104,7 @@ def _localized_error(code: str) -> str | None:
     language = messages.request_language()
     if not language or language == DEFAULT_LANGUAGE:
         return None
-    key = f"errors.{code}"
+    key = f"webui.errors.{code}"
     return messages.t(key) if messages.has(key) else None
 
 

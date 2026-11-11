@@ -56,11 +56,11 @@ class ManualRollService:
         inst=self._inst(key)
         if not inst: return {"ok":False,"error":"游戏不存在"}
         if uid != inst.gm_uid: return {"ok":False,"error":"GM only"}
-        if str(body.get("run_id") or "") != inst.run_id: return {"ok":False,"error":t("manual_rolls.run_changed")}
+        if str(body.get("run_id") or "") != inst.run_id: return {"ok":False,"error":t("webui.services.manual_rolls.run_changed")}
         try: formula,_,_,_=parse_dice_formula(body.get("formula","d20"))
         except ValueError as e: return {"ok":False,"error":str(e)}
         targets=[str(x).strip() for x in (body.get("target_uids") or []) if str(x).strip() in inst.players]
-        if not targets: return {"ok":False,"error":t("manual_rolls.targets_required")}
+        if not targets: return {"ok":False,"error":t("webui.services.manual_rolls.targets_required")}
         purpose = self._purpose(body.get("purpose"))
         rule = self._rule(inst)
         comparison = self._comparison(body.get("comparison"), rule)
@@ -69,11 +69,11 @@ class ManualRollService:
             try:
                 target = int(body.get("target"))
             except (TypeError, ValueError):
-                return {"ok": False, "error": t("manual_rolls.target_required")}
+                return {"ok": False, "error": t("webui.services.manual_rolls.target_required")}
             if not 1 <= target <= 10000:
-                return {"ok": False, "error": t("manual_rolls.target_out_of_range")}
+                return {"ok": False, "error": t("webui.services.manual_rolls.target_out_of_range")}
         op=str(body.get("operation_id") or "").strip()
-        if not op or len(op)>128: return {"ok":False,"error":t("manual_rolls.operation_id_invalid")}
+        if not op or len(op)>128: return {"ok":False,"error":t("webui.services.manual_rolls.operation_id_invalid")}
         for old in checks.manual_roll_requests(inst):
             if old.get("operation_id")==op:
                 return {"ok":True,"request":old,"idempotent":True}
@@ -86,10 +86,10 @@ class ManualRollService:
         inst=self._inst(key)
         if not inst: return {"ok":False,"error":"游戏不存在"}
         req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
-        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":t("manual_rolls.request_missing")}
+        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":t("webui.services.manual_rolls.request_missing")}
         target=str(body.get("target_uid") or uid)
-        if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":t("manual_rolls.not_allowed_to_roll")}
-        if req.get("status") == "cancelled": return {"ok":False,"error":t("manual_rolls.request_cancelled")}
+        if target not in req.get("target_uids",[]) or (uid!=target and uid!=inst.gm_uid): return {"ok":False,"error":t("webui.services.manual_rolls.not_allowed_to_roll")}
+        if req.get("status") == "cancelled": return {"ok":False,"error":t("webui.services.manual_rolls.request_cancelled")}
         if target in req["results"]:
             # An earlier save may have failed after the result was recorded.
             await self.d.save_instance(inst)
@@ -120,9 +120,9 @@ class ManualRollService:
         inst=self._inst(key)
         if not inst or uid!=getattr(inst,"gm_uid",None): return {"ok":False,"error":"GM only"}
         req=next((r for r in checks.manual_roll_requests(inst) if r.get("id")==rid),None)
-        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":t("manual_rolls.request_missing")}
+        if not req or req.get("run_id")!=body.get("run_id"): return {"ok":False,"error":t("webui.services.manual_rolls.request_missing")}
         # A fully rolled request is final: cancelling it would drop its results from the AI context.
-        if req.get("status") == "resolved": return {"ok":False,"error":t("manual_rolls.request_already_resolved"),"request":req}
+        if req.get("status") == "resolved": return {"ok":False,"error":t("webui.services.manual_rolls.request_already_resolved"),"request":req}
         if req.get("status") == "cancelled": return {"ok":True,"request":req,"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
