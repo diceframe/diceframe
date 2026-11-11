@@ -6,11 +6,11 @@
 | 验收载体 | Light 武器的额外攻击；Nick 把它的支付改挂 Attack action；Dual Wielder 放宽第二把武器的属性要求 |
 | 通用能力 | 额外攻击来源声明、每回合记账、攻击动作武器账本、额外攻击的属性调整值判定点 |
 | 规则基准 | 官方 SRD 5.2.1 PDF；SHA256 `8974902d109d6e63672d7c490bde9ccf052410503d9cfa768237154fbc5e3d87` |
-| 规则页码 | Light 与武器属性 p90；Nick 属 mastery 段 p91–p92；Dual Wielder 在 feats 段 p87–p88，**逐条页码须执行时从 PDF 读出后填入 `source_ref`，不得猜** |
+| 规则页码 | Light 与武器属性 p90；Nick 属 mastery 段 p91–p92；Dual Wielder 在 feats 段 p87–p88，**逐条页码须执行时从 PDF 读出后填入 `source_ref`，不得猜**（本轮未取得 PDF，`dual_wielder` 取 p87 是区间夹逼，见 §9.3） |
 | 代码基线 | S0-G1 合入后的集成链头（G1 交付前不得开工） |
 | 硬前置 | **S0-G1**（双槽落位 + 物品实例身份）。没有实例身份就无法判定「a different weapon」 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | 待执行；本文不表示任何功能已实现 |
+| 状态 | **已交付**：A `41fcbefe`、B `8e497158`、C `f4ab1d75`、投影修正 `c54c486b`；执行报告见 §9 |
 
 ## 1. 范围纪律与 A/B/C 提交边界
 
@@ -298,18 +298,121 @@ print("equipment =", actor.get("equipment_refs"))
 print("attacks   =", [(a["weapon_ref"], a.get("light")) for a in engine._available_attacks(actor)])
 ```
 
-## 9. 执行报告模板（执行侧填写）
+## 9. 执行报告（执行侧填写）
 
-- 实际基线 / 分支 / A、B、C 提交：
-- 勘误取舍：SRD 修正措辞 vs PHB 初印本，记录依据：
-- Dual Wielder 实读页码与 `source_ref`：
-- `attack.spent` 的新载荷与账本结构：
-- 三种来源的准入与拒绝对照：
-- Nick 的支付替换实现（不产生扣 bonus action 事件）：
-- 属性调整值判定点与 TWF 留白：
-- 与 Tactical Master / Cleave / Extra Attack 的边界证据：
-- Quick Draw 的 `not_automated` 记录：
-- 白名单文件对照：
-- 测试 1–34 / A/B/C 聚焦 / 回归 / 全量 / ruff / diff：
-- 存档、重放与确定性证据：
-- 偏差、停止原因与未决事项：
+### 9.1 基线与提交
+
+- 基线：`872e165a`，分支 `feat/dnd2024-s0f7-weapon-mastery`。G2 依赖的 G1 已先落地：`8a888d4e`（两只手 + Two-Handed）、`80d6ad46`（物品实例身份）。
+- **G2-A** `41fcbefe`：来源闭集与 `extra_attack_source` 声明、`dnd2024.attack.spent` 携带 `weapon_ref`、`combat.attack_ledger`、每回合额度、属性调整值判定点、actor 视图 `extra_attack` 投影。
+- **G2-B** `8e497158`：Nick 的支付替换（改成 `attack_action`，不产生扣 Bonus Action 事件）。
+- **G2-C** `f4ab1d75`：Dual Wielder 专长声明 + 第二把武器资格放宽 + `features.feat_refs` 投影。
+- **顺带修正** `c54c486b`：`_extra_attack_projection` 的拒绝理由取**第一个**档案，而不是最后一个（见 §9.13 第 3 条）。
+
+### 9.2 勘误取舍：以 SRD 修正措辞为准
+
+采用 SRD 5.2.1 的修正措辞：**首击仍必须是 Light 武器，放宽的是第二把**。2024 PHB 初印本的「把另一手的非 Light 武器视为具有 Light」不作为实现依据——它会让两把长剑合法，与 SRD 原文冲突。
+
+由此钉死两条：矩阵 22（两把长剑即使有专长也非法，因为账本里没有 Light 武器）、矩阵 18（第二把只需近战且不带 `two_handed`，不必是 Light）。§4.3 的「不同 Light 武器」判定按 SAC 的存在性读法实现，不用集合读法、不用末项读法，理由与反例见 §4.3 补充约束 2。
+
+### 9.3 页码：本切片的偏差项（未从 PDF 实读）
+
+**没有从 PDF 实读 Dual Wielder 的页码。** 工作树内不存在 SRD 5.2.1 的 PDF，`.rulebooks` 目录也不存在，本轮无法取得。
+
+`source_ref` 取 `srd-5.2.1:p87:dual-wielder`，依据是同属 General Feats 块的**两个既有 p87 锚点**：
+
+| 条目 | 现有 `source_ref` |
+|---|---|
+| `ability_score_improvement` | `srd-5.2.1:p87:ability-score-improvement` |
+| `grappler` | `srd-5.2.1:p87:grappler` |
+
+Dual Wielder 按字母序严格落在两者之间（A < D < G），且三者在同一块连续排版，因此 p87 是区间夹逼的结果而非猜测。**但这不是实读**：取得 PDF 后须逐字复核，若页码不符只需改这一处 `source_ref`，不影响任何机械行为。原模板要求的「实读页码」一项标记为**未完成**。
+
+### 9.4 `attack.spent` 的新载荷与账本结构
+
+```json
+{"type": "dnd2024.attack.spent", "actor_id": "player:gm",
+ "weapon_ref": "item:shortsword@eq-1"}
+```
+
+reducer 在 `dnd2024.attack.spent` 末尾调用 `_record_attack_weapon`，维护：
+
+```json
+"attack_ledger": {"player:gm": {"round": 1, "turn_index": 0,
+                                "weapon_refs": ["item:shortsword@eq-1"]}}
+```
+
+`round` + `turn_index` 不匹配即重置为本次的值（与 `feature_usage` 同一模式）。列表按发生顺序追加、**保留重复**——同一把武器打两次仍只有一个参照点（矩阵 32）。借机攻击走 `reaction.spent`，不写入该账本（矩阵 30 / §4.2.4）。
+
+### 9.5 三种来源的准入与拒绝对照
+
+| 来源 | 支付 | 武器资格 | 额外前提 | 拒绝理由（原文串） |
+|---|---|---|---|---|
+| `light` | `bonus_action` 1 | 本次武器是 Light | — | `the extra attack must be made with a Light weapon` |
+| `nick` | **不扣**（`attack_action`） | 本次武器是 Light | mastery 可用且属性为 `nick` | `weapon mastery is not available to this actor` / `this weapon's mastery property is not Nick` |
+| `dual_wielder` | `bonus_action` 1 | 本次是近战**武器**、不带 `two_handed`；非 Light 时必须持有专长 | — | `this extra attack must be made with a melee weapon` / `this extra attack cannot be made with a Two-Handed weapon` / `this extra attack needs the Dual Wielder feat` |
+
+三者共用前置：`the Light extra attack was already used this turn`、`the Attack action has not attacked with a Light weapon this turn`、`the extra attack needs a different weapon than the one that enabled it`、`no Bonus Action is left for the extra attack`。检查顺序即玩家提问顺序，报的是第一个真正缺的东西。
+
+### 9.6 Nick 的支付替换
+
+按借机攻击的既有做法**替换支付事件本身**：`nick` 产出的仍是 `dnd2024.attack.extra`，但 `payment` 为 `attack_action`，reducer 在该分支只写账本、不扣 `economy.bonus_action`（矩阵 12–13 直接断言批次里不存在扣 Bonus Action 的记录，而不是「先扣再退」）。矩阵 17：`mastery_override` 把 `nick` 换成 `push` 后，本次武器不再具有 `nick`，改按 `light` 声明则扣 `bonus_action`。
+
+### 9.7 属性调整值判定点与 TWF 留白
+
+`extra_attack_ability_modifier(actor, weapon, source, *, modifier=None)` 是**唯一**判定点，默认 `min(0, modifier)`（保留负值、丢弃正值）。攻击管线把已解析的 `modifier` 传进来，两个调用点（`settlement["modifier"]` 与 `_hit_settlement_events(..., modifier=...)`）因此不会各算一遍。矩阵 9 只断言默认值；Two-Weapon Fighting 的「返回完整 `modifier`」分支**故意不写**，留给 S0-F8，避免在本切片里凭空造一个没有验收的例外。
+
+### 9.8 与 Tactical Master / Cleave / Extra Attack 的边界
+
+- **Tactical Master**：矩阵 17 已覆盖（属性替换先验完再判额外攻击来源）。
+- **Cleave**：矩阵 27 改成钉住「普通攻击不写 `light_extra_attack` 额度」。原矩阵要求「先 Cleave 再 `light` 仍成立」，但 Cleave 武器（greataxe / greatsword / halberd / glaive）全部带 `two_handed`，G1 之后它们占满两只手，另一手不可能再有 Light 武器——该组合在规则上无法构成。实现上 Cleave 第二击允许入账，但用的是同一把武器，存在性判定结果不变。
+- **Extra Attack**：矩阵 28 断言额外攻击前后 `attacks_per_action` 与 `attacks_remaining` 都不变；额外攻击不走 `attacks_remaining`。
+
+### 9.9 Quick Draw 的 `not_automated` 记录
+
+Quick Draw（`You can draw or stow two weapons that lack the Two-Handed property...`）标记为 **`not_automated`**：本仓库没有「取出/收起武器」的交互层，也没有对应的意图或命令，因此**不开任何入口**。
+
+**与原任务书的偏差**：§4.7.1 的 JSON 契约要求写 `parameters: {"enhanced_dual_wielding": true, "quick_draw": true}`，**未按此实现**。原因有二：
+
+1. 载入期 `_validate_feat_parameters` 的参数词表是**封闭**的（`ADVANCEMENT_FEAT_PARAMETER_KEYS` 当前只有 `ranged_attack_bonus`），且要求参数值是 **1–10 的整数**。布尔值 `true` 会直接被拒，写进去角色一构造就失败。
+2. 更重要的是纪律问题：这两个 flag 都**没有消费者**。Enhanced Dual Wielding 的机械效果由战斗准入函数实现，不读目录参数；Quick Draw 完全没有实现。声明一个没人读的参数，会让「已声明」看起来像「已支持」——正是仓库明令禁止的「把可选、可展示计为已支持」。
+
+因此 `dual_wielder` 条目只有 `category` / `source_ref` / `minimum_level` / `repeatable` / `any_ability_minimum` / `ability_choice`，矩阵 26 以「`parameters` 与 `passive_effects` 都不存在」的形式钉住这一取舍。
+
+### 9.10 白名单对照
+
+| 白名单条目 | 实际改动 |
+|---|---|
+| `srd_advancement_feats.json` 及 en / zh-CN locale | 三份均改：新增 `dual_wielder` 条目与两侧 label |
+| `engine.py` / `validation.py` / `resolution.py` / `reducer.py` / `view.py` | A、B 已改前四个；C 只改 `view.py`（`feat_refs` 透传 + `has_dual_wielder`）；`c54c486b` 亦在 `view.py` |
+| 新建 `combat/extra_attacks.py` | A 建，B、C 扩充 |
+| `features/resolver.py`（仅在需要暴露判定点时） | **未改**：`two_weapon_fighting` 判定点留白给 S0-F8，`dual_wielder` 的所有权从 `features.feat_refs` 读，不需要新入口 |
+| 新建两份测试 | `test_dnd2024_light_extra_attack.py`（A/B）、`test_dnd2024_dual_wielder.py`（C） |
+
+白名单之外**没有**任何改动，未碰 `src/engine/**` 与前端。
+
+### 9.11 测试
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| G2 聚焦（A/B/C） | `pytest tests/rulesets/test_dnd2024_light_extra_attack.py tests/rulesets/test_dnd2024_dual_wielder.py -q` | **46 passed**（30 + 16） |
+| 边界回归 | 上一行再并入 `weapon_mastery` / `tactical_master` / `combat` | **119 passed** |
+| 全量 | `pytest tests/rulesets -q -n 4 --dist loadfile` | **11 failed / 1938 passed** |
+| 静态检查 | `ruff` **未安装**（`No module named ruff`），改用 `python -m py_compile` | 通过 |
+| 空白检查 | `git diff --check 8e497158..HEAD` | 干净 |
+
+全量的 11 条失败**全部**在 `test_dnd2024_character_builder.py`，是已知基线（`unresolved reference 'ability:con' in background:soldier`，已在 clean baseline `872e165a` 的临时 worktree 上复现）。本次没有新增失败，也没有出现此前常见的 `PermissionError: [WinError 5]` 抖动。
+
+### 9.12 存档、重放与确定性
+
+- 账本由事件派生，重放得到相同结果：矩阵 39 断言重新读取后 `attack_ledger` / `feature_usage` / `economy` 三份完全一致。
+- 实例身份不使用 uuid / 时间 / 随机 / 进程计数器：`instance_id` 由 `equipment_sequence` 递增铸造，同一操作序列恒得 `eq-n`。
+- `extra_attacks.py` 是纯函数层，不读时钟、不读客户端、不读实例。
+
+### 9.13 偏差、停止原因与未决事项
+
+1. **Dual Wielder 页码未实读**（§9.3）。取得 PDF 后复核 `source_ref`。
+2. **`parameters` 字段未按原契约写入**（§9.9），有两条独立理由；矩阵 26 已把这一取舍变成断言。
+3. **修正了一处 A 遗留的投影语义**（`c54c486b`）：`_extra_attack_projection` 原本保留循环里最后一个档案的拒绝理由，而同一函数的 docstring 承诺的是第一个。持短剑 + 长剑、刚用短剑挥过一击时，玩家会被告知「必须用 Light 武器」——这句话对长剑成立，却掩盖了短剑真正的问题（不能当自己的参照）。改为取第一个后，理由与「玩家最可能想用的那把」一致，也不再随装备顺序漂移。
+4. **矩阵 19 / 20 钉在准入函数而非端到端**：G1 之后双手武器占满两手，`greatsword + shortsword` 在实装状态里根本装不成；远程档案会先在弹药闸门被拒。两处都改为直接断言 `extra_attack_blocker` 的返回值，并在测试 docstring 里写明为什么不能走端到端。
+5. **未决（不属本切片）**：Two-Weapon Fighting 的完整调整值（S0-F8）、Quick Draw 的取出/收起层、Cleave 与双持并存的规则问题（规则上无法构成，但若未来有单手 Cleave 武器则需重新审视矩阵 27）。
+

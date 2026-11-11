@@ -128,8 +128,8 @@ S0-A 子职授予主干
 | S0-F35 | Chain/Tome 与相关选项 | Pact of the Chain/Tome、Investment、Gift of the Protectors、Gaze、Depths | `S0F35_INVOCATION_PACTS_TASK_SPEC_2026-11-07.md` | 18 | 待执行 |
 | S0-F36 | 语言、熟练与常备授予 | Primal Knowledge、Divine/Primal Order、Druidic、Deft Explorer、Thieves' Cant、Bonus Proficiencies | `S0F36_SIMPLE_GRANTS_TASK_SPEC_2026-11-07.md` | 15 | 待执行 |
 | S0-F37 | 最终机器覆盖审计 | 动态 198 行主矩阵、48 行成长项、3/28/10/6 专项矩阵与真实 JUnit 证据 | `S0F37_COVERAGE_AUDIT_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
-| S0-G1 | 装备手部容量与实例身份 | 两只手各持一把武器；同款两把可区分；Two-Handed 与盾牌互斥 | `S0G1_EQUIPMENT_HANDS_INSTANCE_IDENTITY_TASK_SPEC_2026-11-11.md` | 27 | 待执行。**F7 与 F8 的共同硬前置**，理由见 §16 |
-| S0-G2 | Light 额外攻击、Nick 与 Dual Wielder | Light 额外攻击、动作经济与每回合记账；Nick 改挂 Attack action；Dual Wielder 专长 | `S0G2_LIGHT_EXTRA_ATTACK_TASK_SPEC_2026-11-11.md` | 34 | 待执行。**依赖 G1**；交付后解除 F7（Nick）与 F8（TWF）的定义缺口 |
+| S0-G1 | 装备手部容量与实例身份 | 两只手各持一把武器；同款两把可区分；Two-Handed 与盾牌互斥 | `S0G1_EQUIPMENT_HANDS_INSTANCE_IDENTITY_TASK_SPEC_2026-11-11.md` | 27 | **已交付**（A `8a888d4e`、B `80d6ad46`）。报告见任务书 §9。**F7 与 F8 的共同硬前置已解除**，理由见 §16 |
+| S0-G2 | Light 额外攻击、Nick 与 Dual Wielder | Light 额外攻击、动作经济与每回合记账；Nick 改挂 Attack action；Dual Wielder 专长 | `S0G2_LIGHT_EXTRA_ATTACK_TASK_SPEC_2026-11-11.md` | 34 | **已交付**（A `41fcbefe`、B `8e497158`、C `f4ab1d75`、投影修正 `c54c486b`）。报告见任务书 §9：页码未实读、`parameters` 未按契约写入，两项偏差已记录。解除 F7（Nick）与 F8（TWF）的定义缺口：Nick 已自动化，TWF 的完整调整值判定点已就位 |
 
 ## 4. 每份任务书的固定结构
 

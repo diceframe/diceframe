@@ -10,7 +10,7 @@
 | 代码基线 | `feat/dnd2024-s0f7-weapon-mastery@872e165a` |
 | 硬前置 | 无 S0 切片前置；但必须建立在含 S0-B（`features.feature_choices`）与 S0-F7 已交付提交的链头上 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | 待执行；本文不表示任何功能已实现 |
+| 状态 | **已交付**：A `8a888d4e`、B `80d6ad46`；执行报告见 §9 |
 
 ## 1. 范围纪律与 A/B 提交边界
 
@@ -205,16 +205,16 @@ for ref,n in (('item:shortsword','Shortsword'),('item:shield','Shield'),('item:d
     r.prepare_owned_rows(s,[n]); equip_owned_item(s,n,item_ref=ref); print(n,[(x.get('item_ref'),x.get('slot')) for x in s['equipment']])"
 ```
 
-## 9. 执行报告模板（执行侧填写）
+## 9. 执行报告（执行侧填写）
 
-- 实际基线 / 分支 / A 提交 / B 提交：
-- `two_handed` 13 件逐项核对：
-- 槽位候选与占位派生的实现位置：
-- 显式/隐式落位与拒绝理由：
-- 实例发号的确定性证据：
-- `weapon_ref` 解析与裸 ref 兼容：
-- 旧存档 / 旧事件批次重放证据：
-- 三处 actor 视图透传：
-- 白名单文件对照：
-- 测试 1–27 / A/B 聚焦 / 回归 / 全量 / ruff / diff：
-- 偏差、停止原因与未决事项：
+- **基线 / 分支 / 提交**：基线 `872e165a`，分支 `feat/dnd2024-s0f7-weapon-mastery`。A = `8a888d4e`（两只手 + Two-Handed），B = `80d6ad46`（实例身份 + 唯一解析入口）。后续 S0-G2 的 A/B/C 全部建立在这两个提交之上。
+- **`two_handed` 13 件逐项核对**：`greatclub`、`crossbow_light`、`shortbow`、`glaive`、`greataxe`、`greatsword`、`halberd`、`lance`、`maul`、`pike`、`crossbow_heavy`、`longbow`、`musket` 均补 `"two_handed": true`，插在 `damage_type` 之后。逐项与 `damage_two_handed`（Versatile）互斥：载入期 `CombatCatalogError` 整包拒绝，不留「两者兼具」的静默状态。
+- **槽位候选与占位派生**：`features/equipment.py` 新增 `HAND_SLOTS = ("main_hand","off_hand")`、`hands_cost()`（Two-Handed 武器 2、其余武器 1、盾 1、非手部 0）、`preferred_slots()`；`Dnd2024EquipmentCatalog` 暴露 `weapon()` / `hands()` / `slots_for()`。落位在 `commands/state_items.py::_hand_placement()`，`equip_owned_item` 改成「先算落位、再扣背包」——落位失败不会留下半扣的背包行。
+- **显式/隐式落位与拒绝理由**：显式 `slot` 先验（非法槽、已被占、双手冲突各有独立理由）；隐式按 `preferred_slots` 取第一个空槽，两手都满时理由说的是「没有空手」，不是「装备已满」。盾牌与副手武器互斥，`_validate_two_handed` 改为只读 `off_hand` 的占用者。
+- **实例发号确定性**：`instance_id = "eq-<n>"`，来源是 `sheet["equipment_sequence"]` 单调递增；不用 uuid / 时间 / 随机 / 进程计数器。`assign_missing_instance_ids` 按列表顺序为旧存档补号（顺序稳定 ⇒ 结果可重放），已有 id 的行不重新发号（换手不等于换对象）；背包行的 id 在装备时退休，不在背包里维持第二套弱身份。
+- **`weapon_ref` 解析与裸 ref 兼容**：`item_instances.split_weapon_ref()` 是唯一解析入口，返回 `(item_ref, instance_id | None)`，`item_ref` 保留 `item:` 前缀。裸 `item:<id>` 仍可提交，但只在「该 kind 唯一匹配」时成立；`_declared_attack` 遇到多实例直接抛 `has N equipped instances; declare weapon_ref as item:<id>@<instance_id>`，不猜第一把。
+- **旧存档 / 旧事件批次重放**：旧存档没有 `instance_id`，首次投影时补号后结果稳定；旧事件批次里的裸 ref 仍能重放，重放不改写历史、不因缺实例失败。
+- **三处 actor 视图透传**：`equipment_items` 写入 `combat.start` 敌人桩、`_player_view`（服务 `_actor_view` 与 `_actor_view_from_data`）。`_held_equipment_rows` 只在 kind 集合一致时采信 `equipment_items`，否则回退裸 ref——这条一致性校验修掉了 26 条真实回归（旧夹具只改 `item_refs`，导致档案与持握状态错配）。
+- **白名单文件对照**：`srd_combat_core.json`、`features/equipment.py`、`features/__init__.py`、`combat/catalog.py`、`character/item_instances.py`（新建）、`character/reconciliation.py`、`commands/state_items.py`、`combat/view.py`、`combat/validation.py`、`combat/resolution.py`。另加两份新测试（`test_dnd2024_equipment_hands.py` 18 条、`test_dnd2024_item_instances.py` 17 条）、`dnd2024_monk_common.py` 的 `equip_refs` 助手、`test_dnd2024_equipment_data.py` 的一处参数替换（`longbow` → `sling`，因为 longbow 现在占两手，不再适合做「单手持远程」用例）。
+- **测试**：A/B 聚焦 **35 passed**（18 + 17）；全量 **16 failed / 全量其余通过**，其中 11 条是 `test_dnd2024_character_builder.py` 的已知基线（`ability:con in background:soldier`），5 条是 `PermissionError: [WinError 5]` 的 `os.replace` 抖动，**无新增失败**。`ruff` 未安装，改用 `py_compile`。
+- **偏差与未决**：矩阵 13 原写作「A 提交后仍只有一把能进装备」，实测是**两行都在装备里**（一手一把），A 只是没让两个同款变成两个可分别指名的对象——B 才解决可区分性。已改写该条并按事实重写 §4.4.2 的 `split_weapon_ref` 签名。G1 本身不含任何 Light / Nick / 双持客规则，两把 Light 武器不会自动多打一次，该行为由 S0-G2 交付。
