@@ -508,5 +508,17 @@ HP 增量的两个来源分别验证：
 
 **本机全量结果**：`18 failed / 8743 passed / 3 errors`。在 base 提交 `6f07bf0e` 上跑同一批失败文件，失败集合逐条相同（11 条 `test_dnd2024_character_builder.py` 的 `ability:con in background:soldier`、7 条 docker launcher 路径语义、3 个 docker 升级 error），均为 Windows 本地环境问题，Linux CI 不复现。**本切片没有新增后端失败。**
 
-**CI 侧的阻塞不是测试失败**：`Backend tests` 连续三次（run 43035975979 / 43041798115 / 43043239120）都停在 `Install CJK font for bot card rendering`。该步用 `apt-get update && apt-get install` 单行执行，runner 侧 DNS 解析 `azure.archive.ubuntu.com` 整段失败，apt 退出 100，ruff/mypy/pytest 全部被跳过。字体只是覆盖率增强（无字体时相关用例 skip），不该成为门禁。加固方案已备好：重试三次，仍失败则降级为 skip 并留下 warning；因当前 token 无 `workflow` 权限，无法推送 `.github/workflows/` 改动，独立分支 `ci/font-step-fail-open`（基于 `main`，单提交）待授权后提交。
+**CI 侧的阻塞不是测试失败**：`Backend tests` 连续三次（run 43035975979 / 43041798115 / 43043239120）都停在 `Install CJK font for bot card rendering`。该步用 `apt-get update && apt-get install` 单行执行，runner 侧 DNS 解析 `azure.archive.ubuntu.com` 整段失败，apt 退出 100，ruff/mypy/pytest 全部被跳过。
+
+判定依据：该步骤自 2026-11-09（`09a53523`）起未改动，本切片对 `.github/` 零改动；成功与失败的 runner 镜像完全相同（`ubuntu-24.04` / `20261101.360`）；11:23 那次 `Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease`，整步 10 秒完成，14:10 起三次全部 `Temporary failure resolving`，且镜像列表 `Fetched 1467 kB in 3min 20s`。**结论：上游 runner 的出网/DNS 问题，不在本切片修复范围。**（加固思路备忘：该步是覆盖率增强而非正确性门禁，可改为重试后降级为 skip，留作上游恢复后另行提议。）
+
+### 9.12 补齐入口的两次收紧（`d5281818`）
+
+补选端点存在两个"看起来成功、实际什么都没做"的入口，属于本切片自己写出的缺陷：
+
+1. **空请求**。`repair_choices` 收到 `{}` 时既无错误也无动作，HTTP 层照样 `ruleset_revision + 1`、写操作日志、返回 `ok: true`——卡仍然欠着，却白推了一次 revision，顺带失效掉其他客户端的乐观锁。现在改为抛 `no outstanding choice was filled`，路由映射为 422 `ADVANCEMENT_NOT_READY`。
+2. **拼错键**。`repairs` 里出现 `subclass`（漏了 `_ref`）这类未知键时，旧实现静默忽略并"成功"。现在按 `advancement.py` 自己的注释所写规则处理：stray key 是错误，列出未知键后抛错。
+
+同时补上 HTTP 层覆盖：`test_card_choice_routes_answer_with_status_codes_over_http` 钉住 200（完整卡 `missing: []`）、404（卡不存在）、409（revision 过期）、422（空补齐）四种状态映射——此前两条新路由只有 service 层测试，路由与状态码映射没有测试。
+
 
