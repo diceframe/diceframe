@@ -49,6 +49,7 @@ def _fighter(runtime: Dnd2024Runtime) -> dict:
 
 def _advance_to(
     engine: Dnd2024AdvancementEngine, character: dict, target: int,
+    *, subclass: str = CHAMPION,
 ) -> dict:
     while int(character["build"]["level"]) < target:
         requirements = {
@@ -56,7 +57,7 @@ def _advance_to(
         }
         choices: dict = {}
         if "subclass_ref" in requirements:
-            choices["subclass_ref"] = CHAMPION
+            choices["subclass_ref"] = subclass
         if "ability_score_increases" in requirements:
             choices["ability_score_increases"] = {"con": 2}
         character = engine.apply_next_level(character, choices)
@@ -401,3 +402,51 @@ def test_a_stale_revision_is_refused() -> None:
     assert result["ok"] is False
     assert result["code"] == "STALE_CHARACTER_REVISION"
     assert cards[0]["ruleset_revision"] == 3
+
+
+def test_a_rogue_ability_level_at_ten_is_audited() -> None:
+    """矩阵 15：Rogue 的 10 级 ASI 同样由目录决定。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    choices = runtime.builder_choices(None, {"locale": LOCALE})
+    preset = next(item for item in choices["quick_presets"] if item["id"] == "lucky_scout")
+    draft = {**preset["draft"], "locale": LOCALE, "name": "Rogue Tester"}
+    rogue = runtime.finalize_character(None, draft)["ruleset_character"]
+    four = _advance_to(engine, rogue, 4, subclass="subclass:thief")
+
+    forged = deepcopy(four)
+    forged["build"]["level"] = 10
+    forged["build"]["class_levels"][0]["level"] = 10
+    forged["progression"]["level"] = 10
+    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        {"level": level, "class_ref": "class:rogue"} for level in range(2, 11)
+    ]
+
+    assert any(
+        row["id"] == "ability_score_increases" and row["level"] == 10
+        for row in engine.missing_choices(forged)
+    )
+
+
+def test_completing_a_subclass_recomputes_the_derived_facts() -> None:
+    """矩阵 24：补齐改的是派生值，不只是特性列表。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    one = runtime.finalize_character(None, _sorcerer_draft(runtime))["ruleset_character"]
+    five = deepcopy(one)
+    five["build"]["level"] = 5
+    five["build"]["class_levels"][0]["level"] = 5
+    five["progression"]["level"] = 5
+    five["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        {"level": 2, "class_ref": "class:sorcerer"},
+        {"level": 3, "class_ref": "class:sorcerer"},
+        {"level": 4, "class_ref": "class:sorcerer", "ability_score_increase": {"cha": 2}},
+        {"level": 5, "class_ref": "class:sorcerer"},
+    ]
+    before = deepcopy(five["derived"])
+
+    repaired = engine.repair_choices(five, {"subclass_ref": DRACONIC})
+
+    assert repaired["derived"] != before
