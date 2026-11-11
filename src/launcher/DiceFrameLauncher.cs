@@ -38,8 +38,8 @@ internal static partial class DiceFrameLauncher
     // 本机 DiceFrame endpoint 解析结果：数据目录 + 端口 → scheme 与自签指纹。
     private static string launcherDataDir = "";
     private static string launcherPort = DefaultPort;
-    // 仅对 Launcher → 本机 DiceFrame 生效的证书指纹固定；绝不做全局校验关闭。
-    private static string expectedCertFingerprint = "";
+    // 证书校验一律按 data/certs/self-signed/fingerprint.txt 的当前内容判定，
+    // 只对 Launcher → 本机 DiceFrame 生效；绝不做全局校验关闭。
     private static HttpClient localHttpClient;
 
     [STAThread]
@@ -195,19 +195,43 @@ internal static partial class DiceFrameLauncher
             return 0;
         }
 
+        // 端口上可能已经有一个 DiceFrame 在服务：上次切换 HTTPS 时服务端
+        // execv 换了 PID、用户重复双击、或上一个启动器被强制结束时留下的
+        // 孤儿后端。此时再 spawn 一个后端必然 10048 失败并报"异常退出"，
+        // 窗口就永远卡在启动画面——直接接管已有实例。
+        bool attachedToExisting = false;
         if (serverProcess == null || serverProcess.HasExited)
         {
-            try
+            string running = ProbeRunningInstance(url);
+            if (running != null)
             {
-                serverProcess = StartServer(installRoot, activeDir, dataDir);
+                attachedToExisting = true;
+                url = running;
             }
-            catch (Exception ex)
+            else
             {
-                return Fail("DiceFrame failed to start: " + ex.Message);
+                try
+                {
+                    serverProcess = StartServer(installRoot, activeDir, dataDir);
+                }
+                catch (Exception ex)
+                {
+                    return Fail("DiceFrame failed to start: " + ex.Message);
+                }
             }
         }
 
-        if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
+        if (attachedToExisting)
+        {
+            Console.WriteLine("DiceFrame is already running at " + url + "，本次启动接管该实例。");
+            if (!browserOpened)
+            {
+                OpenUi(url, activeDir);
+                browserOpened = true;
+            }
+            Console.WriteLine();
+        }
+        else if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
         {
             if (!browserOpened)
             {
@@ -222,14 +246,32 @@ internal static partial class DiceFrameLauncher
         }
         else if (serverProcess.HasExited)
         {
+            // 服务端为了生效新配置（切换 HTTPS、更新）会 os.execv 原地重启，
+            // Windows 上这会换 PID，原句柄随之中断——那不是崩溃。留一小段时间
+            // 等新进程起来并接上它，接不上才按异常退出取证。
+            string restarted = WaitForLiveServer(url, TimeSpan.FromSeconds(15));
+            if (restarted != null)
+            {
+                attachedToExisting = true;
+                url = restarted;
+                if (!browserOpened)
+                {
+                    OpenUi(url, activeDir);
+                    browserOpened = true;
+                }
+                Console.WriteLine("DiceFrame restarted itself; reattached to " + url + ".");
+            }
             // 启动阶段就异常退出（例如 python.exe native crash）同样要留取证：
             // 这类退出不是用户主动关闭，也不属于更新切换。
-            if (!suppressCrashReport)
+            else if (!suppressCrashReport)
             {
                 HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
                 return serverProcess.ExitCode;
             }
-            return Fail("DiceFrame exited before the Web UI became ready.");
+            else
+            {
+                return Fail("DiceFrame exited before the Web UI became ready.");
+            }
         }
         else
         {
@@ -253,7 +295,9 @@ internal static partial class DiceFrameLauncher
                 );
             }
 
-            if (serverProcess == null || serverProcess.HasExited)
+            // 接管已有实例时没有子进程句柄可等：窗口活多久就是多久，
+            // 关窗口只退出启动器，不杀那个不属于本进程的实例。
+            if (!attachedToExisting && (serverProcess == null || serverProcess.HasExited))
             {
                 if (serverProcess != null && !suppressCrashReport)
                 {
@@ -451,6 +495,9 @@ internal static partial class DiceFrameLauncher
             throw new FileNotFoundException("Cannot find DiceFrame server", serverScript);
         }
 
+        // 必须在首次访问 ProcessStartInfo.EnvironmentVariables 之前完成：
+        // 原始环境块里的大小写重复键会让 .NET Framework 在这里直接抛异常。
+        NormalizeProcessEnvironment();
         ProcessStartInfo info = new ProcessStartInfo();
         info.FileName = python;
         info.Arguments = Quote(serverScript);
@@ -842,6 +889,67 @@ internal static partial class DiceFrameLauncher
         }
     }
 
+    /// <summary>
+    /// 端口上是否已经有一个可用的本机 DiceFrame。HTTP 与 HTTPS 都试：
+    /// 切换连接模式后启动器缓存的 scheme 可能已经过期。
+    /// 返回可以直接打开的 base url；都没有则返回 null。
+    /// </summary>
+    private static string ProbeRunningInstance(string url)
+    {
+        string[] candidates = new string[]
+        {
+            url,
+            "https://127.0.0.1:" + launcherPort,
+            "http://127.0.0.1:" + launcherPort,
+        };
+        foreach (string candidate in candidates)
+        {
+            if (string.IsNullOrEmpty(candidate))
+            {
+                continue;
+            }
+            if (IsDiceFrameServer(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    // 服务端自重启（execv 换 PID）后新监听器要过几秒才 accept，
+    // 这段时间轮询，别把它当崩溃。
+    private static string WaitForLiveServer(string url, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            string running = ProbeRunningInstance(url);
+            if (running != null)
+            {
+                return running;
+            }
+            Thread.Sleep(500);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 判断这个地址后面确实是 DiceFrame：读匿名可达的 /api/config，
+    /// 看公开版本元数据字段。自签 HTTPS 走同一套指纹固定校验。
+    /// </summary>
+    private static bool IsDiceFrameServer(string baseUrl)
+    {
+        try
+        {
+            string body = HttpGet(baseUrl + "/api/config");
+            return body.IndexOf("\"server_version\"", StringComparison.Ordinal) >= 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static string HttpGet(string url)
     {
         using (
@@ -880,48 +988,23 @@ internal static partial class DiceFrameLauncher
     /// </summary>
     private static ServerEndpoint ResolveServerEndpoint()
     {
-        string url = "http://127.0.0.1:" + launcherPort;
-        string fingerprint = "";
-        try
-        {
-            string configPath = Path.Combine(launcherDataDir, "config.json");
-            if (File.Exists(configPath))
-            {
-                string text = File.ReadAllText(configPath);
-                bool selfSigned = Regex
-                    .Match(text, "\"tls_mode\"\\s*:\\s*\"self_signed\"")
-                    .Success;
-                if (selfSigned)
-                {
-                    string fingerprintPath = Path.Combine(
-                        launcherDataDir,
-                        "certs",
-                        "self-signed",
-                        "fingerprint.txt"
-                    );
-                    if (File.Exists(fingerprintPath))
-                    {
-                        string recorded = File.ReadAllText(fingerprintPath).Trim();
-                        if (recorded.Length > 0)
-                        {
-                            url = "https://127.0.0.1:" + launcherPort;
-                            fingerprint = recorded;
-                        }
-                    }
-                    // 指纹文件缺失（例如服务端回退 HTTP）时保持 http：
-                    // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
-                }
-            }
-        }
-        catch
-        {
-        }
-        expectedCertFingerprint = fingerprint;
+        string fingerprint = ReadRecordedFingerprint();
+        // 指纹文件缺失（例如服务端回退 HTTP、或配置尚未写入）时保持 http：
+        // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
+        string url =
+            fingerprint.Length > 0
+                ? "https://127.0.0.1:" + launcherPort
+                : "http://127.0.0.1:" + launcherPort;
         return new ServerEndpoint { Url = url, Fingerprint = fingerprint };
     }
 
     private static void InitLocalHttpClient()
     {
+        // csc 直接生成的 exe 没有目标框架 app.config；在本机 .NET Framework 上
+        // ServicePointManager 仍可能默认只有 Ssl3/Tls，而后端最低接受 TLS 1.2。
+        // 必须在首次本机 HTTPS 请求前显式启用 TLS 1.2，否则证书回调还没执行，
+        // 握手就已经被服务端关闭，窗口会一直停在 Starting。
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         WebRequestHandler handler = new WebRequestHandler();
         // 只影响本机 DiceFrame 请求的 handler；更新、GitHub 等其它流量不走它。
         handler.ServerCertificateValidationCallback = delegate(
@@ -940,6 +1023,41 @@ internal static partial class DiceFrameLauncher
         localHttpClient.Timeout = TimeSpan.FromSeconds(2);
     }
 
+    // 读取本地记录的自签指纹。每次按当前磁盘记录判定，而不是缓存启动时的结果：
+    // 用户可以在运行中开启/重签 HTTPS，服务端 os.execv 原地重启后启动器并不会重新
+    // 解析 endpoint；若沿用启动时的空指纹，应用窗口会被证书错误挡住。
+    // 仍然只信任本地记录（fail-closed）：读不到、或模式不是 self_signed，一律返回空。
+    private static string ReadRecordedFingerprint()
+    {
+        try
+        {
+            string configPath = Path.Combine(launcherDataDir, "config.json");
+            if (!File.Exists(configPath))
+            {
+                return "";
+            }
+            if (!Regex.IsMatch(File.ReadAllText(configPath), "\"tls_mode\"\\s*:\\s*\"self_signed\""))
+            {
+                return "";
+            }
+            string fingerprintPath = Path.Combine(
+                launcherDataDir,
+                "certs",
+                "self-signed",
+                "fingerprint.txt"
+            );
+            if (!File.Exists(fingerprintPath))
+            {
+                return "";
+            }
+            return File.ReadAllText(fingerprintPath).Trim();
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     private static bool ValidateLocalCertificate(
         X509Certificate certificate,
         SslPolicyErrors errors
@@ -950,14 +1068,27 @@ internal static partial class DiceFrameLauncher
             // 系统信任链验证通过（未来的 Let's Encrypt 证书走这里）。
             return true;
         }
+        if (certificate == null)
+        {
+            return false;
+        }
         // 自签证书：只有指纹与本地记录完全一致时才信任。
-        string expected = expectedCertFingerprint;
-        if (expected.Length == 0 || certificate == null)
+        string expected = ReadRecordedFingerprint();
+        if (expected.Length == 0)
         {
             return false;
         }
         string normalized = expected.Replace(":", "").Replace("-", "").ToUpperInvariant();
-        return Sha256Hex(certificate.GetRawCertData()) == normalized;
+        byte[] raw;
+        try
+        {
+            raw = certificate.GetRawCertData();
+        }
+        catch
+        {
+            return false;
+        }
+        return Sha256Hex(raw) == normalized;
     }
 
     private static string Sha256Hex(byte[] data)

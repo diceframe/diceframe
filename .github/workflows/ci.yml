@@ -70,6 +70,42 @@ jobs:
         # 始终落在同一个 worker，模块内 fixture 与共享状态语义与串行一致。
         run: python -m pytest -q -n auto --dist loadfile --cov=src --cov-report=term-missing --cov-report=xml
 
+  launcher-windows:
+    name: Launcher tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # 启动器回归必须落在 Windows runner：它们用 .NET Framework 的编译器现场编译
+    # 裸 exe，再复现 TLS 1.2 默认值与大小写重复环境块这两类只在本机出现的事故。
+    # ubuntu 上这些用例会 skip，CI 全绿并不代表启动器被测过。
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Verify .NET Framework compiler
+        shell: pwsh
+        run: |
+          python -c "from scripts import build_launcher; print(build_launcher.find_csc())"
+
+      - name: Pre-fetch pinned WebView2 SDK
+        # 测试里离线取不到 SDK 会 skip；这里先取一次，让网络/校验失败直接把 job 变红。
+        run: python -c "from scripts import build_launcher; print(build_launcher.ensure_webview2_sdk())"
+
+      - name: Run launcher regression tests
+        run: python -m pytest tests/test_build_launcher.py -q
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
