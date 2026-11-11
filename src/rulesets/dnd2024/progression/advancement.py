@@ -712,6 +712,153 @@ class Dnd2024AdvancementEngine:
             record["subclass_ref"] = subclass_ref
         records.append(record)
 
+    def repair_choices(
+        self,
+        payload: dict[str, Any],
+        repairs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Fill the choices this character still owes, without changing level.
+
+        Repair is not a second upgrade path.  It never moves the level, and it
+        only accepts ids that ``missing_choices`` actually reported -- a stray
+        key is an error rather than a field to ignore, the same rule the
+        upgrade preview applies to unknown choice keys.
+
+        Hit points are recomputed from the two things that can move them here,
+        and neither is "one level's worth":
+
+        - a subclass's declared maximum, which is an absolute value at the
+          current level, not a per-level increment;
+        - a constitution increase, which pays back over the levels already
+          earned, exactly as an upgrade-time increase does.
+        """
+
+        character = deepcopy(_canonical(payload))
+        repairs = deepcopy(repairs or {})
+        class_ref, level = self._single_class_state(character)
+        feature_state = character.get("features")
+        feature_state = feature_state if isinstance(feature_state, dict) else {}
+        features = character.setdefault("features", {})
+        subclass = self.catalog.subclass_choice(class_ref)
+        expected_subclass_ref = f"subclass:{subclass['id']}"
+        pending = self.missing_choices(character)
+        pending_ids = {row["id"] for row in pending}
+        errors: list[str] = []
+
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        hp_before = resolver.feature_max_hp_bonus(character)
+        abilities = character.get("abilities")
+        abilities = abilities if isinstance(abilities, dict) else {}
+        con_before = ability_modifier(int(abilities.get("con", 0) or 0))
+
+        grant_level = self._pending_subclass_level(feature_state, level, subclass)
+        records: list[Any] | None = self._advancement_records(character)
+        repaired_anything = False
+
+        chosen_subclass = repairs.get("subclass_ref")
+        if chosen_subclass is not None:
+            value = str(chosen_subclass)
+            if "subclass_ref" not in pending_ids:
+                errors.append("subclass_ref is not missing from this character")
+            elif value != expected_subclass_ref:
+                errors.append("subclass_ref is not an SRD subclass for this class")
+            else:
+                features["subclass_ref"] = value
+                repaired_anything = True
+                if records is not None and grant_level is not None:
+                    self._merge_advancement_record(records, {
+                        "level": grant_level,
+                        "class_ref": class_ref,
+                        "subclass_ref": value,
+                    })
+
+        for entry in repairs.get("advancements") or []:
+            if not isinstance(entry, dict):
+                errors.append("advancement repairs must be objects")
+                continue
+            raw_level = entry.get("level")
+            if isinstance(raw_level, bool) or not isinstance(raw_level, int):
+                errors.append("an advancement repair needs an integer level")
+                continue
+            if not 1 <= raw_level <= level:
+                errors.append(
+                    f"advancement repair level is out of range: {raw_level}"
+                )
+                continue
+            if not any(
+                row["id"] == "ability_score_increases" and row["level"] == raw_level
+                for row in pending
+            ):
+                errors.append(f"level {raw_level} owes no ability increase")
+                continue
+            snapshot = self.catalog.snapshot(class_ref, raw_level)
+            increases, feat_ref, feat_errors = self._advancement_feat(
+                character, snapshot, entry
+            )
+            errors.extend(feat_errors)
+            if feat_errors:
+                continue
+            for ability, points in increases.items():
+                abilities[ability] = int(abilities.get(ability, 0) or 0) + int(points)
+            repaired_anything = True
+            if records is not None:
+                record: dict[str, Any] = {
+                    "level": raw_level, "class_ref": class_ref,
+                }
+                if increases:
+                    record["ability_score_increase"] = dict(increases)
+                if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
+                    epic = "epic_boon" in snapshot["gained_feature_ids"]
+                    record["epic_boon_ref" if epic else "feat_ref"] = feat_ref
+                    owned = features.setdefault("feat_refs", [])
+                    if feat_ref not in owned:
+                        owned.append(feat_ref)
+                self._merge_advancement_record(records, record)
+
+        if errors:
+            raise ProgressionCatalogError("; ".join(errors))
+
+        if records is not None:
+            progression = character.setdefault("progression", {})
+            progression[ADVANCEMENT_RECORDS_KEY] = records
+
+        if repaired_anything:
+            hp_after = resolver.feature_max_hp_bonus(character)
+            con_after = ability_modifier(int(abilities.get("con", 0) or 0))
+            hp_gain = (hp_after - hp_before) + level * (con_after - con_before)
+            if hp_gain:
+                resources = character.setdefault("resources", {})
+                resources["max_hp"] = (
+                    int(resources.get("max_hp", 0) or 0) + hp_gain
+                )
+                resources["hp"] = min(
+                    int(resources["max_hp"]),
+                    int(resources.get("hp", 0) or 0) + hp_gain,
+                )
+            self._update_derived(character)
+        return character
+
+    @staticmethod
+    def _merge_advancement_record(
+        records: list[Any], record: dict[str, Any],
+    ) -> None:
+        """Insert or update one level's ledger entry, keeping level order.
+
+        Upgrades append; repairs fill in history, which may mean updating a
+        level that already has a record (a subclass repair on top of a level-3
+        entry that recorded something else) or inserting one that was skipped.
+        """
+
+        target_level = int(record["level"])
+        for index, existing in enumerate(records):
+            if not isinstance(existing, dict):
+                continue
+            if int(existing.get("level", 0) or 0) == target_level:
+                records[index] = {**existing, **record}
+                return
+        records.append(record)
+        records.sort(key=lambda row: int(row.get("level", 0) or 0))
+
     def _single_class_state(self, character: dict[str, Any]) -> tuple[str, int]:
         binding = character.get("rule_binding")
         if not isinstance(binding, dict) or binding.get("runtime_id") != "core:dnd2024":

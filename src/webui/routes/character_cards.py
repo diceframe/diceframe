@@ -103,6 +103,38 @@ async def api_character_card_advancement_apply(request: web.Request) -> web.Resp
     return await _api_character_card_advancement(request, "apply")
 
 
+def _choice_status(result: dict[str, Any]) -> int:
+    if result.get("ok"):
+        return 200
+    code = str(result.get("code") or "")
+    if code == "CHARACTER_NOT_FOUND":
+        return 404
+    if code == "STALE_CHARACTER_REVISION":
+        return 409
+    return 422
+
+
+async def api_character_card_choices_pending(request: web.Request) -> web.Response:
+    try:
+        result = _get_api(request).pending_character_card_choices(
+            request.match_info["card_id"],
+        )
+    except ValueError as exc:
+        result = {"ok": False, "code": "INVALID_CHOICE_REPAIR", "error": str(exc)}
+    return web.json_response(result, status=_choice_status(result))
+
+
+async def api_character_card_choices_complete(request: web.Request) -> web.Response:
+    body = await request.json()
+    try:
+        result = _get_api(request).complete_character_card_choices(
+            request.match_info["card_id"], body,
+        )
+    except ValueError as exc:
+        result = {"ok": False, "code": "INVALID_CHOICE_REPAIR", "error": str(exc)}
+    return web.json_response(result, status=_choice_status(result))
+
+
 async def api_character_card_delete(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
@@ -186,6 +218,14 @@ def register_character_cards(app: web.Application) -> None:
     app.router.add_post(
         "/api/character-cards/{card_id}/advancement/apply",
         api_character_card_advancement_apply,
+    )
+    app.router.add_get(
+        "/api/character-cards/{card_id}/choices/pending",
+        api_character_card_choices_pending,
+    )
+    app.router.add_post(
+        "/api/character-cards/{card_id}/choices/complete",
+        api_character_card_choices_complete,
     )
     app.router.add_route("DELETE", "/api/character-cards/{card_id}", api_character_card_delete)
     app.router.add_post("/api/character-cards/import", api_character_card_import)
