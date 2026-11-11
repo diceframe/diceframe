@@ -537,6 +537,8 @@ def _character_schema_for_rule(rule) -> dict[str, Any]:
         "skill_pools": rule.skill_pools,
         "skill_base_values": rule.skill_base_values,
         "currency": rule.currency,
+        "starting_currency": rule.starting_currency,
+        "class_levels_total": max(0, int(rule.template.get("class_levels_total") or 0)),
         "conflict_model": rule.conflict_model,
         "currency_system": rule.currency_system,
         "resource_schema": rule.resource_schema,
@@ -1881,24 +1883,37 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     if damage_dice_error:
         return {"ok": False, "error": damage_dice_error}
     starter_equip, starter_inv = build_starter_items(rule, character.get("class") or default_class)
+    grant_starter = not (
+        rule is not None
+        and rule.starting_currency > 0
+        and rule.template.get("starting_equipment") is False
+    )
+    start_level = rule.start_level if rule is not None else 1
+    start_gold = int(character.get("gold") or (rule.starting_currency if rule is not None else 0) or 30)
+    equipment = character.get("equipment")
+    if not equipment:
+        equipment = (starter_equip if grant_starter else []) or ([] if not grant_starter else default_weapons)
     cs = {
         "race": character.get("race", "人类"),
         "class": character.get("class") or default_class,
         "identity": character.get("identity", {}),
-        "level": 1, "xp": 0,
+        "level": int(character.get("level") or start_level), "xp": 0,
         "attributes": attrs,
         "hp": hp, "max_hp": max_hp,
-        "equipment": character.get("equipment") or starter_equip or default_weapons,
-        "inventory": character.get("inventory") or starter_inv,
+        "equipment": equipment,
+        "inventory": character.get("inventory") or (starter_inv if grant_starter else []),
         "key_items": character.get("key_items", []),
         "skills": _normalize_skills(character.get("skills", []), rule, attributes=attrs, clamp=clamp_to_rule),
         "background": character.get("background", ""),
         "deceased": False,
-        "gold": character.get("gold", 30),
+        "gold": start_gold,
         "currency": character.get("currency", {}),
         "portrait": character.get("portrait", {}),
         "attr_points_max": total_points,
     }
+    for key in ("class_levels", "pending_class_levels", "skill_points"):
+        if key in character:
+            cs[key] = character[key]
     if professional_character:
         cs["rule_binding"] = deepcopy(character["rule_binding"])
         cs["ruleset_character"] = deepcopy(character["ruleset_character"])
@@ -1907,8 +1922,8 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     try:
         if rule:
             for ss in rule.special_stats:
-                max_val = ss.get("max", 99)
-                init_val = initial_special_stat_value(ss, attrs)
+                max_val = rule.special_stat_max(ss, attrs)
+                init_val = initial_special_stat_value({**ss, "max": max_val}, attrs)
                 cs[ss["key"]] = init_val
                 cs[f"max_{ss['key']}"] = max_val
     except Exception as exc:

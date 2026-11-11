@@ -125,7 +125,7 @@ function manualRollResultText(result: ManualRollTimelineEntry['results'][string]
 const rounds = computed(() => visibleLog.value.map((entry, index) => {
   const sw = entry.swipes || []
   const cur = Number(entry.current_swipe) || 0
-  return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, story: isStorySequence(entry.story) ? entry.story : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
+  return { entry, round: Number(entry.round || props.log.length - visibleLog.value.length + index), gm: entry.gm_response ? parseGMText(String(entry.gm_response), props.lore) : null, manual: Array.isArray(entry.manual_narrations) ? entry.manual_narrations : [], story: isStorySequence(entry.story) ? entry.story : null, swipes: sw, swipeCur: cur, swipeCount: sw.length }
 }))
 const standaloneManualRolls = computed(() => {
   const roundsInLog = new Set(rounds.value.map(item => item.round))
@@ -263,7 +263,7 @@ watch(() => rounds.value, async (latest) => {
           :revealer-name="revealOf(check) ? name(revealOf(check)!.by) : ''"
           @reveal="check => emit('reveal', check)"
         />
-        <div v-if="item.gm || item.story" class="message gm message-with-avatar">
+        <div v-if="item.gm || item.story || item.manual?.length" class="message gm message-with-avatar">
           <span class="narrator-avatar" aria-hidden="true">GM</span>
           <div class="message-copy">
           <strong>{{ t('gmRound', { round: item.round }) }}<button
@@ -278,6 +278,7 @@ watch(() => rounds.value, async (latest) => {
           <template v-else-if="item.gm">
             <p v-for="(p, i) in item.gm?.paragraphs" :key="'p' + i" class="chat-gm" v-html="p"></p>
           </template>
+          <p v-for="(p, i) in (item.manual || [])" :key="'manual' + i" class="chat-gm gm-manual">{{ p }}</p>
           <SceneImageBlock
             v-if="sceneImageAsset(item.entry)"
             :asset-id="sceneImageAsset(item.entry)"
@@ -379,6 +380,7 @@ watch(() => rounds.value, async (latest) => {
           <p v-else v-for="(paragraph, index) in liveParagraphs" :key="index" class="chat-gm live-narration">{{ paragraph }}</p>
         </div>
       </div>
+      <slot name="ruleset-log" />
       <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
     </div>
     <button

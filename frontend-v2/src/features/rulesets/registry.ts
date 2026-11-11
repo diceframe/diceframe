@@ -44,6 +44,39 @@ const characterCenterLoaders: Record<string, { load: ComponentLoader; rest: bool
 }
 const characterCenterComponents = new Map<string, Component>()
 
+// 规则专属的局内面板：侧栏面板挂在通用侧栏的 after-character 插槽，时间线面板挂在
+// ruleset-log 插槽；clockControls 表示该规则向 GM 开放命刻编辑。
+const sidebarLoaders: Record<string, { load: ComponentLoader; clockControls: boolean }> = {}
+const sidebarComponents = new Map<string, Component>()
+const timelineLoaders: Record<string, ComponentLoader> = {}
+const timelineComponents = new Map<string, Component>()
+
+function cachedComponent(
+  cache: Map<string, Component>,
+  runtimeId: string,
+  loader: ComponentLoader | undefined,
+): Component | null {
+  if (!loader) return null
+  let component = cache.get(runtimeId)
+  if (!component) {
+    component = defineAsyncComponent(loader)
+    cache.set(runtimeId, component)
+  }
+  return component
+}
+
+export function resolveRulesetSidebarPanel(runtimeId: string): Component | null {
+  return cachedComponent(sidebarComponents, runtimeId, sidebarLoaders[runtimeId]?.load)
+}
+
+export function hasRulesetClockControls(runtimeId: string): boolean {
+  return sidebarLoaders[runtimeId]?.clockControls === true
+}
+
+export function resolveRulesetTimelinePanel(runtimeId: string): Component | null {
+  return cachedComponent(timelineComponents, runtimeId, timelineLoaders[runtimeId])
+}
+
 function resolvePlayComponent(runtimeId: string, tool: RulesetPlayTool): Component | null {
   const loader = playLoaders[runtimeId]?.[tool]
   if (!loader) return null

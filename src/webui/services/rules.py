@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.rules.rule_system import SUPPORTED_DICE_SYSTEMS, RuleSystem
+from src.rules.rule_system import RuleSystem
 from src.rules.loader import RuleBundleLoader
 from src.rules.definition_validation import validate_special_stats
+from src.engine.check_mechanics import check_mechanic_for, supported_dice_systems
 from src.engine.currency import (
     CurrencySystemError,
     declares_currency_schema,
@@ -321,11 +322,12 @@ def update_custom_rule(
             "error": "; ".join(f"{item['path']}: {item['message']}" for item in diagnostics),
         }
     dice_system = str(template.get("dice_system") or "d20").lower()
-    if dice_system not in SUPPORTED_DICE_SYSTEMS:
-        supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
+    if dice_system not in supported_dice_systems():
+        supported = ", ".join(sorted(supported_dice_systems()))
         return {"ok": False, "error": f"dice_system 当前仅支持 {supported}"}
     template["dice_system"] = dice_system
-    if dice_system == "d20":
+    mechanic = check_mechanic_for(dice_system)
+    if dice_system == "d20" or (mechanic is not None and mechanic.target_is_dc):
         try:
             max_check_dc = int(template.get("max_check_dc", 20))
         except (TypeError, ValueError):
@@ -333,6 +335,11 @@ def update_custom_rule(
         if not 1 <= max_check_dc <= 40:
             return {"ok": False, "error": "max_check_dc 必须是 1..40 的整数"}
         template["max_check_dc"] = max_check_dc
+
+    if mechanic is not None:
+        mechanic_error = mechanic.rule_template_error(template)
+        if mechanic_error:
+            return {"ok": False, "error": mechanic_error}
 
     if "combat" in template:
         # 战斗扩展声明在保存时校验：坏块不能进存档，否则游戏加载即炸。
