@@ -735,6 +735,11 @@ class Dnd2024AdvancementEngine:
 
         character = deepcopy(_canonical(payload))
         repairs = deepcopy(repairs or {})
+        unknown = sorted(set(repairs) - {"subclass_ref", "advancements"})
+        if unknown:
+            raise ProgressionCatalogError(
+                "unknown repair keys: " + ", ".join(unknown)
+            )
         class_ref, level = self._single_class_state(character)
         feature_state = character.get("features")
         feature_state = feature_state if isinstance(feature_state, dict) else {}
@@ -814,6 +819,12 @@ class Dnd2024AdvancementEngine:
                     if feat_ref not in owned:
                         owned.append(feat_ref)
                 self._merge_advancement_record(records, record)
+
+        if not errors and not repaired_anything:
+            # A repair that fills nothing is a caller bug, not a success: the
+            # card keeps the debt, and the HTTP layer would bump the revision
+            # and invalidate every other client's optimistic lock for nothing.
+            errors.append("no outstanding choice was filled")
 
         if errors:
             raise ProgressionCatalogError("; ".join(errors))

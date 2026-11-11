@@ -512,3 +512,30 @@ def test_a_ruleset_without_the_repair_path_is_refused_instead_of_crashing() -> N
     assert completed["ok"] is False
     assert completed["code"] == "RULESET_ADVANCEMENT_UNAVAILABLE"
     assert cards[0]["ruleset_revision"] == 0
+
+
+def test_repair_refuses_a_request_that_fills_nothing() -> None:
+    """空请求不能算成功：卡还欠着，却会白白推进一次 revision。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _without_subclass(_advance_to(engine, _fighter(runtime), 5))
+
+    with pytest.raises(ProgressionCatalogError):
+        engine.repair_choices(five, {})
+
+    assert "subclass_ref" in _missing_ids(engine, five)
+
+
+def test_repair_refuses_a_key_it_does_not_understand() -> None:
+    """把 `subclass` 写成 `subclass_ref` 之外的名字时，不能静默什么都不做。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _without_subclass(_advance_to(engine, _fighter(runtime), 5))
+
+    with pytest.raises(ProgressionCatalogError) as excinfo:
+        engine.repair_choices(five, {"subclass": CHAMPION})
+
+    assert "unknown repair keys: subclass" in str(excinfo.value)
+    assert "subclass_ref" in _missing_ids(engine, five)
