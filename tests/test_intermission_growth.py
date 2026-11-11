@@ -51,6 +51,54 @@ def test_character_normalization_keeps_marked_identity_for_settlement():
     assert receipt['changes'][0]['after'] == 46
 
 
+def _damaged_coc_save():
+    """A save written before 3.2.0: pending marks kept ids, the sheet rows lost them."""
+    from tests.test_advantage_authority import _instance, _rule
+    names = ['侦查', '聆听', '说服', '心理学', '图书馆使用', '急救', '闪避', '潜行']
+    inst = _instance(skills=[{'name': name, 'value': 85 if name in {'侦查', '聆听'} else 40} for name in names])
+    inst.modules['skill_growth'] = {'schema_version': 1, 'receipts': {}, 'pending': [
+        {'actor_uid': 'a', 'skill_id': sid, 'label': label, 'check_id': f'c{round_}', 'round': round_}
+        for sid, label, round_ in (('persuade', '说服', 5), ('spot_hidden', '侦查', 7),
+                                   ('psychology', '心理学', 13), ('stealth', '潜行', 28))]}
+    return inst, _rule('freeform_coc.json')
+
+
+def test_settlement_rebinds_marks_whose_skill_rows_lost_their_identity():
+    inst, rule = _damaged_coc_save()
+    with patch('src.engine.dice_rng.roll_die', side_effect=[99, 3, 99, 4, 99, 5, 99, 6]):
+        receipt = skill_growth.settle(inst, rule, 'once', expected_run=inst.run_id)
+    assert [(c['skill_id'], c['before'], c['after']) for c in receipt['changes']] == [
+        ('persuade', 40, 43), ('spot_hidden', 85, 89), ('psychology', 40, 45), ('stealth', 40, 46)]
+    skills = {s['name']: s for s in inst.get_character_sheet('a')['skills']}
+    assert {name: skills[name].get('id') for name in ('侦查', '说服', '心理学', '潜行', '聆听')} == {
+        '侦查': 'spot_hidden', '说服': 'persuade', '心理学': 'psychology', '潜行': 'stealth', '聆听': None}
+    assert skill_growth.view(inst)['pending'] == []
+
+
+def test_identity_rebinding_refuses_ambiguous_rows_and_leaves_the_save_untouched():
+    inst, rule = _damaged_coc_save()
+    inst.get_character_sheet('a')['skills'].append({'name': '潜行', 'value': 10})
+    before = deepcopy(inst.to_dict())
+    with patch('src.engine.dice_rng.roll_die', side_effect=AssertionError('preflight before RNG')):
+        with pytest.raises(ValueError, match='潜行'):
+            skill_growth.settle(inst, rule, 'once', expected_run=inst.run_id)
+    assert inst.to_dict() == before
+
+
+def test_new_success_on_a_row_that_lost_its_identity_reuses_the_pending_mark():
+    inst, rule, check = fixture()
+    skill_growth.mark_checks(inst, rule, [check])
+    marked_id = skill_growth.view(inst)['pending'][0]['skill_id']
+    assert marked_id.startswith('skill_')
+    inst.get_character_sheet('alice')['skills'][0].pop('id')
+    skill_growth.mark_checks(inst, rule, [{**check, 'check_id': 'check2'}])
+    assert inst.get_character_sheet('alice')['skills'][0]['id'] == marked_id
+    assert [p['skill_id'] for p in skill_growth.view(inst)['pending']] == [marked_id]
+    with patch('src.engine.dice_rng.roll_die', side_effect=[98, 6]):
+        receipt = skill_growth.settle(inst, rule, 'once', expected_run=inst.run_id)
+    assert receipt['changes'][0]['after'] == 46
+
+
 @pytest.mark.parametrize('change', [
     {'roll': 80}, {'skill': ''}, {'dice': 'd20'}, {'luck_decision': 'spent'},
     {'attribute_key': 'int'}, {'actor_uid': 'invented'},
