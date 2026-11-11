@@ -73,7 +73,7 @@
 
 1. 给以下 **13 件**武器在 canonical 战斗目录补 `"two_handed": true`，并同步 en / zh-CN locale 的属性标签（若该 locale 已有属性标签表）：
 
-   `greatclub`、`light_crossbow`、`shortbow`、`glaive`、`greataxe`、`greatsword`、`halberd`、`lance`、`maul`、`pike`、`crossbow_heavy`、`longbow`、`musket`
+   `greatclub`、`crossbow_light`、`shortbow`、`glaive`、`greataxe`、`greatsword`、`halberd`、`lance`、`maul`、`pike`、`crossbow_heavy`、`longbow`、`musket`
 
 2. 不新增 `reach`、`loading`、`ammunition`（已有）、`special` 等其它属性。触及武器已由 `range: 10` 表达。
 3. 载入期校验：`two_handed === true` 与存在 `damage_two_handed` 不得同时成立（没有武器两者兼具），冲突则整包拒绝加载。
@@ -106,7 +106,7 @@
 ### 4.4 武器引用解析（提交 B）
 
 1. 规范形：`weapon_ref = "item:<item_id>@<instance_id>"`。
-2. `split_weapon_ref(ref) -> (item_id, instance_id | None)` 是**唯一**解析入口；所有 `removeprefix("item:")` 的散装写法必须改为经它解析。
+2. `split_weapon_ref(ref) -> (item_ref, instance_id | None)` 是**唯一**解析入口；返回的 `item_ref` **保留** `item:` 前缀（与投影里的 `item_ref` 字段同名同形，可直接比对），只剥掉实例后缀；所有 `removeprefix("item:")` 的散装写法必须改为经它解析。
 3. 兼容：裸 `item:<item_id>` 仍可提交，解析为「该 kind 的已装备实例」。若该 kind 有 ≥2 个已装备实例，**拒绝**并提示必须声明实例——不猜第一把。
 4. 旧事件批次里的裸 ref 必须仍能重放；重放不得因缺少实例而失败或改写历史。
 5. `_available_attacks` 每个 profile 带 `instance_id`（`unarmed_strike` 无实例，保持 `instance_id: null`）。
@@ -153,7 +153,7 @@
 10. 双手武器 + 徒手：徒手仍可用（`unarmed_strike` 不占槽），不得被算成第二把武器。
 11. Versatile 武器（longsword）在 `off_hand` 有物时声明 `two_handed: true` 攻击被拒；`off_hand` 为空时允许。
 12. `_validate_two_handed` 不再因「背包里另有一面盾但未装备」而拒绝。
-13. 装两把同款短剑（A 提交后）：仍只有一把能进装备，第二把被顶回背包——A 不解决同款，B 才解决。
+13. 装两把同款短剑（A 提交后）：**两行都在装备里**（一手一把），但投影只留一条 kind 引用、攻击只产出一个档案——A 让"另一只手"存在，却没有让两个同款变成两个可分别指名的对象。B 才解决可区分性。
 14. 装两把同款短剑（B 提交后）：两行并存，`instance_id` 不同，`slot` 一个 `main_hand` 一个 `off_hand`。
 15. 投影 `equipment.items` 保留两行同款武器，`equipment_refs` 仍按 kind 去重为一条（兼容视图语义）。
 16. `_available_attacks` 对两把同款短剑产出两个 profile，`instance_id` 不同、`weapon_ref` 不同。
