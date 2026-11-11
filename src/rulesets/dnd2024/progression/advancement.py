@@ -118,6 +118,232 @@ class Dnd2024AdvancementEngine:
                     f"advancement feat {feat_id} parameter {key} must be an integer from 1 to 10"
                 )
 
+    def missing_choices(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Choices this character still owes, in level order.
+
+        This is the other half of "a subclass only comes from an explicit
+        selection": a rule that refuses the choice after the granting level
+        must also say what happens to a character that never made it.  Without
+        this, a card imported without ``features.subclass_ref`` silently loses
+        its whole subclass tree and has no way back.
+
+        The audit reads facts, never the audit log.  ``progression.history``
+        may be trimmed, and a card that never went through this application has
+        no history at all -- only the ledger is authoritative about *which*
+        level chose what.
+
+        Coverage is deliberately narrow, because a broad audit would have to
+        guess:
+
+        - subclass: one persisted field, and the granting level comes from the
+          catalog instead of a hard-coded 3;
+        - ability increase / feat: read from the growth ledger;
+        - prepared spells: a count comparison, not a legality audit.  Free
+          casts and feature-granted always-prepared spells live outside the
+          lists being counted, so they are excluded by construction.
+
+        An old save with no ledger is not reported as incomplete.  There is no
+        way to tell "the player skipped it" from "this field did not exist
+        yet", and a false report would mark every legacy card as broken.
+        """
+
+        character = _canonical(payload)
+        class_ref, level = self._single_class_state(character)
+        feature_state = character.get("features")
+        feature_state = feature_state if isinstance(feature_state, dict) else {}
+        subclass = self.catalog.subclass_choice(class_ref)
+        missing: list[dict[str, Any]] = []
+
+        missing.extend(
+            self._missing_subclass(level, feature_state, subclass)
+        )
+        missing.extend(
+            self._missing_advancements(class_ref, level, character)
+        )
+        missing.extend(
+            self._missing_spell_slots(class_ref, level, character)
+        )
+        return missing
+
+    def _missing_subclass(
+        self,
+        level: int,
+        feature_state: dict[str, Any],
+        subclass: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        grant_level = self._pending_subclass_level(feature_state, level, subclass)
+        if grant_level is None:
+            return []
+        return [{
+            "id": "subclass_ref",
+            "kind": "single",
+            "required": True,
+            "level": grant_level,
+            "options": [{
+                "value": f"subclass:{subclass['id']}",
+                "name": self._subclass_name(str(subclass["id"])),
+                "source_ref": str(subclass.get("source_ref") or ""),
+            }],
+            "reason": (
+                f"level {grant_level} granted a subclass and none was selected"
+            ),
+        }]
+
+    @staticmethod
+    def _pending_subclass_level(
+        feature_state: dict[str, Any], level: int, subclass: dict[str, Any],
+    ) -> int | None:
+        """The granting level this character still owes, or ``None``.
+
+        The question is "does this character have a subclass", not "does this
+        level grant one".  Those agree for a card grown from level 1, and stop
+        agreeing the moment a card arrives from outside -- which is exactly the
+        case this exists for.
+        """
+
+        if str(feature_state.get("subclass_ref") or ""):
+            return None
+        by_level = subclass.get("feature_ids_by_level") or {}
+        if not by_level:
+            return None
+        grant_level = min(int(raw_level) for raw_level in by_level)
+        return grant_level if level >= grant_level else None
+
+    def _missing_advancements(
+        self, class_ref: str, level: int, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        records = self._advancement_records(character)
+        if records is None:
+            return []
+        by_level: dict[int, dict[str, Any]] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            raw_level = record.get("level")
+            if isinstance(raw_level, bool) or not isinstance(raw_level, int):
+                continue
+            by_level[raw_level] = record
+
+        missing: list[dict[str, Any]] = []
+        for row_level in range(1, level + 1):
+            snapshot = self.catalog.snapshot(class_ref, row_level)
+            gained = snapshot["gained_feature_ids"]
+            epic = "epic_boon" in gained
+            if not epic and "ability_score_improvement" not in gained:
+                continue
+            record = by_level.get(row_level)
+            if record is not None and self._recorded_a_choice(record, epic):
+                continue
+            reason = (
+                f"level {row_level} granted "
+                f"{'an Epic Boon' if epic else 'an ability score improvement'} "
+                "and no choice was recorded"
+            )
+            if epic:
+                missing.append({
+                    "id": "epic_boon_ref",
+                    "kind": "single",
+                    "required": True,
+                    "level": row_level,
+                    "options": self._feat_options(
+                        "epic_boon", character, row_level, snapshot,
+                    ),
+                    "reason": reason,
+                })
+                missing.append({
+                    "id": "ability_score_increases",
+                    "kind": "ability_increase",
+                    "required": True,
+                    "level": row_level,
+                    "total": 1,
+                    "maximum_score": 30,
+                    "allowed": "any",
+                    "pattern": "1",
+                    "reason": reason,
+                })
+            else:
+                missing.append({
+                    "id": "ability_score_increases",
+                    "kind": "ability_increase",
+                    "required": True,
+                    "level": row_level,
+                    "total": 2,
+                    "maximum_score": 20,
+                    "allowed": "any",
+                    "pattern": "2_or_1_1",
+                    "reason": reason,
+                })
+                missing.append({
+                    "id": "feat_ref",
+                    "kind": "single",
+                    "required": True,
+                    "level": row_level,
+                    "options": self._feat_options(
+                        "general", character, row_level, snapshot,
+                    ),
+                    "reason": reason,
+                })
+        return missing
+
+    def _missing_spell_slots(
+        self, class_ref: str, level: int, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        snapshot = self.catalog.snapshot(class_ref, level)
+        if not snapshot["slot_profile"]:
+            return []
+        required = Dnd2024SpellSelection(self.bundle).requirements(class_ref, level)
+        spellcasting = character.get("spellcasting")
+        spell_class = (
+            spellcasting.get("class") if isinstance(spellcasting, dict) else None
+        )
+        spell_class = spell_class if isinstance(spell_class, dict) else {}
+
+        checks = (
+            ("cantrip_refs", "cantrip_count", "cantrips"),
+            ("prepared_spell_refs", "prepared_spell_count", "prepared spells"),
+        )
+        if class_ref == "class:wizard":
+            checks = (*checks, ("spellbook_refs", "spellbook_minimum", "spellbook spells"))
+
+        missing: list[dict[str, Any]] = []
+        for ref_key, count_key, label in checks:
+            expected = int(required.get(count_key, 0) or 0)
+            actual = len([ref for ref in (spell_class.get(ref_key) or []) if ref])
+            if actual >= expected:
+                continue
+            missing.append({
+                "id": count_key,
+                "kind": "spell_selection",
+                "required": True,
+                "level": level,
+                "expected": expected,
+                "actual": actual,
+                "reason": (
+                    f"level {level} expects {expected} {label}, {actual} selected"
+                ),
+            })
+        return missing
+
+    @staticmethod
+    def _advancement_records(character: dict[str, Any]) -> list[Any] | None:
+        """The ledger, or ``None`` when this card predates it.
+
+        ``None`` and ``[]`` mean different things: a card with the field but no
+        entries has been through at least one audit and can be judged; a card
+        without the field cannot.  Detection must not confuse the two.
+        """
+
+        progression = character.get("progression")
+        if not isinstance(progression, dict):
+            return None
+        records = progression.get(ADVANCEMENT_RECORDS_KEY)
+        return records if isinstance(records, list) else None
+
+    @staticmethod
+    def _recorded_a_choice(record: dict[str, Any], epic: bool) -> bool:
+        key = "epic_boon_ref" if epic else "feat_ref"
+        return bool(record.get("ability_score_increase") or record.get(key))
+
     def preview_next_level(
         self,
         payload: dict[str, Any],
@@ -148,7 +374,9 @@ class Dnd2024AdvancementEngine:
         )
         subclass = self.catalog.subclass_choice(class_ref)
         expected_subclass_ref = f"subclass:{subclass['id']}"
-        if any(feature.endswith("_subclass") for feature in after["gained_feature_ids"]):
+        # 判定读"升级后这个角色是否仍缺子职"，而不是"本级是否授予子职"。
+        # 两者对从 1 级长起来的卡等价；对导入卡不等价，而导入卡正是缺口来源。
+        if self._pending_subclass_level(feature_state, target_level, subclass) is not None:
             requirements.append({
                 "id": "subclass_ref",
                 "kind": "single",
@@ -164,7 +392,8 @@ class Dnd2024AdvancementEngine:
             elif selected_subclass_ref != expected_subclass_ref:
                 errors.append("subclass_ref is not an SRD subclass for this class")
         elif choices.get("subclass_ref") and selected_subclass_ref != feature_state.get("subclass_ref"):
-            errors.append("subclass_ref can only be selected when the class grants a subclass")
+            # 已有子职不可改选；"从空到有"走上面的补齐分支，不落在这里。
+            errors.append("subclass_ref cannot be changed once selected")
 
         ability_increases, advancement_feat_ref, ability_errors = self._advancement_feat(
             character, after, choices
@@ -294,7 +523,14 @@ class Dnd2024AdvancementEngine:
         hp_gain = new_level_hp + retrospective_con_hp + feature_hp_gain
 
         subclass_feature_ids = self._subclass_features(
-            subclass, target_level, selected_subclass_ref == expected_subclass_ref
+            subclass,
+            target_level,
+            selected_subclass_ref == expected_subclass_ref,
+            # 原本没有子职、本次补选：低等级的子职特性对它全是新的。
+            catching_up=(
+                not str(feature_state.get("subclass_ref") or "")
+                and selected_subclass_ref == expected_subclass_ref
+            ),
         )
         gained_feature_ids = [*after["gained_feature_ids"], *subclass_feature_ids]
         return {
@@ -629,10 +865,25 @@ class Dnd2024AdvancementEngine:
     @staticmethod
     def _subclass_features(
         subclass: dict[str, Any], level: int, selected: bool,
+        *, catching_up: bool = False,
     ) -> list[str]:
+        """The subclass features this level newly grants.
+
+        ``catching_up`` is a delayed first selection: the character is only now
+        receiving a subclass it owed from an earlier level, so every feature at
+        or below ``level`` is new to it.  Taking only ``level`` would silently
+        skip the option slots the granting level used to ask for.
+        """
+
         if not selected:
             return []
         by_level = subclass.get("feature_ids_by_level") or {}
+        if catching_up:
+            granted: list[str] = []
+            for raw_level in sorted(by_level, key=int):
+                if int(raw_level) <= level:
+                    granted.extend(by_level[raw_level])
+            return granted
         return list(by_level.get(str(level)) or [])
 
     def _update_spellcasting(self, character: dict[str, Any], preview: dict[str, Any]) -> None:
