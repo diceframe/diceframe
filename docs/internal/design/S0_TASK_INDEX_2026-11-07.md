@@ -5,7 +5,7 @@
 | 范围 | 官方 SRD 5.2.1 的 12 个职业、12 个子职及其特性 |
 | 规则基准 | 官方英文 PDF，2025-05-01，CC-BY-4.0；SHA-256 见 `SRD_SOURCE_AUDIT_2026-11-06.md` |
 | 代码祖先基线 | `integration/dnd2024-srd@35653f81`；后续切片按依赖链依次叠加，不跳基线 |
-| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）；S0-D1 已实现（`feat/dnd2024-s0d1-supreme-healing@5283f77d`，stack 在 D3 链头上）；S0-E3 已实现（`feat/dnd2024-s0e3-survivor@c1fef294`，stack 在 D1 链头上）；S0-F1 已实现（`feat/dnd2024-s0f1-d20-skills@5efb0194`，stack 在 E3 链头上；`5efb0194` 为旧测试对齐的 test-only 补提交）；S0-F2 已实现（`feat/dnd2024-s0f2-bardic-inspiration@ebd6166c`，stack 在 F1 链头上）；S0-F3 已实现（`feat/dnd2024-s0f3-failed-d20-windows@b86eec6a`，stack 在 F2 链头上）；S0-F4 已实现（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）；S0-F5 已实现（`feat/dnd2024-s0f5-free-casting@910733c0`，stack 在 F4 链头上）；休息面板接线已交付（`feat/dnd2024-rest-panel-wiring@c5e4a4f1`，stack 在 F5 链头上，地形与研究两类长休声明可由 UI 提交，见 §11）；休息的 DM 裁决与逻辑时间推进已交付（`feat/dnd2024-rest-decision@dbb6edd8`，stack 在面板接线之上，见 §12）。A 类六份（D1–D3、E1–E3）至此全部交付；F 类已交付 F1、F2、F3、F4、F5、F6a、F6b、F6c、F9。F6 按机制拆三段，**三段全部交付**：F6a 短休恢复预算（`feat/dnd2024-s0f6a-rest-recovery-budget`，stack 在 `fc1907e0` 之上，见 §13）、F6b Magical Cunning 1 分钟仪式（`feat/dnd2024-s0f6b-magical-cunning-rite`，stack 在 `2d06ce89` 之上，见 §14）、F6c Font of Magic 双向转换与临时槽（`feat/dnd2024-s0f6c-font-of-magic`，stack 在 `cf6abb2f` 之上，见 §15）。剩余 28 份：F7、F8、F10–F37 待执行 |
+| 状态 | 已 rebase 到 `main@10a6ab23`（release 3.1.0，含 `#687`/`#689` D3b、`#688` 拥有过滤、`#692` CoC 轨）。S0-A 已实现（含 A2 迁移，分支 `feat/dnd2024-s0a-subclass-critical-upstream@7a28b25a`）；S0-B 已实现（分支 `feat/dnd2024-s0b-feature-choices@1304beb7`）；S0-C 已实现（分支 `feat/dnd2024-s0c-draconic-resilience@f6d3d8bb`）；D1–D4 修复在链头 `feat/dnd2024-derived-defense-speed@73d11263`；S0-D2 已实现（`feat/dnd2024-s0d2-overchannel@f775ae4f`）、S0-E1 已实现（`feat/dnd2024-s0e1-dark-ones-blessing@8f3182fd`）、S0-E2 已实现并复核（`feat/dnd2024-s0e2-paladin-auras`）；S0-F9 已交付可自动化部分（`feat/dnd2024-s0f9-movement`），环境面按停止条件记录；S0-D3 已实现（`feat/dnd2024-s0d3-cutting-words@fa254b1f`）；S0-D1 已实现（`feat/dnd2024-s0d1-supreme-healing@5283f77d`，stack 在 D3 链头上）；S0-E3 已实现（`feat/dnd2024-s0e3-survivor@c1fef294`，stack 在 D1 链头上）；S0-F1 已实现（`feat/dnd2024-s0f1-d20-skills@5efb0194`，stack 在 E3 链头上；`5efb0194` 为旧测试对齐的 test-only 补提交）；S0-F2 已实现（`feat/dnd2024-s0f2-bardic-inspiration@ebd6166c`，stack 在 F1 链头上）；S0-F3 已实现（`feat/dnd2024-s0f3-failed-d20-windows@b86eec6a`，stack 在 F2 链头上）；S0-F4 已实现（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）；S0-F5 已实现（`feat/dnd2024-s0f5-free-casting@910733c0`，stack 在 F4 链头上）；休息面板接线已交付（`feat/dnd2024-rest-panel-wiring@c5e4a4f1`，stack 在 F5 链头上，地形与研究两类长休声明可由 UI 提交，见 §11）；休息的 DM 裁决与逻辑时间推进已交付（`feat/dnd2024-rest-decision@dbb6edd8`，stack 在面板接线之上，见 §12）。A 类六份（D1–D3、E1–E3）至此全部交付；F 类已交付 F1、F2、F3、F4、F5、F6a、F6b、F6c、F9。F6 按机制拆三段，**三段全部交付**：F6a 短休恢复预算（`feat/dnd2024-s0f6a-rest-recovery-budget`，stack 在 `fc1907e0` 之上，见 §13）、F6b Magical Cunning 1 分钟仪式（`feat/dnd2024-s0f6b-magical-cunning-rite`，stack 在 `2d06ce89` 之上，见 §14）、F6c Font of Magic 双向转换与临时槽（`feat/dnd2024-s0f6c-font-of-magic`，stack 在 `cf6abb2f` 之上，见 §15）。剩余 30 份：F7、F8、F10–F37，以及 2026-11-11 新增的装备地基切片 **G1、G2**（见 §16）待执行。**2026-11-11：S0-F7 已部分交付**（`feat/dnd2024-s0f7-weapon-mastery@872e165a`：数量轨道与 `tactical_master` 声明、Push 词条、Tactical Master 替换；Nick 移交 G2，Cleave/Topple/武器选择链待执行）。 |
 | 唯一执行入口 | 本索引列出的 `S0*.md` 文件；旧 `SP1`–`SP12` 不再作为 S0 执行依据 |
 
 ## 1. 为什么单独立 S0 任务体系
@@ -61,8 +61,8 @@ S0-A 子职授予主干
 | F4 | B | F23 | F13、F14、F22、E2 |
 | F5 | B、D2、F4 | F24 | C、F1、F3 |
 | F6 | D2、F5 | F25 | F6、F20 |
-| F7 | B | F26 | F4、F12、F16、F25 |
-| F8 | B、F7 | F27 | F5、F20、F25 |
+| F7 | B、G1、G2 | F26 | F4、F12、F16、F25 |
+| F8 | B、F7、G1、G2 | F27 | F5、F20、F25 |
 | F9 | C | F28 | F2、F3、F6、F16、B、D2 |
 | F10 | F1、F9 | F29 | F4、F5、D2 |
 | F11 | A | F30 | F14、F20、F21、F23、F28、D2 |
@@ -74,6 +74,7 @@ S0-A 子职授予主干
 | F17 | D2、F10、F14 | F36 | B、F1、F4 |
 | F18 | F5 | F37 | A–E3、F1–F36 全部 |
 | F19 | B、F11、F12、F14、F18 |  |  |
+| G1 | 无 S0 切片前置；需含 B 与 F7 已交付提交的链头 | G2 | G1 |
 
 依赖图不能替代任务书中的停止条件。F10 的 Hide 环境事实、F16 的 AoE 成员、F25 的 Beast 数据、F26 的区域/掩蔽、F30 的位面/光照、F31 的真实 Spell Scroll，以及 F32–F35 的感官/形态等边界，仍须在执行时逐项核实；缺口只能形成明确的 `guided`／`not_automated` 非完成记录或停止，不能用近似模型冒充验收。
 
@@ -96,8 +97,8 @@ S0-A 子职授予主干
 | S0-F4 | 来源化法术授予 | 五组子职法术、Circle Spells、Magical Discoveries、Magical Secrets | `S0F4_SPELL_GRANTS_TASK_SPEC_2026-11-07.md` | 24 | **已实现**（`feat/dnd2024-s0f4-spell-grants@745baaee`，stack 在 F3 链头上）。七项特性在基线只有 locale 标签与子职目录 id，本切片补声明而不新建管线：`spell_grant_rows()` 每源一行（`owner`/`feature_id`/`spell_ref`/`granted_level`/`terrain`/`spell_ability`），`prepared_view()` 每法术一条有效项并并列 `sources`，容量拆成 `prepared`/`prepared_used`/`granted`/`cantrip` 四个字段，常驻授予不占容量且按授予者职业结算。Land 四地形走长休事务（先校验后落账，非法地形整休不动；切换是替换不是叠加；同地形幂等；缺省不切换但产 `spell_grant_terrain_missing`）。Magical Secrets 只做 `prepared_list_expansion`（不扩容量、不给戏法开列表），Magical Discoveries 恰两项且每级最多换一项。`automation_status` 由 `spell_effects` 真实存在派生，`not_automated` 施放 fail closed。全量净引入 0（11 failed 与基线逐条相同，通过数 1697→1728 = +31 条新测试）。**第一版回归**：把"未回答的授予槽"当非法提交，曾致 62 ERROR / 6 FAILED（全部是 Bard 6 级以上旧夹具），已改为"待选 ≠ 非法"并把边界钉进矩阵 24；两个玩家选择槽未走 `features.feature_choices`（加载期闭集）见该文件 §11；**同日两项裁定已落地**（§12）：`runtime.complete_rest()` 开始转发 `land_terrain`（`rest_option_names` 扩到 `{attunement, land_terrain}`，队伍休息开局前非变更校验），死亡豁免放开重掷面并保留 `death_save_crit_threshold` |
 | S0-F5 | 独立免费施法资源 | Contact Patron、Mystic Arcanum 6/7/8/9、Spell Mastery、Signature Spells | `S0F5_FREE_CASTING_TASK_SPEC_2026-11-07.md` | 25 | 已实现 |
 | S0-F6 | 休息恢复预算与转换 | Arcane/Natural Recovery、Sorcerous Restoration、Magical Cunning、Eldritch Master、Font of Magic | `S0F6_REST_RESOURCE_CONVERSION_TASK_SPEC_2026-11-07.md` | 25 | **已交付**（分三段）：F6a 短休恢复预算（矩阵 1–5、8、9、22、23，§10）、F6b Magical Cunning 1 分钟仪式（矩阵 10–13，§11）、F6c Font of Magic 双向转换与临时槽（矩阵 14–21，§12）。前端入口与仪式窗口仍为独立切片 |
-| S0-F7 | 武器精通与八词条 | 五职业 Weapon Mastery、Tactical Master；Cleave/Graze/Nick/Push/Sap/Slow/Topple/Vex | `S0F7_WEAPON_MASTERY_TASK_SPEC_2026-11-07.md` | 28 | 待执行 |
-| S0-F8 | 战斗风格与戏法选项 | Fighter/Paladin/Ranger Fighting Style；六种风格及 Blessed/Druidic Warrior | `S0F8_FIGHTING_STYLES_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
+| S0-F7 | 武器精通与八词条 | 五职业 Weapon Mastery、Tactical Master；Cleave/Graze/Nick/Push/Sap/Slow/Topple/Vex | `S0F7_WEAPON_MASTERY_TASK_SPEC_2026-11-07.md` | 28 | **部分交付**（`feat/dnd2024-s0f7-weapon-mastery@872e165a`）：① 五职业 `weapon_mastery` 数量轨道 + `tactical_master` 声明（`cf88390d`，另修正一处重复 label 键）；② **Push**（`907a0988`，含 `push_allows_size` 与三处 actor 视图 `size` 透传）；③ **Tactical Master**（`a8632f3d` + `872e165a` 14 条测试）：attack intent 加 `mastery_override`、把「规则可用性」从「效果实现」拆出为 `_mastery_available`、命中与未中两条路径同读替换。**Nick 移交 S0-G2**；Cleave、Topple（需 prone 后果层，全仓库 0 命中）、武器选择链与长休换选待执行 |
+| S0-F8 | 战斗风格与戏法选项 | Fighter/Paladin/Ranger Fighting Style；六种风格及 Blessed/Druidic Warrior | `S0F8_FIGHTING_STYLES_TASK_SPEC_2026-11-07.md` | 24 | 待执行。§7 停止条件 2「Light extra attack 无法由 canonical 装备判定」**由 S0-G2 解除**；TWF 风格只剩消费 G2 留出的属性调整值判定点 |
 | S0-F9 | 无甲防御与特殊移动 | Unarmored Defense/Movement、Fast Movement、Roving、Second-Story Work、Acrobatic Movement | `S0F9_DERIVED_DEFENSE_MOVEMENT_TASK_SPEC_2026-11-07.md` | 26+46 | **部分交付**（`feat/dnd2024-s0f9-movement`）。矩阵 2–11 早在 `feat/dnd2024-derived-defense-speed@73d11263` 已实现（38 条）；本轮补 `roving` / `second_story_work` 声明、`derived.climb_speed`/`swim_speed`、跳跃距离权威（46 条）。矩阵 19–24 按 §7 停止条件 2 记录为不可自动化：combat 是 `position_mode: theater` 的一维距离模型，没有地形/垂直面/液面/支撑事实。详见该文件 §9 |
 | S0-F10 | Bonus Action 路由与移动效果 | Instinctive Pounce、Tactical Shift、Cunning Action、Steady Aim、Fast Hands、Fleet Step、Heightened Focus | `S0F10_ACTION_ROUTING_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
 | S0-F11 | 受击与伤害反应 | Retaliation、Deflect Attacks、Deflect Energy、Slow Fall | `S0F11_DAMAGE_REACTIONS_TASK_SPEC_2026-11-07.md` | 22 | 待执行 |
@@ -127,6 +128,8 @@ S0-A 子职授予主干
 | S0-F35 | Chain/Tome 与相关选项 | Pact of the Chain/Tome、Investment、Gift of the Protectors、Gaze、Depths | `S0F35_INVOCATION_PACTS_TASK_SPEC_2026-11-07.md` | 18 | 待执行 |
 | S0-F36 | 语言、熟练与常备授予 | Primal Knowledge、Divine/Primal Order、Druidic、Deft Explorer、Thieves' Cant、Bonus Proficiencies | `S0F36_SIMPLE_GRANTS_TASK_SPEC_2026-11-07.md` | 15 | 待执行 |
 | S0-F37 | 最终机器覆盖审计 | 动态 198 行主矩阵、48 行成长项、3/28/10/6 专项矩阵与真实 JUnit 证据 | `S0F37_COVERAGE_AUDIT_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
+| S0-G1 | 装备手部容量与实例身份 | 两只手各持一把武器；同款两把可区分；Two-Handed 与盾牌互斥 | `S0G1_EQUIPMENT_HANDS_INSTANCE_IDENTITY_TASK_SPEC_2026-11-11.md` | 27 | 待执行。**F7 与 F8 的共同硬前置**，理由见 §16 |
+| S0-G2 | Light 额外攻击、Nick 与 Dual Wielder | Light 额外攻击、动作经济与每回合记账；Nick 改挂 Attack action；Dual Wielder 专长 | `S0G2_LIGHT_EXTRA_ATTACK_TASK_SPEC_2026-11-11.md` | 34 | 待执行。**依赖 G1**；交付后解除 F7（Nick）与 F8（TWF）的定义缺口 |
 
 ## 4. 每份任务书的固定结构
 
@@ -519,3 +522,55 @@ F6 的最后一段（任务书 §12）。范围是矩阵 14–21：一个法术�
 | 引擎套件 `test_dnd2024_rest_resource_conversion.py` | **32 passed**（23 → +9） |
 | 新增 `test_dnd2024_font_of_magic.py` | **13 passed** |
 | `pytest tests/rulesets -q` | **11 failed / 1838 passed**，11 条为 `character_builder` 基线，1816→1838 = +22，净引入 0 |
+
+## 16. 新增 G 类：装备地基（2026-11-11）
+
+### 16.1 为什么必须新开一类
+
+S0-F7（Nick）与 S0-F8（TWF）都写着「Light 额外攻击」，但**两份任务书都不认领 Light 本身**：F7 把它当既有前提，F8 在 §7 停止条件 2 里承认「Light extra attack 无法由 canonical 装备判定」就停。计划书里因此存在一块**没人认领的第三块工作**，而不是我先前判断的「F7 ↔ F8 循环依赖」。
+
+2026-11-11 定点核实后，阻塞共三层，缺一不可：
+
+| 层 | 位置 | 效果 |
+|---|---|---|
+| 装备槽互斥 | `src/commands/state_items.py:575-587` + `reconciliation.py:52` `_GENERIC_SLOTS` | 武器只落 `main_hand`，第二把武器顶掉第一把 |
+| 投影去重 | `reconciliation.py:244` `list(dict.fromkeys(refs))` | 同款多件即使塞进去也塌成一件 |
+| ref 粒度 = item kind | `combat/view.py:388` `_declared_attack` 用 `next(...)` | 两把短剑是同一个 `weapon_ref`，无法证成「不同的一把」 |
+
+**盾牌不在这个范围内**：`shield` 的 canonical 槽是 `off_hand`、武器是 `main_hand`，两者不同槽，实测可同时装备。当前唯一装不上的是第二把武器。
+
+### 16.2 推翻了计划书的一处显式取舍
+
+`docs/internal/DND2024_FULL_EXPERIENCE_PLAN.md:245` 记录：
+
+> ③ canonical 装备投影 `dict.fromkeys` 去重，**同款多件不可表达**，D2 以数量守卫兜底而非引入**实例 ID**。
+
+该条把范围写成「同款多件不可表达」，实测是「任意两把武器不能并存」，且影响面远超双持：Dual Wielder 专长、备用武器、任何「双手各持一物」的规则全部被堵死。`D1_ITEM_IDENTITY` 的 §1.2 十一条裁剪里也没有实例身份——它定义的是 content-pack item → `item_ref` 的**类型**映射，与**实例**是两个议题。因此该取舍在本轮被推翻，改由 S0-G1 引入实例身份。
+
+### 16.3 为什么是两份而不是一份或三份
+
+| 方案 | 判断 |
+|---|---|
+| 一份全包（槽位 + 实例 + Light） | 否。数据模型迁移与战斗规则混在一个切片，任何一处失败都无法回退 |
+| 三份（槽位 / 实例 / Light 各一份） | 否。槽位与实例共用同一次行形状变更与同一批消费者改造，拆开等于做两遍 |
+| **两份：G1（槽位 + 实例）、G2（Light + Nick + Dual Wielder）** | **采用**。G1 是可独立验收的装备地基，G2 在其上是一条完整战斗链 |
+
+G1 内部再分两个提交：A 手部容量（做完即可「短剑 + 匕首」），B 实例身份（做完才「短剑 + 短剑」）。A 不依赖实例，B 依赖 A 的双槽语义，顺序不可交换。
+
+### 16.4 边界归属
+
+| 项 | 归属 | 理由 |
+|---|---|---|
+| 双槽落位、Two-Handed 属性、实例身份 | **G1** | 装备与存档层 |
+| Light 额外攻击、动作经济、每回合记账 | **G2** | Light 是这条链的地基，F7/F8 都在它之上 |
+| Nick | **G2**（原 F7） | 它就是「同一次额外攻击换支付来源」，与 A 必须同一结算链 |
+| Dual Wielder 专长 | **G2** | F7/F8 均未认领，且它正是用户要求的能力之一 |
+| Two-Weapon Fighting 风格 | **F8**（不变） | G2 只留唯一的属性调整值判定点，F8 补一条声明消费 |
+| Cleave、Topple、武器选择链与长休换选 | **F7**（不变） | 与 Light 无耦合；Topple 另需 prone 后果层（全仓库 0 命中） |
+
+依赖表已同步：`F7 → B、G1、G2`，`F8 → B、F7、G1、G2`。
+
+### 16.5 两条必须在执行时复核的规则事实
+
+1. **Dual Wielder 存在勘误**。2024 PHB 初印本写作「treat a non-Light Weapon in your other hand as if it had the Light property」；SRD 5.2.1 采修正措辞：首击仍须是 Light 武器，放宽的是**第二把**（近战且非 Two-Handed，不必是 Light）。推论：**两把长剑即使有专长也不合法**。按 §5 纪律以 SRD 原文为准，执行时须从 PDF 逐字复核并记录页码。
+2. **`two_handed` 属性在 38 件武器里一条都没有**。基线只有 `damage_two_handed`（Versatile）与 `heavy`。G1 §4.1 列出的 13 件待补武器依据 SRD 武器表的 Two-Handed 列，执行时须逐行对照 PDF，不得按 `heavy` 反推（`light_crossbow`/`shortbow` 带 Two-Handed 但无 Heavy）。
