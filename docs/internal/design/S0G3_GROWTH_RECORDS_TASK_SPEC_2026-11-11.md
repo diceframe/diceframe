@@ -506,7 +506,7 @@ HP 增量的两个来源分别验证：
 1. **ruff F821（`d523fa72`）**。`routes/character_cards.py` 新增的状态映射函数标注了 `dict[str, Any]`，但该模块没有导入 `Any`。由于文件头部有 `from __future__ import annotations`，注解在运行期是字符串，永远不会求值，所以 pytest 全绿；而 CI 的强制门禁 `select = ["E9","F63","F7","F82"]` 包含 F82，会在 lint 步骤直接失败。
 2. **能力守卫缺失（`0db3e91a`）**。`_card_context` 只校验 `preview_advancement` / `apply_advancement`（升级路径所需），而两条新路由调用的是 `missing_advancement_choices` / `repair_advancement`。只实现升级流程、尚未实现补选的插件运行时会走到调用处抛 `AttributeError`，表现为 500，而其余"运行时不支持"的情况都是带错误码的 422。已改为由调用方声明所需方法，并给补选单独的错误文案。
 
-**本机全量结果**：`18 failed / 8743 passed / 3 errors`。在 base 提交 `6f07bf0e` 上跑同一批失败文件，失败集合逐条相同（11 条 `test_dnd2024_character_builder.py` 的 `ability:con in background:soldier`、7 条 docker launcher 路径语义、3 个 docker 升级 error），均为 Windows 本地环境问题，Linux CI 不复现。**本切片没有新增后端失败。**
+**本机全量结果**：最终一轮 `19 failed / 8746 passed / 3 errors`。失败集合为 11 条 `test_dnd2024_character_builder.py`（`ability:con in background:soldier`）、6 条 `test_docker_launcher.py` + 1 条 `test_docker_data_generation.py`（临时目录路径语义）、3 个 `test_docker_runtime_v1_upgrade.py` error、1 条 `test_updater.py::test_safe_extract_writes_and_cleans_paths_beyond_max_path`（Windows 长路径，取决于 `--basetemp` 绝对路径长度，因此某一轮会"多出一条"）。逐条在 base 提交 `6f07bf0e` 上复现，均为 Windows 本地环境问题，Linux CI 不复现。**本切片没有新增后端失败。**
 
 **CI 侧的阻塞不是测试失败**：`Backend tests` 连续三次（run 43035975979 / 43041798115 / 43043239120）都停在 `Install CJK font for bot card rendering`。该步用 `apt-get update && apt-get install` 单行执行，runner 侧 DNS 解析 `azure.archive.ubuntu.com` 整段失败，apt 退出 100，ruff/mypy/pytest 全部被跳过。
 
