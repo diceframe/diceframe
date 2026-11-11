@@ -107,7 +107,8 @@
 
    - 依据 `Sage Advice Compendium`：「The only requirement for the Light property's extra attack is that it's made with a **different** Light weapon.」（同条还明确「攻击一次 Light 武器后从另一只手拔出第二把武器即可满足」）。
    - **双持两把 Light 武器、且 Extra Attack 两击各用一把**时，额外攻击**用哪一把都成立**：用 A 则参照 B，用 B 则参照 A。这是多击角色最常被误判的配置。
-   - **同一把武器连打两击**时，额外攻击**不能**再用它（找不到不同的参照），必须换一把。
+   - **参照与被参照不对称**：`w`（参照武器）必须在账本里，即本回合 Attack action 真的用它打过；本次额外攻击用的那把**不必**在账本里，只需已装备且是 Light（SAC 同条即为此：「攻击一次 Light 武器后从另一只手拔出第二把武器即可满足」）。所以 1 级角色用 shortsword 打一击、用从未打过的 dagger 做额外攻击是合法的；反过来用 shortsword 做额外攻击不合法，因为账本里没有第二把可参照的武器。
+   - **同一把武器不能作为它自己的参照**。原因不是「打了两次」，而是账本里没有一把**不同于本次**的 Light 武器：1 级角色（`attacks_per_action = 1`）用 shortsword 打一击后，额外攻击用 shortsword 一样被拒；5 级角色两击都用 shortsword 时结论完全相同。**攻击次数不进入判定**，账本里同一武器出现多次也不产生第二个参照点。
    - 「先 dagger(Light) 后 longsword(非 Light)」时，enabling 攻击只有 dagger 那一次，故额外攻击不能用 dagger，只能用**另一把** Light 武器——条件里的「w 是 Light 武器」正是为此存在，缺了它会把非 Light 的 longsword 当成合法参照。
    - **不采用「不在本回合已用集合里」的读法**：那会让上述双持多击角色彻底无武器可选，等于把双持从所有多击职业里删掉。
    - **不采用「与末项不同」的读法**：那会错误禁止「用第一击的武器做额外攻击」，而 SAC 明确允许。
@@ -213,12 +214,12 @@
 29. 攻击动作账本按 `round` + `turn_index` 重置；上一回合用过的武器不再满足首击条件。
 30. **左右手互换的两回合**：回合 1 用 shortsword 首击、dagger 做 `light` 额外攻击；回合 2 用 dagger 首击、shortsword 做 `light` 额外攻击。两回合都成立，且额度互相独立（每回合各扣 1 点 `bonus_action`、各用 1 次 `light_extra_attack` 额度），任何一方都不因为「上一回合用过」而被拒。
 31. **多击、两击各用一把**：5 级 Fighter 用 shortsword 打第一击、dagger 打第二击。`light` 额外攻击**用 shortsword 成立**（参照 dagger），**用 dagger 也成立**（参照 shortsword）。这是存在性判定与「集合/末项」两种错误读法的分歧点：集合读法会两把都拒，末项读法会拒掉 dagger，两者都错。
-32. **多击、两击用同一把**：5 级 Fighter 两次都用 shortsword。`light` 额外攻击用 shortsword 被拒（找不到不同的参照），改用 dagger 成立。
+32. **同一把武器不能作为自己的参照，与攻击次数无关**：1 级 Fighter（`attacks_per_action = 1`）用 shortsword 打一击，`light` 额外攻击**用 shortsword 被拒**——账本里唯一的武器就是它自己；改用 dagger 成立。5 级 Fighter 两击都用 shortsword 时结论**完全相同**，证明拒绝的原因不是「打了两击」而是「账本里没有一把不同于本次的 Light 武器」：实现不得把 `attacks_per_action` 或账本条目数读进判定，同一武器在账本里出现多次也不构成第二个参照点。
 33. **非 Light 武器不是合法参照**：先 dagger（Light）后 longsword（非 Light），`light` 额外攻击用 dagger 被拒（enabling 攻击只有 dagger 那次），换第二把 Light 武器才成立——条件里的「w 是 Light 武器」缺了就会把 longsword 误当成合法参照。
 34. 回合 2 尚未进行 Attack action 时直接声明 `light` 被拒：读账本必须做 `round` + `turn_index` 比较，不得读到回合 1 的残留而误放行。
 35. 同一意图同时声明两种来源被拒，不取其一。
 36. 视图 `extra_attack.allowed` 与实际准入一致；被拒来源在 `blocked` 里有可读原因。
-37. A 提交后矩阵 1–11、27–36 通过（矩阵 30–34 属 A 提交的账本语义，31–33 需要 5 级 Fighter 夹具，一并验收）；B 提交后 12–17 通过；C 提交后 18–26 通过。
+37. A 提交后矩阵 1–11、27–36 通过（矩阵 30–34 属 A 提交的账本语义，一并验收；31 需要 5 级 Fighter 夹具，32 需要 1 级与 5 级两组对照，33 需要能装备非 Light 武器）；B 提交后 12–17 通过；C 提交后 18–26 通过。
 38. 既有武器精通、Tactical Master、战斗、方向、装备测试无回归。（矩阵 9 只断言默认值，TWF 分支留给 S0-F8。）
 39. 存档/加载与重放后：每回合额度、攻击动作账本、动作经济三项与重放前一致。
 
