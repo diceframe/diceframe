@@ -474,3 +474,41 @@ def test_a_level_twenty_character_can_still_be_completed() -> None:
 
     assert repaired["build"]["level"] == 20
     assert repaired["features"]["subclass_ref"] == CHAMPION
+
+
+def test_a_ruleset_without_the_repair_path_is_refused_instead_of_crashing() -> None:
+    """补选是较新的能力：只实现升级流程的插件运行时不应当抛 AttributeError。
+
+    路由把非 200 映射成 422，所以这里必须是正常的错误响应，而不是 500。
+    """
+
+    cards = [_card({})]
+    dependencies = CardAdvancementDependencies(
+        read_cards=lambda: cards,
+        write_cards=lambda updated: cards.__setitem__(slice(None), updated),
+        load_rule_by_id=lambda rule_id, language="": SimpleNamespace(
+            rule_id=rule_id,
+        ),
+        runtime_for_card=lambda card: SimpleNamespace(
+            preview_advancement=lambda *args, **kwargs: {"ok": True},
+            apply_advancement=lambda *args, **kwargs: {},
+        ),
+    )
+
+    pending = pending_card_choices(dependencies, "card-1")
+    completed = complete_card_choices(
+        dependencies,
+        "card-1",
+        {
+            "repairs": {"subclass_ref": CHAMPION},
+            "operation_id": "op-1",
+            "expected_revision": 0,
+        },
+    )
+
+    assert pending["ok"] is False
+    assert pending["code"] == "RULESET_ADVANCEMENT_UNAVAILABLE"
+    assert "补齐" in pending["error"]
+    assert completed["ok"] is False
+    assert completed["code"] == "RULESET_ADVANCEMENT_UNAVAILABLE"
+    assert cards[0]["ruleset_revision"] == 0

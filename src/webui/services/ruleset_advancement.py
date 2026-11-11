@@ -126,7 +126,23 @@ def apply(
     }
 
 
-def _card_context(dependencies: CardAdvancementDependencies, card_id: str):
+# A ruleset runtime may speak the upgrade path without speaking the repair
+# path: catching up is a newer capability, and a plugin bundle written before
+# it exists still has preview/apply.  Name the methods each caller needs so a
+# missing one becomes a normal 422 instead of an AttributeError.
+_UPGRADE_METHODS = ("preview_advancement", "apply_advancement")
+_REPAIR_METHODS = ("missing_advancement_choices", "repair_advancement")
+_MISSING_UPGRADE = "该规则尚未提供专业升级流程"
+_MISSING_REPAIR = "该规则尚未提供补齐流程"
+
+
+def _card_context(
+    dependencies: CardAdvancementDependencies,
+    card_id: str,
+    *,
+    required: tuple[str, ...] = _UPGRADE_METHODS,
+    missing_message: str = _MISSING_UPGRADE,
+):
     cards = dedupe_cards(dependencies.read_cards())
     for index, card in enumerate(cards):
         if str(card.get("id") or "") != card_id:
@@ -142,13 +158,12 @@ def _card_context(dependencies: CardAdvancementDependencies, card_id: str):
                 "error": "角色卡绑定的专业规则不可用",
             }
         if not all(
-            callable(getattr(runtime, name, None))
-            for name in ("preview_advancement", "apply_advancement")
+            callable(getattr(runtime, name, None)) for name in required
         ):
             return cards, index, card, rule, runtime, {
                 "ok": False,
                 "code": "RULESET_ADVANCEMENT_UNAVAILABLE",
-                "error": "该规则尚未提供专业升级流程",
+                "error": missing_message,
             }
         return cards, index, card, rule, runtime, None
     return cards, -1, None, None, None, {
@@ -295,6 +310,7 @@ def pending_card_choices(
 
     _cards, _index, card, rule, runtime, error = _card_context(
         dependencies, card_id,
+        required=_REPAIR_METHODS, missing_message=_MISSING_REPAIR,
     )
     if error:
         return error
@@ -319,7 +335,10 @@ def complete_card_choices(
     pay them twice.
     """
 
-    cards, index, card, rule, runtime, error = _card_context(dependencies, card_id)
+    cards, index, card, rule, runtime, error = _card_context(
+        dependencies, card_id,
+        required=_REPAIR_METHODS, missing_message=_MISSING_REPAIR,
+    )
     if error:
         return error
     parsed = validate_draft_shape(body)
