@@ -473,7 +473,7 @@ HP 增量的两个来源分别验证：
 |---|---|---|
 | `test_dnd2024_advancement_records.py` | 7 | 1–6 |
 | `test_dnd2024_missing_choices.py` | 12 | 7–21（15 除外） |
-| `test_dnd2024_choice_repair.py` | 17 | 22–28（15 在此补） |
+| `test_dnd2024_choice_repair.py` | 18 | 22–28（15 在此补） |
 
 全部通过。矩阵 15（Rogue 10 级）在 `test_dnd2024_choice_repair.py` 的 `test_a_rogue_ability_level_at_ten_is_audited` 覆盖，矩阵 24 由 `test_completing_a_subclass_recomputes_the_derived_facts` 覆盖。
 
@@ -498,3 +498,15 @@ HP 增量的两个来源分别验证：
 1. `class_feature_grants` 仍然只写不读。补齐不会更新它，因为没有任何消费者；一旦将来有人按它重建特性，这里会显形。
 2. `feat_refs` 里仍有 `feat:ability_score_improvement` 这个伪专长。账本已经把它和真专长分开，但 `feat_refs` 本身没有区分。清理属于独立议题。
 3. 前端未跑 `vue-tsc`：该工作树没有 `node_modules`，只能人工核对语法。合并前需在 CI 或本地补一次类型检查。
+
+### 9.11 CI 门禁补验：两个只在门禁上才现形的缺陷
+
+交付时本地只跑过 `tests/rulesets`，CI 的三个门禁步骤（ruff / mypy / pytest）此前从未执行过。补验后发现两处缺陷，都已在同一分支修复：
+
+1. **ruff F821（`d523fa72`）**。`routes/character_cards.py` 新增的状态映射函数标注了 `dict[str, Any]`，但该模块没有导入 `Any`。由于文件头部有 `from __future__ import annotations`，注解在运行期是字符串，永远不会求值，所以 pytest 全绿；而 CI 的强制门禁 `select = ["E9","F63","F7","F82"]` 包含 F82，会在 lint 步骤直接失败。
+2. **能力守卫缺失（`0db3e91a`）**。`_card_context` 只校验 `preview_advancement` / `apply_advancement`（升级路径所需），而两条新路由调用的是 `missing_advancement_choices` / `repair_advancement`。只实现升级流程、尚未实现补选的插件运行时会走到调用处抛 `AttributeError`，表现为 500，而其余"运行时不支持"的情况都是带错误码的 422。已改为由调用方声明所需方法，并给补选单独的错误文案。
+
+**本机全量结果**：`18 failed / 8743 passed / 3 errors`。在 base 提交 `6f07bf0e` 上跑同一批失败文件，失败集合逐条相同（11 条 `test_dnd2024_character_builder.py` 的 `ability:con in background:soldier`、7 条 docker launcher 路径语义、3 个 docker 升级 error），均为 Windows 本地环境问题，Linux CI 不复现。**本切片没有新增后端失败。**
+
+**CI 侧的阻塞不是测试失败**：`Backend tests` 连续三次（run 43035975979 / 43041798115 / 43043239120）都停在 `Install CJK font for bot card rendering`。该步用 `apt-get update && apt-get install` 单行执行，runner 侧 DNS 解析 `azure.archive.ubuntu.com` 整段失败，apt 退出 100，ruff/mypy/pytest 全部被跳过。字体只是覆盖率增强（无字体时相关用例 skip），不该成为门禁。加固方案已备好：重试三次，仍失败则降级为 skip 并留下 warning；因当前 token 无 `workflow` 权限，无法推送 `.github/workflows/` 改动，独立分支 `ci/font-step-fail-open`（基于 `main`，单提交）待授权后提交。
+
