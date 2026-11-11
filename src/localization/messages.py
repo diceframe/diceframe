@@ -1,12 +1,15 @@
 """后端文案的统一多语言入口（python-i18n）。
 
-所有面向用户 / 模型的后端文字都放在 ``locales/<命名空间>.<语言>.yml``，代码里
-按 ``命名空间.键`` 取用，不再把某一种语言写死在业务逻辑里::
+所有面向用户 / 模型的后端文字都放在 ``locales/`` 下，代码里按 ``命名空间.键`` 取用，
+不再把某一种语言写死在业务逻辑里。文案目录与源码目录一一对应：
+``src/webui/services/updater.py`` 的文案在 ``locales/webui/services/updater.<语言>.yml``，
+命名空间就是这条路径::
 
     from src.localization.messages import t
 
-    t("errors.game_not_found")                       # 接口提示：按请求语言
-    t("fu.merchant.gold_short", game.language, price=30)   # 对局内容：按对局语言
+    t("webui.errors.game_not_found")                 # 接口提示：按请求语言
+    t("webui.services.updater.package_kind_unknown", kind=kind)
+    t("engine.economy.insufficient_balance", game.language, ...)   # 对局内容：按对局语言
 
 语言来源
 --------
@@ -21,6 +24,8 @@
 
 文案文件约定
 ------------
+- 文件名是 ``<模块名>.<语言>.yml``，所在目录对应源码包；改哪个源文件的提示就去同路径的
+  文案文件；
 - 顶层键是语言标签；占位符写成 ``%{name}``；``count`` 参数触发复数形式
   （值写成 ``one`` / ``many`` 的映射）；
 - 新文案只要求 zh-CN 与 en 两种，其它语言由社区补充；
@@ -56,6 +61,23 @@ _reported_missing: set[tuple[str, str]] = set()
 _loaded = False
 
 
+def catalog_files() -> list[tuple[str, str, Path]]:
+    """Every catalog file as ``(namespace, locale, path)``.
+
+    The namespace mirrors the path under ``locales/``, which in turn mirrors the
+    module under ``src/`` that owns the messages.
+    """
+
+    found: list[tuple[str, str, Path]] = []
+    for path in sorted(LOCALES_DIR.rglob(f"*.{FILE_FORMAT}")):
+        parts = path.name.split(".")
+        if len(parts) != 3:
+            raise ValueError(f"文案文件名必须是 <模块名>.<语言>.{FILE_FORMAT}：{path.name}")
+        namespace = ".".join((*path.relative_to(LOCALES_DIR).parts[:-1], parts[0]))
+        found.append((namespace, parts[1], path))
+    return found
+
+
 def _load_catalogs() -> None:
     """Configure python-i18n once and load every catalog file eagerly.
 
@@ -73,11 +95,9 @@ def _load_catalogs() -> None:
     _i18n.set("error_on_missing_translation", False)
     _i18n.set("error_on_missing_placeholder", False)
     _translations.container.clear()
-    for path in sorted(LOCALES_DIR.glob(f"*.{FILE_FORMAT}")):
-        parts = path.name.split(".")
-        if len(parts) != 3:
-            raise ValueError(f"文案文件名必须是 <命名空间>.<语言>.{FILE_FORMAT}：{path.name}")
-        _resource_loader.load_translation_file(path.name, str(LOCALES_DIR), parts[1])
+    for _namespace, locale, path in catalog_files():
+        # 库按相对路径里的目录拼出命名空间：webui/services/x.en.yml → webui.services.x
+        _resource_loader.load_translation_file(str(path.relative_to(LOCALES_DIR)), str(LOCALES_DIR), locale)
     _loaded = True
 
 
@@ -175,6 +195,7 @@ __all__ = [
     "FALLBACK_CHAIN",
     "LOCALES_DIR",
     "REQUIRED_LOCALES",
+    "catalog_files",
     "catalog_keys",
     "has",
     "recognized_language",

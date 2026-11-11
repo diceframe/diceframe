@@ -15,6 +15,7 @@ from src.localization import messages
 from src.localization.messages import (
     LOCALES_DIR,
     REQUIRED_LOCALES,
+    catalog_files,
     catalog_keys,
     recognized_language,
     request_language,
@@ -29,10 +30,6 @@ ROOT = Path(__file__).resolve().parents[1]
 _PLACEHOLDER = re.compile(r"%\{([^}]+)\}")
 
 
-def _catalog_files() -> list[Path]:
-    return sorted(LOCALES_DIR.glob("*.yml"))
-
-
 def _flatten(value: object, prefix: str = "") -> dict[str, str]:
     if not isinstance(value, dict):
         return {prefix: str(value)}
@@ -43,25 +40,33 @@ def _flatten(value: object, prefix: str = "") -> dict[str, str]:
 
 
 def _namespace_entries(namespace: str, locale: str) -> dict[str, str]:
-    path = LOCALES_DIR / f"{namespace}.{locale}.yml"
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    paths = {(name, language): path for name, language, path in catalog_files()}
+    assert (namespace, locale) in paths, f"{namespace} 缺少 {locale} 文案文件"
+    data = yaml.safe_load(paths[namespace, locale].read_text(encoding="utf-8"))
     return _flatten(data[locale])
 
 
 # ---------------------------------------------------------------- 文案表本身
 
-def test_every_catalog_file_is_named_by_namespace_and_locale_and_rooted_at_its_locale() -> None:
-    files = _catalog_files()
+def test_every_catalog_file_is_rooted_at_its_locale() -> None:
+    files = catalog_files()
     assert files, "locales 目录下应至少有一组文案"
-    for path in files:
-        namespace, locale, extension = path.name.split(".")
-        assert namespace and extension == "yml"
+    for _namespace, locale, path in files:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert list(data) == [locale], f"{path.name} 的顶层键必须是它的语言标签"
 
 
+def test_every_catalog_mirrors_the_source_module_that_owns_it() -> None:
+    assert LOCALES_DIR.is_dir()
+    for namespace, _locale, path in catalog_files():
+        module = ROOT.joinpath("src", *namespace.split("."))
+        assert module.with_name(f"{module.name}.py").is_file() or (module / "__init__.py").is_file(), (
+            f"{path.relative_to(LOCALES_DIR).as_posix()} 没有对应的源码模块 src/{'/'.join(namespace.split('.'))}.py"
+        )
+
+
 def test_required_locales_define_the_same_keys_with_the_same_placeholders() -> None:
-    namespaces = sorted({path.name.split(".")[0] for path in _catalog_files()})
+    namespaces = sorted({namespace for namespace, _locale, _path in catalog_files()})
     for namespace in namespaces:
         tables = {locale: _namespace_entries(namespace, locale) for locale in REQUIRED_LOCALES}
         reference = tables[REQUIRED_LOCALES[0]]
@@ -77,7 +82,7 @@ def test_required_locales_define_the_same_keys_with_the_same_placeholders() -> N
 def test_every_registered_error_code_has_a_message() -> None:
     for locale in REQUIRED_LOCALES:
         keys = catalog_keys(locale)
-        missing = sorted(code for code in set(ERROR_CODE_MAP.values()) if f"errors.{code}" not in keys)
+        missing = sorted(code for code in set(ERROR_CODE_MAP.values()) if f"webui.errors.{code}" not in keys)
         assert not missing, f"{locale} 缺少错误码文案：{missing}"
 
 
@@ -92,42 +97,43 @@ def test_the_library_is_a_declared_and_hash_pinned_runtime_dependency() -> None:
 
 def test_default_language_keeps_the_original_chinese() -> None:
     assert request_language() == ""
-    assert t("errors.game_not_found") == "游戏不存在"
-    assert t("errors.game_not_found", "zh-CN") == "游戏不存在"
+    assert t("webui.errors.game_not_found") == "游戏不存在"
+    assert t("webui.errors.game_not_found", "zh-CN") == "游戏不存在"
 
 
 def test_explicit_language_wins_and_other_locales_fall_back_to_english() -> None:
-    assert t("errors.game_not_found", "en") == "Game not found"
+    assert t("webui.errors.game_not_found", "en") == "Game not found"
     # 社区语言尚未提供译文时回退英文，而不是中文。
-    assert t("errors.game_not_found", "ja") == "Game not found"
-    assert t("errors.game_not_found", "de") == "Game not found"
+    assert t("webui.errors.game_not_found", "ja") == "Game not found"
+    assert t("webui.errors.game_not_found", "de") == "Game not found"
 
 
 def test_missing_key_is_returned_verbatim() -> None:
-    assert t("errors.__no_such_key__", "en") == "errors.__no_such_key__"
-    assert not messages.has("errors.__no_such_key__", "en")
+    assert t("webui.errors.__no_such_key__", "en") == "webui.errors.__no_such_key__"
+    assert not messages.has("webui.errors.__no_such_key__", "en")
 
 
 def test_placeholders_and_plurals_are_rendered(tmp_path, monkeypatch) -> None:
-    (tmp_path / "demo.zh-CN.yml").write_text(
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "demo.zh-CN.yml").write_text(
         'zh-CN:\n  gold_short: "金币不足（需要 %{price}）"\n  items:\n    one: "%{count} 件物品"\n    many: "%{count} 件物品"\n',
         encoding="utf-8",
     )
-    (tmp_path / "demo.en.yml").write_text(
+    (tmp_path / "pkg" / "demo.en.yml").write_text(
         'en:\n  gold_short: "Not enough gold (%{price} needed)"\n  items:\n    one: "%{count} item"\n    many: "%{count} items"\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(messages, "LOCALES_DIR", tmp_path)
     messages.reload()
     try:
-        assert t("demo.gold_short", "zh-CN", price=30) == "金币不足（需要 30）"
-        assert t("demo.gold_short", "en", price=30) == "Not enough gold (30 needed)"
-        assert t("demo.items", "en", count=1) == "1 item"
-        assert t("demo.items", "en", count=3) == "3 items"
+        assert t("pkg.demo.gold_short", "zh-CN", price=30) == "金币不足（需要 30）"
+        assert t("pkg.demo.gold_short", "en", price=30) == "Not enough gold (30 needed)"
+        assert t("pkg.demo.items", "en", count=1) == "1 item"
+        assert t("pkg.demo.items", "en", count=3) == "3 items"
     finally:
         monkeypatch.undo()
         messages.reload()
-    assert t("errors.game_not_found", "en") == "Game not found"
+    assert t("webui.errors.game_not_found", "en") == "Game not found"
 
 
 # ---------------------------------------------------------------- 请求语言
@@ -166,8 +172,8 @@ def test_request_language_is_scoped_to_its_context() -> None:
     token = set_request_language("en-GB")
     try:
         assert request_language() == "en"
-        assert t("errors.gm_only") == "GM only"
-        assert t("errors.gm_only", "zh-CN") != "GM only"
+        assert t("webui.errors.gm_only") == "GM only"
+        assert t("webui.errors.gm_only", "zh-CN") != "GM only"
     finally:
         reset_request_language(token)
     assert request_language() == ""
@@ -178,7 +184,7 @@ def test_concurrent_requests_do_not_share_a_language() -> None:
         token = set_request_language(language)
         try:
             await asyncio.sleep(0)
-            return t("errors.game_not_found")
+            return t("webui.errors.game_not_found")
         finally:
             reset_request_language(token)
 
