@@ -1,0 +1,13 @@
+# src/webui/services/storytelling.py 返回给请求方的提示。
+"en":
+  busy_retry_later: "Generation or rewriting is in progress; try again later"
+  different_public_identities: "Different public identities cannot be merged"
+  merge_temporary_only: "Only a temporary character can be merged into another character who has already appeared"
+  mode_invalid: "The story mode must be prose or dialogue"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  round_generating: "A round is being generated; the story mode cannot be switched right now"
+  settings_save_failed: "Saving the story mode settings failed"
+  settings_version_unsupported: "The story mode settings version is not supported by the current runtime"
+  speaker_id_invalid: "Invalid speaker ID"
+  speaker_missing: "This speaker does not exist in the current story"
+  speakers_changed: "The list of characters changed; refresh and try again"

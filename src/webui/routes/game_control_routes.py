@@ -17,6 +17,7 @@ from src.engine.module_state import ModuleStateError
 from src.webui.services import room_password as room_password_svc
 from src.webui.services._common import is_game_gm
 from src.webui.viewer import viewer_for
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -27,12 +28,12 @@ async def api_claim_gm_session(request: web.Request) -> web.Response:
     inst = api.get_game_instance(request.match_info["game_key"])
     if not inst or not inst.gm_uid:
         return web.json_response(
-            {"ok": False, "error": "存档没有可恢复的房主身份"}, status=404
+            {"ok": False, "error": t("routes_game_control_routes.no_recoverable_host")}, status=404
         )
     token = request.get("session_token", "")
     manager = request.app.get("session_manager")
     if not token or not manager:
-        return web.json_response({"ok": False, "error": "浏览器会话不可用"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_game_control_routes.browser_session_unavailable")}, status=400)
     manager.rebind(token, inst.gm_uid)
     return web.json_response({"ok": True, "user_id": inst.gm_uid})
 
@@ -149,7 +150,7 @@ async def api_set_gm_style(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict):
         return web.json_response(
-            {"ok": False, "error": "GM 叙事风格设置无效"}, status=400,
+            {"ok": False, "error": t("routes_game_control_routes.gm_style_invalid")}, status=400,
         )
     result = await api.set_gm_style(gk, body.get("gm_style"))
     return web.json_response(result, status=200 if result.get("ok") else 400)

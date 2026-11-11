@@ -1,0 +1,10 @@
+# src/webui/routes/game_package_routes.py 返回给请求方的提示。
+"en":
+  batch_limit: "At most 100 per request"
+  body_not_json: "The request body is not valid JSON"
+  delete_gm_only: "Only the GM can delete"
+  game_keys_required: "game_keys must be a non-empty list"
+  import_failed: "Importing the save failed: %{exc}"
+  key_type_invalid: "Invalid key type"
+  multipart_required: "Importing a save requires multipart/form-data"
+  single_save_file_only: "Only one save file can be uploaded"

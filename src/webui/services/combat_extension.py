@@ -34,6 +34,7 @@ from src.engine.combat_scheduler import (
 )
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.modules import combat_extension_state, progression_state
+from src.localization.messages import t
 
 _COMBAT_EXTENSION_SCHEMA = 1
 
@@ -583,13 +584,13 @@ def scheduler_advance(
     config = load_config(rule)
     if config is None or config.scheduler is None:
         return {"ok": False, "code": "COMBAT_EXTENSION_NOT_CONFIGURED",
-                "error": "当前规则未声明战斗扩展调度器"}
+                "error": t("combat_extension.no_combat_scheduler")}
     if not _extension_schema_supported(instance):
         return {"ok": False, "code": "COMBAT_STATE_UNSUPPORTED",
-                "error": "战斗扩展存档版本不受当前服务支持，请先迁移或重置战斗状态"}
+                "error": t("combat_extension.state_version_unsupported")}
     if instance.state != GameState.ACTIVE_ACTION:
         return {"ok": False, "code": "ROUND_NOT_ACCEPTING_ACTIONS",
-                "error": "当前不在玩家行动阶段"}
+                "error": t("combat_extension.not_player_action_phase")}
     try:
         state, scheduler_state = _ensure_state(instance, config)
         scheduler = scheduler_from_config(config.scheduler)
@@ -758,36 +759,36 @@ def resolve_combat_action(
     """服务端结算一次战斗动作 intent；成功后写回状态并按需存档。"""
 
     if not isinstance(intent, Mapping):
-        return {"ok": False, "code": "INVALID_INTENT", "error": "动作 intent 必须是对象"}
+        return {"ok": False, "code": "INVALID_INTENT", "error": t("combat_extension.intent_not_object")}
     raw_intent_id = intent.get("intent_id")
     intent_id = raw_intent_id.strip() if isinstance(raw_intent_id, str) else ""
     if not intent_id or len(intent_id) > 160:
-        return {"ok": False, "code": "INVALID_INTENT_ID", "error": "动作 intent 必须提供有效的 intent_id"}
+        return {"ok": False, "code": "INVALID_INTENT_ID", "error": t("combat_extension.intent_id_required")}
 
     raw_action_id = intent.get("action_id")
     action_id = raw_action_id.strip() if isinstance(raw_action_id, str) else ""
     if not action_id:
-        return {"ok": False, "code": "INVALID_ACTION_ID", "error": "动作必须提供有效的 action_id"}
+        return {"ok": False, "code": "INVALID_ACTION_ID", "error": t("combat_extension.action_id_required")}
     raw_actor = intent.get("actor_id")
     if raw_actor is None:
         requested_actor = f"player:{actor_uid}"
     elif isinstance(raw_actor, str) and raw_actor.strip():
         requested_actor = raw_actor.strip()
     else:
-        return {"ok": False, "code": "INVALID_ACTOR_ID", "error": "actor_id 必须是非空字符串"}
+        return {"ok": False, "code": "INVALID_ACTOR_ID", "error": t("combat_extension.actor_id_required")}
     raw_targets = intent.get("target_ids")
     if raw_targets is None:
         target_ids_for_fingerprint: tuple[str, ...] = ()
     elif not isinstance(raw_targets, list):
-        return {"ok": False, "code": "INVALID_TARGETS", "error": "target_ids 必须是字符串列表"}
+        return {"ok": False, "code": "INVALID_TARGETS", "error": t("combat_extension.target_ids_not_string_list")}
     elif len(raw_targets) > 1:
         # The phase-2 contract has no server-declared area-target policy.
         # Accepting an arbitrary list would let one paid action apply its
         # effect repeatedly, so multi-target actions must be introduced with
         # an explicit ruleset capability first.
-        return {"ok": False, "code": "INVALID_TARGETS", "error": "当前动作只支持一个目标"}
+        return {"ok": False, "code": "INVALID_TARGETS", "error": t("combat_extension.single_target_only")}
     elif any(not isinstance(item, str) or not item.strip() for item in raw_targets):
-        return {"ok": False, "code": "INVALID_TARGETS", "error": "target_ids 必须是非空字符串列表"}
+        return {"ok": False, "code": "INVALID_TARGETS", "error": t("combat_extension.target_ids_empty")}
     else:
         target_ids_for_fingerprint = tuple(item.strip() for item in raw_targets)
     fingerprint = _intent_fingerprint(
@@ -805,23 +806,23 @@ def resolve_combat_action(
     config = load_config(rule)
     if config is None:
         return {"ok": False, "code": "COMBAT_EXTENSION_NOT_CONFIGURED",
-                "error": "当前规则未声明战斗扩展"}
+                "error": t("combat_extension.no_combat_extension")}
     if not _extension_schema_supported(instance):
         return {"ok": False, "code": "COMBAT_STATE_UNSUPPORTED",
-                "error": "战斗扩展存档版本不受当前服务支持，请先迁移或重置战斗状态"}
+                "error": t("combat_extension.state_version_unsupported")}
     decl = config.action(action_id)
     if decl is None:
-        return {"ok": False, "code": "ACTION_NOT_FOUND", "error": "未知战斗动作"}
+        return {"ok": False, "code": "ACTION_NOT_FOUND", "error": t("combat_extension.unknown_action")}
 
     is_gm_entity = requested_actor.startswith(("npc:", "enemy:"))
     if not viewer_is_gm and requested_actor != f"player:{actor_uid}":
         return {"ok": False, "code": "ACTOR_FORBIDDEN",
-                "error": "只能驱动自己的战斗实体"}
+                "error": t("combat_extension.own_entity_only")}
     if is_gm_entity and not viewer_is_gm:
-        return {"ok": False, "code": "ACTOR_FORBIDDEN", "error": "仅 GM 可驱动该实体"}
+        return {"ok": False, "code": "ACTOR_FORBIDDEN", "error": t("combat_extension.entity_gm_only")}
     if instance.state != GameState.ACTIVE_ACTION:
         return {"ok": False, "code": "ROUND_NOT_ACCEPTING_ACTIONS",
-                "error": "当前不在玩家行动阶段"}
+                "error": t("combat_extension.not_player_action_phase")}
 
     target_ids = target_ids_for_fingerprint
 
@@ -849,7 +850,7 @@ def resolve_combat_action(
         return {
             "ok": False,
             "code": "SCHEDULER_STATE_INVALID",
-            "error": "战斗调度器状态损坏，请由 GM 重新初始化行动条",
+            "error": t("combat_extension.scheduler_state_corrupted"),
         }
     if requested_actor not in state.entities:
         # NPC 行动者按需播种（GM 驱动 NPC 的入口）。
@@ -860,7 +861,7 @@ def resolve_combat_action(
                 requested_actor: _seed_pools(instance, config, requested_actor),
             })
         else:
-            return {"ok": False, "code": "ACTOR_NOT_FOUND", "error": "战斗实体不存在"}
+            return {"ok": False, "code": "ACTOR_NOT_FOUND", "error": t("combat_extension.entity_missing")}
     for target_id in target_ids or (requested_actor,):
         if target_id in state.entities:
             continue
@@ -878,7 +879,7 @@ def resolve_combat_action(
             })
             continue
         return {"ok": False, "code": "TARGET_NOT_FOUND",
-                "error": f"战斗目标不存在: {target_id}"}
+                "error": t("combat_extension.target_missing", target_id=target_id)}
 
     scheduler_instance = (
         scheduler_from_config(config.scheduler)
@@ -897,7 +898,7 @@ def resolve_combat_action(
             _scheduler_combat_state(instance, config, state.buffs, state),
         ):
             return {"ok": False, "code": "SCHEDULER_NOT_READY",
-                    "error": "该实体尚未就绪（ATB 行动条未满），请等待 GM 推进时间"}
+                    "error": t("combat_extension.entity_not_ready")}
 
     actor_pool = state.entities.get(requested_actor, {}).get(config.hp_resource)
     if (
@@ -907,7 +908,7 @@ def resolve_combat_action(
         and _player_is_dead(instance, requested_actor.removeprefix("player:"))
     ):
         return {"ok": False, "code": "ACTOR_DEFEATED",
-                "error": "该实体已无法行动"}
+                "error": t("combat_extension.entity_cannot_act")}
     staged_records: dict[str, dict[str, Any]] = {}
     if decl.consume_item is not None:
         if requested_actor.startswith("player:"):
@@ -921,7 +922,7 @@ def resolve_combat_action(
         inventory = record.get("inventory")
         if not isinstance(inventory, list):
             return {"ok": False, "code": "ITEM_MISSING",
-                    "error": f"缺少物品: {decl.consume_item.item} x{decl.consume_item.qty}"}
+                    "error": t("combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty)}
         remaining = decl.consume_item.qty
         kept: list[Any] = []
         for row in inventory:
@@ -941,7 +942,7 @@ def resolve_combat_action(
             kept.append(row)
         if remaining > 0:
             return {"ok": False, "code": "ITEM_MISSING",
-                    "error": f"缺少物品: {decl.consume_item.item} x{decl.consume_item.qty}"}
+                    "error": t("combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty)}
         record["inventory"] = kept
         staged_records[requested_actor] = record
 
@@ -1098,9 +1099,9 @@ def _replay_intent(
     raw = records.get(intent_id)
     if not isinstance(raw, Mapping):
         return {"ok": False, "code": "INTENT_RECORD_INVALID",
-                "error": "已保存的动作幂等记录损坏，请更换 intent_id"}
+                "error": t("combat_extension.idempotency_record_corrupted")}
     if raw.get("fingerprint") != fingerprint:
-        return {"ok": False, "code": "INTENT_ID_CONFLICT", "error": "intent_id 已用于另一条动作"}
+        return {"ok": False, "code": "INTENT_ID_CONFLICT", "error": t("combat_extension.intent_id_reused")}
     result = raw.get("result")
     action = result.get("action") if isinstance(result, Mapping) else None
     events = result.get("events") if isinstance(result, Mapping) else None
@@ -1115,7 +1116,7 @@ def _replay_intent(
         or any(not isinstance(event, Mapping) for event in events)
     ):
         return {"ok": False, "code": "INTENT_RECORD_INVALID",
-                "error": "已保存的动作幂等记录损坏，请更换 intent_id"}
+                "error": t("combat_extension.idempotency_record_corrupted")}
     replay = deepcopy(dict(result))
     replay["replayed"] = True
     return replay

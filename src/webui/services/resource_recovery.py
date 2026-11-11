@@ -15,6 +15,7 @@ from src.engine.world.memory_projection import queue_world_memory
 from src.engine.world_state import clock_to_minutes, world_clock
 from src.rulesets.resource_recovery import managed_resources, policy, requirements, reward_delta, skill_value
 from src.webui.services.recovery_projection import blockers, eligibility, intermissions, project, public_receipt
+from src.localization.messages import t
 
 logger = logging.getLogger('trpg')
 COMMON = {'run_id', 'operation_id', 'expected_revision'}
@@ -78,16 +79,16 @@ class RecoveryService:
             # Gate schema validation may itself fail; keep it inside this guard.
             async with instance.authoritative_write() as entered, instance._lock:
                 if self.deps.get_instance(key) is not instance or body['run_id'] != instance.run_id:
-                    raise RecoveryError('STALE_RUN', '对局已改变，请刷新 / Run changed; refresh first')
+                    raise RecoveryError('STALE_RUN', t("resource_recovery.run_changed_refresh"))
                 if not entered:
-                    raise RecoveryError('READ_ONLY', '对局当前不可修改 / Run is read-only')
+                    raise RecoveryError('READ_ONLY', t("resource_recovery.run_read_only"))
                 if viewer.is_seat and viewer.uid not in instance.players:
                     raise RecoveryError('MEMBER_REQUIRED', 'Game membership required')
                 recovery.require_writable(instance)
                 rule = self.deps.load_rule(instance)
                 selected = policy(rule)
                 if selected is None or not managed_resources(rule):
-                    raise RecoveryError('UNSUPPORTED_RULE', '此规则包未启用恢复策略 / No recovery policy declared')
+                    raise RecoveryError('UNSUPPORTED_RULE', t("resource_recovery.no_recovery_policy"))
                 operation = body['operation_id']
                 fingerprint = {name: deepcopy(value) for name, value in body.items() if name != 'expected_revision'}
                 previous = recovery.command(instance, operation)
@@ -97,7 +98,7 @@ class RecoveryService:
                         raise RecoveryError('OPERATION_ID_REUSED', 'Operation ID already used with another command')
                     return self._result(key, viewer, previous, duplicate=True)
                 if body['expected_revision'] != recovery.view(instance)['revision']:
-                    raise RecoveryError('STALE_REVISION', '恢复记录已更新，请刷新 / Recovery changed; refresh first')
+                    raise RecoveryError('STALE_REVISION', t("resource_recovery.recovery_changed_refresh"))
                 problems = blockers(instance)
                 if problems:
                     raise RecoveryError('RECOVERY_BLOCKED', '; '.join(problems))
@@ -112,7 +113,7 @@ class RecoveryService:
                     transaction.rollback(instance)
                     if isinstance(exc, Exception):
                         logger.exception('Recovery persistence failed: %s', action)
-                        raise RecoveryError('SAVE_FAILED', '保存失败，原状态已保留 / Save failed; original state retained') from exc
+                        raise RecoveryError('SAVE_FAILED', t("resource_recovery.save_failed_state_retained")) from exc
                     raise
                 return self._result(key, viewer, record, duplicate=False)
         except asyncio.CancelledError:
@@ -123,7 +124,7 @@ class RecoveryService:
             return _error('RECOVERY_REJECTED', str(exc))
         except Exception:
             logger.exception('Recovery transaction failed: %s', action)
-            return _error('SAVE_FAILED', '保存失败，原状态已保留 / Save failed; original state retained')
+            return _error('SAVE_FAILED', t("resource_recovery.save_failed_state_retained"))
 
     @staticmethod
     def _validate_body(action: str, body: Any) -> None:
@@ -152,7 +153,7 @@ class RecoveryService:
         if action == 'request':
             uid = body.get('actor_uid', viewer.uid)
             if not viewer.is_gm and uid != viewer.uid:
-                raise RecoveryError('NOT_SOURCE_OWNER', '只能为自己的角色申请 / Request for your own character')
+                raise RecoveryError('NOT_SOURCE_OWNER', t("resource_recovery.request_own_character_only"))
             uid = self._require_actor(instance, uid)
             kind = body.get('kind')
             if not isinstance(kind, str) or kind not in {'overnight', 'therapy'}:
@@ -216,7 +217,7 @@ class RecoveryService:
         if source is None or source['run_id'] != instance.run_id:
             raise ValueError('Recovery source is missing or belongs to another run')
         if not viewer.is_gm and source['actor_uid'] != viewer.uid:
-            raise RecoveryError('NOT_SOURCE_OWNER', '只能领取自己的恢复 / Claim your own recovery')
+            raise RecoveryError('NOT_SOURCE_OWNER', t("resource_recovery.claim_own_recovery_only"))
         if action == 'reject':
             if source['status'] != 'pending':
                 raise ValueError('Only pending requests can be rejected')

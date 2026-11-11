@@ -8,6 +8,7 @@ from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.webui.access_control import SEAT_TOKEN_HEADER
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 def _viewer_is_gm(request: web.Request) -> bool:
@@ -100,10 +101,10 @@ async def api_module_usages(request: web.Request) -> web.Response:
 async def api_module_import_preview(request: web.Request) -> web.Response:
     if request.content_type != "multipart/form-data":
         return web.json_response(
-            {"ok": False, "error": "模组预览需要 multipart/form-data"}, status=400,
+            {"ok": False, "error": t("routes_modules.preview_multipart_required")}, status=400,
         )
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024:
-        return web.json_response({"ok": False, "error": "模组包不能超过 20 MB"}, status=413)
+        return web.json_response({"ok": False, "error": t("routes_modules.package_too_large")}, status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -117,13 +118,13 @@ async def api_module_import_preview(request: web.Request) -> web.Response:
             while chunk := await part.read_chunk():
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok": False, "error": "模组包不能超过 20 MB"}, status=413)
+                    return web.json_response({"ok": False, "error": t("routes_modules.package_too_large")}, status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok": False, "error": "缺少 .dfplugin 模组文件"}, status=400)
+            return web.json_response({"ok": False, "error": t("routes_modules.dfplugin_file_missing")}, status=400)
         if not filename.lower().endswith(".dfplugin"):
-            return web.json_response({"ok": False, "error": "本地预览只接受 .dfplugin 文件"}, status=400)
+            return web.json_response({"ok": False, "error": t("routes_modules.preview_dfplugin_only")}, status=400)
         result = _get_api(request).preview_module_import(payload)
     except ValueError as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -136,10 +137,10 @@ async def api_module_import(request: web.Request) -> web.Response:
         return denied
     if request.content_type != "multipart/form-data":
         return web.json_response(
-            {"ok": False, "error": "模组安装需要 multipart/form-data"}, status=400,
+            {"ok": False, "error": t("routes_modules.install_multipart_required")}, status=400,
         )
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024:
-        return web.json_response({"ok": False, "error": "模组包不能超过 20 MB"}, status=413)
+        return web.json_response({"ok": False, "error": t("routes_modules.package_too_large")}, status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -157,13 +158,13 @@ async def api_module_import(request: web.Request) -> web.Response:
             while chunk := await part.read_chunk():
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok": False, "error": "模组包不能超过 20 MB"}, status=413)
+                    return web.json_response({"ok": False, "error": t("routes_modules.package_too_large")}, status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok": False, "error": "缺少 .dfplugin 模组文件"}, status=400)
+            return web.json_response({"ok": False, "error": t("routes_modules.dfplugin_file_missing")}, status=400)
         if not filename.lower().endswith(".dfplugin"):
-            return web.json_response({"ok": False, "error": "本地安装只接受 .dfplugin 文件"}, status=400)
+            return web.json_response({"ok": False, "error": t("routes_modules.install_dfplugin_only")}, status=400)
         result = await _get_api(request).import_module(payload, overwrite)
     except ValueError as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -175,10 +176,10 @@ async def api_external_module_preview(request: web.Request) -> web.Response:
 
     if request.content_type != "multipart/form-data":
         return web.json_response(
-            {"ok": False, "error": "外部模组预览需要 multipart/form-data"}, status=400,
+            {"ok": False, "error": t("routes_modules.external_preview_multipart_required")}, status=400,
         )
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES:
-        return web.json_response({"ok": False, "error": "外部模组不能超过 20 MB"}, status=413)
+        return web.json_response({"ok": False, "error": t("routes_modules.external_module_too_large")}, status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -192,11 +193,11 @@ async def api_external_module_preview(request: web.Request) -> web.Response:
             while chunk := await part.read_chunk():
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok": False, "error": "外部模组不能超过 20 MB"}, status=413)
+                    return web.json_response({"ok": False, "error": t("routes_modules.external_module_too_large")}, status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok": False, "error": "缺少外部模组元数据文件"}, status=400)
+            return web.json_response({"ok": False, "error": t("routes_modules.external_metadata_missing")}, status=400)
         result = _get_api(request).preview_external_module_import(payload, filename)
     except ValueError as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -210,7 +211,7 @@ async def api_module_marketplace_install(request: web.Request) -> web.Response:
     try:
         body = await request.json()
         if not isinstance(body, dict):
-            raise ValueError("请求体必须是 JSON 对象")
+            raise ValueError(t("routes_modules.body_must_be_json_object"))
         result = await _get_api(request).install_marketplace_module(
             request.match_info["module_id"], bool(body.get("overwrite")),
         )

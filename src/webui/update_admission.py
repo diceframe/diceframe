@@ -7,6 +7,7 @@ import os
 from aiohttp import web
 
 from src.docker_launcher.data_versions import activation_pending
+from src.localization.messages import t
 
 
 @web.middleware
@@ -14,7 +15,7 @@ async def update_admission(request: web.Request, handler):
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         if request.path not in {"/api/login"} and activation_pending(os.environ):
             return web.json_response(
-                {"ok": False, "error": "更新仍在验证，请稍后重试。 / Update validation is in progress; retry shortly.",
+                {"ok": False, "error": t("webui_update_admission.update_validating"),
                  "error_code": "UPDATE_VALIDATING"},
                 status=503, headers={"Retry-After": "2"},
             )

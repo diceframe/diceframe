@@ -1,0 +1,9 @@
+# src/webui/routes/assistant.py 返回给请求方的提示。
+"zh-CN":
+  body_must_be_json_object: "请求体必须是 JSON 对象"
+  history_too_long: "对话历史过长"
+  last_message_must_be_user: "最后一条消息必须是非空用户消息"
+  message_content_invalid: "消息内容无效或过长"
+  message_role_invalid: "消息角色无效"
+  messages_count: "messages 必须包含 1 到 20 条消息"
+  unauthorized: "未授权"

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
+from src.localization.messages import t
 
 FIELD_REQUIRES_GM = "FIELD_REQUIRES_GM"
 # Adopting a library card replaces the whole sheet (stats, gold, equipment).
@@ -148,7 +149,7 @@ def adopt_requires_gm_failure() -> dict[str, Any]:
     return {
         "ok": False,
         "error_code": ADOPT_REQUIRES_GM,
-        "error": "角色行动后只能由 GM 为其套用卡片",
+        "error": t("webui_character_sheet_authority.adopt_requires_gm"),
     }
 
 
@@ -156,5 +157,5 @@ def delete_requires_gm_failure() -> dict[str, Any]:
     return {
         "ok": False,
         "error_code": DELETE_REQUIRES_GM,
-        "error": "角色行动后只能由 GM 删除",
+        "error": t("webui_character_sheet_authority.delete_requires_gm"),
     }

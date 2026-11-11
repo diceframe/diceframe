@@ -1,0 +1,15 @@
+# src/webui/access_control.py 返回给请求方的提示。
+"zh-CN":
+  access_password_changed: "访问密码已更改，请重新登录"
+  bot_binding_read_only: "该对局的 Bot 绑定仅允许读取和只读提问"
+  bot_permission_surface_invalid: "该对局的 Bot 权限面无效，已拒绝请求"
+  bot_token_rotated: "Bot API Token 已更换，请更新 Bot 配置"
+  bot_unauthorized: "Bot 服务未授权"
+  device_pairing_revoked: "此设备的配对已被吊销，请重新登录"
+  gm_seat_requires_host_login: "GM 席位需要房主登录"
+  play_mode_no_bot: "该玩法模式不支持 Bot 操作"
+  plugin_token_revoked: "插件 API Token 已失效或插件已停用"
+  seat_credential_invalid: "席位凭证无效或已失效，请向 GM 重新获取链接"
+  seat_credential_required: "需要席位凭证，请使用 GM 发出的链接重新加入"
+  sse_ticket_invalid: "SSE 票据无效或已过期"
+  unauthorized: "未授权"

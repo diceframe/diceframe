@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from src.bots.bridge_core.card_renderer import BRAND_FOOTER, render_card_png
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -41,15 +42,15 @@ async def apply(
 ) -> dict[str, Any]:
     stage = str(stage or "").strip()
     if stage not in BRIDGE_EXTENSION_STAGES:
-        return {"ok": False, "error": f"不支持的 Bot Bridge 扩展阶段：{stage}"}
+        return {"ok": False, "error": t("bot_extensions.unsupported_stage", stage=stage)}
     if not isinstance(payload, dict):
-        return {"ok": False, "error": "payload 必须是对象"}
+        return {"ok": False, "error": t("bot_extensions.payload_not_object")}
     try:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     except (TypeError, ValueError):
-        return {"ok": False, "error": "payload 不是有效 JSON"}
+        return {"ok": False, "error": t("bot_extensions.payload_not_json")}
     if len(encoded) > MAX_BRIDGE_PAYLOAD_BYTES:
-        return {"ok": False, "error": "Bot Bridge 扩展 payload 不能超过 192 KB"}
+        return {"ok": False, "error": t("bot_extensions.payload_too_large")}
     host = dependencies.plugin_host
     if not host:
         return {
@@ -117,13 +118,13 @@ def _materialize_cards(
 def bridge_card_path(dependencies: BotExtensionDependencies, name: str) -> Path:
     """解析卡片渲染输出文件路径；非法或不存在时抛异常。"""
     if not _BRIDGE_CARD_NAME_RE.match(str(name or "")):
-        raise ValueError("卡片文件名非法")
+        raise ValueError(t("bot_extensions.card_file_name_invalid"))
     root = bridge_card_dir(dependencies)
     target = (root / str(name)).resolve()
     if root not in target.parents:
-        raise ValueError("卡片文件路径非法")
+        raise ValueError(t("bot_extensions.card_file_path_invalid"))
     if not target.is_file():
-        raise KeyError("卡片文件不存在")
+        raise KeyError(t("bot_extensions.card_file_missing"))
     return target
 
 

@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from src.webui.routes._common import _require_confirmed_request
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -53,7 +54,7 @@ async def api_security_transport_prepare(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_security.body_must_be_json_object")}, status=400)
     result = await _get_service(request).prepare(
         str(body.get("mode") or ""), body.get("acme")
     )
@@ -72,7 +73,7 @@ async def api_security_transport_activate(request: web.Request) -> web.Response:
         return denied
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "请求体必须是 JSON 对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_security.body_must_be_json_object")}, status=400)
     result = _get_service(request).activate(str(body.get("token") or ""))
     if not result.get("ok"):
         return web.json_response(result, status=400)

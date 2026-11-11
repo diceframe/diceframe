@@ -1,0 +1,3 @@
+# src/webui/services/asr.py 返回给请求方的提示。
+"en":
+  identity_not_in_game: "Your current identity is not part of this game"

@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import media, room_access, run_finale
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -118,7 +119,7 @@ class GamePackageService:
                 return {"ok": False, "error_code": "UNSUPPORTED_MEDIA_SCHEMA", "error": str(exc), "status": 400}
             except Exception:
                 logger.exception("读取存档失败: %s", state_path)
-                return {"ok": False, "error": "读取失败，请查看服务器日志", "status": 500}
+                return {"ok": False, "error": t("game_packages.read_failed_see_logs"), "status": 500}
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = re.sub(r"[^\w一-鿿-]+", "_", instance.world_name or "save").strip("_") or "save"

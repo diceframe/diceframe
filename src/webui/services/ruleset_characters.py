@@ -17,6 +17,7 @@ from src.webui.character_card_projection import dedupe_cards
 from src.engine import module_hooks
 from src.webui.character_contracts import MAX_BIO_CHARS
 from src.webui.character_sheet_authority import adopt_requires_gm_failure
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -146,7 +147,7 @@ def normalize_character_card_blueprint(
 
     if not isinstance(character, dict):
         raise RulesetCharacterOperationError(
-            "INVALID_RULESET_CHARACTER", "角色卡必须是对象",
+            "INVALID_RULESET_CHARACTER", t("ruleset_characters.card_not_object"),
         )
     runtime = runtime_for_card(dependencies, character)
     if runtime is None or not _is_rules_aware(runtime):
@@ -157,18 +158,18 @@ def normalize_character_card_blueprint(
     if not isinstance(canonical, dict) or not isinstance(binding, dict):
         raise RulesetCharacterOperationError(
             "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED",
-            "专业角色卡缺少可重建的权威规则数据，请使用当前规则的专业建卡器完成后再保存。",
+            t("ruleset_characters.card_missing_authoritative_data"),
         )
     rule_id = str(binding.get("rule_id") or character.get("rule_id") or "").strip()
     if not rule_id:
         raise RulesetCharacterOperationError(
-            "RULESET_NOT_FOUND", "专业角色卡没有可用的规则标识",
+            "RULESET_NOT_FOUND", t("ruleset_characters.card_without_rule_id"),
         )
     locale = str(canonical.get("locale") or character.get("language") or "")
     rule = dependencies.load_rule_by_id(rule_id, locale)
     if rule is None:
         raise RulesetCharacterOperationError(
-            "RULESET_NOT_FOUND", f"找不到专业角色卡使用的规则: {rule_id}",
+            "RULESET_NOT_FOUND", t("ruleset_characters.card_rule_missing", rule_id=rule_id),
         )
     try:
         selected_runtime = dependencies.ruleset_registry.resolve(rule.template)
@@ -178,7 +179,7 @@ def normalize_character_card_blueprint(
         ) from exc
     if selected_runtime.runtime_id != runtime.runtime_id:
         raise RulesetCharacterOperationError(
-            "INCOMPATIBLE_RULESET_CHARACTER", "角色卡规则与运行时绑定不一致",
+            "INCOMPATIBLE_RULESET_CHARACTER", t("ruleset_characters.card_runtime_binding_mismatch"),
         )
     try:
         normalized = runtime.normalize_character_submission(
@@ -187,7 +188,7 @@ def normalize_character_card_blueprint(
     except (TypeError, ValueError) as exc:
         code = str(getattr(exc, "error_code", "") or "")
         raise RulesetCharacterOperationError(
-            code or "INVALID_RULESET_CHARACTER", f"专业角色卡未通过规则校验: {exc}",
+            code or "INVALID_RULESET_CHARACTER", t("ruleset_characters.card_failed_validation", exc=exc),
         ) from exc
 
     profile_patch: dict[str, Any] = {}
@@ -219,23 +220,23 @@ def _validate_profile_patch(
     patch: dict[str, Any],
 ) -> dict[str, Any]:
     if not isinstance(patch, dict):
-        raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", "角色资料必须是对象")
+        raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", t("ruleset_characters.profile_not_object"))
     unknown = sorted(set(patch) - PROFILE_PATCH_FIELDS)
     if unknown:
         raise RulesetCharacterOperationError(
             "MECHANICAL_CHARACTER_FIELD_FORBIDDEN",
-            f"角色资料接口不能修改规则字段: {', '.join(unknown)}",
+            t("ruleset_characters.profile_cannot_change_rule_fields", unknown=', '.join(unknown)),
         )
 
     result: dict[str, Any] = {}
     if "character_name" in patch:
         name = str(patch.get("character_name") or "").strip()
         if not name:
-            raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", "角色名不能为空")
+            raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", t("ruleset_characters.name_empty"))
         if len(name) > MAX_CHARACTER_NAME_CHARS:
             raise RulesetCharacterOperationError(
                 "INVALID_CHARACTER_PROFILE",
-                f"角色名过长（上限 {MAX_CHARACTER_NAME_CHARS} 字）",
+                t("ruleset_characters.name_too_long", max_character_name_chars=MAX_CHARACTER_NAME_CHARS),
             )
         result["character_name"] = name
 
@@ -250,19 +251,19 @@ def _validate_profile_patch(
     if "profile" in patch:
         raw_profile = patch.get("profile")
         if not isinstance(raw_profile, dict):
-            raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", "角色资料字段必须是对象")
+            raise RulesetCharacterOperationError("INVALID_CHARACTER_PROFILE", t("ruleset_characters.profile_fields_not_object"))
         unknown_profile = sorted(set(raw_profile) - PROFILE_FIELDS)
         if unknown_profile:
             raise RulesetCharacterOperationError(
                 "INVALID_CHARACTER_PROFILE",
-                f"不支持的角色资料字段: {', '.join(unknown_profile)}",
+                t("ruleset_characters.unsupported_profile_fields", unknown_profile=', '.join(unknown_profile)),
             )
         profile: dict[str, str] = {}
         total = 0
         for key, value in raw_profile.items():
             if not isinstance(value, str):
                 raise RulesetCharacterOperationError(
-                    "INVALID_CHARACTER_PROFILE", f"角色资料 {key} 必须是文本",
+                    "INVALID_CHARACTER_PROFILE", t("ruleset_characters.profile_field_not_text", field=key),
                 )
             text = value.strip()
             total += len(text)
@@ -270,7 +271,7 @@ def _validate_profile_patch(
         if total > MAX_BIO_CHARS:
             raise RulesetCharacterOperationError(
                 "INVALID_CHARACTER_PROFILE",
-                f"角色资料过长（合计上限 {MAX_BIO_CHARS} 字）",
+                t("ruleset_characters.profile_too_long", max_bio_chars=MAX_BIO_CHARS),
             )
         result["profile"] = profile
     return result
@@ -287,13 +288,13 @@ def _apply_profile(
     if not isinstance(canonical, dict):
         raise RulesetCharacterOperationError(
             "PROFESSIONAL_CHARACTER_BLUEPRINT_REQUIRED",
-            "专业角色缺少权威规则数据，请使用当前规则的专业建卡器完成后再保存。",
+            t("ruleset_characters.character_missing_authoritative_data"),
         )
     canonical = deepcopy(canonical)
     binding = canonical.get("rule_binding")
     if not isinstance(binding, dict) or str(binding.get("runtime_id") or "") != runtime.runtime_id:
         raise RulesetCharacterOperationError(
-            "INCOMPATIBLE_RULESET_CHARACTER", "角色规则版本与当前运行时不兼容",
+            "INCOMPATIBLE_RULESET_CHARACTER", t("ruleset_characters.rule_version_incompatible"),
         )
 
     current_identity = canonical.get("identity")
@@ -321,11 +322,11 @@ def _apply_profile(
         projected = runtime.project_legacy_character(canonical)
     except (TypeError, ValueError) as exc:
         raise RulesetCharacterOperationError(
-            "INVALID_RULESET_CHARACTER", f"角色规则数据无法投影: {exc}",
+            "INVALID_RULESET_CHARACTER", t("ruleset_characters.projection_failed", exc=exc),
         ) from exc
     if not isinstance(projected, dict):
         raise RulesetCharacterOperationError(
-            "INVALID_RULESET_CHARACTER", "角色规则投影结果无效",
+            "INVALID_RULESET_CHARACTER", t("ruleset_characters.projection_invalid"),
         )
 
     updated = deepcopy(current)
@@ -353,7 +354,7 @@ async def update_live_character_profile(
         return _failure("CHARACTER_NOT_FOUND", "角色不存在")
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
-            return _failure("REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试")
+            return _failure("REWRITE_IN_PROGRESS", t("ruleset_characters.rewriting_wait_and_retry"))
         return await _update_live_character_profile_authority(
             dependencies, instance, game_key, user_id, patch,
         )
@@ -368,13 +369,13 @@ async def _update_live_character_profile_authority(
 ) -> dict[str, Any]:
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
-        return _failure("RULESET_NOT_FOUND", "当前游戏规则不存在")
+        return _failure("RULESET_NOT_FOUND", t("ruleset_characters.game_rule_missing"))
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
     except (AttributeError, TypeError, ValueError) as exc:
         return _failure("RULESET_RUNTIME_UNAVAILABLE", str(exc))
     if not _is_rules_aware(runtime):
-        return _failure("RULESET_CHARACTER_NOT_SUPPORTED", "当前规则不使用专业角色资料接口")
+        return _failure("RULESET_CHARACTER_NOT_SUPPORTED", t("ruleset_characters.rule_not_professional_profile"))
 
     before_player = deepcopy(instance.players[user_id])
     try:
@@ -413,7 +414,7 @@ async def adopt_character_card(
         return _failure("CHARACTER_NOT_FOUND", "角色不存在")
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
-            return _failure("REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试")
+            return _failure("REWRITE_IN_PROGRESS", t("ruleset_characters.rewriting_wait_and_retry"))
         if not gm_authority and module_hooks.seat_has_acted(instance, user_id):
             return adopt_requires_gm_failure()
         return await _adopt_character_card_authority(
@@ -437,10 +438,10 @@ async def _adopt_character_card_authority(
         None,
     )
     if card is None:
-        return _failure("CHARACTER_NOT_FOUND", f"角色卡不存在: {card_id}")
+        return _failure("CHARACTER_NOT_FOUND", t("ruleset_characters.card_missing", card_id=card_id))
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
-        return _failure("RULESET_NOT_FOUND", "当前游戏规则不存在")
+        return _failure("RULESET_NOT_FOUND", t("ruleset_characters.game_rule_missing"))
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
     except (AttributeError, TypeError, ValueError) as exc:
@@ -451,7 +452,7 @@ async def _adopt_character_card_authority(
         or card_runtime is None
         or card_runtime.runtime_id != runtime.runtime_id
     ):
-        return _failure("INCOMPATIBLE_RULESET_CHARACTER", "角色卡与当前专业规则不兼容")
+        return _failure("INCOMPATIBLE_RULESET_CHARACTER", t("ruleset_characters.card_incompatible_with_ruleset"))
     try:
         normalized = runtime.normalize_character_submission(
             rule, deepcopy(card), str(getattr(instance, "language", "") or ""),
@@ -467,15 +468,15 @@ async def _adopt_character_card_authority(
     if not ruleset_runtime.binding(instance):
         return _failure(
             "RULESET_BINDING_MISSING",
-            "这个存档没有绑定专业规则版本（旧版存档），无法采用专业角色卡，请新建一局游戏。",
+            t("ruleset_characters.save_without_ruleset_version"),
         )
     if not isinstance(binding, dict) or not instance.ruleset_binding_matches(binding):
-        return _failure("INCOMPATIBLE_RULESET_CHARACTER", "角色卡与当前存档规则版本不兼容")
+        return _failure("INCOMPATIBLE_RULESET_CHARACTER", t("ruleset_characters.card_incompatible_with_save_version"))
     if isinstance(card.get("portrait"), dict):
         normalized["portrait"] = deepcopy(card["portrait"])
     name = str(normalized.get("character_name") or card.get("character_name") or "").strip()
     if not name:
-        return _failure("INVALID_CHARACTER_PROFILE", "角色名不能为空")
+        return _failure("INVALID_CHARACTER_PROFILE", t("ruleset_characters.name_empty"))
     before_player = deepcopy(instance.players[user_id])
     instance.set_player_name(user_id, name)
     instance.set_character_sheet(user_id, normalized)
@@ -500,7 +501,7 @@ def update_character_card_profile(
         runtime = runtime_for_card(dependencies, card)
         if runtime is None or not _is_rules_aware(runtime):
             return _failure(
-                "RULESET_CHARACTER_NOT_SUPPORTED", "当前角色卡不使用专业角色资料接口",
+                "RULESET_CHARACTER_NOT_SUPPORTED", t("ruleset_characters.card_not_professional_profile"),
             )
         try:
             updated, _name = _apply_profile(
@@ -513,4 +514,4 @@ def update_character_card_profile(
         cards[index] = updated
         dependencies.write_cards(cards)
         return {"ok": True, "card": deepcopy(updated)}
-    return _failure("CHARACTER_NOT_FOUND", f"角色卡不存在: {card_id}")
+    return _failure("CHARACTER_NOT_FOUND", t("ruleset_characters.card_missing", card_id=card_id))

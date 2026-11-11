@@ -1,0 +1,8 @@
+# src/webui/routes/speech.py 返回给请求方的提示。
+"en":
+  body_must_be_json: "The request body must be JSON"
+  body_must_be_json_object: "The request body must be a JSON object"
+  profile_not_object: "The personal voice must be a JSON object"
+  profiles_admin_only: "Only an administrator can manage personal voices"
+  profiles_not_on_share_page: "Personal voices cannot be managed on the player share page"
+  speed_not_number: "speed must be a number"

@@ -1,0 +1,3 @@
+# src/webui/routes/game_lorebooks.py 返回给请求方的提示。
+"en":
+  host_only: "Only the logged-in host can manage this game's lorebooks"

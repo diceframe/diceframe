@@ -24,6 +24,7 @@ from src.webui.game_lifecycle_context import (
     GameLifecycleDependencies,
 )
 from src.content_modules.projection import entries_for_world
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -41,21 +42,21 @@ def bind_ruleset_runtime(
         return None
     try:
         if not isinstance(runtime, VersionedStateRuntime):
-            raise ValueError("规则运行时未提供版本化状态绑定")
+            raise ValueError(t("game_creation_phases.runtime_no_versioned_binding"))
         binding = runtime.game_binding(rule, language)
         # The instance only validates the binding's shape, so prove it names
         # the runtime that was actually resolved for this rule.
         if str(binding.get("runtime_id") or "") != runtime.runtime_id:
-            raise ValueError("规则运行时绑定身份不一致")
+            raise ValueError(t("game_creation_phases.runtime_binding_identity_mismatch"))
         if not instance.bind_ruleset_runtime(binding):
-            raise ValueError("规则运行时绑定无效或不兼容")
+            raise ValueError(t("game_creation_phases.runtime_binding_invalid"))
     except Exception:
         transaction.rollback()
         logger.exception("创建游戏规则运行时绑定失败，已回滚: %s", transaction.game_key)
         return {
             "ok": False,
             "error_code": "RULESET_BINDING_FAILED",
-            "error": "规则运行时绑定失败，未留下半成品存档。",
+            "error": t("game_creation_phases.runtime_binding_failed"),
         }
     return None
 
@@ -278,7 +279,7 @@ async def create_players(
         return [], {
             "ok": False,
             "error_code": "GM_SEAT_UNCLAIMED",
-            "error": "第一个角色是房主（GM）自己的席位，不能设为「等待认领」，请改为玩家或 AI 托管。",
+            "error": t("game_creation_phases.first_seat_cannot_be_unclaimed"),
         }
     created_players: list[dict[str, Any]] = []
     public_key = _GAME_KEY_SEP.join(transaction.game_key)

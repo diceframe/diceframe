@@ -59,6 +59,7 @@ from src.webui.character_sheet_authority import (
     field_requires_gm_failure,
     player_field_violations,
 )
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -260,13 +261,13 @@ async def create_payment_proposal(
     try:
         amount = int(amount)
     except (TypeError, ValueError):
-        return {"ok": False, "error": "金额必须是整数"}
+        return {"ok": False, "error": t("characters.amount_not_integer")}
     if not 0 < amount <= MAX_ECONOMY_AMOUNT:
-        return {"ok": False, "error": f"金额必须在 1 到 {MAX_ECONOMY_AMOUNT} 之间"}
+        return {"ok": False, "error": t("characters.amount_out_of_range", max_economy_amount=MAX_ECONOMY_AMOUNT)}
     if payer_uid not in inst.players:
-        return {"ok": False, "error": "付款角色不存在"}
+        return {"ok": False, "error": t("characters.payer_missing")}
     if recipient_uid not in inst.players:
-        return {"ok": False, "error": "接收角色不存在"}
+        return {"ok": False, "error": t("characters.payee_missing")}
     normalized_items = [
         str(item).strip()[:120]
         for item in list(items or [])[:8]
@@ -280,14 +281,14 @@ async def create_payment_proposal(
             return {
                 "ok": False,
                 "code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请稍后再发起支付",
+                "error": t("characters.rewriting_wait_before_payment"),
             }
         current = dependencies.games.get_instance(inst.game_key)
         if current is None or current is not inst:
             return {
                 "ok": False,
                 "code": "STALE_RUN",
-                "error": "游戏已重开或重置，请刷新后再发起支付",
+                "error": t("characters.game_reset_refresh_before_payment"),
             }
         if normalized_items:
             try:
@@ -578,7 +579,7 @@ def character_schema(
     """Return rule-driven creation fields without requiring a GameInstance."""
     rule = dependencies.rules.load_rule_by_id(rule_id, language)
     if not rule:
-        return {"ok": False, "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "error": t("characters.rule_missing", rule_id=rule_id)}
     return {
         "ok": True,
         **_character_schema_for_rule(rule),
@@ -786,10 +787,10 @@ async def update_character(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         if dependencies.games.get_instance(inst.game_key) is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            return {"ok": False, "code": "STALE_RUN", "error": t("characters.game_restarted_refresh_and_retry")}
         return await _update_character_authority(
             dependencies, inst, user_id, updates, gm_authority=gm_authority,
         )
@@ -825,7 +826,7 @@ async def adopt_library_card(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         player_side_after_acting = (
             not gm_authority
@@ -834,7 +835,7 @@ async def adopt_library_card(
             and module_hooks.seat_has_acted(instance, user_id)
         )
         if dependencies.games.get_instance(instance.game_key) is not instance:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            return {"ok": False, "code": "STALE_RUN", "error": t("characters.game_restarted_refresh_and_retry")}
         if player_side_after_acting:
             return adopt_requires_gm_failure()
         card = deepcopy(card)
@@ -880,7 +881,7 @@ async def _update_character_authority(
         return {
             "ok": False,
             "error_code": "RULESET_CHARACTER_OPERATION_REQUIRED",
-            "error": "专业规则角色不能使用旧版通用编辑接口",
+            "error": t("characters.professional_character_no_legacy_edit"),
         }
     # Only player-editable sheet fields; anything else (card metadata, plugin
     # provenance, server-owned state) is dropped instead of mass-assigned.
@@ -917,7 +918,7 @@ async def _update_character_authority(
         inst.set_player_name(user_id, character_name)
     cs = inst.get_character_sheet(user_id)
     if "background" in updates and len(str(updates.get("background", ""))) > MAX_BIO_CHARS:
-        return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
+        return {"ok": False, "error": t("characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)}
     rule = dependencies.rules.load_rule_for_game(inst)
     damage_dice_error = _validate_damage_dice(updates.get("equipment"))
     if damage_dice_error:
@@ -1082,24 +1083,24 @@ def validate_character_portrait(
     if portrait is None or portrait == {}:
         return None
     if not isinstance(portrait, dict):
-        raise ValueError("头像数据无效")
+        raise ValueError(t("characters.avatar_data_invalid"))
     kind = str(portrait.get("kind") or "")
     if kind == "builtin":
         portrait_id = str(portrait.get("id") or "")
         if not portrait_id or len(portrait_id) > 100:
-            raise ValueError("内置头像编号无效")
+            raise ValueError(t("characters.builtin_avatar_number_invalid"))
         return {"kind": "builtin", "id": portrait_id}
     if kind == "upload":
         asset_id = str(portrait.get("asset_id") or "")
         if not asset_id or dependencies.avatar_file(asset_id) is None:
-            raise ValueError("上传头像不存在")
+            raise ValueError(t("characters.uploaded_avatar_missing"))
         return {"kind": "upload", "asset_id": asset_id}
     if kind == "generated":
         asset_id = str(portrait.get("asset_id") or "")
         if not asset_id or dependencies.generated_image_file(asset_id) is None:
-            raise ValueError("生成头像不存在")
+            raise ValueError(t("characters.generated_avatar_missing"))
         return {"kind": "generated", "asset_id": asset_id}
-    raise ValueError("头像类型无效")
+    raise ValueError(t("characters.avatar_type_invalid"))
 
 
 # ---- GAL P8：立绘 / 表情差分 / 音色绑定 --------------------------------------
@@ -1119,7 +1120,7 @@ def _validated_standing_portrait(
     if dependencies.standing_portrait_file is None:
         if value is None or value == {}:
             return None
-        raise ValueError("立绘资产服务未配置")
+        raise ValueError(t("characters.standing_portrait_service_unconfigured"))
     return validate_standing_portrait_ref(value, dependencies.standing_portrait_file)
 
 
@@ -1129,16 +1130,16 @@ def _validated_standing_portrait_expressions(
     if value is None or value == {}:
         return None
     if not isinstance(value, dict):
-        raise ValueError("表情差分必须是对象")
+        raise ValueError(t("characters.expressions_must_be_object"))
     if len(value) > MAX_STANDING_PORTRAIT_EXPRESSIONS:
-        raise ValueError(f"表情差分不能超过 {MAX_STANDING_PORTRAIT_EXPRESSIONS} 条")
+        raise ValueError(t("characters.too_many_expressions", max_standing_portrait_expressions=MAX_STANDING_PORTRAIT_EXPRESSIONS))
     normalized: dict[str, dict[str, str]] = {}
     for label, reference in value.items():
         if not _EXPRESSION_LABEL_RE.fullmatch(str(label or "")):
-            raise ValueError(f"表情标签无效：{label!r}（小写字母、数字、- 或 _，最长 32）")
+            raise ValueError(t("characters.expression_label_invalid", label=repr(label)))
         item = _validated_standing_portrait(dependencies, reference)
         if item is None:
-            raise ValueError(f"表情差分 {label!r} 缺少立绘引用")
+            raise ValueError(t("characters.expression_missing_portrait", label=repr(label)))
         normalized[str(label)] = item
     return normalized
 
@@ -1149,14 +1150,14 @@ def _validated_voice_profile(value: Any) -> str | None:
     if value is None or value == "":
         return None
     if not isinstance(value, str):
-        raise ValueError("音色绑定必须是字符串")
+        raise ValueError(t("characters.voice_binding_not_string"))
     text = value.strip()
     if not text or len(text) > MAX_VOICE_PROFILE_ID_CHARS:
-        raise ValueError("音色绑定无效")
+        raise ValueError(t("characters.voice_binding_invalid"))
     if text.startswith("personal:") and not _VOICE_PROFILE_ID_RE.fullmatch(text):
-        raise ValueError("个人音色 ID 无效")
+        raise ValueError(t("characters.personal_voice_id_invalid"))
     if text.startswith(_PLUGIN_VOICE_PREFIX) and len(text) <= len(_PLUGIN_VOICE_PREFIX):
-        raise ValueError("插件音色 ID 无效")
+        raise ValueError(t("characters.plugin_voice_id_invalid"))
     return text
 
 
@@ -1188,7 +1189,7 @@ async def update_npc_portrait(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         return await _update_npc_portrait_authority(
             dependencies, inst, npc_id, portrait,
@@ -1248,7 +1249,7 @@ async def _update_npc_portrait_authority(
 ) -> dict[str, Any]:
     resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
     if resolved is None:
-        return {"ok": False, "error": "NPC 不存在"}
+        return {"ok": False, "error": t("characters.npc_missing")}
     _npc_key, npc = resolved
     try:
         normalized = _validated_portrait(dependencies.assets, portrait)
@@ -1287,16 +1288,16 @@ async def update_npc_standing_portrait(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
         if resolved is None:
-            return {"ok": False, "error": "NPC 不存在"}
+            return {"ok": False, "error": t("characters.npc_missing")}
         _npc_key, npc = resolved
         portrait_present = standing_portrait is not UNCHANGED
         expressions_present = expressions is not UNCHANGED
         if not portrait_present and not expressions_present:
-            return {"ok": False, "error": "未提供立绘字段"}
+            return {"ok": False, "error": t("characters.standing_portrait_field_missing")}
         try:
             # Validate every supplied field before mutating either one.
             normalized = (
@@ -1344,11 +1345,11 @@ async def update_npc_voice(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
         if resolved is None:
-            return {"ok": False, "error": "NPC 不存在"}
+            return {"ok": False, "error": t("characters.npc_missing")}
         _npc_key, npc = resolved
         try:
             normalized = _validated_voice_profile(voice_profile)
@@ -1403,7 +1404,7 @@ async def resolve_payment(
             return {
                 "ok": False,
                 "code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后再处理支付",
+                "error": t("characters.rewriting_wait_before_resolving_payment"),
             }
         current = dependencies.games.get_instance(
             dependencies.games.parse_game_key(game_key),
@@ -1412,7 +1413,7 @@ async def resolve_payment(
             return {
                 "ok": False,
                 "code": "STALE_RUN",
-                "error": "对局已重开，请刷新后处理新的请求",
+                "error": t("characters.game_restarted_refresh_for_new_request"),
             }
         staged = type(inst).from_dict(deepcopy(inst.to_dict()))
         # The persistence projection intentionally keeps only the recent log
@@ -1465,7 +1466,7 @@ async def resolve_payment(
                 return {
                     "ok": False,
                     "code": "EFFECT_COMMIT_FAILED",
-                    "error": "关联结果应用失败，本次结算未生效，请重试",
+                    "error": t("characters.linked_result_failed"),
                 }
             finally:
                 staged.__dict__.pop("_economy_authorized_receipt_id", None)
@@ -1648,7 +1649,7 @@ async def delete_character(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         player_side_after_acting = (
             not gm_authority
@@ -1657,7 +1658,7 @@ async def delete_character(
         )
         current = dependencies.games.get_instance(inst.game_key)
         if current is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            return {"ok": False, "code": "STALE_RUN", "error": t("characters.game_restarted_refresh_and_retry")}
         if player_side_after_acting:
             return delete_requires_gm_failure()
         return await _delete_character_authority(dependencies, inst, user_id)
@@ -1672,7 +1673,7 @@ async def _delete_character_authority(
     if not inst or user_id not in inst.players:
         return {"ok": False, "error": "角色不存在"}
     if len(inst.players) <= 1:
-        return {"ok": False, "error": "至少保留一个角色，无法删除最后一个"}
+        return {"ok": False, "error": t("characters.keep_at_least_one_character")}
     name = inst.players[user_id].get("character_name", user_id)
     removed = await inst.remove_player(user_id)
     if not removed:
@@ -1699,10 +1700,10 @@ async def create_player(
         if not write_entered:
             return {
                 "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("characters.rewriting_wait_and_retry"),
             }
         if dependencies.games.get_instance(inst.game_key) is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            return {"ok": False, "code": "STALE_RUN", "error": t("characters.game_restarted_refresh_and_retry")}
         # Serialize membership changes with authoritative combat actions.  A
         # player joining during an active encounter must be enrolled in the
         # ruleset's live turn state before the new seat is persisted.
@@ -1800,7 +1801,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     if uid not in inst.players and len(inst.players) >= max_players:
         return {
             "ok": False,
-            "error": f"房间已满（最多 {max_players} 人）",
+            "error": t("characters.room_full", max_players=max_players),
             "error_code": "game_room_full",
         }
     rule = dependencies.rules.load_rule_for_game(inst)
@@ -1829,13 +1830,13 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
                 return {
                     "ok": False,
                     "error_code": "RULESET_BINDING_MISSING",
-                    "error": "这个存档没有绑定专业规则版本（旧版存档），无法加入专业角色，请新建一局游戏。",
+                    "error": t("characters.save_without_runtime_binding"),
                 }
             if not isinstance(binding, dict) or not inst.ruleset_binding_matches(binding):
                 return {
                     "ok": False,
                     "error_code": "INCOMPATIBLE_RULESET_CHARACTER",
-                    "error": "角色与当前游戏的专业规则版本不兼容",
+                    "error": t("characters.character_runtime_incompatible"),
                 }
     # 仅传了名字的轻量加入会自动生成默认角色卡。
     has_full_sheet = bool(character.get("attributes") or character.get("equipment") or character.get("skills"))
@@ -1876,7 +1877,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         max_hp = hp
     default_class = rule.classes[0]["name"] if (rule and rule.classes) else "冒险者"
     if len(str(character.get("background", ""))) > MAX_BIO_CHARS:
-        return {"ok": False, "error": f"角色背景过长（上限 {MAX_BIO_CHARS} 字）"}
+        return {"ok": False, "error": t("characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)}
     damage_dice_error = _validate_damage_dice(character.get("equipment"))
     if damage_dice_error:
         return {"ok": False, "error": damage_dice_error}

@@ -1,6 +1,7 @@
 from aiohttp import web
 from src.webui.routes._common import _get_api
 from src.webui.routes.game_route_common import _gm_only_inst
+from src.localization.messages import t
 
 async def _broadcast_change(request, game_key):
     pool = request.app.get("connection_pool")
@@ -23,7 +24,7 @@ async def api_manual_roll_create(request):
 async def api_manual_roll_resolve(request):
     api=_get_api(request); body=await request.json()
     if request.get("player_preview") and not request.get("player_delegate"):
-        return web.json_response({"ok":False,"error":"当前为玩家预览，请先允许代操作"},status=403)
+        return web.json_response({"ok":False,"error":t("routes_manual_roll_routes.preview_requires_proxy_permission")},status=403)
     inst = api.get_game_instance(request.match_info["game_key"])
     uid = request.get("user_id") or (inst.gm_uid if inst and request.get("owner_authenticated") else "")
     out=await api.resolve_manual_roll_request(request.match_info["game_key"],uid,request.match_info["request_id"],body)

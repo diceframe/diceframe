@@ -13,6 +13,7 @@ from src.webui.routes._common import _get_api
 from src.webui.routes.assistant import _validated_messages
 from src.webui.services.assistant_agent_application import ROUTES
 from src.webui.session import apply_session_cookie
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -74,7 +75,7 @@ async def api_agent_run(request):
         await emit("error", {"code": getattr(exc, "code", "AGENT_REJECTED"), "error": str(exc)})
     except Exception:
         logger.exception("DF Agent run failed")
-        await emit("error", {"code": "AGENT_FAILED", "error": "DF Agent 执行失败，请重试。" if language.startswith("zh") else "DF Agent failed. Please try again."})
+        await emit("error", {"code": "AGENT_FAILED", "error": t("routes_assistant_agent.agent_run_failed") if language.startswith("zh") else "DF Agent failed. Please try again."})
     return response
 
 

@@ -1,0 +1,14 @@
+# src/webui/services/content_pack_maps.py 返回给请求方的提示。
+"en":
+  background_empty: "The map background selected for the content pack is empty"
+  background_unreadable: "The map background selected for the content pack could not be read"
+  icon_data_format_invalid: "The map icon data format is invalid"
+  icon_dimensions_too_large: "The map icon dimensions are too large"
+  icon_file_data_invalid: "The map icon file data is invalid"
+  icon_format: "Map icons must be PNG, JPEG or WebP"
+  icon_too_large: "A single map icon cannot exceed 3 MB"
+  icon_too_small: "A map icon cannot be smaller than 16×16"
+  icon_unreadable: "The map icon could not be read"
+  icons_total_too_large: "The map icons cannot exceed 24 MB in total"
+  too_many_icons: "At most %{max_map_icon_uploads} map icons can be selected at once"
+  world_id_missing: "The selected world has no valid ID, so the map cannot be packaged"

@@ -16,6 +16,7 @@ from src.content_modules.projection import entries_for_world
 from src.engine.language import normalize_language
 from src.plugin_host.content import safe_id_part
 from src.rules.loader import RuleBundleLoader
+from src.localization.messages import t
 
 # 封面随包分发，只在客户端安装后由本机接口读取。导出侧只做字节级校验，
 # 不解码图片（导出接口不该替任意上传承担解码开销和解析器风险）。
@@ -128,17 +129,17 @@ def _package_cover(files: dict[str, bytes], cover_data: str, cover_filename: str
     try:
         data = base64.b64decode(payload, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise ValueError("封面数据不是合法的 base64") from exc
+        raise ValueError(t("content_pack_export.cover_not_base64")) from exc
     if not data:
-        raise ValueError("封面数据为空")
+        raise ValueError(t("content_pack_export.cover_empty"))
     if len(data) > MAX_COVER_BYTES:
-        raise ValueError(f"封面不能超过 {MAX_COVER_BYTES // 1024} KB")
+        raise ValueError(t("content_pack_export.cover_too_large", limit_kb=MAX_COVER_BYTES // 1024))
     suffix = Path(str(cover_filename or "")).suffix.lower()
     magic = _COVER_MAGIC.get(suffix)
     if magic is None:
-        raise ValueError("封面只支持 webp / png / jpg")
+        raise ValueError(t("content_pack_export.cover_format"))
     if not data.startswith(magic):
-        raise ValueError("封面文件的实际格式与扩展名不一致")
+        raise ValueError(t("content_pack_export.cover_format_mismatch"))
     relative = f"assets/cover{suffix}"
     files[relative] = data
     return relative
@@ -197,7 +198,7 @@ def export_content_pack(
         if isinstance(item, dict) and str(item.get("adventure_id") or "").strip()
     ] if isinstance(adventure_refs, list) else []
     if not plugin_id or not name:
-        return {"ok": False, "error": "请填写内容包 ID 和名称"}
+        return {"ok": False, "error": t("content_pack_export.id_and_name_required")}
 
     files: dict[str, str | bytes] = {}
     has_world = has_rule = has_cards = has_adventures = has_lorebooks = False
@@ -206,7 +207,7 @@ def export_content_pack(
         if canonical_id(plugin_id) != plugin_id:
             raise ValueError
     except ValueError:
-        return {"ok": False, "error": "内容包 ID 必须使用小写英文开头，且只能包含小写英文、数字、下划线或短横线"}
+        return {"ok": False, "error": t("content_pack_export.pack_id_format")}
     exported_rule_id = _export_resource_id(rule_id, "rule") if rule_id else ""
     exported_world_id = _export_resource_id(world_id, "world") if world_id else ""
     world_default_rule = exported_rule_id
@@ -242,7 +243,7 @@ def export_content_pack(
                     if packaged:
                         packaged_refs.append(packaged)
                     elif isinstance(rule_scene_image, dict):
-                        return {"ok": False, "error": "无法读取所选规则头图"}
+                        return {"ok": False, "error": t("content_pack_export.rule_cover_unreadable")}
                 if packaged_refs:
                     # Keep the legacy singular field as the first pool member;
                     # newer readers may use the full list for random defaults.
@@ -295,7 +296,7 @@ def export_content_pack(
                 if packaged:
                     packaged_refs.append(packaged)
                 elif isinstance(world_scene_image, dict):
-                    return {"ok": False, "error": "无法读取所选世界头图"}
+                    return {"ok": False, "error": t("content_pack_export.world_cover_unreadable")}
             if packaged_refs:
                 template["scene_image"] = packaged_refs[0]
                 if len(packaged_refs) > 1 or isinstance(template.get("scene_images"), list):
@@ -345,14 +346,14 @@ def export_content_pack(
     if selected_adventures or selected_adventure_refs:
         resolver = dependencies.adventure_resolver
         if resolver is None:
-            return {"ok": False, "error": "冒险来源解析器未启用"}
+            return {"ok": False, "error": t("content_pack_export.adventure_resolver_disabled")}
         resolutions = resolver.list_resolutions(pack_locale)
         if selected_adventures and not selected_adventure_refs:
             ambiguous = sorted({adventure_id for adventure_id in selected_adventures if sum(
                 1 for item in resolutions if str(item.bundle.manifest.adventure_id) == adventure_id
             ) > 1})
             if ambiguous:
-                return {"ok": False, "error": f"冒险来源不唯一，请重新选择来源：{', '.join(ambiguous)}"}
+                return {"ok": False, "error": t("content_pack_export.adventure_source_ambiguous", ambiguous=', '.join(ambiguous))}
         adventure_directories: dict[str, tuple[str, str, str]] = {}
         for resolution in resolutions:
             bundle = resolution.bundle
@@ -371,7 +372,7 @@ def export_content_pack(
             identity = source_ref
             previous = adventure_directories.get(directory)
             if previous is not None and previous != identity:
-                return {"ok": False, "error": f"冒险目录名冲突：{directory}，请分别导出内容包"}
+                return {"ok": False, "error": t("content_pack_export.adventure_directory_conflict", directory=directory)}
             adventure_directories[directory] = identity
             for path in sorted(bundle.root.rglob("*.json")):
                 relative = path.relative_to(bundle.root).as_posix()
@@ -398,15 +399,15 @@ def export_content_pack(
                 str(item.bundle.manifest.adventure_id) for item in resolutions
             })
         if missing:
-            return {"ok": False, "error": f"冒险不存在：{', '.join(missing)}"}
+            return {"ok": False, "error": t("content_pack_export.adventure_missing", missing=', '.join(missing))}
 
     if lorebook_ids:
         if dependencies.lorebook is None:
-            return {"ok": False, "error": "资料册存储未启用"}
+            return {"ok": False, "error": t("content_pack_export.lorebook_storage_disabled")}
         books = {str(book.get("id") or ""): book for book in dependencies.lorebook.list_lorebooks()}
         missing = sorted(set(lorebook_ids) - set(books))
         if missing:
-            return {"ok": False, "error": f"资料册不存在：{', '.join(missing)}"}
+            return {"ok": False, "error": t("content_pack_export.lorebook_missing", missing=', '.join(missing))}
         for book_id in lorebook_ids:
             book = dict(books[book_id])
             book["entries"] = dependencies.lorebook.list_book_entries(book_id)
@@ -419,14 +420,14 @@ def export_content_pack(
             book_path = external_id
             existing = next((path for path in files if path == f"content/lorebooks/{book_path}.json"), None)
             if existing is not None:
-                return {"ok": False, "error": f"资料册文件名冲突：{book_path}，请分别导出"}
+                return {"ok": False, "error": t("content_pack_export.lorebook_file_conflict", book_path=book_path)}
             files[f"content/lorebooks/{book_path}.json"] = json.dumps(
                 book, ensure_ascii=False, indent=2,
             )
         has_lorebooks = True
 
     if not (has_world or has_rule or has_cards or has_adventures or has_lorebooks):
-        return {"ok": False, "error": "请至少选择一个世界、资料册、冒险、角色卡或规则"}
+        return {"ok": False, "error": t("content_pack_export.nothing_selected")}
 
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)
@@ -729,7 +730,7 @@ def _rule_files(
     target_id = exported_rule_id or _export_resource_id(rule_id, "rule")
     raw = json.loads(base.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise ValueError("规则文件必须是 JSON 对象")
+        raise ValueError(t("content_pack_export.rule_file_not_object"))
     source_is_v2 = int(raw.get("rule_schema_version", 1) or 1) >= 2
     core = RuleBundleLoader().load(base)
     core = dict(core)
@@ -747,7 +748,7 @@ def _rule_files(
                 continue
             overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
             if not isinstance(overlay, dict):
-                raise ValueError(f"规则 locale 必须是 JSON 对象：{overlay_path}")
+                raise ValueError(t("content_pack_export.rule_locale_not_object", overlay_path=overlay_path))
             overlay = dict(overlay)
             overlay["target"] = {"kind": "rule", "id": target_id}
             materialize_rule(core, overlay)

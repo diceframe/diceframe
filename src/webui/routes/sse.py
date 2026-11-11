@@ -21,6 +21,7 @@ from src.webui.routes._common import MAX_ACTION_CHARS, _get_api
 from src.webui.services.turns import economy_decision_pending_payload
 from src.webui.access_control import ACCESS_CONTROL_KEY, BOT_GRANT_KEY
 from src.webui.sse_ticket import SSE_GRANT_KEY, BotGrant, OwnerGrant, SseGrant
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -86,7 +87,7 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
     body = await request.json()
     text = body.get("text", "")
     if len(text) > MAX_ACTION_CHARS:
-        return web.json_response({"error": f"行动文本过长（上限 {MAX_ACTION_CHARS} 字）"}, status=400)
+        return web.json_response({"error": t("routes_sse.action_too_long", max_action_chars=MAX_ACTION_CHARS)}, status=400)
     selected_attribute = str(body.get("selected_attribute", "") or "")
     selected_skill = str(body.get("selected_skill", "") or "")
     target_text = str(body.get("target_text", "") or "")
@@ -134,7 +135,7 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
         if int(result.get("status", 200) or 200) >= 400 or payload.get("ok") is False:
             error_data = json.dumps(
                 {
-                    "error": payload.get("error") or "处理出错，请稍后重试",
+                    "error": payload.get("error") or t("routes_sse.error_retry_later"),
                     "error_code": payload.get("error_code") or "",
                 },
                 ensure_ascii=False,
@@ -169,7 +170,7 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
         await response.write(b"event: done\ndata: complete\n\n")
     except Exception:
         logger.exception("SSE 流处理异常")
-        error_data = json.dumps({"error": "处理出错，请查看服务器日志"}, ensure_ascii=False)
+        error_data = json.dumps({"error": t("routes_sse.error_see_logs")}, ensure_ascii=False)
         await response.write(f"event: error\ndata: {error_data}\n\n".encode())
     finally:
         return response
@@ -432,7 +433,7 @@ def _revocation(
     if isinstance(grant, BotGrant):
         return _bot_revocation(request, inst, user_id, grant)
     if user_id not in inst.players:
-        return {"error_code": "SEAT_TOKEN_INVALID", "error": "席位已被移除"}
+        return {"error_code": "SEAT_TOKEN_INVALID", "error": t("routes_sse.seat_removed")}
     if grant is None:
         return None
     if isinstance(grant, OwnerGrant):
@@ -441,7 +442,7 @@ def _revocation(
     if not room_access.player_access_open(inst):
         return {"error_code": "PLAYER_ACCESS_CLOSED", "error": "本局玩家入口已关闭"}
     if grant.seat_credential and room_access.seat_credential_hash(inst, user_id) != grant.seat_credential:
-        return {"error_code": "SEAT_TOKEN_INVALID", "error": "席位凭证无效或已失效，请向 GM 重新获取链接"}
+        return {"error_code": "SEAT_TOKEN_INVALID", "error": t("routes_sse.seat_credential_invalid")}
     if _room_password_marker(inst) != grant.room_password_hash:
         return {"error_code": "ROOM_TOKEN_INVALID", "error": "房间密码已更改，请重新输入", "needs_room_password": True}
     return None

@@ -27,6 +27,7 @@ from src.webui.routes.game_route_common import (
     _gm_only_inst,
     _should_rebind_player_session,
 )
+from src.localization.messages import t
 
 
 async def api_char_update(request: web.Request) -> web.Response:
@@ -126,7 +127,7 @@ async def api_ruleset_character_adopt_card(request: web.Request) -> web.Response
             # Same visibility as the list: a non-owner cannot adopt (and so
             # read) a card it is not allowed to see.
             return web.json_response(
-                {"ok": False, "error_code": "CARD_NOT_AVAILABLE", "error": "这张角色卡不可用"},
+                {"ok": False, "error_code": "CARD_NOT_AVAILABLE", "error": t("routes_game_character_routes.card_unavailable")},
                 status=404,
             )
     # Visibility above covers both the classic and the rules-aware dispatch.
@@ -319,10 +320,10 @@ async def api_npc_standing_portrait_update(request: web.Request) -> web.Response
     if not inst:
         return web.json_response({"error": "游戏不存在"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"error": "仅 GM 可修改 NPC 立绘"}, status=403)
+        return web.json_response({"error": t("routes_game_character_routes.npc_portrait_gm_only")}, status=403)
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"error": "请求体必须是对象"}, status=400)
+        return web.json_response({"error": t("routes_game_character_routes.body_not_object")}, status=400)
     # A field missing from the body is left unchanged; null clears it.
     fields = {
         name: body[key]
@@ -346,7 +347,7 @@ async def api_npc_voice_update(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"error": "游戏不存在"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"error": "仅 GM 可修改 NPC 音色"}, status=403)
+        return web.json_response({"error": t("routes_game_character_routes.npc_voice_gm_only")}, status=403)
     body = await request.json()
     result = await api.update_npc_voice(gk, npc_id, body.get("voice_profile"))
     status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200

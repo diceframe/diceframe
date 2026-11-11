@@ -6,6 +6,7 @@ from aiohttp import web
 
 from src.webui.routes._common import _get_api
 from src.version import APP_NAME, __version__
+from src.localization.messages import t
 
 
 async def api_bot_ping(request: web.Request) -> web.Response:
@@ -36,7 +37,7 @@ async def api_get_bind_token(request: web.Request) -> web.Response:
     if not detail:
         return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
     if request.get("user_id", "") != detail.get("gm_uid"):
-        return web.json_response({"ok": False, "error": "仅 GM 可获取绑定凭证"}, status=403)
+        return web.json_response({"ok": False, "error": t("routes_bot.bind_token_gm_only")}, status=403)
     body = await request.json() if request.content_length else {}
     result = await api.get_bot_bind_token(game_key, bool(body.get("rotate")))
     return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -45,10 +46,10 @@ async def api_get_bind_token(request: web.Request) -> web.Response:
 async def api_apply_bridge_extensions(request: web.Request) -> web.Response:
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "请求体必须是对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_bot.body_not_object")}, status=400)
     payload = body.get("payload")
     if not isinstance(payload, dict):
-        return web.json_response({"ok": False, "error": "payload 必须是对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_bot.payload_not_object")}, status=400)
     caller = request.get("plugin_authenticated")
     payload = dict(payload)
     payload["_caller"] = {

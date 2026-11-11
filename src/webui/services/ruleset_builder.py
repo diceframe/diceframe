@@ -13,6 +13,7 @@ from src.webui.ruleset_draft_validation import (
     MAX_BUILDER_DRAFT_NODES,
     validate_draft_shape,
 )
+from src.localization.messages import t
 
 __all__ = [
     "MAX_BUILDER_DRAFT_BYTES",
@@ -43,14 +44,14 @@ def _context(
         return None, None, draft, {
             "ok": False,
             "code": "RULE_NOT_FOUND",
-            "error": f"规则不存在: {rule_id}",
+            "error": t("ruleset_builder.rule_missing", rule_id=rule_id),
         }
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     if runtime.capabilities.character_builder != "professional":
         return rule, runtime, draft, {
             "ok": False,
             "code": "RULESET_BUILDER_UNAVAILABLE",
-            "error": "该规则使用现有通用角色创建流程",
+            "error": t("ruleset_builder.uses_generic_creation"),
         }
     return rule, runtime, draft, None
 
@@ -62,7 +63,7 @@ def experience(
 ) -> dict[str, Any]:
     rule = dependencies.load_rule(rule_id, language)
     if rule is None:
-        return {"ok": False, "code": "RULE_NOT_FOUND", "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("ruleset_builder.rule_missing", rule_id=rule_id)}
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     return {
         "ok": True,

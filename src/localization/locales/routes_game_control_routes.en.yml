@@ -1,0 +1,5 @@
+# src/webui/routes/game_control_routes.py 返回给请求方的提示。
+"en":
+  browser_session_unavailable: "The browser session is unavailable"
+  gm_style_invalid: "Invalid GM narration style setting"
+  no_recoverable_host: "The save has no host identity that can be restored"

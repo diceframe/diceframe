@@ -1,0 +1,15 @@
+# src/webui/access_control.py 返回给请求方的提示。
+"en":
+  access_password_changed: "The access password was changed; log in again"
+  bot_binding_read_only: "This game's Bot binding only allows reading and read-only questions"
+  bot_permission_surface_invalid: "This game's Bot permission surface is invalid; the request was refused"
+  bot_token_rotated: "The Bot API token was changed; update the Bot configuration"
+  bot_unauthorized: "The Bot service is not authorized"
+  device_pairing_revoked: "This device's pairing was revoked; log in again"
+  gm_seat_requires_host_login: "The GM seat requires the host to be logged in"
+  play_mode_no_bot: "This play mode does not support Bot operations"
+  plugin_token_revoked: "The plugin API token is no longer valid or the plugin is disabled"
+  seat_credential_invalid: "The seat credential is invalid or has expired; ask the GM for a new link"
+  seat_credential_required: "A seat credential is required; rejoin with the link issued by the GM"
+  sse_ticket_invalid: "The SSE ticket is invalid or has expired"
+  unauthorized: "Unauthorized"

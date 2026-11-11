@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
+import warnings
 from pathlib import Path
 
 import pytest
@@ -79,6 +81,55 @@ def test_every_registered_error_code_has_a_message() -> None:
         keys = catalog_keys(locale)
         missing = sorted(code for code in set(ERROR_CODE_MAP.values()) if f"errors.{code}" not in keys)
         assert not missing, f"{locale} 缺少错误码文案：{missing}"
+
+
+def _literal_message_calls():
+    """src/ 里每一处以字面量为键的 t(...) 调用：位置、键、关键字参数名、是否带 ** 展开。"""
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)  # 被扫描文件自身的转义告警与本测试无关
+            tree = ast.parse(path.read_bytes().decode("utf-8-sig"))
+        local_names = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "src.localization.messages"
+            for alias in node.names
+            if alias.name == "t"
+        }
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in local_names and node.args):
+                continue
+            first = node.args[0]
+            branches = [first.body, first.orelse] if isinstance(first, ast.IfExp) else [first]
+            names = {keyword.arg for keyword in node.keywords if keyword.arg}
+            splat = any(keyword.arg is None for keyword in node.keywords)
+            for branch in branches:
+                if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
+                    yield f"{path.relative_to(ROOT).as_posix()}:{node.lineno}", branch.value, names, splat
+
+
+def test_every_message_key_used_in_code_is_defined_and_receives_its_placeholders() -> None:
+    reference = REQUIRED_LOCALES[0]
+    texts: dict[str, str] = {}
+    for path in _catalog_files():
+        namespace, locale, _extension = path.name.split(".")
+        if locale == reference:
+            texts.update({f"{namespace}.{key}": text for key, text in _namespace_entries(namespace, locale).items()})
+    problems: list[str] = []
+    calls = 0
+    for where, key, names, splat in _literal_message_calls():
+        calls += 1
+        # 复数形式的键在文案表里是 key.one / key.many ...，count 由库自己消费
+        forms = [text for name, text in texts.items() if name == key or name.startswith(f"{key}.")]
+        if not forms:
+            problems.append(f"{where}: 文案表里没有 {key}")
+            continue
+        needed = {name for text in forms for name in _PLACEHOLDER.findall(text)}
+        if not splat and needed - names:
+            problems.append(f"{where}: {key} 缺少参数 {sorted(needed - names)}")
+    assert calls, "应至少扫描到一处 t(...) 调用"
+    assert not problems, "\n".join(problems)
 
 
 def test_the_library_is_a_declared_and_hash_pinned_runtime_dependency() -> None:

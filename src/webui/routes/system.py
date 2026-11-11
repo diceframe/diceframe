@@ -9,6 +9,7 @@ from aiohttp import web
 from src.web_transport.local_addresses import reachable_host_candidates
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 async def api_update_check(request: web.Request) -> web.Response:
@@ -57,12 +58,12 @@ async def api_network_addresses(request: web.Request) -> web.Response:
         request.get("owner_authenticated", False)
     )
     if not owner_allowed:
-        return web.json_response({"ok": False, "error": "需要管理员会话"}, status=403)
+        return web.json_response({"ok": False, "error": t("routes_system.admin_session_required")}, status=403)
     transport = request.app.get("web_transport")
     endpoint = getattr(transport, "endpoint", None)
     if endpoint is None:
         return web.json_response(
-            {"ok": False, "error": "传输层未就绪"},
+            {"ok": False, "error": t("routes_system.transport_not_ready")},
             status=503,
         )
     addresses = [

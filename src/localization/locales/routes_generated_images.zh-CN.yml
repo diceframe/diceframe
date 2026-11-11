@@ -1,0 +1,18 @@
+# src/webui/routes/generated_images.py 返回给请求方的提示。
+"zh-CN":
+  avatar_option_not_boolean: "拼接头像选项必须是布尔值"
+  description_required: "请填写画面描述"
+  generate_body_not_object: "生图请求必须是 JSON 对象"
+  generate_requires_membership: "未加入本局，无法生成图片"
+  generated_image_missing: "生成图片不存在"
+  history_requires_membership: "未加入本局，无法查看生成历史"
+  image_requires_membership: "未加入本局，无法查看生成图片"
+  image_type_gm_only: "仅 GM 可生成该类型图片"
+  optimize_admin_only: "仅管理员可以使用 AI 优化提示词"
+  optimize_body_not_object: "优化请求必须是 JSON 对象"
+  optimize_not_on_share_page: "玩家分享页不可使用 AI 优化提示词"
+  panel_count_not_integer: "分镜格数必须是 1 到 6 的整数"
+  panel_count_out_of_range: "分镜格数必须在 1 到 6 之间"
+  storyboard_body_not_object: "分镜请求必须是 JSON 对象"
+  system_image_admin_only: "仅管理员可以生成系统图片"
+  unsupported_purpose: "不支持的图片用途"

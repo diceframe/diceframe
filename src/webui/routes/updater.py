@@ -11,6 +11,7 @@ from aiohttp import web
 from src.version import __version__
 from src.docker_launcher.data_versions import activation_pending
 from src.webui.routes._common import _require_confirmed_request
+from src.localization.messages import t
 
 
 async def _restart_after_response() -> None:
@@ -30,7 +31,7 @@ async def api_update_download(request: web.Request) -> web.Response:
     kind = (request.query.get("kind") or "source").strip().lower()
     if kind not in {"source", "portable", "docker"}:
         return web.json_response(
-            {"ok": False, "error": "kind 必须为 source、portable 或 docker"},
+            {"ok": False, "error": t("routes_updater.kind_invalid")},
             status=400,
         )
     result = await request.app["updater"].download_update(kind)
@@ -73,7 +74,7 @@ async def api_application_restart(request: web.Request) -> web.Response:
     control = request.app["runtime_control"]
     if control["restart_requested"]:
         return web.json_response(
-            {"ok": False, "error": "DiceFrame 已在重启中"},
+            {"ok": False, "error": t("routes_updater.already_restarting")},
             status=409,
         )
     control["restart_requested"] = True

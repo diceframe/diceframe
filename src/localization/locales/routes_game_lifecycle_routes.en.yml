@@ -1,0 +1,3 @@
+# src/webui/routes/game_lifecycle_routes.py 返回给请求方的提示。
+"en":
+  world_description_too_long: "The world description is too long (%{max_seed_chars} characters at most)"

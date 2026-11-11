@@ -1,0 +1,16 @@
+# src/webui/services/content_metadata_recovery.py 返回给请求方的提示。
+"zh-CN":
+  content_changed_since_operation: "内容在该操作之后发生变化；不会覆盖后续编辑"
+  editable_field_required: "必须提供至少一个可编辑字段"
+  no_safe_snapshot: "无法取得安全的编辑快照"
+  prepare_record_failed: "无法准备恢复记录"
+  record_invalid: "恢复记录无效"
+  record_missing_or_handled: "恢复记录不存在、属于其它用户或已处理"
+  save_record_uncertain: "无法保存恢复记录；写入结果处于不确定状态"
+  save_result_uncertain: "无法保存恢复结果；写入结果处于不确定状态"
+  snapshot_field_or_version_invalid: "编辑快照字段或版本无效"
+  snapshot_format_unsupported: "编辑快照格式不受支持"
+  snapshot_too_large: "恢复快照过大"
+  target_invalid: "恢复目标无效"
+  unsupported_field: "不支持的元数据字段"
+  unsupported_record: "不支持的恢复记录"

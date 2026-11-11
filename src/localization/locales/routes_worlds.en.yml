@@ -1,0 +1,5 @@
+# src/webui/routes/worlds.py 返回给请求方的提示。
+"en":
+  entries_required: "The entry list cannot be empty"
+  entry_too_long: "The lorebook entry is too long (%{max_lorebook_chars} characters at most)"
+  generation_prompt_too_long: "The generation description is too long (%{max_lorebook_chars} characters at most)"

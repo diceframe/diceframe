@@ -64,6 +64,7 @@ from src.lorebook.sync import LorebookSyncExporter, LorebookSyncImporter
 from src.webui.services import memory as memory_service
 from src.webui.services import module_import_adapters
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
+from src.localization.messages import t
 
 # Preserve the existing public import used by callers while the service owns the value.
 CANONICAL_ENTRY_DEFAULTS = lorebooks.CANONICAL_ENTRY_DEFAULTS
@@ -2788,10 +2789,10 @@ class WebAPI:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": "GM 正在重写历史回合，请等待完成后重试",
+                    "error": t("webui_api.rewriting_wait_and_retry"),
                 }
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui_api.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.scheduler_advance(instance, rule)
@@ -2813,10 +2814,10 @@ class WebAPI:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": "GM 正在重写历史回合，请等待完成后重试",
+                    "error": t("webui_api.rewriting_wait_and_retry"),
                 }
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui_api.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.resolve_combat_action(

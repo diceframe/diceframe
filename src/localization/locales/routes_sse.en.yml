@@ -1,0 +1,7 @@
+# src/webui/routes/sse.py 返回给请求方的提示。
+"en":
+  action_too_long: "The action text is too long (%{max_action_chars} characters at most)"
+  error_retry_later: "An error occurred while processing; try again later"
+  error_see_logs: "An error occurred while processing; see the server logs"
+  seat_credential_invalid: "The seat credential is invalid or has expired; ask the GM for a new link"
+  seat_removed: "The seat has been removed"

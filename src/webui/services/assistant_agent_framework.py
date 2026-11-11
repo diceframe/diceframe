@@ -18,6 +18,7 @@ from pydantic_ai.usage import RequestUsage, UsageLimits
 
 from src.llm.client import LLMToolCallError
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
+from src.localization.messages import t
 
 
 class AgentProviderUnavailable(ValueError):
@@ -40,18 +41,18 @@ def provider_unavailable(error: LLMToolCallError, language: str) -> AgentProvide
     zh = language.startswith("zh")
     if 402 in error.status_codes:
         return AgentProviderUnavailable("MODEL_BALANCE_INSUFFICIENT",
-            "模型服务商返回余额不足（402）。请在设置中检查服务商余额或切换可用模型。" if zh else
+            t("assistant_agent_framework.provider_insufficient_balance") if zh else
             "The model provider reported insufficient balance (402). Check the provider or choose an available model in Settings.")
     if error.status_codes & {401, 403}:
         return AgentProviderUnavailable("MODEL_ACCESS_DENIED",
-            "模型服务商拒绝访问。请在设置中检查服务商凭据与模型权限。" if zh else
+            t("assistant_agent_framework.provider_access_denied") if zh else
             "The model provider denied access. Check provider credentials and model permissions in Settings.")
     if 429 in error.status_codes:
         return AgentProviderUnavailable("MODEL_RATE_LIMITED",
-            "模型服务商当前限制请求（429）。请稍后重试，或在设置中切换可用模型。" if zh else
+            t("assistant_agent_framework.provider_rate_limited") if zh else
             "The model provider is limiting requests (429). Retry later or choose another model in Settings.")
     return AgentProviderUnavailable("MODEL_UNAVAILABLE",
-        "模型服务商暂时不可用。请检查网络或服务商配置后重试。" if zh else
+        t("assistant_agent_framework.provider_temporarily_unavailable") if zh else
         "The model provider is unavailable. Check the network or provider settings and retry.")
 
 
@@ -79,7 +80,7 @@ class DiceFrameModel(Model):
         return "diceframe"
 
     async def request(self, messages, model_settings, model_request_parameters):
-        await self.emit("status", {"message": "正在规划下一步…" if self.language.startswith("zh") else "Planning the next step…"})
+        await self.emit("status", {"message": t("assistant_agent_framework.planning_next_step") if self.language.startswith("zh") else "Planning the next step…"})
         parameters = model_request_parameters
         definitions = [*parameters.output_tools, *parameters.function_tools]
         schemas = [{"type": "function", "function": {

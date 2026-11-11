@@ -1,0 +1,3 @@
+# src/webui/services/lorebooks.py 返回给请求方的提示。
+"zh-CN":
+  import_preview_expired: "导入预览已过期，请重新预览"

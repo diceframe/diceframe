@@ -1,0 +1,17 @@
+# src/webui/services/standing_portraits.py 返回给请求方的提示。
+"en":
+  data_invalid: "The standing portrait data is invalid"
+  delete_failed: "Deleting the standing portrait failed"
+  dimensions_too_large: "The standing portrait dimensions are too large"
+  encoded_too_large: "The standing portrait exceeds 8 MB after encoding; compress it and try again"
+  file_data_invalid: "The standing portrait file data is invalid"
+  file_missing: "No standing portrait file was provided"
+  file_too_large: "A standing portrait file cannot exceed 8 MB"
+  id_invalid: "Invalid standing portrait ID"
+  missing: "The standing portrait does not exist"
+  still_referenced: "The standing portrait is still used by a character; unbind it first"
+  too_small: "A standing portrait cannot be smaller than %{min_width}×%{min_height}"
+  type_invalid: "Invalid standing portrait type"
+  unreadable: "The standing portrait image could not be read"
+  unsupported_format: "Standing portraits must be PNG or WebP (with the transparent background preserved)"
+  uploaded_missing: "The uploaded standing portrait does not exist"

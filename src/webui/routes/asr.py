@@ -7,6 +7,7 @@ from aiohttp import web
 from src.asr import AsrServiceError
 from src.webui.routes._common import _get_api
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 async def api_game_transcription(request: web.Request) -> web.Response:
@@ -30,9 +31,9 @@ async def api_assistant_transcription(request: web.Request) -> web.Response:
 def _require_asr_admin(request: web.Request) -> web.Response | None:
     query = getattr(request, "query", {})
     if query.get("user") or query.get("share"):
-        return web.json_response({"ok": False, "error": "玩家分享页不可使用语音识别测试"}, status=403)
+        return web.json_response({"ok": False, "error": t("routes_asr.asr_test_not_on_share_page")}, status=403)
     if request.get(ACCESS_PASSWORD_CONFIGURED_KEY, False) and not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": "仅管理员可以测试语音识别"}, status=403)
+        return web.json_response({"ok": False, "error": t("routes_asr.asr_test_admin_only")}, status=403)
     return None
 
 

@@ -1,0 +1,5 @@
+# src/webui/routes/bot.py 返回给请求方的提示。
+"zh-CN":
+  bind_token_gm_only: "仅 GM 可获取绑定凭证"
+  body_not_object: "请求体必须是对象"
+  payload_not_object: "payload 必须是对象"

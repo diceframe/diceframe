@@ -1,0 +1,12 @@
+# src/webui/services/avatars.py 返回给请求方的提示。
+"en":
+  delete_failed: "Failed to delete the avatar"
+  file_missing: "No avatar file was provided"
+  file_too_large: "An avatar file cannot exceed 3 MB"
+  invalid_data: "The avatar file data is invalid"
+  invalid_id: "Invalid avatar ID"
+  not_found: "The avatar does not exist"
+  too_large: "The avatar dimensions are too large"
+  too_small: "An avatar cannot be smaller than 32×32"
+  unreadable_image: "The avatar image could not be read"
+  unsupported_format: "Avatars must be PNG, JPEG or WebP"

@@ -15,6 +15,7 @@ from src.webui.services.assistant_content import _has_private_markers
 from src.webui.services.lorebook_visibility_plans import (
     LorebookVisibilityPlanDependencies, LorebookVisibilityPlans, audience_expands,
 )
+from src.localization.messages import t
 
 
 @dataclass(frozen=True)
@@ -234,7 +235,7 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
             raise ValueError("Whole-book visibility is unavailable")
         entries = book_entries(args["book_id"])
         if len(entries) > 1000:
-            raise ValueError("整册 visibility 最多支持 1000 条目，请按条目分批")
+            raise ValueError(t("assistant_authoring.book_visibility_too_many_entries"))
         # Reuse the same audience, canonical-player and private-marker checks
         # as the bounded entry action, while submitting only changed patches.
         _existing, _visible_to, prepared = visibility_plan({
@@ -252,7 +253,7 @@ def authoring_tools(deps: AuthoringDependencies) -> tuple[AgentTool, ...]:
     def book_visibility_preview(args, owner):
         entries = book_entries(args["book_id"])
         if len(entries) > 1000:
-            raise ValueError("整册 visibility 最多支持 1000 条目，请按条目分批")
+            raise ValueError(t("assistant_authoring.book_visibility_too_many_entries"))
         existing, _visible_to, prepared = visibility_plan({
             **args, "entry_ids": [str(row.get("id")) for row in entries]}, owner)
         changed_count = sum(row.get("visible_to") != existing[row["id"]].get("visible_to") for row in prepared)

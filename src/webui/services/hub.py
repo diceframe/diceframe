@@ -11,6 +11,7 @@ import aiohttp
 
 from src.hub_client import HubUnavailable
 from src.plugin_host.mirrors import parse_github_repository
+from src.localization.messages import t
 
 # 作者 GitHub 仓库 Raw README 的大小上限（超出视为不可信，直接拒绝）。
 _README_RAW_MAX_BYTES = 256 * 1024
@@ -34,7 +35,7 @@ class HubDependencies:
 def _client(dependencies: HubDependencies):
     client = dependencies.client
     if client is None:
-        raise RuntimeError("DiceFrame Hub 当前未启用")
+        raise RuntimeError(t("hub.hub_disabled"))
     return client
 
 
@@ -69,7 +70,7 @@ async def update_preferences(
         dependencies.legal_accepted(state, documents)
         or legal_acceptance is not None
     ):
-        raise ValueError("启用匿名使用统计前必须先确认当前隐私政策")
+        raise ValueError(t("hub.privacy_policy_required"))
     previous = {
         "hub_telemetry_enabled": state.get("hub_telemetry_enabled", False),
         "hub_telemetry_choice_made": state.get("hub_telemetry_choice_made", False),
@@ -186,7 +187,7 @@ async def plugin_readme(dependencies: HubDependencies, plugin_id: str) -> dict[s
         "ok": False,
         "html": "",
         "markdown": "",
-        "error": hub_error or "README 暂不可用",
+        "error": hub_error or t("hub.readme_unavailable"),
         "source": {"hub": False, "github": False, "cached": False, "stale": False, "error": hub_error},
     }
 

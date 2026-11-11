@@ -1,0 +1,7 @@
+# src/webui/services/game_creation_phases.py 返回给请求方的提示。
+"en":
+  first_seat_cannot_be_unclaimed: "The first character is the host's (GM's) own seat and cannot be set to \"waiting to be claimed\"; change it to player or AI-controlled."
+  runtime_binding_failed: "Binding the ruleset runtime failed; no half-finished save was left behind."
+  runtime_binding_identity_mismatch: "The ruleset runtime binding identity does not match"
+  runtime_binding_invalid: "The ruleset runtime binding is invalid or incompatible"
+  runtime_no_versioned_binding: "The ruleset runtime does not provide a versioned state binding"

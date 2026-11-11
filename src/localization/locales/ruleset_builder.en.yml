@@ -1,0 +1,4 @@
+# src/webui/services/ruleset_builder.py 返回给请求方的提示。
+"en":
+  rule_missing: "The rule does not exist: %{rule_id}"
+  uses_generic_creation: "This rule uses the existing generic character creation flow"

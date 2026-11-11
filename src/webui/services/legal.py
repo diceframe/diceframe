@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from src.localization.messages import t
 
 
 LEGAL_VERSION = "1.1"
@@ -175,7 +176,7 @@ async def document(
             allow_cached=False,
         )
     if not text or hashlib.sha256(text.encode("utf-8")).hexdigest() != localized["sha256"]:
-        raise LegalContentUnavailable("当前法律原文校验失败")
+        raise LegalContentUnavailable(t("legal.source_verification_failed"))
     return {
         "ok": True,
         "document": document_name,
@@ -232,7 +233,7 @@ def record_acceptance(
     for name in _DOCUMENT_NAMES:
         supplied = acceptance.get(name) if isinstance(acceptance, dict) else None
         if not isinstance(supplied, dict):
-            raise ValueError("法律文件版本已更新，请重新阅读后确认")
+            raise ValueError(t("legal.version_updated_reaccept"))
         language = _language(str(supplied.get("language") or ""))
         expected = documents[name]
         localized = expected["languages"][language]
@@ -241,7 +242,7 @@ def record_acceptance(
             or supplied.get("version") != expected["version"]
             or supplied.get("sha256") != localized["sha256"]
         ):
-            raise ValueError("法律文件版本已更新，请重新阅读后确认")
+            raise ValueError(t("legal.version_updated_reaccept"))
         state[f"legal_{name}_accepted_updated_at"] = expected["updated_at"]
         state[f"legal_{name}_accepted_version"] = expected["version"]
         state[f"legal_{name}_accepted_hash"] = localized["sha256"]

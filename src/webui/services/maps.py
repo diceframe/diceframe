@@ -22,6 +22,7 @@ from src.engine.participant_view import Viewer
 from src.engine import module_hooks
 
 from src.knowledge.visibility import entry_visible_to_viewer
+from src.localization.messages import t
 
 @dataclass(frozen=True)
 class MapDependencies:
@@ -151,7 +152,7 @@ async def update_map_background(
         )
         definition = select_plugin_map(assets.get("maps", []), normalized.get("map_id", ""))
         if not definition or not public_map_definition(definition, assets).get("background"):
-            return {"ok": False, "error": "内容包地图背景不存在或不适用于当前世界"}
+            return {"ok": False, "error": t("maps.content_pack_background_unavailable")}
     instance.set_map_background(normalized)
     await dependencies.save_instance(instance)
     return {

@@ -10,6 +10,7 @@ from src.content_modules.refs import ContentRefError
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import content_binding
 from src.webui.services._common import _is_safe_world_id, resolve_default_scene_image
+from src.localization.messages import t
 
 GameKey = tuple[str, ...]
 
@@ -97,27 +98,27 @@ class GameMediaService:
         if not instance:
             return _failure("GAME_NOT_FOUND", "游戏不存在")
         if not _is_safe_world_id(world_id):
-            return _failure("INVALID_WORLD_ID", "未指定或非法 world_id")
+            return _failure("INVALID_WORLD_ID", t("game_media.world_id_missing_or_invalid"))
         binding = dict(getattr(instance, "adventure_binding", {}) or {})
         if binding and str(binding.get("world_id") or "") != world_id:
             return _failure(
                 "ADVENTURE_WORLD_LOCKED",
-                "当前存档绑定了固定世界冒险；请新建沙盒对局后再切换世界书。",
+                t("game_media.fixed_world_adventure"),
             )
         language = str(getattr(instance, "language", "") or "")
         try:
             world_name = self._world_display_name(world_id, language)
         except Exception as exc:
-            return _failure("WORLD_LOAD_FAILED", f"加载世界失败: {exc}")
+            return _failure("WORLD_LOAD_FAILED", t("game_media.world_load_failed", exc=exc))
         if world_name is None:
-            return _failure("WORLD_NOT_FOUND", f"世界 {world_id} 不存在")
+            return _failure("WORLD_NOT_FOUND", t("game_media.world_missing", world_id=world_id))
         async with instance.authoritative_write() as write_entered, instance._lock:
             if not write_entered:
-                return _failure("REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试")
+                return _failure("REWRITE_IN_PROGRESS", t("game_media.rewriting_wait_and_retry"))
             if self._instance(game_key) is not instance:
-                return _failure("STALE_RUN", "对局已重开，请刷新后重试")
+                return _failure("STALE_RUN", t("game_media.game_restarted_refresh_and_retry"))
             if instance._process_lock.locked():
-                return _failure("ROUND_PROCESSING", "回合正在处理中，请稍后重试")
+                return _failure("ROUND_PROCESSING", t("game_media.round_processing_retry_later"))
             # world_name is the game's title, shown as the table heading.
             # Switching the world book must not rename a user-titled game; a
             # title that merely names the old world (its id or display name,
@@ -173,7 +174,7 @@ class GameMediaService:
             if not selected:
                 return {
                     "ok": False,
-                    "error": "请选择冒险头图或恢复内容默认",
+                    "error": t("game_media.choose_adventure_cover_or_default"),
                 }
             materialized = self._dependencies.materialize_scene_image(selected)
         except ValueError as exc:

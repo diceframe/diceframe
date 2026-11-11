@@ -1,0 +1,7 @@
+# src/webui/services/game_preferences.py 返回给请求方的提示。
+"en":
+  game_restarted_refresh: "The game was restarted; please refresh"
+  rewriting_retry_later: "History is being rewritten; try again later"
+  round_generating: "This round is being generated; change the preferences after it finishes"
+  save_failed_settings_kept: "Saving the preferences failed; the original settings were kept"
+  version_unsupported: "The game preferences version is not supported"

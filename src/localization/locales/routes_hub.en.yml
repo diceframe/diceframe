@@ -1,0 +1,11 @@
+# src/webui/routes/hub.py 返回给请求方的提示。
+"en":
+  body_not_json: "The request body is not valid JSON"
+  hub_unreachable: "DiceFrame Hub cannot be reached right now; check your network and try again"
+  lang_not_string: "lang must be a string"
+  legal_acceptance_not_object: "legal_acceptance must be an object"
+  peer_count_range: "peer_count must be a whole number from 2 to 6"
+  readme_timeout: "Reading the README timed out"
+  stars_range: "stars must be a whole number from 1 to 5"
+  tags_not_string_array: "tags must be an array of strings"
+  telemetry_enabled_not_boolean: "telemetry_enabled must be a boolean"

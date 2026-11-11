@@ -1,0 +1,10 @@
+# src/webui/services/turns.py 返回给请求方的提示。
+"zh-CN":
+  action_limit_reached: "本回合已达行动上限（%{max_actions_per_turn} 条）"
+  advance_gm_only: "仅 GM 可推进"
+  authoritative_combat_active: "当前处于权威战斗，请在专业战斗工具中选择合法动作"
+  check_choice_pending: "检定已完成，请先处理检定选择再继续叙事"
+  economy_proposal_pending: "请先处理待确认的经济提案，再继续本局叙事"
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  rewriting_wait_before_action: "GM 正在重写历史回合，请等待完成后再提交行动"
+  story_ended: "故事已经抵达结局，不能再提交行动"

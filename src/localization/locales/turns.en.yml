@@ -1,0 +1,10 @@
+# src/webui/services/turns.py 返回给请求方的提示。
+"en":
+  action_limit_reached: "This round has reached the action limit (%{max_actions_per_turn})"
+  advance_gm_only: "Only the GM can advance"
+  authoritative_combat_active: "An authoritative combat is in progress; choose a legal action in the professional combat tool"
+  check_choice_pending: "The check is finished; resolve the check choice before continuing the narration"
+  economy_proposal_pending: "Resolve the pending economy proposal before continuing this game's narration"
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  rewriting_wait_before_action: "The GM is rewriting an earlier round; wait for it to finish before submitting an action"
+  story_ended: "The story has reached its ending; no more actions can be submitted"

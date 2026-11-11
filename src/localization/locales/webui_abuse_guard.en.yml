@@ -1,0 +1,4 @@
+# src/webui/abuse_guard.py 返回给请求方的提示。
+"en":
+  body_read_timeout: "Reading the request body timed out"
+  rate_limited: "Too many requests. To keep repeated requests from affecting the game, this one was temporarily blocked. Wait about %{retry_after} seconds and try again."

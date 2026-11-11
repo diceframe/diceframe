@@ -14,6 +14,7 @@ from src.webui.services._common import (
     MAX_LOREBOOK_CHARS,
     MAX_SEED_CHARS,
 )
+from src.localization.messages import t
 
 
 def _get_api(request: web.Request) -> WebAPI:
@@ -33,4 +34,4 @@ def require_content_owner(request: web.Request) -> web.Response | None:
 def _require_confirmed_request(request: web.Request) -> web.Response | None:
     if str(request.headers.get("X-TRPG-Confirm", "")).lower() in {"true", "yes", "1"}:
         return None
-    return web.json_response({"ok": False, "error": "缺少确认头"}, status=403)
+    return web.json_response({"ok": False, "error": t("routes__common.confirm_header_missing")}, status=403)

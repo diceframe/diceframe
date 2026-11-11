@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from src.engine.modules import check_reveals, checks
+from src.localization.messages import t
 
 GameKey = tuple[str, ...]
 
@@ -51,19 +52,19 @@ class CheckRevealService:
             return {"ok": False, "error": "游戏不存在", "status": 404}
         uid = str(uid or "")
         if not uid:
-            return {"ok": False, "error": "未登录", "status": 403}
+            return {"ok": False, "error": t("check_reveals.not_logged_in"), "status": 403}
         check_id = str(check_id or "")
         async with inst.authoritative_write() as entered:
             if not entered:
-                return {"ok": False, "error_code": "REWRITE_IN_PROGRESS", "error": "GM 正在重写历史回合，请等待完成后重试", "status": 409}
+                return {"ok": False, "error_code": "REWRITE_IN_PROGRESS", "error": t("check_reveals.rewriting_wait_and_retry"), "status": 409}
             if self.d.get_instance(key) is not inst:
-                return {"ok": False, "error_code": "STALE_RUN", "error": "对局已重开，请刷新后重试", "status": 409}
+                return {"ok": False, "error_code": "STALE_RUN", "error": t("check_reveals.game_restarted_refresh_and_retry"), "status": 409}
             assert inst is not None
             check = _find_check(inst, check_id)
             if check is None:
-                return {"ok": False, "error": "检定不存在", "status": 404}
+                return {"ok": False, "error": t("check_reveals.check_missing"), "status": 404}
             if uid != str(inst.gm_uid) and uid != str(check.get("actor_uid") or ""):
-                return {"ok": False, "error": "只有行动者或 GM 可以揭示", "status": 403}
+                return {"ok": False, "error": t("check_reveals.actor_or_gm_only"), "status": 403}
             existing = check_reveals.reveal_record(inst, check_id)
             already = existing is not None
             if not already:

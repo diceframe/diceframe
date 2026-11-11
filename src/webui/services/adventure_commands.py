@@ -9,6 +9,7 @@ from collections.abc import Callable, Awaitable
 from typing import Any
 
 from src.engine.modules import adventure_runtime_state, economy_state
+from src.localization.messages import t
 
 logger = logging.getLogger('trpg')
 
@@ -27,10 +28,10 @@ async def execute(deps: AdventureCommandDependencies, instance: Any, body: dict,
                   actor_uid: str, *, is_gm: bool) -> dict:
     kind = body['type']
     if kind == 'adventure.node.complete' and not is_gm:
-        return {'ok': False, 'code': 'GM_ONLY', 'error': '只有 GM 可以确认冒险节点完成'}
+        return {'ok': False, 'code': 'GM_ONLY', 'error': t("adventure_commands.confirm_gm_only")}
     if kind == 'adventure.completion_suggestion.dismiss':
         if not is_gm:
-            return {'ok': False, 'code': 'GM_ONLY', 'error': '只有 GM 可以忽略冒险节点建议'}
+            return {'ok': False, 'code': 'GM_ONLY', 'error': t("adventure_commands.dismiss_gm_only")}
         if set(body) != {'type', 'proposal_id'}:
             return {'ok': False, 'code': 'INVALID_ADVENTURE_COMMAND', 'error': 'unexpected adventure command field'}
         proposal_id = body.get('proposal_id')
@@ -55,14 +56,14 @@ async def execute(deps: AdventureCommandDependencies, instance: Any, body: dict,
             try:
                 node_id = adventure_runtime_state.dismiss_completion_suggestion(instance, proposal_id)
                 if node_id is None:
-                    return {'ok': False, 'code': 'SUGGESTION_NOT_FOUND', 'error': '冒险节点建议已处理或不存在'}
+                    return {'ok': False, 'code': 'SUGGESTION_NOT_FOUND', 'error': t("adventure_commands.suggestion_handled_or_missing")}
                 await deps.save(instance)
             except BaseException as exc:
                 adventure_runtime_state.replace_progress(instance, before)
                 if isinstance(exc, asyncio.CancelledError) or not isinstance(exc, Exception):
                     raise
                 logger.exception('Adventure suggestion dismissal failed and was restored')
-                return {'ok': False, 'code': 'ADVENTURE_NODE_FAILED', 'error': '保存失败，建议状态已恢复，请重试'}
+                return {'ok': False, 'code': 'ADVENTURE_NODE_FAILED', 'error': t("adventure_commands.save_failed_suggestion_restored")}
         return {'ok': True, 'result': {'completion_suggestion_dismissed': {'proposal_id': proposal_id, 'node_id': node_id}}}
     if kind not in {'adventure.node.complete', 'adventure.choice.request'}:
         return {'ok': False, 'code': 'INVALID_ADVENTURE_COMMAND', 'error': 'unknown adventure command'}
@@ -107,5 +108,5 @@ async def execute(deps: AdventureCommandDependencies, instance: Any, body: dict,
             if isinstance(exc, (ValueError, KeyError, TypeError)):
                 return {'ok': False, 'code': 'ADVENTURE_NODE_REJECTED', 'error': str(exc)}
             logger.exception('Adventure command failed and was restored')
-            return {'ok': False, 'code': 'ADVENTURE_NODE_FAILED', 'error': '冒险结算失败，状态已恢复，请重试'}
+            return {'ok': False, 'code': 'ADVENTURE_NODE_FAILED', 'error': t("adventure_commands.settlement_failed_state_restored")}
     return {'ok': True, 'result': {'adventure_node' if kind == 'adventure.node.complete' else 'adventure_choice_request': result}}

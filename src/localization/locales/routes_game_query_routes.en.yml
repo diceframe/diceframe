@@ -1,0 +1,3 @@
+# src/webui/routes/game_query_routes.py 返回给请求方的提示。
+"en":
+  paging_must_be_integer: "Paging parameters must be whole numbers"

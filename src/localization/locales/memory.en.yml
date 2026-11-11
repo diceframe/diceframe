@@ -1,0 +1,3 @@
+# src/webui/services/memory.py 返回给请求方的提示。
+"en":
+  memory_missing: "The memory does not exist"

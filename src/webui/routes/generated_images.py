@@ -8,6 +8,7 @@ from src.imagegen import IMAGE_PURPOSES, ImageGenerationError, game_image_owner_
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.viewer import viewer_for
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 def _effective_game_user_id(request: web.Request, instance) -> str:
@@ -48,20 +49,20 @@ async def api_optimize_image_prompt(request: web.Request) -> web.Response:
     query = getattr(request, "query", {})
     if query.get("user") or query.get("share"):
         return web.json_response(
-            {"ok": False, "error": "玩家分享页不可使用 AI 优化提示词"},
+            {"ok": False, "error": t("routes_generated_images.optimize_not_on_share_page")},
             status=403,
         )
     if request.get(ACCESS_PASSWORD_CONFIGURED_KEY, False) and not request.get(
         "owner_authenticated", False,
     ):
         return web.json_response(
-            {"ok": False, "error": "仅管理员可以使用 AI 优化提示词"},
+            {"ok": False, "error": t("routes_generated_images.optimize_admin_only")},
             status=403,
         )
     body = await request.json() if request.can_read_body else {}
     if not isinstance(body, dict):
         return web.json_response(
-            {"ok": False, "error": "优化请求必须是 JSON 对象"}, status=400,
+            {"ok": False, "error": t("routes_generated_images.optimize_body_not_object")}, status=400,
         )
     try:
         result = await _get_api(request).optimize_image_prompt(
@@ -77,13 +78,13 @@ async def api_optimize_image_prompt(request: web.Request) -> web.Response:
 async def api_generate_image(request: web.Request) -> web.Response:
     body = await request.json() if request.can_read_body else {}
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "生图请求必须是 JSON 对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.generate_body_not_object")}, status=400)
     purpose = str(body.get("purpose") or "freeform").strip().lower()
     if purpose not in IMAGE_PURPOSES:
-        return web.json_response({"ok": False, "error": "不支持的图片用途"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.unsupported_purpose")}, status=400)
     prompt = str(body.get("prompt") or "").strip()
     if not prompt:
-        return web.json_response({"ok": False, "error": "请填写画面描述"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.description_required")}, status=400)
     api = _get_api(request)
     game_key = str(request.match_info.get("game_key") or body.get("game_key") or "").strip()
     owner_type = "library"
@@ -96,13 +97,13 @@ async def api_generate_image(request: web.Request) -> web.Response:
         is_gm = bool(user_id and user_id == inst.gm_uid)
         is_member = bool(is_gm or user_id in inst.players)
         if not is_member:
-            return web.json_response({"ok": False, "error": "未加入本局，无法生成图片"}, status=403)
+            return web.json_response({"ok": False, "error": t("routes_generated_images.generate_requires_membership")}, status=403)
         if purpose in {"scene", "map", "item"} and not is_gm:
-            return web.json_response({"ok": False, "error": "仅 GM 可生成该类型图片"}, status=403)
+            return web.json_response({"ok": False, "error": t("routes_generated_images.image_type_gm_only")}, status=403)
         owner_type = "game"
         owner_id = game_image_owner_id(inst.game_key)
     elif request.get(ACCESS_PASSWORD_CONFIGURED_KEY, False) and not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": "仅管理员可以生成系统图片"}, status=403)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.system_image_admin_only")}, status=403)
     try:
         result = await api.generate_generated_image(
             prompt=prompt,
@@ -127,10 +128,10 @@ async def api_generated_image_file(request: web.Request) -> web.StreamResponse:
             return web.json_response({"error": "游戏不存在"}, status=404)
         user_id = _effective_game_user_id(request, inst)
         if not user_id or (user_id != inst.gm_uid and user_id not in inst.players):
-            return web.json_response({"error": "未加入本局，无法查看生成图片"}, status=403)
+            return web.json_response({"error": t("routes_generated_images.image_requires_membership")}, status=403)
     path = api.generated_image_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": "生成图片不存在"}, status=404)
+        return web.json_response({"error": t("routes_generated_images.generated_image_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -150,7 +151,7 @@ async def api_game_generated_images(request: web.Request) -> web.Response:
     except KeyError:
         return web.json_response({"error": "游戏不存在"}, status=404)
     except PermissionError:
-        return web.json_response({"error": "未加入本局，无法查看生成历史"}, status=403)
+        return web.json_response({"error": t("routes_generated_images.history_requires_membership")}, status=403)
     return web.json_response({"images": images})
 
 
@@ -168,19 +169,19 @@ async def api_generated_image_as_map_background(request: web.Request) -> web.Res
 async def api_generate_current_round_image(request: web.Request) -> web.Response:
     body = await request.json() if request.can_read_body else {}
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "生图请求必须是 JSON 对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.generate_body_not_object")}, status=400)
     combine_references = body.get("combine_avatar_references", True)
     if not isinstance(combine_references, bool):
-        return web.json_response({"ok": False, "error": "拼接头像选项必须是布尔值"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.avatar_option_not_boolean")}, status=400)
     try:
         round_number = int(body.get("round") or 0)
     except (TypeError, ValueError):
         round_number = 0
     panel_count = body.get("panel_count")
     if panel_count is not None and type(panel_count) is not int:
-        return web.json_response({"ok": False, "error": "分镜格数必须是 1 到 6 的整数"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.panel_count_not_integer")}, status=400)
     if panel_count is not None and not 1 <= panel_count <= 6:
-        return web.json_response({"ok": False, "error": "分镜格数必须在 1 到 6 之间"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.panel_count_out_of_range")}, status=400)
     game_key = str(request.match_info.get("game_key") or "")
     instance = _get_api(request).get_game_instance(game_key)
     result = await _get_api(request).generate_current_round_image(
@@ -202,12 +203,12 @@ async def api_storyboard_draft(request: web.Request) -> web.Response:
 async def api_analyze_storyboard(request: web.Request) -> web.Response:
     body = await request.json() if request.can_read_body else {}
     if not isinstance(body, dict):
-        return web.json_response({"ok": False, "error": "分镜请求必须是 JSON 对象"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.storyboard_body_not_object")}, status=400)
     requested_count = body.get("panel_count")
     if requested_count is not None and type(requested_count) is not int:
-        return web.json_response({"ok": False, "error": "分镜格数必须是 1 到 6 的整数"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.panel_count_not_integer")}, status=400)
     if requested_count is not None and not 1 <= requested_count <= 6:
-        return web.json_response({"ok": False, "error": "分镜格数必须在 1 到 6 之间"}, status=400)
+        return web.json_response({"ok": False, "error": t("routes_generated_images.panel_count_out_of_range")}, status=400)
     game_key = str(request.match_info["game_key"])
     instance = _get_api(request).get_game_instance(game_key)
     result = await _get_api(request).analyze_storyboard(game_key, _effective_game_user_id(request, instance), int((body or {}).get("round") or 0), requested_count)
