@@ -130,6 +130,7 @@ S0-A 子职授予主干
 | S0-F37 | 最终机器覆盖审计 | 动态 198 行主矩阵、48 行成长项、3/28/10/6 专项矩阵与真实 JUnit 证据 | `S0F37_COVERAGE_AUDIT_TASK_SPEC_2026-11-07.md` | 24 | 待执行 |
 | S0-G1 | 装备手部容量与实例身份 | 两只手各持一把武器；同款两把可区分；Two-Handed 与盾牌互斥 | `S0G1_EQUIPMENT_HANDS_INSTANCE_IDENTITY_TASK_SPEC_2026-11-11.md` | 27 | **已交付**（A `8a888d4e`、B `80d6ad46`）。报告见任务书 §9。**F7 与 F8 的共同硬前置已解除**，理由见 §16 |
 | S0-G2 | Light 额外攻击、Nick 与 Dual Wielder | Light 额外攻击、动作经济与每回合记账；Nick 改挂 Attack action；Dual Wielder 专长 | `S0G2_LIGHT_EXTRA_ATTACK_TASK_SPEC_2026-11-11.md` | 34 | **已交付**（A `41fcbefe`、B `8e497158`、C `f4ab1d75`、投影修正 `c54c486b`）。报告见任务书 §9：页码未实读、`parameters` 未按契约写入，两项偏差已记录。解除 F7（Nick）与 F8（TWF）的定义缺口：Nick 已自动化，TWF 的完整调整值判定点已就位 |
+| S0-G3 | 成长记录与缺项补齐 | `progression.advancement_records` 账本；子职/专长/ASI/法术四类缺项检测；补齐事务与派生重算 | `S0G3_GROWTH_RECORDS_TASK_SPEC_2026-11-11.md` | 28 | 待执行。**交付载体并入 S0-A 的 #734**，不新开 PR：替换 S0-A「子职只在授予级可提交」的增量式判定，同时补上专长等级、ASI 来源与法术准备位检测。不新增内容声明，所有「应有几项」读既有目录，因此不引 PDF 页码 |
 
 ## 4. 每份任务书的固定结构
 
