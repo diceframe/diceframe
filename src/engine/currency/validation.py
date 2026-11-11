@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.engine.currency.models import SCHEMA_VERSION, CurrencySpec, CurrencyUnit
+from src.localization.messages import t
 
 _LEGACY_BASE_UNIT_ID = "unit"
 
@@ -50,13 +51,13 @@ def validate_declared_currency_system(raw: Any) -> None:
     assert isinstance(raw, dict)
     version = raw.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
-        raise CurrencySystemError(f"currency_system.schema_version 非法: {version!r}")
+        raise CurrencySystemError(t("engine_currency_validation.schema_version_invalid", version=repr(version)))
     if version == SCHEMA_VERSION:
         validate_currency_system(raw)
         return
     if version != 1:
         raise CurrencySystemError(
-            f"currency_system.schema_version 仅支持 1（legacy）或 {SCHEMA_VERSION}，收到 {version}",
+            t("engine_currency_validation.declared_schema_version_unsupported", schema_version=SCHEMA_VERSION, version=version),
         )
 
 
@@ -79,57 +80,57 @@ def validate_currency_system(raw: Any) -> CurrencySpec:
     """
 
     if not isinstance(raw, dict):
-        raise CurrencySystemError("currency_system 必须是对象")
+        raise CurrencySystemError(t("engine_currency_validation.not_object"))
     version = raw.get("schema_version")
     if version is None:
-        raise CurrencySystemError("currency_system 缺少 schema_version")
+        raise CurrencySystemError(t("engine_currency_validation.schema_version_required"))
     # 显式声明必须受支持且为整型：bool/float/字符串等一切歧义类型 fail-fast，
     # 不做 int() 截断或解析猜测。
     if isinstance(version, bool) or not isinstance(version, int):
-        raise CurrencySystemError(f"currency_system.schema_version 非法: {version!r}")
+        raise CurrencySystemError(t("engine_currency_validation.schema_version_invalid", version=repr(version)))
     version_int = version
     if version_int != SCHEMA_VERSION:
         raise CurrencySystemError(
-            f"currency_system.schema_version 仅支持 {SCHEMA_VERSION}，收到 {version_int}",
+            t("engine_currency_validation.schema_version_unsupported", schema_version=SCHEMA_VERSION, version_int=version_int),
         )
 
     raw_units = raw.get("units")
     if not isinstance(raw_units, list) or not raw_units:
-        raise CurrencySystemError("currency_system.units 必须是非空数组")
+        raise CurrencySystemError(t("engine_currency_validation.units_empty"))
     units: list[CurrencyUnit] = []
     seen_ids: set[str] = set()
     for index, item in enumerate(raw_units):
         if not isinstance(item, dict):
-            raise CurrencySystemError(f"units[{index}] 必须是对象")
+            raise CurrencySystemError(t("engine_currency_validation.unit_not_object", index=index))
         unit_id = str(item.get("id") or "").strip()
         name = str(item.get("name") or "").strip()
         if not unit_id:
-            raise CurrencySystemError(f"units[{index}] 缺少 id")
+            raise CurrencySystemError(t("engine_currency_validation.unit_id_required", index=index))
         if not name:
-            raise CurrencySystemError(f"units[{index}] 缺少 name")
+            raise CurrencySystemError(t("engine_currency_validation.unit_name_required", index=index))
         if unit_id in seen_ids:
-            raise CurrencySystemError(f"units[{index}] unit id 重复: {unit_id}")
+            raise CurrencySystemError(t("engine_currency_validation.unit_id_duplicate", index=index, unit_id=unit_id))
         seen_ids.add(unit_id)
         rate_raw = item.get("rate")
         if isinstance(rate_raw, float) or not isinstance(rate_raw, int):
-            raise CurrencySystemError(f"unit {unit_id} 的 rate 必须是整数，收到 {rate_raw!r}")
+            raise CurrencySystemError(t("engine_currency_validation.unit_rate_not_integer", unit_id=unit_id, rate_raw=repr(rate_raw)))
         if rate_raw <= 0:
-            raise CurrencySystemError(f"unit {unit_id} 的 rate 必须 > 0，收到 {rate_raw}")
+            raise CurrencySystemError(t("engine_currency_validation.unit_rate_not_positive", unit_id=unit_id, rate_raw=rate_raw))
         symbol = str(item.get("symbol") or "").strip()
         units.append(CurrencyUnit(id=unit_id, name=name, rate=rate_raw, symbol=symbol))
 
     base_unit = str(raw.get("base_unit") or "").strip()
     if not base_unit:
-        raise CurrencySystemError("currency_system 缺少 base_unit")
+        raise CurrencySystemError(t("engine_currency_validation.base_unit_required"))
     if base_unit not in seen_ids:
-        raise CurrencySystemError(f"base_unit 不存在: {base_unit}")
+        raise CurrencySystemError(t("engine_currency_validation.base_unit_missing", base_unit=base_unit))
     base = next(u for u in units if u.id == base_unit)
     if base.rate != 1:
-        raise CurrencySystemError(f"base_unit {base_unit} 的 rate 必须为 1，收到 {base.rate}")
+        raise CurrencySystemError(t("engine_currency_validation.base_unit_rate_not_one", base_unit=base_unit, rate=base.rate))
 
     display_unit = str(raw.get("display_unit") or "").strip() or base_unit
     if display_unit not in seen_ids:
-        raise CurrencySystemError(f"display_unit 不存在: {display_unit}")
+        raise CurrencySystemError(t("engine_currency_validation.display_unit_missing", display_unit=display_unit))
 
     return CurrencySpec(
         schema_version=SCHEMA_VERSION,

@@ -1,0 +1,7 @@
+# src/engine/character_utils.py 返回给请求方的提示。
+"zh-CN":
+  card_not_object: "JSON 解析失败: 角色卡必须是对象"
+  file_missing: "文件不存在"
+  json_parse_failed: "JSON 解析失败: %{exc}"
+  png_without_card: "PNG 中未找到角色卡数据"
+  roll_attributes_exhausted: "无法在 %{max_roll_attempts} 次尝试内生成有效属性(keys=%{keys}, total=%{target}, min_total=%{min_total}, max_total=%{max_total})"

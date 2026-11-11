@@ -13,6 +13,7 @@ from src.engine import module_hooks
 from src.engine.language import normalize_language
 from src.engine.narrative_perspective import validate_narrative_perspective
 from src.engine.modules import economy_state, game_config, room_access
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.engine.game_instance import GameInstance, GameState
@@ -78,21 +79,21 @@ def configure_session(
     if luck_timeout_seconds is not None:
         luck_timeout_seconds = int(luck_timeout_seconds)
         if not 0 <= luck_timeout_seconds <= 3600:
-            raise ValueError("幸运超时需在 0..3600 秒之间（0=禁用）")
+            raise ValueError(t("engine_game_configuration.luck_timeout_range"))
     if dice_reveal_mode is not None and dice_reveal_mode not in {"auto", "click"}:
-        raise ValueError("骰子揭示方式仅支持 auto 或 click")
+        raise ValueError(t("engine_game_configuration.dice_reveal_invalid"))
     if economy_reward_policy is not None:
         from src.engine.economy import normalize_reward_policy
 
         economy_state.require_writable(instance)
         if not isinstance(economy_reward_policy, dict):
-            raise ValueError("奖励策略无效")
+            raise ValueError(t("engine_game_configuration.reward_policy_invalid"))
         if not str(economy_reward_policy.get("mode") or "").strip():
             economy_reward_policy = {}
         else:
             normalized = normalize_reward_policy(economy_reward_policy)
             if not normalized:
-                raise ValueError("奖励策略无效（mode 或 auto_reward_cap 不合法）")
+                raise ValueError(t("engine_game_configuration.reward_policy_fields_invalid"))
             economy_reward_policy = normalized
 
     if solo_mode is not None:

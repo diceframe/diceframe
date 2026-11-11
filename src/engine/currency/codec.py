@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 
 from src.engine.currency.models import CurrencySpec, CurrencyUnit
 from src.engine.currency.validation import CurrencySystemError
+from src.localization.messages import t
 
 # 纯十进制字面量：拒绝负号、空白、指数（1e2）、NaN/Infinity 等一切歧义输入。
 _DECIMAL_RE = re.compile(r"\d+(?:\.\d+)?")
@@ -20,14 +21,14 @@ _MAX_FORMAT_DECIMALS = 8
 
 def _as_decimal_text(value: str | int) -> str:
     if isinstance(value, bool):
-        raise CurrencySystemError(f"货币金额非法: {value!r}")
+        raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value)))
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
         text = value.strip()
         if text and _DECIMAL_RE.fullmatch(text):
             return text
-    raise CurrencySystemError(f"货币金额非法: {value!r}")
+    raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value)))
 
 
 def parse_currency_amount(
@@ -43,22 +44,22 @@ def parse_currency_amount(
     """
 
     if not isinstance(spec, CurrencySpec):
-        raise CurrencySystemError("缺少规则货币结构，无法解析金额")
+        raise CurrencySystemError(t("engine_currency_codec.currency_system_missing"))
     unit = spec.unit(str(unit_id or "").strip())
     if unit is None:
-        raise CurrencySystemError(f"未知货币单位: {unit_id!r}")
+        raise CurrencySystemError(t("engine_currency_codec.unknown_unit", unit_id=repr(unit_id)))
     text = _as_decimal_text(value)
     try:
         canonical = Decimal(text) * unit.rate
     except (InvalidOperation, ValueError):
-        raise CurrencySystemError(f"货币金额非法: {value!r}") from None
+        raise CurrencySystemError(t("engine_currency_codec.amount_invalid", amount=repr(value))) from None
     if canonical != canonical.to_integral_value():
         raise CurrencySystemError(
-            f"金额 {text} {unit.name} 无法精确转换为整数个 {spec.base.name}",
+            t("engine_currency_codec.amount_not_exact", text=text, unit=unit.name, base_unit=spec.base.name),
         )
     canonical_int = int(canonical)
     if canonical_int <= 0:
-        raise CurrencySystemError("货币金额必须大于 0")
+        raise CurrencySystemError(t("engine_currency_codec.amount_not_positive"))
     return canonical_int
 
 
@@ -86,7 +87,7 @@ def format_currency_amount(amount: int, spec: CurrencySpec) -> str:
     """
 
     if isinstance(amount, bool) or not isinstance(amount, int):
-        raise CurrencySystemError(f"canonical 金额必须是整数: {amount!r}")
+        raise CurrencySystemError(t("engine_currency_codec.canonical_amount_not_integer", amount=repr(amount)))
     sign = "-" if amount < 0 else ""
     value = abs(int(amount))
     display = spec.display

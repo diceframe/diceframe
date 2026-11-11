@@ -18,6 +18,7 @@ from src.engine import progression
 from src.engine import module_hooks
 from src.engine import check_decisions
 from src.engine.modules import checks, session_stats
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -38,10 +39,10 @@ async def resolve_luck_decision(
             None,
         )
         if not target:
-            return {"ok": False, "code": "CHECK_NOT_FOUND", "error": "检定不存在或已过期"}
+            return {"ok": False, "code": "CHECK_NOT_FOUND", "error": t("engine_luck_resolver.check_missing_or_expired")}
         owner_uid = str(target.get("actor_uid") or "")
         if actor_uid != owner_uid and not (allow_gm and actor_uid == instance.gm_uid):
-            return {"ok": False, "code": "LUCK_FORBIDDEN", "error": "只能处理自己的幸运选择"}
+            return {"ok": False, "code": "LUCK_FORBIDDEN", "error": t("engine_luck_resolver.own_choice_only")}
 
         desired = "spent" if spend else "declined"
         current_decision = str(target.get("luck_decision") or "")
@@ -52,11 +53,11 @@ async def resolve_luck_decision(
                     "already_resolved": True,
                     "check_result": dict(target),
                 }
-            return {"ok": False, "code": "LUCK_ALREADY_RESOLVED", "error": "该检定的幸运选择已经处理"}
+            return {"ok": False, "code": "LUCK_ALREADY_RESOLVED", "error": t("engine_luck_resolver.choice_already_handled")}
         if instance.state != GameState.ACTIVE_JUDGMENT or not checks.round_checks_prepared(instance):
-            return {"ok": False, "code": "LUCK_NOT_PENDING", "error": "当前没有等待处理的幸运选择"}
+            return {"ok": False, "code": "LUCK_NOT_PENDING", "error": t("engine_luck_resolver.no_pending_choice")}
         if current_decision != "pending":
-            return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不能消耗幸运"}
+            return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": t("engine_luck_resolver.luck_not_allowed")}
         progression.require_writable(instance)
         session_stats.require_writable(instance)
         checks.require_writable(instance)
@@ -65,13 +66,13 @@ async def resolve_luck_decision(
 
         if spend:
             if str(target.get("dice") or "").lower() != "d100" or str(target.get("verdict") or "") != "失败":
-                return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不能消耗幸运"}
+                return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": t("engine_luck_resolver.luck_not_allowed")}
             roll_value = int(target.get("roll", 0) or 0)
             # 规则要求困难/极难成功时，幸运要补到所需档位的上限，而不是技能值。
             threshold = int(target.get("required_threshold") or target.get("threshold", 0) or 0)
             cost = roll_value - threshold
             if cost <= 0:
-                return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": "该检定不需要消耗幸运"}
+                return {"ok": False, "code": "LUCK_NOT_AVAILABLE", "error": t("engine_luck_resolver.luck_not_needed")}
             character_sheet = instance.get_character_sheet(owner_uid)
             resource = get_resource(character_sheet, "luck")
             current_luck = int((resource or {}).get("current", character_sheet.get("luck", 0)) or 0)
@@ -79,7 +80,7 @@ async def resolve_luck_decision(
                 return {
                     "ok": False,
                     "code": "LUCK_INSUFFICIENT",
-                    "error": f"幸运不足：需要 {cost} 点，当前只有 {current_luck} 点",
+                    "error": t("engine_luck_resolver.insufficient_luck", cost=cost, current_luck=current_luck),
                 }
             remaining = apply_resource_delta(character_sheet, "luck", -cost, rule)
             target["original_verdict"] = target.get("verdict")
@@ -151,9 +152,9 @@ async def system_decline_luck(instance: GameInstance, check_id: str) -> dict:
             None,
         )
         if not target:
-            return {"ok": False, "code": "CHECK_NOT_FOUND", "error": "检定不存在或已过期"}
+            return {"ok": False, "code": "CHECK_NOT_FOUND", "error": t("engine_luck_resolver.check_missing_or_expired")}
         if str(target.get("luck_decision") or "") != "pending":
-            return {"ok": False, "code": "LUCK_ALREADY_RESOLVED", "error": "该检定的幸运选择已经处理"}
+            return {"ok": False, "code": "LUCK_ALREADY_RESOLVED", "error": t("engine_luck_resolver.choice_already_handled")}
         progression.require_writable(instance)
         session_stats.require_writable(instance)
         checks.require_writable(instance)
@@ -179,7 +180,7 @@ async def system_decline_push(instance: GameInstance, check_id: str) -> dict:
         progression.require_writable(instance)
         session_stats.require_writable(instance)
         if not check_decisions.close_timed_out(instance, check_id):
-            return {"ok": False, "code": "PUSH_NOT_PENDING", "error": "该检定没有等待处理的孤注一掷"}
+            return {"ok": False, "code": "PUSH_NOT_PENDING", "error": t("engine_luck_resolver.no_pending_push")}
         target = next(
             (c for c in checks.last_checks(instance) if str(c.get("check_id") or "") == check_id),
             None,

@@ -1,0 +1,18 @@
+# src/engine/currency/validation.py 返回给请求方的提示。
+"zh-CN":
+  base_unit_missing: "base_unit 不存在: %{base_unit}"
+  base_unit_rate_not_one: "base_unit %{base_unit} 的 rate 必须为 1，收到 %{rate}"
+  base_unit_required: "currency_system 缺少 base_unit"
+  declared_schema_version_unsupported: "currency_system.schema_version 仅支持 1（legacy）或 %{schema_version}，收到 %{version}"
+  display_unit_missing: "display_unit 不存在: %{display_unit}"
+  not_object: "currency_system 必须是对象"
+  schema_version_invalid: "currency_system.schema_version 非法: %{version}"
+  schema_version_required: "currency_system 缺少 schema_version"
+  schema_version_unsupported: "currency_system.schema_version 仅支持 %{schema_version}，收到 %{version_int}"
+  unit_id_duplicate: "units[%{index}] unit id 重复: %{unit_id}"
+  unit_id_required: "units[%{index}] 缺少 id"
+  unit_name_required: "units[%{index}] 缺少 name"
+  unit_not_object: "units[%{index}] 必须是对象"
+  unit_rate_not_integer: "unit %{unit_id} 的 rate 必须是整数，收到 %{rate_raw}"
+  unit_rate_not_positive: "unit %{unit_id} 的 rate 必须 > 0，收到 %{rate_raw}"
+  units_empty: "currency_system.units 必须是非空数组"

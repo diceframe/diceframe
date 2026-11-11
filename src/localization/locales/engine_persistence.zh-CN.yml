@@ -1,0 +1,16 @@
+# src/engine/persistence.py 返回给请求方的提示。
+"zh-CN":
+  archive_duplicate_files: "存档包包含重复文件"
+  archive_encrypted: "存档包不支持加密文件"
+  archive_invalid_files: "存档包包含非法文件"
+  archive_missing_cover: "存档包缺少冒险头图资产"
+  archive_missing_map_background: "存档包缺少地图背景资产"
+  archive_missing_state: "存档包缺少 state.json"
+  archive_not_zip: "存档包不是有效的 zip"
+  archive_parse_failed: "存档包解析失败：%{exc}"
+  archive_too_large: "存档包解压后过大"
+  cover_import_unsupported: "当前环境不支持导入冒险头图资产"
+  map_background_import_unsupported: "当前环境不支持导入地图背景资产"
+  member_too_large: "%{filename} 解压后过大"
+  state_missing_game_key: "state.json 缺少 game_key"
+  state_not_json: "state.json 不是有效 JSON"
