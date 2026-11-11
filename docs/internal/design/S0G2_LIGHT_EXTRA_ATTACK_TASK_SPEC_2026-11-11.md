@@ -82,7 +82,7 @@
 ### 4.2 攻击动作武器账本（提交 A）
 
 1. `dnd2024.attack.spent` 事件新增 `weapon_ref`（G1 的规范形，含实例），用于「本回合 Attack action 用过哪把武器」。
-2. reducer 维护 `combat.attack_ledger`，结构 `{actor_id: {"round", "turn_index", "weapon_refs": [...]}}`，按 `round` + `turn_index` 不匹配即重置——与 `feature_usage` 同一模式，不新造第二套回合语义。列表按攻击发生的先后追加，因此**末项就是本回合最近一次 Attack action 攻击所用的武器**，即 §4.3 的比对基准；列表本身只用于重放与可观测投影，不参与「不同」判定。
+2. reducer 维护 `combat.attack_ledger`，结构 `{actor_id: {"round", "turn_index", "weapon_refs": [...]}}`，按 `round` + `turn_index` 不匹配即重置——与 `feature_usage` 同一模式，不新造第二套回合语义。列表按攻击发生的先后追加，记录本回合 Attack action 用过的**每一把**武器；判定「不同」时对它做存在性检查（§4.3 补充约束 2），**不取末项、也不做集合比较**。列表顺序只用于重放与可观测投影。
 3. 该账本由事件派生，因此重放得到相同结果；不得读时钟或客户端提交。
 4. 借机攻击（支付已换成 `reaction.spent`）**不写入**该账本：它不是 Attack action。
 
@@ -91,21 +91,31 @@
 | 来源 | 前提 | 支付 | 本切片引入 |
 |---|---|---|---|
 | 普通攻击 | 无 | `attacks_remaining` → `action`（不变） | — |
-| `light` | ① 账本末项是 Light 武器（见补充约束 2）；② 本次武器与末项是**不同实例**且也是 Light；③ 本次武器已装备 | 扣 `bonus_action` 1 点 | A |
+| `light` | ① 本回合 Attack action 中有一次 Light 武器攻击（补充约束 3）；② 存在一次 Light 武器攻击，其所用武器 ≠ 本次武器（补充约束 2 的存在性判定），且本次武器是 Light、与之为不同实例；③ 本次武器已装备 | 扣 `bonus_action` 1 点 | A |
 | `nick` | 同 `light` 的 ①②③，**外加**本次武器的 mastery 为 `nick` 且 `_mastery_available` 为真 | **不扣** `bonus_action`，**不动** `attacks_remaining` | B |
-| `dual_wielder` | ① 账本末项是 Light 武器；② 本次武器与末项是不同实例、是**近战**武器、且**不带 `two_handed`**；③ 拥有 `feat:dual_wielder` | 扣 `bonus_action` 1 点 | C |
+| `dual_wielder` | ① 同 `light` 的 ①；② 存在一次 Light 武器攻击，其所用武器 ≠ 本次武器，且本次武器是**近战**、**不带 `two_handed`**、不同实例；③ 拥有 `feat:dual_wielder` | 扣 `bonus_action` 1 点 | C |
 
 补充约束：
 
 1. 「不同实例」按 G1 的 `instance_id` 判定；缺实例时按 G1 的兼容规则（唯一匹配才成立）降级，不得猜。
-2. **「不同」的比对基准是账本末项**，即本回合 Attack action 中**最近一次**攻击所用的武器，**不是**「本回合用过的全部武器」。原文 `a different Light weapon` 是相对于「你攻击时所用的那把」，不是相对于一个集合。
-   - 该读法在多击角色上才产生分歧，且必须按此读法：`attacks_per_action ≥ 2` 的角色先用 shortsword 再用 dagger，额外攻击**仍可用 shortsword**（因为它不同于最近一次攻击所用的 dagger）。若按集合判定，这类角色永远无武器可选，等于把双持从多击职业里整个删掉，与规则意图矛盾。
-   - 单次攻击的角色（本切片多数用例）两种读法结果相同，因此该条不影响矩阵 1–11，只固定矩阵 30、31。
-   - 准入条件 ① 同样按末项判：先 dagger 再 longsword 时末项不是 Light 武器，故不成立。若按「本回合任一击是 Light 就成立」，会推出「额外攻击须不同于一把非 Light 武器」这种无意义的结论。
-3. **手别不是状态**。玩家第一回合用左手武器攻击、第二回合换成右手，两回合各自成立：账本按 `round` + `turn_index` 重置，实现不得从上一回合的 `weapon_refs` 推导任何「这只手本回合已用过」之类的持久结论。
-4. 三种来源都**不消耗** `attacks_remaining`，也**不增加** `attacks_per_action`。
-5. `bonus_action` 不足时拒绝并指出是 Bonus Action 不足，而不是「攻击次数不足」。
-6. 未装备的武器（只背在背包里）不能作为首击或额外攻击的武器。
+2. **「不同」是存在性判定，不与末项比、也不与集合比。** 原文 `a different Light weapon` 的参照点是「触发这次额外攻击的那次攻击」，而 Attack action 里**每一次** Light 武器攻击都能触发它，因此玩家可以任选其中一次作为参照。判定式为：
+
+   ```
+   允许 ⇔ ∃ w ∈ 本回合 Attack action 的各次攻击所用武器：
+           w 是 Light 武器 且 w ≠ 本次额外攻击的武器
+   ```
+
+   - 依据 `Sage Advice Compendium`：「The only requirement for the Light property's extra attack is that it's made with a **different** Light weapon.」（同条还明确「攻击一次 Light 武器后从另一只手拔出第二把武器即可满足」）。
+   - **双持两把 Light 武器、且 Extra Attack 两击各用一把**时，额外攻击**用哪一把都成立**：用 A 则参照 B，用 B 则参照 A。这是多击角色最常被误判的配置。
+   - **同一把武器连打两击**时，额外攻击**不能**再用它（找不到不同的参照），必须换一把。
+   - 「先 dagger(Light) 后 longsword(非 Light)」时，enabling 攻击只有 dagger 那一次，故额外攻击不能用 dagger，只能用**另一把** Light 武器——条件里的「w 是 Light 武器」正是为此存在，缺了它会把非 Light 的 longsword 当成合法参照。
+   - **不采用「不在本回合已用集合里」的读法**：那会让上述双持多击角色彻底无武器可选，等于把双持从所有多击职业里删掉。
+   - **不采用「与末项不同」的读法**：那会错误禁止「用第一击的武器做额外攻击」，而 SAC 明确允许。
+3. 准入条件 ①（「attack with a Light weapon」）同样取存在性：只要账本里有一把 Light 武器即可，是条件 ② 的必要条件，不独立成立。
+4. **手别不是状态**。玩家第一回合用左手武器攻击、第二回合换成右手，两回合各自成立：账本按 `round` + `turn_index` 重置，实现不得从上一回合的 `weapon_refs` 推导任何「这只手本回合已用过」之类的持久结论。
+5. 三种来源都**不消耗** `attacks_remaining`，也**不增加** `attacks_per_action`。
+6. `bonus_action` 不足时拒绝并指出是 Bonus Action 不足，而不是「攻击次数不足」。
+7. 未装备的武器（只背在背包里）不能作为首击或额外攻击的武器。
 
 ### 4.4 每回合一次（提交 A）
 
@@ -149,7 +159,7 @@
 ### 4.8 与其他机制的边界
 
 1. **Extra Attack**：`attacks_per_action` 不变。19 级 Fighter 的 `attacks_remaining` 逻辑不受影响。
-2. **Cleave（F7）**：Cleave 的第二击不是 Light 额外攻击，**不消耗** §4.4 的额度。它用的是触发它的**同一把**武器，因此即使写入账本也不改变末项，§4.3 的比对基准不受影响；实现上允许写入，但不得因此改变额外攻击的准入结果。
+2. **Cleave（F7）**：Cleave 的第二击不是 Light 额外攻击，**不消耗** §4.4 的额度。它用的是触发它的**同一把**武器，因此写入账本不会引入新的武器，§4.3 的存在性判定结果不变；实现上允许写入，但不得因此改变额外攻击的准入结果。
 3. **Tactical Master（F7）**：见 §4.6.3。
 4. **盾牌 / 双手武器**：额外攻击的武器必须是已装备的一件单手武器（G1 保证 `Two-Handed` 武器占满两手，因此不可能存在「双手武器 + 另一把」）。若状态被外部破坏成该形态，校验拒绝而不是取其一。
 5. **徒手打击**：`unarmed_strike` 没有 `light`、也没有实例，不能作为 Light 额外攻击的任一武器；Dual Wielder 也不放宽这一点（原文要求 Melee **weapon**）。
@@ -202,13 +212,15 @@
 28. Extra Attack：19 级 Fighter 的双持 Light 额外攻击不改变 `attacks_remaining` 的初始值。
 29. 攻击动作账本按 `round` + `turn_index` 重置；上一回合用过的武器不再满足首击条件。
 30. **左右手互换的两回合**：回合 1 用 shortsword 首击、dagger 做 `light` 额外攻击；回合 2 用 dagger 首击、shortsword 做 `light` 额外攻击。两回合都成立，且额度互相独立（每回合各扣 1 点 `bonus_action`、各用 1 次 `light_extra_attack` 额度），任何一方都不因为「上一回合用过」而被拒。
-31. Extra Attack ≥ 2 的多击：本回合先用 shortsword 再用 dagger，额外攻击用 **shortsword** 成立——比对基准是账本末项，不是「本回合用过的集合」（矩阵 30、31 固定 §4.3 补充约束 2、3）。
-32. 回合 2 尚未进行 Attack action 时直接声明 `light` 被拒：读账本必须做 `round` + `turn_index` 比较，不得读到回合 1 的残留而误放行。
-33. 同一意图同时声明两种来源被拒，不取其一。
-34. 视图 `extra_attack.allowed` 与实际准入一致；被拒来源在 `blocked` 里有可读原因。
-35. A 提交后矩阵 1–11、27–34 通过（矩阵 30–32 属 A 提交的账本语义，31 需要 5 级 Fighter 夹具，一并验收）；B 提交后 12–17 通过；C 提交后 18–26 通过。
-36. 既有武器精通、Tactical Master、战斗、方向、装备测试无回归。（矩阵 9 只断言默认值，TWF 分支留给 S0-F8。）
-37. 存档/加载与重放后：每回合额度、攻击动作账本、动作经济三项与重放前一致。
+31. **多击、两击各用一把**：5 级 Fighter 用 shortsword 打第一击、dagger 打第二击。`light` 额外攻击**用 shortsword 成立**（参照 dagger），**用 dagger 也成立**（参照 shortsword）。这是存在性判定与「集合/末项」两种错误读法的分歧点：集合读法会两把都拒，末项读法会拒掉 dagger，两者都错。
+32. **多击、两击用同一把**：5 级 Fighter 两次都用 shortsword。`light` 额外攻击用 shortsword 被拒（找不到不同的参照），改用 dagger 成立。
+33. **非 Light 武器不是合法参照**：先 dagger（Light）后 longsword（非 Light），`light` 额外攻击用 dagger 被拒（enabling 攻击只有 dagger 那次），换第二把 Light 武器才成立——条件里的「w 是 Light 武器」缺了就会把 longsword 误当成合法参照。
+34. 回合 2 尚未进行 Attack action 时直接声明 `light` 被拒：读账本必须做 `round` + `turn_index` 比较，不得读到回合 1 的残留而误放行。
+35. 同一意图同时声明两种来源被拒，不取其一。
+36. 视图 `extra_attack.allowed` 与实际准入一致；被拒来源在 `blocked` 里有可读原因。
+37. A 提交后矩阵 1–11、27–36 通过（矩阵 30–34 属 A 提交的账本语义，31–33 需要 5 级 Fighter 夹具，一并验收）；B 提交后 12–17 通过；C 提交后 18–26 通过。
+38. 既有武器精通、Tactical Master、战斗、方向、装备测试无回归。（矩阵 9 只断言默认值，TWF 分支留给 S0-F8。）
+39. 存档/加载与重放后：每回合额度、攻击动作账本、动作经济三项与重放前一致。
 
 ## 7. 非目标与停止条件
 
