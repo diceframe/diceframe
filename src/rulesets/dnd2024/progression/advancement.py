@@ -18,6 +18,15 @@ from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 # 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
 ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({"ranged_attack_bonus"})
 
+# 纯 ASI 走的是一条与专长相同的代码路径：属性值提升被声明成一条伪专长，
+# 让「占专长槽」只有一种实现。它不是角色拥有的专长，账本据此把它记成
+# ability_score_increase，而不是 feat_ref——否则审计会去要一个从未选过的专长。
+PLAIN_ABILITY_FEAT_REF = "feat:ability_score_improvement"
+
+# 成长账本：每级一条，记录该级实际做出的选择。缺失项检测只读它，不从
+# 数值反推选择（`abilities` 已经把来源合并掉了，反推不出「这一级选了什么」）。
+ADVANCEMENT_RECORDS_KEY = "advancement_records"
+
 
 def _canonical(payload: dict[str, Any]) -> dict[str, Any]:
     nested = payload.get("ruleset_character")
@@ -382,6 +391,13 @@ class Dnd2024AdvancementEngine:
             "tracks": deepcopy(preview["snapshot"]["tracks"]),
             "content_version": preview["content_version"],
         })
+        self._record_advancement(
+            progression,
+            level=target_level,
+            class_ref=str(preview["class_ref"]),
+            choices=preview["choices"],
+            diff=preview["diff"],
+        )
         history = progression.setdefault("history", [])
         history.append({
             "from_level": preview["from_level"],
@@ -393,6 +409,72 @@ class Dnd2024AdvancementEngine:
         self._update_spellcasting(character, preview)
         self._update_derived(character)
         return character
+
+    def _record_advancement(
+        self,
+        progression: dict[str, Any],
+        *,
+        level: int,
+        class_ref: str,
+        choices: dict[str, Any],
+        diff: dict[str, Any],
+    ) -> None:
+        """Append this level's choices to the growth ledger.
+
+        The ledger answers "what did this level choose", which is the only
+        question the missing-choice audit may ask -- ``abilities`` has already
+        folded every source together, so a skipped ASI cannot be told from a
+        small one by reading the number.
+
+        Nothing is written for a choice the level did not make.  An empty record
+        would read as "the player answered with nothing" and make a genuinely
+        skipped level look completed.
+
+        Order is enforced here rather than trusted from the caller: levels
+        advance one at a time, so a non-advancing append means two writers
+        disagreed about the current level.
+        """
+
+        records = progression.setdefault(ADVANCEMENT_RECORDS_KEY, [])
+        if not isinstance(records, list):
+            raise ProgressionCatalogError(
+                "progression.advancement_records must be a list"
+            )
+        previous_level = 0
+        if records:
+            last = records[-1]
+            if not isinstance(last, dict):
+                raise ProgressionCatalogError(
+                    "progression.advancement_records entries must be objects"
+                )
+            previous_level = int(last.get("level", 0) or 0)
+        if previous_level >= level:
+            raise ProgressionCatalogError(
+                "progression.advancement_records must advance one level at a time: "
+                f"{previous_level} is not below {level}"
+            )
+
+        record: dict[str, Any] = {"level": level, "class_ref": class_ref}
+        increases = choices.get("ability_score_increases")
+        if isinstance(increases, dict):
+            parsed = {
+                str(ability): int(points)
+                for ability, points in increases.items()
+                if isinstance(points, int)
+                and not isinstance(points, bool)
+                and points > 0
+            }
+            if parsed:
+                record["ability_score_increase"] = parsed
+        feat_ref = str(diff.get("advancement_feat_ref") or "")
+        if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
+            gained = diff.get("gained_feature_ids") or []
+            key = "epic_boon_ref" if "epic_boon" in gained else "feat_ref"
+            record[key] = feat_ref
+        subclass_ref = str(choices.get("subclass_ref") or "")
+        if subclass_ref:
+            record["subclass_ref"] = subclass_ref
+        records.append(record)
 
     def _single_class_state(self, character: dict[str, Any]) -> tuple[str, int]:
         binding = character.get("rule_binding")
