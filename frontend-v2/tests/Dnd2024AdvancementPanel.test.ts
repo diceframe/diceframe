@@ -127,11 +127,14 @@ describe('D&D 2024 advancement panel', () => {
         ok: false,
         errors: [
           'prepared_spell_refs must contain exactly 5 spells',
-          'spellbook_refs must contain exactly 8 spells',
+          'spellbook_refs must contain at least 8 spells',
+          'prepared_spell_refs may replace at most 1 spell(s) at this level',
         ],
         requirements: [{
           id: 'class_spell_choices', kind: 'spell_selection', required: true,
           cantrip_count: 0, prepared_spell_count: 5, spellbook_minimum: 8,
+          additions: 5, replace_limit: 1, cantrip_replace_limit: 0,
+          spellbook_additions: 2,
           cantrips: [],
           leveled_spells: Array.from({ length: 9 }, (_, index) => ({
             ref: `spell:spell-${index}`, name: `Spell ${index}`, level: 1,
@@ -159,8 +162,14 @@ describe('D&D 2024 advancement panel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('准备法术需要正好 5 个')
-    expect(wrapper.text()).toContain('法术书需要正好 8 个法术')
+    expect(wrapper.text()).toContain('法术书至少要有 8 个法术')
     expect(wrapper.text()).toContain('法师请先选法术书')
+    // 额度来自内容：面板必须把"能新增几个、能换掉几个"说清楚，玩家才不会
+    // 在整表重排之后才看到一句服务端拒绝。
+    expect(wrapper.text()).toContain('本级新增 5 个法术')
+    expect(wrapper.text()).toContain('最多替换 1 个旧法术')
+    expect(wrapper.text()).toContain('法术书需新增 2 个')
+    expect(wrapper.text()).toContain('本级最多替换 1 个旧法术')
     const extraSpellChoices = wrapper.findAll('label').filter(label => label.text().includes('Spell 8'))
     expect(extraSpellChoices).toHaveLength(2)
     expect(extraSpellChoices.every(label => label.get('input').attributes('disabled') !== undefined)).toBe(true)
