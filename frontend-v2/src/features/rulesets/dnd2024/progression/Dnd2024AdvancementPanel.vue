@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type {
   JsonObject,
   RulesetAdvancementPreview,
@@ -24,8 +24,16 @@ const props = withDefaults(defineProps<{
   gameKey?: string
   userId?: string
   revision?: number
-}>(), { language: 'zh-CN', cardId: '', gameKey: '', userId: '', revision: 0 })
-const emit = defineEmits<{ applied: [character: JsonObject]; cancel: [] }>()
+  /** 0 = single-level mode (unchanged behaviour); N >= 2 = keep going to N. */
+  targetLevel?: number
+}>(), {
+  language: 'zh-CN', cardId: '', gameKey: '', userId: '', revision: 0, targetLevel: 0,
+})
+const emit = defineEmits<{
+  applied: [character: JsonObject]
+  chainCompleted: [character: JsonObject]
+  cancel: []
+}>()
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 const choices = ref<JsonObject>({ hp_method: 'fixed' })
@@ -119,18 +127,39 @@ async function completePendingSubclass(): Promise<void> {
     pendingSubclass.value = ''
     await refreshPending()
     await refresh()
-    emit('applied', response.character)
+    // 补齐子职只在卡还没升级时发生；链式模式下它不该关掉面板。
+    if (!chained.value) emit('applied', response.character)
   } catch (cause: unknown) {
     error.value = String((cause as Error)?.message || cause)
   } finally { pendingBusy.value = false }
 }
 
-function canonical(): JsonObject {
-  const nested = props.character.ruleset_character
+// A chain replaces the character it is upgrading: level 2's result is level 3's
+// input.  The prop stays the entrance point, this ref is what the panel moves.
+const workingCharacter = ref<JsonObject>(props.character)
+
+function canonical(character: JsonObject = workingCharacter.value): JsonObject {
+  const nested = character.ruleset_character
   return nested && typeof nested === 'object' && !Array.isArray(nested)
     ? nested as JsonObject
-    : props.character
+    : character
 }
+
+function levelOf(character: JsonObject): number {
+  const inner = canonical(character)
+  const progression = inner.progression as JsonObject | undefined
+  const build = inner.build as JsonObject | undefined
+  return Number(
+    character.level || inner.level || progression?.level || build?.level || 0,
+  )
+}
+
+const targetLevel = computed(() => Math.max(0, Math.floor(Number(props.targetLevel || 0))))
+// `targetLevel` at or below the current level is a no-op, not a chain: falling
+// back to single-level mode keeps the panel honest instead of spinning.
+const chained = computed(() => (
+  targetLevel.value >= 2 && levelOf(workingCharacter.value) < targetLevel.value
+))
 
 function initializeSpellChoices(): void {
   const spellcasting = canonical().spellcasting as JsonObject | undefined
@@ -154,7 +183,7 @@ async function refresh(): Promise<void> {
       : props.gameKey && props.userId
         ? await previewLiveCharacterAdvancement(props.gameKey, props.userId, choices.value)
         : await previewRulesetAdvancement(
-          props.ruleId, props.character, choices.value, props.language,
+          props.ruleId, workingCharacter.value, choices.value, props.language,
         )
     if (typeof response.revision === 'number') currentRevision.value = response.revision
     preview.value = response.advancement
@@ -296,6 +325,17 @@ function featureName(id: string): string {
   return id.replaceAll('_', ' ')
 }
 
+function prepareNextLevel(character: JsonObject): void {
+  workingCharacter.value = character
+  // Everything this level asked for (subclass, feat, abilities, spells) now
+  // lives in the character itself.  Only the player's hit-point preference
+  // carries over; re-seeding the rest keeps level N+1's own choices blank.
+  const hpMethod = choices.value.hp_method
+  choices.value = { hp_method: hpMethod === 'rolled' ? 'rolled' : 'fixed' }
+  initializeSpellChoices()
+  preview.value = null
+}
+
 async function apply(): Promise<void> {
   if (!preview.value?.ok) return
   busy.value = true
@@ -316,14 +356,43 @@ async function apply(): Promise<void> {
             props.gameKey, props.userId, choices.value, currentRevision.value, operationId,
           )
         : await applyRulesetAdvancement(
-          props.ruleId, props.character, choices.value, props.language,
+          props.ruleId, workingCharacter.value, choices.value, props.language,
         )
     if (typeof response.revision === 'number') currentRevision.value = response.revision
-    emit('applied', response.character)
+    const changed = response.character as JsonObject
+    const reached = levelOf(changed)
+    const moreLevels = chained.value
+      && reached > levelOf(workingCharacter.value)
+      && reached < targetLevel.value
+    if (moreLevels) {
+      // Keep the panel open and preview the next level with the character the
+      // server just returned -- the chain is N-1 ordinary advancements, so the
+      // persisted result is exactly what replay already accepts.
+      prepareNextLevel(changed)
+      await refresh()
+      return
+    }
+    if (chained.value) emit('chainCompleted', changed)
+    else emit('applied', changed)
   } catch (cause: unknown) {
     error.value = String((cause as Error)?.message || cause)
   } finally { busy.value = false }
 }
+
+// The host may hand over a different character (cancel then reopen, or a card
+// reload).  Start that over instead of upgrading a stale copy.
+watch(() => props.character, next => {
+  if (!next || next === workingCharacter.value) return
+  workingCharacter.value = next
+  currentRevision.value = props.revision
+  const hpMethod = choices.value.hp_method
+  choices.value = { hp_method: hpMethod === 'rolled' ? 'rolled' : 'fixed' }
+  initializeSpellChoices()
+  preview.value = null
+  pendingChoices.value = []
+  void refresh()
+  void refreshPending()
+})
 
 onMounted(() => {
   initializeSpellChoices()
@@ -335,7 +404,7 @@ onMounted(() => {
 <template>
   <section class="advancement-panel" aria-labelledby="dnd-advancement-title">
     <header>
-      <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}</p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
+      <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}<span v-if="chained" class="chain-target">{{ text(`（目标 ${targetLevel} 级）`, ` (target level ${targetLevel})`) }}</span></p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
     </header>
 
     <fieldset v-if="pendingChoices.length" class="pending-choices">
@@ -377,7 +446,7 @@ onMounted(() => {
       <div v-if="preview.errors.length" class="errors" role="alert"><b>{{ text('升级还不能确认', 'Upgrade is not ready') }}</b><p class="error-help">{{ text('下面每一条都告诉你缺什么；按提示补齐后，系统会自动重新核对。', 'Each item below tells you what is missing. The panel rechecks automatically after you make a choice.') }}</p><ul><li v-for="message in preview.errors" :key="message">{{ friendlySpellError(message) }}</li></ul></div>
     </template>
     <p v-if="error" class="errors" role="alert">{{ error }}</p>
-    <footer><button type="button" @click="emit('cancel')">{{ text('取消', 'Cancel') }}</button><button type="button" class="primary" :disabled="busy || !preview?.ok" @click="apply">{{ busy ? text('核对中…', 'Checking…') : text('确认升级', 'Apply level') }}</button></footer>
+    <footer><button type="button" @click="emit('cancel')">{{ text('取消', 'Cancel') }}</button><button type="button" class="primary" :disabled="busy || !preview?.ok" @click="apply">{{ busy ? text('核对中…', 'Checking…') : chained ? text('确认本级', 'Apply level') : text('确认升级', 'Apply level') }}</button></footer>
   </section>
 </template>
 
@@ -386,7 +455,7 @@ onMounted(() => {
 .advancement-panel > header { display: flex; justify-content: space-between; gap: 16px; }
 .advancement-panel header span { color: #d5a44f; font-size: 11px; letter-spacing: .16em; }
 .advancement-panel h3 { margin: 3px 0; font-family: Georgia, serif; font-size: 27px; }
-.advancement-panel header p { margin: 0; color: #aeb8c6; }.advancement-panel header .flow-hint { margin-top: 6px; font-size: 13px; line-height: 1.5; }
+.advancement-panel header p { margin: 0; color: #aeb8c6; }.advancement-panel header .flow-hint { margin-top: 6px; font-size: 13px; line-height: 1.5; }.chain-target { color: #d5a44f; }
 .advancement-panel header button { align-self: start; width: 44px; border-radius: 50%; font-size: 20px; }
 .level-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
 .level-summary article { display: grid; gap: 3px; padding: 13px; border: 1px solid #3b4656; border-radius: 11px; background: #111925; }
