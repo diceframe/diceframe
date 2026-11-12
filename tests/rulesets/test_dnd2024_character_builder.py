@@ -50,8 +50,15 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
         "license": {"id": "test", "attribution": "legal/ATTRIBUTION.md"},
     })
     for ability_id in ("str", "dex", "con", "int", "wis", "cha"):
+        # `con` is a reserved device name on Windows, and `con.json` counts as
+        # the device too: the write goes to the console and no file appears, so
+        # the fixture silently lost one ability and every reference to it failed
+        # as "unresolved".  The loader takes the id from inside the file, which
+        # is why the real content can spell the filename out -- so this does the
+        # same instead of depending on the platform.
+        filename = "constitution" if ability_id == "con" else ability_id
         _write(
-            root / "content" / "abilities" / f"{ability_id}.json",
+            root / "content" / "abilities" / f"{filename}.json",
             _entity("ability", ability_id),
         )
     for skill_id, ability_id in {
