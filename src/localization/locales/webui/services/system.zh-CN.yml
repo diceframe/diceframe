@@ -1,0 +1,7 @@
+# src/webui/services/system.py 返回给请求方的提示。
+"zh-CN":
+  github_http_error: "GitHub 返回 HTTP %{status}: %{message}"
+  no_public_release: "暂无公开 Release"
+  no_release_available: "没有可用的 Release"
+  release_format_invalid: "GitHub Release 返回格式异常"
+  update_repo_invalid: "更新仓库配置无效"

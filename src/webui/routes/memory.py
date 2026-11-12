@@ -6,6 +6,7 @@ from aiohttp import web
 
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.services._common import is_game_gm
+from src.localization.messages import t
 
 
 async def api_memories(request: web.Request) -> web.Response:
@@ -16,7 +17,7 @@ async def api_memories(request: web.Request) -> web.Response:
         limit = min(int(request.query.get("limit", "50")), 200)
         offset = max(0, int(request.query.get("offset", "0")))
     except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "分页参数必须是整数"}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.memory.paging_must_be_integer")}, status=400)
     api = _get_api(request)
     # FIX-05 §7.4：viewer 由请求身份决定——共享玩家链接拿不到 GM 私有记忆。
     viewer_is_gm = is_game_gm(

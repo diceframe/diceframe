@@ -1,0 +1,4 @@
+# src/webui/routes/updater.py 返回给请求方的提示。
+"zh-CN":
+  already_restarting: "DiceFrame 已在重启中"
+  kind_invalid: "kind 必须为 source、portable 或 docker"

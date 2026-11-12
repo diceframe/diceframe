@@ -1,0 +1,8 @@
+# src/webui/services/game_controls.py 返回给请求方的提示。
+"zh-CN":
+  control_mode_invalid: "只能设为 AI 托管或交回真人"
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  gm_style_invalid: "GM 叙事风格设置无效"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  rule_needs_no_dice: "当前规则不需要掷骰"
+  unknown_away_policy: "未知的暂离策略：%{policy}"

@@ -1,0 +1,13 @@
+# src/webui/services/plugins.py 返回给请求方的提示。
+"zh-CN":
+  card_cache_path_invalid: "卡片缓存路径非法"
+  catalog_resources_not_copyable: "目录资源不支持复制导入"
+  content_avatar_too_large: "内容包头像不能超过 3 MB"
+  content_type_catalog_only: "该内容类型仅支持目录引用，不能复制到世界书"
+  content_type_not_importable: "该内容类型不支持导入"
+  lorebook_not_selected: "未选择世界书"
+  lorebook_storage_unavailable: "世界书存储不可用"
+  no_card_cache: "该插件没有可清理的卡片缓存"
+  plugin_operation_invalid: "插件操作无效"
+  select_target_lorebook: "请选择要导入到的世界书"
+  target_lorebook_no_canonical_import: "目标世界书不支持规范导入"

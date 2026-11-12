@@ -14,6 +14,7 @@ from src.engine.modules import game_config
 from src.engine.modules import ruleset_runtime
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.webui.ruleset_rest_projection import public_rest_session, saved_rest_session
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -52,14 +53,14 @@ def resolve(
         raise ValueError("hit_die_rolls must be a JSON object")
     rule = dependencies.load_rule_by_id(rule_id, language)
     if rule is None:
-        return {"ok": False, "code": "RULE_NOT_FOUND", "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_rest.rule_missing", rule_id=rule_id)}
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return {
             "ok": False,
             "code": "RULESET_REST_UNAVAILABLE",
-            "error": "该规则尚未提供专业休息结算",
+            "error": t("webui.services.ruleset_rest.no_professional_rest"),
         }
     result = method(
         rule, character, rest, hit_die_rolls,
@@ -203,9 +204,9 @@ async def resolve_live(
         return _failure("GAME_NOT_FOUND", "游戏不存在")
     async with instance.authoritative_write() as entered:
         if not entered:
-            return _failure("REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试")
+            return _failure("REWRITE_IN_PROGRESS", t("webui.services.ruleset_rest.rewriting_wait_and_retry"))
         if dependencies.get_instance(instance.game_key) is not instance:
-            return _failure("STALE_RUN", "对局已重开，请刷新后重试")
+            return _failure("STALE_RUN", t("webui.services.ruleset_rest.game_restarted_refresh_and_retry"))
         return await _resolve_live_authority(dependencies, game_key, user_id, body, instance)
 
 
@@ -219,31 +220,31 @@ async def _resolve_live_authority(
     parsed = validate_draft_shape(body)
     rest = parsed.get("rest")
     if rest not in {"short", "long"}:
-        return _failure("INVALID_REST", "休息类型必须是 short 或 long")
+        return _failure("INVALID_REST", t("webui.services.ruleset_rest.rest_type_invalid"))
     if "hit_die_rolls" in parsed:
         return _failure(
-            "CLIENT_ROLLS_FORBIDDEN", "休息骰由服务端掷出；客户端只需提交要花费的生命骰数量",
+            "CLIENT_ROLLS_FORBIDDEN", t("webui.services.ruleset_rest.dice_rolled_by_server"),
         )
     if rest == "long" and parsed.get("hit_dice"):
-        return _failure("INVALID_REST", "长休不需要花费生命骰")
+        return _failure("INVALID_REST", t("webui.services.ruleset_rest.long_rest_no_hit_dice"))
     if parsed.get("confirm_elapsed_time") is not True:
-        return _failure("REST_CONFIRMATION_REQUIRED", "请先确认游戏时间会随本次休息推进")
+        return _failure("REST_CONFIRMATION_REQUIRED", t("webui.services.ruleset_rest.confirm_time_advance"))
     operation_id = str(parsed.get("operation_id") or "").strip()
     if not operation_id or len(operation_id) > 160:
-        return _failure("INVALID_OPERATION_ID", "休息操作必须提供有效的 operation_id")
+        return _failure("INVALID_OPERATION_ID", t("webui.services.ruleset_rest.operation_id_required"))
 
     if user_id not in instance.players:
         return _failure("CHARACTER_NOT_FOUND", "角色不存在")
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
-        return _failure("RULE_NOT_FOUND", "当前游戏规则不存在")
+        return _failure("RULE_NOT_FOUND", t("webui.services.ruleset_rest.game_rule_missing"))
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
     except (AttributeError, TypeError, ValueError) as exc:
         return _failure("RULESET_RUNTIME_UNAVAILABLE", str(exc))
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
-        return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
+        return _failure("RULESET_REST_UNAVAILABLE", t("webui.services.ruleset_rest.no_professional_rest"))
     context_validator = getattr(runtime, "validate_rest_context", None)
     if callable(context_validator):
         try:
@@ -262,7 +263,7 @@ async def _resolve_live_authority(
     if previous is not None:
         if previous.get("kind") != "rest":
             return _failure(
-                "OPERATION_ID_REUSED", "operation_id 已被其他角色操作使用，请重试",
+                "OPERATION_ID_REUSED", t("webui.services.ruleset_rest.operation_id_reused"),
             )
         return {
             "ok": True, "rule_id": rule.rule_id, "game_key": game_key,
@@ -278,11 +279,11 @@ async def _resolve_live_authority(
     except (TypeError, ValueError):
         return _failure(
             "INVALID_CHARACTER_REVISION",
-            "休息操作必须提供有效的 expected_revision",
+            t("webui.services.ruleset_rest.expected_revision_required"),
         )
     if expected_revision != revision:
         return _failure(
-            "STALE_CHARACTER_REVISION", "角色已在其他位置更新，请刷新后重试",
+            "STALE_CHARACTER_REVISION", t("webui.services.ruleset_rest.character_updated_elsewhere"),
             revision=revision,
         )
     try:
@@ -336,9 +337,9 @@ async def resolve_live_party(
         return _failure("GAME_NOT_FOUND", "游戏不存在")
     async with instance.authoritative_write() as entered:
         if not entered:
-            return _failure("REWRITE_IN_PROGRESS", "GM 正在重写历史回合，请等待完成后重试")
+            return _failure("REWRITE_IN_PROGRESS", t("webui.services.ruleset_rest.rewriting_wait_and_retry"))
         if dependencies.get_instance(instance.game_key) is not instance:
-            return _failure("STALE_RUN", "对局已重开，请刷新后重试")
+            return _failure("STALE_RUN", t("webui.services.ruleset_rest.game_restarted_refresh_and_retry"))
         return await _resolve_live_party_authority(dependencies, game_key, user_id, body, instance)
 
 
@@ -352,27 +353,27 @@ async def _resolve_live_party_authority(
     parsed = validate_draft_shape(body)
     rest = parsed.get("rest")
     if rest not in {"short", "long"}:
-        return _failure("INVALID_REST", "休息类型必须是 short 或 long")
+        return _failure("INVALID_REST", t("webui.services.ruleset_rest.rest_type_invalid"))
     if "hit_die_rolls" in parsed:
-        return _failure("CLIENT_ROLLS_FORBIDDEN", "休息骰由服务端掷出；客户端只需提交要花费的生命骰数量")
+        return _failure("CLIENT_ROLLS_FORBIDDEN", t("webui.services.ruleset_rest.dice_rolled_by_server"))
     if rest == "long" and parsed.get("hit_dice"):
-        return _failure("INVALID_REST", "长休不需要花费生命骰")
+        return _failure("INVALID_REST", t("webui.services.ruleset_rest.long_rest_no_hit_dice"))
     if parsed.get("confirm_elapsed_time") is not True:
-        return _failure("REST_CONFIRMATION_REQUIRED", "请先确认游戏时间会随本次休息推进")
+        return _failure("REST_CONFIRMATION_REQUIRED", t("webui.services.ruleset_rest.confirm_time_advance"))
     operation_id = str(parsed.get("operation_id") or "").strip()
     if not operation_id or len(operation_id) > 160:
-        return _failure("INVALID_OPERATION_ID", "休息操作必须提供有效的 operation_id")
+        return _failure("INVALID_OPERATION_ID", t("webui.services.ruleset_rest.operation_id_required"))
 
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
-        return _failure("RULE_NOT_FOUND", "当前游戏规则不存在")
+        return _failure("RULE_NOT_FOUND", t("webui.services.ruleset_rest.game_rule_missing"))
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
     except (AttributeError, TypeError, ValueError) as exc:
         return _failure("RULESET_RUNTIME_UNAVAILABLE", str(exc))
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
-        return _failure("RULESET_REST_UNAVAILABLE", "该规则尚未提供专业休息结算")
+        return _failure("RULESET_REST_UNAVAILABLE", t("webui.services.ruleset_rest.no_professional_rest"))
     # 只有 runtime 显式声明的 option 才会进入队伍进度和结算请求。
     rest_options = deepcopy(_rest_options(runtime, parsed))
     options_validator = getattr(runtime, "validate_rest_options", None)
@@ -382,14 +383,14 @@ async def _resolve_live_party_authority(
         except ValueError as exc:
             return _failure("REST_NOT_AVAILABLE", str(exc))
     if module_hooks.combat_view(instance)["combat_active"] or module_hooks.combat_view(instance)["combat_state"] == "active":
-        return _failure("REST_NOT_AVAILABLE", "战斗进行中不能休息；请先结束战斗")
+        return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.no_rest_in_combat"))
 
     async with instance._lock:
         if user_id not in instance.players:
             return _failure("CHARACTER_NOT_FOUND", "角色不存在")
         character = instance.get_character_sheet(user_id)
         if int(character.get("hp", 0) or 0) < 1:
-            return _failure("REST_NOT_AVAILABLE", "至少需要 1 HP 才能发起或加入休息")
+            return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.hp_required"))
         try:
             hit_dice = _validate_hit_dice_counts(
                 character, parsed.get("hit_dice") if rest == "short" else {},
@@ -402,7 +403,7 @@ async def _resolve_live_party_authority(
         if status in {"idle", "completed", "error"}:
             eligible_uids = _rest_eligible_uids(instance)
             if not eligible_uids:
-                return _failure("REST_NOT_AVAILABLE", "当前没有可参加休息的存活角色")
+                return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.no_living_characters"))
             session = {
                 "status": "collecting",
                 "rest": rest,
@@ -411,7 +412,7 @@ async def _resolve_live_party_authority(
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
         elif str(session.get("rest") or "") != rest:
-            return _failure("REST_TYPE_MISMATCH", "队伍已经在准备另一种休息，请先完成或取消当前休息")
+            return _failure("REST_TYPE_MISMATCH", t("webui.services.ruleset_rest.other_rest_pending"))
 
         required = {
             uid for uid in session.get("required_uids", [])
@@ -420,7 +421,7 @@ async def _resolve_live_party_authority(
             and int(instance.get_character_sheet(uid).get("hp", 0) or 0) > 0
         }
         if user_id not in required:
-            return _failure("REST_NOT_AVAILABLE", "当前角色不在本次队伍休息范围内")
+            return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.character_not_in_party_rest"))
         ruleset_runtime.require_writable(instance)
         try:
             ruleset_runtime.require_binding(instance, runtime.runtime_id)
@@ -442,9 +443,9 @@ async def _resolve_live_party_authority(
         try:
             expected_revision = int(raw_expected)
         except (TypeError, ValueError):
-            return _failure("INVALID_CHARACTER_REVISION", "休息操作必须提供有效的 expected_revision")
+            return _failure("INVALID_CHARACTER_REVISION", t("webui.services.ruleset_rest.expected_revision_required"))
         if expected_revision != revision:
-            return _failure("STALE_CHARACTER_REVISION", "角色已在其他位置更新，请刷新后重试", revision=revision)
+            return _failure("STALE_CHARACTER_REVISION", t("webui.services.ruleset_rest.character_updated_elsewhere"), revision=revision)
         participants[user_id] = {
             "operation_id": operation_id,
             "expected_revision": expected_revision,

@@ -1,0 +1,4 @@
+# src/webui/character_sheet_authority.py 返回给请求方的提示。
+"en":
+  adopt_requires_gm: "After a character has acted, only the GM can apply a card to it"
+  delete_requires_gm: "After a character has acted, only the GM can delete it"

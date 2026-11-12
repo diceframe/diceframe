@@ -1,0 +1,8 @@
+# src/webui/services/game_controls.py 返回给请求方的提示。
+"en":
+  control_mode_invalid: "The seat can only be set to AI-controlled or handed back to a human"
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  gm_style_invalid: "Invalid GM narration style setting"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  rule_needs_no_dice: "The current rule does not use dice"
+  unknown_away_policy: "Unknown away policy: %{policy}"

@@ -5,6 +5,7 @@ from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.services.modules import ModuleInUse
+from src.localization.messages import t
 
 
 def _module_in_use_response(exc: ModuleInUse) -> web.Response:
@@ -61,9 +62,9 @@ async def api_plugin_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
     if denied is not None: return denied
     if request.content_type != "multipart/form-data":
-        return web.json_response({"ok":False,"error":"插件安装需要 multipart/form-data"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_multipart_required")},status=400)
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024:
-        return web.json_response({"ok":False,"error":"插件包不能超过 20 MB"},status=413)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -84,13 +85,13 @@ async def api_plugin_install(request: web.Request) -> web.Response:
                     break
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok":False,"error":"插件包不能超过 20 MB"},status=413)
+                    return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok":False,"error":"缺少 .dfplugin 插件文件"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.dfplugin_file_missing")},status=400)
         if not filename.lower().endswith(".dfplugin"):
-            return web.json_response({"ok":False,"error":"本地安装只接受 .dfplugin 文件；开源仓库请从插件商店安装"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_dfplugin_only")},status=400)
         result = await _get_api(request).install_plugin(payload, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
@@ -115,13 +116,13 @@ async def api_plugin_tool_invoke(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     arguments = body.get("arguments", {})
     context = body.get("context", {})
     if not isinstance(arguments, dict) or not isinstance(context, dict):
-        return web.json_response({"ok":False,"error":"arguments 和 context 必须是对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.arguments_context_not_object")},status=400)
     try:
         result = await _get_api(request).invoke_plugin_tool(
             request.match_info["plugin_id"],
@@ -193,9 +194,9 @@ async def api_plugin_export(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     try:
         result = _get_api(request).export_content_pack(
             body.get("plugin_id", ""),
@@ -249,7 +250,7 @@ async def api_plugin_marketplace_install(request: web.Request) -> web.Response:
         plugin_id = str(body.get("plugin_id") or "").strip()
         overwrite = bool(body.get("overwrite"))
         if not plugin_id:
-            return web.json_response({"ok":False,"error":"缺少 plugin_id"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.plugin_id_missing")},status=400)
         result = await _get_api(request).install_marketplace_plugin(plugin_id, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)

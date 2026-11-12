@@ -1,0 +1,5 @@
+# src/webui/services/tavern.py 返回给请求方的提示。
+"zh-CN":
+  file_missing: "未提供文件"
+  file_path_disabled: "已禁用 file_path 模式（安全风险），请改用 file_data 上传"
+  file_too_large: "文件过大（上限 30MB）"

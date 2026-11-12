@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from src.engine.modules import progression_state
 from src.engine.modules.private_channels import remove_table_talk_exchange
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 GameKey = tuple[str, ...]
@@ -54,40 +55,40 @@ async def ask(
         return _result({
             "ok": False,
             "code": "GAME_NOT_FOUND",
-            "error": "游戏不存在，请刷新后重试",
+            "error": t("webui.services.kp_questions.game_missing_refresh"),
         }, 404)
     if actor_uid not in instance.players:
         return _result({
             "ok": False,
             "code": "PLAYER_NOT_IN_GAME",
-            "error": "请先认领本局角色，再向 KP 询问",
+            "error": t("webui.services.kp_questions.claim_character_first"),
         }, 403)
     question = str(question or "").strip()
     if not question:
         return _result({
             "ok": False,
             "code": "EMPTY_QUESTION",
-            "error": "请输入要询问 KP 的问题",
+            "error": t("webui.services.kp_questions.question_required"),
         }, 400)
     if visibility not in {"private", "party"}:
         return _result({
             "ok": False,
             "code": "INVALID_VISIBILITY",
-            "error": "询问可见范围无效",
+            "error": t("webui.services.kp_questions.visibility_invalid"),
         }, 400)
     answerer = dependencies.answer_question
     if answerer is None:
         return _result({
             "ok": False,
             "code": "LLM_NOT_CONFIGURED",
-            "error": "KP 模型尚未配置或不可用",
+            "error": t("webui.services.kp_questions.kp_model_unconfigured"),
         }, 503)
 
     if instance._process_lock.locked():
         return _result({
             "ok": False,
             "code": "GAME_PROCESSING",
-            "error": "游戏正在推进，请稍后再问",
+            "error": t("webui.services.kp_questions.game_advancing"),
         }, 409)
 
     # Capture one coherent, immutable view while holding the per-game lock.
@@ -104,7 +105,7 @@ async def ask(
         return _result({
             "ok": False,
             "code": "LLM_REQUEST_FAILED",
-            "error": "KP 暂时无法回答，请稍后重试",
+            "error": t("webui.services.kp_questions.kp_unavailable"),
         }, 502)
 
     answer = str((generated or {}).get("answer") or "").strip()
@@ -112,13 +113,13 @@ async def ask(
         return _result({
             "ok": False,
             "code": "EMPTY_ANSWER",
-            "error": "KP 没有返回可显示的回答，请重试",
+            "error": t("webui.services.kp_questions.kp_empty_answer"),
         }, 502)
     if dependencies.registry.get(parsed_key) is not instance:
         return _result({
             "ok": False,
             "code": "GAME_CHANGED",
-            "error": "询问期间游戏已被替换或删除，请刷新后重试",
+            "error": t("webui.services.kp_questions.game_replaced_during_question"),
         }, 409)
     exchange: dict[str, Any] | None = None
     if visibility == "party":
@@ -141,7 +142,7 @@ async def ask(
                     return _result({
                         "ok": False,
                         "code": "RUN_READ_ONLY",
-                        "error": "本局已结团或正在准备结团，问答未写入 / This run is read-only",
+                        "error": t("webui.services.kp_questions.run_read_only"),
                     }, 409)
                 instance.append_table_talk(exchange)
                 try:
@@ -154,7 +155,7 @@ async def ask(
             return _result({
                 "ok": False,
                 "code": "TABLE_TALK_SAVE_FAILED",
-                "error": "公开回答暂时无法保存，请稍后重试",
+                "error": t("webui.services.kp_questions.public_answer_save_failed"),
             }, 500)
 
     return _result({

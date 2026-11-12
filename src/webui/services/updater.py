@@ -31,6 +31,7 @@ from src.docker_launcher.contracts import (
 )
 from src.docker_launcher.data_versions import data_for_payload, runtime_for_data
 from src.version import __version__
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -113,11 +114,11 @@ def _file_sha256(path: Path) -> str:
 def verify_sha256(path: Path, expected: str) -> None:
     normalized = (expected or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", normalized):
-        raise ValueError(f"SHA-256 格式无效：{path.name}")
+        raise ValueError(t("webui.services.updater.sha256_format_invalid", name=path.name))
     actual = _file_sha256(path)
     if not hmac.compare_digest(actual, normalized):
         raise ValueError(
-            f"SHA-256 校验失败：{path.name}（期望 {normalized[:8]}…，实际 {actual[:8]}…）"
+            t("webui.services.updater.sha256_mismatch", name=path.name, expected=normalized[:8], actual=actual[:8])
         )
 
 
@@ -157,7 +158,7 @@ def parse_sha256_file(content: str, filename: str) -> str:
         match = _SHA256_RE.search(line.strip())
         if match:
             return match.group(0)
-    raise ValueError(f"无法从校验文件解析 SHA-256：{filename}")
+    raise ValueError(t("webui.services.updater.sha256_parse_failed", filename=filename))
 
 
 def parse_sha256_manifest(content: str, filename: str) -> str:
@@ -170,10 +171,10 @@ def parse_sha256_manifest(content: str, filename: str) -> str:
             continue
         digest = parts[0].lower()
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise ValueError(f"校验清单中的 SHA-256 无效：{filename}")
+            raise ValueError(t("webui.services.updater.manifest_sha256_invalid", filename=filename))
         matches.append(digest)
     if len(matches) != 1:
-        raise ValueError(f"校验清单必须且只能包含一条 {filename} 记录")
+        raise ValueError(t("webui.services.updater.manifest_single_record", filename=filename))
     return matches[0]
 
 
@@ -232,7 +233,7 @@ def _archive_member_path(name: str) -> PurePosixPath:
         or re.match(r"^[A-Za-z]:", normalized)
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
-        raise ValueError(f"更新包包含不安全路径：{name}")
+        raise ValueError(t("webui.services.updater.archive_unsafe_path", name=name))
     return path
 
 
@@ -242,7 +243,7 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
     with zipfile.ZipFile(archive) as package:
         members = package.infolist()
         if not members or len(members) > MAX_ARCHIVE_MEMBERS:
-            raise ValueError("更新包为空或文件数量超出限制")
+            raise ValueError(t("webui.services.updater.archive_empty_or_too_many"))
 
         total_size = 0
         top_levels: set[str] = set()
@@ -251,21 +252,21 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
             path = _archive_member_path(member.filename)
             mode = member.external_attr >> 16
             if stat.S_ISLNK(mode):
-                raise ValueError(f"更新包不允许符号链接：{member.filename}")
+                raise ValueError(t("webui.services.updater.archive_symlink", filename=member.filename))
             total_size += member.file_size
             if total_size > MAX_EXTRACTED_BYTES:
-                raise ValueError("更新包解压后大小超出限制")
+                raise ValueError(t("webui.services.updater.archive_too_large"))
             top_levels.add(path.parts[0])
             checked.append((member, path))
 
         if len(top_levels) != 1:
-            raise ValueError("更新包必须只包含一个顶层目录")
+            raise ValueError(t("webui.services.updater.archive_single_root"))
 
         root = destination.resolve()
         for member, relative in checked:
             target = (destination / Path(*relative.parts)).resolve()
             if not _path_within(target, root):
-                raise ValueError(f"更新包路径越界：{member.filename}")
+                raise ValueError(t("webui.services.updater.archive_path_outside", filename=member.filename))
             io_target = _io_path(target)
             if member.is_dir():
                 io_target.mkdir(parents=True, exist_ok=True)
@@ -276,7 +277,7 @@ def safe_extract_archive(archive: Path, destination: Path) -> Path:
 
     extracted_root = destination / next(iter(top_levels))
     if not extracted_root.is_dir():
-        raise ValueError("更新包顶层目录无效")
+        raise ValueError(t("webui.services.updater.archive_root_invalid"))
     return extracted_root
 
 
@@ -293,7 +294,7 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def _safe_version_dir(version: str) -> str:
     normalized = version.strip().lstrip("vV")
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}", normalized):
-        raise ValueError(f"版本号格式无效：{version}")
+        raise ValueError(t("webui.services.updater.version_format_invalid", version=version))
     return "v" + normalized
 
 
@@ -305,13 +306,13 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
         if not runtime_text:
             return {
                 "supported": False, "mode": "docker", "reason": "runtime",
-                "hint": "当前 Docker 基础镜像缺少托管更新目录配置，请更新基础镜像",
+                "hint": t("webui.services.updater.docker_base_image_outdated"),
             }
         runtime_root = Path(runtime_text)
         if not runtime_root.is_dir() or not os.access(runtime_root, os.W_OK):
             return {
                 "supported": False, "mode": "docker", "reason": "readonly",
-                "hint": "Docker 托管更新目录不可写，请检查 data 持久卷权限",
+                "hint": t("webui.services.updater.docker_managed_dir_not_writable"),
             }
         return {"supported": True, "mode": "docker", "reason": "", "hint": ""}
     if Path("/.dockerenv").exists() or os.getenv("TRPG_DATA_DIR") == "/app/data":
@@ -320,9 +321,7 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
             "mode": "docker",
             "reason": "docker",
             "hint": (
-                "Compose 部署请先进入存放 docker-compose.yml 的目录，再运行 "
-                "docker compose pull && docker compose up -d；使用 docker run 启动的容器"
-                "需要按部署文档拉取镜像并重新创建，NAS 也可在容器管理界面完成更新"
+                t("webui.services.updater.docker_manual_update")
             ),
         }
 
@@ -334,7 +333,7 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
                 "supported": False,
                 "mode": "portable",
                 "reason": "readonly",
-                "hint": "便携版安装目录不可写，请移动到可写目录后重试",
+                "hint": t("webui.services.updater.portable_dir_not_writable"),
             }
         return {"supported": True, "mode": "portable", "reason": "", "hint": ""}
 
@@ -343,14 +342,14 @@ def is_self_update_supported(root: Path) -> dict[str, Any]:
             "supported": False,
             "mode": "development",
             "reason": "development",
-            "hint": "Git 开发目录不会自动覆盖，请使用 git pull 更新",
+            "hint": t("webui.services.updater.git_checkout_manual"),
         }
     if not os.access(root, os.W_OK):
         return {
             "supported": False,
             "mode": "source",
             "reason": "readonly",
-            "hint": "安装目录不可写，请手动下载更新包",
+            "hint": t("webui.services.updater.install_dir_not_writable"),
         }
     return {"supported": True, "mode": "source", "reason": "", "hint": ""}
 
@@ -512,7 +511,7 @@ class UpdaterService:
                 "available": False,
                 "mode": mode,
                 "target_version": "",
-                "reason": "当前安装方式没有可由 launcher 切换的上一版本",
+                "reason": t("webui.services.updater.no_launcher_previous_version"),
             }
         target = self._rollback_target()
         if target is None:
@@ -520,7 +519,7 @@ class UpdaterService:
                 "available": False,
                 "mode": mode,
                 "target_version": "",
-                "reason": "没有可用的上一版本程序副本",
+                "reason": t("webui.services.updater.no_previous_copy"),
             }
         return {
             "available": True,
@@ -532,7 +531,7 @@ class UpdaterService:
 
     async def rollback_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": "已有更新任务在进行中"}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
         target = self._rollback_target()
         if target is None:
             return {"ok": False, "error": self.get_rollback_status()["reason"]}
@@ -547,7 +546,7 @@ class UpdaterService:
             try:
                 await asyncio.to_thread(prepare_rollback_access, target_data)
             except (OSError, ValueError) as exc:
-                return {"ok": False, "error": f"无法安全准备回退数据：{exc}"}
+                return {"ok": False, "error": t("webui.services.updater.rollback_data_failed", exc=exc)}
         signal: dict[str, Any] = {
             "schema": 1,
             "operation": "rollback",
@@ -566,14 +565,14 @@ class UpdaterService:
             install_root = Path(os.getenv("TRPG_INSTALL_ROOT", "")).resolve()
             launcher = install_root / "DiceFrame.exe"
             if not launcher.is_file():
-                return {"ok": False, "error": "当前便携版启动器不存在，无法安全回退"}
+                return {"ok": False, "error": t("webui.services.updater.portable_launcher_missing")}
             staged_launcher = self._dir / (
                 _ROLLBACK_LAUNCHER_PREFIX + _safe_version_dir(version) + ".exe"
             )
             try:
                 shutil.copy2(launcher, staged_launcher)
             except OSError as exc:
-                return {"ok": False, "error": f"无法准备回退启动器：{exc}"}
+                return {"ok": False, "error": t("webui.services.updater.rollback_launcher_failed", exc=exc)}
             signal["launcher_path"] = str(staged_launcher)
 
         self._state.update(
@@ -596,41 +595,42 @@ class UpdaterService:
 
     async def download_update(self, kind: str) -> dict[str, Any]:
         if self._mirrors is None:
-            return {"ok": False, "error": "镜像服务不可用（插件宿主未初始化）"}
+            return {"ok": False, "error": t("webui.services.updater.mirror_unavailable")}
         if kind not in _ASSET_PATTERNS:
-            return {"ok": False, "error": f"未知的更新包类型：{kind}"}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_unknown", kind=kind)}
         if self.is_busy():
-            return {"ok": False, "error": "已有更新任务在进行中"}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):
             return {
                 "ok": False,
-                "error": support.get("hint") or "当前环境不支持自动更新",
+                "error": support.get("hint") or t("webui.services.updater.auto_update_unsupported"),
             }
         mode = str(support.get("mode", ""))
         if kind != mode:
-            expected = "便携版" if mode == "portable" else "完整源码"
-            return {"ok": False, "error": f"当前安装方式需要下载{expected}更新包"}
+            return {"ok": False, "error": t(
+                "webui.services.updater.portable_package_required" if mode == "portable" else "webui.services.updater.source_package_required"
+            )}
 
         check = await self._check_updates()
         if not check.get("ok"):
             return {"ok": False, "error": check.get("error", "版本检查失败")}
         latest = check.get("latest") or {}
         if not latest:
-            return {"ok": False, "error": "未找到最新版本", "no_release": True}
+            return {"ok": False, "error": t("webui.services.updater.latest_not_found"), "no_release": True}
         version = str(latest.get("version", ""))
         selection = select_asset(latest, kind, version)
         if not selection:
-            return {"ok": False, "error": f"未找到 {kind} 类型的更新包"}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_not_found", kind=kind)}
 
         asset, sha_asset = selection
         if kind == "docker":
             if not sha_asset:
-                return {"ok": False, "error": "Docker 更新包缺少 SHA256SUMS，已拒绝下载"}
+                return {"ok": False, "error": t("webui.services.updater.docker_checksums_missing")}
             size = int(asset.get("size", 0) or 0)
             if size <= 0 or size > MAX_APP_UPDATE_BYTES:
-                return {"ok": False, "error": "Docker 更新包大小无效"}
+                return {"ok": False, "error": t("webui.services.updater.docker_package_size_invalid")}
         self._task = asyncio.create_task(
             self._run_download(asset, sha_asset, version, kind)
         )
@@ -679,10 +679,10 @@ class UpdaterService:
                     )
                 else:
                     if kind == "docker":
-                        raise ValueError("Docker 更新包校验清单下载失败，已拒绝安装")
+                        raise ValueError(t("webui.services.updater.docker_checksums_download_failed"))
                     logger.warning("SHA-256 校验文件下载失败，跳过校验：%s", sha_result.error)
             elif kind == "docker":
-                raise ValueError("Docker 更新包必须提供 SHA-256 校验清单")
+                raise ValueError(t("webui.services.updater.docker_checksums_required"))
 
             def on_progress(downloaded: int, total: int) -> None:
                 self._state["downloaded_bytes"] = downloaded
@@ -730,23 +730,24 @@ class UpdaterService:
 
     async def apply_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": "已有更新任务在进行中"}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
         if self._state.get("state") != "staged":
-            return {"ok": False, "error": "没有可应用的已下载更新包"}
+            return {"ok": False, "error": t("webui.services.updater.no_downloaded_package")}
 
         archive = Path(str(self._state.get("path", "")))
         if not archive.is_file() or not _path_within(archive, self._dir):
-            return {"ok": False, "error": "已下载更新包不存在或路径无效"}
+            return {"ok": False, "error": t("webui.services.updater.downloaded_package_missing")}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):
-            return {"ok": False, "error": support.get("hint") or "当前环境不支持自动更新"}
+            return {"ok": False, "error": support.get("hint") or t("webui.services.updater.auto_update_unsupported")}
 
         kind = str(self._state.get("kind", ""))
         mode = str(support.get("mode", ""))
         if kind != mode:
-            expected = "便携版" if mode == "portable" else "完整源码"
-            return {"ok": False, "error": f"当前安装方式需要下载{expected}更新包"}
+            return {"ok": False, "error": t(
+                "webui.services.updater.portable_package_required" if mode == "portable" else "webui.services.updater.source_package_required"
+            )}
 
         version = str(self._state.get("version", ""))
         self._state.update(state="applying", error="", restart_needed=False)
@@ -817,26 +818,26 @@ class UpdaterService:
     def _prepare_docker_update(self, archive: Path, version: str) -> dict[str, Any]:
         runtime_text = os.getenv("TRPG_DOCKER_RUNTIME_ROOT", "").strip()
         if not runtime_text:
-            raise ValueError("缺少 Docker 托管更新目录")
+            raise ValueError(t("webui.services.updater.docker_managed_dir_missing"))
         runtime_root = Path(runtime_text).resolve()
         if runtime_root != self._dir.resolve():
-            raise ValueError("Docker 托管更新目录与应用数据目录不一致")
+            raise ValueError(t("webui.services.updater.docker_managed_dir_mismatch"))
         versions_dir = runtime_root / "docker-versions"
         versions_dir.mkdir(parents=True, exist_ok=True)
         version_dir = versions_dir / _safe_version_dir(version)
         if not _path_within(version_dir, versions_dir):
-            raise ValueError("Docker 候选版本目录越界")
+            raise ValueError(t("webui.services.updater.docker_candidate_dir_outside"))
 
         current = self._read_docker_current_dir(runtime_root)
         if current and current == version_dir.resolve():
-            raise ValueError("不能覆盖当前正在运行的 Docker 版本")
+            raise ValueError(t("webui.services.updater.cannot_overwrite_running_docker"))
         active_text = os.getenv("TRPG_ACTIVE_VERSION_DIR", "").strip()
         if active_text:
             active = Path(active_text).resolve()
             if not _path_within(active, versions_dir):
-                raise ValueError("Docker 当前活动版本目录越界")
+                raise ValueError(t("webui.services.updater.docker_active_dir_outside"))
             if active == version_dir.resolve():
-                raise ValueError("不能覆盖当前正在运行的 Docker 版本")
+                raise ValueError(t("webui.services.updater.cannot_overwrite_running_docker"))
         extract_dir = runtime_root / ("extract-" + _safe_version_dir(version))
         installing = versions_dir / (version_dir.name + ".installing")
         shutil.rmtree(extract_dir, ignore_errors=True)
@@ -860,7 +861,7 @@ class UpdaterService:
                     runtime_api=DOCKER_RUNTIME_API,
                 )
                 if existing_manifest != manifest:
-                    raise ValueError("同版本 Docker 候选已存在且清单不同，已拒绝覆盖")
+                    raise ValueError(t("webui.services.updater.docker_candidate_conflict"))
                 manifest = existing_manifest
             else:
                 os.replace(package_root, installing)
@@ -928,13 +929,13 @@ class UpdaterService:
     ) -> dict[str, Any]:
         install_root_text = os.getenv("TRPG_INSTALL_ROOT", "").strip()
         if not install_root_text:
-            raise ValueError("缺少便携版安装根目录")
+            raise ValueError(t("webui.services.updater.portable_root_missing"))
         install_root = Path(install_root_text).resolve()
         versions_dir = install_root / "versions"
         versions_dir.mkdir(parents=True, exist_ok=True)
         version_dir = versions_dir / _safe_version_dir(version)
         if not _path_within(version_dir, versions_dir):
-            raise ValueError("候选版本目录越界")
+            raise ValueError(t("webui.services.updater.candidate_dir_outside"))
 
         extract_dir = self._dir / ("extract-" + _safe_version_dir(version))
         candidate_temp: Path | None = None
@@ -949,12 +950,12 @@ class UpdaterService:
                 package_root / "DiceFrame.exe",
             )
             if not all(path.is_file() for path in required):
-                raise ValueError("便携版更新包结构无效")
+                raise ValueError(t("webui.services.updater.portable_package_invalid"))
 
             current_pointer = self._read_current_version_dir(install_root)
             if version_dir.exists():
                 if current_pointer and version_dir.resolve() == current_pointer:
-                    raise ValueError("不能覆盖当前正在使用的版本目录")
+                    raise ValueError(t("webui.services.updater.cannot_overwrite_active_version"))
                 _rmtree(version_dir)
 
             candidate_temp = versions_dir / (version_dir.name + ".installing")
@@ -1027,7 +1028,7 @@ class UpdaterService:
                 and (package_root / "src").is_dir()
                 and (package_root / "static-v2" / "index.html").is_file()
             ):
-                raise ValueError("完整源码更新包结构无效")
+                raise ValueError(t("webui.services.updater.source_package_invalid"))
 
             _migrate_user_plugin_packages(
                 self._root / "plugins",
@@ -1040,7 +1041,7 @@ class UpdaterService:
                 if entry.name not in _PROTECTED_SOURCE_ENTRIES
             ]
             if not entries:
-                raise ValueError("完整源码更新包没有可安装内容")
+                raise ValueError(t("webui.services.updater.source_package_empty"))
 
             backup_dir.mkdir(parents=True)
             for source in entries:
@@ -1080,7 +1081,7 @@ class UpdaterService:
                 ) from original
             if moved_old or installed_new:
                 raise UpdateRolledBackError(
-                    f"源码更新失败，已恢复旧版本：{original}"
+                    t("webui.services.updater.source_update_rolled_back", original=original)
                 ) from original
             raise
         finally:

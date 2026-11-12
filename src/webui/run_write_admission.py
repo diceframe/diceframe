@@ -2,6 +2,7 @@
 from aiohttp import web
 
 from src.engine.game_state import GameState
+from src.localization.messages import t
 
 GAME = '/api/games/{game_key}'
 
@@ -38,7 +39,7 @@ SELF_GATED = frozenset({
 
 def read_only_response(instance) -> web.Response:
     return web.json_response({'ok': False, 'error_code': 'RUN_ENDED' if instance.state == GameState.ENDED else 'RUN_READ_ONLY',
-                              'error': '本局已结团或正在准备结团，只能查看 / This run is read-only'}, status=409)
+                              'error': t("webui.run_write_admission.run_read_only")}, status=409)
 
 
 @web.middleware

@@ -1,0 +1,11 @@
+# src/webui/services/seat_tokens.py 返回给请求方的提示。
+"en":
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  gm_seat_not_shareable: "The GM seat cannot be taken over through a share link"
+  gm_seat_requires_host_login: "The GM seat requires the host to be logged in"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  seat_has_credential: "This seat already has a credential; use the link issued by the GM"
+  seat_in_use: "This seat is in use by devices; regenerating the link will sign those devices out"
+  seat_link_gm_only: "Only the GM can generate seat links"
+  seat_missing: "The seat does not exist"
+  session_without_seat: "The current session is not bound to a seat in this game"

@@ -33,6 +33,7 @@ from src.rulesets.contracts import (
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.llm.seat_policy import SeatRuntime
 from src.webui.services import hosted_combat, adventure_commands
+from src.localization.messages import t
 
 
 logger = logging.getLogger("trpg")
@@ -78,7 +79,7 @@ def _intent_write_error(
     if not code:
         return None
     return _error(
-        code, "回合正在处理中，请稍后重试" if code == ROUND_PROCESSING else "当前玩家不在本局中",
+        code, t("webui.services.ruleset_gameplay.round_processing_retry_later") if code == ROUND_PROCESSING else t("webui.services.ruleset_gameplay.player_not_in_game"),
     )
 
 
@@ -180,10 +181,10 @@ def _context(
     if instance is None:
         return None, None, None, "", _error("GAME_NOT_FOUND", "游戏不存在")
     if not requester_id:
-        return instance, None, None, "", _error("AUTH_REQUIRED", "需要有效的游戏会话")
+        return instance, None, None, "", _error("AUTH_REQUIRED", t("webui.services.ruleset_gameplay.game_session_required"))
     effective_requester = str(instance.gm_uid or "") if requester_is_gm else requester_id
     if not effective_requester:
-        return instance, None, None, "", _error("GM_IDENTITY_MISSING", "本局缺少 GM 身份")
+        return instance, None, None, "", _error("GM_IDENTITY_MISSING", t("webui.services.ruleset_gameplay.gm_identity_missing"))
     code = evaluate(
         instance,
         GateRequest(actor_uid=requester_id, source=SOURCE_INTENT, requester_is_gm=requester_is_gm),
@@ -192,11 +193,11 @@ def _context(
         (check_seat_exists,),
     )
     if code:
-        return instance, None, None, "", _error(code, "当前玩家不在本局中")
+        return instance, None, None, "", _error(code, t("webui.services.ruleset_gameplay.player_not_in_game"))
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
         return instance, None, None, effective_requester, _error(
-            "RULE_NOT_FOUND", "本局规则不存在",
+            "RULE_NOT_FOUND", t("webui.services.ruleset_gameplay.game_rule_missing"),
         )
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
@@ -206,13 +207,13 @@ def _context(
         )
     if not runtime.capabilities.authoritative_intents and not adventure_command:
         return instance, rule, runtime, effective_requester, _error(
-            "RULESET_INTENTS_UNAVAILABLE", "该规则继续使用自由文本回合流程",
+            "RULESET_INTENTS_UNAVAILABLE", t("webui.services.ruleset_gameplay.rule_uses_free_text_rounds"),
         )
     if not adventure_command or runtime.capabilities.versioned_state:
         binding = dict(ruleset_runtime.binding(instance) or {})
         if binding.get("id") != runtime.runtime_id:
             return instance, rule, runtime, effective_requester, _error(
-                "RULESET_BINDING_MISMATCH", "存档未绑定当前权威规则运行时",
+                "RULESET_BINDING_MISMATCH", t("webui.services.ruleset_gameplay.save_not_bound_to_runtime"),
             )
     return instance, rule, runtime, effective_requester, None
 
@@ -338,11 +339,11 @@ async def plan_temporary_encounter(
     if error:
         return error
     if not requester_is_gm:
-        return _error("GM_ONLY", "只有 GM 可以生成临时遭遇")
+        return _error("GM_ONLY", t("webui.services.ruleset_gameplay.temporary_encounter_gm_only"))
     if not isinstance(runtime, TemporaryEncounterPlannerRuntime):
         return _error(
             "TEMPORARY_ENCOUNTER_UNAVAILABLE",
-            "当前规则不支持 AI 临时遭遇",
+            t("webui.services.ruleset_gameplay.temporary_encounter_unsupported"),
         )
     async with instance._lock:
         binding_error = await _ensure_compatible_adventure_binding(
@@ -356,7 +357,7 @@ async def plan_temporary_encounter(
         combat = view_data.get("combat")
         request = view_data.get("encounter_request")
         if isinstance(combat, dict) and combat.get("status") == "active":
-            return _error("COMBAT_ACTIVE", "战斗进行中，无法生成临时遭遇")
+            return _error("COMBAT_ACTIVE", t("webui.services.ruleset_gameplay.combat_in_progress"))
         request_pending = (
             isinstance(request, dict)
             and str(request.get("status") or "") == "pending"
@@ -368,13 +369,13 @@ async def plan_temporary_encounter(
         if not request_pending and access_mode != "sandbox":
             return _error(
                 "NO_PENDING_ENCOUNTER",
-                "当前没有可生成临时遭遇的敌情",
+                t("webui.services.ruleset_gameplay.no_hostile_situation"),
             )
         if not isinstance(access, dict) or str(access.get("mode") or "") == "story":
             # 正式剧情遭遇永远优先：有绑定 preset 时绝不能用临时生成绕过。
             return _error(
                 "STORY_ENCOUNTER_BOUND",
-                "当前剧情已绑定正式遭遇，不能覆盖为临时遭遇",
+                t("webui.services.ruleset_gameplay.story_has_formal_encounter"),
             )
         requested_preset_id = (
             str(request.get("encounter_preset_id") or "")
@@ -388,13 +389,13 @@ async def plan_temporary_encounter(
         if requested_preset_id and requested_preset_id in available_preset_ids:
             return _error(
                 "ENCOUNTER_ALREADY_PREPARED",
-                "当前敌情已经匹配到合法遭遇，无需生成临时遭遇",
+                t("webui.services.ruleset_gameplay.encounter_already_matched"),
             )
     llm_client = (
         dependencies.resolve_llm_client() if dependencies.resolve_llm_client else None
     )
     if llm_client is None:
-        return _error("LLM_NOT_CONFIGURED", "未配置可用的 AI 服务商")
+        return _error("LLM_NOT_CONFIGURED", t("webui.services.ruleset_gameplay.no_ai_provider"))
     try:
         proposal = await runtime.plan_temporary_encounter(instance, llm_client)
     except ValueError as exc:
@@ -403,12 +404,12 @@ async def plan_temporary_encounter(
         logger.exception("AI temporary encounter planning failed")
         return _error(
             "LLM_REQUEST_FAILED",
-            "AI 生成临时遭遇失败，你仍可以手动选择自由遭遇",
+            t("webui.services.ruleset_gameplay.temporary_encounter_ai_failed"),
         )
     if not isinstance(proposal, dict):
         return _error(
             "TEMPORARY_ENCOUNTER_INVALID",
-            "无法生成合法的临时遭遇，你仍可以手动选择自由遭遇",
+            t("webui.services.ruleset_gameplay.temporary_encounter_invalid"),
         )
     return {"ok": True, "encounter": proposal}
 
@@ -480,7 +481,7 @@ async def submit_intent(
     if not isinstance(runtime, AuthoritativeIntentHooks):
         return _error(
             "RULESET_INTENT_HOOKS_UNAVAILABLE",
-            "权威规则运行时缺少请求身份与投影边界",
+            t("webui.services.ruleset_gameplay.runtime_missing_requester_boundary"),
         )
     intent = runtime.prepare_intent_submission(
         intent, effective_requester, requester_is_gm,
@@ -489,7 +490,7 @@ async def submit_intent(
     if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime):
         async def preflight() -> dict | None:
             if dependencies.get_instance(instance.game_key) is not instance:
-                return _error("GAME_CHANGED", "游戏已替换，请刷新")
+                return _error("GAME_CHANGED", t("webui.services.ruleset_gameplay.game_replaced_refresh"))
             admission = _intent_write_error(instance, requester_id, requester_is_gm)
             if admission:
                 return admission
@@ -545,7 +546,7 @@ async def submit_intent(
                 return resolved
             batch = resolved.get("event_batch")
             if not isinstance(batch, dict):
-                return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
+                return _error("INVALID_EVENT_BATCH", t("webui.services.ruleset_gameplay.runtime_no_event_batch"))
             applied = runtime.apply_event_batch(instance, batch)
             if marks_seat:
                 # A player-side intent applied for its own seat: the seat has
@@ -640,10 +641,10 @@ async def resume_authoritative_combat(
     if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime):
         async def preflight() -> dict | None:
             if dependencies.get_instance(instance.game_key) is not instance:
-                return _error("GAME_CHANGED", "游戏已替换，请刷新")
+                return _error("GAME_CHANGED", t("webui.services.ruleset_gameplay.game_replaced_refresh"))
             code = check_not_judging(instance, GateRequest(actor_uid=seat_uid, source=SOURCE_INTENT))
             if code:
-                return _error(code, "回合正在处理中，请稍后重试")
+                return _error(code, t("webui.services.ruleset_gameplay.round_processing_retry_later"))
             progression.require_writable(instance)
             session_stats.require_writable(instance)
             return await _ensure_compatible_adventure_binding(dependencies, runtime, instance)
@@ -668,7 +669,7 @@ async def resume_authoritative_combat(
         if code:
             return {
                 "ok": False, "handled": True, "resumed": False,
-                "error_code": code, "error": "回合正在处理中，请稍后重试",
+                "error_code": code, "error": t("webui.services.ruleset_gameplay.round_processing_retry_later"),
             }
         progression.require_writable(instance)
         session_stats.require_writable(instance)

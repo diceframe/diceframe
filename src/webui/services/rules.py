@@ -24,6 +24,7 @@ from src.engine.currency import (
 from src.engine.language import field_suffixes
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
 from src.rulesets.registry import RulesetRuntimeRegistry
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -176,7 +177,7 @@ def list_rules(
                 else []
             )
         except (OSError, ValueError, TypeError) as exc:
-            raise ValueError(f"规则 {rule_id} 的内容或运行时无效：{exc}") from exc
+            raise ValueError(t("webui.services.rules.rule_content_or_runtime_invalid", rule_id=rule_id, exc=exc)) from exc
     seen = {str(rule.get("rule_id") or "") for rule in rules}
     for item in _plugin_rule_items(dependencies, language):
         rule_id = str(item.get("rule_id") or "")
@@ -196,20 +197,20 @@ def save_custom_rule(
     description = (data.get("description") or "").strip()
 
     if not source_rule_id:
-        return {"ok": False, "error": "请选择要复制的基础规则"}
+        return {"ok": False, "error": t("webui.services.rules.source_rule_required")}
     if not rule_id:
-        return {"ok": False, "error": "请输入规则 ID"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_required")}
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": "规则 ID 只能包含英文、数字、下划线或短横线"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_charset")}
     if not rule_name:
-        return {"ok": False, "error": "请输入规则名称"}
+        return {"ok": False, "error": t("webui.services.rules.rule_name_required")}
 
     source_path = _resolve_rule_path(dependencies, source_rule_id)
     target_path = dependencies.rules_dir / f"{rule_id}.json"
     if not source_path or not source_path.exists():
-        return {"ok": False, "error": f"基础规则不存在: {source_rule_id}"}
+        return {"ok": False, "error": t("webui.services.rules.source_rule_missing", source_rule_id=source_rule_id)}
     if target_path.exists():
-        return {"ok": False, "error": f"规则 ID 已存在: {rule_id}"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_exists", rule_id=rule_id)}
 
     template = json.loads(source_path.read_text(encoding="utf-8"))
     template["rule_id"] = rule_id
@@ -246,10 +247,10 @@ def get_rule_template(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": "规则 ID 不合法"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     rule_path = _resolve_rule_path(dependencies, rule_id)
     if not rule_path or not rule_path.exists():
-        return {"ok": False, "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
     template = json.loads(rule_path.read_text(encoding="utf-8"))
     if language and int(template.get("rule_schema_version", 1) or 1) >= 2:
         rule = RuleSystem(
@@ -299,22 +300,22 @@ def update_custom_rule(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": "规则 ID 不合法"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     if not isinstance(template, dict):
-        return {"ok": False, "error": "规则内容必须是 JSON 对象"}
+        return {"ok": False, "error": t("webui.services.rules.rule_not_object")}
     rule_path = RuleSystem.path_for(dependencies.rules_dir, rule_id)
     if not rule_path.exists():
-        return {"ok": False, "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
 
     old_template = json.loads(rule_path.read_text(encoding="utf-8"))
     if not old_template.get("custom"):
-        return {"ok": False, "error": "内置规则不可在 WebUI 中直接编辑，请先复制为自定义规则"}
+        return {"ok": False, "error": t("webui.services.rules.builtin_not_editable")}
 
     rule_name = (template.get("rule_name") or "").strip()
     if not rule_name:
-        return {"ok": False, "error": "规则名称不能为空"}
+        return {"ok": False, "error": t("webui.services.rules.rule_name_empty")}
     if not isinstance(template.get("attributes", []), list):
-        return {"ok": False, "error": "attributes 必须是数组"}
+        return {"ok": False, "error": t("webui.services.rules.attributes_not_array")}
     if diagnostics := validate_special_stats(template):
         return {
             "ok": False, "code": "INVALID_RULE_TEMPLATE", "diagnostics": diagnostics,
@@ -323,15 +324,15 @@ def update_custom_rule(
     dice_system = str(template.get("dice_system") or "d20").lower()
     if dice_system not in SUPPORTED_DICE_SYSTEMS:
         supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
-        return {"ok": False, "error": f"dice_system 当前仅支持 {supported}"}
+        return {"ok": False, "error": t("webui.services.rules.dice_system_unsupported", supported=supported)}
     template["dice_system"] = dice_system
     if dice_system == "d20":
         try:
             max_check_dc = int(template.get("max_check_dc", 20))
         except (TypeError, ValueError):
-            return {"ok": False, "error": "max_check_dc 必须是 1..40 的整数"}
+            return {"ok": False, "error": t("webui.services.rules.max_check_dc_range")}
         if not 1 <= max_check_dc <= 40:
-            return {"ok": False, "error": "max_check_dc 必须是 1..40 的整数"}
+            return {"ok": False, "error": t("webui.services.rules.max_check_dc_range")}
         template["max_check_dc"] = max_check_dc
 
     if "combat" in template:
@@ -341,7 +342,7 @@ def update_custom_rule(
         try:
             combat_extension_from_template(template)
         except ValueError as exc:
-            return {"ok": False, "error": f"combat 声明非法: {exc}"}
+            return {"ok": False, "error": t("webui.services.rules.combat_declaration_invalid", exc=exc)}
     # 好感与冒险推进块同理：RuleSystem 构造时对坏块 fail fast，保存时不拦就会
     # 让整个规则列表和使用这条规则的对局都打不开。
     from src.rules.adventure_progression_config import parse_adventure_progression_config
@@ -355,7 +356,7 @@ def update_custom_rule(
             try:
                 parse(template[block])
             except ValueError as exc:
-                return {"ok": False, "error": f"{block} 声明非法: {exc}"}
+                return {"ok": False, "error": t("webui.services.rules.block_declaration_invalid", block=block, exc=exc)}
 
     currency_error = _validate_currency_declaration(template)
     if currency_error:
@@ -369,9 +370,7 @@ def update_custom_rule(
             return {
                 "ok": False,
                 "error": (
-                    "currency_system 的 base_unit 语义发生变化。"
-                    "该规则可能已有游戏实例，直接修改会让已有余额被重新解释；"
-                    "请复制为新规则使用，或先结束相关对局"
+                    t("webui.services.rules.currency_base_unit_changed")
                 ),
             }
 
@@ -398,13 +397,13 @@ def delete_custom_rule(
 ) -> dict[str, Any]:
     rule_id = (rule_id or "").strip()
     if not _RULE_ID_RE.fullmatch(rule_id):
-        return {"ok": False, "error": "规则 ID 不合法"}
+        return {"ok": False, "error": t("webui.services.rules.rule_id_invalid")}
     rule_path = RuleSystem.path_for(dependencies.rules_dir, rule_id)
     if not rule_path.exists():
-        return {"ok": False, "error": f"规则不存在: {rule_id}"}
+        return {"ok": False, "error": t("webui.services.rules.rule_missing", rule_id=rule_id)}
     template = json.loads(rule_path.read_text(encoding="utf-8"))
     if not template.get("custom"):
-        return {"ok": False, "error": "内置规则不可删除"}
+        return {"ok": False, "error": t("webui.services.rules.builtin_not_deletable")}
     rule_path.unlink()
     logger.info("自定义规则已删除: %s", rule_id)
     return {"ok": True, "rule_id": rule_id}
@@ -483,5 +482,5 @@ def _plugin_rule_items(
                 ),
             })
         except Exception as exc:
-            raise ValueError(f"插件规则模板读取失败：{item.path}: {exc}") from exc
+            raise ValueError(t("webui.services.rules.plugin_template_read_failed", path=item.path, exc=exc)) from exc
     return result

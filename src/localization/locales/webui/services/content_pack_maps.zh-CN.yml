@@ -1,0 +1,14 @@
+# src/webui/services/content_pack_maps.py 返回给请求方的提示。
+"zh-CN":
+  background_empty: "为内容包选择的地图底图为空"
+  background_unreadable: "无法读取为内容包选择的地图底图"
+  icon_data_format_invalid: "地图图标数据格式无效"
+  icon_dimensions_too_large: "地图图标尺寸过大"
+  icon_file_data_invalid: "地图图标文件数据无效"
+  icon_format: "地图图标仅支持 PNG、JPEG 或 WebP"
+  icon_too_large: "单个地图图标不能超过 3 MB"
+  icon_too_small: "地图图标尺寸不能小于 16×16"
+  icon_unreadable: "无法读取地图图标"
+  icons_total_too_large: "地图图标总大小不能超过 24 MB"
+  too_many_icons: "地图图标一次最多选择 %{max_map_icon_uploads} 个"
+  world_id_missing: "所选世界缺少有效 ID，无法打包地图"

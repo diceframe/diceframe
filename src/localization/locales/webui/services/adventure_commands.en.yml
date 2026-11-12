@@ -1,0 +1,7 @@
+# src/webui/services/adventure_commands.py 返回给请求方的提示。
+"en":
+  confirm_gm_only: "Only the GM can confirm that an adventure node is complete"
+  dismiss_gm_only: "Only the GM can dismiss an adventure node suggestion"
+  save_failed_suggestion_restored: "Saving failed; the suggestion was restored. Please try again."
+  settlement_failed_state_restored: "Adventure settlement failed; the state was restored. Please try again."
+  suggestion_handled_or_missing: "The adventure node suggestion was already handled or does not exist"

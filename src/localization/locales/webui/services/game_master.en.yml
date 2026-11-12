@@ -1,0 +1,12 @@
+# src/webui/services/game_master.py 返回给请求方的提示。
+"en":
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  no_previous_round: "There is no previous round to roll back"
+  private_command_queued: "The GM's private instruction was added to the next round"
+  resource_missing_in_rule: "The current rule has no resource: %{resource_alias}"
+  revived: "%{name} has been revived (%{method})"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  rolled_back_to_round: "Player state was rolled back to before round %{round_number} began"
+  system_not_ready: "The system is not ready"
+  whisper_required: "Enter the whisper text"
+  whisper_sent: "Whisper sent"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
+from src.localization.messages import t
 
 
 GameKey = tuple[str, ...]
@@ -66,14 +67,14 @@ async def update_memory(dependencies: MemoryDependencies, game_key: str, entry_i
     ok = await dependencies.repository.edit_entry(
         _memory_namespace(dependencies, game_key), entry_id, updates,
     )
-    return {"ok": ok, "error": "记忆不存在" if not ok else ""}
+    return {"ok": ok, "error": t("webui.services.memory.memory_missing") if not ok else ""}
 
 
 async def delete_memory(dependencies: MemoryDependencies, game_key: str, entry_id: int) -> dict[str, Any]:
     ok = await dependencies.repository.forget_entry(
         _memory_namespace(dependencies, game_key), entry_id,
     )
-    return {"ok": ok, "error": "记忆不存在" if not ok else ""}
+    return {"ok": ok, "error": t("webui.services.memory.memory_missing") if not ok else ""}
 
 
 class MemoryService:

@@ -1,0 +1,4 @@
+# src/webui/routes/asr.py 返回给请求方的提示。
+"zh-CN":
+  asr_test_admin_only: "仅管理员可以测试语音识别"
+  asr_test_not_on_share_page: "玩家分享页不可使用语音识别测试"

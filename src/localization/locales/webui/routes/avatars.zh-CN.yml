@@ -1,0 +1,4 @@
+# src/webui/routes/avatars.py 返回给请求方的提示。
+"zh-CN":
+  avatar_missing: "头像不存在"
+  standing_portrait_missing: "立绘不存在"

@@ -1,0 +1,5 @@
+# src/webui/routes/worlds.py 返回给请求方的提示。
+"zh-CN":
+  entries_required: "条目列表不能为空"
+  entry_too_long: "世界书条目过长（上限 %{max_lorebook_chars} 字）"
+  generation_prompt_too_long: "生成描述过长（上限 %{max_lorebook_chars} 字）"

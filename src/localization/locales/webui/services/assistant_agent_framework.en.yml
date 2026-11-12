@@ -1,0 +1,7 @@
+# src/webui/services/assistant_agent_framework.py 返回给请求方的提示。
+"en":
+  planning_next_step: "Planning the next step…"
+  provider_access_denied: "The model provider denied access. Check the provider credentials and model permissions in Settings."
+  provider_insufficient_balance: "The model provider reported insufficient balance (402). Check the provider balance in Settings or switch to an available model."
+  provider_rate_limited: "The model provider is rate limiting requests (429). Try again later, or switch to an available model in Settings."
+  provider_temporarily_unavailable: "The model provider is temporarily unavailable. Check the network or the provider configuration and try again."

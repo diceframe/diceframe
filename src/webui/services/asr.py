@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from src.asr import TranscriptionRequest, TranscriptionResult
+from src.localization.messages import t
 
 
 GameKey = tuple[str, ...]
@@ -35,7 +36,7 @@ async def transcribe(
     if inst is None:
         raise KeyError("游戏不存在")
     if not user_id or not (owner or user_id == inst.gm_uid or user_id in inst.players):
-        raise PermissionError("当前身份不属于本局游戏")
+        raise PermissionError(t("webui.services.asr.identity_not_in_game"))
     result = await dependencies.backend.transcribe(
         TranscriptionRequest(audio=audio, content_type=content_type, language=language),
     )

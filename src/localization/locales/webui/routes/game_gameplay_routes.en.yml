@@ -1,0 +1,10 @@
+# src/webui/routes/game_gameplay_routes.py 返回给请求方的提示。
+"en":
+  action_too_long: "The action text is too long (%{max_action_chars} characters at most)"
+  advance_error_see_logs: "An error occurred while handling the advance request; see the server logs"
+  body_must_be_json_object: "The request body must be a JSON object"
+  bot_binding_private_questions_only: "This game's Bot binding only allows private questions"
+  gm_command_too_long: "The GM command is too long (%{max_action_chars} characters at most)"
+  question_too_long: "The question is too long (%{max_action_chars} characters at most)"
+  request_error_see_logs: "An error occurred while handling the request; see the server logs"
+  whisper_too_long: "The whisper is too long (%{max_action_chars} characters at most)"

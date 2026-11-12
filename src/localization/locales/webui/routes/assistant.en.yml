@@ -1,0 +1,9 @@
+# src/webui/routes/assistant.py 返回给请求方的提示。
+"en":
+  body_must_be_json_object: "The request body must be a JSON object"
+  history_too_long: "The conversation history is too long"
+  last_message_must_be_user: "The last message must be a non-empty user message"
+  message_content_invalid: "The message content is invalid or too long"
+  message_role_invalid: "Invalid message role"
+  messages_count: "messages must contain 1 to 20 messages"
+  unauthorized: "Unauthorized"

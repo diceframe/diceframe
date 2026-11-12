@@ -1,0 +1,3 @@
+# src/webui/routes/auth.py 返回给请求方的提示。
+"zh-CN":
+  wrong_password: "密码错误"

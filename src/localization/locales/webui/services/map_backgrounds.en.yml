@@ -1,0 +1,15 @@
+# src/webui/services/map_backgrounds.py 返回给请求方的提示。
+"en":
+  content_pack_reference_invalid: "Invalid content pack map reference"
+  dimensions_too_large: "The map background dimensions are too large"
+  file_data_invalid: "The map background file data is invalid"
+  file_missing: "No map background file was provided"
+  file_too_large: "A map background cannot exceed 8 MB"
+  generated_missing: "The generated map background does not exist"
+  selection_not_object: "The map background selection must be an object"
+  too_small: "A map background cannot be smaller than 320×180"
+  unknown_builtin: "Unknown built-in map background"
+  unreadable: "The map background could not be read"
+  unsupported_format: "Map backgrounds must be PNG, JPEG or WebP"
+  unsupported_selection: "Unsupported map background selection"
+  uploaded_missing: "The uploaded map background does not exist"

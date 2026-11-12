@@ -16,6 +16,7 @@ from src.webui.device_tokens import DEVICE_TOKENS_KEY, normalize_install_id, san
 from src.webui.pairing import PairingService
 from src.webui.routes._common import _require_confirmed_request
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 PAIRING_SERVICE_KEY = web.AppKey("pairing_service", PairingService)
@@ -33,7 +34,7 @@ async def api_pairing_issue(request: web.Request) -> web.Response:
         return denied
     if not _owner_allowed(request):
         return web.json_response(
-            {"ok": False, "error": "需要管理员会话"},
+            {"ok": False, "error": t("webui.routes.pairing.admin_session_required")},
             status=403,
             headers={"Cache-Control": "no-store"},
         )
@@ -54,7 +55,7 @@ async def api_pairing_claim(request: web.Request) -> web.Response:
     if install_id not in (None, "") and not normalize_install_id(install_id):
         # Checked before the code is consumed: a malformed id must not burn it.
         return web.json_response(
-            {"ok": False, "error": "install_id 格式无效", "error_code": "INSTALL_ID_INVALID"},
+            {"ok": False, "error": t("webui.routes.pairing.install_id_invalid"), "error_code": "INSTALL_ID_INVALID"},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
@@ -74,7 +75,7 @@ async def api_pairing_claim(request: web.Request) -> web.Response:
 
 async def api_devices_list(request: web.Request) -> web.Response:
     if not _owner_allowed(request):
-        return web.json_response({"ok": False, "error": "需要管理员会话"}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.pairing.admin_session_required")}, status=403)
     devices = request.app[DEVICE_TOKENS_KEY]
     return web.json_response(
         {"ok": True, "devices": devices.entries()},
@@ -86,12 +87,12 @@ async def api_device_revoke(request: web.Request) -> web.Response:
     if denied := _require_confirmed_request(request):
         return denied
     if not _owner_allowed(request):
-        return web.json_response({"ok": False, "error": "需要管理员会话"}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.pairing.admin_session_required")}, status=403)
     devices = request.app[DEVICE_TOKENS_KEY]
     device_id = request.match_info.get("device_id", "")
     if not devices.revoke(device_id):
         return web.json_response(
-            {"ok": False, "error": "设备不存在或已被吊销"},
+            {"ok": False, "error": t("webui.routes.pairing.device_missing_or_revoked")},
             status=404,
         )
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
@@ -102,10 +103,10 @@ async def api_device_clear_install_id(request: web.Request) -> web.Response:
     if denied := _require_confirmed_request(request):
         return denied
     if not _owner_allowed(request):
-        return web.json_response({"ok": False, "error": "需要管理员会话"}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.pairing.admin_session_required")}, status=403)
     devices = request.app[DEVICE_TOKENS_KEY]
     if not devices.clear_install_id(request.match_info.get("device_id", "")):
-        return web.json_response({"ok": False, "error": "设备不存在或已被吊销"}, status=404)
+        return web.json_response({"ok": False, "error": t("webui.routes.pairing.device_missing_or_revoked")}, status=404)
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
@@ -113,7 +114,7 @@ async def api_devices_revoke_all(request: web.Request) -> web.Response:
     if denied := _require_confirmed_request(request):
         return denied
     if not _owner_allowed(request):
-        return web.json_response({"ok": False, "error": "需要管理员会话"}, status=403)
+        return web.json_response({"ok": False, "error": t("webui.routes.pairing.admin_session_required")}, status=403)
     revoked = request.app[DEVICE_TOKENS_KEY].revoke_all()
     return web.json_response(
         {"ok": True, "revoked": revoked},

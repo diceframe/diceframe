@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from src.localization.messages import t
 
 MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 MAX_IMAGE_PIXELS = 16_000_000
@@ -22,31 +23,31 @@ def save_avatar_upload(
     avatars_dir: Path | None, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": "未提供头像文件"}
+        return {"ok": False, "error": t("webui.services.avatars.file_missing")}
     if len(file_data) > (MAX_UPLOAD_BYTES * 4 // 3) + 16:
-        return {"ok": False, "error": "头像文件不能超过 3 MB"}
+        return {"ok": False, "error": t("webui.services.avatars.file_too_large")}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": "头像文件数据无效"}
+        return {"ok": False, "error": t("webui.services.avatars.invalid_data")}
     if not raw or len(raw) > MAX_UPLOAD_BYTES:
-        return {"ok": False, "error": "头像文件不能超过 3 MB"}
+        return {"ok": False, "error": t("webui.services.avatars.file_too_large")}
 
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                return {"ok": False, "error": "头像仅支持 PNG、JPEG 或 WebP"}
+                return {"ok": False, "error": t("webui.services.avatars.unsupported_format")}
             width, height = source.size
             if width < 32 or height < 32:
-                return {"ok": False, "error": "头像尺寸不能小于 32×32"}
+                return {"ok": False, "error": t("webui.services.avatars.too_small")}
             if width > 4096 or height > 4096 or width * height > MAX_IMAGE_PIXELS:
-                return {"ok": False, "error": "头像尺寸过大"}
+                return {"ok": False, "error": t("webui.services.avatars.too_large")}
             image = ImageOps.exif_transpose(source).convert("RGB")
             image = ImageOps.fit(image, (AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
             output = io.BytesIO()
             image.save(output, format="WEBP", quality=88, method=6)
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-        return {"ok": False, "error": "无法读取该头像图片"}
+        return {"ok": False, "error": t("webui.services.avatars.unreadable_image")}
 
     payload = output.getvalue()
     asset_id = hashlib.sha256(payload).hexdigest()
@@ -87,14 +88,14 @@ def list_user_avatars(avatars_dir: Path) -> dict[str, Any]:
 def delete_avatar(avatars_dir: Path, asset_id: str) -> dict[str, Any]:
     """删除用户上传的头像文件。不检查引用，删后引用处显示占位。"""
     if not ASSET_ID_RE.fullmatch(asset_id):
-        return {"ok": False, "error": "无效的头像 ID"}
+        return {"ok": False, "error": t("webui.services.avatars.invalid_id")}
     path = avatars_dir / f"{asset_id}.webp"
     if not path.is_file():
-        return {"ok": False, "error": "头像不存在"}
+        return {"ok": False, "error": t("webui.services.avatars.not_found")}
     try:
         path.unlink()
     except OSError:
-        return {"ok": False, "error": "删除头像失败"}
+        return {"ok": False, "error": t("webui.services.avatars.delete_failed")}
     return {"ok": True}
 
 

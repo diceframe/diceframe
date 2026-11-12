@@ -1,0 +1,10 @@
+# src/webui/routes/game_gameplay_routes.py 返回给请求方的提示。
+"zh-CN":
+  action_too_long: "行动文本过长（上限 %{max_action_chars} 字）"
+  advance_error_see_logs: "推进请求处理出错，请查看服务器日志"
+  body_must_be_json_object: "请求体必须是 JSON 对象"
+  bot_binding_private_questions_only: "该对局的 Bot 绑定仅允许私下提问"
+  gm_command_too_long: "GM 指令过长（上限 %{max_action_chars} 字）"
+  question_too_long: "问题过长（上限 %{max_action_chars} 字）"
+  request_error_see_logs: "处理请求时出错，请查看服务器日志"
+  whisper_too_long: "悄悄话过长（上限 %{max_action_chars} 字）"

@@ -1,0 +1,13 @@
+# src/webui/services/storytelling.py 返回给请求方的提示。
+"zh-CN":
+  busy_retry_later: "生成或重写进行中，请稍后重试"
+  different_public_identities: "不同公开身份不能合并"
+  merge_temporary_only: "只能将临时人物合并到另一位已出场人物"
+  mode_invalid: "故事模式必须是 prose 或 dialogue"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  round_generating: "回合生成进行中，暂时不能切换故事模式"
+  settings_save_failed: "剧情模式设置保存失败"
+  settings_version_unsupported: "剧情模式设置版本不受当前运行时支持"
+  speaker_id_invalid: "说话人编号无效"
+  speaker_missing: "当前剧情中不存在该说话人"
+  speakers_changed: "人物列表已变化，请刷新后重试"

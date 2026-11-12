@@ -1,0 +1,12 @@
+# src/webui/routes/modules.py 返回给请求方的提示。
+"zh-CN":
+  body_must_be_json_object: "请求体必须是 JSON 对象"
+  dfplugin_file_missing: "缺少 .dfplugin 模组文件"
+  external_metadata_missing: "缺少外部模组元数据文件"
+  external_module_too_large: "外部模组不能超过 20 MB"
+  external_preview_multipart_required: "外部模组预览需要 multipart/form-data"
+  install_dfplugin_only: "本地安装只接受 .dfplugin 文件"
+  install_multipart_required: "模组安装需要 multipart/form-data"
+  package_too_large: "模组包不能超过 20 MB"
+  preview_dfplugin_only: "本地预览只接受 .dfplugin 文件"
+  preview_multipart_required: "模组预览需要 multipart/form-data"

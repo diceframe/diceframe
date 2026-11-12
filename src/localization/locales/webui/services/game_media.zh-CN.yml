@@ -1,0 +1,10 @@
+# src/webui/services/game_media.py 返回给请求方的提示。
+"zh-CN":
+  choose_adventure_cover_or_default: "请选择冒险头图或恢复内容默认"
+  fixed_world_adventure: "当前存档绑定了固定世界冒险；请新建沙盒对局后再切换世界书。"
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  round_processing_retry_later: "回合正在处理中，请稍后重试"
+  world_id_missing_or_invalid: "未指定或非法 world_id"
+  world_load_failed: "加载世界失败: %{exc}"
+  world_missing: "世界 %{world_id} 不存在"

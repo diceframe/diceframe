@@ -1,0 +1,6 @@
+# src/webui/routes/game_character_routes.py 返回给请求方的提示。
+"en":
+  body_not_object: "The request body must be an object"
+  card_unavailable: "This character card is not available"
+  npc_portrait_gm_only: "Only the GM can change an NPC's standing portrait"
+  npc_voice_gm_only: "Only the GM can change an NPC's voice"

@@ -1,0 +1,13 @@
+# src/webui/services/game_seed_lifecycle.py 返回给请求方的提示。
+"en":
+  adventure_init_failed: "Adventure initialization failed; no half-finished save was left behind: %{exc}"
+  narration_perspective_invalid: "Invalid narration perspective setting"
+  original_adventure_binding_invalid: "The original save's adventure binding is invalid; no half-finished save was left behind."
+  party_character_required: "Create or select at least 1 party character"
+  play_mode_invalid: "Invalid play mode"
+  restart_failed: "Restarting failed; no half-finished save was left behind. Please try again."
+  restart_opening_failed: "Generating the opening for the restart failed; no half-finished save was left behind. Check the model settings and try again."
+  save_restarted_game_failed: "Saving the restarted game failed; no half-finished save was left behind. Please try again."
+  seed_game_missing: "No game was found for restart reference code '%{seed_code}'; make sure the original save still exists"
+  story_mode_invalid: "Invalid story mode; only prose or dialogue is supported"
+  system_not_ready: "The system is not ready"

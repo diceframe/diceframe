@@ -1,0 +1,7 @@
+# src/webui/services/game_preferences.py 返回给请求方的提示。
+"zh-CN":
+  game_restarted_refresh: "对局已重开，请刷新"
+  rewriting_retry_later: "正在重写历史，请稍后重试"
+  round_generating: "正在生成本轮，请完成后再修改偏好"
+  save_failed_settings_kept: "偏好保存失败，原设置已保留"
+  version_unsupported: "对局偏好版本不受支持"

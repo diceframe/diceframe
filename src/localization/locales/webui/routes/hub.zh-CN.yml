@@ -1,0 +1,11 @@
+# src/webui/routes/hub.py 返回给请求方的提示。
+"zh-CN":
+  body_not_json: "请求体不是合法 JSON"
+  hub_unreachable: "暂时无法连接 DiceFrame Hub，请检查网络后重试"
+  lang_not_string: "lang 必须是字符串"
+  legal_acceptance_not_object: "legal_acceptance 必须是对象"
+  peer_count_range: "peer_count 必须是 2 到 6 的整数"
+  readme_timeout: "README 读取超时"
+  stars_range: "stars 必须是 1 到 5 的整数"
+  tags_not_string_array: "tags 必须是字符串数组"
+  telemetry_enabled_not_boolean: "telemetry_enabled 必须是布尔值"

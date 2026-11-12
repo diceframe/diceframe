@@ -1,0 +1,15 @@
+# src/webui/services/ruleset_advancement.py 返回给请求方的提示。
+"zh-CN":
+  advancement_control_unsupported: "当前规则不支持该升级控制"
+  card_missing: "角色卡不存在: %{card_id}"
+  card_ruleset_unavailable: "角色卡绑定的专业规则不可用"
+  card_updated_elsewhere: "角色卡已在其他位置更新，请刷新后重试"
+  character_updated_elsewhere: "角色已在其他位置更新，请刷新后重试"
+  expected_revision_required: "升级操作必须提供有效的 expected_revision"
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  game_rule_missing: "当前游戏规则不存在"
+  no_professional_advancement: "该规则尚未提供专业升级流程"
+  operation_id_required: "升级操作必须提供有效的 operation_id"
+  operation_id_reused: "operation_id 已被其他角色操作使用，请重试"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  rule_missing: "规则不存在: %{rule_id}"

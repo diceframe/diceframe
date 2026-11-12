@@ -1,0 +1,4 @@
+# src/webui/routes/asr.py 返回给请求方的提示。
+"en":
+  asr_test_admin_only: "Only an administrator can test speech recognition"
+  asr_test_not_on_share_page: "The speech recognition test is not available on the player share page"

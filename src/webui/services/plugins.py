@@ -35,6 +35,7 @@ from src.webui.services.content_pack_export import (
     _world_to_template, _entry_to_lorebook_entry, _card_to_character_template,
     _rule_files, _legacy_rule_locale_overlay, _export_resource_id,
 )
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -586,7 +587,7 @@ async def control_plugin(
     # 前端进程开关要求强制启动/停止，不受 config.enabled 拦截（enabled 是"开机自启"概念）。
     start_kwargs = {"require_enabled": False} if action in ("start", "restart") else {}
     method = {"start": host.start, "stop": host.stop, "restart": host.restart}.get(action)
-    if not method: return {"ok": False, "error": "插件操作无效"}
+    if not method: return {"ok": False, "error": t("webui.services.plugins.plugin_operation_invalid")}
     await method(plugin_id, **start_kwargs)
     if action in ("start", "restart") and _legacy_autoimport_allowed(host, plugin_id):
         LegacyContentPackAdapter(
@@ -744,12 +745,12 @@ def clear_plugin_card_cache(
     if not host:
         return {"ok": False, "error": "插件宿主未启用"}
     if plugin_id != "qq-napcat":
-        return {"ok": False, "error": "该插件没有可清理的卡片缓存"}
+        return {"ok": False, "error": t("webui.services.plugins.no_card_cache")}
     host.public_detail(plugin_id)  # 触发 KeyError，保持和其他插件接口一致
     data_dir = Path(host.data_dir).resolve()
     card_dir = (data_dir / "bot" / "cards").resolve()
     if data_dir not in card_dir.parents:
-        return {"ok": False, "error": "卡片缓存路径非法"}
+        return {"ok": False, "error": t("webui.services.plugins.card_cache_path_invalid")}
     result = cleanup_card_cache(card_dir, delete_all=True)
     return {"ok": True, "path": str(card_dir), **result}
 
@@ -846,7 +847,7 @@ def import_plugin_content(
     except ContentRefError:
         return {
             "ok": False,
-            "error": "该内容类型不支持导入",
+            "error": t("webui.services.plugins.content_type_not_importable"),
             "error_code": "content_kind_not_importable",
         }
     resource = _materialize_content_portrait(dependencies.portraits, resource)
@@ -867,7 +868,7 @@ def import_plugin_content(
     if import_target != "lorebook_entry":
         return {
             "ok": False,
-            "error": "该内容类型仅支持目录引用，不能复制到世界书",
+            "error": t("webui.services.plugins.content_type_catalog_only"),
             "error_code": "content_kind_catalog_only",
         }
 
@@ -881,7 +882,7 @@ def import_plugin_content(
             if callable(world_projection) else ""
         )
     elif not target_world_id:
-        return {"ok": False, "error": "请选择要导入到的世界书"}
+        return {"ok": False, "error": t("webui.services.plugins.select_target_lorebook")}
     if not lorebook or not lorebook.get_world(target_world_id):
         # A standalone canonical Book intentionally has no world projection.
         if not target_book_id:
@@ -955,7 +956,7 @@ def import_all_plugin_content(
                         errors.append({"kind": kind, "name": _content_name(resource), "error": result.get("error", "")})
                 elif import_target == "lorebook_entry":
                     if not target_book_id and not target_world_id:
-                        skipped.append({"kind": kind, "name": _content_name(resource), "reason": "未选择世界书"})
+                        skipped.append({"kind": kind, "name": _content_name(resource), "reason": t("webui.services.plugins.lorebook_not_selected")})
                         continue
                     lorebook = dependencies.store.lorebook
                     if not target_book_id and (not lorebook or not lorebook.get_world(target_world_id)):
@@ -995,7 +996,7 @@ def import_all_plugin_content(
                     skipped.append({
                         "kind": kind,
                         "name": _content_name(resource),
-                        "reason": "目录资源不支持复制导入",
+                        "reason": t("webui.services.plugins.catalog_resources_not_copyable"),
                     })
             except Exception as exc:
                 errors.append({"kind": kind, "name": _content_name(resource), "error": str(exc)})
@@ -1071,7 +1072,7 @@ def _materialize_content_portrait(
         return result
     path = dependencies.plugin_asset_path(plugin_id, str(portrait.get("path") or ""))
     if path.stat().st_size > 3 * 1024 * 1024:
-        raise ValueError("内容包头像不能超过 3 MB")
+        raise ValueError(t("webui.services.plugins.content_avatar_too_large"))
     saved = dependencies.save_avatar_upload(
         base64.b64encode(path.read_bytes()).decode("ascii"), path.name,
     )
@@ -1093,12 +1094,12 @@ def _save_plugin_book_entry(
         return writer(str(book_id), entry)
     lorebook = dependencies.store.lorebook
     if lorebook is None:
-        return {"ok": False, "error": "世界书存储不可用"}
+        return {"ok": False, "error": t("webui.services.plugins.lorebook_storage_unavailable")}
     add_book_entry = getattr(lorebook, "add_book_entry", None)
     if callable(add_book_entry):
         add_book_entry(str(book_id), entry)
         return {"ok": True}
-    return {"ok": False, "error": "目标世界书不支持规范导入", "error_code": "book_writer_unavailable"}
+    return {"ok": False, "error": t("webui.services.plugins.target_lorebook_no_canonical_import"), "error_code": "book_writer_unavailable"}
 
 
 def _content_to_lore_entry(

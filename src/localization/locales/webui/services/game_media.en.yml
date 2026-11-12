@@ -1,0 +1,10 @@
+# src/webui/services/game_media.py 返回给请求方的提示。
+"en":
+  choose_adventure_cover_or_default: "Choose an adventure cover or restore the content default"
+  fixed_world_adventure: "This save is bound to a fixed-world adventure; create a new sandbox game before switching the lorebook."
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  round_processing_retry_later: "The round is being processed; try again later"
+  world_id_missing_or_invalid: "world_id is missing or invalid"
+  world_load_failed: "Failed to load the world: %{exc}"
+  world_missing: "World %{world_id} does not exist"

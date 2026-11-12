@@ -1,0 +1,5 @@
+# src/webui/routes/bot.py 返回给请求方的提示。
+"en":
+  bind_token_gm_only: "Only the GM can get a binding token"
+  body_not_object: "The request body must be an object"
+  payload_not_object: "The payload must be an object"

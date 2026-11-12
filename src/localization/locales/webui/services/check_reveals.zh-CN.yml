@@ -1,0 +1,7 @@
+# src/webui/services/check_reveals.py 返回给请求方的提示。
+"zh-CN":
+  actor_or_gm_only: "只有行动者或 GM 可以揭示"
+  check_missing: "检定不存在"
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  not_logged_in: "未登录"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"

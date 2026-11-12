@@ -1,0 +1,3 @@
+# src/webui/routes/game_query_routes.py 返回给请求方的提示。
+"zh-CN":
+  paging_must_be_integer: "分页参数必须是整数"

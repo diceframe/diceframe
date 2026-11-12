@@ -1,0 +1,9 @@
+# src/webui/services/bot_extensions.py 返回给请求方的提示。
+"zh-CN":
+  card_file_missing: "卡片文件不存在"
+  card_file_name_invalid: "卡片文件名非法"
+  card_file_path_invalid: "卡片文件路径非法"
+  payload_not_json: "payload 不是有效 JSON"
+  payload_not_object: "payload 必须是对象"
+  payload_too_large: "Bot Bridge 扩展 payload 不能超过 192 KB"
+  unsupported_stage: "不支持的 Bot Bridge 扩展阶段：%{stage}"

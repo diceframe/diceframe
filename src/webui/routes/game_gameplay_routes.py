@@ -21,6 +21,7 @@ from src.webui.routes.game_route_common import (
     _gm_only_inst,
     _narration_callbacks,
 )
+from src.localization.messages import t
 
 
 async def api_gm_command(request: web.Request) -> web.Response:
@@ -35,7 +36,7 @@ async def api_gm_command(request: web.Request) -> web.Response:
     command = str(body.get("command", "") or "")
     if len(command) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"ok": False, "error": f"GM 指令过长（上限 {MAX_ACTION_CHARS} 字）"},
+            {"ok": False, "error": t("webui.routes.game_gameplay_routes.gm_command_too_long", max_action_chars=MAX_ACTION_CHARS)},
             status=400,
         )
     result = await api.gm_command(gk, command, str(body.get("mode", "note") or "note"))
@@ -73,7 +74,7 @@ async def api_gm_private_message(request: web.Request) -> web.Response:
     text = str(body.get("text", "") or "")
     if len(text) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"ok": False, "error": f"悄悄话过长（上限 {MAX_ACTION_CHARS} 字）"},
+            {"ok": False, "error": t("webui.routes.game_gameplay_routes.whisper_too_long", max_action_chars=MAX_ACTION_CHARS)},
             status=400,
         )
     result = await _get_api(request).gm_private_message(
@@ -89,7 +90,7 @@ async def api_action(request: web.Request) -> web.Response:
     text = body.get("text", "")
     if len(text) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"error": f"行动文本过长（上限 {MAX_ACTION_CHARS} 字）"}, status=400
+            {"error": t("webui.routes.game_gameplay_routes.action_too_long", max_action_chars=MAX_ACTION_CHARS)}, status=400
         )
     if request.get("player_preview", False) and not request.get(
         "player_delegate", False
@@ -119,7 +120,7 @@ async def api_action(request: web.Request) -> web.Response:
         return web.json_response(
             {
                 "ok": False,
-                "error": "处理请求时出错，请查看服务器日志",
+                "error": t("webui.routes.game_gameplay_routes.request_error_see_logs"),
                 "narration": "处理请求时出错，请查看服务器日志",
                 "advanced": False,
                 "phase": "error",
@@ -149,7 +150,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "error_code": "BOT_READ_ONLY",
-                "error": "该对局的 Bot 绑定仅允许私下提问",
+                "error": t("webui.routes.game_gameplay_routes.bot_binding_private_questions_only"),
             },
             status=403,
         )
@@ -158,7 +159,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "QUESTION_TOO_LONG",
-                "error": f"问题过长（上限 {MAX_ACTION_CHARS} 字）",
+                "error": t("webui.routes.game_gameplay_routes.question_too_long", max_action_chars=MAX_ACTION_CHARS),
             },
             status=400,
         )
@@ -262,7 +263,7 @@ async def api_ruleset_submit_intent(request: web.Request) -> web.Response:
         body = await request.json()
     except (json.JSONDecodeError, ValueError):
         return web.json_response(
-            {"ok": False, "code": "INVALID_JSON", "error": "请求体必须是 JSON 对象"},
+            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.game_gameplay_routes.body_must_be_json_object")},
             status=400,
         )
     result = await api.ruleset_submit_intent(
@@ -383,7 +384,7 @@ async def api_advance(request: web.Request) -> web.Response:
         return web.json_response(
             {
                 "ok": False,
-                "error": "推进请求处理出错，请查看服务器日志",
+                "error": t("webui.routes.game_gameplay_routes.advance_error_see_logs"),
                 "advanced": False,
                 "phase": "error",
             },

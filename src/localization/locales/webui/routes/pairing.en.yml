@@ -1,0 +1,5 @@
+# src/webui/routes/pairing.py 返回给请求方的提示。
+"en":
+  admin_session_required: "An administrator session is required"
+  device_missing_or_revoked: "The device does not exist or has been revoked"
+  install_id_invalid: "Invalid install_id format"

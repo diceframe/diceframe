@@ -17,6 +17,7 @@ from src.webui.device_tokens import DEVICE_TOKENS_KEY
 from src.webui.sse_ticket import SSE_GRANT_KEY, BotGrant, OwnerGrant, token_digest
 from src.webui.services._common import canonical_game_key
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.localization.messages import t
 
 
 SEAT_TOKEN_HEADER = "X-Seat-Token"
@@ -84,7 +85,7 @@ class WebAccessControl:
             )
             if not ticket:
                 return web.json_response(
-                    {"ok": False, "error": "SSE 票据无效或已过期"},
+                    {"ok": False, "error": t("webui.access_control.sse_ticket_invalid")},
                     status=401,
                 )
             request["user_id"] = ticket.user_id
@@ -153,7 +154,7 @@ class WebAccessControl:
                 )
             if not owner_authenticated and self.share_uid_is_gm_seat(request, share_uid):
                 return web.json_response(
-                    {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": "GM 席位需要房主登录"},
+                    {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui.access_control.gm_seat_requires_host_login")},
                     status=403,
                 )
             viewer_uid = request.get("user_id", "")
@@ -195,13 +196,13 @@ class WebAccessControl:
                         )
                     if self.share_uid_is_gm_seat(request, share_uid):
                         return web.json_response(
-                            {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": "GM 席位需要房主登录"},
+                            {"ok": False, "error_code": "GM_SEAT_REQUIRES_OWNER", "error": t("webui.access_control.gm_seat_requires_host_login")},
                             status=403,
                         )
                     request["user_id"] = share_uid
                     return await handler(request)
                 return web.json_response(
-                    {"ok": False, "error": "未授权"},
+                    {"ok": False, "error": t("webui.access_control.unauthorized")},
                     status=401,
                 )
         return await handler(request)
@@ -221,7 +222,7 @@ class WebAccessControl:
         )
         if not global_authenticated and not plugin_identity:
             return web.json_response(
-                {"ok": False, "error": "Bot 服务未授权"},
+                {"ok": False, "error": t("webui.access_control.bot_unauthorized")},
                 status=401,
             )
         request["bot_authenticated"] = True
@@ -283,7 +284,7 @@ class WebAccessControl:
                 {
                     "ok": False,
                     "error_code": "BOT_SURFACE_UNSUPPORTED",
-                    "error": "该对局的 Bot 权限面无效，已拒绝请求",
+                    "error": t("webui.access_control.bot_permission_surface_invalid"),
                 },
                 status=403,
             )
@@ -293,7 +294,7 @@ class WebAccessControl:
                 {
                     "ok": False,
                     "error_code": "BOT_SURFACE_DISABLED",
-                    "error": "该玩法模式不支持 Bot 操作",
+                    "error": t("webui.access_control.play_mode_no_bot"),
                 },
                 status=403,
             )
@@ -304,7 +305,7 @@ class WebAccessControl:
                     {
                         "ok": False,
                         "error_code": "BOT_READ_ONLY",
-                        "error": "该对局的 Bot 绑定仅允许读取和只读提问",
+                        "error": t("webui.access_control.bot_binding_read_only"),
                     },
                     status=403,
                 )
@@ -334,10 +335,10 @@ class WebAccessControl:
         if grant.paired_device_id:
             devices = app.get(DEVICE_TOKENS_KEY)
             if devices is None or not devices.has(grant.paired_device_id):
-                return {"error_code": "PAIRED_DEVICE_REVOKED", "error": "此设备的配对已被吊销，请重新登录"}
+                return {"error_code": "PAIRED_DEVICE_REVOKED", "error": t("webui.access_control.device_pairing_revoked")}
             return None
         if self.access_password_marker() != grant.access_password_hash:
-            return {"error_code": "ACCESS_PASSWORD_CHANGED", "error": "访问密码已更改，请重新登录"}
+            return {"error_code": "ACCESS_PASSWORD_CHANGED", "error": t("webui.access_control.access_password_changed")}
         return None
 
     def bot_revocation(self, app: web.Application, grant: BotGrant) -> dict | None:
@@ -359,8 +360,8 @@ class WebAccessControl:
                 grant.plugin_id, grant.token_digest,
             ):
                 return None
-            return {"error_code": "PLUGIN_TOKEN_REVOKED", "error": "插件 API Token 已失效或插件已停用"}
-        return {"error_code": "BOT_TOKEN_REVOKED", "error": "Bot API Token 已更换，请更新 Bot 配置"}
+            return {"error_code": "PLUGIN_TOKEN_REVOKED", "error": t("webui.access_control.plugin_token_revoked")}
+        return {"error_code": "BOT_TOKEN_REVOKED", "error": t("webui.access_control.bot_token_rotated")}
 
     @staticmethod
     def is_public_ruleset_builder_request(request: web.Request) -> bool:
@@ -453,7 +454,7 @@ class WebAccessControl:
             )
             if not token_uid and not owner_authenticated and access_password_configured:
                 return "", web.json_response(
-                    {"ok": False, "error_code": "SEAT_TOKEN_INVALID", "error": "席位凭证无效或已失效，请向 GM 重新获取链接"},
+                    {"ok": False, "error_code": "SEAT_TOKEN_INVALID", "error": t("webui.access_control.seat_credential_invalid")},
                     status=401,
                 )
         query_uid = str(request.query.get("user") or "").strip()
@@ -474,7 +475,7 @@ class WebAccessControl:
                 return "", None
             return session_uid, None
         return "", web.json_response(
-            {"ok": False, "error_code": "SEAT_TOKEN_REQUIRED", "error": "需要席位凭证，请使用 GM 发出的链接重新加入"},
+            {"ok": False, "error_code": "SEAT_TOKEN_REQUIRED", "error": t("webui.access_control.seat_credential_required")},
             status=401,
         )
 

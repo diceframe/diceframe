@@ -24,6 +24,7 @@ from src.engine.player_control import (
     set_away_control_policy,
 )
 from src.rules.rule_system import RuleSystem
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -147,7 +148,7 @@ class GameControlService:
             return {
                 "ok": False,
                 "error_code": "CONTROL_MODE_UNSUPPORTED",
-                "error": "只能设为 AI 托管或交回真人",
+                "error": t("webui.services.game_controls.control_mode_invalid"),
             }
         code = await instance.apply_player_control_change(user_id, mode)
         if code:
@@ -188,7 +189,7 @@ class GameControlService:
             return {
                 "ok": False,
                 "error_code": "AWAY_POLICY_UNSUPPORTED",
-                "error": f"未知的暂离策略：{policy!r}",
+                "error": t("webui.services.game_controls.unknown_away_policy", policy=repr(policy)),
             }
         await self._dependencies.save_instance(instance)
         return {"ok": True, "away_control_policy": value}
@@ -236,7 +237,7 @@ class GameControlService:
         rule = self._dependencies.load_rule(instance)
         dice_system = str(rule.dice_system if rule else "d20").lower()
         if dice_system == "none":
-            return {"ok": False, "error": "当前规则不需要掷骰"}
+            return {"ok": False, "error": t("webui.services.game_controls.rule_needs_no_dice")}
         formula = "d100" if dice_system == "d100" else "d20"
         result = roll(formula)
         if dice_system == "d20":
@@ -268,7 +269,7 @@ class GameControlService:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": "GM 正在重写历史回合，请等待完成后重试",
+                    "error": t("webui.services.game_controls.rewriting_wait_and_retry"),
                 }
             pending = instance.pending_dice_actions(user_id or None)
             if not pending:
@@ -317,9 +318,9 @@ class GameControlService:
             }
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": "GM 正在重写历史回合，请等待完成后重试"}
+                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry")}
             if self._instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 transaction = StagedGameTransaction(instance)
                 result = await transaction.staged.resolve_luck_decision(check_id, actor_uid, spend, rule=self._dependencies.load_rule(instance), allow_gm=True)
@@ -344,9 +345,9 @@ class GameControlService:
             }
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": "GM 正在重写历史回合，请等待完成后重试"}
+                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry")}
             if self._instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry")}
             async with instance._lock:
                 transaction = StagedGameTransaction(instance)
                 declined = await transaction.staged.decline_pending_luck()
@@ -397,7 +398,7 @@ class GameControlService:
         if not instance:
             return {"ok": False, "error": "游戏不存在"}
         if raw is not None and not isinstance(raw, dict):
-            return {"ok": False, "error": "GM 叙事风格设置无效"}
+            return {"ok": False, "error": t("webui.services.game_controls.gm_style_invalid")}
         try:
             instance.set_gm_style_override(raw)
         except ValueError as exc:

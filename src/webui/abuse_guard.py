@@ -15,6 +15,7 @@ from aiohttp import web
 
 from src.webui.services._common import canonical_game_key
 from src.webui.services.room_password import is_room_password_rejected
+from src.localization.messages import t
 
 
 LOGIN_PER_IP_LIMIT = 10
@@ -318,7 +319,7 @@ class AbuseGuard:
             await asyncio.wait_for(request.read(), timeout=self.room_password_body_timeout)
         except asyncio.TimeoutError:
             return web.json_response(
-                {"ok": False, "error": "请求体读取超时"}, status=408, headers={"Cache-Control": "no-store"},
+                {"ok": False, "error": t("webui.abuse_guard.body_read_timeout")}, status=408, headers={"Cache-Control": "no-store"},
             )
         lock, users = self._room_password_locks.get(key, (None, 0))
         if lock is None:
@@ -415,8 +416,7 @@ def _rate_limited_response(retry_after: int) -> web.Response:
         {
             "ok": False,
             "error": (
-                "操作太频繁，为避免连续请求影响游戏，系统暂时拦截了本次操作。"
-                f"请等待约 {retry_after} 秒后再试。"
+                t("webui.abuse_guard.rate_limited", retry_after=retry_after)
             ),
             "retry_after": retry_after,
         },

@@ -1,0 +1,4 @@
+# src/webui/routes/maps.py 返回给请求方的提示。
+"zh-CN":
+  background_gm_only: "仅 GM 可修改地图背景"
+  background_missing: "地图背景不存在"

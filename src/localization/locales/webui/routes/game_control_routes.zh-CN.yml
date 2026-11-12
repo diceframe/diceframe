@@ -1,0 +1,5 @@
+# src/webui/routes/game_control_routes.py 返回给请求方的提示。
+"zh-CN":
+  browser_session_unavailable: "浏览器会话不可用"
+  gm_style_invalid: "GM 叙事风格设置无效"
+  no_recoverable_host: "存档没有可恢复的房主身份"

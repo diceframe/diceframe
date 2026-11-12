@@ -1,0 +1,5 @@
+# src/webui/services/tavern.py 返回给请求方的提示。
+"en":
+  file_missing: "No file was provided"
+  file_path_disabled: "file_path mode is disabled (security risk); upload with file_data instead"
+  file_too_large: "The file is too large (30 MB at most)"

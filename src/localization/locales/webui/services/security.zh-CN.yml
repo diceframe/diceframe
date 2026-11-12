@@ -1,0 +1,11 @@
+# src/webui/services/security.py 返回给请求方的提示。
+"zh-CN":
+  certificate_changed: "证书在检查后发生了变化，请重新执行检查"
+  certificate_verification_failed: "证书验证失败：%{exc}"
+  lets_encrypt_request_failed: "Let's Encrypt 证书申请失败：%{exc}"
+  local_certificate_verification_failed: "本地证书验证失败：%{exc}"
+  prepare_token_expired: "准备令牌已过期，请重新执行检查"
+  prepare_token_invalid: "准备令牌无效或已使用，请重新执行检查"
+  regenerate_failed: "重新生成本地证书失败：%{exc}"
+  tls_mode_managed_by_env: "TRPG_TLS_MODE 已由环境变量接管，请修改 .env 后重启后端"
+  use_disable_action: "关闭连接安全请使用 disable 操作"

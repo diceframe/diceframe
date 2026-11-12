@@ -40,6 +40,7 @@ from src.webui.game_lifecycle_context import (
     _start_created_game,
     resume_created_ai_table,
 )
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -88,7 +89,7 @@ def delete_game(
         shutil.rmtree(save_dir)
     except Exception as exc:
         logger.warning("删除存档目录失败: %s", save_dir, exc_info=True)
-        return {"ok": False, "error": f"删除存档目录失败: {exc}"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.delete_save_dir_failed", exc=exc)}
     dependencies.registry.remove(parsed_key)
     removed_templates = (
         dependencies.cleanup_orphan_game_templates(world_id) if world_id else 0
@@ -190,7 +191,7 @@ async def create_game(
     book_bindings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not dependencies.handler or not dependencies.registry:
-        return {"ok": False, "error": "系统未就绪"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.system_not_ready")}
     defaults = validate_preferences(getattr(dependencies, 'get_game_defaults', lambda: {})())
     narrative_perspective = defaults['narrative_perspective'] if narrative_perspective is UNSET else narrative_perspective
     story_mode = defaults['story_mode'] if story_mode is UNSET else story_mode
@@ -203,7 +204,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "INVALID_STORY_MODE",
-            "error": "故事模式无效，仅支持 prose 或 dialogue",
+            "error": t("webui.services.game_lifecycle.story_mode_invalid"),
         }
     if config_error := dependencies.llm_configuration_error(language):
         return config_error
@@ -222,7 +223,7 @@ async def create_game(
         except ContentRefError as exc:
             return {"ok": False, "error_code": "INVALID_WORLD_REF", "error": str(exc)}
     if not _is_safe_world_id(world_id):
-        return {"ok": False, "error": "非法 world_id"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.world_id_invalid")}
     if source_world_id and not _is_safe_world_id(source_world_id):
         return {"ok": False, "error": "非法 source_world_id"}
     normalized_book_bindings: list[dict[str, Any]] = []
@@ -262,20 +263,20 @@ async def create_game(
             if first_ref.source_kind == "world":
                 lorebook_world_id = first_ref.source_id
     if not players:
-        return {"ok": False, "error": "请至少创建或选择 1 名队伍角色"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.party_character_required")}
     try:
         normalized_narrative_perspective = validate_narrative_perspective(
             narrative_perspective
         )
         normalized_gm_style = normalize_gm_style_override(gm_style_override)
     except ValueError:
-        return {"ok": False, "error": "叙事设置无效"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.narration_settings_invalid")}
     normalized_play_mode = str(play_mode or "").strip().casefold()
     if not normalized_play_mode:
         normalized_play_mode = "adventure" if str(adventure_id or "").strip() else "free"
     gameplay = DEFAULT_GAMEPLAYS.get(normalized_play_mode)
     if gameplay is None:
-        return {"ok": False, "error": "玩法模式无效"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.play_mode_invalid")}
     gameplay_rejection = gameplay.validate_create(GameplayCreateRequest(
         solo=bool(solo),
         rule_id=str(rule_id or "").strip(),
@@ -310,7 +311,7 @@ async def create_game(
 
     instance = dependencies.registry.get(game_key)
     if instance and instance.state not in (GameState.CREATED, GameState.ENDED):
-        return {"ok": False, "error": "该世界已有进行中的游戏"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.world_has_active_game")}
     transaction = CreationTransaction(dependencies, game_key, world_id)
     resolved_world_name = game_name or world_id
     resolved_language = normalize_language(language)
@@ -412,7 +413,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "GAME_CREATE_FAILED",
-            "error": "创建游戏失败，未留下半成品存档，请重试。",
+            "error": t("webui.services.game_lifecycle.create_game_failed"),
         }
     transaction.advance(CreationPhase.INSTANCE_REGISTERED)
     binding_error = game_creation_phases.bind_ruleset_runtime(
@@ -426,7 +427,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "INVALID_ADVENTURE_BINDING",
-            "error": "冒险包绑定无效，未留下半成品存档。",
+            "error": t("webui.services.game_lifecycle.adventure_binding_invalid"),
         }
     content_error = game_creation_phases.bind_content_refs(
         transaction,
@@ -459,7 +460,7 @@ async def create_game(
             return {
                 "ok": False,
                 "error_code": "ADVENTURE_RUNTIME_INIT_FAILED",
-                "error": f"冒险初始化失败，未留下半成品存档：{exc}",
+                "error": t("webui.services.game_lifecycle.adventure_init_failed", exc=exc),
             }
     instance.set_scene_image(selected_scene_image)
     instance.set_map_background(selected_map_background)
@@ -562,7 +563,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "BOOK_BINDING_FAILED",
-            "error": "世界书绑定失败，未留下半成品存档。",
+            "error": t("webui.services.game_lifecycle.lorebook_binding_failed"),
         }
     created_players, player_error = await game_creation_phases.create_players(
         dependencies,
@@ -585,7 +586,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "GAME_CREATE_FAILED",
-            "error": "生成开场失败，未留下半成品存档，请检查模型设置后重试。",
+            "error": t("webui.services.game_lifecycle.opening_generation_failed"),
         }
     transaction.advance(CreationPhase.OPENING_STARTED)
     world_name = instance.world_name
@@ -602,7 +603,7 @@ async def create_game(
         return {
             "ok": False,
             "error_code": "GAME_CREATE_FAILED",
-            "error": "保存新游戏失败，未留下半成品存档，请重试。",
+            "error": t("webui.services.game_lifecycle.save_new_game_failed"),
         }
 
     # 提交之后才唤醒纯 AI 对局；自动推进失败不会破坏已经成功保存的创建结果。
@@ -626,11 +627,15 @@ async def create_game(
 
 
 def _run_init_failure(exc: RunInitializationError) -> dict[str, Any]:
-    label = "冒险" if exc.code == "ADVENTURE_RUNTIME_INIT_FAILED" else "规则运行时"
+    adventure = exc.code == "ADVENTURE_RUNTIME_INIT_FAILED"
     return {
         "ok": False,
         "error_code": exc.code,
-        "error": f"{label}初始化失败，原对局保持不变：{exc}",
+        "error": t(
+            "webui.services.game_lifecycle.adventure_init_failed_run_kept" if adventure
+            else "webui.services.game_lifecycle.runtime_init_failed_run_kept",
+            exc=exc,
+        ),
     }
 
 
@@ -641,7 +646,7 @@ async def reset_game(
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
     if not dependencies.handler:
-        return {"ok": False, "error": "系统未就绪"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.system_not_ready")}
     try:
         inst = await dependencies.handler.reset_game(inst)
     except RunInitializationError as exc:
@@ -665,11 +670,11 @@ async def restart_game(
     if not inst:
         return {"ok": False, "error": "游戏不存在"}
     if not dependencies.handler:
-        return {"ok": False, "error": "系统未就绪"}
+        return {"ok": False, "error": t("webui.services.game_lifecycle.system_not_ready")}
     if not inst.players:
         return {
             "ok": False,
-            "error": "当前游戏没有角色，无法重开；请先创建角色或重新开局",
+            "error": t("webui.services.game_lifecycle.restart_without_characters"),
         }
     try:
         inst = await dependencies.handler.restart_game(inst)

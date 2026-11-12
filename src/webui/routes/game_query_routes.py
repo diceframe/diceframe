@@ -17,6 +17,7 @@ logger = logging.getLogger("trpg")
 from src.webui.routes.game_route_common import _gm_only_inst
 from src.engine import module_hooks
 from src.engine.modules import room_access
+from src.localization.messages import t
 
 
 async def api_games(request: web.Request) -> web.Response:
@@ -120,7 +121,7 @@ async def api_log(request: web.Request) -> web.Response:
         per_page = max(1, min(200, int(request.query.get("per_page", "50"))))
     except (TypeError, ValueError):
         return web.json_response(
-            {"ok": False, "error": "分页参数必须是整数"}, status=400
+            {"ok": False, "error": t("webui.routes.game_query_routes.paging_must_be_integer")}, status=400
         )
     api = _get_api(request)
     game_key = request.match_info["game_key"]
