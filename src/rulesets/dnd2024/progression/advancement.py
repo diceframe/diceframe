@@ -750,6 +750,28 @@ class Dnd2024AdvancementEngine:
         pending_ids = {row["id"] for row in pending}
         errors: list[str] = []
 
+        # 一个等级在一次请求里只能被补齐一次。缺项是按等级算的，条目却是
+        # 按条应用的：同一级提交两条，两条都能通过缺项判定，各自加一遍属性。
+        # 这不是幂等能挡住的问题——`operation_id` 幂等的是整个请求。
+        # 所以在动任何数据之前整单拒绝，不留「前缀已应用」的中间态。
+        raw_advancements = repairs.get("advancements")
+        advancement_repairs = raw_advancements if raw_advancements is not None else []
+        if not isinstance(advancement_repairs, list):
+            raise ProgressionCatalogError("advancements must be a list of repairs")
+        seen_repair_levels: set[int] = set()
+        for entry in advancement_repairs:
+            if not isinstance(entry, dict):
+                continue
+            raw_level = entry.get("level")
+            if isinstance(raw_level, bool) or not isinstance(raw_level, int):
+                continue
+            if raw_level in seen_repair_levels:
+                raise ProgressionCatalogError(
+                    "advancement repair level is submitted more than once: "
+                    f"{raw_level}"
+                )
+            seen_repair_levels.add(raw_level)
+
         resolver = Dnd2024ClassFeatureResolver(self.bundle)
         hp_before = resolver.feature_max_hp_bonus(character)
         abilities = character.get("abilities")
@@ -777,7 +799,7 @@ class Dnd2024AdvancementEngine:
                         "subclass_ref": value,
                     })
 
-        for entry in repairs.get("advancements") or []:
+        for entry in advancement_repairs:
             if not isinstance(entry, dict):
                 errors.append("advancement repairs must be objects")
                 continue

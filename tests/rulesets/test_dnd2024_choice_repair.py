@@ -279,6 +279,98 @@ def test_repair_still_requires_a_choice_for_the_level_it_fills() -> None:
     assert "feat_ref is required" in str(caught.value)
 
 
+def test_repair_refuses_the_same_level_twice_for_the_same_ability() -> None:
+    """同一级的一片请求里只能补一次：第二条不能再加一遍同一个属性。
+
+    缺项是按等级算的，条目是按条应用的。只按缺项判定的话，两条同级条目
+    都能通过，属性就被加了两遍。外层 operation_id 幂等的是整个请求，挡不住
+    请求内部的重复。
+    """
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _advance_to(engine, _fighter(runtime), 5)
+    damaged = deepcopy(five)
+    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
+        if record["level"] != 4
+    ]
+    damaged["abilities"]["con"] -= 2
+    con_before = damaged["abilities"]["con"]
+
+    with pytest.raises(ProgressionCatalogError) as caught:
+        engine.repair_choices(damaged, {
+            "advancements": [
+                {"level": 4, "ability_score_increases": {"con": 2}},
+                {"level": 4, "ability_score_increases": {"con": 2}},
+            ],
+        })
+
+    assert "level is submitted more than once: 4" in str(caught.value)
+    # 整单拒绝，不留前缀已应用的中间态。
+    assert damaged["abilities"]["con"] == con_before
+    assert "ability_score_increases" in _missing_ids(engine, damaged)
+
+
+def test_repair_refuses_the_same_level_twice_for_different_abilities() -> None:
+    """换一个属性也算重复：重复判定看等级，不看提交内容是否相同。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _advance_to(engine, _fighter(runtime), 5)
+    damaged = deepcopy(five)
+    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
+        if record["level"] != 4
+    ]
+    damaged["abilities"]["con"] -= 2
+    dex_before = damaged["abilities"]["dex"]
+
+    with pytest.raises(ProgressionCatalogError) as caught:
+        engine.repair_choices(damaged, {
+            "advancements": [
+                {"level": 4, "ability_score_increases": {"con": 2}},
+                {"level": 4, "ability_score_increases": {"dex": 2}},
+            ],
+        })
+
+    assert "level is submitted more than once: 4" in str(caught.value)
+    assert damaged["abilities"]["dex"] == dex_before
+
+
+def test_repair_refuses_a_repeated_epic_boon_entry() -> None:
+    """Epic Boon 级同样按等级去重，专长不能被领两次。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    four = _advance_to(engine, _fighter(runtime), 4)
+    forged = deepcopy(four)
+    forged["build"]["level"] = 19
+    forged["build"]["class_levels"][0]["level"] = 19
+    forged["progression"]["level"] = 19
+    records = []
+    for level in range(2, 20):
+        snapshot = engine.catalog.snapshot("class:fighter", level)
+        record: dict = {"level": level, "class_ref": "class:fighter"}
+        if "ability_score_improvement" in snapshot["gained_feature_ids"]:
+            record["ability_score_increase"] = {"str": 2}
+        records.append(record)
+    forged["progression"][ADVANCEMENT_RECORDS_KEY] = records
+    assert "epic_boon_ref" in _missing_ids(engine, forged)
+
+    with pytest.raises(ProgressionCatalogError) as caught:
+        engine.repair_choices(forged, {
+            "advancements": [
+                {"level": 19, "feat_ref": "feat:boon_of_combat_prowess",
+                 "ability_score_increases": {"str": 1}},
+                {"level": 19, "feat_ref": "feat:boon_of_combat_prowess",
+                 "ability_score_increases": {"str": 1}},
+            ],
+        })
+
+    assert "level is submitted more than once: 19" in str(caught.value)
+
+
 def test_repair_writes_the_ledger_entry_it_filled() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
