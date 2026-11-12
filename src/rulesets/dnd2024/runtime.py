@@ -868,6 +868,19 @@ class Dnd2024Runtime:
         repaired = self._sync_class_resources(bundle, repaired)
         return self._live_projection(character, repaired, bundle)
 
+    def prepared_spell_options(
+        self, rule: Any, character: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Read-only: what this character may prepare right now."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        if not isinstance(canonical, dict):
+            canonical = character
+        locale = str(canonical.get("locale") or "")
+        bundle = self.load_bundle(locale)
+        return Dnd2024SpellSelection(bundle).preparation_options(canonical)
+
     def complete_rest(
         self, rule: Any, character: dict[str, Any], rest: str,
         hit_die_rolls: dict[str, list[int]] | None = None,

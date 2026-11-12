@@ -1162,6 +1162,38 @@ export interface RulesetPendingChoicesResponse {
   missing: JsonObject[]
 }
 
+export interface RulesetSpellOption {
+  ref: string
+  name: string
+  level: number
+}
+
+/** The class's own preparation rules, exactly as the class content declares. */
+export interface SpellPreparationPolicy {
+  source: 'class_list' | 'spellbook'
+  level_up_replace: number
+  long_rest_replace: 'any' | number
+  cantrip_swap_on: 'level_up' | 'long_rest' | 'none'
+}
+
+export interface SpellPreparationOptions {
+  class_ref: string
+  level: number
+  policy: SpellPreparationPolicy | null
+  prepared_capacity: number
+  prepared_spell_refs: string[]
+  spellbook_refs: string[]
+  cantrip_capacity: number
+  cantrip_refs: string[]
+  cantrips: RulesetSpellOption[]
+  leveled_spells: RulesetSpellOption[]
+}
+
+export interface SpellPreparationOptionsResponse extends JsonObject {
+  ok: boolean
+  spells: SpellPreparationOptions
+}
+
 export interface RulesetRestResponse extends JsonObject {
   ok: boolean
   rule_id: string

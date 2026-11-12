@@ -2558,6 +2558,13 @@ class WebAPI:
             self._live_advancement_dependencies, game_key, user_id, body,
         )
 
+    def live_character_spell_options(
+        self, game_key: str, user_id: str,
+    ) -> dict[str, Any]:
+        return ruleset_rest.prepared_spell_options(
+            self._live_ruleset_rest_dependencies, game_key, user_id,
+        )
+
     async def apply_live_character_advancement(
         self, game_key: str, user_id: str, body: dict[str, Any],
     ) -> dict[str, Any]:

@@ -16,6 +16,14 @@ def _class_id(class_ref: str) -> str:
     return str(class_ref or "").removeprefix("class:")
 
 
+def _class_magic(character: Mapping[str, Any]) -> dict[str, Any]:
+    """The projected class spell block; a missing block reads as empty."""
+
+    spellcasting = character.get("spellcasting")
+    block = spellcasting.get("class") if isinstance(spellcasting, Mapping) else None
+    return block if isinstance(block, dict) else {}
+
+
 @dataclass(slots=True)
 class Dnd2024SpellSelection:
     bundle: LoadedRulesetBundle
@@ -122,6 +130,79 @@ class Dnd2024SpellSelection:
             "prepared_spell_refs": prepared,
             "spellbook_refs": spellbook,
         }, errors
+
+    def preparation_options(self, character: Mapping[str, Any]) -> dict[str, Any]:
+        """Everything the rest panel needs to offer a preparation change.
+
+        The candidates are the class's own legal picks, narrowed to the
+        spellbook for a ``spellbook`` source -- a Wizard cannot prepare from a
+        list, only from what is written down.  A non-caster reports ``policy:
+        None`` and zero capacity rather than an error.
+        """
+
+        build = character.get("build")
+        rows = build.get("class_levels") if isinstance(build, Mapping) else None
+        row = rows[0] if isinstance(rows, list) and rows else {}
+        class_ref = str(row.get("class_ref") or "")
+        level = int(row.get("level") or 0)
+        block = _class_magic(character)
+        empty = {
+            "class_ref": class_ref,
+            "level": level,
+            "policy": None,
+            "prepared_capacity": 0,
+            "prepared_spell_refs": [],
+            "spellbook_refs": [],
+            "cantrip_capacity": 0,
+            "cantrip_refs": [],
+            "cantrips": [],
+            "leveled_spells": [],
+        }
+        if not class_ref:
+            return empty
+        requirements = self.requirements(class_ref, level)
+        if not requirements["slot_profile"]:
+            return empty
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is None:
+            return empty
+        options = self.options(class_ref, level)
+        leveled = options["leveled_spells"]
+        if policy.source == "spellbook":
+            known = {
+                str(ref) for ref in block.get("spellbook_refs") or ()
+                if isinstance(ref, str)
+            }
+            leveled = [spell for spell in leveled if spell["ref"] in known]
+        return {
+            "class_ref": class_ref,
+            "level": level,
+            "policy": {
+                "source": policy.source,
+                "level_up_replace": policy.level_up_replace,
+                "long_rest_replace": (
+                    "any" if policy.long_rest_replace is None
+                    else policy.long_rest_replace
+                ),
+                "cantrip_swap_on": policy.cantrip_swap_on,
+            },
+            "prepared_capacity": int(requirements["prepared_spell_count"]),
+            "prepared_spell_refs": [
+                str(ref) for ref in block.get("prepared_spell_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "spellbook_refs": [
+                str(ref) for ref in block.get("spellbook_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "cantrip_capacity": int(requirements["cantrip_count"]),
+            "cantrip_refs": [
+                str(ref) for ref in block.get("cantrip_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "cantrips": options["cantrips"],
+            "leveled_spells": leveled,
+        }
 
     def _require_spellbook(
         self,
