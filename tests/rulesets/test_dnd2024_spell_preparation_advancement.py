@@ -10,6 +10,8 @@ the panel renders.
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from src.rulesets.dnd2024.progression import Dnd2024AdvancementEngine
@@ -384,7 +386,19 @@ def _fill_spells(block: dict, requirement: dict) -> dict:
             break
         if spell["ref"] not in prepared:
             prepared.append(spell["ref"])
-    return {"cantrip_refs": cantrips, "prepared_spell_refs": prepared}
+    lists = {"cantrip_refs": cantrips, "prepared_spell_refs": prepared}
+    book = list(block.get("spellbook_refs") or [])
+    additions = int(requirement.get("spellbook_additions") or 0)
+    if additions:
+        target = len(book) + additions
+        for spell in requirement["leveled_spells"]:
+            if len(book) >= target:
+                break
+            if spell["ref"] not in book:
+                book.append(spell["ref"])
+    if book:
+        lists["spellbook_refs"] = book
+    return lists
 
 
 def _advance_to(engine: Dnd2024AdvancementEngine, character: dict, level: int) -> dict:
@@ -445,3 +459,71 @@ def test_a_level_with_spell_growth_does_ask_for_spells(
     )
     assert requirement["required"] is True
     assert requirement["additions"] == 1
+
+
+# ---------------------------------------------------------------------------
+# review follow-ups: the book never shrinks, and every level must say its +2
+# ---------------------------------------------------------------------------
+
+
+def test_a_level_up_cannot_drop_a_spell_from_the_book(
+    selection: Dnd2024SpellSelection, wizard: dict,
+) -> None:
+    """升级只加不减：删旧换新会让"新增数量对得上"掩盖书变小的事实。"""
+
+    previous, next_lists = _wizard_level_four_lists(selection, wizard)
+    book = list(next_lists["spellbook_refs"])
+    book.remove(previous["spellbook_refs"][-1])
+    choices = {
+        "cantrip_refs": [*previous["cantrip_refs"], "spell:minor_illusion"],
+        "prepared_spell_refs": next_lists["prepared_spell_refs"],
+        "spellbook_refs": [*book, "spell:jump"],
+    }
+
+    _, errors = selection.validate("class:wizard", 4, choices, previous=previous)
+
+    assert any(
+        "must keep the spells the book already holds" in error for error in errors
+    ), errors
+
+
+def test_a_book_at_the_next_floor_still_owes_this_levels_two_spells(
+    engine: Dnd2024AdvancementEngine,
+    selection: Dnd2024SpellSelection,
+    wizard: dict,
+) -> None:
+    """旧书靠抄写恰好等于下一级下限，不等于本级的 +2 已经选过。
+
+    11 级书 26 个（印刷下限），抄写到 28 个正好是 12 级的下限；12 级的
+    准备位与戏法位都不增长。旧的判定只看"数量是否等于下限"，于是整段
+    新增校验被跳过——不传 class_spell_choices 也能通过。
+    """
+
+    eleven = _advance_to(engine, deepcopy(wizard), 11)
+    block = _magic(eleven)
+    assert len(block["spellbook_refs"]) == 26
+    assert selection.requirements("class:wizard", 12)["prepared_spell_count"] == (
+        selection.requirements("class:wizard", 11)["prepared_spell_count"]
+    )
+
+    copied = deepcopy(eleven)
+    book = _magic(copied)["spellbook_refs"]
+    pool = [
+        spell["ref"] for spell in selection.catalog.list_for_class(
+            "class:wizard", maximum_level=5,
+        )
+        if int(spell["level"]) >= 1 and spell["ref"] not in book
+    ]
+    book.extend(pool[:2])
+    assert len(book) == 28
+
+    preview = engine.preview_next_level(copied, {})
+
+    requirement = next(
+        item for item in preview["requirements"]
+        if item["id"] == "class_spell_choices"
+    )
+    assert requirement["required"] is True
+    assert requirement["spellbook_additions"] == 2
+    assert preview["ok"] is False
+    assert "class_spell_choices are required" in _errors(preview)

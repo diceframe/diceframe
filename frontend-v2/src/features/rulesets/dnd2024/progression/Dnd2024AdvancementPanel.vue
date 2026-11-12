@@ -29,6 +29,8 @@ const emit = defineEmits<{ applied: [character: JsonObject]; cancel: [] }>()
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 const choices = ref<JsonObject>({ hp_method: 'fixed' })
+// 进场时的法术书大小（含抄写），用来算本级上限；不随勾选变化。
+const spellbookBaseline = ref(0)
 const preview = ref<RulesetAdvancementPreview | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -134,10 +136,12 @@ function initializeSpellChoices(): void {
   const spellcasting = canonical().spellcasting as JsonObject | undefined
   const classMagic = spellcasting?.class as JsonObject | undefined
   if (!classMagic) return
+  const book = [...((classMagic.spellbook_refs as string[]) || [])]
+  spellbookBaseline.value = book.length
   choices.value.class_spell_choices = {
     cantrip_refs: [...((classMagic.cantrip_refs as string[]) || [])],
     prepared_spell_refs: [...((classMagic.prepared_spell_refs as string[]) || [])],
-    spellbook_refs: [...((classMagic.spellbook_refs as string[]) || [])],
+    spellbook_refs: book,
   }
 }
 
@@ -194,7 +198,12 @@ function spellLimit(key: SpellList): number {
   if (!spec) return 0
   if (key === 'cantrip_refs') return Number(spec.cantrip_count || 0)
   if (key === 'prepared_spell_refs') return Number(spec.prepared_spell_count || 0)
-  return Number(spec.spellbook_minimum || 0)
+  // 法术书的下限是"至少"，不是上限：抄写过的书本来就比印刷数多，本级还要
+  // 再加 spellbook_additions 个。上限按"开局旧书 + 本级新增"算，用固定的
+  // baseline 而不是当前已选数——否则每勾一个，上限就跟着涨一格。
+  const floor = Number(spec.spellbook_minimum || 0)
+  const additions = Number(spec.spellbook_additions || 0)
+  return Math.max(floor, spellbookBaseline.value + additions)
 }
 
 function toggleSpell(key: SpellList, spell: RulesetSpellChoice): void {
@@ -361,7 +370,7 @@ onMounted(() => {
 
       <fieldset v-if="abilityRequirement"><legend>{{ text(`属性提升（合计 ${abilityRequirement.total}）`, `Ability increase (total ${abilityRequirement.total})`) }}</legend><div class="ability-grid"><label v-for="ability in ABILITIES" :key="ability" :class="{ unavailable: !abilityAllowed(ability) }"><span>{{ ability.toUpperCase() }} <small>{{ abilityDiff[ability] }}</small></span><select :disabled="!abilityAllowed(ability)" :value="(choices.ability_score_increases as JsonObject)?.[ability] || 0" @change="setAbility(ability, Number(($event.target as HTMLSelectElement).value))"><option :value="0">+0</option><option :value="1">+1</option><option v-if="abilityRequirement.pattern === '2_or_1_1'" :value="2">+2</option></select></label></div></fieldset>
 
-      <fieldset v-if="spellRequirement" class="spell-section"><legend>{{ text('调整职业法术', 'Update class spells') }}</legend><p class="spell-help">{{ text('每个区域标题都写着“已选 / 需要”。达到需要的数量后，其他选项会自动锁定；取消一个已选项即可重新选择。法师请先选法术书，再从法术书里选准备法术。', 'Each section shows selected / required. Once the required count is reached, extra options lock automatically; uncheck one to choose another. Wizards choose the spellbook first, then prepared spells from it.') }}</p><p v-if="spellBudgetText" class="spell-help spell-budget">{{ spellBudgetText }}</p><div v-if="Number(spellRequirement.cantrip_count)"><b>{{ text(`戏法：已选 ${selectedSpells('cantrip_refs').length} / 需要 ${spellRequirement.cantrip_count}`, `Cantrips: ${selectedSpells('cantrip_refs').length} selected / ${spellRequirement.cantrip_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('cantrips')" :key="spell.ref"><input type="checkbox" :disabled="spellDisabled('cantrip_refs', spell)" :checked="selectedSpells('cantrip_refs').includes(spell.ref)" @change="toggleSpell('cantrip_refs', spell)"> {{ spell.name }}</label></div></div><div v-if="Number(spellRequirement.spellbook_minimum)"><b>{{ text(`法术书：已选 ${selectedSpells('spellbook_refs').length} / 需要 ${spellRequirement.spellbook_minimum}`, `Spellbook: ${selectedSpells('spellbook_refs').length} selected / ${spellRequirement.spellbook_minimum} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`book-${spell.ref}`"><input type="checkbox" :disabled="spellDisabled('spellbook_refs', spell)" :checked="selectedSpells('spellbook_refs').includes(spell.ref)" @change="toggleSpell('spellbook_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div><div v-if="Number(spellRequirement.prepared_spell_count)"><b>{{ text(`准备法术：已选 ${selectedSpells('prepared_spell_refs').length} / 需要 ${spellRequirement.prepared_spell_count}`, `Prepared: ${selectedSpells('prepared_spell_refs').length} selected / ${spellRequirement.prepared_spell_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`prepared-${spell.ref}`" :class="{ unavailable: preparedDisabled(spell) || spellDisabled('prepared_spell_refs', spell) }"><input type="checkbox" :disabled="spellDisabled('prepared_spell_refs', spell)" :checked="selectedSpells('prepared_spell_refs').includes(spell.ref)" @change="toggleSpell('prepared_spell_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div></fieldset>
+      <fieldset v-if="spellRequirement" class="spell-section"><legend>{{ text('调整职业法术', 'Update class spells') }}</legend><p class="spell-help">{{ text('每个区域标题都写着“已选 / 需要”。达到需要的数量后，其他选项会自动锁定；取消一个已选项即可重新选择。法师请先选法术书，再从法术书里选准备法术。', 'Each section shows selected / required. Once the required count is reached, extra options lock automatically; uncheck one to choose another. Wizards choose the spellbook first, then prepared spells from it.') }}</p><p v-if="spellBudgetText" class="spell-help spell-budget">{{ spellBudgetText }}</p><div v-if="Number(spellRequirement.cantrip_count)"><b>{{ text(`戏法：已选 ${selectedSpells('cantrip_refs').length} / 需要 ${spellRequirement.cantrip_count}`, `Cantrips: ${selectedSpells('cantrip_refs').length} selected / ${spellRequirement.cantrip_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('cantrips')" :key="spell.ref"><input type="checkbox" :disabled="spellDisabled('cantrip_refs', spell)" :checked="selectedSpells('cantrip_refs').includes(spell.ref)" @change="toggleSpell('cantrip_refs', spell)"> {{ spell.name }}</label></div></div><div v-if="Number(spellRequirement.spellbook_minimum)"><b>{{ text(`法术书：已选 ${selectedSpells('spellbook_refs').length} / 需要 ${spellLimit('spellbook_refs')}`, `Spellbook: ${selectedSpells('spellbook_refs').length} selected / ${spellLimit('spellbook_refs')} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`book-${spell.ref}`"><input type="checkbox" :disabled="spellDisabled('spellbook_refs', spell)" :checked="selectedSpells('spellbook_refs').includes(spell.ref)" @change="toggleSpell('spellbook_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div><div v-if="Number(spellRequirement.prepared_spell_count)"><b>{{ text(`准备法术：已选 ${selectedSpells('prepared_spell_refs').length} / 需要 ${spellRequirement.prepared_spell_count}`, `Prepared: ${selectedSpells('prepared_spell_refs').length} selected / ${spellRequirement.prepared_spell_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`prepared-${spell.ref}`" :class="{ unavailable: preparedDisabled(spell) || spellDisabled('prepared_spell_refs', spell) }"><input type="checkbox" :disabled="spellDisabled('prepared_spell_refs', spell)" :checked="selectedSpells('prepared_spell_refs').includes(spell.ref)" @change="toggleSpell('prepared_spell_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div></fieldset>
 
       <fieldset><legend>{{ text('本级变化', 'Level changes') }}</legend><div class="feature-list"><span v-for="feature in (diff.gained_feature_ids as string[]) || []" :key="feature">{{ featureName(feature) }}</span></div><p v-if="Object.keys(slotChanges).length">{{ text('法术位变化', 'Spell slot changes') }}: <code>{{ JSON.stringify(slotChanges) }}</code></p></fieldset>
 

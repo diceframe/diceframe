@@ -453,14 +453,19 @@ class Dnd2024AdvancementEngine:
                 "spellbook_refs": current_spellbook,
             }
             policy = PreparationPolicy.for_class(self.bundle, class_ref)
+            # 法术书每级固定加 N 个。只要策略声明了增量，这一级就必须提交
+            # 一份书目：旧书恰好等于下一级的下限，只能说明以前的账平了，
+            # 不能说明本级的 N 个已经选过。宁可多要一次输入，也不放过一条
+            # 靠"总数刚好对得上"通过的空升级。
+            spellbook_growth = (
+                int(policy.spellbook_gain_per_level or 0)
+                if policy is not None and policy.source == "spellbook"
+                else 0
+            )
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
-                or (
-                    policy is not None
-                    and policy.source == "spellbook"
-                    and len(current_spellbook) != target_requirements["spellbook_minimum"]
-                )
+                or spellbook_growth > 0
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
@@ -481,7 +486,7 @@ class Dnd2024AdvancementEngine:
                     "cantrip_replace_limit": (
                         1 if policy and policy.cantrip_swap_on == "level_up" else 0
                     ),
-                    "spellbook_additions": policy.spellbook_gain_per_level if policy else 0,
+                    "spellbook_additions": spellbook_growth,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
                 })

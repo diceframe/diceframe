@@ -170,8 +170,60 @@ describe('D&D 2024 advancement panel', () => {
     expect(wrapper.text()).toContain('最多替换 1 个旧法术')
     expect(wrapper.text()).toContain('法术书需新增 2 个')
     expect(wrapper.text()).toContain('本级最多替换 1 个旧法术')
+    // 印刷下限是 8，但本级还要再加 2 个：上限是 10，不是 8。
+    expect(wrapper.text()).toContain('法术书：已选 8 / 需要 10')
     const extraSpellChoices = wrapper.findAll('label').filter(label => label.text().includes('Spell 8'))
     expect(extraSpellChoices).toHaveLength(2)
-    expect(extraSpellChoices.every(label => label.get('input').attributes('disabled') !== undefined)).toBe(true)
+    // 准备法术那一栏因为不在书里而锁着，法术书这一栏必须还能加。
+    const bookPicks = extraSpellChoices.filter(
+      label => label.get('input').attributes('disabled') === undefined,
+    )
+    expect(bookPicks).toHaveLength(1)
+  })
+
+  it('keeps room for the new spells when the book was copied past its floor', async () => {
+    mocks.preview.mockResolvedValueOnce({
+      ok: true,
+      rule_id: 'dnd2024_srd',
+      advancement: {
+        ok: false,
+        errors: [],
+        requirements: [{
+          id: 'class_spell_choices', kind: 'spell_selection', required: true,
+          cantrip_count: 0, prepared_spell_count: 5, spellbook_minimum: 8,
+          additions: 5, replace_limit: 1, cantrip_replace_limit: 0,
+          spellbook_additions: 2,
+          cantrips: [],
+          leveled_spells: Array.from({ length: 11 }, (_, index) => ({
+            ref: `spell:spell-${index}`, name: `Spell ${index}`, level: 1,
+          })),
+        }],
+        from_level: 1, to_level: 2, class_ref: 'class:wizard',
+        source_ref: 'srd-5.2.1:p42:wizard-features', content_version: 'srd-5.2.1+r2',
+        diff: { proficiency_bonus: { before: 2, after: 2 }, hp: { gain: 6 }, gained_feature_ids: [], spell_slot_changes: {}, abilities: {} }, snapshot: {},
+      },
+    })
+    // 抄写过的书 9 本，仍高于 8 的印刷下限。若把下限当上限，9 >= 8 会锁死
+    // 每一个新法术，玩家只能删旧法术"腾容量"——那才真的会丢法术。
+    const wizard = {
+      ...character,
+      ruleset_character: {
+        ...character.ruleset_character,
+        build: { level: 1, class_levels: [{ class_ref: 'class:wizard', level: 1 }] },
+        spellcasting: { class: {
+          prepared_spell_refs: Array.from({ length: 5 }, (_, index) => `spell:spell-${index}`),
+          spellbook_refs: Array.from({ length: 9 }, (_, index) => `spell:spell-${index}`),
+        } },
+      },
+    }
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character: wizard, language: 'zh-CN' },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('法术书：已选 9 / 需要 11')
+    const next = wrapper.findAll('label').filter(label => label.text().includes('Spell 9'))
+    expect(next.length).toBeGreaterThan(0)
+    expect(next.some(label => label.get('input').attributes('disabled') === undefined)).toBe(true)
   })
 })

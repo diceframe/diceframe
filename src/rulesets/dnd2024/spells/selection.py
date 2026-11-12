@@ -290,6 +290,13 @@ class Dnd2024SpellSelection:
             )
         if policy.source == "spellbook" and context == "level_up":
             if policy.spellbook_gain_per_level:
+                # 升级只增不减：旧书目是这张卡已经付过代价的资产，不能因为
+                # "新增数量对得上"就被替换掉。抄写与失书各有自己的领域操作。
+                lost = self._previous_refs(previous, "spellbook_refs") - set(spellbook)
+                if lost:
+                    errors.append(
+                        "spellbook_refs must keep the spells the book already holds"
+                    )
                 added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
                 if len(added) != policy.spellbook_gain_per_level:
                     errors.append(
