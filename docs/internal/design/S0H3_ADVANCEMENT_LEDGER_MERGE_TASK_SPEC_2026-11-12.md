@@ -8,7 +8,7 @@
 | 规则基准 | 无新规则声明，不引 PDF 页码（同 G3 的口径：所有「应有几项」读既有目录） |
 | 代码基线 | S0-G3 交付载体（#734）合入后的 `main`。硬前置：S0-G3（本切片改写其读取方）；与 S0-H1/H2 无耦合，可并行 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | 待执行 |
+| 状态 | 已实现，见 §9（PR 待评审） |
 
 ## 1. 问题：同一事实两份存储
 
@@ -188,28 +188,91 @@ unset CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR CODEBUDDY_TOOL_CALL_ID
 
 ### 9.1 基线与提交
 
-（待填）
+- 基线：`eb3f0b70`（S0-H2 的头，本切片 stack 在 #750 之上；与 H1/H2 实际有耦合——三者都改 `advancement.py`）
+- 分支：`feat/dnd2024-s0h3-advancement-ledger`
+
+| 提交 | 内容 | 改动 |
+|---|---|---|
+| `ee7cf17b` | 新增 `_ledger_entries`；`_missing_advancements` 与 `repair_choices` 改读派生条目；repair 改写成写 `history`（records 写入暂时保留） | `advancement.py` +161/−44、`choice_repair` 夹具 |
+| `bbc7ea0a` | 删除 `_record_advancement`、`_advancement_records`、`_merge_advancement_record`、`ADVANCEMENT_RECORDS_KEY`；history 递增校验；records 测试改写为派生口径 | `advancement.py`、`test_dnd2024_advancement_records.py` |
+| `50103455` | 白名单外一处导入修正：`test_dnd2024_missing_choices.py` 依赖被删常量 | 该测试文件 |
+
+合计 4 个文件、+405/−253。`grep -rn advancement_records src/` 零命中。
+
+**为什么不是一个提交**：删掉写入的那一刻，读取方就没有数据源了，A/B 合并会得到一个红提交。所以拆成「先加派生并把读者移过去（此时两份存储同时存在）→ 再删写入」。A 阶段的额外收益是 §9.4 的双跑对照——两份存储同时在线时可以直接比对。
 
 ### 9.2 `_ledger_entries` 的派生映射表
 
-（待填：record 字段 → history 来源的逐字段对照，含排除规则的位置）
+| 账本字段 | 来源 | 说明 |
+|---|---|---|
+| `level` | `history[].to_level` | |
+| `class_ref` | `progression.class_ref` | 单职业前提，同 G3 |
+| `ability_score_increase` | `history[].choices.ability_score_increases` | 只保留正整数，与写入侧同一过滤 |
+| `feat_ref` / `epic_boon_ref` | `history[].diff.advancement_feat_ref` + `diff.gained_feature_ids` | 有 `epic_boon` 落前者，否则落后者 |
+| （排除） | `PLAIN_ABILITY_FEAT_REF` | 排除从写入侧搬到**派生侧**，读与写不可能分家 |
+
+`None` 与 `[]` 的判定顺序（新增，原实现没有这一层）：
+
+1. 无 `progression` → `None`
+2. `history` 字段存在但不是 list → `None`（损坏，不猜）
+3. `history` 字段不存在且 `progression.level ≤ 1` → `[]`（1 级没有可判的等级）
+4. `history` 字段不存在且等级 > 1 → `None`（旧存档，跳过不误报）
+
+第 3 条是矩阵 5 要求的「1 级卡返回 `[]`」与矩阵 10「无 history 的旧卡跳过」的接缝：建卡不写 `history`，如果一律返回 `None`，矩阵 5 失败；如果一律返回 `[]`，每张 G3 之前的旧卡都会被指控漏选。
 
 ### 9.3 读取方改接的 diff 摘要
 
-（待填：`missing_choices` / `repair_choices` 实际改动行数与逻辑变化点）
+- `_missing_advancements`：一行换数据源（`_advancement_records` → `_ledger_entries`），判定逻辑与 `reason` 文案逐字未动。
+- `repair_choices`：新增 `_merge_history_choice`（+58 行），写回该等级的 `choices.subclass_ref` / `choices.ability_score_increases` / `diff.advancement_feat_ref`；删除 records 合并与回写（−23 行）。「合并账本」步骤确实消失。
+- 顺带修掉一处耦合：`features.feat_refs.append` 原来写在 `if records is not None` 里面，导致「没有账本的卡补了属性却仍报缺专长」。已移到分支外。
 
 ### 9.4 双跑对照结果
 
-（待填：矩阵 8/9/13 的合并前后对照输出）
+在提交 A（两份存储同时在线）上直接比对派生值与账本：
+
+| 卡 | 派生条数 | 账本条数 | 逐字段一致 |
+|---|---|---|---|
+| Fighter 3 级 | 2 | 2 | 是 |
+| Fighter 5 级 | 4 | 4 | 是 |
+| Fighter 12 级 | 11 | 11 | 是 |
+
+矩阵 8/9 的「检出逐字段一致」由 `_missing_advancements` 的数据源就是这个等价的派生序列保证；矩阵 13（replay 零改动）由 `test_dnd2024_character_lifecycle.py` 与 `test_dnd2024_starting_level.py` 原样通过证明。
 
 ### 9.5 白名单对照
 
-（待填）
+| 文件 | 白名单 | 实际 |
+|---|---|---|
+| `src/rulesets/dnd2024/progression/advancement.py` | ✓ | ✓ |
+| `tests/rulesets/test_dnd2024_advancement_records.py` | ✓ | ✓ |
+| `tests/rulesets/test_dnd2024_choice_repair.py` | ✓ | ✓ |
+| `tests/rulesets/test_dnd2024_progression.py`、`test_dnd2024_character_lifecycle.py` | ✓（若受影响） | 未改，原样通过 |
+| `tests/rulesets/test_dnd2024_missing_choices.py` | ✗ | **改了**（见 §9.7 第 1 条） |
 
 ### 9.6 矩阵 1–15 通过情况
 
-（待填）
+| # | 结果 | 落点 |
+|---|---|---|
+| 1 | 通过 | `test_each_level_contributes_exactly_one_entry` |
+| 2 | 通过 | `test_a_half_feat_records_both_its_slot_and_its_ability_point` |
+| 3 | 通过 | `test_a_plain_ability_increase_is_not_recorded_as_a_feat` |
+| 4 | 通过 | `test_an_epic_boon_lands_in_its_own_slot`（19 级逐级升上去） |
+| 5 | 通过 | `test_creation_has_an_empty_ledger` + `test_a_card_without_history_cannot_be_judged` |
+| 6 | 通过 | `test_advancing_writes_no_second_ledger` |
+| 7 | 通过 | `test_the_history_refuses_a_level_that_does_not_advance`（故意造矛盾卡） |
+| 8 | 通过 | `test_a_fighter_past_level_three_without_a_subclass_is_reported` |
+| 9 | 通过 | `test_a_skipped_ability_increase_is_reported_from_the_ledger` + §9.4 |
+| 10 | 通过 | `test_an_old_save_without_a_ledger_is_not_declared_incomplete` |
+| 11 | 通过 | `test_repairing_the_subclass_clears_the_requirement` + 矩阵 6 的断言合并 |
+| 12 | 通过 | `test_a_frozen_ledger_from_an_older_save_changes_nothing` |
+| 13 | 通过 | 既有 replay 测试零改动 |
+| 14 | 通过 | `test_dnd2024_character_lifecycle.py` 的导入拒绝路径 |
+| 15 | 通过 | `grep -rn advancement_records src/` 零命中（仅测试里两处字面量，见矩阵 6/12） |
 
 ### 9.7 偏差、停止原因与未决事项
 
-（待填）
+1. **白名单外改了一个文件**：`test_dnd2024_missing_choices.py` 直接 `import ADVANCEMENT_RECORDS_KEY`。删常量后该文件**收集失败**（ERROR 而非 FAILED），而全量的第一条命令（只跑本切片测试文件）不会碰到它——这正是「只跑 `tests/rulesets` 不算回归」的又一处证明。改法是把 5 处夹具从「删 record」换成「抹掉某一级的 choice」，属于同一件事的口径平移，不是新行为。
+2. **任务书的提交划分与「每提交都绿」冲突**：A/B 按任务书拆分会让 A 变红（读者先于写入者）。已改为「派生 → 删除写入」，代价是 A 阶段存在短暂双写。若评审坚持原划分，需要接受一个红提交。
+3. **`_merge_history_choice` 的边界**：某级在 `history` 里完全缺失时，只有该级恰好等于「最后一级 + 1」才允许补写，否则抛 `ProgressionCatalogError`。理由是补一个中间级等于伪造角色没走过的步骤，会让本该被 replay 拒绝的卡通过。任务书未规定这个边界，属实现补充。
+4. **未做**：records → history 的存量迁移（非目标 1）；`history` 条目形状（非目标 2）；replay（非目标 3）；多职业（非目标 4）。
+5. **矩阵 13 的证据是「未改动即通过」**，没有额外写一条逐字段对照测试；若评审要求更强的证据，需要把合并前的 replay 输出做成黄金文件。
+

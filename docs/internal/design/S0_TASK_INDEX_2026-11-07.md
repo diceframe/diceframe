@@ -133,7 +133,7 @@ S0-A 子职授予主干
 | S0-G3 | 成长记录与缺项补齐 | `progression.advancement_records` 账本；子职/专长/ASI/法术四类缺项检测；补齐事务与派生重算 | `S0G3_GROWTH_RECORDS_TASK_SPEC_2026-11-11.md` | 28 | **已交付**（A `31842211`、B `c4791489`、C `4e54f6e1`、面板 `2efdb7da`）。**交付载体并入 S0-A 的 #734**，替换其增量式子职判定，同时补上专长等级、ASI 来源与法术准备位检测。不新增内容声明，所有「应有几项」读既有目录，因此不引 PDF 页码。前端只做升级面板的欠项区块，ASI/法术编辑仍留在升级流程内，见任务书 §9.10 |
 | S0-H1 | 法术准备策略与长休更换 | 八职业 `preparation_policy` 数据化；升级替换上限收紧；长休更换准备法术全链路（含队伍） | `S0H1_SPELL_PREPARATION_POLICY_TASK_SPEC_2026-11-12.md` | 32 | 待执行。硬前置 S0-A/#734 |
 | S0-H2 | 起始等级与开卡后连续升级 | 建卡可选目标等级（默认 1 不变）；升级面板链式逐级升到目标；产物带完整 history 过 replay | `S0H2_STARTING_LEVEL_CHAINED_ADVANCEMENT_TASK_SPEC_2026-11-12.md` | 17 | 待执行。硬前置 S0-A/#734、S0-H1 |
-| S0-H3 | 成长账本合并 | 删除 `advancement_records` 双写；检测/修复改读 `history` 派生条目；replay 与外部导入契约零改动 | `S0H3_ADVANCEMENT_LEDGER_MERGE_TASK_SPEC_2026-11-12.md` | 15 | 待执行。硬前置 S0-G3（#734 载体）；与 H1/H2 无耦合可并行 |
+| S0-H3 | 成长账本合并 | 删除 `advancement_records` 双写；检测/修复改读 `history` 派生条目；replay 与外部导入契约零改动 | `S0H3_ADVANCEMENT_LEDGER_MERGE_TASK_SPEC_2026-11-12.md` | 15 | 已实现，见报告 §9。硬前置 S0-G3；实测与 H1/H2 有耦合（同改 `advancement.py`），故 stack 在 H2 之上 |
 
 ## 4. 每份任务书的固定结构
 
