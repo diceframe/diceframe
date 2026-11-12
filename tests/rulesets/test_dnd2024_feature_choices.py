@@ -5,9 +5,14 @@ ownership, Resolver projection, advancement history replay, armor class, and
 live equipment reconciliation -- because "a feat_ref can be submitted" is not
 the same thing as "the choice actually works".
 
-Only ``feat:defense`` has an implemented effect.  The other three Fighting
-Style feats are projected, marked ``effect_not_implemented`` and rejected, so
-a selection that grants nothing can never look finished.
+Only ``feat:defense`` and ``feat:archery`` have implemented effects.  The other
+two Fighting Style feats are projected, marked ``effect_not_implemented`` and
+rejected, so a selection that grants nothing can never look finished.
+
+Archery is in the whitelist because the engine already reads its
+``ranged_attack_bonus`` parameter.  Leaving it out made the required level-7
+slot impossible to fill for a Champion who took Defense at level 1: the only
+whitelisted option was already owned, and the other three were inert.
 """
 
 from __future__ import annotations
@@ -34,9 +39,10 @@ FEATURE_ID = "additional_fighting_style"
 CHOICE_ID = "fighting_style_feat"
 DEFENSE = "feat:defense"
 ARCHERY = "feat:archery"
-# 本切片只实现 Defense；其余三项必须保持"可见但不可提交"。
+# 引擎真能兑现的两项：Defense 走 passive_effects，Archery 走参数投影。
+IMPLEMENTED_STYLES = (ARCHERY, DEFENSE)
+# 其余两项必须保持"可见但不可提交"：选了等于什么都没发生。
 UNIMPLEMENTED_STYLES = (
-    "feat:archery",
     "feat:great_weapon_fighting",
     "feat:two_weapon_fighting",
 )
@@ -183,7 +189,7 @@ def test_the_choice_slot_parses_without_touching_option_of() -> None:
     assert (choice.id, choice.kind, choice.category, choice.count) == (
         CHOICE_ID, "advancement_feat", "fighting_style", 1,
     )
-    assert choice.enabled_options == (DEFENSE,)
+    assert choice.enabled_options == IMPLEMENTED_STYLES
     # option_of 仍是 Monk's Focus 的附属能力语义，与 choice 互不干扰。
     focus = resolver.catalog.features_by_key[("class:monk", "flurry_of_blows")]
     assert focus.option_of == "monks_focus"
@@ -288,7 +294,7 @@ def test_a_fighter_without_champion_gets_no_choice_requirement() -> None:
 
 
 def test_champion_level_seven_preview_offers_four_fighting_styles() -> None:
-    """7. Exactly one slot, four options, both locales, one of them usable."""
+    """7. Exactly one slot, four options, both locales, two of them usable."""
 
     runtime = _runtime()
     sheet = _sheet(runtime, 6)
@@ -308,9 +314,12 @@ def test_champion_level_seven_preview_offers_four_fighting_styles() -> None:
     assert slot["count"] == 1
 
     options = {option["value"]: option for option in slot["options"]}
-    assert set(options) == {DEFENSE, *UNIMPLEMENTED_STYLES}
+    assert set(options) == {DEFENSE, ARCHERY, *UNIMPLEMENTED_STYLES}
+    # 这张卡 1 级选的是 Archery，所以 7 级能用的是 Defense。
     assert options[DEFENSE]["available"] is True
     assert options[DEFENSE]["name"] == "Defense"
+    assert options[ARCHERY]["available"] is False
+    assert "already_owned" in options[ARCHERY]["unavailable_reasons"]
     for ref in UNIMPLEMENTED_STYLES:
         assert options[ref]["available"] is False
         assert "effect_not_implemented" in options[ref]["unavailable_reasons"]
@@ -433,11 +442,43 @@ def test_an_owned_fighting_style_is_unavailable_not_reselectable() -> None:
     )
     assert defense["available"] is False
     assert "already_owned" in defense["unavailable_reasons"]
+    # 已拥有的那一项不能是唯一能兑现的选项：否则必选槽没有任何合法输入。
+    archery = next(
+        option for option in slot["options"] if option["value"] == ARCHERY
+    )
+    assert archery["available"] is True
+    assert "effect_not_implemented" not in archery["unavailable_reasons"]
 
     rejected = runtime.preview_advancement(None, sheet, _submission())
     assert rejected["ok"] is False
     with pytest.raises(ProgressionCatalogError):
         runtime.apply_advancement(None, sheet, _submission())
+
+
+def test_a_champion_who_owns_defense_can_finish_level_seven() -> None:
+    """1 级选了 Defense 的冠军战士，7 级必须还有一条能走通的路。
+
+    必选槽这一级只剩 Defense（已拥有）时，若另外三项全部是未实现，
+    preview 恒为 false、任何提交都被拒，正常角色卡死在 6 级。Archery 有
+    真实的 +2 远程攻击加值，放进白名单后这条路才是"有真实效果"的。
+    """
+
+    runtime = _runtime()
+    sheet = _sheet(runtime, 6, fighting_style=DEFENSE)
+
+    preview = runtime.preview_advancement(None, sheet, _submission(ARCHERY))
+    assert preview["ok"] is True, preview["errors"]
+
+    seven = runtime.apply_advancement(None, sheet, _submission(ARCHERY))
+    character = seven["ruleset_character"]
+    assert character["build"]["level"] == 7
+    assert character["features"]["feat_refs"].count(DEFENSE) == 1
+    assert ARCHERY in character["features"]["feat_refs"]
+
+    projection = Dnd2024ClassFeatureResolver(
+        runtime.load_bundle("en"),
+    ).actor_projection(character)
+    assert projection["ranged_attack_bonus"] == 2
 
 
 def test_the_slot_is_only_required_at_the_granting_level() -> None:

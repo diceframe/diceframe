@@ -240,7 +240,7 @@
             "kind": "advancement_feat",
             "category": "fighting_style",
             "count": 1,
-            "enabled_options": ["feat:defense"]
+            "enabled_options": ["feat:archery", "feat:defense"]
           }
         },
         {
