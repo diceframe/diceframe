@@ -1,0 +1,10 @@
+# src/engine/luck_resolver.py 返回给请求方的提示。
+"en":
+  check_missing_or_expired: "The check does not exist or has expired"
+  choice_already_handled: "The Luck choice for this check has already been handled"
+  insufficient_luck: "Not enough Luck: %{cost} needed, only %{current_luck} available"
+  luck_not_allowed: "Luck cannot be spent on this check"
+  luck_not_needed: "This check does not need Luck to be spent"
+  no_pending_choice: "There is no Luck choice waiting to be handled"
+  no_pending_push: "This check has no pushed roll waiting to be handled"
+  own_choice_only: "You can only handle your own Luck choice"

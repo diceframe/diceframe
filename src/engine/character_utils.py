@@ -20,6 +20,7 @@ from src.compat.characters import (
     migrate_legacy_character_sheet,
     normalize_character_sheet as normalize_legacy_character_sheet,
 )
+from src.localization.messages import t as translate
 
 logger = logging.getLogger("trpg")
 
@@ -533,8 +534,7 @@ def roll_attributes(
                     return dict(zip(keys, values))
 
     raise RuntimeError(
-        f"无法在 {_MAX_ROLL_ATTEMPTS} 次尝试内生成有效属性"
-        f"(keys={keys}, total={target}, min_total={min_total}, max_total={max_total})"
+        translate("engine.character_utils.roll_attributes_exhausted", max_roll_attempts=_MAX_ROLL_ATTEMPTS, keys=keys, target=target, min_total=min_total, max_total=max_total)
     )
 
 def find_item_category(item_categories: dict, name: str) -> str:
@@ -907,7 +907,7 @@ def parse_tavern_card(file_path: str | Path) -> dict:
     """
     path = Path(file_path)
     if not path.exists():
-        return {"error": "文件不存在"}
+        return {"error": translate("engine.character_utils.file_missing")}
 
     raw_data = path.read_bytes()
 
@@ -916,7 +916,7 @@ def parse_tavern_card(file_path: str | Path) -> dict:
         result = _parse_tavern_png(raw_data)
         if result:
             return result
-        return {"error": "PNG 中未找到角色卡数据"}
+        return {"error": translate("engine.character_utils.png_without_card")}
 
     # 纯 JSON 格式
     try:
@@ -927,9 +927,9 @@ def parse_tavern_card(file_path: str | Path) -> dict:
     try:
         data = json.loads(raw_text)
     except (json.JSONDecodeError, RecursionError) as exc:
-        return {"error": f"JSON 解析失败: {exc}"}
+        return {"error": translate("engine.character_utils.json_parse_failed", exc=exc)}
     if not isinstance(data, dict):
-        return {"error": "JSON 解析失败: 角色卡必须是对象"}
+        return {"error": translate("engine.character_utils.card_not_object")}
 
     return _extract_tavern_fields(data)
 
@@ -942,17 +942,17 @@ def parse_character_card_document(file_path: str | Path) -> dict:
     """
     path = Path(file_path)
     if not path.exists():
-        return {"error": "文件不存在"}
+        return {"error": translate("engine.character_utils.file_missing")}
     raw_data = path.read_bytes()
     if raw_data[:8] == b'\x89PNG\r\n\x1a\n':
         data = _parse_tavern_png_document(raw_data)
         if not data:
-            return {"error": "PNG 中未找到角色卡数据"}
+            return {"error": translate("engine.character_utils.png_without_card")}
         return {"spec": data.get("spec", "chara_card_v3"), "spec_version": data.get("spec_version", "3.0"), "data": data.get("data", data)}
     try:
         data = json.loads(raw_data.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
-        return {"error": f"JSON 解析失败: {exc}"}
+        return {"error": translate("engine.character_utils.json_parse_failed", exc=exc)}
     inner = data.get("data", data) if isinstance(data, dict) else {}
     book = inner.get("character_book") if isinstance(inner, dict) else None
     return {

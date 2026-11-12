@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import random
 import re
+from src.localization.messages import t
 
 
 @dataclass
@@ -34,7 +35,7 @@ MAX_DICE_MODIFIER = 100
 def roll_die(sides: int, *, zero_based: bool = False) -> int:
     """生成一个骰面值；规则层通过此入口取随机值。"""
     if not 2 <= sides <= MAX_DICE_SIDES:
-        raise ValueError(f"骰子面数超出范围（2-{MAX_DICE_SIDES}）: d{sides}")
+        raise ValueError(t("engine.dice_rng.die_sides_out_of_range", max_dice_sides=MAX_DICE_SIDES, sides=sides))
     return random.randint(0, sides - 1) if zero_based else random.randint(1, sides)
 
 
@@ -55,17 +56,17 @@ def parse_dice_formula(formula: str) -> tuple[str, int, int, int]:
     formula = str(formula or "").strip().lower().replace(" ", "")
     match = re.fullmatch(r"(\d+)?d(\d+)([+-]\d+)?", formula)
     if not match:
-        raise ValueError(f"无效的掷骰公式: {formula}")
+        raise ValueError(t("engine.dice_rng.formula_invalid", formula=formula))
 
     count = int(match.group(1) or 1)
     sides = int(match.group(2))
     mod_str = match.group(3)
     modifier = int(mod_str) if mod_str else 0
     if not 1 <= count <= MAX_DICE_COUNT:
-        raise ValueError(f"骰子数量超出范围（1-{MAX_DICE_COUNT}）: {formula}")
+        raise ValueError(t("engine.dice_rng.count_out_of_range", max_dice_count=MAX_DICE_COUNT, formula=formula))
     if not 2 <= sides <= MAX_DICE_SIDES:
-        raise ValueError(f"骰子面数超出范围（2-{MAX_DICE_SIDES}）: {formula}")
+        raise ValueError(t("engine.dice_rng.sides_out_of_range", max_dice_sides=MAX_DICE_SIDES, formula=formula))
     if not -MAX_DICE_MODIFIER <= modifier <= MAX_DICE_MODIFIER:
-        raise ValueError(f"骰子修正超出范围（±{MAX_DICE_MODIFIER}）: {formula}")
+        raise ValueError(t("engine.dice_rng.modifier_out_of_range", max_dice_modifier=MAX_DICE_MODIFIER, formula=formula))
 
     return formula, count, sides, modifier

@@ -1,0 +1,7 @@
+# src/engine/character_utils.py 返回给请求方的提示。
+"en":
+  card_not_object: "Failed to parse JSON: the character card must be an object"
+  file_missing: "The file does not exist"
+  json_parse_failed: "Failed to parse JSON: %{exc}"
+  png_without_card: "No character card data was found in the PNG"
+  roll_attributes_exhausted: "Could not generate valid attributes within %{max_roll_attempts} attempts (keys=%{keys}, total=%{target}, min_total=%{min_total}, max_total=%{max_total})"

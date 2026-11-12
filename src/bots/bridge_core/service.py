@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from src.bots.bridge_core.client import DiceFrameClient, build_join_link
+from src.bots.bridge_core.client import DiceFrameClient, build_join_link, request_language
 from src.bots.bridge_core.commands import (
     advance_force,
     away_target_query,
@@ -107,7 +107,9 @@ class DiceFrameBridgeService:
             return BridgeResult(handled=True, intercept=True)
 
         try:
-            reply = await self._dispatch(command_text, message)
+            # 这条消息期间发给 DiceFrame 的请求都带上会话语言，服务端的提示随之本地化。
+            with request_language(language):
+                reply = await self._dispatch(command_text, message)
         except DiceFrameHTTPError as exc:
             reply = bridge_text(language, "DiceFrame 请求失败：{error}", "DiceFrame request failed: {error}", de="DiceFrame-Anfrage fehlgeschlagen: {error}", error=exc)
         except Exception as exc:

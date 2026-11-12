@@ -1,0 +1,7 @@
+# src/engine/dice_rules_coc.py 返回给请求方的提示。
+"zh-CN":
+  bonus_penalty_negative: "奖励骰和惩罚骰数量不能为负数"
+  bonus_penalty_too_many: "奖励骰和惩罚骰数量不能超过 %{max_dice_count}"
+  sanity_loss_empty: "理智损失为空"
+  sanity_loss_invalid: "无效的理智损失写法: %{raw}"
+  sanity_loss_out_of_range: "理智损失超出范围: %{term}"

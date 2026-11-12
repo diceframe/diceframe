@@ -1,0 +1,8 @@
+# src/engine/currency/codec.py 返回给请求方的提示。
+"en":
+  amount_invalid: "Invalid currency amount: %{amount}"
+  amount_not_exact: "The amount %{text} %{unit} cannot be converted exactly into a whole number of %{base_unit}"
+  amount_not_positive: "The currency amount must be greater than 0"
+  canonical_amount_not_integer: "The canonical amount must be an integer: %{amount}"
+  currency_system_missing: "The rule has no currency structure, so the amount cannot be parsed"
+  unknown_unit: "Unknown currency unit: %{unit_id}"
