@@ -26,7 +26,6 @@ PLAIN_ABILITY_FEAT_REF = "feat:ability_score_improvement"
 
 # 成长账本：每级一条，记录该级实际做出的选择。缺失项检测只读它，不从
 # 数值反推选择（`abilities` 已经把来源合并掉了，反推不出「这一级选了什么」）。
-ADVANCEMENT_RECORDS_KEY = "advancement_records"
 
 
 def _canonical(payload: dict[str, Any]) -> dict[str, Any]:
@@ -349,7 +348,17 @@ class Dnd2024AdvancementEngine:
             return None
         history = progression.get("history")
         if not isinstance(history, list):
-            return None
+            if "history" in progression:
+                # Present and not a list is corrupt, not legacy: guessing what
+                # it meant is how a broken card stays broken.
+                return None
+            level = progression.get("level")
+            level = level if isinstance(level, int) and not isinstance(level, bool) else 0
+            # A level-1 card owes nothing with or without history: there is no
+            # earlier level it could have answered for.  A card above level 1
+            # with no history is a legacy save, and accusing every one of them
+            # of skipping a choice would be worse than not judging at all.
+            return [] if level <= 1 else None
         class_ref = str(progression.get("class_ref") or "")
 
         entries: list[dict[str, Any]] = []
@@ -385,21 +394,6 @@ class Dnd2024AdvancementEngine:
                 entry["subclass_ref"] = subclass_ref
             entries.append(entry)
         return entries
-
-    @staticmethod
-    def _advancement_records(character: dict[str, Any]) -> list[Any] | None:
-        """The ledger, or ``None`` when this card predates it.
-
-        ``None`` and ``[]`` mean different things: a card with the field but no
-        entries has been through at least one audit and can be judged; a card
-        without the field cannot.  Detection must not confuse the two.
-        """
-
-        progression = character.get("progression")
-        if not isinstance(progression, dict):
-            return None
-        records = progression.get(ADVANCEMENT_RECORDS_KEY)
-        return records if isinstance(records, list) else None
 
     @staticmethod
     def _recorded_a_choice(record: dict[str, Any], epic: bool) -> bool:
@@ -714,14 +708,25 @@ class Dnd2024AdvancementEngine:
             "tracks": deepcopy(preview["snapshot"]["tracks"]),
             "content_version": preview["content_version"],
         })
-        self._record_advancement(
-            progression,
-            level=target_level,
-            class_ref=str(preview["class_ref"]),
-            choices=preview["choices"],
-            diff=preview["diff"],
-        )
         history = progression.setdefault("history", [])
+        if not isinstance(history, list):
+            raise ProgressionCatalogError("progression.history must be a list")
+        previous_level = 0
+        if history:
+            last = history[-1]
+            if not isinstance(last, dict):
+                raise ProgressionCatalogError(
+                    "progression.history entries must be objects"
+                )
+            previous_level = int(last.get("to_level", 0) or 0)
+        if previous_level >= target_level:
+            # Levels advance one at a time, so a non-advancing append means two
+            # writers disagreed about the current level.  Replay enforces the
+            # sequence by construction; this defends a direct caller.
+            raise ProgressionCatalogError(
+                "progression.history must advance one level at a time: "
+                f"{previous_level} is not below {target_level}"
+            )
         history.append({
             "from_level": preview["from_level"],
             "to_level": target_level,
@@ -732,72 +737,6 @@ class Dnd2024AdvancementEngine:
         self._update_spellcasting(character, preview)
         self._update_derived(character)
         return character
-
-    def _record_advancement(
-        self,
-        progression: dict[str, Any],
-        *,
-        level: int,
-        class_ref: str,
-        choices: dict[str, Any],
-        diff: dict[str, Any],
-    ) -> None:
-        """Append this level's choices to the growth ledger.
-
-        The ledger answers "what did this level choose", which is the only
-        question the missing-choice audit may ask -- ``abilities`` has already
-        folded every source together, so a skipped ASI cannot be told from a
-        small one by reading the number.
-
-        Nothing is written for a choice the level did not make.  An empty record
-        would read as "the player answered with nothing" and make a genuinely
-        skipped level look completed.
-
-        Order is enforced here rather than trusted from the caller: levels
-        advance one at a time, so a non-advancing append means two writers
-        disagreed about the current level.
-        """
-
-        records = progression.setdefault(ADVANCEMENT_RECORDS_KEY, [])
-        if not isinstance(records, list):
-            raise ProgressionCatalogError(
-                "progression.advancement_records must be a list"
-            )
-        previous_level = 0
-        if records:
-            last = records[-1]
-            if not isinstance(last, dict):
-                raise ProgressionCatalogError(
-                    "progression.advancement_records entries must be objects"
-                )
-            previous_level = int(last.get("level", 0) or 0)
-        if previous_level >= level:
-            raise ProgressionCatalogError(
-                "progression.advancement_records must advance one level at a time: "
-                f"{previous_level} is not below {level}"
-            )
-
-        record: dict[str, Any] = {"level": level, "class_ref": class_ref}
-        increases = choices.get("ability_score_increases")
-        if isinstance(increases, dict):
-            parsed = {
-                str(ability): int(points)
-                for ability, points in increases.items()
-                if isinstance(points, int)
-                and not isinstance(points, bool)
-                and points > 0
-            }
-            if parsed:
-                record["ability_score_increase"] = parsed
-        feat_ref = str(diff.get("advancement_feat_ref") or "")
-        if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
-            gained = diff.get("gained_feature_ids") or []
-            key = "epic_boon_ref" if "epic_boon" in gained else "feat_ref"
-            record[key] = feat_ref
-        subclass_ref = str(choices.get("subclass_ref") or "")
-        if subclass_ref:
-            record["subclass_ref"] = subclass_ref
-        records.append(record)
 
     def repair_choices(
         self,
@@ -866,7 +805,6 @@ class Dnd2024AdvancementEngine:
         con_before = ability_modifier(int(abilities.get("con", 0) or 0))
 
         grant_level = self._pending_subclass_level(feature_state, level, subclass)
-        records: list[Any] | None = self._advancement_records(character)
         entries = self._ledger_entries(character)
         progression = character.get("progression")
         progression = progression if isinstance(progression, dict) else {}
@@ -886,12 +824,6 @@ class Dnd2024AdvancementEngine:
                 repaired_anything = True
                 if entries is not None and history is not None and grant_level is not None:
                     self._merge_history_choice(history, grant_level, subclass_ref=value)
-                if records is not None and grant_level is not None:
-                    self._merge_advancement_record(records, {
-                        "level": grant_level,
-                        "class_ref": class_ref,
-                        "subclass_ref": value,
-                    })
 
         for entry in advancement_repairs:
             if not isinstance(entry, dict):
@@ -938,15 +870,6 @@ class Dnd2024AdvancementEngine:
                     feat_ref=feat_ref,
                     epic=epic,
                 )
-            if records is not None:
-                record: dict[str, Any] = {
-                    "level": raw_level, "class_ref": class_ref,
-                }
-                if increases:
-                    record["ability_score_increase"] = dict(increases)
-                if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
-                    record["epic_boon_ref" if epic else "feat_ref"] = feat_ref
-                self._merge_advancement_record(records, record)
 
         if not errors and not repaired_anything:
             # A repair that fills nothing is a caller bug, not a success: the
@@ -956,10 +879,6 @@ class Dnd2024AdvancementEngine:
 
         if errors:
             raise ProgressionCatalogError("; ".join(errors))
-
-        if records is not None:
-            progression = character.setdefault("progression", {})
-            progression[ADVANCEMENT_RECORDS_KEY] = records
 
         if repaired_anything:
             hp_after = resolver.feature_max_hp_bonus(character)
@@ -976,27 +895,6 @@ class Dnd2024AdvancementEngine:
                 )
             self._update_derived(character)
         return character
-
-    @staticmethod
-    def _merge_advancement_record(
-        records: list[Any], record: dict[str, Any],
-    ) -> None:
-        """Insert or update one level's ledger entry, keeping level order.
-
-        Upgrades append; repairs fill in history, which may mean updating a
-        level that already has a record (a subclass repair on top of a level-3
-        entry that recorded something else) or inserting one that was skipped.
-        """
-
-        target_level = int(record["level"])
-        for index, existing in enumerate(records):
-            if not isinstance(existing, dict):
-                continue
-            if int(existing.get("level", 0) or 0) == target_level:
-                records[index] = {**existing, **record}
-                return
-        records.append(record)
-        records.sort(key=lambda row: int(row.get("level", 0) or 0))
 
     @staticmethod
     def _merge_history_choice(
