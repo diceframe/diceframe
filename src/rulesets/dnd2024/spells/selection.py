@@ -62,6 +62,7 @@ class Dnd2024SpellSelection:
         choices: Any,
         *,
         previous: Mapping[str, Sequence[str]] | None = None,
+        context: str = "level_up",
     ) -> tuple[dict[str, list[str]], list[str]]:
         requirements = self.requirements(class_ref, level)
         if not requirements["slot_profile"]:
@@ -112,7 +113,9 @@ class Dnd2024SpellSelection:
                     errors.append("prepared_spell_refs must be in spellbook_refs")
         if previous is not None and policy is not None:
             errors.extend(
-                self._replacement_errors(policy, previous, cantrips, prepared, spellbook)
+                self._replacement_errors(
+                    policy, previous, cantrips, prepared, spellbook, context,
+                )
             )
         return {
             "cantrip_refs": cantrips,
@@ -172,35 +175,50 @@ class Dnd2024SpellSelection:
         cantrips: Sequence[str],
         prepared: Sequence[str],
         spellbook: Sequence[str],
+        context: str,
     ) -> list[str]:
-        """The swap budget at level-up, per the class's declared policy.
+        """The swap budget for this context, per the class's declared policy.
 
-        Only the *dropped* spells count: gaining capacity is the other rule
-        ("choose additional spells until the list matches the table") and it is
-        already enforced by the exact-count check above.
+        Level-up and Long Rest are two different budgets for the same class:
+        a Bard swaps one spell when gaining a level and none on a rest, a Cleric
+        the other way round, and a Wizard re-picks cantrips only after a rest.
+        Only the *dropped* spells count; gaining capacity is the other SRD rule
+        and is already enforced by the exact-count check above.
         """
 
         errors: list[str] = []
+        if context == "level_up":
+            budget = policy.level_up_replace
+            where = "at this level"
+        elif context == "long_rest":
+            budget = policy.long_rest_replace
+            where = "on a long rest"
+        else:
+            raise SpellCatalogError(f"unknown spell selection context {context}")
         dropped = self._previous_refs(previous, "prepared_spell_refs") - set(prepared)
-        if len(dropped) > policy.level_up_replace:
+        if budget is not None and len(dropped) > budget:
             errors.append(
-                "prepared_spell_refs may replace at most "
-                f"{policy.level_up_replace} spell(s) at this level"
+                f"prepared_spell_refs may replace at most {budget} spell(s) {where}"
             )
-        cantrip_limit = 1 if policy.cantrip_swap_on == "level_up" else 0
+        cantrip_timing = "level_up" if context == "level_up" else "long_rest"
+        cantrip_limit = 1 if policy.cantrip_swap_on == cantrip_timing else 0
         dropped_cantrips = self._previous_refs(previous, "cantrip_refs") - set(cantrips)
         if len(dropped_cantrips) > cantrip_limit:
             errors.append(
-                f"cantrip_refs may replace at most {cantrip_limit} cantrip(s) "
-                "at this level"
+                f"cantrip_refs may replace at most {cantrip_limit} cantrip(s) {where}"
             )
-        if policy.source == "spellbook" and policy.spellbook_gain_per_level:
-            added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
-            if len(added) != policy.spellbook_gain_per_level:
-                errors.append(
-                    "spellbook_refs must add exactly "
-                    f"{policy.spellbook_gain_per_level} spell(s) at this level"
-                )
+        if policy.source == "spellbook" and context == "level_up":
+            if policy.spellbook_gain_per_level:
+                added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
+                if len(added) != policy.spellbook_gain_per_level:
+                    errors.append(
+                        "spellbook_refs must add exactly "
+                        f"{policy.spellbook_gain_per_level} spell(s) at this level"
+                    )
+        elif policy.source == "spellbook":
+            # 休息只重排准备位，不往法术书里加东西。
+            if set(spellbook) != self._previous_refs(previous, "spellbook_refs"):
+                errors.append("spellbook_refs cannot change during a rest")
         return errors
 
     def configure(

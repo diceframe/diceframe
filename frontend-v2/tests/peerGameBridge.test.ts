@@ -548,11 +548,14 @@ describe('peer host game bridge', () => {
     await bridge.handle('p_abcdefghijk', 'character.rest', {
       rest: 'long', expected_revision: 5, operation_id: 'rest-2',
       attunement: { attach: ['item:ring_of_protection'], detach: [] },
+      // 长休换准备法术也必须原样转发；职业策略与上限由服务端校验。
+      prepared_spells: { prepared_spell_refs: ['spell:bless', 'spell:healing_word'] },
       uid: 'forged', coins_gp: 999,
     })
     expect(JSON.parse(String(calls.at(-1)?.init?.body))).toEqual({
       rest: 'long', expected_revision: 5, operation_id: 'rest-2',
       attunement: { attach: ['item:ring_of_protection'], detach: [] },
+      prepared_spells: { prepared_spell_refs: ['spell:bless', 'spell:healing_word'] },
     })
   })
 

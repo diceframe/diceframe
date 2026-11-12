@@ -134,6 +134,8 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
     'rest', 'hit_dice', 'confirm_elapsed_time', 'expected_revision', 'operation_id',
     // 同调选择属于角色自己的短休/长休声明；容量与引用合法性仍由服务端校验。
     'attunement',
+    // 长休结束时重排准备法术；职业策略与替换上限同样由服务端校验。
+    'prepared_spells',
   ],
   'character.advancement.preview': ['choices'],
   'character.advancement.apply': ['choices', 'expected_revision', 'operation_id'],
