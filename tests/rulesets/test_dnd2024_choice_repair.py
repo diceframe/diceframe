@@ -9,7 +9,6 @@ import pytest
 
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.progression.advancement import (
-    ADVANCEMENT_RECORDS_KEY,
     Dnd2024AdvancementEngine,
     ProgressionCatalogError,
 )
@@ -74,11 +73,35 @@ def _missing_ids(engine: Dnd2024AdvancementEngine, character: dict) -> set[str]:
     return {row["id"] for row in engine.missing_choices(character)}
 
 
+def _history(target: int, increases_at: dict[int, dict] | None = None) -> list[dict]:
+    """A contiguous history for levels 2..target.
+
+    The fixtures need a card that reached a level without going through this
+    engine, and the only thing the audit trusts is what each level answered --
+    so a forged card forges answers, not a parallel ledger.
+    """
+
+    increases_at = increases_at or {}
+    return [
+        {
+            "from_level": level - 1,
+            "to_level": level,
+            "choices": (
+                {"ability_score_increases": dict(increases_at[level])}
+                if level in increases_at else {}
+            ),
+            "diff": {},
+            "source_ref": "test:fixture",
+        }
+        for level in range(2, target + 1)
+    ]
+
+
 def _drop_increase(character: dict, level: int) -> dict:
     """Undo one level's ability answer, as if the player never made it.
 
-    属性、账本条目、history 的 choices 三处一起退，才是一次真正的"没选"：
-    只退其中一处，补齐时读到的是自相矛盾的卡。
+    属性与 history 的 choices 一起退，才是一次真正的"没选"：只退其中一处，
+    补齐时读到的是自相矛盾的卡。
     """
 
     damaged = deepcopy(character)
@@ -88,10 +111,6 @@ def _drop_increase(character: dict, level: int) -> dict:
             entry["choices"].pop("feat_ref", None)
             entry["choices"].pop("epic_boon_ref", None)
             entry["diff"].pop("advancement_feat_ref", None)
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-        if int(record["level"]) != level
-    ]
     damaged["abilities"]["con"] -= 2
     return damaged
 
@@ -117,10 +136,6 @@ def _forge_to(
     forged["build"]["class_levels"][0]["level"] = target
     forged["progression"]["level"] = target
 
-    class_ref = str(forged["build"]["class_levels"][0]["class_ref"])
-    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": level, "class_ref": class_ref} for level in range(2, target + 1)
-    ]
     history = [
         entry for entry in forged["progression"]["history"]
         if int(entry["to_level"]) <= target
@@ -270,12 +285,7 @@ def test_repairing_an_ability_increase_pays_constitution_back_over_every_level()
     engine = _engine(runtime)
     five = _advance_to(engine, _fighter(runtime), 5)
 
-    damaged = deepcopy(five)
-    records = damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in records if record["level"] != 4
-    ]
-    damaged["abilities"]["con"] -= 2
+    damaged = _drop_increase(five, 4)
     assert "ability_score_increases" in _missing_ids(engine, damaged)
 
     hp_before = damaged["resources"]["max_hp"]
@@ -303,12 +313,7 @@ def test_repairing_a_subclass_pays_the_declared_maximum_not_one_level() -> None:
     five["build"]["level"] = 5
     five["build"]["class_levels"][0]["level"] = 5
     five["progression"]["level"] = 5
-    five["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": 2, "class_ref": "class:sorcerer"},
-        {"level": 3, "class_ref": "class:sorcerer"},
-        {"level": 4, "class_ref": "class:sorcerer", "ability_score_increase": {"cha": 2}},
-        {"level": 5, "class_ref": "class:sorcerer"},
-    ]
+    five["progression"]["history"] = _history(5, {4: {"cha": 2}})
     assert "subclass_ref" in _missing_ids(engine, five)
 
     hp_before = five["resources"]["max_hp"]
@@ -338,11 +343,7 @@ def test_repair_still_requires_a_choice_for_the_level_it_fills() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
     five = _advance_to(engine, _fighter(runtime), 5)
-    damaged = deepcopy(five)
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-        if record["level"] != 4
-    ]
+    damaged = _drop_increase(five, 4)
     damaged["abilities"]["con"] -= 2
 
     with pytest.raises(ProgressionCatalogError) as caught:
@@ -362,12 +363,7 @@ def test_repair_refuses_the_same_level_twice_for_the_same_ability() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
     five = _advance_to(engine, _fighter(runtime), 5)
-    damaged = deepcopy(five)
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-        if record["level"] != 4
-    ]
-    damaged["abilities"]["con"] -= 2
+    damaged = _drop_increase(five, 4)
     con_before = damaged["abilities"]["con"]
 
     with pytest.raises(ProgressionCatalogError) as caught:
@@ -390,12 +386,7 @@ def test_repair_refuses_the_same_level_twice_for_different_abilities() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
     five = _advance_to(engine, _fighter(runtime), 5)
-    damaged = deepcopy(five)
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-        if record["level"] != 4
-    ]
-    damaged["abilities"]["con"] -= 2
+    damaged = _drop_increase(five, 4)
     dex_before = damaged["abilities"]["dex"]
 
     with pytest.raises(ProgressionCatalogError) as caught:
@@ -416,26 +407,15 @@ def test_repair_refuses_a_repeated_epic_boon_entry() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
     four = _advance_to(engine, _fighter(runtime), 4)
-    forged = deepcopy(four)
-    forged["build"]["level"] = 19
-    forged["build"]["class_levels"][0]["level"] = 19
-    forged["progression"]["level"] = 19
-    records = []
-    for level in range(2, 20):
-        snapshot = engine.catalog.snapshot("class:fighter", level)
-        record: dict = {"level": level, "class_ref": "class:fighter"}
-        if "ability_score_improvement" in snapshot["gained_feature_ids"]:
-            record["ability_score_increase"] = {"str": 2}
-        records.append(record)
-    forged["progression"][ADVANCEMENT_RECORDS_KEY] = records
+    forged = _forge_to(four, 19, {})
     assert "epic_boon_ref" in _missing_ids(engine, forged)
 
     with pytest.raises(ProgressionCatalogError) as caught:
         engine.repair_choices(forged, {
             "advancements": [
-                {"level": 19, "feat_ref": "feat:boon_of_combat_prowess",
+                {"level": 19, "epic_boon_ref": "feat:boon_of_combat_prowess",
                  "ability_score_increases": {"str": 1}},
-                {"level": 19, "feat_ref": "feat:boon_of_combat_prowess",
+                {"level": 19, "epic_boon_ref": "feat:boon_of_combat_prowess",
                  "ability_score_increases": {"str": 1}},
             ],
         })
@@ -443,24 +423,19 @@ def test_repair_refuses_a_repeated_epic_boon_entry() -> None:
     assert "level is submitted more than once: 19" in str(caught.value)
 
 
-def test_repair_writes_the_ledger_entry_it_filled() -> None:
+def test_repair_writes_the_history_entry_it_filled() -> None:
     runtime = Dnd2024Runtime()
     engine = _engine(runtime)
     five = _without_subclass(_advance_to(engine, _fighter(runtime), 5))
 
     repaired = engine.repair_choices(five, {"subclass_ref": CHAMPION})
 
-    records = repaired["progression"][ADVANCEMENT_RECORDS_KEY]
-    level_three = next(record for record in records if record["level"] == 3)
-    assert level_three["subclass_ref"] == CHAMPION
-    assert [record["level"] for record in records] == sorted(
-        record["level"] for record in records
-    )
-
-    # 账本管审计，history 管重放：同一件事得写两份，缺哪份都是一种失败。
     history = repaired["progression"]["history"]
-    entry = next(item for item in history if item["to_level"] == 3)
-    assert entry["choices"]["subclass_ref"] == CHAMPION
+    level_three = next(entry for entry in history if entry["to_level"] == 3)
+    assert level_three["choices"]["subclass_ref"] == CHAMPION
+    assert [entry["to_level"] for entry in history] == sorted(
+        entry["to_level"] for entry in history
+    )
 
 
 def _round_trip(runtime: Dnd2024Runtime, character: dict) -> dict:
@@ -711,9 +686,7 @@ def test_a_rogue_ability_level_at_ten_is_audited() -> None:
     forged["build"]["level"] = 10
     forged["build"]["class_levels"][0]["level"] = 10
     forged["progression"]["level"] = 10
-    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": level, "class_ref": "class:rogue"} for level in range(2, 11)
-    ]
+    forged["progression"]["history"] = _history(10, {4: {"con": 2}, 8: {"con": 2}})
 
     assert any(
         row["id"] == "ability_score_increases" and row["level"] == 10
@@ -731,12 +704,7 @@ def test_completing_a_subclass_recomputes_the_derived_facts() -> None:
     five["build"]["level"] = 5
     five["build"]["class_levels"][0]["level"] = 5
     five["progression"]["level"] = 5
-    five["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": 2, "class_ref": "class:sorcerer"},
-        {"level": 3, "class_ref": "class:sorcerer"},
-        {"level": 4, "class_ref": "class:sorcerer", "ability_score_increase": {"cha": 2}},
-        {"level": 5, "class_ref": "class:sorcerer"},
-    ]
+    five["progression"]["history"] = _history(5, {4: {"cha": 2}})
     before = deepcopy(five["derived"])
 
     repaired = engine.repair_choices(five, {"subclass_ref": DRACONIC})
@@ -756,9 +724,7 @@ def test_a_level_twenty_character_can_still_be_completed() -> None:
     forged["build"]["level"] = 20
     forged["build"]["class_levels"][0]["level"] = 20
     forged["progression"]["level"] = 20
-    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": level, "class_ref": "class:fighter"} for level in range(2, 21)
-    ]
+    forged["progression"]["history"] = _history(20, {4: {"con": 2}})
     with pytest.raises(ProgressionCatalogError):
         engine.preview_next_level(forged)
 

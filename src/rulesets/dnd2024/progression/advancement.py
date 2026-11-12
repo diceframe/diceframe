@@ -128,10 +128,11 @@ class Dnd2024AdvancementEngine:
         this, a card imported without ``features.subclass_ref`` silently loses
         its whole subclass tree and has no way back.
 
-        The audit reads facts, never the audit log.  ``progression.history``
-        may be trimmed, and a card that never went through this application has
-        no history at all -- only the ledger is authoritative about *which*
-        level chose what.
+        The audit reads what each level answered, and the only place that is
+        written down is the card's ``progression.history``: a level that chose
+        nothing has an empty entry, and a card that never went through this
+        application has no history at all.  There is no second ledger to
+        disagree with, and one derived entry per level is the whole of it.
 
         Coverage is deliberately narrow, because a broad audit would have to
         guess:
@@ -213,7 +214,7 @@ class Dnd2024AdvancementEngine:
     def _missing_advancements(
         self, class_ref: str, level: int, character: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        records = self._advancement_records(character)
+        records = self._ledger_entries(character)
         if records is None:
             return []
         by_level: dict[int, dict[str, Any]] = {}
@@ -326,6 +327,64 @@ class Dnd2024AdvancementEngine:
                 ),
             })
         return missing
+
+    @staticmethod
+    def _ledger_entries(character: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """The growth ledger, derived from the audit history.
+
+        ``None`` and ``[]`` mean different things: ``None`` is "this card keeps
+        no history, so it cannot be judged", while ``[]`` is "this card has
+        history and every level of it chose nothing".  Detection must not
+        confuse the two -- a legacy card reported as incomplete would be a
+        false accusation, and a card that skipped a level must not hide behind
+        the legacy exemption.
+
+        The derivation is the only definition of the ledger.  Every field a
+        level can answer is already inside its history entry, so a second
+        stored copy could only ever disagree with this one.
+        """
+
+        progression = character.get("progression")
+        if not isinstance(progression, dict):
+            return None
+        history = progression.get("history")
+        if not isinstance(history, list):
+            return None
+        class_ref = str(progression.get("class_ref") or "")
+
+        entries: list[dict[str, Any]] = []
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            to_level = item.get("to_level")
+            if isinstance(to_level, bool) or not isinstance(to_level, int):
+                continue
+            entry: dict[str, Any] = {"level": to_level, "class_ref": class_ref}
+            choices = item.get("choices")
+            choices = choices if isinstance(choices, dict) else {}
+            increases = choices.get("ability_score_increases")
+            if isinstance(increases, dict):
+                parsed = {
+                    str(ability): int(points)
+                    for ability, points in increases.items()
+                    if isinstance(points, int)
+                    and not isinstance(points, bool)
+                    and points > 0
+                }
+                if parsed:
+                    entry["ability_score_increase"] = parsed
+            diff = item.get("diff")
+            diff = diff if isinstance(diff, dict) else {}
+            feat_ref = str(diff.get("advancement_feat_ref") or "")
+            if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
+                gained = diff.get("gained_feature_ids") or []
+                key = "epic_boon_ref" if "epic_boon" in gained else "feat_ref"
+                entry[key] = feat_ref
+            subclass_ref = str(choices.get("subclass_ref") or "")
+            if subclass_ref:
+                entry["subclass_ref"] = subclass_ref
+            entries.append(entry)
+        return entries
 
     @staticmethod
     def _advancement_records(character: dict[str, Any]) -> list[Any] | None:
@@ -808,9 +867,7 @@ class Dnd2024AdvancementEngine:
 
         grant_level = self._pending_subclass_level(feature_state, level, subclass)
         records: list[Any] | None = self._advancement_records(character)
-        # 账本与 history 是两件东西，回答的是两个问题：账本给缺项审计看，
-        # history 给重放看。只写账本会让补齐"成功"返回一张过不了创建/加入
-        # 边界的卡——审计已经清了，重放仍然认为这一级什么都没选。
+        entries = self._ledger_entries(character)
         progression = character.get("progression")
         progression = progression if isinstance(progression, dict) else {}
         history = progression.get("history")
@@ -827,14 +884,14 @@ class Dnd2024AdvancementEngine:
             else:
                 features["subclass_ref"] = value
                 repaired_anything = True
+                if entries is not None and history is not None and grant_level is not None:
+                    self._merge_history_choice(history, grant_level, subclass_ref=value)
                 if records is not None and grant_level is not None:
                     self._merge_advancement_record(records, {
                         "level": grant_level,
                         "class_ref": class_ref,
                         "subclass_ref": value,
                     })
-                if history is not None and grant_level is not None:
-                    self._merge_history_choice(history, grant_level, subclass_ref=value)
 
         for entry in advancement_repairs:
             if not isinstance(entry, dict):
@@ -866,12 +923,21 @@ class Dnd2024AdvancementEngine:
                 abilities[ability] = int(abilities.get(ability, 0) or 0) + int(points)
             repaired_anything = True
             epic = "epic_boon" in snapshot["gained_feature_ids"]
-            # 专长是角色的事实，不是账本的事实：补上一张不带账本的旧卡时，
-            # 它照样得进 feat_refs，否则账本说什么都只是内部记录。
+            # The feat slot is a fact about the character, whether or not any
+            # ledger is being maintained, so it must not live inside the
+            # ledger's branch.
             if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
                 owned = features.setdefault("feat_refs", [])
                 if feat_ref not in owned:
                     owned.append(feat_ref)
+            if entries is not None and history is not None:
+                self._merge_history_choice(
+                    history,
+                    raw_level,
+                    increases=dict(increases) if increases else None,
+                    feat_ref=feat_ref,
+                    epic=epic,
+                )
             if records is not None:
                 record: dict[str, Any] = {
                     "level": raw_level, "class_ref": class_ref,
@@ -881,14 +947,6 @@ class Dnd2024AdvancementEngine:
                 if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
                     record["epic_boon_ref" if epic else "feat_ref"] = feat_ref
                 self._merge_advancement_record(records, record)
-            if history is not None:
-                self._merge_history_choice(
-                    history,
-                    raw_level,
-                    increases=dict(increases) if increases else None,
-                    feat_ref=feat_ref,
-                    epic=epic,
-                )
 
         if not errors and not repaired_anything:
             # A repair that fills nothing is a caller bug, not a success: the
