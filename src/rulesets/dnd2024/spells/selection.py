@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
@@ -56,7 +56,12 @@ class Dnd2024SpellSelection:
         }
 
     def validate(
-        self, class_ref: str, level: int, choices: Any,
+        self,
+        class_ref: str,
+        level: int,
+        choices: Any,
+        *,
+        previous: Mapping[str, Sequence[str]] | None = None,
     ) -> tuple[dict[str, list[str]], list[str]]:
         requirements = self.requirements(class_ref, level)
         if not requirements["slot_profile"]:
@@ -97,21 +102,106 @@ class Dnd2024SpellSelection:
             if not isinstance(raw_spellbook, list):
                 errors.append("spellbook_refs are required for this class")
             else:
-                spellbook, spellbook_errors = self.catalog.require(
+                spellbook, spellbook_errors = self._require_spellbook(
                     raw_spellbook,
                     class_ref=class_ref,
-                    level=requirements["maximum_spell_level"],
-                    count=requirements["spellbook_minimum"],
-                    label="spellbook_refs",
+                    requirements=requirements,
                 )
                 errors.extend(spellbook_errors)
                 if not set(prepared).issubset(spellbook):
                     errors.append("prepared_spell_refs must be in spellbook_refs")
+        if previous is not None and policy is not None:
+            errors.extend(
+                self._replacement_errors(policy, previous, cantrips, prepared, spellbook)
+            )
         return {
             "cantrip_refs": cantrips,
             "prepared_spell_refs": prepared,
             "spellbook_refs": spellbook,
         }, errors
+
+    def _require_spellbook(
+        self,
+        spell_refs: list[Any],
+        *,
+        class_ref: str,
+        requirements: Mapping[str, Any],
+    ) -> tuple[list[str], list[str]]:
+        """A spellbook's floor, not its size.
+
+        SRD prints "six 1st-level spells" at level 1 and +2 per later level, but
+        copying spells from scrolls or other books pushes the total above that
+        floor.  An equality check makes every copied spell an invalid book, so
+        the printed number is a minimum and the gain rule is enforced where a
+        gain actually happens (level-up, see ``_replacement_errors``).
+        """
+
+        if any(not isinstance(item, str) for item in spell_refs):
+            return [], ["spellbook_refs must be an array of spell refs"]
+        book = [str(item) for item in spell_refs]
+        errors: list[str] = []
+        minimum = int(requirements["spellbook_minimum"])
+        maximum = int(requirements["maximum_spell_level"])
+        if len(book) < minimum:
+            errors.append(f"spellbook_refs must contain at least {minimum} spells")
+        if len(set(book)) != len(book):
+            errors.append("spellbook_refs must not contain duplicate spells")
+        for ref in book:
+            spell = self.catalog.get(ref)
+            if spell is None:
+                errors.append(f"spellbook_refs contains unknown spell {ref}")
+                continue
+            if class_ref not in spell["class_refs"]:
+                errors.append(f"{ref} is not on the {class_ref} spell list")
+            spell_level = int(spell["level"])
+            if not 1 <= spell_level <= maximum:
+                errors.append(f"{ref} is not eligible at spell level {maximum}")
+        return book, errors
+
+    @staticmethod
+    def _previous_refs(
+        previous: Mapping[str, Sequence[str]], key: str,
+    ) -> set[str]:
+        raw = previous.get(key) or ()
+        return {str(item) for item in raw if isinstance(item, str)}
+
+    def _replacement_errors(
+        self,
+        policy: PreparationPolicy,
+        previous: Mapping[str, Sequence[str]],
+        cantrips: Sequence[str],
+        prepared: Sequence[str],
+        spellbook: Sequence[str],
+    ) -> list[str]:
+        """The swap budget at level-up, per the class's declared policy.
+
+        Only the *dropped* spells count: gaining capacity is the other rule
+        ("choose additional spells until the list matches the table") and it is
+        already enforced by the exact-count check above.
+        """
+
+        errors: list[str] = []
+        dropped = self._previous_refs(previous, "prepared_spell_refs") - set(prepared)
+        if len(dropped) > policy.level_up_replace:
+            errors.append(
+                "prepared_spell_refs may replace at most "
+                f"{policy.level_up_replace} spell(s) at this level"
+            )
+        cantrip_limit = 1 if policy.cantrip_swap_on == "level_up" else 0
+        dropped_cantrips = self._previous_refs(previous, "cantrip_refs") - set(cantrips)
+        if len(dropped_cantrips) > cantrip_limit:
+            errors.append(
+                f"cantrip_refs may replace at most {cantrip_limit} cantrip(s) "
+                "at this level"
+            )
+        if policy.source == "spellbook" and policy.spellbook_gain_per_level:
+            added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
+            if len(added) != policy.spellbook_gain_per_level:
+                errors.append(
+                    "spellbook_refs must add exactly "
+                    f"{policy.spellbook_gain_per_level} spell(s) at this level"
+                )
+        return errors
 
     def configure(
         self, character: dict[str, Any], choices: Any,
