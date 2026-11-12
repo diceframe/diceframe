@@ -1,0 +1,11 @@
+# src/plugin_host/support.py 返回给请求方的提示。
+"zh-CN":
+  adventure_module_catalog_only: "adventure-module 必须使用 content_delivery_mode: catalog（安装只注册内容库，运行时按需物化）"
+  catalog_no_entrypoint: "catalog 纯内容包不得声明 entrypoint；程序能力应使用执行插件类型"
+  compatible_rulesets_empty_string: "%{compatible_rulesets_field} 不允许空字符串"
+  compatible_rulesets_entry_not_string: "%{compatible_rulesets_field} 条目必须是字符串"
+  compatible_rulesets_not_array: "%{compatible_rulesets_field} 必须是数组"
+  compatible_rulesets_too_many: "%{compatible_rulesets_field} 最多 %{max_compatible_rulesets} 条"
+  content_profile_unsupported: "不支持的 content_profile：%{raw_profile}"
+  delivery_mode_unsupported: "不支持的 content_delivery_mode：%{raw_mode}"
+  system_agnostic_conflict: "system_agnostic: true 与 compatible_rulesets 互斥：通用包不应限定具体规则"

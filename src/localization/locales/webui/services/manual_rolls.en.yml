@@ -1,0 +1,11 @@
+# GM 发起的手动掷骰请求（src/webui/services/manual_rolls.py）返回给请求方的提示。
+"en":
+  run_changed: "The game was updated. Refresh and try again."
+  targets_required: "Select at least one player"
+  target_required: "A check needs a target value"
+  target_out_of_range: "The target value must be between 1 and 10000"
+  operation_id_invalid: "Invalid operation_id"
+  request_missing: "The request does not exist or has expired"
+  not_allowed_to_roll: "You are not allowed to make this roll"
+  request_cancelled: "The request has been cancelled"
+  request_already_resolved: "The request is already complete and cannot be cancelled"

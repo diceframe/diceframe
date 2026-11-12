@@ -1,0 +1,16 @@
+# src/plugin_host/content.py 返回给请求方的提示。
+"zh-CN":
+  asset_missing: "插件资源不存在"
+  asset_not_public: "插件资源未声明为可访问贡献"
+  asset_path_outside: "插件资源路径越界"
+  content_resource_not_object: "插件内容资源必须是 JSON 对象：%{path}"
+  content_resource_read_failed: "插件内容资源读取失败：%{path}: %{exc}"
+  content_v2_location: "V2 插件内容必须位于 content/<kind>/ 目录"
+  locale_empty: "插件 locale 必须非空"
+  locale_fields_not_object: "插件 locale fields 必须为对象"
+  locale_not_object: "插件 locale 必须是 JSON 对象：%{overlay_path}"
+  locale_read_failed: "插件 locale 读取失败：%{overlay_path}: %{exc}"
+  locale_schema_version: "插件 locale_schema_version 必须为 1"
+  locale_target_mismatch: "插件 locale target 与资源不匹配"
+  locale_unknown_fields: "插件 locale 含未知顶层字段: %{fields}"
+  world_template_not_object: "插件世界模板必须是 JSON 对象：%{path}"

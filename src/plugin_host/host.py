@@ -73,6 +73,7 @@ from .support import (
     STATIC_PLUGIN_TYPES as _STATIC_PLUGIN_TYPES,
     RPC_PLUGIN_TYPES as _RPC_PLUGIN_TYPES,
 )
+from src.localization.messages import t
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -254,16 +255,16 @@ class PluginHost:
     ) -> dict[str, Any]:
         runtime = self._require(plugin_id)
         if self._plugin_type(runtime.manifest) != "tool":
-            raise ValueError("该插件不是 tool 类型")
+            raise ValueError(t("plugin_host.host.not_tool_plugin"))
         if runtime.status != "running" or not runtime.rpc_client:
-            raise ValueError("工具插件尚未运行或初始化失败")
+            raise ValueError(t("plugin_host.host.tool_plugin_not_running"))
         if not isinstance(arguments, dict):
-            raise ValueError("工具 arguments 必须是对象")
+            raise ValueError(t("plugin_host.host.tool_arguments_not_object"))
         if context is not None and not isinstance(context, dict):
-            raise ValueError("工具 context 必须是对象")
+            raise ValueError(t("plugin_host.host.tool_context_not_object"))
         descriptor = next((item for item in runtime.tools if item.get("name") == tool_name), None)
         if not descriptor:
-            raise KeyError(f"工具不存在：{tool_name}")
+            raise KeyError(t("plugin_host.host.tool_missing", tool_name=tool_name))
         validate_tool_arguments(descriptor["input_schema"], arguments)
         try:
             result = await runtime.rpc_client.request(
@@ -272,7 +273,7 @@ class PluginHost:
                 timeout=DEFAULT_RPC_TIMEOUT,
             )
             if not isinstance(result, dict):
-                raise PluginProtocolError("工具必须返回 JSON 对象")
+                raise PluginProtocolError(t("plugin_host.host.tool_result_not_object"))
         except PluginProtocolError as exc:
             await self._fail_rpc_runtime(runtime, str(exc))
             raise
@@ -294,17 +295,17 @@ class PluginHost:
         """按 capability 别名调用 provider 插件；默认超时长于普通 RPC。"""
         runtime = self._require(plugin_id)
         if self._plugin_type(runtime.manifest) != "provider":
-            raise ValueError("该插件不是 provider 类型")
+            raise ValueError(t("plugin_host.host.not_provider_plugin"))
         if runtime.status != "running" or not runtime.rpc_client:
-            raise ValueError("Provider 插件尚未运行或初始化失败")
+            raise ValueError(t("plugin_host.host.provider_not_running"))
         descriptor = provider_capability(runtime, capability)
         if not descriptor:
-            raise KeyError(f"插件 {plugin_id} 未声明 capability：{capability}")
+            raise KeyError(t("plugin_host.host.capability_not_declared", plugin_id=plugin_id, capability=capability))
         method_name = str(descriptor.get("methods", {}).get(method_alias) or "")
         if not method_name:
-            raise KeyError(f"capability {capability} 不支持方法别名：{method_alias}")
+            raise KeyError(t("plugin_host.host.capability_alias_unsupported", capability=capability, method_alias=method_alias))
         if not isinstance(arguments, dict):
-            raise ValueError("Provider 调用 arguments 必须是对象")
+            raise ValueError(t("plugin_host.host.provider_arguments_not_object"))
         try:
             result = await runtime.rpc_client.request(
                 "provider.request",
@@ -312,7 +313,7 @@ class PluginHost:
                 timeout=max(float(timeout), DEFAULT_RPC_TIMEOUT),
             )
             if not isinstance(result, dict):
-                raise PluginProtocolError("Provider 必须返回 JSON 对象")
+                raise PluginProtocolError(t("plugin_host.host.provider_result_not_object"))
         except PluginProtocolError as exc:
             await self._fail_rpc_runtime(runtime, str(exc))
             raise
@@ -324,9 +325,9 @@ class PluginHost:
     async def apply_bridge_extensions(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
         stage = str(stage or "").strip()
         if stage not in BRIDGE_EXTENSION_STAGES:
-            raise ValueError(f"不支持的 Bot Bridge 扩展阶段：{stage}")
+            raise ValueError(t("plugin_host.host.bridge_stage_unsupported", stage=stage))
         if not isinstance(payload, dict):
-            raise ValueError("Bot Bridge 扩展 payload 必须是对象")
+            raise ValueError(t("plugin_host.host.bridge_payload_not_object"))
         current = dict(payload)
         outputs: list[dict[str, Any]] = []
         applied: list[dict[str, str]] = []
@@ -358,11 +359,11 @@ class PluginHost:
                     timeout=min(30.0, max(1.0, float(descriptor.get("timeout_sec", 5)))),
                 )
                 if not isinstance(result, dict):
-                    raise PluginProtocolError("Bot Bridge 扩展必须返回 JSON 对象")
+                    raise PluginProtocolError(t("plugin_host.host.bridge_result_not_object"))
                 next_payload = result.get("payload")
                 if next_payload is not None:
                     if not isinstance(next_payload, dict):
-                        raise PluginProtocolError("Bot Bridge 扩展返回的 payload 必须是对象")
+                        raise PluginProtocolError(t("plugin_host.host.bridge_returned_payload_not_object"))
                     current = next_payload
                 normalized_outputs = normalize_bridge_outputs(
                     runtime,
@@ -403,14 +404,14 @@ class PluginHost:
     def bridge_asset_path(self, plugin_id: str, relative_path: str) -> Path:
         runtime = self._require(plugin_id)
         if self._plugin_type(runtime.manifest) != "bot-extension" or runtime.status != "running":
-            raise KeyError("Bot Bridge 扩展未运行")
+            raise KeyError(t("plugin_host.host.bridge_extension_not_running"))
         root = (self.data_dir / plugin_id / "runtime").resolve()
         target = (root / str(relative_path or "")).resolve()
         self._ensure_inside(root, target)
         if not target.is_file() or target.suffix.lower() not in _BRIDGE_IMAGE_SUFFIXES:
-            raise KeyError("Bot Bridge 图片不存在或格式不受支持")
+            raise KeyError(t("plugin_host.host.bridge_image_missing_or_unsupported"))
         if target.stat().st_size > _MAX_BRIDGE_IMAGE_BYTES:
-            raise ValueError("Bot Bridge 图片不能超过 10 MB")
+            raise ValueError(t("plugin_host.host.bridge_image_too_large"))
         return target
 
     def contribution_path(self, kind: str, key: str) -> Path | None:
@@ -459,19 +460,19 @@ class PluginHost:
         runtime = self._require(plugin_id)
         docs_rel = str(runtime.manifest.get("docs") or "").strip()
         if not docs_rel:
-            return {"ok": False, "error": "该插件未提供说明文档", "found": False}
+            return {"ok": False, "error": t("plugin_host.host.docs_not_provided"), "found": False}
         plugin_dir = runtime.directory.resolve()
         try:
             docs_path = (plugin_dir / docs_rel).resolve()
             self._ensure_inside(plugin_dir, docs_path)
         except ValueError:
-            return {"ok": False, "error": "说明文档路径越界", "found": False}
+            return {"ok": False, "error": t("plugin_host.host.docs_path_outside"), "found": False}
         if not docs_path.is_file() or docs_path.is_symlink():
-            return {"ok": False, "error": "插件说明文档不存在", "found": False}
+            return {"ok": False, "error": t("plugin_host.host.docs_missing"), "found": False}
         try:
             content = docs_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            return {"ok": False, "error": f"读取说明文档失败：{exc}", "found": False}
+            return {"ok": False, "error": t("plugin_host.host.docs_read_failed", exc=exc), "found": False}
         return {"ok": True, "found": True, "name": docs_rel, "content": content}
 
     def sync_lorebooks(self, lorebook_store: Any) -> int:
@@ -492,9 +493,9 @@ class PluginHost:
             try:
                 data = json.loads(item.path.read_text(encoding="utf-8"))
             except (OSError, ValueError, TypeError) as exc:
-                raise ValueError(f"插件世界模板读取失败：{item.path}: {exc}") from exc
+                raise ValueError(t("plugin_host.host.world_template_read_failed", path=item.path, exc=exc)) from exc
             if not isinstance(data, dict) or not data.get("world_id"):
-                raise ValueError(f"插件世界模板缺少 world_id：{item.path}")
+                raise ValueError(t("plugin_host.host.world_template_missing_world_id", path=item.path))
             world_id = str(data["world_id"])
             if not lorebook_store.get_world(world_id):
                 lorebook_store.create_world(
@@ -532,27 +533,27 @@ class PluginHost:
         if declared is None:
             return None
         if str(manifest.get("plugin_type") or "") != "content-pack":
-            raise ValueError("ruleset_catalogs 仅支持 content-pack")
+            raise ValueError(t("plugin_host.host.ruleset_catalogs_content_pack_only"))
         if not isinstance(declared, list) or not declared:
-            raise ValueError("ruleset_catalogs 必须是非空字符串数组")
+            raise ValueError(t("plugin_host.host.ruleset_catalogs_not_string_array"))
         base = plugin_dir.resolve()
         catalogs: list[Path] = []
         for pattern in declared:
             if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError("ruleset_catalogs 路径必须是非空字符串")
+                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_empty"))
             normalized = pattern.strip().replace("\\", "/")
             candidate = Path(normalized)
             if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-                raise ValueError("ruleset_catalogs 路径不能是绝对路径或包含 ..")
+                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_unsafe"))
             resolved = (base / candidate).resolve()
             if resolved != base and base not in resolved.parents:
-                raise ValueError("ruleset_catalogs 路径越界")
+                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_outside"))
             if resolved.is_symlink() or not resolved.is_dir():
-                raise ValueError(f"ruleset_catalogs 必须是已存在的目录：{normalized}")
+                raise ValueError(t("plugin_host.host.ruleset_catalogs_dir_missing", normalized=normalized))
             catalogs.append(resolved)
         parents = {catalog.parent for catalog in catalogs}
         if len(parents) != 1:
-            raise ValueError("ruleset_catalogs 必须共享同一父目录")
+            raise ValueError(t("plugin_host.host.ruleset_catalogs_same_parent"))
         parent = catalogs[0].parent
         directories = tuple(sorted(catalog.name for catalog in catalogs))
         return parent, directories
@@ -587,7 +588,7 @@ class PluginHost:
         plugin_type = str(manifest.get("plugin_type") or "")
         if expected_plugin_type and plugin_type != expected_plugin_type:
             raise ValueError(
-                f"该接口只接受 {expected_plugin_type} 包，实际为 {plugin_type or 'missing'}"
+                t("plugin_host.host.package_type_mismatch", expected_plugin_type=expected_plugin_type, actual=plugin_type or 'missing')
             )
         validator = self._package_validator
         if validator is None:
@@ -603,10 +604,10 @@ class PluginHost:
         expected_plugin_type: str = "",
     ) -> PluginPublicDetail:
         if not payload:
-            raise ValueError("插件包为空")
+            raise ValueError(t("plugin_host.host.package_empty"))
         if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
             limit_mb = (MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024 - 1) // (1024 * 1024)
-            raise ValueError(f"插件包不能超过 {limit_mb} MB")
+            raise ValueError(t("plugin_host.host.package_too_large", limit_mb=limit_mb))
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         was_running = False
@@ -616,11 +617,11 @@ class PluginHost:
             source_dir = self._find_install_root(temp_dir)
             plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
             if not allow_any_root and source_dir != temp_dir and source_dir.name != plugin_id:
-                raise ValueError("插件包顶层目录名必须与插件 ID 一致")
+                raise ValueError(t("plugin_host.host.package_root_name_mismatch"))
             target_dir = (self.plugins_dir / plugin_id).resolve()
             self._ensure_inside(self.plugins_dir, target_dir)
             if target_dir.exists() and not overwrite:
-                raise ValueError(f"插件 {plugin_id} 已存在；如需更新请启用覆盖安装")
+                raise ValueError(t("plugin_host.host.plugin_exists", plugin_id=plugin_id))
 
             # FIX-01 §3.4/§3.5：包校验与 bound-save guard 必须在任何 mutation
             # （staging/rename/元数据写入）之前完成。
@@ -704,9 +705,9 @@ class PluginHost:
         expected_version = str(market_item.get("version") or "")
         package_version = str(package_manifest.get("version") or "")
         if package_plugin_id != plugin_id:
-            raise ValueError("插件包 ID 与商店索引不一致，已拒绝安装")
+            raise ValueError(t("plugin_host.host.package_id_index_mismatch"))
         if not expected_version or package_version != expected_version:
-            raise ValueError("插件包版本与商店索引不一致，已拒绝安装")
+            raise ValueError(t("plugin_host.host.package_version_index_mismatch"))
         existing_metadata = self._load_marketplace_metadata(plugin_id)
         commit_sha = str(market_item.get("commit_sha") or "")
         if overwrite and commit_sha and existing_metadata.get("commit_sha") == commit_sha:
@@ -741,7 +742,7 @@ class PluginHost:
 
     async def update_from_marketplace(self, plugin_id: str) -> dict[str, Any]:
         if plugin_id not in self.plugins:
-            raise KeyError(f"插件不存在：{plugin_id}")
+            raise KeyError(t("plugin_host.host.plugin_missing", plugin_id=plugin_id))
         return await self.install_from_marketplace(plugin_id, overwrite=True)
 
     async def auto_update_safe_plugins(self) -> list[dict[str, Any]]:
@@ -781,7 +782,7 @@ class PluginHost:
     async def uninstall(self, plugin_id: str, *, delete_data: bool = False) -> dict[str, Any]:
         runtime = self._require(plugin_id)
         if runtime.source == "builtin":
-            raise ValueError("内置插件不可卸载")
+            raise ValueError(t("plugin_host.host.builtin_not_uninstallable"))
         # FIX-01 §3.5：删除 package bytes 前必须过 bound-save guard（与覆盖安装
         # 同一条 choke point，任何入口都绕不过）。
         self._guard_package_mutation(plugin_id, "uninstall")
@@ -1277,11 +1278,11 @@ class PluginHost:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         plugin_id = str(manifest.get("id") or "")
         if not _ID_RE.fullmatch(plugin_id):
-            raise ValueError("插件 ID 非法")
+            raise ValueError(t("plugin_host.host.plugin_id_invalid"))
         if require_directory_match and plugin_dir.name != plugin_id:
-            raise ValueError("插件 ID 与目录名不一致")
+            raise ValueError(t("plugin_host.host.plugin_id_dir_mismatch"))
         if int(manifest.get("schema_version", 0)) != 1:
-            raise ValueError("不支持的 manifest schema_version")
+            raise ValueError(t("plugin_host.host.manifest_schema_version_unsupported"))
         supported_versions = {
             "content_schema_version": {1, 2},
             "locale_schema_version": {1},
@@ -1291,14 +1292,14 @@ class PluginHost:
                 try:
                     version = int(manifest[field])
                 except (TypeError, ValueError) as exc:
-                    raise ValueError(f"{field} 必须是正整数") from exc
+                    raise ValueError(t("plugin_host.host.field_positive_integer", field=field)) from exc
                 if version not in supported_versions[field]:
-                    raise ValueError(f"不支持的 {field}: {version}")
+                    raise ValueError(t("plugin_host.host.field_version_unsupported", field=field, version=version))
         if "default_locale" in manifest and not str(manifest["default_locale"] or "").strip():
-            raise ValueError("default_locale 不能为空")
+            raise ValueError(t("plugin_host.host.default_locale_empty"))
         plugin_type = self._plugin_type(manifest)
         if plugin_type not in _PLUGIN_TYPES:
-            raise ValueError(f"不支持的 plugin_type：{plugin_type}")
+            raise ValueError(t("plugin_host.host.plugin_type_unsupported", plugin_type=plugin_type))
         schema_path = (plugin_dir / str(manifest.get("config_schema") or "config.schema.json")).resolve()
         self._ensure_inside(plugin_dir, schema_path)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -1340,29 +1341,29 @@ class PluginHost:
         if declared is None:
             return None
         if str(manifest.get("plugin_type") or "") != "content-pack":
-            raise ValueError("adventure_packages 仅支持 content-pack")
+            raise ValueError(t("plugin_host.host.adventure_packages_content_pack_only"))
         if not isinstance(declared, list) or not declared:
-            raise ValueError("adventure_packages 必须是非空字符串数组")
+            raise ValueError(t("plugin_host.host.adventure_packages_not_string_array"))
         base = plugin_dir.resolve()
         packages: list[Path] = []
         for pattern in declared:
             if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError("adventure_packages 路径必须是非空字符串")
+                raise ValueError(t("plugin_host.host.adventure_packages_path_empty"))
             normalized = pattern.strip().replace("\\", "/")
             candidate = Path(normalized)
             if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-                raise ValueError("adventure_packages 路径不能是绝对路径或包含 ..")
+                raise ValueError(t("plugin_host.host.adventure_packages_path_unsafe"))
             resolved = (base / candidate).resolve()
             if resolved != base and base not in resolved.parents:
-                raise ValueError("adventure_packages 路径越界")
+                raise ValueError(t("plugin_host.host.adventure_packages_path_outside"))
             if resolved.is_symlink() or not resolved.is_dir():
-                raise ValueError(f"adventure_packages 必须是已存在的目录：{normalized}")
+                raise ValueError(t("plugin_host.host.adventure_packages_dir_missing", normalized=normalized))
             if not (resolved / "manifest.json").is_file():
-                raise ValueError(f"adventure_packages 缺少 manifest.json：{normalized}")
+                raise ValueError(t("plugin_host.host.adventure_packages_manifest_missing", normalized=normalized))
             packages.append(resolved)
         parents = {package.parent for package in packages}
         if len(parents) != 1:
-            raise ValueError("adventure_packages 必须共享同一父目录")
+            raise ValueError(t("plugin_host.host.adventure_packages_same_parent"))
         parent = packages[0].parent
         directories = tuple(sorted(package.name for package in packages))
         return parent, directories
@@ -1394,9 +1395,9 @@ class PluginHost:
         """
 
         if not payload:
-            raise ValueError("插件包为空")
+            raise ValueError(t("plugin_host.host.package_empty"))
         if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
-            raise ValueError("插件包不能超过 20 MB")
+            raise ValueError(t("plugin_host.host.package_over_20mb"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="plugin-validate-", dir=str(self.data_dir)) as temp_name:
             temp_dir = Path(temp_name)
@@ -1407,9 +1408,9 @@ class PluginHost:
 
     def _inspect_zip_manifest(self, payload: bytes) -> tuple[str, dict[str, Any]]:
         if not payload:
-            raise ValueError("插件包为空")
+            raise ValueError(t("plugin_host.host.package_empty"))
         if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
-            raise ValueError("插件包不能超过 20 MB")
+            raise ValueError(t("plugin_host.host.package_over_20mb"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="plugin-inspect-", dir=str(self.data_dir)) as temp_name:
             temp_dir = Path(temp_name)
@@ -1423,33 +1424,33 @@ class PluginHost:
         try:
             archive = zipfile.ZipFile(io.BytesIO(payload))
         except zipfile.BadZipFile as exc:
-            raise ValueError("插件包不是有效 zip 文件") from exc
+            raise ValueError(t("plugin_host.host.package_not_zip")) from exc
         with archive:
             items = archive.infolist()
             if len(items) > MAX_PLUGIN_ARCHIVE_FILES:
-                raise ValueError(f"插件包文件数量不能超过 {MAX_PLUGIN_ARCHIVE_FILES}")
+                raise ValueError(t("plugin_host.host.package_too_many_files", max_plugin_archive_files=MAX_PLUGIN_ARCHIVE_FILES))
             total_unpacked = sum(info.file_size for info in items if not info.is_dir())
             if total_unpacked > MAX_PLUGIN_UNPACKED_BYTES:
-                raise ValueError("插件包解压后不能超过 100 MB")
+                raise ValueError(t("plugin_host.host.package_extracted_too_large"))
             seen_paths: set[str] = set()
             for info in items:
                 name = info.filename.replace("\\", "/")
                 parts = Path(name).parts
                 if not name or Path(name).is_absolute() or any(part == ".." for part in parts):
-                    raise ValueError("插件包包含非法路径")
+                    raise ValueError(t("plugin_host.host.package_path_invalid"))
                 if len(name) > MAX_PLUGIN_PATH_CHARS:
-                    raise ValueError("插件包包含过长路径")
+                    raise ValueError(t("plugin_host.host.package_path_too_long"))
                 normalized = "/".join(parts).casefold()
                 if normalized in seen_paths:
-                    raise ValueError("插件包包含重复路径")
+                    raise ValueError(t("plugin_host.host.package_path_duplicate"))
                 seen_paths.add(normalized)
                 if info.flag_bits & 0x1:
-                    raise ValueError("插件包不能包含加密文件")
+                    raise ValueError(t("plugin_host.host.package_encrypted"))
                 if info.file_size > MAX_PLUGIN_FILE_BYTES:
-                    raise ValueError("插件包单个文件不能超过 25 MB")
+                    raise ValueError(t("plugin_host.host.package_file_too_large"))
                 file_type = (info.external_attr >> 16) & 0o170000
                 if file_type == 0o120000:
-                    raise ValueError("插件包不能包含符号链接")
+                    raise ValueError(t("plugin_host.host.package_symlink"))
                 resolved = (target_dir / name).resolve()
                 PluginHost._ensure_inside(target_dir, resolved)
             archive.extractall(target_dir)
@@ -1463,7 +1464,7 @@ class PluginHost:
         落到根目录，解压即可推到 GitHub。
         """
         if not _ID_RE.fullmatch(plugin_id):
-            raise ValueError("插件 ID 非法")
+            raise ValueError(t("plugin_host.host.plugin_id_invalid"))
         buffer = io.BytesIO()
         seen: set[str] = set()
         total_unpacked = 0
@@ -1472,28 +1473,28 @@ class PluginHost:
                 name = str(rel or "").replace("\\", "/").strip("/")
                 parts = Path(name).parts
                 if not name or Path(name).is_absolute() or any(part == ".." for part in parts):
-                    raise ValueError(f"导出路径非法：{rel}")
+                    raise ValueError(t("plugin_host.host.export_path_invalid", rel=rel))
                 if not flat and parts[0] != plugin_id:
                     name = f"{plugin_id}/{name}"
                     parts = Path(name).parts
                 if len(name) > MAX_PLUGIN_PATH_CHARS:
-                    raise ValueError(f"导出路径过长：{rel}")
+                    raise ValueError(t("plugin_host.host.export_path_too_long", rel=rel))
                 normalized = "/".join(parts).casefold()
                 if normalized in seen:
-                    raise ValueError(f"导出路径重复：{rel}")
+                    raise ValueError(t("plugin_host.host.export_path_duplicate", rel=rel))
                 seen.add(normalized)
                 data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
                 if len(data) > MAX_PLUGIN_FILE_BYTES:
-                    raise ValueError(f"导出单文件过大：{rel}")
+                    raise ValueError(t("plugin_host.host.export_file_too_large", rel=rel))
                 total_unpacked += len(data)
                 if total_unpacked > MAX_PLUGIN_UNPACKED_BYTES:
-                    raise ValueError("导出内容总体积超限")
+                    raise ValueError(t("plugin_host.host.export_total_too_large"))
                 if len(seen) > MAX_PLUGIN_ARCHIVE_FILES:
-                    raise ValueError("导出文件数量超限")
+                    raise ValueError(t("plugin_host.host.export_too_many_files"))
                 archive.writestr(name, data)
         payload = buffer.getvalue()
         if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
-            raise ValueError("导出包体积超限")
+            raise ValueError(t("plugin_host.host.export_package_too_large"))
         return payload
 
     @staticmethod
@@ -1502,9 +1503,9 @@ class PluginHost:
             return temp_dir
         candidates = [path.parent for path in temp_dir.glob("**/plugin.json")]
         if not candidates:
-            raise ValueError("插件包缺少 plugin.json")
+            raise ValueError(t("plugin_host.host.package_manifest_missing"))
         if len(candidates) > 1:
-            raise ValueError("插件包包含多个 plugin.json，请只打包一个插件")
+            raise ValueError(t("plugin_host.host.package_multiple_manifests"))
         return candidates[0]
 
     @staticmethod
@@ -1512,7 +1513,7 @@ class PluginHost:
         root = root.resolve()
         target = target.resolve()
         if target != root and root not in target.parents:
-            raise ValueError("路径越界")
+            raise ValueError(t("plugin_host.host.path_outside"))
 
     @staticmethod
     def _atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -1523,11 +1524,11 @@ class PluginHost:
     @staticmethod
     def _validate_schema(schema: dict[str, Any]) -> None:
         if schema.get("type") != "object" or not isinstance(schema.get("properties"), dict):
-            raise ValueError("配置 Schema 必须是 object")
+            raise ValueError(t("plugin_host.host.config_schema_not_object"))
         for key, field_schema in schema["properties"].items():
             control = (field_schema.get("ui") or {}).get("control")
             if control and control not in _ALLOWED_CONTROLS:
-                raise ValueError(f"字段 {key} 使用不支持的控件 {control}")
+                raise ValueError(t("plugin_host.host.field_control_unsupported", field=key, control=control))
 
     def _status_for_enabled(self, runtime: PluginRuntime) -> str:
         if not runtime.config.get("enabled"):
@@ -1549,7 +1550,7 @@ class PluginHost:
         if command is None and plugin_type in _STATIC_PLUGIN_TYPES:
             return
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
-            raise ValueError(f"{plugin_type} 插件必须提供非空字符串数组 entrypoint")
+            raise ValueError(t("plugin_host.host.entrypoint_required", plugin_type=plugin_type))
 
     @staticmethod
     def _validate_manifest_permissions(manifest: dict[str, Any]) -> None:
@@ -1557,12 +1558,11 @@ class PluginHost:
         if permissions is None:
             permissions = []
         if not isinstance(permissions, list) or not all(isinstance(item, str) and item.strip() for item in permissions):
-            raise ValueError("permissions 必须是字符串数组")
+            raise ValueError(t("plugin_host.host.permissions_not_string_array"))
         unknown = sorted({item.strip() for item in permissions} - set(_ALLOWED_PERMISSIONS))
         if unknown:
             raise ValueError(
-                f"未知插件权限：{', '.join(unknown)}"
-                "（该权限可能来自更新版本的 DiceFrame，请升级后重试）"
+                t("plugin_host.host.permissions_unknown", unknown=', '.join(unknown))
             )
 
     @staticmethod
@@ -1571,7 +1571,7 @@ class PluginHost:
         permissions = set(effective_plugin_permissions(manifest, schema))
         required = plugin_type_descriptor(plugin_type).get("required_permission")
         if required and required not in permissions:
-            raise ValueError(f"{plugin_type} 插件必须声明 {required} 权限")
+            raise ValueError(t("plugin_host.host.permission_required", plugin_type=plugin_type, required=required))
 
     def _plugin_permissions(self, runtime: PluginRuntime) -> list[str]:
         return effective_plugin_permissions(runtime.manifest, runtime.schema)
@@ -1593,23 +1593,23 @@ class PluginHost:
         if field_type == "boolean": return bool(value)
         if field_type == "number":
             number = float(value)
-            if "exclusiveMinimum" in field_schema and number <= float(field_schema["exclusiveMinimum"]): raise ValueError("数值必须大于最小值")
+            if "exclusiveMinimum" in field_schema and number <= float(field_schema["exclusiveMinimum"]): raise ValueError(t("plugin_host.host.value_below_minimum"))
             return number
         if field_type == "integer": return int(value)
         if field_type == "array": return list(dict.fromkeys(str(item).strip() for item in (value if isinstance(value, list) else []) if str(item).strip()))
         text = str(value or "").strip()
-        if field_schema.get("enum") and text not in field_schema["enum"]: raise ValueError("选项无效")
+        if field_schema.get("enum") and text not in field_schema["enum"]: raise ValueError(t("plugin_host.host.option_invalid"))
         return text
 
     @staticmethod
     def _validate_required(schema: dict[str, Any], config: dict[str, Any], secrets_data: dict[str, str]) -> None:
         for key in schema.get("required", []):
             if not config.get(key) and not secrets_data.get(key):
-                raise ValueError(f"缺少必填配置：{key}")
+                raise ValueError(t("plugin_host.host.config_required_missing", field=key))
 
     def _require(self, plugin_id: str) -> PluginRuntime:
         if plugin_id not in self.plugins:
-            raise KeyError(f"插件不存在：{plugin_id}")
+            raise KeyError(t("plugin_host.host.plugin_missing", plugin_id=plugin_id))
         return self.plugins[plugin_id]
 
     def _register_contributions(self, plugin_id: str, runtime: PluginRuntime) -> None:
