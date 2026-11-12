@@ -303,7 +303,9 @@ class Dnd2024AdvancementEngine:
             ("cantrip_refs", "cantrip_count", "cantrips"),
             ("prepared_spell_refs", "prepared_spell_count", "prepared spells"),
         )
-        if class_ref == "class:wizard":
+        # 有法术书的职业才审计法术书数量；"有没有法术书"是内容说的，不是职业名字。
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is not None and policy.source == "spellbook":
             checks = (*checks, ("spellbook_refs", "spellbook_minimum", "spellbook spells"))
 
         missing: list[dict[str, Any]] = []
