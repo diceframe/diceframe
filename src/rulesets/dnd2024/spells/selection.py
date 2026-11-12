@@ -9,6 +9,7 @@ from typing import Any
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog, SpellCatalogError
+from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 
 
 def _class_id(class_ref: str) -> str:
@@ -29,12 +30,15 @@ class Dnd2024SpellSelection:
         snapshot = self.progression.snapshot(class_ref, level)
         tracks = snapshot["tracks"]
         maximum_spell_level = max((int(key) for key in snapshot["spell_slots"]), default=0)
+        # 法术书下限是内容数字（6 本起、每级 +2），不是法师的名字；策略缺省
+        # 即"没有法术书"，非施法职业自然得 0。
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
         return {
             "class_ref": class_ref,
             "level": level,
             "cantrip_count": int(tracks.get("cantrips", 0) or 0),
             "prepared_spell_count": int(tracks.get("prepared_spells", 0) or 0),
-            "spellbook_minimum": 6 + 2 * (level - 1) if class_ref == "class:wizard" else 0,
+            "spellbook_minimum": policy.spellbook_minimum(level) if policy else 0,
             "maximum_spell_level": maximum_spell_level,
             "slot_profile": snapshot["slot_profile"],
             "spell_slots": deepcopy(snapshot["spell_slots"]),
@@ -87,10 +91,11 @@ class Dnd2024SpellSelection:
         )
         errors.extend(prepared_errors)
         spellbook: list[str] = []
-        if class_ref == "class:wizard":
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is not None and policy.source == "spellbook":
             raw_spellbook = refs("spellbook_refs", "spellbook_ids")
             if not isinstance(raw_spellbook, list):
-                errors.append("spellbook_refs are required for a wizard")
+                errors.append("spellbook_refs are required for this class")
             else:
                 spellbook, spellbook_errors = self.catalog.require(
                     raw_spellbook,
@@ -101,7 +106,7 @@ class Dnd2024SpellSelection:
                 )
                 errors.extend(spellbook_errors)
                 if not set(prepared).issubset(spellbook):
-                    errors.append("wizard prepared_spell_refs must be in spellbook_refs")
+                    errors.append("prepared_spell_refs must be in spellbook_refs")
         return {
             "cantrip_refs": cantrips,
             "prepared_spell_refs": prepared,

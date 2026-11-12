@@ -8,6 +8,14 @@
   "hit_die": 10,
   "fixed_hp_per_level": 6,
   "spellcasting_ability": "wis",
+  "preparation_policy": {
+    "source": "class_list",
+    "level_up_replace": 0,
+    "long_rest_replace": 1,
+    "cantrip_swap_on": "none",
+    "spellbook": {"initial": 0, "per_level": 0},
+    "spellbook_gain_per_level": 0
+  },
   "recommended_spell_choices": {
     "cantrip_ids": [],
     "prepared_spell_ids": ["cure_wounds", "ensnaring_strike"]
