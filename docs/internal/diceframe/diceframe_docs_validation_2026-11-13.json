@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "check_count": 18,
+  "task_cards": 31,
+  "source_documents": [
+    "diceframe_implementation_plan_main_2026-11-10.md",
+    "diceframe_ecosystem_plan_2026-11-10.md",
+    "diceframe_missing_requirements_for_6_1_2026-11-11.md",
+    "diceframe_docs_revision_2026-11-11.md"
+  ],
+  "notes": [
+    "The report is a structural and positive-coverage gate; it is not proof that every future runtime or model asset exists.",
+    "The current repository gate is 146 passed and 1 skipped.",
+    "The 2026-11-11 report is historical and is retained only as historical evidence."
+  ]
+}
