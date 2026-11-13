@@ -53,6 +53,19 @@ def _advance_to(
             requirement_id = requirement["id"]
             if requirement_id == "subclass_ref":
                 choices["subclass_ref"] = "subclass:champion"
+            elif requirement.get("kind") == "feature_choice":
+                # 某一级开始必答的特性选项（冠军 7 级的额外战斗风格）。这里按
+                # 需求本身作答，而不是写死哪一级哪个特性：这条链要走到 19 级，
+                # 任何一级新增必答槽都不该让夹具失效。
+                choices.setdefault("feature_choices", []).append({
+                    "owner": requirement["owner"],
+                    "feature_id": requirement["feature_id"],
+                    "choice_id": requirement["choice_id"],
+                    "selected_refs": [
+                        option["value"] for option in requirement["options"]
+                        if option["available"]
+                    ][: int(requirement.get("count", 1) or 1)],
+                })
             elif requirement_id in ("feat_ref", "epic_boon_ref"):
                 choices[requirement_id] = requirement["options"][0]["value"]
             elif requirement_id == "ability_score_increases":
