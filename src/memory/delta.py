@@ -751,8 +751,7 @@ class MemoryStore:
             )
             if not item.get("embedding") or item.get("embedding_profile") != profile:
                 result.append(item)
-                continue
-            if item.get("embedding_content_hash") != current_hash:
+            elif item.get("embedding_content_hash") != current_hash:
                 result.append(item)
             if len(result) >= max(1, int(limit)):
                 break
