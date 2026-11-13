@@ -494,6 +494,8 @@ export const en = {
   embeddingModelStatusInvalid: 'Verification failed',
   embeddingModelDimensions: '{dimension} dims',
   embeddingCatalogEmpty: 'The model catalog is empty or failed to load; refresh the page, or use offline import below.',
+  embeddingCatalogUrlPlaceholder: 'Remote model catalog URL (diceframe-models catalog shard)',
+  embeddingCatalogRefresh: 'Refresh catalog',
   embeddingOfflineImportTitle: 'Offline import (advanced)',
   embeddingOfflineImportHint: 'When downloads are unavailable, place verified manifests and weights under data/models and refresh; hashes are re-verified on load.',
   creatorAiBoundary: 'Boundary: the AI only writes to this project after your approval; publishing and deletion always need manual confirmation. Automated test-and-fix for complex rule code is not fully supported yet.',

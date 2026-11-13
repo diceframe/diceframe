@@ -494,6 +494,8 @@ export const zhCN = {
   embeddingModelStatusInvalid: '校验失败',
   embeddingModelDimensions: '{dimension} 维',
   embeddingCatalogEmpty: '模型目录为空或读取失败；可尝试刷新页面，或使用下方离线导入。',
+  embeddingCatalogUrlPlaceholder: '远端模型目录 URL（如 diceframe-models 的 catalog 分片）',
+  embeddingCatalogRefresh: '刷新目录',
   embeddingOfflineImportTitle: '离线导入（高级）',
   embeddingOfflineImportHint: '无法在线下载时，可把经过校验的 manifest 与权重放入 data/models 目录后刷新本页；文件哈希会被重新校验。',
   creatorAiBoundary: '边界说明：AI 只在你确认后写入当前工程；发布/删除等敏感操作永远需要你手动确认。复杂规则的自动测试修复尚未完全支持。',

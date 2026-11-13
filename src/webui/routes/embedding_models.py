@@ -65,6 +65,24 @@ async def api_embedding_model_uninstall(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def api_embedding_catalog_refresh(request: web.Request) -> web.Response:
+    """W5-2：管理员触发拉取远端模型目录（diceframe-models 分片）。
+
+    远端缓存写入 data/models/remote-catalog.json；读取路径不发网络请求。
+    """
+
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    try:
+        body = await request.json()
+        url = str((body or {}).get("url") or "").strip()
+        result = await _manager(request).refresh_remote_catalog(url)
+    except ModelCatalogError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=422)
+    return web.json_response(result)
+
+
 async def _run_rebuild(app: web.Application) -> None:
     subsystems = app.get("subsystems")
     store = getattr(subsystems, "memory_store", None)
@@ -97,4 +115,5 @@ def register_embedding_models(application: web.Application) -> None:
     application.router.add_get("/api/embedding/models", api_embedding_models)
     application.router.add_post("/api/embedding/models/{model_id}/install", api_embedding_model_install)
     application.router.add_delete("/api/embedding/models/{model_id}", api_embedding_model_uninstall)
+    application.router.add_post("/api/embedding/catalog/refresh", api_embedding_catalog_refresh)
     application.router.add_post("/api/embedding/rebuild", api_embedding_rebuild)

@@ -115,3 +115,57 @@ def test_catalog_projection_includes_download_size(tmp_path):
     }), encoding="utf-8")
     entries = load_catalog(catalog)
     assert entries[0]["files"][0]["size"] == 24010842
+
+
+def _write_remote_shard(path, model_id: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "catalog_version": 1,
+        "models": [{
+            "id": model_id, "kind": "embedding", "backend": "onnxruntime",
+            "version": "0.1.0", "dimension": 384, "license": "apache-2.0",
+            "status": "released",
+            "files": [{"path": "model.onnx",
+                       "url": "https://huggingface.co/demo/model.onnx",
+                       "sha256": "b" * 64, "size": 10}],
+        }],
+    }), encoding="utf-8")
+
+
+def test_remote_catalog_cache_merges_new_ids_only(tmp_path):
+    """远端缓存只补充本地没有的 id，不覆盖本地声明（W5-2 合并策略）。"""
+    from src.memory.model_catalog import LocalModelManager
+
+    models_dir = tmp_path / "models"
+    _write_remote_shard(models_dir / "remote-catalog.json", "remote-model")
+    manager = LocalModelManager(models_dir)
+    ids = [entry["id"] for entry in manager._catalog_entries()]
+    # 内置默认 catalog 的 bge 在前，远端补充在后。
+    assert ids[0] == "bge-small-zh-v1.5"
+    assert "remote-model" in ids
+    # 同 id 不重复。
+    assert len(ids) == len(set(ids))
+
+
+def test_candidate_entries_are_not_installable(tmp_path):
+    from src.memory.model_catalog import LocalModelManager, ModelCatalogError
+
+    models_dir = tmp_path / "models"
+    shard = models_dir / "remote-catalog.json"
+    _write_remote_shard(shard, "candidate-model")
+    raw = json.loads(shard.read_text(encoding="utf-8"))
+    raw["models"][0]["status"] = "candidate"
+    shard.write_text(json.dumps(raw), encoding="utf-8")
+    manager = LocalModelManager(models_dir)
+    import asyncio
+    with pytest.raises(ModelCatalogError, match="candidate"):
+        asyncio.run(manager.install("candidate-model"))
+
+
+def test_refresh_rejects_non_https_url(tmp_path):
+    from src.memory.model_catalog import LocalModelManager, ModelCatalogError
+
+    manager = LocalModelManager(tmp_path / "models")
+    import asyncio
+    with pytest.raises(ModelCatalogError, match="https"):
+        asyncio.run(manager.refresh_remote_catalog("http://evil.example/catalog.json"))

@@ -207,6 +207,19 @@ async function uninstallLocalModel(modelId: string) {
     localModelError.value = errorMessage(error)
   } finally { uninstallingLocalModel.value = '' }
 }
+// W5-2：远端模型目录刷新（diceframe-models 的 loader 分片 URL）。
+const remoteCatalogUrl = ref('')
+const refreshCatalogBusy = ref(false)
+async function refreshRemoteCatalog() {
+  if (refreshCatalogBusy.value) return
+  refreshCatalogBusy.value = true; localModelError.value = ''
+  try {
+    await api('/embedding/catalog/refresh', { method: 'POST', body: JSON.stringify({ url: remoteCatalogUrl.value.trim() }) })
+    await store.load()
+  } catch (error: unknown) {
+    localModelError.value = errorMessage(error)
+  } finally { refreshCatalogBusy.value = false }
+}
 async function rebuildEmbeddings() {
   if (rebuildBusy.value) return
   rebuildBusy.value = true
@@ -279,6 +292,10 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
             <template v-if="embeddingSource === 'local'">
               <label><span>{{ locale === 'zh-CN' ? '启用的本地模型' : 'Enabled local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
               <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ t('embeddingModelPickHint') }}</p>
+              <div class="local-model-catalog-refresh">
+                <NInput v-model:value="remoteCatalogUrl" size="small" :placeholder="t('embeddingCatalogUrlPlaceholder')" data-testid="embedding-catalog-url" />
+                <NButton size="tiny" secondary :loading="refreshCatalogBusy" data-testid="embedding-catalog-refresh" @click="refreshRemoteCatalog">{{ t('embeddingCatalogRefresh') }}</NButton>
+              </div>
               <div class="local-model-cards" data-testid="embedding-model-cards">
                 <div v-for="model in localCatalogAll" :key="model.id" class="local-model-card" :data-testid="`local-model-${model.id}`">
                   <div class="local-model-card-main">
@@ -416,6 +433,8 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
 .local-model-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .local-model-advanced { color: var(--df-text-muted); font-size: .78rem; }
 .local-model-advanced summary { cursor: pointer; }
+.local-model-catalog-refresh { display: flex; gap: .4rem; margin-top: .4rem; }
+.local-model-catalog-refresh .n-input { flex: 1; min-width: 0; }
 .local-model-catalog button { padding: 4px 7px; border: 1px solid var(--df-border-soft); border-radius: 6px; }
 .imagegen-style-field :deep(.n-input),
 .imagegen-style-field :deep(textarea) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
