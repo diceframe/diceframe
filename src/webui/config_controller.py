@@ -586,6 +586,10 @@ class ConfigController:
     async def test_embedding(self, request: web.Request) -> web.Response:
         body = await request.json()
         state = self.dependencies.state
+        # 2026-11-12 计划 §5：按来源分流测试。本地来源此前没有测试路径——
+        # embedding_provider_ref 为空导致必然报「Base URL 非法或不允许」。
+        if str(state.get("embedding_source") or "external") == "local":
+            return await self._test_embedding_local(request)
         provider = resolve_provider(state, str(body.get("provider_id") or ""))
         if provider:
             base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
@@ -632,6 +636,49 @@ class ConfigController:
             )
         finally:
             await client.close()
+
+    async def _test_embedding_local(self, request: web.Request) -> web.Response:
+        """本地来源的向量测试：真实加载 ONNX 并跑一次推理，回报维数与耗时。"""
+
+        state = self.dependencies.state
+        model_id = str(state.get("embedding_local_model_id") or "").strip()
+        if not model_id:
+            return web.json_response(
+                {"ok": False, "source": "local", "error": "请先选择要测试的本地模型"},
+            )
+        subsystems = request.app.get("subsystems")
+        memory_store = getattr(subsystems, "memory_store", None)
+        models_dir = (
+            Path(memory_store.db_path).parent / "models"
+            if memory_store is not None else Path("data") / "models"
+        )
+        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
+
+        start = time.time()
+        try:
+            backend = LocalOnnxEmbeddingBackend(models_dir, model_id)
+        except LocalModelError as exc:
+            return web.json_response(
+                {"ok": False, "source": "local", "error": f"本地模型加载失败：{exc}"},
+            )
+        try:
+            embedding = await backend.embed("测试")
+            elapsed = round(time.time() - start, 2)
+            if embedding and len(embedding) > 0:
+                return web.json_response(
+                    {
+                        "ok": True,
+                        "source": "local",
+                        "model": model_id,
+                        "dimension": len(embedding),
+                        "elapsed": elapsed,
+                    }
+                )
+            return web.json_response(
+                {"ok": False, "source": "local", "error": "本地模型返回异常", "elapsed": elapsed},
+            )
+        finally:
+            await backend.close()
 
     async def test_proxy(self, request: web.Request) -> web.Response:
         body = await request.json()
