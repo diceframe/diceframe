@@ -41,6 +41,12 @@ async def api_rules(request: web.Request) -> web.Response:
         )
 
 
+async def api_gameplays(request: web.Request) -> web.Response:
+    """W2：玩法模式清单（只读），供「规则与玩法」页展示接线状态。"""
+
+    return web.json_response(_get_api(request).list_gameplays())
+
+
 async def api_rule_create(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
@@ -189,6 +195,7 @@ async def api_rule_delete(request: web.Request) -> web.Response:
 
 def register_rules(app: web.Application) -> None:
     app.router.add_get("/api/rules", api_rules)
+    app.router.add_get("/api/gameplays", api_gameplays)
     app.router.add_post("/api/rules", api_rule_create)
     app.router.add_get("/api/rules/{rule_id}/character-schema", api_rule_character_schema)
     app.router.add_get("/api/rules/{rule_id}/experience", api_ruleset_experience)

@@ -1168,6 +1168,25 @@ class WebAPI:
 
     # ---- 规则辅助 ----
 
+    def list_gameplays(self) -> dict[str, Any]:
+        """W2「规则与玩法」页：玩法模式只读投影（不暴露 provider 实现）。"""
+
+        registry = self._gameplay_providers
+        rows: list[dict[str, Any]] = []
+        for mode_id in sorted(registry.gameplays.mode_ids()):
+            mode = registry.gameplays.get(mode_id)
+            if mode is None:
+                continue
+            rows.append({
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                # fail closed 可见性：接线不完整的玩法如实标注，不冒充可用。
+                "provider_registered": registry.get(mode_id) is not None,
+                "turn_driver_bound": registry.driver_for(mode_id) is not None,
+            })
+        return {"ok": True, "gameplays": rows}
+
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)
 
