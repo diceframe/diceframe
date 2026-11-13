@@ -8,6 +8,14 @@
   "hit_die": 6,
   "fixed_hp_per_level": 4,
   "spellcasting_ability": "int",
+  "preparation_policy": {
+    "source": "spellbook",
+    "level_up_replace": 0,
+    "long_rest_replace": "any",
+    "cantrip_swap_on": "long_rest",
+    "spellbook": {"initial": 6, "per_level": 2},
+    "spellbook_gain_per_level": 2
+  },
   "recommended_spell_choices": {
     "cantrip_ids": ["light", "mage_hand", "ray_of_frost"],
     "spellbook_ids": ["detect_magic", "feather_fall", "mage_armor", "magic_missile", "sleep", "thunderwave"],

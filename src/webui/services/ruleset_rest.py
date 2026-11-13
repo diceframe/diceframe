@@ -96,6 +96,44 @@ def _rest_options(runtime: Any, parsed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def prepared_spell_options(
+    dependencies: LiveRulesetRestDependencies,
+    game_key: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Read-only preparation candidates for one seat's rest panel.
+
+    A ruleset that does not implement the read (or a non-caster) still answers
+    with ``ok: True`` and an empty policy: "this character has nothing to
+    prepare" is not an error, and the panel needs to render that state rather
+    than a failure banner.
+    """
+
+    instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
+    if instance is None:
+        return _failure("GAME_NOT_FOUND", "游戏不存在")
+    if user_id not in instance.players:
+        return _failure("CHARACTER_NOT_FOUND", "角色不存在")
+    rule = dependencies.load_rule_for_game(instance)
+    if rule is None:
+        return _failure("RULE_NOT_FOUND", "当前游戏规则不存在")
+    try:
+        runtime = dependencies.ruleset_registry.resolve(rule.template)
+    except (AttributeError, TypeError, ValueError) as exc:
+        return _failure("RULESET_RUNTIME_UNAVAILABLE", str(exc))
+    method = getattr(runtime, "prepared_spell_options", None)
+    if not callable(method):
+        return {
+            "ok": True, "spells": {
+                "policy": None, "prepared_capacity": 0, "prepared_spell_refs": [],
+                "spellbook_refs": [], "cantrip_capacity": 0, "cantrip_refs": [],
+                "cantrips": [], "leveled_spells": [],
+            },
+        }
+    character = instance.get_character_sheet(user_id)
+    return {"ok": True, "spells": method(rule, character)}
+
+
 async def submit_live(
     dependencies: LiveRulesetRestDependencies,
     game_key: str,

@@ -134,8 +134,11 @@ const OPERATION_FIELD_WHITELIST: Record<PeerGameOperation, readonly string[]> = 
     'rest', 'hit_dice', 'confirm_elapsed_time', 'expected_revision', 'operation_id',
     // 同调选择属于角色自己的短休/长休声明；容量与引用合法性仍由服务端校验。
     'attunement',
+    // 长休结束时重排准备法术；职业策略与替换上限同样由服务端校验。
+    'prepared_spells',
   ],
   'character.advancement.preview': ['choices'],
+  'character.spells': [],
   'character.advancement.apply': ['choices', 'expected_revision', 'operation_id'],
 }
 
@@ -385,6 +388,10 @@ export class PeerHostGameBridge {
     if (operation === 'character.rest') {
       return write(`/character/${encodeURIComponent(actorId)}/rest`, payload)
     }
+    if (operation === 'character.spells') {
+      // 只读：actor 来自 peer 绑定，客户端不能借路径参数读别人的卡。
+      return read(`/character/${encodeURIComponent(actorId)}/spells`)
+    }
     if (operation === 'character.advancement.preview') {
       return write(`/character/${encodeURIComponent(actorId)}/advancement/preview`, payload)
     }
@@ -485,6 +492,7 @@ export class PeerRemoteGameClient {
       const decision = /^\/decisions\/([^/]+)$/u.exec(parsed.tail)
       const profile = /^\/character\/([^/]+)\/profile$/u.exec(parsed.tail)
       const rest = /^\/character\/([^/]+)\/rest$/u.exec(parsed.tail)
+      const spells = /^\/character\/([^/]+)\/spells$/u.exec(parsed.tail)
       const advancement = /^\/character\/([^/]+)\/advancement\/(preview|apply)$/u.exec(parsed.tail)
       const roll = /^\/roll-requests\/([^/]+)\/roll$/u.exec(parsed.tail)
       const checkMode = /^\/check-modes\/seats\/([^/]+)\/request$/u.exec(parsed.tail)
@@ -511,6 +519,10 @@ export class PeerRemoteGameClient {
         payload = { ...body, decision_id: decodeURIComponent(decision[1]) }
       } else if (method === 'PATCH' && profile) {
         operation = 'character.profile'
+      } else if (method === 'GET' && spells) {
+        // 升级面板要读 policy 与候选法术；读的是自己那张卡，host 侧只用
+        // 绑定身份，路径里的 uid 不参与授权判定。
+        operation = 'character.spells'
       } else if (method === 'POST' && rest) {
         operation = 'character.rest'
       } else if (method === 'POST' && advancement?.[2] === 'preview') {

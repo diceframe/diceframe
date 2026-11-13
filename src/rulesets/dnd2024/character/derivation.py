@@ -35,10 +35,24 @@ def _bound_refs(refs: Collection[str]) -> set[str]:
 PLAIN_SHIELD_AC_BONUS = 2
 
 
-def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
-    """The minimal canonical shape ``features_for`` needs to resolve ownership."""
+def _feature_proxy(
+    class_ref: str, level: int, feature_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The minimal canonical shape ``features_for`` needs to resolve ownership.
 
-    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
+    Subclass features are owned only through a persisted selection, so the
+    proxy carries ``subclass_ref`` when the caller has one.  A draft built at
+    level 1 has none and correctly owns no subclass feature.
+    """
+
+    proxy: dict[str, Any] = {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+    }
+    if isinstance(feature_state, Mapping):
+        subclass_ref = feature_state.get("subclass_ref")
+        if isinstance(subclass_ref, str) and subclass_ref:
+            proxy["features"] = {"subclass_ref": subclass_ref}
+    return proxy
 
 
 def derive_armor_class(
@@ -276,7 +290,9 @@ class CharacterDerivationMixin:
             # 建卡阶段仍要求装备包里每个引用都真实存在（validation 已保证）。
             self._required_entity(ref, "item")
         features = Dnd2024ClassFeatureResolver(self.bundle)
-        feature_proxy = _feature_proxy(draft["class_ref"], level)
+        feature_proxy = _feature_proxy(
+            draft["class_ref"], level, draft.get("features"),
+        )
         armor_category_refs = [
             f"armor_category:{item}"
             for item in class_entity.get("armor_proficiencies", [])

@@ -31,6 +31,7 @@ export type PeerGameOperation =
   | 'character.update'
   | 'character.profile'
   | 'character.rest'
+  | 'character.spells'
   | 'character.advancement.preview'
   | 'character.advancement.apply'
 
@@ -64,6 +65,7 @@ const GAME_OPERATIONS = new Set<PeerGameOperation>([
   'character.update',
   'character.profile',
   'character.rest',
+  'character.spells',
   'character.advancement.preview',
   'character.advancement.apply',
 ])
