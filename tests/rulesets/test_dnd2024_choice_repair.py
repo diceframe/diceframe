@@ -74,6 +74,78 @@ def _missing_ids(engine: Dnd2024AdvancementEngine, character: dict) -> set[str]:
     return {row["id"] for row in engine.missing_choices(character)}
 
 
+def _drop_increase(character: dict, level: int) -> dict:
+    """Undo one level's ability answer, as if the player never made it.
+
+    属性、账本条目、history 的 choices 三处一起退，才是一次真正的"没选"：
+    只退其中一处，补齐时读到的是自相矛盾的卡。
+    """
+
+    damaged = deepcopy(character)
+    for entry in damaged["progression"]["history"]:
+        if int(entry["to_level"]) == level:
+            entry["choices"].pop("ability_score_increases", None)
+            entry["choices"].pop("feat_ref", None)
+            entry["choices"].pop("epic_boon_ref", None)
+            entry["diff"].pop("advancement_feat_ref", None)
+    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        record for record in damaged["progression"][ADVANCEMENT_RECORDS_KEY]
+        if int(record["level"]) != level
+    ]
+    damaged["abilities"]["con"] -= 2
+    return damaged
+
+
+def _forge_to(
+    character: dict, target: int, increases_at: dict[int, dict],
+    feature_choices_at: dict[int, list[dict]] | None = None,
+) -> dict:
+    """Push a real card up to ``target`` without playing every level.
+
+    补齐的测试需要"早就到了这个等级、但某一级没答"的卡。history 必须连续，
+    因为重放逐级走它；伪造一张有洞的 history 只会测出一个永远过不了重放的
+    卡，而不是补齐的缺点。
+
+    ``feature_choices_at`` 是某一级开始必答的特性选项（冠军 7 级的额外战斗
+    风格）。不回答，伪造的卡本身就不合法，测出来的只是夹具的洞。今天这张卡
+    的目录里还没有那个槽，答案因此是惰性的；等槽随 S0-B 进了目录，这份夹具
+    不用再改一次。
+    """
+
+    forged = deepcopy(character)
+    forged["build"]["level"] = target
+    forged["build"]["class_levels"][0]["level"] = target
+    forged["progression"]["level"] = target
+
+    class_ref = str(forged["build"]["class_levels"][0]["class_ref"])
+    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
+        {"level": level, "class_ref": class_ref} for level in range(2, target + 1)
+    ]
+    history = [
+        entry for entry in forged["progression"]["history"]
+        if int(entry["to_level"]) <= target
+    ]
+    seen = {int(entry["to_level"]) for entry in history}
+    for level in range(2, target + 1):
+        if level in seen:
+            continue
+        choices: dict = {}
+        if level in increases_at:
+            choices["ability_score_increases"] = dict(increases_at[level])
+        if feature_choices_at and level in feature_choices_at:
+            choices["feature_choices"] = deepcopy(feature_choices_at[level])
+        history.append({
+            "from_level": level - 1,
+            "to_level": level,
+            "choices": choices,
+            "diff": {},
+            "source_ref": "test:fixture",
+        })
+    history.sort(key=lambda entry: int(entry["to_level"]))
+    forged["progression"]["history"] = history
+    return forged
+
+
 def _sorcerer_draft(runtime: Dnd2024Runtime) -> dict:
     choices = runtime.builder_choices(None, {
         "locale": LOCALE,
@@ -384,6 +456,134 @@ def test_repair_writes_the_ledger_entry_it_filled() -> None:
     assert [record["level"] for record in records] == sorted(
         record["level"] for record in records
     )
+
+    # 账本管审计，history 管重放：同一件事得写两份，缺哪份都是一种失败。
+    history = repaired["progression"]["history"]
+    entry = next(item for item in history if item["to_level"] == 3)
+    assert entry["choices"]["subclass_ref"] == CHAMPION
+
+
+def _round_trip(runtime: Dnd2024Runtime, character: dict) -> dict:
+    normalized = runtime.normalize_character_submission(
+        None, {"ruleset_character": character}, LOCALE,
+    )
+    return normalized["ruleset_character"]
+
+
+def test_a_repaired_ability_increase_replays_like_a_real_level_up() -> None:
+    """补齐写进 history 的 ASI 必须能被重放读出来。
+
+    只写账本时，审计这一侧干净了，``normalize_character_submission`` 那一侧
+    仍然把这一级看作没答：补齐返回成功，卡却过不了创建/加入。
+    """
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _advance_to(engine, _fighter(runtime), 5)
+    damaged = _drop_increase(five, 4)
+
+    repaired = engine.repair_choices(damaged, {
+        "advancements": [{"level": 4, "ability_score_increases": {"con": 2}}],
+    })
+
+    entry = next(
+        item for item in repaired["progression"]["history"] if item["to_level"] == 4
+    )
+    assert entry["choices"]["ability_score_increases"] == {"con": 2}
+
+    inner = _round_trip(runtime, repaired)
+    assert inner["build"]["level"] == 5
+    assert inner["abilities"]["con"] == five["abilities"]["con"]
+
+
+def test_a_repaired_feat_replays_like_a_real_level_up() -> None:
+    """专长补齐同理：重放读 ``choices``，不读 ``diff``。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _advance_to(engine, _fighter(runtime), 5)
+    damaged = _drop_increase(five, 4)
+
+    repaired = engine.repair_choices(damaged, {
+        "advancements": [{
+            "level": 4,
+            "feat_ref": "feat:grappler",
+            "ability_score_increases": {"dex": 1},
+        }],
+    })
+
+    entry = next(
+        item for item in repaired["progression"]["history"] if item["to_level"] == 4
+    )
+    assert entry["choices"]["feat_ref"] == "feat:grappler"
+    assert entry["choices"]["ability_score_increases"] == {"dex": 1}
+
+    inner = _round_trip(runtime, repaired)
+    assert inner["build"]["level"] == 5
+    assert "feat:grappler" in inner["features"]["feat_refs"]
+
+
+def test_a_repaired_epic_boon_replays_like_a_real_level_up() -> None:
+    """Epic Boon 走的是 ``epic_boon_ref`` 而不是 ``feat_ref``，两边都得写对。"""
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    four = _advance_to(engine, _fighter(runtime), 4)
+    forged = _forge_to(four, 19, {
+        6: {"dex": 2}, 8: {"wis": 2}, 12: {"int": 2},
+        14: {"cha": 2}, 16: {"str": 1, "dex": 1},
+    }, feature_choices_at={7: [{
+        "owner": CHAMPION,
+        "feature_id": "additional_fighting_style",
+        "choice_id": "fighting_style_feat",
+        "selected_refs": ["feat:archery"],
+    }]})
+    assert "epic_boon_ref" in _missing_ids(engine, forged)
+
+    repaired = engine.repair_choices(forged, {
+        "advancements": [{
+            "level": 19,
+            "epic_boon_ref": "feat:boon_of_combat_prowess",
+            "ability_score_increases": {"str": 1},
+        }],
+    })
+
+    entry = next(
+        item for item in repaired["progression"]["history"] if item["to_level"] == 19
+    )
+    assert entry["choices"]["epic_boon_ref"] == "feat:boon_of_combat_prowess"
+    assert "feat_ref" not in entry["choices"]
+
+    inner = _round_trip(runtime, repaired)
+    assert inner["build"]["level"] == 19
+    assert "feat:boon_of_combat_prowess" in inner["features"]["feat_refs"]
+
+
+def test_repair_refuses_to_invent_a_history_entry_out_of_order() -> None:
+    """history 缺中间一层时整单拒绝，而不是补出一张过不了重放的卡。
+
+    这一级没有条目、又不是接在末尾，说明这张卡的 history 本身有洞。补一个
+    条目进去等于替角色凭空走一步；不补则重放照样拒绝。两种都不可接受，所以
+    在动数据之前就拒绝，并说清是哪一级。
+    """
+
+    runtime = Dnd2024Runtime()
+    engine = _engine(runtime)
+    five = _advance_to(engine, _fighter(runtime), 5)
+    damaged = _drop_increase(five, 4)
+    damaged["progression"]["history"] = [
+        entry for entry in damaged["progression"]["history"]
+        if int(entry["to_level"]) != 4
+    ]
+    con_before = damaged["abilities"]["con"]
+
+    with pytest.raises(ProgressionCatalogError) as caught:
+        engine.repair_choices(damaged, {
+            "advancements": [{"level": 4, "ability_score_increases": {"con": 2}}],
+        })
+
+    assert "no entry for level 4" in str(caught.value)
+    assert damaged["abilities"]["con"] == con_before
 
 
 # --------------------------------------------------------------------------

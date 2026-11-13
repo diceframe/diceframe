@@ -780,6 +780,13 @@ class Dnd2024AdvancementEngine:
 
         grant_level = self._pending_subclass_level(feature_state, level, subclass)
         records: list[Any] | None = self._advancement_records(character)
+        # 账本与 history 是两件东西，回答的是两个问题：账本给缺项审计看，
+        # history 给重放看。只写账本会让补齐"成功"返回一张过不了创建/加入
+        # 边界的卡——审计已经清了，重放仍然认为这一级什么都没选。
+        progression = character.get("progression")
+        progression = progression if isinstance(progression, dict) else {}
+        history = progression.get("history")
+        history = history if isinstance(history, list) else None
         repaired_anything = False
 
         chosen_subclass = repairs.get("subclass_ref")
@@ -798,6 +805,8 @@ class Dnd2024AdvancementEngine:
                         "class_ref": class_ref,
                         "subclass_ref": value,
                     })
+                if history is not None and grant_level is not None:
+                    self._merge_history_choice(history, grant_level, subclass_ref=value)
 
         for entry in advancement_repairs:
             if not isinstance(entry, dict):
@@ -828,6 +837,13 @@ class Dnd2024AdvancementEngine:
             for ability, points in increases.items():
                 abilities[ability] = int(abilities.get(ability, 0) or 0) + int(points)
             repaired_anything = True
+            epic = "epic_boon" in snapshot["gained_feature_ids"]
+            # 专长是角色的事实，不是账本的事实：补上一张不带账本的旧卡时，
+            # 它照样得进 feat_refs，否则账本说什么都只是内部记录。
+            if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
+                owned = features.setdefault("feat_refs", [])
+                if feat_ref not in owned:
+                    owned.append(feat_ref)
             if records is not None:
                 record: dict[str, Any] = {
                     "level": raw_level, "class_ref": class_ref,
@@ -835,12 +851,16 @@ class Dnd2024AdvancementEngine:
                 if increases:
                     record["ability_score_increase"] = dict(increases)
                 if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
-                    epic = "epic_boon" in snapshot["gained_feature_ids"]
                     record["epic_boon_ref" if epic else "feat_ref"] = feat_ref
-                    owned = features.setdefault("feat_refs", [])
-                    if feat_ref not in owned:
-                        owned.append(feat_ref)
                 self._merge_advancement_record(records, record)
+            if history is not None:
+                self._merge_history_choice(
+                    history,
+                    raw_level,
+                    increases=dict(increases) if increases else None,
+                    feat_ref=feat_ref,
+                    epic=epic,
+                )
 
         if not errors and not repaired_anything:
             # A repair that fills nothing is a caller bug, not a success: the
@@ -891,6 +911,81 @@ class Dnd2024AdvancementEngine:
                 return
         records.append(record)
         records.sort(key=lambda row: int(row.get("level", 0) or 0))
+
+    @staticmethod
+    def _merge_history_choice(
+        history: list[Any],
+        level: int,
+        *,
+        subclass_ref: str = "",
+        increases: dict[str, int] | None = None,
+        feat_ref: str = "",
+        epic: bool = False,
+    ) -> None:
+        """Write a repaired choice back into the level's history entry.
+
+        Replay reads ``choices``, so a repair that only touched ``features`` or
+        ``abilities`` returns a card that cannot be imported: ``normalize_
+        character_submission`` walks the history through level-up, and a level
+        whose entry is blank still looks unanswered there.
+
+        A level with no entry can only be filled when it continues the chain.
+        Inserting one in the middle would invent a step the character never
+        took, which is a different thing from repairing a step it took without
+        answering.
+        """
+
+        target: dict[str, Any] | None = None
+        for item in history:
+            if isinstance(item, dict) and int(item.get("to_level", 0) or 0) == level:
+                target = item
+                break
+        if target is None:
+            last = max(
+                (int(item.get("to_level", 0) or 0) for item in history if isinstance(item, dict)),
+                default=0,
+            )
+            if level != last + 1:
+                raise ProgressionCatalogError(
+                    f"progression.history has no entry for level {level} and "
+                    "cannot record a repair out of order"
+                )
+            target = {
+                "from_level": level - 1,
+                "to_level": level,
+                "choices": {},
+                "diff": {},
+                "source_ref": "",
+            }
+            history.append(target)
+
+        choices = target.setdefault("choices", {})
+        if not isinstance(choices, dict):
+            raise ProgressionCatalogError(
+                "progression.history entry choices must be an object"
+            )
+        if subclass_ref:
+            choices["subclass_ref"] = subclass_ref
+        if increases:
+            merged = choices.get("ability_score_increases")
+            merged = dict(merged) if isinstance(merged, dict) else {}
+            for ability, points in increases.items():
+                merged[ability] = int(merged.get(ability, 0) or 0) + int(points)
+            choices["ability_score_increases"] = merged
+        if feat_ref:
+            diff = target.setdefault("diff", {})
+            if not isinstance(diff, dict):
+                raise ProgressionCatalogError(
+                    "progression.history entry diff must be an object"
+                )
+            diff["advancement_feat_ref"] = feat_ref
+            # Replay reads `choices`, not `diff`: normalize_character_submission
+            # walks the history through apply_next_level, which asks the feat
+            # for its ability split. A repair that only wrote `diff` produced a
+            # card that could never be imported -- the level looked like a plain
+            # ability increase and then failed "must total exactly 2".
+            if feat_ref != PLAIN_ABILITY_FEAT_REF:
+                choices["epic_boon_ref" if epic else "feat_ref"] = feat_ref
 
     def _single_class_state(self, character: dict[str, Any]) -> tuple[str, int]:
         binding = character.get("rule_binding")
