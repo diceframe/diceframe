@@ -1040,6 +1040,10 @@ class PluginHost:
                 "backup": str(backup_dir),
                 "phase": "prepared",
                 "was_running": was_running,
+                # receipt 重建数据：commit 后中断时恢复逻辑据此补写 install.json。
+                "manifest": dict(runtime.manifest),
+                "artifact_hash": hashlib.sha256(payload).hexdigest(),
+                "source": "zip",
             }
             self._write_install_journal(journal, append=True)
             shutil.copytree(source_dir, staging_dir)
@@ -1059,7 +1063,8 @@ class PluginHost:
                 self._write_install_journal(journal)
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
-                self._remove_install_journal(plugin_id)
+                # journal 在 receipt 持久化之后才删除（见下方 with 块外），
+                # 避免 commit 后中断留下 published-but-no-receipt 状态。
             except Exception:
                 if target_dir.exists() and not (target_dir / "plugin.json").exists():
                     shutil.rmtree(target_dir, ignore_errors=True)
@@ -1080,6 +1085,9 @@ class PluginHost:
             artifact_hash=hashlib.sha256(payload).hexdigest(),
             source="zip",
         )
+        # receipt 已持久化，事务 journal 才能安全移除；恢复路径
+        # (_recover_install_journal) 会在 commit 后中断时补写缺失 receipt。
+        self._remove_install_journal(plugin_id)
         # A replacement can legitimately have a different manifest digest.
         # The first discover happens before the new receipt is persisted, so
         # it conservatively marks the live runtime failed.  Re-discover after
@@ -1144,10 +1152,22 @@ class PluginHost:
                         "staging": str(staging),
                         "backup": str(backup),
                     })
-                self._write_group_install_journal({
+                receipt_records: list[dict[str, Any]] = [
+                    {
+                        "plugin_id": plugin_id,
+                        "manifest": manifest,
+                        "artifact_hash": hashlib.sha256(payload).hexdigest(),
+                        "source": "group-zip",
+                    }
+                    for plugin_id, _source_dir, manifest, payload in staged_sources
+                ]
+                journal_record: dict[str, Any] = {
                     "schema_version": 1, "group_id": group_id,
-                    "phase": "staged", "entries": entries, "published": [],
-                })
+                    "entries": entries, "published": [],
+                    "receipts": receipt_records,
+                }
+                # journal 携带 receipt 重建数据：commit 后中断时恢复逻辑可补写。
+                self._write_group_install_journal({**journal_record, "phase": "staged"})
                 for entry in entries:
                     plugin_id = str(entry["plugin_id"])
                     target = Path(entry["target"])
@@ -1156,27 +1176,31 @@ class PluginHost:
                         if was_running.get(plugin_id):
                             await self.stop(plugin_id, keep_enabled=True)
                         await _rename_dir_with_retry(target, backup)
-                self._write_group_install_journal({
-                    "schema_version": 1, "group_id": group_id,
-                    "phase": "backup_moved", "entries": entries, "published": [],
-                })
+                self._write_group_install_journal({**journal_record, "phase": "backup_moved"})
                 published: list[str] = []
                 for entry in entries:
                     await _rename_dir_with_retry(Path(entry["staging"]), Path(entry["target"]))
                     published.append(str(entry["plugin_id"]))
                     self._write_group_install_journal({
-                        "schema_version": 1, "group_id": group_id,
-                        "phase": "publishing", "entries": entries,
-                        "published": published,
+                        **journal_record, "phase": "publishing", "published": published,
                     })
                 self._write_group_install_journal({
-                    "schema_version": 1, "group_id": group_id,
-                    "phase": "published", "entries": entries, "published": published,
+                    **journal_record, "phase": "published", "published": published,
                 })
                 for entry in entries:
                     backup = Path(entry["backup"])
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                # receipt 必须在事务 journal 删除前持久化；进程在 commit 后
+                # 中断时，_recover_group_install_journal 会按 journal 补写缺失
+                # 的 receipt，避免出现 published-but-no-receipt 的不可自愈状态。
+                self.discover()
+                for record in receipt_records:
+                    self._save_install_receipt(
+                        str(record["plugin_id"]), record["manifest"],
+                        artifact_hash=str(record["artifact_hash"]),
+                        source=str(record["source"]),
+                    )
                 self._group_install_journal_path.unlink(missing_ok=True)
         except Exception:
             # Leave the journal for the next discover to perform the same
@@ -1186,12 +1210,6 @@ class PluginHost:
             self.discover()
             raise
 
-        self.discover()
-        for plugin_id, _source, manifest, payload in staged_sources:
-            self._save_install_receipt(
-                plugin_id, manifest,
-                artifact_hash=hashlib.sha256(payload).hexdigest(), source="group-zip",
-            )
         self.discover()
         for plugin_id, running in was_running.items():
             if running:
@@ -1256,6 +1274,9 @@ class PluginHost:
                         shutil.rmtree(staging, ignore_errors=True)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                    # Commit 后中断：补写缺失的安装 receipt（journal 记录
+                    # 自身携带 manifest/artifact_hash/source 重建数据）。
+                    self._backfill_install_receipt(plugin_id, record, target)
                     continue
                 # Otherwise restore the previous package if the process died
                 # after moving it aside. Never promote an uncommitted staging
@@ -1299,6 +1320,12 @@ class PluginHost:
             } if isinstance(record, dict) else set()
             if not isinstance(entries, list):
                 raise ValueError("group journal entries are invalid")
+            receipts_by_id: dict[str, dict[str, Any]] = {}
+            journal_receipts = record.get("receipts")
+            if isinstance(journal_receipts, list):
+                for journal_receipt in journal_receipts:
+                    if isinstance(journal_receipt, dict):
+                        receipts_by_id[str(journal_receipt.get("plugin_id") or "")] = journal_receipt
             for entry in entries:
                 if not isinstance(entry, dict):
                     raise ValueError("group journal entry is invalid")
@@ -1313,6 +1340,13 @@ class PluginHost:
                         shutil.rmtree(staging, ignore_errors=True)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                    # Commit 后中断：补写缺失的安装 receipt，保证重启后
+                    # marketplace 身份校验与覆盖安装仍有依据。
+                    self._backfill_install_receipt(
+                        str(entry.get("plugin_id") or ""),
+                        receipts_by_id.get(str(entry.get("plugin_id") or "")),
+                        target,
+                    )
                     continue
                 # No commit marker means the group is not atomic. Restore every
                 # old target and discard all candidate staging directories.
@@ -1953,6 +1987,31 @@ class PluginHost:
         except (OSError, json.JSONDecodeError):
             return {}
         return loaded if isinstance(loaded, dict) else {}
+
+    def _backfill_install_receipt(
+        self,
+        plugin_id: str,
+        receipt: dict[str, Any] | None,
+        target: Path,
+    ) -> None:
+        """事务 commit 后中断时，按 journal 数据补写缺失的安装 receipt。
+
+        仅在 receipt 缺失且目标包确实存在时写入；写入失败会向上抛出，
+        由恢复逻辑保留 journal 以便下次重启重试（fail closed）。
+        """
+        if not plugin_id or receipt is None:
+            return
+        receipt_path = self.data_dir / plugin_id / "install.json"
+        if receipt_path.exists() or not target.is_dir():
+            return
+        manifest = receipt.get("manifest")
+        if not isinstance(manifest, dict):
+            return
+        self._save_install_receipt(
+            plugin_id, manifest,
+            artifact_hash=str(receipt.get("artifact_hash") or ""),
+            source=str(receipt.get("source") or "group-zip"),
+        )
 
     def _save_install_receipt(
         self,

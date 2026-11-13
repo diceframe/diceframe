@@ -255,3 +255,90 @@ async def test_update_blocks_candidate_that_breaks_installed_dependents(tmp_path
     with pytest.raises(ValueError, match="would break dependency"):
         await host.install_from_zip(package.read_bytes(), overwrite=True)
     assert host.public_detail("base-pack")["version"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_group_install_recovery_backfills_receipts_after_commit_interrupt(tmp_path):
+    """commit 后、receipt 写入前中断：重启恢复应按 journal 补写 install receipt。"""
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    await host.install_group_from_zips([
+        _package_bytes("dependent-pack", "1", requires={
+            "plugins": [{"id": "base-pack", "minimum_version": "1"}],
+        }),
+        _package_bytes("base-pack", "1"),
+    ])
+    # 模拟中断现场：receipt 缺失，journal 停留在 published 阶段并携带 receipt 数据。
+    entries: list[dict] = []
+    receipts: list[dict] = []
+    for plugin_id in ("dependent-pack", "base-pack"):
+        (tmp_path / "data" / plugin_id / "install.json").unlink()
+        manifest = json.loads(
+            (tmp_path / "plugins" / plugin_id / "plugin.json").read_text(encoding="utf-8")
+        )
+        entries.append({
+            "plugin_id": plugin_id,
+            "target": str((tmp_path / "plugins" / plugin_id).resolve()),
+            "staging": str((tmp_path / "plugins" / f".{plugin_id}.group-x.installing").resolve()),
+            "backup": str((tmp_path / "plugins" / f".{plugin_id}.group-x.backup").resolve()),
+        })
+        receipts.append({
+            "plugin_id": plugin_id,
+            "manifest": manifest,
+            "artifact_hash": f"hash-{plugin_id}",
+            "source": "group-zip",
+        })
+    (tmp_path / "data" / "_plugin_group_install_journal.json").write_text(
+        json.dumps({
+            "schema_version": 1, "group_id": "x", "phase": "published",
+            "entries": entries, "published": ["dependent-pack", "base-pack"],
+            "receipts": receipts,
+        }),
+        encoding="utf-8",
+    )
+    # 模拟重启：全新实例，首次 discover 触发恢复。
+    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    restarted.discover()
+    for plugin_id in ("dependent-pack", "base-pack"):
+        receipt = json.loads(
+            (tmp_path / "data" / plugin_id / "install.json").read_text(encoding="utf-8")
+        )
+        assert receipt["plugin_id"] == plugin_id
+        assert receipt["artifact_hash"] == f"hash-{plugin_id}"
+        assert receipt["source"] == "group-zip"
+        assert restarted.public_detail(plugin_id)["status"] == "active"
+    assert not (tmp_path / "data" / "_plugin_group_install_journal.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_install_recovery_backfills_receipt_after_commit_interrupt(tmp_path):
+    """单包安装 commit 后中断：重启恢复应按 journal 补写 install receipt。"""
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    await host.install_from_zip(_package_bytes("solo-pack", "1"))
+    (tmp_path / "data" / "solo-pack" / "install.json").unlink()
+    manifest = json.loads(
+        (tmp_path / "plugins" / "solo-pack" / "plugin.json").read_text(encoding="utf-8")
+    )
+    (tmp_path / "data" / "_plugin_install_journal.json").write_text(
+        json.dumps([{
+            "plugin_id": "solo-pack",
+            "target": str((tmp_path / "plugins" / "solo-pack").resolve()),
+            "staging": str((tmp_path / "plugins" / ".solo-pack.fake.installing").resolve()),
+            "backup": str((tmp_path / "plugins" / ".solo-pack.fake.backup").resolve()),
+            "phase": "published",
+            "was_running": False,
+            "manifest": manifest,
+            "artifact_hash": "hash-solo",
+            "source": "zip",
+        }]),
+        encoding="utf-8",
+    )
+    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    restarted.discover()
+    receipt = json.loads(
+        (tmp_path / "data" / "solo-pack" / "install.json").read_text(encoding="utf-8")
+    )
+    assert receipt["plugin_id"] == "solo-pack"
+    assert receipt["artifact_hash"] == "hash-solo"
+    assert receipt["source"] == "zip"
+    assert restarted.public_detail("solo-pack")["status"] == "active"
+    assert not (tmp_path / "data" / "_plugin_install_journal.json").exists()
