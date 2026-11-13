@@ -1169,23 +1169,47 @@ class WebAPI:
     # ---- 规则辅助 ----
 
     def list_gameplays(self) -> dict[str, Any]:
-        """W2「规则与玩法」页：玩法模式只读投影（不暴露 provider 实现）。"""
+        """W2「规则与玩法」页：玩法模式只读投影（不暴露 provider 实现）。
+
+        数据源合并两处事实：内置 TRPG 模式（``DEFAULT_GAMEPLAYS``，核心管线
+        直接管，始终可用）与外部 provider 注册的扩展玩法（接线不完整如实
+        标注，fail closed）。
+        """
+
+        from src.gameplays.builtin import DEFAULT_GAMEPLAYS
 
         registry = self._gameplay_providers
-        rows: list[dict[str, Any]] = []
-        for mode_id in sorted(registry.gameplays.mode_ids()):
-            mode = registry.gameplays.get(mode_id)
+        rows: dict[str, dict[str, Any]] = {}
+        for mode_id in sorted(DEFAULT_GAMEPLAYS.mode_ids()):
+            mode = DEFAULT_GAMEPLAYS.get(mode_id)
             if mode is None:
                 continue
-            rows.append({
+            rows[mode_id] = {
                 "mode_id": mode.mode_id,
                 "progression_mode": mode.progression_mode,
                 "bot_surface": mode.bot_surface,
+                "source": "builtin",
+                "available": True,
+            }
+        for mode_id in sorted(registry.gameplays.mode_ids()):
+            if mode_id in rows:
+                continue
+            mode = registry.gameplays.get(mode_id)
+            if mode is None:
+                continue
+            provider_registered = registry.get(mode_id) is not None
+            turn_driver_bound = registry.driver_for(mode_id) is not None
+            rows[mode_id] = {
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                "source": "provider",
+                "provider_registered": provider_registered,
+                "turn_driver_bound": turn_driver_bound,
                 # fail closed 可见性：接线不完整的玩法如实标注，不冒充可用。
-                "provider_registered": registry.get(mode_id) is not None,
-                "turn_driver_bound": registry.driver_for(mode_id) is not None,
-            })
-        return {"ok": True, "gameplays": rows}
+                "available": provider_registered and turn_driver_bound,
+            }
+        return {"ok": True, "gameplays": sorted(rows.values(), key=lambda row: row["mode_id"])}
 
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)

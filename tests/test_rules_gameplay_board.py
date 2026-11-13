@@ -32,8 +32,8 @@ def _provider(mode_id: str) -> GameplayProvider:
     )
 
 
-def test_list_gameplays_reports_wiring_status_honestly() -> None:
-    """provider/driver 都接线的玩法标已接线；只有模式没实现的如实标未接线。"""
+def test_list_gameplays_merges_builtin_and_provider_modes() -> None:
+    """内置 TRPG 模式始终可用；provider 模式按接线如实标注。"""
 
     registry = GameplayProviderRegistry()
     registry.register(_provider("sample_mode"))
@@ -48,7 +48,16 @@ def test_list_gameplays_reports_wiring_status_honestly() -> None:
     result = WebAPI.list_gameplays(SimpleNamespace(_gameplay_providers=registry))
     assert result["ok"] is True
     by_id = {row["mode_id"]: row for row in result["gameplays"]}
+    # 内置模式来自 DEFAULT_GAMEPLAYS（核心管线直管）。
+    for builtin_id in ("free", "adventure", "gal"):
+        assert by_id[builtin_id]["source"] == "builtin"
+        assert by_id[builtin_id]["available"] is True
+    # 接线完整的 provider 玩法。
+    assert by_id["sample_mode"]["source"] == "provider"
     assert by_id["sample_mode"]["provider_registered"] is True
     assert by_id["sample_mode"]["turn_driver_bound"] is True
+    assert by_id["sample_mode"]["available"] is True
+    # 只注册模式、没有 provider：如实标注不可用。
     assert by_id["wip_mode"]["provider_registered"] is False
     assert by_id["wip_mode"]["turn_driver_bound"] is False
+    assert by_id["wip_mode"]["available"] is False

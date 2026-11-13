@@ -82,10 +82,24 @@ async function createProject() {
   projectLoading.value = true
   projectError.value = ''
   try {
-    const result = await creatorApi.create(name, templateSource(wizardType.value, name))
-    projects.value = [result.project, ...projects.value]
+    // W6 复核：create 的 source 是「来源元数据」（kind/id），不是初始文件；
+    // 模板文件走 update 写入（revision 0 → 1），失败不阻断空工程创建。
+    const result = await creatorApi.create(name)
+    let project = result.project
+    try {
+      const updated = await creatorApi.update(project.id, {
+        expected_revision: project.revision,
+        files: templateSource(wizardType.value, name),
+      })
+      project = updated.project
+    } catch {
+      projectError.value = locale.value === 'zh-CN'
+        ? '模板初始化失败；工程已创建（空），可手动添加文件。'
+        : 'Template initialization failed; the empty project was created.'
+    }
+    projects.value = [project, ...projects.value]
     projectName.value = ''
-    await openProject(result.project)
+    await openProject(project)
   } catch (error: unknown) {
     projectError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -328,22 +342,24 @@ onMounted(loadProjects)
 <template>
   <section class="view creator-workshop" data-testid="creator-workshop">
     <ContentPageHeader kicker="CREATOR STUDIO" :title="copy.title" :description="copy.intro" />
-    <section class="creator-taxonomy" data-testid="creator-taxonomy">
-      <h2>{{ taxonomy.title }}</h2>
+    <!-- W6 复核（用户拍板）：三层说明折叠为「创作帮助」，默认收起不占首屏。 -->
+    <details class="creator-taxonomy" data-testid="creator-taxonomy">
+      <summary>{{ t('creatorHelpTitle') }}</summary>
+      <p class="muted creator-taxonomy-title">{{ taxonomy.title }}</p>
       <div class="creator-taxonomy-grid">
         <article><strong>{{ taxonomy.asset }}</strong><span>{{ taxonomy.assetText }}</span></article>
         <article><strong>{{ taxonomy.workspace }}</strong><span>{{ taxonomy.workspaceText }}</span></article>
         <article><strong>{{ taxonomy.package }}</strong><span>{{ taxonomy.packageText }}</span></article>
         <article><strong>{{ taxonomy.backup }}</strong><span>{{ taxonomy.backupText }}</span></article>
       </div>
-    </section>
+    </details>
 
     <section class="creator-projects" data-testid="creator-projects">
       <div class="creator-group-heading">
         <h2>{{ copy.projectGroup }}</h2>
       </div>
-      <form class="creator-project-form" @submit.prevent="createProject">
-        <div class="creator-wizard-types" role="radiogroup" data-testid="creator-wizard-types">
+      <div class="creator-wizard" data-testid="creator-wizard-types">
+        <div class="creator-wizard-types" role="radiogroup">
           <button
             v-for="option in wizardTypes"
             :key="option.id"
@@ -358,11 +374,13 @@ onMounted(loadProjects)
             <span>{{ option.desc }}</span>
           </button>
         </div>
-        <NInput v-model:value="projectName" :placeholder="copy.projectPlaceholder" :disabled="projectLoading" />
-        <NButton type="primary" attr-type="submit" :loading="projectLoading" :disabled="!projectName.trim()">
-          {{ copy.projectCreate }}
-        </NButton>
-      </form>
+        <form class="creator-project-form" @submit.prevent="createProject">
+          <NInput v-model:value="projectName" :placeholder="copy.projectPlaceholder" :disabled="projectLoading" />
+          <NButton type="primary" attr-type="submit" :loading="projectLoading" :disabled="!projectName.trim()">
+            {{ copy.projectCreate }}
+          </NButton>
+        </form>
+      </div>
       <p v-if="projectError" class="creator-project-error" role="alert">{{ projectError }}</p>
       <div v-if="projects.length" class="creator-project-list">
         <button v-for="project in projects" :key="project.id" type="button" class="creator-project-row" @click="openProject(project)">
@@ -411,8 +429,8 @@ onMounted(loadProjects)
           <NButton :loading="projectAction === 'preview'" @click="previewProject">{{ copy.projectPreview }}</NButton>
           <NButton :loading="projectAction === 'submission'" @click="prepareSubmission">{{ copy.projectSubmission }}</NButton>
           <NButton type="primary" :loading="projectAction === 'build'" @click="buildProject">{{ copy.projectBuild }}</NButton>
-          <NButton type="primary" secondary :data-testid="`creator-ai-toggle`" @click="aiOpen = !aiOpen">{{ t('creatorAiToggle') }}</NButton>
-          <NButton type="error" secondary :loading="projectAction === 'delete'" @click="deleteProject">{{ copy.projectDelete }}</NButton>
+          <NButton type="primary" :data-testid="`creator-ai-toggle`" @click="aiOpen = !aiOpen">{{ t('creatorAiToggle') }}</NButton>
+          <NButton type="error" :loading="projectAction === 'delete'" @click="deleteProject">{{ copy.projectDelete }}</NButton>
         </div>
         <CreatorAiPanel v-if="aiOpen" :project="selectedProject" data-testid="creator-ai-panel-embed" @files-changed="reloadProject" />
         <pre v-if="projectPreview" class="creator-project-preview">{{ JSON.stringify(projectPreview, null, 2) }}</pre>
@@ -449,8 +467,12 @@ onMounted(loadProjects)
 </template>
 
 <style scoped>
-.creator-workshop { display: grid; gap: 1.7rem; }
-.creator-taxonomy { display: grid; gap: .7rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); }
+.creator-workshop { display: grid; gap: 1.7rem; max-width: 100%; overflow-x: hidden; }
+/* W6 复核：三层说明折叠为「创作帮助」，默认收起。 */
+.creator-taxonomy { padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); }
+.creator-taxonomy summary { cursor: pointer; font-weight: 700; color: var(--df-text-muted); }
+.creator-taxonomy[open] summary { color: var(--df-text); margin-bottom: .4rem; }
+.creator-taxonomy-title { margin: 0 0 .5rem; font-weight: 600; }
 .creator-taxonomy h2 { margin: 0; font-size: 1rem; }
 .creator-taxonomy-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; }
 .creator-taxonomy-grid article { display: grid; gap: .25rem; padding: .65rem; border-radius: var(--df-radius-md); background: var(--df-surface-2); }
@@ -458,8 +480,15 @@ onMounted(loadProjects)
 @media (max-width: 900px) { .creator-taxonomy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .creator-taxonomy-grid { grid-template-columns: 1fr; } }
 .creator-projects { display: grid; gap: .75rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); }
+/* W6 复核：向导是独立块（不再挤进 600px 表单行），类型卡自适应换行。 */
+.creator-wizard { display: grid; gap: .8rem; min-width: 0; }
+.creator-wizard-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .6rem; }
+.creator-wizard-types button { display: grid; gap: .2rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text-muted); text-align: left; cursor: pointer; font: inherit; min-width: 0; }
+.creator-wizard-types button strong { color: var(--df-text); font-size: .92rem; }
+.creator-wizard-types button span { font-size: .78rem; line-height: 1.4; }
+.creator-wizard-types button.active { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 10%, var(--df-surface-2)); }
 .creator-project-form { display: flex; gap: .65rem; align-items: center; max-width: 600px; }
-.creator-project-form .n-input { flex: 1; }
+.creator-project-form .n-input { flex: 1; min-width: 0; }
 .creator-project-list { display: grid; gap: .45rem; }
 .creator-project-row { display: grid; gap: .2rem; padding: .65rem .75rem; border-radius: var(--df-radius-md); background: var(--df-surface-2); }
 .creator-project-row { border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
@@ -467,13 +496,6 @@ onMounted(loadProjects)
 .creator-project-editor { display: grid; gap: .75rem; padding-top: .5rem; }
 .creator-project-stage { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
 .creator-stage-hint { color: var(--df-text-muted); font-size: .8rem; }
-/* W3 新建向导：先选目标类型。 */
-.creator-wizard-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; flex: 1 1 100%; }
-.creator-wizard-types button { display: grid; gap: .2rem; padding: .6rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text-muted); text-align: left; cursor: pointer; font: inherit; }
-.creator-wizard-types button strong { color: var(--df-text); font-size: .9rem; }
-.creator-wizard-types button span { font-size: .78rem; line-height: 1.4; }
-.creator-wizard-types button.active { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 10%, var(--df-surface-2)); }
-@media (max-width: 760px) { .creator-wizard-types { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* W3 分区编辑页签。 */
 .creator-editor-groups { display: flex; flex-wrap: wrap; gap: .4rem; }
 .creator-editor-groups button { padding: .3rem .8rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text-muted); font-size: .8rem; font-weight: 600; cursor: pointer; }
