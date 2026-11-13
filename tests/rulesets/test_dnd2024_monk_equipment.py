@@ -390,8 +390,11 @@ def test_equipping_armor_through_live_reconciliation_disables_martial_arts() -> 
     instance = GameInstance(("web", "monk-equipment", "bot"))
     instance.language = "en"
     instance.players["gm"] = {"character_name": "Monk", "character_sheet": sheet}
-    assert sheet["class_features"][0]["id"] == "martial_arts"
-    assert sheet["class_features"][0]["active"] is True
+    assert sheet["class_features"][0]["id"] == "unarmored_defense"
+    martial_arts = next(
+        feature for feature in sheet["class_features"] if feature["id"] == "martial_arts"
+    )
+    assert martial_arts["active"] is True
 
     sheet["equipment"].append({
         "name": "Chain Mail", "item_ref": "item:chain_mail",

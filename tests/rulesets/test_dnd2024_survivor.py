@@ -28,6 +28,20 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from dnd2024_monk_common import SequenceRng, advancement_choices
 
 
+def _preset_draft(preset: dict, preset_id: str) -> dict:
+    """The preset draft, with a playable level-1 Fighting Style for Fighters.
+
+    The preset occupies Defense, while this slice only implements Defense's
+    effect; leaving it there makes the level-7 slot unsatisfiable, so fighters
+    take Archery instead.  Other classes never receive the key at all.
+    """
+
+    draft = {**preset["draft"], "locale": "en", "name": "Arden"}
+    if preset_id == "stalwart_guardian":
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:archery"}
+    return draft
+
+
 def _sheet(
     runtime: Dnd2024Runtime, level: int = 1, preset_id: str = "stalwart_guardian",
 ) -> dict:
@@ -40,7 +54,7 @@ def _sheet(
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(item for item in choices["quick_presets"] if item["id"] == preset_id)
     sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Arden"},
+        None, _preset_draft(preset, preset_id),
     )
     while int(sheet["ruleset_character"]["build"]["level"]) < level:
         preview = runtime.preview_advancement(None, sheet, {})
@@ -254,7 +268,9 @@ def test_level_eighteen_fighter_owns_survivor() -> None:
     assert resolver.has_feature(_sheet(runtime, 17)["ruleset_character"], "survivor") is False
 
 
-def test_ownership_is_derived_without_features_subclass_ref() -> None:
+def test_ownership_requires_an_explicit_subclass_selection() -> None:
+    """Survivor is Champion's capstone, not a consequence of Fighter levels."""
+
     runtime = Dnd2024Runtime()
     resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
 
@@ -262,6 +278,9 @@ def test_ownership_is_derived_without_features_subclass_ref() -> None:
         "build": {"class_levels": [{"class_ref": "class:fighter", "level": 18}]},
     }
 
+    assert resolver.has_feature(character, "survivor") is False
+
+    character["features"] = {"subclass_ref": "subclass:champion"}
     assert resolver.has_feature(character, "survivor") is True
 
 

@@ -23,8 +23,8 @@ from dnd2024_monk_common import advance, monk_sheet
 
 
 MONK_FEATURES_AT_TWO = (
-    "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
-    "step_of_the_wind",
+    "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
+    "flurry_of_blows", "patient_defense", "step_of_the_wind",
 )
 MONK_FEATURE_IDS = frozenset({"martial_arts", *MONK_FEATURES_AT_TWO})
 MONK_CAPABILITY_IDS = frozenset({
@@ -42,11 +42,19 @@ def _resolver(locale: str = "en") -> tuple[Dnd2024Runtime, Dnd2024ClassFeatureRe
     return runtime, Dnd2024ClassFeatureResolver(runtime.load_bundle(locale))
 
 
-def _character(level: int, class_ref: str = "class:monk", **extra) -> dict:
-    return {
+def _character(
+    level: int, class_ref: str = "class:monk", *, subclass_ref: str | None = None,
+    **extra,
+) -> dict:
+    character: dict = {
         "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
-        **extra,
     }
+    if subclass_ref:
+        # 子职特性只在角色真实选择了子职时授予，所以这些角色代理显式带上
+        # 选择，而不是依赖"每个职业只有一个 SRD 子职"的隐式回退。
+        character["features"] = {"subclass_ref": subclass_ref}
+    character.update(extra)
+    return character
 
 
 def _with_focus(current: int, maximum: int, level: int = 2) -> dict:
@@ -64,13 +72,19 @@ def _mutated_bundle(runtime: Dnd2024Runtime, mutate) -> object:
     return replace(bundle, entities=entities)
 
 
-def test_monk_level_one_owns_martial_arts_only() -> None:
+def test_monk_level_one_owns_the_unarmored_formula_and_martial_arts() -> None:
     _runtime, resolver = _resolver()
 
     assert [feature.id for feature in resolver.features_for(_character(1))] == [
+        "unarmored_defense",
         "martial_arts",
     ]
+    assert resolver.has_feature(_character(1), "unarmored_defense") is True
     assert resolver.has_feature(_character(1), "martial_arts") is True
+    # Unarmored Movement is a level 2 benefit, so the level 1 Speed is the
+    # species value with no feature bonus yet.
+    assert resolver.has_feature(_character(1), "unarmored_movement") is False
+    assert resolver.speed_bonus(_character(1)) == 0
     assert resolver.has_feature(_character(1), "monks_focus") is False
     assert resolver.has_feature(_character(1), "flurry_of_blows") is False
     assert resolver.class_resource_definition(_character(1), "focus_points") is None
@@ -159,11 +173,15 @@ def test_feature_labels_follow_the_bundle_locale() -> None:
     _runtime_zh, chinese = _resolver("zh-CN")
 
     assert english.feature_value(_character(2), "monks_focus", "missing", None) is None
-    assert [view.name for view in english.feature_views(_character(2))][:2] == [
-        "Martial Arts", "Monk's Focus",
-    ]
+    names = {view.id: view.name for view in english.feature_views(_character(2))}
+    assert names["unarmored_defense"] == "Unarmored Defense"
+    assert names["unarmored_movement"] == "Unarmored Movement"
+    assert names["martial_arts"] == "Martial Arts"
+    assert names["monks_focus"] == "Monk's Focus"
     labels = {view.id: view.name for view in chinese.feature_views(_character(2))}
     assert labels == {
+        "unarmored_defense": "无甲防御",
+        "unarmored_movement": "无甲移动",
         "martial_arts": "武艺",
         "monks_focus": "武僧专注",
         "flurry_of_blows": "疾风连击",
@@ -184,6 +202,8 @@ def test_feature_views_expose_scalar_parameters_only() -> None:
         "unarmed_ability_choice": ["str", "dex"],
     }
     assert martial_arts.minimum_level == 1
+    assert martial_arts.owner == "class:monk"
+    assert martial_arts.to_dict()["owner"] == "class:monk"
     assert martial_arts.source_ref.startswith("srd-5.2.1:")
 
 
@@ -264,36 +284,49 @@ def test_bundle_without_the_feature_catalog_degrades_to_no_features() -> None:
     assert resolver.combat_capabilities(_with_focus(2, 2), {"bonus_action": 1}) == ()
 
 
+def _monk_feature(catalog: dict, feature_id: str) -> dict:
+    """One monk declaration by id -- never a positional index.
+
+    The monk table grows as features are declared, so a mutation must name the
+    declaration it corrupts instead of assuming where it sits.
+    """
+
+    return next(
+        row for row in catalog["classes"]["monk"]["features"]
+        if row["id"] == feature_id
+    )
+
+
 def _drop_actions(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["capabilities"][0]["actions"] = [
+    _monk_feature(catalog, "martial_arts")["capabilities"][0]["actions"] = [
         {"kind": "teleport"},
     ]
 
 
 def _bad_track(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_track"] = (
-        "not_a_track"
-    )
+    _monk_feature(catalog, "martial_arts")["parameters"][
+        "unarmed_damage_die_track"
+    ] = "not_a_track"
 
 
 def _bad_format(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][0]["parameters"]["unarmed_damage_die_format"] = (
-        "{die}{die}"
-    )
+    _monk_feature(catalog, "martial_arts")["parameters"][
+        "unarmed_damage_die_format"
+    ] = "{die}{die}"
 
 
 def _orphan_option(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][2]["option_of"] = "not_declared"
+    _monk_feature(catalog, "flurry_of_blows")["option_of"] = "not_declared"
 
 
 def _undeclared_resource(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][1]["resource_id"] = "not_a_resource"
+    _monk_feature(catalog, "monks_focus")["resource_id"] = "not_a_resource"
 
 
 def _bad_cost_amount(catalog: dict) -> None:
-    catalog["classes"]["monk"]["features"][2]["capabilities"][0]["cost"]["resources"][0][
-        "amount"
-    ] = 0
+    _monk_feature(catalog, "flurry_of_blows")["capabilities"][0]["cost"][
+        "resources"
+    ][0]["amount"] = 0
 
 
 def _bad_once_per_turn(catalog: dict) -> None:
@@ -479,7 +512,9 @@ def test_second_wind_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -
 
 
 def _barbarian(level: int, **extra) -> dict:
-    return _character(level, "class:barbarian", **extra)
+    return _character(
+        level, "class:barbarian", subclass_ref="subclass:path_of_the_berserker", **extra,
+    )
 
 
 def test_barbarian_rage_declaration_and_capabilities_load() -> None:
@@ -489,7 +524,7 @@ def test_barbarian_rage_declaration_and_capabilities_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "rage", "weapon_mastery",
+        "unarmored_defense", "rage", "weapon_mastery",
     ]
     enter = resolver.declared_capability(character, "rage")
     sustain = resolver.declared_capability(character, "rage_sustain")
@@ -565,7 +600,7 @@ def test_rage_recovers_one_use_on_a_short_rest_and_all_on_a_long_rest() -> None:
 
 
 def _rogue(level: int, **extra) -> dict:
-    return _character(level, "class:rogue", **extra)
+    return _character(level, "class:rogue", subclass_ref="subclass:thief", **extra)
 
 
 def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
@@ -657,3 +692,76 @@ def test_retaliation_is_not_owned_below_level_ten() -> None:
         feature.id for feature in resolver.features_for(character)
     ]
     assert resolver.declared_capability(character, "retaliation") is None
+
+
+# --- subclass ownership: every declared subclass feature is choice-gated ---
+
+
+_SUBCLASS_DECLARATIONS = [
+    ("class:paladin", 7, "aura_of_devotion", "subclass:oath_of_devotion"),
+    ("class:fighter", 3, "improved_critical", "subclass:champion"),
+    ("class:fighter", 7, "additional_fighting_style", "subclass:champion"),
+    ("class:fighter", 15, "superior_critical", "subclass:champion"),
+    ("class:fighter", 18, "survivor", "subclass:champion"),
+    ("class:barbarian", 10, "retaliation", "subclass:path_of_the_berserker"),
+    ("class:rogue", 3, "fast_hands", "subclass:thief"),
+    ("class:bard", 3, "cutting_words", "subclass:college_of_lore"),
+    ("class:sorcerer", 3, "draconic_resilience", "subclass:draconic_sorcery"),
+    ("class:warlock", 3, "dark_ones_blessing", "subclass:fiend_patron"),
+    ("class:warlock", 6, "dark_ones_own_luck", "subclass:fiend_patron"),
+    ("class:cleric", 17, "supreme_healing", "subclass:life_domain"),
+    ("class:wizard", 14, "overchannel", "subclass:evoker"),
+]
+
+
+@pytest.mark.parametrize("class_ref,level,feature_id,subclass_ref", _SUBCLASS_DECLARATIONS)
+def test_every_subclass_feature_requires_an_explicit_selection(
+    class_ref: str, level: int, feature_id: str, subclass_ref: str,
+) -> None:
+    """Owning a class level never hands out a subclass benefit on its own.
+
+    The bundle ships exactly one representative subclass per class, so a level
+    based fallback would look harmless and still be wrong: the character has
+    not chosen anything yet.
+    """
+
+    _runtime, resolver = _resolver()
+
+    assert resolver.has_feature(_character(level, class_ref), feature_id) is False
+    assert resolver.has_feature(
+        _character(level, class_ref, subclass_ref=""), feature_id,
+    ) is False
+    assert resolver.has_feature(
+        _character(level, class_ref, subclass_ref=subclass_ref), feature_id,
+    ) is True
+
+
+def test_a_shared_declaration_keeps_one_owner_while_every_granting_class_owns_it() -> None:
+    """Extra Attack is declared once, so ``owner`` never names the granting class.
+
+    The distinction matters because ``has_feature(owner=...)`` separates two
+    same-named declarations (Cutting Words across two Bard colleges); it never
+    asks which class handed a feature out.  Copying the declaration per class
+    would look tidier and would let one class carry a different
+    ``attacks_per_action`` from another, which RAW never allows.
+    """
+
+    _runtime, resolver = _resolver()
+    monk = _character(5, "class:monk")
+    fighter = _character(5, "class:fighter")
+
+    # Ownership follows the grant: both classes own it and both attack twice.
+    assert resolver.has_feature(monk, "extra_attack") is True
+    assert resolver.has_feature(fighter, "extra_attack") is True
+    assert resolver.attacks_per_action(monk) == 2
+    assert resolver.attacks_per_action(fighter) == 2
+
+    # Identity stays owner-scoped: the single declaration is filed under the
+    # Fighter, so the Monk does not own a *Monk-owned* Extra Attack.
+    owners = [view.owner for view in resolver.feature_views(monk) if view.id == "extra_attack"]
+    assert owners == ["class:fighter"]
+    assert resolver.has_feature(monk, "extra_attack", owner="class:monk") is False
+    assert resolver.has_feature(monk, "extra_attack", owner="class:fighter") is True
+
+    # A class the table never grants it to owns nothing at all.
+    assert resolver.has_feature(_character(5, "class:rogue"), "extra_attack") is False

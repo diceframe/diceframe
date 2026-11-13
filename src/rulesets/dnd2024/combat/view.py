@@ -127,6 +127,10 @@ class CombatViewMixin:
         conditions = conditions if isinstance(conditions, dict) else {}
         resources = character.get("resources")
         resources = resources if isinstance(resources, dict) else {}
+        feature_state = character.get("features")
+        feature_state = feature_state if isinstance(feature_state, dict) else {}
+        subclass_ref = feature_state.get("subclass_ref")
+        subclass_ref = subclass_ref if isinstance(subclass_ref, str) else ""
         # 职业资源与 feature-derived 攻击参数在此一次性投影：后面的 combat 代码
         # 只消费结果，不再各自解析职业等级或 level -> 武艺骰。
         feature_projection = self.features.actor_projection(character)
@@ -141,8 +145,11 @@ class CombatViewMixin:
             "max_hp": int(resources.get("max_hp", 0) or 0),
             "temp_hp": int(resources.get("temp_hp", 0) or 0),
             "armor_class": int(character.get("derived", {}).get("armor_class", 10) or 10),
-            "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)
-                - int((character.get("derived", {}).get("armor_training") or {}).get("speed_penalty", 0) or 0)),
+            # 护甲力量惩罚已经由 ``derive_speed`` 扣过一次。战斗侧若在这里
+            # 再减一遍 ``armor_training.speed_penalty``，角色卡与战斗就会报出
+            # 两个不同的速度（力量 8 穿链甲：卡 20 尺、战斗 10 尺），而两边
+            # 都不报错。派生值只有一份，投影只搬不重算。
+            "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)),
             "armor_training": deepcopy(
                 character.get("derived", {}).get("armor_training") or {}
             ),
@@ -179,6 +186,7 @@ class CombatViewMixin:
             "conditions": deepcopy(conditions),
             "death_saves": deepcopy(conditions.get("death_saves") or {}),
             "build": deepcopy(character.get("build") or {}),
+            "features": {"subclass_ref": subclass_ref},
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
@@ -381,6 +389,9 @@ class CombatViewMixin:
             }
         return {
             "build": actor.get("build") or {},
+            "features": {"subclass_ref": str(
+                (actor.get("features") or {}).get("subclass_ref") or ""
+            )},
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
