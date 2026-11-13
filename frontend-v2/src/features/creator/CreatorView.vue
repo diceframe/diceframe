@@ -7,9 +7,11 @@ import { useLocale } from '@/composables/useLocale'
 import { creatorCopy, type CreatorCardId, type CreatorPackageExportMode } from './copy'
 import ContentTextReviewDialog from '@/features/content-review/ContentTextReviewDialog.vue'
 import CreatorPackageExportDialog from './CreatorPackageExportDialog.vue'
+import CreatorAiPanel from './CreatorAiPanel.vue'
+import { templateSource, type CreatorTemplateId } from './templates'
 import { creatorApi, type CreatorProject, type CreatorProjectSummary } from '@/api/creator'
 
-const { locale } = useLocale()
+const { t, locale } = useLocale()
 const copy = computed(() => creatorCopy(locale.value))
 const taxonomy = computed(() => locale.value === 'zh-CN'
   ? {
@@ -39,6 +41,8 @@ const textReviewOpen = ref(false)
 const packageExportMode = ref<CreatorPackageExportMode | null>(null)
 const projects = ref<CreatorProjectSummary[]>([])
 const projectName = ref('')
+// W3 拍板 B：先问「要做什么」，按类型给模板工程。
+const wizardType = ref<CreatorTemplateId>('adventure')
 const projectLoading = ref(false)
 const projectError = ref('')
 const selectedProject = ref<CreatorProject | null>(null)
@@ -48,6 +52,10 @@ const projectAction = ref('')
 const projectPreview = ref<Record<string, unknown> | null>(null)
 const submissionReceipt = ref<Record<string, unknown> | null>(null)
 const projectStage = ref<'draft' | 'validated' | 'built' | 'submission'>('draft')
+// W3：分区编辑（按文件前缀分组）+ 校验问题数 + AI 面板开关。
+const editorGroup = ref<'overview' | 'content' | 'rules' | 'docs' | 'all'>('overview')
+const validationIssues = ref(0)
+const aiOpen = ref(false)
 const stageLabels = computed(() => ({
   'zh-CN': { draft: '草稿', validated: '已校验', built: '已生成', submission: '待提交' },
   en: { draft: 'Draft', validated: 'Validated', built: 'Built', submission: 'Ready to submit' },
@@ -74,9 +82,10 @@ async function createProject() {
   projectLoading.value = true
   projectError.value = ''
   try {
-    const result = await creatorApi.create(name)
+    const result = await creatorApi.create(name, templateSource(wizardType.value, name))
     projects.value = [result.project, ...projects.value]
     projectName.value = ''
+    await openProject(result.project)
   } catch (error: unknown) {
     projectError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -108,6 +117,57 @@ function selectFile(path: string) {
   selectedContent.value = selectedProject.value.files[path] || ''
 }
 
+// W3 分区编辑：按文件前缀分组；「源码」页签看全部文件。
+const EDITOR_GROUPS: Array<{ id: 'overview' | 'content' | 'rules' | 'docs' | 'all'; test: (path: string) => boolean }> = [
+  { id: 'overview', test: path => ['plugin.json', 'config.schema.json', 'README.md', 'manifest.json'].includes(path) },
+  { id: 'content', test: path => path.startsWith('content/') },
+  { id: 'rules', test: path => path.startsWith('rules/') },
+  { id: 'docs', test: path => path.startsWith('docs/') },
+]
+const EDITOR_GROUP_KEYS = {
+  overview: 'creatorEditorGroupOverview',
+  content: 'creatorEditorGroupContent',
+  rules: 'creatorEditorGroupRules',
+  docs: 'creatorEditorGroupDocs',
+  all: 'creatorEditorGroupAll',
+} as const
+const projectFileList = computed(() => Object.keys(selectedProject.value?.files || {}).sort())
+const groupFiles = computed(() => {
+  const files = projectFileList.value
+  if (editorGroup.value === 'all') return files
+  const group = EDITOR_GROUPS.find(item => item.id === editorGroup.value)
+  return files.filter(path => group?.test(path))
+})
+
+const stageHint = computed(() => {
+  const zh = locale.value === 'zh-CN'
+  if (validationIssues.value > 0) {
+    return zh ? `预检发现 ${validationIssues.value} 个问题；修复后重新预检。` : `Validation found ${validationIssues.value} issue(s); fix and re-validate.`
+  }
+  switch (projectStage.value) {
+    case 'draft':
+      return zh ? '下一步：编辑内容后点「预检」检查工程；拿不准就点「AI 助手」描述你的想法。' : 'Next: edit content and run validation, or describe your idea to the AI assistant.'
+    case 'validated':
+      return zh ? '工程通过预检。可以「构建 .dfplugin」，或让 AI 继续完善内容。' : 'Validation passed. Build the .dfplugin, or keep refining with the AI assistant.'
+    case 'built':
+      return zh ? '.dfplugin 已下载。到「内容包」本地导入试装。' : 'The .dfplugin is downloaded; import it locally under Content packages.'
+    case 'submission':
+      return zh ? '投稿回执已生成；按回执里的步骤完成发布。' : 'Submission receipt ready; follow its steps to publish.'
+    default:
+      return ''
+  }
+})
+
+const wizardTypes = computed(() => {
+  const zh = locale.value === 'zh-CN'
+  return [
+    { id: 'adventure' as CreatorTemplateId, title: zh ? '做一个冒险' : 'An adventure', desc: zh ? '剧情、NPC、遭遇、章节——装进内容包就能开团' : 'Story, NPCs, encounters and chapters for your table' },
+    { id: 'rule' as CreatorTemplateId, title: zh ? '做一个规则' : 'A ruleset', desc: zh ? '属性、骰制、结算；复杂规则可接外部运行时' : 'Attributes, dice and resolution mechanics' },
+    { id: 'gameplay' as CreatorTemplateId, title: zh ? '做一种玩法' : 'A gameplay mode', desc: zh ? '回合怎么走、阶段怎么推进的玩法设计' : 'How a session is organized and advanced' },
+    { id: 'toolkit' as CreatorTemplateId, title: zh ? '做一个工具插件' : 'A tool plugin', desc: zh ? '给桌子加小工具：骰子助手、查询器、导入器' : 'Table utilities: dice helpers, lookups, importers' },
+  ]
+})
+
 async function saveProject() {
   if (!selectedProject.value || !selectedFile.value || projectAction.value) return
   projectAction.value = 'save'
@@ -135,12 +195,27 @@ async function validateProject() {
   projectError.value = ''
   try {
     const result = await creatorApi.validate(selectedProject.value.id)
+    validationIssues.value = (result.errors || []).length
     if (result.ok) projectStage.value = 'validated'
     projectError.value = result.ok ? copy.value.projectValidated : (result.errors || []).join('；') || copy.value.projectInvalid
   } catch (error: unknown) {
     projectError.value = error instanceof Error ? error.message : String(error)
   } finally {
     projectAction.value = ''
+  }
+}
+
+// W3：AI 改完文件后重读工程，编辑器与名牌保持最新（diff 摘要在 AI 面板内）。
+async function reloadProject(): Promise<void> {
+  if (!selectedProject.value) return
+  try {
+    const result = await creatorApi.read(selectedProject.value.id)
+    selectedProject.value = result.project
+    if (selectedFile.value && result.project.files[selectedFile.value] !== undefined) {
+      selectedContent.value = result.project.files[selectedFile.value]
+    }
+  } catch {
+    // 保留当前编辑态；下次保存/预检仍按 revision 冲突保护。
   }
 }
 
@@ -268,6 +343,21 @@ onMounted(loadProjects)
         <h2>{{ copy.projectGroup }}</h2>
       </div>
       <form class="creator-project-form" @submit.prevent="createProject">
+        <div class="creator-wizard-types" role="radiogroup" data-testid="creator-wizard-types">
+          <button
+            v-for="option in wizardTypes"
+            :key="option.id"
+            type="button"
+            role="radio"
+            :aria-checked="wizardType === option.id"
+            :class="{ active: wizardType === option.id }"
+            :data-testid="`creator-wizard-${option.id}`"
+            @click="wizardType = option.id"
+          >
+            <strong>{{ option.title }}</strong>
+            <span>{{ option.desc }}</span>
+          </button>
+        </div>
         <NInput v-model:value="projectName" :placeholder="copy.projectPlaceholder" :disabled="projectLoading" />
         <NButton type="primary" attr-type="submit" :loading="projectLoading" :disabled="!projectName.trim()">
           {{ copy.projectCreate }}
@@ -290,13 +380,28 @@ onMounted(loadProjects)
           <span v-for="stage in ['draft', 'validated', 'built', 'submission']" :key="stage" :class="['creator-stage', { active: stage === projectStage, done: ['validated', 'built', 'submission'].includes(projectStage) && ['draft', 'validated', 'built', 'submission'].indexOf(stage) < ['draft', 'validated', 'built', 'submission'].indexOf(projectStage) }]">
             {{ stageLabel(stage) }}
           </span>
+          <span class="creator-stage-hint" data-testid="creator-stage-hint">{{ stageHint }}</span>
+        </div>
+        <div class="creator-editor-groups" role="tablist" data-testid="creator-editor-groups">
+          <button
+            v-for="group in ['overview', 'content', 'rules', 'docs', 'all'] as const"
+            :key="group"
+            type="button"
+            role="tab"
+            :aria-selected="editorGroup === group"
+            :class="{ active: editorGroup === group }"
+            :data-testid="`creator-editor-group-${group}`"
+            @click="editorGroup = group"
+          >
+            {{ t(EDITOR_GROUP_KEYS[group]) }}
+          </button>
         </div>
         <div class="creator-project-editor-grid">
           <div class="creator-project-files">
-            <button v-for="path in Object.keys(selectedProject.files).sort()" :key="path" type="button" :class="{ active: path === selectedFile }" @click="selectFile(path)">
+            <button v-for="path in groupFiles" :key="path" type="button" :class="{ active: path === selectedFile }" @click="selectFile(path)">
               {{ path }}
             </button>
-            <NInput v-model:value="selectedFile" size="small" :placeholder="copy.projectFilePlaceholder" />
+            <p v-if="!groupFiles.length" class="muted creator-project-files-empty">{{ t('creatorEditorGroupEmpty') }}</p>
           </div>
           <textarea v-model="selectedContent" class="creator-project-textarea" spellcheck="false" :placeholder="copy.projectFilePlaceholder" />
         </div>
@@ -306,8 +411,10 @@ onMounted(loadProjects)
           <NButton :loading="projectAction === 'preview'" @click="previewProject">{{ copy.projectPreview }}</NButton>
           <NButton :loading="projectAction === 'submission'" @click="prepareSubmission">{{ copy.projectSubmission }}</NButton>
           <NButton type="primary" :loading="projectAction === 'build'" @click="buildProject">{{ copy.projectBuild }}</NButton>
+          <NButton type="primary" secondary :data-testid="`creator-ai-toggle`" @click="aiOpen = !aiOpen">{{ t('creatorAiToggle') }}</NButton>
           <NButton type="error" secondary :loading="projectAction === 'delete'" @click="deleteProject">{{ copy.projectDelete }}</NButton>
         </div>
+        <CreatorAiPanel v-if="aiOpen" :project="selectedProject" data-testid="creator-ai-panel-embed" @files-changed="reloadProject" />
         <pre v-if="projectPreview" class="creator-project-preview">{{ JSON.stringify(projectPreview, null, 2) }}</pre>
         <pre v-if="submissionReceipt" class="creator-project-preview">{{ JSON.stringify(submissionReceipt, null, 2) }}</pre>
       </div>
@@ -358,7 +465,20 @@ onMounted(loadProjects)
 .creator-project-row { border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .creator-project-row:hover, .creator-project-row:focus-visible { outline: 1px solid var(--df-interactive); }
 .creator-project-editor { display: grid; gap: .75rem; padding-top: .5rem; }
-.creator-project-stage { display: flex; flex-wrap: wrap; gap: .45rem; }
+.creator-project-stage { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.creator-stage-hint { color: var(--df-text-muted); font-size: .8rem; }
+/* W3 新建向导：先选目标类型。 */
+.creator-wizard-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; flex: 1 1 100%; }
+.creator-wizard-types button { display: grid; gap: .2rem; padding: .6rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text-muted); text-align: left; cursor: pointer; font: inherit; }
+.creator-wizard-types button strong { color: var(--df-text); font-size: .9rem; }
+.creator-wizard-types button span { font-size: .78rem; line-height: 1.4; }
+.creator-wizard-types button.active { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 10%, var(--df-surface-2)); }
+@media (max-width: 760px) { .creator-wizard-types { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* W3 分区编辑页签。 */
+.creator-editor-groups { display: flex; flex-wrap: wrap; gap: .4rem; }
+.creator-editor-groups button { padding: .3rem .8rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text-muted); font-size: .8rem; font-weight: 600; cursor: pointer; }
+.creator-editor-groups button.active { color: var(--df-text); border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-2)); }
+.creator-project-files-empty { margin: 0; font-size: .78rem; }
 .creator-stage { padding: .25rem .55rem; border-radius: 999px; color: var(--df-text-muted); background: var(--df-surface-2); font-size: .78rem; }
 .creator-stage.active { color: var(--df-text); background: color-mix(in srgb, var(--df-interactive) 22%, var(--df-surface-2)); }
 .creator-stage.done { color: var(--df-success-strong, var(--df-interactive-strong)); }
