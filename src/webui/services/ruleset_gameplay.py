@@ -28,9 +28,11 @@ from src.rulesets.contracts import (
     AutomaticIntentRuntime,
     IntentResultProjectionRuntime,
     HostedIntentChoiceRuntime,
+    SequentialActionRuntime,
     TemporaryEncounterPlannerRuntime,
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
+from src.rulesets.sequential_actions import execute_sequential_plan
 from src.llm.seat_policy import SeatRuntime
 from src.webui.services import hosted_combat, adventure_commands
 
@@ -54,6 +56,11 @@ class RulesetGameplayDependencies:
     complete_adventure_node: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     request_adventure_choice: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     seat_runtime: SeatRuntime | None = None
+    # The default keeps the existing secure host RNG.  External runtimes may
+    # inject a serializable RNG factory so R00/R02 can bind deterministic state
+    # to the request receipt without making the generic service know the
+    # provider implementation.
+    rng_factory: Callable[[], Any] = random.SystemRandom
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
@@ -485,8 +492,9 @@ async def submit_intent(
     intent = runtime.prepare_intent_submission(
         intent, effective_requester, requester_is_gm,
     )
+    is_sequential_action = str(intent.get("type") or "") == "sequential_action"
 
-    if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime):
+    if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime) and not is_sequential_action:
         async def preflight() -> dict | None:
             if dependencies.get_instance(instance.game_key) is not instance:
                 return _error("GAME_CHANGED", "游戏已替换，请刷新")
@@ -539,14 +547,37 @@ async def submit_intent(
             and not module_hooks.seat_has_acted(instance, effective_requester)
         )
         try:
-            rng = random.SystemRandom()
-            resolved = runtime.resolve_intent(instance, intent, rng)
-            if not resolved.get("ok"):
-                return resolved
-            batch = resolved.get("event_batch")
-            if not isinstance(batch, dict):
-                return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
-            applied = runtime.apply_event_batch(instance, batch)
+            rng = dependencies.rng_factory()
+            if is_sequential_action:
+                if not isinstance(runtime, SequentialActionRuntime):
+                    return _error(
+                        "SEQUENTIAL_ACTION_UNAVAILABLE",
+                        "当前规则运行时没有提供顺序动作 authority",
+                    )
+                sequential = execute_sequential_plan(
+                    instance, runtime, intent, effective_requester,
+                    requester_is_gm, rng,
+                )
+                if not sequential.get("ok"):
+                    return sequential
+                resolved = sequential
+                batches = [
+                    batch for batch in sequential.get("resolved_event_batches") or []
+                    if isinstance(batch, dict)
+                ]
+                applied = {"ok": True, "applied": bool(batches)}
+                for batch in batches:
+                    _project_public_batch(runtime, instance, batch, applied)
+                batch = None
+            else:
+                resolved = runtime.resolve_intent(instance, intent, rng)
+                if not resolved.get("ok"):
+                    return resolved
+                batch = resolved.get("event_batch")
+                if not isinstance(batch, dict):
+                    return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
+                applied = runtime.apply_event_batch(instance, batch)
+                _project_public_batch(runtime, instance, batch, applied)
             if marks_seat:
                 # A player-side intent applied for its own seat: the seat has
                 # acted, so card adoption / deletion become GM-only for it.
@@ -554,7 +585,6 @@ async def submit_intent(
                     module_hooks.SEAT_ACTED, instance, effective_requester,
                     module_hooks.SEAT_SOURCE_INTENT,
                 )
-            _project_public_batch(runtime, instance, batch, applied)
             automatic_batches, automatic_results = _automatic_segment(
                 runtime, instance, rng,
             )
@@ -570,20 +600,32 @@ async def submit_intent(
             if marks_seat:
                 module_hooks.run(module_hooks.SEAT_FORGOTTEN, instance, effective_requester)
             raise
+        resolved_batches = [
+            item for item in (resolved.get("resolved_event_batches") or [batch])
+            if isinstance(item, dict)
+        ]
         await _project_batch_memory(
-            dependencies, runtime, instance, [batch, *automatic_batches],
+            dependencies, runtime, instance, [*resolved_batches, *automatic_batches],
         )
-        return _response(
-            dependencies, rule, runtime, instance, effective_requester,
-            requester_is_gm=requester_is_gm,
-            result={
+        if is_sequential_action:
+            result = {
+                **resolved,
+                "automatic_event_batches": automatic_batches,
+                "automatic_results": automatic_results,
+            }
+        else:
+            result = {
                 **applied,
                 "replayed": bool(resolved.get("replayed", False)),
                 "pending_decision": deepcopy(resolved.get("pending_decision")),
                 "automatic_event_batches": automatic_batches,
                 "automatic_results": automatic_results,
                 "resolved_event_batches": [batch, *automatic_batches],
-            },
+            }
+        return _response(
+            dependencies, rule, runtime, instance, effective_requester,
+            requester_is_gm=requester_is_gm,
+            result=result,
         )
 
 
@@ -698,7 +740,7 @@ async def resume_authoritative_combat(
             "round_number": progression_state.round_value(instance),
         }
         try:
-            rng = random.SystemRandom()
+            rng = dependencies.rng_factory()
             automatic_batches, automatic_results = _automatic_segment(
                 runtime, instance, rng,
             )

@@ -139,6 +139,9 @@ class TurnDependencies:
     # 节点完成，并可生成一次场景过渡叙事。返回结算结果 dict 或 None；
     # None = 未配置（提议保持 advisory-only，行为不变）。
     settle_adventure_completion: Callable[[Any], Awaitable[dict[str, Any] | None]] | None = None
+    # Imported or externally bound gameplay modes fail closed instead of
+    # entering the tabletop round pipeline by accident.
+    gameplay_registry: Any | None = None
 
 
 class TurnResult(TypedDict):
@@ -954,6 +957,16 @@ async def submit_action(
     )
     if not instance:
         return _result({"error": "游戏不存在，请刷新页面重新开始"}, 404)
+    gameplay_registry = getattr(dependencies, "gameplay_registry", None)
+    if gameplay_registry is not None:
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        if gameplay_registry.get(mode_id) is None:
+            return _result({
+                "ok": False,
+                "error_code": "UNSUPPORTED_GAMEPLAY",
+                "error": f"当前客户端/服务端未安装玩法扩展：{mode_id}",
+                "play_mode": mode_id,
+            }, 409)
     rule = dependencies.load_rule_for_game(instance)
     requires_structured = False
     if rule is not None:

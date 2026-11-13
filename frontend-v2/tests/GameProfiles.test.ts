@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({ api: vi.fn() }))
 vi.mock('../src/api/client', async original => ({ ...await original<typeof import('../src/api/client')>(), api: mocks.api }))
 vi.mock('../src/features/play/PlayView.vue', () => ({ default: { template: '<div data-testid="legacy-play">Narrative game</div>' } }))
 vi.mock('../src/features/gal/GalPlayView.vue', () => ({ default: { template: '<div data-testid="gal-play">Gal game</div>' } }))
+vi.mock('../src/features/gameplays/UnsupportedGameplayView.vue', () => ({ default: { template: '<div data-testid="unsupported-gameplay">Unsupported gameplay</div>' } }))
 
 const view = (overrides: Partial<ProfileView> = {}): ProfileView => ({
   ok: true, profile: { id: 'core:demo-survival', version: 1, title: 'Shelter', ui_sections: ['actors', 'resources', 'history'] },
@@ -80,14 +81,30 @@ it('routes a game to the play view its gameplay mode declares', async () => {
   wrapper.unmount()
 })
 
-it('keeps tabletop and unknown modes on the established play view', async () => {
-  for (const play_mode of ['free', 'adventure', 'werewolf', undefined]) {
+it('keeps tabletop modes on the established play view and fails closed for unknown modes', async () => {
+  for (const play_mode of ['free', 'adventure', undefined]) {
     mocks.api.mockReset(); mocks.api.mockResolvedValueOnce({ game_profile: null, play_mode })
     const { wrapper } = await entry(`table-${play_mode}`); await flushPromises()
     expect(wrapper.find('[data-testid=legacy-play]').exists()).toBe(true)
     expect(wrapper.find('[data-testid=gal-play]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid=unsupported-gameplay]').exists()).toBe(false)
     wrapper.unmount()
   }
+
+  mocks.api.mockReset(); mocks.api.mockResolvedValueOnce({ game_profile: null, play_mode: 'werewolf' })
+  const { wrapper } = await entry('table-werewolf'); await flushPromises()
+  expect(wrapper.find('[data-testid=unsupported-gameplay]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid=legacy-play]').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('does not fetch or render a writable profile for an unknown gameplay mode', async () => {
+  mocks.api.mockResolvedValueOnce({ game_profile: { id: 'future:mode' }, play_mode: 'werewolf' })
+  const { wrapper } = await entry('future-mode'); await flushPromises()
+  expect(mocks.api.mock.calls.map(call => call[0])).toEqual(['/games/future-mode', '/games/future-mode/gameplay-view'])
+  expect(wrapper.find('[data-testid=unsupported-gameplay]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid=profile-move-forage]').exists()).toBe(false)
+  wrapper.unmount()
 })
 
 it('fails closed for unsupported profile state without showing a narrative composer', async () => {
@@ -96,6 +113,15 @@ it('fails closed for unsupported profile state without showing a narrative compo
   expect(wrapper.get('[role=alert]').text()).toContain('Unsupported profile version')
   expect(wrapper.find('[data-testid=legacy-play]').exists()).toBe(false)
   wrapper.unmount()
+})
+
+it('renders a successful owner gameplay projection without entering the narrative view', async () => {
+  mocks.api.mockResolvedValueOnce({ game_profile: null, play_mode: 'board' })
+    .mockResolvedValueOnce({ ok: true, mode_id: 'board', read_only: false, view: { slots: [] } })
+  const { wrapper } = await entry('table-board'); await flushPromises()
+  expect(wrapper.find('[data-testid=gameplay-projection-view]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid=gameplay-projection]').text()).toContain('slots')
+  expect(wrapper.find('[data-testid=unsupported-gameplay]').exists()).toBe(false)
 })
 
 it('ignores a stale routing response after navigation to another game', async () => {

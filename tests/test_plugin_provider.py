@@ -125,6 +125,21 @@ def test_new_provider_capability_kind_uses_generic_registration_and_invocation(t
     ) == {"value": 7, "context": {"source": "test"}}
 
 
+def test_provider_capability_collision_fails_closed(tmp_path):
+    initialized = _caps()
+    runtimes = {}
+    for plugin_id in ("provider-a", "provider-b"):
+        runtime = PluginRuntime(
+            manifest={"id": plugin_id, "plugin_type": "provider"},
+            schema={"type": "object", "properties": {}},
+            directory=tmp_path / plugin_id,
+            status="running",
+        )
+        initialize_runtime_capabilities("provider", runtime, initialized)
+        runtimes[plugin_id] = runtime
+    assert find_provider_plugin(runtimes, "text-transform") is None
+
+
 @pytest.mark.asyncio
 async def test_provider_plugin_registers_and_executes_over_stdio_rpc(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

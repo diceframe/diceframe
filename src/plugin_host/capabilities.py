@@ -90,12 +90,15 @@ def find_provider_plugin(
     capability = str(capability or "").strip()
     if not capability:
         return None
+    matches: list[str] = []
     for plugin_id, runtime in runtimes.items():
         if _plugin_type(runtime) != "provider" or runtime.status != "running":
             continue
         if provider_capability(runtime, capability) is not None:
-            return plugin_id
-    return None
+            matches.append(plugin_id)
+    # Provider selection is an authority boundary.  A capability collision
+    # must not silently depend on dictionary order or plugin discovery order.
+    return matches[0] if len(matches) == 1 else None
 
 
 def provider_capability(

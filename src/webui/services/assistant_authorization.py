@@ -1,9 +1,10 @@
 """Server-held, owner-session authorization for bounded Agent tasks."""
 from __future__ import annotations
 
+import secrets
 from copy import deepcopy
 
-SCOPE_KEYS = frozenset({'game_key', 'world_id', 'book_id', 'card_id'})
+SCOPE_KEYS = frozenset({'game_key', 'world_id', 'book_id', 'card_id', 'project_id'})
 
 
 def make_authorization(mode, scope, domains, max_steps, now):
@@ -19,7 +20,7 @@ def make_authorization(mode, scope, domains, max_steps, now):
         raise ValueError('Action budget must be between 1 and 64')
     if mode == 'suggest':
         return None
-    return {'mode': mode, 'scope': deepcopy(scope), 'domains': list(domains), 'max_steps': max_steps,
+    return {'grant_id': secrets.token_urlsafe(12), 'mode': mode, 'scope': deepcopy(scope), 'domains': list(domains), 'max_steps': max_steps,
             'remaining_steps': max_steps, 'expires_at': now + (3600 if mode == 'task' else 14400)}
 
 

@@ -99,6 +99,8 @@ class PluginPublicDetail(TypedDict, total=False):
     bridge_extensions: list[BridgeExtensionDescriptor]
     contributions: list[PluginContributionView]
     docs: object
+    dependencies: list[dict[str, Any]]
+    dependents: list[str]
 
 
 class ListedToolDescriptor(ToolDescriptor):

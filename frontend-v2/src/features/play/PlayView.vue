@@ -4,7 +4,7 @@ import { NIcon } from 'naive-ui'
 import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, KeyOutline, PlayForwardOutline, ShareOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, errorMessage as apiErrorMessage, hasAccessToken, isNotFoundError, retryOnRateLimit } from '@/api/client'
-import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RestActivity, RuleMeta, RulesetDirectorProposal, RulesetGameplayView, StoryMode, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
+import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RestActivity, RuleMeta, RulesetCombatAction, RulesetDirectorProposal, RulesetGameplayView, StoryMode, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { queryString } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { readSeatToken, storeSeatToken } from '@/utils/seatToken'
@@ -47,6 +47,7 @@ import { useDesktopDock } from '@/features/play/surface/useDesktopDock'
 import { usePlayDrawerFocus } from '@/features/play/surface/usePlayDrawerFocus'
 import { workbenchCopy } from '@/features/play/workbench/copy'
 import CombatActionsTool from '@/components/play/CombatActionsTool.vue'
+import SequentialActionComposer from './SequentialActionComposer.vue'
 import MultiplayerPanel from '@/components/play/MultiplayerPanel.vue'
 import MapWorkspace from '@/components/play/MapWorkspace.vue'
 import SceneGalleryModal from '@/components/play/SceneGalleryModal.vue'
@@ -309,12 +310,17 @@ type RulesetTool = 'campaign' | 'combat'
 const activeRulesetTool = ref<RulesetTool | ''>('')
 const directorProposal = ref<RulesetDirectorProposal | null>(null)
 const rulesetGameplay = ref<RulesetGameplayView | null>(null)
+const rulesetAvailableActions = ref<RulesetCombatAction[]>([])
 const rulesetCombatStatus = ref('none')
 const rulesetCampaignStatus = ref('')
 const hasCombatExtension = computed(() => Boolean(game.detail.value?.combat_extension))
 const hasProfessionalTools = computed(() => hasCampaignGuidance.value || hasAuthoritativeCombat.value)
 // 自由规则可能只开启 combat_extension：此时 tools 栏也必须出现，否则「战斗动作」没有入口。
 const hasComposerTools = computed(() => hasProfessionalTools.value || canAskKp.value || hasCombatExtension.value)
+const hasSequentialActionCapability = computed(() => Boolean(
+  game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks
+  || game.detail.value?.ruleset_runtime?.capabilities?.composite_action,
+))
 const rulesetToolCopy = computed(() => (
   resolveRulesetPlayExtension(String(game.detail.value?.ruleset_runtime?.id || ''))
     ?.copy(String(locale.value))
@@ -341,6 +347,7 @@ async function syncEncounterTool(): Promise<void> {
     const response = await fetchRulesetAvailableActions(gameKey)
     if (sequence !== rulesetToolSequence || game.currentGame.value !== gameKey) return
     rulesetGameplay.value = response.gameplay
+    rulesetAvailableActions.value = response.available_actions || []
     directorProposal.value = response.gameplay.director?.proposal?.kind === 'narrative'
       ? null
       : response.gameplay.director?.proposal || null
@@ -361,6 +368,7 @@ async function syncEncounterTool(): Promise<void> {
     // The normal play surface remains usable if the optional tool state cannot sync.
     directorProposal.value = null
     rulesetGameplay.value = null
+    rulesetAvailableActions.value = []
     rulesetCombatStatus.value = 'none'
     rulesetCampaignStatus.value = ''
   }
@@ -373,6 +381,7 @@ function resetRulesetToolPolling(): void {
   previousEncounterPhase = ''
   directorProposal.value = null
   rulesetGameplay.value = null
+  rulesetAvailableActions.value = []
   rulesetCombatStatus.value = 'none'
   rulesetCampaignStatus.value = ''
   if (!hasAuthoritativeCombat.value || !game.currentGame.value) return
@@ -1585,6 +1594,15 @@ function onPlayKeydown(event: KeyboardEvent) {
                 :is-gm="game.isGm.value"
                 @changed="game.refresh(true)"
               />
+              <SequentialActionComposer
+                v-if="hasSequentialActionCapability"
+                :game-key="game.currentGame.value"
+                :actor-id="actorId"
+                :actions="rulesetAvailableActions"
+                :sequential-checks="Boolean(game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks)"
+                :composite-action="Boolean(game.detail.value?.ruleset_runtime?.capabilities?.composite_action)"
+                @changed="refreshRulesetPanels"
+              />
               <button
                 v-if="hasCampaignGuidance"
                 class="campaign-tool-trigger"
@@ -1636,6 +1654,15 @@ function onPlayKeydown(event: KeyboardEvent) {
                 :self-uid="game.actorId.value"
                 :is-gm="game.isGm.value"
                 @changed="game.refresh(true)"
+              />
+              <SequentialActionComposer
+                v-if="hasSequentialActionCapability"
+                :game-key="game.currentGame.value"
+                :actor-id="actorId"
+                :actions="rulesetAvailableActions"
+                :sequential-checks="Boolean(game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks)"
+                :composite-action="Boolean(game.detail.value?.ruleset_runtime?.capabilities?.composite_action)"
+                @changed="refreshRulesetPanels"
               />
               <button
                 v-if="hasCampaignGuidance"

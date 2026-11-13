@@ -17,6 +17,9 @@ from src.webui.routes.game_route_common import (
 from src.webui.routes.game_query_routes import (
     api_games,
     api_detail,
+    api_gameplay_view,
+    api_gameplay_action,
+    api_gameplay_slot,
     api_game_adventure_projection,
     api_game_scene_image_file,
     api_game_scene_image_update,
@@ -134,6 +137,9 @@ def register_games(app: web.Application) -> None:
     app.router.add_get("/api/games", api_games)
     app.router.add_post("/api/games/import", api_import_game)
     app.router.add_get("/api/games/{game_key}", api_detail)
+    app.router.add_get("/api/games/{game_key}/gameplay-view", api_gameplay_view)
+    app.router.add_post("/api/games/{game_key}/gameplay-actions/{action}", api_gameplay_action)
+    app.router.add_get("/api/games/{game_key}/gameplay-slots/{slot}", api_gameplay_slot)
     app.router.add_get("/api/games/{game_key}/adventure", api_game_adventure_projection)
     app.router.add_get("/api/games/{game_key}/scene-image", api_game_scene_image_file)
     app.router.add_get('/api/games/{game_key}/lorebooks', api_game_lorebooks)

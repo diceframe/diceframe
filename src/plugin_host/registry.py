@@ -131,6 +131,22 @@ class ContributionRegistry:
             return list(self._items)
         return [item for item in self._items if item.kind == kind]
 
+    def validate_static_plugin(
+        self, manifest: PluginManifest, plugin_dir: Path, *, replacing_plugin_id: str = "",
+    ) -> None:
+        """Preflight one package against the complete installed registry.
+
+        Installation must reject cross-plugin conflicts before touching the
+        live directory.  The clone keeps the real registry unchanged.
+        """
+
+        clone = ContributionRegistry()
+        for item in self._items:
+            clone._add(item)
+        if replacing_plugin_id:
+            clone.clear_plugin(str(replacing_plugin_id))
+        clone.register_static_plugin(manifest, plugin_dir)
+
     def find(self, kind: str, key: str, *, plugin_id: str = "") -> PluginContribution | None:
         if plugin_id:
             return self._by_ref.get(ResourceRef(f"plugin:{plugin_id}", kind, key))

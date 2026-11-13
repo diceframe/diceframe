@@ -16,6 +16,7 @@ import pytest
 from PIL import Image
 
 from src.plugin_host import PluginHost
+from src.plugin_host.requirements import parse_ruleset_requirements
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.rules.rule_system import RuleSystem
 from src.webui.services import content_pack_maps as content_pack_map_service
@@ -26,6 +27,30 @@ from src.webui.services import worlds as world_service
 
 
 from plugin_host_common import write_plugin, write_png, make_plugin_zip
+
+
+def test_plugin_ruleset_requirement_shape_is_versioned_and_fail_closed():
+    assert parse_ruleset_requirements({
+        "requires": {"rulesets": [{"id": "core:dnd2024", "minimum_version": 2}]},
+    }) == [{"id": "core:dnd2024", "minimum_version": 2}]
+    with pytest.raises(ValueError, match="unknown field"):
+        parse_ruleset_requirements({"requires": {"rulesets": [{"id": "x", "extra": True}]}})
+    with pytest.raises(ValueError, match="duplicate"):
+        parse_ruleset_requirements({"requires": {"rulesets": [{"id": "x"}, {"id": "x"}]}})
+
+
+def test_plugin_host_rejects_malformed_ruleset_requirements_before_activation(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "bad-requirement",
+        manifest_extra={"requires": {"rulesets": [{"id": "core:demo", "minimum_version": "1"}]}},
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    detail = host.public_detail("bad-requirement")
+    assert detail["status"] == "failed"
+    assert "minimum_version" in detail["error"]
 
 class FakeMarketplace:
     def __init__(self, payload, *, plugin_id="demo-plugin", version="1"):
@@ -52,9 +77,77 @@ async def test_install_and_uninstall_plugin_zip(tmp_path):
 
     assert installed["id"] == "demo-plugin"
     assert (tmp_path / "plugins" / "demo-plugin" / "plugin.json").exists()
+    receipt = json.loads((tmp_path / "data" / "demo-plugin" / "install.json").read_text())
+    assert receipt["schema_version"] == 1
+    assert receipt["plugin_id"] == "demo-plugin"
+    assert len(receipt["manifest_digest"]) == 64
     removed = await host.uninstall("demo-plugin")
     assert removed["uninstalled"] is True
     assert not (tmp_path / "plugins" / "demo-plugin").exists()
+
+
+@pytest.mark.asyncio
+async def test_discover_fails_closed_when_install_manifest_digest_is_tampered(tmp_path):
+    package = tmp_path / "demo.zip"
+    make_plugin_zip(package)
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    await host.install_from_zip(package.read_bytes())
+    manifest_path = tmp_path / "plugins" / "demo-plugin" / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["description"] = "tampered"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    restarted.discover()
+    detail = restarted.public_detail("demo-plugin")
+    assert detail["status"] == "failed"
+    assert "digest mismatch" in detail["error"]
+    assert restarted.contributions.list() == []
+
+
+@pytest.mark.asyncio
+async def test_install_rejects_cross_plugin_contribution_conflict_before_publish(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        "existing-pack",
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"contributes": {"world_templates": ["worlds/*.json"]}},
+    )
+    (plugins / "existing-pack" / "worlds").mkdir()
+    (plugins / "existing-pack" / "worlds" / "shared.json").write_text(
+        json.dumps({"world_id": "shared-world", "world_name": "Shared"}),
+        encoding="utf-8",
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    await host.start("existing-pack", require_enabled=False)
+
+    package = tmp_path / "conflict.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("candidate-pack/plugin.json", json.dumps({
+            "schema_version": 1,
+            "id": "candidate-pack",
+            "name": "Candidate",
+            "version": "1",
+            "description": "candidate",
+            "plugin_type": "content-pack",
+            "contributes": {"world_templates": ["worlds/*.json"]},
+            "config_schema": "config.schema.json",
+        }))
+        archive.writestr("candidate-pack/config.schema.json", json.dumps({
+            "type": "object", "properties": {},
+        }))
+        archive.writestr(
+            "candidate-pack/worlds/shared.json",
+            json.dumps({"world_id": "shared-world", "world_name": "Conflict"}),
+        )
+
+    with pytest.raises(ValueError, match="plain ID 冲突"):
+        await host.install_from_zip(package.read_bytes())
+    assert not (plugins / "candidate-pack").exists()
+    assert host.public_detail("existing-pack")["status"] == "active"
 
 
 @pytest.mark.asyncio

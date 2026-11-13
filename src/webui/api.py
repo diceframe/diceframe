@@ -11,6 +11,7 @@ from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 import asyncio
 import json
 import logging
+import tempfile
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +25,9 @@ from src.engine.game_state import GameState
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
+from src.creator import CreatorProjectStore
+from src.creator.worker_jobs import WorkerJobStore
+from src.creator.worker import WorkerPolicy, run_worker
 
 from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
@@ -43,9 +47,12 @@ from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
+from src.webui.services.ui_actions import UiActionDependencies, dispatch_ui_action
 from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
+from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+from src.gameplays.contracts import GameplayProviderRegistry, project_gameplay_view
 from src.game_profiles.service import ProfileService, ProfileDependencies
 from src.webui.services.ai_seats import AISeatDependencies, AISeatRuntime, AISeatService
 from src.webui.services.check_decisions import CheckDecisionDependencies, CheckDecisionService
@@ -161,6 +168,7 @@ class WebAPI:
                  text_gen_max_tokens: int = DEFAULT_TEXT_GEN_MAX_TOKENS, plugin_host=None, hub_client=None,
                  speech_service=None, asr_service=None, imagegen_service=None,
                  ruleset_registry: RulesetRuntimeRegistry | None = None,
+                 gameplay_provider_registry: GameplayProviderRegistry | None = None,
                  content_cache_dir: Path | None = None,
                  content_mirrors: Any | None = None,
                  config_state: dict | None = None,
@@ -168,10 +176,16 @@ class WebAPI:
                  assistant_agent_max_tokens: int = 4096,
                  assistant_agent_task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS):
         self._reg = registry
+        self._creator_projects = CreatorProjectStore(self._reg.save_dir.parent / "creator-projects.json")
+        self._creator_worker_jobs = WorkerJobStore(self._reg.save_dir.parent / "creator-worker-jobs.json")
         self._lore = lorebook
         self._mem = memory
         self._rules_dir = rules_dir
         self._handler = handler
+        # External gameplay owners may be injected at the composition root.
+        # An empty registry is intentional: unsupported modes receive a
+        # read-only diagnostic instead of entering the TRPG view by default.
+        self._gameplay_providers = gameplay_provider_registry or GameplayProviderRegistry()
         self._config_state = config_state if config_state is not None else {}
         self._ai_seat_runtime = AISeatRuntime(config_state=lambda: self._config_state)
         self._ai_seats = AISeatService(AISeatDependencies(
@@ -772,6 +786,7 @@ class WebAPI:
             economy_auto_reward_settings=self.economy_auto_reward_settings,
             resolve_reward=self.resolve_reward_as_gm,
             settle_adventure_completion=self._settle_adventure_completion_for,
+            gameplay_registry=DEFAULT_GAMEPLAYS,
         )
         self._map_dependencies = maps.MapDependencies(
             get_instance=self._reg.get,
@@ -1015,6 +1030,10 @@ class WebAPI:
             generate_rule=self.generate_rule, generate_image=self.generate_generated_image,
             invoke_plugin_tool=self.invoke_plugin_tool, update_plugin=self.update_plugin_config,
             runtime_logs=lambda: assistant_runtime_log_context(self._reg.save_dir.parent),
+            creator_projects=self._creator_projects,
+            worker_jobs=self._creator_worker_jobs,
+            run_creator_worker=self.run_creator_worker,
+            build_creator_project=self.build_creator_project,
         ))
         def agent_game_players(game_key, owner):
             instance = self.get_game_instance(game_key)
@@ -1150,6 +1169,9 @@ class WebAPI:
 
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)
+
+    def list_plugin_dependencies(self) -> dict[str, Any]:
+        return plugins.list_plugin_dependencies(self._plugin_host_dependencies)
 
     def list_modules(self) -> dict[str, Any]:
         return modules.list_modules(self._module_dependencies)
@@ -1349,6 +1371,210 @@ class WebAPI:
     def list_plugin_types(self) -> dict[str, Any]:
         return plugins.list_plugin_types()
 
+    def list_plugin_ui(self) -> dict[str, Any]:
+        describe_action = getattr(getattr(self, "application_actions", None), "describe", None)
+        return plugins.list_plugin_ui(plugins.PluginHostDependencies(
+            plugin_host=self._plugins,
+            describe_action=describe_action if callable(describe_action) else None,
+        ))
+
+    def prebuilt_plugin_ui_descriptor(self, plugin_id: str) -> dict[str, Any]:
+        return plugins.prebuilt_ui_descriptor(
+            plugins.PluginHostDependencies(plugin_host=self._plugins), plugin_id,
+        )
+
+    def prebuilt_plugin_ui_asset_path(self, plugin_id: str, relative_path: str):
+        return plugins.prebuilt_ui_asset_path(
+            plugins.PluginHostDependencies(plugin_host=self._plugins),
+            plugin_id, relative_path,
+        )
+
+    def project_plugin_ui(
+        self, plugin_id: str, projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        describe_action = getattr(getattr(self, "application_actions", None), "describe", None)
+        return plugins.project_plugin_ui(
+            plugins.PluginHostDependencies(
+                plugin_host=self._plugins,
+                describe_action=describe_action if callable(describe_action) else None,
+            ),
+            plugin_id,
+            projection,
+        )
+
+    async def dispatch_ui_action(
+        self, action_name: str, owner_id: str, arguments: Any,
+    ) -> dict[str, Any]:
+        return await dispatch_ui_action(
+            UiActionDependencies(self.application_actions),
+            action_name,
+            owner_id,
+            arguments,
+        )
+
+    def list_creator_projects(self, owner_id: str) -> dict[str, Any]:
+        return self._creator_projects.list(owner_id)
+
+    def list_creator_worker_jobs(
+        self, owner_id: str, project_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_worker_jobs.list(owner_id, project_id)
+
+    async def run_creator_worker(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        expected_revision: int,
+        command: list[str],
+        cwd: str = ".",
+        source_trust: str = "trusted",
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one revision-scoped Creator command and persist its receipt."""
+
+        project = self._creator_projects.read(owner_id, project_id)["project"]
+        if project.get("revision") != expected_revision:
+            raise ValueError("工程版本已变化，请重新读取后再执行 worker")
+        created = self._creator_worker_jobs.create(
+            owner_id, project_id, command,
+            cwd=cwd, source_trust=source_trust,
+            idempotency_key=idempotency_key,
+        )
+        row = created["job"]
+        if created.get("reused") and row.get("status") == "completed":
+            return {"ok": True, "reused": True, "job": row, "result": row.get("result")}
+        claim = self._creator_worker_jobs.claim(owner_id, row["id"])
+        with tempfile.TemporaryDirectory(
+            prefix=f"creator-worker-{project_id}-",
+            dir=str(self._reg.save_dir.parent),
+        ) as workspace_name:
+            workspace = Path(workspace_name).resolve()
+            for relative, content in (project.get("files") or {}).items():
+                target = (workspace / str(relative).replace("\\", "/")).resolve()
+                if workspace not in target.parents:
+                    self._creator_worker_jobs.fail(
+                        owner_id, row["id"], claim["lease_id"], "worker file escaped workspace",
+                    )
+                    raise ValueError("工程文件路径越界")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(str(content), encoding="utf-8")
+            try:
+                result = await run_worker(
+                    command,
+                    project_root=workspace,
+                    cwd=cwd,
+                    policy=WorkerPolicy(),
+                    source_trust=source_trust,
+                )
+            except Exception as exc:
+                receipt = self._creator_worker_jobs.fail(
+                    owner_id, row["id"], claim["lease_id"], str(exc),
+                )
+                return {"ok": False, "job": receipt["job"], "error": str(exc)}
+        if result.get("status") == "timeout":
+            receipt = self._creator_worker_jobs.fail(
+                owner_id, row["id"], claim["lease_id"], "worker timed out", timeout=True,
+            )
+        else:
+            receipt = self._creator_worker_jobs.complete(
+                owner_id, row["id"], claim["lease_id"], result,
+            )
+        return {"ok": bool(result.get("ok")), "job": receipt["job"], "result": result}
+
+    def create_creator_project(
+        self, owner_id: str, name: str, source: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_projects.create(owner_id, name, source=source)
+
+    def read_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.read(owner_id, project_id)
+
+    def update_creator_project(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        expected_revision: int,
+        files: dict[str, str] | None = None,
+        remove: list[str] | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_projects.update(
+            owner_id,
+            project_id,
+            expected_revision=expected_revision,
+            files=files,
+            remove=remove,
+            name=name,
+        )
+
+    def validate_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.validate(owner_id, project_id)
+
+    def preview_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.preview(owner_id, project_id)
+
+    def delete_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.delete(owner_id, project_id)
+
+    def build_creator_project(
+        self, owner_id: str, project_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        result = self._creator_projects.build(
+            owner_id, project_id, expected_revision=expected_revision,
+        )
+        if not result.get("ok") or self._plugins is None:
+            if result.get("ok") and self._plugins is None:
+                return {"ok": False, "error": "插件宿主未启用，无法完成包预检"}
+            return result
+        payload = result["payload"]
+        try:
+            checked = self._plugins.validate_package(
+                payload, lambda _directory, manifest: {
+                    "ok": True,
+                    "id": str(manifest.get("id") or ""),
+                    "version": str(manifest.get("version") or ""),
+                },
+            )
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "project_id": result["project_id"],
+                "revision": result["revision"],
+                "digest": result["digest"],
+            }
+        return {key: value for key, value in result.items() if key != "payload"} | {
+            "validation": checked,
+            "payload": payload,
+        }
+
+    def prepare_creator_submission(
+        self, owner_id: str, project_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        """Return release metadata only; uploading remains an explicit user action."""
+
+        result = self.build_creator_project(
+            owner_id, project_id, expected_revision=expected_revision,
+        )
+        if not result.get("ok"):
+            return result
+        manifest = result.get("manifest") if isinstance(result.get("manifest"), dict) else {}
+        version = str(manifest.get("version") or "0.0.0")
+        return {
+            key: value for key, value in result.items() if key not in {"payload"}
+        } | {
+            "submission": {
+                "filename": result.get("filename", ""),
+                "release_tag": f"v{version}",
+                "artifact_sha256": result.get("artifact_sha256", ""),
+                "revision": result.get("revision"),
+                "requires_manual_upload": True,
+                "requires_user_review": True,
+            },
+        }
+
     def list_speech_voices(self) -> dict[str, Any]:
         return self._web_speech.list_voices()
 
@@ -1440,6 +1666,19 @@ class WebAPI:
     def read_plugin_docs(self, plugin_id: str) -> dict[str, Any]:
         return plugins.read_plugin_docs(self._plugin_host_dependencies, plugin_id)
 
+    def list_plugin_rulebooks(self, plugin_id: str, *, viewer_is_gm: bool = False) -> dict[str, Any]:
+        return plugins.list_plugin_rulebooks(
+            self._plugin_host_dependencies, plugin_id, viewer_is_gm=viewer_is_gm,
+        )
+
+    def read_plugin_rulebook(
+        self, plugin_id: str, book_id: str, *, viewer_is_gm: bool = False,
+    ) -> dict[str, Any]:
+        return plugins.read_plugin_rulebook(
+            self._plugin_host_dependencies, plugin_id, book_id,
+            viewer_is_gm=viewer_is_gm,
+        )
+
     async def update_plugin_config(self, plugin_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         if changes.get("enabled") is False:
             modules.assert_module_action_allowed(
@@ -1473,6 +1712,16 @@ class WebAPI:
         result = await plugins.install_plugin(
             self._plugin_lifecycle_dependencies, payload, overwrite,
             expected_plugin_type=expected_plugin_type,
+        )
+        if result.get("ok"):
+            self.refresh_content_sources()
+        return result
+
+    async def install_plugin_group(
+        self, payloads: list[bytes], overwrite: bool = False,
+    ) -> dict[str, Any]:
+        result = await plugins.install_plugin_group(
+            self._plugin_lifecycle_dependencies, payloads, overwrite,
         )
         if result.get("ok"):
             self.refresh_content_sources()
@@ -1864,6 +2113,105 @@ class WebAPI:
             viewer_uid,
             viewer_is_gm,
         )
+
+    def gameplay_view(self, game_key: str, viewer_uid: str, viewer_is_gm: bool = False) -> dict[str, Any]:
+        """Project an owner-supplied non-TRPG gameplay view.
+
+        This boundary deliberately does not infer a provider from the mode
+        name or fall back to the narrative TRPG view.  Built-in narrative
+        modes keep their existing endpoint; external providers are registered
+        explicitly by the composition root.
+        """
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "read_only": True}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        result = project_gameplay_view(
+            self._gameplay_providers,
+            mode_id,
+            instance,
+            str(viewer_uid or ""),
+            viewer_is_gm=bool(viewer_is_gm),
+        )
+        if result.get("ok") and isinstance(result.get("view"), dict):
+            view = dict(result["view"])
+            raw_ui = view.get("ui")
+            if raw_ui is not None:
+                try:
+                    from src.webui.ui_extension_probe import (
+                        normalize_declarative_descriptor,
+                        project_declarative_descriptor,
+                    )
+
+                    descriptor = normalize_declarative_descriptor(raw_ui)
+                    view["ui"] = project_declarative_descriptor(descriptor, view)
+                except (TypeError, ValueError) as exc:
+                    return {
+                        "ok": False,
+                        "code": "GAMEPLAY_VIEW_UNAVAILABLE",
+                        "mode_id": mode_id,
+                        "read_only": True,
+                        "diagnostic": str(exc),
+                    }
+            result["view"] = view
+        return result
+
+    async def gameplay_action(
+        self,
+        game_key: str,
+        viewer_uid: str,
+        viewer_is_gm: bool,
+        action: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND"}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        try:
+            result = await self._gameplay_providers.dispatch_action(
+                mode_id, instance, str(viewer_uid or ""), bool(viewer_is_gm), action, arguments,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "code": "GAMEPLAY_ACTION_UNAVAILABLE",
+                "mode_id": mode_id,
+                "error": str(exc),
+            }
+        return {"ok": True, "mode_id": mode_id, "result": result}
+
+    def gameplay_slot(
+        self, game_key: str, viewer_uid: str, viewer_is_gm: bool, slot: str,
+    ) -> dict[str, Any]:
+        """Project an owner-defined create/character/GM slot for a bound mode."""
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "read_only": True}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        try:
+            self._gameplay_providers.validate_instance(mode_id, instance)
+            view = self._gameplay_providers.project_slot(
+                mode_id, instance, str(viewer_uid or ""), bool(viewer_is_gm), slot,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "code": "GAMEPLAY_SLOT_UNAVAILABLE",
+                "mode_id": mode_id,
+                "slot": slot,
+                "read_only": True,
+                "diagnostic": str(exc),
+            }
+        return {
+            "ok": True,
+            "mode_id": mode_id,
+            "slot": slot,
+            "read_only": bool(view.get("read_only", False)),
+            "view": view,
+        }
 
     def game_adventure_projection(
         self, game_key: str, *, viewer_is_gm: bool, viewer_uid: str = "",
@@ -2528,12 +2876,29 @@ class WebAPI:
             None,
         )
         if card is not None:
+            instance = self.get_game_instance(game_key)
+            target_rule = (
+                self._character_dependencies.rules.load_rule_for_game(instance)
+                if instance is not None
+                else None
+            )
+            source_rule_id = str(card.get("rule_id") or "").strip()
+            target_rule_id = str(getattr(target_rule, "rule_id", "") or "").strip()
+            if source_rule_id and target_rule_id and source_rule_id != target_rule_id:
+                return {
+                    "ok": False,
+                    "error_code": "INCOMPATIBLE_RULESET_CHARACTER",
+                    "error": "角色卡规则与当前对局规则不兼容，请先复制或转换角色卡",
+                    "source_rule_id": source_rule_id,
+                    "target_rule_id": target_rule_id,
+                }
             result = await characters.adopt_library_card(
                 self._character_dependencies, game_key, user_id, card,
                 gm_authority=gm_authority,
             )
             if result.get("error_code") != "RULESET_CHARACTER_OPERATION_REQUIRED":
                 return result
+
         return await ruleset_characters.adopt_character_card(
             self._ruleset_character_dependencies, game_key, user_id, card_id,
             gm_authority=gm_authority,

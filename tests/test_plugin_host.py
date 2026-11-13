@@ -97,6 +97,107 @@ def test_read_docs_rejects_path_traversal(tmp_path):
     assert result["found"] is False
 
 
+def test_read_docs_uses_bounded_pdf_projection(tmp_path):
+    import base64
+
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, manifest_extra={"docs": "rulebook.pdf"})
+    (plugins / "example" / "rulebook.pdf").write_bytes(b"%PDF-1.7 bounded")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    result = host.read_docs("example")
+
+    assert result["ok"] is True
+    assert result["kind"] == "pdf"
+    assert base64.b64decode(result["content"]) == b"%PDF-1.7 bounded"
+
+
+def test_rulebooks_manifest_is_validated_and_audience_projected(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, manifest_extra={"rulebooks": [
+        {"id": "player", "title": "Player Rules", "path": "docs/player.md", "audience": "player"},
+        {"id": "gm", "title": "GM Guide", "path": "docs/gm.md", "audience": "gm"},
+    ]})
+    (plugins / "example" / "docs").mkdir()
+    (plugins / "example" / "docs" / "player.md").write_text("# Player", encoding="utf-8")
+    (plugins / "example" / "docs" / "gm.md").write_text("# GM", encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    assert [book["id"] for book in host.list_rulebooks("example")["rulebooks"]] == ["player"]
+    assert host.read_rulebook("example", "gm")["ok"] is False
+    assert host.read_rulebook("example", "gm", viewer_is_gm=True)["content"] == "# GM"
+    assert host.read_rulebook("example", "player")["content"] == "# Player"
+
+
+def test_rulebooks_manifest_rejects_missing_files_and_unknown_audience(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, manifest_extra={"rulebooks": [
+        {"id": "secret", "title": "Secret", "path": "docs/secret.txt", "audience": "gm"},
+    ]})
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    detail = host.public_detail("example")
+    assert detail["status"] == "failed"
+    assert "rulebook" in detail["error"]
+
+
+def test_rulebooks_manifest_supports_https_external_links_without_fetching(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, manifest_extra={"rulebooks": [
+        {"id": "remote", "title": "Remote Rules", "url": "https://rules.example/book", "audience": "player"},
+    ]})
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    listed = host.list_rulebooks("example")["rulebooks"]
+    assert listed == [{
+        "id": "remote", "title": "Remote Rules", "url": "https://rules.example/book",
+        "audience": "player", "kind": "external",
+    }]
+    read = host.read_rulebook("example", "remote")
+    assert read["ok"] is True
+    assert read["external"] is True
+    assert read["content"] is None
+
+
+def test_rulebooks_manifest_rejects_non_https_external_links(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, manifest_extra={"rulebooks": [
+        {"id": "remote", "title": "Remote Rules", "url": "http://rules.example/book", "audience": "player"},
+    ]})
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    assert host.public_detail("example")["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_prebuilt_ui_manifest_is_package_owned_and_path_bound(tmp_path):
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins,
+        plugin_type="content-pack",
+        entrypoint=False,
+        manifest_extra={"prebuilt_ui": {
+            "entrypoint": "ui/index.html",
+            "assets": ["ui/app.js", "ui/style.css"],
+        }},
+    )
+    ui = plugins / "example" / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("<html></html>", encoding="utf-8")
+    (ui / "app.js").write_text("console.log('ok')", encoding="utf-8")
+    (ui / "style.css").write_text("body{}", encoding="utf-8")
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+    await host.start("example", require_enabled=False)
+    assert host.prebuilt_ui_descriptor("example")["entrypoint"] == "ui/index.html"
+    assert host.prebuilt_ui_asset_path("example", "ui/app.js").is_file()
+    with pytest.raises(ValueError, match="未在 prebuilt_ui"):
+        host.prebuilt_ui_asset_path("example", "plugin.json")
+    await host.cleanup()
+
+
 def test_list_plugin_types_drives_frontend_filters():
     """前端筛选/展示由后端类型表驱动：filterable 类型按 filter_order 升序。"""
     from src.plugin_host.support import list_plugin_types

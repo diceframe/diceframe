@@ -36,6 +36,7 @@ from src.plugin_host.support import (
     content_profile,
     validate_content_module_profile,
 )
+from src.plugin_host.requirements import parse_ruleset_requirements
 from src.rulesets.module_catalogs import (
     ModuleCatalogError,
     load_declared_module_catalog,
@@ -112,31 +113,7 @@ def parse_requires(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     缺省 = 无 runtime 要求（传统 content-pack）。
     """
 
-    requires = (manifest or {}).get("requires")
-    if requires is None:
-        return []
-    if not isinstance(requires, dict):
-        raise ValueError("requires 必须是对象")
-    rulesets = requires.get("rulesets")
-    if rulesets is None:
-        return []
-    if not isinstance(rulesets, list):
-        raise ValueError("requires.rulesets 必须是数组")
-    parsed: list[dict[str, Any]] = []
-    for entry in rulesets:
-        if not isinstance(entry, dict):
-            raise ValueError("requires.rulesets entry 必须是对象")
-        extra = sorted(set(entry) - {"id", "minimum_version"})
-        if extra:
-            raise ValueError(f"requires.rulesets entry has unknown field: {extra[0]!r}")
-        runtime_id = str(entry.get("id") or "").strip()
-        if not runtime_id:
-            raise ValueError("requires.rulesets entry id is required")
-        minimum = entry.get("minimum_version", 1)
-        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
-            raise ValueError("requires.rulesets minimum_version must be a positive integer")
-        parsed.append({"id": runtime_id, "minimum_version": minimum})
-    return parsed
+    return parse_ruleset_requirements(manifest or {})
 
 
 def _deps_value(deps: Any, name: str) -> Any:

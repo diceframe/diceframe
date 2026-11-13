@@ -11,6 +11,7 @@ import { useTheme, type SkinName } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import { renderSafeMarkdown } from '@/utils/markdown'
 import type { PluginInfo } from '@/api/types'
+import type { PluginUiView } from '@/api/types'
 import { pluginApi } from '@/api/plugins'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { usePluginContent } from './usePluginContent'
@@ -141,6 +142,19 @@ const skinDescriptionKeys = {
 } as const satisfies Record<SkinName, string>
 const pluginDocs = ref<Record<string, { content: string; name: string }>>({})
 const pluginDocsLoading = ref<Record<string, boolean>>({})
+const pluginUiViews = ref<PluginUiView[]>([])
+const pluginUiDiagnostics = ref<Array<{ plugin_id: string; error: string }>>([])
+
+async function loadPluginUi() {
+  try {
+    const response = await pluginApi.ui()
+    pluginUiViews.value = response.views || []
+    pluginUiDiagnostics.value = response.diagnostics || []
+  } catch {
+    pluginUiViews.value = []
+    pluginUiDiagnostics.value = []
+  }
+}
 
 async function loadPluginDocs(pluginId: string) {
   if (pluginDocs.value[pluginId] !== undefined || pluginDocsLoading.value[pluginId]) return
@@ -160,7 +174,7 @@ async function loadPluginDocs(pluginId: string) {
 onMounted(async () => {
   await load()
   await Promise.all([
-    loadMarketplace(), loadMirrors(), loadContentResources(), loadLorebooks(), loadTypes(), settingsStore.load(),
+    loadMarketplace(), loadMirrors(), loadContentResources(), loadLorebooks(), loadTypes(), loadPluginUi(), settingsStore.load(),
   ])
 })
 </script>
@@ -298,6 +312,25 @@ onMounted(async () => {
       />
     </NTabPane>
 
+    <NTabPane name="ui" :tab="t('pluginUiTab')">
+      <section class="plugin-ui-registry" data-testid="plugin-ui-registry">
+        <p class="muted">{{ t('pluginUiDescription') }}</p>
+        <div v-if="pluginUiDiagnostics.length" class="plugin-ui-diagnostics">
+          <p v-for="item in pluginUiDiagnostics" :key="item.plugin_id + item.error" class="error-banner">
+            {{ item.plugin_id }}: {{ item.error }}
+          </p>
+        </div>
+        <div v-if="pluginUiViews.length" class="plugin-ui-views">
+          <article v-for="view in pluginUiViews" :key="view.plugin_id" class="plugin-ui-view">
+            <strong>{{ view.plugin_name || view.plugin_id }}</strong>
+            <span class="muted">{{ view.plugin_id }}</span>
+            <pre>{{ JSON.stringify(view.descriptor, null, 2) }}</pre>
+          </article>
+        </div>
+        <p v-else class="muted">{{ t('pluginUiEmpty') }}</p>
+      </section>
+    </NTabPane>
+
     <NTabPane name="mirrors" :tab="t('mirrorSources')">
       <MirrorsTab
         :mirrors="mirrors"
@@ -346,6 +379,10 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
 }
+.plugin-ui-registry { display: grid; gap: 12px; }
+.plugin-ui-views { display: grid; gap: 12px; }
+.plugin-ui-view { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.plugin-ui-view pre { max-height: 360px; overflow: auto; margin: 0; padding: 10px; border-radius: var(--df-radius-sm); color: var(--df-text-muted); background: var(--df-surface-2); font-size: 12px; }
 
 @media (max-width: 560px) {
   .plugin-surface-tabs :deep(.n-tabs-nav-scroll-content) { min-width: max-content; }

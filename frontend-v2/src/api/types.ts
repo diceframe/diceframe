@@ -954,6 +954,8 @@ export interface RulesetRuntimeCapabilities {
   session_zero: boolean
   tutorial_coach: boolean
   narrative_turns: boolean
+  sequential_checks?: boolean
+  composite_action?: boolean
   adventure_formats?: string[]
 }
 
@@ -2061,6 +2063,9 @@ export interface PluginMarketplaceItem {
   branch?: string
   stars?: number
   distribution?: 'repository' | 'bundled' | string
+  listing_status?: 'approved' | 'paused' | 'withdrawn' | string
+  listing_status_reason?: string
+  listing_status_at?: string
   risk_level?: 'declarative' | 'unrestricted-process' | 'bundled' | 'unknown' | string
   update_policy?: 'automatic' | 'notify' | 'application' | 'approval-required' | 'blocked' | string
   author?: unknown
@@ -2079,6 +2084,10 @@ export interface PluginMarketplaceItem {
   installed_update_policy?: string
   trust_level?: 'official' | 'verified' | 'community' | string
   commit_sha?: string
+  approved_release_tag?: string
+  approved_commit?: string
+  approved_archive_url?: string
+  approved_artifact_sha256?: string
   approved_permissions?: string[]
   permission_changes?: string[]
   verified?: boolean
@@ -2122,6 +2131,19 @@ export interface PluginMarketplaceItem {
     rating?: { stars: number; tags: string[] } | null
   }
   generated_at?: string
+}
+
+export interface PluginUiView {
+  plugin_id: string
+  plugin_name: string
+  descriptor: Record<string, unknown>
+}
+
+export interface PluginUiResponse {
+  ok: boolean
+  views: PluginUiView[]
+  diagnostics?: Array<{ plugin_id: string; error: string }>
+  error?: string
 }
 
 export interface PluginMarketplaceResponse {
@@ -2269,8 +2291,19 @@ export interface AppConfig {
   fallback2_enabled?: boolean
   fallback2_model?: string
   embedding_enabled?: boolean
+  embedding_source?: 'external' | 'local' | string
+  embedding_local_model_id?: string
+  embedding_local_models?: Array<{ id: string; display_name?: string; version?: string; dimension?: number; license?: string; status?: string; error?: string }>
+  embedding_model_catalog?: Array<{ id: string; display_name?: string; version?: string; dimension?: number; license?: string; status?: string }>
   embedding_model?: string
   embedding_max_input?: number
+  embedding_status?: {
+    profile?: string | null
+    total_active?: number
+    ready_current_profile?: number
+    pending?: number
+    state?: 'ready' | 'rebuilding' | 'disabled' | string
+  }
   narrative_max_tokens?: number
   character_gen_max_tokens?: number
   summary_max_tokens?: number

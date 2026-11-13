@@ -7,6 +7,7 @@ import hashlib
 import logging
 import secrets
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -46,16 +47,19 @@ class PluginMarketplace:
         source: MarketplaceSource | None = None,
         *,
         hub_client: Any = None,
+        cache_path: Path | None = None,
     ) -> None:
         self.mirrors = mirrors
         self.source = source or MarketplaceSource()
         self.hub_client = hub_client
+        self.cache_path = Path(cache_path) if cache_path is not None else None
 
     async def list_plugins(self) -> dict[str, Any]:
         if self.hub_client is not None:
             hub_listing = await self.hub_client.catalog()
             if hub_listing.get("ok"):
                 plugins = _normalize_market_items(hub_listing.get("items", []))
+                self._write_cache(hub_listing.get("items", []), hub_listing.get("source", {}))
                 return {
                     "ok": True,
                     "plugins": plugins,
@@ -69,6 +73,12 @@ class PluginMarketplace:
             self.source.file_path,
         )
         if not fetched.ok or not isinstance(fetched.data, str):
+            cached = self._read_cache()
+            if cached is not None:
+                raw_items, source = cached
+                plugins = _normalize_market_items(raw_items)
+                source.update({"stale": True, "error": fetched.error or "插件市场读取失败"})
+                return {"ok": True, "plugins": plugins, "total": len(plugins), "source": source}
             return {"ok": False, "error": fetched.error or "插件市场读取失败", "plugins": [], "source": fetched.to_dict()}
         try:
             raw_items = json.loads(fetched.data)
@@ -76,39 +86,98 @@ class PluginMarketplace:
             return {"ok": False, "error": f"插件市场 JSON 无效：{exc}", "plugins": [], "source": fetched.to_dict()}
         if not isinstance(raw_items, list):
             return {"ok": False, "error": "插件市场 JSON 必须是数组", "plugins": [], "source": fetched.to_dict()}
-        plugins = _normalize_market_items(raw_items)
         source = fetched.to_dict()
         source.pop("data", None)
+        self._write_cache(raw_items, source)
+        plugins = _normalize_market_items(raw_items)
         return {"ok": True, "plugins": plugins, "total": len(plugins), "source": source}
 
+    def _read_cache(self) -> tuple[list[Any], dict[str, Any]] | None:
+        if self.cache_path is None or not self.cache_path.is_file():
+            return None
+        try:
+            payload = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                return None
+            source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+            return list(payload["items"]), dict(source)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _write_cache(self, items: list[Any], source: dict[str, Any]) -> None:
+        if self.cache_path is None:
+            return
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
+            temp.write_text(json.dumps({
+                "schema_version": 1,
+                "items": items,
+                "source": source,
+            }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            temp.replace(self.cache_path)
+        except OSError:
+            logger.warning("写入插件市场缓存失败: %s", self.cache_path, exc_info=True)
+
     async def resolve_release(self, item: dict[str, Any]) -> dict[str, Any]:
+        listing_status = str(item.get("listing_status") or item.get("status") or "approved").strip().lower()
+        if listing_status in {"paused", "withdrawn"}:
+            reason = str(item.get("listing_status_reason") or item.get("status_reason") or "").strip()
+            label = "暂停" if listing_status == "paused" else "撤回"
+            raise ValueError(f"该插件当前已{label}，暂不允许安装" + (f"：{reason}" if reason else ""))
+        if listing_status != "approved":
+            raise ValueError("插件索引状态无效，已拒绝安装")
         repository_url = str(item.get("repository_url") or "")
         owner, repo = parse_github_repository(repository_url)
-        release_result = await self.mirrors.fetch_github_api(
-            f"/repos/{quote(owner)}/{quote(repo)}/releases/latest",
-            official_first=True,
-        )
-        if not release_result.ok or not isinstance(release_result.data, str):
-            raise ValueError(release_result.error or "无法读取插件最新 Release")
-        try:
-            release = json.loads(release_result.data)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"GitHub Release 响应无效：{exc}") from exc
-        tag = str(release.get("tag_name") or "").strip()
-        if not tag or release.get("draft") or release.get("prerelease"):
-            raise ValueError("插件仓库没有可安装的正式 GitHub Release")
+        approved_commit = str(item.get("approved_commit") or "").strip().lower()
+        approved_tag = str(item.get("approved_release_tag") or "").strip()
+        approved_digest = str(item.get("approved_artifact_sha256") or "").strip().lower()
+        approved = bool(approved_commit)
+        if approved_digest and (len(approved_digest) != 64 or any(char not in "0123456789abcdef" for char in approved_digest)):
+            raise ValueError("官方批准工件 SHA-256 无效")
+        if approved and not approved_digest:
+            raise ValueError("官方批准工件缺少 SHA-256")
+        if approved_digest and not approved:
+            raise ValueError("官方批准工件必须绑定 approved_commit")
+        if approved:
+            if len(approved_commit) != 40 or any(char not in "0123456789abcdef" for char in approved_commit):
+                raise ValueError("官方批准的 Git commit 身份无效")
+            tag = approved_tag or str(item.get("release_tag") or "").strip()
+            if not tag:
+                raise ValueError("官方批准工件缺少 Release tag")
+            release = {
+                "tag_name": tag,
+                "html_url": str(item.get("approved_release_url") or item.get("release_url") or ""),
+            }
+            commit_sha = approved_commit
+        else:
+            release_result = await self.mirrors.fetch_github_api(
+                f"/repos/{quote(owner)}/{quote(repo)}/releases/latest",
+                official_first=True,
+            )
+            if not release_result.ok or not isinstance(release_result.data, str):
+                raise ValueError(release_result.error or "无法读取插件最新 Release")
+            try:
+                release = json.loads(release_result.data)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"GitHub Release 响应无效：{exc}") from exc
+            tag = str(release.get("tag_name") or "").strip()
+            if not tag or release.get("draft") or release.get("prerelease"):
+                raise ValueError("插件仓库没有可安装的正式 GitHub Release")
 
-        commit_result = await self.mirrors.fetch_github_api(
-            f"/repos/{quote(owner)}/{quote(repo)}/commits/{quote(tag, safe='')}",
-            official_first=True,
-        )
-        if not commit_result.ok or not isinstance(commit_result.data, str):
-            raise ValueError(commit_result.error or "无法解析插件 Release 的 Git commit")
-        try:
-            commit_sha = str(json.loads(commit_result.data).get("sha") or "").lower()
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"GitHub commit 响应无效：{exc}") from exc
+            commit_result = await self.mirrors.fetch_github_api(
+                f"/repos/{quote(owner)}/{quote(repo)}/commits/{quote(tag, safe='')}",
+                official_first=True,
+            )
+            if not commit_result.ok or not isinstance(commit_result.data, str):
+                raise ValueError(commit_result.error or "无法解析插件 Release 的 Git commit")
+            try:
+                commit_sha = str(json.loads(commit_result.data).get("sha") or "").lower()
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"GitHub commit 响应无效：{exc}") from exc
         archive_url = github_commit_archive_url(repository_url, commit_sha)
+        if approved and str(item.get("approved_archive_url") or "").strip():
+            archive_url = validate_public_http_url(str(item["approved_archive_url"]))
 
         manifest_result = await self.mirrors.fetch_raw(owner, repo, commit_sha, "plugin.json")
         if not manifest_result.ok or not isinstance(manifest_result.data, str):
@@ -153,11 +222,18 @@ class PluginMarketplace:
             "release_url": str(release.get("html_url") or ""),
             "commit_sha": commit_sha,
             "archive_url": archive_url,
+            "approved_commit": approved_commit,
+            "approved_release_tag": approved_tag,
+            "approved_artifact_sha256": approved_digest,
+            "approved": approved,
             "risk_level": risk_level,
             "update_policy": update_policy,
             "permissions": permissions,
             "installable": True,
             "verification_error": "",
+            "listing_status": listing_status,
+            "listing_status_reason": str(item.get("listing_status_reason") or item.get("status_reason") or ""),
+            "listing_status_at": str(item.get("listing_status_at") or item.get("status_at") or ""),
         })
         return resolved
 
@@ -193,13 +269,23 @@ class PluginMarketplace:
                 return {"ok": False, "error": fetched.error or "插件仓库快照下载失败", "plugin": item, "source": fetched.to_dict()}
             source = fetched.to_dict()
             source.pop("data", None)
+            artifact_hash = hashlib.sha256(fetched.data).hexdigest()
+            expected_hash = str(item.get("approved_artifact_sha256") or "").strip().lower()
+            if expected_hash and artifact_hash != expected_hash:
+                return {
+                    "ok": False,
+                    "error": "approved artifact hash mismatch",
+                    "plugin": item,
+                    "source": source,
+                    "artifact_hash": artifact_hash,
+                }
             return {
                 "ok": True,
                 "plugin": item,
                 "payload": fetched.data,
                 "source": source,
                 "hub_event_id": event_id,
-                "artifact_hash": hashlib.sha256(fetched.data).hexdigest(),
+                "artifact_hash": artifact_hash,
             }
         return {"ok": False, "error": f"插件市场中找不到：{plugin_id}"}
 
@@ -322,6 +408,15 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         trust_level = "official" if "official" in tags or distribution == "bundled" else "community"
     verification_error = str(item.get("verification_error") or "")
     installable = bool(item.get("installable", True))
+    listing_status = str(item.get("listing_status") or item.get("status") or "approved").strip().lower()
+    if listing_status in {"paused", "withdrawn"}:
+        installable = False
+        label = "暂停" if listing_status == "paused" else "撤回"
+        reason = str(item.get("listing_status_reason") or item.get("status_reason") or "").strip()
+        verification_error = f"该条目已{label}" + (f"：{reason}" if reason else "")
+    elif listing_status != "approved":
+        installable = False
+        verification_error = "插件索引状态无效，已拒绝安装"
     security = item.get("security") if isinstance(item.get("security"), dict) else {}
     if security.get("install_allowed") is False:
         installable = False
@@ -356,6 +451,9 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         "branch": str(item.get("branch") or "main"),
         "stars": int(item.get("stars") or 0),
         "distribution": distribution,
+        "listing_status": listing_status,
+        "listing_status_reason": str(item.get("listing_status_reason") or item.get("status_reason") or ""),
+        "listing_status_at": str(item.get("listing_status_at") or item.get("status_at") or ""),
         "risk_level": risk_level,
         "update_policy": update_policy,
         "author": item.get("author") or manifest.get("author") or "",
@@ -385,9 +483,14 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
             )
         ],
         "commit_sha": str(item.get("commit_sha") or item.get("commitSha") or ""),
+        "approved_release_tag": str(item.get("approved_release_tag") or ""),
+        "approved_release_url": str(item.get("approved_release_url") or ""),
+        "approved_commit": str(item.get("approved_commit") or ""),
+        "approved_archive_url": str(item.get("approved_archive_url") or ""),
+        "approved_artifact_sha256": str(item.get("approved_artifact_sha256") or "").lower(),
         "approved_permissions": _string_list(item.get("approved_permissions")),
         "permissions": _string_list(manifest.get("permissions") or item.get("permissions")),
-        "verified": bool(item.get("commit_sha")) or distribution == "bundled",
+        "verified": bool(item.get("commit_sha") or item.get("approved_commit")) or distribution == "bundled",
         "installable": installable,
         "verification_error": verification_error,
         "capabilities": _string_list(manifest.get("capabilities") or item.get("capabilities")),

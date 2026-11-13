@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .sqlite import ensure_column, run_migrations
+from .sqlite import MigrationError, ensure_column, run_migrations, table_columns
 
 
 def _v1(conn: sqlite3.Connection) -> None:
@@ -45,5 +45,52 @@ def _v3(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "memory_entries", "visibility", "TEXT")
 
 
+def _validate_known_v4(conn: sqlite3.Connection) -> None:
+    """Accept the short-lived profile-column schema without rewriting data.
+
+    A development build briefly wrote ``user_version=4`` after adding the
+    optional ``embedding_profile`` column.  The profile feature is not part of
+    the current memory contract, but existing databases must still open after
+    returning to the stable v3 reader.  Only that exact, known shape is
+    accepted; an unrelated future v4 database remains fail-closed.
+    """
+
+    columns = table_columns(conn, "memory_entries")
+    required = {
+        "embedding_profile",
+    }
+    if not required.issubset(columns):
+        raise MigrationError(
+            "Database memory schema v4 is not a recognized DiceFrame compatibility shape"
+        )
+    economy_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        ("memory_economy_deliveries",),
+    ).fetchone()
+    if economy_table is None:
+        raise MigrationError(
+            "Database memory schema v4 is missing the economy delivery journal"
+        )
+
+
+def _v4(conn: sqlite3.Connection) -> None:
+    """Bind a derived vector to a model profile; old values remain unknown."""
+
+    ensure_column(conn, "memory_entries", "embedding_profile", "TEXT")
+
+
+def _v5(conn: sqlite3.Connection) -> None:
+    """Track the source text and dimension of a derived vector."""
+
+    ensure_column(conn, "memory_entries", "embedding_content_hash", "TEXT")
+    ensure_column(conn, "memory_entries", "embedding_dimension", "INTEGER")
+
+
 def migrate(conn: sqlite3.Connection) -> int:
-    return run_migrations(conn, ((1, _v1), (2, _v2), (3, _v3)))
+    # The short-lived v4 profile experiment used the same column and journal
+    # shape as the supported migration.  Validate it before continuing to v5;
+    # do not lower user_version and do not guess about any other future schema.
+    current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if current == 4:
+        _validate_known_v4(conn)
+    return run_migrations(conn, ((1, _v1), (2, _v2), (3, _v3), (4, _v4), (5, _v5)))

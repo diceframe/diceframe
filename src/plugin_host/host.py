@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import hmac
@@ -21,6 +22,7 @@ import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .capabilities import (
     clear_runtime_capabilities,
@@ -43,6 +45,7 @@ from .descriptors import (
     BRIDGE_EXTENSION_STAGES,
     normalize_bridge_outputs,
 )
+from .document_reader import DocumentReadError, read_document
 from .marketplace import PluginMarketplace
 from .mirrors import MirrorManager
 from .models import PluginRuntime
@@ -56,6 +59,12 @@ from .package_limits import (
 )
 from .policy import PERMISSION_DETAILS, effective_plugin_permissions
 from .registry import ContributionRegistry, validate_contributes
+from .requirements import (
+    dependency_rows,
+    parse_plugin_requirements,
+    parse_ruleset_requirements,
+    plugin_version_satisfies,
+)
 from .runtime_protocol import (
     DEFAULT_RPC_TIMEOUT,
     MAX_RPC_MESSAGE_BYTES,
@@ -75,6 +84,7 @@ from .support import (
 )
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_RULEBOOK_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
@@ -153,7 +163,11 @@ class PluginHost:
         self.mirrors = MirrorManager(self.data_dir / "_marketplace" / "mirrors.json")
         self.hub_client = hub_client
         self._ai_provider_resolver = ai_provider_resolver
-        self.marketplace = PluginMarketplace(self.mirrors, hub_client=hub_client)
+        self.marketplace = PluginMarketplace(
+            self.mirrors,
+            hub_client=hub_client,
+            cache_path=self.data_dir / "_marketplace" / "catalog-cache.json",
+        )
         self.contributions = ContributionRegistry()
         self.content = PluginContentCatalog(self.contributions, self.logger)
         self._api_tokens: dict[str, str] = {}
@@ -165,6 +179,8 @@ class PluginHost:
         self._host_generation = secrets.token_hex(8)
 
     def discover(self) -> list[PluginPublicDetail]:
+        self._recover_group_install_journal()
+        self._recover_install_journal()
         self.plugins.clear()
         # 先内置再用户目录，用户目录同名覆盖内置；runtime.source 记录来源。
         for source, base_dir in (("builtin", self.builtin_dir), ("user", self.plugins_dir)):
@@ -176,6 +192,11 @@ class PluginHost:
                     runtime.config, runtime.secrets = self._load_config(plugin_id, runtime.schema)
                     runtime.source = source
                     runtime.status = self._status_for_enabled(runtime)
+                    receipt = self._load_install_receipt(plugin_id)
+                    expected_digest = str(receipt.get("manifest_digest") or "").strip().lower()
+                    if expected_digest and expected_digest != self._manifest_digest(runtime.manifest):
+                        runtime.status = "failed"
+                        runtime.error = "installed manifest digest mismatch"
                     self.plugins[plugin_id] = runtime
                 except Exception as exc:
                     self.logger.exception("插件加载失败: %s", manifest_path)
@@ -186,12 +207,295 @@ class PluginHost:
                             {"type": "object", "properties": {}}, manifest_path.parent,
                             status="failed", error=str(exc), source=source,
                         )
-        # 统一按最终 runtime 状态注册贡献，避免内置/用户同名时贡献不一致。
+        self._validate_discovered_plugin_dependencies()
+        # Dependency failures are checked before contributions are exposed.
         self.contributions.clear()
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "active":
                 self._register_contributions(plugin_id, runtime)
         return self.list_public()
+
+    def _validate_discovered_plugin_dependencies(self) -> None:
+        """Fail closed on missing, incompatible, or cyclic hard package edges."""
+
+        graph: dict[str, list[str]] = {}
+        for plugin_id, runtime in self.plugins.items():
+            try:
+                requirements = parse_plugin_requirements(runtime.manifest)
+            except ValueError as exc:
+                runtime.status, runtime.error = "failed", str(exc)
+                graph[plugin_id] = []
+                continue
+            graph[plugin_id] = [item["id"] for item in requirements]
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        cyclic: set[str] = set()
+
+        def walk(plugin_id: str, trail: tuple[str, ...] = ()) -> None:
+            if plugin_id in visiting:
+                cyclic.update(trail[trail.index(plugin_id):])
+                return
+            if plugin_id in visited:
+                return
+            visiting.add(plugin_id)
+            for dependency in graph.get(plugin_id, []):
+                if dependency in self.plugins:
+                    walk(dependency, (*trail, plugin_id))
+            visiting.remove(plugin_id)
+            visited.add(plugin_id)
+
+        for plugin_id in graph:
+            walk(plugin_id)
+        for plugin_id in cyclic:
+            runtime = self.plugins.get(plugin_id)
+            if runtime is not None:
+                runtime.status, runtime.error = "failed", "plugin dependency cycle detected"
+
+        for plugin_id, runtime in self.plugins.items():
+            if runtime.status == "failed":
+                continue
+            try:
+                requirements = parse_plugin_requirements(runtime.manifest)
+            except ValueError as exc:
+                runtime.status, runtime.error = "failed", str(exc)
+                continue
+            for requirement in requirements:
+                dependency_id = requirement["id"]
+                dependency = self.plugins.get(dependency_id)
+                if dependency is None:
+                    runtime.status, runtime.error = "failed", f"missing plugin dependency: {dependency_id}"
+                    break
+                if dependency.status == "failed":
+                    runtime.status, runtime.error = "failed", f"plugin dependency unavailable: {dependency_id}"
+                    break
+                if not plugin_version_satisfies(
+                    requirement["minimum_version"], str(dependency.manifest.get("version") or ""),
+                ):
+                    runtime.status, runtime.error = "failed", (
+                        f"plugin dependency version mismatch: {dependency_id}"
+                    )
+                    break
+
+    def _validate_plugin_requirements_for_manifest(
+        self, manifest: Mapping[str, Any],
+    ) -> None:
+        """Preflight a candidate package before staging or directory mutation."""
+
+        for requirement in parse_plugin_requirements(manifest):
+            dependency_id = requirement["id"]
+            if dependency_id == str(manifest.get("id") or ""):
+                raise ValueError("plugin dependency cycle detected")
+            dependency = self.plugins.get(dependency_id)
+            if dependency is None or dependency.status == "failed":
+                raise ValueError(f"missing plugin dependency: {dependency_id}")
+            if not plugin_version_satisfies(
+                requirement["minimum_version"], str(dependency.manifest.get("version") or ""),
+            ):
+                raise ValueError(f"plugin dependency version mismatch: {dependency_id}")
+
+    def _dependents_requiring(self, plugin_id: str) -> list[dict[str, Any]]:
+        """Return installed packages that would be broken by removing ``plugin_id``."""
+
+        result: list[dict[str, Any]] = []
+        for dependent_id in sorted(self.plugins):
+            if dependent_id == plugin_id:
+                continue
+            runtime = self.plugins[dependent_id]
+            try:
+                requirements = parse_plugin_requirements(runtime.manifest)
+            except ValueError:
+                # The dependent is already invalid; it still must not make a
+                # destructive operation appear safe.  Keep the reason visible.
+                result.append({"id": dependent_id, "minimum_version": "", "invalid": True})
+                continue
+            for requirement in requirements:
+                if requirement["id"] == plugin_id:
+                    result.append({
+                        "id": dependent_id,
+                        "minimum_version": requirement["minimum_version"],
+                    })
+        return result
+
+    def _validate_plugin_replacement(self, plugin_id: str, manifest: Mapping[str, Any]) -> None:
+        """Reject a candidate version that would invalidate installed dependents."""
+
+        candidate_version = str(manifest.get("version") or "")
+        for dependent in self._dependents_requiring(plugin_id):
+            minimum = str(dependent.get("minimum_version") or "")
+            if dependent.get("invalid") or not plugin_version_satisfies(minimum, candidate_version):
+                raise ValueError(
+                    f"plugin update would break dependency: {dependent['id']} requires "
+                    f"{plugin_id}>={minimum or '?'}"
+                )
+
+    def dependency_plan(self) -> list[dict[str, Any]]:
+        """Expose the installed package DAG and exact unsatisfied blockers."""
+
+        manifests = {
+            plugin_id: runtime.manifest
+            for plugin_id, runtime in self.plugins.items()
+        }
+        rows = dependency_rows(manifests)
+        reverse: dict[str, list[str]] = {plugin_id: [] for plugin_id in manifests}
+        for row in rows:
+            for dependency in row["dependencies"]:
+                dependency_id = dependency["id"]
+                if dependency_id in reverse:
+                    reverse[dependency_id].append(row["id"])
+        for row in rows:
+            row["dependents"] = sorted(reverse.get(row["id"], []))
+            row["status"] = self.plugins[row["id"]].status
+        return rows
+
+    def plan_install_group(
+        self, payloads: list[bytes], *, overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Validate a bounded package group without touching live state.
+
+        The planner resolves hard edges against the candidate group first and
+        the installed host second.  It returns a topological order and exact
+        blockers, but deliberately does not download, start, or publish any
+        package; group atomic commit remains an explicit later lifecycle step.
+        """
+
+        if not isinstance(payloads, list) or not payloads or len(payloads) > 32:
+            raise ValueError("插件组必须是 1 到 32 个安装包")
+        candidate: dict[str, tuple[dict[str, Any], Path]] = {}
+        temp = tempfile.TemporaryDirectory(
+            prefix="plugin-group-plan-",
+            dir=str(self.data_dir) if self.data_dir.exists() else None,
+        )
+        try:
+            root = Path(temp.name)
+            for index, payload in enumerate(payloads):
+                if not isinstance(payload, (bytes, bytearray)) or not payload:
+                    raise ValueError(f"插件组第 {index + 1} 个包为空")
+                package_dir = root / str(index)
+                package_dir.mkdir()
+                self._extract_zip(bytes(payload), package_dir)
+                source_dir = self._find_install_root(package_dir)
+                plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
+                if source_dir != package_dir and source_dir.name != plugin_id:
+                    raise ValueError("插件包顶层目录名必须与插件 ID 一致")
+                if plugin_id in candidate:
+                    raise ValueError(f"插件组包含重复 ID：{plugin_id}")
+                self._validate_package_before_install(
+                    source_dir, dict(runtime.manifest), "",
+                )
+                candidate[plugin_id] = (dict(runtime.manifest), source_dir)
+
+            manifests: dict[str, Mapping[str, Any]] = {
+                plugin_id: runtime.manifest
+                for plugin_id, runtime in self.plugins.items()
+            }
+            if not overwrite:
+                duplicates = sorted(plugin_id for plugin_id in candidate if plugin_id in manifests)
+                if duplicates:
+                    raise ValueError(
+                        "插件已存在；如需更新请启用覆盖安装：" + ", ".join(duplicates)
+                    )
+            manifests.update({plugin_id: manifest for plugin_id, (manifest, _path) in candidate.items()})
+            graph: dict[str, list[str]] = {}
+            blockers: list[dict[str, str]] = []
+            candidate_registry = ContributionRegistry()
+            for item in self.contributions.list():
+                candidate_registry._add(item)
+            for plugin_id, (_manifest, source_dir) in candidate.items():
+                candidate_registry.clear_plugin(plugin_id)
+                try:
+                    candidate_registry.register_static_plugin(_manifest, source_dir)
+                except ValueError as exc:
+                    blockers.append({"plugin_id": plugin_id, "reason": str(exc)})
+            for plugin_id, manifest in manifests.items():
+                try:
+                    requirements = parse_plugin_requirements(manifest)
+                except ValueError as exc:
+                    blockers.append({"plugin_id": plugin_id, "reason": str(exc)})
+                    graph[plugin_id] = []
+                    continue
+                graph[plugin_id] = [item["id"] for item in requirements]
+                for requirement in requirements:
+                    dependency_id = requirement["id"]
+                    dependency = manifests.get(dependency_id)
+                    if dependency is None:
+                        blockers.append({
+                            "plugin_id": plugin_id,
+                            "reason": f"missing plugin dependency: {dependency_id}",
+                        })
+                    elif not plugin_version_satisfies(
+                        requirement["minimum_version"],
+                        str(dependency.get("version") or ""),
+                    ):
+                        blockers.append({
+                            "plugin_id": plugin_id,
+                            "reason": f"plugin dependency version mismatch: {dependency_id}",
+                        })
+            visiting: set[str] = set()
+            visited: set[str] = set()
+            cycle_nodes: set[str] = set()
+
+            def visit(node: str, trail: tuple[str, ...] = ()) -> None:
+                if node in visiting:
+                    cycle_nodes.update(trail[trail.index(node):])
+                    return
+                if node in visited:
+                    return
+                visiting.add(node)
+                for dependency_id in graph.get(node, []):
+                    if dependency_id in graph:
+                        visit(dependency_id, (*trail, node))
+                visiting.remove(node)
+                visited.add(node)
+
+            for plugin_id in graph:
+                visit(plugin_id)
+            for plugin_id in sorted(cycle_nodes):
+                blockers.append({"plugin_id": plugin_id, "reason": "plugin dependency cycle detected"})
+
+            for plugin_id, (manifest, _path) in candidate.items():
+                if overwrite and plugin_id in self.plugins:
+                    try:
+                        self._validate_plugin_replacement(plugin_id, manifest)
+                    except ValueError as exc:
+                        blockers.append({"plugin_id": plugin_id, "reason": str(exc)})
+
+            # Kahn order is useful to a later atomic publisher and remains a
+            # read-only review artifact even when blockers exist.
+            indegree = {plugin_id: 0 for plugin_id in graph}
+            for plugin_id, dependencies in graph.items():
+                for dependency_id in dependencies:
+                    if dependency_id in indegree:
+                        indegree[plugin_id] += 1
+            ready = sorted(plugin_id for plugin_id, degree in indegree.items() if degree == 0)
+            order: list[str] = []
+            while ready:
+                current = ready.pop(0)
+                order.append(current)
+                for dependent, dependencies in graph.items():
+                    if current in dependencies:
+                        indegree[dependent] -= 1
+                        if indegree[dependent] == 0:
+                            ready.append(dependent)
+                            ready.sort()
+            if len(order) != len(graph):
+                order = []
+            return {
+                "ok": not blockers,
+                "atomic_commit": False,
+                "plugins": [
+                    {
+                        "id": plugin_id,
+                        "version": str(manifest.get("version") or ""),
+                        "candidate": plugin_id in candidate,
+                    }
+                    for plugin_id, manifest in sorted(manifests.items())
+                ],
+                "order": order,
+                "blockers": blockers,
+            }
+        finally:
+            temp.cleanup()
 
     def list_public(self) -> list[PluginPublicDetail]:
         return [self.public_detail(plugin_id) for plugin_id in self.plugins]
@@ -212,6 +516,10 @@ class PluginHost:
                 value = runtime.secrets.get(key, "")
                 public_config[key] = {"configured": bool(value), "masked": f"***{value[-4:]}" if value else ""}
         min_app_version = str(runtime.manifest.get("min_app_version") or "").strip()
+        dependency_projection = next(
+            (row for row in self.dependency_plan() if row["id"] == plugin_id),
+            {"dependencies": [], "dependents": []},
+        )
         return {
             "id": plugin_id,
             "name": runtime.manifest.get("name", plugin_id),
@@ -236,6 +544,8 @@ class PluginHost:
             "bridge_extensions": [dict(extension) for extension in runtime.bridge_extensions],
             "contributions": [item.to_dict() for item in self.contributions.list() if item.plugin_id == plugin_id],
             "docs": runtime.manifest.get("docs", ""),
+            "dependencies": dependency_projection["dependencies"],
+            "dependents": dependency_projection["dependents"],
         }
 
     def list_contributions(self, kind: str = "") -> list[PluginContributionView]:
@@ -451,6 +761,35 @@ class PluginHost:
         runtime = self._require(plugin_id)
         return self.content.public_asset_path(plugin_id, relative_path, runtime.directory)
 
+    def prebuilt_ui_asset_path(self, plugin_id: str, relative_path: str) -> Path:
+        """Resolve only an active plugin's explicitly declared U02 UI files."""
+
+        runtime = self._require(plugin_id)
+        if runtime.status not in {"active", "running"} or not runtime.prebuilt_ui:
+            raise KeyError("插件未提供可用的预构建 UI")
+        normalized = str(relative_path or "").replace("\\", "/").strip("/")
+        allowed = {
+            runtime.prebuilt_ui["entrypoint"],
+            *runtime.prebuilt_ui.get("assets", []),
+        }
+        if normalized not in allowed:
+            raise ValueError("UI 资源未在 prebuilt_ui 中声明")
+        target = (runtime.directory / normalized).resolve()
+        self._ensure_inside(runtime.directory, target)
+        if target.is_symlink() or not target.is_file():
+            raise KeyError("UI 资源不存在")
+        return target
+
+    def prebuilt_ui_descriptor(self, plugin_id: str) -> dict[str, Any]:
+        runtime = self._require(plugin_id)
+        if runtime.status not in {"active", "running"} or not runtime.prebuilt_ui:
+            raise KeyError("插件未提供可用的预构建 UI")
+        return {
+            "plugin_id": plugin_id,
+            "entrypoint": runtime.prebuilt_ui["entrypoint"],
+            "assets": list(runtime.prebuilt_ui.get("assets", [])),
+        }
+
     def read_docs(self, plugin_id: str) -> dict[str, Any]:
         """读取插件 README/说明文档内容（manifest docs 指向的 .md 文件）。
 
@@ -460,19 +799,71 @@ class PluginHost:
         docs_rel = str(runtime.manifest.get("docs") or "").strip()
         if not docs_rel:
             return {"ok": False, "error": "该插件未提供说明文档", "found": False}
-        plugin_dir = runtime.directory.resolve()
+        kind = "pdf" if docs_rel.lower().endswith(".pdf") else "markdown"
         try:
-            docs_path = (plugin_dir / docs_rel).resolve()
-            self._ensure_inside(plugin_dir, docs_path)
-        except ValueError:
-            return {"ok": False, "error": "说明文档路径越界", "found": False}
-        if not docs_path.is_file() or docs_path.is_symlink():
-            return {"ok": False, "error": "插件说明文档不存在", "found": False}
+            content = read_document(runtime.directory, docs_rel, kind=kind)
+        except DocumentReadError as exc:
+            return {"ok": False, "error": str(exc), "found": False}
+        if isinstance(content, bytes):
+            return {
+                "ok": True, "found": True, "name": docs_rel,
+                "kind": kind, "encoding": "base64",
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        return {"ok": True, "found": True, "name": docs_rel, "kind": kind, "content": content}
+
+    def list_rulebooks(self, plugin_id: str, *, viewer_is_gm: bool = False) -> dict[str, Any]:
+        """Project declared rulebook metadata without exposing GM entries."""
+
+        runtime = self._require(plugin_id)
+        books = []
+        for entry in runtime.rulebooks:
+            if entry["audience"] == "gm" and not viewer_is_gm:
+                continue
+            books.append({key: value for key, value in entry.items() if key != "path"})
+        return {"ok": True, "plugin_id": plugin_id, "rulebooks": books}
+
+    def read_rulebook(
+        self, plugin_id: str, book_id: str, *, viewer_is_gm: bool = False,
+    ) -> dict[str, Any]:
+        """Read one declared Markdown/PDF rulebook through D01 bounds."""
+
+        runtime = self._require(plugin_id)
+        entry = next((item for item in runtime.rulebooks if item["id"] == str(book_id or "")), None)
+        if entry is None:
+            return {"ok": False, "error": "规则书不存在", "found": False}
+        if entry["audience"] == "gm" and not viewer_is_gm:
+            return {"ok": False, "error": "规则书需要 GM 权限", "found": False}
+        if entry.get("kind") == "external":
+            return {
+                "ok": True,
+                "found": True,
+                "external": True,
+                "plugin_id": plugin_id,
+                "book": {key: value for key, value in entry.items() if key != "path"},
+                "url": entry["url"],
+                "encoding": "external",
+                "content": None,
+                "offline_hint": "该规则书由外部地址提供，离线时不可读取",
+            }
         try:
-            content = docs_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            return {"ok": False, "error": f"读取说明文档失败：{exc}", "found": False}
-        return {"ok": True, "found": True, "name": docs_rel, "content": content}
+            content = read_document(runtime.directory, entry["path"], kind=entry["kind"])
+        except DocumentReadError as exc:
+            return {"ok": False, "error": str(exc), "found": False}
+        if isinstance(content, bytes):
+            content_value: str = base64.b64encode(content).decode("ascii")
+            encoding = "base64"
+        else:
+            content_value = content
+            encoding = "utf-8"
+        return {
+            "ok": True,
+            "found": True,
+            "plugin_id": plugin_id,
+            "book": {key: value for key, value in entry.items() if key != "path"},
+            "encoding": encoding,
+            "content": content_value,
+        }
 
     def sync_lorebooks(self, lorebook_store: Any) -> int:
         """把已启用插件的世界模板 starter_lorebook 同步到世界书库（幂等）。
@@ -627,6 +1018,14 @@ class PluginHost:
             self._validate_package_before_install(
                 source_dir, dict(runtime.manifest), expected_plugin_type,
             )
+            self._validate_plugin_requirements_for_manifest(dict(runtime.manifest))
+            if target_dir.exists():
+                self._validate_plugin_replacement(plugin_id, runtime.manifest)
+            self.contributions.validate_static_plugin(
+                runtime.manifest,
+                source_dir,
+                replacing_plugin_id=plugin_id if target_dir.exists() else "",
+            )
             if target_dir.exists():
                 self._guard_package_mutation(plugin_id, "overwrite")
 
@@ -634,17 +1033,33 @@ class PluginHost:
             backup_dir = (self.plugins_dir / f".{plugin_id}.backup-{secrets.token_hex(6)}").resolve()
             self._ensure_inside(self.plugins_dir, staging_dir)
             self._ensure_inside(self.plugins_dir, backup_dir)
+            journal = {
+                "plugin_id": plugin_id,
+                "target": str(target_dir),
+                "staging": str(staging_dir),
+                "backup": str(backup_dir),
+                "phase": "prepared",
+                "was_running": was_running,
+            }
+            self._write_install_journal(journal, append=True)
             shutil.copytree(source_dir, staging_dir)
             try:
+                journal["phase"] = "staged"
+                self._write_install_journal(journal)
                 if target_dir.exists():
                     if plugin_id in self.plugins:
                         current = self.plugins[plugin_id]
                         was_running = bool(current.process and current.process.returncode is None)
                         await self.stop(plugin_id, keep_enabled=True)
                     await _rename_dir_with_retry(target_dir, backup_dir)
+                    journal["phase"] = "backup_moved"
+                    self._write_install_journal(journal)
                 await _rename_dir_with_retry(staging_dir, target_dir)
+                journal["phase"] = "published"
+                self._write_install_journal(journal)
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
+                self._remove_install_journal(plugin_id)
             except Exception:
                 if target_dir.exists() and not (target_dir / "plugin.json").exists():
                     shutil.rmtree(target_dir, ignore_errors=True)
@@ -653,14 +1068,269 @@ class PluginHost:
                 if staging_dir.exists():
                     shutil.rmtree(staging_dir, ignore_errors=True)
                 self.discover()
+                self._remove_install_journal(plugin_id)
                 if was_running and plugin_id in self.plugins:
                     await self.start(plugin_id)
                 raise
 
         self.discover()
+        self._save_install_receipt(
+            plugin_id,
+            self.plugins[plugin_id].manifest,
+            artifact_hash=hashlib.sha256(payload).hexdigest(),
+            source="zip",
+        )
+        # A replacement can legitimately have a different manifest digest.
+        # The first discover happens before the new receipt is persisted, so
+        # it conservatively marks the live runtime failed.  Re-discover after
+        # the receipt write to clear that transient mismatch and re-register
+        # the new contributions before returning to callers.
+        self.discover()
         if was_running:
             await self.start(plugin_id)
         return self.public_detail(plugin_id)
+
+    async def install_group_from_zips(
+        self, payloads: list[bytes], *, overwrite: bool = False,
+    ) -> list[PluginPublicDetail]:
+        """Publish a preflighted package group as one recoverable transaction."""
+
+        plan = self.plan_install_group(payloads, overwrite=overwrite)
+        if not plan.get("ok"):
+            reasons = "; ".join(
+                f"{item.get('plugin_id')}: {item.get('reason')}"
+                for item in plan.get("blockers", [])
+            )
+            raise ValueError(f"插件组安装计划被拒绝：{reasons or '未知阻塞'}")
+        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        group_id = secrets.token_hex(8)
+        entries: list[dict[str, Any]] = []
+        was_running: dict[str, bool] = {}
+        staged_sources: list[tuple[str, Path, dict[str, Any], bytes]] = []
+        try:
+            with tempfile.TemporaryDirectory(prefix="plugin-group-install-", dir=str(self.data_dir)) as temp_name:
+                temp_root = Path(temp_name)
+                for index, payload in enumerate(payloads):
+                    package_dir = temp_root / str(index)
+                    package_dir.mkdir()
+                    self._extract_zip(bytes(payload), package_dir)
+                    source_dir = self._find_install_root(package_dir)
+                    plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
+                    staged_sources.append((plugin_id, source_dir, dict(runtime.manifest), bytes(payload)))
+
+                for plugin_id, source_dir, manifest, _payload in staged_sources:
+                    staging = (self.plugins_dir / f".{plugin_id}.group-{group_id}.installing").resolve()
+                    backup = (self.plugins_dir / f".{plugin_id}.group-{group_id}.backup").resolve()
+                    target = (self.plugins_dir / plugin_id).resolve()
+                    self._ensure_inside(self.plugins_dir, staging)
+                    self._ensure_inside(self.plugins_dir, backup)
+                    self._ensure_inside(self.plugins_dir, target)
+                    if target.exists() and not overwrite:
+                        raise ValueError(f"插件 {plugin_id} 已存在；如需更新请启用覆盖安装")
+                    if staging.exists() or backup.exists():
+                        raise ValueError(f"插件 {plugin_id} 存在未清理的组安装现场")
+                    if target.exists():
+                        self._guard_package_mutation(plugin_id, "overwrite")
+                    shutil.copytree(source_dir, staging)
+                    was_running[plugin_id] = bool(
+                        self.plugins.get(plugin_id)
+                        and self.plugins[plugin_id].process
+                        and self.plugins[plugin_id].process.returncode is None
+                    )
+                    entries.append({
+                        "plugin_id": plugin_id,
+                        "target": str(target),
+                        "staging": str(staging),
+                        "backup": str(backup),
+                    })
+                self._write_group_install_journal({
+                    "schema_version": 1, "group_id": group_id,
+                    "phase": "staged", "entries": entries, "published": [],
+                })
+                for entry in entries:
+                    plugin_id = str(entry["plugin_id"])
+                    target = Path(entry["target"])
+                    backup = Path(entry["backup"])
+                    if target.exists():
+                        if was_running.get(plugin_id):
+                            await self.stop(plugin_id, keep_enabled=True)
+                        await _rename_dir_with_retry(target, backup)
+                self._write_group_install_journal({
+                    "schema_version": 1, "group_id": group_id,
+                    "phase": "backup_moved", "entries": entries, "published": [],
+                })
+                published: list[str] = []
+                for entry in entries:
+                    await _rename_dir_with_retry(Path(entry["staging"]), Path(entry["target"]))
+                    published.append(str(entry["plugin_id"]))
+                    self._write_group_install_journal({
+                        "schema_version": 1, "group_id": group_id,
+                        "phase": "publishing", "entries": entries,
+                        "published": published,
+                    })
+                self._write_group_install_journal({
+                    "schema_version": 1, "group_id": group_id,
+                    "phase": "published", "entries": entries, "published": published,
+                })
+                for entry in entries:
+                    backup = Path(entry["backup"])
+                    if backup.exists():
+                        shutil.rmtree(backup, ignore_errors=True)
+                self._group_install_journal_path.unlink(missing_ok=True)
+        except Exception:
+            # Leave the journal for the next discover to perform the same
+            # rollback after a process interruption.  Do an immediate best
+            # effort recovery as well so the current caller sees old packages.
+            self._recover_group_install_journal()
+            self.discover()
+            raise
+
+        self.discover()
+        for plugin_id, _source, manifest, payload in staged_sources:
+            self._save_install_receipt(
+                plugin_id, manifest,
+                artifact_hash=hashlib.sha256(payload).hexdigest(), source="group-zip",
+            )
+        self.discover()
+        for plugin_id, running in was_running.items():
+            if running:
+                await self.start(plugin_id)
+        return [self.public_detail(plugin_id) for plugin_id, *_ in staged_sources]
+
+    @property
+    def _install_journal_path(self) -> Path:
+        return self.data_dir / "_plugin_install_journal.json"
+
+    def _read_install_journal(self) -> list[dict[str, Any]]:
+        path = self._install_journal_path
+        if not path.exists():
+            return []
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self.logger.error("插件安装 journal 无法读取，保留现场等待人工处理: %s", path)
+            return []
+        if not isinstance(loaded, list):
+            return []
+        return [item for item in loaded if isinstance(item, dict) and str(item.get("plugin_id") or "")]
+
+    def _write_install_journal(self, record: dict[str, Any], *, append: bool = False) -> None:
+        records = self._read_install_journal() if append else self._read_install_journal()
+        plugin_id = str(record.get("plugin_id") or "")
+        records = [item for item in records if str(item.get("plugin_id") or "") != plugin_id]
+        records.append(dict(record))
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._atomic_json(self._install_journal_path, records)
+
+    def _remove_install_journal(self, plugin_id: str) -> None:
+        records = [item for item in self._read_install_journal()
+                   if str(item.get("plugin_id") or "") != str(plugin_id or "")]
+        path = self._install_journal_path
+        if records:
+            self._atomic_json(path, records)
+        elif path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                self.logger.warning("清理插件安装 journal 失败: %s", path, exc_info=True)
+
+    def _recover_install_journal(self) -> None:
+        records = self._read_install_journal()
+        if not records:
+            return
+        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        for record in records:
+            plugin_id = str(record.get("plugin_id") or "")
+            try:
+                target = Path(str(record.get("target") or "")).resolve()
+                staging = Path(str(record.get("staging") or "")).resolve()
+                backup = Path(str(record.get("backup") or "")).resolve()
+                self._ensure_inside(self.plugins_dir, target)
+                self._ensure_inside(self.plugins_dir, staging)
+                self._ensure_inside(self.plugins_dir, backup)
+                # A valid published target is the committed side of the
+                # transaction. Any leftover staging/backup is garbage.
+                if target.is_dir() and (target / "plugin.json").is_file():
+                    if staging.exists():
+                        shutil.rmtree(staging, ignore_errors=True)
+                    if backup.exists():
+                        shutil.rmtree(backup, ignore_errors=True)
+                    continue
+                # Otherwise restore the previous package if the process died
+                # after moving it aside. Never promote an uncommitted staging
+                # directory into a live plugin.
+                if backup.exists() and not target.exists():
+                    _rename = target
+                    backup.rename(_rename)
+                elif target.exists() and not (target / "plugin.json").is_file():
+                    shutil.rmtree(target, ignore_errors=True)
+                    if backup.exists():
+                        backup.rename(target)
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+            except Exception:
+                self.logger.error("插件安装 journal 恢复失败，已保留现场: %s", plugin_id, exc_info=True)
+        try:
+            self._install_journal_path.unlink()
+        except OSError:
+            self.logger.warning("清理插件安装 journal 失败: %s", self._install_journal_path, exc_info=True)
+
+    @property
+    def _group_install_journal_path(self) -> Path:
+        return self.data_dir / "_plugin_group_install_journal.json"
+
+    def _write_group_install_journal(self, record: dict[str, Any]) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._atomic_json(self._group_install_journal_path, record)
+
+    def _recover_group_install_journal(self) -> None:
+        """Roll back an incomplete multi-package publish before discovery."""
+
+        path = self._group_install_journal_path
+        if not path.exists():
+            return
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            entries = record.get("entries") if isinstance(record, dict) else None
+            phase = str(record.get("phase") or "") if isinstance(record, dict) else ""
+            published = {
+                str(item) for item in (record.get("published") or [])
+            } if isinstance(record, dict) else set()
+            if not isinstance(entries, list):
+                raise ValueError("group journal entries are invalid")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    raise ValueError("group journal entry is invalid")
+                target = Path(str(entry.get("target") or "")).resolve()
+                staging = Path(str(entry.get("staging") or "")).resolve()
+                backup = Path(str(entry.get("backup") or "")).resolve()
+                self._ensure_inside(self.plugins_dir, target)
+                self._ensure_inside(self.plugins_dir, staging)
+                self._ensure_inside(self.plugins_dir, backup)
+                if phase == "published":
+                    if staging.exists():
+                        shutil.rmtree(staging, ignore_errors=True)
+                    if backup.exists():
+                        shutil.rmtree(backup, ignore_errors=True)
+                    continue
+                # No commit marker means the group is not atomic. Restore every
+                # old target and discard all candidate staging directories.
+                if str(entry.get("plugin_id") or "") in published and target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                if target.exists() and backup.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                if backup.exists() and not target.exists():
+                    backup.rename(target)
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+        except Exception:
+            self.logger.error("插件组安装 journal 恢复失败，保留现场等待人工处理", exc_info=True)
+            return
+        try:
+            path.unlink()
+        except OSError:
+            self.logger.warning("清理插件组安装 journal 失败: %s", path, exc_info=True)
 
     async def marketplace_plugins(self) -> dict[str, Any]:
         listing = await self.marketplace.list_plugins()
@@ -674,6 +1344,8 @@ class PluginHost:
                     metadata = self._load_marketplace_metadata(item["id"])
                     item["installed_commit_sha"] = metadata.get("commit_sha", "")
                     item["installed_update_policy"] = metadata.get("update_policy", "")
+                    receipt = self._load_install_receipt(item["id"])
+                    item["installed_manifest_digest"] = str(receipt.get("manifest_digest") or "")
         if _PLUGIN_AUTO_UPDATE_ENABLED and (self._auto_update_task is None or self._auto_update_task.done()):
             self._auto_update_task = asyncio.create_task(self._auto_update_in_background())
         return listing
@@ -727,6 +1399,10 @@ class PluginHost:
             "risk_level": market_item.get("risk_level", ""),
             "update_policy": market_item.get("update_policy", "notify"),
             "approved_permissions": market_item.get("approved_permissions", []),
+            "approved_release_tag": market_item.get("approved_release_tag", ""),
+            "approved_commit": market_item.get("approved_commit", ""),
+            "approved_artifact_sha256": market_item.get("approved_artifact_sha256", ""),
+            "artifact_hash": package.get("artifact_hash", ""),
             "installed_version": package_version,
         })
         if self.hub_client is not None:
@@ -782,6 +1458,12 @@ class PluginHost:
         runtime = self._require(plugin_id)
         if runtime.source == "builtin":
             raise ValueError("内置插件不可卸载")
+        dependents = self._dependents_requiring(plugin_id)
+        if dependents:
+            names = ", ".join(str(item["id"]) for item in dependents)
+            raise ValueError(
+                f"cannot uninstall plugin {plugin_id}; required by installed plugin(s): {names}"
+            )
         # FIX-01 §3.5：删除 package bytes 前必须过 bound-save guard（与覆盖安装
         # 同一条 choke point，任何入口都绕不过）。
         self._guard_package_mutation(plugin_id, "uninstall")
@@ -1255,6 +1937,57 @@ class PluginHost:
         folder.mkdir(parents=True, exist_ok=True)
         self._atomic_json(folder / "marketplace.json", metadata)
 
+    @staticmethod
+    def _manifest_digest(manifest: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _load_install_receipt(self, plugin_id: str) -> dict[str, Any]:
+        path = self.data_dir / plugin_id / "install.json"
+        if not path.exists():
+            return {}
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def _save_install_receipt(
+        self,
+        plugin_id: str,
+        manifest: dict[str, Any],
+        *,
+        artifact_hash: str = "",
+        source: str = "zip",
+    ) -> None:
+        folder = self.data_dir / plugin_id
+        folder.mkdir(parents=True, exist_ok=True)
+        resolved_dependencies: list[dict[str, str]] = []
+        try:
+            for requirement in parse_plugin_requirements(manifest):
+                dependency = self.plugins.get(requirement["id"])
+                if dependency is not None:
+                    resolved_dependencies.append({
+                        "id": requirement["id"],
+                        "minimum_version": requirement["minimum_version"],
+                        "version": str(dependency.manifest.get("version") or ""),
+                    })
+        except ValueError:
+            # The manifest was already validated before install.  Keep receipt
+            # writing fail closed if a future schema reaches this boundary.
+            resolved_dependencies = []
+        self._atomic_json(folder / "install.json", {
+            "schema_version": 1,
+            "plugin_id": plugin_id,
+            "version": str(manifest.get("version") or ""),
+            "manifest_digest": self._manifest_digest(manifest),
+            "artifact_hash": str(artifact_hash or ""),
+            "source": source,
+            "resolved_dependencies": resolved_dependencies,
+        })
+
     def _plugin_api_token(self, plugin_id: str) -> str:
         if plugin_id in self._api_tokens:
             return self._api_tokens[plugin_id]
@@ -1304,6 +2037,10 @@ class PluginHost:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self._validate_schema(schema)
         validate_content_module_profile(manifest)
+        # M01: validate the established hard runtime requirement shape before
+        # any plugin config or contribution is exposed.  Resolution remains
+        # with the ruleset binding owner; the host does not guess or download.
+        parse_ruleset_requirements(manifest)
         self._validate_manifest_permissions(manifest)
         self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)
@@ -1316,13 +2053,133 @@ class PluginHost:
         catalog_root, catalog_dirs = (
             ruleset_catalogs if ruleset_catalogs is not None else (None, ())
         )
+        rulebooks = self._validate_rulebooks(manifest, plugin_dir)
+        prebuilt_ui = self._validate_prebuilt_ui(manifest, plugin_dir)
         return plugin_id, PluginRuntime(
             manifest, schema, plugin_dir,
             adventure_packages_root=adventure_root,
             adventure_package_directories=adventure_dirs,
             ruleset_catalogs_root=catalog_root,
             ruleset_catalog_directories=catalog_dirs,
+            rulebooks=rulebooks,
+            prebuilt_ui=prebuilt_ui,
         )
+
+    @staticmethod
+    def _validate_prebuilt_ui(
+        manifest: dict[str, Any], plugin_dir: Path,
+    ) -> dict[str, Any] | None:
+        """Validate an optional package-owned U02 prebuilt UI surface."""
+
+        declared = manifest.get("prebuilt_ui")
+        if declared is None:
+            return None
+        if not isinstance(declared, dict) or set(declared) != {"entrypoint", "assets"}:
+            raise ValueError("prebuilt_ui must contain only entrypoint and assets")
+        entrypoint = str(declared.get("entrypoint") or "").replace("\\", "/").strip("/")
+        assets = declared.get("assets")
+        if (
+            not entrypoint.endswith((".html", ".htm"))
+            or not isinstance(assets, list)
+            or len(assets) > 256
+        ):
+            raise ValueError("prebuilt_ui entrypoint/assets are invalid")
+        paths = [entrypoint, *[str(item or "").replace("\\", "/").strip("/") for item in assets]]
+        if len(set(paths)) != len(paths):
+            raise ValueError("prebuilt_ui contains duplicate paths")
+        normalized: list[str] = []
+        for relative in paths:
+            candidate = Path(relative)
+            if (
+                not relative
+                or len(relative) > 240
+                or candidate.is_absolute()
+                or any(part in {"", ".", ".."} for part in candidate.parts)
+            ):
+                raise ValueError("prebuilt_ui path is invalid")
+            target = (plugin_dir / relative).resolve()
+            PluginHost._ensure_inside(plugin_dir, target)
+            if target.is_symlink() or not target.is_file():
+                raise ValueError(f"prebuilt_ui file is missing: {relative}")
+            normalized.append(relative)
+        return {"entrypoint": normalized[0], "assets": normalized[1:]}
+
+    @staticmethod
+    def _validate_rulebooks(
+        manifest: dict[str, Any], plugin_dir: Path,
+    ) -> tuple[dict[str, Any], ...]:
+        """Validate the D01 ``rulebooks`` declaration without exposing files."""
+
+        declared = manifest.get("rulebooks")
+        if declared is None:
+            return ()
+        if not isinstance(declared, list) or len(declared) > 32:
+            raise ValueError("rulebooks 必须是最多 32 项的数组")
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for entry in declared:
+            if not isinstance(entry, dict):
+                raise ValueError("rulebooks entry 必须是对象")
+            fields = set(entry)
+            if fields not in (
+                {"id", "title", "path", "audience"},
+                {"id", "title", "url", "audience"},
+            ):
+                raise ValueError("rulebooks entry fields are invalid")
+            book_id = str(entry.get("id") or "").strip()
+            title = str(entry.get("title") or "").strip()
+            relative = str(entry.get("path") or "").replace("\\", "/").strip("/")
+            external_url = str(entry.get("url") or "").strip()
+            audience = str(entry.get("audience") or "").strip().lower()
+            if not _RULEBOOK_ID_RE.fullmatch(book_id) or book_id in seen:
+                raise ValueError("rulebooks id is invalid or duplicated")
+            if not title or len(title) > 200:
+                raise ValueError("rulebooks title is invalid")
+            if audience not in {"player", "gm"}:
+                raise ValueError("rulebooks audience must be player or gm")
+            if "url" in fields:
+                parsed = urlsplit(external_url)
+                if (
+                    len(external_url) > 2048
+                    or parsed.scheme.lower() != "https"
+                    or not parsed.hostname
+                    or parsed.username is not None
+                    or parsed.password is not None
+                ):
+                    raise ValueError("rulebooks external URL must be a public HTTPS URL")
+                normalized.append({
+                    "id": book_id,
+                    "title": title,
+                    "url": external_url,
+                    "audience": audience,
+                    "kind": "external",
+                })
+                seen.add(book_id)
+                continue
+            candidate = Path(relative)
+            if (
+                not relative
+                or candidate.is_absolute()
+                or any(part in {"", ".", ".."} for part in candidate.parts)
+                or len(relative) > 240
+            ):
+                raise ValueError("rulebooks path is invalid")
+            target = (plugin_dir / relative).resolve()
+            PluginHost._ensure_inside(plugin_dir, target)
+            if target.is_symlink() or not target.is_file():
+                raise ValueError(f"rulebook file is missing: {relative}")
+            suffix = target.suffix.lower()
+            if suffix not in {".md", ".markdown", ".pdf"}:
+                raise ValueError("rulebooks only support Markdown or PDF files")
+            seen.add(book_id)
+            normalized.append({
+                "id": book_id,
+                "title": title,
+                "path": relative,
+                "audience": audience,
+                "kind": "pdf" if suffix == ".pdf" else "markdown",
+            })
+        return tuple(normalized)
 
     @staticmethod
     def _validate_adventure_packages(

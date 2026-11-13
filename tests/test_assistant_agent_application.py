@@ -6,6 +6,8 @@ from src.webui.services.assistant_agent_application import AgentApplicationDepen
 from src.webui.services.assistant_agent import validate_arguments
 from src.engine.game_instance import GameInstance
 from src.engine.modules import narrative_notes, session_stats
+from src.creator.projects import CreatorProjectStore
+from src.creator.worker_jobs import WorkerJobStore
 
 
 def deps(**overrides):
@@ -118,3 +120,97 @@ async def test_plugin_arguments_schema_is_checked_by_host_and_no_model_context_p
     with pytest.raises(PermissionError):
         await plugin.handler({'plugin_id': 'p', 'tool_name': 't', 'arguments': {}}, 'alice')
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_creator_agent_tools_use_the_selected_author_project_and_revisions(tmp_path):
+    project_store = CreatorProjectStore(tmp_path / "projects.json")
+    built = []
+    async def build(owner, project_id, *, expected_revision):
+        built.append((owner, project_id, expected_revision))
+        return {"ok": True, "payload": b"secret bytes", "artifact_sha256": "abc"}
+    dependencies = deps(creator_projects=project_store, build_creator_project=build)
+    create = tool(dependencies, "creator_project_create")
+    created = await create.handler({"name": "Agent Harbor"}, "alice")
+    project_id = created["project"]["id"]
+    update = tool(dependencies, "creator_project_update")
+    result = await update.handler({
+        "project_id": project_id,
+        "expected_revision": 0,
+        "files": {"README.md": "draft"},
+    }, "alice")
+    assert result["project"]["revision"] == 1
+    validate = tool(dependencies, "creator_project_validate")
+    assert (await validate.handler({"project_id": project_id}, "alice"))["ok"] is False
+    preview = tool(dependencies, "creator_project_preview")
+    assert (await preview.handler({"project_id": project_id}, "alice"))["ok"] is False
+    capabilities = tool(dependencies, "creator_project_execution_capabilities")
+    capability_result = await capabilities.handler({"project_id": project_id}, "alice")
+    assert capability_result["sandbox_available"] is False
+    assert capability_result["accepted_source_trust"] == ["trusted"]
+    build_tool = tool(dependencies, "creator_project_build")
+    build_result = await build_tool.handler({"project_id": project_id, "expected_revision": 1}, "alice")
+    assert build_result == {"ok": True, "artifact_sha256": "abc"}
+    assert built == [("alice", project_id, 1)]
+    submission = tool(dependencies, "creator_project_submission")
+    submission_result = await submission.handler({"project_id": project_id, "expected_revision": 1}, "alice")
+    assert submission_result["submission"]["requires_manual_upload"] is True
+    read = tool(dependencies, "creator_project_read")
+    assert (await read.handler({"project_id": project_id}, "alice"))["project"]["files"]["README.md"] == "draft"
+    with pytest.raises(KeyError):
+        await read.handler({"project_id": project_id}, "bob")
+
+
+@pytest.mark.asyncio
+async def test_creator_agent_can_read_durable_worker_receipts(tmp_path):
+    project_store = CreatorProjectStore(tmp_path / "projects.json")
+    jobs = WorkerJobStore(tmp_path / "worker-jobs.json")
+    dependencies = deps(creator_projects=project_store, worker_jobs=jobs)
+    created = await tool(dependencies, "creator_project_create").handler(
+        {"name": "Worker receipts"}, "alice",
+    )
+    project_id = created["project"]["id"]
+    jobs.create("alice", project_id, ["python", "-c", "pass"], idempotency_key="test")
+    capability = await tool(dependencies, "creator_project_execution_capabilities").handler(
+        {"project_id": project_id}, "alice",
+    )
+    assert capability["receipt_recovery_available"] is True
+    listed = await tool(dependencies, "creator_project_worker_jobs").handler(
+        {"project_id": project_id}, "alice",
+    )
+    assert len(listed["jobs"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_creator_agent_worker_run_is_revision_scoped_and_explicit(tmp_path):
+    project_store = CreatorProjectStore(tmp_path / "projects.json")
+    jobs = WorkerJobStore(tmp_path / "worker-jobs.json")
+    calls = []
+
+    async def run(owner, project_id, **kwargs):
+        calls.append((owner, project_id, kwargs))
+        return {"ok": True, "result": {"status": "completed"}}
+
+    dependencies = deps(
+        creator_projects=project_store,
+        worker_jobs=jobs,
+        run_creator_worker=run,
+    )
+    created = await tool(dependencies, "creator_project_create").handler(
+        {"name": "Worker run"}, "alice",
+    )
+    project_id = created["project"]["id"]
+    capability = await tool(dependencies, "creator_project_execution_capabilities").handler(
+        {"project_id": project_id}, "alice",
+    )
+    assert capability["worker_available"] is True
+    worker = tool(dependencies, "creator_project_worker_run")
+    result = await worker.handler({
+        "project_id": project_id,
+        "expected_revision": 0,
+        "command": ["python", "-c", "pass"],
+        "source_trust": "trusted",
+    }, "alice")
+    assert result["ok"] is True
+    assert calls[0][0:2] == ("alice", project_id)
+    assert calls[0][2]["source_trust"] == "trusted"

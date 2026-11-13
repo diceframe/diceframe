@@ -9,7 +9,7 @@ from src.llm.client import LLMToolResponse
 
 from src.application_actions import ActionRegistry
 from src.webui.services.assistant_agent import AgentDependencies, AgentRuntime, AgentTool
-from src.webui.services.assistant_authorization import permits
+from src.webui.services.assistant_authorization import make_authorization, permits
 from tests.test_assistant_agent import Planner
 
 
@@ -262,3 +262,16 @@ async def test_pending_plan_owner_reload_and_concurrent_confirm_are_once_only(tm
     release.set()
     assert await first == await second
     assert len(calls) == 1
+
+
+def test_project_scope_is_supported_for_creator_agent_grants():
+    grant = make_authorization("task", {"project_id": "project-demo"}, ["creator"], 4, 100)
+    creator_action = action(name="creator_project_update", domain="creator")
+    assert permits(grant, creator_action, {"project_id": "project-demo"})
+    assert not permits(grant, creator_action, {"project_id": "project-other"})
+
+
+def test_reauthorizing_same_scope_creates_a_distinct_grant_identity():
+    first = make_authorization("task", {"project_id": "project-demo"}, ["creator"], 4, 100)
+    second = make_authorization("task", {"project_id": "project-demo"}, ["creator"], 4, 100)
+    assert first["grant_id"] != second["grant_id"]

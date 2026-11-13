@@ -44,6 +44,11 @@ class MemoryEntry(Model):
     source_id = CharField(null=True)
     world_revision = IntegerField(null=True)
     visibility = CharField(null=True)
+    # Derived vector identity.  NULL means legacy/unknown and is never used
+    # for semantic recall until rebuilt under the active profile.
+    embedding_profile = CharField(null=True)
+    embedding_content_hash = CharField(null=True)
+    embedding_dimension = IntegerField(null=True)
     created_at = CharField(constraints=[SQL("DEFAULT (datetime('now'))")])
     updated_at = CharField(constraints=[SQL("DEFAULT (datetime('now'))")])
 

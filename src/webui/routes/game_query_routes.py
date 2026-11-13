@@ -62,6 +62,66 @@ async def api_game_adventure_projection(request: web.Request) -> web.Response:
     )
 
 
+async def api_gameplay_view(request: web.Request) -> web.Response:
+    """Serve an explicitly registered gameplay owner projection."""
+
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    instance = api.get_game_instance(game_key)
+    viewer = viewer_for(request, instance)
+    if instance is None:
+        return web.json_response({"ok": False, "code": "GAME_NOT_FOUND"}, status=404)
+    if not viewer.is_member:
+        return web.json_response({"ok": False, "code": "GAME_MEMBER_REQUIRED"}, status=403)
+    result = api.gameplay_view(game_key, viewer.uid, viewer.is_gm)
+    status = 200 if result.get("ok") else (409 if result.get("code") == "UNSUPPORTED_GAMEPLAY" else 422)
+    return web.json_response(result, status=status)
+
+
+async def api_gameplay_action(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    instance = api.get_game_instance(game_key)
+    viewer = viewer_for(request, instance)
+    if instance is None:
+        return web.json_response({"ok": False, "code": "GAME_NOT_FOUND"}, status=404)
+    if not viewer.is_member:
+        return web.json_response({"ok": False, "code": "GAME_MEMBER_REQUIRED"}, status=403)
+    action = str(request.match_info.get("action") or "").strip()
+    if not action or len(action) > 64 or not all(ch.isalnum() or ch in "_.-" for ch in action):
+        return web.json_response({"ok": False, "code": "INVALID_GAMEPLAY_ACTION"}, status=400)
+    try:
+        if request.content_length and request.content_length > 16 * 1024:
+            return web.json_response({"ok": False, "code": "ACTION_BODY_TOO_LARGE"}, status=413)
+        body = await request.json()
+    except (ValueError, TypeError):
+        return web.json_response({"ok": False, "code": "INVALID_ACTION_BODY"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"ok": False, "code": "INVALID_ACTION_BODY"}, status=400)
+    result = await api.gameplay_action(
+        game_key, viewer.uid, viewer.is_gm, action, body,
+    )
+    status = 200 if result.get("ok") else 409
+    return web.json_response(result, status=status)
+
+
+async def api_gameplay_slot(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    instance = api.get_game_instance(game_key)
+    viewer = viewer_for(request, instance)
+    if instance is None:
+        return web.json_response({"ok": False, "code": "GAME_NOT_FOUND"}, status=404)
+    if not viewer.is_member:
+        return web.json_response({"ok": False, "code": "GAME_MEMBER_REQUIRED"}, status=403)
+    slot = str(request.match_info.get("slot") or "").strip()
+    if slot not in {"create", "character", "gm"}:
+        return web.json_response({"ok": False, "code": "INVALID_GAMEPLAY_SLOT"}, status=400)
+    result = api.gameplay_slot(game_key, viewer.uid, viewer.is_gm, slot)
+    status = 200 if result.get("ok") else 409
+    return web.json_response(result, status=status)
+
+
 async def api_game_scene_image_file(request: web.Request) -> web.StreamResponse:
     api = _get_api(request)
     game_key = request.match_info["game_key"]

@@ -19,6 +19,8 @@ from peewee import fn as peewee_fn
 
 from src.memory.models import MemoryEconomyDelivery, MemoryEntry
 from src.memory.models import database as _models_database
+from src.memory.embedding_profile import content_hash as embedding_content_hash
+from src.memory.embedding_profile import profile_for_client
 from src.migrations.memory import migrate as migrate_memory
 
 logger = logging.getLogger("trpg")
@@ -63,6 +65,9 @@ CREATE TABLE IF NOT EXISTS memory_entries (
         CHECK(status IN ('active','pending','forgotten')),
     source_round INTEGER,
     embedding TEXT,
+    embedding_profile TEXT,
+    embedding_content_hash TEXT,
+    embedding_dimension INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -134,6 +139,9 @@ class MemoryStore:
             return False
         allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
         allowed["embedding"] = None
+        allowed["embedding_profile"] = None
+        allowed["embedding_content_hash"] = None
+        allowed["embedding_dimension"] = None
         async with self._lock:
             rowcount = MemoryEntry.update(**allowed).where(
                 (MemoryEntry.id == int(entry_id))
@@ -283,7 +291,7 @@ class MemoryStore:
             try:
                 for entry_id, after in after_rows.items():
                     current = MemoryEntry.get_or_none(
-                        (MemoryEntry.id == entry_id)
+            (MemoryEntry.id == entry_id)
                         & (MemoryEntry.game_key == gk),
                     )
                     if current is None or not self._same_memory_state(
@@ -407,6 +415,9 @@ class MemoryStore:
             game_key=row["game_key"], entity=row["entity"], relation=row["relation"],
             value=row["value"], confidence=row["confidence"], status=row["status"],
             source_round=row.get("source_round"), embedding=row.get("embedding"),
+            embedding_profile=row.get("embedding_profile"),
+            embedding_content_hash=row.get("embedding_content_hash"),
+            embedding_dimension=row.get("embedding_dimension"),
             created_at=row["created_at"], updated_at=row["updated_at"],
         ).where(MemoryEntry.id == row["id"]).execute()
 
@@ -416,6 +427,9 @@ class MemoryStore:
             relation=row["relation"], value=row["value"],
             confidence=row["confidence"], status=row["status"],
             source_round=row.get("source_round"), embedding=row.get("embedding"),
+            embedding_profile=row.get("embedding_profile"),
+            embedding_content_hash=row.get("embedding_content_hash"),
+            embedding_dimension=row.get("embedding_dimension"),
             created_at=row["created_at"], updated_at=row["updated_at"],
         ).execute()
 
@@ -476,6 +490,8 @@ class MemoryStore:
                 MemoryEntry.update(
                     value=value, confidence=confidence, status=status,
                     source_round=round_num, updated_at=now,
+                    embedding=None, embedding_profile=None,
+                    embedding_content_hash=None, embedding_dimension=None,
                 ).where(MemoryEntry.id == existing.id).execute()
         else:
             new_id = MemoryEntry.insert(
@@ -587,16 +603,20 @@ class MemoryStore:
     # ---- 向量召回 ----
 
     def recall_by_vector(self, game_key: str, query_embedding: list[float],
-                         limit: int = 10, *, viewer_is_gm: bool) -> list[dict]:
+                         limit: int = 10, *, viewer_is_gm: bool,
+                         embedding_profile: str | None = None) -> list[dict]:
         """基于向量余弦相似度的记忆召回。"""
         from src.memory.embedding import cosine_similarity
 
         gk = str(game_key)
+        query = _active_query(gk).where(MemoryEntry.embedding.is_null(False))
+        # Unknown/legacy vectors are intentionally excluded.  A caller must
+        # provide the active profile; dimension alone cannot prove compatibility.
+        if not embedding_profile:
+            return []
+        query = query.where(MemoryEntry.embedding_profile == str(embedding_profile))
         rows = (
-            _viewer_filter(
-                _active_query(gk).where(MemoryEntry.embedding.is_null(False)),
-                viewer_is_gm=viewer_is_gm,
-            )
+            _viewer_filter(query, viewer_is_gm=viewer_is_gm)
             .order_by(MemoryEntry.updated_at.desc())
             .limit(500)
         )
@@ -609,6 +629,12 @@ class MemoryStore:
                 continue
             try:
                 emb = json.loads(emb_json)
+                if entry.get("embedding_content_hash") != embedding_content_hash(
+                    entry.get("entity"), entry.get("relation"), entry.get("value")
+                ):
+                    continue
+                if entry.get("embedding_dimension") not in (None, len(emb)):
+                    continue
                 sim = cosine_similarity(query_embedding, emb)
                 if sim > 0.3:  # 相似度阈值
                     scored.append((sim, entry))
@@ -618,13 +644,26 @@ class MemoryStore:
         scored.sort(key=lambda x: -x[0])
         return [e for _, e in scored[:limit]]
 
-    async def store_embedding(self, entry_id: int, embedding: list[float]) -> None:
+    async def store_embedding(self, entry_id: int, embedding: list[float],
+                              *, profile: str | None = None,
+                              expected_content_hash: str | None = None) -> bool:
         """为指定记忆条目存储向量。"""
         async with self._lock:
-            MemoryEntry.update(
+            row = MemoryEntry.get_or_none(MemoryEntry.id == entry_id)
+            if row is None or (
+                expected_content_hash
+                and embedding_content_hash(row.entity, row.relation, row.value)
+                != expected_content_hash
+            ):
+                return False
+            rowcount = MemoryEntry.update(
                 embedding=json.dumps(embedding),
+                embedding_profile=profile,
+                embedding_content_hash=expected_content_hash,
+                embedding_dimension=len(embedding),
             ).where(MemoryEntry.id == entry_id).execute()
             self._conn.commit()
+            return bool(rowcount)
 
     async def _embed_new_entries(self, entry_ids: list[int]) -> None:
         """为新增的记忆条目异步计算 embedding。"""
@@ -638,7 +677,13 @@ class MemoryStore:
                 text = f"{row.entity}: {row.relation} → {row.value}"
                 emb = await self.embedding_client.embed(text)
                 if emb:
-                    await self.store_embedding(eid, emb)
+                    await self.store_embedding(
+                        eid, emb,
+                        profile=profile_for_client(self.embedding_client),
+                        expected_content_hash=embedding_content_hash(
+                            row.entity, row.relation, row.value,
+                        ),
+                    )
             except Exception:
                 logger.exception("新记忆 embedding 失败: id=%d", eid)
 
@@ -653,11 +698,13 @@ class MemoryStore:
             await self._embed_new_entries(ids_to_process)
         return len(ids_to_process)
 
-    async def embed_all_pending(self, game_key: str | None = None) -> int:
+    async def embed_all_pending(self, game_key: str | None = None,
+                                *, profile: str | None = None) -> int:
         """为未向量化的记忆批量计算 embedding。game_key=None 时不限游戏。"""
         if not self.embedding_client:
             return 0
-        entries = self.get_unembedded(game_key, limit=100)
+        active_profile = profile or profile_for_client(self.embedding_client)
+        entries = self.get_unembedded(game_key, limit=100, profile=active_profile)
         if not entries:
             return 0
         texts = [f"{e['entity']}: {e['relation']} → {e['value']}" for e in entries]
@@ -669,10 +716,18 @@ class MemoryStore:
             async with self._lock:
                 for i, entry in enumerate(entries):
                     if i < len(embeddings) and embeddings[i]:
-                        MemoryEntry.update(
+                        rowcount = MemoryEntry.update(
                             embedding=json.dumps(embeddings[i]),
-                        ).where(MemoryEntry.id == entry["id"]).execute()
-                        count += 1
+                            embedding_profile=active_profile,
+                            embedding_content_hash=embedding_content_hash(
+                                entry.get("entity"), entry.get("relation"), entry.get("value"),
+                            ),
+                            embedding_dimension=len(embeddings[i]),
+                        ).where(
+                            (MemoryEntry.id == entry["id"])
+                            & (MemoryEntry.updated_at == entry.get("updated_at"))
+                        ).execute()
+                        count += int(bool(rowcount))
                 self._conn.commit()
             logger.info("批量 embedding 完成: %d/%d", count, len(entries))
             return count
@@ -680,31 +735,75 @@ class MemoryStore:
             logger.exception("批量 embedding 失败")
             return 0
 
-    def get_unembedded_count(self, game_key: str) -> int:
+    def get_unembedded_count(self, game_key: str, *, profile: str | None = None) -> int:
         """获取尚未向量化的记忆数量。"""
-        return (
-            _active_query(game_key)
-            .where(MemoryEntry.embedding.is_null())
-            .count()
-        )
+        return len(self.get_unembedded(game_key, limit=1_000_000_000, profile=profile))
 
-    def get_unembedded(self, game_key: str, limit: int = 100) -> list[dict]:
+    def get_unembedded(self, game_key: str, limit: int = 100,
+                       *, profile: str | None = None) -> list[dict]:
         """获取尚未向量化的记忆条目。"""
-        rows = (
-            _active_query(game_key)
-            .where(MemoryEntry.embedding.is_null())
-            .limit(limit)
-        )
-        return [dict(r.__data__) for r in rows]
+        rows = _active_query(game_key)
+        result: list[dict] = []
+        for row in rows.order_by(MemoryEntry.updated_at.asc()):
+            item = dict(row.__data__)
+            current_hash = embedding_content_hash(
+                item.get("entity"), item.get("relation"), item.get("value"),
+            )
+            if not item.get("embedding") or item.get("embedding_profile") != profile:
+                result.append(item)
+                continue
+            if item.get("embedding_content_hash") != current_hash:
+                result.append(item)
+            if len(result) >= max(1, int(limit)):
+                break
+        return result
 
-    def get_all_unembedded(self, limit: int = 100) -> list[dict]:
+    def get_all_unembedded(self, limit: int = 100, *, profile: str | None = None) -> list[dict]:
         """获取所有游戏中尚未向量化的记忆条目。"""
-        rows = (
-            MemoryEntry.select()
-            .where(_ACTIVE & MemoryEntry.embedding.is_null())
-            .limit(limit)
-        )
-        return [dict(r.__data__) for r in rows]
+        result: list[dict] = []
+        rows = MemoryEntry.select().where(_ACTIVE).order_by(MemoryEntry.updated_at.asc())
+        for row in rows:
+            item = dict(row.__data__)
+            current_hash = embedding_content_hash(
+                item.get("entity"), item.get("relation"), item.get("value"),
+            )
+            if not item.get("embedding") or item.get("embedding_profile") != profile or item.get("embedding_content_hash") != current_hash:
+                result.append(item)
+            if len(result) >= max(1, int(limit)):
+                break
+        return result
+
+    def embedding_status(self, *, profile: str | None = None) -> dict[str, int | str | None]:
+        """Return counts for the active profile without exposing memory text."""
+
+        active_profile = profile
+        if active_profile is None and self.embedding_client is not None:
+            active_profile = profile_for_client(self.embedding_client)
+        rows = MemoryEntry.select().where(_ACTIVE)
+        total = ready = pending = 0
+        for row in rows:
+            total += 1
+            item = row.__data__
+            current_hash = embedding_content_hash(
+                item.get("entity"), item.get("relation"), item.get("value"),
+            )
+            is_ready = bool(
+                item.get("embedding")
+                and active_profile
+                and item.get("embedding_profile") == active_profile
+                and item.get("embedding_content_hash") == current_hash
+            )
+            if is_ready:
+                ready += 1
+            else:
+                pending += 1
+        return {
+            "profile": active_profile,
+            "total_active": total,
+            "ready_current_profile": ready,
+            "pending": pending,
+            "state": "ready" if pending == 0 else ("disabled" if not active_profile else "rebuilding"),
+        }
 
 
 def memory_kind_of(stored: str | None) -> str:

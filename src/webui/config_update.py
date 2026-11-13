@@ -38,7 +38,7 @@ SECRET_CONFIG_KEYS = frozenset({
     "access_token", "bot_token", "napcat_token",
 })
 STRING_CONFIG_KEYS = frozenset({
-    "model", "embedding_model", "web_cors_origins",
+    "model", "embedding_model", "embedding_source", "embedding_local_model_id", "web_cors_origins",
     "fallback1_model", "fallback2_model", "check_model",
     "public_base_url", "napcat_host", "napcat_connection_id",
     "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
@@ -51,7 +51,7 @@ CONFIG_KEYS = (
     "game_defaults",
     "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_model",
     "model", "web_port", "web_cors_origins", "embedding_enabled",
-    "embedding_model", "embedding_max_input",
+    "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
     "fallback2_enabled", "fallback2_model",
     "narrative_max_tokens", "character_gen_max_tokens", "summary_max_tokens", "brief_max_tokens",
@@ -75,7 +75,7 @@ CONFIG_KEYS = (
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_provider_ref", "check_model",
     "model",
-    "embedding_enabled", "embedding_model", "embedding_max_input",
+    "embedding_enabled", "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
     "fallback2_enabled", "fallback2_model",
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
@@ -343,6 +343,21 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 candidate[key] = raw
     except (TypeError, ValueError):
         return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, "配置字段格式无效")
+
+    embedding_source = str(candidate.get("embedding_source") or "external").strip().lower()
+    if embedding_source not in {"external", "local"}:
+        return PreparedConfigUpdate(
+            candidate, changed_keys, access_password_changed,
+            "embedding_source 只能是 external 或 local",
+        )
+    candidate["embedding_source"] = embedding_source
+    if embedding_source == "local" and candidate.get("embedding_enabled") and not str(
+        candidate.get("embedding_local_model_id") or ""
+    ).strip():
+        return PreparedConfigUpdate(
+            candidate, changed_keys, access_password_changed,
+            "启用本地向量模型前必须选择已安装模型",
+        )
 
     # 服务商删除后同步清理孤儿 secret 与悬空引用，保持 STATE 自洽。
     refs_before = {key: str(candidate.get(key) or "").strip() for key in PROVIDER_REF_KEYS}

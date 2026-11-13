@@ -54,6 +54,10 @@ class RulesetCapabilities:
     combat_action_effects: bool = False
     combat_resource_pools: bool = False
     combat_scheduler: str = ""  # "" | round_robin | initiative | threshold
+    # R05 / SK-01：只有规则 runtime 显式声明，宿主才会接受同一行动中的
+    # 顺序多检定或组合技能计划。两者是独立能力，不自动互相推导。
+    sequential_checks: bool = False
+    composite_action: bool = False
 
     def __post_init__(self) -> None:
         if self.combat_scheduler and self.combat_scheduler not in SCHEDULER_KINDS:
@@ -157,6 +161,32 @@ class AuthoritativeIntentHooks(Protocol):
     def memory_deltas_from_event_batch(
         self, batch: dict[str, Any], instance: Any,
     ) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
+class SequentialActionRuntime(Protocol):
+    """Optional owner for R05 multi-step action plans.
+
+    The host owns plan shape, dependency ordering, staged publication and
+    replay identity.  A ruleset owns the semantic preflight for resources,
+    cooldowns, action economy and phases, then resolves each step into its
+    normal EventBatch contract.  A failed check is a successful resolution
+    with ``success=False``; a rejected step must return ``ok=False`` and never
+    publish a partial plan.
+    """
+
+    def validate_sequential_plan(
+        self, instance: Any, plan: dict[str, Any],
+        requester_id: str, requester_is_gm: bool,
+    ) -> dict[str, Any]: ...
+
+    def resolve_sequential_step(
+        self, instance: Any, step: dict[str, Any], rng: Any,
+    ) -> dict[str, Any]: ...
+
+    def apply_event_batch(
+        self, instance: Any, batch: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable

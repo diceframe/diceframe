@@ -38,6 +38,10 @@ class AgentApplicationDependencies:
     invoke_plugin_tool: Callable
     update_plugin: Callable
     runtime_logs: Callable
+    creator_projects: Any | None = None
+    build_creator_project: Callable | None = None
+    worker_jobs: Any | None = None
+    run_creator_worker: Callable | None = None
 
 
 async def _call(callback, *args, **kwargs):
@@ -236,4 +240,233 @@ def application_tools(deps: AgentApplicationDependencies) -> tuple[AgentTool, ..
             AgentTool("save_content", "Save the reviewed content draft", obj({"draft_id": string(32, minimum=32)}, ("draft_id",)),
                       save, mutation=True, uses_draft=True),
         ])
+    if deps.creator_projects is not None:
+        project_guard = lambda _args, owner: _digest(deps.creator_projects.list(owner))
+
+        async def creator_project_list(args, owner):
+            return deps.creator_projects.list(owner)
+
+        async def creator_project_create(args, owner):
+            return deps.creator_projects.create(
+                owner, args["name"], source=args.get("source"),
+            )
+
+        async def creator_project_read(args, owner):
+            return deps.creator_projects.read(owner, args["project_id"])
+
+        async def creator_project_validate(args, owner):
+            return deps.creator_projects.validate(owner, args["project_id"])
+
+        async def creator_project_preview(args, owner):
+            preview = getattr(deps.creator_projects, "preview", None)
+            if not callable(preview):
+                raise ValueError("Creator 工程预览器尚未就绪")
+            return preview(owner, args["project_id"])
+
+        async def creator_project_execution_capabilities(args, owner):
+            # Report the deployment boundary explicitly so the agent cannot
+            # infer that a bounded local worker is an upload sandbox.
+            deps.creator_projects.read(owner, args["project_id"])
+            return {
+                "ok": True,
+                "project_id": args["project_id"],
+                "worker_available": deps.run_creator_worker is not None,
+                "sandbox_available": False,
+                "receipt_recovery_available": deps.worker_jobs is not None,
+                "accepted_source_trust": ["trusted"],
+                "reason": "untrusted source requires an isolated deployment backend",
+            }
+
+        async def creator_project_build(args, owner):
+            if deps.build_creator_project is None:
+                raise ValueError("Creator 工程构建器尚未就绪")
+            result = await _call(
+                deps.build_creator_project,
+                owner,
+                args["project_id"],
+                expected_revision=args["expected_revision"],
+            )
+            if isinstance(result, dict) and "payload" in result:
+                result = {key: value for key, value in result.items() if key != "payload"}
+            return result
+
+        async def creator_project_submission(args, owner):
+            if deps.build_creator_project is None:
+                raise ValueError("Creator 工程构建器尚未就绪")
+            result = await _call(
+                deps.build_creator_project,
+                owner,
+                args["project_id"],
+                expected_revision=args["expected_revision"],
+            )
+            if not isinstance(result, dict):
+                raise ValueError("Creator 工程构建回执无效")
+            if not result.get("ok"):
+                return result
+            manifest = result.get("manifest") if isinstance(result.get("manifest"), dict) else {}
+            version = str(manifest.get("version") or "0.0.0")
+            return {
+                key: value for key, value in result.items() if key != "payload"
+            } | {
+                "submission": {
+                    "filename": result.get("filename", ""),
+                    "release_tag": f"v{version}",
+                    "artifact_sha256": result.get("artifact_sha256", ""),
+                    "revision": result.get("revision"),
+                    "requires_manual_upload": True,
+                    "requires_user_review": True,
+                },
+            }
+
+        async def creator_project_update(args, owner):
+            return deps.creator_projects.update(
+                owner,
+                args["project_id"],
+                expected_revision=args["expected_revision"],
+                files=args.get("files"),
+                remove=args.get("remove"),
+                name=args.get("name"),
+            )
+
+        async def creator_project_delete(args, owner):
+            return deps.creator_projects.delete(owner, args["project_id"])
+
+        tools.extend([
+            AgentTool(
+                "creator_project_list",
+                "List the author's Creator Studio projects",
+                obj(),
+                creator_project_list,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_create",
+                "Create a scoped Creator Studio project",
+                obj({
+                    "name": string(160, minimum=1),
+                    "source": {"type": "object"},
+                }, ("name",)),
+                creator_project_create,
+                mutation=True,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_read",
+                "Read one scoped Creator Studio project",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_read,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_validate",
+                "Validate the selected Creator Studio project revision",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_validate,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_preview",
+                "Preview public Creator Studio project metadata and resource counts",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_preview,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_execution_capabilities",
+                "Report whether this deployment can safely execute Creator source",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_execution_capabilities,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_update",
+                "Apply a revision-checked Creator Studio project edit",
+                obj({
+                    "project_id": string(64, minimum=1),
+                    "expected_revision": {"type": "integer", "minimum": 0},
+                    "files": {"type": "object"},
+                    "remove": {"type": "array", "items": string(240), "maxItems": 256},
+                    "name": string(160),
+                }, ("project_id", "expected_revision")),
+                creator_project_update,
+                mutation=True,
+                guard=project_guard,
+                domain="creator",
+            ),
+            AgentTool(
+                "creator_project_delete",
+                "Delete the selected Creator Studio project after explicit approval",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_delete,
+                mutation=True,
+                effect="destructive",
+                domain="creator",
+            ),
+        ])
+        if deps.worker_jobs is not None:
+            async def creator_project_worker_jobs(args, owner):
+                deps.creator_projects.read(owner, args["project_id"])
+                return deps.worker_jobs.list(owner, args["project_id"])
+
+            tools.append(AgentTool(
+                "creator_project_worker_jobs",
+                "Read durable Creator worker job receipts and interrupted work",
+                obj({"project_id": string(64, minimum=1)}, ("project_id",)),
+                creator_project_worker_jobs,
+                domain="creator",
+            ))
+        if deps.run_creator_worker is not None:
+            async def creator_project_worker_run(args, owner):
+                return await _call(
+                    deps.run_creator_worker,
+                    owner,
+                    args["project_id"],
+                    expected_revision=args["expected_revision"],
+                    command=args["command"],
+                    cwd=args.get("cwd", "."),
+                    source_trust=args.get("source_trust", "trusted"),
+                    idempotency_key=args.get("idempotency_key") or None,
+                )
+
+            tools.append(AgentTool(
+                "creator_project_worker_run",
+                "Run one bounded command for the selected Creator project revision",
+                obj({
+                    "project_id": string(64, minimum=1),
+                    "expected_revision": {"type": "integer", "minimum": 0},
+                    "command": {"type": "array", "items": string(4096), "maxItems": 64, "minItems": 1},
+                    "cwd": string(240),
+                    "source_trust": string(16, choices=("trusted", "untrusted")),
+                    "idempotency_key": string(160),
+                }, ("project_id", "expected_revision", "command")),
+                creator_project_worker_run,
+                mutation=True,
+                guard=project_guard,
+                domain="creator",
+            ))
+        if deps.build_creator_project is not None:
+            tools.append(AgentTool(
+                "creator_project_build",
+                "Build and validate a fixed Creator Studio project revision",
+                obj({
+                    "project_id": string(64, minimum=1),
+                    "expected_revision": {"type": "integer", "minimum": 0},
+                }, ("project_id", "expected_revision")),
+                creator_project_build,
+                mutation=True,
+                guard=project_guard,
+                domain="creator",
+            ))
+            tools.append(AgentTool(
+                "creator_project_submission",
+                "Prepare a reviewed Creator Studio release receipt without publishing",
+                obj({
+                    "project_id": string(64, minimum=1),
+                    "expected_revision": {"type": "integer", "minimum": 0},
+                }, ("project_id", "expected_revision")),
+                creator_project_submission,
+                mutation=True,
+                guard=project_guard,
+                domain="creator",
+            ))
     return tuple(tools)

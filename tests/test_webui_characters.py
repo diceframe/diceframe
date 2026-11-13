@@ -429,6 +429,35 @@ def test_character_cards_with_same_identity_can_bind_to_different_rules(web_api)
     }
 
 
+@pytest.mark.asyncio
+async def test_card_adoption_rejects_a_rule_mismatch_at_the_server_boundary(web_api):
+    api, _lorebook, registry, _fake_llm, _worlds_dir = web_api
+    created = await api.create_game(
+        "template_world",
+        rule_id="freeform_fantasy",
+        players=[{"name": "Fantasy seat"}],
+    )
+    assert created["ok"] is True
+    instance = registry.get(api._parse_key(created["game_key"]))
+    user_id = next(iter(instance.players))
+
+    saved = api.save_character_card({
+        "character_name": "CoC card",
+        "rule_id": "freeform_coc",
+        "attributes": {"str": 10},
+    })
+    assert saved["ok"] is True
+
+    rejected = await api.adopt_ruleset_character_card(
+        created["game_key"], user_id, saved["card"]["id"], gm_authority=True,
+    )
+
+    assert rejected["ok"] is False
+    assert rejected["error_code"] == "INCOMPATIBLE_RULESET_CHARACTER"
+    assert rejected["source_rule_id"] == "freeform_coc"
+    assert rejected["target_rule_id"] == "freeform_fantasy"
+
+
 def test_character_cards_saved_within_one_clock_tick_get_distinct_ids(web_api, monkeypatch):
     api, _lorebook, _registry, _fake_llm, _worlds_dir = web_api
     # Coarse clocks (Windows) can return the same time_ns() for back-to-back saves.
