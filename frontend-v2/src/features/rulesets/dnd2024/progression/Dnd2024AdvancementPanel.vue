@@ -9,6 +9,8 @@ import {
   applyCharacterCardAdvancement,
   applyLiveCharacterAdvancement,
   applyRulesetAdvancement,
+  completeCharacterCardChoices,
+  fetchCharacterCardPendingChoices,
   previewCharacterCardAdvancement,
   previewLiveCharacterAdvancement,
   previewRulesetAdvancement,
@@ -49,6 +51,141 @@ const featRequirement = computed(() => (
 const abilityRequirement = computed(() => requirement('ability_score_increases'))
 const spellRequirement = computed(() => requirement('class_spell_choices'))
 const subclassRequirement = computed(() => requirement('subclass_ref'))
+// 本级新获得的特性里带选项的那些。后端把每一项发成一条 requirement，
+// 结构固定为 {owner, feature_id, choice_id, count, options}，提交时合成
+// 一个 `feature_choices` 数组 —— 缺了这段渲染，界面只会显示
+// "feature choice X requires a selection at this level"，而没有任何东西
+// 可以点，确认按钮也就永远按不下去。
+const featureChoiceRequirements = computed(() => (
+  requirements.value.filter(item => item.kind === 'feature_choice')
+))
+const featureSelections = ref<Record<string, string[]>>({})
+
+const FEATURE_CHOICE_NAMES: Record<string, [string, string]> = {
+  additional_fighting_style: ['额外战斗风格', 'Additional Fighting Style'],
+  expertise: ['专精', 'Expertise'],
+  scholar: ['学者', 'Scholar'],
+}
+
+function featureChoiceTitle(spec: JsonObject): string {
+  const pair = FEATURE_CHOICE_NAMES[String(spec.feature_id)]
+  return pair ? text(pair[0], pair[1]) : featureName(String(spec.feature_id))
+}
+
+function featureChoiceSelected(spec: JsonObject): string[] {
+  return featureSelections.value[String(spec.id)] || []
+}
+
+function featureChoiceIsPicked(spec: JsonObject, value: string): boolean {
+  return featureChoiceSelected(spec).includes(value)
+}
+
+function featureChoiceAtLimit(spec: JsonObject): boolean {
+  const limit = Number(spec.count || 1)
+  return featureChoiceSelected(spec).length >= limit
+}
+
+function unavailableLabel(option: JsonObject): string {
+  const reasons = (option.unavailable_reasons as string[]) || []
+  // "这个规则集还没有实现该效果" 与 "你的前置条件不满足" 是两件事：前者
+  // 玩家永远选不到，后者补齐属性/熟练就能选。混成一句话会让人一直找办法。
+  if (reasons.includes('effect_not_implemented')) {
+    return text('本规则集尚未实现该效果', 'Not implemented in this ruleset yet')
+  }
+  if (reasons.includes('not_proficient')) return text('尚未熟练', 'Not proficient')
+  if (reasons.includes('already_expertise')) return text('已有专精', 'Already has Expertise')
+  if (reasons.includes('level')) return text('等级不足', 'Level too low')
+  if (reasons.includes('already_owned')) return text('已拥有', 'Already owned')
+  if (reasons.includes('ability_prerequisite')) {
+    return text('属性不满足', 'Ability prerequisite not met')
+  }
+  if (reasons.includes('spellcasting')) {
+    return text('需要施法能力', 'Requires spellcasting')
+  }
+  return text('前置条件未满足', 'Prerequisite not met')
+}
+
+function syncFeatureChoices(): void {
+  const rows: JsonObject[] = []
+  for (const spec of featureChoiceRequirements.value) {
+    const selected = featureChoiceSelected(spec)
+    if (!selected.length) continue
+    rows.push({
+      owner: String(spec.owner || ''),
+      feature_id: String(spec.feature_id || ''),
+      choice_id: String(spec.choice_id || ''),
+      selected_refs: selected,
+    })
+  }
+  // 只提交当前这一级真正存在的槽位：把上一轮预览留下的记录发回去，后端
+  // 会按 "matching no slot" 整条拒绝，玩家看到的是一个他已经改掉的旧错。
+  if (rows.length) choices.value.feature_choices = rows
+  else delete choices.value.feature_choices
+}
+
+function toggleFeatureChoice(spec: JsonObject, value: string): void {
+  const key = String(spec.id)
+  const selected = [...featureChoiceSelected(spec)]
+  const index = selected.indexOf(value)
+  if (index >= 0) selected.splice(index, 1)
+  else if (selected.length < Number(spec.count || 1)) selected.push(value)
+  if (selected.length) featureSelections.value[key] = selected
+  else delete featureSelections.value[key]
+  syncFeatureChoices()
+  void refresh()
+}
+
+// A card can arrive with choices it never made: imported from outside, or
+// carried over from before the choice was required.  The audit reports them so
+// the player can pay before the level moves, instead of finding out too late
+// that the whole subclass tree was never granted.
+const pendingChoices = ref<JsonObject[]>([])
+const pendingBusy = ref(false)
+const pendingSubclass = ref('')
+const pendingSubclassRow = computed<JsonObject | null>(() => (
+  pendingChoices.value.find(row => row.id === 'subclass_ref') as JsonObject | undefined
+) || null
+)
+const pendingOther = computed(() => (
+  pendingChoices.value.filter(row => row.id !== 'subclass_ref')
+))
+
+async function refreshPending(): Promise<void> {
+  if (!props.cardId) return
+  try {
+    const response = await fetchCharacterCardPendingChoices(props.cardId)
+    pendingChoices.value = (response.missing || []) as JsonObject[]
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+  } catch {
+    // A card that cannot be audited must not block the upgrade panel; the
+    // commit path re-checks everything anyway.
+    pendingChoices.value = []
+  }
+}
+
+async function completePendingSubclass(): Promise<void> {
+  if (!props.cardId || !pendingSubclass.value) return
+  pendingBusy.value = true
+  error.value = ''
+  try {
+    const operationId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `repair-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const response = await completeCharacterCardChoices(
+      props.cardId,
+      { subclass_ref: pendingSubclass.value },
+      currentRevision.value,
+      operationId,
+    )
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+    pendingSubclass.value = ''
+    await refreshPending()
+    await refresh()
+    emit('applied', response.character)
+  } catch (cause: unknown) {
+    error.value = String((cause as Error)?.message || cause)
+  } finally { pendingBusy.value = false }
+}
 
 function canonical(): JsonObject {
   const nested = props.character.ruleset_character
@@ -225,6 +362,7 @@ async function apply(): Promise<void> {
 onMounted(() => {
   initializeSpellChoices()
   void refresh()
+  void refreshPending()
 })
 </script>
 
@@ -233,6 +371,22 @@ onMounted(() => {
     <header>
       <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}</p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
     </header>
+
+    <fieldset v-if="pendingChoices.length" class="pending-choices">
+      <legend>{{ text('这张卡还有未完成的选项', 'This card still owes choices') }}</legend>
+      <p class="error-help">{{ text('先把这些补齐再升级；补齐本身不会改变等级。', 'Pay these before the level moves. Filling them does not change the level.') }}</p>
+      <div v-if="pendingSubclassRow" class="pending-subclass">
+        <label>{{ text(`子职（第 ${Number(pendingSubclassRow.level)} 级）`, `Subclass (level ${Number(pendingSubclassRow.level)})`) }}</label>
+        <select v-model="pendingSubclass">
+          <option value="" disabled>{{ text('请选择', 'Choose') }}</option>
+          <option v-for="option in (pendingSubclassRow.options as JsonObject[])" :key="String(option.value)" :value="String(option.value)">{{ option.name }}</option>
+        </select>
+        <button type="button" :disabled="pendingBusy || !pendingSubclass" @click="completePendingSubclass">{{ pendingBusy ? text('补齐中…', 'Saving…') : text('补齐子职', 'Complete subclass') }}</button>
+      </div>
+      <ul v-if="pendingOther.length">
+        <li v-for="row in pendingOther" :key="String(row.id)">{{ text(`第 ${Number(row.level)} 级：${String(row.reason || row.id)}`, `Level ${Number(row.level)}: ${String(row.reason || row.id)}`) }}</li>
+      </ul>
+    </fieldset>
 
     <p v-if="busy && !preview" class="notice" role="status">{{ text('正在核对职业成长表…', 'Checking the class table…') }}</p>
     <template v-if="preview">
@@ -245,6 +399,8 @@ onMounted(() => {
       <fieldset><legend>{{ text('生命值成长方式', 'Hit Point method') }}</legend><label><input v-model="choices.hp_method" type="radio" value="fixed" @change="refresh"> {{ text('采用职业固定值（推荐）', 'Use class fixed value (recommended)') }}</label><label><input v-model="choices.hp_method" type="radio" value="rolled" @change="refresh"> {{ text('掷职业生命骰', 'Roll the class Hit Die') }}</label><input v-if="choices.hp_method === 'rolled'" v-model.number="choices.hp_roll" type="number" min="1" :max="20" @change="refresh"></fieldset>
 
       <fieldset v-if="subclassRequirement"><legend>{{ text('选择子职', 'Choose subclass') }}</legend><select :value="choices.subclass_ref || ''" @change="setChoice('subclass_ref', ($event.target as HTMLSelectElement).value)"><option value="" disabled>{{ text('请选择', 'Choose') }}</option><option v-for="option in (subclassRequirement.options as JsonObject[])" :key="String(option.value)" :value="option.value">{{ option.name }}</option></select></fieldset>
+
+      <fieldset v-for="spec in featureChoiceRequirements" :key="String(spec.id)"><legend>{{ featureChoiceTitle(spec) }}</legend><p class="spell-help">{{ text(`本级需要选择 ${spec.count} 项。标灰的选项写着不可选的原因：本规则集尚未实现的专长会一直无法选中，前置条件不足的补齐后即可。`, `Choose ${spec.count} for this level. Greyed options name their reason: feats this ruleset does not implement stay unavailable, while unmet prerequisites become selectable once satisfied.`) }}</p><div class="feat-grid"><label v-for="option in (spec.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input :type="Number(spec.count || 1) > 1 ? 'checkbox' : 'radio'" :name="String(spec.id)" :disabled="option.available === false || (!featureChoiceIsPicked(spec, String(option.value)) && featureChoiceAtLimit(spec))" :checked="featureChoiceIsPicked(spec, String(option.value))" @change="toggleFeatureChoice(spec, String(option.value))"><span><b>{{ option.name || option.value }}</b><small v-if="option.available === false">{{ unavailableLabel(option) }}</small><code v-if="option.source_ref">{{ option.source_ref }}</code></span></label></div></fieldset>
 
       <fieldset v-if="featRequirement"><legend>{{ requirement('epic_boon_ref') ? text('选择史诗恩惠', 'Choose Epic Boon') : text('选择通用专长', 'Choose General feat') }}</legend><div class="feat-grid"><label v-for="option in (featRequirement.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input type="radio" :name="String(featRequirement.id)" :disabled="option.available === false" :checked="choices[String(featRequirement.id)] === option.value" @change="setChoice(String(featRequirement.id), String(option.value))"><span><b>{{ option.name }}</b><small v-if="option.available === false">{{ text('前置条件未满足', 'Prerequisite not met') }}</small><code>{{ option.source_ref }}</code></span></label></div></fieldset>
 

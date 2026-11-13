@@ -550,7 +550,9 @@ def test_legacy_trained_armor_keeps_its_armor_class_and_gates(runtime) -> None:
     combat = _start_through_runtime(runtime, instance)
     derived = instance.get_character_sheet("gm")["ruleset_character"]["derived"]
 
-    assert derived["armor_class"] == 18
+    # 链甲 16 + 受训盾牌 2 + Defense 1 = 19。存档里的旧值 18 是 Defense 生效
+    # 之前的算法，重新推导后按现行公式修正。
+    assert derived["armor_class"] == 19
     assert derived["armor_training"] == {
         "untrained_armor_worn": False,
         "speed_penalty": 0,
@@ -559,7 +561,7 @@ def test_legacy_trained_armor_keeps_its_armor_class_and_gates(runtime) -> None:
     view = Dnd2024CombatEngine(_bundle(runtime))._actor_view(
         instance, combat, "player:gm",
     )
-    assert view["armor_class"] == 18
+    assert view["armor_class"] == 19
     assert view["speed"] == 30
 
     check = _check_event(_attack(runtime, instance, [15]))

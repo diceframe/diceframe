@@ -27,6 +27,7 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 LOCALE = "en"
 FEATURE_ID = "draconic_resilience"
+_SUBCLASS_BY_CLASS = {"class:sorcerer": "subclass:draconic_sorcery"}
 
 
 # --------------------------------------------------------------------------
@@ -39,7 +40,15 @@ def runtime() -> Dnd2024Runtime:
 
 
 def _proxy(class_ref: str, level: int) -> dict:
-    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
+    character: dict = {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+    }
+    subclass_ref = _SUBCLASS_BY_CLASS.get(class_ref)
+    if subclass_ref:
+        # Draconic Resilience is a subclass feature: without a persisted
+        # selection the character must not own it.
+        character["features"] = {"subclass_ref": subclass_ref}
+    return character
 
 
 def _resolver(runtime: Dnd2024Runtime) -> Dnd2024ClassFeatureResolver:

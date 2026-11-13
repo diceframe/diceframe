@@ -159,6 +159,7 @@
         },
         {
           "id": "aura_of_devotion",
+          "owner": "subclass:oath_of_devotion",
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p56:aura-of-devotion",
           "summary": "You and allies within your Aura (10 feet) have Immunity to the Charmed condition.",
@@ -222,10 +223,25 @@
         },
         {
           "id": "improved_critical",
+          "owner": "subclass:champion",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p49:improved-critical",
-          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 19 or 20.",
+          "summary": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
           "parameters": {"crit_threshold": 19}
+        },
+        {
+          "id": "additional_fighting_style",
+          "owner": "subclass:champion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p49:additional-fighting-style",
+          "summary": "You gain another Fighting Style feat of your choice.",
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1,
+            "enabled_options": ["feat:archery", "feat:defense"]
+          }
         },
         {
           "id": "two_extra_attacks",
@@ -235,13 +251,15 @@
         },
         {
           "id": "superior_critical",
+          "owner": "subclass:champion",
           "minimum_level": 15,
           "source_ref": "srd-5.2.1:p49:superior-critical",
-          "summary": "Your attack rolls with weapons or Unarmed Strikes score a critical hit on a d20 roll of 18-20.",
+          "summary": "Your attack rolls with weapons and Unarmed Strikes can now score a Critical Hit on a roll of 18-20 on the d20.",
           "parameters": {"crit_threshold": 18}
         },
         {
           "id": "survivor",
+          "owner": "subclass:champion",
           "minimum_level": 18,
           "source_ref": "srd-5.2.1:p49:survivor",
           "summary": "You have Advantage on Death Saving Throws, treat a roll of 18-20 on one as a 20, and while Bloodied you regain 5 plus your Constitution modifier Hit Points at the start of each of your turns.",
@@ -291,6 +309,7 @@
         },
         {
           "id": "retaliation",
+          "owner": "subclass:path_of_the_berserker",
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p30:retaliation",
           "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
@@ -327,6 +346,7 @@
         },
         {
           "id": "fast_hands",
+          "owner": "subclass:thief",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p64:fast-hands",
           "summary": "You can use a Bonus Action to make a Sleight of Hand check or to take the Utilize action.",
@@ -348,6 +368,7 @@
       "features": [
         {
           "id": "cutting_words",
+          "owner": "subclass:college_of_lore",
           "minimum_level": 3,
           "resource_id": "bardic_inspiration",
           "source_ref": "srd-5.2.1:p35:cutting-words",
@@ -363,6 +384,7 @@
       "features": [
         {
           "id": "draconic_resilience",
+          "owner": "subclass:draconic_sorcery",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p52:draconic-resilience",
           "summary": "Your Hit Point maximum increases by 3, and it increases by 1 again whenever you gain a Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
@@ -379,6 +401,7 @@
       "features": [
         {
           "id": "dark_ones_blessing",
+          "owner": "subclass:fiend_patron",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p58:dark-ones-blessing",
           "summary": "When you reduce an enemy to 0 HP, or someone else reduces your enemy to 0 HP within 10 feet of you, you gain temporary hit points equal to your Charisma modifier plus your Warlock level (minimum 1).",
@@ -390,6 +413,7 @@
         },
         {
           "id": "dark_ones_own_luck",
+          "owner": "subclass:fiend_patron",
           "minimum_level": 6,
           "resource_id": "dark_ones_own_luck",
           "source_ref": "srd-5.2.1:p76:dark-ones-own-luck",
@@ -405,6 +429,7 @@
       "features": [
         {
           "id": "supreme_healing",
+          "owner": "subclass:life_domain",
           "minimum_level": 17,
           "source_ref": "srd-5.2.1:p40:supreme-healing",
           "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
@@ -417,6 +442,7 @@
       "features": [
         {
           "id": "overchannel",
+          "owner": "subclass:evoker",
           "minimum_level": 14,
           "source_ref": "srd-5.2.1:p82:overchannel",
           "summary": "When you cast a Wizard spell of level 1-5 that deals damage, you can maximize its damage. After the spell resolves, you immediately take 2d12 Necrotic damage per spell slot level, ignoring Resistance and Immunity.",

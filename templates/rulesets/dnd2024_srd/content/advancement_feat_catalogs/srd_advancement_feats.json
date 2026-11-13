@@ -31,7 +31,10 @@
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:defense",
       "requires_feature": "fighting_style",
-      "repeatable": false
+      "repeatable": false,
+      "passive_effects": [
+        {"kind": "armor_class_bonus", "value": 1, "requires_armor": true}
+      ]
     },
     "great_weapon_fighting": {
       "category": "fighting_style",
