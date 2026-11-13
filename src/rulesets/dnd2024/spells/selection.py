@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog, SpellCatalogError
+from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 
 
 def _class_id(class_ref: str) -> str:
     return str(class_ref or "").removeprefix("class:")
+
+
+def _class_magic(character: Mapping[str, Any]) -> dict[str, Any]:
+    """The projected class spell block; a missing block reads as empty."""
+
+    spellcasting = character.get("spellcasting")
+    block = spellcasting.get("class") if isinstance(spellcasting, Mapping) else None
+    return block if isinstance(block, dict) else {}
 
 
 @dataclass(slots=True)
@@ -29,12 +38,15 @@ class Dnd2024SpellSelection:
         snapshot = self.progression.snapshot(class_ref, level)
         tracks = snapshot["tracks"]
         maximum_spell_level = max((int(key) for key in snapshot["spell_slots"]), default=0)
+        # 法术书下限是内容数字（6 本起、每级 +2），不是法师的名字；策略缺省
+        # 即"没有法术书"，非施法职业自然得 0。
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
         return {
             "class_ref": class_ref,
             "level": level,
             "cantrip_count": int(tracks.get("cantrips", 0) or 0),
             "prepared_spell_count": int(tracks.get("prepared_spells", 0) or 0),
-            "spellbook_minimum": 6 + 2 * (level - 1) if class_ref == "class:wizard" else 0,
+            "spellbook_minimum": policy.spellbook_minimum(level) if policy else 0,
             "maximum_spell_level": maximum_spell_level,
             "slot_profile": snapshot["slot_profile"],
             "spell_slots": deepcopy(snapshot["spell_slots"]),
@@ -52,7 +64,13 @@ class Dnd2024SpellSelection:
         }
 
     def validate(
-        self, class_ref: str, level: int, choices: Any,
+        self,
+        class_ref: str,
+        level: int,
+        choices: Any,
+        *,
+        previous: Mapping[str, Sequence[str]] | None = None,
+        context: str = "level_up",
     ) -> tuple[dict[str, list[str]], list[str]]:
         requirements = self.requirements(class_ref, level)
         if not requirements["slot_profile"]:
@@ -87,26 +105,209 @@ class Dnd2024SpellSelection:
         )
         errors.extend(prepared_errors)
         spellbook: list[str] = []
-        if class_ref == "class:wizard":
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is not None and policy.source == "spellbook":
             raw_spellbook = refs("spellbook_refs", "spellbook_ids")
             if not isinstance(raw_spellbook, list):
-                errors.append("spellbook_refs are required for a wizard")
+                errors.append("spellbook_refs are required for this class")
             else:
-                spellbook, spellbook_errors = self.catalog.require(
+                spellbook, spellbook_errors = self._require_spellbook(
                     raw_spellbook,
                     class_ref=class_ref,
-                    level=requirements["maximum_spell_level"],
-                    count=requirements["spellbook_minimum"],
-                    label="spellbook_refs",
+                    requirements=requirements,
                 )
                 errors.extend(spellbook_errors)
                 if not set(prepared).issubset(spellbook):
-                    errors.append("wizard prepared_spell_refs must be in spellbook_refs")
+                    errors.append("prepared_spell_refs must be in spellbook_refs")
+        if previous is not None and policy is not None:
+            errors.extend(
+                self._replacement_errors(
+                    policy, previous, cantrips, prepared, spellbook, context,
+                )
+            )
         return {
             "cantrip_refs": cantrips,
             "prepared_spell_refs": prepared,
             "spellbook_refs": spellbook,
         }, errors
+
+    def preparation_options(self, character: Mapping[str, Any]) -> dict[str, Any]:
+        """Everything the rest panel needs to offer a preparation change.
+
+        The candidates are the class's own legal picks, narrowed to the
+        spellbook for a ``spellbook`` source -- a Wizard cannot prepare from a
+        list, only from what is written down.  A non-caster reports ``policy:
+        None`` and zero capacity rather than an error.
+        """
+
+        build = character.get("build")
+        rows = build.get("class_levels") if isinstance(build, Mapping) else None
+        row = rows[0] if isinstance(rows, list) and rows else {}
+        class_ref = str(row.get("class_ref") or "")
+        level = int(row.get("level") or 0)
+        block = _class_magic(character)
+        empty = {
+            "class_ref": class_ref,
+            "level": level,
+            "policy": None,
+            "prepared_capacity": 0,
+            "prepared_spell_refs": [],
+            "spellbook_refs": [],
+            "cantrip_capacity": 0,
+            "cantrip_refs": [],
+            "cantrips": [],
+            "leveled_spells": [],
+        }
+        if not class_ref:
+            return empty
+        requirements = self.requirements(class_ref, level)
+        if not requirements["slot_profile"]:
+            return empty
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is None:
+            return empty
+        options = self.options(class_ref, level)
+        leveled = options["leveled_spells"]
+        if policy.source == "spellbook":
+            known = {
+                str(ref) for ref in block.get("spellbook_refs") or ()
+                if isinstance(ref, str)
+            }
+            leveled = [spell for spell in leveled if spell["ref"] in known]
+        return {
+            "class_ref": class_ref,
+            "level": level,
+            "policy": {
+                "source": policy.source,
+                "level_up_replace": policy.level_up_replace,
+                "long_rest_replace": (
+                    "any" if policy.long_rest_replace is None
+                    else policy.long_rest_replace
+                ),
+                "cantrip_swap_on": policy.cantrip_swap_on,
+            },
+            "prepared_capacity": int(requirements["prepared_spell_count"]),
+            "prepared_spell_refs": [
+                str(ref) for ref in block.get("prepared_spell_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "spellbook_refs": [
+                str(ref) for ref in block.get("spellbook_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "cantrip_capacity": int(requirements["cantrip_count"]),
+            "cantrip_refs": [
+                str(ref) for ref in block.get("cantrip_refs") or ()
+                if isinstance(ref, str)
+            ],
+            "cantrips": options["cantrips"],
+            "leveled_spells": leveled,
+        }
+
+    def _require_spellbook(
+        self,
+        spell_refs: list[Any],
+        *,
+        class_ref: str,
+        requirements: Mapping[str, Any],
+    ) -> tuple[list[str], list[str]]:
+        """A spellbook's floor, not its size.
+
+        SRD prints "six 1st-level spells" at level 1 and +2 per later level, but
+        copying spells from scrolls or other books pushes the total above that
+        floor.  An equality check makes every copied spell an invalid book, so
+        the printed number is a minimum and the gain rule is enforced where a
+        gain actually happens (level-up, see ``_replacement_errors``).
+        """
+
+        if any(not isinstance(item, str) for item in spell_refs):
+            return [], ["spellbook_refs must be an array of spell refs"]
+        book = [str(item) for item in spell_refs]
+        errors: list[str] = []
+        minimum = int(requirements["spellbook_minimum"])
+        maximum = int(requirements["maximum_spell_level"])
+        if len(book) < minimum:
+            errors.append(f"spellbook_refs must contain at least {minimum} spells")
+        if len(set(book)) != len(book):
+            errors.append("spellbook_refs must not contain duplicate spells")
+        for ref in book:
+            spell = self.catalog.get(ref)
+            if spell is None:
+                errors.append(f"spellbook_refs contains unknown spell {ref}")
+                continue
+            if class_ref not in spell["class_refs"]:
+                errors.append(f"{ref} is not on the {class_ref} spell list")
+            spell_level = int(spell["level"])
+            if not 1 <= spell_level <= maximum:
+                errors.append(f"{ref} is not eligible at spell level {maximum}")
+        return book, errors
+
+    @staticmethod
+    def _previous_refs(
+        previous: Mapping[str, Sequence[str]], key: str,
+    ) -> set[str]:
+        raw = previous.get(key) or ()
+        return {str(item) for item in raw if isinstance(item, str)}
+
+    def _replacement_errors(
+        self,
+        policy: PreparationPolicy,
+        previous: Mapping[str, Sequence[str]],
+        cantrips: Sequence[str],
+        prepared: Sequence[str],
+        spellbook: Sequence[str],
+        context: str,
+    ) -> list[str]:
+        """The swap budget for this context, per the class's declared policy.
+
+        Level-up and Long Rest are two different budgets for the same class:
+        a Bard swaps one spell when gaining a level and none on a rest, a Cleric
+        the other way round, and a Wizard re-picks cantrips only after a rest.
+        Only the *dropped* spells count; gaining capacity is the other SRD rule
+        and is already enforced by the exact-count check above.
+        """
+
+        errors: list[str] = []
+        if context == "level_up":
+            budget = policy.level_up_replace
+            where = "at this level"
+        elif context == "long_rest":
+            budget = policy.long_rest_replace
+            where = "on a long rest"
+        else:
+            raise SpellCatalogError(f"unknown spell selection context {context}")
+        dropped = self._previous_refs(previous, "prepared_spell_refs") - set(prepared)
+        if budget is not None and len(dropped) > budget:
+            errors.append(
+                f"prepared_spell_refs may replace at most {budget} spell(s) {where}"
+            )
+        cantrip_timing = "level_up" if context == "level_up" else "long_rest"
+        cantrip_limit = 1 if policy.cantrip_swap_on == cantrip_timing else 0
+        dropped_cantrips = self._previous_refs(previous, "cantrip_refs") - set(cantrips)
+        if len(dropped_cantrips) > cantrip_limit:
+            errors.append(
+                f"cantrip_refs may replace at most {cantrip_limit} cantrip(s) {where}"
+            )
+        if policy.source == "spellbook" and context == "level_up":
+            if policy.spellbook_gain_per_level:
+                # 升级只增不减：旧书目是这张卡已经付过代价的资产，不能因为
+                # "新增数量对得上"就被替换掉。抄写与失书各有自己的领域操作。
+                lost = self._previous_refs(previous, "spellbook_refs") - set(spellbook)
+                if lost:
+                    errors.append(
+                        "spellbook_refs must keep the spells the book already holds"
+                    )
+                added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
+                if len(added) != policy.spellbook_gain_per_level:
+                    errors.append(
+                        "spellbook_refs must add exactly "
+                        f"{policy.spellbook_gain_per_level} spell(s) at this level"
+                    )
+        elif policy.source == "spellbook":
+            # 休息只重排准备位，不往法术书里加东西。
+            if set(spellbook) != self._previous_refs(previous, "spellbook_refs"):
+                errors.append("spellbook_refs cannot change during a rest")
+        return errors
 
     def configure(
         self, character: dict[str, Any], choices: Any,

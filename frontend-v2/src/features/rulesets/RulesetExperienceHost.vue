@@ -3,19 +3,51 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { errorMessage } from '@/api/client'
 import { fetchRulesetExperience } from '@/api/rulesets'
 import type { CharacterSheet, RulesetExperienceResponse } from '@/api/types'
-import { resolveRulesetExperience } from './registry'
+import { resolveRulesetAdvancementExtension, resolveRulesetExperience } from './registry'
 
 const props = withDefaults(defineProps<{
   ruleId: string
   language?: string
   initial?: CharacterSheet
   embedded?: boolean
-}>(), { language: '', embedded: false })
-const emit = defineEmits<{ submit: [character: CharacterSheet]; cancel: [] }>()
+  /** false = the caller owns the levels after submission (card-library wizard). */
+  chain?: boolean
+}>(), { language: '', embedded: false, chain: true })
+const emit = defineEmits<{
+  submit: [character: CharacterSheet, options?: { targetLevel?: number }]
+  cancel: []
+}>()
 
 const experience = ref<RulesetExperienceResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
+// The builder only ever produces a level-1 card.  A starting level above 1 is
+// the same chain the advancement panel already runs, so the host keeps itself
+// open and hands the finished character over once, at the target level.
+const chaining = ref<{ character: CharacterSheet; targetLevel: number } | null>(null)
+const runtimeId = computed(() => String(experience.value?.ruleset_runtime?.id || ''))
+const advancement = computed(() => (
+  chaining.value && runtimeId.value
+    ? resolveRulesetAdvancementExtension(runtimeId.value)
+    : null
+))
+
+function onBuilderSubmit(
+  character: CharacterSheet,
+  options?: { targetLevel?: number },
+): void {
+  const target = Math.floor(Number(options?.targetLevel || 0))
+  if (props.chain && target > 1) {
+    chaining.value = { character, targetLevel: target }
+    return
+  }
+  emit('submit', character, options)
+}
+
+function onChainCompleted(character: CharacterSheet): void {
+  chaining.value = null
+  emit('submit', character)
+}
 let sequence = 0
 const host = ref<HTMLElement | null>(null)
 const returnFocus = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
@@ -70,6 +102,7 @@ watch(
     loading.value = true
     error.value = ''
     experience.value = null
+    chaining.value = null
     try {
       const result = await fetchRulesetExperience(ruleId, language)
       if (current !== sequence) return
@@ -103,6 +136,21 @@ watch(
       <button @click="emit('cancel')">返回</button>
     </div>
     <component
+      :is="advancement.component"
+      v-else-if="advancement && chaining"
+      :rule-id="ruleId"
+      :character="chaining.character"
+      :language="language"
+      :target-level="chaining.targetLevel"
+      @applied="onChainCompleted"
+      @chain-completed="onChainCompleted"
+      @cancel="emit('cancel')"
+    />
+    <div v-else-if="chaining" class="ruleset-host-state error-banner" role="alert">
+      <p>{{ language.toLowerCase().startsWith('zh') ? '当前规则尚未注册升级界面。' : 'This ruleset has no registered advancement interface.' }}</p>
+      <button @click="emit('cancel')">{{ language.toLowerCase().startsWith('zh') ? '返回' : 'Back' }}</button>
+    </div>
+    <component
       :is="component"
       v-else-if="component && experience"
       :rule-id="ruleId"
@@ -110,7 +158,7 @@ watch(
       :initial="initial"
       :embedded="embedded"
       :experience="experience.experience"
-      @submit="emit('submit', $event)"
+      @submit="onBuilderSubmit"
       @cancel="emit('cancel')"
     />
   </div>

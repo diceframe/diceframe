@@ -1404,9 +1404,11 @@ class Dnd2024CombatEngine(
         target_id = str(target.get("actor_id") or "")
         if not target_side or not target_id:
             return {}
+        # 按 owner 扫描声明：同名特性可以同时存在于 class 与 subclass 两个
+        # owner 下，用短 id 查询会命中错误的那一条，甚至查不到。
         aura_features = [
-            feature_id
-            for feature_id, definition in self.features.catalog.features.items()
+            definition
+            for definition in self.features.catalog.features_by_key.values()
             if "aura_immune_conditions" in definition.parameters
         ]
         immune: dict[str, str] = {}
@@ -1417,14 +1419,17 @@ class Dnd2024CombatEngine(
             character = self._feature_character(
                 self._actor_view(instance, combat, holder_id),
             )
-            for feature_id in aura_features:
-                if not self.features.has_feature(character, feature_id):
+            for definition in aura_features:
+                if not self.features.has_feature(
+                    character, definition.id, owner=definition.owner,
+                ):
                     continue
                 aura_range = self.features.feature_value(
-                    character, feature_id, "aura_range",
+                    character, definition.id, "aura_range", owner=definition.owner,
                 )
                 conditions = self.features.feature_value(
-                    character, feature_id, "aura_immune_conditions",
+                    character, definition.id, "aura_immune_conditions",
+                    owner=definition.owner,
                 )
                 if (
                     isinstance(aura_range, bool)
@@ -1439,7 +1444,7 @@ class Dnd2024CombatEngine(
                 if self._distance(combat, holder_id, target_id) > aura_range:
                     continue
                 for condition_id in conditions:
-                    immune.setdefault(condition_id, feature_id)
+                    immune.setdefault(condition_id, definition.id)
         return immune
 
     def _require_range(

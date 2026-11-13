@@ -15,6 +15,8 @@ from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
+from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
+from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
 
 class RestError(ValueError):
@@ -223,7 +225,9 @@ class Dnd2024RestEngine:
             "requires_elapsed_time_confirmation": True,
         }
 
-    def complete_long_rest(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def complete_long_rest(
+        self, payload: dict[str, Any], prepared_spells: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
         events: list[dict[str, Any]] = []
@@ -250,6 +254,8 @@ class Dnd2024RestEngine:
         resources["ability_score_reductions"] = {}
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
+        if prepared_spells:
+            events.extend(self._apply_prepared_spells(character, prepared_spells))
         for feat_ref in restore_feat_free_casts(character):
             events.append({"type": "restore_feat_spell", "feat_ref": feat_ref})
         holder = concentration_holder(character)
@@ -278,6 +284,86 @@ class Dnd2024RestEngine:
             "source_ref": self.rules["long_rest"]["source_ref"],
             "requires_elapsed_time_confirmation": True,
         }
+
+    def parse_prepared_spells(
+        self, payload: dict[str, Any], request: Any,
+    ) -> dict[str, list[str]]:
+        """Validate a Long Rest preparation change without mutating anything.
+
+        The class policy decides whether the change is legal at all (a Bard
+        swaps spells on level-up, not on a rest), then the ordinary spell
+        selection rules apply with the *rest* budget: the cap is
+        ``long_rest_replace`` -- unlimited for Cleric, Druid and Wizard, one for
+        Paladin and Ranger -- never the level-up cap.
+        """
+
+        character = _canonical(payload)
+        class_ref, _class_id, level = self._class_state(character)
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is None or not policy.can_change_on_long_rest():
+            raise RestError(
+                "this class cannot change prepared spells on a long rest"
+            )
+        if not isinstance(request, dict):
+            raise RestError("prepared_spells must be an object with prepared_spell_refs")
+        raw_prepared = request.get("prepared_spell_refs")
+        if not isinstance(raw_prepared, list) or any(
+            not isinstance(ref, str) for ref in raw_prepared
+        ):
+            raise RestError("prepared_spells must be an object with prepared_spell_refs")
+        block = character.get("spellcasting", {}).get("class")
+        block = block if isinstance(block, dict) else {}
+        current = {
+            "cantrip_refs": list(block.get("cantrip_refs") or []),
+            "prepared_spell_refs": list(block.get("prepared_spell_refs") or []),
+            "spellbook_refs": list(block.get("spellbook_refs") or []),
+        }
+        raw_cantrips = request.get("cantrip_refs")
+        if raw_cantrips is not None and (
+            not isinstance(raw_cantrips, list)
+            or any(not isinstance(ref, str) for ref in raw_cantrips)
+        ):
+            raise RestError("prepared_spells cantrip_refs must be an array of spell refs")
+        parsed, errors = Dnd2024SpellSelection(self.bundle).validate(
+            class_ref,
+            level,
+            {
+                "prepared_spell_refs": raw_prepared,
+                "cantrip_refs": (
+                    raw_cantrips if raw_cantrips is not None else current["cantrip_refs"]
+                ),
+                "spellbook_refs": current["spellbook_refs"],
+            },
+            previous=current,
+            context="long_rest",
+        )
+        if errors:
+            raise RestError("; ".join(errors))
+        if (
+            set(parsed["prepared_spell_refs"]) == set(current["prepared_spell_refs"])
+            and set(parsed["cantrip_refs"]) == set(current["cantrip_refs"])
+        ):
+            # 填不出改动的请求是调用方错误，不是一次成功的休息（同 S0-G3
+            # 对空补齐的处理）。
+            raise RestError("prepared_spells would not change anything")
+        change = {"prepared_spell_refs": list(parsed["prepared_spell_refs"])}
+        if raw_cantrips is not None:
+            change["cantrip_refs"] = list(parsed["cantrip_refs"])
+        return change
+
+    @staticmethod
+    def _apply_prepared_spells(
+        character: dict[str, Any], change: dict[str, list[str]],
+    ) -> list[dict[str, Any]]:
+        block = character.setdefault("spellcasting", {}).get("class")
+        if not isinstance(block, dict):
+            raise RestError("character spellcasting block is missing")
+        before = list(block.get("prepared_spell_refs") or [])
+        after = list(change["prepared_spell_refs"])
+        block["prepared_spell_refs"] = after
+        if "cantrip_refs" in change:
+            block["cantrip_refs"] = list(change["cantrip_refs"])
+        return [{"type": "prepared_spells_changed", "before": before, "after": after}]
 
     def _recharge_items(
         self, character: dict[str, Any], payload: dict[str, Any], rest: str,

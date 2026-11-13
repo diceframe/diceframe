@@ -107,6 +107,28 @@ describe('D&D 2024 professional character builder', () => {
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
       character_name: '阿岚', rule_id: 'dnd2024_srd',
     })
+    // Default starting level is 1: the option is still reported, so the host
+    // never has to guess, but the draft the server validates is unchanged.
+    expect(wrapper.emitted('submit')?.[0]?.[1]).toEqual({ targetLevel: 1 })
+  })
+
+  it('reports a higher starting level without changing the level-1 draft', async () => {
+    const wrapper = mountBuilder({})
+    await flushPromises()
+
+    await wrapper.findAll('button').find(item => item.text().includes('可靠守护者'))!.trigger('click')
+    const nameInput = wrapper.findAll('label').find(item => item.text().includes('角色名'))!.find('input')
+    await nameInput.setValue('阿岚')
+    await wrapper.get('.start-level-field select').setValue('3')
+    expect(wrapper.text()).toContain('第 2 级到第 3 级')
+    await buttonByText(wrapper, '完成并使用这个角色').trigger('click')
+    await flushPromises()
+
+    // The builder still validates and finalizes a level-1 card; the target is a
+    // flow parameter, so validation's level-1 rule keeps holding.
+    expect(mocks.validate.mock.calls[0]?.[1]).toMatchObject({ level: 1 })
+    expect(mocks.finalize.mock.calls[0]?.[1]).toMatchObject({ level: 1 })
+    expect(wrapper.emitted('submit')?.[0]?.[1]).toEqual({ targetLevel: 3 })
   })
 
   it('shows a quick-mode finish failure instead of silently staying put', async () => {

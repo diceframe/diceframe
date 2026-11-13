@@ -8,6 +8,14 @@
   "hit_die": 8,
   "fixed_hp_per_level": 5,
   "spellcasting_ability": "wis",
+  "preparation_policy": {
+    "source": "class_list",
+    "level_up_replace": 0,
+    "long_rest_replace": "any",
+    "cantrip_swap_on": "level_up",
+    "spellbook": {"initial": 0, "per_level": 0},
+    "spellbook_gain_per_level": 0
+  },
   "recommended_spell_choices": {
     "cantrip_ids": ["druidcraft", "produce_flame"],
     "prepared_spell_ids": ["animal_friendship", "cure_wounds", "faerie_fire", "thunderwave"]
