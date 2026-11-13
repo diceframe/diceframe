@@ -840,6 +840,34 @@ class Dnd2024Runtime:
         advanced = self._sync_class_resources(bundle, advanced)
         return self._live_projection(character, advanced, bundle)
 
+    def missing_advancement_choices(
+        self, rule: Any, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Choices this character still owes, in level order."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        return Dnd2024AdvancementEngine(
+            self.load_bundle(locale)
+        ).missing_choices(character)
+
+    def repair_advancement(
+        self,
+        rule: Any,
+        character: dict[str, Any],
+        repairs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Fill a character's outstanding choices without moving its level."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        repaired = Dnd2024AdvancementEngine(bundle).repair_choices(character, repairs)
+        repaired = self._sync_class_resources(bundle, repaired)
+        return self._live_projection(character, repaired, bundle)
+
     def complete_rest(
         self, rule: Any, character: dict[str, Any], rest: str,
         hit_die_rolls: dict[str, list[int]] | None = None,

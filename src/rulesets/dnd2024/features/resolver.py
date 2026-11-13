@@ -60,6 +60,9 @@ class Dnd2024ClassFeatureResolver:
         # canonical 装备元数据是惰性构建的：它只在真的有 feature 声明了装备前提
         # 时才被读取，避免每次角色投影都白拷一份物品目录。
         self._equipment: Dnd2024EquipmentCatalog | None = None
+        # 成长专长的 kind -> category 映射同样惰性：只有声明了 choice 的特性
+        # 才需要它，普通特性投影不该为此读一遍专项目录。
+        self._feat_categories: dict[str, str] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -77,6 +80,16 @@ class Dnd2024ClassFeatureResolver:
         self.resources = Dnd2024ClassResourceCatalog.from_bundle(bundle)
         self.progression = Dnd2024ProgressionCatalog.from_bundle(bundle)
         self._validate_declarations()
+
+    @property
+    def _feature_index(self) -> Mapping[tuple[str, str], ClassFeatureDefinition]:
+        """The catalog's current owner-scoped index.
+
+        Reading it on demand keeps monkeypatched catalogs (tests and
+        diagnostics) authoritative instead of pinning a stale snapshot.
+        """
+
+        return self.catalog.features_by_key
 
     @property
     def equipment(self) -> Dnd2024EquipmentCatalog:
@@ -125,15 +138,22 @@ class Dnd2024ClassFeatureResolver:
     def features_for(
         self, character: Mapping[str, Any] | None,
     ) -> tuple[ClassFeatureDefinition, ...]:
-        """Every declared feature the character owns, in catalog order."""
+        """Every declared feature the character owns, in catalog order.
+
+        Ownership is a set of owner-scoped keys.  Class features come from the
+        progression table; subclass features are granted only when the
+        character's persisted ``features.subclass_ref`` names the subclass the
+        bundle associates with that class.
+        """
 
         state = self.class_state(character)
         if state is None:
             return ()
-        return self._owned_feature_definitions(*state)
+        return self._owned_feature_definitions(*state, character)
 
     def _owned_feature_definitions(
         self, class_id: str, level: int,
+        character: Mapping[str, Any] | None = None,
     ) -> tuple[ClassFeatureDefinition, ...]:
         """The features one class row owns at ``level``, in catalog order.
 
@@ -143,41 +163,69 @@ class Dnd2024ClassFeatureResolver:
         ``minimum_level``, or an option feature whose parent is not granted,
         read as "not owned" on the character sheet while the attack count still
         took the raw grant set.
+
+        ``character`` is required to resolve which subclass the player selected;
+        callers that only have a class row still pass it through so the two
+        entry points can never disagree about ownership.
         """
 
-        granted = self._granted_feature_ids(class_id, level) | self._subclass_feature_ids(
-            class_id, level,
-        )
+        granted = self._granted_feature_keys(class_id, level, character)
         owned: list[ClassFeatureDefinition] = []
         ordered = list(self.catalog.by_class.get(class_id, ()))
-        # Feature ids are canonical and global, while a class table may grant a
-        # feature declared under another class (Weapon Mastery is one such
-        # shared feature).  Ownership therefore follows the progression grant;
-        # the catalog only has to declare the id once.
-        for feature_id in sorted(granted):
-            if feature_id in self.catalog.features and feature_id not in ordered:
-                ordered.append(feature_id)
-        for feature_id in ordered:
-            definition = self.catalog.features.get(feature_id)
+        # A progression table may grant a shared declaration declared under
+        # another class (Extra Attack and Weapon Mastery are shared names).
+        # Ownership follows the grant, while identity stays owner-scoped.
+        for key in sorted(granted):
+            if key not in ordered:
+                ordered.append(key)
+        by_key = self.catalog.features_by_key
+        for key in ordered:
+            definition = by_key.get(key)
             if definition is None or definition.minimum_level > level:
                 continue
             if definition.option_of:
-                # 选项特性（例如 Monk's Focus 的三个用法）只有在授予它的
-                # 特性已经被职业表授予时才算拥有。
-                if definition.option_of not in granted:
+                # 选项特性（例如 Monk's Focus 的三个用法）只有在同一个 owner
+                # 下授予它的父特性已经被拥有时才算拥有。
+                parent_key = (definition.owner, definition.option_of)
+                if parent_key not in granted:
                     continue
-            elif feature_id not in granted:
+            elif key not in granted:
                 continue
             owned.append(definition)
         return tuple(owned)
 
     def has_feature(
-        self, character: Mapping[str, Any] | None, feature_id: str,
+        self,
+        character: Mapping[str, Any] | None,
+        feature_id: str,
+        *,
+        owner: str | None = None,
     ) -> bool:
+        """Whether the character owns ``feature_id``, optionally one declaration.
+
+        ``owner`` narrows the question to a *declaration owner*, never to the
+        class that granted it.  It exists for ids declared twice with different
+        owners -- ``cutting_words`` belongs to both College of Lore and College
+        of Valor -- where "the character has the Bard's Cutting Words" is not
+        the same question as "the character has the Lore one".
+
+        A shared declaration keeps its single owner, so the answer for a second
+        class is deliberately False on the owner check while still True without
+        it: a Monk 5 owns Extra Attack, and that declaration is filed under
+        ``class:fighter`` because Extra Attack is declared once, with one
+        number, for every class that grants it.  Callers asking "does this
+        class grant X" must read the class table, not this method.
+        """
+
         wanted = str(feature_id or "")
         if not wanted:
             return False
-        return any(item.id == wanted for item in self.features_for(character))
+        wanted_owner = str(owner) if owner is not None else None
+        return any(
+            item.id == wanted
+            and (wanted_owner is None or item.owner == wanted_owner)
+            for item in self.features_for(character)
+        )
 
     def attacks_per_action(self, character: Mapping[str, Any] | None) -> int:
         """How many attacks one Attack action grants, per the class tables.
@@ -212,7 +260,9 @@ class Dnd2024ClassFeatureResolver:
                 continue
             if not 1 <= level <= 20:
                 continue
-            for definition in self._owned_feature_definitions(class_id, level):
+            for definition in self._owned_feature_definitions(
+                class_id, level, character,
+            ):
                 value = definition.parameters.get("attacks_per_action")
                 if isinstance(value, int) and not isinstance(value, bool):
                     best = max(best, value)
@@ -252,6 +302,8 @@ class Dnd2024ClassFeatureResolver:
         feature_id: str,
         key: str,
         default: Any = None,
+        *,
+        owner: str | None = None,
     ) -> Any:
         """One scalar/table parameter of an owned feature.
 
@@ -261,10 +313,19 @@ class Dnd2024ClassFeatureResolver:
         An optional ``<key>_format`` template renders the table value into its
         printable form (``1d{die}``); it is a single placeholder, never an
         expression.
+
+        When ``owner`` is supplied, only the declaration with that owner is
+        considered; omitting it preserves the historical short-id lookup.
         """
 
+        wanted = str(feature_id)
+        wanted_owner = str(owner) if owner is not None else None
         definition = next(
-            (item for item in self.features_for(character) if item.id == str(feature_id)),
+            (
+                item for item in self.features_for(character)
+                if item.id == wanted
+                and (wanted_owner is None or item.owner == wanted_owner)
+            ),
             None,
         )
         if definition is None:
@@ -277,19 +338,19 @@ class Dnd2024ClassFeatureResolver:
         key: str,
         default: Any = None,
     ) -> Any:
-        """The smallest numeric value of one parameter across owned features.
+        """The smallest numeric value of one parameter across active features.
 
         Crit threshold and other "best value wins" primitives read through this
         method, so a class never hardcodes a subclass feature id and two owned
         declarations (19 and 18) resolve to the more generous 18 instead of
-        stacking.
+        stacking.  Owned-but-inactive features contribute no values.
         """
 
         name = str(key)
-        found: int | None = None
-        for definition in self.features_for(character):
+        found: int | float | None = None
+        for definition in self.active_features_for(character):
             value = definition.parameters.get(name)
-            if isinstance(value, bool) or not isinstance(value, int):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             if found is None or value < found:
                 found = value
@@ -333,10 +394,15 @@ class Dnd2024ClassFeatureResolver:
         declarations are alternative candidates for the "one base AC at a
         time" rule, so the armor class formula takes the best candidate instead
         of summing ability modifiers.
+
+        Only currently active declarations contribute: an unarmored-AC ability
+        is a benefit, and a benefit whose equipment precondition does not hold
+        is not in force.  Declaring the ability is still the catalog's job, so
+        nothing here names a feature id.
         """
 
         abilities: list[str] = []
-        for definition in self.features_for(character):
+        for definition in self.active_features_for(character):
             ability = definition.parameters.get("unarmored_ac_ability_bonus")
             if isinstance(ability, str) and ability and ability not in abilities:
                 abilities.append(ability)
@@ -385,6 +451,78 @@ class Dnd2024ClassFeatureResolver:
             if definition.parameters.get(name)
         ]
 
+    def feature_selection(
+        self,
+        character: Mapping[str, Any] | None,
+        definition: ClassFeatureDefinition,
+    ) -> dict[str, Any] | None:
+        """The committed selection of one declared choice, or ``None``.
+
+        Only a record matching the full ``(owner, feature_id, choice_id)``
+        identity and carrying refs of the declared category is projected.  A
+        duplicate record for the same slot is ambiguous, so it resolves to an
+        empty selection rather than letting the last write win.  Nothing here
+        grants a feature: ownership still comes only from the class and
+        subclass grant tables, never from a submitted choice.
+        """
+
+        choice = definition.choice
+        if choice is None:
+            return None
+        matches = [
+            record
+            for record in self._feature_choice_records(character)
+            if record.get("owner") == definition.owner
+            and record.get("feature_id") == definition.id
+            and record.get("choice_id") == choice.id
+        ]
+        selected: list[str] = []
+        if len(matches) == 1:
+            raw_refs = matches[0].get("selected_refs")
+            categories = self._advancement_feat_categories()
+            if isinstance(raw_refs, list):
+                for ref in raw_refs:
+                    if not isinstance(ref, str):
+                        continue
+                    if categories.get(ref.removeprefix("feat:")) != choice.category:
+                        continue
+                    if ref not in selected:
+                        selected.append(ref)
+        return {"choice_id": choice.id, "selected_refs": selected}
+
+    @staticmethod
+    def _feature_choice_records(
+        character: Mapping[str, Any] | None,
+    ) -> list[Mapping[str, Any]]:
+        """Every structurally valid persisted choice record, in stored order."""
+
+        if not isinstance(character, Mapping):
+            return []
+        features = character.get("features")
+        if not isinstance(features, Mapping):
+            return []
+        raw = features.get("feature_choices")
+        if not isinstance(raw, list):
+            return []
+        return [record for record in raw if isinstance(record, Mapping)]
+
+    def _advancement_feat_categories(self) -> dict[str, str]:
+        """The advancement feat catalog's id -> category map, read once."""
+
+        if self._feat_categories is None:
+            catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+            feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+            self._feat_categories = (
+                {
+                    str(feat_id): str(feat.get("category") or "")
+                    for feat_id, feat in feats.items()
+                    if isinstance(feat, Mapping)
+                }
+                if isinstance(feats, Mapping)
+                else {}
+            )
+        return self._feat_categories
+
     def feature_views(
         self, character: Mapping[str, Any] | None,
     ) -> tuple[FeatureView, ...]:
@@ -414,12 +552,14 @@ class Dnd2024ClassFeatureResolver:
                         values[key] = deepcopy(raw)
             views.append(FeatureView(
                 id=definition.id,
+                owner=definition.owner,
                 name=self.catalog.label(definition.id, _humanize(definition.id)),
                 summary=definition.summary,
                 source_ref=definition.source_ref,
                 minimum_level=definition.minimum_level,
                 values=values,
                 active=active,
+                selection=self.feature_selection(character, definition),
             ))
         return tuple(views)
 
@@ -748,37 +888,81 @@ class Dnd2024ClassFeatureResolver:
             return template.format(die=resolved)
         return resolved
 
-    def _granted_feature_ids(self, class_id: str, level: int) -> frozenset[str]:
+    def _granted_feature_keys(
+        self, class_id: str, level: int, character: Mapping[str, Any] | None,
+    ) -> frozenset[tuple[str, str]]:
+        """Owner-scoped keys the class table and selected subclass grant."""
+
         if self.progression is None:
             return frozenset()
         progression = self.progression.classes.get(str(class_id))
         if progression is None:
             return frozenset()
-        granted: set[str] = set()
+        owner = f"class:{class_id}"
+        granted: set[tuple[str, str]] = set()
         for row in progression["features_by_level"][:level]:
-            granted.update(str(feature_id) for feature_id in row)
+            for local_id in row:
+                key = self._key_for_grant(str(local_id), owner)
+                if key is not None:
+                    granted.add(key)
+        subclass_ref = self._selected_subclass_ref(class_id, character)
+        if subclass_ref:
+            subclass = self.progression.subclasses.get(str(class_id))
+            if subclass is not None:
+                for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
+                    if 1 <= int(raw_level) <= level:
+                        for local_id in feature_ids:
+                            key = self._key_for_grant(str(local_id), subclass_ref)
+                            if key is not None:
+                                granted.add(key)
         return frozenset(granted)
 
-    def _subclass_feature_ids(self, class_id: str, level: int) -> frozenset[str]:
-        """Subclass features granted up to ``level`` by the representative subclass.
+    def _key_for_grant(
+        self, local_id: str, preferred_owner: str,
+    ) -> tuple[str, str] | None:
+        """The declaration a grant actually owns.
 
-        Ownership is derived from ``(class_id, level)`` only: the SRD bundle
-        guarantees exactly one representative subclass per class, and the
-        advancement chain forces that subclass at the level it is introduced.
-        Consequently a directly built sheet without ``features.subclass_ref``
-        owns the same features as one advanced through the real path.
+        Prefer the grant's own owner.  A uniquely declared shared feature (for
+        example Extra Attack granted to several classes) keeps that shared
+        declaration's owner rather than inventing a second definition: the
+        number is one rule, and duplicating the declaration would let one class
+        silently carry a different ``attacks_per_action`` from another.
+
+        The consequence is visible but intentional -- a Monk's Extra Attack
+        reports ``owner == "class:fighter"`` -- which is why
+        :meth:`has_feature` documents its ``owner`` argument as a declaration
+        owner, not as the granting class.
+        """
+
+        preferred = (preferred_owner, local_id)
+        if preferred in self._feature_index:
+            return preferred
+        matches = [
+            key for key, definition in self._feature_index.items()
+            if definition.id == local_id
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _selected_subclass_ref(
+        self, class_id: str, character: Mapping[str, Any] | None,
+    ) -> str:
+        """Return the persisted subclass ref when it belongs to ``class_id``.
+
+        Missing, empty, malformed, or foreign refs deliberately grant nothing.
+        A direct sheet gets no representative subclass fallback: choosing a
+        subclass is character state, not a consequence of having a class level.
         """
 
         if self.progression is None:
-            return frozenset()
+            return ""
         subclass = self.progression.subclasses.get(str(class_id))
-        if not subclass:
-            return frozenset()
-        granted: set[str] = set()
-        for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
-            if 1 <= int(raw_level) <= level:
-                granted.update(str(feature_id) for feature_id in feature_ids)
-        return frozenset(granted)
+        if subclass is None:
+            return ""
+        features = character.get("features") if isinstance(character, Mapping) else None
+        ref = features.get("subclass_ref") if isinstance(features, Mapping) else None
+        if not isinstance(ref, str) or not ref:
+            return ""
+        return ref if ref == f"subclass:{subclass.get('id')}" else ""
 
     def _track_value(
         self,
@@ -805,7 +989,7 @@ class Dnd2024ClassFeatureResolver:
         progression_catalog = self.progression
         if progression_catalog is None:  # pragma: no cover - guarded by ``available``
             return
-        for definition in self.catalog.features.values():
+        for definition in self._feature_index.values():
             spell_ref = definition.parameters.get("granted_spell_id")
             if spell_ref is not None:
                 spells = (self.bundle.get("spell_catalog", "srd_spells") or {}).get("spells", [])
@@ -818,15 +1002,7 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"class feature {definition.id} references an unknown class table"
                 )
-            subclass = progression_catalog.subclasses.get(definition.class_id)
-            if subclass is not None:
-                for raw_level, feature_ids in subclass["feature_ids_by_level"].items():
-                    # 声明等级与子职表授予等级漂移即拒绝：不允许"声明 3 级、
-                    # 实际 7 级才给"的静默错位。
-                    if definition.id in feature_ids and int(raw_level) != definition.minimum_level:
-                        raise ClassFeatureError(
-                            f"{definition.id}.minimum_level must match its subclass grant level"
-                        )
+            self._validate_owner_grant(definition, progression_catalog)
             for key, value in definition.parameters.items():
                 if key == "crit_threshold":
                     if (
@@ -878,6 +1054,70 @@ class Dnd2024ClassFeatureResolver:
                         f"{definition.id} references an undeclared class resource: "
                         f"{definition.resource_id}"
                     )
+
+    @staticmethod
+    def _validate_owner_grant(
+        definition: ClassFeatureDefinition,
+        progression_catalog: Dnd2024ProgressionCatalog,
+    ) -> None:
+        """Prove a non-option declaration has a real owner-side grant.
+
+        Subclass declarations must name the subclass the progression catalog
+        associates with the declaring class.  Class declarations may still be
+        issued by the subclass table: several pre-existing subclass features
+        were declared before owner scoping and retain ``class:`` as their
+        default owner.
+
+        A subclass declaration must state exactly the level its own table
+        grants it at: the subclass table is its only source, so a drifted
+        level would silently move the unlock.  A class declaration is looser
+        on purpose.  Third-party bundles can hand an id out earlier than the
+        catalog says it starts, and ``features_for`` already resolves that
+        case through the ``minimum_level > level`` filter; failing the whole
+        bundle there would turn a cosmetic mismatch into a ruleset that
+        refuses to load.  What must never pass, either way, is a declaration
+        that no table grants at all -- that feature can never become owned.
+        """
+
+        if definition.option_of:
+            return
+        class_id = definition.class_id
+        progression = progression_catalog.classes[class_id]
+        subclass = progression_catalog.subclasses.get(class_id)
+        class_levels = [
+            level
+            for level, feature_ids in enumerate(
+                progression["features_by_level"], start=1,
+            )
+            if definition.id in feature_ids
+        ]
+        subclass_levels: list[int] = []
+        if subclass is not None:
+            subclass_levels = [
+                int(level)
+                for level, feature_ids in subclass["feature_ids_by_level"].items()
+                if definition.id in feature_ids
+            ]
+        if definition.owner.startswith("subclass:"):
+            subclass_id = definition.owner.removeprefix("subclass:")
+            if subclass is None or str(subclass.get("id") or "") != subclass_id:
+                raise ClassFeatureError(
+                    f"{definition.id}.owner is not a subclass of {class_id}"
+                )
+            if not subclass_levels:
+                raise ClassFeatureError(
+                    f"{definition.id} has no grant in {definition.owner}"
+                )
+            if definition.minimum_level != min(subclass_levels):
+                raise ClassFeatureError(
+                    f"{definition.id}.minimum_level must match its subclass grant"
+                )
+        else:
+            levels = class_levels or subclass_levels
+            if not levels:
+                raise ClassFeatureError(
+                    f"{definition.id} has no class or subclass grant"
+                )
 
     @staticmethod
     def _validate_passive_parameters(definition: ClassFeatureDefinition) -> None:
