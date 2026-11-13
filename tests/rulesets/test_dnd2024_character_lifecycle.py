@@ -205,6 +205,16 @@ class _Api:
             self._card_advancement_dependencies, card_id, body,
         )
 
+    def pending_character_card_choices(self, card_id: str):
+        return ruleset_advancement.pending_card_choices(
+            self._card_advancement_dependencies, card_id,
+        )
+
+    def complete_character_card_choices(self, card_id: str, body):
+        return ruleset_advancement.complete_card_choices(
+            self._card_advancement_dependencies, card_id, body,
+        )
+
     def preview_live_character_advancement(
         self, game_key: str, user_id: str, body,
     ):
@@ -842,6 +852,55 @@ async def test_profile_http_routes_enforce_live_identity_and_patch_cards(
     assert updated_card_body["card"]["ruleset_character"]["profile"]["notes"].startswith(
         "Reusable"
     )
+
+
+@pytest.mark.asyncio
+async def test_card_choice_routes_answer_with_status_codes_over_http(
+    professional_context,
+) -> None:
+    api, _instance, character = professional_context
+    saved = character_cards.save_character_card(
+        api._character_card_dependencies, character,
+    )["card"]
+    revision = int(saved.get("ruleset_revision", 0) or 0)
+    pending_path = f"/api/character-cards/{saved['id']}/choices/pending"
+    complete_path = f"/api/character-cards/{saved['id']}/choices/complete"
+    headers = {"X-Test-Owner": "1"}
+
+    async with TestClient(TestServer(_http_app(api))) as client:
+        pending = await client.get(pending_path, headers=headers)
+        pending_body = await pending.json()
+        missing_card = await client.get(
+            "/api/character-cards/no-such-card/choices/pending",
+            headers=headers,
+        )
+        stale = await client.post(
+            complete_path,
+            headers=headers,
+            json={
+                "repairs": {"subclass_ref": "subclass:fighter:champion"},
+                "operation_id": "http-choice-stale",
+                "expected_revision": revision + 7,
+            },
+        )
+        empty = await client.post(
+            complete_path,
+            headers=headers,
+            json={
+                "repairs": {},
+                "operation_id": "http-choice-empty",
+                "expected_revision": revision,
+            },
+        )
+        empty_body = await empty.json()
+
+    assert pending.status == 200
+    assert pending_body["ok"] is True
+    assert pending_body["missing"] == []
+    assert missing_card.status == 404
+    assert stale.status == 409
+    assert empty.status == 422
+    assert empty_body["code"] == "ADVANCEMENT_NOT_READY"
 
 
 @pytest.mark.asyncio

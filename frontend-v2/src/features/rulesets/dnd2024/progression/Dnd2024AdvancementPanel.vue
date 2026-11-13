@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type {
   JsonObject,
   RulesetAdvancementPreview,
@@ -9,6 +9,8 @@ import {
   applyCharacterCardAdvancement,
   applyLiveCharacterAdvancement,
   applyRulesetAdvancement,
+  completeCharacterCardChoices,
+  fetchCharacterCardPendingChoices,
   previewCharacterCardAdvancement,
   previewLiveCharacterAdvancement,
   previewRulesetAdvancement,
@@ -22,11 +24,21 @@ const props = withDefaults(defineProps<{
   gameKey?: string
   userId?: string
   revision?: number
-}>(), { language: 'zh-CN', cardId: '', gameKey: '', userId: '', revision: 0 })
-const emit = defineEmits<{ applied: [character: JsonObject]; cancel: [] }>()
+  /** 0 = single-level mode (unchanged behaviour); N >= 2 = keep going to N. */
+  targetLevel?: number
+}>(), {
+  language: 'zh-CN', cardId: '', gameKey: '', userId: '', revision: 0, targetLevel: 0,
+})
+const emit = defineEmits<{
+  applied: [character: JsonObject]
+  chainCompleted: [character: JsonObject]
+  cancel: []
+}>()
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 const choices = ref<JsonObject>({ hp_method: 'fixed' })
+// 进场时的法术书大小（含抄写），用来算本级上限；不随勾选变化。
+const spellbookBaseline = ref(0)
 const preview = ref<RulesetAdvancementPreview | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -48,23 +60,117 @@ const featRequirement = computed(() => (
 ))
 const abilityRequirement = computed(() => requirement('ability_score_increases'))
 const spellRequirement = computed(() => requirement('class_spell_choices'))
+// 换法术的额度由内容决定（战士式的"整表重排"只属于长休）：本级能新增几个、
+// 能拿掉几个旧法术，全从要求里读，面板不写死任何一个职业的数字。
+const spellBudgetText = computed(() => {
+  const spec = spellRequirement.value
+  if (!spec) return ''
+  // 老版本服务端不带额度字段：宁可不提示，也不能凭空说"新增 0 个"。
+  if (spec.additions === undefined && spec.replace_limit === undefined) return ''
+  const additions = Number(spec.additions || 0)
+  const replace = Number(spec.replace_limit || 0)
+  const book = Number(spec.spellbook_additions || 0)
+  const cantrips = Number(spec.cantrip_replace_limit || 0)
+  const parts = [text(`本级新增 ${additions} 个法术`, `${additions} new spell(s) at this level`)]
+  parts.push(replace > 0
+    ? text(`最多替换 ${replace} 个旧法术`, `up to ${replace} old spell(s) may be replaced`)
+    : text('不能替换旧法术，只能新增', 'old spells cannot be replaced; only additions'))
+  if (book > 0) parts.push(text(`法术书需新增 ${book} 个`, `the spellbook gains ${book}`))
+  if (cantrips > 0) parts.push(text(`戏法可替换 ${cantrips} 个`, `up to ${cantrips} cantrip(s) may be replaced`))
+  return `${parts.join(' · ')}。`
+})
 const subclassRequirement = computed(() => requirement('subclass_ref'))
 
-function canonical(): JsonObject {
-  const nested = props.character.ruleset_character
+// A card can arrive with choices it never made: imported from outside, or
+// carried over from before the choice was required.  The audit reports them so
+// the player can pay before the level moves, instead of finding out too late
+// that the whole subclass tree was never granted.
+const pendingChoices = ref<JsonObject[]>([])
+const pendingBusy = ref(false)
+const pendingSubclass = ref('')
+const pendingSubclassRow = computed<JsonObject | null>(() => (
+  pendingChoices.value.find(row => row.id === 'subclass_ref') as JsonObject | undefined
+) || null
+)
+const pendingOther = computed(() => (
+  pendingChoices.value.filter(row => row.id !== 'subclass_ref')
+))
+
+async function refreshPending(): Promise<void> {
+  if (!props.cardId) return
+  try {
+    const response = await fetchCharacterCardPendingChoices(props.cardId)
+    pendingChoices.value = (response.missing || []) as JsonObject[]
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+  } catch {
+    // A card that cannot be audited must not block the upgrade panel; the
+    // commit path re-checks everything anyway.
+    pendingChoices.value = []
+  }
+}
+
+async function completePendingSubclass(): Promise<void> {
+  if (!props.cardId || !pendingSubclass.value) return
+  pendingBusy.value = true
+  error.value = ''
+  try {
+    const operationId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `repair-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const response = await completeCharacterCardChoices(
+      props.cardId,
+      { subclass_ref: pendingSubclass.value },
+      currentRevision.value,
+      operationId,
+    )
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+    pendingSubclass.value = ''
+    await refreshPending()
+    await refresh()
+    // 补齐子职只在卡还没升级时发生；链式模式下它不该关掉面板。
+    if (!chained.value) emit('applied', response.character)
+  } catch (cause: unknown) {
+    error.value = String((cause as Error)?.message || cause)
+  } finally { pendingBusy.value = false }
+}
+
+// A chain replaces the character it is upgrading: level 2's result is level 3's
+// input.  The prop stays the entrance point, this ref is what the panel moves.
+const workingCharacter = ref<JsonObject>(props.character)
+
+function canonical(character: JsonObject = workingCharacter.value): JsonObject {
+  const nested = character.ruleset_character
   return nested && typeof nested === 'object' && !Array.isArray(nested)
     ? nested as JsonObject
-    : props.character
+    : character
 }
+
+function levelOf(character: JsonObject): number {
+  const inner = canonical(character)
+  const progression = inner.progression as JsonObject | undefined
+  const build = inner.build as JsonObject | undefined
+  return Number(
+    character.level || inner.level || progression?.level || build?.level || 0,
+  )
+}
+
+const targetLevel = computed(() => Math.max(0, Math.floor(Number(props.targetLevel || 0))))
+// `targetLevel` at or below the current level is a no-op, not a chain: falling
+// back to single-level mode keeps the panel honest instead of spinning.
+const chained = computed(() => (
+  targetLevel.value >= 2 && levelOf(workingCharacter.value) < targetLevel.value
+))
 
 function initializeSpellChoices(): void {
   const spellcasting = canonical().spellcasting as JsonObject | undefined
   const classMagic = spellcasting?.class as JsonObject | undefined
   if (!classMagic) return
+  const book = [...((classMagic.spellbook_refs as string[]) || [])]
+  spellbookBaseline.value = book.length
   choices.value.class_spell_choices = {
     cantrip_refs: [...((classMagic.cantrip_refs as string[]) || [])],
     prepared_spell_refs: [...((classMagic.prepared_spell_refs as string[]) || [])],
-    spellbook_refs: [...((classMagic.spellbook_refs as string[]) || [])],
+    spellbook_refs: book,
   }
 }
 
@@ -77,7 +183,7 @@ async function refresh(): Promise<void> {
       : props.gameKey && props.userId
         ? await previewLiveCharacterAdvancement(props.gameKey, props.userId, choices.value)
         : await previewRulesetAdvancement(
-          props.ruleId, props.character, choices.value, props.language,
+          props.ruleId, workingCharacter.value, choices.value, props.language,
         )
     if (typeof response.revision === 'number') currentRevision.value = response.revision
     preview.value = response.advancement
@@ -121,7 +227,12 @@ function spellLimit(key: SpellList): number {
   if (!spec) return 0
   if (key === 'cantrip_refs') return Number(spec.cantrip_count || 0)
   if (key === 'prepared_spell_refs') return Number(spec.prepared_spell_count || 0)
-  return Number(spec.spellbook_minimum || 0)
+  // 法术书的下限是"至少"，不是上限：抄写过的书本来就比印刷数多，本级还要
+  // 再加 spellbook_additions 个。上限按"开局旧书 + 本级新增"算，用固定的
+  // baseline 而不是当前已选数——否则每勾一个，上限就跟着涨一格。
+  const floor = Number(spec.spellbook_minimum || 0)
+  const additions = Number(spec.spellbook_additions || 0)
+  return Math.max(floor, spellbookBaseline.value + additions)
 }
 
 function toggleSpell(key: SpellList, spell: RulesetSpellChoice): void {
@@ -167,17 +278,38 @@ function friendlySpellError(message: string): string {
       `Prepared spells require exactly ${required}; ${selected} selected${remaining ? `, ${remaining} remaining` : ', count complete'}. Continue in the Prepared spells section.`,
     )
   }
-  const spellbook = message.match(/^spellbook_refs must contain exactly (\d+) spells$/)
+  const spellbook = message.match(/^spellbook_refs must contain at least (\d+) spells$/)
   if (spellbook) {
     const required = Number(spellbook[1])
     const selected = selectedSpells('spellbook_refs').length
     const remaining = Math.max(0, required - selected)
     return text(
-      `法术书需要正好 ${required} 个法术；现在已选 ${selected} 个${remaining ? `，还差 ${remaining} 个` : '，数量已满足'}。请在“法术书”区域继续选择。`,
-      `The spellbook requires exactly ${required}; ${selected} selected${remaining ? `, ${remaining} remaining` : ', count complete'}. Continue in the Spellbook section.`,
+      `法术书至少要有 ${required} 个法术；现在已选 ${selected} 个${remaining ? `，还差 ${remaining} 个` : '，数量已满足'}。请在“法术书”区域继续选择。`,
+      `The spellbook needs at least ${required} spells; ${selected} selected${remaining ? `, ${remaining} remaining` : ', count complete'}. Continue in the Spellbook section.`,
     )
   }
-  if (message === 'wizard prepared_spell_refs must be in spellbook_refs') {
+  const bookGain = message.match(/^spellbook_refs must add exactly (\d+) spell\(s\) at this level$/)
+  if (bookGain) {
+    return text(
+      `升到本级时法术书要新增正好 ${bookGain[1]} 个法术；请在“法术书”区域新增后重试。`,
+      `This level adds exactly ${bookGain[1]} spell(s) to the spellbook; add them in the Spellbook section and retry.`,
+    )
+  }
+  const swap = message.match(/^prepared_spell_refs may replace at most (\d+) spell\(s\) at this level$/)
+  if (swap) {
+    return text(
+      `本级最多替换 ${swap[1]} 个旧法术（长休才能重排整张列表）；请把要保留的旧法术重新勾选回来。`,
+      `At most ${swap[1]} old spell(s) may be replaced at this level (reshuffling the whole list belongs to a long rest); re-check the old spells you want to keep.`,
+    )
+  }
+  const cantripSwap = message.match(/^cantrip_refs may replace at most (\d+) cantrip\(s\) at this level$/)
+  if (cantripSwap) {
+    return text(
+      `本级最多替换 ${cantripSwap[1]} 个戏法；请把要保留的戏法重新勾选回来。`,
+      `At most ${cantripSwap[1]} cantrip(s) may be replaced at this level; re-check the cantrips you want to keep.`,
+    )
+  }
+  if (message === 'prepared_spell_refs must be in spellbook_refs') {
     return text('准备法术必须先放进法术书；请先勾选法术书，再从其中选择准备法术。', 'Prepared spells must also be in the spellbook. Choose spellbook spells first.')
   }
   if (message === 'subclass_ref is required at this level') {
@@ -191,6 +323,17 @@ function friendlySpellError(message: string): string {
 
 function featureName(id: string): string {
   return id.replaceAll('_', ' ')
+}
+
+function prepareNextLevel(character: JsonObject): void {
+  workingCharacter.value = character
+  // Everything this level asked for (subclass, feat, abilities, spells) now
+  // lives in the character itself.  Only the player's hit-point preference
+  // carries over; re-seeding the rest keeps level N+1's own choices blank.
+  const hpMethod = choices.value.hp_method
+  choices.value = { hp_method: hpMethod === 'rolled' ? 'rolled' : 'fixed' }
+  initializeSpellChoices()
+  preview.value = null
 }
 
 async function apply(): Promise<void> {
@@ -213,26 +356,72 @@ async function apply(): Promise<void> {
             props.gameKey, props.userId, choices.value, currentRevision.value, operationId,
           )
         : await applyRulesetAdvancement(
-          props.ruleId, props.character, choices.value, props.language,
+          props.ruleId, workingCharacter.value, choices.value, props.language,
         )
     if (typeof response.revision === 'number') currentRevision.value = response.revision
-    emit('applied', response.character)
+    const changed = response.character as JsonObject
+    const reached = levelOf(changed)
+    const moreLevels = chained.value
+      && reached > levelOf(workingCharacter.value)
+      && reached < targetLevel.value
+    if (moreLevels) {
+      // Keep the panel open and preview the next level with the character the
+      // server just returned -- the chain is N-1 ordinary advancements, so the
+      // persisted result is exactly what replay already accepts.
+      prepareNextLevel(changed)
+      await refresh()
+      return
+    }
+    if (chained.value) emit('chainCompleted', changed)
+    else emit('applied', changed)
   } catch (cause: unknown) {
     error.value = String((cause as Error)?.message || cause)
   } finally { busy.value = false }
 }
 
+// The host may hand over a different character (cancel then reopen, or a card
+// reload).  Start that over instead of upgrading a stale copy.
+watch(() => props.character, next => {
+  if (!next || next === workingCharacter.value) return
+  workingCharacter.value = next
+  currentRevision.value = props.revision
+  const hpMethod = choices.value.hp_method
+  choices.value = { hp_method: hpMethod === 'rolled' ? 'rolled' : 'fixed' }
+  initializeSpellChoices()
+  preview.value = null
+  pendingChoices.value = []
+  void refresh()
+  void refreshPending()
+})
+
 onMounted(() => {
   initializeSpellChoices()
   void refresh()
+  void refreshPending()
 })
 </script>
 
 <template>
   <section class="advancement-panel" aria-labelledby="dnd-advancement-title">
     <header>
-      <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}</p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
+      <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}<span v-if="chained" class="chain-target">{{ text(`（目标 ${targetLevel} 级）`, ` (target level ${targetLevel})`) }}</span></p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
     </header>
+
+    <fieldset v-if="pendingChoices.length" class="pending-choices">
+      <legend>{{ text('这张卡还有未完成的选项', 'This card still owes choices') }}</legend>
+      <p class="error-help">{{ text('先把这些补齐再升级；补齐本身不会改变等级。', 'Pay these before the level moves. Filling them does not change the level.') }}</p>
+      <div v-if="pendingSubclassRow" class="pending-subclass">
+        <label>{{ text(`子职（第 ${Number(pendingSubclassRow.level)} 级）`, `Subclass (level ${Number(pendingSubclassRow.level)})`) }}</label>
+        <select v-model="pendingSubclass">
+          <option value="" disabled>{{ text('请选择', 'Choose') }}</option>
+          <option v-for="option in (pendingSubclassRow.options as JsonObject[])" :key="String(option.value)" :value="String(option.value)">{{ option.name }}</option>
+        </select>
+        <button type="button" :disabled="pendingBusy || !pendingSubclass" @click="completePendingSubclass">{{ pendingBusy ? text('补齐中…', 'Saving…') : text('补齐子职', 'Complete subclass') }}</button>
+      </div>
+      <ul v-if="pendingOther.length">
+        <li v-for="row in pendingOther" :key="String(row.id)">{{ text(`第 ${Number(row.level)} 级：${String(row.reason || row.id)}`, `Level ${Number(row.level)}: ${String(row.reason || row.id)}`) }}</li>
+      </ul>
+    </fieldset>
 
     <p v-if="busy && !preview" class="notice" role="status">{{ text('正在核对职业成长表…', 'Checking the class table…') }}</p>
     <template v-if="preview">
@@ -250,14 +439,14 @@ onMounted(() => {
 
       <fieldset v-if="abilityRequirement"><legend>{{ text(`属性提升（合计 ${abilityRequirement.total}）`, `Ability increase (total ${abilityRequirement.total})`) }}</legend><div class="ability-grid"><label v-for="ability in ABILITIES" :key="ability" :class="{ unavailable: !abilityAllowed(ability) }"><span>{{ ability.toUpperCase() }} <small>{{ abilityDiff[ability] }}</small></span><select :disabled="!abilityAllowed(ability)" :value="(choices.ability_score_increases as JsonObject)?.[ability] || 0" @change="setAbility(ability, Number(($event.target as HTMLSelectElement).value))"><option :value="0">+0</option><option :value="1">+1</option><option v-if="abilityRequirement.pattern === '2_or_1_1'" :value="2">+2</option></select></label></div></fieldset>
 
-      <fieldset v-if="spellRequirement" class="spell-section"><legend>{{ text('调整职业法术', 'Update class spells') }}</legend><p class="spell-help">{{ text('每个区域标题都写着“已选 / 需要”。达到需要的数量后，其他选项会自动锁定；取消一个已选项即可重新选择。法师请先选法术书，再从法术书里选准备法术。', 'Each section shows selected / required. Once the required count is reached, extra options lock automatically; uncheck one to choose another. Wizards choose the spellbook first, then prepared spells from it.') }}</p><div v-if="Number(spellRequirement.cantrip_count)"><b>{{ text(`戏法：已选 ${selectedSpells('cantrip_refs').length} / 需要 ${spellRequirement.cantrip_count}`, `Cantrips: ${selectedSpells('cantrip_refs').length} selected / ${spellRequirement.cantrip_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('cantrips')" :key="spell.ref"><input type="checkbox" :disabled="spellDisabled('cantrip_refs', spell)" :checked="selectedSpells('cantrip_refs').includes(spell.ref)" @change="toggleSpell('cantrip_refs', spell)"> {{ spell.name }}</label></div></div><div v-if="Number(spellRequirement.spellbook_minimum)"><b>{{ text(`法术书：已选 ${selectedSpells('spellbook_refs').length} / 需要 ${spellRequirement.spellbook_minimum}`, `Spellbook: ${selectedSpells('spellbook_refs').length} selected / ${spellRequirement.spellbook_minimum} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`book-${spell.ref}`"><input type="checkbox" :disabled="spellDisabled('spellbook_refs', spell)" :checked="selectedSpells('spellbook_refs').includes(spell.ref)" @change="toggleSpell('spellbook_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div><div v-if="Number(spellRequirement.prepared_spell_count)"><b>{{ text(`准备法术：已选 ${selectedSpells('prepared_spell_refs').length} / 需要 ${spellRequirement.prepared_spell_count}`, `Prepared: ${selectedSpells('prepared_spell_refs').length} selected / ${spellRequirement.prepared_spell_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`prepared-${spell.ref}`" :class="{ unavailable: preparedDisabled(spell) || spellDisabled('prepared_spell_refs', spell) }"><input type="checkbox" :disabled="spellDisabled('prepared_spell_refs', spell)" :checked="selectedSpells('prepared_spell_refs').includes(spell.ref)" @change="toggleSpell('prepared_spell_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div></fieldset>
+      <fieldset v-if="spellRequirement" class="spell-section"><legend>{{ text('调整职业法术', 'Update class spells') }}</legend><p class="spell-help">{{ text('每个区域标题都写着“已选 / 需要”。达到需要的数量后，其他选项会自动锁定；取消一个已选项即可重新选择。法师请先选法术书，再从法术书里选准备法术。', 'Each section shows selected / required. Once the required count is reached, extra options lock automatically; uncheck one to choose another. Wizards choose the spellbook first, then prepared spells from it.') }}</p><p v-if="spellBudgetText" class="spell-help spell-budget">{{ spellBudgetText }}</p><div v-if="Number(spellRequirement.cantrip_count)"><b>{{ text(`戏法：已选 ${selectedSpells('cantrip_refs').length} / 需要 ${spellRequirement.cantrip_count}`, `Cantrips: ${selectedSpells('cantrip_refs').length} selected / ${spellRequirement.cantrip_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('cantrips')" :key="spell.ref"><input type="checkbox" :disabled="spellDisabled('cantrip_refs', spell)" :checked="selectedSpells('cantrip_refs').includes(spell.ref)" @change="toggleSpell('cantrip_refs', spell)"> {{ spell.name }}</label></div></div><div v-if="Number(spellRequirement.spellbook_minimum)"><b>{{ text(`法术书：已选 ${selectedSpells('spellbook_refs').length} / 需要 ${spellLimit('spellbook_refs')}`, `Spellbook: ${selectedSpells('spellbook_refs').length} selected / ${spellLimit('spellbook_refs')} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`book-${spell.ref}`"><input type="checkbox" :disabled="spellDisabled('spellbook_refs', spell)" :checked="selectedSpells('spellbook_refs').includes(spell.ref)" @change="toggleSpell('spellbook_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div><div v-if="Number(spellRequirement.prepared_spell_count)"><b>{{ text(`准备法术：已选 ${selectedSpells('prepared_spell_refs').length} / 需要 ${spellRequirement.prepared_spell_count}`, `Prepared: ${selectedSpells('prepared_spell_refs').length} selected / ${spellRequirement.prepared_spell_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`prepared-${spell.ref}`" :class="{ unavailable: preparedDisabled(spell) || spellDisabled('prepared_spell_refs', spell) }"><input type="checkbox" :disabled="spellDisabled('prepared_spell_refs', spell)" :checked="selectedSpells('prepared_spell_refs').includes(spell.ref)" @change="toggleSpell('prepared_spell_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div></fieldset>
 
       <fieldset><legend>{{ text('本级变化', 'Level changes') }}</legend><div class="feature-list"><span v-for="feature in (diff.gained_feature_ids as string[]) || []" :key="feature">{{ featureName(feature) }}</span></div><p v-if="Object.keys(slotChanges).length">{{ text('法术位变化', 'Spell slot changes') }}: <code>{{ JSON.stringify(slotChanges) }}</code></p></fieldset>
 
       <div v-if="preview.errors.length" class="errors" role="alert"><b>{{ text('升级还不能确认', 'Upgrade is not ready') }}</b><p class="error-help">{{ text('下面每一条都告诉你缺什么；按提示补齐后，系统会自动重新核对。', 'Each item below tells you what is missing. The panel rechecks automatically after you make a choice.') }}</p><ul><li v-for="message in preview.errors" :key="message">{{ friendlySpellError(message) }}</li></ul></div>
     </template>
     <p v-if="error" class="errors" role="alert">{{ error }}</p>
-    <footer><button type="button" @click="emit('cancel')">{{ text('取消', 'Cancel') }}</button><button type="button" class="primary" :disabled="busy || !preview?.ok" @click="apply">{{ busy ? text('核对中…', 'Checking…') : text('确认升级', 'Apply level') }}</button></footer>
+    <footer><button type="button" @click="emit('cancel')">{{ text('取消', 'Cancel') }}</button><button type="button" class="primary" :disabled="busy || !preview?.ok" @click="apply">{{ busy ? text('核对中…', 'Checking…') : chained ? text('确认本级', 'Apply level') : text('确认升级', 'Apply level') }}</button></footer>
   </section>
 </template>
 
@@ -266,7 +455,7 @@ onMounted(() => {
 .advancement-panel > header { display: flex; justify-content: space-between; gap: 16px; }
 .advancement-panel header span { color: #d5a44f; font-size: 11px; letter-spacing: .16em; }
 .advancement-panel h3 { margin: 3px 0; font-family: Georgia, serif; font-size: 27px; }
-.advancement-panel header p { margin: 0; color: #aeb8c6; }.advancement-panel header .flow-hint { margin-top: 6px; font-size: 13px; line-height: 1.5; }
+.advancement-panel header p { margin: 0; color: #aeb8c6; }.advancement-panel header .flow-hint { margin-top: 6px; font-size: 13px; line-height: 1.5; }.chain-target { color: #d5a44f; }
 .advancement-panel header button { align-self: start; width: 44px; border-radius: 50%; font-size: 20px; }
 .level-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
 .level-summary article { display: grid; gap: 3px; padding: 13px; border: 1px solid #3b4656; border-radius: 11px; background: #111925; }
@@ -290,6 +479,7 @@ label input[type='radio'], label input[type='checkbox'] { width: 22px; height: 2
 .errors ul { margin: 6px 0 0; padding-left: 20px; }
 .notice { color: #aeb8c6; }
 .spell-help { margin: 0; color: #b9c5d3; line-height: 1.55; }
+.spell-budget { color: var(--df-accent-strong, #d6b26a); }
 footer { display: flex; justify-content: flex-end; gap: 8px; }
 button { min-height: 44px; border: 1px solid #465367; border-radius: 8px; background: #192331; color: #edf1f7; padding: 8px 12px; }
 button.primary { border-color: #bc8b3f; background: #9d6825; }

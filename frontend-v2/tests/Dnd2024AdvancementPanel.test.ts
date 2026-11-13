@@ -2,14 +2,19 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  preview: vi.fn(), apply: vi.fn(), livePreview: vi.fn(), liveApply: vi.fn(),
+  preview: vi.fn(), apply: vi.fn(),
+  cardPreview: vi.fn(), cardApply: vi.fn(),
+  pending: vi.fn(), complete: vi.fn(),
+  livePreview: vi.fn(), liveApply: vi.fn(),
 }))
 
 vi.mock('../src/features/rulesets/dnd2024/api', () => ({
   previewRulesetAdvancement: mocks.preview,
   applyRulesetAdvancement: mocks.apply,
-  previewCharacterCardAdvancement: vi.fn(),
-  applyCharacterCardAdvancement: vi.fn(),
+  previewCharacterCardAdvancement: mocks.cardPreview,
+  applyCharacterCardAdvancement: mocks.cardApply,
+  fetchCharacterCardPendingChoices: mocks.pending,
+  completeCharacterCardChoices: mocks.complete,
   previewLiveCharacterAdvancement: mocks.livePreview,
   applyLiveCharacterAdvancement: mocks.liveApply,
 }))
@@ -28,6 +33,30 @@ const character = {
     rule_binding: { runtime_id: 'core:dnd2024' },
     build: { level: 1 },
   },
+}
+
+function previewAt(from: number, to: number) {
+  return {
+    ok: true,
+    rule_id: 'dnd2024_srd',
+    advancement: {
+      ok: true, errors: [], requirements: [], from_level: from, to_level: to,
+      class_ref: 'class:fighter', source_ref: 'srd-5.2.1:p42:fighter-features',
+      content_version: 'srd-5.2.1+r2',
+      diff: {
+        proficiency_bonus: { before: 2, after: 2 }, hp: { gain: 8 },
+        gained_feature_ids: [], spell_slot_changes: {}, abilities: {},
+      },
+      snapshot: {},
+    },
+  }
+}
+
+function atLevel(level: number) {
+  return {
+    ...character,
+    ruleset_character: { ...character.ruleset_character, build: { level } },
+  }
 }
 
 describe('D&D 2024 advancement panel', () => {
@@ -55,6 +84,13 @@ describe('D&D 2024 advancement panel', () => {
       ok: true, rule_id: 'dnd2024_srd', revision: 4,
       character: { ...character, level: 2, ruleset_revision: 4 },
     })
+    mocks.cardPreview.mockReset().mockResolvedValue(previewAt(1, 2))
+    mocks.cardApply.mockReset().mockResolvedValue({
+      ok: true, rule_id: 'dnd2024_srd', revision: 1,
+      character: { ...character, level: 2 },
+    })
+    mocks.pending.mockReset().mockResolvedValue({ missing: [], revision: 0 })
+    mocks.complete.mockReset()
   })
 
   it('shows an exact before/after preview and applies only a valid plan', async () => {
@@ -73,6 +109,8 @@ describe('D&D 2024 advancement panel', () => {
       'dnd2024_srd', character, { hp_method: 'fixed' }, 'en',
     )
     expect(wrapper.emitted('applied')?.[0]?.[0]).toMatchObject({ level: 2 })
+    // Single-level mode is the default: no second level, no chain event.
+    expect(wrapper.emitted('chainCompleted')).toBeUndefined()
   })
 
   it('keeps apply disabled while a required subclass is missing', async () => {
@@ -127,11 +165,14 @@ describe('D&D 2024 advancement panel', () => {
         ok: false,
         errors: [
           'prepared_spell_refs must contain exactly 5 spells',
-          'spellbook_refs must contain exactly 8 spells',
+          'spellbook_refs must contain at least 8 spells',
+          'prepared_spell_refs may replace at most 1 spell(s) at this level',
         ],
         requirements: [{
           id: 'class_spell_choices', kind: 'spell_selection', required: true,
           cantrip_count: 0, prepared_spell_count: 5, spellbook_minimum: 8,
+          additions: 5, replace_limit: 1, cantrip_replace_limit: 0,
+          spellbook_additions: 2,
           cantrips: [],
           leveled_spells: Array.from({ length: 9 }, (_, index) => ({
             ref: `spell:spell-${index}`, name: `Spell ${index}`, level: 1,
@@ -159,10 +200,161 @@ describe('D&D 2024 advancement panel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('准备法术需要正好 5 个')
-    expect(wrapper.text()).toContain('法术书需要正好 8 个法术')
+    expect(wrapper.text()).toContain('法术书至少要有 8 个法术')
     expect(wrapper.text()).toContain('法师请先选法术书')
+    // 额度来自内容：面板必须把"能新增几个、能换掉几个"说清楚，玩家才不会
+    // 在整表重排之后才看到一句服务端拒绝。
+    expect(wrapper.text()).toContain('本级新增 5 个法术')
+    expect(wrapper.text()).toContain('最多替换 1 个旧法术')
+    expect(wrapper.text()).toContain('法术书需新增 2 个')
+    expect(wrapper.text()).toContain('本级最多替换 1 个旧法术')
+    // 印刷下限是 8，但本级还要再加 2 个：上限是 10，不是 8。
+    expect(wrapper.text()).toContain('法术书：已选 8 / 需要 10')
     const extraSpellChoices = wrapper.findAll('label').filter(label => label.text().includes('Spell 8'))
     expect(extraSpellChoices).toHaveLength(2)
-    expect(extraSpellChoices.every(label => label.get('input').attributes('disabled') !== undefined)).toBe(true)
+    // 准备法术那一栏因为不在书里而锁着，法术书这一栏必须还能加。
+    const bookPicks = extraSpellChoices.filter(
+      label => label.get('input').attributes('disabled') === undefined,
+    )
+    expect(bookPicks).toHaveLength(1)
+  })
+
+  it('keeps room for the new spells when the book was copied past its floor', async () => {
+    mocks.preview.mockResolvedValueOnce({
+      ok: true,
+      rule_id: 'dnd2024_srd',
+      advancement: {
+        ok: false,
+        errors: [],
+        requirements: [{
+          id: 'class_spell_choices', kind: 'spell_selection', required: true,
+          cantrip_count: 0, prepared_spell_count: 5, spellbook_minimum: 8,
+          additions: 5, replace_limit: 1, cantrip_replace_limit: 0,
+          spellbook_additions: 2,
+          cantrips: [],
+          leveled_spells: Array.from({ length: 11 }, (_, index) => ({
+            ref: `spell:spell-${index}`, name: `Spell ${index}`, level: 1,
+          })),
+        }],
+        from_level: 1, to_level: 2, class_ref: 'class:wizard',
+        source_ref: 'srd-5.2.1:p42:wizard-features', content_version: 'srd-5.2.1+r2',
+        diff: { proficiency_bonus: { before: 2, after: 2 }, hp: { gain: 6 }, gained_feature_ids: [], spell_slot_changes: {}, abilities: {} }, snapshot: {},
+      },
+    })
+    // 抄写过的书 9 本，仍高于 8 的印刷下限。若把下限当上限，9 >= 8 会锁死
+    // 每一个新法术，玩家只能删旧法术"腾容量"——那才真的会丢法术。
+    const wizard = {
+      ...character,
+      ruleset_character: {
+        ...character.ruleset_character,
+        build: { level: 1, class_levels: [{ class_ref: 'class:wizard', level: 1 }] },
+        spellcasting: { class: {
+          prepared_spell_refs: Array.from({ length: 5 }, (_, index) => `spell:spell-${index}`),
+          spellbook_refs: Array.from({ length: 9 }, (_, index) => `spell:spell-${index}`),
+        } },
+      },
+    }
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character: wizard, language: 'zh-CN' },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('法术书：已选 9 / 需要 11')
+    const next = wrapper.findAll('label').filter(label => label.text().includes('Spell 9'))
+    expect(next.length).toBeGreaterThan(0)
+    expect(next.some(label => label.get('input').attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('walks the character from level 1 to a target level over the stateless endpoint', async () => {
+    const levelTwo = atLevel(2)
+    const levelThree = atLevel(3)
+    mocks.preview
+      .mockResolvedValueOnce(previewAt(1, 2))
+      .mockResolvedValueOnce(previewAt(2, 3))
+    mocks.apply
+      .mockResolvedValueOnce({ ok: true, rule_id: 'dnd2024_srd', character: levelTwo })
+      .mockResolvedValueOnce({ ok: true, rule_id: 'dnd2024_srd', character: levelThree })
+
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character, language: 'en', targetLevel: 3 },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Lv. 1 → Lv. 2')
+    expect(wrapper.text()).toContain('target level 3')
+
+    await buttonByText(wrapper, 'Apply level').trigger('click')
+    await flushPromises()
+    // The first level does not end the flow: no `applied`, and the next
+    // preview is built from the character the server just returned.
+    expect(wrapper.emitted('applied')).toBeUndefined()
+    expect(mocks.preview).toHaveBeenLastCalledWith(
+      'dnd2024_srd', levelTwo, { hp_method: 'fixed' }, 'en',
+    )
+
+    await buttonByText(wrapper, 'Apply level').trigger('click')
+    await flushPromises()
+
+    expect(mocks.apply).toHaveBeenCalledTimes(2)
+    // Level N is level N-1's output, which is why `history` accumulates on
+    // its own rather than being assembled by the panel.
+    expect(mocks.apply.mock.calls[1][1]).toEqual(levelTwo)
+    // Stateless rules mode: rule id, character, choices, language -- never a
+    // revision or an idempotency key.
+    expect(mocks.apply.mock.calls[1]).toHaveLength(4)
+    expect(mocks.cardApply).not.toHaveBeenCalled()
+    expect(mocks.liveApply).not.toHaveBeenCalled()
+    expect(wrapper.emitted('applied')).toBeUndefined()
+    expect(wrapper.emitted('chainCompleted')).toHaveLength(1)
+    expect(
+      (wrapper.emitted('chainCompleted')?.[0]?.[0] as typeof levelThree)
+        .ruleset_character.build.level,
+    ).toBe(3)
+  })
+
+  it('passes each level the fresh card revision', async () => {
+    mocks.pending.mockResolvedValue({ missing: [], revision: 3 })
+    mocks.cardPreview
+      .mockResolvedValueOnce(previewAt(1, 2))
+      .mockResolvedValueOnce(previewAt(2, 3))
+    mocks.cardApply
+      .mockResolvedValueOnce({
+        ok: true, rule_id: 'dnd2024_srd', revision: 4, character: atLevel(2),
+      })
+      .mockResolvedValueOnce({
+        ok: true, rule_id: 'dnd2024_srd', revision: 7, character: atLevel(3),
+      })
+
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: {
+        ruleId: 'dnd2024_srd', character, language: 'en',
+        cardId: 'card-1', revision: 3, targetLevel: 3,
+      },
+    })
+    await flushPromises()
+    await buttonByText(wrapper, 'Apply level').trigger('click')
+    await flushPromises()
+    await buttonByText(wrapper, 'Apply level').trigger('click')
+    await flushPromises()
+
+    expect(mocks.cardApply.mock.calls[0][2]).toBe(3)
+    // The second level must spend the revision the first apply produced,
+    // otherwise the card endpoint rejects it as stale.
+    expect(mocks.cardApply.mock.calls[1][2]).toBe(4)
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(wrapper.emitted('chainCompleted')).toHaveLength(1)
+  })
+
+  it('treats a target that is not ahead as a single level', async () => {
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character, language: 'en', targetLevel: 1 },
+    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('target level')
+
+    await buttonByText(wrapper, 'Apply level').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('applied')).toHaveLength(1)
+    expect(wrapper.emitted('chainCompleted')).toBeUndefined()
   })
 })
