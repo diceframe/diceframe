@@ -316,11 +316,24 @@ const rulesetCampaignStatus = ref('')
 const hasCombatExtension = computed(() => Boolean(game.detail.value?.combat_extension))
 const hasProfessionalTools = computed(() => hasCampaignGuidance.value || hasAuthoritativeCombat.value)
 // 自由规则可能只开启 combat_extension：此时 tools 栏也必须出现，否则「战斗动作」没有入口。
-const hasComposerTools = computed(() => hasProfessionalTools.value || canAskKp.value || hasCombatExtension.value)
+// 同理，仅声明顺序检定/组合技能的非战斗规则（SK-01）也需要工具栏承载顺序动作编排器。
+const hasComposerTools = computed(() => hasProfessionalTools.value || canAskKp.value || hasCombatExtension.value || hasRulesetActionCapability.value)
 const hasSequentialActionCapability = computed(() => Boolean(
   game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks
   || game.detail.value?.ruleset_runtime?.capabilities?.composite_action,
 ))
+// available_actions only requires authoritative_intents on the backend, so
+// sequential-check / composite-action rules without deterministic_combat must
+// still be able to fetch the action list (SK-01: not combat-page-only).
+const hasRulesetActionCapability = computed(() => {
+  const capabilities = game.detail.value?.ruleset_runtime?.capabilities
+  if (!capabilities?.authoritative_intents) return false
+  return Boolean(
+    capabilities.deterministic_combat
+    || capabilities.sequential_checks
+    || capabilities.composite_action,
+  )
+})
 const rulesetToolCopy = computed(() => (
   resolveRulesetPlayExtension(String(game.detail.value?.ruleset_runtime?.id || ''))
     ?.copy(String(locale.value))
@@ -338,7 +351,22 @@ function navigateRulesetTool(tool: RulesetTool): void {
 
 let rulesetToolPoll: number | undefined
 let rulesetToolSequence = 0
+let rulesetActionSequence = 0
 let previousEncounterPhase = ''
+async function syncRulesetActions(): Promise<void> {
+  const gameKey = game.currentGame.value
+  if (!hasRulesetActionCapability.value || !gameKey) return
+  const sequence = ++rulesetActionSequence
+  try {
+    const response = await fetchRulesetAvailableActions(gameKey)
+    if (sequence !== rulesetActionSequence || game.currentGame.value !== gameKey) return
+    rulesetAvailableActions.value = response.available_actions || []
+  } catch {
+    if (sequence !== rulesetActionSequence || game.currentGame.value !== gameKey) return
+    // The composer simply hides while the optional action list cannot sync.
+    rulesetAvailableActions.value = []
+  }
+}
 async function syncEncounterTool(): Promise<void> {
   const gameKey = game.currentGame.value
   if (!hasAuthoritativeCombat.value || !gameKey) return
@@ -347,7 +375,6 @@ async function syncEncounterTool(): Promise<void> {
     const response = await fetchRulesetAvailableActions(gameKey)
     if (sequence !== rulesetToolSequence || game.currentGame.value !== gameKey) return
     rulesetGameplay.value = response.gameplay
-    rulesetAvailableActions.value = response.available_actions || []
     directorProposal.value = response.gameplay.director?.proposal?.kind === 'narrative'
       ? null
       : response.gameplay.director?.proposal || null
@@ -368,7 +395,6 @@ async function syncEncounterTool(): Promise<void> {
     // The normal play surface remains usable if the optional tool state cannot sync.
     directorProposal.value = null
     rulesetGameplay.value = null
-    rulesetAvailableActions.value = []
     rulesetCombatStatus.value = 'none'
     rulesetCampaignStatus.value = ''
   }
@@ -376,6 +402,7 @@ async function syncEncounterTool(): Promise<void> {
 
 function resetRulesetToolPolling(): void {
   rulesetToolSequence += 1
+  rulesetActionSequence += 1
   if (rulesetToolPoll) window.clearInterval(rulesetToolPoll)
   rulesetToolPoll = undefined
   previousEncounterPhase = ''
@@ -384,10 +411,15 @@ function resetRulesetToolPolling(): void {
   rulesetAvailableActions.value = []
   rulesetCombatStatus.value = 'none'
   rulesetCampaignStatus.value = ''
-  if (!hasAuthoritativeCombat.value || !game.currentGame.value) return
+  if (!game.currentGame.value) return
+  void syncRulesetActions()
+  if (!hasAuthoritativeCombat.value) return
   void syncEncounterTool()
   rulesetToolPoll = window.setInterval(() => {
-    if (document.visibilityState !== 'hidden') void syncEncounterTool()
+    if (document.visibilityState !== 'hidden') {
+      void syncEncounterTool()
+      void syncRulesetActions()
+    }
   }, 30000)
 }
 const rulesetCombatActive = computed(() => rulesetGameplay.value?.combat?.status === 'active')
@@ -1262,14 +1294,16 @@ watch(() => game.currentGame.value, (next, prev) => {
   if (next && next !== prev) loadPlayContext()
 })
 watch(
-  [() => game.currentGame.value, hasAuthoritativeCombat],
+  [() => game.currentGame.value, hasAuthoritativeCombat, hasRulesetActionCapability],
   resetRulesetToolPolling,
   { immediate: true },
 )
 watch(() => game.detail.value?.round_number, () => {
   if (hasAuthoritativeCombat.value) void syncEncounterTool()
+  if (hasRulesetActionCapability.value) void syncRulesetActions()
 })
 watch(() => game.rulesetStateSignal.value, () => {
+  if (hasRulesetActionCapability.value) void syncRulesetActions()
   if (!hasAuthoritativeCombat.value) return
   rulesetRefreshKey.value += 1
   void syncEncounterTool()
