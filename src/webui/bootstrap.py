@@ -189,6 +189,18 @@ class WebUIBootstrap:
         # 所有能改 package bytes 的路径（本地导入 / 市场安装 / 覆盖 / 后台自动
         # 更新 / 卸载）共用同一条 choke point。
         app["api"].attach_package_hooks(plugin_host)
+        # T3：把已安装且启用的 ruleset-runtime 插件同步进 ruleset 注册表
+        # （安装/卸载/启停/恢复由宿主通知重同步）。注册失败 fail closed，
+        # 只影响对应规则的可用性，不阻断启动。
+        runtime_sync_report = app["api"].attach_plugin_ruleset_runtime_source(plugin_host)
+        if runtime_sync_report.get("registered"):
+            self.logger.info(
+                "外部规则 runtime 已注册: %s", ", ".join(runtime_sync_report["registered"])
+            )
+        if runtime_sync_report.get("failed"):
+            self.logger.warning(
+                "外部规则 runtime 注册失败（fail closed）: %s", runtime_sync_report["failed"]
+            )
         # FIX-07 §10：启动即刷新一次内容来源。否则"重启后直接开局"会在任何人
         # 读过冒险/模组页面之前解析不到已启用模组的冒险包。
         app["api"].refresh_content_sources()
@@ -331,6 +343,8 @@ class WebUIBootstrap:
             await api.close_assistant_agent()
         if api is not None and hasattr(api, "close_hosted_combat"):
             await api.close_hosted_combat()
+        if api is not None and hasattr(api, "close_plugin_ruleset_runtime_source"):
+            api.close_plugin_ruleset_runtime_source()
         plugin_host = app.get("plugin_host")
         if plugin_host:
             await plugin_host.cleanup()

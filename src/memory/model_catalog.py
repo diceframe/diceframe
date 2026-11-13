@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -96,8 +97,65 @@ class LocalModelManager:
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _catalog_entries(self) -> list[dict[str, Any]]:
+        """内置/本地目录 + 远端目录缓存合并（W5-2）。
+
+        合并策略：本地（data/models/catalog.json 或内置兜底）优先；远端缓存
+        （remote-catalog.json，由管理员触发刷新写入）只补充本地没有的 id，
+        不覆盖本地已声明的模型。候选条目照常列出，但 install() 拒绝安装。
+        """
+
         path = self.catalog_path if self.catalog_path.exists() else self.default_catalog_path
-        return load_catalog(path)
+        entries = load_catalog(path)
+        seen = {entry["id"] for entry in entries}
+        remote_path = self.models_dir / "remote-catalog.json"
+        if remote_path.exists():
+            try:
+                for entry in load_catalog(remote_path):
+                    if entry["id"] not in seen:
+                        entries.append(entry)
+                        seen.add(entry["id"])
+            except ModelCatalogError:
+                # 远端缓存损坏不能拖垮目录：忽略并保留原样（下次刷新覆盖）。
+                pass
+        return entries
+
+    async def refresh_remote_catalog(self, url: str) -> dict[str, Any]:
+        """W5-2：管理员触发拉取远端目录（diceframe-models 的 loader 分片）。
+
+        fail closed：仅 https、单响应 ≤ 1MB、必须通过 load_catalog 同一校验；
+        通过后原子写入 remote-catalog.json 缓存，读取路径（_catalog_entries）
+        永不发起网络请求。
+        """
+
+        url = str(url or "").strip()
+        parsed = urlsplit(url)
+        if not url.startswith("https://") or not parsed.hostname:
+            raise ModelCatalogError("remote catalog url must be https")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, allow_redirects=True, proxy=self.proxy_url,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status != 200:
+                    raise ModelCatalogError(f"remote catalog fetch failed: HTTP {response.status}")
+                payload = await response.content.read(1024 * 1024 + 1)
+        if len(payload) > 1024 * 1024:
+            raise ModelCatalogError("remote catalog exceeds 1MB")
+        try:
+            raw = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ModelCatalogError("remote catalog cannot be parsed") from exc
+        # 与 load_catalog 同一校验（临时落盘复用既有契约，避免第二套规则）。
+        staging = self.models_dir / ".remote-catalog.staging.json"
+        staging.parent.mkdir(parents=True, exist_ok=True)
+        staging.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        try:
+            entries = load_catalog(staging)
+        finally:
+            staging.unlink(missing_ok=True)
+        destination = self.models_dir / "remote-catalog.json"
+        destination.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {"ok": True, "url": url, "models": [entry["id"] for entry in entries]}
 
     def catalog(self) -> list[dict[str, Any]]:
         entries = self._catalog_entries()
@@ -109,10 +167,30 @@ class LocalModelManager:
                 "version": str(entry.get("version") or ""),
                 "dimension": int(entry.get("dimension") or 0),
                 "license": str(entry.get("license") or ""),
+                # W5：卡片展示需要预估下载体积（catalog 固定清单的 size 之和）。
+                "size_bytes": sum(int(item.get("size") or 0) for item in entry.get("files") or []),
                 "status": installed.get(entry["id"], {}).get("status", "not_installed"),
             }
             for entry in entries
         ]
+
+    def uninstall(self, model_id: str, *, active_model_id: str = "") -> dict[str, Any]:
+        """删除已安装的本地模型目录（W5）。
+
+        fail closed：路径越界/未安装拒绝；当前启用的模型必须先切换来源或
+        模型再删，避免运行中的 embedding client 指向被删除的权重。
+        """
+
+        model_id = _safe_id(model_id)
+        root = (self.models_dir / model_id).resolve()
+        if root == self.models_dir.resolve() or self.models_dir.resolve() not in root.parents:
+            raise ModelCatalogError("model directory escapes the model storage")
+        if not root.is_dir():
+            raise ModelCatalogError("model is not installed")
+        if active_model_id and model_id == _safe_id(active_model_id):
+            raise ModelCatalogError("model is currently enabled; switch the source or model first")
+        shutil.rmtree(root)
+        return {"ok": True, "model_id": model_id}
 
     async def install(self, model_id: str) -> dict[str, Any]:
         entries = {entry["id"]: entry for entry in self._catalog_entries()}
@@ -120,6 +198,8 @@ class LocalModelManager:
         entry = entries.get(model_id)
         if entry is None:
             raise ModelCatalogError("model is not present in the trusted catalog")
+        if str(entry.get("status") or "released") == "candidate":
+            raise ModelCatalogError("model is a candidate; not installable until benchmarks pass")
         lock = self._locks.setdefault(model_id, asyncio.Lock())
         async with lock:
             version = str(entry.get("version") or "")

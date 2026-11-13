@@ -15,11 +15,10 @@ import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DOMPurify from 'dompurify'
-import { NTag } from 'naive-ui'
-import { CubeOutline } from '@vicons/ionicons5'
+import { NIcon, NTag } from 'naive-ui'
+import { ColorPaletteOutline, CubeOutline, MapOutline, OptionsOutline } from '@vicons/ionicons5'
 import type { PluginMarketplaceItem } from '@/api/types'
 import MarketplaceCard from '@/features/plugins/MarketplaceCard.vue'
-import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
 import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
@@ -208,6 +207,27 @@ function inventorySummary(module: ModuleSummary): string {
 // it uses the same card and Hub detail dialog as the plugin marketplace.
 function marketCardItem(item: ModuleMarketplaceItem): PluginMarketplaceItem {
   return { ...item, version: item.latest_version || item.version, plugin_type: 'content-pack', latest: { version: item.latest_version } }
+}
+
+// ---- W1 能力名牌与图标：数据来自服务端按包实际贡献推导的 capabilities。 ----
+const MODULE_CAPABILITY_KEYS: Record<string, MessageKey> = {
+  adventure: 'modulesCapabilityAdventure',
+  rules: 'modulesCapabilityRules',
+  ui: 'modulesCapabilityUi',
+  materials: 'modulesCapabilityMaterials',
+}
+function moduleCapabilityKey(capability: string): MessageKey {
+  return MODULE_CAPABILITY_KEYS[capability] ?? ('modulesCapabilityMaterials' as MessageKey)
+}
+function moduleIcon(module: ModuleSummary): typeof CubeOutline {
+  const caps = module.capabilities || []
+  if (caps.includes('adventure')) return MapOutline
+  if (caps.includes('rules')) return OptionsOutline
+  if (caps.includes('ui')) return ColorPaletteOutline
+  return CubeOutline
+}
+function marketIcon(item: ModuleMarketplaceItem): typeof CubeOutline {
+  return (item.capabilities || []).includes('adventure') ? MapOutline : CubeOutline
 }
 
 function openUrl(url?: string) {
@@ -555,7 +575,10 @@ async function checkRecovery() {
         >
           <span v-if="module.cover" class="module-card-art" aria-hidden="true"></span>
           <div>
-            <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
+            <p class="module-card-chips">
+              <NIcon :component="moduleIcon(module)" :size="18" class="module-card-icon" aria-hidden="true" />
+              <NTag v-for="cap in module.capabilities || []" :key="cap" size="small" round>{{ t(moduleCapabilityKey(cap)) }}</NTag>
+            </p>
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
@@ -588,133 +611,21 @@ async function checkRecovery() {
       </div>
     </section>
 
-    <section id="modules-online" class="modules-section" data-testid="modules-online">
-      <div class="section-title-row">
-        <h2>{{ t('modulesSectionOnline') }}</h2>
-        <button type="button" class="module-submit-guide-link" data-testid="modules-submit-guide-open" @click="submitGuideOpen = true">{{ t('modulesSubmitGuideLink') }}</button>
-      </div>
-      <div class="module-market-search">
-        <input v-model="marketKeyword" type="search" :placeholder="t('modulesOnlineSearchPlaceholder')" :aria-label="t('modulesOnlineSearch')" @keyup.enter="loadMarketplace">
-        <label class="module-market-filter">
-          <span>{{ t('modulesOnlineFilter') }}</span>
-          <select v-model="marketRuleset" :aria-label="t('modulesOnlineFilter')" @change="loadMarketplace">
-            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-            <option v-for="ruleset in marketRulesetOptions" :key="ruleset" :value="ruleset">{{ rulesetLabel(ruleset) }}</option>
-            <option v-if="marketHasUndeclaredRuleset" :value="UNLABELLED_RULESET">{{ t('modulesRulesetUndeclared') }}</option>
-          </select>
-        </label>
-        <button type="button" :disabled="marketBusy" @click="loadMarketplace">{{ t('modulesOnlineSearch') }}</button>
-      </div>
-      <p v-if="marketBusy" class="muted">{{ t('modulesLoading') }}</p>
-      <p v-else-if="marketError" class="error-text">{{ marketError }}</p>
-      <div v-else-if="!market.length" class="empty-state" data-testid="modules-online-empty">
-        <p class="muted">{{ t('modulesOnlineEmpty') }}</p>
-        <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
-        <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
-      </div>
-      <template v-else>
-        <div class="module-market-filters" data-testid="modules-market-filters">
-          <label class="module-market-filter">
-            <span>{{ t('modulesFilterProfile') }}</span>
-            <select v-model="marketProfile">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option value="adventure-module">{{ copy.adventureLabel }}</option>
-              <option value="content-pack">{{ copy.resourceLabel }}</option>
-            </select>
-          </label>
-          <label v-if="marketLanguageOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterLanguage') }}</span>
-            <select v-model="marketLanguage">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ language === UNLABELLED_LANGUAGE ? t('modulesLanguagesUndeclared') : languageLabel(language) }}</option>
-            </select>
-          </label>
-          <label v-if="marketTagOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterTag') }}</span>
-            <select v-model="marketTag">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="tag in marketTagOptions" :key="tag" :value="tag">{{ tag }}</option>
-            </select>
-          </label>
-          <label v-if="marketLicenseOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterLicense') }}</span>
-            <select v-model="marketLicense">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="license in marketLicenseOptions" :key="license" :value="license">{{ license }}</option>
-            </select>
-          </label>
-          <label v-if="marketTrustOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterTrust') }}</span>
-            <select v-model="marketTrust">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="level in marketTrustOptions" :key="level" :value="level">{{ marketTrustLabel(level) }}</option>
-            </select>
-          </label>
-          <!-- 排序放在筛选项之后：先收窄范围，再决定用什么顺序看。 -->
-          <label class="module-market-filter">
-            <span>{{ t('modulesSortLabel') }}</span>
-            <select v-model="marketSort" data-testid="modules-market-sort" :aria-label="t('modulesSortLabel')">
-              <option v-for="option in marketSortOptions" :key="option.value" :value="option.value">{{ t(option.key) }}</option>
-            </select>
-          </label>
-          <button v-if="marketFiltersActive" type="button" class="module-filter-reset" data-testid="modules-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
+    <!-- W7 扩展中心：在线货架统一到「扩展中心」（/plugins，全类型 +
+         多能力筛选）；本页保留已安装管理与本地导入。 -->
+    <section id="modules-online" class="modules-section" data-testid="modules-online-unified">
+      <div class="module-online-unified" data-testid="modules-online-banner">
+        <div>
+          <h2>{{ t('modulesOnlineUnifiedTitle') }}</h2>
+          <p class="muted">{{ t('modulesOnlineUnifiedHint') }}</p>
         </div>
-        <div v-if="!filteredMarket.length" class="empty-state" data-testid="modules-online-filtered-empty">
-          <p class="muted">{{ t('modulesFilteredEmpty') }}</p>
-          <button type="button" class="module-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
-        </div>
-        <div v-else class="module-market-grid">
-        <MarketplaceCard
-          v-for="item in sortedMarket"
-          :key="item.id"
-          :item="marketCardItem(item)"
-          :icon="CubeOutline"
-          :type-label="moduleCategoryLabel(item, copy)"
-          :show-hub-stats="Boolean(marketSource?.hub)"
-          :has-newer-version="item.update_available"
-          :installing="installBusy === item.id"
-          :data-testid="`modules-market-${item.id}`"
-          @install="installFromMarketplace(item)"
-          @open-url="openUrl"
-          @detail="openMarketDetail(item)"
-        >
-          <template #summary>
-            <p class="muted module-market-summary">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
-            <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.map(shortRuleset).join(' · ') }}</p>
-          </template>
-          <template #tags>
-            <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
-            <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
-            <NTag v-if="item.system_agnostic" size="small">{{ t('modulesRulesetAgnostic') }}</NTag>
-            <NTag v-else-if="!itemHasDeclaredRuleset(item)" size="small" class="module-language-undeclared">{{ t('modulesRulesetUndeclared') }}</NTag>
-          </template>
-          <template #footer>
-            <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
-          </template>
-        </MarketplaceCard>
-        </div>
-      </template>
+        <RouterLink class="module-online-unified-cta" :to="{ name: 'plugins' }" data-testid="modules-online-go-hub">
+          {{ t('modulesOnlineUnifiedCta') }} <span aria-hidden="true">→</span>
+        </RouterLink>
+      </div>
     </section>
 
-    <HubDetailModal
-      v-model:show="hubDetailOpen"
-      :title="t('modulesDetailTitle')"
-      :description-title="t('modulesDetailDescription')"
-      :hub-detail="hubDetail"
-      :hub-detail-loading="hubDetailLoading"
-      :hub-readme-loading="hubReadmeLoading"
-      :hub-rating="hubRating"
-      :hub-rating-summary="hubRatingSummary"
-      :busy="detailBusy"
-      :safe-hub-readme-html="safeHubReadmeHtml"
-      :plugin-type-icon="() => CubeOutline"
-      :plugin-type-label="() => (detailItem ? moduleCategoryLabel(detailItem, copy) : copy.packLabel)"
-      :market-item-has-newer-version="() => Boolean(detailItem?.update_available)"
-      :install-market-plugin="installDetailItem"
-      :open-url="openUrl"
-      :toggle-hub-like="toggleHubLike"
-      :save-hub-rating="saveHubRating"
-    />
+
 
     <Modal v-if="submitGuideOpen" :title="t('contentPackSubmitTitle')" dialog-class="module-submit-guide" close-test-id="modules-submit-guide-close" @close="submitGuideOpen = false">
       <div data-testid="modules-submit-guide">
@@ -786,6 +697,9 @@ async function checkRecovery() {
 .module-card > :not(.module-card-art) { position: relative; z-index: 1; }
 .module-card.has-cover:hover .module-card-art { filter: saturate(.96) contrast(1.06) brightness(1.05); transform: scale(1.05); }
 .module-card h3 { margin: 0; font-size: 1rem; }
+/* W1 能力名牌：标题上方的图标 + 能力 chips（冒险/规则/界面/资料）。 */
+.module-card-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .15rem; }
+.module-card-icon { display: inline-flex; color: var(--df-interactive-strong); }
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
@@ -795,6 +709,10 @@ async function checkRecovery() {
 .module-update-action:disabled { opacity: .6; cursor: progress; }
 .module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
 .module-market-actions button { width: 100%; }
+/* W7 统一货架横幅。 */
+.module-online-unified { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); }
+.module-online-unified h2 { margin: 0; font-size: 1rem; }
+.module-online-unified-cta { display: inline-flex; align-items: center; gap: .4rem; padding: .5rem 1rem; border: 1px solid var(--df-interactive); border-radius: var(--df-radius-md); color: var(--df-interactive-strong); font-weight: 700; text-decoration: none; white-space: nowrap; }
 .module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }
 .module-install-feedback { margin: 0; color: var(--df-text-muted); font-size: .75rem; line-height: 1.35; }
 .module-install-feedback.is-success { color: var(--df-success); }

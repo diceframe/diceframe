@@ -181,6 +181,45 @@ async function installLocalModel(modelId: string) {
     localModelError.value = errorMessage(error)
   } finally { installingLocalModel.value = '' }
 }
+// W5：模型卡片化展示 + 卸载（启用中的模型服务端拒绝，fail closed）。
+const localCatalogAll = computed(() => store.config.embedding_model_catalog || [])
+const activeLocalModelId = computed(() => embeddingSource.value === 'local' ? String(store.config.embedding_local_model_id || '') : '')
+const uninstallingLocalModel = ref('')
+function formatBytes(value: number | undefined): string {
+  const size = Number(value || 0)
+  if (size <= 0) return ''
+  if (size >= 1024 * 1024 * 1024) return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
+  if (size >= 1024 * 1024) return `${Math.round(size / 1024 / 1024)} MB`
+  return `${Math.round(size / 1024)} KB`
+}
+function localModelStatusLabel(model: { status?: string }): string {
+  if (model.status === 'installed') return t('embeddingModelStatusInstalled')
+  if (model.status === 'invalid') return t('embeddingModelStatusInvalid')
+  return t('embeddingModelStatusNotInstalled')
+}
+async function uninstallLocalModel(modelId: string) {
+  if (uninstallingLocalModel.value) return
+  uninstallingLocalModel.value = modelId; localModelError.value = ''
+  try {
+    await api(`/embedding/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
+    await store.load()
+  } catch (error: unknown) {
+    localModelError.value = errorMessage(error)
+  } finally { uninstallingLocalModel.value = '' }
+}
+// W5-2：远端模型目录刷新（diceframe-models 的 loader 分片 URL）。
+const remoteCatalogUrl = ref('')
+const refreshCatalogBusy = ref(false)
+async function refreshRemoteCatalog() {
+  if (refreshCatalogBusy.value) return
+  refreshCatalogBusy.value = true; localModelError.value = ''
+  try {
+    await api('/embedding/catalog/refresh', { method: 'POST', body: JSON.stringify({ url: remoteCatalogUrl.value.trim() }) })
+    await store.load()
+  } catch (error: unknown) {
+    localModelError.value = errorMessage(error)
+  } finally { refreshCatalogBusy.value = false }
+}
 async function rebuildEmbeddings() {
   if (rebuildBusy.value) return
   rebuildBusy.value = true
@@ -249,14 +288,43 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
           <article id="settings-embedding" class="model-role-card model-role-card-embedding">
             <header><NIcon :component="CubeOutline" /><div><h4>{{ t('modelRoleEmbedding') }}</h4><p>{{ t('modelRoleEmbeddingHint') }}</p></div><HelpButton :title="t('embeddingHelpTitle')"><h4>{{ t('embeddingHelpWhatTitle') }}</h4><p>{{ t('embeddingHelpWhatText') }}</p><h4>{{ t('embeddingHelpChooseTitle') }}</h4><p>{{ t('embeddingHelpChooseBefore') }} <code>bge-m3</code>{{ t('embeddingHelpChooseAfter') }} <code>text-embedding-3-small</code>, <code>gte-large</code>, <code>nomic-embed-text</code>{{ t('embeddingHelpChooseSuffix') }}</p><h4>{{ t('embeddingHelpConfigTitle') }}</h4><p>{{ t('embeddingHelpCentralized') }}</p><h4>{{ t('test') }}</h4><p>{{ t('embeddingHelpTest') }}</p></HelpButton></header>
             <label class="model-role-enabled"><span>{{ t('vectorMemory') }}</span><NSwitch :value="!!store.config.embedding_enabled" :disabled="saving" @update:value="emit('toggle-and-save', 'embedding_enabled', $event)" /></label>
-            <label><span>{{ locale === 'zh-CN' ? '模型来源' : 'Model source' }}</span><select :value="embeddingSource" :disabled="saving" @change="setString('embedding_source', eventValue($event))"><option value="external">{{ locale === 'zh-CN' ? '外部服务商' : 'External provider' }}</option><option value="local">{{ locale === 'zh-CN' ? '本地模型（管理员安装）' : 'Local model (admin installed)' }}</option></select></label>
+            <label><span>{{ locale === 'zh-CN' ? '模型来源' : 'Model source' }}</span><select :value="embeddingSource" :disabled="saving" @change="setString('embedding_source', eventValue($event))"><option value="external">{{ locale === 'zh-CN' ? '外部服务商' : 'External provider' }}</option><option value="local">{{ locale === 'zh-CN' ? 'DiceFrame 本地模型' : 'DiceFrame local model' }}</option></select></label>
             <template v-if="embeddingSource === 'local'">
-              <label><span>{{ locale === 'zh-CN' ? '已安装本地模型' : 'Installed local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
-              <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ locale === 'zh-CN' ? '没有已安装模型。请把经过校验的 manifest 和权重放入 data/models，再刷新此页。' : 'No installed model. Add a verified manifest and weights under data/models, then refresh.' }}</p>
-              <div v-if="localEmbeddingCatalog.length" class="local-model-catalog">
-                <span>{{ locale === 'zh-CN' ? '目录中的可安装模型' : 'Available from catalog' }}</span>
-                <button v-for="model in localEmbeddingCatalog" :key="model.id" type="button" :disabled="!!installingLocalModel" @click="installLocalModel(model.id)">{{ installingLocalModel === model.id ? (locale === 'zh-CN' ? '校验下载中…' : 'Downloading…') : (model.display_name || model.id) }}</button>
+              <label><span>{{ locale === 'zh-CN' ? '启用的本地模型' : 'Enabled local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
+              <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ t('embeddingModelPickHint') }}</p>
+              <div class="local-model-catalog-refresh">
+                <NInput v-model:value="remoteCatalogUrl" size="small" :placeholder="t('embeddingCatalogUrlPlaceholder')" data-testid="embedding-catalog-url" />
+                <NButton size="tiny" secondary :loading="refreshCatalogBusy" data-testid="embedding-catalog-refresh" @click="refreshRemoteCatalog">{{ t('embeddingCatalogRefresh') }}</NButton>
               </div>
+              <div class="local-model-cards" data-testid="embedding-model-cards">
+                <div v-for="model in localCatalogAll" :key="model.id" class="local-model-card" :data-testid="`local-model-${model.id}`">
+                  <div class="local-model-card-main">
+                    <strong>{{ model.display_name || model.id }}</strong>
+                    <NTag size="small" :type="model.status === 'installed' ? 'success' : model.status === 'invalid' ? 'error' : 'default'">{{ localModelStatusLabel(model) }}</NTag>
+                  </div>
+                  <p class="muted local-model-meta">
+                    <span v-if="model.dimension">{{ t('embeddingModelDimensions', { dimension: model.dimension }) }}</span>
+                    <span v-if="model.license">{{ model.license }}</span>
+                    <span v-if="formatBytes(model.size_bytes)">{{ formatBytes(model.size_bytes) }}</span>
+                    <span v-if="model.version">v{{ model.version }}</span>
+                  </p>
+                  <div class="local-model-actions">
+                    <NButton v-if="model.status !== 'installed'" size="tiny" type="primary" :loading="installingLocalModel === model.id" :data-testid="`local-model-install-${model.id}`" @click="installLocalModel(model.id)">
+                      {{ installingLocalModel === model.id ? t('embeddingModelDownloading') : t('embeddingModelDownload') }}
+                    </NButton>
+                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" secondary :loading="uninstallingLocalModel === model.id" :data-testid="`local-model-delete-${model.id}`" @click="uninstallLocalModel(model.id)">
+                      {{ t('embeddingModelDelete') }}
+                    </NButton>
+                    <NTag v-if="model.id === activeLocalModelId" size="small" type="info">{{ t('embeddingModelActive') }}</NTag>
+                  </div>
+                  <p v-if="model.error" class="model-role-field-hint embedding-index-pending">{{ model.error }}</p>
+                </div>
+              </div>
+              <p v-if="!localCatalogAll.length" class="model-role-field-hint">{{ t('embeddingCatalogEmpty') }}</p>
+              <details class="local-model-advanced">
+                <summary>{{ t('embeddingOfflineImportTitle') }}</summary>
+                <p class="model-role-field-hint">{{ t('embeddingOfflineImportHint') }}</p>
+              </details>
               <p v-if="localModelError" class="model-role-field-hint embedding-index-pending">{{ localModelError }}</p>
             </template>
             <template v-else>
@@ -356,6 +424,17 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
 .embedding-index-pending { color: var(--df-warning, #a16207); }
 .embedding-index-ready { color: var(--df-success, #15803d); }
 .local-model-catalog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; color: var(--df-text-muted); font-size: 12px; }
+/* W5 本地模型卡片：名称/元信息/状态/下载与删除，不依赖开关状态可见。 */
+.local-model-cards { display: grid; gap: .5rem; margin-top: .4rem; }
+.local-model-card { display: grid; gap: .35rem; padding: .6rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.local-model-card-main { display: flex; align-items: center; gap: .5rem; }
+.local-model-card-main strong { font-size: .88rem; }
+.local-model-meta { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0; font-size: .76rem; }
+.local-model-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.local-model-advanced { color: var(--df-text-muted); font-size: .78rem; }
+.local-model-advanced summary { cursor: pointer; }
+.local-model-catalog-refresh { display: flex; gap: .4rem; margin-top: .4rem; }
+.local-model-catalog-refresh .n-input { flex: 1; min-width: 0; }
 .local-model-catalog button { padding: 4px 7px; border: 1px solid var(--df-border-soft); border-radius: 6px; }
 .imagegen-style-field :deep(.n-input),
 .imagegen-style-field :deep(textarea) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }

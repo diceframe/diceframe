@@ -63,6 +63,7 @@ from .requirements import (
     dependency_rows,
     parse_plugin_requirements,
     parse_ruleset_requirements,
+    parse_ruleset_runtime_declaration,
     plugin_version_satisfies,
 )
 from .runtime_protocol import (
@@ -213,6 +214,9 @@ class PluginHost:
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "active":
                 self._register_contributions(plugin_id, runtime)
+        # 插件集合已重建（含安装/覆盖/恢复路径），外部规则 runtime 可用性可能
+        # 变化：通知组合根重同步注册表（幂等，fail closed，见同步桥）。
+        self._notify_ruleset_runtime_changed()
         return self.list_public()
 
     def _validate_discovered_plugin_dependencies(self) -> None:
@@ -962,6 +966,25 @@ class PluginHost:
         self._package_validator = package_validator
         self._content_module_guard = content_module_guard
 
+    def set_ruleset_runtime_listener(self, listener: Callable[[], None] | None) -> None:
+        """T3 组合根接线点：影响外部规则 runtime 可用性的插件变更后通知重同步。
+
+        listener（PluginRulesetRuntimeSource.sync）由组合根提供；宿主不感知
+        注册表语义。通知为 fire-and-forget：同步失败只记日志，不阻断插件
+        操作——未注册的 runtime 会在 resolve 时 fail closed。
+        """
+
+        self._ruleset_runtime_listener = listener
+
+    def _notify_ruleset_runtime_changed(self) -> None:
+        listener = getattr(self, "_ruleset_runtime_listener", None)
+        if listener is None:
+            return
+        try:
+            listener()
+        except Exception:
+            self.logger.exception("外部规则 runtime 注册表重同步失败")
+
     def _guard_package_mutation(self, plugin_id: str, action: str) -> None:
         """Ask the injected guard before changing/removing installed package bytes."""
 
@@ -1040,6 +1063,10 @@ class PluginHost:
                 "backup": str(backup_dir),
                 "phase": "prepared",
                 "was_running": was_running,
+                # receipt 重建数据：commit 后中断时恢复逻辑据此补写 install.json。
+                "manifest": dict(runtime.manifest),
+                "artifact_hash": hashlib.sha256(payload).hexdigest(),
+                "source": "zip",
             }
             self._write_install_journal(journal, append=True)
             shutil.copytree(source_dir, staging_dir)
@@ -1059,7 +1086,8 @@ class PluginHost:
                 self._write_install_journal(journal)
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
-                self._remove_install_journal(plugin_id)
+                # journal 在 receipt 持久化之后才删除（见下方 with 块外），
+                # 避免 commit 后中断留下 published-but-no-receipt 状态。
             except Exception:
                 if target_dir.exists() and not (target_dir / "plugin.json").exists():
                     shutil.rmtree(target_dir, ignore_errors=True)
@@ -1080,6 +1108,9 @@ class PluginHost:
             artifact_hash=hashlib.sha256(payload).hexdigest(),
             source="zip",
         )
+        # receipt 已持久化，事务 journal 才能安全移除；恢复路径
+        # (_recover_install_journal) 会在 commit 后中断时补写缺失 receipt。
+        self._remove_install_journal(plugin_id)
         # A replacement can legitimately have a different manifest digest.
         # The first discover happens before the new receipt is persisted, so
         # it conservatively marks the live runtime failed.  Re-discover after
@@ -1144,10 +1175,22 @@ class PluginHost:
                         "staging": str(staging),
                         "backup": str(backup),
                     })
-                self._write_group_install_journal({
+                receipt_records: list[dict[str, Any]] = [
+                    {
+                        "plugin_id": plugin_id,
+                        "manifest": manifest,
+                        "artifact_hash": hashlib.sha256(payload).hexdigest(),
+                        "source": "group-zip",
+                    }
+                    for plugin_id, _source_dir, manifest, payload in staged_sources
+                ]
+                journal_record: dict[str, Any] = {
                     "schema_version": 1, "group_id": group_id,
-                    "phase": "staged", "entries": entries, "published": [],
-                })
+                    "entries": entries, "published": [],
+                    "receipts": receipt_records,
+                }
+                # journal 携带 receipt 重建数据：commit 后中断时恢复逻辑可补写。
+                self._write_group_install_journal({**journal_record, "phase": "staged"})
                 for entry in entries:
                     plugin_id = str(entry["plugin_id"])
                     target = Path(entry["target"])
@@ -1156,27 +1199,31 @@ class PluginHost:
                         if was_running.get(plugin_id):
                             await self.stop(plugin_id, keep_enabled=True)
                         await _rename_dir_with_retry(target, backup)
-                self._write_group_install_journal({
-                    "schema_version": 1, "group_id": group_id,
-                    "phase": "backup_moved", "entries": entries, "published": [],
-                })
+                self._write_group_install_journal({**journal_record, "phase": "backup_moved"})
                 published: list[str] = []
                 for entry in entries:
                     await _rename_dir_with_retry(Path(entry["staging"]), Path(entry["target"]))
                     published.append(str(entry["plugin_id"]))
                     self._write_group_install_journal({
-                        "schema_version": 1, "group_id": group_id,
-                        "phase": "publishing", "entries": entries,
-                        "published": published,
+                        **journal_record, "phase": "publishing", "published": published,
                     })
                 self._write_group_install_journal({
-                    "schema_version": 1, "group_id": group_id,
-                    "phase": "published", "entries": entries, "published": published,
+                    **journal_record, "phase": "published", "published": published,
                 })
                 for entry in entries:
                     backup = Path(entry["backup"])
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                # receipt 必须在事务 journal 删除前持久化；进程在 commit 后
+                # 中断时，_recover_group_install_journal 会按 journal 补写缺失
+                # 的 receipt，避免出现 published-but-no-receipt 的不可自愈状态。
+                self.discover()
+                for record in receipt_records:
+                    self._save_install_receipt(
+                        str(record["plugin_id"]), record["manifest"],
+                        artifact_hash=str(record["artifact_hash"]),
+                        source=str(record["source"]),
+                    )
                 self._group_install_journal_path.unlink(missing_ok=True)
         except Exception:
             # Leave the journal for the next discover to perform the same
@@ -1186,12 +1233,6 @@ class PluginHost:
             self.discover()
             raise
 
-        self.discover()
-        for plugin_id, _source, manifest, payload in staged_sources:
-            self._save_install_receipt(
-                plugin_id, manifest,
-                artifact_hash=hashlib.sha256(payload).hexdigest(), source="group-zip",
-            )
         self.discover()
         for plugin_id, running in was_running.items():
             if running:
@@ -1256,6 +1297,9 @@ class PluginHost:
                         shutil.rmtree(staging, ignore_errors=True)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                    # Commit 后中断：补写缺失的安装 receipt（journal 记录
+                    # 自身携带 manifest/artifact_hash/source 重建数据）。
+                    self._backfill_install_receipt(plugin_id, record, target)
                     continue
                 # Otherwise restore the previous package if the process died
                 # after moving it aside. Never promote an uncommitted staging
@@ -1299,6 +1343,12 @@ class PluginHost:
             } if isinstance(record, dict) else set()
             if not isinstance(entries, list):
                 raise ValueError("group journal entries are invalid")
+            receipts_by_id: dict[str, dict[str, Any]] = {}
+            journal_receipts = record.get("receipts")
+            if isinstance(journal_receipts, list):
+                for journal_receipt in journal_receipts:
+                    if isinstance(journal_receipt, dict):
+                        receipts_by_id[str(journal_receipt.get("plugin_id") or "")] = journal_receipt
             for entry in entries:
                 if not isinstance(entry, dict):
                     raise ValueError("group journal entry is invalid")
@@ -1313,6 +1363,13 @@ class PluginHost:
                         shutil.rmtree(staging, ignore_errors=True)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
+                    # Commit 后中断：补写缺失的安装 receipt，保证重启后
+                    # marketplace 身份校验与覆盖安装仍有依据。
+                    self._backfill_install_receipt(
+                        str(entry.get("plugin_id") or ""),
+                        receipts_by_id.get(str(entry.get("plugin_id") or "")),
+                        target,
+                    )
                     continue
                 # No commit marker means the group is not atomic. Restore every
                 # old target and discard all candidate staging directories.
@@ -1480,6 +1537,7 @@ class PluginHost:
                 shutil.rmtree(data_dir)
         self.plugins.pop(plugin_id, None)
         self._api_tokens.pop(plugin_id, None)
+        self._notify_ruleset_runtime_changed()
         return {"id": plugin_id, "uninstalled": True, "data_deleted": bool(delete_data)}
 
     async def start_enabled(self) -> None:
@@ -1539,6 +1597,7 @@ class PluginHost:
         # 启动时只拉起 enabled 的插件；前端开关用 require_enabled=False 强制启动进程。
         if require_enabled and not runtime.config.get("enabled"):
             runtime.status = "disabled"
+            self._notify_ruleset_runtime_changed()
             return
         if runtime.process and runtime.process.returncode is None:
             runtime.status = "running"
@@ -1550,14 +1609,17 @@ class PluginHost:
                 generated = True
         if generated:
             self._save_config(plugin_id, runtime)
-        if not self._has_entrypoint(runtime.manifest):
+        if not self._has_entrypoint(runtime.manifest) or self._plugin_type(runtime.manifest) == "ruleset-runtime":
             self._register_contributions(plugin_id, runtime)
             runtime.status, runtime.error = "active", ""
-            # 声明型插件没有进程，"启动"就是"启用"：必须持久化，否则主程序重启后
+            # 声明型插件没有宿主进程，"启动"就是"启用"：必须持久化，否则主程序重启后
             # 又回到 disabled，内容包/模块每次开机都要用户重新点一次启用。
+            # ruleset-runtime 的进程由组合根注册表的 transport 持有（同步桥注册时
+            # 拉起并探活），宿主不走 subprocess/RPC 启动路径。
             if not runtime.config.get("enabled"):
                 runtime.config["enabled"] = True
                 self._save_config(plugin_id, runtime)
+            self._notify_ruleset_runtime_changed()
             return
         runtime.status, runtime.error = "starting", ""
         env = self._build_process_env(plugin_id, runtime)
@@ -1814,6 +1876,7 @@ class PluginHost:
                 await self._on_plugin_stopped(plugin_id)
             except Exception:
                 self.logger.exception("插件停止回调失败: %s", plugin_id)
+        self._notify_ruleset_runtime_changed()
 
     async def _fail_rpc_runtime(self, runtime: PluginRuntime, error: str) -> None:
         monitor = runtime.monitor_task
@@ -1954,6 +2017,31 @@ class PluginHost:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
+    def _backfill_install_receipt(
+        self,
+        plugin_id: str,
+        receipt: dict[str, Any] | None,
+        target: Path,
+    ) -> None:
+        """事务 commit 后中断时，按 journal 数据补写缺失的安装 receipt。
+
+        仅在 receipt 缺失且目标包确实存在时写入；写入失败会向上抛出，
+        由恢复逻辑保留 journal 以便下次重启重试（fail closed）。
+        """
+        if not plugin_id or receipt is None:
+            return
+        receipt_path = self.data_dir / plugin_id / "install.json"
+        if receipt_path.exists() or not target.is_dir():
+            return
+        manifest = receipt.get("manifest")
+        if not isinstance(manifest, dict):
+            return
+        self._save_install_receipt(
+            plugin_id, manifest,
+            artifact_hash=str(receipt.get("artifact_hash") or ""),
+            source=str(receipt.get("source") or "group-zip"),
+        )
+
     def _save_install_receipt(
         self,
         plugin_id: str,
@@ -2041,6 +2129,10 @@ class PluginHost:
         # any plugin config or contribution is exposed.  Resolution remains
         # with the ruleset binding owner; the host does not guess or download.
         parse_ruleset_requirements(manifest)
+        if plugin_type == "ruleset-runtime":
+            # T3：外部规则运行时声明在安装时校验一次（fail closed）；注册期
+            # 同步桥会重新解析，两处语义一致。
+            parse_ruleset_runtime_declaration(manifest)
         self._validate_manifest_permissions(manifest)
         self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)

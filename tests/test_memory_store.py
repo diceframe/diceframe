@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from src.memory.delta import MemoryStore
+from src.memory.embedding_profile import content_hash as embedding_content_hash
+from src.memory.models import MemoryEntry
 from src.migrations.sqlite import MigrationError
 
 pytestmark = pytest.mark.asyncio
@@ -256,6 +258,29 @@ class TestDeltaApplication:
                 }, 1)
 
             assert store.list_entries("atomic-game", viewer_is_gm=True) == []
+        finally:
+            store.close()
+
+    async def test_get_unembedded_limit_applies_to_profile_mismatch(self, tmp_path):
+        store = MemoryStore(tmp_path / "limit-profile.db")
+        store.open()
+        try:
+            # 模拟切换 Embedding 模型后的积压：每条都带旧 profile 的向量，
+            # 且内容哈希与当前内容一致（仅 profile 不匹配）。
+            for i in range(8):
+                entity, relation, value = f"实体{i}", "位置", f"第{i}号地点"
+                MemoryEntry.insert(
+                    game_key="limit-game",
+                    entity=entity, relation=relation, value=value,
+                    embedding="[1.0, 0.0]",
+                    embedding_profile="old-profile",
+                    embedding_content_hash=embedding_content_hash(entity, relation, value),
+                ).execute()
+            store._conn.commit()
+
+            result = store.get_unembedded("limit-game", limit=5, profile="new-profile")
+            assert len(result) == 5
+            assert all(e["embedding_profile"] == "old-profile" for e in result)
         finally:
             store.close()
 

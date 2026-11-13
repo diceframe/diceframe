@@ -281,6 +281,47 @@ def _module_lorebooks(
     return rows
 
 
+def _rule_contribution_count(plugin_host: Any, plugin_id: str) -> int:
+    """该内容包贡献的规则模板数（T4-W1 能力名牌的数据源之一）。"""
+
+    contributions = getattr(plugin_host, "contributions", None)
+    if contributions is None:
+        return 0
+    try:
+        return sum(
+            1 for item in contributions.list("rule") if str(getattr(item, "plugin_id", "")) == plugin_id
+        )
+    except Exception:  # noqa: BLE001 - 能力摘要是展示信息，读失败不拖垮列表
+        return 0
+
+
+def _installed_module_capabilities(
+    manifest: dict[str, Any],
+    *,
+    profile: str,
+    adventure_count: int | None,
+    counts: dict[str, int] | None,
+    lorebook_count: int,
+    rule_count: int,
+) -> list[str]:
+    """按包的实际贡献推导能力名牌（拍板 A：冒险/规则/界面/资料，不猜）。"""
+
+    capabilities: list[str] = []
+    if profile == "adventure-module" or (adventure_count or 0) > 0:
+        capabilities.append("adventure")
+    if rule_count > 0:
+        capabilities.append("rules")
+    if isinstance(manifest.get("prebuilt_ui"), dict):
+        capabilities.append("ui")
+    # 资料：世界/资料册/地图/NPC/物品等内容贡献（规则模板已单列，不重复计）。
+    material_counts = {
+        kind: count for kind, count in (counts or {}).items() if kind != "rule"
+    } if isinstance(counts, dict) else {}
+    if lorebook_count > 0 or any((count or 0) > 0 for count in material_counts.values()):
+        capabilities.append("materials")
+    return capabilities
+
+
 def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
     """模块库列表（母方案 §51：已安装；在线/本地导入由 marketplace 提供）。"""
 
@@ -304,6 +345,15 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
             "content_counts": counts,
             "inventory_status": inventory_status,
             "lorebook_count": len(lorebooks),
+            # 能力名牌：只声明包真实提供的东西（W1）。
+            "capabilities": _installed_module_capabilities(
+                runtime.manifest,
+                profile=profile,
+                adventure_count=adventure_count,
+                counts=counts,
+                lorebook_count=len(lorebooks),
+                rule_count=_rule_contribution_count(deps.plugin_host, plugin_id),
+            ),
         })
     return {"ok": True, "modules": modules}
 
@@ -398,6 +448,8 @@ async def module_marketplace(
             "content_profile": profile,
             "content_delivery_mode": str(item.get("content_delivery_mode") or ""),
             "adventure_count": int(item.get("adventure_count") or 0),
+            # 在线卡能力：远端索引只提供 profile 级事实，不猜测贡献明细。
+            "capabilities": ["adventure"] if profile == "adventure-module" else [],
             "ruleset_targets": targets,
             "ruleset_declared": declared,
             "system_agnostic": agnostic,

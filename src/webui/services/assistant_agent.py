@@ -380,7 +380,7 @@ class AgentRuntime:
                 active_domains = set((initial_grant or {}).get('domains', []))
                 page_domains = {'play': {'games', 'adventures', 'recovery'}, 'lorebook': {'lorebook'},
                                 'worlds': {'worlds', 'lorebook'}, 'library': {'lorebook', 'worlds', 'adventures'},
-                                'settings': {'settings'}, 'plugins': {'plugins'}}
+                                'settings': {'settings'}, 'plugins': {'plugins'}, 'creator': {'creator'}}
                 active_domains.update(page_domains.get(context.get('route'), set()))
                 loaded.update(tool.name for tool in self.registry.values() if tool.domain in active_domains)
                 loaded.update({'search_capabilities', 'describe_capability'})

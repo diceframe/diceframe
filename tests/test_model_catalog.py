@@ -56,3 +56,116 @@ def test_catalog_rejects_untrusted_mirror(tmp_path):
     }), encoding="utf-8")
     with pytest.raises(ModelCatalogError, match="mirror source"):
         load_catalog(catalog)
+
+
+def _manager_with_installed_model(tmp_path) -> tuple["LocalModelManager", str]:
+    """构造一个「已安装」的模型目录（manifest + 权重占位，走真实校验器）。"""
+    import hashlib
+    from src.memory.model_catalog import LocalModelManager
+
+    models_dir = tmp_path / "models"
+    version_dir = models_dir / "demo-model" / "1.0.0"
+    version_dir.mkdir(parents=True)
+    payload = b"weights"
+    (version_dir / "model.onnx").write_bytes(payload)
+    manifest = {
+        "id": "demo-model", "kind": "embedding", "backend": "onnxruntime",
+        "display_name": "Demo", "version": "1.0.0", "dimension": 8,
+        "max_input_chars": 2048,
+        "onnx_file": "model.onnx", "tokenizer_file": "tokenizer.json",
+        "files": [{
+            "path": "model.onnx", "size": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }],
+    }
+    (version_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return LocalModelManager(models_dir), "demo-model"
+
+
+def test_uninstall_removes_installed_model_dir(tmp_path):
+    manager, model_id = _manager_with_installed_model(tmp_path)
+    result = manager.uninstall(model_id)
+    assert result == {"ok": True, "model_id": model_id}
+    assert not (manager.models_dir / model_id).exists()
+    with pytest.raises(ModelCatalogError, match="not installed"):
+        manager.uninstall(model_id)
+
+
+def test_uninstall_refuses_active_model_and_path_escapes(tmp_path):
+    manager, model_id = _manager_with_installed_model(tmp_path)
+    with pytest.raises(ModelCatalogError, match="currently enabled"):
+        manager.uninstall(model_id, active_model_id=model_id)
+    with pytest.raises(ModelCatalogError, match="escapes|invalid"):
+        manager.uninstall("..")
+    with pytest.raises(ModelCatalogError, match="escapes|not installed"):
+        manager.uninstall("missing-model")
+
+
+def test_catalog_projection_includes_download_size(tmp_path):
+    import io as _io
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({
+        "catalog_version": 1,
+        "models": [{
+            "id": "sized", "kind": "embedding", "backend": "onnxruntime",
+            "version": "1.0.0", "dimension": 512, "license": "mit",
+            "files": [{"path": "model.onnx", "url": "https://huggingface.co/m.onnx",
+                       "sha256": "a" * 64, "size": 24010842}],
+        }],
+    }), encoding="utf-8")
+    entries = load_catalog(catalog)
+    assert entries[0]["files"][0]["size"] == 24010842
+
+
+def _write_remote_shard(path, model_id: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "catalog_version": 1,
+        "models": [{
+            "id": model_id, "kind": "embedding", "backend": "onnxruntime",
+            "version": "0.1.0", "dimension": 384, "license": "apache-2.0",
+            "status": "released",
+            "files": [{"path": "model.onnx",
+                       "url": "https://huggingface.co/demo/model.onnx",
+                       "sha256": "b" * 64, "size": 10}],
+        }],
+    }), encoding="utf-8")
+
+
+def test_remote_catalog_cache_merges_new_ids_only(tmp_path):
+    """远端缓存只补充本地没有的 id，不覆盖本地声明（W5-2 合并策略）。"""
+    from src.memory.model_catalog import LocalModelManager
+
+    models_dir = tmp_path / "models"
+    _write_remote_shard(models_dir / "remote-catalog.json", "remote-model")
+    manager = LocalModelManager(models_dir)
+    ids = [entry["id"] for entry in manager._catalog_entries()]
+    # 内置默认 catalog 的 bge 在前，远端补充在后。
+    assert ids[0] == "bge-small-zh-v1.5"
+    assert "remote-model" in ids
+    # 同 id 不重复。
+    assert len(ids) == len(set(ids))
+
+
+def test_candidate_entries_are_not_installable(tmp_path):
+    from src.memory.model_catalog import LocalModelManager, ModelCatalogError
+
+    models_dir = tmp_path / "models"
+    shard = models_dir / "remote-catalog.json"
+    _write_remote_shard(shard, "candidate-model")
+    raw = json.loads(shard.read_text(encoding="utf-8"))
+    raw["models"][0]["status"] = "candidate"
+    shard.write_text(json.dumps(raw), encoding="utf-8")
+    manager = LocalModelManager(models_dir)
+    import asyncio
+    with pytest.raises(ModelCatalogError, match="candidate"):
+        asyncio.run(manager.install("candidate-model"))
+
+
+def test_refresh_rejects_non_https_url(tmp_path):
+    from src.memory.model_catalog import LocalModelManager, ModelCatalogError
+
+    manager = LocalModelManager(tmp_path / "models")
+    import asyncio
+    with pytest.raises(ModelCatalogError, match="https"):
+        asyncio.run(manager.refresh_remote_catalog("http://evil.example/catalog.json"))
