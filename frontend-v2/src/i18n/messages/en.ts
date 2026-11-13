@@ -458,6 +458,7 @@ export const en = {
   navRules: 'Rules & Gameplay',
   // W3 creator wizard and grouped editor
   creatorHelpTitle: 'Creation help',
+  creatorWorkflowHint: 'Flow: pick a file and edit → save revision → validate (it points out problems) → build .dfplugin; ask the AI assistant if unsure what to write.',
   creatorEditorGroupOverview: 'Overview',
   creatorEditorGroupContent: 'Content',
   creatorEditorGroupRules: 'Rules',
@@ -505,7 +506,9 @@ export const en = {
   rulesGameplayTabEditor: 'Rule editor',
   rulesGameplayTabGameplay: 'Gameplay modes',
   rulesGameplayGameplaySection: 'Gameplay modes',
-  rulesGameplayGameplayHint: 'Engines that organize and advance a session; incomplete wiring is reported honestly.',
+  rulesGameplayGameplayHint: 'Engines that organize and advance a session; builtin modes are provided by the core pipeline and need no editing.',
+  rulesGameplayGameplayEditHint: 'Want your own gameplay mode? Pick "A gameplay mode" in the Creator Studio and build it as a provider project.',
+  rulesGameplayGameplayEditCta: 'Create a gameplay mode',
   rulesGameplayBuiltin: 'Built-in',
   rulesGameplayWired: 'Wired',
   rulesGameplayNotWired: 'Wiring incomplete',

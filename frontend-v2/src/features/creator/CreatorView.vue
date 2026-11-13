@@ -423,14 +423,25 @@ onMounted(loadProjects)
           </div>
           <textarea v-model="selectedContent" class="creator-project-textarea" spellcheck="false" :placeholder="copy.projectFilePlaceholder" />
         </div>
+        <p class="muted creator-workflow-hint" data-testid="creator-workflow-hint">{{ t('creatorWorkflowHint') }}</p>
         <div class="creator-project-actions">
-          <NButton :loading="projectAction === 'save'" :disabled="!selectedFile" @click="saveProject">{{ copy.projectSave }}</NButton>
-          <NButton :loading="projectAction === 'validate'" @click="validateProject">{{ copy.projectValidate }}</NButton>
-          <NButton :loading="projectAction === 'preview'" @click="previewProject">{{ copy.projectPreview }}</NButton>
-          <NButton :loading="projectAction === 'submission'" @click="prepareSubmission">{{ copy.projectSubmission }}</NButton>
-          <NButton type="primary" :loading="projectAction === 'build'" @click="buildProject">{{ copy.projectBuild }}</NButton>
-          <NButton type="primary" :data-testid="`creator-ai-toggle`" @click="aiOpen = !aiOpen">{{ t('creatorAiToggle') }}</NButton>
-          <NButton type="error" :loading="projectAction === 'delete'" @click="deleteProject">{{ copy.projectDelete }}</NButton>
+          <div class="creator-action-group">
+            <NButton :loading="projectAction === 'save'" :disabled="!selectedFile" @click="saveProject">{{ copy.projectSave }}</NButton>
+          </div>
+          <div class="creator-action-group">
+            <NButton :loading="projectAction === 'validate'" @click="validateProject">{{ copy.projectValidate }}</NButton>
+            <NButton :loading="projectAction === 'preview'" @click="previewProject">{{ copy.projectPreview }}</NButton>
+          </div>
+          <div class="creator-action-group">
+            <NButton :loading="projectAction === 'submission'" @click="prepareSubmission">{{ copy.projectSubmission }}</NButton>
+            <NButton type="primary" :loading="projectAction === 'build'" @click="buildProject">{{ copy.projectBuild }}</NButton>
+          </div>
+          <div class="creator-action-group">
+            <NButton type="primary" :data-testid="`creator-ai-toggle`" @click="aiOpen = !aiOpen">{{ t('creatorAiToggle') }}</NButton>
+          </div>
+          <div class="creator-action-group is-danger">
+            <NButton type="error" :loading="projectAction === 'delete'" @click="deleteProject">{{ copy.projectDelete }}</NButton>
+          </div>
         </div>
         <CreatorAiPanel v-if="aiOpen" :project="selectedProject" data-testid="creator-ai-panel-embed" @files-changed="reloadProject" />
         <pre v-if="projectPreview" class="creator-project-preview">{{ JSON.stringify(projectPreview, null, 2) }}</pre>
@@ -511,7 +522,11 @@ onMounted(loadProjects)
 .creator-project-files button { padding: .4rem .5rem; border: 0; border-radius: var(--df-radius-sm); color: var(--df-text-muted); background: transparent; text-align: left; cursor: pointer; }
 .creator-project-files button.active, .creator-project-files button:hover { color: var(--df-text); background: var(--df-surface-2); }
 .creator-project-textarea { min-height: 220px; width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); padding: .65rem; color: var(--df-text); background: var(--df-surface-2); font: .85rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.creator-project-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.creator-project-actions { display: flex; flex-wrap: wrap; gap: .35rem; align-items: stretch; }
+/* W6 复核：操作按「编辑/校验/交付/AI/危险」分组，紧凑不松散。 */
+.creator-action-group { display: flex; gap: .35rem; align-items: center; padding-right: .5rem; margin-right: .4rem; border-right: 1px solid var(--df-border-soft); }
+.creator-action-group:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+.creator-workflow-hint { margin: 0; font-size: .8rem; }
 .creator-project-preview { max-height: 16rem; overflow: auto; margin: 0; padding: .7rem; border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text-secondary); font: .78rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .creator-project-row span, .creator-project-empty { color: var(--df-text-muted); font-size: .84rem; }
 .creator-project-error { color: var(--df-danger-strong); }

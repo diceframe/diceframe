@@ -3,6 +3,7 @@
 // - 「规则编辑」为默认页签：原管理组规则模板编辑器整组件复用（含复制/编辑/删除）。
 // - 「玩法模式」页签：只列玩法模式与其接线状态（fail closed），不放能力名牌。
 import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { NIcon, NTag } from 'naive-ui'
 import { GameControllerOutline, OptionsOutline } from '@vicons/ionicons5'
 import { api, errorMessage } from '@/api/client'
@@ -67,6 +68,11 @@ async function load(): Promise<void> {
       <template v-else>
         <h2>{{ t('rulesGameplayGameplaySection') }}</h2>
         <p class="muted">{{ t('rulesGameplayGameplayHint') }}</p>
+        <!-- W6 用户反馈：玩法「编辑」= 做玩法工程，把入口接明。 -->
+        <div class="rules-gameplay-cta" data-testid="gameplay-create-cta">
+          <span>{{ t('rulesGameplayGameplayEditHint') }}</span>
+          <RouterLink class="rules-gameplay-cta-link" :to="{ name: 'creator' }">{{ t('rulesGameplayGameplayEditCta') }}</RouterLink>
+        </div>
         <div class="rules-gameplay-grid">
           <article v-for="mode in gameplays" :key="mode.mode_id" class="rules-gameplay-card" :data-testid="`gameplay-card-${mode.mode_id}`">
             <div class="rules-card-heading">
@@ -101,4 +107,7 @@ async function load(): Promise<void> {
 .rules-runtime-binding { margin: .15rem 0 0; font-size: .78rem; font-family: var(--df-font-mono, monospace); overflow-wrap: anywhere; }
 .rules-card-icon { display: inline-flex; margin-top: .15rem; color: var(--df-interactive-strong); }
 .rules-gameplay-editor-embed { margin-top: 1rem; max-width: 100%; }
+.rules-gameplay-cta { display: flex; align-items: center; gap: .8rem; margin-top: .6rem; padding: .55rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); font-size: .84rem; }
+.rules-gameplay-cta span { color: var(--df-text-muted); }
+.rules-gameplay-cta-link { color: var(--df-interactive-strong); font-weight: 700; text-decoration: none; white-space: nowrap; }
 </style>

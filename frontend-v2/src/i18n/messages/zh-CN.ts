@@ -458,6 +458,7 @@ export const zhCN = {
   navRules: '规则与玩法',
   // W3 创作工坊向导与分区编辑
   creatorHelpTitle: '创作帮助',
+  creatorWorkflowHint: '流程：左侧选文件编辑 → 保存 revision → 预检（会指出问题）→ 构建 .dfplugin；不知道写什么就点「AI 助手」。',
   creatorEditorGroupOverview: '概览',
   creatorEditorGroupContent: '内容',
   creatorEditorGroupRules: '规则',
@@ -505,7 +506,9 @@ export const zhCN = {
   rulesGameplayTabEditor: '规则编辑',
   rulesGameplayTabGameplay: '玩法模式',
   rulesGameplayGameplaySection: '玩法模式',
-  rulesGameplayGameplayHint: '决定一局游戏如何组织与推进的玩法引擎；接线不完整的会如实标注。',
+  rulesGameplayGameplayHint: '决定一局游戏如何组织与推进的玩法引擎；内置玩法由核心管线提供、无需编辑。',
+  rulesGameplayGameplayEditHint: '想做自己的玩法？到创作工坊选「做一种玩法」，把设计做成 provider 工程。',
+  rulesGameplayGameplayEditCta: '去做一种玩法',
   rulesGameplayBuiltin: '内置',
   rulesGameplayWired: '已接线',
   rulesGameplayNotWired: '接线不完整',
