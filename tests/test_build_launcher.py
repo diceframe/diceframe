@@ -11,18 +11,26 @@ import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from scripts import build_launcher, build_portable
 from src.web_transport.certificates.self_signed import SelfSignedCertificateProvider
 from src.web_transport.certificates.storage import CertificateStore
+from src.webui.services.launcher_link import identity_proof
 
 
 def test_launcher_build_compiles_every_partial_source():
     # 启动器是 partial class，按职责拆在多个文件里；漏编任何一个都会在 csc 阶段才炸。
     names = {Path(source).name for source in build_launcher.launcher_sources()}
-    assert {"DiceFrameLauncher.cs", "OverwriteUpgrade.cs", "AppWindow.cs", "ProcessEnvironment.cs"} <= names
+    assert {
+        "DiceFrameLauncher.cs",
+        "OverwriteUpgrade.cs",
+        "AppWindow.cs",
+        "ProcessEnvironment.cs",
+        "BackendLink.cs",
+    } <= names
 
 
 def test_webview2_sdk_rejects_a_tampered_package(tmp_path):
@@ -88,9 +96,9 @@ internal static class Probe
                 Console.WriteLine("default=" + ServicePointManager.SecurityProtocol);
                 type.GetField("launcherDataDir", flags).SetValue(null, args[2]);
                 type.GetMethod("InitLocalHttpClient", flags).Invoke(null, null);
-                MethodInfo probe = type.GetMethod("IsDiceFrameServer", flags);
-                Console.WriteLine("pinned=" + probe.Invoke(null, new object[] { args[3] }));
-                Console.WriteLine("dead=" + probe.Invoke(null, new object[] { "https://127.0.0.1:1" }));
+                MethodInfo probe = type.GetMethod("ProbeHealth", flags);
+                Console.WriteLine("pinned=" + (probe.Invoke(null, new object[] { args[3] }) != null));
+                Console.WriteLine("dead=" + (probe.Invoke(null, new object[] { "https://127.0.0.1:1" }) != null));
             }
             else
             {
@@ -255,52 +263,136 @@ def _serve_config(body: bytes, tls: ssl.SSLContext | None = None) -> tuple[HTTPS
     return server, server.server_address[1]
 
 
-@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
-def test_launcher_recognizes_an_already_running_instance(tmp_path):
-    """端口上已有 DiceFrame 时启动器要接管它，而不是再 spawn 一个必然 10048 的后端。
+def _serve_identity(answer) -> tuple[HTTPServer, int]:
+    """按 ``answer(nonce)`` 回答 /api/system/launcher/identity 的本地服务。"""
 
-    事故现场：切换 HTTPS 后服务端 os.execv 换了 PID，上一个启动器退出时留下了
-    仍在监听 18000 的孤儿后端；之后每次双击都在 bind 上失败，窗口卡在启动画面。
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler 约定的方法名
+            parsed = urlparse(self.path)
+            nonce = parse_qs(parsed.query).get("nonce", [""])[0]
+            body = json.dumps(answer(nonce)).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, server.server_address[1]
+
+
+def _write_instance_key(data: Path, key: bytes) -> None:
+    folder = data / "_launcher"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "instance.json").write_text(
+        json.dumps({"schema": 1, "key": key.hex(), "data_dir": str(data)}), encoding="utf-8"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_only_trusts_a_backend_that_proves_it_belongs_to_this_install(tmp_path):
+    """接管端口上已有的后端之前必须通过实例握手：/api/config 里的 server_version
+    谁都能伪造，另一份安装也会有。只有拿本安装数据目录里的密钥签出 nonce 的后端才算。
     """
-    feature = _serve_config(b'{"server_version": "9.9.9", "min_client_version": "0.6.0"}')
-    other = _serve_config(b'{"hello": "world"}')
+    data = tmp_path / "data"
+    own_key = os.urandom(32)
+    other_key = os.urandom(32)
+    _write_instance_key(data, own_key)
+
+    def signer(key: bytes):
+        def answer(nonce: str) -> dict:
+            return {
+                "ok": True,
+                "boot_id": "boot-1",
+                "pid": 4242,
+                "version": "3.2.0",
+                "proof": identity_proof(key, nonce, "boot-1", 4242),
+            }
+
+        return answer
+
+    servers = {
+        "own": _serve_identity(signer(own_key)),
+        "other_install": _serve_identity(signer(other_key)),
+        # 拿到合法证明后改报 pid：证明绑定 pid，篡改即失效。
+        "tampered_pid": _serve_identity(lambda nonce: {**signer(own_key)(nonce), "pid": 1}),
+        "imitation": _serve_identity(
+            lambda nonce: {"server_version": "3.2.0", "boot_id": "b", "pid": 1, "proof": "0" * 64}
+        ),
+    }
     exe = tmp_path / "DiceFrame.exe"
     try:
         _compile_launcher(exe)
         script = (
             "$t = [Reflection.Assembly]::LoadFile($env:LAUNCHER_EXE).GetType('DiceFrameLauncher');"
             "$f = [Reflection.BindingFlags]'NonPublic,Static';"
+            "$t.GetField('launcherDataDir', $f).SetValue($null, $env:DATA_DIR);"
             "$t.GetMethod('InitLocalHttpClient', $f).Invoke($null, @()) | Out-Null;"
-            "$probe = $t.GetMethod('IsDiceFrameServer', $f);"
-            "@{"
-            " diceframe = [bool]$probe.Invoke($null, @($env:UP));"
-            " other = [bool]$probe.Invoke($null, @($env:OTHER));"
-            " dead = [bool]$probe.Invoke($null, @('http://127.0.0.1:1'))"
-            "} | ConvertTo-Json -Compress"
+            "$probe = $t.GetMethod('ProbeIdentity', $f);"
+            "$urls = $env:URLS | ConvertFrom-Json;"
+            "$out = @{};"
+            "foreach ($p in $urls.PSObject.Properties) {"
+            " $id = $probe.Invoke($null, @([string]$p.Value));"
+            " $out[$p.Name] = if ($id -eq $null) { $null } else { [int]$id.GetType().GetField('Pid').GetValue($id) } };"
+            "$out.dead = ($probe.Invoke($null, @('http://127.0.0.1:1')) -ne $null);"
+            "$out | ConvertTo-Json -Compress"
         )
+        urls = {name: f"http://127.0.0.1:{port}" for name, (_server, port) in servers.items()}
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            env={
-                **os.environ,
-                "LAUNCHER_EXE": str(exe),
-                "UP": f"http://127.0.0.1:{feature[1]}",
-                "OTHER": f"http://127.0.0.1:{other[1]}",
-            },
+            env={**os.environ, "LAUNCHER_EXE": str(exe), "DATA_DIR": str(data), "URLS": json.dumps(urls)},
             check=True,
             capture_output=True,
             text=True,
         )
     finally:
-        feature[0].shutdown()
-        other[0].shutdown()
+        for server, _port in servers.values():
+            server.shutdown()
 
     payload = json.loads(result.stdout)
-    # 公开配置里的 server_version 是 DiceFrame 的特征：据此复用已有实例。
-    assert payload["diceframe"] is True
-    # 别的服务占着端口时绝不能当成自己的实例接管。
-    assert payload["other"] is False
-    # 没人监听就是没人监听。
+    # 本安装的后端：接管，并拿到经过认证的 pid。
+    assert payload["own"] == 4242
+    # 另一份安装、篡改 pid、伪造元数据的服务：一律不认。
+    assert payload["other_install"] is None
+    assert payload["tampered_pid"] is None
+    assert payload["imitation"] is None
     assert payload["dead"] is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
+def test_launcher_instance_key_is_stable_but_not_shared_by_a_copied_install(tmp_path):
+    exe = tmp_path / "DiceFrame.exe"
+    _compile_launcher(exe)
+    data = tmp_path / "data"
+    data.mkdir()
+    instance = data / "_launcher" / "instance.json"
+    script = (
+        "$t = [Reflection.Assembly]::LoadFile($env:LAUNCHER_EXE).GetType('DiceFrameLauncher');"
+        "$f = [Reflection.BindingFlags]'NonPublic,Static';"
+        "$t.GetField('launcherDataDir', $f).SetValue($null, $env:DATA_DIR);"
+        "$t.GetMethod('EnsureInstanceKey', $f).Invoke($null, @($env:DATA_DIR)) | Out-Null"
+    )
+
+    def ensure() -> dict:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            env={**os.environ, "LAUNCHER_EXE": str(exe), "DATA_DIR": str(data)},
+            check=True,
+            capture_output=True,
+        )
+        return json.loads(instance.read_text(encoding="utf-8"))
+
+    first = ensure()
+    assert len(first["key"]) == 64
+    # 同一安装重复启动：密钥不变，孤儿后端仍能证明归属。
+    assert ensure()["key"] == first["key"]
+    # 整个文件夹被复制成另一份安装（记录的数据目录不是自己）：换一把，两边互不承认。
+    instance.write_text(json.dumps({**first, "data_dir": "D:\\elsewhere\\data"}), encoding="utf-8")
+    assert ensure()["key"] != first["key"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
@@ -322,7 +414,7 @@ def test_launcher_http_client_speaks_tls12_to_the_local_self_signed_server(tmp_p
     # 与后端一致：拒绝 TLS 1.0/1.1，只有 1.2 起步的握手能成功。
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert.cert_path, cert.key_path)
-    live = _serve_config(b'{"server_version": "3.2.0"}', tls=context)
+    live = _serve_config(b'{"ok": true, "version": "3.2.0", "pid": 4242, "boot_id": "b"}', tls=context)
 
     # 探针必须和真实启动器一样是裸 csc 产物：PowerShell 宿主的运行时默认
     # 已含 TLS 1.2，用它复现不了这次事故。

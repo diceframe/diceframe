@@ -13,6 +13,11 @@ TLS 1.2），以及大小写重复的环境变量会让子进程创建失败。�
 
 这里只做文件替换，不改用户的 HTTPS 配置、不削弱 TLS、不删除暂存 exe（旧启动器
 收尾时还要用它）。任何异常都降级为「沿用当前启动器」，绝不能影响后端启动。
+
+替换顺序保证任何一步失败都不会把安装目录的 DiceFrame.exe 留成残缺文件：先把新 exe
+完整复制到**同一目录**的临时文件并校验哈希（这一步可能慢、可能失败，但不碰原 exe），
+之后只剩两次同卷 rename——原 exe 改名为备份、临时文件改名为 DiceFrame.exe。
+第二次 rename 失败时按原 exe 的哈希核对现场，必要时用备份恢复。
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import shutil
 from pathlib import Path
 
@@ -37,6 +43,42 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _discard(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("无法清理启动器临时文件 %s：%s", path, exc)
+
+
+def _copy_verified(source: Path, target: Path, expected_digest: str) -> None:
+    """完整复制到 ``target`` 并落盘，再按哈希核对；任何不一致都按失败处理。"""
+
+    with source.open("rb") as reader, target.open("xb") as writer:
+        shutil.copyfileobj(reader, writer, 1024 * 1024)
+        writer.flush()
+        os.fsync(writer.fileno())
+    if _sha256(target) != expected_digest:
+        raise OSError("复制后的启动器与暂存文件不一致")
+
+
+def _restore_original(launcher: Path, backup: Path, original_digest: str, log: logging.Logger) -> None:
+    """切换失败后把 DiceFrame.exe 恢复成原文件：目标可能缺失，也可能是残缺/未知内容。"""
+
+    try:
+        if launcher.is_file() and _sha256(launcher) == original_digest:
+            return
+        if not backup.is_file() or _sha256(backup) != original_digest:
+            log.error("启动器切换失败且找不到可用备份，请重新解压安装包覆盖 DiceFrame.exe")
+            return
+        if launcher.exists():
+            launcher.unlink()
+        os.replace(backup, launcher)
+    except OSError as exc:
+        log.error("启动器切换失败后恢复原文件也失败：%s", exc)
 
 
 def _within(path: Path, parent: Path) -> bool:
@@ -83,25 +125,41 @@ def promote_pending_launcher(
         return False
 
     try:
-        if _sha256(staged) == _sha256(launcher):
-            return False  # 已经是这一版，避免反复重命名运行中的 exe。
+        staged_digest = _sha256(staged)
+        original_digest = _sha256(launcher)
     except OSError:
         return False
+    if staged_digest == original_digest:
+        return False  # 已经是这一版，避免反复重命名运行中的 exe。
 
+    # 临时文件必须与 DiceFrame.exe 同目录（同一文件系统），最后一步才是原子 rename。
+    temporary = root / f".{_LAUNCHER_NAME}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
     backup = root / _BACKUP_NAME
     try:
-        # Windows 允许重命名正在执行的 exe，但不允许就地覆写它。
+        _copy_verified(staged, temporary, staged_digest)
+    except OSError as exc:
+        active_log.warning("启动器提升失败（复制阶段），沿用当前启动器：%s", exc)
+        _discard(temporary)
+        return False
+
+    try:
+        # Windows 允许重命名正在执行的 exe，但不允许删除或就地覆写它：备份若是上次
+        # 改名留下、仍在运行的旧 exe，这里删不掉，直接放弃本次提升，原 exe 原封不动。
         if backup.exists():
             backup.unlink()
         os.replace(launcher, backup)
-        shutil.copy2(staged, launcher)
     except OSError as exc:
-        active_log.warning("启动器提升失败，沿用当前启动器：%s", exc)
-        try:
-            if not launcher.exists() and backup.exists():
-                os.replace(backup, launcher)
-        except OSError:
-            pass
+        active_log.warning("启动器提升失败（备份阶段），沿用当前启动器：%s", exc)
+        _discard(temporary)
+        _restore_original(launcher, backup, original_digest, active_log)
+        return False
+
+    try:
+        os.replace(temporary, launcher)
+    except OSError as exc:
+        active_log.warning("启动器提升失败（切换阶段），恢复原启动器：%s", exc)
+        _restore_original(launcher, backup, original_digest, active_log)
+        _discard(temporary)
         return False
 
     active_log.info("已将更新包中的启动器提前提升到安装根目录")
