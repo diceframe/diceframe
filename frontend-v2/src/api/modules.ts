@@ -1,5 +1,7 @@
 import { api } from '@/api/client'
 
+export type ModuleCapability = 'adventure' | 'rules' | 'ui' | 'materials'
+
 export type ModuleSummary = {
   id: string
   name: string
@@ -16,6 +18,8 @@ export type ModuleSummary = {
   lorebook_count: number
   // 已安装包声明的封面（包内相对路径，如 assets/cover.webp）；空表示没有。
   cover?: string
+  // 能力名牌（W1）：服务端按包的真实贡献推导；在线卡只给 profile 级事实。
+  capabilities?: ModuleCapability[]
 }
 
 export type ModulesResponse = {
@@ -90,6 +94,8 @@ export type ModuleMarketplaceItem = {
   content_profile: string
   content_delivery_mode: string
   adventure_count: number
+  // 能力名牌（W1）：远端索引只给 profile 级事实（如冒险模组）。
+  capabilities?: ModuleCapability[]
   ruleset_targets: string[]
   /** 清单里到底有没有声明 require.rulesets；false = 规则未标注（不是不兼容）。 */
   ruleset_declared?: boolean

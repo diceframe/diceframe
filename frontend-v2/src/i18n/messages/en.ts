@@ -61,6 +61,11 @@ export const en = {
   modulesAdventureModule: 'Adventure module',
   modulesContentPack: 'Content pack',
   modulesVersion: 'Version {version}',
+  // W1 capability badges
+  modulesCapabilityAdventure: 'Adventure',
+  modulesCapabilityRules: 'Rules',
+  modulesCapabilityUi: 'UI',
+  modulesCapabilityMaterials: 'Reference',
   modulesUpdateCta: 'Update available · Update',
   modulesUpdateFailed: 'Update was not completed',
   modulesAdventures: 'Adventures',

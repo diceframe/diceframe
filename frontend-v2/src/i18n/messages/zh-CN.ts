@@ -61,6 +61,11 @@ export const zhCN = {
   modulesAdventureModule: '冒险模组',
   modulesContentPack: '内容包',
   modulesVersion: '版本 {version}',
+  // W1 能力名牌
+  modulesCapabilityAdventure: '冒险',
+  modulesCapabilityRules: '规则',
+  modulesCapabilityUi: '界面',
+  modulesCapabilityMaterials: '资料',
   modulesUpdateCta: '有更新 · 更新',
   modulesUpdateFailed: '更新没有完成',
   modulesAdventures: '冒险',

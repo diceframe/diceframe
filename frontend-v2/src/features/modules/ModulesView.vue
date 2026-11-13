@@ -15,8 +15,8 @@ import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DOMPurify from 'dompurify'
-import { NTag } from 'naive-ui'
-import { CubeOutline } from '@vicons/ionicons5'
+import { NIcon, NTag } from 'naive-ui'
+import { ColorPaletteOutline, CubeOutline, MapOutline, OptionsOutline } from '@vicons/ionicons5'
 import type { PluginMarketplaceItem } from '@/api/types'
 import MarketplaceCard from '@/features/plugins/MarketplaceCard.vue'
 import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
@@ -208,6 +208,27 @@ function inventorySummary(module: ModuleSummary): string {
 // it uses the same card and Hub detail dialog as the plugin marketplace.
 function marketCardItem(item: ModuleMarketplaceItem): PluginMarketplaceItem {
   return { ...item, version: item.latest_version || item.version, plugin_type: 'content-pack', latest: { version: item.latest_version } }
+}
+
+// ---- W1 能力名牌与图标：数据来自服务端按包实际贡献推导的 capabilities。 ----
+const MODULE_CAPABILITY_KEYS: Record<string, MessageKey> = {
+  adventure: 'modulesCapabilityAdventure',
+  rules: 'modulesCapabilityRules',
+  ui: 'modulesCapabilityUi',
+  materials: 'modulesCapabilityMaterials',
+}
+function moduleCapabilityKey(capability: string): MessageKey {
+  return MODULE_CAPABILITY_KEYS[capability] ?? ('modulesCapabilityMaterials' as MessageKey)
+}
+function moduleIcon(module: ModuleSummary): typeof CubeOutline {
+  const caps = module.capabilities || []
+  if (caps.includes('adventure')) return MapOutline
+  if (caps.includes('rules')) return OptionsOutline
+  if (caps.includes('ui')) return ColorPaletteOutline
+  return CubeOutline
+}
+function marketIcon(item: ModuleMarketplaceItem): typeof CubeOutline {
+  return (item.capabilities || []).includes('adventure') ? MapOutline : CubeOutline
 }
 
 function openUrl(url?: string) {
@@ -555,7 +576,10 @@ async function checkRecovery() {
         >
           <span v-if="module.cover" class="module-card-art" aria-hidden="true"></span>
           <div>
-            <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
+            <p class="module-card-chips">
+              <NIcon :component="moduleIcon(module)" :size="18" class="module-card-icon" aria-hidden="true" />
+              <NTag v-for="cap in module.capabilities || []" :key="cap" size="small" round>{{ t(moduleCapabilityKey(cap)) }}</NTag>
+            </p>
             <h3>{{ module.name }}</h3>
             <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
             <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
@@ -668,7 +692,7 @@ async function checkRecovery() {
           v-for="item in sortedMarket"
           :key="item.id"
           :item="marketCardItem(item)"
-          :icon="CubeOutline"
+          :icon="marketIcon(item)"
           :type-label="moduleCategoryLabel(item, copy)"
           :show-hub-stats="Boolean(marketSource?.hub)"
           :has-newer-version="item.update_available"
@@ -683,6 +707,7 @@ async function checkRecovery() {
             <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.map(shortRuleset).join(' · ') }}</p>
           </template>
           <template #tags>
+            <NTag v-for="cap in item.capabilities || []" :key="`cap-${cap}`" size="small" type="info">{{ t(moduleCapabilityKey(cap)) }}</NTag>
             <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
             <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
             <NTag v-if="item.system_agnostic" size="small">{{ t('modulesRulesetAgnostic') }}</NTag>
@@ -786,6 +811,9 @@ async function checkRecovery() {
 .module-card > :not(.module-card-art) { position: relative; z-index: 1; }
 .module-card.has-cover:hover .module-card-art { filter: saturate(.96) contrast(1.06) brightness(1.05); transform: scale(1.05); }
 .module-card h3 { margin: 0; font-size: 1rem; }
+/* W1 能力名牌：标题上方的图标 + 能力 chips（冒险/规则/界面/资料）。 */
+.module-card-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .15rem; }
+.module-card-icon { display: inline-flex; color: var(--df-interactive-strong); }
 .module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
 .module-card dt { color: var(--df-text-muted); font-size: .85rem; }
 .module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
