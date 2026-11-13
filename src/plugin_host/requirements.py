@@ -166,3 +166,54 @@ def dependency_rows(
             "blockers": blockers,
         })
     return rows
+
+
+# ruleset_runtime 声明的合法字段与边界（T3：外部规则运行时插件）。
+_RULESET_RUNTIME_FIELDS = frozenset({"runtime_id", "runtime_version", "capabilities", "timeout_seconds"})
+_MAX_RULESET_RUNTIME_ID = 160
+_MAX_RULESET_TIMEOUT_SECONDS = 30.0
+
+
+def parse_ruleset_runtime_declaration(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the ``ruleset_runtime`` block of a ruleset-runtime plugin manifest.
+
+    只做**结构**校验（fail closed）：能力键的语义合法性由
+    ``RulesetCapabilities(**capabilities)`` 在构建 adapter 时裁决，未知能力键
+    会抛 TypeError 而不是被静默忽略。宿主不猜测能力语义。
+    """
+
+    declared = manifest.get("ruleset_runtime")
+    if not isinstance(declared, dict):
+        raise ValueError("ruleset-runtime 插件必须提供 ruleset_runtime 对象声明")
+    unknown = sorted(set(declared) - _RULESET_RUNTIME_FIELDS)
+    if unknown:
+        raise ValueError(f"ruleset_runtime has unknown field: {unknown[0]!r}")
+    runtime_id = str(declared.get("runtime_id") or "").strip()
+    if not runtime_id:
+        raise ValueError("ruleset_runtime.runtime_id is required")
+    if len(runtime_id) > _MAX_RULESET_RUNTIME_ID:
+        raise ValueError("ruleset_runtime.runtime_id is too long")
+    version = declared.get("runtime_version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("ruleset_runtime.runtime_version must be a positive integer")
+    capabilities = declared.get("capabilities", {})
+    if capabilities is None:
+        capabilities = {}
+    if not isinstance(capabilities, dict) or not all(isinstance(key, str) and key.strip() for key in capabilities):
+        raise ValueError("ruleset_runtime.capabilities must be a string-keyed object")
+    if not all(
+        isinstance(value, (bool, int, float, str, list)) or value is None
+        for value in capabilities.values()
+    ):
+        raise ValueError("ruleset_runtime.capabilities values must be JSON primitives")
+    timeout = declared.get("timeout_seconds", 5.0)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < float(timeout) <= _MAX_RULESET_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"ruleset_runtime.timeout_seconds must be within (0, {_MAX_RULESET_TIMEOUT_SECONDS}]"
+        )
+    return {
+        "runtime_id": runtime_id,
+        "runtime_version": int(version),
+        "capabilities": dict(capabilities),
+        "timeout_seconds": float(timeout),
+    }

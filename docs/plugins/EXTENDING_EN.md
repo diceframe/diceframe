@@ -49,9 +49,18 @@ This path does not require a `PluginHost` edit.
 3. A handler returns a JSON object containing `handled`, a replacement `payload`, or `outputs`. Outputs use host-validated text/card/image shapes and remain subject to path, count, and length limits.
 4. Follow `plugins/examples/bridge-customizer/` and test stage selection, priority, platform/kind filtering, and output validation.
 
-## E. A Genuinely New Plugin Type
+## E. Ruleset Runtime (external rules engine)
 
-First verify that the feature is not merely a new capability of content-pack, tool, provider, or bot-extension. Add a plugin type only when its process mode, lifecycle, or security semantics are genuinely different.
+1. Use `plugin_type: "ruleset-runtime"`; the host requires the `ruleset.execute` permission. The process speaks the RuntimeProbe JSON-lines stdio protocol (`protocol_version: 1`) — not the plugin JSON-RPC protocol.
+2. The manifest must declare a `ruleset_runtime` block: `runtime_id` (globally unique, must not shadow a builtin runtime), `runtime_version` (positive integer), `capabilities` (valid `RulesetCapabilities` fields; unknown keys fail closed when the adapter is built), and `timeout_seconds` (0–30).
+3. `entrypoint` is the stdio process command. The host's regular start/stop path does not spawn this process — the composition-root registry (`PluginRulesetRuntimeSource`) owns it: enabling registers the runtime and probes it, a failed probe leaves it unregistered, and disable/uninstall revokes the registration and terminates the child.
+4. Ship rule templates through `contributes.rules`; each template's `runtime` block binds to `ruleset_runtime.runtime_id`. An insufficient version raises `IncompatibleRulesetRuntimeError` on resolve.
+5. The runtime process must stay stateless: every settlement works on the instance state provided by the host, and `apply_event_batch` only appends to the ledger with per-batch dedup. Restart recovery relies on "host-persisted state + receipt idempotency".
+6. See `tests/test_plugin_ruleset_runtimes.py` (real zip install + real stdio child process + restart recovery loop).
+
+## F. A Genuinely New Plugin Type
+
+First verify that the feature is not merely a new capability of content-pack, tool, provider, bot-extension, or ruleset-runtime. Add a plugin type only when its process mode, lifecycle, or security semantics are genuinely different.
 
 Review each of these owners:
 

@@ -22,6 +22,7 @@ PROCESS_MODE_STATIC = "static"                # 无进程：内容包/主题
 PROCESS_MODE_RPC_TOOL = "rpc-tool"            # JSON-RPC stdio 进程：工具
 PROCESS_MODE_RPC_BRIDGE = "rpc-bridge"         # JSON-RPC stdio 进程：Bot Bridge 扩展
 PROCESS_MODE_RPC_PROVIDER = "rpc-provider"    # JSON-RPC stdio 进程：能力 Provider（生图等）
+PROCESS_MODE_RPC_RULESET = "rpc-ruleset"      # RuntimeProbe stdio 进程：外部规则运行时
 PROCESS_MODE_PLAIN_SUBPROCESS = "plain-subprocess"  # 普通进程（非 RPC）：渠道适配器
 PROCESS_MODE_NONE = "none"                     # 预留类型，无运行时
 
@@ -30,6 +31,7 @@ PROCESS_MODES = (
     PROCESS_MODE_RPC_TOOL,
     PROCESS_MODE_RPC_BRIDGE,
     PROCESS_MODE_RPC_PROVIDER,
+    PROCESS_MODE_RPC_RULESET,
     PROCESS_MODE_PLAIN_SUBPROCESS,
     PROCESS_MODE_NONE,
 )
@@ -141,6 +143,16 @@ PLUGIN_TYPE_SUPPORT: dict[str, PluginTypeDescriptor] = {
         "contributes": None,
         "filterable": True,
         "filter_order": 4,
+    },
+    "ruleset-runtime": {
+        "level": "supported",
+        "summary": "提供外部规则运行时进程（RuntimeProbe stdio）：建卡、权威结算、版本化状态桥；进程由组合根注册表持有，不在宿主常规启停路径中拉起",
+        "process_mode": PROCESS_MODE_RPC_RULESET,
+        "inferred_permissions": ["ruleset.execute"],
+        "required_permission": "ruleset.execute",
+        "contributes": {"rules": "rule"},
+        "filterable": True,
+        "filter_order": 7,
     },
     "bot-extension": {
         "level": "supported",

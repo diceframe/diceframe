@@ -203,11 +203,14 @@ def test_list_plugin_types_drives_frontend_filters():
     from src.plugin_host.support import list_plugin_types
     types = list_plugin_types()
     filterable = [t["id"] for t in types if t["filterable"]]
-    assert filterable == ["content-pack", "theme", "voice-pack", "tool", "channel-adapter", "provider"]
-    assert len(types) == 8
+    assert filterable == [
+        "content-pack", "theme", "voice-pack", "tool", "channel-adapter", "provider", "ruleset-runtime",
+    ]
+    assert len(types) == 9
     assert {t["id"] for t in types} == {
         "channel-adapter", "content-pack", "theme",
         "import-export", "provider", "tool", "bot-extension", "voice-pack",
+        "ruleset-runtime",
     }
 
 

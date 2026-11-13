@@ -42,6 +42,7 @@ from src.rulesets.builtin import (
     default_adventure_runtime_requirement,
     default_module_runtime_requirement,
 )
+from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
@@ -1281,6 +1282,26 @@ class WebAPI:
             package_validator=self.validate_module_package,
             content_module_guard=self.guard_module_mutation,
         )
+
+    def attach_plugin_ruleset_runtime_source(self, plugin_host: Any) -> dict[str, Any]:
+        """T3 组合根接线点：外部规则 runtime 插件 ↔ RulesetRuntimeRegistry。
+
+        构建同步桥、挂到 plugin_host 的生命周期通知上，并立即做一次初始
+        同步（启动期 ``discover()`` 早于本接线，不会触发通知）。返回初始
+        同步报告（registered/removed/failed），供启动日志与验收记录使用。
+        """
+
+        source = PluginRulesetRuntimeSource(self._ruleset_registry)
+        plugin_host.set_ruleset_runtime_listener(lambda: source.sync(plugin_host))
+        self._plugin_ruleset_runtime_source = source
+        return source.sync(plugin_host)
+
+    def close_plugin_ruleset_runtime_source(self) -> None:
+        """关闭同步桥持有的全部外部 runtime 子进程（组合根 teardown 调用）。"""
+
+        source = getattr(self, "_plugin_ruleset_runtime_source", None)
+        if source is not None:
+            source.close()
 
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)
