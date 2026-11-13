@@ -352,6 +352,19 @@ class AdventureBindingMigrationRuntime(Protocol):
 
 
 @runtime_checkable
+class RoundPromptRuntime(Protocol):
+    """Optional per-round prompt contributions owned by the ruleset runtime."""
+
+    def round_prompt_block(self, instance: Any) -> str:
+        """Text appended to the rule appendix of this round's GM system prompt."""
+        ...
+
+    def round_context_suffix(self, instance: Any) -> str:
+        """Text appended after this round's user context (closest to generation)."""
+        ...
+
+
+@runtime_checkable
 class RunLifecycleRuntime(Protocol):
     """Optional ruleset-owned initialization for a fresh playable run."""
 

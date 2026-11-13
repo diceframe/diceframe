@@ -10,6 +10,7 @@ from typing import Any
 from src.compat.characters import MAX_SKILL_EFFECT_CHARS
 from src.engine import module_hooks
 from src.engine.character_utils import is_conscious
+from src.engine.check_mechanics import check_mechanic_for
 from src.engine.checks import find_action_opponent
 from src.engine.currency import legacy_currency_spec
 from src.engine.dice import d20_dc_cap
@@ -379,6 +380,8 @@ def _npc_context(
 
 def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
     players = []
+    # 规则包注册的骰制可以给行动者条目补充自己的上下文字段。
+    registered_mechanic = check_mechanic_for(rule.dice_system if rule else "d20")
     for action in instance.action_queue:
         uid = str(action.get("user_id") or "")
         if uid not in instance.players:
@@ -403,6 +406,8 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
             "target_text": target_text,
             "item_context": _item_context(sheet, action_text, target_text),
         })
+        if registered_mechanic is not None:
+            players[-1].update(registered_mechanic.planner_actor_context(sheet))
         npc_context = _npc_context(instance, uid, action_text, target_text)
         if npc_context is not None:
             players[-1]["npc_context"] = npc_context
@@ -445,7 +450,7 @@ def _planner_context(instance: GameInstance, rule: RuleSystem | None) -> str:
         ],
         "currency_display_unit": currency_spec.display_unit,
     }
-    if dice_system == "d20":
+    if dice_system == "d20" or (registered_mechanic is not None and registered_mechanic.target_is_dc):
         ruleset["max_check_dc"] = d20_dc_cap(rule)
     else:
         if rule is not None and rule.percentile_difficulty_levels:

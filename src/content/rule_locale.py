@@ -7,7 +7,8 @@ from typing import Any
 
 _DISPLAY_FIELDS = frozenset({
     "rule_name", "name", "description", "attr_hint", "skill_hint",
-    "gm_prompt_appendix", "check_planner_appendix", "difficulty_instructions", "currency",
+    "gm_prompt_appendix", "check_planner_appendix", "narration_policy",
+    "difficulty_instructions", "currency",
 })
 _DISPLAY_STRING_FIELDS = _DISPLAY_FIELDS - {"difficulty_instructions"}
 _NESTED_DISPLAY_FIELDS = frozenset({"name", "description", "label", "hint", "flavor"})

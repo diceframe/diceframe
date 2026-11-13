@@ -1,0 +1,1191 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "利刃风暴",
+      "name": "利刃风暴",
+      "enabled": true,
+      "class": "weaponmaster",
+      "kind": "active",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "enemies",
+        "count": 2
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": true,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "近战攻击获得多重攻击（2），命中者吃武器伤害"
+    },
+    {
+      "id": "碎骨",
+      "name": "碎骨",
+      "enabled": true,
+      "class": "weaponmaster",
+      "kind": "active",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": true,
+      "choices": [
+        "daze",
+        "weak",
+        "mp"
+      ],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "近战命中后可不造成伤害：眩晕 / 虚弱 / 失去技能等级×10 MP"
+    },
+    {
+      "id": "破防打击",
+      "name": "破防打击",
+      "enabled": true,
+      "class": "weaponmaster",
+      "kind": "active",
+      "mp": 5,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": true,
+      "choices": [
+        "shield",
+        "armor",
+        "vulnerable"
+      ],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "5 MP：单体近战，命中后不造成伤害：毁盾 / 毁甲 / 到下次行动前所有伤害 +技能等级×2"
+    },
+    {
+      "id": "反击",
+      "name": "反击",
+      "enabled": true,
+      "class": "weaponmaster",
+      "kind": "reaction",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "counter",
+      "spell": {},
+      "text": "敌人近战攻击后，若命中检定结算值为偶数，可对其顺势攻击（高值视为 0）"
+    },
+    {
+      "id": "近战武器精通",
+      "name": "近战武器精通",
+      "enabled": true,
+      "class": "weaponmaster",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "attack_bonus": "level",
+        "weapon": "melee"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "近战武器命中检定 +技能等级"
+    },
+    {
+      "id": "弹幕射击",
+      "name": "弹幕射击",
+      "enabled": true,
+      "class": "sharpshooter",
+      "kind": "active",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "enemies",
+        "count": 2
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": true,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "远程攻击获得多重攻击（2），命中者吃武器伤害"
+    },
+    {
+      "id": "干涉火力",
+      "name": "干涉火力",
+      "enabled": true,
+      "class": "sharpshooter",
+      "kind": "reaction",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "intercept",
+      "spell": {},
+      "text": "看见远程攻击后，消耗 5+命中结算值 MP 使其自动失败；大成功无效"
+    },
+    {
+      "id": "鹰眼",
+      "name": "鹰眼",
+      "enabled": true,
+      "class": "sharpshooter",
+      "kind": "active",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "self",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": true,
+      "no_damage": false,
+      "choices": [],
+      "effects": [
+        {
+          "type": "buff",
+          "stat": "damage",
+          "value": 3,
+          "duration": 1,
+          "scale": "level"
+        }
+      ],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "防御且不掩护时：本场景下一次远程攻击 +技能等级×3 伤害"
+    },
+    {
+      "id": "远程武器精通",
+      "name": "远程武器精通",
+      "enabled": true,
+      "class": "sharpshooter",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "attack_bonus": "level",
+        "weapon": "ranged"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "远程武器命中检定 +技能等级"
+    },
+    {
+      "id": "威慑射击",
+      "name": "威慑射击",
+      "enabled": true,
+      "class": "sharpshooter",
+      "kind": "active",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": true,
+      "choices": [
+        "shaken",
+        "slow",
+        "mp"
+      ],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "远程命中后可不造成伤害：动摇 / 迟缓 / 失去技能等级×10 MP"
+    },
+    {
+      "id": "暗影击",
+      "name": "暗影击",
+      "enabled": true,
+      "class": "darkblade",
+      "kind": "active",
+      "mp": 0,
+      "hp": -1,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [
+        {
+          "type": "damage",
+          "bonus": 0,
+          "damage_type": "dark"
+        }
+      ],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "行动：掷力量骰，失去等量 HP；未归零则武器顺势攻击，命中额外 +技能等级+力量骰，全部暗属性"
+    },
+    {
+      "id": "痛楚",
+      "name": "痛楚",
+      "enabled": true,
+      "class": "darkblade",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "heal_on_damage": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "每回合一次：对羁绊生物造成伤害后，回复技能等级×2 HP/MP"
+    },
+    {
+      "id": "身负黑血",
+      "name": "身负黑血",
+      "enabled": true,
+      "class": "darkblade",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "crisis_resist": [
+          "dark",
+          "poison"
+        ]
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "危机中，对暗、毒伤害抵抗"
+    },
+    {
+      "id": "黑暗之心",
+      "name": "黑暗之心",
+      "enabled": true,
+      "class": "darkblade",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "crisis_bond": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "每场景一次：进入危机时可对一生物建立憎恨羁绊"
+    },
+    {
+      "id": "苦痛教训",
+      "name": "苦痛教训",
+      "enabled": true,
+      "class": "darkblade",
+      "kind": "reaction",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "painful_lesson",
+      "spell": {},
+      "text": "失去 HP 后，立即对来源执行调查顺势行动，+技能等级"
+    },
+    {
+      "id": "保镖",
+      "name": "保镖",
+      "enabled": true,
+      "class": "guardian",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "cover_resist": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "防御并为他人掩护时，该生物对所有伤害抵抗到你的下回合"
+    },
+    {
+      "id": "防御精通",
+      "name": "防御精通",
+      "enabled": true,
+      "class": "guardian",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "damage_reduction": "level"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "装备盾/职业防具时，受到的所有伤害 -技能等级（先于相性）"
+    },
+    {
+      "id": "双盾战士",
+      "name": "双盾战士",
+      "enabled": true,
+      "class": "guardian",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "dual_shield": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "主手可装备盾；双盾可当双手格斗武器（力+力，高值+5）"
+    },
+    {
+      "id": "铁壁",
+      "name": "铁壁",
+      "enabled": true,
+      "class": "guardian",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "max_hp": "level*3"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "最大 HP +技能等级×3"
+    },
+    {
+      "id": "挺身守护",
+      "name": "挺身守护",
+      "enabled": true,
+      "class": "guardian",
+      "kind": "reaction",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "guard",
+      "spell": {},
+      "text": "代替他人承受一次攻击/法术/险情；冲突中每轮一次"
+    },
+    {
+      "id": "元素魔法",
+      "name": "元素魔法",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "spell",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "ins",
+          "wlp"
+        ],
+        "dl": "mdef"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {
+        "damage_type": "fire",
+        "bonus": 15,
+        "offensive": true,
+        "elements": [
+          "fire",
+          "ice",
+          "lightning",
+          "light",
+          "dark"
+        ]
+      },
+      "text": "施放元素攻击法术：洞察+意志 vs 魔防，高值+15 元素伤害（默认火）"
+    },
+    {
+      "id": "天灾骤降",
+      "name": "天灾骤降",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "spell_boost": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "瞬发法术可将 MP 提高至多技能等级×10，每多 10 MP 伤害 +5"
+    },
+    {
+      "id": "魔法炮击",
+      "name": "魔法炮击",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "spell_bonus": "level*2"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "装备魔法武器时，攻击法术施法检定 +技能等级×2"
+    },
+    {
+      "id": "以械引咒",
+      "name": "以械引咒",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "spell_weapon_check": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "单体攻击法术可用武器命中算式替代施法检定；含敏捷时 +技能等级"
+    },
+    {
+      "id": "元素系仪式",
+      "name": "元素系仪式",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "ritual": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "可启动元素学派仪式（洞察+意志）"
+    },
+    {
+      "id": "灵光洞见",
+      "name": "灵光洞见",
+      "enabled": true,
+      "class": "loremaster",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "investigate_questions": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "调查检定掷出 13+ 时，可向 GM 提出至多技能等级个与调查对象有关的问题"
+    },
+    {
+      "id": "治疗",
+      "name": "治疗",
+      "enabled": true,
+      "class": "spiritist",
+      "kind": "spell",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "self_or_ally",
+        "count": 3
+      },
+      "check": {
+        "attributes": [
+          "ins",
+          "wlp"
+        ],
+        "dl": "mdef"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {
+        "heal": 40
+      },
+      "text": "法术：至多 3 个生物，每个 10 MP，各恢复 40 HP"
+    },
+    {
+      "id": "鼓舞",
+      "name": "鼓舞",
+      "enabled": true,
+      "class": "orator",
+      "kind": "active",
+      "mp": 5,
+      "hp": 0,
+      "target": {
+        "scope": "ally",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "ins",
+          "wlp"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": true,
+      "no_damage": false,
+      "choices": [],
+      "effects": [
+        {
+          "type": "heal",
+          "scale": "level*10"
+        },
+        {
+          "type": "buff",
+          "stat": "attribute_die_up",
+          "target": "ally",
+          "value": 1,
+          "duration": 2
+        }
+      ],
+      "passive": {},
+      "reaction": "",
+      "spell": {},
+      "text": "5 MP：一名盟友恢复技能等级×10 HP，选择一项属性骰等级 +1 到你的下回合"
+    },
+    {
+      "id": "光耀术",
+      "name": "光耀术",
+      "enabled": true,
+      "class": "spiritist",
+      "kind": "spell",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "enemies",
+        "count": 3
+      },
+      "check": {
+        "attributes": [
+          "ins",
+          "wlp"
+        ],
+        "dl": "mdef"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {
+        "damage_type": "light",
+        "bonus": 15,
+        "offensive": true
+      },
+      "text": "法术：至多 3 个生物，每个 10 MP，造成高值+15 光系伤害"
+    },
+    {
+      "id": "元素武器",
+      "name": "元素武器",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "spell",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "self",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "ins",
+          "wlp"
+        ],
+        "dl": "mdef"
+      },
+      "multiattack": false,
+      "no_check": true,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {
+        "weapon_element": true,
+        "elements": [
+          "wind",
+          "lightning",
+          "ice",
+          "fire",
+          "earth"
+        ]
+      },
+      "text": "法术：10 MP，为一件武器注入元素（风/雷/冰/火/土），伤害类型变为所选元素"
+    },
+    {
+      "id": "翱翔击",
+      "name": "翱翔击",
+      "enabled": true,
+      "class": "elementalist",
+      "kind": "spell",
+      "mp": 10,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "dex",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {},
+      "reaction": "",
+      "spell": {
+        "weapon_attack": true,
+        "bonus": 5
+      },
+      "text": "法术：10 MP，用近战武器顺势攻击，伤害 +5，可攻击飞行目标"
+    },
+    {
+      "id": "药剂雨",
+      "name": "药剂雨",
+      "enabled": true,
+      "class": "tinkerer",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "potion_splash": true
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "制造的恢复药剂可额外影响至多技能等级个生物（恢复量减半）"
+    },
+    {
+      "id": "肾上腺素",
+      "name": "肾上腺素",
+      "enabled": true,
+      "class": "fury",
+      "kind": "passive",
+      "mp": 0,
+      "hp": 0,
+      "target": {
+        "scope": "enemy",
+        "count": 1
+      },
+      "check": {
+        "attributes": [
+          "mig",
+          "mig"
+        ],
+        "dl": "defense"
+      },
+      "multiattack": false,
+      "no_check": false,
+      "no_damage": false,
+      "choices": [],
+      "effects": [],
+      "passive": {
+        "crisis_damage": "level*2"
+      },
+      "reaction": "",
+      "spell": {},
+      "text": "危机状态时，造成的伤害 +技能等级×2"
+    },
+    {
+      "id": "monster:雷击",
+      "name": "雷击",
+      "class": "monster",
+      "enabled": true,
+      "scope": "players",
+      "damage_type": "lightning",
+      "bonus": 5,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:凝视",
+      "name": "凝视",
+      "class": "monster",
+      "enabled": true,
+      "scope": "players",
+      "status": "shaken",
+      "duration": 2,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:火球术",
+      "name": "火球术",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "fire",
+      "bonus": 5,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:号令",
+      "name": "号令",
+      "class": "monster",
+      "enabled": true,
+      "scope": "self",
+      "buff": {
+        "stat": "damage",
+        "value": 2,
+        "duration": 2
+      },
+      "cooldown": 4
+    },
+    {
+      "id": "monster:大地震击",
+      "name": "大地震击",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "earth",
+      "bonus": 4,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:烈焰吐息",
+      "name": "烈焰吐息",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "fire",
+      "bonus": 4,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:毒刃",
+      "name": "毒刃",
+      "class": "monster",
+      "enabled": true,
+      "scope": "players",
+      "damage_type": "physical",
+      "bonus": 3,
+      "status": "poisoned",
+      "duration": 2,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:钟鸣",
+      "name": "钟鸣",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "dark",
+      "bonus": 5,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:暗影爆发",
+      "name": "暗影爆发",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "dark",
+      "bonus": 6,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:撼地",
+      "name": "撼地",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "physical",
+      "bonus": 5,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:乱刀",
+      "name": "乱刀",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "physical",
+      "bonus": 2,
+      "cooldown": 3
+    },
+    {
+      "id": "monster:碎地重击",
+      "name": "碎地重击",
+      "class": "monster",
+      "enabled": true,
+      "scope": "all_players",
+      "damage_type": "physical",
+      "bonus": 6,
+      "cooldown": 3
+    }
+  ]
+}

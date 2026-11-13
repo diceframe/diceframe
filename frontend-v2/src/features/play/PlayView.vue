@@ -64,7 +64,12 @@ import CheckModePanel from '@/features/play/check-modes/CheckModePanel.vue'
 import AdventurePanel from '@/components/play/AdventurePanel.vue'
 import RulesetCharacterCenterHost from '@/features/rulesets/RulesetCharacterCenterHost.vue'
 import RulesetPlayHost from '@/features/rulesets/RulesetPlayHost.vue'
-import { resolveRulesetPlayExtension } from '@/features/rulesets/registry'
+import {
+  hasRulesetClockControls,
+  resolveRulesetPlayExtension,
+  resolveRulesetSidebarPanel,
+  resolveRulesetTimelinePanel,
+} from '@/features/rulesets/registry'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { fileToBase64, resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
 import { fetchRulesetAvailableActions } from '@/api/rulesets'
@@ -286,6 +291,9 @@ const canAskKp = computed(() => Boolean(
 ))
 const rulesetRefreshKey = ref(0)
 const adventureRefreshKey = ref(0)
+const activeRulesetRuntimeId = computed(() => String(game.detail.value?.ruleset_runtime?.id || ''))
+const rulesetSidebarPanel = computed(() => resolveRulesetSidebarPanel(activeRulesetRuntimeId.value))
+const rulesetTimelinePanel = computed(() => resolveRulesetTimelinePanel(activeRulesetRuntimeId.value))
 watch(
   () => [game.detail.value?.round_number, game.log.value] as const,
   () => { adventureRefreshKey.value += 1 },
@@ -1388,14 +1396,26 @@ function onPlayKeydown(event: KeyboardEvent) {
           :docked="characterDocked"
           :portrait-editable="canEditOwnPortrait"
           :show-advanced-center="hasRulesAwareCharacters"
+          :is-gm="game.isGm.value"
+          :clock-controls="game.isGm.value && hasRulesetClockControls(activeRulesetRuntimeId)"
           @lore-click="onLoreClick"
           @open-map="openMap"
           @toggle-sidebar="toggleCharacterSidebar"
           @portrait-click="openPortraitEditor"
           @allocate-level-up="allocateLevelUp"
           @open-character-center="openCharacterCenter"
+          @changed="game.refresh(true)"
         >
           <template #after-character>
+            <component
+              :is="rulesetSidebarPanel"
+              v-if="rulesetSidebarPanel"
+              :detail="game.detail.value"
+              :player="game.player.value"
+              :players="game.players.value"
+              :is-gm="game.isGm.value"
+              @changed="game.refresh(true)"
+            />
             <ResourceRecoveryPanel
               ref="resourceRecoveryPanel"
               :game-key="game.currentGame.value"
@@ -1536,7 +1556,11 @@ function onPlayKeydown(event: KeyboardEvent) {
           @refresh="game.refresh"
           @luck="onLuckDecision"
           @reveal="onCheckReveal"
-        />
+        >
+          <template v-if="rulesetTimelinePanel" #ruleset-log>
+            <component :is="rulesetTimelinePanel" :detail="game.detail.value" />
+          </template>
+        </GameTimeline>
 
         <EconomyProposalCard
           v-if="pendingPay"

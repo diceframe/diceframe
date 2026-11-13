@@ -25,6 +25,8 @@ const props = withDefaults(defineProps<{
 }>(), { animate: false, canDecideLuck: false, busy: false, clickMode: false, reveal: null, canReveal: false, revealerName: '' })
 const emit = defineEmits<{ luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult]; refresh: [] }>()
 const { t, locale } = useLocale()
+// 「两枚骰子相加」的骰制由结果里的 dice_pair 标识；本组件不认具体规则名。
+const isDicePair = computed(() => Array.isArray(props.check.dice_pair) && props.check.dice_pair.length === 2)
 // 点击揭示模式下：服务端结果已权威落盘，这里只做共享揭示的表现遮罩。
 // 不遮蔽数据本身（时间线公开结果），未揭示也不阻塞任何流程。
 // 点击模式只有服务端的共享标记能翻开；未点击不会计时，也不阻塞规则推进。
@@ -91,6 +93,18 @@ const statusLabel = computed(() => ({
 })[status.value])
 const math = computed(() => {
   const check = props.check
+  if (isDicePair.value) {
+    // 两枚属性骰相加的骰制：DL 而不是 DC，并单独展示伤害用的高值。
+    const rolls = (check.rolls || []).filter((value): value is number => typeof value === 'number')
+    const pair = rolls.length ? rolls.join('+') : String(check.roll ?? '')
+    const diceLabel = `d${check.dice_a ?? '?'}+d${check.dice_b ?? '?'}`
+    const modifier = Number(check.modifier || 0)
+    const modifierText = modifier ? ` ${modifier > 0 ? '+' : '-'} ${Math.abs(modifier)}` : ''
+    const total = typeof check.total === 'number' ? ` = ${check.total}` : ''
+    const dc = typeof check.dc === 'number' ? ` / DL ${check.dc}` : ''
+    const high = typeof check.high_roll === 'number' ? `（高值 ${check.high_roll}）` : ''
+    return `${diceLabel} = ${pair}${modifierText}${total}${dc}${high}`
+  }
   if (typeof check.threshold === 'number') {
     const own = `${check.dice || 'd100'}=${check.roll} / ${check.threshold}`
     const opposed = check.opposed
@@ -117,6 +131,8 @@ const diceChips = computed<{ value: number; taken: boolean }[]>(() => {
   const rolls = (props.check.rolls?.length ? props.check.rolls : [props.check.roll])
     .filter((value): value is number => typeof value === 'number')
   if (rolls.length < 2) return []
+  // 两枚骰子都计入总和时，没有“取其中一枚”的语义。
+  if (isDicePair.value) return rolls.map((value) => ({ value, taken: false }))
   // 找不到权威 roll 时不标记任何一枚，避免把异常数据展示成确定的裁定。
   const takenIndex = rolls.findIndex((value) => value === props.check.roll)
   return rolls.map((value, index) => ({ value, taken: index === takenIndex }))
@@ -167,6 +183,13 @@ onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.c
     <button v-if="revealed && !pendingDecision" class="tray-toggle" data-testid="dice-tray-toggle" type="button" :aria-expanded="showTray" @click="toggleTray">{{ showTray ? trayCopy.hide : trayCopy.show }}</button>
     <div v-show="showTray" class="tray-presentation"><DiceTray :check="check" :revealed="revealed" :rolling="!revealed && !pendingClickReveal" :animate-reveal="recentReveal" /></div>
     <p v-if="revealed" class="check-math">{{ math }}</p>
+    <div v-if="revealed && (check.opportunity?.length || check.fumble_opportunity?.length)" class="check-opportunity">
+      <strong>{{ check.opportunity?.length ? t('checkOpportunityTitle') : t('checkFumbleOpportunityTitle') }}</strong>
+      <ul>
+        <li v-for="(item, index) in (check.opportunity?.length ? check.opportunity : check.fumble_opportunity)" :key="index">{{ item }}</li>
+      </ul>
+      <p class="check-opportunity-hint">{{ t('checkOpportunityHint') }}</p>
+    </div>
     <div v-if="revealed" class="check-reveal-footer">
       <details>
         <summary>{{ t('checkDetails') }}</summary>
@@ -242,6 +265,10 @@ onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.c
 .failure .check-verdict,.fumble .check-verdict{color:var(--df-danger)}
 .critical .check-verdict{color:var(--df-accent-strong)}
 .check-math{margin:8px 0 2px;font-variant-numeric:tabular-nums}
+.check-opportunity{margin-top:8px;padding:8px 10px;border:1px solid var(--df-border-soft);border-radius:6px;font-size:12px}
+.check-opportunity strong{display:block;margin-bottom:4px;color:var(--df-accent-strong)}
+.check-opportunity ul{margin:0;padding-left:16px;line-height:1.6}
+.check-opportunity-hint{margin:6px 0 0;color:var(--df-text-muted)}
 .check-reveal-footer{display:flex;align-items:flex-start;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--df-border-soft)}
 details{min-width:0;flex:1;margin:0;color:var(--df-text-muted);font-size:12px;line-height:1.7;overflow-wrap:anywhere}
 details span{display:block;margin-top:5px}

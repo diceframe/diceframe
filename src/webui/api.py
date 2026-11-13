@@ -1738,6 +1738,10 @@ class WebAPI:
         )
         return self._load_rule_by_id(rule_id, language)
 
+    def rule_for_game(self, inst) -> RuleSystem | None:
+        """存档当前使用的规则；路由经这里读取，不直接碰私有加载器。"""
+        return self._load_rule_for_game(inst)
+
     def _load_runtime_for_game(self, inst):
         rule = self._load_rule_for_game(inst)
         return self._ruleset_registry.resolve(rule.template) if rule else None

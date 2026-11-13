@@ -131,6 +131,10 @@ def register_games(app: web.Application) -> None:
     register_check_decisions(app)
     from src.webui.routes.game_preferences import register as register_game_preferences
     register_game_preferences(app)
+    from src.webui.routes.fu_content import register as register_fu_content
+    register_fu_content(app)
+    from src.webui.routes.character_progress import register as register_character_progress
+    register_character_progress(app)
     app.router.add_get("/api/games", api_games)
     app.router.add_post("/api/games/import", api_import_game)
     app.router.add_get("/api/games/{game_key}", api_detail)

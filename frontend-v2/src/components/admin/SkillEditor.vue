@@ -21,12 +21,18 @@ const skills = computed<CharacterSkill[]>({
 })
 const pool = computed(() => props.pool || [])
 function poolName(s: string | SkillSpec) { return typeof s === 'string' ? s : s.name || s.key || '' }
+// 有技能池时，名称走下拉；保留卡上已有但不在池里的自定义技能作为额外选项。
+const poolNames = computed(() => Array.from(new Set(pool.value.map(poolName).filter(Boolean))))
 
 function add(name?: string) {
-  // 「超出基础值才计点」的规则（CoC）新技能从基础值起步；其它规则保持旧的 20。
+  // 「超出基础值才计点」的规则（CoC）新技能从基础值起步；其余规则的默认值跟随
+  // 规则声明的总点数与技能数上限（点数紧的规则默认较小），未声明时保持旧的 20。
+  const suggested = skillPointTotal.value && maxSkills.value
+    ? Math.floor(skillPointTotal.value / maxSkills.value)
+    : 20
   const value = name && props.meta?.skill_point_spend_mode === 'above_base'
     ? skillBaseValue(name, props.meta, props.attributes)
-    : 20
+    : Math.max(1, Math.min(20, maxSkillValue.value || 20, suggested))
   skills.value = [...skills.value, { name: name || '', value }]
 }
 function remove(i: number) {
@@ -86,7 +92,16 @@ const skillOverLimit = computed(() =>
     </p>
     <div v-for="(s, i) in skills" :key="i" class="skill-block">
       <div class="skill-row">
-        <input :value="s.name" :placeholder="t('skillName')" @input="updateName(i, ($event.target as HTMLInputElement).value)">
+        <select
+          v-if="poolNames.length"
+          :value="s.name"
+          :aria-label="t('skillName')"
+          @change="updateName(i, ($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="s.name && !poolNames.includes(s.name)" :value="s.name">{{ s.name }}</option>
+          <option v-for="name in poolNames" :key="name" :value="name">{{ name }}</option>
+        </select>
+        <input v-else :value="s.name" :placeholder="t('skillName')" @input="updateName(i, ($event.target as HTMLInputElement).value)">
         <input type="number" :value="s.value" min="0" :class="{ warn: maxSkillValue && (Number(s.value || 0) || 0) > maxSkillValue }" @input="updateVal(i, Number(($event.target as HTMLInputElement).value))">
         <button
           type="button"

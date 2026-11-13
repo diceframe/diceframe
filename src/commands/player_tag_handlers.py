@@ -43,6 +43,25 @@ def _hp(value: str, result: dict, _limits: dict) -> None:
             _set_int_change(result, uid, "hp_change", parsed)
 
 
+def _bonus(value: str, result: dict, _limits: dict) -> None:
+    """下一次检定加值：BONUS:玩家ID:数值[:原因]。
+
+    只写入角色卡的 ``pending_check_bonus``；是否消费、何时消费由当前规则的
+    检定机制决定（未声明该机制的规则不会用到它）。
+    """
+    if split := _split(value):
+        uid, change = split
+        raw_amount, _, reason = change.partition(":")
+        parsed = _parse_int(raw_amount.strip(), tag="BONUS", uid=uid)
+        if parsed is None or parsed <= 0:
+            logger.warning("BONUS 加值无效，已忽略: %s = %s", uid, change)
+            return
+        update = _player_update(result, uid)
+        update["pending_check_bonus"] = min(20, parsed)
+        if reason.strip():
+            update["pending_check_bonus_reason"] = reason.strip()[:120]
+
+
 def _reward(value: str, result: dict, _limits: dict, *, tag: str = "REWARD", source: str = "narrative_reward_tag") -> None:
     if split := _split(value):
         uid, change = split
@@ -271,6 +290,7 @@ PLAYER_TAG_HANDLERS: dict[str, PlayerTagHandler] = {
     "MANA": _mana,
     "REVIVE": _revive,
     "STAT": _stat,
+    "BONUS": _bonus,
 }
 
 

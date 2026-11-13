@@ -15,6 +15,7 @@ from src.engine.checks import (
     resolve_check_request,
     roll_check_request,
 )
+from src.engine.check_mechanics import check_mechanic_for, request_dice_system
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
 from src.engine.modules.check_modes import apply_grant
@@ -169,7 +170,7 @@ class DiceResolver:
             "required": True,
             "actor_uid": uid,
             "actor_name": str(instance.players.get(uid, {}).get("character_name") or uid),
-            "dice_system": "d100" if rule.dice_system == "d100" else "d20",
+            "dice_system": request_dice_system(rule.dice_system),
             "label": "检定",
             "skill": str(action.get("selected_skill") or ""),
             "attribute": attribute,
@@ -177,6 +178,16 @@ class DiceResolver:
             "advantage_note": None,
             "planner_source": "legacy",
         }
+        mechanic = check_mechanic_for(rule.dice_system)
+        if mechanic is not None:
+            sheet = instance.get_character_sheet(uid)
+            attributes = sheet.get("attributes")
+            request.update(mechanic.request_fields(
+                rule=rule,
+                sheet_attributes=attributes if isinstance(attributes, dict) else {},
+                attribute=attribute,
+                action=action,
+            ))
         if rule.advantage_mechanic.get("type") in {"coc_bonus_penalty", "d20_keep_high_low"}:
             apply_grant(instance, request, f"round:{progression_state.round_value(instance)}")
         return request
@@ -261,6 +272,12 @@ class DiceResolver:
             })
 
         rolls = list(check.get("rolls") or [check.get("roll")])
+        mechanic = check_mechanic_for(check.get("dice"))
+        if mechanic is not None:
+            # 注册骰制自己描述结果；返回空串时沿用下面的通用格式。
+            custom = mechanic.result_prompt(instance, check)
+            if custom:
+                return custom
         mode = str(check.get("advantage_mode") or "")
         if mode == "advantage":
             roll_label = f"d20优势={rolls} 取 {check['roll']}"

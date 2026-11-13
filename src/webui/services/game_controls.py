@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from src.engine.check_mechanics import check_mechanic_for
 from src.engine.checks import build_check_request, roll_check_request
 from src.engine.dice import d20_critical_thresholds, roll
 from src.engine.game_instance import GameState
@@ -237,6 +238,10 @@ class GameControlService:
         dice_system = str(rule.dice_system if rule else "d20").lower()
         if dice_system == "none":
             return {"ok": False, "error": "当前规则不需要掷骰"}
+        mechanic = check_mechanic_for(dice_system)
+        refusal = mechanic.manual_roll_refusal(instance.language) if mechanic is not None else None
+        if refusal is not None:
+            return refusal
         formula = "d100" if dice_system == "d100" else "d20"
         result = roll(formula)
         if dice_system == "d20":

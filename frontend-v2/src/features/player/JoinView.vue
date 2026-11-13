@@ -102,6 +102,26 @@ const inferredAttrTotal = computed(() => attrs.value.reduce((sum, attr) => {
 const attrLimit = computed(() => attrTotal.value || Number(ruleMeta.value.attribute_points || 0) || inferredAttrTotal.value)
 const attrRemaining = computed(() => Math.max(attrLimit.value, attrSum.value) - attrSum.value)
 const attrOverLimit = computed(() => Boolean(attrLimit.value && attrSum.value > attrLimit.value))
+// 双职业建卡：规则声明 class_levels_total>1 时，加入页也用两个职业 + 等级分配。
+const ruleClasses = ref<string[]>([])
+const classLevelsTotal = computed(() => Number(ruleMeta.value.class_levels_total || 0))
+const dualClass = computed(() => classLevelsTotal.value > 1 && ruleClasses.value.length >= 2)
+const classA = ref('')
+const classB = ref('')
+const levelA = ref(1)
+const levelB = computed(() => Math.max(0, classLevelsTotal.value - levelA.value))
+function syncClassLabel() {
+  if (!dualClass.value) return
+  const total = classLevelsTotal.value
+  levelA.value = Math.min(Math.max(1, Number(levelA.value) || 1), total - 1)
+  form.value.class = `${classA.value} ${levelA.value} / ${classB.value} ${total - levelA.value}`
+}
+watch([classA, classB, levelA, dualClass, classLevelsTotal], syncClassLabel, { immediate: true })
+watch(ruleClasses, (list) => {
+  if (!list.length) return
+  if (!classA.value || !list.includes(classA.value)) classA.value = list[0]
+  if (!classB.value || !list.includes(classB.value)) classB.value = list[1] || list[0]
+}, { immediate: true })
 const maxSkills = computed(() => Number(ruleMeta.value.max_skills || 0))
 const skillPointTotal = computed(() => skillPointBudget(ruleMeta.value, form.value.attributes || {}))
 const maxSkillValue = computed(() => Number(ruleMeta.value.max_skill_value || 0))
@@ -274,6 +294,7 @@ async function loadGameData() {
     partyPlayers.value = c.players || []
     attrs.value = c.rule_attrs?.length ? c.rule_attrs : fallbackAttrs.value
     ruleMeta.value = c.rule_meta || {}
+    ruleClasses.value = Array.isArray(c.rule_classes) ? c.rule_classes as string[] : []
     rulesetRuntime.value = c.ruleset_runtime || null
     attrTotal.value = Number(c.rule_attrs_total || ruleMeta.value.attribute_points || 0) || inferredAttrTotal.value
     form.value.attributes = suggestedAttributes(attrs.value, attrLimit.value)
@@ -419,6 +440,7 @@ async function applyCard(event: Event) {
 async function create() {
   busy.value = true; error.value = ''
   try {
+    syncClassLabel()
     const payload = {
       ...form.value,
       hp: form.value.hp === '' ? undefined : Number(form.value.hp),
@@ -530,7 +552,21 @@ async function create() {
         <div class="two-cols">
           <label>{{ t('characterName') }}<input v-model="form.character_name" maxlength="40"></label>
           <label>{{ t('race') }}<input v-model="form.race"></label>
-          <label>{{ t('classRole') }}<input v-model="form.class"></label>
+          <template v-if="dualClass">
+            <label>{{ t('classRole') }} 1
+              <select v-model="classA">
+                <option v-for="name in ruleClasses" :key="'a-' + name" :value="name">{{ name }}</option>
+              </select>
+            </label>
+            <label>{{ t('classRole') }} 2
+              <select v-model="classB">
+                <option v-for="name in ruleClasses" :key="'b-' + name" :value="name">{{ name }}</option>
+              </select>
+            </label>
+            <label>{{ t('classSlotLevel', { index: 1 }) }}<input type="number" min="1" :max="classLevelsTotal - 1" v-model.number="levelA"></label>
+            <label>{{ t('classSlotLevel', { index: 2 }) }}<input type="number" :value="levelB" disabled></label>
+          </template>
+          <label v-else>{{ t('classRole') }}<input v-model="form.class"></label>
           <label>HP<input type="number" v-model="form.hp" :placeholder="t('leaveBlankAuto')"></label>
         </div>
         <details class="join-avatar-details">

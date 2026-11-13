@@ -1,0 +1,342 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "slime",
+      "name": "史莱姆",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 20,
+      "defense": 8,
+      "mdef": 8,
+      "initiative": 6,
+      "attacks": [
+        {
+          "name": "酸液撞击",
+          "attributes": [
+            "mig",
+            "mig"
+          ],
+          "damage": 5
+        }
+      ],
+      "skills": [],
+      "affinities": {
+        "fire": "weak",
+        "ice": "resist"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "goblin",
+      "name": "哥布林",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 28,
+      "defense": 9,
+      "mdef": 8,
+      "initiative": 8,
+      "attacks": [
+        {
+          "name": "锈刀",
+          "attributes": [
+            "dex",
+            "mig"
+          ],
+          "damage": 6
+        }
+      ],
+      "skills": [
+        {
+          "name": "乱刀",
+          "scope": "all_players",
+          "damage_type": "physical",
+          "bonus": 2,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {},
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "orc",
+      "name": "兽人",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 45,
+      "defense": 11,
+      "mdef": 9,
+      "initiative": 7,
+      "attacks": [
+        {
+          "name": "巨斧",
+          "attributes": [
+            "mig",
+            "mig"
+          ],
+          "damage": 10
+        }
+      ],
+      "skills": [],
+      "affinities": {
+        "ice": "weak"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "skeleton",
+      "name": "骷髅兵",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 30,
+      "defense": 10,
+      "mdef": 8,
+      "initiative": 7,
+      "attacks": [
+        {
+          "name": "骨剑",
+          "attributes": [
+            "dex",
+            "mig"
+          ],
+          "damage": 7
+        }
+      ],
+      "skills": [],
+      "affinities": {
+        "light": "weak",
+        "dark": "resist"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "golem",
+      "name": "青铜魔像",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 70,
+      "defense": 13,
+      "mdef": 11,
+      "initiative": 5,
+      "attacks": [
+        {
+          "name": "重拳",
+          "attributes": [
+            "mig",
+            "mig"
+          ],
+          "damage": 14
+        }
+      ],
+      "skills": [
+        {
+          "name": "碎地重击",
+          "scope": "all_players",
+          "damage_type": "physical",
+          "bonus": 6,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {
+        "lightning": "weak",
+        "physical": "resist"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "whelp",
+      "name": "幼龙",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 60,
+      "defense": 12,
+      "mdef": 12,
+      "initiative": 10,
+      "attacks": [
+        {
+          "name": "爪击",
+          "attributes": [
+            "dex",
+            "mig"
+          ],
+          "damage": 11
+        },
+        {
+          "name": "吐息",
+          "attributes": [
+            "ins",
+            "wlp"
+          ],
+          "damage": 12
+        }
+      ],
+      "skills": [
+        {
+          "name": "烈焰吐息",
+          "scope": "all_players",
+          "damage_type": "fire",
+          "bonus": 4,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {
+        "ice": "weak"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "assassin",
+      "name": "刺客",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 36,
+      "defense": 12,
+      "mdef": 10,
+      "initiative": 12,
+      "attacks": [
+        {
+          "name": "毒刃",
+          "attributes": [
+            "dex",
+            "ins"
+          ],
+          "damage": 9
+        }
+      ],
+      "skills": [
+        {
+          "name": "毒刃",
+          "scope": "players",
+          "damage_type": "physical",
+          "bonus": 3,
+          "status": "poisoned",
+          "duration": 2,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {
+        "poison": "resist"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "mage",
+      "name": "敌法师",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 40,
+      "defense": 10,
+      "mdef": 13,
+      "initiative": 9,
+      "attacks": [
+        {
+          "name": "奥术冲击",
+          "attributes": [
+            "ins",
+            "wlp"
+          ],
+          "damage": 12
+        }
+      ],
+      "skills": [
+        {
+          "name": "火球术",
+          "scope": "all_players",
+          "damage_type": "fire",
+          "bonus": 5,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {
+        "physical": "weak"
+      },
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "captain",
+      "name": "守卫队长",
+      "rank": "minion",
+      "enabled": true,
+      "hp": 55,
+      "defense": 12,
+      "mdef": 11,
+      "initiative": 8,
+      "attacks": [
+        {
+          "name": "长戟",
+          "attributes": [
+            "mig",
+            "dex"
+          ],
+          "damage": 11
+        }
+      ],
+      "skills": [
+        {
+          "name": "号令",
+          "scope": "self",
+          "buff": {
+            "stat": "damage",
+            "value": 2,
+            "duration": 2
+          },
+          "cooldown": 4
+        }
+      ],
+      "affinities": {},
+      "villain": false,
+      "fate": 0
+    },
+    {
+      "id": "witch",
+      "name": "锈钟女巫",
+      "rank": "boss",
+      "enabled": true,
+      "hp": 90,
+      "defense": 13,
+      "mdef": 14,
+      "initiative": 11,
+      "attacks": [
+        {
+          "name": "钟鸣",
+          "attributes": [
+            "ins",
+            "wlp"
+          ],
+          "damage": 15
+        },
+        {
+          "name": "锈蚀之触",
+          "attributes": [
+            "mig",
+            "wlp"
+          ],
+          "damage": 12
+        }
+      ],
+      "skills": [
+        {
+          "name": "钟鸣",
+          "scope": "all_players",
+          "damage_type": "dark",
+          "bonus": 5,
+          "cooldown": 3
+        }
+      ],
+      "affinities": {
+        "light": "weak",
+        "dark": "immune"
+      },
+      "villain": true,
+      "fate": 15
+    }
+  ]
+}

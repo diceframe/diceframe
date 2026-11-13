@@ -29,7 +29,7 @@ from src.llm.context_builder import (
 from src.memory.delta import MemoryStore
 from src.rules.loader import RuleBundleLoader
 from src.rules.rule_system import RuleSystem
-from src.rulesets.contracts import NarrativeAdvancementRuntime
+from src.rulesets.contracts import NarrativeAdvancementRuntime, RoundPromptRuntime
 from src.rulesets.registry import RulesetRuntimeRegistry
 
 logger = logging.getLogger("trpg")
@@ -195,6 +195,13 @@ class PromptComposer:
                     affection_appendix = affection_prompt_appendix(instance, rule.affection, language)
                     if affection_appendix:
                         ctx.rule_appendix = ctx.rule_appendix + "\n\n" + affection_appendix
+                    # 每轮动态注入：规则运行时可以提供「当前场景/节点」块，
+                    # 让模型每轮都被要求判断是否达成，而不是靠它自己翻状态视图。
+                    runtime = self._runtime(instance)
+                    if isinstance(runtime, RoundPromptRuntime):
+                        dynamic_block = str(runtime.round_prompt_block(instance) or "").strip()
+                        if dynamic_block:
+                            ctx.rule_appendix = ctx.rule_appendix + "\n\n" + dynamic_block
         except ValueError:
             raise
         except Exception:
@@ -344,7 +351,7 @@ class PromptComposer:
         runtime = self._runtime(instance)
         if runtime is not None:
             state_view = runtime.build_llm_view(instance)
-        return await build_context(
+        text = await build_context(
             instance,
             gm_prompt,
             lorebook_matches,
@@ -364,6 +371,12 @@ class PromptComposer:
             context_recent_rounds=self.context_recent_rounds,
             scene_objective_view=self.scene_objective_view(instance, viewer_is_gm=True),
         )
+        # 规则运行时可以在 user context 末尾追加每轮都要出现、且离生成点最近的约束。
+        suffix = (
+            str(runtime.round_context_suffix(instance) or "").strip()
+            if isinstance(runtime, RoundPromptRuntime) else ""
+        )
+        return f"{text}\n\n{suffix}" if suffix else text
 
     async def build_player_safe_context(
         self,

@@ -803,7 +803,12 @@ def make_default_character(
     except Exception:
         logger.exception("读取默认角色规则失败: %s", rule_path)
 
-    attrs = roll_attributes(keys, pts, lo, hi, rule.attributes if rule else None)
+    dice_array = rule.attribute_dice_array if rule is not None else []
+    if dice_array and len(keys) == len(dice_array):
+        # 规则声明了属性骰组：属性是骰面，建卡是从固定骰组里各取一枚，不做点数分配。
+        attrs = dict(zip(keys, dice_array))
+    else:
+        attrs = roll_attributes(keys, pts, lo, hi, rule.attributes if rule else None)
 
     try:
         if rule:
@@ -821,8 +826,15 @@ def make_default_character(
         "zh-CN": "生命", "en": "HP", "ja": "生命", "de": "Leben", "ru": "Здоровье",
     })
 
+    level = rule.start_level if rule is not None else 1
+    # 规则声明了 starting_currency 且关掉起始装备时，建卡只发钱，由玩家自选装备。
+    if rule is not None and rule.starting_currency > 0 and rule.template.get("starting_equipment") is False:
+        default_equipment = []
+    if rule is not None and rule.starting_currency > 0:
+        gold = rule.starting_currency
+
     cs = {
-        "race": default_race, "class": default_class_name, "level": 1, "xp": 0,
+        "race": default_race, "class": default_class_name, "level": level, "xp": 0,
         # Written explicitly so set_hp()'s legacy Chinese setdefault never fires
         # for a freshly created sheet.
         "resources": {"hp": {"label": hp_label, "min": 0, "current": hp, "max": hp}},
@@ -839,8 +851,8 @@ def make_default_character(
     try:
         if rule:
             for ss in rule.special_stats:
-                max_val = ss.get("max", 99)
-                init_val = initial_special_stat_value(ss, attrs)
+                max_val = rule.special_stat_max(ss, attrs)
+                init_val = initial_special_stat_value({**ss, "max": max_val}, attrs)
                 cs[ss["key"]] = init_val
                 cs[f"max_{ss['key']}"] = max_val
     except Exception:

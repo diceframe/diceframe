@@ -4,6 +4,7 @@ from pathlib import Path
 from src.adventures.compatibility import default_runtime_requirement
 
 from src.rulesets.dnd2024 import Dnd2024Runtime
+from src.rulesets.fabula_ultima import FabulaUltimaRuntime
 from src.rulesets.legacy_adapter import LegacyRulesetAdapter
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -25,4 +26,5 @@ def build_default_ruleset_registry(
     return RulesetRuntimeRegistry([
         LegacyRulesetAdapter(),
         Dnd2024Runtime(adventures_dir=adventures_dir),
+        FabulaUltimaRuntime(adventures_dir=adventures_dir),
     ])

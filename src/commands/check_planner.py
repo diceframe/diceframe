@@ -6,6 +6,7 @@ from src.engine.modules import game_config
 
 from src.engine import module_hooks
 
+import copy
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from typing import Any
 
 from src.compat.characters import MAX_SKILL_EFFECT_CHARS
 from src.engine.check_channels import normalize_check_channels
+from src.engine.check_mechanics import check_mechanic_for, request_dice_system
 from src.engine.checks import (
     build_check_request,
     find_action_opponent,
@@ -131,6 +133,17 @@ def _economy_repair_context(instance: GameInstance, rule: RuleSystem | None) -> 
         "recent_purchases": _recent_purchases(instance),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _dice_checks_tool(rule: RuleSystem | None) -> dict[str, Any]:
+    """检定规划工具；规则包注册的骰制可以为每条 check 追加自己的 schema 属性。"""
+    mechanic = check_mechanic_for(rule.dice_system if rule else "d20")
+    extra = mechanic.planner_tool_properties() if mechanic is not None else {}
+    if not extra:
+        return DICE_CHECKS_TOOL
+    tool = copy.deepcopy(DICE_CHECKS_TOOL)
+    tool["function"]["parameters"]["properties"]["checks"]["items"]["properties"].update(extra)
+    return tool
 
 
 def _planner_system_prompt(instance: GameInstance, rule: RuleSystem | None) -> str:
@@ -325,6 +338,9 @@ def normalize_check_specs(
     errors: list[str] = []
     seen_players: set[str] = set()
     dice_system = str(rule.dice_system if rule else "d20").lower()
+    mechanic = check_mechanic_for(dice_system)
+    # 注册骰制可声明 target 与 d20 同为 DC 语义，共用渠道归一化与硬上限。
+    target_is_dc = dice_system == "d20" or (mechanic is not None and mechanic.target_is_dc)
     for index, raw in enumerate(raw_checks[:8]):
         if not isinstance(raw, dict):
             errors.append(f"checks[{index}] 不是 object")
@@ -459,7 +475,7 @@ def normalize_check_specs(
         # 模型把同一不利事实重复表达（抬 DC + 负 modifier + 劣势）时按固定
         # 优先级折叠，并留下 notes/dropped 审计信息，而不是全量执行。
         channels = normalize_check_channels(
-            target=target if dice_system == "d20" else None,
+            target=target if target_is_dc else None,
             modifier=modifier,
             advantage_mode=advantage_mode,
             baseline_dc=rule.dc_for_difficulty(game_config.difficulty(instance), "normal") if rule else None,
@@ -469,7 +485,7 @@ def normalize_check_specs(
             advantage_reason=str(raw.get("advantage_reason") or ""),
             modifier_reason=str(raw.get("modifier_reason") or ""),
         )
-        if dice_system == "d20" and channels.target is not None:
+        if target_is_dc and channels.target is not None:
             target = channels.target
         modifier = channels.modifier
         advantage_mode = channels.advantage_mode
@@ -516,11 +532,23 @@ def normalize_check_specs(
             "actor_uid": uid,
             "actor_ref": actor_ref,
             "actor_name": actor_name,
-            "dice_system": "d100" if dice_system == "d100" else "d20",
+            "dice_system": request_dice_system(dice_system),
             "label": _label(instance, rule, attribute, skill, kind),
             "intent": "ai_planned",
             "skill": skill,
             "attribute": attribute,
+            **(
+                mechanic.request_fields(
+                    rule=rule,
+                    sheet_attributes=sheet_attributes,
+                    attribute=attribute,
+                    action=action,
+                    planned=raw,
+                    is_attack=kind == "attack",
+                    resolve_attribute=lambda value: _attribute_key(rule, value),
+                )
+                if mechanic is not None else {}
+            ),
             "target": target,
             "circumstance_modifier": modifier,
             "advantage_mode": advantage_mode,
@@ -853,7 +881,7 @@ async def plan_round_checks(
     response = await llm_client.call_tools(
         _planner_system_prompt(instance, rule),
         _planner_context(instance, rule),
-        tools=[DICE_CHECKS_TOOL],
+        tools=[_dice_checks_tool(rule)],
         max_tokens=4096,
         temperature=0.1,
     )

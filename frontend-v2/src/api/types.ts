@@ -217,6 +217,16 @@ export interface CheckResult {
   skill?: string
   roll?: number
   rolls?: number[]
+  // 「两枚属性骰相加」的骰制：两枚骰子的面数、原始骰值与伤害用的高值。
+  dice_a?: number
+  dice_b?: number
+  high_roll?: number
+  dice_pair?: number[]
+  attribute_b?: string | null
+  attribute_b_key?: string
+  // 规则给出的「机会」选项：大成功由行动者选，大失败由 GM 选。
+  opportunity?: string[]
+  fumble_opportunity?: string[]
   modifier?: number
   modifier_breakdown?: string | null
   total?: number
@@ -261,6 +271,8 @@ export interface CheckResult {
   advantage_reason?: string | null
   modifier_reason?: string | null
   planner_notes?: string[]
+  /** DC 的权威来源：request_dc（裁判）/ server_armor_class（目标物防）。 */
+  target_source?: string
 }
 
 export interface PublicAction {

@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.rules.rule_system import RuleSystem
 
 __all__ = ["migrate_legacy_character_sheet", "normalize_character_sheet", "normalize_character_payload"]
+
+# 双职业标签："神射手 3 / 美食家 2"（也接受 "神射手3" 这种单职业写法）。
+_CLASS_LABEL_RE = re.compile(r"([^\s/]+?)\s*(\d+)\s*(?:/\s*([^\s/]+?)\s*(\d+))?")
+
+
+def _parse_class_label(label: Any) -> dict[str, int]:
+    """从可读的职业字符串里恢复 ``{职业: 等级}``；解析不出返回空字典。"""
+    text = str(label or "").strip()
+    if not text:
+        return {}
+    match = _CLASS_LABEL_RE.fullmatch(text)
+    if not match:
+        return {}
+    levels: dict[str, int] = {}
+    if match.group(1):
+        levels[match.group(1).strip()] = int(match.group(2))
+    if match.group(3):
+        levels[match.group(3).strip()] = int(match.group(4))
+    return levels
+
 
 # 技能效果说明是玩家自定义文本（descriptive metadata，非规则权威）：
 # 长度上限同时防止单技能塞入超长文本撑大 planner context。
@@ -108,11 +129,19 @@ def normalize_character_sheet(
     else:
         character_sheet["background"] = identity.get("background", "")
 
+    # 双职业：建卡时写入的 class 形如 "神射手 3 / 美食家 2"。
+    # 前端若没单独传 class_levels，这里从可读字符串里补出结构化数据。
+    if not isinstance(character_sheet.get("class_levels"), dict):
+        parsed_levels = _parse_class_label(character_sheet.get("class"))
+        if parsed_levels:
+            character_sheet["class_levels"] = parsed_levels
+
     progression = character_sheet.setdefault("progression", {})
+    default_level = int(getattr(rule, "start_level", 1) or 1) if rule is not None else 1
     if "level" in character_sheet:
-        progression["level"] = int(character_sheet.get("level", 1) or 1)
+        progression["level"] = int(character_sheet.get("level", default_level) or default_level)
     else:
-        character_sheet["level"] = int(progression.get("level", 1) or 1)
+        character_sheet["level"] = int(progression.get("level", default_level) or default_level)
     if "xp" in character_sheet:
         progression["xp"] = int(character_sheet.get("xp", 0) or 0)
     else:
