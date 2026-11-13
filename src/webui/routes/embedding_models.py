@@ -45,6 +45,26 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "model": result})
 
 
+async def api_embedding_model_uninstall(request: web.Request) -> web.Response:
+    """W5：删除已安装本地模型；当前启用的模型拒绝删除（fail closed）。"""
+
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    state = request.app.get("config_state") or {}
+    active_model_id = (
+        str(state.get("embedding_local_model_id") or "")
+        if str(state.get("embedding_source") or "") == "local" else ""
+    )
+    try:
+        result = _manager(request).uninstall(
+            request.match_info["model_id"], active_model_id=active_model_id,
+        )
+    except ModelCatalogError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=422)
+    return web.json_response(result)
+
+
 async def _run_rebuild(app: web.Application) -> None:
     subsystems = app.get("subsystems")
     store = getattr(subsystems, "memory_store", None)
@@ -76,4 +96,5 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
 def register_embedding_models(application: web.Application) -> None:
     application.router.add_get("/api/embedding/models", api_embedding_models)
     application.router.add_post("/api/embedding/models/{model_id}/install", api_embedding_model_install)
+    application.router.add_delete("/api/embedding/models/{model_id}", api_embedding_model_uninstall)
     application.router.add_post("/api/embedding/rebuild", api_embedding_rebuild)

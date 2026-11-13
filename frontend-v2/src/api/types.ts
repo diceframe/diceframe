@@ -2294,7 +2294,7 @@ export interface AppConfig {
   embedding_source?: 'external' | 'local' | string
   embedding_local_model_id?: string
   embedding_local_models?: Array<{ id: string; display_name?: string; version?: string; dimension?: number; license?: string; status?: string; error?: string }>
-  embedding_model_catalog?: Array<{ id: string; display_name?: string; version?: string; dimension?: number; license?: string; status?: string }>
+  embedding_model_catalog?: Array<{ id: string; display_name?: string; version?: string; dimension?: number; license?: string; status?: string; size_bytes?: number; error?: string }>
   embedding_model?: string
   embedding_max_input?: number
   embedding_status?: {

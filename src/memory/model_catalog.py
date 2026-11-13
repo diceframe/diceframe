@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -109,10 +110,30 @@ class LocalModelManager:
                 "version": str(entry.get("version") or ""),
                 "dimension": int(entry.get("dimension") or 0),
                 "license": str(entry.get("license") or ""),
+                # W5：卡片展示需要预估下载体积（catalog 固定清单的 size 之和）。
+                "size_bytes": sum(int(item.get("size") or 0) for item in entry.get("files") or []),
                 "status": installed.get(entry["id"], {}).get("status", "not_installed"),
             }
             for entry in entries
         ]
+
+    def uninstall(self, model_id: str, *, active_model_id: str = "") -> dict[str, Any]:
+        """删除已安装的本地模型目录（W5）。
+
+        fail closed：路径越界/未安装拒绝；当前启用的模型必须先切换来源或
+        模型再删，避免运行中的 embedding client 指向被删除的权重。
+        """
+
+        model_id = _safe_id(model_id)
+        root = (self.models_dir / model_id).resolve()
+        if root == self.models_dir.resolve() or self.models_dir.resolve() not in root.parents:
+            raise ModelCatalogError("model directory escapes the model storage")
+        if not root.is_dir():
+            raise ModelCatalogError("model is not installed")
+        if active_model_id and model_id == _safe_id(active_model_id):
+            raise ModelCatalogError("model is currently enabled; switch the source or model first")
+        shutil.rmtree(root)
+        return {"ok": True, "model_id": model_id}
 
     async def install(self, model_id: str) -> dict[str, Any]:
         entries = {entry["id"]: entry for entry in self._catalog_entries()}
