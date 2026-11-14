@@ -1153,6 +1153,15 @@ export interface RulesetAdvancementApplyResponse {
   duplicate?: boolean
 }
 
+/** The choices a card still owes, in level order. Same shape as a requirement. */
+export interface RulesetPendingChoicesResponse {
+  ok: boolean
+  rule_id: string
+  card_id: string
+  revision: number
+  missing: JsonObject[]
+}
+
 export interface RulesetRestResponse extends JsonObject {
   ok: boolean
   rule_id: string

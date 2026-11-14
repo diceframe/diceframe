@@ -254,7 +254,9 @@ def test_level_eighteen_fighter_owns_survivor() -> None:
     assert resolver.has_feature(_sheet(runtime, 17)["ruleset_character"], "survivor") is False
 
 
-def test_ownership_is_derived_without_features_subclass_ref() -> None:
+def test_ownership_requires_an_explicit_subclass_selection() -> None:
+    """Survivor is Champion's capstone, not a consequence of Fighter levels."""
+
     runtime = Dnd2024Runtime()
     resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
 
@@ -262,6 +264,9 @@ def test_ownership_is_derived_without_features_subclass_ref() -> None:
         "build": {"class_levels": [{"class_ref": "class:fighter", "level": 18}]},
     }
 
+    assert resolver.has_feature(character, "survivor") is False
+
+    character["features"] = {"subclass_ref": "subclass:champion"}
     assert resolver.has_feature(character, "survivor") is True
 
 

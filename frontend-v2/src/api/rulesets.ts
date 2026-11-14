@@ -7,6 +7,7 @@ import type {
   RulesetBuilderChoicesResponse,
   RulesetBuilderValidationResponse,
   RulesetExperienceResponse,
+  RulesetPendingChoicesResponse,
   RulesetProgressionResponse,
   RulesetRestResponse,
   RulesetGameplayResponse,
@@ -129,6 +130,35 @@ export function applyCharacterCardAdvancement(
       method: 'POST',
       body: JSON.stringify({
         choices,
+        expected_revision: expectedRevision,
+        operation_id: operationId,
+      }),
+    },
+  )
+}
+
+/** What a card still owes. Read-only; opening the panel must not write. */
+export function fetchCharacterCardPendingChoices(
+  cardId: string,
+): Promise<RulesetPendingChoicesResponse> {
+  return api<RulesetPendingChoicesResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/pending`,
+  )
+}
+
+/** Fill outstanding choices without advancing a level. */
+export function completeCharacterCardChoices(
+  cardId: string,
+  repairs: JsonObject,
+  expectedRevision: number,
+  operationId: string,
+): Promise<RulesetAdvancementApplyResponse> {
+  return api<RulesetAdvancementApplyResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/complete`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        repairs,
         expected_revision: expectedRevision,
         operation_id: operationId,
       }),

@@ -127,6 +127,10 @@ class CombatViewMixin:
         conditions = conditions if isinstance(conditions, dict) else {}
         resources = character.get("resources")
         resources = resources if isinstance(resources, dict) else {}
+        feature_state = character.get("features")
+        feature_state = feature_state if isinstance(feature_state, dict) else {}
+        subclass_ref = feature_state.get("subclass_ref")
+        subclass_ref = subclass_ref if isinstance(subclass_ref, str) else ""
         # 职业资源与 feature-derived 攻击参数在此一次性投影：后面的 combat 代码
         # 只消费结果，不再各自解析职业等级或 level -> 武艺骰。
         feature_projection = self.features.actor_projection(character)
@@ -179,6 +183,7 @@ class CombatViewMixin:
             "conditions": deepcopy(conditions),
             "death_saves": deepcopy(conditions.get("death_saves") or {}),
             "build": deepcopy(character.get("build") or {}),
+            "features": {"subclass_ref": subclass_ref},
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
@@ -381,6 +386,9 @@ class CombatViewMixin:
             }
         return {
             "build": actor.get("build") or {},
+            "features": {"subclass_ref": str(
+                (actor.get("features") or {}).get("subclass_ref") or ""
+            )},
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},

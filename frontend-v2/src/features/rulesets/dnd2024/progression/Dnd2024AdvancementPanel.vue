@@ -9,6 +9,8 @@ import {
   applyCharacterCardAdvancement,
   applyLiveCharacterAdvancement,
   applyRulesetAdvancement,
+  completeCharacterCardChoices,
+  fetchCharacterCardPendingChoices,
   previewCharacterCardAdvancement,
   previewLiveCharacterAdvancement,
   previewRulesetAdvancement,
@@ -49,6 +51,58 @@ const featRequirement = computed(() => (
 const abilityRequirement = computed(() => requirement('ability_score_increases'))
 const spellRequirement = computed(() => requirement('class_spell_choices'))
 const subclassRequirement = computed(() => requirement('subclass_ref'))
+
+// A card can arrive with choices it never made: imported from outside, or
+// carried over from before the choice was required.  The audit reports them so
+// the player can pay before the level moves, instead of finding out too late
+// that the whole subclass tree was never granted.
+const pendingChoices = ref<JsonObject[]>([])
+const pendingBusy = ref(false)
+const pendingSubclass = ref('')
+const pendingSubclassRow = computed<JsonObject | null>(() => (
+  pendingChoices.value.find(row => row.id === 'subclass_ref') as JsonObject | undefined
+) || null
+)
+const pendingOther = computed(() => (
+  pendingChoices.value.filter(row => row.id !== 'subclass_ref')
+))
+
+async function refreshPending(): Promise<void> {
+  if (!props.cardId) return
+  try {
+    const response = await fetchCharacterCardPendingChoices(props.cardId)
+    pendingChoices.value = (response.missing || []) as JsonObject[]
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+  } catch {
+    // A card that cannot be audited must not block the upgrade panel; the
+    // commit path re-checks everything anyway.
+    pendingChoices.value = []
+  }
+}
+
+async function completePendingSubclass(): Promise<void> {
+  if (!props.cardId || !pendingSubclass.value) return
+  pendingBusy.value = true
+  error.value = ''
+  try {
+    const operationId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `repair-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const response = await completeCharacterCardChoices(
+      props.cardId,
+      { subclass_ref: pendingSubclass.value },
+      currentRevision.value,
+      operationId,
+    )
+    if (typeof response.revision === 'number') currentRevision.value = response.revision
+    pendingSubclass.value = ''
+    await refreshPending()
+    await refresh()
+    emit('applied', response.character)
+  } catch (cause: unknown) {
+    error.value = String((cause as Error)?.message || cause)
+  } finally { pendingBusy.value = false }
+}
 
 function canonical(): JsonObject {
   const nested = props.character.ruleset_character
@@ -225,6 +279,7 @@ async function apply(): Promise<void> {
 onMounted(() => {
   initializeSpellChoices()
   void refresh()
+  void refreshPending()
 })
 </script>
 
@@ -233,6 +288,22 @@ onMounted(() => {
     <header>
       <div><span>5E · 2024 · SRD</span><h3 id="dnd-advancement-title">{{ text('职业升级', 'Class advancement') }}</h3><p v-if="preview">Lv. {{ preview.from_level }} → Lv. {{ preview.to_level }}</p><p class="flow-hint">{{ text('先看本级变化，再完成需要选择的项目；底部按钮可用后才会真正升级。', 'Review the level changes, complete the choices, then apply when the bottom button is enabled.') }}</p></div>
     </header>
+
+    <fieldset v-if="pendingChoices.length" class="pending-choices">
+      <legend>{{ text('这张卡还有未完成的选项', 'This card still owes choices') }}</legend>
+      <p class="error-help">{{ text('先把这些补齐再升级；补齐本身不会改变等级。', 'Pay these before the level moves. Filling them does not change the level.') }}</p>
+      <div v-if="pendingSubclassRow" class="pending-subclass">
+        <label>{{ text(`子职（第 ${Number(pendingSubclassRow.level)} 级）`, `Subclass (level ${Number(pendingSubclassRow.level)})`) }}</label>
+        <select v-model="pendingSubclass">
+          <option value="" disabled>{{ text('请选择', 'Choose') }}</option>
+          <option v-for="option in (pendingSubclassRow.options as JsonObject[])" :key="String(option.value)" :value="String(option.value)">{{ option.name }}</option>
+        </select>
+        <button type="button" :disabled="pendingBusy || !pendingSubclass" @click="completePendingSubclass">{{ pendingBusy ? text('补齐中…', 'Saving…') : text('补齐子职', 'Complete subclass') }}</button>
+      </div>
+      <ul v-if="pendingOther.length">
+        <li v-for="row in pendingOther" :key="String(row.id)">{{ text(`第 ${Number(row.level)} 级：${String(row.reason || row.id)}`, `Level ${Number(row.level)}: ${String(row.reason || row.id)}`) }}</li>
+      </ul>
+    </fieldset>
 
     <p v-if="busy && !preview" class="notice" role="status">{{ text('正在核对职业成长表…', 'Checking the class table…') }}</p>
     <template v-if="preview">

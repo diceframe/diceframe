@@ -2297,6 +2297,18 @@ class WebAPI:
             self._card_advancement_dependencies, card_id, body,
         )
 
+    def pending_character_card_choices(self, card_id: str) -> dict[str, Any]:
+        return ruleset_advancement.pending_card_choices(
+            self._card_advancement_dependencies, card_id,
+        )
+
+    def complete_character_card_choices(
+        self, card_id: str, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return ruleset_advancement.complete_card_choices(
+            self._card_advancement_dependencies, card_id, body,
+        )
+
     # ---- 世界编辑器 ----
 
     def list_worlds(self) -> dict[str, Any]:
