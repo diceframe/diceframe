@@ -113,6 +113,19 @@ _BRUTAL_STRIKE_EFFECTS = frozenset({
     "forceful", "hamstring", "staggering", "sundering",
 })
 
+#: Hunter's Mark 链的五个声明各自只能读自己的那几个键。Favored Enemy 只用
+#: 既有授权机制（`granted_spell_id` + `resource_id`），所以它的闭集就是那一个键。
+_MARK_PARAMETER_KEYS: dict[str, frozenset[str]] = {
+    "favored_enemy": frozenset({"granted_spell_id"}),
+    "relentless_hunter": frozenset({"concentration_damage_exempt_spell_id"}),
+    "precise_hunter": frozenset({"marked_target_attack_advantage"}),
+    "feral_senses": frozenset({"blindsight_range_ft"}),
+    "foe_slayer": frozenset({"mark_damage_die"}),
+}
+
+#: Foe Slayer 只能把骰面换成同为标准骰的一种；d3 或 d20 都不是官方骰面。
+_MARK_DAMAGE_DICE = frozenset({4, 6, 8, 10, 12})
+
 
 def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
@@ -1898,6 +1911,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_overchannel_parameters(definition)
             self._validate_hit_rider_parameters(definition)
             self._validate_attack_state_parameters(definition)
+            self._validate_mark_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -2655,3 +2669,57 @@ class Dnd2024ClassFeatureResolver:
             # 到期点是攻击者"下一个回合结束"：引擎只实现这一个时点，写成
             # 别的值会得到一条永远不会到期的标记。
             one_of("expiry", frozenset({"attacker_next_turn_end"}))
+
+    @staticmethod
+    def _validate_mark_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the Hunter's Mark chain's declared numbers.
+
+        The five declarations are one shape -- a spell instance the character
+        owns plus four narrow readings of it -- and every reading takes its
+        number from here.  An unknown key promises behaviour nothing reads; a
+        die size outside the canonical set would roll a d3 nobody prints.
+        """
+
+        expected = _MARK_PARAMETER_KEYS.get(definition.id)
+        if expected is None:
+            return
+        parameters = definition.parameters
+        unknown = sorted(set(parameters) - expected)
+        if unknown:
+            raise ClassFeatureError(
+                f"{definition.id} does not support {', '.join(unknown)}"
+            )
+        feature_id = definition.id
+        if feature_id == "favored_enemy":
+            if not parameters:
+                raise ClassFeatureError(
+                    f"{feature_id} must grant its spell through granted_spell_id"
+                )
+        elif feature_id == "relentless_hunter":
+            # 例外必须绑到一个具名法术上：写成"所有专注"就是另一条规则。
+            spell_id = parameters["concentration_damage_exempt_spell_id"]
+            if not isinstance(spell_id, str) or not spell_id or ":" in spell_id:
+                raise ClassFeatureError(
+                    f"{feature_id}.concentration_damage_exempt_spell_id must name a spell"
+                )
+        elif feature_id == "precise_hunter":
+            if not isinstance(parameters["marked_target_attack_advantage"], bool):
+                raise ClassFeatureError(
+                    f"{feature_id}.marked_target_attack_advantage must be a boolean"
+                )
+        elif feature_id == "feral_senses":
+            range_ft = parameters["blindsight_range_ft"]
+            if (
+                isinstance(range_ft, bool) or not isinstance(range_ft, int)
+                or not 1 <= range_ft <= 120
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.blindsight_range_ft must be an integer from 1 to 120"
+                )
+        elif feature_id == "foe_slayer":
+            die = parameters["mark_damage_die"]
+            if isinstance(die, bool) or die not in _MARK_DAMAGE_DICE:
+                raise ClassFeatureError(
+                    f"{feature_id}.mark_damage_die must be one of "
+                    f"{sorted(_MARK_DAMAGE_DICE)}"
+                )

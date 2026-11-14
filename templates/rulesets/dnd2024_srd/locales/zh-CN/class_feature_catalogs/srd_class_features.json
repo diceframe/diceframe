@@ -228,7 +228,12 @@
       "wild_shape": "野性形态",
       "wizard_subclass": "法师子职",
       "words_of_creation": "创世之言",
-      "ranger": "游侠"
+      "ranger": "游侠",
+      "favored_enemy": "宿敌",
+      "relentless_hunter": "不懈追猎者",
+      "precise_hunter": "精准追猎者",
+      "feral_senses": "野性感知",
+      "foe_slayer": "宿敌克星"
     }
   }
 }

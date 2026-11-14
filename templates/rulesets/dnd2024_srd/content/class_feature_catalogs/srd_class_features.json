@@ -225,6 +225,11 @@
     "words_of_creation": "Words of Creation",
     "additional_fighting_style": "Additional Fighting Style",
     "ranger": "Ranger",
+    "favored_enemy": "Favored Enemy",
+    "relentless_hunter": "Relentless Hunter",
+    "precise_hunter": "Precise Hunter",
+    "feral_senses": "Feral Senses",
+    "foe_slayer": "Foe Slayer",
     "expertise": "Expertise",
     "jack_of_all_trades": "Jack of All Trades",
     "reliable_talent": "Reliable Talent",
@@ -910,6 +915,14 @@
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
         {
+          "id": "favored_enemy",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p58:favored-enemy",
+          "summary": "You always have the Hunter's Mark spell prepared. You can cast it twice without expending a spell slot, and you regain all expended uses of this ability when you finish a Long Rest. The number of free casts increases at certain Ranger levels.",
+          "parameters": {"granted_spell_id": "hunter_s_mark"},
+          "resource_id": "favored_enemy"
+        },
+        {
           "id": "expertise",
           "minimum_level": 9,
           "source_ref": "srd-5.2.1:p59:ranger-expertise",
@@ -935,6 +948,34 @@
             "swim_speed_from_speed": true
           },
           "equipment_requirement": {"no_heavy_armor": true}
+        },
+        {
+          "id": "relentless_hunter",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p59:relentless-hunter",
+          "summary": "Taking damage can't break your Concentration on Hunter's Mark.",
+          "parameters": {"concentration_damage_exempt_spell_id": "hunter_s_mark"}
+        },
+        {
+          "id": "precise_hunter",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p59:precise-hunter",
+          "summary": "You have Advantage on attack rolls against the creature currently marked by your Hunter's Mark.",
+          "parameters": {"marked_target_attack_advantage": true}
+        },
+        {
+          "id": "feral_senses",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p59:feral-senses",
+          "summary": "Your connection to the forces of nature grants you Blindsight with a range of 30 feet.",
+          "parameters": {"blindsight_range_ft": 30}
+        },
+        {
+          "id": "foe_slayer",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p59:foe-slayer",
+          "summary": "The damage die of your Hunter's Mark is a d10 rather than a d6.",
+          "parameters": {"mark_damage_die": 10}
         }
       ]
     },

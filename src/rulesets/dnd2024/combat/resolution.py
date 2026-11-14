@@ -60,10 +60,13 @@ from .primitives import (
     rider_attack_kind,
 )
 from .check_modes import (
+    HUNTERS_MARK_REF,
     condition_check_bonus_rolls,
     condition_flags,
     effective_speed,
+    marked_target_id,
     mode_from_sources,
+    owned_mark,
 )
 from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
@@ -1340,7 +1343,13 @@ class CombatResolutionMixin:
             return []
         character = self._feature_character(actor)
         actor_id = str(actor["actor_id"])
+        # Hunter's Mark 排在最前：它是法术效果，不是职业特性，所以走不经过
+        # `feature_definition` 的那条装配路径；但它同样是一个独立伤害实例
+        # （Force 抗性只作用于这一份），因此与 rider 同形。
         declarations: list[dict[str, Any]] = []
+        mark_rider = self._mark_rider_row(actor, str(intent.get("target_id") or ""))
+        if mark_rider is not None:
+            declarations.append(mark_rider)
 
         def parameter(feature_id: str, key: str) -> Any:
             return self.features.feature_value(character, feature_id, key, None)
@@ -1416,6 +1425,101 @@ class CombatResolutionMixin:
             )
         )
         return declarations
+
+    def _mark_rider_row(self, actor: dict[str, Any], target_id: str) -> dict[str, Any] | None:
+        """The Hunter's Mark damage row for one hit, or ``None``.
+
+        The mark is not a condition and not a feature: it is the caster's own
+        concentration instance, so both halves of the question -- "is this the
+        target I marked" and "is it still mine" -- are answered by one read.
+        A second Ranger marking the same creature keeps their own instance, and
+        an ally's attack reads no instance at all.
+
+        Foe Slayer replaces the die, never the instance: the spell catalog keeps
+        the printed d6 that every other reader of Hunter's Mark still uses.
+        """
+
+        if not owned_mark(actor) or marked_target_id(actor) != str(target_id):
+            return None
+        effect = self.catalog.spell_effects.get(
+            HUNTERS_MARK_REF.removeprefix("spell:")
+        ) or {}
+        sides = self._mark_damage_die(actor, effect)
+        return {
+            "feature_id": "hunter_s_mark",
+            "owner": HUNTERS_MARK_REF,
+            "dice": f"1d{sides}",
+            "damage_type": str(effect.get("mark_damage_type") or "force"),
+            "once_per_turn": False,
+        }
+
+    def _mark_damage_die(self, actor: dict[str, Any], effect: dict[str, Any]) -> int:
+        """The die this caster's Hunter's Mark rolls, in sides."""
+
+        formula = str(effect.get("mark_damage") or "")
+        base = formula.rsplit("d", 1)[-1] if "d" in formula else ""
+        if not base.isdigit():
+            raise CombatIntentError("hunter's mark damage die is not declared")
+        upgrade = self.features.feature_value(
+            self._feature_character(actor), "foe_slayer", "mark_damage_die", 0,
+        )
+        return int(upgrade or base)
+
+    def _mark_duration_hours(self, effect: dict[str, Any], slot_level: int) -> int:
+        """How long this cast's instance may last, from the slot it used.
+
+        There is no clock in the combat state, so this is the declared number
+        carried by the instance rather than an expiry that gets enforced -- the
+        same honesty the rest of the concentration model applies.
+        """
+
+        base = int(effect.get("mark_duration_hours", 1) or 1)
+        thresholds = effect.get("mark_duration_hours_by_slot") or {}
+        best = base
+        for raw_level, hours in thresholds.items():
+            level = int(raw_level)
+            if int(slot_level) >= level and int(hours) > best:
+                best = int(hours)
+        return best
+
+    def _mark_retarget_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        effect: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Move the mark to a new creature without casting anything.
+
+        Validation already proved every precondition (own instance, the marked
+        creature at 0 HP, the new one visible and in range, a Bonus Action to
+        spend); this method only builds the events, and it fails closed if the
+        instance went away between the two steps.
+
+        No ``spell_cast`` trigger fires and no cost is paid: the spell instance
+        keeps its identity, so its remaining duration is untouched.
+        """
+
+        actor_id = str(intent["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        mark = owned_mark(actor)
+        if not mark:
+            raise CombatIntentError("there is no Hunter's Mark to move")
+        target_ids = intent.get("target_ids")
+        target_id = str(target_ids[0]) if isinstance(target_ids, list) and target_ids else ""
+        if not target_id:
+            raise CombatIntentError("the mark needs a new target")
+        if not effect.get("marks_target"):  # pragma: no cover - catalog guard
+            raise CombatIntentError("only a mark instance can be moved")
+        return [
+            {
+                "type": "dnd2024.action.spent", "actor_id": actor_id,
+                "resource": "bonus_action", "amount": 1,
+            },
+            {
+                "type": "dnd2024.concentration.retargeted",
+                "actor_id": actor_id, "spell_ref": HUNTERS_MARK_REF,
+                "target_id": target_id,
+                "previous_target_id": str(mark.get("mark_target_id") or ""),
+            },
+        ]
 
     def _attack_state_riders(
         self, character: Any, weapon: dict[str, Any], combat: dict[str, Any],
@@ -1688,27 +1792,9 @@ class CombatResolutionMixin:
         for row in declarations:
             if not isinstance(row, dict) or not row.get("dice"):
                 continue
-            node = attack_damage_node(
-                damage_formula=str(row["dice"]), modifier=0,
-                critical=critical, extra_dice_formulas=[],
-            )
-            amount, rolls = roll_damage_node(node, rng)
-            amount = max(0, amount)
-            if amount <= 0:
+            event, damage = self._rider_damage_event(row, target, critical, rng)
+            if event is None:
                 continue
-            damage_type = str(row.get("damage_type") or "")
-            damage, resistance = self._resist_damage(target, amount, damage_type)
-            event: dict[str, Any] = {
-                "type": "resource.changed", "resource": "hp",
-                "target_id": str(target["actor_id"]),
-                "delta": -damage, "amount": damage, "damage_type": damage_type,
-                "critical": critical, "rolls": rolls,
-                "feature_id": str(row.get("feature_id") or ""),
-                "owner_ref": str(row.get("owner") or ""),
-            }
-            if resistance:
-                event["resisted"] = True
-                event["resistance"] = resistance
             events.append(event)
             if row.get("once_per_turn"):
                 events.append({
@@ -1719,6 +1805,42 @@ class CombatResolutionMixin:
                 })
             total += damage
         return events, total
+
+    def _rider_damage_event(
+        self, row: dict[str, Any], target: dict[str, Any],
+        critical: bool, rng: Any,
+    ) -> tuple[dict[str, Any] | None, int]:
+        """One rider row as its own resisted damage instance.
+
+        Shared by the weapon-hit path (which rolls at commit time, after every
+        window that could turn the hit into a miss) and the spell-attack path
+        (which has no such window and rolls inline), so a Hunter's Mark that
+        arrives with a weapon and one that arrives with a spell produce the
+        same event shape and the same resistance boundary.
+        """
+
+        node = attack_damage_node(
+            damage_formula=str(row["dice"]), modifier=0,
+            critical=critical, extra_dice_formulas=[],
+        )
+        amount, rolls = roll_damage_node(node, rng)
+        amount = max(0, amount)
+        if amount <= 0:
+            return None, 0
+        damage_type = str(row.get("damage_type") or "")
+        damage, resistance = self._resist_damage(target, amount, damage_type)
+        event: dict[str, Any] = {
+            "type": "resource.changed", "resource": "hp",
+            "target_id": str(target["actor_id"]),
+            "delta": -damage, "amount": damage, "damage_type": damage_type,
+            "critical": critical, "rolls": rolls,
+            "feature_id": str(row.get("feature_id") or ""),
+            "owner_ref": str(row.get("owner") or ""),
+        }
+        if resistance:
+            event["resisted"] = True
+            event["resistance"] = resistance
+        return event, damage
 
     def _hit_condition_declarations(
         self, actor: dict[str, Any], weapon: dict[str, Any],
@@ -2261,6 +2383,10 @@ class CombatResolutionMixin:
         effect = self.catalog.spell_effects[spell_ref.removeprefix("spell:")]
         if effect["mode"] == "triggered_damage":
             return self._triggered_spell_events(instance, combat, intent, rng)
+        if intent.get("retarget_mark"):
+            # 转移标记不是再施一次法：它是同一个法术实例换了个目标，所以
+            # 不扣任何施法资源，也不重置剩余时长。
+            return self._mark_retarget_events(instance, combat, intent, effect)
         slot_level = int(intent.get("slot_level", spell["level"]) or 0)
         # 一次施法只有一个启用状态：所有目标、所有射线共享它。
         overchannel = bool(intent.get("overchannel"))
@@ -2283,10 +2409,18 @@ class CombatResolutionMixin:
                     "type": "dnd2024.concentration.ended", "actor_id": actor_id,
                     "reason": "new_concentration_spell",
                 })
-            events.append({
+            started: dict[str, Any] = {
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
-            })
+            }
+            if effect.get("marks_target"):
+                # 唯一当前目标与剩余时长随实例一起落地：走这条唯一写入点，
+                # 才能保证"一个施法者同时只有一个标记"是数据形状而非约定。
+                started["mark_target_id"] = target_ids[0]
+                started["mark_expires_hours"] = self._mark_duration_hours(
+                    effect, slot_level,
+                )
+            events.append(started)
         cast_event = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
@@ -2391,8 +2525,19 @@ class CombatResolutionMixin:
                     if relentless:
                         damage_event["relentless"] = relentless
                     events.append(damage_event)
-                    events.extend(self._concentration_events(instance, combat, target, damage, rng))
-                    dealt[target_id] = dealt.get(target_id, 0) + damage
+                    # Hunter's Mark 认的是"任意攻击检定命中"，法术攻击也在内：
+                    # 独立实例、独立抗性，但只算一次专注豁免。
+                    mark_row = self._mark_rider_row(actor, target_id)
+                    mark_event, mark_damage = (
+                        self._rider_damage_event(mark_row, target, critical, rng)
+                        if mark_row is not None else (None, 0)
+                    )
+                    if mark_event is not None:
+                        events.append(mark_event)
+                    events.extend(self._concentration_events(
+                        instance, combat, target, damage + mark_damage, rng,
+                    ))
+                    dealt[target_id] = dealt.get(target_id, 0) + damage + mark_damage
                     total_dealt = dealt[target_id]
                     if (
                         target["kind"] == "enemy"
@@ -2612,6 +2757,8 @@ class CombatResolutionMixin:
                 })
                 succeeded = True
             elif mode in {"buff", "debuff"}:
+                # 标记类法术也走这条分支：它们不造成伤害、不施加条件，只把
+                # "谁是我的目标"写进施法者的专注实例（已在上方落地）。
                 succeeded = True
             condition = str(effect.get("condition") or "")
             condition_applies = (

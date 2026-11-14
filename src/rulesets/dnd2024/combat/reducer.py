@@ -671,11 +671,39 @@ class CombatReducerMixin:
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind in {"player", "companion"}:
+                instance = {
+                    "spell_ref": event["spell_ref"],
+                    "target_ids": deepcopy(event["target_ids"]),
+                }
+                # 只有把"唯一当前目标"写进实例，同一施法者"同时只有一个标记"
+                # 才是数据形状：任何第二个标记都必须先覆盖这一条。
+                if event.get("mark_target_id"):
+                    instance["mark_target_id"] = str(event["mark_target_id"])
+                if event.get("mark_expires_hours") is not None:
+                    instance["mark_expires_hours"] = int(event["mark_expires_hours"])
                 concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
                     "concentration"
-                ] = {
-                    "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
-                }
+                ] = instance
+            return
+        if event_type == "dnd2024.concentration.retargeted":
+            # 转移只改目标：spell_ref 与剩余时长都留在原实例上，所以它不是
+            # 一次新的专注，也不会被写成第二个实例。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                return
+            holder = concentration_holder(self._canonical_of(snapshot, kind, raw_id))
+            instance = holder.get("concentration")
+            if not isinstance(instance, dict):
+                raise EventBatchError("no concentration instance to retarget")
+            if str(instance.get("spell_ref") or "") != str(event["spell_ref"]):
+                raise EventBatchError("the concentration instance holds another spell")
+            if not instance.get("mark_target_id"):
+                raise EventBatchError("the concentration instance is not a mark")
+            instance["mark_target_id"] = str(event["target_id"])
+            # 标记法术的 target_ids 与 mark_target_id 是同一件事的两种写法；
+            # 一个写入点同时更新两者，才不会出现"标已转移、目标列表还停在
+            # 上一只生物"的实例。
+            instance["target_ids"] = [str(event["target_id"])]
             return
         if event_type == "dnd2024.concentration.ended":
             owner = str(event["actor_id"])

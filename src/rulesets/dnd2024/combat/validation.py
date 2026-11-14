@@ -53,7 +53,7 @@ from .primitives import (
     canonical as _canonical,
     rider_attack_kind,
 )
-from .check_modes import condition_flags
+from .check_modes import condition_flags, owned_mark, vision_codes
 from .check_windows import (
     CHECK_WINDOW_DECISION,
     DAMAGE_WINDOW_DECISION,
@@ -1105,6 +1105,11 @@ class CombatValidationMixin:
             raise CombatIntentError("this spell requires a pending melee hit")
         if trigger is not None and effect["mode"] != "triggered_damage":
             raise CombatIntentError("resolve the melee hit spell decision first")
+        if intent.get("retarget_mark"):
+            # 转移标记是一次独立的声明：它复用同一个法术实例，因此不走
+            # 施法成本、目标数量与免费次数那一整套。
+            self._validate_mark_retarget(instance, combat, intent, actor, economy, effect)
+            return
         if intent.get("spend_luck") and effect["mode"] != "spell_attack":
             raise CombatIntentError("spend_luck requires a spell attack roll")
         self._validate_lucky_spend(instance, intent, actor)
@@ -1187,6 +1192,12 @@ class CombatValidationMixin:
                     combat, actor["actor_id"], target_id,
                     self._spell_effective_range(actor, spell, effect),
                 )
+            if effect.get("marks_target") and not self._spell_target_visible(
+                instance, combat, actor, target,
+            ):
+                # 只有"你能看见的一个生物"才能被标记；不可见目标在 30 尺内
+                # 被 Blindsight 覆盖时算看得见，这正是 Feral Senses 的作用点。
+                raise CombatIntentError("you cannot see the creature you are marking")
         self._validate_cantrip_temp_hp_target(instance, combat, intent, actor, spell, effect)
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
@@ -1235,6 +1246,78 @@ class CombatValidationMixin:
                 raise CombatIntentError("teleport distance exceeds the spell range")
         elif intent.get("teleport_distance") is not None:
             raise CombatIntentError("teleport distance is not valid for this spell")
+
+    def _spell_target_visible(
+        self, instance: Any, combat: dict[str, Any],
+        actor: dict[str, Any], target: dict[str, Any],
+    ) -> bool:
+        """Whether the caster can see this creature right now.
+
+        Visibility is not "is it invisible": it is "does its Invisible still
+        hide it from *me*".  The registry owns the second half -- the negations
+        that cancel ``invisible`` -- so this method asks the same list the
+        attack matrix asks, at this distance, instead of inventing a second
+        rule for spell targeting.
+        """
+
+        target_conditions = target.get("conditions") or {}
+        if "invisible" not in target_conditions:
+            return True
+        negations: set[str] = set()
+        for declaration in (
+            (self.catalog.conditions.get("invisible") or {}).get("attack_modes") or []
+        ):
+            negations.update(str(code) for code in declaration.get("negated_by") or [])
+        distance = self._distance(
+            combat, str(actor["actor_id"]), str(target["actor_id"]),
+        )
+        return bool(negations & vision_codes(self, actor, distance=distance))
+
+    def _validate_mark_retarget(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], economy: dict[str, Any], effect: dict[str, Any],
+    ) -> None:
+        """Every precondition of "move the mark" is checked before any event.
+
+        The move is free on purpose: it reuses the instance, so it must not
+        look like a second cast to validation, the reducer or the log.  What it
+        does cost is the Bonus Action, and what it requires is that the spell
+        it moves is still *this caster's* current instance.
+        """
+
+        if not effect.get("marks_target"):
+            raise CombatIntentError("this spell has no mark to move")
+        if not owned_mark(actor):
+            raise CombatIntentError("there is no Hunter's Mark to move")
+        if int(economy.get("bonus_action", 0) or 0) < 1:
+            raise CombatIntentError("the bonus action has already been spent")
+        raw = intent.get("target_ids")
+        target_ids = [str(item) for item in raw] if isinstance(raw, list) else []
+        if len(target_ids) != 1 or not target_ids[0]:
+            raise CombatIntentError("the mark moves to exactly one creature")
+        new_target_id = target_ids[0]
+        current_id = str(owned_mark(actor).get("mark_target_id") or "")
+        if not current_id:
+            raise CombatIntentError("this Hunter's Mark has no target")
+        if new_target_id == current_id:
+            raise CombatIntentError("the mark is already on that creature")
+        current = self._actor_view(instance, combat, current_id)
+        if int(current.get("hp", 0) or 0) > 0:
+            raise CombatIntentError(
+                "the mark can only move after its target drops to 0 hit points"
+            )
+        target = self._actor_view(instance, combat, new_target_id)
+        if int(target.get("hp", 0) or 0) <= 0:
+            raise CombatIntentError("spell target is not active")
+        if str(target.get("side") or "") == str(actor.get("side") or ""):
+            # 与施放同一条边界：标记属于进攻性法术，不能落在盟友身上。
+            raise CombatIntentError("Hunter's Mark marks a hostile creature")
+        self._require_range(
+            combat, str(actor["actor_id"]), new_target_id,
+            int(effect.get("mark_retarget_range") or effect.get("range") or 0),
+        )
+        if not self._spell_target_visible(instance, combat, actor, target):
+            raise CombatIntentError("you cannot see the new target")
 
     def _validate_cantrip_temp_hp_target(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

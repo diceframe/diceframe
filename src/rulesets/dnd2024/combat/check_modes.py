@@ -109,6 +109,8 @@ def condition_check_bonus_rolls(
 
 def attack_sources(
     registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
+    *, actor_senses: frozenset[str] = frozenset(),
+    target_senses: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Collect the registry-declared attack modifiers for this attack roll.
 
@@ -117,6 +119,14 @@ def attack_sources(
     is checked against the *observer* -- the attacker for target-side
     declarations, the target for actor-side ones -- so a creature that can see
     through the trick does not grant/benefit from it.
+
+    ``actor_senses`` / ``target_senses`` are the *derived* sense codes the two
+    sides bring to this roll (Blindsight today).  A sense is not a condition:
+    it depends on the distance between the two creatures, so it cannot be
+    written onto either one of them.  It answers the same question the
+    ``negated_by`` list asks, which is what keeps the registry the single place
+    that says *what* cancels a condition while this function answers *whether
+    the observer has it right now*.
 
     ``long_range`` stays code-generated: it is a positional fact of the attack,
     not a condition.
@@ -128,9 +138,13 @@ def attack_sources(
             on_actor = declaration["side"] == "actor"
             holder = actor if on_actor else target
             observer = target if on_actor else actor
+            senses = target_senses if on_actor else actor_senses
             if condition_id not in holder["conditions"]:
                 continue
-            if any(code in observer["conditions"] for code in declaration.get("negated_by") or []):
+            if any(
+                code in observer["conditions"] or code in senses
+                for code in declaration.get("negated_by") or []
+            ):
                 continue
             sources.append({"code": condition_id, "mode": declaration["mode"]})
     if range_disadvantage:
@@ -141,6 +155,127 @@ def attack_sources(
 def mode_from_sources(sources: list[dict]) -> str:
     modes = {row["mode"] for row in sources}
     return next(iter(modes)) if len(modes) == 1 else ""
+
+
+#: The only spell whose instance carries a ``mark_target_id`` today.  Foe Slayer,
+#: Precise Hunter and the extra damage all read this one instance, so the ref
+#: lives here instead of being spelled out at each reader.
+HUNTERS_MARK_REF = "spell:hunter_s_mark"
+
+
+def owned_mark(actor: dict) -> dict:
+    """The Hunter's Mark instance this actor owns, or ``{}``.
+
+    A mark is caster-bound state, never a condition on the target: two Rangers
+    marking the same creature must not share a die, and a second caster must
+    not inherit the first one's Advantage.  Reading the *attacker's* own
+    concentration is what makes that true by construction.
+    """
+
+    concentration = actor.get("concentration")
+    if not isinstance(concentration, dict):
+        return {}
+    if str(concentration.get("spell_ref") or "") != HUNTERS_MARK_REF:
+        return {}
+    return concentration
+
+
+def marked_target_id(actor: dict) -> str:
+    return str(owned_mark(actor).get("mark_target_id") or "")
+
+
+def sense_declarations(engine: Any, observer: dict) -> list[dict[str, Any]]:
+    """Every sense this creature owns, with the range it owns it at.
+
+    This half is distance-independent on purpose: Blindsight 30 is a property
+    of the creature and is shown as such, while *applying* it to a specific
+    attack needs the distance between the two.  Splitting the two is what lets
+    the same declaration answer both without a second copy of "30".
+    """
+
+    rows: list[dict[str, Any]] = []
+    character = engine._feature_character(observer)
+    range_ft = int(engine.features.feature_value(
+        character, "feral_senses", "blindsight_range_ft", 0,
+    ) or 0)
+    if range_ft > 0:
+        rows.append({
+            "code": "blindsight", "range_ft": range_ft, "source": "feral_senses",
+        })
+    return rows
+
+
+def observer_senses(
+    engine: Any, observer: dict, *, distance: int | None,
+) -> list[dict[str, Any]]:
+    """Sourced sense codes this observer can apply at ``distance``.
+
+    Blindsight is a range, not a flag: Feral Senses grants 30 feet, so the same
+    creature cancels a Blur at 30 and does not at 31.  ``distance`` is ``None``
+    only when no combat exists yet, which is the one case where nothing is
+    within range of anything.
+
+    Truesight is deliberately absent: the SRD's Blindsight sees through
+    Invisibility and Blur, but it does not see through illusions, shapechangers
+    or the Ethereal Plane, so it must never answer the ``truesight`` code.
+    """
+
+    if distance is None:
+        return []
+    return [
+        row for row in sense_declarations(engine, observer)
+        if distance <= int(row["range_ft"])
+    ]
+
+
+def vision_codes(engine: Any, observer: dict, *, distance: int | None) -> frozenset[str]:
+    """Every negation code the observer brings to a sight question.
+
+    Conditions and derived senses answer the same question -- "does this
+    creature see through that?" -- so they are merged once here and matched
+    against the registry's ``negated_by`` list by the caller.  Keeping the
+    merge in one place is what stops "can I see it" from drifting away from
+    "does its Blur still impose Disadvantage".
+    """
+
+    codes = {str(code) for code in (observer.get("conditions") or {})}
+    codes.update(row["code"] for row in observer_senses(engine, observer, distance=distance))
+    return frozenset(codes)
+
+
+def mark_attack_sources(engine: Any, actor: dict, target: dict) -> list[dict[str, str]]:
+    """Precise Hunter: Advantage against the creature your own mark names."""
+
+    wanted = marked_target_id(actor)
+    if not wanted or wanted != str(target.get("actor_id") or ""):
+        return []
+    if not engine.features.has_feature(
+        engine._feature_character(actor), "precise_hunter",
+    ):
+        return []
+    return [{"code": "precise_hunter", "mode": "advantage"}]
+
+
+def mark_find_sources(
+    engine: Any, actor: dict, skill_id: str, target_id: str,
+) -> list[dict[str, str]]:
+    """Advantage on the Wisdom checks made to find your marked quarry.
+
+    The skill list and the spell's own identity both come from the catalog
+    effect, so "Perception and Survival, and only while it is your current
+    mark" is one declaration instead of three code paths.  Other abilities,
+    other skills and other creatures answer with an empty list.
+    """
+
+    effect = engine.catalog.spell_effects.get(
+        HUNTERS_MARK_REF.removeprefix("spell:")
+    ) or {}
+    allowed = {str(item) for item in effect.get("mark_find_skills") or ()}
+    if str(skill_id) not in allowed:
+        return []
+    if marked_target_id(actor) != str(target_id):
+        return []
+    return [{"code": "hunter_s_mark", "mode": "advantage"}]
 
 
 def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
@@ -159,10 +294,31 @@ def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
     if combat is not None:
         actor = engine._effective_target(instance, combat, actor)
         target = engine._effective_target(instance, combat, target)
-    sources = attack_sources(engine.catalog.conditions, actor, target, range_disadvantage)
+    if combat is None:
+        combat = ruleset_runtime.state(instance).get("combat") or {}
+    # 感官依赖两只生物之间的距离，所以在这里按本次攻击求值；写进任一方身上
+    # 都会变成"隔着 60 尺也看得见"。
+    distance: int | None = None
+    if combat.get("positions") is not None:
+        distance = engine._distance(
+            combat, str(actor.get("actor_id") or ""), str(target.get("actor_id") or ""),
+        )
+    actor_senses = frozenset(
+        row["code"] for row in observer_senses(engine, actor, distance=distance)
+    )
+    target_senses = frozenset(
+        row["code"] for row in observer_senses(engine, target, distance=distance)
+    )
+    sources = attack_sources(
+        engine.catalog.conditions, actor, target, range_disadvantage,
+        actor_senses=actor_senses, target_senses=target_senses,
+    )
     # 意图声明的来源（如 Lucky）只在本次掷骰生效，不写进持续条件注册表：
     # 追加到来源列表后由同一个归一函数处理优劣势抵消。
     sources.extend(extra_sources)
+    # Precise Hunter 也走这里：它回答的是"这一掷对谁有优势"，定义在攻击方
+    # 自己持有的法术实例上，所以对武器攻击和法术攻击都成立。
+    sources.extend(mark_attack_sources(engine, actor, target))
     if use_grant and actor["kind"] == "player":
         grant = scoped(instance, actor["actor_id"].removeprefix("player:"), context_id(engine, instance)).get("grant")
         if grant:

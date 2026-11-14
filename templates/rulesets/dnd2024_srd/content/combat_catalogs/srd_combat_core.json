@@ -83,6 +83,19 @@
     "hex": {"mode": "debuff", "range": 90, "target_count": 1, "condition": "hexed", "condition_duration": "concentration", "concentration": true},
     "faerie_fire": {"mode": "saving_throw", "save": "dex", "range": 60, "condition": "faerie_fire", "condition_duration": "concentration", "concentration": true},
     "heroism": {"mode": "buff", "range": 5, "target_count": 1, "condition": "heroism", "condition_duration": "concentration", "concentration": true},
+    "hunter_s_mark": {
+      "mode": "debuff",
+      "range": 90,
+      "target_count": 1,
+      "concentration": true,
+      "marks_target": true,
+      "mark_damage": "1d6",
+      "mark_damage_type": "force",
+      "mark_duration_hours": 1,
+      "mark_duration_hours_by_slot": {"3": 8, "5": 24},
+      "mark_retarget_range": 90,
+      "mark_find_skills": ["perception", "survival"]
+    },
     "divine_smite": {
       "mode": "triggered_damage",
       "trigger": "melee_hit",
@@ -115,8 +128,8 @@
     "dodging": {"attack_modes": [{"side": "target", "mode": "disadvantage"}]},
     "blurred": {"attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}]},
     "invisible": {"initiative_advantage": true, "attack_modes": [
-      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight"]},
-      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
+      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]},
+      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}
     ]},
     "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
     "charmed": {"cannot_attack_source": true},
