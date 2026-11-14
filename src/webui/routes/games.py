@@ -77,6 +77,7 @@ from src.webui.routes.game_character_routes import (
     api_live_character_advancement_apply,
     api_live_advancement_control,
     api_live_character_rest,
+    api_live_character_spells,
     api_char_delete,
     api_npc_portrait_update,
     api_npc_standing_portrait_update,
@@ -258,6 +259,10 @@ def register_games(app: web.Application) -> None:
     app.router.add_post(
         "/api/games/{game_key}/character/{user_id}/rest",
         api_live_character_rest,
+    )
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/spells",
+        api_live_character_spells,
     )
     app.router.add_route(
         "DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete

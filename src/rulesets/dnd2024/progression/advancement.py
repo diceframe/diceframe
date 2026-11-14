@@ -19,6 +19,7 @@ from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
 )
+from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
 # 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
@@ -316,7 +317,9 @@ class Dnd2024AdvancementEngine:
             ("cantrip_refs", "cantrip_count", "cantrips"),
             ("prepared_spell_refs", "prepared_spell_count", "prepared spells"),
         )
-        if class_ref == "class:wizard":
+        # 有法术书的职业才审计法术书数量；"有没有法术书"是内容说的，不是职业名字。
+        policy = PreparationPolicy.for_class(self.bundle, class_ref)
+        if policy is not None and policy.source == "spellbook":
             checks = (*checks, ("spellbook_refs", "spellbook_minimum", "spellbook spells"))
 
         missing: list[dict[str, Any]] = []
@@ -507,13 +510,25 @@ class Dnd2024AdvancementEngine:
             current_prepared = list(before_spell.get("prepared_spell_refs") or [])
             current_spellbook = list(before_spell.get("spellbook_refs") or [])
             target_requirements = spell_selection.requirements(class_ref, target_level)
+            previous_lists = {
+                "cantrip_refs": current_cantrips,
+                "prepared_spell_refs": current_prepared,
+                "spellbook_refs": current_spellbook,
+            }
+            policy = PreparationPolicy.for_class(self.bundle, class_ref)
+            # 法术书每级固定加 N 个。只要策略声明了增量，这一级就必须提交
+            # 一份书目：旧书恰好等于下一级的下限，只能说明以前的账平了，
+            # 不能说明本级的 N 个已经选过。宁可多要一次输入，也不放过一条
+            # 靠"总数刚好对得上"通过的空升级。
+            spellbook_growth = (
+                int(policy.spellbook_gain_per_level or 0)
+                if policy is not None and policy.source == "spellbook"
+                else 0
+            )
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
-                or (
-                    class_ref == "class:wizard"
-                    and len(current_spellbook) != target_requirements["spellbook_minimum"]
-                )
+                or spellbook_growth > 0
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
@@ -523,11 +538,24 @@ class Dnd2024AdvancementEngine:
                     "kind": "spell_selection",
                     "required": spell_choice_required,
                     **target_requirements,
+                    # 三个上限交给客户端做即时提示与禁用，出提交前就能看出
+                    # 超额；服务端仍然逐条校验，二者用同一份策略数据。
+                    "additions": max(
+                        0,
+                        int(target_requirements["prepared_spell_count"])
+                        - len(current_prepared),
+                    ),
+                    "replace_limit": policy.level_up_replace if policy else 0,
+                    "cantrip_replace_limit": (
+                        1 if policy and policy.cantrip_swap_on == "level_up" else 0
+                    ),
+                    "spellbook_additions": spellbook_growth,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
                 })
                 spell_choices, spell_errors = spell_selection.validate(
                     class_ref, target_level, raw_spell_choices,
+                    previous=previous_lists,
                 )
                 errors.extend(spell_errors)
             else:
