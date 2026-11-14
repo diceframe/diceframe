@@ -1384,6 +1384,7 @@ class Dnd2024Runtime:
             "death_save_crit_threshold",
             "check_bonus_rolls",
             "aura_bonus", "aura_sources", "blocked_condition", "blocked_by_aura",
+            "blocked_by_feature",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
             "item_ref",

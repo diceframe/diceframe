@@ -346,6 +346,17 @@
           }
         },
         {
+          "id": "self_restoration",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p52:self-restoration",
+          "summary": "At the end of each of your turns, you can remove one of the following conditions from yourself: Charmed, Frightened, or Poisoned. In addition, forgoing food and drink doesn't give you levels of Exhaustion.",
+          "parameters": {
+            "removable_conditions": ["charmed", "frightened", "poisoned"],
+            "removable_at": "own_turn_end",
+            "exhaustion_sources_ignored": ["food_drink"]
+          }
+        },
+        {
           "id": "evasion",
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p51:evasion",
@@ -408,6 +419,17 @@
           "parameters": {
             "aura_source_feature_id": "aura_of_protection",
             "aura_condition_immunities": ["charmed"]
+          }
+        },
+        {
+          "id": "aura_of_courage",
+          "owner": "class:paladin",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p55:aura-of-courage",
+          "summary": "You and your allies have Immunity to the Frightened condition while in your Aura of Protection. If a Frightened ally enters the aura, that condition has no effect on that ally while there.",
+          "parameters": {
+            "aura_source_feature_id": "aura_of_protection",
+            "aura_condition_immunities": ["frightened"]
           }
         },
         {
@@ -618,6 +640,19 @@
               "actions": [{"kind": "rage_sustain", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "mindless_rage",
+          "owner": "subclass:path_of_the_berserker",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p30:mindless-rage",
+          "summary": "You have Immunity to the Charmed and Frightened conditions while your Rage is active. If you are Charmed or Frightened when you enter your Rage, the condition ends on you.",
+          "parameters": {
+            "immune_conditions": ["charmed", "frightened"],
+            "immune_while_condition": "rage",
+            "removes_conditions_on_gaining_condition": "rage",
+            "removes_conditions_on_gaining": ["charmed", "frightened"]
+          }
         },
         {
           "id": "retaliation",

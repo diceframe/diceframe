@@ -380,10 +380,22 @@ class Dnd2024CombatEngine(
                 "type": "move", "label": "Move", "actor_id": current,
                 "expected_version": version, "movement_remaining": economy["movement"],
             })
-        actions.append({
+        end_turn_entry: dict[str, Any] = {
             "type": "end_turn", "label": "End turn", "actor_id": current,
             "expected_version": version,
-        })
+        }
+        # 回合末移除是一个"可选"越项：面板必须能看出可移除哪几项，否则
+        # 玩家只能靠猜该传什么值；候选来自声明白名单与当前实有条件，服务端
+        # 在 intent 边界仍会重验同一份事实。
+        choice = self._self_restoration_choice(actor)
+        if choice is not None:
+            _feature_id, removable = choice
+            options = sorted(
+                code for code in (actor.get("conditions") or {}) if code in removable
+            )
+            if options:
+                end_turn_entry["self_restoration_options"] = options
+        actions.append(end_turn_entry)
         if actor_id == gm_uid:
             actions.append({
                 "type": "combat.end", "label": "End combat", "expected_version": version,
@@ -861,7 +873,7 @@ class Dnd2024CombatEngine(
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
         elif intent_type == "end_turn":
-            events.extend(self._end_turn_events(instance, combat, rng))
+            events.extend(self._end_turn_events(instance, combat, rng, intent))
         elif intent_type == "death_save":
             events.extend(self._death_save_events(instance, combat, intent, rng))
         elif intent_type == "stabilize":
@@ -1508,6 +1520,150 @@ class Dnd2024CombatEngine(
         if best is None:
             return {"bonus": 0, "sources": []}
         return {"bonus": best.pop("bonus"), "sources": [best]}
+
+    def _passive_condition_immunity(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+        condition_id: str,
+    ) -> dict[str, str] | None:
+        """The feature the target owns that makes ``condition_id`` a no-op.
+
+        Unlike an aura this needs no projection and no distance: the feature is
+        on the target, so the only question is whether its gate is met.  The
+        gate is a condition id (Mindless Rage is only on while Rage is on), and
+        it is read from the *effective* condition set -- a condition that an
+        aura already suppressed cannot switch a second immunity on.
+        """
+
+        wanted = str(condition_id or "")
+        target_id = str(target.get("actor_id") or "")
+        if not wanted or not target_id or str(target.get("side") or "") != "party":
+            return None
+        character = self._feature_character(target)
+        if not character:
+            return None
+        conditions = self._effective_conditions(instance, combat, target)
+        for definition in self.features.active_features_for(character):
+            declared = definition.parameters.get("immune_conditions")
+            if not isinstance(declared, list) or wanted not in declared:
+                continue
+            gate = definition.parameters.get("immune_while_condition")
+            if isinstance(gate, str) and gate and gate not in conditions:
+                continue
+            return {
+                "feature_id": definition.id,
+                "owner": definition.owner,
+                "source_actor_id": target_id,
+            }
+        return None
+
+    def _condition_immunity_blocker(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+        condition_id: str,
+    ) -> dict[str, str] | None:
+        """Why ``condition_id`` cannot affect the target at all right now.
+
+        One question, two shapes of answer: an emanation the target stands in,
+        or a feature the target carries.  Both are reported as the same record
+        so the settlement path has exactly one branch, and ``scope`` says which
+        kind it was -- an interception whose reason cannot be read is not an
+        audit trail.
+        """
+
+        aura = self._aura_condition_immunity_source(
+            instance, combat, target, condition_id,
+        )
+        if aura is not None:
+            return {**aura, "scope": "aura"}
+        passive = self._passive_condition_immunity(
+            instance, combat, target, condition_id,
+        )
+        if passive is not None:
+            return {**passive, "scope": "feature"}
+        return None
+
+    def _suppressed_condition_codes(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> frozenset[str]:
+        """Conditions the actor still carries but that have no effect now.
+
+        Only suppression by an aura is modelled, and only for the condition
+        ids some declaration actually immunizes -- asking the aura machinery
+        about a condition nothing can intercept would cost a projection per
+        condition for an answer that is always "no".
+        """
+
+        if str(actor.get("side") or "") != "party":
+            return frozenset()
+        declared = {
+            code
+            for definition in self.features.catalog.features_by_key.values()
+            for code in (definition.parameters.get("aura_condition_immunities") or [])
+            if isinstance(code, str)
+        }
+        present = declared & set((actor.get("conditions") or {}).keys())
+        if not present:
+            return frozenset()
+        return frozenset(
+            code for code in present
+            if self._aura_condition_immunity_source(instance, combat, actor, code) is not None
+        )
+
+    def _effective_conditions(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The condition set the mechanics should read.
+
+        Canonical state keeps every entry, its source and its duration: an aura
+        does not delete a condition, it makes it inert while the creature
+        stands inside.  This view is the other half of that sentence, and it is
+        what ``condition_flags``, attack modes, speed and intent validation
+        must consult so that "suppressed" means the same thing everywhere.
+        """
+
+        conditions = actor.get("conditions") or {}
+        suppressed = self._suppressed_condition_codes(instance, combat, actor)
+        if not suppressed:
+            return conditions
+        return {
+            code: value for code, value in conditions.items() if code not in suppressed
+        }
+
+    def _effective_target(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> dict[str, Any]:
+        """A shallow copy of ``actor`` whose ``conditions`` are the effective set.
+
+        Pure helpers such as ``attack_sources`` take a view and read
+        ``conditions`` from it; giving them this copy is cheaper and less
+        invasive than threading a second condition argument through every call.
+        """
+
+        suppressed = self._suppressed_condition_codes(instance, combat, actor)
+        if not suppressed:
+            return actor
+        return {**actor, "conditions": self._effective_conditions(instance, combat, actor)}
+
+    def _self_restoration_choice(
+        self, actor: dict[str, Any],
+    ) -> tuple[str, frozenset[str]] | None:
+        """The feature that may remove one condition at this actor's turn end.
+
+        The timing is part of the declaration, so the engine asks "is there a
+        feature whose removal happens at my turn end" rather than "is this a
+        monk".  Returns the feature id and the whitelist the server re-checks
+        the player's choice against.
+        """
+
+        character = self._feature_character(actor)
+        if not character:
+            return None
+        for definition in self.features.active_features_for(character):
+            if definition.parameters.get("removable_at") != "own_turn_end":
+                continue
+            allowed = definition.parameters.get("removable_conditions")
+            if isinstance(allowed, list) and allowed:
+                return definition.id, frozenset(str(code) for code in allowed)
+        return None
 
     def _aura_condition_immunity_source(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],

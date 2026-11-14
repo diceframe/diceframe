@@ -358,7 +358,9 @@ class CombatValidationMixin:
             self._validate_lucky_spend(instance, intent, actor)
         # 失能族只禁"动作"（动作/附赠动作/反应），移动不是动作：纯 incapacitated
         # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
-        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        # 读的是有效条件：被光环抑制的 Frightened 不能继续禁动作。
+        conditions = self._effective_conditions(instance, combat, actor)
+        flags = condition_flags(self.catalog.conditions, conditions)
         if flags["incapacitated"] and intent_type in {
             "attack", "cast_spell", "activate_item", "class_capability", "dash", "dodge",
             "disengage", "hide", "stabilize",
@@ -384,8 +386,19 @@ class CombatValidationMixin:
                 raise CombatIntentError("movement distance must be a non-zero integer")
             if abs(distance) > int(economy.get("movement", 0) or 0):
                 raise CombatIntentError("movement exceeds the remaining speed")
+            for source_id in self._restriction_sources(conditions, "cannot_approach_source"):
+                before = self._distance(combat, actor["actor_id"], source_id)
+                after = self._distance_after_move(
+                    combat, actor["actor_id"], source_id, distance,
+                )
+                if after < before:
+                    raise CombatIntentError(
+                        "a frightened creature cannot move closer to the source of its fear"
+                    )
         if intent_type == "attack":
             self._validate_attack(instance, combat, intent, actor)
+        if intent_type == "end_turn":
+            self._validate_self_restoration(actor, intent)
         if intent_type == "class_capability":
             self._validate_class_capability(instance, combat, intent, actor, economy)
         if intent_type == "cast_spell":
@@ -580,6 +593,64 @@ class CombatValidationMixin:
         ):
             raise CombatIntentError("lucky pool is empty")
 
+    def _validate_self_restoration(
+        self, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> None:
+        """The turn-end removal is a choice, and a choice has to be legal.
+
+        Absent means "not used": the engine never picks a condition for the
+        player, and it never removes two.  A declared value must name one of
+        the feature's own conditions *and* be one the actor actually has -- a
+        stale client must not be able to delete a condition that is not there,
+        nor one that arrived after the panel was rendered.
+        """
+
+        if "self_restoration_condition" not in intent:
+            return
+        requested = intent["self_restoration_condition"]
+        if requested is None:
+            return
+        chosen = self._self_restoration_choice(actor)
+        if chosen is None:
+            raise CombatIntentError(
+                "this actor has no feature that removes a condition at turn end"
+            )
+        feature_id, allowed = chosen
+        if not isinstance(requested, str) or not requested:
+            raise CombatIntentError("self_restoration_condition must be a condition id")
+        if requested not in allowed:
+            raise CombatIntentError(
+                f"{feature_id} cannot remove the {requested} condition"
+            )
+        if requested not in (actor.get("conditions") or {}):
+            raise CombatIntentError(f"the actor does not have the {requested} condition")
+
+    def _restriction_sources(
+        self, conditions: dict[str, Any], flag: str,
+    ) -> list[str]:
+        """Actor ids named by the conditions that declare ``flag``.
+
+        A condition such as Frightened restricts behaviour *towards its own
+        source*, so the restriction is data on the stored entry, not a branch
+        on the condition id.  An entry without a recorded source cannot be
+        scoped to anyone and is therefore not enforced -- blocking every
+        direction would be a worse answer than a restriction that visibly does
+        nothing, and the settlement paths always record the source.
+        """
+
+        sources: list[str] = []
+        for condition_id, entry in self.catalog.conditions.items():
+            if not entry.get(flag) or condition_id not in conditions:
+                continue
+            stored = conditions.get(condition_id)
+            source = (
+                str(stored.get("source_actor_id") or "")
+                if isinstance(stored, dict) else ""
+            )
+            if source and source not in sources:
+                sources.append(source)
+        return sources
+
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
@@ -590,6 +661,11 @@ class CombatValidationMixin:
         target_side = str(target.get("side") or "")
         if target_side == actor_side or target["hp"] <= 0:
             raise CombatIntentError("attack target must be a living hostile actor")
+        conditions = self._effective_conditions(instance, combat, actor)
+        if target_id in self._restriction_sources(conditions, "cannot_attack_source"):
+            raise CombatIntentError(
+                "a charmed creature cannot attack the creature that charmed it"
+            )
         weapon = self._declared_attack(actor, intent)
         if weapon is None:
             # 一个 lookup 同时覆盖装备武器、徒手打击与敌人 attack profile：

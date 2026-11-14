@@ -654,6 +654,7 @@ class CombatResolutionMixin:
         check_mode = attack_mode(
             self, instance, actor, target, range_disadvantage,
             use_grant=spend_attack_action, extra_sources=extra_sources,
+            combat=combat,
         )
         # 未受训护甲：武器/徒手攻击（力/敏掷骰）具有劣势。这里内联而不进
         # check_modes，因为 spell_attack 也用 attack_mode 但走施法属性，不能误伤。
@@ -668,7 +669,8 @@ class CombatResolutionMixin:
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
         natural = max(first, second) if advantage and second else min(first, second) if disadvantage and second else first
         check_bonus_rolls = condition_check_bonus_rolls(
-            self.catalog.conditions, actor["conditions"], "attack", rng,
+            self.catalog.conditions,
+            self._effective_conditions(instance, combat, actor), "attack", rng,
         )
         check_bonus = sum(row["roll"] for row in check_bonus_rolls)
         total = natural + attack_bonus + check_bonus
@@ -1088,7 +1090,7 @@ class CombatResolutionMixin:
                 )
                 check_mode = attack_mode(
                     self, instance, visible_actor, visible_target, False,
-                    extra_sources=extra_sources,
+                    extra_sources=extra_sources, combat=combat,
                 )
                 rolls = [int(rng.randint(1, 20))]
                 if check_mode["mode"]:
@@ -1096,7 +1098,9 @@ class CombatResolutionMixin:
                 roll = max(rolls) if check_mode["mode"] == "advantage" else min(rolls)
                 bonus = int(actor["spell_attack_bonus"])
                 check_bonus_rolls = condition_check_bonus_rolls(
-                    self.catalog.conditions, visible_actor["conditions"], "attack", rng,
+                    self.catalog.conditions,
+                    self._effective_conditions(instance, combat, visible_actor),
+                    "attack", rng,
                 )
                 # 加值骰逐掷骰各一枚：多道射线逐 beam 各掷一次。
                 check_bonus = sum(row["roll"] for row in check_bonus_rolls)
@@ -1418,28 +1422,39 @@ class CombatResolutionMixin:
                 or (mode == "saving_throw" and not succeeded)
                 or mode in {"buff", "debuff"}
             )
-            # 光环条件免疫：命中则根本不产生 condition.applied，并把拦截来源
-            # 写回本次豁免事件（没有 check event 时改用一条 message 留痕）。
+            # 条件免疫：命中则根本不产生 condition.applied，并把拦截来源写回
+            # 本次豁免事件（没有 check event 时改用一条 message 留痕）。
             # 豁免本身仍然是失败——被免疫的是条件的落地，不是掷骰结果。
-            blocked_by_aura: dict[str, str] | None = None
+            # 两个字段名区分"站在谁的灵光里"与"我自己带着免疫"：玩家看到的
+            # 拦截原因不能只有一句"没生效"。
+            blocked: dict[str, str] | None = None
+            blocked_field = ""
             if condition and condition_applies:
-                blocked_by_aura = self._aura_condition_immunity_source(
+                blocker = self._condition_immunity_blocker(
                     instance, combat, target, condition,
                 )
-            if blocked_by_aura:
+                if blocker is not None:
+                    scope = str(blocker.get("scope") or "")
+                    blocked = {
+                        key: value for key, value in blocker.items() if key != "scope"
+                    }
+                    blocked_field = (
+                        "blocked_by_aura" if scope == "aura" else "blocked_by_feature"
+                    )
+            if blocked:
                 if save_check_index is not None:
                     events[save_check_index]["blocked_condition"] = condition
-                    events[save_check_index]["blocked_by_aura"] = blocked_by_aura
+                    events[save_check_index][blocked_field] = blocked
                 else:
                     # 免疫不依赖豁免：buff/debuff/自动伤害同样经过这里。这些
                     # 路径没有 check event 可挂，但被吞掉的条件必须留痕，否则
                     # 只能靠怀疑；用既有 message 类型，不新增事件类型。
                     events.append({
                         "type": "dnd2024.combat.message", "target_id": target_id,
-                        "text": f"{condition} has no effect inside an aura",
+                        "text": f"{condition} has no effect on this creature",
                         "condition": condition,
                         "blocked_condition": condition,
-                        "blocked_by_aura": blocked_by_aura,
+                        blocked_field: blocked,
                     })
             elif condition and condition_applies:
                 applied = {
@@ -1994,6 +2009,11 @@ class CombatResolutionMixin:
                     "sustained_this_turn": False, "established": False,
                     "source_actor_id": actor_id,
                 })
+                # 进入狂暴时"已有的条件直接结束"，与"之后的免疫"是两件事：
+                # 免疫只拦新增，已经挂上的条目要真的删除并留下可审计事件。
+                events.extend(
+                    self._condition_gain_cleanup_events(instance, actor, "rage")
+                )
             elif action.kind == "rage_sustain":
                 # 只刷新续期标记；``turns_remaining`` 由回合结束的到期检查递减，
                 # 延长一次不等于重置 10 分钟上限。
@@ -2291,8 +2311,85 @@ class CombatResolutionMixin:
                 })
         return events
 
+    def _condition_gain_cleanup_events(
+        self, instance: Any, actor: dict[str, Any], gained: str,
+    ) -> list[dict[str, Any]]:
+        """Conditions that end because ``gained`` just started.
+
+        Mindless Rage is two rules wearing one name: while raging you are
+        immune, and entering the rage *ends* what you already had.  The second
+        half cannot be expressed as immunity -- an immune creature never loses
+        the entry, and the entry carries a duration, a source and a repeat save
+        that must all go away with it.  Each declared condition gets its own
+        removal event so the feed can show which one ended and why.
+        """
+
+        conditions = actor.get("conditions") or {}
+        events: list[dict[str, Any]] = []
+        for definition in self.features.active_features_for(
+            self._feature_character(actor)
+        ):
+            if (
+                definition.parameters.get("removes_conditions_on_gaining_condition")
+                != gained
+            ):
+                continue
+            declared = definition.parameters.get("removes_conditions_on_gaining")
+            if not isinstance(declared, list):
+                continue
+            for code in declared:
+                if not isinstance(code, str) or code not in conditions:
+                    continue
+                events.append({
+                    "type": "condition.removed", "target_id": actor["actor_id"],
+                    "condition": code, "reason": f"feature:{definition.id}",
+                    "feature_id": definition.id,
+                    "source_actor_id": actor["actor_id"],
+                })
+        return events
+
+    def _self_restoration_removal_events(
+        self, actor: dict[str, Any], intent: dict[str, Any] | None,
+        already: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """At most one condition the actor chose to end at its own turn end.
+
+        Validation has already proved the choice is legal; this repeats the
+        three facts that matter (the feature exists, the condition is on the
+        whitelist, the actor actually has it) because the reducer must never be
+        the first place an illegal removal is noticed.  Missing intent or no
+        choice means the feature simply is not used.
+        """
+
+        if not isinstance(intent, dict):
+            return []
+        requested = intent.get("self_restoration_condition")
+        if not isinstance(requested, str) or not requested:
+            return []
+        chosen = self._self_restoration_choice(actor)
+        if chosen is None:
+            return []
+        feature_id, allowed = chosen
+        conditions = actor.get("conditions") or {}
+        if requested not in allowed or requested not in conditions:
+            return []
+        target_id = str(actor["actor_id"])
+        if any(
+            event.get("type") == "condition.removed"
+            and event.get("condition") == requested
+            and event.get("target_id") == target_id
+            for event in already
+        ):
+            return []
+        return [{
+            "type": "condition.removed", "target_id": target_id,
+            "condition": requested, "reason": f"feature:{feature_id}",
+            "feature_id": feature_id, "source_actor_id": target_id,
+        }]
+
     def _end_turn_events(
         self, instance: Any, combat: dict[str, Any], rng: Any,
+        intent: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         order = list(combat["initiative"])
         if not any(
@@ -2317,6 +2414,12 @@ class CombatResolutionMixin:
         previous_index = int(combat["turn_index"])
         # 重复豁免 tick 发生在"目标自己回合结束"，排在推进回合之前。
         events = self._save_repeat_events(instance, combat, order[previous_index], rng)
+        # Self-Restoration 与重复豁免读的是同一个时刻：若那条条件已在本次
+        # tick 里被豁免掉，选定移除就不再产生第二条事件。
+        ender = self._actor_view(instance, combat, order[previous_index])
+        events.extend(
+            self._self_restoration_removal_events(ender, intent, events)
+        )
         next_index = previous_index
         wraps = 0
         for _ in range(len(order)):

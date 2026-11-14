@@ -119,6 +119,8 @@
       {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
     ]},
     "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "charmed": {"cannot_attack_source": true},
+    "frightened": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}], "cannot_approach_source": true},
     "stoneskinned": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
     "poison_resistant": {"resist_damage_types": ["poison"]},
     "slowed_10": {"speed_modifier": -10},

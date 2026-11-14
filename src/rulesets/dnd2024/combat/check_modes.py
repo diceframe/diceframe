@@ -132,7 +132,20 @@ def mode_from_sources(sources: list[dict]) -> str:
 
 def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
                 range_disadvantage: bool, *, use_grant: bool = True,
-                extra_sources: tuple[dict, ...] = ()) -> dict:
+                extra_sources: tuple[dict, ...] = (),
+                combat: dict[str, Any] | None = None) -> dict:
+    """Both sides of the roll, with suppressed conditions already removed.
+
+    ``combat`` is optional so the pure pre-roll callers can keep passing just
+    views, but every caller that has it passes it: an aura that makes
+    Frightened inert must change the attack mode, and a condition the engine
+    suppresses in one place and not in another is worse than not suppressing it
+    at all.
+    """
+
+    if combat is not None:
+        actor = engine._effective_target(instance, combat, actor)
+        target = engine._effective_target(instance, combat, target)
     sources = attack_sources(engine.catalog.conditions, actor, target, range_disadvantage)
     # 意图声明的来源（如 Lucky）只在本次掷骰生效，不写进持续条件注册表：
     # 追加到来源列表后由同一个归一函数处理优劣势抵消。
@@ -172,7 +185,7 @@ def policy(engine: Any, instance: Any, uid: str) -> dict:
                     if engine.validate_intent(instance, intent).get("ok"):
                         result["previews"].append({"spell_ref": spell["spell_ref"], "target_id": target["actor_id"],
                             "label": f"{spell['name']} → {target.get('name') or target['actor_id']}",
-                            **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]), False)})
+                            **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]), False, combat=combat)})
         if available["type"] != "attack":
             continue
         for weapon in available.get("weapons", []):
@@ -189,5 +202,5 @@ def policy(engine: Any, instance: Any, uid: str) -> dict:
                 result["previews"].append({"weapon_ref": weapon["weapon_ref"], "target_id": target["actor_id"],
                     "label": f"{weapon.get('name') or weapon['weapon_ref']} → {target.get('name') or target['actor_id']}",
                     **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]),
-                                  normal < distance <= maximum)})
+                                  normal < distance <= maximum, combat=combat)})
     return result

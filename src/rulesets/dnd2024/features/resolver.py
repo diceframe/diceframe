@@ -48,6 +48,12 @@ def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
 
 
+# 光环免疫只承诺引擎真的会"抑制"的条件。一个条件若连机械效果都没有声明，
+# 免疫它就是一句空话：被拦截的条件和没被拦截的条件在结算上完全一样，测试
+# 也分辨不出来。因此这份白名单是能力边界，不是条件全集的子集。
+_AURA_IMMUNITY_CONDITIONS = frozenset({"charmed", "frightened"})
+
+
 def _grant_row(value: Any) -> tuple[int, str] | None:
     """Parse one ``"<level>:spell:<id>"`` always-prepared table row.
 
@@ -1698,6 +1704,7 @@ class Dnd2024ClassFeatureResolver:
                 )
             self._validate_owner_grant(definition, progression_catalog)
             self._validate_aura_parameters(definition)
+            self._validate_condition_immunity_parameters(definition)
             for key, value in definition.parameters.items():
                 if key == "crit_threshold":
                     if (
@@ -2006,6 +2013,73 @@ class Dnd2024ClassFeatureResolver:
                 f"{definition.id}.jump_ability must be str or dex"
             )
 
+    @staticmethod
+    def _validate_condition_immunity_parameters(
+        definition: ClassFeatureDefinition,
+    ) -> None:
+        """Fail closed on the condition-immunity and condition-removal contract.
+
+        Immunity is a set of condition ids a feature *suppresses*; removal is a
+        set the actor may *delete*, gated by a timing that has to be one the
+        engine actually honours.  Both are lists of ids, never sentences: a
+        typo here would silently immunize nothing, and an unrecognised timing
+        would promise a removal that never happens at the wrong moment.
+        """
+
+        parameters = definition.parameters
+
+        def _string_list(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, list) or not value:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a non-empty list of condition ids"
+                )
+            if any(not isinstance(code, str) or not code for code in value):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must hold condition ids"
+                )
+            if len(set(value)) != len(value):
+                raise ClassFeatureError(f"{definition.id}.{key} repeats a condition")
+
+        for key in (
+            "immune_conditions", "removable_conditions", "exhaustion_sources_ignored",
+            "removes_conditions_on_gaining",
+        ):
+            if key in parameters:
+                _string_list(key)
+
+        if "immune_while_condition" in parameters:
+            value = parameters["immune_while_condition"]
+            if not isinstance(value, str) or not value:
+                raise ClassFeatureError(
+                    f"{definition.id}.immune_while_condition must name a condition"
+                )
+
+        trigger_key = "removes_conditions_on_gaining_condition"
+        if ("removes_conditions_on_gaining" in parameters) != (trigger_key in parameters):
+            # 清理规则必须同时说明"获得哪个条件时"与"清理什么"；只有一半
+            # 的声明会被引擎读成一条永远不触发的规则。
+            raise ClassFeatureError(
+                f"{definition.id} must declare removes_conditions_on_gaining and "
+                f"{trigger_key} together"
+            )
+        if trigger_key in parameters:
+            trigger = parameters[trigger_key]
+            if not isinstance(trigger, str) or not trigger:
+                raise ClassFeatureError(
+                    f"{definition.id}.{trigger_key} must name the gained condition"
+                )
+
+        if "removable_at" in parameters:
+            if parameters["removable_at"] != "own_turn_end":
+                raise ClassFeatureError(
+                    f"{definition.id}.removable_at currently supports own_turn_end only"
+                )
+            if "removable_conditions" not in parameters:
+                raise ClassFeatureError(
+                    f"{definition.id} declares removable_at without removable_conditions"
+                )
+
     def _validate_aura_parameters(self, definition: ClassFeatureDefinition) -> None:
         """Fail closed on the aura declaration contract.
 
@@ -2091,7 +2165,7 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.aura_condition_immunities repeats a condition"
                 )
-            unsupported = sorted(code for code in immunities if code != "charmed")
+            unsupported = sorted(code for code in immunities if code not in _AURA_IMMUNITY_CONDITIONS)
             if unsupported:
                 raise ClassFeatureError(
                     f"{definition.id}.aura_condition_immunities does not support "
