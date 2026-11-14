@@ -33,7 +33,9 @@ ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
 WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
-EQUIPMENT_REQUIREMENT_KEYS = frozenset({"unarmored", "no_shield", "weapon_kinds"})
+EQUIPMENT_REQUIREMENT_KEYS = frozenset(
+    {"unarmored", "no_shield", "no_heavy_armor", "weapon_kinds"}
+)
 # 本切片只支持成长专长选择；未知 kind 必须加载期拒绝，不能静默当成无选项特性。
 FEATURE_CHOICE_KINDS = frozenset({"advancement_feat"})
 
@@ -99,15 +101,21 @@ def _require_scalar(value: Any, field_name: str) -> Any:
 class EquipmentRequirement:
     """The canonical equipment precondition a class feature declares.
 
-    ``unarmored`` / ``no_shield`` are evaluated against the character's item
-    types; a non-empty ``weapon_kinds`` additionally requires *every* wielded
-    weapon to match one of the declared kinds.  The same kinds are the weapons
-    the feature's own weapon benefits cover (Martial Arts: the Monk Weapon), so
-    a feature never repeats the weapon definition in a second table.
+    ``unarmored`` / ``no_shield`` / ``no_heavy_armor`` are evaluated against the
+    character's item types and armor categories; a non-empty ``weapon_kinds``
+    additionally requires *every* wielded weapon to match one of the declared
+    kinds.  The same kinds are the weapons the feature's own weapon benefits
+    cover (Martial Arts: the Monk Weapon), so a feature never repeats the weapon
+    definition in a second table.
+
+    ``no_heavy_armor`` is the precondition Fast Movement and Roving state:
+    Light, Medium, and no armor all keep the benefit, and a Shield never
+    interferes.
     """
 
     unarmored: bool = False
     no_shield: bool = False
+    no_heavy_armor: bool = False
     weapon_kinds: tuple[str, ...] = ()
 
 
@@ -300,7 +308,7 @@ def _parse_equipment_requirement(
             f"{feature_id}.equipment_requirement has an unknown field: {sorted(unknown)[0]}"
         )
     flags: dict[str, bool] = {}
-    for key in ("unarmored", "no_shield"):
+    for key in ("unarmored", "no_shield", "no_heavy_armor"):
         value = raw.get(key, False)
         if not isinstance(value, bool):
             raise ClassFeatureError(f"{feature_id}.equipment_requirement.{key} must be a boolean")
@@ -324,6 +332,7 @@ def _parse_equipment_requirement(
     return EquipmentRequirement(
         unarmored=flags["unarmored"],
         no_shield=flags["no_shield"],
+        no_heavy_armor=flags["no_heavy_armor"],
         weapon_kinds=tuple(kinds),
     )
 

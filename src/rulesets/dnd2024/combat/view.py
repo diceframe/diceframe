@@ -145,8 +145,11 @@ class CombatViewMixin:
             "max_hp": int(resources.get("max_hp", 0) or 0),
             "temp_hp": int(resources.get("temp_hp", 0) or 0),
             "armor_class": int(character.get("derived", {}).get("armor_class", 10) or 10),
-            "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)
-                - int((character.get("derived", {}).get("armor_training") or {}).get("speed_penalty", 0) or 0)),
+            # 护甲力量惩罚已经由 ``derive_speed`` 扣过一次。战斗侧若在这里
+            # 再减一遍 ``armor_training.speed_penalty``，角色卡与战斗就会报出
+            # 两个不同的速度（力量 8 穿链甲：卡 20 尺、战斗 10 尺），而两边
+            # 都不报错。派生值只有一份，投影只搬不重算。
+            "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)),
             "armor_training": deepcopy(
                 character.get("derived", {}).get("armor_training") or {}
             ),

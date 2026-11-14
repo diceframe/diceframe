@@ -219,8 +219,8 @@ def test_monk_focus_options_still_require_and_share_the_parent_owner() -> None:
     owned = resolver.features_for(character)
 
     assert [feature.id for feature in owned] == [
-        "martial_arts", "monks_focus", "flurry_of_blows", "patient_defense",
-        "step_of_the_wind",
+        "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
+        "flurry_of_blows", "patient_defense", "step_of_the_wind",
     ]
     assert {feature.owner for feature in owned} == {"class:monk"}
     assert resolver.has_feature(

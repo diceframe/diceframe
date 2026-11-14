@@ -9,7 +9,11 @@ from typing import Any
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
-from src.rulesets.dnd2024.character.derivation import derive_armor_class
+from src.rulesets.dnd2024.character.derivation import (
+    derive_armor_class,
+    derive_armor_training_state,
+    derive_speed,
+)
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
@@ -1503,6 +1507,23 @@ class Dnd2024AdvancementEngine:
             attuned_refs=attuned_refs(character),
             feat_refs=owned_refs if isinstance(owned_refs, list) else (),
         )
+        # 速度与 AC 同源：升级当次就按当前装备与等级重算，不等下一次换装。
+        # 力量不足的 -10 也在这里重新判，因为 abilities 可能刚被 ASI 改过。
+        armor_training = derive_armor_training_state(
+            abilities, equipped_refs, armor_category_refs, self.bundle,
+        )
+        derived["armor_training"] = armor_training
+        species_ref = str(
+            (character.get("sources") or {}).get("species_ref") or ""
+        ).removeprefix("species:")
+        species = self.bundle.get("species", species_ref) if species_ref else None
+        base_speed = int((species or {}).get("speed", 0) or 0)
+        if base_speed > 0:
+            derived["speed"] = derive_speed(
+                base_speed,
+                feature_bonus=self._feature_resolver.speed_bonus(character),
+                armor_training=armor_training,
+            )
         class_ref = str(character["build"]["class_levels"][0]["class_ref"])
         class_entity = self.bundle.get("class", _class_id(class_ref)) or {}
         spell_ability = str(class_entity.get("spellcasting_ability") or "")

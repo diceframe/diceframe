@@ -300,6 +300,9 @@ def test_actor_speed_is_net_and_training_is_copied(runtime) -> None:
         "speed_penalty": 10,
         "stealth_disadvantage": True,
     }
+    # A canonical sheet stores the already-net Speed: ``derive_speed`` applied
+    # the -10 ft when the armour was reconciled.  The actor view only moves it.
+    canonical["derived"]["speed"] = 20
 
     view = engine._player_view("gm", canonical)
 
@@ -309,8 +312,11 @@ def test_actor_speed_is_net_and_training_is_copied(runtime) -> None:
     view["armor_training"]["speed_penalty"] = 99
     assert canonical["derived"]["armor_training"]["speed_penalty"] == 10
 
+    # ...and the projection never recomputes Speed from the training block.
+    # Subtracting the penalty here as well was how the sheet and combat ended
+    # up reporting two different numbers for one character.
     canonical["derived"]["armor_training"]["speed_penalty"] = 100
-    assert engine._player_view("gm", canonical)["speed"] == 0
+    assert engine._player_view("gm", canonical)["speed"] == 20
 
 
 # --------------------------------------------------------------------------
@@ -334,7 +340,7 @@ def test_companion_projection_inherits_armor_training(runtime) -> None:
             "conditions": {},
             "abilities": _abilities(12, 10),
             "derived": {
-                "armor_class": 16, "speed": 30, "initiative": 1,
+                "armor_class": 16, "speed": 20, "initiative": 1,
                 "proficiency_bonus": 2, "saving_throws": {"str": 1, "con": 3},
                 "armor_training": {
                     "untrained_armor_worn": True,
@@ -522,7 +528,10 @@ def test_legacy_untrained_armor_is_repaired_through_the_production_chain(runtime
         instance, combat, "player:gm",
     )
     assert view["armor_class"] == 16
+    # Species 30 尺，穿 Chain Mail 而 Strength 不足，派生速度扣 10：协调写回
+    # ``derived.speed``（唯一权威）就是 20，投影照搬，不再二次扣减。
     assert view["speed"] == 20
+    assert view["speed"] == derived["speed"]
     assert view["armor_training"] == derived["armor_training"]
 
     blocked = _cast(runtime, instance, "spell:magic_missile")
