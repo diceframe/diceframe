@@ -232,13 +232,24 @@ class CombatTriggeredSpellsMixin:
                 self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
             ))
         events.extend(self._submit_hit_damage(decision["damage_event"]))
-        total = int(decision["damage_event"]["amount"])
+        # 这条路径同样是"命中落地"：rider（光耀/神圣/原始打击）与命中后条件
+        # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
+        # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
+        attacker_id = str(decision["actor_id"])
+        rider_events, rider_damage = self._hit_rider_events(
+            combat, target, decision["damage_event"], rng, attacker_id=attacker_id,
+        )
+        events.extend(rider_events)
+        total = int(decision["damage_event"]["amount"]) + rider_damage
         if extra_damage:
             events.append(extra_damage)
             total += int(extra_damage["amount"])
         events.extend(self._concentration_events(instance, combat, target, total, rng))
+        events.extend(self._hit_condition_events(
+            instance, combat, attacker_id, target, decision["damage_event"], rng,
+        ))
         events.extend(self._enemy_zero_hp_feature_events(
-            instance, combat, str(decision["actor_id"]), target, total,
+            instance, combat, attacker_id, target, total,
         ))
         if self._last_hostile_defeated(combat, target, total):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})

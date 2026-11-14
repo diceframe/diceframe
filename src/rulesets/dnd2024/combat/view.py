@@ -222,6 +222,11 @@ class CombatViewMixin:
             "build": deepcopy(character.get("build") or {}),
             "features": {
                 "subclass_ref": subclass_ref,
+                # Which option a two-way choice committed to (Blessed Strikes,
+                # Elemental Fury).  Ownership of the chosen option is decided
+                # from this record, so a view that dropped it would read as
+                # "never chose" and silently withdraw the feature's mechanics.
+                "feature_choices": deepcopy(feature_state.get("feature_choices") or []),
                 # Copied verbatim, not sanitised: a corrupted ledger must reach
                 # the counter read and fail closed there, never look like zero.
                 "usage": deepcopy(feature_state["usage"])
@@ -438,6 +443,12 @@ class CombatViewMixin:
         features: dict[str, Any] = {
             "subclass_ref": str((actor.get("features") or {}).get("subclass_ref") or ""),
         }
+        # The committed option of a two-way choice decides which mechanics are
+        # owned; dropping it here would make every option-gated feature read as
+        # "never chosen" during combat.
+        raw_choices = (actor.get("features") or {}).get("feature_choices")
+        if raw_choices is not None:
+            features["feature_choices"] = deepcopy(raw_choices)
         raw_usage = (actor.get("features") or {}).get("usage")
         if raw_usage is not None:
             features["usage"] = deepcopy(raw_usage)
@@ -508,9 +519,10 @@ class CombatViewMixin:
             if available_slots:
                 # 目标声明随法术一起投影：前端只消费服务端语义，不再按
                 # spell mode 硬编码"盟友/敌人"。
+                spell_range = self._spell_effective_range(actor, spell, effect)
                 row = {
                     "spell_ref": ref, "name": spell["name"], "level": spell["level"],
-                    "casting_time": spell["casting_time"], "range": effect["range"],
+                    "casting_time": spell["casting_time"], "range": spell_range,
                     "mode": effect["mode"], "available_slot_levels": available_slots,
                     "target_side": _target_side(effect["mode"]),
                     "target_count": int(effect.get("target_count", 1) or 1),
@@ -519,6 +531,9 @@ class CombatViewMixin:
                 }
                 if effect.get("target_scope"):
                     row["target_scope"] = effect["target_scope"]
+                if spell_range != int(effect["range"]):
+                    # 被特性改写过的射程要能对账：前端显示的是和，不是原文。
+                    row["range_base"] = int(effect["range"])
                 if effect.get("resist_choice"):
                     row["resist_choice"] = list(effect["resist_choice"])
                 if effect["mode"] == "triggered_damage":

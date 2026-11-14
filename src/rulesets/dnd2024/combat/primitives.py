@@ -12,6 +12,21 @@ DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 UNARMED_STRIKE_REF = "unarmed_strike"
 # 狂暴至多持续 10 分钟；一轮 6 秒，即 100 轮。
 RAGE_MAX_ROUNDS = 100
+
+
+def rider_attack_kind(weapon: dict[str, Any]) -> str:
+    """Which ``attack_kinds`` value this weapon qualifies as.
+
+    The three hit riders (Radiant, Divine, Primal) declare overlapping but not
+    identical kinds: Radiant Strikes names "melee weapon or Unarmed Strike",
+    Divine Strike just "a weapon", Primal Strike adds a Beast form's attack.
+    Validation and resolution both need the same classification, so it lives
+    here rather than being guessed twice.
+    """
+
+    if bool(weapon.get("unarmed")):
+        return "unarmed_strike"
+    return "ranged_weapon" if bool(weapon.get("ranged")) else "melee_weapon"
 INTENT_TYPES = frozenset({
     "encounter.ready", "encounter.unready", "combat.start", "combat.end", "combat.message",
     "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",

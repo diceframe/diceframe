@@ -44,6 +44,42 @@ from .resources import (
 )
 
 
+#: 命中 rider 声明允许的参数键。每个键都必须被消费，缺键则加载期拒绝：一个
+#: 写得像"已实现"、实际没有任何代码读取的参数，比不写更危险。
+_RIDER_PARAMETER_KEYS: dict[str, frozenset[str]] = {
+    "stunning_strike": frozenset({
+        "once_per_turn", "focus_cost", "save_ability",
+        "on_fail_condition", "on_success_condition", "condition_duration",
+    }),
+    "empowered_strikes": frozenset({"unarmed_damage_type_choices"}),
+    "open_hand_technique": frozenset({
+        "flurry_hit_choices", "addle_condition", "push_distance_ft",
+        "push_save_ability", "topple_save_ability", "topple_condition",
+    }),
+    "radiant_strikes": frozenset({
+        "extra_damage", "extra_damage_type", "attack_kinds",
+    }),
+    "divine_strike": frozenset({
+        "damage_dice", "damage_types", "once_per_turn", "attack_kinds",
+    }),
+    "primal_strike": frozenset({
+        "damage_dice", "damage_types", "once_per_turn", "attack_kinds",
+    }),
+    "potent_spellcasting": frozenset({"cantrip_source_class", "ability"}),
+    "improved_blessed_strikes": frozenset({
+        "divine_strike_dice", "temp_hp_ability_multiplier", "temp_hp_range_ft",
+    }),
+    "improved_elemental_fury": frozenset({
+        "primal_strike_dice", "range_bonus_ft", "range_minimum_ft",
+    }),
+}
+#: 声明"这次攻击算哪一类"的闭集。``weapon`` 是任意武器攻击（近战或远程），
+#: ``melee_weapon`` 是近战武器，``beast_form`` 是荒野形态的野兽攻击。
+_RIDER_ATTACK_KINDS = frozenset({"weapon", "melee_weapon", "unarmed_strike", "beast_form"})
+_OPEN_HAND_CHOICES = frozenset({"addle", "push", "topple"})
+_RIDER_CONDITION_DURATIONS = frozenset({"attacker_next_turn_start", "target_turn_start"})
+
+
 def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
 
@@ -305,6 +341,19 @@ class Dnd2024ClassFeatureResolver:
                 # 下授予它的父特性已经被拥有时才算拥有。
                 parent_key = (definition.owner, definition.option_of)
                 if parent_key not in granted:
+                    continue
+                parent = by_key.get(parent_key)
+                if (
+                    parent is not None
+                    and parent.choice is not None
+                    and parent.choice.kind == "feature_option"
+                    and definition.id not in self._selected_feature_options(
+                        character, parent,
+                    )
+                ):
+                    # 互斥选项：父特性拥有不等于两个选项都拥有。Divine Strike
+                    # 与 Potent Spellcasting 是替代关系，同时拥有会让一次命中
+                    # 既拿 1d8 又拿 Wisdom 加值。
                     continue
             elif key not in granted:
                 continue
@@ -1165,6 +1214,67 @@ class Dnd2024ClassFeatureResolver:
             return []
         return [record for record in raw if isinstance(record, Mapping)]
 
+    def _selected_feature_options(
+        self,
+        character: Mapping[str, Any] | None,
+        parent: ClassFeatureDefinition,
+    ) -> frozenset[str]:
+        """The option ids the character committed to under ``parent``.
+
+        Identity is ``(owner, feature_id, choice_id)`` exactly as the
+        advancement path stores it.  A record whose ``selected_refs`` is
+        malformed contributes nothing: the character then simply does not own
+        the option, which is the same answer as "never chose".
+        """
+
+        choice = parent.choice
+        if choice is None:  # pragma: no cover - callers filter on choice
+            return frozenset()
+        selected: set[str] = set()
+        for record in self._feature_choice_records(character):
+            if (
+                str(record.get("owner") or "") != parent.owner
+                or str(record.get("feature_id") or "") != parent.id
+                or str(record.get("choice_id") or "") != choice.id
+            ):
+                continue
+            refs = record.get("selected_refs")
+            if not isinstance(refs, list):
+                continue
+            for ref in refs:
+                local = str(ref).removeprefix("feature:")
+                if local in choice.enabled_options or f"feature:{local}" in choice.enabled_options:
+                    selected.add(local)
+        return frozenset(selected)
+
+    def feature_option_choice(
+        self,
+        character: Mapping[str, Any] | None,
+        feature_id: str,
+        *,
+        owner: str | None = None,
+    ) -> str:
+        """The single option id chosen under ``feature_id``, or ``""``.
+
+        Returns ``""`` when the feature is not owned, is not an option parent,
+        or has no (or more than one) committed selection.  Callers must treat
+        an empty answer as "no option in force" rather than defaulting to one,
+        so an un-answered choice grants nothing instead of guessing.
+        """
+
+        for definition in self.features_for(character):
+            if definition.id != feature_id:
+                continue
+            if owner is not None and definition.owner != owner:
+                continue
+            if definition.choice is None or definition.choice.kind != "feature_option":
+                continue
+            selected = self._selected_feature_options(character, definition)
+            if len(selected) == 1:
+                return next(iter(selected))
+            return ""
+        return ""
+
     def _advancement_feat_categories(self) -> dict[str, str]:
         """The advancement feat catalog's id -> category map, read once."""
 
@@ -1749,6 +1859,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_speed_parameters(definition)
             self._validate_movement_parameters(definition)
             self._validate_overchannel_parameters(definition)
+            self._validate_hit_rider_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -2263,3 +2374,120 @@ class Dnd2024ClassFeatureResolver:
                 f"{definition.id}.usage_scope must be one of "
                 f"{sorted(FEATURE_USAGE_SCOPES)}"
             )
+
+    @staticmethod
+    def _validate_hit_rider_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on every hit-rider declaration this slice consumes.
+
+        The check is deliberately strict in both directions: an unknown key
+        means the author expected behaviour no code implements, and a missing
+        key means the code would read a default the SRD never states.  Both
+        are load-time errors rather than silent no-ops.
+        """
+
+        expected = _RIDER_PARAMETER_KEYS.get(definition.id)
+        if expected is None:
+            return
+        # 延迟导入：``combat.catalog`` 经物品声明回到 character 包，模块级导入
+        # 会把 features <-> character 变成环。这里只在加载期各声明校验时读一次
+        # 两个闭集，不承担运行时职责。
+        from src.rulesets.dnd2024.combat.catalog import (
+            DAMAGE_TYPES, DICE_RE, SAVE_ABILITIES,
+        )
+
+        parameters = definition.parameters
+        unknown = sorted(set(parameters) - expected)
+        if unknown:
+            raise ClassFeatureError(
+                f"{definition.id} does not support {', '.join(unknown)}"
+            )
+        missing = sorted(expected - set(parameters))
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} is missing {', '.join(missing)}"
+            )
+
+        feature_id = definition.id
+
+        def flag(key: str) -> None:
+            if not isinstance(parameters[key], bool):
+                raise ClassFeatureError(f"{feature_id}.{key} must be a boolean")
+
+        def positive_int(key: str) -> None:
+            value = parameters[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a positive integer"
+                )
+
+        def bare_id(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not value:
+                raise ClassFeatureError(f"{feature_id}.{key} must name a value")
+
+        def one_of(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or value not in allowed:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be one of {sorted(allowed)}"
+                )
+
+        def id_list(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if (
+                not isinstance(value, list)
+                or not value
+                or any(not isinstance(item, str) or item not in allowed for item in value)
+                or len(set(value)) != len(value)
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a list drawn from {sorted(allowed)}"
+                )
+
+        def dice(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not DICE_RE.match(value):
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a dice formula"
+                )
+
+        if feature_id == "stunning_strike":
+            flag("once_per_turn")
+            positive_int("focus_cost")
+            one_of("save_ability", SAVE_ABILITIES)
+            bare_id("on_fail_condition")
+            bare_id("on_success_condition")
+            one_of("condition_duration", _RIDER_CONDITION_DURATIONS)
+        elif feature_id == "empowered_strikes":
+            id_list("unarmed_damage_type_choices", DAMAGE_TYPES)
+        elif feature_id == "open_hand_technique":
+            id_list("flurry_hit_choices", _OPEN_HAND_CHOICES)
+            bare_id("addle_condition")
+            positive_int("push_distance_ft")
+            one_of("push_save_ability", SAVE_ABILITIES)
+            one_of("topple_save_ability", SAVE_ABILITIES)
+            bare_id("topple_condition")
+        elif feature_id == "radiant_strikes":
+            dice("extra_damage")
+            one_of("extra_damage_type", DAMAGE_TYPES)
+            id_list("attack_kinds", _RIDER_ATTACK_KINDS)
+        elif feature_id in {"divine_strike", "primal_strike"}:
+            dice("damage_dice")
+            id_list("damage_types", DAMAGE_TYPES)
+            flag("once_per_turn")
+            id_list("attack_kinds", _RIDER_ATTACK_KINDS)
+        elif feature_id == "potent_spellcasting":
+            value = parameters["cantrip_source_class"]
+            if not isinstance(value, str) or not value.startswith("class:"):
+                raise ClassFeatureError(
+                    f"{feature_id}.cantrip_source_class must name a class"
+                )
+            one_of("ability", frozenset(ABILITY_IDS))
+        elif feature_id == "improved_blessed_strikes":
+            dice("divine_strike_dice")
+            positive_int("temp_hp_ability_multiplier")
+            positive_int("temp_hp_range_ft")
+        elif feature_id == "improved_elemental_fury":
+            dice("primal_strike_dice")
+            positive_int("range_bonus_ft")
+            positive_int("range_minimum_ft")

@@ -362,6 +362,45 @@
           "source_ref": "srd-5.2.1:p51:evasion",
           "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You don't benefit from this feature while Incapacitated.",
           "parameters": {"half_on_success_save": "dex"}
+        },
+        {
+          "id": "stunning_strike",
+          "minimum_level": 5,
+          "resource_id": "focus_points",
+          "source_ref": "srd-5.2.1:p51:stunning-strike",
+          "summary": "Once per turn when you hit a creature with a Monk weapon or an Unarmed Strike, you can expend 1 Focus Point to attempt a stunning strike. The target makes a Constitution saving throw: on a failure it has the Stunned condition, on a success its Speed is halved and the next attack roll against it has Advantage, both until the start of your next turn.",
+          "parameters": {
+            "once_per_turn": true,
+            "focus_cost": 1,
+            "save_ability": "con",
+            "on_fail_condition": "stunned",
+            "on_success_condition": "staggered",
+            "condition_duration": "attacker_next_turn_start"
+          }
+        },
+        {
+          "id": "empowered_strikes",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p51:empowered-strikes",
+          "summary": "Whenever you deal damage with your Unarmed Strike, it can deal your choice of Force damage or its normal damage type.",
+          "parameters": {
+            "unarmed_damage_type_choices": ["force"]
+          }
+        },
+        {
+          "id": "open_hand_technique",
+          "owner": "subclass:warrior_of_the_open_hand",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p52:open-hand-technique",
+          "summary": "Whenever you hit a creature with an attack granted by your Flurry of Blows, you can impose one of the following on that target: Addle (no Opportunity Attacks until the start of its next turn), Push (Strength save or pushed up to 15 feet away), or Topple (Dexterity save or Prone).",
+          "parameters": {
+            "flurry_hit_choices": ["addle", "push", "topple"],
+            "addle_condition": "reaction_blocked",
+            "push_distance_ft": 15,
+            "push_save_ability": "str",
+            "topple_save_ability": "dex",
+            "topple_condition": "prone"
+          }
         }
       ]
     },
@@ -441,6 +480,18 @@
           "parameters": {
             "aura_expands_feature_id": "aura_of_protection",
             "aura_range_override_ft": 30
+          }
+        },
+        {
+          "id": "radiant_strikes",
+          "owner": "class:paladin",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p55:radiant-strikes",
+          "summary": "When you hit a target with an attack roll using a Melee weapon or an Unarmed Strike, the target takes an extra 1d8 Radiant damage.",
+          "parameters": {
+            "extra_damage": "1d8",
+            "extra_damage_type": "radiant",
+            "attack_kinds": ["melee_weapon", "unarmed_strike"]
           }
         }
       ]
@@ -1210,6 +1261,55 @@
           "source_ref": "srd-5.2.1:p40:supreme-healing",
           "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
           "parameters": {}
+        },
+        {
+          "id": "blessed_strikes",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "You gain one of the following options of your choice: Divine Strike or Potent Spellcasting.",
+          "choice": {
+            "id": "blessed_strikes_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": ["feature:divine_strike", "feature:potent_spellcasting"]
+          }
+        },
+        {
+          "id": "divine_strike",
+          "option_of": "blessed_strikes",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon, you can cause the target to take an extra 1d8 Necrotic or Radiant damage (your choice).",
+          "parameters": {
+            "damage_dice": "1d8",
+            "damage_types": ["necrotic", "radiant"],
+            "once_per_turn": true,
+            "attack_kinds": ["weapon"]
+          }
+        },
+        {
+          "id": "potent_spellcasting",
+          "option_of": "blessed_strikes",
+          "owner": "class:cleric",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "Add your Wisdom modifier to the damage you deal with any Cleric cantrip.",
+          "parameters": {
+            "cantrip_source_class": "class:cleric",
+            "ability": "wis"
+          }
+        },
+        {
+          "id": "improved_blessed_strikes",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p41:improved-blessed-strikes",
+          "summary": "The option you chose for Blessed Strikes grows more powerful: Divine Strike's extra damage becomes 2d8, and Potent Spellcasting can grant Temporary Hit Points equal to twice your Wisdom modifier to yourself or a creature within 60 feet.",
+          "parameters": {
+            "divine_strike_dice": "2d8",
+            "temp_hp_ability_multiplier": 2,
+            "temp_hp_range_ft": 60
+          }
         }
       ]
     },
@@ -1258,6 +1358,55 @@
               "tropical:7:spell:polymorph",
               "tropical:9:spell:insect_plague"
             ]
+          }
+        },
+        {
+          "id": "elemental_fury",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "You gain one of the following options of your choice: Potent Spellcasting or Primal Strike.",
+          "choice": {
+            "id": "elemental_fury_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": ["feature:potent_spellcasting", "feature:primal_strike"]
+          }
+        },
+        {
+          "id": "potent_spellcasting",
+          "option_of": "elemental_fury",
+          "owner": "class:druid",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "Add your Wisdom modifier to the damage you deal with any Druid cantrip.",
+          "parameters": {
+            "cantrip_source_class": "class:druid",
+            "ability": "wis"
+          }
+        },
+        {
+          "id": "primal_strike",
+          "option_of": "elemental_fury",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon or a Beast form's attack in Wild Shape, you can cause the target to take an extra 1d8 Cold, Fire, Lightning, or Thunder damage (your choice).",
+          "parameters": {
+            "damage_dice": "1d8",
+            "damage_types": ["cold", "fire", "lightning", "thunder"],
+            "once_per_turn": true,
+            "attack_kinds": ["weapon", "beast_form"]
+          }
+        },
+        {
+          "id": "improved_elemental_fury",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p43:improved-elemental-fury",
+          "summary": "The option you chose for Elemental Fury grows more powerful: Primal Strike's extra damage becomes 2d8, and Potent Spellcasting increases the range of your Druid cantrips with a range of 10 feet or more by 300 feet.",
+          "parameters": {
+            "primal_strike_dice": "2d8",
+            "range_bonus_ft": 300,
+            "range_minimum_ft": 10
           }
         }
       ]

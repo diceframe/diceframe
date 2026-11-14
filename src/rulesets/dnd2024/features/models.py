@@ -43,7 +43,9 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 # 不能静默当成无选项特性。``skill_proficiency`` 是 Expertise / Scholar 这类
 # "在已有技能熟练里再选几项"的选择：它的候选项来自技能目录而不是专长目录，
 # 且可以一次选多项（Expertise 一次两项）——用 ``advancement_feat`` 表达不了。
-FEATURE_CHOICE_KINDS = frozenset({"advancement_feat", "skill_proficiency"})
+FEATURE_CHOICE_KINDS = frozenset({
+    "advancement_feat", "skill_proficiency", "feature_option",
+})
 # 技能选择最终"授予什么"的闭集。目前只有 Expertise；未知值必须加载期拒绝，
 # 否则选中一个技能却在运行时什么都不发生。
 SKILL_CHOICE_GRANTS = frozenset({"expertise"})
@@ -227,6 +229,12 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         raise ClassFeatureError(f"{feature_id}.choice.count must be a positive integer")
     if kind == "advancement_feat" and count != 1:
         raise ClassFeatureError(f"{feature_id}.choice.count must be 1")
+    if kind == "feature_option" and count != 1:
+        # 互斥选项（Divine Strike / Potent Spellcasting）只能选一个：选两个
+        # 会让同一个 hit 同时拿到 1d8 与 Wis 加值，而它们在规则上是替代关系。
+        raise ClassFeatureError(
+            f"{feature_id}.choice.count must be 1 for a feature option choice"
+        )
     raw_refs = raw.get("enabled_options")
     if raw_refs is None and kind == "skill_proficiency":
         # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
@@ -235,11 +243,14 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be an array"
         )
-    if not raw_refs and kind == "advancement_feat":
+    if not raw_refs and kind in {"advancement_feat", "feature_option"}:
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
-    prefix = "feat:" if kind == "advancement_feat" else "skill:"
+    prefix = {
+        "advancement_feat": "feat:",
+        "feature_option": "feature:",
+    }.get(kind, "skill:")
     refs: list[str] = []
     seen: set[str] = set()
     for raw_ref in raw_refs:
@@ -260,9 +271,9 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         if not isinstance(value, bool):
             raise ClassFeatureError(f"{feature_id}.choice.{key} must be a boolean")
         flags[key] = value
-    if kind == "advancement_feat":
-        # 成长专长的两个约束是技能选择专有的；写在专长选择上会被静默忽略，
-        # 因此宁可加载期拒绝。
+    if kind in {"advancement_feat", "feature_option"}:
+        # 成长专长与特性选项都不使用技能选择的两个约束；写在它们上面会被
+        # 静默忽略，因此宁可加载期拒绝。
         for key in ("requires_proficiency", "exclude_expertise"):
             if key in raw and raw[key] is not True:
                 raise ClassFeatureError(
@@ -272,6 +283,10 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
     if kind == "skill_proficiency" and category != "skill":
         raise ClassFeatureError(
             f"{feature_id}.choice.category must be 'skill' for a skill choice"
+        )
+    if kind == "feature_option" and category != "feature":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'feature' for a feature option choice"
         )
     grants = str(raw.get("grants") or "")
     if kind == "skill_proficiency":
@@ -347,6 +362,19 @@ def _validate_feature_choices(
                 raise ClassFeatureError(
                     f"{definition.id}.choice.count exceeds the {choice.category} pool"
                 )
+            continue
+        if choice.kind == "feature_option":
+            # 候选是同一份特性目录里的声明，不是成长专长：校验它长得像特性
+            # （有声明、同 owner、且自己不是选项父），而不是去专长目录里找。
+            for ref in choice.enabled_options:
+                local_id = ref[len("feature:"):]
+                if not any(
+                    definition.owner == other.owner and other.id == local_id
+                    for other in features
+                ):
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared feature: {ref}"
+                    )
             continue
         if choice.category not in known:
             raise ClassFeatureError(
