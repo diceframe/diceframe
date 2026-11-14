@@ -417,6 +417,25 @@ def test_reconciliation_recomputes_speed_from_the_current_equipment(runtime) -> 
     assert _reconciled(runtime, monk)["derived"]["speed"] == SPECIES_SPEED + 20
 
 
+def test_legacy_speed_base_is_stable_across_reconciliation(runtime) -> None:
+    """Old cards without a species ref must not compound derived speed."""
+
+    monk = _sheet(runtime, "class:monk", level=10)
+    canonical = deepcopy(monk["ruleset_character"])
+    canonical["sources"].pop("species_ref", None)
+    # Before the new speed projection, legacy cards stored only the species
+    # value. Simulate that persisted shape and reconcile it twice.
+    canonical["derived"]["speed"] = SPECIES_SPEED
+    reconciler = Dnd2024CharacterStateReconciler(runtime.load_bundle(LOCALE))
+
+    reconciler.reconcile_canonical(canonical)
+    assert canonical["derived"]["speed"] == SPECIES_SPEED + 20
+    assert canonical["derived"]["speed_base"] == SPECIES_SPEED
+
+    reconciler.reconcile_canonical(canonical)
+    assert canonical["derived"]["speed"] == SPECIES_SPEED + 20
+
+
 def test_heavy_armor_drops_fast_movement_in_the_derived_speed(runtime) -> None:
     barbarian = _sheet(runtime, "class:barbarian", level=5)
     assert barbarian["ruleset_character"]["derived"]["speed"] == SPECIES_SPEED + 10

@@ -113,18 +113,18 @@ def _resolve_base_speed(
     """The Speed a derived value is recomputed from, or 0 when unknowable.
 
     ``_base_speed`` answers 0 for a legacy sheet that lost
-    ``sources.species_ref``.  Leaving Speed alone is right for a sheet with no
-    armour penalty to apply, but wrong the moment ``armor_training`` reports
-    one: the sheet then claims "-10 ft" while still showing the unpenalised
-    number, and combat used to hide that by subtracting the penalty a second
-    time on top of the already-net ``derived.speed``.
+    ``sources.species_ref``.  Such a sheet keeps a private ``speed_base`` marker
+    after its first reconciliation so the already-derived speed is never fed
+    back into the formula as a new base value.
 
-    When the species is unknown the stored value is the only remaining
-    candidate, and it is the honest one: before the penalty moved into
-    ``derive_speed`` that field held the species value, so recomputing from it
-    applies the penalty exactly once.
+    Before this marker exists, the stored value is the only remaining candidate:
+    old saves held the species value in ``derived.speed`` before the penalty and
+    feature bonus moved into ``derive_speed``.
     """
 
+    stored_base = derived.get("speed_base")
+    if isinstance(stored_base, int) and not isinstance(stored_base, bool) and stored_base > 0:
+        return stored_base
     base = _base_speed(canonical, bundle)
     if base > 0:
         return base
@@ -496,6 +496,11 @@ class Dnd2024CharacterStateReconciler:
         if speed is not None:
             # 速度没有 legacy mirror：canonical ``derived.speed`` 是唯一权威。
             derived["speed"] = speed
+            if _base_speed(canonical, self.bundle) <= 0:
+                # Old cards may not carry a species ref. Preserve the immutable
+                # base once so a later reconciliation does not compound the
+                # already-applied feature bonus or armor penalty.
+                derived["speed_base"] = base_speed
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending
@@ -597,6 +602,8 @@ class Dnd2024CharacterStateReconciler:
         derived["armor_training"] = armor_training
         if speed is not None:
             derived["speed"] = speed
+            if _base_speed(canonical, self.bundle) <= 0:
+                derived["speed_base"] = base_speed
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending
