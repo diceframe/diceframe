@@ -386,8 +386,8 @@
           "id": "draconic_resilience",
           "owner": "subclass:draconic_sorcery",
           "minimum_level": 3,
-          "source_ref": "srd-5.2.1:p52:draconic-resilience",
-          "summary": "Your Hit Point maximum increases by 3, and it increases by 1 again whenever you gain a Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
+          "source_ref": "srd-5.2.1:p69:draconic-resilience",
+          "summary": "Your Hit Point maximum increases by 3, and it increases by 1 whenever you gain another Sorcerer level. While you aren't wearing armor, your base Armor Class is 10 plus your Dexterity and Charisma modifiers.",
           "parameters": {
             "unarmored_ac_ability_bonus": "cha",
             "max_hp_bonus_first": 3,

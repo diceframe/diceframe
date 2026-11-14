@@ -394,10 +394,15 @@ class Dnd2024ClassFeatureResolver:
         declarations are alternative candidates for the "one base AC at a
         time" rule, so the armor class formula takes the best candidate instead
         of summing ability modifiers.
+
+        Only currently active declarations contribute: an unarmored-AC ability
+        is a benefit, and a benefit whose equipment precondition does not hold
+        is not in force.  Declaring the ability is still the catalog's job, so
+        nothing here names a feature id.
         """
 
         abilities: list[str] = []
-        for definition in self.features_for(character):
+        for definition in self.active_features_for(character):
             ability = definition.parameters.get("unarmored_ac_ability_bonus")
             if isinstance(ability, str) and ability and ability not in abilities:
                 abilities.append(ability)
