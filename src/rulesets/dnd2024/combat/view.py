@@ -19,6 +19,7 @@ from src.rulesets.dnd2024.spells.font_of_magic import font_slots as _font_slots
 
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    FEATURE_STATE_KEYS,
     CombatIntentError,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
@@ -225,6 +226,14 @@ class CombatViewMixin:
                 # the counter read and fail closed there, never look like zero.
                 "usage": deepcopy(feature_state["usage"])
                 if feature_state.get("usage") is not None else [],
+                # Character-scoped feature state (a re-chosen resistance, the
+                # next survival DC) outlives the combat, so the view has to
+                # carry it or combat would silently read "never chosen".
+                **{
+                    feature_id: deepcopy(feature_state[feature_id])
+                    for feature_id in FEATURE_STATE_KEYS
+                    if isinstance(feature_state.get(feature_id), dict)
+                },
             },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
@@ -432,6 +441,10 @@ class CombatViewMixin:
         raw_usage = (actor.get("features") or {}).get("usage")
         if raw_usage is not None:
             features["usage"] = deepcopy(raw_usage)
+        for feature_id in FEATURE_STATE_KEYS:
+            stored = (actor.get("features") or {}).get(feature_id)
+            if isinstance(stored, dict):
+                features[feature_id] = deepcopy(stored)
         return {
             "build": actor.get("build") or {},
             "features": features,

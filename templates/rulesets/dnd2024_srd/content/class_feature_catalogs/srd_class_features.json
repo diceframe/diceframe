@@ -344,6 +344,13 @@
             "reroll_cost_resource": "focus_points",
             "reroll_cost": 1
           }
+        },
+        {
+          "id": "evasion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p51:evasion",
+          "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You don't benefit from this feature while Incapacitated.",
+          "parameters": {"half_on_success_save": "dex"}
         }
       ]
     },
@@ -580,6 +587,13 @@
           "equipment_requirement": {"no_heavy_armor": true}
         },
         {
+          "id": "danger_sense",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p29:danger-sense",
+          "summary": "You have Advantage on Dexterity saving throws unless you have the Incapacitated condition.",
+          "parameters": {"save_advantage_abilities": ["dex"]}
+        },
+        {
           "id": "rage",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p28:rage",
@@ -612,6 +626,18 @@
           "source_ref": "srd-5.2.1:p30:retaliation",
           "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
           "parameters": {"counterattack_range": 5}
+        },
+        {
+          "id": "relentless_rage",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p30:relentless-rage",
+          "summary": "If you drop to 0 Hit Points while your Rage is active and don't die outright, you can make a DC 10 Constitution saving throw. On a success, your Hit Points change to twice your Barbarian level instead. Each use after the first raises the DC by 5; a Short or Long Rest resets it to 10.",
+          "parameters": {
+            "save_ability": "con",
+            "base_dc": 10,
+            "dc_step": 5,
+            "hp_multiplier": 2
+          }
         }
       ]
     },
@@ -684,6 +710,13 @@
           "parameters": {
             "damage_multiplier": 0.5
           }
+        },
+        {
+          "id": "evasion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p63:evasion",
+          "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You can't use this feature while Incapacitated.",
+          "parameters": {"half_on_success_save": "dex"}
         },
         {
           "id": "reliable_talent",
@@ -997,6 +1030,14 @@
           "parameters": {
             "die_sides": 10
           }
+        },
+        {
+          "id": "fiendish_resilience",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p76:fiendish-resilience",
+          "summary": "Choose one damage type other than Force whenever you finish a Short or Long Rest. You have Resistance to that damage type until you choose a different one with this feature.",
+          "parameters": {"excluded_damage_types": ["force"]}
         },
         {
           "id": "magical_cunning",

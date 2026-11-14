@@ -24,6 +24,7 @@ from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_
 from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
+from .primitives import FEATURE_STATE_KEYS, RELENTLESS_RAGE_DECISION
 
 
 _ITEM_EVENT_FIELDS = {
@@ -329,6 +330,29 @@ class CombatReducerMixin:
                 set_feature_usage_count(character, owner, feature_id, scope, after)
             except ClassFeatureError as exc:
                 raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.feature_state.set":
+            # 角色特性状态（Relentless Rage 的下一 DC）不是资源计数器，也不
+            # 属于任何条件：它写在既有 ``features`` 结构里，键集合是闭集，
+            # 未知字段一律拒绝，避免变成通用 character 写入口。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion feature state is canonical")
+            character = self._canonical_of(snapshot, kind, raw_id)
+            feature_id = str(event["feature_id"])
+            allowed = FEATURE_STATE_KEYS.get(feature_id)
+            values = event.get("values")
+            if allowed is None or not isinstance(values, dict) or not values:
+                raise EventBatchError("feature state is not writable")
+            unknown = sorted(set(values) - allowed)
+            if unknown:
+                raise EventBatchError(f"feature state field is not writable: {unknown[0]}")
+            block = character.get("features")
+            if not isinstance(block, dict):
+                raise EventBatchError("character feature state is missing")
+            current = block.get(feature_id)
+            current = current if isinstance(current, dict) else {}
+            block[feature_id] = {**deepcopy(current), **deepcopy(values)}
             return
         if event_type == "dnd2024.class_resource.spent":
             # 职业资源永远写在既有的 canonical resources.class 结构里，
@@ -708,11 +732,23 @@ class CombatReducerMixin:
             # 优先失去临时生命值：伤害先吸收，余下的才扣 hp；事件的 amount
             # 仍是打出的伤害，吸收只反映在资源状态上。
             temp = int(resources.get("temp_hp", 0) or 0)
-            if delta < 0 and temp > 0:
+            if delta < 0 and temp > 0 and not event.get("healing"):
                 absorbed = min(temp, -delta)
                 resources["temp_hp"] = temp - absorbed
                 delta += absorbed
-            resources["hp"] = max(0, min(maximum, before + delta))
+            next_hp = max(0, min(maximum, before + delta))
+            relentless = event.get("relentless")
+            if (
+                isinstance(relentless, dict)
+                and next_hp <= 0
+                and before > 0
+                and not event.get("relentless_deferred")
+            ):
+                # 归零前拦截：临时 HP 已经吸收，但 HP 本身不动、昏迷与结束
+                # 狂暴都还没发生。伤害随决策挂起，等本人决定是否用这次特性。
+                self._open_relentless_rage(snapshot, target_id, before, event, relentless)
+                return
+            resources["hp"] = next_hp
             conditions = character.setdefault("conditions", {})
             if resources["hp"] <= 0:
                 conditions["unconscious"] = {"source": "zero_hp"}
@@ -738,3 +774,34 @@ class CombatReducerMixin:
                 enemy.setdefault("conditions", {})["defeated"] = {"source": "zero_hp"}
         else:
             raise EventBatchError("HP target actor is invalid")
+
+    def _open_relentless_rage(
+        self, snapshot: dict[str, Any], target_id: str, before: int,
+        event: dict[str, Any], marker: dict[str, Any],
+    ) -> None:
+        """Hold the damage and offer the zero-HP survival save.
+
+        ``decision_id`` is derived from round/turn/HP so a replay that reaches
+        the same damage produces the same window instead of a second one.
+        """
+
+        combat = snapshot["ruleset_state"]["combat"]
+        decision_id = (
+            f"relentless-rage:{target_id}:{combat.get('round', 0)}:"
+            f"{combat.get('turn_index', 0)}:{before}"
+        )
+        pending = combat.setdefault("pending_decisions", [])
+        if any(item.get("decision_id") == decision_id for item in pending):
+            return
+        pending.append({
+            "decision_id": decision_id,
+            "kind": RELENTLESS_RAGE_DECISION,
+            "actor_id": target_id,
+            "assigned_to": str(marker.get("assigned_to") or ""),
+            "options": ["use", "decline"],
+            "dc": int(marker["dc"]),
+            "dc_step": int(marker.get("dc_step", 5) or 5),
+            "hp_amount": int(marker.get("hp_amount", 0) or 0),
+            "save_ability": str(marker.get("save_ability") or "con"),
+            "damage_event": {**deepcopy(event), "relentless_deferred": True},
+        })

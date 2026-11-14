@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.engine.player_control import is_ai_controlled
 from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
 from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_FEATURE_ID,
@@ -45,6 +46,7 @@ from .action_adapter import (
     spell_formula_node,
 )
 from .primitives import (
+    RELENTLESS_RAGE_DECISION,
     CombatIntentError,
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
@@ -414,6 +416,111 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _saving_throw_sources(
+        self, actor: dict[str, Any], ability: str,
+    ) -> list[dict[str, Any]]:
+        """Every declared Advantage/Disadvantage source on one saving throw.
+
+        Rage's Strength save and untrained armor are code facts of the combat
+        authority; Danger Sense is read from its own declaration so a second
+        ability would never need a new branch.  The aggregation stays in one
+        place: two sources of Advantage still roll two dice, and Advantage plus
+        Disadvantage collapses to a straight roll.
+        """
+
+        conditions = actor.get("conditions") or {}
+        flags = condition_flags(self.catalog.conditions, conditions)
+        sources: list[dict[str, Any]] = []
+        if "rage" in conditions and ability == "str":
+            sources.append({"code": "rage", "mode": "advantage"})
+        if bool(
+            (actor.get("armor_training") or {}).get("untrained_armor_worn")
+        ) and ability in {"str", "dex"}:
+            sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+        if not flags["incapacitated"]:
+            character = self._feature_character(actor)
+            declared = self.features.feature_value(
+                character, "danger_sense", "save_advantage_abilities", [],
+            )
+            if isinstance(declared, list) and ability in {str(item) for item in declared}:
+                sources.append({"code": "danger_sense", "mode": "advantage"})
+        return sources
+
+    def _evasion_applies(self, target: dict[str, Any], ability: str) -> bool:
+        """Whether Evasion rewrites this effect's damage branches.
+
+        Evasion only matches the effect the declaration names -- a Dexterity
+        save that already allows half damage on a success.  It is not a global
+        halving of Dexterity saves, and an Incapacitated holder gets nothing.
+        """
+
+        if target.get("kind") not in {"player", "companion"}:
+            return False
+        flags = condition_flags(self.catalog.conditions, target.get("conditions") or {})
+        if flags["incapacitated"]:
+            return False
+        character = self._feature_character(target)
+        declared = self.features.feature_value(
+            character, "evasion", "half_on_success_save", "",
+        )
+        return str(declared) == ability
+
+    def _relentless_rage_marker(
+        self, instance: Any, target: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The state a damage event needs so the reducer can offer Relentless Rage.
+
+        The declaration answers ``what`` (DC ladder, ability, HP formula); the
+        target's own feature state answers ``which DC``.  Nothing is rolled and
+        no decision is opened here: only a damage batch that would actually
+        reach 0 HP (temp HP already absorbed) may open the window, and that is
+        the reducer's boundary.
+        """
+
+        if target.get("kind") not in {"player", "companion"}:
+            return None
+        if "rage" not in (target.get("conditions") or {}):
+            return None
+        character = self._feature_character(target)
+        if not self.features.has_feature(character, "relentless_rage"):
+            return None
+        base_dc = self.features.feature_value(
+            character, "relentless_rage", "base_dc", 10,
+        )
+        step = self.features.feature_value(
+            character, "relentless_rage", "dc_step", 5,
+        )
+        multiplier = self.features.feature_value(
+            character, "relentless_rage", "hp_multiplier", 2,
+        )
+        ability = str(self.features.feature_value(
+            character, "relentless_rage", "save_ability", "con",
+        ) or "con")
+        stored = (character.get("features") or {}).get("relentless_rage")
+        stored_dc = stored.get("next_dc") if isinstance(stored, dict) else None
+        dc = int(base_dc)
+        if isinstance(stored_dc, int) and not isinstance(stored_dc, bool):
+            dc = stored_dc
+        class_level = 0
+        rows = (character.get("build") or {}).get("class_levels") or []
+        for row in rows:
+            if isinstance(row, dict) and str(row.get("class_ref")) == "class:barbarian":
+                raw_level = row.get("level")
+                if isinstance(raw_level, int) and not isinstance(raw_level, bool):
+                    class_level = raw_level
+                break
+        if class_level <= 0:
+            return None
+        kind, raw_id = _actor_kind(str(target.get("actor_id") or ""))
+        human = kind == "player" and not is_ai_controlled(instance, raw_id)
+        return {
+            "dc": dc,
+            "dc_step": int(step) if isinstance(step, int) else 5,
+            "hp_amount": int(multiplier) * class_level,
+            "save_ability": ability,
+            "assigned_to": raw_id if human else str(getattr(instance, "gm_uid", "") or ""),
+        }
+
     def _resist_damage(
         self, target: dict[str, Any], amount: int, damage_type: str,
     ) -> tuple[int, str]:
@@ -425,6 +532,12 @@ class CombatResolutionMixin:
         spells). A single set-membership test guarantees that multiple
         simultaneous sources never stack; the returned condition id names the
         source for the event, or ``""`` when nothing applies.
+
+        Fiendish Resilience is the third source and the only one stored on the
+        character rather than in a condition: the chosen type lives in
+        ``features.fiendish_resilience.damage_type`` because it outlives the
+        combat and is re-chosen at rest.  It is consulted only after every
+        condition source declined, so it can never stack a second halving.
         """
 
         if amount <= 0 or not damage_type:
@@ -440,7 +553,20 @@ class CombatResolutionMixin:
                 )
             if damage_type in types:
                 return amount // 2, condition_id
+        if self._fiendish_resilience_type(target) == damage_type:
+            return amount // 2, "fiendish_resilience"
         return amount, ""
+
+    def _fiendish_resilience_type(self, target: dict[str, Any]) -> str:
+        """The damage type this character re-chose at its last rest, or ``""``."""
+
+        if target.get("kind") not in {"player", "companion"}:
+            return ""
+        character = self._feature_character(target)
+        stored = (character.get("features") or {}).get("fiendish_resilience")
+        if not isinstance(stored, dict):
+            return ""
+        return str(stored.get("damage_type") or "")
 
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -772,6 +898,9 @@ class CombatResolutionMixin:
         if resistance:
             damage_event["resisted"] = True
             damage_event["resistance"] = resistance
+        relentless = self._relentless_rage_marker(instance, target)
+        if relentless:
+            damage_event["relentless"] = relentless
         if sneak_dice:
             # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
             # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
@@ -1015,6 +1144,9 @@ class CombatResolutionMixin:
                     if resistance:
                         damage_event["resisted"] = True
                         damage_event["resistance"] = resistance
+                    relentless = self._relentless_rage_marker(instance, target)
+                    if relentless:
+                        damage_event["relentless"] = relentless
                     events.append(damage_event)
                     events.extend(self._concentration_events(instance, combat, target, damage, rng))
                     dealt[target_id] = dealt.get(target_id, 0) + damage
@@ -1059,17 +1191,10 @@ class CombatResolutionMixin:
                     })
                     succeeded = False
                 else:
-                    # 狂暴（力量豁免优势）与未受训护甲（力/敏豁免劣势）走同一
-                    # 归一函数：优劣势相消时按 RAW 回到单骰。
-                    rage_advantage = "rage" in target["conditions"] and save_ability == "str"
-                    untrained_disadvantage = bool(
-                        (target.get("armor_training") or {}).get("untrained_armor_worn")
-                    ) and save_ability in {"str", "dex"}
-                    save_sources: list[dict[str, Any]] = []
-                    if rage_advantage:
-                        save_sources.append({"code": "rage", "mode": "advantage"})
-                    if untrained_disadvantage:
-                        save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+                    # 狂暴（力量豁免优势）、未受训护甲（力/敏豁免劣势）与
+                    # Danger Sense（敏捷豁免优势）走同一归一函数：优劣势
+                    # 相消时按 RAW 回到单骰。
+                    save_sources = self._saving_throw_sources(target, save_ability)
                     save_mode = mode_from_sources(save_sources)
                     first = int(rng.randint(1, 20))
                     second = int(rng.randint(1, 20)) if save_mode else None
@@ -1110,8 +1235,14 @@ class CombatResolutionMixin:
                     )
                     damage_node = self._maybe_overchannel(intent, damage_node)
                     damage, rolls = roll_damage_node(damage_node, rng)
-                    if succeeded:
-                        damage = damage // 2 if effect.get("half_on_success") else 0
+                    half_on_success = bool(effect.get("half_on_success"))
+                    if half_on_success and self._evasion_applies(target, save_ability):
+                        # Evasion 改写的是"这条允许敏捷豁免半伤"的效果分支，不是
+                        # 所有敏捷豁免：成功 0、失败 floor(amount/2)，之后抗性
+                        # 仍只应用一次（顺序固定，不能重复减半）。
+                        damage = 0 if succeeded else damage // 2
+                    elif succeeded:
+                        damage = damage // 2 if half_on_success else 0
                     damage_type = str(effect.get("damage_type") or "force")
                     # 抗性在豁免减半之后结算（RAW 顺序：先修正，后抗性）。
                     damage, resistance = self._resist_damage(target, damage, damage_type)
@@ -1127,6 +1258,9 @@ class CombatResolutionMixin:
                         if resistance:
                             damage_event["resisted"] = True
                             damage_event["resistance"] = resistance
+                        relentless = self._relentless_rage_marker(instance, target)
+                        if relentless:
+                            damage_event["relentless"] = relentless
                         events.append(damage_event)
                         events.extend(self._concentration_events(instance, combat, target, damage, rng))
                         dealt[target_id] = dealt.get(target_id, 0) + damage
@@ -1160,6 +1294,9 @@ class CombatResolutionMixin:
                 if resistance:
                     damage_event["resisted"] = True
                     damage_event["resistance"] = resistance
+                relentless = self._relentless_rage_marker(instance, target)
+                if relentless:
+                    damage_event["relentless"] = relentless
                 events.append(damage_event)
                 events.extend(self._concentration_events(instance, combat, target, damage, rng))
                 dealt[target_id] = dealt.get(target_id, 0) + damage
@@ -2060,15 +2197,7 @@ class CombatResolutionMixin:
                 "repeat_save": True,
                 "roll_id": self._roll_id(events, "saving_throw", actor_id),
             }
-        rage_advantage = "rage" in actor["conditions"] and ability == "str"
-        untrained_disadvantage = bool(
-            (actor.get("armor_training") or {}).get("untrained_armor_worn")
-        ) and ability in {"str", "dex"}
-        save_sources: list[dict[str, Any]] = []
-        if rage_advantage:
-            save_sources.append({"code": "rage", "mode": "advantage"})
-        if untrained_disadvantage:
-            save_sources.append({"code": "untrained_armor", "mode": "disadvantage"})
+        save_sources = self._saving_throw_sources(actor, ability)
         save_mode = mode_from_sources(save_sources)
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if save_mode else None
@@ -2422,6 +2551,86 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _finish_relentless_rage(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Resolve the zero-HP survival window.
+
+        Declining or failing submits the held damage, so the ordinary 0 HP
+        consequences run exactly once.  A success replaces those consequences
+        with ``hp = 2 x Barbarian level``; the Rage never ended, so nothing has
+        to be restored afterwards and no healing trigger fires.  Every actual
+        use -- success or failure -- raises the next DC; a decline does not.
+        """
+
+        actor_id = str(decision["actor_id"])
+        damage_event = deepcopy(decision["damage_event"])
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],
+            "option": intent["option"],
+        }]
+        if intent["option"] != "use":
+            events.append(damage_event)
+            return events
+        actor = self._actor_view(instance, combat, actor_id)
+        ability = str(decision.get("save_ability") or "con")
+        dc = int(decision["dc"])
+        modifier = int(actor["saving_throws"].get(ability, 0) or 0)
+        sources = self._saving_throw_sources(actor, ability)
+        mode = mode_from_sources(sources)
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if mode else None
+        if mode == "advantage":
+            natural = max(first, second)
+        elif mode == "disadvantage":
+            natural = min(first, second)
+        else:
+            natural = first
+        bonus_rolls = condition_check_bonus_rolls(
+            self.catalog.conditions, actor["conditions"], "saving_throw", rng,
+        )
+        bonus = sum(row["roll"] for row in bonus_rolls)
+        aura = self._saving_throw_aura_bonus(instance, combat, actor)
+        total = natural + modifier + bonus + int(aura["bonus"])
+        success = total >= dc
+        check: dict[str, Any] = {
+            "type": "check.resolved", "kind": "saving_throw", "actor_id": actor_id,
+            "ability": ability,
+            "rolls": [value for value in (first, second) if value is not None],
+            "natural": natural, "modifier": modifier,
+            "check_bonus": bonus, "check_bonus_rolls": bonus_rolls,
+            "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
+            "total": total, "target": dc, "success": success,
+            "feature_id": "relentless_rage", "trigger": "zero_hp",
+        }
+        if sources:
+            check["advantage_mode"] = mode
+            check["advantage_sources"] = sources
+        events.append(check)
+        # DC 递增写在 save 之后、结果之前：失败也是一次实际使用。
+        events.append({
+            "type": "dnd2024.feature_state.set", "actor_id": actor_id,
+            "feature_id": "relentless_rage", "owner": "class:barbarian",
+            "values": {"next_dc": dc + int(decision.get("dc_step") or 5)},
+        })
+        if not success:
+            events.append(damage_event)
+            return events
+        maximum = int(actor.get("max_hp", 0) or 0)
+        target_hp = int(decision.get("hp_amount", 0) or 0)
+        if maximum > 0:
+            target_hp = min(maximum, target_hp)
+        events.append({
+            "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+            "delta": target_hp - int(actor.get("hp", 0) or 0), "amount": 0,
+            # ``healing`` 只用于拒绝临时 HP 吸收：这是"HP 改为某值"，不是伤害。
+            "healing": True,
+            "relentless_rage": True, "save_total": total, "dc": dc,
+            "hp_after": target_hp,
+        })
+        return events
+
     def _decision_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
@@ -2439,6 +2648,8 @@ class CombatResolutionMixin:
             return self._finish_check_window(instance, combat, decision, intent, rng)
         if decision.get("kind") == DAMAGE_WINDOW_DECISION:
             return self._finish_damage_window(instance, combat, decision, intent, rng)
+        if decision.get("kind") == RELENTLESS_RAGE_DECISION:
+            return self._finish_relentless_rage(instance, combat, decision, intent, rng)
         movement = decision["movement"]
         events: list[dict[str, Any]] = [{
             "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],

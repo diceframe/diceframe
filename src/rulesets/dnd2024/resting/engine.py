@@ -11,6 +11,7 @@ from src.rulesets.dnd2024.character.attunement import AttunementError
 from src.rulesets.dnd2024.character.attunement import apply_short_rest_attunement
 from src.rulesets.dnd2024.character.attunement import owned_ref_counts
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.features.resources import reset_feature_usage
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
@@ -270,6 +271,7 @@ class Dnd2024RestEngine:
         attunement: dict[str, Any] | None = None,
         free_cast: dict[str, Any] | None = None,
         recovery: dict[str, Any] | None = None,
+        fiendish_resilience: str | None = None,
     ) -> dict[str, Any]:
         if free_cast:
             # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
@@ -277,6 +279,13 @@ class Dnd2024RestEngine:
             raise RestError("free cast slots can only be re-chosen during a long rest")
         character = self.sync_resources(payload)
         self._require_conscious(character, "Short Rest")
+        # Fiend 的抗性改选与其它选择一样先校验再落账：非法类型不能留下
+        # 已经恢复的 HP 与槽位。
+        fiendish_choice = self._plan_fiendish_resilience(
+            character,
+            fiendish_resilience if fiendish_resilience is not None
+            else payload.get("fiendish_resilience"),
+        )
         # 预算型恢复先算成计划：超预算、选到没消耗的槽、当天已用过都要在
         # 任何状态变化之前拒绝，这样一次非法选择不会留下半个休息结果。
         recovery_plan = self._plan_short_recovery(
@@ -317,6 +326,8 @@ class Dnd2024RestEngine:
         self._recover_spell_slots(character, "short", events)
         self._recover_free_cast_slots(character, "short", events)
         events.extend(self._apply_short_recovery(character, recovery_plan))
+        events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
+        events.extend(self._reset_relentless_rage_dc(character))
         events.extend(self._apply_attunement(character, payload, attunement))
         events.extend(self._recharge_items(character, payload, "short"))
         return {
@@ -331,9 +342,15 @@ class Dnd2024RestEngine:
         self, payload: dict[str, Any], land_terrain: str | None = None,
         prepared_spells: dict[str, list[str]] | None = None,
         free_cast: dict[str, Any] | None = None,
+        fiendish_resilience: str | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
+        fiendish_choice = self._plan_fiendish_resilience(
+            character,
+            fiendish_resilience if fiendish_resilience is not None
+            else payload.get("fiendish_resilience"),
+        )
         # Land 地形选择先算成一份计划再落账：校验通过之前不动任何状态，
         # 因此一次非法地形不会留下"半套"休息结果。
         terrain_plan = self._plan_land_terrain(
@@ -385,6 +402,8 @@ class Dnd2024RestEngine:
         events.extend(self._apply_land_terrain(character, terrain_plan))
         if prepared_spells:
             events.extend(self._apply_prepared_spells(character, prepared_spells))
+        events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
+        events.extend(self._reset_relentless_rage_dc(character))
         # 长休作用域的特性使用计数只在这里清零：短休、战斗结束、回合结束、
         # 升级与语言切换都不得动它，否则"首次免费"会被反复刷新。
         for record in reset_feature_usage(character):
@@ -820,6 +839,76 @@ class Dnd2024RestEngine:
                 "before": before,
                 "after": maximum,
             })
+
+    def _plan_fiendish_resilience(
+        self, character: dict[str, Any], requested: Any,
+    ) -> str | None:
+        """Validate a Fiend's rest-time damage-type choice.
+
+        ``None``/absent means "keep the current choice": the feature only
+        changes when the player explicitly re-chooses.  A first rest without a
+        choice therefore leaves the character with no resistance rather than
+        defaulting to a type.
+        """
+
+        if requested is None or requested == "":
+            return None
+        if not isinstance(requested, str):
+            raise RestError("fiendish_resilience must be a damage type")
+        chosen = requested.strip().lower()
+        if chosen not in DAMAGE_TYPES:
+            raise RestError(f"unknown damage type for fiendish resilience: {requested}")
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(
+            character, "fiendish_resilience", owner="subclass:fiend_patron",
+        ):
+            raise RestError("this character has no fiendish resilience")
+        excluded = resolver.feature_value(
+            character, "fiendish_resilience", "excluded_damage_types", [],
+        )
+        if isinstance(excluded, list) and chosen in {str(item) for item in excluded}:
+            raise RestError(f"{chosen} cannot be chosen with fiendish resilience")
+        return chosen
+
+    def _apply_fiendish_resilience(
+        self, character: dict[str, Any], chosen: str | None,
+    ) -> list[dict[str, Any]]:
+        if chosen is None:
+            return []
+        block = character.setdefault("features", {})
+        current = block.get("fiendish_resilience")
+        current = current if isinstance(current, dict) else {}
+        before = str(current.get("damage_type") or "")
+        block["fiendish_resilience"] = {**current, "damage_type": chosen}
+        return [{
+            "type": "rebind_fiendish_resilience", "before": before or None,
+            "after": chosen, "feature_id": "fiendish_resilience",
+            "owner": "subclass:fiend_patron",
+        }]
+
+    def _reset_relentless_rage_dc(
+        self, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Both rests reset the survival DC to the declaration's base.
+
+        Nothing is written when the DC is already at the base, so a rest that
+        never used the feature does not invent a recovery event.
+        """
+
+        block = character.get("features")
+        if not isinstance(block, dict):
+            return []
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(character, "relentless_rage"):
+            return []
+        base = resolver.feature_value(character, "relentless_rage", "base_dc", 10)
+        base_dc = int(base) if isinstance(base, int) and not isinstance(base, bool) else 10
+        stored = block.get("relentless_rage")
+        stored = stored if isinstance(stored, dict) else {}
+        if stored.get("next_dc") == base_dc:
+            return []
+        block["relentless_rage"] = {**stored, "next_dc": base_dc}
+        return [{"type": "reset_relentless_rage_dc", "dc": base_dc}]
 
     def _class_state(self, character: dict[str, Any]) -> tuple[str, str, int]:
         build = character.get("build")

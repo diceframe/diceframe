@@ -46,6 +46,7 @@ from ..spells.font_of_magic import (
 from .primitives import (
     DICE_RE,
     INTENT_TYPES,
+    RELENTLESS_RAGE_DECISION,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -259,6 +260,11 @@ class CombatValidationMixin:
             for row in combat.get("pending_decisions", [])
         ) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("resolve the pending check window first")
+        if any(
+            row.get("kind") == RELENTLESS_RAGE_DECISION
+            for row in combat.get("pending_decisions", [])
+        ) and intent_type not in {"decision.resolve", "combat.message"}:
+            raise CombatIntentError("resolve the relentless rage decision first")
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -286,6 +292,21 @@ class CombatValidationMixin:
                 if submitted_by != str(decision.get("assigned_to") or gm_uid):
                     raise CombatIntentError("only the window owner can resolve this check window")
                 self._validate_check_window(instance, combat, decision, intent)
+                return
+            if decision.get("kind") == RELENTLESS_RAGE_DECISION:
+                # 归零存活是本人（或托管该席位的 GM）的决定；GM 始终可以
+                # 代为处理，与其它托管决策同一条边界。
+                kind, raw_id = _actor_kind(str(decision.get("actor_id") or ""))
+                expected_owner = (
+                    gm_uid
+                    if kind == "companion"
+                    or (kind == "player" and is_ai_controlled(instance, raw_id))
+                    else str(decision.get("assigned_to") or gm_uid)
+                )
+                if submitted_by != expected_owner and submitted_by != gm_uid:
+                    raise CombatIntentError(
+                        "only the assigned actor can resolve this survival decision"
+                    )
                 return
             if decision.get("kind") in {HIT_SPELL_DECISION, HIT_REACTION_DECISION}:
                 kind, raw_id = _actor_kind(str(decision.get("actor_id") or ""))
