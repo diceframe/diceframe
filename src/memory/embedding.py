@@ -53,6 +53,8 @@ class EmbeddingClient:
         self.timeout_seconds = max(5.0, min(float(timeout_seconds), 300.0))
         self.max_input_chars = max_input_override if max_input_override > 0 else self._detect_max_input(model)
         self._session: aiohttp.ClientSession | None = None
+        # Safe diagnostic for the WebUI rebuild receipt; never include API keys.
+        self.last_error: str = ""
 
     def fingerprint(self) -> str:
         """Return a secret-free identity for derived vectors."""
@@ -153,6 +155,7 @@ class EmbeddingClient:
             "model": self.model,
             "input": texts,
         }
+        self.last_error = ""
 
         try:
             session = await self._get_session()
@@ -163,10 +166,14 @@ class EmbeddingClient:
                 **request_kwargs,
             ) as resp:
                 if resp.status != 200:
+                    error_text = (await resp.text()).strip()
+                    self.last_error = f"Embedding API HTTP {resp.status}: {error_text[:240]}"
+                    logger.warning("批量 embedding API 失败: %s", self.last_error)
                     return None
                 data = await resp.json()
                 return [item["embedding"] for item in data["data"]]
-        except Exception:
+        except Exception as exc:
+            self.last_error = f"Embedding API 请求失败：{exc}"
             logger.exception("批量 embedding 调用失败")
             return None
 

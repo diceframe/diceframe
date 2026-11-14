@@ -22,9 +22,9 @@ def _controller(state: dict) -> ConfigController:
     return controller
 
 
-def _request(models_dir: Path) -> SimpleNamespace:
+def _request(models_dir: Path, body: dict | None = None) -> SimpleNamespace:
     async def _json() -> dict:
-        return {}
+        return body or {}
 
     return SimpleNamespace(
         app={"subsystems": SimpleNamespace(memory_store=SimpleNamespace(db_path=str(models_dir / "memory.db")))},
@@ -65,3 +65,14 @@ def test_external_source_keeps_existing_base_url_guard():
     payload = _body(response)
     assert payload["ok"] is False
     assert payload["error"] == "Base URL 非法或不允许"
+
+
+def test_unsaved_local_source_draft_uses_local_test_path(tmp_path):
+    controller = _controller({"embedding_source": "external"})
+    response = asyncio.run(controller.test_embedding(_request(
+        tmp_path,
+        {"embedding_source": "local", "embedding_local_model_id": "missing-model"},
+    )))
+    payload = _body(response)
+    assert payload["source"] == "local"
+    assert "本地模型加载失败" in payload["error"]

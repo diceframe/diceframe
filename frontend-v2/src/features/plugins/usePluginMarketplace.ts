@@ -117,9 +117,9 @@ export function usePluginMarketplace(
     const type = typeFilter.value
     const keyword = marketKeyword.value.trim().toLowerCase()
     const items = marketplace.value.filter(item => {
-      // W7 扩展中心：统一货架——content-pack 不再分流到 /modules，全部
-      // .dfplugin 类型（内容包/冒险模组/ruleset-runtime/工具等）在同一货架
-      // 发现与安装；Hub catalog 是共享索引，服务端本就不按货架过滤。
+      // 内容包有自己的内容库在线货架；扩展中心只展示技术扩展。后端仍
+      // 共用同一份索引与安装服务，但任何类型筛选都不能把模组混进扩展列表。
+      if (item.plugin_type === 'content-pack') return false
       if (type && item.plugin_type !== type) return false
       if (!keyword) return true
       return [item.id, item.name, item.description, item.repository_url, ...(item.tags || [])]

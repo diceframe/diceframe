@@ -140,8 +140,8 @@ describe('ModulesView', () => {
     // 禁用中的模组仍然列在"已安装"里（否则无法再启用）。
     expect(installedSection.text()).toContain('Dormant Module')
     expect(installedSection.text()).toContain('已禁用')
-    expect(installedSection.text()).toContain('冒险模组')
-    expect(installedSection.text()).toContain('资源包')
+    expect(installedSection.text()).toContain('冒险内容包')
+    expect(installedSection.text()).toContain('资源内容包')
     expect(installedSection.text()).toContain('不含固定剧情')
     expect(localSection.find('input[type="file"]').exists()).toBe(true)
     expect(onlineSection.text()).toContain('Other Module')
@@ -345,7 +345,7 @@ describe('ModulesView', () => {
     await wrapper.get('[data-testid="modules-submit-guide-open"]').trigger('click')
     const guide = wrapper.get('[data-testid="modules-submit-guide"]')
     expect(guide.findAll('li')).toHaveLength(3)
-    expect(guide.text()).toContain('在创作工坊导出冒险模组或资源包')
+    expect(guide.text()).toContain('在创作工坊导出冒险内容包或资源内容包')
     expect(guide.get('[data-testid="modules-submit-go-creator"]').attributes('href')).toBe('/creator')
     const direct = guide.get('[data-testid="modules-submit-direct"]')
     expect([direct.attributes('target'), direct.attributes('rel')]).toEqual(['_blank', 'noopener'])
@@ -384,10 +384,12 @@ describe('ModulesView', () => {
     const { wrapper } = await mountView()
 
     const installedCard = wrapper.get('[data-testid="modules-installed"] .module-card')
-    expect(installedCard.get('.eyebrow').text()).toBe('资源包')
+    expect(installedCard.get('.eyebrow').text()).toBe('资源内容包')
+    expect(installedCard.find('.module-card-title .module-card-icon').exists()).toBe(true)
+    expect(installedCard.find('.module-card-chips').exists()).toBe(false)
     expect(installedCard.text()).toContain('包含 1 个冒险')
     const onlineCard = wrapper.get('[data-testid="modules-market-office-night"]')
-    expect(onlineCard.get('.tag-row .n-tag').text()).toBe('资源包')
+    expect(onlineCard.get('.tag-row .n-tag').text()).toBe('资源内容包')
     expect(onlineCard.text()).toContain('包含 1 个冒险')
   })
 
@@ -406,7 +408,7 @@ describe('ModulesView', () => {
     expect(credited.classes()).toContain('market-card')
     expect(credited.get('.market-author').text()).toBe('作者: EOEOY')
     expect(credited.findAll('.tag-row .n-tag').map(tag => tag.text()))
-      .toEqual(['冒险模组', '已验证作者', 'adventure', '简体中文', 'English', 'fr'])
+      .toEqual(['冒险内容包', '已验证作者', 'adventure', '简体中文', 'English', 'fr'])
     expect(credited.get('.stars-tag').text()).toBe('12')
     expect(credited.text()).toContain('包含 2 个冒险')
     await credited.findAll('button').find(button => button.text() === '打开仓库')!.trigger('click')
@@ -464,7 +466,7 @@ describe('ModulesView', () => {
     mocks.list.mockResolvedValue({ ok: true, modules: [{ ...installed.modules[0], status: 'disabled', inventory_status: 'disabled' }] })
     const { wrapper } = await mountView()
     const section = wrapper.get('[data-testid="modules-installed"]')
-    expect(section.text()).toContain('冒险模组')
+    expect(section.text()).toContain('冒险内容包')
     expect(section.text()).toContain('启用后')
     expect(section.text()).not.toContain('不含固定剧情')
   })
@@ -660,5 +662,18 @@ describe('ModulesView', () => {
     // 更新后必须重读已安装列表与市场索引，版本号才会刷新。
     expect(mocks.list).toHaveBeenCalledTimes(2)
     expect(mocks.marketplace).toHaveBeenCalledTimes(2)
+  })
+
+  it('offers one-click update for all installed packs with available updates', async () => {
+    mocks.update.mockResolvedValue({ ok: true, up_to_date: false, version: '1.2.0' })
+    const { wrapper } = await mountView()
+    const updateAll = wrapper.get('[data-testid="modules-installed"] .module-update-all-action')
+    expect(updateAll.text()).toContain('一键更新（1）')
+
+    await updateAll.trigger('click')
+    await flushPromises()
+
+    expect(mocks.update).toHaveBeenCalledWith('castle-module')
+    wrapper.unmount()
   })
 })

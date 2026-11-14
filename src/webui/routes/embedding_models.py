@@ -17,11 +17,13 @@ def _manager(request: web.Request) -> LocalModelManager:
     if models_dir is None:
         raise ModelCatalogError("embedding model storage is not ready")
     state = request.app.get("config_state") or {}
+    plugin_host = request.app.get("plugin_host")
     return LocalModelManager(
         models_dir,
         proxy_url=effective_proxy_url(
             bool(state.get("proxy_enabled")), state.get("proxy_url", ""),
         ),
+        mirror_manager=getattr(plugin_host, "mirrors", None),
     )
 
 
@@ -66,7 +68,7 @@ async def api_embedding_model_uninstall(request: web.Request) -> web.Response:
 
 
 async def api_embedding_catalog_refresh(request: web.Request) -> web.Response:
-    """W5-2：管理员触发拉取远端模型目录（diceframe-models 分片）。
+    """W5-2：管理员触发拉取远端模型目录（diceframe-models index 或分片）。
 
     远端缓存写入 data/models/remote-catalog.json；读取路径不发网络请求。
     """
@@ -88,8 +90,22 @@ async def _run_rebuild(app: web.Application) -> None:
     store = getattr(subsystems, "memory_store", None)
     if store is None or store.embedding_client is None:
         return
-    while await store.embed_all_pending():
-        await asyncio.sleep(0)
+    app.pop("_embedding_backfill_error", None)
+    try:
+        while True:
+            processed = await store.embed_all_pending()
+            if processed:
+                await asyncio.sleep(0)
+                continue
+            if store.embedding_status().get("pending", 0):
+                detail = str(getattr(store.embedding_client, "last_error", "") or "").strip()
+                app["_embedding_backfill_error"] = (
+                    "向量服务未返回有效结果，待重建条目仍未完成；请检查模型连接后重试。"
+                    + (f"（{detail}）" if detail else "")
+                )
+            return
+    except Exception as exc:
+        app["_embedding_backfill_error"] = f"索引重建失败：{exc}"
 
 
 async def api_embedding_rebuild(request: web.Request) -> web.Response:
@@ -105,6 +121,7 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
     previous = request.app.get("_embedding_backfill_task")
     if previous is not None and not previous.done():
         return web.json_response({"ok": True, "state": "rebuilding"})
+    request.app.pop("_embedding_backfill_error", None)
     request.app["_embedding_backfill_task"] = asyncio.create_task(
         _run_rebuild(request.app), name="embedding-profile-rebuild-manual",
     )

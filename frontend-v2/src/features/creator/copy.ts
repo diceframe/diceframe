@@ -16,6 +16,10 @@ export type CreatorCopy = {
   sourceGroup: string
   toolGroup: string
   packagingGroup: string
+  workspaceLauncherTitle: string
+  workspaceLauncherHint: string
+  workspaceLauncherAction: string
+  workspaceModalTitle: string
   projectGroup: string
   projectPlaceholder: string
   projectCreate: string
@@ -37,8 +41,9 @@ export type CreatorCopy = {
 
 const values: Record<Locale, CreatorCopy> = {
   'zh-CN': {
-    kicker: '创作工具', title: '创作工坊', intro: '先制作内容资产，再用工程工作区保存源文件；最后导出统一内容扩展包。',
+    kicker: '创作工具', title: '创作工坊', intro: '先制作内容资产，再用工程工作区保存源文件；最后导出可安装的内容包。',
     storyGroup: '故事创作', foundationGroup: '世界与规则', sourceGroup: '内容资产', toolGroup: '文本工具', packagingGroup: '分享与安装',
+    workspaceLauncherTitle: '工程工作区（源文件）', workspaceLauncherHint: '只有要编辑源文件、运行预检或构建 .dfplugin 时才需要打开。日常制作内容请从下面的创作入口开始。', workspaceLauncherAction: '打开工程工作区', workspaceModalTitle: '工程工作区（源文件）',
     projectGroup: '工程工作区（源文件）', projectPlaceholder: '新工程名称', projectCreate: '创建工程', projectEmpty: '还没有工程；创建一个后可持续保存源码、revision、预检和构建记录。',
     projectFilePlaceholder: '文件路径或内容', projectSave: '保存 revision', projectValidate: '预检', projectPreview: '预览', projectSubmission: '准备投稿回执', projectBuild: '构建 .dfplugin', projectValidated: '预检通过', projectInvalid: '预检未通过', projectBuilt: '构建完成，已下载。', projectDelete: '删除工程', projectDeleteConfirm: '确定删除这个工程吗？', projectDeleted: '工程已删除。',
     cards: {
@@ -48,14 +53,15 @@ const values: Record<Locale, CreatorCopy> = {
       rules: { title: '规则编辑', description: '查看和维护可用规则配置，保持规则结算由规则系统负责。', action: '打开规则' },
       modules: { title: '已安装内容包', description: '安装、导入、更新可安装内容包，并查看包资源和来源身份。', action: '管理内容包' },
       textReview: { title: '文本整理与分配', description: '按标题拆分普通文本，逐段选择保存到世界、资料册、角色模板或冒险。', action: '打开文本工具' },
-      exportAdventureModule: { title: '统一内容扩展包', description: '在一个向导里组合内容资产，生成一个可安装、可分享的 .dfplugin。', action: '创建统一内容扩展包' },
-      exportResourcePack: { title: '导出资源包', description: '只打包世界、规则、资料册和角色卡这类可复用资源，不含冒险，适合给别人当素材。', action: '导出资源包' },
+      exportAdventureModule: { title: '导出内容包', description: '在一个向导里组合冒险和配套内容，生成一个可安装、可分享的 .dfplugin。', action: '导出内容包' },
+      exportResourcePack: { title: '导出资源内容包', description: '只打包世界、规则、资料册和角色卡这类可复用资源，不含冒险，适合给别人当素材。', action: '导出资源内容包' },
       exportAdventureBundle: { title: '导出单个冒险包', description: '在冒险列表里把单个冒险导出为 .dfadventure.zip，用于备份、编辑或跨实例传输；它不是商店安装包。', action: '前往冒险列表' },
     },
   },
   en: {
-    kicker: 'CREATION TOOLS', title: 'Creator workshop', intro: 'Use the existing tools to make adventures, worlds, lorebooks, rules, and content packages.',
+    kicker: 'CREATION TOOLS', title: 'Creator workshop', intro: 'Make content assets, keep source files in a project workspace, and export installable content packages.',
     storyGroup: 'Story creation', foundationGroup: 'Worlds and rules', sourceGroup: 'Content assets', toolGroup: 'Text tools', packagingGroup: 'Share and install',
+    workspaceLauncherTitle: 'Project workspace (source)', workspaceLauncherHint: 'Open this only when you need to edit source files, validate a project, or build a .dfplugin. Start everyday content work from the creation tools below.', workspaceLauncherAction: 'Open project workspace', workspaceModalTitle: 'Project workspace (source)',
     projectGroup: 'Project workspace (source)', projectPlaceholder: 'New project name', projectCreate: 'Create project', projectEmpty: 'No projects yet. Create one to keep source files, revisions, validation, and build receipts together.',
     projectFilePlaceholder: 'File path or content', projectSave: 'Save revision', projectValidate: 'Validate', projectPreview: 'Preview', projectSubmission: 'Prepare submission receipt', projectBuild: 'Build .dfplugin', projectValidated: 'Validation passed', projectInvalid: 'Validation failed', projectBuilt: 'Build complete and downloaded.', projectDelete: 'Delete project', projectDeleteConfirm: 'Delete this project?', projectDeleted: 'Project deleted.',
     cards: {
@@ -65,14 +71,15 @@ const values: Record<Locale, CreatorCopy> = {
       rules: { title: 'Rules editor', description: 'View and maintain available rules configurations while the rules runtime owns resolution.', action: 'Open rules' },
       modules: { title: 'Content packages', description: 'Install, import, and update content packages, then inspect their resources and source identity.', action: 'Manage content packages' },
       textReview: { title: 'Distribute text', description: 'Split ordinary text by headings and choose whether each fragment becomes a world, lorebook, character template, or adventure.', action: 'Open text tool' },
-      exportAdventureModule: { title: 'Unified content extension', description: 'Combine content assets in one guided export to create one installable and shareable .dfplugin.', action: 'Create unified content package' },
-      exportResourcePack: { title: 'Export a resource pack', description: 'Bundle reusable worlds, rulesets, lorebooks, and character cards without adventures, for others to build on.', action: 'Export resource pack' },
+      exportAdventureModule: { title: 'Export a content package', description: 'Combine adventures and supporting assets in one guided export to create an installable and shareable .dfplugin.', action: 'Export content package' },
+      exportResourcePack: { title: 'Export a resource content package', description: 'Bundle reusable worlds, rulesets, lorebooks, and character cards without adventures, for others to build on.', action: 'Export resource package' },
       exportAdventureBundle: { title: 'Export a single adventure', description: 'Export one adventure as a .dfadventure.zip from the adventure list for backup, editing, or moving between instances. It is not a store package.', action: 'Go to adventures' },
     },
   },
   ja: {
     kicker: '作成ツール', title: 'クリエイターワークショップ', intro: '既存のツールから、冒険、世界、ロアブック、ルール、コンテンツソースを作成します。',
     storyGroup: 'ストーリー作成', foundationGroup: '世界とルール', sourceGroup: 'コンテンツソース', toolGroup: 'テキストツール', packagingGroup: 'パッケージと共有',
+    workspaceLauncherTitle: 'プロジェクト（ソース）', workspaceLauncherHint: 'ソースファイルの編集、検証、.dfplugin のビルドが必要なときだけ開きます。普段の作成は下の作成ツールから始めてください。', workspaceLauncherAction: 'プロジェクトを開く', workspaceModalTitle: 'プロジェクト（ソース）',
     projectGroup: 'プロジェクト', projectPlaceholder: '新しいプロジェクト名', projectCreate: '作成', projectEmpty: 'プロジェクトはまだありません。',
     projectFilePlaceholder: 'ファイルパスまたは内容', projectSave: 'Revision を保存', projectValidate: '検証', projectPreview: 'プレビュー', projectSubmission: '投稿用レシートを準備', projectBuild: '.dfplugin をビルド', projectValidated: '検証成功', projectInvalid: '検証失敗', projectBuilt: 'ビルドしてダウンロードしました。', projectDelete: 'プロジェクトを削除', projectDeleteConfirm: 'このプロジェクトを削除しますか？', projectDeleted: 'プロジェクトを削除しました。',
     cards: {
@@ -90,6 +97,7 @@ const values: Record<Locale, CreatorCopy> = {
   de: {
     kicker: 'ERSTELLUNGSWERKZEUGE', title: 'Kreativwerkstatt', intro: 'Erstelle Abenteuer, Welten, Lorebücher, Regeln und Inhaltsquellen mit den vorhandenen Werkzeugen.',
     storyGroup: 'Geschichten erstellen', foundationGroup: 'Welten und Regeln', sourceGroup: 'Inhaltsquellen', toolGroup: 'Textwerkzeuge', packagingGroup: 'Packen und teilen',
+    workspaceLauncherTitle: 'Projektarbeitsbereich (Quellen)', workspaceLauncherHint: 'Öffne ihn nur zum Bearbeiten von Quelldateien, Prüfen oder Bauen eines .dfplugin. Für die tägliche Erstellung nutzt du die Werkzeuge unten.', workspaceLauncherAction: 'Projektarbeitsbereich öffnen', workspaceModalTitle: 'Projektarbeitsbereich (Quellen)',
     projectGroup: 'Projektarbeitsbereich', projectPlaceholder: 'Neuer Projektname', projectCreate: 'Projekt erstellen', projectEmpty: 'Noch keine Projekte.',
     projectFilePlaceholder: 'Dateipfad oder Inhalt', projectSave: 'Revision speichern', projectValidate: 'Prüfen', projectPreview: 'Vorschau', projectSubmission: 'Einreichungsbeleg vorbereiten', projectBuild: '.dfplugin bauen', projectValidated: 'Prüfung bestanden', projectInvalid: 'Prüfung fehlgeschlagen', projectBuilt: 'Erstellt und heruntergeladen.', projectDelete: 'Projekt löschen', projectDeleteConfirm: 'Dieses Projekt löschen?', projectDeleted: 'Projekt gelöscht.',
     cards: {
@@ -107,6 +115,7 @@ const values: Record<Locale, CreatorCopy> = {
   ru: {
     kicker: 'ИНСТРУМЕНТЫ СОЗДАНИЯ', title: 'Мастерская автора', intro: 'Используйте существующие инструменты для приключений, миров, книг знаний, правил и источников контента.',
     storyGroup: 'Создание историй', foundationGroup: 'Миры и правила', sourceGroup: 'Источники контента', toolGroup: 'Текстовые инструменты', packagingGroup: 'Упаковка и публикация',
+    workspaceLauncherTitle: 'Рабочая область проекта (исходники)', workspaceLauncherHint: 'Открывайте её только для редактирования исходников, проверки или сборки .dfplugin. Для обычного создания используйте инструменты ниже.', workspaceLauncherAction: 'Открыть рабочую область', workspaceModalTitle: 'Рабочая область проекта (исходники)',
     projectGroup: 'Рабочие проекты', projectPlaceholder: 'Название нового проекта', projectCreate: 'Создать проект', projectEmpty: 'Проектов пока нет.',
     projectFilePlaceholder: 'Путь к файлу или содержимое', projectSave: 'Сохранить revision', projectValidate: 'Проверить', projectPreview: 'Предпросмотр', projectSubmission: 'Подготовить квитанцию публикации', projectBuild: 'Собрать .dfplugin', projectValidated: 'Проверка пройдена', projectInvalid: 'Проверка не пройдена', projectBuilt: 'Собрано и скачано.', projectDelete: 'Удалить проект', projectDeleteConfirm: 'Удалить этот проект?', projectDeleted: 'Проект удалён.',
     cards: {

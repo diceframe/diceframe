@@ -37,11 +37,21 @@ describe('CreatorView', () => {
     const { wrapper } = await render()
     expect(wrapper.text()).toContain('分享与安装')
     expect(wrapper.get('[data-testid="creator-card-exportAdventureModule"]').element.tagName).toBe('BUTTON')
-    expect(wrapper.text()).toContain('统一内容扩展包')
+    expect(wrapper.text()).toContain('导出内容包')
     expect(wrapper.find('[data-testid="creator-card-exportResourcePack"]').exists()).toBe(false)
     // A single adventure is exported from its row in the adventure list.
     expect(wrapper.get('[data-testid="creator-card-exportAdventureBundle"]').attributes('href')).toBe('/adventures')
     expect(wrapper.find('[data-testid="creator-card-package"]').exists()).toBe(false)
+  })
+
+  it('keeps the source workspace behind an explicit launcher', async () => {
+    i18n.global.locale.value = 'zh-CN'
+    const { wrapper } = await render()
+    expect(wrapper.get('[data-testid="creator-workspace-launch"]').text()).toContain('工程工作区')
+    expect(wrapper.find('[data-testid="creator-projects"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="creator-workspace-open"]').trigger('click')
+    expect(document.body.querySelector('[data-testid="creator-projects"]')).not.toBeNull()
+    wrapper.unmount()
   })
 
   it('keeps all five supported locales populated', async () => {

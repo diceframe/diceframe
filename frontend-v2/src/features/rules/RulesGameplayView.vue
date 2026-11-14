@@ -59,7 +59,7 @@ async function load(): Promise<void> {
     </ContentPageHeader>
 
     <section v-if="activeTab === 'editor'" class="rules-gameplay-editor-embed">
-      <RulesView />
+      <RulesView embedded />
     </section>
 
     <section v-else class="rules-gameplay-board">
@@ -94,8 +94,8 @@ async function load(): Promise<void> {
 
 <style scoped>
 .rules-gameplay-view { max-width: 100%; overflow-x: hidden; }
-.rules-gameplay-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; max-width: 100%; }
-.rules-gameplay-tabs button { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .95rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: transparent; color: var(--df-text-muted); font-weight: 600; cursor: pointer; max-width: 100%; }
+.rules-gameplay-tabs { display: flex; flex-wrap: wrap; gap: .5rem; max-width: 100%; }
+.rules-gameplay-tabs button { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; padding: .45rem .95rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: transparent; color: var(--df-text-muted); font-weight: 600; cursor: pointer; max-width: 100%; }
 .rules-gameplay-tabs button.active { border-color: color-mix(in srgb, var(--df-interactive-strong) 55%, var(--df-border-soft)); color: var(--df-text); background: color-mix(in srgb, var(--df-interactive-strong) 10%, var(--df-surface-1)); }
 .rules-gameplay-board { max-width: 100%; margin-top: 1.4rem; }
 .rules-gameplay-board h2 { margin: 0 0 .2rem; font-size: 1.05rem; }

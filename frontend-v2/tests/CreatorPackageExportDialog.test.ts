@@ -71,7 +71,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
 describe('CreatorPackageExportDialog', () => {
   it('exports a resource pack without listing or sending adventures', async () => {
     const wrapper = await render('resource')
-    expect(wrapper.text()).toContain('导出资源包')
+    expect(wrapper.text()).toContain('导出资源内容包')
     expect(mocks.api.mock.calls.some(([path]) => String(path).startsWith('/adventures'))).toBe(false)
     expect(wrapper.find('[data-testid="creator-export-adventures"]').exists()).toBe(false)
 

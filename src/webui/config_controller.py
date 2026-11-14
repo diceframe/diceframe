@@ -109,6 +109,9 @@ class ConfigController:
                 rebuild_task = request.app.get("_embedding_backfill_task")
                 if rebuild_task is not None and not rebuild_task.done():
                     public["embedding_status"]["state"] = "rebuilding"
+                rebuild_error = request.app.get("_embedding_backfill_error")
+                if rebuild_error:
+                    public["embedding_status"]["rebuild_error"] = str(rebuild_error)
         # Defaults can contain private Keeper instructions; anonymous bootstrap
         # clients and invited seats must not receive the owner profile.
         if not request.get("owner_authenticated", False) and request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is not False:
@@ -588,8 +591,14 @@ class ConfigController:
         state = self.dependencies.state
         # 2026-11-12 计划 §5：按来源分流测试。本地来源此前没有测试路径——
         # embedding_provider_ref 为空导致必然报「Base URL 非法或不允许」。
-        if str(state.get("embedding_source") or "external") == "local":
-            return await self._test_embedding_local(request)
+        embedding_source = str(
+            body.get("embedding_source") or state.get("embedding_source") or "external"
+        ).strip().lower()
+        if embedding_source == "local":
+            return await self._test_embedding_local(
+                request,
+                model_id=str(body.get("embedding_local_model_id") or "").strip(),
+            )
         provider = resolve_provider(state, str(body.get("provider_id") or ""))
         if provider:
             base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
@@ -637,11 +646,11 @@ class ConfigController:
         finally:
             await client.close()
 
-    async def _test_embedding_local(self, request: web.Request) -> web.Response:
+    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
         """本地来源的向量测试：真实加载 ONNX 并跑一次推理，回报维数与耗时。"""
 
         state = self.dependencies.state
-        model_id = str(state.get("embedding_local_model_id") or "").strip()
+        model_id = model_id or str(state.get("embedding_local_model_id") or "").strip()
         if not model_id:
             return web.json_response(
                 {"ok": False, "source": "local", "error": "请先选择要测试的本地模型"},

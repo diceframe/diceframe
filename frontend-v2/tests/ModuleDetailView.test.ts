@@ -139,7 +139,7 @@ describe('ModuleDetailView', () => {
     const metadata = wrapper.get('[data-testid="module-metadata"]').text()
     expect(metadata).toContain('castle-module')
     // Readable labels first, raw host values kept for troubleshooting.
-    expect(metadata).toContain('冒险模组 adventure-module')
+    expect(metadata).toContain('冒险内容包 adventure-module')
     expect(metadata).toContain('已启用 running')
     expect(metadata).toContain('开局时按需取用，启用时不导入 catalog')
     expect(wrapper.get('[data-testid="module-compatibility"]').text()).toContain('兼容')
@@ -158,7 +158,7 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.text()).toContain('资源包')
+    expect(wrapper.text()).toContain('资源内容包')
     expect(wrapper.text()).toContain('不含固定剧情')
     expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('content-pack')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).not.toContain('用此冒险创建游戏')
@@ -169,7 +169,7 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('.module-quick-facts').text()).toContain('资源包')
+    expect(wrapper.get('.module-quick-facts').text()).toContain('资源内容包')
     expect(wrapper.get('.module-quick-facts').text()).not.toContain('content-pack')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
     expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('启用时自动导入包里的内容 legacy_autoimport')

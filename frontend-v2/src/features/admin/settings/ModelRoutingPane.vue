@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NInputNumber, NModal, NSwitch } from 'naive-ui'
 import { AlertCircleOutline, CheckmarkCircleOutline, CubeOutline, ImageOutline, MicOutline, ServerOutline, SparklesOutline, VolumeHighOutline } from '@vicons/ionicons5'
 import { api, errorMessage } from '@/api/client'
@@ -13,9 +13,10 @@ import type { AppConfig, TestResult } from '@/api/types'
 import CheckModelSettings from './CheckModelSettings.vue'
 import GenerationSettings from './GenerationSettings.vue'
 
-defineProps<{
+const props = defineProps<{
   supported: boolean
   saving: boolean
+  dirty?: boolean
   embeddingTesting: boolean
   embeddingResult: TestResult | null
   ttsTesting?: boolean
@@ -43,11 +44,13 @@ const asrProvider = computed(() => String(store.config.asr_provider || 'disabled
 const embeddingStatus = computed(() => store.config.embedding_status || {})
 const embeddingSource = computed(() => String(store.config.embedding_source || 'external'))
 const localEmbeddingModels = computed(() => store.config.embedding_local_models || [])
-const localEmbeddingCatalog = computed(() => (store.config.embedding_model_catalog || []).filter(model => model.status !== 'installed'))
 const installingLocalModel = ref('')
 const localModelError = ref('')
 const rebuildBusy = ref(false)
+const rebuildFeedback = ref('')
+const rebuildFeedbackKind = ref<'info' | 'success' | 'error'>('info')
 let rebuildTimer: number | undefined
+let rebuildPollBusy = false
 type ImagePromptField = 'style_prefix' | 'manual_rules' | 'manual_prompt' | 'auto_rules' | 'auto_prompt'
 type ImagePromptConfigKey = 'imagegen_style_prefix' | 'imagegen_manual_rules' | 'imagegen_manual_prompt' | 'imagegen_auto_rules' | 'imagegen_auto_prompt'
 const promptConfigKeys: Record<ImagePromptField, ImagePromptConfigKey> = {
@@ -177,6 +180,9 @@ async function installLocalModel(modelId: string) {
   try {
     await api(`/embedding/models/${encodeURIComponent(modelId)}/install`, { method: 'POST', body: '{}' })
     await store.load()
+    if (!String(store.config.embedding_local_model_id || '').trim()) {
+      store.setConfigField('embedding_local_model_id', modelId)
+    }
   } catch (error: unknown) {
     localModelError.value = errorMessage(error)
   } finally { installingLocalModel.value = '' }
@@ -185,6 +191,7 @@ async function installLocalModel(modelId: string) {
 const localCatalogAll = computed(() => store.config.embedding_model_catalog || [])
 const activeLocalModelId = computed(() => embeddingSource.value === 'local' ? String(store.config.embedding_local_model_id || '') : '')
 const uninstallingLocalModel = ref('')
+const DEFAULT_REMOTE_CATALOG_URL = 'https://raw.githubusercontent.com/diceframe/diceframe-models/main/catalog/index.json'
 function formatBytes(value: number | undefined): string {
   const size = Number(value || 0)
   if (size <= 0) return ''
@@ -197,6 +204,12 @@ function localModelStatusLabel(model: { status?: string }): string {
   if (model.status === 'invalid') return t('embeddingModelStatusInvalid')
   return t('embeddingModelStatusNotInstalled')
 }
+function activateLocalModel(modelId: string) {
+  setString('embedding_source', 'local')
+  setString('embedding_local_model_id', modelId)
+  store.setConfigField('embedding_enabled', true)
+  emit('save')
+}
 async function uninstallLocalModel(modelId: string) {
   if (uninstallingLocalModel.value) return
   uninstallingLocalModel.value = modelId; localModelError.value = ''
@@ -207,8 +220,8 @@ async function uninstallLocalModel(modelId: string) {
     localModelError.value = errorMessage(error)
   } finally { uninstallingLocalModel.value = '' }
 }
-// W5-2：远端模型目录刷新（diceframe-models 的 loader 分片 URL）。
-const remoteCatalogUrl = ref('')
+// W5-2：远端模型目录刷新（默认使用 diceframe-models 的 index，后端会展开分片）。
+const remoteCatalogUrl = ref(DEFAULT_REMOTE_CATALOG_URL)
 const refreshCatalogBusy = ref(false)
 async function refreshRemoteCatalog() {
   if (refreshCatalogBusy.value) return
@@ -220,27 +233,67 @@ async function refreshRemoteCatalog() {
     localModelError.value = errorMessage(error)
   } finally { refreshCatalogBusy.value = false }
 }
+function stopRebuildPolling() {
+  if (rebuildTimer) window.clearInterval(rebuildTimer)
+  rebuildTimer = undefined
+  rebuildBusy.value = false
+}
+
+async function pollRebuildStatus() {
+  if (!rebuildBusy.value || rebuildPollBusy) return
+  rebuildPollBusy = true
+  try {
+    await store.load()
+    const current = store.config.embedding_status || {}
+    const pending = Number(current.pending || 0)
+    if (current.rebuild_error) {
+      rebuildFeedbackKind.value = 'error'
+      rebuildFeedback.value = String(current.rebuild_error)
+      stopRebuildPolling()
+    } else if (current.state !== 'rebuilding') {
+      rebuildFeedbackKind.value = pending > 0 ? 'error' : 'success'
+      rebuildFeedback.value = pending > 0
+        ? (locale.value === 'zh-CN' ? `重建已停止，仍有 ${pending} 条未完成；请检查模型连接后重试。` : `Rebuild stopped with ${pending} entries pending; check the model connection and retry.`)
+        : (locale.value === 'zh-CN' ? '长期记忆索引已重建完成。' : 'The long-term memory index has been rebuilt.')
+      stopRebuildPolling()
+    } else {
+      rebuildFeedbackKind.value = 'info'
+      rebuildFeedback.value = locale.value === 'zh-CN'
+        ? `正在重建长期记忆索引${pending > 0 ? `，剩余 ${pending} 条` : '…'}`
+        : `Rebuilding the long-term memory index${pending > 0 ? `, ${pending} remaining` : '…'}`
+    }
+  } finally {
+    rebuildPollBusy = false
+  }
+}
+
 async function rebuildEmbeddings() {
   if (rebuildBusy.value) return
   rebuildBusy.value = true
+  rebuildFeedbackKind.value = 'info'
+  rebuildFeedback.value = locale.value === 'zh-CN' ? '已提交重建任务，正在读取进度…' : 'Rebuild queued; reading progress…'
   try {
     await api('/embedding/rebuild', { method: 'POST', body: '{}' })
-    await store.load()
-    if (rebuildTimer) window.clearInterval(rebuildTimer)
-    rebuildTimer = window.setInterval(async () => {
-      await store.load()
-      if (store.config.embedding_status?.state !== 'rebuilding') {
-        if (rebuildTimer) window.clearInterval(rebuildTimer)
-        rebuildTimer = undefined
-        rebuildBusy.value = false
-      }
-    }, 1500)
+    await pollRebuildStatus()
+    if (rebuildBusy.value) rebuildTimer = window.setInterval(() => { void pollRebuildStatus() }, 1000)
   } catch (error: unknown) {
-    localModelError.value = errorMessage(error)
-    rebuildBusy.value = false
+    rebuildFeedbackKind.value = 'error'
+    rebuildFeedback.value = errorMessage(error)
+    stopRebuildPolling()
   }
 }
-onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
+onBeforeUnmount(stopRebuildPolling)
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!props.dirty) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+watch(() => props.dirty, dirty => {
+  if (typeof window === 'undefined') return
+  if (dirty) window.addEventListener('beforeunload', warnBeforeUnload)
+  else window.removeEventListener('beforeunload', warnBeforeUnload)
+}, { immediate: true })
+onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventListener('beforeunload', warnBeforeUnload) })
 </script>
 
 <template>
@@ -248,17 +301,20 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
     <header class="model-routing-header">
       <div><h3>{{ t('modelRoutingTitle') }}</h3><p>{{ t('modelRoutingHint') }}</p></div>
       <div class="model-routing-actions">
+        <span v-if="dirty" class="model-routing-save-state is-dirty" role="status">{{ t('modelRoutingUnsaved') }}</span>
+        <span v-else class="model-routing-save-state is-saved" role="status">{{ t('modelRoutingSaved') }}</span>
         <HelpButton :title="t('modelRoutingHelpTitle')">
           <h4>{{ t('modelRoutingHelpMainTitle') }}</h4><p>{{ t('modelRoutingHelpMainText') }}</p>
           <h4>{{ t('modelRoutingHelpFallbackTitle') }}</h4><p>{{ t('modelRoutingHelpFallbackText') }}</p>
           <h4>{{ t('modelRoutingHelpOptionalTitle') }}</h4><p>{{ t('modelRoutingHelpOptionalText') }}</p>
           <h4>{{ t('modelRoutingHelpExampleTitle') }}</h4><p>{{ t('modelRoutingHelpExampleText') }}</p>
         </HelpButton>
-        <NButton class="model-routing-save" type="success" :loading="saving" :disabled="!supported" @click="emit('save')">
+        <NButton class="model-routing-save" :class="{ 'is-dirty': dirty }" type="success" :loading="saving" :disabled="!supported" @click="emit('save')">
           <template #icon><NIcon :component="CheckmarkCircleOutline" /></template>{{ t('modelRoutingSave') }}
         </NButton>
       </div>
     </header>
+    <p v-if="dirty" class="model-routing-unsaved-hint" role="status">{{ t('modelRoutingSaveHint') }}</p>
 
     <div v-if="!supported" class="provider-backend-warning compact">
       <NIcon :component="AlertCircleOutline" /><div><strong>{{ t('providerBackendOutdatedTitle') }}</strong><p>{{ t('providerBackendOutdated') }}</p></div>
@@ -292,10 +348,12 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
             <template v-if="embeddingSource === 'local'">
               <label><span>{{ locale === 'zh-CN' ? '启用的本地模型' : 'Enabled local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
               <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ t('embeddingModelPickHint') }}</p>
+              <p class="model-role-field-hint embedding-local-flow-hint">{{ locale === 'zh-CN' ? '下载只负责把模型放到本机；选中模型并点击本卡右上角“保存模型配置”后，才会切换到它。' : 'Download only puts the model on this machine. Select it and click “Save model settings” in this card before switching to it.' }}</p>
               <div class="local-model-catalog-refresh">
                 <NInput v-model:value="remoteCatalogUrl" size="small" :placeholder="t('embeddingCatalogUrlPlaceholder')" data-testid="embedding-catalog-url" />
                 <NButton size="tiny" secondary :loading="refreshCatalogBusy" data-testid="embedding-catalog-refresh" @click="refreshRemoteCatalog">{{ t('embeddingCatalogRefresh') }}</NButton>
               </div>
+              <p class="model-role-field-hint local-model-catalog-hint">{{ locale === 'zh-CN' ? '默认目录：' : 'Default catalog: ' }}<code>{{ DEFAULT_REMOTE_CATALOG_URL }}</code>{{ locale === 'zh-CN' ? '。国内网络可直接使用已配置的代理或扩展中心镜像。' : '. Use the configured proxy or Extension Hub mirrors when GitHub is unavailable.' }}</p>
               <div class="local-model-cards" data-testid="embedding-model-cards">
                 <div v-for="model in localCatalogAll" :key="model.id" class="local-model-card" :data-testid="`local-model-${model.id}`">
                   <div class="local-model-card-main">
@@ -311,6 +369,9 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
                   <div class="local-model-actions">
                     <NButton v-if="model.status !== 'installed'" size="tiny" type="primary" :loading="installingLocalModel === model.id" :data-testid="`local-model-install-${model.id}`" @click="installLocalModel(model.id)">
                       {{ installingLocalModel === model.id ? t('embeddingModelDownloading') : t('embeddingModelDownload') }}
+                    </NButton>
+                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" type="primary" :data-testid="`local-model-activate-${model.id}`" @click="activateLocalModel(model.id)">
+                      {{ locale === 'zh-CN' ? '启用并保存' : 'Enable and save' }}
                     </NButton>
                     <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" secondary :loading="uninstallingLocalModel === model.id" :data-testid="`local-model-delete-${model.id}`" @click="uninstallLocalModel(model.id)">
                       {{ t('embeddingModelDelete') }}
@@ -336,9 +397,12 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
             <div class="embedding-index-status" data-testid="embedding-index-status">
               <strong>{{ locale === 'zh-CN' ? '长期记忆索引' : 'Long-term memory index' }}</strong>
               <span>{{ locale === 'zh-CN' ? `当前模型已就绪 ${Number(embeddingStatus.ready_current_profile || 0)} / ${Number(embeddingStatus.total_active || 0)} 条` : `${Number(embeddingStatus.ready_current_profile || 0)} / ${Number(embeddingStatus.total_active || 0)} entries ready for the current model` }}</span>
+              <span v-if="embeddingStatus.state === 'rebuilding'" class="embedding-index-pending">{{ locale === 'zh-CN' ? '正在重建，完成后会自动更新数量…' : 'Rebuilding; counts will update when it finishes…' }}</span>
               <span v-if="Number(embeddingStatus.pending || 0) > 0" class="embedding-index-pending">{{ locale === 'zh-CN' ? `待重建 ${Number(embeddingStatus.pending)} 条；不影响关键词检索` : `${Number(embeddingStatus.pending)} pending; keyword search remains available` }}</span>
               <span v-else class="embedding-index-ready">{{ locale === 'zh-CN' ? '已完成，旧模型向量不会混用' : 'Ready; vectors from another model are not mixed in' }}</span>
-              <NButton size="small" :loading="rebuildBusy || embeddingStatus.state === 'rebuilding'" :disabled="!store.config.embedding_enabled || Number(embeddingStatus.pending || 0) <= 0" @click="rebuildEmbeddings">{{ locale === 'zh-CN' ? '立即重建索引' : 'Rebuild now' }}</NButton>
+              <span v-if="embeddingStatus.rebuild_error && embeddingStatus.rebuild_error !== rebuildFeedback" class="embedding-index-pending">{{ embeddingStatus.rebuild_error }}</span>
+              <span v-if="rebuildFeedback" class="embedding-index-feedback" :class="`is-${rebuildFeedbackKind}`" data-testid="embedding-rebuild-feedback" role="status">{{ rebuildFeedback }}</span>
+              <NButton size="small" :loading="rebuildBusy || embeddingStatus.state === 'rebuilding'" :disabled="!store.config.embedding_enabled || Number(embeddingStatus.pending || 0) <= 0" @click="rebuildEmbeddings">{{ locale === 'zh-CN' ? '重建长期记忆索引' : 'Rebuild memory index' }}</NButton>
               <small>{{ locale === 'zh-CN' ? '向量来源、模型和本地模型选择修改后，点击本页右上角“保存”才会生效。' : 'Changes to source and model take effect after clicking Save in the top right.' }}</small>
             </div>
             <TestResultCard v-if="embeddingResult" :result="embeddingResult" kind="embedding" />
@@ -419,10 +483,17 @@ onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
 </template>
 
 <style scoped>
+.model-routing-save-state { font-size: .76rem; font-weight: 700; white-space: nowrap; }
+.model-routing-save-state.is-dirty { color: var(--df-warning, #a16207); }
+.model-routing-save-state.is-saved { color: var(--df-success, #15803d); }
+.model-routing-unsaved-hint { margin: -.35rem 0 .75rem; padding: .55rem .7rem; border: 1px solid color-mix(in srgb, var(--df-warning, #a16207) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-warning, #a16207); background: color-mix(in srgb, var(--df-warning, #a16207) 8%, transparent); font-size: .8rem; }
 .embedding-index-status { display: grid; gap: 3px; margin-top: 8px; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: 8px; color: var(--df-text-muted); font-size: 12px; }
 .embedding-index-status strong { color: var(--df-text); font-size: 13px; }
 .embedding-index-pending { color: var(--df-warning, #a16207); }
 .embedding-index-ready { color: var(--df-success, #15803d); }
+.embedding-index-feedback.is-info { color: var(--df-interactive-strong); }
+.embedding-index-feedback.is-success { color: var(--df-success, #15803d); }
+.embedding-index-feedback.is-error { color: var(--df-danger-strong, #b91c1c); }
 .local-model-catalog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; color: var(--df-text-muted); font-size: 12px; }
 /* W5 本地模型卡片：名称/元信息/状态/下载与删除，不依赖开关状态可见。 */
 .local-model-cards { display: grid; gap: .5rem; margin-top: .4rem; }

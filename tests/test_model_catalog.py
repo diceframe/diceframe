@@ -169,3 +169,33 @@ def test_refresh_rejects_non_https_url(tmp_path):
     import asyncio
     with pytest.raises(ModelCatalogError, match="https"):
         asyncio.run(manager.refresh_remote_catalog("http://evil.example/catalog.json"))
+
+
+def test_catalog_index_expands_repository_shards(tmp_path, monkeypatch):
+    from src.memory.model_catalog import LocalModelManager
+
+    manager = LocalModelManager(tmp_path / "models")
+    index_url = "https://raw.githubusercontent.com/diceframe/diceframe-models/main/catalog/index.json"
+    index = {
+        "catalog_version": 1,
+        "models": [{"id": "demo-model", "file": "models/demo-model/1.0.0.json", "status": "released"}],
+    }
+    shard = {
+        "catalog_version": 1,
+        "models": [{
+            "id": "demo-model", "kind": "embedding", "backend": "onnxruntime",
+            "version": "1.0.0", "files": [{
+                "path": "model.onnx", "url": "https://huggingface.co/demo/model.onnx",
+                "sha256": "a" * 64, "size": 1,
+            }],
+        }],
+    }
+
+    async def fake_fetch(_session, url):
+        return index if url == index_url else shard
+
+    monkeypatch.setattr(manager, "_fetch_remote_json", fake_fetch)
+    import asyncio
+    resolved = asyncio.run(manager._expand_catalog_index(None, index_url, index))
+    assert resolved["models"][0]["id"] == "demo-model"
+    assert resolved["models"][0]["files"][0]["path"] == "model.onnx"

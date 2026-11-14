@@ -457,6 +457,7 @@ const {
   providerTestResult,
   providerCatalogOpen,
   modelRoutingSaving,
+  modelRoutingDirty,
   catalogAssignmentBusy,
   providerLibrarySupported,
   readyProviderIds,
@@ -2082,6 +2083,7 @@ function redownloadUpdatePackage() {
             v-show="section === 'models'"
             :supported="providerLibrarySupported"
             :saving="modelRoutingSaving"
+            :dirty="modelRoutingDirty"
             :embedding-testing="testing && testKind === 'embedding'"
             :embedding-result="testKind === 'embedding' ? testResult : null"
             @save="saveModelRouting"

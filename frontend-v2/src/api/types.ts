@@ -2303,6 +2303,7 @@ export interface AppConfig {
     ready_current_profile?: number
     pending?: number
     state?: 'ready' | 'rebuilding' | 'disabled' | string
+    rebuild_error?: string
   }
   narrative_max_tokens?: number
   character_gen_max_tokens?: number

@@ -16,6 +16,10 @@ const toast = useToast()
 const { confirm } = useConfirm()
 const { t } = useLocale()
 
+const props = defineProps<{
+  embedded?: boolean
+}>()
+
 const data = ref<RulesResponse | null>(null)
 const error = ref('')
 const busy = ref(false)
@@ -314,13 +318,7 @@ async function deleteRule(rule: RuleSummary) {
 
 <template>
   <section class="view archive-page rules-page">
-    <ContentPageHeader class="view-title archive-hero rules-page-heading" kicker="RULE COMPENDIUM" :title="t('ruleSystem')" :description="t('ruleSystemSubtitle')">
-      <template #actions>
-        <div class="actions">
-          <button class="primary" @click="openNewRule">{{ t('newRule') }}</button>
-          <button @click="load">{{ t('refresh') }}</button>
-        </div>
-      </template>
+    <ContentPageHeader v-if="!props.embedded" class="view-title archive-hero rules-page-heading" kicker="RULE COMPENDIUM" :title="t('ruleSystem')" :description="t('ruleSystemSubtitle')">
     </ContentPageHeader>
 
     <p v-if="error" class="error-banner">{{ error }}</p>
@@ -333,6 +331,10 @@ async function deleteRule(rule: RuleSummary) {
         <option value="custom">{{ t('custom') }}</option>
       </select>
       <span class="rules-count">{{ visibleRules.length }} / {{ data?.rules?.length || 0 }}</span>
+      <div class="rules-toolbar-actions">
+        <button class="primary" @click="openNewRule">{{ t('newRule') }}</button>
+        <button @click="load">{{ t('refresh') }}</button>
+      </div>
     </div>
 
     <div v-if="(data?.rules || []).length >= 2" class="rule-warn-card">
@@ -436,10 +438,13 @@ async function deleteRule(rule: RuleSummary) {
 .rules-toolbar input { flex: 1 1 16rem; min-width: 0; }
 .rules-toolbar select { min-height: 44px; }
 .rules-count { color: var(--df-text-muted); font-size: .85rem; }
+.rules-toolbar-actions { display: flex; align-items: center; gap: .45rem; margin-left: auto; }
 .rule-capability-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
 .rule-capability { border: 1px solid var(--df-border-soft); border-radius: 999px; padding: .2rem .55rem; color: var(--df-text-muted); font-size: .75rem; }
 @media (max-width: 480px) {
   .rules-toolbar input, .rules-toolbar select { width: 100%; }
   .rules-count { width: 100%; }
+  .rules-toolbar-actions { width: 100%; margin-left: 0; }
+  .rules-toolbar-actions button { flex: 1; }
 }
 </style>
